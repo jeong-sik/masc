@@ -1,6 +1,6 @@
 (* HIGH-RISK-UNREVIEWED: this pass deletes files under the settled archive. *)
 
-(** Startup pass over the settled archive (RFC-0498 layer three a). It deletes
+(** Startup pass over the settled archive. It deletes
     the archived records no live record names and every archived body.
 
     A live record names the request IDs its progress events hold and, for a

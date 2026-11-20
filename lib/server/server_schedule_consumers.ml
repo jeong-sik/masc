@@ -1117,7 +1117,7 @@ let target_intake_fence_hold config (request : Schedule_domain.schedule_request)
    schedule, ask the operation that holds the fence to walk its finalization
    again. The fence is read again here rather than parsed back from the hold,
    so the ask goes to whoever holds it now. It rides on the tick that already
-   found the hold, so it adds no clock of its own (RFC-0433). *)
+   found the hold, so it adds no clock of its own. *)
 let fenced_targets (held : Schedule_runner.held list) =
   held
   |> List.filter_map (fun ({ reason; _ } : Schedule_runner.held) ->

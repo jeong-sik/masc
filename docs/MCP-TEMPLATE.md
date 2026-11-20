@@ -88,11 +88,6 @@ bearer의 수명과 MCP 세션의 수명도 별개입니다. 연결이 끊겼거
 `503`을 토큰 만료로 해석하지 않습니다. 준비 상태는 `/health/ready`, 실제
 작업 공간은 `/health?full=1`의 `paths`로 확인합니다.
 
-[설치 바이너리의 격리 재시작 검증](evidence/2026-10-25-mcp-client-restart/README.md)은
-발급한 동일 Worker bearer의 HTTP 검증과, 생성된 설정 그대로 실행한
-실제 `mcp-remote` 프로세스의 재시작 전후 도구 조회·호출을 기록합니다. Codex나 Claude Desktop 앱 자체의 자동
-재연결 동작을 대신하는 증거는 아닙니다.
-
 ## 연결 확인
 
 다음 요청은 HTTP `200`과 `result.serverInfo.name = "masc"`를 반환해야 합니다.

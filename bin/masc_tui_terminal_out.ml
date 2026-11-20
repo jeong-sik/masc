@@ -52,7 +52,9 @@ let rec writer () =
     | chunks ->
         (match write_all Unix.stdout (String.concat "" (List.rev chunks)) 0 with
          | () -> ()
-         | exception _ -> Atomic.set lost true);
+         | exception _ ->
+             Atomic.set lost true;
+             Masc_tui_wake.(ring loop Terminal_write_lost));
         take ()
   in
   take ();

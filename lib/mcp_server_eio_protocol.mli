@@ -117,6 +117,7 @@ val handle_request :
     (sw:'sw ->
      clock:([> float Eio.Time.clock_ty ] as 'clk) Eio.Resource.t ->
      profile:tool_profile ->
+     protocol:Mcp_transport_protocol.request_protocol ->
      ?mcp_session_id:string ->
      bearer:Mcp_server_eio_caller_identity.bearer ->
      Mcp_server.server_state ->

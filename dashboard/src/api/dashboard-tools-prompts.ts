@@ -2041,7 +2041,7 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
 
 const KEEPER_SKILL_ACTIVATIONS_SCHEMA = 'masc.keeper-skill-activations/v1'
 
-/** One Keeper's skill activations, read from its own route (RFC-0483). */
+/** One Keeper's skill activations, read from its own route. */
 export async function fetchKeeperSkillActivations(
   keeperName: string,
   opts?: AbortableRequestOptions,

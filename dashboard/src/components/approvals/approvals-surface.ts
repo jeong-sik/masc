@@ -17,9 +17,6 @@ import type {
   KeeperApprovalQueueItem,
   KeeperApprovalRule,
   KeeperApprovalRulesState,
-  KeeperGateModeOverride,
-  KeeperExactLanePreference,
-  KeeperGateSettingsState,
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
   GateDecisionSource,
@@ -846,95 +843,6 @@ const GATE_MODES: ReadonlyArray<{ mode: GateMode; label: string }> = [
   { mode: 'always_allow', label: 'Always Allow' },
 ]
 
-// One Keeper an operator singled out. Both kinds render the same way -- who,
-// what was chosen, and who chose it -- because that is what an operator scans
-// the list for. The mode override says only what was asked for: the Gate keeps
-// the stricter of it and the workspace, and a row asking for less is on file
-// without being in force.
-function KeeperGateSettingRow({
-  keeperName,
-  value,
-  updatedBy,
-  updatedAt,
-  testId,
-}: {
-  keeperName: string
-  value: string
-  updatedBy: string
-  updatedAt: string
-  testId: string
-}) {
-  return html`
-    <li class="ap-rule-row" data-testid=${testId}>
-      <span class="ap-rule-keeper mono">${keeperName}</span>
-      <span class="ap-rule-tool mono">${value}</span>
-      <span class="ap-rule-provenance mono">${updatedBy}</span>
-      <span class="ap-rule-expiry mono">${updatedAt === '' ? '시각 없음' : updatedAt}</span>
-    </li>
-  `
-}
-
-function KeeperGateSettingsCard({
-  modes,
-  modesState,
-  exactLanes,
-  exactLanesState,
-}: {
-  modes: KeeperGateModeOverride[]
-  modesState: KeeperGateSettingsState
-  exactLanes: KeeperExactLanePreference[]
-  exactLanesState: KeeperGateSettingsState
-}) {
-  const modeLabel = (mode: GateMode) =>
-    GATE_MODES.find(entry => entry.mode === mode)?.label ?? mode
-  return html`
-    <section class="wka-card" data-testid="keeper-gate-settings">
-      <div class="wka-h">
-        <h3>Keeper 개별 설정</h3>
-        <span class="mono">${(modes.length + exactLanes.length).toLocaleString()}</span>
-      </div>
-      <div class="wka-hint mono">Gate mode — workspace 설정보다 엄격한 쪽만 적용</div>
-
-      ${modesState.state === 'unavailable'
-        ? html`<div class="ap-env-warn" role="alert" data-testid="keeper-modes-unavailable">모드 오버라이드 읽기 실패: ${modesState.error}</div>`
-        : modes.length > 0
-        ? html`
-            <ul class="ap-rule-list">${modes.map(row => html`
-              <${KeeperGateSettingRow}
-                key=${`mode:${row.keeper_name}`}
-                keeperName=${row.keeper_name}
-                value=${modeLabel(row.mode)}
-                updatedBy=${row.updated_by}
-                updatedAt=${row.updated_at}
-                testId="keeper-mode-row"
-              />
-            `)}</ul>
-          `
-        : html`<div class="ap-side-empty">모드를 따로 정한 Keeper 없음</div>`}
-
-      <div class="wka-hint mono">Exact lane — Keeper별 첫 slot, 나머지는 failover</div>
-      ${exactLanesState.state === 'unavailable'
-        ? html`<div class="ap-env-warn" role="alert" data-testid="keeper-exact-lanes-unavailable">Exact lane 설정 읽기 실패: ${exactLanesState.error}</div>`
-        : exactLanes.length > 0
-        ? html`
-            <ul class="ap-rule-list">${exactLanes.map(row => html`
-              <${KeeperGateSettingRow}
-                key=${`exact:${row.keeper_name}:${row.lane_id}`}
-                keeperName=${row.keeper_name}
-                value=${row.offered
-                  ? `${row.lane_id} → ${row.slot_id}`
-                  : `${row.lane_id} → ${row.slot_id} (레인에 없음 · 선언 순서로 걸어요)`}
-                updatedBy=${row.updated_by}
-                updatedAt=${row.updated_at}
-                testId="keeper-exact-lane-row"
-              />
-            `)}</ul>
-          `
-        : html`<div class="ap-side-empty">Exact lane 첫 slot을 따로 정한 Keeper 없음</div>`}
-    </section>
-  `
-}
-
 function ApAside({
   openCount,
   resolvedItems,
@@ -1049,13 +957,6 @@ function ApAside({
             `
           : html`<div class="ap-side-empty">저장된 Always 규칙 없음</div>`}
       </section>
-
-      <${KeeperGateSettingsCard}
-        modes=${gateData.value?.keeper_modes ?? []}
-        modesState=${gateData.value?.keeper_modes_state ?? { state: 'ready' }}
-        exactLanes=${gateData.value?.keeper_exact_lanes ?? []}
-        exactLanesState=${gateData.value?.keeper_exact_lanes_state ?? { state: 'ready' }}
-      />
 
       <section class="wka-card">
         <div class="wka-h">

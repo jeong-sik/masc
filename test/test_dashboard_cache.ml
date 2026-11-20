@@ -416,7 +416,7 @@ let test_seed_stale_if_missing_refreshes_in_background ~clock () =
   check_json "background refresh stores fresh value"
     (`String "fresh") refreshed
 
-(* RFC-0474 L4d. A key that names a generation of its data: the read after a
+(* A key that names a generation of its data: the read after a
    write finds the new generation's key empty. Seeded from the previous
    generation, it answers with that page at once (same bytes, same entity
    tag) and fills the new generation in the background. The new compute
@@ -800,26 +800,6 @@ let test_execution_preparation_reuse_and_scope () =
       Alcotest.(check bool) "scoped request bypasses default bytes" true
         (Option.is_none (scoped_read query)))
       [ "full=true"; "force=true"; "agent=alice" ];
-    (* #40917 isolates every explicit fixture request from the default cache:
-       the default bytes serve only requests that carry no fixture parameter
-       (server_dashboard_http_execution_surfaces.ml, [when requested_fixture =
-       None]). An explicit fixture -- execution_smoke, an unknown name, or any
-       name while fixtures are disabled -- routes through its own
-       parameterized response, so it never takes the prepared default bytes. *)
-    let with_fixtures_enabled value f =
-      let name = "MASC_DASHBOARD_FIXTURES_ENABLED" in
-      Unix.putenv name value;
-      Fun.protect ~finally:(fun () -> Unix.putenv name "false") f
-    in
-    List.iter (fun enabled ->
-      with_fixtures_enabled enabled (fun () ->
-        List.iter (fun query ->
-          Alcotest.(check bool)
-            (Printf.sprintf "explicit %s (fixtures enabled=%s) bypasses default bytes"
-               query enabled)
-            true (Option.is_none (scoped_read query)))
-          [ "fixture=execution_smoke"; "fixture=sample" ]))
-      [ "true"; "false" ];
     Server_dashboard_http_execution_surfaces.For_testing.invalidate execution_test_owner;
     Alcotest.(check bool) "mutation discards all representations" true
       (Option.is_none (read "gzip")))
@@ -1523,7 +1503,7 @@ let test_runtime_git_probes_skip_when_command_is_unavailable () =
     false
     (Runtime.git_probe_command_available ~getenv ())
 
-(* RFC-0372 Phase 5 — the compute must leave the caller's domain.
+(* The compute must leave the caller's domain.
 
    HTTP connections are fibers on one domain, and a pure compute never yields,
    so a dashboard read run inline stops every sibling fiber for its duration.

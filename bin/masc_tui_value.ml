@@ -349,6 +349,16 @@ module Interval = struct
       Printf.sprintf "%dm" (seconds / seconds_per_minute)
     else
       Printf.sprintf "%dm%02ds" (seconds / seconds_per_minute) (seconds mod seconds_per_minute)
+
+  (* [int_of_float] is defined only below 2^62; far below that a setting is a
+     malformed value, not a span anyone set. *)
+  let largest_whole_setting = 1e15
+
+  let of_seconds seconds =
+    let whole = Float.ceil seconds in
+    if Float.is_finite whole && Float.abs whole < largest_whole_setting then
+      text (int_of_float whole)
+    else Ongoing.text whole
 end
 
 module Mark = struct

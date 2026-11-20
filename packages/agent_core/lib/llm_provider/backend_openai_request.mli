@@ -39,6 +39,8 @@ val capabilities_of_config : Provider_config.t -> Capabilities.capabilities
     per-envelope, the resolution policy is single-sourced here. The
     required Anthropic envelope uses
     [Backend_anthropic.required_output_token_receipt] instead. *)
+val warn_if_output_token_clamped : model_id:string -> Types.output_token_receipt -> unit
+
 val output_token_receipt
   :  envelope:Types.output_token_envelope
   -> Provider_config.t

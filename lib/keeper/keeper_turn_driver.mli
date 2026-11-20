@@ -429,11 +429,12 @@ val run_named :
   ?argument_demotion_seed:Agent_core.Types.message list ->
   (* Raw pre-admission history; native continuations supply their retained
      initial seed. Absence leaves ToolUse inputs verbatim. *)
-  ?history_at_start:Keeper_turn_boundaries.history_at_start ->
-  (* Where this turn began, as the turn computed it before its input. Rule 8
-     resends from it, and rule 7 bounds the front rule 8 held by it (RFC
-     librarian-lifecycle §4.10). Absence is [Continued_history]: no start is
-     known, so rule 8 has no step. *)
+  ?this_turn_opening:Keeper_turn_driver_try_provider.this_turn_opening ->
+  (* Whether the turn log's open [Opened] came before this turn's input, so
+     its baseline is where the turn began (rules 7 and 8 of RFC
+     librarian-lifecycle §4.10; {!Keeper_run_prompt.this_turn_opening}).
+     A caller that does not say gets [Opened_after_its_input]: no start is
+     read, and rule 8 has nothing to resend from. *)
   ?model_input_projection:Keeper_history_projection.t ->
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->

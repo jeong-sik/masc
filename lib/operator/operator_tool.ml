@@ -7,7 +7,7 @@ type 'a context = 'a Tool_operator.context
 
 module Operator_name = Tool_name.Operator_name
 
-(* RFC-0189 PR-1b.11 — typed result.
+(* Typed result.
 
    [result_of_json] projects [Operator_control.*_json :
    ... -> (Yojson.Safe.t, string) result] into the typed surface.

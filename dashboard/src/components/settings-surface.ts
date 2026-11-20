@@ -136,8 +136,7 @@ const SET_SECTIONS: [SectionId, string, string][] = [
 
 // keeper-v2 design settings.jsx SET_GROUPS의 부분 채택: lifecycle/
 // sandbox/gate 섹션은 백엔드 계약 부재로 미구현이라 그룹에서 빠져 있고,
-// 디자인이 nav에서 뺀 mcp/display는 live-backed 동작 섹션이라 유지한다
-// (docs/design/keeper-v2-design-delta-audit-2026-07-03.md).
+// 디자인이 nav에서 뺀 mcp/display는 live-backed 동작 섹션이라 유지한다.
 const SET_GROUPS: [string, SectionId[]][] = [
   ['계정', ['account']],
   ['Keeper 운영', ['runtime', 'routing', 'prompts', 'fusion']],

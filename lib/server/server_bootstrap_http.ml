@@ -73,7 +73,7 @@ let listen_socket_result ~sw ~net ~address (config : Http.config) =
   listen_tcp_result ~sw ~net ~backlog:config.listen_backlog (tcp_address ~address config)
 ;;
 
-(* The HTTPS listener of one boot (RFC-0512 D6); see the interface. *)
+(* The HTTPS listener of one boot; see the interface. *)
 type https_listener =
   { https_port : int
   ; tls : Tls.Config.server
@@ -184,7 +184,7 @@ let disable_nagle flow =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> ()
 
-(* RFC-0204 §3.2: a GET or HEAD is a read. The mark covers the handler call
+(* A GET or HEAD is a read. The mark covers the handler call
    and the fibers it forks; httpun callbacks that run after the handler has
    returned (body reads, streaming) belong to an answered read and see
    [Background], as do POSTs, gRPC and /mcp tool calls. *)
@@ -507,7 +507,7 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
         Log.Misc.debug "[%s] protocol detect skipped: %s" listener_tag msg)
 ;;
 
-(* {1 HTTPS listener (RFC-0512 D6)} *)
+(* {1 HTTPS listener} *)
 
 let https_listener_of_env ~base_path ~bind_host =
   match Env_config.Transport.https_port () with

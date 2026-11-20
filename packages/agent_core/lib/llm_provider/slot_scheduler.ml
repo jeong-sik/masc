@@ -61,11 +61,13 @@ type t =
   ; mutable standard : waiter_queue
   ; mutable background : waiter_queue
   ; mutable priority_run : int
-        (** Priority grants while [Standard] waits, reset by a standard
-            grant or an empty standard queue, never by a background grant. *)
+        (** Priority grants while [Standard] waits (active only when
+            [priority_run_limit = Some _]), reset by a standard grant or an
+            empty standard queue, never by a background grant. *)
   ; mutable foreground_run : int
-        (** Foreground grants while [Background] waits, reset by a background
-            grant or an empty background queue. *)
+        (** Foreground grants while [Background] waits (active only when
+            [priority_run_limit = Some _]), reset by a background grant or an
+            empty background queue. *)
   ; mutex : Stdlib.Mutex.t
   }
 
@@ -100,14 +102,10 @@ let create ~max_slots ~priority_run_limit =
 
 let queued t = t.priority.length + t.standard.length + t.background.length
 
-(* The queue a request of [admission_class] joins. A scheduler without a
-   run limit has one FIFO, so all classes wait in arrival order. *)
-let queue_of t admission_class =
-  match t.priority_run_limit, (admission_class : Admission_class.t) with
-  | Some _, Priority -> Admission_class.Priority
-  | Some _, Background -> Admission_class.Background
-  | Some _, Standard | None, (Priority | Standard | Background) -> Admission_class.Standard
-;;
+(* Every request always joins its own admission-class queue so
+   Priority > Standard > Background ordering applies reliably regardless
+   of whether an explicit run limit was configured. *)
+let queue_of (admission_class : Admission_class.t) = admission_class
 
 (* Takes a free slot, or joins its class's queue. Under the mutex so the
    count and the queues move together. A free slot is taken at once only
@@ -120,7 +118,7 @@ let request_slot t ~admission_class =
       `Got_slot)
     else (
       let promise, resolver = Eio.Promise.create () in
-      let queue = queue_of t admission_class in
+      let queue = queue_of admission_class in
       let waiter = { resolver; state = Atomic.make Waiting; queue } in
       (match queue with
        | Priority -> t.priority <- enqueue waiter t.priority
@@ -145,27 +143,29 @@ let rec take_waiting queue =
        else take_waiting rest)
 ;;
 
-(* The existing Priority/Standard decision applies to foreground grants.
-   Background has its own bounded service, using the same declared limit.
-   Without a limit, old Priority then old Background queues drain before
-   the shared FIFO; newcomers cannot extend either finite old queue. *)
+(* Priority > Standard > Background strict ordering. When an explicit
+   [priority_run_limit = Some limit] is configured, [limit] bounds consecutive
+   Priority grants ahead of waiting Standard and consecutive foreground grants
+   ahead of waiting Background. When [priority_run_limit = None], strict
+   ordering holds unconditionally with zero artificial weights or quotas. *)
 let next_queue t =
-  match t.priority_run_limit with
-  | None ->
-    if t.priority.length > 0
-    then Admission_class.Priority
-    else if t.background.length > 0
-    then Admission_class.Background
-    else Admission_class.Standard
-  | Some limit ->
-    if t.background.length > 0
-       && (t.foreground_run >= limit || t.priority.length + t.standard.length = 0)
-    then Admission_class.Background
-    else if t.priority.length = 0
-    then Admission_class.Standard
-    else if t.standard.length = 0 || t.priority_run < limit
-    then Admission_class.Priority
-    else Admission_class.Standard
+  let background_due =
+    match t.priority_run_limit with
+    | Some limit -> t.foreground_run >= limit
+    | None -> false
+  in
+  if
+    t.background.length > 0
+    && (background_due || t.priority.length + t.standard.length = 0)
+  then Admission_class.Background
+  else if t.priority.length = 0
+  then Admission_class.Standard
+  else if t.standard.length = 0
+  then Admission_class.Priority
+  else (
+    match t.priority_run_limit with
+    | Some limit when t.priority_run >= limit -> Admission_class.Standard
+    | Some _ | None -> Admission_class.Priority)
 ;;
 
 (* Hands one slot to the next live waiter, under the mutex, and returns its
@@ -183,9 +183,13 @@ let rec take_next t =
       (match take_waiting t.priority with
        | Some waiter, rest ->
          t.priority <- rest;
-         t.priority_run <- (if standard_waiting then t.priority_run + 1 else 0);
-         t.foreground_run <-
-           (if t.background.length > 0 then t.foreground_run + 1 else 0);
+         let bounded = Option.is_some t.priority_run_limit in
+         if bounded && standard_waiting
+         then t.priority_run <- t.priority_run + 1
+         else t.priority_run <- 0;
+         if bounded && t.background.length > 0
+         then t.foreground_run <- t.foreground_run + 1
+         else t.foreground_run <- 0;
          Some waiter.resolver
        | None, rest ->
          t.priority <- rest;
@@ -195,8 +199,9 @@ let rec take_next t =
        | Some waiter, rest ->
          t.standard <- rest;
          t.priority_run <- 0;
-         t.foreground_run <-
-           (if t.background.length > 0 then t.foreground_run + 1 else 0);
+         if Option.is_some t.priority_run_limit && t.background.length > 0
+         then t.foreground_run <- t.foreground_run + 1
+         else t.foreground_run <- 0;
          Some waiter.resolver
        | None, rest ->
          t.standard <- rest;
@@ -250,6 +255,11 @@ let reconfigure t ~max_slots ~priority_run_limit =
     Stdlib.Mutex.protect t.mutex (fun () ->
       t.max_slots <- max_slots;
       t.priority_run_limit <- priority_run_limit;
+      (match priority_run_limit with
+       | Some _ -> ()
+       | None ->
+         t.priority_run <- 0;
+         t.foreground_run <- 0);
       let rec fill woken =
         if t.active >= t.max_slots
         then woken
@@ -505,4 +515,71 @@ let%test "snapshot during active permit" =
     with_permit ~admission_class:Standard t (fun () ->
       let s = snapshot t in
       s.active = 1 && s.available = 1))
+;;
+
+let%test "priority > standard > background ordering applies when priority_run_limit=None" =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let t = create ~max_slots:1 ~priority_run_limit:None in
+    let order = ref [] in
+    let enqueue ~sw admission_class label =
+      Eio.Fiber.fork ~sw (fun () ->
+        with_permit ~admission_class t (fun () -> order := label :: !order))
+    in
+    Eio.Switch.run (fun sw ->
+      acquire_held ~admission_class:Standard t;
+      enqueue ~sw Background "bg-1";
+      enqueue ~sw Standard "std-1";
+      enqueue ~sw Priority "pri-1";
+      enqueue ~sw Priority "pri-2";
+      enqueue ~sw Standard "std-2";
+      await_queue_length clock t 5;
+      release t);
+    List.rev !order = [ "pri-1"; "pri-2"; "std-1"; "std-2"; "bg-1" ])
+;;
+
+let%test "strict keeper-first ordering holds under continuous priority and standard arrivals when priority_run_limit=None" =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let t = create ~max_slots:1 ~priority_run_limit:None in
+    let order = ref [] in
+    let enqueue ~sw admission_class label =
+      Eio.Fiber.fork ~sw (fun () ->
+        with_permit ~admission_class t (fun () -> order := label :: !order))
+    in
+    Eio.Switch.run (fun sw ->
+      acquire_held ~admission_class:Standard t;
+      enqueue ~sw Background "bg-1";
+      enqueue ~sw Standard "std-1";
+      enqueue ~sw Priority "pri-1";
+      await_queue_length clock t 3;
+      (* Even after queueing bg-1 first and adding a second Standard arrival
+         while held, strict Priority > Standard > Background ordering grants
+         all Priority then all Standard before Background. *)
+      enqueue ~sw Standard "std-2";
+      enqueue ~sw Priority "pri-2";
+      await_queue_length clock t 5;
+      release t);
+    List.rev !order = [ "pri-1"; "pri-2"; "std-1"; "std-2"; "bg-1" ])
+;;
+
+let%test "background librarian keeps full concurrency when foreground queues are empty" =
+  Eio_main.run (fun _env ->
+    let t = create ~max_slots:4 ~priority_run_limit:None in
+    let max_active = ref 0 in
+    let active_now = ref 0 in
+    Eio.Switch.run (fun sw ->
+      let release, resolve_release = Eio.Promise.create () in
+      let barriers = ref 0 in
+      for _ = 1 to 4 do
+        Eio.Fiber.fork ~sw (fun () ->
+          with_permit ~admission_class:Background t (fun () ->
+            incr active_now;
+            if !active_now > !max_active then max_active := !active_now;
+            incr barriers;
+            if !barriers = 4 then Eio.Promise.resolve resolve_release ()
+            else Eio.Promise.await release;
+            decr active_now))
+      done);
+    !max_active = 4 && (snapshot t).active = 0)
 ;;

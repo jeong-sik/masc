@@ -127,7 +127,7 @@ let history_status_lines ~ko ~width
     | Masc_tui_fetched.Failed (History_kept_back notice) -> Masc_tui_text_block.rows ~max_cells:width
         ("    " ^ Terminal_text.single_line notice)
     | Masc_tui_fetched.Absent -> [ (text "    기록 미조회" "    history not requested") ]
-    | Masc_tui_fetched.Loading -> [ (text "    조회 중" "    loading...") ]
+    | Masc_tui_fetched.Loading -> [ (text "    조회 중" "    loading") ]
   in
   let pending =
     if not in_flight then []
@@ -268,7 +268,7 @@ let prepare_input = function
         | Membership [] -> field (text "목표" "Goal") (text "연결 없음" "No link")
         | Membership ids -> List.concat_map (fun id -> field (text "목표" "Goal") id
             @ field ~style:provenance_style (text "링크" "Link") (Masc_tui_link.reference Masc_tui_link.Goal id)) ids
-        | Canonical goal -> field (text "기록된 목표" "Recorded Goal") (Option.fold ~none:(text "없음" "None") ~some:Fun.id goal) in
+        | Canonical goal -> field (text "기록된 목표" "Recorded Goal") (Option.fold ~none:(text "없음" "none") ~some:Fun.id goal) in
       body_lines ~ko ~cols ~goal_lines task
 
 let prepare input = Message_layout.with_isolated_pieces_cache (fun () -> prepare_input input)

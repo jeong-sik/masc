@@ -12,7 +12,7 @@ module Http = Http_server_eio
 module Runtime_request = Server_dashboard_runtime_request
 module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
-(* RFC fusion-seat-routes §2.5 — the typed fusion write. The client sends the
+(* The typed fusion write. The client sends the
    revision it read with the settings; the edit re-checks it inside the config
    lock, so a write that landed in between is refused rather than overwritten. *)
 let parse_fusion_edit_body body_str =
@@ -446,7 +446,7 @@ let add_routes router =
              Keeper_api_types.respond_error
                ~status:(runtime_config_path_error_status msg)
                ~request:req reqd msg)
-  (* RFC-0306 §3.1 — typed read of the active fusion config for the settings
+  (* Typed read of the active fusion config for the settings
      editor. [Fusion_config_loader.load] returns [Ok disabled] when runtime.toml
      or its [fusion] section is absent, and [Error] only when an existing section
      fails to parse/validate (a broken on-disk config), which surfaces as 500. *)

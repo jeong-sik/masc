@@ -101,9 +101,9 @@ type outcome =
 let hello_wait_sec = 1.0
 
 (* A connection made before the agent listens usually ends within a few
-   milliseconds (docs/evidence/2026-11-03-microvm-request-transport,
-   agent-boot-results.json). Without a pause the loop would ask the VM runtime
-   for a new guest connection every few milliseconds while the VM boots. *)
+   milliseconds (measured 2026-11-03). Without a pause the loop would ask the
+   VM runtime for a new guest connection every few milliseconds while the VM
+   boots. *)
 let reconnect_pause_sec = 0.1
 
 (* One read takes at most a whole chunk: a 5-byte header and the largest

@@ -1384,7 +1384,6 @@ let prepare_next_ready
           | Exact_flow.Prompt_contract_unavailable _
           | Exact_flow.Registry_unavailable
           | Exact_flow.Lane_unavailable
-          | Exact_flow.Lane_preference_unavailable _
           | Exact_flow.Lane_resolved_without_slots
           | Exact_flow.Candidate_invalid _
           | Exact_flow.Flow_snapshot_failed
@@ -1991,8 +1990,8 @@ let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
     ~execute
 ;;
 
-let prepare_exact ~base_path ~keeper_name ~net =
-  Exact_flow.prepare ~base_path ~keeper_name ~net
+let prepare_exact ~base_path ~net =
+  Exact_flow.prepare ~base_path ~net
 ;;
 
 (* The worker's durable callbacks fail with the partition transition's own
@@ -2012,7 +2011,7 @@ let process_next_exact_with_write_outcome
     ~map_write_outcome
     ~claim_ready_exact:Partition.claim_ready_exact
     ~now ~worker_epoch ~base_path ~keeper_name
-    ~prepare:(prepare_exact ~base_path ~keeper_name ~net)
+    ~prepare:(prepare_exact ~base_path ~net)
     ~execute:(execute_exact ~clock)
 ;;
 
@@ -2022,7 +2021,7 @@ let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
     ~worker_epoch
     ~base_path
     ~keeper_name
-    ~prepare:(prepare_exact ~base_path ~keeper_name ~net)
+    ~prepare:(prepare_exact ~base_path ~net)
     ~execute:(execute_exact ~clock)
 ;;
 
@@ -2450,7 +2449,7 @@ let run
          | Error detail -> fail Process_start_recovery detail
          | Ok () ->
            let prepare =
-             prepare_exact ~base_path ~keeper_name ~net
+             prepare_exact ~base_path ~net
            in
            let execute = execute_exact ~clock in
            let contention_rearms =

@@ -2,7 +2,7 @@
 
     Uses OpenAI-compatible wire format with Glm-specific extensions:
     - [thinking] parameter: [{"type":"enabled"}], with [clear_thinking] only
-      when the row declares [preserve_thinking] (RFC-0488)
+      when the row declares [preserve_thinking]
     - [reasoning_content] in response and streaming delta
     - String error codes (e.g., ["1305"])
 

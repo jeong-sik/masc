@@ -57,29 +57,8 @@ Their assertions check component rendering and interaction against fixture
 state. They do not exercise a server producer, a live Keeper conversation,
 SSE delivery or actual browser visibility.
 
-For a manual Chromium rendering check of the same fixtures:
-
-```bash
-bash scripts/harness_dashboard_keeper_chat_interleave_contract_dom_smoke.sh
-bash scripts/harness_dashboard_keeper_chat_tool_output_failure_contract_dom_smoke.sh
-bash scripts/harness_dashboard_keeper_chat_control_status_dom_smoke.sh
-```
-
-These commands start their own local Vite process and stop it when they end.
-The server stays in the script's process group, so a signal sent to the group
-ends both. A script that is ended alone leaves its server running when the
-signal gives it no chance to stop it: SIGKILL, and SIGQUIT under bash 3.2
-(`/bin/bash` on macOS). They require pnpm, the dashboard dependencies, `lsof`
-and installed Playwright Chromium; the failure and control-status scripts
-additionally use Python's Playwright package. Their default ports are 5186,
-5187 and 5188; set `PORT` for an unused port if needed. A run fails when
-another process listens on its port, because it would otherwise test that
-process's pages. Each prints its fixture URL and screenshot paths. The scripts
-use the configured dashboard proxy target (default localhost:8935), so record
-that target if investigating any network-backed component behavior.
-
-Seven dashboard harness scripts, these three among them, start and stop Vite
-through `scripts/harness/lib/dashboard_dev_server.sh`. When changing that file,
+Dashboard harness scripts start and stop Vite through
+`scripts/harness/lib/dashboard_dev_server.sh`. When changing that file,
 run:
 
 ```bash
@@ -92,8 +71,7 @@ SIGKILL of its process group leaves no server, and that a start fails when the
 server never answers or is not the only listener on the port. It needs
 `python3`, `curl` and `lsof`. It does not start Vite or a browser.
 
-The Chromium checks assert declared DOM attributes and fixture interactions.
-Screenshots are inspection artifacts. A fixture screenshot or DOM check does
-not prove the backend producer, live delivery, deployment or a current fleet.
+A fixture DOM check does not prove the backend producer, live delivery,
+deployment or a current fleet.
 A production-path regression claim needs the actual producer/consumer evidence
 and an appropriate failing control for that path.

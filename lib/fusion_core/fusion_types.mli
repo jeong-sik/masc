@@ -7,14 +7,12 @@
     이 모듈은 순수 데이터 타입만 담는다: AGENT_CORE·키퍼·보드 의존 0, 독립 컴파일 가능.
     fan-out(패널), 구조화 출력(심판), 게이트, 가시성은 별도 모듈이 이 타입을 소비한다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md
-
     @stability Evolving *)
 
 (** {1 토큰 사용량} *)
 
 (** 단일 완성의 토큰 사용량. fusion은 패널 N + 심판 1 완성을 합산해 비용을
-    회계한다 (RFC-0252 §10). 외부 usage 타입에 결합하지 않도록 자체 정의한다. *)
+    회계한다. 외부 usage 타입에 결합하지 않도록 자체 정의한다. *)
 type usage =
   { input_tokens : int
   ; output_tokens : int
@@ -47,7 +45,7 @@ val sum_all_usage : ('id * ('a * usage, 'b * usage) result) list -> usage
 (** {1 재귀 가드} *)
 
 (** 심의 깊이. OpenRouter의 [x-openrouter-fusion-depth] 헤더에 대응하는 타입드
-    가드. 패널/심판은 fusion을 다시 못 부른다 — 1단계로 제한 (RFC-0252 §10). *)
+    가드. 패널/심판은 fusion을 다시 못 부른다 — 1단계로 제한. *)
 module Fusion_depth : sig
   type t =
     | Top  (** 키퍼/오퍼레이터가 시작한 최상위 심의 *)
@@ -204,7 +202,7 @@ type judge_synthesis =
   }
 [@@deriving yojson, show, eq]
 
-(** {1 심판 실행 관측 (RFC-0284)}
+(** {1 심판 실행 관측}
 
     실제로 실행된 심판 노드의 *사후* record. [panel_outcome]와 구조 동형이라 board
     증거/대시보드가 패널과 같은 배열 렌더 경로를 재사용한다. JOJ의 N개 1차 심판 + meta
@@ -403,7 +401,7 @@ type judge_outcome =
   | Judge_failed of judge_error_node
 [@@deriving yojson, show, eq]
 
-(** {1 자리 경로 (RFC fusion-seat-routes)}
+(** {1 자리 경로}
 
     panel 한 명과 judge 하나는 각각 한 자리다. 자리에 적힌 값은 경로 이름이고
     ([Runtime.resolve_assignment] 로 푼다), 그 경로의 후보를 차례로 시도해 처음 쓸 수
@@ -463,7 +461,7 @@ type deliberation_evidence =
 
 (** fusion 발동 사유 — 게이트 입력(이유 라벨). catch-all 없음.
 
-    게이트는 trigger의 *종류*로 심의 가치를 판정하지 않는다(RFC-0252 §6).
+    게이트는 trigger의 *종류*로 심의 가치를 판정하지 않는다.
     "이 결정이 심의할 가치가 있나"는 키퍼(이미 LLM)가 스스로 판단해 masc_fusion을
     호출하는 것으로 표현되고, 게이트는 구조적 안전(enabled/preset/depth)만 본다.
     따라서 각 변형은 score 비교·문자열 매칭 대상이 아니라 "왜 발동했나"를 기록하는
@@ -479,7 +477,7 @@ type fusion_trigger =
 
 (** {1 심의 요청} *)
 
-(** 이번 실행만 preset 의 명단 대신 쓰는 자리 경로 (RFC fusion-seat-routes §2.4).
+(** 이번 실행만 preset 의 명단 대신 쓰는 자리 경로.
     [None] 인 칸은 preset 값을 그대로 쓴다. 명단을 preset 에 얹는 규칙과 검사는
     {!Fusion_policy.with_roster} 한 곳에 있다. [panel_routes = Some []] 은 "바꾸지 않음"
     이 아니라 빈 명단이고, 검사가 거절한다. *)
@@ -540,7 +538,7 @@ type gate_decision =
 
     패널 답을 어떤 합성 구조로 reduce할지. 닫힌 합 — keeper가 [masc_fusion] 도구에서
     이름으로 고르고(합성-by-selection), 게이트는 보지 않으며, 오케스트레이터가 이 변형으로
-    dispatch한다. 그래프 datatype이 아니라 named composition의 닫힌 집합(RFC-0252 §13 P2).
+    dispatch한다. 그래프 datatype이 아니라 named composition의 닫힌 집합.
     새 위상은 여기 추가 시 orchestrator dispatch가 exhaustive-match로 누락을 강제한다. *)
 type fusion_topology =
   | Simple  (** panel → judge → sink (현행, byte-identical) *)
@@ -549,7 +547,7 @@ type fusion_topology =
       (** panel → judge → (1차 판정이 [Insufficient]일 때만) judge'(refine) → sink.
           애매할 때만 한 단계 더 깊이; 그 외엔 1차 종합 그대로(= Simple). *)
   | Judge_of_judges
-      (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0283). 서로 다른 N개 1차
+      (** panel → [N개 1차 심판] → meta-judge → sink. 서로 다른 N개 1차
           심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
   | Staged_judge_of_judges
       (** panel → [N개 1차 심판] → fixed-size stage meta reducers → final meta reducer

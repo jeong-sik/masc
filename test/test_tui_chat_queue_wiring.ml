@@ -4614,9 +4614,8 @@ let test_the_header_names_only_unusual_modes () =
 ;;
 
 let test_chat_header_resolves_the_effective_modes () =
-  let labels ?keeper ?workspace yolo =
-    Tui_types.keeper_chat_mode_labels ~yolo ~keeper_gate_mode:keeper
-      ~workspace_gate_mode:workspace
+  let labels ?workspace yolo =
+    Tui_types.keeper_chat_mode_labels ~yolo ~workspace_gate_mode:workspace
   in
   let mode m = Tui_decode.Gate_mode m in
   (* The words are the chooser's, not the wire's: [w] offers "manual, Auto
@@ -4627,10 +4626,6 @@ let test_chat_header_resolves_the_effective_modes () =
   check (pair string (option string)) "YOLO does not hide inherited Gate mode"
     ("YOLO", Some "manual")
     (labels ~workspace:(mode Masc.Keeper_gate_mode.Manual) true);
-  check (pair string (option string)) "Keeper override wins"
-    ("AUTO", Some "allow-all")
-    (labels ~keeper:(mode Masc.Keeper_gate_mode.Always_allow)
-       ~workspace:(mode Masc.Keeper_gate_mode.Manual) false);
   (* A stance this build does not know keeps the server's spelling; only an
      unobserved one answers [None], which the header draws as "(not loaded)". *)
   check (pair string (option string)) "an unknown stance is shown as sent"

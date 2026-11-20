@@ -8,8 +8,7 @@ additional_properties = false
 # 호출 수가 아니라 필요했던 턴 수로 가른다(masc #32062): 실으면 25.5 MB, 지연하면
 # 24턴 x 표면 91,483 B = 2.2 MB 라서 11.6배다. 같은 도구 묶음의 BrowserRead,
 # BrowserAct, BrowserInteract 는 이미 지연돼 있다. 지연돼도 keeper_tool_search
-# 목록에 이름이 남고, 부르면 그 턴에 스키마가 붙는다. 재측정 방법은
-# docs/evidence/defer-loading-2026-11/README.md 에 있다.
+# 목록에 이름이 남고, 부르면 그 턴에 스키마가 붙는다.
 defer_loading = true
 
 [[params]]

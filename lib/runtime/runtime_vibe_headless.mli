@@ -6,8 +6,7 @@
     outcome, usage and exit code. This module turns both into closed types.
     It reads strings only; it spawns nothing and holds no state.
 
-    The contract is what Vibe 3.1.0 wrote in the runs retained under
-    [docs/evidence/vibe-official-client-lane-20261107/]. Vibe documents
+    The contract is what Vibe 3.1.0 wrote in runs on 2026-11-07. Vibe documents
     these files only in outline, so every enum decodes to a closed variant
     with one [Unrecognized_*] arm that keeps the wire value: a value a later
     Vibe adds is reported as itself and never taken for a value MASC knows.

@@ -1,4 +1,4 @@
-(* RFC play-link-for-the-shared-machine §2.7: an MCP caller of masc_dos_screen
+(* An MCP caller of masc_dos_screen
    gets the frame as a PNG image item beside the text observation. A VGA game
    draws its menus as pixels, so the text alone cannot spell them. *)
 

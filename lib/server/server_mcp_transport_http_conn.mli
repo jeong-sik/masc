@@ -5,7 +5,7 @@
     All access to global registries is internally protected by
     atomic CAS loops.  A connection's response belongs to the domain
     that runs the connection: only {!send_raw} and the {!run_sse_pumps}
-    supervisor touch it, both on that domain (RFC-0493 §3.2).
+    supervisor touch it, both on that domain.
 
     Open'd by sibling modules (`server_mcp_transport_http`,
     `server_mcp_transport_http_agui`) — all top-level bindings
@@ -115,7 +115,7 @@ val stop_sse_session_evict :
 (** [stop_sse_session_evict session_id ~reason] is
     {!stop_sse_session} plus a typed
     {!Session_lifecycle_event.Evict}/{!Session_lifecycle_event.Close}
-    pair published on the bus topic (RFC-0099 PR-3).
+    pair published on the bus topic.
 
     No [event: evicted] frame reaches the client: [Sse.register] runs
     the evicted client's [on_disconnect] first, which already stopped
@@ -168,7 +168,7 @@ val drain_sse :
   Sse.delivery_stream ->
   Server_sse_pump.ending
 (** [drain_sse info ~clock ~prime ~replay ~frame_of ~send stream] is the
-    drain of an MCP GET, AG-UI or presence connection (RFC-0493 §3.2):
+    drain of an MCP GET, AG-UI or presence connection:
     {!Server_sse_pump.run} over [prime], then the [replay] deliveries,
     then the live deliveries of [stream], each live or replayed one
     written as [frame_of] makes it.  The frames already waiting go out

@@ -1,6 +1,6 @@
 open Alcotest
 
-(** Unit tests for [Domain_pool] — RFC-0059 Phase 2 PR-6.
+(** Unit tests for [Domain_pool].
 
     Each test runs inside [Eio_main.run] + [Eio.Switch.run] because
     [Domain_pool.create] requires an active switch and a real

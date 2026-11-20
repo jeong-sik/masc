@@ -51,7 +51,7 @@ and runtime_attempt = {
   error : string option;
 }
 
-(* RFC-0132 PR-2: runtime observation AGENT_CORE/dashboard surface = external boundary; redact via SSOT. *)
+(* Runtime observation AGENT_CORE/dashboard surface = external boundary; redact via SSOT. *)
 let public_runtime_model_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 

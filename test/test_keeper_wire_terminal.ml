@@ -430,8 +430,8 @@ let test_interrupted_owner_without_subscriber_replays_failure () =
     ~source:(operation_source keeper_name)
     ~input:(`Assoc [ "message", `String "answer me" ])));
   Eio.Promise.await started;
-  (match owner_ok (Owner.interrupt_running_operation owner operation_id) with
-   | Owner.Operation_interrupt_signalled -> ()
+  (match fst (owner_ok (Owner.interrupt_turn owner (Owner.Direct_operation operation_id))) with
+   | Owner.Interrupt_result Owner.Operation_interrupt_signalled -> ()
    | _ -> fail "running operation did not accept the interrupt");
   (match Eio.Promise.await settled with
    | Owner.Operation_failed { kind = Keeper_chat_operation.Turn_cancelled; _ } -> ()
@@ -586,7 +586,7 @@ let test_registry_shutdown_projects_every_claimed_batch_member () =
      | _ -> fail "a batch member journal lacks its exact durable settlement identity")) ids
 
 (* A rejected terminal append leaves no durable seq, and both reconnect
-   replay and the RFC-0412 live dedup key off seq membership. Broadcasting the
+   replay and the live dedup key off seq membership. Broadcasting the
    terminal seq-less would close one live client while reconnecting clients
    replay the operation as still running (#41687 recurrence), so settlement
    logs the failure and skips the broadcast rather than projecting a delivery

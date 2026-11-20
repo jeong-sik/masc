@@ -1874,7 +1874,7 @@
 .chat-backctx { align-self: flex-start; margin: 10px 0 -4px 24px; display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: 11.5px; color: var(--text-mid); background: var(--bg-card); border: 1px solid var(--border-main); border-radius: var(--radius-pill); padding: 5px 13px; cursor: pointer; transition: 0.14s; }
 .chat-backctx:hover { border-color: var(--volt-dim); color: var(--volt-strong); }
 
-/* ════ CHAT PENDING-REVIEW CUE (RFC keeper-conversation-hitl-flow §4.1-A) ════ */
+/* ════ CHAT PENDING-REVIEW CUE ════ */
 .chat-pendcue { align-self: stretch; margin: 12px 24px -2px; display: flex; align-items: center; gap: 10px; font-family: var(--font-ui); font-size: 12.5px; color: var(--text-mid); background: color-mix(in oklab, var(--status-warn) 9%, var(--bg-card)); border: 1px solid color-mix(in oklab, var(--status-warn) 38%, var(--border-main)); border-radius: var(--radius-sm); padding: 9px 13px; cursor: pointer; text-align: left; transition: 0.14s; }
 .chat-pendcue:hover { border-color: var(--status-warn); background: color-mix(in oklab, var(--status-warn) 14%, var(--bg-card)); }
 .chat-pendcue-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--status-warn); box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-warn) 60%, transparent); animation: lg-pulse 2.4s ease-in-out infinite; }

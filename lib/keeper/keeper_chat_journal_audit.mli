@@ -1,4 +1,4 @@
-(** RFC-0412 stage 2 consistency auditor: proves the stage-1 journal
+(** Consistency auditor: proves the stage-1 journal
     ({!Keeper_chat_event_log}) and {!Keeper_chat_store} record the same turns,
     before any read path switches to the journal. Pure comparison core + IO
     shell; the sweep is driven from the server maintenance fiber.

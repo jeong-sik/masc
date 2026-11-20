@@ -1,4 +1,4 @@
-(** Per-keeper Librarian execution lane. See keeper_memory_lane.mli (RFC-0257). *)
+(** Per-keeper Librarian execution lane. See keeper_memory_lane.mli. *)
 
 let lane_label = "librarian"
 open Result.Syntax

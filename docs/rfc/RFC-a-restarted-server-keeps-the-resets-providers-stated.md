@@ -45,7 +45,7 @@ RFC-a-restarted-server-reads-the-stored-usage-reports 는 사용량 창을 되�
 ### 1.3 실측
 
 - 재시작: `~/me/.masc/logs/masc-start-*.log` 를 날짜별로 세면 11-06 부터 11-12 낮까지 59번이다(하루 3~15번).
-- 한도 거절로 끝난 Keeper 턴(`agent-core-events` 의 `agent_failed`, `error_code = provider_error_hard_quota`): 11-05 부터 7.25일에 2,113번이다. 그중 2,089번이 풀리는 시각을 말했다. 스크립트와 결과는 `docs/evidence/2026-11-12-hard-quota-after-restart/` 에 있다.
+- 한도 거절로 끝난 Keeper 턴(`agent-core-events` 의 `agent_failed`, `error_code = provider_error_hard_quota`): 11-05 부터 7.25일에 2,113번이다. 그중 2,089번이 풀리는 시각을 말했다.
 - 앞뒤 재시작과 한 시간 넘게 떨어진 재시작 39번에서, 재시작 전 30분에는 180번, 뒤 30분에는 325번 실패했다. 재시작 한 번에 3.7번 는 셈이다.
 - 재시작 71번에서, 재시작 전에 들은 풀리는 시각이 아직 앞에 있는데 재시작 뒤 30분 안에 같은 Keeper 가 다시 거절당한 첫 실패는 225번이다(재시작 한 번에 3.2번).
 - 이 숫자가 말하지 않는 것: 기록은 Keeper 이름만 갖고 계정을 갖지 않는다. Keeper 가 다른 계정으로 거절당했어도 같은 Keeper 로 센다. 재시작 뒤에는 Keeper 가 한꺼번에 깨어 턴 수 자체가 는다. 전체 턴 수로 나눈 비율은 세지 않았다.

@@ -34,6 +34,31 @@ val chat_template_thinking_active
 val thinking_requested : default:bool -> Provider_config.t -> bool
 
 val tool_calls_to_openai_json : Types.content_block list -> Yojson.Safe.t list
+
+(** OpenAI [input_audio.format] wire token derived from a MIME type. *)
+type openai_audio_format =
+  | Audio_wav
+  | Audio_mp3
+  | Audio_ogg
+  | Audio_flac
+  | Audio_webm
+  | Audio_aac
+  | Audio_m4a
+  | Audio_opus
+  | Audio_pcm16
+
+val openai_audio_format_to_string : openai_audio_format -> string
+
+(** Normalize an audio MIME type (such as ["audio/wav"], ["audio/mpeg"], or
+    ["audio/ogg; codecs=opus"]) into a closed {!openai_audio_format}.
+    Returns [Error raw] for unrecognized or empty MIME types. *)
+val openai_audio_format_of_media_type : string -> (openai_audio_format, string) result
+
+(** Resolve the OpenAI [input_audio.format] wire string for [backend], raising
+    [Invalid_argument] on unrecognized MIME types. Shared by Chat Completions
+    and Responses serializers. *)
+val openai_audio_format_wire : backend:string -> string -> string
+
 val openai_content_parts_of_blocks : Types.content_block list -> Yojson.Safe.t list
 val openai_messages_of_message : Types.message -> Yojson.Safe.t list
 

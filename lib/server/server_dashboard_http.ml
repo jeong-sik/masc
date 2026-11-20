@@ -15,11 +15,49 @@ let dashboard_namespace_truth_http_json =
   Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
 ;;
 
+(* The cache key of one Board list read, made here and nowhere else. Each
+   part that comes from the request or the workspace is written with its
+   length, as [board:list:] writes its own: such a part may hold the [;]
+   between the parts, and two reads that differ in any part must not share a
+   cached payload. An absent part is [-], which no written part is. *)
+let board_memory_cache_key
+      ~reader
+      ~base_path
+      ~hearth
+      ~author_filter
+      ~text_query
+      ~sort_by
+      ~exclude_system
+      ~exclude_automation
+      ~limit
+      ~offset
+      ~voter
+  =
+  let key_part = function
+    | Some value -> Printf.sprintf "%d:%s" (String.length value) value
+    | None -> "-"
+  in
+  Printf.sprintf
+    "board:memory:%s;%s;%s;%s;%b;%b;%d;%d;%s;%s;%s"
+    (Masc_board_handlers.Board_access.cache_key reader)
+    (key_part hearth)
+    (key_part author_filter)
+    (board_sort_label sort_by)
+    exclude_system
+    exclude_automation
+    limit
+    offset
+    (key_part base_path)
+    (key_part voter)
+    (key_part text_query)
+;;
+
 let dashboard_board_payload
       ~reader
       ?config
       ?hearth
       ?author_filter
+      ?text_query
       ?(sort_by = Board_dispatch.Hot)
       ?(exclude_system = false)
       ?(exclude_automation = false)
@@ -32,24 +70,19 @@ let dashboard_board_payload
   let limit = clamp ~min_v:1 ~max_v:500 limit in
   let offset = clamp ~min_v:0 ~max_v:5000 offset in
   let author_filter = Option.map String.trim author_filter in
-  let config_key =
-    match config with
-    | None -> "-"
-    | Some config -> config.Workspace.base_path
-  in
   let cache_key =
-    Printf.sprintf
-      "board:memory:%s;%s;%s;%s;%b;%b;%d;%d;%s;%s"
-      (Masc_board_handlers.Board_access.cache_key reader)
-      (Option.value ~default:"-" hearth)
-      (Option.value ~default:"-" author_filter)
-      (board_sort_label sort_by)
-      exclude_system
-      exclude_automation
-      limit
-      offset
-      config_key
-      (Option.value ~default:"-" voter)
+    board_memory_cache_key
+      ~reader
+      ~base_path:(Option.map (fun (config : Workspace.config) -> config.base_path) config)
+      ~hearth
+      ~author_filter
+      ~text_query
+      ~sort_by
+      ~exclude_system
+      ~exclude_automation
+      ~limit
+      ~offset
+      ~voter
   in
   (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
      fleets.  The compute below scans the post store, fetches the
@@ -75,6 +108,7 @@ let dashboard_board_payload
           ~exclude_system
           ~exclude_automation
           ?author_filter
+          ?text_query
           ~limit:probe_fetch
           ()
       in
@@ -125,6 +159,9 @@ let dashboard_memory_http_payload ?config ~reader ~actor request : Dashboard_cac
     |> Fun.flip Option.bind (fun s ->
       if s = "" then None else Some s)
   in
+  (* The Board search box. A blank one is no query, so it shares the
+     unfiltered payload. *)
+  let text_query = String_util.option_trim (query_param request "q") in
   let sort_by = board_sort_order_of_request request in
   let exclude_system = bool_query_param request "exclude_system" ~default:false in
   let exclude_automation = bool_query_param request "exclude_automation" ~default:false in
@@ -141,6 +178,7 @@ let dashboard_memory_http_payload ?config ~reader ~actor request : Dashboard_cac
     ?config
     ?hearth
     ?author_filter
+    ?text_query
     ~sort_by
     ~exclude_system
     ~exclude_automation
@@ -214,65 +252,6 @@ let dashboard_gate_tool_events_http_json request ~base_path : Yojson.Safe.t =
     ()
 ;;
 
-(* /api/v1/dashboard/proof was measured at 28-60s (timeout) under
-   live load. The verification projection walks the on-disk request store, so
-   an uncached computation must not run on the Eio main domain.
-
-   Same fix pattern as PR #18991 / #18993 / #18994: wrap in
-   [Dashboard_cache.get_or_compute] for stale-while-revalidate, which
-   submits the compute to a worker as [Pool_work.cpu], so the main domain
-   keeps serving requests during refresh. *)
-let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
-  let base_path = config.Workspace.base_path in
-  (* Single disk scan via [proof_compose]; the historical
-     [summary_json] + [requests_json] sequence walked the verification
-     store twice per refresh. *)
-  let verification_summary, verification_requests =
-    Dashboard_verification.proof_compose ~base_path ~limit ()
-  in
-  let proof_source ~id ~label ~route =
-    `Assoc [ "id", `String id; "label", `String label; "route", `String route ]
-  in
-  let proof_sources =
-    [
-      proof_source ~id:"verification_summary"
-        ~label:"Verification submission summary"
-        ~route:"/api/v1/verification/summary";
-      proof_source ~id:"verification_requests"
-        ~label:"Verification request evidence"
-        ~route:"/api/v1/verification/requests";
-      proof_source ~id:"tlc_results"
-        ~label:"TLA+ verification logs"
-        ~route:"/api/v1/verification/tlc-results";
-      proof_source ~id:"execution_trust"
-        ~label:"Execution trust provenance"
-        ~route:"/api/v1/dashboard/execution-trust";
-    ]
-  in
-  `Assoc
-    [
-      "generated_at", `String (Masc_domain.now_iso ());
-      ( "summary",
-        `Assoc
-          [
-            "verification_total",
-            (match verification_summary with
-             | `Assoc fields -> (
-                 match List.assoc_opt "total" fields with
-                 | Some (`Int n) -> `Int n
-                 | _ -> `Int 0)
-             | _ -> `Int 0);
-          ] );
-      ( "verification",
-        `Assoc
-          [
-            "summary", verification_summary;
-            "requests", verification_requests;
-          ] );
-      "proof_sources", `List proof_sources;
-    ]
-;;
-
 (* Both the HTTP/1 router and the H2 gateway serve this projection, and the H2
    registration carries a comment requiring the two to stay identical. Caching
    at each call site would have been two copies of the policy and the first
@@ -287,18 +266,31 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
 
    [live_cache_ttl_s] is the 30 s tier documented for "frequently-changing data
    such as active keeper state" — schedule state belongs there rather than in
-   the 120 s projection tier. The aggregate response takes no selectors, so
-   base_path is the whole key. Exact lookups bypass this aggregate cache below. *)
-let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
+   the 120 s projection tier. The key is base_path and [active_only]: the fleet
+   list and the active-only list the Dashboard calendar reads are each one
+   entry per workspace. Target-scoped pages, cursor pages and exact lookups
+   bypass this cache below. [name] is the pool work's label: the two lists
+   differ in rows built (20 against up to 200), so each keeps its own. *)
+let scheduled_automation_cached_json ~name ~active_only ~(config : Workspace.config) :
   Yojson.Safe.t
   =
   Dashboard_cache.get_or_compute
     (Server_dashboard_http_core_cache.scheduled_automation_cache_key
-       ~base_path:config.base_path)
+       ~base_path:config.base_path
+       ~active_only)
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
-    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    (Pool_work.cpu ~name (fun () ->
       Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+        ~active_only
         config))
+;;
+
+let dashboard_scheduled_automation_http_json ~config =
+  scheduled_automation_cached_json ~name:__FUNCTION__ ~active_only:false ~config
+;;
+
+let dashboard_active_schedules_http_json ~config =
+  scheduled_automation_cached_json ~name:__FUNCTION__ ~active_only:true ~config
 ;;
 
 let dashboard_scheduled_automation_query_http_json
@@ -308,16 +300,22 @@ let dashboard_scheduled_automation_query_http_json
   =
   match Server_utils.query_param request "schedule_id" with
   | None ->
-    (* A target selector is already narrowed by its target, so it bypasses the
-       aggregate's shared cache the same way the exact lookup does: a
-       client-controlled selector in a cache key is a key per caller. *)
+    let active_only =
+      Server_utils.bool_query_param request "active_only" ~default:false
+    in
+    (* A target selector and a cursor bypass the shared cache the same way the
+       exact lookup does: a client-controlled value in a cache key is a key per
+       caller. [active_only] has two values, so both of its lists are cached. *)
     (match Server_utils.query_param request "payload_target",
            Server_utils.query_param request "cursor" with
-     | None, None -> dashboard_scheduled_automation_http_json ~config
+     | None, None ->
+       if active_only
+       then dashboard_active_schedules_http_json ~config
+       else dashboard_scheduled_automation_http_json ~config
      | payload_target, cursor ->
        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
          Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
-           ?payload_target ?cursor
+           ?payload_target ~active_only ?cursor
            config))
   | Some schedule_id ->
     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -327,15 +325,6 @@ let dashboard_scheduled_automation_query_http_json
            projection stays a pure function of (state, now). *)
         ~now:(Unix.gettimeofday ())
         ~schedule_id)
-;;
-
-let dashboard_proof_http_json ~config request : Yojson.Safe.t =
-  let limit = int_query_param request "limit" ~default:25 |> clamp ~min_v:1 ~max_v:100 in
-  let key =
-    Printf.sprintf "dashboard.proof:%s;%d" config.Workspace.base_path limit
-  in
-  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-    dashboard_proof_compute ~config ~limit ()))
 ;;
 
 type approval_resolve_http_error =

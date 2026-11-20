@@ -1,9 +1,0 @@
-gui:
-  showRandomTip: false
-  showCommandLog: false
-git:
-  autoFetch: false
-  autoRefresh: false
-update:
-  method: never
-disableStartupPopups: true

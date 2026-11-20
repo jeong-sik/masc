@@ -419,7 +419,7 @@ let a_first_run_sets_the_installation_up () =
       Alcotest.(check string) "the kind" "mode_event" (R.Kind.to_string record.R.kind);
       (match record.R.author with
        | A.Local_operator -> ()
-       | A.Authenticated _ | A.System_cron | A.System_maintenance | A.System_migration ->
+       | A.Authenticated _ | A.System_cron | A.System_maintenance ->
          Alcotest.fail "the author is not the local operator");
       (match M.of_body record.R.body with
        | Ok mode_event ->

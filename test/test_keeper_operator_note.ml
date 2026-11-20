@@ -1,4 +1,4 @@
-(* RFC-0366. An operator sentence that lives for one turn.
+(* An operator sentence that lives for one turn.
 
    The contract that matters is the lifetime: it renders once, and after that
    the record stays so "delivered" and "never existed" are different answers.

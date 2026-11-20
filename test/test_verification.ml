@@ -1137,7 +1137,7 @@ let commit_rejection_for_delivery config ~producer ~verification_id ~reason ~aut
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
-    (* RFC-0393: the producer is recorded under its keeper_name, and
+    (* The producer is recorded under its keeper_name, and
        keeper-ness is decided by the persisted meta at that name. *)
     let keeper_name = "persisted-canonical-producer" in
     let producer = keeper_name in
@@ -1397,7 +1397,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
       (fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
-        (* RFC-0361 D7(a): the completion-authority review resolves only the
+        (* The completion-authority review resolves only the
            verifier_exact lane; the default runtime hook above no longer
            reaches it. *)
         Atomic.set
@@ -2118,7 +2118,7 @@ let test_verdict_audit_names_the_judging_runtime () =
         (json |> member "authority_actor" |> to_string))
 ;;
 
-(* RFC-0361 D7(b): the completion authority no longer mints a random actor
+(* The completion authority no longer mints a random actor
    per judgement. N judgements registered with the agent's authority identity
    must all record the same fixed [authority_actor] — the [verifier_exact]
    lane id — so verdicts aggregate by actor; run identity stays with
@@ -2593,7 +2593,7 @@ let test_create_rejects_blank_criterion_before_write () =
         0
         (List.length (readable_requests_exn base_path)))
 
-(* RFC-0221 §3.1: [delete_request] removes the record (compensation) and is
+(* [delete_request] removes the record (compensation) and is
    idempotent — deleting a missing record is success, so a caller can compensate
    without first checking existence. *)
 let test_delete_request () =
@@ -2656,7 +2656,7 @@ let test_request_path_uses_current_store () =
 
    The earlier contract failed the whole scan here. That kept the failure loud
    but made it total: 171 records written by a producer removed on 2026-08-07
-   were enough to answer /api/v1/dashboard/proof with 500 for five days, naming
+   were enough to answer the verification projection with 500 for five days, naming
    one path while saying nothing about the other 170 or the 122 that read fine. *)
 let test_scan_isolates_bad_entry_with_metric () =
   with_temp_dir (fun base_path ->
@@ -4254,7 +4254,7 @@ let test_submit_with_unreadable_producer_meta_refuses_artifacts () =
       | Ok () -> ()
       | Error detail -> Alcotest.failf "a note-only submit was refused: %s" detail)
 
-(* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
+(* A binary payload is adopted, not refused -- the
    snapshot keeps the hash, size and format, and files the bytes as the
    evidence body when the caller names the request. *)
 let large_binary_format_fixtures () =
@@ -4360,7 +4360,7 @@ let test_a_binary_payload_is_adopted_and_filed () =
       Alcotest.(check bool) "without a request id there is no body field"
         false (bare |> member "body" != `Null))
 
-(* RFC-0436 §4.3: the judge reads a filed binary body back as base64, and
+(* The judge reads a filed binary body back as base64, and
    only an image format counts as an attached image. A body that was never
    filed is an error, not a guess. *)
 let test_a_filed_binary_body_reads_back_and_only_images_attach () =
@@ -4410,7 +4410,7 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
        | Error (VS.Over_delivery_ceiling _) ->
          Alcotest.fail "no body was filed, nothing to measure");
       (* A body above the capture ceiling is not delivered — the judge falls
-         back to the reference-and-hash line (RFC-0436 §4.5). *)
+         back to the reference-and-hash line. *)
       let oversized =
         String.make (VS.verification_evidence_max_bytes + 1) 'x'
       in

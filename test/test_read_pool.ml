@@ -1,6 +1,6 @@
 open Alcotest
 
-(* RFC-0204 §5.1. Each pool has one worker; the background worker is held
+(* Each pool has one worker; the background worker is held
    for the whole test, so a read that went to the background pool could never
    start. *)
 

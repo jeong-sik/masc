@@ -82,7 +82,7 @@ val keeper_tool_approval_timeout_sec : unit -> float
 
 (** [keeper.hitl.observation_stderr_bytes], default 4096. How much of a
     refused observe run's stderr tail the Gate keeps on the approval row for
-    the judge (RFC-0422 step 3b); the bytes cut are counted on the row. *)
+    the judge; the bytes cut are counted on the row. *)
 val keeper_hitl_observation_stderr_bytes : unit -> int
 (** Maximum concurrent Auto Judge workers admitted for one workspace/Keeper
     owner. This bounds per-Keeper fan-out; provider/runtime concurrency limits

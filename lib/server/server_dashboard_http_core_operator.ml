@@ -2,12 +2,6 @@
 
 open Dashboard_http_helpers
 
-let operator_digest_cache ~state =
-  Server_dashboard_operator_digest_observation.cache
-    (Server_dashboard_operator_digest_observation.owner_for_scope ~state
-      (Mcp_server.workspace_scope state))
-;;
-
 let operator_refresh_interval_s =
   float_of_env_default
     "MASC_OPERATOR_REFRESH_INTERVAL_S"

@@ -541,7 +541,7 @@ let test_gate_fresh_roster_bypasses_cache_with_auth_and_workspace () =
           (get ~router ~token:worker ("/api/v1/gate/keepers?" ^ suffix)).status)
         [ "fresh=tru"; "fresh="; "fresh=true&fresh=false"; "fresh" ]))
 
-(* RFC-0481 §3.1: [name] narrows the Gate roster to one Keeper through the
+(* [name] narrows the Gate roster to one Keeper through the
    same route, so its authentication and Candle projection stay the roster's. *)
 let test_gate_named_roster_reads_one_keeper_with_auth () =
   Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->

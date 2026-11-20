@@ -225,7 +225,7 @@ interface DashboardHealthInput {
   pendingVerificationCount?: number
 }
 
-// RFC-0135 PR-3: the local `keeperLooksPaused` was one of four
+// The local `keeperLooksPaused` was one of four
 // parallel paused-predicate chains. Canonical implementation now in
 // `../lib/keeper-predicates.ts` covers exactly the same four axes
 // (paused / phase / pipeline_stage / status).

@@ -1,8 +1,0 @@
-.venv/
-dist/
-results/jobs/
-__pycache__/
-.pytest_cache/
-configs/out/
-configs/out-probe/
-results/datasets/

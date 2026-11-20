@@ -119,7 +119,7 @@ let clear_agent_current_task_cache config ~task_id =
     (* Backend-aware listing: the guard above already went through
        [path_exists config], but the listing used bare [Sys.readdir], so a
        Memory-backend workspace scanned an empty local mirror and skipped
-       the cache invalidation silently (RFC-0371 B9). [list_dir] is total —
+       the cache invalidation silently. [list_dir] is total —
        missing dir and backend errors read as []. *)
     let agent_files = list_dir config agents_path in
     List.iter

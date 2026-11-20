@@ -17,7 +17,7 @@ export function routeWantsRefreshTarget(
       return routeState.tab === 'monitoring' && routeState.params.section === 'observatory'
     case 'fusion':
       // The fusion run-status panel only mounts on the top-level fusion surface,
-      // so its registry refetch is scoped to that route (RFC-0266 Phase 4).
+      // so its registry refetch is scoped to that route.
       return routeState.tab === 'fusion'
     case 'internalAgents':
       return (routeState.tab === 'monitoring' && routeState.params.section === 'internal-agents')

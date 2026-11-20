@@ -2132,7 +2132,7 @@ let test_a_failed_turn_after_a_built_in_tool_is_not_effect_free () =
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
-(* RFC-0509: the host took the turn and the provider refused it for quota.
+(* The host took the turn and the provider refused it for quota.
    Only the input and the model's reasoning reached the durable range, so
    the attempt is effect-free, and the proof is the durable page MASC read.
    An answer that reached the range or the stream, or a range MASC could not
@@ -2299,7 +2299,7 @@ let test_a_changed_model_starts_a_fresh_session () =
        |> List.filter (fun line -> line <> "")))
 ;;
 
-(* RFC-0495: the host keeps its native files in one root per Keeper. A new
+(* The host keeps its native files in one root per Keeper. A new
    session empties it, a resumed one keeps it, and a root that cannot be
    prepared fails the turn before the host is launched, leaving the session
    to resume. *)

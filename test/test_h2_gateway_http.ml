@@ -188,11 +188,7 @@ let test_subpath_routes_check_the_token_themselves () =
     check int "github identity needs a credential" 401
       (status ~meth:`GET client "/api/v1/keepers/someone/github-identity"))
 
-(* [namespace-truth] was an alias only HTTP/2 served. *)
 let test_a_path_the_router_lacks_is_not_found () =
-  with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
-    check int "namespace-truth" 404
-      (status ~meth:`GET client "/api/v1/dashboard/namespace-truth"));
   with_gateway
     ~make_routes:(fun ~sw:_ ~clock:_ -> Masc.Http_server_eio.Router.create ())
     (fun ~player:_ ~reader:_ client ->

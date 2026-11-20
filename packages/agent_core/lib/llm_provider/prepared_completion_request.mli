@@ -10,7 +10,7 @@ type measured
 type admitted
 type admitted_body = Llm_transport.admitted_http_body
 
-type context_fit =
+type context_fit = Input_budget.context_fit =
   { input_tokens : int
   ; reserved_output_tokens : int
   ; max_context_tokens : int

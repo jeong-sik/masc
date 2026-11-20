@@ -73,7 +73,7 @@ let test_no_path_escape () =
     ".masc/playground/_/"
     (PP.bundle_root "")
 
-(* RFC-0393: keeper name is the only spelling (sanitize_keeper_name is a no-op identity wrapper). *)
+(* Keeper name is the only spelling (sanitize_keeper_name is a no-op identity wrapper). *)
 
 let test_strip_canonical_to_short () =
   check string "canonical stays canonical"

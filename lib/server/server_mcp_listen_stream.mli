@@ -1,5 +1,5 @@
 (** One MCP [subscriptions/listen] response over HTTP/1.1 or HTTP/2 (MCP
-    2026-07-28, RFC-0493 §3.2).
+    2026-07-28).
 
     The response body is the subscription's notification stream: the
     reconnect [retry:] frame, the acknowledgement, then each notification

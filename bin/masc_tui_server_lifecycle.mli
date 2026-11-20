@@ -147,3 +147,30 @@ val start :
 val stop : owned_server -> grace_sec:float -> unit
 (** Tree-kill only this owned server: SIGTERM to the process group, then
     SIGKILL after [grace_sec] if anything survives. Idempotent. *)
+
+(** {1 How a start ended, for the loop}
+
+    The start waiter runs beside the TUI's main loop and does not write the
+    screen. It leaves what it saw here and rings
+    [Masc_tui_wake.Server_start_settled]; the loop takes it and says it
+    (RFC tui-idle-wait §2.1). *)
+
+type settled_start = {
+  server : owned_server;
+  host : string;
+  port : int;  (** Where this start was for. *)
+  outcome : exit_report health_outcome;
+}
+
+type settled_starts
+
+val create_settled_starts : unit -> settled_starts
+
+val await_start :
+  settled_starts -> owned_server -> host:string -> port:int -> health_ok:(unit -> bool) ->
+  attempts:int -> sleep:(unit -> unit) -> unit
+(** The start waiter: {!wait_healthy} on this server's own exit, then keep
+    the outcome for the loop and ring [Masc_tui_wake.loop]. *)
+
+val take_settled : settled_starts -> settled_start list
+(** The starts settled since the last call, oldest first, and forget them. *)

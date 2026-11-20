@@ -226,7 +226,8 @@ let create_keeper_preference_writer () =
 
 let publish_preference writer (request : preference_request) outcome =
   Queue.add { request_id = request.request_id; preference = request.preference; outcome }
-    writer.completed_preferences
+    writer.completed_preferences;
+  Masc_tui_wake.(ring loop Keeper_preference_written)
 
 let refuse_pending_preferences writer reason =
   Queue.iter (fun request -> publish_preference writer request (Preference_not_started reason))

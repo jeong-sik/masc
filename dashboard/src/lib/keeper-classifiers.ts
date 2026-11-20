@@ -1,5 +1,5 @@
 /**
- * RFC-0174: Centralized typed classifiers for keeper status/phase/verdict strings.
+ * Centralized typed classifiers for keeper status/phase/verdict strings.
  *
  * Every function takes `string` input from backend wire-format and returns a
  * typed result. Unknown inputs map to explicit fallbacks (null, false, or

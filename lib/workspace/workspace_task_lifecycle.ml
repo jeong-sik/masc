@@ -142,7 +142,7 @@ let decide
   | Masc_domain.Cancel, Masc_domain.Cancelled _ -> ok task_status
   | Masc_domain.Cancel, Masc_domain.Todo -> ok (cancelled_status ~agent_name ~now ~reason)
   (* The holder stops its own work outright: giving up work you hold needs
-     nobody's permission (RFC-0417 §4.1). A pending submission is the
+     nobody's permission. A pending submission is the
      producer's own, so withdrawing it ends the same way. *)
   | ( Masc_domain.Cancel
     , ( Masc_domain.Claimed { assignee; _ }

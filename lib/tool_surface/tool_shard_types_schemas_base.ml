@@ -5,7 +5,7 @@
 let base_tools : Masc_domain.tool_schema list =
   [ (* Context status *)
     Tool_shard_types_schemas_base_toml.context_status
-  ; (* The execution lane's own account of itself (RFC-0427 D-1) *)
+  ; (* The execution lane's own account of itself *)
     Tool_shard_types_schemas_base_toml.lane_status
   ; Tool_shard_types_schemas_base_toml.workspace_memory_read
   ; (* Memory *)
@@ -18,7 +18,7 @@ let base_tools : Masc_domain.tool_schema list =
      into the Memory OS fact store (RFC keeper-memory-consolidation
      Stage 4: the turn-scoped bank is gone). *)
     Tool_shard_types_schemas_base_toml.memory_write
-  ; (* The world's own constitution (RFC-0442). Same layer as the memory
+  ; (* The world's own constitution. Same layer as the memory
        writes: a durable write a keeper makes about the world it works in,
        except every keeper in that world reads it rather than one. *)
     Tool_shard_types_schemas_base_toml.constitution_write

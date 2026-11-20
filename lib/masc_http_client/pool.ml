@@ -710,8 +710,8 @@ let create_fresh t ?resolved_addresses key uri : (_, request_error) result =
     | Ok c ->
       (try
          with_mu t (fun () ->
-           t.connect_failures <- Host_map.remove key t.connect_failures);
-         t.counters.create_count_total <- t.counters.create_count_total + 1;
+           t.connect_failures <- Host_map.remove key t.connect_failures;
+           t.counters.create_count_total <- t.counters.create_count_total + 1);
          Ok c
        with
        | Eio.Cancel.Cancelled _ as exn ->
@@ -744,16 +744,15 @@ let release t key client ownership ~close_only =
             Pool_client_lease.park ownership ~publish:(fun () ->
               t.idle <- Host_map.add key (entry :: existing) t.idle);
             `Parked
-          end else `Evict
+          end else begin
+            t.counters.evict_count_total <- t.counters.evict_count_total + 1;
+            `Evict
+          end
         else `Close)
     in
     match disposition with
     | `Parked -> ()
-    | `Close -> close ()
-    | `Evict ->
-      close ();
-      with_mu t (fun () ->
-        t.counters.evict_count_total <- t.counters.evict_count_total + 1)
+    | `Close | `Evict -> close ()
 
 (* ── Public request API ────────────────────────────────────────── *)
 
@@ -958,7 +957,7 @@ let request t ?(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t option)
     let uri = Uri.of_string url in
     do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri
 
-(* ── RFC-0129: idle-timeout request with streaming progress ────── *)
+(* ── idle-timeout request with streaming progress ────── *)
 
 type body_progress = {
   first_byte_at_sec : float option;

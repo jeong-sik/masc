@@ -107,7 +107,7 @@ function JudgeNodeRow({ node }: { node: FusionJudgeNode }) {
   `
 }
 
-// RFC-0284 PR 2: observed judge-node topology inline on the board evidence card.
+// Observed judge-node topology inline on the board evidence card.
 // Mirrors the standalone fusion surface strip but in the board's token system —
 // the data layer (shape classification, node normalization in lib/fusion-meta)
 // and the i18n labels (fusion/fusion-judge-format) are shared, only the markup is

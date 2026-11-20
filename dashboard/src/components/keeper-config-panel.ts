@@ -1188,7 +1188,7 @@ function dedupeStrings(values: readonly string[]): string[] {
 }
 
 /** What the runtime_id select offers, split by kind. A keeper assignment names
- *  a declared lane or a runtime (RFC-0457) and the server resolves a lane
+ *  a declared lane or a runtime and the server resolves a lane
  *  first, so an id that is a declared lane is offered once, under lanes. The
  *  draft and the server's current value stay under runtimes when they are not
  *  lanes, so the select never shows another id in their place. */
@@ -1581,7 +1581,7 @@ function renderConstitutionLedger(ledger: KeeperConstitutionLedgerPreview) {
       ${line.line}번째 줄${line.line_end === 'unterminated_final_line' ? ' (마지막 줄, 줄바꿈 없음)' : ''}: ${line.detail}
     </div>`)}
   </div>`
-  // RFC-0504 §2.4: a line written under a name the roster does not hold
+  // A line written under a name the roster does not hold
   // withholds the articles it touches, so it is named here beside the
   // unreadable lines instead of the norm vanishing.
   const isolated = ledger.isolated_lines.length === 0 ? null : html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-constitution-isolated-lines">

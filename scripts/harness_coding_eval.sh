@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Coding-outcome eval runner (RFC-0396 W2).
+# Coding-outcome eval runner.
 #
 # For every selected case x model x repeat: boot nothing new per run — one
 # isolated MASC server serves the whole invocation — copy the case workspace
 # fresh, create one keeper, send it the task, wait for the episode to finish,
 # then run the case's verify script. The verify exit code is the entire pass
-# verdict (RFC-0396 D2); this script records evidence and never re-judges.
+# verdict; this script records evidence and never re-judges.
 #
 # Evidence: one JSON file per run plus runs.jsonl rebuilt before reporting, then
 # test/coding_eval_report_cli.exe turns rows into pass@k / buckets. A run
@@ -28,7 +28,6 @@ PORT="${CODING_EVAL_PORT:-}"
 POLL_INTERVAL_SEC="${CODING_EVAL_POLL_INTERVAL_SEC:-2}"
 TIMEOUT_SEC="${CODING_EVAL_MCP_TIMEOUT_SEC:-30}"
 CLI_EXE="${ROOT_DIR}/_build/default/test/coding_eval_report_cli.exe"
-CHECKER_EXE="${ROOT_DIR}/_build/default/bin/masc_reliable_change_g1_check.exe"
 
 SERVER_PID=""
 LIVE_RUN_DIR=""
@@ -120,10 +119,7 @@ ensure_cli_built() {
   (
     cd "${ROOT_DIR}"
     local targets=(./test/coding_eval_report_cli.exe ./bin/main_eio.exe)
-    if [[ -n "${MANIFEST}" || -x "${CHECKER_EXE}" ]]; then
-      targets+=(./bin/masc_reliable_change_g1_check.exe)
-    fi
-    if [[ "${CODING_EVAL_SKIP_BUILD:-0}" != "1" || ! -x "${CLI_EXE}" || ( -n "${MANIFEST}" && ! -x "${CHECKER_EXE}" ) ]]; then
+    if [[ "${CODING_EVAL_SKIP_BUILD:-0}" != "1" || ! -x "${CLI_EXE}" ]]; then
       scripts/dune-local.sh build "${targets[@]}" >/dev/null
     fi
   )
@@ -987,10 +983,6 @@ main() {
   "${CLI_EXE}" --cases "${CASES_DIR}" --runs "${RUNS_JSONL}" --out "${OUT_DIR}" \
     --k "${PASS_AT_K}"
   echo "[coding-eval] report: ${OUT_DIR}/REPORT.md" >&2
-  if [[ -n "${MANIFEST}" && -f "${MANIFEST}" ]]; then
-    "${CHECKER_EXE}" --manifest "${MANIFEST}" --runs "${RUNS_JSONL}" --out "${OUT_DIR}"
-    echo "[coding-eval] checker: ${OUT_DIR}/checker.json" >&2
-  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

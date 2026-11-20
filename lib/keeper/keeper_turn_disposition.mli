@@ -7,7 +7,7 @@
     operator see and do?".
 
     The two layers are deliberately separate types:
-    - [Keeper_turn_terminal_code.t] stays narrow (RFC-0042 §3.1) and
+    - [Keeper_turn_terminal_code.t] stays narrow and
       is sourced from [Keeper_registry.failure_reason] /
       [Agent_core.Error.t].
     - [Keeper_turn_disposition.t] is a display and operator-action

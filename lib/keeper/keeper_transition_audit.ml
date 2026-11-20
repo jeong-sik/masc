@@ -1,4 +1,4 @@
-(** Keeper Transition Audit — Structured audit trail (RFC-0002).
+(** Keeper Transition Audit — Structured audit trail.
 
     Types and JSON serialization extracted to [Keeper_transition_audit_types].
     This module retains ring buffer, store, recording, and query operations. *)

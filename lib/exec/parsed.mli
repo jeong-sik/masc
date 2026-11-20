@@ -27,8 +27,7 @@ type reason_too_complex =
   | `Cmd_subst
   | `Shell_builtin of string
       (** [eval], [source], [.] in program position: they re-parse their
-          arguments in the shell that runs the line, which no IR node holds
-          (RFC-shell-ir-typed-command-substitution §2.4). *)
+          arguments in the shell that runs the line, which no IR node holds. *)
   | `Proc_subst
   | `Subshell
   | `Arith_expansion

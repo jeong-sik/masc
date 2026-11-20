@@ -1,4 +1,4 @@
-(* RFC-0483 §4.2: the skill activation ledger knows only the trace it wrote.
+(* The skill activation ledger knows only the trace it wrote.
    The server names the Keeper from the registry, where each Keeper holds its
    current trace, and announces the change to the workspace's observer
    sessions. The ledger's side, one call per appending write, is covered in

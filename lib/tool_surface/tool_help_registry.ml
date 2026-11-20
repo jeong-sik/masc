@@ -13,12 +13,12 @@ type help_entry = {
   doc_refs : string list;
   prompt_hints : string list;
   examples : string list;
-      (* RFC-0195 P0 — Anthropic MCP guidance: examples > longer descriptions
+      (* Anthropic MCP guidance: examples > longer descriptions
          for parameter accuracy. Empty list means "no curated example yet". *)
   alternatives : string list;
-      (* RFC-0195 P0 — typed list of sibling tool names the LLM may try when
+      (* Typed list of sibling tool names the LLM may try when
          this one rejects or is unavailable. Empty list means "terminal —
-         this is the only path". RFC-0194 §2 instantiation. *)
+         this is the only path". *)
 }
 
 let normalize_spaces text =
@@ -99,7 +99,7 @@ let constraints_from_meta (meta : Tool_catalog.metadata) =
   List.filter_map render_fragment_opt visibility_note
 
 (* Authored help lives in the tool's own [config/tools/<name>.toml] [help]
-   table (RFC prompts-and-tool-definitions-outside-ocaml §2.2; the in-code
+   table (the in-code
    table this replaces was the last hand-written copy). The embedded tree is
    the source: definitions are validated at boot, so a file that fails to
    load here has already refused the boot — the defensive [Error] arm below
@@ -279,7 +279,7 @@ let canonicalize_schemas schemas =
 let entry_json (entry : help_entry) =
   let meta_fields = Tool_catalog.metadata_to_fields entry.name in
   let workflow_fields = [] in
-  (* RFC-0195 P0 — empty lists omitted so the JSON wire shape stays
+  (* Empty lists omitted so the JSON wire shape stays
      identical for tools with no curated examples/alternatives. *)
   let optional_string_list_field key values =
     if values = [] then []

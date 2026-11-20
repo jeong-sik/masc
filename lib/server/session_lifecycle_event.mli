@@ -45,7 +45,7 @@ type t =
       session_id : string ;
     }
       (** transport upgrade within the same session (e.g. POST /mcp
-          chunked-JSON → SSE on long-running dispatch — RFC-0100 §3.2). *)
+          chunked-JSON → SSE on long-running dispatch). *)
   | Evict of {
       transport : transport ;
       session_id : string ;

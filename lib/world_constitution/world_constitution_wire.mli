@@ -1,4 +1,4 @@
-(** JSON wire form for constitution ledger entries (RFC-0442).
+(** JSON wire form for constitution ledger entries.
 
     The schema is closed: an unknown or duplicated field is a rejection, not a
     field to ignore. A decoder that answers [None] tells its caller only that

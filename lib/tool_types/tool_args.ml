@@ -57,7 +57,7 @@ type error_code =
   | External_service_unavailable (** An external service or transport is unavailable *)
   | Internal_error        (** Unexpected server-side failure *)
   | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound) *)
-  | Unavailable           (** A store this build cannot read (RFC-0444: the goal store). The
+  | Unavailable           (** A store this build cannot read (the goal store). The
                               envelope names reason, field, file, mirror and reset step. *)
 
 let error_code_to_string = function

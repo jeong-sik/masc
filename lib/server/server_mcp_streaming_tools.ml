@@ -1,7 +1,7 @@
 (** Server_mcp_streaming_tools — auto-upgrade dispatch registry for
     POST /mcp [tools/call] requests.
 
-    RFC-0100 PR-3: a [POST /mcp] [tools/call] request promotes to SSE
+    A [POST /mcp] [tools/call] request promotes to SSE
     framing (same chunked connection, [content-type: text/event-stream])
     only when the named tool appears in this registry. Tools outside the
     registry receive the chunked-JSON shape introduced by RFC-0100 PR-2.
@@ -17,7 +17,7 @@
     Removing a tool name flips its POST response from SSE framing to
     chunked JSON. JSON-RPC body and headers are identical; only the
     transfer framing differs. A client that already accepts chunked JSON
-    (the default per RFC-0100 PR-2) is unaffected. *)
+    (the default) is unaffected. *)
 
 let streaming_capable_tools =
   [ (* Workspace surface — long-poll messaging and status, currently the

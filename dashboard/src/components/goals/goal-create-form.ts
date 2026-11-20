@@ -163,7 +163,7 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
     ?? (submitted?.kind === 'measure_label' || submitted?.kind === 'measure_total' || submitted?.kind === 'measure_target'
       ? submitted : null)
   const measureMessage = goalCreateErrorMessage(measureError)
-  // RFC-0444 §2.2: every Goal write is refused while the store cannot be read,
+  // Every Goal write is refused while the store cannot be read,
   // so the form does not offer a submit that the server would reject.
   // Only the standalone form falls back to the shared observation. A Work
   // source explicitly says whether its own bound observation is unavailable.

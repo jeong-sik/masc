@@ -67,7 +67,3 @@ let reconcile_replacement ~config ~reserved ~original ~request =
 let observe_destination ~config ~reserved destination =
   let+ _,current=Submit.destination_relation ~config ~reserved ~label:"history" destination in
   current
-
-let observe_relation ~config ~reserved destination =
-  let+ relation,_=Submit.destination_relation ~config ~reserved ~label:"history" destination in
-  relation

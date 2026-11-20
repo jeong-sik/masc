@@ -48,8 +48,7 @@ let fields expected = function
   | _ -> Error "Original gate record has unknown, duplicate or missing fields"
 let value name fields = List.assoc name fields
 (* A gate request names its parent execution by ID and request digest; the
-   parent's body is read from the parent record, never copied here
-   (RFC-librarian-history-settles-finished-originals 3.4). *)
+   parent's body is read from the parent record, never copied here. *)
 let request_version = 3
 let request_fields = ["version";"kind";"request_id";"owner";"execution_id";"execution_digest";
   "proposal";"authority";"guidance";"predecessor"]

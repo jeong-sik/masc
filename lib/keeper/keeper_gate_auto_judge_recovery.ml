@@ -67,50 +67,29 @@ let recovered_work_for_base_path ~base_path =
     |> Result.map_error (fun reason ->
       ({ path = base_path; reason } : Keeper_approval_queue_result.storage_error))
   in
-  (* Boot recovery admits owners by their EFFECTIVE mode, mirroring
-     [drain_auto_judges]: a keeper override held in auto_judge above a
-     manual/always_allow workspace must be recovered too, or restart —
-     the only escape from a stalled owner — recovers nothing for it. *)
-  let workspace_readable =
-    match Keeper_gate_mode.read ~base_path with
-    | Ok (_ : Keeper_gate_mode.t) -> true
-    | Error detail ->
-      Log.Keeper.error
-        "Auto Judge recovery unavailable workspace=%s: %s"
-        base_path
-        detail;
-      false
-  in
-  if not workspace_readable
-  then Ok []
-  else
+  (* Boot recovery mirrors [drain_auto_judges]: every pending entry of this
+     workspace is decided under the workspace mode, read once. *)
+  match Keeper_gate_mode.read ~base_path with
+  | Error detail ->
+    Log.Keeper.error
+      "Auto Judge recovery unavailable workspace=%s: %s"
+      base_path
+      detail;
+    Ok []
+  | Ok mode ->
     Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
     |> Result.map (fun entries ->
     let entries = List.map reclaim_orphaned_start_reservation entries in
     let owners =
-      List.fold_left
-        (fun owners (entry : Keeper_approval_queue_rules_types.pending_approval) ->
-           Auto_judge_owner_set.add (auto_judge_owner entry) owners)
+      match mode with
+      | Keeper_gate_mode.Auto_judge ->
+        List.fold_left
+          (fun owners (entry : Keeper_approval_queue_rules_types.pending_approval) ->
+             Auto_judge_owner_set.add (auto_judge_owner entry) owners)
+          Auto_judge_owner_set.empty
+          entries
+      | Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow ->
         Auto_judge_owner_set.empty
-        entries
-    in
-    let owners =
-      Auto_judge_owner_set.filter
-        (fun (owner_base_path, keeper_name) ->
-           match
-             Keeper_gate_mode.resolve ~base_path:owner_base_path ~keeper_name
-           with
-           | Ok Keeper_gate_mode.Auto_judge -> true
-           | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
-             false
-           | Error detail ->
-             Log.Keeper.error
-               ~keeper_name
-               "Auto Judge recovery owner mode unresolved workspace=%s: %s"
-               owner_base_path
-               detail;
-             false)
-        owners
     in
     let recovered_work_for_entry
           (entry : Keeper_approval_queue_rules_types.pending_approval)
@@ -230,16 +209,11 @@ and retry_blocked_auto_judge_typed
     canonical_base_path base_path
     |> Result.map_error (fun detail -> Retry_mode_unreadable detail)
   in
-  (* Same admission rule as [drain_auto_judges] (#31321): the entry's owner
-     is judged by its EFFECTIVE mode, not the workspace mode alone. The old
-     workspace-mode short-circuit refused this operator escape hatch for a
-     keeper pinned to auto_judge under an always_allow or manual workspace —
-     the exact stalled-owner configuration the retry exists for. The
-     workspace read stays first so an unreadable mode store remains a loud
-     error. *)
+  (* Same admission rule as [drain_auto_judges]: the entry is decided under
+     the mode of the workspace that holds it. *)
   match Keeper_gate_mode.read ~base_path with
   | Error detail -> Error (Retry_mode_unreadable detail)
-  | Ok _workspace_mode ->
+  | Ok workspace_mode ->
     (match
        Keeper_approval_queue.get_pending_entry_for_workspace
          ~base_path
@@ -248,14 +222,10 @@ and retry_blocked_auto_judge_typed
      | Error error -> Error (Retry_row_lookup_failed error)
      | Ok None -> Error (Retry_row_missing approval_id)
      | Ok (Some entry) ->
-       (match
-          let owner_base_path, keeper_name = auto_judge_owner entry in
-          Keeper_gate_mode.resolve ~base_path:owner_base_path ~keeper_name
-        with
-        | Error detail -> Error (Retry_mode_unreadable detail)
-        | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
+       (match workspace_mode with
+        | Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow ->
           Error (Retry_not_auto_judge entry.keeper_name)
-        | Ok Keeper_gate_mode.Auto_judge ->
+        | Keeper_gate_mode.Auto_judge ->
        (match
           retry_auto_judge_entry
             ~requested_by
@@ -448,12 +418,9 @@ type operator_recovery_report =
 
 let request_operator_auto_judge_recovery ~base_path =
   let* base_path = canonical_base_path base_path in
-  (* [drain_auto_judges] already admits owners by their EFFECTIVE mode
-     (#31321), so refusing here on the workspace mode alone re-closed the
-     escape hatch for a keeper pinned to auto_judge under an always_allow
-     or manual workspace. The workspace read stays as the loud
-     unreadable-store check; a workspace where no owner resolves to
-     auto_judge simply drains zero entries, and the report says so. *)
+  (* The workspace read is the loud unreadable-store check; a workspace
+     that is not in auto_judge drains zero entries, and the report says
+     so. *)
   match Keeper_gate_mode.read ~base_path with
   | Error detail -> Error detail
   | Ok _workspace_mode ->

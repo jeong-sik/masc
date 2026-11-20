@@ -4,8 +4,7 @@
 
 `masc_wiki_lint` reads every page of the wiki and reports what is wrong with
 it. It is read-only: it writes no page, no `index.md`, no `log.md`, takes no
-lock and calls no model. The design is
-[`docs/rfc/RFC-wiki-lint-and-page-contracts.md`](../rfc/RFC-wiki-lint-and-page-contracts.md).
+lock and calls no model.
 
 ## Findings
 

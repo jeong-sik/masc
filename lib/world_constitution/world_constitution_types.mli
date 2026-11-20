@@ -1,4 +1,4 @@
-(** World constitution articles (RFC-0442).
+(** World constitution articles.
 
     An article is one norm a world wrote down for itself. It is text, who wrote
     it, and when. Proposing, arguing and agreeing happen on the board and in
@@ -83,7 +83,7 @@ type entry =
       reason : string option;
     }
       (** One line retires a bundle and names its replacement, so the ledger
-          keeps which norm replaced which (RFC-0504). *)
+          keeps which norm replaced which. *)
   | Removed of {
       id : Article_id.t;
       by : string;

@@ -140,7 +140,7 @@ type artifact_payload =
 type artifact_read_result = (artifact_payload, evidence_read_failure) result
 (** One artifact's read: text as [(content, bytes, truncated)] — [bytes] may
     exceed the content length when the read was capped — or binary as raw
-    bytes with their hash and format (RFC-0436 §4.1). A reader that cannot
+    bytes with their hash and format. A reader that cannot
     answer returns the typed failure instead. *)
 
 type utf8_scan =
@@ -151,7 +151,7 @@ type utf8_scan =
 val scan_utf8 : string -> utf8_scan
 (** The text line every artifact read answers under. Exposed so an injected
     reader classifies its bytes with the same scan the store applies, rather
-    than a second opinion ({#33816}, RFC-0436 §4.1). *)
+    than a second opinion ({#33816}). *)
 
 val payload_of_complete_bytes : path:string -> string -> artifact_read_result
 (** Classify a fully read artifact. Known binary formats are adopted whole
@@ -161,7 +161,7 @@ val payload_of_complete_bytes : path:string -> string -> artifact_read_result
 
 val image_media_type_of_binary_format : string -> string option
 (** Whether a binary artifact's [format] is an image a runtime accepts as
-    attached input, and as which media type (RFC-0436 §4.3). The format
+    attached input, and as which media type. The format
     taxonomy stays with the store that produced it. *)
 
 val persist_binary_body :
@@ -171,7 +171,7 @@ val persist_binary_body :
   string ->
   string option
 (** File a binary artifact's bytes as the evidence body and answer the
-    masc-dir-relative path recorded on the item (RFC-0436 §4.2). [None] when
+    masc-dir-relative path recorded on the item. [None] when
     no request id was given — the hash still stands, the body is simply not
     filed. Exposed so a test builds a filed item through the same filing the
     capture path uses. *)
@@ -207,7 +207,7 @@ val read_binary_body_base64 :
     regular descriptor and stable identity; complete bytes are checked against
     the submitted size and SHA-256 before encoding. [Error] names why it was not delivered — see
     {!read_binary_error}; in every case the judge then rests on the
-    reference-and-hash line in the prompt (RFC-0436 §4.4/§4.5). *)
+    reference-and-hash line in the prompt. *)
 
 val read_binary_body_for_operator_base64 :
   base_path:string -> submitted_evidence_item -> (string, read_binary_error) result

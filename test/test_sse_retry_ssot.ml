@@ -1,4 +1,4 @@
-(* RFC-0089 — SSE reconnect-interval SSOT. The presence-stream and
+(* SSE reconnect-interval SSOT. The presence-stream and
    activity-stream primers build their "retry:" directive via
    [sse_comment_with_retry], sourced from [sse_retry_ms], instead of inlining
    "retry: 3000" (which would silently diverge if the interval were tuned). *)

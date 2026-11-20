@@ -319,6 +319,27 @@ val load : base_path:string -> keeper_name:string -> (t option, read_error) resu
     session without the host's last turn for it is such an error, and so is a
     binding of another client that records one. *)
 
+val load_for_runtime :
+  base_path:string ->
+  keeper_name:string ->
+  client_kind:client_kind ->
+  runtime_id:string ->
+  (t option, read_error) result
+(** Load the durable session state relevant to [(client_kind, runtime_id)].
+    Returns the primary binding if it belongs to this runtime or holds an
+    incomplete claim ([Start], [Active], [Turn_inflight]) that must be
+    reconciled or rejected first; otherwise reads the per-runtime retained
+    binding preserved across switches to other official-client runtimes or
+    [Agent_core]. Pure read-only. *)
+
+val retained_bindings : base_path:string -> keeper_name:string -> (t list, read_error) result
+(** All retained per-runtime bindings currently preserved for [keeper_name],
+    sorted deterministically by client kind and runtime identity. Reads only. *)
+
+val bridge_cursors_path : base_path:string -> keeper_name:string -> (string, string) result
+(** Path of the per-keeper causal bridge cursor file inside the official-client
+    runtime state directory. *)
+
 type stored_binding =
   { keeper_name : string
   ; path : string
@@ -467,7 +488,7 @@ val reconcile_context : claim_plan -> expected:t option -> snapshot_sha256:strin
     [Canonical_source_guard]. A Gate continuation, bound to its original
     session, does not use this: it refuses with {!validate_unchanged_context}. *)
 
-(** The vendor sessions one transition left unnamed (RFC-0501 §2.1).
+(** The vendor sessions one transition left unnamed.
     [Same_client] ids belong to the client and runtime that wrote [after], so
     that runtime can delete them. [Other_client] names the client and runtime
     the ids belong to; the runtime writing [after] cannot reach them. *)
@@ -673,6 +694,19 @@ val reconcile_process_restart :
   (t, process_restart_error) result
 (** Convert an incomplete claim owned by a different process epoch into an
     explicit ambiguous recovery. Same-epoch claims remain occupied. *)
+
+val load_reconciled_for_runtime :
+  base_path:string ->
+  keeper_name:string ->
+  client_kind:client_kind ->
+  runtime_id:string ->
+  current_owner_epoch:string ->
+  required_at:float ->
+  (t option, Agent_core.Error.t) result
+(** Load the session state for [(client_kind, runtime_id)], reconciling any
+    incomplete claim left by an earlier process epoch first. If a reconciled
+    crashed claim belonged to a different runtime, reloads the target runtime's
+    retained binding after marking the crashed runtime for recovery. *)
 
 val resolve_recovery :
   base_path:string ->

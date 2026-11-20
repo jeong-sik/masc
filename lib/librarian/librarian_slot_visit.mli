@@ -4,10 +4,8 @@
     {!classify} reads each type a visit carries, from these four down to the
     Agent-Core and client errors, in one match per type without a wildcard. A
     constructor added to any of them stops the build until it has an outcome.
-    The table of
-    [docs/evidence/research/2026-11-18-librarian-rebuild-design/slot-outcome/]
-    names one outcome per constructor, and its test runs every row through
-    {!classify}. Text a value carries (a message, a stop reason sent as a
+    The table of [test/fixtures/librarian_slot_outcome/] names one outcome
+    per constructor, and its test runs every row through {!classify}. Text a value carries (a message, a stop reason sent as a
     string, a client's detail) is not read.
 
     A CLI slot is run with {!Keeper_lane_cli_oneshot.run} and its JSON read

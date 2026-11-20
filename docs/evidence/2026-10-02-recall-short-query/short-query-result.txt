@@ -1,1 +1,0 @@
-PASS 20 actual query predicate assertions

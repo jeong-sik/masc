@@ -31,8 +31,7 @@ type prepared_flow =
   ; transport : prepared_transport
   ; cli_slots : string list
         (* Official-client runtime ids the lane walks after every catalog
-           slot is exhausted, carried from the resolved lane declaration
-           (RFC cli-runtimes-as-lane-slots). *)
+           slot is exhausted, carried from the resolved lane declaration. *)
   ; system_prompt : string
   ; context_bundle : Yojson.Safe.t
         (* Kept beside the frozen HTTP attempt because a cli one-shot has no

@@ -1086,7 +1086,7 @@ let test_scoped_schedules_keep_participant_identity () =
     [other; requested]
     U.(cross_wake |> member "detail" |> member "keeper_participants" |> to_list |> List.map to_string);
   let masc_dir = Workspace_utils.masc_dir config in
-  (* RFC-0234: a corrupt primary with a parseable .last-good mirror loads from
+  (* A corrupt primary with a parseable .last-good mirror loads from
      the mirror on purpose (Loaded + warning, not Corrupt). To pin the
      read_error surface both copies must be unreadable. *)
   save_text (Filename.concat masc_dir "schedules.json") "{broken";

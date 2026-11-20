@@ -1,6 +1,6 @@
 open Alcotest
 
-(* RFC-0204 §3.4. A cache compute is a read only while a request waits for
+(* A cache compute is a read only while a request waits for
    it. The lane a submission carries is the one [Pool_wait] records it under,
    counted when a worker enters the job. *)
 

@@ -7,7 +7,7 @@ import { toKeeperPhase } from '../keeper-store-normalize'
 
 
 // ================================================================
-// Composite Lifecycle (RFC-0003)
+// Composite Lifecycle
 // ================================================================
 //
 // Compound graph: five parent clusters (one per sub-FSM) each containing
@@ -130,7 +130,7 @@ function clusterNodes(
 }
 
 export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec {
-  // RFC-0135 PR-11: phase tone derivation moved to SSOT
+  // Phase tone derivation moved to SSOT
   // (`compositePhaseTone` in `lib/keeper-operational-state.ts`). Same 6
   // warn-phase literals were copy-pasted between this builder and
   // `fsm-hub-invariant-analysis.ts` (N-of-M anti-pattern). Unknown wire

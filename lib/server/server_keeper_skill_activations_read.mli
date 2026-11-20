@@ -1,4 +1,4 @@
-(** One Keeper's skill activation ledger, read on its own (RFC-0483).
+(** One Keeper's skill activation ledger, read on its own.
 
     Two answers come from the same ledger. [GET
     /api/v1/keepers/skill-activations?keeper=<name>] answers with

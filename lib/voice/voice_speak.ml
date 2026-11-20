@@ -657,7 +657,7 @@ let attempt_tts_endpoint
     Ordered endpoint chain from voice_config.json. Fails explicitly when no
     real backend accepts the request.
 
-    RFC-0235 P3: when the winning endpoint is [Voice_mcp] and a separate
+    When the winning endpoint is [Voice_mcp] and a separate
     HTTP TTS endpoint is also configured, synthesize a parallel browser
     clip so the dashboard can play the utterance. The MCP server still
     owns local playback; the HTTP clip is dashboard-only. *)

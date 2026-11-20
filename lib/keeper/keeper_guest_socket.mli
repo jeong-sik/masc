@@ -10,7 +10,7 @@
 
     Nothing is written before a hello is accepted. A connection made before
     the agent listens may end at once or stay silent (one stayed silent for 12
-    minutes; docs/evidence/2026-11-03-microvm-request-transport), so a
+    minutes on 2026-11-03), so a
     connection that ends or gives no hello within {!hello_wait_sec} is closed
     and a new one is made, until the connect budget runs out. Giving up on a
     connection before the request was written cannot have started anything.

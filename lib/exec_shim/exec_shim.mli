@@ -359,7 +359,7 @@ val payload_env :
     [env_allowlist].  Exposed so the composition the dispatcher runs is
     testable, like {!jail_for_request}. *)
 
-(** {1 The box (RFC-0422)} *)
+(** {1 The box} *)
 
 val observe_supported : unit -> bool
 (** Whether this kernel lets the shim box a payload: Landlock ABI >= 1 and

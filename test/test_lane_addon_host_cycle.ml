@@ -459,7 +459,7 @@ let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
       Eio.Promise.resolve release ();
       ignore (Eio.Promise.await detached |> unwrap)))
 
-(* RFC host-cycle-runs-exact-requests-side-by-side 3.3 and 3.4: an installation
+(* An installation
    that declares a count of two runs two exact calls together, and retirement
    cancels both. *)
 let side_by_side_declaration = "max_exact_in_flight=2\n" ^ declaration

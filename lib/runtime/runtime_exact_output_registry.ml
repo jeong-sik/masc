@@ -678,7 +678,7 @@ let resolve_lane registry ~lane_id =
   | Some lane ->
     (* A lane is empty only when it has NOTHING to run: cli fallbacks keep a
        lane alive even when every catalog slot was dropped (and a cli-only
-       judge lane is a supported shape — RFC cli-runtimes-as-lane-slots). *)
+       judge lane is a supported shape). *)
     if lane.slots = [] && lane.cli_slots = []
     then Error (No_admitted_lane_slots { lane_id })
     else

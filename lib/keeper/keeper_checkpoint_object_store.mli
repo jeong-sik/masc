@@ -1,5 +1,5 @@
-(** The message objects and turn bundles a checkpoint head names
-    (RFC-0476 §3.2), one file each under [<session_dir>/objects/]. *)
+(** The message objects and turn bundles a checkpoint head names,
+    one file each under [<session_dir>/objects/]. *)
 
 val dirname : string
 

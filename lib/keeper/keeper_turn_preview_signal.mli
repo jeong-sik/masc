@@ -1,5 +1,4 @@
-(** Says that the preview a Keeper's turns answer shows was written
-    (RFC-0481 §3.5).
+(** Says that the preview a Keeper's turns answer shows was written.
 
     {!Keeper_turn_preview} calls {!changed} after a write to the writer the
     turns answer reads for that Keeper: a new writer installed by [reset], a

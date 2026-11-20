@@ -125,20 +125,10 @@ type block =
     turn's first request carries the turn context and is still the largest
     request of a turn that calls no tool. A request with the turn context
     opens a turn. A front that moves opens another window: the counts start
-    over with it, and [largest] stays, since how much one turn grows does not
-    depend on where the window opens. A restart starts all of it over. *)
-type turn_growth =
-  { ended_at : int option
-        (** The count of the last request before the current turn, under
-            this window; [None] for the turn the window opened in. *)
-  ; peak : int option
-        (** The largest count among the current turn's requests; [None] once
-            one of them went uncounted. *)
-  ; largest : int option
-        (** The largest [peak - ended_at] of a turn that finished since the
-            ledger started, under any of its windows. *)
-  ; last_input : int option  (** The count of the last request. *)
-  }
+    over with it, and the largest growth stays, since how much one turn grows
+    does not depend on where the window opens. A restart starts all of it
+    over. Only {!observe} changes it and only {!next_turn_peak} reads it. *)
+type turn_growth
 
 type t =
   { prefix_digest : string

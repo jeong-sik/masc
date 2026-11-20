@@ -7,7 +7,7 @@
       first, driven by the generated board registry, exposed so a test
       can pin that every declared field is bound.
 
-    RFC-0062 Phase 4c-2: {!dispatch} now returns [Tool_result.result option]
+    {!dispatch} now returns [Tool_result.result option]
     instead of [(bool * string) option].
 
     Internal: helpers (activity emission, JSON field upsert,

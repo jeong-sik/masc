@@ -166,7 +166,7 @@ Goal별 Space 자동 생성·저장·재개 관리와는 구분한다. `--ego-sp
 
 - 가짜 `ego-browser`: 세션 루프의 소켓에 붙어, 받은 스크립트 맨 위의 표지 주석(`// masc-ego: tabs.list` 등)을 읽고 정해진 답을 내는 실행 파일. worker 의 연결·탭 번호·실패 분류와, 프로세스 하나가 명령을 모두 실행하는지를 이걸로 본다.
 - 표 검사: `test_browser_lane` 의 연결 방식 표 검사에 `ego` 열을 더한다.
-- 실제 ego: 샌드박스 밖에서 example.com 과 고정 fixture 페이지로 목록·읽기·클릭·이동·닫기를 돈다. 결과는 `docs/evidence/` 에 둔다.
+- 실제 ego: 샌드박스 밖에서 example.com 과 고정 fixture 페이지로 목록·읽기·클릭·이동·닫기를 돈다. 결과는 PR 본문에 적는다.
 - live: 운영자 승인 뒤 Keeper 가 BrowserTabs 로 ego 연결을 보고 Slack 채널 하나를 읽는다.
 
 ## 9. 순서
@@ -194,15 +194,14 @@ Goal별 Space 자동 생성·저장·재개 관리와는 구분한다. `--ego-sp
   MASC receipts, artifact publication and process/file lifetime.
 
 The persistent SDK-process adapter was checked on Ego 0.6.0.20 and rechecked
-on installed [0.6.1.11](../evidence/ego-native-session-gap/0.6.1.11/).
+on installed 0.6.1.11.
 The second SDK process made no progress past its before-info marker while the
 original process held the confirm; it returned after the original dismissed
 it. This supports retaining the serial session, without proving the SDK's
 internal blocking cause or relabeling earlier Keeper runs as new-version
 execution. The complete usage guides were byte-identical: the new guide
 exposed no additional Page method replacing a MASC adapter. Separately, the
-[.20 download observation](../evidence/ego-native-session-gap/#download-lifetime-is-not-inferred-from-the-guide)
-does not support claiming every SDK round exit deletes its download temp files.
+.20 download observation does not support claiming every SDK round exit deletes its download temp files.
 
 ### Explicit shared Goal Space binding
 

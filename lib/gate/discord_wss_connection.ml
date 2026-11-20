@@ -61,7 +61,7 @@ type conn =
          [close] tears the connection down. The gateway runs its reader through
          this so the reader's lifetime is the connection's, not the gateway's:
          a per-connection close cancels the reader (its blocking read raises
-         [Cancelled]) instead of leaking it on the outer switch (RFC-0287 P0). *)
+         [Cancelled]) instead of leaking it on the outer switch. *)
   }
 
 (* RFC 6455 §7.4: a Close frame with no body maps to status code 1005

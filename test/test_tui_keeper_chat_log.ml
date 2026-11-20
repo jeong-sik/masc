@@ -1,4 +1,4 @@
-(* RFC-0412 stage 3a — the per-operation event log behind the keeper chat
+(* The per-operation event log behind the keeper chat
    pane. Seq dedup, the attempt counter, the committed flag and revision, the
    v2 page decoder, and the golden case: a journal decoded through
    [delta_of_journaled] equals the same journal projected by the server to

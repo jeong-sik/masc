@@ -14,7 +14,7 @@ let string_opt_json = function
   | Some value when String.trim value <> "" -> `String value
   | _ -> `Null
 
-(* RFC-0154: derive (raw_error, error_class) from the optional [exn] /
+(* Derive (raw_error, error_class) from the optional [exn] /
    [error] inputs.  When both are present, [error] wins for the wire
    value (caller's explicit string is authoritative) while [exn] is
    still used for the typed errno match.  When only [error] is given,

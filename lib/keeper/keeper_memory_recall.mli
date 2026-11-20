@@ -75,14 +75,12 @@ val read_file_tail_lines_result :
     [Error class] surfaces an IO/parse failure classified through the
     bounded {!Keeper_memory_recall_exn_class.t} closed sum so callers
     can branch on a typed value instead of inspecting a stringified
-    exception (RFC-0149 §3.1).
+    exception.
 
     Use this entry point when the caller can produce a meaningful
     operator-visible signal on [Error] (e.g. propagate
     {b Memory_unavailable} up the chain instead of silently rendering
-    an empty summary).
-
-    @since RFC-0149 Phase 1 *)
+    an empty summary). *)
 
 val record_memory_recall_read_error :
   site:string -> string -> Keeper_memory_recall_exn_class.t -> unit

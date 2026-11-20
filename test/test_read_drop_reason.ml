@@ -13,7 +13,7 @@ let canonical : (string * R.t) list =
   ; (* RFC-0134 PR-1. *)
     "Concurrent_removal", R.Concurrent_removal
   ; "Transient_fd_pressure", R.Transient_fd_pressure
-  ; (* RFC-0134, same not-a-loss family: the final line of an append-only
+  ; (* Same not-a-loss family: the final line of an append-only
        file caught mid-write by a tail reader. *)
     "Tail_partial_write", R.Tail_partial_write
   ]

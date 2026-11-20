@@ -154,7 +154,7 @@ export async function fetchFusionRuns(
   return parseFusionRunsResponse(raw)
 }
 
-// ── Typed fusion config (RFC-0306 §3.1, RFC fusion-seat-routes §2.5) ────────
+// ── Typed fusion config ─────────────────────────────────────────────────────
 //
 // GET /api/v1/runtime/config/fusion serves the *parsed* [fusion] policy, which
 // is the same value the tool executes against, together with the revision of
@@ -189,7 +189,7 @@ export interface FusionPresetConfigView {
   readonly judgeSystemPrompt: string
   readonly judgeMaxOutputTokens: number | null
   readonly judgeTimeoutS: number | null
-  /** First-pass judges (RFC-0283). Two or more make the judge-of-judges
+  /** First-pass judges. Two or more make the judge-of-judges
       topologies runnable; the `judge` above is then the meta reducer. */
   readonly judges: readonly FusionJudgeSpecView[]
   readonly minAnswered: number

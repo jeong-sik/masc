@@ -22,7 +22,7 @@ type drop_reason =
           is a dangling reference (an operator typo, fatal at
           {!Runtime.load_list}), while a disabled binding or provider is a choice the
           operator wrote down and [Execution_unbuildable] is an adapter
-          capability limit — both non-fatal, per RFC-0206 §2.1. *)
+          capability limit — both non-fatal. *)
 
 val string_of_drop_reason : drop_reason -> string
 (** Operator-facing rendering. Single source for the wording, so a reason read

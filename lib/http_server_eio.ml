@@ -510,7 +510,7 @@ module Router = struct
      plain HTTP routes never need it; WebSocket-upgrade routes ([ws_get])
      require it to hand the post-101 socket to the ws-direct runtime.
      A discovery GET still runs when the transport carries no capability.
-     [dispatch] reads it from the handle. See RFC-0281. *)
+     [dispatch] reads it from the handle. *)
   type upgrade = Http_reqd.upgrade
 
   type ws_handler =
@@ -520,8 +520,7 @@ module Router = struct
      case, and [Serving]) or upgrades the connection to WebSocket ([Ws]).
      Encoding this as a typed variant keeps the route table the single
      source of truth for which paths upgrade and for which domain a handler
-     runs on, instead of a path-string match in the connection handler.
-     RFC-0281 S3.3, RFC http-transport-runs-on-its-own-domain §3.2. *)
+     runs on, instead of a path-string match in the connection handler. *)
   type route_target =
     | Owner of request_handler
     | Serving of request_handler

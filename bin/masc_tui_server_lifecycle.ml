@@ -248,3 +248,28 @@ let start ~masc_bin ~base_path ~host ~port ~env =
 
 let stop t ~grace_sec =
   Process_eio_detached.tree_kill ~pgid:t.pgid ~signal:Sys.sigterm ~grace_sec
+
+type settled_start = {
+  server : owned_server;
+  host : string;
+  port : int;
+  outcome : exit_report health_outcome;
+}
+
+(* Newest first; [take_settled] turns it round. The waiter is a fiber of the
+   loop's own switch, but nothing here relies on that. *)
+type settled_starts = settled_start list Atomic.t
+
+let create_settled_starts () = Atomic.make []
+
+let rec keep starts settled =
+  let held = Atomic.get starts in
+  if not (Atomic.compare_and_set starts held (settled :: held)) then keep starts settled
+
+let await_start starts server ~host ~port ~health_ok ~attempts ~sleep =
+  let outcome =
+    wait_healthy ~health_ok ~child_exit:(fun () -> exit_report server) ~attempts ~sleep in
+  keep starts { server; host; port; outcome };
+  Masc_tui_wake.(ring loop Server_start_settled)
+
+let take_settled starts = List.rev (Atomic.exchange starts [])

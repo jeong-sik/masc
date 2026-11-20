@@ -26,7 +26,7 @@ let channel_label ~ko ~channel_id ~channel_name =
         (Terminal_text.single_line channel_id)
   | None ->
       Terminal_text.single_line channel_id
-      ^ if ko then " (이름 모름)" else " (name unknown)"
+      ^ if ko then " (이름 보고 안 됨)" else " (name not reported)"
 
 (* Every sentence that names a target below is English, so the label inside
    it is English too. *)

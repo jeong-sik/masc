@@ -130,7 +130,7 @@ val run :
     server shutdown), never by drain — a caller that returns normally
     from [Switch.run] with [run] forked will hang. *)
 
-(** {1 Connection state (RFC-0223 P2)} *)
+(** {1 Connection state} *)
 
 val connection_state : unit -> Discord_gateway_state.connection_state
 (** Last connection state published by the {!run} loop's state machine.

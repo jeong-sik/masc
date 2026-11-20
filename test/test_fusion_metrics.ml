@@ -1,4 +1,4 @@
-(* RFC-0284 — Fusion deliberation OTel metrics wiring. *)
+(* Fusion deliberation OTel metrics wiring. *)
 
 open Alcotest
 open Masc

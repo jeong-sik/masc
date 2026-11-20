@@ -337,6 +337,10 @@ streaming = false
     (match Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"demote-proof" record with
      | Ok () -> ()
      | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
+    (* The turn start is read from the turn log; the Librarian still reads
+       the boundary line above. *)
+    Masc_test_deps.start_turn_log ~keepers_dir ~keeper_name:"demote-proof" ~trace_id
+      ~closed_messages:(List.length initial_messages);
     let last_atom_digest =
       match Runtime_model_input_tail_window.atom_opening_digest initial_messages 0 with
       | Some digest -> digest

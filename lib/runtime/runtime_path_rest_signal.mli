@@ -1,5 +1,4 @@
-(** Says that a record a provider rest or a walk order reads was written
-    (RFC-0481 §3.2).
+(** Says that a record a provider rest or a walk order reads was written.
 
     {!Runtime_candidate_backpressure} calls {!recorded} after
     [note_rate_limit], [note_failed_attempt] and [note_candidate_success];

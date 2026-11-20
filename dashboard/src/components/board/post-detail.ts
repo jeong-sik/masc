@@ -620,7 +620,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const postVoteAria = `게시글 점수 ${post.votes}`
   const auditLabel = postVisibilityAuditLabel(post)
 
-  // RFC-0233 §7: a board post minted from a keeper turn carries origin.turn_ref.
+  // A board post minted from a keeper turn carries origin.turn_ref.
   // When present, surface a "턴" affordance that opens the originating turn in
   // the shared turn inspector (which self-fetches the keeper's turn records by
   // keeperName). Resolve the author keeper the same way navigateToAuthor does.

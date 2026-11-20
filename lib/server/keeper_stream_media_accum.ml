@@ -1,4 +1,4 @@
-(* RFC-0301 item 6 — see keeper_stream_media_accum.mli. The live SSE bridge and
+(* See keeper_stream_media_accum.mli. The live SSE bridge and
    this turn-local durable collector retain their separate delivery policies. *)
 
 module State = Keeper_stream_media_state

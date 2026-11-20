@@ -22,7 +22,7 @@ import { FusionJudgesStrip, FusionSurface } from './fusion-surface'
 // Mock only the refresh side effects; keep the real signals (fusionBoardLoading /
 // fusionRunsLoading) via ...actual so the component reads live state. The manual
 // Refresh button must fan out to BOTH refreshers — the run-status panel is a
-// second data source the board-sink refresh cannot reach (RFC-0266 Phase 4).
+// second data source the board-sink refresh cannot reach.
 vi.mock('../../store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../store')>()
   return { ...actual, refreshFusionBoard: vi.fn(), refreshFusionRuns: vi.fn(), loadFusionRunEvidence: vi.fn() }

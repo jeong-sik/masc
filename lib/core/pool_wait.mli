@@ -1,5 +1,5 @@
 (** How long pool submissions wait for a worker, and how long they then run,
-    by {!Pool_lane.lane}. RFC-0204 §3.6.
+    by {!Pool_lane.lane}.
 
     Counters are cumulative since the process started; two reads give a rate.
     Recording measures only. Nothing reads these values to decide where or
@@ -7,7 +7,7 @@
 
 val in_flight : Pool_lane.lane -> int
 (** The weight, in millionths as Eio's executor counts it, of the lane's jobs
-    that entered a worker and have not returned. RFC-0474 L4a. *)
+    that entered a worker and have not returned. *)
 
 val enter : Pool_lane.lane -> weight:float -> unit
 (** A job of [weight] entered a worker. *)
@@ -19,7 +19,7 @@ val record_wait : Pool_lane.lane -> name:string -> in_flight:int -> Mtime.span -
 (** From the submit call to the worker entering the job; [in_flight] is
     {!in_flight} read at the submit call. The wait is also counted by the
     workers' worth of weight that was in flight: 0, 1, 2, and 3 or more, and
-    under [name], the work's name (RFC-0474 L4c). *)
+    under [name], the work's name. *)
 
 val record_run : Pool_lane.lane -> name:string -> weight:float -> Mtime.span -> unit
 (** From the worker entering the job to the job returning or raising, also

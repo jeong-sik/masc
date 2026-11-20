@@ -1,4 +1,4 @@
-(* RFC-0020 Phase 1 PR-3: typed keeper cycle channel.
+(* Typed keeper cycle channel.
 
    The keeper cycle channel ("is this turn reactive or scheduled-
    autonomous") is now carried by the closed [keeper_cycle_channel]

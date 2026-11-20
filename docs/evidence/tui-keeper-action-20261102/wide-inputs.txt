@@ -1,9 +1,0 @@
-colon
-go_keepers
-enter
-enter
-ctrl_b
-snapshot keeper-action-v3-wide
-escape
-q
-q

@@ -19,7 +19,7 @@ val wire_field_first_seen : string
 val wire_field_last_seen : string
 
 (** On a librarian claim: the short id of the dropped memory this claim
-    continues (RFC-0418). *)
+    continues. *)
 val wire_field_supersedes : string
 val wire_field_absorbs : string
 
@@ -168,7 +168,7 @@ type dropped_statement =
   ; reason : string
   }
 
-(** A current memory a new claim now says (RFC-0456 §4.2): [absorbed] leaves
+(** A current memory a new claim now says: [absorbed] leaves
     the snapshot and its row goes to {!Keeper_memory_absorbed}; [into] is the
     new claim's identity. No reason: the new claim is the reason. *)
 type absorbed_statement =
@@ -332,7 +332,7 @@ val origin_kind_to_string : origin_kind -> string
 (** A single semantic claim extracted from conversation history.
     [first_seen] insertion (authoritative, preserved across re-upsert);
     [last_seen] most recent re-observation of the same claim bytes. A
-    re-observation is not a strength signal (RFC-0418). *)
+    re-observation is not a strength signal. *)
 type fact =
   { claim : string
   ; category : category

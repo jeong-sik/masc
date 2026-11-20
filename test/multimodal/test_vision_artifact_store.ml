@@ -1,5 +1,4 @@
 (* Vision_artifact_store tests — content-addressed durable input store.
-   RFC-keeper-vision-delegation-tool §2.5.
 
    The load-bearing property is round-trip durability: store -> load returns the
    exact bytes. *)

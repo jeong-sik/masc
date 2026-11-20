@@ -1,6 +1,6 @@
 /**
  * LayeredOverlay — framework-agnostic multi-select toggle controller
- * for the IDE editor LAYERS bar (RFC 0020).
+ * for the IDE editor LAYERS bar.
  *
  * Each registered layer can be toggled independently. Layers may
  * declare `mutuallyExclusive: true`, in which case activating that
@@ -13,7 +13,7 @@
  * toggles. Subscribers receive the new active set per change so they
  * can update without reading state from the controller.
  *
- * Out of scope (RFC 0020 §2):
+ * Out of scope:
  *   - Per-overlay rendering. Each overlay's pixels are owned by its
  *     consumer (editor blame strip for `time`, gutter striper for
  *     `parallel`, etc.).
@@ -29,7 +29,7 @@ export interface OverlayLayer {
   readonly description: string
   readonly mutuallyExclusive?: boolean
   /**
-   * RFC-0028 §3 / §10: layers whose visual surfaces collide with this one.
+   * Layers whose visual surfaces collide with this one.
    * Activating this layer drops every active layer in `conflictsWith`, and
    * activating any layer that lists this one in *its* `conflictsWith` drops
    * this one — i.e. the relationship is treated as symmetric at runtime

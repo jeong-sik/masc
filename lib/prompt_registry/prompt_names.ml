@@ -37,7 +37,7 @@ let verification_evidence_posture_usable =
   "verification.evidence_posture.usable"
 ;;
 
-(* RFC-0436: the image-evidence header for a review whose goal blocks carry
+(* The image-evidence header for a review whose goal blocks carry
    binary image artifacts. The lines under it are data (reference + sha256 +
    media type) and are assembled in code; only the header prose lives here. *)
 let verification_image_evidence = "verification.image_evidence"
@@ -602,7 +602,7 @@ let tool_help_entry_examples = "tool_help.entry.examples"
 let tool_help_entry_alternatives = "tool_help.entry.alternatives"
 let tool_help_index_header = "tool_help.index.header"
 
-(* Tool-result guidance (RFC prompts-and-tool-definitions-outside-ocaml §3.11):
+(* Tool-result guidance:
    each closed variant arm maps to exactly one key here; the prose lives in
    the group file, and the execution path only picks the variant and supplies
    the data. *)

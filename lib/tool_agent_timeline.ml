@@ -103,7 +103,7 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
     ]
 
 
-(* RFC-0393: a keeper is written everywhere under its keeper_name. The
+(* A keeper is written everywhere under its keeper_name. The
    only second form is the Activity_graph entity key ("keeper:<name>"),
    which is a kind namespace, not a spelling of the identity. *)
 let identity_matches ~(agent_name : string) (candidate : string) : bool =
@@ -357,7 +357,7 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
        let latency_ms = Safe_ops.json_int_opt "latency_ms" e.payload in
        let model_used = Safe_ops.json_string ~default:"unknown" "model_used" e.payload in
        let work_kind =
-         (* RFC-0182 §3.1 cycle break — codec moved to lib/Turn_mode_codec
+         (* Cycle break — codec moved to lib/Turn_mode_codec
             (was Keeper_unified_metrics.work_kind_of_json in lib/keeper/). *)
          Turn_mode_codec.work_kind_of_json e.payload
          |> Option.value ~default:"unknown"
@@ -605,7 +605,7 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
    [Tool_schemas_agent_timeline], beside every other surface's. *)
 let schemas : Masc_domain.tool_schema list = Tool_schemas_agent_timeline.schemas
 
-(* RFC-0189 PR-1b.13 — typed result. Success carries the [build_timeline]
+(* Typed result. Success carries the [build_timeline]
    [Yojson.Safe.t] envelope as [~data:json] first-class (drops the
    [Yojson.Safe.to_string] round-trip). *)
 

@@ -7,7 +7,7 @@
     schema is closed: a row
     carrying any other field fails to decode.
 
-    Reading (RFC-0444). The store is read through one closed sum,
+    Reading. The store is read through one closed sum,
     {!source}. There is no reader that returns a state or a list on its own:
     a store this build cannot read is {!Unavailable}, never an empty state,
     and the only empty state is {!Uninitialized} (neither goals.json nor its
@@ -157,7 +157,7 @@ val goal_events_path : Workspace_utils.config -> string
 (** [{!Workspace_utils.masc_dir} / "goal_events.jsonl"]: the Goal audit event
     ledger that {!append_audit_event} and {!flush_pending_events} append to. *)
 
-(** {1 Source (RFC-0444 §2.1)} *)
+(** {1 Source} *)
 
 type source =
   | Uninitialized
@@ -212,7 +212,7 @@ and mirror_status = Goal_store_unavailable.mirror_status =
 
 and reset_step = Goal_store_unavailable.reset_step =
   | Repair_field of string  (** Inspect and repair this named location. *)
-  | Reset_goal_store  (** Move the store aside (RFC-0444 §2.6, PR-7). *)
+  | Reset_goal_store  (** Move the store aside. *)
   | Restore_permission  (** [Unreadable EACCES]. *)
   | Inspect_path  (** Inspect file paths, links and mounts before recovery. *)
 
@@ -402,7 +402,7 @@ val upsert_goal_with_events :
     - [due_date] that {!Goal_due.read} cannot read, on a create and on an
       update alike. Nothing is written. [None] leaves the stored due date as
       it is; there is no way to clear one here.
-    - RFC-0387 B1: [measure] and a non-blank [procedure] are both required
+    - [measure] and a non-blank [procedure] are both required
       whenever the upsert creates a new row — including an explicit
       previously-unknown [id]. The create/update split is decided inside the
       write lock on the freshly decoded state, so an undecodable store is

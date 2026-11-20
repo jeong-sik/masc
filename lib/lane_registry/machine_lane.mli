@@ -1,5 +1,5 @@
 (** The machines a workspace shares, one instance each, each in its own
-    attached add-on worker: MSX (RFC-0439) and DOS ([Dos_lane]). A new machine
+    attached add-on worker: MSX and DOS ([Dos_lane]). A new machine
     is a constructor here, and every exhaustive match over this type then says
     what it means. *)
 

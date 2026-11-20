@@ -68,7 +68,6 @@ type t =
   | SessionCleanupFailures
   | ToolExecuteFailures
   | LifecycleDispatchRejections
-  | RecordingErrorDedup
   | PausedStatePersistErrors
   | Agent_coreTimeoutClassifications
   | ProactiveOutcome (* counter: scheduled autonomous cycles, by keeper and outcome (tool_called, noop, error) *)

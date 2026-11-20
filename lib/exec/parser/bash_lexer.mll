@@ -4,7 +4,7 @@
    words, command substitutions ([$( )], read into [Shell_ir.Subst]),
    pipelines, fd-to-fd redirects, and file redirect operators.
    Unsupported shell forms still fail closed through Parsed.Too_complex
-   or Parse_error.  See RFC v5 (docs/rfc/RFC-0005). *)
+   or Parse_error. *)
 
 {
   open Bash_subset
@@ -36,7 +36,7 @@
   ;;
 
   (* Carries an inner refusal out of [subst_piece] unchanged: the same
-     rules, the same reasons (RFC shell-ir-typed-command-substitution §2.2).
+     rules, the same reasons.
      Never [Parsed _] — that arm returns the child IR directly. *)
   exception Subst_inner_refusal of Shell_ir.t Parsed.t
   let meta_of_string w =
@@ -353,7 +353,7 @@ and dq_pieces token_count parse_subst first_opt rev_rest = parse
 (* One [$( )] piece: balanced-scan the body, re-parse it through the callback
    (which shares the token budget and never resets it), and hand the child
    IR up as a [Subst].  An inner refusal rides out unchanged — the same
-   rules, the same reasons (RFC shell-ir-typed-command-substitution §2.2).
+   rules, the same reasons.
    The re-parse target is the source the user wrote, never execution
    output. *)
 and subst_piece token_count parse_subst = parse

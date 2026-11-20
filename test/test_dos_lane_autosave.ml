@@ -619,7 +619,7 @@ let test_a_start_resumes_the_autosave_with_the_controller_free () =
     check int "the machine is where the autosave left it" campaign_steps machine.Dos_lane.steps;
     check (option string) "nobody holds the controller" None machine.Dos_lane.controller;
     check (option string) "the screen agrees" None (controller ());
-    (* A free controller goes to whoever moves next (RFC play-link §2.8). *)
+    (* A free controller goes to whoever moves next. *)
     ignore (require (Dos_lane.step ~who:"guest" ~steps:1_000 ~until_ready:false));
     check (option string) "the first to move takes it" (Some "guest") (controller ()))
 ;;

@@ -44,7 +44,7 @@ let span_ago ~ko span = span ^ if ko then " 전" else " ago"
    They are lower case for the middle of a row; a row that starts with one
    capitalises it in English, as its neighbours do. *)
 let workspace_name ~ko = if ko then "워크스페이스" else "workspace"
-let field_unconfirmed ~ko = if ko then "미확인" else "unconfirmed"
+let field_unconfirmed ~ko = if ko then "확인 안 됨" else "unconfirmed"
 let workspace_identity_name ~ko = workspace_name ~ko ^ if ko then " 식별" else " identity"
 let workspace_identity_unconfirmed ~ko =
   workspace_identity_name ~ko ^ " " ^ field_unconfirmed ~ko
@@ -207,7 +207,6 @@ module Kept_request = struct
     | Image_read
     | Gate_mode_change
     | Tool_modes_read
-    | Gate_settings_read
     | Tool_mode_change
     | Board_requeue
     | Service_switch
@@ -362,7 +361,6 @@ module Kept_request = struct
     | Image_read -> text "그림 읽기" "image read"
     | Gate_mode_change -> text "게이트 모드 변경" "Gate mode change"
     | Tool_modes_read -> text "도구 승인 모드 읽기" "tool approval modes read"
-    | Gate_settings_read -> text "게이트 설정 읽기" "Gate settings read"
     | Tool_mode_change -> text "도구 승인 모드 변경" "tool approval mode change"
     | Board_requeue -> text "게시판 다시 넣기" "Board requeue"
     | Service_switch -> text "서비스 켜고 끄기" "service switch"
@@ -376,7 +374,7 @@ module Kept_request = struct
     | Surface_read -> text "화면 읽기" "screen read"
     | Keeper_reply_follow -> text "키퍼 답 이어 받기" "Keeper reply follow-up"
     | Keeper_action_step -> text "키퍼 동작 다음 단계" "next Keeper action step"
-    | Unchecked_report_move -> text "다음 미확인 보고서로 이동" "move to next unchecked report"
+    | Unchecked_report_move -> text "다음 확인 안 한 보고서로 이동" "move to next unchecked report"
 end
 
 (* reason · <request> not sent · what stayed. The reason leads, so a cut row

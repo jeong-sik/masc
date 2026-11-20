@@ -172,7 +172,7 @@ module Transport = struct
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let ws_enabled () = get_bool ~default:true "MASC_WS_ENABLED"
 
-  (** HTTPS listener port (RFC-0512 D6): TLS 1.3 with ALPN [h2] and
+  (** HTTPS listener port: TLS 1.3 with ALPN [h2] and
       [http/1.1] on one port. 8937 is the WebSocket listener's default, so
       the next port is the default here. ["0"] turns the listener off. A
       value that is not a port falls back to the default, as {!get_port}
@@ -195,7 +195,7 @@ module Transport = struct
   let tls_cert_file () = raw_value_opt "MASC_TLS_CERT_FILE" |> trim_opt
   let tls_key_file () = raw_value_opt "MASC_TLS_KEY_FILE" |> trim_opt
 
-  (** Whether HTTP serving is isolated to a dedicated OCaml domain (RFC-0204 Phase 3).
+  (** Whether HTTP serving is isolated to a dedicated OCaml domain.
       Default: false. *)
   let serving_domain_enabled () =
     get_bool ~default:false "MASC_SERVING_DOMAIN_ENABLED"

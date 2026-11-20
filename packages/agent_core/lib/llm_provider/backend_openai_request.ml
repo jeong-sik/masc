@@ -215,91 +215,24 @@ let response_format_of_config (config : Provider_config.t) =
   | None -> None
 ;;
 
-let capabilities_of_config (config : Provider_config.t) =
-  match config.kind with
-  | Provider_config.Anthropic
-  | Provider_config.Kimi
-  | Provider_config.OpenAI_compat
-  | Provider_config.Ollama
-  | Provider_config.Glm
-  | Provider_config.Gemini ->
-    (match Provider_config.capabilities_for_config_model config with
-     | Some caps -> caps
-     | None ->
-       (match config.kind with
-        | Provider_config.Ollama -> Capabilities.ollama_capabilities
-        | Provider_config.Kimi -> Capabilities.kimi_capabilities
-        | Provider_config.Glm -> Capabilities.glm_capabilities
-        | Provider_config.Gemini -> Capabilities.gemini_capabilities
-        | Provider_config.Anthropic -> Capabilities.anthropic_capabilities
-        | Provider_config.OpenAI_compat -> Capabilities.openai_compat_chat_capabilities))
-;;
+let capabilities_of_config = Input_budget.capabilities_of_config
 
-(* Resolve the output-token budget for optional request envelopes (#2517).
-
-   [Capabilities.max_output_tokens] is a VALIDATION CEILING — the maximum
-   the provider accepts — not a request default. The two roles must not
-   conflate: injecting the ceiling whenever the caller sends [None] turns
-   "use the provider's default policy" into "always request the maximum
-   output", and on providers whose context window bounds
-   input + reasoning + output jointly (e.g. Z.AI GLM: 200K context,
-   default max_tokens 65536, maximum 131072) a long prompt plus a
-   ceiling-sized output request can exceed the context contract even
-   though each half is individually legal.
-
-   Policy, single-sourced here for Chat Completions ([max_tokens]),
-   Responses ([max_output_tokens]), Ollama ([num_predict]) and Gemini
-   ([maxOutputTokens]) — all optional fields:
-   - caller [None]  -> [None]: the field is omitted and the provider
-     applies its own default sized to the model's real limits. The
-     catalog ceiling is never injected as a request value.
-   - caller [Some n] with n above the catalog ceiling -> clamped to the
-     ceiling with a one-shot WARN (avoids 400s that corrupt
-     partial-commit state).
-   - caller [Some n] otherwise -> emitted as-is.
-
-   Anthropic Messages REQUIRES the field on the wire; that envelope
-   resolves through [Backend_anthropic.required_output_token_receipt],
-   which applies an explicit AGENT_CORE required-envelope fallback (the
-   catalog-declared model maximum, not a provider default) and fails loudly
-   when no value is declared anywhere — no invented constants. *)
-let output_token_ceiling (config : Provider_config.t) =
-  (* [model_capabilities_override] is the typed declaration boundary documented
-     by [Provider_config.t]: it includes caller declarations and provider/runtime
-     catalog binding declarations.  It is intentionally distinct from the model
-     catalog lookup below.  Do not infer provenance by comparing capability
-     records or model/provider strings. *)
-  match config.model_capabilities_override with
-  | Some caps ->
-    Option.map
-      (fun value ->
-         Types.output_token_ceiling ~value ~source:Types.Declared_capability_override)
-      caps.max_output_tokens
-  | None ->
-    let caps, source =
-      match Provider_config.capabilities_for_config_model config with
-      | Some caps -> caps, Types.Catalog_model
-      | None -> capabilities_of_config config, Types.Provider_default
-    in
-    Option.map
-      (fun value -> Types.output_token_ceiling ~value ~source)
-      caps.max_output_tokens
+(* Output-token ceiling and receipt resolution live in {!Input_budget}
+   so pre-flight admission, request serializers, and MASC window signals
+   share one pure computation; this wrapper adds the serialization-time
+   one-shot clamp warning. *)
+let warn_if_output_token_clamped ~model_id receipt =
+  match Types.output_token_receipt_policy receipt with
+  | Types.Explicit_clamped -> warn_output_token_clamp ~model_id ~receipt
+  | Omitted
+  | Explicit
+  | Required_catalog_fallback
+  | Required_capability_override_fallback -> ()
 ;;
 
 let output_token_receipt ~envelope (config : Provider_config.t) =
-  let receipt =
-    Types.optional_output_token_receipt
-      ~envelope
-      ~requested:config.max_tokens
-      ~ceiling:(output_token_ceiling config)
-  in
-  (match Types.output_token_receipt_policy receipt with
-   | Types.Explicit_clamped ->
-     warn_output_token_clamp ~model_id:config.model_id ~receipt
-   | Omitted
-   | Explicit
-   | Required_catalog_fallback
-   | Required_capability_override_fallback -> ());
+  let receipt = Input_budget.optional_output_token_receipt ~envelope config in
+  warn_if_output_token_clamped ~model_id:config.model_id receipt;
   receipt
 ;;
 
@@ -336,7 +269,9 @@ let build_request_assoc_artifact
       invalid_arg ("Backend_openai_request: invalid reasoning target: " ^ detail)
   in
   let output_token_receipt =
-    output_token_receipt ~envelope:Types.Openai_chat_max_tokens config
+    output_token_receipt
+      ~envelope:(Provider_http_codec.output_token_envelope Provider_http_codec.openai_chat)
+      config
   in
   let assistant_tool_content_format = caps.Capabilities.assistant_tool_content_format in
   let control_lowering =

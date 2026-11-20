@@ -11,7 +11,7 @@ source "${ROOT_DIR}/scripts/harness/lib/server_bootstrap.sh"
 MASC_HTTP_PORT="${MASC_HTTP_PORT:-$(harness_pick_free_port)}"
 MASC_GRPC_PORT="${MASC_GRPC_PORT:-$(harness_pick_free_port)}"
 MASC_WS_PORT="${MASC_WS_PORT:-$(harness_pick_free_port)}"
-# The TLS listener (RFC-0512) defaults to 8938; a free port keeps the harness
+# The TLS listener defaults to 8938; a free port keeps the harness
 # server off an operator's listener instead of skipping with bind_failed.
 MASC_HTTPS_PORT="${MASC_HTTPS_PORT:-$(harness_pick_free_port)}"
 # Issue #8423: `MASC_HTTP_BASE_URL` is the documented name the OCaml

@@ -1,4 +1,4 @@
-(** Slack connector observability helpers (RFC-0317).
+(** Slack connector observability helpers.
 
     Mirrors {!Discord_observability} for the Slack in-process gateway. Only the
     subset the server-side gateway emits directly is covered: gateway event

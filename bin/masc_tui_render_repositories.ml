@@ -122,7 +122,7 @@ let render_workspace_activity (state : state) repo_id =
     | Some requested ->
         let count = List.length (workspace_activity_context_lines state ~cols) in
         let height = workspace_activity_context_height state
-          ~surface_rows:(surface_body_rows state ~terminal_rows) in
+          ~budget:(surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows) in
         let scroll = max 0 (min requested (max 0 (count - height))) in
         here_row ~cols state
           ~path:(activity_path @ [ ui_text state ~ko:"맥락" ~en:"context" ])
@@ -147,8 +147,8 @@ let render_workspace_activity (state : state) repo_id =
               Printf.sprintf "%s %d" (Terminal_text.single_line name)
                 (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper = name) rows))) names));
           c.push_styled ~style:(Theme.recede ())
-            (if ko then "  모든 Keeper 가 clone 에 쓴 기록 · Enter 로 파일 열기 · 코드 화면에서 H 이력, m 노트"
-             else "  Recorded clone writes from all Keepers · Enter opens file; H history, m notes in Code");
+            (if ko then "  전체 Keeper clone 쓰기 기록  Enter:파일 열기 (코드 화면: H:이력  m:노트)"
+             else "  Recorded clone writes from all Keepers  Enter:open file (in Code: H:history  m:notes)");
           let cells = workspace_activity_cells ~ko ~cols in
           c.push ("  " ^ Masc_tui_table.header_row (cells ~date:"" ~keeper:"" ~task:"" ~result:"" ~path:""));
           c.push_divider ();
@@ -161,15 +161,27 @@ let render_workspace_activity (state : state) repo_id =
             | Some (change, path) ->
                 let date =
                   Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) change.Tui_decode.fc_at in
-                let task = match change.fc_task_id with None -> (if ko then "연결 없음" else "unlinked") | Some id -> id in
-                let line = "  " ^ Masc_tui_table.row (cells ~date
+                let task =
+                  match change.fc_task_id with
+                  | None -> if ko then "연결 없음" else "unlinked"
+                  | Some id ->
+                      (match
+                         List.find_opt
+                           (fun (t : Tui_decode.task) -> String.equal t.id id)
+                           state.tasks
+                       with
+                       | Some t when not (String.equal (String.trim t.title) "") -> t.title
+                       | Some _ | None -> id)
+                in
+                let is_selected = first + i = cursor in
+                let line = (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row (cells ~date
                   ~keeper:(Terminal_text.single_line change.fc_keeper)
                   ~task:(Terminal_text.single_line task)
                   ~result:
                     (if change.fc_succeeded then (if ko then "성공" else "ok")
                      else if ko then "실패" else "failed")
                   ~path:(Terminal_text.single_line path)) in
-                if first + i = cursor then c.push_selected line else c.push line
+                if is_selected then c.push_selected line else c.push line
           done;
           c.push_divider ();
           c.push (match selected with
@@ -195,7 +207,7 @@ let render_workspace_activity (state : state) repo_id =
       match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading ->
           c.push
-            (ui_text state ~ko:"  기록된 파일 변경 조회 중…" ~en:"  Reading recorded file changes...")
+            (ui_text state ~ko:"  기록된 파일 변경 조회 중" ~en:"  Reading recorded file changes")
       | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
       | Masc_tui_fetched.Ready reading -> show ~budget reading
       (* The changes already read stay, with the failed refresh above them so
@@ -308,6 +320,7 @@ type repository_studio_geometry = {
   rsg_list_width : int;
   rsg_detail_width : int;
   rsg_detail : string list;
+  rsg_detail_spec : (string * string list) option;
   rsg_errors : string list;
   rsg_content_height : int;
 }
@@ -338,14 +351,17 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
   (* As tall as the longest detail among the loaded repositories (RFC
      tui-one-screen-grammar §8), so j and k move the selection and not the
      card's bottom edge. *)
-  let detail = match selected with
+  let detail_spec = match selected with
     | Some repo when context_budget > 0 ->
         let more = ui_text state ~ko:"v:전체 경로·배정 읽기" ~en:"v:read complete context" in
-        studio_panel ~width:detail_width
-          ~title:(Terminal_text.single_line repo.rp_name)
-          ~lines:(Masc_tui_detail_height.fit ~budget:context_budget ~rows:repos ~detail:preview
-                    ~too_tall:(Masc_tui_detail_height.Cut_with more) ~blank:"" (preview repo))
-    | Some _ | None -> [] in
+        Some
+          ( Terminal_text.single_line repo.rp_name
+          , Masc_tui_detail_height.fit ~budget:context_budget ~rows:repos ~detail:preview
+              ~too_tall:(Masc_tui_detail_height.Cut_with more) ~blank:"" (preview repo) )
+    | Some _ | None -> None in
+  let detail = match detail_spec with
+    | Some (title, lines) -> studio_panel ~width:detail_width ~title ~lines
+    | None -> [] in
   let list_budget = if split then panel_budget else panel_budget - List.length detail in
   let errors = match state.repositories_error with
     | Some reason when boxed && list_budget > 4 ->
@@ -356,7 +372,7 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
   let content_height = max 1 (min shown room) in
   {rsg_intro = intro; rsg_split = split; rsg_boxed = boxed;
    rsg_list_width = list_width; rsg_detail_width = detail_width;
-   rsg_detail = detail; rsg_errors = errors;
+   rsg_detail = detail; rsg_detail_spec = detail_spec; rsg_errors = errors;
    rsg_content_height = content_height}
 
 let repository_studio_content_height state ~cols ~budget ~cursor =
@@ -390,13 +406,14 @@ let render_repository_list (state : state) =
       let detail_width = geometry.rsg_detail_width in
       let content_height = geometry.rsg_content_height in
       let row_width = max 1 (list_width - if geometry.rsg_boxed then 4 else 0) in
-      let row repo =
+      let row ~selected repo =
+        let prefix = if selected then "\xe2\x80\xba " else "  " in
         let status = Terminal_text.single_line (Tui_decode.repository_status_word repo.rp_status) in
-        let status_cells = min (row_width / 3) (Message_layout.display_width status) in
-        let name_cells = max 1 (row_width - status_cells - 2) in
+        let status_cells = min (max 0 ((row_width - 2) / 3)) (Message_layout.display_width status) in
+        let name_cells = max 1 (row_width - status_cells - 4) in
         let name = Terminal_text.single_line repo.rp_name in
-        if row_width < 4 then Message_layout.truncate_middle row_width name
-        else Message_layout.fit_width
+        if row_width < 6 then prefix ^ Message_layout.truncate_middle (max 1 (row_width - 2)) name
+        else prefix ^ Message_layout.fit_width
           (Message_layout.truncate_middle name_cells name) name_cells
           ^ "  " ^ Message_layout.truncate_middle status_cells status in
       let max_scroll = max 0 (shown - content_height) in
@@ -417,8 +434,9 @@ let render_repository_list (state : state) =
           match Rows.at repos_window idx with
           | None -> ""
           | Some r ->
-              let line = row r in
-              if idx = state.repositories_cursor then
+              let is_selected = idx = state.repositories_cursor in
+              let line = row ~selected:is_selected r in
+              if is_selected then
                 Theme.selection_style () ^ fit_width line row_width ^ Ansi.reset
               else line)
       in
@@ -430,9 +448,49 @@ let render_repository_list (state : state) =
       (* [j/k] steps over a row; with none, the title does not offer it. *)
       let listing_title =
         ui_text state ~ko:"등록된 저장소" ~en:"Registered repositories" in
-      let listing = if geometry.rsg_boxed then
-          studio_panel ~width:list_width ~title:listing_title ~lines else lines in
-      let detail = geometry.rsg_detail in
+      let listing, detail =
+        if geometry.rsg_split && geometry.rsg_boxed then
+          let detail_title, detail_lines =
+            match geometry.rsg_detail_spec with
+            | Some spec -> spec
+            | None ->
+                let style, note =
+                  if shown > 0 then
+                    Theme.recede (), ui_text state ~ko:"저장소를 선택하세요." ~en:"Select a repository."
+                  else
+                    match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
+                    | Page_failed ->
+                        Theme.bad (),
+                        String.trim (page_failed_note ~ko:(state.ui_language = Lang_ko))
+                    | Page_unread ->
+                        Theme.recede (),
+                        String.trim
+                          (page_unread_note_while ~ko:(state.ui_language = Lang_ko)
+                             ~reading:state.repositories_inflight)
+                    | Page_empty ->
+                        Theme.recede (),
+                        ui_text state ~ko:"등록된 저장소가 없습니다."
+                          ~en:"No registered repositories yet."
+                in
+                ( ui_text state ~ko:"저장소 상세" ~en:"Repository detail"
+                , [ style ^ note ^ Ansi.reset ] )
+          in
+          let panel_max = max 1 (budget - List.length geometry.rsg_intro - 2) in
+          let inner_h =
+            min panel_max (max (List.length lines) (List.length detail_lines))
+          in
+          let pad xs =
+            let shown = List.take inner_h xs in
+            shown @ List.init (max 0 (inner_h - List.length shown)) (fun _ -> "")
+          in
+          ( studio_panel ~width:list_width ~title:listing_title ~lines:(pad lines)
+          , studio_panel ~width:detail_width ~title:detail_title ~lines:(pad detail_lines) )
+        else
+          ( (if geometry.rsg_boxed then
+               studio_panel ~width:list_width ~title:listing_title ~lines
+             else lines)
+          , geometry.rsg_detail )
+      in
       if geometry.rsg_split then begin
         let height = max (List.length listing) (List.length detail) in
         let count = min (budget - List.length geometry.rsg_intro) height in
@@ -672,8 +730,17 @@ let render_repository_changes (state : state) =
                          | Some fc ->
                              let t =
                                match fc.fc_task_id with
-                               | Some tid -> tid
-                               | None -> fc.fc_keeper
+                               | Some tid ->
+                                   (match
+                                      List.find_opt
+                                        (fun (t : Tui_decode.task) -> String.equal t.id tid)
+                                        state.tasks
+                                    with
+                                    | Some task when not (String.equal (String.trim task.title) "") ->
+                                        Message_layout.truncate_end 20
+                                          (Terminal_text.single_line task.title)
+                                    | Some _ | None -> Terminal_text.single_line tid)
+                               | None -> Terminal_text.single_line fc.fc_keeper
                              in
                              " [record:" ^ t ^ "]"
                          | None -> "")
@@ -689,16 +756,22 @@ let render_repository_changes (state : state) =
                     if Message_layout.display_width attr + min 8 path_cells <= available
                     then attr else ""
                   in
+                  let is_selected = idx = state.repository_changes_cursor in
+                  let lead =
+                    if geometry.rcg_error_rows = 0 && Option.is_some state.repository_changes_error
+                    then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " "
+                    else if is_selected then "\xe2\x80\xba "
+                    else "  "
+                  in
                   let line =
                     Printf.sprintf "%s%-18s %s%s"
-                      (if geometry.rcg_error_rows = 0 && Option.is_some state.repository_changes_error
-                       then "! " else "  ")
+                      lead
                       (repository_change_status row)
                       (Message_layout.truncate_middle
                          (max 1 (available - Message_layout.display_width attr)) path)
                       attr
                   in
-                  if idx = state.repository_changes_cursor then c.push_selected line
+                  if is_selected then c.push_selected line
                   else c.push line
             done)
 
@@ -900,8 +973,8 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf
-       (if state.ui_language = Lang_ko then "  열 %d · Esc 로 닫기"
-        else "  col %d · esc closes")
+       (if state.ui_language = Lang_ko then "  열 %d  Esc:닫기"
+        else "  col %d  Esc:close")
        (state.changes_diff_hscroll + 1));
   box_bottom buf cols;
   let framed = Buffer.create (Buffer.length buf + 512) in
@@ -960,7 +1033,6 @@ let render_changes_list (state : state) =
                  (Masc_tui_message_layout.count_noun
                     s.Masc.Tui_decode.fcs_calls_in_window "call"))
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   (* What the turn did takes the cells the drawn columns leave. *)
@@ -1104,8 +1176,8 @@ let render_changes_list (state : state) =
        box_divider buf cols;
        box_line_styled buf cols ~style:(Theme.recede ())
          (Printf.sprintf
-            (if state.ui_language = Lang_ko then "  미리보기 %s  -%d +%d  (Enter 로 열어 스크롤)"
-             else "  preview %s  -%d +%d  (Enter opens, scrolls)")
+            (if state.ui_language = Lang_ko then "  미리보기 %s  -%d +%d  Enter:열기·스크롤"
+             else "  preview %s  -%d +%d  Enter:open/scroll")
             (Terminal_text.single_line (change_row_address change))
             removed added);
        let body_height = preview_height - 2 in

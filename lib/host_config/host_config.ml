@@ -81,7 +81,7 @@ let host () =
   ; base_path_lease_root = base_path_lease_root_of_env get_opt
   ; policy_dir = tmp
   ; base_path =
-      (* RFC-0085 PR-9 — base_path field carries the *normalised* value
+      (* base_path field carries the *normalised* value
          (previously Env_config_core.base_path_opt).  Empty / missing
          env returns None; non-empty trimmed values are passed through
          Env_config_core.normalize_masc_base_path_input. *)

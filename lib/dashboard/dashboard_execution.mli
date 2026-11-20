@@ -5,7 +5,7 @@ type observation = Dashboard_projection_read.observation = {
 }
 
 val observe_current :
-  ?actor:string -> ?fixture:string -> ?light:bool -> config:Workspace.config ->
+  ?actor:string -> ?light:bool -> config:Workspace.config ->
   sw:Eio.Switch.t -> clock:'a Eio.Time.clock ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option -> unit -> observation
 (** Source-triggered current metadata, with policy/window deadlines from the
@@ -17,7 +17,6 @@ val observe_current :
 
 val json :
   ?actor:string ->
-  ?fixture:string ->
   ?light:bool ->
   config:Workspace.config ->
   sw:Eio.Switch.t ->

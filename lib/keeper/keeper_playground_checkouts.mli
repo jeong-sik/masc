@@ -6,8 +6,7 @@
 
     This replaces three independent scans that each hardcoded a [repos/]
     segment and each disagreed about what counted as a checkout: one accepted
-    any directory, one required [.git], one excluded dot-prefixed names. See
-    RFC-keeper-workspace-root-only §1.2.
+    any directory, one required [.git], one excluded dot-prefixed names.
 
     {1 Traversal}
 

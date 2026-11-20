@@ -164,7 +164,7 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
 
 ```bash
-TAG=v0.73.1
+TAG=v0.74.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -658,8 +658,7 @@ Keeper 파일을 보존합니다. 필수 runtime 설정이 이미 있는 작업 
 
 서버/대시보드와 prefix의 companion 실행 파일은 설치 실패 시 이전 상태로 복구합니다.
 workspace의 guest shim과 명시적으로 초기화한 설정은 이 prefix transaction에
-포함되지 않습니다. 프로세스가 강제 종료되어 `.masc-install-transaction`이 남으면
-[배포 transaction 안내](design/installed-dashboard-distribution.md)를 확인합니다.
+포함되지 않습니다.
 
 일부 릴리스는 이전 상태 파일을 변환하는 대신 파일 계약을 바로 변경합니다.
 `CHANGELOG.md`의 `Fresh state required` 항목에 해당 파일이 나열됩니다. 새 서버를

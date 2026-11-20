@@ -48,7 +48,7 @@ export function DialogOverlay({
 
   // Focus trap + restore: delegated to headless-core via useFocusScope.
   // Replaces the inline FOCUSABLE_SELECTOR + focusableElements + trapFocus
-  // helpers that lived here pre-migration (RFC 0002 Iter 1).
+  // helpers that lived here pre-migration.
   useFocusScope({
     containerRef: panelRef,
     active: true,

@@ -1,5 +1,5 @@
 (** Server_routes_http_routes_play_page — the page an invite link opens and
-    the seat it reads (RFC play-link-for-the-shared-machine §2.6).
+    the seat it reads.
 
     [GET /play] ({!Server_auth.play_page_path}) is public and self-contained:
     a CSP with a fresh CSPRNG nonce admits only its inline script and style,

@@ -133,7 +133,6 @@ type approval_change =
   | Approval_queue_changed
   | Approval_rules_changed
   | Gate_mode_changed
-  | Gate_keeper_settings_changed of { keeper : string }
   | Tool_approval_waits_changed of { keeper : string }
   | Tool_approval_mode_changed of { keeper : string }
   | Keeper_asks_changed of { keeper : string }
@@ -325,7 +324,7 @@ let held_calls_changed = function
   | Approval_change (Tool_approval_waits_changed _) -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
-      | Gate_keeper_settings_changed _ | Tool_approval_mode_changed _
+      | Tool_approval_mode_changed _
       | Keeper_asks_changed _ | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
@@ -338,7 +337,7 @@ let held_calls_changed = function
       false
 
 let tool_modes_changed = function
-  | Approval_change (Tool_approval_mode_changed _ | Gate_keeper_settings_changed _) -> true
+  | Approval_change (Tool_approval_mode_changed _) -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Tool_approval_waits_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
@@ -529,7 +528,7 @@ let pending_confirms_changed = function
   | Workspace_store_changed Pending_confirms -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
-      | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
+      | Tool_approval_waits_changed _
       | Tool_approval_mode_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
@@ -545,7 +544,7 @@ let runtime_config_changed = function
   | Workspace_store_changed Runtime_config -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
-      | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
+      | Tool_approval_waits_changed _
       | Tool_approval_mode_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
@@ -561,7 +560,7 @@ let asks_changed = function
   | Approval_change (Keeper_asks_changed _ | Installation_asks_changed _) -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
-      | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
+      | Tool_approval_waits_changed _
       | Tool_approval_mode_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
@@ -587,8 +586,7 @@ let board_changed_post = function
 
 let gate_snapshot_changed = function
   | Approval_change
-      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
-      | Gate_keeper_settings_changed _ ) ->
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed ) ->
       true
   | Approval_change
       ( Tool_approval_waits_changed _ | Tool_approval_mode_changed _ | Keeper_asks_changed _
@@ -1058,12 +1056,6 @@ let reading_of_type type_name =
   | "approval_rules_changed" -> Named (Approval_change Approval_rules_changed)
   | "gate_mode_changed" | "gate_external_mode_changed" ->
       Named (Approval_change Gate_mode_changed)
-  | ("gate_keeper_mode_changed" | "keeper_exact_lane_preference_changed") as event ->
-      From_fields
-        (fun fields ->
-          match string_field fields "keeper_name" with
-          | Some keeper -> Ok (Approval_change (Gate_keeper_settings_changed { keeper }))
-          | None -> Error (event ^ " carries no keeper_name"))
   | "keeper_tool_approval_waits_changed" as event ->
       From_fields
         (fun fields ->

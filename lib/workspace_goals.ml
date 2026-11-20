@@ -3,10 +3,10 @@
 open Workspace_types
 open Tool_args
 
-(* Handlers return [Tool_result.result] (RFC-0189 PR-1b.8). A failure is
+(* Handlers return [Tool_result.result]. A failure is
    built by [Tool_args.error_result_typed] or [Tool_args.validation_error_result],
    which take the class from the error code. A goal store this build cannot
-   read answers through [Goal_unavailable_envelope] (RFC-0444 PR-2). *)
+   read answers through [Goal_unavailable_envelope]. *)
 let ok_result ~tool_name ~start_time fields : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:(ok_assoc fields) ()
 ;;
@@ -14,7 +14,7 @@ let ok_result ~tool_name ~start_time fields : Tool_result.result =
 let unavailable_result = Goal_unavailable_envelope.tool_result
 ;;
 
-(* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
+(* Derive the accepted-value sets from the Goal_phase ADT (the goal
    lifecycle SSOT) instead of hand-rolling them here, so the validator, the MCP
    schema enum, and the type can never drift apart. *)
 let goal_phase_strings = List.map Goal_phase.Kind.to_string Goal_phase.Kind.all
@@ -202,7 +202,7 @@ let goal_event_recording_to_yojson delivery (event : Goal_store.pending_event) =
           :: ("event_id", `String event.event_id) :: fields)
 ;;
 
-(* RFC-0387 stage 2: wake the goal verifier lane after a durable
+(* Wake the goal verifier lane after a durable
    [Proof_pending] request committed. The wake is
    scheduling only — the same discipline as the task-side
    [verification_submitted_fn] call: a raised hook must not fail (or roll
@@ -282,7 +282,7 @@ let goal_list_short_row (goal : Goal_store.goal) =
 ;;
 
 let goal_list_whole_rows (ctx : context) (goals : Goal_store.goal list) =
-  (* RFC-0387 (stage 1): the verification ledger joins each goal here (not
+  (* The verification ledger joins each goal here (not
      in [Goal_store.goal_to_yojson], which is the persistence codec). The
      ledger is loaded ONCE per request and joined in memory; a store that
      does not decode renders the explicit [ledger_error] marker per goal —
@@ -364,7 +364,7 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
      | None, phase ->
        let rows = if get_bool args "detailed" false then Whole_rows else Short_rows in
        (match Goal_store.list_goals_result ctx.config ?kind:phase () with
-        (* RFC-0444 criterion 1: a store this build cannot read is the typed
+        (* A store this build cannot read is the typed
            envelope, never [goals:[]]. [Uninitialized] reads as [Ok []]. *)
         | Error unavailable -> unavailable_result ~tool_name ~start_time unavailable
         | Ok goals -> goal_list_answer ~tool_name ~start_time ctx ~rows goals))
@@ -544,7 +544,7 @@ let handle_goal_measure ~tool_name ~start_time (ctx : context) args
    crashed write reconcilable instead of wedged (stage-2 review P0-2). *)
 
 (* The gate actions carry a verdict; a verdict without evidence is not a
-   judgment, so [evidence] is required non-blank (RFC-0387 §3.3/§4). *)
+   judgment, so [evidence] is required non-blank. *)
 let gate_action_requires_evidence = function
   | Goal_phase.Record_proof_proven
   | Goal_phase.Record_proof_refuted -> true
@@ -837,7 +837,7 @@ let reconcile_committed_proof config ~goal_id =
             (apply_committed_verdict goal verdict))) in
   (* This locked re-read keeps its write_error typed — including a store that
      became unavailable after the verifier scan listed it. The scan records
-     only its own list read as [Scan_skipped] (RFC-0444 PR-5); a failure here
+     only its own list read as [Scan_skipped]; a failure here
      reaches it as an unreconciled goal the Goal rows show. *)
   Result.map (fun (_, (outcome, _)) ->
     ignore (deliver_goal_effects config);
@@ -1348,7 +1348,7 @@ let handle_goal_transition_validated ~tool_name ~start_time (ctx : context) args
         | Ok (Goal_phase.Move_to _) ->
           (match public_action with
            | Goal_phase.Public_action.Request_complete ->
-                (* Executing -> Verifying (RFC-0387 §4): persist the proof
+                (* Executing -> Verifying: persist the proof
                    request BEFORE the phase write — if the ledger write fails
                    the phase does not move, so a crash between the two leaves a
                    request the verifier can still pick up.

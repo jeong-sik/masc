@@ -32,8 +32,7 @@ type declaration = {
       Matches the declaration editor's source_revision; never a worker key. *)
   source_path : string;
   max_exact_in_flight : exact_in_flight;
-  (** RFC host-cycle-runs-exact-requests-side-by-side 3.2.
-      {!one_exact_at_a_time} when the declaration has no such key. It is not a
+  (** {!one_exact_at_a_time} when the declaration has no such key. It is not a
       worker input, so it is outside [revision]. *)
 }
 

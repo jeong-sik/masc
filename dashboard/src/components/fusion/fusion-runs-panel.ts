@@ -1,4 +1,4 @@
-// RFC-0266 §7 — fusion run status helpers.
+// Fusion run status helpers.
 //
 // The registry status panel these helpers once backed was merged into the
 // FusionSurface master list (one list for board-sink + registry-only runs), so

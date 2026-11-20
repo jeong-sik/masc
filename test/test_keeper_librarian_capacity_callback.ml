@@ -408,7 +408,7 @@ let test_prefit_real_continuity ~base_path () =
       (P.memory_committed ~config ~keeper_name:keeper_id prepared |> get);
     Alcotest.(check string) "continuity leaves pending context bytes unchanged"
       context_before (Fs_compat.load_file_opt context_path |> some) in
-  let fit prepared = Runtime.fit_continuity ~source_lines:[] ~capacity ~base_path ~keeper_id
+  let fit prepared = Runtime.fit_continuity ~source_lines:[] ~capacity
       ~input_for:(fun candidate -> Ok (input candidate)) prepared |> get |> some in
   let first = fit full in
   Alcotest.(check int) "measured bound selects first two whole atoms" 2 (P.end_atom first);
@@ -439,7 +439,8 @@ let test_prefit_real_continuity ~base_path () =
     ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
     ~model_id:"continuity-cycle-fixture" ~base_url:"https://provider.example" () in
   let completed_end =
-    Driver.completed_history_end ~trace_id ~lines ~messages:canonical
+    Librarian_continuity_snapshot.checkpoint_prefix_range ~trace_id ~lines ~messages:canonical
+    |> Result.map (fun (range : Keeper_librarian_range.range) -> range.end_atom)
     |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
   let view = match Driver.For_testing.request_view
     ~prepare_request_media:(fun _selected -> Ok (fun messages -> Ok messages))

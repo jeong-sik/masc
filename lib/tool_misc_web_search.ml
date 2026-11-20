@@ -57,7 +57,7 @@ type search_payload =
   | Hits of provider_response
   | Grounded of grounded_context
 
-(* RFC-0189 PR-2 — per-provider errors are lifted to typed variants so the
+(* per-provider errors are lifted to typed variants so the
    fallback chain can distinguish transport vs server vs config vs parse
    failures instead of collapsing them into one aggregate string. The
    aggregate boundary at [search_impl] remains [Runtime_failure] for now

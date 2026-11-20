@@ -21,7 +21,7 @@ type tool_call_entry = {
   duration_ms : int;
   error : string option;
   execution_id : string option;
-      (** RFC-0233 canonical join key shared with the tool_calls JSONL row
+      (** Canonical join key shared with the tool_calls JSONL row
           for the same execution. [None] only for rows written by paths
           that have not adopted the id yet (and historical rows). *)
 }

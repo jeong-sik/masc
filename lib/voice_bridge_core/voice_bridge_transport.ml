@@ -19,7 +19,7 @@ let safe_agent_id value =
 let make_audio_file ~format =
   Voice_bridge_core.ensure_audio_dir ();
   (* The token is both the filename and the HTTP capability for
-     /api/v1/voice/audio/:token (RFC-0235 P1). agent_id is deliberately
+     /api/v1/voice/audio/:token. agent_id is deliberately
      absent from the filename: a logged-in operator viewing one keeper
      must not be able to enumerate another keeper's clips by guessing
      <ts>_<agent>. 16 bytes = 128-bit unguessable. *)

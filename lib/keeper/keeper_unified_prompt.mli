@@ -121,7 +121,7 @@ val active_goal_summaries :
   keeper_name:string ->
   (goal_summary list, Goal_store.unavailable) result
 (** Every Goal still open enough to progress. [Error] is the typed store
-    failure (RFC-0444 §2.3 row 6); the Active Goals layer renders it with
+    failure; the Active Goals layer renders it with
     reason, file, mirror and reset step.
 
     A Goal is shared intent and names no keeper, so every turn carries the

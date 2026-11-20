@@ -1,5 +1,5 @@
 (** What a Candle read folds the ledger to before it decays the balances to
-    the read time (RFC-0481 §3.7).
+    the read time.
 
     A reader that holds it computes each Keeper's balance, and the burned and
     circulating supply, at a later instant with {!Candle_decay.remaining}. The

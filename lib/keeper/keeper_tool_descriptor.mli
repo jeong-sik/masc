@@ -55,7 +55,7 @@ type execution =
     representable. *)
 
 (** Closed execution-semantics classification of one tool call: whether the
-    call is itself a multi-call execution unit (RFC-0386). [Atomic_tool] runs
+    call is itself a multi-call execution unit. [Atomic_tool] runs
     one capability per call. [Composition_tool] runs one fixed, validated
     catalog plan inline. [Async_composition_tool] covers durable async
     composition submissions and their status/cancel controls. This
@@ -79,7 +79,7 @@ type prepared_leaf_admission =
     File mutations and job launch retain their Serial effectful descriptor
     contracts. A file mutation admission is not a prepared resource claim.
     [Inline_effect_leaf] admits Execute and masc_board_post to inline drafts
-    only (RFC-0502): each node's effect passes through the invoking Keeper's
+    only: each node's effect passes through the invoking Keeper's
     own dispatch boundary — Execute through effect Gate approval, a board post
     through Board policy — exactly as a direct call does. Durable async plans
     refuse them: their effects are neither replayable nor idempotent, so an
@@ -244,7 +244,7 @@ val tool_kind_of_string : string -> (tool_kind, string) result
 val public_descriptors : t list
 
 (** [all_descriptors ()] is [public_descriptors] plus the module-private
-    descriptor-backed workspace surface (RFC-0179; [keeper_*] / [masc_*]
+    descriptor-backed workspace surface ([keeper_*] / [masc_*]
     workspace tools mapped to a typed handler, not part of the LLM-native
     public-name contract). The runtime dispatcher walks this list to
     resolve [internal_name] for any descriptor-backed tool, regardless of

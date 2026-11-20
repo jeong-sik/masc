@@ -4,7 +4,7 @@ import { isRecord } from '../lib/type-guards'
 export interface IdeApiOptions extends GetOptions {
   readonly keeper?: string
   readonly scope?: IdeScope | null
-  /** RFC-0378 §5.3b: the one wire key — the canonical codebase slug the
+  /** The one wire key — the canonical codebase slug the
    *  server minted (repositories API `codebase` field). Display names and
    *  catalog ids are projection labels, not addresses. */
   readonly codebase?: string | null

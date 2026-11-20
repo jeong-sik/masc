@@ -19,17 +19,11 @@ type not_recorded =
   | Run_unnamed of Head.covering_error
   | Not_appended of Store.append_error
 
-let range_error_to_string : Keeper_turn_log_marks.range_error -> string = function
-  | Starts_before_covered { from; first } ->
-    Printf.sprintf "the run starts at message %d, before the first covered one %d" from first
+let covering_error_to_string : Head.covering_error -> string = function
   | Ends_after_covered { through; last } ->
     Printf.sprintf "the run ends at message %d, after the last closed one %d" through last
   | Backwards { from; through } ->
     Printf.sprintf "the run goes from message %d back to %d" from through
-;;
-
-let covering_error_to_string : Head.covering_error -> string = function
-  | Range error -> range_error_to_string error
   | Segment Nothing_before -> "the run starts before message 0"
   | Segment (Not_read unread) -> Head.segment_unread_to_string unread
   | Segment (Does_not_fit { first; segment_messages; has_previous }) ->

@@ -45,7 +45,7 @@ describe('globalShortcutManager — RFC-0012 dashboard root host', () => {
     // Registry is empty after afterEach unregisterAll. No registration here:
     // the host wire-in must NOT preventDefault when there is nothing to fire,
     // so existing ad-hoc keydown listeners keep working until their owners
-    // migrate per RFC-0012 §8.
+    // migrate.
     const matched = globalShortcutManager.dispatch({
       key: 'F1',
       target: null,

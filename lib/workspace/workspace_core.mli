@@ -34,7 +34,7 @@ module For_testing : sig
       cannot run. Exposed so tests do not depend on backend-specific
       [Effect.Unhandled] behavior.
 
-      RFC-0088 §4 Option A (2026-05-15): the previous
+      The previous
       [~event_family:string -> ~event_kind:string] surface was replaced
       by the typed {!Workspace_telemetry_drop_event.t} sum. The Otel_metric_store
       label wire format is unchanged ([family_to_wire] / [kind_to_wire]

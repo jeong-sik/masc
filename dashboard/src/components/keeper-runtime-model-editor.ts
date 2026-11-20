@@ -2,7 +2,7 @@
 // runtime lane a keeper dispatches on, at the top of the keeper detail's 진단/운영
 // section so it is discoverable without digging.
 //
-// RFC-0207: a keeper's runtime selection lives in a SINGLE surface —
+// A keeper's runtime selection lives in a SINGLE surface —
 // runtime.toml [runtime.assignments], edited through the 설정(.kcf) config modal's
 // 런타임 tab. This card is READ-ONLY: it surfaces the current assignment + catalog
 // facts and deep-links to the config modal for changes. It does NOT write.

@@ -1,4 +1,4 @@
-(* RFC-0301 item 6: unit tests for the turn-local generated-media accumulator. *)
+(* Unit tests for the turn-local generated-media accumulator. *)
 
 open Alcotest
 

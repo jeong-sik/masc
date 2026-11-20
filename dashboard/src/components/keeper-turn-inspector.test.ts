@@ -789,7 +789,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     const meta = container.querySelector('.ti-kv')?.textContent ?? ''
-    // grounded from the backend turn record (RFC-0233 §2.3)
+    // grounded from the backend turn record
     expect(meta).toContain('deepseek-v4-flash')
     expect(meta).toContain('completed')
     // finish_reason is no longer the fabricated hardcoded 'stop'
@@ -948,7 +948,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(stats).toContain('도구')
     expect(stats).toContain('1')
     expect(stats).toContain('추정비용')
-    // RFC-0233 §8: turn 42 fixture carries real context_window + prices, so
+    // Turn 42 fixture carries real context_window + prices, so
     // the nullable ctxPct/cost render grounded values — not "미상". Guards the
     // number|null widening against a regression that drops the grounded path.
     expect(stats).not.toContain('미상')
@@ -1083,7 +1083,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('agent subturns')
     expect(drawerText).toContain('T9001')
     expect(drawerText).toContain('masc_board_post_get')
-    // RFC-0233 §9/§10: the gen (response-generation) phase carries
+    // The gen (response-generation) phase carries
     // request_latency_ms from the record (1234ms → "1.2s") plus ttfrc_ms
     // (567.8ms → "568ms"), so it renders a measured duration with the
     // time-to-first-token instead of "측정 없음".

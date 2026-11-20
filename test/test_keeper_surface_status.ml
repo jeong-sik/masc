@@ -1,4 +1,4 @@
-(* RFC-0089 (String Classifier to Typed Variant) — keeper surface_status.
+(* Keeper surface_status.
 
    keeper_surface_status derives a display status from keeper_health and emits
    it as a string; the server row patcher re-classifies that string. These

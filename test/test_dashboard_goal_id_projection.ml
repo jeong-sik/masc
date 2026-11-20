@@ -1,4 +1,4 @@
-(** RFC-0267 Phase 1 — registry goal_id projection onto the /execution wire.
+(** Registry goal_id projection onto the /execution wire.
 
     The task record carries no goal_id (the goal_task_links registry is SSOT).
     [Dashboard_execution.task_json] projects a canonical goal_id per task from

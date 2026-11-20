@@ -1,4 +1,4 @@
-(** Invites to the shared machine (RFC play-link-for-the-shared-machine §2.4).
+(** Invites to the shared machine.
 
     An invite is a credential with the [Player] role and an expiry. The
     operator issues it under a name, hands the link on, and revokes it by

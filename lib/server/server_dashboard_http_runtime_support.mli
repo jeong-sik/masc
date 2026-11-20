@@ -45,7 +45,7 @@ val run_dashboard_compute :
     {!Pool_work.submit} as work of [kind] and runs it under a nested
     [Eio.Switch.run]. Nested dashboard cache submissions therefore stay on
     the current worker instead of waiting on the same pool, and the outermost
-    submit's [kind] is the one that counts (RFC-0474 L4b).
+    submit's [kind] is the one that counts.
 
     [Eio.Cancel.Cancelled] is propagated from either path. Any
     other exception during the offload is logged at

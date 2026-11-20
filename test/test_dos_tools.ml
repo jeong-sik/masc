@@ -1293,7 +1293,7 @@ let test_a_removed_keeper_lets_its_controller_go () =
       check bool "and the next Keeper moves" true (keeper_press ~base_path "liu-bei" "a")))
 ;;
 
-(* RFC play-link-for-the-shared-machine §2.8: under enforced auth, a holder
+(* Under enforced auth, a holder
    whose credential ran out has left. A holder that is not a
    Keeper has also left when no credential carries its name. Where requests
    need no token a name may be self-declared, and it keeps the controller. *)

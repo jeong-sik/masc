@@ -13,17 +13,6 @@ type reply_error =
 
 let tool_name = "convert_to_markdown"
 
-let catalog_error_to_string = function
-  | Tool_missing -> "declared reader does not offer convert_to_markdown"
-  | Tool_ambiguous -> "declared reader offers duplicate convert_to_markdown tools"
-  | Invalid_input_schema _ -> "declared converter has an incompatible input contract"
-
-let reply_error_to_string = function
-  | Tool_reported_error -> "declared converter returned an error; its complete reply is retained"
-  | Invalid_reply_shape _ -> "declared converter returned an invalid result"
-  | Nontext_content _ -> "declared converter returned nontext content"
-  | Empty_markdown -> "declared converter returned no readable text"
-
 let member key = function
   | `Assoc fields -> List.assoc_opt key fields
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None

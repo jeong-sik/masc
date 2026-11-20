@@ -1,4 +1,4 @@
-(** RFC-0240 §2.4 — close tool cycles left open by process death, at boot.
+(** Close tool cycles left open by process death, at boot.
 
     Checkpoint persistence deliberately stores the in-flight tool cycle so
     recovery knows which calls were dispatched

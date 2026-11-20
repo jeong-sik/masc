@@ -434,7 +434,7 @@ let test_no_verdict_is_failed_and_unmeasured_elapsed_skips_p50 () =
          [ `String "antigravity_subscription.gemini-3-7-flash-high"
          ; `String "cli-backup"
          ]);
-  (* RFC cli-runtimes-as-lane-slots: the declared cli suffix is on the wire,
+  (* The declared cli suffix is on the wire,
      and a lane whose only slots are cli ones is ready, not degraded. *)
   check bool
     "cli slots are surfaced per lane"

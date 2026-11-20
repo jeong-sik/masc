@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 (* A name written after [@] is a target only when the recipient lookup the
-   server installed declares it (RFC-at-name-resolves-to-declared-recipient).
+   server installed declares it.
    Each test below installs its own lookup and writes through the dispatcher,
    so what is asserted is what the write path decided and stored. *)
 

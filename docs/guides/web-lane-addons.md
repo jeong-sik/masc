@@ -64,9 +64,6 @@ instance, incarnation, 설치 revision, 완료된 관측 sequence와 보존된 �
 열지 않으며, 이미 요청한 action의 상태 조회는 원래 identity로 계속 제공한다.
 실행 중이라는 상태와 완료된 관측, action receipt의 성공은 각각 별도 근거다.
 
-실제 Docker/MCP worker를 해제·재연결하고 Dashboard에서 확인한 범위와 화면은
-[재연결 관측 기록](../evidence/2026-10-21-addon-reconnect/README.md)을 참고한다.
-
 입력은 화면 이동·컴포넌트 재진입·작업공간 왕복 중 보존되지만 브라우저 재시작 후
 복구되는 저장소는 아니다. 작업공간 연결이 바뀌거나 재확인이 실패하면 새 preview를
 받기 전에는 초안을 만들 수 없다. schema가 바뀌면 새 입력 세트를 열고 기존 값은

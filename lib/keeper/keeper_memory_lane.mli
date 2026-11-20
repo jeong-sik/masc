@@ -1,12 +1,11 @@
-(** Per-keeper Librarian execution lane (RFC-0257).
+(** Per-keeper Librarian execution lane.
 
     Detaches post-turn Librarian extraction from the keeper turn lane. Each
     keeper owns one latest-wins drain, so work is serialized within a keeper
     and runs independently across keepers. This replaces the process-global
     [Eio.Semaphore.make 1] in
     [Keeper_librarian_runtime] that previously serialized every keeper's
-    librarian work fleet-wide — the opposite of the lane-per-keeper model
-    (RFC-0225).
+    librarian work fleet-wide — the opposite of the lane-per-keeper model.
 
     The unit submitted must be self-contained over immutable values: it reads
     its Eio capabilities from [Eio_context] (the lane binds the executor switch
@@ -69,7 +68,7 @@ val submit
 val has_waiting : base_path:string -> keeper_name:string -> bool
 (** Whether a unit waits behind the running one as the latest snapshot. A
     unit that loops between rounds reads this to end itself so the waiting
-    unit runs next (RFC-0467). Reading it registers nothing. *)
+    unit runs next. Reading it registers nothing. *)
 
 type external_effect_error = External_purge_in_progress | External_cancelled_by_purge
 val external_effect_error_to_string : external_effect_error -> string

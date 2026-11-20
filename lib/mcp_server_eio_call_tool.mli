@@ -137,6 +137,7 @@ val handle_call_tool_eio :
     (success:bool -> tool_name:string -> 'notify) ->
   broadcast_tools_list_changed:(unit -> unit) ->
   ?wire_result:(unit -> Mcp_protocol.Mcp_types.tool_result option) ->
+  ?protocol:Mcp_transport_protocol.request_protocol ->
   sw:'sw ->
   clock:'clk Eio.Resource.t ->
   ?profile:Mcp_server_eio_types.tool_profile ->
@@ -175,6 +176,14 @@ val handle_call_tool_eio :
     absent, because a failure can follow its durable append. Original content,
     Board fact and [isError] are preserved. Retained-artifact receipt failures
     and Eio cancellation keep their existing propagation policy.
+
+    [protocol] controls the [structuredContent] projection. Stateless requests
+    preserve every JSON value as MCP 2026-07-28 permits; legacy requests retain
+    the earlier object-only projection. It defaults to [Legacy_protocol] for
+    source-compatible direct embedders, while the request dispatcher always
+    supplies the version admitted from the actual request. Add-on wire results
+    retain their existing projection, except that explicit null is emitted only
+    for stateless requests.
 
     [sw] / [clock] type variables stay polymorphic so the
     protocol layer can call this function with whatever

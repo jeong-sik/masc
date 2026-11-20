@@ -14,7 +14,7 @@ Keeper·Task·Goal·Skill·composition·MCP는 이 약속을 수행하는 내부
 Scale-out은 검증된 완료 처리량을 높이는 기능으로 개발한다. 실행 중 에이전트 수는 성과가 아니다.
 
 이 문서는 개선 순서와 Goal acceptance의 정본이다. 제품·개발 원칙은
-[constitution.xml](constitution.xml), 릴리스 편성은 [VERSIONED-ROADMAP.md](VERSIONED-ROADMAP.md)를 따른다.
+[constitution.xml](constitution.xml)을 따른다.
 런타임 Goal에는 현재 착수한 범위만 등록한다. 미래 Goal을 전부 executing으로 만들지 않는다.
 
 ## 현재 연결과 부족한 부분
@@ -56,8 +56,7 @@ Goal 완료 요청은 원시 증거를 보존한 뒤 verifier에 제출한다. �
 
 Runtime Goal ID: `goal-reliable-change-g1-20260909`. 첫 구현 Task: `task-1478` (등록 시 todo, 2026-09-12 현재도 todo).
 정의 정본: [G1 acceptance contract](roadmaps/reliable-change-g1.json), 현재 `criterion_revision` 2.
-[등록 당시 readback](evidence/reliable-change-roadmap/activation.json)은 revision 1의 기록이며 실행 결과가 아니다.
-그 등록은 2026-09-09 운영자 초기화로 런타임에서 사라졌다. 자세한 경위와 재등록 절차는 아래 revision 2 항목에 있다.
+revision 1 등록은 2026-09-09 운영자 초기화로 런타임에서 사라졌다. 자세한 경위와 재등록 절차는 아래 revision 2 항목에 있다.
 
 범위는 기존 coding harness와 run/turn/request/cost ledger의 연결이다. 새로운 실행 엔진을 만들지 않는다.
 다음 여섯 사례를 각각 3회 실행한다. 3회는 잘못된 재사용·누적 집계를 찾는 소규모 반복이며
@@ -160,8 +159,7 @@ input 40 / output 8 / cache-read 8 / USD 0.07. Goal ID도 그대로 둔다.
 `Already_assigned`가 돌아오면 끊지 않는다. `predecessor_task_id = task-1478`인 후속 Task를 만들고 task-1478은 그대로 둔다.
 재등록 단계는 소유권을 잡지 않는다. 구현자는 평소처럼 `masc_transition(claim)`으로 잡는다.
 
-**revision 1 등록의 대체.** [activation.json](evidence/reliable-change-roadmap/activation.json)은 revision 1의
-readback으로 남긴다. 고치지 않고, 거기서 진행률을 가져오지 않는다. 손실 경위: #34459가 `criterion_revision`을
+**revision 1 등록의 대체.** 손실 경위: #34459가 `criterion_revision`을
 필수 필드로 만들었고 `read_state`가 `Undecodable`을 빈 상태로 접어 goals.json이 7시간 29분 동안 비어 보였다.
 #34485가 오류를 드러낸 뒤 운영자가 goals.json을 손으로 초기화했다(97 → 41 → 0). revision 1에서는
 측정이 한 번도 돌지 않았다. JSON contract의 `supersedes` 블록이 이 관계를 기계가 읽는 형태로 담는다.

@@ -1,7 +1,7 @@
 (** Turn context helpers for keeper tool-call logging.
 
     The context is carried in a per-run {!cell} created at turn setup and
-    threaded to every reader of the same run. RFC-0225 §3.3: the previous
+    threaded to every reader of the same run. The previous
     carrier was a global table keyed by keeper name, so two concurrent runs
     of the same keeper overwrote each other and tool-call rows were logged
     with the wrong run identity (trace_id / keeper_turn_id

@@ -1,4 +1,4 @@
-; The fleet stream over a real loopback socket (RFC-0477): the server's accept
+; The fleet stream over a real loopback socket: the server's accept
 ; loop and the route's serve, the terminal's HTTP client and Masc_tui_fleet_stream.
 ; A reader follows the hub, a keepalive comment is not an event, and a reader
 ; recovers from a server restart with the new server's Snapshot.

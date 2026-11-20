@@ -2,7 +2,7 @@
 
     Openai wire format with Glm-specific extensions:
     - thinking control parameter with type=enabled; [clear_thinking] only when
-      the row declares [preserve_thinking] (RFC-0488)
+      the row declares [preserve_thinking]
     - [reasoning_content] in response message and streaming delta
     - String error codes (e.g., ["1305"])
     - Temperature range 0-1 (not 0-2)
@@ -471,7 +471,7 @@ let%test
      serialize-time branch in the request builder. A config that declares
      [preserve_thinking = true], and one that declares nothing, must echo a
      prior assistant [Thinking] block back as [reasoning_content] unchanged;
-     only a declared [preserve_thinking = false] drops it (RFC-0488 §3.2).
+     only a declared [preserve_thinking = false] drops it.
      Reverting the dialect resolution leaves the GLM dialect at the dead
      [No_replay] default and turns the [preserved] case red. *)
   let preserved =

@@ -53,8 +53,6 @@ between batch construction and ready binding order. The ready order is flattened
 once, rather than rebuilding the graph for each node. This reuses original node
 objects only; inputs, file preparation, Gate decisions and settlements still
 resolve at their original boundaries. It is not a cross-call result cache.
-See the [source comparison](../audits/2026-10-19-composition-dependency-order-reuse.md)
-for traversal counts and measurement limits.
 Read/Edit/Write plans retain supported file capabilities. Overwrite/Append Write
 can bind existing physical parents or the deepest existing ancestor when child
 directories are missing; unsupported paths retain the original exclusive handler.
@@ -78,8 +76,7 @@ without whole-plan scoped admission and transient
 run calls retain their outer descriptor; only their inner ready file leaves overlap.
 Whole-plan resource transfer to the outer named-call SDK batch still requires
 only supported file leaves. A mixed ordinary/file plan keeps its Serial outer
-envelope even when its inner file leaves are ready. See the
-[mixed-plan source comparison](../audits/2026-10-19-mixed-ready-resources.md).
+envelope even when its inner file leaves are ready.
 
 ## Bind original Write resources when inputs become ready
 
@@ -180,15 +177,13 @@ The abstract plan also binds each canonical node to its original resolved
 contract once. Construction validators and later descriptor/input/output/child
 export queries reuse that plan-owned index. Parameter binding and reconstruction
 produce a fresh index and plan identity; previous plan/run outputs remain
-ineligible. See the [plan source comparison](../audits/2026-10-19-composition-plan-contract-index.md)
-for validation/error-order invariants, early-refusal costs and evidence limits.
+ineligible.
 
 File preparation retains the original plan's leaves, member contracts and
 preparation predecessor lists in private immutable ID indexes. Lookup still
 requires the original physical member; aggregate consumption also checks the
 exact input and plan. Dynamic inputs and physical resource/owner checks keep
-their existing validation boundaries. See the [source comparison](../audits/2026-10-19-composition-file-preparation-index.md)
-for lookup costs, unchanged pairwise conflict work and unexecuted scenarios.
+their existing validation boundaries.
 
 The feature scenarios extend `test_keeper_composition_nested` and
 `test_keeper_prepared_edit`. They exercise the real public run Tool, actual

@@ -1,9 +1,0 @@
-ROUTE GET /api/v1/keepers/turns
-ROUTE GET /api/v1/gate/keepers
-ROUTE GET /api/v1/dashboard/scheduled-automation
-ROUTE GET /api/v1/tui/preferences
-ROUTE GET /api/v1/dashboard/health-line
-ROUTE GET /api/v1/operator
-ROUTE PREFIX_GET /api/v1/keepers/
-ROUTE GET /api/v1/dashboard/logs/stream
-ROUTE GET /health @Server_routes_http_routes_frontend

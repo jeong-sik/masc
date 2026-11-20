@@ -5,7 +5,11 @@ module Render_schedule = Masc_tui_render_schedule
     inspect it without stealing the presenter's invalidation signal. *)
 let frame_damaged = Atomic.make false
 
-let note () = Atomic.set frame_damaged true
+(* A console write can come from any thread while the loop sleeps; the bell
+   wakes it to repaint (RFC tui-idle-wait §2.1). *)
+let note () =
+  Atomic.set frame_damaged true;
+  Masc_tui_wake.(ring loop Console_write)
 let damage_pending () = Atomic.get frame_damaged
 
 let request_repaint render_schedule =

@@ -1,4 +1,3 @@
-include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
 module Agent_name_map = Set_util.StringMap
@@ -562,7 +561,7 @@ let task_completed_at (task : Masc_domain.task) =
   | Masc_domain.AwaitingVerification _ -> None
 ;;
 
-(* RFC-0267 Phase 1: pick a goal_id for the wire so the Work board can nest
+(* Pick a goal_id for the wire so the Work board can nest
    jobs under goals. The task record carries no goal_id; the goal_task_links
    registry holds the association.
 
@@ -631,7 +630,6 @@ let task_list_json ~goal_task_index (task : Masc_domain.task) =
 ;;
 
 let agent_json ~model_map (agent : Masc_domain.agent) =
-  let profile = get_agent_profile agent.name in
   let model_value =
     match Agent_name_map.find_opt agent.name model_map with
     | Some model -> `String model
@@ -645,8 +643,8 @@ let agent_json ~model_map (agent : Masc_domain.agent) =
     ; "session_bound_at", `String agent.session_bound_at
     ; "last_seen", `String agent.last_seen
     ; "capabilities", `List (List.map (fun value -> `String value) agent.capabilities)
-    ; "emoji", `String profile.emoji
-    ; "koreanName", `String profile.korean_name
+    ; "emoji", `String agent_emoji
+    ; "koreanName", `String agent.name
     ; "model", model_value
     ]
 ;;
@@ -773,7 +771,7 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
          so other fibers (SSE, health checks) can progress. *)
     Eio.Fiber.yield ();
     let tasks = tasks_safe config in
-    (* RFC-0267 Phase 1: build the task→goals index once; task_json projects the
+    (* Build the task→goals index once; task_json projects the
        canonical goal_id per task from it (registry is SSOT for the linkage). *)
     let goal_task_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let operation_contexts = build_operation_contexts ~tasks in
@@ -947,14 +945,10 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
        | None -> Dashboard_projection_read.keeper_completeness ~listing:keepers_listing ~unread:keepers_unread)})
 ;;
 
-let observe_current ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
+let observe_current ?actor ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in
-  match execution_fixture_name ?fixture () with
-  | Some "execution_smoke" -> {json = execution_smoke_fixture_json (); next_deadline_unix = None;
-      completeness = Dashboard_projection_read.Complete}
-  | Some _ | None ->
-      render_observation ~read_policy:Dashboard_projection_read.Current
-        ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()
+  render_observation ~read_policy:Dashboard_projection_read.Current
+    ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()
 ;;
 
 (* A render that finished as the window closed is the render;
@@ -967,30 +961,27 @@ let render_under_timeout ~clock ~timeout_s render =
     (fun () -> Ok (render ()))
 ;;
 
-let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
+let json ?actor ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in
-  match execution_fixture_name ?fixture () with
-  | Some "execution_smoke" -> execution_smoke_fixture_json ()
-  | _ ->
-    (* Guard: abort render if it exceeds render_timeout_s.
-       PG connection failures during render can block fibers for hours
-       (observed: 11,018s render on 2026-03-21). *)
-    (match
-       render_under_timeout ~clock ~timeout_s:render_timeout_s (fun () ->
-         (render_observation ~read_policy:Dashboard_projection_read.Reuse
-            ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()).json)
-     with
-     | Ok result -> result
-     | Error `Timeout ->
-       Log.Dashboard.error
-         "[dashboard_execution] render timed out after %.0fs"
-         render_timeout_s;
-       `Assoc
-         [ "generated_at", `String (Masc_domain.now_iso ())
-         ; ( "error"
-           , `String (Printf.sprintf "render timed out after %.0fs" render_timeout_s) )
-         ; "status", workspace_status_json config
-         ])
+  (* Guard: abort render if it exceeds render_timeout_s.
+     PG connection failures during render can block fibers for hours
+     (observed: 11,018s render on 2026-03-21). *)
+  match
+    render_under_timeout ~clock ~timeout_s:render_timeout_s (fun () ->
+      (render_observation ~read_policy:Dashboard_projection_read.Reuse
+         ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()).json)
+  with
+  | Ok result -> result
+  | Error `Timeout ->
+    Log.Dashboard.error
+      "[dashboard_execution] render timed out after %.0fs"
+      render_timeout_s;
+    `Assoc
+      [ "generated_at", `String (Masc_domain.now_iso ())
+      ; ( "error"
+        , `String (Printf.sprintf "render timed out after %.0fs" render_timeout_s) )
+      ; "status", workspace_status_json config
+      ]
 ;;
 
 module For_test = struct

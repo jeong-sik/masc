@@ -1,4 +1,4 @@
-(* RFC-0089 — nickname word-list SSOT. The agent-nickname adjective/animal
+(* Nickname word-list SSOT. The agent-nickname adjective/animal
    vocabulary lives once in [Nickname_words] (masc.config). The workspace-side
    generator ([Nickname]) and the auth-side classifier ([Auth_nickname]) both
    read it, so a name the generator produces is always recognized by the auth

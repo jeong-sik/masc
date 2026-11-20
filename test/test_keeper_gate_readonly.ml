@@ -519,7 +519,7 @@ let with_auto_judge f =
   f base_path
 ;;
 
-(* ── script classification through the shell IR (RFC-0421) ─────────── *)
+(* ── script classification through the shell IR ────────────────────── *)
 
 let observation label script =
   check bool (label ^ " is observation") true (Readonly.classify_script script |> is_static)
@@ -596,7 +596,7 @@ let test_script_classification_unit () =
 ;;
 
 let test_substitution_children_supply_the_reason () =
-  (* RFC shell-ir-typed-command-substitution: a substitution's child stages
+  (* A substitution's child stages
      classify first.  A child that needs observation supplies the reason;
      children that all classify static still leave the parent's argv
      unproven — the substituted text is not on the line. *)
@@ -734,7 +734,7 @@ let test_auto_judge_allows_microvm_observation_without_queueing () =
   | Keeper_gate.Unavailable _ -> fail "microvm observation request made the queue unavailable"
 ;;
 
-(* ── the box between the tables and the judge (RFC-0422) ──────────────── *)
+(* ── the box between the tables and the judge ─────────────────────────── *)
 
 (* An argv the tables do not answer, on the profile the fleet runs. *)
 let boxed_request base_path =
@@ -1004,8 +1004,7 @@ let test_auto_judge_defers_a_refused_observe_run () =
   in
   deferred_to_the_judge "a refused observe run" decision;
   (* And the judge is shown why the box could not be built: the row the
-     deferral wrote carries the kind, the status and the shim's stderr
-     (RFC-0422 §3.3). *)
+     deferral wrote carries the kind, the status and the shim's stderr. *)
   match decision with
   | Keeper_gate.Deferred { approval_id; _ } ->
     (match Keeper_approval_queue.get_pending_entry_for_workspace ~base_path ~id:approval_id with

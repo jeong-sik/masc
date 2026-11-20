@@ -64,7 +64,6 @@ let author_label : Author.t -> string = function
   | Author.Local_operator -> "the local operator"
   | Author.System_cron -> "the system cron"
   | Author.System_maintenance -> "the system maintenance"
-  | Author.System_migration -> "the system migration"
 ;;
 
 let refusal_to_string = function
@@ -127,6 +126,6 @@ let apply t ~(author : Author.t) ~at_ms ~is_active (event : E.t) =
   | Author.Authenticated (Principal.Human id), E.Revoked { pat_id } -> revoke t ~author:id ~pat_id
   | Author.Authenticated (Principal.Service _ as principal), (E.Issued _ | E.Revoked _) ->
     Error (Not_a_human principal)
-  | ( (Author.Local_operator | Author.System_cron | Author.System_maintenance | Author.System_migration)
+  | ( (Author.Local_operator | Author.System_cron | Author.System_maintenance)
     , (E.Issued _ | E.Revoked _) ) -> Error (Not_a_pat_author author)
 ;;

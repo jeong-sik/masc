@@ -207,7 +207,7 @@ let lines ~ko ~now fetched ~keeper_name =
   let say korean english = if ko then korean else english in
   match Masc_tui_fetched.view_for ~equal:String.equal fetched ~key:keeper_name with
   | Masc_tui_fetched.Absent -> [ Dim, say "읽기 전" "not read yet" ]
-  | Masc_tui_fetched.Loading -> [ Dim, say "읽는 중\xe2\x80\xa6" "reading\xe2\x80\xa6" ]
+  | Masc_tui_fetched.Loading -> [ Dim, say "읽는 중" "reading" ]
   | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail ->
     (* The detail pane's one shape for a read that failed: what was read,
        "read failed", then the reason (RFC tui-one-screen-grammar §2). *)

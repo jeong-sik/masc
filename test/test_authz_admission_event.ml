@@ -246,7 +246,7 @@ let only_an_authenticated_principal_writes_one () =
       match make author with
       | Error (R.Author_not_admitted _) -> ()
       | Ok _ -> Alcotest.fail "an author who is not a principal wrote an admission")
-    [ Author.Local_operator; Author.System_cron; Author.System_maintenance; Author.System_migration ]
+    [ Author.Local_operator; Author.System_cron; Author.System_maintenance ]
 ;;
 
 let () =

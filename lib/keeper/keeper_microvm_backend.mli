@@ -85,7 +85,7 @@ type request_delivery =
       (** The guest's first process is the shim's agent
           ([masc-exec-shim --serve]), and the runtime publishes its socket on
           the host ([container run --publish-socket]). Each request is one
-          connection to that socket (RFC microvm-guest-agent-over-socket). *)
+          connection to that socket. *)
   | Exec_per_request of exec_runtime
       (** One [exec] of the shim per request, through the runtime's CLI. *)
 
@@ -113,7 +113,7 @@ type guest_constraint =
   | Scratch_tmpfs
       (** An in-memory filesystem at {!scratch_guest_root}, so the shim has
           somewhere to make a boxed request's scratch while the rootfs stays
-          read-only (RFC-0422). *)
+          read-only. *)
 
 val scratch_guest_root : string
 (** {!Exec_ssh_protocol.default_scratch_root}: the path the boot mounts the

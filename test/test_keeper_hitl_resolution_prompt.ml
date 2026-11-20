@@ -5,8 +5,7 @@ open Masc
    under the config/prompts/keeper.gate_replay prefix; without a loaded
    registry the
    execution path falls back to bare data and the wording assertions below
-   see nothing. Same repo-root idiom test_tool_task_coverage uses — that
-   executable passes inside the CI sandbox, so the mechanism is CI-proven. *)
+   see nothing. *)
 let () =
   Prompt_defaults.init ()
 ;;

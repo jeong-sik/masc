@@ -1,4 +1,4 @@
-(* RFC-0088 §4 Option A — typed event for the Workspace async-context-free
+(* Typed event for the Workspace async-context-free
    telemetry drop counter [Otel_metric_store.metric_workspace_telemetry_drop].
 
    See [.mli] for the public contract. The wire strings are chosen to be

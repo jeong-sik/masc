@@ -152,6 +152,10 @@ val density_of_string : string -> density option
 val density_title : ko:bool -> density -> string
 (** Compact screen-language label for the inline density indicator ([1줄]/[2줄], [1L]/[2L]). *)
 
+val supports_density : view -> bool
+(** Whether [Two_lines] draws an extra line on this view ([Plain], [By_state],
+    and [By_cause]). Views where density is a no-op omit the density chip. *)
+
 val shows_portrait : view -> density -> bool
 (** Whether the list draws the selected Keeper's portrait above its rows:
     only the [Plain] view in [Two_lines]. The axis views spend those rows on

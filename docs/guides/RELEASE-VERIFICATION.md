@@ -74,7 +74,7 @@ declared essential behavior profile run against the same candidate SHA. A
 reviewed versioned profile must record its exact suites and identity in the
 candidate receipt; it cannot be reduced after a failure to manufacture a pass.
 Full repository regression (`test.yml` root `@runtest`) remains a separate
-manual/scheduled validation lane recorded in the candidate ledger (`run id`,
+manual validation lane recorded in the candidate ledger (`run id`,
 `head`, `TARGET_SUITES`, or `미실행` if not run on that candidate), while
 `release-candidate.yml` enforces the explicit essential behavior selection in
 `config/release-behavior.json` (`release-behavior.yml`).

@@ -75,7 +75,7 @@ function keeperTraceNameFromEvent(event: SSEEvent, fallback: string): string {
   )
 }
 
-// Per-turn cache observability (RFC-0382). Two sources with different
+// Per-turn cache observability. Two sources with different
 // semantics, shown side by side and never merged: `cache_read_tokens` is
 // usage-reported by cloud providers; `cache_n`/`prompt_n` are wire timings
 // (llama-server, Ollama) — KV-reused vs freshly prefilled prompt tokens.
@@ -426,7 +426,7 @@ function handleEvent(event: SSEEvent): void {
         break
       }
     case 'fusion_run_status':
-      // RFC-0266 §7 Phase 4: a fusion run changed state (running →
+      // A fusion run changed state (running →
       // completed/failed). Re-fetch the registry snapshot, which is the SSOT;
       // the event is only a change trigger, never the source of truth, so a
       // missed/duplicated event self-heals on the next change or route visit.

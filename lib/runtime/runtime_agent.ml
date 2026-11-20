@@ -201,7 +201,7 @@ let transport_for_provider
      (see the note above). *)
   observed_http_transport ~sw ~net ?clock ?body_timeout_s ()
 
-(* Typed field first (RFC-0371 B12), then the config name. The id is not
+(* Typed field first, then the config name. The id is not
    parsed out of the "runtime:<id>/runtime" spelling in the human-facing
    [description], which is display-only. *)
 let runtime_id_of_config (config : config) =
@@ -535,7 +535,7 @@ let multimodal_capability_error ~provider_label ~required ~supported ~reason =
        })
 
 (* Pure accept predicate shared by the dispatch capability gate
-   ([validate_content_blocks_against_capabilities]) and the RFC-0265 modality
+   ([validate_content_blocks_against_capabilities]) and the modality
    reroute decision ([decide_modality_reroute]). A single predicate guarantees
    the invariant: a runtime the reroute picks as "capable" is exactly a runtime
    the gate would admit, so a reroute never lands on a runtime the gate then
@@ -545,7 +545,7 @@ let caps_admit_required_modalities
   List.for_all (supports_required_modality caps) required
   && not (requires_text_media_projection caps ~required)
 
-(* RFC-0265 follow-up — graceful media degrade. When no configured runtime can
+(* Graceful media degrade. When no configured runtime can
    accept a turn's input modality (the reroute floor [No_capable_runtime]),
    instead of the loud terminal reject the caller strips the unsupported media
    blocks and proceeds on text. These helpers are the pure block/message
@@ -825,7 +825,7 @@ let media_candidates () =
   let runtimes, media_failover = Runtime.runtimes_and_media_failover () in
   media_candidates_of ~runtimes ~media_failover
 
-(* RFC-0440 §3: an image turn walks the candidates that take the image, in the
+(* An image turn walks the candidates that take the image, in the
    order the candidate set gives them. A text-only candidate is not part of
    that walk; the driver walks the rest of the lane after it, in declared
    order, as the degrade tail. A run that requires no media has no media walk
@@ -874,7 +874,7 @@ let validated_model_input_projection (config : config) =
           ~provider_label:label caps (content_blocks_of_messages projected) in
       projected) config.model_input_projection
 
-(* RFC-0265: capability-driven proactive runtime reroute. A pure decision from
+(* capability-driven proactive runtime reroute. A pure decision from
    the turn's required input modalities and the candidate runtimes' declared
    capabilities — no I/O, no provider liveness (liveness-aware skipping is
    deferred to RFC-0260), so two identical turns reroute identically. The caller
@@ -1062,7 +1062,7 @@ let dashboard_status_of_stop_reason = function
 let record_dashboard_agent_core_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_core.Types.api_response) =
   try
-    (* RFC-0132 PR-2: dashboard surface = external boundary; redact via SSOT. *)
+    (* Dashboard surface = external boundary; redact via SSOT. *)
     Dashboard_agent_core_bridge.record_response
       ~provider_id:
         (Boundary_redaction.to_string Boundary_redaction.runtime_provider_label)

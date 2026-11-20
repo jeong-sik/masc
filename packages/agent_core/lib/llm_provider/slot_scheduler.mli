@@ -1,9 +1,8 @@
 (** Slot scheduler for LLM requests.
 
     When capacity is exhausted, requests are queued by their
-    {!Admission_class.t}. Within a class, slots are granted in arrival order.
-    A scheduler created without a priority run limit has a single queue, so
-    every request is granted in arrival order whatever its class.
+    {!Admission_class.t} in [Priority > Standard > Background] order. Within a
+    class, slots are granted in arrival order.
 
     Cancel-safe: whether a waiter owns a slot once its wait has ended is
     decided by the waiter's state transition, not by how the wait ended. A
@@ -26,7 +25,11 @@ type t
     [Standard] request. Each class keeps arrival order; both lower classes
     receive bounded service while higher classes keep arriving. The bound
     counts permit grants, not elapsed time, and does not preempt holders.
-    With [None] there is one queue.
+
+    With [priority_run_limit = None], strict [Priority > Standard > Background]
+    ordering applies with zero artificial run-limit default, zero priority
+    weights, and zero concurrency cap on [Background] when higher-priority queues
+    are empty.
 
     @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
 val create : max_slots:int -> priority_run_limit:int option -> t
@@ -34,13 +37,8 @@ val create : max_slots:int -> priority_run_limit:int option -> t
 (** Change the allowance of a scheduler that may have holders and waiters.
     A raised [max_slots] hands the new slots to waiters at once. A lowered
     one takes effect as holders return slots: no slot is handed on while
-    more than [max_slots] are held. A waiter keeps the queue it joined; a
-    request queued after the change joins by the new run limit. After
-    removing a limit, old [Priority] waiters drain first, then old
-    [Background] waiters, then the shared [Standard] queue. That temporarily
-    promotes the finite old background queue; global arrival order is not
-    preserved across reconfiguration. A waiter's cancellation still removes
-    it from its original queue.
+    more than [max_slots] are held. Every waiter remains in its class queue
+    across reconfiguration.
 
     @raise Invalid_argument if [max_slots < 1] or [limit < 1]. *)
 val reconfigure : t -> max_slots:int -> priority_run_limit:int option -> unit
@@ -51,9 +49,8 @@ type wait_end =
   | Wait_expired  (** Only a bounded wait ({!with_permit_until}) expires. *)
 
 (** Run [f] with a permit. If all slots are in use, the request queues as
-    [admission_class] (one shared queue when the scheduler has no run
-    limit). Raises the original exception if [f] fails; the permit is still
-    released.
+    [admission_class]. Raises the original exception if [f] fails; the permit is
+    still released.
 
     [on_queue] watches waits: it runs when the request joins the queue, and
     the function it returns runs once when that wait is granted (before [f])

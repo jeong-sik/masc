@@ -1,4 +1,4 @@
-(** RFC-0233 §2.2 — closed identity for keeper prompt-assembly blocks.
+(** Closed identity for keeper prompt-assembly blocks.
 
     Each constructor names one injection site of the per-turn context
     assembly. Adding a new injection site without extending this variant
@@ -20,12 +20,12 @@
     [Goals_awaiting_proof] names the Goals in [Verifying]: completion was
     requested and the verifier is judging the proof. It exists only while one
     is. The [Active_goals] rows carry no such mark, so a Goal entering or
-    leaving [Verifying] does not change the System (RFC-0491 §3.3).
+    leaving [Verifying] does not change the System.
     [Constitution_amendments] names the world articles written or taken back
-    since the turn's System rendered its [<norms>] (RFC-0491 §3.2). That
+    since the turn's System rendered its [<norms>]. That
     delta exists only beside a System rendered with articles the world has
     since changed. The same id names the complete current article set of a
-    turn that carries one (RFC-0504 §2.4), whatever its System was rendered
+    turn that carries one, whatever its System was rendered
     with.
     [Dynamic_context] is the remaining composite soft-context string built by
     keeper_turn.ml/keeper_run_prompt.ml (continuity snapshot, skill
@@ -39,7 +39,7 @@
     official-client resumes compare and deliver these two blocks separately.
 
     [Recalled_memory_status] and [Recalled_memory] are the two texts of a recall
-    judgment (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, section 4.4). The
+    judgment. The
     status line says what the judgment came to, names its turn and lists the
     ids it carried. The body holds those memories and exists only when the
     judgment carried some. A Keeper whose recall judgment is off has neither.
@@ -48,7 +48,7 @@
     tool surface. It exists because nothing else says they are there to a model
     that does not read tool descriptions: keeper prompt blocks mentioned Skills
     only through [current_task.skills] / [held_task.skills], which render only
-    when a task names one, and 0 of 292 recorded tasks ever did (RFC-0411 §1.5).
+    when a task names one, and 0 of 292 recorded tasks ever did.
     Measured 2026-09, Skills were opened 250 times across 108,185 tool calls,
     and the busiest runtime opened none in 24,041 calls.
 
@@ -56,7 +56,7 @@
     the running turn began. The queue is read between turns, so a row that
     arrives during a turn waited for the turn to end; this block shows it on
     the next provider round that follows tool results, once, and the row stays
-    queued (docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md). A chat
+    queued. A chat
     request waits in the owner's operation queue, which no round reads; the
     same block says how many are queued each time that count rises
     (docs/rfc/RFC-backlog-never-preempts-a-running-turn.md, 3.5). It is

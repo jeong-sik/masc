@@ -1,4 +1,4 @@
-(** The HTTP/2 adapter (RFC-0512 D2). One h2 stream becomes one
+(** The HTTP/2 adapter. One h2 stream becomes one
     {!Http_reqd.t} and runs {!Server_http_ingress.serve}, the same entry
     HTTP/1.1 runs, so the route table is the only place a route exists. *)
 

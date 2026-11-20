@@ -1,5 +1,5 @@
 (** Recipient_resolution — which of the names written after [@] are
-    recipients (RFC-at-name-resolves-to-declared-recipient).
+    recipients.
 
     {!Board_addressing.parse} finds the names in a text.  Such a name is only
     a {e candidate}: the [check] in [dune build @check] is a dune alias, not a

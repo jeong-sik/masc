@@ -125,7 +125,7 @@ type gate_binding = { approval_ids:string list; obligations:gate_obligation list
 let gate_binding ~(preparation : gate_preparation) ~approval_ids ~obligations ~runtime_suffix =
   let* () = match preparation with
     | Prepared_agent_core {reference;canonical_checkpoint_bytes} ->
-      (* The bytes are a checkpoint head (RFC-0476 §3.2): its content digest
+      (* The bytes are a checkpoint head: its content digest
          and its header's session and turn must be the reference's. *)
       let* head = Agent_core.Checkpoint_objects.head_of_string canonical_checkpoint_bytes
         |> Result.map_error (fun _ -> "invalid canonical Gate preparation checkpoint") in

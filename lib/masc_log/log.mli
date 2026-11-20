@@ -126,7 +126,7 @@ val legacy_traceln : level:level -> ?module_name:string -> string -> unit
 
 (** In-memory ring buffer exposed for dashboard log viewer routes. *)
 module Ring : sig
-  (** RFC-0079: typed entry.  Wire format keeps [level] and [source] as
+  (** Typed entry.  Wire format keeps [level] and [source] as
       their canonical strings (see {!level_to_string} / {!source_to_string});
       the dashboard schema in [dashboard/src/api/schemas/logs.ts] mirrors
       that wire format. *)
@@ -335,7 +335,7 @@ module Gate : LOGGER
 module Transport : LOGGER
 module Keeper : LOGGER
 module Runtime : LOGGER
-(** RFC-0058 Phase 8.1.5: runtime-domain namespace for catalog,
+(** runtime-domain namespace for catalog,
     routing, and partial-parse events. Separated from {!Keeper} so
     alerting/dashboard filters can target runtime subsystem without
     keeper-domain false positives. *)

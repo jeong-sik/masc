@@ -491,6 +491,10 @@ let approval_answer =
   b ~role:Acts ~ko:"질문에 답하기" Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
 let approval_answer_hint = key_hint approval_answer
+let approval_answer_hint_for ~lang =
+  match lang with
+  | Masc_tui_types.Lang_ko -> key_hint ~label:approval_answer.label_ko approval_answer
+  | Masc_tui_types.Lang_en -> approval_answer_hint
 let approval_installation_results =
   b ~role:Acts ~ko:"설치 결과" Act "g" "installation Results"
     ~help:"after answering an installation's question, open that installation's Results in Plugins, where the reveal appears"
@@ -2777,10 +2781,10 @@ let entries ~lang bindings =
   List.map
     (fun { key; label; label_ko; help; _ } ->
        ( key
-       , match help, lang with
-         | Some sentence, (Lang_ko | Lang_en) -> sentence
-         | None, Lang_ko -> label_ko
-         | None, Lang_en -> label ))
+       , match lang, help with
+         | Lang_ko, _ -> label_ko
+         | Lang_en, Some sentence -> sentence
+         | Lang_en, None -> label ))
     bindings
 
 (* The reader's own surface first, then the keys that work everywhere, then
@@ -2795,6 +2799,44 @@ let entries ~lang bindings =
    no section of its own simply matches nothing and the sheet reads as it did
    before this argument existed. *)
 let here_marker = " \xc2\xb7 you are here"
+
+let here_marker_for = function
+  | Lang_ko -> " \xc2\xb7 현재 화면"
+  | Lang_en -> here_marker
+
+let help_surface_title ~lang title surface =
+  match lang with
+  | Lang_en -> title
+  | Lang_ko -> (
+      match surface with
+      | Overview -> "운영"
+      | Planning -> "작업"
+      | Keepers Keeper_list -> "키퍼"
+      | Metrics -> "운영 › 사용량"
+      | Board -> "작업 › 게시판"
+      | Repositories -> "워크스페이스"
+      | Config -> "시스템"
+      | Acting -> "활동"
+      | Keepers Keeper_detail -> "키퍼 상세"
+      | Keepers Keeper_message -> "채팅"
+      | Keepers Keeper_logs -> "키퍼 › 로그"
+      | Keepers Keeper_calls -> "키퍼 › 호출"
+      | Keepers Keeper_runtime_pick -> "키퍼 › 런타임"
+      | Lanes -> "기능·플러그인"
+      | Clients -> "기능·플러그인 › 클라이언트"
+      | Approvals -> "승인"
+      | Verification -> "작업 › 검토"
+      | Harness -> "작업 › 판정"
+      | Fusion -> "Fusion"
+      | Schedules -> "키퍼 › 일정"
+      | Memory -> "기억"
+      | Code -> "워크스페이스 › 코드"
+      | Changes -> "변경 사항"
+      | Runtime -> "시스템 › 런타임"
+      | Resources -> "기능·플러그인 › 리소스"
+      | Tools -> "기능·플러그인 › 도구"
+      | System_logs -> "시스템 › 로그"
+      | Connectors -> "연결")
 
 (* The Keeper detail tabs. Until 2026-08-30 the renderer drew these as
    hand-written strings in its own [tab_hint] match, so the detail tabs were
@@ -2956,6 +2998,8 @@ let work_task_detail_bindings =
    answer for none. The sheet reads the sections, the key reference reads the
    surface as well, for the paragraphs under a table. *)
 let located_sections ~lang ?current () =
+  let ko = lang = Lang_ko in
+  let say korean english = if ko then korean else english in
   let sections =
     List.map
       (fun (title, surface) ->
@@ -2971,9 +3015,14 @@ let located_sections ~lang ?current () =
                     List.map
                       (fun (key, help) ->
                          ( key
-                         , Printf.sprintf "on the %s tab: %s"
-                             (Masc_tui_types.keeper_detail_tab_label tab)
-                             help ))
+                         , if ko then
+                             Printf.sprintf "%s 탭: %s"
+                               (Masc_tui_types.keeper_detail_tab_title ~ko:true tab)
+                               help
+                           else
+                             Printf.sprintf "on the %s tab: %s"
+                               (Masc_tui_types.keeper_detail_tab_label tab)
+                               help ))
                       (entries ~lang (keeper_detail_tab_bindings tab)))
                  Masc_tui_types.keeper_detail_tabs
            (* The fact browser and the reading its Enter opens have the same
@@ -2982,19 +3031,19 @@ let located_sections ~lang ?current () =
               where they look, so both rows go there with the screen named. *)
            | Memory ->
                List.map
-                 (fun (key, help) -> (key, "in the facts browser: " ^ help))
+                 (fun (key, help) -> (key, say "사실 목록: " "in the facts browser: " ^ help))
                  (entries ~lang bindings_memory_facts)
-               @ List.map (fun (key, help) -> (key, "in the changes browser: " ^ help))
+               @ List.map (fun (key, help) -> (key, say "변경 목록: " "in the changes browser: " ^ help))
                    (entries ~lang bindings_memory_changes)
                @ List.map
-                   (fun (key, help) -> (key, "in the fact detail: " ^ help))
+                   (fun (key, help) -> (key, say "사실 상세: " "in the fact detail: " ^ help))
                    (entries ~lang bindings_memory_fact_detail)
            | Lanes ->
                List.map
-                 (fun (key, help) -> (key, "in a lane's run list: " ^ help))
+                 (fun (key, help) -> (key, say "레인 실행 목록: " "in a lane's run list: " ^ help))
                  (entries ~lang (lane_run_list_bindings ~has_runs:true ~has_older:true))
                @ List.map
-                   (fun (key, help) -> (key, "in a run's detail: " ^ help))
+                   (fun (key, help) -> (key, say "실행 상세: " "in a run's detail: " ^ help))
                    (entries ~lang lane_run_detail_bindings)
                @ entries ~lang [preflight_detail_binding]
            | Planning -> entries ~lang work_task_detail_bindings
@@ -3010,7 +3059,7 @@ let located_sections ~lang ?current () =
             page -- the reader's own section and nothing behind it -- is
             where a new reader finds them, quit among them (RFC
             tui-one-screen-grammar section 4). *)
-         (surface, (title, entries ~lang (for_surface surface) @ tab_entries)))
+         (surface, (help_surface_title ~lang title surface, entries ~lang (for_surface surface) @ tab_entries)))
       help_surfaces
   in
   let here, rest =
@@ -3019,8 +3068,9 @@ let located_sections ~lang ?current () =
     | Some current ->
         List.partition (fun (surface, _) -> surface = current) sections
   in
-  List.map (fun (surface, (title, keys)) -> (Some surface, (title ^ here_marker, keys))) here
-  @ (None, ("Global", entries ~lang global))
+  let marker = here_marker_for lang in
+  List.map (fun (surface, (title, keys)) -> (Some surface, (title ^ marker, keys))) here
+  @ (None, (say "전역" "Global", entries ~lang global))
     :: (List.map (fun (surface, section) -> (Some surface, section)) rest
         (* The marks last, as reference, the way the slash commands read as
            reference. One reader of them has no words beside it: the Keepers
@@ -3036,12 +3086,12 @@ let located_sections ~lang ?current () =
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
         @ List.map (fun section -> (None, section))
-        [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+        [ (say "키퍼 상태 기호" "Keeper marks", Masc_tui_keeper_mark.legend)
           (* The Keepers header words and the Mode S letters. They were two
              rows above every roster: an empty roster spent them on columns
              it had nothing in, a narrow one on columns it did not draw, and
              beside the Activity pane both rows were cut. *)
-          ; ("Keeper columns", Masc_tui_keeper_mark.column_legend)
+          ; (say "키퍼 열 안내" "Keeper columns", Masc_tui_keeper_mark.column_legend)
           (* The Board's first column is the only place these three appear, and
              the column has no room for a legend of its own: its header already
              spends three rows and the hearth row is cut at 150 columns. *)
@@ -3051,30 +3101,30 @@ let located_sections ~lang ?current () =
              Same move as the Keeper columns above: the row goes, the sheet
              keeps the words, and the glyphs now come from the function the
              column draws with. *)
-          ; ("Memory marks", Masc_tui_memory_mark.legend)
-          ; ("Board marks", Masc_tui_board_kind_mark.legend)
+          ; (say "기억 상태 기호" "Memory marks", Masc_tui_memory_mark.legend)
+          ; (say "게시판 종류 기호" "Board marks", Masc_tui_board_kind_mark.legend)
           (* The Code tree's file marks. A folder takes the arrow and a file
              takes its kind's mark, and neither carries a word -- the name
              beside it says the extension the mark was read from, not what the
              mark means. Seven marks drew with nothing anywhere saying so. *)
-          ; ("File marks", Masc_tui_file_icon.legend)
+          ; (say "파일 종류 기호" "File marks", Masc_tui_file_icon.legend)
           (* Planning's own legend says the marks its list is drawing, which
              is what keeps that line inside a narrow frame -- so a mark no
              goal carries right now has nowhere else to be explained. Here. *)
-          ; ("Judge marks", Masc_tui_planning_proof_mark.legend)
+          ; (say "판정 기호" "Judge marks", Masc_tui_planning_proof_mark.legend)
           (* The marks and phrases on a chat's tool and skill rows. Six
              outcome marks, eight skill phrases and two words of proof sat on
              every transcript with nothing anywhere saying what one meant;
              an operator reading them asked what "받아서 씀" received and
              wrote (2026-09-14). *)
-          ; ("Chat marks", Masc_tui_keeper_chat_transcript.legend)
+          ; (say "채팅 기호" "Chat marks", Masc_tui_keeper_chat_transcript.legend)
           (* The first column of Config's two list panes. The prompt registry
              draws three marks and the params list two, and the words for
              them were only in the detail pane below the list -- for the one
              row the cursor was on. A reader scanning twenty rows could tell
              a marked row from an unmarked one and not what the mark said. *)
-          ; ("Prompt marks", Masc_tui_config_mark.prompt_legend)
-          ; ("Param marks", Masc_tui_config_mark.param_legend)
+          ; (say "프롬프트 기호" "Prompt marks", Masc_tui_config_mark.prompt_legend)
+          ; (say "매개변수 기호" "Param marks", Masc_tui_config_mark.param_legend)
           ])
 
 let help_sections ~lang ?current () = List.map snd (located_sections ~lang ?current ())
@@ -3223,42 +3273,44 @@ let agenda_bindings =
 
 let help_sections_for_state ~cols (state : state) =
   let lang = state.ui_language in
+  let say korean english = if lang = Lang_ko then korean else english in
   let active =
-    if state.about_open then Some ("About", about_bindings)
-    else if state.context_inspector_open then Some ("Context", context_bindings ~cols state)
+    if state.about_open then Some (say "소개" "About", about_bindings)
+    else if state.context_inspector_open then Some (say "컨텍스트" "Context", context_bindings ~cols state)
     else if Option.is_some state.queue_panel then
-      Option.map (fun panel -> "Queue", queue_bindings state panel) state.queue_panel
-    else if state.agenda_open then Some ("Agenda", agenda_bindings)
+      Option.map (fun panel -> say "대기열" "Queue", queue_bindings state panel) state.queue_panel
+    else if state.agenda_open then Some (say "오늘 할 일" "Agenda", agenda_bindings)
     else if state.view = Lanes && Option.is_some state.exact_activity_open then
-      Some ("Exact activity", exact_activity_bindings)
+      Some (say "정확 실행 활동" "Exact activity", exact_activity_bindings)
     else if state.view = Lanes && Option.is_some state.machine_activity_open then
-      Some ("Machine activity", exact_activity_bindings)
+      Some (say "머신 활동" "Machine activity", exact_activity_bindings)
     else if Option.is_some state.voice_agent_voices then
       let bindings =
         match state.voice_agent_voices with
         | Some session -> voice_agent_bindings_for_saving session.vas_saving
         | None -> voice_agent_bindings
       in
-      Some ("Keeper voices", bindings)
+      Some (say "키퍼 음성" "Keeper voices", bindings)
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       let routes = state.runtime_detail_target = Some Runtime_routes in
-      Some ("Runtime detail", runtime_detail_bindings_for ~routes)
+      Some (say "런타임 상세" "Runtime detail", runtime_detail_bindings_for ~routes)
     else if state.view = Runtime && Option.is_some (runtime_parent state) then
       Option.map (fun parent ->
-        "Runtime editor", runtime_parent_bindings parent)
+        say "런타임 편집" "Runtime editor", runtime_parent_bindings parent)
         (runtime_parent state)
     else if state.view = Acting && Option.is_some state.acting_detail then
-      Some ("Event evidence", bindings_acting_evidence)
+      Some (say "이벤트 근거" "Event evidence", bindings_acting_evidence)
     else if state.view = Code && state.code_focus_file = Right_pane
             && state.code_history_open && not state.repository_changes_open then
-      Some ("Code history", code_history_bindings)
+      Some (say "코드 이력" "Code history", code_history_bindings)
     else if state.view = Code && state.code_focus_file = Right_pane
             && state.code_notes_open && not state.repository_changes_open then
-      Some ("Code memos", code_notes_bindings)
+      Some (say "코드 메모" "Code memos", code_notes_bindings)
     else if state.view = Repositories && not state.repository_changes_open
             && Option.is_some state.workspace_activity_repo then
       let context = Option.is_some state.workspace_activity_context_scroll in
-      Some ((if context then "Activity context" else "Workspace Activity"),
+      Some ((if context then say "활동 컨텍스트" "Activity context"
+             else say "워크스페이스 활동" "Workspace Activity"),
             workspace_activity_bindings ~context)
     else if state.view = Lanes then
       (match state.lanes_mode with
@@ -3267,7 +3319,7 @@ let help_sections_for_state ~cols (state : state) =
               keys that move; with zone 5 down to the help door, this section
               is where they are. *)
            Some
-             ( "Lane runs",
+             ( say "레인 실행 목록" "Lane runs",
                lane_run_list_bindings
                  ~has_runs:
                    (match state.lane_runs with
@@ -3276,14 +3328,14 @@ let help_sections_for_state ~cols (state : state) =
                  ~has_older:(Option.is_some state.lane_runs_next)
                @ listing_meta )
        | Lanes_run_detail (_, _) ->
-           Some ("Lane run", lane_run_detail_bindings @ [preflight_detail_binding])
+           Some (say "레인 실행" "Lane run", lane_run_detail_bindings @ [preflight_detail_binding])
        | Lanes_overview | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None)
     else None
   in
   match active with
   | None -> help_sections ~lang ~current:state.view ()
   | Some (title, bindings) ->
-      (title ^ here_marker, entries ~lang bindings) :: help_sections ~lang ()
+      (title ^ here_marker_for lang, entries ~lang bindings) :: help_sections ~lang ()
 
 let footer_hints_browser_lane ~lang =
   hints_of_bindings ~lang

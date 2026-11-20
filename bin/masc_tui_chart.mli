@@ -120,6 +120,7 @@ val meter :
   max_value:int ->
   scale:meter_scale ->
   ?label:string ->
+  ?label_style:string ->
   ?suffix:string ->
   ?track_style:string ->
   ?suffix_style:string ->
@@ -127,10 +128,12 @@ val meter :
   unit ->
   string
 (** Bracketless segmented telemetry meter bounded within [width] display cells:
-    optional [label], {!meter_bar}, and right readout ([suffix], defaulting to
-    aligned ["%3d%%"]). When [suffix_style] is omitted, the readout takes
-    {!meter_tip_style} so the figure matches the bar's tip colour; pass
-    [~suffix_style:""] for plain foreground or an explicit SGR to override. *)
+    optional [label] (styled with [label_style] when provided so labels recede
+    behind the bar and readout), {!meter_bar}, and right readout ([suffix],
+    defaulting to aligned ["%3d%%"]). When [suffix_style] is omitted, the
+    readout takes {!meter_tip_style} so the figure matches the bar's tip
+    colour; pass [~suffix_style:""] for plain foreground or an explicit SGR to
+    override. *)
 
 (** {1 Distribution Bars} *)
 

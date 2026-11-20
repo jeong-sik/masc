@@ -15,7 +15,7 @@
 [runtime]
 # The default model id must be known to the AGENT_CORE capability catalog, or the
 # startup capability gate (missing_runtime_model_capabilities ->
-# Missing_catalog_models, RFC-0206)
+# Missing_catalog_models)
 # refuses to boot (a fixture model named "smoke" is absent from the catalog and
 # was rejected, breaking this evidence step on every OCaml push to main).
 # deepseek-v4.1-flash has an ollama_cloud row in the catalog; the provider

@@ -1,4 +1,4 @@
-(** Entry-action observability (RFC-0002): a log side effect only — no
+(** Entry-action observability: a log side effect only — no
     registry state is read or written. *)
 
 (** Emit the lifecycle log line for a [Log_lifecycle] entry action. *)

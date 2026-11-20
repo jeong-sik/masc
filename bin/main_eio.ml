@@ -348,8 +348,6 @@ let sweep_single_user_state (judged : Server_runtime_bootstrap.judged) =
      let started = Unix.gettimeofday () in
      match
        Masc.Keeper_checkpoint_object_sweep.run ~runtime_root
-         ~journal_inputs_dir:(Keeper_journal_preparation.input_directories canonical_base_path)
-         ~journal_input_head:Keeper_journal_preparation.input_checkpoint_basename
      with
      | exception exn ->
        Log.Server.warn "[Startup] checkpoint object sweep raised: %s" (Printexc.to_string exn)
@@ -381,7 +379,7 @@ let sweep_single_user_state (judged : Server_runtime_bootstrap.judged) =
          report.unprotected_files report.unprotected_logical_bytes report.protected_digests
          (original_inventory_elapsed ()) in
        if report.unprotected_files > 0 then Log.Server.warn "%s" message else Log.Server.info "%s" message);
-    (* RFC-0498 layer three a: the settled-archive pass deletes under the same
+    (* The settled-archive pass deletes under the same
        lease, before any settle can run. *)
     let sweep_started = Unix.gettimeofday () in
     (match Server_settled_archive_sweep.run_at_startup ~base_path:canonical_base_path with
@@ -629,7 +627,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      Dashboard_cache.now() reads from Time_compat directly. *)
   Time_compat.set_clock (Eio.Stdenv.clock env);
 
-  (* RFC-0372 Phase 3: register the clock with Dashboard_cache so every
+  (* Register the clock with Dashboard_cache so every
      [get_or_compute] runs under a timeout. Without this the 37 call sites that
      do not pass a clock compute without any ceiling. *)
   Dashboard_cache.set_default_clock (Eio.Stdenv.clock env);
@@ -2054,8 +2052,7 @@ let runtime_wizard_provider_record cfg (provider : Runtime_schema.provider) =
          Codex / Antigravity), not an HTTP endpoint and not an .env key: the
          wizard offers it as a subscription and lets that CLI own the login.
          [command] is the binary the installer probes for with `command -v`;
-         whether that CLI is actually signed in is a later, probe-based step
-         (RFC-0408). *)
+         whether that CLI is actually signed in is a later, probe-based step. *)
       (match runtime_wizard_binding_for_provider cfg provider with
        | Error _ as err -> err
        | Ok binding ->
@@ -3794,7 +3791,7 @@ let build_commit_cmd =
   Cmd.v (Cmd.info "build-commit" ~doc) Term.(const build_commit_cmd_exit $ const ())
 
 (* Build one sandbox recipe into one image store, under a tag that names that
-   build. RFC keeper-sandbox-images-have-versions (#38699) §2.2: the tag is never moved
+   build. (#38699) The tag is never moved
    to new content, so a tag already in the store refuses the build instead of
    being rebuilt in place. *)
 
@@ -4726,62 +4723,6 @@ let runtime_resume_cmd =
   Cmd.v (Cmd.info "runtime-resume" ~doc:"Apply saved model settings to this running workspace after sign-in.")
     Term.(const run $ base_path $ port $ login_agent)
 
-let workspace_upgrade_cmd =
-  let open Masc_cli_workspace_upgrade in
-  let apply = Arg.(value & opt (some string) None & info ["apply"] ~docv:"KEEPER"
-    ~doc:"Back up and upgrade this selected Keeper's known released configuration.") in
-  let source_sha256 = Arg.(value & opt (some string) None & info ["source-sha256"] ~docv:"SHA256"
-    ~doc:"Require the exact configuration digest displayed during assessment.") in
-  let restore = Arg.(value & opt (some string) None & info ["restore"] ~docv:"BACKUP_ID"
-    ~doc:"Restore a selected configuration backup only while its output remains unchanged.") in
-  let run_configuration base_path apply source_sha256 restore =
-    let action = match apply,source_sha256,restore with
-      | None,None,None -> Some Inspect
-      | Some keeper_name,Some source_sha256,None -> Some (Apply {keeper_name;source_sha256})
-      | None,None,Some backup_id -> Some (Restore {backup_id})
-      | _ -> None in
-    match action with Some action -> run ~base_path ~action
-    | None -> prerr_endline "Choose configuration inspection, --apply with --source-sha256, or --restore."; 1 in
-  let argument name docv doc = Arg.(required & opt (some string) None & info [name] ~docv ~doc) in
-  let keeper = argument "keeper" "KEEPER" "Select the existing Keeper journal." in
-  let bundle = argument "bundle" "BUNDLE_ID" "Select a preserved journal bundle." in
-  let trace = argument "trace" "TRACE_ID" "Select the current trace named by Keeper metadata." in
-  let adoption = argument "adoption" "ADOPTION_ID" "Select an exact-input adoption bundle." in
-  let installation = argument "installation" "INSTALLATION_ID" "Select a preserved installation intent." in
-  let journal_source = argument "source-sha256" "SHA256" "Require the exact assessed original journal digest." in
-  let checkpoint = argument "checkpoint-sha256" "SHA256" "Require the exact assessed canonical checkpoint digest." in
-  let adopted = argument "adopted-sha256" "SHA256" "Require the exact assessed derivative journal digest." in
-  let leaf name doc action =
-    Cmd.v (Cmd.info name ~doc) Term.(const (fun base_path action -> run ~base_path ~action) $ base_path $ action) in
-  let journal = Cmd.group (Cmd.info "journal" ~doc:"Offline journal evidence, explicit input adoption and conditional installation.")
-    [leaf "inspect" "Read an existing journal identity without conversion."
-       Term.(const (fun keeper -> Inspect_journal keeper) $ keeper);
-     leaf "prepare" "Preserve the assessed original journal and prepare a private recovery bundle."
-       Term.(const (fun keeper_name source_sha256 -> Prepare_journal {keeper_name;source_sha256}) $ keeper $ journal_source);
-     leaf "bundle" "Verify a preserved journal bundle without installation."
-       Term.(const (fun bundle -> Inspect_journal_bundle bundle) $ bundle);
-     leaf "input" "Assess exact current input evidence against a preserved bundle."
-       Term.(const (fun bundle_id trace_id -> Inspect_journal_input {bundle_id;trace_id}) $ bundle $ trace);
-     leaf "adopt" "Explicitly adopt assessed canonical input into a separate bundle."
-       Term.(const (fun bundle_id trace_id checkpoint_sha256 -> Adopt_journal_input {bundle_id;trace_id;checkpoint_sha256})
-         $ bundle $ trace $ checkpoint);
-     leaf "adoption" "Verify an input-adoption bundle and its actual retained payload."
-       Term.(const (fun adoption -> Inspect_journal_adoption adoption) $ adoption);
-     leaf "installation-plan" "Assess exact original and adopted bytes before offline installation."
-       Term.(const (fun adoption -> Assess_journal_installation adoption) $ adoption);
-     leaf "install" "Replace the unchanged original journal with the explicitly adopted derivative while offline."
-       Term.(const (fun adoption_id source_sha256 adopted_sha256 -> Install_journal {adoption_id;source_sha256;adopted_sha256})
-         $ adoption $ journal_source $ adopted);
-     leaf "installations" "Discover installation intents and per-record errors without creating or repairing evidence."
-       Term.(const List_journal_installations);
-     leaf "installation" "Inspect an intent and classify actual original, adopted, changed or missing bytes."
-       Term.(const (fun installation -> Inspect_journal_installation installation) $ installation);
-     leaf "restore" "Restore original journal bytes only while installed journal and input evidence remain unchanged."
-       Term.(const (fun installation -> Restore_journal_installation installation) $ installation)] in
-  Cmd.group (Cmd.info "workspace-upgrade" ~doc:"Inspect configuration upgrades and manage offline journal recovery.")
-    ~default:Term.(const run_configuration $ base_path $ apply $ source_sha256 $ restore)
-    [journal]
-
 let antigravity_account_cmd =
   let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
   let sign_in = Arg.(value & flag & info ["sign-in"] ~doc:"Open official sign-in in a private account directory.") in
@@ -5142,7 +5083,6 @@ let cmd =
     ; setup_cmd
     ; setup_preflight_cmd
     ; runtime_resume_cmd
-    ; workspace_upgrade_cmd
     ; antigravity_account_cmd
     ; antigravity_models_cmd
     ; antigravity_context_cmd

@@ -1,5 +1,4 @@
-(** Tests for [Tool_definition_toml] — the config/tools/<name>.toml loader
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+(** Tests for [Tool_definition_toml] — the config/tools/<name>.toml loader.
 
     The round-trip cases hold the expected [Masc_domain.tool_schema] as an
     OCaml literal in exactly the shape the hand-written schema modules use

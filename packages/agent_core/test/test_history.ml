@@ -1,4 +1,4 @@
-(** History content types: media by reference (RFC-0476 §3.4, D5). *)
+(** History content types: media by reference. *)
 
 module H = Agent_core_base.History
 module P = Llm_provider.Types

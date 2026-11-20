@@ -1,5 +1,0 @@
-prompt seen before the reply: True
-exit status after the reply: 1
-printed after the reply:
-   | Couldn't log in: That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code.
-credentials file written: False

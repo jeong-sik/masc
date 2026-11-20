@@ -1,5 +1,5 @@
 (** One source-attributed request for changed workspace facts.
-    RFC-workspace-curator-curates-changed-facts section 2.4. This module does
+    This module does
     not call a model or change the ledger. *)
 
 type error =

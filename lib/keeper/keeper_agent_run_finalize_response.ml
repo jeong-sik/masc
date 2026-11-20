@@ -187,10 +187,10 @@ let finalize
     | Keeper_turn_outcome.Awaiting_gate_approval
     | Keeper_turn_outcome.No_visible_reply -> false
   in
-  (* RFC-0385: an internal turn's wake cue and final text are not conversation.
+  (* An internal turn's wake cue and final text are not conversation.
      The history source label is what the turn already carries, so the decision
      comes from it and not from the text. Direct turns keep [direct_assistant]
-     and are unaffected (RFC-0376 4.3). *)
+     and are unaffected. *)
   let exclude_thought_from_replay =
     Keeper_types_support.is_internal_history_source history_assistant_source
   in
@@ -266,7 +266,7 @@ let finalize
        | Ok (patched, replay_suffix_pruned) ->
          (* This save closes the turn: it writes the open messages as the
             turn's bundle, so it runs even when the pipeline already saved
-            these messages (RFC-0476 §3.2). *)
+            these messages. *)
          let save_outcome =
              let save_started_at = Time_compat.now () in
              let save_started_mono = Mtime_clock.now () in
@@ -409,7 +409,7 @@ let finalize
     | Runtime_execution.Official_client, None -> Ok None
   in
   let* saved_checkpoint = saved_checkpoint_result in
-    let (_ : boundary_recording) = record_turn_boundary
+    let boundary_recorded = record_turn_boundary
       ~task_context
       ~config
       ~meta
@@ -423,6 +423,41 @@ let finalize
       ~history_at_start
       ~restart_notice_pending
       saved_checkpoint in
+    (match boundary_recorded, checkpoint_owner, official_client_settlement with
+     | Recorded, Runtime_execution.Official_client,
+       Some
+         { Keeper_official_client_session_store.client_kind
+         ; runtime_id
+         ; phase = Keeper_official_client_session_store.Settled { session_id; _ }
+         ; updated_at
+         ; _
+         } ->
+       (match
+          Keeper_turn_bridge.record_official_client_settlement
+            ~base_path:config.base_path
+            ~keeper_name:meta.name
+            ~turn_ref
+            ~client_kind
+            ~runtime_id
+            ~session_id
+            ~updated_at
+        with
+        | Ok () -> ()
+        | Error detail ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "official-client bridge cursor update skipped turn=%d: %s"
+            (Ids.Turn_ref.absolute_turn turn_ref)
+            detail)
+     | (Recorded | Not_recorded), Runtime_execution.Official_client,
+       ( None
+       | Some
+           { Keeper_official_client_session_store.phase =
+               ( Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ )
+           ; _
+           } )
+     | Not_recorded, Runtime_execution.Official_client, Some { phase = Settled _; _ }
+     | (Recorded | Not_recorded), Runtime_execution.Masc_agent_core, _ -> ());
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge
        boundary. *)

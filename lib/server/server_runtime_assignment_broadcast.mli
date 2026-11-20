@@ -1,5 +1,5 @@
 (** Says that every roster row may have moved when the runtime catalogue is
-    published (RFC-0481 §3.2).
+    published.
 
     A row's runtime id comes from the Keeper's [[runtime.assignments]] entry
     or the default route, and its provider rest walks the whole catalogue: a

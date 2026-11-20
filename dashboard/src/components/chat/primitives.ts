@@ -1593,7 +1593,7 @@ function ChatTraceStep({
   const sourceBadge = traceSourceBadge(step)
 
   if (step.kind === 'think' && step.contentWithheld) {
-    // The server admitted the step without its reasoning (RFC-0358 §2), so
+    // The server admitted the step without its reasoning, so
     // there is nothing to preview, expand, or stream — only the fact and its
     // timestamp. The wording lives here because the read boundary is a policy
     // of this surface, not a property of the run.
@@ -1901,7 +1901,7 @@ function ChatBroadcastBlock(b: ChatBroadcastBlock) {
   `
 }
 
-// RFC-0252: fusion deliberation card. The board post (created by
+// Fusion deliberation card. The board post (created by
 // fusion_sink.ml) holds the full panel answers + judge synthesis in its
 // meta_json; the chat message only carries the board_post_id. We lazy-fetch
 // the post the first time the card is expanded so a collapsed transcript does
@@ -2462,7 +2462,7 @@ function formatAudioDuration(seconds?: number | null): string {
   return `${min}:${sec.toString().padStart(2, '0')}`
 }
 
-// RFC-0235 P1/P3: user-gesture play button for synthesized assistant
+// user-gesture play button for synthesized assistant
 // voice clips. Uses the native `<audio controls>` element (no autoplay).
 function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
   const [loadError, setLoadError] = useState(false)
@@ -4983,7 +4983,7 @@ export function ChatComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // RFC-0236 P1: speak to compose. Voice transcription is saved as a visual draft
+  // Speak to compose. Voice transcription is saved as a visual draft
   // card (VoiceDraft) matching the mockup and board composers.
   const voice = useVoiceInput({
     onTranscribed: (text) => {

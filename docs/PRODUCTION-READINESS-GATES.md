@@ -74,8 +74,7 @@ Default thresholds:
 | dangling provider attempts | 0 |
 | max evidence span per turn | <= 600 seconds |
 
-This gate is intentionally stricter than `keeper-runtime-truth-gate.sh`.  The
-runtime-truth gate proves one turn.  The production gate proves a minimum sample
+The production gate proves a minimum sample
 of terminal turns across the 18+ keeper fleet, enforces per-keeper evidence
 minimums, and reports percentages that can be compared across releases.
 

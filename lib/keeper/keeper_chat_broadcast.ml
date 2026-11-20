@@ -34,7 +34,7 @@ let chat_appended ~keeper_name ?connector ?audio () =
     (* Field is named [connector], not [source]: the dashboard SSE
        vocabulary already reserves [source] for the journal origin
        (JournalSource), and the chat JSONL's own [source] column is a
-       different boundary. [audio] is a separate boundary (RFC-0235): only
+       different boundary. [audio] is a separate boundary: only
        present when the row carries a synthesized clip, and the dashboard
        decodes it into a typed record at the SSE edge. *)
     let fields =

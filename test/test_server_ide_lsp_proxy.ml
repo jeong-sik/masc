@@ -390,7 +390,7 @@ let test_dispatch_workers_are_parallelized () =
     (Lsp.inbound_dispatch_worker_count > 1)
 ;;
 
-(* RFC-0281 Phase 2: [/api/v1/ide/lsp] must be a typed WebSocket-upgrade
+(* [/api/v1/ide/lsp] must be a typed WebSocket-upgrade
    route ([Router.Ws]).  Only a Ws route receives the Gluten [upgrade]
    capability, so a regression to an in-band route would silently
    reintroduce the undriven-socket defect (frames never read).  [add_routes]

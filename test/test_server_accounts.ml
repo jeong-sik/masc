@@ -348,6 +348,10 @@ let refusal_label : Server_accounts.refusal -> string = function
   | Server_accounts.Zone_not_opened error -> "zone not opened: " ^ open_error_label error
   | Server_accounts.Zone_not_trusted uncertain -> "zone not trusted: " ^ uncertain_label uncertain
   | Server_accounts.Zone_not_multi_account mode -> "zone not multi-account: " ^ mode_label mode
+  | Server_accounts.Keeper_definitions_not_named { folder = _; files = first, rest } ->
+    "Keeper definitions not named: " ^ String.concat ", " (first :: rest)
+  | Server_accounts.Keeper_definitions_not_read { folder = _; detail = _ } ->
+    "Keeper definitions not read"
   | Server_accounts.Login_client_refused
       (Server_account_login.Github_client_refused (Login_client.Secret_variable_unset name)) ->
     "github client refused: the variable " ^ name ^ " is not set"
@@ -484,6 +488,21 @@ let test_stops_when_the_accounts_were_turned_off () =
     Alcotest.(check string)
       "the boot over a log that was turned off"
       "zone not multi-account: off"
+      (boot_outcome env ~port:(free_port ()) multi_account))
+;;
+
+(* A multi-account installation runs only the Keepers its authorization log
+   names, and the log names none by the name of a definition yet. A definition
+   in the folder the engine reads them from stops the boot, and the refusal
+   names its file. The folder is the one the engine resolves for the base. *)
+let test_stops_when_the_folder_holds_a_keeper_definition () =
+  with_installation (fun env { base; config = _; store = _; multi_account } ->
+    let folder = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+    write_file (Filename.concat folder "made-up.toml") "[keeper]\n";
+    write_file (Filename.concat folder "made-up.md") "not a definition";
+    Alcotest.(check string)
+      "the boot over a folder that holds a definition"
+      "Keeper definitions not named: made-up.toml"
       (boot_outcome env ~port:(free_port ()) multi_account))
 ;;
 
@@ -1336,6 +1355,10 @@ let () =
             "the boot stops when the accounts were turned off"
             `Quick
             test_stops_when_the_accounts_were_turned_off
+        ; Alcotest.test_case
+            "the boot stops when the folder holds a Keeper definition"
+            `Quick
+            test_stops_when_the_folder_holds_a_keeper_definition
         ; Alcotest.test_case
             "the boot stops when a login client is refused"
             `Quick

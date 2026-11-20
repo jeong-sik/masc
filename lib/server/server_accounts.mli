@@ -101,6 +101,21 @@ type refusal =
           after the boot judged them. *)
   | Zone_not_multi_account of Authz_mode_state.t
       (** The log that opened is not in the mode the boot judged. *)
+  | Keeper_definitions_not_named of
+      { folder : string
+      ; files : string * string list
+      }
+      (** The folder the engine reads Keeper definitions from
+          ([Config_dir_resolver.keepers_dir_for_base_path]) holds these
+          files. A multi-account installation runs only the Keepers its
+          authorization log names, and the log names none by the name of a
+          definition yet (RFC a-persons-keeper-runs-on-the-engine, S1). A
+          folder that is not there holds none. *)
+  | Keeper_definitions_not_read of
+      { folder : string
+      ; detail : string
+      }
+      (** That folder could not be listed. *)
   | Login_client_refused of Server_account_login.refusal
       (** A login client that [config.json] names was refused: the
           environment variable of its secret is not set or holds the empty
@@ -146,8 +161,8 @@ val health_version : string -> string option
     to is read from the kernel
     ({!Server_startup_takeover.account_server_port_holder}). *)
 
-(** Reads the HTTP mode, opens the zone and reads it again, builds the login
-    clients, makes the table, binds [address]:[port], binds the HTTPS listener of the environment,
+(** Reads the HTTP mode, opens the zone and reads it again, looks in the
+    folder of Keeper definitions, builds the login clients, makes the table, binds [address]:[port], binds the HTTPS listener of the environment,
     makes the trust policy, announces the port to the host under [lease]
     ({!Server_startup_takeover.announce_account_server}), publishes the
     access, gives the environment and [sw] to the transport of a login

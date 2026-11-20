@@ -22,6 +22,7 @@
   httpun
   masc
   masc.auth
+  masc.config_dir_resolver
   masc.fs_compat
   masc.masc_eio_context
   masc.masc_types

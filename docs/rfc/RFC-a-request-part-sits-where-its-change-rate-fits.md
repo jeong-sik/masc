@@ -175,7 +175,7 @@ binding 에 두는 까닭:
 - 메시지 분류를 새로 만들지 않는다. 같은 질문(어디서부터 달라졌나)에 답이 둘이 되기 때문이다. snapshot part 의 sha256 은 턴 안 digest 와 같은 값이라 그대로 견준다.
 - 두 깃발이 꺼져 있고 `Appended` 인데 쉰 시간이 선언된 유지 시간보다 길면 「유지 시간 넘김」으로 적는다.
 - 비율이나 문턱으로 까닭을 고르지 않는다. 바이트 비교와 선언된 값만 쓴다.
-- TUI Inspector 는 턴마다 한 줄로 적는다. 예: 「앞부분 13.9만 다시 씀 · 9분 쉼(유지 5분)」.
+- TUI Inspector 는 턴마다 한 줄로 적는다. 예: 「First request on claude.sonnet · cache read 0 · cache created 139.0k · idle 6m55s, past its 5m lifetime · 12 messages kept, 2 added」.
 - Keeper 목록은 오늘 「유지 시간 넘김으로 다시 쓴 토큰」과 「1시간이었다면 든 값」을 보인다. 둘 다 기록에서 계산한다.
 
 기록에서 읽는 것(2026-11-20 코드 기준):
@@ -228,7 +228,10 @@ binding 에 두는 까닭:
   - 5분을 고른 요청 가운데, 유지 시간 넘김 턴이면서 쉰 시간이 3600초 이하인 첫 요청은 다시 쓴 토큰을 읽기 값으로 매긴다.
 - 서버가 계산하고 TUI 는 그리기만 한다(TUI 일관성 작업과 맞춤, 2026-11-20).
   - 계산은 `Keeper_cache_outcome` 이 한다. 원장 걷기는 순수한 상태 기계고, 읽기는 그 위에 얹는다.
-  - TUI Inspector 는 응답 사용량 줄 바로 아래에 한 줄을 둔다. 판정은 `lib/tui_decode` 가 닫힌 variant 로 받고, 시간은 `Masc_tui_value.Interval` 로 적는다.
+  - TUI Inspector 는 응답 사용량 줄 바로 아래에 한 줄을 둔다. 같은 탭의 다른 줄처럼 영어로 적는다.
+  - 응답은 서버와 같은 `Keeper_cache_outcome_reading.of_json` 으로 읽는다. Inspector 는 `masc` 를 링크하지 않아서, 응답 타입을 `masc_types` 에 둔다(운영자 결정, 2026-11-21).
+  - 유지 시간과 찾는 범위는 설정이라 `Masc_tui_value.Interval` 로 적는다(5m, 1h). 쉰 시간은 끝난 길이라 `elapsed_text` 로 적는다(6m55s).
+  - 메시지 변화는 두 요청이 같이 가진 메시지 수로 시작한다. 앞에서부터 달라지면 「0 messages kept」다.
 
 ### 3.3 Anthropic 레인은 도구를 불러올 때 배열을 바꾸지 않는다
 

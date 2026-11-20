@@ -1,7 +1,7 @@
 ---
 rfc: "tui-a-streaming-reply-only-grows-at-its-end"
 title: "스트리밍 중인 답은 뒤에만 붙는 글로 다룬다"
-status: Draft
+status: Implemented (1~3단계 병합 2026-11-21, #54172·#54174. §5 의 5.0ms 목표는 못 미침, §8)
 created: 2026-11-21
 updated: 2026-11-21
 author: claude
@@ -149,3 +149,29 @@ val snapshot : t -> snapshot
 1. `Masc_tui_growing_text` 와 시험(§5 의 같은 글·변이). → 확인: 새 시험 통과, 변이 넷 실패.
 2. 토막·walk 를 바꾼다(§3.2). → 확인: transcript 시험 전부, `test_tui_chat_search_projection` 통과.
 3. 렌더 캐시 입구와 identity(§3.3·§3.4). → 확인: §5 성능 목표, render cache 시험 통과.
+
+## 8. 결과
+
+1~3단계가 병합됐다(#54172, #54174). 같은 stream bench 로 main `4b2be7fd` 와 그 위 #54174 를 두 번씩 쟀다(macOS M3 Max, 2026-11-21).
+
+| | frame 중앙값 | 최솟값 | 최댓값 |
+|---|---|---|---|
+| main | 8.78 / 8.72ms | 7.29 / 7.13ms | 272 / 215ms |
+| #54174 | 5.82 / 5.77ms | 3.15 / 3.09ms | 13.9 / 13.3ms |
+
+- `sample` 10초(UI thread 5,925 sample)에서 MD5, `passes_unchanged`, `escape_invisible`, `String.starts_with` 는 5 sample 아래라 표에 나오지 않는다. §5 의 1% 기준은 맞는다.
+- 중앙값 5.0ms 목표는 못 미친다. §1 의 42% 를 걷어낸 뒤 남은 것은 이렇다.
+  - GC 가 약 67% 다. §6 의 복사들이다.
+  - `Message_layout` 이 frame 마다 본문 전체를 훑는 곳이 셋이다. `body_rows_reusing` 의 `shared_lines`(약 8%), `newest_entry_window` 의 `List.length`, `last_content` 의 `is_blank` 다.
+- `Gc.Memprof` 로 잰 1MB 도착 frame 의 할당은 frame 당 약 87만 word 다.
+
+  | 자리 | 몫 |
+  |---|---|
+  | 렌더 캐시가 행 목록을 다시 잇기(`List.rev_append`) | 26.8% |
+  | `body_rows_reusing` 의 행 배열과 목록 | 26.7% |
+  | `snapshot` 이 닫힌 글을 새 문자열로 복사 | 16.1% |
+  | `lines`·`drawn`·블록 표 배열 | 25.3% |
+
+- 크기별 도착 frame 은 30KB 0.31 → 0.18ms, 300KB 2.92 → 1.72ms, 1MB 11.72 → 6.53ms 다(답 하나에 delta 21번). 아무것도 안 바뀐 frame 은 0.1ms 그대로다.
+- 개행이 아직 없는 토막은 닫힌 부분이 없다. 그래서 snapshot 마다 전체를 바꾸고 digest 한다. 화면용 변환이 `\n` 에서만 나눠도 같기 때문이다(§2).
+- §5 의 변이는 모두 시험에서 실패한다. key 에서 `stretch` 를 빼는 변이는 #54174 에서 빠졌다. 그래서 같은 자리에 다른 토막이 오는 시험(`a new stretch at the same place is not read through the old promise`)을 이 글을 고치는 PR 에서 더했다.

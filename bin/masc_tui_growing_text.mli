@@ -5,7 +5,9 @@
     That conversion splits at a newline: when [a] ends with ['\n'],
     [safe (a ^ b) = safe a ^ safe b]. So each finished line is converted, and
     its MD5 fed, once when it arrives; a snapshot converts only the line that
-    has not ended yet. *)
+    has not ended yet. A stretch with no newline yet has nothing closed, so
+    each snapshot converts and digests all of it. Every snapshot copies the
+    closed text into its [text]. *)
 
 type t
 

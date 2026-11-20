@@ -57,6 +57,22 @@ val order_index : layer_id -> int
 (** Position of a layer in {!ordered} (0-based). Exhaustive over {!layer_id}, so
     a new variant forces an arm here as well as in any [content_of]. *)
 
+(** Who authored the bytes in a context layer (RFC
+    [a-request-part-sits-where-its-change-rate-fits] §3.4). Exhaustive over
+    {!layer_id}, so adding a new layer forces an explicit authorship decision
+    at compile time. *)
+type author =
+  | Host_state
+      (** Rendered exclusively from host-owned store state (ids, counts,
+          revisions, surface presence, schedules). Zero bytes authored by
+          outside speakers, other keepers, or external text ledgers. *)
+  | Outside_text
+      (** Contains at least one byte authored by another keeper, a person, an
+          external service, or a text ledger (goals, tasks, wiki, recall,
+          board, mentions, fleet, or tool-call arguments/errors). *)
+
+val author_of_layer : layer_id -> author
+
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
 
 (** What one span of a rendered world state came from: a typed layer, or text
@@ -75,12 +91,16 @@ val source_of_name : string -> source option
     class in {!resend_on_resume}'s exhaustive match. *)
 type resend_on_resume =
   | Sent_when_changed
-      (** Standing state. The same bytes add nothing the session does not
-          already hold, so they are left out and named as unchanged. *)
+      (** Standing state and repeated unacked lists (including
+          {!Pending_mentions} and {!Fleet_messages} via {!Head_and_rows}). The
+          same bytes add nothing the session does not already hold, so they are
+          left out and named as unchanged. *)
   | Sent_every_resume
-      (** What arrived for this turn: its trigger and its inbox rows. The same
-          bytes on a later turn are a new arrival, as an operator repeating a
-          note is a new utterance, so they are always sent. *)
+      (** What arrived for this turn only: its trigger and per-turn inbox
+          events (Board activity, completion authority, cancellations, schedule
+          attention). The same bytes on a later turn are a new arrival, as an
+          operator repeating a note is a new utterance, so they are always
+          sent. *)
   | Sent_with_other_sections
       (** The frame that heads the sections and says the runtime assembled
           them. It goes out whenever any section does and is left out only

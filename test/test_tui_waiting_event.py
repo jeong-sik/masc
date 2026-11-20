@@ -438,21 +438,12 @@ class WaitingEventTest(unittest.TestCase):
                 server.set_phase("held")
                 event_output_start = len(output)
                 server.events.put((1, "analyst"))
+                # The read in flight over the held rows draws no sentence of its
+                # own; the reading slot says it once the read passes the bar
+                # (RFC tui-one-screen-grammar section 8). The request is the
+                # evidence that it started.
                 wait_until(
                     server.held_read_started.is_set, "first event did not start a read"
-                )
-                wait_until(
-                    lambda: (
-                        any(
-                            marker in output[event_output_start:]
-                            for marker in (
-                                "대기 목록 갱신 중".encode(),
-                                b"waiting refresh pending",
-                                b"waiting inventory: refreshing",
-                            )
-                        )
-                    ),
-                    "waiting refresh was not shown as pending",
                 )
                 server.set_phase("queued")
                 server.events.put((2, "analyst"))

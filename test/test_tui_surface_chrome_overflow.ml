@@ -54,7 +54,7 @@ let draw ?(frame = Chrome_screen) ?hand ~overflow ~count state =
     List.iter (fun index -> c.push (row_text index)) (List.init count Fun.id);
     Option.iter (fun hand -> Option.iter c.position (hand ~budget)) hand
   in
-  drawn_position := surface_chrome_position ~overflow state ~terminal_rows ~body;
+  drawn_position := surface_chrome_position ~frame ~overflow state ~terminal_rows ~body;
   let drawn, clamped =
     surface_chrome ~overflow ~frame state ~terminal_rows ~cols
       ~surface_key:"surface-chrome-overflow" ~title:"probe" ~hints ~body

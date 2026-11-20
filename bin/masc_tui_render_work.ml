@@ -478,15 +478,6 @@ let planning_phase_mark = function
   | Goal_phase.Blocked _ -> Masc_tui_value.Mark.Failed
   | Goal_phase.Dropped -> Masc_tui_value.Mark.Paused
 
-let planning_phase_sidebar_glyph = function
-  | Goal_phase.Awaiting_confirmation -> "\xe2\x97\x86" (* ◆ *)
-  | Goal_phase.Executing -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
-  | Goal_phase.Verifying -> "\xe2\x97\x8e" (* ◎ *)
-  | Goal_phase.Completed -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
-  | Goal_phase.Paused _ -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Paused
-  | Goal_phase.Blocked _ -> "!"
-  | Goal_phase.Dropped -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
-
 let planning_progress_sheet ~now ?goal_id (state : state) =
   let matching_inflight =
     match goal_id with
@@ -817,50 +808,76 @@ let planning_due_clause ~ko (standing : Planning_due.standing) =
   | Planning_due.Due_ahead | Planning_due.Not_in_progress | Planning_due.No_due -> None
 
 let planning_preview_lines (state : state) ~now ~cells ~rows (goal : planning_goal) =
-  if rows <= 0 then [] else
-  let ko = state.ui_language = Lang_ko in
-  let text korean english = if ko then korean else english in
-  let field = work_preview_field ~cells in
-  let phase = planning_phase_label ~ko goal.pg_phase in
-  let notice =
-    if not (planning_goal_has_valid_id goal) then
-      Some (Theme.warn (), text "목표 ID 확인 필요" "Goal identifier needs inspection")
-    else if Option.is_some goal.pg_verifier_unreconciled then planning_proof_detail ~ko goal
-    else match goal.pg_proof with
-      | Proof_refuted _ | Proof_stale _ | Proof_unreadable _ -> planning_proof_detail ~ko goal
-      | Proof_idle | Proof_pending | Proof_proven _ -> None in
-  let notice = match notice with
-    | Some _ -> notice
-    | None ->
-        (match goal.pg_phase with
-         | (Goal_phase.Executing | Verifying) when Option.is_none goal.pg_retry_binding ->
-             Some (Theme.warn (), text "검증 요청 정보 보고 안 됨" "Verification request binding not reported")
-         | Executing | Verifying | Awaiting_confirmation | Completed | Dropped
-         | Paused _ | Blocked _ -> None) in
-  let due = Option.map (fun words -> (Theme.warn (), words))
-      (planning_due_clause ~ko (Planning_due.standing ~now goal)) in
-  let phase_row = if rows >= 3 then [Theme.recede () ^ field "" phase ^ Ansi.reset] else [] in
-  (* The notice above keeps the first row it always had; the due clause takes
-     the next one only when the preview has a row left for it. *)
-  let notices =
-    List.take (rows - List.length phase_row) (Option.to_list notice @ Option.to_list due)
-    |> List.map (fun (style, detail) -> style ^ field "" detail ^ Ansi.reset) in
-  let header =
-    let raw = phase_row @ notices in
-    if raw <> [] && rows >= List.length raw + 3 then raw @ [""] else raw
-  in
-  let hint =
-    if rows > List.length header && rows >= 2 then
-      [Theme.recede () ^ text "Enter:상세" "Enter:details" ^ Ansi.reset]
-    else [] in
-  let criterion =
-    text "목표: " "Measure: " ^ Planning_detail.measure_text goal.pg_measure ^ "\n"
-    ^ text "측정 방법: " "Procedure: " ^ goal.pg_procedure in
-  let room = max 0 (rows - List.length header - List.length hint) in
-  let body_budget = if hint <> [] && room >= 3 then room - 1 else room in
-  let body = work_preview_body ~cells ~rows:body_budget criterion in
-  let hint_gap = if hint <> [] && body <> [] && List.length body < room then [""] else [] in
-  header @ body @ hint_gap @ hint
+  if rows <= 0 || cells <= 0 then []
+  else
+    let ko = state.ui_language = Lang_ko in
+    let text korean english = if ko then korean else english in
+    let next_tone, next_sentence = planning_next_step ~ko goal in
+    let next_rows =
+      Text_block.rows ~max_cells:cells (Terminal_text.single_line next_sentence)
+      |> (function
+          | first :: _ ->
+              [ (if String.equal next_tone "" then first
+                 else next_tone ^ first ^ Ansi.reset) ]
+          | [] -> [])
+    in
+    let notice =
+      if not (planning_goal_has_valid_id goal) then
+        Some (Theme.warn (), text "목표 ID 확인 필요" "Goal identifier needs inspection")
+      else if Option.is_some goal.pg_verifier_unreconciled then
+        planning_proof_detail ~ko goal
+      else
+        match goal.pg_proof with
+        | Proof_refuted _ | Proof_stale _ | Proof_unreadable _ ->
+            planning_proof_detail ~ko goal
+        | Proof_idle | Proof_pending | Proof_proven _ -> (
+            match goal.pg_phase with
+            | (Goal_phase.Executing | Verifying)
+              when Option.is_none goal.pg_retry_binding ->
+                Some
+                  ( Theme.warn ()
+                  , text "검증 요청 정보 보고 안 됨"
+                      "Verification request binding not reported" )
+            | Executing | Verifying | Awaiting_confirmation | Completed | Dropped
+            | Paused _ | Blocked _ -> None)
+    in
+    let open_note, open_tone = planning_open_note state goal in
+    let due_opt = planning_due_clause ~ko (Planning_due.standing ~now goal) in
+    let kv_fields =
+      [ Doc.kv ~tone:Ansi.bold (text "목표값" "Target")
+          (Planning_detail.measure_text goal.pg_measure)
+      ]
+      @ (if String.equal open_note "" then []
+         else [ Doc.kv ~tone:open_tone (text "연결 작업" "Tasks") open_note ])
+      @ (match due_opt with
+         | None -> []
+         | Some words -> [ Doc.kv ~tone:(Theme.warn ()) (text "기한" "Due") words ])
+      @ (match notice with
+         | None -> []
+         | Some (tone, detail) ->
+             [ Doc.kv ~tone (text "판정/주의" "Notice")
+                 (Terminal_text.single_line detail) ])
+    in
+    let kv_lines = Doc.kv_rows ~width:cells ~indent:0 ~max_label_cells:12 kv_fields in
+    let prose_lines =
+      if rows >= 4 && not (String.equal (String.trim goal.pg_procedure) "") then
+        [ "" ]
+        @ Doc.prose_block ~width:cells ~indent:0 ~break_numbered:true
+            goal.pg_procedure
+      else []
+    in
+    next_rows @ kv_lines @ prose_lines
+
+let paint_goal_table_row ~width ~selected ~current row =
+  let fitted = fit_width row width in
+  if selected then
+    match Theme.sidebar_selection_background () with
+    | Some bg when not (String.equal bg "") ->
+        Masc_tui_theme.paint_row_background ~bg fitted
+    | Some _ | None ->
+        Theme.selection_style () ^ Masc_tui_theme.strip_sgr fitted ^ Ansi.reset
+  else if current then fitted
+  else Theme.recede () ^ Masc_tui_theme.strip_sgr fitted ^ Ansi.reset
 
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -944,70 +961,133 @@ let render_planning_list (state : state) =
              Option.iter (fun detail -> push_context (" " ^ Theme.warn () ^ Terminal_text.single_line detail ^ Ansi.reset))
                state.planning_error
            end;
-           let geometry = work_panels ~inner:(framed_inner_width cols) ~rows:(budget - !used) in
-           let window = work_list_window ~rows:geometry.list_rows ~count
-               ~selected:(Some state.planning_cursor) in
-           report_drawn_list Goal_entries ~height:window.capacity;
-           let list_lines =
-             (if count = 0 then
-                [text (if snapshot.pl_goals = [] then "아직 Goal 없음" else "필터에 맞는 Goal 없음 · f:필터")
-                      (if snapshot.pl_goals = [] then "No Goals in this reading" else "No Goals match · f:filter")]
-              else goals |> List.mapi (fun index goal -> index, goal)
-                |> List.drop window.first |> List.take window.capacity
-                |> List.concat_map (fun (index, (goal : planning_goal)) ->
-                  let phase = planning_phase_label ~ko goal.pg_phase in
-                  (* Past due qualifies the phase, so it sits right after it. *)
-                  let due = match planning_due_clause ~ko (Planning_due.standing ~now goal) with
-                    | None -> ""
-                    | Some words -> " · " ^ words in
-                  let open_note, open_style = planning_open_note state goal in
-                  let linked = if open_note = "" then "" else " · " ^ open_note in
-                  (* A Goal in verification is waiting for its verdict; the
-                     pending verdict would say the phase a second time. *)
-                  let restates_phase = match goal.pg_proof with
-                    | Tui_decode.Proof_pending ->
-                        (match goal.pg_phase with
-                         | Goal_phase.Verifying -> Option.is_none goal.pg_verifier_unreconciled
-                         | Executing | Awaiting_confirmation | Completed | Dropped
-                         | Paused _ | Blocked _ -> false)
-                    | Proof_idle | Proof_proven _ | Proof_refuted _ | Proof_stale _
-                    | Proof_unreadable _ -> false in
-                  let verdict = if restates_phase then None else planning_proof_detail ~ko goal in
-                  (* A previous Goal reading keeps its words and loses its
-                     colours; the scope line above says why. *)
-                  let sep = Theme.recede () ^ " · " ^ Ansi.reset in
-                  let summary =
-                    if current then
-                      planning_phase_color goal.pg_phase ^ phase ^ Ansi.reset
-                      ^ (match planning_due_clause ~ko (Planning_due.standing ~now goal) with
-                         | None -> ""
-                         | Some words -> sep ^ Theme.warn () ^ words ^ Ansi.reset)
-                      ^ (if open_note = "" then ""
-                         else sep ^ open_style ^ open_note ^ Ansi.reset)
-                      ^ (match verdict with
-                         | None -> ""
-                         | Some (style, detail) ->
-                             sep ^ style ^ Terminal_text.single_line detail ^ Ansi.reset)
-                    else
-                      Theme.recede () ^ phase ^ due ^ linked
-                      ^ (match verdict with
-                         | None -> ""
-                         | Some (_, detail) -> " · " ^ Terminal_text.single_line detail)
-                      ^ Ansi.reset in
-                  work_entry_lines ~cells:geometry.list_width ~height:window.entry_height
-                    ~selected:(index = state.planning_cursor) ~title:goal.pg_title ~summary
-                    ~compact:(phase ^ due ^ linked))) in
+           let inner = max 1 (framed_inner_width cols) in
+           let body_budget = max 0 (budget - !used) in
+           let selected_goal = List.nth_opt goals state.planning_cursor in
+           let split =
+             Masc_tui_types.docked_vertical_split ~total_rows:body_budget
+               ~mode:state.planning_preview_mode
+               ~has_selection:(count > 0 && Option.is_some selected_goal)
+           in
+           let list_rows = split.list_rows in
+           let table_header_rows =
+             (if list_rows >= 3 then 1 else 0) + (if list_rows >= 4 then 1 else 0)
+           in
+           let entry_rows = max 0 (list_rows - table_header_rows) in
+           let capacity = if count = 0 then 0 else min count entry_rows in
+           let first =
+             if capacity <= 0 || count <= capacity then 0
+             else
+               max 0 (min (count - capacity) (state.planning_cursor - (capacity / 2)))
+           in
+           report_drawn_list Goal_entries ~height:capacity;
+           let list_header =
+             if list_rows >= 3 then
+               [ Doc.section_header ~width:inner ~indent:1
+                   ~subtitle:(Printf.sprintf (if ko then "%d건" else "%d goals") count)
+                   (text "목표" "Goals")
+               ]
+             else []
+           in
+           let phase_w = min 14 (max 8 (inner / 6)) in
+           let tail_w = min 22 (max 10 (inner / 5)) in
+           let prefix_w = 8 in
+           let title_w = max 10 (inner - prefix_w - phase_w - tail_w - 4) in
+           let col_header =
+             if list_rows >= 4 then
+               [ Theme.recede ()
+                 ^ fit_width
+                     (Printf.sprintf "  %s %s  %s  %s"
+                        (fit_width (text "우선" "Prio") 5)
+                        (fit_width (text "제목" "Goal") title_w)
+                        (fit_width (text "단계" "Phase") phase_w)
+                        (fit_width (text "연결 · 기한" "Tasks / Due") tail_w))
+                     inner
+                 ^ Ansi.reset
+               ]
+             else []
+           in
+           let entry_lines =
+             if count = 0 then
+               if entry_rows > 0 then
+                 [ "  " ^ Theme.recede ()
+                   ^ text
+                       (if snapshot.pl_goals = [] then "아직 Goal 없음"
+                        else "필터에 맞는 Goal 없음 · f:필터")
+                       (if snapshot.pl_goals = [] then "No Goals in this reading"
+                        else "No Goals match · f:filter")
+                   ^ Ansi.reset
+                 ]
+               else []
+             else
+               goals
+               |> List.mapi (fun index goal -> index, goal)
+               |> List.drop first
+               |> List.take capacity
+               |> List.map (fun (index, (goal : planning_goal)) ->
+                    let selected = index = state.planning_cursor in
+                    let pointer = if selected then "\xe2\x80\xba " else "  " in
+                    let mark = Masc_tui_value.Mark.glyph (planning_phase_mark goal.pg_phase) in
+                    let mark_sgr = planning_phase_color goal.pg_phase in
+                    let prio = fit_width (Printf.sprintf "P%d" goal.pg_priority) 3 in
+                    let phase = planning_phase_label ~ko goal.pg_phase in
+                    let due_opt = planning_due_clause ~ko (Planning_due.standing ~now goal) in
+                    let open_note, open_style = planning_open_note state goal in
+                    let tail_raw, tail_sgr =
+                      match due_opt, open_note with
+                      | Some words, "" -> words, Theme.warn ()
+                      | Some words, note -> note ^ " · " ^ words, open_style
+                      | None, "" -> Masc_tui_theme.Glyph.no_value, Theme.recede ()
+                      | None, note -> note, open_style
+                    in
+                    let title_fit = fit_width (Terminal_text.single_line goal.pg_title) title_w in
+                    let phase_fit = fit_width phase phase_w in
+                    let tail_fit = fit_width tail_raw tail_w in
+                    let styled =
+                      Printf.sprintf "%s%s%s%s %s %s%s%s  %s%s%s  %s%s%s"
+                        pointer mark_sgr mark Ansi.reset prio
+                        Ansi.bold title_fit Ansi.reset
+                        mark_sgr phase_fit Ansi.reset
+                        tail_sgr tail_fit Ansi.reset
+                    in
+                    paint_goal_table_row ~width:inner ~selected ~current styled)
+           in
            if count > 0 then
              c.position
                (Masc_tui_value.Position.row ~selected:(Some state.planning_cursor)
                   ~total:count);
-           let preview_lines = match List.nth_opt goals state.planning_cursor with
-             | None -> [text "선택된 목표 없음" "No Goal selected"]
-             | Some goal -> planning_preview_lines state ~now ~cells:geometry.preview_width ~rows:geometry.preview_rows goal in
-           List.iter push (work_panel_lines geometry
-             ~list_title:(text "목표" "Goals")
-             ~list_lines ~preview_title:(text "목표와 성공 조건" "Goal and success criterion")
-             ~preview_lines)))
+           let pad_rows =
+             max 0 (list_rows - List.length list_header - List.length col_header - List.length entry_lines)
+           in
+           let preview_lines =
+             if split.preview_rows <= 0 then []
+             else
+               match selected_goal with
+               | None -> []
+               | Some goal ->
+                   let stage_label =
+                     match state.planning_preview_mode with
+                     | Preview_compact -> text "미리보기 확장" "expand"
+                     | Preview_half -> text "최대" "full"
+                     | Preview_full -> text "접기" "compact"
+                   in
+                   let body =
+                     planning_preview_lines state ~now ~cells:(max 1 (inner - 1))
+                       ~rows:(max 1 (split.preview_rows - 3)) goal
+                   in
+                   Doc.docked_preview ~width:inner ~height:split.preview_rows
+                     ~indent:1
+                     ~eyebrow:(text "선택한 목표" "Selected Goal")
+                     ~meta:(Printf.sprintf "P%d · %s" goal.pg_priority (planning_phase_label ~ko goal.pg_phase))
+                     ~footer_hints:
+                       [ { Card.key = "Space"; label = stage_label }
+                       ; { Card.key = "Enter"; label = text "상세" "open" }
+                       ; { Card.key = "Esc"; label = text "닫기/뒤로" "back" }
+                       ]
+                     body
+           in
+           List.iter push
+             (list_header @ col_header @ entry_lines @ List.init pad_rows (fun _ -> "") @ preview_lines)))
 
 let planning_measurement_lines (state : state) ~width (goal : planning_goal) =
   let text ko en = ui_text state ~ko ~en in
@@ -1643,7 +1723,6 @@ let planning_detail_lines state ~confirmation ~cols goal =
 
 let planning_detail_candle_scroll (state : state) (goal : planning_goal) =
   let _, cols = get_terminal_size () in
-  let cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
   snd (planning_detail_content state ~cols goal
     ~confirmation:(planning_confirmation_view state ~goal_id:goal.pg_id))
 
@@ -1693,7 +1772,6 @@ let planning_detail_sheet_rows ~rows ~cols ~header_rows ~base_action_rows ~goal_
 let planning_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
   match state.planning_mode, state.planning with
   | Planning_detail goal_id, Some snapshot ->
       (match List.find_opt (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id) snapshot.pl_goals with
@@ -1792,17 +1870,16 @@ let render_planning_detail (state : state)
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let detail_cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
-  let header_rows = List.length (planning_detail_header_rows state ~cols:detail_cols goal) in
+  let header_rows = List.length (planning_detail_header_rows state ~cols goal) in
   let base_action_rows =
-    List.length (planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols:detail_cols ~armed
+    List.length (planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols ~armed
       ~drop_reason:(goal_drop_reason_for state goal.pg_id) goal)
   in
   let action_rows =
     base_action_rows
-    + planning_detail_sheet_rows ~rows ~cols:detail_cols ~header_rows ~base_action_rows ~goal_id:goal.pg_id state
+    + planning_detail_sheet_rows ~rows ~cols ~header_rows ~base_action_rows ~goal_id:goal.pg_id state
   in
-  let count = List.length (planning_detail_lines state ~confirmation ~cols:detail_cols goal) in
+  let count = List.length (planning_detail_lines state ~confirmation ~cols goal) in
   if not (planning_detail_fits ~rows ~header_rows ~action_rows ~count) then begin
     let buf = Buffer.create 96 in
     Buffer.add_string buf (fit_width (ui_text state ~ko:"목표 상세를 읽으려면 창을 늘려 주세요" ~en:"Goal detail needs more room; resize to read and act") cols);
@@ -1811,41 +1888,7 @@ let render_planning_detail (state : state)
   end else begin
   let buf = Buffer.create 4096 in
   let scroll, seen =
-    if cols < keeper_split_threshold_cols then
-      planning_detail_pane state ~armed ~confirmation ~rows ~cols goal buf
-    else begin
-      let left_cols = keeper_roster_pane_cols in
-      let goals =
-        match state.planning with
-        | None -> []
-        | Some p ->
-            planning_visible_goals ~filter:state.planning_filter
-              ~sort:state.planning_sort p.pl_goals
-      in
-      let selection = List.find_index (fun (row : planning_goal) ->
-        String.equal row.pg_id goal.pg_id) goals in
-      let left_buf = Buffer.create 1024 in
-      let right_buf = Buffer.create 4096 in
-      let format_sidebar_goal (row : planning_goal) =
-        Printf.sprintf "%s %s"
-          (planning_phase_sidebar_glyph row.pg_phase)
-          (Terminal_text.single_line row.pg_title)
-      in
-      (* The goal filter narrows to a phase; the goals it leaves out are on
-         the other side of a filter, not behind a page boundary. *)
-      write_list_sidebar_selection ~framed:false left_buf ~rows ~cols:left_cols
-        ~title:(ui_text state ~ko:"목표" ~en:"Goals")
-        ~holding:None
-        ~focused:false
-        ~labels:(List.map format_sidebar_goal goals)
-        ~selection;
-      let scroll, seen =
-        planning_detail_pane state ~armed ~confirmation ~rows ~cols:(cols - left_cols) goal
-          right_buf
-      in
-      write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
-      scroll, seen
-    end
+    planning_detail_pane state ~armed ~confirmation ~rows ~cols goal buf
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

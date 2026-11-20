@@ -11,6 +11,7 @@ module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
+module Card = Masc_tui_card
 module Doc = Masc_tui_doc
 module Chart = Masc_tui_chart
 module Text_block = Masc_tui_text_block
@@ -864,6 +865,15 @@ let harness_ledger_lines ?(ko = false) ~cols snapshot =
                 ; Doc.kv ~tone:(Theme.recede ()) (if ko then "라벨" else "Labelled") label_value
                 ])
 
+let split_verdict_ruling (verdict : Masc.Tui_decode.harness_verdict) =
+  let whole = verdict.hv_verdict in
+  match String.index_opt whole ':' with
+  | None -> Terminal_text.single_line whole, ""
+  | Some at ->
+      ( Terminal_text.single_line (String.sub whole 0 at)
+      , String.trim
+          (String.sub whole (at + 1) (String.length whole - at - 1)) )
+
 let render_harness_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -984,14 +994,29 @@ let render_harness_list (state : state) =
   (* Drawing and cursor/page movement consume the same state-owned bound.
      The timestamp makes five head rows and two tail rows; aggregate ledger
      rows are part of the selected detail document instead. *)
-  let content_height =
+  let total_body =
     match scrolled_surface state ~cols Harness with
-    | Some layout -> Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
-        ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
-    | None -> max 1 (rows - harness_listing_chrome ~error:state.harness_error) in
-  let scroll = Masc_tui_scroll.ensure_visible ~cursor:state.harness_cursor
-      ~height:content_height state.harness_scroll
-    |> Masc_tui_scroll.normalize ~count:shown ~height:content_height in
+    | Some layout ->
+        Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+          ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+    | None -> max 1 (rows - harness_listing_chrome ~error:state.harness_error)
+  in
+  let clamped_cursor =
+    if shown <= 0 then 0 else max 0 (min (shown - 1) state.harness_cursor)
+  in
+  let selected_verdict = List.nth_opt verdicts clamped_cursor in
+  let split =
+    Masc_tui_types.docked_vertical_split ~total_rows:total_body
+      ~mode:state.harness_preview_mode
+      ~has_selection:(shown > 0 && Option.is_some selected_verdict)
+  in
+  let content_height = max 1 split.list_rows in
+  let preview_rows = max 0 (total_body - content_height) in
+  let scroll =
+    Masc_tui_scroll.ensure_visible ~cursor:clamped_cursor ~height:content_height
+      state.harness_scroll
+    |> Masc_tui_scroll.normalize ~count:shown ~height:content_height
+  in
   let verdicts_window = Rows.of_list ~first:scroll ~height:content_height verdicts in
   report_drawn_list Harness_rows ~height:content_height;
   if shown = 0 then begin
@@ -1017,7 +1042,7 @@ let render_harness_list (state : state) =
       | None -> box_empty buf cols
       | Some v ->
           let open Masc.Tui_decode in
-          let is_selected = idx = state.harness_cursor in
+          let is_selected = idx = clamped_cursor in
           let line = verdict_row ~selected:is_selected v.hv_task_title (verdict_status v) in
           let style =
             match v.hv_fallback_reason with
@@ -1027,6 +1052,62 @@ let render_harness_list (state : state) =
           if is_selected then box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
+  (if preview_rows > 0 then
+     match selected_verdict with
+     | None ->
+         for _ = 1 to preview_rows do
+           box_empty buf cols
+         done
+     | Some v ->
+         let inner = max 1 (framed_inner_width cols) in
+         let ko = state.ui_language = Lang_ko in
+         let t korean english = if ko then korean else english in
+         let ruling, reason = split_verdict_ruling v in
+         let verdict_tone = semantic_status_color ruling in
+         let stage_label =
+           match state.harness_preview_mode with
+           | Preview_compact -> t "미리보기 확장" "expand"
+           | Preview_half -> t "최대" "full"
+           | Preview_full -> t "접기" "compact"
+         in
+         let fallback_rows =
+           match v.hv_fallback_reason with
+           | None -> []
+           | Some fb ->
+               [ Doc.kv ~tone:(Theme.warn ()) (t "대체 사유" "Fallback")
+                   (Terminal_text.single_line fb) ]
+         in
+         let kv_body =
+           Doc.kv_rows ~width:inner ~indent:0 ~max_label_cells:12
+             ([ Doc.kv ~tone:(verdict_tone ^ Ansi.bold) (t "판정" "Verdict") ruling
+              ; Doc.kv "Gate" (Terminal_text.single_line v.hv_gate)
+              ; Doc.kv ~tone:Ansi.bold (t "에이전트" "Agent")
+                  (Terminal_text.single_line v.hv_agent)
+              ; Doc.kv ~tone:(Theme.recede ()) (t "평가자" "Evaluator")
+                  (Terminal_text.single_line v.hv_evaluator)
+              ]
+              @ fallback_rows)
+         in
+         let prose_body =
+           if preview_rows >= 7 && not (String.equal reason "") then
+             [ "" ]
+             @ Doc.prose_block ~width:inner ~indent:0
+                 ~guide_style:(if String.equal verdict_tone "" then Theme.border_muted () else verdict_tone)
+                 ~break_numbered:true reason
+           else []
+         in
+         let preview_lines =
+           Doc.docked_preview ~width:inner ~height:preview_rows ~indent:0
+             ~eyebrow:(t "선택한 판정" "Selected Verdict")
+             ~meta:(ruling ^ " · " ^ Terminal_text.single_line v.hv_gate)
+             ~footer_hints:
+               [ { Card.key = "Space"; label = stage_label }
+               ; { Card.key = "Enter"; label = t "상세" "open" }
+               ; { Card.key = "Esc"; label = t "닫기/뒤로" "back" }
+               ]
+             (kv_body @ prose_body)
+         in
+         List.iter (box_line buf cols) preview_lines);
   Buffer.add_buffer buf tail;
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
@@ -1083,15 +1164,7 @@ let harness_goal_lines ~width (state : state) (verdict : Masc.Tui_decode.harness
 let harness_detail_lines ~ko ~width ~now (verdict : Masc.Tui_decode.harness_verdict) =
   let t korean english = if ko then korean else english in
   let pre = List.map (fun s -> "", s) in
-  let ruling, reason =
-    let whole = verdict.hv_verdict in
-    match String.index_opt whole ':' with
-    | None -> Terminal_text.single_line whole, ""
-    | Some at ->
-        ( Terminal_text.single_line (String.sub whole 0 at)
-        , String.trim
-            (String.sub whole (at + 1) (String.length whole - at - 1)) )
-  in
+  let ruling, reason = split_verdict_ruling verdict in
   let verdict_tone = semantic_status_color ruling in
   let title =
     Text_block.rows ~max_cells:(max 1 (width - 4)) verdict.hv_task_title
@@ -1201,62 +1274,7 @@ let render_harness_detail (state : state) verdict =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let scroll =
-    if cols < keeper_split_threshold_cols then
-      harness_detail_pane state ~rows ~cols verdict buf
-    else begin
-      let left_cols = keeper_roster_pane_cols in
-      let labels =
-        match state.harness with
-        | None -> []
-        | Some snapshot ->
-          (* A verdict has no id of its own on the wire. The notes hash is
-             shared by repeat verdicts on one submission, and a clock alone
-             can name several verdicts recorded in the same second. *)
-          snapshot.Tui_decode.hs_verdicts
-          |> List.map (fun (row : Tui_decode.harness_verdict) ->
-               let verdict_word =
-                 let whole = String.trim row.hv_verdict in
-                 let head =
-                   match String.index_opt whole ':' with
-                   | None -> whole
-                   | Some at -> String.sub whole 0 at
-                 in
-                 String.lowercase_ascii (String.trim head)
-               in
-               let mark =
-                 if Option.is_some row.hv_fallback_reason then "\xe2\x96\xb2" (* ▲ *)
-                 else match verdict_word with
-                 | "approve" | "approved" | "pass" | "passed" | "ok" ->
-                     Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
-                 | "reject" | "rejected" | "refuted" | "failed" | "deny" | "denied" ->
-                     Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
-                 | _ -> "\xc2\xb7"
-               in
-               let raw_title =
-                 match String.trim row.hv_task_title with
-                 | "" -> row.hv_task_id
-                 | title -> title
-               in
-               (mark ^ " " ^ raw_title), row.hv_at)
-          |> Render_schedule.verdict_sidebar_labels
-               ~now:(Unix.gettimeofday ())
-      in
-      let left_buf = Buffer.create 1024 in
-      let right_buf = Buffer.create 4096 in
-      (* The harness snapshot carries its verdicts whole; there is no page
-         behind them. *)
-      write_list_sidebar ~framed:false left_buf ~rows ~cols:left_cols
-        ~title:(ui_text state ~ko:"판정" ~en:"Verdicts")
-        ~focused:false ~holding:None ~labels ~selected:state.harness_cursor;
-      let answer =
-        harness_detail_pane state ~rows ~cols:(cols - left_cols) verdict
-          right_buf
-      in
-      write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
-      answer
-    end
-  in
+  let scroll = harness_detail_pane state ~rows ~cols verdict buf in
   Buffer.add_string buf
     (* The key table, not a literal. This row was written out here, and what
        it left out was the pair that answers a ruling -- [y / x] -- on the one

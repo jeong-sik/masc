@@ -29410,6 +29410,8 @@ let main
                  | Planning_list
                    when Masc_tui_overview_tasks.is_focused state.task_focus ->
                      state.task_focus <- Masc_tui_overview_tasks.No_task_focus
+                 | Planning_list when state.planning_preview_mode <> Preview_compact ->
+                     state.planning_preview_mode <- Preview_compact
                  | Planning_list -> state.view <- Overview)
             | Fusion ->
                 (match state.fusion_mode with
@@ -29446,6 +29448,8 @@ let main
                   state.harness_detail <- None;
                   state.harness_detail_scroll <- 0
                 end
+                else if state.harness_preview_mode <> Preview_compact then
+                  state.harness_preview_mode <- Preview_compact
                 else goto_surface state ~mailbox:async_messages Planning
             | Resources ->
                 if state.resource_focus = Right_pane then
@@ -30628,6 +30632,25 @@ let main
                         state.changes_diff_max_width <- 0;
                         launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
+       | Some " "
+         when ((state.view = Planning && state.planning_mode = Planning_list
+                && Option.is_none state.task_detail_id
+                && not (Masc_tui_overview_tasks.is_focused state.task_focus))
+               || (state.view = Harness && Option.is_none state.harness_detail))
+              && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           (match state.view with
+            | Planning ->
+                state.planning_preview_mode <-
+                  Masc_tui_types.cycle_docked_preview_mode state.planning_preview_mode
+            | Harness | Overview | Acting | Metrics | Keepers _ | Memory | Lanes
+            | Clients | Board | Approvals | Schedules | Verification | Fusion
+            | Repositories | Code | Changes | Connectors | Runtime | Config
+            | Resources | Tools | System_logs ->
+                state.harness_preview_mode <-
+                  Masc_tui_types.cycle_docked_preview_mode state.harness_preview_mode)
        | Some ("1" | "2" | "3" as digit)
          when (state.view = Planning || state.view = Verification || state.view = Harness)
               && not state.composer_focused

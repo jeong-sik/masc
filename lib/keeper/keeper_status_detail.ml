@@ -376,19 +376,19 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
         = options
       in
       let context_budget =
-        let runtime_id = runtime_id_of_meta m in
+        let route = runtime_id_of_meta m in
         match
-          Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+          Keeper_context_runtime.resolve_max_context_resolution_for_route
             ~requested_override:m.max_context_override
-            ~runtime_id
+            ~route
         with
-        | Ok max_context_resolution ->
+        | Ok (resolved_runtime_id, max_context_resolution) ->
             Keeper_context_runtime.context_budget_json_of_resolution
-              ~runtime_id
+              ~runtime_id:resolved_runtime_id
               max_context_resolution
         | Error error ->
             `Assoc
-              [ ( "runtime_id", `String runtime_id )
+              [ ( "runtime_id", `String route )
               ; ( "capacity_error"
                 , `String
                     (Keeper_context_runtime.max_context_resolution_error_to_string

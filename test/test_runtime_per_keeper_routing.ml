@@ -3054,6 +3054,61 @@ let test_of_meta_projection_budgets_against_routed_runtime () =
           res.Keeper_context_runtime.effective_budget)
 ;;
 
+let test_route_context_budget_resolves_declared_lane_and_direct_runtime () =
+  with_runtime_file (fun path ->
+    let lane_config =
+      String.trim runtime_config
+      ^ "\n\n[runtime.lanes.coding]\ncandidates = [\"openai.gpt\", \"openai.small\"]\n"
+    in
+    (match Runtime.save_config_text ~runtime_config_path:path lane_config with
+     | Ok _ -> ()
+     | Error msg -> Alcotest.failf "lane fixture reload failed: %s" msg);
+    (match
+       Keeper_context_runtime.resolve_max_context_resolution_for_route
+         ~requested_override:None ~route:"coding"
+     with
+     | Ok (resolved_runtime_id, resolution) ->
+       Alcotest.(check string) "lane resolves to its first candidate"
+         "openai.gpt" resolved_runtime_id;
+       Alcotest.(check int) "lane resolves first candidate's budget"
+         64000 resolution.effective_budget
+     | Error err ->
+       Alcotest.failf "declared lane route must resolve: %s"
+         (Keeper_context_runtime.max_context_resolution_error_to_string err));
+    (match
+       Keeper_context_runtime.resolve_max_context_resolution_for_route
+         ~requested_override:None ~route:"openai.small"
+     with
+     | Ok (resolved_runtime_id, resolution) ->
+       Alcotest.(check string) "direct runtime id preserved"
+         "openai.small" resolved_runtime_id;
+       Alcotest.(check int) "direct runtime budget resolved"
+         32000 resolution.effective_budget
+     | Error err ->
+       Alcotest.failf "direct runtime route must resolve: %s"
+         (Keeper_context_runtime.max_context_resolution_error_to_string err));
+    (match
+       Keeper_context_runtime.resolve_max_context_resolution_for_route
+         ~requested_override:None ~route:"missing.route"
+     with
+     | Error (Keeper_context_runtime.Runtime_context_window_unavailable { runtime_id }) ->
+       Alcotest.(check string) "missing route keeps unresolved id"
+         "missing.route" runtime_id
+     | Error err ->
+       Alcotest.failf "unexpected error for missing route: %s"
+         (Keeper_context_runtime.max_context_resolution_error_to_string err)
+     | Ok _ -> Alcotest.fail "missing route must not resolve");
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_route
+        ~requested_override:(Some 0) ~route:"coding"
+    with
+    | Error (Keeper_context_runtime.Invalid_requested_context_override 0) -> ()
+    | Error err ->
+      Alcotest.failf "unexpected error for invalid override: %s"
+        (Keeper_context_runtime.max_context_resolution_error_to_string err)
+    | Ok _ -> Alcotest.fail "non-positive override must be rejected on lane route")
+;;
+
 (* ---- per-model thinking gate: runtime.toml [thinking-support] drives the
    keeper thinking seed via [Runtime_inference.for_runtime] ----
 
@@ -4749,6 +4804,10 @@ let () =
             "of_meta projection prefers the routed runtime"
             `Quick
             test_of_meta_projection_budgets_against_routed_runtime
+        ; Alcotest.test_case
+            "route context budget resolves declared lane and direct runtime"
+            `Quick
+            test_route_context_budget_resolves_declared_lane_and_direct_runtime
         ; Alcotest.test_case
             "Codex official-client runtime cannot enter AGENT_CORE runner"
             `Quick

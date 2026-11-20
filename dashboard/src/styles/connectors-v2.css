@@ -1,6 +1,6 @@
 /* MASC Dashboard — Keeper-v2 Connectors surface layout.
  *
- * Ports the keeper-v2 prototype (connectors.jsx / surfaces.css) onto the
+ * Ports the keeper-v2 prototype (surfaces.css) onto the
  * existing dashboard token ladder.  This stylesheet is scoped to the
  * .v2-connectors-surface container; legacy connector surfaces keep their
  * previous styling.

@@ -179,6 +179,35 @@ jobs:
             --same-repo="${SAME_REPO:-false}" \
             --fetch-ref="refs/pull/${PR_NUMBER}/head"
 
+      # The fourth thing this required job answers: does a TUI file this pull
+      # request changes write a count by hand? RFC tui-one-screen-grammar 6.3
+      # writes counts through Masc_tui_value.Count, and later pull requests
+      # wrote "+N more", "(+N)" and "-N" by hand again after reviews had moved
+      # them (RFC tui-hand-written-counts-fail-the-pr-check). The changed TUI
+      # files are read whole from the merge commit. The checker and its tests
+      # are read from the merge commit as well, and the tests run first: a
+      # reader that miscounts a comment would block every TUI pull request.
+      - name: Refuse hand-written counts in changed TUI files
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/pr-changes"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          checker="$RUNNER_TEMP/pr-tui-value"
+          mkdir -p "$checker/tests"
+          git -C "$work" show "$GITHUB_SHA:scripts/ci/pr_tui_value_strings.py" \
+            > "$checker/pr_tui_value_strings.py"
+          git -C "$work" show "$GITHUB_SHA:scripts/ci/tests/test_pr_tui_value_strings.py" \
+            > "$checker/tests/test_pr_tui_value_strings.py"
+          python3 -I -m unittest discover -s "$checker/tests" -p test_pr_tui_value_strings.py
+          python3 -I "$checker/pr_tui_value_strings.py" --git-dir "$work" --merge "$GITHUB_SHA"
+
   type-check:
     needs: [changes]
     # Skipped here rather than at the workflow level so the check context

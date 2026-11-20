@@ -96,17 +96,20 @@ Printf.sprintf "execute('edit +%d ' . fnameescape(%s))" line path
 ```
 
 - 표지는 `(* tui-value: <이유> *)` 다. 이유가 비면 검사가 실패한다.
-- 표지는 그 literal 하나만 풀어 준다. 파일 전체를 풀어 주는 표지는 없다.
+- 표지는 자기가 걸친 줄과 그다음 줄에서 시작하는 literal 만 풀어 준다. 파일 전체를 풀어 주는
+  표지는 없다. `next_run` 처럼 한 줄에 한국어·영어 literal 이 같이 있으면 표지 하나가 둘을 푼다.
 
 ### 3.4 어디서 도나
 
-`changes` job 에 세 번째 Python 단계를 더한다.
+`changes` job 에 Python 단계를 하나 더한다.
 
 - 스크립트는 `scripts/ci/pr_tui_value_strings.py` 다.
 - 앞의 두 단계(`pr_changelog_fragments.py`, `pr_no_merge_commits.py`)처럼 merge commit 에서 스크립트를 읽는다.
 - 바뀐 파일만 가져온다. 이미 받은 blobless fetch 에 파일 내용만 더한다.
 - stack 의 아래층도 따로 읽는다. 아래층이 꼭대기보다 먼저 병합될 수 있어서다.
-- 실패 줄은 `파일:줄: 규칙: 글자 → 대신 쓸 함수` 로 찍는다.
+- 실패 줄은 `파일:줄: 규칙: 글자 -> 대신 쓸 함수` 로 찍는다.
+- 같은 단계가 merge commit 의 단위 시험(`scripts/ci/tests/test_pr_tui_value_strings.py`)을 먼저 돌린다.
+  읽는 부분이 틀리면 모든 TUI PR 이 막히므로, 시험이 실패하면 검사를 돌리지 않고 단계가 실패한다.
 
 `type-check` job 이 아니라 `changes` 에 두는 이유는 둘이다.
 `type-check` 는 소스가 바뀐 PR 에서만 돌고, 몇 분씩 걸린다.

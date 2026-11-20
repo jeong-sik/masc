@@ -298,11 +298,9 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
   Filename.concat (trajectories_dir masc_root keeper_name)
     (Printf.sprintf "%s.jsonl" trace_id)
 
-(* RFC-0108: the inline per-path Stdlib.Mutex + fresh-fd helper
-   (PR-4 #15926) is removed here. [Fs_compat.append_jsonl] (post-RFC-0108
-   #15936) now provides the equivalent per-path cross-domain guarantee
-   via its own registry, so the trajectory-local copy is redundant.
-   Calls below delegate directly. *)
+(* [Fs_compat.append_jsonl] serializes appends to one path across domains
+   through its own per-path mutex registry, so the calls below delegate to
+   it directly. *)
 
 (* ── In-memory round counter ──────────────────────────────────────
    Replaces the read-all-entries-just-to-count-round pattern.

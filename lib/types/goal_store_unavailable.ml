@@ -44,8 +44,8 @@ and reset_step =
 (* {1 Wire names}
 
    The constructor name in lowercase snake case. These are the tokens the
-   RFC-0444 envelope carries in [reason], [mirror.status] and [reset_step];
-   the TS union (PR-3) and [Tui_decode] variant (PR-4) parse them exactly. *)
+   wire envelope carries in [reason], [mirror.status] and [reset_step];
+   the TS union and [Tui_decode] variant parse them exactly. *)
 
 let reason_name = function
   | Missing_after_init -> "missing_after_init"

@@ -1,5 +1,4 @@
 (** Typed [tool_error] surface for LLM-facing tool failures.
-    See [docs/rfc/RFC-0148-typed-tool-error-variant.md] for design.
 
     Closed sum type — adding a variant forces all callers to handle it
     (compiler-enforced exhaustive match).  Replaces ~30 catch-all

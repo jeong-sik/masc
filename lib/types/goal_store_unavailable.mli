@@ -54,7 +54,7 @@ and reset_step =
 
 (** {1 Wire names}
 
-    The constructor name in lowercase snake case: the tokens the RFC-0444
+    The constructor name in lowercase snake case: the tokens the wire
     envelope carries in [reason], [mirror.status] and [reset_step]. *)
 
 val reason_name : reason -> string
@@ -76,8 +76,8 @@ val to_string : t -> string
 
 (** {1 Durable codec}
 
-    Lossless, for the store that keeps a skipped verifier scan (RFC-0444
-    PR-5). Every [Unix.error], observed nonregular kind, detail string and
+    Lossless, for the store that keeps a skipped verifier scan. Every
+    [Unix.error], observed nonregular kind, detail string and
     the mirror's inner reason round-trips; the wire envelope ({!Goal_unavailable_envelope} in
     masc_goal) is the lossy projection for tool results and HTTP bodies. The
     [kind] member of each nested object carries the wire name

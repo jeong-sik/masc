@@ -433,19 +433,8 @@ let runtime_tool_delivery (runtime : Runtime_instance.t) =
   | Runtime_execution.Antigravity_cli _
   | Runtime_execution.Muse_serve _ -> Tools_delivered
   | Runtime_execution.Vibe_cli _ -> Tools_suppressed_runtime_unsupported
-  | Runtime_execution.Claude_code _ ->
-    if runtime.model.tools_support
-    then Tools_delivered
-    else Tools_suppressed_runtime_unsupported
-  | Runtime_execution.Agent_core sealed ->
-    let provider_config = Runtime_account_access.api_declaration sealed in
-    let capabilities =
-      match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
-      | Some capabilities -> capabilities
-      | None ->
-        Llm_provider.Capabilities.capabilities_of_kind provider_config.kind
-    in
-    if capabilities.supports_tools
+  | Runtime_execution.Claude_code _ | Runtime_execution.Agent_core _ ->
+    if Runtime_tool_support.declares_tools runtime
     then Tools_delivered
     else Tools_suppressed_runtime_unsupported
 ;;

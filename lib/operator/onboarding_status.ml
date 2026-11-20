@@ -129,7 +129,8 @@ let model_checks config_path =
       [check Runtime_configuration Invalid
          "runtime.toml loaded, but imp's runtime does not resolve against it."
          [Inspect_configuration; Configure_models]]
-    | Some runtime when not runtime.model.tools_support -> selected, Some runtime.model.api_name,
+    | Some runtime when not (Runtime_tool_support.declares_tools runtime) ->
+      selected, Some runtime.model.api_name,
       [loaded; check Model_connection Needs_setup "The selected model has tool calling disabled."
          [Configure_models]]
     | Some runtime -> selected, Some runtime.model.api_name,

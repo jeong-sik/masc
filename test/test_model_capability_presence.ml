@@ -161,6 +161,98 @@ let test_undeclared_sampling_support_still_refuses_top_k () =
               errors))
 ;;
 
+(* #53659 — whether a turn may carry tools has one answer per Runtime. The
+   AGENT_CORE catalog has a row for this model on this provider, and the row
+   writes no [tools-support], which the parser reads as [false]. The catalog
+   row is what the turn's tool surface reads, so the readiness check and the
+   onboarding status read it too, instead of refusing a model the turn would
+   give tools. *)
+let config_with_catalogued_model =
+  {|[providers.openrouter]
+protocol = "openai-compatible-http"
+endpoint = "https://openrouter.ai/api/v1"
+
+[providers.openrouter.credentials]
+type = "env"
+key = "OPENROUTER_API_KEY"
+
+[models.catalogued]
+api-name = "z-ai/glm-5.3-flash"
+thinking-support = true
+reasoning-effort = "low"
+
+[openrouter.catalogued]
+
+[runtime]
+default = "openrouter.catalogued"
+|}
+;;
+
+(* The same uncatalogued model as above, with no [tools-support]: there is
+   no catalog row, so the row's key is still the only answer. *)
+let config_with_uncatalogued_model_without_tools =
+  {|[providers.fixture_novel_endpoint]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[models.partial]
+api-name = "fixture-partial-model"
+max-context = 8192
+
+[models.partial.capabilities]
+supports-image-input = true
+
+[fixture_novel_endpoint.partial]
+
+[runtime]
+default = "fixture_novel_endpoint.partial"
+|}
+;;
+
+let declares_tools runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> failf "runtime %s did not materialize" runtime_id
+  | Some runtime -> Runtime_tool_support.declares_tools runtime
+;;
+
+let with_embedded_catalog f =
+  Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None
+  @@ fun () ->
+  Masc_test_deps.with_process_env "OPENROUTER_API_KEY" (Some "synthetic-no-network")
+  @@ fun () ->
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect
+    ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog)
+    (fun () ->
+       Llm_provider.Catalog_snapshot.reset ();
+       f ())
+;;
+
+let test_catalog_row_answers_tool_calling () =
+  with_embedded_catalog
+  @@ fun () ->
+  with_config config_with_catalogued_model
+  @@ fun () ->
+  check
+    bool
+    "the catalog row answers, not the row's unwritten key"
+    true
+    (declares_tools "openrouter.catalogued")
+;;
+
+let test_uncatalogued_row_key_answers_tool_calling () =
+  with_config config_with_partial_capabilities
+  @@ fun () ->
+  check bool "a stated key declares tools" true (declares_tools "fixture_novel_endpoint.partial");
+  with_config config_with_uncatalogued_model_without_tools
+  @@ fun () ->
+  check
+    bool
+    "an unwritten key declares none"
+    false
+    (declares_tools "fixture_novel_endpoint.partial")
+;;
+
 let () =
   run
     "model capability presence"
@@ -179,6 +271,16 @@ let () =
             "an undeclared sampling support still refuses top-k"
             `Quick
             test_undeclared_sampling_support_still_refuses_top_k
+        ] )
+    ; ( "tool calling"
+      , [ test_case
+            "a catalog row answers tool calling"
+            `Quick
+            test_catalog_row_answers_tool_calling
+        ; test_case
+            "an uncatalogued row's key answers tool calling"
+            `Quick
+            test_uncatalogued_row_key_answers_tool_calling
         ] )
     ]
 ;;

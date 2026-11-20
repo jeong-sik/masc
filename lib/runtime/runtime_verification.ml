@@ -678,13 +678,20 @@ let model_refusal (model : Runtime_schema.model_spec) =
   if model.tools_support then None else Some Tools_not_declared
 ;;
 
+(* An Agent Core Runtime's tool calling is its capability record's, the
+   catalog row's when the catalog knows the model, so the row's own
+   [tools-support] does not refuse a model the turn would give tools. *)
+let runtime_refusal (runtime : Runtime_instance.t) =
+  if Runtime_tool_support.declares_tools runtime then None else Some Tools_not_declared
+;;
+
 let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~account_request (runtime : Runtime_instance.t) =
   (* The refusal the client's latest report amounts to. Whichever ends the
      run first -- this window or the client's own timeout -- reads it. *)
   let refusal_before_deadline = ref None in
   let deadline_failure () = Option.value !refusal_before_deadline ~default:Timed_out in
   let run (tool : Runtime_official_client_tool.dynamic_tool) ~prompt =
-    match model_refusal runtime.model with
+    match runtime_refusal runtime with
     | Some unavailable -> Error (Unavailable unavailable)
     | None -> (
       match runtime.execution with

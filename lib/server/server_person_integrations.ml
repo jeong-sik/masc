@@ -36,9 +36,15 @@ let calls_of client =
 ;;
 
 (* A binding makes its Runtime from the model row it names, as a Runtime is
-   materialized; a binding of no declared row makes none. A model row that
-   declares no tool calling is not offered: the verification refuses it
-   before any client starts. *)
+   materialized; a binding of no declared row makes none. [of_config] only
+   reaches this check for providers accepted by
+   {!Server_setup_account_login.person_target} (official clients
+   [Codex | Claude | Muse]; Agent Core protocols fail with
+   [Unsupported_connection] in
+   {!Server_runtime_setup_actions.login_target_of_config}), so
+   {!Runtime_verification.model_refusal} on the model row matches its
+   official-client contract. A model row that declares no tool calling is
+   not offered: the verification refuses it before any client starts. *)
 let verdict (config : Runtime_schema.config) (binding : Runtime_schema.binding) =
   match Runtime_schema.model_of_id config binding.model_id with
   | None -> Error Model_undeclared

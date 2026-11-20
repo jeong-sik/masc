@@ -179,7 +179,7 @@ bindings and lanes.
 | --- | --- | --- | --- |
 | `api-name` | string | the table id | model id sent on the wire (`model-name` is an accepted alias) |
 | `max-context` | positive int | catalog | operator window override; fail-close at load when no source resolves (RFC-0206 §2.1) |
-| `tools-support` | bool | `false` | |
+| `tools-support` | bool | `false` | whether a turn may carry tools. An official-client row is answered by this key. An Agent Core row is answered by its AGENT_CORE catalog row when the catalog has one for this provider and model; the key is read only for a model the catalog has no row for, together with `[models.<id>.capabilities]` |
 | `thinking-support` | bool | absent | absent = follow the caller's policy; on a `reasoning-uncontrolled` row it only says the model thinks and sends no request. When set on an Agent Core row, every turn sends it, so the configuration is refused at load (`Thinking_requests_inadmissible`, naming each runtime) when request admission refuses the request it builds, for example `true` on a `reasoning-effort` wire with no effort to send |
 | `preserve-thinking` | bool | absent | replay policy for prior-turn reasoning |
 | `streaming` | bool | `true` | |

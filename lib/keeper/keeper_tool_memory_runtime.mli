@@ -8,11 +8,12 @@ type memory_search_source =
       (** Ordinary and source-bound facts that are current now. This is the
           default and excludes absorbed history. *)
   | Absorbed
-      (** Facts a librarian pass merged into a newer claim (RFC-0456 §4.2),
-          read from [<keeper>.memory-absorbed.jsonl]. *)
+      (** Facts that left for another fact: merged, revised or superseded,
+          read from the Memory commit log ({!Keeper_memory_left}). *)
   | Dropped
-      (** Historical originals and reasons from the removal journal.
-          These are not current claims or authority to restore them. *)
+      (** Facts that left with nothing in their place, with the reason, read
+          from the same log. These are not current claims or authority to
+          restore them. *)
   | History
   | All
 

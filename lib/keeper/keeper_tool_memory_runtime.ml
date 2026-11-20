@@ -5,13 +5,6 @@ open Keeper_context_runtime
 module StringSet = Set_util.StringSet
 module StringMap = Set_util.StringMap
 module IntMap = Map.Make (Int)
-module StringPairMap = Map.Make (struct
-  type t = string * string
-
-  let compare (a1, b1) (a2, b2) =
-    let c = String.compare a1 a2 in
-    if c <> 0 then c else String.compare b1 b2
-end)
 
 
 (* Issue #8484: Variant SSOT for memory search scope. Adding a new
@@ -98,9 +91,7 @@ type fact_match =
 type durable_search_error =
   | Snapshot_read_failed of string
   | Source_revalidate_failed of string
-  | Absorbed_read_failed of string
-  | Dropped_read_failed of string
-  | Lineage_read_failed of string
+  | Memory_log_read_failed of string
   | Cursor_invalid
   | Cursor_stale
   | Cursor_scope_unsupported
@@ -108,9 +99,7 @@ type durable_search_error =
 let durable_search_error_kind_to_string = function
   | Snapshot_read_failed _ -> "snapshot_read_failed"
   | Source_revalidate_failed _ -> "source_revalidate_failed"
-  | Absorbed_read_failed _ -> "absorbed_read_failed"
-  | Dropped_read_failed _ -> "dropped_read_failed"
-  | Lineage_read_failed _ -> "lineage_read_failed"
+  | Memory_log_read_failed _ -> "memory_log_read_failed"
   | Cursor_invalid -> "invalid_memory_search_cursor"
   | Cursor_stale -> "stale_memory_search_cursor"
   | Cursor_scope_unsupported -> "unsupported_memory_search_cursor_scope"
@@ -119,9 +108,7 @@ let durable_search_error_kind_to_string = function
 let durable_search_error_detail = function
   | Snapshot_read_failed detail
   | Source_revalidate_failed detail
-  | Absorbed_read_failed detail
-  | Dropped_read_failed detail
-  | Lineage_read_failed detail -> detail
+  | Memory_log_read_failed detail -> detail
   | Cursor_invalid -> "Pass the next_cursor returned by the previous current-memory page."
   | Cursor_stale -> "Current memory or query changed. Restart the search without cursor."
   | Cursor_scope_unsupported -> "Pagination is available only for source=current."
@@ -439,232 +426,90 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
      | Source_sha256 sha256 -> [ "source_sha256", `String sha256 ])
 ;;
 
-(* --- Absorbed fact search (RFC-0456 §4.2) --- *)
+(* --- The Memory writer beside a search (RFC librarian-call-only-proposes §11.5) --- *)
 
-let absorbed_store = "absorbed_memory"
-
-type absorbed_match =
-  { row : Keeper_memory_absorbed.record
-  ; into : string
-  ; into_current : bool
-  }
-
-type absorbed_search =
-  { matches : absorbed_match list
-  ; candidates : int
-  ; unreadable : (int * Keeper_memory_absorbed.read_error) list
-  }
-
-let current_memory_ids facts =
-  List.fold_left
-    (fun ids fact -> StringSet.add (Keeper_memory_os_types.memory_id fact) ids)
-    StringSet.empty
-    facts
+(* The snapshot is read whatever the writer's state, and the answer says
+   what that state was. An open store says nothing. A stopped one says why.
+   A writer that has not opened its store, or none at all, means the snapshot
+   was read before it was checked against the commit log, so it can be one
+   write behind (§8.6). The table is only read: a search makes no writer. *)
+let memory_writer_fields ~(config : Workspace.config) ~keeper_name =
+  let not_checked state =
+    [ ( "memory_writer"
+      , `Assoc
+          [ "state", `String state
+          ; ( "guidance"
+            , `String
+                "Memory was read before its writer checked it against the commit log; it can be one write behind." )
+          ] )
+    ]
+  in
+  match Keeper_memory_writers.find ~base_path:config.base_path with
+  | None -> not_checked "none_in_process"
+  | Some writers ->
+    (match List.assoc_opt keeper_name (Librarian_writers.statuses writers) with
+     | None -> not_checked "not_started"
+     | Some Booting -> not_checked "booting"
+     | Some Retired -> not_checked "retired"
+     | Some (Open (_ : Librarian_log.line)) -> []
+     | Some (Stopped stop) ->
+       [ ( "memory_writer"
+         , `Assoc
+             [ "state", `String "stopped"
+             ; ( "stop"
+               , `String
+                   (Keeper_tool_memory_validation.memory_unwritable_to_string
+                      (Keeper_tool_memory_validation.Store_stopped stop)) )
+             ; ( "guidance"
+               , `String
+                   "Memory writes are refused until an operator resumes or adopts the store. This is the snapshot the store last held." )
+             ] )
+       ])
 ;;
 
-(* Rows a librarian pass wrote for facts that left the snapshot, answering the
-   query the way current facts do ({!answering}): whole-query rows first, then
-   fragment rows, each tier in stored order. Every result still carries its
-   own [absorbed_at], so prioritising the stronger match does not erase merge
-   time. The rows are written just before a snapshot replace, so a replace
-   that failed leaves rows for a pass that never committed (RFC-0456 §4.2). Two of their
-   shapes are exact to recognise: a row for a fact that is still current is
-   not an absorption, and a row repeating another row's memory_id and the
-   claim its into reaches (below) states the same thing, kept once at its
-   last write.
+(* --- Facts that left Memory (RFC librarian-call-only-proposes §11.5) --- *)
 
-   A claim a pass made can itself be absorbed by a later pass, so a row's
-   [into] may name a claim that is gone too. The rows say where that claim
-   went, and [into] is followed along them to the claim at the end: a current
-   one, or the last one the rows name. When the rows send one claim to
-   several places, a current one is taken, since only a committed pass makes
-   its claim current; with none current, the latest row is taken. A chain
-   that would come back to a claim it already passed stops at the claim
-   before it. A claim that left the snapshot because a newer claim
-   continues it -- a revision link in the memory journal, committed by the
-   Librarian or by [keeper_memory_write ~supersedes] -- is followed to that
-   newer claim the same way, so an absorbed fact whose claim was later revised
-   still reaches the claim current now. Only a claim that never became
-   current, or whose own departure has no row and no revision link, ends as
-   [into_current = false].
-
-   [answered_by] names the current claims that answer this search themselves.
-   A row whose claim is one of them says the same thing again and is left
-   out before [limit] is taken, so the rows sharing an answering claim do not
-   take the places of rows that reach a different one.
-
-   Kept at the last write, [absorbed_at] is the time of the last row stating
-   it: the retry's when a failed pass was retried, which is the usual order,
-   and a pass that did not commit when a failed pass follows a committed one.
-   No row says which of its passes committed. *)
-let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~query ~limit =
+let read_left ~keepers_dir ~keeper_id ~current =
   match
     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      Keeper_memory_absorbed.read ~keepers_dir ~keeper_id)
+      Keeper_memory_left.read ~keepers_dir ~keeper_id ~current)
   with
-  | Error detail -> Error (Absorbed_read_failed detail)
-  | Ok lines ->
-    let rows, unreadable =
-      List.partition_map
-        (fun (line, decoded) ->
-           match decoded with
-           | Ok (row : Keeper_memory_absorbed.record) -> Either.Left row
-           | Error (error : Keeper_memory_absorbed.read_error) -> Either.Right (line, error))
-        lines
-    in
-    let absorbed =
-      List.filter
-        (fun (row : Keeper_memory_absorbed.record) ->
-           not (StringSet.mem row.memory_id current_ids))
-        rows
-    in
-    let into_of =
-      List.fold_left
-        (fun into_of (row : Keeper_memory_absorbed.record) ->
-           StringMap.update
-             row.memory_id
-             (function
-               | Some kept
-                 when StringSet.mem kept current_ids
-                      && not (StringSet.mem row.into current_ids) -> Some kept
-               | Some _ | None -> Some row.into)
-             into_of)
-        StringMap.empty
-        absorbed
-    in
-    let rec chain_end ~revised_to ~passed id =
-      if StringSet.mem id current_ids
-      then id
-      else (
-        let passed = StringSet.add id passed in
-        let next =
-          match StringMap.find_opt id into_of with
-          | Some _ as absorbed_into -> absorbed_into
-          | None -> StringMap.find_opt id revised_to
-        in
-        match next with
-        | None -> id
-        | Some next when StringSet.mem next passed -> id
-        | Some next -> chain_end ~revised_to ~passed next)
-    in
-    let resolve ~revised_to (row : Keeper_memory_absorbed.record) =
-      let into =
-        chain_end ~revised_to ~passed:(StringSet.singleton row.memory_id) row.into
-      in
-      { row; into; into_current = StringSet.mem into current_ids }
-    in
-    (* One statement per (memory_id, into): a row repeating another row's
-       memory_id and the claim its into reaches states the same thing, kept
-       once at its last write. *)
-    let statements_of resolved =
-      let last_write =
-        List.fold_left
-          (fun (index, acc) (m : absorbed_match) ->
-             index + 1, StringPairMap.add (m.row.Keeper_memory_absorbed.memory_id, m.into) index acc)
-          (0, StringPairMap.empty) resolved
-        |> snd
-      in
-      List.filteri
-        (fun index (m : absorbed_match) ->
-           StringPairMap.find_opt (m.row.Keeper_memory_absorbed.memory_id, m.into) last_write = Some index)
-        resolved
-    in
-    let answered statements =
-      let whole_query, fragments =
-        answering
-          ~claim_of:(fun (m : absorbed_match) ->
-            m.row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.claim)
-          ~query
-          statements
-      in
-      whole_query @ fragments
-    in
-    (* The journal is the complete commit history, so it is read only when a
-       chain of absorbed rows alone stops short of a current claim in a row
-       that answers this search; only then can a revision link move it. A
-       chain that stops short in a row the query does not answer never reaches
-       the results, so it does not open the journal. *)
-    let by_rows = List.map (resolve ~revised_to:StringMap.empty) absorbed in
-    let statements = statements_of by_rows in
-    let answered_by_rows = answered statements in
-    let followed =
-      if List.for_all (fun (m : absorbed_match) -> m.into_current) answered_by_rows
-      then Ok (statements, answered_by_rows)
-      else (
-        match Keeper_memory_os_current.read_commit_lineage ~keepers_dir ~keeper_id with
-        | Error detail -> Error (Lineage_read_failed detail)
-        | Ok lineage ->
-          let revised_to =
-            List.fold_left
-              (fun revised_to (link : Keeper_memory_os_types.revision) ->
-                 StringMap.add link.superseded link.superseded_by revised_to)
-              StringMap.empty
-              lineage.Keeper_memory_os_current.revisions
-          in
-          let statements = statements_of (List.map (resolve ~revised_to) absorbed) in
-          Ok (statements, answered statements))
-    in
-    match followed with
-    | Error _ as error -> error
-    | Ok (statements, answered_rows) ->
-    Ok
-      { matches =
-          answered_rows
-          |> List.filter (fun (m : absorbed_match) ->
-            not (StringSet.mem m.into answered_by))
-          |> take limit
-      ; candidates = List.length statements
-      ; unreadable
-      }
+  | Error detail -> Error (Memory_log_read_failed detail)
+  | Ok left -> Ok left
 ;;
 
-let absorbed_match_to_json { row; into; into_current } : Yojson.Safe.t =
-  `Assoc
-    [ "text", `String row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.claim
-    ; ( "category"
-      , `String
-          (Keeper_memory_os_types.category_to_string
-             row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.category) )
-    ; "memory_id", `String row.Keeper_memory_absorbed.memory_id
-    ; "basis", Keeper_memory_os_types.basis_to_json row.fact.basis
-    ; "into", `String into
-    ; "into_current", `Bool into_current
-    ; "absorbed_at", `Float row.Keeper_memory_absorbed.recorded_at
-    ; "store", `String absorbed_store
-    ]
+let absorbed_claim (absorbed : Keeper_memory_left.absorbed) =
+  absorbed.left.fact.Keeper_memory_os_types.claim
+;;
+
+let dropped_claim (dropped : Keeper_memory_left.dropped) =
+  dropped.left.fact.Keeper_memory_os_types.claim
+;;
+
+(* The absorbed facts that answer the query the way current facts do
+   ({!answering}). [answered_by] names the current facts that answer this
+   search themselves. An absorbed fact that went into one of them says the
+   same thing again, so it is left out before [limit] is taken: the facts
+   that went into one answering claim do not take the places of facts that
+   went somewhere else. *)
+let answering_absorbed ~answered_by ~query ~limit absorbed =
+  let whole_query, fragments = answering ~claim_of:absorbed_claim ~query absorbed in
+  whole_query @ fragments
+  |> List.filter (fun (absorbed : Keeper_memory_left.absorbed) ->
+    not (StringSet.mem absorbed.into answered_by))
+  |> take limit
+;;
+
+let answering_dropped ~query ~limit dropped =
+  let whole_query, fragments = answering ~claim_of:dropped_claim ~query dropped in
+  take limit (whole_query @ fragments)
+;;
+
+let left_guidance =
+  "Historical removed claims, not current facts. Check the removal reason and original evidence before using or explicitly writing a current claim. Search never restores a fact. A fact removed before the Memory commit log started is not here."
 ;;
 
 (* --- History search (checkpoint + current trace) --- *)
-let search_dropped_facts ~keepers_dir ~keeper_id ~current_facts ~query ~limit =
-  match Keeper_memory_os_current.read_dropped ~keepers_dir ~keeper_id ~current_facts with
-  | Error detail -> Error (Dropped_read_failed detail)
-  | Ok rows ->
-    let whole, fragments = answering
-        ~claim_of:(fun (row : Keeper_memory_os_current.archived_fact) -> row.original.claim)
-        ~query rows in
-    Ok (take limit (whole @ fragments), List.length rows)
-;;
-
-let dropped_match_to_json (row : Keeper_memory_os_current.archived_fact) =
-  `Assoc
-    [ "text", `String row.original.claim
-    ; "memory_id", `String (Keeper_memory_os_types.memory_id row.original)
-    ; "category", `String (Keeper_memory_os_types.category_to_string row.original.category)
-    ; "basis", Keeper_memory_os_types.basis_to_json row.original.basis
-    ; "store", `String "dropped_memory"
-    ; "current", `Bool false
-    ; "removed_at", `Float row.removal.removed_at
-    ; "removed_in_revision", `Int row.removal.removed_in_revision
-    ; "removed_by", `String
-        (Keeper_memory_os_current.source_kind_to_string row.removal.removed_by.kind)
-    ; "reason", Json_util.string_opt_to_json row.removal.drop_reason
-    ]
-;;
-
-let dropped_guidance =
-  "Historical removed claims, not current facts. Check the removal reason and original evidence before using or explicitly writing a current claim. Search never restores a fact. Pending removal finalization is a read failure until a writer recovers it; older journal gaps may remain."
-;;
-
 type history_search =
   { matches : string list
   ; unreadable_rows : int
@@ -779,21 +624,21 @@ let search_history ~config ~(meta : keeper_meta) ~ctx_work ~query ~limit =
 
 type all_search_match =
   | All_fact of fact_match
-  | All_absorbed of absorbed_match
-  | All_dropped of Keeper_memory_os_current.archived_fact
+  | All_absorbed of Keeper_memory_left.absorbed
+  | All_dropped of Keeper_memory_left.dropped
   | All_history of string
 
 let all_search_match_text = function
   | All_fact match_ -> fact_match_lookup_text match_
-  | All_absorbed match_ -> match_.row.fact.claim
-  | All_dropped match_ -> match_.original.claim
+  | All_absorbed match_ -> absorbed_claim match_
+  | All_dropped match_ -> dropped_claim match_
   | All_history message -> message
 ;;
 
 let all_search_match_to_json = function
   | All_fact match_ -> fact_match_to_json match_
-  | All_absorbed match_ -> absorbed_match_to_json match_
-  | All_dropped match_ -> dropped_match_to_json match_
+  | All_absorbed match_ -> Keeper_memory_left.absorbed_to_json match_
+  | All_dropped match_ -> Keeper_memory_left.dropped_to_json match_
   | All_history message ->
     `Assoc
       [ "source", `String (memory_search_source_to_string History)
@@ -950,46 +795,38 @@ let keeper_memory_search_with_outcome
          ; "matches", `List (fact_jsons @ extra_matches)
          ]
          @ (if total_matches = 0 && not read_errors then [ "no_match", `Bool true ] else [])
-         @ read_error_fields)
+         @ read_error_fields
+         @ memory_writer_fields ~config ~keeper_name:meta.name)
     in
-    (* A line of the absorbed store that does not decode is left out of the
-       results, and both the model and the operator are told. The store is
-       append-only, so the same lines are reported on every search until the
-       file is repaired; a count and the first and last line numbers keep that
-       report the same size however many lines there are. For source=all, a
-       store that cannot be read at all is named beside the stores that
-       answered rather than taking their results with it. *)
-    let absorbed_fields ~(absorbed : absorbed_search) ~unavailable =
-      (match absorbed.unreadable with
-       | [] -> []
-       | (first, first_error) :: _ ->
-         let last = List.fold_left (fun _ (line, _) -> line) first absorbed.unreadable in
+    (* A commit log line that does not decode is left out of the results, and
+       both the model and the operator are told: what it removed is not known,
+       so an empty answer is not proof. The log is append-only, so the same
+       count comes back on every search. For source=all, a log that cannot be
+       read at all is named beside the stores that answered rather than taking
+       their results with it. *)
+    let left_fields ~(left : Keeper_memory_left.t option) ~unavailable =
+      (match left with
+       | None -> []
+       | Some { unreadable = 0; _ } -> []
+       | Some { unreadable; _ } ->
          Log.Keeper.warn
            ~keeper_name:meta.name
-           "keeper_memory_search left out %d absorbed memory line(s) it could not read; first: line %d: %s"
-           (List.length absorbed.unreadable)
-           first
-           (Keeper_memory_absorbed.read_error_to_string first_error);
-         [ ( "absorbed_unreadable_lines"
-           , `Assoc
-               [ "count", `Int (List.length absorbed.unreadable)
-               ; "first", `Int first
-               ; "last", `Int last
-               ] )
-         ])
+           "keeper_memory_search left out %d Memory commit log line(s) it could not read"
+           unreadable;
+         [ "memory_log_unreadable_lines", `Int unreadable ])
       @
       match unavailable with
       | None -> []
       | Some error ->
         Log.Keeper.warn
           ~keeper_name:meta.name
-          "keeper_memory_search answered source=%s without the absorbed memory store: %s"
+          "keeper_memory_search answered source=%s without the Memory commit log: %s"
           source_label
           (durable_search_error_detail error);
         [ ( "unavailable_stores"
           , `List
               [ `Assoc
-                  [ "store", `String absorbed_store
+                  [ "store", `String "memory_log"
                   ; "error_kind", `String (durable_search_error_kind_to_string error)
                   ; "detail", `String (durable_search_error_detail error)
                   ]
@@ -1066,14 +903,14 @@ let keeper_memory_search_with_outcome
       | Error _ as error -> error
       | Ok (facts, fact_matches, fact_total, deferred_sources, successor_fields, successor_incomplete, _corpus_revision) ->
         (
-           (* A librarian made one claim of the rows it absorbed (RFC-0456
-              §4.2). When that claim answers this search too, the rows say
-              the same thing again and are left out, so the claim is not
-              undone by its own sources crowding the limit. A row whose claim
-              does not answer is the only way to what it says and stays. A
-              claim answers here only when it holds the whole query or every
-              term of it: one that shares a single term was found, but it does
-              not say what the row says. *)
+           (* An absorbed fact names the claim that now says it. When that
+              claim answers this search too, the absorbed fact says the same
+              thing again and is left out, so the claim is not crowded out
+              of the limit by the facts it took in. An absorbed fact whose
+              claim does not answer is the only way to what it says and
+              stays. A claim answers here only when it holds the whole query
+              or every term of it: one that shares a single term was found,
+              but it does not say what the absorbed fact says. *)
            let answering_claims =
              List.fold_left
                (fun ids (m : fact_match) ->
@@ -1086,31 +923,27 @@ let keeper_memory_search_with_outcome
                StringSet.empty
                fact_matches
            in
-           let absorbed, unavailable =
-             match
-               search_absorbed_facts
-                 ~keepers_dir
-                 ~keeper_id:meta.name
-                 ~current_ids:(current_memory_ids facts)
-                 ~answered_by:answering_claims
-                 ~query
-                 ~limit
-             with
-             | Ok absorbed -> absorbed, None
-             | Error error ->
-               ( { matches = []; candidates = 0; unreadable = [] }
-               , Some error )
+           let left, unavailable =
+             match read_left ~keepers_dir ~keeper_id:meta.name ~current:facts with
+             | Ok left -> Some left, None
+             | Error error -> None, Some error
            in
-           let dropped, dropped_total, dropped_error =
-             match search_dropped_facts ~keepers_dir ~keeper_id:meta.name
-                 ~current_facts:facts ~query ~limit with
-             | Ok (rows, total) -> rows, total, None
-             | Error error -> [], 0, Some error
+           let absorbed, dropped =
+             match left with
+             | None -> [], []
+             | Some (left : Keeper_memory_left.t) ->
+               ( answering_absorbed ~answered_by:answering_claims ~query ~limit left.absorbed
+               , answering_dropped ~query ~limit left.dropped )
+           in
+           let left_total =
+             match left with
+             | None -> 0
+             | Some left -> List.length left.absorbed + List.length left.dropped
            in
            let history = search_history ~config ~meta ~ctx_work ~query ~limit in
            let candidates =
              List.map (fun match_ -> All_fact match_) fact_matches
-             @ List.map (fun match_ -> All_absorbed match_) absorbed.matches
+             @ List.map (fun match_ -> All_absorbed match_) absorbed
              @ List.map (fun match_ -> All_dropped match_) dropped
              @ List.map (fun message -> All_history message) history.matches
            in
@@ -1122,34 +955,57 @@ let keeper_memory_search_with_outcome
              deferred_sources <> []
              || successor_incomplete
              || history_has_read_errors history
-             || absorbed.unreadable <> []
+             || (match left with Some { unreadable; _ } -> unreadable > 0 | None -> false)
              || unavailable <> None
-             || dropped_error <> None
            in
            Ok
              { output =
                  durable_json
                    ~fact_jsons:(List.map all_search_match_to_json selected)
-                   ~fact_total:(fact_total + absorbed.candidates + dropped_total)
+                   ~fact_total:(fact_total + left_total)
                    ~total_matches:(List.length selected)
                    ~extra_matches:[]
                    ~read_errors
                    ~read_error_fields:
-                     ([ "dropped_guidance", `String dropped_guidance ]
-                      @ (match dropped_error with
-                         | None -> []
-                         | Some error ->
-                           [ "dropped_store_unavailable", `Assoc
-                               [ "error_kind", `String (durable_search_error_kind_to_string error)
-                               ; "detail", `String (durable_search_error_detail error) ] ])
-                      @ absorbed_fields ~absorbed ~unavailable
+                     ([ "left_guidance", `String left_guidance ]
+                      @ left_fields ~left ~unavailable
                       @ history_read_error_fields history
                       @ source_verification_fields deferred_sources
                       @ successor_fields)
              ; match_count = List.length selected
-             ; durable_candidates = Some (fact_total + absorbed.candidates + dropped_total)
+             ; durable_candidates = Some (fact_total + left_total)
              ; read_errors
              ; matched_memory_ids = List.filter_map ordinary_memory_id_of_all_match selected
+             })
+    in
+    (* source=absorbed and source=dropped. No Retrieved event: a fact that
+       left is not a current memory, and the events sidecar is about current
+       memories (RFC-0418). [page] picks the facts of one source and counts
+       them. *)
+    let left_answer page =
+      match read_current_facts ~keepers_dir ~keeper_id:meta.name with
+      | Error _ as error -> error
+      | Ok current ->
+        (match read_left ~keepers_dir ~keeper_id:meta.name ~current with
+         | Error _ as error -> error
+         | Ok left ->
+           let fact_jsons, total = page left in
+           let read_errors = left.Keeper_memory_left.unreadable > 0 in
+           Ok
+             { output =
+                 durable_json
+                   ~fact_jsons
+                   ~fact_total:total
+                   ~total_matches:(List.length fact_jsons)
+                   ~extra_matches:[]
+                   ~read_errors
+                   ~read_error_fields:
+                     ([ "left_guidance", `String left_guidance ]
+                      @ left_fields ~left:(Some left) ~unavailable:None)
+             ; match_count = List.length fact_jsons
+             ; durable_candidates = Some total
+             ; read_errors
+             ; matched_memory_ids = []
              })
     in
     let result =
@@ -1180,58 +1036,15 @@ let keeper_memory_search_with_outcome
           }
       | All -> all_stores ()
       | Dropped ->
-        (match read_current_facts ~keepers_dir ~keeper_id:meta.name with
-         | Error _ as error -> error
-         | Ok current_facts ->
-           match search_dropped_facts ~keepers_dir ~keeper_id:meta.name
-               ~current_facts ~query ~limit with
-           | Error _ as error -> error
-           | Ok (rows, total) ->
-             Ok
-               { output = durable_json
-                   ~fact_jsons:(List.map dropped_match_to_json rows)
-                   ~fact_total:total ~total_matches:(List.length rows)
-                   ~extra_matches:[] ~read_errors:false
-                   ~read_error_fields:[ "dropped_guidance", `String dropped_guidance ]
-               ; match_count = List.length rows
-               ; durable_candidates = Some total
-               ; read_errors = false
-               ; matched_memory_ids = []
-               })
+        left_answer (fun (left : Keeper_memory_left.t) ->
+          ( List.map Keeper_memory_left.dropped_to_json
+              (answering_dropped ~query ~limit left.dropped)
+          , List.length left.dropped ))
       | Absorbed ->
-        (* No Retrieved event: an absorbed fact is not a current memory, and
-           the events sidecar is about current memories (RFC-0418). *)
-        (match read_current_facts ~keepers_dir ~keeper_id:meta.name with
-         | Error _ as error -> error
-         | Ok facts ->
-           (match
-              search_absorbed_facts
-                ~keepers_dir
-                ~keeper_id:meta.name
-                ~current_ids:(current_memory_ids facts)
-                ~answered_by:StringSet.empty
-                ~query
-                ~limit
-            with
-            | Error _ as error -> error
-            | Ok absorbed ->
-              let read_errors =
-                absorbed.unreadable <> []
-              in
-              Ok
-                { output =
-                    durable_json
-                      ~fact_jsons:(List.map absorbed_match_to_json absorbed.matches)
-                      ~fact_total:absorbed.candidates
-                      ~total_matches:(List.length absorbed.matches)
-                      ~extra_matches:[]
-                      ~read_errors
-                      ~read_error_fields:(absorbed_fields ~absorbed ~unavailable:None)
-                ; match_count = List.length absorbed.matches
-                ; durable_candidates = Some absorbed.candidates
-                ; read_errors
-                ; matched_memory_ids = []
-                }))
+        left_answer (fun (left : Keeper_memory_left.t) ->
+          ( List.map Keeper_memory_left.absorbed_to_json
+              (answering_absorbed ~answered_by:StringSet.empty ~query ~limit left.absorbed)
+          , List.length left.absorbed ))
       | Current ->
         (match current_cursor_of_json (Safe_ops.safe_member "cursor" args) with
          | Error _ as error -> error
@@ -1248,16 +1061,16 @@ let keeper_memory_search_with_outcome
     | Error error ->
       let rejection = match error with
         | Cursor_invalid | Cursor_stale | Cursor_scope_unsupported -> true
-        | Snapshot_read_failed _ | Source_revalidate_failed _ | Absorbed_read_failed _
-        | Dropped_read_failed _ | Lineage_read_failed _ -> false in
+        | Snapshot_read_failed _ | Source_revalidate_failed _
+        | Memory_log_read_failed _ -> false in
       if not rejection then record_search_outcome Store_unavailable;
       Keeper_tool_execution.failure
         ~class_:(if rejection then Tool_result.Policy_rejection else Tool_result.Dependency_unavailable)
         ~effect_disposition:(match error with
           | Cursor_stale -> Tool_result.Effect_outcome_unknown
           | Cursor_invalid | Cursor_scope_unsupported
-          | Snapshot_read_failed _ | Source_revalidate_failed _ | Absorbed_read_failed _
-          | Dropped_read_failed _ | Lineage_read_failed _ -> Tool_result.Proven_pre_effect)
+          | Snapshot_read_failed _ | Source_revalidate_failed _
+          | Memory_log_read_failed _ -> Tool_result.Proven_pre_effect)
         (error_json
            ~fields:
              [ "error_kind", `String (durable_search_error_kind_to_string error)

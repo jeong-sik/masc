@@ -686,6 +686,29 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
        ]
        (removed_by retraction)
    | [] -> Alcotest.fail "no commit line");
+  (* source=dropped reads the same line: each fact that left with nothing in
+     its place, with why. *)
+  let dropped =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:(`Assoc [ "query", `String ""; "source", `String "dropped"; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  (match json_field "matches" dropped with
+   | `List rows ->
+     Alcotest.(check (list (pair string string)))
+       "the retracted fact and the two conclusions that lost their premise"
+       [ first_id, "retracted"; conclusion_id, "support_lost"; consequence_id, "support_lost" ]
+       (List.map (fun row -> string_field "memory_id" row, string_field "removal" row) rows);
+     (match rows with
+      | first :: _ ->
+        Alcotest.(check string) "the reason the Keeper gave"
+          "manifest now selects region B" (string_field "reason" first);
+        Alcotest.(check string) "and who removed it" "keeper" (string_field "removed_by" first)
+      | [] -> Alcotest.fail "no dropped row")
+   | _ -> Alcotest.fail "matches is a list");
   let revision_before_missing = int_field "revision" response in
   let missing =
     retract_tool
@@ -2444,6 +2467,20 @@ let check_failure_class label expected execution =
 
 let empty_ctx () = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:""
 
+(* A Keeper's write that supersedes [old] with [claim]. The commit log keeps
+   the fact that left and names the claim that took its place, which is what
+   source=absorbed reads. *)
+let supersede_tool ~config ~meta ~old claim =
+  let response =
+    (write_tool ~config ~meta
+       ~args:(`Assoc [ "content", `String claim; "supersedes", `String old ]))
+      .Masc.Keeper_tool_execution.raw_output
+    |> Yojson.Safe.from_string
+  in
+  if json_field "ok" response <> `Bool true
+  then Alcotest.failf "the superseding write was refused: %s" (Yojson.Safe.to_string response)
+;;
+
 (* A store the runtime cannot decode is a dependency that did not answer.
    Before, [read_current_facts] raised and the dispatcher printed
    [Failure("...invalid current Memory OS snapshot...")] back to the model,
@@ -2546,649 +2583,14 @@ let test_a_torn_tail_does_not_stop_the_next_absorb () =
       lines)
 ;;
 
-let test_absorbed_search_preserves_board_basis source =
-  let module Memory = Masc.Keeper_memory_os_types in
-  let module Librarian = Masc.Keeper_librarian in
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "absorbed-board-basis" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let post_id = "p-0123456789abcdef0123456789abcdef" in
-  let comment_id = "c-0123456789abcdef0123456789abcdef" in
-  let cases =
-    [ "original-source post observation", []
-    ; "original-source comment observation", [ "comment_id", `String comment_id ]
-    ]
-  in
-  let expected_basis comment_fields =
-    `Assoc
-      [ "kind", `String "observed"
-      ; "board", `Assoc (("post_id", `String post_id) :: comment_fields)
-      ]
-  in
-  List.iter
-    (fun (content, comment_fields) ->
-       let args =
-         `Assoc
-           ([ "content", `String content; "board_post_id", `String post_id ]
-            @ List.map (fun (_, value) -> "board_comment_id", value) comment_fields)
-       in
-       let written =
-         write_tool ~config ~meta ~args
-         |> fun execution -> Yojson.Safe.from_string execution.raw_output
-       in
-       Alcotest.(check bool) "public writer succeeded" true (json_field "ok" written = `Bool true);
-       Alcotest.(check bool) "the receipt preserves the original Board source" true
-         (Yojson.Safe.equal (expected_basis comment_fields) (json_field "basis" written)))
-    cases;
-  let original = current_facts ~keepers_dir ~keeper_id:meta.name in
-  Alcotest.(check int) "both original facts were stored" 2 (List.length original);
-  List.iter
-    (fun (fact : Memory.fact) ->
-       Alcotest.(check bool) "the Keeper authored each original" true
-         (fact.origin.kind = Memory.Authored);
-       Alcotest.(check bool) "the snapshot stores the original Board source" true
-         (Yojson.Safe.equal
-            (expected_basis (List.assoc fact.claim cases))
-            (Memory.basis_to_json fact.basis)))
-    original;
-  let input : Librarian.input =
-    { turn_ref = Ids.Turn_ref.make ~trace_id:"absorb-board-sources" ~absolute_turn:8
-    ; historical_task_contexts = []; goal_context = Librarian.No_task
-    ; keeper_id = Masc_test_deps.keeper_id_fixture meta.name
-    ; keeper_instructions = "Preserve useful observations."
-    ; current = Some { Librarian.facts = original }
-    ; working_context = Masc.Keeper_librarian_context.empty
-    ; messages = []
-    ; tool_observations = []
-    ; counterpart_observations = []
-    }
-  in
-  let selection =
-    match
-      Librarian.selection_of_json_result
-        ~now:(Time_compat.now ()) input
-        (`Assoc
-           [ "working_contexts", `List []
-           ; "dropped", `List []
-           ; "new_claims",
-             `List
-               [ `Assoc
-                   [ "claim", `String "Combined observations"
-                   ; "category", `String "fact"
-                   ; "absorbs", `List [ `String "m1"; `String "m2" ]; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]
-                   ]
-               ]
-           ])
-    with
-    | Ok selection -> selection
-    | Error error -> Alcotest.fail (Librarian.parse_error_to_string error)
-  in
-  (match
-     Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
-       ~keepers_dir ~keeper_id:meta.name ~now:(Time_compat.now ())
-       ~source:{ Current.kind = Current.Librarian; trace_id = "absorb-board-sources" }
-       ~new_claims:selection.new_claims ~dropped_statements:selection.dropped
-       ~absorbed:selection.absorbed ()
-   with
-   | Ok _ -> ()
-   | Error detail -> Alcotest.fail detail);
-  (match current_facts ~keepers_dir ~keeper_id:meta.name with
-   | [ merged ] ->
-     Alcotest.(check bool) "the new claim does not inherit the original Board sources" true
-       (merged.basis = Memory.Observed Memory.Transcript)
-   | _ -> Alcotest.fail "expected only the merged claim in current memory");
-  (match Masc.Keeper_memory_absorbed.read ~keepers_dir ~keeper_id:meta.name with
-   | Error detail -> Alcotest.fail detail
-   | Ok rows ->
-     Alcotest.(check int) "both original facts were archived" 2 (List.length rows);
-     List.iter
-       (function
-         | _, Error error ->
-           Alcotest.fail (Masc.Keeper_memory_absorbed.read_error_to_string error)
-         | _, Ok (row : Masc.Keeper_memory_absorbed.record) ->
-           Alcotest.(check bool) "the archive preserves the complete original fact" true
-             (List.exists (fun fact -> fact = row.fact) original))
-       rows);
-  let response =
-    Runtime.keeper_memory_search_json ~config ~meta ~ctx_work:(empty_ctx ())
-      ~args:
-        (`Assoc
-           [ "query", `String "original-source"
-           ; "source", `String source
-           ; "limit", `Int 10
-           ])
-    |> Yojson.Safe.from_string
-  in
-  let matches = Yojson.Safe.Util.to_list (json_field "matches" response) in
-  Alcotest.(check int) "both original texts are returned" 2 (List.length matches);
-  List.iter
-    (fun (content, comment_fields) ->
-       let matched =
-         match List.find_opt (fun row -> String.equal content (string_field "text" row)) matches with
-         | Some row -> row
-         | None -> Alcotest.failf "missing original text: %s" content
-       in
-       Alcotest.(check string) "result names the absorbed store" "absorbed_memory"
-         (string_field "store" matched);
-       Alcotest.(check bool) "search exposes the original Board source" true
-         (Yojson.Safe.equal (expected_basis comment_fields) (json_field "basis" matched)))
-    cases
-;;
-
-(* RFC-0456 §4.2: a fact a librarian pass absorbed is found through
-   source=absorbed and source=all, named with the claim that now says it. Rows a
-   pass wrote before a replace that failed are recognised: a row for a fact
-   that is still current is not returned, and a row repeating another's
-   memory_id and into is returned once, at its last write. A line that does not
-   decode is left out and named. *)
-let test_absorbed_facts_are_searchable () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "absorbed-search" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let id = Masc.Keeper_memory_os_types.memory_id in
-  let alpha = fact "alpha deploys on tuesday" in
-  let beta = fact "beta deploys on tuesday" in
-  let gamma = fact "gamma deploys on friday" in
-  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ alpha; beta; gamma ];
-  let merged = fact "alpha and beta deploy on tuesday" in
-  (match
-     Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
-       ~keepers_dir
-       ~keeper_id:meta.name
-       ~now:(Time_compat.now ())
-       ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
-       ~absorbed:
-         [ { Masc.Keeper_memory_os_types.absorbed = id alpha; into = id merged }
-         ; { Masc.Keeper_memory_os_types.absorbed = id beta; into = id merged }
-         ]
-       ~new_claims:[ merged ]
-       ()
-   with
-   | Ok _ -> ()
-   | Error detail -> Alcotest.fail detail);
-  let uncommitted (absorbed : Masc.Keeper_memory_os_types.fact) =
-    { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
-    ; trace_id = "failed-pass"
-    ; memory_id = id absorbed
-    ; into = id merged
-    ; fact = absorbed
-    }
-  in
-  (match
-     Masc.Keeper_memory_absorbed.append_all
-       ~keepers_dir
-       ~keeper_id:meta.name
-       [ uncommitted gamma; uncommitted alpha ]
-   with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
-  let search source =
-    Runtime.keeper_memory_search_json
-      ~config
-      ~meta
-      ~ctx_work:(empty_ctx ())
-      ~args:
-        (`Assoc [ "query", `String "deploy"; "source", `String source; "limit", `Int 10 ])
-    |> Yojson.Safe.from_string
-  in
-  let matches response =
-    match json_field "matches" response with
-    | `List items -> items
-    | _ -> Alcotest.fail "matches is a list"
-  in
-  let absorbed = matches (search "absorbed") in
-  Alcotest.(check (list string))
-    "each absorbed statement once, at its last write, and none for a current fact"
-    [ "beta deploys on tuesday"; "alpha deploys on tuesday" ]
-    (List.map (string_field "text") absorbed);
-  List.iter
-    (fun matched ->
-       Alcotest.(check string) "the store is named" "absorbed_memory"
-         (string_field "store" matched);
-       Alcotest.(check string) "into names the merged claim" (id merged)
-         (string_field "into" matched);
-       Alcotest.(check bool) "and says it is current" true
-         (json_field "into_current" matched = `Bool true))
-    absorbed;
-  Alcotest.(check (list string))
-    "all leaves out the rows whose claim answers too"
-    [ "current_memory_snapshot"; "current_memory_snapshot" ]
-    (List.filter_map
-       (function
-         | `Assoc fields -> Option.map Yojson.Safe.Util.to_string (List.assoc_opt "store" fields)
-         | _ -> None)
-       (matches (search "all")));
-  Alcotest.(check (list string))
-    "current search answers only current facts"
-    [ "gamma deploys on friday"; "alpha and beta deploy on tuesday" ]
-    (List.map (string_field "text") (matches (search "current")));
-  let search_for query source =
-    Runtime.keeper_memory_search_json
-      ~config
-      ~meta
-      ~ctx_work:(empty_ctx ())
-      ~args:(`Assoc [ "query", `String query; "source", `String source; "limit", `Int 10 ])
-    |> Yojson.Safe.from_string
-  in
-  Alcotest.(check (list string))
-    "current scope does not silently recover absorbed originals"
-    [ "gamma deploys on friday" ]
-    (List.map (string_field "text") (matches (search_for "deploys" "current")));
-  let default_current =
-    Runtime.keeper_memory_search_json
-      ~config
-      ~meta
-      ~ctx_work:(empty_ctx ())
-      ~args:(`Assoc [ "query", `String "deploys"; "limit", `Int 10 ])
-    |> Yojson.Safe.from_string
-  in
-  Alcotest.(check string) "absent source defaults to current" "current"
-    (string_field "source" default_current);
-  Alcotest.(check (list string))
-    "default excludes absorbed originals"
-    [ "gamma deploys on friday" ]
-    (List.map (string_field "text") (matches default_current));
-  Alcotest.(check (list string))
-    "all scope explicitly recovers absorbed originals"
-    [ "gamma deploys on friday"; "beta deploys on tuesday"; "alpha deploys on tuesday" ]
-    (List.map (string_field "text") (matches (search_for "deploys" "all")));
-  let channel =
-    open_out_gen
-      [ Open_wronly; Open_append ]
-      0o600
-      (Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
-  in
-  output_string channel "{\"recorded_at\": 1";
-  close_out channel;
-  let torn = search "absorbed" in
-  Alcotest.(check int) "the readable rows are still returned" 2
-    (List.length (matches torn));
-  Alcotest.(check bool) "and the line that does not decode is counted" true
-    (json_field "absorbed_unreadable_lines" torn
-     = `Assoc [ "count", `Int 1; "first", `Int 5; "last", `Int 5 ])
-;;
-
-(* A claim a librarian made can be absorbed by a later pass. A row naming it
-   is followed to the claim that holds it now, so it is not reported as lost.
-   And under source=all, rows whose claim already answers the search are left
-   out before the limit is taken, so they do not keep a row that reaches a
-   different claim from being shown. *)
-let test_absorbed_rows_follow_later_merges_and_leave_room () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let id = Masc.Keeper_memory_os_types.memory_id in
-  let absorb ~keeper_id ~trace_id pairs new_claims =
-    match
-      Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
-        ~keepers_dir
-        ~keeper_id
-        ~now:(Time_compat.now ())
-        ~source:{ Current.kind = Current.Librarian; trace_id }
-        ~absorbed:
-          (List.map
-             (fun (absorbed, into) ->
-                { Masc.Keeper_memory_os_types.absorbed = id absorbed; into = id into })
-             pairs)
-        ~new_claims
-        ()
-    with
-    | Ok _ -> ()
-    | Error detail -> Alcotest.fail detail
-  in
-  let search ~meta ~source ~limit =
-    Runtime.keeper_memory_search_json
-      ~config
-      ~meta
-      ~ctx_work:(empty_ctx ())
-      ~args:
-        (`Assoc
-            [ "query", `String "deploy"; "source", `String source; "limit", `Int limit ])
-    |> Yojson.Safe.from_string
-  in
-  let matches response =
-    match json_field "matches" response with
-    | `List items -> items
-    | _ -> Alcotest.fail "matches is a list"
-  in
-  let chained = make_meta "absorbed-chain" in
-  let alpha = fact "alpha deploys on tuesday" in
-  let beta = fact "beta deploys on tuesday" in
-  replace_current_facts ~keepers_dir ~keeper_id:chained.name [ alpha; beta ];
-  let first_merge = fact "alpha and beta ship on tuesday" in
-  let second_merge = fact "every team ships on tuesday" in
-  absorb
-    ~keeper_id:chained.name
-    ~trace_id:"first-pass"
-    [ alpha, first_merge; beta, first_merge ]
-    [ first_merge ];
-  absorb
-    ~keeper_id:chained.name
-    ~trace_id:"second-pass"
-    [ first_merge, second_merge ]
-    [ second_merge ];
-  let followed = matches (search ~meta:chained ~source:"absorbed" ~limit:10) in
-  Alcotest.(check (list string))
-    "both rows of the first pass are found"
-    [ "alpha deploys on tuesday"; "beta deploys on tuesday" ]
-    (List.map (string_field "text") followed);
-  List.iter
-    (fun matched ->
-       Alcotest.(check string) "into names the claim that holds it now" (id second_merge)
-         (string_field "into" matched);
-       Alcotest.(check bool) "and says it is current" true
-         (json_field "into_current" matched = `Bool true))
-    followed;
-  let crowded = make_meta "absorbed-crowded" in
-  let gamma = fact "gamma deploys on friday" in
-  replace_current_facts ~keepers_dir ~keeper_id:crowded.name [ alpha; beta; gamma ];
-  let answering_merge = fact "alpha and beta deploy on tuesday" in
-  let quiet_merge = fact "gamma ships on friday" in
-  absorb
-    ~keeper_id:crowded.name
-    ~trace_id:"answering-pass"
-    [ alpha, answering_merge; beta, answering_merge ]
-    [ answering_merge ];
-  absorb
-    ~keeper_id:crowded.name
-    ~trace_id:"quiet-pass"
-    [ gamma, quiet_merge ]
-    [ quiet_merge ];
-  Alcotest.(check (list string))
-    "the row reaching a claim that does not answer is shown beside the one that does"
-    [ "alpha and beta deploy on tuesday"; "gamma deploys on friday" ]
-    (List.map (string_field "text") (matches (search ~meta:crowded ~source:"all" ~limit:2)))
-;;
-
-(* Rows a failed pass left can send a claim to one that never became current,
-   and rows can loop. Following [into], a claim the rows send to a current
-   claim goes there even when a later failed pass sent it elsewhere, and a
-   loop stops at the claim before it would come back. *)
-let test_absorbed_chain_prefers_current_and_stops_before_a_loop () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "absorbed-chain-edges" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let id = Masc.Keeper_memory_os_types.memory_id in
-  let committed = fact "delta holds the release notes" in
-  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ committed ];
-  let xray = fact "xray deploys on monday" in
-  let alpha = fact "alpha holds the release notes" in
-  let never_current = fact "echo holds the release notes" in
-  let yankee = fact "yankee deploys on sunday" in
-  let bravo = fact "bravo waits for yankee" in
-  let row ~trace_id (absorbed : Masc.Keeper_memory_os_types.fact) into =
-    { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
-    ; trace_id
-    ; memory_id = id absorbed
-    ; into = id into
-    ; fact = absorbed
-    }
-  in
-  (match
-     Masc.Keeper_memory_absorbed.append_all
-       ~keepers_dir
-       ~keeper_id:meta.name
-       [ row ~trace_id:"first-pass" xray alpha
-       ; row ~trace_id:"committed-pass" alpha committed
-       ; row ~trace_id:"failed-pass" alpha never_current
-       ; row ~trace_id:"loop-pass" yankee bravo
-       ; row ~trace_id:"loop-pass" bravo yankee
-       ]
-   with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
-  let found =
-    match
-      Runtime.keeper_memory_search_json
-        ~config
-        ~meta
-        ~ctx_work:(empty_ctx ())
-        ~args:
-          (`Assoc
-              [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
-      |> Yojson.Safe.from_string
-      |> json_field "matches"
-    with
-    | `List items -> items
-    | _ -> Alcotest.fail "matches is a list"
-  in
-  Alcotest.(check (list (triple string string bool)))
-    "a current claim is preferred over a failed pass, and a loop stops before it returns"
-    [ "xray deploys on monday", id committed, true
-    ; "yankee deploys on sunday", id bravo, false
-    ]
-    (List.map
-       (fun matched ->
-          ( string_field "text" matched
-          , string_field "into" matched
-          , json_field "into_current" matched = `Bool true ))
-       found)
-;;
-
-(* A line no decoder reads, appended to the memory journal after the seed
-   commit: a lineage scan stops on it with an error. *)
-let break_journal ~keepers_dir ~keeper_id =
-  let oc =
-    open_out_gen [ Open_append; Open_wronly ] 0o600
-      (Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id)
-  in
-  output_string oc "not json\n";
-  close_out oc
-;;
-
-(* A claim the librarian absorbed into can later be replaced: the keeper
-   writes a new claim with [supersedes], and the commit's journal row links
-   the old claim to the new one. The absorbed row still names the dropped
-   claim, so the search follows the journal link from there and lands on the
-   claim that is current now (#38543, #37433). *)
-let test_absorbed_chain_follows_a_revised_claim () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "absorbed-chain-revised" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let id = Masc.Keeper_memory_os_types.memory_id in
-  let replacement = fact "foxtrot holds the release notes now" in
-  let absorbed = fact "golf deploys on monday" in
-  let replaced = fact "foxtrot holds the release notes" in
-  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ replaced ];
-  (match
-     Masc.Keeper_memory_absorbed.append_all
-       ~keepers_dir
-       ~keeper_id:meta.name
-       [ { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
-         ; trace_id = "absorbing-pass"
-         ; memory_id = id absorbed
-         ; into = id replaced
-         ; fact = absorbed
-         }
-       ]
-   with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
-  (match
-     Current.supersede_fact
-       ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
-       ~keepers_dir
-       ~keeper_id:meta.name
-       ~now:(Time_compat.now ())
-       ~source:{ Current.kind = Current.Explicit_write; trace_id = "revising-turn" }
-       ~superseded_memory_id:(id replaced)
-       replacement
-   with
-   | Ok _ -> ()
-   | Error _ -> Alcotest.fail "the supersede did not commit");
-  let found =
-    match
-      Runtime.keeper_memory_search_json
-        ~config
-        ~meta
-        ~ctx_work:(empty_ctx ())
-        ~args:
-          (`Assoc
-              [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
-      |> Yojson.Safe.from_string
-      |> json_field "matches"
-    with
-    | `List items -> items
-    | _ -> Alcotest.fail "matches is a list"
-  in
-  Alcotest.(check (list (triple string string bool)))
-    "the absorbed claim leads past the replaced claim to its replacement"
-    [ "golf deploys on monday", id replacement, true ]
-    (List.map
-       (fun matched ->
-          ( string_field "text" matched
-          , string_field "into" matched
-          , json_field "into_current" matched = `Bool true ))
-       found)
-;;
-
-(* The journal holds every commit, so a search whose absorbed rows all reach a
-   current claim does not read it. A journal that cannot be read then costs
-   that search nothing. *)
-let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "absorbed-events-unread" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let id = Masc.Keeper_memory_os_types.memory_id in
-  let current = fact "hotel holds the release notes" in
-  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ current ];
-  let absorbed = fact "india deploys on monday" in
-  (match
-     Masc.Keeper_memory_absorbed.append_all
-       ~keepers_dir
-       ~keeper_id:meta.name
-       [ { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
-         ; trace_id = "absorbing-pass"
-         ; memory_id = id absorbed
-         ; into = id current
-         ; fact = absorbed
-         }
-       ]
-   with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
-  break_journal ~keepers_dir ~keeper_id:meta.name;
-  let search () =
-    Runtime.keeper_memory_search_json
-      ~config
-      ~meta
-      ~ctx_work:(empty_ctx ())
-      ~args:
-        (`Assoc
-            [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
-    |> Yojson.Safe.from_string
-  in
-  let found =
-    match search () |> json_field "matches" with
-    | `List items -> items
-    | _ -> Alcotest.fail "matches is a list"
-  in
-  Alcotest.(check (list (pair string bool)))
-    "a chain that reaches a current claim does not need the journal"
-    [ "india deploys on monday", true ]
-    (List.map
-       (fun matched ->
-          string_field "text" matched, json_field "into_current" matched = `Bool true)
-       found)
-;;
-
-(* A chain that stops short of a current claim only matters in a row the query
-   answers, because only those rows reach the results. A stopped chain in a row
-   the query does not answer must not open the journal (#38617). Where the
-   query does answer the stopped row, the journal is read, and a journal that
-   cannot be read fails the search. *)
-let test_absorbed_search_reads_events_only_for_an_answered_stopped_chain () =
-  with_temp_dir
-  @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "absorbed-events-answered" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let id = Masc.Keeper_memory_os_types.memory_id in
-  let current = fact "hotel holds the release notes" in
-  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ current ];
-  let reaches_current = fact "india deploys on monday" in
-  let stops_short = fact "juliet moves the schedule" in
-  let gone = fact "juliet owned the old schedule" in
-  let row ~(from : Masc.Keeper_memory_os_types.fact) ~(into : Masc.Keeper_memory_os_types.fact) =
-    { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
-    ; trace_id = "absorbing-pass"
-    ; memory_id = id from
-    ; into = id into
-    ; fact = from
-    }
-  in
-  (match
-     Masc.Keeper_memory_absorbed.append_all
-       ~keepers_dir
-       ~keeper_id:meta.name
-       [ row ~from:stops_short ~into:gone; row ~from:reaches_current ~into:current ]
-   with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
-  break_journal ~keepers_dir ~keeper_id:meta.name;
-  let search query =
-    Runtime.keeper_memory_search_json
-      ~config
-      ~meta
-      ~ctx_work:(empty_ctx ())
-      ~args:
-        (`Assoc [ "query", `String query; "source", `String "absorbed"; "limit", `Int 10 ])
-    |> Yojson.Safe.from_string
-  in
-  (match search "deploys" |> json_field "matches" with
-   | `List items ->
-     Alcotest.(check (list (pair string bool)))
-       "a stopped chain in a row the query does not answer does not need the journal"
-       [ "india deploys on monday", true ]
-       (List.map
-          (fun matched ->
-             string_field "text" matched, json_field "into_current" matched = `Bool true)
-          items)
-   | _ -> Alcotest.fail "matches is a list");
-  match search "schedule" with
-  | `Assoc fields ->
-    Alcotest.(check bool)
-      "a stopped chain in a row the query answers reads the journal, and the search fails"
-      false
-      (List.mem_assoc "matches" fields);
-    Alcotest.(check string)
-      "the search fails because the journal lineage could not be read"
-      "lineage_read_failed"
-      (string_field "error_kind" (`Assoc fields))
-  | _ -> Alcotest.fail "the search result is an object"
-;;
-
 (* A keeper asks in several words, and a claim rarely holds them as one run of
    text. A claim answers when it holds the whole query, or any word of it
    (RFC-memory-search-beyond-substring section 3.1). The whole-query answers
    come first in store order, so a search the substring rule answered is still
    answered the same way at its head; the rest are ranked by BM25, so a claim
    holding every word comes before one holding a single word. The absorbed
-   store follows the same rule, so there too the kind of match comes before
-   the order the rows were written in. *)
+   facts follow the same rule, so there too the kind of match comes before
+   the order they left in. *)
 let test_a_query_of_several_words_is_answered () =
   with_temp_dir
   @@ fun base_path ->
@@ -3203,28 +2605,15 @@ let test_a_query_of_several_words_is_answered () =
   let other = fact "beta ships on tuesday" in
   let retired = fact "tuesday was chosen for alpha after the outage" in
   let retired_later = fact "the alpha tuesday window moved once" in
-  (* Absorbed rows are written in the order of the snapshot they leave, so
-     [retired] is written before [retired_later]. *)
   replace_current_facts
     ~keepers_dir
     ~keeper_id:meta.name
     [ apart; together; other; retired; retired_later ];
-  let merged = fact "alpha deploys on a fixed weekday" in
-  (match
-     Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
-       ~keepers_dir
-       ~keeper_id:meta.name
-       ~now:(Time_compat.now ())
-       ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
-       ~absorbed:
-         [ { Masc.Keeper_memory_os_types.absorbed = id retired; into = id merged }
-         ; { Masc.Keeper_memory_os_types.absorbed = id retired_later; into = id merged }
-         ]
-       ~new_claims:[ merged ]
-       ()
-   with
-   | Ok _ -> ()
-   | Error detail -> Alcotest.fail detail);
+  (* [retired] leaves first, so it is first among the absorbed facts. The
+     second write supersedes into the claim the first one wrote. *)
+  let merged = "alpha deploys on a fixed weekday" in
+  supersede_tool ~config ~meta ~old:(id retired) merged;
+  supersede_tool ~config ~meta ~old:(id retired_later) merged;
   let search ?(limit = 10) ~source query =
     Runtime.keeper_memory_search_json
       ~config
@@ -3266,12 +2655,12 @@ let test_a_query_of_several_words_is_answered () =
     ]
     (texts (search ~source:"all" "tuesday alpha"));
   Alcotest.(check (list string))
-    "the absorbed store answers by the same rule: the row holding the whole \
-     query comes before the row written earlier that holds only its words"
+    "the absorbed facts answer by the same rule: the fact holding the whole \
+     query comes before the one that left earlier holding only its words"
     [ "the alpha tuesday window moved once"; "tuesday was chosen for alpha after the outage" ]
     (texts (search ~source:"absorbed" "alpha tuesday"));
   Alcotest.(check (list string))
-    "and it is the row holding only the words that the limit cuts"
+    "and it is the fact holding only the words that the limit cuts"
     [ "the alpha tuesday window moved once" ]
     (texts (search ~limit:1 ~source:"absorbed" "alpha tuesday"));
   Alcotest.(check (list string))
@@ -3310,24 +2699,11 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
     ~keepers_dir
     ~keeper_id:meta.name
     [ ordinary_fragment; absorbed_exact ];
-  let merged = fact "merged weekday decision" in
-  (match
-     Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
-       ~keepers_dir
-       ~keeper_id:meta.name
-       ~now:(Time_compat.now ())
-       ~source:{ Current.kind = Current.Librarian; trace_id = "all-tier-pass" }
-       ~absorbed:
-         [ { Masc.Keeper_memory_os_types.absorbed =
-               Masc.Keeper_memory_os_types.memory_id absorbed_exact
-           ; into = Masc.Keeper_memory_os_types.memory_id merged
-           }
-         ]
-       ~new_claims:[ merged ]
-       ()
-   with
-   | Ok _ -> ()
-   | Error detail -> Alcotest.fail detail);
+  supersede_tool
+    ~config
+    ~meta
+    ~old:(Masc.Keeper_memory_os_types.memory_id absorbed_exact)
+    "merged weekday decision";
   let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let source_path = "facts/source.txt" in
   Fs_compat.mkdir_p (Filename.dirname (Filename.concat sandbox_root source_path));
@@ -3463,20 +2839,20 @@ let test_fragment_contract_is_whitespace_split_substring_matching () =
     history_empty
 ;;
 
-(* The absorbed store is read only by source=absorbed and source=all. When it
-   cannot be read, current still answers independently; all answers from the
-   current facts and explicitly names the historical store it went without. *)
-let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
+(* The commit log is read only by source=absorbed, source=dropped and
+   source=all. When it cannot be read, current still answers independently;
+   all answers from the current facts and names the log it went without. *)
+let test_an_unreadable_memory_log_leaves_all_its_current_facts () =
   with_temp_dir
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "absorbed-unreadable" in
+  let meta = make_meta "memory-log-unreadable" in
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
   replace_current_facts ~keepers_dir ~keeper_id:meta.name [ fact "gamma deploys on friday" ];
   Unix.mkdir
-    (Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+    (Masc.Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
     0o700;
   let search source =
     Runtime.keeper_memory_search_with_outcome
@@ -3486,12 +2862,15 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
       ~args:(`Assoc [ "query", `String "deploy"; "source", `String source ])
       ()
   in
-  let absorbed = search "absorbed" in
-  check_failure_class "absorbed alone" Tool_result.Dependency_unavailable absorbed;
-  Alcotest.(check string) "the absorbed store is named"
-    "absorbed_read_failed"
-    (string_field "error_kind"
-       (Yojson.Safe.from_string absorbed.Masc.Keeper_tool_execution.raw_output));
+  List.iter
+    (fun source ->
+       let alone = search source in
+       check_failure_class (source ^ " alone") Tool_result.Dependency_unavailable alone;
+       Alcotest.(check string) (source ^ ": the log is named")
+         "memory_log_read_failed"
+         (string_field "error_kind"
+            (Yojson.Safe.from_string alone.Masc.Keeper_tool_execution.raw_output)))
+    [ "absorbed"; "dropped" ];
   let answered source =
     (search source).Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
   in
@@ -3501,10 +2880,17 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
      Alcotest.(check string) "the current search still answers its current fact"
        "gamma deploys on friday" (string_field "text" matched)
    | _ -> Alcotest.fail "expected the one fact from the current search");
-  Alcotest.(check bool) "current never touches or reports the absorbed store" true
+  Alcotest.(check bool) "current never touches or reports the log" true
     (match default_search with
      | `Assoc fields -> Option.is_none (List.assoc_opt "unavailable_stores" fields)
      | _ -> false);
+  (match json_field "memory_writer" default_search with
+   | `Assoc _ as writer ->
+     Alcotest.(check string)
+       "a process with no writer says the snapshot was not checked against the log"
+       "none_in_process"
+       (string_field "state" writer)
+   | _ -> Alcotest.fail "expected the writer's state");
   let all = answered "all" in
   (match json_field "matches" all with
    | `List [ matched ] ->
@@ -3513,9 +2899,9 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
    | _ -> Alcotest.fail "expected the one current fact");
   match json_field "unavailable_stores" all with
   | `List [ store ] ->
-    Alcotest.(check string) "and the missing store is named" "absorbed_memory"
+    Alcotest.(check string) "and the missing log is named" "memory_log"
       (string_field "store" store)
-  | _ -> Alcotest.fail "expected the absorbed store to be named unavailable"
+  | _ -> Alcotest.fail "expected the commit log to be named unavailable"
 ;;
 
 (* A write that cannot reach its store is the same dependency failure. The
@@ -4096,82 +3482,6 @@ let test_ordinary_commit_budget_counts_source_facts () =
     (Fs_compat.load_file source_store_path)
 ;;
 
-let test_dropped_originals_are_historical_and_searchable () =
-  with_temp_dir @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "dropped-search" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let retired = fact "canary deployment needs rollback assets" in
-  let current = fact "current unrelated preference" in
-  replace_current_facts ~keepers_dir ~keeper_id:meta.name [retired;current];
-  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
-  Fs_compat.invalidate_cached_writer journal;
-  Sys.remove journal;
-  Unix.mkdir journal 0o700;
-  let retract reason =
-    match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id:meta.name ~now:3.
-        ~source:{kind=Current.Explicit_retract;trace_id="drop"}
-        ~memory_id:(Masc.Keeper_memory_os_types.memory_id retired) ~reason () with
-    | Ok _ -> () | Error _ -> Alcotest.fail "retraction failed" in
-  retract "deployment rule superseded";
-  let pending_receipts =
-    [ Current.publication_receipt_path ~keepers_dir ~keeper_id:meta.name
-    ; Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:meta.name
-    ] in
-  List.iter (fun path ->
-    Alcotest.(check bool) "journal failure preserves pending evidence" true
-      (Sys.file_exists path)) pending_receipts;
-  let search source =
-    Runtime.keeper_memory_search_json ~config ~meta ~ctx_work:(empty_ctx ())
-      ~args:(`Assoc ["query",`String "canary deployment";
-                    "source",`String source;"limit",`Int 10])
-    |> Yojson.Safe.from_string in
-  List.iter (fun source ->
-    let result = search source in
-    Alcotest.(check string) "pending publication prevents an authoritative snapshot read"
-      "snapshot_read_failed" (string_field "error_kind" result);
-    Alcotest.(check bool) "pending publication does not report a clean miss" false
-      (Yojson.Safe.Util.member "no_match" result = `Bool true)) ["dropped";"all"];
-  Unix.rmdir journal;
-  let result = search "dropped" in
-  Alcotest.(check (list string)) "first public read recovers the exact archived original"
-    [retired.claim] (match_texts result);
-  let row = Yojson.Safe.Util.(member "matches" result |> to_list |> List.hd) in
-  Alcotest.(check bool) "explicitly non-current" true (json_field "current" row = `Bool false);
-  Alcotest.(check string) "reason travels with original" "deployment rule superseded"
-    (string_field "reason" row);
-  List.iter (fun path ->
-    Alcotest.(check bool) "public read clears finalized publication and removal evidence" false
-      (Sys.file_exists path)) pending_receipts;
-  Alcotest.(check (list string)) "default current corpus has no retired body"
-    [] (match_texts (search "current"));
-  Alcotest.(check (list string)) "all includes removed originals"
-    [retired.claim] (match_texts (search "all"));
-  Alcotest.(check int) "search does not restore memory" 1
-    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
-  (* Explicit restoration is deduplicated by the ordinary write path. *)
-  (match Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id:meta.name ~now:4.
-      ~source:{kind=Current.Explicit_write;trace_id="restore"} retired with
-   | Ok _ -> () | Error _ -> Alcotest.fail "restoration failed");
-  Alcotest.(check (list string)) "re-added identity leaves archive"
-    [] (match_texts (search "dropped"));
-  retract "new removal reason";
-  let result = search "dropped" in
-  Alcotest.(check int) "repeated drops produce one latest original" 1 (int_field "match_count" result);
-  let row = Yojson.Safe.Util.(member "matches" result |> to_list |> List.hd) in
-  Alcotest.(check string) "latest reason is authoritative history" "new removal reason"
-    (string_field "reason" row);
-  let out = open_out_gen [Open_wronly;Open_append;Open_binary] 0o600 journal in
-  Fun.protect ~finally:(fun () -> close_out out) (fun () -> output_string out "{broken}\n");
-  Alcotest.(check string) "broken archive is a read failure" "dropped_read_failed"
-    (string_field "error_kind" (search "dropped"));
-  let partial = search "all" in
-  Alcotest.(check bool) "partial all search is not a clean miss" false
-    (Yojson.Safe.Util.member "no_match" partial = `Bool true);
-  Alcotest.(check bool) "partial failure is exposed" true
-    (Yojson.Safe.Util.member "dropped_store_unavailable" partial <> `Null)
-;;
-
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -4335,14 +3645,6 @@ let () =
             `Quick
             test_source_parser_accepts_every_supported_value
         ; tool_case
-            "absorbed search preserves the original Board basis"
-            `Quick
-            (fun () -> test_absorbed_search_preserves_board_basis "absorbed")
-        ; tool_case
-            "all search preserves the original Board basis"
-            `Quick
-            (fun () -> test_absorbed_search_preserves_board_basis "all")
-        ; tool_case
             "source parser rejects unknown value"
             `Quick
             test_source_parser_rejects_unknown_value
@@ -4365,34 +3667,6 @@ let () =
             `Quick
             test_a_torn_tail_does_not_stop_the_next_absorb
         ; tool_case
-            "absorbed facts are searchable"
-            `Quick
-            test_absorbed_facts_are_searchable
-        ; tool_case
-            "dropped originals remain historical, searchable and read-only"
-            `Quick
-            test_dropped_originals_are_historical_and_searchable
-        ; tool_case
-            "absorbed rows follow later merges and leave room"
-            `Quick
-            test_absorbed_rows_follow_later_merges_and_leave_room
-        ; tool_case
-            "absorbed chain prefers current and stops before a loop"
-            `Quick
-            test_absorbed_chain_prefers_current_and_stops_before_a_loop
-        ; tool_case
-            "absorbed chain follows a revised claim"
-            `Quick
-            test_absorbed_chain_follows_a_revised_claim
-        ; tool_case
-            "absorbed search reads events only for a stopped chain"
-            `Quick
-            test_absorbed_search_reads_events_only_for_a_stopped_chain
-        ; tool_case
-            "absorbed search reads events only for an answered stopped chain"
-            `Quick
-            test_absorbed_search_reads_events_only_for_an_answered_stopped_chain
-        ; tool_case
             "a query of several words is answered"
             `Quick
             test_a_query_of_several_words_is_answered
@@ -4405,9 +3679,9 @@ let () =
             `Quick
             test_fragment_contract_is_whitespace_split_substring_matching
         ; tool_case
-            "an unreadable absorbed store leaves all its current facts"
+            "an unreadable memory log leaves all its current facts"
             `Quick
-            test_an_unreadable_absorbed_store_leaves_all_its_current_facts
+            test_an_unreadable_memory_log_leaves_all_its_current_facts
         ; tool_case
             "unwritable store is a dependency failure"
             `Quick

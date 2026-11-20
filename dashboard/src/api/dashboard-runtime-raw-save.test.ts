@@ -50,6 +50,8 @@ describe('raw runtime.toml revision-checked write', () => {
     { durability: 'future', durability_detail: null },
     { durability: 'unconfirmed', durability_detail: '' },
     { warnings: [null] },
+    { ignored_legacy_keys: [7] },
+    { ignored_legacy_keys: undefined },
   ])('keeps an unreadable commit indeterminate without repeating the write', async invalid => {
     const committed = committedResponse()
     const fetchMock = reply({ ...committed, commit: { ...committed.commit, ...invalid } }, 200)

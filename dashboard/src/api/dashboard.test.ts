@@ -4442,6 +4442,7 @@ describe('runtime.toml raw config API', () => {
         durability: 'durable',
         durability_detail: null,
         warnings: [],
+        ignored_legacy_keys: [],
       },
       application: {
         operation: 'test_write',
@@ -4636,6 +4637,7 @@ describe('runtime.toml raw config API', () => {
       durability: 'durable',
         durability_detail: null,
       warnings: [],
+      ignored_legacy_keys: [],
     })
     expect(result.application.skills).toMatchObject({
       state: 'published',
@@ -4660,6 +4662,7 @@ describe('runtime.toml raw config API', () => {
         durability: 'durable',
         durability_detail: null,
         warnings: [],
+        ignored_legacy_keys: [],
       },
       application: {
         operation: 'raw_save',

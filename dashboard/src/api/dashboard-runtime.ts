@@ -1070,6 +1070,9 @@ export type RuntimeConfigCommit = {
   source_revision: string
   order: string
   warnings: Array<{ code: string; detail: string }>
+  // Legacy keys the committed text still carries and the server reads past
+  // without a value (Runtime.Config_commit_wire writes them on every commit).
+  ignored_legacy_keys: string[]
 } & (
   | { durability: 'durable'; durability_detail: null }
   | { durability: 'unconfirmed'; durability_detail: string }
@@ -1913,10 +1916,17 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
 }
 
 function decodeRuntimeConfigCommit(raw: unknown): RuntimeConfigCommit | undefined {
-  if (!hasExactKeys(raw, ['source_revision', 'order', 'durability', 'durability_detail', 'warnings'])) return undefined
+  if (!hasExactKeys(raw, ['source_revision', 'order', 'durability', 'durability_detail', 'warnings',
+    'ignored_legacy_keys'])) return undefined
   const sourceRevision = asString(raw.source_revision)
   const order = asString(raw.order)
   if (!sourceRevision || !order || !Array.isArray(raw.warnings)) return undefined
+  if (!Array.isArray(raw.ignored_legacy_keys)) return undefined
+  const ignoredLegacyKeys: string[] = []
+  for (const key of raw.ignored_legacy_keys) {
+    if (typeof key !== 'string') return undefined
+    ignoredLegacyKeys.push(key)
+  }
   const warnings: RuntimeConfigCommit['warnings'] = []
   for (const warning of raw.warnings) {
     if (!hasExactKeys(warning, ['code', 'detail'])) return undefined
@@ -1925,7 +1935,7 @@ function decodeRuntimeConfigCommit(raw: unknown): RuntimeConfigCommit | undefine
     if (!code?.trim() || !detail?.trim()) return undefined
     warnings.push({ code, detail })
   }
-  const identity = { source_revision: sourceRevision, order, warnings }
+  const identity = { source_revision: sourceRevision, order, warnings, ignored_legacy_keys: ignoredLegacyKeys }
   if (raw.durability === 'durable' && raw.durability_detail === null) {
     return { ...identity, durability: 'durable', durability_detail: null }
   }

@@ -1,5 +1,5 @@
-(** Candle amounts as the server folds them at the moment they are drawn
-    (RFC-0481 §3.7). The roster carries the fold's basis, and each balance and
+(** Candle amounts as the server folds them at the moment they are drawn.
+    The roster carries the fold's basis, and each balance and
     the supply are computed from it with {!Candle_decay_basis}, the server's
     own function, at [now] (Unix seconds). *)
 

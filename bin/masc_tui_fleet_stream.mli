@@ -1,4 +1,4 @@
-(** The terminal's side of the fleet stream (RFC-0477), without the socket.
+(** The terminal's side of the fleet stream, without the socket.
 
     A [t] reads the bytes of one connection after another and says what the
     Keepers screen can draw. It has one owner, the job that reads the

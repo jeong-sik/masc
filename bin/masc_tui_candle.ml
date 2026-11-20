@@ -7,7 +7,7 @@ let amount_text amount =
 
 (* The basis answers no instant before the last Candle event it holds. A TUI
    clock behind that event draws the values at the event, the earliest
-   instant the basis answers (RFC-0481 §6). *)
+   instant the basis answers. *)
 let instant ~now (basis : Candle_decay_basis.t) =
   match Ptime.of_float_s now with
   | None -> Error "the clock is out of range"

@@ -1,4 +1,4 @@
-(* RFC-0297 Phase 1 (P0-1): impure shell + SSOT resolver for the keeper
+(* Impure shell + SSOT resolver for the keeper
    lifecycle gates. The gate LOGIC stays in the pure Keeper_lifecycle_gate
    module; this module owns the two projections (Agent Core contract pure-core /
    impure-shell):

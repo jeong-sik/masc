@@ -1,4 +1,4 @@
-(** What failed when a terminal tool effect failed (RFC-0454 D1).
+(** What failed when a terminal tool effect failed.
 
     Each constructor names one producer's failure. Leaf strings are messages
     for people (a tool's own message, agent-core's detail); no code reads them

@@ -16,7 +16,7 @@ type ide_error =
 
 val ide_error : string -> string -> ide_error
 
-(** RFC-0378 §5.3b/§5.2: one wire key, one store. [Scope_codebase]
+(** One wire key, one store. [Scope_codebase]
     carries the canonical slug itself — the store directory name and the
     value the co-view context hands the keeper. Full-URL and repo_id
     spellings are projection labels, not addresses. The keeper-lane

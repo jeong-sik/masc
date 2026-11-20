@@ -220,14 +220,14 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
     [ Keeper_memory_os_types.wire_field_board_post_id
     ; Keeper_memory_os_types.wire_field_board_comment_id
     ];
-  (* RFC-0456 §4.2: every claim answers [absorbs], an empty array when it
+  (* Every claim answers [absorbs], an empty array when it
      absorbs nothing. *)
   check
     (list string)
     "absorbs is a required array"
     [ "array" ]
     (type_tokens (schema_property Keeper_memory_os_types.wire_field_absorbs claim_schema));
-  (* RFC-0456 §4.1: every claim answers [evidence], a closed object whose four
+  (* Every claim answers [evidence], a closed object whose four
      fields are all answered, empty arrays and false when it relied on nothing. *)
   let evidence_schema =
     schema_property Keeper_memory_os_types.wire_field_evidence claim_schema

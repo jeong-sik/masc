@@ -163,14 +163,14 @@ module Runtime : sig
 
   val microvm_work_volume_size : unit -> string
   (** [MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE], default [256g]. Ceiling of the
-      per-keeper work volume that holds the keeper's working tree (RFC-0400);
+      per-keeper work volume that holds the keeper's working tree;
       the image is sparse. *)
 
   val microvm_build_volume_size : unit -> string
   (** [MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE], default [128g], sized against
       one keeper's measured 87 GB of [_build] across three checkouts.
       Ceiling of the per-keeper build volume that holds derived [_build]
-      output (RFC-keeper-build-output-returns-to-a-disposable-volume),
+      output,
       `Apple_container` only; the image is sparse. *)
 
   val microvm_payload_path : unit -> string

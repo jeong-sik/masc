@@ -1,5 +1,4 @@
 (* Vision_analyze tests — the analyze_image pure contract.
-   RFC-keeper-vision-delegation-tool §2.2.
 
    Locks the failure contract: an empty or truncated vision reply is a typed
    error, never Ok "". The truncated case encodes the measured 2026-06-25 gemma4

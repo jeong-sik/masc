@@ -10,7 +10,7 @@ let message_feed_targets (meta : keeper_meta) =
   if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
 ;;
 
-(* RFC-0232 §3.4: identities are minted once at the parse boundary by
+(* Identities are minted once at the parse boundary by
    [Keeper_id.of_string]; the multi-form token-set expansion that used to
    live here moved inside it.  A keeper's self is the (≤2-element) id set
    minted from its name and agent name — they usually collapse to the
@@ -66,7 +66,7 @@ let has_kind kind messages =
   List.exists (fun message -> kind_equal kind message.kind) messages
 ;;
 
-(* RFC-0232 P1: the direct-line role is a closed sum, not a string label.
+(* The direct-line role is a closed sum, not a string label.
    The projection has exactly three shapes (a tool row is shown as its call
    name); [to_label] is the single place the display vocabulary lives, so the
    renderer never re-derives semantics from a free string. *)
@@ -209,7 +209,7 @@ let render_recent_direct_conversation_context
    ([Surface_ref.Agent], written for masc_keeper_msg / delegate) is too: it
    was sent to this Keeper, and the watermarked lane is what re-raises it if
    its turn never answered. Another Keeper's broadcast is standing context
-   for the fleet layer, and connector chatter is ignored (RFC-0468 §3.2). *)
+   for the fleet layer, and connector chatter is ignored. *)
 let is_scope_line (m : Keeper_chat_store.chat_message) : bool =
   match m.speaker with
   | Some (s : Keeper_chat_store.speaker) ->

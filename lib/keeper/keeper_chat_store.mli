@@ -118,9 +118,8 @@ type user_row_origin = Keeper_chat_types.user_row_origin =
     message content: the authenticated dashboard route is [Owner];
     anything carrying connector context is [External]; a sender that the
     producing site matched exactly against the Keeper registry is [Keeper],
-    with the Keeper's id in [speaker_id] (RFC-0468 §3.2). Persisted as
-    ["owner"] / ["external"] / ["keeper"] in [speaker_authority]
-    (RFC-0223 §3). *)
+    with the Keeper's id in [speaker_id]. Persisted as
+    ["owner"] / ["external"] / ["keeper"] in [speaker_authority]. *)
 type speaker_authority = Keeper_chat_types.speaker_authority =
   | Owner
   | External
@@ -146,7 +145,7 @@ type audio_clip = Keeper_chat_types.audio_clip = {
   device_id : string option;
   expired : bool;
 }
-(** Persistable audio clip (RFC-0235 P1). Written on an assistant line
+(** Persistable audio clip. Written on an assistant line
     when the keeper synthesized a voice utterance; [token] is the
     [/api/v1/voice/audio/:token] capability, [message_text] doubles as
     the caption. [audio_url] and [device_id] carry transport routing hints
@@ -180,7 +179,7 @@ val keeper_speaker : Keeper_identity.Keeper_id.t -> speaker
     already matched the sender against the Keeper registry; the id is not
     read back from the shape of any string here. [speaker_id] and
     [speaker_name] both carry the Keeper id, since a Keeper has exactly one
-    name (RFC-0393). *)
+    name. *)
 
 type chat_message = Keeper_chat_types.chat_message = {
   id : string;
@@ -213,12 +212,12 @@ type chat_message = Keeper_chat_types.chat_message = {
           [speaker_authority] label fails to parse (reported as a
           persistence read drop, row otherwise kept). *)
   audio : audio_clip option;
-      (** RFC-0235 P1: present when this assistant line was a synthesized
+      (** Present when this assistant line was a synthesized
           voice utterance (keeper_voice_speak). [None] on every other
           line and on rows written before voice transport; the dashboard
           renders a play button when present. *)
   blocks : chat_block list option;
-      (** RFC-0235 P3: rich chat blocks parsed from assistant reply text.
+      (** Rich chat blocks parsed from assistant reply text.
           Persisted server-side so the dashboard can prefer backend blocks
           over its local parser. [None] on rows written before this field
           and on non-assistant rows. *)
@@ -518,7 +517,7 @@ val append_assistant_message :
 
 (** [append_user_message ~base_dir ~keeper_name ~content ?attachments
     ?surface ?conversation_id ?external_message_id ?speaker ()] appends one
-    inbound user line with no paired assistant turn (RFC-0226). Written at delivery time by the inbound
+    inbound user line with no paired assistant turn. Written at delivery time by the inbound
     recorder — the Discord gateway's ambient arm and the gate dispatch
     boundary — so the line lands whether or not a turn starts or
     replies. Same failure policy as {!append_turn}. *)
@@ -665,7 +664,7 @@ val load_all_result :
 type page = { messages : chat_message list; has_more : bool }
 
 (** [load_page ~base_dir ~keeper_name ?before ()] is the paged form of
-    {!load} (RFC-0228 P1): with [before] (a message [ts]) it returns
+    {!load}: with [before] (a message [ts]) it returns
     the window of messages strictly older than that stamp; without it,
     the tail window. [has_more] reports whether rows older than the
     returned window remain — walk backward by passing the oldest
@@ -716,7 +715,7 @@ val to_json_array :
   chat_message list ->
   Yojson.Safe.t
 
-(** {1 Turn transcript (RFC-0233 §7)} *)
+(** {1 Turn transcript} *)
 
 (** A keeper turn's transcript. The terminal assistant row is selected by
     exact persisted [turn_ref]; an accepted-user row may join either by that
@@ -738,8 +737,8 @@ val transcript_of_messages :
     lines carrying either that [turn_ref] or the same typed delivery key in an
     [Accepted_user] provenance slot. Input order is preserved. There is no
     timestamp/text fallback (RFC-0233 §7 "no fuzzy attribution"). Pass
-    {!load}-produced messages so the content is already the redacted view
-    (RFC-0132); this function does not re-redact. *)
+    {!load}-produced messages so the content is already the redacted view;
+    this function does not re-redact. *)
 
 val turn_transcript_to_json :
   keeper:string ->

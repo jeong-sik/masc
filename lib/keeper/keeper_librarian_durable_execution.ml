@@ -234,7 +234,7 @@ let validate_lineage ~store ~fenced ~read listed =
     let+ allowed=can_replace ~store ~record ~request in
     if allowed then original::candidates else candidates) (Ok []) read in
   List.rev candidates
-(* RFC-librarian-history-settles-finished-originals. A chain settles leaf
+(* A chain settles leaf
    first under the day its root was minted, as Workspace Curator chains do:
    each history record, then the gate records of that execution. Every body
    holds its own request ID, so no two records share a body file and a move

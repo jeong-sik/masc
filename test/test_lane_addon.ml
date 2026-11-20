@@ -418,7 +418,7 @@ let test_a_document_source_reads_only_its_named_browser_that_covers_its_output (
     (choose T.Shared (browser ~installation:(O.Manual "browser") T.Shared) = T.Another_installation_serves);
   check bool "no browser is no browser" true (choose T.Shared None = T.No_browser_service)
 
-(* RFC browser-backends-end-alone S-L2: a document read goes to the service of
+(* A document read goes to the service of
    its route's source, and a client of a live source two services serve is not
    read, since a client does not say which of them it came from. *)
 let test_a_document_read_goes_to_the_service_of_its_source () =

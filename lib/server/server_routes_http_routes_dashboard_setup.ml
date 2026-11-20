@@ -13,17 +13,6 @@ module Pages = Server_routes_http_pages
    slot is not worth keeping live.  See
    [Server_dashboard_snapshot_select.select_telemetry_summary_json]. *)
 
-let trimmed_query_param req key =
-  match Server_utils.query_param req key |> Option.map String.trim with
-  | Some value when value <> "" -> Some value
-  | _ -> None
-
-let agent_core_telemetry_limit_param req =
-  Server_utils.int_query_param req "limit" ~default:50
-  |> Server_utils.clamp ~min_v:1 ~max_v:200
-
-let agent_core_telemetry_provider_param req = trimmed_query_param req "provider"
-
 (** Broadcast handler: parse JSON body, extract "message" string field, and
     relay via Workspace.broadcast.  Error responses are encoded through Yojson so
     exception messages cannot break JSON framing via embedded quotes. *)
@@ -51,7 +40,7 @@ let default_windowed_telemetry_limit = 2000
    (windowed: [default_windowed_telemetry_limit], else
    [default_telemetry_limit]).
 
-   RFC-0372: the result is a [Telemetry_unified.read_limit], not an int, so
+   The result is a [Telemetry_unified.read_limit], not an int, so
    "unbounded" cannot leave this function. #20659 preserved an explicit n=0 as
    an all-in-window contract; that form is now clamped to
    [Telemetry_unified.max_read_entries] and answered with [truncated = true]

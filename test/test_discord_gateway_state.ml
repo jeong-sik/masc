@@ -1,4 +1,4 @@
-(* RFC-0203 Phase 1.6 — fixture-frame unit tests for the pure
+(* fixture-frame unit tests for the pure
    state machine.
 
    No live WSS, no Eio. Drives Discord_gateway_state.step with
@@ -728,7 +728,7 @@ let test_attachment_caption_keeps_paragraphs () =
   check string "whitespace-only caption stays absent" suffix
     (S.content_with_attachments ~content:" \n\t " ~attachments)
 
-(* RFC-0223 P1 — author display name extraction. *)
+(* Author display name extraction. *)
 
 let decode_author_name ~payload =
   match
@@ -1326,7 +1326,7 @@ let test_policy_all_emits_messages_and_reactions () =
     (has_emit_event react_effects)
 
 (* ---------------------------------------------------------------- *)
-(* RFC-0226 — ambient lane recording. A message that fails the      *)
+(* Ambient lane recording. A message that fails the                 *)
 (* trigger policy (and is not the bot's own echo) is delivered as   *)
 (* Emit_ambient: record-only, never a turn. Policy decides exactly  *)
 (* one thing — whether a turn starts.                               *)
@@ -1417,7 +1417,7 @@ let test_ambient_not_for_reactions () =
     (has_emit_ambient effects)
 
 (* ---------------------------------------------------------------- *)
-(* RFC-0203 Phase 3 follow-up — self-skip guard. Bot-authored events *)
+(* self-skip guard. Bot-authored events *)
 (* are suppressed regardless of trigger policy so a misconfigured   *)
 (* User_only:<bot_id> or All policy can't loop the bot into itself. *)
 (* ---------------------------------------------------------------- *)

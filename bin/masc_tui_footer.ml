@@ -170,8 +170,8 @@ let status_item_projection ~ko = function
   | Keeper_action_running { gerund; keeper } ->
     Some
       { text =
-          (if ko then Printf.sprintf "%s %s\xe2\x80\xa6" keeper gerund
-           else Printf.sprintf "%s %s\xe2\x80\xa6" gerund keeper)
+          (if ko then Printf.sprintf "%s %s" keeper gerund
+           else Printf.sprintf "%s %s" gerund keeper)
       ; retention = Armed_action
       ; shorter = []
       }

@@ -87,7 +87,7 @@ let handle_ag_ui_events ~deps request reqd =
                   let response = Httpun.Response.create ~headers `OK in
                   (match evicted with
                   | Some evicted_sid ->
-                      (* RFC-0099 PR-3: cap-exceeded eviction publishes the
+                      (* cap-exceeded eviction publishes the
                          typed Evict/Close event pair. *)
                       stop_sse_session_evict evicted_sid
                         ~reason:Session_lifecycle_event.Cap_exceeded
@@ -95,7 +95,7 @@ let handle_ag_ui_events ~deps request reqd =
                   (match deps.get_runtime_result () with
                   | Error msg ->
                       (* No supervisor could own the response, so the stream
-                         ends at once (RFC-0493 §3.2). *)
+                         ends at once. *)
                       Log.Server.debug "ag-ui SSE runtime unavailable for session %s: %s"
                         session_id msg;
                       Sse.unregister_if_current session_id client_id;
@@ -117,7 +117,7 @@ let handle_ag_ui_events ~deps request reqd =
                       let clock = runtime.clock in
                       (* The drain sends the prime and the replay too, under
                          the supervisor, so a stop cancels one that waits for
-                         the socket (RFC-0493 §3.2). *)
+                         the socket. *)
                       run_sse_pumps ~sw info
                         ~drain:(fun () ->
                           match
@@ -218,7 +218,7 @@ let handle_presence_events ~deps request reqd =
               let response = Httpun.Response.create ~headers `OK in
           (match evicted with
           | Some evicted_sid ->
-              (* RFC-0099 PR-3: cap-exceeded eviction publishes the typed
+              (* cap-exceeded eviction publishes the typed
                  Evict/Close event pair. *)
               stop_sse_session_evict evicted_sid
                 ~reason:Session_lifecycle_event.Cap_exceeded
@@ -226,7 +226,7 @@ let handle_presence_events ~deps request reqd =
           match deps.get_runtime_result () with
           | Error msg ->
               (* No supervisor could own the response, so the stream ends at
-                 once (RFC-0493 §3.2). *)
+                 once. *)
               Log.Server.debug
                 "presence SSE runtime unavailable for session %s: %s"
                 session_id msg;

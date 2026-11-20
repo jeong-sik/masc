@@ -1,9 +1,7 @@
 (** Keeper_turn_driver_wrappers — convenience wrappers around
     {!Keeper_turn_driver.run_named}.
 
-    - [run_named_with_masc_tools]: runtime variant + MASC tool bridging
-
-    @since RFC-0048 PR-2 *)
+    - [run_named_with_masc_tools]: runtime variant + MASC tool bridging *)
 
 open Result.Syntax
 include Keeper_turn_driver

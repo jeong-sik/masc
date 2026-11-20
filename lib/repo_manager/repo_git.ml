@@ -345,7 +345,7 @@ let get_branches ~repository =
    lock held by another process — or a stalled filesystem — would block the
    caller indefinitely. Both callers sit on request paths: repository checkout
    inspection renders a dashboard response, and write attribution reads it on
-   the tool post-hook (RFC-keeper-workspace-root-only §5.1).
+   the tool post-hook.
 
    [read_only_git_env] adds GIT_OPTIONAL_LOCKS=0 so an inspection never takes
    a lock that a keeper's own git command then waits on. *)

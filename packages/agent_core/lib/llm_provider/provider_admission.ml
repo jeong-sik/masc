@@ -274,11 +274,6 @@ let with_admission_and_work_until ?wait ~clock ~deadline_at ~config f =
   | Error `Permit_wait_expired -> Error Permit_wait_expired
 ;;
 
-let with_admission_and_work_for ?wait ~clock ~timeout_s ~config f =
-  let deadline_at = Eio.Time.now clock +. timeout_s in
-  with_admission_and_work_until ?wait ~clock ~deadline_at ~config f
-;;
-
 type seat =
   | Unadmitted
   | Held of

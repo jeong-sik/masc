@@ -325,7 +325,7 @@ let json_lacks_field json key =
   | `Assoc fields -> not (List.mem_assoc key fields)
   | _ -> false
 
-(* RFC-0393: keeper-ness is a registry lookup, not a name shape. With no
+(* keeper-ness is a registry lookup, not a name shape. With no
    registered keeper, the old wrapper spelling is an ordinary agent name —
    nothing is recovered from the string. *)
 let test_board_actor_identity_is_registry_backed () =

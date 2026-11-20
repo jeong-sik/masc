@@ -66,7 +66,7 @@ let test_no_two_stores_share_a_directory () =
     (List.length (List.sort_uniq String.compare dirs))
 ;;
 
-(* RFC-0474 L4c. A pool job that reads a store is named by it: the name
+(* A pool job that reads a store is named by it: the name
    tells the store apart from every other store and does not carry the keeper,
    so one keeper store across forty keepers is one name. *)
 let test_a_location_knows_its_store_and_its_job_name () =

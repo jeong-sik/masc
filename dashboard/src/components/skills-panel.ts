@@ -887,7 +887,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
       request_id: identity.request_id, keeper_name: identity.keeper_name }, visit: ++asyncVisits.current }
   }
 
-  // Each Keeper's usage is its own read (RFC-0483), so reading every Keeper
+  // Each Keeper's usage is its own read, so reading every Keeper
   // does not carry every ledger. The catalog read does not wait for them, and
   // a newer round cancels the older one.
   const usageReadError = useRef<unknown | null>(null)

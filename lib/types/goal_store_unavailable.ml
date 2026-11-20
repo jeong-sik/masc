@@ -1,4 +1,4 @@
-(* RFC-0444 §2.1: the value a goal store this build cannot read produces.
+(* The value a goal store this build cannot read produces.
 
    It lives in masc_types, below both masc_workspace and masc_goal, because
    the task-creation contract in masc_workspace carries it
@@ -121,7 +121,7 @@ let to_string { file; reason; mirror; reset_step } =
 
 (* {1 Durable codec}
 
-   RFC-0444 PR-5: a skipped verifier scan keeps the whole value in the
+   A skipped verifier scan keeps the whole value in the
    verification-runs store, so a row read back after a restart is the same
    value the scan saw. This codec loses nothing — every [Unix.error], every
    detail string, the mirror's inner reason — which the wire envelope

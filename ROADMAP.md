@@ -1,15 +1,13 @@
 # masc Roadmap
 
-> Current package version: v0.73.1
-> Latest changelog entry: v0.73.1 (2026-11-18)
+> Current package version: v0.74.0
+> Latest changelog entry: v0.74.0 (2026-11-19)
 > Latest published GitHub release: v0.73.1 (2026-11-18)
-> Updated: 2026-11-18
+> Updated: 2026-11-19
 
 A planning view, not a release promise. The operating model behind it
 (labels, priority, pull-request and release rules) is
-[docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md). The
-historical feature-train rules are
-[docs/VERSIONED-ROADMAP.md](docs/VERSIONED-ROADMAP.md).
+[docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md).
 
 ## Scope
 
@@ -138,5 +136,4 @@ Open `must-do` issues, grouped. Numbers are issues.
 
 - [CHANGELOG.md](CHANGELOG.md), release by release
 - [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md)
-- [docs/VERSIONED-ROADMAP.md](docs/VERSIONED-ROADMAP.md)
 - [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md)

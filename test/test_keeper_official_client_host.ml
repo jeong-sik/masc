@@ -1148,7 +1148,7 @@ let test_text_history_uses_the_single_envelope () =
     (encoded_message_json message |> Yojson.Safe.to_string)
 ;;
 
-(* RFC-0468 §3.2: the input speaker is Librarian attribution. The official
+(* The input speaker is Librarian attribution. The official
    client reads this envelope as prompt text and its snapshot hashes cover it,
    so a stamped message encodes to the same bytes as an unstamped one. *)
 let test_input_speaker_stays_out_of_the_envelope () =
@@ -1806,7 +1806,7 @@ let test_required_native_none_never_degrades () =
   | Ok _ -> fail "an unsupported required posture must never degrade to native reads"
 ;;
 
-(* RFC-0390 admission review (P0): an admission refusal must not kill the
+(* An admission refusal must not kill the
    turn. resolve_native_posture degrades to the safest weaker posture and
    records the downgrade as a typed event. The pure predicate above still
    refuses — the policy below keeps the runtime call alive. *)
@@ -3178,7 +3178,7 @@ let test_direct_operation_source_reaches_official_start_and_resume () =
     (List.mem_assoc Prompt_block_id.Direct_input_source external_assembly.blocks)
 ;;
 
-(* RFC-0491 §3.1: the issuer carries Completion Authority as a block of its
+(* The issuer carries Completion Authority as a block of its
    context carrier, so the Agent Core System holds standing instructions only.
    An official client keeps the System-role carrier in the vendor's persistent
    System, so its turn takes the block out and delivers it as current-turn
@@ -3375,7 +3375,7 @@ let test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
        authority_text)
 ;;
 
-(* RFC-0491 §3.2 (f): a System kept with older articles sends the articles
+(* A System kept with older articles sends the articles
    changed since it was rendered in the end context, on the turn's first
    round and again on every later round. *)
 let amended_system () =
@@ -3468,7 +3468,7 @@ let test_an_authority_only_carrier_is_not_expected_among_the_messages () =
           ^ Keeper_agent_prompt_metrics.provenance_failure_reason failure)
 ;;
 
-(* RFC-0491 §3.3: the Goals awaiting proof leave the official carrier with the
+(* The Goals awaiting proof leave the official carrier with the
    authority, so the vendor's persistent System never keeps a Goal's phase
    past its turn. Both go out as current-turn input on Start, in carrier
    order, each proved by its own span of the issuer's carrier, and again on

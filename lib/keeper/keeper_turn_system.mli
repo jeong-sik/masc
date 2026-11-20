@@ -118,8 +118,8 @@ type lane =
       }
       (** An Agent Core runtime: masc fixes the System of each request. *)
   | Without_basis
-      (** An official client, whose vendor session holds its own System
-          (RFC-0491 §5), or a runtime the catalog does not hold. *)
+      (** An official client, whose vendor session holds its own System,
+          or a runtime the catalog does not hold. *)
 
 val issue :
   held:held option ->

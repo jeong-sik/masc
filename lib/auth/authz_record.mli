@@ -58,7 +58,6 @@ module Kind : sig
     | Trigger_evidence
     | Lease_terminal_evidence
     | Preauthorized_expiry
-    | Migration_diagnostic
     | Local_recovery
     | Mode_event
       (** A change of the mode of the installation (design 5.1). The body is

@@ -105,7 +105,7 @@ let read_index_entries ~base_path =
   | entries -> Ok entries
   | exception Sys_error detail -> Error detail
 
-(* RFC-0189 PR-1b.7 — handlers in this module return typed
+(* Handlers in this module return typed
    [Tool_result.result]. Boundary back to [Tool_result.result option] in
    [dispatch] below via [lift]. Two input-rejection helpers
    ([topic_required], [query_required]) share the
@@ -501,7 +501,7 @@ let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
 
 (* Search pages *)
 (* How a page matched a search query. [keeper_memory_search] uses the same two
-   tiers (RFC memory-search-beyond-substring): the whole query as one run of
+   tiers: the whole query as one run of
    text, then every whitespace-separated term anywhere in the page. A query of
    two words that are not adjacent in the page is the second kind. Read as one
    run it found nothing, and a Keeper took "No pages matching" to mean the

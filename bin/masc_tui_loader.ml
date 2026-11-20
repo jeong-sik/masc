@@ -293,7 +293,7 @@ let load_active_tasks (base_path : string) :
     * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
-  match Workspace_backlog.read_backlog_observation_with_source_r config with
+  match Masc_tui_backlog_read.read config with
   | Error err ->
       report path err;
       let reason = "task backlog unavailable: " ^ err in
@@ -1304,18 +1304,6 @@ let load_dashboard_gate ~(host : string) ~(port : int) :
     (Result.bind (fetch_dashboard_gate ~host ~port)
        (decode_offloaded memo_dashboard_gate ~name:"gate.decode_wait"
           Tui_decode.decode_gate_snapshot))
-
-let memo_keeper_gate_settings = json_memo ()
-
-(** Load the durable per-keeper Gate settings. *)
-let load_keeper_gate_settings ~(host : string) ~(port : int) :
-    ((string * Tui_decode.gate_mode) list * Tui_decode.keeper_exact_lane_first list, string) result =
-  match fetch_keeper_gate_settings ~host ~port with
-  | Error err -> Error ("keeper Gate settings load failed: " ^ err)
-  | Ok json ->
-      decode_offloaded memo_keeper_gate_settings
-        ~name:"keeper.gate_settings.decode_wait"
-        Tui_decode.decode_keeper_gate_settings json
 
 let memo_runtime_params = json_memo ()
 

@@ -131,13 +131,13 @@ let voice_wizard_clear session =
 let voice_wizard_save_held session =
   match session.vws_save with
   | Save_not_sent | Save_probing _ | Save_settled -> None
-  | Save_sending _ -> Some "saving…"
+  | Save_sending _ -> Some "saving"
   | Save_unanswered _ ->
-    Some "reading runtime.toml again to see whether the last save was written…"
+    Some "reading runtime.toml again to see whether the last save was written"
   | Save_needs_reopen reason -> Some reason
 
 let voice_wizard_sending session ~request =
-  { session with vws_save = Save_sending request; vws_status = Some "saving…"; vws_probe = [] }
+  { session with vws_save = Save_sending request; vws_status = Some "saving"; vws_probe = [] }
 
 (* What came back for a save, already told apart: an answer that carries the
    revision the write produced, a refusal the server gave in words, a save
@@ -163,7 +163,7 @@ let voice_wizard_after_save session ~request reply =
           | Voice_setup.Tts ->
             { session with
               vws_save = Save_probing request
-            ; vws_status = Some "saved. asking the endpoints to answer…"
+            ; vws_status = Some "saved. asking the endpoints to answer"
             }
           | Voice_setup.Stt ->
             (* Transcription needs audio this pane does not have. The CLI takes
@@ -181,7 +181,7 @@ let voice_wizard_after_save session ~request reply =
              Some
                (Printf.sprintf
                   "the save got no answer (%s), so it may have been written. reading \
-                   runtime.toml again…"
+                   runtime.toml again"
                   detail)
          })
   | Save_sending _ | Save_not_sent | Save_probing _ | Save_settled | Save_unanswered _

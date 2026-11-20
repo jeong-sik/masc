@@ -398,10 +398,6 @@ type keeper_msg =
       * (Masc.Tui_decode.keeper_turns_projection, request_failure) result
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now. *)
-  (* Its own message rather than a field on the stance one: the two come from
-     different endpoints and one failing must not blank the other. *)
-  | Keeper_gate_settings_loaded of
-      (((string * Masc.Tui_decode.gate_mode) list * Masc.Tui_decode.keeper_exact_lane_first list), request_failure) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, request_failure) result
       * Masc_tui_operator_projection.Listing_order.ticket
@@ -992,6 +988,12 @@ type 'a mailed = {
   message : 'a;
 }
 
+(* The loop may be asleep in its wait; the bell tells it to look
+   (RFC tui-idle-wait §2.1). *)
+let mail notifications message =
+  Eio.Stream.add notifications { ready_at_ns = Mtime_clock.elapsed_ns (); message };
+  Masc_tui_wake.(ring loop Mailbox)
+
 let capture_workspace_message state =
   let authority = state.workspace_authority in
   let reading = if server_authority_ready state then Some state.workspace_read_authority else None in
@@ -1060,7 +1062,12 @@ module Delivery_round : sig
   (** Capture the actual queued prefix, apply it in FIFO order, then collect
       and deliver one finite set of owned results. A completed round returns
       [None] even if new shared traffic is queued. [can_take] uses the caller's
-      existing deadline; a paused round retains its exact prefix/remainder. *)
+      existing deadline and is asked only with an item in hand: before a
+      queued item is taken and before a collected result is handed on. So a
+      [false] always leaves work, and a round with nothing to do never asks.
+      Capturing the prefix and collecting the owned results are not items;
+      they run when the round reaches them. A paused round retains its exact
+      prefix/remainder. *)
   val take : 'a t -> can_take:(unit -> bool) -> queued:(unit -> int) ->
     take_shared:(unit -> 'a option) -> collect_owned:(unit -> 'a list) ->
     'a option * 'a t
@@ -1068,12 +1075,12 @@ end = struct
   type 'a t = Await_prefix | Shared_prefix of int | Owned_results of 'a list
   let empty = Await_prefix
   let rec take round ~can_take ~queued ~take_shared ~collect_owned =
-    if not (can_take ()) then None, round
-    else match round with
+    match round with
     | Await_prefix ->
         take (Shared_prefix (queued ())) ~can_take ~queued ~take_shared ~collect_owned
     | Shared_prefix remaining when remaining > 0 ->
-        (match take_shared () with
+        if not (can_take ()) then None, round
+        else (match take_shared () with
          | Some ready -> Some ready, Shared_prefix (remaining-1)
          | None ->
              take (Owned_results (collect_owned ()))
@@ -1081,7 +1088,8 @@ end = struct
     | Shared_prefix _ ->
         take (Owned_results (collect_owned ()))
           ~can_take ~queued ~take_shared ~collect_owned
-    | Owned_results (ready :: rest) -> Some ready, Owned_results rest
+    | Owned_results (ready :: rest) ->
+        if not (can_take ()) then None, round else Some ready, Owned_results rest
     | Owned_results [] -> None, Await_prefix
 end
 
@@ -1193,8 +1201,7 @@ let rec workspace_message_is_read = function
   | Sent_image_ready _
   | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _)
   | Gate_msg (Gate_snapshot_loaded _)
-  | Keeper_msg (Keeper_gate_settings_loaded _
-  | Keeper_tool_modes_loaded _)
+  | Keeper_msg (Keeper_tool_modes_loaded _)
   | Goal_msg (Goal_confirmation_loaded _)
   | Schedule_msg (Schedules_loaded _
   | Schedule_wake_history_loaded _)
@@ -1378,7 +1385,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received _) | Gate_msg (Gate_snapshot_loaded _ | Gate_approval_resolved _
   | Gate_auto_judge_retried _ | Gate_mode_set _) | Keeper_msg (Keeper_tool_approval_answered _
-  | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
+  | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
   | Keeper_chat_dispatch_blocked _ | Keeper_logs_loaded _ | Keeper_settings_save_changed _)
   | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_creation_changed _ | Keeper_action_done _)
   | Board_msg (Board_publication_done _ | Board_comment_done _ | Board_vote_done _) | Goal_msg (Goal_transition_done _
@@ -1542,7 +1549,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Gate_approval_resolved (_, _, _, _, _)
     | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _))
     | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
-    | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
+    | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _))
     | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _)) | Board_msg (Board_publication_done _ | Board_comment_done _)
     | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _
@@ -1686,7 +1693,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Gate_approval_resolved (_, _, _, _, _)
   | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _))
   | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
-  | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
+  | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _))
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _)) | Board_msg (Board_publication_done _ | Board_comment_done _) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _))
   | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _

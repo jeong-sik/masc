@@ -14,9 +14,7 @@
 
     Current scope: all projected sub-FSM live states are written directly
     into [Keeper_registry.registry_entry]. The observer no longer infers
-    decision/runtime state from coarse parent conditions.
-
-    @since RFC-0003 — Composite observer v0. *)
+    decision/runtime state from coarse parent conditions. *)
 
 type turn_phase = Keeper_registry.turn_phase =
   | Turn_idle

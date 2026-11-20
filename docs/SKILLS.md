@@ -5,8 +5,7 @@ masc 의 스킬은 파일 하나로 선언되는 능력이다. `runtime.toml`의
 각각의 `.masc/skills`, `.agents/skills`다. Keeper 턴과 `/api/v1/skills`는 같은 발행
 스냅샷을 새로 고쳐 읽으므로 source 우선순위·shadow·거부 결과가 서로 갈리지 않는다.
 
-관련 RFC: `docs/rfc/RFC-skills-as-tools.md` (합성·도구 승격),
-`#30156` skills-declared-not-discovered (task 라우팅). 파서는
+관련 이슈: `#30156` skills-declared-not-discovered (task 라우팅). 파서는
 `packages/agent_core/lib/skill_document.ml` (frontmatter 계약) + `lib/keeper/keeper_skill_catalog.ml` (fence·카탈로그)다.
 
 런타임에서 **어떻게 도는가**(순서도 + 코드 경로)는 `docs/SKILLS-FLOW.md`.
@@ -27,8 +26,7 @@ package 이름은 검증한 입력을 가리키며, 발행된 Skill Reference가
 정적 검증은 실행 성공이나 안전성을 증명하지 않고 source·snapshot도 변경하지
 않는다.
 
-Keeper는 `keeper_skill_publish`로 새 package를 직접 발행한다
-([self-authored-skills](rfc/RFC-keeper-self-authored-skills.md)).
+Keeper는 `keeper_skill_publish`로 새 package를 직접 발행한다.
 `package_id`, `SKILL.md` 전체인 `source_text`, 비어 있지 않은 `evidence` 목록을 받는다.
 쓰는 곳은 `project-agents` source 하나로 정해져 있고 Keeper가 고르지 못한다.
 편집기 `create`와 같은 parser로 검증하고, `project-agents`에 이미 있는 package는
@@ -51,8 +49,7 @@ HTTP 편집기 응답은 감사 상태를 전달하지 않는다.
 삭제는 운영자의 편집기 DELETE 경로로 하며, TUI Tools 화면의 `d` 두 번 누름이
 같은 경로를 호출한다.
 
-Keeper가 composition을 저장하는 `keeper_compose_save`는
-[writes-own-compositions](rfc/RFC-keeper-writes-own-compositions.md)의 제안이며
+Keeper가 composition을 저장하는 `keeper_compose_save`는 제안이며
 현재 도구가 아니다. 실행 기록에서 후보를 찾고 검증해 발행하는
 [Tool Librarian 제안](https://github.com/jeong-sik/masc/pull/36925)도 구현된 자동
 생산 경로로 취급하지 않는다. 발행된 Skill의 사용 기록은 그 Skill이 자동으로

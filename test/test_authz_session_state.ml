@@ -117,7 +117,6 @@ let who_may_write_what () =
     ; "the local operator", Author.Local_operator, "not a session author"
     ; "system cron", Author.System_cron, "not a session author"
     ; "system maintenance", Author.System_maintenance, "not a session author"
-    ; "system migration", Author.System_migration, "not a session author"
     ];
   check_refused "a session for another" ~author:bob S.empty (issued ()) "bob issues for alice";
   check_refused

@@ -277,7 +277,7 @@ let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
     filled_part ^ track_part
 ;;
 
-let meter ~width ~value ~max_value ~scale ?label ?suffix
+let meter ~width ~value ~max_value ~scale ?label ?(label_style = "") ?suffix
     ?(track_style = "") ?suffix_style
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
@@ -298,7 +298,9 @@ let meter ~width ~value ~max_value ~scale ?label ?suffix
     in
     let prefix =
       match label with
-      | Some l when l <> "" -> l ^ " "
+      | Some l when l <> "" ->
+        if String.equal label_style "" then l ^ " "
+        else label_style ^ l ^ reset ^ " "
       | Some _ | None -> ""
     in
     let raw_suffix =

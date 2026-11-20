@@ -1,8 +1,0 @@
-glm-coding               fully-stable turns= 82 | 0-120s n=32 hit=76% | 120-300s n=18 hit=75% | 300-600s n=10 hit=68% | 600-1800s n=18 hit=80% | 1800-infs n=4 hit=35%
-openai-responses         fully-stable turns= 22 | 0-120s n=7 hit=31% | 120-300s n=1 hit=21% | 300-600s n=1 hit=41% | 600-1800s n=5 hit=31% | 1800-infs n=8 hit=36%
-kimi_coding              fully-stable turns=  4 | 0-120s n=2 hit=79% | 300-600s n=1 hit=76% | 600-1800s n=1 hit=41%
-ollama_cloud             fully-stable turns=  2 | 0-120s n=1 hit=94% | 120-300s n=1 hit=100%
-claude_account_A    fully-stable turns=138 | 0-120s n=40 hit=91% | 120-300s n=91 hit=92% | 300-600s n=7 hit=92%
-claude_account_D           fully-stable turns=  2 | 0-120s n=1 hit=94% | 120-300s n=1 hit=94%
-claude_account_B          fully-stable turns=  8 | 0-120s n=5 hit=76% | 120-300s n=1 hit=94% | 300-600s n=2 hit=0%
-claude_account_C        fully-stable turns=  1 | 0-120s n=1 hit=41%

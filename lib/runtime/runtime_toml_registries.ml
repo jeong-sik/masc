@@ -218,7 +218,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   in
   let env_allowlist_result = string_array_field "env_allowlist" in
   let capabilities_result = string_array_field "capabilities" in
-  (* RFC-0422 §3.4: the operator's declaration that the account home is the
+  (* The operator's declaration that the account home is the
      keeper's alone. Absent is [false], so a shared account keeps the judge
      for every write until someone says otherwise in this file. *)
   let private_home_result =
@@ -403,7 +403,7 @@ let exec_single_child ~(path : string) ~(child_key : string) (value : Otoml.t)
 (** Walk [\[exec.ssh.endpoints.*\]] tables into the endpoint registry. Each
     endpoint name passes {!validate_runtime_id_component} dot-free, matching
     provider ids. Absent [\[exec\]] section yields an empty registry. *)
-(* [\[egress.keepers.<name>\]] — one keeper's allowlist (RFC-0415).
+(* [\[egress.keepers.<name>\]] — one keeper's allowlist.
 
    Every rule is parsed here, at config load, rather than when a request
    arrives. A rule a resolver could read differently than [Egress_host] does

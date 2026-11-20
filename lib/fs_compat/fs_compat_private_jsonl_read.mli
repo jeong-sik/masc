@@ -93,6 +93,10 @@ val fold_private_jsonl_unique_regular_locked_with_io_for_testing :
 
 module Private_jsonl_window :
   sig
+    type previous_row_wanted =
+        No_previous_row
+      | Nearest_accepted of (string -> bool)
+
     type t =
         Window_missing
       | Window_present of { previous_row : (int * string) option;
@@ -105,7 +109,7 @@ val read_private_jsonl_window_locked_result :
   string ->
   from:int ->
   max_rows:int ->
-  previous_row_wanted:(string -> bool) ->
+  previous_row_wanted:Private_jsonl_window.previous_row_wanted ->
   ( Private_jsonl_window.t
   , Private_jsonl_rows.error )
   private_file_transaction_outcome

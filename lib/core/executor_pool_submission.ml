@@ -4,7 +4,7 @@ type worker_entry = Awaiting_worker | Entered_worker | Cancelled_before_entry
    capabilities belong to one submission, across the caller/worker domains.
    The entry CAS decides whether there is user work whose cleanup to join.
    [name] labels the job in [Pool_wait] and, as an Eio trace span, in the
-   runtime-events trace of the worker that runs it (RFC-0474 L4c). *)
+   runtime-events trace of the worker that runs it. *)
 let submit pool ~weight ~name f =
   let lane = Pool_lane.current () in
   let in_flight = Pool_wait.in_flight lane in

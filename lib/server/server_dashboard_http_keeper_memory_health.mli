@@ -9,7 +9,7 @@ val fleet_cache_key : base_path:string -> string
 (** The key the route caches {!keeper_memory_health_http_json} under. A
     write to one of its inputs empties it before the write is announced, so a
     fleet read after the announcement does not answer older than the row read
-    it announced (RFC-0487 §2.8). *)
+    it announced. *)
 
 val keeper_memory_health_row_http_json : base_path:string -> keeper:string -> Yojson.Safe.t
 (** [keeper]'s row alone, as [{"schema", "generated_at", "keeper"}] where

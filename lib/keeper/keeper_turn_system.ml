@@ -1,5 +1,5 @@
 (* Keeper_turn_system — the System a keeper turn sends, and the articles that
-   changed since it was rendered (RFC-0491 §3.2). See the mli. *)
+   changed since it was rendered. See the mli. *)
 
 open Result.Syntax
 

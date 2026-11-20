@@ -570,7 +570,7 @@ let test_the_shell_reads_its_own_operators () =
     [ "test -w /tmp && echo ok"; "grep x f || echo none"; "a; b" ]
 ;;
 
-(* RFC shell-ir-typed-command-substitution. [$( )] is inside the subset now:
+(* [$( )] is inside the subset now:
    the script lowers to one Simple whose arg is the Subst, and the judge
    classifies it Representable rather than naming a refusal. *)
 let test_a_substitution_lowers_and_classifies_representable () =
@@ -1014,7 +1014,7 @@ let test_a_program_named_like_cd_still_runs () =
     Alcotest.failf "cdparanoia is a program: %a" Execute_input.pp_validation_error err
 ;;
 
-(* RFC execute-subset-dispositions step 1.  A script inside argv is counted as
+(* A script inside argv is counted as
    nothing at all on this path, and these pin that it is now counted. *)
 let host = Masc_exec.Sandbox_target.host ()
 
@@ -1063,7 +1063,7 @@ let test_hidden_script_findings_ignores_what_hides_nothing () =
     (List.length (findings_of (`Assoc [ "argv", `List [ `String "rg"; `String "x" ] ])))
 ;;
 
-(* RFC execute-boundary-is-the-sandbox §6. A script source used to yield
+(* A script source used to yield
    nothing here, on the grounds that it had already crossed the gate. It no
    longer crosses one — it goes to a shell — so this is the only place its
    construct gets named, and the advice that rides back is the whole of what
@@ -1087,7 +1087,7 @@ let costume script =
   `Assoc [ "argv", `List [ `String "sh"; `String "-c"; `String script ] ]
 ;;
 
-(* RFC execute-boundary-is-the-sandbox §4.1. The costume used to be taken
+(* The costume used to be taken
    apart when the subset could represent it, so [sh -c "echo hi"] became
    [echo hi] and [sh -c "false; echo hi"] became a [Sequence]. Both are one
    shell now, whichever the argv named: the caller asked for a shell, and
@@ -1107,7 +1107,7 @@ let test_a_costume_keeps_its_shell () =
 let test_what_the_ir_cannot_hold_keeps_todays_path () =
   (* Constructs the IR still cannot hold — backtick substitution, unquoted
      heredoc — stay on the shell.  [$( )] left this list when it became
-     [Shell_ir.Subst] (RFC shell-ir-typed-command-substitution). *)
+     [Shell_ir.Subst]. *)
   Alcotest.(check string) "backtick cmd_subst" "sh" (lowered_bin (costume "cat `echo foo`"));
   Alcotest.(check string) "heredoc" "sh" (lowered_bin (costume "cat <<'EOF'\nx\nEOF"))
 ;;

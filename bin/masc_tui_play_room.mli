@@ -57,10 +57,10 @@ val kept_back : t -> request -> now:float -> string -> t
 val origin : t -> Masc.Play_room.message -> origin
 (** [Viewer] when the message's author is the committed viewer, otherwise the
     room speaker. Layout marks each message from this value. *)
-val layout : t -> width:int -> height:int -> t * string list
+val layout : ?ko:bool -> t -> width:int -> height:int -> t * string list
 (** Pure layout and its normalized navigation state. Commit the returned state
     only after the terminal write succeeds. PgUp/PgDn use these actual row
     bounds; history is anchored by message id and wrapped line, so appended
     messages do not move the reader. An anchor removed from the snapshot
     clamps to the first remaining message at or after it. *)
-val footer : t -> string
+val footer : ?ko:bool -> t -> string

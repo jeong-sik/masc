@@ -1,4 +1,4 @@
-(** A derived read index over the keeper tool-call ledger (RFC-0437).
+(** A derived read index over the keeper tool-call ledger.
 
     The ledger is the authority. This holds only where each row lives and the
     fields the reads filter on, and it can be deleted at any time: the

@@ -63,8 +63,7 @@ Exact records and proofs, domain ledgers, receipts and source queues.
    originals before clearing the volume. Check the known IDs against host proofs
    and owner outcomes, recording delivery and domain commit separately.
 
-The host incarnation/cause change has its own Exact/Curator/Librarian hard cut
-in the [unknown outcome RFC](../rfc/RFC-exact-outcome-unknown-names-its-cause.md).
+The host incarnation/cause change has its own Exact/Curator/Librarian hard cut.
 If both changes deploy together, use one stopped-server window and satisfy both
 inventories. Browser Add-on fresh-state steps are a separate retained-owner
 contract and must use the candidate's actual preflight refusals.

@@ -67,7 +67,7 @@ type stimulus_payload =
   | Bootstrap
   | Tool_result_ready of string
   | Fusion_completed of fusion_completion
-      (* RFC-0266: an async [masc_fusion] deliberation finished. Wakes the
+      (* An async [masc_fusion] deliberation finished. Wakes the
          calling keeper so the resolved answer arrives as actionable turn
          input on its next cycle, instead of being discovered passively. *)
   | Schedule_due of scheduled_wake
@@ -148,7 +148,7 @@ and fusion_completion = {
   board_post_id : string;
   (* correlates to the sink's board evidence post; "" if none was created. *)
   channel : Keeper_continuation_channel.t;
-  (* RFC-0320 pattern: the connector conversation the deliberation was started
+  (* The connector conversation the deliberation was started
      from, captured at masc_fusion call time, so the woken keeper can deliver
      the resolved answer back into the originating channel.  [Unrouted] when
      the run was not started from a connector conversation. *)
@@ -225,18 +225,18 @@ and hitl_resolution = {
   decision : hitl_resolution_decision;
   (* resolved decision label carried for observability. *)
   channel : Keeper_continuation_channel.t;
-  (* RFC-0320: the connector the resolved conversation started on, captured at
+  (* The connector the resolved conversation started on, captured at
      approval-submission time and carried through so a woken keeper can reply
      into it. [Unrouted] when no originating connector was captured. *)
 }
 
 and connector_attention = {
   event_id : string;
-      (* RFC-connector-ambient-attention-wake: pointer into
+      (* Pointer into
          [Keeper_external_attention] for the ambient message; content/surface
          read from that store on the turn path. *)
   channel : Keeper_continuation_channel.t;
-      (* RFC-0320: the connector that raised this attention, so a woken keeper
+      (* The connector that raised this attention, so a woken keeper
          replies into the same channel. [Unrouted] when unknown. *)
 }
 
@@ -1057,23 +1057,132 @@ let sort_by_urgency (queue : t) : t =
        (fun a b -> Int.compare (urgency_rank a.urgency) (urgency_rank b.urgency))
   |> of_list
 
-(* For a single selection, [Immediate] receives rank 0. Between [Normal]
-   and [Low], prefer the lane opposite the supplied last non-immediate urgency
-   without wall-clock aging thresholds. This preference does not bound an
-   individual item's wait behind other entries in the same lane. *)
+type immediate_burst_policy =
+  | Always_preempt
+  | Alternate_after_immediate
+  | Bounded_immediate_burst of { max_consecutive : int }
+
+let validate_immediate_burst_policy = function
+  | (Always_preempt | Alternate_after_immediate) as policy -> Ok policy
+  | Bounded_immediate_burst { max_consecutive } as policy ->
+    if max_consecutive >= 1
+    then Ok policy
+    else
+      Error
+        (Printf.sprintf
+           "Bounded_immediate_burst.max_consecutive must be >= 1, got %d"
+           max_consecutive)
+;;
+
+type alternation_state =
+  { last_non_immediate_served : urgency option
+  ; consecutive_immediate : int
+  }
+
+let initial_alternation_state =
+  { last_non_immediate_served = None; consecutive_immediate = 0 }
+;;
+
+let advance_alternation_state ~served state =
+  match served with
+  | Immediate ->
+    let consecutive_immediate =
+      if state.consecutive_immediate < max_int
+      then state.consecutive_immediate + 1
+      else state.consecutive_immediate
+    in
+    { state with consecutive_immediate }
+  | (Normal | Low) as lane ->
+    { last_non_immediate_served = Some lane; consecutive_immediate = 0 }
+;;
+
+let immediate_yields_to_non_immediate ~policy ~state =
+  match policy with
+  | Always_preempt -> false
+  | Alternate_after_immediate -> state.consecutive_immediate >= 1
+  | Bounded_immediate_burst { max_consecutive } ->
+    if max_consecutive < 1
+    then
+      invalid_arg
+        "Keeper_event_queue: Bounded_immediate_burst.max_consecutive must be >= 1"
+    else state.consecutive_immediate >= max_consecutive
+;;
+
+(* For a single selection, [Immediate] receives rank 0 unless the declared burst
+   policy yields one turn to non-immediate work after sustained [Immediate]
+   service. Between [Normal] and [Low], prefer the lane opposite the supplied
+   last non-immediate urgency without wall-clock aging thresholds. *)
 let preferred_non_immediate_urgency ~last_non_immediate_served =
   match last_non_immediate_served with
   | Some Normal -> Low
   | None | Some (Low | Immediate) -> Normal
 ;;
 
+let selection_urgency_rank_with_policy ~policy ~state urgency =
+  let preferred =
+    preferred_non_immediate_urgency
+      ~last_non_immediate_served:state.last_non_immediate_served
+  in
+  if immediate_yields_to_non_immediate ~policy ~state
+  then (
+    match urgency with
+    | (Normal | Low) as candidate -> if candidate = preferred then 0 else 1
+    | Immediate -> 2)
+  else (
+    match urgency with
+    | Immediate -> 0
+    | (Normal | Low) as candidate -> if candidate = preferred then 1 else 2)
+;;
+
+let compare_selection_urgency_with_policy ~policy ~state left right =
+  Int.compare
+    (selection_urgency_rank_with_policy ~policy ~state left)
+    (selection_urgency_rank_with_policy ~policy ~state right)
+;;
+
+let sort_by_selection_policy ~policy ~state (queue : t) : t =
+  queue
+  |> to_list
+  |> List.stable_sort (fun a b ->
+       compare_selection_urgency_with_policy ~policy ~state a.urgency b.urgency)
+  |> of_list
+;;
+
+let dequeue_fair ~policy ~state (queue : t) : (stimulus * t * alternation_state) option =
+  match to_list queue with
+  | [] -> None
+  | first :: rest ->
+    let rank_of s =
+      selection_urgency_rank_with_policy ~policy ~state s.urgency
+    in
+    let best_idx, best_stimulus, _best_rank =
+      let rec scan idx cur_idx cur_stim cur_rank = function
+        | [] -> cur_idx, cur_stim, cur_rank
+        | item :: tl ->
+          let r = rank_of item in
+          if r < cur_rank
+          then scan (idx + 1) idx item r tl
+          else scan (idx + 1) cur_idx cur_stim cur_rank tl
+      in
+      scan 1 0 first (rank_of first) rest
+    in
+    let rec remove_at idx acc = function
+      | [] -> List.rev acc
+      | item :: tl ->
+        if idx = 0
+        then List.rev_append acc tl
+        else remove_at (idx - 1) (item :: acc) tl
+    in
+    let remaining = remove_at best_idx [] (first :: rest) in
+    let next_state = advance_alternation_state ~served:best_stimulus.urgency state in
+    Some (best_stimulus, of_list remaining, next_state)
+;;
+
 let selection_urgency_rank ~last_non_immediate_served urgency =
-  match urgency with
-  | Immediate -> 0
-  | (Normal | Low) as candidate ->
-    if candidate = preferred_non_immediate_urgency ~last_non_immediate_served
-    then 1
-    else 2
+  selection_urgency_rank_with_policy
+    ~policy:Always_preempt
+    ~state:{ last_non_immediate_served; consecutive_immediate = 0 }
+    urgency
 ;;
 
 let compare_selection_urgency ~last_non_immediate_served left right =
@@ -1101,7 +1210,7 @@ let payload_kind_label = function
   | Owned_job_completed _ -> "owned_job_completed"
   | Task_outcome _ -> "task_outcome"
 
-(* RFC-0377: the batch-intake predicate needs the routed channel without
+(* The batch-intake predicate needs the routed channel without
    repeating the payload match at every call site. Exhaustive on purpose:
    a new payload kind must decide here at compile time whether it carries a
    conversation channel. *)

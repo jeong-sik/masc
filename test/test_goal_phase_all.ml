@@ -1,4 +1,4 @@
-(* RFC-0089 — Goal_phase.all / Public_action.all are the SSOT for the MCP goal
+(* Goal_phase.all / Public_action.all are the SSOT for the MCP goal
    schema enums and the workspace_goals validator. Internal [all_actions]
    additionally covers verifier commits. This guards those lists: every entry round-trips
    through of_string, the derived string set has no duplicates, and it matches
@@ -88,7 +88,7 @@ let outcome_label = function
 
 (* phase, action, expected outcome. Read down a column to see one action across
    all phases; the diagonal (target phase = current phase) is "already:*".
-   RFC-0387 stage 2: request_complete moves executing -> verifying, and only
+   request_complete moves executing -> verifying, and only
    record_proof_proven reaches completed. *)
 let matrix =
   [

@@ -1,4 +1,4 @@
-(** Entry-action observability (RFC-0002): the lifecycle log line the
+(** Entry-action observability: the lifecycle log line the
     registry writes on phase entry. No registry state is read or written. *)
 
 let execute_observability

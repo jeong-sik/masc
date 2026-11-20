@@ -575,7 +575,7 @@ let test_codec_optional_fields_absent () =
     }
   in
   let json = Turn_record.to_json record in
-  (* RFC-0233 §2.3/§8: absent meta fields are omitted from the wire, never
+  (* Absent meta fields are omitted from the wire, never
      emitted as a fabricated value (no "stop", no placeholder selected model, no
      fabricated 200K window or Claude $3/$15 price). *)
   (match json with
@@ -1291,7 +1291,7 @@ let test_entries_with_diffs_same_trace_only () =
     check bool "trace boundary yields no diff" true (third = None)
   | _ -> fail "expected three paired entries"
 
-(* ── Turn_ref (RFC-0233 §7) ───────────────────────────── *)
+(* ── Turn_ref ─────────────────────────────────────────── *)
 
 let test_turn_ref_roundtrip () =
   let r =

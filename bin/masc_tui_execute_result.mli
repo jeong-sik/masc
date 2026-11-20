@@ -36,8 +36,10 @@ val process_status_text : Unix.process_status -> string
     [signal 9], [stopped 19]. *)
 
 val status_text : t -> string
-(** How the command ended and how long it ran: [exit 0 · 808 ms],
-    [signal 9 · 30012 ms · timed out at 30 s], [stopped 19 · 40 ms]. *)
+(** How the command ended and how long it ran, in the duration spellings of
+    RFC tui-one-screen-grammar 6.2: [exit 0 · 808ms],
+    [signal 9 · 30.0s · timed out at 30s], [exit 0 · 2m05s]. A negative run
+    time draws the failed mark [✕]. *)
 
 val stored_text : Tool_output.artifact_ref -> string
 (** Where output too large to ride inline went:

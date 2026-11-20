@@ -793,7 +793,7 @@ let reject_server_request io id =
    no other reason. Nothing reads it: dispatch is the tool table in
    [handle_dynamic_tool_call], and giving every tool its own word was
    measured to change nothing. It is not a grouping axis, and masc keeps no
-   concept behind it -- RFC-0451 §7. *)
+   concept behind it. *)
 let dynamic_tool_spec (tool : dynamic_tool) =
   `Assoc
     [ "name", `String tool.name

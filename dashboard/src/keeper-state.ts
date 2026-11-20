@@ -291,7 +291,7 @@ function normalizeApprovalLifecycle(raw: unknown): KeeperApprovalLifecycle | nul
   }
 }
 
-// --- Audio helpers (RFC-0235 P1/P3) ---
+// --- Audio helpers ---
 
 /** Canonicalize an audio clip from the wire into the dashboard type.
  *  Accepts both snake_case (history rows) and camelCase (SSE payloads).
@@ -709,7 +709,7 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
             })
           : null
       }
-      // RFC-0252: fusion deliberation card. board_post_id is the lazy-fetch key
+      // Fusion deliberation card. board_post_id is the lazy-fetch key
       // and is required; dropping it here would silently strip the card and let
       // the text fallback overwrite blocks.
       if (t === 'fusion') {
@@ -964,7 +964,7 @@ function normalizeHistoryEntry(
   const speakerId = asString(raw.speaker_id) ?? null
   const speakerName = asString(raw.speaker_name) ?? null
   const speakerAuthority = asString(raw.speaker_authority) ?? null
-  // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
+  // asString rejects malformed join keys instead of repairing them.
   const turnRef = asString(raw.turn_ref) ?? null
   const executionId = asString(raw.execution_id)
   const deliveryProvenance = deliveryProvenanceFromRaw(raw)
@@ -1800,7 +1800,7 @@ interface RestChatHistoryMessage {
   speaker_id?: string
   speaker_name?: string
   speaker_authority?: string
-  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" turn join key.
+  // MASC-minted "<trace_id>#<absolute_turn>" turn join key.
   turn_ref?: string | null
   // Canonical append-once identity decoded at the HTTP boundary. Direct
   // normalizeStatusDetail callers may still supply the raw sibling fields;
@@ -1820,7 +1820,7 @@ interface RestChatHistoryMessage {
   }>
   // Typed durable Gate approval/replay status projected by keeper_chat_store.
   approval_lifecycle?: unknown
-  // RFC-0235 P3: backend-parsed rich chat blocks. When present the dashboard
+  // backend-parsed rich chat blocks. When present the dashboard
   // prefers them over its local parser.
   blocks?: unknown
   stream_contract?: unknown

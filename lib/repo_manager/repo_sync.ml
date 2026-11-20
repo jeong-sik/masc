@@ -18,7 +18,7 @@ let advance_outcome_label = function
   | Fast_forward_refused _ -> "fast_forward_refused"
   | Advance_inspect_failed _ -> "advance_inspect_failed"
 
-(* RFC-0210 (Keeper Playground Repo Currency): a fetch alone never moves the
+(* A fetch alone never moves the
    working tree, so managed clones drift arbitrarily far behind their remote
    while reporting a clean "변경 없음" state to every reader (IDE workspace
    tree/file/diff/blame). After a successful fetch we advance the checked-out

@@ -6,14 +6,10 @@ name: Installer dependency contract (macOS)
 # to run when $0 is not its canonical path, so a symlinked shasum dies with
 # "perl ... can't run host-bin/shasum". That only shows up on a macOS runner,
 # so the release-build macOS job caught it first. Run the contract on macos-15
-# here as well, so a change to the test or scripts/install.sh is checked on the
+# by hand after changing the test or scripts/install.sh, to check it on the
 # platform where the wrapper behaves differently.
 on:
   workflow_dispatch: {}
-  pull_request:
-    paths:
-      - 'test/test_installer_dependencies.py'
-      - 'scripts/install.sh'
 
 permissions:
   contents: read

@@ -427,7 +427,7 @@ let test_user_message_of_network_errors () =
   (* The raw overflow diagnostic must not reach chat verbatim (2026-07-21:
      "Context overflow: empty completion (stop_reason=…)" was stored in
      dashboard chat four times). Only the typed Api arm exists — the
-     Provider path collapses overflow into InvalidRequest (RFC-0353). *)
+     Provider path collapses overflow into InvalidRequest. *)
   let overflow =
     CoreError.Api
       (Agent_core.Retry.ContextOverflow
@@ -678,7 +678,7 @@ let test_gate_replay_repair_failure_is_typed () =
   | None -> Alcotest.fail "typed Gate replay repair did not decode"
 ;;
 
-(* RFC-0454 P2: the two runtime stops the chat pane used to recognise by
+(* The two runtime stops the chat pane used to recognise by
    searching the row for a sentence. *)
 let host_shutdown =
   KTD.Host_stopped_turn

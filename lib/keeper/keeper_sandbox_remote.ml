@@ -56,7 +56,7 @@ let microvm_guest_local_unavailable_reason =
   "microvm_guest_local_ownership_unverified: the work volume may be shared across workspaces; guest_local is unavailable"
 ;;
 
-(* ── What the lane last did (RFC-0427 D-1) ──────────────────────────────
+(* ── What the lane last did ─────────────────────────────────────────────
    Each arm below is one return branch of [runner]: the class is decided
    where the branch is, never read back out of the message text. The record
    is a projection kept with the endpoint's shared state for the life of
@@ -151,7 +151,7 @@ type shared_state =
   ; first_dispatch_logged : bool Atomic.t
   ; probe_answer : probe_answer option Atomic.t
     (* What the endpoint's shim answered to [--probe], kept for the life of
-       this process once asked (RFC-0422); [None] until a probe has answered.
+       this process once asked; [None] until a probe has answered.
        The major frames every request to this endpoint, so a shim one release
        behind or ahead of this server keeps running instead of refusing every
        frame, and the first dispatch asks. [release] is the MASC release the
@@ -644,7 +644,7 @@ let outdated_shim_repair t =
       c.container_name c.shim_path asset
 ;;
 
-(* RFC-0427 B-3. The shim names the release it was built from and the server
+(* The shim names the release it was built from and the server
    compares it with its own. A difference is what 2026-09-05 looked like from
    the inside: an endpoint one release behind, found by symptom because
    nothing on the wire carried the answer.
@@ -1867,7 +1867,7 @@ let invalidate_preflight t =
     Hashtbl.remove preflight_cache (preflight_cache_key t))
 ;;
 
-(* Whether this endpoint's shim can build the box (RFC-0422). The shim says
+(* Whether this endpoint's shim can build the box. The shim says
    so itself through the probe's [capabilities], so the answer is the
    binary's rather than a guess from the profile; a guest whose shim
    predates the box, or a host without Landlock, answers no and the request

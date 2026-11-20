@@ -1,5 +1,4 @@
-(** The recall judgment of one turn
-    (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, sections 4.6 and 4.7).
+(** The recall judgment of one turn.
 
     The one entry the context assembly calls. It asks whether the keeper is
     judged at all, runs {!Keeper_memory_recall_flow} through the evaluation

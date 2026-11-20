@@ -127,7 +127,7 @@ function canonicalRuntimeBlockerClass(
 export function deriveKeeperOperationalState(
   { keeper, composite }: DeriveInputs,
 ): KeeperOperationalState {
-  // RFC-0135 §10 Goal-2: these axes are now present on every variant so
+  // These axes are now present on every variant so
   // callers don't need to keep parallel composite/flat fallback chains.
   const axes = computeKeeperOperationalAxes(keeper, composite)
 
@@ -211,7 +211,7 @@ function compositeFiberKnownDead(c: KeeperCompositeSnapshot): boolean {
   return fiberAlive === false
 }
 
-/** RFC-0135 PR-14a — orthogonal attention axis.
+/** Orthogonal attention axis.
  *
  *  Maps `composite.runtime_attention.{blocked, needs_attention}` to a
  *  closed sum. Priority: `blocked` over `needs_attention` (backend can
@@ -237,7 +237,7 @@ function computeKeeperAttention(
   return 'clean'
 }
 
-// RFC-0135 PR-11 — Composite KSM phase SSOT helpers.
+// Composite KSM phase SSOT helpers.
 //
 // `KeeperCompositeSnapshot.phase` is wire-format lowercase emitted by
 // backend `lib/server/server_dashboard_http.ml` and typed as bare

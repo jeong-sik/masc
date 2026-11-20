@@ -1,4 +1,4 @@
-(* RFC-0483: one Keeper's skill activation ledger is read on its own. The
+(* One Keeper's skill activation ledger is read on its own. The
    activations answer carries the projection; the usage answer carries only
    the per-surface counts and says which of its closed states the Keeper is
    in. *)

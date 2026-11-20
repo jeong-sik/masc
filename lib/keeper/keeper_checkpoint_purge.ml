@@ -1,4 +1,4 @@
-(* Deterministic offline checkpoint purge (RFC-0351 S1). See the .mli for the
+(* Deterministic offline checkpoint purge. See the .mli for the
    rule contract. The implementation works on the closed units produced by
    [Keeper_transcript_unit.partition] so a tool cycle is one indivisible item
    from the first line to the last. *)

@@ -64,7 +64,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
       let prefix = safe_filename agent_type ^ "-" in
       (* Backend-aware: the bare [Sys.readdir] scan saw only the local
          mirror, so a Memory-backend workspace never found the existing
-         record and minted a fresh nickname per session (RFC-0371 B9).
+         record and minted a fresh nickname per session.
          [list_dir] is total — missing dir reads as []. *)
       let existing =
         list_dir config dir

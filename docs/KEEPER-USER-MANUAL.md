@@ -432,8 +432,7 @@ Nerdctl/Kata retains its process ownership rules. When available, use
 `container list --all --format json` and `container inspect <helper-name>` to
 read the helper's state and mounts and investigate its owner and other
 workspace users. Preserve the helper and volume if the inventory, ownership,
-or operation completion cannot be established. See the
-[guest survival RFC](rfc/RFC-keeper-guest-survives-restart.md) for the decisions.
+or operation completion cannot be established.
 
 The TUI sandbox status separately asks the configured Kata runtime whether the
 current network mode's expected guest name appears in its listing. It shows an
@@ -549,9 +548,7 @@ recommended Keeper count. They are defined in
 `lib/config/env_config_sandbox.ml` and `lib/runtime/exec_ssh_endpoint.ml`; where
 this table and the code disagree, the code is right. There is no implemented
 global Keeper-count or host
-memory budget; the
-[host memory budget RFC](rfc/RFC-keeper-guests-stay-inside-a-host-memory-budget.md)
-is still a draft, including its hibernation design.
+memory budget.
 
 | Profile / backend | Execution unit and current limits | Network and sharing boundary |
 |---|---|---|
@@ -601,8 +598,7 @@ A bare host admits port 443 and a wildcard does not include its apex. Other
 backends do not silently fall back to `inherit` when `policy` is unsupported;
 they refuse it.
 
-An Apple container guest takes every request through its guest agent
-([RFC](rfc/RFC-microvm-guest-agent-over-socket.md)): the guest's first process
+An Apple container guest takes every request through its guest agent: the guest's first process
 is the shim's agent, and the host end of its socket is under
 `<base>/.masc/microvm/agent/`. No Keeper TOML key chooses this. A
 `nerdctl_kata` or `microsandbox` guest runs one exec of the shim per request.
@@ -1088,10 +1084,6 @@ lists may report `supports_image_input` or `architecture.input_modalities`.
 Unreported metadata leaves the setting undeclared. Account/model discovery and
 a successful text/tool check do not establish that an image was read; verify
 image delivery with an actual pixel-reading request on the selected connection.
-
-See the [recorded GLM/Codex attachment observations and Claude limits](evidence/keeper-native-image-input-20261101/README.md)
-for a bounded example. That record does not cover every runtime or the artifact
-reader's tool-result path.
 
 ### Check which guidance is live
 

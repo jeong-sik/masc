@@ -338,15 +338,27 @@ let complete decoder =
           && Option.is_some decoder.background))
 ;;
 
-let holds_incomplete_sequence decoder =
+let pending decoder : Masc_tui_input_decoder.pending option =
   match decoder.mode with
+  (* A lone ESC: the next byte says whether it heads a reply or a paste,
+     and a quiet read makes it the Escape key ({!next}). *)
+  | Escape -> Some Masc_tui_input_decoder.Prefix
   (* Bytes sit in [pending] across an idle read, waiting for the rest of a
      sequence that may be a reply or a paste start. *)
   | Paste_prefix _ | Osc_candidate _ | Csi_window | Apc_prefix
-  | Apc _ -> true
-  (* [Escape] is flushed by [next] as soon as input runs dry, and the
-     passthrough states replay each byte as it arrives: nothing is held. *)
-  | Normal | Escape | Paste _ | Osc_passthrough _ | Apc_passthrough _ -> false
+  | Apc _ -> Some Masc_tui_input_decoder.Sequence
+  (* The passthrough states replay each byte as it arrives: nothing is
+     held. *)
+  | Normal | Paste _ | Osc_passthrough _ | Apc_passthrough _ -> None
+;;
+
+let holds_incomplete_sequence decoder =
+  match pending decoder with
+  | Some Masc_tui_input_decoder.Sequence -> true
+  | Some
+      ( Masc_tui_input_decoder.Prefix | Masc_tui_input_decoder.Character
+      | Masc_tui_input_decoder.Pasting | Masc_tui_input_decoder.Draining )
+  | None -> false
 ;;
 
 let discard_incomplete_sequence decoder =
@@ -405,17 +417,18 @@ let rec next decoder ~next_raw =
   | None ->
     (match next_raw () with
      | None ->
-       (match decoder.mode with
-        | Escape ->
+       (match pending decoder with
+        | Some Masc_tui_input_decoder.Prefix ->
           flush_pending decoder;
           decoder.mode <- Normal;
           take_replay decoder
         (* [Escape] alone is a key the reader pressed; every other held
            state is a sequence still arriving, and input running dry is not
            the end of it. *)
-        | Normal | Paste_prefix _ | Paste _ | Osc_candidate _
-        | Osc_passthrough _ | Csi_window | Apc_prefix
-        | Apc _ | Apc_passthrough _ ->
+        | Some
+            ( Masc_tui_input_decoder.Sequence | Masc_tui_input_decoder.Character
+            | Masc_tui_input_decoder.Pasting | Masc_tui_input_decoder.Draining )
+        | None ->
           None)
      | Some byte ->
        feed decoder byte;

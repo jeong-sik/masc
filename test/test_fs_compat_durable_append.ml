@@ -518,18 +518,30 @@ let compare_window_with_rows store =
   in
   List.iter (fun from ->
     List.iter (fun max_rows ->
-      let expected = expected_window ~rows ~rows_end ~end_offset ~from ~max_rows in
-      match
-        Fs_compat.read_private_jsonl_window_locked_result path ~from ~max_rows
-          ~previous_row_wanted:window_previous_row_wanted
-      with
-      | Fs_compat.Private_file_succeeded
-          (Fs_compat.Private_jsonl_window.Window_present
-             { previous_row; from_starts_row; rows; window_end; rows_end; end_offset }) ->
-        if (previous_row, from_starts_row, rows, window_end, rows_end, end_offset) <> expected
-        then failf "window from %d with %d rows differs from the whole read of %d bytes"
-            from max_rows (String.length store)
-      | _ -> failf "window from %d did not read as a window" from)
+      let ((_, starts_row, window_rows, window_end, window_rows_end, window_end_offset) as
+           expected)
+        =
+        expected_window ~rows ~rows_end ~end_offset ~from ~max_rows
+      in
+      let read what previous_row_wanted expected =
+        match
+          Fs_compat.read_private_jsonl_window_locked_result path ~from ~max_rows
+            ~previous_row_wanted
+        with
+        | Fs_compat.Private_file_succeeded
+            (Fs_compat.Private_jsonl_window.Window_present
+               { previous_row; from_starts_row; rows; window_end; rows_end; end_offset }) ->
+          if (previous_row, from_starts_row, rows, window_end, rows_end, end_offset) <> expected
+          then failf "window from %d with %d rows, %s, differs from the whole read of %d bytes"
+              from max_rows what (String.length store)
+        | _ -> failf "window from %d did not read as a window" from
+      in
+      read "asked for the nearest wanted row" (Nearest_accepted window_previous_row_wanted)
+        expected;
+      (* A read that asks for no row before [from] returns the same window
+         without one. *)
+      read "asked for no row before it" No_previous_row
+        (None, starts_row, window_rows, window_end, window_rows_end, window_end_offset))
       [ 1; 2; 5; 50 ])
     starts
 ;;
@@ -545,7 +557,7 @@ let test_private_jsonl_window_matches_the_whole_read () =
   Sys.remove missing;
   match
     Fs_compat.read_private_jsonl_window_locked_result missing ~from:0 ~max_rows:1
-      ~previous_row_wanted:window_previous_row_wanted
+      ~previous_row_wanted:(Nearest_accepted window_previous_row_wanted)
   with
   | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_window.Window_missing -> ()
   | _ -> fail "a missing store must read as Window_missing"

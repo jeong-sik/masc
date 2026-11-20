@@ -1153,6 +1153,29 @@ let test_footer_keys_and_superscript_digit () =
     ; (36, [ "a"; "b"; "c"; "d" ])
     ; (60, [ "a"; "b"; "c"; "d" ])
     ]
+let test_accented_card_keeps_text_contrast_on_edge_meta_and_footer_keys () =
+  let accent = "\027[38;5;108m" in
+  let footer_keys = [ { Card.key = "m"; label = "Usage" } ] in
+  let rows =
+    Card.render ~ko:true ~style:styled ~width:34 ~height:4
+      { Card.edge =
+          edge ~count:(Card.Whole 7) ~border_accent:accent ~footer_keys
+            ~focus:Card.Unfocused "Fleet"
+      ; body = (fun ~cells:_ -> [ "row 1"; "row 2"; "row 3" ]) }
+  in
+  let top = List.hd rows in
+  let bottom = List.hd (List.rev rows) in
+  check bool "top border uses border_accent" true (contains ~needle:accent top);
+  check bool "top count uses text-grade style.border, not 3:1 accent" true
+    (contains ~needle:(styled.border ^ "7" ^ styled.reset) top);
+  check bool "bottom border uses border_accent" true (contains ~needle:accent bottom);
+  check bool "footer key label uses text-grade style.border" true
+    (contains ~needle:(styled.border ^ "Usage" ^ styled.reset) bottom);
+  check bool "footer key atom is not bolded with title_style" false
+    (contains ~needle:(styled.title_style ^ "m") bottom);
+  check bool "overflow count uses text-grade style.border" true
+    (contains ~needle:(styled.border ^ "외 1" ^ styled.reset) bottom)
+
 let () =
   run "tui card"
     [ ( "geometry"
@@ -1196,6 +1219,8 @@ let () =
             test_the_bottom_edge_keeps_the_number_whole
         ; test_case "footer_keys and superscript_digit keep width invariants" `Quick
             test_footer_keys_and_superscript_digit
+        ; test_case "accented card keeps text contrast on edge meta and footer keys" `Quick
+            test_accented_card_keeps_text_contrast_on_edge_meta_and_footer_keys
         ] )
     ; ( "columns"
       , [ test_case "columns and gaps add up to the screen" `Quick

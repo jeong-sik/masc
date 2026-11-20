@@ -399,7 +399,7 @@ let test_local_masc_fallback_collapses_explicit_masc_dir () =
     (Config_dir_resolver.source_to_string resolution.config_root.source);
   check string "root path" local_config resolution.config_root.path
 
-(* RFC-0121 — .masc/<sub> sub-directory accessors. The accessors derive
+(* .masc/<sub> sub-directory accessors. The accessors derive
    layout from [base_path] without filesystem access, so we only check
    the constructed paths. *)
 

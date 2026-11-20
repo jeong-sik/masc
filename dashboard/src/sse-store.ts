@@ -40,6 +40,7 @@ import {
   boardExcludeAutomation,
   boardAuthorFilter,
   boardHearthFilter,
+  boardSearchText,
   boardOffset,
 } from './store'
 import {
@@ -609,6 +610,9 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
   // Author filtering is server-defined today, so a filtered view should be
   // reconciled through the board endpoint instead of guessing client-side.
   if (boardAuthorFilter.value.trim() !== '') return false
+  // The server answers a search over the title, body, author and hearth, so a
+  // searched list is read again through the board endpoint as well.
+  if (boardSearchText.value !== '') return false
 
   if (typeof event.post_kind !== 'string' && (boardExcludeSystem.value || boardExcludeAutomation.value)) {
     return false

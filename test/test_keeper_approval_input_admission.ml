@@ -234,7 +234,7 @@ let gate_and_answer_co_admission () = with_directory (fun root ->
   Alcotest.(check bool) "failed co-admission changes neither input" true
     (unchanged.messages = after.messages))
 
-(* RFC-0468 §3.2: an input admitted before its speaker was stamped matches the
+(* An input admitted before its speaker was stamped matches the
    stamped copy of the same input. A gate pending across the upgrade resumes
    instead of admitting the answer a second time. *)
 let speaker_stamp_resumes_pre_speaker_admission () =

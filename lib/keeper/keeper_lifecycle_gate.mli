@@ -1,4 +1,4 @@
-(** RFC-0297 Phase 1 (P0-1): closed-variant keeper lifecycle gate.
+(** closed-variant keeper lifecycle gate.
 
     A lifecycle activity runs only when BOTH the global kill-switch
     (from [runtime.toml] [reactive]/[proactive]/[autonomous] [enabled]) AND the per-keeper flag (projected from [keeper_meta]) are

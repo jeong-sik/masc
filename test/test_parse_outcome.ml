@@ -1,4 +1,4 @@
-(** RFC-0145 — Parse_outcome unit tests.
+(** Parse_outcome unit tests.
 
     Covers:
     1. Ok path (successful parse).
@@ -46,7 +46,7 @@ let test_map () =
   in
   check int "map increments" 8 (match r with Ok v -> v | Error _ -> -1)
 
-(* RFC-0145 §Design — cancellation MUST re-raise. We drive an Eio
+(* Cancellation MUST re-raise. We drive an Eio
    fiber and cancel it from a sibling; inside the cancelled context
    the parser raises Cancelled which parse_safe must propagate. *)
 let test_cancellation_reraises () =

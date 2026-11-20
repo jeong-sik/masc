@@ -121,7 +121,7 @@ type t =
           the argv means and returns a process-shaped answer (status,
           stdout, stderr).  [lib/exec] stays product-neutral — what the
           caller does with the argv (run a catalog tool, answer from a
-          fixture) is the caller's layer.  RFC tools-as-shell-commands. *)
+          fixture) is the caller's layer. *)
 
 (** Default host target.  The dispatch path routes this directly to
     [Process_eio]; no runner is carried. *)

@@ -259,7 +259,7 @@ value = { title = "not admitted", content = "effectful async" }
   | Error _ | Ok _ -> fail "effectful async composition was admitted"
 ;;
 
-(* RFC-0502 (#49177): the catalog grammar admits Execute and masc_board_post
+(* (#49177) The catalog grammar admits Execute and masc_board_post
    inline and refuses them for durable async plans. *)
 let one_node_effect_composition ~execution ~name ~tool ~value =
   Printf.sprintf
@@ -1003,7 +1003,7 @@ let test_draft_admits_inline_owned_file_write () =
   | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error))
 ;;
 
-(* RFC-0502 (#49177): inline drafts admit Execute and masc_board_post — each
+(* (#49177) Inline drafts admit Execute and masc_board_post — each
    node's effect passes through the invoking Keeper's own Gate approval or
    Board policy. Durable async plans still refuse them: their effects are
    neither replayable nor idempotent. *)

@@ -1,4 +1,4 @@
-(** A failed keeper request is a value (RFC-0454 D2).
+(** A failed keeper request is a value.
 
     This suite pins three things: which constructor each producer's input maps
     to, that the codec is symmetric and refuses everything it does not write,
@@ -250,8 +250,8 @@ let test_a_raised_summary_names_its_site_and_is_one_line () =
 ;;
 
 let test_a_masc_summary_without_one_keeps_the_envelope () =
-  (* Two kinds answer [None] on purpose until the row carries the value
-     (RFC-0454 D3); the pane reads the envelope back to draw its badge, so the
+  (* Two kinds answer [None] on purpose until the row carries the value;
+     the pane reads the envelope back to draw its badge, so the
      summary must still be that envelope. *)
   let masc_error =
     Kie.Runtime_connection_closed

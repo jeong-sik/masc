@@ -10,7 +10,7 @@ open Keeper_checkpoint_store_summary
    Per canonical file this process keeps a lineage: the encoding memo of its
    saves and the value the head and its objects hold, which is what a load
    gives for them -- the decode of the files, not a second truth, so the disk
-   stays the only watermark (RFC-0225 §3.2). A save keeps what it wrote, under
+   stays the only watermark. A save keeps what it wrote, under
    the identity of the head it wrote, taken from that file's descriptor
    ([Keeper_fs.save_encoded_durable_atomic_from]).
    [load_agent_core_for_save] keeps what it read, with the memo the load

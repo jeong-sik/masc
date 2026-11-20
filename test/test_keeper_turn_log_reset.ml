@@ -318,9 +318,13 @@ let test_a_closing_save_that_fails =
       (fun () ->
          reset place ~prepare:(fun () -> Ok ()) ~change:(fun () -> incr changes))
   in
-  check string "refused"
-    "refused: the head's open messages were not closed: the closing save was not installed"
-    (result_text (fun () -> "") result);
+  (match result with
+   | Error (Open_not_closed (Save_not_installed (Objects_not_installed _ as cause))) ->
+     check string "refused with the save's cause"
+       ("refused: the head's open messages were not closed: the closing save was not installed: "
+        ^ Keeper_checkpoint_store.checkpoint_cas_error_to_string cause)
+       (result_text (fun () -> "") result)
+   | Ok _ | Error _ -> fail ("refused for another reason: " ^ result_text (fun () -> "") result));
   check int "the message is still open" 1 (open_messages place);
   check string "no line" before (log_text place);
   check int "no change" 0 !changes

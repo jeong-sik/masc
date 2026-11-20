@@ -1,6 +1,6 @@
 (** The shim a guest runs commands through (RFC-0400): the keeper's work root
     on the host, the shim's names and paths on the host and in the guest, the
-    sidecar that says whether the binary is the release's (RFC-0427), the
+    sidecar that says whether the binary is the release's, the
     mount that hands it to a guest, its config, and the environment and
     limits of a remote session.
 
@@ -16,7 +16,7 @@ val shim_config_name : string
 
 val shim_sidecar_name : string
 
-(* RFC-0427 B-2. The installer places the release's shim and, beside it, the
+(* The installer places the release's shim and, beside it, the
    sha256 the release's SHA256SUMS gave for that asset. The boot reads the
    pair: a binary that does not match its own sidecar is refused by name,
    because a shim the release did not ship is the 2026-09-05 outage waiting

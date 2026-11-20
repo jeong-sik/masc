@@ -360,7 +360,7 @@ let read_file_error_to_string = function
 
 (* Typed variant so consumers that branch on "was the file missing" match a
    constructor instead of re-deriving the condition from the rendered
-   message's prefix (RFC-0371 B10). *)
+   message's prefix. *)
 let read_file_result path : (string, read_file_error) result =
   if not (Sys.file_exists path) then Error (File_not_found path)
   else

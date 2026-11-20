@@ -425,7 +425,7 @@ let gate_keeper_ctx ?config ~sw ~clock state =
    masc_keeper_status dispatch and re-derived the store's [Ok None] by
    substring-matching "keeper not found" in the rendered error — a phrase
    its producers spell two ways, so a wording change silently turned 404
-   into 502 (RFC-0371 B4). Invalid names now read as [Ok false] (404)
+   into 502. Invalid names now read as [Ok false] (404)
    instead of surfacing a resolver error. *)
 let keeper_exists ~config keeper_name =
   Keeper_status_detail.keeper_exists_config ~config keeper_name
@@ -450,8 +450,7 @@ let keeper_tool_response ~(config : Workspace.config) ~project ~sw ~clock state 
          (see [handle_gate_keeper_status_by_name]); an error out of the tool
          dispatch itself is a backend failure, not a 404. The substring
          classifier that used to pick the status here matched one of the two
-         producer spellings of "keeper not found" by accident
-         (RFC-0371 B4). *)
+         producer spellings of "keeper not found" by accident. *)
       let err = Tool_result.message result in
       `Bad_gateway, Channel_gate.error_json err
   | None ->

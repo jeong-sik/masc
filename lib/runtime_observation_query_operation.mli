@@ -7,7 +7,7 @@
 
 type t =
   | Read_backlog_snapshot
-  | Read_current_task (** [meta.current_task_id] → backlog record resolve failure (RFC-0315). *)
+  | Read_current_task (** [meta.current_task_id] → backlog record resolve failure. *)
   | Read_held_task_skills (** Held-task skills read for the direct-message lane (task-364). *)
   | Count_running_keeper_fibers
   | Cursor_stale

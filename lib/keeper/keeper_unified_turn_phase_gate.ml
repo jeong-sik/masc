@@ -1,4 +1,4 @@
-(* Keeper_unified_turn_phase_gate — RFC-0136 PR-1.
+(* Keeper_unified_turn_phase_gate.
 
    The gate owns the three pre-dispatch early-exit paths plus the FSM
    transition into Runtime_routing on the proceed path. *)

@@ -1,4 +1,4 @@
-(* The MSX screen (RFC-0439 §3.7). The machine lives in the server; this screen
+(* The MSX screen. The machine lives in the server; this screen
    renders the frame it is handed and, before a game is loaded, lets the human
    pick one from the cartridge inventory. What is pinned here, all pure (no
    HTTP): the spectator draws an empty frame as "no machine" and a real frame as

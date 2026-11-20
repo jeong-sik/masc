@@ -113,7 +113,7 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
     An
     [interrupted] cause also calls [wake]: inventory validation reads that
     refusal as settled, so the next pass moves the original and selects its
-    range again (RFC-0500). Other unknown causes and [cut] without the bound
+    range again. Other unknown causes and [cut] without the bound
     disposition stay pending. A dispatch-pending original whose declaration
     changed first uses the runner-free trusted Exact reconciliation port. Only
     its real claim, bound input/proofs and fresh execution guard may retain a

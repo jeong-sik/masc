@@ -1,4 +1,4 @@
-(* RFC-0444 PR-2: the one projection of a [Goal_store.unavailable] value onto
+(* The one projection of a [Goal_store.unavailable] value onto
    the wire. Every surface that answers with a store this build cannot read
    (MCP goal tools, task creation and assignment with goal_ids, the dashboard
    goal delete route, the proof confirmation route) calls this module; none

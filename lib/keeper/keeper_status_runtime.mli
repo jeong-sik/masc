@@ -11,7 +11,7 @@ type keeper_quiet_reason =
 val agent_staleness_threshold_s : float
 (** How long after creation a Keeper with no recorded turn still reads as
     [Starting_up] rather than [Never_started]. The TUI reads a starting
-    Keeper's roster row again at that age (RFC-0481 §3.6). *)
+    Keeper's roster row again at that age. *)
 
 val keeper_quiet_reason_to_string : keeper_quiet_reason -> string
 (** Wire form of the keeper diagnostic's [quiet_reason]. The dashboard's
@@ -173,7 +173,7 @@ val keeper_surface_status :
   diagnostic:Yojson.Safe.t ->
   string
 
-(** Derive pipeline stage directly from phase (RFC-0002).
+(** Derive pipeline stage directly from phase.
     Deterministic mapping, no 30s recency heuristic. *)
 val pipeline_stage_of_phase : Keeper_state_machine.phase -> string
 

@@ -103,7 +103,7 @@ type read_source =
   | Primary_ledger
   | Recovery_mirror of recovery_cause
 
-(* RFC-0234: a parsed-or-absent ledger load.
+(* A parsed-or-absent ledger load.
 
    [Fresh] = neither the primary ledger nor its [.last-good] mirror exists, so
    [default_state] is correct. [write_state] commits the primary before its

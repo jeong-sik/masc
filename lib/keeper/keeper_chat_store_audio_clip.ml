@@ -1,6 +1,6 @@
 open Keeper_chat_types
 
-(* RFC-0235 P3: the history endpoint can tell the dashboard that a clip
+(* The history endpoint can tell the dashboard that a clip
    has been reaped by checking the same audio directory the synthesis side
    writes to. This keeps the TTL reaper simple while avoiding a broken
    native player on reload. *)

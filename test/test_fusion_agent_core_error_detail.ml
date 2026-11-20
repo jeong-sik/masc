@@ -52,7 +52,7 @@ let test_panel_failure_detail_rewrites_unknown_provider () =
        (Fusion_types.Provider_error "Provider 'unknown' timeout"))
 ;;
 
-(* RFC-0278: panel_failure_text는 이미 attribution된 detail을 재-attribution 없이
+(* panel_failure_text는 이미 attribution된 detail을 재-attribution 없이
    그대로 렌더한다 (sink가 panelist 정체성을 provider 슬롯에 다시 입히지 않도록). *)
 let test_panel_failure_text_no_reattribution () =
   Alcotest.(check string)

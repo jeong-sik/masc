@@ -448,7 +448,7 @@ and drain_auto_judge_owner
       ~keeper_name
       ()
   =
-  match Keeper_gate_mode.resolve ~base_path ~keeper_name with
+  match Keeper_gate_mode.read ~base_path with
   | Ok Keeper_gate_mode.Auto_judge ->
     drain_auto_judge_owner_queue
       ?reserved_id
@@ -477,17 +477,9 @@ and drain_auto_judge_owner
     Error detail
 
 and drain_auto_judges ~base_path =
-  (* The sweep admits owners by their EFFECTIVE mode, not by the workspace
-     mode alone. A stricter keeper override can hold one keeper in
-     auto_judge while the workspace sits in manual or always_allow — the
-     old workspace-mode short-circuit left that keeper's approvals queued
-     with nothing sweeping them (the hazard keeper_gate_mode.ml's
-     strictness comment predicted for the loosening direction, reached
-     from the stricter one). The same filter also stops sweeping an owner
-     a manual override holds ABOVE an auto_judge workspace, which the old
-     branch judged strictly but drained anyway. The workspace read stays
-     first so an unreadable mode store remains a loud error, not an empty
-     sweep. *)
+  (* Every pending entry of this workspace is decided under the workspace
+     mode, so the sweep reads it once. An unreadable mode store is a loud
+     error, not an empty sweep. *)
   match Keeper_gate_mode.read ~base_path with
   | Error detail ->
     Log.Keeper.error
@@ -495,37 +487,23 @@ and drain_auto_judges ~base_path =
       base_path
       detail;
     Error detail
-  | Ok (_ : Keeper_gate_mode.t) ->
+  | Ok mode ->
     (match Keeper_approval_queue.list_pending_entries_for_workspace ~base_path with
      | Error error ->
        Error (Keeper_approval_queue_result.storage_error_to_string error)
      | Ok entries ->
-       let owners =
-         List.fold_left
-           (fun owners (entry : Keeper_approval_queue_rules_types.pending_approval) ->
-              if auto_judge_entry_ready entry
-              then Auto_judge_owner_set.add (auto_judge_owner entry) owners
-              else owners)
-           Auto_judge_owner_set.empty
-           entries
-       in
        let auto_judge_owners =
-         List.filter
-           (fun (owner_base_path, keeper_name) ->
-              match
-                Keeper_gate_mode.resolve ~base_path:owner_base_path ~keeper_name
-              with
-              | Ok Keeper_gate_mode.Auto_judge -> true
-              | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
-                false
-              | Error detail ->
-                Log.Keeper.error
-                  ~keeper_name
-                  "Auto Judge drain owner mode unresolved workspace=%s: %s"
-                  owner_base_path
-                  detail;
-                false)
-           (Auto_judge_owner_set.elements owners)
+         match mode with
+         | Keeper_gate_mode.Auto_judge ->
+           List.fold_left
+             (fun owners (entry : Keeper_approval_queue_rules_types.pending_approval) ->
+                if auto_judge_entry_ready entry
+                then Auto_judge_owner_set.add (auto_judge_owner entry) owners
+                else owners)
+             Auto_judge_owner_set.empty
+             entries
+           |> Auto_judge_owner_set.elements
+         | Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow -> []
        in
        Ok
          (drain_auto_judge_owners_with

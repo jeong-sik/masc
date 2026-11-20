@@ -17,7 +17,7 @@
     [msb load]) goes unnoticed: the catalog records no content identity.
     Going back is a promote of an earlier tag the store still has.
 
-    RFC keeper-sandbox-images-have-versions (#38699) §2.3. Parsing is strict:
+    (#38699) Parsing is strict:
     an unknown key or a store this runtime does not know is an error, not a
     default. *)
 

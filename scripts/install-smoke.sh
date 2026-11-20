@@ -53,7 +53,7 @@ for a in "${ASSETS[@]}"; do
   [ -f "$BIN_DIR/$a" ] || { echo "install-smoke: missing release asset $BIN_DIR/$a" >&2; exit 2; }
 done
 
-# The guest exec shim (RFC-0427 B-2) is built by the Linux release jobs on
+# The guest exec shim is built by the Linux release jobs on
 # their own architecture, so it is in dist/ there and absent on the macOS job.
 # When it is here the smoke stages it and checks the installer placed it with
 # its sha256 sidecar; when it is not, the smoke asks the installer to skip it,

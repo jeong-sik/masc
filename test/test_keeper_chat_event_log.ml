@@ -1,4 +1,4 @@
-(* RFC-0412 stage 1 — canonical keeper chat event log: codec, journal, and
+(* Canonical keeper chat event log: codec, journal, and
    golden replay tests. *)
 
 module E = Masc.Keeper_chat_events
@@ -800,7 +800,7 @@ let test_journal_path_sanitizes_segments () =
        "keeper_chat_events")
     (Filename.dirname (Filename.dirname path))
 
-(* RFC-0412 stage 1 journals hold full reasoning text, so they age out with
+(* Journals hold full reasoning text, so they age out with
    the shared JSONL prune: flat <operation_id>.jsonl under
    keeper_chat_events/<keeper>/, pruned by mtime like trajectories/. *)
 let test_journal_files_age_out_with_shared_prune () =

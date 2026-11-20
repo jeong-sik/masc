@@ -129,17 +129,3 @@ module Operator = struct
   let cache_background_revalidate =
     get_bool ~default:true "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE"
 end
-
-(** {1 Dashboard Configuration} *)
-
-module Dashboard_config = struct
-  (** Whether dashboard fixtures are enabled. Default: false.
-      Re-readable within the process; this does not imply shell-level
-      hot reload as an operator contract. *)
-  let fixtures_enabled () = get_bool ~default:false "MASC_DASHBOARD_FIXTURES_ENABLED"
-
-  (** Dashboard fixture name override. *)
-  let fixture_opt () =
-    Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" |> trim_opt
-
-end

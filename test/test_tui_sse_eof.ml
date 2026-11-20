@@ -175,7 +175,7 @@ let test_log_stream_names_its_observer_instance env =
 let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal
 
 (* The real presence route, served with a runtime on [runtime_sw], so its
-   supervisor owns the response (RFC-0493 §3.2). *)
+   supervisor owns the response. *)
 let presence_handler env ~workspace ~runtime_sw =
   let authority =
     match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with

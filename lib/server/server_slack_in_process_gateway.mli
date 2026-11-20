@@ -1,5 +1,5 @@
-(** Server_slack_in_process_gateway — in-process Slack Socket Mode gateway
-    (RFC-0317 PR-3). The Slack mirror of {!Server_discord_in_process_gateway}.
+(** Server_slack_in_process_gateway — in-process Slack Socket Mode gateway.
+    The Slack mirror of {!Server_discord_in_process_gateway}.
 
     Spawned once during server bootstrap. Forks a long-running fiber on the
     server-wide [Eio.Switch.t] that:
@@ -12,7 +12,7 @@
        the Keeper-scoped connector lane projects the threaded status notice; the Keeper Owner operation owns the
        eventual turn and connector reply.
 
-    Ambient parity with the Discord gateway (RFC-0226): a human message that
+    Ambient parity with the Discord gateway: a human message that
     fails the trigger policy is persisted as durable external attention plus a
     single chat-store user line, committed as a durable [Connector_attention]
     stimulus, and followed by a best-effort wake hint for the bound keeper.
@@ -22,9 +22,7 @@
     Off by default: if [SLACK_APP_TOKEN] is unset the gateway logs a
     warning and skips startup; the server still boots normally. A message
     arriving while the keeper is in flight is enqueued with the leaf-owned
-    Slack delivery source for deferred delivery, not dropped.
-
-    See: docs/rfc/RFC-0317-slack-builtin-gateway.md. *)
+    Slack delivery source for deferred delivery, not dropped. *)
 
 val default_trigger_policy : Slack_gateway_state.trigger_policy
 (** Policy used when none is configured (empty/unset): the quiet,

@@ -3,7 +3,7 @@
 
     The parser is total. It never raises and never drops a link shape it does
     not know; it names the shape and leaves it to the lint rules to decide
-    whether that is an error (RFC-wiki-lint-and-page-contracts §5). Text
+    whether that is an error. Text
     inside a fenced code block, inside an inline code span, and an image
     [![alt](target)] are not links and are skipped. *)
 

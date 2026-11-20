@@ -1,5 +1,5 @@
 (** The HTTPS listener's state for [/health], the dashboard transport health
-    surface and the OTel scrape (RFC-0512 D6).
+    surface and the OTel scrape.
 
     The cleartext listener's state is {!Transport_metrics}; the HTTPS listener
     keeps its own so neither overwrites the other's mode, status or counts. *)

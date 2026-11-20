@@ -1,4 +1,4 @@
-; RFC-0056 Phase 1C — extract Host_config leaf module from flat
+; Extract Host_config leaf module from flat
 ; masc namespace.
 ;
 ; Host_config is dependency-leaf: stdlib (Filename, Format, String,
@@ -20,7 +20,7 @@
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq))
  (libraries
-  ; RFC-0085 PR-9 — Host_config absorbs base_path normalisation
+  ; Host_config absorbs base_path normalisation
   ; (previously Env_config_core.base_path_opt) so callers get a single
   ; SSOT for the normalised env-derived base_path.  The masc_workspace
   ; dep was unused (audit 2026-05-15) so it is dropped here, making

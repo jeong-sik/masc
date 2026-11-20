@@ -133,7 +133,7 @@ let resolve_board_post_kind (raw_kind : string option)
 
 (** {1 Vote / stats / search handlers} *)
 
-(* RFC-0189 PR-1b.1 — handlers in this module return the typed
+(* Handlers in this module return the typed
    [Tool_result.result] variant. Errors carry an explicit [~class_] at
    the catch site (no string-classifier fallback). *)
 

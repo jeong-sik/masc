@@ -1,7 +1,6 @@
 (** Composition request and draft control schemas, read from
     [config/tools/keeper_composition_status.toml] and
-    [config/tools/keeper_composition_cancel.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/keeper_composition_cancel.toml].
 
     Status/cancel take a [request_id]; run authors and runs a bound draft. Their descriptions are fixed
     sentences — schema and prose belong in the TOML with every other tool,

@@ -299,7 +299,6 @@ let reclaim_apple_work_volume ~run ~on_cleanup_error ~timeout_sec ~remove_timeou
       Ok (Discard_helper_finished {status; output; after})
 ;;
 
-(* RFC keeper-volume-filesystem-repair §3.3. *)
 let volume_repair_guest_root = "/masc-repair"
 let volume_repair_capabilities = [ "CAP_SYS_ADMIN" ]
 

@@ -15,15 +15,25 @@ results are distinct from later source revisions and production deployment.
 
 ## Install
 
-Build and test in CI using [the package workflow](../../.github/workflows/lane-dos-package.yml).
-It pins the Node base image by digest, uses `npm ci` with exact direct versions and
-integrity-locked dependencies, assembles `guest/lanedemo.asm` with NASM, and runs
-the actual scenario on native amd64 and arm64 runners. It retains each image and
-its evidence separately as workflow artifacts. A successful artifact includes
-`SOURCE_COMMIT`, Docker image identity, `BUILD_SHA256SUMS`, MCP receipts, measured
-counter values, PNG captures, raw `STATE.BIN` files, and server diagnostics.
+Build the image with [the package image workflow](../../.github/workflows/lane-addon-images.yml)
+or from the repository root:
 
-Load the CI-produced image into the Docker engine used by MASC. Place this package
+```sh
+docker build --file addons/dos-world/Dockerfile --tag masc-lane-dos-world:0.1.0 addons
+mkdir -p proof
+docker run --rm --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --cpus 1 --memory 536870912 --pids-limit 64 \
+  --user "$(id -u):$(id -g)" --mount "type=bind,src=$PWD/proof,dst=/verification" \
+  --workdir /verification masc-lane-dos-world:0.1.0 \
+  node --test /opt/dos-world/test/world.test.mjs
+```
+
+The Dockerfile pins the Node base image by digest, uses `npm ci` with exact direct
+versions and integrity-locked dependencies, and assembles `guest/lanedemo.asm` with
+NASM. The `docker run` command runs the actual scenario inside the image and
+writes its evidence to `proof/`.
+
+Load the built image into the Docker engine used by MASC. Place this package
 directory where MASC can read its manifest and Skill, then copy
 [install.toml](install.toml) into the active config root's `lane-addons/` directory.
 Set `manifest_path` relative to the declaration's new location, or use its actual
@@ -108,10 +118,7 @@ The running native binary SHA-256 was
 `9f7f6896946c51dcf0fc3bad3ef847f62dd1cd0ef5560cef5e306d070d939a0c`.
 These CI links identify the tested package and host inputs; the following host
 results came from isolated local executions, with retained raw API responses,
-Dashboard screenshots, guest bytes, hashes and cleanup records. The
-[committed evidence bundle](../../docs/evidence/lane-dos-packages-2026-09-13/README.md)
-contains the original responses, referenced blobs, guest files, screenshots and
-an offline verifier for both probes.
+Dashboard screenshots, guest bytes, hashes and cleanup records.
 
 The first host probe installed DOS and an independent controlled-capture observer
 through TOML, with no Attach request or DOS-specific host/UI change. It read the

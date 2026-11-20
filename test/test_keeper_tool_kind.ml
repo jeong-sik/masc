@@ -1,4 +1,4 @@
-(** RFC-0386: the closed tool-kind classification is declared, strict on
+(** The closed tool-kind classification is declared, strict on
     parse, and visible in route/discovery evidence. Composition and batch
     kinds come from the catalog/surface declarations — never from matching on
     tool-name strings. *)

@@ -1,6 +1,6 @@
 (** Tests for Keeper_sandbox_read_backend.
 
-    RFC-0006 Phase B-2: docker-routed reads for Docker keepers.
+    docker-routed reads for Docker keepers.
     These tests cover the pure path-mapping and routing logic;
     the actual [docker run] call is exercised only in environments
     where docker is available, gated through env-set integration
@@ -192,7 +192,7 @@ let test_container_path_nested_maps_with_suffix () =
         mapped
   | Error e -> Alcotest.fail e
 
-(* RFC-0427 A: a microvm keeper's tree is on its work volume, so a host path
+(* A microvm keeper's tree is on its work volume, so a host path
    under the keeper's bundle root maps to /masc-work/<keeper>/<suffix> whether
    or not that suffix exists on the host. The suffix here does not: the host
    bundle is bookkeeping, and the guest is the authority on what is there. *)
@@ -794,7 +794,7 @@ instructions = "remote read test"
 sandbox_profile = "remote_ssh"
 remote_endpoint = "fixture"
 |};
-  (* RFC-0121: the endpoint resolver reads .masc/config/runtime.toml — the live
+  (* The endpoint resolver reads .masc/config/runtime.toml — the live
      layout — not the .masc root this fixture used to write to. *)
     write_file
     (Filename.concat base ".masc/config/runtime.toml")
@@ -2363,7 +2363,7 @@ let test_only_the_policy_backend_has_a_policy_network () =
     [ Masc.Keeper_microvm_backend.Microsandbox; Masc.Keeper_microvm_backend.Nerdctl_kata ]
 
 (* Docker's egress boundary is unmeasured, so the policy lane refuses there
-   rather than emitting args that might not close (RFC-0415). A silent
+   rather than emitting args that might not close. A silent
    fallback to inherit is the failure this pins. *)
 let test_docker_refuses_the_policy_lane () =
   match Keeper_sandbox_runtime.docker_network_args Keeper_types_profile_sandbox.Network_policy with

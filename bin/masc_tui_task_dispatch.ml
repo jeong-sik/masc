@@ -19,11 +19,14 @@ let complete t outcome =
     match before with
     | Completed _ -> ()
     | Not_started | Reserved | Preparing | Sending ->
-        if not (Atomic.compare_and_set t.progress before (Completed completion)) then commit () in
+        if Atomic.compare_and_set t.progress before (Completed completion)
+        then Masc_tui_wake.(ring loop Task_dispatched)
+        else commit () in
   commit ()
 let settle_unstarted t outcome =
   let completion = { ready_at_ns = Mtime_clock.elapsed_ns (); outcome } in
-  ignore (Atomic.compare_and_set t.progress Not_started (Completed completion))
+  if Atomic.compare_and_set t.progress Not_started (Completed completion) then
+    Masc_tui_wake.(ring loop Task_dispatched)
 let reject t detail = settle_unstarted t (Not_sent detail)
 let keep_back t notice = settle_unstarted t (Kept_back notice)
 let boundary_failure t detail = match progress t with

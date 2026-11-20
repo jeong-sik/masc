@@ -1,4 +1,4 @@
-(* RFC-0412 stage 2 — dual-write consistency auditor: every verdict class of
+(* dual-write consistency auditor: every verdict class of
    the pure comparison core, the IO shell over a real journal file and real
    keeper_chat_store rows, and the sweep's liveness / audited-once /
    canonical-stem gating. *)

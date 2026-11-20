@@ -83,5 +83,5 @@ val publish_native_posture_degraded :
   unit
 (** Typed record that a declared [keeper.tools.native] posture was degraded
     to a safer effective posture at lane admission instead of failing the
-    turn (RFC-0390 admission review). Wire name:
+    turn. Wire name:
     [masc.keeper.native_posture_degraded]. *)

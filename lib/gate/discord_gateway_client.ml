@@ -82,7 +82,7 @@ let now_mono env =
   let m = Eio.Time.Mono.now (Eio.Stdenv.mono_clock env) in
   Int64.to_float (Mtime.to_uint64_ns m) /. 1e9
 
-(* RFC-0287: ws-direct delivers complete, reassembled, UTF-8-validated text
+(* ws-direct delivers complete, reassembled, UTF-8-validated text
    messages and the peer Close as typed [inbound] events (Ping/Pong are
    handled inside the endpoint), so this collapses to a two-case match. *)
 let frame_to_input (inbound : Discord_wss_connection.inbound) =
@@ -104,7 +104,7 @@ let log_effect level message =
   | `Warn -> Log.Discord.warn "%s" message
   | `Error -> Log.Discord.error "%s" message
 
-(* RFC-0223 P2: the run loop's connection state, published so presence
+(* The run loop's connection state, published so presence
    derivation (Channel_gate_discord_state.connected) can read it without
    file indirection. One gateway per process (single bot token), so a
    module-level register is unambiguous. Written only by [run]'s
@@ -317,7 +317,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient ~on_phase
             gateway-wide [sw]) so a per-connection [Close_wss] cancels it. On
             the gateway-wide [sw] the reader would survive close — blocked in
             [Stream.take] with nothing left to wake it — and leak one fiber per
-            reconnect cycle (RFC-0287 P0). *)
+            reconnect cycle. *)
          Discord_wss_connection.spawn conn (fun () -> reader_loop conn)
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception exn ->
@@ -368,7 +368,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient ~on_phase
       Eio.Fiber.fork ~sw (fun () ->
         (* Add ±25% jitter to the backoff delay. The state machine's
            backoff_ms remains deterministic for testability; jitter
-           belongs in the I/O layer per RFC-0203. Prevents thundering
+           belongs in the I/O layer. Prevents thundering
            herd when multiple instances restart simultaneously. *)
         let jitter_factor =
           let raw = Crypto_rng.generate 1 in

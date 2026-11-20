@@ -375,8 +375,8 @@ let registry_failure_reason_of_terminal_reason
          { code = Keeper_turn_terminal_code.to_wire c
          ; detail
          ; runtime_id = failed_runtime_id
-           (* The typed observation rides along with the verbatim wire
-              (RFC-0371 §6.1(3)); consumers stop re-parsing the code. *)
+           (* The typed observation rides along with the verbatim wire;
+              consumers stop re-parsing the code. *)
          ; agent_core_timeout =
              (match c with
               | Keeper_turn_terminal_code.Agent_core_error { timeout; _ } -> timeout

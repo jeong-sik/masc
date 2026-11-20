@@ -29,7 +29,7 @@ let test_a_result_reads_into_its_parts () =
   | None -> fail "a result of the declared shape did not read"
   | Some result ->
       check bool "ok" true result.ok;
-      check string "how it ended and how long it ran" "exit 0 \xc2\xb7 808 ms"
+      check string "how it ended and how long it ran" "exit 0 \xc2\xb7 808ms"
         (R.status_text result);
       check bool "what it printed, whole" true
         (match result.output with
@@ -60,7 +60,7 @@ let test_a_failure_says_its_stderr () =
   with
   | Some result ->
       check bool "not ok" false result.ok;
-      check string "the exit code" "exit 2 \xc2\xb7 40 ms" (R.status_text result);
+      check string "the exit code" "exit 2 \xc2\xb7 40ms" (R.status_text result);
       check bool "stderr in the output" true
         (match result.output with
          | Some (R.Printed "ls: nope: No such file") -> true
@@ -78,7 +78,7 @@ let test_a_timeout_says_the_limit () =
   with
   | Some result ->
       check string "the signal, the time and the limit"
-        "signal 9 \xc2\xb7 30012 ms \xc2\xb7 timed out at 30 s" (R.status_text result)
+        "signal 9 \xc2\xb7 30.0s \xc2\xb7 timed out at 30s" (R.status_text result)
   | None -> fail "a timed-out result did not read"
 
 (* What does not match the shape the producer writes is not guessed at: the

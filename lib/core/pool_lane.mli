@@ -1,5 +1,5 @@
 (** Who the current fiber is working for: an HTTP read being answered, or
-    anything else. RFC-0204 §3.1.
+    anything else.
 
     The mark lives in an Eio fiber key, so fibers forked while a read is being
     answered inherit it. A read ends when {!with_read} returns or raises;

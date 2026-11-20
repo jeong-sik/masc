@@ -1,4 +1,4 @@
-(* RFC-0049 — dashboard surface/section open counters. *)
+(* Dashboard surface/section open counters. *)
 
 type event =
   { surface : string

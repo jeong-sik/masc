@@ -1,5 +1,4 @@
-(** Server_play_skills — the game guides an agent handed an invite link reads
-    (RFC play-link-for-the-shared-machine §2.7).
+(** Server_play_skills — the game guides an agent handed an invite link reads.
 
     A guide is a Skill of the attached shared DOS machine: the installation
     that serves the DOS screen tool, found as the seat and the moves find it

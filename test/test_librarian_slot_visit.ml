@@ -1,7 +1,8 @@
 (* Every row of the slot-outcome table (RFC librarian-call-only-proposes §7.2)
-   through Librarian_slot_visit.classify. The table is read as it is in the
-   evidence folder: table.tsv gives one outcome per constructor of the types a
-   visit carries, and not-constructors.tsv the visit's own cases. A sample
+   through Librarian_slot_visit.classify. The table is read from
+   test/fixtures/librarian_slot_outcome: table.tsv gives one outcome per
+   constructor of the types a visit carries, and not-constructors.tsv the
+   visit's own cases. A sample
    names the rows its value passes, from a root type to the row that gives
    the outcome. The test fails when those rows are not a chain of the table,
    when classify disagrees with the last one, or when a row has no sample. *)
@@ -18,7 +19,7 @@ module Antigravity = Runtime_antigravity
 module Muse = Runtime_muse_serve
 module Visit = Masc.Librarian_slot_visit
 
-let folder = "docs/evidence/research/2026-11-18-librarian-rebuild-design/slot-outcome"
+let folder = "test/fixtures/librarian_slot_outcome"
 
 type row =
   | Constructor of

@@ -4,7 +4,7 @@
     are the same bytes as before. Only feeding changes: a string or bytes
     argument is fed in slices of {!slice_bytes}, and OCaml code runs between
     slices, so a stop-the-world request waits for one slice at most instead of
-    the whole argument (RFC-0474 L2). *)
+    the whole argument. *)
 
 type t = Digestif.SHA256.t
 type ctx = Digestif.SHA256.ctx

@@ -1,5 +1,5 @@
 (** Host_fd_pressure_poller — bridges out-of-process host FD pressure
-    signal into [Keeper_fd_pressure.engage_external]. (RFC-0137 PR-2)
+    signal into [Keeper_fd_pressure.engage_external].
 
     The companion [scripts/monitor-system-health.sh] daemon atomically
     writes the configured state file (JSON one-line) on WARN/CRIT

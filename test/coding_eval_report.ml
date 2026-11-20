@@ -1,11 +1,10 @@
-(** Evidence rows and report assembly for the coding-outcome eval
-    (RFC-0396 W2).
+(** Evidence rows and report assembly for the coding-outcome eval.
 
     [scripts/harness_coding_eval.sh] appends one JSON row per run to
     [runs.jsonl]; this module decodes those rows, maps them onto
     {!Masc.Eval_harness.eval_run}, and assembles the suite result through
     [summarize_runs] / [compute_pass_at_k]. The pass verdict is carried in
-    from the runner's verify execution (RFC-0396 D2) — nothing here re-judges
+    from the runner's verify execution — nothing here re-judges
     an outcome, and a row whose [passed] disagrees with its own
     [status]/[verify_exit] is a decode error, not a repair. *)
 
@@ -360,7 +359,7 @@ let eval_run_of_row (row : row) : Eval_harness.eval_run =
   }
 ;;
 
-(* Failure taxonomy for the report (RFC-0396 D5). Each bucket is decided by a
+(* Failure taxonomy for the report. Each bucket is decided by a
    typed run signal, never by parsing model output or tool-name strings:
 
    - [Budget_exceeded] / [Provider_error] / [Transport_error] come from the run

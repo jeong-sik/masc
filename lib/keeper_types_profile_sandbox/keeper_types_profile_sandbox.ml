@@ -40,7 +40,7 @@ type network_mode =
   | Network_policy [@tla.symbol "Network_policy"]
       (** Outbound traffic reaches a proxy the MASC server owns and nothing
           else, and the proxy judges each destination against the keeper's
-          allowlist (RFC-0415).
+          allowlist.
 
           The enforcement point is the backend's own network boundary, not an
           environment variable: [HTTPS_PROXY] is advice, and a subprocess
@@ -89,7 +89,7 @@ let default_network_mode_for_profile = function
   | Remote_ssh -> Network_inherit
 ;;
 
-(* ── the box (RFC-0422 §3.4) ─────────────────────────────────────────── *)
+(* ── the box ─────────────────────────────────────────────────────────── *)
 
 type observation_run =
   | Observe
@@ -165,8 +165,8 @@ let network_mode_rejection profile mode =
        policy, not something masc sets; only \"inherit\" is accepted)"
   | Docker, (Network_none | Network_inherit) -> None
   (* Refused at create as well as at boot. Docker can express an internal
-     network, so the shape is plausible and the boundary is unmeasured
-     (RFC-0415); saying so while the keeper TOML is being written beats
+     network, so the shape is plausible and the boundary is unmeasured;
+     saying so while the keeper TOML is being written beats
      saying it when the keeper first tries to start. *)
   | Docker, Network_policy ->
     Some
@@ -197,7 +197,7 @@ type tree_location =
   | Shared_mount
   | Endpoint_owned
 
-(* A microvm guest's tree is on the named work volume (RFC-0400): the host
+(* A microvm guest's tree is on the named work volume: the host
    never mounts the playground into it, so every consumer that branches on
    the location reaches that tree through the remote lane. *)
 let tree_location_of_profile = function

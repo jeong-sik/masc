@@ -1,4 +1,4 @@
-(** Native-tool posture for official-client runtimes (RFC-0390).
+(** Native-tool posture for official-client runtimes.
 
     Each CLI runtime (Claude Code, Codex, Antigravity) ships its own agent
     tools. MASC decides per keeper how much of that built-in surface a turn
@@ -19,7 +19,7 @@ type posture_source =
   | Program_defined of posture
       (** The program that created the keeper states it as a value. Such a
           keeper has no declaration on disk and none is looked for: the
-          task-completion reviewer is one (RFC-0390, #36066 fallout). *)
+          task-completion reviewer is one (#36066 fallout). *)
 
 val posture_source_of_required : posture option -> posture_source
 (** [None] at the turn driver's [?required_native_posture] means the keeper
@@ -154,13 +154,12 @@ val degrade_on_admission : posture:posture -> none_supported:bool -> unit -> pos
 (** The safest posture the client can run when admission cannot honor the
     declared one: [full] degrades to [read] (effects stay behind the MASC
     approval gate), [none] on a client without a disable switch degrades
-    to [read]. Used with a typed event, never silently — see
-    RFC-0390 admission review. *)
+    to [read]. Used with a typed event, never silently. *)
 
 type claude_code_built_ins =
   | Granted of string list
       (** Exactly these built-ins may run. Every posture that grants a list
-          grants only built-ins that leave the work unchanged (RFC-0390), so
+          grants only built-ins that leave the work unchanged, so
           the turn's effects all pass through MASC tool handlers. *)
   | Client_default
       (** The client's own default set, which MASC does not enumerate and

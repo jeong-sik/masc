@@ -40,7 +40,7 @@ val checkpoint_for_replay_persistence :
   Agent_core.Checkpoint.t ->
   (Agent_core.Checkpoint.t * replay_suffix_prune_reason option, string) result
 (** [exclude_thought_from_replay] says this turn's wake cue and final text are
-    an internal thought rather than conversation (RFC-0385). The caller reads it
+    an internal thought rather than conversation. The caller reads it
     from the history source label the turn already carries, so nothing here
     inspects the text.
 

@@ -21,8 +21,8 @@ type owner = single_user_listener kernel_owner
    module, in [Masc_cli_runtime_config_remote] and in [Masc_cli_model_resume],
    and the two steps of [masc setup] (the sign-in and the Keeper boot), go
    only to a [Single_user_server_here]. Other senders of the bearer, such as
-   [masc keeper up], [masc keeper-create], the requests of the TUI and
-   [masc_http_probe], do not make this read. *)
+   [masc keeper up], [masc keeper-create] and the requests of the TUI, do
+   not make this read. *)
 let owner_with ~here ~lease_owner ~single_holder ~account_holder ~single_seen ~account_seen ~port =
   match lease_owner () with
   | Error (Server_startup_takeover.Owner_identity_unavailable No_owner) -> Ok Unowned

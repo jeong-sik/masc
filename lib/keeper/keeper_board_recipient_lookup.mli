@@ -1,5 +1,4 @@
-(** The Keeper side of the Board recipient lookup
-    (RFC-at-name-resolves-to-declared-recipient, layer L2c).
+(** The Keeper side of the Board recipient lookup.
 
     A name written after [@] is declared when a persisted Keeper answers to it.
     That is the question the Board asks when it routes a post to a Keeper

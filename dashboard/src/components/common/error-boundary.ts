@@ -6,8 +6,7 @@ interface ErrorBoundaryInfo {
   componentStack?: string
 }
 
-// Phase 2 spec (`design-system/preview/cb-group-g.jsx:G3`) defines two
-// inline error-banner tones:
+// Two inline error-banner tones:
 //   - 'recoverable' (warn) + retry — soft amber, retry resets boundary
 //   - 'fatal' (err) + retry + reload — soft red, reload reloads the window
 // Production has historically rendered only the fatal tone with a single

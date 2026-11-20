@@ -1,4 +1,4 @@
-(* RFC browser-backends-end-alone S-L2: each browser source is served by the
+(* Each browser source is served by the
    one worker whose package names it. Real native installations, one
    scripted worker per package; no browser is opened. *)
 open Alcotest

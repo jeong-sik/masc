@@ -1,5 +1,4 @@
-(** Tells turns readers which Keepers' shown preview was written
-    (RFC-0481 §3.5).
+(** Tells turns readers which Keepers' shown preview was written.
 
     The turns answer shows each Keeper's running-turn preview: activity, the
     tail of the response text, the last tool and the preparation phase. A
@@ -16,6 +15,6 @@
     logged, so the fiber never fails its switch. *)
 
 val post_interval_s : float
-(** The shortest time between two sends of the fiber (RFC-0481 §7 decision 2). *)
+(** The shortest time between two sends of the fiber. *)
 
 val install : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit

@@ -72,15 +72,3 @@ module Operator : sig
       (default [true]). When [false], stale entries block on recompute
       like the original TTL cache. *)
 end
-
-(** {1 Dashboard} *)
-
-module Dashboard_config : sig
-  val fixtures_enabled : unit -> bool
-  (** [MASC_DASHBOARD_FIXTURES_ENABLED] feature flag.
-      Re-readable within the process — does NOT imply
-      shell-level hot reload as an operator contract. *)
-
-  val fixture_opt : unit -> string option
-
-end

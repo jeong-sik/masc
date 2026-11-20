@@ -57,9 +57,11 @@ type agent_briefs_observation = {
 val build_agent_briefs_observation :
   now_ts:float -> Workspace.config -> attention_context list ->
   Yojson.Safe.t list -> agent_briefs_observation
-(** Build the same source-dated agent rows and retain the next live-to-stale
-    transition from those rows. Existing integer age <=300 changes at
-    last_seen+301; incrementing display age does not wake a reader. *)
+(** Aggregate per-agent briefs from workspace agents, attention, and keepers
+    into source-dated JSON rows, one per workspace agent, sorted for dashboard
+    display, and retain the next live-to-stale transition from those rows.
+    Existing integer age <=300 changes at last_seen+301; incrementing display
+    age does not wake a reader. *)
 
 val latest_message_to :
   string -> Masc_domain.message list -> Masc_domain.message option
@@ -67,14 +69,3 @@ val latest_message_to :
     that mentions [agent_name] and was not sent by it. Exposed for testing:
     tolerates an empty/whitespace-only [agent_name] (returns [None] rather than
     raising). *)
-
-val build_agent_briefs :
-  Workspace.config ->
-  attention_context list ->
-  Yojson.Safe.t list ->
-  Yojson.Safe.t list
-(** [build_agent_briefs config attention_queue keepers]
-    aggregates per-agent briefs from workspace agents, attention, and keepers.
-
-    Returns a JSON list, one entry per workspace agent,
-    sorted for dashboard display. *)

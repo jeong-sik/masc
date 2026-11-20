@@ -1,5 +1,5 @@
 (** Says that what [GET /api/v1/keepers/turns] answers for one Keeper may have
-    changed (RFC-0481 §3.4).
+    changed.
 
     The event is [{"type":"keeper_turn_changed","name":<keeper>,"ts_unix":...}].
     It carries the Keeper name only; a reader that shows turns reads them

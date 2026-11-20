@@ -1,4 +1,4 @@
-(** RFC-0108: trajectory writer atomicity stress.
+(** Trajectory writer atomicity stress.
 
     Drives many concurrent OCaml threads against [Trajectory.append_entry]
     for the same trace file (the contention surface that produced ~89

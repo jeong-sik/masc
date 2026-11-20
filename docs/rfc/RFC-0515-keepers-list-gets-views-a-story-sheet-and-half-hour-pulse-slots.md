@@ -17,7 +17,7 @@ related: ["0511", "0503", "0481", "0418"]
 - 2026-11-09 두 번째 정정: 운영자가 V1 을 깔고 시안과 견줬다. 시안의 보기별 칸(기억별 · 나이별 · 앞 12시간 일정 띠)과 머리 띠가 어느 층에도 없었다. §2.4 를 보기가 칸 값을 고르는 줄로 고치고 §2.8, 층 V6 · V8, 앞 12시간 띠, E16–E19 를 더했다.
 - 2026-11-09 세 번째 정정: 운영자가 V6 설치본을 보고 시안과 너무 다르다고 했다. 시안을 headless 로 그려 같은 폭 캡처와 견줬다. 줄의 뼈대가 달랐다. 열 배치, `┃` 지금 선, 30분 맥박 칸 수, ▹ 의 띠 · due · lag 열, 묶음 접기, 나이 사다리 칸 수다. §2.4 를 시안 `layout(cols)` 그대로 다시 썼다. E2 · E16 · E17 을 바꾸고 E23–E27 을 더했다. 층 G1–G4 · A1 을 더했다. 앞 12시간 띠는 G3 이 올린다. 운영자는 나이 사다리를 서버 24칸으로 고르고(E17), 시안 그대로 다시 올리기를 골랐다.
 - 2026-11-09 네 번째 정정: 균일 로그 눈금 24칸에는 1일 · 7일 경계가 없어서 문구가 27시간 · 9일이 됐다. 운영자가 경계를 1h · 1d · 7d · 30d 에 맞추고 문구를 세 묶음으로 줄이라고 골랐다(E28). §2.4.5 를 구간별 로그 눈금으로 고쳤다.
-- 시안: `docs/research/2026-11-06-keepers-list-past-now-next-preview.html` (Artifact `Keeper Pulse` 3판).
+- 시안: Artifact `Keeper Pulse` 3판(#49202).
 - 앞 RFC: RFC-0511 §4 가 보기 6개 · Story 창 · `s` `m` `w` 키를 "값이 main 에 오른 뒤 별도 RFC" 로 미뤘다. 이 RFC 가 그 별도 RFC 다.
 
 ## 0. 요약
@@ -452,7 +452,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 
 ## 8. 참고
 
-- 시안: `docs/research/2026-11-06-keepers-list-past-now-next-preview.html`
+- 시안: Artifact `Keeper Pulse` 3판(#49202)
 - RFC-0511 §4 · §7 D5, RFC-0503, RFC-0481 §3.2, RFC-0418
 - 저장: `lib/keeper/keeper_turn_pulse.ml`, 행 JSON: `lib/keeper/keeper_tool_surface_ops.ml`, 디코더: `lib/tui_decode.ml` 의 `decode_recent_turns`
 - 맥박 칸: `bin/masc_tui_keeper_pulse.ml`, 범례: `bin/masc_tui_keeper_mark.ml`

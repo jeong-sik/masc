@@ -120,8 +120,6 @@
   test_schema_surface_index
   test_fs_result
   test_gemini_edge_cases
-  test_harness
-  test_harness_deep
   test_hooks
   test_hooks_integration
   test_http_client
@@ -242,8 +240,6 @@
   test_schema_surface_index
   test_fs_result
   test_gemini_edge_cases
-  test_harness
-  test_harness_deep
   test_hooks
   test_hooks_integration
   test_http_client
@@ -789,3 +785,8 @@
  (name test_http_request_stream)
  (modules test_http_request_stream)
  (libraries llm_provider yojson alcotest))
+
+(test
+ (name test_input_budget)
+ (modules test_input_budget)
+ (libraries agent_core_test_deps llm_provider alcotest yojson))

@@ -37,7 +37,7 @@ let runtime_rate_limit ~now observed : bool * float option =
 
 (* The last attempt on a runtime that failed without answering. The lane walk
    reads it to try this runtime after the candidates that answered, except in
-   the walk of the Keeper that recorded it (RFC-0458 §3.4); only an answer
+   the walk of the Keeper that recorded it; only an answer
    clears it. *)
 let runtime_failed_attempt_json observed : Yojson.Safe.t =
   match observed with

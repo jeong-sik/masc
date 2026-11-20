@@ -1,3 +1,0 @@
-(executable
- (name main)
- (libraries masc masc.dashboard masc.masc_candle_runtime masc.masc_candle yojson mtime mtime.clock.os))

@@ -1,4 +1,4 @@
-(* RFC play-link-for-the-shared-machine §2.7: the attached DOS machine's
+(* The attached DOS machine's
    Skills reach an invited agent through the link. The installation is real
    Lane runtime state, declared or attached by hand; only its worker is a
    fixture that lists the DOS screen tool. Its Skills are published the way

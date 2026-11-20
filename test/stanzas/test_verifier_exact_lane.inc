@@ -1,4 +1,4 @@
-; RFC-0361 D7(a) — completion-authority judgement calls run on the dedicated
+; completion-authority judgement calls run on the dedicated
 ; verifier_exact exact-output lane: frozen-order slot resolution through the
 ; published registry, and failover in declared slot order inside review.
 

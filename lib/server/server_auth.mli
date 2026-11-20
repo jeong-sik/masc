@@ -100,7 +100,7 @@ val verify_seat_mcp_auth :
   (Auth.request_principal, Masc_domain.masc_error) result
 (** Bearer token check for the seat door [/mcp/play]: the same as
     {!verify_mcp_auth} but asking [CanPlayMachine], which an invite's
-    [Player] credential holds (RFC play-link-for-the-shared-machine §2.7). *)
+    [Player] credential holds. *)
 
 val verify_mcp_auth_for_authority :
   base_path:string ->

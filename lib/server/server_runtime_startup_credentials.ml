@@ -90,7 +90,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
          Log.Server.error
            "startup keeper credential sync failed for %s: %s"
            keeper_name detail);
-  (* RFC-0393: a keeper's credential lives under its keeper_name — the
+  (* A keeper's credential lives under its keeper_name — the
      decorated agent alias and the #10440 short-form alias mirror it
      required are gone. *)
   match Auth.rotate_shared_tokens_for_agents base_path ~agent_names:keeper_names with

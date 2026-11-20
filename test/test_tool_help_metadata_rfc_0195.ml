@@ -1,9 +1,9 @@
 (* test/test_tool_help_metadata_rfc_0195.ml
 
-   RFC-0195 P0 — help_entry record gains two optional, additive
+   help_entry record gains two optional, additive
    metadata fields: [examples] and [alternatives]. These fields
    exist so LLMs can recover from a typed rejection or catalog miss
-   without parsing prose hints (RFC-0194 §2).
+   without parsing prose hints.
 
    This test checks:
    - Every name listed in any [alternatives] field resolves

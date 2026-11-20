@@ -1,13 +1,13 @@
 (* See .mli for high-level shape.
 
-   RFC-0317 PR-3: the in-process Slack Socket Mode gateway. Mirrors
+   The in-process Slack Socket Mode gateway. Mirrors
    {!Server_discord_in_process_gateway}: fork a long-running fiber that runs
    {!Slack_socket_client.run} and, for each triggered event, looks up the
    channel→keeper binding and durably accepts the exact event before the socket
    callback returns. The connector lane then projects only the threaded ACK;
    the durable queue consumer owns the Keeper turn and final reply.
 
-   Ambient parity with the Discord gateway (RFC-0226): a human message that
+   Ambient parity with the Discord gateway: a human message that
    fails the trigger policy is delivered on the record-only ambient lane —
    persisted as external attention + one chat-store user line, committed as a
    durable [Connector_attention] stimulus, and followed by a best-effort wake
@@ -42,7 +42,7 @@ let original_route (original : Keeper_external_attention.item) =
      send time, so a rotation does not require a restart). *)
 
 (* Default trigger policy when none is configured (empty/unset). The
-   "quiet, mention-triggered bot" baseline per RFC-0203. *)
+   "quiet, mention-triggered bot" baseline. *)
 let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 
 (* The TOML walk lives in [Connector_trigger_policy]: this module and the

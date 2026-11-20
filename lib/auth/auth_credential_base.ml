@@ -47,7 +47,7 @@ let internal_keeper_token_hash_file config =
 
 let internal_keeper_token_env_key = "MASC_INTERNAL_MCP_TOKEN"
 
-(* In-process holder for the internal keeper token (RFC-0371 B11). The env
+(* In-process holder for the internal keeper token. The env
    var stays as the cross-process surface (startup import, diagnostics),
    but in-process consumers read this typed value: before it existed, boot
    wrote the token with putenv and the tool-workspace credential check read

@@ -286,7 +286,7 @@ let test_evidence_text_is_not_classified_before_llm_review () =
        [ " tbd "; ""; " n/a "; "   " ])
 ;;
 
-(* RFC prompts-and-tool-definitions-outside-ocaml §2.2: the schema handed to
+(* The schema handed to
    the reviewer is read from [config/tools/report_review_verdict.toml], whose
    verdict enum is a literal. The variant owns the vocabulary; this mirror
    (the [test_agent_card_action_mirror] idiom) catches drift between the
@@ -343,7 +343,7 @@ let test_verdict_enum_mirrors_valid_verdict_strings () =
           | _ -> Alcotest.fail "properties.verdict is not an object"))
 ;;
 
-(* RFC-0417 section 4.3: evidence posture changes the judge's question, not the
+(* Evidence posture changes the judge's question, not the
    verdict after the judge answers. A controlled judge approval therefore
    remains an approval even when the submitted snapshot is note-only. *)
 let test_note_only_verdict_is_owned_by_the_reviewer () =

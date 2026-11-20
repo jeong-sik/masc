@@ -7,7 +7,7 @@
 | Created | 2026-10-13 |
 | Updated | 2026-10-13 (독립 검토 반영. #42677 이 들어간 main 기준으로 문제 진술과 인용을 다시 읽음) |
 | Target | `agent_core` — `lib/agent/agent_turn.ml`, `lib/llm_provider/{retry,reasoning_dialect,reasoning_history_projection,backend_anthropic,types}.ml`, 카탈로그(`models.toml`). masc — `lib/keeper/keeper_turn_driver_try_provider.ml`, `lib/runtime/runtime_model_input_tail_window.ml`, `lib/keeper/keeper_model_input_demotion.mli`, `lib/keeper/keeper_run_tools_hooks.ml` |
-| Related | #42636, #42632, #42671, #42677, #42713, #42729, RFC-AC-029 §S3, RFC-AC-040, `docs/rfc/RFC-keeper-context-window-in-tokens.md` §1·§13.4, `docs/rfc/RFC-librarian-lifecycle.md` §4.10, `docs/rfc/RFC-0363-historical-tool-result-demotion.md` |
+| Related | #42636, #42632, #42671, #42677, #42713, #42729, RFC-AC-029 §S3, RFC-AC-040, `docs/rfc/RFC-keeper-context-window-in-tokens.md` §1·§13.4, `docs/rfc/RFC-librarian-lifecycle.md` §4.10 |
 | 측정 기준 | `파일:줄` 은 `origin/main` `4cc7ed1ebf`(2026-10-13 조회)에서 다시 읽은 값이다. 처음 쓴 기준 `361883ee64` 와 줄이 다른 곳은 부록 A 에 두 열로 적었다. 측정 수치는 2026-10-12T16:04Z(2026-10-13 01:04 KST)에 `~/.masc` 에서 잰 값이고, 센 방법을 각 곳에 적었다 |
 | 디렉터리 | `packages/agent_core/docs/rfc/`. 이유는 부록 B |
 
@@ -47,7 +47,7 @@
 
 확인하지 못한 것:
 
-- 요청 본문이 로그에 없다. 라운드 N 과 N+1 의 실제 바이트를 대조하지 못했다. 아래 원인은 코드 읽기와 오류 문구에서 나온 추정이다. 라운드 N 과 N+1 의 요청 본문 쪽 증거는 #42713 이 `docs/evidence/2026-10-13-anthropic-thinking-prefix/diagnosis.json`(glossary-maniac 요청 #2326/#2327: system·tools 동일, 이전 문맥 블록이 다음 요청에서 사라짐)으로 남겼다.
+- 요청 본문이 로그에 없다. 라운드 N 과 N+1 의 실제 바이트를 대조하지 못했다. 아래 원인은 코드 읽기와 오류 문구에서 나온 추정이다. 라운드 N 과 N+1 의 요청 본문 쪽 증거는 #42713 이 진단(glossary-maniac 요청 #2326/#2327: system·tools 동일, 이전 문맥 블록이 다음 요청에서 사라짐)으로 남겼다.
 - 위 수치는 #42677 병합(2026-10-13T03:07:10Z) 전의 것이다. 병합 뒤 같은 400 이 줄었는지는 세지 못했다. 이 실행 환경에 `~/.masc/keepers` 가 없었고, 병합한 빌드가 Keeper 에 배포된 시각도 모른다.
 - vincent 키 계정이 2026-08-31 이후 생성인지 모른다. 공식 문서는 그날 이후 만든 계정에 검사를 기본으로 켠다. vincent 만 실패하고 `claude.*` 는 통과하는 이유가 계정 나이라는 설명이 맞을 수 있으나 확인하지 않았다.
 
@@ -482,7 +482,7 @@ system·tools 가 라운드마다 바뀌는 경로를 없애는 일은 이 스�
 - **Q10.** 도구 목록이 라운드마다 달라지는 두 경로(§1.3-5)와 `defer_loading` 으로 옮기는 방법. 후속 이슈다.
 - **Q11.** `clear_at` 메시지가 도구 결과 user 메시지 앞에 오는 위치 제약(§1.2-11)이 우리 문맥 위치(user 입력 바로 뒤)에서 지켜지는지 실제 요청으로 확인한다.
 - **Q12.** 지문 비교의 요청당 비용(직렬화·해시). 이력이 클 때 얼마인지 재지 않았다.
-- **Q14.** #42677 만 적용된 빌드에서 같은 턴 둘째 라운드가 400 을 받는가(§1.3-4 의 추론). 지문 층 없이 `prefix_mismatch_behavior: "error"` 로 턴별 문맥이 있는 두 라운드 도구 루프를 보내 확인한다. 400 이 나면 2·5층의 우선순위가 올라간다. 안 나면 §1.3-1 의 설명을 다시 읽어야 한다. 요청 본문 쪽 증거는 #42713 의 `docs/evidence/2026-10-13-anthropic-thinking-prefix/diagnosis.json`(glossary-maniac 요청 #2326/#2327: system·tools 동일, 이전 문맥 블록이 다음 요청에서 사라짐)에 이미 있어 라이브 호출 없이 반쯤 닫혀 있다.
+- **Q14.** #42677 만 적용된 빌드에서 같은 턴 둘째 라운드가 400 을 받는가(§1.3-4 의 추론). 지문 층 없이 `prefix_mismatch_behavior: "error"` 로 턴별 문맥이 있는 두 라운드 도구 루프를 보내 확인한다. 400 이 나면 2·5층의 우선순위가 올라간다. 안 나면 §1.3-1 의 설명을 다시 읽어야 한다. 요청 본문 쪽 증거는 #42713 의 진단(glossary-maniac 요청 #2326/#2327: system·tools 동일, 이전 문맥 블록이 다음 요청에서 사라짐)에 이미 있어 라이브 호출 없이 반쯤 닫혀 있다.
 - **Q16.** tools 를 지문 재료로 넣을 때 순서를 어떻게 다루는가. 문서는 tools 를 집합이라고 적고, #42729 는 목록 순서 그대로 해시한다. 순서만 바뀐 요청을 서버가 받는지는 확인하지 못했다. 받는다면 정렬해서 넣는 쪽이 불필요한 지문 변화를 줄인다.
 - **Q17.** 메타데이터 키와 필드 이름을 어떻게 맞추는가. #42729 는 `agent_core.reasoning_prefix.v1`(`request_digest`, `message_digest`)을 쓰고 이 RFC 는 `agent_core.prefix_binding.v1`(`prefix_fingerprint`, `credential_scope`, `thinking_predecessor`)을 쓴다. 구현 때 한쪽으로 맞춘다.
 

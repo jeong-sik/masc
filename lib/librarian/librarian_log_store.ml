@@ -51,12 +51,12 @@ let window path ~from ~previous_row_wanted =
 (* Two locked reads: where the lines end, then the line before that end. *)
 let read_tail path =
   let ( let* ) = Result.bind in
-  let* first = window path ~from:0 ~previous_row_wanted:(fun (_ : string) -> false) in
+  let* first = window path ~from:0 ~previous_row_wanted:No_previous_row in
   match first with
   | Fs_compat.Private_jsonl_window.Window_missing -> Ok Nothing_written
   | Window_present { rows_end = 0; _ } -> Ok Nothing_written
   | Window_present { rows_end; _ } ->
-    let* second = window path ~from:rows_end ~previous_row_wanted:(fun (_ : string) -> true) in
+    let* second = window path ~from:rows_end ~previous_row_wanted:(Nearest_accepted (fun (_ : string) -> true)) in
     (match second with
      | Window_missing -> Ok Nothing_written
      | Window_present { from_starts_row = false; _ }

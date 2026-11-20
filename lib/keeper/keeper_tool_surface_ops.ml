@@ -528,7 +528,7 @@ let with_keeper_name args name =
       `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
   | other -> other
 
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* ctx-free body for keeper_dispatch_ref path. *)
 let prepare_passive_keeper_identity_config ~(config : Workspace.config) ~(agent_name : string) args =
   let requested_name =
     match String.trim (get_string args "name" "") with
@@ -574,7 +574,7 @@ let keeper_up_body
   in
   with_keeper_startup_gate (fun () -> execute_keeper_up keeper_ctx args)
 ;;
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* ctx-free body for keeper_dispatch_ref path. *)
 let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
   match
     let* prepared_args =
@@ -599,12 +599,12 @@ let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args 
 
 let handle_keeper_status ctx args : tool_result =
   keeper_status_body ~config:ctx.config ~agent_name:ctx.agent_name args
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* ctx-free body for keeper_dispatch_ref path. *)
 let keeper_name_lookup_candidates raw_name =
   let trimmed = String.trim raw_name in
   if String.equal trimmed "" then [] else [ trimmed ]
 
-(* Resolution carries the meta it read (RFC-0371 B6). The name-only shape
+(* Resolution carries the meta it read. The name-only shape
    below discarded it, which forced the preflight one call later to read the
    same keeper again from disk — two reads per submitted message for one
    question. Effective meta (TOML overlay) is read here because the only
@@ -693,8 +693,8 @@ let operation_id_of_invocation_ref invocation_ref =
 (* Who sent this, as the recipient's transcript and Librarian will see it.
    Registry membership decides it, the same exact lookup
    [delegate_continuation_channel] uses: a name shaped like a Keeper id is
-   not proof, since people and external bots mint the same shape
-   (RFC-0468 §3.2). An operator or agent driving the tool over HTTP is not
+   not proof, since people and external bots mint the same shape.
+   An operator or agent driving the tool over HTTP is not
    in the registry and stays [None], which the route records as the owner. *)
 let sender_keeper_of_submitter ~(config : Workspace.config) ~submitted_by =
   match Keeper_identity.Keeper_id.of_string submitted_by with
@@ -1389,7 +1389,7 @@ let handle_keeper_msg_stream_admitted
       message
     |> complete_keeper_msg_stream_result
 
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
   let* resolved =

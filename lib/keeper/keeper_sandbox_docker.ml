@@ -316,7 +316,7 @@ let docker_run_argv
      argv construction, and [ensure_shell_image_available] refuses remote_ssh.
      Both profiles' trees live on their endpoint, so a one-shot container
      that bind-mounts the host root has nothing correct to mount. Fail
-     closed rather than improvise an argv (RFC-0001, RFC-0400). *)
+     closed rather than improvise an argv. *)
   | Keeper_types_profile_sandbox.Micro_vm | Keeper_types_profile_sandbox.Remote_ssh ->
     failwith
       (Printf.sprintf

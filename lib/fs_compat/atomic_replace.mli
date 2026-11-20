@@ -23,7 +23,7 @@ val sync_file_and_parent_strict : string -> (unit, string) Result.t
     Returns [Ok ()] on success or [Error msg] when temp-file creation,
     writing, fsync, or rename fails (an existing tmp is cleaned up). Re-raises
     [Eio.Cancel.Cancelled] after cleaning up the tmp — cancellation
-    must not be swallowed (RFC-0143). *)
+    must not be swallowed. *)
 val save_file_atomic
   :  save_file:(string -> string -> unit)
   -> string

@@ -1330,7 +1330,7 @@ async function handoffCancelledStreamToOperationHydration(
  *  of appends collapses into the single in-flight fetch rather than
  *  fanning out one fetch per event.
  *
- *  If the event carries an RFC-0235 audio clip, we first try to attach
+ *  If the event carries an audio clip, we first try to attach
  *  it to the matching assistant bubble that is already streaming. A
  *  failed match still falls back to the history re-merge (the clip is
  *  persisted server-side too).
@@ -1348,7 +1348,7 @@ export function noteKeeperChatAppended(name: string, audio?: unknown): void {
     }
     return
   }
-  // Try to attach an RFC-0235 audio clip to the streaming assistant bubble,
+  // Try to attach an audio clip to the streaming assistant bubble,
   // but always fall through to the history re-merge so the transcript stays
   // current even if the clip had no matching text or no content text was
   // generated.

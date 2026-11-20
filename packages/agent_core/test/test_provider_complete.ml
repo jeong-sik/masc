@@ -2106,7 +2106,7 @@ let test_cache_no_system_no_cache () =
     (json |> member "cache_control" = `Null)
 ;;
 
-(* RFC-0382 G4: with caching opted in, the request also carries the
+(* With caching opted in, the request also carries the
    TOP-LEVEL automatic cache_control, which the API advances along the
    growing conversation so message history is read from cache each turn —
    the explicit system/tools breakpoints alone never cache the history. *)

@@ -49,6 +49,11 @@ let subscription_model_rows =
   ; "claude-sonnet-5-5-high", "claude-sonnet-5-5"
   ; "claude-sonnet-5-5-medium", "claude-sonnet-5-5"
   ; "claude-sonnet-5-5-low", "claude-sonnet-5-5"
+  ; "gemini-4-neon", "gemini-4-neon"
+  ; "gemini-4-neon-xhigh", "gemini-4-neon"
+  ; "gemini-4-neon-high", "gemini-4-neon"
+  ; "gemini-4-neon-medium", "gemini-4-neon"
+  ; "gemini-4-neon-low", "gemini-4-neon"
   ; "gemini-4-hydrogen", "gemini-4-hydrogen"
   ; "gemini-4-hydrogen-xhigh", "gemini-4-hydrogen"
   ; "gemini-4-hydrogen-high", "gemini-4-hydrogen"
@@ -368,6 +373,7 @@ let subscription_model_efforts =
   ; None, "gpt-6.1-sol", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gemini-4-neon", [ "low"; "medium"; "high"; "xhigh" ]
   ; None, "gemini-4-hydrogen", [ "low"; "medium"; "high"; "xhigh" ]
   ; None, "gemini-4-carbon", [ "low"; "medium"; "high" ]
   ; None, "gemini-4-argon", [ "low"; "medium"; "high" ]
@@ -646,7 +652,7 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
 
    Rows that declare supports_reasoning = false keep their own declaration. A
    model that does not reason has no control on either wire, so nothing about
-   the wire is being guessed (RFC-one-provider-two-wires §5). *)
+   the wire is being guessed. *)
 let test_no_ollama_cloud_row_states_a_wire () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog

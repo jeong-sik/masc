@@ -62,12 +62,32 @@ let process_status_text = function
   | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
   | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
 
+(* Durations in the spellings of RFC tui-one-screen-grammar 6.2. The run is a
+   length that ended: [808ms], [30.0s], [2m05s]. The limit is a setting: a
+   whole number of seconds reads [30s] or [2m], and a caller's fractional
+   limit keeps its tenths. A negative time is a clock that disagreed with
+   itself, a reading that failed, so it draws the failed mark. *)
+let failed_reading = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
+
+let took_text seconds =
+  Option.value ~default:failed_reading (Masc_tui_message_layout.elapsed_text seconds)
+
+(* Past this a whole-second float no longer converts to an int exactly. *)
+let largest_whole_limit = 1e15
+
+let limit_text seconds =
+  if Float.is_integer seconds && Float.abs seconds < largest_whole_limit then
+    Masc_tui_value.Interval.text (int_of_float seconds)
+  else took_text seconds
+
 let status_text t =
   let ended = process_status_text t.status in
-  let ran = Printf.sprintf "%s \xc2\xb7 %d ms" ended t.execution_time_ms in
+  let ran =
+    ended ^ " \xc2\xb7 " ^ took_text (float_of_int t.execution_time_ms /. 1000.)
+  in
   match t.timeout_limit_sec with
   | None -> ran
-  | Some seconds -> Printf.sprintf "%s \xc2\xb7 timed out at %g s" ran seconds
+  | Some seconds -> ran ^ " \xc2\xb7 timed out at " ^ limit_text seconds
 
 (* Enough of the digest to tell two artifacts apart by eye, the length git
    shortens a commit to. *)

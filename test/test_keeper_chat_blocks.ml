@@ -381,7 +381,7 @@ let test_blocks_of_yojson_rejects_malformed () =
     true
     (B.blocks_of_yojson (`List [ `Assoc [ ("t", `String "unknown") ] ]) = None)
 
-(* RFC-0252: the fusion block wire shape is the contract the dashboard zod
+(* The fusion block wire shape is the contract the dashboard zod
    schema mirrors (t=fusion, snake_case ids). Pin it so a drift breaks here. *)
 let test_fusion_block_roundtrip () =
   let original = [ B.Fusion { board_post_id = "p-abc123"; run_id = "fus-2583b65c" } ] in
@@ -438,7 +438,7 @@ let test_continuation_status_connector_text () =
     "작업이 체크포인트에 저장되었습니다. 다음 주기에 이어서 처리합니다."
     (B.status_kind_connector_text B.Continuation_checkpoint)
 
-(* RFC-0302: the thinking block wire shape is the contract the dashboard
+(* The thinking block wire shape is the contract the dashboard
    schema mirrors (t=thinking, content required, redacted omitted when
    false). Pin it so a drift breaks here. *)
 let test_thinking_block_roundtrip () =
@@ -511,7 +511,7 @@ let withheld_think_trace steps = [ B.Trace { trace = steps; omitted = 0 } ]
 
 let test_withheld_think_step_roundtrip () =
   (* The public autonomous projection admits the step and its timestamp with no
-     reasoning text (RFC-0358 §2). The flag is what states that, so it has to
+     reasoning text. The flag is what states that, so it has to
      survive the wire in both directions. *)
   let original =
     withheld_think_trace

@@ -364,7 +364,7 @@ function reduceHubState(state: HubState, action: HubAction): HubState {
  * Layout redesign: Hero (KSM) + Pipeline strip (KTC->KDP->KCL) +
  * Health grid (measurement/invariants) + collapsible graph.
  *
- * Data source: `/api/v1/keepers/:name/composite` (RFC-0003 S7).
+ * Data source: `/api/v1/keepers/:name/composite`.
  */
 export interface FsmHubProps {
   /** Optional externally-driven selection — used by the fleet matrix
@@ -372,11 +372,11 @@ export interface FsmHubProps {
    *  switches to the requested keeper on the next render. */
   selectedName?: string | null
   /** Surface variant. `'fleet'` (default) renders the keeper selector
-   *  tablist for in-hub switching. `'detail'` (RFC-0046) hides the
+   *  tablist for in-hub switching. `'detail'` hides the
    *  selector — the parent surface (keeper detail page) has already
    *  pinned a single keeper, so re-offering selection is noise. */
   mode?: 'fleet' | 'detail'
-  /** RFC-0046 §7 #2 follow-up: parent-supplied composite snapshot.
+  /** parent-supplied composite snapshot.
    *  When the prop is present (not `undefined`), this hub stops
    *  issuing its own /composite read and feeds the parent value into
    *  its reducer as a `fetch_succeeded` event. `null` means the
@@ -391,7 +391,7 @@ export interface FsmHubProps {
 
 export function FsmHub(props: FsmHubProps = {}) {
   const mode = props.mode ?? 'fleet'
-  // RFC-0046 §7 #2: parent-supplied snapshot only honoured in 'detail'
+  // parent-supplied snapshot only honoured in 'detail'
   // mode. Fleet mode drives selection internally and has no single
   // snapshot to share, so we fall back to the existing fetch path.
   const externalSnapshot = mode === 'detail' ? props.externalSnapshot : undefined
@@ -572,7 +572,7 @@ export function FsmHub(props: FsmHubProps = {}) {
   useEffect(() => {
     if (!activeSelected) return
 
-    // RFC-0046 §7 #2: parent supplies the snapshot in 'detail' mode.
+    // Parent supplies the snapshot in 'detail' mode.
     // Inject it into the reducer instead of issuing a duplicate fetch.
     // `null` = parent is still loading — emit fetch_started so the
     // skeleton UI shows, then wait for the next prop update.

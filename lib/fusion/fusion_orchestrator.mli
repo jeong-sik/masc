@@ -2,9 +2,7 @@
 
     {b 비차단은 호출자 책임}: 본 함수는 동기적이다(패널 N + 심판 1 완성을 기다림,
     ~7× 지연). [Fusion_tool]은 이를 [Keeper_msg_async] worker에서 실행하고 키퍼
-    턴에는 canonical request id만 즉시 반환한다(RFC-0252 §4).
-
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §4 *)
+    턴에는 canonical request id만 즉시 반환한다. *)
 
 (** 오케스트레이션 결과 (닫힌 합). *)
 type compute_outcome =

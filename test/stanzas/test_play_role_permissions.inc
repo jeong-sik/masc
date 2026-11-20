@@ -1,4 +1,4 @@
-; RFC play-link-for-the-shared-machine stage 1: the Player role, the
+; The Player role, the
 ; CanPlayMachine permission and the five DOS seat tools that require it.
 ; Pure checks over the role table and the tool catalog; no workspace.
 

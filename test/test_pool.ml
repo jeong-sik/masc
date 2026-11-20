@@ -1,4 +1,4 @@
-(* RFC-0107 Phase D.2d — Pool unit tests.
+(* Pool unit tests.
 
    Tests the pure, transport-independent pieces of the connection pool:
    Host_key normalization, default_config sanity, response/stats type
@@ -73,7 +73,7 @@ let test_to_string_format () =
 
 let test_default_config_max_idle_bounded () =
   let c = Masc_http_client.Pool.default_config in
-  (* RFC-0101 §2: nofile cap 10240. Pool consumption must be a small
+  (* Nofile cap 10240. Pool consumption must be a small
      fraction. 256 max_total_idle is ~2.5% of the cap. *)
   Alcotest.(check bool) "max_total_idle <= 1024 (rfc-0101 §2 budget)"
     true (c.max_total_idle <= 1024);
@@ -200,7 +200,7 @@ let test_ensure_host_header_on_none_headers_without_uri_host_stays_none () =
     None
     (ensure_host_header ~uri None)
 
-(* ── RFC-0129 — read_body_with_idle ─────────────────────────── *)
+(* ── read_body_with_idle ────────────────────────────────────── *)
 
 (* Build a mock [Piaf.Body.t] that the test fiber can feed chunks into
    on its own schedule. The producer fiber pushes [Some chunk] for each

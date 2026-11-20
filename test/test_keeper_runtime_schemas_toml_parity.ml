@@ -23,7 +23,7 @@ open Alcotest
 
 (* name, description, input_schema (keys sorted), in the order
    Keeper_runtime_schemas_toml.schemas publishes. The three provider Files
-   tools are #33639 (RFC-0430 Phase 3); keeper_analyze_image carries the
+   tools are #33639; keeper_analyze_image carries the
    runtime_id parameter #34561 added. *)
 let expected =
   [ "keeper_artifact_transfer"

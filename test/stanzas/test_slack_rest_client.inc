@@ -1,4 +1,4 @@
-; RFC-0317 Slack_rest_client pure-helper tests.
+; Slack_rest_client pure-helper tests.
 ; Same minimal-deps stanza as test_discord_rest_client.
 (test
  (name test_slack_rest_client)

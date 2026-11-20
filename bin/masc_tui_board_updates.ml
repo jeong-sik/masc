@@ -131,8 +131,8 @@ let apply_publication state ~report ~refresh outcome =
         apply_current_publication state ~report ~refresh outcome request
 
 let comment_outcome_unknown ~ko =
-  if ko then "댓글 결과 미확인 · 다시 보내기 전에 댓글을 확인하세요"
-  else "Board comment outcome unknown · check the thread before retrying"
+  if ko then "댓글 결과 보고 안 됨 · 다시 보내기 전에 댓글을 확인하세요"
+  else "Board comment outcome not reported · check the thread before retrying"
 
 let comment_launch_failed state ~request_id =
   match state.board_write with

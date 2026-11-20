@@ -1,6 +1,6 @@
 (** The approval audit store's newest rows per Keeper and for the whole store,
-    decoded once and advanced over what changed since the previous read
-    (RFC-0474 L4f). {!select} answers as the backward scan of the store would
+    decoded once and advanced over what changed since the previous read.
+    {!select} answers as the backward scan of the store would
     have: the same rows, or a refusal where that scan would have stopped. *)
 
 val max_rows : int

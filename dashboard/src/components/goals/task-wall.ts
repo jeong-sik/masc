@@ -1,7 +1,6 @@
 // MASC Dashboard — G2 · Per-keeper task wall variant
 //
-// Phase 2 spec (`design-system/preview/cb-group-d.jsx:TaskWall`)
-// renders an N-column grid keyed by keeper, with each cell holding the
+// TaskWall renders an N-column grid keyed by keeper, with each cell holding the
 // task chips for that keeper. Production has the data (`Task.assignee`)
 // but no surface that flattens it into a wall view; per-keeper filtering
 // today only surfaces inside `KeeperToolActivity` strips.

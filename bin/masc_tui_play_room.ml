@@ -90,8 +90,10 @@ let start t machine operation =
 let poll t ~now ~machine =
   if Option.is_some t.pending then t, None
   else if not t.active then
-    if t.joined && now >= t.next_read then start t machine Leave else t, None
-  else if now >= t.next_read then start t machine (Read t.before)
+    if t.joined && Masc_tui_wake.reached Masc_tui_wake.Play_room_read ~now ~at:t.next_read
+    then start t machine Leave else t, None
+  else if Masc_tui_wake.reached Masc_tui_wake.Play_room_read ~now ~at:t.next_read
+  then start t machine (Read t.before)
   else t, None
 let send t ~machine =
   if not t.active || Option.is_some t.pending then
@@ -100,7 +102,7 @@ let send t ~machine =
   else
     let sending, draft, notice = match t.retry with
       | Some sending -> sending, t.draft, "이전 전송을 확인하는 중이에요. 새 초안은 남겨 두어요."
-      | None -> {id = Random_id.hex ~bytes:16; machine; text = t.draft}, "", "보내는 중…" in
+      | None -> {id = Random_id.hex ~bytes:16; machine; text = t.draft}, "", "보내는 중" in
     start {t with draft; retry = Some sending; notice = Some notice} sending.machine (Say sending)
 let request_json request =
   let machine = match request.machine with Masc.Machine_lane.Msx -> "msx" | Dos -> "dos" in
@@ -157,22 +159,31 @@ let clean = Masc.Tui_terminal_text.sanitize_terminal_text
 let origin t (m : Room.message) =
   if t.viewer = Some m.who then Viewer
   else match m.speaker with Room.Keeper -> Keeper | Room.Participant -> Peer
-let footer t = if not t.focused then "" else
-  let send = match t.retry with None -> "보내기" | Some _ -> "이전 전송 확인" in
-  " 대화 · Enter: " ^ send ^ "  Tab/Esc: 관전  PgUp/PgDn: 스크롤  Home/End: 이전/최근"
-let layout t ~width ~height =
+let footer ?(ko = true) t = if not t.focused then "" else
+  let send =
+    match t.retry with
+    | None -> if ko then "보내기" else "send"
+    | Some _ -> if ko then "이전 전송 확인" else "confirm previous send"
+  in
+  if ko then
+    " 대화 · Enter: " ^ send ^ "  Tab/Esc: 관전  PgUp/PgDn: 스크롤  Home/End: 이전/최근"
+  else
+    " Chat · Enter: " ^ send ^ "  Tab/Esc: watch  PgUp/PgDn: scroll  Home/End: top/latest"
+let layout ?(ko = true) t ~width ~height =
+  let say korean english = if ko then korean else english in
   if height <= 0 then {t with viewport = None}, []
   (* Below the compact room heading's width, there is no usable conversation
      viewport. Preserve drafts/history but do not expand every message into
      one-cell lines just to discard them again. *)
-  else if width < Layout.display_width "공용 대화" then
+  else if width < Layout.display_width (say "공용 대화" "Room chat") then
     {t with viewport = None},
-    List.init height (fun row -> Layout.fit_width (if row = 0 then "공용 대화: 창을 넓혀 주세요." else "") width)
+    List.init height (fun row -> Layout.fit_width (if row = 0 then say "공용 대화: 창을 넓혀 주세요." "Room chat: widen window." else "") width)
   else
   let members, messages, empty = match t.snapshot with
-    | None -> "참여자를 읽고 있어요.", [], "대화를 읽고 있어요."
+    | None ->
+      say "참여자를 읽고 있어요." "Reading participants.", [], say "대화를 읽고 있어요." "Reading messages."
     | Some snapshot ->
-      let members = "참여 중 · " ^ String.concat ", " (List.map (fun (m : Room.member) -> clean m.name) snapshot.members) in
+      let members = (say "참여 중 · " "In room · ") ^ String.concat ", " (List.map (fun (m : Room.member) -> clean m.name) snapshot.members) in
       let messages =
         List.concat_map (fun (m : Room.message) ->
           let mark = match origin t m with Viewer -> "▶ " | Keeper -> "● " | Peer -> "◀ " in
@@ -181,12 +192,15 @@ let layout t ~width ~height =
           heading :: (Layout.wrap_words ~max_cells:(max 1 (width - 1)) (clean m.text)
             |> List.map (fun line -> " " ^ line))
           |> List.mapi (fun line text -> {message_id = m.id; line}, text)) snapshot.messages in
-      members, messages, "아직 대화가 없어요." in
-  let heading = "공용 게임 대화" ^ (if t.focused then " · 입력" else " · Tab 입력 / F4 전환") in
+      members, messages, say "아직 대화가 없어요." "No messages yet." in
+  let heading =
+    say "공용 게임 대화" "Shared game chat"
+    ^ (if t.focused then say " · 입력" " · typing" else say " · Tab 입력 / F4 전환" " · Tab type / F4 toggle")
+  in
   let notice = match t.notice with None -> [] | Some text -> [clean text] in
   let notice = match t.retry with
     | None -> notice
-    | Some sending -> ("› 전송 확인 중: " ^ clean sending.text) :: notice in
+    | Some sending -> (say "› 전송 확인 중: " "› confirming send: " ^ clean sending.text) :: notice in
   let prefix = if height >= 5 then [heading; members] else [heading] in
   let available = max 0 (height - List.length prefix - List.length notice - 1) in
   let t, body = if available = 0 || messages = [] then
@@ -201,7 +215,9 @@ let layout t ~width ~height =
         | Anchored _, None -> Latest in
       {t with position; viewport = Some viewport},
       messages |> List.drop first |> List.take available |> List.map snd in
-  let composer = if t.draft = "" then (if t.focused then "› " else "Tab: 함께 보는 사람에게 말하기")
+  let composer =
+    if t.draft = "" then
+      if t.focused then "› " else say "Tab: 함께 보는 사람에게 말하기" "Tab: talk to watchers"
     else "› " ^ Layout.input_viewport ~max_cells:(max 0 (width - 2)) (clean t.draft) in
   let rows = prefix @ body @ notice in
   let rows = List.take (max 0 (height - 1)) rows in

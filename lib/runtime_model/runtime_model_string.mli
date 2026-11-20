@@ -1,4 +1,4 @@
-(** Model-label string → [Provider_config.t] resolution (RFC-0206).
+(** Model-label string → [Provider_config.t] resolution.
     Resolves
     a ["provider:model"] / ["custom:model@url"] label via a resolved AGENT_CORE runtime binding. No runtime routing/weighted-entry machinery. *)
 

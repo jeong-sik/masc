@@ -1,5 +1,5 @@
 /**
- * Voice input for the keeper-chat composer (RFC-0236 P1).
+ * Voice input for the keeper-chat composer.
  *
  * The dashboard captures speech with {@link MediaRecorder}, re-encodes it as
  * 16 kHz mono WAV ({@link recordingToWav}), and uploads the bytes to

@@ -151,7 +151,7 @@ let fields = function
   | Fusion { run } -> Kind_fusion, [ f_run, run ]
   | Schedule { schedule; occurrence } ->
     Kind_schedule, [ f_schedule, schedule; f_occurrence, occurrence ]
-  | Connector { event } -> Kind_connector, [ f_attention, event ]
+  | Connector { attention } -> Kind_connector, [ f_attention, attention ]
   | Hitl { approval } -> Kind_hitl, [ f_approval, approval ]
   | Ask { ask } -> Kind_ask, [ f_ask, ask ]
   | Completion_rejected { task; verification; judge } ->
@@ -264,8 +264,8 @@ let of_json json =
     Ok (Schedule { schedule; occurrence })
   | Kind_connector ->
     let* () = exact [ f_attention ] in
-    let* event = text f_attention in
-    Ok (Connector { event })
+    let* attention = text f_attention in
+    Ok (Connector { attention })
   | Kind_hitl ->
     let* () = exact [ f_approval ] in
     let* approval = text f_approval in

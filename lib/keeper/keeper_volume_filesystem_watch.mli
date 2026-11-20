@@ -1,5 +1,4 @@
-(** The latest ext4 state the server read for each Keeper volume
-    (RFC keeper-volume-filesystem-repair §3.2).
+(** The latest ext4 state the server read for each Keeper volume.
 
     The superblock is the authority. This is a process-local projection of
     the last read, kept so a Keeper status read shows the state without

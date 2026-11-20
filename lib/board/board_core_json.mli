@@ -5,7 +5,7 @@ open Board_types
 val post_to_yojson : post -> Yojson.Safe.t
 
 val post_origin_to_yojson : post_origin -> Yojson.Safe.t
-(** RFC-0233 §7: encode the typed post origin (turn_ref / source /
+(** Encode the typed post origin (turn_ref / source /
     fusion_run_id) as a JSON object. Shared with the dashboard board
     serializer ({!Board_votes.post_to_yojson_with_karma}) so the wire shape
     matches {!post_to_yojson}. *)

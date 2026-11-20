@@ -72,11 +72,11 @@ val peak_lag : t list -> int
     did. The caller passes the readings of the Keepers it draws, and the lag
     bars are drawn against it. *)
 
-val pass_word : Masc.Tui_decode_memory_health.memory_librarian_pass_end -> string
+val pass_word : ?ko:bool -> Masc.Tui_decode_memory_health.memory_librarian_pass_end -> string
 (** How the librarian's last pass ended, in one word for the Memory pane and
     the memory view. *)
 
-val pass_cell : t -> Masc_tui_keeper_axis_cell.t
+val pass_cell : ?ko:bool -> t -> Masc_tui_keeper_axis_cell.t
 val updated_cell : now:float -> t -> Masc_tui_keeper_axis_cell.t
 val fact_ages_cell : t -> Masc_tui_keeper_axis_cell.t
 (** The ● cell of the memory view (the pass end), the ● cell of the age view

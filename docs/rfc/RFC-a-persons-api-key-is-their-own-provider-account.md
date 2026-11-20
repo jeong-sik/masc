@@ -14,7 +14,6 @@ related: []
 
 - 상태: 초안.
 - 계기: 다계정 서버에 사람을 초대해 같이 쓰려면, 구독이 없는 사람도 자기 API key 로 Keeper 를 돌릴 수 있어야 한다(2026-11-17 운영자 요청).
-- 근거 기록: [연구 기록](../research/2026-11-17-person-api-key-for-claude-code.md). 공식 문서 인용, CLI 측정, 코드 좌표가 거기 있다.
 - 코드 좌표는 `origin/main` `55c86a8b2ee5` 에서 읽었다.
 - 먼저 있는 결정:
   - 설계 §4.2: ProviderAccount 는 주인(`owner`), 자격 참조(`credential_ref`), 세대(`credential_generation`), 상태를 가진다. Admin 도 다른 사람의 ProviderAccount 로 Runtime 을 만들지 못한다.

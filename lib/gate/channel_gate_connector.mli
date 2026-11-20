@@ -95,12 +95,12 @@ module type S = sig
   (** Channel ids currently bound to [keeper_name], freshly read from
       the connector's binding store on each call (no cached state).
       Sorted by channel id. Binding-store failure is distinct from an
-      unbound keeper. RFC-0223 P2. *)
+      unbound keeper. *)
 
   val connected : unit -> bool
   (** Whether the connector's transport is currently believed live.
       Recomputed per call from the connector's own liveness source
-      (status file staleness, in-process gateway state). RFC-0223 P2. *)
+      (status file staleness, in-process gateway state). *)
 end
 
 (** {1 Connector status vocabulary} *)

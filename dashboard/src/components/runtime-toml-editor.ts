@@ -417,7 +417,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
   // does — no direct API call. The new provider/model/binding only reaches
   // runtime.toml when the operator hits the existing "저장"/라이브 적용 button,
   // which re-validates the full text through the same POST /api/v1/runtime/config/raw
-  // -> Runtime.save_config_text path (RFC-0273 §3.2: reuse, don't reimplement).
+  // -> Runtime.save_config_text path (reuse, don't reimplement).
   function handleAddProvider(input: NewRuntimeProviderInput) {
     if (saving || loadState !== 'loaded') return
     editDraft(current => {

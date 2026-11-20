@@ -53,7 +53,7 @@ type source =
   | Command of command
       (** one command line, run by a real shell inside the keeper's sandbox.
 
-          RFC execute-boundary-is-the-sandbox: the field the caller chose names
+          The field the caller chose names
           the execution model. [argv] is typed and reaches no shell; [command]
           is a shell. The bash subset still parses this text,
           but as a judge — for path classification, telemetry, and the rewrite
@@ -142,7 +142,7 @@ val hidden_script_findings
     {!Keeper_tooling.Shell_costume.finding_tag}.
 
     Recognition and classification only: calling this changes nothing about
-    what runs.  RFC execute-subset-dispositions step 1: this distribution is what decides
+    what runs.  This distribution is what decides
     which constructs the subset rewrites first. *)
 
 val to_shell_ir :

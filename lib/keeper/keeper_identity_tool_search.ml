@@ -1,7 +1,7 @@
 (* The attached-service surface, offered as a listing instead of as schemas.
 
    A Keeper attached to a work service is handed that service's entire tool
-   list. Measured on 2026-08-29 (RFC-attached-service-tool-scoping §1.5-1.6)
+   list. Measured on 2026-08-29
    one Keeper's attached list was 145 tools and 142,257 bytes against 57 KB
    of built-in tools, it was charged to all 83 provider requests of a turn,
    and 20% of those tools were called at all that day. Overflow took 412

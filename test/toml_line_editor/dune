@@ -1,4 +1,4 @@
-; Isolated alcotest for the comment-preserving TOML line editor (RFC-0306 3.2).
+; Isolated alcotest for the comment-preserving TOML line editor.
 ; Links otoml too, so a produced file is judged by the loader that will read it
 ; rather than by counting lines.
 

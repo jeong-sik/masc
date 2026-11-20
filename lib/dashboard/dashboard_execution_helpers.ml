@@ -56,34 +56,8 @@ let execution_tool_preview_limit = 8
 let cap_string_list ?(limit = execution_tool_preview_limit) values =
   take limit values
 
-let dashboard_fixture_name ?fixture () =
-  let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in
-  if not fixtures_enabled then None
-  else
-    match fixture with
-    | Some value ->
-        let trimmed = String.trim value in
-        if trimmed <> "" then Some trimmed else Env_config.Dashboard_config.fixture_opt ()
-    | None -> Env_config.Dashboard_config.fixture_opt ()
-
-let execution_fixture_name ?fixture () =
-  match dashboard_fixture_name ?fixture () with
-  | Some "execution_smoke" as selected -> selected
-  | Some _ | None -> None
-
-(** Agent profile representation for dashboard views. *)
-type agent_profile = {
-  emoji : string;
-  korean_name : string;
-}
-
-(** Get agent profile for dashboard projection.
-    Returns default identity emoji and agent name without dead Neo4j GraphQL dependency. *)
-let get_agent_profile (name : string) : agent_profile =
-  {
-    emoji = "🤖";
-    korean_name = name;
-  }
+(** The identity emoji every agent shows on dashboard surfaces. *)
+let agent_emoji = "🤖"
 
 let handoff_json ~surface ?command_surface ?operation_id ~label ~target_type ~target_id
     ~focus_kind () =

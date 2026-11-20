@@ -1291,7 +1291,7 @@ let completed_turn_of_history ~turn_id ~open_items history =
 ;;
 
 (* Whether an item of this kind can leave anything outside the host's own
-   session (RFC-0509). Only MASC's own input and the model's reasoning
+   session. Only MASC's own input and the model's reasoning
    cannot. An answer can: its text may already have reached a reader. *)
 let item_may_act : Msp.item_kind -> bool = function
   | Msp.User_message | Msp.Reasoning -> false
@@ -1593,7 +1593,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
                  last_call_usage=witness.durable_last_call; call_models=witness.durable_models}
              | Msp.Terminal_failed _ ->
                (* The failed turn's own durable range is the only witness
-                  that the host did nothing outside its session (RFC-0509).
+                  that the host did nothing outside its session.
                   A read that fails proves nothing and changes no outcome. *)
                let pending_decisions = ref state.pending_decisions in
                let items =

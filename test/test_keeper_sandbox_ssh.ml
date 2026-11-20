@@ -406,7 +406,7 @@ instructions = "remote test keeper"
 sandbox_profile = "remote_ssh"
 remote_endpoint = "build-box"
 |};
-  (* RFC-0121: the resolver reads .masc/config/runtime.toml — the path the
+  (* The resolver reads .masc/config/runtime.toml — the path the
      live layout uses — not the .masc root this fixture used to write to. *)
     save
     (Filename.concat base_path ".masc/config/runtime.toml")

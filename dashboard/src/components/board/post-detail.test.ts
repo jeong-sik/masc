@@ -1078,7 +1078,7 @@ describe('PostDetail', () => {
 
     const drawer = screen.getByTestId('board-post-turn-inspector-drawer')
     // keeperName falls back to post.author when no keeper is resolved in-test;
-    // The ref anchor is the exact origin turn_ref join key (RFC-0233 §7).
+    // The ref anchor is the exact origin turn_ref join key.
     expect(drawer.getAttribute('data-keeper')).toBe('sleepers')
     expect(drawer.getAttribute('data-initial-turn-ref')).toBe('trace-x#5')
   })

@@ -1,4 +1,4 @@
-(* RFC-0084 §3.2 — Typed tool dispatch capability.
+(* Typed tool dispatch capability.
    See tool_capability.mli for the contract. *)
 
 type kind =

@@ -377,13 +377,20 @@ let wrap_tokens ?on_row palette ~width tokens =
     if word_cells <= remaining then append token ~start_byte ~word_cells token.word
     else begin
       let prefix, chunks =
-        Layout.split_cells_after_prefix ~prefix_cells:remaining
-          ~max_cells:width token.word in
-      let chunks = match chunks with [] -> [""] | _ -> chunks in
+        if !current_cells = 0 then
+          "", Layout.split_word ~max_cells:width token.word
+        else
+          let prefix, tail = Layout.split_at_cells token.word remaining in
+          let tail_chunks =
+            if String.equal tail "" then []
+            else Layout.split_word ~max_cells:width tail
+          in
+          prefix, tail_chunks
+      in
       if prefix <> "" then
         append token ~start_byte ~word_cells:(Layout.display_width_for_wrapping prefix) prefix;
-      (* Split the remaining word once at the full row width, preserving
-         graphemes, source bytes and styling. *)
+      (* Split the remaining word at separator/kinsoku boundaries at the full
+         row width, preserving graphemes, source bytes and styling. *)
       let next_byte = ref (start_byte + String.length prefix) in
       List.iter (fun word ->
         if Buffer.length current > 0 then flush ();
@@ -392,20 +399,53 @@ let wrap_tokens ?on_row palette ~width tokens =
         chunks
     end
   in
-  List.iter (fun token ->
-    let separator_cells = if token.space_before then 1 else 0 in
-    let start_byte = !source_byte + separator_cells in
-    let word_cells = Layout.display_width_for_wrapping token.word in
-    let wrapped = !current_has_word
-      && !current_cells + separator_cells + word_cells > width in
-    if wrapped then flush ();
-    if token.space_before && not wrapped then (
-      if !current_cells = width then flush ();
-      Buffer.add_char current ' ';
-      record !source_byte 1;
-      incr current_cells);
-    append_word token ~start_byte ~word_cells;
-    source_byte := start_byte + String.length token.word) tokens;
+  (* Group contiguous tokens where subsequent tokens have [space_before = false]
+     into one word cluster so Korean postpositions (`file`에서) and closing
+     punctuation (`**완료**.`, `[link](u):`) stay attached to their inline span. *)
+  let clusters =
+    let rec group acc current = function
+      | [] ->
+          List.rev
+            (match current with [] -> acc | _ :: _ -> List.rev current :: acc)
+      | token :: rest ->
+          if token.space_before || current = [] then
+            let acc =
+              match current with [] -> acc | _ :: _ -> List.rev current :: acc
+            in
+            group acc [ token ] rest
+          else group acc (token :: current) rest
+    in
+    group [] [] tokens
+  in
+  List.iter (fun cluster ->
+    match cluster with
+    | [] -> ()
+    | first :: _ ->
+        let separator_cells = if first.space_before then 1 else 0 in
+        let cluster_cells =
+          List.fold_left
+            (fun acc token -> acc + Layout.display_width_for_wrapping token.word)
+            0 cluster
+        in
+        let wrapped =
+          !current_has_word
+          && !current_cells + separator_cells + cluster_cells > width
+        in
+        if wrapped then flush ();
+        if first.space_before then begin
+          if not wrapped then (
+            if !current_cells = width then flush ();
+            Buffer.add_char current ' ';
+            record !source_byte 1;
+            incr current_cells);
+          incr source_byte
+        end;
+        List.iter (fun token ->
+          let word_cells = Layout.display_width_for_wrapping token.word in
+          append_word token ~start_byte:!source_byte ~word_cells;
+          source_byte := !source_byte + String.length token.word)
+          cluster)
+    clusters;
   if Buffer.length current > 0 || !rows = [] then flush ();
   List.rev !rows
 

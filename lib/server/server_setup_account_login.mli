@@ -131,12 +131,10 @@ type runtime_error =
     {!Runtime_api_key_file.read_error_code}. *)
 val key_unusable_message : Runtime_api_key_file.read_error -> string
 
-(** The call of an account that is running. Only {!one_call_of} makes one,
-    and it hands it to the work it runs. The type keeps a caller from making
-    one. It does not keep the work from handing the value on: a value that
-    outlives its call, given back as the result or kept by a fiber the work
-    started, names a call that ended. No caller does either. *)
-type in_call
+(** The call of an account that is running ({!Runtime_account_call.t}).
+    {!one_call_of} makes one and hands it to the work it runs. No caller
+    hands the value on past its call. *)
+type in_call = Runtime_account_call.t
 
 (** The runtime of [binding] on the home of the account of the call, an
     account of the person: a provider of the workspace with the home of the
@@ -165,11 +163,8 @@ val person_runtime
   -> (prepared, runtime_error) result
 
 (** Runs [f] when no other call of the account runs, and gives [busy]
-    otherwise. A call starts the official client on the home of the account,
-    and no two clients refresh the credential of one home at once, so a
-    verification and a Keeper turn of one account take turns (issue #50018).
-    [f] gets the call it runs in, which {!person_runtime} takes. It holds
-    within this process. *)
+    otherwise ({!Runtime_account_call.one_call_of}). [f] gets the call it
+    runs in, which {!person_runtime} takes. *)
 val one_call_of
   :  Authz_types.Provider_account_id.t
   -> busy:'e

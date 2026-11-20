@@ -140,7 +140,7 @@ let test_applies_lifecycle_enabled_overrides () =
   check (option string) "single autonomy setting" (Some "true")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_ENABLED" overrides)
 
-(* RFC keepers-see-the-wiki-table-of-contents: the operator turns the wiki
+(* The operator turns the wiki
    paragraph off in runtime.toml. A wiki that lists a page before the switch
    lists nothing after it, and the turn carries no paragraph. *)
 let test_wiki_contents_switch_turns_the_wiki_paragraph_off () =
@@ -449,7 +449,7 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
 let test_resolved_stream_idle_timeout_defaults_to_failsafe_floor () =
-  (* RFC-0345 / #25128: with no explicit env/toml value the resolver substitutes
+  (* #25128: with no explicit env/toml value the resolver substitutes
      the fail-safe liveness floor (not [None]) so AGENT_CORE enforces a bound and a hung
      stream cannot freeze the lane forever. Reverting the floor (back to [None])
      makes this fail. *)

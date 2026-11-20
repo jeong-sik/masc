@@ -7,7 +7,7 @@ val message_feed_targets : keeper_meta -> string list
 
 val self_ids : keeper_meta -> Keeper_identity.Keeper_id.t list
 (** The keeper's own identities, minted from [meta.name] and
-    [meta.agent_name] at the parse boundary (RFC-0232 §3.4).  Usually a
+    [meta.agent_name] at the parse boundary.  Usually a
     single canonical id; at most two. *)
 
 val is_self_author
@@ -46,7 +46,7 @@ type direct_line_role =
   | User
   | Assistant
   | Tool_call
-(** RFC-0232 P1: closed-sum role for a direct-conversation line, replacing the
+(** closed-sum role for a direct-conversation line, replacing the
     former [role_label : string]. The renderer derives the display label from
     this via {!direct_line_role_to_label}; no consumer re-derives semantics
     from a free string. *)

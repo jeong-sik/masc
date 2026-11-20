@@ -740,26 +740,28 @@ type window_line = {
 }
 
 (* Keep the marker separate from provider text, including on wrapped lines.
-   The empty slot also distinguishes a provider name beginning with [!]. *)
-let marked ~attention text = (if attention then "! " else "  ") ^ text
+   The empty slot also distinguishes a provider name beginning with the mark.
+   Attention is the caution mark of RFC tui-one-screen-grammar 7.2. *)
+let attention_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
+let marked ~attention text = (if attention then attention_mark ^ " " else "  ") ^ text
 
 let wrap_marked ~width ~attention text =
   let width = max 1 width in
   let prefix =
-    if width >= 4 then if attention then "! " else "  "
-    else if width >= 2 then if attention then "!" else " "
+    if width >= 4 then if attention then attention_mark ^ " " else "  "
+    else if width >= 2 then if attention then attention_mark else " "
     else ""
   in
   let lines =
-    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - String.length prefix)) text
+    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - cells_of prefix)) text
   in
   match lines with
-  | [] when attention -> [ "!" ]
+  | [] when attention -> [ attention_mark ]
   | [] -> []
   | _ :: _ ->
       List.map
         (fun line ->
-          if cells_of line + String.length prefix <= width then prefix ^ line
+          if cells_of line + cells_of prefix <= width then prefix ^ line
           else line)
         lines
 
@@ -1010,7 +1012,7 @@ let draw_entry ?(named = true) layout tone entry =
     let label_overflows = cells_of (marked ~attention:line.at_limit line.label) > layout.label_cells in
     let label =
       if label_overflows then
-        Text.fit_middle layout.label_cells (if line.at_limit then "!" else "")
+        Text.fit_middle layout.label_cells (if line.at_limit then attention_mark else "")
       else Text.fit_middle layout.label_cells (marked ~attention:line.at_limit line.label)
     in
     let label_rows =
@@ -1487,7 +1489,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       in
       let legend =
         Masc_tui_message_layout.pack_clauses ~max_cells:summary_width
-          [ "!: at limit or exhausted"
+          [ attention_mark ^ ": at limit or exhausted"
           ; "Bar: used at last report"
           ; "other use does not block model calls" ]
         |> List.map (fun line -> summary_indent ^ Theme.recede () ^ line ^ Ansi.reset)

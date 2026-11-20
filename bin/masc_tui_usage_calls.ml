@@ -106,11 +106,14 @@ let every_call_failed (calls : Series.tool_series_calls) =
 
 let grouped_digits = Masc_tui_value.Count.grouped
 
+(* A p95 is how long calls took, so it reads on the finished-length ladder of
+   RFC tui-one-screen-grammar 6.2 that the Lanes table and approvals already
+   use: [243ms], [29.2s], [6m55s], with no space before the unit. A negative
+   or non-numeric p95 is a reading that failed and draws the failed mark. *)
 let milliseconds_text ms =
-  if ms >= 1000.0 then Printf.sprintf "%.1f s" (ms /. 1000.0)
-  else if ms >= 100.0 then Printf.sprintf "%.0f ms" ms
-  else if ms >= 10.0 then Printf.sprintf "%.1f ms" ms
-  else Printf.sprintf "%.2f ms" ms
+  Option.value
+    ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+    (Masc_tui_message_layout.elapsed_text (ms /. 1000.0))
 
 let percent_text ~failures ~calls =
   if failures = 0 then "0%"
@@ -132,9 +135,9 @@ let time_text series_width start =
         ~now:(Unix.gettimeofday ()) start
   | Series.Series_day -> Masc_tui_value.Utc_day.month_day (Masc_tui_value.Utc_day.of_moment start)
 
-let time_header = function
-  | Series.Series_hour -> "HOUR"
-  | Series.Series_day -> "DAY (UTC)"
+let time_header ~ko = function
+  | Series.Series_hour -> if ko then "시각" else "HOUR"
+  | Series.Series_day -> if ko then "날짜(UTC)" else "DAY (UTC)"
 
 let totals buckets =
   List.fold_left
@@ -153,17 +156,17 @@ let note_gap = 2
 let widest_load_bar = 24
 let narrowest_load_bar = 6
 
-let span_name = function
-  | Last_day -> "last 24 hours"
-  | Last_week -> "7 UTC days"
-  | Last_fortnight -> "14 UTC days"
+let span_name ~ko = function
+  | Last_day -> if ko then "최근 24시간" else "last 24 hours"
+  | Last_week -> if ko then "최근 7일(UTC)" else "7 UTC days"
+  | Last_fortnight -> if ko then "최근 14일(UTC)" else "14 UTC days"
 
-let span_text window =
-  span_name window
+let span_text ~ko window =
+  span_name ~ko window
   ^
   match width window with
-  | Series.Series_hour -> " · per hour"
-  | Series.Series_day -> " · per UTC day"
+  | Series.Series_hour -> if ko then " · 시간별" else " · per hour"
+  | Series.Series_day -> if ko then " · 일별(UTC)" else " · per UTC day"
 
 (* The first of the wordings that fits [cells]; the last one is cut to [cells]
    when it does not fit either. *)
@@ -177,31 +180,41 @@ let rec first_within ~cells wording rest =
 (* The longest wording that fits goes first. The time the numbers are from
    stays in every wording: the answer can be a read behind the store, and this
    time is what says by how much. *)
-let heading ~cells t =
-  let time =
-    "as of "
-    ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ())
-        t.series.Series.tsr_generated_at
+let heading ~ko ~cells t =
+  let stamp =
+    Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ())
+      t.series.Series.tsr_generated_at
   in
+  let time = if ko then stamp ^ " 기준" else "as of " ^ stamp in
+  let title = if ko then "도구 호출" else "Tool calls" in
   first_within ~cells
-    (Printf.sprintf " Tool calls (%s) · %s" (span_text t.window) time)
-    [ Printf.sprintf " Tool calls (%s) · %s" (span_name t.window) time;
-      Printf.sprintf " Tool calls · %s" time;
+    (Printf.sprintf " %s (%s) · %s" title (span_text ~ko t.window) time)
+    [ Printf.sprintf " %s (%s) · %s" title (span_name ~ko t.window) time;
+      Printf.sprintf " %s · %s" title time;
       " " ^ time ]
 
-let note_lines ~days note =
+let note_lines ?(ko = false) ~days note =
   let span =
     match window_of_days days with
-    | Some window -> span_text window
-    | None -> Printf.sprintf "%d UTC days" days
+    | Some window -> span_text ~ko window
+    | None ->
+        if ko then Printf.sprintf "최근 %d일(UTC)" days
+        else Printf.sprintf "%d UTC days" days
   in
-  [ Printf.sprintf " Tool calls (%s) · %s" span note ]
+  let title = if ko then "도구 호출" else "Tool calls" in
+  [ Printf.sprintf " %s (%s) · %s" title span note ]
 
-let totals_line ~calls ~failures ~deferred =
-  Printf.sprintf " %s calls · %s failed (%s)%s" (grouped_digits calls)
-    (grouped_digits failures)
-    (percent_text ~failures ~calls)
-    (if deferred = 0 then "" else Printf.sprintf " · %s deferred" (grouped_digits deferred))
+let totals_line ~ko ~calls ~failures ~deferred =
+  if ko then
+    Printf.sprintf " 호출 %s건 · 실패 %s건 (%s)%s" (grouped_digits calls)
+      (grouped_digits failures)
+      (percent_text ~failures ~calls)
+      (if deferred = 0 then "" else Printf.sprintf " · 보류 %s건" (grouped_digits deferred))
+  else
+    Printf.sprintf " %s calls · %s failed (%s)%s" (grouped_digits calls)
+      (grouped_digits failures)
+      (percent_text ~failures ~calls)
+      (if deferred = 0 then "" else Printf.sprintf " · %s deferred" (grouped_digits deferred))
 
 (* One glyph per bucket, scaled to the row's own largest value. A bucket in
    which every call failed is red top to bottom, so an outage reads as one
@@ -314,7 +327,7 @@ let ruler ~span ~series_width buckets =
 (* The [index]th text row of every column. *)
 let row_of columns index = List.map (fun column -> List.nth column index) columns
 
-let chart_lines ~tall ~cells t =
+let chart_lines ~ko ~tall ~cells t =
   let buckets = t.series.Series.tsr_buckets in
   let series_width = t.series.Series.tsr_width in
   let count = List.length buckets in
@@ -327,12 +340,14 @@ let chart_lines ~tall ~cells t =
   in
   let _, p95_cells = chart_cells ~tall ~sample:p95_sample ~series:Masc_tui_theme.Latency buckets in
   let count_note maximum =
-    if maximum <= 0 then "none" else Printf.sprintf "max %d%s" maximum per
+    if maximum <= 0 then (if ko then "없음" else "none")
+    else if ko then Printf.sprintf "최대 %d%s" maximum per
+    else Printf.sprintf "max %d%s" maximum per
   in
   let rows =
-    [ ("Calls", calls_cells, count_note calls_maximum);
-      ("Failed", failed_cells, count_note failed_maximum);
-      ("p95", p95_cells, "worst " ^ milliseconds_text (worst_p95_ms buckets)) ]
+    [ ((if ko then "호출" else "Calls"), calls_cells, count_note calls_maximum);
+      ((if ko then "실패" else "Failed"), failed_cells, count_note failed_maximum);
+      ("p95", p95_cells, (if ko then "최장 " else "worst ") ^ milliseconds_text (worst_p95_ms buckets)) ]
   in
   let note_cells =
     List.fold_left
@@ -398,7 +413,7 @@ let reading_of series_width (bucket : Series.tool_series_bucket) =
           percent_text ~failures:active.Series.tsc_failures ~calls:active.Series.tsc_calls;
         p95 = milliseconds_text active.Series.tsc_p95_ms }
 
-let reading_cells ~series_width ~widths ~with_rate reading =
+let reading_cells ~ko ~series_width ~widths ~with_rate reading =
   let time_width, calls_width, failed_width, rate_width, p95_width = widths in
   let idle, every_failed =
     match reading.activity with
@@ -407,14 +422,14 @@ let reading_cells ~series_width ~widths ~with_rate reading =
   in
   let dim = if idle then Theme.recede () else "" in
   let failure_style = if every_failed then Theme.bad () else dim in
-  [ Table.cell ~style:dim ~header:(time_header series_width) ~width:time_width
+  [ Table.cell ~style:dim ~header:(time_header ~ko series_width) ~width:time_width
       reading.time;
-    Table.cell ~style:dim ~align:Table.Right ~header:"CALLS" ~width:calls_width
+    Table.cell ~style:dim ~align:Table.Right ~header:(if ko then "호출" else "CALLS") ~width:calls_width
       reading.calls;
-    Table.cell ~style:failure_style ~align:Table.Right ~header:"FAILED"
+    Table.cell ~style:failure_style ~align:Table.Right ~header:(if ko then "실패" else "FAILED")
       ~width:failed_width reading.failed ]
   @ (if with_rate then
-       [ Table.cell ~style:failure_style ~align:Table.Right ~header:"FAIL%"
+       [ Table.cell ~style:failure_style ~align:Table.Right ~header:(if ko then "실패%" else "FAIL%")
            ~width:rate_width reading.rate ]
      else [])
   @ [ Table.cell ~style:dim ~align:Table.Right ~header:"P95" ~width:p95_width
@@ -441,7 +456,7 @@ let load_bar ~cells ~maximum_calls reading =
 
 (* The newest bucket first: what the operator came to read is at the top, and
    the chart above already runs oldest to newest. *)
-let table_lines ~cells t =
+let table_lines ~ko ~cells t =
   let series_width = t.series.Series.tsr_width in
   let readings =
     List.rev_map (reading_of series_width) t.series.Series.tsr_buckets
@@ -449,22 +464,22 @@ let table_lines ~cells t =
   let widest header pick =
     List.fold_left
       (fun widest reading -> max widest (Layout.display_width (pick reading)))
-      (String.length header) readings
+      (Layout.display_width header) readings
   in
   let widths =
-    ( widest (time_header series_width) (fun reading -> reading.time),
-      widest "CALLS" (fun reading -> reading.calls),
-      widest "FAILED" (fun reading -> reading.failed),
-      widest "FAIL%" (fun reading -> reading.rate),
+    ( widest (time_header ~ko series_width) (fun reading -> reading.time),
+      widest (if ko then "호출" else "CALLS") (fun reading -> reading.calls),
+      widest (if ko then "실패" else "FAILED") (fun reading -> reading.failed),
+      widest (if ko then "실패%" else "FAIL%") (fun reading -> reading.rate),
       widest "P95" (fun reading -> reading.p95) )
   in
   let inner = cells - String.length margin in
-  let cells_for ~with_rate = reading_cells ~series_width ~widths ~with_rate in
+  let cells_for ~with_rate = reading_cells ~ko ~series_width ~widths ~with_rate in
   match readings with
   | [] -> []
   | first :: _ ->
-      let open_tag = " open" in
-      let open_cells = String.length open_tag in
+      let open_tag = if ko then " 진행 중" else " open" in
+      let open_cells = Layout.display_width open_tag in
       let with_rate = Table.used_width (cells_for ~with_rate:true first) <= inner in
       let used = Table.used_width (cells_for ~with_rate first) in
       let bar_cells = min widest_load_bar (inner - used - Table.cell_gap - open_cells) in
@@ -483,7 +498,7 @@ let table_lines ~cells t =
       let gap = String.make Table.cell_gap ' ' in
       let header =
         margin ^ Theme.recede () ^ Table.header_row (cells_for ~with_rate first)
-        ^ (if show_bar then gap ^ "LOAD" else "")
+        ^ (if show_bar then gap ^ (if ko then "부하" else "LOAD") else "")
         ^ Ansi.reset
       in
       let row index reading =
@@ -497,28 +512,36 @@ let table_lines ~cells t =
    being its rows: every row has its own scale, what the dot is and what red
    is. The newest bucket being open is left to the wording with room for it,
    because the table marks that row [open] too. *)
-let legend_wordings =
-  [ [ Printf.sprintf "Each row is scaled to its own largest bucket; %s = no call ran"
-        no_call_mark;
-      "Red = every call in the bucket failed; the newest bucket is still open" ];
-    [ Printf.sprintf "Each row is scaled to its own max; %s = no call; red = every call failed"
-        no_call_mark ] ]
+let legend_wordings ~ko =
+  if ko then
+    [ [ Printf.sprintf "각 줄은 자체 최대 구간 기준 · %s = 호출 없음" no_call_mark;
+        "빨강 = 구간 내 호출 전체 실패 · 최신 구간은 집계 진행 중" ];
+      [ Printf.sprintf "줄별 자체 최대 기준 · %s = 없음 · 빨강 = 전체 실패" no_call_mark ] ]
+  else
+    [ [ Printf.sprintf "Each row is scaled to its own largest bucket; %s = no call ran"
+          no_call_mark;
+        "Red = every call in the bucket failed; the newest bucket is still open" ];
+      [ Printf.sprintf "Each row is scaled to its own max; %s = no call; red = every call failed"
+          no_call_mark ] ]
 
-let legend_shortest =
-  Printf.sprintf "Own scale per row; %s = no call; red = all failed" no_call_mark
+let legend_shortest ~ko =
+  if ko then
+    Printf.sprintf "줄별 기준 · %s = 없음 · 빨강 = 전체 실패" no_call_mark
+  else
+    Printf.sprintf "Own scale per row; %s = no call; red = all failed" no_call_mark
 
 (* The first wording with no more than [at_most] rows, all within [cells]. A
    width that none of them fits gets the shortest one, cut. *)
-let legend ~cells ~at_most =
+let legend ~ko ~cells ~at_most =
   let room = max 0 (cells - String.length margin) in
   let fits rows =
     List.length rows <= at_most
     && List.for_all (fun row -> Layout.display_width row <= room) rows
   in
   let rows =
-    match List.find_opt fits legend_wordings with
+    match List.find_opt fits (legend_wordings ~ko) with
     | Some rows -> rows
-    | None -> [ Layout.truncate_end room legend_shortest ]
+    | None -> [ Layout.truncate_end room (legend_shortest ~ko) ]
   in
   List.map (fun row -> Theme.recede () ^ margin ^ row ^ Ansi.reset) rows
 
@@ -529,18 +552,21 @@ let legend ~cells ~at_most =
    richer one could have used. The smallest is drawn even when it does not
    fit; the screen then scrolls the section and says so on its last row. The
    table never gives way: every arrangement keeps all of it. *)
-let lines ~width:cells ~rows t =
+let lines ?(ko = false) ~width:cells ~rows t =
   let calls, failures, deferred = totals t.series.Series.tsr_buckets in
-  let heading = heading ~cells t in
-  if calls = 0 then [ heading; " No tool call ran in this window" ]
+  let heading = heading ~ko ~cells t in
+  if calls = 0 then
+    [ heading
+    ; if ko then " 이 기간에 실행된 도구 호출이 없습니다"
+      else " No tool call ran in this window" ]
   else
-    let top = [ heading; totals_line ~calls ~failures ~deferred ] in
-    let table = table_lines ~cells t in
+    let top = [ heading; totals_line ~ko ~calls ~failures ~deferred ] in
+    let table = table_lines ~ko ~cells t in
     let arrange ~tall ~gap_above ~gap_below ~legend_rows =
       top
       @ (if gap_above then [ "" ] else [])
-      @ chart_lines ~tall ~cells t
-      @ legend ~cells ~at_most:legend_rows
+      @ chart_lines ~ko ~tall ~cells t
+      @ legend ~ko ~cells ~at_most:legend_rows
       @ (if gap_below then [ "" ] else [])
       @ table
     in
@@ -558,28 +584,32 @@ let lines ~width:cells ~rows t =
     | None -> smallest ()
 
 (* The Dashboard's row names its window in as few cells as the row can spare. *)
-let short_span = function
-  | Last_day -> "24h"
-  | Last_week -> "7d"
-  | Last_fortnight -> "14d"
+let short_span ~ko = function
+  | Last_day -> if ko then "24시간" else "24h"
+  | Last_week -> if ko then "7일" else "7d"
+  | Last_fortnight -> if ko then "14일" else "14d"
 
-let summary_label window = Printf.sprintf " Tool calls %s" (short_span window)
+let summary_label ~ko window =
+  Printf.sprintf " %s %s" (if ko then "도구 호출" else "Tool calls") (short_span ~ko window)
 let summary_gap = "  "
 
 (* The label, the calls as one glyph per bucket, then the total and the failed
    calls. The chart goes first when the row is too narrow for it, then the
    rest is cut. *)
-let summary_line ~cells t =
-  let label = summary_label t.window in
+let summary_line ?(ko = false) ~cells t =
+  let label = summary_label ~ko t.window in
   let buckets = t.series.Series.tsr_buckets in
   let calls, failures, _deferred = totals buckets in
   if calls = 0 then
     Theme.recede ()
-    ^ Layout.truncate_end cells (label ^ summary_gap ^ "no calls")
+    ^ Layout.truncate_end cells (label ^ summary_gap ^ (if ko then "호출 없음" else "no calls"))
     ^ Ansi.reset
   else
     let figures =
-      Printf.sprintf "%s · %s failed" (grouped_digits calls) (grouped_digits failures)
+      if ko then
+        Printf.sprintf "%s건 · 실패 %s" (grouped_digits calls) (grouped_digits failures)
+      else
+        Printf.sprintf "%s · %s failed" (grouped_digits calls) (grouped_digits failures)
     in
     let without_chart =
       Layout.display_width label + String.length summary_gap
@@ -600,7 +630,7 @@ let summary_line ~cells t =
       ^ Layout.truncate_end cells (label ^ summary_gap ^ figures)
       ^ Ansi.reset
 
-let summary_note ~cells window note =
+let summary_note ?(ko = false) ~cells window note =
   Theme.recede ()
-  ^ Layout.truncate_end cells (summary_label window ^ summary_gap ^ note)
+  ^ Layout.truncate_end cells (summary_label ~ko window ^ summary_gap ^ note)
   ^ Ansi.reset

@@ -8,7 +8,7 @@ open Tool_args
 
 module String_map = Map.Make (String)
 
-(* RFC-0189 PR-1b.2 — handlers in this module return the typed
+(* Handlers in this module return the typed
    [Tool_result.result] variant directly. *)
 
 let attachment_error ~tool_name ~start_time error : Tool_result.result =
@@ -572,9 +572,8 @@ let with_thread_position json fields =
 (* What the write answers with. The writer sent [content] in this very call, so
    the text is already in its context, and the board stores it as sent. The
    answer names the comment and says where it landed, and leaves the text out.
-   docs/evidence/board-comment-result-2026-11 counts it in the tool-call
-   ledger: the text was 79.3% of the answer bytes (2026-11-02T00:00Z to
-   11-09T10:30Z). *)
+   In the tool-call ledger the text was 79.3% of the answer bytes
+   (2026-11-02T00:00Z to 11-09T10:30Z). *)
 let comment_acknowledgement (comment : Board.comment) =
   match Board.comment_to_yojson comment with
   | `Assoc fields -> `Assoc (List.remove_assoc "content" fields)

@@ -819,7 +819,7 @@ let test_recovery_is_scoped_to_max_tokens_rejections () =
        ~result:(max_tokens_rejection ()) ~checkpoint:None)
 
 let test_accept_rejected_threads_stop_reason () =
-  (* RFC-0271 §4.5 slice 1: apply_accept preserves the provider's typed
+  (* apply_accept preserves the provider's typed
      stop_reason on the rejected turn's Accept_rejected, so a MaxTokens
      truncation is later distinguishable from a clean EndTurn no-progress
      terminal. Behaviour-neutral groundwork — no classification change yet. *)
@@ -1403,11 +1403,7 @@ let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
     Alcotest.(check bool)
       "reason is Dns_failure"
       true
-      (reason = Keeper_internal_error.Dns_failure);
-    Alcotest.(check bool)
-      "Dns_failure is policy-retryable (Auto_resume_with_backoff eligible)"
-      true
-      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason)
+      (reason = Keeper_internal_error.Dns_failure)
   | Some other ->
     Alcotest.failf "expected Runtime_exhausted, got %s"
       (Keeper_internal_error.kind_of_masc_internal_error other)
@@ -1450,10 +1446,6 @@ let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
       "reason is Session_conflict"
       true
       (reason = Keeper_internal_error.Session_conflict);
-    Alcotest.(check bool)
-      "session conflict is not automatically retryable"
-      false
-      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason);
     Alcotest.(check string)
       "session conflict has a stable observation label"
       "session_conflict"

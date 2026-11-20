@@ -12,7 +12,6 @@ related: ["operator-quiz-lane"]
 
 - 상태: Draft. 운영자 결정 넷이 남았다(§9). 2026-11-13 적대 리뷰의 지적을 본문에 반영했다(§12).
 - 운영자 요청(2026-11-13, Claude Code 세션, 원문): "이 제품을 분석하고 장점과 매커니즘을 확인한 다음 Lane Addon 스타일로 우리 스타일로 masc 로 체득하고싶다. 범위를 가장 넓게 바라보고 빠르게 적용할 수 있는 부분부터 흡수해나가자." 대상 제품은 OpenMAIC 다.
-- 조사: [OpenMAIC 메커니즘 조사](../research/2026-11-13-openmaic-mechanisms-and-lane-addon-absorption.md). 이 RFC 는 그 문서 §6 의 1번이다.
 - 좌표는 `71626e7e1d80` 기준 `파일:줄` 이다. §11 에 읽은 범위를 적었다.
 
 ## 0. 요약

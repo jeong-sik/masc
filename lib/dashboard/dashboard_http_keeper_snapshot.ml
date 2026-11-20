@@ -79,8 +79,8 @@ type system_prompt_preview_error =
    decode and whose subject the roster holds, and goes on without the rest,
    so the preview is where an operator sees which line is missing and why:
    [rejected_lines] did not decode, [isolated_lines] decoded but name a
-   subject outside the roster and withhold the article ids they touch
-   (RFC-0504 §2.4). Read separately from the prompt build: an unreadable
+   subject outside the roster and withhold the article ids they touch.
+   Read separately from the prompt build: an unreadable
    answer here is this read's, not the prompt's. *)
 let constitution_ledger_json = function
   | Ok (ledger : World_constitution_store.diagnostics) ->
@@ -328,7 +328,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
         ]
       in
       let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in
-      (* RFC-0457: an assignment names a declared [runtime.lanes.<id>] lane or
+      (* An assignment names a declared [runtime.lanes.<id>] lane or
          a runtime, and [Runtime.resolve_assignment] tries the lanes first.
          They are two different things to pick, so they travel as two lists:
          a route that is a declared lane is never carried as a runtime. *)
@@ -346,7 +346,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
         in
         List.sort_uniq String.compare with_current
       in
-      (* RFC-0149 §3.3 — Result-returning resolver: on [Error] the
+      (* Result-returning resolver: on [Error] the
          canonical field surfaces as JSON [null] (parse-don't-validate
          honest signal) instead of the silent [Keeper_turn] rewrite the
          legacy live runtime-id facade would produce. *)

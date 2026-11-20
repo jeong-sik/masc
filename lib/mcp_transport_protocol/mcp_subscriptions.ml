@@ -181,20 +181,6 @@ let acknowledgement ~subscription_id filter =
            ]))
 ;;
 
-(* The JSON-RPC response to the long-lived request. A client that receives it
-   knows the subscription closed cleanly; a transport that drops without one
-   is an unexpected disconnect. *)
-let graceful_closure ~subscription_id =
-  Mcp_transport_protocol.make_response
-    ~id:subscription_id
-    (`Assoc
-      [ ( "_meta"
-        , `Assoc
-            [ (Mcp_transport_protocol.subscription_id_meta_key, subscription_id)
-            ] )
-      ])
-;;
-
 let reset_for_test () = with_lock (fun () ->
   Hashtbl.iter (fun _ entry -> Atomic.set entry.active false) entries;
   Hashtbl.reset entries)

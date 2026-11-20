@@ -421,7 +421,7 @@ let test_scope_cannot_escalate_role () =
     ]
 ;;
 
-(* RFC play-link-for-the-shared-machine: a Player credential is an invite
+(* A Player credential is an invite
    to the shared machine and backs no OAuth grant, through the real issue,
    exchange and refresh path rather than [effective_role] alone. *)
 let test_a_player_credential_backs_no_grant () =

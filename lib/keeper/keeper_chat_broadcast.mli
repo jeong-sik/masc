@@ -11,7 +11,7 @@
     says a row is in; readers fetch the transcript to see it.
 
     [connector] is the row's surface lane label, absent when the row has
-    no surface. [audio] is the row's synthesized clip (RFC-0235 P1); the
+    no surface. [audio] is the row's synthesized clip; the
     dashboard decodes it into a typed record at the SSE edge and attaches
     a play button.
 

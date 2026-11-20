@@ -1,11 +1,11 @@
-(** Keeper_surface_post — act on one connected surface (RFC-0223 P4).
+(** Keeper_surface_post — act on one connected surface.
 
     Decision layer behind the [keeper_surface_post] tool: resolve which
     lane a post goes to, purely from the requested surface label, the
     optional channel id, the typed continuation channel, and the keeper's
     current Discord/Slack bindings.
     Posting to a surface the keeper is not bound to is an error, not a
-    no-op (RFC-0223 §4 P4). All transport I/O stays in the runtime
+    no-op. All transport I/O stays in the runtime
     handler. *)
 
 type rich_block = Yojson.Safe.t

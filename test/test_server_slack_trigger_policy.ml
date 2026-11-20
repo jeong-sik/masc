@@ -1,4 +1,4 @@
-(* RFC-0317 / masc#29078 — the Slack gateway's trigger-policy resolution must
+(* masc#29078 — the Slack gateway's trigger-policy resolution must
    delegate to the single canonical grammar in [Slack_gateway_state] and apply
    the same precedence and failure posture as the Discord sibling
    ([test_server_discord_trigger_policy]).

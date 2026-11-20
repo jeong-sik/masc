@@ -30,7 +30,7 @@ val state_bytes_per_piece : int
 (** Most bytes of candidate lines in one request. Jev refused a 159.7 KB
     [state] and accepted 77.9 KB and 82.1 KB ones, so the starting value is
     below the largest accepted [state] (scripts/keeper-recall-jev-probe.py,
-    evidence in docs/evidence/keeper-recall-jev-probe-2026-10-28). A [state]
+    2026-10-28). A [state]
     is a little larger than its lines (separators, wrapper, purpose) and the
     request adds one question per candidate, so the lines are only part of
     what a request weighs. A KB is 1000 bytes. *)

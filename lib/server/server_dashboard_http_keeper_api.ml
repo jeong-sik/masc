@@ -497,7 +497,7 @@ let handle_keeper_get_subroutes state req request reqd =
   | Some Route.(Keeper (Memory_journal, name)) ->
     Memory_reads.handle_journal_get state req reqd name
   | Some Route.(Keeper (Operator_note, name)) -> (
-    (* RFC-0366. Read-only here: the operator asks whether a note is pending or
+    (* Read-only here: the operator asks whether a note is pending or
        which turn consumed it. The write surface belongs to the operator control
        plane and is a separate change. *)
     (match
@@ -662,7 +662,7 @@ let handle_keeper_get_subroutes state req request reqd =
     in
     Http.Response.json_value ~compress:true ~request:req json reqd
   | Some Route.(Keeper (Composite, name)) -> (
-    (* RFC-0003 §7: composite lifecycle snapshot derived from the
+    (* Composite lifecycle snapshot derived from the
        registry entry via the [Keeper_composite_observer] pure
        projection. No mutation, no I/O, no provider/token access. *)
     let config = Mcp_server.workspace_config state in

@@ -164,7 +164,7 @@ let test_row_carrying_a_retired_key_is_refused () =
     retired_post_keys
 ;;
 
-(* The posts file is the board's one snapshot (RFC-0091). A size cap used to
+(* The posts file is the board's one snapshot. A size cap used to
    rename it to [.1] once it passed 10 MiB, while the loader reads only
    [board_posts.jsonl]; a restart before the next full rewrite came up with no
    posts (2026-09-19). The long post puts the file past that old cap. *)

@@ -2896,7 +2896,7 @@ let test_append_archive_tasks_creates_the_archive () =
 ;;
 
 (* ============================================================ *)
-(* RFC-0323 W2: predecessor_task_id (linked re-run tasks)        *)
+(* predecessor_task_id (linked re-run tasks)                     *)
 (* ============================================================ *)
 
 let predecessor_of config task_id =
@@ -3638,7 +3638,7 @@ let () =
             `Quick
             test_a_task_without_skills_reads_back_empty
         ] )
-    ; (* === RFC-0323 W2: predecessor_task_id === *)
+    ; (* === predecessor_task_id === *)
       ( "predecessor"
       , [ Alcotest.test_case "unknown rejected" `Quick test_predecessor_unknown_rejected
         ; Alcotest.test_case

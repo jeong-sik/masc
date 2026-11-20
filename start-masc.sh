@@ -1,7 +1,6 @@
 #!/bin/bash
 # MASC MCP Server (OCaml) - Shared/full-runtime start script (HTTP/SSE default)
-# Usage: ./start-masc.sh [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]
-# Note: Eio is the default runtime; --lwt exits with an error.
+# Usage: ./start-masc.sh [--print-port] [--stdio] [--http] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]
 # For dir-local local-dev startup, prefer scripts/run-local.sh.
 
 set -e
@@ -164,10 +163,6 @@ build_dune_target_with_lock() {
     local label="$2"
     local build_status=0
     if ! acquire_build_lock; then
-        if is_truthy "${MASC_ALLOW_STALE_EXE_ON_BUILD_LOCK:-0}"; then
-            echo "Warning: proceeding without rebuilding $label because MASC_ALLOW_STALE_EXE_ON_BUILD_LOCK=1." >&2
-            return 0
-        fi
         echo "Error: unable to acquire build lock for $label; refusing to continue with a stale or missing executable." >&2
         return 1
     fi
@@ -462,11 +457,7 @@ restore_env_override() {
     fi
 }
 
-# A workspace no longer carries its own env file. `.masc/config/.env.local` was
-# read here and written by quickstart.sh, which put provider keys on disk in a
-# second place the running server did not read -- settings live in TOML and
-# credentials live in the environment the server is started in. The repo-root
-# .env/.env.local below are a developer's own shell files and stay.
+# The repo-root .env/.env.local below are a developer's own shell files.
 
 REPO_ENV_ROOT="$(resolve_repo_env_root)"
 
@@ -547,39 +538,14 @@ fi
 
 raise_open_file_limit() {
     # Multi-keeper local runs can fan out across many LLM/provider CLIs,
-    # sockets, logs, and watcher handles. Keep the default high enough for
-    # 50-ish concurrent sessions while still allowing operators to override.
-    local desired="${MASC_NOFILE_TARGET:-245760}"
-    local current hard target
-
-    case "$desired" in
-        max|hard)
-            desired=""
-            ;;
-    esac
-
-    if [ -z "$desired" ]; then
-        hard="$(ulimit -Hn 2>/dev/null || echo "")"
-        if [[ "$hard" =~ ^[0-9]+$ ]]; then
-            desired="$hard"
-        else
-            desired="${MASC_NOFILE_UNLIMITED_TARGET:-245760}"
-        fi
-    fi
-
-    if ! [[ "$desired" =~ ^[0-9]+$ ]]; then
-        echo "Warning: ignoring invalid MASC_NOFILE_TARGET=$desired" >&2
-        return 0
-    fi
+    # sockets, logs, and watcher handles. Raise the soft limit high enough for
+    # 50-ish concurrent sessions.
+    local target=245760
+    local current
 
     current="$(ulimit -Sn 2>/dev/null || ulimit -n 2>/dev/null || echo "")"
     if ! [[ "$current" =~ ^[0-9]+$ ]]; then
         return 0
-    fi
-
-    target="$desired"
-    if [[ "$hard" =~ ^[0-9]+$ ]] && [ "$hard" -lt "$target" ]; then
-        target="$hard"
     fi
 
     if [ "$current" -ge "$target" ]; then
@@ -604,12 +570,10 @@ PORT="${MASC_PORT:-8935}"
 PORT_EXPLICIT=0
 PRINT_PORT_ONLY=0
 WORKTREE_PORT_HINT=""
-HTTP_MODE="${MASC_HTTP:-true}"
+HTTP_MODE="true"
 DEFAULT_BASE_PATH="$(default_base_path)"
 BASE_PATH="${MASC_BASE_PATH:-$DEFAULT_BASE_PATH}"
 HOST="${MASC_HOST:-127.0.0.1}"
-# NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
-EIO_MODE="true"
 
 if [ -n "${MASC_PORT:-}" ]; then
     PORT_EXPLICIT=1
@@ -630,15 +594,6 @@ while [[ $# -gt 0 ]]; do
             HTTP_MODE="false"
             shift
             ;;
-        --eio)
-            EIO_MODE="true"
-            shift
-            ;;
-        --lwt)
-            echo "Error: Lwt runtime is deprecated since 2026-01." >&2
-            echo "Please use Eio (default). Lwt support has been removed." >&2
-            exit 1
-            ;;
         --port)
             PORT="$2"
             PORT_EXPLICIT=1
@@ -655,9 +610,8 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]" >&2
+            echo "Usage: $0 [--print-port] [--stdio] [--http] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]" >&2
             echo "Dir-local local-dev launcher: scripts/run-local.sh" >&2
-            echo "Note: Eio is the default runtime; --lwt exits with an error." >&2
             exit 1
             ;;
     esac
@@ -741,34 +695,13 @@ fi
 # HTTP mode starts it in the background by default; stdio skips it entirely.
 build_dashboard_spa
 
-# Resolve executable path
-# Priority: 1. Release binary  2. Local build  3. Workspace build  4. Installed  5. Auto-download
-RELEASE_BINARY="$SCRIPT_DIR/masc-macos-arm64"
-WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/masc/bin/main.exe"
-LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
-INSTALLED_EXE="$(command -v masc || true)"
-# Eio-based server (main_eio.exe)
+# Resolve executable path: local build first, then the workspace build.
 WORKSPACE_EIO_EXE="$SCRIPT_DIR/../_build/default/masc/bin/main_eio.exe"
 LOCAL_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
 WORKSPACE_STDIO_EIO_EXE="$SCRIPT_DIR/../_build/default/masc/bin/main_stdio_eio.exe"
 LOCAL_STDIO_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_stdio_eio.exe"
-MASC_EXE=""
 MASC_EIO_EXE=""
 MASC_STDIO_EIO_EXE=""
-
-# 1. Pre-downloaded release binary (fastest, no build needed)
-if [ -x "$RELEASE_BINARY" ]; then
-    MASC_EXE="$RELEASE_BINARY"
-# 2. Local build
-elif [ -x "$LOCAL_EXE" ]; then
-    MASC_EXE="$LOCAL_EXE"
-# 3. Workspace build
-elif [ -x "$WORKSPACE_EXE" ]; then
-    MASC_EXE="$WORKSPACE_EXE"
-# 4. System-installed
-elif [ -n "$INSTALLED_EXE" ]; then
-    MASC_EXE="$INSTALLED_EXE"
-fi
 
 if [ -x "$LOCAL_EIO_EXE" ]; then
     MASC_EIO_EXE="$LOCAL_EIO_EXE"
@@ -782,7 +715,7 @@ elif [ -x "$WORKSPACE_STDIO_EIO_EXE" ]; then
     MASC_STDIO_EIO_EXE="$WORKSPACE_STDIO_EIO_EXE"
 fi
 
-# 5. Build Eio version if not found (Lwt deprecated, download disabled)
+# Build the server when no executable was found.
 if [ "$HTTP_MODE" = "true" ] && [ -z "$MASC_EIO_EXE" ]; then
     echo "Building MASC MCP server from source..." >&2
     if ! command -v dune >/dev/null 2>&1; then
@@ -824,8 +757,7 @@ if [ "$HTTP_MODE" = "false" ] && [ -z "$MASC_STDIO_EIO_EXE" ]; then
     fi
 fi
 
-# Rebuild Eio version if sources are newer than the executable (avoids stale binary runs)
-# NOTE: Lwt version (main.exe) is deprecated - Eio is now the default
+# Rebuild when sources are newer than the executable (avoids stale binary runs)
 if [ "$HTTP_MODE" = "true" ] && [ -n "$MASC_EIO_EXE" ] \
     && command -v dune >/dev/null 2>&1; then
     if find "$SCRIPT_DIR/bin" "$SCRIPT_DIR/lib" \
@@ -861,7 +793,7 @@ fi
 # Default behavior is fail-fast on conflict to prevent duplicate server startup.
 # To preserve legacy behavior, set MASC_ALLOW_PORT_REUSE=1.
 wait_for_port() {
-    local port="$1" max_wait="${MASC_PORT_WAIT_MAX_SEC:-10}" waited=0
+    local port="$1" max_wait=10 waited=0
     while lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1; do
         if [ "$waited" -ge "$max_wait" ]; then
             local listener_pid listener_cmd
@@ -895,39 +827,10 @@ if [ "$HTTP_MODE" = "true" ]; then
     fi
 fi
 
-# Select executable based on EIO_MODE
-SELECTED_EXE="$MASC_EXE"
-RUNTIME_NAME="Lwt"
-
-if [ "$EIO_MODE" = "true" ]; then
-    RUNTIME_NAME="Eio"
-    if [ "$HTTP_MODE" = "true" ] && [ -z "$MASC_EIO_EXE" ]; then
-        echo "Building MASC MCP server (Eio mode)..." >&2
-        if ! command -v dune >/dev/null 2>&1; then
-            echo "Error: dune not found. Cannot build Eio server." >&2
-            exit 1
-        fi
-        if build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
-            :
-        else
-            build_status=$?
-            echo "Error: Failed to build Eio server (status=$build_status)." >&2
-            exit "$build_status"
-        fi
-        if [ -x "$WORKSPACE_EIO_EXE" ]; then
-            MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
-        elif [ -x "$LOCAL_EIO_EXE" ]; then
-            MASC_EIO_EXE="$LOCAL_EIO_EXE"
-        else
-            echo "Error: Failed to build Eio server (main_eio.exe)." >&2
-            exit 1
-        fi
-    fi
-    if [ "$HTTP_MODE" = "true" ]; then
-        SELECTED_EXE="$MASC_EIO_EXE"
-    else
-        SELECTED_EXE="$MASC_STDIO_EIO_EXE"
-    fi
+if [ "$HTTP_MODE" = "true" ]; then
+    SELECTED_EXE="$MASC_EIO_EXE"
+else
+    SELECTED_EXE="$MASC_STDIO_EIO_EXE"
 fi
 
 # Port guard: abort if another process already holds the port (unless MASC_ALLOW_PORT_REUSE=1).
@@ -956,9 +859,8 @@ launch_from_base_path() {
     fi
 }
 
-# Eio server has different CLI format and is HTTP-only
-if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
-    echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
+if [ "$HTTP_MODE" = "true" ]; then
+    echo "Starting MASC MCP server (HTTP mode)..." >&2
     echo "  Host: $HOST" >&2
     echo "  Port: $PORT" >&2
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
@@ -974,34 +876,13 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     launch_from_base_path "$SELECTED_EXE" start --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
-elif [ "$HTTP_MODE" = "true" ]; then
-    echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
-    echo "  Host: $HOST" >&2
-    echo "  Port: $PORT" >&2
-    echo "  Base path: $RESOLVED_BASE_PATH" >&2
-    if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then
-        echo "  Base path (input): $BASE_PATH" >&2
-    fi
-    echo "  Executable: $SELECTED_EXE" >&2
-    echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
-    if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
-        echo "  MCP endpoint: ${MASC_HTTP_BASE_URL%/}/mcp" >&2
-    else
-        echo "  MCP endpoint: /mcp (set MASC_HTTP_BASE_URL for an absolute origin)" >&2
-    fi
-    echo "  MCP Accept: application/json, text/event-stream" >&2
-    launch_from_base_path "$SELECTED_EXE" --http --port "$PORT" --path "$RESOLVED_BASE_PATH"
 else
-    echo "Starting MASC MCP server (stdio mode, $RUNTIME_NAME)..." >&2
+    echo "Starting MASC MCP server (stdio mode)..." >&2
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
     if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then
         echo "  Base path (input): $BASE_PATH" >&2
     fi
     echo "  Executable: $SELECTED_EXE" >&2
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
-    if [ "$EIO_MODE" = "true" ]; then
-        launch_from_base_path "$SELECTED_EXE" --base-path "$RESOLVED_BASE_PATH"
-    else
-        launch_from_base_path "$SELECTED_EXE" --stdio --path "$RESOLVED_BASE_PATH"
-    fi
+    launch_from_base_path "$SELECTED_EXE" --base-path "$RESOLVED_BASE_PATH"
 fi

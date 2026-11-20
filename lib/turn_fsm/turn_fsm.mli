@@ -6,7 +6,7 @@
 
     Formal contract: [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. The [@tla.*] /
     [@@deriving tla] annotations bind states + the transition matrix to that
-    spec; [test_keeper_turn_fsm_tla_parity] verifies parity. *)
+    spec. *)
 
 type cancel_reason =
   | Cancelled_supervisor_stop

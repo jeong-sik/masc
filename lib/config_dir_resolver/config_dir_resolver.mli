@@ -145,7 +145,7 @@ val keeper_toml_path_opt_for_base_path :
 (** [keeper_toml_path_opt_for_base_path ~base_path name] is
     {!keeper_toml_path_for_base_path} when that file exists. *)
 
-(** {1 .masc/ root sub-directory accessors (RFC-0121)}
+(** {1 .masc/ root sub-directory accessors}
 
     All non-config artifacts under [<base>/.masc/<sub>/] route through these
     helpers instead of hand-built base_path plus .masc child string-literals
@@ -194,15 +194,14 @@ val packages_dir : base_path:string -> string
 
 val constitution_dir : base_path:string -> string
 (** [<base_path>/.masc/constitution/]. Ledger of the articles this world's
-    keepers ratified for themselves (RFC-0442). One world's norms never reach
+    keepers ratified for themselves. One world's norms never reach
     another, so the path is base-path scoped like every other state directory
     here. *)
 
 val microvm_shim_dir : base_path:string -> string
 (** [<base_path>/.masc/microvm/shim/]. The static [masc-exec-shim] the
     operator installs for Apple [container] guests, and the config the
-    runtime writes beside it; mounted read-only into every guest
-    (RFC-0400). *)
+    runtime writes beside it; mounted read-only into every guest. *)
 
 val microvm_identity_dir : base_path:string -> backend:string -> string
 (** [<base_path>/.masc/microvm/identity/<backend>/]. The caller supplies the

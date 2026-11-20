@@ -1,4 +1,4 @@
-// Composite lifecycle SSE envelope signal (RFC-0003 §6 / PR#7060).
+// Composite lifecycle SSE envelope signal (PR#7060).
 //
 // The SSE stream emits [keeper_composite_changed] with a name + wall-clock
 // envelope whenever a registry mutation may have changed the composite

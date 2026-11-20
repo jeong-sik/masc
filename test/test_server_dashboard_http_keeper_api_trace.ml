@@ -884,8 +884,8 @@ let test_checkpoint_inventory_isolates_overflowing_bundle () =
   | _ -> fail "expected only the damaged archive in history_errors"
 ;;
 
-(* The rows come from the heads and the newest message with text
-   (RFC-0476 §3.5). The archive entry of the current checkpoint is not listed
+(* The rows come from the heads and the newest message with text.
+   The archive entry of the current checkpoint is not listed
    again. *)
 let test_checkpoint_inventory_rows_come_from_the_heads () =
   with_temp_dir @@ fun dir ->
@@ -1454,7 +1454,7 @@ let test_input_wait_inventory_refuses_unavailable_retained () =
   check_unavailable_inventory "retained_unavailable" (read ());
   replace_inventory_checkpoint_bytes retained "{invalid retained bytes";
   check_unavailable_inventory "retained_unavailable" (read ());
-  (* Other content under the same name (RFC-0476 §3.2). *)
+  (* Other content under the same name. *)
   replace_inventory_checkpoint_bytes retained
     (Masc_test_deps.checkpoint_head_bytes_with_field bytes "turn_count" (`Int 1000));
   check_unavailable_inventory "retained_unavailable" (read ());

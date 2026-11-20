@@ -149,9 +149,7 @@ stimulus identity. A missing/duplicate source or EOF without completion is not
 a successful full read. Source frames contain no placeholders for pending peers.
 The Questions pane uses this stream and admits each exact-answer source before
 its peers finish. Pending sources have separate state rather than invented empty
-or unavailable values. See the [stream source audit](../audits/2026-10-18-ask-followup-source-stream.md)
-and [TUI integration audit](../audits/2026-10-18-tui-ask-partial-followup.md) for
-source scope and unexecuted behavior limits.
+or unavailable values.
 
 The opt-in `answer_progress` response keeps canonical answer identity outside
 three independent source branches. `reaction_evidence` is either unavailable or
@@ -172,9 +170,6 @@ be displayed while wake/turn evidence is unavailable. Neither this independence
 nor Task phase proves answer consumption, causation or whole-work completion.
 Server and OCaml consumer use the nested reaction shape together; removed flat
 reaction clocks are not decoded as an empty source.
-
-Before/After and source-only limits:
-[independent evidence audit](../audits/2026-10-18-ask-followup-independent-evidence.md).
 
 ## Inspect the original question source in TUI
 

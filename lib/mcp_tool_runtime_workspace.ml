@@ -8,7 +8,7 @@ module Planning_eio = Task.Planning_eio
 
 open Mcp_tool_runtime_types
 
-(* RFC-0189 PR-2: lifecycle handlers return [Tool_result.result option]
+(* Lifecycle handlers return [Tool_result.result option]
    directly, matching the shared MCP runtime alias. *)
 
 let runtime_ok ~tool_name ~start_time body : Tool_result.result =
@@ -153,7 +153,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
             "masc_start failed while setting project scope: %s"
             (Mcp_server.workspace_switch_error_to_string error)))
   | Ok active_config ->
-    (* RFC-0393 D4: identity uniqueness is durable truth. An external agent
+    (* Identity uniqueness is durable truth. An external agent
        binding under a name that already names a Keeper would poison every
        ledger attribution for that Keeper, so the join is refused at this
        boundary. Keeper runtimes do not bind through masc_start. *)

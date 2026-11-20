@@ -45,7 +45,8 @@ type t =
       (** 400 [account_runtime_invalid]: the runtime of the account does not
           load from the configuration of the server. *)
   | Turn_refused of string
-      (** 403 [turn_refused]: the authorization log refused the turn. *)
+      (** 403 [turn_refused]: the judgment of the request refused the turn:
+          the log, or the home or the key the account was captured from. *)
   | Native_tools_refused of string
       (** 403 [native_tools_refused]: the client would start with tools that
           reach the homes of other people (plan D3c). *)

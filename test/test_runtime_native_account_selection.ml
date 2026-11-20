@@ -302,6 +302,24 @@ let with_file path body run =
     Out_channel.with_open_bin path (fun out -> output_string out body);
     run ())
 
+(* The environment of the two captures is equal, since the process has no
+   variable of the name. What the home asks for still tells them apart. *)
+let test_asked_names_are_identity () =
+  let asked = "MADE_UP_ABSENT_NAME" in
+  with_directory (fun home ->
+    with_env [asked, None] (fun () ->
+      let capture () =
+        match Runtime_official_account.capture ~client:Codex ~declaration:(Some home) with
+        | Ok selected -> selected | Error detail -> fail detail in
+      let asking_nothing = capture () in
+      let body = Printf.sprintf "[model_providers.made_up]\nname = \"made up\"\nenv_key = \"%s\"\n" asked in
+      with_file (Filename.concat home "config.toml") body (fun () ->
+        let asking = capture () in
+        check (list string) "the capture says which name the home asks for" [asked]
+          (Runtime_official_account.names_asked_by_the_home asking);
+        check bool "a home that asks for a name is not the account that asked for none" false
+          (Runtime_official_account.same asking_nothing asking))))
+
 let test_declared_codex_credentials () =
   with_directory (fun source -> with_directory (fun private_home ->
     let body = {|model_provider = "custom"
@@ -392,4 +410,5 @@ let () =
      test_case "Codex reload notices an inherited home change" `Quick (test_reload_identity Codex false);
      test_case "Claude reload notices captured credential changes" `Quick (test_reload_identity Claude true);
      test_case "Codex reload notices captured credential changes" `Quick (test_reload_identity Codex true);
-     test_case "private carrier preserves its invariants" `Quick test_carrier_invariants]]
+     test_case "private carrier preserves its invariants" `Quick test_carrier_invariants;
+     test_case "what a home asks for is part of the account" `Quick test_asked_names_are_identity]]

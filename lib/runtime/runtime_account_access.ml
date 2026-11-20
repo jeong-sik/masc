@@ -286,8 +286,9 @@ let own_home ~runtime_root provider_account_id claim =
 (* HIGH-RISK-UNREVIEWED: the environment of the process is the operator's.
    The configuration of a Codex home names variables its client takes from
    it ([Runtime_official_account.names_asked_by_the_home]), and the home of a
-   person is written by the client that person drives. So a client starts on
-   the home of a person only when the home asks for none. *)
+   person is written by the client that person drives. So the judgment
+   authorizes a client on the home of a person only when the home asks for
+   none. The client of a login does not pass here. *)
 let asks_for_nothing provider_account_id claim =
   match claim.asked_names with
   | [] -> Ok ()

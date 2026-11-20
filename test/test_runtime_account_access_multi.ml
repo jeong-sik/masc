@@ -483,6 +483,26 @@ let test_multi_account () =
                  label
                  (Access.refusal_to_string refusal))
           on_the_codex_home;
+        (* The home is judged before what it asks for, so the answer to
+           another person says nothing of the configuration of this home. *)
+        List.iter
+          (fun (label, request) ->
+             match codex_judged request alice_codex with
+             | Error (Access.Not_the_account_home account) ->
+               Alcotest.(check bool)
+                 (label ^ ": the refusal names the account that was asked for")
+                 true
+                 (Provider_account_id.equal account bob.account)
+             | Ok () ->
+               Alcotest.failf "%s on the Codex home of another person: authorized" label
+             | Error refusal ->
+               Alcotest.failf
+                 "%s on the Codex home of another person: refused for another reason: %s"
+                 label
+                 (Access.refusal_to_string refusal))
+          [ "another person's own account", own bob ()
+          ; "a turn of another person's Keeper", turn bob ()
+          ];
         allowed "a direct turn" (turn alice ~channel:Channel.Direct ()) alice_account;
         (* A turn that a personal access token asked for runs inside the scope
            of that token. *)

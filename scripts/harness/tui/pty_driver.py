@@ -9,8 +9,7 @@ and the answers the `Vte` gives to the TUI's terminal queries are written back.
 
 A key is a `Press`, bytes typed as they are, or a `Jump`, a command palette
 entry: `:` opens the palette, the entry is typed once its title is on screen,
-and Enter runs it. The palette title follows the TUI's language, Korean by
-default (`default_ui_language`), so either spelling counts as open
+and Enter runs it. The palette title is `Command palette` in both languages
 (bin/masc_tui_render_overlays.ml).
 
 `first_frame` waits for the TUI's first frame: every frame its presenter
@@ -38,9 +37,7 @@ EXEC_FAILED = 127
 RESTORED_SIGNALS = (signal.SIGPIPE, signal.SIGXFSZ)
 FRAME_START = b'\x1b[?7l'
 PALETTE_KEY = b':'
-# The palette's title in each language: the `say` pair that draws it in
-# bin/masc_tui_render_overlays.ml.
-PALETTE_TITLES = ('명령 팔레트', 'Command palette')
+PALETTE_TITLE = 'Command palette'
 ENTER = b'\r'
 KEY_GAP_S = 0.2
 KEY_QUIET_S = 0.3
@@ -200,8 +197,7 @@ def press(child: Child, vte: Vte, key: Key) -> Sent:
         case Jump(entry):
             os.write(child.fd, PALETTE_KEY)
             settle(child, vte, PALETTE_OPEN_QUIET_S, PALETTE_OPEN_LIMIT_S)
-            screen = vte.screen_text()
-            if not any(title in screen for title in PALETTE_TITLES):
+            if PALETTE_TITLE not in vte.screen_text():
                 return Sent(f':{entry}', False, 'palette-not-open')
             os.write(child.fd, entry.encode())
             settle(child, vte, PALETTE_TYPED_QUIET_S, PALETTE_TYPED_LIMIT_S)

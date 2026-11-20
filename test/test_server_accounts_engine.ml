@@ -236,8 +236,9 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
   let base = installation.base in
   (* Pre-seed operator auth/ credentials BEFORE starting the multi-account
      engine without placing either secret in process env, so we can prove BOTH:
-     1) multi-account boot leaves MASC_ADMIN_TOKEN and MASC_INTERNAL_MCP_TOKEN
-        absent from the process environment (CLI children cannot inherit them);
+     1) multi-account boot exports neither MASC_ADMIN_TOKEN nor
+        MASC_INTERNAL_MCP_TOKEN into the process environment, which test/dune
+        leaves empty (a value the shell set would stay);
      2) pre-seeded auth/ tokens are still rejected 401 Legacy_credential_forbidden
         by the account server gate. *)
   let preseeded_admin = "masc-preseeded-admin-token" in

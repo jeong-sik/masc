@@ -2,15 +2,18 @@
    get no token of the operator (RFC a-persons-keeper-runs-on-the-engine,
    S1, section 5). The engine of a multi-account installation does not
    export the admin token and the internal Keeper token
-   (Server_runtime_startup_credentials), but its process keeps them when the
-   shell that started it set them.
+   (Server_runtime_bootstrap, Server_runtime_startup_credentials), but its
+   process keeps them when the shell that started it set them.
 
-   Claude Code and Codex start the children of a person on an account they
-   capture (Runtime_official_account.capture, and capture_on_key for a key),
-   and Muse Code filters its login child by its own list. The cases call the
-   login environment of each client and capture_on_key. Codex also passes
-   the names the config.toml of its home lists; the home of each case is new
-   and lists none, as the login home of a person is.
+   Each child of Claude Code and Codex for a person takes the environment of
+   an account that Runtime_official_account captured: [capture] on a login,
+   as the login environment of each client does, and [capture_on_key] on a
+   key of Claude Code (a key account of Codex is refused). Muse Code filters
+   its login child by its own list. The cases call these four builders. The
+   capture of Codex also passes the names the config.toml of its home lists;
+   a turn or a check refuses a home that lists any
+   (Runtime_account_access, Home_asks_for_environment), and the login home
+   of a person is new and lists none, as the home of each case is.
 
    The process of the case holds a made-up value under both names. No child
    gets either name, and every child gets the PATH value of the process, so

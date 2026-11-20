@@ -149,11 +149,22 @@ let last_span (reading : Unread.reading) =
 
 let range_text ({ from; until } : Masc.Librarian_unit.range) = Printf.sprintf "%d-%d" from until
 
-let segment_text ({ slices; history; internal; chat; external_rows } : Unread.segment) =
-  Printf.sprintf "[%s] history %s internal %s chat %s external %s"
-    (String.concat " "
-       (List.map (fun ({ skip; take; _ } : Log.slice) -> Printf.sprintf "%d+%d" skip take) slices))
-    (range_text history) (range_text internal) (range_text chat) (range_text external_rows)
+let slices_text slices =
+  String.concat " " (List.map (fun ({ skip; take; _ } : Log.slice) -> Printf.sprintf "%d+%d" skip take) slices)
+;;
+
+let record_text : Unread.record -> string = function
+  | Checkpoint { slices; internal } ->
+    Printf.sprintf "checkpoint [%s] internal %s" (slices_text slices) (range_text internal)
+  | Official_files { history; internal } ->
+    Printf.sprintf "files history %s internal %s" (range_text history) (range_text internal)
+  | Every_record { slices; history; internal } ->
+    Printf.sprintf "all [%s] history %s internal %s" (slices_text slices) (range_text history)
+      (range_text internal)
+;;
+
+let segment_text ({ record; chat; external_rows } : Unread.segment) =
+  Printf.sprintf "%s chat %s external %s" (record_text record) (range_text chat) (range_text external_rows)
 ;;
 
 (* Offsets are counted from [base], so readings of logs with more lines
@@ -217,14 +228,14 @@ let test_unit_boundaries () =
   in
   check (list string) "each unit runs from where the one before it left to its own end"
     [ Printf.sprintf
-        "reset at %d: [] history 10-20 internal 20-40 chat 30-60 external 1-2; next 0/20"
+        "reset at %d: all [] history 10-20 internal 20-40 chat 30-60 external 1-2; next 0/20"
         first_reset
     ; Printf.sprintf
-        "turn %d closed at %d: unattributed [0+1] history 20-30 internal 40-60 chat 60-90 external \
-         2-3; own [1+2] history 30-40 internal 60-80 chat 90-120 external 3-4; next 4/40"
+        "turn %d closed at %d: unattributed all [0+1] history 20-30 internal 40-60 chat 60-90 \
+         external 2-3; own checkpoint [1+2] internal 60-80 chat 90-120 external 3-4; next 4/40"
         turn turn_closed
     ; Printf.sprintf
-        "reset at %d: [3+1] history 40-50 internal 80-100 chat 120-150 external 4-5; next 2/50"
+        "reset at %d: all [3+1] history 40-50 internal 80-100 chat 120-150 external 4-5; next 2/50"
         last_reset
     ; "log end"
     ]
@@ -282,7 +293,7 @@ let test_unit_with_no_item () =
   let (_ : int) = append log started in
   let empty_reset = append log (announced (mark 1) (cleared 1)) in
   let empty_reset_text =
-    Printf.sprintf "reset at %d: [] history 10-10 internal 20-20 chat 30-30 external 1-1; next 0/10"
+    Printf.sprintf "reset at %d: all [] history 10-10 internal 20-20 chat 30-30 external 1-1; next 0/10"
       empty_reset
   in
   let alone = read_ok log started_tail in
@@ -309,7 +320,7 @@ let test_unit_with_no_item () =
   let before_unannounced = read_ok log (committed_through (last_span with_turn)) in
   check (list string) "before an unannounced reset"
     [ Printf.sprintf
-        "reset at %d: [] history 20-20 internal 40-40 chat 60-60 external 2-2; next 0/20"
+        "reset at %d: all [] history 20-20 internal 40-40 chat 60-60 external 2-2; next 0/20"
         second_empty
     ; Printf.sprintf "unannounced reset at %d, read on from %d" unannounced_at log.rows_end
     ]
@@ -342,8 +353,8 @@ let test_reading_that_starts_inside_a_turn () =
     (reading_lines (read_ok log (committed_inside ~starts_at:first_span.next second_span)));
   check string "the first reading split the turn with a reset in it as no turn's"
     (Printf.sprintf
-       "turn %d closed at %d: unattributed [0+2] history 20-30 internal 40-60 chat 60-90 external \
-        2-3; own [] history 30-30 internal 60-60 chat 90-90 external 3-3; next 3/30"
+       "turn %d closed at %d: unattributed all [0+2] history 20-30 internal 40-60 chat 60-90 \
+        external 2-3; own files history 30-30 internal 60-60 chat 90-90 external 3-3; next 3/30"
        first first_span.line)
     (span_text first_span)
 ;;
@@ -373,8 +384,8 @@ let test_unit_after_a_session_change () =
   in
   check (list string) "the next turn holds the new session's files from their start"
     [ Printf.sprintf
-        "turn %d closed at %d: unattributed [] history 0-5 internal 0-7 chat 60-90 external 2-3; own \
-         [0+1] history 5-15 internal 7-17 chat 90-120 external 3-4; next 4/15"
+        "turn %d closed at %d: unattributed all [] history 0-5 internal 0-7 chat 60-90 external 2-3; \
+         own checkpoint [0+1] internal 7-17 chat 90-120 external 3-4; next 4/15"
         second second_closed
     ; "log end"
     ]

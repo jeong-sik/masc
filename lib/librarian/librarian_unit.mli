@@ -6,9 +6,10 @@
     [unattributed], after it is [own], and when a [Reset] followed that
     [Opened] everything is [unattributed]. A [Reset] unit is one segment.
     A question shows [unattributed] and then [own]. Inside one segment the
-    rows the other side sent come first, then the messages, in this order:
-    chat rows, external rows, Agent-Core messages in slice order,
-    official-client history rows, official-client internal rows.
+    rows the other side sent come first, then the conversation, in this
+    order: chat rows, external rows, then one record of the conversation
+    ({!Librarian_unread.record}): the Agent-Core messages in slice order, or
+    the official-client history rows and then its internal rows.
 
     A part of a unit that is not there is named the way the unit's line
     names it: a bundle slice, a range of one file's bytes, a range of

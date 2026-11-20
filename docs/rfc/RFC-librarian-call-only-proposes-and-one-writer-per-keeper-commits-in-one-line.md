@@ -379,8 +379,21 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 이 규칙이면 어느 head 가 닫은 메시지든 빠지지 않고 단위에 든다. 줄을 못 쓴 턴이 닫은 것, 늦게 들어온 저장, 꼬리 복구가 닫은 것도 같다.
 두 번 드는 것은 셋뿐이다. 지우기가 남긴 System 메시지(§5.6)가 하나다. 줄을 먼저 쓴 head 변경이 일어나지 않았을 때 그 줄의 `after` 와 `before` 사이가 둘이다. 알리지 않고 줄어든 head 가 그대로 둔 앞부분이 셋이다(§5.2). 지우기, recovering purge, session 을 지우는 정지가 줄을 먼저 쓴다(§5.2).
 
-단위 안의 것은 항목(item)으로 센다. 상대가 보낸 행이 먼저고 메시지가 그다음이다.
-보이는 순서는 `unattributed` 다음 `own` 이고, 구간 안은 chat 행, 외부 행, Agent-Core 메시지(slice 순서), official-client history 행, internal 행이다.
+단위 안의 것은 항목(item)으로 센다. 상대가 보낸 행이 먼저고 대화가 그다음이다.
+보이는 순서는 `unattributed` 다음 `own` 이고, 구간 안은 chat 행, 외부 행, 그다음 대화다.
+대화를 어느 기록에서 읽는지는 구간이 턴 하나의 것인지와 slice 가 정한다. 글을 맞춰 보지 않는다.
+
+| 구간 | slice 가 메시지를 가리키나 | 읽는 것 |
+|---|---|---|
+| `own` | 가리킨다 | Agent-Core 메시지(slice 순서), 그다음 internal 행 |
+| `own` | 가리키지 않는다 | history 행, 그다음 internal 행 |
+| `unattributed`, 알린 `Reset` | 따지지 않는다 | Agent-Core 메시지, history 행, internal 행 모두 |
+
+- **Agent Core 턴의 기록은 checkpoint 다.** 그 턴의 context runtime 은 history 파일에도 쓴다(`Keeper_context_core_history.history_path_for_source`). 직접 턴의 `Direct_user`·`Direct_assistant` 는 main 파일로 간다. checkpoint 가 그 둘을 다시 담으니 main 파일은 읽지 않는다. 둘 다 읽으면 한 단위에 같은 대화가 두 번 든다(#53607).
+- **내부 턴의 답은 internal 파일에만 있다.** checkpoint 는 내부 턴(`Internal_assistant`)의 마지막 답을 다시 보내지 않는다(`Keeper_replay_checkpoint`). tool 을 부른 내부 턴은 slice 가 메시지를 가리키지만, 답은 internal 파일에만 있다. 그래서 `own` 은 checkpoint 와 internal 행을 같이 읽는다.
+- **Agent Core 턴의 internal 행은 그 답뿐이다.** internal 파일에 가는 것은 `Internal_assistant` 답과 tool 관찰이다. tool 관찰은 official client 턴만 쓴다(`checkpoint_owner` 가 `Masc_agent_core` 이면 관찰 목록이 비어 있다).
+- official client 로 돈 턴은 Agent Core checkpoint 를 남기지 않는다(`Runtime_execution.checkpoint_owner`). 그 턴의 기록은 history 파일뿐이다. 메시지를 닫지 못한 Agent Core 턴도 history 파일만 남긴다. 둘 다 slice 가 메시지를 가리키지 않는다.
+- **턴이 여럿 섞일 수 있는 구간은 모두 읽는다.** `unattributed` 와 알린 `Reset` 의 구간에는 줄을 못 쓴 턴이 들 수 있다. 그 가운데 Agent Core 턴과 official client 턴이 섞일 수 있다. slice 는 자기 턴을 말하지 않는다. 그래서 history 행이 checkpoint 메시지를 다시 쓴 것인지 가를 수 없다. 셋을 다 읽는다. 같은 말이 두 번 들 수 있지만 빠지는 것은 없다.
 항목의 이름은 `{ line; index }` 다. `line` 은 그 단위의 줄이 시작하는 바이트 offset 이다.
 순서는 줄이 정한다. 그래서 bundle 하나가 없어지거나 돌아와도 번호가 밀리지 않는다.
 

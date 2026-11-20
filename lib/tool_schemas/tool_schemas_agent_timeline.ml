@@ -1,6 +1,5 @@
 (** Tool_schemas_agent_timeline — the agent-timeline tool declaration, read
-    from [config/tools/masc_agent_timeline.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    from [config/tools/masc_agent_timeline.toml].
 
     One operation today. The wire name is written once, in [operation_name];
     {!schemas} and {!operation_of_tool_name} both derive from {!definitions},

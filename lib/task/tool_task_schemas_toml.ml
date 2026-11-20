@@ -1,6 +1,5 @@
 (** The task tools whose declarations moved to
-    [config/tools/masc_*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2), read from the binary-embedded config tree.
+    [config/tools/masc_*.toml], read from the binary-embedded config tree.
 
     One file declares one tool; [schema_of_name] decodes it through
     [Tool_definition_toml] once at module initialization. A missing file or a

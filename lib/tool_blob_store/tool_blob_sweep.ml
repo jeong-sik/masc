@@ -405,7 +405,7 @@ type now_live_class =
   | Read_only
   | Untouched
 
-(* RFC-0499 §5.2: what would have happened to a blob layer two deleted at the
+(* What would have happened to a blob that a deleting sweep removed at the
    end of the previous scan, now that a durable consumer references it. *)
 let classify_now_live ~store ~touches ~(previous : record) sha256 =
   let written_since =

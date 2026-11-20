@@ -1,5 +1,4 @@
-(** The three agent tools, read from [config/tools/*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+(** The three agent tools, read from [config/tools/*.toml].
 
     Decoded once at module initialization. A missing file or a declaration that
     does not decode refuses the boot rather than advertising a partial agent

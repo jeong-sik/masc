@@ -1,7 +1,6 @@
 (** Tool_schemas_agent — MCP tool schemas for the [masc_agent*] family.
 
-    Read from [config/tools/*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2) rather than built here.
+    Read from [config/tools/*.toml] rather than built here.
 
     [masc_tool_schemas] only depends on [masc_types], so it cannot reach
     {!Tool_agent} for the [masc_agent_card] action values. They are still

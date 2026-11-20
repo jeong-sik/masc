@@ -1,6 +1,5 @@
 (** The two local-runtime tool declarations that moved to
-    [config/tools/masc_runtime_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/masc_runtime_*.toml].
 
     Decoded once at module initialization; a missing or undecodable file
     refuses the boot rather than advertising a partial local-runtime surface.

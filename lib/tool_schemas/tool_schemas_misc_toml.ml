@@ -1,6 +1,5 @@
 (** [masc_web_search] and [masc_web_fetch], read from
-    [config/tools/masc_web_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/masc_web_*.toml].
 
     Decoded once at module initialization; a missing or undecodable file
     refuses the boot rather than advertising a partial web surface.

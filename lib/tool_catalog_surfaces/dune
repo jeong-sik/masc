@@ -1,8 +1,7 @@
-; RFC-0086 Phase 2.B prereq — extract tool_catalog_surfaces from the
-; flat masc namespace and keep generic surface membership as a leaf.
+; tool_catalog_surfaces sits outside the flat masc namespace and keeps
+; generic surface membership as a leaf.
 ;
-; Deps: Agent_core (external) + stdlib only — clean leaf, matches
-; PR-0c/0d/0e leaf precedent.
+; Deps: stdlib only — clean leaf.
 
 (include_subdirs no)
 

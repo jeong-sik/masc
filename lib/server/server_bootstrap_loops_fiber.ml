@@ -10,6 +10,14 @@
     two standard [on_error] adapters that print a fiber-crash line
     to the [Log.Server] / [Log.Dashboard] streams.
 
+    [run_steps] runs the named steps of one pass of a serial loop.
+    A step that raises is that step's failure: it goes to [on_error]
+    with the step's name and the steps after it still run, so the
+    loop that calls it reaches its next pass. Cancellation and the
+    runtime's reserved exceptions are raised again.
+    [log_server_step_failure] is its [on_error] adapter for the
+    [Log.Server] stream.
+
     [filteri_with_fair_yield] / [iteri_with_fair_yield] iterate a
     list while inserting [Eio_guard.yield_step] calls every element,
     so a long-list iteration cannot starve other fibers on the
@@ -31,6 +39,23 @@ let log_server_fiber_crash name exn =
 
 let log_dashboard_fiber_crash name exn =
   Log.Dashboard.error "%s fiber crashed: %s" name (Printexc.to_string exn)
+;;
+
+let run_steps ~on_error steps =
+  List.iter
+    (fun (name, step) ->
+       try step () with
+       | exn ->
+         (* Out of memory, a stack overflow or a cancellation is not the
+            step's failure: absorbing one would keep the loop running through
+            a shutdown or an exhausted heap. *)
+         Llm_provider.Reserved_exn.reraise_if_reserved exn;
+         on_error name exn)
+    steps
+;;
+
+let log_server_step_failure loop name exn =
+  Log.Server.error "%s step %s failed: %s" loop name (Printexc.to_string exn)
 ;;
 
 let filteri_with_fair_yield f xs =

@@ -219,12 +219,12 @@ let preview_block ~ko ~max_line_cells ~language lines =
       [ clipped ~max_cells:max_line_cells
           (if ko then
              Printf.sprintf
-               "(기록된 미리보기 %d줄 생략: 본문에 지원 코드 펜스가 모두 포함됨 · 변경 화면에서 확인)"
-               count
+               "(기록된 미리보기 %s줄 생략: 본문에 지원 코드 펜스가 모두 포함됨 · 변경 화면에서 확인)"
+               (Masc_tui_value.Count.grouped count)
            else
              Printf.sprintf
-               "(%d recorded preview row%s withheld: text contains both supported fence markers; open Changes)"
-               count (if count = 1 then "" else "s"))
+               "(%s recorded preview row%s withheld: text contains both supported fence markers; open Changes)"
+               (Masc_tui_value.Count.grouped count) (if count = 1 then "" else "s"))
       ]
   | Some marker ->
       (marker ^ language) :: lines @ [ marker ]
@@ -289,12 +289,12 @@ let edited_evidence_rows ~ko ~max_line_cells ~replace_all
         { occurrence_count; occurrences = None }) ->
     ( (if ko then
          Printf.sprintf
-           "  일치 %d건 · 줄 범위 생략 · 전체 치환 템플릿%s"
-           occurrence_count attempted
+           "  일치 %s건 · 줄 범위 생략 · 전체 치환 템플릿%s"
+           (Masc_tui_value.Count.grouped occurrence_count) attempted
        else
          Printf.sprintf
-           "  %d match%s · line ranges omitted · replace-all template%s"
-           occurrence_count (if occurrence_count = 1 then "" else "es") attempted)
+           "  %s match%s · line ranges omitted · replace-all template%s"
+           (Masc_tui_value.Count.grouped occurrence_count) (if occurrence_count = 1 then "" else "es") attempted)
     , [] )
   | Some
       (Masc.Keeper_file_change_evidence.Edited
@@ -302,11 +302,11 @@ let edited_evidence_rows ~ko ~max_line_cells ~replace_all
     let detail =
       if replace_all then
         if ko then
-          Printf.sprintf "  일치 %d건 · 전체 치환 템플릿%s" occurrence_count attempted
+          Printf.sprintf "  일치 %s건 · 전체 치환 템플릿%s" (Masc_tui_value.Count.grouped occurrence_count) attempted
         else
           Printf.sprintf
-            "  %d match%s · replace-all template%s"
-            occurrence_count
+            "  %s match%s · replace-all template%s"
+            (Masc_tui_value.Count.grouped occurrence_count)
             (if occurrence_count = 1 then "" else "es")
             attempted
       else (if ko then "  기록된 치환" else "  recorded replacement") ^ attempted
@@ -421,13 +421,13 @@ let written_section ~ko ~max_line_cells (change : Masc.Tui_decode.file_change)
       ~preview ~omitted ~row_count =
   let summary =
     if change.fc_succeeded then
-      if ko then Printf.sprintf "(%d줄 작성)" row_count
+      if ko then Printf.sprintf "(%s줄 작성)" (Masc_tui_value.Count.grouped row_count)
       else
-        Printf.sprintf "(%d row%s written)" row_count
+        Printf.sprintf "(%s row%s written)" (Masc_tui_value.Count.grouped row_count)
           (if row_count = 1 then "" else "s")
     else
-      if ko then Printf.sprintf "(%d줄 작성 시도)" row_count
-      else Printf.sprintf "(%d-row write attempt)" row_count
+      if ko then Printf.sprintf "(%s줄 작성 시도)" (Masc_tui_value.Count.grouped row_count)
+      else Printf.sprintf "(%s-row write attempt)" (Masc_tui_value.Count.grouped row_count)
   in
   let address = address_rows ~max_line_cells ~summary change in
   let evidence_rows =

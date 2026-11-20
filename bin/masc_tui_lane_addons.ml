@@ -852,7 +852,7 @@ let evidence_receipt_lines json =
   | None -> []
   | Some evidence ->
       let text value = match value with Some (`String s) -> Some s | _ -> None in
-      let count = match member "row_count" json with Some (`Int n) -> Printf.sprintf "%d row%s" n (if n=1 then "" else "s") | _ -> "rows" in
+      let count = match member "row_count" json with Some (`Int n) -> Printf.sprintf "%s row%s" (Masc_tui_value.Count.grouped n) (if n=1 then "" else "s") | _ -> "rows" in
       let frozen = "Evidence preserved: " ^ count
         ^ (match text (member "sha256" evidence) with Some sha -> " · sha256 " ^ sha | None -> "") in
       let selection = Option.fold ~none:[] ~some:(fun id -> ["Evidence owner: " ^ id])
@@ -2044,7 +2044,7 @@ let overview_bottom_sheet ~ko ~width ~height view snapshot entries =
         let cat = category_heading ~ko (current_category snapshot (`Instance item)) in
         let records_text =
           if item.observation_seq = 0 then say "첫 관측 대기 중" "awaiting first observation"
-          else Printf.sprintf (if ko then "%d건" else "%d records") item.rows_count
+          else Printf.sprintf (if ko then "%s건" else "%s records") (Masc_tui_value.Count.grouped item.rows_count)
         in
         let fields =
           [ Doc.kv ~tone (say "단계" "Phase") (Masc_tui_lane_standing.word ~korean:ko standing ^ " · " ^ word)
@@ -2178,7 +2178,7 @@ let overview_lines ?(ko = false) ?(sheet_docked = false) ~width view =
                         [name ^ " · add-on " ^ item.addon_id ^ " · run " ^ item.run_id] in
                 let count_text =
                   if item.observation_seq=0 then (if ko then "첫 관측 대기 중" else "awaiting first observation")
-                  else Printf.sprintf (if ko then "기록 %d건" else "%d records") item.rows_count
+                  else Printf.sprintf (if ko then "기록 %s건" else "%s records") (Masc_tui_value.Count.grouped item.rows_count)
                 in
                 let off_requested = off_requested snapshot item in
                 let activity = if off_requested then (if ko then "종료 요청됨 · " else "off requested · ") else "" in
@@ -2731,7 +2731,7 @@ let flow_external_inputs binding =
 
 let flow_worker_state (worker : instance) =
   let result = if worker.observation_seq=0 then "no completed observation received"
-    else Printf.sprintf "last completed: %d record%s" worker.rows_count
+    else Printf.sprintf "last completed: %s record%s" (Masc_tui_value.Count.grouped worker.rows_count)
       (if worker.rows_count=1 then "" else "s") in
   phase_label worker.phase ^ " · " ^ result
 

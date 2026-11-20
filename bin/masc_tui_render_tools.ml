@@ -27,10 +27,6 @@ module Say = Masc_tui_say
 let ( ++ ) = Say.( ++ )
 let say_dot = Say.code " \xc2\xb7 "
 
-let wrap_style style text =
-  if String.equal style "" || String.equal text "" then text
-  else style ^ text ^ Ansi.reset
-
 (* Right-pads to [cells] display cells without truncating; Korean words are
    measured in cells, not bytes. Use [pad_cells_fit] for fixed-width data
    columns that must truncate cleanly with "…" when wider. *)
@@ -889,14 +885,14 @@ let skill_usage_box ~cols rows =
   let content_width = max 1 (width - 4) in
   let border_style = Theme.border_muted () in
   let border left right = border_style, left ^ draw_hline (max 0 (width - 2)) ^ right in
-  let vbar = wrap_style border_style Ansi.box_v in
+  let vbar = Ansi.wrap_style border_style Ansi.box_v in
   let body =
     List.concat_map (fun (style, text) ->
       (if Masc_tui_message_layout.display_width text <= content_width then [text]
        else Masc_tui_message_layout.wrap_styled_words ~max_cells:content_width text)
       |> List.map (fun line ->
         "",
-        vbar ^ " " ^ wrap_style style (fit_width line content_width) ^ " " ^ vbar)) rows
+        vbar ^ " " ^ Ansi.wrap_style style (fit_width line content_width) ^ " " ^ vbar)) rows
   in
   if width < 5 then
     List.concat_map (fun (style, text) ->

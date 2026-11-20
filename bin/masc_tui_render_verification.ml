@@ -16,11 +16,6 @@ module Doc = Masc_tui_doc
 module Chart = Masc_tui_chart
 module Text_block = Masc_tui_text_block
 
-let wrap_style style text =
-  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
-  then text
-  else style ^ text ^ Ansi.reset
-
 let review_mark = function
   | Review_unobserved -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting
   | Review_running _ | Review_waiting_original _ ->
@@ -89,7 +84,7 @@ let judgement_list_columns state ~cols ~status_header ~statuses =
   let row ?(selected = false) ?(status_style = "") title status =
     (if selected then "\xe2\x80\xba " else "  ")
     ^ fit_width (Terminal_text.single_line title) title_width
-    ^ "  " ^ wrap_style status_style (fit_width status status_width) in
+    ^ "  " ^ Ansi.wrap_style status_style (fit_width status status_width) in
   row (ui_text state ~ko:"작업" ~en:"Task") status_header, row
 
 (* What the notice above a retained reading says went wrong: the last read
@@ -910,14 +905,14 @@ let harness_ledger_lines ~ko ~cols snapshot =
                         Printf.sprintf "    %s  %s  %s"
                           (fit_width safe_gate name_w)
                           bar
-                          (wrap_style (Theme.recede ()) readout))
+                          (Ansi.wrap_style (Theme.recede ()) readout))
                       top_with_readout
                   in
                   let more_row =
                     if remaining = 0 then []
-                    else [ "    " ^ wrap_style (Theme.recede ()) (Masc_tui_value.Count.more ~ko remaining) ]
+                    else [ "    " ^ Ansi.wrap_style (Theme.recede ()) (Masc_tui_value.Count.more ~ko remaining) ]
                   in
-                  ("  " ^ wrap_style (Theme.recede ()) (if ko then "게이트" else "Gates"))
+                  ("  " ^ Ansi.wrap_style (Theme.recede ()) (if ko then "게이트" else "Gates"))
                   :: rows @ more_row
                 else []
             in

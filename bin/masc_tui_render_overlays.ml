@@ -13,11 +13,6 @@ module Render_schedule = Masc_tui_render_schedule
 module Agenda = Masc_tui_agenda
 module Keeper_control = Masc_tui_keeper_control
 
-let wrap_style style text =
-  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
-  then text
-  else style ^ text ^ Ansi.reset
-
 (* /about: the candle over the surface, with what the TUI is running under
    -- its colour scheme and how many Keepers the workspace holds. *)
 let render_about (state : state) =
@@ -58,8 +53,8 @@ let render_about (state : state) =
           | Masc_tui_emblem_screen.Keepers_unreadable
           | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:
-          [ wrap_style (Theme.accent ()) "MASC \xc2\xb7 Multi-Agent Shared Context"
-          ; wrap_style (Theme.recede ())
+          [ Ansi.wrap_style (Theme.accent ()) "MASC \xc2\xb7 Multi-Agent Shared Context"
+          ; Ansi.wrap_style (Theme.recede ())
               (Masc_tui_emblem_screen.about_facts ~ko ~theme keepers)
           ]
       |> List.iter c.push)
@@ -1035,7 +1030,7 @@ let render_link_preview_modal (state : state) =
         ~frame:Chrome_overlay
         ~title:
           (screen_title (ui_text state ~ko:" 링크 미리보기" ~en:" Link preview")
-           ^ "  " ^ wrap_style (Theme.recede ()) (ui_text state ~ko:"(링크 없음)" ~en:"(no links)"))
+           ^ "  " ^ Ansi.wrap_style (Theme.recede ()) (ui_text state ~ko:"(링크 없음)" ~en:"(no links)"))
         ~hints:(Masc_tui_keys.footer_hints_link_preview_empty ~lang:state.ui_language)
         ~body:(fun ~budget:_ c ->
           c.push
@@ -1238,7 +1233,7 @@ let help_title (state : state) ~cols =
   match state.help_filter with
   | Masc_tui_help.Off ->
       name ^ "  "
-      ^ wrap_style (Theme.recede ())
+      ^ Ansi.wrap_style (Theme.recede ())
           (if state.hints_visible then ui_text state ~ko:"힌트 켬" ~en:"hints on"
            else ui_text state ~ko:"힌트 끔" ~en:"hints off")
   | (Masc_tui_help.Typing query | Masc_tui_help.Kept query) as filter ->
@@ -1698,7 +1693,7 @@ let render_answering (state : state) =
       | Masc_tui_answering.Unknown -> Theme.warn ()
       | Masc_tui_answering.Quiet -> Theme.recede ()
     in
-    prefix ^ wrap_style tone_prefix line.Masc_tui_answering.text
+    prefix ^ Ansi.wrap_style tone_prefix line.Masc_tui_answering.text
   in
   let preview_lines =
     let cursor_preview =
@@ -1731,14 +1726,14 @@ let render_answering (state : state) =
         let preview_width = framed_inner_width cols in
         let name_width = min (Masc_tui_message_layout.display_width (Terminal_text.single_line keeper_name))
           (max 0 ((preview_width - 2) / 2)) in
-        [ wrap_style Ansi.bold (fit_width (Terminal_text.single_line keeper_name) name_width)
+        [ Ansi.wrap_style Ansi.bold (fit_width (Terminal_text.single_line keeper_name) name_width)
           ^ "  "
-          ^ wrap_style (Theme.accent ())
+          ^ Ansi.wrap_style (Theme.accent ())
               (fit_width doing (max 0 (preview_width - name_width - 2)))
-        ; wrap_style (Theme.recede ()) tail
+        ; Ansi.wrap_style (Theme.recede ()) tail
         ]
     | None ->
-        [ wrap_style (Theme.recede ())
+        [ Ansi.wrap_style (Theme.recede ())
             (ui_text state ~ko:"실시간 미리보기 \xc2\xb7 이 줄에는 없음"
                ~en:"live preview \xc2\xb7 none for this row")
         ; ""
@@ -1807,7 +1802,7 @@ let render_agenda (state : state) =
     | Agenda.Failed -> Theme.bad ()
   in
   let paint (line : Agenda.line) =
-    wrap_style (paint_tone line) line.Agenda.text
+    Ansi.wrap_style (paint_tone line) line.Agenda.text
   in
   (* Every key of the panel moves -- j/k, the page keys, g/G, Enter and Esc --
      so zone 5 names none of them (RFC tui-one-screen-grammar section 2) and
@@ -1836,7 +1831,7 @@ let render_agenda (state : state) =
                   "\xe2\x80\xba " ^ String.sub raw 2 (String.length raw - 2)
                 else "\xe2\x80\xba " ^ raw
               in
-              c.push_selected_styled (wrap_style (paint_tone line) marked)
+              c.push_selected_styled (Ansi.wrap_style (paint_tone line) marked)
             else
               c.push (paint line))
         lines;

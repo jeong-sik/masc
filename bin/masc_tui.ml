@@ -10470,7 +10470,7 @@ let launch_engine_sample_read state ~mailbox =
    the whole terminal, and the graphs under it are not sampled. *)
 let step_engine_samples state ~mailbox ~render_schedule =
   let terminal_rows, cols = get_terminal_size () in
-  let now = monotonic_now_s () in
+  let now = Masc_tui_wake.Mono.now () in
   let capacity =
     match Masc_tui_render_metrics.engine_graph_capacity ~cols state with
     | None -> None
@@ -10490,7 +10490,8 @@ let step_engine_samples state ~mailbox ~render_schedule =
   | None -> state.engine_samples <- Masc_tui_engine_samples.hidden state.engine_samples
   | Some capacity ->
     let allow_read =
-      Masc_tui_refresh_pace.screen_read_starts ~now Owed_read_due state.refresh_pace
+      Masc_tui_refresh_pace.screen_read_starts ~now:(Masc_tui_wake.Mono.now ()) Owed_read_due
+        state.refresh_pace
     in
     let samples, step =
       Masc_tui_engine_samples.tick ~allow_read
@@ -14129,7 +14130,9 @@ let poll_play_room state ~mailbox =
   then state.play_room <- Some (Masc_tui_play_room.create ());
   Option.iter (fun room ->
     let room = Masc_tui_play_room.active room watching in
-    let room, request = Masc_tui_play_room.poll room ~now:(Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9) ~machine:state.machine_source in
+    let room, request =
+      Masc_tui_play_room.poll room ~now:(Masc_tui_wake.Mono.now ()) ~machine:state.machine_source
+    in
     state.play_room <- Some room;
     Option.iter (launch_play_room state ~mailbox) request) state.play_room
   end
@@ -17406,7 +17409,7 @@ let note_read state read result =
 let fail_refresh_pace state =
   state.refresh_pace <-
     Masc_tui_refresh_pace.probe_failed ~retry_s:stream_reconnect_s
-      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ())
       ~wall_now:(Unix.gettimeofday ()) state.refresh_pace
 
 (* The [/health] probe's reading: its error is the probe's own failure. It
@@ -17935,7 +17938,7 @@ let apply_tool_series_load state { tsl_days = days; tsl_result = result } =
     match result with
     | Ok calls ->
         state.tool_series <- Tool_series_read calls;
-        Masc_tui_types.note_tool_series_read state ~now:(monotonic_now_s ())
+        Masc_tui_types.note_tool_series_read state ~now:(Masc_tui_wake.Mono.now ())
     | Error reason -> state.tool_series <- Tool_series_error reason
   end else
     (* The reply is for a window the screen has left, and the read it was
@@ -21367,7 +21370,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
   (* While [/health] keeps failing, a pass the TUI asks for by itself waits
      for the one the failure owes, which revalidates everything this one
      would, side reads included (RFC tui-one-screen-grammar §2). *)
-  let paced = Masc_tui_refresh_pace.starts ~now:(monotonic_now_s ()) intent state.refresh_pace in
+  let paced =
+    Masc_tui_refresh_pace.starts ~now:(Masc_tui_wake.Mono.now ()) intent state.refresh_pace
+  in
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle. A revalidation owes it a read. Owed, so a pane
      scrolled into older rows or a read in flight takes it when it can; the
@@ -22031,7 +22036,7 @@ let start_http_scoped_refresh state ~host ~port
      no start, so its debt stays owed and its launcher asks again on a later
      loop. Every caller states its [ask]; none is assumed. *)
   if Masc_tui_types.surface_needs_any needs
-     && Masc_tui_refresh_pace.screen_read_starts ~now:(monotonic_now_s ()) ask
+     && Masc_tui_refresh_pace.screen_read_starts ~now:(Masc_tui_wake.Mono.now ()) ask
           state.refresh_pace
   then begin
     let collection_inflight = !full_refresh_inflight
@@ -22145,7 +22150,7 @@ let start_http_scoped_refresh state ~host ~port
 let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   owe_provider_history_day state ~now:(Unix.gettimeofday ());
-  if Masc_tui_types.take_tool_series_due state ~now:(monotonic_now_s ()) then
+  if Masc_tui_types.take_tool_series_due state ~now:(Masc_tui_wake.Mono.now ()) then
     owe_pushed_read state Surface_read_source.Tool_series;
   let wanted = Surface_read_order.sources (current_surface_needs state) in
   let now = Masc_tui_wake.Mono.now () in
@@ -22268,7 +22273,7 @@ let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
 let launch_owed_refresh_pass state ~refresh_inflight ~scoped_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   if not !refresh_inflight
-     && Masc_tui_refresh_pace.due ~now:(monotonic_now_s ()) state.refresh_pace
+     && Masc_tui_refresh_pace.due ~now:(Masc_tui_wake.Mono.now ()) state.refresh_pace
   then
     start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Owed_pass
       ~refresh_inflight ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
@@ -27892,7 +27897,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Drawn_changed
   | Play_msg (Play_room_received (request, result)) ->
       state.play_room <- Option.map (fun room ->
-        let now = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9 in
+        let now = Masc_tui_wake.Mono.now () in
         match result with
         | Ok (viewer, snapshot) -> Masc_tui_play_room.receive ~viewer room request ~now (Ok snapshot)
         | Error (Request_failed detail) -> Masc_tui_play_room.receive room request ~now (Error detail)
@@ -31310,7 +31315,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (* A sample answer is not compared with what is drawn, so it asks for a
          frame like an answer that did change it. *)
       let samples, (_ : Masc_tui_engine_samples.step), report =
-        Masc_tui_engine_samples.answered state.engine_samples ~now:(monotonic_now_s ()) reading
+        Masc_tui_engine_samples.answered state.engine_samples ~now:(Masc_tui_wake.Mono.now ()) reading
       in
       state.engine_samples <- samples;
       (match report with

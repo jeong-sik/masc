@@ -8,6 +8,7 @@ type case =
   ; facts : fact list
   ; planted : string list
   ; must_keep : (string * string list) list
+  ; must_remain : string list
   }
 
 type reading =
@@ -17,6 +18,8 @@ type reading =
   ; recovered : int
   ; merge_expected : int
   ; merge_kept : int
+  ; remain_expected : int
+  ; remain_kept : int
   }
 
 type scored =
@@ -33,6 +36,8 @@ type tally =
   ; recovered : int
   ; merge_expected : int
   ; merge_kept : int
+  ; remain_expected : int
+  ; remain_kept : int
   }
 
 let count predicate items = List.length (List.filter predicate items)
@@ -79,6 +84,10 @@ let score case text =
         (0, 0)
         plan.effects.removed
     in
+    (* Looked for in Memory after the answer, not in the removals: the merge
+       numbers above see only merges, and a revise into a claim that nothing
+       is known of the rules empties Memory of them just as a drop does. *)
+    let remain_kept = count held_after case.must_remain in
     Read
       { ops = List.length answer.ops
       ; not_applied =
@@ -92,6 +101,8 @@ let score case text =
       ; recovered = count held_after (to_recover case)
       ; merge_expected
       ; merge_kept
+      ; remain_expected = List.length case.must_remain
+      ; remain_kept
       }
 ;;
 
@@ -119,7 +130,16 @@ let tally scored =
            { total with
              thrown_away = add_to (Librarian_answer.rejection_kind rejection) total.thrown_away
            }
-         | Read { ops; not_applied; changed; recovered; merge_expected; merge_kept } ->
+         | Read
+             { ops
+             ; not_applied
+             ; changed
+             ; recovered
+             ; merge_expected
+             ; merge_kept
+             ; remain_expected
+             ; remain_kept
+             } ->
            { total with
              ops = total.ops + ops
            ; not_applied =
@@ -131,6 +151,8 @@ let tally scored =
            ; recovered = total.recovered + recovered
            ; merge_expected = total.merge_expected + merge_expected
            ; merge_kept = total.merge_kept + merge_kept
+           ; remain_expected = total.remain_expected + remain_expected
+           ; remain_kept = total.remain_kept + remain_kept
            })
       { answers = 0
       ; thrown_away = []
@@ -141,6 +163,8 @@ let tally scored =
       ; recovered = 0
       ; merge_expected = 0
       ; merge_kept = 0
+      ; remain_expected = 0
+      ; remain_kept = 0
       }
       scored
   in
@@ -165,6 +189,8 @@ let tally_to_text tally =
        ; Printf.sprintf "planted %d, in Memory afterwards %d" tally.planted tally.recovered
        ; Printf.sprintf "merged away %d, kept by the merge %d" tally.merge_expected
            tally.merge_kept
+       ; Printf.sprintf "must remain %d, in Memory afterwards %d" tally.remain_expected
+           tally.remain_kept
        ])
   ^ "\n"
 ;;

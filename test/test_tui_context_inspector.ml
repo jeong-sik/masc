@@ -882,7 +882,7 @@ let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
   check (option int) "ollama cache creation stays None" None
     ollama_turn_usage.cache_creation_input_tokens;
   check string "ollama renders unreported without ratio"
-    "Provider usage (last reported request in this turn) · input 100 · cache read unreported"
+    "Provider usage (last reported request in this turn) · input 100 · cache read ?"
     (Inspector.provider_usage_summary ollama_turn_usage);
   let openai_zero_json =
     {|{"id":"c1","model":"glm-5.3","choices":[{"index":0,"finish_reason":"stop","message":{"content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":0}}}|}
@@ -945,7 +945,7 @@ let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
   check (option int) "terminal-only muse cache read stays None" None
     muse_terminal_only_usage.cache_read_input_tokens;
   check string "terminal-only muse renders unreported without fabricated 0"
-    "Provider usage (client turn total) · input 120 · cache read unreported"
+    "Provider usage (client turn total) · input 120 · cache read ?"
     (Inspector.provider_usage_summary muse_terminal_only_usage);
   let muse_zero_resp =
     Masc.Keeper_muse_runtime.For_testing.completed_turn_response
@@ -991,7 +991,7 @@ let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
   check (option int) "claude unreported cache read stays None" None
     claude_unreported_usage.cache_read_input_tokens;
   check string "claude unreported renders unreported without fabricated 0"
-    "Provider usage (client turn total) · input 120 · cache read unreported"
+    "Provider usage (client turn total) · input 120 · cache read ?"
     (Inspector.provider_usage_summary claude_unreported_usage);
   let claude_zero_resp = claude_turn_resp ~cache_creation:0 ~cache_read:0 () in
   let claude_zero_usage =

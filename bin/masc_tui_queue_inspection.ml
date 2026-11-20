@@ -275,6 +275,11 @@ let waiting_text ~now since =
   | Some age -> " · waiting " ^ age
   | None -> ""
 
+(* A moment in a queue line reads in the operator's zone (RFC
+   tui-one-screen-grammar 6.1): [15:43] today, [11-21 09:00] this year. The
+   server's ISO text is for copying, not for reading. *)
+let local_moment ~now at = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
+
 let describe_row ~now row =
   let* source = string "source" row in
   let* source = Inventory.source_of_string source in
@@ -303,8 +308,8 @@ let describe_row ~now row =
       Option.bind since (fun since -> Masc_tui_message_layout.age_text ~now ~since)
       |> Option.fold ~none:" · unacknowledged" ~some:(fun age -> " · unacknowledged " ^ age)
     | Pending -> Option.fold ~none:"" ~some:(waiting_text ~now) since
-    | Scheduled at -> " · scheduled for " ^ Masc_domain.iso8601_of_unix_seconds at
-    | Due at -> " · due " ^ Masc_domain.iso8601_of_unix_seconds at
+    | Scheduled at -> " · scheduled for " ^ local_moment ~now at
+    | Due at -> " · due " ^ local_moment ~now at
     | Running -> " · running"
     | Settling -> " · settling"
     | Terminal -> " · terminal"
@@ -364,7 +369,7 @@ let inventory_item row described =
     | Inventory.Observation_unavailable -> None in
   { id; text = first_line described.line }
 
-let inventory_items row described =
+let inventory_items ~now row described =
   let summary = inventory_item row described in
   let members = match described.source with
     | Inventory.Event_queue_pending when described.count > 1 ->
@@ -414,7 +419,7 @@ let inventory_items row described =
       {id=Some (Event (reference, revision));
        text=Printf.sprintf "    occurrence %d/%d%s · %s"
          (index + 1) described.count
-         (Option.fold ~none:"" ~some:(fun at -> " · due " ^ Masc_domain.iso8601_of_unix_seconds at) due)
+         (Option.fold ~none:"" ~some:(fun at -> " · due " ^ local_moment ~now at) due)
          (first_line described.line)}) addresses
 
 let waiting_items ~now json =
@@ -422,7 +427,7 @@ let waiting_items ~now json =
   let* global_rows = list "global_waiting_on" json in
   let describe rows = map_result (fun row ->
     let* described = describe_row ~now row in
-    Ok (described, inventory_items row described)) rows in
+    Ok (described, inventory_items ~now row described)) rows in
   let* global = describe global_rows in
   let* groups = map_result (fun keeper ->
     let* state = string "state" keeper in

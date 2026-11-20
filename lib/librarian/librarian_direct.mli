@@ -15,7 +15,9 @@
       Nothing changes.
     - [Supersede], [old] held: [old] leaves as
       {!Librarian_effects.Superseded_by} and the claim is added, in one
-      commit. A claim that is already held is only seen again.
+      commit. The added claim is first seen when [old] was: it says what
+      [old] said, corrected. A claim that is already held is only seen
+      again and keeps its own first seen.
     - [Supersede], [old] not held and the claim held: {!Already_done}.
     - [Supersede], neither held: [Refused Unknown_fact]. The claim is not
       added.

@@ -154,6 +154,11 @@ module Mono = struct
     let offset = if seconds > 0. then offset_ns seconds else 0L in
     add_saturating at offset
 
+  let compare = Int64.compare
+
+  let seconds_since at ~since =
+    Int64.to_float (Int64.sub at since) /. nanoseconds_per_second
+
   (* RFC tui-idle-wait §3.2: only what remains of a wall-clock instant moves
      onto this clock, so a wall-clock step after this call does not move the
      result, and the next pass converts again. *)

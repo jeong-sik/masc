@@ -33,9 +33,11 @@ val comment_gutter_cells : int
 (** Display cells the gutter before a comment row takes. The comment text is
     wrapped to the column less these cells. *)
 
-val close_time : float -> (string, float) result
-(** UTC close time inside Ptime's supported calendar, or the original seconds
-    when the supplied number is non-finite or outside that calendar. *)
+val close_time : now:float -> float -> (string, float) result
+(** The close time in the operator's zone, to the minute
+    ({!Masc_tui_value.Instant.detail_text}, RFC tui-one-screen-grammar 6.1),
+    when the number lies inside Ptime's supported calendar; the original
+    seconds when it is non-finite or outside that calendar. *)
 
 val create : unit -> t
 val get : t -> source:source -> render:(unit -> string list * comment_row list * (string * int) option) -> rows

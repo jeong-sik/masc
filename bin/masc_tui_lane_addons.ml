@@ -2151,7 +2151,7 @@ let installation_results view ~installation_id =
       {view with error=Some (Input_failure (installation_id
         ^ " has no running worker; its Results appear while it runs"))}
 
-let host_wait_text = function
+let host_wait_text ~now = function
   | Host_wait_operator -> "waiting for the operator's answer"
   | Host_wait_source detail -> "source unavailable: " ^ detail
   | Host_wait_exact reason ->
@@ -2162,7 +2162,8 @@ let host_wait_text = function
        | E.Lane_unavailable E.No_admitted_slots -> "its lane has no admitted slot"
        | E.Lane_unavailable (E.Lane_registry_unavailable { detail }) -> "lane registry unavailable: " ^ detail
        | E.Lane_unavailable (E.Every_slot_held { until }) ->
-           "no slot can be called before " ^ Masc_domain.iso8601_of_unix_seconds until
+           (* The operator's zone (RFC tui-one-screen-grammar 6.1). *)
+           "no slot can be called before " ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now until
        | E.Provider_refused (E.Provider_unavailable { detail }) -> "provider unavailable: " ^ detail
        | E.Provider_refused (E.Provider_auth_refused { detail }) -> "provider refused authentication: " ^ detail
        | E.Provider_refused (E.Provider_configuration_refused { detail }) ->
@@ -2186,7 +2187,7 @@ let host_request_lines item = match item.host_requests with
         ((match hr_waiting, hr_issue with
           | [], Some _ -> ["  waiting status incomplete"]
           | [], None -> ["  nothing reported waiting"]
-          | waiting, _ -> List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) waiting)
+          | waiting, _ -> List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text ~now:(Unix.gettimeofday ()) wait) waiting)
          @ (if hr_waiting <> [] && Option.is_some hr_issue then ["  waiting status incomplete"] else [])
          @ Option.fold ~none:[] ~some:(fun issue -> ["  issue: " ^ host_issue_text issue]) hr_issue)
 

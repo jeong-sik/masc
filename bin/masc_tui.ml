@@ -9151,8 +9151,6 @@ let stream_reconnect_s = 2.0
 let keeper_execute_stream_reconnect_s = 2.0
 let keeper_execute_stream_max_reconnect_s = 30.0
 
-let monotonic_now_s () = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
-
 (* The pointer press a drag in the browser picture holds; the cadence read
    yields to it, so it is defined before the first launch that checks it. *)
 let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None

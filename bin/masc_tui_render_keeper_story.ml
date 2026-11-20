@@ -22,9 +22,17 @@ let rows ~budget =
   else min target_rows (budget - list_floor)
 ;;
 
-let dim text = Theme.recede () ^ text ^ Ansi.reset
-let info text = Theme.info () ^ text ^ Ansi.reset
-let warn text = Theme.warn () ^ text ^ Ansi.reset
+let wrap_style style text =
+  if String.equal style "" || String.equal text "" then text
+  else style ^ text ^ Ansi.reset
+;;
+
+let dim text = wrap_style (Theme.recede ()) text
+let rule text = wrap_style (Theme.border_muted ()) text
+let ok text = wrap_style (Theme.ok ()) text
+let info text = wrap_style (Theme.info ()) text
+let warn text = wrap_style (Theme.warn ()) text
+let bad text = wrap_style (Theme.bad ()) text
 
 let tab ~ko ~current page =
   let hotkey, label = Story.tab_parts ~ko page in
@@ -38,12 +46,12 @@ let tab ~ko ~current page =
   else
     match hotkey with
     | Some key ->
-        " " ^ Ansi.bold ^ key ^ Ansi.reset ^ " " ^ dim label ^ " "
+        " " ^ key ^ " " ^ dim label ^ " "
     | None -> dim (" " ^ label ^ " ")
 ;;
 
 (* btop-style embedded top rule: lead on the left, tabs on the right, filled
-   with receded horizontal rule cells so no separate divider row is spent. *)
+   with muted-border horizontal rule cells so no separate divider row is spent. *)
 let header_rule ~ko ~inner ~lead ~current =
   let tabs = match current with
     | Story.World -> [Story.World]
@@ -59,12 +67,17 @@ let header_rule ~ko ~inner ~lead ~current =
   in
   let rule_count = inner - lead_cells - tabs_cells - 6 in
   if rule_count >= 1 then
-    dim (draw_hline 1) ^ " " ^ lead ^ " "
-    ^ dim (draw_hline rule_count) ^ " " ^ tabs_text ^ " "
-    ^ dim (draw_hline 1)
+    rule (draw_hline 1) ^ " " ^ lead ^ " "
+    ^ rule (draw_hline rule_count) ^ " " ^ tabs_text ^ " "
+    ^ rule (draw_hline 1)
+  else if inner <= tabs_cells + 1 then
+    Message_layout.truncate_end inner tabs_text
   else
-    let gap = max 1 (inner - lead_cells - tabs_cells) in
-    lead ^ String.make gap ' ' ^ tabs_text
+    let lead_room = max 1 (inner - tabs_cells - 1) in
+    let shown_lead = Message_layout.truncate_end lead_room lead in
+    let shown_lead_cells = Message_layout.display_width shown_lead in
+    let gap = max 1 (inner - shown_lead_cells - tabs_cells) in
+    shown_lead ^ String.make gap ' ' ^ tabs_text
 ;;
 
 (* The lines a window of [rows] rows holds: all but its embedded header rule. *)
@@ -96,7 +109,7 @@ let ago ~ko ~now at =
 
 let status_cells = 10
 let clock_cells = Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute
-let relative_cells = 11
+let relative_cells = 12
 
 let clock_text ~now = function
   | None -> Masc_tui_theme.Glyph.no_value
@@ -105,20 +118,21 @@ let clock_text ~now = function
 
 (* A schedule that has not run reads [in 5m], or [late 5m] once its time has
    passed. A closed one reads [5m ago]. A status this build does not know says
-   nothing about the time. *)
+   nothing about the time. The boolean marks overdue coming schedules so the
+   renderer can tint them with [Theme.warn ()]. *)
 let relative_text ~ko ~now (row : Masc_tui_types.schedule_row) = function
-  | None -> Masc_tui_theme.Glyph.no_value
+  | None -> Masc_tui_theme.Glyph.no_value, false
   | Some at ->
       (match Masc_tui_agenda.standing_of_wire row.sch_status with
        | Masc_tui_agenda.Coming ->
            if at >= now then
              let span = Masc_tui_value.Ongoing.until ~now at in
-             if ko then span ^ " 후" else "in " ^ span
+             (if ko then span ^ " 후" else "in " ^ span), false
            else
              let span = Masc_tui_value.Ongoing.since ~now at in
-             if ko then span ^ " 지연" else "late " ^ span
-       | Masc_tui_agenda.Settled -> ago ~ko ~now at
-       | Masc_tui_agenda.Unrecognised _ -> Masc_tui_theme.Glyph.no_value)
+             (if ko then span ^ " 지연" else "late " ^ span), true
+       | Masc_tui_agenda.Settled -> ago ~ko ~now at, false
+       | Masc_tui_agenda.Unrecognised _ -> Masc_tui_theme.Glyph.no_value, false)
 ;;
 
 (* A held row, or a row whose delivered wake has not settled, is one
@@ -169,6 +183,11 @@ let schedule_row_line ~ko ~now ~recurrence_cells ((row : Masc_tui_types.schedule
          ~summary:row.sch_recurrence_summary row.sch_recurrence)
   in
   let what = Masc_tui_render_prim.schedule_row_label row in
+  let rel_text, overdue = relative_text ~ko ~now row due in
+  let rel_cell =
+    let padded = Message_layout.fit_width rel_text relative_cells in
+    if overdue then warn padded else padded
+  in
   String.concat ""
     [ "  "
     ; color
@@ -177,7 +196,7 @@ let schedule_row_line ~ko ~now ~recurrence_cells ((row : Masc_tui_types.schedule
     ; "  "
     ; Message_layout.fit_width (clock_text ~now due) clock_cells
     ; "  "
-    ; Message_layout.fit_width (relative_text ~ko ~now row due) relative_cells
+    ; rel_cell
     ; "  "
     ; dim (Message_layout.fit_width recurrence recurrence_cells ^ " · ")
     ; what
@@ -292,13 +311,13 @@ let wake_item_text ~ko wake =
     match row.sch_last_wake_status with
     | Some Schedule_contract_values.Wake_failed ->
         (match row.sch_last_wake_error with
-         | Some error -> dim (" · " ^ Terminal_text.single_line error)
+         | Some error -> dim " · " ^ bad (Terminal_text.single_line error)
          | None -> "")
     | Some (Schedule_contract_values.Wake_running | Schedule_contract_values.Wake_succeeded)
     | None -> ""
   in
-  dim (if ko then "호출" else "wake") ^ outcome_text
-  ^ dim (" · " ^ Masc_tui_render_prim.schedule_row_label row)
+  dim ("◷ " ^ (if ko then "호출" else "wake")) ^ outcome_text
+  ^ dim " · " ^ Masc_tui_render_prim.schedule_row_label row
   ^ error_text
 ;;
 
@@ -308,21 +327,22 @@ let wake_item_text ~ko wake =
 let turn_item_text ~ko (turn : Masc_tui_keeper_turns.turn) =
   match turn.stop with
   | Masc_tui_keeper_turns.Stopped reason ->
-      dim ((if ko then "턴 " else "turn ") ^ Terminal_text.single_line reason)
+      dim ("● " ^ (if ko then "턴 " else "turn ")) ^ Terminal_text.single_line reason
   | Masc_tui_keeper_turns.No_stop_reason ->
-      warn (if ko then "턴 종료 사유 없음" else "turn no stop reason")
+      warn ("● " ^ (if ko then "턴 종료 사유 없음" else "turn no stop reason"))
 ;;
 
 let feed_item_text ~ko = function
   | Masc_tui_keeper_feed.Wake wake -> wake_item_text ~ko wake
   | Masc_tui_keeper_feed.Turn turn -> turn_item_text ~ko turn
   | Masc_tui_keeper_feed.Digest _ ->
-      dim (if ko then "요약 완료 · 사서" else "digest ok · librarian")
+      ok ("◈ " ^ (if ko then "요약 완료" else "digest ok"))
+      ^ dim (if ko then " · 사서" else " · librarian")
 ;;
 
 (* The column of ages, wide enough for the longest the ladder writes (a hundred
    days, or ninety-nine days and 23 hours) and the word after it. *)
-let feed_age_cells = 11
+let feed_age_cells = 12
 
 let feed_item_line ~ko ~now item =
   dim (Message_layout.fit_width (ago ~ko ~now (Masc_tui_keeper_feed.at item)) feed_age_cells)

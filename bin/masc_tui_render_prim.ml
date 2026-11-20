@@ -1944,7 +1944,6 @@ let paint_acting_pane_line ?(selected = false)
     ~(target : Masc_tui_acting_pane.row_target) ~ground
     (line : Masc_tui_acting_pane.line) =
   if selected then
-    let sel = Theme.sidebar_selection () in
     match line with
     | [] -> ""
     | border_span :: rest ->
@@ -1955,22 +1954,45 @@ let paint_acting_pane_line ?(selected = false)
               ^ (if String.equal ground "" then "" else Ansi.reset)
           | sgr -> ground ^ sgr ^ border_span.text ^ Ansi.reset
         in
-        let body_paint =
-          String.concat ""
-            (List.map
-               (fun (span : Masc_tui_acting_pane.span) ->
-                 match span.tone with
-                 | Masc_tui_acting_pane.Accent ->
-                     Ansi.bold ^ span.text ^ Ansi.reset ^ sel
-                 | Masc_tui_acting_pane.Plain
-                 | Masc_tui_acting_pane.Dim
-                 | Masc_tui_acting_pane.Ok
-                 | Masc_tui_acting_pane.Warn
-                 | Masc_tui_acting_pane.Bad
-                 | Masc_tui_acting_pane.Info -> span.text)
-               rest)
-        in
-        border_paint ^ sel ^ body_paint ^ Ansi.reset
+        (match Theme.sidebar_selection_background () with
+         | Some bg when not (String.equal bg "") ->
+             let body_styled =
+               String.concat ""
+                 (List.map
+                    (fun (span : Masc_tui_acting_pane.span) ->
+                      match span.tone with
+                      | Masc_tui_acting_pane.Accent ->
+                          Ansi.bold ^ span.text ^ Ansi.reset
+                      | Masc_tui_acting_pane.Plain -> span.text
+                      | Masc_tui_acting_pane.Dim
+                      | Masc_tui_acting_pane.Ok
+                      | Masc_tui_acting_pane.Warn
+                      | Masc_tui_acting_pane.Bad
+                      | Masc_tui_acting_pane.Info ->
+                          (match acting_pane_sgr span.tone with
+                           | "" -> span.text
+                           | sgr -> sgr ^ span.text ^ Ansi.reset))
+                    rest)
+             in
+             border_paint ^ Masc_tui_theme.paint_row_background ~bg body_styled
+         | Some _ | None ->
+             let sel = Theme.sidebar_selection () in
+             let body_paint =
+               String.concat ""
+                 (List.map
+                    (fun (span : Masc_tui_acting_pane.span) ->
+                      match span.tone with
+                      | Masc_tui_acting_pane.Accent ->
+                          Ansi.bold ^ span.text ^ Ansi.reset ^ sel
+                      | Masc_tui_acting_pane.Plain
+                      | Masc_tui_acting_pane.Dim
+                      | Masc_tui_acting_pane.Ok
+                      | Masc_tui_acting_pane.Warn
+                      | Masc_tui_acting_pane.Bad
+                      | Masc_tui_acting_pane.Info -> span.text)
+                    rest)
+             in
+             border_paint ^ sel ^ body_paint ^ Ansi.reset)
   else
     let is_tab_header =
       match target with
@@ -2020,9 +2042,11 @@ let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
       Masc_tui_acting_pane.lines ~rows:pane_rows ~cols:pane_cols
         ~scroll:state.acting_pane_scroll input
     in
-    state.acting_pane_cursor <- Masc_tui_acting_pane.reconcile_context_cursor
-      ~previous_rows:!acting_pane_context_rows
-      ~current_rows:rendering.Masc_tui_acting_pane.context_rows state.acting_pane_cursor;
+    state.acting_pane_cursor <-
+      Masc_tui_acting_pane.reconcile_context_cursor
+        ~previous_rows:!acting_pane_context_rows
+        ~current_rows:rendering.Masc_tui_acting_pane.context_rows
+        state.acting_pane_cursor;
     acting_pane_context_rows := rendering.Masc_tui_acting_pane.context_rows;
     let targets = Array.of_list rendering.Masc_tui_acting_pane.targets in
     (match state.acting_pane_cursor, state.acting_pane_snap with
@@ -4495,7 +4519,7 @@ let keeper_control_hints ?(offers_chat = true) ?(taken = []) ~keys state reading
    renders unstyled rather than borrowing another level's colour. *)
 
 let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
-  | System_debug -> Ansi.dim
+  | System_debug -> Theme.recede ()
   | System_info -> Ansi.reset
   | System_warn -> (Theme.warn ())
   | System_error -> (Theme.bad ())
@@ -5543,19 +5567,14 @@ let help_lines ~width (state : state) =
 
 module Context_bars = Masc_tui_context_bars
 
-(* One colour and one shade per producer, on every tab. Seven kinds took
-   seven colours picked kind by kind: two of them were the terminal's default,
-   so "Assistant text" and "Keeper instructions" were the same white row, and
-   the shade beside them cycled with the row's position, which put the same
-   shade on unrelated kinds and moved it when the sizes changed. Colour says
-   where the bytes came in; the composition tree, the request tab's kinds and
-   the proof tab's blocks all read from this one answer. *)
+(* One non-status colour and one shade per producer, on every tab. Colours stay
+   off status.warn / status.info / status.ok / status.bad (RFC §7.3) so producer
+   bars never collide with verification or attention badges: [Slot_1] (blue),
+   neutral foreground ([""]) with [bar_dark], and [Slot_2] (magenta). *)
 let context_source_style = function
-  | Masc_tui_context_inspector.Turn_prompt_assembly -> Theme.warn ()
-  | Masc_tui_context_inspector.Effective_tool_surface ->
-      Theme.accent ()
-  | Masc_tui_context_inspector.Provider_message_list ->
-      Theme.category Theme.Slot_2
+  | Masc_tui_context_inspector.Turn_prompt_assembly -> Theme.category Theme.Slot_1
+  | Masc_tui_context_inspector.Effective_tool_surface -> ""
+  | Masc_tui_context_inspector.Provider_message_list -> Theme.category Theme.Slot_2
 
 (* Shade as well as colour, so the groups stay apart where the terminal
    reports no colour support. *)
@@ -5564,18 +5583,45 @@ let context_source_glyph = function
   | Masc_tui_context_inspector.Effective_tool_surface -> Context_bars.bar_dark
   | Masc_tui_context_inspector.Provider_message_list -> Context_bars.bar_medium
 
-(* What the shades stand for, for a tab that draws them without a column
-   naming the producer beside every row. *)
-let context_source_legend =
+let context_wrap_style style text =
+  if String.equal style "" || String.equal text "" then text
+  else style ^ text ^ Ansi.reset
+
+let context_band ~width ~title ~caption =
+  Context_bars.band_styled
+    ~rule_style:(Theme.border_muted ())
+    ~caption_style:(Theme.recede ())
+    ~width ~title ~caption
+
+let context_split_header ~focused title =
+  if focused then
+    context_wrap_style (Theme.border_focus ()) "╭─ "
+    ^ context_wrap_style Ansi.bold ("▸ " ^ title)
+  else
+    context_wrap_style (Theme.border_muted ()) "╭─ "
+    ^ context_wrap_style (Theme.recede ()) ("  " ^ title)
+
+let context_mini_bar ~style ~width ~numerator ~denominator =
+  let filled = Context_bars.fill_cells ~width ~numerator ~denominator in
+  let empty = max 0 (width - filled) in
+  let repeat_s g n =
+    if n <= 0 then "" else String.concat "" (List.init n (fun _ -> g))
+  in
+  context_wrap_style style (repeat_s Context_bars.bar_full filled)
+  ^ context_wrap_style (Theme.border_muted ()) (repeat_s "\xe2\x96\x91" empty)
+
+(* What the shades stand for, evaluated per draw so runtime theme and language
+   switches apply immediately. *)
+let context_source_legend ~ko () =
+  let recede = Theme.recede () in
   String.concat
-    (Ansi.dim ^ "  \xc2\xb7  " ^ Ansi.reset)
+    (context_wrap_style recede "  \xc2\xb7  ")
     (List.map
        (fun source ->
-         context_source_style source
-         ^ context_source_glyph source
-         ^ Ansi.reset ^ Ansi.dim ^ " "
-         ^ Masc_tui_context_inspector.input_source_label source
-         ^ Ansi.reset)
+         context_wrap_style (context_source_style source)
+           (context_source_glyph source)
+         ^ context_wrap_style recede
+             (" " ^ Masc_tui_context_inspector.input_source_label ~ko source))
        Masc_tui_context_inspector.input_sources)
 
 let context_component_style component =
@@ -5609,16 +5655,15 @@ let context_evidence_style = function
   | Masc_tui_context_inspector.Serialized_turn_snapshot ->
       Ansi.bold ^ Theme.info ()
   | Masc_tui_context_inspector.Producer_digest_only ->
-      Ansi.bold ^ Theme.category Theme.Slot_2
+      Ansi.bold ^ Theme.warn ()
   | Masc_tui_context_inspector.Byte_count_only ->
-      Ansi.bold ^ (Theme.recede ())
+      Theme.recede ()
 
 
-let context_evidence_badge evidence =
-  Printf.sprintf "%s[ %s ]%s"
-    (context_evidence_style evidence)
-    (Masc_tui_context_inspector.input_evidence_label evidence)
-    Ansi.reset
+let context_evidence_badge ~ko evidence =
+  context_wrap_style (context_evidence_style evidence)
+    (Printf.sprintf "[ %s ]"
+       (Masc_tui_context_inspector.input_evidence_label ~ko evidence))
 
 
 let context_split_width cols =
@@ -5662,7 +5707,8 @@ let context_wrapped_lines ~cols ~style text =
   let text = context_escape_wide_clusters ~width text in
   Context_bars.wrap ~width text
   |> List.concat_map (Message_layout.split_cells ~max_cells:width)
-  |> List.map (fun line -> String.make indent ' ' ^ style ^ line ^ Ansi.reset)
+  |> List.map (fun line ->
+       String.make indent ' ' ^ context_wrap_style style line)
 
 let context_detail_preview detail =
   Keeper_chat.bounded_http_error_ends detail |> Keeper_chat.terminal_safe_text
@@ -5677,17 +5723,17 @@ let context_next_request_lines ?(ko = false) ?(runtime_details = fun _ -> []) ?(
   let width = max 1 (framed_inner_width cols - 2) in
   let prose text =
     List.map
-      (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset)
+      (fun line -> "  " ^ context_wrap_style (Theme.recede ()) line)
       (Context_bars.wrap ~width text)
   in
   let fact text =
     List.map (fun line -> "  " ^ line) (Context_bars.wrap ~width text)
   in
   let detail ~dim text =
-    context_wrapped_lines ~cols ~style:(if dim then Ansi.dim else "") text
+    context_wrapped_lines ~cols ~style:(if dim then Theme.recede () else "") text
   in
   [ "  "
-    ^ Context_bars.band ~width
+    ^ context_band ~width
         ~title:(say "다음 요청" "NEXT REQUEST")
         ~caption:(say "지금 계산한 다음 Agent Core 요청 구성" "what the next Agent Core request would carry, computed now")
   ]
@@ -5702,7 +5748,7 @@ let context_next_request_lines ?(ko = false) ?(runtime_details = fun _ -> []) ?(
       ~safe:Keeper_chat.terminal_safe_text ~safe_detail:context_detail_preview
       ~scale forecast)
   @ (if show_scale_note
-     then prose (Masc_tui_token_scale.note scale)
+     then prose (Masc_tui_token_scale.note ~ko scale)
      else [])
   @ [ "" ]
 
@@ -5715,15 +5761,14 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
     ?forecast
     (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
+  let say korean english = if ko then korean else english in
+  let recede = Theme.recede () in
+  let hairline = Theme.border_muted () in
   (* The usable cells after the two-space indent every row carries. No floor
      above one: a floor wider than the pane makes the rows overrun and the
      frame cut them, and every row builder here is exact at any width. *)
   let width = max 1 (framed_inner_width cols - 2) in
-  let bar_width = min 60 width in
-  (* Every reading outside the composition band describes the newest turn. The
-     band describes the newest turn that recorded an exact composition, which
-     is not always the same turn -- so the two are labelled separately rather
-     than drawn as one turn's report. *)
+  let bar_width = min 72 width in
   (* The row the operator stepped back to, or the newest one. Every
      reading in this stack describes this record; the composition band
      below keeps its own rule about which row it measured. *)
@@ -5736,62 +5781,62 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
      to the pane rather than cut by it. *)
   let prose text =
     List.map
-      (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset)
+      (fun line -> "  " ^ context_wrap_style recede line)
       (Context_bars.wrap ~width text)
   in
   (* Same folding for a row of figures, which keeps its own colour. *)
   let fact text =
     List.map (fun line -> "  " ^ line) (Context_bars.wrap ~width text)
   in
+  let fact_styled text =
+    List.map (fun line -> "  " ^ line)
+      (Message_layout.wrap_styled_words ~max_cells:width text)
+  in
+  (* Preserve leading column gutters (e.g. inactive turn marker or indented
+     sub-rows) outside [wrap_styled_words], which trims leading spaces. *)
+  let fact_styled_with_lead ~lead text =
+    let lead_cells = Message_layout.display_width lead in
+    let body_width = max 1 (width - lead_cells) in
+    let cont = "  " ^ String.make lead_cells ' ' in
+    match Message_layout.wrap_styled_words ~max_cells:body_width text with
+    | [] -> [ "  " ^ lead ]
+    | first :: rest ->
+        ("  " ^ lead ^ first) :: List.map (fun line -> cont ^ line) rest
+  in
   let selected_model =
     Option.value
       ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported)
       record.selected_model
   in
-  (* Three short rows rather than one long one. Joined, the turn number and
-     the timestamp fall off the right edge of a narrow pane, and the turn
-     number is what an operator matches against the chat above. *)
   let identity =
-    Printf.sprintf "  %s%s%s  %s%s%s" Ansi.bold
-      (Keeper_chat.terminal_safe_text selected_model)
-      Ansi.reset Ansi.dim
-      (Keeper_chat.terminal_safe_text record.runtime_profile)
-      Ansi.reset
+    Printf.sprintf "  %s  %s"
+      (context_wrap_style Ansi.bold (Keeper_chat.terminal_safe_text selected_model))
+      (context_wrap_style recede (Keeper_chat.terminal_safe_text record.runtime_profile))
   in
   let turn =
-    Printf.sprintf "  %sturn #%d  ·  %s%s" Ansi.dim record.absolute_turn
-      (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
-         ~now:(Unix.gettimeofday ()) record.ts)
-      Ansi.reset
+    "  "
+    ^ context_wrap_style recede
+        (Printf.sprintf (if ko then "턴 #%d  ·  %s" else "turn #%d  ·  %s")
+           record.absolute_turn
+           (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
+              ~now:(Unix.gettimeofday ()) record.ts))
   in
   let trace =
-    Printf.sprintf "  %s%s%s" Ansi.dim
-      (Keeper_chat.terminal_safe_text record.trace_id)
-      Ansi.reset
+    "  " ^ context_wrap_style recede (Keeper_chat.terminal_safe_text record.trace_id)
   in
-  (* Every size on this screen is read in tokens: the window is sized in
-     tokens and the input figure is recorded in tokens, while masc measured bytes before
-     dispatch. The scale is this record's own wire body over its
-     per-request count when it has both, else the page's median, else the
-     fleet figure; the sentence under the rows names which. *)
   let scale = Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows record in
-  (* The recorded input figure leads the band; the estimate from the
-     prepared body follows it, with the bytes it was read from. *)
   let wire_lines =
     match record.request_wire_observation with
     | Some observation ->
-        [ Printf.sprintf "  %s%s tok in the body masc sent  ·  %s%s" Ansi.dim
-            (Masc_tui_token_scale.format_estimate scale observation.body_bytes)
-            (Keeper_chat.terminal_safe_text observation.runtime_profile)
-            Ansi.reset
+        [ "  "
+          ^ context_wrap_style recede
+              (Printf.sprintf
+                 (if ko then "MASC 전송 본문 %s tok  ·  %s"
+                  else "%s tok in the body masc sent  ·  %s")
+                 (Masc_tui_token_scale.format_estimate scale observation.body_bytes)
+                 (Keeper_chat.terminal_safe_text observation.runtime_profile))
         ]
     | None ->
-        (* No body was serialized here, which is the ordinary case on a lane
-           whose client assembles the request itself, not a failure to
-           observe one. What masc handed that client is the composition
-           above, when it belongs to this turn; a resumed client session
-           already holds the earlier turns, so that figure is a ceiling on
-           what went out and not a count of it. *)
         let handed =
           match selection.Inspector.attributed with
           | Some { Inspector.record = attributed; components; _ }
@@ -5803,74 +5848,109 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
                   0 components
               in
               Printf.sprintf
-                "; masc handed it the %s tok of prompt, tools and history \
-                 above, which a resumed session already held in part"
+                (if ko then
+                   " (위 프롬프트·도구·이력 %s tok을 전달했으며, 재개된 세션은 일부를 이미 보유할 수 있음)"
+                 else
+                   "; masc handed it the %s tok of prompt, tools and history \
+                    above, which a resumed session already held in part")
                 (Masc_tui_token_scale.format_estimate scale total)
           | Some _ | None -> ""
         in
         prose
-          ("No body was serialized here: the runtime client assembled the \
-            request itself" ^ handed ^ ".")
+          (say "이 레인에서는 본문이 직렬화되지 않았습니다: 런타임 클라이언트가 직접 요청을 조립했습니다"
+             "No body was serialized here: the runtime client assembled the request itself"
+           ^ handed ^ ".")
   in
   let non_request_token_lines count_label =
     match record.usage.input_tokens, record.context_window with
     | Some tokens, Some maximum when maximum > 0 ->
-        [ Printf.sprintf
-            "  %s %s  %s(this request's own share was not reported)%s"
-            (Inspector.format_tokens tokens) count_label Ansi.dim Ansi.reset
-        ; Printf.sprintf "  %sWindow %s tokens; no per-request figure to place in it%s"
-            Ansi.dim (Inspector.format_tokens maximum) Ansi.reset
+        [ Printf.sprintf "  %s %s  %s"
+            (Inspector.format_tokens tokens) count_label
+            (context_wrap_style recede
+               (say "(이 요청 단독 비중 미보고)" "(this request's own share was not reported)"))
+        ; "  "
+          ^ context_wrap_style recede
+              (Printf.sprintf
+                 (if ko then "컨텍스트 한도 %s 토큰 · 대입할 요청별 수치 없음"
+                  else "Window %s tokens; no per-request figure to place in it")
+                 (Inspector.format_tokens maximum))
         ]
     | Some tokens, (None | Some _) ->
-        [ Printf.sprintf "  %s %s  %s(window not reported)%s"
-            (Inspector.format_tokens tokens) count_label Ansi.dim Ansi.reset
+        [ Printf.sprintf "  %s %s  %s"
+            (Inspector.format_tokens tokens) count_label
+            (context_wrap_style recede (say "(한도 미보고)" "(window not reported)"))
         ]
-    | None, _ -> [ "  Context usage was not reported for this turn" ]
+    | None, _ ->
+        [ "  "
+          ^ context_wrap_style recede
+              (say "이 턴의 컨텍스트 사용량이 보고되지 않았습니다"
+                 "Context usage was not reported for this turn")
+        ]
   in
   let token_lines =
     match record.usage.scope with
     | Runtime_usage_scope.Turn_total ->
-        non_request_token_lines "tokens counted across the client turn"
+        non_request_token_lines
+          (say "토큰 (클라이언트 턴 전체 집계)" "tokens counted across the client turn")
     | Runtime_usage_scope.Conversation_cumulative ->
-        non_request_token_lines "tokens counted across the conversation"
+        non_request_token_lines
+          (say "토큰 (대화 전체 누적)" "tokens counted across the conversation")
     | Runtime_usage_scope.Usage_scope_unavailable ->
-        non_request_token_lines "tokens reported without their scope"
+        non_request_token_lines
+          (say "토큰 (집계 범위 미보고)" "tokens reported without their scope")
     | Runtime_usage_scope.Per_request -> (
         match record.usage.input_provenance with
         | Some Turn_input_provenance.Context_estimate ->
-            non_request_token_lines "estimated context tokens, not dispatched input"
-        | None -> non_request_token_lines "tokens reported without their input provenance"
+            non_request_token_lines
+              (say "추정 컨텍스트 토큰 (실제 전송 입력 아님)"
+                 "estimated context tokens, not dispatched input")
+        | None ->
+            non_request_token_lines
+              (say "토큰 (입력 출처 미보고)"
+                 "tokens reported without their input provenance")
         | Some Turn_input_provenance.Measured_request -> (
         match record.usage.input_tokens, record.context_window with
-        (* A figure above MASC's effective shaping ceiling cannot become a
-           percentage of that ceiling. The client may report a different
-           model window; its size is shown separately below. *)
         | Some tokens, Some maximum when maximum > 0 && tokens > maximum ->
-            fact
+            fact_styled
               (Printf.sprintf
-                 "%s recorded input tokens exceed the %s-token MASC shaping ceiling; \
-                  ctx-fill against that ceiling is unavailable"
-                 (Inspector.format_tokens tokens)
+                 (if ko then
+                    "%s 기록 입력 토큰이 MASC 셰이핑 상한(%s 토큰)을 초과했습니다 · 이 상한 기준 점유율은 계산 불가"
+                  else
+                    "%s recorded input tokens exceed the %s-token MASC shaping ceiling; \
+                     ctx-fill against that ceiling is unavailable")
+                 (context_wrap_style (Theme.bad ()) (Inspector.format_tokens tokens))
                  (Inspector.format_tokens maximum))
         | Some tokens, Some maximum when maximum > 0 ->
-            fact
+            let limit_scale = Chart.Declared_limit (Theme.paint ()) in
+            let pct_style =
+              Chart.meter_tip_style limit_scale ~value:tokens ~max_value:maximum
+            in
+            let pct_text =
+              context_wrap_style pct_style
+                (Printf.sprintf "%.1f%%" (float tokens /. float maximum *. 100.))
+            in
+            fact_styled
               (Printf.sprintf
-                 "%s / %s tokens  ·  %.1f%% of MASC shaping ceiling  ·  %s left"
+                 (if ko then "%s / %s 토큰  ·  MASC 상한의 %s  ·  %s 남음"
+                  else "%s / %s tokens  ·  %s of MASC shaping ceiling  ·  %s left")
                  (Inspector.format_tokens tokens)
                  (Inspector.format_tokens maximum)
-                 (float tokens /. float maximum *. 100.)
+                 pct_text
                  (Inspector.format_tokens (max 0 (maximum - tokens))))
-            (* The shaping ceiling is the turn's context window, a declared
-               limit: each cell takes the colour of its place in it. *)
             @ [ "  "
                 ^ Context_bars.ratio_bar ~width:bar_width ~numerator:tokens
-                    ~denominator:maximum
-                    ~scale:(Chart.Declared_limit (Theme.paint ()))
+                    ~denominator:maximum ~scale:limit_scale
               ]
         | Some tokens, (None | Some _) ->
-            [ Printf.sprintf "  %s input tokens; window not reported"
+            [ Printf.sprintf
+                (if ko then "  입력 %s 토큰 · 한도 미보고" else "  %s input tokens; window not reported")
                 (Inspector.format_tokens tokens) ]
-        | None, _ -> [ "  Context usage was not reported for this turn" ]))
+        | None, _ ->
+            [ "  "
+              ^ context_wrap_style recede
+                  (say "이 턴의 컨텍스트 사용량이 보고되지 않았습니다"
+                     "Context usage was not reported for this turn")
+            ]))
   in
   let provider_context_lines =
     let occupied =
@@ -5880,18 +5960,49 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
         ~output_tokens:record.usage.output_tokens
     in
     match occupied, record.provider_context_window with
-    (* [Turn_record.of_json] admits only a positive window, so no guard here. *)
+    | Some tokens, Some window when window > 0 ->
+      let limit_scale = Chart.Declared_limit (Theme.paint ()) in
+      let pct_style =
+        if tokens > window then Theme.bad ()
+        else Chart.meter_tip_style limit_scale ~value:tokens ~max_value:window
+      in
+      let pct_text =
+        context_wrap_style pct_style
+          (Printf.sprintf "%.1f%%" (float tokens /. float window *. 100.))
+      in
+      let over =
+        if tokens > window then
+          " " ^ context_wrap_style (Theme.bad ())
+                  (say "(보고된 한도 초과)" "(over the reported window)")
+        else ""
+      in
+      fact_styled
+        (Printf.sprintf
+           (if ko then
+              "클라이언트 활성 컨텍스트 %s / 모델 한도 %s 토큰 (%s)%s · MASC 상한과 별개"
+            else
+              "Client reports active context %s / provider window %s tokens (%s)%s; \
+               this is separate from MASC's shaping ceiling")
+           (Inspector.format_tokens tokens)
+           (Inspector.format_tokens window)
+           pct_text over)
+      @ [ "  "
+          ^ Context_bars.ratio_bar ~width:bar_width ~numerator:tokens
+              ~denominator:window ~scale:limit_scale
+        ]
     | Some tokens, Some window ->
       fact
         (Printf.sprintf
-           "Client reports active context %s / provider window %s tokens%s; \
-            this is separate from MASC's shaping ceiling"
+           (if ko then "클라이언트 활성 컨텍스트 %s / 모델 한도 %s 토큰 · MASC 상한과 별개"
+            else "Client reports active context %s / provider window %s tokens; \
+                  this is separate from MASC's shaping ceiling")
            (Inspector.format_tokens tokens)
-           (Inspector.format_tokens window)
-           (if tokens > window then " (over the reported window)" else ""))
+           (Inspector.format_tokens window))
     | None, Some window ->
       fact
-        (Printf.sprintf "Client reports a %s-token model window; active context unavailable"
+        (Printf.sprintf
+           (if ko then "클라이언트 보고 모델 한도 %s 토큰 · 활성 컨텍스트 미보고"
+            else "Client reports a %s-token model window; active context unavailable")
            (Inspector.format_tokens window))
     | (Some _ | None), None -> []
   in
@@ -5899,24 +6010,24 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
     let parts =
       List.filter_map Fun.id
         [ Option.map
-            (fun n -> "cache read " ^ Inspector.format_tokens n)
+            (fun n -> say "캐시 읽기 " "cache read " ^ Inspector.format_tokens n)
             record.usage.cache_read_input_tokens
         ; Option.map
-            (fun n -> "cache created " ^ Inspector.format_tokens n)
+            (fun n -> say "캐시 생성 " "cache created " ^ Inspector.format_tokens n)
             record.usage.cache_creation_input_tokens
         ; Option.map
-            (fun n -> "output " ^ Inspector.format_tokens n)
+            (fun n -> say "출력 " "output " ^ Inspector.format_tokens n)
             record.usage.output_tokens
         ; Option.map
-            (fun n -> "turn output " ^ Inspector.format_tokens n)
+            (fun n -> say "턴 출력 " "turn output " ^ Inspector.format_tokens n)
             record.turn_output_tokens
         ]
     in
     let label =
       match record.usage.scope with
-      | Runtime_usage_scope.Turn_total -> "client turn total  "
-      | Runtime_usage_scope.Conversation_cumulative -> "cumulative  "
-      | Runtime_usage_scope.Usage_scope_unavailable -> "scope not reported  "
+      | Runtime_usage_scope.Turn_total -> say "클라이언트 턴 총합  " "client turn total  "
+      | Runtime_usage_scope.Conversation_cumulative -> say "누적  " "cumulative  "
+      | Runtime_usage_scope.Usage_scope_unavailable -> say "범위 미보고  " "scope not reported  "
       | Runtime_usage_scope.Per_request -> ""
     in
     match parts with
@@ -5931,47 +6042,68 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
         let share =
           if total <= 0 then 0. else float transmitted /. float total *. 100.
         in
-        (* The last projection in this turn does not record its runtime.
-           Wire and durable shapes describe the measurement basis; neither
-           attributes this range to the runtime in the turn's heading. *)
+        let mem_scale =
+          Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory }
+        in
+        let share_style =
+          Chart.meter_tip_style mem_scale ~value:transmitted ~max_value:total
+        in
         let measured, label, reach_prose =
           match window.measurement with
           | Turn_record.Wire_shape ->
-              ( "wire shape"
-              , "projected range"
+              ( say "전송 형태" "wire shape"
+              , say "전송된 이력 범위" "projected range"
               , Printf.sprintf
-                  "An atom is one user message, or one assistant message \
-                   with the tool results it caused. %d older atoms were \
-                   outside this projected range. A cut falls between atoms, \
-                   so a tool result and the call it answers are kept together."
+                  (if ko then
+                     "아톰은 사용자 메시지 1개 또는 어시스턴트 메시지와 연결된 도구 결과 묶음입니다. \
+                      이전 아톰 %d개는 이 전송 범위 밖에 있었습니다. 절단은 아톰 사이에서 이뤄져 \
+                      도구 호출과 결과가 항상 함께 유지됩니다."
+                   else
+                     "An atom is one user message, or one assistant message \
+                      with the tool results it caused. %d older atoms were \
+                      outside this projected range. A cut falls between atoms, \
+                      so a tool result and the call it answers are kept together.")
                   (max 0 (total - transmitted)) )
           | Turn_record.Durable_shape ->
-              ( "durable shape"
-              , "prepared history"
+              ( say "저장 이력 형태" "durable shape"
+              , say "준비된 이력" "prepared history"
               , Printf.sprintf
-                  "An atom is one user message, or one assistant message \
-                   with the tool results it caused. %d older atoms were \
-                   outside this prepared range. Measured on the history list \
-                   prepared for a client; its final request is not measured \
-                   here. A cut falls between atoms, so a \
-                   tool result and the call it answers stay together."
+                  (if ko then
+                     "아톰은 사용자 메시지 1개 또는 어시스턴트 메시지와 연결된 도구 결과 묶음입니다. \
+                      이전 아톰 %d개는 이 준비 범위 밖에 있었습니다. 클라이언트에 전달할 이력 목록 \
+                      기준이며 최종 요청 자체는 여기서 측정되지 않습니다. 절단은 아톰 사이에서 이뤄져 \
+                      도구 호출과 결과가 함께 유지됩니다."
+                   else
+                     "An atom is one user message, or one assistant message \
+                      with the tool results it caused. %d older atoms were \
+                      outside this prepared range. Measured on the history list \
+                      prepared for a client; its final request is not measured \
+                      here. A cut falls between atoms, so a \
+                      tool result and the call it answers stay together.")
                   (max 0 (total - transmitted)) )
         in
-        prose "Last observed history range"
-        @ [ Printf.sprintf "  %s%d of %d kept atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
-            transmitted total Ansi.reset share Ansi.dim measured Ansi.reset
-        ; "  "
-          ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
-              ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
-        ; "  "
-          ^ Context_bars.reach_pointer ~label ~width:bar_width ~transmitted
-              ~total
-        ]
-        @ prose "Range observation runtime: not recorded"
+        prose (say "마지막 관측 대화 범위" "Last observed history range")
+        @ [ Printf.sprintf
+              (if ko then "  보존 아톰 %d개 중 %d개  ·  %s  ·  %s"
+               else "  %d of %d kept atoms  ·  %s  ·  %s")
+              (if ko then total else transmitted)
+              (if ko then transmitted else total)
+              (context_wrap_style share_style (Printf.sprintf "%.1f%%" share))
+              (context_wrap_style recede measured)
+          ; "  "
+            ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
+                ~scale:mem_scale
+          ; "  "
+            ^ Context_bars.reach_pointer_styled ~style:recede ~label ~width:bar_width
+                ~transmitted ~total
+          ]
+        @ prose
+            (say "범위 관측 런타임: 기록되지 않음" "Range observation runtime: not recorded")
         @ prose reach_prose
     | None ->
         context_wrapped_lines ~cols ~style:(Theme.bad ())
-          "Conversation history window was not reported"
+          (say "대화 이력 범위가 보고되지 않았습니다"
+             "Conversation history window was not reported")
   in
   let component_lines =
     match
@@ -5986,13 +6118,17 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
     | None ->
         (if turn_back > 0 then
            context_wrapped_lines ~cols ~style:(Theme.bad ())
-             (Printf.sprintf "Turn #%d recorded no exact input composition"
+             (Printf.sprintf
+                (if ko then "턴 #%d에는 정확한 입력 구성이 기록되지 않았습니다"
+                 else "Turn #%d recorded no exact input composition")
                 record.Turn_record.absolute_turn)
          else
            context_wrapped_lines ~cols ~style:(Theme.bad ())
-             "No turn on this page recorded an exact input composition"
-           @ context_wrapped_lines ~cols ~style:Ansi.dim
-               "The readings above still describe the latest turn.")
+             (say "이 페이지의 어떤 턴에도 정확한 입력 구성이 기록되지 않았습니다"
+                "No turn on this page recorded an exact input composition")
+           @ context_wrapped_lines ~cols ~style:recede
+               (say "위 수치는 여전히 최신 턴 기준입니다."
+                  "The readings above still describe the latest turn."))
     | Some { Inspector.record = attributed; components; turns_behind_latest } ->
         let total =
           List.fold_left
@@ -6000,21 +6136,15 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
               total + component.bytes)
             0 components
         in
-        (* The gap is the whole point of showing it: without it an operator
-           reads a turn the keeper left behind as the current one. *)
         let gap =
           if turns_behind_latest = 0 then []
           else
             context_wrapped_lines ~cols ~style:(Theme.warn ())
               (Printf.sprintf
-                 "Measured on turn #%d, %d turns before the readings above."
+                 (if ko then "턴 #%d 기준 측정 (위 최신 수치보다 %d턴 이전)."
+                  else "Measured on turn #%d, %d turns before the readings above.")
                  attributed.Turn_record.absolute_turn turns_behind_latest)
         in
-        (* Grouped by the producer the bytes entered through, in the order a
-           turn assembles them, and biggest share first inside a group. The
-           list was ranked by size alone: it named seven kinds in one column
-           and never said that three of them are the prompt this turn built
-           and three more are the conversation the provider was handed. *)
         let ranked =
           List.stable_sort
             (fun (left : Turn_record.input_component)
@@ -6056,12 +6186,9 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
           List.fold_left
             (fun widest (source, _) ->
               max widest
-                (Message_layout.display_width (Inspector.input_source_label source)))
+                (Message_layout.display_width (Inspector.input_source_label ~ko source)))
             0 by_source
         in
-        (* Wide enough for the longest component name on screen and no wider:
-           the share and the byte count belong beside the name they describe,
-           not at the far edge of a 140-column overlay. *)
         let label_cells =
           List.fold_left
             (fun widest (_, grouped) ->
@@ -6069,23 +6196,23 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
                 (fun widest (component : Turn_record.input_component) ->
                   max widest
                     (Message_layout.display_width
-                       (Inspector.input_component_label component.component)))
+                       (Inspector.input_component_label ~ko component.component)))
                 widest grouped)
             0 by_source
         in
+        let mini_bar_width =
+          if width - source_width - context_flow_row_chrome_cells - min label_cells 26 >= 8
+          then 6
+          else 0
+        in
+        let mini_bar_extra = if mini_bar_width > 0 then mini_bar_width + 2 else 0 in
         let label_width =
           min label_cells
-            (max 10 (width - source_width - context_flow_row_chrome_cells))
+            (max 4 (width - source_width - context_flow_row_chrome_cells - mini_bar_extra))
         in
-        (* The rows describe [attributed], which is not always the record the
-           band above reads: when the keeper kept turning after its last
-           attributed row, the composition is older than [latest] and its
-           bytes must be read at its own ratio, not the latest turn's. *)
         let attributed_scale =
           Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows attributed
         in
-        (* The row's size in the unit the window is sized in. The bytes it
-           was read from stand once under the rows, beside the basis. *)
         let token_cell bytes =
           Printf.sprintf "\xe2\x89\x88%6s tok"
             (Inspector.format_tokens
@@ -6102,165 +6229,151 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
                     if total = 0 then 0.
                     else float component.bytes /. float total *. 100.
                   in
-                  (* A component with bytes in it must not print as 0.0%: the
-                     screen would then name a kind and deny it in the same
-                     row. *)
                   let share_text =
                     if component.bytes > 0 && share < 0.05 then "<0.1%"
                     else Printf.sprintf "%.1f%%" share
                   in
+                  let mini =
+                    if mini_bar_width > 0 && total > 0 then
+                      "  "
+                      ^ context_mini_bar ~style ~width:mini_bar_width
+                          ~numerator:component.bytes ~denominator:total
+                    else ""
+                  in
                   String.concat ""
                     [ "  "
-                    ; Ansi.dim
-                    ; pad_cells ~width:source_width
-                        (if index = 0 then Inspector.input_source_label source
-                         else "")
-                    ; context_branch ~index ~last
-                    ; Ansi.reset
-                    ; style
-                    ; context_source_glyph source
-                    ; " "
-                    ; fit_width
-                        (Inspector.input_component_label component.component)
-                        label_width
-                    ; Ansi.reset
+                    ; context_wrap_style recede
+                        (pad_cells ~width:source_width
+                           (if index = 0 then Inspector.input_source_label ~ko source
+                            else ""))
+                    ; context_wrap_style hairline (context_branch ~index ~last)
+                    ; context_wrap_style style
+                        (context_source_glyph source ^ " "
+                         ^ fit_width
+                             (Inspector.input_component_label ~ko component.component)
+                             label_width)
+                    ; mini
                     ; Printf.sprintf " %6s  " share_text
-                    ; Ansi.dim
-                    ; token_cell component.bytes
-                    ; Ansi.reset
+                    ; context_wrap_style recede (token_cell component.bytes)
                     ])
                 grouped)
             by_source
         in
-        (* Attributed and serialized figures are compared on the same turn,
-           never across two, and they measure different things: the rows
-           count the content of each block, the request counts the JSON it
-           was wrapped in. On 2026-09-01 the attributed total ran about a
-           fifth above the body across 1,556 turns. Naming both is what keeps
-           an operator from reading the rows as the volume shipped. *)
         let against_wire =
           (match attributed.Turn_record.request_wire_observation with
            | Some observation when total > 0 && observation.body_bytes > 0 ->
                prose
                  (Printf.sprintf
-                    "%s tok attributed here, %s tok in the serialized request. \
-                     The rows count content and the request counts the JSON \
-                     around it, so the two are compared on one turn and not \
-                     expected to match. Read the shares as proportions and the \
-                     request band as this turn's size."
+                    (if ko then
+                       "구성 요소 합계 %s tok, 직렬화 요청 %s tok. 구성 행은 본문 기준이고 요청은 감싼 JSON 기준이므로 같은 턴에서 비교하되 정확히 일치하지 않을 수 있습니다. 비중은 구성 비율로, 실제 턴 크기는 아래 입력 대역으로 읽으세요."
+                     else
+                       "%s tok attributed here, %s tok in the serialized request. \
+                        The rows count content and the request counts the JSON \
+                        around it, so the two are compared on one turn and not \
+                        expected to match. Read the shares as proportions and the \
+                        request band as this turn's size.")
                     (Masc_tui_token_scale.format_estimate attributed_scale total)
                     (Masc_tui_token_scale.format_estimate attributed_scale
                        observation.body_bytes))
            | Some _ ->
                prose
                  (Printf.sprintf
-                    "%s tok attributed here; the serialized request recorded \
-                     no size to set it against."
+                    (if ko then "구성 요소 합계 %s tok · 직렬화 요청 크기가 기록되지 않았습니다."
+                     else "%s tok attributed here; the serialized request recorded \
+                           no size to set it against.")
                     (Masc_tui_token_scale.format_estimate attributed_scale total))
            | None ->
                prose
                  (Printf.sprintf
-                    "%s tok attributed here. No body was serialized on this \
-                     lane, so there is no request figure to set it against."
+                    (if ko then "구성 요소 합계 %s tok · 이 레인은 요청 본문을 직렬화하지 않아 대조할 전송 크기가 없습니다."
+                     else "%s tok attributed here. No body was serialized on this \
+                           lane, so there is no request figure to set it against.")
                     (Masc_tui_token_scale.format_estimate attributed_scale total)))
-          @ prose (Masc_tui_token_scale.note attributed_scale)
+          @ prose (Masc_tui_token_scale.note ~ko attributed_scale)
         in
-        (* The arrow says the rows above are what the request below is made
-           of. Drawn only when both readings are the same turn: where the
-           composition is older, [gap] says so and an arrow into this turn's
-           request would deny it. *)
         let into_request =
           if turns_behind_latest > 0 then []
           else
             let indent = String.make (2 + source_width + 2) ' ' in
-            [ Ansi.dim ^ indent ^ "\xe2\x94\x82" ^ Ansi.reset
-            ; Ansi.dim ^ indent ^ "\xe2\x96\xbc  serialized and dispatched"
-              ^ Ansi.reset
+            [ indent ^ context_wrap_style hairline "\xe2\x94\x82"
+            ; indent
+              ^ context_wrap_style hairline "\xe2\x96\xbc"
+              ^ context_wrap_style recede
+                  (say "  직렬화 후 요청 전송" "  serialized and dispatched")
             ]
         in
         gap @ bar @ rows @ into_request @ against_wire
   in
-  (* Recorded per-request-scoped input, newest first, one row per decoded
-     turn the page holds. A post-compaction context estimate travels with
-     its provenance and gets its own sentence, so it is never read as a
-     dispatched request's count. A provider that reports its usage across
-     the whole conversation gets a row that says so rather than a number
-     that looks like this turn's. *)
   let recent_turns_lines =
     let row index (recent : Inspector.recent_turn) =
-      (* A column of turn moments in the operator's zone, padded to the
-         widest form so the sentences after it stay aligned (RFC
-         tui-one-screen-grammar 6.1). *)
       let ts =
         Printf.sprintf "%-*s" Terminal_text.clock_timestamp_cells
           (Terminal_text.clock_timestamp_of_unix recent.ts) in
-      (* The sentence each row can honestly carry depends on why a figure is
-         absent: a conversation-cumulative provider has a number that is not
-         about this turn, while a per-request provider that reported nothing
-         simply reported nothing. One None in the data covers both, so the
-         scope -- which the record owns -- decides. *)
-      let marker = if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " " in
+      let is_current = index = turn_back in
+      let marker =
+        if is_current then
+          context_wrap_style (Theme.info ()) Masc_tui_theme.Glyph.current_entry
+        else " "
+      in
+      let muted_row msg =
+        [ "  " ^ marker ^ " "
+          ^ context_wrap_style recede (Printf.sprintf "#%-4d %s  %s" recent.turn ts msg)
+        ]
+      in
       let usage_lines = match recent.scope, recent.input_tokens with
       | Runtime_usage_scope.Turn_total, _ ->
-          [ marker ^ Ansi.dim
-            ^ Printf.sprintf " #%-4d %s  client turn total, not per request" recent.turn ts
-            ^ Ansi.reset ]
+          muted_row
+            (say "클라이언트 턴 총합 (요청별 아님)" "client turn total, not per request")
       | Runtime_usage_scope.Usage_scope_unavailable, _ ->
-          [ marker ^ Ansi.dim
-            ^ Printf.sprintf " #%-4d %s  usage scope not reported" recent.turn ts
-            ^ Ansi.reset ]
+          muted_row (say "사용량 범위 미보고" "usage scope not reported")
       | Runtime_usage_scope.Conversation_cumulative, _ ->
-          [ marker
-            ^ Ansi.dim
-            ^ Printf.sprintf
-                " #%-4d %s  counted across the conversation, not per request"
-                recent.turn ts
-            ^ Ansi.reset
-          ]
+          muted_row
+            (say "대화 전체 누적 (요청별 아님)" "counted across the conversation, not per request")
       | Runtime_usage_scope.Per_request, Some input -> (
           match recent.input_provenance with
           | Some Turn_input_provenance.Context_estimate ->
-              [ marker ^ Ansi.dim
-                ^ Printf.sprintf
-                    " #%-4d %s  context estimate %s after compaction, not a \
-                     dispatched request"
-                    recent.turn ts (Inspector.format_tokens input)
-                ^ Ansi.reset
-              ]
+              muted_row
+                (Printf.sprintf
+                   (if ko then "압축 후 컨텍스트 추정 %s (실제 전송 요청 아님)"
+                    else "context estimate %s after compaction, not a dispatched request")
+                   (Inspector.format_tokens input))
           | None ->
-              [ marker ^ Ansi.dim
-                ^ Printf.sprintf " #%-4d %s  count %s; input provenance not reported"
-                    recent.turn ts (Inspector.format_tokens input)
-                ^ Ansi.reset ]
+              muted_row
+                (Printf.sprintf
+                   (if ko then "수치 %s · 입력 출처 미보고"
+                    else "count %s; input provenance not reported")
+                   (Inspector.format_tokens input))
           | Some Turn_input_provenance.Measured_request -> (
-          fact
-            (* fit_width, not %-7s: the cells hold the no-value mark, which is
-               three bytes and one column, and byte padding would end the row
-               two cells short of where the unset ones end. *)
-            (Printf.sprintf "%s #%-4d %s  in %s  cache read %s  out %s"
-               (if index = turn_back then Masc_tui_theme.Glyph.current_entry else " ")
-               recent.turn ts
-               (Message_layout.fit_width (Inspector.format_tokens input)
-                  token_cell_width)
-               (Message_layout.fit_width
-                  (match recent.cache_read with
-                   | Some tokens -> Inspector.format_tokens tokens
-                   | None -> Masc_tui_theme.Glyph.no_value)
-                  token_cell_width)
-               (* The request's own output when reported; otherwise the
-                  client turn's, marked so it is not read as one request's. *)
-               (match recent.output_tokens, recent.turn_output_tokens with
-                 | Some tokens, _ -> Inspector.format_tokens tokens
-                 | None, Some tokens -> "turn " ^ Inspector.format_tokens tokens
-                 | None, None -> Masc_tui_theme.Glyph.no_value))))
+          let head =
+            Printf.sprintf "#%-4d %s" recent.turn
+              (context_wrap_style recede ts)
+          in
+          let in_lbl = context_wrap_style recede (say "입력" "in") in
+          let cache_lbl = context_wrap_style recede (say "캐시" "cache read") in
+          let out_lbl = context_wrap_style recede (say "출력" "out") in
+          let out_val =
+            match recent.output_tokens, recent.turn_output_tokens with
+            | Some tokens, _ -> Inspector.format_tokens tokens
+            | None, Some tokens ->
+                (if ko then "턴 " else "turn ") ^ Inspector.format_tokens tokens
+            | None, None ->
+                context_wrap_style recede Masc_tui_theme.Glyph.no_value
+          in
+          let cache_val =
+            match recent.cache_read with
+            | Some tokens ->
+                Message_layout.fit_width (Inspector.format_tokens tokens) token_cell_width
+            | None ->
+                context_wrap_style recede
+                  (Message_layout.fit_width Masc_tui_theme.Glyph.no_value token_cell_width)
+          in
+          fact_styled_with_lead ~lead:(marker ^ " ")
+            (Printf.sprintf "%s  %s %s  %s %s  %s %s" head
+               in_lbl
+               (Message_layout.fit_width (Inspector.format_tokens input) token_cell_width)
+               cache_lbl cache_val out_lbl out_val)))
       | Runtime_usage_scope.Per_request, None ->
-          [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
-            ^ Ansi.dim
-            ^ Printf.sprintf
-                " #%-4d %s  input not reported for this turn"
-                recent.turn ts
-            ^ Ansi.reset
-          ]
+          muted_row (say "이 턴 입력 미보고" "input not reported for this turn")
       in
       usage_lines
       @ (match
@@ -6270,14 +6383,18 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
            recent.provider_context_window
          with
          | Some tokens, Some window ->
-           fact
-             (Printf.sprintf "    client ctx %s/%s"
+           fact_styled_with_lead ~lead:"    "
+             (Printf.sprintf "%s %s/%s"
+                (context_wrap_style recede (say "클라이언트 컨텍스트" "client ctx"))
                 (Inspector.format_tokens tokens)
                 (Inspector.format_tokens window))
          | None, Some window ->
-           fact
-             (Printf.sprintf "    client window %s; active context unavailable"
-                (Inspector.format_tokens window))
+           fact_styled_with_lead ~lead:"    "
+             (context_wrap_style recede
+                (Printf.sprintf
+                   (if ko then "클라이언트 한도 %s · 활성 컨텍스트 미보고"
+                    else "client window %s; active context unavailable")
+                   (Inspector.format_tokens window)))
          | (Some _ | None), None -> [])
     in
     let trend = Inspector.recent_input_trend selection.Inspector.recent in
@@ -6286,87 +6403,123 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
     let input_trend_lines =
       match inputs with
       | _ :: _ ->
-          let bars, scale = match trend.Inspector.bounds with
-            | None -> List.map (fun _ -> "") inputs, "no scale"
+          let bars, scale_range, tint_of =
+            match trend.Inspector.bounds with
+            | None ->
+                ( List.map (fun _ -> "") inputs
+                , say "범위 없음" "no scale"
+                , fun _ -> "" )
             | Some (minimum, maximum) ->
                 let scaled_inputs = List.map (function
                   | Inspector.Input_count n -> n
                   | Inspector.Input_estimate n -> n
                   | Inspector.Input_invalid _ | Inspector.Input_unavailable -> minimum) inputs in
-                Chart.sparkline_marks ~min:minimum ~max:maximum scaled_inputs,
-                Printf.sprintf "scale %s–%s tokens"
-                  (Masc_tui_value.Count.grouped minimum) (Masc_tui_value.Count.grouped maximum) in
-          (* A turn whose record carries no input count is a value read but
-             not reported, and a negative count is a reading that failed:
-             the 6.4 marks of RFC tui-one-screen-grammar, not [·] and [!]. *)
+                let tint = Theme.series_tint Masc_tui_theme.Usage in
+                let span = float (max 1 (maximum - minimum)) in
+                let tint_of n =
+                  let pos =
+                    if maximum <= minimum then 1.0
+                    else Float.min 1.0 (Float.max 0.0 (float (n - minimum) /. span))
+                  in
+                  tint pos
+                in
+                ( Chart.sparkline_marks ~min:minimum ~max:maximum scaled_inputs
+                , Printf.sprintf
+                    (if ko then "범위 %s–%s 토큰" else "scale %s–%s tokens")
+                    (Masc_tui_value.Count.grouped minimum) (Masc_tui_value.Count.grouped maximum)
+                , tint_of )
+          in
           let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
           let invalid = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed in
-          let marks = List.map2 (fun sample bar -> match sample with
-            | Inspector.Input_unavailable -> unreported
-            | Inspector.Input_invalid _ -> invalid
-            | Inspector.Input_estimate _ -> "~"
-            | Inspector.Input_count 0 -> "0"
-            | Inspector.Input_count _ -> bar) inputs bars |> String.concat "" in
+          let styled_marks =
+            List.map2
+              (fun sample bar ->
+                match sample with
+                | Inspector.Input_unavailable -> context_wrap_style recede unreported
+                | Inspector.Input_invalid _ -> context_wrap_style (Theme.bad ()) invalid
+                | Inspector.Input_estimate _ -> context_wrap_style (Theme.warn ()) "~"
+                | Inspector.Input_count 0 -> context_wrap_style recede "0"
+                | Inspector.Input_count n -> context_wrap_style (tint_of n) bar)
+              inputs bars
+            |> String.concat ""
+          in
           let legends =
-            [ (List.exists (( = ) Inspector.Input_unavailable) inputs, unreported ^ " not reported")
-            ; (List.exists (( = ) (Inspector.Input_count 0)) inputs, "0 recorded zero")
-            ; (List.exists (function Inspector.Input_estimate _ -> true
+            [ ( List.exists (( = ) Inspector.Input_unavailable) inputs
+              , unreported ^ say " 미보고" " not reported" )
+            ; ( List.exists (( = ) (Inspector.Input_count 0)) inputs
+              , say "0 기록된 0" "0 recorded zero" )
+            ; ( List.exists (function Inspector.Input_estimate _ -> true
                        | Inspector.Input_count _ | Inspector.Input_invalid _
-                       | Inspector.Input_unavailable -> false) inputs,
-               "~ context estimate, no dispatched request")
-            ; (List.exists (function Inspector.Input_invalid _ -> true
+                       | Inspector.Input_unavailable -> false) inputs
+              , say "~ 추정치 (전송 요청 아님)" "~ context estimate, no dispatched request" )
+            ; ( List.exists (function Inspector.Input_invalid _ -> true
                        | Inspector.Input_count _ | Inspector.Input_estimate _
-                       | Inspector.Input_unavailable -> false) inputs,
-               invalid ^ " invalid negative count")
+                       | Inspector.Input_unavailable -> false) inputs
+              , invalid ^ say " 음수 오류값" " invalid negative count" )
             ]
             |> List.filter_map (fun (present, text) -> if present then Some text else None) in
-          wrapped "" ("Input by turn: " ^ marks)
-          @ wrapped Ansi.dim (Printf.sprintf
-              "Oldest to newest; %d measured and %d estimated of %d turns; %s%s."
-              trend.Inspector.measured_count trend.Inspector.estimate_count
-              (List.length inputs) scale
-              (if legends = [] then "" else "; " ^ String.concat "; " legends))
-          @ wrapped Ansi.dim
-              "Records older than provenance may hold estimates among the unmarked values too."
+          let spark_label =
+            context_wrap_style recede (say "턴별 입력 추이: " "Input by turn: ")
+          in
+          let spark_row =
+            Message_layout.split_styled_cells ~max_cells:width (spark_label ^ styled_marks)
+            |> List.map (fun line -> "  " ^ line)
+          in
+          spark_row
+          @ wrapped recede
+              (Printf.sprintf
+                 (if ko then "오래된 순 → 최신 · 전체 %d턴 중 실측 %d, 추정 %d · %s%s."
+                  else "Oldest to newest; %d measured and %d estimated of %d turns; %s%s.")
+                 (if ko then List.length inputs else trend.Inspector.measured_count)
+                 (if ko then trend.Inspector.measured_count else trend.Inspector.estimate_count)
+                 (if ko then trend.Inspector.estimate_count else List.length inputs)
+                 scale_range
+                 (if legends = [] then "" else " · " ^ String.concat " · " legends))
+          @ wrapped recede
+              (say "출처 기록 이전의 오래된 기록에는 표시되지 않은 추정치가 포함될 수 있습니다."
+                 "Records older than provenance may hold estimates among the unmarked values too.")
       | [] -> []
     in
     let source_warning = match selection.Inspector.recent, selection.skipped_rows with
       | [], _ | _, Some 0 -> []
       | _ :: _, Some count ->
-          wrapped Ansi.dim (Printf.sprintf
-            "Source omitted %d unreadable records on this page; their positions are unknown."
-            count)
+          wrapped (Theme.warn ())
+            (Printf.sprintf
+               (if ko then "이 페이지에서 읽을 수 없는 기록 %d건이 생략되었습니다 (위치 미상)."
+                else "Source omitted %d unreadable records on this page; their positions are unknown.")
+               count)
       | _ :: _, None ->
-          wrapped Ansi.dim "Source skipped-record count unavailable; page completeness unknown."
+          wrapped recede
+            (say "생략된 기록 수를 알 수 없어 페이지 완전성을 확인할 수 없습니다."
+               "Source skipped-record count unavailable; page completeness unknown.")
     in
     [ "  "
-      ^ Context_bars.band ~width ~title:"RECENT TURNS"
-          ~caption:
-            "recorded input, one row per decoded turn"
+      ^ context_band ~width
+          ~title:(say "최근 턴" "RECENT TURNS")
+          ~caption:(say "디코딩된 턴별 기록 입력" "recorded input, one row per decoded turn")
     ]
     @ input_trend_lines
     @ source_warning
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
-  (* Read top to bottom as the turn is built: what came in, what was sent,
-     how far back it reached, and what was recorded on the turns
-     before it. The request stood above the components it is made of, so the
-     screen opened on a total whose parts were three sections further down. *)
   [ identity; turn; trace; "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"WHAT WENT IN"
-          ~caption:"the pieces this request was built from, in estimated tokens"
+      ^ context_band ~width
+          ~title:(say "입력 구성" "WHAT WENT IN")
+          ~caption:(say "이 요청을 구성한 항목별 추정 토큰" "the pieces this request was built from, in estimated tokens")
     ]
   @ component_lines @ [ "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"RECORDED INPUT"
-          ~caption:"input value and observed serialized body, when available"
+      ^ context_band ~width
+          ~title:(say "기록된 입력" "RECORDED INPUT")
+          ~caption:(say "보고된 입력량과 직렬화 본문 관측치" "input value and observed serialized body, when available")
     ]
   @ token_lines
   @ (match record.usage.scope, record.usage.input_tokens with
      | Runtime_usage_scope.Per_request, Some _ ->
-         context_wrapped_lines ~cols ~style:Ansi.dim
-           "Recorded input can be a post-compaction context estimate; its provenance is not recorded."
+         context_wrapped_lines ~cols ~style:recede
+           (say "기록된 입력값은 출처 미기록 시 압축 후 컨텍스트 추정치일 수 있습니다."
+              "Recorded input can be a post-compaction context estimate; its provenance is not recorded.")
      | Runtime_usage_scope.Per_request, None
      | (Runtime_usage_scope.Turn_total | Runtime_usage_scope.Conversation_cumulative
        | Runtime_usage_scope.Usage_scope_unavailable), _ -> [])
@@ -6375,18 +6528,17 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
   @ cache_lines
   @ [ "" ]
   @ [ "  "
-      ^ Context_bars.band ~width
-          ~title:(if ko then "대화 도달 범위" else "HOW FAR BACK")
-          ~caption:(if ko then "보존된 대화 중 이 요청에 실린 비중" else "how much of the kept conversation this request carried")
+      ^ context_band ~width
+          ~title:(say "대화 도달 범위" "HOW FAR BACK")
+          ~caption:(say "보존된 대화 중 이 요청에 실린 비중" "how much of the kept conversation this request carried")
     ]
   @ history_lines
   @ [ "" ]
   @ Option.fold ~none:[] ~some:(context_next_request_lines ~ko ~runtime_details ~cols ~scale) forecast
   @ (if selection.Inspector.recent = [] then [] else recent_turns_lines) @ [ "" ]
   @ prose
-      (if ko then
+      (say
          "같은 턴에 대한 세 가지 독립 측정치입니다. 서로의 하위 항목이 아니므로 합산되지 않습니다."
-       else
          "Three readings of one turn, not three views of one number: none of \
           them is a breakdown of another, and they do not add up.")
 
@@ -6422,14 +6574,18 @@ let context_part_view state (input : Masc_tui_context_inspector.provider_input)
 
 (* The part's text when it has been read, or one line saying where its read
    stands. *)
-let context_part_text_or_status = function
+let context_part_text_or_status ~ko = function
   | Masc_tui_fetched.Ready text | Masc_tui_fetched.Stale (text, _) -> Ok text
   | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading ->
-      Error (Ansi.dim ^ "Reading this part" ^ Ansi.reset)
+      Error
+        (context_wrap_style (Theme.info ())
+           (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+            ^ (if ko then "항목 불러오는 중" else "Reading this part")))
   | Masc_tui_fetched.Failed detail ->
       Error
-        ((Theme.bad ()) ^ "This part could not be read: "
-         ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
+        (context_wrap_style (Theme.bad ())
+           ((if ko then "항목을 읽지 못했습니다: " else "This part could not be read: ")
+            ^ Keeper_chat.terminal_safe_text detail))
 
 type context_retained_projection =
   { retained_text : string
@@ -6472,30 +6628,29 @@ let section_rule_text = Masc_tui_ansi.Section.rule_text
 let section_heading_style = Masc_tui_ansi.Section.style
 
 let section_heading_line title =
-  Masc_tui_ansi.Section.styled_heading ~rule_style:(Theme.recede ()) title
+  Masc_tui_ansi.Section.styled_heading ~rule_style:(Theme.border_muted ()) title
 
-let context_exact_item_detail_lines ~width ~scale ~part
+let context_exact_item_detail_lines ~ko ~width ~scale ~part
     (item : Masc_tui_context_inspector.exact_input_item) =
   let module Inspector = Masc_tui_context_inspector in
-  (* A message's text is wire JSON; its typed blocks are where the prose
-     lives. Walking the blocks and rendering each part for what it is --
-     markdown prose, a highlighted JSON payload, a structural label -- is the
-     difference between reading the item and re-reading the envelope. *)
+  let say korean english = if ko then korean else english in
+  let recede = Theme.recede () in
   let body =
-    match context_part_text_or_status part with
+    match context_part_text_or_status ~ko part with
     | Error status -> [ status ]
     | Ok text -> context_retained_body_lines ~width text
   in
-  [ section_heading_line "Retained item"
-  ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
+  [ section_heading_line (say "보존된 항목" "Retained item")
+  ; context_wrap_style Ansi.bold (Inspector.exact_input_label ~ko item.kind)
   ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
       (Masc_tui_token_scale.format_estimate scale item.bytes)
       (Inspector.exact_bytes item.bytes)
       (String.sub item.sha256 0 12)
   ; ""
-  ; Theme.recede () ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+  ; context_wrap_style recede (Masc_tui_token_scale.note ~ko scale)
   ; ""
-  ; Theme.recede () ^ "Retained pre-dispatch content" ^ Ansi.reset
+  ; context_wrap_style recede
+      (say "전송 직전 보존된 원문" "Retained pre-dispatch content")
   ]
   @ body
 
@@ -6504,14 +6659,16 @@ let context_exact_item_detail_lines ~width ~scale ~part
    this request made of" before it answers "what is item 34". Counted from the
    same items the list below draws, never from the composition tab's separate
    meter. *)
-let context_exact_input_summary ~width ~scale
+let context_exact_input_summary ~ko ~width ~scale
     (items : Masc_tui_context_inspector.exact_input_item list) =
   let module Inspector = Masc_tui_context_inspector in
+  let say korean english = if ko then korean else english in
+  let recede = Theme.recede () in
   let tally = Hashtbl.create 8 in
   let order = ref [] in
   List.iter
     (fun (item : Inspector.exact_input_item) ->
-      let key = Inspector.exact_input_category item.kind in
+      let key = Inspector.exact_input_category ~ko item.kind in
       let source = Inspector.exact_input_source item.kind in
       match Hashtbl.find_opt tally key with
       | None ->
@@ -6528,9 +6685,6 @@ let context_exact_input_summary ~width ~scale
         | Some (count, bytes, source) -> Some (key, count, bytes, source))
       (List.rev !order)
   in
-  (* Producer first, then size, the way the composition tab groups the same
-     bytes: a reader who learned there that the pink shade is the conversation
-     handed to the provider reads it here without a second legend. *)
   let source_rank source =
     let rec index position = function
       | [] -> List.length Inspector.input_sources
@@ -6550,7 +6704,7 @@ let context_exact_input_summary ~width ~scale
   let total =
     List.fold_left (fun sum (_, _, bytes, _) -> sum + bytes) 0 ranked
   in
-  let bar_width = min 60 width in
+  let bar_width = min 72 width in
   let bar =
     if total = 0 then []
     else
@@ -6565,6 +6719,11 @@ let context_exact_input_summary ~width ~scale
                  ranked)
       ]
   in
+  let pad_left_exact width text =
+    let pad = max 0 (width - Message_layout.display_width text) in
+    String.make pad ' ' ^ text
+  in
+  let show_mini = width >= 76 in
   let rows =
     List.map
       (fun (key, count, bytes, source) ->
@@ -6575,31 +6734,43 @@ let context_exact_input_summary ~width ~scale
           if bytes > 0 && share < 0.05 then "<0.1%"
           else Printf.sprintf "%.1f%%" share
         in
-        let label =
-          key
-          ^ String.make
-              (max 0 (22 - Message_layout.display_width key))
-              ' '
+        let label = fit_width key 20 in
+        let count_text =
+          if ko then pad_left_exact 6 (Printf.sprintf "%d개" count)
+          else Printf.sprintf "%3d %s" count (if count = 1 then "item " else "items")
         in
-        Printf.sprintf "  %s%s %s%s %s%3d %s%s  %9s  \xe2\x89\x88%6s tok  %6s"
-          (context_source_style source)
-          (context_source_glyph source)
-          label Ansi.reset Ansi.dim count
-          (if count = 1 then "item " else "items")
-          Ansi.reset
-          (Masc_tui_context_inspector.exact_bytes bytes)
+        let style = context_source_style source in
+        let mini =
+          if show_mini && total > 0 then
+            "  "
+            ^ context_mini_bar ~style ~width:6 ~numerator:bytes ~denominator:total
+          else ""
+        in
+        Printf.sprintf "  %s %s%s  %s  \xe2\x89\x88%6s tok  %6s"
+          (context_wrap_style style (context_source_glyph source ^ " " ^ label))
+          (context_wrap_style recede count_text)
+          mini
+          (context_wrap_style recede
+             (pad_left_exact 11 (Masc_tui_context_inspector.exact_bytes bytes)))
           (Masc_tui_context_inspector.format_tokens
              (Masc_tui_token_scale.estimate scale bytes))
           share_text)
       ranked
   in
   ( [ "  "
-      ^ Context_bars.band ~width ~title:"BY KIND"
+      ^ context_band ~width
+          ~title:(say "종류별 구성" "BY KIND")
           ~caption:
-            (Printf.sprintf "%s, %s tok (%s) retained"
-               (Masc_tui_message_layout.count_noun (List.length items) "item")
-               (Masc_tui_token_scale.format_estimate scale total)
-               (Masc_tui_context_inspector.exact_bytes total))
+            (if ko then
+               Printf.sprintf "총 %d개 항목 · %s tok (%s) 보존"
+                 (List.length items)
+                 (Masc_tui_token_scale.format_estimate scale total)
+                 (Masc_tui_context_inspector.exact_bytes total)
+             else
+               Printf.sprintf "%s, %s tok (%s) retained"
+                 (Masc_tui_message_layout.count_noun (List.length items) "item")
+                 (Masc_tui_token_scale.format_estimate scale total)
+                 (Masc_tui_context_inspector.exact_bytes total))
     ]
     @ bar @ rows
   , total )
@@ -6608,7 +6779,7 @@ let context_exact_input_summary ~width ~scale
 (* Only the explicit response reader projects its complete Markdown. Keep
    one immutable projection across row counting, painting and scrolling; the
    request list must not pay for a body it no longer previews. Identity and
-   display inputs belong in the key, including terminal theme changes. *)
+   display inputs belong in the key, including terminal theme and language. *)
 type context_response_projection =
   { response_keeper : string option
   ; response_target : Masc_tui_context_inspector.target
@@ -6616,6 +6787,7 @@ type context_response_projection =
   ; response_width : int
   ; response_palette_generation : int
   ; response_table_frame : bool
+  ; response_ko : bool
   ; response_lines : string list
   }
 
@@ -6629,7 +6801,7 @@ let context_response_target_equal left right =
   | Inspector.Recent _, Inspector.Pinned _
   | Inspector.Pinned _, Inspector.Recent _ -> false
 
-let context_response_body_lines ~width state parts =
+let context_response_body_lines ~ko ~width state parts =
   let generation = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
   match !context_response_projection with
   | Some cached
@@ -6638,25 +6810,28 @@ let context_response_body_lines ~width state parts =
          && cached.response_parts == parts
          && cached.response_width = width
          && cached.response_palette_generation = generation
-         && cached.response_table_frame = !table_frame_enabled -> cached.response_lines
+         && cached.response_table_frame = !table_frame_enabled
+         && Bool.equal cached.response_ko ko -> cached.response_lines
   | Some _ | None ->
+      let recede = Theme.recede () in
       let lines = List.concat_map
           (function
             | Masc_tui_context_inspector.Reply_text text ->
                 document_markdown ~width
                   (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
             | Masc_tui_context_inspector.Request_failure detail ->
-                List.map (fun line -> (Theme.bad ()) ^ line ^ Ansi.reset)
+                List.map (fun line -> context_wrap_style (Theme.bad ()) line)
                   (Context_bars.wrap ~width
-                     ("Request failed: " ^ Keeper_chat.terminal_safe_text detail))
+                     ((if ko then "요청 실패: " else "Request failed: ")
+                      ^ Keeper_chat.terminal_safe_text detail))
             | Masc_tui_context_inspector.Tool_steps rows ->
                 List.concat_map (fun row ->
                     Context_bars.wrap ~width (Keeper_chat.terminal_safe_text row)
-                    |> List.map (fun line -> Ansi.dim ^ line ^ Ansi.reset)) rows
+                    |> List.map (fun line -> context_wrap_style recede line)) rows
             | Masc_tui_context_inspector.Reasoning_lines rows ->
                 List.concat_map (fun row ->
                     Context_bars.wrap ~width ("· " ^ Keeper_chat.terminal_safe_text row)
-                    |> List.map (fun line -> Ansi.dim ^ line ^ Ansi.reset)) rows)
+                    |> List.map (fun line -> context_wrap_style recede line)) rows)
           parts in
       context_response_projection := Some
           { response_keeper = state.context_inspector_keeper
@@ -6665,43 +6840,66 @@ let context_response_body_lines ~width state parts =
           ; response_width = width
           ; response_palette_generation = generation
           ; response_table_frame = !table_frame_enabled
+          ; response_ko = ko
           ; response_lines = lines };
       lines
 
 let context_response_lines ~cols state observation =
   let module Inspector = Masc_tui_context_inspector in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  let recede = Theme.recede () in
   let width = max 1 (framed_inner_width cols - 2) in
   let lines = match observation with
-    | Inspector.Not_requested -> [ Ansi.dim ^ "  Open 4:response to read the response" ^ Ansi.reset ]
-    | Inspector.Pending -> [ Ansi.dim ^ "  Response observation is still loading" ^ Ansi.reset ]
+    | Inspector.Not_requested ->
+        [ "  " ^ context_wrap_style recede
+            (say "4:응답 탭을 열어 응답 내용을 조회하세요" "Open 4:response to read the response") ]
+    | Inspector.Pending ->
+        [ "  " ^ context_wrap_style (Theme.info ())
+            (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+             ^ say "응답을 불러오는 중입니다" "Response observation is still loading") ]
     | Inspector.Observed (Error detail) ->
-        context_error_lines ~cols ~label:"Response unavailable" detail
+        context_error_lines ~cols ~label:(say "응답 조회 불가" "Response unavailable") detail
     | Inspector.Observed (Ok { Inspector.parts; source }) ->
         let caption, empty = match source with
           | Inspector.Newest_history_page ->
-              "response in the newest history page",
-              "This turn's reply is not in the newest history page"
+              ( say "최신 대화 이력 페이지의 응답" "response in the newest history page"
+              , say "이 턴의 답변이 최신 대화 이력 페이지에 없습니다"
+                  "This turn's reply is not in the newest history page" )
           | Inspector.Exact_turn_transcript ->
-              "response from the retained turn transcript",
-              "No assistant response was recorded in the retained turn transcript" in
-        [ "  " ^ Context_bars.band ~width ~title:"RESPONSE" ~caption; "" ]
+              ( say "보존된 턴 기록의 응답" "response from the retained turn transcript"
+              , say "보존된 턴 기록에 어시스턴트 응답이 없습니다"
+                  "No assistant response was recorded in the retained turn transcript" ) in
+        [ "  " ^ context_band ~width ~title:(say "응답" "RESPONSE") ~caption; "" ]
         @ (match parts with
-           | [] -> [ Ansi.dim ^ "  " ^ empty ^ Ansi.reset ]
-           | _ -> context_response_body_lines ~width state parts) in
+           | [] -> [ "  " ^ context_wrap_style recede empty ]
+           | _ -> context_response_body_lines ~ko ~width state parts) in
   Plain (lines, None)
 
-let context_response_summary observation =
+let context_response_summary ~ko observation =
   let module Inspector = Masc_tui_context_inspector in
+  let say korean english = if ko then korean else english in
+  let recede = Theme.recede () in
   match observation with
-  | Inspector.Not_requested -> Ansi.dim ^ "  Read response · 4:response" ^ Ansi.reset
-  | Inspector.Pending -> Ansi.dim ^ "  Response loading · 4:response" ^ Ansi.reset
-  | Inspector.Observed (Error _) -> (Theme.bad ()) ^ "  Response unavailable · 4:response" ^ Ansi.reset
+  | Inspector.Not_requested ->
+      "  " ^ context_wrap_style recede (say "응답 읽기 · 4:응답" "Read response · 4:response")
+  | Inspector.Pending ->
+      "  " ^ context_wrap_style (Theme.info ())
+        (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+         ^ say "응답 불러오는 중 · 4:응답" "Response loading · 4:response")
+  | Inspector.Observed (Error _) ->
+      "  " ^ context_wrap_style (Theme.bad ())
+        (say "응답 조회 불가 · 4:응답" "Response unavailable · 4:response")
   | Inspector.Observed (Ok { Inspector.parts = []; source }) ->
       (match source with
        | Inspector.Newest_history_page ->
-           Ansi.dim ^ "  Response not in newest history page · 4:response" ^ Ansi.reset
+           "  " ^ context_wrap_style recede
+             (say "최신 대화 이력에 응답 없음 · 4:응답"
+                "Response not in newest history page · 4:response")
        | Inspector.Exact_turn_transcript ->
-           Ansi.dim ^ "  No assistant response in retained transcript · 4:response" ^ Ansi.reset)
+           "  " ^ context_wrap_style recede
+             (say "보존 기록에 어시스턴트 응답 없음 · 4:응답"
+                "No assistant response in retained transcript · 4:response"))
   | Inspector.Observed (Ok { parts = _ :: _ as parts; source = _ }) ->
       let count, failures = List.fold_left (fun (count, failures) part ->
           count + 1,
@@ -6711,15 +6909,25 @@ let context_response_summary observation =
             | Inspector.Tool_steps _
             | Inspector.Reasoning_lines _ -> 0))
           (0, 0) parts in
-      let failure = if failures = 0 then "" else
-          Printf.sprintf " · %d request failures" failures in
-      (if failures = 0 then Ansi.dim else Theme.bad ())
-      ^ Printf.sprintf "  Response · %d retained parts%s · 4:response" count failure ^ Ansi.reset
+      let failure =
+        if failures = 0 then ""
+        else Printf.sprintf (if ko then " · 요청 실패 %d건" else " · %d request failures") failures
+      in
+      let style = if failures = 0 then recede else Theme.bad () in
+      "  "
+      ^ context_wrap_style style
+          (Printf.sprintf
+             (if ko then "응답 · 보존 파트 %d개%s · 4:응답"
+              else "Response · %d retained parts%s · 4:response")
+             count failure)
 
 
 let context_exact_input_lines ~cols ~scale state ~response ~response_parts
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  let recede = Theme.recede () in
   let items = Inspector.exact_input_items input in
   let width = max 1 (framed_inner_width cols - 2) in
   match state.context_inspector_exact with
@@ -6727,57 +6935,61 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       (match List.nth_opt items index with
        | None ->
            Plain
-             ( [ (Theme.bad ()) ^ "  Selected input item is no longer present"
-                 ^ Ansi.reset
+             ( [ "  "
+                 ^ context_wrap_style (Theme.bad ())
+                     (say "선택한 입력 항목이 더 이상 존재하지 않습니다"
+                        "Selected input item is no longer present")
                ]
              , None )
        | Some item ->
            let detail =
-             context_exact_item_detail_lines ~width ~scale
+             context_exact_item_detail_lines ~ko ~width ~scale
                ~part:(context_part_view state input item) item
              |> List.map (fun line -> "  " ^ line)
            in
            Plain (detail, None))
   | None ->
       let identity =
-        Printf.sprintf "  Exact provider input  %s  %s"
+        Printf.sprintf "  %s  %s  %s"
+          (context_wrap_style Ansi.bold (say "원본 프로바이더 입력" "Exact provider input"))
           (Keeper_chat.terminal_safe_text
              (Ids.Turn_ref.to_string input.turn_ref))
-          (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
-             ~now:(Unix.gettimeofday ()) input.captured_at)
+          (context_wrap_style recede
+             (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
+                ~now:(Unix.gettimeofday ()) input.captured_at))
       in
       let wire =
-        Printf.sprintf "  Prepared request  %s · %s · %s tok (%s) · %s"
+        Printf.sprintf "  %s  %s · %s · %s tok (%s) · %s"
+          (context_wrap_style recede (say "준비된 요청" "Prepared request"))
           input.wire.provider input.wire.model
           (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
           (Inspector.exact_bytes input.wire.body_bytes)
-          (String.sub input.wire.body_sha256 0 12)
+          (context_wrap_style recede (String.sub input.wire.body_sha256 0 12))
       in
       let summary, retained =
-        context_exact_input_summary ~width ~scale items
+        context_exact_input_summary ~ko ~width ~scale items
       in
       let against_wire =
         (if retained > 0 && input.wire.body_bytes > 0 then
-           [ Printf.sprintf
-               "  %s%s tok (%s) retained here, %s tok (%s) in the serialized \
-                request%s"
-               Ansi.dim
-               (Masc_tui_token_scale.format_estimate scale retained)
-               (Inspector.exact_bytes retained)
-               (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
-               (Inspector.exact_bytes input.wire.body_bytes)
-               Ansi.reset
+           [ "  "
+             ^ context_wrap_style recede
+                 (Printf.sprintf
+                    (if ko then "보존 항목 합계 %s tok (%s) · 직렬화 요청 %s tok (%s)"
+                     else "%s tok (%s) retained here, %s tok (%s) in the serialized request")
+                    (Masc_tui_token_scale.format_estimate scale retained)
+                    (Inspector.exact_bytes retained)
+                    (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
+                    (Inspector.exact_bytes input.wire.body_bytes))
            ]
          else [])
-        @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset ]
+        @ (Context_bars.wrap ~width (Masc_tui_token_scale.note ~ko scale)
+           |> List.map (fun line -> "  " ^ context_wrap_style recede line))
         @ (Context_bars.wrap ~width
-             "Item token estimates can change with this ratio even when their bytes and SHA-256 stay identical."
-           |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
+             (say
+                "바이트와 SHA-256이 같아도 환산 비율에 따라 항목별 추정 토큰은 달라질 수 있습니다."
+                "Item token estimates can change with this ratio even when their bytes and SHA-256 stay identical.")
+           |> List.map (fun line -> "  " ^ context_wrap_style recede line))
       in
-      (* What came back for this exact request, to the extent the turn
-         record observed it. The response text lives in the chat store and
-         is not joined here; the counts and the finish reason are the
-         turn's own. *)
       let response_line =
         match response with
         | None -> []
@@ -6785,14 +6997,14 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             let parts =
               List.filter_map Fun.id
                 [ Option.map
-                    (fun tokens -> "output " ^ Inspector.format_tokens tokens)
+                    (fun tokens -> say "출력 " "output " ^ Inspector.format_tokens tokens)
                     record.usage.output_tokens
                 ; Option.map
-                    (fun tokens -> "turn output " ^ Inspector.format_tokens tokens)
+                    (fun tokens -> say "턴 출력 " "turn output " ^ Inspector.format_tokens tokens)
                     record.turn_output_tokens
                 ; Option.map
                     (fun reason ->
-                       "finish "
+                       say "종료 " "finish "
                        ^ Keeper_chat.terminal_safe_text reason)
                     record.finish_reason
                 ]
@@ -6800,34 +7012,24 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             match parts with
             | [] -> []
             | _ ->
-                [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
+                [ Printf.sprintf "  %s  ·  %s"
+                    (context_wrap_style recede (say "응답" "Response"))
+                    (String.concat "  ·  " parts) ]
       in
-      (* The retained usage can describe a measured request, a context
-         estimate or an aggregate. A pre-dispatch snapshot can instead name
-         a later failed attempt; the
-         record has no response-to-capture ID, so do not label this as a hit
-         on the prepared request above. The summary keeps a measured request,
-         a context estimate and unknown provenance distinct, independent of
-         the byte-to-token scale used for individual items. *)
       let cache_lines =
         match response with
-        | None -> [ Ansi.dim ^ "  Provider cache usage unavailable" ^ Ansi.reset ]
+        | None ->
+            [ "  " ^ context_wrap_style recede
+                (say "공급자 캐시 사용량 정보 없음" "Provider cache usage unavailable") ]
         | Some (record : Turn_record.t) ->
             Context_bars.wrap ~width
-              (Inspector.provider_usage_summary record.usage)
+              (Inspector.provider_usage_summary ~ko record.usage)
             |> List.map (fun line -> "  " ^ line)
       in
       let common =
         [ identity; wire ] @ response_line @ cache_lines @ [ "" ] @ summary @ against_wire
-        @ [ context_response_summary response_parts; "" ]
+        @ [ context_response_summary ~ko response_parts; "" ]
       in
-      (* One letter per row says where the item stands in the assembly. The
-         wire is append-only, so the last message is this turn's newest
-         addition and every earlier message is history the window carried
-         forward. The system prompt can include changing turn observations;
-         its position alone does not establish cacheability. The letter
-         states a position on the wire, not a join
-         the pane would have to invent. *)
       let last_message_index =
         List.fold_left
           (fun acc (index, (item : Inspector.exact_input_item)) ->
@@ -6847,23 +7049,32 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       let idx_width =
         max 2 (String.length (string_of_int (max 1 (List.length items))))
       in
+      let is_split = cols >= keeper_split_threshold_cols in
+      let cursor =
+        Masc_tui_context_inspector.normalized_cursor
+          ~count:(List.length items)
+          state.context_inspector_cursor
+      in
+      let sel_style =
+        if is_split && state.context_inspector_focus = Right_pane then
+          Theme.sidebar_selection ()
+        else Theme.selection_style ()
+      in
       let rows width =
         List.mapi
           (fun index (item : Inspector.exact_input_item) ->
-             let selected = index = state.context_inspector_cursor in
+             let selected = index = cursor in
              let marker = if selected then "\xe2\x80\xba" else " " in
              let label_width = max 8 (width - (20 + idx_width)) in
-             (* The list carries the producer's colour the summary above it
-                groups by, except under the selection band, whose own styling
-                owns the whole row. *)
              let label =
-               fit_width (Inspector.exact_input_label item.kind) label_width
+               fit_width (Inspector.exact_input_label ~ko item.kind) label_width
              in
              let label =
                if selected then label
                else
-                 context_source_style (Inspector.exact_input_source item.kind)
-                 ^ label ^ Ansi.reset
+                 context_wrap_style
+                   (context_source_style (Inspector.exact_input_source item.kind))
+                   label
              in
              let body =
                Printf.sprintf " %s %*d %s  %s  \xe2\x89\x88%6s tok"
@@ -6872,58 +7083,43 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                     (Masc_tui_token_scale.estimate scale item.bytes))
              in
              if selected then
-               Theme.selection_style ()
+               sel_style
                ^ fit_width (Masc_tui_theme.strip_sgr body) width
                ^ Ansi.reset
              else body)
           items
       in
-      let ko = state.ui_language = Lang_ko in
-      let say korean english = if ko then korean else english in
       let legend =
-        ("  " ^ context_source_legend)
+        ("  " ^ context_source_legend ~ko ())
         :: (Context_bars.wrap ~width
               (say "P 시스템 프롬프트(턴 관측 포함 가능) · H 대화 이력 · N 이번 턴 신규 · S 스키마"
                  "P system prompt (may include turn observations) · H history · N new this turn · S schema")
-           |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
+           |> List.map (fun line -> "  " ^ context_wrap_style recede line))
       in
       let common = common @ legend @ [ "" ] in
-      if cols >= keeper_split_threshold_cols then
+      if is_split then
         let left_width = context_split_width cols in
-        let cursor =
-          Masc_tui_context_inspector.normalized_cursor
-            ~count:(List.length items)
-            state.context_inspector_cursor
-        in
         let selected = List.nth_opt items cursor in
-        (* The caret names the pane that hears j/k, the way the roster and
-           the board say it; the keys themselves stay in the footer. *)
-        let caret pane = if state.context_inspector_focus = pane then "▸ " else "  " in
         let left =
-          (Ansi.bold
-           ^ "╭─ " ^ caret Left_pane ^ say "요청 항목" "REQUEST ITEMS"
-           ^ Ansi.reset)
+          context_split_header
+            ~focused:(state.context_inspector_focus = Left_pane)
+            (say "요청 항목" "REQUEST ITEMS")
           :: (match rows left_width with
-              | [] -> [ Ansi.dim ^ say "  (보존된 항목 없음)" "  (no retained items)" ^ Ansi.reset ]
+              | [] -> [ "  " ^ context_wrap_style recede (say "(보존된 항목 없음)" "(no retained items)") ]
               | rows -> rows)
         in
         let right_width = max 8 (framed_inner_width cols - left_width - 3) in
         let selected_detail =
           match selected with
-          | None -> [ Ansi.dim ^ say "  j/k로 항목을 선택하세요" "  Select an item with j/k" ^ Ansi.reset ]
+          | None -> [ "  " ^ context_wrap_style recede (say "j/k로 항목을 선택하세요" "Select an item with j/k") ]
           | Some item ->
-              context_exact_item_detail_lines ~width:right_width ~scale
+              context_exact_item_detail_lines ~ko ~width:right_width ~scale
                 ~part:(context_part_view state input item) item
         in
-        (* The detail column starts at the top of its own window and keeps
-           its own scroll. It used to be padded down to sit beside the
-           selected row, which tied reading an item to standing on its row:
-           the longer the list grew, the less of the item the pane could
-           show. *)
         let right =
-          (Ansi.bold
-           ^ "╭─ " ^ caret Right_pane ^ say "선택한 입력" "SELECTED INPUT"
-           ^ Ansi.reset)
+          context_split_header
+            ~focused:(state.context_inspector_focus = Right_pane)
+            (say "선택한 입력" "SELECTED INPUT")
           :: selected_detail
         in
         Split { common; left; right }
@@ -6931,64 +7127,76 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         let header =
           common
           @ [ "  "
-              ^ Context_bars.band ~width ~title:"ITEMS"
-                  ~caption:"in the order the request carries them"
+              ^ context_band ~width
+                  ~title:(say "항목" "ITEMS")
+                  ~caption:(say "요청에 실린 순서" "in the order the request carries them")
             ]
         in
         let body =
           match rows (framed_inner_width cols) with
-          | [] -> [ "  (this request carried no retained items)" ]
+          | [] ->
+              [ "  " ^ context_wrap_style recede
+                  (say "(이 요청에 보존된 항목 없음)" "(this request carried no retained items)") ]
           | rows -> rows
         in
         let selected =
           if items = [] then None
-          else
-            Some
-              (List.length header
-              + min (List.length items - 1)
-                  (max 0 state.context_inspector_cursor))
+          else Some (List.length header + cursor)
         in
         Plain
           ( header @ body
             @ [ ""
-              ; Ansi.dim
-                ^ "  Enter opens one retained item. The request digest identifies the pre-dispatch serialized body; each row carries its own retained digest."
-                ^ Ansi.reset
+              ; "  "
+                ^ context_wrap_style recede
+                    (say
+                       "Enter로 보존 항목을 엽니다. 요청 다이제스트는 전송 직전 직렬화 본문을 가리키며 각 행은 개별 다이제스트를 가집니다."
+                       "Enter opens one retained item. The request digest identifies the pre-dispatch serialized body; each row carries its own retained digest.")
               ]
           , selected )
 
 
-let context_input_map_detail_lines ~width ~scale ~part_of
+let context_input_map_detail_lines ~ko ~width ~scale ~part_of
     (row : Masc_tui_context_inspector.input_map_row) =
   let module Inspector = Masc_tui_context_inspector in
+  let say korean english = if ko then korean else english in
+  let recede = Theme.recede () in
   let digest =
     match row.digest with
-    | None -> "digest  —"
+    | None -> say "다이제스트  —" "digest  —"
     | Some digest ->
-        "digest  " ^ String.sub digest 0 (min 12 (String.length digest))
+        say "다이제스트  " "digest  "
+        ^ String.sub digest 0 (min 12 (String.length digest))
   in
   let explanation =
     match row.evidence with
     | Inspector.Verified_exact_text ->
-        "The retained part's SHA-256 and byte count match the producer's digest and byte count."
+        say
+          "보존된 파트의 SHA-256과 바이트 수가 생성측 다이제스트 및 바이트 수와 일치합니다."
+          "The retained part's SHA-256 and byte count match the producer's digest and byte count."
     | Inspector.Serialized_turn_snapshot ->
-        "A same-turn pre-dispatch serialization snapshot exists, but no item-level join key binds this component row to one retained item. Inspect 2:request for the exact retained items."
+        say
+          "같은 턴의 전송 직전 직렬화 스냅샷은 존재하지만 이 구성 행을 단일 보존 항목에 연결하는 항목별 키가 없습니다. 정확한 보존 항목은 2:요청 탭에서 확인하세요."
+          "A same-turn pre-dispatch serialization snapshot exists, but no item-level join key binds this component row to one retained item. Inspect 2:request for the exact retained items."
     | Inspector.Producer_digest_only ->
-        "The producer retained this prompt block's digest and byte count, but no same-turn exact snapshot is joined. The text cannot be verified or opened."
+        say
+          "생성측이 이 프롬프트 블록의 다이제스트와 바이트 수를 보존했지만 같은 턴의 원본 스냅샷이 연결되지 않아 본문을 검증하거나 열 수 없습니다."
+          "The producer retained this prompt block's digest and byte count, but no same-turn exact snapshot is joined. The text cannot be verified or opened."
     | Inspector.Byte_count_only ->
-        "Only the producer's component byte count is available. No exact provider snapshot is joined to this turn."
+        say
+          "생성측 구성 요소 바이트 수만 기록되어 있으며 이 턴에 연결된 원본 프로바이더 스냅샷이 없습니다."
+          "Only the producer's component byte count is available. No exact provider snapshot is joined to this turn."
   in
   let wrap text =
     Message_layout.wrap_body ~max_cells:width
       ~sanitize:Keeper_chat.terminal_safe_text text
   in
-  [ context_evidence_badge row.evidence
-  ; Ansi.bold ^ Inspector.input_component_label row.component ^ Ansi.reset
+  [ context_evidence_badge ~ko row.evidence
+  ; context_wrap_style Ansi.bold (Inspector.input_component_label ~ko row.component)
   ; Printf.sprintf "%s tok (%s)  ·  %s"
       (Masc_tui_token_scale.format_estimate scale row.bytes)
       (Inspector.exact_bytes row.bytes)
-      (Inspector.input_source_label row.source)
-  ; Ansi.dim ^ digest ^ Ansi.reset
+      (Inspector.input_source_label ~ko row.source)
+  ; context_wrap_style recede digest
   ; ""
   ]
   @ wrap explanation
@@ -6996,8 +7204,8 @@ let context_input_map_detail_lines ~width ~scale ~part_of
   match row.verified_item with
   | None -> []
   | Some item ->
-      [ ""; Ansi.dim ^ "VERIFIED TEXT" ^ Ansi.reset ]
-      @ (match context_part_text_or_status (part_of item) with
+      [ ""; context_wrap_style recede (say "검증된 원문" "VERIFIED TEXT") ]
+      @ (match context_part_text_or_status ~ko (part_of item) with
          | Ok text -> wrap text
          | Error status -> [ status ])
 
@@ -7005,7 +7213,10 @@ let context_input_map_detail_lines ~width ~scale ~part_of
 let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
     (provider_input : Masc_tui_context_inspector.provider_input Masc_tui_context_inspector.observation) =
   let module Inspector = Masc_tui_context_inspector in
-  (* Only a verified row names a part, and only the joined input lists it. *)
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  let recede = Theme.recede () in
+  let hairline = Theme.border_muted () in
   let part_of item =
     match provider_input with
     | Inspector.Observed (Ok input) -> context_part_view state input item
@@ -7016,14 +7227,18 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
     | Inspector.Observed (Ok input) -> Inspector.input_map_rows record (Some input), Some input, []
     | Inspector.Not_requested ->
         ( Inspector.input_map_rows record None, None
-        , [ Ansi.dim ^ "  Original input has not been read" ^ Ansi.reset ] )
+        , [ "  " ^ context_wrap_style recede
+              (say "원본 입력을 아직 읽지 않았습니다" "Original input has not been read") ] )
     | Inspector.Pending ->
         ( Inspector.input_map_rows record None, None
-        , [ Ansi.dim ^ "  Original input is still loading; verification is pending" ^ Ansi.reset ] )
+        , [ "  " ^ context_wrap_style (Theme.info ())
+              (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+               ^ say "원본 입력을 불러오는 중입니다 · 검증 대기 중"
+                   "Original input is still loading; verification is pending") ] )
     | Inspector.Observed (Error detail) ->
         ( Inspector.input_map_rows record None
         , None
-        , context_error_lines ~cols ~label:"Exact input unavailable" detail )
+        , context_error_lines ~cols ~label:(say "요청 입력 조회 불가" "Exact input unavailable") detail )
   in
   match state.context_inspector_exact with
   | Some index ->
@@ -7031,25 +7246,24 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
        | Some ({ verified_item = Some item; _ } as row) ->
            let width = max 8 (framed_inner_width cols - 4) in
            let heading =
-             Printf.sprintf "  %s%s%s  ·  %s tok (%s)  ·  %s  ·  %s"
-               Ansi.bold
-               (Inspector.input_component_label row.component)
-               Ansi.reset
+             Printf.sprintf "  %s  ·  %s tok (%s)  ·  %s  ·  %s"
+               (context_wrap_style Ansi.bold (Inspector.input_component_label ~ko row.component))
                (Masc_tui_token_scale.format_estimate scale row.bytes)
                (Inspector.exact_bytes row.bytes)
-               (Inspector.input_source_label row.source)
-               (context_evidence_badge row.evidence)
+               (Inspector.input_source_label ~ko row.source)
+               (context_evidence_badge ~ko row.evidence)
            in
            let digest =
              match row.digest with
              | None -> ""
              | Some digest ->
-                 Printf.sprintf "  %sdigest %s%s" Ansi.dim
-                   (String.sub digest 0 (min 12 (String.length digest)))
-                   Ansi.reset
+                 "  "
+                 ^ context_wrap_style recede
+                     (say "다이제스트 " "digest "
+                      ^ String.sub digest 0 (min 12 (String.length digest)))
            in
            let body =
-             (match context_part_text_or_status (part_of item) with
+             (match context_part_text_or_status ~ko (part_of item) with
               | Ok text ->
                   Message_layout.wrap_body ~max_cells:width
                     ~sanitize:Keeper_chat.terminal_safe_text text
@@ -7059,91 +7273,105 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
            Plain (error_rows @ (heading :: digest :: "" :: body), None)
        | Some _ | None ->
            Plain
-             ( error_rows @ [ (Theme.bad ())
-                 ^ "  Exact text is not retained for this component" ^ Ansi.reset
-               ]
+             ( error_rows
+               @ [ "  "
+                   ^ context_wrap_style (Theme.bad ())
+                       (say "이 구성 요소의 원문은 보존되지 않았습니다"
+                          "Exact text is not retained for this component")
+                 ]
              , None ))
   | None ->
       let identity =
-        Printf.sprintf "  Provider request map  %s#%d"
+        Printf.sprintf "  %s  %s#%d"
+          (context_wrap_style Ansi.bold (say "프로바이더 요청 매핑" "Provider request map"))
           (Keeper_chat.terminal_safe_text record.trace_id)
           record.absolute_turn
       in
       let joined =
         match exact_input with
         | Some input when Ids.Turn_ref.equal input.turn_ref record.turn_ref ->
-            Ansi.bold ^ Theme.ok () ^ "[ EXACT TURN JOIN ]" ^ Ansi.reset
+            context_wrap_style (Ansi.bold ^ Theme.ok ())
+              (say "[ 동일 턴 원본 연결됨 ]" "[ EXACT TURN JOIN ]")
         | Some _ | None ->
-            Ansi.bold ^ Theme.warn () ^ "[ NO EXACT INPUT JOIN ]" ^ Ansi.reset
+            context_wrap_style (Ansi.bold ^ Theme.warn ())
+              (say "[ 원본 입력 미연결 ]" "[ NO EXACT INPUT JOIN ]")
       in
-      (* One name column for every row, sized by the widest badge on the
-         page, so the token figures line up whatever each row's badge says. *)
       let badge_cells =
         List.fold_left
           (fun widest (row : Inspector.input_map_row) ->
-             max widest (Inspector.input_evidence_badge_cells row.evidence))
+             max widest (Inspector.input_evidence_badge_cells ~ko row.evidence))
           0 rows
+      in
+      let is_split = cols >= keeper_split_threshold_cols in
+      let cursor =
+        Masc_tui_context_inspector.normalized_cursor
+          ~count:(List.length rows)
+          state.context_inspector_cursor
+      in
+      let sel_style =
+        if is_split && state.context_inspector_focus = Right_pane then
+          Theme.sidebar_selection ()
+        else Theme.selection_style ()
       in
       let mapped width =
         let label_width = max 4 (width - 19 - badge_cells) in
         List.mapi
           (fun index (row : Inspector.input_map_row) ->
-             let selected = index = state.context_inspector_cursor in
+             let selected = index = cursor in
              let marker = if selected then "\xe2\x80\xba" else " " in
              let branch = if index = List.length rows - 1 then "└─" else "├─" in
              let label =
-               fit_width (Inspector.input_component_label row.component) label_width
+               fit_width (Inspector.input_component_label ~ko row.component) label_width
              in
-             let badge = context_evidence_badge row.evidence in
-             let component_style, after_label, shown_badge =
-               if selected then "", "", Masc_tui_theme.strip_sgr badge
-               else context_component_style row.component, Ansi.reset, badge
+             let badge = context_evidence_badge ~ko row.evidence in
+             let shown_branch, shown_label, shown_badge =
+               if selected then branch, label, Masc_tui_theme.strip_sgr badge
+               else
+                 ( context_wrap_style hairline branch
+                 , context_wrap_style (context_component_style row.component) label
+                 , badge )
              in
              let body =
-               Printf.sprintf " %s %s %s%s%s \xe2\x89\x88%6s tok %s"
-                 marker branch
-                 component_style label after_label
+               Printf.sprintf " %s %s %s \xe2\x89\x88%6s tok %s"
+                 marker shown_branch shown_label
                  (Inspector.format_tokens
                     (Masc_tui_token_scale.estimate scale row.bytes))
                  shown_badge
              in
              if selected then
-               Theme.selection_style ()
+               sel_style
                ^ fit_width (Masc_tui_theme.strip_sgr body) width
                ^ Ansi.reset
              else body)
           rows
       in
-      let ko = state.ui_language = Lang_ko in
-      let say korean english = if ko then korean else english in
-      if cols >= keeper_split_threshold_cols then
+      if is_split then
         let left_width = context_split_width cols in
-        let cursor =
-          Masc_tui_context_inspector.normalized_cursor
-            ~count:(List.length rows)
-            state.context_inspector_cursor
-        in
-        let caret pane = if state.context_inspector_focus = pane then "▸ " else "  " in
         let left =
-          (Ansi.bold
-           ^ "╭─ " ^ caret Left_pane ^ say "컨텍스트 구성" "CONTEXT STACK"
-           ^ Ansi.reset)
+          context_split_header
+            ~focused:(state.context_inspector_focus = Left_pane)
+            (say "컨텍스트 구성" "CONTEXT STACK")
           :: (match mapped left_width with
-              | [] -> [ Ansi.dim ^ say "  (구성요소 정보 없음)" "  (no component attribution)" ^ Ansi.reset ]
+              | [] -> [ "  " ^ context_wrap_style recede (say "(구성요소 정보 없음)" "(no component attribution)") ]
               | mapped -> mapped)
         in
         let right_width = max 8 (framed_inner_width cols - left_width - 3) in
         let selected_detail =
           match List.nth_opt rows cursor with
-          | None -> [ Ansi.dim ^ say "  j/k로 블록을 선택하세요" "  Select a block with j/k" ^ Ansi.reset ]
+          | None -> [ "  " ^ context_wrap_style recede (say "j/k로 블록을 선택하세요" "Select a block with j/k") ]
           | Some row ->
-              context_input_map_detail_lines ~width:right_width ~scale ~part_of row
+              context_input_map_detail_lines ~ko ~width:right_width ~scale ~part_of row
         in
         let right =
-          (Ansi.bold
-           ^ "╭─ " ^ caret Right_pane ^ say "선택한 블록" "SELECTED BLOCK"
-           ^ Ansi.reset)
+          context_split_header
+            ~focused:(state.context_inspector_focus = Right_pane)
+            (say "선택한 블록" "SELECTED BLOCK")
           :: selected_detail
+        in
+        let scale_note_rows =
+          Context_bars.wrap ~width:(max 12 (framed_inner_width cols - 4))
+            (Masc_tui_token_scale.note ~ko scale)
+          |> List.map (fun line -> "  " ^ context_wrap_style recede line)
         in
         Split
           { common =
@@ -7151,31 +7379,34 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
               ; "  " ^ joined
               ]
               @ error_rows
-              @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
-                ; ""
-                ]
+              @ scale_note_rows
+              @ [ "" ]
           ; left
           ; right
           }
       else
+        let scale_note_rows =
+          Context_bars.wrap ~width:(max 12 (framed_inner_width cols - 4))
+            (Masc_tui_token_scale.note ~ko scale)
+          |> List.map (fun line -> "  " ^ context_wrap_style recede line)
+        in
         let header =
           [ identity
           ; "  " ^ joined
           ]
           @ error_rows
-          @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
-            ; ""
-            ; Ansi.bold ^ "  What the runtime prepared, and why" ^ Ansi.reset
+          @ scale_note_rows
+          @ [ ""
+            ; "  "
+              ^ context_wrap_style Ansi.bold
+                  (say "런타임이 준비한 구성과 검증 근거" "What the runtime prepared, and why")
             ]
-        in
-        let cursor =
-          Masc_tui_context_inspector.normalized_cursor
-            ~count:(List.length rows)
-            state.context_inspector_cursor
         in
         let body =
           match mapped (framed_inner_width cols) with
-          | [] -> [ "  (exact component attribution unavailable)" ]
+          | [] ->
+              [ "  " ^ context_wrap_style recede
+                  (say "(정확한 구성 요소 정보 없음)" "(exact component attribution unavailable)") ]
           | mapped ->
               List.mapi
                 (fun index line ->
@@ -7186,31 +7417,30 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                        match List.nth_opt rows cursor with
                        | None -> []
                        | Some row ->
-                           context_input_map_detail_lines
+                           context_input_map_detail_lines ~ko
                              ~width:(max 8 (framed_inner_width cols - 4))
                              ~scale ~part_of row
                            |> List.map (fun detail -> "    " ^ detail)
                      in
                      line
-                     :: (Ansi.bold ^ "   ╰─ SELECTED BLOCK" ^ Ansi.reset)
+                     :: ("   " ^ context_wrap_style hairline "╰─ "
+                         ^ context_wrap_style Ansi.bold (say "선택한 블록" "SELECTED BLOCK"))
                      :: detail)
                 mapped
               |> List.concat
         in
         let selected =
           if rows = [] then None
-          else
-            Some
-              (List.length header
-              + min (List.length rows - 1)
-                  (max 0 state.context_inspector_cursor))
+          else Some (List.length header + cursor)
         in
         Plain
           ( header @ body
             @ [ ""
-              ; Ansi.dim
-                ^ "  Enter opens VERIFIED text. Use 2:request for exact retained items."
-                ^ Ansi.reset
+              ; "  "
+                ^ context_wrap_style recede
+                    (say
+                       "Enter로 검증된 원문을 엽니다. 전체 보존 항목은 2:요청 탭에서 확인하세요."
+                       "Enter opens VERIFIED text. Use 2:request for exact retained items.")
               ]
           , selected )
 
@@ -7223,6 +7453,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
 let context_inspector_content_lines ~cols state : context_pane_body =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
+  let recede = Theme.recede () in
   let runtime_details id =
     match state.runtime_catalog_reading with
     | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
@@ -7258,11 +7489,14 @@ let context_inspector_content_lines ~cols state : context_pane_body =
   | None ->
       Plain
         ( [ (if state.context_inspector_loading then
-                say "  프로바이더 입력 근거 불러오는 중"
-                  "  Loading provider-input evidence"
-              else
-                say "  요청된 컨텍스트 관측이 없습니다"
-                  "  No context reading has been requested.")
+               "  " ^ context_wrap_style (Theme.info ())
+                 (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+                  ^ say "프로바이더 입력 근거 불러오는 중"
+                      "Loading provider-input evidence")
+             else
+               "  " ^ context_wrap_style recede
+                 (say "요청된 컨텍스트 관측이 없습니다"
+                    "No context reading has been requested."))
           ]
         , None )
   | Some (_, Masc_tui_context_inspector.Request_failed detail) ->
@@ -7298,21 +7532,25 @@ let context_inspector_content_lines ~cols state : context_pane_body =
           ^ Keeper_chat.terminal_safe_text (Ids.Turn_ref.to_string reading.turn_ref) ]
         @ (match reading.record with
            | Inspector.Not_requested ->
-               [ Ansi.dim ^ say "  턴 기록을 아직 읽지 않았습니다" "  Turn record has not been read" ^ Ansi.reset ]
+               [ "  " ^ context_wrap_style recede
+                   (say "턴 기록을 아직 읽지 않았습니다" "Turn record has not been read") ]
            | Inspector.Pending ->
-               [ Ansi.dim ^ say "  턴 기록을 불러오는 중입니다" "  Turn record is still loading" ^ Ansi.reset ]
+               [ "  " ^ context_wrap_style (Theme.info ())
+                   (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+                    ^ say "턴 기록을 불러오는 중입니다" "Turn record is still loading") ]
            | Inspector.Observed (Error detail) ->
                context_error_lines ~cols ~label:(say "턴 기록 조회 불가" "Turn record unavailable") detail
            | Inspector.Observed (Ok exact) ->
                if exact.skipped_rows = 0 then [] else
-                 [ Ansi.dim
-                   ^ (if ko then
-                        Printf.sprintf "  원본 기록 확인됨 · 읽을 수 없는 이력 행 %d건 건너뜀" exact.skipped_rows
-                      else
-                        Printf.sprintf "  Exact record found; %s %s encountered"
-                          (Message_layout.count_noun exact.skipped_rows "unreadable history row")
-                          (if exact.skipped_rows = 1 then "was" else "were"))
-                   ^ Ansi.reset ])
+                 [ "  "
+                   ^ context_wrap_style recede
+                       (if ko then
+                          Printf.sprintf "원본 기록 확인됨 · 읽을 수 없는 이력 행 %d건 건너뜀" exact.skipped_rows
+                        else
+                          Printf.sprintf "Exact record found; %s %s encountered"
+                            (Message_layout.count_noun exact.skipped_rows "unreadable history row")
+                            (if exact.skipped_rows = 1 then "was" else "were"))
+                 ])
       in
       let prepend = function
         | Plain (lines, selected) ->
@@ -7320,7 +7558,11 @@ let context_inspector_content_lines ~cols state : context_pane_body =
         | Split body -> Split { body with common = prefix @ body.common }
       in
       let pending label =
-        Plain ([ Ansi.dim ^ "  " ^ label ^ say " 불러오는 중입니다" " is still loading" ^ Ansi.reset ], None)
+        Plain
+          ( [ "  " ^ context_wrap_style (Theme.info ())
+                (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+                 ^ label ^ say " 불러오는 중입니다" " is still loading") ]
+          , None )
       in
       let unavailable label detail =
         Plain
@@ -7348,7 +7590,10 @@ let context_inspector_content_lines ~cols state : context_pane_body =
             let label = say "원본 입력" "Original input" in
             (match reading.provider_input with
              | Inspector.Not_requested ->
-                 Plain ([ say "  원본 입력을 아직 읽지 않았습니다" "  Original input has not been read" ], None)
+                 Plain
+                   ( [ "  " ^ context_wrap_style recede
+                         (say "원본 입력을 아직 읽지 않았습니다" "Original input has not been read") ]
+                   , None )
              | Inspector.Pending -> pending label
              | Inspector.Observed (Error detail) -> unavailable label detail
              | Inspector.Observed (Ok input) ->
@@ -7367,7 +7612,10 @@ let context_inspector_content_lines ~cols state : context_pane_body =
           { selection; provider_input; response; forecast } ) ->
       (match state.context_inspector_target with
        | Masc_tui_context_inspector.Pinned _ ->
-           Plain ([ say "  요청한 불변 원본 기록 대기 중" "  Waiting for the requested immutable source" ], None)
+           Plain
+             ( [ "  " ^ context_wrap_style recede
+                   (say "요청한 불변 원본 기록 대기 중" "Waiting for the requested immutable source") ]
+             , None )
        | Masc_tui_context_inspector.Recent turn_back ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Response ->
@@ -7380,12 +7628,17 @@ let context_inspector_content_lines ~cols state : context_pane_body =
        | Masc_tui_context_inspector.Exact_input ->
            (match provider_input with
             | Masc_tui_context_inspector.Not_requested ->
-                Plain ([ say "  원본 입력을 아직 읽지 않았습니다" "  Original input has not been read" ], None)
+                Plain
+                  ( [ "  " ^ context_wrap_style recede
+                        (say "원본 입력을 아직 읽지 않았습니다" "Original input has not been read") ]
+                  , None )
             | Masc_tui_context_inspector.Pending ->
-                Plain ([ Ansi.dim ^ say "  원본 입력을 불러오는 중입니다" "  Original input is still loading" ^ Ansi.reset ], None)
+                Plain
+                  ( [ "  " ^ context_wrap_style (Theme.info ())
+                        (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+                         ^ say "원본 입력을 불러오는 중입니다" "Original input is still loading") ]
+                  , None )
             | Masc_tui_context_inspector.Observed (Ok input) ->
-                (* The same stepped/attributed record names the input,
-                   token scale and response counters on this tab. *)
                 let record = Masc_tui_context_inspector.viewing_record selection ~turn_back in
                 let scale = Option.fold ~none:Masc_tui_token_scale.fleet
                     ~some:(Masc_tui_token_scale.of_turn ~rows:selection.Masc_tui_context_inspector.rows) record in
@@ -7399,21 +7652,15 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                   , None ))
        | Masc_tui_context_inspector.Input_map ->
            (
-                (* The row the exact provider input was fetched for, so the
-                   join on this tab stays honest; the keys walk the same
-                   row's components. *)
                 match
                   Masc_tui_context_inspector.viewing_record selection
                     ~turn_back
                 with
                 | None ->
-                    (* The map is a per-component table; with no attribution
-                       there are no rows to draw, and inventing them from the
-                       latest turn's totals would state bytes nobody
-                       measured. *)
                     Plain
                       ( context_wrapped_lines ~cols ~style:(Theme.bad ())
-                          "No turn on this page recorded an exact input composition"
+                          (say "이 페이지의 어떤 턴에도 정확한 입력 구성이 기록되지 않았습니다"
+                             "No turn on this page recorded an exact input composition")
                       , None )
                 | Some record ->
                     let scale =

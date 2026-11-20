@@ -49,6 +49,16 @@ val band : width:int -> title:string -> caption:string -> string
     the title alone leaves a plain rule. The row is exactly [width] cells in all
     three cases, so the frame never has to cut it. *)
 
+val band_styled :
+  rule_style:string ->
+  caption_style:string ->
+  width:int ->
+  title:string ->
+  caption:string ->
+  string
+(** Like {!band}, painting hairline rules with [rule_style] and the caption
+    with [caption_style]. Empty styles suppress reset escapes under NO_COLOR. *)
+
 val wrap : width:int -> string -> string list
 (** [wrap ~width text] breaks [text] on spaces into lines of at most
     [width] Unicode display cells. Used for the rows under a bar, which say what
@@ -88,7 +98,17 @@ val reach_pointer :
     not establish how the range was measured. The flag hangs to the left of
     the cut and ends on it, which is the usual shape because the filled run is
     a cell or two; when that run leaves no room on the left, the label sits
-    to the right of the cut instead. *)
+    to the right of the cut instead, clamped to [width]. *)
+
+val reach_pointer_styled :
+  style:string ->
+  label:string ->
+  width:int ->
+  transmitted:int ->
+  total:int ->
+  string
+(** Like {!reach_pointer}, painting the flag with [style] (no escape sequences
+    when [style] is empty). *)
 
 val bar_full : string
 val bar_dark : string

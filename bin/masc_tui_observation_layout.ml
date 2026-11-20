@@ -142,7 +142,8 @@ let context_summary = function
    which is in [/help] and nowhere a reader looking at this figure would find
    it. The key says what it opens, because a narrow block can put it on a row
    of its own. *)
-let context_facts ~ko ~inspect_key observation =
+let context_facts ?(pressure_tone = fun _ -> Masc_tui_chat_facts.Amount)
+    ~ko ~inspect_key observation =
   let say korean english = if ko then korean else english in
   let fact = Masc_tui_chat_facts.fact in
   let context = say "컨텍스트 " "Context " in
@@ -156,7 +157,7 @@ let context_facts ~ko ~inspect_key observation =
       let grouped_int = Masc_tui_value.Count.grouped in
       (* The share and the counts behind it are one fact: the counts alone on
          the next row would not say what they count. *)
-      [ fact ~label:context Masc_tui_chat_facts.Amount
+      [ fact ~label:context (pressure_tone (context_pressure ratio))
           (Printf.sprintf "%.0f%% (%s/%s %s)" (ratio *. 100.0) (grouped_int tokens)
              (grouped_int maximum) tok)
       ; key

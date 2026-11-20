@@ -49,4 +49,4 @@ val format_estimate : t -> int -> string
 
 (** One sentence naming the basis, why this record could not supply it,
     and calling the figures estimates. *)
-val note : t -> string
+val note : ?ko:bool -> t -> string

@@ -41,11 +41,14 @@ val log_entry_rows : width:int -> time:string -> Tui_decode.log_entry -> string 
     field order; callers order entries newest first before slicing rows. *)
 val context_summary : Tui_decode.context_observation -> context_summary
 val context_facts :
+  ?pressure_tone:(context_pressure -> 'reading Masc_tui_chat_facts.tone) ->
   ko:bool ->
   inspect_key:string ->
   Tui_decode.context_observation ->
   'reading Masc_tui_chat_facts.t list
 (** The context reading as facts of the chat's Keeper status block: the share,
     the token counts behind it, and the key that opens the breakdown.
+    [pressure_tone] lets a styled surface colour the measured share by its
+    {!context_pressure} band; omitting it keeps {!Masc_tui_chat_facts.Amount}.
     [inspect_key] is the name of that key, spelled by the key table; this
     layout cannot see the table, so the caller hands it over. *)

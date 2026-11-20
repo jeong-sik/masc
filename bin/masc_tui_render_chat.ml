@@ -862,8 +862,8 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
   with
   | None ->
       [ who
-      ; fact (Chat_facts.Reading Ansi.dim) (say "\xc3\x97 사용 불가" "\xc3\x97 unavailable")
-      ; fact (Chat_facts.Reading Ansi.dim) "\xe2\x80\x94"
+      ; fact (Chat_facts.Reading (Theme.recede ())) (say "\xc3\x97 사용 불가" "\xc3\x97 unavailable")
+      ; fact (Chat_facts.Reading (Theme.recede ())) "\xe2\x80\x94"
       ]
       @ memory
       @ if registered then [ context_unread ] else []
@@ -875,7 +875,7 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
          direct message is the one this block gives amounts. *)
       let health_style =
         if reading.Keeper_control.paused
-        then Ansi.dim
+        then Theme.recede ()
         else (
           match
             Option.map Tui_decode.keeper_health_reading (Keeper_control.health reading)
@@ -883,7 +883,7 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
           | Some Tui_decode.Health_running -> Theme.ok ()
           | Some Tui_decode.Health_failing -> Theme.warn ()
           | Some Tui_decode.Health_offline -> Theme.bad ()
-          | Some Tui_decode.Health_idle | None -> Ansi.dim)
+          | Some Tui_decode.Health_idle | None -> Theme.recede ())
       in
       let status =
         fact
@@ -940,19 +940,24 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
           | Ok _ | Error (Tui_decode.Identity_unreadable _) ->
               (match live_context_view state keeper with
                | Masc_tui_fetched.Ready observation ->
-                   Observation_layout.context_facts ~ko
+                   Observation_layout.context_facts
+                     ~pressure_tone:(function
+                       | Observation_layout.Quiet -> Chat_facts.Amount
+                       | Observation_layout.Pressure -> Chat_facts.Reading (Theme.warn ())
+                       | Observation_layout.Danger -> Chat_facts.Reading (Theme.bad ()))
+                     ~ko
                      ~inspect_key:Masc_tui_keys.context_inspector_label observation
                | Masc_tui_fetched.Stale _ ->
-                   [ fact Chat_facts.Plain
+                   [ fact (Chat_facts.Reading (Theme.warn ()))
                        (say "컨텍스트 새로 조회 실패" "Context refresh failed")
                    ]
                | Masc_tui_fetched.Failed _ ->
-                   [ fact Chat_facts.Plain
+                   [ fact (Chat_facts.Reading (Theme.bad ()))
                        (say "컨텍스트 조회 실패" "Context read failed")
                    ]
                | Masc_tui_fetched.Loading ->
                    let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-                   [ fact Chat_facts.Plain
+                   [ fact (Chat_facts.Reading (Theme.info ()))
                        (under_way ^ " " ^ say "컨텍스트 조회 중" "Context reading")
                    ]
                | Masc_tui_fetched.Absent -> [ context_unread ]))
@@ -1273,10 +1278,9 @@ let tool_document_rows_shown = 8
 
 let tool_detail_palette () : Tool_detail.palette =
   { Tool_detail.branch = Theme.recede ()
-    (* A field's name and a document member's name are the same kind of
-       thing, so they read in the same colour; the weight is what separates
-       the tree's own labels from the names inside a payload. *)
-  ; label = Ansi.bold ^ Theme.accent ()
+    (* Weight separates the tree's own labels from payload member keys without
+       spending the interactive accent colour on static labels (RFC §7.3). *)
+  ; label = Ansi.bold
   ; separator = Theme.recede ()
   ; key = Theme.Syntax.json_key ()
   ; string_ = Theme.Syntax.string ()
@@ -4972,7 +4976,10 @@ let render_keeper_message (state : state) =
            "  " ^ Theme.warn () ^ ui_text state ~ko:"[이벤트 유실]" ~en:"[events lost]" ^ Ansi.reset
          else "")
         ^ (if String.equal modes "" then ""
-           else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset)
+           else
+             let style = Theme.recede () in
+             if String.equal style "" then "  " ^ modes
+             else Printf.sprintf "  %s%s%s" style modes Ansi.reset)
       in
       title, mode_suffix
     in
@@ -5718,9 +5725,14 @@ let render_keeper_message (state : state) =
         let bar =
           match state.voice_capture_phase, state.voice_level_db with
           | Voice_recording, Some db when not state.voice_capture_withdrawn ->
+            let level_tone =
+              if db >= -6.0 then Theme.bad ()
+              else if db >= -18.0 then Theme.warn ()
+              else Theme.ok ()
+            in
             Printf.sprintf
               "%s%s%s%s  %.0f dB"
-              (Theme.accent ())
+              level_tone
               (Masc_tui_footer.voice_bar
                  ~width:Masc_tui_footer.voice_bar_width
                  ~db:(Some db))
@@ -5832,8 +5844,13 @@ let render_keeper_message (state : state) =
           | None -> pane_rows
           | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in
         Option.iter (fun portrait ->
+          let caption =
+            ui_text state ~ko:" 현재 대화 · " ~en:" Active chat · "
+            ^ display_keeper_name
+          in
+          let style = Theme.recede () in
           box_line left_buf keeper_roster_pane_cols
-            (Theme.recede () ^ " 현재 대화 · " ^ display_keeper_name ^ Ansi.reset);
+            (if String.equal style "" then caption else style ^ caption ^ Ansi.reset);
           (* Anchor pixels to the caption actually drawn above the selectable roster. *)
           let picture_row = count_frame_lines left_buf in
           List.iter (box_line left_buf keeper_roster_pane_cols)

@@ -70,20 +70,28 @@ let apportion ~width ~weights =
    so wide CJK glyphs and multi-byte symbols fill the exact band width. *)
 let display_cells text = Masc_tui_message_layout.display_width text
 
-let band ~width ~title ~caption =
+let wrap_style style text =
+  if String.equal style "" || String.equal text "" then text
+  else style ^ text ^ Sgr.reset
+
+let band_styled ~rule_style ~caption_style ~width ~title ~caption =
   let title_cells = display_cells title in
   let caption_cells = display_cells caption in
   if width >= 9 + title_cells + caption_cells then
     let fill = width - 8 - title_cells - caption_cells in
-    Sgr.dim ^ repeat Box.h 2 ^ Sgr.reset ^ " " ^ Sgr.bold ^ title ^ Sgr.reset
-    ^ " " ^ Sgr.dim ^ repeat Box.h fill ^ " " ^ caption ^ " " ^ repeat Box.h 2
-    ^ Sgr.reset
+    wrap_style rule_style (repeat Box.h 2)
+    ^ " " ^ wrap_style Sgr.bold title ^ " "
+    ^ wrap_style rule_style (repeat Box.h fill)
+    ^ " " ^ wrap_style caption_style caption ^ " "
+    ^ wrap_style rule_style (repeat Box.h 2)
   else if width >= 5 + title_cells then
-    Sgr.dim ^ repeat Box.h 2 ^ Sgr.reset ^ " " ^ Sgr.bold ^ title ^ Sgr.reset
-    ^ " " ^ Sgr.dim
-    ^ repeat Box.h (width - 4 - title_cells)
-    ^ Sgr.reset
-  else Sgr.dim ^ repeat Box.h (max 0 width) ^ Sgr.reset
+    wrap_style rule_style (repeat Box.h 2)
+    ^ " " ^ wrap_style Sgr.bold title ^ " "
+    ^ wrap_style rule_style (repeat Box.h (width - 4 - title_cells))
+  else wrap_style rule_style (repeat Box.h (max 0 width))
+
+let band ~width ~title ~caption =
+  band_styled ~rule_style:Sgr.dim ~caption_style:Sgr.dim ~width ~title ~caption
 
 (* Word wrap for the rows under a bar. The pane can be narrower than a
    sentence, and a sentence the frame cuts with a tilde loses the half that
@@ -135,6 +143,16 @@ let wrap ~width text =
     match List.rev !lines with [] -> [ "" ] | wrapped -> wrapped
   end
 
+let track_style_of_scale = function
+  | Masc_tui_chart.Declared_limit paint
+  | Masc_tui_chart.Series { paint; _ }
+  | Masc_tui_chart.Anomaly { paint; _ } -> (
+      match paint.depth with
+      | Masc_tui_theme.No_color -> ""
+      | Masc_tui_theme.Colors_16 | Masc_tui_theme.Colors_256
+      | Masc_tui_theme.Truecolor ->
+          Masc_tui_theme.border_muted ~surface:paint.surface paint.palette)
+
 (* The fill walks the meter's ramp (RFC tui-one-screen-grammar section 7.3):
    a declared limit by each cell's place against the limit, a series by its
    hue from deep to bright. *)
@@ -145,32 +163,61 @@ let ratio_bar ~width ~numerator ~denominator ~scale =
       ~max_value:denominator ~reset:Sgr.reset
       (List.init (max 0 filled) (fun _ -> bar_full))
   in
-  fill ^ Sgr.dim ^ repeat bar_light (max 0 (width - filled)) ^ Sgr.reset
+  let empty = max 0 (width - filled) in
+  if empty = 0 then fill
+  else fill ^ wrap_style (track_style_of_scale scale) (repeat bar_light empty)
 
 (* The kept atoms are a share of the history, not a use of a limit; the
    caller names the series their run walks. *)
 let reach_bar ~width ~transmitted ~total ~scale =
   let sent = fill_cells ~width ~numerator:transmitted ~denominator:total in
-  Sgr.dim
-  ^ repeat bar_light (max 0 (width - sent))
-  ^ Sgr.reset
+  let omitted = max 0 (width - sent) in
+  let prefix =
+    if omitted = 0 then ""
+    else wrap_style (track_style_of_scale scale) (repeat bar_light omitted)
+  in
+  prefix
   ^ Masc_tui_chart.meter_fill_run ~scale ~width ~value:transmitted ~max_value:total
       ~reset:Sgr.reset
       (List.init (max 0 sent) (fun _ -> bar_full))
 
-let reach_pointer ~label:pointer_label ~width ~transmitted ~total =
-  let sent = fill_cells ~width ~numerator:transmitted ~denominator:total in
-  let cut = max 0 (width - sent) in
-  let label_cells = display_cells pointer_label in
-  (* The corner has to sit on the first sent cell, not on the last omitted one:
-     one cell to its left it labels the history it is telling the reader was
-     left behind. *)
-  Sgr.dim
-  ^ (if cut >= label_cells + 2 then
-       String.make (cut - label_cells - 2) ' '
-       ^ pointer_label ^ " " ^ Box.h ^ Box.br
-     else String.make cut ' ' ^ Box.bl ^ " " ^ pointer_label)
-  ^ Sgr.reset
+let reach_pointer_styled ~style ~label:pointer_label ~width ~transmitted ~total =
+  if width <= 0 then ""
+  else
+    let sent = fill_cells ~width ~numerator:transmitted ~denominator:total in
+    let cut = max 0 (width - sent) in
+    let label_cells = display_cells pointer_label in
+    (* The corner has to sit on the first sent cell, not on the last omitted one:
+       one cell to its left it labels the history it is telling the reader was
+       left behind. Never overrun [width]. *)
+    let raw =
+      if cut >= label_cells + 2 && cut < width then
+        String.make (cut - label_cells - 2) ' '
+        ^ pointer_label ^ " " ^ Box.h ^ Box.br
+      else if cut < width && cut + 2 + label_cells <= width then
+        String.make cut ' ' ^ Box.bl ^ " " ^ pointer_label
+      else if cut >= width then
+        let fitted = Masc_tui_message_layout.fit_width pointer_label width in
+        let pad = max 0 (width - display_cells fitted) in
+        String.make pad ' ' ^ fitted
+      else if width <= 2 then
+        Masc_tui_message_layout.fit_width pointer_label width
+      else
+        let avail = width - cut - 2 in
+        if avail >= 2 then
+          String.make cut ' ' ^ Box.bl ^ " "
+          ^ Masc_tui_message_layout.fit_width pointer_label avail
+        else if cut >= 3 then
+          let fitted = Masc_tui_message_layout.fit_width pointer_label (cut - 2) in
+          let pad = max 0 (cut - 2 - display_cells fitted) in
+          String.make pad ' ' ^ fitted ^ " " ^ Box.h ^ Box.br
+        else
+          String.make cut ' ' ^ Box.bl
+    in
+    wrap_style style raw
+
+let reach_pointer ~label ~width ~transmitted ~total =
+  reach_pointer_styled ~style:Sgr.dim ~label ~width ~transmitted ~total
 
 let stacked_bar ~width ~segments =
   let cells =
@@ -178,6 +225,8 @@ let stacked_bar ~width ~segments =
   in
   (* [apportion] returns one count per weight, so the zip is total. *)
   String.concat ""
-    (List.map
-       (fun ((style, glyph, _), count) -> style ^ repeat glyph count ^ Sgr.reset)
+    (List.filter_map
+       (fun ((style, glyph, _), count) ->
+         if count <= 0 then None
+         else Some (wrap_style style (repeat glyph count)))
        (List.combine segments cells))

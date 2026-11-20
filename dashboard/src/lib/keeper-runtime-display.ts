@@ -268,34 +268,6 @@ function keeperLifecycleStatus(
   }
 }
 
-function transientProviderRuntimeText(value: string | null | undefined): boolean {
-  const text = value?.trim().toLowerCase()
-  if (!text) return false
-  return (
-    text.includes('tls alert')
-    || text.includes('tls_error')
-    || text.includes('handshake failure')
-    || text.includes('network')
-    || text.includes('connection refused')
-    || text.includes('connection reset')
-    || text.includes('dns')
-    || text.includes('timeout')
-    || text.includes('timed out')
-  )
-}
-
-export function isKeeperAutoRecoverPause(keeper: Keeper | null | undefined): boolean {
-  if (!keeper || !isKeeperPaused(keeper)) return false
-  const blockerClass = keeper.runtime_blocker_class
-  if (blockerClass === 'provider_runtime_error') {
-    return (
-      transientProviderRuntimeText(keeper.runtime_blocker_summary)
-      || transientProviderRuntimeText(keeper.attention_reason)
-    )
-  }
-  return false
-}
-
 /** Distinguish "never booted" from "was running but stopped" keepers.
  *  Reached only when no lifecycle phase named the state. The registry phase
  *  is the authority for a process that is up; without one, the turn counter

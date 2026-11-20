@@ -197,7 +197,7 @@ let cell_share ~dots (left, right) = value_share ~dots (Stdlib.max left right)
    so the colour says how high the row sits; a one-row graph takes it from
    each cell's own height. [distance] counts rows from where the columns
    start growing. *)
-let draw_rows ~tint ~rows ~dots ~distance ~mask cell_pairs =
+let draw_rows ?(baseline_style = "") ~tint ~rows ~dots ~distance ~mask cell_pairs =
   List.init rows (fun row ->
     let from_base = distance row in
     let row_style =
@@ -206,16 +206,23 @@ let draw_rows ~tint ~rows ~dots ~distance ~mask cell_pairs =
     tinted_row
       (List.map
          (fun ((left, right) as pair) ->
-           ( mask ~row left right,
-             if rows > 1 then row_style else tint (cell_share ~dots pair) ))
+           let cell_style =
+             if not (String.equal baseline_style "")
+                && from_base = 0
+                && Stdlib.max left right = 1
+             then baseline_style
+             else if rows > 1 then row_style
+             else tint (cell_share ~dots pair)
+           in
+           (mask ~row left right, cell_style))
          cell_pairs))
 ;;
 
 (* Rows, top first, of columns growing up: the top row holds the dots
    [rows - 1] rows above the base. *)
-let rising_rows ~tint ~rows ~dots cell_pairs =
+let rising_rows ?(baseline_style = "") ~tint ~rows ~dots cell_pairs =
   let distance row = rows - 1 - row in
-  draw_rows ~tint ~rows ~dots ~distance cell_pairs ~mask:(fun ~row left right ->
+  draw_rows ~baseline_style ~tint ~rows ~dots ~distance cell_pairs ~mask:(fun ~row left right ->
     let from_base = distance row in
     braille_left_dots.(row_dots ~row:from_base left)
     lor braille_right_dots.(row_dots ~row:from_base right))
@@ -229,14 +236,19 @@ let falling_rows ~tint ~rows ~dots cell_pairs =
       lor braille_right_dots_down.(row_dots ~row right))
 ;;
 
-let with_axis ~axis ~axis_cells rows =
+let with_axis ?(axis_style = "") ~axis ~axis_cells rows =
+  let styled_axis =
+    if String.equal axis_style "" || String.equal (String.trim axis) "" then axis
+    else axis_style ^ axis ^ Masc_tui_theme.Sgr.reset
+  in
   List.mapi
     (fun row dots ->
-      (if row = 0 then axis ^ " " else String.make axis_cells ' ') ^ dots)
+      (if row = 0 then styled_axis ^ " " else String.make axis_cells ' ') ^ dots)
     rows
 ;;
 
-let braille_graph ~tint ~width ~rows ~axis ~maximum samples =
+let braille_graph ?(baseline_style = "") ?(axis_style = "")
+    ~tint ~width ~rows ~axis ~maximum samples =
   let rows = Stdlib.max 1 rows in
   let axis_cells, cells = graph_layout ~width ~axis in
   if never_read samples then Never_read
@@ -244,8 +256,9 @@ let braille_graph ~tint ~width ~rows ~axis ~maximum samples =
   else
     let dots = rows * braille_top in
     Drawn
-      (with_axis ~axis ~axis_cells
-         (rising_rows ~tint ~rows ~dots (levelled ~dots ~maximum ~cells samples)))
+      (with_axis ~axis_style ~axis ~axis_cells
+         (rising_rows ~baseline_style ~tint ~rows ~dots
+            (levelled ~dots ~maximum ~cells samples)))
 ;;
 
 let braille_mirror ~up_tint ~down_tint ~width ~half_rows ~axis ~maximum ~up ~down =

@@ -476,14 +476,15 @@ let chunk_calls_text ~ko (chunk : Acting.chunk) =
 
 (* The same count as a figure alone, for the fleet row's four-cell column.
    The word "calls" moves to the column header, which says it once for every
-   row instead of once per row. "?" is an end event that named no count, and "-"
-   is a record with no call yet: they are different facts and neither is 0. *)
+   row instead of once per row. "?" is an end event that named no count, and
+   {!Masc_tui_theme.Glyph.no_value} ("—") is a record with no call yet: they are
+   different facts and neither is 0. *)
 let calls_figure (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then
     match chunk.Acting.ck_calls with Some count -> string_of_int count | None -> "?"
   else
     match List.length (Acting.chunk_tools chunk) with
-    | 0 -> "-"
+    | 0 -> Masc_tui_theme.Glyph.no_value
     | seen -> string_of_int seen ^ "+"
 
 type record_state = Record_open | Record_unfinished | Record_done
@@ -1555,10 +1556,11 @@ let window ~below ~scroll ~overview body =
    be decided from what they are: the column names belong over rows that use
    the columns, and beside the roster there may be none. *)
 let trace_summary ~ko count =
-  Printf.sprintf
-    (if ko then "추적 불가: 키퍼 %d명 · 자세한 내용은 키퍼 정보 › 메타데이터"
-     else "Trace unavailable: %d Keepers · details in Keeper Info › Metadata")
-    count
+  if ko then
+    Printf.sprintf "추적 불가: 키퍼 %d명 · 자세한 내용은 키퍼 정보 › 메타데이터" count
+  else
+    Printf.sprintf "Trace unavailable: %d %s · details in Keeper Info › Metadata"
+      count (if count = 1 then "Keeper" else "Keepers")
 
 (* A Keeper that never started has no trace to lose, so its row is a note.
    A row whose metadata did not decode lost one, and that is a warning. *)

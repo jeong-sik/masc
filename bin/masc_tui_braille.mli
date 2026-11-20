@@ -110,6 +110,8 @@ val braille_level : dots:int -> maximum:int -> sample -> int
 type tint = float -> string
 
 val braille_graph :
+  ?baseline_style:string ->
+  ?axis_style:string ->
   tint:tint ->
   width:int -> rows:int -> axis:string -> maximum:int -> sample list -> graph
 (** A graph [width] cells wide and [rows] text rows tall, growing up from its
@@ -121,11 +123,14 @@ val braille_graph :
 
     A graph more than one row tall colours each row by its height, from [0]
     at the base row to [1] at the top; a one-row graph colours each cell by
-    the taller of its two times through {!value_share}.
+    the taller of its two times through {!value_share}. When [baseline_style]
+    is non-empty, cells holding only measured-zero baseline dots ([⣀]/[⢀]/[⡀])
+    draw in [baseline_style] instead of [tint 0.0]. When [axis_style] is
+    non-empty and [axis] is non-blank, the axis text wraps in [axis_style] and
+    closes with a reset.
     A colour code goes out only where it changes, a blank cell opens none, an
     empty tint after a colour resets to the foreground, and each row that
-    opened a colour ends with a reset. The axis text draws in the
-    foreground. *)
+    opened a colour ends with a reset. *)
 
 val braille_mirror :
   up_tint:tint ->

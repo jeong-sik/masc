@@ -187,6 +187,12 @@ let scheduler_probe_symbol : Decode.scheduler_probe option -> Masc_tui_card.symb
    give the card. A failed probe takes the colour its mark means instead, so
    a card with no stalls does not draw a failure in the colour of one that is
    fine. *)
+let wrap_style style text =
+  if String.equal style "" || String.equal text "" then text
+  else style ^ text ^ Ansi.reset
+
+let dim_lbl text = wrap_style (Theme.recede ()) text
+
 let scheduler_probe_status ~ko ~tone probe : Masc_tui_card.status =
   let symbol = scheduler_probe_symbol probe in
   let word =
@@ -198,9 +204,11 @@ let scheduler_probe_status ~ko ~tone probe : Masc_tui_card.status =
   let tone =
     match symbol with
     | Masc_tui_card.Mark Masc_tui_value.Mark.Failed -> Theme.bad ()
-    | Masc_tui_card.Mark
-        Masc_tui_value.Mark.(Settled | Under_way | Waiting | Paused | Caution | Yours)
-    | Masc_tui_card.Unknown _ -> tone
+    | Masc_tui_card.Mark Masc_tui_value.Mark.Under_way ->
+        if String.equal tone "" then Theme.info () else tone
+    | Masc_tui_card.Mark Masc_tui_value.Mark.(Waiting | Paused)
+    | Masc_tui_card.Unknown _ -> Theme.recede ()
+    | Masc_tui_card.Mark Masc_tui_value.Mark.(Settled | Caution | Yours) -> tone
   in
   { Masc_tui_card.symbol; word; tone }
 
@@ -210,7 +218,6 @@ let pulse_line ~cols (state : state) kpis =
   let inner_width = max 10 (framed_inner_width cols) in
   (* A count with no reading behind it draws the mark of why (RFC
      tui-one-screen-grammar section 6.4). *)
-  let dim_lbl s = Theme.recede () ^ s ^ Ansi.reset in
   let sep = dim_lbl " · " in
   let turns = match kpis.turns with
     | None ->
@@ -220,9 +227,19 @@ let pulse_line ~cols (state : state) kpis =
            | Some _ -> Unknown.Read_failed
            | None -> Unknown.Unread)
     | Some count ->
-      let run = Count.grouped count.running
-      and idle = Count.grouped count.idle
-      and unavail = Count.grouped count.unavailable in
+      let run_raw = Count.grouped count.running in
+      let run =
+        if count.running > 0 then
+          wrap_style (Theme.info ())
+            (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " ^ run_raw)
+        else run_raw
+      in
+      let idle = Count.grouped count.idle in
+      let unavail_raw = Count.grouped count.unavailable in
+      let unavail =
+        if count.unavailable > 0 then wrap_style (Theme.warn ()) unavail_raw
+        else unavail_raw
+      in
       if ko then
         dim_lbl "턴: 실행 중 " ^ run ^ sep
         ^ dim_lbl "대기 중 " ^ idle ^ sep
@@ -235,16 +252,20 @@ let pulse_line ~cols (state : state) kpis =
   let roster =
     match state.local_keepers, state.keepers_error with
     | Local_workspace_read, None ->
-      Printf.sprintf (if ko then "키퍼 %s · 일시정지 %s" else "%s configured · %s paused")
-        (Count.grouped kpis.total_keepers) (Count.grouped kpis.paused_keepers)
-    | Local_workspace_unread, None -> say "키퍼 " "roster " ^ Unknown.(glyph Unread)
+      let total = Count.grouped kpis.total_keepers in
+      let paused = Count.grouped kpis.paused_keepers in
+      if ko then
+        dim_lbl "키퍼 " ^ total ^ sep ^ dim_lbl "일시정지 " ^ paused
+      else
+        total ^ dim_lbl " configured" ^ sep ^ paused ^ dim_lbl " paused"
+    | Local_workspace_unread, None ->
+      dim_lbl (say "키퍼 " "roster ") ^ Unknown.(glyph Unread)
     | (Local_workspace_unread | Local_workspace_read | Local_workspace_failed _), Some _
     | Local_workspace_failed _, None ->
-      say "키퍼 " "roster " ^ Unknown.(glyph Read_failed)
+      dim_lbl (say "키퍼 " "roster ") ^ wrap_style (Theme.bad ()) Unknown.(glyph Read_failed)
   in
-  let text = Printf.sprintf "  %s  %s| %s%s"
-      turns (Theme.recede ()) roster Ansi.reset in
-  Layout.truncate_end inner_width text ^ Ansi.reset
+  let text = "  " ^ turns ^ "  " ^ wrap_style (Theme.border_muted ()) "│" ^ " " ^ roster in
+  Layout.truncate_end inner_width text
 
 (* The three sections as a tab strip, drawn the way the surface strip above
    every screen is: a mark on the one being read, the names beside it. It was
@@ -408,7 +429,9 @@ let engine_series_tint = function
    with no room for dots, the number the card already wrote. *)
 let engine_graph_row ~cells ~axis ~number series (state : state) =
   match
-    Masc_tui_engine_samples.graph ~tint:(engine_series_tint series) ~width:cells
+    Masc_tui_engine_samples.graph
+      ~baseline_style:(Theme.recede ()) ~axis_style:(Theme.recede ())
+      ~tint:(engine_series_tint series) ~width:cells
       ~axis_cells:engine_axis_cells ~axis series state.engine_samples
   with
   | Braille.Drawn rows -> String.concat "" rows
@@ -459,7 +482,6 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
      workers on one row take 37 cells or more, so at the narrower card widths
      the cut took the workers off. The compact summary is one row wide enough
      for all three. *)
-  let dim_lbl s = Theme.recede () ^ s ^ Ansi.reset in
   let sep = dim_lbl " · " in
   let workers_styled =
     if ko then dim_lbl "워커 " ^ domains else domains ^ dim_lbl " workers"
@@ -514,13 +536,13 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
         Unknown.(glyph Unreported) )
     | Some s ->
       let tone = if s.ssch_stalls > 0 then Theme.warn () else "" in
-      let badge_tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.ok () in
+      let badge_tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.info () in
       let p95_val = Printf.sprintf "%.3fms" s.ssch_p95_ms in
       let max_val = Printf.sprintf "%.3fms" s.ssch_max_ms in
       let samples_val = Count.grouped s.ssch_samples in
       let stalls_val =
         let raw = Count.grouped s.ssch_stalls in
-        if s.ssch_stalls > 0 then Theme.warn () ^ raw ^ Ansi.reset else raw
+        if s.ssch_stalls > 0 then wrap_style (Theme.warn ()) raw else raw
       in
       let row2 =
         if ko then
@@ -771,7 +793,8 @@ let render_section_fleet ?session_rows ~cols (state : state) =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
+  let clip text = Layout.truncate_end inner_width text in
+  let sep = dim_lbl " · " in
   (* A block of this page is headed like every detail section (RFC
      tui-one-screen-grammar §5.2, §7.3). *)
   let title text = Doc.section_rule ~width:inner_width ~indent:2 text in
@@ -782,9 +805,9 @@ let render_section_fleet ?session_rows ~cols (state : state) =
      read is the loader's own sentence, as the transport block draws it. *)
   let identity_gap =
     match state.server_identity, state.server_identity_error with
-    | Some _, (None | Some _) -> say "서버가 보고하지 않음" "not reported by the server"
-    | None, Some error -> Terminal_text.single_line error
-    | None, None -> field_unread ~ko
+    | Some _, (None | Some _) -> dim_lbl (say "서버가 보고하지 않음" "not reported by the server")
+    | None, Some error -> wrap_style (Theme.bad ()) (Terminal_text.single_line error)
+    | None, None -> dim_lbl (field_unread ~ko)
   in
   let reported_count =
     Option.fold ~none:Unknown.(glyph Unreported) ~some:Count.grouped
@@ -797,52 +820,64 @@ let render_section_fleet ?session_rows ~cols (state : state) =
           [ "    "
             ^ Chart.dot_meter ~width:(min 56 (max 24 (inner_width - 4)))
                 ~value:gc.sgc_live_words ~max_value:(max 1 gc.sgc_heap_words)
-                ~label:(say "점유율" "Occupancy")
+                ~label:(say "점유율" "Occupancy") ~label_style:(Theme.recede ())
                 ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
                 ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
           ]
         else []
       in
-      [ Printf.sprintf
-          (if ko then "    힙 %s · 사용 중 %s · 마이너 힙 설정 %s"
-           else "    Heap %s · live %s · configured minor heap %s")
-          (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words)
-          (format_words gc.sgc_minor_heap_size) ]
+      [ "    " ^ dim_lbl (say "힙 " "Heap ") ^ format_words gc.sgc_heap_words
+        ^ sep ^ dim_lbl (say "사용 중 " "live ") ^ format_words gc.sgc_live_words
+        ^ sep ^ dim_lbl (say "마이너 힙 설정 " "configured minor heap ")
+        ^ format_words gc.sgc_minor_heap_size ]
       @ meter_rows
-      @ [ Printf.sprintf
-            (if ko then "    수거: 마이너 %s · 메이저 %s · 강제 메이저 %s · 압축 %s"
-             else "    Collections: minor %s · major %s · forced %s · compactions %s")
-            (Count.grouped gc.sgc_minor_collections) (Count.grouped gc.sgc_major_collections)
-            (Count.grouped gc.sgc_forced_major_collections) (Count.grouped gc.sgc_compactions)
-        ; Printf.sprintf
-            (if ko then "    할당 누계: 마이너 %s · 승격 %s · 메이저 %s"
-             else "    Allocation totals: minor %s · promoted %s · major %s")
-            (format_megawords gc.sgc_minor_words) (format_megawords gc.sgc_promoted_words)
-            (format_megawords gc.sgc_major_words) ]
+      @ [ "    " ^ dim_lbl (say "수거: 마이너 " "Collections: minor ")
+          ^ Count.grouped gc.sgc_minor_collections
+          ^ sep ^ dim_lbl (say "메이저 " "major ") ^ Count.grouped gc.sgc_major_collections
+          ^ sep ^ dim_lbl (say "강제 메이저 " "forced ")
+          ^ Count.grouped gc.sgc_forced_major_collections
+          ^ sep ^ dim_lbl (say "압축 " "compactions ") ^ Count.grouped gc.sgc_compactions
+        ; "    " ^ dim_lbl (say "할당 누계: 마이너 " "Allocation totals: minor ")
+          ^ format_megawords gc.sgc_minor_words
+          ^ sep ^ dim_lbl (say "승격 " "promoted ") ^ format_megawords gc.sgc_promoted_words
+          ^ sep ^ dim_lbl (say "메이저 " "major ") ^ format_megawords gc.sgc_major_words ]
+  in
+  let probe_styled probe =
+    let text = scheduler_probe_text ~ko probe in
+    match probe with
+    | Some (Decode.Probe_reported (Scheduler_lag.Stopped _)) -> wrap_style (Theme.bad ()) text
+    | Some (Decode.Probe_reported Scheduler_lag.Running) -> wrap_style (Theme.info ()) text
+    | Some (Decode.Probe_reported Scheduler_lag.(Not_started | Cancelled))
+    | Some (Decode.Probe_unknown _) | None -> dim_lbl text
   in
   let scheduler_lines = match scheduler with
     | None -> [ "    " ^ identity_gap ]
     | Some sched when sched.ssch_samples <= 0 ->
-      [ say "    서버 표본 구간에 지연 표본 없음" "    No latency samples in the producer window"
-      ; Printf.sprintf
-          (if ko then "    프로브 %s · 워커 도메인 %s" else "    Probe %s · worker domains %s")
-          (scheduler_probe_text ~ko sched.ssch_probe)
-          (reported_count sched.ssch_pool_domains) ]
+      [ "    " ^ dim_lbl (say "서버 표본 구간에 지연 표본 없음" "No latency samples in the producer window")
+      ; "    " ^ dim_lbl (say "프로브 " "Probe ") ^ probe_styled sched.ssch_probe
+        ^ sep ^ dim_lbl (say "워커 도메인 " "worker domains ")
+        ^ reported_count sched.ssch_pool_domains ]
     | Some sched ->
-      [ Printf.sprintf "    p50 %.3fms · p95 %.3fms · p99 %.3fms"
-          sched.ssch_p50_ms sched.ssch_p95_ms sched.ssch_p99_ms
-      ; Printf.sprintf
-          (if ko then "    최대 %.3fms · 평균 %.3fms · 표본 %s"
-           else "    Maximum %.3fms · mean %.3fms · %s samples")
-          sched.ssch_max_ms sched.ssch_mean_ms (Count.grouped sched.ssch_samples)
-      ; Printf.sprintf
-          (if ko then "    서버가 센 정체 %s · 프로브 %s · 워커 도메인 %s"
-           else "    Producer-reported stalls %s · probe %s · worker domains %s")
-          (Count.grouped sched.ssch_stalls)
-          (scheduler_probe_text ~ko sched.ssch_probe)
-          (reported_count sched.ssch_pool_domains)
-      ; say "    스케줄러 지연은 런타임 응답 속도이며 작업 결과가 아닙니다."
-          "    Scheduler delay measures runtime responsiveness, not task output." ]
+      let stalls_raw = Count.grouped sched.ssch_stalls in
+      let stalls =
+        if sched.ssch_stalls > 0 then wrap_style (Theme.warn ()) stalls_raw
+        else stalls_raw
+      in
+      [ "    " ^ dim_lbl "p50 " ^ Printf.sprintf "%.3fms" sched.ssch_p50_ms
+        ^ sep ^ dim_lbl "p95 " ^ Printf.sprintf "%.3fms" sched.ssch_p95_ms
+        ^ sep ^ dim_lbl "p99 " ^ Printf.sprintf "%.3fms" sched.ssch_p99_ms
+      ; "    " ^ dim_lbl (say "최대 " "Maximum ") ^ Printf.sprintf "%.3fms" sched.ssch_max_ms
+        ^ sep ^ dim_lbl (say "평균 " "mean ") ^ Printf.sprintf "%.3fms" sched.ssch_mean_ms
+        ^ sep
+        ^ (if ko then dim_lbl "표본 " ^ Count.grouped sched.ssch_samples
+           else Count.grouped sched.ssch_samples ^ dim_lbl " samples")
+      ; "    " ^ dim_lbl (say "서버가 센 정체 " "Producer-reported stalls ") ^ stalls
+        ^ sep ^ dim_lbl (say "프로브 " "probe ") ^ probe_styled sched.ssch_probe
+        ^ sep ^ dim_lbl (say "워커 도메인 " "worker domains ")
+        ^ reported_count sched.ssch_pool_domains
+      ; "    " ^ dim_lbl
+          (say "스케줄러 지연은 런타임 응답 속도이며 작업 결과가 아닙니다."
+             "Scheduler delay measures runtime responsiveness, not task output.") ]
   in
   let path_word = function
     | Masc.Transport_metrics.Grpc_subscribe -> say "gRPC 구독" "gRPC subscribe"
@@ -850,49 +885,64 @@ let render_section_fleet ?session_rows ~cols (state : state) =
     | Sse -> "SSE"
     | Streamable_http -> "Streamable HTTP"
   in
-  let pressure_word = function
-    | Masc.Transport_metrics.Steady -> say "안정" "steady"
-    | Watch -> say "주의" "watch"
-    | High -> say "높음" "high"
+  let pressure_styled = function
+    | Masc.Transport_metrics.Steady ->
+        wrap_style (Theme.ok ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled ^ " " ^ say "안정" "steady")
+    | Watch ->
+        wrap_style (Theme.warn ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " " ^ say "주의" "watch")
+    | High ->
+        wrap_style (Theme.bad ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " " ^ say "높음" "high")
   in
   (* A failed read is the loader's own sentence, which names its subject and
      its verdict, so it is not drawn as a read not made yet. *)
   let transport_lines = match state.transport, state.transport_error with
     | Some transport, _ ->
-      [ Printf.sprintf
-          (if ko then "    주 경로 %s · gRPC %s" else "    Primary path %s · gRPC %s")
-          (path_word transport.th_primary_path)
-          (Option.fold ~none:(say "꺼짐" "off") ~some:(Printf.sprintf ":%d")
-             transport.th_grpc_port)
-      ; Printf.sprintf
-          (if ko then "    SSE 세션 %s · WebSocket 세션 %s · 버린 이벤트 %s"
-           else "    SSE sessions %s · WebSocket sessions %s · dropped events %s")
-          (Count.grouped transport.th_sse_sessions)
-          (reported_count transport.th_websocket_sessions)
-          (Count.grouped transport.th_events_dropped)
-      ; say "    큐 압력: " "    Queue pressure: " ^ pressure_word transport.th_queue_pressure ]
-    | None, Some error -> [ "    " ^ Terminal_text.single_line error ]
-    | None, None -> [ "    " ^ field_unread ~ko ]
+      let dropped_raw = Count.grouped transport.th_events_dropped in
+      let dropped =
+        if transport.th_events_dropped > 0 then wrap_style (Theme.warn ()) dropped_raw
+        else dropped_raw
+      in
+      let grpc =
+        match transport.th_grpc_port with
+        | None -> dim_lbl (say "꺼짐" "off")
+        | Some port -> Printf.sprintf ":%d" port
+      in
+      [ "    " ^ dim_lbl (say "주 경로 " "Primary path ") ^ path_word transport.th_primary_path
+        ^ sep ^ dim_lbl "gRPC " ^ grpc
+      ; "    " ^ dim_lbl (say "SSE 세션 " "SSE sessions ")
+        ^ Count.grouped transport.th_sse_sessions
+        ^ sep ^ dim_lbl (say "WebSocket 세션 " "WebSocket sessions ")
+        ^ reported_count transport.th_websocket_sessions
+        ^ sep ^ dim_lbl (say "버린 이벤트 " "dropped events ") ^ dropped
+      ; "    " ^ dim_lbl (say "큐 압력: " "Queue pressure: ")
+        ^ pressure_styled transport.th_queue_pressure ]
+    | None, Some error -> [ "    " ^ wrap_style (Theme.bad ()) (Terminal_text.single_line error) ]
+    | None, None -> [ "    " ^ dim_lbl (field_unread ~ko) ]
   in
   (* This TUI's own subscription to the runtime event feed. The count sits
      straight after the state word in both states, the way the Activity
      status row puts it, so a closed feed's number reads as the frames it
      carried. *)
   let feed_line =
-    say "    런타임 이벤트 수신: " "    Runtime event feed: "
+    "    " ^ dim_lbl (say "런타임 이벤트 수신: " "Runtime event feed: ")
     ^
     match state.observer with
-    | Observer_off -> say "꺼짐" "off"
+    | Observer_off -> dim_lbl (say "꺼짐" "off")
     | Observer_opening ->
-        Theme.info () ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
-        ^ say "연결 중" "opening" ^ Ansi.reset
+        wrap_style (Theme.info ())
+          (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+           ^ say "연결 중" "opening")
     | Observer_live { events; _ } ->
-        Printf.sprintf (if ko then "수신 중 %s" else "live %s") (Count.grouped events)
+        wrap_style (Theme.ok ())
+          (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled ^ " "
+           ^ say "수신 중" "live")
+        ^ " " ^ Count.grouped events
     | Observer_closed_after_live { events; reason; _ } ->
-        Printf.sprintf (if ko then "닫힘 %s · %s" else "closed %s · %s")
-          (Count.grouped events) (Terminal_text.single_line reason)
+        wrap_style (Theme.warn ()) (say "닫힘" "closed")
+        ^ " " ^ Count.grouped events ^ sep ^ Terminal_text.single_line reason
     | Observer_closed_before_answer { reason; _ } ->
-        say "시작 실패 · " "failed to open · " ^ Terminal_text.single_line reason
+        wrap_style (Theme.bad ()) (say "시작 실패" "failed to open")
+        ^ sep ^ Terminal_text.single_line reason
   in
   (* This TUI's own log: what it did and what it was told, oldest first so the
      newest event is last. The log holds eleven events ([add_event]); a run of
@@ -901,14 +951,16 @@ let render_section_fleet ?session_rows ~cols (state : state) =
      can give it, and [session_block] spends them on whole events. *)
   let session_lines =
     match state.events with
-    | [] -> [ say "    (아직 이벤트 없음)" "    (no events yet)" ]
+    | [] -> [ "    " ^ dim_lbl (say "(아직 이벤트 없음)" "(no events yet)") ]
     | events ->
       let block =
         session_block ~now:(Unix.gettimeofday ()) ~width:inner_width ?room:session_rows events in
       let rows = List.concat_map (fun entry -> entry.rows) block.kept in
       if block.earlier > 0 then
-        Printf.sprintf (if ko then "    %s이전 %s건%s" else "    %s%s earlier%s")
-          (Theme.recede ()) (Count.grouped block.earlier) Ansi.reset
+        ("    "
+         ^ dim_lbl
+             (Printf.sprintf (if ko then "이전 %s건" else "%s earlier")
+                (Count.grouped block.earlier)))
         :: rows
       else rows
   in
@@ -930,7 +982,8 @@ let age_text = Layout.span_text
 
 let render_section_resources ~cols (state : state) =
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
+  let clip text = Layout.truncate_end inner_width text in
+  let sep = dim_lbl " · " in
   (* A block of this page is headed like every detail section (RFC
      tui-one-screen-grammar §5.2, §7.3). *)
   let title text = Doc.section_rule ~width:inner_width ~indent:2 text in
@@ -939,23 +992,46 @@ let render_section_resources ~cols (state : state) =
   let say korean english = if ko then korean else english in
   (* The blocks after the first read the same snapshot. Without one they say
      why in a word; the first block carries the loader's sentence. *)
-  let no_snapshot = "    " ^ field_missing_reading ~ko ~error:state.tasks_error in
+  let no_snapshot = "    " ^ dim_lbl (field_missing_reading ~ko ~error:state.tasks_error) in
   let task_lines = match state.task_flow with
     | None ->
       [ "    "
         ^ (match state.tasks_error with
-           | None -> field_unread ~ko
-           | Some error -> Terminal_text.single_line error) ]
+           | None -> dim_lbl (field_unread ~ko)
+           | Some error -> wrap_style (Theme.bad ()) (Terminal_text.single_line error)) ]
     | Some flow ->
       let current = flow.Task_flow.current in
+      let total = Task_flow.total_count current in
       let moment at =
         Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
       in
       (* A count of the tasks in a status, which the Tasks screen names. *)
       let in_status (tag : Masc_domain.Task_status_tag.t) count =
-        Masc_tui_task_document.status_tag_label ~ko tag ^ " " ^ Count.grouped count
+        let num = Count.grouped count in
+        let val_str =
+          if count <= 0 then num
+          else
+            match tag with
+            | Masc_domain.Task_status_tag.Done -> wrap_style (Theme.ok ()) num
+            | Masc_domain.Task_status_tag.Awaiting_verification -> wrap_style (Theme.warn ()) num
+            | Masc_domain.Task_status_tag.In_progress -> wrap_style (Theme.info ()) num
+            | Masc_domain.Task_status_tag.(Todo | Claimed | Cancelled) -> num
+        in
+        dim_lbl (Masc_tui_task_document.status_tag_label ~ko tag ^ " ") ^ val_str
       in
-      let row parts = "    " ^ String.concat " · " parts in
+      let row parts = "    " ^ String.concat sep parts in
+      let completion_meter =
+        if total > 0 then
+          [ "    "
+            ^ Chart.meter ~width:(min 56 (max 24 (inner_width - 4)))
+                ~value:current.completed ~max_value:(max 1 total)
+                ~label:(say "완료율" "Completion") ~label_style:(Theme.recede ())
+                ~suffix:(Printf.sprintf "%s/%s" (Count.grouped current.completed) (Count.grouped total))
+                ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
+                ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+          ]
+        else []
+      in
       let open_dist_items =
         List.filter_map
           (fun (tag, count, style) ->
@@ -981,14 +1057,14 @@ let render_section_resources ~cols (state : state) =
           |> List.map (fun bar -> "  " ^ bar)
       in
       [ row
-          [ say "새 작업 " "New tasks " ^ Count.grouped flow.recent.created
+          [ dim_lbl (say "새 작업 " "New tasks ") ^ Count.grouped flow.recent.created
           ; in_status Done flow.recent.completed
           ; in_status Cancelled flow.recent.cancelled ]
-      ; Printf.sprintf (if ko then "    구간: %s ~ %s" else "    Window: %s to %s")
-          (moment flow.window_started_at) (moment flow.observed_at)
-      ; say "    지금 열린 작업 " "    Current open "
-        ^ Count.grouped (Task_flow.open_count current) ^ ": "
-        ^ String.concat " · "
+      ; "    " ^ dim_lbl (say "구간: " "Window: ")
+        ^ moment flow.window_started_at ^ dim_lbl (say " ~ " " to ") ^ moment flow.observed_at
+      ; "    " ^ dim_lbl (say "지금 열린 작업 " "Current open ")
+        ^ Count.grouped (Task_flow.open_count current) ^ dim_lbl ": "
+        ^ String.concat sep
             [ in_status Todo current.todo
             ; in_status Claimed current.claimed
             ; in_status In_progress current.in_progress
@@ -996,26 +1072,31 @@ let render_section_resources ~cols (state : state) =
       @ open_dist_lines
       @
       [ row
-          [ say "백로그 전체 " "Retained total " ^ Count.grouped (Task_flow.total_count current)
+          [ dim_lbl (say "백로그 전체 " "Retained total ") ^ Count.grouped total
           ; in_status Done current.completed
           ; in_status Cancelled current.cancelled
-          ; Printf.sprintf (if ko then "스냅샷 %s 전" else "snapshot %s ago")
-              (Masc_tui_value.Ongoing.since ~now flow.observed_at) ]
-      ; say "    가장 오래된 열린 작업: " "    Oldest open task registration: "
-        ^ Option.fold ~none:(say "등록 시각을 아는 작업 없음" "none with a known timestamp")
-            ~some:(fun at ->
-              Printf.sprintf (if ko then "스냅샷 %s 전 등록" else "%s before this snapshot")
-                (age_text (flow.observed_at -. at)))
-            flow.oldest_open_created_at
-      ; say "    완료는 작업 결과이고, 도구 호출과 턴 종료는 활동입니다."
-          "    Done is a task outcome; tool calls and turn endings are activity." ]
+          ; dim_lbl
+              (Printf.sprintf (if ko then "스냅샷 %s 전" else "snapshot %s ago")
+                 (Masc_tui_value.Ongoing.since ~now flow.observed_at)) ] ]
+      @ completion_meter
+      @ [ "    " ^ dim_lbl (say "가장 오래된 열린 작업: " "Oldest open task registration: ")
+          ^ Option.fold ~none:(dim_lbl (say "등록 시각을 아는 작업 없음" "none with a known timestamp"))
+              ~some:(fun at ->
+                Printf.sprintf (if ko then "스냅샷 %s 전 등록" else "%s before this snapshot")
+                  (age_text (flow.observed_at -. at)))
+              flow.oldest_open_created_at
+        ; "    " ^ dim_lbl
+            (say "완료는 작업 결과이고, 도구 호출과 턴 종료는 활동입니다."
+               "Done is a task outcome; tool calls and turn endings are activity.") ]
       @ (if flow.unparseable_timestamps = 0 then [] else
-           [ Printf.sprintf
-               (if ko then "    구간 집계에서 뺀 잘못된 시각 %s개"
-                else "    %s invalid timestamps excluded from time-window counts")
-               (Count.grouped flow.unparseable_timestamps) ])
+           [ "    " ^ wrap_style (Theme.warn ())
+               (Printf.sprintf
+                  (if ko then "구간 집계에서 뺀 잘못된 시각 %s개"
+                   else "%s invalid timestamps excluded from time-window counts")
+                  (Count.grouped flow.unparseable_timestamps)) ])
       @ (match state.tasks_error with None -> [] | Some error ->
-           [ say "    스냅샷 경고: " "    Snapshot warning: " ^ Terminal_text.single_line error ])
+           [ "    " ^ wrap_style (Theme.warn ())
+               (say "스냅샷 경고: " "Snapshot warning: " ^ Terminal_text.single_line error) ])
   in
   (* One row per assignee, longest queue first. The list is capped so the two
      blocks below it stay on screen; the tail is reported as a count rather
@@ -1030,7 +1111,7 @@ let render_section_resources ~cols (state : state) =
     | None -> [ no_snapshot ]
     | Some flow ->
       (match flow.Task_flow.by_assignee with
-       | [] -> [ say "    담당자가 있는 작업이 없습니다." "    No retained task carries an assignee." ]
+       | [] -> [ "    " ^ dim_lbl (say "담당자가 있는 작업이 없습니다." "No retained task carries an assignee.") ]
        | rows ->
          let head = List.filteri (fun index _ -> index < assignee_rows_shown) rows in
          let max_total =
@@ -1055,23 +1136,29 @@ let render_section_resources ~cols (state : state) =
          let body =
            List.map
              (fun (row : Task_flow.assignee_flow) ->
+               let lead_str =
+                 match row.af_median_lead_hours with
+                 | None -> dim_lbl Masc_tui_theme.Glyph.no_value
+                 | Some hours -> age_text (hours *. 3600.)
+               in
                assignee_row ~bar:(bar_for row)
-                 row.af_assignee (Count.grouped row.af_done)
+                 (Terminal_text.single_line row.af_assignee)
+                 (Count.grouped row.af_done)
                  (Count.grouped row.af_open)
-                 (match row.af_median_lead_hours with
-                  | None -> Masc_tui_theme.Glyph.no_value
-                  | Some hours -> age_text (hours *. 3600.)))
+                 lead_str)
              head
          in
          let omitted = List.length rows - List.length head in
-         [ say "    키퍼 이름과 에이전트 이름은 합치지 않고 따로 적습니다."
-             "    A keeper name and an agent name stay separate rows; nothing is merged."
-         ; assignee_row (say "담당자" "assignee") (say "완료" "done") (say "열림" "open")
-             (say "소요 중앙값" "median lead") ]
+         [ "    " ^ dim_lbl
+             (say "키퍼 이름과 에이전트 이름은 합치지 않고 따로 적습니다."
+                "A keeper name and an agent name stay separate rows; nothing is merged.")
+         ; dim_lbl
+             (assignee_row (say "담당자" "assignee") (say "완료" "done") (say "열림" "open")
+                (say "소요 중앙값" "median lead")) ]
          @ body
          @ (if omitted <= 0 then []
             else
-              [ "    " ^ Count.more ~ko omitted ]))
+              [ "    " ^ dim_lbl (Count.more ~ko omitted) ]))
   in
   let day_label at = Masc_tui_value.Utc_day.month_day (Masc_tui_value.Utc_day.of_moment at) in
   let daily_title = match state.task_flow with
@@ -1095,27 +1182,30 @@ let render_section_resources ~cols (state : state) =
     | None -> [ no_snapshot ]
     | Some flow ->
       let rows =
-        [ say "날짜" "day", (fun (day : Task_flow.day) ->
+        [ true, say "날짜" "day", (fun (day : Task_flow.day) ->
               Masc_tui_value.Utc_day.day_of_month (Masc_tui_value.Utc_day.of_moment day.d_start))
-        ; say "새 작업" "created", (fun (day : Task_flow.day) -> day.d_created)
-        ; say "완료" "completed", (fun (day : Task_flow.day) -> day.d_completed)
-        ; say "취소" "cancelled", (fun (day : Task_flow.day) -> day.d_cancelled) ]
+        ; false, say "새 작업" "created", (fun (day : Task_flow.day) -> day.d_created)
+        ; false, say "완료" "completed", (fun (day : Task_flow.day) -> day.d_completed)
+        ; false, say "취소" "cancelled", (fun (day : Task_flow.day) -> day.d_cancelled) ]
       in
       let columns =
         List.map
           (fun day ->
             ( day
             , List.fold_left
-                (fun width (_, pick) -> max width (1 + String.length (Count.grouped (pick day))))
+                (fun width (_, _, pick) -> max width (1 + String.length (Count.grouped (pick day))))
                 3 rows ))
           flow.Task_flow.daily
       in
       List.map
-        (fun (label, pick) ->
-          "    " ^ Layout.fit_width label 10
+        (fun (is_header, label, pick) ->
+          "    " ^ dim_lbl (Layout.fit_width label 10)
           ^ String.concat ""
               (List.map
-                 (fun (day, width) -> Layout.pad_left (Count.grouped (pick day)) width)
+                 (fun (day, width) ->
+                   let value = pick day in
+                   let cell = Layout.pad_left (Count.grouped value) width in
+                   if is_header || value = 0 then dim_lbl cell else cell)
                  columns))
         rows
       @ (match flow.Task_flow.daily with
@@ -1131,7 +1221,7 @@ let render_section_resources ~cols (state : state) =
            in
            let maximum = Braille.graph_maximum samples in
            let axis = Count.grouped maximum in
-           let label = Layout.fit_width (say "완료 추세" "done trend") 10 in
+           let label = dim_lbl (Layout.fit_width (say "완료 추세" "done trend") 10) in
            let table_cells =
              List.fold_left (fun acc (_, w) -> acc + w) 0 columns
            in
@@ -1160,17 +1250,19 @@ let render_section_resources ~cols (state : state) =
              let pad_indent = String.make (15 + axis_w + 1) ' ' in
              List.mapi
                (fun idx row ->
-                 if idx = 0 then "    " ^ label ^ " " ^ axis ^ " " ^ row
+                 if idx = 0 then "    " ^ label ^ " " ^ dim_lbl axis ^ " " ^ row
                  else pad_indent ^ row)
                curve)
   in
   let turn_lines = match state.keeper_turns_observed_at, state.keeper_turns_error with
     | _, Some error ->
-      [ "    " ^ Terminal_text.single_line
-          (request_failure_text ~ko ~request:Kept_request.Turn_observation_read error)
-      ; say "    이전 행은 지금 실행 중인 턴으로 세지 않습니다."
-          "    Previous rows are not counted as current running turns." ]
-    | None, None -> [ "    " ^ field_unread ~ko ]
+      [ "    " ^ wrap_style (Theme.bad ())
+          (Terminal_text.single_line
+             (request_failure_text ~ko ~request:Kept_request.Turn_observation_read error))
+      ; "    " ^ dim_lbl
+          (say "이전 행은 지금 실행 중인 턴으로 세지 않습니다."
+             "Previous rows are not counted as current running turns.") ]
+    | None, None -> [ "    " ^ dim_lbl (field_unread ~ko) ]
     | Some observed_at, None ->
       (* The age below is drawn from the observation time, which every
          successful turns answer moves (RFC tui-one-screen-grammar §8). *)
@@ -1187,46 +1279,77 @@ let render_section_resources ~cols (state : state) =
             | Keeper_turn_unavailable _ -> idle, unavailable + 1
             | Keeper_turn_running _ -> idle, unavailable)
           (0, 0) state.keeper_turns in
-      [ Printf.sprintf
-          (if ko then "    실행 중 %s · 대기 중 %s · 확인 불가 %s · %s 전 조회"
-           else "    %s running · %s idle · %s unavailable · observed %s ago")
-          (Count.grouped (List.length running)) (Count.grouped idle)
-          (Count.grouped unavailable) (Masc_tui_value.Ongoing.since ~now observed_at)
-      ; say "    턴 시간은 키퍼가 알린 시작 시각부터 잽니다."
-          "    Turn age = since owner-reported start." ]
+      let run_count = List.length running in
+      let run_str =
+        let raw = Count.grouped run_count in
+        if run_count > 0 then wrap_style (Theme.info ()) raw else raw
+      in
+      let unavail_str =
+        let raw = Count.grouped unavailable in
+        if unavailable > 0 then wrap_style (Theme.warn ()) raw else raw
+      in
+      let summary_row =
+        if ko then
+          "    " ^ dim_lbl "실행 중 " ^ run_str
+          ^ sep ^ dim_lbl "대기 중 " ^ Count.grouped idle
+          ^ sep ^ dim_lbl "확인 불가 " ^ unavail_str
+          ^ sep ^ dim_lbl (Masc_tui_value.Ongoing.since ~now observed_at ^ " 전 조회")
+        else
+          "    " ^ run_str ^ dim_lbl " running"
+          ^ sep ^ Count.grouped idle ^ dim_lbl " idle"
+          ^ sep ^ unavail_str ^ dim_lbl " unavailable"
+          ^ sep ^ dim_lbl ("observed " ^ Masc_tui_value.Ongoing.since ~now observed_at ^ " ago")
+      in
+      [ summary_row
+      ; "    " ^ dim_lbl
+          (say "턴 시간은 키퍼가 알린 시작 시각부터 잽니다."
+             "Turn age = since owner-reported start.") ]
       @ List.map
           (fun (name, lane, started_at_unix) ->
-              Printf.sprintf
-                (if ko then "    %s  턴 %s  레인 %s" else "    %s  turn %s  lane %s")
-                (Layout.fit_width name 18)
-                (Layout.pad_left (Masc_tui_value.Ongoing.since ~now started_at_unix) 8)
-                (Masc_tui_answering.lane_word ~ko lane))
+              "    "
+              ^ wrap_style (Theme.info ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " ")
+              ^ Layout.fit_width (Terminal_text.single_line name) 18
+              ^ "  " ^ dim_lbl (say "턴 " "turn ")
+              ^ Layout.pad_left (Masc_tui_value.Ongoing.since ~now started_at_unix) 8
+              ^ "  " ^ dim_lbl (say "레인 " "lane ")
+              ^ Masc_tui_answering.lane_word ~ko lane)
           running
   in
   (* A failed read is the loader's own sentence, as the Keepers header draws
      it. It read the words this block says before the first read, so a fleet
      the TUI could not read looked like one it had not asked for yet
      (#38499). *)
-  let readiness text = say "    실행 준비: " "    Execution readiness: " ^ text in
+  let readiness text = "    " ^ dim_lbl (say "실행 준비: " "Execution readiness: ") ^ text in
   let safety_lines = match fleet_stream_view state with
     | Masc_tui_fleet_stream.Cannot_read failure ->
-      [ readiness (Masc_tui_fleet_line.failure_text ~ko failure) ]
-    | Masc_tui_fleet_stream.Awaiting_first_reading -> [ readiness (field_unread ~ko) ]
+      [ readiness (wrap_style (Theme.bad ()) (Masc_tui_fleet_line.failure_text ~ko failure)) ]
+    | Masc_tui_fleet_stream.Awaiting_first_reading -> [ readiness (dim_lbl (field_unread ~ko)) ]
     | Masc_tui_fleet_stream.Unreachable { since } ->
-      [ readiness (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since) ]
+      [ readiness (wrap_style (Theme.warn ()) (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since)) ]
     | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
       [ readiness
-          (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since) ]
+          (wrap_style (Theme.warn ())
+             (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since)) ]
     | Masc_tui_fleet_stream.Reading { reading = { fleet = safety; _ }; trouble } ->
-      Printf.sprintf
-        (if ko then "    실행 가능 %s · 목표 %s · 부족 %s · 실패 %s · 일시정지 %s"
-         else "    Executable %s · target %s · shortfall %s · failing %s · paused %s")
-        (Count.grouped safety.fs_executable_count)
-        (Count.grouped safety.fs_target_reaction_capacity)
-        (Count.grouped safety.fs_reaction_capacity_shortfall)
-        (Count.grouped safety.fs_failing_count) (Count.grouped safety.fs_paused_count)
+      let shortfall =
+        let raw = Count.grouped safety.fs_reaction_capacity_shortfall in
+        if safety.fs_reaction_capacity_shortfall > 0 then wrap_style (Theme.warn ()) raw else raw
+      in
+      let failing =
+        let raw = Count.grouped safety.fs_failing_count in
+        if safety.fs_failing_count > 0 then wrap_style (Theme.bad ()) raw else raw
+      in
+      ("    " ^ dim_lbl (say "실행 가능 " "Executable ")
+       ^ Count.grouped safety.fs_executable_count
+       ^ sep ^ dim_lbl (say "목표 " "target ")
+       ^ Count.grouped safety.fs_target_reaction_capacity
+       ^ sep ^ dim_lbl (say "부족 " "shortfall ") ^ shortfall
+       ^ sep ^ dim_lbl (say "실패 " "failing ") ^ failing
+       ^ sep ^ dim_lbl (say "일시정지 " "paused ")
+       ^ Count.grouped safety.fs_paused_count)
       :: (trouble
-          |> Option.map (fun trouble -> "    " ^ Masc_tui_fleet_line.trouble_text ~ko ~now trouble)
+          |> Option.map (fun trouble ->
+               "    " ^ wrap_style (Theme.warn ()) (Masc_tui_fleet_line.trouble_text ~ko ~now trouble))
           |> Option.to_list)
   in
   List.map clip
@@ -1247,9 +1370,18 @@ let render_section_tools ~cols (state : state) : string list =
   let inner_width = max 20 (framed_inner_width cols) in
   let clip line = Layout.truncate_end inner_width line in
   let bar_w = min 60 (max 20 (inner_width - 8)) in
+  let sep = dim_lbl " · " in
 
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
+  let styled_observation ~current_style obs =
+    let raw = observation_detail ~ko obs in
+    match obs with
+    | Current rows -> wrap_style (current_style (List.length rows)) raw
+    | Not_observed -> dim_lbl raw
+    | Read_failed _ | Unavailable _ -> wrap_style (Theme.bad ()) raw
+    | Stale _ -> wrap_style (Theme.warn ()) raw
+  in
   let title_mem =
     Doc.section_rule ~width:inner_width ~indent:2
       (say "Memory OS 사실 저장소" "Memory OS knowledge base & fact store")
@@ -1264,8 +1396,15 @@ let render_section_tools ~cols (state : state) : string list =
       ~error:(memory_health_error_text state) state.memory_health
   in
   let memory_status =
-    say "    기억 상태: " "    Memory health: "
-    ^ observation_detail_with ~ko ~current:(fun _ -> "") memory
+    let detail = observation_detail_with ~ko ~current:(fun _ -> "") memory in
+    let styled_detail =
+      match memory with
+      | Current _ -> detail
+      | Not_observed -> dim_lbl detail
+      | Read_failed _ | Unavailable _ -> wrap_style (Theme.bad ()) detail
+      | Stale _ -> wrap_style (Theme.warn ()) detail
+    in
+    "    " ^ dim_lbl (say "기억 상태: " "Memory health: ") ^ styled_detail
   in
   let memory_rows =
     match state.memory_health with
@@ -1274,18 +1413,19 @@ let render_section_tools ~cols (state : state) : string list =
         let total_facts = mhs.mhs_total_facts in
         (* The ordinary snapshots' size, named as the Memory screen names it. *)
         let header =
-          Printf.sprintf
-            (if ko then "    일반 사실 %s · 출처 사실 %s · 일반 저장량 %s tok"
-             else "    Ordinary facts %s · source facts %s · ordinary stored %s tok")
-            (Count.grouped total_facts)
-            (Count.grouped mhs.mhs_total_source_facts)
-            (Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet
-               (List.fold_left (fun acc (k : Masc.Tui_decode_memory_health.memory_keeper_health) -> acc + k.mkh_snapshot_bytes) 0 mhs.mhs_keepers))
+          "    " ^ dim_lbl (say "일반 사실 " "Ordinary facts ") ^ Count.grouped total_facts
+          ^ sep ^ dim_lbl (say "출처 사실 " "source facts ")
+          ^ Count.grouped mhs.mhs_total_source_facts
+          ^ sep ^ dim_lbl (say "일반 저장량 " "ordinary stored ")
+          ^ Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet
+              (List.fold_left (fun acc (k : Masc.Tui_decode_memory_health.memory_keeper_health) -> acc + k.mkh_snapshot_bytes) 0 mhs.mhs_keepers)
+          ^ dim_lbl " tok"
         in
         let rows =
           if mhs.mhs_keepers = [] then
-            [ say "    (기억 구역이 있는 등록 키퍼 없음)"
-                "    (no registered keepers with memory partitions)" ]
+            [ "    " ^ dim_lbl
+                (say "(기억 구역이 있는 등록 키퍼 없음)"
+                   "(no registered keepers with memory partitions)") ]
           else
             List.map
               (fun (k : Masc.Tui_decode_memory_health.memory_keeper_health) ->
@@ -1295,16 +1435,16 @@ let render_section_tools ~cols (state : state) : string list =
                     ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
                     ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
                 in
-                Printf.sprintf
-                  (if ko then "    %s  사실 %s  %s  %s tok%s" else "    %s  %s facts  %s  %s tok%s")
-                  (Layout.fit_width
-                     (Terminal_text.single_line k.mkh_keeper_id)
-                     16)
-                  (Layout.pad_left (Count.grouped k.mkh_facts) 6)
-                  bar
-                  (Masc_tui_token_scale.format_estimate
-                     Masc_tui_token_scale.fleet k.mkh_snapshot_bytes)
-                  Ansi.reset)
+                let facts_col =
+                  if ko then dim_lbl "사실 " ^ Layout.pad_left (Count.grouped k.mkh_facts) 6
+                  else Layout.pad_left (Count.grouped k.mkh_facts) 6 ^ dim_lbl " facts"
+                in
+                "    "
+                ^ Layout.fit_width (Terminal_text.single_line k.mkh_keeper_id) 16
+                ^ "  " ^ facts_col ^ "  " ^ bar ^ "  "
+                ^ Masc_tui_token_scale.format_estimate
+                    Masc_tui_token_scale.fleet k.mkh_snapshot_bytes
+                ^ dim_lbl " tok")
               mhs.mhs_keepers
         in
         header :: rows
@@ -1354,17 +1494,24 @@ let render_section_tools ~cols (state : state) : string list =
         ktas
   in
 
+  let warn_if_nonzero n = if n > 0 then Theme.warn () else Theme.ok () in
+  let bad_if_nonzero n = if n > 0 then Theme.bad () else "" in
   let gate_summary =
-    [ say "    Gate 승인 대기: " "    Pending Gate Calls: " ^ observation_detail ~ko gate
-    ; say "    보류된 호출: " "    Held Tool Approvals: " ^ observation_detail ~ko held
-    ; say "    항상 허용 규칙: " "    Standing Rules: " ^ observation_detail ~ko rules
-    ; say "    YOLO 키퍼: " "    YOLO Keepers: " ^ observation_detail ~ko yolo ]
+    [ "    " ^ dim_lbl (say "Gate 승인 대기: " "Pending Gate Calls: ")
+      ^ styled_observation ~current_style:warn_if_nonzero gate
+    ; "    " ^ dim_lbl (say "보류된 호출: " "Held Tool Approvals: ")
+      ^ styled_observation ~current_style:warn_if_nonzero held
+    ; "    " ^ dim_lbl (say "항상 허용 규칙: " "Standing Rules: ")
+      ^ styled_observation ~current_style:(fun _ -> "") rules
+    ; "    " ^ dim_lbl (say "YOLO 키퍼: " "YOLO Keepers: ")
+      ^ styled_observation ~current_style:bad_if_nonzero yolo ]
   in
   let yolo_line =
     match yolo with
     | Current (_ :: _ as names) ->
-      [ say "    YOLO 실행: " "    YOLO Execution: "
-        ^ String.concat " \xc2\xb7 " (List.map Terminal_text.single_line names) ]
+      [ "    " ^ dim_lbl (say "YOLO 실행: " "YOLO Execution: ")
+        ^ wrap_style (Theme.bad ())
+            (String.concat " \xc2\xb7 " (List.map Terminal_text.single_line names)) ]
     | Current [] | Not_observed | Read_failed _ | Unavailable _ | Stale _ -> []
   in
 
@@ -1372,13 +1519,15 @@ let render_section_tools ~cols (state : state) : string list =
     if Tool_map.is_empty counts then
       (match gate, held with
        | Current [], Current [] ->
-         [ say "    (Gate 승인 대기와 보류된 호출 없음)"
-             "    (no active pending gate operations or held approval requests)" ]
+         [ "    " ^ dim_lbl
+             (say "(Gate 승인 대기와 보류된 호출 없음)"
+                "(no active pending gate operations or held approval requests)") ]
        | (Current [], Current (_::_))
        | (Current [], (Not_observed | (Read_failed _ | (Unavailable _ | Stale _))))
        | (Current (_::_), _) | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) ->
-         [ say "    도구별 대기 수를 다 읽지 못해 비었다고 보지 않습니다."
-             "    Pending tool totals unavailable; no empty queue inferred" ])
+         [ "    " ^ dim_lbl
+             (say "도구별 대기 수를 다 읽지 못해 비었다고 보지 않습니다."
+                "Pending tool totals unavailable; no empty queue inferred") ])
     else
       let items =
         Tool_map.fold
@@ -1393,8 +1542,9 @@ let render_section_tools ~cols (state : state) : string list =
         | Current _, Current _ -> []
         | (Current _, (Not_observed | (Read_failed _ | (Unavailable _ | Stale _))))
         | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) ->
-          [ say "    도구 분포: 읽은 대기열만 (일부 관측)"
-              "    Tool distribution: observed queues only (partial coverage)" ] in
+          [ "    " ^ wrap_style (Theme.warn ())
+              (say "도구 분포: 읽은 대기열만 (일부 관측)"
+                 "Tool distribution: observed queues only (partial coverage)") ] in
       scope @ (Chart.distribution_bars ~width:bar_w items
         |> List.map (fun l -> "    " ^ l))
   in

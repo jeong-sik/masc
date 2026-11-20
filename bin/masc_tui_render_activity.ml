@@ -13,11 +13,24 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 module Page_line = Masc_tui_page_line
 
+let wrap_style style text =
+  if String.equal style "" || String.equal text "" then text
+  else style ^ text ^ Ansi.reset
+
+let box_line_selection buf cols styled_line =
+  match Theme.sidebar_selection_background () with
+  | Some bg ->
+      let inner = framed_inner_width cols in
+      box_line buf cols
+        (Masc_tui_theme.paint_row_background ~bg (fit_width styled_line inner))
+  | None ->
+      box_line_selected buf cols (Masc_tui_theme.strip_sgr styled_line)
+
 let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> "\xc2\xb7"
   | System_info -> "\xe2\x80\xa2"
   | System_warn -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
-  | System_error -> "\xc3\x97"
+  | System_error -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
   | System_level_unknown _ -> "?"
 
 (* How loudly a level reads on the detail page. The list draws the same four
@@ -70,13 +83,14 @@ let system_log_detail_lines (state : state) ~seq ~width =
         ]
       in
       let metadata_facts =
-        [ system_log_optional_fact (t "Keeper" "Keeper") entry.sl_keeper
+        let ko = state.ui_language = Lang_ko in
+        [ system_log_optional_fact (t "키퍼" "Keeper") entry.sl_keeper
         ; system_log_optional_fact (t "턴" "Turn") (Option.map string_of_int entry.sl_turn)
         ; system_log_fact (t "모듈" "Module") entry.sl_module
         ; system_log_fact (t "출처" "Source")
             (Masc.Tui_decode.system_log_source_label entry.sl_source)
         ; system_log_fact (t "읽은 곳" "Origin")
-            (System_logs_view.source_label (System_logs_view.source state.system_logs))
+            (System_logs_view.source_label ~ko (System_logs_view.source state.system_logs))
         ; system_log_fact (t "순번" "Sequence") (string_of_int entry.sl_seq)
         ]
       in
@@ -110,12 +124,14 @@ let render_system_log_detail (state : state) seq =
   report_drawn_list System_log_detail_rows ~height:content_height;
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min (system_logs_page state).lp_detail_scroll max_scroll) in
+  let ko = state.ui_language = Lang_ko in
   box_top buf cols;
   box_line buf cols
     (here_row ~cols state
-       ~path:[ ui_text state ~ko:"로그" ~en:"logs"; Printf.sprintf "seq %d" seq ]
+       ~path:[ ui_text state ~ko:"로그" ~en:"logs"
+             ; Printf.sprintf (if ko then "순번 %d" else "seq %d") seq ]
        ~readings:
-         [ System_logs_view.source_label
+         [ System_logs_view.source_label ~ko
              (System_logs_view.source state.system_logs) ]
        ~position:
          (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
@@ -286,9 +302,13 @@ let render_system_logs (state : state) =
                   (Masc_tui_value.Count.grouped snapshot.sys_total))
              :: (match snapshot.sys_latest_seq with
                  | None -> []
-                 | Some seq -> [ Printf.sprintf "  seq %d" seq ])
+                 | Some seq ->
+                     [ Printf.sprintf
+                         (if state.ui_language = Lang_ko then "  순번 %d" else "  seq %d")
+                         seq ])
              @ filter_pieces)
   in
+  let cursor = max 0 (min (system_logs_page state).lp_cursor (max 0 (total_entries - 1))) in
   box_line buf cols
     (zone_two_title ~cols state ~title:header
        ~position:
@@ -296,7 +316,7 @@ let render_system_logs (state : state) =
           else
             Some
               (Masc_tui_value.Position.row
-                 ~selected:(Some (system_logs_page state).lp_cursor)
+                 ~selected:(Some cursor)
                  ~total:total_entries)));
   box_divider buf cols;
   (* The message takes what the named columns leave, asked of the columns. *)
@@ -327,7 +347,6 @@ let render_system_logs (state : state) =
           ~preview_keep:s.sc_preview_keep
     | None -> max 1 (rows - listing_chrome ~error:(system_logs_page state).lp_error)
   in
-  let cursor = max 0 (min (system_logs_page state).lp_cursor (max 0 (total_entries - 1))) in
   let max_scroll = max 0 (total_entries - content_height) in
   let scroll = max 0 (min (system_logs_page state).lp_scroll max_scroll) in
   let scroll =
@@ -397,11 +416,11 @@ let render_system_logs (state : state) =
             (if is_selected then "\xe2\x80\xba " else "  ")
             ^ Render_schedule.system_log_row ~layout:log_layout ~level_style
                 ~styles:
-                  { Render_schedule.slog_time_style = Ansi.dim
+                  { Render_schedule.slog_time_style = Theme.recede ()
                   ; slog_module_style =
                       Theme.accent ()
                   ; slog_keeper_style = Theme.keeper_origin ()
-                  ; slog_category_style = Ansi.dim
+                  ; slog_category_style = Theme.recede ()
                   }
                 { Render_schedule.slog_time =
                     Terminal_text.clock_timestamp e.sl_ts
@@ -414,8 +433,7 @@ let render_system_logs (state : state) =
                 ; slog_message = Terminal_text.single_line e.sl_message
                 }
           in
-          if is_selected then
-            box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+          if is_selected then box_line_selection buf cols line
           else box_line buf cols line
     done
   end;
@@ -505,7 +523,7 @@ let render_keeper_calls (state : state) =
             | Masc.Tui_decode.Call_log_missing -> ui_text state ~ko:"기록 없음" ~en:"missing"
             | Masc.Tui_decode.Call_log_stale -> ui_text state ~ko:"오래됨" ~en:"stale"
             | Masc.Tui_decode.Call_log_coverage_gap ->
-                ui_text state ~ko:"기록 공백" ~en:"coverage_gap"
+                ui_text state ~ko:"기록 공백" ~en:"coverage gap"
             | Masc.Tui_decode.Call_log_unknown unknown -> Terminal_text.single_line unknown
           in
           match snapshot.Masc.Tui_decode.kcs_latest_age_s with
@@ -655,8 +673,8 @@ let render_keeper_calls (state : state) =
              glyph duration turn
          in
          let exact_rows =
-           labeled_rows ~call_index ~style:Ansi.dim ~label:"tool" call.kc_tool
-           @ labeled_rows ~call_index ~style:Ansi.dim ~label:"input" call.kc_input
+           labeled_rows ~call_index ~style:(Theme.recede ()) ~label:"tool" call.kc_tool
+           @ labeled_rows ~call_index ~style:(Theme.recede ()) ~label:"input" call.kc_input
          in
          let output_rows =
            (* This is the recorded-call inspector. A timeline digest drops
@@ -671,11 +689,11 @@ let render_keeper_calls (state : state) =
                   | Tool_result.Recorded_failed -> Theme.bad ()
                   | Tool_result.Recorded_succeeded | Tool_result.Recorded_deferred
                   | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
-                    Ansi.dim)
+                    Theme.recede ())
                ~label:"output" output
          in
          let call_rows = (call_index, style, summary) :: exact_rows @ output_rows in
-         if call_index = 0 then call_rows else (call_index, Ansi.dim, "") :: call_rows)
+         if call_index = 0 then call_rows else (call_index, Theme.recede (), "") :: call_rows)
     |> List.concat
   in
   let total_rows = List.length rows in
@@ -731,15 +749,16 @@ let render_keeper_calls (state : state) =
    what arrives above it, so an operator reading the past is not pushed off
    it by the present. *)
 let acting_evidence_intro (state : state) =
-  [ Ansi.dim
+  let recede = Theme.recede () in
+  [ recede
     , ui_text state ~ko:" 고른 이벤트의 스냅샷 · 새로 온 이벤트가 이 화면을 바꾸지 않음"
         ~en:" Selected event snapshot; new arrivals do not replace this reading"
-  ; Ansi.dim
+  ; recede
     , Printf.sprintf
         (if state.ui_language = Lang_ko then " 보유한 이벤트: %d개 (고른 것은 고정)"
          else " Retained feed events: %d (selection pinned)")
         (List.length state.acting)
-  ; Ansi.dim, " " ^ Terminal_text.single_line
+  ; recede, " " ^ Terminal_text.single_line
       (observer_replay_description ~ko:(state.ui_language = Lang_ko)
          ~source_loss:state.observer_source_loss state.observer_replay)
   ]
@@ -1093,8 +1112,8 @@ let render_acting (state : state) =
     in
     Acting.columns ~inner_width:(framed_inner_width cols) measured
   in
-  let column_line ~glyph ~content ~actor ~clock =
-    "  " ^ glyph ^ " "
+  let column_line ~lead ~glyph ~content ~actor ~clock =
+    lead ^ glyph ^ " "
     ^ fit_width content table_columns.Acting.content_cells ^ " "
     ^ fit_width
         (Message_layout.fit_middle table_columns.Acting.keeper_cells actor)
@@ -1102,7 +1121,7 @@ let render_acting (state : state) =
     ^ (if table_columns.Acting.show_clock then " " ^ clock else "")
   in
   let col_hdr =
-    column_line ~glyph:" "
+    column_line ~lead:"  " ~glyph:" "
       ~content:(ui_text state ~ko:"이벤트" ~en:"EVENT")
       ~actor:(ui_text state ~ko:"주체" ~en:"ACTOR")
       ~clock:(ui_text state ~ko:"시각" ~en:"TIME")
@@ -1161,35 +1180,54 @@ let render_acting (state : state) =
       | Some row ->
           let style =
             match row.Acting.glyph with
-            | Acting.Call_started -> (Theme.info ())
-            | Acting.Call_returned -> (Theme.ok ())
-            | Acting.Turn_boundary -> Ansi.reset
-            | Acting.Turn_done -> Ansi.bold
-            | Acting.Failure -> (Theme.bad ())
-            | Acting.Attention -> (Theme.warn ())
-            | Acting.Quiet -> Ansi.dim
+            | Acting.Call_started -> Theme.info ()
+            | Acting.Call_returned -> Theme.ok ()
+            | Acting.Turn_boundary -> ""
+            | Acting.Turn_done -> Theme.ok ()
+            | Acting.Failure -> Theme.bad ()
+            | Acting.Attention -> Theme.warn ()
+            | Acting.Quiet -> Theme.recede ()
           in
-          let content =
+          let content_text =
             Terminal_text.single_line row.Acting.label
             ^ (if row.Acting.detail = "" then ""
                else " · " ^ Terminal_text.single_line row.Acting.detail)
           in
-          let clock =
+          let actor_text =
+            Terminal_text.single_line
+              (Acting.actor_text ~ko:(state.ui_language = Lang_ko) row.Acting.actor)
+          in
+          let clock_text =
             Terminal_text.clock_timestamp_of_unix row.Acting.at
           in
-          let line =
-            column_line ~glyph:(Acting.glyph_text row.Acting.glyph)
-              ~content
-              ~actor:
-                (Terminal_text.single_line
-                   (Acting.actor_text ~ko:(state.ui_language = Lang_ko) row.Acting.actor))
-              ~clock
-          in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
-          if selected then
-            let marked = "\xe2\x80\xba " ^ String.sub line 2 (String.length line - 2) in
-            box_line_selected buf cols (Masc_tui_theme.strip_sgr marked)
-          else box_line_styled buf cols ~style line
+          let lead = if selected then "\xe2\x80\xba " else "  " in
+          let styled_line =
+            let glyph_styled = wrap_style style (Acting.glyph_text row.Acting.glyph) in
+            let content_styled =
+              let fitted = fit_width content_text table_columns.Acting.content_cells in
+              match row.Acting.glyph with
+              | Acting.Turn_done -> wrap_style (Ansi.bold ^ style) fitted
+              | Acting.Failure | Acting.Attention | Acting.Quiet -> wrap_style style fitted
+              | Acting.Call_started | Acting.Call_returned | Acting.Turn_boundary -> fitted
+            in
+            let actor_styled =
+              let fitted =
+                fit_width
+                  (Message_layout.fit_middle table_columns.Acting.keeper_cells actor_text)
+                  table_columns.Acting.keeper_cells
+              in
+              wrap_style (Theme.recede ()) fitted
+            in
+            let clock_styled =
+              if table_columns.Acting.show_clock then
+                " " ^ wrap_style (Theme.recede ()) clock_text
+              else ""
+            in
+            lead ^ glyph_styled ^ " " ^ content_styled ^ " " ^ actor_styled ^ clock_styled
+          in
+          if selected then box_line_selection buf cols styled_line
+          else box_line buf cols styled_line
     done;
   box_bottom buf cols;
   (* A Turns row is a fold with no cursor on it: "/" and n have no row to

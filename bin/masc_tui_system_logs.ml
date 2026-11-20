@@ -1,7 +1,9 @@
 module Decode = Masc.Tui_decode
 
 type source = Server | This_tui
-let source_label = function Server -> "Server" | This_tui -> "This TUI"
+let source_label ?(ko = false) = function
+  | Server -> if ko then "서버" else "Server"
+  | This_tui -> if ko then "이 TUI" else "This TUI"
 type page = {
   lp_snapshot : Decode.system_log_snapshot option;
   lp_error : string option;
@@ -34,7 +36,9 @@ let apply source result t = update source (fun page -> match result with
   | Error detail -> {page with lp_error=Some detail}
   | Ok snapshot ->
     let page={page with lp_snapshot=Some snapshot;lp_error=None} in
-    {page with lp_cursor=max 0 (min page.lp_cursor (List.length (visible page)-1))}) t
+    let last = max 0 (List.length (visible page) - 1) in
+    {page with lp_cursor=max 0 (min page.lp_cursor last);
+               lp_scroll=max 0 (min page.lp_scroll last)}) t
 let clear_server t = update Server (fun page ->
   {empty_page with lp_min_level=page.lp_min_level;lp_category=page.lp_category}) t
 

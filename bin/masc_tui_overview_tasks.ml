@@ -259,11 +259,14 @@ let age_text ~age_text ~now since =
   | None -> Masc_tui_theme.Glyph.no_value
   | Some at -> age_text (int_of_float (Float.max 0. (now -. at)))
 
-let summary_text ~age_text:format ~now line =
+let summary_text ?(ko = false) ~age_text:format ~now line =
   match line with
   | Task_row _ -> None
-  | Nothing_active -> Some "no task in progress"
+  | Nothing_active ->
+      Some (if ko then "진행 중인 작업 없음" else "no task in progress")
   | Todo_backlog { todo_count; oldest_created_at } ->
       Some
-        (Printf.sprintf "%d todo · oldest %s" todo_count
+        (Printf.sprintf
+           (if ko then "할 일 %d건 · 가장 오래됨 %s" else "%d todo · oldest %s")
+           todo_count
            (age_text ~age_text:format ~now oldest_created_at))

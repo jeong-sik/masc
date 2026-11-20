@@ -208,13 +208,16 @@ let bar_fill = function
   | Masc.Tui_decode_usage.Role_unclassified_limit -> Foreground_fill
   | Masc.Tui_decode_usage.Role_counts_other_use -> Row_tone_fill
 
-(* The meter in its colours. [around] is the colour the row draws in; the
-   track and whatever follows the fill go back to it. A limit's cells are
-   coloured against the whole percent written beside the bar, floored the same
-   way, so the colour and the figure agree at each band's edge. A fill exists
-   only for a finite share above zero, which is the share the percent is taken
-   of. *)
-let coloured_meter ~cells ~fill:bar ~around share =
+(* The meter in its colours. [track_style] colours the unfilled track (and a
+   row-tone fill). A limit's cells are coloured against the whole percent
+   written beside the bar, floored the same way, so the colour and the figure
+   agree at each band's edge. A fill exists only for a finite share above zero,
+   clamped at [percent_of_full] so huge ratios never overflow [int_of_float]. *)
+let wrap_style style text =
+  if String.equal style "" || String.equal text "" then text
+  else style ^ text ^ Ansi.reset
+
+let coloured_meter ~cells ~fill:bar ~track_style share =
   let fill, track = meter_glyphs ~cells share in
   let width = max 0 cells in
   let drawn_fill =
@@ -222,15 +225,15 @@ let coloured_meter ~cells ~fill:bar ~around share =
     | Limit_fill, [] -> ""
     | Limit_fill, (_ :: _ as fill) ->
         let scale = Masc_tui_chart.Declared_limit (Theme.paint ()) in
-        let value = percent_of_fraction share in
+        let value =
+          if share >= 1.0 then percent_of_full else percent_of_fraction share
+        in
         Masc_tui_chart.meter_fill_run ~scale ~width ~value
-          ~max_value:percent_of_full ~reset:Masc_tui_theme.Sgr.default_fg fill
-        ^ around
-    | Foreground_fill, fill ->
-        Masc_tui_theme.Sgr.default_fg ^ String.concat "" fill ^ around
-    | Row_tone_fill, fill -> String.concat "" fill
+          ~max_value:percent_of_full ~reset:Ansi.reset fill
+    | Foreground_fill, fill -> String.concat "" fill
+    | Row_tone_fill, fill -> wrap_style track_style (String.concat "" fill)
   in
-  drawn_fill ^ String.concat "" track
+  drawn_fill ^ wrap_style track_style (String.concat "" track)
 
 let credit_decimals = 2
 let credit_small_amount = 0.01
@@ -357,7 +360,7 @@ let scope_name (account : Masc.Tui_decode_usage.provider_usage_account) =
   let id = scope_id account in
   let id =
     Terminal_text.single_line
-      (String.sub id 0 (min scope_id_cells (String.length id)))
+      (String_util.utf8_prefix ~max_bytes:scope_id_cells id)
   in
   match account.pua_providers with
   | [] -> "scope " ^ id
@@ -929,7 +932,9 @@ let rstrip_spaces text =
   String.sub text 0 !stop
 
 let style tone text =
-  match tone with None -> text | Some tone -> tone ^ text ^ Ansi.reset
+  match tone with
+  | None -> text
+  | Some tone -> wrap_style tone text
 
 (* Every line is cut to the screen: a column that cannot shrink further loses
    its tail rather than the row's edge. *)
@@ -1052,20 +1057,42 @@ let draw_entry ~ko ?(named = true) layout tone entry =
     let gauge =
       match line.share with
       | Some share ->
-          let around = match line.tone with Some tone -> tone | None -> "" in
-          around ^ meter_open
-          ^ coloured_meter ~cells:layout.bar_cells ~fill:line.fill ~around share
-          ^ meter_close ^ " " ^ pad_left line.percent layout.percent_cells ^ Ansi.reset
+          let chrome_style =
+            match line.fill with
+            | Limit_fill | Foreground_fill -> Theme.border_muted ()
+            | Row_tone_fill -> Option.value ~default:"" line.tone
+          in
+          let percent_style =
+            match line.fill with
+            | Limit_fill ->
+                if not (Float.is_finite share) || share <= 0.0 then ""
+                else
+                  let scale = Masc_tui_chart.Declared_limit (Theme.paint ()) in
+                  let value =
+                    if share >= 1.0 then percent_of_full
+                    else percent_of_fraction share
+                  in
+                  Masc_tui_chart.meter_tip_style scale ~value
+                    ~max_value:percent_of_full
+            | Foreground_fill | Row_tone_fill -> Option.value ~default:"" line.tone
+          in
+          wrap_style chrome_style meter_open
+          ^ coloured_meter ~cells:layout.bar_cells ~fill:line.fill
+              ~track_style:chrome_style share
+          ^ wrap_style chrome_style meter_close
+          ^ " "
+          ^ wrap_style percent_style (pad_left line.percent layout.percent_cells)
       | None -> String.make gauge_width ' '
     in
+    let styled_label = style line.tone label in
     (* A row with no bar has an empty gauge. When the detail does not fit
        after that empty space, it moves left into it before it wraps. *)
     let bodies =
       match line.share with
-      | Some _ -> [ (label ^ " " ^ gauge, detail_gap) ]
-      | None -> [ (label ^ " " ^ gauge, detail_gap); (label, " ") ]
+      | Some _ -> [ (styled_label ^ " " ^ gauge, detail_gap) ]
+      | None -> [ (styled_label ^ " " ^ gauge, detail_gap); (styled_label, " ") ]
     in
-    let head body = indent ^ meter_name ^ " " ^ style line.tone body in
+    let head body = indent ^ meter_name ^ " " ^ body in
     let placements =
       List.concat_map
         (fun (body, gap) ->
@@ -1082,7 +1109,7 @@ let draw_entry ~ko ?(named = true) layout tone entry =
     in
     if Option.is_some line.share
        && ((line.at_limit && layout.label_cells = 0)
-           || cells_of (head (rstrip_spaces (label ^ " " ^ gauge))) > layout.width)
+           || cells_of (head (rstrip_spaces (styled_label ^ " " ^ gauge))) > layout.width)
     then
       let labels =
         if label_overflows then label_rows
@@ -1097,7 +1124,7 @@ let draw_entry ~ko ?(named = true) layout tone entry =
       label_rows
       @ (match List.find_opt fits placements with
          | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
-         | None -> head (rstrip_spaces (label ^ " " ^ gauge)) :: wrapped_detail ())
+         | None -> head (rstrip_spaces (styled_label ^ " " ^ gauge)) :: wrapped_detail ())
   in
   (* An entry named on the row above that reports a state has no bar to line
      up with the list: its text and notes start just under the name and take
@@ -1304,17 +1331,22 @@ let rec pairs = function
   | [ only ] -> [ [ only ] ]
   | first :: second :: rest -> [ first; second ] :: pairs rest
 
+let section_border_role = function
+  | At_limit_or_exhausted -> Masc_tui_theme.Panel_attention
+  | Other_windows -> Masc_tui_theme.Panel_usage
+  | No_windows -> Masc_tui_theme.Panel_neutral
+
 (* An account's windows as a card titled with its name. The name column is
    empty inside the card: the title already says it. The section's shared
    layout keeps every window row on the same axes. *)
-let account_card ~ko ~tone ~layout entry =
+let account_card ~ko ~section ~tone ~layout entry =
   { Masc_tui_card.edge =
       { Masc_tui_card.name = marked ~attention:entry.de_attention entry.de_name
       ; key = None
       ; status = None
       ; count = None
       ; focus = Masc_tui_card.Unfocused
-      ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_usage)
+      ; border_accent = Some (Theme.panel_border (section_border_role section))
       ; footer_keys = [] }
   ; body =
       (fun ~cells ->
@@ -1322,15 +1354,15 @@ let account_card ~ko ~tone ~layout entry =
           if cells_of (marked ~attention:entry.de_attention entry.de_name) <= max 0 (cells - 1) then []
           else
             wrap_marked ~width:cells ~attention:entry.de_attention entry.de_name
-            |> List.map (fun line -> Ansi.bold ^ tone ^ line ^ Ansi.reset)
+            |> List.map (fun line -> wrap_style (Ansi.bold ^ tone) line)
         in
-        full_name @ draw_entry ~ko layout tone entry)
+        full_name @ draw_entry ~ko ~named:false layout tone entry)
   }
 
 (* Each pair of accounts is one row of cards that end on the same line; a lone
    last account leaves its neighbour's place empty rather than stretching
    across the screen. *)
-let draw_card_rows ~ko ~width ~tone entries =
+let draw_card_rows ~ko ~section ~width ~tone entries =
   let style =
     { Masc_tui_card.border = Theme.border_muted ()
     ; focused_border = Theme.border_focus ()
@@ -1348,7 +1380,9 @@ let draw_card_rows ~ko ~width ~tone entries =
   let row pair =
     (* No row of an account card can be selected. *)
     let cards =
-      List.map (fun entry -> (account_card ~ko ~tone ~layout entry, Masc_tui_card.Unselectable)) pair
+      List.map
+        (fun entry -> (account_card ~ko ~section ~tone ~layout entry, Masc_tui_card.Unselectable))
+        pair
     in
     let columns =
       match cards with
@@ -1373,7 +1407,9 @@ let draw_cards ~ko ~show_limit_exhausted ~width groups =
         let tone = section_tone section in
         let silent, listed = split_silent section entries in
         group_heading ~ko ~width section entries
-        @ blocks [ draw_card_rows ~ko ~width ~tone listed; draw_silent_accounts ~ko ~width ~tone silent ]
+        @ blocks
+            [ draw_card_rows ~ko ~section ~width ~tone listed
+            ; draw_silent_accounts ~ko ~width ~tone silent ]
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -1497,23 +1533,25 @@ let section_with ~ko ~draw ~bound ~(providers : Types.overview_providers_reading
       let exhausted =
         match counts.exhausted with
         | Exhausted_unknown gap -> Masc_tui_value.Unknown.glyph gap
-        | Exhausted_accounts count -> string_of_int count
+        | Exhausted_accounts count -> Masc_tui_value.Count.grouped count
       in
       (* Metrics lead and the legend recedes. A row that is too wide still ends
          where a clause ends, rather than splitting a count from its meaning. *)
       let metric ?(tone = "") label value =
-        Theme.recede () ^ label ^ Ansi.reset ^ " " ^ Ansi.bold ^ tone ^ value ^ Ansi.reset
+        wrap_style (Theme.recede ()) label ^ " " ^ wrap_style (Ansi.bold ^ tone) value
       in
       let summary_indent = if width > indent_cells then indent else "" in
       let summary_width = max 1 (width - String.length summary_indent) in
       let metrics =
         Masc_tui_message_layout.pack_clauses ~max_cells:summary_width
-          [ metric (if ko then "계정" else "Accounts") (string_of_int counts.accounts)
-          ; metric (if ko then "보고됨" else "Reporting") (string_of_int counts.reporting)
+          [ metric (if ko then "계정" else "Accounts")
+              (Masc_tui_value.Count.grouped counts.accounts)
+          ; metric (if ko then "보고됨" else "Reporting")
+              (Masc_tui_value.Count.grouped counts.reporting)
           ; metric
               ~tone:(if counts.at_limit > 0 then Theme.text_status Masc_tui_theme.Bad else "")
               (if ko then "한도 도달 (보고)" else "At limit (reported)")
-              (string_of_int counts.at_limit)
+              (Masc_tui_value.Count.grouped counts.at_limit)
           ; metric
               ~tone:(match counts.exhausted with
                 | Exhausted_unknown Masc_tui_value.Unknown.Read_failed ->

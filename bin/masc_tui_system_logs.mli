@@ -1,7 +1,7 @@
 (** Source-owned Logs pages. Client observations are process-local, and never
     borrow server authority, sequence identities, filters or detail targets. *)
 type source = Server | This_tui
-val source_label : source -> string
+val source_label : ?ko:bool -> source -> string
 type page = {
   lp_snapshot : Masc.Tui_decode.system_log_snapshot option;
   lp_error : string option;

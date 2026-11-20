@@ -592,6 +592,41 @@ let test_an_average_near_the_integer_range_does_not_wrap () =
   Alcotest.(check (option int)) "the fifth time above" (Some max_int)
     (heap_top ([ steady ] @ repeat 4 max_int @ [ steady; max_int ]))
 
+let test_braille_baseline_and_axis_styles () =
+  let tint share = Printf.sprintf "<%.2f>" share in
+  let reset = "\027[0m" in
+  let samples =
+    [ Masc_tui_braille.Absent; Masc_tui_braille.Absent
+    ; Masc_tui_braille.of_count 8; Masc_tui_braille.of_count 8
+    ; Masc_tui_braille.Zero; Masc_tui_braille.Zero
+    ; Masc_tui_braille.of_count 6; Masc_tui_braille.of_count 6
+    ]
+  in
+  (match
+     Masc_tui_braille.braille_graph ~baseline_style:"<base>" ~axis_style:"<axis>"
+       ~tint ~width:6 ~rows:1 ~axis:"8" ~maximum:8 samples
+   with
+   | Masc_tui_braille.Drawn [ row ] ->
+       Alcotest.(check string) "baseline and axis styles apply independently"
+         ("<axis>8" ^ reset ^ " "
+          ^ Masc_tui_braille.braille_cell ~mask:0
+          ^ "<1.00>" ^ Masc_tui_braille.braille_pair ~left:4 ~right:4
+          ^ "<base>" ^ Masc_tui_braille.braille_pair ~left:1 ~right:1
+          ^ "<0.50>" ^ Masc_tui_braille.braille_pair ~left:3 ~right:3
+          ^ reset)
+         row
+   | Masc_tui_braille.(Never_read | Too_narrow | Drawn ([] | _ :: _ :: _)) ->
+       Alcotest.fail "expected a single drawn Braille row");
+  match
+    Masc_tui_braille.braille_graph ~baseline_style:"<base>" ~axis_style:"<axis>"
+      ~tint ~width:7 ~rows:1 ~axis:"  " ~maximum:8 samples
+  with
+  | Masc_tui_braille.Drawn [ row ] ->
+      Alcotest.(check bool) "blank axis emits no axis style" true
+        (String.starts_with ~prefix:"   " row)
+  | Masc_tui_braille.(Never_read | Too_narrow | Drawn ([] | _ :: _ :: _)) ->
+      Alcotest.fail "expected a single drawn Braille row with blank axis"
+
 let () =
   Alcotest.run "tui_engine_samples"
     [ ( "requests"
@@ -669,5 +704,7 @@ let () =
             test_a_top_over_blanks_only_is_not_written
         ; Alcotest.test_case "how far above the top moves no dot" `Quick
             test_how_far_above_the_top_moves_no_dot
+        ; Alcotest.test_case "baseline and axis styles apply cleanly" `Quick
+            test_braille_baseline_and_axis_styles
         ] )
     ]

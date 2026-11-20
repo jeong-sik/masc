@@ -809,6 +809,8 @@ let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
 let sub_board_access_of_string_opt = Board_sub_board_json.sub_board_access_of_string_opt
 let sub_board_access_field_of_yojson =
   Board_sub_board_json.sub_board_access_field_of_yojson
+let sub_board_members_field_of_yojson =
+  Board_sub_board_json.sub_board_members_field_of_yojson
 let sub_board_post_counts_unlocked store =
   let counts = Hashtbl.create 64 in
   Hashtbl.iter

@@ -51,6 +51,39 @@ let sub_board_access_field_of_yojson (args : Yojson.Safe.t) =
          ("arguments must be a JSON object, got " ^ Yojson.Safe.to_string other))
 ;;
 
+let members_field = "members"
+
+let sub_board_members_field_of_yojson (args : Yojson.Safe.t) =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt members_field fields with
+     | None | Some `Null -> Ok None
+     | Some (`List items) ->
+       let rec collect acc = function
+         | [] -> Ok (Some (List.rev acc))
+         | `String raw :: rest -> collect (raw :: acc) rest
+         | other :: _ ->
+           Error
+             (Validation_error
+                (Printf.sprintf
+                   "%s entries must be strings, got %s"
+                   members_field
+                   (Yojson.Safe.to_string other)))
+       in
+       collect [] items
+     | Some other ->
+       Error
+         (Validation_error
+            (Printf.sprintf
+               "%s must be an array of strings, got %s"
+               members_field
+               (Yojson.Safe.to_string other))))
+  | other ->
+    Error
+      (Validation_error
+         ("arguments must be a JSON object, got " ^ Yojson.Safe.to_string other))
+;;
+
 let valid_sub_board_slug_pattern =
   Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
 ;;

@@ -11,6 +11,14 @@ val sub_board_access_of_string_opt : string -> sub_board_access option
 val sub_board_access_field_of_yojson
   :  Yojson.Safe.t
   -> (sub_board_access option, board_error) result
+
+(** Reads the ["members"] field of a create/update argument object. A missing
+    or [null] field is [Ok None] (preserving existing members on update), while
+    an explicit array — including [[]] — is [Ok (Some ids)], and any non-array
+    or non-string element is a [Validation_error]. *)
+val sub_board_members_field_of_yojson
+  :  Yojson.Safe.t
+  -> (string list option, board_error) result
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 (** Accepts only the exact current persistence shape emitted for stored

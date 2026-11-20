@@ -1311,6 +1311,65 @@ let test_sub_board_routes_reject_unknown_access () =
       (Masc.Board.sub_board_access_to_string sub_board.access)
 ;;
 
+let test_sub_board_update_empty_members_clears_non_owners () =
+  with_authenticated_activity_router
+    ~prefix:"sub-board-http-empty-members-"
+    ~agent_name:"bob"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let request ?meth path fields =
+    dispatch_json ?meth ~router ~token ~path ~extra_headers:[]
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) ()
+  in
+  let open Yojson.Safe.Util in
+  let member_names_of_json json =
+    json |> member "members" |> to_list |> List.map to_string |> List.sort String.compare
+  in
+  let status, created =
+    request "/api/v1/board/sub-boards"
+      [ "slug", `String "http-team-room"
+      ; "name", `String "HTTP Team Room"
+      ; "access", `String "members_only"
+      ; "members", `List [ `String "carol" ]
+      ]
+  in
+  check int "sub-board create with member returns 200" 200 status;
+  check (list string) "created sub-board has owner and carol"
+    [ "bob"; "carol" ] (member_names_of_json created);
+  let sub_board_id = created |> member "id" |> to_string in
+  let status, renamed =
+    request ~meth:"PUT" ("/api/v1/board/sub-boards/" ^ sub_board_id)
+      [ "name", `String "HTTP Team Room Renamed" ]
+  in
+  check int "update omitting members returns 200" 200 status;
+  check (list string) "omitting members preserves carol"
+    [ "bob"; "carol" ] (member_names_of_json renamed);
+  let status, cleared =
+    request ~meth:"PUT" ("/api/v1/board/sub-boards/" ^ sub_board_id)
+      [ "members", `List [] ]
+  in
+  check int "update with members=[] returns 200" 200 status;
+  check (list string) "members=[] response leaves owner only"
+    [ "bob" ] (member_names_of_json cleared);
+  (match Masc.Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id with
+   | Error error -> fail (Board_tool.board_error_to_string error)
+   | Ok sub_board ->
+     check (list string) "stored sub-board leaves owner only"
+       [ "bob" ]
+       (List.map Masc.Board.Agent_id.to_string sub_board.members));
+  let status, _ =
+    request ~meth:"PUT" ("/api/v1/board/sub-boards/" ^ sub_board_id)
+      [ "members", `String "carol" ]
+  in
+  check int "string members returns 400" 400 status;
+  let status, _ =
+    request ~meth:"PUT" ("/api/v1/board/sub-boards/" ^ sub_board_id)
+      [ "members", `List [ `Int 123 ] ]
+  in
+  check int "non-string members element returns 400" 400 status
+;;
+
 (* Strict HTTP auth covers the sub-board reads like every other Board read. *)
 let test_sub_board_reads_require_auth_in_strict_mode () =
   with_authenticated_activity_router
@@ -1943,6 +2002,8 @@ let () =
             test_sub_board_routes_use_authenticated_owner
         ; test_case "sub-board unknown access is a 400" `Quick
             test_sub_board_routes_reject_unknown_access
+        ; test_case "sub-board update with empty members clears non-owners" `Quick
+            test_sub_board_update_empty_members_clears_non_owners
         ; test_case "sub-board reads follow strict auth" `Quick
             test_sub_board_reads_require_auth_in_strict_mode
         ; test_case "context inference uses typed Owner receipt and authenticated actor" `Quick

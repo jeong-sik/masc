@@ -1127,6 +1127,124 @@ let test_sub_board_unknown_access_is_rejected () =
     Alcotest.(check bool) "stored access unchanged" true
       (sb.Board.access = Board.Owner_only)
 
+let test_sub_board_update_empty_members_clears_non_owners () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, _ =
+    dispatch
+      "masc_board_sub_board_create"
+      (make_args
+         [ "slug", `String "team-room"
+         ; "name", `String "Team Room"
+         ; "owner", `String "bob"
+         ; "access", `String "members_only"
+         ; "members", `List [ `String "carol" ]
+         ])
+  in
+  Alcotest.(check bool) "create members_only sub-board succeeds" true ok;
+  let ok, created_post_body =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "author", `String "carol"
+         ; "content", `String "carol member post"
+         ; "hearth", `String "team-room"
+         ])
+  in
+  Alcotest.(check bool) "carol can post while listed as member" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created_post_body |> member "id" |> to_string)
+  in
+  let ok, _ =
+    dispatch
+      "masc_board_sub_board_update"
+      (make_args
+         [ "sub_board_id", `String "team-room"
+         ; "owner", `String "bob"
+         ; "name", `String "Team Room Renamed"
+         ])
+  in
+  Alcotest.(check bool) "update omitting members succeeds" true ok;
+  (match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"team-room" with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok sb ->
+     Alcotest.(check (list string)) "omitting members preserves carol"
+       [ "bob"; "carol" ]
+       (List.map Board.Agent_id.to_string sb.Board.members |> List.sort String.compare));
+  let ok, _ =
+    dispatch
+      "masc_board_sub_board_update"
+      (make_args
+         [ "sub_board_id", `String "team-room"
+         ; "owner", `String "bob"
+         ; "members", `List []
+         ])
+  in
+  Alcotest.(check bool) "update with explicit empty members succeeds" true ok;
+  (match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"team-room" with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok sb ->
+     Alcotest.(check (list string)) "explicit empty members leaves owner only"
+       [ "bob" ]
+       (List.map Board.Agent_id.to_string sb.Board.members));
+  let ok, _ =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "author", `String "carol"
+         ; "content", `String "carol rejected post"
+         ; "hearth", `String "team-room"
+         ])
+  in
+  Alcotest.(check bool) "carol cannot post after members cleared" false ok;
+  let ok, _ =
+    dispatch
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id
+         ; "author", `String "carol"
+         ; "content", `String "carol rejected comment"
+         ])
+  in
+  Alcotest.(check bool) "carol cannot comment after members cleared" false ok;
+  let ok, _ =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "author", `String "bob"
+         ; "content", `String "bob owner post"
+         ; "hearth", `String "team-room"
+         ])
+  in
+  Alcotest.(check bool) "owner bob can still post" true ok;
+  let ok, _ =
+    dispatch
+      "masc_board_sub_board_update"
+      (make_args
+         [ "sub_board_id", `String "team-room"
+         ; "owner", `String "bob"
+         ; "members", `String "carol"
+         ])
+  in
+  Alcotest.(check bool) "string members update rejected" false ok;
+  let ok, _ =
+    dispatch
+      "masc_board_sub_board_update"
+      (make_args
+         [ "sub_board_id", `String "team-room"
+         ; "owner", `String "bob"
+         ; "members", `List [ `Int 123 ]
+         ])
+  in
+  Alcotest.(check bool) "non-string members element rejected" false ok;
+  match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"team-room" with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok sb ->
+    Alcotest.(check (list string)) "rejected updates leave owner-only members"
+      [ "bob" ]
+      (List.map Board.Agent_id.to_string sb.Board.members)
+
 let test_direct_board_reaction_binds_keeper_identity () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4239,6 +4357,8 @@ let () =
             test_keeper_board_sub_board_owner_is_runtime_bound;
           Alcotest.test_case "sub-board unknown access is rejected" `Quick
             test_sub_board_unknown_access_is_rejected;
+          Alcotest.test_case "sub-board update with empty members clears non-owners" `Quick
+            test_sub_board_update_empty_members_clears_non_owners;
           Alcotest.test_case "direct Board reaction binds keeper identity" `Quick
             test_direct_board_reaction_binds_keeper_identity;
           Alcotest.test_case

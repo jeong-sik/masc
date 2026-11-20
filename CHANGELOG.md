@@ -1,6 +1,1262 @@
-# Changelog
-
 ## [Unreleased]
+
+## [0.75.0] - 2026-11-20
+
+### 요약
+
+1. [0.75.0] 항목은 changelog.d 조각 파일 402개(기존 385개 + 이번 컷에서 PR 제목으로 backfill 한 16개 + 컷 뒤 병합된 #53966 조각 1개)를 접은 509개 불릿입니다. 절은 Upgrade notes·Fresh state required·Added·Changed·Removed·Fixed·Performance·Documentation·Internal 아홉 절이 각각 하나씩 있습니다.
+2. TUI 전면 고도화가 여섯 층 Native Stack(#53860·#53861·#53862·#53863·#53864·#53865, 최상층 merge `11f7b347`)으로 한 번에 들어왔습니다. 타이포그래피·KV·Bottom Sheet·숫자 탭 프리미티브, Goals·Verdicts 계층과 액션 콜아웃, Keeper 24h Braille 활동 월, Memory World→Shared→Keeper→Category 트리와 콕핏, Skills/Plugins 컬러 리스트와 Docked Bottom Sheet, Usage/Metrics 차트가 모두 이 창에 있습니다.
+3. 그 스택에서 넘긴 P2 하나를 릴리스 전에 닫았습니다. Plugins overview 의 Bottom Sheet 가 목록 끝에 붙어 화면 밖으로 밀려나던 문제를 `list_budget = budget - List.length sheet_rows` 로 예산에서 먼저 빼 뷰포트 하단에 도킹했습니다(#53906, main `66d593ab`). 항목이 화면을 넘는 height:20 시험이 함께 들어왔습니다.
+4. 업그레이드 주의는 Upgrade notes 와 Fresh state required 를 먼저 읽으세요. 두 절 모두 이번 창에 각각 하나씩 있습니다.
+5. 컷 노트: v0.74.0 릴리스 브랜치 컷 뒤에 병합된 PR 중 조각이 없던 302건을 셌습니다. 그중 v0.74.0 노트에 이미 적혀 있고 #53473 으로 접힌 286건은 사유를 적어 exempt 목록에 넣었고, 어느 릴리스에도 실리지 않은 16건은 PR 제목으로 조각을 채워 이번 절에 넣었습니다. strict missing 게이트는 exit 0 입니다.
+
+### Upgrade notes
+
+- A credential that is not a registered Keeper secret and has none of the
+  known shapes (`ghp_`, `sk-`, `AKIA`, a PEM block, an `Authorization:`
+  header, `user:password@` in a URL) is no longer masked when it is printed
+  as `KEY=value`, after `Bearer`, as a URL user without a password, or under
+  a JSON key that is not on the list, such as `confirm_token` (#53703).
+- On its first boot with this release, a multi-account installation writes what the engine writes on a single-user one: the refill of its config root (a missing `runtime.toml` among it), an Admin credential, `agents/` and the hash of the internal Keeper token under `.masc/auth`, the built-in skills under `.masc/skills` unless `MASC_CONFIG_BOOTSTRAP` is `empty` or `skip`, and the stores of the workspace under `.masc`. It still runs no Keeper (#53748).
+- A multi-account installation that holds a Keeper configuration journal does not boot until the journal is gone. Removing it leaves the Keeper definition and runtime.toml as they are; check both before the next boot (#53790).
+- A build before this one does not decode a Memory commit log line with a `make_room` cause or a `not_valid_in_room` reason (#53829).
+  - As the last line it stops that Keeper's Memory store at boot with `Log_unreadable`. A line before the last is refused by `validate-stores`.
+
+### Fresh state required
+
+- The turn log's `Opened` line now carries `stimuli`, and an `Opened` without that field is not read. Only a server that ran a build holding #53283 without this change has such lines, in each Keeper's `<base>/.masc/keepers/<keeper>/turns.jsonl`. Delete those files with the server stopped before starting this build; the next start writes each log's first line again. A file left in place and ending in a `Closed` still takes new lines, and its earlier `Opened` lines stay unreadable to any reader that goes back to them. A file left in place and ending in such an `Opened` (the server stopped during a turn) takes no further line, and `masc_keeper_turn_log_append_failed_total` rises on every turn of that Keeper (#53363).
+- Execution journals (`events.v1.wal`) that spell `reasoning_prefix` as an explicit `null` are refused. A binary that always emitted the field stored `"reasoning_prefix":null,` in events. This build accepts a stored event only when its bytes equal what the current encoder writes, so it reads such a journal as `Corrupt_store` (`event bytes are not canonical`), finished or not. `validate-stores` does not scan these journals (#53435).
+  - A Keeper operation whose native call was still running when the server stopped: at startup the restart settlement cannot read its journal. The server logs `restart journal read failed operation=<id>` at WARN, closes the call with an unknown effect, and fails the operation with "the restart could not read the native call's journal; its effect is unknown". The call is not run again (#53435).
+  - A finished call is not read at startup. Only the execution history of that call fails to load (#53435).
+  - Nothing has to be deleted. `rg -a -l -F --hidden --no-ignore --glob events.v1.wal '"reasoning_prefix":null,' /path/to/workspace/.masc` lists the affected journals. Remove the `<call_id>` directory that holds a listed journal (`.masc/keepers/<keeper>/request-executions/<call_id>/`, or `native-executions/<call_id>/` under its session directory) only if that execution's history is no longer needed. To avoid the unknown-effect failure, let running Keeper operations finish before upgrading (#53435).
+- Turn boundary lines written before #52903 carry the old Goal criterion in
+  their task context and are not read. For each Keeper whose
+  `.masc/keepers/<keeper>/turn-boundaries.jsonl` `validate-stores` refuses,
+  stop the server and delete that log with its Librarian positions, range
+  receipt, unread ledger and Librarian history scope, then delete what the
+  next `validate-stores` run names, as the "Keeper turn boundaries" section of
+  `docs/guides/DURABLE-STORE-HARD-CUT.md` lists. Turns the Librarian had not
+  committed before the cut never reach Memory (#53492).
+- Semantic execution records in formats other than `masc.keeper_semantic_execution.v4` are no longer read or converted. A Keeper whose `<base-path>/.masc/keepers/<keeper>/chat-operations.sqlite3` (`Common.chat_operation_store_basename`) holds any semantic execution written by an earlier build refuses that journal at startup and returns no Owner handle; a journal with no semantic execution rows still opens. For fresh state, stop every writer and preserve the old workspace and evidence before removing `chat-operations.sqlite3` and any `chat-operations.sqlite3-wal`, `chat-operations.sqlite3-shm` and `chat-operations.sqlite3-journal` beside it. This discards that Keeper's queued, running and settled operations, their input history and the execution records. See [the stored-state guide](../docs/guides/DURABLE-STORE-HARD-CUT.md#keeper-chat-operation-journals); this change performs no installed-state removal (#53680).
+- A full replacement catalog named by `AGENT_CORE_MODEL_CATALOG` or a
+  capability manifest that uses a refused label stops loading. Rewrite the
+  value to its label in `packages/agent_core/docs/capability-manifest.md`:
+  `claude` is `anthropic`, `zhipu` and `glm-coding` are `glm`, `openai` and
+  `openai_compat` are `openai_chat`, and `openai_compat_chat_extended`,
+  `xai` and `mistral` are `openai_chat_extended` (#53695).
+- Bump Keeper Librarian admission capture schema from `3` to `4` so `working_context` always carries `withheld` separately from `unavailable`; persisted schema-3 captures are rejected fail-closed (#53750).
+- Official-client session files that hold a `librarian_unread` context are
+  not read (#53752).
+  - Boot and `validate-stores` refuse `official-client-runtime/session.json`.
+    `--accept-store-quarantine` moves only that file (#53752).
+  - Neither reads the retained copies under `official-client-runtime/runtimes/`.
+    A Claude Code, Codex, Antigravity or Muse turn on such a runtime ends
+    with `session binding load failed` before the provider call (#53752).
+  - Stop the server and delete every file that
+    `rg -l -F --hidden --no-ignore --glob '**/official-client-runtime/session.json' --glob '**/official-client-runtime/runtimes/*.json' '"librarian_unread"' /path/to/workspace/.masc/keepers`
+    lists. Each of those Keepers opens a new vendor session on its next turn
+    on that runtime (#53752).
+- A Memory commit log line whose `Read` cause carries `"memory":"shown"` or `"memory":"not_shown"` does not decode (#53777).
+  - When it is the last line, that Keeper's Memory store stops at boot with `Log_unreadable` until an operator adopts the snapshot. A line before the last is refused by `validate-stores` (#53777).
+  - Stop the server and delete every file that
+    `rg -l --glob '*.memory-log.jsonl' '"memory":"(shown|not_shown)"' /path/to/workspace/.masc/config/keepers`
+    lists. That Keeper's next boot starts a new log on its snapshot and reads its turn log from the start (#53777).
+
+### Added
+
+- Show remaining Credit for OpenRouter, Ollama Cloud, Kimi Coding and Codex in Usage, preserving currency, optional totals and explicit unlimited balances across native TUI, dashboard and durable history (#53329).
+- Read OpenRouter account credits beside existing API-key usage, support both Ollama balance plans, decode Kimi booster wallets and expose Codex finite/unlimited credits (#53329).
+- The accounts console replaces the key of a key account: the card of the
+  account has "key 바꾸기", which takes another key for it and says what
+  came of it. An account whose key replacement did not start takes the key
+  again there (#53394).
+- Enabled direct 24-bit Truecolor RGB foreground output for active TUI themes and bundled `tokyo-night-storm-truecolor` (7/7 native WCAG AA) as the default scheme on Truecolor terminals, while preserving explicit terminal-follow opt-out and safe late OSC probe handling (#53453).
+- `POST /api/v1/keepers/<keeper>/memory/act` (Admin): an operator resumes or adopts a Keeper's stopped Memory store. `{"action":"resume"}` boots the store again; `{"action":"adopt","observed":"<sha256 hex>"}` takes the bytes the snapshot file holds as Memory. An action the writer took answers with the store afterwards (`store`, and `stopped` with the reason; a store whose commit log and snapshot disagree also carries `expected_snapshot` and `observed_snapshot`). `store: "booting"` says another boot of the store is running after the action; the action is not sent again. A refusal answers 409 with `code` and changes nothing. (#53525)
+- A Librarian answer can say a unit restated a fact Memory holds with
+  `{"op":"seen","ref":"m5","from":["u1"]}`: the plan moves only that fact's
+  `last_seen` and records the units as its sources, so a reconfirmation no
+  longer has to copy the claim byte for byte and cannot add a near copy of it
+  (#53543).
+- The model catalog knows Gemini 4 Neon (`gemini-4-neon`, generally available
+  2026-11-18): a 1,048,576-token window, 65,536 output tokens per call,
+  reasoning levels low to xhigh and its price. The seed declares its four
+  Antigravity bindings next to Hydrogen (#53546).
+- Add cooperative FIFO `Eio.Condition` backpressure for
+  `Connector_ingress_lane` lanes created with `?config`,
+  `Standalone_lane.admission_class_of_caller`,
+  `Runtime_candidate_standing.order_for_scoped` and
+  `Keeper_event_queue.dequeue_fair`. The Slack and Discord gateways create
+  their ingress lanes without `?config`, and nothing calls the other three
+  yet (#53573).
+- Retain native client sessions per runtime family in
+  `Keeper_official_client_session_store` and project causal turns uniformly
+  across `Official_client` and `Agent_core` via `Keeper_turn_bridge` (#53575).
+- Detect HTTP `slots` and CLI `cli_slots` overlaps between Librarian and
+  interactive Keeper seats via `Runtime.detect_librarian_keeper_seat_overlaps`
+  and propose seat separation in
+  `docs/rfc/RFC-librarian-seat-separation-and-keeper-first-admission.md`
+  (#53576).
+- Add the deterministic 12-case `test_librarian_l6g_scoring` evaluation suite
+  (with paired unknowing-reply non-erasure vs explicit retraction cases), Living
+  Memory & Context Cycle design doc, and deferred RFC #53148 schema amendments
+  for multi-category `facets` and causal `temporal_scope`, while handing off
+  canonical `config/prompts/librarian.ask.md` ownership to #53583 to keep the
+  branches conflict-free (#53577).
+- Add in-process World Memory curation (`Server_workspace_memory_curator`),
+  cursor-based delta planning with overflow bisection
+  (`Workspace_memory_delta`), 8 KiB Wiki frontmatter memoization (`Tool_wiki`),
+  MCP World Memory resources (`masc://world-memory/claims`,
+  `masc://world-memory/log`) with live `Mcp_subscriptions` update
+  notifications, and live production wiring for `Workspace_memory_log`.
+  `Workspace_memory_delta` and `Workspace_memory_reader` have no production
+  caller yet; only tests call them (#53582).
+- Own `config/prompts/librarian.ask.md` (single User message with
+  `system_prompt = ""` and exact `Librarian_question.make` `turn`/`reset`
+  unit and item field contracts), enable all 5 ops (`add`, `seen`, `revise`,
+  `merge`, `drop`) matching `#53605`/`#53543`, harden against unknowing-reply
+  erasure and acknowledgement-phrasing quotes, preserve unit language, and
+  guard against `#53607` multi-store duplicates, together with
+  `test_librarian_l6g_question_corpus` (including paired unknowing-reply vs.
+  operator-retraction cases, `must_remain` preservation checks, `seen`
+  round-trip, and prompt contract tests) merged atop `#53605` (#53583).
+- Add a shared docked progress Bottom Sheet (`Masc_tui_render_prim.progress_sheet`, `render_progress_sheet`, `progress_inline`, `surface_chrome ?progress_sheet`), monotonic per-slot live 1Hz elapsed clocks (`Masc_tui_types.progress_clock_for`/`progress_clock_option`), and `a`/`A`/`ㅁ` select-all with cancellable sequential context batch probing on the Account Login overlay (#53792).
+- Re-introduced `masc://keepers/{keeper}/memory` and
+  `masc://keepers/{keeper}/memory/health` MCP resource templates with
+  fail-closed `resource_caller` authorization, Board readership filtering on
+  ordinary memory snapshots (pruning unreadable `Board` facts, transitively
+  unsupported `Derived` facts, and change deltas), and closed-token
+  `/memory/health` reporting without free-text error fields (#53824).
+- After the Librarian writer commits an item it read alone, it asks once more with Memory and the working state and no unit, to make room (#53829).
+  - The answer may drop, merge and revise facts and set the working state. Its `add` and `seen` ops are left out as `not_valid_in_room`.
+  - The answer is committed only when it changes Memory or the working state, and its `make_room` line does not move reading. It is not committed when a direct write removed a fact while it was asked.
+  - Making room never holds reading up: whatever it ends in, the next ask reads on.
+- `masc_keeper_librarian_room_outcomes_total` counts how each ask to make room ended, by `keeper` and `outcome` (#53829).
+- Add `Masc_tui_doc` typography and container primitives (`section_rule`, `kv_rows`, numbered `prose_block`, `action_callout_card`, docked `bottom_sheet`), `Masc_tui_theme.Glyph.superscript_digit` SSOT (with `Masc_tui_card` delegation), `tab_strip ~numbered:true`, `Braille.braille_pair_down`/`braille_curve_rows`/`interpolate_pairs`, `Theme.thermal_tint`/`warm_tint`, and fine Braille `Chart.dot_meter_bar`/`dot_meter` (#53860).
+- Add the hierarchical Memory sidebar tree (`Masc_tui_memory_tree`), a `World -> Shared -> Keeper` lineage summary card, columnar overview utilization using fine Braille `Chart.dot_meter_bar` bars, a docked fixed-height fact inspector bottom sheet, and `1–4` numbered section tabs (#53863).
+
+### Changed
+
+- On Agent Core, a turn that serves an admitted chat request and a turn a
+  Keeper wakes for itself send the same System and the same tools. The
+  admitted request source rides the end context of the turn's first request
+  instead of the System. An Anthropic lane that keeps that context in its
+  history after signed thinking sends it again in place on later requests.
+  Every run is offered `keeper_receipt_wait`, and a call from a run with no
+  chat execution is refused before anything is read. An official client still
+  reads the source in its System (#53316).
+- At a turn's first request, an Agent Core window that stayed where the last
+  request opened it moves to the turn boundary when the provider's count for
+  the last request plus the largest growth one turn made since the ledger
+  started, under any window, passes the binding's max-context. An unknown count, an unknown boundary or
+  no declared max-context moves nothing. The rest of the turn keeps the moved
+  start, and the next-request forecast shows the same start (#53355).
+- An Agent Core window that stays now sends the markers it sent before: the
+  results and arguments of turns that ended change only when the window
+  moves, so a turn's first request no longer rewrites the middle of a
+  history the provider holds in its cache. At a turn's first request the
+  markers wait only while the size signal watches the window; with no
+  ledger, no known turn growth or no declared max-context, that request
+  demotes the turns that ended as before. The resend that answers a size
+  refusal is unchanged (#53369).
+- An Agent Core window that stays now holds where the provider last
+  accepted it even after the Librarian reads past it, and carries the
+  working state it opened with, or none when it opened with none: the
+  front of a request changes only when its window moves. At a turn's
+  first request the window holds only while the size signal watches it.
+  When the signal moves a window and the Librarian has read past where it
+  opened, the window moves to the end of what the Librarian read, and the
+  rest of the turn holds there (#53396).
+- `masc_keeper_clear` writes the Keeper's turn log line before it clears anything. A head that decodes gets its open messages closed with one save and a `Reset` line announced as cleared, which names what was closed since the last unit; a head that does not decode is dropped with an unannounced `Reset` to no closed message, written without reading it; a clear that finds no head writes no line. When the line cannot be written the clear is refused before any effect: the official-client session and the history stay as they were (#53408).
+- A Keeper's meta file that stops reading while the server runs (changed from outside the server) no longer makes the operator snapshot partial when the Keeper's Owner stands for the file, and the Keeper stays in `persistent_agents`: the snapshot answers from what the Owner holds, as its Keeper rows already did. The supervisor sweep still reads the file. It counts the failure (`masc_keeper_meta_read_failures_total`, `site="keepalive_read"`), warns when the state changes and leaves the Keeper out of its keepalive set. (#53413)
+- The TUI Lanes list and Lane Add-ons screen draw a lane's standing in the
+  status marks: `○` waiting (was `◌`, the not-read mark) in the waiting tone
+  instead of the warning tone, `‖` turned off and `—` nothing set up (both
+  were `○`), and `✕` failing (was `✗`). A standing that could not be read
+  reads `못 읽음` / `not read` instead of `미관측` / `unknown` (#53418).
+- A Keeper stop that deletes the session writes the Keeper's turn log line before it deletes: an unannounced `Reset` from the last mark to no closed message and no official-client bytes, written every time and without reading the head. When the line cannot be written the session is kept and the finalization step fails as `Session_remove`, so it is retried rather than deleting without a line (#53420).
+- The TUI Planning list's JUDGE column draws each verdict in the status marks
+  and their tones: `○` waiting for the judge (was `…`), `●` proven (was `✓`),
+  `✕` refused (was `✗`), `▲` criterion changed (was `~`) and `✕` an unreadable
+  ledger (was `!`). The legend under the column follows (#53424).
+- The TUI Keeper detail no longer writes `미관측` / `not observed` in a value
+  cell. A Keeper without an activity record reads `—` when it is declared and
+  has never started and `?` when the server roster row does not carry it; a
+  lane walk with no recorded end reads `?`. The Keepers list heading for
+  Keepers whose state could not be read says `못 읽음` / `Not read` (#53429).
+- The Slack connector form names `docs/CONNECTOR-CONFIG-SCHEMA.md` as its documentation, like the other in-process connectors (#53435).
+- A dashboard purge that drops what follows a structural break writes the Keeper's turn log line before it installs: the open messages are closed with one save, and an announced `Recovered` reset names everything closed since the last unit, ending at the messages the purge keeps. A purge that only rewrites writes no line. When the line cannot be written nothing is replaced and the purge answers `Purge_turn_log_not_written` (500) (#53439).
+- `masc_checkpoint_purge --apply` takes the workspace writer lease before it reads the head and installs the purged checkpoint by compare-and-swap over the head it read; a head another writer installed in between is kept and the purge is refused. A purge that drops what follows a structural break writes the Keeper's turn log line first, as the dashboard purge does, and purges nothing when that line cannot be written (#53440).
+- The TUI Config prompt registry marks an override the registry declined and
+  a key with no prompt file with the failed mark `✕` (were `⊘` and `!`), and
+  the params list marks a value you set with `*`, the prompt override mark,
+  leaving the registered default blank (were `●` and `○`, the settled and
+  waiting status marks). The `?` sheet's Prompt and Param marks follow (#53445).
+- Replaced reverse-video (`\027[7m`) row highlights with a WCAG 4.5:1 Truecolor accent-tinted selection bar on Truecolor terminals, retaining reverse-video fallbacks on `NO_COLOR` and non-Truecolor capabilities (#53451).
+- Added a Truecolor 2.2:1 muted hairline border token (`border_muted`) for unfocused card frames, overlays, rules, and side-pane dividers so structural chrome sits calmly behind secondary text (#53452).
+- Replaced hardcoded xterm-256 diff backgrounds (`48;5;22`/`48;5;52`) with palette-adaptive Truecolor emerald/rose row tints and 4.5:1 lifted foregrounds, invalidating cached Code draft and history diff rows on palette changes (#53454).
+- The TUI Board marks a post a keeper or a lane wrote with `#` in the receding
+  tone, instead of `◐` in the warning tone. `◐` is the status mark for work
+  under way everywhere else, and an automation's post is not a warning. The
+  `?` sheet's Board marks follow (#53457).
+- A request with no seed starts where the Keeper's turn log says its last unit ended, not at the last `Turn_ended` line of `turn-boundaries.jsonl`. No digest is compared, so a purge that rewrites closed messages keeps the start. A turn log that cannot be read, that ended on another trace, or that names more closed messages than the history holds leaves the start unknown, and the request opens on the newest atom as before (#53461).
+- The TUI lane run detail marks each tool call and the tool count badges with
+  the status marks: completed `●`, deferred `◐` (handed to the async path and
+  still going), failed `✕`, in the status tones. They were `✓`, `△` and `✗`;
+  a disposition this build does not know keeps `?` (#53464).
+- The TUI Activity tool call list marks each call with the status marks:
+  succeeded `●`, deferred `◐` (handed to the async path and still going),
+  failed `✕`, in the status tones. They were `✓`, `◌` and `✗`; `◌` is the
+  mark of a value not read yet. A record with no outcome yet keeps `?` (#53466).
+- `keeper_memory_write` commits a plain observation to current Memory instead of the pending admission queue, and answers with its `memory_id` and `inserted` or `reobserved`. The tool was the queue's only producer; rows already queued are still drained by the admission pass. The error kinds `pending_admission_capacity_exceeded` and `pending_admission_persistence_failed` are gone. Part of the Librarian rebuild (L5n). (#53467)
+- A Keeper's queue signal (turn end, event queue, add-on wake) now runs only the working-context pass. Keeper launch, autoboot and checkpoint purge no longer submit a durable Librarian catch-up. Part of the Librarian rebuild (L5o); the old passes stay in the tree for their tests until the cut. (#53469)
+- The TUI Tools screen draws status marks where it drew `✓`, `◌`, `✗`, `!`
+  and `·`. A skill source that holds skills is `●`; one that holds none or is
+  missing is `—`; a path that is not a directory is `▲`; an unreadable source
+  or a path the config refused is `✕`. A skill activation that was delivered
+  is `● 전달됨`, and a composition result is `●` completed, `◐` deferred or
+  `✕` failed, with `?` where the disposition is missing (was `모름`) (#53470).
+- The TUI draws status marks where five notices drew `✓`, `✗`, `!` and `◷`:
+  the Keepers memory view's briefing (`○` pending, `●` current, `▲` stale,
+  `✕` unavailable) and world reading on both its Briefing and Ledger lines
+  (`◌` not read or reading, `✕` read failed, `▲` after a failed refresh),
+  the artifact check badge (`●` checked), the GitHub token save notice
+  (`●` / `✕`), the answering overlay's finished rows (`●`), and the Config
+  presets pane (`●` save confirmed, `✕` not sent, refused or unreadable,
+  `▲` unconfirmed) (#53477).
+- Unified MASC TUI typography hierarchy across cards, section headings, KPI meters, Goal List, and Keeper List: card edge metadata and footer key labels keep ≥4.5:1 text contrast instead of border accents, section heading rules (`── ` / ` ─────`) recede so bold titles stand out, KPI labels and Goal List middle-dot separators recede so values lead on both card and compact tiers, and Keeper List adopts bold sentence-case headers, receded two-line work subtitles, and canonical unbolded route keys (#53482).
+- Added consistent 1-line vertical breathing room across MASC TUI detail screens and list previews (Activity, Fusion, Verification, Work/Task/Goal preview & detail, Schedule, Config/Runtime params/Prompts) and between technical blocks and conversational speech in `Origin_bare` chat, and added optional `?width` wrapping to `detail_section_heading` and `detail_section_lines` (#53484).
+- Unified MASC TUI copy and key hints: separated hardcoded bilingual parenthetical Fusion headings into clean Korean and English strings, fixed dynamic section numbering on Model and Harness detail screens, normalized inline key hints to canonical `key:label  key:label` syntax while preserving sequential key semantics, and tightened outlier Korean prompts to a consistent concise TUI register (#53485).
+- The Dashboard Board search box searches every post of the Board (or of the
+  selected sub-board), not only the posts already loaded. `GET
+  /api/v1/dashboard/board` takes the text as `q` and matches it in the title,
+  body, author and hearth, as the `masc_board_search` tool does. The count
+  reads as matches while a search is applied, and the Overview Board card no
+  longer shows the total of a searched or sub-board list as the total of the
+  Board (#53494).
+- The TUI chat marks the Keeper speaking with `✦` and the pane's note about
+  a turn with `✧` (were `●` and `○`), and the Acting pane draws `✧` for a
+  boundary inside a turn (was `●`). `●` and `○` are the settled and waiting
+  status marks, which tool and turn rows take next (#53495).
+- The TUI Keepers screen says why a value is missing in the reading words
+  (`미조회`, `조회 실패`, `일부 관측`, `이전 관측`) or `보고 안 됨` where the
+  server read gave no value, instead of `미관측`, `미확인` and `미기록`. An
+  idle Keeper no longer adds `작업 이름 미관측`, and a turn end time that does
+  not read as an age is left out (#53497).
+- `keeper_memory_write` and `keeper_memory_retract` write through the Keeper's Memory writer, which the server starts for its workspace. A fact the Librarian put in Memory can be superseded. A `supersedes` that names no current fact is refused unless the claim is already current (`already_superseded`); removed facts are not looked up. A claim that is current with another basis is left as it is (`already_held`). A write Memory did not take answers `memory_unwritable` with the reason. Part of the Librarian rebuild (L5s). (#53499)
+- After a size refusal, the request resends from where this turn began as the turn log's open `Opened` line records it, not from the start state the turn computed and checked by digest. A purge that rewrites closed messages keeps that start. With no open turn, a `Reset` after the `Opened`, a line of another trace, or a history shorter than the line, the start is unknown and the request is not resent from it. A turn that resumes a checkpoint (native resume, direct resume, HITL) names no start either: an earlier run already closed its input, so its `Opened` lies after it (#53500).
+- The TUI chat and Acting pane mark states with the status marks. A call
+  under way is `◐` (was `▶` or `◌`), waiting on its result `○` (was `▶`),
+  returned, received or done `●` (was `✓`, `↩`, `■`), failed `✕` (was `✗`),
+  and a result never seen before the attempt ended `▲` (was `○`); anything
+  the Acting pane asks you to look at is `▲` (was `?`). Skills read `◐` live,
+  `●` settled, `▲` attention and `✕` failed (were `◇ ◆ △ ✗`). A tool row
+  keeps `■`, and an outcome the record does not carry keeps `?` (#53501).
+- The TUI Work screen says why a value is missing in the reading words
+  (`미조회`, `일부 관측`, `이전 관측`) or `보고 안 됨` where a read gave no value,
+  instead of `미관측`, `미확인` and `미기록`. A ledger or measurement that
+  records nothing now says so (`기록 없음`), and an empty earlier reading no
+  longer adds `현재 미확인` (#53506).
+- The Dashboard schedule calendar draws every schedule that is still going to
+  run, up to 200, instead of the 20 soonest rows of the whole ledger. `GET
+  /api/v1/dashboard/scheduled-automation` takes `active_only=true` for that
+  page and echoes `active_only_selector` on every page. The cadence chips count
+  the rows of the open view, and the `표시 N / 전체 M` line is drawn in the list
+  view only. A page cursor now carries the selector (cursor version 2), so a
+  cursor issued before this change answers `invalid_cursor` (#53508).
+- The TUI Memory screen says why a value is missing in the reading words
+  (`미조회`, `조회 실패`, `읽기 실패`, `일부 관측`) or `보고 안 됨` where a read
+  gave no value, instead of `미관측` and `미확인`. A failed page says
+  `(조회 실패)` without the `현재 … 미확인` tail (#53510).
+- The TUI's shared lines (a failed page's note, the Runtime surface's
+  probe, default route, slot order, quota scope and cost summary, Memory's
+  Librarian pass, and the chat's schedule facts) say why a value is missing
+  in the reading words (`미조회`) or `보고 안 됨`, and a schedule with no
+  record of its latest run says `최근 회차 기록 없음`, instead of `미관측`
+  and `미확인`. A failed page reads `(조회 실패)` on every screen (#53513).
+- `POST /api/v1/keepers/<keeper>/memory/retractions` writes each retraction through the Keeper's Memory writer, as one commit log line by the operator who asked, on the trace `plan_id`. The request takes `plan_id` and `retractions` only: `expected_revision` and `expected_snapshot_sha256` are no longer accepted. The answer lists each retraction as `retracted` (with the facts that left Memory) or `not_current`. The first retraction the writer does not take ends the request with `code=memory_unwritable`, the reason in `unwritable`, and the retractions committed before it. A Keeper that is not running has no writer and answers `keeper_not_registered`. (#53521)
+- The TUI Lanes screen and its inventory list say why a value is missing in
+  the reading words (`미조회`, `조회 실패`, `일부 관측`) or `보고 안 됨`, instead
+  of `미관측`, `미확인` and `미기록`. An absent declaration says
+  `적용할 선언 없음`, and runs with no slot say `슬롯 기록 없음` (#53523).
+- The TUI Keeper sandbox section says why a value is missing in the reading
+  words (`미조회`) or `보고 안 됨` instead of `미확인` and `미관측`, and its
+  status titles wear the status marks: a failed inspection or name lookup
+  `✕`, a partial inspection, partly reported run states and a name in use
+  `▲`, a stopped instance `‖`, and a name not read yet `◌` (each was `●` or
+  `?`). Two readings that may describe different instances say
+  `같은 인스턴스인지 알 수 없음` (#53526).
+- The TUI memory lineage chart and the Keeper memory list say `보고 안 됨`
+  where the journal did not carry a claim, a relation between a removed
+  fact and its successor, or a fact's change in the window, instead of
+  `미확인`. The chart's legend names the dashed nodes and edges the same way (#53527).
+- Unify TUI top-level selection bands, rounded `studio_panel` borders, Zone 2 titles, Voice dividers, and receded table headers (#53529).
+- Align standalone TUI top-level screen headers on row 2 by removing legacy `box_top` spacers and syncing `listing_chrome` and local viewport budgets (#53530).
+- Consolidate Keeper List `v`-cycled views from 8 down to 5 (`list`, `state`, `cause`, `memory`, `24h`) and unify the top header stack so cycling views never shifts tabs vertically (#53531).
+- The TUI Config and Verification screens say why a value is missing in the
+  reading words (`미조회`, `조회 실패`, `이전 관측`) or `보고 안 됨`, instead of
+  `미확인` and `미관측`. The voice device and config source tell a reading not
+  made yet (`미조회`) from one that failed (`조회 실패`) and from one that came
+  back without the field (`보고 안 됨`) (#53534).
+- The TUI Goal detail and Runtime screen say why a value is missing in the
+  reading words (`미조회`) or `보고 안 됨`, and say `기록된 … 없음` where the
+  ledger records none, instead of `미확인`, `미관측` and `미기록` (#53535).
+- The TUI Board, Home and action-reason reading say why a value is missing in
+  the reading words (`미조회`, `조회 실패`, `일부 관측`) or `보고 안 됨`, instead
+  of `미확인` and `미관측`. A Board post or comment whose reply never arrived
+  says `게시 결과 보고 안 됨` / `댓글 결과 보고 안 됨` (#53536).
+- The TUI says `확인 안 됨` instead of `미확인` where a workspace's identity
+  is not confirmed -- never read, or last confirmed and not again since.
+  The `/preset` and preset restore notes mark an unreadable preset `✕` and
+  a restore that needs a look `▲` (was `!`), and report a disk sync or lock
+  release that was not confirmed as `보고 안 됨`. A report the operator has
+  not checked yet is `확인 안 한` (#53537).
+- The TUI's remaining `!` and `△` state marks follow the status marks: a
+  refused form entry and a missing prompt asset are `✕`, and a provider at
+  its limit, a Keeper observation error, a repository list kept after a
+  failed refresh and a prompt override or authoring issue to look at are
+  `▲`. The Providers legend names the new mark (#53541).
+- A fact's `last_seen` moves only on an op that names a unit. A held claim
+  written again without a unit changes nothing, and a merge or a revision
+  that names no unit keeps the latest `last_seen` of the facts it replaced,
+  so rewording Memory no longer makes it look freshly confirmed (#53543).
+- The context inspector's input-by-turn strip marks a turn whose record has
+  no input count `?` (was `·`) and a negative count `✕` (was `!`), the value
+  marks for a reading not reported and a reading that failed (#53544).
+- The TUI no longer prints `unknown` or `None` where a value is missing. The
+  Add-on screen's revisions, evidence hash, executor, snapshot coverage and
+  cursors, the temporal report's end atoms and a repository change with no
+  status draw the unreported mark `?`. Add-on status and receipt lines say
+  `not reported` or `not read`. A parsed declaration with no applied revision
+  says `none` on both of its views (one said `unknown`) (#53545).
+- More TUI lines say what was not reported instead of `unknown`: a tool call
+  with no recorded outcome (`not recorded`), the Keeper strip's age group with
+  no age (`나이 보고 안 됨` / `age not reported`), a channel whose name the
+  connector did not report, the Execute output row when nothing is active and
+  no end was recorded (`state not reported`) and the Add-on overview's
+  configuration summary (#53547).
+- `keeper_memory_search` current results carry `first_seen`, and ordinary
+  facts also `last_seen`, as UTC ISO 8601, so a Keeper can tell how old a
+  recalled fact is and when it was last observed again (#53548).
+- The Resources CHECK column says why a report's confirmation has no
+  answer: `◌ not read` while the query runs or before it was sent, `✕ read
+  failed` (in the bad tone) when the read or some records failed, and
+  `? not reported` when the record is for a different report body. It said
+  `? check unknown` for all of them; the detail line follows the same words
+  (#53550).
+- Same-level facts join with ` · ` instead of ` — ` (RFC tui-one-screen-grammar
+  6.5): a standalone lane's `Needs attention` and `Running` summaries, which
+  already used ` · ` beside their siblings (`Off`, `Models configured`), the
+  Lanes runtime-candidate picker banner, and Memory's empty-category note in
+  English (the Korean already used ` · `) (#53552).
+- The Config screen's loading lines (parameters, prompt catalog, admin
+  execution details, presets and a preset's contents, voice settings, the
+  selected account's settings) no longer end in `…`. RFC
+  tui-one-screen-grammar 6.4 keeps `…` for cut text, so a whole sentence
+  does not read as cut (#53553).
+- Loading lines in the worktree, branch, checkout-file and queue overlays,
+  the code view's file and blame reads, and the Keeper story's turn, wake
+  and schedule sources no longer end in `…`, which RFC tui-one-screen-grammar
+  6.4 keeps for cut text. A code search in flight reads `Searching for
+  <query>`, so the query no longer looks cut (#53554).
+- Loading and saving lines on the Add-on, Plugins and subscription screens,
+  the Exact and machine activity forms, and Home's workspace-access rows no
+  longer end in `…`, which RFC tui-one-screen-grammar 6.4 keeps for cut
+  text (#53555).
+- Progress lines in the Board original-bytes reader, the width-fitted
+  detail document, collaboration invites, the GitHub token form, the MSX
+  live screen, the play room composer and the verification evidence pane
+  no longer end in `…`, which RFC tui-one-screen-grammar 6.4 keeps for cut
+  text (#53557).
+- Upgraded the TUI Keeper list views (`Plain`, `By_state`, `By_cause`, `By_memory`, `Day_wall`, and `By_runtime`) with calmer 6-step wake sparklines, fixed-width monotonic lag rule bars, unified `› ` cursor/gutter alignment, resolved schedule titles and a compact schedule/memory strip in the Plain detail pane, Korean Librarian memory labels, and smart first-visit unfolding in `By_cause` (#53559).
+- Upgraded Keeper Chat and Zone 1 navigation chrome: refreshed the top waiting badge (`◆ 확인 필요: ... (;)`), dropped benign native tool wire trailers from compact rollup headers, simplified tool-return progress wording, localized the chat schedule banner bidirectionally for KO/EN, and shortened the bottom runtime status bar while deduplicating identical configured/observed runtimes (#53560).
+- Unified selection bands, `› ` cursor markers, rounded panel frames, matched split `studio_panel` heights (`Repositories`, `Lanes`), table column headers/dividers (`Approvals`, `Acting`), `System_warn` caution glyph (`▲`), and localized overflow notices across the remaining TUI screens (#53561).
+- Added bidirectional KO/EN localization across the remaining top-level TUI surfaces, tables, and split sidebars (`Dashboard`/`Usage`, `Config > Models`, `Runtime` and `Runtime Picker`, `Approvals`, `Resources`, `Lanes` category headers, `Verification`/`Verdicts`, `Connectors`/`Browser`, `Fusion`, and `Schedules`) while preserving English defaults for pure helper unit tests (#53562).
+- The Connectors screen's browser status lines (reading, refreshing,
+  scrolling, following, clicking, capturing) and the observation history's
+  loading lines no longer end in `…`, which RFC tui-one-screen-grammar 6.4
+  keeps for cut text (#53564).
+- Define `Llm_provider.Input_budget.t` once atop
+  `Provider_http_codec.output_token_envelope` and wire it through `agent-core`
+  backends, `Prepared_completion_request`, `Keeper_turn_driver_try_provider`
+  window-shift signals, and `Keeper_next_request_forecast` so pre-flight
+  admission and Agent Core turn-window/forecast comparisons agree on the
+  available input token budget (official-client runtimes keep `None` since
+  `agent-core` does not own their admission boundary) (#53574).
+- Enforce strict `Priority > Standard > Background` slot admission in
+  `Llm_provider.Slot_scheduler` when `priority_run_limit = None`, without
+  magic weights or background concurrency caps (#53576).
+- An idle TUI no longer wakes every 16 ms to poll: its loop sleeps until a
+  key arrives, a typed wake source rings (`Masc_tui_wake.source`), or the
+  earliest deadline something on screen needs is due. Idle loop passes went
+  from about 57 to under 1 per second and idle CPU from 0.57-0.75 to about
+  0.03 CPU seconds a minute, with key latency unchanged (#53580).
+- While the screen shows a clock or an age further than 5 seconds from its
+  next change, the TUI reads the wall clock again every 5 seconds, so after
+  the machine wakes from sleep or its clock is set the clock and ages are
+  right within 5 seconds (#53580).
+- Unify `› ` / `  ` cursor glyphs, full-width SGR-clean selection bands, and column alignment across TUI Keepers, Config, Approvals, Identity, Code, Resources, Context Inspector, Work Schedules, Board, Lanes, Runtime, Activity Logs, Verification, Harness, Repositories, Connectors, Memory, Keeper Memory, and Queue/Answering/Agenda overlays. (#53593)
+- Silence healthy Zone 2 connection badge churn across Config, Runtime, Work, Verification, and Harness via `quiet_connection_tail`, remove legacy `" MASC "` overlay prefixes, unify `/` breadcrumbs to `›` and `•` bullets to `·`, and eliminate duplicate Verification notice rows. (#53594)
+- Add bidirectional KO/EN localization across Keeper Story, Detail Items, Identity, GitHub, Command Palette, Context Inspector, overlays, Chat `Tool_detail.tree`, Lane run output, Memory, Keeper Memory, Fusion, Config, and Work screens. (#53595)
+- Remove trailing ellipses from TUI loading/progress text, replace peer-fact em-dashes with `·` across renderers, and resolve raw `task_id` values to human-readable task titles in Overview, Verification, Harness, and Repositories. (#53596)
+- Remove trailing ellipses from shared core TUI loading/progress helpers and replace peer-fact em-dashes with `·` across `Masc_tui_types`, footer, command palette/bar, agenda, answering, board quarantine/composer, planning detail, task document, resource catalog, roster pane, composer, voice wizard, fusion launch, and GitHub UI. (#53601)
+- Vertically align the Overview Keeper sidebar with `Chrome_screen` (`~top_spacer:false`) and localize its heading, add `› ` cursor gutters to Overview cards and fallback list, add selection bands to `Tools > Async broker` and `Keeper Detail > Runs` (fixing the stale-state scroll offset), reclaim 2 rows in `render_planning_detail`, and unify remaining ASCII `>` cursors to `›` across forms, pickers, and plugins. (#53602)
+- Enable full Korean localization in the TUI Help sheet (`?`, including localized `here_marker_for`), Keeper Detail sub-tabs, Chat folded thoughts/tool outcomes/native tasks/child entries with `ui_language`-aware memo invalidation, and bidirectional KO/EN support across Play Room, Collab, Account Login, Queue detail, Board composer, and Goal timeline unavailability notices. (#53603)
+- The TUI reads the task backlog by decoding only the task rows whose bytes
+  changed since its last read, and reuses its file buffers. On a 5.3 MB
+  backlog of 1,487 tasks, one read after a commit allocates 0.085 M words
+  instead of 1.3 M and runs 0.32 minor collections instead of 6.28 at the
+  runtime's 256k-word heap. The answer equals the full reader's; every case
+  the new reader does not take from the bytes goes to the full reader
+  (#53568, #53618).
+- An Execute command's outcome line spells its run time and limit like the
+  rest of the TUI (RFC tui-one-screen-grammar 6.2): `exit 0 · 808ms`,
+  `signal 9 · 30.0s · timed out at 30s`, and `2m05s` for a long run. It
+  read `30012 ms` and `timed out at 30 s` before (#53621).
+- Connection failures and the Storage cleanup pass spell their durations
+  like the rest of the TUI (RFC tui-one-screen-grammar 6.2): `retry in 2m`
+  instead of `retry in 120s`, `no answer within 1m30s` instead of `90s`,
+  and the cleanup interval `간격 5m` / `every 5m` instead of `300초` /
+  `300s` (#53623).
+- The Usage calls table's P95 column and the graph's `worst` note spell a
+  latency like every other length that ended (RFC tui-one-screen-grammar
+  6.2): `243ms`, `29.2s`, `6m55s`, with no space before the unit. They read
+  `243 ms`, `29.2 s` and `415.9 s` before (#53625).
+- A fact written with `supersedes` is first seen when the fact it replaces was; its `last_seen` is the commit time. It was first seen at the commit before, so each rewrite reset how long Memory had known it. A claim Memory already holds keeps its own `first_seen`. (#53627)
+- A Keeper's metrics record rows say `?` for a reading the record left out
+  instead of `--`, group token and message counts (`12,840/1,203`), spell
+  latency on the duration ladder (`1.2s` instead of `1200ms`) and cost with
+  four decimals (`$1.0000`, which read `$1.`) (#53628).
+- A provider retry in Keeper chat names its delay as a duration: `delay 30s`
+  or `delay 1.5s` instead of `delay 30000ms` (#53628).
+- The Tools screen no longer prints the retired read words of RFC
+  tui-one-screen-grammar 6.4 (`미확인`, `미관측`, `unknown`, `not observed`,
+  `n/a`). Async broker ownership reads `소유 확인 안 됨` / `ownership not
+  confirmed`, a skill's missing result window and an unreported native
+  posture draw `?`, and the empty run-time note says an unreported total is
+  not 0ms (#53635).
+- The waiting queue's scheduled and due times, the Verification list's latest
+  verdict and a verdict's recorded time, and an Add-on's "no slot before"
+  wait read in the operator's zone (`15:43`, `11-21 09:00`) instead of the
+  server's ISO text (RFC tui-one-screen-grammar 6.1). A verdict detail whose
+  time the producer left at zero says `time not reported`, as the list does
+  (#53638).
+- The Tools screen's last retired read words go: startup recovery with no
+  report says `이 process 에 보고 없음` / `not reported to this process`, a
+  missing original request says `원본 요청 기록이 없습니다` / `No record of
+  the original request`, an absent tool surface digest says `none` instead of
+  `n/a`, and an on-disk request's English ownership word matches the summary's
+  `unconfirmed` (#53639).
+- The Acting event detail's TUI-received time, the Inspector's turn header,
+  recent turns column and exact provider input capture time, and the
+  Connectors history's selected observation read in the operator's zone to
+  the second (`15:43:07`, `11-21 09:00:12`) instead of the server's ISO text;
+  the recent turns column is padded so the sentences after it stay aligned
+  (RFC tui-one-screen-grammar 6.1) (#53649).
+- A closed Board post's `Closed at` field reads in the operator's zone to the
+  minute (`15:43`, `11-21 09:00`) instead of UTC ISO text (RFC
+  tui-one-screen-grammar 6.1). A close time outside the calendar still shows
+  its raw Unix seconds (#53651).
+- The Inspector draws a token count or cache read the provider left out as
+  `?` (`cache read ?`, `Input count · ? tokens`) instead of the word
+  `unreported`, and says a usage scope or input provenance the record does not
+  carry was `not reported` instead of `unknown` (RFC tui-one-screen-grammar
+  6.4) (#53654).
+- An Acting tool call whose disposition this build could not read reads
+  `도구 호출 ✕` / `tool call ✕` in the EVENT column instead of `처리 결과
+  불명` / `unknown disposition`; the event detail still names the error. A
+  DOS controller the server could not ask reads `DOS 조작자를 읽지 못함` /
+  `DOS controller could not be read` instead of `미확인` / `unknown` (RFC
+  tui-one-screen-grammar 6.4) (#53667).
+- The MSX and DOS screen titles join their facts with ` · ` (`MSX · BASIC ·
+  game.rom · frame 120 · controlled by alice · spectating the server`)
+  instead of ` — ` and three-space gaps, and the English title names who
+  controls the machine in English instead of `조작:` (RFC
+  tui-one-screen-grammar 6.5) (#53671).
+- Semantic execution records write every field, and the record format becomes `masc.keeper_semantic_execution.v4`. The `gate_obligations` list is written even when empty. `native_call`, `input_response_intent` and `input_branch` are written as `null` when there is none. A record that leaves any of these out is refused instead of being read as empty or absent, and an explicit `null` is the only form of "none" (#53680).
+- `scripts/bump-version.sh` edits only `dune-project`, the generated `masc.opam` and `CHANGELOG.md`, and `scripts/check-version-truth.sh` no longer reads `ROADMAP.md`; its output drops `published_release=` (#53686).
+- A Board SSE hook that raises is logged as an error instead of disappearing.
+  The Board write keeps its result and its Keeper signal (#53689).
+- A poisoned Dashboard gate-metrics ring is reported to its reader instead of
+  reading as no gate rejections (#53689).
+- An exception from a `Proactive_refresh` `on_failure` callback is logged as an
+  error instead of disappearing; the worker keeps its retry (#53689).
+- Whether a turn may carry tools has one answer per Runtime. An Agent Core
+  Runtime reads it from its capability record (the AGENT_CORE catalog row, or
+  `[models.<id>.capabilities]` for a model the catalog has no row for), and the
+  readiness check, the onboarding status, `masc start imp` and the dashboard
+  runtime card now read the same answer the turn's tool surface reads. A
+  catalogued model no longer needs `tools-support = true` to pass the readiness
+  check; an official-client row is still answered by its `tools-support`
+  (#53691).
+- Token counts in a Keeper's context override, the Inspector's input scale
+  and its configured context are grouped (`200,000 tokens`). A Keeper chat
+  background task's usage reads `12,840 tokens · 3 tools · 6m55s reported`
+  instead of `415000 ms`, and its states say `status not reported` and
+  `end not reported` / `end reported` instead of `status unreported` and
+  `terminal unobserved` / `terminal observed` (RFC tui-one-screen-grammar
+  6.2–6.4) (#53693).
+- The TUI and the CLI read the `commit` object of a runtime.toml write answer
+  with the server's own codec, `Runtime.Config_commit_wire`, instead of four
+  hand-written readers with different rules. A commit object the server does
+  not write (a missing or extra field, a revision that is not lowercase
+  SHA-256 hex, an order that is not a positive decimal int64, a blank detail
+  or an unknown lock warning code) is now refused everywhere, so the save
+  shows as unconfirmed (#53694).
+- The Providers header's `Exhausted (observed)` count draws `◌` while the
+  quota catalogue is not read yet and `✕` when reading it failed, instead of
+  `unknown` for both; only the failure keeps the warning colour. A change's
+  PR with no repository reads `(repository not reported)` (RFC
+  tui-one-screen-grammar 6.4) (#53699).
+- Redaction no longer masks text that only looks like a credential. A URL
+  is masked at `user:password@` inside its authority only, so an `@` in a
+  path or a query (an npm version, an e-mail address) leaves the URL as it
+  is, and a URL user with no password is left too. The right-hand side of a
+  `name = value` line and the word after `Bearer` are no longer masked; the
+  value of an `Authorization:` header still is (#53703).
+- JSON redaction masks the value of a key whose name is on the sensitive-key
+  list, and no longer everything under a key that merely contains `token`,
+  `secret`, `password`, `credential` or `api_key`. `token_usage`,
+  `max_tokens` and `next_page_token` are read as they were written (#53703).
+- A Keeper no longer takes every line of the GitHub CLI's `hosts.yml` as a
+  secret value, so `github.com:` in an SSH remote is left as it is. The
+  file's whole text and the values of its credential keys are still masked
+  (#53703).
+- `masc_config` lists every runtime setting registry row once, grouped by its registry category: the three `MASC_H2_*` rows now appear under `transport`, the HTTPS, TLS and OTel rows show the registry's description and default, and `MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC` moves from `keeper` to `transport`. (#53705)
+- A schedule occurrence whose evidence does not settle its stage no longer
+  reads `미확인` / `unknown` in the Keeper Story status column or a Korean
+  sentence in the chat schedule line in either language. The status column
+  draws `◌` (not seen by the Keeper yet), `?` (occurrence id not reported),
+  `✕` (a record this build could not read) or `기록 충돌` / `conflict`, and the
+  chat line names the reason in the UI language. A consumed wake's result
+  reads `결과 보고 없음` / `result not reported` (RFC tui-one-screen-grammar
+  6.4) (#53710).
+- The Resources header's unchecked-today count draws `◌` while the report
+  listing or the confirmation inventory is still being read and `✕` (in the
+  warning colour) when a read failed or the listing was partial, instead of
+  `모름` / `unknown` for every case (RFC tui-one-screen-grammar 6.4) (#53712).
+- Rows a list cut off read `외 N` / `N more` with the thousands grouped,
+  everywhere the TUI counts them: the Acting card edge (was `N개 더`),
+  verification gates (`외 N건` / `+N more`), the chat schedule block (`외
+  N개` / `+N more`), the Keeper waiting item, the chat status and turn
+  progress facts, and the metrics lead-time list (`외 N명`) (RFC
+  tui-one-screen-grammar 6.3) (#53716).
+- How many times one thing happened reads `×N` after its name, with the
+  thousands grouped: a tool's repeated calls in the chat activity summary
+  and the Keeper detail tool list, and the Memory screen's image ingest
+  error reasons (were `x13`) (RFC tui-one-screen-grammar 6.3) (#53717).
+- The Browser lane's SDK Space row reads its observation moment in the
+  local zone (`observed 14:05:06`, a date on another day) instead of a UTC
+  ISO timestamp, and a client with no Space observation reads `SDK Space
+  control: not reported` (RFC tui-one-screen-grammar 6.1 and 6.4) (#53721).
+- TUI Keepers, Verification, Harness, and Lanes surfaces resolve raw `sched-<hex>` and `task-*` identifiers to human-readable schedule/task titles, and overlays, pickers, Collab, and Lane Add-ons render uniform selection bands and `›` cursor glyphs (#53722).
+- Localized all 46 TUI slash commands (+ 4 aliases) and all 9 Help Sheet mark/column legends for KO/EN, completed the RFC §6.4 / §6.5 copy grammar sweep across TUI surfaces, and added unit tests pinning KO slash completeness and zero-Hangul EN legends (#53725).
+- Completed bidirectional KO/EN localization for TUI Config forms (`runtime_account_form`, `memory_recall_form`, `typesafeai_exclusion_form`), Gate lifecycle/fold rows, Resource documents, Queue inspection, Memory diagnostics, Fusion launch/detail, Identity app form, Board attachments, and remaining Keeper/Clients labels, with language-keyed cache invalidation across memos (#53726).
+- The Librarian writer remembers the ranges its lane refused and asks the next question no wider than the innermost one: half the units refused, then half the first unit's items once a single unit is refused. Commits and skips count the ranges down, so the question widens again as reading passes them. A busy, lost or uncalled slot does not narrow it. A read that stops inside a unit names the item it stopped after by its store and its place in that store, and the next read goes on after that item (#53736).
+- A schedule page's observation time is read once when the page is
+  decoded, and a page whose `generated_at` is not an RFC 3339 time is
+  refused as a read failure. The queue panel's schedule item reads `Name
+  observed at 12:05` in the local zone instead of the server's ISO text,
+  and Keeper Story and the chat schedule block no longer fall back to the
+  server's text (RFC tui-one-screen-grammar 6.1) (#53740).
+- The Keeper sandbox tab draws `?` where the reading did not carry a
+  value -- the backend, network mode, CPU, and the workspace, HOME,
+  config and host bundle mounts -- instead of `미보고` / `not reported`
+  or `확인 불가` / `unavailable` (RFC tui-one-screen-grammar 6.4) (#53742).
+- The Keeper logs view and the Terminal tab draw an Execute snapshot's
+  state with the same words: `실행 중 N개` / `N active` with the thousands
+  grouped, `끝남` / `closed`, `상태 보고 안 됨` / `state not reported`. The
+  logs view read `실행 중 N`, `종료됨` and `상태 미보고` (RFC
+  tui-one-screen-grammar 6.3 and 6.4) (#53744).
+- Missing facts read `보고 없음` / `not reported` instead of `미보고`,
+  `미관측`, `unreported` or `not observed`: the chat schedule block's due
+  time, a provider walk with no end in the Keeper detail, and the runtime
+  page's and Keeper assignment's bound-Keeper activity (#53744).
+- The account server of a multi-account installation stops its boot when the folder the engine reads Keeper definitions from holds one, and names the files. Such an installation runs only the Keepers its authorization log names, and the log names none by a definition yet (#53745).
+- The Acting card's task line draws why it holds no task id: `◌` while
+  the workspace or the task source is not read yet, `—` when the read
+  found no task, `✕` when the read failed. It read `조회 불가` /
+  `unavailable` for a source not read yet and `관측 전` / `not observed`
+  for a Keeper the read found with no task (RFC tui-one-screen-grammar
+  6.4) (#53747).
+- The account server of a multi-account installation starts the engine once it has published its access: the owner state, its activation, readiness and the lanes after readiness, in a fiber, with the startup watchdog. A failure before readiness, or no readiness in time, ends the process. No server state is published, and no gateway, gRPC, WebSocket or Dashboard refresh loop starts; background maintenance starts the Dashboard snapshot worker. Logins do not wait for the engine (#53748).
+- The footer's action notice draws why the server's action reasons are
+  not there: `조치 원인 ?` / `Action reasons ?` when the server identity
+  did not carry them, `조치 원인 ✕` / `Action reasons ✕` when it carried a
+  list this build could not read. Both read `조치 원인 미관측` / `Action
+  reasons unobserved` (RFC tui-one-screen-grammar 6.4) (#53749).
+- The context inspector draws `?` for a turn's model the record did not
+  carry, and says the context window was "not reported" instead of "not
+  observed", as its other lines already do (#53749).
+- 원장에 격리된 기록이 있어도 지금 조항으로 그린 System 에는 규범 목록을 두 번 싣지 않아요. 옛 조항으로 그린 System, native 이어가기, 덮어쓴 System 은 현재 조항 전체와 보류 안내를 그대로 받아요 (#53753).
+- The Keeper strip writes a schedule's interval as it was set, in at most
+  two units: a 90-minute schedule reads `every 1h30m` and a daily one
+  `every 1d`, where they read `90m` and `24h` (RFC tui-one-screen-grammar
+  6.2) (#53757).
+- binding 이 `cache-retention = "5m" | "1h"` 로 캐시 유지 시간을 선언해요. catalog 가 1시간을 문서로 받는 Messages 런타임만 받고, 다른 런타임은 선언을 거절해요. 대시보드 런타임 선언에 그 값이 보여요 (#53760).
+- A provider usage window the provider gave in minutes reads as a set span
+  in at most two units: 90 minutes reads `1h30m` and 36 hours `1d12h`,
+  where they read `90m` and `36h` (RFC tui-one-screen-grammar 6.2) (#53762).
+- The file-change window reads `1d` where the Acting pane, the
+  Repositories heading and the chat tool pane wrote `24h` or `24시간`, and
+  a 1.5-hour window reads `1h30m` instead of rounding to `2h` (RFC
+  tui-one-screen-grammar 6.2) (#53764).
+- The Keeper pulse window reads a day as `1d` and thirty hours as `1d06h`
+  in its column and matrix headers, where it read `24h` and `30h` (RFC
+  tui-one-screen-grammar 6.2) (#53770).
+- The Work hub's unlisted Goal history writes each Goal's lifetime as a
+  finished length: 36 hours reads `1d12h` and 60 hours `2d12h`, where they
+  read `36.0h` and `2.5d`, and a lifetime the server sent negative reads
+  `✕` (RFC tui-one-screen-grammar 6.2, 6.4) (#53771).
+- The Dashboard's tool-call row names its one-day window `1d` (`1일`),
+  where it read `24h` (`24시간`), in the same unit as the 7- and 14-day
+  windows (RFC tui-one-screen-grammar 6.2) (#53774).
+- The preset list, its restore results and the MSX pane's titles join
+  their facts with ` · ` instead of ` — `, as the rest of the TUI does
+  (RFC tui-one-screen-grammar 6.5) (#53776).
+- Once the Librarian writer has narrowed a question to the head item, it remembers each slot's refusal for size of that item's two questions, with Memory and alone, and does not call that slot with the same question again (#53777).
+  - Every declared slot refused the item with Memory for its input size: the writer asks the item alone, without Memory or the working state.
+  - Every declared slot refused the item alone for its input size too: the writer commits `Skip (Item_exceeds_window)` and reads on.
+  - Every declared slot gave a size and not all for the input: the writer waits in `Refused_at_bottom`. A direct write, a new declaration or an operator's `Resume` asks again; a pulse does not.
+- The Runtime screen says why a value is missing: the route detail's
+  Probe reads `result not read`, `result read failed` or `result not
+  reported` instead of `unobserved`, the quota trend, Keeper usage and
+  tool-call headings read `not read` before their first read, and the
+  Keeper usage rows draw `?` for a figure the server did not report (RFC
+  tui-one-screen-grammar 6.4) (#53778).
+- The Keeper usage heading names its window `(1d)` instead of `(24h)`
+  before a read and when the read fails (#53778).
+- The Keepers screen says `미조회` / `not read` for an Items, Config,
+  GitHub identity, Identity, schedule or Sandbox tab it has not read yet,
+  where it said `미관측` / `not observed`, and a row whose server entry
+  carried no activity reads `작업 보고 없음` / `task not reported`, where
+  the Korean said the read failed (RFC tui-one-screen-grammar 6.4)
+  (#53782).
+- The Memory screen's input-size block draws `?` in the avg, max, min and
+  last cells for a figure the snapshot did not carry, where it wrote
+  `미보고` / `unreported` (RFC tui-one-screen-grammar 6.4) (#53789).
+- A model-input projection names the request a turn sends first and the
+  narrower requests it would send instead (`Agent.model_input_candidates`).
+  When `admit_request` refuses a request as larger than the input limit
+  before sending, the route asks for the next narrower request and compares
+  it in the same provider attempt, so a turn still sends at most once and
+  its journal keeps one provider attempt. A provider's refusal of a sent
+  request asks for none. masc projections name one request, as before
+  (RFC a-request-fits-by-the-one-input-limit-agent-core-decides 4.2)
+  (#53791).
+- The Runtime screen's Keeper usage heading names no window before its
+  first read or when the read fails, where it wrote `(1d)`: the window is
+  known only from the server's answer (#53800).
+- The Memory screen's context cycle says `none since server start` for a
+  prepared request or synthesis the server has not recorded since it
+  started, and draws `—` for the context used, where it said `not
+  observed` (RFC tui-one-screen-grammar 6.4) (#53802).
+- The waiting-queue inspection header draws `?` for a Keeper whose pause
+  state the server left out, where it wrote `unknown` (RFC
+  tui-one-screen-grammar 6.4) (#53804).
+- The Approvals screen writes its cut-off counts as `외 3` / `3 more`,
+  where it wrote `+3 more asks` and a folded ask ended `· +2`; both rows
+  under a cut-off ask list now say the same thing (RFC
+  tui-one-screen-grammar 6.3) (#53806).
+- The Board hearth row, folded chat tool results and the Keepers runtime
+  legend write left-out counts as `외 3` / `3 more` or a plain count,
+  where they wrote `+3` (RFC tui-one-screen-grammar 6.3) (#53808).
+- A Keeper row's attempt chain leads with `외 3` / `3 more` for the older
+  attempts it leaves out, where it wrote `+3` (RFC tui-one-screen-grammar
+  6.3) (#53811).
+- Extract TUI bootstrap, exit journal, editor/workspace notices, quit guard, preferences, and terminal session lifecycle into wrapped library `masc_tui_shell` (`bin/tui/shell/`). (#53814)
+- A Keeper turn takes its continuity from the Memory writer's view
+  (`Keeper_covered_point.read`). It no longer reads the Librarian
+  continuity snapshot, the progress file or the boundary log for it (#53815).
+  - When the view's read end is a place in the turn's history, the request
+    starts there. The working state the writer committed rides ahead of it
+    (#53815).
+  - With no view, nothing read yet, or a read end that is no place in this
+    history, the request starts at the seed or at the turn's boundary and
+    carries no working state. The Keeper log says why at info, and at warn
+    when the writer's store is stopped (#53815).
+  - The four official-client lanes take the same value. They no longer
+    recheck a snapshot against each list they cut (#53815).
+- While no `librarian_memory` lane is configured, no turn has a read end
+  (#53815).
+- A Keeper request after the run's checkpoint stage that the input limit
+  refuses before it is sent is narrowed in the same run: the retained-result
+  carrier, the turn boundary, the current-turn demotion and where this turn
+  began are its next candidates, in the ladder's order without memory. The
+  tool round is not run again and the turn ends with the refusal only when
+  none of them fits. Requests before the checkpoint stage keep the attempt
+  ladder (RFC a-request-fits-by-the-one-input-limit-agent-core-decides 4.2)
+  (#53817).
+- The Memory recall and TypeSafeAI exclusion forms count the Keeper names
+  past the first four as `외 3` / `3 more`, where English wrote `+3 more`
+  (RFC tui-one-screen-grammar 6.3) (#53819).
+- `keeper_memory_search` with `source=absorbed`, `source=dropped` or `source=all` reads the facts that left a Keeper's Memory from its commit log (`<k>.memory-log.jsonl`), where it read the absorbed store and the removal journal that stopped growing once the Memory writer took every write. A fact the writer removed is found now; a fact removed before the log started is not. An absorbed row names how it left (`merged`, `revised`, `superseded`) and the claim it reaches; a dropped row names the removal, who made it and why, or the premises a derived fact lost. Times are UTC ISO 8601 strings, and `removed_in_revision` is gone (#53822).
+- The three read errors of those stores are one, `memory_log_read_failed`, and lines of the log that do not decode are counted in `memory_log_unreadable_lines` (#53822).
+- A `keeper_memory_search` answer that read the snapshot names the Memory writer's state when its store is not open: `memory_writer.state` is `stopped` with the `stop` a write would be refused for, or `booting`, `not_started`, `retired` or `none_in_process` when the snapshot was read before the writer checked it against the commit log. The search reads the writer table only, so it starts no writer (#53822).
+- Shared frame notes write cut-off counts as `외 3` / `3 more`: a cut
+  body (`8 more rows`), the refresh notice after its first source, and an
+  edit's other matches, where they wrote `+3` (RFC tui-one-screen-grammar
+  6.3) (#53823).
+- A table header's dropped-column badge reads `2 more cols` / `1 more
+  col` in English, where it read `+2 cols` (RFC tui-one-screen-grammar
+  6.3) (#53828).
+- Each kind of Librarian question asks its slots for an answer of its own schema: a range takes every op, the item read alone only `add` with no working state, making room only `drop`, `merge` and `revise` (#53829).
+  - The decoder still reads every answer the same way, and the plan leaves out an op the question cannot use, one op at a time.
+- The verification screen ends its waiting-record list with `· 외 4` /
+  `· 4 more`, and a folded chat Memory row says `· 이전 3건` / `· 3
+  earlier`, where both wrote `+N` (RFC tui-one-screen-grammar 6.3)
+  (#53830).
+- The bare `/` hint counts the command words it leaves out as `외 3` /
+  `3 more`, where it wrote `외 3개` / `+3 more`, and measures that tail
+  in cells (RFC tui-one-screen-grammar 6.3) (#53833).
+- The emblem screen ends its Keeper names with `3 more Keepers`, and a
+  failed Keeper metadata read ends `(2 more)`, where both wrote `+N` (RFC
+  tui-one-screen-grammar 6.3) (#53838).
+- Extract TUI workspace admission, explicit-handle server contact lifecycle (`Server_contact.t`), HTTP surface collector, local source readers, SSE/fleet event streams, and workspace-request notices into the wrapped `masc_tui_transport` library while keeping `Masc_tui_shell.Editor_notice` focused on `$EDITOR` forms (#53840).
+- Removed counts on the Memory, Connectors, Lanes and Repositories
+  screens and the Keeper memory reading cell carry the minus sign `−2`,
+  where they used the hyphen `-2`; counts of 1,000 or more get a comma
+  (RFC tui-one-screen-grammar 6.3) (#53841).
+- A Keeper request that opens at the Memory writer's read end names its
+  origin `covered` in the next-request forecast, the continuity request
+  record and the carried-range log, where it said `librarian_progress`
+  (#53845).
+- The official-client lanes log `covered` and `covered_with_working_state`
+  for the same two starts, where they logged `librarian_progress` and
+  `librarian_progress_with_working_state` (#53845).
+- A size refusal moves the front under one label per move:
+  `turn_start_after_refusal` to the turn boundary, and
+  `this_turn_start_after_refusal` to where this turn began. Each replaces
+  the seed and the librarian label of the same move (#53845).
+- The TUI next-request band reads the new kinds, and says a covered range's
+  earlier atoms are in Memory and are not sent again. Install the TUI with
+  the server of the same build (#53845).
+- Extract the core five surface-request modules (`Account_requests`, `Runtime_config_requests`, `Prompt_preset_requests`, `Keeper_surface_requests`, and `Connector_volume_requests`) into the wrapped `masc_tui_surface_requests` library with pure account-login resume codecs and abstract item-revision tracking (#53852).
+- Complete the wrapped `masc_tui_surface_requests` library by extracting `Lane_browser_requests` and `Memory_repository_requests` with private slice-source variants and preserved `Eio.Fiber.fork_daemon` browser execution (#53856).
+- Extract wrapped `masc_tui_work_requests` library (`Approval_gate_requests`, `Voice_requests`, `Tools_task_requests`, `Schedule_call_requests`) from `bin/masc_tui.ml`, moving `boot_audio_input_device` onto `Masc_tui_types.state` and injecting `~terminal_size` (#53859).
+- Restructure Goals and Verdicts detail surfaces with hairline section rules, aligned key-value grids, numbered evidence paragraph splitting, action callout banners, and direct `1–3` workspace section shortcuts (#53861).
+- Upgrade the Keepers 24h pulse wall (`fleet_rows`) to a four-row `btop`-style mirrored Braille wave (upward ok turns over downward failure turns with thermal gradient) and shape-disjoint neighbor-interpolated per-keeper Braille sparklines across `Masc_tui_keeper_wall` (#53862).
+- Add direct `1–6` Tools section shortcuts, semantic Skills profile styling with a docked Skill Bottom Sheet, full Korean localization and docked `overview_bottom_sheet` on Plugins/Add-ons, and align headers/borders away from `Theme.info` (#53864).
+- Add direct `1–4` Usage section shortcuts with `~numbered:true` tabs, upgrade Usage Calls to continuous three-row interpolated `btop` Braille curves with thermal latency gradients, stretch Usage Trend filled-area Braille edge-to-edge inside `Masc_tui_card` panels, adopt `Chart.dot_meter_bar`/`dot_meter`/`distribution_bars`/`Doc.section_rule` across Usage and Telemetry, and render three-row continuous Braille completion trends (#53865).
+- Extract wrapped `masc_tui_chat_input` leaf library (`Paste_spill`, `Message_draft_recall`, `Message_keymap`) from `bin/masc_tui.ml` with injected `~terminal_size` and `~wheel_notch_rows` (#53867).
+- Extract wrapped `masc_tui_waiting_inventory` and `masc_tui_chat_dispatch` core libraries (`Chat_watching`, `Chat_journals`, `Chat_history_rows`) from `bin/masc_tui.ml`, replacing process-global waiting-inventory state with an explicit `Masc_tui_waiting_inventory.t` handle on `Masc_tui_types.state` (#53870).
+- Complete wrapped `masc_tui_chat_dispatch` library (`Queue_steer`, `Runtime_picker`, `Task_dispatch`) from `bin/masc_tui.ml` (`-1,323` lines, `58` strict `.mli` exports total) (#53874).
+- Extract wrapped `masc_tui_collab_queue` library (`Chat_notice`, `Collab_play`, `Keeper_queue`) from `bin/masc_tui.ml` (`-512` lines, `16` strict `.mli` exports) (#53891).
+- Extract wrapped `masc_tui_work_actions` library (`Goal_actions`, `Board_schedule_actions`, `Verification_actions`, `Detail_navigation`) from `bin/masc_tui.ml` (`-818` lines, `33` strict `.mli` exports) and decouple `planning_action_key` / `planning_action_of_key` into `masc_tui_types` (#53892).
+
+### Removed
+
+- Remove the unwired endpoint job subsystem (`lib/endpoint_job_*`, `endpoint_process_gate`), the unused workspace memory log and reader, `Keeper_volume_ownership` and `Agent_core.Harness`; only their own tests called them (#53388).
+- Remove dashboard prototypes, design-system preview and storybook copies, PR evidence fixtures, unreferenced dev-fixture pages and one-off e2e scripts that no dashboard entry point loads (#53389).
+- Remove 1,016 evidence bundles under `docs/evidence/` that no file outside the archive references (#53391).
+- `masc-reliable-change-g1-check` and `Reliable_change_g1`; `scripts/harness_coding_eval.sh` no longer builds or runs it (#53433).
+- `masc-http-probe` (#53433).
+- `Shell_ir_oracle`, its fixtures and `tools/shell_ir_oracle` (#53433).
+- The `Board_core` / `Board_core_payload` re-export modules of the `masc` library; tests name `Masc_board_handlers` directly (#53433).
+- `Keeper_owner.interrupt_running_operation` and `Keeper_internal_error.runtime_exhaustion_reason_retryable`, which only tests called, and 25 exported values nothing called, including the unused llama round-robin (`next_llama_endpoint`) (#53433).
+- `masc workspace-upgrade` and everything behind it: the released Keeper configuration upgrade with its backups and restore, offline journal prepare/adopt/install, the v2 and input-adoption copies of the chat operation store, the journal-input roots of the startup checkpoint object sweep, and the installer's upgrade/restore choices. A workspace this version cannot open is offered a new directory only (#53434).
+- Keeper error recording no longer deduplicates repeated errors; `Keeper_recording_error_state` and the `Bounded_event_dedupe` library are gone (#53435).
+- Authz records drop the `system_migration` author and the `migration_diagnostic` kind (#53435).
+- The agent_core execution codec no longer accepts stored events with explicit legacy null fields as canonical (#53435).
+- Keeper ask events no longer read the legacy `turn_id` field; only `source_turn_ref` is read (#53435).
+- The MSX checkpoint route no longer answers requests without an `operation_id` (#53435).
+- The dashboard execution fixture (`?fixture=execution_smoke`, `MASC_DASHBOARD_FIXTURE`, `MASC_DASHBOARD_FIXTURES_ENABLED`) and `scripts/harness_dashboard_execution_smoke.sh` are removed (#53435).
+- Dashboard routes no client called are removed: `POST /api/v1/dashboard/board/close`, `board/reopen`, `tasks/assign-goal`, `goals/measurements`, and `GET /api/v1/dashboard/eval-feed`, `keeper-practice`, `proof`, `agent_core/telemetry/recent`, `agent_core/telemetry/summary`, `exact-lane-run-retention`. Board close/reopen, goal assignment and goal measurements stay available as MCP tools (#53435).
+- The coverage-gap block no longer links an RFC for FD and disk exhaustion; its cause row keeps the label (#53435).
+- Thirteen manual or stale workflows (apple-keychain, auth-route-parity, bench-tests, browser-proof, installer-shell-path, lane-addon-native, lane-dos-package, linux-portable-python, main-check, model-catalog-uniqueness, model-release-evidence, process-groups, viewport-cadence-bytes) and the scripts and tests only they ran (#53436).
+- The nightly schedule of `test.yml`, its issue-filing step and failing-suite digest, and the release-candidate step that refused a cut over the last scheduled nightly (`scripts/ci/nightly_cut_gate.py`, `nightly_baseline.json`). `test.yml` runs on dispatch or `workflow_call` only (#53436).
+- The `pull_request` triggers of `proto-generated.yml` and `installer-deps-macos.yml`; both run on dispatch only (#53436).
+- Checker self-test steps in `pr-type-check.yml` and `pr-check.yml`, with `scripts/ci/raw_token_auth_calls.py` and the self-tests they ran. The notice-collector suite still runs in `release-build.yml` and `@runtest` (#53436).
+- The 35 generated function-level coverage tests (`test/stanzas/coverage_tests.inc`) and nineteen `*_toml_parity` migration pins. `Mcp_session` no longer exports `base62_chars` and `encode_base62` (#53436).
+- Manual source-text and numeric gate scripts (`audit-*.sh`, `audit-sublib-cycle.py`, `mli_val_caller_check.py`, `validate-*.sh`, `ocaml-north-star-health.sh` and `make ocaml-health`, the request-cost / keeper-load / scheduler-starvation gates), `test_wiki_core_purity`, `test_keeper_turn_fsm_tla_parity`, `test_stanzas_include.py` and the `@test-stanzas-include` alias (#53436).
+- `.githooks/pre-push` and its test; `.githooks/pre-commit` stays (#53436).
+- Twenty-six tests no workflow, hook, Makefile or dune rule ran, and five unreferenced fixtures (#53436).
+- Dead operator scripts: 149 files under `scripts/` that no build, workflow, test stanza or live script calls (performance and workload harnesses, one-off probes, migrations and audits, the keeper skill proof bundle, the progress-page pipeline, Docker-only entrypoints). Scripts that the README, CONTRIBUTING or an operations runbook tells people to run stay (#53437).
+- `benchmarks/terminal_bench`, `benchmarks/context_recovery`, `benchmarks/dashboard_observation`, `benchmarks/benchmark.sh`, `benchmarks/quick-bench.sh`, and the one-off tools `tools/ocaml_boundary_audit`, `tools/costume_census`, `tools/spawn_bench`, `tools/recipient_replay` (#53437).
+- The four Keeper TOMLs under `config/keepers/`; config seeding never copied them (#53437).
+- The `world-*` team presets. `presets/classic` remains (#53437).
+- The WebMCP dashboard surface, its userscript and bridge script (#53437).
+- Root deployment files: `Dockerfile`, `Dockerfile.oneclick`, `docker-compose.yml`, `.dockerignore`, `infrastructure/systemd` and the compose-only `infrastructure/monitoring`. Keeper sandbox images are unchanged (#53437).
+- `specs/Makefile`; `scripts/tla-check.sh` is the one TLA+ runner (#53437).
+- `start-masc.sh` no longer accepts `--eio` or `--lwt` and no longer reads `MASC_HTTP`, `MASC_ALLOW_STALE_EXE_ON_BUILD_LOCK`, `MASC_PORT_WAIT_MAX_SEC`, `MASC_NOFILE_TARGET` or `MASC_NOFILE_UNLIMITED_TARGET` (#53437).
+- The repository no longer stores evidence: `docs/evidence/` (5,925 files) and top-level `evidence/` are deleted, along with `scripts/check-evidence-locations.py` and the two tests that exercised scripts kept inside evidence bundles. Proof for a change goes in the PR body and CI artifacts; the two inputs a test read now live in `test/fixtures/` and `dashboard/src/components/fixtures/` (#53438).
+- Point-in-time documents are deleted: `docs/audits`, `docs/research` notes, `docs/reports`, `docs/superpowers`, `docs/tla-audit`, `docs/audit`, `docs/audit-responses`, 122 design documents no change is working on, 88 unreached or one-time upgrade documents, and the undeployed `docs-site/` (#53438).
+- 432 RFCs that no open pull request or recent change works on are deleted; 83 in-flight RFCs remain, and an RFC is deleted once its change lands (#53438).
+- `docs/constitution.xml` and the storage and contributor guides now say proof goes in the PR body and CI artifacts; the constitution no longer points at the parity audit or cites RFC sections (#53438).
+- Per-Keeper Gate mode overrides: `POST /api/v1/dashboard/gate/keeper-mode`, the `keeper-modes.json` store and every reader. The Gate decides each call under the workspace mode (and the external-services lane under its own mode); Auto Judge sweeps, boot recovery and operator retry read the workspace mode once (#53471).
+- Per-Keeper exact-lane first-slot preferences: `POST /api/v1/dashboard/runtime/keeper-exact-lane`, the `keeper-exact-lane-preferences.json` store, and the reorder step in the HITL, Board attention and Librarian lanes. Every exact lane walks its slots in declaration order (#53471).
+- `GET /api/v1/dashboard/gate/keeper-settings`, the `keeper_modes`, `keeper_modes_state`, `keeper_exact_lanes` and `keeper_exact_lanes_state` fields of the Gate snapshot, the `gate_keeper_mode_changed` and `keeper_exact_lane_preference_changed` events, the dashboard's Keeper settings card, and the TUI's Keeper detail Gate settings rows with the read and the SSE branches behind them (#53471).
+- `POST /api/v1/keepers/memory-catch-up` and the TUI command `/memory sync`, and the history-original resolution route (`GET` and `POST /api/v1/keepers/<keeper>/memory-history-originals/<id>/resolution`). They were the operator's ways to start the old durable Librarian pass. `/memory` and `/memory status` are unchanged. Part of the Librarian rebuild (L5p). (#53474)
+- The `supersedes_not_authored` error kind and the `supersedes_already_removed` and `supersedes_removed` receipt fields of `keeper_memory_write`. (#53499)
+- Code comments no longer cite deleted RFCs and design documents: 2,356 citations of 273 deleted documents are removed from 1,371 files, and the issue and PR numbers inside them stay. Citations of the 84 remaining RFCs stay, and so do citations whose removal would break the sentence, citations inside string literals and citations in files that open pull requests edit (#53507).
+- The research and evidence files that pull requests added after the purge
+  (`docs/research/`, `docs/evidence/research/`, 54 files) and the dead research
+  index. RFCs and comments that linked them cite the pull request that added
+  the file instead (#53620).
+- The dashboard no longer guesses an "auto-recover" pause from words such as
+  `dns`, `timeout` or `network` in a provider error sentence. The paused
+  operational state drops its `cause` field: no screen read it, and the server
+  has no path that resumes a paused Keeper on its own (#53682).
+- Capability preset labels have one spelling each. `claude`, `openai`,
+  `openai_compat`, `zhipu`, `glm-coding`, `openai_compat_chat_extended`,
+  `xai` and `mistral`, and any label written in another case or with
+  surrounding whitespace, are refused in `base`, `capabilities_base` and
+  `capabilities_base_by_identity_kind` (#53695).
+- `MASC_WS_PORT` is gone: the server serves WebSocket on the HTTP port at `/ws` and never read it. `start-masc.sh` no longer exports it or refuses to start when port 8937 is taken. (#53705)
+- The `masc_config` rows for `MASC_WS_PORT` and `MASC_KEEPER_AUTONOMOUS_MAX_TOKENS`, which nothing read, and the empty `autonomy` category are gone. (#53705)
+- `MASC_LABEL_QUIET_THRESHOLD_SEC`, `MASC_LABEL_STUCK_THRESHOLD_SEC`, `MASC_BRIEFING_CACHE_TTL_SEC`, `MASC_SSE_BUFFER_TTL_SEC` and `MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC` are no longer read; their former defaults are now fixed values. (#53705)
+- Keeper requests no longer carry the Librarian unread observation.
+  `Keeper_librarian_request_unread`, the `keeper.context.librarian_unread`
+  prompt, the tail window's unread marker and the official-client held
+  context kind `librarian_unread` are gone (#53752).
+- The continuity request record (`masc.continuity-request.v3`) no longer
+  writes an `unread` field (#53752).
+- The digest check of a continuity snapshot against a dispatch's history
+  and the snapshot range start are gone (#53815).
+- The next-request forecast and the carried-range log no longer report a
+  `librarian_snapshot` origin. A range that opens at the read end is
+  `librarian_progress`. On the official-client lanes, one that carries the
+  working state logs `librarian_progress_with_working_state` (#53815).
+- Continuity request records and the Memory screen's continuity
+  observations say `absorbed` where they said `summarized`. They name the
+  trace and the read end's atom, and no longer a boundary-log line (#53815).
+- The TUI no longer decodes a `librarian_snapshot` forecast origin (#53845).
+- Remove dead `Runtime_transport` model-label resolution chain (`Runtime_transport_label_resolution`, `Runtime_model_string`, `Provider_kind_resolver`, `Runtime_model_resolve`, `Runtime_model_id_split`, `Discovery_cache.first_ollama_model_id_for_url`) and stale `auth-archive` startup comment (`#53868`, fixes `#53784`).
+- Remove the unreachable `Llm_provider.Error.MissingApiKey` variant and its dead pattern-match and serialization branches across `packages/agent_core` and `lib/`, updating the three affected unit tests (`#53884`, fixes `#53479`).
+
+### Fixed
+
+- Restore RFC-0458 §3.4 failed-attempt demotion in `Runtime_candidate_standing.order` and `is_available`: a `Provider_timeout` or `Network_transient` mark recorded by a Keeper no longer exiles that candidate from the recording Keeper's next fresh walk, and no longer skips demotion on deferred retries, intra-walk rotation and one-shot walks (`#53966`, `task-3816`).
+- Keep usage windows when a provider reports no wallet, and retract stale Codex balances across read/update sources and restart when credits become disabled or hidden (#53329).
+- Parse Codex balances only as JSON decimal strings and keep report handling exhaustive under the repository's warnings-as-errors policy (#53329).
+- A Codex credits object or Kimi booster wallet that is out of shape no longer drops the plan windows of the same read: Codex revokes the held balance, Kimi adds no row, and the log names the field (#53329).
+- Preserve small positive Credit without displaying zero, omit meaningless reset and zero-total usage text, and show daily Credit balances and state transitions instead of a percentage plot (#53329).
+- 목록의 쪽 키는 그 목록이 그린 줄만큼 넘기고, 고른 줄 상세는 높이를 지켜요 (#53357).
+- The accounts console reads `replacement` of the account list. The card of
+  a key account whose key replacement did not start says so and offers no
+  model check; before, it looked like an account that only needs a model
+  checked (#53381).
+- A key replacement makes or looks at the home of the account before it
+  writes its record, with the real path of the runtime root. With a link in
+  the place of the root whose target was away, it recorded the replacement,
+  answered 503 `key_not_stored` and removed nothing, so the key before was
+  not removed. It now answers 503 `files_not_reached` with no record
+  written. A home that is no private folder of the user the server runs as
+  is answered the same way, and the account keeps the key it has: before,
+  the replacement was recorded and the account was left with no key
+  (#53398).
+- A turn or a model check on an account whose API key is missing or not
+  read answers that the key of the account is to be replaced. It said to
+  remove the account and register the key again, which takes the checked
+  models and the Keeper assignments of the account with it (#53416).
+- The accounts console empties the field of a key as soon as the server
+  answers a key replacement. It waited for the list of the accounts first,
+  with the key still in the field (#53419).
+- A session that ends takes every open field of a key off the page, and a
+  card that loses its field puts the focus on its title (#53419).
+- The requests of the console that carry an API key follow no redirect
+  (#53419).
+- The accounts console tells a person whose API key is missing, not read
+  or refused to replace the key of the account. It said to remove the
+  account and add the key again (#53421).
+- A key replacement that cannot use the folder of the account answers 503
+  `files_not_reached`, apart from the answer of a replacement the log did
+  not take, and its sentence names the person who runs the server (#53430).
+- A card of the accounts console that asked for the subscriptions again
+  waits for the list of the newest reading. When another card asked
+  meanwhile, it said the key was replaced beside the list from before
+  (#53462).
+- A Keeper secret that holds a double quote, a backslash, a tab or another control character is masked in tool-call arguments as well as in plain text. The arguments are JSON text in the chat stream, the approval listing and the journal, where such a character is written as an escape, and the redaction compared the value byte for byte. A multi-line secret passed whole in an argument no longer leaves its lines shorter than eight bytes readable (#53465).
+- A Keeper keeps reading the working-context pockets it may read when one stored Board source becomes unreadable (a deleted post, a reader removed). Recall and publication refused the whole working context in that case; they now leave out only the pockets that name such a source, as the Librarian capture already did. The pocket and source counts in the recall notice count the readable pockets. When no stored pocket is readable, recall still answers unavailable (#53476).
+- The merge sweep reads each check of a pull request instead of the rollup state, so a cancelled run of Approval merge request no longer keeps an approved pull request out of the sweep (#53480).
+- Improved Korean/CJK truncation and line wrapping in MASC TUI: `fit_width` places trailing padding after the ellipsis without a floating space (and keeps `fitted_source_bytes` in sync), inline Markdown clusters keep Korean particles and closing punctuation attached across wraps, `split_word` adds Unicode/CJK separator and kinsoku pull-back rules, and diagnostic/seat-route wrapping preserves leading indentation (#53483).
+- Fixed `planning_detail_fits` rejecting every scrollable Goal detail screen with "resize to read and act" after `position_row` was removed, and aligned six other TUI row-budget and scroll-limit calculations (Schedules summary rows, Link preview modal, Approval detail pane, Config/Runtime status, Browser lane/history, and Workspace activity context) with the actual drawn chrome rows (#53502).
+- Recalling a Keeper's working context no longer takes an index that another publication of the same revision wrote right after the recall rebuilt it. The rebuilt index was checked against the revision alone, so a publication that had read the pockets while a Board source still was readable could hand the Keeper an artifact holding a pocket it cannot read now. A rebuilt index is now taken on the condition a stored one is: it names the revision and points at the bytes the readable pockets render to. Otherwise that recall emits the unavailable notice and the next one rebuilds the index. A working-context body template that does not render is the explicit error the interface documents, where it was answered with the unavailable notice (#53514).
+- Keep the media projection counts (media_projected_total, media_projected_counts) inside the public decision projection so run_named media-degrade manifests stay readable to operators instead of losing the projected fields at the allowlist boundary (#53520).
+- The JSON spelling of a secret value is held to the size a secret file is read under (64 KiB). Since #53465 each exact value is also matched as a JSON string spells it, and that spelling had no bound: a JSON string writes a control character in six bytes, so one 64 KiB file of them produced a 393 KB exact value. The longest exact value is what an unterminated stream line keeps back, and every copy of a redaction snapshot compiles all values again (Execute output, transcript loads, wire capture). A spelling past the bound is now left out; the value as written and every spelling within the bound are masked as before (#53524).
+- Unify Keeper List view visuals (`24h` wall ruler/dividers/tone, `grid_gap` warning color, deduplicated group counts, `Theme.selection_style` tabs), restore `Keeper_world` click marks on selection, and close bidirectional Korean/English localization leaks (#53532).
+- A fact the Librarian states by merging or revising Memory keeps the earliest
+  `first_seen` of the facts it replaced instead of the commit time, so folding
+  old memories into one sentence no longer makes them look new (#53538).
+- On the Agent Core runtime, a Keeper's `last-prompt` capture holds the
+  turn's first request. A request that follows the turn's tool results no
+  longer overwrites it, so the capture shows the first-request blocks, such
+  as Memory guidance, that the Keeper was given (#53556).
+- Preserved 8-colour palette swatches on the selected row in `Config > Themes` (including narrow and `NO_COLOR` terminals) and placed the `f:filter` bar above the table column headers (#53561).
+- PgDn and PgUp on the Schedules list move by the rows the list draws less
+  one; they moved one row (#53571).
+- PgDn and PgUp on the Tools Skill list and the async request list move by
+  the fewest whole entries the window holds, less one, so the entry read last
+  stays on screen when a Skill or a request wraps. They moved by the window's
+  rows counted as entries and passed entries that were never drawn (#53571).
+- Isolate `Provider_timeout` and `Network_transient` candidate backpressure
+  per Keeper via `failure_scope` (`Keeper_scoped`), eliminate busy-polling and
+  yield-under-mutex in `Cross_context_mutex`, re-raise `Eio.Cancel.Cancelled`
+  in `Board_core_persist`, tighten `Masc_http_client.Pool` and
+  `Slack_user_directory` synchronization, and run the `Verifier`,
+  `Hitl_auto_judge` and `Board_attention` standalone lanes as `Standard`
+  instead of `Priority` admission (#53573).
+- Normalize wire tool-call IDs deterministically across Anthropic and OpenAI
+  limits (`Tool_call_id_wire`), admit audio and document payloads in
+  `Backend_openai_serialize`, serialize `Document` blocks as media-source parts
+  in `Backend_anthropic`, exclude closed prior-turn foreign reasoning under
+  `Exclude_unselected` (`Reasoning_history_projection`), and fix
+  `Claude_code` `guidance_result` propagation in `Keeper_turn_driver` (#53575).
+- A whole-file scan of a private JSONL store (`Private_jsonl_scan.fold`) whose file is removed after its first read now ends with `Moved`. Before, it returned the rows read so far as the whole file. The scan now runs through the same loop as `fold_from`. (#53578)
+- Protect `Workspace_memory_ledger` writes and multi-Keeper claim
+  corroboration across partial updates, separate `#53475` withheld exclusions
+  from context pruning (fresh state required for in-flight Librarian
+  admission captures: drain pending Librarian addon requests before upgrading
+  because `working_context` now requires the `withheld` field), make
+  `keeper_librarian_context_review` fail closed, preserve
+  `keeper_memory_os_current` state on decode refusal (explicit boot recovery
+  via `inspect_for_boot` → `move_aside`), and pin SQLite memory search
+  teardown with `<3`-char fallback in `keeper_memory_search_index` (#53582).
+- `lib/build_commit/probe-commit.sh` now hashes untracked symlinks via `readlink -n` and probes untracked nested git repositories recursively instead of passing them to `git hash-object`, preventing `Unable to hash` failures that dropped `MASC_SOURCE_IDENTITY` and blocked `scripts/install-local-build.sh` (#53585).
+- Preserve every JSON value kind in MCP 2026-07-28 tool `structuredContent` while retaining legacy response behavior. (#53586)
+- Distinguish explicit null from missing structured content when decoding Add-on MCP stdio results. (#53586)
+- The boot warning for an exact-output registry that fails to configure now names the reason from the configuration error. Before, it printed one fixed sentence, so an operator could not tell which lane or setting was rejected. (#53587)
+- The Tools Skill list and the async request list no longer move by a row
+  when j or k selects an entry whose source, package or requester wraps
+  differently. The rows above the list take the height of the tallest
+  entry's rows, and a shorter entry's end in blank rows. PgDn and PgUp keep
+  the entry read last on screen for every selection; they pushed it off
+  when the landing entry's rows above the list had a different height (#53590).
+- After a failed read of a Keeper's login providers, the TUI reads them again
+  once the retry wait has passed. It used to time that retry on the wall
+  clock and check it on the loop's monotonic clock, so the retry never came
+  (#53581, #53608).
+- release the stale read cursor claim after a replaced declaration drains the queue (#53612).
+- Reverted the durable Librarian stale-claim release introduced by #53612: it dropped a replaced declaration's pending external preparation at the drained pass and broke the handover contract re-established by #52912, where a fresh selection from the same source observes the exact existing external preparation as its starting state (deterministic failure at test_keeper_librarian_durable_execution.ml:7094 since 9030bed329). The purged-keeper stale listing coordinate (test_keeper_librarian_addon_owner.ml:2805) is planned for a separate listing-layer repair; this revert restores the pre-#53612 behavior there (#53614).
+- Dashboard Board: the count in the feed head, the number beside "전체" in the rail and the home Board card now describe the list on screen instead of the filters the operator has just changed. While the list for a changed search, sub-board or filter is read, the feed head says it is loading instead of counting the previous list under the new word; the rail gives no number beside "전체" while the list on screen answers a sub-board, a search or an author filter; an empty list that already answers the query keeps its text while it is read again (#53619).
+- Dashboard schedule calendar: opening the calendar again no longer draws the page it read the last time it was open before the fresh read answers. A schedule page is dropped when its last reader closes, so the home, tools and lane queue surfaces start the same way. An active-only read now refuses a page that does not say it is active-only: a server from before that page answers with the 20-row fleet page, and the calendar says so instead of drawing it as every schedule still going to run (#53629).
+- A Keeper made after the server started opens its Memory store when its first pulse or write comes before its first turn. The store start now writes the turn log's first line before the writer's boot, at the first boot and at a resume, and leaves an open turn open. Before, such a store stopped as unwritable until an operator resumed it. Part of the Librarian rebuild (L6h). (#53631)
+- Dashboard Board: the cache key of the Board list read is made in one place, and the sub-board, author, voter and workspace path are written with their length like the search text, so two reads that differ in any of them no longer share a cached list. Applying a search closes the open post, as a change of sort or sub-board does; it used to close when the matches left it out and open again once the search was cleared (#53634).
+- Dashboard Board: a new post pushed by the server is put on top of the list only when that list answers the sub-board, sort and filters asked for now and no read of it is on the wire; otherwise the list is read again. It used to land on the previous list right after a change of sub-board, and could vanish when a read answered. The feed head count goes up with the added post, and the rail shows no number beside the whole-Board entry before a list is on screen, where it showed a zero (#53640).
+- `Runtime_account_call.call_in_turn_of` does not run its work in a cancelled fiber. It ran when the fiber was cancelled after the call was handed to it, and when an already cancelled fiber found the account free. Nothing calls this door yet. (#53650)
+- TUI 측정 도구(`scripts/harness/tui`)가 명령 팔레트 제목을 한국어와 영어 둘 다로 찾아요. #53595 가 제목을 현지화한 뒤로, 한국어로 시작한 TUI 에서는 모든 화면이 `palette-not-open` 으로 끝났어요 (#53653).
+- Remove unused `monotonic_now_s` declaration in `bin/masc_tui.ml` (warning 32 after `#53636`/`#53637`/`#53641`/`#53648` migrated all callers to `Masc_tui_wake.Mono.now`) and add `must_remain = []` plus the `must remain 0, in Memory afterwards 0` tally line in `test/test_librarian_l6g_scoring.ml` (broken after concurrent merge of `#53577` and `#53633`), restoring `main` `dune build @check`. (#53674)
+- Deduplicate redundant `chat` mirror rows (`Role.User` by exact external keys
+  or `turn_ref` + matching conversation text, `Role.Assistant` by exact
+  transcript text, and `Role.Tool` by exact `tool_call_id` or official-client
+  `Tool_observation` tool name) in `Librarian_unit_content` while preserving
+  chat-only provenance (`Fusion_run`, `Approval_lifecycle`, `Autonomous_turn`,
+  `Workspace_message`), `Role.System`, `Role.Request_failure`, corrupt rows,
+  unlinked `Operation*` accepted-user rows, and `First_items`/resume item
+  coordinates (#53676).
+- A call of an account that waits its turn (`Runtime_account_call.call_in_turn_of`), made from outside an Eio fiber while the account was busy, left the lock of the account held, and every later call of the account blocked. It now raises before it touches the lock. No caller is outside a fiber. (#53678)
+- The Librarian reads each segment's conversation from the record that holds it. One turn on Agent Core is read from its checkpoint and the internal file's reply, which the checkpoint never replays; the history files' copies of the same exchange are not read again. One turn on an official client is read from its history files. The stretch before a turn opens and the stretch a reset closes can hold several turns, so they are read from every record. A turn on Agent Core no longer reaches the question twice, and an internal turn that called a tool keeps its reply (#53684, part of #53607).
+- The agent decode-failure log snapshot records why the agent file could not
+  be read (`raw_head_read_error`) instead of showing it like an empty file
+  (#53689).
+- In a multi-account installation no client starts on the home of a person whose Codex `config.toml` names environment variables (`env_key`, `env_http_headers`): the capture takes the values of such names from the environment of the server, which is the operator's. A Keeper turn answers 403 with the reason. The check after a login and a verification answer their fixed sentence, and the reason is in the server log (#53704).
+- Saving runtime.toml from the dashboard no longer ends in
+  "유효하지 않은 runtime.toml 적용 영수증" after the file was written: the
+  dashboard now reads the six-field `commit` object the server has written
+  since `ignored_legacy_keys` was added, instead of requiring the older five
+  fields (#53707).
+- The check after a login now writes to the server log why it was refused. It dropped the reason, so a person got the fixed sentence and the operator had no line to read (#53715).
+- Aligned TUI scroll height budgets between input handlers and renderers, added viewport-resize `ensure_visible` tracking across list surfaces, fixed CJK display-width column padding, and removed redundant inner boxes on split-detail panes and Git Diff (#53723).
+- 실패한 읽기를 TUI 가 자동으로 다시 하는 동안, 화면의 실패 문구가 「읽는 중」 으로 깜빡이지 않아요. 다시 읽은 답이 오면 그때 바뀌어요 (#53729).
+- The merge sweep reads only the newest run of each check name, so a failed run that a newer run of the same name replaced no longer keeps an approved pull request out of the sweep (#53730).
+- `Keeper_covered_point` leaves the read end of a Keeper's Memory unresolved while the turn log holds a `Reset` line the writer has not read. A `Reset` starts the count of closed messages again, so a view taken before one could name a place in messages the writer never read once the history grew past the old count. A turn log that cannot be read after the view's position leaves the place unresolved too. (#53732)
+- Board 화면을 보는 동안 워크스페이스 연결이 끊겼다가 돌아오면 Board 목록을 다시 읽어요. 전에는 비워진 목록이 Board 이벤트가 올 때까지 남았어요 (#53738).
+- `test_tui_ask_followup_result` 가 macOS 에서 packet 스크립트를 기다리다 신호에 끊기면(EINTR) 다시 기다려요. 전에는 그 시험이 macOS 에서 늘 실패했어요 (#53739).
+- Harden World Memory reconciliation and briefing persistence with locked `Ledger.update` and `Briefing.update`, remove dead `preserved_stage` in favor of live `corroboration_stage` recomputation with single-fact entailment prompt rules, and handle `Eio.Cancel.Cancelled` and `File_lock_eio.Flock_timeout` in `Workspace_memory_reader` (#53750).
+- Add bounded `?since_seq=&limit=` cursor pagination (default `100`, max `500`), 1-retry ledger SHA mismatch recovery, and systhread `Sys_error`/`Unix.Unix_error` guards to MCP World Memory resources (#53750).
+- Fall back to full-file reads in `Tool_wiki` when frontmatter exceeds the 8 KiB prefix slice, and log fail-closed `Keeper_librarian_context_review` failures at `Log.Keeper.warn` via `withholding_kind` (#53750).
+- The tool blob sweep, which a multi-account installation runs since its account server starts the engine (#53748), no longer finds the folder of the persons, `.masc/accounts`, unclassified: its scope names it as an entry that writes no tool blob reference. A scan still marks nothing deletable while `.masc/activity-events` or `.masc/official-clients` is there, which #53783 tracks (#53763).
+- A Keeper turn whose provider attempt was fenced keeps the fence route
+  instead of `internal_opaque`. A fence after a tool handler ran now counts as
+  an answer, so the Gate continuation it carried settles (#53767).
+- 터미널이 TUI 출력을 읽지 않게 되어도 TUI 가 종료해요. 전에는 SIGTERM 을 받아도 끝나지 않았어요. 이제 1초 동안 아무것도 읽지 않는 터미널은 남은 출력을 버리고 놓아요 (#53769).
+- Schedules 상세 화면의 Keeper 링크를 따라가면 그 Keeper 로 가요. 전에는 링크에 `keeper:` 가 붙은 이름이 들어가서 어떤 Keeper 도 찾지 못했어요 (#53773).
+- An Antigravity turn that called only read-only MASC tools can retry on the
+  same turn or move to the next runtime again. The four official clients
+  share one tool effect fence that reads `call_effect` (#53775).
+- 1시간 캐시를 요청한 쓰기는 모델 행의 1시간 값으로 매겨요. 전에는 모든 캐시 쓰기를 5분 값으로 매겨서, 1시간 쓰기의 `cost_usd` 가 실제 청구보다 낮게 남을 수 있었어요. 1시간 값이 없는 행은 값을 비워 둬요 (#53780).
+- TUI 계정 로그인 창이 창보다 긴 로그인 주소를 여러 줄로 보여 줘요. 전에는 주소 끝이 잘려서 읽거나 복사할 수 없었어요. 넘어간 줄도 주소의 색을 그대로 가져요 (#53786).
+- Enforce ASCII word boundaries via `String_util.contains_query_term_ci` on
+  short (<3-character) terms in `Keeper_memory_search_index` before applying
+  `Excluding` result limits, fixing `#53772` where unanchored SQL `LIKE`
+  matched word interiors (`astronomy`, `source`, `SRC`, `city`) while preserving
+  Korean suffixes and punctuated identifiers (#53787).
+- The account server of a multi-account installation stops its boot on a Keeper configuration journal. The first step of the engine rolls back the change of a journal it accepts after the boot looked in the folder of Keeper definitions, and could so write a definition the autoboot of the engine starts. A folder of definitions the boot cannot stat stops it too, where it was read as absent (#53790).
+- Upgrade all blocking, loading, saving, probing, and submitting states across TUI overlays, forms, wizards, main surfaces, and shared chrome/footer with clear docked Bottom Sheet or inline `◐` progress indicators while preserving frame height budgets, `NO_COLOR` readability, and failure-vs-loading separation (#53792).
+- The readiness probe of the account server of a multi-account installation answers 503 until its engine is ready, where it read only the authorization zone. `masc restart` takes a 200 of the probe for a replacement that serves, so it reported an account server ready before its engine was (#53795).
+- `?` 키 도움말이 Keepers `d`(Git 변경)와 Task 상세 `x`(취소)를 알려 줘요. Tools `p`, Memory `s`, Telemetry `1 / 2 / 3` 도움말은 화면에 그린 이름과 개수를 그대로 적어요 (#53805).
+- The refill of a config root that a multi-account boot has just made no longer logs it as an existing root (#53807).
+- The engine of a multi-account installation logs its boot stages (`boot stage=...`) as the single-user server does, so an engine that stalls after its first stage and before it is ready leaves the last stage it reached before the startup watchdog ends the process. Provider diagnostics reach the structured log in the single-user and the multi-account HTTP server: the sink is installed before the server starts, where only the single-user server installed it (#53813).
+- The config root resolver reads a folder removed during the resolution as missing, where it raised out of the caller: `existing_dir` and `existing_file` stat a path once. The account server of a multi-account boot resolves the folder of Keeper definitions with it (#53818).
+- Planning 에서 Goal 중단 사유를 쓰고 Enter 를 누른 뒤 요청이 막히거나 실패해도 쓴 사유가 남아요. 사유 칸은 Goal 이 중단된 것을 다시 읽을 때 닫혀요 (#53825).
+- The account server of a multi-account installation no longer tells the operator that a single-user boot rolls a Keeper configuration journal back, or that its boot goes on once the Keeper definitions are out of the folder (#53832).
+- `masc_keeper_librarian_room_outcomes_total` counts an answer to making room as `made` only once its line is on disk. A commit that stops the store counts as `store_stopped`, and one whose result the snapshot codec refuses counts as the new `snapshot_refused` and goes to the Keeper's log with the refusal (#53842).
+- Validate SSE credentials and existing session state via
+  `Sse.register_session_with_client` before recording `check_sse_connect_guard`
+  reconnect cooldowns or MCP profiles in `handle_get_mcp` (fixing `#53794`
+  where repeated GETs with an unknown `session_id` returned `429` instead of
+  `404`), and stop clearing `sse_connect_guards` inside
+  `stop_sse_session_before` so session cooldown remains armed after connection
+  admission (#53843).
+- TUI 오버레이(`account_login`, `schema_form`, `lane_records`, `package_browser`, `lane_installer`, `lane_addons`)의 선택 행 판별을 텍스트 접두사 추정에서 타입화된 `(bool * row)` 반환으로 전환하고, 서버 대기 목록과 TUI 화면에 남았던 원시 `task-*`/`sched-*` ID 노출을 사람 읽는 제목으로 해석해 표시해요 (#53847).
+- TUI 키퍼 표의 다색 점·차트·스파크라인 진행 표현(`▪` 핍, 4색 턴 펄스, 3단계 실패 열도, Oklab 지연 막대·예약 확인 막대)과 전경색을 유지하는 선택 배경 밴드를 적용하고, `lag ?` 중복·중복 경고 목록·일정 불일치·Story 일정 열 정렬·리사이즈 클램핑·CJK 폭 계산 문제를 바로잡아요 (#53848).
+- 영문(EN) UI 모드에서 음성 상태, 대기 입력, 레인, 작업, 볼륨 정리, 키퍼 설정, 대화 기록·활동, 플레이 룸, 메모리 회수·제외 폼, alphaTex 헤더, 준비 상세, 프리셋, 계정 로그인(전체 선택·배치 확인 포함), 클립보드·액션 알림에 남아 있던 한국어 누출을 제거하고 언어 전환 시 캐시된 뷰를 동기화해요 (#53849).
+- 한국어(KO) UI 모드에서 미번역 상태로 남아 있던 폼·모달·패널(`/features`, 호출 리더, 플레이 초대 카드, 패키지 브라우저, 모델·스키마·Fusion·레인 오버레이, 사용량 계획 카드, 도구 호출 근거·인라인 diff, Ask·컨텍스트 검사기, Git 브랜치·변경 컨텍스트)을 현지화하고 기계적 `(s)` 복수형·문장 줄표(`—`)·혼용 영문 명사를 정리해요 (#53850).
+- Narrow `masc://keepers/{keeper}/memory/health` access via
+  `authorize_keeper_memory_caller` so only `Operator_admin` or the matching
+  Keeper can read health metadata, and replace free-text parser/I/O details in
+  `read_keeper_memory_inputs_blocking` MCP errors with fixed closed messages
+  while logging details server-side (#53853).
+- Resolve relative `base_path` inputs once against the process cwd in
+  `Config_dir_resolver.inputs_for_base_path` and delegate
+  `Server_runtime_config_root_bootstrap.base_path_config_root` to
+  `Config_dir_resolver.base_path_config_root`, preventing `<ws>/<ws>/.masc/config`
+  path doubling (#53855).
+- Inspect and quarantine retained `official-client-runtime/runtimes/*.json`
+  session copies in `Keeper_official_client_session_store.stored_bindings`,
+  `Keeper_official_client_session_store.move_aside`, and
+  `Keeper_store_boot_reconcile.move_aside`, verifying retained filenames against
+  their decoded `(client_kind, runtime_id)` identity (#53857).
+- Canonicalize non-existent keeper health directory paths via `Fs_compat.realpath_lenient` so cache invalidation matches symlinked/temp parents on macOS, and update macOS fake-docker sandbox read stubs for 7-arg confined reads (`#53869`, fixes `#53611`).
+- Classify `.masc/activity-events` (`Truncated_copies`) and `.masc/official-clients` (`Vendor_client_home`) in the tool blob sweep scope so old blobs still become sweep candidates when operator tool calls or official-client logins create those directories (`#53871`, fixes `#53783`).
+- Deduplicate pending `turn_ref` entries in `Keeper_turn_bridge.uncheckpointed_official_turns` and update `test_production_empty_retry_boundary_survives_the_next_turn` for `#53575` turn-bridging and synthetic context preamble injection (`#53872`, fixes `#53766`).
+- Enforce positive-only provider usage window durations (`Positive_minutes.t`) across Codex/Muse/Z.AI/Kimi decoders, durable history restore, and TUI `Tui_decode_usage` decoding so zero or negative durations are rejected at the boundary (`#53873`, fixes `#53797`).
+- Resolve declared `[runtime.lanes]` routes in `Keeper_status_detail.handle_keeper_status_config` via `Keeper_context_runtime.resolve_max_context_resolution_for_route` so lane-assigned Keepers report their selected candidate runtime's `context_budget` instead of `capacity_error` (`#53879`, fixes `#53516`).
+- Detect `Dashboard_cache` timeout envelopes in `Operator_control_snapshot_trust.read_compact_keeper_runtime_trust` so timed-out `Reuse` reads yield `null` with `Partial` completeness instead of projecting an empty trust summary object with `Complete` (`#53880`, fixes `#53379`).
+- Persist `fixture.meta` on disk for `keeper_constitution_{write,read,remove}` matrix cases in `Test_keeper_tool_matrix_cases` so `Keeper_constitution_roster` includes `"keeper-tool-matrix"` (`#53893`, fixes `#53334`).
+- Reject non-directory files, symlinks to non-directories, and dangling symlinks with `Unix.Unix_error (Unix.ENOTDIR, "mkdir", path)` in `Fs_compat_base_io.mkdir_p_unix` instead of mistaking `Sys.file_exists` for a directory (`#53894`, fixes `#53324`).
+- Queue `goal_proof_reopened` inside `Goal_store`'s outbox ahead of `goal_phase` within the single `Goal_verification.reopen_goal` transaction so reopening with a proof never double-writes `goals.json` at the same revision or fails when the audit ledger refuses appends (`#53897`, fixes `#53259`).
+- Explicitly serialize `"strict": false` for OpenAI Responses API function tools when `strict` is unset, preventing implicit Responses strict mode from rejecting `uniqueItems` schemas and forcing mutually exclusive or optional tool parameters (#53903).
+- Use kind-specific safe public messages in `Keeper_chat_events.public_protocol_error_message_of_kind` for `sse_timeout` and `sse_stream_incomplete` instead of the generic unusable-event text across TUI, dashboard, connectors, and replay journals (#53904).
+- Separate the Plugins/Add-ons `overview_bottom_sheet` from the scrollable document via `Masc_tui_lane_addons.viewport_frame`, dock `sheet_rows` to the bottom of `Masc_tui_render_overlays.render_lane_addons`, align `scroll_lane_addons` with the reserved `list_budget`, and verify stationary viewport docking under tall overflowing lists (#53906).
+
+### Performance
+
+- The operator snapshot names the Keepers meant to keep running without opening the meta file of a Keeper whose Owner stands for that file. It read every configured Keeper's meta file for every snapshot that carried Keepers; the Keeper rows of the same snapshot already asked the Owner. A Keeper with no Owner is read from its file as before, and the supervisor's keepalive reconcile still reads the files. (#53413)
+- A scan of a private JSONL store (`Private_jsonl_scan.fold`) takes only the nearest row before each window it reads, instead of reading back to the start of the file for every window. The turn log check and the commit log scan use it. (#53565)
+
+### Documentation
+
+- RFC `librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line`: the durable Librarian is rebuilt on one rule. The model call only proposes; the one writer of a Keeper changes Memory by appending one line that carries the Memory change, the read position and the working state. A call whose result is unknown is asked again, the input is a new turn log whose content is the difference of two marks, and a question is narrowed only after a slot refused it. The cut is a hard cut with fresh state. The pull request also adds the research note on six months of Librarian failures, the evidence folders, and three TLA+ models (`LibrarianWidth`, `LibrarianWriter`, `LibrarianTurnLog`) (#53148).
+- Librarian rebuild RFC: section 19.2 lists the 62 units that call a module the cut deletes or renames (generated by `cut-callers/list_callers.py`), names the Memory store units that are trimmed rather than deleted, and keeps the Exact walk's input refusal type under a new name. Corrects sections 9, 11.6, 22.2 and 23 where review found them wrong or silent (#53160).
+- RFC `a-sent-request-prefix-changes-only-when-the-window-moves`: an already
+  sent request prefix changes only when the window moves, and what varies per
+  turn goes at the end of the request. The measured Kimi Coding Plan usage
+  showed the first request of most turns missing the provider cache because
+  the Librarian point, finished-turn markers and the chat-or-self-woken turn
+  shape rewrote earlier bytes. The pull request adds the read-only measurement
+  scripts and their sanitized outputs (#53307).
+- RFC a-persons-api-key-is-their-own-provider-account 3.7 says that a key
+  replacement makes the runtime root before its record and a registration
+  after it, and names the cases in which a file of the next generation
+  stays in the folder of the keys. The interfaces of the key file and of
+  the runtime root of a person say what a replacement asks of them
+  (#53399).
+- The account server guide has a section on the API keys of people: which
+  provider takes a key, where the server keeps it, what the card of an
+  account offers and reports, and what to restore together (#53406).
+- The research record on inviting people into a running installation says
+  what stands in the way of the Keeper engine in the process of the account
+  server: the state one process holds once, and what the engine keys by the
+  name of a Keeper alone (#53441).
+- RFC a-persons-keeper-runs-on-the-engine decides how the process of the
+  account server starts the Keeper engine, and how the engine, which finds
+  a Keeper by one name, is joined to the log, which finds it by its owner
+  and its id (#53446).
+- #53403 이 창별 초기화 시각을 어디에 남기는지 적어요 (#53449).
+- 요청이 들어가는지는 agent-core 가 정한 입력 한도 하나로 봐요 (#53504) (#53512).
+- the guide names the preset read-error mark ✕ (#53542).
+- The `Invalid_request` contract in `lib/msx_lane/msx_lane.mli` now says the BIOS inventory directory the server finds on disk takes the same check as a caller-named `roms_dir`; only a directory supplied through the machine's environment is exempt (#53613).
+- RFC a-persons-keeper-runs-on-the-engine says when the runtime value of a
+  person's Keeper is made again: a lookup makes it from two records of the
+  log and the configuration the operator's table was made from, and makes
+  it again when one of the three is another object. The reason a turn ended
+  is kept on the line of the conversation record that ends the operation,
+  where the answer of a turn that succeeded is kept; the operation store
+  does not change (#53615).
+- 이번 턴이 시작한 곳은 run 이 Opened 를 입력보다 먼저 썼을 때만 있어요 (Librarian RFC §11.2) (#53617).
+- RFC a-persons-keeper-runs-on-the-engine records what was read before the engine boots in a multi-account process (research section 19). The caller of the account server boots the engine, and the engine boot takes the access the process published (#53675).
+- `ROADMAP.md`, `docs/PRODUCT-OPERATING-PLAN.md` and `docs/spec/SPEC-INDEX.md` no longer carry the package version, the latest changelog entry or the latest published release, and the pinned-release install example in `docs/INSTALL.md` and `docs/INSTALL.ko.md` uses `TAG=vX.Y.Z` for a tag taken from GitHub Releases (#53686).
+- The interfaces of the account access and of the engine boot say what the published access proves: a single-user access comes from the account mode judgment, and a multi-account access carries the base path its publisher gave. (#53687)
+- RFC official-clients-share-one-type-and-the-host-runs-their-turn records
+  that the four official-client adapters each walk the same session claim,
+  effect record and settlement, and sets the target: one `Official_client.t`,
+  a host that runs the turn while each adapter supplies only what differs,
+  and one turn-driver arm, in slices S1 to S6 with open decisions D1 to D8
+  (#53688).
+- RFC `each-test-suite-in-its-own-directory` proposes giving every test suite its own `test/<name>/dune` so Dune discovers it without the hand-kept `(include stanzas/*.inc)` list, with a deterministic codemod plan, its verification and open decisions. (#53690)
+- RFC a-persons-keeper-runs-on-the-engine says how the engine is assembled in a multi-account process (research section 20). The multi-account boot does what the stdio server does, before the port is announced, and a boot whose engine does not stand is refused (#53696).
+- Add an RFC that replaces the six Board JSONL files with one event log written by one writer, with deletion cascades and derived counts computed in one fold (#53698).
+- RFC a-persons-keeper-runs-on-the-engine takes back the assembly order of #53696, which was decided over code that was not read. The engine starts as the single-user server starts it, in a fiber once the access is published, and what it starts is left open (#53708).
+- say the Librarian lane compares nothing against the input limit in masc (#53719).
+- the turn log and the commit log have no lock file beside them (#53728).
+- RFC a-persons-keeper-runs-on-the-engine sets what a multi-account boot starts in S1: the four steps the stdio server starts, with no gateway, gRPC, WebSocket or Dashboard loop. It adds that a multi-account boot makes no Keeper definition of its own, and research section 21 records what the engine does on a multi-account installation that has no Keeper, marking which lines were read directly (#53731).
+- 입력 한도 RFC 에 턴 쪽 조사와 넘칠 때 run 안에서 다시 투영하는 규칙을 적어요 (#53504) (#53743).
+- TUI 작업자 heap 주석에, 새로고침이 바뀐 task 만 다시 풀게 된 뒤(#53618) 다시 잰 값을 적었어요. 4M 이 256k 보다 `r` 뒤 키 지연 p99 를 절반으로 지켜서(24.6 대 47.3 ms) 4M 을 그대로 써요 (#53755).
+- run 안 후보는 보내기 전 거절에만 써요 — 실행 기록은 턴마다 provider 시도 하나 (#53504) (#53758).
+- RFC a-persons-keeper-runs-on-the-engine says what S1 starts and refuses as it was built: the four steps and the startup watchdog, the Dashboard snapshot worker of background maintenance, a readiness probe that waits for the engine, and a boot that stops on a Keeper configuration journal or on a folder of definitions it cannot read. Research section 22 records the lines the attack reviews of S1 named, read again at main `e25fdb1a`, and what remains moves to the risks of S2 (#53803).
+- The changelog entries of #53748 and #53763 match the code: background maintenance starts the Dashboard snapshot worker, the upgrade note lists `auth/agents`, the hash of the internal Keeper token and the built-in skills beside the Admin credential, and the tool blob sweep still marks nothing deletable while `.masc/activity-events` or `.masc/official-clients` is there (#53810).
+- The setup guide of the account server says that `GET /health/ready` answers 503 while the engine starts (#53832).
+- The RFC of a person's Keeper on the engine and its research say what S1 does: the capture of a Codex child also passes the names its home lists and a turn or a check refuses a home that lists any, a Keeper configuration journal blocks a multi-account boot whichever process left it, the engine starts the runtime probe loop of the Dashboard, and the supervisor sweep makes a definition that appears after the boot and has no run record a keepalive candidate unless its mode is manual (#53839).
+
+### Internal
+
+- Librarian rebuild L1a: the answer type and its codec (`Librarian_answer`, `Librarian_question_id`) and a test that pins the bytes of a Memory snapshot. Nothing calls the new modules yet (#53153).
+- Librarian rebuild L1b: `Librarian_effects` (what one commit does to Memory) and the pure `Librarian_plan.of_answer`, which leaves out a flawed op and keeps the others. Nothing calls the new modules yet (#53159).
+- Librarian rebuild L1c: `Librarian_scoring` counts, per slot, answers thrown away, ops left out, answers that changed Memory, what Memory holds of what the units said, and what a merge kept. A test pins the table it prints for seven fixed answers. Nothing calls the new module yet (#53162).
+- Librarian rebuild RFC: the cut's caller list now counts the six units deleted whole as deleted, which adds three callers (`server_lane_addon_exact`, `server_unowned_exact_sweep`, `server_routes_http_routes_keepers`) and their dispositions. The RFC states that the list is a lower bound and closes the `keeper_memory_os_current_types` row (#53165).
+- Librarian rebuild: the pure plan records every op whose stated fact did not stay (`Successor_unsupported`, now also for an `Add`) and returns its own working-state result, so an answer that saw no Memory and set the working state is reported as `Not_valid_alone`. Three tests cover rules the plan layer's review found unreached (#53172).
+- Librarian rebuild L3a1: `Keeper_turn_log` defines the four lines of a Keeper's turn log, where a line ends a unit, and the one order of lines a reader accepts. `Keeper_turn_log_codec` is the wire shape. Nothing writes or reads a turn log yet (#53180).
+- Librarian rebuild L3a2: `Keeper_turn_log_store` reads the tail of a Keeper's turn log and appends only at the end offset that was read. An append behind another writer writes nothing. Nothing calls it yet (#53182).
+- Librarian rebuild L3a2b: `Keeper_turn_log_marks` counts the closed messages of a checkpoint history and names a run of messages as slices of the bundles that hold it. Pure, and nothing calls it yet (#53184).
+- Librarian rebuild L3a3a: `Keeper_turn_log_writer.plan` decides which turn log lines an admission, an ending and a process start append. A head on another trace, or with fewer closed messages, gets an `Unannounced` reset whose `after` is the empty mark of that head. Pure, and nothing calls it yet (#53220).
+- Librarian rebuild: review of the turn log layers, the scorer and the cut list. Turn log tokens are written through a total match, the order rule refuses a turn's own messages after a reset, a covered range says which segment comes before it and refuses one that does not fit, and a tail that moved between its two reads is an error (#53224).
+- Librarian rebuild: the scorer no longer counts a planted token Memory already held as recovered, and the covered turns of a history read the segment before them by the name they hold instead of taking one from the caller (#53230).
+- Librarian rebuild L3a3b1: `Keeper_turn_log_head` reads from a Keeper's saved history how many messages are closed and open and which turns hold them, treats a missing or superseded checkpoint as empty the way a starting turn does, and reads the segment before a run by the name the head holds (#53234).
+- Librarian rebuild L3a3b2: `Keeper_turn_log_ends` reads where a Keeper's official-client files and chat file end (just after their last line break) and how many whole rows its external store holds, each under the store's own locked read (#53242).
+- Librarian rebuild L3a3b3: `Keeper_turn_log_recorder.record` writes what one event adds to a Keeper's turn log, reading the log's tail, the saved history's head and the other stores' ends, planning the lines and appending them at the end that was read (#53250).
+- Librarian rebuild L3a3b4a: a Keeper turn writes its `Opened` and its `Closed` to the turn log beside the old boundary file. `Keeper_turn_log_turn.around` is the one place that writes them, so every way out of a turn (return, exception, cancellation) writes exactly one end. A line that cannot be written is counted in `masc_keeper_turn_log_append_failed_total` and the turn runs. The turn log's directory is created without the process-wide directory memo (#53283).
+- The Librarian RFC and the turn log model (`LibrarianTurnLog`) no longer have a turn's admission close the head's open messages. A message that is open when a turn is admitted is closed by that turn's closing save and is in its own slice. The model's property `LeftoverNotBorrowed` is now `OwnNotClosedBefore`. No product behaviour changes (#53290).
+- A server start runs the turn log's process-start step after checkpoint tail recovery and before any Keeper turn: a Keeper with no turn log gets its first line, and a Keeper whose last turn was left open by the previous process gets that turn's `Closed` with `Process_exited`. The messages that turn saved are closed with one save first, so the line names them as the turn's own. A failure is counted (`masc_keeper_turn_log_open_close_failed_total`, and `masc_keeper_turn_log_append_failed_total{site="process_start"}`) and does not stop the start. A turn's end that finds the log no longer showing the turn open is now counted too (`site="end"`). (#53331)
+- A Keeper turn's `Opened` line in the turn log names what woke the turn: the entries of the Keeper's event queue the turn was admitted with, in the queue's order, each as its kind, its id and the names the entry itself holds. No body of a post, a message or an answer is written. A turn started by a direct request or by the Keeper's cadence has none. Each kind of queue entry has one line type, and the function between them matches every kind, so a new kind does not compile until it has one. `Keeper_agent_run.run_turn` takes the entries as `~woken_by` (#53363).
+- A product path that shrinks, drops or changes a Keeper's head now has one function to go through, `Keeper_turn_log_reset.run`: its own checks, whose plan says which line the change needs, then the line, then the change. A head the log can read gets one save that closes its open messages (and the checks again against the closed head) and a `Reset` line with an announced cause, which names what was closed since the last unit, so what the path drops is named before it goes. A head dropped without being read (one this build cannot decode, or a session a stop deletes) gets an unannounced `Reset` from the last mark to no closed message, written every time; with no log yet it is the log's first line. After the line there is no error branch: a failed change and a kill leave the same disk, and the next unit starts at the line's `after` either way. Nothing calls it yet; history clear, the recovering purge and the session-deleting stop move onto it next. The closing save the process start step makes now lives in `Keeper_turn_log_closing`, shared by both (#53376).
+- The accounts console has the request and the state of a key replacement
+  (`key-replace.ts`) (#53385).
+- The whole-turn Keeper fixture checks an official-client turn's unit against the two history files: the bytes between the unit's two marks in `history.jsonl` and `history.internal.jsonl` hold every line that names the turn and no other line, and the last unit ends where the file ends. It runs a direct turn, a turn that fails at the provider, a turn the Keeper started itself and two turns of one trace, on the Codex app-server fixture. No product code changes (#53386).
+- Librarian rebuild L5a: `Librarian_direct.plan` answers what a direct write (remember, supersede, retract) does to Memory as a pure function, and `Librarian_effects.removal` gains `Superseded_by` and `Retracted`. Nothing calls the plan yet. (#53401)
+- Librarian rebuild L5b: `Librarian_log` is the line of a Keeper's commit log (`Started`, and `Committed` with the effects of one commit, the snapshot digests, the read position and the working state) and `Librarian_log_codec` is its wire shape. The causes are a direct write and an adoption. Nothing reads or writes the file yet. (#53409)
+- Librarian rebuild L5c: `Librarian_log_store` reads the tail line of a Keeper's commit log (`<keeper>.memory-log.jsonl`, beside the snapshot) and appends one durable line at the end its caller read. A cut-short fragment is not a line, and an append at a stale end writes nothing. Nothing calls it yet. (#53415)
+- Librarian rebuild L5d: `Librarian_envelope.after` makes the snapshot a commit leaves from the snapshot before it and the commit's line alone, so a snapshot that was not written after its line can be written again with the same bytes. A direct write's line now carries the trace it arrived on (`Direct.trace`), and the plan refuses a write on a blank trace. Nothing calls it yet. (#53417)
+- The longest decision row the server keeps after appending it is the reader's 40,000-byte window less one byte, newline counted: the longest row the file read finds behind another line. `Keeper_memory_recall.tail_chunk_bytes` names the step the tail read goes back by, and the read's interface says when it stops. (#53422)
+- Librarian rebuild L5e: `Librarian_store` opens one Keeper's Memory from the last line of its commit log (the boot table: first boot, a snapshot one line behind written again from that line, any other snapshot refused as diverged) and commits a direct write as line first, snapshot second. `Keeper_turn_log_store.read_start` reads the line that starts a turn log. `Librarian_envelope.next` returns the snapshot with its bytes and refuses what the snapshot codec does not write instead of raising. Nothing calls the store yet. (#53425)
+- Librarian rebuild L5f: `Librarian_store.adopt` lets an operator accept the snapshot a stopped Memory store holds. It takes the named bytes only when the file holds them and they decode, appends one line read from the log's tail at that moment (a commit after a tail that decodes, a `Started` line after one that does not), and does not write the snapshot. `Tail_undecodable` now says where its line ends. Nothing calls it yet. (#53427)
+- Librarian rebuild L5g: `Librarian_machine` decides the cells of the writer's state table that exist before the Librarian asks a model. A direct write is planned and committed when the store is open and refused when it is stopped; `Resume` boots a stopped store again; `Adopt` is taken only by a store stopped as diverged or unreadable. Each function returns the next state with the answer. Nothing calls it yet. (#53432)
+- Librarian rebuild L5h: `Librarian_writer` is the fiber that owns one Keeper's Memory store. It takes `<keeper>.memory.lock` without waiting and holds it until it ends, boots the store, and handles one event at a time from its mailbox (a direct write, a resume, an adoption, a retirement). Readers read a status the writer replaces before it answers. A writer is made (`create`) and then run (`run`), and one that has ended answers that it took nothing. Nothing starts a writer yet. (#53442)
+- Librarian rebuild L5i: `Librarian_writers` is the table that gives every registered Keeper its one writer. Finding a live writer and registering a new one are one compare-and-set, from any domain, and a fiber of the table runs each new writer. A write, a resume and an adoption go to the Keeper's writer, and to its next one when that writer ended first; only a Keeper that is not registered is answered as retired. The view is read without waiting. A pulse makes the writers of registered Keepers and retires the others. Nothing makes a table yet. (#53448)
+- Librarian rebuild L5j: `Private_jsonl_scan.fold` reads a private JSONL store from its first row, a window of rows at a time under the store's lock; `Librarian_log_store.fold` reads a Keeper's commit log with it, and `Librarian_archive.read` uses it to give the facts that left Memory with what removed each one. A fact that was added again or that the snapshot holds now is not listed, and lines that do not decode are counted instead of ending the scan. Nothing reads it yet. (#53455)
+- Librarian rebuild L5k: `validate-stores` reads two more stores, the Keeper turn log and the Memory commit log, from their first line. A line that does not decode is refused with the offset it starts at; in the commit log, a line that does not decode and has a `Started` line right after it is the tail an operator adopted the snapshot past and is counted as a row. The blob sweep has a rule for `<keeper>.memory-log.jsonl` and `<keeper>.memory.lock`. Nothing writes the commit log yet. (#53459)
+- Librarian rebuild L5l: deleting a Keeper also removes its Memory commit log, the log's lock and the writer's lock. A commit log left behind names a snapshot that is gone, and a later Keeper of the same name would find its Memory store stopped at boot. Nothing writes these files yet. (#53460)
+- Librarian rebuild L5m: the working-context pass (whether to call the model, the input it hands the Librarian, the run) moves from `Keeper_librarian_queue_refresh` to its own module, `Keeper_working_context_pass`. Behaviour is the same. (#53463)
+- `Keeper_memory_writers` holds one table of Memory writers per workspace. The server does not start one yet. Part of the Librarian rebuild (L5q). (#53487)
+- 한 턴이 자란 양을 ledger 밖에서 못 만들게 감춰요 (#53355·#53307 리뷰 후속) (#53489).
+- record a red candidate verification instead of crashing on an empty behavior profile (#53490).
+- A Keeper's Memory writer notifies `Keeper_memory_commit_notifications` when the snapshot holds a new revision: after a commit that rewrote it, and when its store opens. Part of the Librarian rebuild (L5r). (#53496)
+- narrow the head's covering error to the cases it returns (#53503).
+- name the Connector stimulus field after its wire key and keep a failed closing save's cause (#53505).
+- `Fs_compat.read_private_jsonl_window_locked_result` takes `previous_row_wanted` as `No_previous_row | Nearest_accepted of (string -> bool)`. A read that asks for no row reads nothing before its start, so `Private_jsonl_scan.fold` no longer walks back to the first row for every window: the commit log fold, the archive and the turn log fold read each row once. (#53515)
+- The Keeper purge ends the Keeper's Memory writer before it removes files, and removes nothing of a Keeper that is in the Keeper registry. (#53521)
+- The Librarian store stops as `Store_unwritable`, not `Memory_unreadable`, when reading the snapshot file fails: at boot, at a direct write and at an adoption. A snapshot that is absent or is not one still stops it as `Memory_unreadable`. (#53522)
+- The commit line codec refuses a line whose `at` is not finite. (#53522)
+- `Librarian_answer.of_string` documents that the JSON reader skips whitespace and JSON comments around the document. (#53522)
+- The Librarian reads its Keeper's turn log from the offset its commit log names (`Librarian_unread`). No line before that offset is read, except the lines of a turn that reading starts inside. Faults are found in the order id, offset, line. Part of the Librarian rebuild (L6a). (#53565)
+- The Librarian reads the content of a turn log unit as items (`Librarian_unit_content`): the Agent-Core messages its slices take and the official-client, chat and external rows in its ranges, in one order. A part a store does not hold is named the way the unit's line names it and the rest is still read; a bundle that is there and does not read stops the read. Part of the Librarian rebuild (L6b). (#53567)
+- `Agent_core.Checkpoint_objects.load_bundle` reads one bundle's messages, checked against its digest and each message's digest, without a head. (#53567)
+- The Task, Goal, Schedule, Skill and async request lists report the height
+  they drew (`Task_entries`, `Goal_entries`, `Schedule_rows`,
+  `Skill_entries`, `Async_request_entries`), and a page key reads only
+  reported heights. `Masc_tui_list_moves.Projected`, `work_tasks_page_rows`
+  and the Goal list's `Planning_list_page_rows` are removed (#53571).
+- The Librarian writes its reading question as one pure function (`Librarian_question.make`): the lane prompt, then the `question:`, `memory:`, `working_state:`, `units:` and `question-end:` lines, each value one compact JSON document. The question id's front half covers the declaration, Memory and the working state; the back half covers the units line. Part of the Librarian rebuild (L6c). (#53578)
+- The Librarian classifies what its walk saw at one slot (`Librarian_slot_visit.classify`): answered, refused with or without a size, or silent with a reason. The slot-outcome table is a test fixture (`test/fixtures/librarian_slot_outcome/`) with a row per constructor after the L2 constructors (17 types, 176 constructors, 181 rows), and a test runs a sample through every row. Part of the Librarian rebuild (L6d). (#53579)
+- `Masc_tui_render_tools.display.entries` gives each entry's first and last
+  row, not its height. The landings of both Tools lists and the window rule
+  that follows them are `Masc_tui_render_tools.skill_landing`,
+  `request_landing` and `follow`. The async landing reads the request's rows
+  from one drawing of the page; it drew the page three times (#53590).
+- The Librarian asks one question about every unit it has not read (`Librarian_ask.run`). It reads its tail, the snapshot the tail names and the tail again, so a direct write during the read is read under its own line, and other snapshot bytes end the ask as `Memory_diverged` before any call. The HTTP slots are walked in the lane's backpressure order and the CLI slots only after no HTTP slot answered; `No_answer` holds a refused or silent outcome for every slot. Part of the Librarian rebuild (L6e). (#53598)
+- The Librarian writer's machine holds an ask (`Librarian_machine.decide`): the writer is Idle, Asking, Resting or Stopped, and every pair of a state and an event (a closed turn, the pulse, an ended ask, a new declaration) is written out. An answer is committed as a Read line, planned with the facts that direct writes removed while it was out, and a range with nothing readable as a Skip line. An answer to an ask that is no longer current is dropped and counted (`LibrarianLateAnswers`). Part of the Librarian rebuild (L6f). (#53599)
+- The Librarian writer asks in a fiber of its own and keeps answering direct writes while a call is out; the ask reads Memory only while the writer waits for its next event, so it never reads a commit halfway. An appended `Closed` or `Reset` turn log line tells the Keeper's writer, the pulse reaches every registered Keeper's writer, and a new `librarian_memory` lane value reaches every writer (`Keeper_memory_writers.follow_declaration`, which the server does not start yet). The server hands the writers the Librarian ask with its own network and clock. Part of the Librarian rebuild (L6f wiring). (#53605)
+- The server reads the `librarian.ask` prompt once at start and follows the `librarian_memory` declaration with it and `Librarian_answer.schema`, so Memory writers ask once the lane has a value. Without the prompt no value is sent, the writers stay idle, and the reason is logged. The answer schema is built from the field lists the answer decoder takes, and the observed basis shape sits next to its decoder. Part of the Librarian rebuild (L6g). (#53606)
+- Instants on the TUI loop's monotonic clock have their own type,
+  `Masc_tui_wake.Mono.t`. `Masc_tui_owed_read` and every module that passes
+  it a time take that type, so a wall-clock `float` passed there no longer
+  compiles. A wall-clock instant reaches that clock only through
+  `Masc_tui_wake.Mono.of_wall` (#53581, #53608).
+- The mixed-batch Memory tool test expects `proven_pre_effect` from a stopped store: the writer reads the snapshot before it appends, so a write that finds the snapshot unreadable commits nothing. (#53616)
+- The table that keeps one call of an account at a time moved from the server library to `Runtime_account_call` in the runtime library, where the Keeper engine can reach it. The server refuses a call while another runs, as before. `call_in_turn_of` is a second door that waits: the calls of an account that wait run in the order they came, and a wait ends when its fiber is cancelled. Nothing calls it yet (#53632).
+- The Librarian answer scorer counts what Memory has to go on saying after an answer (`must_remain`), whichever op removed the fact that said it. An answer that revises standing rules into a claim that nothing is known of them now scores 0 of what must remain, where the other numbers saw nothing. (#53633)
+- The TUI's refresh pace takes the loop's monotonic instants as
+  `Masc_tui_wake.Mono.t`: the retry after a failed `/health` probe and every
+  decision that reads it. Its wall-clock moment, shown as the next try, stays
+  a float, so passing one clock for the other no longer compiles (#53636).
+- The TUI's play-room view keeps its next read as `Now`, `At` an instant on
+  the loop's clock (`Masc_tui_wake.Mono.t`) or `Until_changed`, instead of
+  one float that meant all three, and its `poll`, `receive` and `kept_back`
+  take the loop's instant as `Mono.t` (#53637).
+- The TUI's engine-graph sampler keeps its instants (the view's origin, each
+  `/health` answer's arrival, what it has seen) as `Masc_tui_wake.Mono.t`
+  instead of float seconds, with no answer seen yet as `None` rather than
+  `neg_infinity`; `Mono` gains `compare` and `seconds_since` (#53641).
+- Six server modules call the registry of the calls of an account by its own name, `Runtime_account_call`, and no longer through the alias in `Server_setup_account_login`. Nothing a person or an operator sees changes. (#53642)
+- Three server tests take the call of an account from `Runtime_account_call`, not through the alias in `Server_setup_account_login`. (#53643)
+- `Server_setup_account_login` no longer re-exports the registry of the calls of an account as `in_call` and `one_call_of`. Every caller names `Runtime_account_call`. (#53646)
+- The TUI keeps the moment its tool series is owed a re-read as
+  `Masc_tui_wake.Mono.t` instead of float monotonic seconds, and checks it
+  with `reached_mono` (#53648).
+- #53616, #53622 and #53627 were merged into the L5m branch after it was already on main; this lands their changes on main, the Supersede first_seen inheritance of #53627 included. (#53652)
+- `Runtime_account_access.publish` answers the access it published, a value only it makes, with the base path that access is of. Its callers behave as before. (#53668)
+- The function that boots the engine (`initialize_owner_state_blocking`) takes the access the process published and no longer publishes it. The single-user server and the stdio runtime publish first, at the step where the function did. (#53670)
+- The opam pin script comment cites the tls-eio bench by its pull request
+  (#51374) instead of a deleted evidence folder (#53673).
+- Refuse merge commits on ordinary feature and stack branches via `.githooks/pre-push` and the required `changes` check (`scripts/ci/pr_no_merge_commits.py`, exempting same-repository `release/v*` branches), and align contributor/agent workflow docs with squash-only `main`, authorized `--force-with-lease` rebases, and the single-approval `main` ruleset (#53677).
+- The TUI's wake reasons are two closed sums, `mono_reason` and
+  `wall_reason`, under `deadline_reason`: `reached_mono` takes a monotonic
+  reason with `Mono.t` instants and `reached_wall` a wall-clock reason with
+  floats, so a reason handed to the other clock's decision does not compile.
+  `clock_of`, `reached_ns` and `monotonic_now_s` are gone (#53681).
+- The targeted test runner runs every OCaml suite through Dune's generated `@@DIR/runtest-NAME` alias instead of executing the binary from the shell, so a targeted run gets the stanza's `setenv`, the directory `(env)` and every dependency expression exactly as the root `@runtest` does. `scripts/ci/stanza_env.py` becomes `scripts/ci/alias_prebuild_deps.py`, which only names the targets to build before the per-suite timeout starts. (#53685)
+- Removed `Safe_ops.protect`, `Workspace_query.safe_yield` and
+  `Metrics_store_eio.safe_yield`; yields go through `Eio_guard.fair_yield`,
+  and the process-group wait catches only `EINTR` (#53689).
+- `Runtime.config_lock_warning_of_yojson` and `Runtime.config_lock_warning_code`
+  read and name the lock warnings the server writes; the TUI's own
+  durability and lock warning copies and the test-only
+  `Masc_tui_runtime_config_receipt.summary` are gone (#53694).
+- `Provider_kind.all` and `Capability_preset.all` are derived with
+  `ppx_enumerate`; the test that held the hand-written list at six entries
+  is gone (#53695).
+- `Keeper_memory` and `Keeper_alerting`, two modules that only re-exported `Keeper_memory_recall` and part of `Keeper_alerting_path` inside the same library, are gone; callers name the owner module, and three aliases nobody used (`bin/main_eio.ml`, `Server_routes_http_common`) are dropped. (#53697)
+- The execution receipt carries why a turn ended as the typed `Keeper_terminal_reason.t` instead of a string, and the operator disposition matches every error constructor through `Keeper_terminal_reason.failure_class`; the `terminal_reason_code` written to receipt rows is byte-for-byte unchanged (#53700).
+- Remove the string decoders the disposition used to re-read that code: `Keeper_terminal_reason.of_wire` with its prefix checks and `Unknown` case, `Keeper_internal_error.wire_kind_of_string`, `Keeper_task_skill_resolution_error.kind_of_code` and `Keeper_official_client_session_refusal.of_code` (#53700).
+- The four official-client adapters (Antigravity, Claude Code, Codex, Muse) return one shared attempt outcome and record tool-effect observations into one effect cell, `Keeper_official_client_attempt`; the turn driver builds pre-dispatch refusals with `refused_before_dispatch` (#53701)
+- Each `MASC_*` name read in more than one module is spelled once by its owner (`Env_config_core`, `Log`, `Auth`, `Env_config_runtime.Tools`) and the other modules, including the Keeper environment allowlist, use that constant. (#53705)
+- A setup batch receipt carries the commit as `Runtime.Config_commit_wire.t`;
+  `Runtime_setup_batch.commit_record` is gone, the lock warnings left after the
+  commit are added with `Runtime.Config_commit_wire.attach_lock_warnings`, and
+  the CLI batch reads the running server's save answer with
+  `Runtime_setup_batch.commit_of_answer`. The setup answer and the Keeper lock
+  warning name their warning code through `Runtime.config_lock_warning_code`;
+  their JSON is byte-identical. The setup answer still writes its own shorter
+  commit object, tracked in #53714 (#53713).
+- `Keeper_covered_point` reads a Memory writer's view as a place in the history a request is cut from: the count of closed messages becomes the atom that opens at or after it, with no digest compared. A view of another trace or a history shorter than the view does not resolve, a writer that has read no unit has no read end, and a missing, booting or stopped writer is an error rather than "nothing read". (#53724)
+- The failure handling and the startup watchdog of the owner initialization are top-level functions of `Server_runtime_bootstrap`. The single-user boot behaves as before. (#53733)
+- `Server_bootstrap_maintenance.with_initial_configuration` takes what a config root it makes gets: the seed of a single-user workspace, or the refill a root that was there gets, which holds no Keeper definition. The owner initialization asks for the refill when the published access is multi-account, which no process reaches yet. (#53734)
+- The comments of the owner initialization in `Server_runtime_bootstrap` say that a cancellation, and a failure of the failure handling itself, are raised on, and the startup watchdog of the single-user boot keeps its step comment. (#53741)
+- RFC: 요청의 각 부분을 바뀌는 빈도에 맞는 자리에 두고, 턴 문맥의 역할을 쓴 사람으로 정해요. 캐시 유지 시간 선언, 턴마다 캐시 결과 보이기, Anthropic 도구 불러오기, 규범 목록 한 번 싣기의 층을 적어요 (#53746).
+- the Keeper idle span reads Ongoing.Narrow, not a copy of it (#53751).
+- A test executable boots the engine of a multi-account installation through the account server, once per process. In its own process the engine comes up on the Multi_account access, ready and not degraded, on the base path of the installation and with no Keeper definition, and a route of a person refuses the admin token and the internal Keeper token the engine put in the environment. In a child process, a Keeper configuration journal the engine refuses ends the process with a status other than 0, before the startup watchdog of the child could end it (#53756).
+- catalog provider 행이 1시간 캐시 유지 시간(`supports_extended_cache_ttl`)을 선언해요. `claude` 행만 문서 링크와 함께 선언해요 (#53759).
+- The Claude Code lifecycle tests expect the spawn refusal types #52856 gave
+  a missing executable, and a refused-cycle route mismatch prints the error
+  that took the route (#53767).
+- A test executable holds the admin token and the internal Keeper token of the operator in its environment and checks that the child each official client starts on the account home of a person (Claude Code, Codex, Muse Code, Antigravity) gets neither name and keeps the PATH of the process (#53768).
+- catalog 모델 행이 1시간 캐시 쓰기 값(`cache_write_1h_multiplier`)을 선언해요. claude provider 가 받는 Claude 여섯 행은 공식 가격표대로 기본 입력의 2배예요 (#53779).
+- The engine of the account server resolves its promise at readiness, before it starts the post-ready lanes, so the probe does not wait on a lane (#53795).
+- TUI 시험 둘이 바뀐 화면을 따라가요. 미터 끝 색은 호출 계열의 파랑이고, 양식 커서는 `›` 예요. 둘 다 main 에서 실패하던 시험이에요 (#53801).
+- The cases of a multi-account installation catch four mutations they passed: the sweep of tool blobs reading the folder of the persons as payloads, a key account of Claude Code building its child environment without the filter, a child that gets a PATH other than that of the process, and a refill that copies the embedded roster of Keepers. The case of a person's turn checks that the CLI gets no `--mcp-config`, which is why the sweep reads no file of the persons, and the case of an Antigravity child no person reaches is gone (#53807).
+- RFC: L3 에 「요청이 고른 캐시 유지 시간」 기록과 셈을, L5 에 턴 문맥 22개 층의 쓴 사람·도착 방식 표를 적어요. mention 이 답할 때까지 매 턴 다시 그려지는 점, `Active_goals` 가 System 꼬리에 있는 점, 그리는 곳 없는 `Scope_messages` 층을 고칠 것으로 적어요 (#53809).
+- 그리는 곳이 없던 `Scope_messages` 턴 문맥 층을 지워요. scope 메시지는 #24332 부터 `Pending_mentions` 층이 함께 그려요 (#53812).
+- main 에서 실패하던 TUI 시험 둘이 통과해요. 매일 깨는 예약 시각은 `Masc_tui_value` 로 적고, 제목 줄 위치 확인은 실제로 그리는 frame 을 따라요. 화면 글자는 그대로예요 (#53816).
+- 응답 telemetry 가 요청이 고른 캐시 유지 시간(`cache_write_lifetime`)을 적어요. 가격 출처와 같은 `Provider_config.cache_write_lifetime` 이 값을 정해요 (#53820).
+- The cases of the account server and of its engine read the config root of their temporary base whatever the shell holds: they set `MASC_CONFIG_DIR` empty, so a run that allows test overrides no longer takes the definition a refusal case writes into a real folder (#53821).
+- Agent Core 요청 행이 그 요청이 고른 캐시 유지 시간(`cache_write_lifetime`)을 적어요. 턴 합계 행은 `null` 이에요 (#53826).
+- The no-request-body-gate test reads a finished call's arguments as a reference. A call that ended in an earlier turn sends its arguments as a reference, as its result does, and the test reads the stored blob back as the original JSON. It failed on main while it still expected the original JSON (#53831).
+- `test_tui_theme_contrast` 가 `NO_COLOR=1` 환경에서도 통과해요. 색을 켠 호출의 기대값을 환경과 상관없이 적어요 (#53836).
+- The test executables that dune runs no longer read `MASC_ADMIN_TOKEN`, `MASC_INTERNAL_MCP_TOKEN` or `MASC_CONFIG_BOOTSTRAP` from the shell (`test/dune`). A case that boots a server registered the operator's token in its temporary installation, and a shell with `skip` changed the config root of those cases (#53837).
+- drop the in-run front restore no later request reads (#53844).
+- Isolate test executables and spawned `main_eio` test processes from an
+  inherited shell `MASC_HTTP_BASE_URL` via `(MASC_HTTP_BASE_URL "")` in
+  `test/dune` and explicit loopback defaults in `main_eio_env_overrides` and
+  `test_openapi_servers_url_follows_the_admitted_authority` (#53858).
 
 ## [0.74.0] - 2026-11-19
 

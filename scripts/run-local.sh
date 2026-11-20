@@ -535,7 +535,7 @@ build_dashboard_if_requested
 materialize_executable_provenance
 
 if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
-  listener_pid="$(lsof -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | sed -n '1p')"
+  listener_pid="$(lsof -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1)"
   listener_cmd=""
   if [ -n "$listener_pid" ]; then
     listener_cmd="$(ps -p "$listener_pid" -o command= 2>/dev/null || true)"

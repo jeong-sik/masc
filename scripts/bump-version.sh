@@ -47,7 +47,7 @@ python3 "$ROOT_DIR/scripts/changelog-fragments.py" check --dir "$ROOT_DIR/change
 # by version instead, and start the scan where that release's fold stopped
 # seeing this branch.
 last_tag="$(git for-each-ref refs/tags --format='%(refname:short)' --sort=-v:refname 2>/dev/null \
-  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '1p' || true)"
+  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
 base_ref=""
 if [ -n "$last_tag" ]; then
   # Two commits bound what the last release folded, and git names both.

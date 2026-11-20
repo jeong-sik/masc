@@ -133,12 +133,6 @@ val materialize_provider_binding
     [Provider_config.cache_extended_ttl]; every other runtime refuses a
     declared value.
 
-    The binding's [provider_only] and [provider_ignore] lists are request
-    policy too. Only a Chat Completions runtime whose catalog provider row
-    declares [supports_provider_routing_filter] carries them as
-    [Provider_config.provider_only] / [Provider_config.provider_ignore]; every
-    other runtime refuses non-empty lists.
-
     Returns [Error reason] (no silent fallback) when the provider or model id
     is unresolved, or when the provider transport/kind cannot be mapped to a
     concrete provider config. *)

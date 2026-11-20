@@ -1,8 +1,8 @@
 (** What [/health?full=1]'s [overall_status] is answerable for.
 
     Each case pins one edge of the derivation that replaced the eight
-    hand-named sections (#34893). The rule is: a section is rolled up when the
-    rollup lists it and its [status] parses as a grade. *)
+    hand-named sections (#34893). The rule is: a section is rolled up when it
+    is cached and its [status] parses as a grade. *)
 
 open Alcotest
 module R = Server_health_rollup
@@ -43,11 +43,11 @@ let status_lines ?sections ?runtime_startup_degradation ?keeper_config_schema_st
 
 let section name status = (name, `Assoc [ "status", `String status ])
 
-let test_listed_grade_moves_the_status () =
+let test_cached_grade_moves_the_status () =
   let status, action, reasons =
     summary ~sections:[ section "keeper_event_queue" "degraded" ] ()
   in
-  check string "a degraded listed section is the overall status" "degraded" status;
+  check string "a degraded cached section is the overall status" "degraded" status;
   (* Degraded ranks 2 and [requires_operator_action] is rank >= 3, so the
      status moves and no reason is raised. An operator watching the rollup for
      reasons alone would not see this one, which is what the status field is
@@ -131,20 +131,20 @@ let test_status_reasons_win_over_the_fallback () =
   check (list string) "every declared reason is carried, prefixed"
     [ "keeper_owner:first"; "keeper_owner:second" ] reasons
 
-(* The rollup's list is its reach. The rollup runs in the snapshot pass, and a
-   section only the probe pass computes is not there to be read.
-   schedule_runner is one of those: this is why naming it in the rollup would
-   not have worked (#34893). *)
-let test_an_unlisted_section_is_not_reached () =
+(* The cache boundary is the rollup's reach. [overall_status] is itself cached,
+   so it is computed in the snapshot pass, and a section the probe pass
+   supplies fresh is not there to be read. schedule_runner is one of those:
+   this is why naming it in the rollup would not have worked (#34893). *)
+let test_an_uncached_section_is_not_reached () =
   let status, action, reasons =
     summary ~sections:[ section "schedule_runner" "error" ] ()
   in
-  check string "an unlisted section does not move the status" "ok" status;
-  check bool "an unlisted section raises no action" false action;
-  check (list string) "an unlisted section raises no reason" [] reasons
+  check string "an uncached section does not move the status" "ok" status;
+  check bool "an uncached section raises no action" false action;
+  check (list string) "an uncached section raises no reason" [] reasons
 
 (* [Health_status.of_string] folds an unrecognised word to [Unknown], which
-   ranks alongside [Degraded]. Were the rollup to read a listed section
+   ranks alongside [Degraded]. Were the rollup to read a cached section
    reporting a state name, a listening socket would rank as a troubled
    subsystem. The parse is what keeps them apart. *)
 let test_a_state_name_is_not_a_grade () =
@@ -162,7 +162,9 @@ let test_observability_artifacts_are_rolled_up () =
   in
   check string "keeper_observability_artifacts reaches the rollup" "degraded" status
 
-let test_waiting_inventory_fault_is_rolled_up () =
+let test_waiting_inventory_fault_is_cached_and_rolled_up () =
+  check bool "inventory belongs to background snapshot" true
+    (R.is_cached "keeper_waiting_inventory");
   let status, action, reasons =
     summary ~sections:
       [ "keeper_waiting_inventory", `Assoc
@@ -177,6 +179,8 @@ let test_waiting_inventory_fault_is_rolled_up () =
     [ "keeper_waiting_inventory:schedule_primary_unusable" ] reasons
 
 let test_memory_dependency_failure_reaches_overall_health () =
+  check bool "Memory dependencies share the background cache" true
+    (R.is_cached "keeper_memory_execution");
   let status, action, reasons = summary ~sections:
     ["keeper_memory_execution", `Assoc ["status",`String "degraded";
       "operator_action_required",`Bool true;
@@ -186,6 +190,8 @@ let test_memory_dependency_failure_reaches_overall_health () =
   check (list string) "cause is joined into health" ["keeper_memory_execution:addon_unattached"] reasons
 
 let test_memory_original_attention_reaches_overall_health () =
+  check bool "original outcome attention survives the background cache" true
+    (R.is_cached "keeper_memory_attention");
   let status, action, reasons = summary ~sections:
     ["keeper_memory_attention", `Assoc ["status",`String "degraded";
       "operator_action_required",`Bool true;
@@ -195,7 +201,7 @@ let test_memory_original_attention_reaches_overall_health () =
   check (list string) "the Keeper and original outcome remain named"
     ["keeper_memory_attention:keeper-a:librarian_attention_required"] reasons
 
-(* Most listed fields are not sections: keeper_fibers is an int, and
+(* Most cached fields are not sections: keeper_fibers is an int, and
    keeper_config_errors a list. A field with no status says nothing about
    health and must not arrive as unknown. *)
 let test_a_field_without_a_status_is_skipped () =
@@ -208,9 +214,9 @@ let test_a_field_without_a_status_is_skipped () =
   check bool "a field with no status raises no action" false action;
   check (list string) "a field with no status raises no reason" [] reasons
 
-(* Rolled up from its own argument: the value the response carries comes
-   from the probe pass, and this is the copy that is judged. *)
-let test_startup_degradation_is_rolled_up_outside_the_list () =
+(* Rolled up and not cached: the value the response carries comes from the
+   probe pass, and this is the copy that is judged. *)
+let test_startup_degradation_is_rolled_up_outside_the_cache () =
   let status, _, reasons =
     summary
       ~runtime_startup_degradation:
@@ -246,7 +252,7 @@ let test_a_warning_section_leaves_a_line_without_demanding_action () =
     [ "keeper_event_queue:runnable_backlog=18" ]
     (status_lines ~sections ())
 
-(* A listed section: dashboard_surface would have been the natural example and
+(* A cached section: dashboard_surface would have been the natural example and
    is the wrong one, because the rollup cannot see it at all -- it is
    probe-only, which is the fact the .mli spells out. Naming it here made this
    case fail on nothing. *)
@@ -279,7 +285,7 @@ let test_the_worst_grade_wins () =
         ]
       ()
   in
-  check string "the worst listed grade is the overall status" "blocked" status
+  check string "the worst cached grade is the overall status" "blocked" status
 
 (* RFC-0484 §3.2: the typesafeai section and what the rollup carries of it. *)
 module Client = Masc.Typesafeai_client
@@ -358,7 +364,7 @@ let test_typed_original_observation_survives_rollup () =
   check (list string) "raw diagnostics derive from the same item"
     [A.diagnostic action] r.operator_action_reasons;
   check bool "the structured collection is copied into the cheap health probe" true
-    (List.mem "operator_actions" R.operator_field_names);
+    (R.is_cached "operator_actions" && List.mem "operator_actions" R.operator_field_names);
   let changed = match A.to_json action with
     | `Assoc fields -> `Assoc (("keeper_id", `String "different-keeper") :: List.remove_assoc "keeper_id" fields)
     | _ -> Alcotest.fail "the action is an object" in
@@ -387,24 +393,24 @@ let () =
   run
     "server_health_rollup"
     [ ( "reach"
-      , [ test_case "a listed grade moves the status" `Quick
-            test_listed_grade_moves_the_status
+      , [ test_case "a cached grade moves the status" `Quick
+            test_cached_grade_moves_the_status
         ; test_case "typed original observation survives rollup" `Quick
             test_typed_original_observation_survives_rollup
         ; test_case "queue action preserves ambiguous ownership" `Quick
             test_queue_action_preserves_ambiguous_ownership
-        ; test_case "an unlisted section is not reached" `Quick
-            test_an_unlisted_section_is_not_reached
+        ; test_case "an uncached section is not reached" `Quick
+            test_an_uncached_section_is_not_reached
         ; test_case "observability artifacts are rolled up" `Quick
             test_observability_artifacts_are_rolled_up
-        ; test_case "waiting inventory fault is rolled up" `Quick
-            test_waiting_inventory_fault_is_rolled_up
+        ; test_case "waiting inventory fault is cached and rolled up" `Quick
+            test_waiting_inventory_fault_is_cached_and_rolled_up
         ; test_case "Memory dependency failure reaches overall health" `Quick
             test_memory_dependency_failure_reaches_overall_health
         ; test_case "original Memory outcome attention reaches overall health" `Quick
             test_memory_original_attention_reaches_overall_health
-        ; test_case "startup degradation is rolled up outside the list" `Quick
-            test_startup_degradation_is_rolled_up_outside_the_list
+        ; test_case "startup degradation is rolled up outside the cache" `Quick
+            test_startup_degradation_is_rolled_up_outside_the_cache
         ] )
     ; ( "grades"
       , [ test_case "a warning section leaves a line without demanding action"

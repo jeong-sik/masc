@@ -176,8 +176,6 @@ type t =
   | MemoryRecallRequestSeconds  (* histogram: seconds a recall judgment request took, from sending to its result *)
   | MemoryRecallTotal           (* counter: recall judgments, by outcome *)
   | MemoryRecallSelected        (* counter: candidates a recall judgment carried *)
-  | MemoryRecallTurnContradicted (* counter: recall judgments where question (b) answered no-knowledge while question (a) selected at least one candidate *)
-  | MemoryRecallRenderedBodyBytes (* histogram: UTF-8 byte length of rendered recall memory body per judged preparation *)
   | MemoryRecallJudgmentSeconds (* histogram: seconds a recall judgment took, from its first request to its saved outcome *)
   | MemoryRecallPreparationFailures (* counter: recall preparation failures, by bounded reason; no judgment is implied *)
   | MemoryChanges               (* counter: memory IDs a store commit added, absorbed, superseded or dropped, by keeper, pass and change *)
@@ -374,8 +372,6 @@ let to_string = function
   | MemoryRecallRequestSeconds -> "masc_keeper_memory_recall_request_seconds"
   | MemoryRecallTotal -> "masc_keeper_memory_recall_total"
   | MemoryRecallSelected -> "masc_keeper_memory_recall_selected_total"
-  | MemoryRecallTurnContradicted -> "masc_keeper_memory_recall_turn_contradicted_total"
-  | MemoryRecallRenderedBodyBytes -> "masc_keeper_memory_recall_rendered_body_bytes"
   | MemoryRecallJudgmentSeconds -> "masc_keeper_memory_recall_judgment_seconds"
   | MemoryRecallPreparationFailures -> "masc_keeper_memory_recall_preparation_failures_total"
   | MemoryChanges -> "masc_keeper_memory_changes_total"
@@ -440,7 +436,6 @@ let collection = function
   | HistoryFragmentFailures | WorkingStateNotCarried | WorkspaceMemoryBriefingBytes
   | WorkspaceMemoryLedgerClaims | MemoryRecallRequests | MemoryRecallInputBytes
   | MemoryRecallRequestSeconds | MemoryRecallTotal | MemoryRecallSelected
-  | MemoryRecallTurnContradicted | MemoryRecallRenderedBodyBytes
   | MemoryRecallJudgmentSeconds | MemoryRecallPreparationFailures | MemoryChanges | MemoryFacts
   | MemorySnapshotBytes | LibrarianAbsorbSources | LibrarianAbsorbCopyChecks
   | LibrarianLateAnswers | LibrarianRoomOutcomes -> Metric_store

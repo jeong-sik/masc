@@ -496,7 +496,6 @@ let test_the_outcome_is_saved_as_the_last_row () =
          ; "judged", `Int 2
          ; "total", `Int 2
          ; "selected", `List [ `String first_id ]
-         ; "selected_id_set_sha256", `String (Eval.selected_id_set_sha256 [ first_id ])
          ; "turn_question_contradicted", `Bool false
          ; "turn", `String "yes"
          ; ( "results"
@@ -509,61 +508,6 @@ let test_the_outcome_is_saved_as_the_last_row () =
       (field "outcome" last);
     Alcotest.(check string) "the outcome row carries the judgment id" (Eval.judgment_id journal)
       (text "judgment_id" last))
-
-let test_selected_id_set_sha256_and_backward_compatible_decode () =
-  let ab = Eval.selected_id_set_sha256 [ "id-a"; "id-b" ] in
-  let ba = Eval.selected_id_set_sha256 [ "id-b"; "id-a" ] in
-  let dup = Eval.selected_id_set_sha256 [ "id-b"; "id-a"; "id-b" ] in
-  let joined = Eval.selected_id_set_sha256 [ "id-a\nid-b" ] in
-  Alcotest.(check string) "order-invariant" ab ba;
-  Alcotest.(check string) "duplicate-invariant" ab dup;
-  Alcotest.(check bool) "injective across newline-containing ids" true (not (String.equal ab joined));
-  Alcotest.(check int) "64-hex SHA-256 digest" 64 (String.length ab);
-  (* Current outcome with selected_id_set_sha256 decodes completely. *)
-  (match
-     Eval.outcome_observation_of_yojson
-       (`Assoc
-          [ "status", `String "selected"
-          ; "selected", `List [ `String "id-a"; `String "id-b" ]
-          ; "selected_id_set_sha256", `String ab
-          ; "turn_question_contradicted", `Bool true
-          ])
-   with
-   | Ok obs ->
-     Alcotest.(check string) "status" "selected" obs.Eval.status;
-     Alcotest.(check (list string)) "selected_ids" [ "id-a"; "id-b" ] obs.Eval.selected_ids;
-     Alcotest.(check (option string)) "digest" (Some ab) obs.Eval.selected_id_set_sha256;
-     Alcotest.(check bool) "contradicted" true obs.Eval.turn_question_contradicted
-   | Error detail -> Alcotest.fail ("unexpected decode error: " ^ detail));
-  (* Historical pre-PR selected row without selected_id_set_sha256 decodes with None. *)
-  (match
-     Eval.outcome_observation_of_yojson
-       (`Assoc
-          [ "status", `String "selected"
-          ; "selected", `List [ `String "id-a" ]
-          ; "turn_question_contradicted", `Bool false
-          ])
-   with
-   | Ok obs ->
-     Alcotest.(check (list string)) "legacy selected_ids" [ "id-a" ] obs.Eval.selected_ids;
-     Alcotest.(check (option string)) "legacy missing digest defaults to None" None obs.Eval.selected_id_set_sha256;
-     Alcotest.(check bool) "legacy contradicted" false obs.Eval.turn_question_contradicted
-   | Error detail -> Alcotest.fail ("legacy decode failed: " ^ detail));
-  (* Non-selected outcome defaults selected_ids and turn_question_contradicted cleanly. *)
-  (match Eval.outcome_observation_of_yojson (`Assoc [ "status", `String "none_found" ]) with
-   | Ok obs ->
-     Alcotest.(check string) "none_found status" "none_found" obs.Eval.status;
-     Alcotest.(check (list string)) "empty ids" [] obs.Eval.selected_ids;
-     Alcotest.(check (option string)) "no digest" None obs.Eval.selected_id_set_sha256;
-     Alcotest.(check bool) "not contradicted" false obs.Eval.turn_question_contradicted
-   | Error detail -> Alcotest.fail ("none_found decode failed: " ^ detail));
-  (* Malformed field fails closed with Error. *)
-  (match
-     Eval.outcome_observation_of_yojson
-       (`Assoc [ "status", `String "selected"; "selected_id_set_sha256", `Int 42 ])
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "malformed selected_id_set_sha256 must fail closed")
 
 let test_a_judgment_whose_outcome_cannot_be_saved_is_not_used () =
   with_journal (fun journal ->
@@ -629,8 +573,6 @@ let () =
             test_a_journal_that_cannot_be_rotated_sends_nothing
         ; Alcotest.test_case "the outcome is saved as the last row" `Quick
             test_the_outcome_is_saved_as_the_last_row
-        ; Alcotest.test_case "selected_id_set_sha256 is deterministic and outcome decoding is backward-compatible" `Quick
-            test_selected_id_set_sha256_and_backward_compatible_decode
         ; Alcotest.test_case "a judgment whose outcome cannot be saved is not used" `Quick
             test_a_judgment_whose_outcome_cannot_be_saved_is_not_used
         ] )

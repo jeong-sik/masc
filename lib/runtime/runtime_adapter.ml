@@ -864,37 +864,11 @@ let validate_cache_retention (provider : Runtime_schema.provider)
          provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.protocol)
 ;;
 
-let validate_provider_routing_filter (provider : Runtime_schema.provider)
-    ~(model_id : string) ~supports_provider_routing_filter
-    ~(provider_only : string list) ~(provider_ignore : string list) =
-  match provider_only, provider_ignore with
-  | [], [] -> Ok ()
-  | _ :: _, _ | _, _ :: _ ->
-    (match provider.api_format with
-     | Runtime_schema.Chat_completions_api ->
-       (match supports_provider_routing_filter with
-        | true -> Ok ()
-        | false ->
-          Error
-            (Printf.sprintf
-               "binding %s.%s declares provider-only/provider-ignore, but provider %S has no catalog-declared provider routing filter contract"
-               provider.id model_id provider.id))
-     | Messages_api | Ollama_api | Gemini_api | Vertex_gemini_api
-     | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
-     | Muse_serve_runtime | Vibe_cli_runtime ->
-       Error
-         (Printf.sprintf
-            "binding %s.%s declares provider-only/provider-ignore, but protocol %s cannot carry that request policy"
-            provider.id model_id provider.protocol))
-;;
-
 let provider_config_from_declared_provider ?(person_api = false) ?binding_max_context ?keep_alive ?num_ctx ?repeat_penalty
     ?max_tokens
     ?repeat_last_n ?return_progress
     ?max_concurrent_requests
     ?cache_retention
-    ?(provider_only = [])
-    ?(provider_ignore = [])
     ~declarations
     ~disable_parallel_tool_use
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
@@ -919,11 +893,6 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
       ~supports_parallel_tool_suppression:(Declarations.supports_parallel_tool_suppression
         declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
       ~disable_parallel_tool_use in
-  let* () = validate_provider_routing_filter provider ~model_id:spec.id
-      ~supports_provider_routing_filter:(Declarations.supports_provider_routing_filter
-        declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
-      ~provider_only
-      ~provider_ignore in
   let* declaration =
     Result.map_error (catalog_row_refusal_text provider) (catalog_declaration declarations provider)
   in
@@ -1041,8 +1010,6 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
             ~request_path
             ~disable_parallel_tool_use
             ~cache_extended_ttl
-            ~provider_only
-            ~provider_ignore
             ?max_context
             ?model_capabilities_override
             ?model_anthropic_thinking_control_override
@@ -1148,8 +1115,6 @@ let materialize_provider_binding_with ~person_api ~construction (cfg : Runtime_s
          ?return_progress:binding.return_progress
          ?max_concurrent_requests:binding.max_concurrent
          ?cache_retention:binding.cache_retention
-         ~provider_only:binding.provider_only
-         ~provider_ignore:binding.provider_ignore
          ~disable_parallel_tool_use:binding.disable_parallel_tool_use
          ?max_tokens:binding.max_tokens
          provider
@@ -1544,16 +1509,11 @@ let validate_official_binding
       in
       (* An official client writes its own cache breakpoints, so a
          declared lifetime would reach no request. *)
-      let* (_ : bool) =
-        validate_cache_retention provider ~model_id:binding.model_id
-          ~supports_extended_cache_ttl:false
-          ~prompt_cache_wire:Llm_provider.Capabilities.No_prompt_cache_wire
-          ~cache_retention:binding.cache_retention
-      in
-      validate_provider_routing_filter provider ~model_id:binding.model_id
-        ~supports_provider_routing_filter:false
-        ~provider_only:binding.provider_only
-        ~provider_ignore:binding.provider_ignore
+      validate_cache_retention provider ~model_id:binding.model_id
+        ~supports_extended_cache_ttl:false
+        ~prompt_cache_wire:Llm_provider.Capabilities.No_prompt_cache_wire
+        ~cache_retention:binding.cache_retention
+      |> Result.map (fun (_ : bool) -> ())
   in
   refuse_anthropic_thinking_control_on_official_client provider spec
 ;;

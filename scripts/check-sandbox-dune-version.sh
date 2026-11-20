@@ -14,7 +14,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # --- Extract required dune version from dune-project: (lang dune X.Y) --------
 req_ver="$(grep -E '^\(lang dune\b' "$repo_root/dune-project" \
-           | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | sed -n '1p')"
+           | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
 
 if [[ -z "$req_ver" ]]; then
   printf 'ERROR: could not extract dune version from dune-project\n' >&2
@@ -34,7 +34,7 @@ fi
 # the diagnostic below.
 sandbox_ver="$(grep -oE 'dune\.[0-9]+\.[0-9]+(\.[0-9]+)?' \
                "$repo_root/sandbox-images/ocaml/Dockerfile" 2>/dev/null \
-               | sed -n '1p' | sed 's/^dune\.//' || true)"
+               | head -1 | sed 's/^dune\.//' || true)"
 sandbox_source="sandbox-images/ocaml/Dockerfile (explicit install)"
 
 if [[ -z "$sandbox_ver" ]] \
@@ -42,7 +42,7 @@ if [[ -z "$sandbox_ver" ]] \
         "$repo_root/sandbox-images/ocaml/Dockerfile"; then
   sandbox_ver="$(grep -oE '"dune" \{= "[0-9]+\.[0-9]+(\.[0-9]+)?"\}' \
                  "$repo_root/masc.opam.locked" 2>/dev/null \
-                 | sed -n '1p' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)"
+                 | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)"
   sandbox_source="masc.opam.locked (via --deps-only)"
 fi
 

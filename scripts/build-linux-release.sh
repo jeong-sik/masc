@@ -198,7 +198,7 @@ trap cleanup EXIT
 
 echo "== builder image $image"
 docker pull "$image"
-docker run --rm "$image" bash -lc 'ldd --version | sed -n 1p; ocaml -version'
+docker run --rm "$image" bash -lc 'ldd --version | head -1; ocaml -version'
 
 docker rm -f "$container" >/dev/null 2>&1 || true
 docker run -d --name "$container" \

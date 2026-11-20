@@ -113,17 +113,6 @@ type t =
         when the selected provider declares a matching {!Capabilities.cache_session_wire}
         and the trimmed key is non-empty and within the 256-byte wire limit.
         [None] omits the field. *)
-  ; provider_only : string list
-    (** Optional upstream provider allowlist (for example OpenRouter
-        [provider.only], including endpoint sub-tags such as
-        ["alibaba/us-east-1"]). Emitted only when the selected provider
-        declares [supports_provider_routing_filter = true] and the list is
-        non-empty. Empty list omits the field. *)
-  ; provider_ignore : string list
-    (** Optional upstream provider denylist (for example OpenRouter
-        [provider.ignore], such as ["amazon-bedrock"]). Emitted only when the
-        selected provider declares [supports_provider_routing_filter = true]
-        and the list is non-empty. Empty list omits the field. *)
   ; model_capabilities_override : Capabilities.capabilities option
     (** Explicit capability declaration for this concrete provider endpoint.
         This is projected from provider catalog entries that have verified the
@@ -276,8 +265,6 @@ val make
   -> ?system_prompt_cache_prefix:string
   -> ?cache_extended_ttl:bool
   -> ?cache_session_key:string
-  -> ?provider_only:string list
-  -> ?provider_ignore:string list
   -> ?model_capabilities_override:Capabilities.capabilities
   -> ?model_anthropic_thinking_control_override:Capabilities.anthropic_thinking_control
   -> ?keep_alive:string
@@ -389,11 +376,6 @@ val validated_cache_session_key : t -> string option
     256 bytes (the documented OpenRouter [session_id] wire limit). Returns
     [None] otherwise so invalid keys are silently omitted instead of producing
     a 400 wire rejection. *)
-
-val supports_provider_routing_filter : t -> bool
-(** Whether this config's selected provider policy declares upstream provider
-    routing filter support ([provider: { only; ignore }]), or [false] when
-    undeclared or anonymous. *)
 
 val pricing_source : t -> Pricing.source
 (** Read request-owned price authority from a matching policy snapshot. An

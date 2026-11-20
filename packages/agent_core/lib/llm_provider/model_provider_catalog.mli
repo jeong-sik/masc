@@ -37,11 +37,6 @@ type entry =
     (** Wire field used by this provider to carry a caller-supplied prompt-cache
         routing session key. Missing declarations default to
         {!Capability_vocab.No_cache_session_wire}. *)
-  ; supports_provider_routing_filter : bool
-    (** The provider accepts an upstream provider routing filter object
-        ([provider: { only; ignore }]) on Chat Completions requests. Missing
-        declarations are false so non-router endpoints never receive an unknown
-        [provider] field. *)
   ; serves_bare_models : Model_identifiers.Model_id.t list
     (** Explicit exact provider-independent model IDs served by this endpoint.
         Authorization uses ASCII case equality, never a family prefix. Absence or an empty list grants no

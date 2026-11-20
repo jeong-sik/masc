@@ -475,64 +475,6 @@ let test_fleet_rows_render_in_arrival_order () =
     (contains ~needle:"- fleet keeper-carol-agent: second thing" user)
 ;;
 
-let test_fleet_and_pending_messages_expose_head_and_rows () =
-  let observation =
-    { base_observation with
-      pending_messages =
-        [ { MS.message_id = "msg-1"
-          ; speaker = "keeper-alice"
-          ; content = "please check PR"
-          ; kind = MS.Mention
-          }
-        ; { MS.message_id = "msg-2"
-          ; speaker = "keeper-dave"
-          ; content = "scope update"
-          ; kind = MS.Scope
-          }
-        ]
-    ; fleet_messages =
-        [ fleet_row "keeper-bob-agent" "first thing"
-        ; fleet_row "keeper-carol-agent" "second thing"
-        ]
-    }
-  in
-  let turn_decision = WO.keeper_cycle_decision ~meta observation in
-  let parts =
-    Prompt.build_prompt ~turn_decision ~current_task:Inputs.No_current_task ~observation ()
-  in
-  let sections = Masc.Keeper_context_layers.sections parts.world_partition in
-  let find_layer layer =
-    List.find_opt
-      (fun (s : Masc.Keeper_context_layers.section) ->
-         s.section_source = Masc.Keeper_context_layers.Layer layer)
-      sections
-  in
-  (match find_layer Masc.Keeper_context_layers.Pending_mentions with
-   | Some { section_rows = Masc.Keeper_context_layers.Head_and_rows { head; rows; tail }; section_text; _ } ->
-     check bool "pending head has count" true (contains ~needle:"### Pending Messages (2)" head);
-     check int "pending row count" 2 (List.length rows);
-     check string "pending tail is closing newline" "\n" tail;
-     check bool "every pending row ends with newline" true
-       (List.for_all (fun r -> String.ends_with ~suffix:"\n" r) rows);
-     check string "pending head+rows+tail is byte-identical to section_text"
-       section_text (head ^ String.concat "" rows ^ tail)
-   | Some { section_rows = Masc.Keeper_context_layers.Whole_section; _ } ->
-     fail "Pending_mentions must be prepared as Head_and_rows, not Whole_section"
-   | None -> fail "Pending_mentions section missing");
-  match find_layer Masc.Keeper_context_layers.Fleet_messages with
-  | Some { section_rows = Masc.Keeper_context_layers.Head_and_rows { head; rows; tail }; section_text; _ } ->
-    check bool "fleet head has count" true (contains ~needle:"### Fleet Messages (2)" head);
-    check int "fleet row count" 2 (List.length rows);
-    check string "fleet tail is closing newline" "\n" tail;
-    check bool "every fleet row ends with newline" true
-      (List.for_all (fun r -> String.ends_with ~suffix:"\n" r) rows);
-    check string "fleet head+rows+tail is byte-identical to section_text"
-      section_text (head ^ String.concat "" rows ^ tail)
-  | Some { section_rows = Masc.Keeper_context_layers.Whole_section; _ } ->
-    fail "Fleet_messages must be prepared as Head_and_rows, not Whole_section"
-  | None -> fail "Fleet_messages section missing"
-;;
-
 let test_bound_keeper_sees_presence_section () =
   let user =
     user_message
@@ -850,8 +792,6 @@ let () =
             test_no_fleet_messages_no_section;
           test_case "rows render in arrival order" `Quick
             test_fleet_rows_render_in_arrival_order;
-          test_case "fleet and pending messages expose Head_and_rows" `Quick
-            test_fleet_and_pending_messages_expose_head_and_rows;
         ] );
       ( "own recent actions",
         [

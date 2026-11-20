@@ -54,53 +54,6 @@ let unknown_binding_keys ~path ~binding_keys entries =
     entries
 ;;
 
-let validate_provider_slug ~path slug =
-  if slug = ""
-  then Error (error path "provider slug must not be empty")
-  else (
-    let len = String.length slug in
-    let rec check i =
-      if i >= len
-      then Ok ()
-      else (
-        let code = Char.code slug.[i] in
-        if code <= 0x20 || code = 0x7f
-        then
-          Error
-            (error path
-               (Printf.sprintf
-                  "provider slug %S must not contain whitespace or control characters"
-                  slug))
-        else check (i + 1))
-    in
-    check 0)
-;;
-
-let validate_provider_slug_list ~path ~key = function
-  | None -> Ok []
-  | Some [] ->
-    Error
-      (error (path ^ "." ^ key)
-         (Printf.sprintf "%s must not be empty; omit the key to leave routing unfiltered" key))
-  | Some slugs ->
-    let field_path = path ^ "." ^ key in
-    let rec loop seen acc = function
-      | [] -> Ok (List.rev acc)
-      | slug :: rest ->
-        (match validate_provider_slug ~path:field_path slug with
-         | Error _ as err -> err
-         | Ok () ->
-           let norm = String.lowercase_ascii slug in
-           if List.mem norm seen
-           then
-             Error
-               (error field_path
-                  (Printf.sprintf "%s must not contain duplicate provider slug %S" key slug))
-           else loop (norm :: seen) (slug :: acc) rest)
-    in
-    loop [] [] slugs
-;;
-
 let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml.t)
   : (Runtime_schema.binding, parse_error list) result
   =
@@ -158,23 +111,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
               (path ^ ".cache-retention")
               (Printf.sprintf "cache-retention must be \"5m\" or \"1h\"; got %S" raw)))
     | Error _ as e -> e
-  in
-  (* Upstream provider allow/deny lists (e.g. OpenRouter [provider.only] /
-     [provider.ignore]). Intentionally binding-level only so each model binding
-     declares its own vendor filter without provider-vs-binding precedence
-     ambiguity, and intentionally excludes [order]/[sort] to preserve sticky
-     routing. *)
-  let provider_only_result =
-    Result.bind
-      (typed_find "an array of strings" path tbl "provider-only"
-         (Otoml.get_array Otoml.get_string))
-      (validate_provider_slug_list ~path ~key:"provider-only")
-  in
-  let provider_ignore_result =
-    Result.bind
-      (typed_find "an array of strings" path tbl "provider-ignore"
-         (Otoml.get_array Otoml.get_string))
-      (validate_provider_slug_list ~path ~key:"provider-ignore")
   in
   let max_context_result =
     match typed_find "an integer" path tbl "max-context" Otoml.get_integer with
@@ -268,23 +204,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let* max_concurrent = max_concurrent_result in
   let* disable_parallel_tool_use = disable_parallel_tool_use_result in
   let* cache_retention = cache_retention_result in
-  let* provider_only = provider_only_result in
-  let* provider_ignore = provider_ignore_result in
-  let* () =
-    let ignored = List.map String.lowercase_ascii provider_ignore in
-    match
-      List.filter
-        (fun slug -> List.mem (String.lowercase_ascii slug) ignored)
-        provider_only
-    with
-    | [] -> Ok ()
-    | clashes ->
-      Error
-        (error (path ^ ".provider-only")
-           (Printf.sprintf
-              "provider-only and provider-ignore must not overlap (conflict: %s)"
-              (String.concat ", " clashes)))
-  in
   let* max_tokens = max_tokens_result in
   let* price_input = price_input_result in
   let* price_output = price_output_result in
@@ -303,8 +222,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; max_concurrent
     ; disable_parallel_tool_use
     ; cache_retention
-    ; provider_only
-    ; provider_ignore
     ; max_tokens
     ; price_input
     ; price_output

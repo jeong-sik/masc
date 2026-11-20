@@ -13,10 +13,10 @@ let operator_field_names =
   [ "overall_status"; "operator_action_required"; "operator_action_reasons"; "operator_actions" ]
 ;;
 
-(* The sections the rollup grades. The list says nothing about what the
-   response carries: the snapshot keeps every section, named here or not. *)
-let rolled_up_section_names =
-  [
+let cached_field_names =
+  operator_field_names
+  @ [
+    "overall_status_reasons";
     "keeper_fibers";
     "fd_observation";
     "fd_accountant";
@@ -52,7 +52,7 @@ let rolled_up_section_names =
   ]
 ;;
 
-let is_rolled_up name = List.exists (String.equal name) rolled_up_section_names
+let is_cached name = List.exists (String.equal name) cached_field_names
 
 (* The reason an operator sees when a section reports no [status_reasons]. The
    three keys are the ones sections use for it -- [blocker] on fleet safety,
@@ -161,9 +161,9 @@ let operator_summary ~sections ~runtime_startup_degradation
          end)
   in
   List.iter
-    (fun (component, json) -> if is_rolled_up component then note_status component json)
+    (fun (component, json) -> if is_cached component then note_status component json)
     sections;
-  (* Rolled up from its own argument: see the .mli. *)
+  (* Rolled up and not cached: see the .mli. *)
   note_status "runtime_startup_degradation" runtime_startup_degradation;
   status := Health_status.max_string !status keeper_config_schema_status;
   if Health_status.rank (Health_status.of_string keeper_config_schema_status) > 0

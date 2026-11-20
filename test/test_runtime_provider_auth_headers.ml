@@ -93,8 +93,6 @@ let runpod_binding =
   ; max_concurrent = None
   ; disable_parallel_tool_use = false
   ; cache_retention = None
-  ; provider_only = []
-  ; provider_ignore = []
   ; max_tokens = None
   ; price_input = None
   ; price_output = None
@@ -3616,103 +3614,6 @@ auth = "none"
     ; "openai/gpt-5.6-sol", "5m"
     ]
 
-let test_provider_routing_filter_requires_a_provider_contract () =
-  let parse_invalid ~label ~policy ~expected_path =
-    let toml =
-      Printf.sprintf
-        {|[providers.p]
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:1"
-[models.m]
-[p.m]
-%s
-|}
-        policy
-    in
-    match Runtime_toml.parse_string toml with
-    | Ok _ -> fail (label ^ " must be rejected")
-    | Error errors ->
-      check bool (label ^ " names " ^ expected_path) true
-        (List.exists
-           (fun (error : Runtime_toml.parse_error) ->
-              String.equal error.path expected_path)
-           errors)
-  in
-  parse_invalid ~label:"empty provider-only" ~policy:"provider-only = []"
-    ~expected_path:"p.m.provider-only";
-  parse_invalid ~label:"empty provider-ignore" ~policy:"provider-ignore = []"
-    ~expected_path:"p.m.provider-ignore";
-  parse_invalid ~label:"blank slug" ~policy:{|provider-only = [""]|}
-    ~expected_path:"p.m.provider-only";
-  parse_invalid ~label:"whitespace slug" ~policy:{|provider-only = ["alibaba us-east-1"]|}
-    ~expected_path:"p.m.provider-only";
-  parse_invalid ~label:"control-char slug" ~policy:{|provider-ignore = ["amazon\tbedrock"]|}
-    ~expected_path:"p.m.provider-ignore";
-  parse_invalid ~label:"duplicate slug case-insensitive"
-    ~policy:{|provider-only = ["alibaba/us-east-1", "Alibaba/US-EAST-1"]|}
-    ~expected_path:"p.m.provider-only";
-  parse_invalid ~label:"overlap case-insensitive"
-    ~policy:"provider-only = [\"Alibaba/us-east-1\"]\nprovider-ignore = [\"alibaba/us-east-1\"]"
-    ~expected_path:"p.m.provider-only";
-  parse_invalid ~label:"provider-order rejected as unknown key"
-    ~policy:{|provider-order = ["alibaba"]|}
-    ~expected_path:"p.m.provider-order";
-  parse_invalid ~label:"provider-sort rejected as unknown key"
-    ~policy:{|provider-sort = "price"|}
-    ~expected_path:"p.m.provider-sort";
-  (* OpenRouter accepts binding-level provider-only and provider-ignore (including
-     endpoint sub-tags) and threads them into Provider_config.t. *)
-  let or_cfg, or_binding =
-    parallel_policy_runtime ~provider_id:"openrouter"
-      ~protocol:"openai-compatible-http" ~model_id:"qwen/qwen3.8-max-0902"
-      ~policy:"provider-only = [\"alibaba/us-east-1\", \"deepinfra\"]\nprovider-ignore = [\"amazon-bedrock\"]"
-  in
-  (match provider_config_for_binding or_cfg or_binding with
-   | Ok pc ->
-     check (list string) "openrouter provider_only threaded"
-       [ "alibaba/us-east-1"; "deepinfra" ] pc.provider_only;
-     check (list string) "openrouter provider_ignore threaded"
-       [ "amazon-bedrock" ] pc.provider_ignore
-   | Error error -> fail ("openrouter provider filter rejected unexpectedly: " ^ error));
-  (* Non-supporting Chat Completions and Messages providers fail closed. *)
-  let glm_cfg, glm_binding =
-    parallel_policy_runtime ~provider_id:"glm-coding"
-      ~protocol:"openai-compatible-http" ~model_id:"glm-5.3"
-      ~policy:{|provider-ignore = ["amazon-bedrock"]|}
-  in
-  (match provider_config_for_binding glm_cfg glm_binding with
-   | Error error ->
-     check string "non-supporting chat provider refuses filter"
-       "binding glm-coding.probe declares provider-only/provider-ignore, but provider \"glm-coding\" has no catalog-declared provider routing filter contract"
-       error
-   | Ok _ -> fail "glm-coding silently accepted provider-ignore");
-  let claude_cfg, claude_binding =
-    parallel_policy_runtime ~provider_id:"claude"
-      ~protocol:"messages-http" ~model_id:"claude-fable-5"
-      ~policy:{|provider-only = ["anthropic"]|}
-  in
-  (match provider_config_for_binding claude_cfg claude_binding with
-   | Error error ->
-     check string "messages-http refuses filter"
-       "binding claude.probe declares provider-only/provider-ignore, but protocol messages-http cannot carry that request policy"
-       error
-   | Ok _ -> fail "messages-http silently accepted provider-only");
-  let catalog_bad_type = {|[[providers]]
-id = "fixture-provider"
-kind = "openai_compat"
-capabilities_base = "openrouter"
-base_url = "https://fixture.invalid"
-request_path = "/chat/completions"
-auth = "none"
-supports_provider_routing_filter = "true"
-|} in
-  match Llm_provider.Model_catalog.of_toml_string ~source:"routing-filter-type" catalog_bad_type with
-  | Error error ->
-    check string "provider contract rejects a string"
-      "provider entry \"fixture-provider\" field \"supports_provider_routing_filter\" expected bool"
-      error
-  | Ok _ -> fail "provider contract silently accepted a string"
-
 (* #37849. A config that names a provider reads bare rows only when that
    provider declares serves_bare_models. The runtime mirrors the Terminal-Bench
    anthropic lane: reasoning-effort = "high" and a capabilities block that keeps
@@ -4156,8 +4057,6 @@ let () =
             `Quick test_parallel_policy_requires_provider_contract
         ; test_case "cache retention requires a provider contract"
             `Quick test_cache_retention_requires_a_provider_contract
-        ; test_case "provider routing filter requires a provider contract"
-            `Quick test_provider_routing_filter_requires_a_provider_contract
         ; test_case "a declared provider reads bare rows only when it serves them"
             `Quick test_declared_provider_reads_bare_rows_only_when_it_serves_them
         ; test_case "the bench anthropic lane sends high with the embedded catalog"

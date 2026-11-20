@@ -14,35 +14,6 @@ let prompt_blocks { status; body } =
       | Some body -> [ Prompt_block_id.Recalled_memory, body ]
       | None -> [])
 
-let rendered_body_bytes { status = _; body } =
-  match body with
-  | Some body -> String.length body
-  | None -> 0
-
-(* Powers-of-two byte-scale measurement buckets for the rendered recall body
-   histogram. Schema only — imposes no size cap or deferral threshold. *)
-let rendered_body_bytes_upper_bounds =
-  [ 1_024.
-  ; 4_096.
-  ; 16_384.
-  ; 65_536.
-  ; 131_072.
-  ; 262_144.
-  ; 524_288.
-  ; 1_048_576.
-  ]
-
-let () =
-  Otel_metric_store.register_histogram_buckets
-    Keeper_metrics.(to_string MemoryRecallRenderedBodyBytes)
-    rendered_body_bytes_upper_bounds
-
-let record_rendered_body_bytes ~keeper_id prepared =
-  Otel_metric_store.observe_histogram
-    Keeper_metrics.(to_string MemoryRecallRenderedBodyBytes)
-    ~labels:[ "keeper", keeper_id ]
-    (Float.of_int (rendered_body_bytes prepared))
-
 type offered_body =
   | No_current_body
   | Offered_body of { turn_ref : Ids.Turn_ref.t; status : string; body : string }
@@ -159,13 +130,10 @@ let prepare_with ~judge ~read_facts ~keeper_id ~turn_ref ~memory_search_availabl
            unavailable Request_not_built
          | Ok (Turn.Off _ | Turn.Nothing_to_judge) -> None
          | Ok (Turn.Judged judged) ->
-           let prepared =
+           Some
              { status = Render.status ~memory_search_available ~turn_ref judged
              ; body = Render.body facts judged
-             }
-           in
-           record_rendered_body_bytes ~keeper_id prepared;
-           Some prepared)
+             })
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->

@@ -519,6 +519,9 @@ let main_eio_env_overrides overrides =
   let defaults =
     [ ("MASC_ADMIN_TOKEN", main_eio_test_admin_token)
     ; ("MASC_INTERNAL_MCP_TOKEN", "")
+    ; ("MASC_HTTP_BASE_URL", "")
+    ; ("MASC_HTTP_AUTH_STRICT", "false")
+    ; ("MASC_HOST", "127.0.0.1")
     ; ("XDG_CONFIG_HOME", Lazy.force spawned_config_home)
     ]
   in
@@ -5201,6 +5204,7 @@ let with_health_posture ~strict f =
    document it serves is dialled back over https; the cleartext listener keeps
    http (#50025). *)
 let test_openapi_servers_url_follows_the_admitted_authority () =
+  with_health_posture ~strict:false @@ fun () ->
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   let previous_startup = Server_startup_state.snapshot () in
   Fun.protect
@@ -5260,6 +5264,23 @@ let test_openapi_servers_url_follows_the_admitted_authority () =
          (String.starts_with ~prefix:"HTTP/1.1 200" tls);
        Alcotest.(check bool) "the TLS document is dialled over https at the default port" true
          (String_util.contains_substring tls "\"url\":\"https://127.0.0.1:443\""))
+
+let test_openapi_and_main_eio_env_ignore_shell_public_http_base_url () =
+  with_env "MASC_HTTP_BASE_URL" (Some "https://masc.example.org") @@ fun () ->
+  test_openapi_servers_url_follows_the_admitted_authority ();
+  let default_env = Array.to_list (main_eio_env_overrides []) in
+  Alcotest.(check bool)
+    "main_eio_env_overrides clears inherited MASC_HTTP_BASE_URL"
+    true
+    (List.mem "MASC_HTTP_BASE_URL=" default_env);
+  let explicit_env =
+    Array.to_list
+      (main_eio_env_overrides [ ("MASC_HTTP_BASE_URL", "https://explicit.example") ])
+  in
+  Alcotest.(check bool)
+    "main_eio_env_overrides preserves explicit MASC_HTTP_BASE_URL"
+    true
+    (List.mem "MASC_HTTP_BASE_URL=https://explicit.example" explicit_env)
 
 let test_mcp_transport_requires_explicit_readiness () =
   (* The body read below is the one a server that asks for no credential
@@ -7939,6 +7960,9 @@ let () =
             test_mcp_transport_requires_explicit_readiness;
           Alcotest.test_case "OpenAPI servers url follows the admitted authority" `Quick
             test_openapi_servers_url_follows_the_admitted_authority;
+          Alcotest.test_case
+            "OpenAPI and main_eio env overrides ignore shell MASC_HTTP_BASE_URL" `Quick
+            test_openapi_and_main_eio_env_ignore_shell_public_http_base_url;
           Alcotest.test_case
             "health says only the public probe without a credential under strict auth"
             `Quick

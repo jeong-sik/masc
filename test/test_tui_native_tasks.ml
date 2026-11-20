@@ -164,7 +164,7 @@ let test_real_chat_projection_preserves_flags_and_terminal_safety () =
   check bool "changed observation invalidates native layout" false
     (before_update.layout_entries == refreshed.layout_entries);
   check string "actual task row exposes patched status rather than stale cached text"
-    "worker · paused reported · terminal unobserved · backgrounded"
+    "worker · paused reported · end not reported · backgrounded"
     (List.nth refreshed.layout_entries 2).body
 
 let test_change_hint_poll () =

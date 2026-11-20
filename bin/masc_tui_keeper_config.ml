@@ -764,7 +764,7 @@ let string_list_value = function
 
 let int_override_value = function
   | Some `Null -> "default runtime window"
-  | Some (`Int value) -> Printf.sprintf "%d tokens" value
+  | Some (`Int value) -> Masc_tui_value.Count.grouped value ^ " tokens"
   | value -> string_value value
 
 let skill_selection_value = function

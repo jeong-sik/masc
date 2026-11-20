@@ -511,16 +511,18 @@ let label_of_event ~ko (event : Observer.event) =
   | Observer.Keeper_heartbeat _ -> say "하트비트" "heartbeat"
   | Observer.Keeper_tool_call c -> (
       let skill = is_skill_tool c.Observer.kt_tool in
+      let call_word = if skill then say "스킬 호출" "skill call" else say "도구 호출" "tool call" in
       match c.Observer.kt_disposition with
-      | Some disposition ->
-          let word =
-            match disposition with
-            | Ok disposition ->
-                Masc.Tui_decode.keeper_call_disposition_word ~ko disposition
-            | Error _ -> say "처리 결과 불명" "unknown disposition"
-          in
+      | Some (Ok disposition) ->
+          let word = Masc.Tui_decode.keeper_call_disposition_word ~ko disposition in
           if skill then say "스킬 \xc2\xb7 " "skill \xc2\xb7 " ^ word else word
-      | None -> if skill then say "스킬 호출" "skill call" else say "도구 호출" "tool call")
+      | Some (Error _) ->
+          (* A disposition the row carries but this build could not read is
+             the read-failed mark of RFC tui-one-screen-grammar 6.4 beside
+             the call, not a word in the disposition's place; the detail
+             keeps the reason. *)
+          call_word ^ " " ^ Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
+      | None -> call_word)
   | Observer.Keeper_tool_call_evidence_committed _ -> say "호출 기록" "call log"
   | Observer.Keeper_turn_complete _ -> say "턴 완료" "turn done"
   | Observer.Keeper_composite_changed _ -> "composite"

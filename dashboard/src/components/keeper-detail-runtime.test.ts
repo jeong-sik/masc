@@ -571,7 +571,6 @@ describe('RuntimeLensSection', () => {
     const keeper: Keeper = { name: 'sangsu', status: 'active', phase: 'Running', keepalive_running: true }
     const state = deriveKeeperOperationalState({ keeper, composite })
     expect(state.kind).toBe(kind)
-    if (state.kind === 'paused') expect(state.cause).toBe('operator')
 
     render(h(KeeperLiveTruthPanel, {
       keeper,

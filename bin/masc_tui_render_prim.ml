@@ -4369,7 +4369,7 @@ let build_change_context_lines ~cols (change_ctx : change_context) : string list
     ; Option.map (fun turn -> Printf.sprintf "Turn #%d" turn) change_ctx.ctx_turn
     ; (match change_ctx.ctx_pr, change_ctx.ctx_pr_slug with
        | Some pr, Some slug -> Some (Printf.sprintf "PR: %s#%d" slug (Masc_tui_pr_ref.number pr))
-       | Some pr, None -> Some (Printf.sprintf "PR: #%d (repository unknown)" (Masc_tui_pr_ref.number pr))
+       | Some pr, None -> Some (Printf.sprintf "PR: #%d (repository not reported)" (Masc_tui_pr_ref.number pr))
        | None, (Some _ | None) -> None)
     ; (match change_ctx.ctx_comment with
        | Some text when String.trim text <> "" -> Some ("Note: " ^ first_line_summary ~max_len:34 text)
@@ -5373,12 +5373,12 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     | Runtime_usage_scope.Conversation_cumulative ->
         non_request_token_lines "tokens counted across the conversation"
     | Runtime_usage_scope.Usage_scope_unavailable ->
-        non_request_token_lines "tokens reported with unknown scope"
+        non_request_token_lines "tokens reported without their scope"
     | Runtime_usage_scope.Per_request -> (
         match record.usage.input_provenance with
         | Some Turn_input_provenance.Context_estimate ->
             non_request_token_lines "estimated context tokens, not dispatched input"
-        | None -> non_request_token_lines "tokens with unknown input provenance"
+        | None -> non_request_token_lines "tokens reported without their input provenance"
         | Some Turn_input_provenance.Measured_request -> (
         match record.usage.input_tokens, record.context_window with
         (* A figure above MASC's effective shaping ceiling cannot become a
@@ -5455,7 +5455,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
       match record.usage.scope with
       | Runtime_usage_scope.Turn_total -> "client turn total  "
       | Runtime_usage_scope.Conversation_cumulative -> "cumulative  "
-      | Runtime_usage_scope.Usage_scope_unavailable -> "scope unknown  "
+      | Runtime_usage_scope.Usage_scope_unavailable -> "scope not reported  "
       | Runtime_usage_scope.Per_request -> ""
     in
     match parts with
@@ -5746,7 +5746,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             ^ Ansi.reset ]
       | Runtime_usage_scope.Usage_scope_unavailable, _ ->
           [ marker ^ Ansi.dim
-            ^ Printf.sprintf " #%-4d %s  usage scope unknown" recent.turn ts
+            ^ Printf.sprintf " #%-4d %s  usage scope not reported" recent.turn ts
             ^ Ansi.reset ]
       | Runtime_usage_scope.Conversation_cumulative, _ ->
           [ marker
@@ -5768,7 +5768,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
               ]
           | None ->
               [ marker ^ Ansi.dim
-                ^ Printf.sprintf " #%-4d %s  count %s; input provenance unknown"
+                ^ Printf.sprintf " #%-4d %s  count %s; input provenance not reported"
                     recent.turn ts (Inspector.format_tokens input)
                 ^ Ansi.reset ]
           | Some Turn_input_provenance.Measured_request -> (
@@ -5833,7 +5833,8 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                   | Inspector.Input_estimate n -> n
                   | Inspector.Input_invalid _ | Inspector.Input_unavailable -> minimum) inputs in
                 Chart.sparkline_marks ~min:minimum ~max:maximum scaled_inputs,
-                Printf.sprintf "scale %d–%d tokens" minimum maximum in
+                Printf.sprintf "scale %s–%s tokens"
+                  (Masc_tui_value.Count.grouped minimum) (Masc_tui_value.Count.grouped maximum) in
           (* A turn whose record carries no input count is a value read but
              not reported, and a negative count is a reading that failed:
              the 6.4 marks of RFC tui-one-screen-grammar, not [·] and [!]. *)
@@ -6765,9 +6766,9 @@ let context_inspector_content_lines ~cols state : context_pane_body =
              (runtime_quota_scope_label ~ko runtime) runtime.ro_provider
          ; say "연결 " "Connection " ^ runtime.ro_provider_id
          ; Printf.sprintf
-             (if ko then "설정 컨텍스트 %d 토큰 (%s) · 모델 %s"
-              else "Configured context %d tokens (%s) · model %s")
-             runtime.ro_effective_max_context
+             (if ko then "설정 컨텍스트 %s 토큰 (%s) · 모델 %s"
+              else "Configured context %s tokens (%s) · model %s")
+             (Masc_tui_value.Count.grouped runtime.ro_effective_max_context)
              (Tui_decode.runtime_context_source_label runtime.ro_max_context_source)
              runtime.ro_model
          ; say "마지막 관측 설정 · 위 캡처된 턴은 자체 런타임과 컨텍스트를 유지합니다"

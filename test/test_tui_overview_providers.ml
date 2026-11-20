@@ -216,7 +216,7 @@ let counts_of ?(runtimes = Types.Quota_unread) accounts =
   , ( counts.at_limit
     , match counts.exhausted with
       | Providers.Exhausted_accounts count -> Some count
-      | Providers.Exhausted_unknown -> None ) )
+      | Providers.Exhausted_unknown _ -> None ) )
 
 let counts_t = pair (pair int int) (pair int (option int))
 
@@ -259,7 +259,7 @@ let test_section_draws_one_line_per_window () =
      , ( counts.at_limit
        , match counts.exhausted with
          | Providers.Exhausted_accounts count -> Some count
-         | Providers.Exhausted_unknown -> None ) ));
+         | Providers.Exhausted_unknown _ -> None ) ));
   let groups =
     Providers.plan ~now ~runtimes windows.puws_accounts
   in

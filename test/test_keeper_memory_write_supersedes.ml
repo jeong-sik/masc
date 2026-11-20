@@ -207,6 +207,11 @@ let test_supersede_replaces_the_earlier_claim () =
   let meta = make_meta "supersede-a" in
   let keeper_id = meta.name in
   let first_id = seed env meta "position: stage 1, checkpoint 3" in
+  let first_seen_before =
+    match snapshot ~keepers_dir:env.keepers_dir ~keeper_id with
+    | Some { facts = [ first ]; _ } -> first.first_seen
+    | Some _ | None -> Alcotest.fail "expected the seeded fact alone"
+  in
   let lines_before = List.length (commits env ~keeper_id) in
   let second = write env meta ~supersedes:first_id "position: stage 2, checkpoint 1" in
   check_ok "superseding write" second;
@@ -230,11 +235,11 @@ let test_supersede_replaces_the_earlier_claim () =
   (match snapshot ~keepers_dir:env.keepers_dir ~keeper_id with
    | Some { facts = [ successor ]; updated_at; _ } ->
      Alcotest.(check (float 0.))
-       "the successor's first_seen is the commit that wrote it"
-       updated_at
+       "the successor is first seen when the fact it replaces was"
+       first_seen_before
        successor.first_seen;
      Alcotest.(check (float 0.))
-       "and so is its last_seen"
+       "its last_seen is the commit that wrote it"
        updated_at
        successor.last_seen
    | Some _ | None -> Alcotest.fail "expected exactly one current fact");

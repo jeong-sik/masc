@@ -3,6 +3,7 @@
    test owns, and its visit answers what the test scripted. *)
 
 open Alcotest
+open Masc
 module Walk = Exact_lane_walk
 module Provider_admission = Llm_provider.Provider_admission
 module Slot_scheduler = Llm_provider.Slot_scheduler

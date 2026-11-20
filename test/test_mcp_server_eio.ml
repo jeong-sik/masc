@@ -4382,24 +4382,49 @@ let test_handle_request_keeper_memory_access_and_readership () =
         (List.length filtered_dirty.change.removed);
       Alcotest.(check int) "invalidated drops withheld direct and derived" 0
         (List.length filtered_dirty.change.invalidated);
-      (* 5. Memory health returns closed G16 tokens/counts and no free-text detail/rejection/rejected_path. *)
-      let health_json =
-        Yojson.Safe.from_string
-          (resource_text_exn
-             (read_via_protocol ~sender:(admit beta_tok) ~auth_token:beta_tok
-                "masc://keepers/alpha/memory/health"))
+      (* 5. Memory health denies cross-keeper workers (-32007), allows matching keeper and admin,
+            and returns closed G16 tokens/counts without free-text detail/rejection/rejected_path. *)
+      let beta_health_resp =
+        read_via_protocol ~sender:(admit beta_tok) ~auth_token:beta_tok
+          "masc://keepers/alpha/memory/health"
       in
-      Alcotest.(check string) "health schema" "keeper.memory.health.v1"
-        Yojson.Safe.Util.(health_json |> member "schema" |> to_string);
-      Alcotest.(check string) "health ordinary status" "readable"
-        Yojson.Safe.Util.(health_json |> member "ordinary" |> member "status" |> to_string);
-      let health_text = Yojson.Safe.to_string health_json in
-      Alcotest.(check bool) "no detail field on health" false
-        (String_util.contains_substring health_text "\"detail\"");
-      Alcotest.(check bool) "no rejection field on health" false
-        (String_util.contains_substring health_text "\"rejection\"");
-      Alcotest.(check bool) "no rejected_path field on health" false
-        (String_util.contains_substring health_text "\"rejected_path\""))
+      Alcotest.(check int) "non-matching worker gets Insufficient_scope (-32007) on health"
+        (-32007) (error_code_exn beta_health_resp);
+      List.iter (fun (label, tok) ->
+        let health_json =
+          Yojson.Safe.from_string
+            (resource_text_exn
+               (read_via_protocol ~sender:(admit tok) ~auth_token:tok
+                  "masc://keepers/alpha/memory/health"))
+        in
+        Alcotest.(check string) (label ^ ": health schema") "keeper.memory.health.v1"
+          Yojson.Safe.Util.(health_json |> member "schema" |> to_string);
+        Alcotest.(check string) (label ^ ": health ordinary status") "readable"
+          Yojson.Safe.Util.(health_json |> member "ordinary" |> member "status" |> to_string);
+        let health_text = Yojson.Safe.to_string health_json in
+        Alcotest.(check bool) (label ^ ": no detail field on health") false
+          (String_util.contains_substring health_text "\"detail\"");
+        Alcotest.(check bool) (label ^ ": no rejection field on health") false
+          (String_util.contains_substring health_text "\"rejection\"");
+        Alcotest.(check bool) (label ^ ": no rejected_path field on health") false
+          (String_util.contains_substring health_text "\"rejected_path\""))
+        [ "matching keeper", alpha_tok; "admin", admin_tok ];
+      (* 6. Undecodable/unreadable errors on keeper/memory scrub free-text host paths/parser details. *)
+      let ordinary_path = Memory_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha" in
+      Fs_compat.save_file ordinary_path "{bad /secret/host/path/sentinel";
+      let bad_mem_resp =
+        read_via_protocol ~sender:(admit alpha_tok) ~auth_token:alpha_tok
+          "masc://keepers/alpha/memory"
+      in
+      Alcotest.(check int) "undecodable keeper memory returns Internal_error"
+        (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Internal_error)
+        (error_code_exn bad_mem_resp);
+      Alcotest.(check string) "undecodable keeper memory uses closed message"
+        "keeper ordinary memory snapshot undecodable"
+        Yojson.Safe.Util.(bad_mem_resp |> member "error" |> member "message" |> to_string);
+      Alcotest.(check bool) "undecodable error leaks no sentinel host path or detail" false
+        (String_util.contains_substring (Yojson.Safe.to_string bad_mem_resp)
+           "/secret/host/path/sentinel"))
 
 let test_handle_request_resources_subscribe_requires_session () =
   Eio_main.run @@ fun env ->

@@ -408,30 +408,41 @@ let filter_ordinary_snapshot_for_reader
     { snap with facts = surviving_facts; change }, withheld_count)
 ;;
 
+let authorize_keeper_memory_caller ~resource_label ~caller ~keeper =
+  match caller with
+  | Operator_admin -> Ok ()
+  | Anonymous_reader ->
+    Error (Mcp_error_code.Auth_error, resource_label ^ " requires authentication")
+  | Authenticated_reader { agent_name; board_reader = _ } ->
+    if String.equal agent_name keeper
+    then Ok ()
+    else
+      Error
+        ( Mcp_error_code.Insufficient_scope
+        , resource_label ^ " requires admin permission or matching keeper identity" )
+;;
+
 let read_keeper_memory_inputs_blocking ~config ~caller ~keeper =
   let base_path = config.Workspace.base_path in
   let reader_res =
-    match caller with
-    | Operator_admin -> Ok Masc_board_handlers.Board_access.Operator
-    | Anonymous_reader ->
-      Error (Mcp_error_code.Auth_error, "Keeper memory resource requires authentication")
-    | Authenticated_reader { agent_name; board_reader } ->
-      if not (String.equal agent_name keeper)
-      then
-        Error
-          ( Mcp_error_code.Insufficient_scope
-          , "Keeper memory resource requires admin permission or matching keeper identity" )
-      else (
-        match Keeper_meta_store.read_effective_meta_presence config keeper with
-        | Ok (Keeper_meta_store.Meta_present meta) ->
-          (match board_reader with
-           | Masc_board_handlers.Board_access.Anonymous ->
-             Ok Masc_board_handlers.Board_access.Anonymous
-           | Masc_board_handlers.Board_access.Named _
-           | Masc_board_handlers.Board_access.Operator ->
-             Ok (Keeper_board_audience.reader_for_keeper meta))
-        | Ok (Keeper_meta_store.Meta_absent | Keeper_meta_store.Meta_not_current _) | Error _ ->
-          Error (Mcp_error_code.Insufficient_scope, "Keeper readership metadata unavailable"))
+    match authorize_keeper_memory_caller ~resource_label:"Keeper memory resource" ~caller ~keeper with
+    | Error _ as err -> err
+    | Ok () ->
+      (match caller with
+       | Operator_admin -> Ok Masc_board_handlers.Board_access.Operator
+       | Anonymous_reader ->
+         Error (Mcp_error_code.Auth_error, "Keeper memory resource requires authentication")
+       | Authenticated_reader { agent_name = _; board_reader } ->
+         (match Keeper_meta_store.read_effective_meta_presence config keeper with
+          | Ok (Keeper_meta_store.Meta_present meta) ->
+            (match board_reader with
+             | Masc_board_handlers.Board_access.Anonymous ->
+               Ok Masc_board_handlers.Board_access.Anonymous
+             | Masc_board_handlers.Board_access.Named _
+             | Masc_board_handlers.Board_access.Operator ->
+               Ok (Keeper_board_audience.reader_for_keeper meta))
+          | Ok (Keeper_meta_store.Meta_absent | Keeper_meta_store.Meta_not_current _) | Error _ ->
+            Error (Mcp_error_code.Insufficient_scope, "Keeper readership metadata unavailable")))
   in
   match reader_res with
   | Error _ as err -> err
@@ -446,13 +457,16 @@ let read_keeper_memory_inputs_blocking ~config ~caller ~keeper =
     else (
       match ordinary with
       | Keeper_memory_os_current.Undecodable { rejection } ->
-        Error (Mcp_error_code.Internal_error, "keeper ordinary memory undecodable: " ^ rejection)
+        Log.Server.warn "keeper ordinary memory undecodable (%s): %s" keeper rejection;
+        Error (Mcp_error_code.Internal_error, "keeper ordinary memory snapshot undecodable")
       | Keeper_memory_os_current.Io_unreadable { detail } ->
-        Error (Mcp_error_code.Internal_error, "keeper ordinary memory unreadable: " ^ detail)
+        Log.Server.warn "keeper ordinary memory unreadable (%s): %s" keeper detail;
+        Error (Mcp_error_code.Internal_error, "keeper ordinary memory snapshot unreadable")
       | (No_snapshot | Readable _) as ordinary_ok ->
         (match source_bound with
          | Error detail ->
-           Error (Mcp_error_code.Internal_error, "keeper source memory unreadable: " ^ detail)
+           Log.Server.warn "keeper source memory unreadable (%s): %s" keeper detail;
+           Error (Mcp_error_code.Internal_error, "keeper source-bound memory snapshot unreadable")
          | Ok source_opt -> Ok (Some (reader, ordinary_ok, source_opt))))
 ;;
 
@@ -460,15 +474,9 @@ let read_keeper_memory_json ~config ~caller ~keeper =
   match validate_keeper_name keeper with
   | Error err -> Error err
   | Ok () ->
-    (match caller with
-     | Anonymous_reader ->
-       Error (Mcp_error_code.Auth_error, "Keeper memory resource requires authentication")
-     | Authenticated_reader { agent_name; board_reader = _ }
-       when not (String.equal agent_name keeper) ->
-       Error
-         ( Mcp_error_code.Insufficient_scope
-         , "Keeper memory resource requires admin permission or matching keeper identity" )
-     | Operator_admin | Authenticated_reader _ ->
+    (match authorize_keeper_memory_caller ~resource_label:"Keeper memory resource" ~caller ~keeper with
+     | Error err -> Error err
+     | Ok () ->
        (match
           run_blocking_resource_result (fun () ->
             read_keeper_memory_inputs_blocking ~config ~caller ~keeper)
@@ -487,6 +495,9 @@ let read_keeper_memory_json ~config ~caller ~keeper =
             | Keeper_memory_os_current.Undecodable _
             | Keeper_memory_os_current.Io_unreadable _ -> `Null, 0
           in
+          (* [Keeper_memory_source_current.fact] binds only to [file_source],
+             never a Board basis, so Board readership filtering applies solely
+             to [ordinary] facts. *)
           let source_json =
             match source_opt with
             | None -> `Null
@@ -535,10 +546,12 @@ let read_keeper_memory_health_json ~base_path ~caller ~keeper =
   match validate_keeper_name keeper with
   | Error err -> Error err
   | Ok () ->
-    (match caller with
-     | Anonymous_reader ->
-       Error (Mcp_error_code.Auth_error, "Keeper memory health resource requires authentication")
-     | Operator_admin | Authenticated_reader _ ->
+    (match
+       authorize_keeper_memory_caller
+         ~resource_label:"Keeper memory health resource" ~caller ~keeper
+     with
+     | Error err -> Error err
+     | Ok () ->
        run_blocking_resource_result (fun () ->
          let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
          let ordinary = Keeper_memory_os_current.read_classified ~keepers_dir ~keeper_id:keeper in

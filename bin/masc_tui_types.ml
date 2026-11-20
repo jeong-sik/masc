@@ -28932,12 +28932,9 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now
               snapshot.scs_observed_at in
           let freshness =
-            if kept
+            if failed
             then [fact ~label:(say "이전 관측 " "retained ") Facts.Plain
-                    (observed
-                     ^ if failed then say "/갱신 실패" "/refresh failed"
-                       else "/" ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
-                            ^ say "갱신 중" "refreshing")]
+                    (observed ^ say "/갱신 실패" "/refresh failed")]
             else [] in
           let partial =
             if snapshot.scs_truncated then [fact Facts.Plain (say "일부 목록" "partial list")]

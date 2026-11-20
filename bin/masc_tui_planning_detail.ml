@@ -882,13 +882,4 @@ let timeline ~ko ~now ~width ~goal_id
         let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
         [ { tone = Active; text = "  " ^ mark ^ " " ^ (text "조회 중" "loading") } ]
   in
-  let pending =
-    if not (Masc_tui_fetched.in_flight loaded) then []
-    else
-      let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-      match view with
-      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ->
-          [ { tone = Active; text = "  " ^ mark ^ " " ^ (text "갱신 중 · 이전 관측" "refreshing; previous observation") } ]
-      | Masc_tui_fetched.Failed _ -> [ { tone = Active; text = "  " ^ mark ^ " " ^ (text "재조회 중 · 이전 실패 유지" "retrying; previous failure remains") } ]
-      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
-  ({ tone = Quiet; text = "" } :: header :: (pending @ rows))
+  ({ tone = Quiet; text = "" } :: header :: rows)

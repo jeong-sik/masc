@@ -239,19 +239,11 @@ let capabilities_base_by_identity_kind_field ~entry_id ~identity_kinds toml =
                       entry_id
                       raw_kind)
                | base ->
-                 let normalized = String.lowercase_ascii (String.trim base) in
-                 if not (String.equal base (String.trim base))
-                 then
-                   Error
-                     (Printf.sprintf
-                        "provider entry %S capability-base wire %S must not be padded"
-                        entry_id
-                        raw_kind)
-                 else match Capability_preset.of_string normalized with
-                   | None -> Error (Printf.sprintf
-                       "provider entry %S capability-base wire %S has unknown base %S"
-                       entry_id raw_kind base)
-                   | Some preset -> loop (kind :: seen) ((kind, preset) :: acc) rest))
+                 (match Capability_preset.of_string base with
+                  | None -> Error (Printf.sprintf
+                      "provider entry %S capability-base wire %S has unknown base %S"
+                      entry_id raw_kind base)
+                  | Some preset -> loop (kind :: seen) ((kind, preset) :: acc) rest)))
        in
        loop [] [] pairs)
 ;;
@@ -304,7 +296,7 @@ let parse_entry provider_toml =
     capabilities_base_by_identity_kind_field ~entry_id:id ~identity_kinds provider_toml
   in
   let* capability_policy =
-    match String.lowercase_ascii raw_capabilities_base, by_identity_kind with
+    match raw_capabilities_base, by_identity_kind with
     | "models_only", [] -> Ok Models_only
     | "models_only", _ :: _ -> Error (Printf.sprintf
         "provider entry %S declares models_only and cannot grant provider-wide wire capability overrides" id)

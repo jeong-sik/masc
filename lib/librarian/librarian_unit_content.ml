@@ -164,15 +164,25 @@ let messages ~line ~session_dir (slices : Keeper_turn_log.slice list) =
   |> Result.map List.rev
 ;;
 
-(* The segment's conversation from the one record that holds it (§5.1):
-   the checkpoint's messages, or the official-client files' rows. *)
-let conversation stores ~line ~(through : Keeper_turn_log.mark) : Librarian_unread.record -> _ = function
-  | Checkpoint slices -> messages ~line ~session_dir:(stores.session_dir ~session:through.trace) slices
+(* The segment's conversation from the record that holds it (§5.3). *)
+let conversation stores ~line ~(through : Keeper_turn_log.mark) : Librarian_unread.record -> _ =
+  let checkpoint slices = messages ~line ~session_dir:(stores.session_dir ~session:through.trace) slices in
+  let official = stores.session_dir ~session:through.session in
+  let rows file range = official_rows (Keeper_turn_fragments.path ~session_dir:official file) file range in
+  function
+  | Checkpoint { slices; internal } ->
+    let* messages = checkpoint slices in
+    let* internal = rows Internal internal in
+    Ok (messages @ [ internal ])
   | Official_files { history; internal } ->
-    let official = stores.session_dir ~session:through.session in
-    let* history = official_rows (Keeper_turn_fragments.path ~session_dir:official Main) Main history in
-    let* internal = official_rows (Keeper_turn_fragments.path ~session_dir:official Internal) Internal internal in
+    let* history = rows Main history in
+    let* internal = rows Internal internal in
     Ok [ history; internal ]
+  | Every_record { slices; history; internal } ->
+    let* messages = checkpoint slices in
+    let* history = rows Main history in
+    let* internal = rows Internal internal in
+    Ok (messages @ [ history; internal ])
 ;;
 
 (* One segment's items in the order {!Librarian_unit} gives: chat rows,

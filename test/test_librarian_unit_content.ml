@@ -100,6 +100,7 @@ let external_item preview : Masc.Keeper_external_attention.item =
    a bundle of three messages, two history rows and one internal row. *)
 type stored =
   { stores : Content.stores
+  ; session : Masc.Keeper_context_core.session_context
   ; bundle : Objects.digest
   ; session_dir : string
   ; history : int list (** The history file's end after each row. *)
@@ -158,6 +159,7 @@ let with_stores f =
     [ "e1"; "e2" ];
   f
     { stores
+    ; session
     ; bundle
     ; session_dir
     ; history = [ after_q1; after_a1 ]
@@ -229,6 +231,11 @@ let read_text stores span =
 ;;
 
 let files ?(history = range 0 0) ?(internal = range 0 0) () = Unread.Official_files { history; internal }
+let checkpoint ?(internal = range 0 0) slices = Unread.Checkpoint { slices; internal }
+
+let every ?(history = range 0 0) ?(internal = range 0 0) slices =
+  Unread.Every_record { slices; history; internal }
+;;
 
 let segment ?(record = files ()) ?(chat = range 0 0) ?(external_rows = range 0 0) () : Unread.segment =
   { record; chat; external_rows }
@@ -251,7 +258,7 @@ let test_each_store_in_order () =
       ~chat:(range 0 after_c1) ~external_rows:(range 0 1) ()
   in
   let own =
-    segment ~record:(Checkpoint [ slice stored.bundle 1 2 ]) ~chat:(range after_c1 after_c2)
+    segment ~record:(checkpoint [ slice stored.bundle 1 2 ]) ~chat:(range after_c1 after_c2)
       ~external_rows:(range 1 2) ()
   in
   let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
@@ -301,7 +308,7 @@ let test_what_a_store_does_not_hold () =
   in
   check (list string) "the checkpoint's messages that are there, then what is not"
     ([ "reset 0 external e2"; "reset 1 message first" ] @ chat_and_external @ [ "missing bundle 0+1" ])
-    (read (Checkpoint [ slice absent 0 1; slice stored.bundle 0 1 ]));
+    (read (checkpoint [ slice absent 0 1; slice stored.bundle 0 1 ]));
   check (list string) "the files' rows that are there, then what is not"
     (("reset 0 external e2" :: chat_and_external)
      @ [ Printf.sprintf "missing history bytes %d-%d" after_a1 (after_a1 + 40)
@@ -321,12 +328,43 @@ let test_a_bundle_that_does_not_read () =
   append_raw (Masc.Keeper_checkpoint_object_store.path ~session_dir:stored.session_dir changed) "other bytes";
   let reading slices =
     read_text stored.stores
-      (span (Announced_reset { cause = Recovered; segment = segment ~record:(Checkpoint slices) () }))
+      (span (Announced_reset { cause = Recovered; segment = segment ~record:(checkpoint slices) () }))
   in
   check (list string) "a bundle whose bytes changed" [ "content of 100 unreadable" ]
     (reading [ slice changed 0 1 ]);
   check (list string) "a slice past the bundle's messages" [ "content of 100 unreadable" ]
     (reading [ slice stored.bundle 2 2 ])
+;;
+
+(* §5.3: each record reads what its turn left nowhere else. One turn on
+   Agent Core reads its checkpoint and the internal file, which holds only
+   the reply the checkpoint does not replay, and not the main file, which
+   says what the checkpoint says. One turn on an official client reads both
+   files, its tool observation among them. A stretch that can hold several
+   turns reads all three. *)
+let test_each_record_reads_what_only_it_holds () =
+  with_stores
+  @@ fun stored ->
+  let history = range 0 (size (Fragments.path ~session_dir:stored.session_dir Main)) in
+  let slices = [ slice stored.bundle 0 3 ] in
+  let read record =
+    read_text stored.stores
+      (span (Announced_reset { cause = Recovered; segment = segment ~record () }))
+  in
+  let messages = [ "reset 0 message first"; "reset 1 message second"; "reset 2 message third" ] in
+  check (list string) "one turn on Agent Core: its checkpoint, then the reply it does not replay"
+    (messages @ [ "reset 3 internal noted" ])
+    (read (checkpoint ~internal:(range 0 stored.internal) slices));
+  History.persist_tool_observation ~keeper_name ~turn_ref stored.session ~tool_name:"masc_tasks"
+    ~outcome:Tool_result.Ok;
+  let internal = range 0 (size stored.internal_path) in
+  check (list string) "one turn on an official client: both files"
+    [ "reset 0 history q1"; "reset 1 history a1"; "reset 2 internal noted"; "reset 3 internal tool masc_tasks" ]
+    (read (files ~history ~internal ()));
+  check (list string) "a stretch: every record"
+    (messages
+     @ [ "reset 3 history q1"; "reset 4 history a1"; "reset 5 internal noted"; "reset 6 internal tool masc_tasks" ])
+    (read (every ~history ~internal slices))
 ;;
 
 let () =
@@ -335,6 +373,7 @@ let () =
       , [ test_case "each store in order" `Quick test_each_store_in_order
         ; test_case "what a store does not hold" `Quick test_what_a_store_does_not_hold
         ; test_case "a bundle that does not read" `Quick test_a_bundle_that_does_not_read
+        ; test_case "each record reads what only it holds" `Quick test_each_record_reads_what_only_it_holds
         ] )
     ]
 ;;

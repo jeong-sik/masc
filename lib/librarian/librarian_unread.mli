@@ -18,28 +18,47 @@
     holds the end session's files from their first byte, since no unit
     before it covered them. The chat and external stores are the Keeper's
     own and are not split by session. *)
-(** Where a segment's conversation is recorded (§5.1).
+(** Where a segment's conversation is recorded (§5.3).
 
     A turn on Agent Core saves the messages it closed in its checkpoint. Its
-    context runtime also writes the same exchange to the session's history
-    files, so in that segment those files say again what the messages say.
-    A turn on an official client saves no Agent Core checkpoint
-    ({!Runtime_execution.checkpoint_owner}), and its history files are its
-    record. A segment is read from one of the two: the turn log line says
-    which, by whether a slice takes a message. *)
+    context runtime also writes to the session's history files
+    ({!Keeper_context_core_history.history_path_for_source}): a direct turn's
+    user and assistant messages to the main file, which the checkpoint holds
+    again, and an internal turn's reply to the internal file, which the
+    checkpoint never replays ({!Keeper_replay_checkpoint}). A turn on an
+    official client saves no Agent Core checkpoint
+    ({!Runtime_execution.checkpoint_owner}). Its history files are its record,
+    and only its turn writes tool observations to the internal file.
+
+    One turn's segment ([own]) is read from the record its slices name. The
+    stretch before a turn opens ([unattributed]) and the stretch a reset
+    closes can hold several turns, among them turns whose lines were not
+    written, and a slice does not name its turn. There a history row cannot
+    be told from the messages that say it again, so every record is read. *)
 type record =
-  | Checkpoint of Keeper_turn_log.slice list
-  (** A slice takes a message. These are the Agent Core messages, as the
-      line names them. The history files' bytes in the segment are not
-      read. *)
+  | Checkpoint of
+      { slices : Keeper_turn_log.slice list
+      ; internal : Librarian_unit.range
+      }
+  (** One turn, and a slice takes a message. These are the Agent Core
+      messages, as the line names them, then the internal file's rows: on
+      Agent Core they are the replies the checkpoint does not replay. The main
+      file says what the messages say and is not read. *)
   | Official_files of
       { history : Librarian_unit.range
       ; internal : Librarian_unit.range
       (** Bytes of the official-client files of the session the unit ends in. *)
       }
-  (** No slice takes a message: a turn on an official client, or a turn on
-      Agent Core that closed no message and left its words only in these
-      files. *)
+  (** One turn, and no slice takes a message: a turn on an official client,
+      or a turn on Agent Core that closed no message and left its words only
+      in these files. *)
+  | Every_record of
+      { slices : Keeper_turn_log.slice list
+      ; history : Librarian_unit.range
+      ; internal : Librarian_unit.range
+      }
+  (** A stretch that can hold several turns: the Agent Core messages, then
+      every row of both files. A message can show twice; none is left out. *)
 
 type segment =
   { record : record

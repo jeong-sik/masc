@@ -3,9 +3,17 @@ module Store = Keeper_turn_log_store
 module Scan = Private_jsonl_scan
 
 type record =
-  | Checkpoint of Log.slice list
+  | Checkpoint of
+      { slices : Log.slice list
+      ; internal : Librarian_unit.range
+      }
   | Official_files of
       { history : Librarian_unit.range
+      ; internal : Librarian_unit.range
+      }
+  | Every_record of
+      { slices : Log.slice list
+      ; history : Librarian_unit.range
       ; internal : Librarian_unit.range
       }
 
@@ -74,8 +82,10 @@ let non_empty ({ from; until } : Librarian_unit.range) = until > from
 let takes_a_message slices = List.exists (fun ({ take; _ } : Log.slice) -> take > 0) slices
 
 let record_has_items = function
-  | Checkpoint slices -> takes_a_message slices
+  | Checkpoint { slices; internal } -> takes_a_message slices || non_empty internal
   | Official_files { history; internal } -> non_empty history || non_empty internal
+  | Every_record { slices; history; internal } ->
+    takes_a_message slices || non_empty history || non_empty internal
 ;;
 
 let segment_has_items { record; chat; external_rows } =
@@ -122,17 +132,25 @@ let ranges ~(from : Log.mark) ~(through : Log.mark) =
   }
 ;;
 
-(* §5.1: a segment whose slices take a message is read from the checkpoint,
-   and one whose slices take none from the official-client files. *)
-let segment_of ~slices ({ history; internal; chat; external_rows } : ranges) =
+(* §5.3: one turn's segment is read from its checkpoint when a slice takes
+   a message, with the internal file's replies the checkpoint does not
+   replay, and from the official-client files when none does. *)
+let one_turn ~slices ({ history; internal; chat; external_rows } : ranges) =
   { record =
-      (if takes_a_message slices then Checkpoint slices else Official_files { history; internal })
+      (if takes_a_message slices
+       then Checkpoint { slices; internal }
+       else Official_files { history; internal })
   ; chat
   ; external_rows
   }
 ;;
 
-let whole ~from ~through slices = segment_of ~slices (ranges ~from ~through)
+(* §5.3: a stretch that can hold several turns is read from every record. *)
+let stretch ~slices ({ history; internal; chat; external_rows } : ranges) =
+  { record = Every_record { slices; history; internal }; chat; external_rows }
+;;
+
+let whole ~from ~through slices = stretch ~slices (ranges ~from ~through)
 
 (* One store's range cut at [at], kept inside it. *)
 let cut ({ from; until } : Librarian_unit.range) at : Librarian_unit.range * Librarian_unit.range =
@@ -153,13 +171,13 @@ let turn_segments ~from ~(through : Log.mark) ~(baseline : Log.mark) ~reset_sinc
   let internal_before, internal_after = official all.internal baseline.internal_bytes in
   let chat_before, chat_after = at_baseline all.chat baseline.chat_bytes in
   let external_before, external_after = at_baseline all.external_rows baseline.external_rows in
-  ( segment_of ~slices:unattributed
+  ( stretch ~slices:unattributed
       { history = history_before
       ; internal = internal_before
       ; chat = chat_before
       ; external_rows = external_before
       }
-  , segment_of ~slices:own
+  , one_turn ~slices:own
       { history = history_after
       ; internal = internal_after
       ; chat = chat_after

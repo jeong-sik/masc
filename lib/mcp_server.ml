@@ -271,8 +271,27 @@ let resource_template_of_entry (entry : Mcp_surface_toml.template_entry) =
     ~title:entry.title ~description:entry.description
     ~mime_type:entry.mime_type ()
 
+let living_memory_resource_templates : mcp_resource_template list =
+  [ make_resource_template
+      ~uri_template:"masc://keepers/{keeper}/memory"
+      ~name:"Keeper Living Memory"
+      ~title:"Keeper Living Memory"
+      ~description:"Readership-filtered living memory snapshot for a Keeper"
+      ~mime_type:"application/json"
+      ()
+  ; make_resource_template
+      ~uri_template:"masc://keepers/{keeper}/memory/health"
+      ~name:"Keeper Memory Health"
+      ~title:"Keeper Memory Health"
+      ~description:
+        "Closed-status living memory store health diagnostics for a Keeper"
+      ~mime_type:"application/json"
+      ()
+  ]
+
 let resource_templates : mcp_resource_template list =
   List.map resource_template_of_entry Mcp_surface_toml.resource_templates
+  @ living_memory_resource_templates
 
 (** Parse a masc:// resource URI into (resource_id, Uri.t) *)
 let parse_masc_resource_uri uri_str =

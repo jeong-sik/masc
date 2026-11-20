@@ -192,7 +192,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
          let response =
            Masc.Mcp_server_eio_protocol.handle_request ~sender:Masc.Mcp_server_eio_types.Unadmitted
              ~handle_call_tool_eio
-             ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+             ~handle_read_resource_eio:(fun ?caller:_ _state _id _params -> `Assoc [])
              ~clock:(Eio.Stdenv.clock env)
              ~sw
              state
@@ -216,7 +216,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
          let response =
            Masc.Mcp_server_eio_protocol.handle_request ~sender:Masc.Mcp_server_eio_types.Unadmitted
              ~handle_call_tool_eio
-             ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+             ~handle_read_resource_eio:(fun ?caller:_ _state _id _params -> `Assoc [])
              ~clock:(Eio.Stdenv.clock env) ~sw state
              (request (`Assoc
                  [ "_meta", meta; "name", `String "masc_status"; key, value ]))
@@ -230,7 +230,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
       (fun (key, value) ->
          ignore (Masc.Mcp_server_eio_protocol.handle_request ~sender:Masc.Mcp_server_eio_types.Unadmitted
            ~handle_call_tool_eio
-           ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+           ~handle_read_resource_eio:(fun ?caller:_ _state _id _params -> `Assoc [])
            ~clock:(Eio.Stdenv.clock env) ~sw state
            (request (`Assoc [ "name", `String "masc_status"; key, value ]))))
       [ "requestState", `String "legacy-extension"; "inputResponses", `Assoc [] ];
@@ -567,7 +567,7 @@ let test_admitted_protocol_selects_structured_content () =
       Masc.Mcp_server_eio_protocol.handle_request
         ~sender:Masc.Mcp_server_eio_types.Unadmitted
         ~handle_call_tool_eio
-        ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+        ~handle_read_resource_eio:(fun ?caller:_ _state _id _params -> `Assoc [])
         ~clock:(Eio.Stdenv.clock env)
         ~sw
         state

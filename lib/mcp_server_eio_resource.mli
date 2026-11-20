@@ -10,6 +10,17 @@
     \[public_tool_help_schemas\] (delegate to {!Config.visible_tool_schemas})
     stay private — none have external callers. *)
 
+type resource_caller =
+  | Operator_admin
+  | Authenticated_reader of
+      { agent_name : string
+      ; board_reader : Masc_board_handlers.Board_access.reader
+      }
+  | Anonymous_reader
+(** Authenticated caller identity governing Keeper memory resource access.
+    Non-admin callers only read their own Keeper memory, filtered through
+    current Board readership. *)
+
 type resource_target =
   | Tool_help_index
   | Tool_help of string
@@ -29,6 +40,8 @@ type resource_target =
   | Wiki_page_json of string
   | World_memory_claims
   | World_memory_log
+  | Keeper_memory of string
+  | Keeper_memory_health of string
   | Unknown of string
 
 val parse_resource_target : string -> resource_target
@@ -59,12 +72,14 @@ val notify_world_memory_updated : unit -> unit
     {!world_memory_log_uri}. *)
 
 val handle_read_resource_eio :
+  ?caller:resource_caller ->
   Mcp_server.server_state ->
   Yojson.Safe.t ->
   Yojson.Safe.t option ->
   Yojson.Safe.t
-(** [handle_read_resource_eio state id params] handles a
-    [resources/read] JSON-RPC call.
+(** [handle_read_resource_eio ?caller state id params] handles a
+    [resources/read] JSON-RPC call. Defaults to {!Anonymous_reader} so
+    callers that omit identity fail closed on gated Keeper memory targets.
 
     Parameter contract:
     - [state]: server state (provides config + session registry).
@@ -107,4 +122,13 @@ val wiki_resources : base_path:string -> Mcp_server.mcp_resource list
 module For_testing : sig
   val blocking_io_execution_context : unit -> Eio_guard.execution_context
   (** Execution context observed inside the resource filesystem boundary. *)
+
+  val filter_ordinary_snapshot_for_reader :
+    ?base_path:string ->
+    reader:Masc_board_handlers.Board_access.reader ->
+    Keeper_memory_os_current.t ->
+    Keeper_memory_os_current.t * int
+  (** Filter an ordinary Memory OS snapshot for [reader], transitively
+      withholding derived facts whose premises are unreadable and scrubbing
+      delta fields. Returns the filtered snapshot and withheld fact count. *)
 end

@@ -907,6 +907,39 @@ let mcp_tool_call_log_details ?outcome ~phase ~profile ~tool_name ~id ?mcp_sessi
      | None -> [])
 ;;
 
+let resource_caller_for ~base_path ~(sender : Mcp_server_eio_types.sender)
+      (credential : Masc_domain.agent_credential option)
+  : Mcp_server_eio_resource.resource_caller
+  =
+  match credential with
+  | Some cred ->
+    (match cred.Masc_domain.role with
+     | Masc_domain.Admin -> Mcp_server_eio_resource.Operator_admin
+     | Masc_domain.Worker | Masc_domain.Player ->
+       Mcp_server_eio_resource.Authenticated_reader
+         { agent_name = cred.agent_name
+         ; board_reader = Masc_board_handlers.Board_access.named cred.agent_name
+         })
+  | None ->
+    (match sender with
+     | Mcp_server_eio_types.Admitted Auth.Auth_off ->
+       Mcp_server_eio_resource.Operator_admin
+     | Mcp_server_eio_types.Unadmitted ->
+       if Auth.is_auth_enabled base_path
+       then Mcp_server_eio_resource.Anonymous_reader
+       else Mcp_server_eio_resource.Operator_admin
+     | Mcp_server_eio_types.Admitted Auth.Anonymous ->
+       Mcp_server_eio_resource.Anonymous_reader
+     | Mcp_server_eio_types.Admitted (Auth.Bearer { agent_name; role; _ }) ->
+       (match role with
+        | Masc_domain.Admin -> Mcp_server_eio_resource.Operator_admin
+        | Masc_domain.Worker | Masc_domain.Player ->
+          Mcp_server_eio_resource.Authenticated_reader
+            { agent_name
+            ; board_reader = Masc_board_handlers.Board_access.named agent_name
+            }))
+;;
+
 let request_protocol_error_response = Mcp_request_admission.protocol_error
 
 (** Handle incoming JSON-RPC request - Pure Eio Native *)
@@ -1014,12 +1047,14 @@ let handle_request
                      | Ok { cursor } ->
                        handle_list_resources_eio ~base_path id cursor)
               | "resources/read" ->
-                with_required_auth
+                with_required_credential
                   ~base_path
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  (fun _auth_token -> handle_read_resource_eio state id req.params)
+                  (fun credential ->
+                     let caller = resource_caller_for ~base_path ~sender credential in
+                     handle_read_resource_eio ?caller:(Some caller) state id req.params)
               | "resources/templates/list" ->
                 with_required_auth
                   ~base_path

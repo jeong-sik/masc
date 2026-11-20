@@ -125,7 +125,8 @@ val handle_request :
      Mcp_server_eio_call_request.t ->
      Yojson.Safe.t) ->
   handle_read_resource_eio:
-    (Mcp_server.server_state ->
+    (?caller:Mcp_server_eio_resource.resource_caller ->
+     Mcp_server.server_state ->
      Yojson.Safe.t ->
      Yojson.Safe.t option ->
      Yojson.Safe.t) ->

@@ -320,14 +320,16 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
    and the root of the installation. *)
 let child_flag = "--boot-the-installation-at"
 
-(* The file the child makes when the account server hands it the access, so
-   the parent tells an engine that ended its process from a boot that never
-   started one. *)
-let engine_started_marker root = Filename.concat root "engine-started"
+(* What the child leaves beside the installation for the parent. It makes
+   [engine_started] when the account server hands the engine the access, and
+   [own_failure], with the exception, when it ends on an exception of its
+   own. The parent counts an end of the child as the engine's only with the
+   first and without the second. *)
+let engine_started root = Filename.concat root "engine-started"
+let own_failure root = Filename.concat root "own-failure"
 
 (* The child: the judgment, the process of a server and the account server,
-   which starts the engine. The engine ends the process; a refused boot ends
-   it too, and leaves no marker. *)
+   which starts the engine. *)
 let boot_the_installation_at root =
   let installation = installation_at root in
   let multi_account = judged installation in
@@ -341,7 +343,7 @@ let boot_the_installation_at root =
       ~port:(free_port ())
       ~lease
       ~start_engine:(fun access ->
-        write_file (engine_started_marker root) "";
+        write_file (engine_started root) "";
         ignore
           (Server_runtime_bootstrap.start_engine ~sw ~runtime_sw ~env ~accept_store_quarantine:false access
            : Mcp_server.server_state Eio.Promise.t))
@@ -351,26 +353,19 @@ let boot_the_installation_at root =
   | Error refusal -> Alcotest.fail (Server_accounts.refusal_to_string refusal)
 ;;
 
-(* An engine that hangs before readiness is ended by the startup watchdog of
-   the child within one period. The parent waits two, so it sees that end. *)
-let watchdog_periods_the_parent_waits = 2.
 let poll_interval_s = 0.05
 
-(* The status of the child, or [None] when it did not end in time; the
-   parent then ends it. *)
-let rec status_of_child pid ~deadline =
+(* The status of the child when the parent saw it end by [deadline], or
+   [None]. A child still running after [deadline] is killed and reaped. The
+   time is read after each wait, so an end seen by [deadline] came by it. *)
+let rec end_of_child pid ~deadline =
   match Unix.waitpid [ Unix.WNOHANG ] pid with
-  | exception Unix.Unix_error (Unix.EINTR, _, _) -> status_of_child pid ~deadline
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> end_of_child pid ~deadline
   | 0, (_ : Unix.process_status) ->
-    if Unix.gettimeofday () > deadline
-    then (
-      Unix.kill pid Sys.sigkill;
-      ignore (Unix.waitpid [] pid : int * Unix.process_status);
-      None)
-    else (
-      Unix.sleepf poll_interval_s;
-      status_of_child pid ~deadline)
-  | (_ : int), status -> Some status
+    if Unix.gettimeofday () > deadline then Unix.kill pid Sys.sigkill;
+    Unix.sleepf poll_interval_s;
+    end_of_child pid ~deadline
+  | (_ : int), status -> if Unix.gettimeofday () > deadline then None else Some status
 ;;
 
 let test_a_refused_store_ends_the_process () =
@@ -383,6 +378,11 @@ let test_a_refused_store_ends_the_process () =
   write_file
     (Keeper_config_journal.journal_path_for_base_path ~base_path:installation.base)
     "not a journal";
+  (* The startup watchdog of the child ends an engine that is not ready one
+     period after the engine starts, and the engine starts after the spawn.
+     The parent waits one period from before the spawn, so an end it sees
+     within the wait is not the watchdog's. *)
+  let deadline = Unix.gettimeofday () +. Server_startup_state.watchdog_timeout_sec () in
   let pid =
     Unix.create_process
       Sys.executable_name
@@ -391,17 +391,16 @@ let test_a_refused_store_ends_the_process () =
       Unix.stdout
       Unix.stderr
   in
-  let deadline =
-    Unix.gettimeofday ()
-    +. (watchdog_periods_the_parent_waits *. Server_startup_state.watchdog_timeout_sec ())
-  in
-  let status = status_of_child pid ~deadline in
-  Alcotest.(check bool)
-    "the account server started the engine"
-    true
-    (Sys.file_exists (engine_started_marker installation.root));
-  match status with
-  | None -> Alcotest.fail "the process did not end within two startup watchdogs"
+  let ended = end_of_child pid ~deadline in
+  let root = installation.root in
+  if Sys.file_exists (own_failure root)
+  then
+    Alcotest.failf
+      "the child ended on an exception of its own: %s"
+      (In_channel.with_open_bin (own_failure root) In_channel.input_all);
+  Alcotest.(check bool) "the account server started the engine" true (Sys.file_exists (engine_started root));
+  match ended with
+  | None -> Alcotest.fail "the process did not end before the startup watchdog could end it"
   | Some (Unix.WEXITED 0) -> Alcotest.fail "the process ended with 0"
   | Some (Unix.WEXITED (_ : int)) -> ()
   | Some (Unix.WSIGNALED signal) -> Alcotest.failf "the process ended on signal %d" signal
@@ -412,7 +411,12 @@ let test_a_refused_store_ends_the_process () =
    process has started no engine when it spawns one. *)
 let () =
   match Array.to_list Sys.argv with
-  | [ (_ : string); flag; root ] when String.equal flag child_flag -> boot_the_installation_at root
+  | [ (_ : string); flag; root ] when String.equal flag child_flag ->
+    (try boot_the_installation_at root with
+     | exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       write_file (own_failure root) (Printexc.to_string exn);
+       Printexc.raise_with_backtrace exn backtrace)
   | (_ : string list) ->
     Alcotest.run
       "server_accounts_engine"

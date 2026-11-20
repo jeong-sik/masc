@@ -508,7 +508,7 @@ let count_noun ?plural count singular =
     if count = 1 then singular
     else match plural with Some word -> word | None -> singular ^ "s"
   in
-  Printf.sprintf "%d %s" count noun
+  Printf.sprintf "%s %s" (Masc_tui_value.Count.grouped count) noun
 
 (* A token figure a reader reads at a glance rather than counts digit by
    digit. Thousands keep a tenth so nearby readings such as 73.9k and 73.2k

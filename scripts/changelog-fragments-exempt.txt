@@ -1,11 +1,11 @@
-# Pull requests exempt from the strict missing-fragment gate.
-# One PR number per line; '#' starts a comment. A number earns its place when
-# the PR's own content is changelog work (e.g. a fragment backfill PR whose
-# payload is another PR's fragment), or -- rule widened for v0.71.0 -- when the
-# merge changes nothing a user can see: documentation, tests, comments or
-# compile repairs only. Every entry states its reason on its own line. A PR
-# that changes behavior, output, configuration or an interface a user reads
-# still needs a fragment and must not be listed here.
+# Legacy read-only list of pull requests exempt from the strict
+# missing-fragment gate (kept for previously merged pull requests).
+#
+# Do NOT append new PR numbers here: concurrent PRs appending to the tail line
+# conflict with one another. Instead, add a per-PR fragment file
+# `changelog.d/<PR number>.md` with a `### Exempt` section (see
+# `changelog.d/README.md`). A PR that changes behavior, output, configuration
+# or an interface a user reads still needs a normal release section.
 50747
 50686  # docs only (21 files under docs/); no user-facing behavior
 50706  # doc comment on close_after + move of the #50659 fragment from 50636.md to 50659.md; no behavior change

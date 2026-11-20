@@ -119,11 +119,16 @@ agent-core 도 그 요청을 보내지 않는다.
 ### 4.1 지금
 
 - 신호는 턴 첫 요청에서, ledger 가 시작된 뒤 가장 크게 자란 턴만큼 다음 턴이 자란다고 본다. 그보다 많이 자라는 턴은 턴 가운데 넘친다(§1.3 의 19:39 KST).
-- 크기 거절 사다리는 세 단이다(`lib/keeper/keeper_turn_driver_try_provider.ml:3588-3700`).
+- 크기 거절 사다리는 다섯 단이다(`lib/keeper/keeper_turn_driver_try_provider.ml:3588-3770`).
+  - 보관된 tool 결과를 본문 대신 주소로 싣는다(`Keeper_client_tool_outbox.carrier_reprojection`, `lib/keeper/keeper_client_tool_outbox.ml:712`).
+  - 공유 기억 기록 일부를 미룬다(`Keeper_workspace_memory_host_recall.defer_for_capacity`).
   - 턴 경계로 옮긴다(`turn_boundary_resend_sequence`).
   - 거절된 요청의 tool 결과를 표시로 바꾼다(`current_turn_demotion_sequence`).
   - 이 턴이 시작한 곳으로 옮긴다(`this_turn_start_resend_sequence`).
-- 단마다 attempt 를 처음부터 다시 돌린다. 그래서 셋 모두 `same_run_retry_authorized` 가 열려 있을 때만 돈다.
+- 앞 두 단은 attempt 안에서 돈다(`memory_capacity_retry_sequence`, `:3724`).
+- 순서는 코드 주석이 정한다. 「The carrier step answers a size refusal before memory and history do」(`:3745`).
+- 공유 기억은 hook 이 투영 전에 그린다. tool 결과로 끝나는 뒤 round 에서는 그리지 않는다(`lib/keeper/keeper_run_tools_hooks.ml:443-446`, `Keeper_run_prompt.is_later_round_of_this_turn`).
+- 단마다 attempt 를 처음부터 다시 돌린다. 그래서 다섯 모두 `same_run_retry_authorized` 가 열려 있을 때만 돈다.
   - agent-core 가 이 run 에서 checkpoint 단계에 닿으면 닫힌다(`same_run_retry_allowed`, `:844`).
   - 처음부터 다시 돌리면 이미 저장된 진행 위에 이번 턴 입력을 다시 넣는다(`lib/keeper/keeper_unified_turn_execution.ml:437`).
 - 안쪽 요청은 매번 checkpoint 를 저장한다. 그래서 턴 첫 요청 뒤의 거절에는 사다리가 없다.
@@ -137,7 +142,15 @@ agent-core 도 그 요청을 보내지 않는다.
 투영(`model_input_projection`, `packages/agent_core/lib/agent/agent_types.mli:57`)은 요청 하나 대신 후보 목록을 돌려준다.
 
 - 첫 후보는 지금 요청이다. 창을 붙잡는다.
-- 다음 후보들은 크기 거절 사다리의 단이고, 순서도 §4.1 과 같다.
+- 다음 후보는 run 이 checkpoint 단계에 닿은 뒤의 요청에만 붙는다(`same_run_retry_allowed`, `:844`).
+  - 그 전 요청에는 다음 후보가 없다. 지금처럼 attempt 사다리가 다섯 단을 차례로 쓴다.
+  - 그래서 거절 하나에 답하는 쪽은 많아야 하나다. checkpoint 전에는 사다리, 뒤에는 run 안 후보다.
+  - checkpoint 전 요청에 후보를 붙이지 않는 까닭은 기억 단이다. run 안 후보는 hook 을 다시 돌리지 않으니 기억을 미룰 수 없다.
+  - 그 요청에 후보를 붙이면 기억을 미루기 전에 history 를 자른다. §4.1 의 순서와 어긋난다.
+- 다음 후보들은 크기 거절 사다리의 단이고, 순서도 §4.1 과 같다. 기억 단만 빠진다.
+  - carrier, 턴 경계, 강등, 이 턴 시작 순서다.
+  - checkpoint 뒤 요청이 기억을 싣는 것은 tool 결과로 끝나지 않을 때뿐이다. 그 요청에서는 기억을 둔 채 history 를 자른다.
+  - 그 요청의 기억을 줄이려면 hook 을 다시 돌려야 한다. 이 층에서는 하지 않는다. 지금은 그 요청이 넘치면 턴이 끝난다.
   - 후보는 누적이다. 앞 단이 붙잡은 front 와 표시 바꾸기를 안고 한 단을 더 쓴다.
   - 지금 사다리도 그렇다(`turn_boundary_resend_sequence` 의 `restore_front` 조건, `this_turn_start_resend_sequence` 의 「whatever demotion [first] chose」).
   - 좁아지지 않는 단은 후보를 내지 않는다. 조건은 지금 단의 조건이다.
@@ -147,6 +160,10 @@ agent-core 도 그 요청을 보내지 않는다.
 - 받아들여진 후보의 좁힘은 run 의 다음 요청으로 이어진다.
   - 턴 가운데 요청은 ledger 의 마지막 요청이 연 곳을 붙잡는다(`held_window`, `lib/keeper/keeper_turn_driver_try_provider.ml:1429`). ledger 는 응답 때 바뀐다(`:2770`).
   - 표시 바꾸기는 attempt 가 들고 있는 상태다(`:2108`).
+- 후보로 front 를 옮긴 attempt 가 크기 아닌 이유로 끝나면, 옮기기 전 front 를 되돌린다.
+  - 사다리의 `restore_front` 와 같은 규칙이다(`turn_boundary_resend_sequence` 위 주석).
+  - 그러지 않으면 다음 lane 이 크기와 상관없는 실패 때문에 좁힌 범위에서 열린다.
+  - carrier 주소와 표시 바꾸기는 사다리처럼 되돌리지 않는다.
 
 agent-core 계약에 한 가지를 더한다.
 
@@ -168,7 +185,7 @@ provider 거절은 run 안에서 다시 보내지 않는다.
 - checkpoint 뒤 provider 거절로 턴이 끝나는 것은 받아들인 한계다. 이것을 세는 장치는 따로 넣지 않는다.
   - 보내기 전에 재지 않는 레인(`Body_only`, `lib/runtime/runtime_agent_context.ml:199-207`)에는 보내기 전 거절이 없다. 그 레인에서는 run 안 후보가 돌지 않는다.
   - 그런 레인이 주력 레인이 되면 다시 본다.
-- attempt 사다리는 남는다. run 안 후보가 이미 쓴 단은 사다리 조건에서 걸러지므로, 후보가 다한 뒤 사다리는 attempt 를 다시 돌리지 않는다.
+- attempt 사다리는 남는다. 후보가 도는 요청에서는 사다리가 닫혀 있어, 후보가 다해도 attempt 는 다시 돌지 않는다.
 
 다른 도구는 넘치면 한 번 줄여 다시 보내고, 줄일 것이 없으면 끝낸다.
 
@@ -195,7 +212,10 @@ provider 거절은 run 안에서 다시 보내지 않는다.
    - 시험: 받아들여진 후보 뒤의 thunk 는 불리지 않는다.
    - 시험: 후보 셋 가운데 셋째가 받아들여지면, provider 시도는 ordinal 0 하나다. `record_provider_request_provenance`(`packages/agent_core/lib/pipeline/pipeline.ml:865`)가 적는 요청은 셋째다.
    - 시험: provider 가 넘침으로 거절하면 다음 후보를 보내지 않는다. 그 턴의 provider 시도는 하나다.
-   - 시험: 후보가 다하면 턴이 끝나고 lane 을 돌리는 것은 지금과 같다. attempt 사다리는 attempt 를 다시 돌리지 않는다.
+   - 시험: 후보가 다하면 턴이 끝나고 lane 을 돌리는 것은 지금과 같다. attempt 는 다시 돌지 않는다.
+   - 시험: checkpoint 전 요청에는 다음 후보가 없다. 사다리가 다섯 단을 지금 순서로 쓴다.
+   - 시험: carrier 를 주소로 바꾼 후보가 받아들여지면, history 범위는 첫 후보와 같다.
+   - 시험: 후보로 front 를 옮긴 attempt 가 크기 아닌 이유로 끝나면 front 가 돌아온다.
 
 ## 6. 조사할 것
 

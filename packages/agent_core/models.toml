@@ -2709,6 +2709,10 @@ id = "claude"
 # 2026-09-19: documented request suppression, independent of model capability.
 # https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use
 supports_parallel_tool_suppression = true
+# 2026-11-20: documented one-hour prompt-cache lifetime (cache_control "ttl": "1h").
+# https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+# Another provider on this wire declares it only once its own docs do.
+supports_extended_cache_ttl = true
 # Anthropic's own API: the claude-* bare rows above describe exactly the models
 # it serves, so this provider enumerates their exact identities. No row is
 # scoped to "claude", and before this every such config fell to the Anthropic

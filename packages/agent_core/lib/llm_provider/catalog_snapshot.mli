@@ -58,6 +58,9 @@ val policy_provider : t -> string -> (entry * Model_catalog.provider_entry) opti
 (** The admitted entry and its selected model-policy authority. *)
 val requires_api_key : authentication -> bool
 val supports_parallel_tool_suppression : t -> provider_id:string -> bool
+val supports_extended_cache_ttl : t -> provider_id:string -> bool
+(** The model-policy provider of [provider_id] declares the one-hour
+    prompt-cache lifetime. An unknown provider declares nothing. *)
 
 type default_error =
   | Invalid_model_catalog of string

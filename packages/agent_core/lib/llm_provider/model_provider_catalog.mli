@@ -28,6 +28,11 @@ type entry =
     (** The provider documents a request control that limits a response to at
         most one tool call. Missing declarations are false; this is separate
         from a model being able to generate parallel tool calls. *)
+  ; supports_extended_cache_ttl : bool
+    (** The provider documents the one-hour prompt-cache lifetime that
+        [Provider_config.cache_extended_ttl] asks for. Missing declarations
+        are false: an endpoint that speaks the same wire does not thereby
+        accept the [ttl] field. *)
   ; serves_bare_models : Model_identifiers.Model_id.t list
     (** Explicit exact provider-independent model IDs served by this endpoint.
         Authorization uses ASCII case equality, never a family prefix. Absence or an empty list grants no

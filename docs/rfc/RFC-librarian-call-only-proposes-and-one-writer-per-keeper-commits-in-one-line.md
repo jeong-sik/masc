@@ -1441,7 +1441,14 @@ seed 의 세대 경계도 턴 기록에서 읽는다. 지금은 `turn-boundaries
 - `Announced Recovered` 는 세지 않는다. purge 는 번호를 바꾸지 않는다. purge 가 고쳐 쓴 atom 의 seed 는 위의 digest 가 버린다.
 - 센 `Reset` 이 없거나 그 앞에 닫힌 턴이 없으면 경계가 없다.
 
-head 가 그 trace 에 없거나 닫힌 메시지가 `covered.closed_messages` 보다 적으면 시작점은 `Front_unresolved` 다. 이력을 지운 뒤 Librarian 이 그 `Reset` 단위를 읽기 전까지가 그렇다.
+읽은 자리 뒤의 턴 기록에 `Reset` 줄이 있으면 시작점은 `Front_unresolved` 다.
+`Reset` 은 닫힌 메시지 수를 다시 센다. 그 앞에서 센 `covered.closed_messages` 가 지금 이력의 어느 메시지인지는 알 수 없다.
+쓰는 쪽이 그 `Reset` 단위를 끝까지 읽으면 풀린다.
+
+- cause 셋을 모두 센다. 지우기(`Announced Cleared`)와 마지막 자리 아래에서 발견된 head(`Unannounced`)는 수를 0 으로 만든다. break 뒤를 버린 purge(`Announced Recovered`)는 수를 줄인다.
+- 수만 견주면 틈이 생긴다. 쓰는 쪽이 100 개까지 읽은 뒤 head 가 80 개로 돌아가고 다시 100 개를 넘으면, 80 번부터 99 번까지의 새 메시지가 Memory 에도 요청에도 없다.
+- 턴 기록의 그 구간을 읽지 못해도 `Front_unresolved` 다.
+- `covered.trace` 가 다른 trace 이거나 손에 든 이력이 `covered.closed_messages` 개보다 짧아도 `Front_unresolved` 다. 이 둘은 턴 기록을 읽기 전에 본다.
 
 provider 가 범위를 크다고 거절하면 Keeper 쪽에서 시작점을 당긴다. 코드에 있는 세 단계이고 그대로 둔다.
 

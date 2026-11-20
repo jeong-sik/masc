@@ -107,8 +107,12 @@ let kv_rows ~width ?(indent = 2) ?label_style ?(max_label_cells = 18) fields =
     let gutter = "  " in
     let gutter_w = 2 in
     let natural_col_w = min widest_label max_label_cells in
+    let col_w = min natural_col_w (max 4 (content_w / 3)) in
+    (* Two columns only when the width did not cut the label column: a label
+       past [max_label_cells] is cut by design, but one the narrow width cut
+       reads whole stacked above its value. *)
     let two_col =
-      natural_col_w > 0 && natural_col_w + gutter_w + 12 <= content_w
+      col_w > 0 && col_w = natural_col_w && col_w + gutter_w + 12 <= content_w
     in
     let wrap_clamped max_w value =
       let rows =
@@ -119,7 +123,6 @@ let kv_rows ~width ?(indent = 2) ?label_style ?(max_label_cells = 18) fields =
       List.map (clamp_plain ~max_cells:max_w) rows
     in
     if two_col then
-      let col_w = min natural_col_w (max 4 (content_w / 3)) in
       let val_w = content_w - col_w - gutter_w in
       let cont_prefix = margin ^ String.make (col_w + gutter_w) ' ' in
       List.concat_map

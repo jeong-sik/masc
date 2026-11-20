@@ -261,7 +261,7 @@ let runtime_prompt_assets_for_state state =
   | Some snapshot -> snapshot.Masc.Tui_decode.ps_runtime_assets
   | None -> []
 
-let prompt_catalog_count_for_state state =
+let prompt_catalog_count_for_state (state : Masc_tui_types.state) =
   if state.prompts_show_runtime_assets then
     List.length (runtime_prompt_assets_for_state state)
   else List.length (prompt_rows_for_state state)

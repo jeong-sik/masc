@@ -261,6 +261,7 @@ let case_cross_category_merge : Scoring.case =
       [ id c4_constraint, [ "force-push"; "main" ]
       ; id c4_preference, [ "stacked PR"; "gh-stack rebase" ]
       ]
+  ; must_remain = []
   }
 ;;
 
@@ -430,6 +431,7 @@ let case_progressive_merge_and_bridge : Scoring.case =
       [ id c10_progressive, [ "Migrating"; "3 of 5"; "2026-11-18" ]
       ; id c10_limit, [ "at most 2 shards" ]
       ]
+  ; must_remain = []
   }
 ;;
 

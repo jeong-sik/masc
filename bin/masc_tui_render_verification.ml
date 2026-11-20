@@ -11,6 +11,9 @@ module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
+module Doc = Masc_tui_doc
+module Chart = Masc_tui_chart
+module Text_block = Masc_tui_text_block
 
 let review_label state = function
   | Review_unobserved -> ui_text state ~ko:"보고 안 됨" ~en:"not reported"
@@ -435,51 +438,81 @@ let judgement_detail_rows = Masc_tui_render_evidence.wrap_rows
 
 let verification_detail_lines ~ko ~width
     (request : Masc.Tui_decode.verification_request) =
-  let wrap style text = Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
-    ~sanitize:Keeper_chat.terminal_safe_text text
-    |> List.map (fun line -> style, "  " ^ line) in
-  wrap Ansi.bold request.vr_task_title
-  @ wrap (match request.vr_review with
-      | Review_stopped _ -> Theme.warn ()
-      | Review_waiting_original _ -> Theme.warn ()
-      | Review_unobserved | Review_running _ | Review_approved _ | Review_rejected _
-      | Review_superseded _ -> Ansi.reset)
-      (review_detail ~ko request.vr_review)
-  @ wrap (Theme.recede ())
-      (Printf.sprintf
-         (if ko then "제출 증거 %d개 · 요구 증거 %d항목 · 개수는 충족 여부가 아닙니다."
-          else "%d evidence items submitted · %d required · a count is not whether they are met")
-         (List.length request.vr_submitted_evidence) (List.length request.vr_required_artifacts))
-  @ (match request.vr_evidence_error with None -> [] | Some detail -> wrap (Theme.bad ()) detail)
+  let text k e = if ko then k else e in
+  let pre = List.map (fun s -> "", s) in
+  let title =
+    Text_block.rows ~max_cells:(max 1 (width - 4)) request.vr_task_title
+    |> List.map (fun line -> Ansi.bold, "  " ^ line)
+  in
+  let detail_tone =
+    match request.vr_review with
+    | Review_stopped _ | Review_waiting_original _ -> Theme.warn ()
+    | Review_approved _ -> Theme.ok ()
+    | Review_rejected _ -> Theme.bad ()
+    | Review_unobserved | Review_running _ | Review_superseded _ -> ""
+  in
+  title
+  @ pre
+      (Doc.prose_block ~width ~indent:2
+         ~guide_style:(if detail_tone = "" then Theme.border_muted () else detail_tone)
+         ~break_numbered:true ~tone:detail_tone (review_detail ~ko request.vr_review))
+  @ pre
+      (Doc.kv_rows ~width ~indent:2 ~max_label_cells:12
+         [ Doc.kv ~tone:(Theme.recede ()) (text "증거" "Evidence")
+             (Printf.sprintf
+                (if ko then "제출 %d개 · 요구 %d항목 (개수는 충족 여부가 아님)"
+                 else "%d submitted · %d required (count is not sufficiency)")
+                (List.length request.vr_submitted_evidence)
+                (List.length request.vr_required_artifacts))
+         ])
+  @ (match request.vr_evidence_error with
+     | None -> []
+     | Some detail ->
+         pre (Doc.prose_block ~width ~indent:2 ~guide_style:(Theme.bad ()) ~tone:(Theme.bad ()) detail))
 
 let verification_contract_lines state ~width (request : Masc.Tui_decode.verification_request) =
-  let wrap text = Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
-    ~sanitize:Keeper_chat.terminal_safe_text text
-    |> List.map (fun line -> Ansi.reset, "  " ^ line) in
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
-  [Ansi.dim, ""; Ansi.bold, say "  완료 조건" "  Completion contract"]
-  @ List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_completion_contract
-  @ [Ansi.dim, ""; Ansi.bold, say "  요구 증거" "  Required evidence"]
+  let pre = List.map (fun s -> "", s) in
+  let bullet_rows text =
+    Doc.prose_block ~width ~indent:2 ~guide_style:(Theme.border_muted ()) ("• " ^ text)
+    |> pre
+  in
+  let submitted_at =
+    match Time_codec.parse_rfc3339_opt request.vr_created_at with
+    | Some at -> Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) at
+    | None -> Terminal_text.single_line request.vr_created_at
+  in
+  let task_text =
+    if String.equal (String.trim request.vr_task_title) "" then
+      resolve_task_title state request.vr_task_id
+    else
+      Terminal_text.single_line request.vr_task_title ^ " (" ^ request.vr_task_id ^ ")"
+  in
+  let record_path =
+    match state.server_identity with
+    | Some identity -> Filename.concat (Canonical_path.to_string identity.sid_masc_root)
+        ("verifications/" ^ request.vr_request_id ^ ".json")
+    | None ->
+      workspace_identity_unread ~ko ^ " · verifications/" ^ request.vr_request_id ^ ".json"
+  in
+  [ "", "" ]
+  @ pre [ Doc.section_rule ~width ~indent:2 (say "완료 조건" "Completion contract") ]
+  @ List.concat_map bullet_rows request.vr_completion_contract
+  @ [ "", "" ]
+  @ pre [ Doc.section_rule ~width ~indent:2 (say "요구 증거" "Required evidence") ]
   @ (if request.vr_required_artifacts = [] then
-       wrap (say "별도 요구 목록 없음" "No separate list of required evidence.")
-     else List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_required_artifacts)
-  @ [Ansi.dim, ""; Ansi.bold, say "  제출 정보" "  Submission"]
-  @ wrap
-      (say "작업: " "Task: "
-       ^ (if String.equal (String.trim request.vr_task_title) "" then
-            resolve_task_title state request.vr_task_id
-          else
-            Terminal_text.single_line request.vr_task_title
-            ^ " (" ^ request.vr_task_id ^ ")")
-       ^ say " · 제출자: " " · submitted by: " ^ request.vr_submitted_by)
-  @ wrap (say "제출 시각: " "Submitted at: " ^ request.vr_created_at)
-  @ wrap (say "서버의 저장 기록: " "Server record: " ^
-      (match state.server_identity with
-       | Some identity -> Filename.concat (Canonical_path.to_string identity.sid_masc_root)
-           ("verifications/" ^ request.vr_request_id ^ ".json")
-       | None ->
-         workspace_identity_unread ~ko ^ " · verifications/" ^ request.vr_request_id ^ ".json"))
+       pre (Doc.kv_rows ~width ~indent:2 [ Doc.kv ~tone:(Theme.recede ()) "" (say "별도 요구 목록 없음" "No separate list of required evidence.") ])
+     else List.concat_map bullet_rows request.vr_required_artifacts)
+  @ [ "", "" ]
+  @ pre [ Doc.section_rule ~width ~indent:2 (say "제출 정보" "Submission") ]
+  @ pre
+      (Doc.kv_rows ~width ~indent:2 ~max_label_cells:14
+         [ Doc.kv (say "작업" "Task") task_text
+         ; Doc.kv (say "제출자" "Submitted by") request.vr_submitted_by
+         ; Doc.kv ~tone:(Theme.recede ()) (say "제출 시각" "Submitted") submitted_at
+         ; Doc.kv ~tone:(Theme.recede ()) (say "저장 기록" "Server record") record_path
+         ])
 
 (* The nouns are the ones the evidence section under the index uses
    ([Masc_tui_render_evidence.section]). *)
@@ -772,54 +805,64 @@ let harness_ledger_lines ?(ko = false) ~cols snapshot =
           let open Masc.Tui_decode in
           if calibration.hcal_total <= 0 then []
           else
+            let doc_width = max 1 (framed_inner_width cols) in
             let share count =
               100. *. float_of_int count /. float_of_int calibration.hcal_total
             in
-            (* Banded over every gate, then cut to the four that fit. The
-               tail is where the small ones are, so ranking only what is
-               drawn would rank four leaders out of four. *)
             let gates =
               Magnitude.of_counts calibration.hcal_gates
               |> List.filteri (fun index _ -> index < 4)
-              |> List.map (fun (gate, count, band) ->
-                     Printf.sprintf "%s%s %d (%.0f%%)%s" (magnitude_tone band)
-                       gate count (share count) Ansi.reset)
-              |> String.concat "  \xc2\xb7  "
+              |> List.map (fun (gate, count, _band) ->
+                     Printf.sprintf "%s %d (%.0f%%)"
+                       (Masc.Tui_terminal_text.sanitize_terminal_text gate) count (share count))
+              |> String.concat " · "
             in
             let remaining = max 0 (List.length calibration.hcal_gates - 4) in
             let gates =
               if remaining = 0 then gates
-              else
-                gates ^ "  \xc2\xb7  " ^ Masc_tui_value.Count.more ~ko remaining
+              else gates ^ " · " ^ Masc_tui_value.Count.more ~ko remaining
             in
             let evaluator =
               match snapshot.hs_overview with
               | None -> ""
               | Some overview ->
                   Printf.sprintf
-                    (if ko then "  \xc2\xb7  평가자 %s" else "  \xc2\xb7  evaluator %s")
+                    (if ko then " · 평가자 %s" else " · evaluator %s")
                     (Terminal_text.single_line overview.hov_evaluator_status)
             in
-            [ Printf.sprintf
-                (if ko then "  %s누적%s    %d건 판정  \xc2\xb7  승인 %d  \xc2\xb7  거절 %d%s"
-                 else "  %sledger%s  %d ruled  \xc2\xb7  approve %d  \xc2\xb7  reject %d%s")
-                Ansi.dim Ansi.reset calibration.hcal_total
-                calibration.hcal_approve calibration.hcal_reject evaluator
-            ; row_with_field ~cols
-                ~lead:(Printf.sprintf
-                         (if ko then "  %s게이트%s  " else "  %sgate%s    ")
-                         Ansi.dim Ansi.reset)
-                ~field:gates ~tail:""
-            ; (if calibration.hcal_labeled > 0 then
-                 Printf.sprintf
-                   (if ko then "  %s라벨%s    %d건" else "  %slabelled%s %d")
-                   Ansi.dim Ansi.reset calibration.hcal_labeled
-               else
-                 Printf.sprintf
-                   (if ko then "  %s라벨%s    없음 · 일치율·오류 집계용 정답 기준 없음"
-                    else "  %slabelled%s none · agreement and the error counts have no ground truth")
-                   Ansi.dim Ansi.reset)
-            ])
+            let ledger_value =
+              Printf.sprintf
+                (if ko then "%d건 판정 · 승인 %d · 거절 %d%s"
+                 else "%d ruled · approve %d · reject %d%s")
+                calibration.hcal_total calibration.hcal_approve
+                calibration.hcal_reject evaluator
+            in
+            let label_value =
+              if calibration.hcal_labeled > 0 then
+                Printf.sprintf (if ko then "%d건" else "%d") calibration.hcal_labeled
+              else
+                if ko then "없음 · 일치율·오류 집계용 정답 기준 없음"
+                else "none · no ground truth for agreement/error counts"
+            in
+            let meter_row =
+              let m_width = max 16 (min 52 (doc_width - 4)) in
+              let bar =
+                Chart.meter ~width:m_width ~value:calibration.hcal_approve
+                  ~max_value:calibration.hcal_total
+                  ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
+                  ~label:(if ko then "승인율" else "Approved")
+                  ~label_style:(Theme.recede ())
+                  ~track_style:(Theme.border_muted ())
+                  ~reset:Ansi.reset ()
+              in
+              [ "  " ^ bar ]
+            in
+            meter_row
+            @ Doc.kv_rows ~width:doc_width ~indent:2 ~max_label_cells:12
+                [ Doc.kv (if ko then "누적" else "Ledger") ledger_value
+                ; Doc.kv (if ko then "게이트" else "Gates") gates
+                ; Doc.kv ~tone:(Theme.recede ()) (if ko then "라벨" else "Labelled") label_value
+                ])
 
 let render_harness_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -992,16 +1035,11 @@ let render_harness_list (state : state) =
    measure it is judged by -- three hops that were all present and never
    walked, so a verdict said "pass" without saying what it was passing
    towards. *)
-(* The label column of the verdict detail, in display cells: a Korean label
-   is padded by what it occupies, not by its bytes. *)
-let harness_label_cells = 12
-
-let harness_labeled label value =
-  Printf.sprintf "  %s %s" (Message_layout.fit_width label harness_label_cells) value
-
-let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdict) =
+let harness_goal_lines ~width (state : state) (verdict : Masc.Tui_decode.harness_verdict) =
   let t korean english = ui_text state ~ko:korean ~en:english in
   let towards = t "목표" "Towards" in
+  let pre = List.map (fun s -> "", s) in
+  let kv_list fields = Doc.kv_rows ~width ~indent:2 ~max_label_cells:12 fields |> pre in
   let goal_of id =
     Option.bind state.planning (fun snapshot ->
       List.find_opt
@@ -1010,73 +1048,41 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
   in
   match task_goal_reading state ~task_id:verdict.hv_task_id with
   | Masc_tui_agenda.Not_read ->
-    [ Ansi.dim, harness_labeled towards (t "목표 연결을 읽기 전" "goal links not read") ]
+      kv_list [ Doc.kv ~tone:(Theme.recede ()) towards (t "목표 연결을 읽기 전" "goal links not read") ]
   | Read_failed _ ->
-    [ Ansi.dim, harness_labeled towards (t "목표 연결을 읽지 못함" "goal links unavailable") ]
+      kv_list [ Doc.kv ~tone:(Theme.warn ()) towards (t "목표 연결을 읽지 못함" "goal links unavailable") ]
   | Read [] ->
-    (* Two different silences, told apart. A task this screen has never seen
-       (the backlog has not loaded, or the verdict judged something already
-       archived) is not the same as a task that serves no goal, and drawing
-       nothing for both leaves the reader unable to tell which. *)
-    let known_task =
-      List.exists
-        (fun (row : Masc_domain.task) -> String.equal row.id verdict.hv_task_id)
-        (Masc_tui_types.task_domain_values state)
-    in
-    if known_task then
-      [ Ansi.dim
-        , harness_labeled towards
-            (t "이 태스크는 목표에 연결되지 않음" "this task is not linked to a goal") ]
-    else
-      [ Ansi.dim
-        , harness_labeled towards
-            (t "판정한 태스크가 이 backlog 에 없음" "the judged task is not in this backlog") ]
+      let known_task =
+        List.exists
+          (fun (row : Masc_domain.task) -> String.equal row.id verdict.hv_task_id)
+          (Masc_tui_types.task_domain_values state)
+      in
+      if known_task then
+        kv_list [ Doc.kv ~tone:(Theme.recede ()) towards (t "이 태스크는 목표에 연결되지 않음" "this task is not linked to a goal") ]
+      else
+        kv_list [ Doc.kv ~tone:(Theme.recede ()) towards (t "판정한 태스크가 이 backlog 에 없음" "the judged task is not in this backlog") ]
   | Read goal_ids ->
-    (Ansi.bold, t "  목표" "  TOWARDS")
-    :: List.concat_map
-         (fun id ->
+      List.concat_map
+        (fun id ->
            match goal_of id with
            | None ->
-             (* Linked to a goal this snapshot does not carry -- terminal, or
-                simply not in the page that was fetched. Named rather than
-                dropped: the link is a fact even when the goal is not here. *)
-             [ Ansi.reset, harness_labeled (t "목표" "Goal") (Terminal_text.single_line id)
-             ; Ansi.dim, harness_labeled "" (Link.reference Goal id)
-             ]
+               kv_list
+                 [ Doc.kv (t "목표" "Goal") (Terminal_text.single_line id)
+                 ; Doc.kv ~tone:(Theme.recede ()) "" (Link.reference Goal id)
+                 ]
            | Some goal ->
-             let aim = Masc_tui_planning_detail.measure_text goal.pg_measure in
-             [ Ansi.reset,
-               harness_labeled (t "목표" "Goal") (Terminal_text.single_line goal.pg_title)
-             ; Ansi.reset, harness_labeled (t "지표" "Aim") (Terminal_text.single_line aim)
-             ; Ansi.dim, harness_labeled "" (Link.reference Goal id)
-             ])
-         goal_ids
+               let aim = Masc_tui_planning_detail.measure_text goal.pg_measure in
+               kv_list
+                 [ Doc.kv ~tone:Ansi.bold (t "목표" "Goal") (Terminal_text.single_line goal.pg_title)
+                 ; Doc.kv ~tone:(Theme.ok ()) (t "지표" "Aim") (Terminal_text.single_line aim)
+                 ; Doc.kv ~tone:(Theme.recede ()) "" (Link.reference Goal id)
+                 ])
+        goal_ids
 ;;
 
 let harness_detail_lines ~ko ~width ~now (verdict : Masc.Tui_decode.harness_verdict) =
   let t korean english = if ko then korean else english in
-  let field ?(style = Ansi.reset) label value =
-    style, harness_labeled label (Terminal_text.single_line value)
-  in
-  let wrapped label text =
-    (Ansi.bold, "  " ^ label)
-    :: (Message_layout.wrap_body
-          ~max_cells:(max 1 (width - 6))
-          ~sanitize:Keeper_chat.terminal_safe_text text
-        |> List.map (fun line -> Ansi.reset, "    " ^ line))
-  in
-  let fallback =
-    match verdict.hv_fallback_reason with
-    | None ->
-        [ Ansi.dim
-        , harness_labeled (t "대체 평가" "Fallback")
-            (t "없음 · 지정한 평가자가 답함" "none; the named evaluator answered") ]
-    | Some reason ->
-        [ (Theme.warn ()), t "  대체 평가" "  FALLBACK EVALUATION" ]
-        @ wrapped
-            (t "요청한 평가자가 돌지 못한 이유" "Why the requested evaluator did not run")
-            reason
-  in
+  let pre = List.map (fun s -> "", s) in
   let ruling, reason =
     let whole = verdict.hv_verdict in
     match String.index_opt whole ':' with
@@ -1086,36 +1092,57 @@ let harness_detail_lines ~ko ~width ~now (verdict : Masc.Tui_decode.harness_verd
         , String.trim
             (String.sub whole (at + 1) (String.length whole - at - 1)) )
   in
-  let title = Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
-      ~sanitize:Keeper_chat.terminal_safe_text verdict.hv_task_title
+  let verdict_tone = semantic_status_color ruling in
+  let title =
+    Text_block.rows ~max_cells:(max 1 (width - 4)) verdict.hv_task_title
     |> List.map (fun line -> Ansi.bold, "  " ^ line)
   in
+  let fallback =
+    match verdict.hv_fallback_reason with
+    | None ->
+        pre
+          (Doc.kv_rows ~width ~indent:2 ~max_label_cells:12
+             [ Doc.kv ~tone:(Theme.recede ()) (t "대체 평가" "Fallback")
+                 (t "없음 · 지정한 평가자가 답함" "none; the named evaluator answered")
+             ])
+    | Some fallback_reason ->
+        [ (Theme.warn () ^ Ansi.bold, t "  대체 평가 사유" "  Fallback evaluation reason") ]
+        @ pre (Doc.prose_block ~width ~indent:2 ~guide_style:(Theme.warn ()) ~break_numbered:true fallback_reason)
+  in
   title
-  @ detail_section_heading ~width (t "1. 판정 결과 · 사유" "1. Decision & Verdict")
-  @ [ field ~style:(semantic_status_color ruling) (t "판정" "Verdict") ruling
-    ; field "Gate" verdict.hv_gate
-    ; field (t "평가자" "Evaluator") verdict.hv_evaluator
-    ; field (t "기록 시각" "Recorded")
-        (* The producer writes zero for an absent time, as the list's latest
-           line already reads; the epoch is not when this was recorded. *)
-        (if Float.equal verdict.hv_at 0.0 then t "시각 보고 안 됨" "time not reported"
-         else Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now verdict.hv_at)
-    ]
-  (* The reason a task was rejected or approved is the sentence the operator came
-     here to read, and it runs long. [field] is one [single_line], so it was cut at
-     the pane's width and the rest existed nowhere on the surface. The title
-     above already wraps for the same reason. *)
-  @ (if reason = "" then [] else (Ansi.dim, "") :: wrapped (t "사유" "Reason") reason)
-  @ (if fallback = [] then [] else (Ansi.dim, "") :: fallback)
-  @ detail_section_heading ~width (t "2. 대상 태스크 · 에이전트" "2. Task & Agent")
-  @ [ field (t "태스크" "Task") verdict.hv_task_id
-    ; field (t "태스크 링크" "Task link") (Link.reference Task verdict.hv_task_id)
-    ; field (t "에이전트" "Agent") verdict.hv_agent
-    ]
+  @ [ "", "" ]
+  @ pre [ Doc.section_rule ~width ~indent:2 ~badge:ruling ~badge_tone:verdict_tone
+            (t "1. 판정 결과 · 사유" "1. Decision & Verdict") ]
+  @ pre
+      (Doc.kv_rows ~width ~indent:2 ~max_label_cells:12
+         [ Doc.kv ~tone:(verdict_tone ^ Ansi.bold) (t "판정" "Verdict") ruling
+         ; Doc.kv "Gate" verdict.hv_gate
+         ; Doc.kv (t "평가자" "Evaluator") verdict.hv_evaluator
+         ; Doc.kv ~tone:(Theme.recede ()) (t "기록 시각" "Recorded")
+             (if Float.equal verdict.hv_at 0.0 then t "시각 보고 안 됨" "time not reported"
+              else Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now verdict.hv_at)
+         ])
+  @ (if reason = "" then []
+     else
+       [ "", ""
+       ; (Ansi.bold, "  " ^ t "사유" "Reason")
+       ]
+       @ pre (Doc.prose_block ~width ~indent:2
+                ~guide_style:(if verdict_tone = "" then Theme.border_muted () else verdict_tone)
+                ~break_numbered:true reason))
+  @ (if fallback = [] then [] else [ "", "" ] @ fallback)
+  @ [ "", "" ]
+  @ pre [ Doc.section_rule ~width ~indent:2 (t "2. 대상 태스크 · 에이전트" "2. Task & Agent") ]
+  @ pre
+      (Doc.kv_rows ~width ~indent:2 ~max_label_cells:12
+         [ Doc.kv (t "태스크" "Task") verdict.hv_task_id
+         ; Doc.kv ~tone:(Theme.recede ()) (t "태스크 링크" "Task link") (Link.reference Task verdict.hv_task_id)
+         ; Doc.kv ~tone:Ansi.bold (t "에이전트" "Agent") verdict.hv_agent
+         ])
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   let width = max 1 (framed_inner_width cols) in
-  let goal_lines = harness_goal_lines state verdict in
+  let goal_lines = harness_goal_lines ~width state verdict in
   let ledger_section_num = if goal_lines = [] then 3 else 4 in
   let lines =
     reading_notice_lines state ~width
@@ -1123,21 +1150,20 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
       ~error:(Option.map (fun detail -> Last_error detail) state.harness_error)
     @ harness_detail_lines ~ko:(state.ui_language = Lang_ko)
         ~width ~now:(Unix.gettimeofday ()) verdict
-    (* Appended rather than woven in: the verdict block is what the server
-       said, and what the task is aiming at is read from two other surfaces.
-       Keeping them in that order keeps the judged fact above the context. *)
     @ (match goal_lines with
        | [] -> []
        | lines ->
-           detail_section_heading ~width (ui_text state ~ko:"3. 연결된 목표" ~en:"3. Towards Goals")
+           [ "", ""; "", Doc.section_rule ~width ~indent:2 (ui_text state ~ko:"3. 연결된 목표" ~en:"3. Towards Goals") ]
            @ lines)
     @ (match harness_ledger_lines ~ko:(state.ui_language = Lang_ko) ~cols state.harness with
        | [] -> []
        | lines ->
-           detail_section_heading ~width
-             (Printf.sprintf "%d. %s" ledger_section_num
-                (ui_text state ~ko:"전체 판정 집계" ~en:"All Verdicts"))
-           @ List.map (fun line -> Ansi.reset, line) lines)
+           [ "", ""
+           ; "", Doc.section_rule ~width ~indent:2
+                   (Printf.sprintf "%d. %s" ledger_section_num
+                      (ui_text state ~ko:"전체 판정 집계" ~en:"All Verdicts"))
+           ]
+           @ List.map (fun line -> "", line) lines)
     |> judgement_detail_rows ~width
   in
   let content_height = max 1 (rows - max 0 (framed_chrome_rows - 2)) in
@@ -1189,12 +1215,30 @@ let render_harness_detail (state : state) verdict =
              can name several verdicts recorded in the same second. *)
           snapshot.Tui_decode.hs_verdicts
           |> List.map (fun (row : Tui_decode.harness_verdict) ->
-               let label =
+               let verdict_word =
+                 let whole = String.trim row.hv_verdict in
+                 let head =
+                   match String.index_opt whole ':' with
+                   | None -> whole
+                   | Some at -> String.sub whole 0 at
+                 in
+                 String.lowercase_ascii (String.trim head)
+               in
+               let mark =
+                 if Option.is_some row.hv_fallback_reason then "\xe2\x96\xb2" (* ▲ *)
+                 else match verdict_word with
+                 | "approve" | "approved" | "pass" | "passed" | "ok" ->
+                     Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+                 | "reject" | "rejected" | "refuted" | "failed" | "deny" | "denied" ->
+                     Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
+                 | _ -> "\xc2\xb7"
+               in
+               let raw_title =
                  match String.trim row.hv_task_title with
                  | "" -> row.hv_task_id
                  | title -> title
                in
-               label, row.hv_at)
+               (mark ^ " " ^ raw_title), row.hv_at)
           |> Render_schedule.verdict_sidebar_labels
                ~now:(Unix.gettimeofday ())
       in

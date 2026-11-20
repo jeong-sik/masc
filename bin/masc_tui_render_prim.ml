@@ -4267,7 +4267,7 @@ let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : str
     stops
 
 let planning_workspace_strip ~width tabs =
-  tab_strip ~width
+  tab_strip ~numbered:true ~width
     ~press:(fun surface text -> pressable (Press_surface surface) text)
     tabs
 
@@ -4294,7 +4294,7 @@ let harness_detail_heading (state : state) ~cols ~task_id ~tail =
   detail_heading ~cols
     ~lead:
       (Lead_strip
-         { floor = around + tab_strip_min_width tabs
+         { floor = around + tab_strip_min_width ~numbered:true tabs
          ; draw =
              (fun width ->
                planning_workspace_lead

@@ -7,7 +7,7 @@ open Keeper_sandbox_microvm_network
    The guest model is shared and the spellings are not. One detached guest
    per keeper holding [tail -f /dev/null], commands delivered by [exec],
    the working tree on the per-keeper work volume, no host playground:
-   that is RFC-0400's model and it does not change with the hypervisor
+   that is the guest model and it does not change with the hypervisor
    under it. What changes is how each CLI is told, so the flags come from
    {!Keeper_microvm_backend} and the guarantees the boot asks for are
    named rather than spelled.

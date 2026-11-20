@@ -29,9 +29,9 @@ let apple_volume_create_argv ~volume_name ~size =
     until directory quotas are enforced"), and a disk volume cannot be
     mounted as a named work root -- [-v] and [--mount-named] both request a
     dir and refuse a disk one ("already exists as disk, but this sandbox
-    requested dir"). So RFC-0400's size ceiling has no msb spelling, the way
-    it has no nerdctl one; the dir volume mounts over virtiofs and the mount
-    args are the shared [--volume NAME:DEST] form. *)
+    requested dir"). So the work volume's size ceiling has no msb spelling,
+    the way it has no nerdctl one; the dir volume mounts over virtiofs and the
+    mount args are the shared [--volume NAME:DEST] form. *)
 let msb_volume_create_argv ~volume_name =
   command_argv_for Backend.Microsandbox @ [ "volume"; "create"; "--kind"; "dir"; volume_name ]
 ;;

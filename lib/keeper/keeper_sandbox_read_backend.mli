@@ -1,14 +1,13 @@
 (** Keeper sandbox read backend implementation.
 
-    RFC-0006 Phase B-2: hardened keepers route read-side operations through the
-    selected sandbox backend so the backend mount restrictions are the
-    load-bearing boundary instead of a host-side string check. The current
-    concrete backend uses Docker, but callers should depend on
+    Hardened keepers route read-side operations through the selected sandbox
+    backend so the backend mount restrictions are the load-bearing boundary
+    instead of a host-side string check. The backend is a Docker container, a
+    microVM guest or an SSH endpoint, but callers should depend on
     {!Keeper_sandbox_read_runner} instead of this module.
 
-    The host-side containment check from Phase B-1 remains as
-    defense in depth and is still applied before this module is
-    consulted. *)
+    The host-side containment check remains as defense in depth and is still
+    applied before this module is consulted. *)
 
 (** Translate a runner's [run_outcome] into a read result. A
     [Transport_failed] is always an [Error]; a [Ran] result applies

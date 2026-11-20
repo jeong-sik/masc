@@ -1,6 +1,5 @@
 ---------------------------- MODULE TaskOwnership ----------------------------
 \* Task lifecycle over several Tasks and several agents.
-\* Target model of docs/rfc/RFC-task-lifecycle-a-verdict-assigns-no-work.md.
 \*
 \* TaskLifecycle.tla models one Task and no agent, so it cannot state what this
 \* module is about: who holds what, and what a verdict is allowed to change.

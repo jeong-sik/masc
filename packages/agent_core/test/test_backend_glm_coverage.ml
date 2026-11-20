@@ -68,13 +68,16 @@ let response_json ?(reasoning = Some "step by step") ?(content = "answer") () =
 ;;
 
 let test_classification_matrix () =
-  check_classification "auth" "1001" K.Glm_auth_error;
-  check_classification "rate" "1305" K.Glm_rate_limited;
-  check_classification "quota" "1308" K.Glm_quota_exceeded;
-  check_classification "server" "1234" K.Glm_server_error;
-  check_classification "invalid" "1210" K.Glm_invalid_request;
-  check_classification "context overflow (agent-core boundary)" "1261" K.Glm_context_overflow;
-  check_classification "unknown" "9999" K.Glm_invalid_request
+  check_classification "auth" "1001" (Some K.Glm_auth_error);
+  check_classification "rate" "1305" (Some K.Glm_rate_limited);
+  check_classification "quota" "1308" (Some K.Glm_quota_exceeded);
+  check_classification "server" "1234" (Some K.Glm_server_error);
+  check_classification "invalid" "1210" (Some K.Glm_invalid_request);
+  check_classification
+    "context overflow (agent-core boundary)"
+    "1261"
+    (Some K.Glm_context_overflow);
+  check_classification "unknown" "9999" None
 ;;
 
 (* agent-core boundary: the streaming path classifies a non-200 rejection by the
@@ -85,7 +88,7 @@ let test_check_glm_error_1261_envelope () =
      K.check_glm_error {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|}
    with
    | Some err ->
-     check_class "envelope 1261 class" K.Glm_context_overflow err.K.error_class;
+     check_class "envelope 1261 class" (Some K.Glm_context_overflow) err.K.error_class;
      check
        bool
        "envelope 1261 message"
@@ -96,10 +99,23 @@ let test_check_glm_error_1261_envelope () =
    | Some err ->
      check
        bool
-       "codeless envelope is not overflow"
+       "codeless envelope has no classified class"
        true
-       (err.K.error_class <> K.Glm_context_overflow)
+       (Option.is_none err.K.error_class)
    | None -> fail "expected a parsed codeless glm error envelope");
+  (match K.check_glm_error {|{"error":{"code":"9999","message":"undocumented"}}|} with
+   | Some err ->
+     check
+       bool
+       "unknown code leaves error_class None"
+       true
+       (Option.is_none err.K.error_class);
+     check
+       bool
+       "unknown code yields no promoted provider failure"
+       true
+       (Option.is_none (K.provider_failure_of_glm_error ~retry_after:None err))
+   | None -> fail "expected a parsed unknown-code glm error envelope");
   check
     bool
     "non-json body parses to none"

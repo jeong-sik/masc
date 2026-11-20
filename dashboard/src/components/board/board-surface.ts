@@ -68,6 +68,9 @@ import {
   boardLoading,
   boardLoadingMore,
   boardListReadFailed,
+  boardListOnScreen,
+  boardListNarrowed,
+  boardListCurrent,
   boardHasMore,
   boardTotal,
   boardHiddenCategories,
@@ -496,6 +499,10 @@ function BdRail({ activeSub, onSub, onMentions }: {
   onMentions: () => void
 }) {
   const hearths = boardHearths.value
+  // The count beside "전체" is the count of the list on screen. Under a
+  // sub-board, a search or an author filter that list is not the Board, and
+  // nothing here counts the Board, so no number is given.
+  const countsBoard = !boardListNarrowed.value
   const allCount = boardTotal.value ?? boardPosts.value.length
   const allCountLabel = boardTotal.value === null && boardHasMore.value ? `${allCount}+` : String(allCount)
   const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
@@ -512,10 +519,13 @@ function BdRail({ activeSub, onSub, onMentions }: {
         >
           <span class="glyph">${SUB_BOARD_GLYPHS.all}</span>
           <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>전체</span>
-          <span
-            class="n"
-            title=${boardTotal.value === null && boardHasMore.value ? `${allCount}개 이상 · 현재 불러온 게시글 기준` : `전체 ${allCount}개`}
-          >${allCountLabel}</span>
+          ${countsBoard
+            ? html`<span
+                class="n"
+                data-testid="bd-sub-all-count"
+                title=${boardTotal.value === null && boardHasMore.value ? `${allCount}개 이상 · 현재 불러온 게시글 기준` : `전체 ${allCount}개`}
+              >${allCountLabel}</span>`
+            : null}
         </button>
         ${hearths.map(hearth => html`
           <button
@@ -1434,15 +1444,24 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
   // it, so the feed says that and offers the read again; a count or "no posts
   // yet" would describe a board that was never read.
   const readFailed = boardListReadFailed.value && !boardLoading.value
-  // Under a search the server counts the matches, not the posts of the Board.
-  const totalWord = searching ? '일치' : '전체'
+  // The operator has changed the search, the sub-board or a filter and the
+  // read has not answered: the rows and the total on screen are still the
+  // previous query's. They are not counted under the new title and search
+  // text, and an empty previous list does not say the new one is empty.
+  const awaitingList = boardLoading.value && !boardListCurrent.value
+  // The count is the list's on screen, so its word follows the search that
+  // list answers: under a search the server counts the matches, not the posts
+  // of the Board.
+  const totalWord = (boardListOnScreen.value?.query.search ?? '') !== '' ? '일치' : '전체'
   const countLabel = readFailed
     ? '불러오지 못함'
-    : boardTotal.value !== null
-      ? `${totalWord} ${boardTotal.value}개`
-      : boardHasMore.value
-        ? `현재 ${visiblePosts.length}개 불러옴 · 더 있음`
-        : `${totalWord} ${visiblePosts.length}개`
+    : awaitingList
+      ? '불러오는 중…'
+      : boardTotal.value !== null
+        ? `${totalWord} ${boardTotal.value}개`
+        : boardHasMore.value
+          ? `현재 ${visiblePosts.length}개 불러옴 · 더 있음`
+          : `${totalWord} ${visiblePosts.length}개`
 
   return html`
     <section class="bd-feed">
@@ -1470,7 +1489,7 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
               title="게시판을 불러오지 못했습니다"
               onAction=${() => { void refreshBoard() }}
             />`
-          : visiblePosts.length === 0 && boardLoading.value
+          : visiblePosts.length === 0 && awaitingList
             ? html`<${LoadingState} title="게시판 불러오는 중…" />`
             : visiblePosts.length === 0 && searching
               ? html`<${BdSearchMiss} matchCount=${posts.length} />`

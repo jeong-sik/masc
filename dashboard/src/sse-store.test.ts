@@ -28,7 +28,6 @@ const refreshExecution = vi.fn<(opts?: { force?: boolean }) => Promise<void>>(as
 const refreshBoard = vi.fn<() => void>(() => {})
 const refreshFusionRuns = vi.fn<() => void>(() => {})
 const invalidateDashboardCache = vi.fn<() => void>(() => {})
-const hydrateBoardSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydrateShellSnapshot = vi.fn<(payload: unknown, opts?: unknown) => void>(() => {})
 const hydrateShellRootSnapshot = vi.fn<(payload: unknown, completion?: boolean) => void>(() => {})
 const hydrateExecutionSnapshot = vi.fn<(payload: unknown) => void>(() => {})
@@ -66,7 +65,6 @@ async function loadSseStore() {
   }))
   vi.doMock('./store', () => ({
     invalidateDashboardCache,
-    hydrateBoardSnapshot,
     hydrateShellSnapshot,
     hydrateShellRootSnapshot,
     hydrateExecutionSnapshot,
@@ -145,7 +143,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     refreshBoard.mockClear()
     refreshFusionRuns.mockClear()
     invalidateDashboardCache.mockClear()
-    hydrateBoardSnapshot.mockClear()
     hydrateShellSnapshot.mockClear()
     hydrateShellRootSnapshot.mockClear()
     hydrateExecutionSnapshot.mockClear()
@@ -1232,7 +1229,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(hydrateBoardSnapshot).not.toHaveBeenCalled()
     expect(refreshBoard).toHaveBeenCalledTimes(1)
   }, dashboardDeltaTimeoutMs)
 })

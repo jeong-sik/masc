@@ -25,7 +25,6 @@ import type {
   DashboardExecutionResponse,
   DashboardBootstrapResponse,
   DashboardBootstrapSliceError,
-  DashboardMemoryResponse,
   DashboardPlanningResponse,
   DashboardConfigResolution,
   DashboardRuntimeResolution,
@@ -331,12 +330,27 @@ export const boardHearthFilter = signal('')
 /** The applied Board search text, trimmed; '' when nothing is searched. The
  *  server answers it over the whole Board, so the list holds only matches. */
 export const boardSearchText = signal('')
-/** Whether the Board list answers a sub-board, a search or an author filter.
- *  `boardTotal` then counts that list, not the Board. */
-export const boardListNarrowed = computed(() =>
-  boardHearthFilter.value.trim() !== ''
-  || boardSearchText.value !== ''
-  || boardAuthorFilter.value.trim() !== '')
+/** The list in `boardPosts`: the query it answers and the first-page request
+ *  that filled it. null until a first page has answered, and after the list of
+ *  another query was taken off the screen. `boardTotal` and `boardHasMore`
+ *  describe this list. The sub-board, search and filter signals above say
+ *  what the operator asks for now: from a change to one of them until the
+ *  read answers, the list on screen is still the previous query's. */
+export const boardListOnScreen = signal<BoardListOnScreen | null>(null)
+/** Whether the list on screen answers a sub-board, a search or an author
+ *  filter. `boardTotal` then counts that list, not the Board. */
+export const boardListNarrowed = computed(() => {
+  const list = boardListOnScreen.value
+  return list !== null
+    && (list.query.hearth.trim() !== ''
+      || list.query.search !== ''
+      || list.query.author.trim() !== '')
+})
+/** Whether the list on screen answers what the operator asks for now. */
+export const boardListCurrent = computed(() => {
+  const list = boardListOnScreen.value
+  return list !== null && sameBoardListQuery(list.query, boardListQuery())
+})
 /** Number of posts currently loaded — the offset for the next page request. */
 export const boardOffset = signal<number>(0)
 /** true when the server indicates (or we optimistically believe) more posts are available. */
@@ -1694,13 +1708,18 @@ function boardPageSize(): number {
 }
 
 /** What a list read asks the server for. Reads with equal queries read the same list. */
-interface BoardListQuery {
+export interface BoardListQuery {
   readonly sort: BoardSortMode
   readonly excludeSystem: boolean
   readonly excludeAutomation: boolean
   readonly author: string
   readonly hearth: string
   readonly search: string
+}
+
+export interface BoardListOnScreen {
+  readonly query: BoardListQuery
+  readonly requestId: number
 }
 
 function boardListQuery(): BoardListQuery {
@@ -1735,10 +1754,6 @@ function sameBoardListQuery(a: BoardListQuery, b: BoardListQuery): boolean {
 
 /** Id of the newest first-page request. Ids grow in the order the requests start. */
 let boardListRequestId = 0
-/** The list in `boardPosts`: the query it answers and the first-page request
- *  that filled it. null until a first page has answered, and after the list of
- *  another query was taken off the screen. */
-let boardListOnScreen: { readonly query: BoardListQuery; readonly requestId: number } | null = null
 /** Id of the next-page request that may still be appended. It moves on whenever
  *  the list on screen is replaced, which leaves a next page still on the wire
  *  with nothing to continue. */
@@ -1771,19 +1786,25 @@ export async function refreshBoard(): Promise<void> {
     // Only a later read of this same query makes this answer the older one. A
     // later read of another query filled the screen while the operator was
     // away; this answer is for the list they came back to.
-    if (boardListOnScreen !== null
-      && sameBoardListQuery(boardListOnScreen.query, query)
-      && boardListOnScreen.requestId > requestId) return
+    const onScreen = boardListOnScreen.value
+    if (onScreen !== null
+      && sameBoardListQuery(onScreen.query, query)
+      && onScreen.requestId > requestId) return
     const next = data.posts ?? []
-    boardPosts.value = reconcileBoardPosts(boardPosts.value, next)
-    boardOffset.value = next.length
-    boardHasMore.value = typeof data.has_more === 'boolean'
-      ? data.has_more
-      : next.length >= limit
-    boardTotal.value = typeof data.total === 'number' ? data.total : null
-    lastBoardRefreshAt.value = new Date().toISOString()
-    boardListOnScreen = { query, requestId }
-    boardListReadFailed.value = false
+    // The rows, their total and the query they answer change together: a
+    // reader between two of these writes would count one list under the
+    // query of another.
+    batch(() => {
+      boardPosts.value = reconcileBoardPosts(boardPosts.value, next)
+      boardOffset.value = next.length
+      boardHasMore.value = typeof data.has_more === 'boolean'
+        ? data.has_more
+        : next.length >= limit
+      boardTotal.value = typeof data.total === 'number' ? data.total : null
+      lastBoardRefreshAt.value = new Date().toISOString()
+      boardListOnScreen.value = { query, requestId }
+      boardListReadFailed.value = false
+    })
     abandonBoardNextPage()
   } catch (err) {
     console.warn('[Board] fetch error:', err)
@@ -1792,33 +1813,23 @@ export async function refreshBoard(): Promise<void> {
     const wanted = boardListQuery()
     // The operator has moved to another list; the request for that one speaks for it.
     if (asked !== null && !sameBoardListQuery(asked, wanted)) return
-    if (boardListOnScreen !== null && !sameBoardListQuery(boardListOnScreen.query, wanted)) {
+    const onScreen = boardListOnScreen.value
+    if (onScreen !== null && !sameBoardListQuery(onScreen.query, wanted)) {
       // What is on screen answers another query, and this one has no answer to show.
-      boardPosts.value = []
-      boardOffset.value = 0
-      boardHasMore.value = false
-      boardTotal.value = null
-      boardListOnScreen = null
+      batch(() => {
+        boardPosts.value = []
+        boardOffset.value = 0
+        boardHasMore.value = false
+        boardTotal.value = null
+        boardListOnScreen.value = null
+      })
       abandonBoardNextPage()
     }
-    boardListReadFailed.value = boardListOnScreen === null
+    boardListReadFailed.value = boardListOnScreen.value === null
     showToast('게시판을 불러오지 못했습니다', 'error')
   } finally {
     if (requestId === boardListRequestId) boardLoading.value = false
   }
-}
-
-export function hydrateBoardSnapshot(data: DashboardMemoryResponse): void {
-  const next = data.posts ?? []
-  boardPosts.value = reconcileBoardPosts(boardPosts.value, next)
-  const offset = typeof data.offset === 'number' ? data.offset : 0
-  const limit = typeof data.limit === 'number' ? data.limit : boardPageSize()
-  boardOffset.value = offset + next.length
-  boardHasMore.value = typeof data.has_more === 'boolean'
-    ? data.has_more
-    : next.length >= limit
-  boardTotal.value = typeof data.total === 'number' ? data.total : null
-  lastBoardRefreshAt.value = data.generated_at ?? new Date().toISOString()
 }
 
 /** Append the next page of board posts onto boardPosts. Noop if a next page is
@@ -1830,7 +1841,8 @@ export async function loadMoreBoardPosts(): Promise<void> {
   if (boardLoadingMore.value) return
   if (!boardHasMore.value) return
   const query = boardListQuery()
-  if (boardListOnScreen !== null && !sameBoardListQuery(boardListOnScreen.query, query)) return
+  const onScreen = boardListOnScreen.value
+  if (onScreen !== null && !sameBoardListQuery(onScreen.query, query)) return
   const requestId = ++boardNextPageRequestId
   const limit = boardPageSize()
   const offset = boardOffset.value

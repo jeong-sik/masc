@@ -56,6 +56,7 @@ let request_fingerprint
                      ; cache_system_prompt
                      ; system_prompt_cache_prefix
                      ; cache_extended_ttl
+                     ; cache_session_key
                      ; model_capabilities_override
                      ; model_anthropic_thinking_control_override
                      ; request_policy_snapshot
@@ -104,6 +105,10 @@ let request_fingerprint
   ignore model_capabilities_override;
   ignore model_anthropic_thinking_control_override;
   ignore request_policy_snapshot;
+  (* [cache_session_key] steers provider-side prompt-cache routing locality
+     without changing the prompt or expected answer; [http_request_fingerprint]
+     still binds the exact serialized body when emitted. *)
+  ignore cache_session_key;
   ignore reasoning_uncontrolled;
   let json =
     `Assoc

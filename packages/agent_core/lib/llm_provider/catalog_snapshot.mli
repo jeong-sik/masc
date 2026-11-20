@@ -61,6 +61,9 @@ val supports_parallel_tool_suppression : t -> provider_id:string -> bool
 val supports_extended_cache_ttl : t -> provider_id:string -> bool
 (** The model-policy provider of [provider_id] declares the one-hour
     prompt-cache lifetime. An unknown provider declares nothing. *)
+val cache_session_wire : t -> provider_id:string -> Capability_vocab.cache_session_wire
+(** The prompt-cache session wire field declared by the model-policy provider of
+    [provider_id]. An unknown provider returns [No_cache_session_wire]. *)
 
 type default_error =
   | Invalid_model_catalog of string

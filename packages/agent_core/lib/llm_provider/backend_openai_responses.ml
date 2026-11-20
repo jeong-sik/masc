@@ -590,6 +590,16 @@ let build_request_artifact
     @ body
   in
   let body = if stream then ("stream", `Bool true) :: body else body in
+  let body =
+    match
+      Provider_config.cache_session_wire config,
+      Provider_config.validated_cache_session_key config
+    with
+    | Capabilities.No_cache_session_wire, (Some _ | None)
+    | Capabilities.Openrouter_session_id, (Some _ | None)
+    | Capabilities.Prompt_cache_key, None -> body
+    | Capabilities.Prompt_cache_key, Some key -> ("prompt_cache_key", `String key) :: body
+  in
   Request_artifact_internal.create
     ~payload:(Yojson.Safe.to_string (`Assoc body))
     ~output_token_receipt

@@ -3054,6 +3054,105 @@ let test_responses_build_request_includes_previous_response_id () =
   check_int "manual input still present" 1 (member "input" body |> to_list |> List.length)
 ;;
 
+let test_cache_session_wire_emission_and_validation () =
+  let messages = [ msg User [ Text "hello" ] ] in
+  let chat_fields config =
+    Backend_openai_request.build_request ~config ~messages ()
+    |> Yojson.Safe.from_string
+    |> Yojson.Safe.Util.to_assoc
+  in
+  let responses_fields config =
+    Responses.build_request ~config ~messages ()
+    |> Yojson.Safe.from_string
+    |> Yojson.Safe.Util.to_assoc
+  in
+  (* OpenRouter emits top-level "session_id" and never "prompt_cache_key". *)
+  let or_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openrouter"
+      ~model_id:"anthropic/claude-opus-5"
+      ~base_url:"https://openrouter.ai/api/v1"
+      ~cache_session_key:"  keeper-trace-123  "
+      ()
+  in
+  let or_body = chat_fields or_cfg in
+  check_bool "openrouter emits trimmed session_id" true
+    (List.assoc_opt "session_id" or_body = Some (`String "keeper-trace-123"));
+  check_bool "openrouter omits prompt_cache_key" false
+    (List.mem_assoc "prompt_cache_key" or_body);
+  (* OpenAI Chat and Mistral emit "prompt_cache_key" and never "session_id". *)
+  List.iter
+    (fun (provider_id, model_id, base_url) ->
+       let cfg =
+         Provider_config.make
+           ~kind:OpenAI_compat
+           ~provider_id
+           ~model_id
+           ~base_url
+           ~cache_session_key:"keeper-trace-456"
+           ()
+       in
+       let body = chat_fields cfg in
+       check_bool (provider_id ^ " emits prompt_cache_key") true
+         (List.assoc_opt "prompt_cache_key" body = Some (`String "keeper-trace-456"));
+       check_bool (provider_id ^ " omits session_id") false
+         (List.mem_assoc "session_id" body))
+    [ "openai", "gpt-5.5", "https://api.openai.com/v1"
+    ; "mistral", "mistral-large-4", "https://api.mistral.ai/v1"
+    ];
+  (* OpenAI Responses emits "prompt_cache_key". *)
+  let resp_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openai-responses"
+      ~model_id:"gpt-5.6-sol"
+      ~base_url:"https://api.openai.com"
+      ~request_path:"/v1/responses"
+      ~cache_session_key:"keeper-trace-resp"
+      ()
+  in
+  let resp_body = responses_fields resp_cfg in
+  check_bool "openai-responses emits prompt_cache_key" true
+    (List.assoc_opt "prompt_cache_key" resp_body = Some (`String "keeper-trace-resp"));
+  check_bool "openai-responses omits session_id" false
+    (List.mem_assoc "session_id" resp_body);
+  (* Providers with No_cache_session_wire and anonymous endpoints emit neither key. *)
+  List.iter
+    (fun (label, provider_id, kind) ->
+       let cfg =
+         Provider_config.make
+           ~kind
+           ?provider_id
+           ~model_id:"m"
+           ~base_url:"https://example.invalid"
+           ~cache_session_key:"keeper-trace-unused"
+           ()
+       in
+       let body = chat_fields cfg in
+       check_bool (label ^ " omits session_id") false (List.mem_assoc "session_id" body);
+       check_bool (label ^ " omits prompt_cache_key") false
+         (List.mem_assoc "prompt_cache_key" body))
+    [ "glm", Some "glm", Provider_config.Glm
+    ; "deepseek", Some "deepseek", Provider_config.OpenAI_compat
+    ; "anonymous", None, Provider_config.OpenAI_compat
+    ];
+  (* Blank and >256-byte keys are omitted; exact 256-byte key is emitted. *)
+  let key_256 = String.make 256 'k' in
+  let key_257 = String.make 257 'k' in
+  let or_256 = chat_fields { or_cfg with cache_session_key = Some key_256 } in
+  check_bool "256-byte session_id emitted" true
+    (List.assoc_opt "session_id" or_256 = Some (`String key_256));
+  List.iter
+    (fun (label, cache_session_key) ->
+       let body = chat_fields { or_cfg with cache_session_key } in
+       check_bool (label ^ " omits session_id") false (List.mem_assoc "session_id" body);
+       let rbody = responses_fields { resp_cfg with cache_session_key } in
+       check_bool (label ^ " omits prompt_cache_key") false
+         (List.mem_assoc "prompt_cache_key" rbody))
+    [ "none", None; "blank", Some "   \t "; "over-256", Some key_257 ]
+;;
+
 let test_responses_build_request_uses_text_format_json_schema () =
   let schema =
     `Assoc
@@ -4115,6 +4214,10 @@ let () =
             "build request previous_response_id"
             `Quick
             test_responses_build_request_includes_previous_response_id
+        ; Alcotest.test_case
+            "cache_session_wire emission and key validation"
+            `Quick
+            test_cache_session_wire_emission_and_validation
         ; Alcotest.test_case
             "build request text.format json_schema"
             `Quick

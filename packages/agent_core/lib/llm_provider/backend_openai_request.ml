@@ -492,6 +492,16 @@ let build_request_assoc_artifact
            config.model_id)
     | true, None | false, None -> body
   in
+  let body =
+    match
+      Provider_config.cache_session_wire config,
+      Provider_config.validated_cache_session_key config
+    with
+    | Capabilities.No_cache_session_wire, (Some _ | None)
+    | (Capabilities.Openrouter_session_id | Capabilities.Prompt_cache_key), None -> body
+    | Capabilities.Openrouter_session_id, Some key -> ("session_id", `String key) :: body
+    | Capabilities.Prompt_cache_key, Some key -> ("prompt_cache_key", `String key) :: body
+  in
   Request_artifact_internal.create ~payload:(`Assoc body) ~output_token_receipt
 ;;
 

@@ -294,6 +294,7 @@ let exact_config (target : request_target) response_format =
   ; disable_parallel_tool_use = false
   ; response_format
   ; cache_system_prompt = false
+  ; cache_session_key = None
   ; keep_alive = None
   ; internal_model_rotation_count = None
   ; previous_response_id = None

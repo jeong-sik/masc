@@ -56,6 +56,11 @@ type uncontrolled_reasoning = Capability_vocab.uncontrolled_reasoning =
   | Provider_default_reasoning
   | Provider_enables_reasoning
 
+type cache_session_wire = Capability_vocab.cache_session_wire =
+  | No_cache_session_wire
+  | Openrouter_session_id
+  | Prompt_cache_key
+
 type reasoning_replay_override = Capability_vocab.reasoning_replay_override =
   | Default_reasoning_replay
   | Force_no_replay

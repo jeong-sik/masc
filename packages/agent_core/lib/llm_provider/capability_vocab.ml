@@ -82,6 +82,11 @@ type reasoning_output_format =
    arrives on its own channel: a model can do both at once, and minimax-m3
    does. Folding this into that axis costs the model its reasoning_details
    stream. *)
+type cache_session_wire =
+  | No_cache_session_wire
+  | Openrouter_session_id
+  | Prompt_cache_key
+
 type json_schema_dialect =
   | Openai_json_schema
   | Json_object_schema
@@ -754,4 +759,32 @@ let json_schema_dialect_of_string = function
 let json_schema_dialect_to_string = function
   | Openai_json_schema -> "openai_json_schema"
   | Json_object_schema -> "json_object_schema"
+;;
+
+let cache_session_wire_table =
+  [ "none", No_cache_session_wire
+  ; "openrouter_session_id", Openrouter_session_id
+  ; "prompt_cache_key", Prompt_cache_key
+  ]
+;;
+
+let cache_session_wire_values = List.map fst cache_session_wire_table
+
+let cache_session_wire_of_string raw =
+  match normalize raw with
+  | "" -> None
+  | normalized -> List.assoc_opt normalized cache_session_wire_table
+;;
+
+let cache_session_wire_to_string = function
+  | No_cache_session_wire -> "none"
+  | Openrouter_session_id -> "openrouter_session_id"
+  | Prompt_cache_key -> "prompt_cache_key"
+;;
+
+let%test "cache_session_wire round-trips through to_string and of_string" =
+  List.for_all
+    (fun (_raw, wire) ->
+       cache_session_wire_of_string (cache_session_wire_to_string wire) = Some wire)
+    cache_session_wire_table
 ;;

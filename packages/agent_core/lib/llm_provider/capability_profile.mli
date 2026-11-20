@@ -63,6 +63,11 @@ type chat_output_budget_field = Capability_vocab.chat_output_budget_field =
   | Chat_max_tokens
   | Chat_max_completion_tokens
 
+type cache_session_wire = Capability_vocab.cache_session_wire =
+  | No_cache_session_wire
+  | Openrouter_session_id
+  | Prompt_cache_key
+
 type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
   | Rich_json_schema
   | Conformant_subset_required

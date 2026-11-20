@@ -62,6 +62,11 @@ type chat_output_budget_field = Capability_vocab.chat_output_budget_field =
   | Chat_max_tokens
   | Chat_max_completion_tokens
 
+type cache_session_wire = Capability_vocab.cache_session_wire =
+  | No_cache_session_wire
+  | Openrouter_session_id
+  | Prompt_cache_key
+
 type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
   | Rich_json_schema
   | Conformant_subset_required
@@ -396,6 +401,10 @@ val request_policy_anthropic_thinking_control :
 val request_policy_pricing_source : request_policy -> Pricing.source
 (** The same captured catalog and provider authority used for this request's
     model policy, including unknown rates and selected bare-row permissions. *)
+
+val request_policy_cache_session_wire : request_policy -> cache_session_wire
+(** The prompt-cache session routing wire field declared by the selected
+    provider entry, or {!No_cache_session_wire} when undeclared or anonymous. *)
 
 
 (** Exact bare-model lookup from the one loaded model catalog. Returns [None]

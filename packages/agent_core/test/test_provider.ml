@@ -184,6 +184,39 @@ let test_provider_config_rebinds_model_specific_context () =
     (Option.is_none target.model_capabilities_override)
 ;;
 
+let test_provider_config_threads_cache_session_key () =
+  let parent =
+    Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openrouter"
+      ~model_id:"anthropic/claude-opus-5"
+      ~base_url:"https://openrouter.ai/api/v1"
+      ~cache_session_key:"parent-trace"
+      ()
+  in
+  let inherited =
+    Agent_turn.provider_config_with_agent_config
+      ~config:(Types.default_config ~model:"anthropic/claude-opus-5")
+      parent
+  in
+  Alcotest.(check (option string))
+    "absent agent cache_session_key preserves parent key"
+    (Some "parent-trace")
+    inherited.cache_session_key;
+  let overridden =
+    Agent_turn.provider_config_with_agent_config
+      ~config:
+        { (Types.default_config ~model:"anthropic/claude-opus-5") with
+          cache_session_key = Some "keeper-trace-42"
+        }
+      parent
+  in
+  Alcotest.(check (option string))
+    "agent cache_session_key overrides parent key"
+    (Some "keeper-trace-42")
+    overridden.cache_session_key
+;;
+
 let () =
   install_embedded_model_catalog ();
   Alcotest.run
@@ -203,6 +236,10 @@ let () =
             "model rebind clears parent context"
             `Quick
             test_provider_config_rebinds_model_specific_context
+        ; Alcotest.test_case
+            "agent config threads cache_session_key"
+            `Quick
+            test_provider_config_threads_cache_session_key
         ] )
     ; ( "provider_files"
       , [ Alcotest.test_case

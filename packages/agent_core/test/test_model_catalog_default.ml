@@ -1369,6 +1369,45 @@ let test_openrouter_and_haiku_5_5_cache_multipliers () =
     check (option (float 0.0001)) "haiku-5-5 read" (Some 0.1) entry.cache_read_multiplier
 ;;
 
+let test_provider_cache_session_wire_declarations () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"cache_session_wire"
+  in
+  let snapshot =
+    match Llm_provider.Catalog_snapshot.of_catalogs ~models:(Some catalog) ~providers:None with
+    | Ok s -> s
+    | Error err -> Alcotest.fail (Llm_provider.Catalog_snapshot.error_to_string err)
+  in
+  let wire provider_id = Llm_provider.Catalog_snapshot.cache_session_wire snapshot ~provider_id in
+  let check_wire provider_id expected =
+    check bool (provider_id ^ " cache_session_wire") true (wire provider_id = expected)
+  in
+  check_wire "openrouter" Llm_provider.Capability_vocab.Openrouter_session_id;
+  check_wire "openai" Llm_provider.Capability_vocab.Prompt_cache_key;
+  check_wire "openai-responses" Llm_provider.Capability_vocab.Prompt_cache_key;
+  check_wire "mistral" Llm_provider.Capability_vocab.Prompt_cache_key;
+  check_wire "claude" Llm_provider.Capability_vocab.No_cache_session_wire;
+  check_wire "glm" Llm_provider.Capability_vocab.No_cache_session_wire;
+  check_wire "deepseek" Llm_provider.Capability_vocab.No_cache_session_wire;
+  check_wire "xai" Llm_provider.Capability_vocab.No_cache_session_wire;
+  check_wire "undeclared-provider" Llm_provider.Capability_vocab.No_cache_session_wire;
+  match
+    Model_catalog.of_toml_string
+      ~source:"invalid cache_session_wire"
+      {|[[providers]]
+id = "bad-wire"
+kind = "openai_compat"
+base_url = "https://example.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat"
+cache_session_wire = "bogus_key"
+|}
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "unknown cache_session_wire must fail closed"
+;;
+
 let () =
   run
     "model catalog default"
@@ -1475,6 +1514,10 @@ let () =
             "OpenRouter and Haiku 5.5 cache multipliers"
             `Quick
             test_openrouter_and_haiku_5_5_cache_multipliers
+        ; test_case
+            "provider cache_session_wire declarations"
+            `Quick
+            test_provider_cache_session_wire_declarations
         ; test_case
             "empty capability vocab value is rejected"
             `Quick

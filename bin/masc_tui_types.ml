@@ -3531,10 +3531,9 @@ let schedule_row_due_time row =
 (* The declaration's next firing and its last delivered occurrence are
    separate clocks. A one-shot marked Succeeded can still be queued. *)
 let chat_schedule_entries ~keeper_name snapshot =
-  let target = "keeper:" ^ keeper_name in
-  let owns row = match row.sch_payload_target with
-    | Some actual -> String.equal actual target
-    | None -> row.sch_payload_keeper_name = Some keeper_name in
+  (* The server derives "keeper:<name>" in [sch_payload_target] from the
+     same field it sends as [sch_payload_keeper_name]. *)
+  let owns row = row.sch_payload_keeper_name = Some keeper_name in
   let rows = List.filter owns snapshot.scs_rows in
   let active row = match Schedule_domain.schedule_status_of_string row.sch_status with
     | Ok (Scheduled | Due | Running) -> true

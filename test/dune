@@ -4932,6 +4932,7 @@
  (name test_tui_render_list_heights)
  (modules test_tui_render_list_heights)
  (libraries alcotest masc masc_tui_types masc_tui_render_prim masc_tui_render_board
+  masc_tui_link
   masc_tui_render_config masc_tui_ansi masc_tui_render_schedule masc_tui_theme
   masc_tui_frame_presenter masc_tui_fetched masc_tui_model_runtime_table
   masc_tui_runtime_config_view masc_tui_account_login masc_tui_render_work

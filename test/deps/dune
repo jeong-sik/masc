@@ -100,10 +100,9 @@
   (re_export masc.masc_board)
   (re_export masc.board_handlers)
   (re_export masc.board_tool_adapter)
-  ;; RFC-0056 Phase 1A — Trajectory leaf module sub-library.
+  ;; Trajectory leaf module sub-library.
   ;; Tests previously wrote `Masc.Trajectory.X` (wrapped pattern);
-  ;; after this re-export they use bare `Trajectory.X` per the
-  ;; G5 qualifier-removal budget.
+  ;; after this re-export they use bare `Trajectory.X`.
   (re_export masc.trajectory)
   ;; Keeper domain group libraries.
   (re_export masc.keeper_tooling)
@@ -113,9 +112,9 @@
   (re_export masc.briefing_compactors)
   ;; Dashboard_eval_feed leaf module sub-library.
   (re_export masc.dashboard_eval_feed)
-  ;; RFC-0056 Phase 1 — Dashboard_tla_specs leaf module sub-library.
+  ;; Dashboard_tla_specs leaf module sub-library.
   ;; Re-exported so test_dashboard_tla_specs keeps resolving the module
-  ;; after the carve (test rewrites Masc.Dashboard_tla_specs -> bare per G5).
+  ;; after the carve (test rewrites Masc.Dashboard_tla_specs -> bare).
   (re_export masc.dashboard_tla_specs)
   ;; Tool_call_quality_benchmark family sub-library.
   (re_export masc.tool_call_quality_benchmark)
@@ -208,9 +207,9 @@
   ;; Tool_registry.X / Tool_name.X / Tool_token.X / Dispatch_outcome.X resolves
   ;; after the carve.
   (re_export masc.masc_tool_dispatch)
-  ;; Tool surface leaf extracted to lib/tool_surface/ (masc_tool_surface, RFC-0056
-  ;; Phase 2 / LANE 6). Re-export so test code using bare Tool_spec.X /
-  ;; Tool_capability.X / Tool_shard_types*.X / Board_tool.X etc. resolves.
+  ;; Tool surface leaf extracted to lib/tool_surface/ (masc_tool_surface).
+  ;; Re-export so test code using bare Tool_spec.X / Tool_capability.X /
+  ;; Tool_shard_types*.X etc. resolves.
   (re_export masc.masc_tool_surface)
   (re_export masc_types)
   (re_export mirage-crypto)

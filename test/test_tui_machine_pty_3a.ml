@@ -1,6 +1,5 @@
-(* RFC machine-spectating-goes-through-lanes §5 3a (#38815) — the spectator
-   TUI over a real PTY against an in-process server with the real lane-addon
-   router and the DOS fixture worker. Three asserted behaviors:
+(* The spectator TUI over a real PTY against an in-process server with the
+   real lane-addon router and the DOS fixture worker. Three asserted behaviors:
 
      a. while the first live read is pending, the spectator screen still
         processes keys (the raw capture grows before any answer lands);
@@ -62,7 +61,7 @@ let sha256_of_file path =
   D.to_hex (D.digest_string bytes)
 
 (* The DOS program from the live-route test: prints HI, waits for a key,
-   exits. Kept identical so the machine behaves like the stage-1 suite. *)
+   exits. Kept identical so the machine behaves as it does in that test. *)
 let hello_com =
   "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
 
@@ -266,7 +265,7 @@ let main env =
     (* The real server classifies the Host authority per request and runs
        every route handler inside Server_request_authority.with_current;
        route handlers (e.g. /health identity) read the current authority.
-       RFC-faithful in-process wiring requires the same admission here. *)
+       Faithful in-process wiring requires the same admission here. *)
     (* Harness-only: strip conditional headers so the router always answers
        200 with a body. The TUI's surface loaders treat a bare 304 (empty
        body) as a decode failure, which spirals the workspace badge. *)

@@ -2042,10 +2042,9 @@ let test_rejected_verdict_audit_preserves_reason () =
         (json |> member "authority_kind" |> to_string))
 
 (* The judging runtime is the axis a verdict history can be grouped on:
-   since RFC-0361 D7(b) [authority_actor] is the fixed [verifier_exact]
-   identity, so 74 verdicts carry one actor. The runtime was already computed
-   and carried inside the review notes blob, but every structured projection
-   dropped it. *)
+   [authority_actor] is the fixed [verifier_exact] identity, so 74 verdicts
+   carry one actor. The runtime was already computed and carried inside the
+   review notes blob, but every structured projection dropped it. *)
 let test_verdict_audit_names_the_judging_runtime () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in

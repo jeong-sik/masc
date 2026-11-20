@@ -1,6 +1,5 @@
-(** RFC-0233 §5 harness for PR-3: Prompt_block_id round-trip, TurnRecord
-    codec round-trip, and block-diff exactness (the "what entered/left
-    context" question as a test). *)
+(** Prompt_block_id round-trip, TurnRecord codec round-trip, and block-diff
+    exactness (the "what entered/left context" question as a test). *)
 
 open Alcotest
 
@@ -1214,7 +1213,7 @@ let test_codec_rejects_unknown_fields () =
       (Astring.String.is_infix ~affix:"prompt block fields are not exact" message)
 ;;
 
-(* ── Block diff (RFC §5: exact added/removed set) ─────── *)
+(* ── Block diff (exact added/removed set) ─────────────── *)
 
 let record_with_blocks blocks = { (sample_record ()) with blocks }
 

@@ -1,5 +1,5 @@
-; RFC play-link-for-the-shared-machine §2.4 through the real router: who may
-; issue, what the answer carries, and that revoking frees the DOS controller.
+; The play invite routes, driven through the real router: who may issue an
+; invite, what the answer carries, and that revoking frees the DOS controller.
 
 (test
  (name test_play_invite_routes)

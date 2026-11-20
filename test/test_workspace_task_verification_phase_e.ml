@@ -1,6 +1,4 @@
-(* RFC-0109 Phase E regression guard.
-
-   The transition layer does not decide whether evidence is sufficient. It
+(* The transition layer does not decide whether evidence is sufficient. It
    preserves explicitly typed producer refs and represents completion prose as
    [note:] evidence; contract requirements are projected separately. *)
 

@@ -308,7 +308,7 @@ let test_bytes_cache_counters () =
    wrong rather than merely wasteful.  [send_dashboard_delta_frame] carries it in
    a separate notification for exactly that reason.
 
-   Written against "goal_loop_status" -> "goals" (#23339).  RFC-0352 (#25500)
+   Written against "goal_loop_status" -> "goals" (#23339).  A later change
    deleted that mapping arm, which left this red for 17 days -- unnoticed because
    test_ws_transport is not in any ci.yml target list.  The property under test is
    about the shared-payload contract and not about which event carries it, so it
@@ -895,13 +895,12 @@ let test_ws_external_subscriber_count () =
     let final = Sse.external_subscriber_count () in
     Alcotest.(check int) "back to before" before final)
 
-(* ====== Slice index (Phase 1: bookkeeping only) ====== *)
+(* ====== Slice index (bookkeeping only) ====== *)
 
 (* The slice index maps each dashboard slice to the set of session IDs
-   currently subscribed to it.  Phase 1 maintains the index at subscribe
-   / unsubscribe / cleanup time but does NOT yet rewire the broadcast
-   fanout (RFC #10119).  These tests pin add/remove/sweep semantics so
-   Phase 2 can rely on them. *)
+   currently subscribed to it.  It is maintained at subscribe / unsubscribe /
+   cleanup time, but the broadcast fanout does not read it.  These tests pin
+   add/remove/sweep semantics. *)
 
 let test_slice_index_starts_empty_for_unknown_slice () =
   Eio_main.run (fun _env ->
@@ -986,9 +985,9 @@ let test_slice_index_add_is_idempotent () =
       1 occurrences;
     Ws.__test_slice_index_remove_session sid)
 
-(* ====== Slice fanout gate (Phase 2) ====== *)
+(* ====== Slice fanout gate ====== *)
 
-(* Phase 2 turns on the slice-aware fanout: when the env flag is set,
+(* The slice-aware fanout is on unless the env flag turns it off:
    slice-scoped events skip raw-SSE-forwards to authenticated sessions
    whose route does not subscribe.  The counter
    [masc_ws_slice_fanout_skipped_total] advances per skip.  Catch-all
@@ -1158,14 +1157,13 @@ let test_missed_pong_threshold_reads_env () =
   with_env_var "MASC_WS_MISSED_PONG_THRESHOLD" "-2" (fun () ->
     Alcotest.(check int) "negative values clamp to 0" 0 (Ws.__test_missed_pong_threshold ()))
 
-(* ====== Cross-domain delivery-state safety (RFC-0204 Phase 3 gate) ====== *)
+(* ====== Cross-domain delivery-state safety ====== *)
 
 (* The per-session dashboard delivery counters are read and written on the SSE
    fanout callback, which fires from the main domain (keeper keepalive / event
    bridge / registry broadcasts) AND from serving handlers
-   (HTTP-route broadcasts).  Today that is safe only because a single Eio
-   domain runs cooperative fibers that never preempt mid-update.  RFC-0204
-   Phase 3 moves serving to a second domain; the moment two domains run in
+   (HTTP-route broadcasts).  On a single Eio domain that is safe because
+   cooperative fibers never preempt mid-update.  The moment two domains run in
    parallel, a plain [int] read-modify-write in [next_dashboard_seq] loses
    updates and hands two callers the same seq, breaking the dashboard-ws.v1
    seq/ack contract.

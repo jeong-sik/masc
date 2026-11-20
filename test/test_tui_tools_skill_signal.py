@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Tools view reads each part on the server's pushes (RFC-0483 §4.3):
+"""The Tools view reads each part on the server's pushes:
 
 - the Surface pane reads the selected Keeper's inventory when that Keeper's
   row, the Lane Add-on exports or runtime.toml change, and not for another

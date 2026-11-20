@@ -45,18 +45,10 @@ let layout ~cols =
 
 let strip_cells t = if t.side_cells > 0 then now_slot_cells + t.side_cells else 0
 
-let minute_seconds = int_of_float Masc_time_constants.minute
-let slot_minutes = Pulse.slot_seconds / minute_seconds
-let minutes_per_hour = Masc_time_constants.hour_int / minute_seconds
-
-let window_of_minutes minutes =
-  let hours = minutes / minutes_per_hour and rest = minutes mod minutes_per_hour in
-  if hours = 0 then Printf.sprintf "%dm" rest
-  else if rest = 0 then Printf.sprintf "%dh" hours
-  else Printf.sprintf "%dh%02dm" hours rest
-;;
-
-let window_label ~slots = window_of_minutes (slots * slot_minutes)
+(* A run of slots is a length the grid set, so it reads on the set-span
+   ladder (RFC tui-one-screen-grammar 6.2): 48 half-hour slots read 1d,
+   not 24h. *)
+let window_label ~slots = Masc_tui_value.Interval.text (slots * Pulse.slot_seconds)
 
 let slot_label = window_label ~slots:1
 

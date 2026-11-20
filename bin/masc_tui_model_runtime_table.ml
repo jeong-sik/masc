@@ -158,9 +158,9 @@ let detail_lines ?(ko = false) ?account_email ?keepers row =
                | other -> other
            in
            Printf.sprintf
-             (if ko then "컨텍스트: %d 토큰 (%s) · 모델 사양: %s"
-              else "Context: %d tokens (%s); model specification: %s")
-             n source_label (tokens_text row.model_context))
+             (if ko then "컨텍스트: %s 토큰 (%s) · 모델 사양: %s"
+              else "Context: %s tokens (%s); model specification: %s")
+             (Masc_tui_value.Count.grouped n) source_label (tokens_text row.model_context))
     ; (if ko then "- 는 해당 키가 설정되지 않았음을 뜻합니다. 위 섹션에서 추가하거나 수정할 수 있습니다."
        else "- means that key is absent; add or edit it in the section shown above.")
     ]

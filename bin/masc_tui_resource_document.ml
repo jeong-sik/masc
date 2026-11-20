@@ -286,7 +286,7 @@ let resource_document ?(ko = false) entry
   in
   let size =
     match resource.size with
-    | Some bytes -> Printf.sprintf (if ko then "%d바이트" else "%d bytes") bytes
+    | Some bytes -> Printf.sprintf (if ko then "%s바이트" else "%s bytes") (Masc_tui_value.Count.grouped bytes)
     | None -> say "크기 알 수 없음" "size unknown"
   in
   let mime = present resource.mime_type in
@@ -327,10 +327,10 @@ let resource_document ?(ko = false) entry
       | Masc_tui_mcp.Resource_blob {base64} ->
         Markdown_text
           (Printf.sprintf
-             (if ko then "%s · `%s` · base64 %d바이트" else "%s · `%s` · %d base64 bytes")
+             (if ko then "%s · `%s` · base64 %s바이트" else "%s · `%s` · %s base64 bytes")
              (if Masc_tui_resource_images.is_image part_mime then say "이미지 데이터" "Image data"
               else say "바이너리 데이터" "Binary data")
-             part_mime (String.length base64)) in
+             part_mime (Masc_tui_value.Count.grouped (String.length base64))) in
     match contents with
     | Some (_ :: _ :: _) ->
       [ Part_heading index

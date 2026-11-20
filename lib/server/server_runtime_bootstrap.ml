@@ -1700,6 +1700,68 @@ let activate_owner_state
   }
 ;;
 
+(* What a failure of the owner initialization does. Before readiness it ends
+   the process, so no partial owner is left on the base path. After readiness
+   the owner goes on serving, marked degraded. *)
+let handle_initialization_failure error =
+  match
+    startup_failure_disposition
+      ~state_ready:(Server_startup_state.snapshot ()).state_ready
+  with
+  | Fatal_pre_ready ->
+    Log.Server.error
+      "[FATAL] Critical startup failed before readiness; refusing partial BasePath ownership: %s"
+      error;
+    exit 1
+  | Degraded_after_ready ->
+    Server_startup_state.mark_degraded ~error;
+    Log.Server.error
+      "Auxiliary initialization failed after readiness (HTTP remains available in degraded state): %s"
+      error
+;;
+
+(* Runs the initialization of an owner in the fiber forked for it. Whatever it
+   raises ends at [handle_initialization_failure], so the fiber never fails
+   the switch it runs under. *)
+let owner_initialization initialize =
+  try initialize () with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Owner_initialization_failed error ->
+    handle_initialization_failure (owner_initialization_error_to_string error)
+  | exn -> handle_initialization_failure (Printexc.to_string exn)
+;;
+
+(* The startup watchdog: if init does not reach state_ready within timeout,
+   log and exit so external process managers can restart the server.
+   Prevents zombie-listener state where the socket is open but HTTP
+   requests hang because init is stuck. *)
+(* A daemon: the watchdog only sleeps and then reads a flag, so nothing
+   waits for it and the switch must not either. As an ordinary fiber it
+   kept a normally returning [Switch.run] parked for the rest of the
+   timeout. Cancelling it loses nothing -- a closing switch means the
+   process is already ending, which is what the watchdog would force. *)
+let start_startup_watchdog ~sw ~clock =
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Switch.run ~name:"startup-watchdog" (fun _ ->
+      try
+        let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
+        Eio.Time.sleep clock timeout_sec;
+        let current = Server_startup_state.snapshot () in
+        if not current.state_ready then (
+          let elapsed = Server_startup_state.elapsed_since_start () in
+          Log.Server.error
+            "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s). Exiting."
+            timeout_sec elapsed
+            (Server_startup_state.phase_to_string current.phase);
+          exit 1)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Server.error "startup watchdog fiber failed: %s"
+          (Printexc.to_string exn));
+    `Stop_daemon)
+;;
+
 let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user ~lease
     ?input_base_path ?on_ready ~accept_store_quarantine ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler () =
@@ -1804,23 +1866,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
      auxiliary failure after readiness may continue as degraded serving. *)
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Switch.run ~name:"owner-initialization" @@ fun _ ->
-    let handle_initialization_failure error =
-      match
-        startup_failure_disposition
-          ~state_ready:(Server_startup_state.snapshot ()).state_ready
-      with
-      | Fatal_pre_ready ->
-        Log.Server.error
-          "[FATAL] Critical startup failed before readiness; refusing partial BasePath ownership: %s"
-          error;
-        exit 1
-      | Degraded_after_ready ->
-        Server_startup_state.mark_degraded ~error;
-        Log.Server.error
-          "Auxiliary initialization failed after readiness (HTTP remains available in degraded state): %s"
-          error
-    in
-    try
+    owner_initialization @@ fun () ->
       Server_startup_state.mark_blocking ();
       (* HIGH-RISK-UNREVIEWED: a CLI starts on an account only by the access the
          process published (plan D2-3), and the boot judged this one. *)
@@ -2178,42 +2224,9 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
                  (Server_auxiliary_startup.component_name component)
                  (Printexc.to_string failure.Server_auxiliary_startup.cause))
              failures);
-      ()
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | Owner_initialization_failed error ->
-      handle_initialization_failure (owner_initialization_error_to_string error)
-    | exn ->
-      handle_initialization_failure (Printexc.to_string exn));
+      ());
 
-  (* 2b. Startup watchdog: if init does not reach state_ready within timeout,
-     log and exit so external process managers can restart the server.
-     Prevents zombie-listener state where the socket is open but HTTP
-     requests hang because init is stuck. *)
-  (* A daemon: the watchdog only sleeps and then reads a flag, so nothing
-     waits for it and the switch must not either. As an ordinary fiber it
-     kept a normally returning [Switch.run] parked for the rest of the
-     timeout. Cancelling it loses nothing -- a closing switch means the
-     process is already ending, which is what the watchdog would force. *)
-  Eio.Fiber.fork_daemon ~sw (fun () ->
-    Eio.Switch.run ~name:"startup-watchdog" (fun _ ->
-      try
-        let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
-        Eio.Time.sleep clock timeout_sec;
-        let current = Server_startup_state.snapshot () in
-        if not current.state_ready then (
-          let elapsed = Server_startup_state.elapsed_since_start () in
-          Log.Server.error
-            "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s). Exiting."
-            timeout_sec elapsed
-            (Server_startup_state.phase_to_string current.phase);
-          exit 1)
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Log.Server.error "startup watchdog fiber failed: %s"
-          (Printexc.to_string exn));
-    `Stop_daemon);
+  start_startup_watchdog ~sw ~clock;
 
   (* 3. Start serving -- /health responds before init completes *)
   let run_serving ~sw ~socket ~https_listener ~routes:_ ~request_handler

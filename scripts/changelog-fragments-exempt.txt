@@ -155,4 +155,3 @@
 53964  # comments only: stale plan text removed from two source comments; no user-facing behavior
 54015  # comments only: the wire-format sentence in read_drop_reason.mli now describes the pre-PR-2 constants; no user-facing behavior
 54003  # docs only (two files under packages/agent_core/docs): capability manifest table lists the keys the parser already accepts; no behavior change
-54048  # test only (two files + test/dune): chat diff and pulse expectations follow the minus sign and slot start; no user-facing behavior

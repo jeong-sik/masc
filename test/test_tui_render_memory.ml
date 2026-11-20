@@ -1066,6 +1066,75 @@ let test_facts_list_reports_the_rows_it_drew () =
         [ 0; 1; rows / 2; rows - 1 ])
     [ 120, 33; 80, 17 ]
 
+let test_memory_tree_hierarchy_and_safety () =
+  let module Tree = Masc_tui_memory_tree in
+  check bool "malformed control-byte category name is rejected at domain boundary" true
+    (Option.is_none (Cat.category_of_string "custom\x07\027[2J"));
+  let custom_cat =
+    match Cat.category_of_string "release_notes" with
+    | Some cat -> cat
+    | None -> fail "expected valid custom category"
+  in
+  let cats =
+    [ Cat.Code_change
+    ; Cat.Fact
+    ; Cat.Preference
+    ; Cat.Goal
+    ; Cat.Constraint
+    ; Cat.Validated_approach
+    ; Cat.Lesson
+    ; Cat.Blocker
+    ; custom_cat
+    ]
+  in
+  List.iter
+    (fun ko ->
+      List.iter
+        (fun cat ->
+          let label, style = Tree.category_badge ~ko cat in
+          check bool "category badge label is non-empty" true (String.trim label <> "");
+          check bool "category badge never uses Theme.info" true
+            (style = "" || not (String.equal style (Masc_tui_ansi.Theme.info ()))) ;
+          check bool "custom category strips raw control bytes" false
+            (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) label))
+        cats;
+      let card =
+        Tree.world_hierarchy_card ~ko ~width:80 ~world:Masc_tui_memory_world.Not_read
+          ~health:None ~unit:Masc_tui_memory_usage.Tokens
+      in
+      check int "world hierarchy card has fixed 4-row height" 4 (List.length card);
+      let tree_entries =
+        [ Types.Category_all, Some 12
+        ; Types.Category_ordinary Cat.Constraint, Some 4
+        ; Types.Category_source, Some 2
+        ; Types.Category_dropped, Some 1
+        ]
+      in
+      let rows =
+        Tree.sidebar_tree_rows ~ko ~width:32 ~height:12 ~world:Masc_tui_memory_world.Not_read
+          ~selected:(Types.Category_ordinary Cat.Constraint) ~entries:tree_entries
+      in
+      check bool "sidebar tree renders header and branch rows" true (List.length rows = 8);
+      List.iter
+        (fun (_filt, line) ->
+          let plain = Masc_tui_theme.strip_sgr line in
+          check int "sidebar tree row fits exact column width" 32
+            (Masc_tui_message_layout.display_width plain))
+        rows;
+      let narrow =
+        Tree.sidebar_tree_rows ~ko ~width:12 ~height:3 ~world:Masc_tui_memory_world.Not_read
+          ~selected:(Types.Category_ordinary Cat.Constraint) ~entries:tree_entries
+      in
+      check bool "narrow short sidebar respects height cap" true (List.length narrow <= 3);
+      List.iter
+        (fun (_filt, line) ->
+          let plain = Masc_tui_theme.strip_sgr line in
+          check int "narrow sidebar row never overflows width" 12
+            (Masc_tui_message_layout.display_width plain))
+        narrow)
+    [ false; true ]
+;;
+
 let () =
   run "tui_render_memory"
     [ "input statistics",
@@ -1075,7 +1144,9 @@ let () =
       [ test_case "fact detail escapes wire controls and preserves API values" `Quick
           test_detail_escapes_wire_controls_without_changing_facts
       ; test_case "Librarian diagnostics escape wire controls" `Quick
-          test_memory_diagnostics_escape_control_bytes ]
+          test_memory_diagnostics_escape_control_bytes
+      ; test_case "Memory hierarchy tree cards and badges are safe and fixed width" `Quick
+          test_memory_tree_hierarchy_and_safety ]
     ; "memory decisions",
       [ test_case "memory recovery does not inherit historical failure state" `Quick
           test_memory_state_tracks_current_pass_not_history

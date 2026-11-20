@@ -1200,7 +1200,7 @@ let keeper_turn_progress state (frame : keeper_message_status_frame) =
               @ (if folded_away > 0
                  then
                    [ fact Chat_facts.Plain
-                       (Printf.sprintf (if ko then "외 %d" else "%d more") folded_away)
+                       (Masc_tui_value.Count.more ~ko folded_away)
                    ]
                  else [])
             in
@@ -4915,7 +4915,7 @@ let render_keeper_message (state : state) =
     let status_block =
       Chat_facts.layout ~max_cells:status_cells
         ~max_rows:status_frame.kmsf_status_block_rows
-        ~more:(Printf.sprintf (if state.ui_language = Lang_ko then "외 %d" else "%d more"))
+        ~more:(Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko))
         status_facts
     in
     if
@@ -5224,8 +5224,8 @@ let render_keeper_message (state : state) =
          let turn_progress = keeper_turn_progress state status_frame in
          if status.kmsp_details_hint
          then box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-           (Printf.sprintf (if ko then "  외 %d · %s:턴 상세" else "  %d more · %s:details")
-              folded_away Masc_tui_keys.expand_turn_label);
+           ("  " ^ Masc_tui_value.Count.more ~ko folded_away ^ " · " ^ Masc_tui_keys.expand_turn_label
+            ^ (if ko then ":턴 상세" else ":details"));
          List.iter
            (fun (kind, text) ->
              (match kind with
@@ -5241,7 +5241,7 @@ let render_keeper_message (state : state) =
                         Chat_facts.layout
                           ~max_cells:(framed_inner_width chat_cols - lead_cells)
                           ~max_rows:status_frame.kmsf_progress_rows
-                          ~more:(Printf.sprintf (if ko then "외 %d" else "%d more"))
+                          ~more:(Masc_tui_value.Count.more ~ko)
                           turn.tp_facts
                       in
                       List.iteri

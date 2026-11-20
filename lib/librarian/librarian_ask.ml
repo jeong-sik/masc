@@ -45,30 +45,22 @@ let same_line a b =
 
 let not_open = Failed (Flow_stopped, "the writer is no longer open")
 
-(* The digest is of the bytes the file holds, as the store reads it, and it
-   is compared before the bytes are decoded. *)
-let memory_of_bytes tail read =
-  match read with
-  | Error error ->
-    Error (Failed (Read_failed, "snapshot: " ^ Fs_compat.regular_file_read_error_to_string error))
-  | Ok None -> Error (Failed (Read_failed, "snapshot: no file"))
-  | Ok (Some bytes) ->
+(* The file is read as the store reads it before a commit: a file the store
+   does not open ends the ask with its fault, and the writer stops for it as
+   the store does. The digest is of the bytes the file holds and is compared
+   before they are decoded, so bytes other than the ones the tail names
+   diverged, as they do for a commit. *)
+let memory_of_bytes tail = function
+  | Error fault -> Error (Ended (Snapshot_fault fault))
+  | Ok bytes ->
     let expected = named tail in
     let observed = Digest.digest_of_bytes bytes in
     if not (same_digest expected observed)
     then Error (Ended (Memory_diverged { expected; observed }))
     else (
-      match Yojson.Safe.from_string bytes with
-      | exception Yojson.Json_error detail -> Error (Failed (Read_failed, "snapshot: " ^ detail))
-      | json ->
-        (match Keeper_memory_os_snapshot_codec.of_json json with
-         | Error rejection ->
-           Error
-             (Failed
-                ( Read_failed
-                , "snapshot: " ^ Keeper_memory_os_snapshot_codec.snapshot_rejection_to_string rejection
-                ))
-         | Ok memory -> Ok (tail, memory)))
+      match Librarian_store.decode_snapshot bytes with
+      | Some memory -> Ok (tail, memory)
+      | None -> Error (Ended (Snapshot_fault Not_a_snapshot_file)))
 ;;
 
 (* The tail is read on both sides of the bytes. A direct write that commits
@@ -78,7 +70,7 @@ let rec read_memory input ~snapshot_path =
   match input.tail () with
   | None -> Error not_open
   | Some tail ->
-    let read = Fs_compat.load_regular_file_opt snapshot_path in
+    let read = Librarian_store.read_snapshot_bytes snapshot_path in
     (match input.tail () with
      | None -> Error not_open
      | Some again when not (same_line tail again) -> read_memory input ~snapshot_path

@@ -46,9 +46,8 @@ type failed =
   (** A measurement or an attempt could not start, a callback failed, or the
       writer was no longer open. *)
   | Read_failed
-  (** The snapshot the tail names, the turn log or a byte file of a unit
-      could not be read: an IO error, the file changed while it was read, or
-      the snapshot is not there or does not decode. *)
+  (** The turn log or a byte file of a unit could not be read: an IO error,
+      or the file changed while it was read. *)
 
 type t =
   | Answered of
@@ -83,5 +82,10 @@ type t =
       { expected : Digest.digest (** The snapshot the last commit line names. *)
       ; observed : Digest.digest (** The snapshot the file holds. *)
       }
+  | Snapshot_fault of Librarian_snapshot_fault.t
+  (** The file at the snapshot path is not one the store opens: no file,
+      not a regular file, a failed read, or bytes the tail names that do not
+      decode. The file is read as the store reads it before a commit, and
+      the writer stops for it as the store does. *)
   | Input_fault of Librarian_unit.input_fault
   | Ask_failed of failed

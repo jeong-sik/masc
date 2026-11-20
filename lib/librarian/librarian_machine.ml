@@ -99,7 +99,7 @@ let late place t (result : Read_result.t) =
        ~labels:[ "keeper", place.keeper_id ]
        ()
    | Nothing_to_ask | No_answer _ | Nothing_readable _ | Span_unknown _ | Memory_diverged _
-   | Input_fault _ | Ask_failed _ -> ());
+   | Snapshot_fault _ | Input_fault _ | Ask_failed _ -> ());
   t
 ;;
 
@@ -159,6 +159,9 @@ let ended place t ~at store (asking : asking) : Read_result.t -> t = function
       (Store.commit_skip store ~at ~hole:(Unknown_span { before; after = reach.covered }) reach)
   | Memory_diverged { expected; observed } ->
     { t with state = Stopped (Log_diverged { expected; observed }) }
+  (* A file the store does not open does not mend itself: the store stops
+     as boot and a commit stop it for the same file. *)
+  | Snapshot_fault fault -> { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
   | Input_fault (_ : Librarian_unit.input_fault) | Ask_failed (_ : Read_result.failed) ->
     { t with state = Resting store }
 ;;
@@ -214,9 +217,13 @@ let table place t ~at event =
   | Stopped (_ : Store.stop), Declaration_changed lane -> { t with lane }
 ;;
 
+(* The same value changes no state, but its resolution is the one the
+   registry published last: the admitted target with its credential and body
+   timeout, and the slots a provider holds. The next ask and a rest's held
+   check go through it. *)
 let decide place t ~at event =
   match event with
-  | Declaration_changed lane when same_lane t.lane lane -> t
+  | Declaration_changed lane when same_lane t.lane lane -> { t with lane }
   | Turn_closed | Pulse | Ask_ended _ | Declaration_changed _ -> table place t ~at event
 ;;
 

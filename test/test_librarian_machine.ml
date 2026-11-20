@@ -511,6 +511,25 @@ let test_resting_declaration_changed () =
   ()
 ;;
 
+(* A key or body timeout changed in the registry comes with the same lane
+   value. The rest reads the new resolution: here no slot of it is held, so
+   the next pulse asks. *)
+let test_resting_same_value_new_resolution () =
+  let place = started_place () in
+  let at = Unix.gettimeofday () +. 1.0 in
+  let value = resting ~lane:(declared ~resolved:(held_lane ()) [ fast ]) place in
+  let value =
+    step ~at "the value held, its resolution published again" place value
+      (Declaration_changed (Some (declared [ fast ])))
+      ~state:"resting, holding: " ~fiber:"keep"
+  in
+  let (_ : Machine.t) =
+    step ~at "the pulse reads the new resolution" place value Pulse ~state:"asking #2, holding: "
+      ~fiber:"start #2"
+  in
+  ()
+;;
+
 let test_stopped () =
   let place = new_place () in
   let value = booted place ~at:100.0 in
@@ -641,6 +660,22 @@ let test_memory_diverged () =
       (ended 1 (Memory_diverged { expected; observed }))
       ~state:("stopped: " ^ stop_text (Log_diverged { expected; observed }))
       ~fiber:"cancel"
+  in
+  ()
+;;
+
+(* A snapshot the store does not open stops the store, as boot does for the
+   same file; the writer does not rest and ask again on every pulse. *)
+let test_snapshot_fault () =
+  let place, value = asking_place () in
+  let (_ : Machine.t) =
+    step "no snapshot file" place value (ended 1 (Snapshot_fault Absent))
+      ~state:"stopped: memory unreadable" ~fiber:"cancel"
+  in
+  let place, value = asking_place () in
+  let (_ : Machine.t) =
+    step "a snapshot read that failed" place value (ended 1 (Snapshot_fault Not_read))
+      ~state:"stopped: store unwritable" ~fiber:"cancel"
   in
   ()
 ;;
@@ -876,6 +911,8 @@ let () =
         ; test_case "resting, a closed turn" `Quick test_resting_turn_closed
         ; test_case "resting, the pulse" `Quick test_resting_pulse
         ; test_case "resting, a new declaration" `Quick test_resting_declaration_changed
+        ; test_case "resting, the same value with a new resolution" `Quick
+            test_resting_same_value_new_resolution
         ; test_case "stopped" `Quick test_stopped
         ; test_case "late answers" `Quick test_late_answers
         ] )
@@ -886,6 +923,7 @@ let () =
         ; test_case "nothing readable" `Quick test_nothing_readable
         ; test_case "a span unknown" `Quick test_span_unknown
         ; test_case "Memory diverged" `Quick test_memory_diverged
+        ; test_case "a snapshot fault" `Quick test_snapshot_fault
         ; test_case "an input fault" `Quick test_input_fault
         ; test_case "a failed ask" `Quick test_ask_failed
         ; test_case "an answer from before reading moved" `Quick

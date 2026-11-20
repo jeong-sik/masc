@@ -2742,7 +2742,9 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
         else
           let more =
             Theme.recede ()
-            ^ Printf.sprintf " (+%d)" (List.length rest)
+            (* The alerts after the first: a cut-off count, never "+N"
+               (RFC tui-one-screen-grammar 6.3). *)
+            ^ " (" ^ Masc_tui_value.Count.more ~ko (List.length rest) ^ ")"
             ^ Ansi.reset
           in
           let more_cells =

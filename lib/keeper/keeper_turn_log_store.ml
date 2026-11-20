@@ -44,6 +44,20 @@ let decode row =
   | json -> Result.map_error (fun error -> Malformed error) (Codec.of_json json)
 ;;
 
+type scanned =
+  { at : int
+  ; line : (Log.line, undecodable) result
+  }
+
+(* How many lines one locked read takes. An append waits for one such read
+   at most. *)
+let scan_window_rows = 256
+
+let fold path ~init ~f =
+  Private_jsonl_scan.fold path ~rows_per_read:scan_window_rows ~init ~f:(fun acc ~at row ->
+    f acc { at; line = decode row })
+;;
+
 type turn_seen =
   | Not_yet
   | No_open_turn

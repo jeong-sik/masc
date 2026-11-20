@@ -1827,7 +1827,11 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | | 같은 디렉터리의 curator, verifier, Candle, Goal 기록 | 건드리지 않는다 |
 | run 기록부 | – | 손으로 고치지 않는다. 자기 보존 규칙이 옛 행을 지운다 |
 
-- 새로 생기는 파일은 둘이다. `<keepers_dir>/<k>/turns.jsonl` 과 `<config keepers>/<k>.memory-log.jsonl` 이다. 잠금 `<k>.memory.lock` 이 하나 더 있다.
+- 새로 생기는 파일은 둘이다. `<keepers_dir>/<k>/turns.jsonl` 과 `<config keepers>/<k>.memory-log.jsonl` 이다. 잠금 `<k>.memory.lock` 이 하나 더 있다. 두 파일 옆에는 저장소 잠금 `<파일>.lock` 이 생긴다.
+- `validate-stores` 는 두 파일을 첫 줄부터 읽는다. 해석되지 않는 줄은 거절로 세고, 그 줄이 시작하는 offset 을 알린다. 줄바꿈 없이 끝난 꼬리는 줄이 아니다.
+- 반영 기록에서 해석되지 않는 줄 바로 뒤에 `Started` 줄이 있으면 거절이 아니다. 운영자가 읽지 못한 꼬리를 두고 맡긴 자리다(§8.7). 그 줄은 파일에 계속 남으므로, 거절로 세면 그 Keeper 는 검증을 다시 통과하지 못한다.
+- 해석되지 않는 줄 뒤에 반영 줄이 오거나 아무 줄도 없으면 거절이다. 마지막 줄이면 저장소가 boot 에서 멈춘다.
+- blob sweep 은 `memory-log.jsonl` 과 `memory.lock` 을 blob 을 가리키지 않는 파일로 분류한다. 반영 줄에는 blob key 가 없다. 턴 기록이 있는 `keepers` 트리는 이미 분류돼 있다.
 - 지금 설정에 없는 Keeper 의 `memory-current.json` 은 그대로 둔다. 쓰는 쪽은 등록된 Keeper 에게만 있다.
 
 ### 19.2 코드
@@ -1863,7 +1867,10 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 - `librarian_continuity_snapshot`, `librarian_continuity_report`, `keeper_continuity_{request, evidence, observation}`, `keeper_external_read_cursor`.
 - `keeper_turn_boundaries` 와 그 줄을 만들고 읽는 코드 전부. `Keeper_turn_task_context` 는 턴 기록의 `task_evidence` 로 바뀐다(§5.1).
 - `keeper_carried_front` 의 Librarian 출처 다섯(§11.2).
-- `turn-boundaries.jsonl` 을 읽던 곳은 지우지 않고 턴 기록으로 옮긴다. 한 층에서 옮기고, 그 뒤에 옛 파일 쓰기를 멈춘다. 옮기는 곳은 `Keeper_turn_boundaries` 를 부르는 단위 전부다. 목록은 아래 k 의 표에 있다. 줄을 쓰는 곳(`keeper_agent_run_finalize_response`, `keeper_history_clear`)과 `Keeper_turn_boundaries_artifact` 생성자를 가진 `keeper_shutdown_types` 도 든다.
+- `turn-boundaries.jsonl` 을 읽던 곳 가운데 컷 뒤에도 남는 곳은 지우지 않고 턴 기록으로 옮긴다. 한 층(L3d)에서 옮긴다. 목록은 아래 k 의 표에 있다.
+- 옛 파일 쓰기는 컷(L10)에서 멈춘다. 옛 durable consumer 가 읽은 자리를 그 줄에서 얻기 때문이다(`Keeper_librarian_durable_consumer` 의 `Keeper_turn_boundaries.read`). 쓰기를 먼저 멈추면 컷 앞의 빌드에서 옛 경로가 나아가지 못한다.
+- 컷에서 같이 지우는 것은 넷이다. 줄을 쓰는 곳(`keeper_agent_run_finalize_response`, `keeper_history_clear`, `keeper_agent_run_turn_helpers` 의 턴 시작 줄), `keeper_shutdown_types` 의 `Keeper_turn_boundaries_artifact` 생성자와 삭제 계획, `Keeper_durable_store` 의 `Turn_boundaries` 검증, blob 분류의 `.turn-boundaries.jsonl` 행이다.
+- L3d 가 옮기지 않은 독자는 컷까지 옛 파일을 그대로 읽는다. 쓰기가 컷까지 이어지므로 그 사이의 빌드에서도 읽는 값이 맞다.
 
 **e. 반영 경로의 판정자.** `Typesafeai_librarian_preflight`, `bin/masc_librarian_preflight_eval.ml`, TUI 의 preflight 표시, `absorb_gate` 와 `librarian_preflight` 키.
 
@@ -1923,7 +1930,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 1. 스택의 어느 빌드에서나 Memory 를 쓰는 곳은 하나다.
 2. 전환(L5) 뒤의 층은 모두 서버의 실제 경로가 부른다. 부르는 곳이 없는 코드 위에 시험을 쌓지 않는다.
-3. 새 파일의 store 검증, Keeper 삭제 계획, blob GC 분류는 그 파일을 처음 쓰는 층에 넣는다.
+3. 새 파일의 store 검증, Keeper 삭제 계획, blob GC 분류는 서버가 그 파일을 처음 쓰는 층이나 그 앞의 층에 넣는다.
 4. 삭제는 마지막이다. 커밋 하나가 파일 다섯 개를 넘지 않는다.
 
 앞서 끝나 있어야 하는 것은 「Exact 요청은 자리만 기다린다」 RFC(#52986)의 자리 걷기 층이다. 그 층이 병합되기 전에는 이 스택의 어느 PR 도 `exact_output.ml`, `exact_output.mli`, `retry.ml` 을 고치지 않는다.
@@ -1948,7 +1955,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L3a3b4d | `Opened` 가 `stimuli` 를 싣는다. event queue payload 를 줄 타입으로 옮기는 전체 함수를 둔다(`Keeper_turn_log_turn.stimulus`). 턴을 도는 함수가 받은 queue 항목을 인자로 받는다. 이 칸이 없는 `Opened` 는 읽지 않는다 | payload 갈래마다 줄 타입이 하나다. 줄 타입마다 글로 박은 모양. 턴 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L3b | official-client 턴의 단위가 두 이력 파일에서 그 턴의 줄과 같은지 턴 전체를 돌려 확인한다. 제품 코드는 바뀌지 않는다. 끝자리 읽기는 L3a3b2 가 넣었고, 받아들일 때의 근거는 L3a3b4a 와 L3a3b4d 가 넣었다 | 단위의 바이트 범위에 그 턴을 이름 붙인 줄이 전부 있고 다른 줄이 없다. 마지막 단위는 파일 끝에서 끝난다. 직접 턴, 실패한 턴, 스스로 깬 턴, 같은 trace 의 두 턴에서 본다. Codex app server 의 턴 fixture 에서 돈다. 나머지 official-client runtime 셋에는 턴 전체를 도는 fixture 가 없다(이슈 #53384). 이력 줄을 쓰는 세 곳은 runtime 을 가리지 않는다 |
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |
-| L3d | `turn-boundaries.jsonl` 을 읽던 곳 열을 턴 기록으로 옮긴다(§19.2 d). 그 뒤 옛 파일 쓰기를 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |
+| L3d | `turn-boundaries.jsonl` 을 읽던 곳 가운데 컷 뒤에도 남는 곳을 턴 기록으로 옮긴다(§19.2 d). 옛 파일 쓰기는 컷(L10)에서 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |
 | L4 | lane 선언: Librarian 의 built-in lane 과 그 표, 풀린 lane 값(질문 쪽 값과 slot 별 key), `lane_held` | 로드 시험. 선언이 같으면 값이 같고, slot 하나의 창이 바뀌면 값이 다르다 |
 | L5a | 직접 쓰기의 계획(`Librarian_direct.plan`, §8.5 의 표). 순수 함수다. `removal` 에 직접 쓰기의 둘(`Superseded_by`, `Retracted`)과 쓴 이(`actor`)를 더한다. 부르는 곳은 L5 의 쓰는 쪽이다 | 표의 행마다 시험. 줄을 쓰는 답마다 효과를 적용한 Memory 에 같은 fact 가 둘 없고 근거 없는 파생 fact 가 없다. 철회가 그 fact 에 기댄 fact 를 같은 계획에서 지운다. 같은 쓰기를 두 번 하면 둘째는 줄을 쓰지 않는다 |
 | L5b | 반영 기록의 줄: 줄 타입(`Librarian_log`)과 codec(`Librarian_log_codec`, §8.1). 파일을 읽거나 쓰지 않는다. `cause` 는 전환이 만드는 둘(`Direct`, `Adopt`)만 넣는다. `Read`, `Make_room`, `Skip` 과 그것이 싣는 타입은 그것을 만드는 층(L6, L7)이 더한다. fact 는 스냅샷 codec 으로, 끝자리는 턴 기록 codec 으로 쓴다 | 생성자마다 왕복 시험과 글로 박은 모양. object 마다 field 집합이 정확히 맞아야 한다. 읽기는 쓰기가 실은 글(claim, 이유, 이름)을 거절하지 않는다. 쓰는 쪽이 쓴 줄을 읽는 쪽이 거절하면 저장소가 선다 |
@@ -1960,6 +1967,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5h | 쓰는 쪽 fiber(`Librarian_writer`): 잠금, boot, mailbox, 읽는 쪽이 보는 상태, `Retire`. 사건마다 `Librarian_machine` 을 부른다. 등록부와 pulse 는 없다 | boot 전에 온 쓰기가 boot 뒤에 답을 받는다. 쓰기는 온 순서대로 반영된다. 턴 기록이 없으면 멈추고, 생긴 뒤 `Resume` 하면 열린다. 같은 Keeper 의 둘째 쓰는 쪽은 잠금을 못 잡는다. 등록된 Keeper 의 `Retire` 는 버린다. 끝난 쓰는 쪽은 받지 않았다고 답하고, 잠금이 풀려 둘째가 이어서 쓴다 |
 | L5i | 쓰는 쪽 등록부(`Librarian_writers`): 표, `ensure`, view, 쓰기와 운영자 행동을 쓰는 쪽에 보내기, `Retire`, pulse. 아직 등록부를 만드는 곳은 없다 | 등록된 Keeper 를 처음 물으면 답이 `Booting` 이고 표에 쓰는 쪽이 생긴다. 등록되지 않은 Keeper 는 view 가 `No_writer` 이고 쓰기와 운영자 행동이 `Keeper_retired` 이며 파일이 생기지 않는다. 같은 Keeper 에 나란히 온 쓰기 둘이 한 쓰는 쪽에서 `seq` 1, 2 가 된다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. 등록된 Keeper 의 `Retire` 는 버린다. 등록에서 뺀 뒤의 `Retire` 뒤에는 잠금이 풀려 있다. pulse 가 묻기 전에 쓰는 쪽을 만든다 |
 | L5j | 반영 기록을 처음부터 읽는 것(`Librarian_log_store.fold`)과 나간 fact 의 읽기(`Librarian_archive`). 아직 부르는 곳은 없다 | 줄마다 시작 offset 과 함께 순서대로 나온다. 해석 안 되는 줄은 그렇게 표시돼 나오고, 끊긴 조각은 줄이 아니다. 한 번에 읽는 줄 수를 넘는 기록도 한 번씩 다 나온다. 철회한 fact, 근거를 잃은 fact, 대체된 fact 가 나간 순서대로 이유와 함께 나온다. 다시 더한 fact 와 지금 스냅샷에 있는 fact 는 빠진다. 해석 안 되는 줄은 수로 센다 |
+| L5k | 턴 기록과 반영 기록의 store 검증(`Keeper_durable_store` 의 `Turn_log`, `Memory_log`). 반영 기록과 쓰는 쪽 잠금의 blob GC 분류. 턴 기록을 처음부터 읽는 것(`Keeper_turn_log_store.fold`) | 턴 기록의 해석 안 되는 줄은 offset 과 함께 거절된다. 끊긴 꼬리는 줄이 아니다. 반영 기록의 해석 안 되는 마지막 줄은 거절되고, 맡긴 뒤에는 행으로 센다. 해석 안 되는 줄 뒤에 반영 줄이 오면 거절된다. 쓰는 쪽이 한 번 반영한 workspace 에서 blob sweep 이 분류 안 된 이름을 0개로 알린다 |
 | L5 | **전환.** 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |

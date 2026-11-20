@@ -620,6 +620,90 @@ let scan_keeper_dirs ~base_path scan_keeper =
           empty_report)
 ;;
 
+let not_json = "not JSON"
+
+let row_refusal ~keeper_id ~at reason = Printf.sprintf "%s offset %d: %s" keeper_id at reason
+
+let scan_refusal ~keeper_id error = keeper_id ^ ": " ^ Private_jsonl_scan.error_to_string error
+
+(* The Keeper's turn log. Bytes after the last line break are an append that
+   was cut short and are not a line. *)
+let turn_log_store =
+  { store = "keeper turn log"
+  ; on_refusal =
+      "the keeper's turns still run; an event whose walk back from the end of \
+       the log meets the line appends no line, and when the line is the first \
+       one the keeper's Memory store does not open"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = runtime_keepers_dir ~base_path in
+         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+           match
+             Keeper_turn_log_store.fold
+               (Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id)
+               ~init:report
+               ~f:(fun report ({ at; line } : Keeper_turn_log_store.scanned) ->
+                 count_row report
+                   (match line with
+                    | Ok (_ : Keeper_turn_log.line) -> Ok ()
+                    | Error Keeper_turn_log_store.Not_json ->
+                      Error (row_refusal ~keeper_id ~at not_json)
+                    | Error (Keeper_turn_log_store.Malformed error) ->
+                      Error
+                        (row_refusal ~keeper_id ~at
+                           (Keeper_memory_os_types.wire_error_to_string error))))
+           with
+           | Ok report -> report
+           | Error error -> count_row report (Error (scan_refusal ~keeper_id error))))
+  }
+;;
+
+(* A Keeper's Memory commit log. An operator who adopts the snapshot past a
+   tail that does not decode leaves that tail in the file and a [Started]
+   line right after it (Librarian_store.adopt). Those lines stay for good, so
+   they are rows and not refusals. Any other line that does not decode is
+   refused. *)
+let memory_log_store =
+  let count_rows report rows = List.fold_left count_row report rows in
+  { store = "keeper memory commit log"
+  ; on_refusal =
+      "when the line is the last one, the keeper's Memory store stops at boot \
+       until an operator adopts the snapshot; a line before it is counted as \
+       unread by the search for facts that left Memory"
+  ; scan =
+      (fun ~base_path ->
+         scan_memory_files ~base_path ~suffix:Librarian_log_store.suffix
+           (fun report ~keepers_dir ~keeper_id ->
+           (* [undecoded] holds the lines right before the one being read that
+              do not decode, newest first. *)
+           match
+             Librarian_log_store.fold
+               (Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id)
+               ~init:(report, [])
+               ~f:(fun (report, undecoded) ({ at; line } : Librarian_log_store.scanned) ->
+                 match line with
+                 | Ok (Started _) ->
+                   ( count_rows report
+                       (Ok () :: List.map (fun (_ : string) -> Ok ()) undecoded)
+                   , [] )
+                 | Ok (Committed _) ->
+                   ( count_rows report
+                       (List.rev_map (fun detail -> Error detail) undecoded @ [ Ok () ])
+                   , [] )
+                 | Error Librarian_log_store.Not_json ->
+                   report, row_refusal ~keeper_id ~at not_json :: undecoded
+                 | Error (Librarian_log_store.Malformed error) ->
+                   ( report
+                   , row_refusal ~keeper_id ~at
+                       (Keeper_memory_os_types.wire_error_to_string error)
+                     :: undecoded ))
+           with
+           | Ok (report, undecoded) ->
+             count_rows report (List.rev_map (fun detail -> Error detail) undecoded)
+           | Error error -> count_row report (Error (scan_refusal ~keeper_id error))))
+  }
+;;
+
 let turn_boundary_store =
   { store = "keeper turn boundaries"
   ; on_refusal =
@@ -1050,6 +1134,8 @@ module Id = struct
     | Provider_inputs
     | Turn_records
     | Turn_boundaries
+    | Turn_log
+    | Memory_log
     | Librarian_progress
     | Librarian_external_cursor
     | Librarian_official_progress
@@ -1103,6 +1189,8 @@ let reader : Id.t -> reader = function
   | Id.Provider_inputs -> Preflight_only provider_input_store
   | Id.Turn_records -> Preflight_only turn_record_store
   | Id.Turn_boundaries -> Preflight_only turn_boundary_store
+  | Id.Turn_log -> Preflight_only turn_log_store
+  | Id.Memory_log -> Preflight_only memory_log_store
   | Id.Librarian_progress -> Preflight_only librarian_progress_store
   | Id.Librarian_external_cursor -> Preflight_only librarian_external_cursor_store
   | Id.Librarian_official_progress -> Preflight_only librarian_official_progress_store

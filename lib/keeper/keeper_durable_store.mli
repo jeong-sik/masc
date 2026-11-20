@@ -52,6 +52,8 @@ module Id : sig
     | Provider_inputs
     | Turn_records
     | Turn_boundaries
+    | Turn_log
+    | Memory_log
     | Librarian_progress
     | Librarian_external_cursor
     | Librarian_official_progress

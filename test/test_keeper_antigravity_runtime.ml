@@ -2966,6 +2966,161 @@ let test_bridged_official_turns_resume_without_resetting_session () =
       (String_util.contains_substring prompt3 "real-checkpoint-addition"))
 ;;
 
+let count_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let hay_len = String.length haystack in
+  let rec loop pos acc =
+    if needle_len = 0 || pos + needle_len > hay_len
+    then acc
+    else if String.sub haystack pos needle_len = needle
+    then loop (pos + needle_len) (acc + 1)
+    else loop (pos + 1) acc
+  in
+  loop 0 0
+;;
+
+let index_of_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let hay_len = String.length haystack in
+  let rec loop pos =
+    if pos + needle_len > hay_len
+    then None
+    else if String.sub haystack pos needle_len = needle
+    then Some pos
+    else loop (pos + 1)
+  in
+  loop 0
+;;
+
+let test_standing_system_observations_resume_with_replacement_notice () =
+  with_session_resume_fixture (fun run_turn ->
+    let run_assembled ?hooks ~base_text ~observations ~goal () =
+      let assembly =
+        Keeper_context_assembly.assemble
+          ~dynamic_context_partition:None
+          ~existing_extra_system_context:None
+          ~blocks:[]
+        |> Keeper_context_assembly.with_system_observations ~base_text ~observations
+      in
+      let system_prompt =
+        Keeper_context_assembly.effective_system_prompt ~base_text assembly
+      in
+      run_turn
+        ~composed_context:(fun () -> Some assembly)
+        ?hooks
+        ~system_prompt
+        ~goal
+        ~initial_messages:[]
+        ()
+    in
+    let notice_marker = Keeper_official_client_host.standing_system_replacement_notice in
+    let mode1, prompt1 =
+      run_assembled
+        ~base_text:"STANDING_BASE_V1"
+        ~observations:
+          [ Keeper_context_assembly.Current_norms "NORM_ALPHA"
+          ; Keeper_context_assembly.Active_goals "GOAL_ONE"
+          ; Keeper_context_assembly.Direct_input_source "OP_ONE"
+          ]
+        ~goal:"First standing turn"
+        ()
+    in
+    check string "first assembled turn starts fresh" "START:conv-1" mode1;
+    check bool "Start prompt omits resume replacement notice" false
+      (String_util.contains_substring prompt1 notice_marker);
+    check bool "Start prompt carries standing base" true
+      (String_util.contains_substring prompt1 "STANDING_BASE_V1");
+    check bool "Start prompt carries active goal" true
+      (String_util.contains_substring prompt1 "GOAL_ONE");
+    let mode2, prompt2 =
+      run_assembled
+        ~base_text:"STANDING_BASE_V1"
+        ~observations:
+          [ Keeper_context_assembly.Current_norms "NORM_ALPHA"
+          ; Keeper_context_assembly.Direct_input_source "OP_TWO"
+          ]
+        ~goal:"Second standing turn"
+        ()
+    in
+    check string "updated standing observations resume the same session" "RESUME:conv-1" mode2;
+    check bool "Resume prompt includes explicit replacement notice" true
+      (String_util.contains_substring prompt2 notice_marker);
+    check int "updated observation appears once without duplication" 1
+      (count_substring ~needle:"OP_TWO" prompt2);
+    check bool "removed Active_goals observation is omitted" false
+      (String_util.contains_substring prompt2 "GOAL_ONE");
+    check bool "superseded Direct_input_source is omitted" false
+      (String_util.contains_substring prompt2 "OP_ONE");
+    (match
+       index_of_substring ~needle:"NORM_ALPHA" prompt2,
+       index_of_substring ~needle:"OP_TWO" prompt2
+     with
+     | Some norm_pos, Some op_pos ->
+       check bool "Resume preserves issuer observation order" true (norm_pos < op_pos)
+     | _ -> fail "Resume prompt omitted expected standing observations");
+    let mode3, prompt3 =
+      run_assembled
+        ~base_text:"STANDING_BASE_V1"
+        ~observations:[]
+        ~goal:"Third standing turn with no observations"
+        ()
+    in
+    check string "removing all standing observations still resumes" "RESUME:conv-1" mode3;
+    check bool "empty observation snapshot keeps explicit replacement notice" true
+      (String_util.contains_substring prompt3 notice_marker);
+    check bool "removed norms no longer appear" false
+      (String_util.contains_substring prompt3 "NORM_ALPHA");
+    let mode4, _ =
+      run_assembled
+        ~base_text:"STANDING_BASE_V2"
+        ~observations:[ Keeper_context_assembly.Direct_input_source "OP_THREE" ]
+        ~goal:"Base changed turn"
+        ()
+    in
+    check string "base_text change between partitioned turns starts a fresh session"
+      "START:conv-2" mode4;
+    let mode5, _ =
+      run_assembled
+        ~base_text:"STANDING_BASE_V2"
+        ~observations:[ Keeper_context_assembly.Goals_awaiting_proof "PROOF_PENDING" ]
+        ~goal:"Proof awaiting turn"
+        ()
+    in
+    check string "Goals_awaiting_proof on same base falls back to full-system guard and starts fresh"
+      "START:conv-3" mode5;
+    let mode6, _ =
+      run_assembled
+        ~base_text:"STANDING_BASE_V3"
+        ~observations:[ Keeper_context_assembly.Direct_input_source "OP_FOUR" ]
+        ~goal:"Partitioned base before hook override"
+        ()
+    in
+    check string "partitioned V3 establishes a scoped session" "START:conv-4" mode6;
+    let override_hooks =
+      { Agent_core.Hooks.empty with
+        before_turn_params =
+          Some
+            (fun _ ->
+               Agent_core.Hooks.AdjustParams
+                 { Agent_core.Hooks.default_turn_params with
+                   (* Exact same bytes as STANDING_BASE_V3, proving
+                      system_prompt_scope separates unpartitioned overrides. *)
+                   system_prompt_override = Some "STANDING_BASE_V3"
+                 })
+      }
+    in
+    let mode7, _ =
+      run_assembled
+        ~hooks:override_hooks
+        ~base_text:"STANDING_BASE_V3"
+        ~observations:[ Keeper_context_assembly.Direct_input_source "OP_OVERRIDE" ]
+        ~goal:"Hook override turn"
+        ()
+    in
+    check string "opaque hook override matching base_text still starts fresh via scope"
+      "START:conv-5" mode7)
+;;
+
 let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
@@ -3088,6 +3243,10 @@ let () =
               "bridged official turns resume without resetting session"
               `Quick
               test_bridged_official_turns_resume_without_resetting_session
+          ; test_case
+              "standing system observations resume with explicit replacement notice"
+              `Quick
+              test_standing_system_observations_resume_with_replacement_notice
         ] )
     ]
 ;;

@@ -13,22 +13,17 @@ let receipt context text : Store.held_context =
   {context; sha256 = Agent_core_sha256.(digest_string text |> to_hex)}
 
 let standing_blocks =
-  Prompt_block_id.[Constitution_amendments; Active_goals; Direct_input_source]
+  Keeper_official_client_context_projection.standing_system_blocks
 
-let supported_observation = function
-  | Assembly.Current_norms _ | Active_goals _ | Direct_input_source _ -> true
-  | Goals_awaiting_proof _ -> false
+let supported_observation =
+  Keeper_official_client_context_projection.supported_standing_system_observation
 
 let join pieces =
   List.filter (fun text -> String.trim text <> "") pieces
   |> String.concat "\n\n" |> String.trim
 
 let replacement_notice =
-  let kinds = String.concat ", " (List.map Prompt_block_id.to_string standing_blocks) in
-  "Current host-issued System observation snapshot for: " ^ kinds ^ ".\n"
-  ^ "This snapshot replaces earlier System observations of those kinds. "
-  ^ "An omitted kind has no current System observation. "
-  ^ "Other current-turn observations remain independent."
+  Keeper_official_client_context_projection.standing_system_replacement_notice
 
 let prepare ~full_system ~system_prompt ~posture_notes ~assembly ~previously_held =
   let full_receipt = receipt Store.Codex_system_prompt full_system in

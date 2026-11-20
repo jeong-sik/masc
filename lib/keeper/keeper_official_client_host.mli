@@ -295,7 +295,43 @@ val is_canonical_source_snapshot_message : Agent_core.Types.message -> bool
     their own turns or receive intervening cross-runtime turns through
     {!Keeper_turn_bridge.prepend_resume_handoff}. *)
 
+val standing_system_blocks : Prompt_block_id.t list
+(** Standing System observation kinds eligible for snapshot replacement on
+    official-client Resume. Shared by Codex, Antigravity, and Muse. *)
+
+val supported_standing_system_observation :
+  Keeper_context_assembly.system_observation -> bool
+(** Whether an issued System observation is covered by
+    {!standing_system_blocks}. [Goals_awaiting_proof] returns [false]. *)
+
+val standing_system_replacement_notice : string
+(** Explicit replacement notice announcing that the accompanying standing
+    System observation snapshot supersedes earlier observations of
+    {!standing_system_blocks} and that omitted kinds have no current
+    observation. *)
+
 type composed_context = Keeper_context_assembly.t
+
+type canonical_system_guard =
+  { guard_system_prompt : string
+  ; guard_rest : (string * Yojson.Safe.t) list
+  ; resume_system_notice : string option
+  }
+
+val canonical_system_guard :
+  raw_system_prompt:string ->
+  static_notes:string list ->
+  composed_context:composed_context option ->
+  canonical_system_guard
+(** Compute the System portion of a [Canonical_source_guard] digest for framed
+    official clients (Antigravity, Muse). When [composed_context] carries a
+    verified [system_prompt] matching [raw_system_prompt] byte-for-byte whose
+    observations are all supported by {!supported_standing_system_observation},
+    hashes [issued.base_text] joined with [static_notes] under an explicit
+    [system_prompt_scope] tag and returns {!standing_system_replacement_notice}
+    for Resume. Opaque overrides, missing assemblies, and [Goals_awaiting_proof]
+    hash the full [raw_system_prompt] joined with [static_notes] with an empty
+    scope tag and no Resume notice. *)
 
 val transmitted_carrier_receipt :
   composed_context -> Keeper_context_assembly.receipt option
@@ -717,6 +753,7 @@ type framed_delivery =
 
 val framed_prompt_for_turn :
   ?composed_context:composed_context ->
+  ?resume_system_notice:string ->
   held:Keeper_official_client_session_store.held_context list ->
   delivery:framed_delivery ->
   goal:string ->
@@ -726,7 +763,9 @@ val framed_prompt_for_turn :
     carries the shared Antigravity frame's System label, history encoded with
     {!encode_start_message} and current Goal in order, prefixed once by
     {!start_prompt}. A Resume uses
-    {!resume_prompt} with the exact held/composed context supplied by its lane.
+    {!resume_prompt} with the exact held/composed context supplied by its lane,
+    prefixed by [resume_system_notice] when supplied to declare standing System
+    observation snapshot supersession.
     Protocol/session handling and any historical-task input stay with the lane.
     @raise Invalid_argument when a required frame-label asset is missing. *)
 

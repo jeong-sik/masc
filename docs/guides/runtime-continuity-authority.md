@@ -101,6 +101,17 @@ User 본문에 중복하지 않으며, Completion Authority 같은 턴별 관측
 native compaction용 developerInstructions는 현재 전체 System을 그대로 유지한다.
 알려진 compaction의 재구성 계약과 단순 token estimate/window-fill 관측은 구분한다.
 
+Antigravity와 Muse 같은 framed `Canonical_source_guard` 어댑터도 같은
+`Keeper_official_client_host.canonical_system_guard` 규칙을 공유한다.
+분해 가능한 issued System(`issued.text = raw_system_prompt`, 지원 standing 관측인
+`Constitution_amendments`·`Active_goals`·`Direct_input_source`만 포함)은
+별도 `system_prompt_scope` 태그와 함께 `base_text`와 정적 workspace/posture
+안내를 해시하고, Resume에서는 `Host.framed_prompt_for_turn`이 공통
+`standing_system_replacement_notice` 바로 아래에 현재 standing 관측을
+발급 순서대로 중복 없이 실어 빠진 관측 종류의 해제를 명시한다.
+`Goals_awaiting_proof`가 포함되거나 issuer가 일치하지 않는 hook override는
+전체 System과 빈 scope로 해시해 새 세션을 연다.
+
 Goal·승인 관측의 권위와 순서, 관측 제거와 미확정 ACK를 보존하는
 전달 계약 없이 `base_text`만 해시하거나 지시문 주입을 없애는 수리를 하지 않는다.
 그 최적화가 필요하면 기존 receipt와 provider별 실제 갱신·압축 계약에서 출발한다.

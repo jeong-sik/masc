@@ -3,10 +3,8 @@
 type source =
   | Ledger
   | Turn_record of { turn : int }
-  | Turn_start_after_seed_refusal
-  | Turn_start_after_librarian_refusal
-  | This_turn_start_after_seed_refusal
-  | This_turn_start_after_librarian_refusal
+  | Turn_start_after_refusal
+  | This_turn_start_after_refusal
   | Turn_start_at_max_context
   | Librarian_point_at_max_context
 
@@ -18,7 +16,7 @@ type seed =
 
 type origin =
   | Carried of source
-  | Librarian_progress of { end_atom : int }
+  | Covered of { end_atom : int }
   | Past_librarian_point of { librarian_end_atom : int; source : source }
   | Turn_start of { end_atom : int }
   | Turn_start_unknown of { reason : string }
@@ -418,16 +416,14 @@ let warn_range_opens_on_newest_atom ~keeper_name ~reason =
 
 let warn_if_origin_is_unknown_start ~keeper_name = function
   | Turn_start_unknown { reason } -> warn_range_opens_on_newest_atom ~keeper_name ~reason
-  | Carried _ | Librarian_progress _ | Past_librarian_point _ | Turn_start _ -> ()
+  | Carried _ | Covered _ | Past_librarian_point _ | Turn_start _ -> ()
 ;;
 
 let source_to_string = function
   | Ledger -> "ledger"
   | Turn_record { turn } -> Printf.sprintf "turn_record#%d" turn
-  | Turn_start_after_seed_refusal -> "turn_start_after_seed_refusal"
-  | Turn_start_after_librarian_refusal -> "turn_start_after_librarian_refusal"
-  | This_turn_start_after_seed_refusal -> "this_turn_start_after_seed_refusal"
-  | This_turn_start_after_librarian_refusal -> "this_turn_start_after_librarian_refusal"
+  | Turn_start_after_refusal -> "turn_start_after_refusal"
+  | This_turn_start_after_refusal -> "this_turn_start_after_refusal"
   | Turn_start_at_max_context -> "turn_start_at_max_context"
   | Librarian_point_at_max_context -> "librarian_point_at_max_context"
 ;;
@@ -441,7 +437,7 @@ let seed_to_json (seed : seed) =
 ;;
 
 let origin_to_string = function
-  | Librarian_progress _ -> "librarian_progress"
+  | Covered _ -> "covered"
   | Past_librarian_point { source; _ } -> "past_librarian_point:" ^ source_to_string source
   | Carried source -> source_to_string source
   | Turn_start _ -> "turn_start"
@@ -452,14 +448,10 @@ let rec origin_to_json = function
   | Carried Ledger -> `Assoc [ "kind", `String "ledger" ]
   | Carried (Turn_record { turn }) ->
     `Assoc [ "kind", `String "turn_record"; "turn", `Int turn ]
-  | Carried Turn_start_after_seed_refusal ->
-    `Assoc [ "kind", `String "turn_start_after_seed_refusal" ]
-  | Carried Turn_start_after_librarian_refusal ->
-    `Assoc [ "kind", `String "turn_start_after_librarian_refusal" ]
-  | Carried This_turn_start_after_seed_refusal ->
-    `Assoc [ "kind", `String "this_turn_start_after_seed_refusal" ]
-  | Carried This_turn_start_after_librarian_refusal ->
-    `Assoc [ "kind", `String "this_turn_start_after_librarian_refusal" ]
+  | Carried Turn_start_after_refusal ->
+    `Assoc [ "kind", `String "turn_start_after_refusal" ]
+  | Carried This_turn_start_after_refusal ->
+    `Assoc [ "kind", `String "this_turn_start_after_refusal" ]
   | Carried Turn_start_at_max_context ->
     `Assoc [ "kind", `String "turn_start_at_max_context" ]
   | Carried Librarian_point_at_max_context ->
@@ -470,8 +462,8 @@ let rec origin_to_json = function
       ; "librarian_end_atom", `Int librarian_end_atom
       ; "front", origin_to_json (Carried source)
       ]
-  | Librarian_progress { end_atom } ->
-    `Assoc [ "kind", `String "librarian_progress"; "end_atom", `Int end_atom ]
+  | Covered { end_atom } ->
+    `Assoc [ "kind", `String "covered"; "end_atom", `Int end_atom ]
   | Turn_start { end_atom } ->
     `Assoc [ "kind", `String "turn_start"; "end_atom", `Int end_atom ]
   | Turn_start_unknown { reason } ->

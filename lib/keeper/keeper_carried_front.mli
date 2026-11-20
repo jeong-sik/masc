@@ -3,12 +3,11 @@
     keeper-context-window-in-tokens §10.4, §13.4, §13.6).
 
     Where a request starts is chosen in one place,
-    {!Keeper_turn_driver_try_provider.choose_range_start}: a Librarian
-    continuity snapshot that fits the history, else the Librarian's read
-    position in it, else a seed this history still holds, else where the
-    last completed turn on this history ended ({!Turn_start}). A Librarian
-    point yields to a later start the provider accepted
-    ({!Past_librarian_point}). The turn's
+    {!Keeper_turn_driver_try_provider.choose_range_start}: where the
+    Keeper's Memory writer has read to in this history ({!Covered}), else a
+    seed this history still holds, else where the last completed turn on
+    this history ended ({!Turn_start}). The read end yields to a later start
+    the provider accepted ({!Past_librarian_point}). The turn's
     composition and the next-request forecast both ask it. This module holds
     the vocabulary of that choice -- the seed, the turn start, and the
     {!origin} a request reports -- and the reads that produce a seed.
@@ -23,11 +22,9 @@
     provider response, whichever runtime observed it -- an official client's
     record counts the same history as an Agent Core one -- read as
     [total_atoms - transmitted_atoms]. A front a refusal moved in this turn
-    ({!Turn_start_after_seed_refusal}, {!Turn_start_after_librarian_refusal},
-    {!This_turn_start_after_seed_refusal},
-    {!This_turn_start_after_librarian_refusal}), or the size signal moved
-    ({!Turn_start_at_max_context}), belongs to the turn and takes precedence
-    over an older front in a later candidate's ledger.
+    ({!Turn_start_after_refusal}, {!This_turn_start_after_refusal}), or the
+    size signal moved ({!Turn_start_at_max_context}), belongs to the turn and
+    takes precedence over an older front in a later candidate's ledger.
 
     A front is a position witnessed by an opening-message digest
     ({!Runtime_model_input_tail_window.atom_opening_digest}): the front atom
@@ -42,25 +39,18 @@ type source =
       (** The newest turn record on the trace with a request range joined to
           an actual provider response, whichever runtime ran it. The whole
           turn may still have ended in error after that response. *)
-  | Turn_start_after_seed_refusal
-      (** With no Librarian point, the provider refused the range a seed
-          opened as too large: the front moved to the turn boundary, and the
-          turn shares that position with its later candidates and lanes. *)
-  | Turn_start_after_librarian_refusal
-      (** With a Librarian point, the provider refused as too large a range
-          that opened before the turn boundary -- at the point, or at the
-          accepted start past it: the front moved to the turn boundary for
-          the rest of the turn (RFC librarian-lifecycle §4.10, rule 1). *)
-  | This_turn_start_after_seed_refusal
-      (** With no Librarian point, the range opened at the turn boundary was
-          refused as too large too: the front moved to where this turn began
-          (RFC librarian-lifecycle §4.10, rule 8), and the turn shares that
-          position with its later candidates and lanes. *)
-  | This_turn_start_after_librarian_refusal
-      (** With a Librarian point, the range opened at the turn boundary was
-          refused as too large too: the front moved to where this turn began
-          for the rest of the turn (rule 8). Rule 7 bounds it by where this
-          turn began, not by the turn boundary. *)
+  | Turn_start_after_refusal
+      (** The provider refused as too large a range that opened before the
+          turn boundary -- at a seed, at the Memory writer's read end, or at
+          a start the provider accepted past it: the front moved to the turn
+          boundary, and the turn shares that position with its later
+          candidates and lanes (RFC librarian-lifecycle §4.10, rule 1). *)
+  | This_turn_start_after_refusal
+      (** The range opened at the turn boundary was refused as too large
+          too: the front moved to where this turn began (rule 8), and the
+          turn shares that position with its later candidates and lanes.
+          Rule 7 bounds it by where this turn began, not by the turn
+          boundary. *)
   | Turn_start_at_max_context
       (** No provider refused anything: at the turn's first request the
           window stayed where the last request opened it, and that request's
@@ -112,7 +102,7 @@ val turn_start_to_string : turn_start -> string
 
 type origin =
   | Carried of source  (** The front came from a seed. *)
-  | Librarian_progress of { end_atom : int }
+  | Covered of { end_atom : int }
       (** Where the Keeper's Memory writer has read to in this history
           (RFC librarian-call-only-proposes §11.1): the atoms before
           [end_atom] are in Memory and are not sent again. The working state
@@ -331,13 +321,10 @@ val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind], one per constructor: [ledger];
-    [turn_record] with [turn]; [turn_start_after_seed_refusal];
-    [turn_start_after_librarian_refusal];
-    [this_turn_start_after_seed_refusal];
-    [this_turn_start_after_librarian_refusal]; [turn_start_at_max_context];
+    [turn_record] with [turn]; [turn_start_after_refusal];
+    [this_turn_start_after_refusal]; [turn_start_at_max_context];
     [librarian_point_at_max_context];
-    [librarian_snapshot] with [end_atom] and [boundary_line];
-    [librarian_progress] with [end_atom]; [past_librarian_point] with
+    [covered] with [end_atom]; [past_librarian_point] with
     [librarian_end_atom] and [front], the {!Carried} object of its source;
     [turn_start] with [end_atom]; or
     [turn_start_unknown] with [reason]. *)

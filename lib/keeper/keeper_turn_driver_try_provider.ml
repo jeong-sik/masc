@@ -1043,16 +1043,6 @@ let librarian_point_of (continuity : continuity option) =
   | Some No_read_end | None -> None
 ;;
 
-(* What a front rule 8 moved to where this turn began is called (RFC
-   librarian-lifecycle §4.10): a label of its own on each continuity, so a
-   log line, the continuity request record and rule 7 tell it from rule 1's
-   front at the turn boundary. *)
-let this_turn_front_source (continuity : continuity) =
-  match continuity with
-  | Covered _ -> Keeper_carried_front.This_turn_start_after_librarian_refusal
-  | No_read_end -> Keeper_carried_front.This_turn_start_after_seed_refusal
-;;
-
 (* Rule 7 of RFC librarian-lifecycle §4.10: an accepted start is at most
    this turn's boundary, so the atoms since the last completed turn always
    ride. A start past it is moved back to it, named by the message that
@@ -1069,12 +1059,10 @@ let within_turn_boundary ~history_digest_at ~turn_boundary ~this_turn_start
   | Model_input_front.At_atom _, Keeper_carried_front.Turn_boundary { end_atom } ->
     let bound =
       match seed.source with
-      | Keeper_carried_front.This_turn_start_after_seed_refusal
-      | Keeper_carried_front.This_turn_start_after_librarian_refusal ->
+      | Keeper_carried_front.This_turn_start_after_refusal ->
         Option.fold ~none:end_atom ~some:(Int.max end_atom) this_turn_start
       | Keeper_carried_front.Ledger | Keeper_carried_front.Turn_record _
-      | Keeper_carried_front.Turn_start_after_seed_refusal
-      | Keeper_carried_front.Turn_start_after_librarian_refusal
+      | Keeper_carried_front.Turn_start_after_refusal
       | Keeper_carried_front.Turn_start_at_max_context
       | Keeper_carried_front.Librarian_point_at_max_context -> end_atom
     in
@@ -1283,8 +1271,7 @@ let choose_range_start ~past_max_context ~held_window ~continuity ~front ~accept
 ;;
 
 let range_start_origin = function
-  | From_covered { end_atom; working_state = _ } ->
-    Keeper_carried_front.Librarian_progress { end_atom }
+  | From_covered { end_atom; working_state = _ } -> Keeper_carried_front.Covered { end_atom }
   | Past_librarian_point { point; accepted } ->
     Keeper_carried_front.Past_librarian_point
       { librarian_end_atom = point.end_atom
@@ -2523,7 +2510,7 @@ let turn_boundary_step
   match refused_range () with
   | Some
       ( ( Keeper_carried_front.Carried _
-        | Keeper_carried_front.Librarian_progress _
+        | Keeper_carried_front.Covered _
         | Keeper_carried_front.Past_librarian_point _ )
       , refused_first_atom )
     when boundary_resend_on error && authorized () ->
@@ -2536,7 +2523,7 @@ let turn_boundary_step
      | Some (_ : Keeper_carried_front.seed) | None -> Front_kept)
   | Some
       ( ( Keeper_carried_front.Carried _
-        | Keeper_carried_front.Librarian_progress _
+        | Keeper_carried_front.Covered _
         | Keeper_carried_front.Past_librarian_point _
         | Keeper_carried_front.Turn_start _
         | Keeper_carried_front.Turn_start_unknown _ )
@@ -2599,22 +2586,19 @@ type history_rungs =
   }
 
 let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity : continuity) =
-  (* A refused Librarian point gives way to the turn start under its own
-     source. A refused seed gives way to it too; an unknown boundary puts the
-     front on the newest atom alone for the rest of the turn. *)
-  let boundary_source, on_boundary_front =
+  (* A refused range gives way to the turn start, from the read end or from a
+     seed. Without a read end, an unknown boundary puts the front on the
+     newest atom alone for the rest of the turn. *)
+  let on_boundary_front =
     match continuity with
-    | Covered _ ->
-      ( Keeper_carried_front.Turn_start_after_librarian_refusal
-      , fun (_ : Keeper_carried_front.seed) -> () )
+    | Covered _ -> fun (_ : Keeper_carried_front.seed) -> ()
     | No_read_end ->
-      ( Keeper_carried_front.Turn_start_after_seed_refusal
-      , fun (_ : Keeper_carried_front.seed) ->
-          match ctx.turn_boundary with
-          | Keeper_carried_front.Turn_boundary_unknown { reason } ->
-            Keeper_carried_front.warn_range_opens_on_newest_atom
-              ~keeper_name:ctx.keeper_name ~reason
-          | Keeper_carried_front.Turn_boundary _ -> () )
+      fun (_ : Keeper_carried_front.seed) ->
+        (match ctx.turn_boundary with
+         | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+           Keeper_carried_front.warn_range_opens_on_newest_atom
+             ~keeper_name:ctx.keeper_name ~reason
+         | Keeper_carried_front.Turn_boundary _ -> ())
   in
   { refused_range =
       (fun () ->
@@ -2637,7 +2621,7 @@ let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity
             (fun front_digest ->
                { Keeper_carried_front.first_atom
                ; front = Model_input_front.At_atom front_digest
-               ; source = boundary_source
+               ; source = Keeper_carried_front.Turn_start_after_refusal
                })
             (sent.digest_at first_atom)))
   ; on_turn_start =
@@ -2686,7 +2670,7 @@ let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity
               (fun front_digest ->
                  { Keeper_carried_front.first_atom
                  ; front = Model_input_front.At_atom front_digest
-                 ; source = this_turn_front_source continuity
+                 ; source = Keeper_carried_front.This_turn_start_after_refusal
                  })
               (sent.digest_at first_atom))))
   ; on_this_turn_start =
@@ -4208,7 +4192,6 @@ module For_testing = struct
   let aged_result_min_bytes = aged_result_min_bytes
   let compose_carried_model_input = compose_carried_model_input
   let request_view = request_view
-  let this_turn_front_source = this_turn_front_source
   let current_turn_demotion = current_turn_demotion
   let offload_model_input_cpu = offload_model_input_cpu
 end

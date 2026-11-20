@@ -163,10 +163,8 @@ let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~ac
     | Keeper_turn_driver_try_provider.From_seed
         { source =
             ( Keeper_carried_front.Turn_record _
-            | Keeper_carried_front.Turn_start_after_seed_refusal
-            | Keeper_carried_front.Turn_start_after_librarian_refusal
-            | Keeper_carried_front.This_turn_start_after_seed_refusal
-            | Keeper_carried_front.This_turn_start_after_librarian_refusal
+            | Keeper_carried_front.Turn_start_after_refusal
+            | Keeper_carried_front.This_turn_start_after_refusal
             | Keeper_carried_front.Turn_start_at_max_context
             | Keeper_carried_front.Librarian_point_at_max_context )
         ; _

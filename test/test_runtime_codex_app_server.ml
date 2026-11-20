@@ -5329,7 +5329,8 @@ for line in sys.stdin:
         contains_history = state['threads'][thread]['contains_history']
         emit({'id': ident, 'result': {'thread': {'id': thread}, 'model': 'gpt-fixture'}})
     elif method == 'thread/inject_items':
-        contains_history = contains_history or 'OMITTED_HISTORY_' in json.dumps(params)
+        payload = json.dumps(params)
+        contains_history = contains_history or ('OMITTED_HISTORY_' in payload or 'Continue operation' in payload or 'MASC_SUBSCRIPTION_OK' in payload)
         save_thread()
         emit({'id': ident, 'result': {}})
     elif method == 'turn/start':
@@ -5381,9 +5382,10 @@ for line in sys.stdin:
      | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
     let run phase_number =
       write_fixture_file phase (string_of_int phase_number);
-      (match run_production_keeper_turn ~base_path ~trace_id
+      (match run_production_keeper_turn_numbered ~keeper_turn_id:phase_number
+        ~history:direct_history ~base_path ~trace_id
         ~user_message:(Printf.sprintf "Continue operation %d." phase_number)
-        ~cli_path ~model:"gpt-fixture" ~turn_instructions:None with
+        ~cli_path with
        | Ok _ -> ()
        | Error error -> fail (Agent_core.Error.to_string error));
       match Dated_jsonl.read_recent
@@ -5392,14 +5394,24 @@ for line in sys.stdin:
         | Ok record -> record | Error detail -> fail detail)
       | _ -> fail "expected the actual turn writer's newest record"
     in
+    let keepers_dir = Workspace.keepers_runtime_dir config in
+    let bridged_history () =
+      match Keeper_turn_bridge.uncheckpointed_official_turns ~keepers_dir
+        ~keeper_name ~trace_id ~session_dir ~existing_messages:history with
+      | Ok msgs -> history @ msgs
+      | Error error -> fail (Keeper_turn_bridge.bridge_load_error_to_string error)
+    in
     let first = run 1 in
     (match first.response_observed_model_input with
      | Some { window = { transmitted_atoms = 4; total_atoms = 8; _ }; _ } -> ()
      | _ -> fail "first turn must establish the carried range 4..7");
+    let after_turn1 = bridged_history () in
+    check int "turn one adds two bridged atoms on disk" 10 (List.length after_turn1);
+    let digest_after_turn1 = Runtime_model_input_tail_window.atom_opening_digest after_turn1 in
     let second = run 2 in
     let expected_empty : Turn_record.model_input_window =
-      { transmitted_atoms = 0; total_atoms = 8; measurement = Durable_shape
-      ; model_input_front = Model_input_front.After_history (Option.get (digest_at 7))
+      { transmitted_atoms = 0; total_atoms = 10; measurement = Durable_shape
+      ; model_input_front = Model_input_front.After_history (Option.get (digest_after_turn1 9))
       } in
     check bool "empty retry replaces the last rejected projection" true
       (second.model_input_window = Some expected_empty);
@@ -5407,6 +5419,9 @@ for line in sys.stdin:
      | Some observed -> check bool "response certifies the empty request only" true
          (observed.window = expected_empty)
      | None -> fail "successful empty retry must have response evidence");
+    let after_turn2 = bridged_history () in
+    check int "turn two adds two more bridged atoms on disk" 12 (List.length after_turn2);
+    let digest_after_turn2 = Runtime_model_input_tail_window.atom_opening_digest after_turn2 in
     let settled_thread () =
       match Keeper_official_client_session_store.load ~base_path ~keeper_name |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
       | Ok (Some { phase = Settled settlement; _ }) -> settlement.session_id
@@ -5421,13 +5436,17 @@ for line in sys.stdin:
       ~base_path ~keeper_name (fun () -> ()) with
      | Ok () -> ()
      | Error detail -> fail detail);
+    let expected_third : Turn_record.model_input_window =
+      { transmitted_atoms = 2; total_atoms = 12; measurement = Durable_shape
+      ; model_input_front = Model_input_front.At_atom (Option.get (digest_after_turn2 10))
+      } in
     let third = run 3 in
     check bool "next fresh lifecycle preserves the durable empty boundary" true
-      (third.model_input_window = Some expected_empty);
+      (third.model_input_window = Some expected_third);
     (match third.response_observed_model_input with
-     | Some observed -> check bool "fresh response certifies the same empty boundary" true
-         (observed.window = expected_empty)
-     | None -> fail "fresh Start must report its accepted empty projection");
+     | Some observed -> check bool "fresh response certifies only post-boundary turns" true
+         (observed.window = expected_third)
+     | None -> fail "fresh Start must report its accepted post-boundary projection");
     let third_thread = settled_thread () in
     check bool "turn three really starts another vendor thread" true
       (not (String.equal second_thread third_thread));
@@ -5441,10 +5460,10 @@ for line in sys.stdin:
     let seed_read = Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id in
     (match seed_read.seed with
      | Some seed ->
-       check int "an unobserved Resume preserves the durable empty front" 8 seed.first_atom;
-       check bool "the boundary still has the omitted history witness" true
-         (seed.front = expected_empty.model_input_front)
-     | None -> fail "ordinary Resume concealed the prior accepted empty boundary");
+       check int "an unobserved Resume preserves the post-boundary front" 10 seed.first_atom;
+       check bool "the boundary still begins at turn two" true
+         (seed.front = expected_third.model_input_front)
+     | None -> fail "ordinary Resume concealed the prior accepted boundary");
     let rows = In_channel.with_open_bin capture In_channel.input_lines
       |> List.map Yojson.Safe.from_string in
     let requests phase_number method_name =
@@ -5488,8 +5507,14 @@ for line in sys.stdin:
       (history_requests <> []);
     List.iter (fun params ->
       check bool "third wire never resurrects an omitted history atom" false
-        (String_util.contains_substring (Yojson.Safe.to_string params) "OMITTED_HISTORY_"))
+        (String_util.contains_substring (Yojson.Safe.to_string params) "OMITTED_HISTORY_");
+      check bool "third wire never resurrects pre-empty turn one" false
+        (String_util.contains_substring (Yojson.Safe.to_string params) "Continue operation 1."))
       history_requests;
+    check bool "third wire carries post-empty turn two" true
+      (List.exists (fun params ->
+         String_util.contains_substring (Yojson.Safe.to_string params) "Continue operation 2.")
+         (requests 3 "thread/inject_items"));
     check int "turn four is one ordinary Resume" 1
       (List.length (requests 4 "thread/resume"));
     check int "ordinary Resume starts no replacement thread" 0

@@ -83,7 +83,7 @@ let expect_error (result : Tool_result.result option) =
   | None -> fail "tool not handled"
 ;;
 
-(* {1 RFC-0444 PR-2: the typed Unavailable envelope}
+(* {1 The typed Unavailable envelope}
 
    A store this build cannot read answers
    [{ok:false, error_code:"goal_store_unavailable", reason, field, file,

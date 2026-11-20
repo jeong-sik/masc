@@ -94,6 +94,7 @@ type mono_reason =
   | Engine_sample
   | Play_room_read
   | Tool_series_reread
+  | Reading_slot
   | Emblem_step
   | Paste_quiet
   | Drain_budget_spent

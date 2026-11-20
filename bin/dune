@@ -1765,6 +1765,15 @@
  (modules masc_tui_owed_read)
  (libraries masc_tui_wake))
 
+;; Whether the screen says it is waiting on the server, and for how long (RFC
+;; tui-one-screen-grammar section 8). Pure apart from noting when its answer
+;; next changes for the main loop (masc_tui_wake); the main loop steps it.
+(library
+ (name masc_tui_reading)
+ (wrapped false)
+ (modules masc_tui_reading)
+ (libraries masc_tui_value masc_tui_wake))
+
 ;; When the next refresh pass may read /health after the probe failed
 ;; (RFC tui-one-screen-grammar section 2). Pure apart from noting when the
 ;; wait ends for the main loop (masc_tui_wake); the main loop starts it.

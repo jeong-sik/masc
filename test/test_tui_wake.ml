@@ -48,8 +48,9 @@ let mono_number : Wake.mono_reason -> int = function
   | Drain_budget_spent -> 10
   | Machine_view_cadence -> 11
   | Wall_clock_recheck -> 12
+  | Reading_slot -> 13
 
-let mono_count = 13
+let mono_count = 14
 
 let wall_number : Wake.wall_reason -> int = function
   | Time_text -> 0
@@ -68,7 +69,7 @@ let reason_number : Wake.deadline_reason -> int = function
 let mono_reasons : Wake.mono_reason list =
   [ Frame_slot; After_frame; Owed_read_retry; Refresh_retry; Roster_row_scheduled;
     Engine_sample; Play_room_read; Tool_series_reread; Emblem_step; Paste_quiet;
-    Drain_budget_spent; Machine_view_cadence; Wall_clock_recheck ]
+    Drain_budget_spent; Machine_view_cadence; Wall_clock_recheck; Reading_slot ]
 
 (* The clock column of RFC tui-idle-wait §2.2. Moving a reason to the other
    clock moves it between these lists, and the type of each decision that

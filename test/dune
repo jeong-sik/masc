@@ -4319,6 +4319,11 @@
  (libraries alcotest masc_tui_owed_read masc_tui_wake))
 
 (test
+ (name test_tui_reading)
+ (modules test_tui_reading)
+ (libraries alcotest masc_tui_reading masc_tui_value masc_tui_wake))
+
+(test
  (name test_tui_roster_owed)
  (modules test_tui_roster_owed)
  (libraries alcotest masc_tui_roster_owed masc_tui_wake))

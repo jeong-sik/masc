@@ -4723,7 +4723,22 @@ let production_fixture_woken_by : Keeper_event_queue.stimulus list =
   ]
 ;;
 
-let run_production_keeper_turn_as ~input_speaker ~turn_kind ~write_cost_ledger ~after_turn
+(* The sources of a turn's input and of its answer, which decide the history
+   file each is written to ({!Keeper_context_core_history}). A direct turn
+   writes both to the main file. A turn the Keeper started itself writes its
+   answer to the internal file and does not write its wake cue. *)
+let direct_history = Keeper_types_support.Direct_user, Keeper_types_support.Direct_assistant
+
+let internal_history =
+  Keeper_types_support.World_state_prompt, Keeper_types_support.Internal_assistant
+;;
+
+(* Where the fixture's turns keep their sessions, one directory for a trace. *)
+let production_fixture_session_base ~base_path = Filename.concat base_path "keeper-sessions"
+
+let run_production_keeper_turn_as ~keeper_turn_id
+    ~history:(history_user_source, history_assistant_source)
+    ~input_speaker ~turn_kind ~write_cost_ledger ~after_turn
     ~dynamic_context_for_tools
     ~http_fixture ~base_path ~trace_id
     ~user_message ~cli_path ~model ~turn_instructions =
@@ -4843,7 +4858,9 @@ candidates = [%s]
                                        ())
                                 else None
                               in
-                              let run () = Keeper_agent_run.run_turn ~keeper_turn_id:1 ~approval_admission:Keeper_approval_origin.Unavailable
+                              let run () = Keeper_agent_run.run_turn ~keeper_turn_id
+                                ~history_user_source ~history_assistant_source
+                                ~approval_admission:Keeper_approval_origin.Unavailable
                                 ?trajectory_acc
                                 ~config
                                 ~meta
@@ -4852,7 +4869,7 @@ candidates = [%s]
                                   Keeper_types_profile_defaults.empty_keeper_profile_defaults
                                 ~turn_ctx_cell:
                                   (Keeper_tool_call_log.create_turn_ctx_cell ())
-                                ~base_dir:(Filename.concat base_path "keeper-sessions")
+                                ~base_dir:(production_fixture_session_base ~base_path)
                                 ~max_context:400_000
                                 ~build_turn_prompt:
                                   (fun ~base_system_prompt:_ ~messages:_ ->
@@ -4888,7 +4905,7 @@ candidates = [%s]
 let run_production_keeper_turn_with_projection ~write_cost_ledger ~after_turn
     ~dynamic_context_for_tools ~http_requests ~base_path ~trace_id
     ~user_message ~cli_path ~model ~turn_instructions =
-  run_production_keeper_turn_as
+  run_production_keeper_turn_as ~keeper_turn_id:1 ~history:direct_history
     ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
     ~turn_kind:Turn_record.Direct
     ~write_cost_ledger ~after_turn ~dynamic_context_for_tools
@@ -4922,6 +4939,16 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
     ~turn_instructions =
   run_production_keeper_turn_with_predecessor ~http_requests:None ~base_path
     ~trace_id ~user_message ~cli_path ~model ~turn_instructions
+;;
+
+(* The same turn with its number and its history files chosen. *)
+let run_production_keeper_turn_numbered ~keeper_turn_id ~history ~base_path ~trace_id
+    ~user_message ~cli_path =
+  run_production_keeper_turn_as ~keeper_turn_id ~history
+    ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+    ~turn_kind:Turn_record.Direct ~write_cost_ledger:false ~after_turn:ignore
+    ~dynamic_context_for_tools:None ~http_fixture:None ~base_path ~trace_id ~user_message
+    ~cli_path ~model:"gpt-fixture" ~turn_instructions:None
 ;;
 
 (* #37963: enter the actual production collector/finalizer and read its
@@ -5024,7 +5051,7 @@ supports_native_streaming = false
             (Yojson.Safe.to_string Yojson.Safe.Util.(trust |> member "execution" |> member "runtime_lane_observation"));
           Printf.printf "RUNTIME_WALK_PRODUCER_RECEIPT %s\n%!" (Yojson.Safe.to_string raw)
         in
-        let result=run_production_keeper_turn_as
+        let result=run_production_keeper_turn_as ~keeper_turn_id:1 ~history:direct_history
           ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
           ~turn_kind:Turn_record.Direct ~write_cost_ledger:false ~after_turn
           ~dynamic_context_for_tools:None ~http_fixture:(Some http_fixture)
@@ -8637,19 +8664,130 @@ let assert_production_keeper_result result =
 
 (* The same turn in the turn log, written beside the boundary line: the log's
    start, the turn's admission, and an end that says how the turn ended. *)
-let assert_turn_log ~keepers_dir ~trace_id ~ended =
+let turn_log_lines ~keepers_dir =
   let path =
     Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:"codex-production-fixture"
   in
-  let lines =
-    String.split_on_char '\n' (Fs_compat.load_file path)
-    |> List.filter (fun row -> not (String.equal row ""))
-    |> List.map (fun row ->
-      match Keeper_turn_log_codec.of_json (Yojson.Safe.from_string row) with
-      | Ok line -> line
-      | Error error -> fail (Keeper_memory_os_types.wire_error_to_string error))
+  String.split_on_char '\n' (Fs_compat.load_file path)
+  |> List.filter (fun row -> not (String.equal row ""))
+  |> List.map (fun row ->
+    match Keeper_turn_log_codec.of_json (Yojson.Safe.from_string row) with
+    | Ok line -> line
+    | Error error -> fail (Keeper_memory_os_types.wire_error_to_string error))
+;;
+
+(* The units the turns of a log ended, in the order they were written: the
+   turn, the mark its unit starts at and the mark it ends at. A unit starts
+   where the unit before it ended, or where the log started
+   ({!Keeper_turn_log.boundary}). *)
+let turn_units lines =
+  let (_ : Keeper_turn_log.mark option), (_ : Ids.Turn_ref.t option), units =
+    List.fold_left
+      (fun (point, opened, units) (line : Keeper_turn_log.line) ->
+         match Keeper_turn_log.boundary line, line with
+         | Starts_at mark, (Log_started _ | Opened _ | Closed _ | Reset _) ->
+           Some mark, opened, units
+         | Moves_nothing, Opened { turn_ref; _ } -> point, Some turn_ref, units
+         | Moves_nothing, (Log_started _ | Closed _ | Reset _) -> point, opened, units
+         | Ends_unit { through; next }, Closed _ ->
+           (match point, opened with
+            | Some from, Some turn_ref -> Some next, None, (turn_ref, from, through) :: units
+            | None, (Some _ | None) | Some _, None ->
+              fail "a turn's end with no start of the log or no admission before it")
+         | Ends_unit { next; through = (_ : Keeper_turn_log.mark) }, (Log_started _ | Opened _ | Reset _)
+           -> Some next, opened, units)
+      (None, None, [])
+      lines
   in
-  match lines with
+  List.rev units
+;;
+
+(* The byte offset at which each whole line of [raw] starts, by its number
+   from 1. *)
+let line_starts raw =
+  let rec go number offset starts =
+    match String.index_from_opt raw offset '\n' with
+    | None -> List.rev starts
+    | Some stop -> go (number + 1) (stop + 1) ((number, offset) :: starts)
+  in
+  go 1 0 []
+;;
+
+(* One official-client file against the units of the turn log. The bytes of a
+   unit hold the lines that name its turn, every one of them and no other
+   line, and the last unit ends where the file ends. Returns how many lines
+   each unit holds. *)
+let official_client_lines_in_units ~session_dir file ~bytes units =
+  let path = Keeper_turn_fragments.path ~session_dir file in
+  let raw = if Sys.file_exists path then Fs_compat.load_file path else "" in
+  let starts = line_starts raw in
+  let lines =
+    match Keeper_turn_fragments.read ~session_dir file with
+    | Ok lines -> lines
+    | Error detail -> fail detail
+  in
+  (match List.rev units with
+   | (_, _, last) :: _ ->
+     check int "the last unit ends where the file ends" (String.length raw) (bytes last)
+   | [] -> fail "the turn log ends no unit");
+  List.map
+    (fun (turn_ref, from, through) ->
+       let named = Ids.Turn_ref.to_string turn_ref in
+       let in_unit =
+         List.filter
+           (fun (number, (_ : (Keeper_turn_fragments.line, Keeper_turn_fragments.read_error) result)) ->
+              let start = List.assoc number starts in
+              start >= bytes from && start < bytes through)
+           lines
+       in
+       List.iter
+         (fun (number, line) ->
+            match line with
+            | Ok (Keeper_turn_fragments.Fragment fragment) ->
+              check string
+                (Printf.sprintf "line %d lies in the unit of the turn it names" number)
+                named
+                (Ids.Turn_ref.to_string (Keeper_turn_fragments.fragment_turn_ref fragment))
+            | Ok Keeper_turn_fragments.Untagged ->
+              fail (Printf.sprintf "line %d of the unit of %s names no turn" number named)
+            | Error error -> fail (Keeper_turn_fragments.read_error_to_string error))
+         in_unit;
+       check int
+         (Printf.sprintf "the unit of %s holds every line that names it" named)
+         (List.length (Keeper_turn_fragments.of_turn turn_ref lines))
+         (List.length in_unit);
+       List.length in_unit)
+    units
+;;
+
+(* Both official-client files of [trace_id] against the turn log: for each
+   unit, the lines it holds in the main file and in the internal one. *)
+let official_client_units ~base_path ~trace_id =
+  let keepers_dir =
+    Filename.concat (Workspace.backend_config_for base_path).base_path
+      Common.keepers_runtime_dirname
+  in
+  let session_dir = Filename.concat (production_fixture_session_base ~base_path) trace_id in
+  let units = turn_units (turn_log_lines ~keepers_dir) in
+  let main =
+    official_client_lines_in_units ~session_dir Keeper_turn_fragments.Main
+      ~bytes:(fun (mark : Keeper_turn_log.mark) -> mark.history_bytes)
+      units
+  in
+  let internal =
+    official_client_lines_in_units ~session_dir Keeper_turn_fragments.Internal
+      ~bytes:(fun (mark : Keeper_turn_log.mark) -> mark.internal_bytes)
+      units
+  in
+  List.map2
+    (fun (turn_ref, (_ : Keeper_turn_log.mark), (_ : Keeper_turn_log.mark)) lines ->
+       Ids.Turn_ref.to_string turn_ref, lines)
+    units
+    (List.combine main internal)
+;;
+
+let assert_turn_log ~keepers_dir ~trace_id ~ended =
+  match turn_log_lines ~keepers_dir with
   | [ Keeper_turn_log.Log_started _; Opened { turn_ref; stimuli; _ }; Closed { outcome; _ } ] ->
     check string "turn log turn" (trace_id ^ "#1") (Ids.Turn_ref.to_string turn_ref);
     check bool "the admission names what the turn was woken by" true
@@ -8753,7 +8891,12 @@ let test_production_keeper_dispatches_codex_runtime () =
               assert_official_client_turn_boundary
                 ~base_path
                 ~trace_id:"codex-production-trace-1"
-                ~ended:Keeper_turn_log.Completed))
+                ~ended:Keeper_turn_log.Completed;
+              check
+                (list (pair string (pair int int)))
+                "the turn's unit holds its input and its answer, both in the main file"
+                [ "codex-production-trace-1#1", (2, 0) ]
+                (official_client_units ~base_path ~trace_id:"codex-production-trace-1")))
 ;;
 
 (* An official-client turn that fails never reaches finalize. Its input is
@@ -8781,7 +8924,80 @@ let test_production_keeper_failed_turn_leaves_its_end_line () =
               assert_official_client_turn_boundary
                 ~base_path
                 ~trace_id:"codex-production-failed-1"
-                ~ended:Keeper_turn_log.Errored))
+                ~ended:Keeper_turn_log.Errored;
+              check
+                (list (pair string (pair int int)))
+                "the failed turn's unit holds its input"
+                [ "codex-production-failed-1#1", (1, 0) ]
+                (official_client_units ~base_path ~trace_id:"codex-production-failed-1")))
+;;
+
+(* A turn the Keeper started itself writes its answer to the internal file
+   and its wake cue to neither file. Its unit holds that one line there, and
+   nothing in the main file. *)
+let test_production_keeper_unit_of_an_internal_turn () =
+  let base_path = temp_workspace "masc-codex-production-internal-" in
+  let trace_id = "codex-production-internal-1" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; turn_result; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn_numbered ~keeper_turn_id:1 ~history:internal_history
+                ~base_path ~trace_id
+                ~user_message:"Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                ~cli_path
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ ->
+              check
+                (list (pair string (pair int int)))
+                "the unit holds the turn's answer in the internal file"
+                [ trace_id ^ "#1", (0, 1) ]
+                (official_client_units ~base_path ~trace_id)))
+;;
+
+(* Two turns of one trace. The second unit starts where the first ended, so
+   each holds the lines of its own turn and none of the other's. *)
+let test_production_keeper_units_of_two_turns () =
+  let base_path = temp_workspace "masc-codex-production-two-turns-" in
+  let trace_id = "codex-production-two-turns-1" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; turn_result; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn_numbered ~keeper_turn_id:1 ~history:direct_history
+                ~base_path ~trace_id ~user_message:"Start the production fixture thread."
+                ~cli_path
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> ());
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; resumed_turn_result
+         ; resumed_item_completed; resumed_turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn_numbered ~keeper_turn_id:2 ~history:direct_history
+                ~base_path ~trace_id ~user_message:"Resume the production fixture thread."
+                ~cli_path
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> ());
+       check
+         (list (pair string (pair int int)))
+         "each unit holds its own turn's input and answer"
+         [ trace_id ^ "#1", (2, 0); trace_id ^ "#2", (2, 0) ]
+         (official_client_units ~base_path ~trace_id))
 ;;
 
 (* The host resolves a Codex turn's spend from the thread's running count
@@ -10503,6 +10719,14 @@ let () =
             "production Keeper failed turn leaves its end line"
             `Quick
             test_production_keeper_failed_turn_leaves_its_end_line
+        ; test_case
+            "production Keeper unit of an internal turn"
+            `Quick
+            test_production_keeper_unit_of_an_internal_turn
+        ; test_case
+            "production Keeper units of two turns"
+            `Quick
+            test_production_keeper_units_of_two_turns
         ; test_case
             "production Keeper reports Codex token usage"
             `Quick

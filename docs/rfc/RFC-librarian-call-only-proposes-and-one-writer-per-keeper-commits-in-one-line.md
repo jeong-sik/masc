@@ -219,6 +219,7 @@ type turn_line =
   - 이름을 싣지 않는 갈래가 있다. connector 의 귀띔, HITL 판정, Ask 의 답은 id 만 싣는다. 보낸 이는 그 id 가 가리키는 행에 있다.
   - 내용은 싣지 않는다. id 가 가리키는 저장소에 있다.
   - 직접 요청으로 시작한 턴과 Keeper 의 cadence 로 시작한 턴은 비어 있다. 직접 요청의 메시지는 이력에 말한 이와 함께 있다.
+  - 스스로 깬 official-client 턴은 깨운 문장을 이력 파일에 쓰지 않는다(`World_state_prompt`). 그 턴의 단위에는 답과 tool 관찰만 있다. 무엇이 깨웠는지는 이 칸만 말한다.
 
 줄에 적은 digest 는 그 줄이 남아 있는 한 읽을 수 있다. head 가 나중에 어떻게 바뀌어도 같다.
 
@@ -1870,7 +1871,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L3a3b4b | 받아들임은 head 의 열린 메시지를 닫지 않는다. §5.2 와 모델(`LibrarianTurnLog`)을 그렇게 고친다. 코드는 L3a3b4a 그대로다. 턴 앞에서 head 에 열린 메시지를 두는 제품 경로가 있어서다. Keeper 만들기의 첫 저장, 멈춘 턴을 잇는 저장(gate, checkpoint, runtime), 입력을 기다린 답의 저장이다. 받아들임이 닫으면 이어 가는 턴의 메시지가 Task 없이 실린다 | 모델의 정상 설정이 모두 통과한다. 받아들임이 닫는다는 규칙에 기대던 설정과 속성이 없어진다. 열린 메시지는 그것을 닫은 저장의 단위에 든다 |
 | L3a3b4c | 프로세스 시작 단계(`Keeper_turn_log_process_start`). checkpoint 꼬리 복구 뒤, Keeper 턴 앞에서 저장된 Keeper 마다 돈다. 마지막 `Opened` 가 열려 있으면 head 의 열린 메시지를 닫고 `Closed {Process_exited}` 를 쓴다. 턴 기록이 없으면 `Log_started` 를 쓴다. 카운터 `turn_log_open_close_failed` | 죽은 턴이 저장한 메시지가 `Process_exited` 단위에 든다. 열린 턴이 없으면 head 의 열린 메시지를 그대로 둔다. 읽지 못한 턴 기록에는 닫지도 쓰지도 않는다. 닫는 저장이 실패해도 줄을 쓰고, 줄을 못 써도 프로세스 시작이 그대로 간다 |
 | L3a3b4d | `Opened` 가 `stimuli` 를 싣는다. event queue payload 를 줄 타입으로 옮기는 전체 함수를 둔다(`Keeper_turn_log_turn.stimulus`). 턴을 도는 함수가 받은 queue 항목을 인자로 받는다. 이 칸이 없는 `Opened` 는 읽지 않는다 | payload 갈래마다 줄 타입이 하나다. 줄 타입마다 글로 박은 모양. 턴 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
-| L3b | official-client runtime 넷: fragment 바이트 끝자리(찢긴 꼬리는 길이를 읽기 전에 자른다), chat 과 외부 행의 끝자리, 받아들일 때의 근거 | runtime 마다 같은 기능 시험. fragment 범위가 그 턴의 줄과 정확히 같다 |
+| L3b | official-client 턴의 단위가 두 이력 파일에서 그 턴의 줄과 같은지 턴 전체를 돌려 확인한다. 제품 코드는 바뀌지 않는다. 끝자리 읽기는 L3a3b2 가 넣었고, 받아들일 때의 근거는 L3a3b4a 와 L3a3b4d 가 넣었다 | 단위의 바이트 범위에 그 턴을 이름 붙인 줄이 전부 있고 다른 줄이 없다. 마지막 단위는 파일 끝에서 끝난다. 직접 턴, 실패한 턴, 스스로 깬 턴, 같은 trace 의 두 턴에서 본다. Codex app server 의 턴 fixture 에서 돈다. 나머지 official-client runtime 셋에는 턴 전체를 도는 fixture 가 없다(이슈 #53384). 이력 줄을 쓰는 세 곳은 runtime 을 가리지 않는다 |
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |
 | L3d | `turn-boundaries.jsonl` 을 읽던 곳 열을 턴 기록으로 옮긴다(§19.2 d). 그 뒤 옛 파일 쓰기를 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |
 | L4 | lane 선언: Librarian 의 built-in lane 과 그 표, 풀린 lane 값(질문 쪽 값과 slot 별 key), `lane_held` | 로드 시험. 선언이 같으면 값이 같고, slot 하나의 창이 바뀌면 값이 다르다 |

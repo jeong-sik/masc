@@ -2516,8 +2516,8 @@ let test_rate_limits_read_without_turn () =
           (List.map (fun json -> json |> member "method" |> to_string) requests)))
 ;;
 
-(* RFC-0501 §2.2: [initialize], then one [thread/delete] per id and no
-   [account/read]. A refusal stays with its own id. *)
+(* [delete_threads] sends [initialize], then one [thread/delete] per id and
+   no [account/read]. A refusal stays with its own id. *)
 let test_thread_delete_answers_each_id () =
   let capture = Filename.temp_file "masc-thread-delete-capture-" ".jsonl" in
   Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
@@ -5067,7 +5067,7 @@ supports_native_streaming = false
         | _ -> fail "first candidate did not reach the HTTP fixture"))
 ;;
 
-(* #38174, RFC-0458 §3.4. A production Keeper turn names its Keeper as the
+(* #38174. A production Keeper turn names its Keeper as the
    recorder of a failed attempt, so that Keeper's next cycle dispatches the
    candidate again. The client closes before the turn starts; the route calls
    that a server error, which a fleet walk records. *)

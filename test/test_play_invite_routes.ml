@@ -1,6 +1,5 @@
-(* RFC play-link-for-the-shared-machine §2.4 and §5 through the real router:
-   who may issue, what the answer carries, and that revoking a name that holds
-   the DOS controller frees it. *)
+(* Invites through the real router: who may issue, what the answer carries,
+   and that revoking a name that holds the DOS controller frees it. *)
 
 open Alcotest
 module Routes = Server_routes_http_routes_play

@@ -1,8 +1,7 @@
 (** Integration tests for tool_search_files read-side containment.
 
-    RFC-0006 Phase B-1.5: extend the host-FS read guard from B-1
-    (handle_tool_read_file) to tool_search_files read ops (ls/cat/rg/find/
-    head/tail/wc/tree/git_status/git_log/git_diff). Docker keepers are
+    The host-FS read guard of tool_read_file also guards
+    tool_search_files, which runs rg only. Docker keepers are
     always contained to their playground via the same containment
     module. *)
 
@@ -53,7 +52,7 @@ let make_config () =
   (tmp, Workspace.default_config tmp)
 
 let make_meta ~name ~sandbox =
-  (* The resolver permits any path under project_root; the B-1.5 sandbox
+  (* The resolver permits any path under project_root; the sandbox
      containment fires AFTER the resolver but BEFORE I/O. *)
   let json =
     `Assoc

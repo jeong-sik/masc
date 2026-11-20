@@ -3,9 +3,7 @@
     Counters declared through [Otel_metric_store_core.declare_counter]
     (metric-name modules) and the [Keeper_metrics] module-init sweep must
     export an unlabeled 0-cell from process start, so Grafana can
-    distinguish "never fired" (series at 0) from "not wired" (no series).
-    See RFC-0217 (OTel single backend) and the absence-vs-zero finding in
-    the 2026-06-10 telemetry audit. *)
+    distinguish "never fired" (series at 0) from "not wired" (no series). *)
 
 open Alcotest
 

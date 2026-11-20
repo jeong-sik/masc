@@ -767,7 +767,7 @@ let test_structured_text_is_sanitized_before_it_reaches_the_client () =
     [Llm_provider.Utf8_sanitize.sanitize raw] content
 ;;
 
-(* RFC-0490 L4: mcp_config_json omits the per-tool eager map so agy keeps every
+(* mcp_config_json omits the per-tool eager map so agy keeps every
    masc tool in its lazy list and loads schemas on demand from the allowed
    schema folder instead of silently dropping large eager schemas past ~62 KB. *)
 let test_config_omits_eager_tools_for_on_demand_loading () =

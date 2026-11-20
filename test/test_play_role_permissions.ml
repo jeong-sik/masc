@@ -1,6 +1,5 @@
-(* RFC play-link-for-the-shared-machine stage 1 (§2.2, §2.3, §5): the
-   [Player] role an invite carries holds [CanPlayMachine] and nothing else,
-   the seat tools require exactly that permission, and [Worker] /
+(* The [Player] role an invite carries holds [CanPlayMachine] and nothing
+   else, the seat tools require exactly that permission, and [Worker] /
    [Admin] keep every right they had and gain the seat. *)
 
 open Alcotest
@@ -20,7 +19,7 @@ let all_permissions =
     ; CanPlayMachine
     ]
 
-(* The tools an invited Player may call (§2.3). load, eject, restore and save
+(* The tools an invited Player may call. load, eject, restore and save
    change the game itself; peek reads what the screen hides; click is not
    needed for keyboard games. *)
 let seat_tools =

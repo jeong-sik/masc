@@ -764,7 +764,7 @@ let test_native_permissions_match_posture_and_workspace () =
   let workspace = Filename.concat runtime_root "workspace" in
   Unix.mkdir workspace 0o700;
   let paths = Runtime_antigravity_home.For_testing.paths home in
-  (* RFC-0490 2.2 + L3b: every posture names the lazily loaded masc tools'
+  (* Every posture names the lazily loaded masc tools'
      schema folder and the two secret paths. None of them emit the broad
      all-files read deny that would shadow schema reads; Native_none denies
      workspace roots explicitly and pairs with the read-guard hook. *)

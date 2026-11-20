@@ -1,6 +1,6 @@
-(** test_mcp_session_id_header — RFC-0100 PR-3 session-id contract.
+(** test_mcp_session_id_header — session-id contract.
 
-    Pins the Q3-default behaviour: a client that echoes an
+    Pins the behaviour: a client that echoes an
     [Mcp-Session-Id] header the server has no state for is rejected
     with the equivalent of [404 Not Found], rather than silently
     minted into a phantom session. Also exercises the
@@ -35,7 +35,7 @@ let test_validate_session_known_unknown_id_blocks_non_handshake () =
 
 let test_validate_session_known_allows_handshake_methods () =
   (* The handshake set ([initialize] / [ping] /
-     [notifications/initialized]) is exempt from the Q3 check —
+     [notifications/initialized]) is exempt from the unknown-id check —
      those methods are what *establish* a known session. *)
   let check_ok method_ =
     let result =

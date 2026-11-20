@@ -1,4 +1,4 @@
-(* RFC-0491 §3.2: a keeper's System keeps the articles it was rendered with
+(* A keeper's System keeps the articles it was rendered with
    while the carried range keeps its front, and the articles written or taken
    back since then ride the end context. These cases pin the rule over plain
    values: where the range opens, which articles render the System, and what

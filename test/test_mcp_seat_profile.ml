@@ -396,9 +396,8 @@ let test_an_invite_recovers_only_a_stopped_keepers_controller () =
         ])
     [ false; true ]
 
-(* RFC play-link-for-the-shared-machine §2.8 over MCP: the gate a Keeper's
-   call and the play page's routes run also stands before an MCP client's
-   pass. *)
+(* Over MCP: the pass gate a Keeper's call and the play page's routes run
+   also stands before an MCP client's pass. *)
 let test_an_invite_passes_only_to_someone_at_the_machine () =
   let module Lane = Dos_lane in
   let program = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20" in

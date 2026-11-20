@@ -1,8 +1,7 @@
-(* GET /api/v1/lane-addons/live, stage 1 of RFC
-   machine-spectating-goes-through-lanes (§2.1, §5): the MSX and DOS machine
-   change counters and the read route over them. Drives the real Msx_lane
-   with no ROM (the bus reads 0xFF), the real Dos_lane with hand-assembled
-   COM programs, and the real lane-addon router. *)
+(* GET /api/v1/lane-addons/live: the MSX and DOS machine change counters
+   and the read route over them. Drives the real Msx_lane with no ROM (the
+   bus reads 0xFF), the real Dos_lane with hand-assembled COM programs, and
+   the real lane-addon router. *)
 
 open Alcotest
 module Lane = Msx_lane

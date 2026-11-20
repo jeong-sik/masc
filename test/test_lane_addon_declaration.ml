@@ -399,7 +399,8 @@ let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun
   ignore (reconcile config directory);
   check string "invalid edits never retire active worker" instance_id (one_live config |> text "instance_id"))
 
-(* RFC-0497 layer two through the real configuration pass. *)
+(* The real configuration pass removes a released instance that a newer
+   binding of the same owner supersedes, and folders no binding claims. *)
 let test_superseded_instance_records_leave () = with_fixture (fun clock config directory root _started ->
   let store = Filename.concat root ".masc/lane-addons" in
   let at relative = Filename.concat store relative in

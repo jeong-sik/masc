@@ -1,8 +1,7 @@
-(* The image catalog a Keeper's sandbox_image name is looked up in (RFC
-   keeper-sandbox-images-have-versions §2.3). A name either resolves to one
-   pinned build for the store asked about, or says precisely why not; a
-   malformed catalog is refused rather than read around; a change is written
-   only over the file it was read from. *)
+(* The image catalog a Keeper's sandbox_image name is looked up in. A name
+   either resolves to one pinned build for the store asked about, or says
+   precisely why not; a malformed catalog is refused rather than read around;
+   a change is written only over the file it was read from. *)
 
 open Alcotest
 open Keeper_sandbox_image_catalog

@@ -219,7 +219,7 @@ readonly EIO_POSIX_SHA="3a8ab387d748bcc8d8ae682cfb0ec7da2c9544b7"
 # under it with a write. tls-eio 2.1.5 copies it from a string source, and a
 # socket takes such a source through Eio.Flow.Pi.simple_copy, 4096 bytes a
 # write: on the bench the server spent 32~53% less CPU per MB with the write
-# (docs/evidence/research/2026-11-09-h2-sse-tls, bench run4). Pinned as
+# (#51374, bench run4). Pinned as
 # version 2.1.5 so the lock constraint and the tls package stay 2.1.5's.
 # Remove the pin when a tls-eio release writes its ciphertext this way.
 readonly TLS_EIO_SHA="2c0f8615865a8ae54188b706628d84474b26d8da"

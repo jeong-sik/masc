@@ -188,8 +188,7 @@ let validate_command_tool_execute ?allow_pipes ir =
 
 let path_is_existing_dir ?workdir path =
   let resolved = resolve_path ?base_dir:workdir path in
-  try Sys.file_exists resolved && Sys.is_directory resolved with
-  | Sys_error _ -> false
+  Fs_compat.is_directory resolved
 ;;
 
 (* Largest number of sibling directory names surfaced in a

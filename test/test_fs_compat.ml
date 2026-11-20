@@ -1274,6 +1274,31 @@ let test_fold_jsonl_lines_missing_file () =
   check int "missing file returns init" 0 result
 ;;
 
+let test_is_directory_kinds () =
+  with_tmp_dir @@ fun base ->
+  let dir = Filename.concat base "dir" in
+  let file = Filename.concat base "file" in
+  let missing = Filename.concat base "missing" in
+  let dangling = Filename.concat base "dangling" in
+  let dir_link = Filename.concat base "dir_link" in
+  let file_link = Filename.concat base "file_link" in
+  Unix.mkdir dir 0o755;
+  Fs_compat.save_file file "x";
+  Unix.symlink missing dangling;
+  Unix.symlink dir dir_link;
+  Unix.symlink file file_link;
+  List.iter
+    (fun (label, path, expected) ->
+       check bool label expected (Fs_compat.is_directory path))
+    [ "directory", dir, true
+    ; "regular file", file, false
+    ; "missing", missing, false
+    ; "dangling symlink", dangling, false
+    ; "symlink to directory", dir_link, true
+    ; "symlink to regular file", file_link, false
+    ]
+;;
+
 let () =
   Eio_main.run
   @@ fun env ->
@@ -1402,6 +1427,14 @@ let () =
             `Quick
             (test_read_dir_of_a_large_directory_forces_no_minor_collection
                ~fs:(Eio.Stdenv.fs env))
+        ; test_case
+            "is_directory classifies kinds, fallback"
+            `Quick
+            (with_optional_read_fs None test_is_directory_kinds)
+        ; test_case
+            "is_directory classifies kinds, Eio"
+            `Quick
+            (with_optional_read_fs (Some (Eio.Stdenv.fs env)) test_is_directory_kinds)
         ] )
     ; ( "owned regular file"
       , [ test_case "requested UID checked before and after open/read" `Quick

@@ -80,10 +80,7 @@ let keeper_staging_dir ~base_path ~keeper_name =
         Filename.concat base_path
           (Keeper_sandbox_config.host_root_rel_of_profile profile keeper_name)
       in
-      match Sys.file_exists dir && Sys.is_directory dir with
-      | true -> Some (dir, profile)
-      | false -> None
-      | exception Sys_error _ -> None)
+      if Env_config_core.existing_dir dir then Some (dir, profile) else None)
 
 (* Publish a completed temporary file without replacing an earlier paste.
    Keeper paste delivery enumerates only [Keeper_paste_naming] names, so it

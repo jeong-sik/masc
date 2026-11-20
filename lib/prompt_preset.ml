@@ -524,7 +524,7 @@ let report_to_json (r : restore_report) : Yojson.Safe.t =
 
 let capture_instructions ~base_path =
   let dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  if not (Sys.file_exists dir && Sys.is_directory dir)
+  if not (Fs_compat.is_directory dir)
   then []
   else
     Keeper_types_profile.discover_keepers_toml dir
@@ -789,7 +789,7 @@ let load ~base_path name =
 
 let list ~base_path =
   let dir = presets_dir ~base_path in
-  if not (Sys.file_exists dir && Sys.is_directory dir)
+  if not (Fs_compat.is_directory dir)
   then { presets = []; unreadable = [] }
   else (
     match guard (fun () -> Ok (Fs_compat.read_dir dir)) with

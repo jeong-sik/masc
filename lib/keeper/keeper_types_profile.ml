@@ -629,7 +629,7 @@ let keeper_toml_config_errors_in_dir_result dir =
       }
 
 let keeper_toml_unknown_keys_in_dir dir =
-  if not (Fs_compat.file_exists dir && Sys.is_directory dir) then []
+  if not (Fs_compat.is_directory dir) then []
   else
     dir
     |> Sys.readdir

@@ -651,7 +651,7 @@ let read_matching_task_events config ~task_id ~limit =
         (fun month ->
            if !remaining > 0 then
              let month_path = Filename.concat events_dir month in
-             if Sys.file_exists month_path && Sys.is_directory month_path then
+             if Fs_compat.is_directory month_path then
                let files =
                  Sys.readdir month_path
                  |> Array.to_list

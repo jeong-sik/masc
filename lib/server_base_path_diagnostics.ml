@@ -43,7 +43,7 @@ let normalize_path ~cwd path =
   | Unix.Unix_error _ -> absolute
 
 let dir_exists path =
-  Sys.file_exists path && Sys.is_directory path
+  Fs_compat.is_directory path
 
 let strict_mode_env_enabled () =
   match Sys.getenv_opt "MASC_BASE_PATH_STRICT" with

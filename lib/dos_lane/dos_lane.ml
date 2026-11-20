@@ -998,7 +998,7 @@ let ran_then_kept st ~who ran =
    snapshots the lane counter first; commit rejects a concurrent guest run. *)
 let with_saves ~saves_dir files =
   match
-    if Sys.file_exists saves_dir && Sys.is_directory saves_dir then
+    if Fs_compat.is_directory saves_dir then
       Sys.readdir saves_dir
       |> Array.to_list
       |> List.filter (fun f -> not (escapes f))

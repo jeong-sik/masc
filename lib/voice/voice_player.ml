@@ -15,7 +15,7 @@ let run_voice_status = Voice_bridge_transport.run_voice_status
     cap is satisfied. *)
 let cleanup_old_audio_files () =
   let dir = Filename.concat (masc_base_dir ()) "audio" in
-  if Sys.file_exists dir && Sys.is_directory dir
+  if Fs_compat.is_directory dir
   then (
     let now = Time_compat.now () in
     let cutoff = now -. Masc_time_constants.day in

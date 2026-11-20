@@ -133,7 +133,7 @@ let validate_raw_size data =
   else Ok ()
 
 let cleanup_old_files_in_dir dir =
-  if Sys.file_exists dir && Sys.is_directory dir
+  if Fs_compat.is_directory dir
   then
     try
       let cutoff =

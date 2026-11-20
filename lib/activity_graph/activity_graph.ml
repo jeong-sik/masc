@@ -187,7 +187,7 @@ let collect_event_files config =
     |> List.sort String.compare
     |> List.filter_map (fun month ->
            let month_path = Filename.concat root month in
-           if Sys.file_exists month_path && Sys.is_directory month_path then
+           if Fs_compat.is_directory month_path then
              Some
                (Sys.readdir month_path
                |> Array.to_list

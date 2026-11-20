@@ -48,6 +48,18 @@ let file_exists (path : string) : bool =
        | Eio.Io _ -> false)
 ;;
 
+let is_directory (path : string) : bool =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      match Stdlib.Sys.is_directory path with
+      | is_dir -> is_dir
+      | exception Sys_error (_ : string) -> false)
+    (fun fs ->
+       try (Eio.Path.stat ~follow:true Eio.Path.(fs / path)).kind = `Directory with
+       | Eio.Io _ -> false)
+;;
+
 type path_kind =
   | Missing
   | Directory

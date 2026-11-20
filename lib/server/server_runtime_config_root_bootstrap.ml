@@ -48,7 +48,7 @@ let versioned_config_root_candidates () =
   [ Some cwd_candidate; cwd_ancestor_candidate; exe_candidate ]
   |> List.filter_map (fun x -> x)
   |> Json_util.dedupe_keep_order
-  |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)
+  |> List.filter Fs_compat.is_directory
 ;;
 
 let copy_file_if_missing ~src ~dst =
@@ -59,15 +59,12 @@ let copy_file_if_missing ~src ~dst =
     Fs_compat.save_file dst (Fs_compat.load_file src))
 ;;
 
-let existing_directory path =
-  try Sys.file_exists path && Sys.is_directory path with
-  | Sys_error _ -> false
-;;
+let existing_directory = Fs_compat.is_directory
 
 let rec copy_missing_tree_count ~src ~dst =
   if Sys.is_directory src
   then
-    if Sys.file_exists dst && not (Sys.is_directory dst)
+    if Env_config_core.existing_file dst
     then (
       Log.Server.warn
         "config bootstrap: refusing to replace file with directory (%s -> %s)"
@@ -115,7 +112,7 @@ let rec copy_missing_tree ~src ~dst =
 let copy_missing_prompt_seed ~src_config_root ~dst_config_root =
   let src = Filename.concat src_config_root "prompts" in
   let dst = Filename.concat dst_config_root "prompts" in
-  if Sys.file_exists src && Sys.is_directory src
+  if Fs_compat.is_directory src
   then copy_missing_tree_count ~src ~dst
   else 0
 ;;
@@ -515,13 +512,16 @@ let base_path_config_root ~base_path =
 (* A root this caller just created holds nothing but the runtime.toml lock, and
    is seeded as new; any other root that exists is the operator's. *)
 let existing_root_or ~config_root ~created fresh =
-  if Sys.file_exists config_root
-     && not (created && Sys.is_directory config_root
+  match Sys.is_directory config_root with
+  | exception Sys_error (_ : string) -> fresh
+  | false -> Existing_root_not_a_directory
+  | true ->
+    if created
        && Array.for_all
-         (String.equal (Config_dir_resolver.runtime_toml_filename ^ ".lock"))
-         (Sys.readdir config_root))
-  then if Sys.is_directory config_root then Refill_existing_root else Existing_root_not_a_directory
-  else fresh
+            (String.equal (Config_dir_resolver.runtime_toml_filename ^ ".lock"))
+            (Sys.readdir config_root)
+    then fresh
+    else Refill_existing_root
 ;;
 
 let config_root_bootstrap_in_mode ~mode ~config_root ~created =

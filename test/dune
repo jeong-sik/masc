@@ -3219,6 +3219,7 @@
 (include stanzas/test_fs_compat_input.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
+(include stanzas/test_no_double_stat_dir_check.inc)
 (include stanzas/test_retention_directory.inc)
 
 (include stanzas/test_fs_compat_save_file_mode.inc)

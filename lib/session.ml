@@ -548,7 +548,7 @@ let connected_agents registry =
 
 let discover_agent_names ~agents_path =
   Eio_guard.run_in_systhread ~label:"agent-session-discovery" (fun () ->
-    if Sys.file_exists agents_path && Sys.is_directory agents_path then
+    if Fs_compat.is_directory agents_path then
       Sys.readdir agents_path
       |> Array.to_list
       |> List.filter_map (fun name ->

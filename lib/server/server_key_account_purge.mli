@@ -6,7 +6,7 @@
 (** The removal of a person's key account (design 8.5, RFC
     a-persons-api-key-is-their-own-provider-account 3.6). The owner asks for
     it, and it runs inside the call of the account
-    ({!Server_setup_account_login.one_call_of}), as each verification and
+    ({!Runtime_account_call.one_call_of}), as each verification and
     each turn on the account does, so none of them runs meanwhile.
 
     The last purge record of the account decides where the removal starts.
@@ -79,7 +79,7 @@ val resume : zone:Authz_zone.t -> base_path:string -> unit
     {!Server_key_account_registration}). It reads whose the account is and
     of which kind itself, as {!remove} does, so an id of a login account or
     of another person is answered [Not_a_key_account] or [Not_found] and
-    nothing is removed. [in_call] is not tied to [id] by its type: the
+    nothing is removed. The call is not tied to [id] by its type: the
     caller hands the witness of the call of that account. [Account_busy] is
     not answered. *)
 val remove_in_call

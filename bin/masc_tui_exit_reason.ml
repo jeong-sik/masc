@@ -64,3 +64,7 @@ let line t =
     (if is_normal t then "normal" else "abnormal")
     (bounded (one_row (label t)))
 ;;
+
+(* PROBE for #54044 (RFC tui-hand-written-counts section 6): a hand-written
+   plus sign that the changes check must refuse. Reverted in the next commit. *)
+let _tui_value_probe () = Printf.sprintf " +%d" 1

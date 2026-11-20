@@ -416,6 +416,68 @@ let test_frame_feedback_consumes_arrival_compensation () = at_sizes (fun origin 
 let long_answer prefix =
   String.concat "\n" (List.init 100 (fun index -> Printf.sprintf "%s%03d" prefix index))
 
+(* A streaming reply's live edge reads its rows from the open suffix alone
+   (#53979). The suffix must give every row it draws the same last source
+   byte the whole body's render gives it, at every point the reply can grow
+   to, including inside a fence whose language is a generated label. *)
+let growing_corpus = String.concat "" [
+  "# Heading one\n\nA paragraph with **bold**, `code` and a [link](https://example.com) ";
+  "that runs long enough to wrap across a narrow pane more than once.\n\n";
+  "- item one\n- item two with more words\n  continued line\n- item three\n\n";
+  "```ocaml\nlet x = 1\nlet y = x + 1\n```\n\n";
+  "> a quote line\n> another quote line\n\n";
+  "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\n";
+  "1. first\n2. second\n\n";
+  "Closing paragraph without a newline at the end" ]
+
+let growing_entry body : Layout.entry =
+  { delivery_state = None; style = Layout.Keeper; heading_boundary = Layout.Inherit_heading;
+    body_presentation = Layout.Source_body; timestamp = "12:00:00"; timeline_bucket = None;
+    diagnostics = []; speaker = "alpha"; role_label = "alpha";
+    role_label_mark_cells = Layout.role_label_mark_cells ~style:Layout.Keeper ();
+    request_label = ""; body; journal = [];
+    markdown_source = Layout.Markdown_growing {keeper_name = "alpha"; request_id = "grow"; entry_index = 0};
+    turn_rail = Layout.Rail_none; action = Layout.Action_none }
+
+let test_growing_suffix_reads_the_rows_the_whole_body_reads () =
+  List.iter (fun width ->
+    let steps = [| 1; 5; 13; 29 |] in
+    let rec grow length step read_from_suffix =
+      if length > String.length growing_corpus then read_from_suffix else
+      let body = String.sub growing_corpus 0 length in
+      let whole, suffix = Render.For_testing.growing_row_end_sources ~width (growing_entry body) in
+      match suffix with
+      | None -> grow (length + steps.(step mod 4)) (step + 1) read_from_suffix
+      | Some (row_start, suffix_rows) ->
+          let expected = List.filter (fun (row, _) -> row >= row_start) whole in
+          check bool (Printf.sprintf "width %d, %d bytes: the suffix from row %d reads the whole body's rows"
+            width length row_start) true (expected = suffix_rows);
+          grow (length + steps.(step mod 4)) (step + 1) (read_from_suffix + 1) in
+    let read_from_suffix = grow 1 0 0 in
+    check bool (Printf.sprintf "width %d: the suffix is read at most growth points" width)
+      true (read_from_suffix * 2 > String.length growing_corpus / 12)) [60; 24]
+
+let test_streaming_frames_leave_the_whole_reply_unread () =
+  let state = state Layout.Origin_inline in
+  let live = T.turn_log_create ~keeper_name:"alpha" ~request_id:"stream" ~started_at:300. in
+  T.turn_log_add ~now:300. live ~seq:(Some 0) Live.Run_started;
+  T.turn_log_add ~now:301. live ~seq:(Some 1)
+    (Live.Text {text=long_answer "STREAM_"; response=Unobserved_scope (None)});
+  state.msg_live <- Some live;
+  ignore (frame_lines state);
+  let before = Render.For_testing.source_index_build_count () in
+  List.iteri (fun step text ->
+    T.turn_log_add ~now:(302. +. float_of_int step) live ~seq:(Some (step + 2))
+      (Live.Text {text; response=Unobserved_scope (None)});
+    ignore (frame_lines state)) ["\nmore words here"; " and more"; "\n\nnew paragraph"];
+  check int "streaming frames read no whole-reply index" before
+    (Render.For_testing.source_index_build_count ());
+  match state.msg_scroll_pin with
+  | Some {T.pin_mode=T.Follow_live; pin_points; _} ->
+      check bool "the live edge still holds a source byte for the next scroll key" true
+        (List.exists (fun (point : T.chat_scroll_point) -> Option.is_some point.source_position) pin_points)
+  | Some {T.pin_mode=(T.Hold_scroll | T.Hold_search); _} | None -> fail "the live edge left no pin"
+
 let visible_line lines needle =
   match List.find_mapi (fun index line ->
     if Astring.String.is_infix ~affix:needle line then Some index else None) lines with
@@ -1556,6 +1618,8 @@ let () = run "chat search projection" [
       test_a_settled_conversation_keeps_its_measured_list;
     test_case "held replies and full suffix geometry" `Quick test_settled_reply_and_complete_suffix;
     test_case "byte rows wait for a pin" `Quick test_byte_rows_wait_for_a_pin;
+    test_case "growing suffix reads the whole body's rows" `Quick test_growing_suffix_reads_the_rows_the_whole_body_reads;
+    test_case "streaming frames leave the whole reply unread" `Quick test_streaming_frames_leave_the_whole_reply_unread;
     test_case "a held turn's tool blocks follow the tool stance" `Quick
       test_held_turn_tool_blocks_follow_the_tool_stance;
     test_case "repeated matches within one entry are newest first" `Quick

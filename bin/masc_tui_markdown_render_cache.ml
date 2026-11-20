@@ -190,6 +190,16 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
       rows
   | Some _ | None -> reset_growing cache ~key ~text ~renderer
 
+let growing_boundary cache ~theme_revision ~palette_generation ~width ~identity
+    ~text =
+  let key : _ Streaming.key =
+    { identity; width; theme_revision; palette_generation }
+  in
+  match find_growing cache key with
+  | Some growing when String.equal growing.text text ->
+      Some (growing.stable_source_len, List.length growing.stable_rows)
+  | Some _ | None -> None
+
 let row_extent rows =
   List.fold_left (fun extent row ->
     let count = extent.count + 1 in

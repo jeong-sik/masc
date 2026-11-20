@@ -52,6 +52,20 @@ val render_growing :
     snapshot renders from the previous suffix boundary. A non-prefix snapshot
     or any visual-key change starts again from the complete source. *)
 
+val growing_boundary :
+  'identity t ->
+  theme_revision:int ->
+  palette_generation:int ->
+  width:int ->
+  identity:'identity ->
+  text:string ->
+  (int * int) option
+(** [Some (source_bytes, rows)] when the growing entry [identity] last
+    rendered exactly [text] with these visual fields: the bytes of its closed
+    blocks and the rows they draw. The rows of [text] after that prefix are
+    what [text]'s remaining bytes render to on their own, numbered from
+    [rows]. [None] when nothing for [text] is retained. *)
+
 type measurement = { height : int; nonblank_lines : int }
 
 val measure_growing_details :

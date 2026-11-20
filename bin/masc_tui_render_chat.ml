@@ -241,6 +241,11 @@ let preview_snapshot lookup =
     | Some value -> value
     | None -> let value=lookup url in Hashtbl.add previews url value; value
 
+let growing_markdown_identity (entry : Message_layout.entry) ~keeper_name ~request_id
+    ~entry_index =
+  { cmi_style = entry.style; cmi_keeper_name = keeper_name; cmi_request_id = request_id;
+    cmi_observed_at = None; cmi_entry_index = entry_index }
+
 let cached_chat_markdown_with_preview ~preview ~link_previews_mode ~theme =
   fun ~(entry : Message_layout.entry) ~width ->
   let body = chat_body_with_previews ~preview ~mode:link_previews_mode ~entry ~width in
@@ -273,13 +278,7 @@ let cached_chat_markdown_with_preview ~preview ~link_previews_mode ~theme =
             ~theme_revision:chat_markdown_theme_revision
             ~palette_generation ~width
             ~renderer:(chat_markdown_streaming ~context)
-            ~identity:
-              { cmi_style = entry.style;
-                cmi_keeper_name = keeper_name;
-                cmi_request_id = request_id;
-                cmi_observed_at = None;
-                cmi_entry_index = entry_index;
-            }
+            ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index)
             ~text:body
       | Message_layout.Markdown_streaming ->
           chat_markdown ~context ~width body)
@@ -289,16 +288,19 @@ let cached_chat_markdown_with_preview ~preview ~link_previews_mode ~theme =
 
 type mapped_chat_body = { mapped_rows : string list; runs : Search.run list; unavailable : bool }
 
+let body_byte_origin (entry : Message_layout.entry) body_identity offset =
+  match entry.body_presentation with
+  | Source_body -> Search.Body_byte {body=body_identity;offset;expansion=0}
+  | Thinking_summary -> Search.Thinking_summary_byte {body=body_identity;offset}
+  | Projected_body projection -> Search.Projected_byte {body=body_identity;projection;offset;expansion=0}
+
 let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_layout.entry) ~width =
   let fields=ref [] in
   let body=chat_body_with_previews_internal ~on_field:(fun ~index ~url ~start field ->
     fields:=(index,url,start,field):: !fields) ~preview ~mode:link_previews_mode ~entry ~width () in
   let body_identity=Search.body_identity entry.body in
   let origins=Array.init (String.length body) (fun offset ->
-    if offset<String.length entry.body then Some(match entry.body_presentation with
-      | Source_body -> Search.Body_byte {body=body_identity;offset;expansion=0}
-      | Thinking_summary -> Search.Thinking_summary_byte {body=body_identity;offset}
-      | Projected_body projection -> Search.Projected_byte {body=body_identity;projection;offset;expansion=0})
+    if offset<String.length entry.body then Some(body_byte_origin entry body_identity offset)
       else None) in
   List.iter (fun (index,url,start,(field : Masc_tui_link_preview.card_source_span)) ->
     for delta=0 to field.source_end_byte-field.source_start_byte-1 do
@@ -326,6 +328,37 @@ let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_l
         let runs=Hashtbl.to_seq fields |> List.of_seq |> List.sort (fun (a,_) (b,_) -> compare a b) |> List.map snd in
         "" :: chat_journal_rows ~context ~width lines,runs in
   {mapped_rows=document.document_rows @ journal_rows;runs=runs @ journal_runs;unavailable}
+
+
+(* The open suffix of a growing entry, numbered as the whole body's render
+   numbers it. [source_start] and [row_start] are the closed prefix the
+   growing render cache holds: the renderer starts a block there, so the
+   suffix draws the rows and runs the whole body draws past that point.
+   Positions keep the whole body's identity and offsets. *)
+let search_chat_markdown_suffix ~theme ~(entry : Message_layout.entry) ~width ~source_start
+    ~row_start =
+  let body = entry.body in
+  let body_identity = Search.body_identity body in
+  let suffix = String.sub body source_start (String.length body - source_start) in
+  let origins = Array.init (String.length suffix) (fun local ->
+    Some (body_byte_origin entry body_identity (source_start + local))) in
+  let context = Chat_theme.body_context theme entry.style in
+  let palette = chat_markdown_palette ~closing:context.Chat_theme.markdown_close in
+  let document = Markdown.render_document_with_spans ~palette ~width suffix in
+  let shift_origin = function
+    | Some (Markdown.Generated {block_start; field; byte}) ->
+        Some (Markdown.Generated {block_start = block_start + source_start; field; byte})
+    | (Some (Markdown.Original _) | None) as origin -> origin in
+  let shift_run (run : Markdown.semantic_run) =
+    { run with origins = Array.map shift_origin run.origins;
+      visible_rows = List.map (fun (row, ranges) -> row + row_start, ranges) run.visible_rows;
+      reading = (match run.reading with
+        | Markdown.Source_order -> Markdown.Source_order
+        | Drawn_diagram {block_start} -> Drawn_diagram {block_start = block_start + source_start}) } in
+  let document = { document with semantic_runs = List.map shift_run document.semantic_runs } in
+  let runs, _ = Search.of_document ~presentation:entry.body_presentation ~body:body_identity
+    ~body_length:(String.length body) ~origins document in
+  row_start + List.length document.document_rows, runs
 
 
 (* Conversation colour names the source, not the prose. A keeper can return a
@@ -2609,6 +2642,38 @@ type source_body_key = {
 
 type source_body_memo = { key : source_body_key; index : source_body_index option }
 
+let source_rows_builds = ref 0
+
+let source_body_index_of_runs ~convert ~body_rows (runs : Search.run list) =
+  (* Each visible byte with a source, in the order search's source producer
+     walks them. *)
+  let iter_visible f =
+    List.iter (fun (run : Search.run) ->
+      let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
+      let visible_bytes = Array.make (String.length run.text) false in
+      Array.iter (fun byte -> visible_bytes.(byte) <- true) copied;
+      List.iter (fun (row, ranges) ->
+        if row >= 0 && row < body_rows then
+          List.iter (fun (range : Markdown.source_range) ->
+            for byte = range.start_byte to range.end_byte - 1 do
+              if visible_bytes.(byte) then
+                Option.iter (f row) (Option.bind run.positions.(byte) convert)
+            done) ranges) run.visible_rows) runs in
+  let row_sources = Hashtbl.create 16 and row_end_sources = Hashtbl.create 16 in
+  iter_visible (fun row position ->
+    if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position;
+    Hashtbl.replace row_end_sources row position);
+  (* A normalized origin can occur more than once. Keep the first actually
+     visible row, matching search's source producer traversal, without
+     electing by source words. *)
+  let source_rows = lazy (
+    incr source_rows_builds;
+    let source_rows = Hashtbl.create 64 in
+    iter_visible (fun row position ->
+      if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row);
+    source_rows) in
+  {source_rows;row_sources;row_end_sources}
+
 let source_body_indexes = Source_entry_cache.create 64
 
 let rebind_entry_observations entry =
@@ -4174,7 +4239,6 @@ let same_source_body_key (a : source_body_key) (b : source_body_key) =
   && Bool.equal a.source_polled_unavailable b.source_polled_unavailable
 
 let source_index_builds = ref 0
-let source_rows_builds = ref 0
 
 type source_mapping_owner =
   | Durable_source
@@ -4271,35 +4335,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                  | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
                  | Projected_byte _ | Projected_label _
                  | Preview_byte _ | Journal_byte _ | Request_byte _ -> None) in
-          let body_rows = List.length body.mapped_rows in
-          (* Each visible byte with a source, in the order search's source
-             producer walks them. *)
-          let iter_visible f =
-            List.iter (fun (run : Search.run) ->
-              let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
-              let visible_bytes = Array.make (String.length run.text) false in
-              Array.iter (fun byte -> visible_bytes.(byte) <- true) copied;
-              List.iter (fun (row, ranges) ->
-                if row >= 0 && row < body_rows then
-                  List.iter (fun (range : Markdown.source_range) ->
-                    for byte = range.start_byte to range.end_byte - 1 do
-                      if visible_bytes.(byte) then
-                        Option.iter (f row) (Option.bind run.positions.(byte) convert)
-                    done) ranges) run.visible_rows) body.runs in
-          let row_sources = Hashtbl.create 16 and row_end_sources = Hashtbl.create 16 in
-          iter_visible (fun row position ->
-            if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position;
-            Hashtbl.replace row_end_sources row position);
-          (* A normalized origin can occur more than once. Keep the first
-             actually visible row, matching search's source producer
-             traversal, without electing by source words. *)
-          let source_rows = lazy (
-            incr source_rows_builds;
-            let source_rows = Hashtbl.create 64 in
-            iter_visible (fun row position ->
-              if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row);
-            source_rows) in
-          Some {source_rows;row_sources;row_end_sources} in
+          Some (source_body_index_of_runs ~convert ~body_rows:(List.length body.mapped_rows) body.runs) in
           Source_entry_cache.replace source_body_indexes entry {key;index};
           index in
         Hashtbl.add mapped entry_index value;
@@ -4310,6 +4346,58 @@ let body_row_of_point ~source_body entry_index (point : chat_scroll_point) =
   | None -> None
   | Some position -> Option.bind (source_body entry_index) (fun body ->
       Hashtbl.find_opt (Lazy.force body.source_rows) position)
+
+(* The open suffix's rows of a growing entry the chat drew this frame, with the
+   row the suffix starts at. [None] when the growing render cache holds no
+   closed prefix for exactly this body and width. *)
+let growing_suffix_index ~theme ~width (entry : Message_layout.entry) =
+  match entry.markdown_source with
+  | Message_layout.Markdown_growing {keeper_name; request_id; entry_index} ->
+      let context = Chat_theme.body_context theme entry.style in
+      Option.map (fun (source_start, row_start) ->
+        let body_rows, runs =
+          search_chat_markdown_suffix ~theme ~entry ~width ~source_start ~row_start in
+        row_start, source_body_index_of_runs
+          ~convert:(fun position -> Some (Durable_position position)) ~body_rows runs)
+        (Markdown_cache.growing_boundary chat_markdown_cache
+           ~theme_revision:chat_markdown_theme_revision
+           ~palette_generation:context.palette_generation ~width
+           ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index)
+           ~text:entry.body)
+  | Message_layout.Markdown_stable _ | Markdown_streaming -> None
+
+(* The live edge reads one row's last source byte. A growing entry is a new
+   entry on every arrival, so reading it through [source_body] drew the whole
+   reply again with spans on every streaming frame. The closed prefix the
+   growing render cache holds draws none of the open suffix's rows, so a row
+   the suffix draws is read from the suffix alone. *)
+let live_row_end_source state ~keeper_name projection ~inner_width ~theme ~source_body =
+  let entries = (scroll_anchor_index projection).indexed_entries in
+  let suffixes = Hashtbl.create 2 in
+  let suffix_index entry_index =
+    match Hashtbl.find_opt suffixes entry_index with
+    | Some value -> value
+    | None ->
+        let entry = entries.(entry_index) in
+        let value = match entry.Message_layout.markdown_source, entry.journal with
+          | Message_layout.Markdown_growing _, [] ->
+              (match fst (source_mapping_owner state ~keeper_name projection entry_index) with
+               | Durable_source ->
+                   growing_suffix_index ~theme entry ~width:(Message_layout.entry_body_cells
+                     ~origin:state.msg_origin_display ~inner_width entry)
+               | Unknown_polled_source | Polled_source _ -> None)
+          | Message_layout.Markdown_growing _, _ :: _
+          | (Message_layout.Markdown_stable _ | Markdown_streaming), _ -> None in
+        Hashtbl.add suffixes entry_index value;
+        value in
+  fun entry_index body_row ->
+    let whole () = Option.bind (source_body entry_index) (fun body ->
+      Hashtbl.find_opt body.row_end_sources body_row) in
+    if entry_index < 0 || entry_index >= Array.length entries then whole () else
+    match suffix_index entry_index with
+    | Some (row_start, index) when body_row >= row_start ->
+        Hashtbl.find_opt index.row_end_sources body_row
+    | Some _ | None -> whole ()
 
 let source_point_on_row ~source_body entry_index body_row =
   Option.bind (source_body entry_index) (fun body -> Hashtbl.find_opt body.row_sources body_row)
@@ -4369,15 +4457,13 @@ let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_bo
              (List.find_map (scroll_at ~row_of:(surviving_entry_row projection)) pin.pin_points))
   | Some _ | None -> state.msg_scroll
 
-let scroll_position_for_window state ~keeper_name projection ~markdown ~source_body ~inner_width
-    (window : Message_layout.scroll_window) =
+let scroll_position_for_window state ~keeper_name projection ~markdown ~source_body
+    ~live_end_source ~inner_width (window : Message_layout.scroll_window) =
   let live_edge = window.scroll = 0 in
   let positions = if live_edge then List.rev window.body_positions else window.body_positions in
   let point_of_position (position : Message_layout.body_row_position) =
     Option.bind (scroll_anchor_at projection position.entry_index) (fun anchor ->
-      let source = if live_edge then
-          Option.bind (source_body position.entry_index) (fun body ->
-            Hashtbl.find_opt body.row_end_sources position.body_row)
+      let source = if live_edge then live_end_source position.entry_index position.body_row
         else source_point_on_row ~source_body position.entry_index position.body_row in
       Option.map (fun source_position ->
         {scroll_anchor=anchor; body_row=position.body_row; source_position=Some source_position;
@@ -5070,8 +5156,10 @@ let render_keeper_message (state : state) =
     in
     Masc_tui_frame_timing.finish_stage ~name:"chat.window" window_started;
     let scroll = window.scroll and visible_rows = window.rows in
+    let live_end_source = live_row_end_source state ~keeper_name projection ~inner_width
+      ~theme:chat_theme ~source_body in
     let scroll_feedback = scroll_position_for_window state ~keeper_name projection
-      ~markdown ~source_body ~inner_width window in
+      ~markdown ~source_body ~live_end_source ~inner_width window in
 
     (* The chat buffer starts below the one-row tab strip, which is added by
        [finish_frame_beside_acting_pane]. Mouse reports count from the terminal's
@@ -5940,4 +6028,18 @@ module For_testing = struct
   let source_rows_build_count () = !source_rows_builds
   let source_url_discovery_count () = !source_url_discoveries
   let search_candidate_build_count () = !search_candidate_builds
+  let growing_row_end_sources ~width (entry : Message_layout.entry) =
+    let theme = Chat_theme.snapshot () in
+    let preview = preview_snapshot Masc_tui_link_preview.get_preview in
+    ignore (cached_chat_markdown_with_preview ~preview ~link_previews_mode:`Off ~theme
+      ~entry ~width);
+    let sorted table =
+      List.sort compare (Hashtbl.fold (fun row position rows -> (row, position) :: rows) table []) in
+    let whole = search_chat_markdown ~link_previews_mode:`Off ~theme ~preview ~entry ~width in
+    let whole_index = source_body_index_of_runs
+      ~convert:(fun position -> Some (Durable_position position))
+      ~body_rows:(List.length whole.mapped_rows) whole.runs in
+    sorted whole_index.row_end_sources,
+    Option.map (fun (row_start, (index : source_body_index)) ->
+      row_start, sorted index.row_end_sources) (growing_suffix_index ~theme ~width entry)
 end

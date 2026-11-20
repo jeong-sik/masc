@@ -190,4 +190,12 @@ module For_testing : sig
   val source_rows_build_count : unit -> int
   val source_url_discovery_count : unit -> int
   val search_candidate_build_count : unit -> int
+  val growing_row_end_sources :
+    width:int -> Message_layout.entry ->
+    (int * Masc_tui_types.chat_source_position) list
+    * (int * (int * Masc_tui_types.chat_source_position) list) option
+  (** Draw a [Markdown_growing] entry through the chat's Markdown as a frame
+      does, then give each row's last source byte from the whole body's
+      render and, when the growing render cache holds a closed prefix, the
+      row it ends at and the rows of the open suffix rendered alone. *)
 end

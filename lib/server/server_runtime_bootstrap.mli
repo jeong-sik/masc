@@ -354,9 +354,10 @@ val judge
     of a single user whose announcement is refused, raises
     [Env_config_core.Config_error]. Either runs on the base path that
     [judged] was read from. [input_base_path] is that path as the operator
-    typed it, before it was made canonical: the diagnostics of the owner
-    state show it, the one of a single user or the engine of the account
-    server, and nothing opens it.
+    typed it, before it was made canonical: the diagnostics of the base path
+    read it when the owner state is built, the one of a single user or the
+    engine of the account server. The routes of a single user show it; the
+    account server has no route that does. Nothing opens it.
 
     [on_ready] runs once the owner is ready and the HTTP listener is bound;
     for the account server, once its listener is bound.

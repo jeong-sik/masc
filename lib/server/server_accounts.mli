@@ -75,11 +75,11 @@
     - [GET /health]: the server name, the release version and the account
       mode.
     - [GET /health/live]: [{"live": true}] once the listener answers.
-    - [GET /health/ready]: [{"ready": true}] while a decision can rest on the
-      authorization zone ({!Authz_zone.read}), and a 503 with
-      [{"ready": false}] otherwise. Every route of a person is a 503 in that
-      state, so the server is taken out of service by whatever reads the
-      probe.
+    - [GET /health/ready]: [{"ready": true}] once the engine is ready and
+      while a decision can rest on the authorization zone
+      ({!Authz_zone.read}), and a 503 with [{"ready": false}] otherwise.
+      While the engine starts the routes of a person answer; while the zone
+      cannot be trusted each of them is a 503 too.
 
     {b The zone.} {!run} opens the authorization zone over the log of the base
     path and the external store that the boot judgment read, and reads it
@@ -112,7 +112,8 @@ type refusal =
           files. A multi-account installation runs only the Keepers its
           authorization log names, and the log names none by the name of a
           definition yet (RFC a-persons-keeper-runs-on-the-engine, S1). A
-          folder that is not there holds none. *)
+          path that is not there, or is not a folder, holds none, as the
+          engine reads it. *)
   | Keeper_definitions_not_read of
       { folder : string
       ; detail : string
@@ -123,9 +124,8 @@ type refusal =
       (** A change of a Keeper configuration did not finish, and [journal]
           ([Keeper_config_journal.journal_path_for_base_path]) records it.
           The first step of the engine would roll it back by writing or
-          removing a Keeper definition, after the folder was looked in. A
-          multi-account installation makes no such change, so a single-user
-          boot left the journal. *)
+          removing a Keeper definition, after the folder was looked in.
+          Removing the journal gives the rollback up. *)
   | Keeper_configuration_journal_not_read of
       { journal : string
       ; detail : string
@@ -202,10 +202,11 @@ val health_version : string -> string option
 
     An [Error] comes before a connection is accepted and before the port is
     recorded, and the refusals come in the order of the constructors of
-    {!refusal} but one: a redirect of a login client that is not the
-    callback of its provider is a {!Login_client_refused} that comes after
+    {!refusal} but one: a redirect of a login client that is not on the
+    base URL of the server is a {!Login_client_refused} that comes after
     {!Trust_policy_refused}, since the base URL it is compared with comes
-    from the trust policy. {!Trust_policy_refused}, {!Port_not_announced} and
+    from the trust policy. {!Trust_policy_refused}, that
+    {!Login_client_refused}, {!Port_not_announced} and
     {!Access_not_published} come with the port bound: the trust policy names
     the HTTPS port that bound.
 

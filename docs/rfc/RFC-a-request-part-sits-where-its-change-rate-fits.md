@@ -311,8 +311,12 @@ L5 에서 정하는 것:
   - 턴 문맥을 실은 User 메시지가 자기 구획과 줄의 sha 를 메시지 `metadata` 로 든다.
   - 그 칸은 타입이 있는 접근 모듈 하나로만 쓰고 읽는다. 지금의 `Conversation_metadata` 와 같은 방식이다.
   - `metadata` 는 provider 요청에 실리지 않는다. Anthropic 직렬화(`backend_anthropic.ml`)는 이 칸을 읽지 않고, OpenAI Responses 는 자기 키(`openai.responses.phase`)만 읽는다. 그래서 sha 를 들어도 캐시에 닿는 바이트는 그대로다.
-  - 무엇을 실을지는 투영 앞단이 정한다. 이번 요청의 창에 든 메시지의 `metadata` 를 읽고, 창이 든 구획과 줄을 뺀다.
-  - 창이 옮겨져 그 메시지가 빠지면 다음 턴에 저절로 다시 싣는다. 창 밖에 사본이 없어서 둘이 어긋날 수 없다.
+  - `metadata` 로 요청 모양이 바뀌는 곳이 하나 있다. `api_common.ml` 이 tool result 뒤 User 메시지를 합칠 때 `Conversation_metadata.is_mergeable_followup` 으로 읽는다(speaker 말고 다른 키가 있으면 안 합친다). 그 합치기는 origin 이 `Recovery_instruction`·`Tool_result_followup` 인 메시지만 본다. 턴 문맥 메시지는 그 두 origin 을 쓰지 않는다.
+  - 무엇을 실을지는 투영이 창 시작을 고른 뒤 정한다. 고른 창에 든 메시지의 `metadata` 를 읽고, 창이 든 구획과 줄을 뺀다.
+  - 판정은 투영이 창 시작을 고를 때마다 다시 한다. 턴에 한 번이 아니다.
+    - 턴 첫 요청의 크기 신호와 checkpoint 뒤 사다리(#53817)도 투영 안에서 창을 옮긴다. 사다리는 hook 없이 투영만 다시 돌린다.
+    - 판정이 턴에 한 번이면, 창을 좁힌 요청이 그 턴 끝까지 빠진 구획 없이 나간다.
+  - 창이 옮겨져 그 메시지가 빠지면, 그 창을 고른 요청부터 다시 싣는다. 창 밖에 사본이 없어서 둘이 어긋날 수 없다.
   - `Keeper_model_input_ledger` 에는 칸을 더하지 않는다.
 - `Active_goals` 는 바깥 글이다. System 꼬리에서 빼 「바뀔 때」 규칙으로 User 자리에 싣는다. 그러면 Goal 사건이 System 을 바꾸지 않는다.
 - `Goals_awaiting_proof` 는 호스트 상태지만 System 꼬리에 있다. 턴 문맥으로 옮길지 같이 정한다.

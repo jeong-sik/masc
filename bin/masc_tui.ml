@@ -26861,15 +26861,15 @@ Use relative paths for resources already held in the package. -->
                 let scroll_lane_addons ~page ~down =
                   let terminal_rows, cols = get_terminal_size () in
                   let height = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
-                  let count =
-                    List.length
-                      (Addons.lines ~ko:(state.ui_language = Lang_ko) ~height
-                         ~width:(framed_inner_width cols) view)
+                  let ({ Addons.total_list_rows = count; list_budget; scroll = current; _ }
+                        : Addons.viewport_frame) =
+                    Addons.viewport_frame ~ko:(state.ui_language = Lang_ko) ~height
+                      ~width:(framed_inner_width cols) view
                   in
-                  let current = Masc_tui_scroll.normalize ~count ~height view.scroll in
-                  let distance = if page then height else 1 in
+                  let page_height = max 1 list_budget in
+                  let distance = if page then page_height else 1 in
                   let delta = if down then distance else -distance in
-                  update { view with scroll = Masc_tui_scroll.normalize ~count ~height (current + delta) }
+                  update { view with scroll = Masc_tui_scroll.normalize ~count ~height:page_height (current + delta) }
                 in
                 (match view.installer with
                  | Some installer ->

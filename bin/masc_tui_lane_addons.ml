@@ -1978,7 +1978,7 @@ let overview_bottom_sheet ~ko ~width ~height view snapshot entries =
           ~body:(fun ~cells -> Doc.kv_rows ~width:cells fields)
           ()
 
-let overview_lines ?(ko = false) ?(height = 24) ~width view =
+let overview_lines ?(ko = false) ?(sheet_docked = false) ~width view =
   let wrap = document_rows ~width in
   let texts = List.map (fun line -> Overview_text line) in
   let content = match view.snapshot with
@@ -2044,7 +2044,6 @@ let overview_lines ?(ko = false) ?(height = 24) ~width view =
             (if ko then "보존 이력 · %d개 인스턴스" else "Retained history · %d instances")
             retained_count
         in
-        let sheet = overview_bottom_sheet ~ko ~width ~height view snapshot entries in
         texts [heading]
         @ [plain_drawn (key_rows ~width (match view.overview_mode with
              | Current_installations -> [history; if ko then "h:이력 열기" else "h:open"]
@@ -2123,11 +2122,10 @@ let overview_lines ?(ko = false) ?(height = 24) ~width view =
                            else "    role: worker started as %s · declaration now %s")
                           (word started)
                           (match now with Classified c -> category_label ~ko c | Unclassified | Unverified -> if ko then "미분류" else "unclassified")])
-                @ (if index=view.instance_cursor && sheet = [] then
+                @ (if index=view.instance_cursor && not sheet_docked then
                      Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
                    else []))
                 @ [plain_drawn controls] @ texts detail) items
-        @ (if sheet = [] then [] else texts [""] @ [plain_drawn sheet])
   in
   List.concat_map (function
     | Overview_text line -> List.map (fun row -> false, row) (wrap line)
@@ -2797,7 +2795,20 @@ let links_lines ~width view =
     | Some _, None | None, (Some _ | None) -> [] in
   fact_spans_with_selection ~width (bound @ (Fact_text "" :: flow_rows ~embedded:true view))
 
-let lines_with_selection ?(ko = false) ?(height=24) ?(failed_note = "") ~width view =
+let overview_surface_active view =
+  Option.is_none view.installer
+  && Option.is_none view.evidence_prompt
+  && Option.is_none view.subscription_panel
+  && Option.is_none view.action_menu
+  && Option.is_none view.records
+  && not view.help_open
+  && view.presentation = Summary
+  && Option.is_none view.document_key
+  && Option.is_none view.draft
+  && view.screen = Overview
+
+let lines_with_selection_internal ?(ko = false) ?(sheet_docked = false)
+    ?(height=24) ?(failed_note = "") ~width view =
   let plain lines = List.map (fun line -> false, line) lines in
   let wrap_selected rows =
     List.concat_map (fun (selected, line) ->
@@ -2884,14 +2895,57 @@ let lines_with_selection ?(ko = false) ?(height=24) ?(failed_note = "") ~width v
               | receipt -> [if ko then "마지막 증거 영수증" else "Last evidence receipt"] @ receipt @ [""]) in
         let receipt_lines = plain (List.concat_map (document_rows ~width) receipt_lines) in
         (match view.screen with
-        | Overview -> overview_lines ~ko ~height ~width view @ receipt_lines
+        | Overview -> overview_lines ~ko ~sheet_docked ~width view @ receipt_lines
         | Detail _ -> receipt_lines @ detail_lines ~height:(height - List.length receipt_lines) ~width view
             @ (match view.focus with
                | Connections -> links_lines ~width view
                | Timeline | Configurations | Instances | Rows -> []))
 
+let lines_with_selection ?ko ?height ?failed_note ~width view =
+  lines_with_selection_internal ?ko ~sheet_docked:false ?height ?failed_note ~width view
+
 let lines ?ko ?height ?failed_note ~width view =
   List.map snd (lines_with_selection ?ko ?height ?failed_note ~width view)
+
+type viewport_frame = {
+  list_rows : (bool * string) list;
+  scroll : int;
+  list_budget : int;
+  total_list_rows : int;
+  sheet_rows : string list;
+}
+
+let viewport_frame ?(ko = false) ?(allow_docked_sheet = true) ?failed_note
+    ~height ~width view =
+  let budget = max 0 height in
+  let sheet_rows =
+    if not allow_docked_sheet || not (overview_surface_active view) then []
+    else
+      match view.snapshot with
+      | None -> []
+      | Some snapshot ->
+          let entries = selectable_overview_entries view snapshot in
+          let candidate =
+            overview_bottom_sheet ~ko ~width ~height:budget view snapshot entries
+          in
+          if candidate <> [] && budget - List.length candidate >= 1 then candidate
+          else []
+  in
+  let list_budget = max 0 (budget - List.length sheet_rows) in
+  let sheet_docked = sheet_rows <> [] in
+  let all_rows =
+    lines_with_selection_internal ~ko ~sheet_docked ~height:list_budget
+      ?failed_note ~width view
+  in
+  let total_list_rows = List.length all_rows in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:total_list_rows ~height:list_budget view.scroll
+  in
+  let list_rows =
+    all_rows
+    |> List.filteri (fun index _ -> index >= scroll && index < scroll + list_budget)
+  in
+  { list_rows; scroll; list_budget; total_list_rows; sheet_rows }
 
 (* A TOML declaration may exist while no worker can run. Keep the file count,
    live worker count, and failures separate on the Lanes surface. *)

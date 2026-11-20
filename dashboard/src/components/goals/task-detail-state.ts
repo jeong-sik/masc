@@ -77,8 +77,7 @@ function normalizeTaskHistory(raw: TaskHistoryRow[]): NormalizedTaskEvent[] {
 
 // -- Activity lineage (ownership chain + lifecycle rail) ------------
 //
-// The keeper-v2 prototype (work.jsx TaskLineage) renders task history as an
-// ownership chain (first actor + every handoff target, de-duplicated) plus a
+// Task history renders as an ownership chain (de-duplicated actors) plus a
 // vertical rail of lifecycle events. masc_task_history carries the per-event
 // actor (`agent`) but no explicit handoff *target*, so the chain is derived
 // from the actor sequence rather than fabricated per-event `→ target` arrows.
@@ -155,8 +154,8 @@ export interface TaskLineage {
   readonly synthesized: boolean
 }
 
-// Minimal flow synthesized from the current status when no history exists yet
-// (mirrors work.jsx taskLineage fallback). Keyed by the live 6-state lifecycle.
+// Minimal flow synthesized from the current status when no history exists yet.
+// Keyed by the live 6-state lifecycle.
 const SYNTHESIZED_STAGE_KEYS: Readonly<Record<string, readonly string[]>> = {
   todo: ['created'],
   claimed: ['created', 'claimed'],

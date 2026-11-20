@@ -266,8 +266,8 @@ function VerdictLineageSection() {
   `
 }
 
-// RFC-0323 G-9: linked re-run lineage. A task created as a re-run carries
-// the write-once predecessor_task_id (G-8); surface it as a link so the
+// Linked re-run lineage. A task created as a re-run carries
+// the write-once predecessor_task_id; surface it as a link so the
 // operator can walk back to the original. Clicking opens the predecessor's
 // detail when it is in the loaded task list; otherwise the id renders as
 // plain text (the store may window out old terminal tasks).

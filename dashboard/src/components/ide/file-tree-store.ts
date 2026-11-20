@@ -34,7 +34,7 @@ export interface FileTreeNode {
   readonly hasChildren: boolean
   readonly diff: string | null  // '+12', '-2', etc; null = no diff this run
   readonly keeperId: string | null
-  readonly hueIndex: number | null  // 1..12 (matches RFC 0019 mapping)
+  readonly hueIndex: number | null  // 1..12 (keeper hue slot)
 }
 
 export interface FileTreeDiffSummary {

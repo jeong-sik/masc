@@ -47,7 +47,11 @@ let render_ask_prompt () =
 
 let make_lane prompt : Lane.question_side =
   { prompt
-  ; answer_schema = `Assoc [ "type", `String "object" ]
+  ; answer_schemas =
+      { Lane.range = `Assoc [ "type", `String "object" ]
+      ; item_alone = `Assoc [ "type", `String "object" ]
+      ; room = `Assoc [ "type", `String "object" ]
+      }
   ; max_output_tokens = 4096
   ; thinking = Some false
   }
@@ -130,7 +134,7 @@ let make_question ?(working_state = Some "PR release blockers under review") pro
       ~shows:(With_memory (memory_of facts))
       ~reach ~trace:"trace-l6g" ~offered:(offered_of units) units
   with
-  | Question.Made { question; text } -> question, text
+  | Question.Made { question; text; schema = (_ : Yojson.Safe.t) } -> question, text
   | Question.Nothing_readable _ -> fail "expected Question.Made for non-empty units"
 ;;
 
@@ -306,7 +310,7 @@ let test_l6g_corpus_via_librarian_question_make () =
   let c1 : Scoring.case =
     { name = "upcoming_usable_until_via_question_make"
     ; question = q1.id
-    ; shown = q1.shown
+    ; shown = Read q1.shown
     ; facts = [ f_hold ]
     ; planted = [ "18935" ]
     ; must_keep = []
@@ -344,7 +348,7 @@ let test_l6g_corpus_via_librarian_question_make () =
   let c2 : Scoring.case =
     { name = "completed_usable_until_dropped_causally"
     ; question = q2.id
-    ; shown = q2.shown
+    ; shown = Read q2.shown
     ; facts = [ f_done ]
     ; planted = []
     ; must_keep = []
@@ -362,7 +366,7 @@ let test_l6g_corpus_via_librarian_question_make () =
   let c3 : Scoring.case =
     { name = "cross_category_progressive_merge"
     ; question = q3.id
-    ; shown = q3.shown
+    ; shown = Read q3.shown
     ; facts = [ f_con; f_pref ]
     ; planted = []
     ; must_keep =
@@ -411,7 +415,7 @@ let test_l6g_corpus_via_librarian_question_make () =
   let c4 : Scoring.case =
     { name = "runtime_context_self_echo_empty_ops"
     ; question = q4.id
-    ; shown = q4.shown
+    ; shown = Read q4.shown
     ; facts = [ f_con ]
     ; planted = []
     ; must_keep = []
@@ -454,7 +458,7 @@ let test_l6g_corpus_via_librarian_question_make () =
   let c5 : Scoring.case =
     { name = "unknowing_keeper_reply_preserves_korean_rules"
     ; question = q5.id
-    ; shown = q5.shown
+    ; shown = Read q5.shown
     ; facts = [ f_rule1; f_rule2; f_rule3 ]
     ; planted = []
     ; must_keep = []
@@ -474,7 +478,7 @@ let test_l6g_corpus_via_librarian_question_make () =
    | Error rej -> failf "bad unknowing answer failed decode: %s" (Answer.rejection_kind rej)
    | Ok decoded_bad ->
      let bad_plan =
-       Plan.of_answer ~shown:q5.shown ~facts:[ f_rule1; f_rule2; f_rule3 ]
+       Plan.of_answer ~shown:(Read q5.shown) ~facts:[ f_rule1; f_rule2; f_rule3 ]
          ~removed_since:[] ~at:1_763_600_250.0 ~trace_id:"trace-l6g" decoded_bad
      in
      check bool "bad English overwrite erases rule1" false
@@ -518,7 +522,7 @@ let test_l6g_corpus_via_librarian_question_make () =
   let c6 : Scoring.case =
     { name = "explicit_operator_retraction_updates_korean_rules"
     ; question = q6.id
-    ; shown = q6.shown
+    ; shown = Read q6.shown
     ; facts = [ f_rule1; f_rule2; f_rule3 ]
     ; planted = [ "18935~18940" ]
     ; must_keep = []
@@ -555,7 +559,7 @@ let test_l6g_corpus_via_librarian_question_make () =
    | Error rej -> failf "valid seen answer rejected: %s" (Answer.rejection_kind rej)
    | Ok decoded_seen ->
      let seen_plan =
-       Plan.of_answer ~shown:q1.shown ~facts:[ f_hold ] ~removed_since:[]
+       Plan.of_answer ~shown:(Read q1.shown) ~facts:[ f_hold ] ~removed_since:[]
          ~at:1_763_600_500.0 ~trace_id:"trace-l6g" decoded_seen
      in
      check int "seen op has 0 not_applied" 0 (List.length seen_plan.effects.not_applied);

@@ -423,7 +423,7 @@ let reach : Read_result.reach =
 
 let question : Read_result.question =
   { id = question_id
-  ; shown = { memory = Some []; units = [ "u1", reach.line ] }
+  ; shown = Range { memory = []; units = [ "u1", reach.line ] }
   ; basis = Agent_core.Checkpoint_objects.digest_of_bytes "the snapshot the question saw"
   ; reach
   ; trace = "trace-2"
@@ -433,7 +433,7 @@ let question : Read_result.question =
 ;;
 
 let answer_plan store ~at ~working_state ops =
-  Plan.of_answer ~shown:question.shown ~facts:(Store.memory store).facts ~removed_since:[] ~at
+  Plan.of_answer ~shown:(Read question.shown) ~facts:(Store.memory store).facts ~removed_since:[] ~at
     ~trace_id:question.trace
     { question = question_id; ops; working_state }
 ;;
@@ -476,6 +476,10 @@ let cause_text : Log.cause -> string = function
   | Skip { hole = Unknown_span _ } -> "skip: an unknown span"
   | Skip { hole = Item_exceeds_window (_ : Masc.Librarian_unit.missing_at list) } ->
     "skip: the item fits no slot"
+  | Make_room { question = id; slot; trace } ->
+    Printf.sprintf "made room for %s by %s on %s"
+      (if Masc.Librarian_question_id.equal id question_id then "the question" else "another")
+      slot trace
 ;;
 
 let source_text ({ kind; trace_id } : Current.source) =
@@ -618,7 +622,7 @@ let test_adopt_a_diverged_snapshot () =
      check string "the cause is the adoption" "operator-1"
        (match line.cause with
         | Adopt { by; observed = (_ : Digest.digest) } -> by
-        | Direct _ | Read _ | Skip _ -> "another cause")
+        | Direct _ | Read _ | Make_room _ | Skip _ -> "another cause")
    | Started _ -> fail "a log whose last line decodes was started over");
   check string "boot now opens the store" "booted" (boot_text place);
   let (_ : Store.t), next = committed store ~at:401.0 (remember owner) in

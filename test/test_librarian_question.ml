@@ -20,7 +20,11 @@ module Agent = Agent_core.Types
 
 let lane : Lane.question_side =
   { prompt = "Read the units and answer with one JSON document."
-  ; answer_schema = `Assoc [ "type", `String "object" ]
+  ; answer_schemas =
+      { range = `Assoc [ "type", `String "object"; "title", `String "range" ]
+      ; item_alone = `Assoc [ "type", `String "object"; "title", `String "item_alone" ]
+      ; room = `Assoc [ "type", `String "object"; "title", `String "room" ]
+      }
   ; max_output_tokens = 4096
   ; thinking = Some false
   }
@@ -141,7 +145,7 @@ let made ~shows units =
     Question.make ~lane ~from ~shows ~reach ~trace:"trace-1" ~offered:{ units = 1; head_items = 3 }
       units
   with
-  | Question.Made { question; text } -> question, text
+  | Question.Made { question; text; schema = (_ : Yojson.Safe.t) } -> question, text
   | Question.Nothing_readable _ -> fail "a range with items made no question"
 ;;
 
@@ -216,11 +220,38 @@ let the_item_alone_shows_no_memory () =
   check bool "no memory line" false (labelled "memory:");
   check bool "no working state line" false (labelled "working_state:");
   check bool "the units line" true (labelled "units:");
-  check bool "no fact is named" true (Option.is_none alone.shown.memory);
+  check bool "no fact is named" true
+    (match alone.shown with
+     | Item_alone _ -> true
+     | Range _ -> false);
   let with_memory, (_ : string) = ask (facts ()) (units ()) in
   check bool "the front half is not the one with Memory" false
     (String.equal alone.id.front with_memory.id.front);
   check string "the back half is the units' either way" with_memory.id.back alone.id.back
+;;
+
+(* §7.4 「자리 내기」: Memory and the working state, then one sentence where
+   the units were. The front half carries the room schema, so the id is not
+   the reading question's under the same Memory. *)
+let the_room_question_reads_no_unit () =
+  let room = Question.make_room ~lane ~from ~memory:(memory (facts ())) ~trace:"trace-1" in
+  let lines = String.split_on_char '\n' room.text in
+  let labels =
+    [ "question: "; "memory: "; "working_state: "; "units: "; "make_room: "; "question-end: " ]
+  in
+  check (list string) "the lines after the prompt"
+    [ "question: "; "memory: "; "working_state: "; "make_room: "; "question-end: " ]
+    (List.filter_map
+       (fun line -> List.find_opt (fun label -> String.starts_with ~prefix:label line) labels)
+       lines);
+  check bool "the working state of the line it follows" true
+    (List.mem {|working_state: "triage the release blockers"|} lines);
+  check (list string) "every fact named" [ "m1"; "m2" ] (List.map fst room.question.memory);
+  check string "the trace of the item read alone" "trace-1" room.question.trace;
+  check bool "the room schema" true (Yojson.Safe.equal lane.answer_schemas.room room.schema);
+  let reading, (_ : string) = ask (facts ()) (units ()) in
+  check bool "the front half is not the reading question's" false
+    (String.equal reading.id.front room.question.id.front)
 ;;
 
 let () =
@@ -229,6 +260,7 @@ let () =
     [ ( "question"
       , [ test_case "the same inputs give the same bytes" `Quick same_inputs_same_bytes
         ; test_case "the item alone shows no Memory" `Quick the_item_alone_shows_no_memory
+        ; test_case "the room question reads no unit" `Quick the_room_question_reads_no_unit
         ; test_case
             "a change to Memory alone moves the front half"
             `Quick

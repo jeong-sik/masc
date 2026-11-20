@@ -81,7 +81,9 @@ let summarize_errors label errors =
       let suffix =
         match rest with
         | [] -> ""
-        | _ -> Printf.sprintf " (+%d more)" (List.length rest)
+        (* The summary is English prose; the errors after the first are a
+           cut-off count, never "+N" (RFC tui-one-screen-grammar 6.3). *)
+        | _ -> " (" ^ Masc_tui_value.Count.more ~ko:false (List.length rest) ^ ")"
       in
       Some (Printf.sprintf "%s: %s%s" label first suffix)
 

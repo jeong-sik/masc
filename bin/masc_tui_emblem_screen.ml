@@ -300,7 +300,9 @@ let about_rows ~style ~cols ~rows ~caption ~frame ~keepers
   in
   let overflow =
     if hidden_count = 0 then []
-    else [centred ~cols (Printf.sprintf "+%d more Keepers" hidden_count)]
+    (* The screen has English text only; the count left out is a cut-off
+       count, never "+N" (RFC tui-one-screen-grammar 6.3). *)
+    else [centred ~cols (Masc_tui_value.Count.more ~ko:false hidden_count ^ " Keepers")]
   in
   let gap = if picture_lines = [] then [] else [""] in
   let block = picture_lines @ gap @ names @ overflow @ List.map (centred ~cols) caption in

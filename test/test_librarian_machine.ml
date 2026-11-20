@@ -664,6 +664,22 @@ let test_memory_diverged () =
   ()
 ;;
 
+(* A snapshot the store does not open stops the store, as boot does for the
+   same file; the writer does not rest and ask again on every pulse. *)
+let test_snapshot_fault () =
+  let place, value = asking_place () in
+  let (_ : Machine.t) =
+    step "no snapshot file" place value (ended 1 (Snapshot_fault Absent))
+      ~state:"stopped: memory unreadable" ~fiber:"cancel"
+  in
+  let place, value = asking_place () in
+  let (_ : Machine.t) =
+    step "a snapshot read that failed" place value (ended 1 (Snapshot_fault Not_read))
+      ~state:"stopped: store unwritable" ~fiber:"cancel"
+  in
+  ()
+;;
+
 let test_input_fault () =
   let place, value = asking_place () in
   let (_ : Machine.t) =
@@ -907,6 +923,7 @@ let () =
         ; test_case "nothing readable" `Quick test_nothing_readable
         ; test_case "a span unknown" `Quick test_span_unknown
         ; test_case "Memory diverged" `Quick test_memory_diverged
+        ; test_case "a snapshot fault" `Quick test_snapshot_fault
         ; test_case "an input fault" `Quick test_input_fault
         ; test_case "a failed ask" `Quick test_ask_failed
         ; test_case "an answer from before reading moved" `Quick

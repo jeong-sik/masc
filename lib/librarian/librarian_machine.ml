@@ -99,7 +99,7 @@ let late place t (result : Read_result.t) =
        ~labels:[ "keeper", place.keeper_id ]
        ()
    | Nothing_to_ask | No_answer _ | Nothing_readable _ | Span_unknown _ | Memory_diverged _
-   | Input_fault _ | Ask_failed _ -> ());
+   | Snapshot_fault _ | Input_fault _ | Ask_failed _ -> ());
   t
 ;;
 
@@ -159,6 +159,9 @@ let ended place t ~at store (asking : asking) : Read_result.t -> t = function
       (Store.commit_skip store ~at ~hole:(Unknown_span { before; after = reach.covered }) reach)
   | Memory_diverged { expected; observed } ->
     { t with state = Stopped (Log_diverged { expected; observed }) }
+  (* A file the store does not open does not mend itself: the store stops
+     as boot and a commit stop it for the same file. *)
+  | Snapshot_fault fault -> { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
   | Input_fault (_ : Librarian_unit.input_fault) | Ask_failed (_ : Read_result.failed) ->
     { t with state = Resting store }
 ;;

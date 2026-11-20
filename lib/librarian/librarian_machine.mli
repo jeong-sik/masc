@@ -47,7 +47,9 @@
 
     The model's results map to {!Librarian_read_result.t}: ["answer"] is
     [Answered], ["nothing"] [Nothing_to_ask], ["missing"] [Nothing_readable],
-    ["span"] [Span_unknown], ["diverged"] [Memory_diverged], ["fault"]
+    ["span"] [Span_unknown], ["diverged"] [Memory_diverged] and
+    [Snapshot_fault] (the model's [snapBad] is a snapshot that does not
+    decode, and it stops the store either way), ["fault"]
     [Input_fault], ["failed"] [Ask_failed], and the lane results
     ([LaneRes]) are [No_answer]. *)
 
@@ -193,6 +195,9 @@ type event =
     Span_unknown      Skip (Unknown_span {before; after = reach.covered}) committed
                       at reach; the next ask
     Memory_diverged   Stopped (Log_diverged _)
+    Snapshot_fault    Stopped ({!Librarian_store.stop_of_snapshot_fault}): absent and
+                      not a snapshot are Memory_unreadable, a failed read
+                      Store_unwritable
     Input_fault       Resting
     Ask_failed        Resting
     v} *)

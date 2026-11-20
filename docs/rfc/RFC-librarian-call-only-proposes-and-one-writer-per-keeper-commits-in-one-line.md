@@ -696,6 +696,7 @@ Agent-Core 는 다섯 곳을 고친다. 이 스택의 작은 층 하나이고 #5
 | `Nothing_readable` | – | `Skip (Content_missing _)` 을 반영하고 다시 묻는다 |
 | `Span_unknown` | – | `Skip (Unknown_span _)` 을 반영하고 다시 묻는다. 모델을 부르지 않는다 |
 | `Memory_diverged` | – | `Stopped (Log_diverged _)` |
+| `Snapshot_fault` | – | 저장소가 같은 결함에 멈추는 이유로 `Stopped`. 없음·스냅샷 아님은 `Memory_unreadable`, 읽기 실패는 `Store_unwritable` |
 | `Input_fault`, `Ask_failed` | – | `Resting` |
 
 - 고장 난 slot 은 폭 줄이기를 막지 못한다. 거절이 하나만 있어도 줄인다.
@@ -1226,6 +1227,7 @@ lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slo
 | 읽는 질문 | `Nothing_readable` | `Skip (Content_missing _)` 을 반영한다 → 다음 묻기 |
 | 읽는 질문 | `Span_unknown` | `Skip (Unknown_span _)` 을 반영한다. 모델을 부르지 않았다 → 다음 묻기 |
 | 읽는 질문 | `Memory_diverged` | `Stopped (Log_diverged _)` |
+| 읽는 질문 | `Snapshot_fault` | `Stopped`. 없음·스냅샷 아님은 `Memory_unreadable`, 읽기 실패는 `Store_unwritable` |
 | 읽는 질문 | `Input_fault`, `Ask_failed` | `Resting` |
 | `Read_range` | `Answered` | 반영한다. 폭 기억에 반영한 수를 알린다. Memory 없이 읽었다는 표시를 내리고 마지막 자리 내기의 결과를 비운다. Memory 를 실은 질문에 답이 왔으니 Memory 는 slot 에 들어간다 → 다음 묻기 |
 | `Read_range`, 한 항목보다 넓다 | `Refused_by_lane` | 폭 기억에 거절을 알린다 → 다음 묻기(줄인 폭으로 바로) |
@@ -1236,6 +1238,7 @@ lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slo
 | `Make_room` | `Room_answered` | 효과 있는 op 가 있고 묻는 사이 지워진 fact 가 없으면 반영한다. 마지막 자리 내기의 결과에 적는다 → 다음 묻기 |
 | `Make_room` | `Room_refused`, `Room_silent`, `Room_failed` | 마지막 자리 내기의 결과에 적는다 → 다음 묻기 |
 | `Make_room` | `Memory_diverged` | `Stopped (Log_diverged _)` |
+| `Make_room` | `Snapshot_fault` | 읽는 질문과 같다 |
 
 - `Refused_by_lane` 과 `Silent_lane` 은 지금 선언된 slot 의 결과만으로 다시 정한다. 묻는 사이 선언에서 빠진 slot 이 한 거절은 세지 않는다. 남은 slot 가운데 거절한 것이 없으면 말 없음이다.
 - 묻는 사이에 lane 값이 바뀌었고 지금 선언된 slot 가운데 결과가 있는 것이 하나도 없으면, 답이 아닌 결과는 `Resting` 으로 가지 않고 다음 묻기다. 그 묻기는 지금 lane 값으로 가므로 되풀이되지 않는다. 운영자가 방금 선언한 lane 에 pulse 한 번을 기다리지 않고 묻는다.

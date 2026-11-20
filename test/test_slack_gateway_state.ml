@@ -218,7 +218,7 @@ let test_app_mention_always_emits () =
     (List.mem "emit_event" effects)
 
 (* ---------------------------------------------------------------- *)
-(* step: ambient lane (RFC-0226 parity)                              *)
+(* step: ambient lane                                               *)
 (* ---------------------------------------------------------------- *)
 
 let mk_event_reaction ?(channel = "C1") ?(message_ts = "1700000000.000100")

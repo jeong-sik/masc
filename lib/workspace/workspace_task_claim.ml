@@ -86,6 +86,67 @@ let emit_auto_start_side_effects config ~agent_name ~task_id ~from_status ~to_st
          ()))
 ;;
 
+let claim_broadcast_content ~task_id = Printf.sprintf "Claimed %s" task_id
+
+let emit_claim_side_effects
+      config
+      ~action
+      ~agent_name
+      ~task_id
+      ~from_status
+      ~claimed_status
+      ~final_status
+      ~auto_start
+      ~activity_payload
+      ~log_label
+      ~log_payload
+  =
+  let run label f = run_post_commit ~task_id ~agent_name ~action label f in
+  (* Update agent status — takes [with_file_lock] on the agent file via
+     [Workspace_task_classify.update_local_agent_state] to keep the record
+     consistent with concurrent task transitions that hold the agent-file lock
+     (PR #6634). *)
+  run "agent_state" (fun () ->
+    Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
+      { agent with status = Busy; current_task = Some task_id }));
+  run "broadcast" (fun () ->
+    let _ =
+      broadcast
+        ~audience:System_record
+        config
+        ~from_agent:agent_name
+        ~content:(claim_broadcast_content ~task_id)
+    in
+    ());
+  run "activity" (fun () ->
+    Workspace_task_classify.emit_task_activity
+      config
+      ~agent_name
+      ~task_id
+      ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
+      ~payload:activity_payload);
+  run log_label (fun () -> log_event config log_payload);
+  run "observe_transition" (fun () ->
+    Workspace_task_classify.observe_task_transition
+      config
+      ~agent_name
+      ~task_id
+      ~transition:Masc_domain.Claim
+      ~details:
+        (Workspace_task_classify.task_transition_details
+           ~from_status
+           ~to_status:claimed_status
+           ()));
+  if auto_start
+  then
+    emit_auto_start_side_effects
+      config
+      ~agent_name
+      ~task_id
+      ~from_status:claimed_status
+      ~to_status:final_status
+;;
+
 (** Claim [task_id] for [agent_name]. *)
 let claim_task_with_details_r
       config
@@ -274,56 +335,28 @@ let claim_task_with_details_r
                  ~agent_name ~task_id ~status:claimed_task.task_status
                  ~module_name:"claim_task_r.claimed_ok")
              config new_backlog;
-           run_claim_post_commit "agent_state" (fun () ->
-             Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
-               { agent with status = Busy; current_task = Some task_id }));
-           run_claim_post_commit "broadcast" (fun () ->
-             let _ =
-               broadcast ~audience:System_record
-                 config
-                 ~from_agent:agent_name
-                 ~content:(Printf.sprintf "Claimed %s" task_id)
-             in
-             ());
-           run_claim_post_commit "activity" (fun () ->
-             Workspace_task_classify.emit_task_activity
-               config
-               ~agent_name
-               ~task_id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
-               ~payload:(`Assoc [ "task_id", `String task_id ]));
-           run_claim_post_commit "claim_log" (fun () ->
-             log_event
-               config
+           emit_claim_side_effects
+             config
+             ~action:"claim"
+             ~agent_name
+             ~task_id
+             ~from_status:Masc_domain.Todo
+             ~claimed_status
+             ~final_status:claimed_task.task_status
+             ~auto_start
+             ~activity_payload:(`Assoc [ "task_id", `String task_id ])
+             ~log_label:"claim_log"
+             ~log_payload:
                (`Assoc
-                      [ "type", `String "task_claim"
-                      ; "agent", `String agent_name
-                      ; ( "actor_kind"
-                        , `String
-                            (Workspace_task_classify.task_actor_kind_to_string
-                               Workspace_task_classify.Agent) )
-                      ; "task", `String task_id
-                      ; "ts", `String now
-                      ]));
-           run_claim_post_commit "observe_transition" (fun () ->
-             Workspace_task_classify.observe_task_transition
-               config
-               ~agent_name
-               ~task_id
-               ~transition:Masc_domain.Claim
-               ~details:
-                 (Workspace_task_classify.task_transition_details
-                    ~from_status:Masc_domain.Todo
-                    ~to_status:claimed_status
-                    ()));
-           if auto_start
-           then
-             emit_auto_start_side_effects
-               config
-               ~agent_name
-               ~task_id
-               ~from_status:claimed_status
-               ~to_status:claimed_task.task_status;
+                   [ "type", `String "task_claim"
+                   ; "agent", `String agent_name
+                   ; ( "actor_kind"
+                     , `String
+                         (Workspace_task_classify.task_actor_kind_to_string
+                            Workspace_task_classify.Agent) )
+                   ; "task", `String task_id
+                   ; "ts", `String now
+                   ]);
            let base_msg = Printf.sprintf "%s claimed %s" agent_name task_id in
            let claim_msg =
              if auto_start

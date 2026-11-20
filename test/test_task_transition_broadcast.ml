@@ -768,12 +768,91 @@ let test_submit_schedules_review_after_log_failure () =
         | Some _ | None -> Alcotest.fail "submission did not remain committed"))
 ;;
 
+let capture_broadcast_deliveries f =
+  let recorded = ref [] in
+  let prev = ref (fun _ -> Workspace_broadcast.Passive) in
+  prev :=
+    Workspace_broadcast.For_testing.replace_on_broadcast_mention
+      (fun (delivery : Workspace_broadcast.broadcast_delivery) ->
+         recorded := (delivery.content, delivery.audience) :: !recorded;
+         !prev delivery);
+  Fun.protect
+    ~finally:(fun () ->
+      let _ :
+        Workspace_broadcast.broadcast_delivery ->
+        Workspace_broadcast.mention_delivery
+        =
+        Workspace_broadcast.For_testing.replace_on_broadcast_mention !prev
+      in
+      ())
+    (fun () ->
+       f ();
+       !recorded)
+;;
+
+let is_system_record = function
+  | Workspace_broadcast.System_record -> true
+  | Workspace_broadcast.Fleet_conversation -> false
+;;
+
+let test_claim_next_broadcasts_system_record () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config (make_task ~id:"task-1" ~status:D.Todo);
+    let deliveries =
+      capture_broadcast_deliveries (fun () ->
+        match Workspace_task_schedule.claim_next_r config ~agent_name:owner () with
+        | D.Claim_next_claimed { task_id; _ } ->
+          Alcotest.(check string) "claim_next claimed expected task" "task-1" task_id
+        | D.Claim_next_no_unclaimed ->
+          Alcotest.fail "expected claim_next_r to claim task-1"
+        | D.Claim_next_error msg ->
+          Alcotest.failf "claim_next_r failed: %s" msg)
+    in
+    Alcotest.(check (list string))
+      "claim_next broadcasts Claimed <id> to message log"
+      [ "Claimed task-1" ]
+      (contents config ~baseline_seq);
+    Alcotest.(check (list (pair string bool)))
+      "claim_next broadcast uses System_record audience"
+      [ "Claimed task-1", true ]
+      (List.map (fun (content, audience) -> content, is_system_record audience) deliveries))
+;;
+
+let test_claim_next_auto_start_broadcasts_claim_and_start () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config (make_task ~id:"task-1" ~status:D.Todo);
+    let deliveries =
+      capture_broadcast_deliveries (fun () ->
+        match
+          Workspace_task_schedule.claim_next_r config ~agent_name:owner ~auto_start:true ()
+        with
+        | D.Claim_next_claimed { task_id; _ } ->
+          Alcotest.(check string) "claim_next auto_start claimed task" "task-1" task_id
+        | D.Claim_next_no_unclaimed ->
+          Alcotest.fail "expected claim_next_r ~auto_start:true to claim task-1"
+        | D.Claim_next_error msg ->
+          Alcotest.failf "claim_next_r failed: %s" msg)
+    in
+    Alcotest.(check (list string))
+      "claim_next auto_start broadcasts Claimed then Started (newest first)"
+      [ "Started task-1"; "Claimed task-1" ]
+      (contents config ~baseline_seq);
+    Alcotest.(check (list (pair string bool)))
+      "claim_next auto_start broadcasts both use System_record audience"
+      [ "Started task-1", true; "Claimed task-1", true ]
+      (List.map (fun (content, audience) -> content, is_system_record audience) deliveries))
+;;
+
 let () =
   Alcotest.run
     "task transition broadcast"
     [ ( "committed transitions"
       , [ Alcotest.test_case "submit scheduling survives event log failure" `Quick
             test_submit_schedules_review_after_log_failure
+        ; Alcotest.test_case "claim_next broadcasts System_record" `Quick
+            test_claim_next_broadcasts_system_record
+        ; Alcotest.test_case "claim_next auto_start broadcasts Claimed and Started" `Quick
+            test_claim_next_auto_start_broadcasts_claim_and_start
         ; Alcotest.test_case "cancel carries its reason" `Quick
             test_cancel_broadcasts_reason
         ; Alcotest.test_case "an unclaimed cancel is terminal" `Quick

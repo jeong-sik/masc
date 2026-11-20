@@ -161,62 +161,30 @@ let claim_next_r
                  ~agent_name ~task_id:task.id ~status:final_status
                  ~module_name:"claim_next_r.claim")
              config new_backlog;
-           let run_claim_next_post_commit label f =
-             Workspace_task_claim.run_post_commit
-               ~task_id:task.id
-               ~agent_name
-               ~action:"claim_next"
-               label
-               f
-           in
-           (* Update agent status — takes [with_file_lock] on the
-             agent file via [Workspace_task.update_local_agent_state] to
-             keep the record consistent with concurrent task transitions
-             that hold the agent-file lock (PR #6634). *)
-           run_claim_next_post_commit "agent_state" (fun () ->
-             Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
-               { agent with status = Busy; current_task = Some task.id }));
-           run_claim_next_post_commit "activity" (fun () ->
-             Workspace_task.emit_task_activity
-               config
-               ~agent_name
-               ~task_id:task.id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
-               ~payload:
-                 (`Assoc
-                     [ "task_id", `String task.id
-                     ; "title", `String task.title
-                     ; "priority", `Int task.priority
-                     ]));
-           run_claim_next_post_commit "claim_next_log" (fun () ->
-             log_event
-               config
+           Workspace_task_claim.emit_claim_side_effects
+             config
+             ~action:"claim_next"
+             ~agent_name
+             ~task_id:task.id
+             ~from_status:task.task_status
+             ~claimed_status
+             ~final_status
+             ~auto_start
+             ~activity_payload:
+               (`Assoc
+                   [ "task_id", `String task.id
+                   ; "title", `String task.title
+                   ; "priority", `Int task.priority
+                   ])
+             ~log_label:"claim_next_log"
+             ~log_payload:
                (`Assoc
                    [ "type", `String "task_claim_next"
                    ; "agent", `String agent_name
                    ; "task", `String task.id
                    ; "priority", `Int task.priority
                    ; "ts", `String now
-                   ]));
-           run_claim_next_post_commit "observe_transition" (fun () ->
-             Workspace_task.observe_task_transition
-               config
-               ~agent_name
-               ~task_id:task.id
-               ~transition:Masc_domain.Claim
-               ~details:
-                 (Workspace_task.task_transition_details
-                    ~from_status:task.task_status
-                    ~to_status:claimed_status
-                    ()));
-           if auto_start
-           then
-             Workspace_task_claim.emit_auto_start_side_effects
-               config
-               ~agent_name
-               ~task_id:task.id
-               ~from_status:claimed_status
-               ~to_status:final_status;
+                   ]);
            let base_message =
              Printf.sprintf
                "%s auto-claimed [P%d] %s: %s"

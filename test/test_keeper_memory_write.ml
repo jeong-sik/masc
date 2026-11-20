@@ -692,7 +692,7 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
     Runtime.keeper_memory_search_json
       ~config
       ~meta
-      ~ctx_work:(empty_ctx ())
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
       ~args:(`Assoc [ "query", `String ""; "source", `String "dropped"; "limit", `Int 10 ])
     |> Yojson.Safe.from_string
   in

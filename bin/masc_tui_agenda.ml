@@ -337,13 +337,14 @@ let overlay ~ko ~now ~localtime ~cols t =
            { tone = Wake
            ; goes_to = Nowhere
            ; text =
-               two_column
-                 ~cols
-                 (Printf.sprintf
-                    "%-6s  %s"
-                    (hour_and_minute ~now ~localtime row)
-                    (said ~ko row))
-                 row.recurrence
+               let time_text = hour_and_minute ~now ~localtime row in
+               let padded_time =
+                 time_text
+                 ^ String.make
+                     (max 0 (6 - Masc_tui_message_layout.display_width time_text))
+                     ' '
+               in
+               two_column ~cols (padded_time ^ "  " ^ said ~ko row) row.recurrence
            })
         rows
   in

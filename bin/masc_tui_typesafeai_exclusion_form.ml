@@ -307,30 +307,33 @@ let window ~room ~cursor rows =
     visible, start, total - start - shown)
 ;;
 
-let rows ~ko ~width ~height t =
+let rows_with_selection ~ko ~width ~height t =
+  let plain lines = List.map (fun line -> false, line) lines in
   let mark index = if t.cursor = index then "›" else " " in
-  let intro_rows = wrapped ~width ~lead:hint_lead (intro ~ko) in
-  let destination_rows = wrapped ~width ~lead:hint_lead (destinations_text ~ko t) in
+  let intro_rows = plain (wrapped ~width ~lead:hint_lead (intro ~ko)) in
+  let destination_rows = plain (wrapped ~width ~lead:hint_lead (destinations_text ~ko t)) in
   let summary_rows =
-    wrapped ~width ~lead:hint_lead
-      ((if ko then "저장하면 · " else "On save · ") ^ summary_text ~ko t)
+    plain (wrapped ~width ~lead:hint_lead
+      ((if ko then "저장하면 · " else "On save · ") ^ summary_text ~ko t))
   in
   let note_rows =
-    wrapped ~width ~lead:hint_lead (board_note ~ko)
-    @ wrapped ~width ~lead:hint_lead (applies_note ~ko)
+    plain (
+      wrapped ~width ~lead:hint_lead (board_note ~ko)
+      @ wrapped ~width ~lead:hint_lead (applies_note ~ko))
   in
   let error_rows =
     match t.error with
     | None -> []
-    | Some reason -> wrapped ~width ~lead:refusal_lead reason
+    | Some reason -> plain (wrapped ~width ~lead:refusal_lead reason)
   in
   let keeper_rows =
     match t.entries with
-    | [] -> wrapped ~width ~lead:hint_lead (no_roster ~ko)
+    | [] -> plain (wrapped ~width ~lead:hint_lead (no_roster ~ko))
     | entries ->
       let drawn =
         List.mapi
           (fun index entry ->
+             t.cursor = index,
              Printf.sprintf
                "    %s [%s] %s%s"
                (mark index)
@@ -352,7 +355,8 @@ let rows ~ko ~width ~height t =
       then visible
       else
         visible
-        @ [ Printf.sprintf
+        @ [ false,
+            Printf.sprintf
               (if ko then "      … 위 %d명 · 아래 %d명 (↑/↓ 로 움직여요)"
                else "      … %d above · %d below (↑/↓ to move)")
               above below ]
@@ -363,5 +367,9 @@ let rows ~ko ~width ~height t =
   @ summary_rows
   @ note_rows
   @ error_rows
-  @ [ "" ]
+  @ [ false, "" ]
+;;
+
+let rows ~ko ~width ~height t =
+  List.map snd (rows_with_selection ~ko ~width ~height t)
 ;;

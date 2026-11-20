@@ -44,16 +44,16 @@ val apportion : width:int -> weights:int list -> int list
 val band : width:int -> title:string -> caption:string -> string
 (** [band ~width ~title ~caption] is a rule of exactly [width] cells carrying
     [title] at the left and [caption] at the right, with no leading indent.
-    [title] and [caption] are expected to be ASCII. A width too small for both
-    drops the caption and keeps the title; a width too small for the title
-    alone leaves a plain rule. The row is exactly [width] cells in all three
-    cases, so the frame never has to cut it. *)
+    [title] and [caption] are measured in Unicode display cells. A width too
+    small for both drops the caption and keeps the title; a width too small for
+    the title alone leaves a plain rule. The row is exactly [width] cells in all
+    three cases, so the frame never has to cut it. *)
 
 val wrap : width:int -> string -> string list
-(** [wrap ~width text] breaks ASCII [text] on spaces into lines of at most
-    [width] cells. Used for the rows under a bar, which say what the number
-    above them means and so are the worst thing on the screen to lose to a
-    truncated row.
+(** [wrap ~width text] breaks [text] on spaces into lines of at most
+    [width] Unicode display cells. Used for the rows under a bar, which say what
+    the number above them means and so are the worst thing on the screen to lose
+    to a truncated row.
 
     A run of spaces inside a line is kept at its original length, because the
     screen separates figures with a wide "  " dot and a folded row that

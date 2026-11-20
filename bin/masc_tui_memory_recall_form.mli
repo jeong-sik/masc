@@ -152,6 +152,7 @@ val text_on : t -> (string, t) result
     name twice, is the chosen list. *)
 
 val rows : ko:bool -> width:int -> height:int -> t -> string list
+val rows_with_selection : ko:bool -> width:int -> height:int -> t -> (bool * string) list
 (** The form as rows of a pane [width] cells wide. The Keeper list gets the
     rows left under [height] after the others, and a list longer than that is
     cut to a window that follows the cursor, with a row saying how many are

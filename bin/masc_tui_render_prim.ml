@@ -3640,7 +3640,7 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
   let caret = if selected_question then "\xe2\x80\xba" else " " in
   box_wrapped_field buf cols
     ~head:
-      (Printf.sprintf " %s%s%s%s%s  " caret
+      (Printf.sprintf " %s %s%s%s%s  " caret
          (if selected_question then Ansi.bold else "")
          (fit_width (Terminal_text.single_line (Masc.Tui_decode_asks.ask_asker_label row.Masc.Tui_decode_asks.ar_asker)) 16)
          (if selected_question then Ansi.reset else "")
@@ -6801,9 +6801,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         List.mapi
           (fun index (item : Inspector.exact_input_item) ->
              let selected = index = state.context_inspector_cursor in
-             let marker, style =
-               if selected then "\xe2\x80\xba", Theme.selection_style () else " ", Ansi.reset
-             in
+             let marker = if selected then "\xe2\x80\xba" else " " in
              let label_width = max 8 (width - (20 + idx_width)) in
              (* The list carries the producer's colour the summary above it
                 groups by, except under the selection band, whose own styling
@@ -6817,11 +6815,17 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                  context_source_style (Inspector.exact_input_source item.kind)
                  ^ label ^ Ansi.reset
              in
-             Printf.sprintf "%s %s %*d %s  %s  \xe2\x89\x88%6s tok%s" style
-               marker idx_width (index + 1) (kind_letter index item) label
-               (Inspector.format_tokens
-                  (Masc_tui_token_scale.estimate scale item.bytes))
-               Ansi.reset)
+             let body =
+               Printf.sprintf " %s %*d %s  %s  \xe2\x89\x88%6s tok"
+                 marker idx_width (index + 1) (kind_letter index item) label
+                 (Inspector.format_tokens
+                    (Masc_tui_token_scale.estimate scale item.bytes))
+             in
+             if selected then
+               Theme.selection_style ()
+               ^ fit_width (Masc_tui_theme.strip_sgr body) width
+               ^ Ansi.reset
+             else body)
           items
       in
       let ko = state.ui_language = Lang_ko in
@@ -7035,9 +7039,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
         List.mapi
           (fun index (row : Inspector.input_map_row) ->
              let selected = index = state.context_inspector_cursor in
-             let marker, selection =
-               if selected then "\xe2\x80\xba", Theme.selection_style () else " ", Ansi.reset
-             in
+             let marker = if selected then "\xe2\x80\xba" else " " in
              let branch = if index = List.length rows - 1 then "└─" else "├─" in
              let label =
                fit_width (Inspector.input_component_label row.component) label_width
@@ -7047,13 +7049,19 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                if selected then "", "", Masc_tui_theme.strip_sgr badge
                else context_component_style row.component, Ansi.reset, badge
              in
-             Printf.sprintf "%s %s %s %s%s%s \xe2\x89\x88%6s tok %s%s"
-               selection marker branch
-               component_style label after_label
-               (Inspector.format_tokens
-                  (Masc_tui_token_scale.estimate scale row.bytes))
-               shown_badge
-               Ansi.reset)
+             let body =
+               Printf.sprintf " %s %s %s%s%s \xe2\x89\x88%6s tok %s"
+                 marker branch
+                 component_style label after_label
+                 (Inspector.format_tokens
+                    (Masc_tui_token_scale.estimate scale row.bytes))
+                 shown_badge
+             in
+             if selected then
+               Theme.selection_style ()
+               ^ fit_width (Masc_tui_theme.strip_sgr body) width
+               ^ Ansi.reset
+             else body)
           rows
       in
       let ko = state.ui_language = Lang_ko in

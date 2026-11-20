@@ -84,7 +84,8 @@ let key t key =
   | key when String.length key > 0 && String.length key = Uchar.utf_decode_length (String.get_utf_8_uchar key 0) -> Editing (paste t key)
   | _ -> Editing t
 
-let rows ?(input_locked=false) ~width ~height t =
+let rows_with_selection ?(input_locked=false) ~width ~height t =
+  let plain lines = List.map (fun line -> false, line) lines in
   let wrap = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) in
   let heading = (match t.mode with Edit -> "Edit model" | Copy -> "Copy model") ^ " · " ^ t.source.provider in
   let label = function Name -> "Variant name" | Context -> "Context tokens" | Effort -> "Reasoning effort" | Temperature -> "Temperature" | Output -> "Max output tokens" in
@@ -101,7 +102,12 @@ let rows ?(input_locked=false) ~width ~height t =
   let notes = (match t.mode with
     | Copy -> "Same account and API model; independent settings. Add the saved variant to a Lane to use it."
     | Edit -> "Context/output apply to this account. Effort/temperature affect every account sharing this model; use Copy for independent settings.") in
-  let content = wrap heading @ List.concat_map wrap field_rows @ wrap notes in
+  let content =
+    plain (wrap heading)
+    @ List.concat (List.mapi (fun i row ->
+        let selected = i = t.selected in
+        List.map (fun line -> selected, line) (wrap row)) field_rows)
+    @ plain (wrap notes) in
   (* Keep navigation visible even when a server error spans many rows. The
      field window, error prefix and key hint share one bounded height. *)
   let height = max 0 height in
@@ -119,7 +125,10 @@ let rows ?(input_locked=false) ~width ~height t =
   let room = max 0 (available - List.length errors) in
   let selected_line = List.length (wrap heading) + List.fold_left (fun n row -> n + List.length (wrap row)) 0 (List.take t.selected field_rows) in
   let first = max 0 (selected_line - room + 1) in
-  List.take room (List.drop first content) @ errors @ hints
+  List.take room (List.drop first content) @ plain errors @ plain hints
+
+let rows ?input_locked ~width ~height t =
+  List.map snd (rows_with_selection ?input_locked ~width ~height t)
 
 let path parts = String.concat "." (List.map Edit_text.render_key parts)
 let errors errors = String.concat "; " (List.map (fun (e:Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)

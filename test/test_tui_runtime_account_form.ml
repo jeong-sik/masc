@@ -451,6 +451,16 @@ let test_a_file_with_no_client_has_nothing_to_copy () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "a file with no official client opened the form"
 
+let test_rows_with_selection_tracks_active_field () =
+  match F.open_on fixture with
+  | Error detail -> Alcotest.fail detail
+  | Ok form ->
+    let selected = List.filter fst (F.rows_with_selection ~ko:false ~width:80 ~height:16 form) in
+    Alcotest.(check int) "filling form highlights exactly one field" 1 (List.length selected);
+    Alcotest.(check bool) "rows matches snd of rows_with_selection" true
+      (F.rows ~ko:false ~width:80 ~height:16 form
+       = List.map snd (F.rows_with_selection ~ko:false ~width:80 ~height:16 form))
+
 let () =
   Alcotest.run "tui_runtime_account_form"
     [ ( "form"
@@ -484,7 +494,9 @@ let () =
             test_a_file_with_no_client_has_nothing_to_copy
         ] )
     ; ( "rows"
-      , [] )
+      , [ Alcotest.test_case "rows_with_selection tracks active field" `Quick
+            test_rows_with_selection_tracks_active_field
+        ] )
     ; ( "saved"
       , [ Alcotest.test_case "a saved form copies its command until closed" `Quick
             test_a_saved_form_copies_its_command_until_closed

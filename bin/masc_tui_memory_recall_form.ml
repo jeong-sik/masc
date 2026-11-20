@@ -609,31 +609,34 @@ let window ~room ~cursor rows =
     visible, start, total - start - shown)
 ;;
 
-let rows ~ko ~width ~height t =
+let rows_with_selection ~ko ~width ~height t =
+  let plain lines = List.map (fun line -> false, line) lines in
   let mark index = if t.cursor = index then "›" else " " in
-  let intro_rows = wrapped ~width ~lead:hint_lead (intro ~ko) in
+  let intro_rows = plain (wrapped ~width ~lead:hint_lead (intro ~ko)) in
   let server_rows =
-    capped ~limit:server_rows_limit (wrapped ~width ~lead:hint_lead (server_line ~ko t.server))
+    plain (capped ~limit:server_rows_limit (wrapped ~width ~lead:hint_lead (server_line ~ko t.server)))
   in
   let range_row =
+    t.cursor = 0,
     Printf.sprintf "  %s %s  \xe2\x80\xb9 %s \xe2\x80\xba"
       (mark 0) (range_label ~ko) (mode_label ~ko t.mode)
   in
   let summary_rows =
-    wrapped ~width ~lead:hint_lead
-      ((if ko then "저장하면 · " else "On save · ") ^ summary_text ~ko t)
+    plain (wrapped ~width ~lead:hint_lead
+      ((if ko then "저장하면 · " else "On save · ") ^ summary_text ~ko t))
   in
   let note_rows =
-    (match t.mode, t.entries with
-     | All, _ -> wrapped ~width ~lead:hint_lead (all_warning ~ko)
-     | Listed, [] -> wrapped ~width ~lead:hint_lead (no_roster ~ko)
-     | Listed, _ :: _ | Off, _ -> [])
-    @ wrapped ~width ~lead:hint_lead (applies_note ~ko)
+    plain (
+      (match t.mode, t.entries with
+       | All, _ -> wrapped ~width ~lead:hint_lead (all_warning ~ko)
+       | Listed, [] -> wrapped ~width ~lead:hint_lead (no_roster ~ko)
+       | Listed, _ :: _ | Off, _ -> [])
+      @ wrapped ~width ~lead:hint_lead (applies_note ~ko))
   in
   let error_rows =
     match t.error with
     | None -> []
-    | Some reason -> wrapped ~width ~lead:refusal_lead reason
+    | Some reason -> plain (wrapped ~width ~lead:refusal_lead reason)
   in
   let keeper_rows =
     match t.mode with
@@ -642,6 +645,7 @@ let rows ~ko ~width ~height t =
       let drawn =
         List.mapi
           (fun index entry ->
+             t.cursor = index + 1,
              Printf.sprintf
                "    %s [%s] %s%s%s"
                (mark (index + 1))
@@ -667,10 +671,15 @@ let rows ~ko ~width ~height t =
       then visible
       else
         visible
-        @ [ Printf.sprintf
+        @ [ false,
+            Printf.sprintf
               (if ko then "      … 위 %d명 · 아래 %d명 (↑/↓ 로 움직여요)"
                else "      … %d above · %d below (↑/↓ to move)")
               above below ]
   in
-  intro_rows @ server_rows @ [ range_row ] @ keeper_rows @ summary_rows @ note_rows @ error_rows @ [ "" ]
+  intro_rows @ server_rows @ [ range_row ] @ keeper_rows @ summary_rows @ note_rows @ error_rows @ [ false, "" ]
+;;
+
+let rows ~ko ~width ~height t =
+  List.map snd (rows_with_selection ~ko ~width ~height t)
 ;;

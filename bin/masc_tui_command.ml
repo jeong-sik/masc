@@ -358,7 +358,7 @@ let help_usage entry =
       ^ ")"
 
 let help_summary_padding text =
-  String.make (max 2 (help_summary_column - String.length text)) ' '
+  String.make (max 2 (help_summary_column - Masc_tui_message_layout.display_width text)) ' '
 
 let summary_ko = function
   | "login" -> "공식 클라이언트에 로그인하고 모델 연결을 확인합니다"

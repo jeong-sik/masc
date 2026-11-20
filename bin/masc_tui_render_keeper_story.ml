@@ -96,7 +96,7 @@ let ago ~ko ~now at =
 
 let status_cells = 10
 let clock_cells = Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute
-let relative_cells = 12
+let relative_cells = 11
 
 let clock_text ~now = function
   | None -> Masc_tui_theme.Glyph.no_value
@@ -155,7 +155,7 @@ let by_time (_, left) (_, right) =
   | None, None -> 0
 ;;
 
-let schedule_row_line ~ko ~now ((row : Masc_tui_types.schedule_row), due) =
+let schedule_row_line ~ko ~now ~recurrence_cells ((row : Masc_tui_types.schedule_row), due) =
   let color, status =
     match attention_word ~ko row with
     | Some word -> Theme.warn (), word
@@ -163,33 +163,29 @@ let schedule_row_line ~ko ~now ((row : Masc_tui_types.schedule_row), due) =
         let status = Masc_tui_render_work.schedule_status_reading ~ko row.sch_status in
         status.tone, status.word
   in
+  let recurrence =
+    Terminal_text.single_line
+      (Masc_tui_schedule_recurrence.text ~ko ~now
+         ~summary:row.sch_recurrence_summary row.sch_recurrence)
+  in
   let what = Masc_tui_render_prim.schedule_row_label row in
   String.concat ""
     [ "  "
     ; color
     ; Message_layout.fit_width status status_cells
     ; Ansi.reset
-    ; " "
+    ; "  "
     ; Message_layout.fit_width (clock_text ~now due) clock_cells
-    ; " "
+    ; "  "
     ; Message_layout.fit_width (relative_text ~ko ~now row due) relative_cells
-    ; " "
-    ; dim
-        (Terminal_text.single_line
-           (Masc_tui_schedule_recurrence.text ~ko ~now
-              ~summary:row.sch_recurrence_summary row.sch_recurrence)
-         ^ " · ")
+    ; "  "
+    ; dim (Message_layout.fit_width recurrence recurrence_cells ^ " · ")
     ; what
     ]
 ;;
 
 let next_run_cell (state : Masc_tui_types.state) ~now ~keeper_name =
-  Masc_tui_keeper_next_run.cell ~ko:(state.ui_language = Masc_tui_types.Lang_ko) ~now
-    (Masc_tui_keeper_next_run.find
-       (Masc_tui_keeper_next_run.index_of_agenda
-          ~freshness:state.schedules_agenda_freshness
-          state.schedules_agenda)
-       ~keeper_name)
+  Masc_tui_keeper_axis.run_cell state ~now ~keeper_name
 ;;
 
 let memory_reading (state : Masc_tui_types.state) ~keeper_name =
@@ -535,7 +531,21 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
                  [ warn (say "  첫 페이지에 일정 없음 · 더 많은 일정이 있을 수 있음" "  none on the first page: more schedules may exist") ])
         | [], _ :: _ ->
             [ dim (say "  이 페이지에 예정되거나 최근 실행된 일정 없음" "  nothing live or recent on this page") ]
-        | _ :: _, ([] | _ :: _) -> List.map (schedule_row_line ~ko ~now) entries
+        | _ :: _, ([] | _ :: _) ->
+            let recurrence_cells =
+              entries
+              |> List.fold_left
+                   (fun widest ((row : Masc_tui_types.schedule_row), _) ->
+                     let text =
+                       Terminal_text.single_line
+                         (Masc_tui_schedule_recurrence.text ~ko ~now
+                            ~summary:row.sch_recurrence_summary row.sch_recurrence)
+                     in
+                     max widest (Message_layout.display_width text))
+                   5
+              |> min 14
+            in
+            List.map (schedule_row_line ~ko ~now ~recurrence_cells) entries
       in
       let observed =
         Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now

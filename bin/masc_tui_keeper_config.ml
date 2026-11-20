@@ -712,26 +712,29 @@ let note_column = label_width + 5
 
 let pad_to_note ~prefix_width = String.make (max 1 (note_column - prefix_width)) ' '
 
+let pad_right text width =
+  text ^ String.make (max 0 (width - Masc_tui_message_layout.display_width text)) ' '
+
 let section title note =
   let heading = styled Masc_tui_theme.Sgr.bold title in
   if String.equal note ""
   then " " ^ heading
   else
     Printf.sprintf " %s%s%s" heading
-      (pad_to_note ~prefix_width:(1 + String.length title))
+      (pad_to_note ~prefix_width:(1 + Masc_tui_message_layout.display_width title))
       (styled Masc_tui_theme.Sgr.dim note)
 
 let marked_section glyph colour title note =
   Printf.sprintf " %s %s%s%s"
     (styled colour glyph)
     (styled Masc_tui_theme.Sgr.bold title)
-    (pad_to_note ~prefix_width:(3 + String.length title))
+    (pad_to_note ~prefix_width:(3 + Masc_tui_message_layout.display_width title))
     (styled Masc_tui_theme.Sgr.dim note)
 
 let marked_row glyph colour label value =
   Printf.sprintf "  %s %s %s"
     (styled colour glyph)
-    (styled colour (Printf.sprintf "%-*s" label_width label))
+    (styled colour (pad_right label label_width))
     value
 
 let editable_row label value = marked_row editable_glyph Masc_tui_theme.Sgr.cyan label value

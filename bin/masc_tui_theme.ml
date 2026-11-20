@@ -1040,19 +1040,25 @@ let selection_style palette =
     palette
 ;;
 
-let sidebar_selection palette =
-  if not colors_enabled then selection
+let sidebar_selection_background palette =
+  if not colors_enabled then None
   else match palette with
-  | None -> selection
+  | None -> None
   | Some palette ->
     let foreground = Terminal_palette.foreground palette in
     (* A small neutral step toward the foreground, instead of filling the
        whole selected row with the terminal's bright text colour. *)
-    (match Option.bind (Color.recede_toward ~background:foreground
-       ~floor:status_contrast_floor ~max_ratio:0.18
-       (Terminal_palette.background palette)) Terminal_palette.best_color with
-     | None -> selection
-     | Some projected -> Sgr.default_fg ^ Sgr.background (Some projected))
+    Option.bind
+      (Color.recede_toward ~background:foreground
+         ~floor:status_contrast_floor ~max_ratio:0.18
+         (Terminal_palette.background palette))
+      Terminal_palette.best_color
+    |> Option.map (fun projected -> Sgr.background (Some projected))
+
+let sidebar_selection palette =
+  match sidebar_selection_background palette with
+  | None -> selection
+  | Some bg -> Sgr.default_fg ^ bg
 
 module Syntax = struct
   (* What does not take a hue from the palette. The words a reader scans for
@@ -1117,6 +1123,86 @@ let strip_sgr_internal ?on_span text =
       copy_span 0 first
 
 let strip_sgr text = strip_sgr_internal text
+
+let paint_row_background ~bg text =
+  if String.equal bg "" then text
+  else
+    let length = String.length text in
+    let buf = Buffer.create (length + 64) in
+    Buffer.add_string buf bg;
+    let filter_sgr_params params =
+      if String.equal params "" then true, [ "0" ]
+      else
+        let rec loop has_reset acc = function
+          | [] -> has_reset, List.rev acc
+          | "" :: rest -> loop true ("0" :: acc) rest
+          | "48" :: "5" :: _ :: rest -> loop has_reset acc rest
+          | "48" :: "2" :: _ :: _ :: _ :: rest -> loop has_reset acc rest
+          | "38" :: "5" :: n :: rest -> loop has_reset (n :: "5" :: "38" :: acc) rest
+          | "38" :: "2" :: r :: g :: b :: rest ->
+              loop has_reset (b :: g :: r :: "2" :: "38" :: acc) rest
+          | code :: rest ->
+              (match int_of_string_opt code with
+               | Some 0 -> loop true ("0" :: acc) rest
+               | Some n when (n >= 40 && n <= 47) || n = 49 || (n >= 100 && n <= 107) ->
+                   loop has_reset acc rest
+               | Some _ | None -> loop has_reset (code :: acc) rest)
+        in
+        loop false [] (String.split_on_char ';' params)
+    in
+    (* Scan an ECMA-48 CSI sequence starting after "\027[":
+       parameter bytes 0x30..0x3F, intermediate bytes 0x20..0x2F,
+       terminated by a final byte in 0x40..0x7E. *)
+    let scan_csi start =
+      let rec params i =
+        if i >= length then None
+        else
+          let c = Char.code text.[i] in
+          if c >= 0x30 && c <= 0x3F then params (i + 1)
+          else intermediates i
+      and intermediates i =
+        if i >= length then None
+        else
+          let c = Char.code text.[i] in
+          if c >= 0x20 && c <= 0x2F then intermediates (i + 1)
+          else if c >= 0x40 && c <= 0x7E then Some i
+          else None
+      in
+      params start
+    in
+    let rec walk offset =
+      match String.index_from_opt text offset '\027' with
+      | None ->
+          Buffer.add_substring buf text offset (length - offset)
+      | Some esc when esc + 1 < length && Char.equal text.[esc + 1] '[' ->
+          Buffer.add_substring buf text offset (esc - offset);
+          (match scan_csi (esc + 2) with
+           | None ->
+               Buffer.add_substring buf text esc (length - esc)
+           | Some stop ->
+               let is_sgr = Char.equal text.[stop] 'm' in
+               let is_private_hit = esc + 2 < stop && Char.equal text.[esc + 2] '=' in
+               if not is_sgr || is_private_hit then
+                 (* Preserve non-SGR CSI sequences and private hit-test marks verbatim. *)
+                 Buffer.add_substring buf text esc (stop - esc + 1)
+               else begin
+                 let params = String.sub text (esc + 2) (stop - esc - 2) in
+                 let has_reset, kept = filter_sgr_params params in
+                 if kept <> [] then begin
+                   Buffer.add_string buf "\027[";
+                   Buffer.add_string buf (String.concat ";" kept);
+                   Buffer.add_char buf 'm'
+                 end;
+                 if has_reset && stop + 1 < length then Buffer.add_string buf bg
+               end;
+               walk (stop + 1))
+      | Some esc ->
+          Buffer.add_substring buf text offset (esc - offset + 1);
+          walk (esc + 1)
+    in
+    walk 0;
+    Buffer.add_string buf Sgr.reset;
+    Buffer.contents buf
 
 let strip_sgr_with_positions text =
   let spans=ref [] in

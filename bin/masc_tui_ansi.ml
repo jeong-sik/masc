@@ -330,6 +330,11 @@ module Theme = struct
     Masc_tui_terminal_palette.snapshot ()
     |> Masc_tui_terminal_palette.snapshot_palette
     |> Masc_tui_theme.sidebar_selection
+
+  let sidebar_selection_background () =
+    Masc_tui_terminal_palette.snapshot ()
+    |> Masc_tui_terminal_palette.snapshot_palette
+    |> Masc_tui_theme.sidebar_selection_background
   (* A focused card's border, the border.focused token. RFC
      tui-one-screen-grammar section 7.3 gives status.info to "under way" and
      to focus, so it is [info] and goes through the same lift: a raw bright

@@ -6,7 +6,7 @@ let source reference text : Context.source = {reference; content = `String text}
 let events = List.init 20 (fun i -> source (Printf.sprintf "event:campaign:%d" i) "continue campaign")
 let question = source "chat:question:revision1" "Where are we now?"
 let pocket sources context next_steps : Context.pocket = {id = "test:" ^ String.concat ":" sources; merge_contexts = []; sources; context; next_steps; completeness = Context.Current}
-let input sources previous : Context.input = {sources; previous; unavailable = []; execution_basis = Some "test-progress"}
+let input sources previous : Context.input = {sources; previous; unavailable = []; withheld = []; execution_basis = Some "test-progress"}
 let ok = function Ok value -> value | Error detail -> fail detail
 let expect_error = function Error _ -> () | Ok _ -> fail "expected rejection"
 let with_store f =
@@ -70,7 +70,7 @@ let test_partial_observation_and_cas () = with_store @@ fun keepers_dir ->
   let third = ok (Context.commit ~observed_sources:[question] ~keepers_dir ~keeper_id
     ~expected_version:(Some (Context.version second)) ~sources:[] []) in
   check int "authoritative settled event observation prunes derived history" 1 (List.length third.pockets);
-  let unknown : Context.input = {sources = []; previous = Some third; unavailable = ["store unavailable"]; execution_basis = None} in
+  let unknown : Context.input = {sources = []; previous = Some third; unavailable = ["store unavailable"]; withheld = []; execution_basis = None} in
   check bool "unknown observation still exposes historical context" true (Option.is_some (ok (Context.render unknown)));
   let fourth = ok (Context.commit ~keepers_dir ~keeper_id ~expected_version:(Some (Context.version third))
     ~sources:unknown.sources []) in
@@ -490,7 +490,7 @@ let test_unchanged_capture_needs_no_second_queue_pass () = with_store @@ fun kee
       ~sources:[settled] [pocket [settled.reference] "Handled event" []]) in
   let captured : Context.input =
     {sources = [a]; previous = Some first; unavailable = ["chat store not yet available"];
-     execution_basis = None} in
+     withheld = []; execution_basis = None} in
   let needed inp = Pass.needed ~keepers_dir ~keeper_name inp in
   check bool "a new pending input needs a pass" true (needed captured);
   let committed = ok (Context.commit ~keepers_dir ~keeper_id:keeper_name
@@ -604,6 +604,11 @@ let test_capture_rechecks_direct_readers_and_retained_context () = with_store @@
     let expected_sources = if authorized then 4 else 2 in
     check int "capture rechecks actual stored Direct readership" expected_sources
       (List.length captured.sources);
+    check bool "withheld Board sources are kept in withheld, never unavailable" true
+      (captured.withheld <> []
+       && not (List.exists (fun s -> String_util.contains_substring s "withheld") captured.unavailable));
+    check bool "withheld sources alone never block shows_no_working_context" true
+      (Context.shows_no_working_context {Context.empty with withheld = captured.withheld});
     let previous = Option.get captured.previous in
     check int "retained raw sources use the same authorization guard" expected_sources
       (List.length previous.sources);

@@ -409,8 +409,8 @@
 (test
  (name test_workspace_memory_curator_lane)
  (modules test_workspace_memory_curator_lane)
- (deps (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
- (libraries masc_test_deps masc.server exact_output_fixture))
+ (deps (source_tree %{workspace_root}/config/prompts))
+ (libraries masc_test_deps masc.server exact_output_fixture masc.mcp_transport_protocol))
 
 (test
  (name test_msx_vision)
@@ -6557,6 +6557,11 @@
  (modules test_workspace_memory_execution_capture)
  (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry unix))
+
+(test
+ (name test_workspace_memory_log_reader)
+ (modules test_workspace_memory_log_reader)
+ (libraries alcotest masc masc.fs_compat unix))
 
 (test
  (name test_keeper_direct_runtime_resume)

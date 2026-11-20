@@ -127,6 +127,56 @@ let test_one_table_serves_several_rankings () =
   let _, idle = Index.with_excluding_owners ~texts ~max_results:1 (fun ~rank -> rank ["writer", ""]) in
   Alcotest.(check int) "calls with no work build no table" 0 idle.index_builds
 
+let test_short_queries_and_pooled_close () =
+  let texts =
+    [ "writer", "AI pipeline uses DB cache"
+    ; "reviewer", "Go service hit 50% load on 가"
+    ; "auditor", "DB schema migration C module"
+    ]
+  in
+  let ok = function
+    | Ok rows -> rows
+    | Error error -> Alcotest.fail (Index.error_to_string error)
+  in
+  let plain_texts = List.map snd texts in
+  let check_hits label query expected_indices =
+    let hits = Index.rank ~query plain_texts |> ok |> List.map fst in
+    Alcotest.(check (list int)) label expected_indices hits
+  in
+  check_hits "two-char ASCII query matches case-insensitively" "db" [ 0; 2 ];
+  check_hits "one-char query matches exact token" "c" [ 0; 1; 2 ];
+  check_hits "one-char UTF-8 Korean query matches" "가" [ 1 ];
+  check_hits "wildcard characters are escaped literally" "50%" [ 1 ];
+  check_hits "mixed trigram + short term query matches both" "schema db" [ 2; 0 ];
+  let excluded =
+    Index.rank_many_excluding_owners
+      ~queries:[ "writer", "db"; "writer", "가" ]
+      ~texts
+      ~max_results:2
+    |> ok
+    |> fst
+    |> List.map (List.map fst)
+  in
+  Alcotest.(check (list (list int))) "short queries honor owner filter" [ [ 2 ]; [ 1 ] ] excluded;
+  (* Pooled close path inside Eio_guard *)
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_guard.disable ();
+      Domain_pool_ref.clear_for_tests ())
+    (fun () ->
+       with_pool env (fun () ->
+         let res, stats =
+           Index.with_excluding_owners ~texts ~max_results:2 (fun ~rank ->
+             rank [ "writer", "db" ])
+         in
+         Alcotest.(check (list (list int)))
+           "pooled with_excluding_owners short query succeeds"
+           [ [ 2 ] ]
+           (List.map (List.map fst) (ok res));
+         Alcotest.(check int) "one table built under pool" 1 stats.index_builds))
+
 let () =
   Alcotest.run "Keeper memory search index"
     ["multi-query", [Alcotest.test_case "one transient index answers each query" `Quick
@@ -134,7 +184,9 @@ let () =
       Alcotest.test_case "owner filter precedes limit and reports build cost" `Quick
       test_owner_filter_and_index_cost;
       Alcotest.test_case "one table serves several rankings" `Quick
-      test_one_table_serves_several_rankings];
+      test_one_table_serves_several_rankings;
+      Alcotest.test_case "short (<3-char) and mixed queries match under owner filter and pooled close" `Quick
+      test_short_queries_and_pooled_close];
      "domain pool", [Alcotest.test_case "pooled and inline rankings agree" `Quick
       test_pool_and_inline_rank_the_same;
       Alcotest.test_case "the calling domain keeps running" `Quick

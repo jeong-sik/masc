@@ -164,7 +164,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
             completeness=Current}] with
         | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
       {Keeper_librarian_context.sources=[]; previous=Some prior; unavailable=[];
-       execution_basis=Some "fixture-live-basis"} in
+       withheld=[]; execution_basis=Some "fixture-live-basis"} in
   let input : Keeper_librarian.input =
     {turn_ref=Ids.Turn_ref.make ~trace_id:name ~absolute_turn:1;
      historical_task_contexts=[];goal_context=Keeper_librarian.No_task;
@@ -369,7 +369,7 @@ let () =
       prompt_shape "empty" Keeper_librarian_context.empty true;
       prompt_shape "running keeper with nothing pending"
         {Keeper_librarian_context.sources=[]; previous=Some prior; unavailable=[];
-         execution_basis=Some "fixture-live-basis"} true;
+         withheld=[]; execution_basis=Some "fixture-live-basis"} true;
       prompt_shape "pending source"
         {Keeper_librarian_context.empty with sources=[consumed_source]} false;
       prompt_shape "unavailable source"

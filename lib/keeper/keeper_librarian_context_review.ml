@@ -106,14 +106,17 @@ let observation_to_yojson = function
     in `Assoc (fields @ ["elapsed_s", `Float elapsed_s; "request", request_json request])
 
 let permits_publication = function
-  | Complete {result = Judged {verdict = Needs_revision; _}; _} -> false
-  | Skipped _ | Checking _
+  | Checking _
   | Complete
       { result =
-          ( Judged { verdict = Faithful | Insufficient_evidence; _ }
-          | Invalid_answer _ | Failed _ )
+          ( Judged { verdict = Needs_revision; _ }
+          | Invalid_answer _
+          | Failed _ )
       ; _
-      } -> true
+      } -> false
+  | Skipped _
+  | Complete { result = Judged { verdict = Faithful | Insufficient_evidence; _ }; _ } ->
+    true
 
 let run ?(observe = fun _ -> ()) ~clock ~keeper_id ~input ~proposed () =
   let finish observation = observe observation; observation in

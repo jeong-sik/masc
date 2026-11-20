@@ -17,7 +17,11 @@ val path : directory:string -> string
 val load : directory:string -> (t, string) result
 val save : directory:string -> t -> (unit, string) result
 (** Missing file is [empty]; malformed state and I/O failures are errors.
-    Writes use strict atomic replacement. Eio cancellation propagates. *)
+    Reads and writes serialize under {!File_lock_eio.with_lock} when [directory]
+    exists, and writes use strict atomic replacement. Eio cancellation
+    propagates. *)
+val update : directory:string -> (t -> (t, string) result) -> (t, string) result
+(** Locked read-modify-write transition over [briefing.json]. *)
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 (** Complete strict state codec, also used by original commit recovery. *)

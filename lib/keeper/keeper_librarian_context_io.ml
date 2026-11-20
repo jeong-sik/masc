@@ -19,19 +19,16 @@ let execution_basis ~base_path ~keeper_name =
 
 let board_source_withheld = "Board queue source withheld pending authorized routing/readership"
 
-let withheld_failure = function
-  | Readership.Board_source_unreadable -> board_source_withheld
-  | Readership.Event_source_undecodable -> "Retained event source unavailable"
-
 let capture ~base_path ~keepers_dir ~keeper_name =
   let before = execution_basis ~base_path ~keeper_name in
   let failures = ref [] in
+  let withheld_reasons = ref [] in
   let reader = Readership.reader ~base_path ~keeper_name in
   let events = match Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name with
     | Ok selections -> selections
       |> List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
         let shown = Readership.can_project reader selection.source in
-        if not shown then failures := board_source_withheld :: !failures;
+        if not shown then withheld_reasons := board_source_withheld :: !withheld_reasons;
         shown)
       |> List.map Context.source_of_event
     | Error detail -> failures := ("events: " ^ detail) :: !failures; [] in
@@ -48,7 +45,13 @@ let capture ~base_path ~keepers_dir ~keeper_name =
     | Ok snapshot ->
       Option.map (fun (snapshot : Context.snapshot) ->
         let shown, withheld = Readership.shown reader snapshot in
-        List.iter (fun reason -> failures := withheld_failure reason :: !failures) withheld;
+        List.iter
+          (function
+            | Readership.Board_source_unreadable ->
+              withheld_reasons := board_source_withheld :: !withheld_reasons
+            | Readership.Event_source_undecodable ->
+              failures := "Retained event source unavailable" :: !failures)
+          withheld;
         shown) snapshot
     | Error detail -> failures := ("previous context: " ^ detail) :: !failures; None in
   let _, reversed_sources = List.fold_left (fun (seen, acc) (source : Context.source) ->
@@ -56,5 +59,9 @@ let capture ~base_path ~keepers_dir ~keeper_name =
     else References.add source.reference seen, source :: acc)
     (References.empty, []) (events @ chats) in
   let after = execution_basis ~base_path ~keeper_name in
-  {Context.sources = List.rev reversed_sources; previous; unavailable = List.rev !failures;
-   execution_basis = (if before = after then after else None)}
+  { Context.sources = List.rev reversed_sources
+  ; previous
+  ; unavailable = List.rev !failures
+  ; withheld = List.rev !withheld_reasons
+  ; execution_basis = (if before = after then after else None)
+  }

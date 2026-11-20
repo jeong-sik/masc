@@ -219,7 +219,7 @@ let test_prefit_real_continuity ~base_path () =
   let context_before = Fs_compat.load_file_opt context_path |> some in
   let working_context : Context.input =
     {sources=[queued_source]; previous=Some previous_context; unavailable=[];
-     execution_basis=Some "pending-execution"} in
+     withheld=[]; execution_basis=Some "pending-execution"} in
   let source = List.init 4 (fun index -> Agent_core.Types.user_msg
     (string_of_int index ^ String.make 2000 'a')) in
   let pending =

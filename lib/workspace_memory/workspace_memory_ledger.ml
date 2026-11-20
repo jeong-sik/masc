@@ -55,11 +55,50 @@ type t =
   ; dispositions : disposition Fact_map.t
   }
 
+type corroboration_stage =
+  | Observed
+  | Consolidated
+  | Crystallized
+
+let corroboration_stage_to_string = function
+  | Observed -> "observed"
+  | Consolidated -> "consolidated"
+  | Crystallized -> "crystallized"
+
+let stage_rank = function
+  | Observed -> 0
+  | Consolidated -> 1
+  | Crystallized -> 2
+
+type claim_provenance =
+  { claim_id : string
+  ; claim : string
+  ; stage : corroboration_stage
+  ; supporting_keepers : string list
+  ; support_count : int
+  ; has_source_bound : bool
+  }
+
+type provenance_change =
+  { provenance : claim_provenance
+  ; prior_stage : corroboration_stage
+  ; preserved_stage : corroboration_stage
+  ; prior_support_count : int
+  ; vanished_keepers : string list
+  }
+
 type reconciliation =
   { ledger : t
   ; current_facts : pending_fact list
   ; new_facts : pending_fact list
   ; vanished : fact_ref list
+  }
+
+type detailed_reconciliation =
+  { reconciliation : reconciliation
+  ; retracted_claims : string list
+  ; shrank_claims : provenance_change list
+  ; dissolved_conflicts : string list
   }
 
 let empty =
@@ -68,6 +107,57 @@ let empty =
 let claims t = String_map.bindings t.claims
 let conflicts t = String_map.bindings t.conflicts
 let dispositions t = Fact_map.bindings t.dispositions
+
+let fact_keeper_id = function
+  | Ordinary { keeper_id; _ } | Source_bound { keeper_id; _ } -> keeper_id
+
+let fact_is_source_bound = function
+  | Ordinary _ -> false
+  | Source_bound _ -> true
+
+let stage_of ~supporting_keepers ~has_source_bound =
+  match supporting_keepers with
+  | [] | [ _ ] -> Observed
+  | _ :: _ :: _ -> if has_source_bound then Crystallized else Consolidated
+
+let claim_provenance_table t =
+  let grouped =
+    Fact_map.fold
+      (fun fact disposition acc ->
+         match disposition with
+         | Claim_member id ->
+           let keeper = fact_keeper_id fact in
+           let sb = fact_is_source_bound fact in
+           let prev_keepers, prev_count, prev_sb =
+             match String_map.find_opt id acc with
+             | Some entry -> entry
+             | None -> String_set.empty, 0, false
+           in
+           String_map.add
+             id
+             (String_set.add keeper prev_keepers, prev_count + 1, prev_sb || sb)
+             acc
+         | Conflict_member _ | Excluded _ -> acc)
+      t.dispositions
+      String_map.empty
+  in
+  String_map.mapi
+    (fun claim_id claim ->
+       let keepers_set, support_count, has_source_bound =
+         match String_map.find_opt claim_id grouped with
+         | Some entry -> entry
+         | None -> String_set.empty, 0, false
+       in
+       let supporting_keepers = String_set.elements keepers_set in
+       let stage = stage_of ~supporting_keepers ~has_source_bound in
+       { claim_id; claim; stage; supporting_keepers; support_count; has_source_bound })
+    t.claims
+
+let claim_provenance t ~claim_id =
+  String_map.find_opt claim_id (claim_provenance_table t)
+
+let all_claim_provenance t =
+  String_map.bindings (claim_provenance_table t) |> List.map snd
 
 let named_entries dispositions =
   Fact_map.fold
@@ -79,36 +169,59 @@ let named_entries dispositions =
     dispositions
     (String_set.empty, String_set.empty)
 
-(* A claim or conflict text is written once, from the facts that made it,
-   and never rewritten. After one of those facts goes, the text can keep a
-   sentence no remaining member supports. So an entry that loses any member
-   goes with it, and its other members lose their disposition: the next
-   classification judges them again as new facts. *)
-let remove facts t =
-  let lost_claims, lost_conflicts =
+(* Remove only the vanished facts themselves. A multi-Keeper shared claim
+   survives as long as at least one corroborating member remains, so updating
+   or dropping one Keeper's fact shrinks provenance without wiping out
+   surviving Keepers' truth; a claim is retracted only when zero supporting
+   members remain. A conflict that loses a member and drops below two
+   remaining members dissolves so a lone surviving fact re-enters [new_facts]. *)
+let remove_with_details facts t =
+  let lost_conflicts =
     List.fold_left
-      (fun (claims, conflicts) fact ->
+      (fun conflicts fact ->
          match Fact_map.find_opt fact t.dispositions with
-         | Some (Claim_member id) -> String_set.add id claims, conflicts
-         | Some (Conflict_member id) -> claims, String_set.add id conflicts
-         | Some (Excluded _) | None -> claims, conflicts)
-      (String_set.empty, String_set.empty)
+         | Some (Conflict_member id) -> String_set.add id conflicts
+         | Some (Claim_member _ | Excluded _) | None -> conflicts)
+      String_set.empty
       facts
   in
-  let kept _ = function
-    | Claim_member id -> not (String_set.mem id lost_claims)
-    | Conflict_member id -> not (String_set.mem id lost_conflicts)
-    | Excluded _ -> true
+  let dispositions_after_vanished =
+    List.fold_left (fun map fact -> Fact_map.remove fact map) t.dispositions facts
+  in
+  let conflict_member_counts =
+    Fact_map.fold
+      (fun _ disposition counts ->
+         match disposition with
+         | Conflict_member id ->
+           let prev = Option.value ~default:0 (String_map.find_opt id counts) in
+           String_map.add id (prev + 1) counts
+         | Claim_member _ | Excluded _ -> counts)
+      dispositions_after_vanished
+      String_map.empty
+  in
+  let dissolved_conflicts =
+    String_set.filter
+      (fun id ->
+         match String_map.find_opt id conflict_member_counts with
+         | None | Some 0 | Some 1 -> true
+         | Some _ -> false)
+      lost_conflicts
   in
   let dispositions =
-    List.fold_left (fun map fact -> Fact_map.remove fact map) t.dispositions facts
-    |> Fact_map.filter kept
+    Fact_map.filter
+      (fun _ -> function
+         | Conflict_member id -> not (String_set.mem id dissolved_conflicts)
+         | Claim_member _ | Excluded _ -> true)
+      dispositions_after_vanished
   in
   let named_claims, named_conflicts = named_entries dispositions in
-  { claims = String_map.filter (fun id _ -> String_set.mem id named_claims) t.claims
-  ; conflicts = String_map.filter (fun id _ -> String_set.mem id named_conflicts) t.conflicts
-  ; dispositions
-  }
+  let next_ledger =
+    { claims = String_map.filter (fun id _ -> String_set.mem id named_claims) t.claims
+    ; conflicts = String_map.filter (fun id _ -> String_set.mem id named_conflicts) t.conflicts
+    ; dispositions
+    }
+  in
+  next_ledger, String_set.elements dissolved_conflicts
 
 (* Codec *)
 
@@ -318,6 +431,9 @@ let path ~base_path = Filename.concat (directory ~base_path) "ledger.json"
 
 let io f =
   try f () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | File_lock_eio.Flock_timeout { caller; path; attempts } ->
+    Error (Printf.sprintf "%s: flock timeout on %s after %d attempts" caller path attempts)
   | Unix.Unix_error (error, fn, arg) ->
     Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
   | Sys_error detail -> Error detail
@@ -329,34 +445,73 @@ let require_base ~base_path =
   if Sys.is_directory base_path then Ok ()
   else Error (base_path ^ ": workspace base is not a directory")
 
+let load_unlocked ~base_path =
+  let path = path ~base_path in
+  match Fs_compat.load_file_opt path with
+  | None -> Ok empty
+  | Some text ->
+    let* json =
+      try Ok (Yojson.Safe.from_string text) with
+      | Yojson.Json_error detail -> Error (path ^ ": " ^ detail)
+    in
+    of_json json |> Result.map_error (fun detail -> path ^ ": " ^ detail)
+
 let load ~base_path =
   io (fun () ->
     let* () = require_base ~base_path in
-    let path = path ~base_path in
-    match Fs_compat.load_file_opt path with
-    | None -> Ok empty
-    | Some text ->
-      let* json =
-        try Ok (Yojson.Safe.from_string text) with
-        | Yojson.Json_error detail -> Error (path ^ ": " ^ detail)
-      in
-      of_json json |> Result.map_error (fun detail -> path ^ ": " ^ detail))
+    if Sys.file_exists (directory ~base_path) then
+      File_lock_eio.with_lock (path ~base_path) (fun () -> load_unlocked ~base_path)
+    else
+      Ok empty)
+
+let save_unlocked ~base_path t =
+  match
+    Fs_compat.save_file_atomic_strict_staged
+      (path ~base_path)
+      (Yojson.Safe.to_string (to_json t))
+  with
+  | Ok () -> Ok ()
+  | Error failure ->
+    (match failure.exception_ with
+     | Eio.Cancel.Cancelled _ as exn ->
+       Printexc.raise_with_backtrace exn failure.backtrace
+     | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure))
 
 let save ~base_path t =
   io (fun () ->
     let* () = require_base ~base_path in
     Fs_compat.mkdir_p (directory ~base_path);
     let changed_directory = Fs_compat.realpath_lenient (directory ~base_path) in
+    let attempted_write = ref false in
     Fun.protect
-      ~finally:(fun () -> Workspace_memory_changed.written ~directory:changed_directory)
+      ~finally:(fun () ->
+        if !attempted_write then Workspace_memory_changed.written ~directory:changed_directory)
       (fun () ->
-    match Fs_compat.save_file_atomic_strict_staged (path ~base_path)
-            (Yojson.Safe.to_string (to_json t)) with
-    | Ok () -> Ok ()
-    | Error failure ->
-      (match failure.exception_ with
-       | Eio.Cancel.Cancelled _ as exn -> Printexc.raise_with_backtrace exn failure.backtrace
-       | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure))))
+         File_lock_eio.with_lock (path ~base_path) (fun () ->
+           attempted_write := true;
+           save_unlocked ~base_path t)))
+
+let update ~base_path f =
+  io (fun () ->
+    let* () = require_base ~base_path in
+    Fs_compat.mkdir_p (directory ~base_path);
+    let changed_directory = Fs_compat.realpath_lenient (directory ~base_path) in
+    let attempted_write = ref false in
+    Fun.protect
+      ~finally:(fun () ->
+        if !attempted_write then Workspace_memory_changed.written ~directory:changed_directory)
+      (fun () ->
+         File_lock_eio.with_lock (path ~base_path) (fun () ->
+           let* current = load_unlocked ~base_path in
+           let* next = f current in
+           let ledger_path = path ~base_path in
+           if Sys.file_exists ledger_path && String.equal (sha256 current) (sha256 next) then
+             Ok next
+           else begin
+             attempted_write := true;
+             let* () = save_unlocked ~base_path next in
+             Ok next
+           end)))
 
 let briefing_sources ledger =
   let source kind (id, text) : Workspace_memory_briefing.source =
@@ -397,14 +552,13 @@ let check_readable ~base_path =
   | Unix.Unix_error (error, fn, arg) ->
     Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
 
-let observe ~base_path =
+let observe_with_template ~resolve_template ~base_path =
   try
       match read_current ~base_path with
        | Error detail -> Unavailable detail
        | Ok ledger ->
          let ledger_sha256 = sha256 ledger in
-         let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
-         let contract = Workspace_memory_briefing.contract ~template:resolution.effective in
+         let contract = Workspace_memory_briefing.contract ~template:(resolve_template ()) in
          let briefing_loaded = Workspace_memory_briefing.load ~directory:(directory ~base_path) in
          let briefing = briefing_loaded
            |> Result.map (Workspace_memory_briefing.observe ~sources:(briefing_sources ledger) ~contract) in
@@ -431,6 +585,15 @@ let observe ~base_path =
      | Error detail -> Unavailable detail)
   | Unix.Unix_error (error, fn, arg) ->
     Unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+
+let observe_with_briefing_template ~briefing_template ~base_path =
+  observe_with_template ~resolve_template:(fun () -> briefing_template) ~base_path
+
+let observe ~base_path =
+  observe_with_template
+    ~resolve_template:(fun () ->
+      (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective)
+    ~base_path
 
 (* Reconciliation *)
 
@@ -479,7 +642,7 @@ let observe_keeper (keeper : Workspace_memory_context.keeper) =
           ; claim = fact.claim }, fact.first_seen)
           snapshot.facts) ) ]
 
-let reconcile t keepers =
+let reconcile_detailed t keepers =
   let stores = List.concat_map observe_keeper keepers in
   let unreadable =
     List.filter_map (fun (key, facts) -> match facts with None -> Some key | Some _ -> None) stores
@@ -510,7 +673,49 @@ let reconcile t keepers =
       []
     |> List.rev
   in
-  let ledger = remove vanished t in
+  let prior_provenance = claim_provenance_table t in
+  let ledger, dissolved_conflicts = remove_with_details vanished t in
+  let next_provenance = claim_provenance_table ledger in
+  let retracted_claims =
+    String_map.bindings prior_provenance
+    |> List.filter_map (fun (claim_id, _) ->
+         if String_map.mem claim_id next_provenance then None else Some claim_id)
+  in
+  let vanished_keepers_by_claim =
+    List.fold_left
+      (fun acc fact ->
+         match Fact_map.find_opt fact t.dispositions with
+         | Some (Claim_member id) ->
+           let prev = Option.value ~default:String_set.empty (String_map.find_opt id acc) in
+           String_map.add id (String_set.add (fact_keeper_id fact) prev) acc
+         | Some (Conflict_member _ | Excluded _) | None -> acc)
+      String_map.empty
+      vanished
+  in
+  let shrank_claims =
+    String_map.bindings next_provenance
+    |> List.filter_map (fun (claim_id, provenance) ->
+         match String_map.find_opt claim_id prior_provenance with
+         | Some prior when provenance.support_count < prior.support_count ->
+           let preserved_stage =
+             if stage_rank prior.stage > stage_rank provenance.stage
+             then prior.stage
+             else provenance.stage
+           in
+           let vanished_keepers =
+             match String_map.find_opt claim_id vanished_keepers_by_claim with
+             | Some keepers -> String_set.elements keepers
+             | None -> []
+           in
+           Some
+             { provenance
+             ; prior_stage = prior.stage
+             ; preserved_stage
+             ; prior_support_count = prior.support_count
+             ; vanished_keepers
+             }
+         | Some _ | None -> None)
+  in
   let new_facts =
     observed
     |> List.filter (fun ((pending : pending_fact), _) -> not (Fact_map.mem pending.fact ledger.dispositions))
@@ -520,7 +725,13 @@ let reconcile t keepers =
          | order -> order)
     |> List.map fst
   in
-  { ledger; current_facts; new_facts; vanished }
+  { reconciliation = { ledger; current_facts; new_facts; vanished }
+  ; retracted_claims
+  ; shrank_claims
+  ; dissolved_conflicts
+  }
+
+let reconcile t keepers = (reconcile_detailed t keepers).reconciliation
 
 type ordinary_absence_counts = {
   facts : int;

@@ -10,6 +10,52 @@
     \[public_tool_help_schemas\] (delegate to {!Config.visible_tool_schemas})
     stay private — none have external callers. *)
 
+type resource_target =
+  | Tool_help_index
+  | Tool_help of string
+  | Status_markdown
+  | Status_json
+  | Tasks_markdown
+  | Tasks_json
+  | Who_markdown
+  | Who_json
+  | Messages_markdown
+  | Messages_json
+  | Events_markdown
+  | Events_json
+  | Wiki_index_markdown
+  | Wiki_index_json
+  | Wiki_page_markdown of string
+  | Wiki_page_json of string
+  | World_memory_claims
+  | World_memory_log
+  | Unknown of string
+
+val parse_resource_target : string -> resource_target
+(** Parse the [resource_id] returned by {!Mcp_server.parse_masc_resource_uri}
+    into a closed resource target variant. *)
+
+val world_memory_claims_uri : string
+(** Canonical URI for {!World_memory_claims} ([masc://world-memory/claims]). *)
+
+val world_memory_log_uri : string
+(** Canonical URI for {!World_memory_log} ([masc://world-memory/log]). *)
+
+val register_session_resource_notifier : (uri:string -> unit) -> unit
+(** Install the legacy session-scoped [notifications/resources/updated]
+    callback from {!Mcp_server_eio_protocol}. *)
+
+val notify_resource_updated : string list -> unit
+(** Emit [notifications/resources/updated] for each URI in the list to all
+    subscribed 2026-07-28 {!Mcp_subscriptions} streams and any registered
+    legacy session subscribers. Must be called from an Eio fiber (or outside Eio
+    before {!Eio_guard.enable}), never inside a raw systhread while Eio is
+    active. *)
+
+val notify_world_memory_updated : unit -> unit
+(** Emit [notifications/resources/updated] on {!world_memory_claims_uri} and
+    {!world_memory_log_uri}. *)
+
 val handle_read_resource_eio :
   Mcp_server.server_state ->
   Yojson.Safe.t ->

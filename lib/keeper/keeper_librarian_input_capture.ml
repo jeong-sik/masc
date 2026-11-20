@@ -163,11 +163,13 @@ let snapshot_of_json json = let* f=fields ["generation";"revision";"execution_ba
   let+ pockets=list pocket_of_json (value "pockets" f) in ({C.generation;revision;execution_basis;sources;pockets}:C.snapshot)
 let context_json (context:C.input) = `Assoc ["sources",`List (List.map source_json context.sources);
   "previous",optional snapshot_json context.previous;"unavailable",json_strings context.unavailable;
+  "withheld",json_strings context.withheld;
   "execution_basis",optional (fun s -> `String s) context.execution_basis]
-let context_of_json json = let* f=fields ["sources";"previous";"unavailable";"execution_basis"] json in
+let context_of_json json = let* f=fields ["sources";"previous";"unavailable";"withheld";"execution_basis"] json in
   let* sources=list source_of_json (value "sources" f) in let* previous=option snapshot_of_json (value "previous" f) in
-  let* unavailable=strings (value "unavailable" f) in let+ execution_basis=option text (value "execution_basis" f) in
-  ({C.sources;previous;unavailable;execution_basis}:C.input)
+  let* unavailable=strings (value "unavailable" f) in let* withheld=strings (value "withheld" f) in
+  let+ execution_basis=option text (value "execution_basis" f) in
+  ({C.sources;previous;unavailable;withheld;execution_basis}:C.input)
 
 let historical_source_of_json json = let* kind=tag json in match kind with
   | "atoms" -> let* f=fields ["kind";"trace_id";"start_atom";"end_atom"] json in

@@ -243,8 +243,28 @@ let resource_of_entry (entry : Mcp_surface_toml.resource_entry) =
   make_resource ~uri:entry.uri ~name:entry.name ~title:entry.title
     ~description:entry.description ~mime_type:entry.mime_type ()
 
+let world_memory_resources : mcp_resource list =
+  [ make_resource
+      ~uri:"masc://world-memory/claims"
+      ~name:"World Memory Claims"
+      ~title:"World Memory Claims"
+      ~description:
+        "Current workspace memory ledger claims, conflicts, corroboration \
+         stages, and synthesized briefing snapshot"
+      ~mime_type:"application/json"
+      ()
+  ; make_resource
+      ~uri:"masc://world-memory/log"
+      ~name:"World Memory Log"
+      ~title:"World Memory Log"
+      ~description:
+        "Committed shared workspace memory two-phase log entries"
+      ~mime_type:"application/json"
+      ()
+  ]
+
 let resources : mcp_resource list =
-  List.map resource_of_entry Mcp_surface_toml.resources
+  List.map resource_of_entry Mcp_surface_toml.resources @ world_memory_resources
 
 let resource_template_of_entry (entry : Mcp_surface_toml.template_entry) =
   make_resource_template ~uri_template:entry.uri_template ~name:entry.name

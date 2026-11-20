@@ -479,11 +479,7 @@ val read_classified :
 (** Non-mutating classified read. Pending publication is [Io_unreadable], never
     a decode rejection or an authoritative target. Both receipt checks bracket
     snapshot acquisition; use [recover_publication] outside locks to resume it.
-    Other failure modes remain variants instead of flattened messages. Callers that must route a
-    decode rejection into the write-path quarantine (the librarian durable
-    consumer) use this so an undecodable snapshot reaches
-    [update_locked_with_error] and is moved aside, instead of being skipped
-    forever because no writer ran. *)
+    Other failure modes remain variants instead of flattened messages. *)
 
 val read_with_snapshot_sha256 :
   keepers_dir:string -> keeper_id:string -> ((t * string) option, string) result
@@ -1009,14 +1005,11 @@ val replace
     still equals [expected_revision]. Concurrently changed state fails closed
     and is not overwritten.
 
-    Existing state this build cannot decode is moved aside and the write
-    continues from fresh state, with the decoder's own account recorded as a
-    [Journal_quarantined] line. Every writer reads before it writes, so
-    refusing to write over an undecodable file left the keeper's memory both
-    unreadable and unwritable for good. The moved-aside bytes are kept, never
-    deleted. An [expected_revision] of [Some _] still fails after a
-    quarantine, because a caller cannot have read a revision from a file that
-    does not decode.
+    Existing state this build cannot decode fails closed and is preserved
+    untouched on disk until explicit operator-approved boot quarantine via
+    {!move_aside_for_keepers_dir}. After {!move_aside_for_keepers_dir} moves
+    the rejected bytes aside and records a [Journal_quarantined] row, writes
+    restart at revision 1.
 
     No pass calls [replace]; its commits are not counted in the Memory change
     metrics.

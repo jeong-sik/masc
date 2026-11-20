@@ -231,27 +231,22 @@ let update_locked_with_output
               with
               | Ok snapshot -> Ok (Some snapshot, Some content)
               | Error rejection ->
-                (* Every writer reads before it writes, so a snapshot this
-                   build cannot decode is durable state no producer can leave:
-                   one undecodable file wedged eight live keepers for good on
-                   2026-09-01. #32239 declared a hard cut and left the old
-                   files in place, and that is the half that was missing — a
-                   hard cut is finished when the old state is gone.
-
-                   The bytes move aside instead of being overwritten by the
-                   commit below, because recovering by destroying the only copy
-                   of the rejected state is not recovery. *)
-                let* rejected_path =
-                  quarantine_snapshot_and_receipt
-                    ~keepers_dir ~keeper_id ~snapshot_path ~now ~rejection
-                  |> Result.map_error store_error
-                in
+                (* Never silently drop or auto-quarantine a snapshot whose bytes
+                   failed decoding during a normal write: surface the decode
+                   failure explicitly and preserve the existing snapshot bytes on
+                   disk until explicit operator/boot reconciliation moves them
+                   aside. *)
                 Log.Keeper.warn
                   ~keeper_name:keeper_id
-                  "memory os snapshot quarantined rejected_path=%s rejection=%s"
-                  rejected_path
+                  "memory os snapshot decode failed path=%s rejection=%s"
+                  snapshot_path
                   rejection;
-                Ok (None, None))
+                Error
+                  (store_error
+                     (Printf.sprintf
+                        "current Memory OS snapshot decode failed path=%s: %s"
+                        snapshot_path
+                        rejection)))
          in
          let snapshot =
            match previous, snapshot_content with

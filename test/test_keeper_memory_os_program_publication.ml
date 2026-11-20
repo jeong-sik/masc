@@ -237,6 +237,18 @@ let test_pending_boundary_conflict_preserves_stores () = fixture @@ fun keepers_
 let test_quarantine_and_empty_incarnation () =
   fixture (fun keepers_dir anchor ->
     Fs_compat.save_file (snapshot_path ~keepers_dir) "{broken snapshot";
+    Current.replace ~keepers_dir ~keeper_id:keeper ~expected_revision:None
+      ~now:20. ~source:{Current.kind=Current.Explicit_write;trace_id="explicit-writer"} ~facts:[a] ()
+    |> refused;
+    check string "decode failure preserves snapshot bytes untouched" "{broken snapshot"
+      (Fs_compat.load_file (snapshot_path ~keepers_dir));
+    (match Current.inspect_for_boot ~keepers_dir ~keeper_id:keeper with
+     | Current.Boot_undecodable { rejection; snapshot_sha256 } ->
+       Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:keeper ~now:25.
+         ~rejection ~expected_snapshot_sha256:snapshot_sha256 ()
+       |> require |> ignore
+     | Current.Boot_absent | Current.Boot_readable | Current.Boot_unreadable _ ->
+       fail "expected Boot_undecodable fixture");
     ignore (replace ~keepers_dir [a] : Current.t);
     publish ~keepers_dir ~anchor (program ()) |> refused);
   with_store (fun keepers_dir ->

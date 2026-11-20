@@ -81,24 +81,72 @@ let list_pages ~base_path =
     raise (Sys_error (operation ^ ": " ^ Unix.error_message error))
 
 (* What the index says about each file: a page gives its title and summary,
-   a file whose header does not read gives the reason. A file that vanishes
-   between the listing and the read is left out. *)
+   a file whose header does not read gives the reason. Reads at most
+   [frontmatter_read_limit] header bytes and caches parsed frontmatter in
+   memory keyed by [(path, mtime, size)]. A file that vanishes between the
+   listing and the read is left out. *)
+let frontmatter_read_limit = 8192
+
+type cached_frontmatter = {
+  mtime : float;
+  size : int;
+  parsed : (frontmatter, frontmatter_error) result;
+}
+
+let frontmatter_cache_mutex = Stdlib.Mutex.create ()
+let frontmatter_cache : (string, cached_frontmatter) Hashtbl.t = Hashtbl.create 64
+
+let invalidate_frontmatter_cache path =
+  Stdlib.Mutex.protect frontmatter_cache_mutex (fun () ->
+    Hashtbl.remove frontmatter_cache path)
+
+let read_frontmatter_cached path =
+  match Unix.stat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    invalidate_frontmatter_cache path;
+    None
+  | exception (Unix.Unix_error _ | Sys_error _) -> None
+  | { Unix.st_mtime = mtime; st_size = size; _ } ->
+    let cached =
+      Stdlib.Mutex.protect frontmatter_cache_mutex (fun () ->
+        match Hashtbl.find_opt frontmatter_cache path with
+        | Some entry when Float.equal entry.mtime mtime && entry.size = size ->
+          Some entry.parsed
+        | Some _ | None -> None)
+    in
+    (match cached with
+     | Some result -> Some result
+     | None ->
+       let len = Int.min (Int.max 0 size) frontmatter_read_limit in
+       (match
+          if len <= 0 then ""
+          else Fs_compat.read_slice ~path ~from:0 ~len
+        with
+        | exception Sys_error _ -> None
+        | slice ->
+          let parsed = parse_frontmatter slice in
+          (match Unix.stat path with
+           | { Unix.st_mtime = mtime2; st_size = size2; _ }
+             when Float.equal mtime mtime2 && size = size2 ->
+             Stdlib.Mutex.protect frontmatter_cache_mutex (fun () ->
+               Hashtbl.replace frontmatter_cache path { mtime; size; parsed })
+           | _ | exception Unix.Unix_error _ -> ());
+          Some parsed))
+
 let index_entries ~base_path =
   list_pages ~base_path
   |> List.filter_map (fun path ->
     let file = Filename.basename path in
-    match In_channel.with_open_text path In_channel.input_all with
-    | exception Sys_error _ -> None
-    | content ->
-      (match parse_frontmatter content with
-       | Ok fm ->
-         Some
-           (Wiki_journal.Page
-              { file; title = (fm.title :> string); summary = (fm.summary :> string) })
-       | Error error ->
-         Some
-           (Wiki_journal.Unreadable
-              { file; reason = frontmatter_error_to_string error })))
+    match read_frontmatter_cached path with
+    | None -> None
+    | Some (Ok fm) ->
+      Some
+        (Wiki_journal.Page
+           { file; title = (fm.title :> string); summary = (fm.summary :> string) })
+    | Some (Error error) ->
+      Some
+        (Wiki_journal.Unreadable
+           { file; reason = frontmatter_error_to_string error }))
 
 let read_index_entries ~base_path =
   match index_entries ~base_path with
@@ -157,11 +205,11 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
        [setlist.md], not [pm-setlist.md], which sorts first. *)
     let topic_lc = String.lowercase_ascii topic in
     let files = list_pages ~base_path:ctx.base_path in
-    let title_matches content =
-      match parse_frontmatter content with
-      | Ok fm ->
+    let title_matches_cached path =
+      match read_frontmatter_cached path with
+      | Some (Ok fm) ->
         String_util.contains_substring (String.lowercase_ascii (fm.title :> string)) topic_lc
-      | Error _ -> false
+      | Some (Error _) | None -> false
     in
     let is_exact_name path =
       let file_lc = String.lowercase_ascii (Filename.basename path) in
@@ -169,31 +217,21 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
     in
     let matched =
       match List.find_opt is_exact_name files with
-      | Some path -> Some (path, None)
+      | Some path -> Some path
       | None ->
-        List.find_map
+        List.find_opt
           (fun path ->
             let base_lc = String.lowercase_ascii (Filename.basename path) in
-            if String_util.contains_substring base_lc topic_lc
-            then Some (path, None)
-            else (
-              match In_channel.with_open_text path In_channel.input_all with
-              | content when title_matches content -> Some (path, Some content)
-              | _ -> None
-              | exception Sys_error _ -> None))
+            String_util.contains_substring base_lc topic_lc || title_matches_cached path)
           files
     in
     match matched with
     | None ->
         workflow_err ~tool_name ~start_time
           (sprintf "No page matching '%s'" topic)
-    | Some (path, cached) ->
+    | Some path ->
         try
-          let content =
-            match cached with
-            | Some c -> c
-            | None -> In_channel.with_open_text path In_channel.input_all
-          in
+          let content = In_channel.with_open_text path In_channel.input_all in
           let heading =
             match parse_frontmatter content with
             | Ok _ -> Filename.basename path
@@ -252,6 +290,7 @@ let write_page ~tool_name ~start_time ctx ~path ~content ~action ~revision ~page
     runtime_err ~tool_name ~start_time
       (sprintf "Write error: %s" (Fs_compat.atomic_replace_failure_to_string failure))
   | Ok () ->
+    invalidate_frontmatter_cache path;
     let wiki_root = wiki_root ~base_path:ctx.base_path in
     let line =
       Wiki_journal.log_line

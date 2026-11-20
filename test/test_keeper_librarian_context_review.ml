@@ -84,7 +84,7 @@ let test_case ~base_path ~registry scenario () =
   let memory_before = Fs_compat.load_file memory_path in
   let working_context : Context.input =
     {sources = [sc]; previous = Some previous; unavailable = ["prior inputs outside this selected batch"];
-     execution_basis = Some "current-progress"} in
+     withheld = []; execution_basis = Some "current-progress"} in
   let input : Keeper_librarian.input =
     {turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
      historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
@@ -203,18 +203,22 @@ let test_case ~base_path ~registry scenario () =
         (Keeper_chat_operation.to_json original) (Keeper_chat_operation.to_json current)
     | None -> Alcotest.fail "original queued chat disappeared") [a; b; c];
   let after = Context.read ~keepers_dir ~keeper_id |> require |> Option.get in
-  if scenario = Rejected || scenario = Cancel_review then
+  let review_withheld = match scenario with
+    | Rejected | Cancel_review | Missing | Invalid | Http_failure -> true
+    | Faithful | Uncertain | Excluded | Stale | Cancel_absorb | Context_only | Conversation_queue -> false
+  in
+  if review_withheld then
     Alcotest.(check string) "unpublished batch leaves prior Context byte-for-byte unchanged"
       prior_bytes (Fs_compat.load_file context_path)
   else if scenario = Stale then
     Alcotest.(check bool) "stale proposal cannot overwrite concurrent Context" true
       (Some after = !changed_snapshot)
   else (
-    Alcotest.(check int) "accepted or unassessed batch commits once" (previous.revision + 1) after.revision;
+    Alcotest.(check int) "accepted or skipped batch commits once" (previous.revision + 1) after.revision;
     Alcotest.(check bool) "new source enters the organized snapshot" true
       (List.exists (fun (s : Context.source) -> s.reference = sc.reference) after.sources));
   Alcotest.(check bool) "the caller observes exactly the version this pass wrote" true
-    (!context_commits = (if scenario = Rejected || scenario = Cancel_review || scenario = Stale
+    (!context_commits = (if review_withheld || scenario = Stale
       then [] else [Context.version after]));
   if scenario = Cancel_absorb || scenario = Cancel_review || scenario = Context_only then
     Alcotest.(check string) "Context commit is independent of uncommitted Memory"
@@ -262,7 +266,10 @@ let test_case ~base_path ~registry scenario () =
     check_json "no absorb pass was run" `Null (member "absorb_gate" output));
   let review = member "context_review" output and write = member "context_write" output in
   Alcotest.(check string) "publication outcome is explicit"
-    (if scenario = Cancel_review then "not_attempted" else if scenario = Rejected then "withheld" else if scenario = Stale then "failed" else "committed")
+    (if scenario = Cancel_review then "not_attempted"
+     else if scenario = Rejected || scenario = Missing || scenario = Invalid || scenario = Http_failure then "withheld"
+     else if scenario = Stale then "failed"
+     else "committed")
     (member "status" write |> text);
   Alcotest.(check string) "review failures never claim preservation"
     (match scenario with Cancel_review -> "incomplete" | Excluded -> "skipped" | Missing | Invalid -> "invalid_answer"

@@ -278,25 +278,52 @@ let path ~directory = Filename.concat directory "briefing.json"
 let io f =
   try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | File_lock_eio.Flock_timeout { caller; path; attempts } ->
+    Error (Printf.sprintf "%s: flock timeout on %s after %d attempts" caller path attempts)
   | Unix.Unix_error (error, fn, arg) -> Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
   | Sys_error detail -> Error detail
   | Eio.Io _ as exn -> Error (Printexc.to_string exn)
-let load ~directory = io (fun () ->
+let load_unlocked ~directory =
   match Fs_compat.load_file_opt (path ~directory) with
   | None -> Ok empty
   | Some text ->
     let* json = try Ok (Yojson.Safe.from_string text) with
       | Yojson.Json_error detail -> Error detail in
-    of_json json)
-let save ~directory t = io (fun () ->
-  Fs_compat.mkdir_p directory;
-  let changed_directory = Fs_compat.realpath_lenient directory in
-  Fun.protect
-    ~finally:(fun () -> Workspace_memory_changed.written ~directory:changed_directory)
-    (fun () ->
+    of_json json
+let load ~directory = io (fun () ->
+  if Sys.file_exists directory then
+    File_lock_eio.with_lock (path ~directory) (fun () -> load_unlocked ~directory)
+  else
+    Ok empty)
+let save_unlocked ~directory t =
   match Fs_compat.save_file_atomic_strict_staged (path ~directory) (Yojson.Safe.to_string (to_json t)) with
   | Ok () -> Ok ()
   | Error failure ->
     match failure.exception_ with
     | Eio.Cancel.Cancelled _ as exn -> Printexc.raise_with_backtrace exn failure.backtrace
-    | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)))
+    | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)
+let save ~directory t = io (fun () ->
+  Fs_compat.mkdir_p directory;
+  let changed_directory = Fs_compat.realpath_lenient directory in
+  Fun.protect
+    ~finally:(fun () -> Workspace_memory_changed.written ~directory:changed_directory)
+    (fun () -> File_lock_eio.with_lock (path ~directory) (fun () -> save_unlocked ~directory t)))
+let update ~directory f = io (fun () ->
+  Fs_compat.mkdir_p directory;
+  let changed_directory = Fs_compat.realpath_lenient directory in
+  let attempted_write = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if !attempted_write then Workspace_memory_changed.written ~directory:changed_directory)
+    (fun () ->
+       File_lock_eio.with_lock (path ~directory) (fun () ->
+         let* current = load_unlocked ~directory in
+         let* next = f current in
+         let briefing_path = path ~directory in
+         if Sys.file_exists briefing_path && Yojson.Safe.equal (to_json current) (to_json next) then
+           Ok next
+         else begin
+           attempted_write := true;
+           let* () = save_unlocked ~directory next in
+           Ok next
+         end)))

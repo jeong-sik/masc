@@ -63,7 +63,8 @@ let input () : L.input =
         first_message=2;after_message=2;first_tool_observation=2;after_tool_observation=2}];
     current=Some {L.facts=[fact "Second in lexical order";fact "First in lexical order"]};
     working_context={C.sources=[source "current-b";source "current-a"];previous=Some prior;
-      unavailable=["source unavailable";"another source unavailable"];execution_basis=Some "current-progress"};
+      unavailable=["source unavailable";"another source unavailable"];
+      withheld=["board source withheld"];execution_basis=Some "current-progress"};
     messages=List.map (fun role -> { origin = Llm_provider.Types.Conversation; T.role;content=blocks;name=Some "original-name";
       tool_call_id=Some "original-call";metadata}) [T.User;T.Assistant;T.Tool;T.System];
     tool_observations=[{L.tool_name="browser_read";outcome=L.Succeeded};

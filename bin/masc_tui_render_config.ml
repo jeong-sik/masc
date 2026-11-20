@@ -500,8 +500,9 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                | Some entry ->
                    List.concat_map wrap
                      [Printf.sprintf
-                        (if state.ui_language = Lang_ko then "⊘ 적용 안 됨 · 저장된 재정의 %d바이트 보존"
-                         else "⊘ Not applied · saved override of %d bytes retained") entry.hbo_bytes;
+                        (if state.ui_language = Lang_ko then "⊘ 적용 안 됨 · 저장된 재정의 %s바이트 보존"
+                         else "⊘ Not applied · saved override of %s bytes retained")
+                        (Masc_tui_value.Count.grouped entry.hbo_bytes);
                       entry.hbo_reason;
                       ui_text state ~ko:"해당 변수 제거 후 같은 키로 재저장 필요"
                         ~en:"Remove that variable and save the same key again"]

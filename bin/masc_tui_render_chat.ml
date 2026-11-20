@@ -1377,10 +1377,15 @@ let keeper_message_tool_activity_details state ~keeper_name
               let parts =
                 List.filter_map Fun.id
                   [ Option.map
-                      (Printf.sprintf (if ko then "%d바이트" else "%d bytes"))
+                      (fun n ->
+                        Printf.sprintf (if ko then "%s바이트" else "%s bytes")
+                          (Masc_tui_value.Count.grouped n))
                       result_bytes
                   ; Option.map
-                      (Printf.sprintf (if ko then "%d바이트까지 전달" else "served through %d bytes"))
+                      (fun n ->
+                        Printf.sprintf
+                          (if ko then "%s바이트까지 전달" else "served through %s bytes")
+                          (Masc_tui_value.Count.grouped n))
                       truncated_to
                   ]
               in

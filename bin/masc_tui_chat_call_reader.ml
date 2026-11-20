@@ -100,9 +100,10 @@ let output_sections ~ko (call:Masc.Tui_decode.keeper_call) =
       @ printed @ [section (say ~ko "보존된 원본 결과" "Retained original result") body.content;
         section (say ~ko "원본 출처" "Original source")
           (Printf.sprintf
-             (if ko then "투영 %d바이트 · 기록 %d바이트 · sha256 %s"
-              else "%d projected bytes · %d recorded bytes · sha256 %s")
-             (String.length body.content) body.recorded_bytes body.sha256)]
+             (if ko then "투영 %s바이트 · 기록 %s바이트 · sha256 %s"
+              else "%s projected bytes · %s recorded bytes · sha256 %s")
+             (Masc_tui_value.Count.grouped (String.length body.content))
+             (Masc_tui_value.Count.grouped body.recorded_bytes) body.sha256)]
     | Original_not_read -> preview ()
     | (Original_pending | Original_unavailable _ | Original_failed _) as source ->
         preview () @ (match original_failure ~ko source with
@@ -110,9 +111,9 @@ let output_sections ~ko (call:Masc.Tui_decode.keeper_call) =
   output @ (match call.kc_truncated_to with None -> [] | Some bytes ->
     [section (say ~ko "원장 미리보기 제한" "Ledger preview limit")
        (Printf.sprintf
-          (if ko then "원장 미리보기는 %d바이트로 잘려 있으며, 원본 출처는 별도로 읽습니다."
-           else "The ledger preview declares truncation to %d bytes; the original source is read separately.")
-          bytes)])
+          (if ko then "원장 미리보기는 %s바이트로 잘려 있으며, 원본 출처는 별도로 읽습니다."
+           else "The ledger preview declares truncation to %s bytes; the original source is read separately.")
+          (Masc_tui_value.Count.grouped bytes))])
 let result_document t =
   let ko = t.ko in
   match selected t with

@@ -456,20 +456,17 @@ type carried_start_front =
           (RFC-librarian-lifecycle §4.10). No working state is
           carried; the atoms between a Librarian point and the range wait for
           the Librarian. *)
-  | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
-      (** The Librarian absorbed this history through [absorbed_through],
-          the end of the completed turn on boundary-log row [boundary_line],
-          and saved what the keeper was in the middle of. The range starts there
-          and carries that working state in place of the atoms it summarises —
-          the front the Agent Core lane already takes
-          ([Keeper_carried_front.Librarian_snapshot]). [first_atom] is that
-          position clamped to the newest atom, so a range that the Librarian
-          read to the end still carries the turn it answers; the two differ
-          only then. *)
+  | Librarian_working_state of { end_atom : int }
+      (** The Memory writer read this history through [end_atom] and
+          committed what the keeper was in the middle of. The range starts
+          there and carries that working state in place of the atoms before
+          it. [first_atom] is that position clamped to the newest atom, so a
+          range the writer read to the end still carries the turn it
+          answers; the two differ only then. *)
   | Librarian_progress of { end_atom : int }
-      (** No working state fits, and the Librarian read this history through
-          [end_atom]: the range starts there and nothing is carried for the
-          atoms before it, which are in the keeper's memory
+      (** The Memory writer read this history through [end_atom] and no
+          working state goes: the range starts there and nothing is carried
+          for the atoms before it, which are in the keeper's memory
           ([Keeper_carried_front.Librarian_progress] on the Agent Core lane).
           [first_atom] is that position clamped to the newest atom. *)
 
@@ -485,40 +482,14 @@ type carried_start =
   ; front : carried_start_front
   ; accepted_front : Keeper_carried_front.seed option
       (** A validated response-observed seed at or past the lane's own cut.
-          Retained when a Librarian snapshot wins so its accepted empty range
+          Retained when the writer's read end wins so its accepted empty range
           remains distinguishable from a nonempty range cut down to zero. *)
   }
-
-(** Where the turn's one continuity choice puts the range, as a position in
-    the messages a lane is about to send
-    ({!Keeper_turn_driver_try_provider.librarian_position}). The choice is
-    made once per turn for every lane
-    ({!Keeper_turn_driver_try_provider.continuity_for_request}); this lane
-    only applies it. A position the messages no longer hold is not a value
-    of this type but an error from the reader ({!librarian_front_reader}),
-    and the lane refuses the request with it before any seed is weighed. *)
-type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
 val project_source :
   Keeper_history_projection.t option -> Keeper_history_projection.t
 (** Apply the caller's explicit source projection, preserving its errors.
     Without one the messages go as they are. *)
-
-type librarian_front_reader =
-  Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
-(** Reads the turn's choice as a position in exactly the messages a lane is
-    about to cut ({!Keeper_turn_driver_try_provider.librarian_position}).
-    [Error] when those messages no longer hold what the choice covered; the
-    lane refuses the request with it, as the Agent Core lane refuses its
-    own. *)
-
-val read_librarian_front
-  :  librarian_front_reader option
-  -> Agent_core.Types.message list
-  -> (librarian_position, Agent_core.Error.t) result
-(** A lane's optional reader applied to its messages, before the range is
-    cut. A lane handed no reader has
-    {!Keeper_turn_driver_try_provider.No_position}. *)
 
 val carried_start_front_to_string : carried_start_front -> string
 
@@ -535,17 +506,17 @@ val continuity_observation_input
   -> Keeper_continuity_observation.input
 (** What the Memory screen records for a request this lane composed
     ({!Keeper_continuity_observation}), in the words the Agent Core lane
-    records: [Summarized] when a working state named the front, [Absorbed]
-    when the read position did, [Without_snapshot] when the turn's choice
-    was no absorbed point, and [Not_applied] when the turn made no choice
-    (no trace, or a recovery view) or its choice sat behind the seed or the
-    lane's own cut and so was not applied to this request. *)
+    records: [Absorbed] when the writer's read end named the front, with or
+    without its working state, [Without_snapshot] when the turn has no read
+    end, and [Not_applied] when the turn read none (no trace, or a recovery
+    view) or its read end sat behind the seed or the lane's own cut and so
+    was not applied to this request. *)
 
 val carried_start_range
   :  keeper_name:string
   -> runtime_id:string
   -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
-  -> librarian_front:librarian_position
+  -> librarian_front:Keeper_turn_driver_try_provider.continuity
   -> own_first_atom:int
   -> turn_start:Keeper_carried_front.turn_start
   -> Agent_core.Types.message list
@@ -566,19 +537,18 @@ val carried_start_range
     keeper-context-window-in-tokens §13.4); a history with no completed turn
     has [turn_start] 0.
 
-    [librarian_front] is the turn's continuity choice as a position in these
-    messages, read by the lane ({!read_librarian_front}): a fitting working
-    state ([Librarian_snapshot]), the Librarian's read position alone
-    ([Librarian_progress]), or none. That position wins when it is at or past the seed that
-    holds, or the lane's own cut when no seed holds, so a Librarian that read
-    less than the last request carried never moves the range back.
-    [turn_start] is not weighed against it: it is where a request with no
-    absorbed point begins, so a Librarian position behind it still names
-    atoms nothing else carries, and they go out. A read position alone
-    carries nothing for the atoms before it. The working state goes in
-    front of the range, as
-    extra system context, exactly when a [Librarian_snapshot] position is the
-    one that wins: a position the seed or the lane cut already passed stands for
+    [librarian_front] is the turn's continuity, read once for every lane
+    ({!Keeper_turn_driver_try_provider.read_keeper_continuity}): the writer's
+    read end with its working state ([Librarian_working_state]), the read end
+    alone ([Librarian_progress]), or none. That read end wins when it is at or
+    past the seed that holds, or the lane's own cut when no seed holds, so a
+    writer that read less than the last request carried never moves the
+    range back. [turn_start] is not weighed against it: it is where a request
+    with no read end begins, so a read end behind it still names atoms
+    nothing else carries, and they go out. A read end alone carries nothing
+    for the atoms before it. The working state goes in front of the range,
+    as extra system context, exactly when a read end with one is the one
+    that wins: a read end the seed or the lane cut already passed stands for
     atoms the range is carrying anyway, and summarising those would say twice
     what the request already says. When it does win, the request grows by
     those bytes, and they are pinned, so a lane that cuts the range to a
@@ -619,26 +589,27 @@ val windowed_projection : windowed_range -> Runtime_model_input_tail_window.proj
 val compose_librarian_range
   :  keeper_name:string
   -> runtime_id:string
-  -> compose:(librarian_position -> (windowed_range, Agent_core.Error.t) result)
-  -> librarian_position
+  -> compose:(Keeper_turn_driver_try_provider.continuity -> (windowed_range, Agent_core.Error.t) result)
+  -> Keeper_turn_driver_try_provider.continuity
   -> (windowed_range, Agent_core.Error.t) result
-(** Compose and window the range from the turn's Librarian position, with
-    [compose] doing both the way the lane does them.
+(** Compose and window the range from the turn's read end, with [compose]
+    doing both the way the lane does them.
 
     A working state goes out only where it displaces none of the atoms after
-    the range it leads. A [Librarian_snapshot] position is composed with it
+    the range it leads. A read end with a working state is composed with it
     first, and kept when the window left every atom of the range. A witnessed
     accepted empty range may keep a fitting summary: the current goal travels
     separately, and no prior conversation atom has to be restored. Otherwise
-    the same position is composed alone ([Librarian_progress] at the
-    snapshot's end), and the working state goes only when the window kept at
+    the same read end is composed alone, without its working state, and the
+    working state goes only when the window kept at
     least the newest atom and as many atoms with it as without it. When it
     stays out, the request goes with the position alone, a WARN names the
     reason and the first atom sent, and
     [masc_keeper_librarian_working_state_not_carried_total] counts it -- the turn is not
     refused, because that band is usually a Librarian that has not caught up
     yet. A composition the position alone cannot carry is refused with its
-    own error. Other positions are composed once, as given. *)
+    own error. A read end without a working state, and no read end, are
+    composed once, as given. *)
 
 type argument_source
 (** One official attempt's frozen raw completed authority and address memo:
@@ -677,7 +648,7 @@ val start_range_projection :
   reserved_bytes:int ->
   ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
-  ?librarian_front:librarian_front_reader ->
+  ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
   ?on_carried_front:(carried_start_front -> transmitted_bytes:int -> unit) ->
   turn_start:Keeper_carried_front.turn_start ->
   keeper_name:string ->
@@ -688,7 +659,8 @@ val start_range_projection :
     zero-history floor stays empty; otherwise the latest of the capacity,
     seed, Librarian, and turn-start fronts is composed and observed once.
     Source-specific projection runs after this range. Antigravity and Muse
-    Code can use the same projection with unbounded capacity.
+    Code can use the same projection with unbounded capacity. Without
+    [librarian_front] the turn has no read end.
 
     With [argument_projection], verified closed raw-seed arguments and
     finished-turn tool results are planned before measuring capacity. A result
@@ -702,8 +674,8 @@ val start_range_projection :
     results, which open no atom. When the raw seed does not bind
     ({!Keeper_model_input_demotion.bind_completed_arguments}), arguments and
     results both stay verbatim. A Resume passes no projection
-    ({!argument_projection}). Seed/Librarian validation, digests and
-    observation still use the original source and atom coordinates. Summary
+    ({!argument_projection}). The seed check, digests and observation still
+    use the original source and atom coordinates. Summary
     selection is pure with respect to blobs; only retained slots are
     materialized once. Actual success/failure outcomes are replayed, every
     unmaterialized slot is restored, and the full range/summary decision is
@@ -715,7 +687,7 @@ val carried_history_projection :
   ?argument_projection:argument_projection ->
   ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
-  ?librarian_front:librarian_front_reader ->
+  ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
   ?on_carried_front:(carried_start_front -> transmitted_bytes:int -> unit) ->
   turn_start:Keeper_carried_front.turn_start ->
   keeper_name:string ->
@@ -723,8 +695,9 @@ val carried_history_projection :
   Keeper_history_projection.t option ->
   Keeper_history_projection.t
 (** Unbounded carried-history composition for clients that compact their own
-    input. Freeze the durable Librarian position before applying the range and
-    source projection. Window/front observations are published only after that
+    input. The range opens from the turn's read end ([librarian_front]; none
+    without it) before the source projection. Window/front observations are
+    published only after that
     final projection succeeds, and retain durable-history coordinates: an
     appended Gate replay reference cannot become a checkpoint front. *)
 

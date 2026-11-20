@@ -1,10 +1,11 @@
-(* RFC tools-as-shell-commands — the split between a declared shell path
-   and the positional words that follow it, against the real crunched tool
-   tree (the three read-only tools PR-1 declares).
+(* The split between a declared shell path and the positional words that
+   follow it, against the real crunched tool tree (the three read-only tools
+   that declare a [shell_command]).
 
-   The rewrite itself is covered from the other side: PR-1a's dispatch
-   tests already lock the delegated round trip, and the conversion needs a
-   full turn context to build, which a unit test does not have. *)
+   The rewrite itself is covered from the other side: the dispatch tests of
+   [Sandbox_target.Delegated] already lock the delegated round trip, and the
+   conversion needs a full turn context to build, which a unit test does not
+   have. *)
 
 let () =
   let module K = Masc.Keeper_shell_tool_command in
@@ -97,8 +98,7 @@ let () =
    | Error _ -> assert false)
 
 (* A substitution's child stages are command positions too: [$(masc …)]
-   names the reserved word, and the refusal names the shape (RFC
-   shell-ir-typed-command-substitution, plan risk 3). *)
+   names the reserved word, and the refusal names the shape. *)
 let () =
   let module K = Masc.Keeper_shell_tool_command in
   let module SI = Masc_exec.Shell_ir in

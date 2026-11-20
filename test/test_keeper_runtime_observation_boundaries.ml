@@ -397,11 +397,6 @@ let test_attributed_empty_completion_is_auto_recoverable () =
     false
     (EC.is_server_rejected_parse_error err)
 
-(* The pinning test for a ParseError-carried empty completion was removed
-   with the guard it pinned: no production producer of that shape exists at
-   the pinned Agent Core, and locking a message substring in place is the
-   drift-guard anti-pattern RFC-0371 §5.4 removes. *)
-
 (* AGENT_CORE surfaces an empty completion with an unmodeled stop_reason as a
    non-retryable [InvalidRequest].  This shape must stay classified as an
    invalid request, not as an empty completion: the classes drive telemetry
@@ -428,8 +423,8 @@ let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
 
 (* A generic 400 [InvalidRequest] is not an empty completion either: the
    classes stay distinct for telemetry and failure routing. Both count
-   toward the crash-accounting streak identically (RFC
-   turn-failure-visible-stop, #32105) — no class carries its own budget. *)
+   toward the crash-accounting streak identically — no class carries its own
+   budget. *)
 let test_generic_invalid_request_is_not_empty_completion () =
   let err =
     Agent_core.Error.Api
@@ -444,11 +439,10 @@ let test_generic_invalid_request_is_not_empty_completion () =
     (EC.is_empty_completion_error err)
 
 (* #31958 regression pin: a transient network failure must advance the crash
-   streak. Before RFC turn-failure-visible-stop (#32105) the network class had
-   no budget term, so such failures were exempt: the streak stayed 0 — a dead
-   transport retried forever with fleet health ok. Every step here is the
-   production chain: record_failure_observation → registry count → the failed
-   turn's turn_status_event → dispatched phase. *)
+   streak; a streak that stays 0 keeps a dead transport retrying forever with
+   fleet health ok. Every step here is the production chain:
+   record_failure_observation → registry count → the failed turn's
+   turn_status_event → dispatched phase. *)
 let test_transient_network_failure_advances_crash_streak () =
   with_temp_dir "network-crash-streak" @@ fun base_path ->
   let config = Workspace.default_config base_path in

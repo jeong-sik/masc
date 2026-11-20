@@ -198,13 +198,11 @@ let api_invalid_request_vendor_400 =
        ~body:
          {|{"error":{"message":"Invalid request (unknown): invalid temperature: only 0.6 is allowed for this model","type":"invalid_request_error"}}|})
 
-(* Until RFC-0370 §3.1, the Codex app-server boundary folded provider- and
-   transport-side failures into [Internal] strings (the catch-all in
-   [codex_error_to_core_error]); these three verbatim live-log classes
-   document what that wire looked like, and that [Internal] itself remains
-   non-rotating for genuine MASC defects. The typed rows below them are what
-   the same failures carry after the boundary fix (mirroring the claude_code
-   and antigravity conversions, which were already typed). *)
+(* Three verbatim Codex app-server live-log classes as [Internal] strings,
+   which pin that [Internal] itself stays non-rotating for genuine MASC
+   defects. The typed rows below them are what [codex_error_to_core_error]
+   gives the same failures, mirroring the claude_code and antigravity
+   conversions. *)
 let internal_app_server_timeout =
   Agent_core.Error.Internal
     "Codex app-server turn timed out after 300.000s"
@@ -217,7 +215,7 @@ let internal_remote_command_failed =
   Agent_core.Error.Internal
     "Codex app-server turn failed: Error running remote command"
 
-(* Post-RFC-0370 typed forms of the same boundary failures. *)
+(* Typed forms of the same boundary failures. *)
 let api_turn_budget_timeout =
   Agent_core.Error.Api
     (Agent_core.Retry.Timeout
@@ -359,16 +357,13 @@ let test_census_report () =
    - Every [Internal] row is [false]. [core_error_to_runtime_outcome] returns
      [None] for [Internal _], so [lane_should_retry] short-circuits before any
      status is consulted. The official-client runtimes (Codex app-server,
-     Claude Code, Antigravity) carry provider- and transport-side failures in
-     [Internal] because that is the constructor their subscription clients
-     have, so a per-runtime transport failure on those three reaches the same
-     decision as a MASC defect.
+     Claude Code, Antigravity) type provider- and transport-side failures at
+     their boundary, so those failures do not reach this decision.
 
    - Quota rotates under either constructor that carries it: [Provider
      (HardQuota _)] and [Api (PaymentRequired _)] both move the lane to its
-     next declared candidate. They disagreed until RFC-0440 §3 read the 402 as
-     a fact about the binding's account rather than as an HTTP retry code; the
-     condition was always the same and only the routing differed. *)
+     next declared candidate. The 402 is read as a fact about the binding's
+     account rather than as an HTTP retry code. *)
 let expected_rotation =
   [ "provider:hard_quota", true
   ; "provider:network_error", true

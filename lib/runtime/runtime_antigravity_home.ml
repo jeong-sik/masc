@@ -298,14 +298,13 @@ let path_is_within ~root path =
    Directory arguments (without glob suffixes) are recursive CLI grants:
    https://antigravity.google/docs/permissions?tab=cli .
    - Deny beats allow. Every posture names the schema folder and the two
-     secret paths. Until L3, Native_none also keeps the all-files read deny,
-     so its schema allow stays shadowed and no read can become an Ask. L3
-     removes the broad deny to open the schema folder. A denied read fails
-     only that call; a read no rule matches is an Ask, which print mode
-     refuses by ending the run.
+     secret paths. [Native_none] omits the broad all-files read deny so the
+     model can read lazily loaded masc tool schemas under [policy.schema_dir],
+     while explicitly denying every workspace root and pairing with
+     [prepare_read_hook] so unmatched outside reads fail only that tool call
+     instead of becoming a headless Ask that ends the run.
    - agy allows reads inside the workspace (cwd and --add-dir) when no rule
-     matches. Native_none keeps each workspace root denied for when L3
-     removes the broader rule.
+     matches, so [Native_none] denies each workspace root explicitly.
    - agy's own appDataDir boundary already refuses the token file. That rule
      is undocumented and agy updates itself, so the token keeps its own deny;
      login still works with it (RFC-0490 measurement 8b).
@@ -314,13 +313,7 @@ let path_is_within ~root path =
      action. With --sandbox, the vendor's implicit grant covers sandboxed
      commands; an escape remains Ask, which print mode cannot approve. Read
      posture denies both. *)
-let native_settings_json ~policy ~posture ~workspaces =
-  let read = List.map (fun path -> "read_file(" ^ path ^ ")") workspaces in
-  let write = List.map (fun path -> "write_file(" ^ path ^ ")") workspaces in
-  let allow, deny = match (posture : Runtime_native_tools.posture) with
-    | Native_none -> [], "read_file(*)" :: (read @ ["write_file(*)"; "command(*)"])
-    | Native_read -> read, ["write_file(*)"; "command(*)"]
-    | Native_full -> read @ write, [] in
+let settings_permissions_json ~policy ~allow ~deny =
   let strings values = `List (List.map (fun value -> `String value) values) in
   `Assoc ["permissions", `Assoc
     ["allow", strings
@@ -330,8 +323,22 @@ let native_settings_json ~policy ~posture ~workspaces =
         :: deny @ ["read_url(*)"; "execute_url(*)"])]]
 ;;
 
+let native_settings_json ~policy ~posture ~workspaces =
+  let read = List.map (fun path -> "read_file(" ^ path ^ ")") workspaces in
+  let write = List.map (fun path -> "write_file(" ^ path ^ ")") workspaces in
+  let allow, deny = match (posture : Runtime_native_tools.posture) with
+    | Native_none -> [], read @ ["write_file(*)"; "command(*)"]
+    | Native_read -> read, ["write_file(*)"; "command(*)"]
+    | Native_full -> read @ write, [] in
+  settings_permissions_json ~policy ~allow ~deny
+;;
+
+(* Default settings for non-native HOME preparation ([prepare] and
+   [prepare_for_login]): neither publishes an MCP bridge nor installs
+   [prepare_read_hook], so the broad all-files read deny stays in force
+   alongside the named secret paths. *)
 let settings_json policy =
-  native_settings_json ~policy ~posture:Runtime_native_tools.Native_none ~workspaces:[]
+  settings_permissions_json ~policy ~allow:[] ~deny:["read_file(*)"; "write_file(*)"; "command(*)"]
 ;;
 
 let write_private_file ~make_error path contents =
@@ -1134,7 +1141,10 @@ let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
   Ok cwd
 ;;
 
-let prepare_read_hook t ~cwd ~additional_workspaces =
+(* HIGH-RISK-UNREVIEWED: read-guard hook publication (RFC-0490 2.3).
+   [Native_none] opens only the masc schema folder; workspace roots stay
+   denied by both this hook and settings.json. *)
+let prepare_read_hook t ~posture ~cwd ~additional_workspaces =
   let path = Filename.concat (Filename.dirname t.mcp_config_path) "hooks.json" in
   let failure detail = Error (Settings_write_failed {path; detail}) in
   let* executable =
@@ -1148,11 +1158,16 @@ let prepare_read_hook t ~cwd ~additional_workspaces =
       failure ("install masc-antigravity-path-hook beside MASC: " ^ unix_error_detail error fn arg)
   in
   let* policy = policy_paths t in
+  let read_roots =
+    match (posture : Runtime_native_tools.posture) with
+    | Runtime_native_tools.Native_none -> [ policy.schema_dir ]
+    | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full ->
+      policy.schema_dir :: cwd :: additional_workspaces
+  in
   let arguments =
     [executable; "--cwd"; cwd; "--brain";
      Filename.concat (Filename.dirname t.settings_path) "brain"]
-    @ List.concat_map (fun root -> ["--read-root"; root])
-        (policy.schema_dir :: cwd :: additional_workspaces)
+    @ List.concat_map (fun root -> ["--read-root"; root]) read_roots
     @ List.concat_map (fun root -> ["--deny-root"; root])
         [policy.config_dir; policy.token_path]
   in

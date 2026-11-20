@@ -1247,7 +1247,7 @@
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink
   )
- (deps (source_tree %{workspace_root}/config/prompts))
+ (deps masc-antigravity-path-hook (source_tree %{workspace_root}/config/prompts))
  (libraries goal_measure_fixture masc.goal_measure
  masc.prompt_registry
   ;; test_librarian_ask asks a fake provider on loopback through the

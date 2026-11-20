@@ -102,13 +102,6 @@ val run :
     Core lane records its own request
     ({!Keeper_official_client_host.continuity_observation_input}). *)
 
-val eager_tool_names : Keeper_official_client_host.dynamic_tool list -> string list
-(** The tools this lane marks [eager] in the Antigravity MCP config: all of
-    them, whatever their declared [loading]. A tool that is not eager gets no
-    schema unless the model reads a schema file, and a masc home denies
-    [read_file] ({!Runtime_official_client_mcp_http.mcp_config_json}), so a
-    declared on-demand tool is still eager here. *)
-
 module For_testing : sig
   val runtime_error_to_core_error : Runtime_antigravity.error -> Agent_core.Error.t
   (** The Agent Core error a runtime error becomes. *)

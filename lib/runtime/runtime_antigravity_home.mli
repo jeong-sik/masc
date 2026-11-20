@@ -167,24 +167,28 @@ val prepare_native_tools
     Keeper that root is the masc state directory, which holds every Keeper's
     credentials. A refusal leaves the published settings unchanged.
     Every posture names the masc tool schema folder and denies the config
-    folder and the token file by exact path (RFC-0490 2.2). Until L3,
-    [Native_none] also keeps the all-files [read_file] deny, so its schema allow remains
-    shadowed and no read becomes an Ask. Its workspace root denies remain
-    for L3, and a root that holds the HOME is refused.
+    folder and the token file by exact path (RFC-0490 2.2). [Native_none]
+    opens the schema folder without an all-files [read_file] deny while
+    explicitly denying its workspace roots, writes, commands and network; a
+    root that holds the HOME is refused. Callers pair [Native_none] with
+    {!prepare_read_hook} so unmatched outside reads return tool errors rather
+    than reaching headless Ask.
     Read posture denies commands and writes; full permits sandboxed effects.
     Both deny native network tools. The caller must enable the CLI sandbox;
     no command allow rule is emitted because it would grant sandbox escapes
     too. Unsandboxed requests retain the vendor's interactive approval gate. *)
 
 val prepare_read_hook
-  : t -> cwd:string -> additional_workspaces:string list -> (unit, error) result
-(** Publish a native read guard before launching the admitted Keeper client.
+  : t -> posture:Runtime_native_tools.posture -> cwd:string -> additional_workspaces:string list -> (unit, error) result
+(** Publish a native read guard before launching the admitted Antigravity client.
     The guard must be installed beside the running executable; PATH is not
     searched. It returns out-of-scope reads as tool errors before headless Ask
     can end the turn, delegating permitted reads to the existing settings.
-    The settings, including [Native_none]'s broad deny, are unchanged. The
-    caller supplies the canonical roots returned by native policy preparation.
-    Missing/unusable helper binaries refuse preparation. *)
+    [Native_none] permits only the masc tool schema folder (and current-turn
+    generated artifacts); [Native_read] and [Native_full] also permit [cwd] and
+    [additional_workspaces]. The caller supplies the canonical roots returned
+    by native policy preparation. Missing/unusable helper binaries refuse
+    preparation. *)
 
 val prepare_native
   : host:Runtime_account_access.host_account
@@ -249,7 +253,9 @@ module For_testing : sig
 
   val paths : t -> paths
   val settings_json : t -> (Yojson.Safe.t, error) result
-  (** The default ([Native_none]) policy this HOME is prepared with. *)
+  (** The default non-native policy this HOME is prepared with (keeps the
+      all-files read deny because neither an MCP bridge nor {!prepare_read_hook}
+      is installed). *)
 
   val prepared_count_below : runtime_root:string -> int
   (** How many homes below [runtime_root] hold a first-preparation claim. *)

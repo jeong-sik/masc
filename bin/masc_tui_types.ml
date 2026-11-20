@@ -16454,7 +16454,7 @@ let owe_identity_deadline_reads (state : state) ~now =
   state.identity_deadline_reads <-
     List.filter (fun attempt_id -> List.mem attempt_id waited) state.identity_deadline_reads;
   List.iter (fun expectation ->
-    if Masc_tui_wake.reached Masc_tui_wake.Identity_attempt_deadline ~now
+    if Masc_tui_wake.reached_wall Masc_tui_wake.Identity_attempt_deadline ~now
          ~at:expectation.ile_expires_at
        && not (List.mem expectation.ile_attempt_id state.identity_deadline_reads)
     then begin
@@ -16588,7 +16588,7 @@ let retire_identity_login_state (state : state) retirement =
        | Login_provider_inventory _ -> true
        | Login_keeper_inventory _ -> true
        | Login_deadline now ->
-           not (Masc_tui_wake.reached Masc_tui_wake.Identity_login_expiry ~now ~at:expires_at))
+           not (Masc_tui_wake.reached_wall Masc_tui_wake.Identity_login_expiry ~now ~at:expires_at))
   in
   state.identity_login_expectations <- List.filter
     (fun held -> not (disappeared ~keeper:held.ile_keeper ~provider:held.ile_provider))
@@ -18610,7 +18610,7 @@ let loading_notice ?elapsed what =
    screen that moves without new data, and it arrives at a still final frame,
    so it costs nothing once it has arrived. State marks do not move and time
    text changes on second boundaries (RFC tui-one-screen-grammar §7.2, §8). *)
-let motion_step_ns = 150_000_000L
+let motion_step_s = 0.15
 
 let nanoseconds_per_second = 1e9
 

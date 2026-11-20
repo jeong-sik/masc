@@ -96,14 +96,15 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 | `Identity_attempt_deadline` | `identity_login_expectations` 의 `ile_expires_at` | 벽 |
 | `Identity_login_expiry` | `identity_logins` 의 `ils_expires_at` | 벽 |
 | `Quit_notice_expiry` | 걸어 둔 종료 확인의 알림 시각 + `last_action_window_s` | 벽 |
-| `Emblem_step` | About 촛불의 다음 걸음 (`motion_step_ns`) | 단조 |
+| `Emblem_step` | About 촛불의 다음 걸음 (`motion_step_s`) | 단조 |
 | `Paste_quiet` | 끝 표지 없이 멈춘 붙여넣기의 마지막 바이트 + `paste_quiet_seconds` (`paste_is_quiet`). 지나면 "Ctrl-C 로 되살린다" 안내가 뜬다 | 단조 |
 | `Drain_budget_spent` | drain 이 바퀴 예산을 다 써서 남긴 일. 지금 바로. 예산은 꺼낼 것을 쥔 뒤에만 묻는다(§3.6) | 단조 |
 | `Wall_clock_recheck` | 벽시계 시각을 `wall_clock_recheck_s`(5 초)보다 멀리 적을 때 그 5 초 뒤(§6) | 단조 |
 
 - 입력 decoder 와 시작 probe 의 ESC 뒤 대기(`sequence_byte_wait_seconds`)는 읽기 안의 대기다. 종이 끊지 않는다.
   끊으면 화살표 하나가 ESC 와 두 글자로 갈라진다. 대기는 터미널이 마지막 바이트를 준 때부터 센다(§3.3).
-- 시계 칸은 `Masc_tui_wake.clock_of` 가 정한다. `reached` 는 이유의 시계로 `now` 와 `at` 을 비교한다.
+- 시계 칸은 타입이 정한다. 단조 이유는 `mono_reason`, 벽시계 이유는 `wall_reason` 의 생성자다.
+  `deadline_reason` 은 둘을 `Monotonic` 과 `Wall` 로 감싼다. 이유를 다른 시계의 판단에 넘기면 컴파일되지 않는다.
 
 ### 2.3 (c) 주기
 
@@ -129,10 +130,11 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 
 ### 3.2 시각
 
-- 시간을 비교하는 판단은 `Masc_tui_wake.reached reason ~now ~at` 을 쓴다. 단조 ns 로 비교하면 `reached_ns` 다.
+- 시간을 비교하는 판단은 단조 시계면 `Masc_tui_wake.reached_mono reason ~now ~at` 을, 벽시계면 `reached_wall` 을 쓴다.
+  `reached_mono` 는 `mono_reason` 과 `Mono.t` 둘을, `reached_wall` 은 `wall_reason` 과 `float` 둘을 받는다.
 - 단조 시각에는 타입 `Masc_tui_wake.Mono.t` 가 있다. `Mtime_clock.elapsed_ns` 의 ns 다.
   시계에서 이 값을 읽는 함수는 `Mono.now` 하나다. 이 타입을 받는 판단에 벽시계 `float` 를 넘기면 컴파일되지 않는다(#53581).
-  `Masc_tui_owed_read` 와 이것에 시각을 넘기는 모듈이 이 타입으로 비교한다(`reached_mono`).
+  단조 이유의 판단은 모두 이 타입으로 비교한다(`reached_mono`).
   `now >= at` 을 돌려주고, 아직이면 `at` 을 이번 바퀴의 시각으로 적는다. `at` 이 무한이나 nan 이면 적지 않는다.
   `Redraw.holds` 가 화면 글자에 하는 일을 루프 판단에 한다.
 - 적는 창은 기다림이 끝난 뒤부터 다음 기다림 전까지다(`Pass.begin_pass`).
@@ -140,7 +142,7 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 - 루프만 아는 시각(`Frame_slot`, `After_frame`, `Machine_view_cadence`)은 `Masc_tui_wake.next_deadline` 이 만든다.
   `Frame_slot` 은 `Render_schedule.frame_due_ns` 다. 이 함수가 `input_timeout_seconds` 를 대신한다.
   `next_deadline` 은 이 셋과 이번 바퀴에 적힌 시각 가운데 가장 이른 하나를 고른다.
-- `Time_text`, `Quit_notice_expiry`, `Emblem_step` 은 루프 꼬리의 판단이 `reached` 로 적는다.
+- `Time_text`, `Quit_notice_expiry` 는 루프 꼬리의 판단이 `reached_wall` 로, `Emblem_step` 은 `reached_mono` 로 적는다.
 - 벽시계 시각은 적을 때 단조 시각으로 바꾼다. 남은 시간만 옮기므로 벽시계가 움직여도 다음 바퀴가
   다시 적는다. 바꾸는 함수는 `Mono.of_wall` 하나다.
 - 남은 시간이 `wall_clock_recheck_s`(5 초)보다 길면 그 시각 대신 5 초 뒤를 `Wall_clock_recheck` 로 적는다.
@@ -192,12 +194,12 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 
 ## 4. 시험
 
-- `test_tui_wake` 는 `source` 와 `deadline_reason` 마다 빠짐없는 `match` 로 번호를 붙인다.
+- `test_tui_wake` 는 `source`, `mono_reason`, `wall_reason` 마다 빠짐없는 `match` 로 번호를 붙인다.
   생성자를 더하면 시험이 컴파일되지 않고, 번호를 붙이면 아래 확인이 그 생성자를 요구한다.
   - 각 `source` 를 치면 기다리던 fiber 가 깨고, `take` 가 그 source 하나를 돌려준다.
   - 종을 치지 않으면 기다림은 계속 잔다.
   - `earliest` 는 이유와 상관없이 가장 이른 시각을 고른다.
-  - `reached` 는 아직일 때만 적고, 벽시계 시각을 남은 시간만큼의 단조 시각으로 적는다.
+  - `reached_mono` 와 `reached_wall` 은 아직일 때만 적는다. `reached_wall` 은 벽시계 시각을 남은 시간만큼의 단조 시각으로 적는다.
   - `next_deadline` 은 프레임 간격, 프레임 뒤 한 바퀴, 게임 주기, 적힌 시각 가운데 가장 이른 것을 고른다.
   - `Masc_tui_owed_read.due`, `Masc_tui_refresh_pace.due`, `Masc_tui_roster_owed.release_scheduled`,
     `Masc_tui_engine_samples.tick`, `Masc_tui_play_room.poll` 은 아직일 때 자기 이유로 시각을 적는다.
@@ -207,8 +209,7 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
   - 그 뒤에 온 Backspace, `[`, `O`, `]` 는 ESC 에 붙지 않고 제 키로 남는다.
   - `next_byte_wait` 는 `Prefix` 에 조용해질 때까지만 주고 종을 빼며, 이미 조용하면 0 을 준다.
     `Sequence`·`Character` 는 첫 조용한 읽기까지만 묶고 그 뒤로는 호출자의 기다림을 준다.
-  - 벽시계 이유는 `wall_reasons` 표와 같고, 한 시간 뒤 벽시계 시각은 5 초 뒤 `Wall_clock_recheck` 로 적힌다.
-    단조 이유는 한 시간 뒤를 그대로 적는다.
+  - 한 시간 뒤 벽시계 시각은 5 초 뒤 `Wall_clock_recheck` 로 적힌다. 2 초 뒤 벽시계 시각은 자기 이유로 적힌다.
 - `test_tui_wake_writers` 는 `mail`, Task 전송 완료, 콘솔 쓰기가 프로세스의 종을 치는지 본다.
   `Delivery_round.take` 는 할 일이 없으면 예산을 묻지 않고, 묻고 거절되면 일이 남는다.
 - `test_tui_server_lifecycle` 은 서버 시작 waiter 가 끝난 child 와 답하지 않는 child 의 결과를 한 번씩 남기고
@@ -216,7 +217,7 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 - 변이 확인. 아래를 하나씩 되돌리면 시험이 실패한다.
   - `mail` 에서 종 치기를 뺀다.
   - `terminal_has_bytes` 의 겨룸에서 종을 뺀다.
-  - `reached` 에서 적기를 뺀다.
+  - `reached_mono` 나 `reached_wall` 에서 적기를 뺀다.
   - `next_deadline` 에서 적힌 시각을 뺀다.
   - `terminal_has_bytes` 의 커널 먼저 묻기를 뺀다.
   - ESC 뒤 대기에 종을 넣는다.

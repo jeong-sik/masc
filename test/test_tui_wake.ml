@@ -34,47 +34,61 @@ let source_number : Wake.source -> int = function
 
 let source_count = 21
 
-let reason_number : Wake.deadline_reason -> int = function
+let mono_number : Wake.mono_reason -> int = function
   | Frame_slot -> 0
   | After_frame -> 1
-  | Time_text -> 2
-  | Owed_read_retry -> 3
-  | Refresh_retry -> 4
-  | Roster_row_scheduled -> 5
-  | Engine_sample -> 6
-  | Play_room_read -> 7
-  | Tool_series_reread -> 8
-  | Provider_history_day -> 9
-  | Harness_stale -> 10
-  | Identity_attempt_deadline -> 11
-  | Identity_login_expiry -> 12
-  | Quit_notice_expiry -> 13
-  | Emblem_step -> 14
-  | Paste_quiet -> 15
-  | Drain_budget_spent -> 16
-  | Machine_view_cadence -> 17
-  | Wall_clock_recheck -> 18
+  | Owed_read_retry -> 2
+  | Refresh_retry -> 3
+  | Roster_row_scheduled -> 4
+  | Engine_sample -> 5
+  | Play_room_read -> 6
+  | Tool_series_reread -> 7
+  | Emblem_step -> 8
+  | Paste_quiet -> 9
+  | Drain_budget_spent -> 10
+  | Machine_view_cadence -> 11
+  | Wall_clock_recheck -> 12
 
-let all_reasons : Wake.deadline_reason list =
-  [ Frame_slot; After_frame; Time_text; Owed_read_retry; Refresh_retry;
-    Roster_row_scheduled; Engine_sample; Play_room_read; Tool_series_reread;
-    Provider_history_day; Harness_stale; Identity_attempt_deadline;
-    Identity_login_expiry; Quit_notice_expiry; Emblem_step; Paste_quiet;
+let mono_count = 13
+
+let wall_number : Wake.wall_reason -> int = function
+  | Time_text -> 0
+  | Provider_history_day -> 1
+  | Harness_stale -> 2
+  | Identity_attempt_deadline -> 3
+  | Identity_login_expiry -> 4
+  | Quit_notice_expiry -> 5
+
+let wall_count = 6
+
+let reason_number : Wake.deadline_reason -> int = function
+  | Monotonic reason -> mono_number reason
+  | Wall reason -> mono_count + wall_number reason
+
+let mono_reasons : Wake.mono_reason list =
+  [ Frame_slot; After_frame; Owed_read_retry; Refresh_retry; Roster_row_scheduled;
+    Engine_sample; Play_room_read; Tool_series_reread; Emblem_step; Paste_quiet;
     Drain_budget_spent; Machine_view_cadence; Wall_clock_recheck ]
 
-let reason_count = 19
-
 (* The clock column of RFC tui-idle-wait §2.2. Moving a reason to the other
-   clock changes this list. *)
-let wall_reasons : Wake.deadline_reason list =
-  [ Time_text; Provider_history_day; Harness_stale; Identity_attempt_deadline;
-    Identity_login_expiry; Quit_notice_expiry ]
+   clock moves it between these lists, and the type of each decision that
+   notes it changes with it. *)
+let wall_reasons : Wake.wall_reason list =
+  [ Time_text; Provider_history_day; Harness_stale;
+    Identity_attempt_deadline; Identity_login_expiry; Quit_notice_expiry ]
+
+let all_reasons : Wake.deadline_reason list =
+  List.map (fun reason -> Wake.Monotonic reason) mono_reasons
+  @ List.map (fun reason -> Wake.Wall reason) wall_reasons
+
+let reason_count = mono_count + wall_count
+
 let ns_per_s = 1_000_000_000L
 let seconds n = Int64.mul (Int64.of_int n) ns_per_s
 let taken bell = List.map source_number (Wake.take bell)
 let noted_reason () = Option.map (fun (d : Wake.deadline) -> reason_number d.reason) (Wake.Pass.noted ())
 
-(* [reached] reads the monotonic clock itself; bracket that read. *)
+(* [reached_wall] reads the monotonic clock itself; bracket that read. *)
 let check_noted_in label reason ~remaining_s run =
   Wake.Pass.begin_pass ();
   let before = Mtime_clock.elapsed_ns () in
@@ -158,7 +172,7 @@ let test_earliest_picks_each_reason () =
     all_reasons
 
 let test_in_seconds_bounds () =
-  let at offset = (Wake.in_seconds Wake.Time_text ~now_ns:(seconds 100) offset).at_ns in
+  let at offset = (Wake.in_seconds Wake.Frame_slot ~now_ns:(seconds 100) offset).at_ns in
   check int64 "a second and a half later" (Int64.add (seconds 100) 1_500_000_000L) (at 1.5);
   check int64 "a past moment is now" (seconds 100) (at (-3.));
   check int64 "nan is now" (seconds 100) (at Float.nan);
@@ -166,51 +180,50 @@ let test_in_seconds_bounds () =
   check int64 "too far for the clock is its end" Int64.max_int (at 1e300)
 
 let test_reached_notes_only_while_not_yet () =
+  let t0 = Wake.Mono.now () in
+  let at = Wake.Mono.after t0 2.5 in
   List.iter (fun reason ->
-      check_noted_in "a moment still ahead" reason ~remaining_s:2.5
-        (fun () -> Wake.reached reason ~now:1000. ~at:1002.5);
       Wake.Pass.begin_pass ();
-      check bool "the moment itself is reached" true (Wake.reached reason ~now:1002.5 ~at:1002.5);
-      check bool "and after it" true (Wake.reached reason ~now:2000. ~at:1002.5);
-      check_nothing_noted "a reached moment")
-    all_reasons;
+      check bool "mono: still ahead" false (Wake.reached_mono reason ~now:t0 ~at);
+      check (option (pair int int64)) "mono: noted as given"
+        (Some (reason_number (Monotonic reason), (at :> int64)))
+        (Option.map (fun (d : Wake.deadline) -> (reason_number d.reason, d.at_ns)) (Wake.Pass.noted ()));
+      Wake.Pass.begin_pass ();
+      check bool "mono: the moment itself is reached" true (Wake.reached_mono reason ~now:at ~at);
+      check bool "mono: and after it" true
+        (Wake.reached_mono reason ~now:(Wake.Mono.after at 1.) ~at);
+      check_nothing_noted "mono: a reached moment")
+    mono_reasons;
+  List.iter (fun reason ->
+      check_noted_in "wall: a moment still ahead" (Wall reason) ~remaining_s:2.5
+        (fun () -> Wake.reached_wall reason ~now:1000. ~at:1002.5);
+      Wake.Pass.begin_pass ();
+      check bool "wall: the moment itself is reached" true (Wake.reached_wall reason ~now:1002.5 ~at:1002.5);
+      check bool "wall: and after it" true (Wake.reached_wall reason ~now:2000. ~at:1002.5);
+      check_nothing_noted "wall: a reached moment")
+    wall_reasons;
   Wake.Pass.begin_pass ();
-  check bool "never is not reached" false (Wake.reached Wake.Time_text ~now:1. ~at:Float.infinity);
-  check bool "nan is not reached" false (Wake.reached Wake.Time_text ~now:Float.nan ~at:1.);
-  check_nothing_noted "a moment off the clock";
-  check bool "ns: still ahead" false
-    (Wake.reached_ns Wake.Emblem_step ~now_ns:(seconds 1) ~at_ns:(seconds 3));
-  check (option int64) "ns: noted as given" (Some (seconds 3))
-    (Option.map (fun (d : Wake.deadline) -> d.at_ns) (Wake.Pass.noted ()));
-  Wake.Pass.begin_pass ();
-  check bool "ns: reached" true (Wake.reached_ns Wake.Emblem_step ~now_ns:(seconds 3) ~at_ns:(seconds 3));
-  check_nothing_noted "ns: a reached moment"
+  check bool "never is not reached" false (Wake.reached_wall Wake.Time_text ~now:1. ~at:Float.infinity);
+  check bool "nan is not reached" false (Wake.reached_wall Wake.Time_text ~now:Float.nan ~at:1.);
+  check_nothing_noted "a moment off the clock"
 
 (* The loop's own clock and the kernel's wait stop while the machine sleeps,
    so a wall-clock instant far ahead is read again soon instead (§6). *)
 let test_a_far_wall_clock_instant_is_read_again_soon () =
   List.iter (fun reason ->
-      let wall = List.mem reason wall_reasons in
-      check bool "the reason's clock" wall
-        (match Wake.clock_of reason with Wall -> true | Monotonic -> false);
-      if wall then begin
-        check_noted_in "a wall-clock instant an hour away" Wall_clock_recheck
-          ~remaining_s:Wake.wall_clock_recheck_s (fun () -> Wake.reached reason ~now:0. ~at:3600.);
-        check_noted_in "a wall-clock instant within the recheck" reason ~remaining_s:2.
-          (fun () -> Wake.reached reason ~now:0. ~at:2.)
-      end
-      else
-        check_noted_in "a monotonic instant an hour away" reason ~remaining_s:3600.
-          (fun () -> Wake.reached reason ~now:0. ~at:3600.))
-    all_reasons
+      check_noted_in "a wall-clock instant an hour away" (Monotonic Wall_clock_recheck)
+        ~remaining_s:Wake.wall_clock_recheck_s (fun () -> Wake.reached_wall reason ~now:0. ~at:3600.);
+      check_noted_in "a wall-clock instant within the recheck" (Wall reason) ~remaining_s:2.
+        (fun () -> Wake.reached_wall reason ~now:0. ~at:2.))
+    wall_reasons
 
 let test_pass_keeps_the_earliest_and_begins_empty () =
   Wake.Pass.begin_pass ();
-  Wake.Pass.note { reason = Harness_stale; at_ns = seconds 30 };
-  Wake.Pass.note { reason = Owed_read_retry; at_ns = seconds 10 };
-  Wake.Pass.note { reason = Engine_sample; at_ns = seconds 20 };
-  Wake.Pass.note { reason = Paste_quiet; at_ns = seconds 10 };
-  check (option int) "the earliest, the first of a tie" (Some (reason_number Owed_read_retry)) (noted_reason ());
+  Wake.Pass.note { reason = Wall Harness_stale; at_ns = seconds 30 };
+  Wake.Pass.note { reason = Monotonic Owed_read_retry; at_ns = seconds 10 };
+  Wake.Pass.note { reason = Monotonic Engine_sample; at_ns = seconds 20 };
+  Wake.Pass.note { reason = Monotonic Paste_quiet; at_ns = seconds 10 };
+  check (option int) "the earliest, the first of a tie" (Some (reason_number (Monotonic Owed_read_retry))) (noted_reason ());
   Wake.Pass.begin_pass ();
   check_nothing_noted "a new pass"
 
@@ -223,22 +236,22 @@ let test_next_deadline () =
   Wake.Pass.begin_pass ();
   check (option (pair int int64)) "nothing to wake for" None (next (moments ()));
   check (option (pair int int64)) "a frame's slot"
-    (Some (reason_number Frame_slot, seconds 101)) (next (moments ~frame_due_ns:(Some (seconds 101)) ()));
+    (Some (reason_number (Monotonic Frame_slot), seconds 101)) (next (moments ~frame_due_ns:(Some (seconds 101)) ()));
   check (option (pair int int64)) "the pass after a frame is now"
-    (Some (reason_number After_frame, now_ns))
+    (Some (reason_number (Monotonic After_frame), now_ns))
     (next (moments ~frame_due_ns:(Some (seconds 101)) ~frame_drawn:true ()));
   check (option (pair int int64)) "a game on screen"
-    (Some (reason_number Machine_view_cadence,
+    (Some (reason_number (Monotonic Machine_view_cadence),
            Int64.add now_ns (Int64.of_float (Wake.machine_view_cadence_s *. 1e9))))
     (next (moments ~machine_view:true ()));
-  Wake.Pass.note { reason = Refresh_retry; at_ns = seconds 105 };
+  Wake.Pass.note { reason = Monotonic Refresh_retry; at_ns = seconds 105 };
   check (option (pair int int64)) "a noted moment when nothing of the loop's is due"
-    (Some (reason_number Refresh_retry, seconds 105)) (next (moments ()));
+    (Some (reason_number (Monotonic Refresh_retry), seconds 105)) (next (moments ()));
   check (option (pair int int64)) "a frame slot before it"
-    (Some (reason_number Frame_slot, seconds 101)) (next (moments ~frame_due_ns:(Some (seconds 101)) ()));
-  Wake.Pass.note { reason = Paste_quiet; at_ns = seconds 100 };
+    (Some (reason_number (Monotonic Frame_slot), seconds 101)) (next (moments ~frame_due_ns:(Some (seconds 101)) ()));
+  Wake.Pass.note { reason = Monotonic Paste_quiet; at_ns = seconds 100 };
   check (option (pair int int64)) "a noted moment before the frame slot"
-    (Some (reason_number Paste_quiet, seconds 100)) (next (moments ~frame_due_ns:(Some (seconds 101)) ()));
+    (Some (reason_number (Monotonic Paste_quiet), seconds 100)) (next (moments ~frame_due_ns:(Some (seconds 101)) ()));
   Wake.Pass.begin_pass ()
 
 let test_until () =
@@ -247,9 +260,9 @@ let test_until () =
   check (option (float 0.)) "no deadline waits without a bound" None wait.within_s;
   check bool "and carries the bell" true (Option.is_some wait.bell);
   check (option (float 1e-9)) "a deadline ahead" (Some 2.5)
-    (Wake.until ~now_ns:(seconds 10) bell (Some { reason = Frame_slot; at_ns = 12_500_000_000L })).within_s;
+    (Wake.until ~now_ns:(seconds 10) bell (Some { reason = Monotonic Frame_slot; at_ns = 12_500_000_000L })).within_s;
   check (option (float 0.)) "a deadline passed is no wait" (Some 0.)
-    (Wake.until ~now_ns:(seconds 10) bell (Some { reason = Frame_slot; at_ns = seconds 9 })).within_s;
+    (Wake.until ~now_ns:(seconds 10) bell (Some { reason = Monotonic Frame_slot; at_ns = seconds 9 })).within_s;
   check bool "within carries no bell" true (Option.is_none (Wake.within 0.1).bell)
 
 (* The decisions that note their moment *)
@@ -272,7 +285,7 @@ let test_owed_read_retry_is_noted () =
   Wake.Pass.begin_pass ();
   check bool "owed read: not yet" false (Owed.due ~now:(Wake.Mono.after now 1.) waiting);
   check (option (pair int int64)) "owed read: its retry is noted"
-    (Some (reason_number Owed_read_retry, (retry_at :> int64))) (noted ());
+    (Some (reason_number (Monotonic Owed_read_retry), (retry_at :> int64))) (noted ());
   Wake.Pass.begin_pass ();
   check bool "due at its retry" true (Owed.due ~now:retry_at waiting);
   check bool "owed is due" true (Owed.due ~now (Owed.changed Owed.settled));
@@ -291,7 +304,7 @@ let test_refresh_retry_is_noted () =
   Wake.Pass.begin_pass ();
   check bool "refresh: not yet" false (Pace.due ~now:(Wake.Mono.after now 0.5) failing);
   check (option (pair int int64)) "refresh: its retry is noted"
-    (Some (reason_number Refresh_retry, (retry_at :> int64))) (noted ());
+    (Some (reason_number (Monotonic Refresh_retry), (retry_at :> int64))) (noted ());
   Wake.Pass.begin_pass ();
   check bool "due at its retry" true (Pace.due ~now:retry_at failing);
   check_nothing_noted "refresh at its retry"
@@ -304,7 +317,7 @@ let test_roster_row_is_noted () =
   Wake.Pass.begin_pass ();
   let still = Roster.release_scheduled ~now scheduled in
   check (option (pair int int64)) "the scheduled row is noted"
-    (Some (reason_number Roster_row_scheduled, (at :> int64))) (noted ());
+    (Some (reason_number (Monotonic Roster_row_scheduled), (at :> int64))) (noted ());
   check bool "nothing to read before its time" true (Option.is_none (Roster.next_read ~now still));
   check bool "read at its time" true
     (Option.is_some (Roster.next_read ~now:at (Roster.release_scheduled ~now:at scheduled)))
@@ -323,7 +336,7 @@ let test_engine_sample_is_noted () =
      | _, Samples.Nothing -> false
      | _, (Samples.Sampled | Samples.Read) -> true);
   check (option (pair int int64)) "engine sample: its slot is noted"
-    (Some (reason_number Engine_sample, Int64.add (now :> int64) (seconds 2))) (noted ());
+    (Some (reason_number (Monotonic Engine_sample), Int64.add (now :> int64) (seconds 2))) (noted ());
   Wake.Pass.begin_pass ();
   check bool "engine sample: due at its slot" true
     (match Samples.tick opened ~now:(Wake.Mono.after now 2.) ~newest with
@@ -341,7 +354,7 @@ let test_play_room_read_is_noted () =
   check bool "play room: not yet" false
     (Option.is_some (snd (Room.poll failed ~now:(Wake.Mono.after now 1.) ~machine)));
   check (option (pair int int64)) "play room: its retry is noted"
-    (Some (reason_number Play_room_read, Int64.add (now :> int64) (seconds 2))) (noted ());
+    (Some (reason_number (Monotonic Play_room_read), Int64.add (now :> int64) (seconds 2))) (noted ());
   Wake.Pass.begin_pass ();
   check bool "play room: due at its retry" true
     (Option.is_some (snd (Room.poll failed ~now:(Wake.Mono.after now 2.) ~machine)));
@@ -487,7 +500,7 @@ let test_lone_escape_behind_a_probe_keeps_the_next_key () =
 let test_next_byte_wait () =
   let bell = Wake.create () in
   let idle = Wake.until ~now_ns:0L bell None in
-  let due_now = Wake.until ~now_ns:0L bell (Some { Wake.reason = Frame_slot; at_ns = 0L }) in
+  let due_now = Wake.until ~now_ns:0L bell (Some { Wake.reason = Monotonic Frame_slot; at_ns = 0L }) in
   let quiet_at_ns = seconds 10 in
   let ahead = Int64.sub quiet_at_ns 30_000_000L and past = Int64.add quiet_at_ns 1L in
   let wait held ~now_ns caller = Reader.next_byte_wait held ~quiet_at_ns ~now_ns caller in

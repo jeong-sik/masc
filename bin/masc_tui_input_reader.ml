@@ -24,7 +24,7 @@ type input_source =
    Ctrl-C already asked it to wait. Whether a paste is active at all is the
    decoder's state; this is only the clock the Ctrl-C recovery reads. *)
 type paste_clock = {
-  mutable last_byte_ns : int64;
+  mutable last_byte : Masc_tui_wake.Mono.t;
   mutable cancel_armed : bool;
 }
 
@@ -85,7 +85,7 @@ let create_input_reader () =
     last_terminal_byte_ns = 0L;
     decoder = Masc_tui_input_decoder.create ();
     queued = Queue.create ();
-    paste_clock = { last_byte_ns = 0L; cancel_armed = false };
+    paste_clock = { last_byte = Masc_tui_wake.Mono.now (); cancel_armed = false };
   }
 
 let log_startup json =
@@ -435,12 +435,10 @@ let cancel_incomplete_sequence reader =
    last byte. Reading itself uses the caller's short render-loop deadline;
    this is a recovery observation, not a blocking terminal read. *)
 let paste_quiet_seconds = 0.5
-let paste_quiet_ns =
-  Int64.of_float (paste_quiet_seconds *. nanoseconds_per_second)
 
-let paste_is_quiet last_byte_ns =
-  Masc_tui_wake.reached_ns Masc_tui_wake.Paste_quiet
-    ~now_ns:(Mtime_clock.elapsed_ns ()) ~at_ns:(Int64.add last_byte_ns paste_quiet_ns)
+let paste_is_quiet last_byte =
+  Masc_tui_wake.reached_mono Masc_tui_wake.Paste_quiet
+    ~now:(Masc_tui_wake.Mono.now ()) ~at:(Masc_tui_wake.Mono.after last_byte paste_quiet_seconds)
 
 (* Check every input source without consuming its next byte. A terminal read
    can already be buffered, and the startup probe can still have replay; a
@@ -454,7 +452,7 @@ let input_byte_ready reader =
     | Some _ -> return_input_byte reader; true
 
 let paste_can_recover reader clock =
-  paste_is_quiet clock.last_byte_ns && not (input_byte_ready reader)
+  paste_is_quiet clock.last_byte && not (input_byte_ready reader)
 
 (* A paste is not a key and does not become one. Encoding the payload into
    the key channel would put a second meaning on a string every surface reads
@@ -564,10 +562,10 @@ let read_available_input ~(wait : Masc_tui_wake.wait) reader () : input_event op
             enqueue (Masc_tui_input_decoder.feed reader.decoder byte);
             (match paste_phase reader with
              | Pasting clock when not was_pasting ->
-                 clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
+                 clock.last_byte <- Masc_tui_wake.Mono.now ();
                  clock.cancel_armed <- false
              | Pasting clock | Draining_tail clock ->
-                 clock.last_byte_ns <- Mtime_clock.elapsed_ns ()
+                 clock.last_byte <- Masc_tui_wake.Mono.now ()
              | No_paste -> ());
             if not (Queue.is_empty reader.queued) then serve ()
             else if was_in_paste && not (in_paste reader) then
@@ -731,7 +729,7 @@ let abandon_draining reader =
 
 let recover_paste reader =
   let recovered = Masc_tui_input_decoder.recover_paste reader.decoder in
-  reader.paste_clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
+  reader.paste_clock.last_byte <- Masc_tui_wake.Mono.now ();
   recovered
 
 let cancel_armed clock = clock.cancel_armed

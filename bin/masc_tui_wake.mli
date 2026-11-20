@@ -57,21 +57,16 @@ val take : bell -> source list
     them. A ring after this call wakes the next {!await}. *)
 
 (** Why the loop has to wake at a time. *)
-type deadline_reason =
+(** What a decision on the loop's own clock waits for. *)
+type mono_reason =
   | Frame_slot  (** A requested frame waits for its interval. *)
   | After_frame  (** The pass after a frame: launchers read what it drew. *)
-  | Time_text  (** The last frame's time text reads differently. *)
   | Owed_read_retry  (** A failed or placeholder read's wait ends. *)
   | Refresh_retry  (** A failing [/health] probe's owed pass is due. *)
   | Roster_row_scheduled  (** A Keeper row is scheduled to be read again. *)
   | Engine_sample  (** The engine graphs' next sample is due. *)
   | Play_room_read  (** The play room beside a game reads again. *)
   | Tool_series_reread  (** The tool series is read again. *)
-  | Provider_history_day  (** A new day owes the provider history. *)
-  | Harness_stale  (** The harness reading turns stale. *)
-  | Identity_attempt_deadline  (** A login attempt's consent deadline passes. *)
-  | Identity_login_expiry  (** A shown login expires. *)
-  | Quit_notice_expiry  (** An armed quit's notice leaves the screen. *)
   | Emblem_step  (** The About candle's next step. *)
   | Paste_quiet  (** A paste without its end marker has been quiet long enough to recover. *)
   | Drain_budget_spent  (** The drain left work when its pass budget ran out. *)
@@ -80,13 +75,20 @@ type deadline_reason =
       (** A wall-clock instant is noted further away than
           {!wall_clock_recheck_s}: the wall clock is read again (§6). *)
 
-(** Which clock a reason's instants are read on. A wall-clock instant can
+(** What a decision on the wall clock waits for. A wall-clock instant can
     move against the loop's own clock: the machine sleeps, or the clock is
     set. *)
-type clock = Monotonic | Wall
+type wall_reason =
+  | Time_text  (** The last frame's time text reads differently. *)
+  | Provider_history_day  (** A new day owes the provider history. *)
+  | Harness_stale  (** The harness reading turns stale. *)
+  | Identity_attempt_deadline  (** A login attempt's consent deadline passes. *)
+  | Identity_login_expiry  (** A shown login expires. *)
+  | Quit_notice_expiry  (** An armed quit's notice leaves the screen. *)
 
-val clock_of : deadline_reason -> clock
-(** The clock column of RFC tui-idle-wait §2.2. *)
+(** A noted moment's reason, under the clock its decision reads: the clock
+    column of RFC tui-idle-wait §2.2. *)
+type deadline_reason = Monotonic of mono_reason | Wall of wall_reason
 
 val wall_clock_recheck_s : float
 (** How far ahead a wall-clock instant is noted at most, so a machine that
@@ -128,24 +130,21 @@ type deadline = { reason : deadline_reason; at_ns : int64 }
 val earliest : deadline list -> deadline option
 (** The deadline with the smallest [at_ns], [None] for none. *)
 
-val in_seconds : deadline_reason -> now_ns:int64 -> float -> deadline
+val in_seconds : mono_reason -> now_ns:int64 -> float -> deadline
 (** A deadline [seconds] after [now_ns]. A negative or nan wait is due at
     [now_ns]; a wait past the clock's range, [infinity] among them, is due at
     its end. *)
 
-val reached : deadline_reason -> now:float -> at:float -> bool
-(** [now >= at] for two instants on the reason's clock ({!clock_of}). While
-    it answers [false], [at] is noted for this pass ({!Pass}), so the loop
-    wakes when the answer changes. A wall-clock [at] more than
-    {!wall_clock_recheck_s} away is noted as [Wall_clock_recheck] that far
-    away instead. A non-finite instant is never reached and is not noted. *)
-
-val reached_mono : deadline_reason -> now:Mono.t -> at:Mono.t -> bool
+val reached_mono : mono_reason -> now:Mono.t -> at:Mono.t -> bool
 (** [now >= at] on the loop's clock. While it answers [false], [at] is noted
-    for this pass ({!Pass}). *)
+    for this pass ({!Pass}), so the loop wakes when the answer changes. *)
 
-val reached_ns : deadline_reason -> now_ns:int64 -> at_ns:int64 -> bool
-(** {!reached_mono} on raw [Mtime_clock.elapsed_ns] nanoseconds. *)
+val reached_wall : wall_reason -> now:float -> at:float -> bool
+(** [now >= at] for two wall-clock instants. While it answers [false], what
+    remains until [at] is noted for this pass on the loop's clock
+    ({!Mono.of_wall}); an [at] more than {!wall_clock_recheck_s} away is
+    noted as [Wall_clock_recheck] that far away instead. A non-finite instant
+    is never reached and is not noted. *)
 
 (** What the decisions of one loop pass noted. The window runs from the end
     of one wait to the start of the next: every per-pass decision runs again

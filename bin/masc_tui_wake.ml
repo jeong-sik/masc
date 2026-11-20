@@ -85,39 +85,32 @@ let take bell =
   let rung = Atomic.exchange bell.rung 0 in
   List.filter (fun source -> rung land mask source <> 0) all_sources
 
-type deadline_reason =
+type mono_reason =
   | Frame_slot
   | After_frame
-  | Time_text
   | Owed_read_retry
   | Refresh_retry
   | Roster_row_scheduled
   | Engine_sample
   | Play_room_read
   | Tool_series_reread
-  | Provider_history_day
-  | Harness_stale
-  | Identity_attempt_deadline
-  | Identity_login_expiry
-  | Quit_notice_expiry
   | Emblem_step
   | Paste_quiet
   | Drain_budget_spent
   | Machine_view_cadence
   | Wall_clock_recheck
 
-type clock = Monotonic | Wall
+type wall_reason =
+  | Time_text
+  | Provider_history_day
+  | Harness_stale
+  | Identity_attempt_deadline
+  | Identity_login_expiry
+  | Quit_notice_expiry
 
 (* The clock column of RFC tui-idle-wait §2.2: which clock the decision
    behind each reason reads its instants on. *)
-let clock_of = function
-  | Time_text | Provider_history_day | Harness_stale | Identity_attempt_deadline
-  | Identity_login_expiry | Quit_notice_expiry ->
-      Wall
-  | Frame_slot | After_frame | Owed_read_retry | Refresh_retry | Roster_row_scheduled
-  | Engine_sample | Play_room_read | Tool_series_reread | Emblem_step | Paste_quiet
-  | Drain_budget_spent | Machine_view_cadence | Wall_clock_recheck ->
-      Monotonic
+type deadline_reason = Monotonic of mono_reason | Wall of wall_reason
 
 (* RFC tui-idle-wait §6. The loop's wait runs on Mtime, which on macOS is
    mach_absolute_time, and on the kernel's poll timeout: neither counts the
@@ -173,7 +166,7 @@ let earliest = function
   | [] -> None
   | first :: rest -> Some (List.fold_left earlier first rest)
 
-let in_seconds reason ~now_ns seconds = { reason; at_ns = Mono.after now_ns seconds }
+let in_seconds reason ~now_ns seconds = { reason = Monotonic reason; at_ns = Mono.after now_ns seconds }
 
 module Pass = struct
   let current : deadline option Atomic.t = Atomic.make None
@@ -192,27 +185,24 @@ module Pass = struct
   let noted () = Atomic.get current
 end
 
-let reached reason ~now ~at =
-  if not (Float.is_finite now && Float.is_finite at) then false
-  else if now >= at then true
-  else begin
-    let now_ns = Mono.now () and remaining = at -. now in
-    Pass.note (match clock_of reason with
-      | Wall when remaining > wall_clock_recheck_s ->
-          in_seconds Wall_clock_recheck ~now_ns wall_clock_recheck_s
-      | Wall -> { reason; at_ns = Mono.of_wall ~now:now_ns ~wall_now:now at }
-      | Monotonic -> in_seconds reason ~now_ns remaining);
-    false
-  end
-
 let reached_mono reason ~now ~at =
   if Int64.compare now at >= 0 then true
   else begin
-    Pass.note { reason; at_ns = at };
+    Pass.note { reason = Monotonic reason; at_ns = at };
     false
   end
 
-let reached_ns reason ~now_ns ~at_ns = reached_mono reason ~now:now_ns ~at:at_ns
+let reached_wall reason ~now ~at =
+  if not (Float.is_finite now && Float.is_finite at) then false
+  else if now >= at then true
+  else begin
+    let now_ns = Mono.now () in
+    Pass.note
+      (if at -. now > wall_clock_recheck_s then
+         in_seconds Wall_clock_recheck ~now_ns wall_clock_recheck_s
+       else { reason = Wall reason; at_ns = Mono.of_wall ~now:now_ns ~wall_now:now at });
+    false
+  end
 
 (* RFC tui-idle-wait §2.3: the one cadence left. The machine's screen
    arrives through the observer stream and the chat beside it reads on its
@@ -223,8 +213,8 @@ let machine_view_cadence_s = 0.3
 type loop_moments = { frame_due_ns : int64 option; frame_drawn : bool; machine_view : bool }
 
 let next_deadline ~now_ns { frame_due_ns; frame_drawn; machine_view } =
-  let frame_slot = Option.map (fun at_ns -> { reason = Frame_slot; at_ns }) frame_due_ns in
-  let after_frame = if frame_drawn then Some { reason = After_frame; at_ns = now_ns } else None in
+  let frame_slot = Option.map (fun at_ns -> { reason = Monotonic Frame_slot; at_ns }) frame_due_ns in
+  let after_frame = if frame_drawn then Some { reason = Monotonic After_frame; at_ns = now_ns } else None in
   let machine =
     if machine_view then Some (in_seconds Machine_view_cadence ~now_ns machine_view_cadence_s)
     else None in

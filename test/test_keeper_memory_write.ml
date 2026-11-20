@@ -2587,13 +2587,12 @@ let test_a_torn_tail_does_not_stop_the_next_absorb () =
 ;;
 
 (* A keeper asks in several words, and a claim rarely holds them as one run of
-   text. A claim answers when it holds the whole query, or any word of it
-   (RFC-memory-search-beyond-substring section 3.1). The whole-query answers
-   come first in store order, so a search the substring rule answered is still
-   answered the same way at its head; the rest are ranked by BM25, so a claim
-   holding every word comes before one holding a single word. The absorbed
-   facts follow the same rule, so there too the kind of match comes before
-   the order they left in. *)
+   text. A claim answers when it holds the whole query, or any word of it.
+   The whole-query answers come first in store order, so a search the
+   substring rule answered is still answered the same way at its head; the
+   rest are ranked by BM25, so a claim holding every word comes before one
+   holding a single word. The absorbed facts follow the same rule, so there
+   too the kind of match comes before the order they left in. *)
 let test_a_query_of_several_words_is_answered () =
   with_temp_dir
   @@ fun base_path ->
@@ -3045,7 +3044,7 @@ let string_list_field key json =
   | _ -> Alcotest.failf "expected list field: %s" key
 ;;
 
-(* RFC-0418: every ordinary fact a search returns is a retrieval of that fact,
+(* Every ordinary fact a search returns is a retrieval of that fact,
    recorded with the query and the turn. A miss records nothing. The
    decision-log line names the same ids, so the two records agree, and counts
    the facts searched, so a miss can be told from an empty store. *)

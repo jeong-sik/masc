@@ -23,9 +23,8 @@ let plan : Plan.t =
   ; labels = ["masc.mcp.keeper", "fixture"; Sandbox.microvm_backend_label_key, "apple_container"]
   }
 
-(* A guest whose first process is the shim's agent (RFC
-   microvm-guest-agent-over-socket 3.6): root first process, a writable root,
-   three capabilities given back and one published socket. *)
+(* A guest whose first process is the shim's agent: root first process, a
+   writable root, three capabilities given back and one published socket. *)
 let agent_socket =
   {Plan.host_path = "/host/agents/fixture.sock"; guest_path = "/run/masc-agent/agent.sock"}
 

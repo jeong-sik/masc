@@ -1482,12 +1482,11 @@ let test_repeated_turn_reactions_advance_recorded_at_timestamps () =
    payload is unrepresentable — the prior [test_malformed_typed_payload_degrades_summary]
    covered a parse-error path that can no longer occur and was removed. *)
 
-(* RFC-0266 regression: a recorded [Fusion_completed] stimulus is a recognized
-   closed-sum kind and must NOT be miscounted as an unsupported stimulus.  The
-   prior string whitelist
-   dropped [fusion_completed] into [unsupported_stimulus_count], degrading the
-   summary on every async fusion wake.  (We assert only the unsupported counter:
-   with no reaction row the stimulus is still legitimately pending.) *)
+(* Regression: a recorded [Fusion_completed] stimulus is a recognized
+   closed-sum kind and must NOT be quarantined by the closed row decoder,
+   which would degrade the summary on every async fusion wake.  (We assert
+   only the quarantine counter: with no reaction row the stimulus is still
+   legitimately pending.) *)
 let test_fusion_completed_stimulus_is_supported () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "fusion-keeper" in

@@ -61,6 +61,16 @@ type chat_output_budget_field =
   | Chat_max_tokens
   | Chat_max_completion_tokens
 
+(** How an OpenAI Responses request carries [Provider_config.system_prompt] when
+    [previous_response_id] is absent. [Responses_instructions] emits the
+    top-level ["instructions"] field (default). [Responses_developer_message]
+    prepends a [role = "developer"] message at [input[0]] and omits
+    ["instructions"] so the prompt prefix stays contiguous for prompt caching,
+    falling back to ["instructions"] whenever [previous_response_id] is set. *)
+type responses_system_prompt_carrier =
+  | Responses_instructions
+  | Responses_developer_message
+
 (** Whether the provider rejects enum/oneOf/anyOf/allOf inside function
     parameter schemas (OpenAI's rule). When [Conformant_subset_required],
     the serializer projects tool schemas down to the conformant subset;
@@ -197,6 +207,12 @@ val chat_output_budget_field_values : string list
 val chat_output_budget_field_of_string
   :  string
   -> chat_output_budget_field option
+
+val responses_system_prompt_carrier_values : string list
+
+val responses_system_prompt_carrier_of_string
+  :  string
+  -> responses_system_prompt_carrier option
 
 val tool_schema_conformance_values : string list
 

@@ -70,6 +70,9 @@ let assistant_tool_content_format_of_catalog_string raw =
 let chat_output_budget_field_of_catalog_string raw =
   Capability_vocab.chat_output_budget_field_of_string raw
 
+let responses_system_prompt_carrier_of_catalog_string raw =
+  Capability_vocab.responses_system_prompt_carrier_of_string raw
+
 let tool_schema_conformance_of_catalog_string raw =
   Capability_vocab.tool_schema_conformance_of_string raw
 ;;
@@ -134,6 +137,7 @@ type declarative_capability_overrides =
   ; supports_function_response_parts : bool option
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
+  ; responses_system_prompt_carrier : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; accepted_reasoning_efforts : string list option
@@ -151,6 +155,7 @@ type declarative_capability_overrides =
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
+  ; supports_explicit_cache_opt_out : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option
@@ -244,6 +249,15 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
             warn_unknown_capability_value ~field:"chat_output_budget_field" s;
             base.chat_output_budget_field)
        | None -> base.chat_output_budget_field)
+  ; responses_system_prompt_carrier =
+      (match overrides.responses_system_prompt_carrier with
+       | Some s ->
+         (match responses_system_prompt_carrier_of_catalog_string s with
+          | Some carrier -> carrier
+          | None ->
+            warn_unknown_capability_value ~field:"responses_system_prompt_carrier" s;
+            base.responses_system_prompt_carrier)
+       | None -> base.responses_system_prompt_carrier)
   ; tool_schema_conformance =
       (match overrides.tool_schema_conformance with
        | Some s ->
@@ -303,6 +317,10 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
       override_bool base.supports_assistant_prefill overrides.supports_assistant_prefill
   ; supports_prompt_caching =
       override_bool base.supports_prompt_caching overrides.supports_prompt_caching
+  ; supports_explicit_cache_opt_out =
+      override_bool
+        base.supports_explicit_cache_opt_out
+        overrides.supports_explicit_cache_opt_out
   ; supports_top_k = override_bool base.supports_top_k overrides.supports_top_k
   ; supports_min_p = override_bool base.supports_min_p overrides.supports_min_p
   ; supports_seed = override_bool base.supports_seed overrides.supports_seed
@@ -395,6 +413,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; supports_function_response_parts = entry.supports_function_response_parts
   ; assistant_tool_content_format = entry.assistant_tool_content_format
   ; chat_output_budget_field = entry.chat_output_budget_field
+  ; responses_system_prompt_carrier = entry.responses_system_prompt_carrier
   ; tool_schema_conformance = entry.tool_schema_conformance
   ; supports_reasoning = entry.supports_reasoning
   ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
@@ -412,6 +431,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; supports_system_prompt = entry.supports_system_prompt
   ; supports_assistant_prefill = entry.supports_assistant_prefill
   ; supports_prompt_caching = entry.supports_prompt_caching
+  ; supports_explicit_cache_opt_out = entry.supports_explicit_cache_opt_out
   ; supports_top_k = entry.supports_top_k
   ; supports_min_p = entry.supports_min_p
   ; supports_seed = entry.supports_seed

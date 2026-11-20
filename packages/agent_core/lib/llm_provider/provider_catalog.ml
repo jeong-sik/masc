@@ -544,6 +544,9 @@ let parse_capability_overrides ~base cap_json =
   let* chat_output_budget_field = enum "chat_output_budget_field"
     Capability_vocab.chat_output_budget_field_values
     Capability_vocab.chat_output_budget_field_of_string in
+  let* responses_system_prompt_carrier = enum "responses_system_prompt_carrier"
+    Capability_vocab.responses_system_prompt_carrier_values
+    Capability_vocab.responses_system_prompt_carrier_of_string in
   let* tool_schema_conformance = enum "tool_schema_conformance"
     Capability_vocab.tool_schema_conformance_values
     Capability_vocab.tool_schema_conformance_of_string in
@@ -633,6 +636,9 @@ let parse_capability_overrides ~base cap_json =
   let* supports_system_prompt = member_bool "supports_system_prompt" cap_json in
   let* supports_assistant_prefill = member_bool "supports_assistant_prefill" cap_json in
   let* supports_prompt_caching = member_bool "supports_prompt_caching" cap_json in
+  let* supports_explicit_cache_opt_out =
+    member_bool "supports_explicit_cache_opt_out" cap_json
+  in
   let* supports_top_k = member_bool "supports_top_k" cap_json in
   let* supports_min_p = member_bool "supports_min_p" cap_json in
   let* supports_seed = member_bool "supports_seed" cap_json in
@@ -641,6 +647,8 @@ let parse_capability_overrides ~base cap_json =
     base
     |> fun caps -> override chat_output_budget_field caps (fun caps value ->
       {caps with Capability_profile.chat_output_budget_field=value})
+    |> fun caps -> override responses_system_prompt_carrier caps (fun caps value ->
+      {caps with Capability_profile.responses_system_prompt_carrier=value})
     |> fun caps -> override tool_schema_conformance caps (fun caps value ->
       {caps with Capability_profile.tool_schema_conformance=value})
     |> fun caps -> override content_inline_reasoning caps (fun caps value ->
@@ -723,6 +731,9 @@ let parse_capability_overrides ~base cap_json =
     |> fun caps ->
     override supports_prompt_caching caps (fun caps value ->
       { caps with Capability_profile.supports_prompt_caching = value })
+    |> fun caps ->
+    override supports_explicit_cache_opt_out caps (fun caps value ->
+      { caps with Capability_profile.supports_explicit_cache_opt_out = value })
     |> fun caps ->
     override supports_top_k caps (fun caps value ->
       { caps with Capability_profile.supports_top_k = value })

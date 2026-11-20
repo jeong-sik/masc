@@ -3153,6 +3153,86 @@ let test_cache_session_wire_emission_and_validation () =
     [ "none", None; "blank", Some "   \t "; "over-256", Some key_257 ]
 ;;
 
+let test_responses_developer_carrier_and_explicit_cache_opt_out () =
+  let messages = [ msg User [ Text "hello" ] ] in
+  let responses_json config =
+    Responses.build_request ~config ~messages () |> Yojson.Safe.from_string
+  in
+  let sol_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openai-responses"
+      ~model_id:"gpt-5.6-sol"
+      ~base_url:"https://api.openai.com"
+      ~request_path:"/v1/responses"
+      ~system_prompt:"You are concise."
+      ~cache_system_prompt:true
+      ()
+  in
+  (* Declared GPT-5.6+ Responses row with no previous_response_id prepends a
+     developer message at input[0], omits top-level instructions, and omits
+     prompt_cache_options when cache_system_prompt = true. *)
+  let warm = responses_json sol_cfg in
+  let warm_fields = Yojson.Safe.Util.to_assoc warm in
+  check_bool "developer carrier omits top-level instructions" false
+    (List.mem_assoc "instructions" warm_fields);
+  check_bool "cache_system_prompt=true omits prompt_cache_options" false
+    (List.mem_assoc "prompt_cache_options" warm_fields);
+  let warm_input = member "input" warm |> to_list in
+  check_int "input has developer + user items" 2 (List.length warm_input);
+  let dev_item = List.nth warm_input 0 in
+  check_string "input[0] role is developer" "developer" (member "role" dev_item |> to_string);
+  (match member "content" dev_item |> to_list with
+   | [ part ] ->
+     check_string "developer part type" "input_text" (member "type" part |> to_string);
+     check_string "developer part text" "You are concise." (member "text" part |> to_string)
+   | _ -> Alcotest.fail "expected single input_text part in developer item");
+  check_string "input[1] role is user" "user"
+    (List.nth warm_input 1 |> member "role" |> to_string);
+  (* When previous_response_id is present, Responses falls back to top-level
+     instructions and never prepends a developer message into input. *)
+  let chained =
+    responses_json { sol_cfg with previous_response_id = Some "resp_prev_9" }
+  in
+  check_string "previous_response_id keeps top-level instructions" "You are concise."
+    (member "instructions" chained |> to_string);
+  let chained_input = member "input" chained |> to_list in
+  check_int "chained input keeps user item only" 1 (List.length chained_input);
+  check_string "chained input[0] is user" "user"
+    (List.nth chained_input 0 |> member "role" |> to_string);
+  (* When cache_system_prompt = false on a row declaring
+     supports_explicit_cache_opt_out, emit prompt_cache_options = {mode:"explicit"}. *)
+  let one_shot = responses_json { sol_cfg with cache_system_prompt = false } in
+  check_string "1-shot opt-out sets explicit mode" "explicit"
+    (member "prompt_cache_options" one_shot |> member "mode" |> to_string);
+  (* Blank system_prompt omits both developer item and instructions. *)
+  let blank_sys = responses_json { sol_cfg with system_prompt = Some "   " } in
+  check_bool "blank system prompt omits instructions" false
+    (List.mem_assoc "instructions" (Yojson.Safe.Util.to_assoc blank_sys));
+  check_int "blank system prompt adds no developer item" 1
+    (member "input" blank_sys |> to_list |> List.length);
+  (* Non-declared Responses model stays byte-identical: keeps top-level
+     instructions and never emits prompt_cache_options. *)
+  let legacy_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"gpt-5.5"
+      ~base_url:"https://api.openai.com"
+      ~request_path:"/v1/responses"
+      ~system_prompt:"Legacy system."
+      ~cache_system_prompt:false
+      ()
+  in
+  let legacy = responses_json legacy_cfg in
+  let legacy_fields = Yojson.Safe.Util.to_assoc legacy in
+  check_string "non-declared Responses keeps instructions" "Legacy system."
+    (member "instructions" legacy |> to_string);
+  check_bool "non-declared Responses omits prompt_cache_options" false
+    (List.mem_assoc "prompt_cache_options" legacy_fields);
+  check_int "non-declared Responses input has user only" 1
+    (member "input" legacy |> to_list |> List.length)
+;;
+
 let test_responses_build_request_uses_text_format_json_schema () =
   let schema =
     `Assoc
@@ -4218,6 +4298,10 @@ let () =
             "cache_session_wire emission and key validation"
             `Quick
             test_cache_session_wire_emission_and_validation
+        ; Alcotest.test_case
+            "responses developer carrier, previous_response_id guard, and explicit cache opt-out"
+            `Quick
+            test_responses_developer_carrier_and_explicit_cache_opt_out
         ; Alcotest.test_case
             "build request text.format json_schema"
             `Quick

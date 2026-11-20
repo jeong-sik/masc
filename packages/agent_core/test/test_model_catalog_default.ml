@@ -1304,6 +1304,9 @@ let test_empty_capability_vocab_value_is_rejected () =
     "assistant_tool_content_format"
     Capability_vocab.assistant_tool_content_format_of_string;
   rejects "chat_output_budget_field" Capability_vocab.chat_output_budget_field_of_string;
+  rejects
+    "responses_system_prompt_carrier"
+    Capability_vocab.responses_system_prompt_carrier_of_string;
   rejects "tool_schema_conformance" Capability_vocab.tool_schema_conformance_of_string;
   rejects "reasoning_output_format" Capability_vocab.reasoning_output_format_of_string;
   rejects "content_inline_reasoning" Capability_vocab.content_inline_reasoning_of_string;
@@ -1406,6 +1409,55 @@ cache_session_wire = "bogus_key"
   with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "unknown cache_session_wire must fail closed"
+;;
+
+let test_openai_responses_developer_carrier_and_opt_out_declarations () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"openai-responses cache flags"
+  in
+  let snapshot =
+    match Llm_provider.Catalog_snapshot.of_catalogs ~models:(Some catalog) ~providers:None with
+    | Ok s -> s
+    | Error err -> Alcotest.fail (Llm_provider.Catalog_snapshot.error_to_string err)
+  in
+  let resolve provider_id model_id =
+    let policy =
+      Llm_provider.Capabilities.resolve_snapshot_request_policy
+        ~snapshot
+        ~wire:Llm_provider.Provider_kind.OpenAI_compat
+        ~provider_id
+        ~model_id
+    in
+    match Llm_provider.Capabilities.request_policy_capabilities policy with
+    | Some caps -> caps
+    | None -> Alcotest.failf "missing capabilities for %s/%s" provider_id model_id
+  in
+  List.iter
+    (fun model_id ->
+       let caps = resolve "openai-responses" model_id in
+       check bool (model_id ^ " developer carrier") true
+         (caps.responses_system_prompt_carrier
+          = Llm_provider.Capabilities.Responses_developer_message);
+       check bool (model_id ^ " explicit cache opt-out") true
+         caps.supports_explicit_cache_opt_out)
+    [ "gpt-5.6-luna"
+    ; "gpt-5.6-sol"
+    ; "gpt-5.6-terra"
+    ; "gpt-6-sol"
+    ; "gpt-6-astra"
+    ; "gpt-6.2-sol"
+    ; "gpt-6.2-astra"
+    ];
+  (* Pre-5.6 OpenAI Chat and OpenRouter rows keep defaults. *)
+  List.iter
+    (fun (provider_id, model_id) ->
+       let caps = resolve provider_id model_id in
+       check bool (provider_id ^ "/" ^ model_id ^ " keeps instructions carrier") true
+         (caps.responses_system_prompt_carrier
+          = Llm_provider.Capabilities.Responses_instructions);
+       check bool (provider_id ^ "/" ^ model_id ^ " keeps opt-out false") false
+         caps.supports_explicit_cache_opt_out)
+    [ "openai", "gpt-5.5"; "openrouter", "openai/gpt-5.6-sol" ]
 ;;
 
 let () =
@@ -1518,6 +1570,10 @@ let () =
             "provider cache_session_wire declarations"
             `Quick
             test_provider_cache_session_wire_declarations
+        ; test_case
+            "openai-responses developer carrier and explicit opt-out declarations"
+            `Quick
+            test_openai_responses_developer_carrier_and_opt_out_declarations
         ; test_case
             "empty capability vocab value is rejected"
             `Quick

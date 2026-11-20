@@ -81,6 +81,11 @@ type chat_output_budget_field = Capability_vocab.chat_output_budget_field =
   | Chat_max_tokens
   | Chat_max_completion_tokens
 
+type responses_system_prompt_carrier =
+      Capability_vocab.responses_system_prompt_carrier =
+  | Responses_instructions
+  | Responses_developer_message
+
 type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
   | Rich_json_schema
   | Conformant_subset_required
@@ -168,6 +173,7 @@ type capabilities =
         classic [max_tokens] or the reasoning-era [max_completion_tokens]
         OpenAI's gpt-5 family requires. Emission-side field name only; the
         #2517 receipt policy (omit/clamp) is unchanged. *)
+  ; responses_system_prompt_carrier : responses_system_prompt_carrier
   ; tool_schema_conformance : tool_schema_conformance
     (** Whether this model's provider rejects enum/oneOf/anyOf/allOf inside
         function parameter schemas. When conformant-only, the request
@@ -241,6 +247,7 @@ type capabilities =
   ; supports_system_prompt : bool
   ; supports_assistant_prefill : bool
   ; supports_prompt_caching : bool
+  ; supports_explicit_cache_opt_out : bool
   ; (* ── Sampling parameters ───────────────────────────── *)
     supports_top_k : bool
   ; supports_min_p : bool
@@ -274,6 +281,7 @@ let default_capabilities =
   ; supports_function_response_parts = false
   ; assistant_tool_content_format = Assistant_tool_content_null
   ; chat_output_budget_field = Chat_max_tokens
+  ; responses_system_prompt_carrier = Responses_instructions
   ; tool_schema_conformance = Rich_json_schema
   ; supports_reasoning = false
   ; accepted_reasoning_efforts = None
@@ -299,6 +307,7 @@ let default_capabilities =
   ; supports_system_prompt = true
   ; supports_assistant_prefill = true
   ; supports_prompt_caching = false
+  ; supports_explicit_cache_opt_out = false
   ; supports_top_k = false
   ; supports_min_p = false
   ; supports_seed = false

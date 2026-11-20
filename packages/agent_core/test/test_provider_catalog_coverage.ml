@@ -205,6 +205,9 @@ let test_capability_overrides_are_applied () =
     [ "chat_output_budget_field",
       ["max_tokens", (fun c -> c.Capabilities.chat_output_budget_field = Capabilities.Chat_max_tokens);
        "max_completion_tokens", (fun c -> c.Capabilities.chat_output_budget_field = Capabilities.Chat_max_completion_tokens)]
+    ; "responses_system_prompt_carrier",
+      ["instructions", (fun c -> c.Capabilities.responses_system_prompt_carrier = Capabilities.Responses_instructions);
+       "developer_message", (fun c -> c.Capabilities.responses_system_prompt_carrier = Capabilities.Responses_developer_message)]
     ; "tool_schema_conformance",
       ["rich", (fun c -> c.Capabilities.tool_schema_conformance = Capabilities.Rich_json_schema);
        "conformant", (fun c -> c.Capabilities.tool_schema_conformance = Capabilities.Conformant_subset_required)]
@@ -223,6 +226,9 @@ let test_capability_overrides_are_applied () =
       [`String ""; `String "unknown"; `Bool true; `Int 1]) enums;
   List.iter (fun value -> check bool "assistant prefill override is applied" value
     (caps ["supports_assistant_prefill", `Bool value]).supports_assistant_prefill)
+    [true; false];
+  List.iter (fun value -> check bool "explicit cache opt-out override is applied" value
+    (caps ["supports_explicit_cache_opt_out", `Bool value]).supports_explicit_cache_opt_out)
     [true; false];
   List.iter (fun value -> require_rejected ~needle:"supports_assistant_prefill"
     "assistant prefill requires a boolean" (catalog_with_provider

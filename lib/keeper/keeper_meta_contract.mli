@@ -18,8 +18,7 @@ type proactive_cycle_outcome =
   | Proactive_error
   | Proactive_rested
       (** The provider refused on its own quota and stated when it resets, so
-          the cycle rests until then; not a failure
-          (RFC-turn-failure-visible-stop §2.4). *)
+          the cycle rests until then; not a failure. *)
 (** Outcome variants for a single proactive (autonomous) cycle. *)
 
 (** {1 Runtime state types} *)

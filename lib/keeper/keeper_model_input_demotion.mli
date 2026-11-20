@@ -14,9 +14,8 @@
     its prompt cache, so the keeper's agent_core assembly asks for it in two
     places only: the results and verified arguments of turns that already
     ended, once each, on the first request whose window moved after their
-    turn ended (RFC-tool-results-age-out-of-context; an
-    exception to RFC-0363 §3.4.1), and every result of the resend that
-    answers a size refusal.
+    turn ended (RFC-tool-results-age-out-of-context), and every result of the
+    resend that answers a size refusal.
 
     Durable state is untouched. This runs on the provider-bound copy, like the
     window, so a blob written here has no durable referrer — see
@@ -115,9 +114,9 @@ val plan
 
     - it is a text body of a [ToolResult]: its [content], and each [Text]
       block of one whose [content_blocks] is [Some]. Image, document and
-      audio blocks keep their place; they have no marker form (RFC-0363
-      §3.1.2). The floor below is checked for the whole result; the other
-      conditions for each body.
+      audio blocks keep their place; they have no marker form. The floor
+      below is checked for the whole result; the other conditions for each
+      body.
     - {!Tool_output.decode_from_agent_core} reports [Not_marker]. [Decoded] is already
       demoted; [Invalid_marker] is marker-shaped content that failed to parse
       and is left exactly as-is rather than being stored as a blob, which would

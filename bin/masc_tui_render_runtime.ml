@@ -1091,7 +1091,7 @@ let render_runtime_reading (state : state) =
                        Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                    ~detail) in
                if is_selected then
-                 c.push_selected (Masc_tui_theme.strip_sgr line)
+                 c.push_selected_styled line
                else if Masc_tui_types.runtime_row_deemphasized state runtime then
                  c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
                else c.push line)
@@ -1191,7 +1191,7 @@ let render_runtime_reading (state : state) =
               ~candidate:candidate_label ~identity:provider_model ~status:route_probe
               ~detail) in
           if is_selected then
-            c.push_selected (Masc_tui_theme.strip_sgr line)
+            c.push_selected_styled line
           else if Masc_tui_types.runtime_row_deemphasized state runtime then
             c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
           else c.push line
@@ -1244,7 +1244,7 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
     ~title:header ~hints
     ~body:(fun ~budget:_ c ->
       List.iter (function
-        | Parent_focus line -> c.push_selected line
+        | Parent_focus line -> c.push_selected_styled line
         | Parent_text line -> c.push line
         | Parent_notice (Some notice, line) -> c.push_styled ~style:(runtime_lane_notice_style notice) line
         | Parent_notice (None, line) -> c.push_styled ~style:(Theme.warn ()) line)
@@ -1282,7 +1282,7 @@ let render_runtime (state : state) =
           let visible = List.take budget primary in
           List.iter
             (fun (selected, row) ->
-              if selected then c.push_selected (Masc_tui_theme.strip_sgr row)
+              if selected then c.push_selected_styled row
               else c.push row)
             visible;
           let remaining = budget - List.length visible in
@@ -1410,7 +1410,7 @@ let render_tools (state : state) =
     | None -> box_empty buf cols
     | Some (style, line) ->
         if String.equal style sel_style then
-          box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+          box_line_selected_styled buf cols line
         else box_line_styled buf cols ~style line
   done;
   List.iter (box_line buf cols) sheet_lines;
@@ -2200,7 +2200,8 @@ let render_runtime_pick (state : state) =
             Printf.sprintf "%s%s  %s  %s" badge target route_col facts
           in
           if view.Masc_tui_pick_list.selected_row = Some row then
-            c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
+            c.push_selected_styled
+              (Theme.accent () ^ Ansi.bold ^ "\xe2\x80\xba " ^ Ansi.reset ^ line)
           else
             (* The Keeper's own assignment is starred; the cursor row keeps
                its [>], and the title still names the assignment. *)

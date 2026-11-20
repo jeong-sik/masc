@@ -369,7 +369,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                 ^ (if browser_choice_selected view choice then
                      ui_text state ~ko:" (현재)" ~en:" (current)"
                    else "") in
-              if is_selected then c.push_selected line
+              if is_selected then c.push_selected_styled line
               else c.push_styled ~style:Ansi.reset line);
           (* One row whatever the choice, so the rows below do not move with
              the cursor. *)
@@ -479,7 +479,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       for index = scroll to min (scroll + room - 1) (total - 1) do
         let raw = Browser_lane_layout.line lines index in
         if selected_row = Some index then
-          c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr raw)
+          c.push_selected_styled
+            (Theme.accent () ^ Ansi.bold ^ "\xe2\x80\xba " ^ Ansi.reset ^ raw)
         else
           c.push_styled ~style:Ansi.reset ("  " ^ raw)
       done;
@@ -818,7 +819,7 @@ let render_connectors (state : state) =
                   ~status:(Terminal_text.single_line (connector_status connector))
                   ~channel:channel_cell)
               in
-              if is_selected then c.push_selected (Masc_tui_theme.strip_sgr line)
+              if is_selected then c.push_selected_styled line
               else if available && not connected then
                 (* Set up and unreachable is the row to act on: it was
                    working. Never configured recedes -- it is a choice, not a

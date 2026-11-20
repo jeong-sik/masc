@@ -11,12 +11,12 @@
     from a {!sealed} account and the {!request} it serves, by the access the
     process {!publish}ed.
 
-    {b Published once.} A process publishes its access once. The owner state
-    of a server and of the stdio server publishes {!Single_user} after the
-    judgment of the account mode, a host tool publishes it after
-    {!Authz_boot_mode_read.tool}, and the multi-account preview publishes
-    {!Multi_account} with the zone it opened. Until then every request is
-    refused.
+    {b Published once.} A process publishes its access once. The single-user
+    server and the stdio server publish {!Single_user} after the judgment of
+    the account mode and before they open the owner state, a host tool
+    publishes it after {!Authz_boot_mode_read.tool}, and the account server
+    and the multi-account preview publish {!Multi_account} with the zone they
+    opened. Until then every request is refused.
 
     {b Single user.} The one person of a single-user process owns every
     account of it, so every request is allowed.
@@ -162,8 +162,9 @@ val publish : t -> (published, publish_error) result
 (** The access that was published. *)
 val published_access : published -> t
 
-(** The base path of the published access: the one the boot judged a single
-    user, or the [base_path] of a multi-account access. *)
+(** The base path of the published access. For {!Single_user} it is the one
+    the account mode judgment read. For {!Multi_account} it is the
+    [base_path] its publisher gave, which no type ties to that judgment. *)
 val published_base_path : published -> string
 
 (** Publishes the access of a host tool: {!Single_user} when

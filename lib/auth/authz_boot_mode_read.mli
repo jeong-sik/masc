@@ -125,9 +125,10 @@ val refused_line : base_path:string -> Authz_boot_mode.refusal -> string
     found. *)
 val messages : Authz_boot_mode.input -> stop -> string * string list
 
-(** A base path that {!boot} judged a single-user boot. Only {!boot} makes one,
-    and owner initialization takes one in place of a base path, so a runtime
-    that skips the judgment does not compile. *)
+(** A base path that the judgment gave a single user. Only {!boot} and
+    {!tool} make one, and a single-user access is published from one
+    ({!Runtime_account_access.Single_user}), so a runtime that skips the
+    judgment has no single-user access to publish. *)
 type single_user
 
 (** The base path that {!boot} read. *)
@@ -143,7 +144,8 @@ val turned_off : single_user -> Authz_state.t option
     (row 7). Only {!boot} makes one, and the account server takes one in place
     of a base path, so a server that skips the judgment does not open the
     authorization zone of an installation. No single-user runtime takes one:
-    the owner state, the stdio server and a host tool take a {!single_user}. *)
+    the single-user server, the stdio server and a host tool take a
+    {!single_user}. *)
 type multi_account
 
 (** The base path that {!boot} read. *)

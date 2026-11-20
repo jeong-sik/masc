@@ -80,13 +80,10 @@ let observe_phase_dwell ~keeper_name ~from_label =
   | Some prev_at ->
     let now = Unix.gettimeofday () in
     let dwell = Float.max 0.0 (now -. prev_at) in
-    (* Cancel-aware: bare [try ... with _ -> ()] would swallow (* cancel-guard-ok: prose; the code below routes through Safe_ops.protect *)
-       [Eio.Cancel.Cancelled] and break switch teardown. *)
-    Safe_ops.protect ~default:() (fun () ->
-      Otel_metric_store.observe_histogram
-        Keeper_metrics.(to_string TurnPhaseDuration)
-        ~labels:[ ("keeper", keeper_name); ("from", from_label) ]
-        dwell)
+    Otel_metric_store.observe_histogram
+      Keeper_metrics.(to_string TurnPhaseDuration)
+      ~labels:[ ("keeper", keeper_name); ("from", from_label) ]
+      dwell
 
 let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   let now = Unix.gettimeofday () in

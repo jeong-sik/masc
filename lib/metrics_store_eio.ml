@@ -431,9 +431,6 @@ let read_metrics_file config ~agent_id file =
       in
       parse 1 [] (String.split_on_char '\n' contents)
 
-let safe_yield () =
-  Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
-
 let month_key ~year ~month =
   (year * 12) + (month - 1)
 
@@ -489,7 +486,7 @@ let read_recent config ~agent_id ~days =
     let rec read acc = function
       | [] -> Ok (List.rev acc)
       | file :: rest ->
-          safe_yield ();
+          Eio_guard.fair_yield ();
           let* rows = read_metrics_file config ~agent_id file in
           read (List.rev_append rows acc) rest
     in

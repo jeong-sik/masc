@@ -206,9 +206,6 @@ val is_valid_filename : string -> bool
 
 (** {1 Internal Helpers (used by sibling workspace modules)} *)
 
-(** Yield the Eio fiber if running under Eio; no-op otherwise. *)
-val safe_yield : unit -> unit
-
 (** How far back a message read walks. [Newest_window] stops at [limit] names
     because each one is an answer; [Matching] keeps walking until [limit]
     messages satisfy the predicate. *)

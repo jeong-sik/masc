@@ -93,6 +93,47 @@ let test_failure_retries_then_settles () =
       assert_settled clock)
 ;;
 
+exception Failure_callback_bug
+
+(* [on_failure] runs inside the refresh fiber. A callback that raises must not
+   fail the worker's switch; the read is retried as after any failure. *)
+let test_raising_failure_callback_keeps_the_retry () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let changes = Eio.Stream.create 1 in
+    let results = Eio.Stream.create 8 in
+    let failures = Eio.Stream.create 8 in
+    let reads = ref 0 in
+    let never, _ = Eio.Promise.create () in
+    Eio.Fiber.first
+      (fun () ->
+        Eio.Switch.run (fun sw ->
+          Refresh.start_on_change ~sw
+            ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~changes
+            ~config:
+              { (Refresh.default_config ~label:"raising-callback" ~interval_s) with
+                timeout_s; warm_delay_s = 0.0;
+                on_failure = Some (fun failure ->
+                  Eio.Stream.add failures failure;
+                  raise Failure_callback_bug) }
+            ~compute:(fun () ->
+              incr reads;
+              if !reads = 1 then failwith "first read fails";
+              !reads)
+            ~on_result:(Eio.Stream.add results);
+          Eio.Promise.await never))
+      (fun () ->
+        (match Eio.Stream.take failures with
+         | Refresh.Raised (Failure _) -> ()
+         | Refresh.Raised _ | Refresh.Timed_out _ -> fail "the read failure was lost");
+        Eio.Fiber.yield ();
+        check bool "the raising callback leaves the retry timer" true
+          (Eio_mock.Clock.try_advance clock);
+        check int "the worker retries the read" 2 (Eio.Stream.take results);
+        assert_settled clock))
+;;
+
 let test_initial_timeout_retains_retry () =
   let reads = ref 0 and retired = ref false in
   let never, _ = Eio.Promise.create () in
@@ -327,6 +368,7 @@ let () =
       [ test_case "healthy idle has no periodic scan" `Quick test_success_has_no_periodic_scan
       ; test_case "changes during a read remain owed" `Quick test_change_during_read_remains_owed
       ; test_case "read failure retries then settles" `Quick test_failure_retries_then_settles
+      ; test_case "a raising failure callback keeps the retry" `Quick test_raising_failure_callback_keeps_the_retry
       ; test_case "initial timeout retains its retry" `Quick test_initial_timeout_retains_retry
       ; test_case "input brings initial read forward" `Quick test_change_can_admit_the_initial_read
       ; test_case "cancellation retires pending work" `Quick test_cancellation_retires_work_without_publishing

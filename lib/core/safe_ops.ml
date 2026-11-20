@@ -10,16 +10,6 @@
     - Log unexpected failures for debugging
 *)
 
-(** Run [f ()], re-raising [Eio.Cancel.Cancelled] with its original backtrace
-    and returning [default] for any other exception. *)
-let protect ~default f =
-  try f ()
-  with
-  | Eio.Cancel.Cancelled _ as e ->
-    let bt = Printexc.get_raw_backtrace () in
-    Printexc.raise_with_backtrace e bt
-  | _ -> default
-
 (** Cancel-aware exception handler.
     Re-raises [Eio.Cancel.Cancelled] with backtrace; delegates other
     exceptions to [handler]. *)
@@ -74,7 +64,7 @@ let emit_persistence_utf8_repair_metric () =
        | Eio.Cancel.Cancelled _ as e ->
          (* A metric hook runs inside the caller's fiber. Absorbing
             [Cancelled] here would leave the switch waiting on a fiber that
-            already decided to stop. Same treatment as [protect] above. *)
+            already decided to stop. Same treatment as [handle] above. *)
          Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
        | exn ->
          Log.Misc.warn

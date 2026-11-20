@@ -77,7 +77,9 @@ val start :
     writers cannot block.
 
     When [config.on_failure] is set, it is called on timeout or exception,
-    allowing callers to record the failure (e.g. mark_cached_surface_error). *)
+    allowing callers to record the failure (e.g. mark_cached_surface_error).
+    An exception from [on_failure] itself is logged as an error and the
+    worker keeps its retry. *)
 
 val start_on_change :
   sw:Eio.Switch.t ->

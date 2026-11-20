@@ -203,7 +203,7 @@ let status_summary_string
       in
       List.iter
         (fun (agent : Masc_domain.agent) ->
-          Workspace_query.safe_yield ();
+          Eio_guard.fair_yield ();
           let icon = agent_status_icon agent.status in
           let active_assigned_task_ids =
             active_assigned_task_ids_for_agent agent.name
@@ -223,7 +223,7 @@ let status_summary_string
   Buffer.add_string buf "\nQuest Board:\n";
   List.iter
     (fun (task : Masc_domain.task) ->
-      Workspace_query.safe_yield ();
+      Eio_guard.fair_yield ();
       let status_icon, status_label = task_status_badge task.task_status in
       let assignee = task_assignee task.task_status in
       let goal_ids =

@@ -1,5 +1,5 @@
 let project_root_from_executable () =
-  let raw_exe = Safe_ops.protect ~default:"" (fun () -> Sys.executable_name) in
+  let raw_exe = Sys.executable_name in
   let exe =
     if String.equal raw_exe ""
     then ""

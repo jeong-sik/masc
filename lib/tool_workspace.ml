@@ -280,7 +280,7 @@ let status_summary_string (ctx : context) =
     List.fold_left
       (fun (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt)
         (task : Masc_domain.task) ->
-         Workspace_query.safe_yield ();
+         Eio_guard.fair_yield ();
          match task.task_status with
          | Masc_domain.Todo ->
            ( task :: active

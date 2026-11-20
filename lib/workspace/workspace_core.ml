@@ -182,16 +182,15 @@ let () =
       (fun peer ->
          if peer <> assignee
          then
-           Safe_ops.protect ~default:() (fun () ->
-             (Atomic.get Workspace_hooks.activity_emit_fn)
-               config
-               ~actor:Workspace_hooks.{ kind = "agent"; id = assignee }
-               ~subject:Workspace_hooks.{ kind = "agent"; id = peer }
-               ~kind:"hebbian.strengthen"
-               ~payload:
-                 (`Assoc [ "from_agent", `String assignee; "to_agent", `String peer ])
-               ~tags:[ "hebbian"; "strengthen"; "memory" ]
-               ()))
+           (Atomic.get Workspace_hooks.activity_emit_fn)
+             config
+             ~actor:Workspace_hooks.{ kind = "agent"; id = assignee }
+             ~subject:Workspace_hooks.{ kind = "agent"; id = peer }
+             ~kind:"hebbian.strengthen"
+             ~payload:
+               (`Assoc [ "from_agent", `String assignee; "to_agent", `String peer ])
+             ~tags:[ "hebbian"; "strengthen"; "memory" ]
+             ())
       active_agents)
 ;;
 
@@ -204,16 +203,15 @@ let () =
          (fun peer ->
             if peer <> agent_name
             then
-              Safe_ops.protect ~default:() (fun () ->
-                (Atomic.get Workspace_hooks.activity_emit_fn)
-                  config
-                  ~actor:Workspace_hooks.{ kind = "agent"; id = agent_name }
-                  ~subject:Workspace_hooks.{ kind = "agent"; id = peer }
-                  ~kind:"hebbian.weaken"
-                  ~payload:
-                    (`Assoc [ "from_agent", `String agent_name; "to_agent", `String peer ])
-                  ~tags:[ "hebbian"; "weaken"; "memory" ]
-                  ()))
+              (Atomic.get Workspace_hooks.activity_emit_fn)
+                config
+                ~actor:Workspace_hooks.{ kind = "agent"; id = agent_name }
+                ~subject:Workspace_hooks.{ kind = "agent"; id = peer }
+                ~kind:"hebbian.weaken"
+                ~payload:
+                  (`Assoc [ "from_agent", `String agent_name; "to_agent", `String peer ])
+                ~tags:[ "hebbian"; "weaken"; "memory" ]
+                ())
          active_agents)
 ;;
 

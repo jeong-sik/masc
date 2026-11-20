@@ -2954,15 +2954,22 @@ let native_task_entries (state : state) ~keeper_name ~role_label_column =
             | None,Some Task_failed -> say "실패 보고" "failed reported"
             | None,Some Task_killed -> say "강제 종료 보고" "killed reported"
             | None,Some Task_paused -> say "일시정지 보고" "paused reported"
-            | None,None -> say "상태 미보고" "status unreported" in
+            | None,None -> say "상태 보고 없음" "status not reported" in
           let boundary=match task.boundary with
-            | Task.Task_terminal_unobserved -> say "종료 미관측" "terminal unobserved"
-            | Task_terminal_observed -> say "종료 관측" "terminal observed" in
+            | Task.Task_terminal_unobserved -> say "종료 보고 없음" "end not reported"
+            | Task_terminal_observed -> say "종료 보고됨" "end reported" in
           let usage=match task.usage with None -> [] | Some usage ->
+            (* RFC tui-one-screen-grammar 6.2 and 6.3: counts grouped, the
+               length on the duration ladder; a negative length the provider
+               signed is a reading that failed. *)
+            let took = Option.value
+                ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+                (Masc_tui_message_layout.elapsed_text (float_of_int usage.duration_ms /. 1000.)) in
             [Printf.sprintf
-               (if ko then "%d 토큰 · 도구 %d회 · %d ms 보고"
-                else "%d tokens · %d tools · %d ms reported")
-               usage.total_tokens usage.tool_uses usage.duration_ms] in
+               (if ko then "%s 토큰 · 도구 %s회 · %s 보고"
+                else "%s tokens · %s tools · %s reported")
+               (Masc_tui_value.Count.grouped usage.total_tokens)
+               (Masc_tui_value.Count.grouped usage.tool_uses) took] in
           let metadata=Option.to_list task.subagent_type @ [status;boundary]
             @ (match task.ambient with Some true -> [say "상시" "ambient"] | Some false | None -> [])
             @ (match task.is_backgrounded with Some true -> [say "백그라운드" "backgrounded"] | Some false | None -> [])

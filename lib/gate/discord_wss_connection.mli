@@ -54,8 +54,7 @@ val spawn : conn -> (unit -> unit) -> unit
     when [close conn] tears the connection down. The gateway runs its reader
     loop through this so the reader's lifetime is the connection's: a
     per-connection close cancels the reader (its blocking [read] raises
-    [Cancelled]) rather than leaking it on the gateway-wide switch (RFC-0287
-    P0). Call before [close]; forking onto an already-closed connection raises. *)
+    [Cancelled]) rather than leaking it on the gateway-wide switch. Call before [close]; forking onto an already-closed connection raises. *)
 
 (** Pure bridge helpers, exposed for unit tests. *)
 module For_testing : sig

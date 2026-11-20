@@ -1,8 +1,8 @@
 (* Shared machinery for the goal-side stores that keep a primary JSON ledger
-   with an evidence-only [.last-good] recovery mirror (the RFC-0234/0444
-   family: Goal_store, Goal_verification). One owner for the content-addressed
-   prepared cache; each store keeps its own load classification and recovery
-   policy, which encode domain damage decisions this module must not absorb. *)
+   with an evidence-only [.last-good] recovery mirror (Goal_store,
+   Goal_verification). One owner for the content-addressed prepared cache;
+   each store keeps its own load classification and recovery policy, which
+   encode domain damage decisions this module must not absorb. *)
 
 module Content_cache = struct
   (* A hit requires exact byte equality against the freshly read document, so

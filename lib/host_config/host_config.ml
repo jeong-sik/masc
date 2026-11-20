@@ -1,4 +1,4 @@
-(* RFC-0084 §1.5, §3.4 + RFC-0085 PR-1 — Typed host configuration.
+(* RFC-0085 PR-1 — Typed host configuration.
 
    PR-1 of RFC-0085 (this commit):
    - Renames `legacy_macos_default ()` -> `host ()` (canonical accessor).

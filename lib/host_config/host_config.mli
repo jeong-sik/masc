@@ -1,5 +1,5 @@
-(** RFC-0084 §1.5 + §3.4 + RFC-0085 PR-1 — Typed host configuration for
-    keeper-tool dispatch portability.
+(** RFC-0085 PR-1 — Typed host configuration for keeper-tool dispatch
+    portability.
 
     Canonical accessor is [host ()].  RFC-0085 PR-1 removed the
     previous misnomer [legacy_macos_default ()] (the function was the

@@ -11,9 +11,10 @@ type t =
    PageUp/PageDown held, the 4M-word heap cut the median key-to-output time
    by about a quarter.
 
-   Worker: a refresh of the overview parses the local task files, several
+   Worker: a refresh of the overview reads the local task files, several
    MB of JSON, so this domain fills a heap far faster than the other two.
-   Measured 2026-11-19 against the frozen replay: overview at 120x40,
+   Measured 2026-11-19, when a refresh still decoded every task, against
+   the frozen replay: overview at 120x40,
    Down/Up every 33 ms, r every 45 presses, key-to-output of the presses
    within 600 ms of an r, builds interleaved round by round, ms:
 
@@ -32,7 +33,19 @@ type t =
    footprint after 5 minutes idle at 200x60, eight to ten TUIs at once,
    two runs per build on the overview and two on Keepers: 4M 223-243 MB,
    every domain 4M 220-236 MB, 1M 173-200 MB, 256k 171-210 MB. The tail
-   decides. When a refresh stops parsing whole files, measure both again.
+   decides.
+
+   Measured again 2026-11-20, after a refresh decodes only the tasks whose
+   bytes changed (#53618): same replay and keys, the task file renamed
+   over itself before each r, 6 interleaved rounds at load 131-421, ms:
+
+     worker heap         p90    p95    p99
+     256k (runtime)      7.6    13.0   47.3
+     4M                  6.6    10.0   24.6
+
+   256k was worse in 4 of the 6 rounds (median p99 +8.6). Resident size at
+   the end of each run: 4M 287-294 MB, 256k 234-248 MB. The worker stays on
+   4M.
 
    Io: it sends requests and reads answers, and leaves decoding to the
    worker. Its heap changed neither figure beyond the spread between

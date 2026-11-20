@@ -6769,6 +6769,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_write <- Board_idle;
   state.board_listing <- Masc_tui_fetched.Absent;
   state.board_list_reported_error <- None;
+  state.board_list_scroll <- 0;
   state.board_census <- Masc_tui_fetched.Absent;
   state.board_detail <- Board_detail.clear state.board_detail;
   state.board_mode <- Board_list;
@@ -17389,6 +17390,7 @@ let main
         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _
         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _
         | Preset_detail_scroll { confirmation = None; _ } | Keeper_list_scroll _
+        | Board_list_scroll _
         | Context_inspector_scroll _
         | Context_inspector_response_scroll _ | Queue_panel_presented _ | Help_presented) -> false in
     let activity_authority_changed =
@@ -17500,7 +17502,7 @@ let main
          | Some (Resource_scroll _) | Some (Metrics_scroll _) | Some (Approval_detail_scroll _)
          | Some (Link_modal_scroll _)
          | Some (Play_invite_scroll _) | Some (Voice_scroll _) | Some (Preset_detail_scroll _)
-         | Some (Keeper_list_scroll _) | Some (Context_inspector_scroll _)
+         | Some (Keeper_list_scroll _) | Some (Board_list_scroll _) | Some (Context_inspector_scroll _)
          | Some (Context_inspector_response_scroll _) | Some (Queue_panel_presented _)
          | Some Help_presented -> ());
         (* Include picture writes in the post-output input observation. *)
@@ -19312,6 +19314,7 @@ let main
           | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
           | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _
           | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Keeper_list_scroll _
+          | Board_list_scroll _
           | Context_inspector_scroll _ | Context_inspector_response_scroll _
           | Queue_panel_presented _ | Help_presented) -> false in
       let key =
@@ -23001,6 +23004,7 @@ let main
                  | Some (_, Masc_tui_palette.Palette_board_hearth hearth) ->
                      state.board_hearth <- hearth;
                      state.board_cursor <- 0;
+                     state.board_list_scroll <- 0;
                      state.board_mode <- Board_list;
                      goto_surface state ~mailbox:async_messages Board;
                      start_http_refresh ~server_contact state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port:state.port
@@ -27541,6 +27545,7 @@ let main
              (if key = Some "F" then Board_hearth.previous else Board_hearth.next)
                ~current:state.board_hearth ~census:(board_census_values state);
            state.board_cursor <- 0;
+           state.board_list_scroll <- 0;
            state.board_mode <- Board_list;
            report_action state "system"
              (match state.board_hearth with

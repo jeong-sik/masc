@@ -11303,6 +11303,9 @@ type state = {
       returns the ordinary wrapped-row scroll position. *)
   mutable board_history_post_id: string option;
   mutable board_cursor: int;
+  (* Top row of the Board post list window, kept stationary across cursor
+     moves that stay on screen ([Board_list_scroll]). *)
+  mutable board_list_scroll: int;
   mutable msg_find: string;
       (** What [/find] was last given on this pane, or [""] before it is used.
           Kept so the arg-less form continues the same search instead of
@@ -22178,6 +22181,7 @@ let create_state
   board_comment_landing = None;
   board_history_post_id = None;
   board_cursor = 0;
+  board_list_scroll = 0;
   msg_find = "";
   msg_search_generation = Atomic.make 0;
   msg_find_at = None;
@@ -23747,6 +23751,9 @@ type clamped_scroll =
      row once the list scrolled, and choosing a row above it moved the whole
      window: a second press at the same place named another Keeper. *)
   | Keeper_list_scroll of int
+  (* The Board list window, kept stationary across cursor moves within the
+     visible page so stepping up does not scroll the whole table on every press. *)
+  | Board_list_scroll of int
   (* The context inspector's plain shapes are lines the frame lays out of the
      reading it holds, and the frame windows them. The keypress bounds the
      scroll against the same window, but a reading that lands shorter leaves
@@ -23765,6 +23772,7 @@ let approval_detail_viewport_of_reader = function
          | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
          | Resource_scroll _ | Metrics_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Board_list_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _
          | Queue_panel_presented _ | Help_presented)
   | None -> None
@@ -23780,7 +23788,7 @@ let task_detail_of_reader = function
          | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
          | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _
          | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _
-         | Keeper_list_scroll _ | Context_inspector_scroll _ | Context_inspector_response_scroll _
+         | Keeper_list_scroll _ | Board_list_scroll _ | Context_inspector_scroll _ | Context_inspector_response_scroll _
          | Queue_panel_presented _ | Help_presented)
   | None -> None
 
@@ -23795,7 +23803,7 @@ let play_card_of_reader = function
          | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
          | Approval_detail_scroll _ | Link_modal_scroll _
-         | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Board_list_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _
          | Help_presented)
   | None -> None
@@ -23812,6 +23820,7 @@ let queue_owner_of_reader = function
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
          | Approval_detail_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Board_list_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Help_presented)
   | None -> None
 
@@ -23827,6 +23836,7 @@ let help_is_presented = function
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
          | Approval_detail_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Board_list_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _)
   | None -> false
 
@@ -23849,7 +23859,7 @@ let resource_scroll_position = function
   | Planning_confirmation_scroll _ | Planning_detail_scroll _ | Lane_run_detail_scroll _
   | Changes_diff_scroll _ | Repository_changes_diff_scroll _ | Metrics_scroll _
   | Approval_detail_scroll _ | Link_modal_scroll _ | Play_invite_scroll _
-  | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Context_inspector_scroll _
+  | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Board_list_scroll _ | Context_inspector_scroll _
   | Context_inspector_response_scroll _ | Queue_panel_presented _
   | Help_presented -> None
 
@@ -23929,6 +23939,7 @@ let apply_clamped_scroll (state : state) = function
       state.config_scroll <- scroll;
       state.config_document_max_scroll <- max_scroll
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
+  | Board_list_scroll value -> state.board_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
   | Context_inspector_response_scroll value -> state.context_inspector_response_scroll <- value
 

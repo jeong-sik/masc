@@ -994,6 +994,29 @@ let test_config_themes_and_voice_report_drawn_heights () =
   Alcotest.(check bool) "voice drawn height grows with terminal height" true
     (voice_small >= 1 && voice_small < voice_large)
 
+let test_board_list_sticky_scroll () =
+  let posts = List.init 40 board_post in
+  with_size (24, 80) (fun () ->
+    let state = create_state ~workspace:"" ~port:0 () in
+    state.view <- Board;
+    state.board_listing <-
+      Masc_tui_fetched.Ready { bl_query = board_query state; bl_posts = posts };
+    let render_and_apply () =
+      Prim.frame_lists := [];
+      let _frame, clamped = Masc_tui_render_board.render_board_list state in
+      Option.iter (apply_clamped_scroll state) clamped;
+      state.board_list_scroll
+    in
+    state.board_cursor <- 30;
+    let s1 = render_and_apply () in
+    Alcotest.(check bool) "scrolling down to row 30 advances viewport" true (s1 > 0);
+    state.board_cursor <- 29;
+    let s2 = render_and_apply () in
+    Alcotest.(check int) "stepping up inside viewport keeps window stationary" s1 s2;
+    state.board_cursor <- s1 - 1;
+    let s3 = render_and_apply () in
+    Alcotest.(check int) "stepping above viewport top scrolls by one row" (s1 - 1) s3)
+
 let () =
   Alcotest.run "tui render list heights"
     [ ( "reported heights"
@@ -1027,5 +1050,7 @@ let () =
             test_board_read_sidebar_reports_drawn_rows
         ; Alcotest.test_case "Config themes and voice report their drawn heights" `Quick
             test_config_themes_and_voice_report_drawn_heights
+        ; Alcotest.test_case "Board list keeps viewport stationary on in-window cursor moves" `Quick
+            test_board_list_sticky_scroll
         ] )
     ]

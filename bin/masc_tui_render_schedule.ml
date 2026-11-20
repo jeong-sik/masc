@@ -1634,11 +1634,13 @@ let board_id_width = 12
 let board_hearth_width = 13
 let board_author_width = 16
 
-(* Seven holds the Korean header, "게시 후" or "변경 후", and the widest span,
-   "12h43m"; at six the header read "… 후". *)
-let board_age_width = 7
-let board_score_width = 5
-let board_replies_width = 7
+(* Eight holds the Korean header with its active sort arrow ("게시 후↓",
+   "변경 후↓"), English ("MOVED ↓"), and the widest age span ("99d23h"). *)
+let board_age_width = 8
+(* Seven holds "SCORE ↓", "점수 ↓", and grouped vote counts like "▲+1,234". *)
+let board_score_width = 7
+(* Eight holds "REPLIES↓" and "댓글 ↓". *)
+let board_replies_width = 8
 
 (* The title is what the list is read for, so it is the last thing a narrow
    list takes cells from. Thirty cells hold about fifteen Hangul syllables,
@@ -1694,12 +1696,22 @@ type board_column =
   | Board_score
   | Board_replies
 
+type board_sort_column =
+  | Sort_none
+  | Sort_age
+  | Sort_score
+  | Sort_replies
+
+(* Fixed-width scan spine on the left (mark, age, author, hearth), then the
+   flexible title flowing directly out of who/when/where, with right-aligned
+   numeric counters on the far right so wide terminals never leave a blank gulf
+   between short titles and their author/time metadata. *)
 let board_columns =
   [ Board_mark
-  ; Board_title
+  ; Board_age
   ; Board_author
   ; Board_hearth
-  ; Board_age
+  ; Board_title
   ; Board_score
   ; Board_replies
   ]
@@ -1715,22 +1727,36 @@ let board_column_width = function
   | Board_score -> board_score_width
   | Board_replies -> board_replies_width
 
-(* What a narrow list gives up, first to go first (operator, 2026-09-28).
-   - The hearth: the census row above the list already names the hearths and
-     their counts.
-   - The replies and then the score: counts a reader can do without before
-     knowing who wrote the post.
-   - The author last of all.
-   The mark, the title and the age never go: the kind of post, what it is
-   about, and how long ago it moved are what a row is for. *)
-let board_drop_order =
-  [ Board_hearth; Board_replies; Board_score; Board_author ]
+(* What a narrow list gives up, first to go first (operator, 2026-09-28),
+   deferring the active sort column to the end so sorting by [discussed] or
+   [hot] keeps its governing column visible at 80 columns.
+   The mark, the title and the age never go. *)
+let board_drop_order = function
+  | Sort_replies -> [ Board_hearth; Board_score; Board_author; Board_replies ]
+  | Sort_score -> [ Board_hearth; Board_replies; Board_author; Board_score ]
+  | Sort_none | Sort_age -> [ Board_hearth; Board_replies; Board_score; Board_author ]
 
-let board_layout ~inner_width =
+let board_layout ~hide_hearth ~sort_column ~inner_width =
+  let columns =
+    if hide_hearth then
+      List.filter (fun col -> col <> Board_hearth) board_columns
+    else board_columns
+  in
   Table.fit ~inner_width ~width:board_column_width ~flex:Board_title
-    ~drop_order:board_drop_order board_columns
+    ~drop_order:(board_drop_order sort_column) columns
 
-let board_cell ~ko ~styles ~age_header ~title_width values = function
+let board_title_header ~ko ~title_width ~dropped =
+  let base = if ko then "제목" else "TITLE" in
+  match Table.dropped_columns_badge ~ko dropped with
+  | None -> base
+  | Some badge ->
+      let base_w = Masc_tui_message_layout.display_width base in
+      let badge_w = Masc_tui_message_layout.display_width badge in
+      if base_w + 2 + badge_w <= title_width then
+        base ^ String.make (title_width - base_w - badge_w) ' ' ^ badge
+      else base
+
+let board_cell ~sort_column ~dropped ~ko ~styles ~age_header ~title_width values = function
   | Board_mark ->
       (* The kind mark is a mark, like Planning's proof. A name would be
          wider than the cell holding it, and it carries its own dress: the
@@ -1743,26 +1769,42 @@ let board_cell ~ko ~styles ~age_header ~title_width values = function
       Table.cell ~style:styles.bstyle_author ~header:(if ko then "작성자" else "AUTHOR")
         ~width:board_author_width values.brow_author
   | Board_title ->
-      Table.cell ~fold:Table.Fold_tail ~header:(if ko then "제목" else "TITLE") ~width:title_width
+      let header = board_title_header ~ko ~title_width ~dropped in
+      Table.cell ~fold:Table.Fold_tail ~header ~width:title_width
         values.brow_title
   | Board_age ->
       (* Right, the way Planning's age reads. A span is a number and the two
          screens are read one after the other; left on one and right on the
          other is the drift this description exists to close. *)
+      let header =
+        match sort_column with
+        | Sort_age -> age_header ^ (if ko then "\xe2\x86\x93" else " \xe2\x86\x93")
+        | Sort_none | Sort_score | Sort_replies -> age_header
+      in
       Table.cell ~align:Table.Right ~style:styles.bstyle_age
-        ~header:age_header ~width:board_age_width values.brow_age
+        ~header ~width:board_age_width values.brow_age
   | Board_score ->
-      Table.cell ~align:Table.Right ~style:styles.bstyle_score ~header:(if ko then "점수" else "SCORE")
+      let header =
+        match sort_column with
+        | Sort_score -> if ko then "점수 \xe2\x86\x93" else "SCORE \xe2\x86\x93"
+        | Sort_none | Sort_age | Sort_replies -> if ko then "점수" else "SCORE"
+      in
+      Table.cell ~align:Table.Right ~style:styles.bstyle_score ~header
         ~width:board_score_width values.brow_score
   | Board_replies ->
-      Table.cell ~align:Table.Right ~style:styles.bstyle_replies ~header:(if ko then "댓글" else "REPLIES")
+      let header =
+        match sort_column with
+        | Sort_replies -> if ko then "댓글 \xe2\x86\x93" else "REPLIES\xe2\x86\x93"
+        | Sort_none | Sort_age | Sort_score -> if ko then "댓글" else "REPLIES"
+      in
+      Table.cell ~align:Table.Right ~style:styles.bstyle_replies ~header
         ~width:board_replies_width values.brow_replies
 
-let board_cells ?(styles = board_no_styles) ~ko ~age_header
+let board_cells ?(sort_column = Sort_none) ?(dropped = 0) ?(styles = board_no_styles) ~ko ~age_header
     ~(layout : board_column Table.layout) values =
   List.map
-    (board_cell ~ko ~styles ~age_header ~title_width:layout.Table.flex_width
-       values)
+    (board_cell ~sort_column ~dropped ~ko ~styles ~age_header
+       ~title_width:layout.Table.flex_width values)
     layout.Table.shown
 
 (* How long ago the time the caller chose was, or a dash when the post carried
@@ -1791,12 +1833,18 @@ let board_age_text ~now = function
 let sidebar_row_label ~about ~apart =
   match apart with None -> about | Some apart -> about ^ "  " ^ apart
 
-let board_header_row ~ko ~age_header ~layout =
-  Table.header_row (board_cells ~ko ~age_header ~layout board_no_values)
+let board_header_row ~sort_column ~ko ~age_header ~layout =
+  Table.header_row (board_cells ~sort_column ~ko ~age_header ~layout board_no_values)
 
-let board_header_row_with_dropped ~ko ~inner_width ~age_header ~layout =
-  Table.header_row_with_dropped ~ko ~inner_width ~dropped:layout.Table.dropped
-    (board_cells ~ko ~age_header ~layout board_no_values)
+let board_header_row_with_dropped ~sort_column ~ko ~inner_width ~age_header ~layout =
+  let cells =
+    board_cells ~sort_column ~dropped:layout.Table.dropped ~ko ~age_header ~layout
+      board_no_values
+  in
+  if Table.used_width cells > inner_width then
+    Table.header_row_with_dropped ~ko ~inner_width ~dropped:layout.Table.dropped
+      (board_cells ~sort_column ~dropped:0 ~ko ~age_header ~layout board_no_values)
+  else Table.header_row cells
 
 let board_row ?close ~ko ~styles ~age_header ~layout values =
   Table.row ?close (board_cells ~ko ~styles ~age_header ~layout values)

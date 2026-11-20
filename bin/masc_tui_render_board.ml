@@ -72,9 +72,36 @@ let board_document_markdown ~width body =
    for the widest [span_text] draws, "99d23h": a board's oldest live threads are
    days old, so the day tier is the one it holds. *)
 
-(* The header and rows use one title-first column layout inside the frame. *)
-let board_layout ~cols =
-  Render_schedule.board_layout ~inner_width:(max 1 (framed_inner_width cols - 2))
+(* The header and rows use one aligned column layout inside the frame. *)
+let board_layout ~hide_hearth ~sort_column ~cols =
+  Render_schedule.board_layout ~hide_hearth ~sort_column
+    ~inner_width:(max 1 (framed_inner_width cols - 2))
+
+(* Deterministic per-author identity colour on the Board, lifted for WCAG 4.5:1
+   against the terminal's ground. People stand out in bold [info] matching the
+   [@] mark; system posts recede so human and keeper voices pop; keepers and
+   automations hash deterministically across four non-red palette hues so
+   every author forms a scannable colour column without colliding with [bad]. *)
+let board_author_style ~kind author =
+  match kind with
+  | Some Post_by_person -> Ansi.bold ^ Theme.info ()
+  | Some Post_by_system -> Theme.recede ()
+  | Some (Post_by_automation | Post_kind_unknown _) | None ->
+      let len = String.length author in
+      let rec hash acc i =
+        if i >= len then acc
+        else hash (((acc * 31) + Char.code author.[i]) land 0x3fffffff) (i + 1)
+      in
+      (match hash 0 0 mod 4 with
+       | 0 -> Theme.category Theme.Slot_1
+       | 1 -> Theme.category Theme.Slot_2
+       | 2 -> Theme.ok ()
+       | _ -> Theme.warn ())
+
+let board_sort_column_of_sort = function
+  | Board_hot | Board_trending -> Render_schedule.Sort_score
+  | Board_recent | Board_updated -> Render_schedule.Sort_age
+  | Board_discussed -> Render_schedule.Sort_replies
 
 (* Colour here, the glyph in {!Masc_tui_board_kind_mark}, which the help sheet
    reads from the same function. Nothing explained these marks anywhere before:
@@ -615,11 +642,16 @@ let render_board_list (state : state) =
                 | Some _ | None -> Masc_tui_value.Position.row ~selected ~total:count))
   in
 
-  let layout = board_layout ~cols in
+  let hide_hearth = Option.is_some query.bq_hearth in
+  let sort_column = board_sort_column_of_sort query.bq_sort in
+  let layout = board_layout ~hide_hearth ~sort_column ~cols in
+  let drawn_list_scroll = ref 0 in
   (* The frame, its fill and the footer are the contract's: this surface
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
-  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"board-list"
+  surface_chrome
+    ~overflow:(Self_scrolled (fun () -> Board_list_scroll !drawn_list_scroll))
+    ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"board-list"
     ~title:header ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false state.view)
     ~body:(fun ~budget c ->
       (* Every post still occupies one row. Count the headings drawn above
@@ -633,7 +665,9 @@ let render_board_list (state : state) =
                sheet under [?]. *)
             c.push_styled ~style:(Theme.recede ())
               (board_heading_with_tail ~cols
-                 (Printf.sprintf (if state.ui_language = Lang_ko then "%s정렬 [s]: %s" else "%sSort [s]: %s")
+                 (Printf.sprintf
+                    (if state.ui_language = Lang_ko then "%s정렬 [s]: %s"
+                     else "%sSort [s]: %s")
                     (match board_posts_status state with None -> "" | Some status -> status ^ " · ")
                     (board_sort_text state query.bq_sort))
                  (words state " · H:게시판 선택" " · H:choose hearth")))
@@ -641,7 +675,7 @@ let render_board_list (state : state) =
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
               ("  "
-               ^ Render_schedule.board_header_row_with_dropped ~ko
+               ^ Render_schedule.board_header_row_with_dropped ~sort_column ~ko
                    ~inner_width:(max 0 (framed_inner_width cols - 2))
                    ~age_header ~layout))
         ; c.push_divider
@@ -673,10 +707,16 @@ let render_board_list (state : state) =
           max 0 (budget - List.length heading - error_rows)
         in
         let scroll_offset =
-          if cursor >= content_height then
-            cursor - content_height + 1
-          else 0
+          if content_height = 0 then 0
+          else
+            let normalized =
+              Masc_tui_scroll.normalize ~count ~height:content_height
+                state.board_list_scroll
+            in
+            Masc_tui_scroll.ensure_visible ~cursor ~height:content_height
+              normalized
         in
+        drawn_list_scroll := scroll_offset;
         (* One clock read for the whole page, so two rows drawn in the same
            frame cannot report ages a tick apart. *)
         let now_unix = Unix.gettimeofday () in
@@ -703,14 +743,14 @@ let render_board_list (state : state) =
               | _ -> ""
             in
             let score_text =
-              if p.bp_votes > 0 then Printf.sprintf "▲%+d" p.bp_votes
-              else if p.bp_votes < 0 then Printf.sprintf "▼%d" p.bp_votes
-              else " 0"
+              if p.bp_votes > 0 then
+                "\xe2\x96\xb2" ^ Masc_tui_value.Count.increase p.bp_votes
+              else if p.bp_votes < 0 then
+                "\xe2\x96\xbc" ^ Masc_tui_value.Count.decrease (-p.bp_votes)
+              else "0"
             in
             let replies_text =
-              if p.bp_comment_count > 0 then
-                Printf.sprintf "%d" p.bp_comment_count
-              else "0"
+              Masc_tui_value.Count.grouped p.bp_comment_count
             in
             (* task-1758/#39356: the list row has no spare column for
                closed state, so it goes into the title text itself, the
@@ -744,7 +784,7 @@ let render_board_list (state : state) =
               { Render_schedule.bstyle_hearth =
                   if String.equal hearth_text "" then Theme.recede ()
                   else Theme.info ()
-              ; bstyle_author = Theme.ok ()
+              ; bstyle_author = board_author_style ~kind:p.bp_kind p.bp_author
               ; bstyle_age = Theme.recede ()
               ; bstyle_score = board_score_style p.bp_votes
               ; bstyle_replies =
@@ -920,25 +960,26 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
   box_line buf cols title_line;
   let author_chip =
     let author_name = Terminal_text.single_line post.bp_author in
+    let author_style = board_author_style ~kind:post.bp_kind post.bp_author in
     match post.bp_kind with
     | Some Post_by_automation ->
         Printf.sprintf
           (if state.ui_language = Lang_ko then "%s@%s%s %s[자동 게시]%s"
            else "%s@%s%s %s[Automation]%s")
-          (Theme.accent ())
+          author_style
           author_name
           Ansi.reset
           (Theme.warn ())
           Ansi.reset
     | Some Post_by_person ->
         Printf.sprintf (if state.ui_language = Lang_ko then "%s@%s%s %s[작성자]%s" else "%s@%s%s %s[Author]%s")
-          (Theme.accent ())
+          author_style
           author_name
           Ansi.reset
           (Theme.info ())
           Ansi.reset
     | Some (Post_by_system | Post_kind_unknown _) | None -> Printf.sprintf "%s@%s%s"
-          (Theme.accent ())
+          author_style
           author_name
           Ansi.reset
   in
@@ -993,7 +1034,8 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
       body_columns = body_wrap_cols; comment_columns = comment_wrap_cols;
       language = state.ui_language;
       styles = [ Theme.info (); Theme.warn (); Theme.bad (); Theme.recede ();
-                 Theme.accent () ];
+                 Theme.accent (); Theme.ok ();
+                 Theme.category Theme.Slot_1; Theme.category Theme.Slot_2 ];
       table_frame = !table_frame_enabled }
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.pane_prep" prep_started;
@@ -1184,6 +1226,20 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                      " " ^ (Theme.warn ()) ^ (words state "[키퍼]" "[Keeper]") ^ Ansi.reset
                    else ""
                  in
+                 let author_style =
+                   let kind =
+                     if String.equal author (Terminal_text.single_line post.bp_author) then
+                       post.bp_kind
+                     else
+                       List.find_map
+                         (fun (other : board_post) ->
+                           if String.equal (Terminal_text.single_line other.bp_author) author
+                           then other.bp_kind
+                           else None)
+                         (board_posts state)
+                   in
+                   board_author_style ~kind c.bc_author
+                 in
                  let score = board_comment_score c.bc_votes in
                  (* Every row below is drawn after the comment gutter, which
                     marks the selected comment; it is not part of the text,
@@ -1191,7 +1247,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                  let heading =
                    Printf.sprintf "%s%s@%s%s%s  %s%s%s  %s%s%s"
                      rail
-                     (Theme.accent ())
+                     author_style
                      author
                      Ansi.reset
                      author_role
@@ -1231,7 +1287,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                        else
                          let identity =
                            Printf.sprintf "%s%s@%s%s%s  %s%s%s" rail
-                             (Theme.accent ())
+                             author_style
                              author Ansi.reset author_role
                              (board_score_style score)
                              (board_score_text score)
@@ -1404,11 +1460,14 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
     in
     find 0 (board_posts state)
   in
+  let narrowed_hearth = Option.is_some (board_posts_query state).bq_hearth in
   let format_sidebar_post (post : board_post) =
     let hearth_prefix =
-      match Terminal_text.optional_single_line post.bp_hearth with
-      | Some h when not (String.equal h "") -> "#" ^ h ^ " "
-      | _ -> ""
+      if narrowed_hearth then ""
+      else
+        match Terminal_text.optional_single_line post.bp_hearth with
+        | Some h when not (String.equal h "") -> "#" ^ h ^ " "
+        | _ -> ""
     in
     let vote_prefix =
       if post.bp_votes > 0 then Masc_tui_value.Count.increase post.bp_votes ^ " "

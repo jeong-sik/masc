@@ -490,7 +490,7 @@ let docked_preview ~width ~height ?(indent = 0) ?eyebrow ?title ?meta
     let bottom_rows = match footer_row with Some r -> [ r ] | None -> [] in
     let body_budget = max 0 (height - top_count - List.length bottom_rows) in
     let fit_body_row row =
-      let plain = Theme.strip_sgr row in
+      let plain = Masc_tui_theme.strip_sgr row in
       let clean_plain = sanitize plain in
       if not (String.equal plain clean_plain) then
         margin ^ clamp_plain ~max_cells:content_w clean_plain

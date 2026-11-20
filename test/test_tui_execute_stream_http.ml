@@ -1220,6 +1220,108 @@ let test_standalone_observer_keeps_auth_and_supplied_session_checks env =
     Server_mcp_transport_http.forget_mcp_session supplied_id)
 ;;
 
+let test_unknown_session_repeated_gets_never_trigger_cooldown env =
+  let module Transport = Server_mcp_transport_http in
+  Masc_test_deps.with_process_env "MASC_SSE_RECONNECT_MIN_INTERVAL_S" (Some "60") @@ fun () ->
+  with_standalone_observer_server env (fun ~workspace:_ ~state:_ ~token ~sw:_ ~clock ~port ->
+    let client_count = Masc.Sse.client_count () in
+    let profiles_before = Server_mcp_transport_http_session.For_testing.profile_count () in
+    let unknown_id = "unknown-repeat-" ^ string_of_int (Random.bits ()) in
+    let base_headers = ["Accept", "text/event-stream"; "Authorization", "Bearer " ^ token] in
+    let cases =
+      [ "first unknown agent header", "/mcp", ("Mcp-Session-Id", unknown_id) :: base_headers
+      ; "second unknown agent cookie", "/mcp", ("Cookie", "mcp-session-id=" ^ unknown_id) :: base_headers
+      ; "first unknown observer header", "/mcp?sse_kind=observer", ("Mcp-Session-Id", unknown_id) :: base_headers
+      ; "second unknown observer cookie", "/mcp?sse_kind=observer", ("Cookie", "mcp-session-id=" ^ unknown_id) :: base_headers
+      ] in
+    List.iter (fun (label, target, headers) ->
+      let url = Printf.sprintf "http://127.0.0.1:%d%s" port target in
+      match Masc_http_client.get_response_sync ~clock ~timeout_sec:3. ~url ~headers () with
+      | Error detail -> Alcotest.failf "%s: %s" label detail
+      | Ok response ->
+        Alcotest.(check int) (label ^ " stays 404") 404 response.status;
+        Alcotest.(check int) (label ^ ": no client registered") client_count (Masc.Sse.client_count ()))
+      cases;
+    Alcotest.(check bool) "unknown id stays absent from session store" true
+      (Option.is_none (Masc.Session.McpSessionStore.peek unknown_id));
+    Alcotest.(check int) "unknown id leaves no profile entry" profiles_before
+      (Server_mcp_transport_http_session.For_testing.profile_count ());
+    Transport.forget_mcp_session unknown_id)
+;;
+
+let test_known_session_auth_failure_preserves_cooldown_and_reconnect_limits env =
+  let module Transport = Server_mcp_transport_http in
+  Masc_test_deps.with_process_env "MASC_SSE_RECONNECT_MIN_INTERVAL_S" (Some "60") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_SSE_CONNECT_MAX_IN_WINDOW" (Some "-1") @@ fun () ->
+  with_standalone_observer_server env (fun ~workspace ~state:_ ~token ~sw ~clock ~port ->
+    let client_count = Masc.Sse.client_count () in
+    let known_id = "known-session-" ^ string_of_int (Random.bits ()) in
+    let other_token =
+      match Auth.create_token workspace ~agent_name:"other-session-agent" ~role:Masc_domain.Admin with
+      | Ok (tok, _) -> tok
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+    in
+    ignore (Masc.Session.McpSessionStore.get_or_create ~id:known_id ~agent_name:"waiting-observer" ());
+    Transport.remember_protocol_version known_id Transport.mcp_protocol_version_default;
+    Fun.protect
+      ~finally:(fun () ->
+        Eio.Cancel.protect (fun () -> Transport.stop_sse_session known_id);
+        ignore (Masc.Session.McpSessionStore.remove known_id);
+        Transport.forget_mcp_session known_id;
+        ignore (Transport.reap_stale_guards ()))
+      (fun () ->
+        let url = Printf.sprintf "http://127.0.0.1:%d/mcp" port in
+        let request_sync label auth_header =
+          match Masc_http_client.get_response_sync ~clock ~timeout_sec:3. ~url
+                  ~headers:["Accept", "text/event-stream"; "Mcp-Session-Id", known_id;
+                            "Authorization", "Bearer " ^ auth_header] () with
+          | Ok response -> response
+          | Error detail -> Alcotest.failf "%s: %s" label detail
+        in
+        let forged = request_sync "forged token on known session" "forged" in
+        Alcotest.(check int) "forged bearer returns 401" 401 forged.status;
+        Alcotest.(check int) "forged bearer registers no SSE client" client_count (Masc.Sse.client_count ());
+        let wrong_owner = request_sync "mismatched agent token on known session" other_token in
+        Alcotest.(check int) "wrong owner token returns 404" 404 wrong_owner.status;
+        Alcotest.(check int) "wrong owner registers no SSE client" client_count (Masc.Sse.client_count ());
+        let opened, publish_opened = Eio.Promise.create () in
+        let ended, publish_ended = Eio.Promise.create () in
+        let await promise = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await promise) in
+        Eio.Fiber.fork ~sw (fun () ->
+          let result = Masc_http_client.get_stream ~clock ~idle_timeout_sec:3. ~url
+              ~headers:["Accept", "text/event-stream"; "Mcp-Session-Id", known_id;
+                        "Authorization", "Bearer " ^ token]
+              ~on_response:(fun ~status ~headers:_ ->
+                ignore (Eio.Promise.try_resolve publish_opened status))
+              ~on_chunk:(fun _ -> ()) () in
+          Eio.Promise.resolve publish_ended result);
+        let first_status = await opened in
+        Alcotest.(check int) "auth failures did not consume reconnect cooldown" 200 first_status;
+        Server_mcp_transport_http_conn.stop_sse_session_preserve_guard known_id;
+        (match await ended with
+         | Ok (Masc_http_client.Pool.Streamed _) -> ()
+         | Ok (Masc_http_client.Pool.Buffered _) -> Alcotest.fail "session stream was buffered"
+         | Error detail -> Alcotest.failf "session stream close failed: %s" detail);
+        let reconnect = request_sync "valid reconnect within cooldown" token in
+        Alcotest.(check int) "immediate reconnect returns 429" 429 reconnect.status;
+        let reason =
+          reconnect.body
+          |> Yojson.Safe.from_string
+          |> Yojson.Safe.Util.member "reason"
+          |> Yojson.Safe.Util.to_string
+        in
+        Alcotest.(check string) "429 reason is session_cooldown"
+          (Sse_reject_reason.to_label Sse_reject_reason.Session_cooldown) reason;
+        let session_header =
+          List.find_map (fun (key, value) ->
+            if String.equal (String.lowercase_ascii key) "mcp-session-id"
+            then Some value else None) reconnect.headers
+        in
+        Alcotest.(check (option string)) "429 retains known MCP session id"
+          (Some known_id) session_header;
+        Alcotest.(check int) "429 reconnect leaves client count clean" client_count (Masc.Sse.client_count ())))
+;;
+
 (* Exercise the real MCP GET handler over H1. Authentication is supplied by
    this fixture; the assertion is that ambiguous cursors stop before SSE
    registration. *)
@@ -1468,6 +1570,7 @@ let test_retired_observer_close_keeps_successor env =
 ;;
 
 let test_play_observer_reconnect_keeps_replacement_presence env =
+  Masc_test_deps.with_process_env "MASC_SSE_RECONNECT_MIN_INTERVAL_S" (Some "0") @@ fun () ->
   let module Transport = Server_mcp_transport_http in
   let workspace = Masc_test_deps.setup_test_workspace () in
   let session_id = "play-observer-" ^ string_of_int (Random.bits ()) in
@@ -2153,6 +2256,10 @@ let () =
             test_standalone_guard_expires_each_boundary_entry_once
         ; case "standalone Observer keeps auth and supplied-session checks"
             test_standalone_observer_keeps_auth_and_supplied_session_checks
+        ; case "repeated unknown session GETs never trigger reconnect cooldown"
+            test_unknown_session_repeated_gets_never_trigger_cooldown
+        ; case "known session auth failures preserve cooldown and reconnect limits"
+            test_known_session_auth_failure_preserves_cooldown_and_reconnect_limits
         ; case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes
         ; case "unusable replay retries without the requested cursor" test_observer_retries_without_cursor
         ; case "valid and unadvertised live streams still open" test_observer_accepts_valid_and_unadvertised_live_streams

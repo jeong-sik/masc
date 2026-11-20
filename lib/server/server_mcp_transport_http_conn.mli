@@ -79,7 +79,9 @@ val register_sse_conn :
 
 val stop_sse_session_before : client_id:int -> string -> unit
 (** Close the current connection only when its client id is strictly lower than
-    [client_id]. A newer or equal-id successor is never closed. *)
+    [client_id]. A newer or equal-id successor is never closed. Unlike
+    {!stop_sse_session}, this preserves the session's connect-rate guard state
+    so an admitted connection's cooldown remains armed. *)
 
 val register_sse_conn_if_newer :
   session_id:string -> info:sse_conn_info -> bool

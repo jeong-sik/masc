@@ -443,6 +443,7 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
     Keeper_official_client_session_store.move_aside
       ~base_path
       ~keeper_name:u.keeper
+      ~binding_path:u.path
       ~rejected_path
     |> Result.map (fun () -> u.path, rejected_path, None)
     |> Result.map_error (fun error ->

@@ -509,9 +509,10 @@ let turn_record_store =
 
 (* The official-client session store decodes with the same exact-field
    contract the memory snapshot and TurnRecord use, and it lives on disk per
-   keeper. [load] never turns malformed state into a fresh session, so every
-   runtime that plans a claim refuses the turn. The traversal is the store's
-   own [stored_bindings], which boot reconcile reads too. *)
+   keeper (primary [session.json] plus retained [runtimes/*.json] copies).
+   [load] never turns malformed state into a fresh session, so any runtime
+   that plans a claim against a malformed copy refuses the turn. The traversal
+   is the store's own [stored_bindings], which boot reconcile reads too. *)
 let official_client_session_store =
   { store = "official-client session state"
   ; on_refusal =

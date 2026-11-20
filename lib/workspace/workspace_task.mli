@@ -29,7 +29,10 @@ val delete_task_r : config -> task_id:string -> task_delete_outcome Masc_domain.
     [current_task] cache that still points at it after the backlog commit.
     The backlog lock is held through Goal-link cleanup. An already-absent Task
     retries copy/link/cache settlement without incrementing the backlog revision.
-    [Error] means no deletion committed in this call. [Task_delete_cleanup_failed]
+    [Error (Masc_domain.Task (Masc_domain.Task_error.InvalidId _))] is
+    returned before acquiring the backlog lock or writing any receipt when
+    [task_id] fails {!Validation.Task_id.validate}. Other [Error] results mean
+    no deletion committed in this call. [Task_delete_cleanup_failed]
     means the Task is absent but listed settlement obligations remain retryable.
     This is not a cross-file crash-atomic transaction. *)
 

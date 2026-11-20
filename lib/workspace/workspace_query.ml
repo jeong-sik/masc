@@ -125,7 +125,9 @@ let read_task_inspection_r config ~task_id =
          match found with
          | Some task -> Ok (Inspected_task {task;location=Task_backlog})
          | None ->
-           match List.filter (fun receipt -> receipt.deleted_task_id=task_id) backlog.task_deletion_receipts with
+           match List.filter (fun receipt ->
+             String.equal (Masc_domain.task_deletion_task_id_to_string receipt.deleted_task_id) task_id)
+             backlog.task_deletion_receipts with
            | [] -> Ok Task_unobserved
            | [receipt] -> Ok (Task_deletion_recorded receipt)
            | _ -> Error "backlog contains duplicate requested Task deletion records")

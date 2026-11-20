@@ -368,11 +368,55 @@ let test_old_deletion_cannot_remove_reused_task_identity () =
     Alcotest.(check string) "new Task links preserved" links (Fs_compat.load_file (Workspace_goal_index.goal_task_links_path config)))
 ;;
 
+let test_delete_rejects_invalid_task_id_without_corrupting_backlog () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let before = Workspace.read_backlog config in
+    List.iter
+      (fun bad_id ->
+        match Workspace.delete_task_r config ~task_id:bad_id with
+        | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidId _)) -> ()
+        | Ok _ -> Alcotest.failf "expected InvalidId for %S, got Ok" bad_id
+        | Error error ->
+          Alcotest.failf "expected InvalidId for %S, got %s" bad_id (Masc_domain.show_masc_error error))
+      [ ""; "   "; "../escape"; "task 1" ];
+    let after = Workspace.read_backlog config in
+    Alcotest.(check int) "invalid deletes did not bump backlog version" before.version after.version;
+    Alcotest.(check int) "no deletion receipts written" 0 (List.length after.task_deletion_receipts);
+    (match Workspace.deletion_receipts_r config with
+     | Ok { receipts = []; _ } -> ()
+     | Ok _ -> Alcotest.fail "expected empty deletion receipts"
+     | Error message -> Alcotest.fail ("deletion_receipts_r failed: " ^ message));
+    List.iter
+      (fun bad_id ->
+        let backlog_json = Workspace.read_backlog config |> Masc_domain.backlog_to_yojson in
+        let fields = match backlog_json with `Assoc fields -> fields | _ -> Alcotest.fail "backlog object" in
+        let bad_receipt =
+          `Assoc
+            [ "deletion_id", `String "delete-bad"
+            ; "task_id", `String bad_id
+            ; "requested_at", `String "2026-09-09T00:00:00Z"
+            ; "phase", `String "cleanup_required"
+            ; "cleanup_errors", `List []
+            ]
+        in
+        let tampered =
+          `Assoc
+            (("task_deletion_receipts", `List [ bad_receipt ])
+             :: List.remove_assoc "task_deletion_receipts" fields)
+        in
+        match Masc_domain.backlog_of_yojson tampered with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.failf "backlog_of_yojson unexpectedly accepted invalid task_id %S" bad_id)
+      [ ""; "   "; "../escape"; "task 1" ])
+;;
+
 let () =
   Alcotest.run
     "Workspace task delete"
     [ ( "delete"
-      , [ Alcotest.test_case "old deletion identity cannot remove a new Task" `Quick test_old_deletion_cannot_remove_reused_task_identity
+      , [ Alcotest.test_case "rejects invalid task_id without corrupting backlog" `Quick test_delete_rejects_invalid_task_id_without_corrupting_backlog
+        ; Alcotest.test_case "old deletion identity cannot remove a new Task" `Quick test_old_deletion_cannot_remove_reused_task_identity
         ; Alcotest.test_case "deletion receipt survives a fresh store read" `Quick test_deletion_receipt_survives_reload
         ; Alcotest.test_case "contradictory receipt is rejected without rewriting" `Quick test_contradictory_receipt_preserves_source
         ; Alcotest.test_case "deletion retires only its pending repair obligations" `Quick test_delete_retires_only_its_pending_rejections

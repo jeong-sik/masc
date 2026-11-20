@@ -1,6 +1,6 @@
 type t =
   | Answering
-  | Failing of { failures : int; retry_at : float; retry_wall_at : float }
+  | Failing of { failures : int; retry_at : Masc_tui_wake.Mono.t; retry_wall_at : float }
   | Recovered of { failures : int }
 
 type ask = Revalidate | Operator_key | Owed_pass
@@ -19,7 +19,8 @@ let probe_failed ~retry_s ~max_retry_s ~now ~wall_now t =
        | Answering -> 0)
   in
   let wait = Float.min max_retry_s (retry_s *. Float.pow 2.0 (float_of_int (failures - 1))) in
-  Failing { failures; retry_at = now +. wait; retry_wall_at = wall_now +. wait }
+  Failing
+    { failures; retry_at = Masc_tui_wake.Mono.after now wait; retry_wall_at = wall_now +. wait }
 
 let pass_answered (_ : t) = Answering
 
@@ -39,7 +40,7 @@ let next_try = function
 
 let due ~now = function
   | Failing { retry_at; _ } ->
-      Masc_tui_wake.reached Masc_tui_wake.Refresh_retry ~now ~at:retry_at
+      Masc_tui_wake.reached_mono Masc_tui_wake.Refresh_retry ~now ~at:retry_at
   | Recovered _ -> true
   | Answering -> false
 

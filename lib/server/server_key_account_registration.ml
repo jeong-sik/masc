@@ -84,7 +84,7 @@ let register ~(person : Login.person) ~base_path ~integration_id key =
        what comes after the record: from then on the list of the person
        names the account, and a verification, a turn or a removal of it
        answers that a call runs until the files are there. *)
-    Login.one_call_of id ~busy:Id_not_usable (fun in_call ->
+    Runtime_account_call.one_call_of id ~busy:Id_not_usable (fun in_call ->
       let* generation = recorded person id ~integration_id in
       match made person ~base_path id ~generation key with
       | Ok () -> Ok id

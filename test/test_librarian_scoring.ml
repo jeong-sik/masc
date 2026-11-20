@@ -4,7 +4,8 @@
    The seven are the ways a slot has been seen to answer: a sound answer, an
    answer that changes nothing, an answer in a code fence, an answer to
    another question, a merge that loses what it merged, a merge that keeps
-   it, and an answer with one op that names a fact it was never shown.
+   it, and an answer with one op that names a fact it was never shown. None
+   of them is about the release owner, so each answer that is read keeps it.
 
    A change to the scorer changes the table at the end of this file, so it
    shows in review as a change to what a prompt is measured against. *)
@@ -50,6 +51,7 @@ let case : Scoring.case =
   ; planted = [ "8935" ]
   ; must_keep =
       [ Types.memory_id port, [ "port" ]; Types.memory_id probe, [ "probe"; "every minute" ] ]
+  ; must_remain = [ "platform team" ]
   }
 ;;
 
@@ -140,6 +142,7 @@ let test_a_token_memory_already_holds () =
     ; facts = [ known; owner ]
     ; planted = [ "8935"; "9000" ]
     ; must_keep = []
+    ; must_remain = []
     }
   in
   let reading label text =
@@ -161,6 +164,54 @@ let test_a_token_memory_already_holds () =
     (tally.planted, tally.recovered)
 ;;
 
+(* The Keeper's turn was not shown the deploy rules, and it said it knew
+   nothing of them. An answer that revises each rule into that saying leaves
+   Memory with none of them. The units planted nothing and the ops are not
+   merges, so the other numbers stay at 0: only what must remain shows the
+   loss. *)
+let test_an_answer_that_forgets_what_the_turn_was_not_shown () =
+  let cutoff = held "deploys stop at 15:00 on Friday" in
+  let approvals = held "a release needs two approvals" in
+  let hotfix = held "a hotfix goes through the on-call lead" in
+  let case : Scoring.case =
+    { name = "the turn knew nothing"
+    ; question
+    ; shown =
+        { memory =
+            Some
+              [ "m1", Types.memory_id cutoff
+              ; "m2", Types.memory_id approvals
+              ; "m3", Types.memory_id hotfix
+              ]
+        ; units = [ "u1", 10 ]
+        }
+    ; facts = [ cutoff; approvals; hotfix ]
+    ; planted = []
+    ; must_keep = []
+    ; must_remain = [ "15:00"; "two approvals"; "on-call lead" ]
+    }
+  in
+  let reading label text =
+    match Scoring.score case text with
+    | Read reading -> reading
+    | Thrown_away rejection ->
+      failf "%s: thrown away as %s" label (Masc.Librarian_answer.rejection_kind rejection)
+  in
+  let nothing_known = "the provided context lacks information about the deploy rules" in
+  let forgot =
+    reading "forgetting"
+      (answer [ revise "m1" nothing_known; revise "m2" nothing_known; revise "m3" nothing_known ])
+  in
+  check bool "the answer changed Memory" true forgot.changed;
+  check (pair int int) "nothing to recover, no merge" (0, 0)
+    (forgot.recovered, forgot.merge_expected);
+  check (pair int int) "three must remain, none does" (3, 0)
+    (forgot.remain_expected, forgot.remain_kept);
+  let kept = reading "changes nothing" changes_nothing in
+  check (pair int int) "an answer that changes nothing keeps all three" (3, 3)
+    (kept.remain_expected, kept.remain_kept)
+;;
+
 let pinned =
   {|answers 7
 thrown away 2
@@ -172,6 +223,7 @@ ops left out 1
 answers that changed Memory 4
 planted 7, in Memory afterwards 4
 merged away 6, kept by the merge 3
+must remain 5, in Memory afterwards 5
 |}
 ;;
 
@@ -197,6 +249,8 @@ let () =
       , [ test_case "each kind of answer" `Quick test_each_answer
         ; test_case "a revise is not a merge" `Quick test_revise_is_not_scored_as_a_merge
         ; test_case "a token Memory already holds" `Quick test_a_token_memory_already_holds
+        ; test_case "an answer that forgets what the turn was not shown" `Quick
+            test_an_answer_that_forgets_what_the_turn_was_not_shown
         ; test_case "the table of seven answers" `Quick test_table_is_pinned
         ] )
     ]

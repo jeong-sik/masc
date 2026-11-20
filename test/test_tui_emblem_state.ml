@@ -189,7 +189,7 @@ let test_retained_chat_origin_restores_room_receipt () =
   Types.withdraw_play_room_workspace state ~previous:(Some a) ~current:None;
   Types.withdraw_play_room_workspace state ~previous:(Some a) ~current:(Some a);
   let room = match state.Types.play_room with Some room -> room | None -> fail "room not restored" in
-  let room = Room.receive room request ~now:1. (Error "late old response") in
+  let room = Room.receive room request ~now:(Masc_tui_wake.Mono.now ()) (Error "late old response") in
   let _, rows = Room.layout room ~width:80 ~height:8 in
   (* A send leaves the composer at once; its unknown outcome stays on screen
      as the receipt being confirmed, not as the next draft. *)

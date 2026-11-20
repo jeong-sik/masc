@@ -109,6 +109,12 @@ module Mono : sig
       itself; a wait past the clock's range, [infinity] among them, is the
       clock's end. *)
 
+  val compare : t -> t -> int
+
+  val seconds_since : t -> since:t -> float
+  (** How long after [since] the instant is, in seconds; before [since] it
+      is negative. *)
+
   val of_wall : now:t -> wall_now:float -> float -> t
   (** The instant on this clock that a wall-clock instant names, [now] and
       [wall_now] being read together: [now] plus what remains until it. A

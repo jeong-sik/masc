@@ -1831,6 +1831,23 @@ describe('BoardSurface Component', () => {
       expect(screen.queryByTestId('bd-sub-all-count')).toBeNull()
     })
 
+    // No list is on screen before the first read answers and after a read
+    // that failed. A zero here would say the Board holds no post.
+    it.each([
+      ['the first read is on the wire', true, false],
+      ['the read failed', false, true],
+    ] as const)('gives no count beside "전체" while no list is on screen: %s', (_name, loading, failed) => {
+      boardPosts.value = []
+      boardTotal.value = null
+      boardListOnScreen.value = null
+      boardLoading.value = loading
+      boardListReadFailed.value = failed
+      render(h(BoardSurface, null))
+
+      expect(screen.getByTestId('bd-sub-all')).toBeInTheDocument()
+      expect(screen.queryByTestId('bd-sub-all-count')).toBeNull()
+    })
+
     // The sub-board the operator picked has not answered: the list on screen
     // is the whole Board, and its total is the Board's.
     it('keeps the count beside "전체" while a sub-board the operator picked has not answered', () => {

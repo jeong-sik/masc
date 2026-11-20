@@ -13,11 +13,16 @@ let retry_s = 2.0
 let max_retry_s = 30.0
 (* The wall clock runs apart from the monotonic one, as it does in the TUI. *)
 let wall_offset = 1_700_000_000.0
-let failed ~now t = P.probe_failed ~retry_s ~max_retry_s ~now ~wall_now:(now +. wall_offset) t
+(* An instant [s] seconds after one reading of the loop's clock. *)
+let t0 = Masc_tui_wake.Mono.now ()
+let at s = Masc_tui_wake.Mono.after t0 s
+let failed ~now t =
+  P.probe_failed ~retry_s ~max_retry_s ~now:(at now) ~wall_now:(now +. wall_offset) t
 
 let wait_after ~now t =
   match t with
-  | P.Failing { retry_at; _ } -> retry_at -. now
+  | P.Failing { retry_at; _ } ->
+      Int64.to_float (Int64.sub (retry_at :> int64) (at now :> int64)) /. 1e9
   | P.Answering | P.Recovered _ -> Alcotest.fail "no wait is scheduled"
 
 let failures t =
@@ -55,50 +60,50 @@ let test_a_long_outage_keeps_the_longest_wait () =
 let test_a_pass_that_answers_resets_the_wait () =
   let t = failed ~now:0.0 (failed ~now:0.0 (failed ~now:0.0 P.answering)) in
   let t = P.pass_answered t in
-  check bool "nothing is owed after the pass answered" false (P.due ~now:1000.0 t);
-  check bool "a pass the TUI asks for starts at once" true (P.starts ~now:0.0 P.Revalidate t);
+  check bool "nothing is owed after the pass answered" false (P.due ~now:(at 1000.0) t);
+  check bool "a pass the TUI asks for starts at once" true (P.starts ~now:(at 0.0) P.Revalidate t);
   check (float 1e-9) "the next failure waits the first wait again" retry_s
     (wait_after ~now:50.0 (failed ~now:50.0 t))
 
 let test_no_pass_starts_before_its_wait () =
   let t = failed ~now:10.0 P.answering in
-  check bool "the owed pass is not due before the wait" false (P.due ~now:11.9 t);
+  check bool "the owed pass is not due before the wait" false (P.due ~now:(at 11.9) t);
   check bool "the owed pass does not start before the wait" false
-    (P.starts ~now:11.9 P.Owed_pass t);
-  check bool "the owed pass is due once the wait is over" true (P.due ~now:12.0 t);
+    (P.starts ~now:(at 11.9) P.Owed_pass t);
+  check bool "the owed pass is due once the wait is over" true (P.due ~now:(at 12.0) t);
   check bool "the owed pass starts once the wait is over" true
-    (P.starts ~now:12.0 P.Owed_pass t);
-  check bool "a pass the TUI asks for waits" false (P.starts ~now:11.9 P.Revalidate t);
+    (P.starts ~now:(at 12.0) P.Owed_pass t);
+  check bool "a pass the TUI asks for waits" false (P.starts ~now:(at 11.9) P.Revalidate t);
   check bool "it still leaves the start to the owed pass after the wait" false
-    (P.starts ~now:12.0 P.Revalidate t);
-  check bool "an answering probe owes no pass" false (P.due ~now:0.0 P.answering);
+    (P.starts ~now:(at 12.0) P.Revalidate t);
+  check bool "an answering probe owes no pass" false (P.due ~now:(at 0.0) P.answering);
   check bool "an answering probe starts what the TUI asks for" true
-    (P.starts ~now:0.0 P.Revalidate P.answering)
+    (P.starts ~now:(at 0.0) P.Revalidate P.answering)
 
 let test_an_operator_key_skips_the_wait_and_keeps_the_count () =
   let t = failed ~now:10.0 P.answering in
   check bool "the operator's key starts during the wait" true
-    (P.starts ~now:10.1 P.Operator_key t);
+    (P.starts ~now:(at 10.1) P.Operator_key t);
   check (float 1e-9) "a failure after it waits one step longer" 4.0
     (wait_after ~now:10.2 (failed ~now:10.2 t))
 
 let test_an_answer_ends_the_wait_and_the_owed_pass_starts_now () =
   let t = failed ~now:10.0 (failed ~now:0.0 P.answering) in
   let t = P.answered_again t in
-  check bool "the owed pass is due before its wait was over" true (P.due ~now:10.1 t);
-  check bool "a pass the TUI asks for starts" true (P.starts ~now:10.1 P.Revalidate t);
+  check bool "the owed pass is due before its wait was over" true (P.due ~now:(at 10.1) t);
+  check bool "a pass the TUI asks for starts" true (P.starts ~now:(at 10.1) P.Revalidate t);
   check (float 1e-9) "the run of failures is broken" retry_s
     (wait_after ~now:10.2 (failed ~now:10.2 t));
   check bool "a screen answer with nothing owed owes nothing" false
-    (P.due ~now:0.0 (P.answered_again P.answering))
+    (P.due ~now:(at 0.0) (P.answered_again P.answering))
 
 (* A server whose [/health] alone fails still opens the stream that restores
    the workspace confirmation. That open is the ring, so it keeps the wait. *)
 let test_a_stream_open_at_every_attempt_keeps_the_wait () =
   let t = failed ~now:10.0 (failed ~now:0.0 P.answering) in
   let t = P.stream_opened P.Opened_each_time t in
-  check bool "the owed pass is not due before its wait" false (P.due ~now:10.1 t);
-  check bool "a pass the TUI asks for still waits" false (P.starts ~now:10.1 P.Revalidate t);
+  check bool "the owed pass is not due before its wait" false (P.due ~now:(at 10.1) t);
+  check bool "a pass the TUI asks for still waits" false (P.starts ~now:(at 10.1) P.Revalidate t);
   check int "the run of failures goes on" 2 (failures t)
 
 (* After an outage the same stream opens once the server is back. An attempt
@@ -106,10 +111,10 @@ let test_a_stream_open_at_every_attempt_keeps_the_wait () =
 let test_a_stream_open_after_a_failed_attempt_ends_the_wait () =
   let t = failed ~now:10.0 (failed ~now:0.0 P.answering) in
   let t = P.stream_opened P.Opened_after_failure t in
-  check bool "the owed pass is due before its wait was over" true (P.due ~now:10.1 t);
-  check bool "a pass the TUI asks for starts" true (P.starts ~now:10.1 P.Revalidate t);
+  check bool "the owed pass is due before its wait was over" true (P.due ~now:(at 10.1) t);
+  check bool "a pass the TUI asks for starts" true (P.starts ~now:(at 10.1) P.Revalidate t);
   check bool "with nothing owed it owes nothing" false
-    (P.due ~now:0.0 (P.stream_opened P.Opened_after_failure P.answering))
+    (P.due ~now:(at 0.0) (P.stream_opened P.Opened_after_failure P.answering))
 
 (* The reopened stream is not a [/health] answer. A server whose [/health]
    still fails after it goes on doubling the wait; only [/health] answering
@@ -131,17 +136,17 @@ let test_a_failure_after_a_reopened_stream_waits_longer () =
 let test_a_screen_read_waits_unless_the_operator_asks () =
   let t = failed ~now:10.0 P.answering in
   check bool "a due debt waits during the wait" false
-    (P.screen_read_starts ~now:10.1 P.Owed_read_due t);
+    (P.screen_read_starts ~now:(at 10.1) P.Owed_read_due t);
   check bool "a due debt still waits once the owed pass is due" false
-    (P.screen_read_starts ~now:12.0 P.Owed_read_due t);
+    (P.screen_read_starts ~now:(at 12.0) P.Owed_read_due t);
   check bool "the operator's change reads during the wait" true
-    (P.screen_read_starts ~now:10.1 P.Operator_change t);
+    (P.screen_read_starts ~now:(at 10.1) P.Operator_change t);
   check bool "a due debt starts while the probe answers" true
-    (P.screen_read_starts ~now:0.0 P.Owed_read_due P.answering);
+    (P.screen_read_starts ~now:(at 0.0) P.Owed_read_due P.answering);
   check bool "a due debt starts once [/health] answers again" true
-    (P.screen_read_starts ~now:10.1 P.Owed_read_due (P.answered_again t));
+    (P.screen_read_starts ~now:(at 10.1) P.Owed_read_due (P.answered_again t));
   check bool "a due debt starts once the stream reopens" true
-    (P.screen_read_starts ~now:10.1 P.Owed_read_due
+    (P.screen_read_starts ~now:(at 10.1) P.Owed_read_due
        (P.stream_opened P.Opened_after_failure t))
 
 (* Zone 4 says when the owed pass starts (RFC §2). The moment is fixed on the

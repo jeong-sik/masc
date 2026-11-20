@@ -615,8 +615,7 @@ let render_keeper_calls (state : state) =
              (if state.ui_language = Lang_ko then "  #%d %s %s · %s · 턴 %s"
               else "  #%d %s %s · %s · turn %s")
              (call_index + 1)
-             (Terminal_text.clock_timestamp
-                (Masc_domain.iso8601_of_unix_seconds call.kc_at))
+             (Terminal_text.clock_timestamp_of_unix call.kc_at)
              glyph duration turn
          in
          let exact_rows =
@@ -734,7 +733,11 @@ let render_acting_evidence (state : state) entry =
       (ui_text state ~ko:"1. 이벤트 식별 · 실행 컨텍스트"
          ~en:"1. Event Identity & Execution Context")
     @ ((ui_text state ~ko:"TUI 수신 시각" ~en:"TUI received at",
-         Some (Masc_domain.iso8601_of_unix_seconds entry.Masc_tui_acting.ae_at))
+         (* The operator's zone, to the second like the row it details
+            (RFC tui-one-screen-grammar 6.1). *)
+         Some
+           (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
+              ~now:(Unix.gettimeofday ()) entry.Masc_tui_acting.ae_at))
        :: Masc_tui_acting.evidence_fields ~ko:(state.ui_language = Lang_ko) entry
        |> List.concat_map (fun (label, value) ->
            let prefix = "  " ^ label ^ ": " in
@@ -1118,8 +1121,7 @@ let render_acting (state : state) =
                else " · " ^ Terminal_text.single_line row.Acting.detail)
           in
           let clock =
-            Terminal_text.clock_timestamp
-              (Masc_domain.iso8601_of_unix_seconds row.Acting.at)
+            Terminal_text.clock_timestamp_of_unix row.Acting.at
           in
           let line =
             column_line ~glyph:(Acting.glyph_text row.Acting.glyph)

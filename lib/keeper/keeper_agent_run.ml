@@ -2403,6 +2403,37 @@ let run_turn
           ~tool_surface_ref
           ();
         prune_raw_traces_after_turn_record ~config ~meta raw_trace;
+        (* Retire source-bound invalidations strictly after BOTH the turn
+           succeeded AND its receipt committed ([failure_keeps_evidence]).
+           A failed retirement logs a warning without failing the already-
+           committed turn and self-heals on the next committed turn. *)
+        (let settlement =
+           match turn_result, receipt_result.Keeper_agent_result.result with
+           | Ok _, Ok _ -> Keeper_memory_os_recall.Turn_committed
+           | Ok _, Error _ | Error _, _ -> Keeper_memory_os_recall.Turn_not_committed
+         in
+         match settlement, acc.Keeper_run_tools_hook_accumulator.delivered_source_invalidations with
+         | Keeper_memory_os_recall.Turn_committed, (_ :: _ as delivered) ->
+           let memory_os_keepers_dir =
+             Config_dir_resolver.keepers_dir_for_base_path
+               ~base_path:config.Workspace.base_path
+           in
+           (match
+              Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                Keeper_memory_os_recall.retire_after_turn_settlement
+                  ~keepers_dir:memory_os_keepers_dir
+                  ~keeper_id:meta.name
+                  ~settlement
+                  ~delivered
+                  ())
+            with
+            | Ok _ -> ()
+            | Error detail ->
+              Log.Keeper.warn ~keeper_name:meta.name
+                "source-bound invalidation retirement failed after committed turn: %s"
+                detail)
+         | Keeper_memory_os_recall.Turn_committed, []
+         | Keeper_memory_os_recall.Turn_not_committed, _ -> ());
         (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
            turn span. Both turn drivers (unified "invoke_agent <keeper>"
            and direct "keeper_turn") keep their span open across this

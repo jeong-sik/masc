@@ -39,6 +39,11 @@ type hook_accumulator =
   ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
     (* Sum of the turn's provider responses' wire [cache_n] / [prompt_n],
        written by the after_turn hook. *)
+  ; mutable delivered_source_invalidations :
+      Keeper_memory_source_current.invalidation list
+    (* Source-bound invalidations rendered into the active runtime attempt's
+       first-round prompt; overwritten per attempt and retired strictly after
+       committed receipt settlement. *)
   }
 
 let create ~meta ~tool_surface =
@@ -54,7 +59,12 @@ let create ~meta ~tool_surface =
   ; prompt_blocks = []
   ; extra_system_context_assembly = None
   ; wire_prompt_tokens = None
+  ; delivered_source_invalidations = []
   }
+;;
+
+let set_delivered_source_invalidations (acc : hook_accumulator) invalidations =
+  acc.delivered_source_invalidations <- invalidations
 ;;
 
 let extra_system_context_receipt (acc : hook_accumulator) =

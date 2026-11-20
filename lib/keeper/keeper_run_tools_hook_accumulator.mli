@@ -22,6 +22,11 @@ type hook_accumulator =
         carrier presence are preserved inside the immutable proof. *)
   ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
     (** Sum of the turn's provider responses' wire [cache_n] / [prompt_n]. *)
+  ; mutable delivered_source_invalidations :
+      Keeper_memory_source_current.invalidation list
+    (** Source-bound invalidations rendered into the winning runtime attempt's
+        first-round prompt. Overwritten per runtime attempt and retired only
+        after the turn and its receipt have committed. *)
   }
 
 val create :
@@ -29,6 +34,12 @@ val create :
   tool_surface:Keeper_agent_tool_surface.tool_surface_metrics ->
   hook_accumulator
 (** Begin a new invocation with no executed calls. *)
+
+val set_delivered_source_invalidations :
+  hook_accumulator -> Keeper_memory_source_current.invalidation list -> unit
+(** Overwrite the delivered source-bound invalidations for the active runtime
+    attempt (pass [[]] when starting a new candidate attempt or when recall
+    produced no invalidations). *)
 
 val extra_system_context_receipt :
   hook_accumulator -> Keeper_context_assembly.receipt option

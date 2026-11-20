@@ -243,7 +243,12 @@ type turn_line =
 ### 5.2 누가 언제 무엇을 덧붙이나
 
 턴 기록은 턴 기록 모듈만 쓴다. 그 모듈을 부르는 곳은 턴 경로(받아들임, 끝남), 프로세스 시작 단계, Keeper 만들기, head 를 줄이는 함수, purge, session 을 지우는 정지, 쓰는 쪽을 만들 때와 운영자의 `Resume` 때 하는 저장소 시작(§8.6)이다. Memory 를 쓰는 쪽(§9)은 이 파일을 읽기만 한다.
-부르는 곳은 그 Keeper 의 owner 안이거나, Keeper 가 등록되지 않은 동안의 purge 이거나, 정지의 마무리 단계다. owner 안은 턴이거나 턴 사이의 idle maintenance 자리다. 정지의 마무리 단계가 그 Keeper 의 턴이 모두 끝난 뒤에 도는지는 확인하지 못했다(§23.2). dashboard purge 는 Keeper 가 등록되지 않았을 때만 돌고 그 Keeper 의 lifecycle key lock 을 쥔다(`server_dashboard_http_keeper_api_checkpoints.ml:618-626`). CLI purge 는 서버가 workspace 를 쥐고 있으면 적용을 거절한다(`bin/masc_checkpoint_purge.ml:322`). 그래서 저장소 시작과 정지의 마무리 단계를 빼면, 한 Keeper 의 턴 기록을 쓰는 곳은 한 번에 하나다.
+부르는 곳은 그 Keeper 의 owner 안이거나, Keeper 가 등록되지 않은 동안의 purge 이거나, 정지의 마무리 단계다. owner 안은 턴이거나 턴 사이의 idle maintenance 자리다. 정지의 마무리 단계는 그 Keeper 의 턴이 모두 끝난 뒤에만 돈다. 까닭은 문단 아래에 적었다. dashboard purge 는 Keeper 가 등록되지 않았을 때만 돌고 그 Keeper 의 lifecycle key lock 을 쥔다(`server_dashboard_http_keeper_api_checkpoints.ml:618-626`). CLI purge 는 서버가 workspace 를 쥐고 있으면 적용을 거절한다(`bin/masc_checkpoint_purge.ml:322`). 그래서 저장소 시작을 빼면, 한 Keeper 의 턴 기록을 쓰는 곳은 한 번에 하나다.
+
+- 마무리는 `Joined_idle` 과 그 뒤의 phase 에서만 돈다. 그 앞의 phase 는 `Unsupported_phase` 로 거절한다(`keeper_shutdown_finalize.ml` 의 `run`).
+- `Joined_idle` 을 쓰는 곳은 넷이다. 켜진 Keeper 의 정지는 owner 가 쉬고 lane fiber 가 끝난 뒤에 쓴다. 꺼진 Keeper 의 정지는 owner 가 쉬고 lane 이 없는 것을 본 뒤에 쓴다(`keeper_shutdown_prepare_join.ml`). 나머지 둘은 새 프로세스의 boot 복구다(`keeper_shutdown_runtime.ml`). 앞 프로세스의 턴은 이미 없다.
+- `Prepared` 부터 `Cleanup_ready` 까지 admission fence 가 서 있다(`requires_admission_fence`). 그래서 그사이 새 턴도 받아들여지지 않는다.
+
 저장소 시작만 다르다. owner 의 자리를 기다리지 않고 덧붙이는 helper 의 잠금만 잡는다. 쓰는 줄은 `Log_started` 하나이고, 파일에 완전한 줄이 없을 때만 쓴다. 턴의 덧붙임과는 아래의 끝 offset 규칙이 가른다.
 덧붙일 때마다 꼬리를 읽고, 읽은 끝 offset 에서만 덧붙인다. 끝이 달라졌으면 꼬리를 다시 읽는다. 덧붙이는 helper 는 프로세스 안의 잠금과 프로세스 사이의 경로 잠금을 같이 잡는다.
 
@@ -306,19 +311,26 @@ head 를 줄이거나 없애는 제품 경로는 셋이다. 이력 지우기, �
   | 바꿀 것이 없다 | 쓰지 않는다 |
 
   - 해석 못 하는 head 를 치우는 두 갈래의 줄은 session 을 지우는 정지의 줄과 같다. 줄 쓰는 쪽의 사건 하나를 셋이 쓴다.
-  - 그 사건은 head 를 읽지 않는다. `before` 는 꼬리의 끝자리다. `after` 는 거기서 닫힌 메시지 수만 0 으로 바꾼 값이다. `closed_before` 는 비어 있다.
+  - 그 사건은 head 를 읽지 않는다. `before` 는 꼬리의 끝자리다. `after` 는 거기서 그 경로가 없애는 저장소의 값만 0 으로 바꾼 값이다. `closed_before` 는 비어 있다.
+  - 지우기는 닫힌 메시지 수만 0 으로 바꾼다. official-client 파일 둘은 그대로 두기 때문이다(§5.6).
   - 매번 쓴다. 마지막 줄이 이미 같은 줄이어도 쓴다. 까닭은 정지와 같다(아래).
 - 끊긴 곳 뒤를 버리는 purge(recovering purge). 규칙은 `keeper_checkpoint_purge.ml:391-428` 에 있다. dashboard(`server_dashboard_http_keeper_api_checkpoints.ml:612`)와 CLI(`bin/masc_checkpoint_purge.ml:251`) 두 군데서 들어온다. `Announced Recovered` 를 쓴다. 지금은 두 진입이 head 를 다르게 넣는다. dashboard 는 compare-and-swap 이고 CLI 는 watermark 저장이다. 함수 하나를 지나게 하면서 CLI 를 compare-and-swap 으로 옮긴다.
-- session 을 지우는 정지(`remove_session`, `keeper_shutdown_finalize.ml:609`). head 와 그 trace 의 object 를 디렉터리째 지운다. 지금은 줄을 쓰지 않는다. 지우기 전에 `Reset {Unannounced; before = 마지막 끝자리; after = 그 trace 의 빈 끝자리}` 를 쓴다.
+- session 을 지우는 정지(`remove_session`, `keeper_shutdown_finalize.ml:609`). head 와 그 trace 의 object 를 디렉터리째 지운다. 지금은 줄을 쓰지 않는다. 지우기 전에 `Reset {Unannounced; before = 마지막 끝자리; after}` 를 쓴다.
+  - 그 디렉터리에는 official-client 파일 둘도 있다. 그래서 정지의 `after` 는 닫힌 메시지 수와 `history_bytes` 와 `internal_bytes` 가 모두 0 이다. chat 과 external 의 값은 `before` 그대로다.
   - 정지는 이 줄을 매번 쓴다. 위 표의 줄은 head 가 마지막 끝자리 아래일 때만 쓰인다. 정지는 head 를 없애는 쪽이라 마지막 끝자리가 이미 비어 있어도 쓴다.
   - 덧붙임이 실패하면 지우지 않는다. 정지는 그 단계가 실패했다고 알린다.
-  - 줄을 쓴 뒤에 지우지 못했거나 그사이 프로세스가 죽으면 head 가 남는다. 다음 단위는 빈 끝자리에서 시작해 그 이력을 한 번 더 싣는다.
+  - 줄을 쓴 뒤에 지우지 못했거나 그사이 프로세스가 죽으면 head 와 official-client 파일이 남는다. 다음 단위는 `after` 에서 시작해 그 이력과 그 파일의 내용을 한 번 더 싣는다.
   - 버리는 내용은 디렉터리와 함께 없어진다. 그래서 조각으로 가리키지 않는다. 읽는 쪽은 그 줄을 `Unknown_span` 으로 적는다(§5.4).
   - 다음에 줄 쓰는 쪽이 수를 보고 알아내게 두지 않는다. 마지막 끝자리가 0 이면 빈 head 가 그 아래가 아니다. `Opened` 를 못 쓴 턴이 그 뒤에 head 를 같은 수까지 다시 키울 수도 있다. 두 경우에 구멍이 기록 없이 지나간다.
 
 head 를 줄이지 않는 것은 이 함수를 지나지 않는다. 고쳐 쓰기만 하는 purge, 턴의 닫는 저장, 응답을 버린 뒤의 턴 안 저장, boot 의 꼬리 복구, dashboard 의 스냅샷 파일 지우기가 그렇다. 닫는 저장과 턴 안 저장은 열린 메시지만 바꾸고, 끝자리는 닫힌 메시지만 센다. 고쳐 쓰기만 하는 purge 는 닫힌 메시지를 줄이지 않는다(§5.6).
 
-이 함수는 턴의 줄을 쓰는 쪽이 잡는 잠금 아래서 돈다. 줄과 head 변경 사이에 그 Keeper 의 턴이 받아들여지지 않는다. 지우기는 owner 의 `begin_history_clear` 를 지나고, dashboard purge 는 받아들임과 같은 lifecycle key lock 을 쥔다.
+이 함수가 도는 동안 그 Keeper 의 턴은 받아들여지지 않는다. `Reset` 줄부터 head 변경이 돌아올 때까지다. 들어오는 길은 넷이고 턴을 막는 방법이 다르다.
+
+- 지우기는 턴과 같은 자리에서 돈다. owner 의 턴 자리(`turn_in_flight`)는 하나이고 비었을 때만 찬다. 지우기는 그 자리를 쥔 maintenance 로 돌고(`run_maintenance_if_idle`), 턴이 돌고 있으면 아무것도 건드리지 않고 `Busy` 로 끝난다.
+- dashboard purge 는 등록되지 않은 Keeper 에서만 돌고 lifecycle key lock 을 쥔다. Keeper 를 등록하는 쪽이 같은 잠금을 잡는다. 턴은 등록된 Keeper 에서만 시작한다. 등록에서 빠진 Keeper 에 도는 턴이 남지 않는지는 빼는 곳 여섯을 다 읽지 못했다(§23.2).
+- CLI purge 는 head 를 읽기 전부터 workspace lease 를 쥔다. 서버는 그 lease 를 사는 동안 쥐고, 턴은 서버 안에서만 돈다.
+- 정지는 `Joined_idle` 뒤에만 돌고 그사이 admission fence 가 서 있다(위).
 
 **줄을 쓴 뒤에 head 변경이 일어나지 않으면.** 변경이 오류를 돌려준 경우와, 줄과 변경 사이에서 프로세스가 죽은 경우가 있다. 지우기에는 줄 뒤에 실패할 수 있는 단계가 여덟 개 넘게 있다. 두 경우는 디스크에서 똑같이 보인다. `Reset` 줄이 있고 head 는 그대로다.
 이 경우를 가리지 않는다. 다음 단위는 언제나 그 줄의 `after` 에서 시작한다.
@@ -1257,6 +1269,17 @@ Memory 를 바꾼 쓰기 뒤에는 새 질문을 slot 마다 한 번 묻는다. 
 - `Resume` 의 답 `Done` 은 boot 가 돌았다는 뜻이다. 어떻게 끝났는지는 상태가 말한다.
 - `Adopt` 가 줄을 덧붙이다 I/O 로 실패하면 `Refused (Store_stopped Store_unwritable)` 로 답한다. 상태는 멈춘 그대로다.
 - 계획의 효과로 스냅샷이 만들어지지 않으면 쓰기를 거절하고 아무것도 쓰지 않는다. 계획과 스냅샷 codec 이 어긋났다는 뜻이라 일어나면 결함이다.
+
+fiber 는 잠금을 잡고, boot 하고, mailbox 에서 사건을 하나씩 꺼낸다(`Librarian_writer`).
+
+- 잠금은 기다리지 않고 잡는다. 못 잡으면 `Stopped Store_unwritable` 이고 `Resume` 이 다시 잡아 본다. 한번 잡으면 fiber 가 끝날 때까지 쥔다.
+- 쓰는 쪽은 사건에 답하기 전에 바뀐 상태를 내놓는다. 그래서 답을 받은 쪽이 읽는 상태는 그 답 뒤의 상태다.
+- 읽는 쪽은 mailbox 를 거치지 않는다. 쓰는 쪽이 내놓은 값 하나를 읽는다. 열린 저장소에서는 반영 기록의 꼬리 줄이다.
+- 끝난 쓰는 쪽은 mailbox 를 꺼내지 않는다. 그래서 보낸 쪽은 답과 쓰는 쪽의 끝을 함께 기다린다. 끝이 먼저 오면 쓰는 쪽은 받지 않았다고 답한다. 그 요청으로는 아무 일도 하지 않았다.
+- `Retired` 는 끝난 fiber 다. 그 함수에는 그 상태가 없다. 표의 `Retired` 행은 등록부가 답한다. 그 Keeper 가 등록돼 있으면 새 쓰는 쪽에 보내고, 아니면 `Keeper_retired` 다(§8.6).
+- 쓰는 쪽을 만드는 것과 그 fiber 를 돌리는 것은 다른 걸음이다. 만든 쓰는 쪽은 `Booting` 이고, 돌기 전에 온 사건은 mailbox 에서 기다린다.
+- `Retire` 의 답은 잠금을 놓은 뒤에 간다. Keeper 를 지우는 경로가 그 답을 받고 파일을 지운다.
+- 저장소가 멈추면 이유를 Keeper 이름과 함께 로그에 적는다. 잠금을 못 잡은 이유도 적는다.
 꺼진 Keeper 의 안 읽은 단위는 꺼져 있는 동안 읽지 않는다. 다시 켜면 boot 가 반영 기록의 자리에서 이어 읽는다. 지금은 autoboot 가 띄우지 않은 Keeper 의 것도 따라잡는다(`server_bootstrap_loops.ml:2197-2206`). 그 점이 달라진다.
 
 ### 9.4 읽기가 서 있는 곳
@@ -1917,7 +1940,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5e | Keeper 하나의 Memory 저장소(`Librarian_store`): boot 표와 직접 쓰기의 반영 2~5단계. 잠금과 fiber 는 없다. 턴 기록의 첫 줄을 읽는 함수(`Keeper_turn_log_store.read_start`). 줄에서 만든 스냅샷이 바이트와 함께 나온다(`Librarian_envelope.next`) | boot 표의 행마다 하나. 반영이 `basis` 와 `after` 로 이어진다. 스냅샷이 한 줄 늦으면 boot 가 그 줄에서 다시 쓰고, 두 번 해도 같다. 밖에서 바꾼 스냅샷은 반영과 boot 를 `Log_diverged` 로 세운다. 읽은 뒤에 다른 줄이 붙으면 덧붙이지 않는다. 스냅샷 쓰기만 실패하는 갈래는 시험이 없다 |
 | L5f | 맡김(`Librarian_store.adopt`, §8.7). 해석되지 않는 꼬리가 줄이 끝나는 곳을 함께 알린다 | 밖에서 바꾼 스냅샷을 맡기면 줄 하나가 붙고 boot 가 열린다. 다음 반영이 그 줄에 이어진다. sha 가 다르거나 해석되지 않으면 거절하고 쓰지 않는다. 꼬리가 해석되지 않으면 `Started` 를 그 뒤에 쓰고 `seq` 를 1 부터 센다 |
 | L5g | 상태표의 판단(`Librarian_machine`): boot, 직접 쓰기, `Resume`, `Adopt` 가 `Idle`, `Stopped` 에서 하는 일. `Retired` 는 등록부가 답한다. 동기 함수고 fiber 가 없다. 묻기의 상태와 사건은 그것을 만드는 층이 더한다 | 칸마다 하나. 줄을 쓰지 않는 답은 상태와 반영 기록을 그대로 둔다. 밖에서 바꾼 스냅샷을 만난 쓰기가 저장소를 세우고, 그 뒤의 쓰기는 거절된다. 파일을 되돌리고 `Resume` 하면 열린다. `Adopt` 는 `Log_diverged` 와 `Log_unreadable` 에서 받고 그 뒤의 쓰기가 이어진다 |
-| L5 | **전환.** 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기를 받는 문), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
+| L5h | 쓰는 쪽 fiber(`Librarian_writer`): 잠금, boot, mailbox, 읽는 쪽이 보는 상태, `Retire`. 사건마다 `Librarian_machine` 을 부른다. 등록부와 pulse 는 없다 | boot 전에 온 쓰기가 boot 뒤에 답을 받는다. 쓰기는 온 순서대로 반영된다. 턴 기록이 없으면 멈추고, 생긴 뒤 `Resume` 하면 열린다. 같은 Keeper 의 둘째 쓰는 쪽은 잠금을 못 잡는다. 등록된 Keeper 의 `Retire` 는 버린다. 끝난 쓰는 쪽은 받지 않았다고 답하고, 잠금이 풀려 둘째가 이어서 쓴다 |
+| L5 | **전환.** 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |
@@ -2185,8 +2209,6 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | 모르는 것 | 틀리면 달라지는 것 | 확인하는 곳 |
 |---|---|---|
 | registry 에서 Keeper 를 빼는 곳 여섯(파일 다섯, `unregister_exact` 를 부르는 곳)이 그 lane 이 끝난 뒤에 빼는지 | 아니면 도는 턴 아래에서 dashboard purge 가 고쳐 쓴다. 지금 purge 도 같다 | purge 층(L8) |
-| session 을 지우는 정지의 마무리 단계가 그 Keeper 의 턴이 모두 끝난 뒤에 도는지 | 아니면 정지가 쓴 줄 뒤에 그 턴의 `Closed` 가 온다. 그 줄의 끝자리는 없어진 head 의 것이다 | reset 층(L3c) |
-| head 를 줄이는 함수가 `Reset` 줄부터 head 설치가 돌아올 때까지 턴의 줄을 쓰는 쪽과 같은 잠금을 쥐는지. 지우기와 dashboard purge 가 쥐는 잠금 이름만 읽었다(§5.2) | 아니면 줄과 head 변경 사이에 턴이 받아들여지고, 그 턴의 `baseline` 이 없어질 head 의 것이다 | reset 층(L3c) |
 | 같은 이름의 runtime 파일이 남아 있을 때 Keeper 만들기가 거절하는지 | 거절하면 「meta 를 치우고 다시 만든 Keeper」 경로(§5.2)가 없다 | reset 층(L3c) |
 | 끝이 결과를 기다리는 tool 요청인 열린 메시지를 닫은 뒤에, 다음 턴이 그 이력을 지금처럼 읽는지. 지금은 턴이 시작할 때 메모리에서 닫는 메시지를 덧붙인다(`keeper_agent_run.ml:229-230`). 닫는 저장은 메시지 목록을 바꾸지 않고 닫힘의 경계만 옮긴다 | 다르게 읽으면 프로세스 시작 단계가 닫는 저장을 하기 전에 그 꼬리를 먼저 고쳐야 한다 | 프로세스 시작 단계의 층(L3a3b4c) |
 | 메시지 codec 이 옛 빌드가 쓴 object 를 같은 바이트로 되돌려 주는지 | 아니면 purge 가 건드리지 않은 메시지의 digest 가 바뀐다. 시험은 풀어낸 값이 아니라 저장된 digest 를 견준다 | purge 층(L8) |

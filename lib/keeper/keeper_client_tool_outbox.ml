@@ -258,7 +258,7 @@ let host_response producer ~min_result_bytes ~success ~content ~content_blocks =
     | Image {source=Llm_provider.Types.Url _ | Llm_provider.Types.File_id _; _}
     | Document {source=Llm_provider.Types.Url _ | Llm_provider.Types.File_id _; _}
     | Audio {source=Llm_provider.Types.Url _ | Llm_provider.Types.File_id _; _}
-    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ ->
+    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _ ->
       provider_json block in
   let* content = text_body content in
   let* content_blocks = match content_blocks with

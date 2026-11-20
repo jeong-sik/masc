@@ -19,6 +19,10 @@
    [agent.tools] before the history sees it, so the call would disappear
    rather than fail. *)
 
+type placement_policy =
+  | History_carry
+  | Tool_references
+
 type deferred =
   { tool : Agent_core.Tool.t
   ; summary : string

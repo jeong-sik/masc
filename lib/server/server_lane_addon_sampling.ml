@@ -104,7 +104,7 @@ let response_content (response : L.api_response) =
     let content = List.filter (function
       | L.Text text -> String.trim text <> ""
       | L.Thinking _ | L.ReasoningDetails _ | L.RedactedThinking _ -> false
-      | L.Image _ | L.Audio _ | L.Document _ | L.ToolUse _ | L.ToolResult _ -> true)
+      | L.Image _ | L.Audio _ | L.Document _ | L.ToolUse _ | L.ToolReference _ | L.ToolResult _ -> true)
       response.content in
     match content with
     | [L.Image {media_type;source=L.Base64 data}] ->

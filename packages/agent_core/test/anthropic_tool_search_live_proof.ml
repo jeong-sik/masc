@@ -88,7 +88,15 @@ let tool_calls content =
   List.filter_map
     (function
       | Types.ToolUse { id; name; input } -> Some (id, name, input)
-      | _ -> None)
+      | Types.Text _
+      | Types.Thinking _
+      | Types.ReasoningDetails _
+      | Types.RedactedThinking _
+      | Types.ToolReference _
+      | Types.ToolResult _
+      | Types.Image _
+      | Types.Document _
+      | Types.Audio _ -> None)
     content
 ;;
 

@@ -73,6 +73,7 @@ let rec redact_block ~redact_text ~redact_json : Llm_provider.Types.content_bloc
   | ToolResult value -> ToolResult {value with content=redact_text value.content;
       json=Option.map redact_json value.json;
       content_blocks=Option.map (List.map (redact_block ~redact_text ~redact_json)) value.content_blocks}
+  | ToolReference { tool_name } -> ToolReference { tool_name = redact_text tool_name }
   | Image value -> Image {value with source=redact_media_source ~redact_text value.source}
   | Document value -> Document {value with source=redact_media_source ~redact_text value.source}
   | Audio value -> Audio {value with source=redact_media_source ~redact_text value.source}

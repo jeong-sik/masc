@@ -93,6 +93,7 @@ let stub_block ~enabled ~min_bytes ~names ~first (block : Types.content_block) =
   | Types.ReasoningDetails _
   | Types.RedactedThinking _
   | Types.ToolUse _
+  | Types.ToolReference _
   | Types.Image _
   | Types.Document _
   | Types.Audio _ -> first, None

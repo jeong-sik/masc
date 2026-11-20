@@ -334,8 +334,6 @@ let metric_of_block
         + String.length (Yojson.Safe.to_string input)
     | Agent_core.Types.ToolReference { tool_name } ->
         String.length (Inference_utils.sanitize_text_utf8 tool_name)
-        + String.length (Inference_utils.sanitize_text_utf8 name)
-        + String.length (Yojson.Safe.to_string input)
     | Agent_core.Types.Text text ->
         String.length (Inference_utils.sanitize_text_utf8 text)
     | Agent_core.Types.Thinking { content; _ } ->

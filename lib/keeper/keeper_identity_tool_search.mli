@@ -139,7 +139,9 @@ type placement =
             With [Tool_references], the typed ToolReference history itself is the
             authority: a tool remains callable exactly while its reference is in
             this window, and neither of those retirement rules applies. This is
-            the direct Anthropic native deferred-loading path.
+            the direct Anthropic native deferred-loading path. The production
+            bundle supplies an empty initial history here; Agent_turn recomputes
+            admission from each exact projected request window.
 
             Checkpoint Context preserves these receipts even when successful
             result bodies are purged. The tool result's prose is not parsed.

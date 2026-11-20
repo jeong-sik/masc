@@ -257,9 +257,9 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 
 구현한 것(task-3814):
 - `ToolReference` 를 content block 으로 저장해 checkpoint 와 provider failover 에서 보존한다. Anthropic 이외 wire 에는 기존 `ToolResult.content` 텍스트를 쓴다.
-- Agent 의 callable 집합과 deferred wire surface를 분리했다. 지원 model capability가 있는 Anthropic 은 전체 catalog 를 stable order 로 복사하고 지연 이름에는 항상 `defer_loading: true` 를 단다. 로드 전후 tools JSON 이 달라지지 않는다.
-- `cache_control` 은 마지막 non-deferred tool 에 단다. all-deferred 요청은 전송 전에 거부한다.
-- `Tool_references` placement 는 이력 창에 reference 가 남은 도구를 catalog 순서로 callable 로 둔다. 다른 provider 는 `History_carry` 를 유지한다.
+- Agent 의 callable 집합과 deferred wire surface를 분리했다. 지원 model capability가 있는 Anthropic 은 eager 도구와 deferrable catalog 를 stable order 로 복사하고 지연 이름에는 항상 `defer_loading: true` 를 단다. 로드 전후 tools JSON 이 달라지지 않는다.
+- `cache_control` 은 마지막 non-deferred tool 에 단다. all-deferred 요청은 전송 전에 거부한다. eager loader 는 deferred catalog 에서 제외한다.
+- `Agent_turn` 은 first/narrower 요청 각각의 projected history 에서 reference 를 읽어 callable 집합을 계산한다. canonical history 에만 남은 reference 는 도구를 유지하지 않는다. Keeper 는 eager surface 만 공급하고 다른 provider 는 `History_carry` 를 유지한다.
 
 남는 것:
 - loader 설명에 지연 이름 목록이 있다. add-on 이 붙거나 떨어지면 그 설명이 바뀐다. 이 RFC 는 다루지 않는다.

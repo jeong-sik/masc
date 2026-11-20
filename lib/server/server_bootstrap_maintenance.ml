@@ -409,7 +409,11 @@ let recover_keeper_config_journal_on_startup ~base_path =
   report
 ;;
 
-let with_initial_configuration ~base_path initialize =
+type fresh_config_root =
+  | Seeded
+  | Refilled
+
+let with_initial_configuration ~base_path ~fresh_root initialize =
   let runtime_config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
   let config_root = Filename.dirname runtime_config_path in
   (* Directory creation is atomic. No configuration bytes are read or seeded
@@ -420,7 +424,11 @@ let with_initial_configuration ~base_path initialize =
     | Unix.Unix_error (Unix.EEXIST, _, _) -> false in
   Runtime.with_config_lock ~runtime_config_path (fun () ->
     if created then
-      Server_runtime_config_root_bootstrap.bootstrap_initial_config_root ~base_path ~created;
+      (match fresh_root with
+       | Seeded ->
+         Server_runtime_config_root_bootstrap.bootstrap_initial_config_root ~base_path ~created
+       | Refilled ->
+         Server_runtime_config_root_bootstrap.bootstrap_base_path_config_root ~base_path);
     Ok (initialize ~runtime_config_path))
 ;;
 

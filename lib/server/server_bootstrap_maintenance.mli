@@ -68,12 +68,34 @@ val recover_keeper_config_journal_on_startup :
     write (#31180) to its pre-request state and clear the journal. Called
     synchronously before background server work starts. *)
 
+(** What a boot gives a config root it has just made. *)
+type fresh_config_root =
+  | Seeded
+      (** The seed of a single-user workspace, the default Keeper definitions
+          among it
+          ({!Server_runtime_config_root_bootstrap.bootstrap_initial_config_root}). *)
+  | Refilled
+      (** What a root that was there gets: the scaffold, the missing prompts
+          and the runtime.toml this build embeds, and no Keeper definition
+          ({!Server_runtime_config_root_bootstrap.bootstrap_base_path_config_root}).
+          The boot of a multi-account installation asks for this. The Keepers
+          of such an installation are the ones its authorization log names,
+          so its boot makes no definition of its own. [masc auth bootstrap]
+          leaves a root that boots the same way: one with runtime.toml
+          alone. *)
+
 val with_initial_configuration :
-  base_path:string -> (runtime_config_path:string -> 'a) -> ('a, string) result
+  base_path:string
+  -> fresh_root:fresh_config_root
+  -> (runtime_config_path:string -> 'a)
+  -> ('a, string) result
 (** Hold the existing configuration lock from the first bootstrap read through
     publication of the initial owner inventory. Recheck journal admission under
     that lock: early recovery's [No_journal] is not a later read permit. The
-    callback's own missing/invalid-model result is preserved as its value. *)
+    callback's own missing/invalid-model result is preserved as its value.
+
+    A config root that is not there is made, and filled as [fresh_root]
+    says. *)
 
 val latest_keeper_msg_recovery_observation :
   unit -> Keeper_msg_async.recovery_report option

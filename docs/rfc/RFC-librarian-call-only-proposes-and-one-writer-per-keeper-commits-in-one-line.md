@@ -949,7 +949,7 @@ type write =
 | `Remember` | 없는 claim | 더한다 |
 | `Remember` | 같은 claim, 같은 category 와 basis | `last_seen` 을 옮긴다 |
 | `Remember` | 같은 claim, 다른 category 나 basis | `Already_held`. 바꾸지 않는다 |
-| `Supersede` | `old` 가 있고 새 claim 은 없다 | `old` 를 `Superseded_by` 로 지우고 새 claim 을 더한다. 한 줄이다 |
+| `Supersede` | `old` 가 있고 새 claim 은 없다 | `old` 를 `Superseded_by` 로 지우고 새 claim 을 더한다. 새 claim 의 `first_seen` 은 `old` 의 것이다. 한 줄이다 |
 | `Supersede` | `old` 도 새 claim 도 있다 | `old` 를 `Superseded_by` 로 지우고 새 claim 은 `last_seen` 만 옮긴다. 한 줄이다 |
 | `Supersede` | `old` 가 없고 새 claim 은 있다 | 이미 된 것으로 답한다 |
 | `Supersede` | 둘 다 없다 | `Refused Unknown_fact`. 더하지 않는다 |

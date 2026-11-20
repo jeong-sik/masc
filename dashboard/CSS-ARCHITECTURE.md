@@ -289,8 +289,6 @@ without checking HashBridge first.**
 - Issue #3915 - CSS refactoring
 - Issue #3912 - Duplicate CSS removal (predecessor)
 - Tailwind v4 documentation: https://tailwindcss.com/docs/v4-beta
-- DS-Drift Phase 0 audit: `dashboard/design-system/audits/2026-04-28-production-css-drift.md`
-- DS-Drift orphan triage: `dashboard/design-system/audits/2026-04-28-orphan-triage.md`
 - DS-Drift Phase 3 refresh (CSS layer 0 hex remaining): see this file's commit history (2026-05-11)
 - SSOT-4 (`tokens.css`) origin PRs: #12625 (V2), #12769 (drift elimination), #12881 (polish tokens), #12922 (provider tokens)
 - RFC-0063 §7-B file-level grep lint pattern (precedent for component inline hex lint)

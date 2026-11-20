@@ -53,7 +53,7 @@ type SurfaceSectionId =
   | 'lane-addons'
   | 'lane-inventory'
   | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐 (keeper-v2 lanes.jsx).
-  | 'skills' // SKILL.md catalog keepers load at turn start, with usage (RFC skills-as-tools §2.6).
+  | 'skills' // SKILL.md catalog keepers load at turn start, with usage.
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
   // connectors (top-level surface for server-owned channel gateways)

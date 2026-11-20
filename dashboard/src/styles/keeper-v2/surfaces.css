@@ -316,13 +316,6 @@ body.rail-resizing .v2-body { transition: none; }
 .bd-feed-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 11px 18px; border-bottom: 1px solid var(--border-main); background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep)); }
 .bd-feed-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 15px; color: var(--text-bright); margin: 0; white-space: nowrap; }
 .bd-feed-head .ns { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
-/* faithful-copy rules restored 2026-08-23 (bd-stateblock precedent, docs/DESIGN-PARITY.md):
-   the kit stays diffable against the design even though the live producers were
-   purged in ce67d20558 (#29504). Removing them dropped board parity 0.996 → 0.813. */
-.bd-feed-head .spacer { flex: 1; }
-.bd-filter { font-family: var(--font-ui); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); background: transparent; color: var(--text-dim); cursor: pointer; transition: 0.14s; white-space: nowrap; }
-.bd-filter.on { color: var(--volt-ink); background: var(--volt); border-color: var(--volt); font-weight: 600; }
-.bd-filter:not(.on):hover { color: var(--text-mid); border-color: var(--border-highlight); }
 
 .bd-list { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
 .bd-list::-webkit-scrollbar { width: 9px; }
@@ -355,12 +348,6 @@ body.rail-resizing .v2-body { transition: none; }
 .bd-post-foot .replies { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
 .bd-post-foot .karma { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
 .bd-post-foot .karma b { color: var(--volt-strong); font-weight: 600; }
-
-/* state-block post */
-.bd-stateblock { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin-top: 9px; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--bg-sunken); border: 1px dashed var(--border-main); font-family: var(--font-mono); font-size: var(--fs-11); }
-.bd-stateblock .sk { color: var(--text-dim); }
-.bd-stateblock .sv { color: var(--text-mid); }
-.bd-stateblock .sv.hl { color: var(--info); }
 
 /* board composer */
 .bd-composer { flex: none; border-top: 1px solid var(--border-main); background: linear-gradient(0deg, var(--bg-panel), var(--bg-deep)); padding: 10px 18px 14px; }

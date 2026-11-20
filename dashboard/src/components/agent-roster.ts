@@ -1323,8 +1323,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             // keeper-v2 fleet.jsx: hover-revealed .fl-actions group + fl-chat
             // deep link into the keepers conversation surface. The design's
             // per-button .fl-act glyph buttons stay unbuilt — the live row
-            // deliberately renders text action buttons (DESIGN-PARITY.md
-            // monitor ledger: six-track grid with a 160px action cell).
+            // deliberately renders text action buttons (six-track grid with
+            // a 160px action cell).
             ? html`<div class="fl-actions"><${KeeperActionButtons}
                 keeper=${row.keeperRuntime}
                 size="sm"

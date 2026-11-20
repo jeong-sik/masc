@@ -80,8 +80,7 @@ open('src/styles/fonts.css', 'w').write(f"""/* Keeper-v2 brand fonts
  *   Cinzel (display, TTF) and EB Garamond + JetBrains Mono (latin &
  *   latin-ext woff2 subsets, ~30KB each). Korean text is covered by
  *   fonts-noto-sans-kr.css. No stylesheet in this app fetches Google Fonts:
- *   the subsets are vendored so a clean machine renders the design's metrics
- *   (see docs/DESIGN-PARITY.md, "the body face is the same one").
+ *   the subsets are vendored so a clean machine renders the design's metrics.
  */
 
 @font-face {{

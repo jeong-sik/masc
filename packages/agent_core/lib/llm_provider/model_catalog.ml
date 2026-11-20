@@ -84,7 +84,6 @@ type provider_entry = Model_provider_catalog.entry =
   ; supports_parallel_tool_suppression : bool
   ; supports_extended_cache_ttl : bool
   ; cache_session_wire : Capability_vocab.cache_session_wire
-  ; supports_provider_routing_filter : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 

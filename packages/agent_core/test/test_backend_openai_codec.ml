@@ -3320,72 +3320,6 @@ let test_openrouter_top_level_cache_control_and_1h_pricing () =
     ]
 ;;
 
-let test_openrouter_provider_routing_filter_serialization () =
-  let messages = [ msg User [ Text "hello" ] ] in
-  let chat_json config =
-    Backend_openai_request.build_request ~config ~messages () |> Yojson.Safe.from_string
-  in
-  let or_base =
-    Provider_config.make
-      ~kind:OpenAI_compat
-      ~provider_id:"openrouter"
-      ~model_id:"qwen/qwen3.8-max-0902"
-      ~base_url:"https://openrouter.ai/api/v1"
-      ()
-  in
-  (* Empty lists omit "provider" entirely (never emit {} or []). *)
-  let base_fields = chat_json or_base |> Yojson.Safe.Util.to_assoc in
-  check_bool "empty provider filters omit provider field" false
-    (List.mem_assoc "provider" base_fields);
-  (* provider_only emits {"only": [...]} without "ignore", "order", or "sort". *)
-  let only_body = chat_json { or_base with provider_only = [ "alibaba/us-east-1" ] } in
-  let only_obj = member "provider" only_body |> Yojson.Safe.Util.to_assoc in
-  check_bool "only present" true
-    (List.assoc_opt "only" only_obj = Some (`List [ `String "alibaba/us-east-1" ]));
-  List.iter
-    (fun k -> check_bool ("only omits " ^ k) false (List.mem_assoc k only_obj))
-    [ "ignore"; "order"; "sort" ];
-  (* provider_ignore emits {"ignore": [...]} without "only". *)
-  let ignore_body = chat_json { or_base with provider_ignore = [ "amazon-bedrock" ] } in
-  let ignore_obj = member "provider" ignore_body |> Yojson.Safe.Util.to_assoc in
-  check_bool "ignore present" true
-    (List.assoc_opt "ignore" ignore_obj = Some (`List [ `String "amazon-bedrock" ]));
-  check_bool "ignore omits only" false (List.mem_assoc "only" ignore_obj);
-  (* Disjoint only + ignore emits both under "provider". *)
-  let both_body =
-    chat_json
-      { or_base with
-        provider_only = [ "alibaba/us-east-1"; "deepinfra" ]
-      ; provider_ignore = [ "amazon-bedrock" ]
-      }
-  in
-  let both_obj = member "provider" both_body |> Yojson.Safe.Util.to_assoc in
-  check_bool "both carries only" true
-    (List.assoc_opt "only" both_obj
-     = Some (`List [ `String "alibaba/us-east-1"; `String "deepinfra" ]));
-  check_bool "both carries ignore" true
-    (List.assoc_opt "ignore" both_obj = Some (`List [ `String "amazon-bedrock" ]));
-  (* Providers with supports_provider_routing_filter = false never emit "provider". *)
-  List.iter
-    (fun (label, kind, provider_id, model_id, base_url) ->
-       let cfg =
-         Provider_config.make
-           ~kind
-           ?provider_id
-           ~model_id
-           ~base_url
-           ~provider_only:[ "alibaba/us-east-1" ]
-           ~provider_ignore:[ "amazon-bedrock" ]
-           ()
-       in
-       let fields = chat_json cfg |> Yojson.Safe.Util.to_assoc in
-       check_bool (label ^ " omits provider filter") false (List.mem_assoc "provider" fields))
-    [ "direct openai", Provider_config.OpenAI_compat, Some "openai", "gpt-5.5", "https://api.openai.com/v1"
-    ; "direct mistral", Provider_config.OpenAI_compat, Some "mistral", "mistral-large-4", "https://api.mistral.ai/v1"
-    ; "anonymous compat", Provider_config.OpenAI_compat, None, "qwen/qwen3.8-max-0902", "https://example.invalid/v1"
-    ]
-;;
-
 let test_responses_build_request_uses_text_format_json_schema () =
   let schema =
     `Assoc
@@ -4459,10 +4393,6 @@ let () =
             "openrouter top-level cache_control and 1h write pricing"
             `Quick
             test_openrouter_top_level_cache_control_and_1h_pricing
-        ; Alcotest.test_case
-            "openrouter provider routing filter serialization"
-            `Quick
-            test_openrouter_provider_routing_filter_serialization
         ; Alcotest.test_case
             "build request text.format json_schema"
             `Quick

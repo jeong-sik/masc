@@ -37,7 +37,6 @@ let choice label probabilities =
 let possibly = choice "possibly_needed" [ "possibly_needed", 0.8; "not_needed", 0.2 ]
 let unrelated = choice "not_needed" [ "possibly_needed", 0.3; "not_needed", 0.7 ]
 let yes = choice "yes" [ "yes", 0.7; "no", 0.2; "unsure", 0.1 ]
-let no_knowledge = choice "no" [ "yes", 0.1; "no", 0.8; "unsure", 0.1 ]
 let standing = choice "standing" [ "standing", 0.9; "time_bound", 0.1 ]
 
 let evaluated answers : Client.evaluated =
@@ -53,7 +52,7 @@ let evaluated answers : Client.evaluated =
 
 (* The client answers by the shape of the request: this stands in for Jev. It
    carries the candidates [carries] says. *)
-let scripted_with_turn ~turn ~carries ~destinations:_ ~state ~questions () =
+let scripted ~carries ~destinations:_ ~state ~questions () =
   let is_candidate_question =
     match state with
     | `Assoc fields -> List.mem_assoc "purpose" fields
@@ -62,13 +61,11 @@ let scripted_with_turn ~turn ~carries ~destinations:_ ~state ~questions () =
   let is_turn_question = List.map fst questions = [ "turn" ] in
   let answer (id, _) =
     id,
-    if is_turn_question then turn
+    if is_turn_question then yes
     else if is_candidate_question then (if carries id then possibly else unrelated)
     else standing
   in
   Ok (evaluated (List.map answer questions))
-
-let scripted ~carries = scripted_with_turn ~turn:yes ~carries
 
 let answering = scripted ~carries:(String.equal (C.id first_candidate))
 let carrying_nothing = scripted ~carries:(fun _ -> false)
@@ -151,9 +148,6 @@ let judgments ~keeper ~outcome =
 
 let selected ~keeper =
   counter Keeper_metrics.(to_string MemoryRecallSelected) [ "keeper", keeper ]
-
-let contradicted ~keeper =
-  counter Keeper_metrics.(to_string MemoryRecallTurnContradicted) [ "keeper", keeper ]
 
 let timed ~keeper =
   counter
@@ -284,24 +278,7 @@ let test_a_judgment_that_carries_nothing_is_counted_without_a_selection () =
     let judged = judged_of (judge ~call:carrying_nothing ~memo:(Turn.create_memo ()) config ~keeper_id ()) in
     Alcotest.(check string) "none found" "none_found" (J.status_token judged.status);
     Alcotest.(check (float 0.0)) "counted as none found" 1.0 (judgments ~keeper:keeper_id ~outcome:"none_found");
-    Alcotest.(check (float 0.0)) "no selection was counted" 0.0 (selected ~keeper:keeper_id);
-    Alcotest.(check (float 0.0)) "no contradiction was counted" 0.0 (contradicted ~keeper:keeper_id))
-
-let test_a_contradicted_turn_question_increments_counter () =
-  with_recall_setup (fun config ->
-    let agreeing_keeper = "turn-agrees" in
-    ignore (judged_of (judge ~call:answering ~memo:(Turn.create_memo ()) config ~keeper_id:agreeing_keeper ()));
-    Alcotest.(check (float 0.0)) "agreeing turn question is not counted as contradicted" 0.0
-      (contradicted ~keeper:agreeing_keeper);
-    let keeper_id = "turn-contradicted" in
-    let call = scripted_with_turn ~turn:no_knowledge ~carries:(String.equal (C.id first_candidate)) in
-    let judged = judged_of (judge ~call ~memo:(Turn.create_memo ()) config ~keeper_id ()) in
-    (match judged.status with
-     | J.Selected { selection = _; coverage = _; turn_question_contradicted } ->
-       Alcotest.(check bool) "turn question contradiction recorded on status" true turn_question_contradicted
-     | J.None_found _ | J.None_needed _ | J.Unavailable _ -> Alcotest.fail "expected selected");
-    Alcotest.(check (float 0.0)) "contradiction counter incremented once" 1.0
-      (contradicted ~keeper:keeper_id))
+    Alcotest.(check (float 0.0)) "no selection was counted" 0.0 (selected ~keeper:keeper_id))
 
 (* ---- the rest of the turn ---- *)
 
@@ -432,8 +409,6 @@ let () =
             test_a_judgment_that_carries_two_candidates_counts_both
         ; Alcotest.test_case "a judgment that carries nothing is counted without a selection" `Quick
             test_a_judgment_that_carries_nothing_is_counted_without_a_selection
-        ; Alcotest.test_case "a contradicted turn question increments the OTel counter" `Quick
-            test_a_contradicted_turn_question_increments_counter
         ] )
     ; ( "the rest of the turn"
       , [ Alcotest.test_case "the judgment is given back for the rest of its turn" `Quick

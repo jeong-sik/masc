@@ -21,7 +21,7 @@ dockerfile="$repo_root/sandbox-images/ocaml/Dockerfile"
 
 # --- What masc.opam requires: "ocaml" {= "X.Y.Z"} ----------------------------
 req_ver="$(grep -oE '"ocaml" \{= "[0-9]+\.[0-9]+\.[0-9]+"\}' "$repo_root/masc.opam" \
-           | sed -n '1p' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+           | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
 
 if [[ -z "$req_ver" ]]; then
   printf 'ERROR: masc.opam does not pin ocaml to an exact version\n' >&2
@@ -33,10 +33,10 @@ fi
 # `|| true` is required: a no-match grep exits 1 under `set -e`, which would
 # kill the script before it could print the diagnostic below.
 img_ver="$(grep -oE 'ocaml-base-compiler\.[0-9]+\.[0-9]+\.[0-9]+' "$dockerfile" \
-           | sed -n '1p' | sed 's/^ocaml-base-compiler\.//' || true)"
+           | head -1 | sed 's/^ocaml-base-compiler\.//' || true)"
 
 if [[ -z "$img_ver" ]]; then
-  from_tag="$(grep -oE '^FROM ocaml/opam:[^ ]+' "$dockerfile" | sed -n '1p' || true)"
+  from_tag="$(grep -oE '^FROM ocaml/opam:[^ ]+' "$dockerfile" | head -1 || true)"
   printf 'FAIL: masc.opam requires ocaml %s and the sandbox image installs no exact compiler\n' \
          "$req_ver" >&2
   printf '  Base image: %s\n' "${from_tag:-<no ocaml/opam FROM line>}" >&2

@@ -161,12 +161,12 @@ if command -v lsof >/dev/null 2>&1; then
     awk 'NR > 1 {count[$2]++; name[$2]=$1} END {for (pid in count) print count[pid], pid, name[pid]}' \
       "${tmp_lsof}" \
       | sort -nr \
-      | sed -n '1,20p'
+      | head -20
     if [[ "${ps_available}" -eq 1 ]]; then
       printf 'top fd holder commands:\n'
       awk 'NR > 1 {count[$2]++} END {for (pid in count) print count[pid], pid}' "${tmp_lsof}" \
         | sort -nr \
-        | sed -n '1,10p' \
+        | head -10 \
         | while read -r _count pid; do
           ps -p "${pid}" -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
             | truncate_rows || true

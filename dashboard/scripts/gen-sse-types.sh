@@ -66,7 +66,7 @@ case "$MODE" in
       echo "error: $OUT_FILE is out of date relative to $ATD_SOURCE" >&2
       echo "       run $0 (no flags) and commit the regenerated file" >&2
       echo "       diff (first 40 lines):" >&2
-      diff -u "$OUT_FILE" "$GENERATED" | sed -n '1,40p' >&2 || true
+      diff -u "$OUT_FILE" "$GENERATED" | head -40 >&2 || true
       exit 1
     fi
     echo "ok: $OUT_FILE in sync with $ATD_SOURCE"

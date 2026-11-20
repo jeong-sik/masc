@@ -88,38 +88,6 @@ let order_index = function
   | Fleet_messages -> 20
 ;;
 
-type author =
-  | Host_state
-  | Outside_text
-
-(* Exhaustive over [layer_id] (RFC §3.4): [Host_state] strictly for layers
-   rendered purely from host-owned state (ids, counts, revisions, schedules).
-   Any layer that can carry even one byte of external/keeper-authored text is
-   [Outside_text]. *)
-let author_of_layer = function
-  | Goals_awaiting_proof
-  | Approval_authority
-  | Connected_surfaces
-  | Namespace_state
-  | Workspace_memory
-  | Lane_updates
-  | Autonomous_trigger
-  | Scheduled_automation -> Host_state
-  | Active_goals
-  | Direct_input_source
-  | Goal_observations
-  | Current_task
-  | Wiki
-  | Completion_authority
-  | Task_cancellations
-  | Pending_mentions
-  | Own_board_posts
-  | Board_activity
-  | Own_recent_actions
-  | Recent_work
-  | Fleet_messages -> Outside_text
-;;
-
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
 type source = Layer of layer_id | Unattributed of unattributed
 type resend_on_resume = Sent_when_changed | Sent_every_resume | Sent_with_other_sections
@@ -223,12 +191,9 @@ let source_of_name name =
   @ List.map (fun reason -> Unattributed reason) all_unattributed
   |> List.find_opt (fun source -> String.equal (source_name source) name)
 
-(* See the mli. The per-turn inbox layers carry rows delivered only for this
-   turn (Board and authority events, schedule-store attention rows) and the
+(* See the mli. The inbox layers carry rows delivered for this turn (pending
+   messages, Board and authority events, the schedule-store attention rows) and the
    trigger says why this turn ran, so a repeat of their bytes is a new arrival.
-   [Pending_mentions] repeats unacked mentions across turns until replied to,
-   so it stays [Sent_when_changed] with row-level [Head_and_rows] framing
-   (RFC §3.4) and resumes omit rows the session already holds.
    [Goals_awaiting_proof] is sent every resume as its block is
    ({!Prompt_block_id.resent_when_held}): a Goal's phase moves between resumes.
    Every other layer projects state that holds until it changes. A whole
@@ -239,12 +204,12 @@ let resend_on_resume = function
   | Layer
       ( Active_goals | Direct_input_source | Goal_observations | Current_task | Approval_authority | Connected_surfaces
       | Namespace_state | Workspace_memory | Wiki | Lane_updates
-      | Pending_mentions | Own_board_posts | Own_recent_actions | Recent_work | Fleet_messages )
+      | Own_board_posts | Own_recent_actions | Recent_work | Fleet_messages )
   | Unattributed (Host_workspace_recall | Direct_turn | Unprojected_input) ->
     Sent_when_changed
   | Layer
       ( Goals_awaiting_proof | Autonomous_trigger | Scheduled_automation | Completion_authority
-      | Task_cancellations | Board_activity ) ->
+      | Task_cancellations | Pending_mentions | Board_activity ) ->
     Sent_every_resume
   | Unattributed World_frame -> Sent_with_other_sections
 

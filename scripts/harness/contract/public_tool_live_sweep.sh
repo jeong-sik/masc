@@ -131,7 +131,7 @@ board_reaction_emoji="$(
       | (.inputSchema // .input_schema)
       | .properties.emoji.enum[0] // empty
     ' \
-    | sed -n '1p'
+    | head -n1
 )"
 if [[ -z "$board_reaction_emoji" ]]; then
   mcp_fail_with_context "masc_board_reaction schema missing emoji enum" "$tools_list_payload"
@@ -172,7 +172,7 @@ expect_ok "masc_add_task" "$r_add_task"
 task_id="$(
   printf '%s' "$r_add_task" \
     | jq -r 'try (.result.structuredContent.task_id // .result.structuredContent.id) catch empty | strings' \
-    | sed -n '1p'
+    | head -n1
 )"
 if [[ -z "$task_id" ]]; then
   mcp_fail_with_context "masc_add_task: could not extract task_id" "$r_add_task"
@@ -230,7 +230,7 @@ expect_ok "masc_board_post" "$r_board_post"
 post_id="$(
   printf '%s' "$r_board_post" \
     | jq -r 'try (.result.structuredContent.id) catch empty | strings' \
-    | sed -n '1p'
+    | head -n1
 )"
 if [[ -z "$post_id" ]]; then
   mcp_fail_with_context "masc_board_post: could not extract post_id" "$r_board_post"
@@ -250,7 +250,7 @@ expect_ok "masc_board_comment" "$r_board_comment"
 comment_id="$(
   printf '%s' "$r_board_comment" \
     | jq -r 'try (.result.structuredContent.comment_id // .result.structuredContent.id // .result.structuredContent.comment.id) catch empty | strings' \
-    | sed -n '1p'
+    | head -n1
 )"
 if [[ -z "$comment_id" ]]; then
   mcp_fail_with_context "masc_board_comment: could not extract comment_id" "$r_board_comment"

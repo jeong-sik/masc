@@ -366,19 +366,6 @@ type binding =
             (five minutes on Anthropic). Only a Messages runtime whose catalog
             provider row declares [supports_extended_cache_ttl] carries it;
             any other refuses a declared value at load time. *)
-  ; provider_only : string list
-        (** Optional upstream provider allowlist ([provider-only], e.g.
-            OpenRouter [provider.only] including sub-tags such as
-            ["alibaba/us-east-1"]). Empty when omitted. Only a Chat Completions
-            binding whose catalog provider row declares
-            [supports_provider_routing_filter] carries it; any other refuses a
-            non-empty list at load time. *)
-  ; provider_ignore : string list
-        (** Optional upstream provider denylist ([provider-ignore], e.g.
-            OpenRouter [provider.ignore] such as ["amazon-bedrock"]). Empty
-            when omitted. Only a Chat Completions binding whose catalog
-            provider row declares [supports_provider_routing_filter] carries
-            it; any other refuses a non-empty list at load time. *)
   ; max_tokens : int option
         (** Request-side output budget for this binding ([max_tokens] on Chat
             Completions, [max_output_tokens] on Responses, [num_predict] on

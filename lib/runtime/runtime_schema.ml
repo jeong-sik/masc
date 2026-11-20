@@ -428,8 +428,6 @@ type binding =
   ; max_concurrent : int option
   ; disable_parallel_tool_use : bool
   ; cache_retention : cache_retention option
-  ; provider_only : string list
-  ; provider_ignore : string list
   ; max_tokens : int option
     (** Request-side output budget for this binding ([max_tokens] on Chat
         Completions, [max_output_tokens] on Responses, [num_predict] on Ollama).

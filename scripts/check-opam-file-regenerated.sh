@@ -80,7 +80,7 @@ if ! cmp -s "$committed_opam" "$snapshot"; then
   printf '  after fixing dune-project.\n' >&2
   printf '\n' >&2
   printf '  Diff (regenerated vs previously committed):\n' >&2
-  diff "$committed_opam" "$snapshot" | sed -n '1,40p' >&2 || true
+  diff "$committed_opam" "$snapshot" | head -40 >&2 || true
   exit 1
 fi
 

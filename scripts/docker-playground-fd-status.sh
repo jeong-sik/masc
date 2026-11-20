@@ -146,7 +146,7 @@ echo ""
 echo "Top worktree fanout by keeper/repo:"
 echo "worktree_fanout_columns=count keeper repo worktrees_dir"
 if [ -s "$fanout_tmp" ]; then
-  sort -rn "$fanout_tmp" | awk -v limit="$LIMIT" 'NR <= (limit + 0)'
+  sort -rn "$fanout_tmp" | head -n "$LIMIT"
 else
   echo "0 none none none"
 fi
@@ -155,7 +155,7 @@ emit_top_fanout_action() {
   [ -s "$fanout_tmp" ] || return 0
   local top_fanout_line top_fanout_count top_fanout_keeper top_fanout_repo
   local quoted_root quoted_keeper quoted_repo
-  top_fanout_line="$(sort -rn "$fanout_tmp" | sed -n '1p')"
+  top_fanout_line="$(sort -rn "$fanout_tmp" | head -n 1)"
   set -- $top_fanout_line
   top_fanout_count="${1:-0}"
   top_fanout_keeper="${2:-}"
@@ -259,7 +259,7 @@ emit_cleanup_summaries() {
     "projected_worktree_entries" "$worktree_entries"
   if [ -s "$fanout_tmp" ]; then
     local top_fanout_line top_fanout_count top_fanout_keeper top_fanout_repo
-    top_fanout_line="$(sort -rn "$fanout_tmp" | sed -n '1p')"
+    top_fanout_line="$(sort -rn "$fanout_tmp" | head -n 1)"
     set -- $top_fanout_line
     top_fanout_count="${1:-0}"
     top_fanout_keeper="${2:-}"
@@ -274,7 +274,7 @@ emit_cleanup_summaries() {
       "projected_worktree_entries" "$worktree_entries"
     if [ -s "$fanout_tmp" ]; then
       local top_fanout_line top_fanout_count top_fanout_keeper top_fanout_repo
-      top_fanout_line="$(sort -rn "$fanout_tmp" | sed -n '1p')"
+      top_fanout_line="$(sort -rn "$fanout_tmp" | head -n 1)"
       set -- $top_fanout_line
       top_fanout_count="${1:-0}"
       top_fanout_keeper="${2:-}"

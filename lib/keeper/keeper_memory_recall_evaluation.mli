@@ -97,29 +97,8 @@ val evaluate_with :
 val retain_outcome :
   t -> Keeper_memory_recall_flow.judged -> Keeper_memory_recall_flow.judged
 (** Saves the final row of the judgment ([judgment_completed]): the status and
-    its coverage and reason, the selected ids, the canonical
-    [selected_id_set_sha256] digest when selected, the answer of question (b),
-    the result of every candidate and the mark of every carried candidate.
-    Returns the judgment to use. When the row cannot be saved that is
+    its coverage and reason, the selected ids, the answer of question (b), the
+    result of every candidate and the mark of every carried candidate. Returns
+    the judgment to use. When the row cannot be saved that is
     {!Keeper_memory_recall_flow.not_recorded}, so a judgment is used only when
     its record exists. *)
-
-val selected_id_set_sha256 : string list -> string
-(** Deterministic SHA-256 hex digest of the sorted, deduplicated set of
-    selected memory ids encoded as a canonical JSON string array. Order- and
-    duplicate-invariant so k-turn recall overlap can be measured directly from
-    evaluation journals without re-hashing raw payloads. *)
-
-type outcome_observation =
-  { status : string
-  ; selected_ids : string list
-  ; selected_id_set_sha256 : string option
-  ; turn_question_contradicted : bool
-  }
-(** Backward-compatible projection of the [outcome] object in a
-    [judgment_completed] row. Historical rows written before
-    [selected_id_set_sha256] was added decode with [selected_id_set_sha256 = None],
-    and non-selected outcomes decode with [selected_ids = []] and
-    [turn_question_contradicted = false]. *)
-
-val outcome_observation_of_yojson : Yojson.Safe.t -> (outcome_observation, string) result

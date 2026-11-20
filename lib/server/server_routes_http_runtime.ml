@@ -370,10 +370,7 @@ let compute_section ~name ?section_timings_ref f =
         ~status:"error"
         name
 
-(* Every field of the full health computation: the sections, then the rollup
-   that reads them. The snapshot keeps this list whole, so a section added
-   below reaches [/health?full=1] without being named anywhere else. *)
-let make_health_fields ?(listener = default_listener) ?section_timings_ref
+let make_health_json ?(listener = default_listener) ?section_timings_ref
     ~request_authority request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
@@ -689,22 +686,19 @@ let make_health_fields ?(listener = default_listener) ?section_timings_ref
       ~keeper_config_operator_action_required
   in
   let string_list reasons = `List (List.map (fun reason -> `String reason) reasons) in
-  sections
-  @ [
-      ("overall_status", `String rollup.Server_health_rollup.overall_status);
-      ( "operator_action_required",
-        `Bool rollup.Server_health_rollup.operator_action_required );
-      ( "operator_action_reasons",
-        string_list rollup.Server_health_rollup.operator_action_reasons );
-      ( "operator_actions",
-        `List (List.map Operator_action_reason.to_json rollup.Server_health_rollup.operator_actions) );
-      ( "overall_status_reasons",
-        string_list rollup.Server_health_rollup.overall_status_reasons );
-    ]
-
-let make_health_json ?listener ?section_timings_ref ~request_authority request =
   Tool_args.ok_assoc
-    (make_health_fields ?listener ?section_timings_ref ~request_authority request)
+    (sections
+     @ [
+         ("overall_status", `String rollup.Server_health_rollup.overall_status);
+         ( "operator_action_required",
+           `Bool rollup.Server_health_rollup.operator_action_required );
+         ( "operator_action_reasons",
+           string_list rollup.Server_health_rollup.operator_action_reasons );
+         ( "operator_actions",
+           `List (List.map Operator_action_reason.to_json rollup.Server_health_rollup.operator_actions) );
+         ( "overall_status_reasons",
+           string_list rollup.Server_health_rollup.overall_status_reasons );
+       ])
 
 module Health_observation = Server_full_health_observation
 
@@ -946,6 +940,30 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ("keeper_config_operator_action_required", `Bool false);
   ]
 
+let cached_full_health_fields = function
+  | `Assoc fields ->
+      let cached =
+        List.filter (fun (name, _) -> Server_health_rollup.is_cached name) fields
+      in
+      let has_cached name =
+        List.exists (fun (cached_name, _) -> String.equal cached_name name) cached
+      in
+      let missing_placeholders =
+        full_health_placeholder_fields ~status:"unavailable" ()
+        |> List.filter (fun (name, _) ->
+            Server_health_rollup.is_cached name && not (has_cached name))
+      in
+      cached @ missing_placeholders
+  | json ->
+      [
+        ( "full_health_payload",
+          `Assoc
+            [
+              ("status", `String "unexpected_payload");
+              ("payload", json);
+            ] );
+      ]
+
 let duration_ms ~started_at ~finished_at =
   max 0 (int_of_float ((finished_at -. started_at) *. 1000.))
 
@@ -968,7 +986,8 @@ let compute_full_health_snapshot ?(listener = default_listener)
   let section_timings_ref = ref [] in
   try
     let fields =
-      make_health_fields ~listener ~section_timings_ref ~request_authority request
+      cached_full_health_fields
+        (make_health_json ~listener ~section_timings_ref ~request_authority request)
     in
     let finished_at = Unix.gettimeofday () in
     let workspace_epoch, scope_consistent = unchanged_workspace_epoch workspace_epoch in
@@ -1704,19 +1723,10 @@ let make_cached_full_health_json_with ~after_selection ?timing ?(listener = defa
     | Some snapshot -> snapshot.fields
     | None -> full_health_placeholder_fields ()
   in
-  let probe_fields =
-    make_health_probe_fields ?timing ~listener ~health_detail:"full" ~request_authority
-      request
-  in
-  (* The snapshot holds every field of the full computation. The ones this
-     request has just computed again are left out of it: no key is answered
-     twice, and for those keys the answer is never the older reading. *)
-  let snapshot_fields =
-    List.filter (fun (name, _) -> not (List.mem_assoc name probe_fields)) fields
-  in
   Tool_args.ok_assoc
-    (probe_fields
-     @ snapshot_fields
+    (make_health_probe_fields ?timing ~listener ~health_detail:"full" ~request_authority
+       request
+     @ fields
      @ [
          ( "full_health_snapshot",
            full_health_snapshot_metadata ~now view );

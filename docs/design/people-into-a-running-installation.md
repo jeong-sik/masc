@@ -754,7 +754,59 @@ config root 와 `runtime.toml` 두 줄은 직접 읽었다. 나머지는 조사�
 - 다계정에서 거절되는 운영자 요청이 남기는 로그의 양(§20.3).
 - 엔진 초기화에 걸리는 시간.
 - persistence 준비가 고치는 기록이 계정 서버가 지금 쓰는 사람의 대화 기록과 겹치는지.
-- Keeper loop 와 준비 뒤 lane 의 본문(§20.2, §20.3). 띄우는 범위는 이것을 읽은 뒤에 정한다.
 - completion authority 와 goal verifier 가 판정에 넘기는 요청(§20.3).
 - `Runtime_setup_batch` 가 프로세스 environment 전체를 자식에게 넘기는 길(`lib/runtime/runtime_setup_batch.ml:102-104`)이 사람의 요청에서 닿는지.
-- 계정 서버의 로그인 경로가 작업 공간의 credential 로 여는 wrapper 를 쓰는지.
+- 계정 서버의 로그인 경로가 작업 공간의 credential 로 여는 wrapper 를 쓰는지. §21.3 이 한 경로를 읽었다.
+
+## 21. 엔진이 Keeper 없는 다계정 설치에서 하는 일
+
+줄 번호는 main `62900e072` 기준이다. 조사 에이전트 둘이 엔진이 띄우는 것 일흔 개를 훑었다. "조사만 함" 이 붙지 않은 줄은 직접 읽었다. RFC 는 직접 읽은 줄에만 기댄다.
+
+### 21.1 띄우는 것은 네 단계다
+
+- stdio 서버와 단일 사용자 HTTP 서버는 같은 넷을 부른다. `initialize_owner_state_blocking`, `activate_owner_state`, `mark_owner_state_ready`, `start_post_ready_owner_lanes` 다(`bin/main_stdio_eio.ml:125-204`, `lib/server/server_runtime_bootstrap.ml:1836, 1840, 1860, 2055-2058`).
+- 활성화는 prompt 상태, Gate 저장소, MCP session, lazy task 를 차례로 놓고 Keeper persistence 를 claim 해 시작한다(`:1660-1702`). 조사만 함: Keeper loop 는 그 마지막 단계에서 뜬다.
+- 준비 뒤 lane 은 model setup resume, Candle, Librarian wake, completion authority, goal verifier, memory curator, 정리 넷, 보고 셋, background maintenance 다(`:1540-1581`).
+- HTTP 서버에만 있는 것은 server state 공개(`:1854`), gateway·gRPC·WebSocket·Dashboard 를 띄우는 단계(`:2001`), watchdog(`:2198`)이다.
+
+### 21.2 host 의 자격으로는 모델을 부르지 못한다
+
+- 다계정 판정은 운영자 요청을 거절한다. `Operator_call` 은 `No_operator`, `Operator_keeper_turn` 은 `No_operator_keeper` 다(`lib/runtime/runtime_account_access.ml:357, 377`).
+- host 의 API key provider 도 거절한다. `authorize_api` 는 `authorize_host` 를 지나고, 다계정이면 `Host_not_shared` 다(`:496-524`).
+- 사용량 읽기는 `Operator_call` 로 판정을 지난다. 거절되면 process 를 띄우지 않는다(`lib/runtime/runtime_provider_usage_read.ml:90-103`).
+- 조사만 함: completion authority, goal verifier, memory curator, Candle 은 남은 일이 있을 때만 모델을 부른다. 그 길은 `Operator_call` 이나 `authorize_api` 다. Dashboard runtime probe 도 `authorize_api` 를 지난다. timer 만으로 모델을 부르는 lane 은 없다.
+- 조사만 함: `runtime.toml` 에 HTTP API runtime 이 있으면 다계정에서는 exact-output 등록표가 게시되지 않고 warn 이 남는다.
+
+### 21.3 auth 폴더에 쓰는 것
+
+- 엔진 boot 는 Admin credential 을 준비한다. owner 파일이 없으면 이름은 `admin` 이다. credential 과 token 이 둘 다 없으면 token 을 새로 만들어 Admin credential 로 낸다(`lib/server/server_runtime_startup_credentials.ml:6-19`, `lib/auth/auth_credential_token.ml:487-539`). 실패하면 boot 가 멈춘다(`server_runtime_bootstrap.ml:1031-1034`).
+- 그 token 을 프로세스 environment 에 넣는다(`server_runtime_startup_credentials.ml:12`). environment 의 admin token 을 읽는 곳은 이 단계와 설정 snapshot 뿐이다(`lib/config/env_config_snapshot.ml:62`).
+- 다계정 gate 는 이 bearer 와 internal token header 를 `Legacy_bearer` 로 읽는다. 다계정은 그것을 거절한다고 적혀 있다(`lib/auth/authz_credential_presentation.mli:44-50`, `lib/auth/authz_credential_presentation.ml:62-106`). 계정 서버의 사람 경로는 요청의 credential 을 이 모듈에 넘긴다(`lib/server/server_login_http.ml:268-281`).
+- 하루 한 번 도는 정리가 만료된 agent credential 을 지운다. 첫 실행은 시작 뒤 첫 tick 이다(`lib/server/server_bootstrap_maintenance.ml:297-338, 1005-1016`). 다계정 코드(`lib/auth/authz_*`)에는 그 폴더(`auth/agents`)의 이름이 없다.
+- 조사만 함: authz 로그(`auth/authz.jsonl`)와 사람 폴더(`accounts/`)를 고치는 lane 은 없다. JSONL 보존 정리는 닫힌 목록의 폴더만 지운다.
+
+### 21.4 config root 와 Keeper 정의
+
+- 초기 설정은 config root 가 없으면 만든다. 자기가 만들었을 때만 채운다(`server_bootstrap_maintenance.ml:412-425`). state 를 만드는 단계가 같은 함수를 한 번 더 부른다. 그때는 이미 있는 root 다(`server_runtime_bootstrap.ml:427`, `lib/server/server_runtime_config_root_bootstrap.ml:642-643`).
+- 채우는 방식은 넷이다. `MASC_CONFIG_DIR` 가 있으면 쓰지 않는다. 자기가 방금 만든 root 가 아니면 빠진 것만 채운다. 새 root 는 mode 에 따라 빈 틀이거나 seed 다(`lib/server/server_runtime_config_root_bootstrap.ml:508-535`).
+- 기본 Keeper 정의를 복사하는 것은 seed 뿐이다(`:139-168, 617-639`). 빠진 것만 채우는 쪽은 prompt 와 시작에 필요한 설정 파일을 채운다(`:574-605`). 그래서 root 는 있고 `runtime.toml` 이 없는 설치에는 boot 가 내장된 `runtime.toml` 을 쓴다(`:236-237, 547-551, 584-585`).
+- 조사만 함: `masc auth bootstrap` 이 `runtime.toml` 을 놓으면서 config root 를 만든다. 내장된 기본 정의는 `imp.toml` 하나이고 `activation_mode = "manual"` 이라 autoboot 대상이 아니다.
+- autoboot 는 Runtime 이 준비될 때까지 기다린다. `MASC_KEEPER_AUTONOMOUS_ENABLED` 가 꺼져 있으면 아무것도 하지 않는다(`lib/server/server_bootstrap_loops.ml:1974-1977`). 띄울 이름은 `Keeper_runtime.bootable_keeper_names` 에서 온다(`:2004`).
+- 조사만 함: 그 함수는 config root 의 `keepers/*.toml` 을 읽는다. 폴더가 없거나 비면 빈 목록이고, 0개를 띄운 뒤 supervisor sweep 만 시작한다.
+
+### 21.5 host 자원과 그 밖
+
+- tool blob sweep 은 범위가 이름을 모르는 항목이 있으면 지울 수 있는 것을 표시하지 않고 warn 을 남긴다(`lib/server/server_tool_blob_sweep.ml:7-15`). 범위에 `auth` 는 있고 사람 폴더 `accounts` 는 없다(`lib/server/server_tool_blob_scope.ml:115`, `lib/runtime/runtime_account_home_layout.ml:16`).
+- 볼륨 GC 는 보고만 한다(`lib/keeper/keeper_volume_gc_periodic.ml:15-23`).
+- 조사만 함: Apple `container` 가 준비된 기계에서 볼륨 GC 는 host 의 Keeper 볼륨 전체를 나열한다. 볼륨 이름에 base path 가 없다. Keeper 선언이 없는 설치는 같은 기계의 다른 서버가 쓰는 볼륨에 helper container 를 붙여 marker 를 읽는다. 6시간마다 돈다.
+- 조사만 함: microVM guest 정리는 `base_path_hash` label 이 같은 guest 만 지운다.
+- 조사만 함: 단일 사용자 boot 가 Keeper 앞에 도는 정리 넷은 `<base>/.masc` 의 `keepers`, `traces`, `lane-addons` 를 본다. 엔진의 다른 lane 이 그 일을 대신하지 않는다.
+- 조사만 함: 한 프로세스에서 한 번만 되는 것이 다섯이다. 접근 값 공개, run registry 넷, Keeper persistence, 실행 runtime, Board workspace 다. 두 번째는 boot 를 멈춘다.
+
+### 21.6 읽지 않은 것
+
+- 계정 서버의 모든 경로가 credential 을 다계정 gate 에 넘기는지.
+- 판정을 지나지 않고 client 나 provider 를 부르는 길이 있는지. 판정 모듈의 주석은 설정이 `authorize_api` 로만 나간다고 적는다(`runtime_account_access.ml:510-513`).
+- `create_server_state` 가 놓는 observer 들, run registry replay, Gate 저장소 설치, Lane Add-on attach 와 fleet recovery, schedule runner, maintenance 의 recovery pulse 본문. 조사 에이전트도 읽지 않았다.
+- 사람의 Codex 홈 설정이 client 에게 명령을 실행시키는 항목(`mcp_servers`, `notify`). 판정은 environment 이름만 본다(#53704). 격리하지 않은 app-server 시작은 설정을 덮는 인자를 붙이지 않는다(`lib/runtime/runtime_codex_app_server.ml:2872-2881`).
+- 사람의 로그인이 늘 새 홈에서 뜬다는 조건(`lib/server/server_setup_account_login.ml:158-160`)을 고정하는 시험이 없다.

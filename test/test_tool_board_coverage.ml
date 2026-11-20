@@ -110,6 +110,95 @@ let test_visibility_of_string () =
     (match Board_tool.visibility_of_string "garbage" with
      | None -> "none" | _ -> "other")
 
+let test_invalid_visibility_rejected_in_post_and_list () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  List.iter
+    (fun value ->
+       Alcotest.(check bool)
+         (Printf.sprintf "parse_visibility rejects %S" value)
+         true
+         (Result.is_error (Board_tool.parse_visibility value)))
+    [ "private"; "Direct"; "INTERNAL"; " internal "; "" ];
+  List.iter
+    (fun (label, bad_vis) ->
+       let res =
+         dispatch_result
+           "masc_board_post"
+           (make_args
+              [ "author", `String "tester"
+              ; "body", `String "should not persist"
+              ; "visibility", bad_vis
+              ])
+       in
+       Alcotest.(check bool)
+         ("masc_board_post rejects invalid visibility: " ^ label)
+         false
+         (Tool_result.is_success res);
+       Alcotest.(check bool)
+         ("masc_board_post returns Workflow_rejection: " ^ label)
+         true
+         (Tool_result.failure_class res = Some Tool_result.Workflow_rejection))
+    [ "private", `String "private"
+    ; "Direct", `String "Direct"
+    ; "padded", `String " internal "
+    ; "empty", `String ""
+    ; "int", `Int 1
+    ];
+  Alcotest.(check int)
+    "rejected visibility posts wrote nothing"
+    0
+    (List.length
+       (Board_dispatch.list_posts
+          ~reader:Masc_board_handlers.Board_access.Operator
+          ~limit:10
+          ()));
+  let ok_omitted =
+    dispatch_result
+      "masc_board_post"
+      (make_args [ "author", `String "tester"; "body", `String "default vis" ])
+  in
+  Alcotest.(check bool) "omitted visibility succeeds" true (Tool_result.is_success ok_omitted);
+  let ok_null =
+    dispatch_result
+      "masc_board_post"
+      (make_args
+         [ "author", `String "tester"
+         ; "body", `String "null vis"
+         ; "visibility", `Null
+         ])
+  in
+  Alcotest.(check bool) "null visibility defaults cleanly" true (Tool_result.is_success ok_null);
+  List.iter
+    (fun (label, bad_vis) ->
+       let res =
+         dispatch_result "masc_board_list" (make_args [ "visibility", bad_vis ])
+       in
+       Alcotest.(check bool)
+         ("masc_board_list rejects invalid visibility: " ^ label)
+         false
+         (Tool_result.is_success res);
+       Alcotest.(check bool)
+         ("masc_board_list returns Workflow_rejection: " ^ label)
+         true
+         (Tool_result.failure_class res = Some Tool_result.Workflow_rejection))
+    [ "private", `String "private"
+    ; "Direct", `String "Direct"
+    ; "empty", `String ""
+    ; "int", `Int 1
+    ];
+  let list_ok =
+    dispatch_result
+      "masc_board_list"
+      (make_args [ "visibility", `String "internal" ])
+  in
+  Alcotest.(check bool) "valid visibility filter succeeds" true (Tool_result.is_success list_ok);
+  let list_null =
+    dispatch_result "masc_board_list" (make_args [ "visibility", `Null ])
+  in
+  Alcotest.(check bool) "null visibility filter succeeds" true (Tool_result.is_success list_null)
+
 (* Issue #8449 PR B: [Board_tool.sort_order_of_string] removed —
    replaced by [parse_sort_order] (Result-returning) which delegates to
    [Board_dispatch.sort_order_of_string_opt]. The previous silent
@@ -4299,6 +4388,8 @@ let () =
       ( "helpers",
         [
           Alcotest.test_case "visibility_of_string" `Quick test_visibility_of_string;
+          Alcotest.test_case "invalid visibility rejected in post and list" `Quick
+            test_invalid_visibility_rejected_in_post_and_list;
           Alcotest.test_case "sort_order_of_string" `Quick test_sort_order_of_string;
           Alcotest.test_case "board_error_to_string" `Quick test_board_error_to_string;
           Alcotest.test_case "format_timestamp_absolute" `Quick test_format_timestamp_absolute;

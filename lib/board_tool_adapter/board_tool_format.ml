@@ -168,6 +168,46 @@ let post_of_write_data = function
 
 let visibility_of_string = Board.visibility_of_string
 
+let valid_visibility_strings =
+  List.map Board.visibility_to_string
+    [ Board.Public; Board.Unlisted; Board.Internal; Board.Direct ]
+;;
+
+let parse_visibility value =
+  match Board.visibility_of_string value with
+  | Some v -> Ok v
+  | None ->
+    Error
+      (Printf.sprintf
+         "invalid visibility %S. Valid: %s"
+         value
+         (String.concat ", " valid_visibility_strings))
+;;
+
+let parse_visibility_arg ~default args =
+  match Json_util.assoc_member_opt "visibility" args with
+  | None | Some `Null -> Ok default
+  | Some (`String value) -> parse_visibility value
+  | Some ((`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _) as other) ->
+    Error
+      (Printf.sprintf
+         "invalid visibility: expected string, got %s. Valid: %s"
+         (Json_util.kind_name other)
+         (String.concat ", " valid_visibility_strings))
+;;
+
+let parse_visibility_filter_arg args =
+  match Json_util.assoc_member_opt "visibility" args with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Result.map Option.some (parse_visibility value)
+  | Some ((`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _) as other) ->
+    Error
+      (Printf.sprintf
+         "invalid visibility: expected string, got %s. Valid: %s"
+         (Json_util.kind_name other)
+         (String.concat ", " valid_visibility_strings))
+;;
+
 (** {1 Formatters} *)
 
 (* The reading agent's own vote, rendered into the listing. The vote tool

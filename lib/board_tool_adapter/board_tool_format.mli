@@ -41,6 +41,11 @@ val post_of_write_data : Yojson.Safe.t -> Board.post option
     post.  Use it instead of {!Board.post_of_yojson} on a write response: the
     post decoder rejects the extra [unresolved] field. *)
 val visibility_of_string : string -> Board.visibility option
+val parse_visibility : string -> (Board.visibility, string) Result.t
+val parse_visibility_arg :
+  default:Board.visibility -> Yojson.Safe.t -> (Board.visibility, string) Result.t
+val parse_visibility_filter_arg :
+  Yojson.Safe.t -> (Board.visibility option, string) Result.t
 val format_post : ?viewer_vote:Board.vote_direction -> replies:int -> Board.post -> string
 (** [viewer_vote] is the reading agent's own vote on the post, rendered as a
     "내 투표" marker beside the tallies so the next turn's read carries what

@@ -98,16 +98,19 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
         "author is required"
     | Some author ->
       let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
-       let visibility_str = get_string args "visibility" "internal" in
       let hearth = get_string_opt args "hearth" in
       let thread_id = get_string_opt args "thread_id" in
       let raw_post_kind = get_string_opt args "post_kind" in
-      let visibility =
-        match Board_tool_format.visibility_of_string visibility_str with
-        | Some v -> v
-        | None -> Board.Internal
-      in
-      match Board_tool_handlers.resolve_board_post_kind raw_post_kind with
+      match Board_tool_format.parse_visibility_arg ~default:Board.Internal args with
+      | Error msg ->
+        Tool_result.make_err
+          ~tool_name
+          ~class_:Tool_result.Workflow_rejection
+          ~effect_disposition:Tool_result.Proven_pre_effect
+          ~start_time
+          msg
+      | Ok visibility ->
+        match Board_tool_handlers.resolve_board_post_kind raw_post_kind with
       | Error msg ->
         Tool_result.make_err
           ~tool_name
@@ -243,7 +246,6 @@ let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
 let handle_post_list ~reader ~tool_name ~start_time args : Tool_result.result =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
-  let visibility_str = get_string_opt args "visibility" in
   let hearth = get_string_opt args "hearth" in
   let random = get_bool args "random" false in
   let offset = get_int args "offset" 0 in
@@ -269,24 +271,26 @@ let handle_post_list ~reader ~tool_name ~start_time args : Tool_result.result =
     | None -> None
   in
   let since = get_float_opt args "since" in
-  let visibility_filter =
-    match visibility_str with
-    | Some s -> Board_tool_format.visibility_of_string s
-    | None -> None
-  in
+  let visibility_filter_result = Board_tool_format.parse_visibility_filter_arg args in
   let sort_by_result =
     match sort_arg with
     | None -> Ok Board_tool_format.Hot
     | Some value -> Board_tool_format.parse_sort_order value
   in
-  match sort_by_result with
-  | Error msg ->
+  match visibility_filter_result, sort_by_result with
+  | Error msg, (Ok _ | Error _) ->
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Workflow_rejection
       ~start_time
       msg
-  | Ok sort_by ->
+  | Ok _, Error msg ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      msg
+  | Ok visibility_filter, Ok sort_by ->
     (* Fetch exactly what we need: offset posts to skip + limit posts to show.
        Board_dispatch.list_posts ~reader already applies visibility/hearth/author filters. *)
     let fetch_limit = limit + offset in

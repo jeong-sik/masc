@@ -132,9 +132,8 @@ let test_an_opened_store_appends_under_its_location () =
 ;;
 
 (* The rule each store is kept by, written out per store: which records are
-   removed by date is an operator decision (RFC
-   dated-stores-take-retention-from-one-list §4.4, §9), so a changed rule has
-   to show up here as a changed line. *)
+   removed by date is an operator decision, so a changed rule has to show up
+   here as a changed line. *)
 type expected_rule =
   | Window
   | Days of int

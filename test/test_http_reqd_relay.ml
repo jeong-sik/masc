@@ -1,5 +1,4 @@
-(* A request handled on another domain than its connection (RFC
-   http-transport-runs-on-its-own-domain §3.3).
+(* A request handled on another domain than its connection.
 
    Each case runs a real httpun connection over a socket pair on a second
    domain. Its handler runs on the domain that owns the root switch and

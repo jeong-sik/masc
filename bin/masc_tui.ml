@@ -9140,7 +9140,7 @@ let owe_keeper_costs_read state =
 
 let owe_provider_history_day state ~now =
   match state.provider_history_reread_at with
-  | Some at when Masc_tui_wake.reached Masc_tui_wake.Provider_history_day ~now ~at ->
+  | Some at when Masc_tui_wake.reached_wall Masc_tui_wake.Provider_history_day ~now ~at ->
       state.provider_history_reread_at <- None;
       owe_pushed_read state Surface_read_source.Provider_history
   | Some _ | None -> ()
@@ -10640,7 +10640,7 @@ let launch_owed_harness state ~mailbox =
   else begin
     (match state.harness_stale_at with
      | Some stale_at
-       when Masc_tui_wake.reached Masc_tui_wake.Harness_stale
+       when Masc_tui_wake.reached_wall Masc_tui_wake.Harness_stale
               ~now:(Unix.gettimeofday ()) ~at:stale_at ->
          state.harness_stale_at <- None;
          owe_harness_read state
@@ -31625,7 +31625,8 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
       let now_ns = Mtime_clock.elapsed_ns () in
       let spent = Int64.compare now_ns deadline >= 0 in
       if spent then
-        Masc_tui_wake.Pass.note { Masc_tui_wake.reason = Masc_tui_wake.Drain_budget_spent; at_ns = now_ns };
+        Masc_tui_wake.Pass.note
+          { Masc_tui_wake.reason = Masc_tui_wake.Monotonic Masc_tui_wake.Drain_budget_spent; at_ns = now_ns };
       spent
   in
   let chat_changed = drain_preference_completions state
@@ -32922,7 +32923,7 @@ let main
   (* The wall-clock second at which the time text of the last built frame
      next reads differently, [None] when that frame drew none. *)
   let time_redraw_due = ref None in
-  let emblem_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
+  let emblem_last_step = ref (Masc_tui_wake.Mono.now ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
      read as "there is nothing here". What is watched is the set of data the
@@ -45186,9 +45187,6 @@ Use relative paths for resources already held in the package. -->
       if reconcile_task_documents state ~mailbox:async_messages then
         Render_schedule.request render_schedule Render_schedule.Background;
 
-      (* Pending HTTP readers keep the last observed contact. Their own
-         progress carries elapsed time; a slow reader is not a reconnect. *)
-      let now_ns = Mtime_clock.elapsed_ns () in
       (* Without new data only time text changes: the zone-1 clock, moments
          and lengths (RFC tui-one-screen-grammar §8). The last built frame
          said when its first such text reads differently; the frame for that
@@ -45196,7 +45194,7 @@ Use relative paths for resources already held in the package. -->
          text schedules none. About keeps its independent clock below. *)
       (match !time_redraw_due with
        | Some due
-         when Masc_tui_wake.reached Masc_tui_wake.Time_text
+         when Masc_tui_wake.reached_wall Masc_tui_wake.Time_text
                 ~now:(Unix.gettimeofday ()) ~at:due ->
            time_redraw_due := None;
            Render_schedule.request render_schedule Render_schedule.Background
@@ -45206,11 +45204,12 @@ Use relative paths for resources already held in the package. -->
          motion immediately before the reader left. *)
       (match Masc_tui_emblem_screen.drawn () with
        | Masc_tui_emblem_screen.Moving when state.about_open ->
+           let now = Masc_tui_wake.Mono.now () in
            if
-             Masc_tui_wake.reached_ns Masc_tui_wake.Emblem_step ~now_ns
-               ~at_ns:(Int64.add !emblem_last_step_ns Masc_tui_types.motion_step_ns)
+             Masc_tui_wake.reached_mono Masc_tui_wake.Emblem_step ~now
+               ~at:(Masc_tui_wake.Mono.after !emblem_last_step Masc_tui_types.motion_step_s)
            then begin
-             emblem_last_step_ns := now_ns;
+             emblem_last_step := now;
              state.emblem_frame <-
                min Masc_tui_emblem_screen.final_frame (state.emblem_frame + 1);
              Render_schedule.request render_schedule Render_schedule.Background
@@ -45234,7 +45233,7 @@ Use relative paths for resources already held in the package. -->
       (* An armed quit is withdrawn when its notice leaves the screen. *)
       Option.iter (fun arm ->
           let _, shown_at = Masc_tui_action_notice.quit_ordinary arm.qa_confirmation in
-          ignore (Masc_tui_wake.reached Masc_tui_wake.Quit_notice_expiry
+          ignore (Masc_tui_wake.reached_wall Masc_tui_wake.Quit_notice_expiry
                     ~now:(Unix.gettimeofday ()) ~at:(shown_at +. last_action_window_s)))
         state.quit_armed;
       (match state.quit_armed with

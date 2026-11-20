@@ -165,8 +165,19 @@ val register_standalone_observer_with_client :
     [admit] receives the exact validated credential once, before any client is
     published. A refusal creates no client, queue or cap eviction. On success
     that same credential is used for publication, without a second lookup.
-    Client-supplied ids and agent streams use {!register_with_client}, which
-    retains the existing session, expiry and owner checks. *)
+    Client-supplied ids and agent streams use {!register_with_client} or
+    {!register_session_with_client}, which retain the existing session, expiry
+    and owner checks. *)
+
+val register_session_with_client :
+  ?kind:session_kind -> ?on_disconnect:(unit -> unit) -> ?observer_instance_id:string ->
+  admit:(Masc_domain.agent_credential -> (unit, 'admission_error) result) ->
+  auth:registration_auth -> string -> last_event_id:int ->
+  (client * client option * string option, 'admission_error standalone_observer_error) result
+(** As {!register_with_client}, but invokes [admit credential] only after
+    verifying the credential and an existing, non-expired, owner-matching
+    session, preventing unauthenticated or unknown session ids from consuming
+    reconnect cooldown state. *)
 
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit

@@ -196,8 +196,6 @@ let stop_sse_session_before ~client_id session_id =
         info_opt := Some info;
         SMap.remove session_id map
     | Some _ | None -> map);
-  Atomic_util.update sse_connect_guards (fun map ->
-    Guard_map.remove (Connect_guard_key.Session session_id) map);
   match !info_opt with
   | None -> ()
   | Some info -> close_sse_conn info

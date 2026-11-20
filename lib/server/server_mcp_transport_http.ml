@@ -897,7 +897,9 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
       let otel_transport_context = transport_context_of_reqd reqd in
       (match standalone_observer_instance with
        | Some _ -> ()
-       | None -> remember_mcp_profile ~otel_transport_context session_id profile);
+       | None ->
+           if is_known_session session_id then
+             remember_mcp_profile ~otel_transport_context session_id profile);
       let token =
         match sse_kind with
         | Sse.Observer | Sse.Presence ->
@@ -906,21 +908,14 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             Server_auth.auth_token_from_request request
       in
       let auth = { Sse.config = base_path; token } in
-      let session_guard = match standalone_observer_instance with
-        | Some _ -> Ok () (* Charged with the validated actor just before publication. *)
-        | None -> check_sse_connect_guard session_id
-      in
-      (match session_guard with
-      | Error (reason, retry_after_s) ->
-          respond_sse_rate_limited ~deps ~origin ~session_id:(Some session_id) ~protocol_version
-            ~reason ~retry_after_s reqd
-      | Ok () ->
-          if Option.is_some last_event_id then
-            Transport_metrics.inc_sse_reconnect ();
-          (match standalone_observer_instance with
-           | Some _ -> ()
-           | None -> ensure_sse_backing_session_for_known_transport_session
-               ~transport_session_id:session_id ~sse_session_id:session_id);
+      (* Reconnect cooldown is checked inside registration after
+         validate_registration confirms credential and session existence, so
+         unknown or unauthenticated session ids return 404/401 without
+         mutating guard state. *)
+      (match standalone_observer_instance with
+       | Some _ -> ()
+       | None -> ensure_sse_backing_session_for_known_transport_session
+           ~transport_session_id:session_id ~sse_session_id:session_id);
           let expected_resource =
             Server_oauth_metadata.resource request_authority
           in
@@ -1030,12 +1025,18 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                       check_standalone_observer_connect_guard ~observer_instance_id ~credential)
                     ~on_disconnect session_id ~last_event_id
                | None ->
-                 Sse.register_with_client ~kind:sse_kind ~auth ?observer_instance_id
-                    ~on_disconnect session_id ~last_event_id
-                  |> Result.map_error (fun error -> Sse.Credential_refused error))
+                 Sse.register_session_with_client ~kind:sse_kind ~auth ?observer_instance_id
+                    ~admit:(fun _credential -> check_sse_connect_guard session_id)
+                    ~on_disconnect session_id ~last_event_id)
            with
             | Error (Sse.Admission_refused (reason, retry_after_s)) ->
-                respond_sse_rate_limited ~deps ~origin ~session_id:None ~protocol_version
+                let rate_limited_session_id =
+                  match standalone_observer_instance with
+                  | Some _ -> None
+                  | None -> Some session_id
+                in
+                respond_sse_rate_limited ~deps ~origin
+                  ~session_id:rate_limited_session_id ~protocol_version
                   ~reason ~retry_after_s reqd
             | Error (Sse.Credential_refused reg_err) ->
                let msg = Sse.registration_error_to_string reg_err in
@@ -1168,6 +1169,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                  stop_sse_conn_if_current info));
              Eio.Fiber.check ()
            | true ->
+          if Option.is_some last_event_id then
+            Transport_metrics.inc_sse_reconnect ();
           if Atomic.get disconnected then stop_sse_conn_if_current info;
           let send_if_current data : Server_sse_response.outcome =
             if scope_is_current () then send_raw info data
@@ -1250,7 +1253,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
               Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients)))))))))
+              session_id client_count Sse.max_clients))))))))
 
 
 let handle_get_operator_mcp ~deps request reqd =

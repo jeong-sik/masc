@@ -694,17 +694,28 @@ type 'admission_error standalone_observer_error =
   | Credential_refused of registration_error
   | Admission_refused of 'admission_error
 
-let register_standalone_observer_with_client ?on_disconnect ~observer_instance_id
-    ~admit ~(auth : registration_auth) session_id ~last_event_id =
-  match registration_credential ~auth with
+let register_admitted_client ~kind ?on_disconnect ?observer_instance_id
+    ~admit ~(auth : registration_auth) session_id ~last_event_id = function
   | Error error -> Error (Credential_refused error)
   | Ok credential ->
     match admit credential with
     | Error error -> Error (Admission_refused error)
     | Ok () ->
-      register_validated_client ~kind:Observer ?on_disconnect ~observer_instance_id
+      register_validated_client ~kind ?on_disconnect ?observer_instance_id
         ~base_path:auth.config credential session_id ~last_event_id
       |> Result.map_error (fun error -> Credential_refused error)
+
+let register_standalone_observer_with_client ?on_disconnect ~observer_instance_id
+    ~admit ~(auth : registration_auth) session_id ~last_event_id =
+  registration_credential ~auth
+  |> register_admitted_client ~kind:Observer ?on_disconnect ~observer_instance_id
+       ~admit ~auth session_id ~last_event_id
+
+let register_session_with_client ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
+    ~admit ~(auth : registration_auth) session_id ~last_event_id =
+  validate_registration ~auth session_id
+  |> register_admitted_client ~kind ?on_disconnect ?observer_instance_id
+       ~admit ~auth session_id ~last_event_id
 
 (** Register a new SSE client.
     Returns (client_id, event_stream, evicted_session_id option). *)

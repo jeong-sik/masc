@@ -357,7 +357,7 @@ let launch_tools_parts (state : T.state) ~mailbox parts =
                 |> Result.map_error (fun detail -> T.Request_failed detail))
         | T.Tools_activations_read ->
             (* The Activations pane draws the selected Keeper's ledger, which its
-               own route answers (RFC-0483). *)
+               own route answers. *)
             Option.iter
               (fun keeper ->
                 (* A reading or a failure held for no Keeper or for another one
@@ -399,7 +399,7 @@ let launch_tools_parts (state : T.state) ~mailbox parts =
               keeper
         | T.Tools_usage_read keeper ->
             (* The Usage pane counts every Keeper's use of the catalog, one
-               Keeper's ledger per read (RFC-0483). *)
+               Keeper's ledger per read. *)
             T.set_keeper_skill_usage_owed state keeper
               (Masc_tui_owed_read.started (T.keeper_skill_usage_owed state keeper));
             WA.launch_json_read state ~mailbox

@@ -2,10 +2,19 @@
     coverage. Unknown wire variants and invalid cache combinations remain
     errors; absent sums stay absent. No network, clock or UI dependency. *)
 
+module Positive_minutes : sig
+  type t = Runtime_provider_usage_window.Positive_minutes.t
+
+  val of_int : int -> t option
+  val to_int : t -> int
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+end
+
 type provider_usage_window_kind =
   | Window_five_hour
   | Window_seven_day
-  | Window_duration_minutes of int
+  | Window_duration_minutes of Positive_minutes.t
       (** A window length the server has no name for. *)
   | Window_provider_label of string
       (** A label the provider gave the window, kept as written. *)

@@ -585,7 +585,7 @@ let ollama_balance_response =
 let kind_to_string : Usage.window_kind -> string = function
   | Five_hour -> "five_hour"
   | Seven_day -> "seven_day"
-  | Duration_minutes minutes -> Printf.sprintf "%d minutes" minutes
+  | Duration_minutes minutes -> Printf.sprintf "%d minutes" (Usage.Positive_minutes.to_int minutes)
   | Provider_label label -> Printf.sprintf "label %S" label
 ;;
 
@@ -1530,7 +1530,7 @@ let muse_window_rows (windows : Usage.window list) =
        , (match window.kind with
           | Usage.Five_hour -> "5h"
           | Usage.Seven_day -> "7d"
-          | Usage.Duration_minutes minutes -> Printf.sprintf "%dmin" minutes
+          | Usage.Duration_minutes minutes -> Printf.sprintf "%dmin" (Usage.Positive_minutes.to_int minutes)
           | Usage.Provider_label label -> label)
        , (match window.utilization with
           | Usage.Percent percent -> percent
@@ -1616,6 +1616,71 @@ let test_muse_observe_records_and_rests_by_one_rule () =
       (Usage.state ~scope:refused = Usage.Not_reported_since_start);
     check bool "a refused report still rests a spent account" true
       (Runtime_quota_window.is_exhausted ~scope:refused ~now:1791262199.))
+;;
+
+let test_nonpositive_window_durations_rejected () =
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+    check bool "Positive_minutes refuses 0" true (Usage.Positive_minutes.of_int 0 = None);
+    check bool "Positive_minutes refuses negative" true (Usage.Positive_minutes.of_int (-5) = None);
+    check (option int) "Positive_minutes accepts 1" (Some 1)
+      (Option.map Usage.Positive_minutes.to_int (Usage.Positive_minutes.of_int 1));
+    check (option int) "Positive_minutes accepts 90" (Some 90)
+      (Option.map Usage.Positive_minutes.to_int (Usage.Positive_minutes.of_int 90));
+    List.iter
+      (fun bad_mins ->
+         let updated_json =
+           Printf.sprintf
+             {|{"rateLimits":{"limitId":"codex","primary":{"usedPercent":50,"windowDurationMins":%d,"resetsAt":1790200000}}}|}
+             bad_mins
+         in
+         (match Usage.decode_codex_rate_limits_updated (Yojson.Safe.from_string updated_json) with
+          | Error (Usage.Unexpected_value _) -> ()
+          | Error err -> failf "expected Unexpected_value for update %d, got %s" bad_mins (Usage.decode_error_to_string err)
+          | Ok _ -> failf "expected Codex update with windowDurationMins=%d to be rejected" bad_mins);
+         let read_json =
+           Printf.sprintf
+             {|{"rateLimits":{"limitId":"codex","secondary":{"usedPercent":25,"windowDurationMins":%d,"resetsAt":1790200000}},"rateLimitsByLimitId":null}|}
+             bad_mins
+         in
+         (match Usage.decode_codex_rate_limits_read (Yojson.Safe.from_string read_json) with
+          | Error (Usage.Unexpected_value _) -> ()
+          | Error err -> failf "expected Unexpected_value for read %d, got %s" bad_mins (Usage.decode_error_to_string err)
+          | Ok _ -> failf "expected Codex read with windowDurationMins=%d to be rejected" bad_mins);
+         let bad_muse =
+           { Runtime_muse_msp.observed_at_ms = 1791250060000
+           ; tier = "power"
+           ; window = { used_percent = 100; resets_at_ms = 1791262200000; window_duration_mins = bad_mins }
+           ; weekly = { weekly_used_percent = 12; weekly_resets_at_ms = 1791730800000 }
+           }
+         in
+         match Runtime_muse_usage.report Runtime_muse_usage.Usage_read bad_muse with
+         | Error (Usage.Unexpected_value _) -> ()
+         | Error err -> failf "expected Unexpected_value for Muse %d, got %s" bad_mins (Usage.decode_error_to_string err)
+         | Ok _ -> failf "expected Muse report with window_duration_mins=%d to be rejected" bad_mins)
+      [ 0; -15 ];
+    let scope = Runtime_quota_window.scope_of_muse_home "/fixture/muse-preserve-valid" in
+    Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_changed
+      (muse_usage ~window_mins:300 ~window_percent:37);
+    let bad_spent_muse =
+      { Runtime_muse_msp.observed_at_ms = 1791250060000
+      ; tier = "power"
+      ; window = { used_percent = 100; resets_at_ms = 1791262200000; window_duration_mins = 0 }
+      ; weekly = { weekly_used_percent = 12; weekly_resets_at_ms = 1791730800000 }
+      }
+    in
+    Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_read bad_spent_muse;
+    check bool "rejected Muse update rests an exhausted scope" true
+      (Runtime_quota_window.is_exhausted ~scope ~now:1791262199.);
+    (match Usage.state ~scope with
+     | Usage.Reported (first, rest) ->
+       check muse_row "prior valid windows survive a rejected update"
+         (nest
+            [ "-", "5h", 37, 1791262200, "gates_model_calls"
+            ; "-", "7d", 12, 1791730800, "gates_model_calls" ])
+         (nest (muse_window_rows (List.map (fun (r : Usage.recorded) -> r.window) (first :: rest))))
+     | Usage.Not_reported_since_start | Usage.Reported_no_windows _ ->
+       fail "rejected Muse update erased valid prior windows"))
 ;;
 
 (* A complete usage read can say a scope refuses calls, and the quota table
@@ -1907,6 +1972,8 @@ let () =
             test_muse_report_names_both_windows
         ; test_case "observe records and rests by one rule" `Quick
             test_muse_observe_records_and_rests_by_one_rule
+        ; test_case "nonpositive window durations are rejected" `Quick
+            test_nonpositive_window_durations_rejected
         ] )
     ; ( "scope room"
       , [ test_case "gate coverage by source" `Quick test_gate_coverage_by_source

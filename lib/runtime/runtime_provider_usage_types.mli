@@ -1,9 +1,18 @@
 (** Canonical immutable values shared by usage decoding and observation reduction. *)
 
+module Positive_minutes : sig
+  type t
+
+  val of_int : int -> t option
+  val to_int : t -> int
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+end
+
 type window_kind =
   | Five_hour
   | Seven_day
-  | Duration_minutes of int
+  | Duration_minutes of Positive_minutes.t
   | Provider_label of string
 
 type utilization =

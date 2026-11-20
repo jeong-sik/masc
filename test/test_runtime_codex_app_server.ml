@@ -2496,7 +2496,7 @@ let test_rate_limits_read_without_turn () =
               ( Option.value ~default:"-" w.limit_id
               , (match w.kind with
                  | Five_hour -> "5h" | Seven_day -> "7d"
-                 | Duration_minutes m -> string_of_int m | Provider_label l -> l)
+                 | Duration_minutes m -> string_of_int (Runtime_provider_usage_window.Positive_minutes.to_int m) | Provider_label l -> l)
               , (match w.utilization with
                  | Percent p -> p
                  | Fraction _ | Usd _ | Credit_balance _ | Credit_unlimited | Credit_retracted -> -1) ))

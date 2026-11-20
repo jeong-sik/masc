@@ -1823,7 +1823,7 @@ let recorded_usage_windows scope =
     List.map (fun (recorded : Usage.recorded) ->
         let kind = match recorded.window.kind with
           | Usage.Five_hour -> "5h" | Usage.Seven_day -> "7d"
-          | Usage.Duration_minutes minutes -> Printf.sprintf "%dmin" minutes
+          | Usage.Duration_minutes minutes -> Printf.sprintf "%dmin" (Usage.Positive_minutes.to_int minutes)
           | Usage.Provider_label label -> label in
         let percent = match recorded.window.utilization with
           | Usage.Percent percent -> percent

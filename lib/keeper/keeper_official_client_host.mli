@@ -538,6 +538,12 @@ val project_source :
 
 val carried_start_front_to_string : carried_start_front -> string
 
+(** What a lane reports for the range it sends: the front, the range's bytes,
+    and where the request starts in the history
+    ({!Keeper_request_start.sends_from}). *)
+type carried_front_observer =
+  carried_start_front -> transmitted_bytes:int -> sends_from:int -> unit
+
 val warn_if_sent_on_unknown_start : keeper_name:string -> carried_start_front -> unit
 (** {!Keeper_carried_front.warn_range_opens_on_newest_atom} when the range a
     lane sent opened on an unknown turn start. Called where the lane reports
@@ -694,15 +700,18 @@ val start_range_projection :
   ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
-  ?on_carried_front:(carried_start_front -> transmitted_bytes:int -> unit) ->
+  ?on_carried_front:carried_front_observer ->
   turn_start:Keeper_carried_front.turn_start ->
   keeper_name:string ->
   runtime_id:string ->
   Agent_core.Types.message list ->
   (Agent_core.Types.message list, Agent_core.Error.t) result
 (** Capacity-first Start projection shared by Claude Code and Codex. The
-    zero-history floor stays empty; otherwise the latest of the capacity,
-    seed, Librarian, and turn-start fronts is composed and observed once.
+    zero-history floor stays empty and its front is {!Lane_cut}; otherwise
+    the latest of the capacity, seed, Librarian, and turn-start fronts is
+    composed. [on_carried_front] gets the front once, with the range's bytes
+    and where the request starts in the history
+    ({!Keeper_request_start.sends_from}).
     Source-specific projection runs after this range. Antigravity and Muse
     Code can use the same projection with unbounded capacity. Without
     [librarian_front] the turn has no read end.
@@ -733,7 +742,7 @@ val carried_history_projection :
   ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
-  ?on_carried_front:(carried_start_front -> transmitted_bytes:int -> unit) ->
+  ?on_carried_front:carried_front_observer ->
   turn_start:Keeper_carried_front.turn_start ->
   keeper_name:string ->
   runtime_id:string ->

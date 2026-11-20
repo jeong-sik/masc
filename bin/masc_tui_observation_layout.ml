@@ -50,20 +50,29 @@ let log_channel_label = function
   | Tui_decode.Log_channel_scheduled_autonomous -> "sched"
   | Tui_decode.Log_channel_heartbeat -> "hb"
 
+(* A metrics record that left a reading out says so with the unreported mark
+   of RFC tui-one-screen-grammar 6.4, not [--]. Counts group their thousands
+   (6.3) and a latency reads on the finished-length ladder (6.2): [1.2s], not
+   [1200ms]. A negative latency is a reading that failed. *)
+let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
+
 let message_count_label = function
-  | Some count -> string_of_int count
-  | None -> "--"
+  | Some count -> Masc_tui_value.Count.grouped count
+  | None -> unreported
 
 let usage_value = function
-  | Some value -> string_of_int value
-  | None -> "--"
+  | Some value -> Masc_tui_value.Count.grouped value
+  | None -> unreported
 
 let usage_label ~input ~output =
   Printf.sprintf "%s/%s" (usage_value input) (usage_value output)
 
 let latency_label = function
-  | Some latency -> Printf.sprintf "%dms" latency
-  | None -> "--"
+  | Some latency ->
+      Option.value
+        ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+        (Masc_tui_message_layout.elapsed_text (float_of_int latency /. 1000.))
+  | None -> unreported
 
 (* The metrics tail's columns.
 
@@ -102,8 +111,8 @@ let log_entry_rows ~width ~time (entry : Tui_decode.log_entry) =
   @ wrap ("Channel: " ^ log_channel_label entry.le_channel)
   @ wrap ("Messages: " ^ cells.messages ^ "  In/out: " ^ cells.usage)
   @ wrap ("Cost: " ^ (match entry.le_cost_usd with
-      | None -> "--"
-      | Some cost -> "$" ^ string_of_float cost))
+      | None -> unreported
+      | Some cost -> Printf.sprintf "$%.4f" cost))
   @ (match entry.le_work_kind with
      | None -> []
      | Some work -> wrap ("Work: " ^ work))

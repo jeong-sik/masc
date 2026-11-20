@@ -3528,7 +3528,7 @@ auth = "none"
    wire refuses the declaration at load time. *)
 let test_cache_retention_requires_a_provider_contract () =
   let toml = {|[providers.p]
-protocol = "messages-http"
+protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 [models.m]
 [p.m]

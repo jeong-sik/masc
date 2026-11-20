@@ -8,9 +8,8 @@ type tool_profile =
   | Managed_agent
   | Operator_remote
   | Seat
-      (** An invited player at the shared machine (RFC
-          play-link-for-the-shared-machine §2.7): [/mcp/play], the tools that
-          require [CanPlayMachine] and no other MCP method. *)
+      (** An invited player at the shared machine: [/mcp/play], the tools
+          that require [CanPlayMachine] and no other MCP method. *)
 
 (** How a request reached the dispatcher, which decides by it whether the
     request may call a method that requires auth (RFC

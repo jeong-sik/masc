@@ -1,7 +1,7 @@
 (** The wiki's two own files: [index.md] and [log.md].
 
-    They sit in the wiki directory beside the pages (RFC
-    library-becomes-a-wiki, D5 and D6, after Karpathy's llm-wiki).
+    They sit in the wiki directory beside the pages (after Karpathy's
+    llm-wiki).
 
     - [index.md] has one line per page: its title, its file and its one-line
       summary. It is rebuilt from the pages after every write, so nobody edits

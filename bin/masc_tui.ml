@@ -28,134 +28,6 @@ let with_async_switch state ~action start =
   | Some sw -> start sw
   | None -> report_action state "error" (action ^ ": asynchronous runtime unavailable")
 
-(* The forms an $EDITOR round trip fills, each named once in both languages
-   for the notices about it. *)
-type connector_change = Channel_bind | Channel_unbind | Channel_binding_edit
-
-type editor_form =
-  | Board_draft
-  | Code_draft
-  | Gate_rejection
-  | Connector_form of connector_change
-  | Harness_overrule
-  | Verification_rejection
-  | Task_cancellation
-  | Runtime_config_text
-  | Skill_creation
-  | Original_request_lookup
-  | Skill_source of string
-  | Prompt_text of string
-  | Keeper_settings of string
-  | Keeper_creation
-  | Repository_addition
-  | Schedule_form of schedule_change
-
-let editor_form_name ~ko = function
-  | Board_draft -> if ko then "글쓰기" else "Board compose"
-  | Code_draft -> if ko then "코드 초안" else "Code draft"
-  | Gate_rejection -> if ko then "Gate 거절" else "Gate rejection"
-  | Connector_form Channel_bind -> if ko then "채널 연결" else "bind"
-  | Connector_form Channel_unbind -> if ko then "채널 연결 해제" else "unbind"
-  | Connector_form Channel_binding_edit -> if ko then "채널 연결 편집" else "edit binding"
-  | Harness_overrule -> if ko then "판정 뒤집기" else "overrule"
-  | Verification_rejection -> if ko then "검증 거절" else "reject"
-  | Task_cancellation -> if ko then "작업 취소" else "cancel"
-  | Runtime_config_text -> "runtime.toml"
-  | Skill_creation -> if ko then "Skill 만들기" else "Skill creation"
-  | Original_request_lookup ->
-    if ko then "원래 비동기 요청 찾기" else "Original async request lookup"
-  | Skill_source name -> name ^ (if ko then " 편집" else " edit")
-  | Prompt_text key -> key ^ (if ko then " 프롬프트" else " prompt")
-  | Keeper_settings keeper -> keeper ^ (if ko then " 설정" else " settings")
-  | Keeper_creation -> if ko then "Keeper 만들기" else "create"
-  | Repository_addition -> if ko then "저장소 등록" else "add"
-  | Schedule_form change -> schedule_change_name ~ko change
-
-(* What quitting the editor leaves. Four forms say what stayed as it was; the
-   rest name themselves as called off. The task cancel form says the task
-   stays, because "작업 취소 취소" reads as undoing itself. *)
-let editor_form_left_alone ~ko form =
-  match form with
-  | Board_draft -> if ko then "초안 그대로" else "Board draft unchanged"
-  | Runtime_config_text ->
-    if ko then "runtime.toml 그대로 · 앞서 쓴 초안 남아 있음"
-    else "runtime.toml unchanged · any earlier draft is retained"
-  | Prompt_text key -> key ^ (if ko then ": 프롬프트 그대로" else ": prompt unchanged")
-  | Keeper_settings keeper ->
-    keeper ^ (if ko then ": 설정 그대로" else ": settings unchanged")
-  | Task_cancellation -> if ko then "작업 취소 안 함" else "task not cancelled"
-  | Code_draft | Gate_rejection | Connector_form _ | Harness_overrule
-  | Verification_rejection | Skill_creation | Original_request_lookup
-  | Skill_source _ | Keeper_creation | Repository_addition | Schedule_form _ ->
-    editor_form_name ~ko form ^ (if ko then " 취소" else " cancelled")
-
-(* One place decides how an aborted $EDITOR form reads: the form's name, then
-   what happened. An editor that never ran and a temp file that could not be
-   read are the same fact wherever they happen, and neither is the operator
-   saying no. *)
-let report_editor_abort state ~form (abort : Masc_tui_editor.abort) =
-  let ko = state.ui_language = Lang_ko in
-  match abort with
-  | Masc_tui_editor.Cancelled ->
-    report_action state "system" (editor_form_left_alone ~ko form)
-  | Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ ->
-    report_action state "error"
-      (editor_form_name ~ko form ^ ": " ^ Masc_tui_editor.abort_detail ~ko abort)
-
-(* No editor is set. Said before a form opens, where the check saves a read
-   or a stem, in the words the round trip itself would use. *)
-let report_editor_unset state ~form =
-  report_editor_abort state ~form
-    (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset)
-
-(* A chat command that names no Keeper sends nothing; its line stays. *)
-let select_keeper_first ~ko =
-  if ko then "먼저 키퍼를 고르세요" else "Select a Keeper first"
-
-(* An operator request the TUI kept back, said on the action line: why, that
-   nothing was sent, and what stayed. *)
-let report_kept_back state ~request reason kept =
-  let ko = state.ui_language = Lang_ko in
-  report_action state "error" (kept_back ~ko ~request (reason ~ko) kept)
-
-(* A request the workspace guard stopped before it left: never sent, so it is
-   said as kept back and never as the server's answer (RFC §2). *)
-let report_withdrawn state ~request refusal =
-  report_kept_back state ~request (fun ~ko -> workspace_refusal_reason ~ko refusal) Nothing_kept
-
-(* A read's result with its failure as the text its surface keeps: the read's
-   own failure as it was, or the kept-back notice alone for a read the
-   workspace guard stopped (RFC §2). *)
-let said_read_result state ~request result =
-  Result.map_error (request_failure_text ~ko:(state.ui_language = Lang_ko) ~request) result
-
-(* The read ran before its authority was withdrawn. Its wire outcome may
-   still be unknown, so preserve the attempt without claiming it was unsent. *)
-let workspace_response_refusal_text state ~request refusal =
-  let ko = state.ui_language = Lang_ko in
-  String.concat " · "
-    [ Kept_request.name ~ko request
-      ^ (if ko then " 시도 후 결과 미적용" else " attempted; result not applied")
-    ; workspace_refusal_reason ~ko refusal
-    ]
-
-let request_failure_after_read state ~request = function
-  | Request_failed _ as failure -> failure
-  | Request_withdrawn refusal ->
-      Request_failed (workspace_response_refusal_text state ~request refusal)
-
-(* Kept back until the server says again which workspace it serves, which a
-   reconnect brings. *)
-let kept_back_until_reconnect ~ko ~request =
-  kept_back ~ko ~request (workspace_identity_unconfirmed ~ko) Nothing_kept
-  ^ " · " ^ (if ko then "다시 연결한 뒤 다시 시도하세요" else "retry after reconnecting")
-
-(* Opening a file needs a Neovim to talk to or an editor to hand the terminal
-   to. *)
-let editor_jump_unset state =
-  ui_text state ~ko:"편집기 없음 · Neovim 안에서 실행하거나 $EDITOR 를 설정하세요"
-    ~en:"no editor · run this inside Neovim, or set $EDITOR"
-
 module Code_results = Masc_tui_code_results
 module Context_results = Masc_tui_context_results
 module Fleet_results = Masc_tui_fleet_results
@@ -183,10 +55,7 @@ module Goal_confirmation = Masc_tui_planning_detail
 module Goal_confirmation_read = Masc_tui_fetched
 module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
-module Terminal_profile = Masc_tui_terminal_profile
-module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
-module Terminal_restore = Masc_tui_terminal_restore
 
 (* Tools rows are the exact projection the renderer draws, so their scroll
    bound belongs to that projection rather than a second reconstruction in
@@ -226,132 +95,9 @@ let scrolled_surface state surface =
       Masc_tui_types.scrolled_surface state ~cols surface
 ;;
 
-(** Local exception for breaking the main TUI loop without using Exit. *)
-exception Break
-
-(* Why this session ended, written once at exit. The per-PID stderr log held
-   only the boot lines, so a session that ended left no reason behind: the
-   operator saw roughly a hundred files a day and none said why. Set at each
-   way out and written by the [at_exit] below, which runs after the terminal
-   is restored. *)
-let exit_reason : Masc_tui_exit_reason.t option ref = ref None
-
-let note_exit_reason reason =
-  match !exit_reason with
-  | Some _ -> ()
-  | None -> exit_reason := Some reason
-;;
-
-(* Written once. [at_exit] stops at the first callback that raises and OCaml
-   may retry the remaining ones while it reports the exception, so a writer
-   with no guard can leave two [exit:] rows for one session -- and a reader
-   counting rows by cause would count that session twice. *)
-let exit_reason_written = ref false
-
-let write_exit_reason () =
-  if not !exit_reason_written then begin
-    exit_reason_written := true;
-    let reason =
-      match !exit_reason with
-      | Some reason -> reason
-      | None -> Masc_tui_exit_reason.Unrecorded
-    in
-    let row = "[masc-tui] " ^ Masc_tui_exit_reason.line reason ^ "\n" in
-    (* Two attempts through different layers, because this row is the whole
-       point of the change: a session that ends without it is unexplained
-       again. [output_string] goes through the buffered channel, which can
-       raise on a channel an earlier [at_exit] callback already closed; the
-       raw write on the descriptor skips that layer, so it fails for
-       different reasons rather than the same one. stderr is the per-PID log
-       file by now ([redirect_stderr_off_terminal]), and neither attempt is
-       queued behind the console mirror's thread, so the row is on disk
-       before the process returns.
-
-       If both fail the failure is dropped on purpose, not by oversight: the
-       descriptor this function would report on is the one that just refused,
-       and raising here would take the remaining [at_exit] callbacks down
-       with it. *)
-    try
-      output_string stderr row;
-      flush stderr
-    with _ -> (
-      (* fire-and-forget: the note above says why this failure is dropped. *)
-      try ignore (Unix.write_substring Unix.stderr row 0 (String.length row))
-      with _ -> ())
-  end
-;;
-
-(* The name of the signal that asked the session to end, for the exit line. *)
-let signal_name signal =
-  if signal = Sys.sigterm then "SIGTERM"
-  else if signal = Sys.sighup then "SIGHUP"
-  else if signal = Sys.sigquit then "SIGQUIT"
-  else Printf.sprintf "signal %d" signal
-;;
-
-(** One 60 Hz frame window: bursts are coalesced without delaying an idle
-    terminal's first changed frame. *)
-let frame_interval_ns = 16_000_000L
 (* What one wheel detent moves. Terminals report three lines per detent, so a
    notch here is worth what a notch is worth in a pager. *)
 let wheel_notch_rows = 3
-
-(* Point fd 2 at a file under the base path, so writing to stderr cannot land
-   in the frame. Best effort by construction: a surface that cannot open its
-   log is still a working surface, and refusing to start over it would trade a
-   cosmetic fault for an outage. The failure is reported on the terminal that
-   is about to be cleared, which is the last moment a person can see it. *)
-let redirect_stderr_off_terminal ~base_path =
-  match
-    let dir =
-      Filename.concat (Common.masc_dir_from_base_path ~base_path) "logs"
-    in
-    let path =
-      Filename.concat dir (Printf.sprintf "masc-tui-%d.log" (Unix.getpid ()))
-    in
-    (* [O_CREAT] makes the file, not the directory above it. A base path that
-       has never had a log written under it -- a fresh workspace, a test's
-       temporary root -- therefore failed here on ENOENT, and the surface
-       started with its stderr still on the terminal. That is the exact state
-       this function exists to avoid, reached by the one cause it could have
-       removed itself. *)
-    Fs_compat.mkdir_p dir;
-    let fd =
-      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
-    in
-    (* No [Fun.protect] around the close: its [Finally_raised] is neither
-       [Unix_error] nor [Sys_error], so a raising finaliser would leave this
-       match and take the surface down over a descriptor. If [dup2] raises,
-       one fd leaks in a process that is one line from reporting it. *)
-    Unix.dup2 fd Unix.stderr;
-    Unix.close fd;
-    path
-  with
-  | path ->
-      Log.Startup.info "stderr redirected to %s" path
-  | exception (Unix.Unix_error _ | Sys_error _) ->
-      (* Say so before the screen is taken: a surface drawing over a mirror it
-         could not move is the state this whole path exists to avoid. *)
-      prerr_endline
-        "[masc-tui] could not redirect stderr off this terminal; log lines may \
-         land in the drawn screen"
-
-let require_interactive_terminal () =
-  let term =
-    Sys.getenv_opt "TERM"
-    |> Option.value ~default:""
-    |> String.lowercase_ascii
-    |> String.trim
-  in
-  if
-    (not (Unix.isatty Unix.stdin))
-    || not (Unix.isatty Unix.stdout)
-    || String.equal term "dumb"
-  then begin
-    prerr_endline
-      "masc-tui requires interactive TTY stdin/stdout and TERM other than dumb";
-    exit 2
-  end
 
 (* The bound comes from [scrolled_surface], which the drawing reads too, so a
    keypress cannot move past what the frame can show. Surfaces the state
@@ -605,85 +351,6 @@ let keeper_log_row_count (state : state) =
   let _, cols = get_terminal_size () in
   List.length (Masc_tui_types.keeper_log_rows state ~cols)
 
-(** Parse command line arguments *)
-let parse_args () =
-  let port = ref None in
-  (* Named so the R13 footer-fact scan does not read the setter's [ := ] as a
-     quoted [Port:] label split across the flag tuple's strings. *)
-  let set_selected_port value = port := Some value in
-  let workspace = ref "" in
-  let refresh = ref 2.0 in
-  let base_path = ref "" in
-  let reasoning_visibility = ref "folded" in
-  let tool_visibility = ref "compact" in
-
-  let specs = [
-    ("--version", Arg.Unit (fun () -> print_endline Runtime_build_version.current; exit 0),
-      "Print this executable's build version and exit");
-    ("--build-commit", Arg.Unit (fun () ->
-        match Build_commit_generated.commit with
-        | Some commit -> print_endline commit; exit 0
-        | None -> prerr_endline "build commit is not embedded"; exit 1),
-      "Print the Git commit embedded at build time and exit");
-    ( "--port", Arg.Int set_selected_port
-    , "MASC server port (environment or saved workspace value when omitted)" );
-    ("--workspace", Arg.Set_string workspace, "Workspace name (default: from base path)");
-    ( "--base-path",
-      Arg.Set_string base_path,
-      "Workspace/base path; .masc lives below it (default: MASC_BASE_PATH, then a cwd holding .masc/config, then the recorded default)" );
-    ( "--base",
-      Arg.Set_string base_path,
-      "Alias for --base-path" );
-    ( "--reasoning",
-      Arg.Symbol ([ "hidden"; "folded"; "full" ], fun value -> reasoning_visibility := value),
-      "Keeper chat reasoning default: hidden, folded, or full" );
-    ( "--tool-view",
-      Arg.Symbol ([ "compact"; "results"; "full" ], fun value -> tool_visibility := value),
-      "Keeper chat tool-call default: compact, results, or full" );
-  ] in
-
-  Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
-
-  (* The same order `masc start` boots in (RFC workspace-root-resolution), so
-     the screen and the server it starts or joins read one workspace. A cwd is
-     used only when it holds .masc/config; with none the TUI names the choices
-     instead of observing an empty directory. *)
-  let base =
-    let flag = if String.trim !base_path = "" then None else Some !base_path in
-    match Workspace_root.resolve_current ~flag with
-    | Ok workspace -> workspace.Workspace_root.root
-    | Error error -> prerr_endline (Workspace_root.error_message error); exit 1
-  in
-
-  let resolved_port = match Workspace_connection.resolve ~base_path:(Some base) ~cli:!port
-    ~environment:(Env_config_core.raw_value_opt Env_config_core.http_port_env_key) with
-    | Ok value -> Workspace_connection.to_int value
-    | Error error -> prerr_endline (Workspace_connection.error_message error); exit 1 in
-
-  (* Resolve workspace *)
-  let r = if !workspace <> "" then !workspace else Filename.basename base in
-
-  let reasoning_visibility =
-    match !reasoning_visibility with
-    | "hidden" -> Reasoning_hidden
-    | "folded" -> Reasoning_folded
-    | "full" -> Reasoning_full
-    | _ -> Reasoning_hidden
-  in
-  let tool_visibility =
-    match !tool_visibility with
-    | "compact" -> Tools_compact
-    | "results" -> Tools_results
-    | "full" -> Tools_full
-    | _ -> Tools_compact
-  in
-  ( base
-  , r
-  , resolved_port
-  , !refresh
-  , reasoning_visibility
-  , tool_visibility )
-
 let recovered_paste_send_locked_for state keeper_name =
   match keeper_name with
   | Some target ->
@@ -930,107 +597,6 @@ let clear_keeper_history_projection state =
     state.msg_older_exist <- false;
     state.msg_older_loading <- false;
     state.msg_older_error <- None
-
-(* Send one [tui] pick to the server (RFC-0482 §3.1). The screen has already
-   taken it; what the server answered is said when the writer's completion is
-   drained, below. *)
-let store_preference state change =
-  note_session_pick state change;
-  match state.connection_status with
-  (* The account server of a multi-account installation keeps no [tui]
-     table, and nothing is sent to it. No pick a person makes reaches here:
-     its screen takes every key. What does is the first key retiring the help
-     hint, which is not a choice to report. *)
-  | Masc_tui_types.Account_server _ -> ()
-  | Masc_tui_types.Disconnected | Masc_tui_types.Connecting | Masc_tui_types.Booting
-  | Masc_tui_types.Degraded | Masc_tui_types.Connected ->
-    ignore
-      (Masc_tui_preference_writer.submit state.preference_writer
-         ~sw:(Eio_context.get_switch_opt ()) change
-       : Masc_tui_preference_writer.request)
-
-let preference_name state = function
-  | Masc.Tui_preference.Theme_chosen _ -> ui_text state ~ko:"테마" ~en:"Theme"
-  | Masc.Tui_preference.Language_chosen _ -> ui_text state ~ko:"UI 언어" ~en:"UI language"
-  | Masc.Tui_preference.Board_sort_chosen _ -> ui_text state ~ko:"Board 정렬" ~en:"Board sort"
-  | Masc.Tui_preference.Candle_chosen _ -> ui_text state ~ko:"Candle" ~en:"Candle"
-  | Masc.Tui_preference.Help_hint_retired -> ui_text state ~ko:"도움말 안내" ~en:"The help hint"
-  | Masc.Tui_preference.Chat_visited keeper ->
-      let target = Keeper_id.Keeper_name.to_string keeper in
-      ui_text state ~ko:("대화 " ^ target) ~en:("Conversation " ^ target)
-
-(* A pick the screen already shows: only what did not go as shown is said. A
-   credential that may not write runtime.toml is said once for the session. *)
-let report_preference_outcome state change outcome =
-  let name = preference_name state change in
-  match outcome with
-  | Ok Masc_tui_preference_writer.Unchanged -> false
-  | Ok (Masc_tui_preference_writer.Committed { durability; ignored_legacy_keys }) ->
-      let legacy_said =
-        match ignored_legacy_keys with
-        | [] -> false
-        | keys ->
-            report_action state "warn"
-              (ui_text state
-                 ~ko:(name ^ ": 저장했어요. 다만 이후 릴리스에서 읽지 않는 옛 키가 파일에 남아 있어 무시돼요: " ^ String.concat ", " keys)
-                 ~en:(name ^ " saved. Legacy keys left in the file are ignored from this release on: " ^ String.concat ", " keys));
-            true
-      in
-      let durability_said =
-        match durability with
-        | Runtime.Durable -> false
-        | Runtime.Durability_unconfirmed { detail } ->
-            report_action state "warn"
-              (ui_text state ~ko:(name ^ ": 저장했지만 디스크에 반영됐는지 확인하지 못했어요: " ^ detail)
-                 ~en:(name ^ " saved; durability unconfirmed: " ^ detail));
-            true
-      in
-      legacy_said || durability_said
-  | Error (Masc_tui_preference_writer.Not_permitted reason) ->
-      if state.preference_refusal_said then false
-      else begin
-        state.preference_refusal_said <- true;
-        report_action state "error"
-          (ui_text state
-             ~ko:("이 터미널의 credential 로는 화면 설정을 저장할 수 없어요. 이번 세션에만 적용돼요: " ^ reason)
-             ~en:("This terminal's credential may not store screen settings. They last this session only: " ^ reason));
-        true
-      end
-  | Error (Masc_tui_preference_writer.Refused reason | Masc_tui_preference_writer.Not_started reason) ->
-      report_action state "error"
-        (ui_text state ~ko:(name ^ ": 저장하지 못했어요. 이번 세션에만 적용돼요: " ^ reason)
-           ~en:(name ^ " not saved. This session only: " ^ reason));
-      true
-  | Error (Masc_tui_preference_writer.Unobserved reason) ->
-      report_action state "error"
-        (ui_text state ~ko:(name ^ ": 저장됐는지 알 수 없어요: " ^ reason)
-           ~en:(name ^ " save outcome unknown: " ^ reason));
-      true
-
-let drain_preference_completions state ~can_take =
-  let changed = ref false in
-  Masc_tui_preference_writer.drain_completed state.preference_writer ~can_take
-    ~apply:(fun (completion : Masc_tui_preference_writer.completion) ->
-      let change = completion.request.change in
-      let accepted =
-        match change with
-        | Masc.Tui_preference.Chat_visited keeper -> accept_chat_visit state completion keeper
-        | Masc.Tui_preference.Theme_chosen _ | Masc.Tui_preference.Language_chosen _
-        | Masc.Tui_preference.Board_sort_chosen _ | Masc.Tui_preference.Candle_chosen _
-        | Masc.Tui_preference.Help_hint_retired -> false
-      in
-      let said = report_preference_outcome state change completion.outcome in
-      changed := !changed || accepted || said);
-  !changed
-
-let drain_keeper_preference_completions state ~can_take =
-  let changed = ref false in
-  Masc_tui_config.drain_keeper_preferences state.keeper_preference_writer ~can_take
-    ~apply:(fun completion ->
-      changed := true;
-      Option.iter (report_action state "error")
-        (apply_keeper_preference_completion state completion));
-  !changed
 
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
     ?(remember_home_chat = true) state
@@ -2495,12 +2061,12 @@ let launch_artifact_check_change state ~mailbox =
   | (None | Some (Masc_tui_resource_catalog.Mcp _)), _ ->
     report_action state "error" "Select a published report revision to check or uncheck"
   | Some (Report _), None ->
-    report_kept_back state ~request:Kept_request.Report_check workspace_identity_unread Nothing_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Report_check workspace_identity_unread Nothing_kept
   | Some (Report report), Some expected_workspace ->
     match Masc_tui_resources_updates.begin_check state ~report with
     | Error (Request_failed detail) -> report_action state "error" detail
     | Error (Request_withdrawn refusal) ->
-      report_withdrawn state ~request:Kept_request.Report_check refusal
+      Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Report_check refusal
     | Ok request ->
       let credential = Masc_tui_http.bind_credential () in
       let host = server_peer_host and port = state.port in
@@ -2548,7 +2114,7 @@ let launch_resource_share state ~mailbox ~report ~entry ~recovery ~dispatch_allo
     (match Masc_tui_resources_updates.begin_share_change ~recovery state ~report ~entry with
      | Error (Request_failed detail) -> report_action state "error" detail
      | Error (Request_withdrawn refusal) ->
-       report_withdrawn state ~request:Kept_request.Resource_share refusal
+       Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Resource_share refusal
      | Ok request ->
        report_action state "system" (if recovery then
          "Reconciling the original share operation; it may be applied now"
@@ -3301,9 +2867,9 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_kept_back state ~request:Kept_request.Tool_approval workspace_identity_unconfirmed Nothing_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Tool_approval workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_kept_back state ~request:Kept_request.Tool_approval workspace_identity_unread Nothing_kept
+  | None -> Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Tool_approval workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   (* Answering a held tool call mutates server state over one round trip, like
      the Gate and operator-confirm decisions beside it. Take the same
@@ -4033,9 +3599,9 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_kept_back state ~request:Kept_request.Gate_decision workspace_identity_unconfirmed Nothing_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Gate_decision workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_kept_back state ~request:Kept_request.Gate_decision workspace_identity_unread Nothing_kept
+  | None -> Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Gate_decision workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   (* A Gate decision mutates durable server state over one round trip. Take the
      same single-action slot the operator-confirm path takes, so the header
@@ -4083,9 +3649,9 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_kept_back state ~request:Kept_request.Auto_judge_retry workspace_identity_unconfirmed Nothing_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Auto_judge_retry workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_kept_back state ~request:Kept_request.Auto_judge_retry workspace_identity_unread Nothing_kept
+  | None -> Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Auto_judge_retry workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   match pending.gp_retry_request with
   | None ->
@@ -4132,7 +3698,7 @@ let launch_gate_mode_set state ~mailbox ~lane ~mode =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   match write_authority_refusal state authority with
-  | Some refusal -> report_withdrawn state ~request:Kept_request.Gate_mode_change refusal
+  | Some refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Gate_mode_change refusal
   | None ->
   let host = server_peer_host in
   let port = state.port in
@@ -4202,7 +3768,7 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   match write_authority_refusal state authority with
-  | Some refusal -> report_withdrawn state ~request:Kept_request.Tool_mode_change refusal
+  | Some refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Tool_mode_change refusal
   | None ->
   (* [begin_action] takes the newest generation, so a stance listing already
      on the wire stops being current and cannot put the old answer back on
@@ -4247,9 +3813,9 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_kept_back state ~request:Kept_request.Tool_approval workspace_identity_unconfirmed Nothing_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Tool_approval workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_kept_back state ~request:Kept_request.Tool_approval workspace_identity_unread Nothing_kept
+  | None -> Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Tool_approval workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   supersede_home_decision_receipt state;
   let host = server_peer_host in
@@ -5010,9 +4576,9 @@ let launch_task_history_load ?(older=false) ?limit state ~mailbox task_id =
 let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
   if state.workspace_identity <> Workspace_identity_match
      || authority <> state.workspace_authority then
-    report_kept_back state ~request:Kept_request.Task_cancel workspace_identity_unconfirmed Nothing_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Task_cancel workspace_identity_unconfirmed Nothing_kept
   else match identity with
-  | None -> report_kept_back state ~request:Kept_request.Task_cancel workspace_identity_unread Nothing_kept
+  | None -> Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Task_cancel workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   supersede_home_decision_receipt state;
   let host = server_peer_host in
@@ -5208,9 +4774,9 @@ let launch_keeper_deletions state ~mailbox ?retry () =
             ~path:"/api/v1/dashboard/keepers/deletions") in
           let* inventory = failed (Keeper_control.decode_deletion_inventory json) in
           let* () = check_authority ()
-            |> Result.map_error (request_failure_after_read state ~request:Kept_request.Keeper_deletions_read) in
+            |> Result.map_error (Masc_tui_shell.Editor_notice.request_failure_after_read state ~request:Kept_request.Keeper_deletions_read) in
           let* () = admit ()
-            |> Result.map_error (request_failure_after_read state ~request:Kept_request.Keeper_deletions_read) in
+            |> Result.map_error (Masc_tui_shell.Editor_notice.request_failure_after_read state ~request:Kept_request.Keeper_deletions_read) in
           Ok inventory
         with Eio.Cancel.Cancelled _ as exn -> raise exn
            | exn -> Error (Request_failed (Printexc.to_string exn))
@@ -5784,7 +5350,7 @@ let launch_preset_save state ~mailbox ~sink ~name ~description ~chat_input ~also
 
 let launch_chat_command_read state ~mailbox ~label ~call ~wrap =
   if not (server_authority_ready state) then
-    report_action state "error" (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
+    report_action state "error" (Masc_tui_shell.Editor_notice.kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
       ~request:(Kept_request.Command label))
   else begin
     let ticket = ref () in
@@ -5980,7 +5546,7 @@ let launch_keeper_settings_editor_read state ~mailbox request =
               ~keeper_name:key.ksk_keeper ~format:request.ksr_format
             |> Result.map_error (fun detail -> Request_failed detail) in
           let* () = check ()
-            |> Result.map_error (request_failure_after_read state ~request:Kept_request.Keeper_settings_read) in
+            |> Result.map_error (Masc_tui_shell.Editor_notice.request_failure_after_read state ~request:Kept_request.Keeper_settings_read) in
           Ok {kss_observed=observed;kss_stem=stem})
         (fun () ->
           Eio.Promise.await superseded;
@@ -6739,7 +6305,7 @@ let launch_lane_subscriptions state ~mailbox request =
 
 let launch_lane_addons ?target state ~mailbox request =
   if not (server_authority_ready state) then
-    report_action state "error" (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
+    report_action state "error" (Masc_tui_shell.Editor_notice.kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
       ~request:Kept_request.Addon_request)
   else begin
   let module Addons = Masc_tui_lane_addons in
@@ -8026,7 +7592,7 @@ let launch_machine_activity_read state ~mailbox owner =
              (Masc_tui_loader.load_runtime_config_view ~host ~port) in
            let check () = Result.map_error (fun refusal -> Request_withdrawn refusal) (check ()) in
            Result.bind (check ()
-             |> Result.map_error (request_failure_after_read state ~request:Kept_request.Runtime_config_read)) (fun () ->
+             |> Result.map_error (Masc_tui_shell.Editor_notice.request_failure_after_read state ~request:Kept_request.Runtime_config_read)) (fun () ->
            let activity = Result.bind (Masc_tui_loader.load_lane_inventory ~host ~port)
              (fun snapshot ->
                match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
@@ -8041,7 +7607,7 @@ let launch_machine_activity_read state ~mailbox owner =
                    Error "The selected machine is absent from the server reading.") in
            Result.map (fun () -> Masc_tui_machine_activity.{document;activity})
              (check ()
-              |> Result.map_error (request_failure_after_read state ~request:Kept_request.Lanes_read)))))
+              |> Result.map_error (Masc_tui_shell.Editor_notice.request_failure_after_read state ~request:Kept_request.Lanes_read)))))
   end
 
 let launch_machine_activity_save state ~mailbox session =
@@ -9732,7 +9298,7 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Suffix) state ~
             |> Result.map_error (fun detail -> Masc_tui_native_tasks.Transport detail) in
           let* () = retired () in
           let* () = admit () |> Result.map_error (fun refusal -> Masc_tui_native_tasks.Transport
-            (workspace_response_refusal_text state ~request:Kept_request.Native_tasks_read refusal)) in
+            (Masc_tui_shell.Editor_notice.workspace_response_refusal_text state ~request:Kept_request.Native_tasks_read refusal)) in
           result))
   end
 
@@ -9785,7 +9351,7 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Suffix) state
             |> Result.map_error (fun detail -> Masc_tui_child_content.Transport detail) in
           let* () = retired () in
           let* () = admit () |> Result.map_error (fun refusal -> Masc_tui_child_content.Transport
-            (workspace_response_refusal_text state ~request:Kept_request.Child_content_read refusal)) in
+            (Masc_tui_shell.Editor_notice.workspace_response_refusal_text state ~request:Kept_request.Child_content_read refusal)) in
           result))
   end
 
@@ -9885,7 +9451,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
           let* () = check () in
           let* reading = fetch ~host ~port ~keeper_name
             |> Result.map_error (fun detail -> Request_failed detail) in
-          let* () = check () |> Result.map_error (request_failure_after_read state ~request) in
+          let* () = check () |> Result.map_error (Masc_tui_shell.Editor_notice.request_failure_after_read state ~request) in
           Ok reading
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -9909,7 +9475,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
             |> Result.map_error (fun error ->
                  Request_failed (Keeper_chat_history.page_error_to_string error)) in
           let* () = check ()
-            |> Result.map_error (request_failure_after_read state ~request:Kept_request.Keeper_history_read) in
+            |> Result.map_error (Masc_tui_shell.Editor_notice.request_failure_after_read state ~request:Kept_request.Keeper_history_read) in
           Ok page
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -11320,7 +10886,7 @@ let settle_retired_chat_copy state =
 
 let launch_keeper_chat_copy state ~mailbox ~keeper_name =
   if not (server_authority_ready state) then
-    report_action state "error" (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
+    report_action state "error" (Masc_tui_shell.Editor_notice.kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
       ~request:(Kept_request.Command "/copy"))
   else begin
   let enqueue_async = workspace_enqueue state in
@@ -12847,7 +12413,7 @@ let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
   match target with
   | None -> report_action state "error" "/steer needs a Keeper selected"
   | Some _ when state.workspace_identity <> Workspace_identity_match ->
-      report_kept_back state ~request:(Kept_request.Command "/steer") workspace_identity_unconfirmed Draft_kept
+      Masc_tui_shell.Editor_notice.report_kept_back state ~request:(Kept_request.Command "/steer") workspace_identity_unconfirmed Draft_kept
   | Some keeper_name when not (keeper_available_for_new_message state keeper_name) ->
       report_action state "error"
         (Printf.sprintf "Cannot steer: Keeper %s is unavailable"
@@ -12938,7 +12504,7 @@ let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
       (* Unread and mismatched workspaces refuse. An unconfirmed match keeps
          the last confirmed match, so the line queues and waits for the
          resume that a confirming read runs. *)
-      report_kept_back state ~request:Kept_request.Message workspace_identity_unconfirmed Draft_kept
+      Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Message workspace_identity_unconfirmed Draft_kept
   | Some target when Option.is_some state.keepers_error
                      && not (keeper_available_for_new_message state target) ->
       report_action state "error"
@@ -13548,7 +13114,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
          chat_notice state ~keeper_name:(Some keeper_name)
            ~kind:(if failure then Notice_failure else Notice_reply) text) in
   if not (server_authority_ready state) then
-    panel_notice ~failure:true (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
+    panel_notice ~failure:true (Masc_tui_shell.Editor_notice.kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
       ~request:(Kept_request.Command "/queue"))
   else begin
   let enqueue_async = workspace_enqueue state in
@@ -14206,7 +13772,7 @@ let with_msx_observation state ~mailbox ~request read apply =
       let result = read () in
       (match check () with
        | Error refusal ->
-           state.msx_notice <- Some (workspace_response_refusal_text state ~request refusal)
+           state.msx_notice <- Some (Masc_tui_shell.Editor_notice.workspace_response_refusal_text state ~request refusal)
        | Ok () -> apply result)
 
 let observe_msx_carts state ~mailbox =
@@ -16814,7 +16380,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Queue input ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name, Masc_tui_queue_inspection.parse input with
-       | None, _ -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | None, _ -> notice ~kind:Notice_failure (Masc_tui_shell.Editor_notice.select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | _, Error detail -> notice ~kind:Notice_failure detail
        | _, Ok (Masc_tui_queue_inspection.Inspect_peers _) ->
          assert false (* [parse] never creates a roster read. *)
@@ -16889,7 +16455,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Reconcile_held ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name with
-       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | None -> notice ~kind:Notice_failure (Masc_tui_shell.Editor_notice.select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some name ->
          let held =
            List.filter (fun (entry : inflight) ->
@@ -16912,7 +16478,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Run_next ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name with
-       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | None -> notice ~kind:Notice_failure (Masc_tui_shell.Editor_notice.select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some name ->
          if List.mem_assoc name state.keeper_chat_control_pending then
            notice ~kind:Notice_failure "Wait for the pending stop or resume before run-next"
@@ -16983,7 +16549,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Answer_tool_approval allow ->
       Masc_tui_message_input.clear state.msg_input;
       (match target with
-       | None -> notice ~kind:Notice_reply (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | None -> notice ~kind:Notice_reply (Masc_tui_shell.Editor_notice.select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some target ->
          match inflight_for_keeper state target with
          | Some entry ->
@@ -17095,7 +16661,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          ^ " (Ctrl-N or /memory to cycle)")
   | Masc_tui_command.Memory_status ->
       (match target with
-       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | None -> notice ~kind:Notice_failure (Masc_tui_shell.Editor_notice.select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some _ when not (server_authority_ready state) ->
          notice ~kind:Notice_failure
            (let ko = (state.ui_language = Lang_ko) in
@@ -18201,7 +17767,7 @@ let launch_approvals_summary_load state ~mailbox =
                        server. A failed GET still needs the trailing check. *)
                     let* () = check_identity
                       ~prior_contact:Masc_tui_server_lifecycle.Server_reached ()
-                      |> Result.map_error (request_failure_after_read state ~request:Kept_request.Confirmations_read) in
+                      |> Result.map_error (Masc_tui_shell.Editor_notice.request_failure_after_read state ~request:Kept_request.Confirmations_read) in
                     Result.map_error (fun detail -> Request_failed detail) snapshot)
 
 (* The owed read of the confirmations, also when their count is drawn: that
@@ -20713,7 +20279,7 @@ let apply_ui_language state lang =
     (ui_text state
        ~ko:("UI 언어: " ^ ui_language_label lang)
        ~en:("UI language: " ^ ui_language_label lang));
-  store_preference state (Masc.Tui_preference.Language_chosen lang)
+  Masc_tui_shell.Preferences.store state (Masc.Tui_preference.Language_chosen lang)
 
 (* The view and its density are saved together, the way [v] and [V] save
    them. *)
@@ -21723,7 +21289,7 @@ let launch_skill_evidence_read ?composition_run_id state ~mailbox reference =
         let* json = Masc_tui_http.post_skill_evidence ?composition_run_id ~host ~port reference
           |> Result.map_error (fun detail -> Request_failed detail) in
         let* () = check ()
-          |> Result.map_error (request_failure_after_read state ~request:Kept_request.Skill_evidence) in
+          |> Result.map_error (Masc_tui_shell.Editor_notice.request_failure_after_read state ~request:Kept_request.Skill_evidence) in
         Ok json)
   end
 
@@ -22521,7 +22087,7 @@ let apply_approval_decision_result state approval decision approvals result =
        report_action state "error"
          (Printf.sprintf "%s: %s" (approval_decision_unverified decision) err)
    | Error (Request_withdrawn refusal) ->
-       report_withdrawn state ~request:Kept_request.Approval_decision refusal);
+       Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Approval_decision refusal);
   apply_approvals_load state (Result.map_error (fun detail -> Request_failed detail) approvals)
 
 let apply_approval_decision_completion state generation approval decision result
@@ -22540,7 +22106,7 @@ let start_approval_decision state approval decision ~mailbox =
   let identity = state.server_identity in
   let reading = Some state.workspace_read_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_kept_back state ~request:Kept_request.Approval_decision workspace_identity_unconfirmed Nothing_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Approval_decision workspace_identity_unconfirmed Nothing_kept
   else
   match Approval.Flow.begin_action state.approval_flow with
   | Error `Already_inflight ->
@@ -22902,7 +22468,7 @@ let apply_ask_answer_completion state submission result asks =
    | Error (Request_withdrawn refusal) ->
        (* The guard stopped the answer before it left: kept back, with the
           draft it kept, never an unconfirmed recording (RFC §2). *)
-       report_kept_back state ~request:Kept_request.Ask_answer
+       Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Ask_answer
          (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept);
   settle_asks state asks
 
@@ -22918,7 +22484,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
     as_authority = authority; as_reading = reading; as_asker = asker;
     as_ask_id = ask_id; as_source_turn_ref = source_turn_ref; as_answered_label = answered_label } in
   if state.workspace_identity <> Workspace_identity_match then
-    report_kept_back state ~request:Kept_request.Ask_answer workspace_identity_unconfirmed Draft_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Ask_answer workspace_identity_unconfirmed Draft_kept
   else begin
   supersede_home_decision_receipt state;
 
@@ -22990,7 +22556,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
 
 let handle_ask_submit state ~mailbox =
   if state.workspace_identity <> Workspace_identity_match then
-    report_kept_back state ~request:Kept_request.Ask_answer workspace_identity_unconfirmed Draft_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Ask_answer workspace_identity_unconfirmed Draft_kept
   else
   match state.asks_error with
   | Some _ -> report_action state "error" "Question source unavailable; refresh before answering"
@@ -23174,7 +22740,7 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
 let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   let refuse () =
     state.keeper_action_pending <- None;
-    report_kept_back state ~request:Kept_request.Keeper_action workspace_identity_unconfirmed Nothing_kept in
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Keeper_action workspace_identity_unconfirmed Nothing_kept in
   (* The requests carry the identity this admission confirmed. *)
   match state.server_identity with
   | None -> refuse ()
@@ -23293,13 +22859,13 @@ let start_goal_transition ?note ?retry_binding state ~mailbox ~(goal_id : string
       end
   | ( Workspace_identity_match | Workspace_identity_mismatch _
     | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ ), _ ->
-      report_kept_back state ~request:Kept_request.Goal_transition workspace_identity_unconfirmed Nothing_kept
+      Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Goal_transition workspace_identity_unconfirmed Nothing_kept
 
 (* Confirmation uses the operator route and the exact proof read here, never
    the public MCP action set or a proof obtained at the second keypress. *)
 let handle_goal_confirmation_key state ~mailbox =
   if state.workspace_identity <> Workspace_identity_match then
-    report_kept_back state ~request:Kept_request.Goal_transition workspace_identity_unconfirmed Nothing_kept
+    Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Goal_transition workspace_identity_unconfirmed Nothing_kept
   else
   match state.planning_mode with
   | Planning_list -> ()
@@ -23520,9 +23086,9 @@ let handle_board_vote_key state ~cols ~mailbox ~(up : bool) =
 let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   match state.workspace_identity with
   | Workspace_identity_unread ->
-      report_kept_back state ~request:Kept_request.Schedule_cancel workspace_identity_unread Nothing_kept
+      Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Schedule_cancel workspace_identity_unread Nothing_kept
   | Workspace_identity_match_unconfirmed _ ->
-      report_kept_back state ~request:Kept_request.Schedule_cancel workspace_identity_unconfirmed Nothing_kept
+      Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Schedule_cancel workspace_identity_unconfirmed Nothing_kept
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
   let admit = capture_workspace_admission state ~mailbox in
@@ -23839,7 +23405,7 @@ let open_board_composer_editor state ~restore ~reenter =
           (Masc_tui_editor.abort_detail ~ko:(state.ui_language = Lang_ko)
              (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset));
       state.board_compose_armed <- false;
-      report_editor_unset state ~form:Board_draft
+      Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Board_draft
   | Some _ -> (
       let current_draft = Buffer.contents state.board_draft in
       let stem =
@@ -23853,7 +23419,7 @@ let open_board_composer_editor state ~restore ~reenter =
         Masc_tui_editor.roundtrip ~restore ~reenter ~suffix:".md" stem
       with
       | Error abort ->
-          report_editor_abort state ~form:Board_draft abort;
+          Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Board_draft abort;
           state.board_compose_armed <- false
       | Ok edited ->
           let trimmed = String.trim edited in
@@ -24152,9 +23718,9 @@ let no_keeper_under_cursor ~ko =
 let handle_keeper_action state ~base_path ~mailbox action =
   match state.workspace_identity with
   | Workspace_identity_unread ->
-      report_kept_back state ~request:Kept_request.Keeper_action workspace_identity_unread Nothing_kept
+      Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Keeper_action workspace_identity_unread Nothing_kept
   | Workspace_identity_match_unconfirmed _ ->
-      report_kept_back state ~request:Kept_request.Keeper_action workspace_identity_unconfirmed Nothing_kept
+      Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Keeper_action workspace_identity_unconfirmed Nothing_kept
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match selected_keeper state with
   | None ->
@@ -24649,100 +24215,6 @@ let contact_of_connection_status :
       Masc_tui_server_lifecycle.Server_reached
   | Masc_tui_types.Connecting | Masc_tui_types.Booting ->
       Masc_tui_server_lifecycle.Undecided
-
-(* The stored picks in [settings], except the ones this session has changed
-   itself: a value read later never replaces a choice made meanwhile. The
-   opening screen is not among them; it is the start-up read's alone. *)
-let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
-  let unpicked key = not (List.mem key state.session_picks) in
-  let module Key = Masc.Tui_preference.Key in
-  if unpicked Key.Midi_soundfont then boot_midi_soundfont := settings.midi_soundfont;
-  if unpicked Key.Audio_input_device then boot_audio_input_device := settings.audio_input_device;
-  if unpicked Key.Last_chat_keeper then
-    (match settings.last_chat_keeper with
-     | Ok None -> state.home_last_chat <- No_chat_receipt
-     | Ok (Some keeper) -> state.home_last_chat <- Recorded_chat keeper
-     | Error reason ->
-         state.home_last_chat <- Unreadable_chat_receipt reason;
-         add_event state "error" reason);
-  if unpicked Key.Board_sort then
-    (match settings.board_sort with
-     | None -> ()
-     | Some value ->
-         (match board_sort_of_string value with
-          | Some sort -> state.board_sort <- sort
-          | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
-  (* A theme named in runtime.toml's [tui] section is applied, so the reader's
-     pick survives a restart instead of being re-chosen each session. When no
-     preference is stored on a Truecolor terminal, activate the curated
-     Truecolor default theme; storing [terminal] opts back into following the
-     terminal's own palette. *)
-  if unpicked Key.Theme then
-    let apply_default_if_truecolor () =
-      if state.theme_choice = None
-         && Masc_tui_theme.color_depth () = Masc_tui_theme.Truecolor
-         && Masc_tui_theme_choice.apply Masc_tui_theme_choice.default_truecolor_theme
-      then state.theme_choice <- Some Masc_tui_theme_choice.default_truecolor_theme
-    in
-    (match settings.theme, state.theme_before_preview with
-     | None, None -> apply_default_if_truecolor ()
-     | None, Some _ -> ()
-     | Some name, None when String.equal name Masc_tui_theme_choice.terminal_choice_name ->
-         Masc_tui_theme_choice.follow_terminal ();
-         state.theme_choice <- None
-     | Some name, Some _ when String.equal name Masc_tui_theme_choice.terminal_choice_name ->
-         state.theme_before_preview <- Some None
-     (* A preview is on screen. The stored theme becomes what Esc puts back,
-        and the preview stays where the reader is looking. *)
-     | Some name, Some _ ->
-         if List.exists
-              (fun (entry : Masc_tui_theme_choice.entry) ->
-                String.equal entry.Masc_tui_theme_choice.name name)
-              (Masc_tui_theme_choice.entries ())
-         then state.theme_before_preview <- Some (Some name)
-     | Some name, None ->
-         if Masc_tui_theme_choice.apply name then state.theme_choice <- Some name);
-  if unpicked Key.Language then
-    (match settings.language with
-     | None -> ()
-     | Some value ->
-         (match ui_language_of_string value with
-          | Some lang -> state.ui_language <- lang
-          | None -> add_event state "error" ("Unknown saved UI language: " ^ value)));
-  if unpicked Key.Candle then
-    (match settings.candle with
-     | None -> ()
-     | Some value ->
-         (match Masc_tui_emblem_screen.style_of_string value with
-          | Some style -> Masc_tui_emblem_screen.set_style style
-          | None -> add_event state "error" ("Unknown saved candle: " ^ value)));
-  if unpicked Key.Reduce_motion then
-    state.about_reduce_motion <-
-      (match settings.reduce_motion with Some enabled -> enabled | None -> false);
-  (* Absent reads as on, which is what masc drew before the key existed -- a
-     reader who never set it sees no change. *)
-  if unpicked Key.Lift_colours then
-    Masc_tui_theme.set_lift_enabled (Option.value settings.lift_colours ~default:true);
-  (* The box a table draws is a look, and a look that survives a restart is
-     the point of storing it. *)
-  if unpicked Key.Table_frame then
-    set_table_frame (Option.value settings.table_frame ~default:false);
-  (* Absent reads as on -- the hints predate the key, and a reader who never
-     set it sees no change. *)
-  if unpicked Key.Hints_visible then
-    state.hints_visible <- Option.value settings.hints_visible ~default:true;
-  (* Absent reads as not shown: the door line exists for a first-time
-     reader, and a long-running operator still meets it once. *)
-  if unpicked Key.Help_hint_shown then
-    state.help_hint_shown <- Option.value settings.help_hint_shown ~default:false;
-  if unpicked Key.Coalesce_queued_input then
-    state.coalesce_queued_input <- Option.value settings.coalesce_queued_input ~default:false;
-  if unpicked Key.User_input_priority_next then
-    state.user_input_priority_next <-
-      Option.value settings.user_input_priority_next ~default:false;
-  (* Default false, unlike its neighbours: this one sends without the operator
-     confirming, so absence is not consent. *)
-  state.voice_send_on_stop <- Option.value settings.send_on_stop ~default:false
 
 (* Start a server here; [apply_settled_starts] reads it once it answers. The
    start the TUI makes by itself and the Keeper list's [s] both come here. *)
@@ -27322,7 +26794,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            refresh Cancellation_confirmed
        | Task_cancel_refused err -> report_action state "error" ("task cancel refused: " ^ err)
        | Task_cancel_kept_back refusal ->
-           report_withdrawn state ~request:Kept_request.Task_cancel refusal
+           Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Task_cancel refusal
        | Task_cancel_unconfirmed detail ->
            report_action state "error"
              (Printf.sprintf "task %s cancellation unconfirmed; checking its workspace: %s"
@@ -27364,7 +26836,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Board_msg (Board_attachment_loaded (request,result)) ->
       if Option.is_some (current_board_reader state) then
         state.board_reader <- Masc_tui_board_reader.complete state.board_reader request
-          (said_read_result state ~request:Kept_request.Attachment_read result);
+          (Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.Attachment_read result);
       Drawn_changed
   | Board_msg (Board_attachment_prepared (request,result)) ->
       if Option.is_some (current_board_reader state) then
@@ -27523,7 +26995,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Ok _ -> ()
         | Error (Request_failed detail) -> report_action state "error" detail
         | Error (Request_withdrawn refusal) ->
-            report_withdrawn state ~request:Kept_request.Keeper_settings_read refusal
+            Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Keeper_settings_read refusal
       end;
       Drawn_changed
   | Keeper_msg (Keeper_config_view_loaded (request, result)) -> (
@@ -27886,7 +27358,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error" (ui_text state ~ko:"프리셋 복원: " ~en:"Preset restore: " ^ detail)
        | Preset_to_pane, Error (Request_withdrawn refusal) ->
            state.preset_busy <- false;
-           report_withdrawn state ~request:Kept_request.Preset_restore refusal);
+           Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Preset_restore refusal);
       Drawn_changed
   | Preset_msg (Preset_deleted (sink, result)) ->
       (* The list is read again after a failure too: a refusal says the
@@ -27909,7 +27381,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            launch_presets_load state ~mailbox
        | Preset_to_pane, Error (Request_withdrawn refusal) ->
            state.preset_busy <- false;
-           report_withdrawn state ~request:Kept_request.Preset_delete refusal;
+           Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Preset_delete refusal;
            launch_presets_load state ~mailbox);
       Drawn_changed
   | Play_msg (Play_room_received (request, result)) ->
@@ -28310,7 +27782,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Resource_msg (Resources_listed (owner, result)) ->
       withdraw_resource_diagram_pending state;
       Masc_tui_resources_updates.listed state ~owner
-        (said_read_result state ~request:Kept_request.Resource_list_read result);
+        (Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.Resource_list_read result);
       Drawn_changed
   | Artifact_msg (Artifact_checks_loaded (request, result)) ->
       (* A read the guard stopped keeps its notice apart, so the confirmation
@@ -28330,7 +27802,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Error (Request_failed detail) -> report_action state "error"
              ("Confirmation result requires refresh: " ^ detail)
          | Error (Request_withdrawn refusal) ->
-             report_withdrawn state ~request:Kept_request.Report_check refusal);
+             Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Report_check refusal);
         launch_artifact_checks_load state ~mailbox
       end;
       Drawn_changed
@@ -28338,7 +27810,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if settle_resource_save state request outcome then begin
         match outcome with
         | Resource_save_kept_back refusal ->
-            report_withdrawn state ~request:Kept_request.Original_save refusal
+            Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Original_save refusal
         | Resource_save_result _ | Resource_save_not_started _
         | Resource_save_unconfirmed _ | Resource_save_interrupted _ ->
         let category = match outcome with
@@ -28363,7 +27835,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                     | Masc_tui_resource_catalog.Mcp_uri _), _) | None -> ())
        | Error (Request_failed detail) -> report_action state "error" (label ^ ": " ^ detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Report_open refusal);
+           Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Report_open refusal);
       Drawn_changed
   | Resource_msg (Resource_share_changed (request, result)) ->
       if resource_share_is_owned state request then begin
@@ -28701,14 +28173,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Drawn_changed
   | System_log_streamed (stream, event) -> take_system_log_stream state stream event; Drawn_changed
   | Schedule_msg (Schedules_loaded (Schedule_agenda_read ticket, result)) ->
-      let result = said_read_result state ~request:Kept_request.Schedule_read result in
+      let result = Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.Schedule_read result in
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
       apply_schedule_agenda_read state ticket result;
       if current then
         state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result;
       Drawn_changed
   | Schedule_msg (Schedules_loaded (Schedule_page_read request, result)) ->
-      let result = said_read_result state ~request:Kept_request.Schedule_read result in
+      let result = Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.Schedule_read result in
       let current_agenda =
         Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
           request.spr_agenda_ticket in
@@ -28772,7 +28244,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Error _ -> failed_read state.memory_activity_owed);
       state.memory_activity <-
         Masc_tui_fetched.complete ~equal:String.equal state.memory_activity request
-          (said_read_result state ~request:Kept_request.Memory_activity_read result);
+          (Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.Memory_activity_read result);
       Drawn_changed
   | Schedule_msg (Schedule_cancel_done (schedule_id, result)) -> (
       match result with
@@ -28825,7 +28297,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           owe_harness_read state
       | Error (Request_failed err) -> report_action state "error" ("Harness label: " ^ err)
       | Error (Request_withdrawn refusal) ->
-          report_withdrawn state ~request:Kept_request.Harness_label refusal);
+          Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Harness_label refusal);
       Drawn_changed
   | Approvals_msg (Approval_decision_done (approval, decision, result, generation, approvals)) ->
       apply_approval_decision_completion state generation approval decision
@@ -29771,7 +29243,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (Printf.sprintf "Gate decision for %s failed: %s" approval_id
                 detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Gate_decision refusal);
+           Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Gate_decision refusal);
       Drawn_changed
   | Gate_msg (Gate_auto_judge_retried (approval_id, expected_workspace, result, generation)) ->
       let flow, owns_action =
@@ -29789,7 +29261,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id
                 detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Auto_judge_retry refusal);
+           Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Auto_judge_retry refusal);
       Drawn_changed
   | Gate_msg (Gate_mode_set (lane, mode, result)) ->
       (match result with
@@ -29801,7 +29273,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error"
              (Printf.sprintf "%s Gate change failed: %s" (Masc_tui_palette.gate_lane_label lane) detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Gate_mode_change refusal);
+           Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Gate_mode_change refusal);
       Drawn_changed
   | Keeper_msg (Keeper_tool_modes_loaded (result, ticket)) ->
       (* Dropped when a press has opened since the fetch went out -- it
@@ -29866,7 +29338,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error"
              (Printf.sprintf "could not set %s's gate: %s" keeper_name detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Tool_mode_change refusal);
+           Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Tool_mode_change refusal);
       Drawn_changed
   | Keeper_msg (Keeper_tool_approval_answered
       (keeper_name, tool_call_id, approval_id, allow, result, generation)) ->
@@ -30481,7 +29953,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         match result with
         | Error (Request_failed detail) -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Error (Request_withdrawn refusal) ->
-            report_withdrawn state ~request:Kept_request.Skill_evidence refusal
+            Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Skill_evidence refusal
         | Ok json -> state.tools_skill_evidence <- Some (key, json));
       Drawn_changed
   | Tools_msg (Tools_read_loaded (Tools_activations_loaded { generation; keeper; result })) ->
@@ -30753,7 +30225,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | Retire _ -> launch_connectors_load state ~mailbox));
       Drawn_changed
   | Connectors_msg (Connectors_loaded (request, read)) ->
-      let result = said_read_result state ~request:Kept_request.Connector_list_read read in
+      let result = Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.Connector_list_read read in
       (match complete_connectors_read state request result with
        | None -> ()
        | Some completion -> begin
@@ -31050,7 +30522,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Error detail -> state.repository_changes_diff_error <- Some detail);
       Drawn_changed
   | Keeper_msg (Keeper_chat_file_changes_loaded (generation, keeper_name, read)) ->
-      let result = said_read_result state ~request:Kept_request.File_changes_read read in
+      let result = Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.File_changes_read read in
       let still_current =
         generation = state.msg_file_changes_generation
         && Option.equal String.equal state.msg_file_changes_keeper
@@ -31138,7 +30610,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end;
       Drawn_changed
   | File_changes_loaded (keeper_name, result) ->
-      let result = said_read_result state ~request:Kept_request.File_changes_read result in
+      let result = Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.File_changes_read result in
       (* An answer for a keeper the surface has since left is not this
          surface's answer. Dropping it keeps one keeper's files from being
          drawn under another's name. *)
@@ -31377,7 +30849,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.harness_error <- Some detail);
       Drawn_changed
   | Fusion_msg (Fusion_runs_loaded (request, result)) ->
-      let result = said_read_result state ~request:Kept_request.Fusion_read result in
+      let result = Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.runs_loaded state request result with
        | Reread when state.view = Fusion
                      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs) ->
@@ -31386,7 +30858,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Reread | Await_observer | Obsolete -> ());
       Drawn_changed
   | Fusion_msg (Fusion_detail_loaded (generation, run_id, result)) ->
-      let result = said_read_result state ~request:Kept_request.Fusion_read result in
+      let result = Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result with
        | Reread when state.view = Fusion ->
            launch_fusion_detail_load state ~mailbox ~run_id
@@ -31394,7 +30866,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Reread | Await_observer | Obsolete -> ());
       Drawn_changed
   | Fusion_msg (Fusion_historical_detail_loaded (generation, reference, result)) ->
-      let result = said_read_result state ~request:Kept_request.Fusion_read result in
+      let result = Masc_tui_shell.Editor_notice.said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result with
        | Reread when state.view = Fusion ->
            launch_fusion_historical_detail_load state ~mailbox ~reference
@@ -31648,9 +31120,9 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
           { Masc_tui_wake.reason = Masc_tui_wake.Monotonic Masc_tui_wake.Drain_budget_spent; at_ns = now_ns };
       spent
   in
-  let chat_changed = drain_preference_completions state
+  let chat_changed = Masc_tui_shell.Preferences.drain_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
-  let keeper_preferences_changed = drain_keeper_preference_completions state
+  let keeper_preferences_changed = Masc_tui_shell.Preferences.drain_keeper_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
   let settings_reread_changed =
     match state.settings_reread with
@@ -31664,7 +31136,10 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
              (match outcome with
               | Ok (Ok settings) ->
                   let board_sort_before = state.board_sort in
-                  apply_stored_picks state settings;
+                  Masc_tui_shell.Preferences.apply_stored_picks
+                    ~on_midi_soundfont:(fun v -> boot_midi_soundfont := v)
+                    ~on_audio_input_device:(fun v -> boot_audio_input_device := v)
+                    ~set_table_frame state settings;
                   (* The start-up apply runs before the terminal is taken,
                      and main sends the page then; here it is sent now. *)
                   sync_theme_page state;
@@ -31846,316 +31321,15 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
     end
   | Some _ | None -> changed
 
-(* What a size change costs, wherever it was noticed: the presenter's cached
-   screen describes the old geometry, and the next frame has to be drawn
-   rather than skipped as unchanged. Both doors below end here so the two
-   cannot come to disagree about what a resize costs. *)
-let discard_frame_for_new_size frame_presenter render_schedule =
-  Masc_tui_msx.invalidate ();
-  Frame_presenter.invalidate frame_presenter;
-  Render_schedule.request render_schedule Render_schedule.Force
-
-(* SIGWINCH says the size changed without saying to what, so the cached size
-   is dropped and the next reader re-probes. The loop's own ioctl snapshot
-   takes the other door: it already holds the new size and has to keep it, or
-   the frame it is about to draw would read a different one. *)
-let invalidate_frame_for_resize frame_presenter render_schedule =
-  invalidate_terminal_size ();
-  discard_frame_for_new_size frame_presenter render_schedule
-
-let request_console_write_repair render_schedule =
-  Terminal_write_repair.request_repaint render_schedule
-
 let copy_reference render_schedule reference =
   let outcome = copy_text_out reference in
-  request_console_write_repair render_schedule;
+  Masc_tui_shell.Terminal_session.request_console_write_repair render_schedule;
   outcome
-
-let session_quit_notice (state : state) ~key =
-  let queued =
-    List.fold_left (fun count (_, held) ->
-        count + Masc_tui_keeper_chat_queue.length held.ski_queue)
-      (Masc_tui_keeper_chat_queue.length state.msg_queued) state.suspended_keeper_inputs in
-  let waiting, sending = List.fold_left (fun (waiting, sending) (entry : inflight) ->
-      match entry.phase with
-      | Turn_preflight _ -> waiting + 1, sending
-      | Turn_streaming | Turn_reconciling -> waiting, sending + 1)
-      (queued, 0) state.msg_inflight in
-  let unconfirmed_save = List.exists (fun draft ->
-      match Masc_tui_code_draft.phase draft with
-      | Masc_tui_code_draft.Saving _
-      | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Uncertain _, _) -> true
-      | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _ | Masc_tui_code_draft.Kept_back _
-      | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Conflict _, _) -> false)
-      state.code_drafts in
-  let chat_draft = not (keeper_message_draft_empty state) || state.msg_drafts <> [] in
-  let loss = match chat_draft, state.code_drafts <> [] with
-    | true, true -> "chat/Code/other drafts"
-    | true, false -> "chat/other drafts"
-    | false, true -> "Code/other drafts"
-    | false, false -> "unsaved work" in
-  let details = if waiting > 0 then Printf.sprintf " +%d unsent" waiting else "" in
-  let pending = match sending > 0, unconfirmed_save with
-    | true, true -> "; send/save may run"
-    | true, false -> "; send may run"
-    | false, true -> "; save may run"
-    | false, false -> "" in
-  Printf.sprintf "Quit loses %s%s%s; %s again" loss details pending key
-
-let arm_session_quit (state : state) ~kind ~key =
-  match Masc_tui_ansi.probe_terminal_size () with
-  | Some (rows, cols) when rows > 0 && cols > 0 ->
-      report_action state "system" (session_quit_notice state ~key);
-      state.quit_armed <- Option.map (fun ordinary ->
-      { qa_confirmation = Masc_tui_action_notice.arm_quit ~kind ~ordinary;
-        qa_composer_revision = Masc_tui_message_input.revision state.msg_input;
-        qa_attachments = state.msg_attachments;
-        qa_references = state.msg_references;
-        qa_drafts = state.msg_drafts;
-        qa_queue = state.msg_queued;
-        qa_suspended = state.suspended_keeper_inputs;
-        qa_inflight = quit_inflight_snapshot state;
-        qa_code_drafts = state.code_drafts;
-        qa_target = state.msg_target_keeper_name;
-        qa_workspace = state.workspace_authority })
-        (Masc_tui_action_notice.ordinary state.last_action)
-  | None | Some (_, _) ->
-      state.quit_armed <- None;
-      report_action state "error"
-        "Cannot confirm quit: terminal size unavailable; resize or reconnect"
-
-let withdraw_session_quit (state : state) =
-  (match state.quit_armed, Masc_tui_action_notice.ordinary state.last_action with
-   | Some arm, Some ordinary
-     when ordinary == Masc_tui_action_notice.quit_ordinary arm.qa_confirmation ->
-       set_last_action state None
-   | (Some _ | None), (Some _ | None) -> ());
-  state.quit_armed <- None
-
-(* One enable/disable pair for SGR mouse reports. Without tracking the
-   terminal keeps the wheel for its own scrollback -- which scrolls past the
-   TUI's frame on a non-alternate screen -- or turns it into arrow keys only
-   if configured to. With it, wheel reports arrive here and read_input maps
-   them to the same keys the arrows make.
-
-   1002 is button-event tracking: motion reports while a button is held, the
-   drag a selection is read from. It follows 1000 so a terminal that knows
-   both ends on 1002, and one that knows only 1000 still reports the wheel
-   and the press. *)
-let mouse_tracking_enable = "\x1b[?1006;1000;1002h"
-let mouse_tracking_disable = "\x1b[?1006;1002;1000l"
-
-(* Tracking is what the wheel costs the terminal: with reports on, a drag is a
-   report and the terminal never highlights anything. A drag is read here
-   instead: it selects inside the pane it started in and is copied on release
-   ([Masc_tui_pane_selection]). F2 hands the mouse back, for a selection
-   the terminal draws itself, and takes it again. A letter would not do -- in
-   the composer every letter is text. *)
-let mouse_tracking_on = Atomic.make true
-let toggle_mouse_tracking_key = Masc_tui_keys.mouse_toggle_key
-
-(* Ctrl-B, as an editor toggles its side bar. The roster beside a keeper chat
-   costs 30 of the terminal's columns, and a reader who knows which keeper
-   they are talking to wants them back. A letter would not do -- in the
-   composer every letter is text. *)
-let toggle_roster_pane_key = "\002"
-
-(* Ctrl-L, beside Ctrl-B: the Activity pane is the side bar on the other
-   edge. It costs the surface [Masc_tui_acting_pane.pane_cols] columns for
-   the fleet's live feed, or [wide_pane_cols] for whole names and each
-   call's age, and a reader who wants the width back, or the feed beside a
-   chat, walks it narrow, wide, hidden. One key for the three: every other
-   Ctrl letter is taken, and in the composer every plain letter is text. *)
-let toggle_acting_pane_key = "\012"
-
-(* Ctrl-^ keeps a reader one key away without consuming a typed letter. *)
-let toggle_browser_lane_key = "\030"
-
-let terminal_title_visible_keeper state =
-  match state.view with
-  | Code -> None
-  | Keepers Keeper_message -> state.msg_target_keeper_name
-  | Keepers
-      (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
-      | Keeper_runtime_pick) ->
-      Option.map
-        (fun (keeper : keeper) -> keeper.k_name)
-        (selected_keeper state)
-  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
-  | Planning | Schedules
-  | Verification | Harness | Fusion | Repositories | Changes | Connectors
-  | Runtime | Config | Resources | Tools | System_logs -> None
-;;
-
-let terminal_title_runtime state keeper_name =
-  (* Option.bind takes the option first, so it cannot sit after [|>] the way
-     Option.map does -- piping handed it the continuation in the option's
-     slot and the build stopped compiling. *)
-  Option.bind keeper_name (fun name ->
-    Option.bind
-      (List.find_opt
-         (fun (keeper : keeper) -> String.equal keeper.k_name name)
-         state.keepers)
-      (fun keeper ->
-        match (keeper_reading state keeper).Keeper_control.liveness with
-        | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
-        | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None))
-;;
-
-let terminal_title_attention state =
-  Option.map List.length (Masc_tui_types.operator_actions state)
-;;
-
-let terminal_title_snapshot state =
-  let live = Option.map turn_log_keeper_name state.msg_live in
-  let inflight =
-    List.map
-      (fun entry -> entry.sent_request.keeper_name)
-      state.msg_inflight
-  in
-  let keeper_name =
-    Terminal_title.select_keeper
-      ~live
-      ~inflight
-      ~visible:(terminal_title_visible_keeper state)
-  in
-  let activity =
-    match live, inflight with
-    | Some _, _ | None, _ :: _ -> Terminal_title.Working
-    | None, [] -> Terminal_title.Connection state.connection_status
-  in
-  Terminal_title.make
-    ~activity
-    ~attention:(terminal_title_attention state)
-    ~keeper_name
-    ~runtime_id:(terminal_title_runtime state keeper_name)
-    ~workspace:state.workspace
-;;
-
-let toggle_mouse_tracking () =
-  let on = not (Atomic.get mouse_tracking_on) in
-  Atomic.set mouse_tracking_on on;
-  Masc_tui_terminal_out.write (if on then mouse_tracking_enable else mouse_tracking_disable);
-  Masc_tui_terminal_out.flush ()
-
-(* One enable/disable pair for bracketed paste. Without it the terminal
-   delivers a paste as the keys it looks like, so every newline in it is
-   Return: a three-line paste is three messages, a pasted Markdown block
-   arrives as three sends, and the operator gets a queue full of fragments
-   instead of the thing they copied. With it the payload comes wrapped in
-   ESC[200~ and ESC[201~ and the text arrives as text.
-
-   Written and cleared beside the mouse mode, for the reasons its comment
-   gives about when a byte may be put on this stream. *)
-let bracketed_paste_enable = "\x1b[?2004h"
-let bracketed_paste_disable = "\x1b[?2004l"
-
-let enable_bracketed_paste () =
-  Masc_tui_terminal_out.write bracketed_paste_enable;
-  Masc_tui_terminal_out.flush ()
-
-(* Raw mode, and the keys the record cannot turn off.
-
-   The tty layer takes some keys for itself: Ctrl-V (paste), Ctrl-backslash
-   (SIGQUIT, which ends the session unconfirmed), and on BSD terminals Ctrl-O
-   (Browser screenshot) and Ctrl-Y (speak) -- see
-   [Masc_tui_termios.reclaimed_key]. Every hand-off gives them back, and
-   [Unix.tcsetattr] writes [new_term]'s [c_vquit], the quit character it was
-   read with. Reclaiming them after it keeps the three places that take raw
-   mode back (session start, the return from Ctrl-Z, the return from $EDITOR)
-   from taking it back without the keys.
-
-   The result is not checked because there is nothing left for it to report:
-   the [tcsetattr] on the line above just succeeded on this descriptor, so it
-   is a terminal this process can set. What remains is a hangup between the two
-   calls, and that ends the session either way. *)
-let apply_raw_mode new_term =
-  Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
-  (* A key this platform lacks is skipped; a refusal is a hangup, which ends
-     the session either way. *)
-  Masc_tui_termios.reclaim Unix.stdin
-;;
-
-let enter_terminal_session ~cleanup ~terminate ~request_interrupt
-    ~request_full_repaint ~suspend ~new_term =
-  (* [at_exit] runs its callbacks in the reverse of this order. Restore first
-     so an error writing the frame summary cannot prevent the first restore
-     attempt. An exception interrupts that cleanup pass; OCaml may retry
-     remaining callbacks while reporting an uncaught exception. The exit
-     reason is registered first so it is written last, after the terminal is
-     back. *)
-  at_exit write_exit_reason;
-  at_exit Masc_tui_frame_timing.report;
-  at_exit Masc_tui_alloc_profile.report;
-  at_exit cleanup;
-  Masc_tui_alloc_profile.start ();
-  (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
-     session is over. Neither ends the process from the handler: the loop
-     leaves through [Break], so the switch release that stops a server this
-     TUI started runs whichever signal ended the session. See
-     [Masc_tui_exit_signals]. While raw mode holds, SIGQUIT comes from
-     [kill -QUIT]: [apply_raw_mode] takes Ctrl-backslash back from the tty. *)
-  Sys.set_signal Sys.sigint (Sys.Signal_handle request_interrupt);
-  Sys.set_signal Sys.sigterm (Sys.Signal_handle terminate);
-  Sys.set_signal Sys.sighup (Sys.Signal_handle terminate);
-  Sys.set_signal Sys.sigquit (Sys.Signal_handle terminate);
-  Sys.set_signal Sys.sigwinch (Sys.Signal_handle request_full_repaint);
-  Sys.set_signal Sys.sigcont (Sys.Signal_handle request_full_repaint);
-  Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
-  apply_raw_mode new_term
-
-let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
-  (* The server could not answer this terminal's settings: it opens on the
-     defaults, says so once, and reads them again when a server is first
-     reached. *)
-  Option.iter
-    (fun reason ->
-       state.settings_reread <- Reread_due;
-       report_action state "error"
-         (ui_text state
-            ~ko:("서버에서 화면 설정을 읽지 못해 기본값으로 열었어요: " ^ reason)
-            ~en:("Screen settings could not be read from the server; opened on the defaults: " ^ reason)))
-    tui_settings.settings_unread;
-  apply_stored_picks state tui_settings.stored;
-  (match tui_settings.stored.opening with
-   | Ok Masc_tui_config.Overview -> ()
-   | Ok (Masc_tui_config.Last None as opening) ->
-       state.opening_mode <- opening;
-       state.opening_notice <-
-         Some "Could not open last chat (no saved Keeper). Showing Dashboard."
-   | Ok ((Masc_tui_config.Last (Some _) | Masc_tui_config.Keeper _) as opening) ->
-       state.opening_mode <- opening;
-       state.opening_pending <- true
-   | Error reason ->
-       state.opening_notice <- Some (reason ^ ". Showing Dashboard."));
-  let note_keeper_preference_error message =
-    note_keeper_preference_startup_error state message;
-    add_event state "error" message in
-  (match tui_settings.keeper_list_sort with
-   | None -> ()
-   | Some value ->
-       (match Masc_tui_keeper_list_model.sort_of_string value with
-        | Some sort -> state.keeper_list_sort <- sort
-        | None -> note_keeper_preference_error ("Unknown saved Keeper order: " ^ value)));
-  (match tui_settings.keeper_list_view with
-   | None -> ()
-   | Some value ->
-       (match Masc_tui_keeper_list_model.view_of_string value with
-        | Some view -> state.keeper_list_view <- view
-        | None -> note_keeper_preference_error ("Unknown saved Keeper view: " ^ value)));
-  (match tui_settings.keeper_list_density with
-   | None -> ()
-   | Some value ->
-       (match Masc_tui_keeper_list_model.density_of_string value with
-        | Some density -> state.keeper_list_density <- density
-        | None -> note_keeper_preference_error ("Unknown saved Keeper density: " ^ value)));
-  Option.iter (fun reason -> note_keeper_preference_error ("Keeper view preferences unavailable: " ^ reason))
-    tui_settings.keeper_list_error
 
 (** Main loop *)
 let main
-    (base_path, workspace, port, _refresh,
-     reasoning_visibility, tool_visibility) () =
+    ({ Masc_tui_shell.Bootstrap.base_path; workspace; port;
+       reasoning_visibility; tool_visibility }) () =
   (* The provider layer reports through [Llm_provider.Diag], whose default sink
      writes to stderr -- which here is the terminal this draws on. One INFO line
      about the embedded model catalog lands between two frames and the screen is
@@ -32169,7 +31343,7 @@ let main
      local Keeper metadata from a different workspace than its server. *)
   Unix.putenv Env_config_core.base_path_env_key base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
-  require_interactive_terminal ();
+  Masc_tui_shell.Bootstrap.require_interactive_terminal ();
   (* stderr is this terminal -- [lsof] on a running surface shows fd 1 and fd 2
      on the same [/dev/ttys*]. Everything that writes there writes into the
      drawn screen: the console mirror behind every [Log] record, this binary's
@@ -32184,7 +31358,7 @@ let main
      while one pointed here is a corruption. This runs after
      [require_interactive_terminal] so its refusal still reaches a person, and
      before anything can log. *)
-  redirect_stderr_off_terminal ~base_path;
+  Masc_tui_shell.Bootstrap.redirect_stderr_off_terminal ~base_path;
   Log.init_from_env ();
   (* The client ring is process-local. Its structured details need their own
      file sink; the server's dashboard and this stderr mirror cannot persist
@@ -32227,46 +31401,9 @@ let main
       ~sw:(Eio_context.get_switch_opt ()) ~base_path ~read_settings in
 
   (* Setup terminal *)
-  let old_term = Unix.tcgetattr Unix.stdin in
-  (* Read beside [old_term] because the record carries only one of them,
-     Ctrl-backslash. The reclaimed keys are turned off for as long as this
-     program owns the terminal ([apply_raw_mode]) and handed back whenever the
-     terminal is -- at exit and around Ctrl-Z. Restoring [old_term] alone
-     leaves the shell without the other keys, which the PTY harness catches as
-     a terminal this program did not put back the way it found it. *)
-  let old_reclaimed_keys = Masc_tui_termios.snapshot Unix.stdin in
-  (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
-     default translation on, Return is delivered as LF -- the same byte Ctrl-J
-     sends -- and the composer cannot tell "send this" from "start a new line".
-     LF still submits below if some terminal sends it for Return, so this only
-     ever adds a key. *)
-  (* Flow control off. IXON lives in c_iflag and ICANON in c_lflag, so raw
-     mode did not touch it: the tty was still answering Ctrl-S by stopping
-     output and Ctrl-Q by resuming it, and neither byte ever reached the
-     key layer. Measured on a pty with the TUI running: ixon=True.
-
-     What an operator saw was small, because IXANY is on too -- the next key
-     they pressed released it, so the screen stalled rather than froze. What
-     it cost was a key: Ctrl-S could not be bound to anything, which is the
-     key a reader reaches for to hold a moving surface still. *)
-  let new_term =
-    { old_term with
-      Unix.c_icanon = false
-    ; c_echo = false
-    ; c_icrnl = false
-    ; c_ixon = false
-    }
-  in
-
-  let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in
-  Masc_tui_msx.set_synchronized_output
-    (Terminal_profile.synchronized_output terminal_profile);
-  let frame_presenter =
-    Frame_presenter.create
-      ~synchronized_output:
-        (Terminal_profile.synchronized_output terminal_profile)
-      ()
-  in
+  let terminal_session = Masc_tui_shell.Terminal_session.create () in
+  let frame_presenter = Masc_tui_shell.Terminal_session.presenter terminal_session in
+  let exit_signals = Masc_tui_shell.Terminal_session.exit_signals terminal_session in
   (* Off unless MASC_TUI_NAV_TRACE names a file (RFC-0485). *)
   let nav_trace = Masc_tui_nav_trace_log.from_environment ~clock:Unix.gettimeofday in
   (* All interaction evidence is committed together after terminal output. *)
@@ -32319,190 +31456,21 @@ let main
   in
   (* The left button's gesture from press to release. *)
   let pointer_gesture = ref Masc_tui_pane_selection.Idle in
-  let terminal_title = Terminal_title.create () in
-  let resize_requested = Atomic.make false in
-  let resize_generation = Atomic.make 0 in
-
-  (* The terminal changes hands: its queued bytes go first, but a terminal
-     that stopped reading does not hold the handoff or the exit for good. *)
-  let drain_before_handoff () =
-    match Masc_tui_terminal_out.(drain ~within_s:handoff_limit_s) with
-    | Masc_tui_terminal_out.Drained -> ()
-    | Masc_tui_terminal_out.Abandoned ->
-        Log.Transport.warn
-          "tui_terminal_not_reading: dropped the queued output after %.1fs and handed the terminal over"
-          Masc_tui_terminal_out.handoff_limit_s
-  in
-  let restore_terminal_outcome () =
-    (* No tracking-off here. [cleanup] writes the off byte once, at real
-       process exit, after the farewell. [suspend] writes it before the stop
-       and takes the mode again when the process continues. *)
-    Frame_presenter.cleanup frame_presenter ~write:Masc_tui_terminal_out.write
-      ~flush:Masc_tui_terminal_out.flush;
-    if Terminal_profile.dynamic_title terminal_profile then
-      Terminal_title.clear terminal_title ~write:Masc_tui_terminal_out.write
-        ~flush:Masc_tui_terminal_out.flush;
-    (* Raw mode and the alternate screen are given back only after every
-       queued byte reached the terminal: a frame still queued would otherwise
-       land on the shell's screen, or in a child process's input. *)
-    drain_before_handoff ();
-    (* Keep the known-loss result so exit cleanup does not write a farewell
-       or tracking controls to a terminal that already rejected restoration. *)
-    let outcome =
-      Terminal_restore.put_back ~set:(fun () ->
-        Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
-    in
-    (* After the record, not before: [tcsetattr] is what puts the rest of the
-       terminal back, and these characters, Ctrl-backslash aside, are the part
-       it cannot reach. A refusal here is the terminal already gone. *)
-    Masc_tui_termios.restore Unix.stdin old_reclaimed_keys;
-    outcome
-  in
-  let restore_terminal () =
-    match restore_terminal_outcome () with
-    | Terminal_restore.Restored | Terminal_restore.Terminal_gone _ -> ()
-  in
-
-  (* Cleanup on exit *)
-  let keeper_preference_exit_warnings = ref [] in
-  let cleanup_started = Atomic.make false in
-  let cleanup () =
-    if Atomic.compare_and_set cleanup_started false true then begin
-      (* The terminal is being given back for good. A Ctrl-Z now would run
-         [suspend], whose resume takes raw mode and the alternate screen
-         again after this restore, and the shell would inherit them. *)
-      Sys.set_signal Sys.sigtstp Sys.Signal_ignore;
-      Console_sink.set_after_write_observer None;
-      (* Bound by name: the AST guard pins this call by listing every
-         labelled argument as an identifier, so the exit writer is a named
-         function rather than an inline closure. *)
-      let finish () =
-        List.iter
-          (fun warning -> Masc_tui_terminal_out.write
-              ("[masc-tui] " ^ Masc_tui_ansi.Terminal_text.single_line warning ^ "\n"))
-          (List.rev !keeper_preference_exit_warnings);
-        Masc_tui_terminal_out.write "Goodbye!\n";
-        (* Tracking off after Goodbye: a terminal left in report mode keeps
-           swallowing the wheel after this process is gone, and the farewell
-           line is the last thing a reader matches on -- a byte after it cannot
-           disturb that read. *)
-        Masc_tui_terminal_out.write mouse_tracking_disable;
-        Masc_tui_terminal_out.write bracketed_paste_disable;
-        (* The mode belongs to this program's screen. A shell that inherited it
-           would see its own keys reported in a form it does not read. *)
-        if Terminal_profile.kitty_keyboard terminal_profile then
-          Masc_tui_terminal_out.write Masc_tui_csi.disable_kitty_keyboard;
-        drain_before_handoff ()
-      in
-      Terminal_restore.finish_after_restore ~restore:restore_terminal_outcome
-        ~finish
-    end
-  in
-
-  let request_full_repaint _ =
-    ignore (Atomic.fetch_and_add resize_generation 1);
-    Atomic.set resize_requested true;
-    Masc_tui_wake.(ring loop Resize_signal) in
-  (* SIGTERM, SIGHUP and SIGQUIT used to call [exit] from the handler, and a
-     second Ctrl-C did the same from the loop. [exit] runs the [at_exit]
-     terminal restore and nothing else: the switch release in
-     [run_with_eio_context] never ran, so a server this TUI had started
-     stayed up -- and whether it did depended on which key ended the session.
-     Every end now goes the way q goes: the handler records, the loop reads
-     the record once per pass and raises [Break], the switch releases, and
-     the process returns from [main]. A handler cannot raise [Break] itself:
-     it runs at the next poll point, inside whatever the loop was doing, an
-     Eio wait included. *)
-  let exit_signals = Masc_tui_exit_signals.create () in
-  let terminate signal =
-    Masc_tui_exit_signals.request_terminate exit_signals
-      ~signal:(signal_name signal);
-    Masc_tui_wake.(ring loop Terminate_signal)
-  in
-  (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
-     whatever was in the composer gone. It is one key away from Ctrl-V and
-     Ctrl-X on the same hand, and the footer never listed it, so the first
-     time an operator meets this binding is the time they lose a draft.
-
-     It cannot simply become a key: turning off ISIG would take Ctrl-Z with
-     it, and suspend is wired to a handler that gives the terminal back. So
-     the signal stays a signal and the loop decides what it means — the first
-     one says what a second one will do, and any other key withdraws it. *)
-  let request_interrupt _ =
-    Masc_tui_exit_signals.request_interrupt exit_signals;
-    Masc_tui_wake.(ring loop Interrupt_signal)
-  in
-  (* The terminal goes to another program for a while and comes back: the
-     shell while Ctrl-Z has this process stopped, an [$EDITOR], a player. Every
-     such trip is this one pair, so a mode taken at session start cannot be
-     missed by one of them.
-
-     Handing off turns mouse reporting off. The program that has the terminal
-     does not read the reports: a shell prints a wheel turn as characters, and
-     an editor that never asked for the mouse receives them as keystrokes. The
-     mode belongs to the terminal, not to the alternate screen, so leaving that
-     screen does not clear it.
-
-     Taking back retakes the alternate screen first. [hand_off_terminal] gave
-     it up so the other program could use the main one, and a frame painted on
-     the main screen lands on the user's shell history and stays there after
-     the session ends. Mouse reporting then comes back unless F2 gave the mouse
-     to the terminal -- an editor that turns reporting off when it exits would
-     otherwise leave the wheel dead -- and every row is painted again.
-     [enable_bracketed_paste] flushes. *)
-  let hand_off_terminal () =
-    Masc_tui_terminal_out.write mouse_tracking_disable;
-    Masc_tui_terminal_out.flush ();
-    restore_terminal ()
-  in
-  let take_back_terminal () =
-    apply_raw_mode new_term;
-    Frame_presenter.setup frame_presenter ~write:Masc_tui_terminal_out.write
-      ~flush:Masc_tui_terminal_out.flush;
-    if Atomic.get mouse_tracking_on then
-      Masc_tui_terminal_out.write mouse_tracking_enable;
-    enable_bracketed_paste ();
-    request_full_repaint 0
-  in
-  let rec suspend _ =
-    hand_off_terminal ();
-    Sys.set_signal Sys.sigtstp Sys.Signal_default;
-    Fun.protect
-      ~finally:(fun () ->
-        Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
-        take_back_terminal ())
-      (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
-  in
   (* The snapshot is still applied before terminal ownership, setting-dependent
      output and ordinary key processing. Only independent initialization overlaps
      the original read; a late saved value cannot replace an operator choice. *)
   let snapshot = Eio.Promise.await_exn tui_settings_read.result in
-  apply_startup_settings state snapshot.settings;
+  Masc_tui_shell.Preferences.apply_startup_settings
+    ~on_midi_soundfont:(fun v -> boot_midi_soundfont := v)
+    ~on_audio_input_device:(fun v -> boot_audio_input_device := v)
+    ~set_table_frame state snapshot.settings;
   Log.Transport.routine_lazy (fun () -> Printf.sprintf
     "tui_startup_settings phase=ui_applied started_ns=%Ld reader_entered_ns=%Ld reader_returned_ns=%Ld at_ns=%Ld"
     tui_settings_read.started_ns snapshot.reader_entered_ns snapshot.reader_returned_ns
     (Mtime_clock.elapsed_ns ()));
-  enter_terminal_session ~cleanup ~terminate ~request_interrupt
-    ~request_full_repaint ~suspend
-    ~new_term;
-  let render_schedule =
-    Render_schedule.create ~min_interval_ns:frame_interval_ns ()
-  in
-  if Terminal_write_repair.console_sink_writes_to_terminal () then
-    Console_sink.set_after_write_observer
-      (Some (fun () -> Terminal_write_repair.note ()));
-
-  (* Written here rather than at session entry, inside enter_terminal_session:
-     a byte written the moment raw mode is taken races the handshake reads a
-     harness (or terminal) performs on the very first output, and the PTY
-     regression's quit scenario reliably loses that race. Between session
-     entry and the first frame the stream is quiet, and the enable is not
-     urgent anyway -- the first wheel event always arrives after the first
-     frame. *)
-  (* Before the first frame and after session entry, so the at_exit cleanup
-     that gives this back is already installed. *)
-  Frame_presenter.setup frame_presenter ~write:Masc_tui_terminal_out.write
-    ~flush:Masc_tui_terminal_out.flush;
+  Masc_tui_shell.Terminal_session.enter terminal_session;
+  let render_schedule = Masc_tui_shell.Terminal_session.create_render_schedule () in
+  Masc_tui_shell.Terminal_session.setup_screen terminal_session;
   (* The pick, written to the runtime.toml boot reads it back from. Only a
      commit comes here: a preview is a look at a scheme, not a choice of one,
      and storing every row the cursor passes would make Esc a lie.
@@ -32511,15 +31479,9 @@ let main
      time this runs, so silence would let the screen stand as proof it was
      kept, and the reader would find the old one back after a restart with
      nothing having told them. *)
-  let store_theme_choice choice = store_preference state (Masc.Tui_preference.Theme_chosen choice) in
-  Masc_tui_terminal_out.write mouse_tracking_enable;
-  enable_bracketed_paste ();
-  (* Only terminals with an extended profile receive this opt-in. Apple
-     Terminal does not implement the protocol; keeping an unsupported control
-     sequence off its parser also keeps its crash-sensitive render path small. *)
-  if Terminal_profile.kitty_keyboard terminal_profile then
-    Masc_tui_terminal_out.write Masc_tui_csi.enable_kitty_keyboard;
-  Masc_tui_terminal_out.flush ();
+  let store_theme_choice choice =
+    Masc_tui_shell.Preferences.store state (Masc.Tui_preference.Theme_chosen choice)
+  in
 
   (* Initial load *)
   (* Local workspace state is loaded only after /health proves that this TUI
@@ -32538,18 +31500,18 @@ let main
   let deferred_share_sweep = ref None and resource_copy_sweep = ref None in
   let resource_share_dispatch_allowed () =
     let signal_generation = Masc_tui_exit_signals.generation exit_signals in
-    let terminal_generation = Atomic.get resize_generation in
+    let terminal_generation = Masc_tui_shell.Terminal_session.resize_generation terminal_session in
     let admitted = not (Masc_tui_exit_signals.pending_signal exit_signals)
-      && not (Atomic.get resize_requested) in
+      && not (Masc_tui_shell.Terminal_session.resize_requested terminal_session) in
     fun () -> admitted && not (Masc_tui_exit_signals.pending_signal exit_signals)
       && signal_generation = Masc_tui_exit_signals.generation exit_signals
-      && terminal_generation = Atomic.get resize_generation in
+      && terminal_generation = Masc_tui_shell.Terminal_session.resize_generation terminal_session in
   (* A write the guard refuses here is not sent, and is said as kept back
      under its own name (RFC §2). *)
   let workspace_write_ready request =
     match write_authority_refusal state state.workspace_authority with
     | None -> true
-    | Some refusal -> report_withdrawn state ~request refusal; false
+    | Some refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request refusal; false
   in
   (* When the last wait for input ended: the pass's own work runs from here
      to the next wait. *)
@@ -32577,23 +31539,23 @@ let main
     | Ok draft ->
       let suffix = Filename.extension (Masc_tui_code_draft.address draft).path in
       let suffix = if String.equal suffix "" then ".txt" else suffix in
-      (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
+      (match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session)
           ~suffix (Masc_tui_code_draft.text draft) with
-       | Error abort -> report_editor_abort state ~form:Code_draft abort
+       | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Code_draft abort
        | Ok text -> match Code_results.edit_draft state draft text with
          | Ok () -> report_action state "system" "Draft retained in this session; S explicitly saves to the server"
          | Error detail -> report_action state "error" detail)
   in
   let reject_gate_approval (pending : Tui_decode.gate_pending) =
     match Masc_tui_editor.editor_command () with
-    | None -> report_editor_unset state ~form:Gate_rejection
+    | None -> Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Gate_rejection
     | Some _ -> (
       let stem = "{\n  \"reason\": \"\"\n}\n" in
       match
-        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-          ~reenter:take_back_terminal stem
+        Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
       with
-      | Error abort -> report_editor_abort state ~form:Gate_rejection abort
+      | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Gate_rejection abort
       | Ok body -> (
         match Yojson.Safe.from_string body with
         | exception Yojson.Json_error error ->
@@ -32645,7 +31607,7 @@ let main
         match Masc_tui_ansi.probe_terminal_size () with
         | Some (physical_rows, physical_cols)
           when not (Terminal_write_repair.damage_pending ())
-               && not (Atomic.get resize_requested)
+               && not (Masc_tui_shell.Terminal_session.resize_requested terminal_session)
                && (physical_rows, physical_cols) = Masc_tui_ansi.get_terminal_size () ->
             presented_input_rejection ~rows:(List.length rows)
               ~cols:physical_cols (!presented).presses
@@ -32664,7 +31626,7 @@ let main
         match Masc_tui_ansi.probe_terminal_size () with
         | Some (physical_rows, physical_cols)
           when not (Terminal_write_repair.damage_pending ())
-               && not (Atomic.get resize_requested)
+               && not (Masc_tui_shell.Terminal_session.resize_requested terminal_session)
                && (physical_rows, physical_cols) = Masc_tui_ansi.get_terminal_size () ->
             presented_quit_confirmation ~rows:(List.length rows)
               ~cols:physical_cols (!presented).presses
@@ -32881,7 +31843,7 @@ let main
            Masc_tui_artifact_share_confirmation.observe_frame prompt.recovery_confirmation
              ~visible
              ~input_pending:(input_pending ()
-               || Atomic.get resize_requested
+               || Masc_tui_shell.Terminal_session.resize_requested terminal_session
                || Masc_tui_exit_signals.pending_signal exit_signals)
          | (Some _ | None), Some prompt ->
            Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation
@@ -33026,39 +31988,29 @@ let main
     terminal_draws_images := Some (match proto with
       | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.ITerm2_protocol -> true
       | Masc_tui_graphics.Unsupported_protocol -> false);
-    request_full_repaint 0;
+    Masc_tui_shell.Terminal_session.request_full_repaint terminal_session;
     observe_capabilities_applied input_reader observation in
   (* One original observation owner survives early key handoff and byte-filter
      completion. Late replies update every existing terminal capability consumer. *)
   install_terminal_probe_publisher input_reader ~publish:apply_terminal_observation;
 
-  let restore_music_terminal () =
-    Masc_tui_terminal_out.write bracketed_paste_disable;
-    if Terminal_profile.kitty_keyboard terminal_profile then
-      Masc_tui_terminal_out.write Masc_tui_csi.disable_kitty_keyboard;
-    hand_off_terminal () in
-  let reenter_music_terminal () =
-    take_back_terminal ();
-    if Terminal_profile.kitty_keyboard terminal_profile then
-      Masc_tui_terminal_out.write Masc_tui_csi.enable_kitty_keyboard;
-    Masc_tui_terminal_out.flush () in
   music_terminal_handoff := Some (fun () ->
     let root = Filename.concat
       (Common.masc_dir_from_base_path ~base_path:state.local_base_path) Common.tui_music_dirname in
-    Masc_tui_score.launch_music ~restore:restore_music_terminal ~reenter:reenter_music_terminal
+    Masc_tui_score.launch_music ~restore:(fun () -> Masc_tui_shell.Terminal_session.restore_for_music terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.reenter_from_music terminal_session)
       ~project_root:(Filename.concat root "projects") ~session_root:(Filename.concat root "sessions")
       ~soundfont:!boot_midi_soundfont);
   music_midi_terminal_handoff := Some (fun ~path ->
     let root = Filename.concat
       (Common.masc_dir_from_base_path ~base_path:state.local_base_path) Common.tui_music_dirname in
-    Masc_tui_score.launch_midi ~restore:restore_music_terminal ~reenter:reenter_music_terminal
+    Masc_tui_score.launch_midi ~restore:(fun () -> Masc_tui_shell.Terminal_session.restore_for_music terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.reenter_from_music terminal_session)
       ~project_root:(Filename.concat root "projects") ~session_root:(Filename.concat root "sessions")
       ~soundfont:!boot_midi_soundfont ~path);
   score_terminal_handoff := Some (fun ~sources ~index ->
     match !active_graphics_protocol, !image_cell_pixels with
     | Masc_tui_graphics.Kitty_protocol, Some ((width, height) as cell_pixels)
       when width > 0 && height > 0 ->
-        Masc_tui_score.launch ~restore:restore_music_terminal ~reenter:reenter_music_terminal ~sources ~index ~cell_pixels
+        Masc_tui_score.launch ~restore:(fun () -> Masc_tui_shell.Terminal_session.restore_for_music terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.reenter_from_music terminal_session) ~sources ~index ~cell_pixels
           ~soundfont:!boot_midi_soundfont
     | (Masc_tui_graphics.Kitty_protocol, (Some _ | None))
     | (Masc_tui_graphics.ITerm2_protocol | Masc_tui_graphics.Unsupported_protocol), _ ->
@@ -33084,21 +32036,21 @@ let main
      target cannot disagree. *)
   let handle_connector_form ?fixed_channel_id ~change ~connector
       ~required_fields ~stem ~post () =
-    let form = Connector_form change in
+    let form = Masc_tui_shell.Editor_notice.Connector_form change in
     (* The form's other notices are still English; they move with the
        connector screen's own sentences. *)
-    let action = editor_form_name ~ko:false form in
+    let action = Masc_tui_shell.Editor_notice.form_name ~ko:false form in
     let authority = state.workspace_authority in
     let identity = state.server_identity in
     let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
-    | None -> report_editor_unset state ~form
+    | None -> Masc_tui_shell.Editor_notice.report_unset state ~form
     | Some _ -> (
       match
-        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-          ~reenter:take_back_terminal stem
+        Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
       with
-      | Error abort -> report_editor_abort state ~form abort
+      | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form abort
       | Ok body -> (
         match Yojson.Safe.from_string body with
         | exception Yojson.Json_error e ->
@@ -33129,10 +32081,10 @@ let main
                       (* Not sent: the kept-back notice, never the route's
                          own answer (RFC §2). *)
                       let request = match change with
-                        | Channel_bind -> Kept_request.Connector_bind
-                        | Channel_unbind -> Kept_request.Connector_unbind
-                        | Channel_binding_edit -> Kept_request.Connector_binding_edit in
-                      report_withdrawn state ~request refusal
+                        | Masc_tui_shell.Editor_notice.Channel_bind -> Kept_request.Connector_bind
+                        | Masc_tui_shell.Editor_notice.Channel_unbind -> Kept_request.Connector_unbind
+                        | Masc_tui_shell.Editor_notice.Channel_binding_edit -> Kept_request.Connector_binding_edit in
+                      Masc_tui_shell.Editor_notice.report_withdrawn state ~request refusal
                   | Ok () ->
                   match post ~connector ~json with
                   | Ok _ ->
@@ -33170,7 +32122,7 @@ let main
     match selected_connector () with
     | None -> report_action state "error" "bind: select a transport first"
     | Some selected ->
-        handle_connector_form ~change:Channel_bind ~connector:selected.cn_id
+        handle_connector_form ~change:Masc_tui_shell.Editor_notice.Channel_bind ~connector:selected.cn_id
           ~required_fields:[ "channel_id"; "keeper_name" ]
           ~stem:
             (Yojson.Safe.pretty_to_string
@@ -33193,7 +32145,7 @@ let main
     | None -> report_action state "error" "unbind: select a transport first"
     | Some selected ->
         let submit ?fixed_channel_id channel_id =
-          handle_connector_form ?fixed_channel_id ~change:Channel_unbind
+          handle_connector_form ?fixed_channel_id ~change:Masc_tui_shell.Editor_notice.Channel_unbind
             ~connector:selected.cn_id ~required_fields:[ "channel_id" ]
             ~stem:
               (Yojson.Safe.pretty_to_string
@@ -33225,7 +32177,7 @@ let main
                     match admit_workspace_request state ~mailbox:async_messages
                         ~authority ~identity ~host ~port () with
                     | Error refusal ->
-                      report_withdrawn state ~request:Kept_request.Connector_unbind refusal
+                      Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Connector_unbind refusal
                     | Ok () ->
                     match
                       Masc_tui_http.post_connector_unbind ~host ~port
@@ -33365,7 +32317,7 @@ let main
          | None -> report_action state "error" "edit: select a binding with J/K"
          | Some binding ->
              handle_connector_form ~fixed_channel_id:binding.cb_channel_id
-               ~change:Channel_binding_edit ~connector:connector.cn_id
+               ~change:Masc_tui_shell.Editor_notice.Channel_binding_edit ~connector:connector.cn_id
                ~required_fields:[ "channel_id"; "keeper_name" ]
                ~stem:
                  (Yojson.Safe.pretty_to_string
@@ -33449,14 +32401,14 @@ let main
     | Some row -> (
         match Masc_tui_editor.editor_command () with
         | None ->
-            report_editor_unset state ~form:Harness_overrule
+            Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Harness_overrule
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
             match
-              Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-                ~reenter:take_back_terminal stem
+              Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+                ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
             with
-            | Error abort -> report_editor_abort state ~form:Harness_overrule abort
+            | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Harness_overrule abort
             | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
@@ -33499,14 +32451,14 @@ let main
         let task_id = row.Masc.Tui_decode.vr_task_id in
         match Masc_tui_editor.editor_command () with
         | None ->
-            report_editor_unset state ~form:Verification_rejection
+            Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Verification_rejection
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
             match
-              Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-                ~reenter:take_back_terminal stem
+              Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+                ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
             with
-            | Error abort -> report_editor_abort state ~form:Verification_rejection abort
+            | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Verification_rejection abort
             | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
@@ -33541,7 +32493,7 @@ let main
         let task_id = task.id in
         match Masc_tui_editor.editor_command () with
         | None ->
-            report_editor_unset state ~form:Task_cancellation
+            Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Task_cancellation
         | Some _ -> (
             let stem =
               Yojson.Safe.pretty_to_string
@@ -33549,10 +32501,10 @@ let main
               ^ "\n"
             in
             match
-              Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-                ~reenter:take_back_terminal stem
+              Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+                ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
             with
-            | Error abort -> report_editor_abort state ~form:Task_cancellation abort
+            | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Task_cancellation abort
             | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
@@ -33621,8 +32573,8 @@ let main
         (match Addons.selected_document view with
          | None -> ()
          | Some session ->
-             match Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-               ~reenter:take_back_terminal ~suffix:".toml" session.text with
+             match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+               ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) ~suffix:".toml" session.text with
              (* The lane add-ons pane is still English, so the reason in it is
                 too; the pane's own layer moves both. *)
              | Error abort -> map_lane_addons state (fun view ->
@@ -33676,9 +32628,9 @@ let main
     | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
     | Some workspace, Some reading ->
       let session = runtime_config_working_session reading in
-      (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-          ~reenter:take_back_terminal ~suffix:".toml" session.text with
-       | Error abort -> report_editor_abort state ~form:Runtime_config_text abort
+      (match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) ~suffix:".toml" session.text with
+       | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Runtime_config_text abort
        | Ok edited ->
          if String.equal edited session.base.source_text then begin
            release_runtime_document_recovery state ~workspace ~path:session.base.path;
@@ -33971,11 +32923,11 @@ Use relative paths for resources already held in the package. -->
       | Some draft -> draft.scd_source_text
       | None -> skill_template ~composition in
     match Masc_tui_editor.editor_command () with
-    | None -> report_editor_unset state ~form:Skill_creation
+    | None -> Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Skill_creation
     | Some _ ->
-      (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
+      (match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session)
           ~suffix:".md" source_text with
-       | Error abort -> report_editor_abort state ~form:Skill_creation abort
+       | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Skill_creation abort
        | Ok source_text ->
          state.tools_skill_create_drafts <-
            { scd_source_id = source_id; scd_composition = composition; scd_source_text = source_text; scd_origin = origin }
@@ -33992,7 +32944,7 @@ Use relative paths for resources already held in the package. -->
              | Error refusal ->
                (* Not sent: the kept-back notice with the draft it kept
                   (RFC §2). *)
-               report_kept_back state ~request:Kept_request.Skill_creation
+               Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Skill_creation
                  (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept
              | Ok () ->
                match Masc_tui_http.post_skill_editor_create ~host:server_peer_host ~port
@@ -34020,7 +32972,7 @@ Use relative paths for resources already held in the package. -->
     let port = state.port in
     let origin = workspace_input_identity_of_server state.server_identity in
     match check () with
-    | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_sources_read refusal
+    | Error refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Skill_sources_read refusal
     | Ok () ->
     match Masc_tui_http.fetch_skill_editor_sources ~host:server_peer_host ~port with
     | Error detail -> report_action state "error" ("Skill sources failed: " ^ detail)
@@ -34028,7 +32980,7 @@ Use relative paths for resources already held in the package. -->
     | Ok [source_id] ->
       (match origin with
        | None ->
-         report_kept_back state ~request:Kept_request.Skill_creation
+         Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Skill_creation
            workspace_identity_unconfirmed Nothing_kept
        | Some origin -> edit_new_skill ~origin ~composition ~source_id ~check ~port ())
     | Ok sources ->
@@ -34058,11 +33010,11 @@ Use relative paths for resources already held in the package. -->
              ~authority:picker.ssp_authority ~identity:picker.ssp_identity
              ~host:server_peer_host ~port:picker.ssp_port in
            match check () with
-           | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_creation refusal
+           | Error refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Skill_creation refusal
            | Ok () ->
              match workspace_input_identity_of_server picker.ssp_identity with
              | None ->
-               report_kept_back state ~request:Kept_request.Skill_creation
+               Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Skill_creation
                  workspace_identity_unconfirmed Nothing_kept
              | Some origin -> edit_new_skill ~origin ~composition:picker.ssp_composition
                  ~source_id ~check ~port:picker.ssp_port ())
@@ -34074,9 +33026,9 @@ Use relative paths for resources already held in the package. -->
         `Assoc ["submitted_by",`String target.submitted_by;"request_id",`String target.request_id;
           "keeper_name",`String target.keeper_name]
       | None -> `Assoc ["submitted_by",`String "";"request_id",`String "";"keeper_name",`String ""] in
-    match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
+    match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session)
         ~suffix:".json" (Yojson.Safe.pretty_to_string target ^ "\n") with
-    | Error abort -> report_editor_abort state ~form:Original_request_lookup abort
+    | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Original_request_lookup abort
     | Ok text ->
       let decoded = match Yojson.Safe.from_string text with
         | json -> Masc.Tui_decode_async_request.target_of_json json
@@ -34147,7 +33099,7 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_skill_evidence () =
     if not (server_authority_ready state) then
-      report_kept_back state ~request:Kept_request.Skill_evidence workspace_identity_unconfirmed Nothing_kept
+      Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Skill_evidence workspace_identity_unconfirmed Nothing_kept
     else match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
@@ -34178,7 +33130,7 @@ Use relative paths for resources already held in the package. -->
       let host = server_peer_host in
       let port = state.port in
       (match check () with
-       | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_read refusal
+       | Error refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Skill_read refusal
        | Ok () ->
        match Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference with
        | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
@@ -34187,22 +33139,22 @@ Use relative paths for resources already held in the package. -->
        | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
          (match Masc_tui_editor.editor_command () with
           | None ->
-            report_editor_unset state ~form:(Skill_source name)
+            Masc_tui_shell.Editor_notice.report_unset state ~form:(Masc_tui_shell.Editor_notice.Skill_source name)
           | Some _ ->
             (match
                Masc_tui_editor.roundtrip
-                 ~restore:hand_off_terminal
-                 ~reenter:take_back_terminal
+                 ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+                 ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session)
                  ~suffix:".md"
                  loaded.sel_source_text
              with
              | Error abort ->
-               report_editor_abort state ~form:(Skill_source name) abort
+               Masc_tui_shell.Editor_notice.report_abort state ~form:(Masc_tui_shell.Editor_notice.Skill_source name) abort
              | Ok edited when String.equal edited loaded.sel_source_text ->
                report_action state "system" (name ^ " unchanged")
              | Ok edited ->
                (match check () with
-                | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_preview refusal
+                | Error refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Skill_preview refusal
                 | Ok () ->
                 match
                   Masc_tui_http.post_skill_editor_preview ~host ~port
@@ -34212,7 +33164,7 @@ Use relative paths for resources already held in the package. -->
                   report_action state "error" ("Skill preview rejected: " ^ detail)
                 | Ok _ ->
                   (match check () with
-                   | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_save refusal
+                   | Error refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Skill_save refusal
                    | Ok () ->
                    match
                      Masc_tui_http.post_skill_editor_save ~host ~port
@@ -34274,7 +33226,7 @@ Use relative paths for resources already held in the package. -->
         (* The read and the delete each ask the workspace guard first; one it
            stops was not sent and is said as kept back (RFC §2). *)
         match check () with
-        | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_read refusal
+        | Error refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Skill_read refusal
         | Ok () ->
         match Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference with
         | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
@@ -34282,7 +33234,7 @@ Use relative paths for resources already held in the package. -->
           report_action state "error" (name ^ " belongs to a read-only Skill source")
         | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
           (match check () with
-           | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_delete refusal
+           | Error refusal -> Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Skill_delete refusal
            | Ok () ->
            match Masc_tui_http.delete_skill_editor ~host ~port ~reference:loaded.sel_reference with
            | Error (Masc_tui_http.Skill_write_refused detail) ->
@@ -34327,14 +33279,14 @@ Use relative paths for resources already held in the package. -->
     | Some row -> (
       match Masc_tui_editor.editor_command () with
       | None ->
-        report_editor_unset state ~form:(Prompt_text row.Tui_decode.pr_key)
+        Masc_tui_shell.Editor_notice.report_unset state ~form:(Masc_tui_shell.Editor_notice.Prompt_text row.Tui_decode.pr_key)
       | Some _ -> (
         match
-          Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-            ~reenter:take_back_terminal row.Tui_decode.pr_effective
+          Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+            ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) row.Tui_decode.pr_effective
         with
         | Error abort ->
-          report_editor_abort state ~form:(Prompt_text row.Tui_decode.pr_key) abort
+          Masc_tui_shell.Editor_notice.report_abort state ~form:(Masc_tui_shell.Editor_notice.Prompt_text row.Tui_decode.pr_key) abort
         | Ok edited ->
           (match check () with
            | Error refusal ->
@@ -34398,11 +33350,11 @@ Use relative paths for resources already held in the package. -->
     (* The same frozen snapshot supplies the editor text and guarded patch. *)
     let rec edit_round ?prior_reason stem =
       match
-        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-          ~reenter:take_back_terminal ~suffix:(Masc_tui_keeper_config.editor_suffix format) stem
+        Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) ~suffix:(Masc_tui_keeper_config.editor_suffix format) stem
       with
       | Error abort ->
-          report_editor_abort state ~form:(Keeper_settings keeper_name) abort
+          Masc_tui_shell.Editor_notice.report_abort state ~form:(Masc_tui_shell.Editor_notice.Keeper_settings keeper_name) abort
       | Ok edited ->
         let reopen reason =
           if String.equal edited stem then
@@ -34446,7 +33398,7 @@ Use relative paths for resources already held in the package. -->
     | None -> report_action state "system" (no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
     | Some keeper ->
       (match Masc_tui_editor.editor_command () with
-       | None -> report_editor_unset state ~form:(Keeper_settings keeper.k_name)
+       | None -> Masc_tui_shell.Editor_notice.report_unset state ~form:(Masc_tui_shell.Editor_notice.Keeper_settings keeper.k_name)
        | Some _ ->
          match Masc_tui_types.begin_keeper_settings_editor state
              ~format
@@ -34476,12 +33428,12 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
     if state.workspace_identity <> Workspace_identity_match then
-      report_kept_back state ~request:Kept_request.Keeper_creation workspace_identity_unconfirmed Draft_kept
+      Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.Keeper_creation workspace_identity_unconfirmed Draft_kept
     else
     let return_to = Option.value state.keeper_creation_return ~default:return_to in
     match Masc_tui_editor.editor_command () with
     | None ->
-      report_editor_unset state ~form:Keeper_creation
+      Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Keeper_creation
     | Some _ -> (
       (* Which fields a creation cannot omit is [parse]'s business, so the
          stem comes from there rather than being restated here. Restating it
@@ -34495,10 +33447,10 @@ Use relative paths for resources already held in the package. -->
             ~default:Masc.Keeper_turn_up_args.creation_stem
       in
       match
-        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-          ~reenter:take_back_terminal stem
+        Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
       with
-      | Error abort -> report_editor_abort state ~form:Keeper_creation abort
+      | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Keeper_creation abort
       | Ok declaration -> (
         state.keeper_creation_draft <- Some declaration;
         state.keeper_creation_draft_owner <- ref ();
@@ -34554,7 +33506,7 @@ Use relative paths for resources already held in the package. -->
     let check = capture_workspace_admission state ~mailbox:async_messages in
     match Masc_tui_editor.editor_command () with
     | None ->
-      report_editor_unset state ~form:Repository_addition
+      Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Repository_addition
     | Some _ -> (
       let stem =
         String.concat "\n"
@@ -34568,10 +33520,10 @@ Use relative paths for resources already held in the package. -->
             "" ]
       in
       match
-        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-          ~reenter:take_back_terminal stem
+        Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
       with
-      | Error abort -> report_editor_abort state ~form:Repository_addition abort
+      | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Repository_addition abort
       | Ok declaration -> (
         let declared field =
           match Yojson.Safe.from_string declaration with
@@ -34589,7 +33541,7 @@ Use relative paths for resources already held in the package. -->
         else
           match check () with
           | Error refusal ->
-            report_withdrawn state ~request:Kept_request.Repository_add refusal
+            Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Repository_add refusal
           | Ok () ->
           match
             Masc_tui_http.post_repository_add ~host ~port
@@ -34604,7 +33556,7 @@ Use relative paths for resources already held in the package. -->
           | Error detail -> report_action state "error" detail))
   in
   let handle_schedule_form ~change ~stem ~post =
-    let form = Schedule_form change in
+    let form = Masc_tui_shell.Editor_notice.Schedule_form change in
     let ko = state.ui_language = Lang_ko in
     (* A refusal stays on the Schedules surface for the last-action window:
        the action line alone is lost under a workspace warning. A new
@@ -34626,11 +33578,11 @@ Use relative paths for resources already held in the package. -->
         (Schedule_form_editor (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset))
     | Some _ ->
       (match
-         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
-           ~reenter:take_back_terminal stem
+         Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
+           ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
        with
        | Error Masc_tui_editor.Cancelled ->
-           report_editor_abort state ~form Masc_tui_editor.Cancelled
+           Masc_tui_shell.Editor_notice.report_abort state ~form Masc_tui_editor.Cancelled
        | Error (Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ as abort) ->
            report_form_refusal (Schedule_form_editor abort)
        | Ok declaration ->
@@ -34700,7 +33652,7 @@ Use relative paths for resources already held in the package. -->
   in
   let cell_image_redraw_pending = ref false in
   let consume_resize_request () =
-    if Atomic.exchange resize_requested false then begin
+    if Masc_tui_shell.Terminal_session.take_resize_request terminal_session then begin
       cell_image_redraw_pending := true;
       withdraw_resource_diagram_pending state;
       state.resource_copy_pending <- None;
@@ -34708,16 +33660,16 @@ Use relative paths for resources already held in the package. -->
       state.resource_share_recovery_lookup <- None;
       Option.iter (fun prompt -> Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation)
         state.resource_share_recovery_prompt;
-      invalidate_frame_for_resize frame_presenter render_schedule
+      Masc_tui_shell.Terminal_session.invalidate_frame_for_resize frame_presenter render_schedule
     end
   in
   let make_worker_geometry_current () =
     let module Size = Render_schedule.Terminal_size_cache in
-    let generation = Atomic.get resize_generation in
+    let generation = Masc_tui_shell.Terminal_session.resize_generation terminal_session in
     fun cached ->
       match Size.verify_for_work ~cached
-          ~resize_changed:(fun () -> Atomic.get resize_requested
-            || Atomic.get resize_generation <> generation)
+          ~resize_changed:(fun () -> Masc_tui_shell.Terminal_session.resize_requested terminal_session
+            || Masc_tui_shell.Terminal_session.resize_generation terminal_session <> generation)
           ~probe:Masc_tui_ansi.probe_terminal_size with
       | Size.Current -> true
       | Size.Resize_interrupted | Size.Resize_detected -> false
@@ -34728,7 +33680,7 @@ Use relative paths for resources already held in the package. -->
       (match poll_terminal_probe input_reader with
        | Probe_installed -> Render_schedule.request render_schedule Render_schedule.Background
        | Probe_pending | Probe_unchanged -> ());
-      request_console_write_repair render_schedule;
+      Masc_tui_shell.Terminal_session.request_console_write_repair render_schedule;
       consume_resize_request ();
       (* A second Ctrl-C while the first still stands ends the session; a lone
          one only says so. The notice is an event rather than a footer line
@@ -34742,11 +33694,11 @@ Use relative paths for resources already held in the package. -->
       let interrupted_paste =
         match Masc_tui_exit_signals.poll exit_signals with
        | Masc_tui_exit_signals.Quit ->
-           note_exit_reason
+           Masc_tui_shell.Exit_journal.note
              (match Masc_tui_exit_signals.terminate_signal exit_signals with
               | Some signal -> Masc_tui_exit_reason.Terminate signal
               | None -> Masc_tui_exit_reason.Interrupt);
-           raise Break
+           raise Masc_tui_shell.Exit_journal.Break
        | (Masc_tui_exit_signals.Interrupt_armed
          | Masc_tui_exit_signals.Interrupt_again) as interrupt ->
            (* A pending MIDI handoff yields to this gesture before the quit
@@ -34763,7 +33715,7 @@ Use relative paths for resources already held in the package. -->
            (match paste_phase input_reader, input_holds_incomplete_sequence input_reader with
             | No_paste, false -> ()
             | No_paste, true | Pasting _, (true | false) | Draining_tail _, (true | false) ->
-                withdraw_session_quit state);
+                Masc_tui_shell.Quit_guard.withdraw state);
            (match paste_phase input_reader,
                   input_holds_incomplete_sequence input_reader with
             | Draining_tail tail, _
@@ -34869,10 +33821,10 @@ Use relative paths for resources already held in the package. -->
                   | (Masc_tui_exit_signals.Continue | Masc_tui_exit_signals.Quit),
                     (Some _ | None), (Some _ | None) -> false in
                 if confirmed then begin
-                  note_exit_reason Masc_tui_exit_reason.Interrupt;
-                  raise Break
+                  Masc_tui_shell.Exit_journal.note Masc_tui_exit_reason.Interrupt;
+                  raise Masc_tui_shell.Exit_journal.Break
                 end;
-                arm_session_quit state ~kind:Masc_tui_action_notice.Interrupt ~key:"Ctrl-C";
+                Masc_tui_shell.Quit_guard.arm state ~kind:Masc_tui_action_notice.Interrupt ~key:"Ctrl-C";
                 if Option.is_none state.quit_armed then
                   Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 Render_schedule.request render_schedule Render_schedule.Background;
@@ -34907,7 +33859,7 @@ Use relative paths for resources already held in the package. -->
       in
       let asynchronous_input_pending () =
         Masc_tui_exit_signals.pending_signal exit_signals
-        || Atomic.get resize_requested
+        || Masc_tui_shell.Terminal_session.resize_requested terminal_session
         || Option.is_some interrupted_paste
         || input_reader_has_unsettled_input input_reader
         || not (Queue.is_empty hangul_latin_queue)
@@ -35069,13 +34021,13 @@ Use relative paths for resources already held in the package. -->
       let resized = match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
            withdraw_resource_diagram_pending state;
-           ignore (Atomic.fetch_and_add resize_generation 1);
+           Masc_tui_shell.Terminal_session.bump_resize_generation terminal_session;
            state.resource_copy_pending <- None;
            state.resource_copy_ready <- None;
            state.resource_share_recovery_lookup <- None;
            Option.iter (fun prompt -> Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation)
              state.resource_share_recovery_prompt;
-           discard_frame_for_new_size frame_presenter render_schedule;
+           Masc_tui_shell.Terminal_session.discard_frame_for_new_size frame_presenter render_schedule;
            (* The panes a held gesture was placed in are not where they were. *)
            pointer_gesture := Masc_tui_pane_selection.Idle;
            (* Geometry changes redraw the cached snapshot immediately; an
@@ -35098,7 +34050,7 @@ Use relative paths for resources already held in the package. -->
            (match image_pixel_source_for_redraw state source with
             | None ->
                 close_image state;
-                invalidate_frame_for_resize frame_presenter render_schedule
+                Masc_tui_shell.Terminal_session.invalidate_frame_for_resize frame_presenter render_schedule
             | Some current ->
                 state.image_pixel_source <- Some current;
                 if resized || current.ips_unconfirmed <> source.ips_unconfirmed then begin
@@ -35631,7 +34583,7 @@ Use relative paths for resources already held in the package. -->
            let close () =
              state.image_request_generation <- state.image_request_generation + 1;
              close_image state;
-             invalidate_frame_for_resize frame_presenter render_schedule
+             Masc_tui_shell.Terminal_session.invalidate_frame_for_resize frame_presenter render_schedule
            in
            (* Inputs during an in-flight request are consumed, never queued or
               replayed after a possible browser side effect. A gesture the
@@ -35695,7 +34647,7 @@ Use relative paths for resources already held in the package. -->
        | Some inspected, Some event, Some cell_pixels
            when state.image_open && not state.msx_open ->
          let close () = close_image state;
-           invalidate_frame_for_resize frame_presenter render_schedule in
+           Masc_tui_shell.Terminal_session.invalidate_frame_for_resize frame_presenter render_schedule in
          let action = match event with
            | Key ("+" | "=") -> Some Masc_tui_image_viewport.Zoom_in
            | Key "-" -> Some Zoom_out
@@ -35816,7 +34768,7 @@ Use relative paths for resources already held in the package. -->
       in
       if dismissed_image then begin
         close_image state;
-        invalidate_frame_for_resize frame_presenter render_schedule
+        Masc_tui_shell.Terminal_session.invalidate_frame_for_resize frame_presenter render_schedule
       end;
       (* The MSX screen owns the keyboard the same way a showing picture
          does, except it answers keys instead of ending on the first one:
@@ -35913,7 +34865,7 @@ Use relative paths for resources already held in the package. -->
               end
               else begin
                 state.msx_open <- false;
-                invalidate_frame_for_resize frame_presenter render_schedule
+                Masc_tui_shell.Terminal_session.invalidate_frame_for_resize frame_presenter render_schedule
               end
           | Watch source ->
               state.msx_menu_open <- false;
@@ -36049,7 +35001,7 @@ Use relative paths for resources already held in the package. -->
       | Some "esc" ->
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
-          then invalidate_frame_for_resize frame_presenter render_schedule
+          then Masc_tui_shell.Terminal_session.invalidate_frame_for_resize frame_presenter render_schedule
       | Some (("+" | "=" | "-" | "_") as size_key) -> (
           (* Local size controls are handled before mapped game keys. The
              observation/control and room-focus branches above have already
@@ -36818,7 +35770,7 @@ Use relative paths for resources already held in the package. -->
       (match input with
        | Some (Key _ | Pasted _) when not state.help_hint_shown ->
            state.help_hint_shown <- true;
-           store_preference state Masc.Tui_preference.Help_hint_retired
+           Masc_tui_shell.Preferences.store state Masc.Tui_preference.Help_hint_retired
        | Some (Key _ | Pasted _)
        | Some (Graphics_reply _)
        | Some (Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _)
@@ -36865,15 +35817,15 @@ Use relative paths for resources already held in the package. -->
               && not (Masc_tui_exit_signals.interrupt_pending exit_signals)
           | (Some _ | None), (Some _ | None) -> false in
         if confirmed then begin
-          note_exit_reason Masc_tui_exit_reason.Quit_key;
-          raise Break
+          Masc_tui_shell.Exit_journal.note Masc_tui_exit_reason.Quit_key;
+          raise Masc_tui_shell.Exit_journal.Break
         end else begin
-          arm_session_quit state ~kind:Masc_tui_action_notice.Quit_key ~key:"q"
+          Masc_tui_shell.Quit_guard.arm state ~kind:Masc_tui_action_notice.Quit_key ~key:"q"
         end in
       let input_seen = Option.is_some input || rejected_operator_input in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
-      if input_seen && not quit_key then withdraw_session_quit state;
+      if input_seen && not quit_key then Masc_tui_shell.Quit_guard.withdraw state;
       (* An armed shutdown expires on the next unrelated input. Otherwise it
          waits indefinitely and a later press of the same key -- after the
          cursor has moved, after a refresh -- submits work the operator armed
@@ -37051,10 +36003,10 @@ Use relative paths for resources already held in the package. -->
         && Option.is_none (text_input_target state ~compact_viewport)
         && not (view_is_chat state.view)
         && not state.keeper_navigation_open
-        && key <> Some toggle_mouse_tracking_key
-        && key <> Some toggle_roster_pane_key
-        && key <> Some toggle_acting_pane_key
-        && key <> Some toggle_browser_lane_key
+        && key <> Some Masc_tui_shell.Terminal_session.toggle_mouse_tracking_key
+        && key <> Some Masc_tui_shell.Terminal_session.toggle_roster_pane_key
+        && key <> Some Masc_tui_shell.Terminal_session.toggle_acting_pane_key
+        && key <> Some Masc_tui_shell.Terminal_session.toggle_browser_lane_key
         &&
         match key with
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
@@ -37196,8 +36148,8 @@ Use relative paths for resources already held in the package. -->
        (* Above the modals on purpose: the reason to reach for this is to copy
           something already on the screen, and the help overlay is one of the
           screens worth copying from. *)
-       | Some k when String.equal k toggle_mouse_tracking_key ->
-           toggle_mouse_tracking ();
+       | Some k when String.equal k Masc_tui_shell.Terminal_session.toggle_mouse_tracking_key ->
+           Masc_tui_shell.Terminal_session.toggle_mouse_tracking terminal_session;
            (* Handed to the terminal, the button's release never comes here. *)
            pointer_gesture := Masc_tui_pane_selection.Idle;
            Render_schedule.request render_schedule Render_schedule.Force
@@ -37233,9 +36185,9 @@ Use relative paths for resources already held in the package. -->
            state.quit_armed <- None;
            Render_schedule.request render_schedule Render_schedule.Force
        | Some _ when panel_owns_input && quit_key -> handle_quit_key ()
-       | Some k when panel_owns_input && String.equal k toggle_roster_pane_key ->
+       | Some k when panel_owns_input && String.equal k Masc_tui_shell.Terminal_session.toggle_roster_pane_key ->
            toggle_roster_chrome ()
-       | Some k when panel_owns_input && String.equal k toggle_acting_pane_key ->
+       | Some k when panel_owns_input && String.equal k Masc_tui_shell.Terminal_session.toggle_acting_pane_key ->
            toggle_activity_chrome ()
        | Some k when panel_owns_input && current_panel = Some Presented.Context_search ->
            handle_row_search_key k
@@ -37495,7 +36447,7 @@ Use relative paths for resources already held in the package. -->
                    failed is said out loud when the writer answers, or a
                    restart would bring the old one back with nothing having
                    told the reader. *)
-                store_preference state (Masc.Tui_preference.Candle_chosen style)
+                Masc_tui_shell.Preferences.store state (Masc.Tui_preference.Candle_chosen style)
             | _ -> ())
        | Some k when panel_owns_input && current_panel = Some Presented.Agenda ->
            let close () = close_agenda state in
@@ -37731,7 +36683,7 @@ Use relative paths for resources already held in the package. -->
           copying from. *)
        | Some k
          when not compact_viewport && Option.is_some (Masc_tui_types.play_card_shown state)
-              && not (String.equal k toggle_mouse_tracking_key) ->
+              && not (String.equal k Masc_tui_shell.Terminal_session.toggle_mouse_tracking_key) ->
            (match k, Masc_tui_types.play_card_shown state with
             | ("esc" | "q" | "Q"), Some _ ->
                 state.quit_armed <- None;
@@ -38640,8 +37592,8 @@ Use relative paths for resources already held in the package. -->
        (* Also above the modals: the roster is chrome around whatever is
           showing, and reclaiming its columns should not depend on which
           surface is up. *)
-       | Some k when String.equal k toggle_roster_pane_key -> toggle_roster_chrome ()
-       | Some k when String.equal k toggle_acting_pane_key -> toggle_activity_chrome ()
+       | Some k when String.equal k Masc_tui_shell.Terminal_session.toggle_roster_pane_key -> toggle_roster_chrome ()
+       | Some k when String.equal k Masc_tui_shell.Terminal_session.toggle_acting_pane_key -> toggle_activity_chrome ()
        | Some k when (let terminal_rows, _ = get_terminal_size () in
              match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
              | `Queue _ -> true | _ -> false) ->
@@ -38726,7 +37678,7 @@ Use relative paths for resources already held in the package. -->
                   (Masc_tui_roster_pane.zoom_label ~ko state.pane_zoom));
            Render_schedule.request render_schedule Render_schedule.Force
        | Some k
-         when String.equal k toggle_browser_lane_key
+         when String.equal k Masc_tui_shell.Terminal_session.toggle_browser_lane_key
               && not state.palette_open && not (modal_owns_keys state)
               && not state.answering_open
               && not state.link_modal_open
@@ -38986,7 +37938,7 @@ Use relative paths for resources already held in the package. -->
                     let target = match Masc_tui_ansi.probe_terminal_size () with
                       | Some physical when physical = (terminal_rows, terminal_cols)
                           && not (Terminal_write_repair.damage_pending ())
-                          && not (Atomic.get resize_requested) ->
+                          && not (Masc_tui_shell.Terminal_session.resize_requested terminal_session) ->
                           (match !presented_peer_target,
                                  peer_target_on_screen ~terminal_rows ~terminal_cols with
                            | Some presented, Some current
@@ -40814,7 +39766,7 @@ Use relative paths for resources already held in the package. -->
              ~dispatch_allowed:(resource_share_dispatch_allowed ())
        | Some "!" when state.view = Resources && state.resource_focus = Right_pane
              && Option.is_some state.resource_share_recovery_prompt ->
-           if Atomic.get resize_requested || Masc_tui_exit_signals.pending_signal exit_signals then begin
+           if Masc_tui_shell.Terminal_session.resize_requested terminal_session || Masc_tui_exit_signals.pending_signal exit_signals then begin
              Option.iter (fun prompt -> Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation)
                state.resource_share_recovery_prompt;
              report_action state "system" "Wait for pending terminal or signal changes before confirming."
@@ -40841,7 +39793,7 @@ Use relative paths for resources already held in the package. -->
            (match Masc_tui_resources_updates.select_next_unchecked state with
             | Error (Request_failed detail) -> report_action state "error" detail
             | Error (Request_withdrawn refusal) ->
-                report_withdrawn state ~request:Kept_request.Unchecked_report_move refusal
+                Masc_tui_shell.Editor_notice.report_withdrawn state ~request:Kept_request.Unchecked_report_move refusal
             | Ok None -> report_action state "system" "No unchecked reports in the current format and date selection"
             | Ok (Some key) ->
               if state.resource_focus = Right_pane then
@@ -41655,7 +40607,7 @@ Use relative paths for resources already held in the package. -->
               as this comment always claimed. *)
            let handled =
              handle_board_compose_key state ~mailbox:async_messages
-               ~restore:hand_off_terminal ~reenter:take_back_terminal k
+               ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) k
            in
            if not handled then
              (match k with
@@ -41834,7 +40786,7 @@ Use relative paths for resources already held in the package. -->
             | Ok () -> ()
             | Error (Request_failed detail) -> report_action state "error" detail
             | Error (Request_withdrawn refusal) ->
-                report_kept_back state ~request:Kept_request.File_save
+                Masc_tui_shell.Editor_notice.report_kept_back state ~request:Kept_request.File_save
                   (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept)
        | Some "V" when state.view = Code && code_edit_focus state ->
            (match current_code_draft state with
@@ -44403,7 +43355,7 @@ Use relative paths for resources already held in the package. -->
                       match Masc_tui_editor_jump.route () with
                       | Masc_tui_editor_jump.No_editor ->
                           report_action state "error"
-                            (editor_jump_unset state)
+                            (Masc_tui_shell.Editor_notice.editor_jump_unset state)
                       | Masc_tui_editor_jump.Remote_neovim { server } -> (
                           (* The editor is already on screen. Nothing here
                              gives up the terminal, so this surface keeps
@@ -44420,13 +43372,13 @@ Use relative paths for resources already held in the package. -->
                              terminal and this surface stands down until it
                              exits -- the same handoff the settings round-trip
                              makes. *)
-                          hand_off_terminal ();
+                          Masc_tui_shell.Terminal_session.hand_off terminal_session;
                           let command =
                             Printf.sprintf "%s +%d %s" editor line
                               (Filename.quote path)
                           in
                           let _ : Unix.process_status = Unix.system command in
-                          take_back_terminal ();
+                          Masc_tui_shell.Terminal_session.take_back terminal_session;
                           report_action state "system"
                             (Printf.sprintf "closed %s:%d" path line))))
        | Some ("a" | "A") when state.view = Planning
@@ -44796,7 +43748,7 @@ Use relative paths for resources already held in the package. -->
                  | Board_compose -> ()
                  | Board_list | Board_read _ ->
                      state.board_sort <- next_board_sort state.board_sort;
-                     store_preference state
+                     Masc_tui_shell.Preferences.store state
                        (Masc.Tui_preference.Board_sort_chosen (board_sort_order state.board_sort));
                      (* The session log row is read away from Board, so it
                         says the order rather than the token the request
@@ -45268,7 +44220,7 @@ Use relative paths for resources already held in the package. -->
       (match state.quit_armed with
        | Some arm when Option.is_none (current_quit_confirmation state ~now:(Unix.gettimeofday ())) ->
            let kind = Masc_tui_action_notice.quit_kind arm.qa_confirmation in
-           withdraw_session_quit state;
+           Masc_tui_shell.Quit_guard.withdraw state;
            (match kind with
             | Masc_tui_action_notice.Interrupt -> Masc_tui_exit_signals.withdraw_interrupt exit_signals
             | Masc_tui_action_notice.Quit_key -> ())
@@ -45459,10 +44411,7 @@ Use relative paths for resources already held in the package. -->
            (* So are the lists it drew: a page key moves each by the rows
               this frame drew it in. *)
            state.lists_drawn <- lists_drawn;
-           if Terminal_profile.dynamic_title terminal_profile then
-             Terminal_title.present terminal_title ~write:Masc_tui_terminal_out.write
-               ~flush:Masc_tui_terminal_out.flush
-               (terminal_title_snapshot state);
+           Masc_tui_shell.Terminal_session.present_title terminal_session state;
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:Masc_tui_terminal_out.write ~flush:Masc_tui_terminal_out.flush
@@ -45479,54 +44428,18 @@ Use relative paths for resources already held in the package. -->
     done
   in
   Fun.protect ~finally:(fun () ->
-    restore_terminal ();
+    Masc_tui_shell.Terminal_session.restore terminal_session;
     Masc_tui_config.close_keeper_preference_writer state.keeper_preference_writer;
     Masc_tui_config.drain_keeper_preferences state.keeper_preference_writer
       ~can_take:(fun () -> true)
       ~apply:(fun completion -> ignore (apply_keeper_preference_completion state completion));
-    keeper_preference_exit_warnings := List.rev (keeper_preference_unresolved_warnings state);
+    Masc_tui_shell.Terminal_session.set_keeper_preference_exit_warnings terminal_session
+      (keeper_preference_unresolved_warnings state);
     Masc_tui_preference_writer.close state.preference_writer;
-    ignore (drain_preference_completions state ~can_take:(fun () -> true))) run_loop
-
-let run_with_eio_context f =
-  Masc_tui_domains.use_ui_heap ();
-  try
-    Eio_main.run (fun env ->
-        Eio.Switch.run (fun sw ->
-            Eio_guard.enable ();
-            Eio.Switch.on_release sw Eio_guard.disable;
-            (* The workspace server owns its lifetime independently of this UI. *)
-            Fs_compat.set_fs (Eio.Stdenv.fs env);
-            (* Without this, Process_eio falls back to a Unix path that waits on
-               Unix.select. Eio is cooperative, so that blocks the whole domain
-               rather than one fiber: a microphone capture forked to keep the
-               UI responsive froze every key instead, for as long as the
-               recorder ran. The server and fusion_run already init here; the
-               TUI did not, and nothing it spawned had been long enough to
-               notice until a capture ran for 15 s. *)
-            Process_eio.init
-              ~cwd_default:(Eio.Stdenv.cwd env)
-              ~proc_mgr:(Eio.Stdenv.process_mgr env)
-              ~clock:(Eio.Stdenv.clock env);
-            Domain_pool_ref.set
-              (Masc_tui_domains.start_worker_pool ~sw (Eio.Stdenv.domain_mgr env));
-            Eio_context.set_env env;
-            Eio_context.set_switch sw;
-            Eio_context.set_net (Eio.Stdenv.net env);
-            Eio_context.set_clock (Eio.Stdenv.clock env);
-            Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-            Masc_tui_http.start_io_domain ~sw ~env;
-            f ()))
-  with
-  | Break -> ()
-  | exn ->
-      (* An uncaught exception is the abnormal end the exit line exists to
-         name; the [at_exit] writer still runs while the exception unwinds. *)
-      note_exit_reason (Masc_tui_exit_reason.Exception (Printexc.to_string exn));
-      raise exn
+    ignore (Masc_tui_shell.Preferences.drain_completions state ~can_take:(fun () -> true))) run_loop
 
 let () =
   (* Informational flags terminate during parsing, before base-path
      resolution and before the TUI installs its runtime/terminal context. *)
-  let args = parse_args () in
-  run_with_eio_context (main args)
+  let args = Masc_tui_shell.Bootstrap.parse_args () in
+  Masc_tui_shell.Bootstrap.run_with_eio_context (main args)

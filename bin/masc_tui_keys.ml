@@ -1007,13 +1007,15 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Board ->
       [ b ~role:Moves ~ko:"선택" Navigate "j/k" "move"
-      ; b ~role:Moves ~ko:"읽기" Act "Right / Enter" "read" ~help:"read the post"
+      ; b ~role:Moves ~ko:"읽기" Act "Right / Enter" "read"
+          ~help:"read the post; on the list, Space cycles the docked preview size and J/K scroll long preview bodies"
         (* Left closes the open post and does nothing on the list
            ([Board_list | Board_compose -> ()] in the [Some "left"] arm of
-           masc_tui.ml); Esc leaves the list for the Dashboard. One row per
-           state, so the list footer stops offering a key that does nothing
-           there. *)
-      ; b ~role:Moves ~ko:"뒤로" Act "Esc" "back" ~detail:List_only ~help:"back to Dashboard"
+           masc_tui.ml); Esc folds an expanded preview or leaves the list for
+           the Dashboard. One row per state, so the list footer stops offering
+           a key that does nothing there. *)
+      ; b ~role:Moves ~ko:"뒤로" Act "Esc" "back" ~detail:List_only
+          ~help:"fold an expanded preview, or return to Dashboard"
       ; b ~role:Moves ~ko:"뒤로" Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the post"
       ; b ~role:Acts ~ko:"글쓰기" Act "w" "write" ~help:"write a post"
       ; board_vote_key

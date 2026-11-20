@@ -1017,6 +1017,145 @@ let test_board_list_sticky_scroll () =
     let s3 = render_and_apply () in
     Alcotest.(check int) "stepping above viewport top scrolls by one row" (s1 - 1) s3)
 
+let test_board_list_preview_modes_scroll_and_markdown () =
+  let long_body =
+    String.concat "\n"
+      ( "## Overview"
+      :: List.init 25 (fun i -> Printf.sprintf "- line %02d of post body" i) )
+  in
+  let closed_post =
+    { (board_post 0) with
+      bp_body = long_body
+    ; bp_hearth = Some "code-review"
+    ; bp_votes = 4
+    ; bp_comment_count = 3
+    ; bp_closed =
+        Some
+          { bpc_closed_by = "reviewer"
+          ; bpc_closed_at = Some 1_790_000_000.
+          ; bpc_summary = Some "**Resolved**: merged in follow-up"
+          ; bpc_successor_id = None
+          }
+    }
+  in
+  let second_post =
+    { (board_post 1) with bp_body = "Second post short body" }
+  in
+  let posts =
+    closed_post :: second_post :: List.init 38 (fun i -> board_post (i + 2))
+  in
+  with_size (40, 120) (fun () ->
+    let state = create_state ~workspace:"" ~port:0 () in
+    state.ui_language <- Lang_en;
+    state.view <- Board;
+    state.board_listing <-
+      Masc_tui_fetched.Ready { bl_query = board_query state; bl_posts = posts };
+    let render_mode mode =
+      state.board_preview_mode <- mode;
+      Prim.frame_lists := [];
+      let frame, clamped = Masc_tui_render_board.render_board_list state in
+      Option.iter (apply_clamped_scroll state) clamped;
+      let lines =
+        List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
+      in
+      let reported_rows = reported Board_post_rows !Prim.frame_lists in
+      (lines, reported_rows)
+    in
+    let compact_lines, compact_rows = render_mode Preview_compact in
+    let compact_body_rows = state.board_list_preview_body_rows in
+    let compact_max_scroll = state.board_list_preview_max_scroll in
+    Alcotest.(check (list int)) "compact mode reports exact drawn rows"
+      [ rows_naming "zq-" compact_lines ] compact_rows;
+    Alcotest.(check (option string)) "preview binds to post-00"
+      (Some "post-00") state.board_list_preview_post_id;
+    Alcotest.(check bool) "long post has positive preview max_scroll"
+      true (compact_max_scroll > 0);
+    let has_text needle lines =
+      let nlen = String.length needle in
+      List.exists
+        (fun line ->
+          let rec scan i =
+            i + nlen <= String.length line
+            && (String.equal (String.sub line i nlen) needle || scan (i + 1))
+          in
+          scan 0)
+        lines
+    in
+    Alcotest.(check bool) "closed resolution renders ahead of body"
+      true (has_text "Resolution" compact_lines);
+    Alcotest.(check bool) "rich metadata includes hearth and comments"
+      true
+      (has_text "#code-review" compact_lines
+       && has_text "3 comments" compact_lines);
+    Alcotest.(check bool) "scrollable preview advertises J/K scroll hint"
+      true (has_text "J/K" compact_lines);
+    (* Scrolling past max_scroll clamps cleanly to max_scroll. *)
+    state.board_list_preview_scroll <- compact_max_scroll + 50;
+    let _, _ = render_mode Preview_compact in
+    Alcotest.(check int) "overscroll clamps to preview_max_scroll"
+      compact_max_scroll state.board_list_preview_scroll;
+    (* Expanding to half then full grows preview body rows and shrinks list rows monotonically. *)
+    let half_lines, half_rows = render_mode Preview_half in
+    let half_body_rows = state.board_list_preview_body_rows in
+    Alcotest.(check (list int)) "half mode reports exact drawn rows"
+      [ rows_naming "zq-" half_lines ] half_rows;
+    let full_lines, full_rows = render_mode Preview_full in
+    let full_body_rows = state.board_list_preview_body_rows in
+    Alcotest.(check (list int)) "full mode reports exact drawn rows"
+      [ rows_naming "zq-" full_lines ] full_rows;
+    Alcotest.(check bool) "preview body grows compact < half < full"
+      true (compact_body_rows < half_body_rows && half_body_rows < full_body_rows);
+    (* Moving to another post automatically resets preview scroll to 0 and binds new post_id. *)
+    state.board_list_preview_scroll <- 5;
+    state.board_cursor <- 1;
+    let second_lines, _ = render_mode Preview_compact in
+    Alcotest.(check (option string)) "preview rebinds to post-01"
+      (Some "post-01") state.board_list_preview_post_id;
+    Alcotest.(check int) "switching post resets preview scroll to 0"
+      0 state.board_list_preview_scroll;
+    Alcotest.(check int) "short post has 0 preview max_scroll"
+      0 state.board_list_preview_max_scroll;
+    Alcotest.(check bool) "short post renders its own body"
+      true (has_text "Second post short body" second_lines);
+    (* Missing timestamps omit a dangling em-dash from preview header metadata. *)
+    let undated_post =
+      { (board_post 2) with
+        bp_body = "Undated body"
+      ; bp_created_at_unix = None
+      ; bp_updated_at = None
+      }
+    in
+    state.board_listing <-
+      Masc_tui_fetched.Ready { bl_query = board_query state; bl_posts = [ undated_post ] };
+    state.board_cursor <- 0;
+    let undated_lines, _ = render_mode Preview_compact in
+    Alcotest.(check bool) "missing age omits em-dash from preview meta"
+      false (has_text (" \xc2\xb7 " ^ Masc_tui_theme.Glyph.no_value ^ " \xc2\xb7 ") undated_lines);
+    (* Empty list clears preview binding and scroll bounds. *)
+    state.board_listing <-
+      Masc_tui_fetched.Ready { bl_query = board_query state; bl_posts = [] };
+    let _, _ = render_mode Preview_compact in
+    Alcotest.(check (option string)) "empty list clears preview post_id"
+      None state.board_list_preview_post_id;
+    Alcotest.(check int) "empty list resets preview max_scroll"
+      0 state.board_list_preview_max_scroll);
+  (* Short terminal where docked_vertical_split drops preview clears binding. *)
+  with_size (10, 80) (fun () ->
+    let state = create_state ~workspace:"" ~port:0 () in
+    state.view <- Board;
+    state.board_listing <-
+      Masc_tui_fetched.Ready { bl_query = board_query state; bl_posts = posts };
+    state.board_list_preview_post_id <- Some "post-00";
+    state.board_list_preview_scroll <- 3;
+    state.board_list_preview_max_scroll <- 10;
+    Prim.frame_lists := [];
+    let _frame, clamped = Masc_tui_render_board.render_board_list state in
+    Option.iter (apply_clamped_scroll state) clamped;
+    Alcotest.(check (option string)) "short terminal drops preview and clears post_id"
+      None state.board_list_preview_post_id;
+    Alcotest.(check int) "short terminal resets preview max_scroll"
+      0 state.board_list_preview_max_scroll)
+
 let () =
   Alcotest.run "tui render list heights"
     [ ( "reported heights"
@@ -1052,5 +1191,7 @@ let () =
             test_config_themes_and_voice_report_drawn_heights
         ; Alcotest.test_case "Board list keeps viewport stationary on in-window cursor moves" `Quick
             test_board_list_sticky_scroll
+        ; Alcotest.test_case "Board list docked preview renders Markdown, grows across modes, scrolls, and resets on post change" `Quick
+            test_board_list_preview_modes_scroll_and_markdown
         ] )
     ]

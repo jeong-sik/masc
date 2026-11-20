@@ -547,6 +547,234 @@ let board_posts_status state =
       Some (origin ^ (match status with None -> "" | Some status -> "; " ^ status))
   | Some _ | None -> status
 
+(* Single-entry render-loop cache for the Board_list docked preview body.
+   Invalidates whenever post identity, body, closed resolution summary, width,
+   UI language, table frame flag, or any Markdown/preview theme style changes. *)
+type board_list_preview_cache_key =
+  { blpk_post_id : string
+  ; blpk_body : string
+  ; blpk_resolution : string option
+  ; blpk_width : int
+  ; blpk_language : ui_language
+  ; blpk_table_frame : bool
+  ; blpk_styles : string list
+  }
+
+let equal_board_list_preview_cache_key (a : board_list_preview_cache_key)
+    (b : board_list_preview_cache_key) =
+  String.equal a.blpk_post_id b.blpk_post_id
+  && String.equal a.blpk_body b.blpk_body
+  && Option.equal String.equal a.blpk_resolution b.blpk_resolution
+  && Int.equal a.blpk_width b.blpk_width
+  && a.blpk_language = b.blpk_language
+  && Bool.equal a.blpk_table_frame b.blpk_table_frame
+  && List.equal String.equal a.blpk_styles b.blpk_styles
+
+let board_list_preview_cache : (board_list_preview_cache_key * string list) option ref =
+  ref None
+
+let board_preview_style_signature () =
+  [ Theme.recede ()
+  ; Theme.warn ()
+  ; Theme.category Theme.Slot_1
+  ; Theme.category Theme.Slot_2
+  ; Theme.Syntax.code_span ()
+  ; Theme.Syntax.link ()
+  ; Theme.Syntax.rule ()
+  ; Theme.Syntax.keyword ()
+  ; Theme.Syntax.string ()
+  ; Theme.Syntax.code_comment ()
+  ; Theme.Syntax.code_number ()
+  ; Theme.Syntax.code_type ()
+  ; Theme.Syntax.json_key ()
+  ; Theme.Syntax.json_number ()
+  ; Theme.Syntax.json_literal ()
+  ; Theme.Syntax.diff_added_bg ()
+  ; Theme.Syntax.diff_added_fg ()
+  ; Theme.Syntax.diff_removed_bg ()
+  ; Theme.Syntax.diff_removed_fg ()
+  ]
+
+let board_preview_wrapped_body (state : state) ~width (post : board_post) =
+  let width = max 1 width in
+  let resolution =
+    Option.bind post.bp_closed (fun closed -> closed.bpc_summary)
+  in
+  let key =
+    { blpk_post_id = post.bp_id
+    ; blpk_body = post.bp_body
+    ; blpk_resolution = resolution
+    ; blpk_width = width
+    ; blpk_language = state.ui_language
+    ; blpk_table_frame = !table_frame_enabled
+    ; blpk_styles = board_preview_style_signature ()
+    }
+  in
+  match !board_list_preview_cache with
+  | Some (cached_key, cached_lines)
+    when equal_board_list_preview_cache_key cached_key key ->
+      cached_lines
+  | Some _ | None ->
+      let resolution_lines =
+        match resolution with
+        | Some summary when not (String.equal (String.trim summary) "") ->
+            (Theme.warn () ^ Ansi.bold ^ words state "종료 결론" "Resolution" ^ Ansi.reset)
+            :: Message_layout.wrap_body
+                 ~markdown:board_document_markdown ~max_cells:width
+                 ~sanitize:Terminal_text.single_line summary
+        | Some _ | None -> []
+      in
+      let body_lines =
+        match String.trim post.bp_body with
+        | "" -> []
+        | _ ->
+            Message_layout.wrap_body
+              ~markdown:board_document_markdown ~max_cells:width
+              ~sanitize:Terminal_text.single_line post.bp_body
+      in
+      let combined =
+        match resolution_lines, body_lines with
+        | [], [] -> [ Theme.recede () ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset ]
+        | res, [] -> res
+        | [], body -> body
+        | res, body -> res @ [ "" ] @ body
+      in
+      board_list_preview_cache := Some (key, combined);
+      combined
+
+(* Matches [Masc_tui_doc.docked_preview] chrome allocation when both eyebrow
+   and footer hints are present: hairline + header on top (2 rows when
+   [rows >= 2], else 1), footer hint bar on the bottom when [rows - top >= 2]. *)
+let board_preview_body_budget ~rows =
+  if rows <= 0 then 0
+  else
+    let top_count = if rows >= 2 then 2 else 1 in
+    let bottom_count = if rows - top_count >= 2 then 1 else 0 in
+    max 0 (rows - top_count - bottom_count)
+
+let slice_window ~offset ~limit lines =
+  let rec drop n xs =
+    if n <= 0 then xs
+    else match xs with [] -> [] | _ :: rest -> drop (n - 1) rest
+  in
+  let rec take n acc xs =
+    if n <= 0 then List.rev acc
+    else match xs with [] -> List.rev acc | x :: rest -> take (n - 1) (x :: acc) rest
+  in
+  take limit [] (drop offset lines)
+
+(* The selected post under the list, the same docked preview Goals and
+   Verdicts draw. It returns exactly [rows] lines, so the list rows above it
+   stay where they are while the cursor moves. Space grows it, J/K scroll long
+   bodies inside it, Esc folds it back, Enter opens the post as before. The
+   title is not repeated: the selected row above already shows it. *)
+let board_preview_lines (state : state) ~now ~age_time ~hide_hearth ~cols ~rows
+    (post : board_post) =
+  let width = max 1 (framed_inner_width cols) in
+  let ko = state.ui_language = Lang_ko in
+  let stage =
+    match state.board_preview_mode with
+    | Preview_compact -> words state "미리보기 확장" "expand"
+    | Preview_half -> words state "최대" "full"
+    | Preview_full -> words state "접기" "compact"
+  in
+  let wrapped_body = board_preview_wrapped_body state ~width post in
+  let body_budget = board_preview_body_budget ~rows in
+  let total_lines = List.length wrapped_body in
+  let max_scroll =
+    if body_budget <= 0 then 0 else max 0 (total_lines - body_budget)
+  in
+  let requested_scroll =
+    match state.board_list_preview_post_id with
+    | Some id when String.equal id post.bp_id -> state.board_list_preview_scroll
+    | Some _ | None -> 0
+  in
+  let clamped_scroll =
+    if body_budget <= 0 then 0
+    else Masc_tui_scroll.normalize ~count:total_lines ~height:body_budget requested_scroll
+  in
+  let visible_body =
+    if body_budget <= 0 then []
+    else slice_window ~offset:clamped_scroll ~limit:body_budget wrapped_body
+  in
+  let scroll_arrow =
+    if max_scroll <= 0 then ""
+    else
+      match clamped_scroll > 0, clamped_scroll < max_scroll with
+      | true, true -> " \xe2\x96\xb2\xe2\x96\xbc"
+      | true, false -> " \xe2\x96\xb2"
+      | false, true -> " \xe2\x96\xbc"
+      | false, false -> ""
+  in
+  let comments =
+    let n = Masc_tui_value.Count.grouped post.bp_comment_count in
+    if ko then "댓글 " ^ n
+    else if post.bp_comment_count = 1 then "1 comment"
+    else n ^ " comments"
+  in
+  let hearth_meta =
+    if hide_hearth then None
+    else
+      match Terminal_text.optional_single_line post.bp_hearth with
+      | Some h when not (String.equal h "") -> Some ("#" ^ h)
+      | Some _ | None -> None
+  in
+  let age_meta =
+    Option.map (Masc_tui_value.Ongoing.since ~now)
+      (board_age_source ~time:age_time
+         ~posted:post.bp_created_at_unix ~changed:post.bp_updated_at)
+  in
+  let score_meta =
+    if post.bp_votes > 0 then
+      Some ("\xe2\x96\xb2" ^ Masc_tui_value.Count.increase post.bp_votes)
+    else if post.bp_votes < 0 then
+      Some ("\xe2\x96\xbc" ^ Masc_tui_value.Count.decrease (-post.bp_votes))
+    else None
+  in
+  let attachments_meta =
+    match List.length post.bp_attachments with
+    | 0 -> None
+    | count ->
+        let n = Masc_tui_value.Count.grouped count in
+        Some
+          (if ko then "첨부 " ^ n
+           else if count = 1 then "1 attachment"
+           else n ^ " attachments")
+  in
+  let closed_meta =
+    match post.bp_closed with
+    | Some _ -> Some (words state "종료됨" "closed")
+    | None -> None
+  in
+  let meta_parts =
+    [ Some ("@" ^ Terminal_text.single_line post.bp_author)
+    ; hearth_meta
+    ; age_meta
+    ; Some comments
+    ; score_meta
+    ; attachments_meta
+    ; closed_meta
+    ]
+    |> List.filter_map Fun.id
+  in
+  let footer_hints =
+    { Masc_tui_card.key = "Space"; label = stage }
+    :: (if max_scroll > 0 then
+          [ { Masc_tui_card.key = "J/K"; label = words state "본문 스크롤" "scroll" } ]
+        else [])
+    @ [ { Masc_tui_card.key = "Enter"; label = words state "읽기" "read" }
+      ; { Masc_tui_card.key = "Esc"; label = words state "닫기/뒤로" "back" }
+      ]
+  in
+  let lines =
+    Masc_tui_doc.docked_preview ~width ~height:rows ~indent:0
+      ~eyebrow:(words state "선택한 글" "Selected post" ^ scroll_arrow)
+      ~meta:(String.concat " · " meta_parts)
+      ~footer_hints
+      visible_body
+  in
+  (lines, clamped_scroll, max_scroll, body_budget)
+
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
 
@@ -646,11 +874,24 @@ let render_board_list (state : state) =
   let sort_column = board_sort_column_of_sort query.bq_sort in
   let layout = board_layout ~hide_hearth ~sort_column ~cols in
   let drawn_list_scroll = ref 0 in
+  let drawn_preview_post_id = ref None in
+  let drawn_preview_scroll = ref 0 in
+  let drawn_preview_max_scroll = ref 0 in
+  let drawn_preview_body_rows = ref 0 in
   (* The frame, its fill and the footer are the contract's: this surface
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
   surface_chrome
-    ~overflow:(Self_scrolled (fun () -> Board_list_scroll !drawn_list_scroll))
+    ~overflow:
+      (Self_scrolled
+         (fun () ->
+           Board_list_scroll
+             { list_scroll = !drawn_list_scroll
+             ; preview_post_id = !drawn_preview_post_id
+             ; preview_scroll = !drawn_preview_scroll
+             ; preview_max_scroll = !drawn_preview_max_scroll
+             ; preview_body_rows = !drawn_preview_body_rows
+             }))
     ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"board-list"
     ~title:header ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false state.view)
     ~body:(fun ~budget c ->
@@ -703,9 +944,14 @@ let render_board_list (state : state) =
       else begin
         Option.iter render_list_error list_error;
         let error_rows = if Option.is_some list_error then 1 else 0 in
-        let content_height =
-          max 0 (budget - List.length heading - error_rows)
+        let selected_post = List.nth_opt (board_posts state) cursor in
+        let split =
+          docked_vertical_split
+            ~total_rows:(max 0 (budget - List.length heading - error_rows))
+            ~mode:state.board_preview_mode
+            ~has_selection:(Option.is_some selected_post)
         in
+        let content_height = split.list_rows in
         let scroll_offset =
           if content_height = 0 then 0
           else
@@ -728,7 +974,10 @@ let render_board_list (state : state) =
         for i = 0 to content_height - 1 do
           let idx = i + scroll_offset in
           match Rows.at board_posts_window idx with
-          | None -> ()
+          | None ->
+              (* A short list keeps the preview docked at the bottom rather
+                 than drawn directly under its last row. *)
+              if split.preview_rows > 0 then c.push ""
           | Some p ->
             let is_selected = idx = cursor in
             (* The age is since the post or one of its comments last moved.
@@ -798,7 +1047,20 @@ let render_board_list (state : state) =
               c.push_selected_styled
                 (Theme.accent () ^ Ansi.bold ^ "\xe2\x80\xba " ^ Ansi.reset ^ content)
             else c.push ("  " ^ content)
-        done
+        done;
+        if split.preview_rows > 0 then
+          Option.iter
+            (fun post ->
+              let lines, preview_scroll, preview_max_scroll, preview_body_rows =
+                board_preview_lines state ~now:now_unix ~age_time ~hide_hearth
+                  ~cols ~rows:split.preview_rows post
+              in
+              drawn_preview_post_id := Some post.bp_id;
+              drawn_preview_scroll := preview_scroll;
+              drawn_preview_max_scroll := preview_max_scroll;
+              drawn_preview_body_rows := preview_body_rows;
+              List.iter c.push lines)
+            selected_post
       end)
 
 (* Owned by the single render loop, like the chat Markdown cache. Only the

@@ -3085,9 +3085,9 @@ describe('GoalTree', () => {
     })
   })
 
-  // RFC-0444 §2.3 row 4 / criterion 9: a Goal store this build cannot read is
-  // drawn as an alert with file · reason · mirror · reset step, and the create
-  // form refuses to submit while that state stands.
+  // A Goal store this build cannot read is drawn as an alert with file ·
+  // reason · mirror · reset step, and the create form refuses to submit while
+  // that state stands.
   it('keeps a Goal store error from an earlier workspace out of the new workspace view', async () => {
     const failure = new GoalSourceUnavailableError({
       kind: 'unavailable', reason: 'not_json', field: null, file: '/workspace-a/private-goals.json',

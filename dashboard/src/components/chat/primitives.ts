@@ -1487,9 +1487,9 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
   const [open, setOpen] = useState(false)
   const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
-  // Keeper-v2 messages.jsx image block: figure.img-out > .img-frame > img | .img-ph.
-  // chat-block-media-frame stays alongside img-frame — it owns the dashboard-only
-  // extras the design never had to solve (placeholder min-height, img max-height cap).
+  // Image block: figure.img-out > .img-frame > img | .img-ph.
+  // chat-block-media-frame stays alongside img-frame — it owns the extras
+  // img-frame does not set (placeholder min-height, img max-height cap).
   return html`
     <figure class="img-out" data-chat-block="image">
       <div class="chat-block-media-frame img-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>
@@ -1516,7 +1516,7 @@ function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: str
 function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
   const [open, setOpen] = useState(false)
   const clean = useMemo(() => sanitizeHtml(svg), [svg])
-  // Keeper-v2 messages.jsx svg block: figure.svg-out > .svg-frame (sanitized inline svg).
+  // SVG block: figure.svg-out > .svg-frame (sanitized inline svg).
   return html`
     <figure class="svg-out" data-chat-block="svg">
       <div
@@ -1849,10 +1849,9 @@ function ChatLinkBlock(b: ChatLinkBlock) {
   }
   const safeUrl = isSafeUrl(b.url) ? b.url : '#'
   const unsafe = safeUrl === '#'
-  // Keeper-v2 messages.jsx LinkCard vocabulary (linkcard / -fav / -body / -title /
-  // -desc / -meta mono / -go); skin is vendored in keeper-v2/v2.css. The
-  // chat-block-linkcard-unsafe hook is dashboard-only: the design has no unsafe-URL
-  // state, and the live renderer refuses javascript:/data: hrefs.
+  // LinkCard vocabulary (linkcard / -fav / -body / -title / -desc / -meta mono /
+  // -go); skin is vendored in keeper-v2/v2.css. The chat-block-linkcard-unsafe
+  // hook marks a refused href: the renderer refuses javascript:/data: hrefs.
   return html`
     <a
       class="linkcard ${b.kind || ''} ${unsafe ? 'chat-block-linkcard-unsafe' : ''}"
@@ -2031,8 +2030,8 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
   const answeredCount = state.panel.filter((p) => p.status === 'answered').length
   const usageLabel =
     state.totalOutputTokens !== undefined ? ` · ${state.totalOutputTokens.toLocaleString()} tok` : ''
-  // Keeper-v2 messages.jsx fusion block: .msg-fusion > .msg-fusion-h (tag · run ·
-  // decision badge) + .msg-fusion-ans + .msg-fusion-foot (panel count · run link).
+  // Fusion block: .msg-fusion > .msg-fusion-h (tag · run · decision badge) +
+  // .msg-fusion-ans + .msg-fusion-foot (panel count · run link).
   // Skin is vendored in keeper-v2/fusion.css. The decision badge/answer only render
   // once the board post is lazy-fetched on expand — before that the live signal
   // does not exist locally and nothing is fabricated for them.
@@ -2894,11 +2893,10 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const speakerInfo = speakerMeta(entry)
   const routeInfo = routeMeta(entry)
 
-  // Keeper-v2 messages.jsx Message row vocabulary: the operator avatar is
-  // `.msg-av.op` (keeper rows draw the sigil badge in the design, so msg-av
-  // goes on user rows only); msg-col/msg-hd mark the content column and the
+  // Message row vocabulary: the operator avatar is `.msg-av.op`, so msg-av
+  // goes on user rows only; msg-col/msg-hd mark the content column and the
   // header row. The row keeps the dashboard's chat-bubble chrome — delivery,
-  // stream-contract and meta chips are live signals the design has no slot for.
+  // stream-contract and meta chips.
   return html`
     <article
       ref=${bubbleRef}
@@ -3519,8 +3517,8 @@ function ToolTraceStep({
     output?.duration_ms != null && output.duration_ms > 0
       ? formatMsCompact(output.duration_ms)
       : traceOnly ? traceStep?.dur ?? '' : ''
-  // RFC-0358 keeps autonomous arguments/results off the transcript even when
-  // its canonical execution hydrates. Edit evidence below is an independent,
+  // An autonomous turn shows no tool arguments/results, even when the call's
+  // canonical execution hydrates. Edit evidence below is an independent,
   // typed receipt projection, not permission to expose the raw tool body.
   const resultView = structuralSummary ? null
     : output ? toolOutputDisplay(output.output)
@@ -5391,12 +5389,11 @@ export function ChatComposer({
                 </div>
               `
             : null}
-          <!-- Flush borderless textarea: prototype composer.jsx <textarea> has
-               no inline styling; all box styling (border:0, outline:0,
-               transparent bg, padding:9px 0) comes from .composer textarea in
-               chat.css (mirrors the prototype). Removing the prior
-               inline Tailwind (control-textarea + border + rounded + px/py +
-               bg + focus ring) drops the nested box the prototype lacks. -->
+          <!-- Flush borderless textarea: no inline styling; all box styling
+               (border:0, outline:0, transparent bg, padding:9px 0) comes from
+               the .composer textarea rules in chat.css and keeper-v2/v2.css.
+               Without inline Tailwind (control-textarea + border + rounded +
+               px/py + bg + focus ring) there is no nested box. -->
           ${voice.state === 'recording' || voice.state === 'transcribing'
             ? html`
                 <div class=${`rec-bar ${voice.state === 'transcribing' ? 'transcribing' : ''}`}>

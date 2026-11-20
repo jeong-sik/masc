@@ -276,8 +276,8 @@ function BoardSummary() {
 // ── Author sigil (v2) ──────────────────────────────────────────────
 function BdAuthor({ label, size = 24 }: { label: string; size?: number }) {
   const isOperator = label.toLowerCase() === 'operator' || label.toLowerCase() === 'dashboard'
-  // Prototype board.jsx:8 renders the operator avatar as the literal "OP"
-  // glyph; keepers use a 2-letter monogram (SigilBadge style, fleet.jsx:8).
+  // The operator avatar is the literal "OP" glyph; keepers use a 2-letter
+  // monogram.
   const sigil = isOperator ? 'OP' : label.slice(0, 2).toUpperCase()
   return html`<span class=${`bd-sigil ${isOperator ? 'op' : ''}`} style=${{ width: size, height: size }}>${sigil}</span>`
 }
@@ -478,10 +478,9 @@ function PostCard({ post, batchObservation, getLatestBatchRevision }: {
 }
 
 // ── v2 board chrome ────────────────────────────────────────────────
-// Glyph vocabulary mirrors the keeper-v2 prototype (data-surfaces.jsx:7-12):
-// all→◈, incidents→⚠, watercooler→◌, every other hearth→⌗. Live hearth
-// names are data-driven, so the generic ⌗ default matches the prototype's
-// per-hearth glyph while the two named specials keep their prototype glyphs.
+// Glyph vocabulary: all→◈, incidents→⚠, watercooler→◌, every other
+// hearth→⌗. Live hearth names are data-driven, so any hearth without its
+// own entry falls back to the generic ⌗ default.
 const SUB_BOARD_GLYPHS: Record<string, string> = {
   all: '◈',
   incidents: '⚠',
@@ -564,8 +563,8 @@ function BdFeedHead({ countLabel, searchText, onSearchText, sortMode, onSort }: 
   onSort: (sortMode: BoardSortMode) => void
 }) {
   const activeHearth = boardHearthFilter.value
-  // Prototype board.jsx:158 renders the bare hearth label (e.g. "core/scheduler")
-  // with no "#" prefix; the hearth name already carries its namespace path.
+  // The title is the bare hearth label (e.g. "core/scheduler") with no "#"
+  // prefix; the hearth name already carries its namespace path.
   const title = activeHearth === '' ? '전체 피드' : activeHearth
 
   return html`

@@ -4601,8 +4601,7 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
   })
 })
 
-// Pixel-match of the v2 composer to the Claude-Design prototype (composer.jsx /
-// styles/v2.css). jsdom does not apply the .css files, so these assert the
+// v2 composer surface. jsdom does not apply the .css files, so these assert the
 // markup contract the CSS depends on: the textarea must be a flush, borderless
 // element with NO inline Tailwind box styling (border/rounded/padding/bg/
 // control-textarea) — all box styling lives in .composer textarea (chat.css).

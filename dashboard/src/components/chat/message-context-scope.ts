@@ -1,9 +1,9 @@
-// Keeper-v2 messages.jsx `CtxFrom` — the expandable provenance strip above a
-// bubble when a turn belongs to a connector channel conversation
+// The expandable provenance strip above a bubble when a turn belongs to a
+// connector channel conversation
 // ("#채널 맥락 포함 · 메시지 N개 · HH:MM–HH:MM", 범위 보기 → cf-detail preview).
 //
-// Live signal: KeeperConversationEntry.surface (RFC-0223 connector
-// coordinates: kind / guild_id / channel_id / thread_id / label) plus
+// Live signal: KeeperConversationEntry.surface (connector coordinates:
+// kind / guild_id / channel_id / thread_id / label) plus
 // conversation_id grouping and speaker_id/speaker_name identity. The backend
 // does not ship a "fetched context scope" payload, so the preview is derived
 // from the transcript itself: the channel conversation's own rows in this
@@ -123,9 +123,9 @@ export function buildChatContextScope(
   }
 }
 
-// Design: the Message header in messages.jsx renders `<span className="whoh">{handle}</span>`
-// when a user row has both a nick and a handle. Live: speaker_name (nick) +
-// speaker_id (handle) on RFC-0223 connector rows.
+// The message header renders `<span class="whoh">{handle}</span>` when a
+// user row has both a nick and a handle: speaker_name (nick) + speaker_id
+// (handle) on connector rows.
 export function speakerHandleLabel(entry: KeeperConversationEntry): string | null {
   if (entry.role !== 'user') return null
   const nick = entry.speakerName?.trim()
@@ -140,8 +140,8 @@ export function ChatSpeakerHandle({ entry }: { entry: KeeperConversationEntry })
   return html`<span class="whoh">${handle}</span>`
 }
 
-// DOM mirrors messages.jsx CtxFrom exactly: KVM.Provenance head
-// (ctx-from / cf-ico / cf-view) + expandable cf-detail scope preview.
+// DOM: provenance head (ctx-from / cf-ico / cf-view) + expandable cf-detail
+// scope preview.
 export function ChatContextScopeRow({ scope }: { scope: ChatContextScope }): VNode {
   const [open, setOpen] = useState(false)
   const hasPreview = scope.preview.length > 0

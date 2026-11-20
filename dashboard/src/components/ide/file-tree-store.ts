@@ -1,5 +1,5 @@
 /**
- * file-tree-store — IDE EXPLORER signal store (Phase 2 PR-4).
+ * file-tree-store — IDE EXPLORER signal store.
  *
  * Mirrors the keeper-state.ts module-level signal pattern. Keeps a
  * flat array of nodes plus an expansion set, derives the visible
@@ -10,16 +10,14 @@
  * its public API is consumable by both Preact (signal.value reads)
  * and Solid adapters (signal.peek + subscribe).
  *
- * Out of scope (RFC 0014 §2):
+ * Out of scope:
  *   - Drag-to-reorder.
  *   - Multi-select.
  *
- * RFC 0014 amendment (lazy children): the v1 "flat node array up front"
- * assumption cannot show a workspace deeper than the server's bounded scan,
- * and for the `project` workspace source the server returns root-only leaves
- * (all hasChildren=false), so no directory was ever expandable. The store now
- * supports on-expand children loading. A bounded seed snapshot is not treated
- * as a completeness signal: a directory with some children present may still be
+ * Lazy children: the server's tree scan stops at a depth and node cap, and
+ * every directory it returns is expandable. The store loads a directory's
+ * entries when it expands. A bounded seed snapshot is not treated as a
+ * completeness signal: a directory with some children present may still be
  * truncated by the server cap, so `loadChildren` remains the authority for
  * marking that directory complete.
  */
@@ -34,7 +32,7 @@ export interface FileTreeNode {
   readonly hasChildren: boolean
   readonly diff: string | null  // '+12', '-2', etc; null = no diff this run
   readonly keeperId: string | null
-  readonly hueIndex: number | null  // 1..12 (matches RFC 0019 mapping)
+  readonly hueIndex: number | null  // 1..12 (keeper hue slot)
 }
 
 export interface FileTreeDiffSummary {

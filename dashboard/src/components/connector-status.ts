@@ -1339,10 +1339,8 @@ function GateStatusStrip({
   connectors: GateConnectorInfo[]
 }) {
   const healthy = gate !== null && connectors.some(c => c.gate_healthy === true)
-  // Prototype gate-strip dot is <StatusDot status pulse/> → window.KV.Dot → `.dot2`
-  // (messages.jsx:8 maps run→ok, pause→warn, off→idle). The vendored CSS styles
-  // `.dot2` / `.dot2.ok` / `.dot2.warn`; there is no `.status-dot`
-  // rule, so emit the prototype's `.dot2` vocabulary instead.
+  // The gate-strip dot emits the `.dot2` vocabulary; the vendored CSS styles
+  // `.dot2` / `.dot2.ok` / `.dot2.warn`.
   function statusDotClass(): string {
     if (healthy) return 'dot2 ok pulse'
     if (gate === null) return 'dot2'
@@ -1453,8 +1451,8 @@ function ConnectorGateCard({
   const pillClass = connectorStatusPillClass(label)
   const bindings = connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS
   const caps = connector?.capabilities?.length ? connector.capabilities : ['bindings']
-  // Prototype card cell label is exactly `Base URL` (webhook) or `Guilds`
-  // (connectors.jsx:96); value is the base URL or the numeric guild count.
+  // Card cell label is exactly `Base URL` (webhook) or `Guilds`; value is
+  // the base URL or the numeric guild count.
   // Mirror the existing connectorScopeLabel/connectorScopeValue helpers
   // (below) so the card and the live panel agree on the same wiring.
   const scopeLabel = connectorScopeLabel(connector)

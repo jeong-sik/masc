@@ -1,7 +1,5 @@
-// RFC-0393: a keeper has exactly one name. Nothing is encoded inside the
-// string and nothing is recovered from other spellings by parsing — the
-// wrapper/prefix strips and the generated-nickname dictionary that used to
-// live here mirrored the OCaml parsers deleted by the same RFC.
+// A keeper has exactly one name. Nothing is encoded inside the
+// string and nothing is recovered from other spellings by parsing.
 
 function trimmedOrNull(value: string | null | undefined): string | null {
   const trimmed = value?.trim()

@@ -1,4 +1,4 @@
-// Btn — atomic primitive ported from design-system v0.4 primitives.html
+// Btn — atomic primitive ported from design-system v0.4
 // (`<button class="btn ...">…</button>`). The SPEC defines a base button
 // (warm border, transparent surface) plus three semantic variants
 // (primary / danger / ghost), four sizes (xs / sm / default / lg), and
@@ -129,11 +129,11 @@ interface SizeStyle {
   letterSpacing?: string
 }
 
-// Sizes match SPEC primitives.css: xs (line 164), sm (163), default
+// Heights match SPEC primitives.css: xs (line 164), sm (163), default
 // (tokens.css line 467 base — derived 24px height from `padding 4px 10px`
 // + 11px font line-height), lg (line 165 — added by this PR, fs-12 paired
 // with the 28px geometry inferred from the xs(18)→sm(20)→default(24)→
-// lg(28) +2px progression that primitives.html demos).
+// lg(28) +2px progression).
 const SIZE_STYLE: Record<BtnSize, SizeStyle> = {
   xs: { height: '18px', padding: '0 6px', fontSize: '10px', letterSpacing: '0.04em' },
   sm: { height: '20px', padding: '0 8px', fontSize: '11px', letterSpacing: '0.02em' },

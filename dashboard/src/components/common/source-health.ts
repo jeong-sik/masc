@@ -74,9 +74,9 @@ export type CoverageGapDisplay = {
     surface: string | null
     trace: string | null
     error: string | null
-    // RFC-0154 PR-3: backend-classified short tag. Absent on v1 wire rows
-    // (pre-RFC-0154 PR-2 deployment); present on v2 rows. Consumers should
-    // prefer this typed lookup over substring matching on `error`.
+    // Backend-classified short tag; null when the gap row carries no
+    // classification. Consumers should prefer this typed lookup over
+    // substring matching on `error`.
     errorClass: string | null
   }
 }

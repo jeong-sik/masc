@@ -2300,7 +2300,9 @@ let ko_localization_and_overview_bottom_sheet () =
   in
   let has_sheet_top lines =
     List.exists
-      (fun line -> String.starts_with ~prefix:"╭─" (Masc_tui_theme.strip_sgr line))
+      (fun line ->
+        let plain = Masc_tui_theme.strip_sgr line in
+        contains ~needle:"선택한 작업자" plain || contains ~needle:"선택한 설치" plain)
       lines
   in
   let tall_frame = UI.viewport_frame ~ko:true ~height:20 ~width:100 tall_view in
@@ -2308,8 +2310,11 @@ let ko_localization_and_overview_bottom_sheet () =
     (tall_frame.UI.total_list_rows > 20);
   check bool "docked Bottom Sheet is non-empty at scroll = 0" true
     (tall_frame.UI.sheet_rows <> []);
-  check bool "docked Bottom Sheet renders rounded top edge even when list overflows" true
+  check bool "docked Bottom Sheet renders docked preview header even when list overflows" true
     (has_sheet_top tall_frame.UI.sheet_rows);
+  check bool "docked Bottom Sheet renders top hairline" true
+    (String.starts_with ~prefix:"───"
+       (String.trim (Masc_tui_theme.strip_sgr (List.hd tall_frame.UI.sheet_rows))));
   check int "list_budget reserves exact sheet height"
     (20 - List.length tall_frame.UI.sheet_rows) tall_frame.UI.list_budget;
   check int "tall list fills list_budget exactly"
@@ -2365,7 +2370,7 @@ let ko_localization_and_overview_bottom_sheet () =
     (List.exists
        (fun line ->
          let plain = Masc_tui_theme.strip_sgr line in
-         String.starts_with ~prefix:"╭─" plain && contains ~needle:"\xe2\x9c\x95" plain)
+         contains ~needle:"선택한 작업자" plain && contains ~needle:"\xe2\x9c\x95" plain)
        failed_frame.UI.sheet_rows);
   check_clean_rows "Failed list_rows" (List.map snd failed_frame.UI.list_rows);
   check_clean_rows "Failed sheet_rows" failed_frame.UI.sheet_rows

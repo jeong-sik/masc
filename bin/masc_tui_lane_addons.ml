@@ -1991,14 +1991,14 @@ let overview_bottom_sheet ~ko ~width ~height view snapshot entries =
         in
         let reading = declaration_reading declaration in
         let word = Masc.Tui_terminal_text.sanitize_terminal_text (declaration_reading_word ~ko reading) in
-        let symbol, tone =
+        let mark, tone =
           match reading with
           | Configuration_issue | Needs_attention ->
-              Card.Mark Masc_tui_value.Mark.Failed, Theme.bad ()
+              Masc_tui_value.Mark.Failed, Theme.bad ()
           | Configured_off ->
-              Card.Mark Masc_tui_value.Mark.Paused, Theme.recede ()
+              Masc_tui_value.Mark.Paused, Theme.recede ()
           | No_current_worker | Pending ->
-              Card.Mark Masc_tui_value.Mark.Waiting, Theme.warn ()
+              Masc_tui_value.Mark.Waiting, Theme.warn ()
         in
         let cat =
           match declaration.ui_category with
@@ -2015,30 +2015,31 @@ let overview_bottom_sheet ~ko ~width ~height view snapshot entries =
               (Masc.Tui_terminal_text.sanitize_terminal_text declaration.source_path)
           ]
         in
-        Doc.bottom_sheet ~ko ~width ~height:7 ~role:Masc_tui_theme.Panel_neutral
+        let preview_indent = 1 in
+        let preview_cells = max 1 (width - preview_indent) in
+        Doc.docked_preview ~width ~height:7 ~indent:preview_indent
+          ~eyebrow:(say "선택한 설치" "Selected Install")
           ~title:(Masc.Tui_terminal_text.sanitize_terminal_text title)
-          ~status:{ Card.symbol; word; tone }
-          ~count:(Card.Whole (List.length fields))
-          ~footer_keys:
+          ~meta:(Masc_tui_value.Mark.glyph mark ^ " " ^ word)
+          ~footer_hints:
             [ { Card.key = "Enter"; label = say "설치 상세" "install" }
             ; { key = "E"; label = say "편집" "edit" }
             ; { key = "r"; label = say "새로고침" "refresh" }
             ]
-          ~body:(fun ~cells -> Doc.kv_rows ~width:cells fields)
-          ()
+          (Doc.kv_rows ~width:preview_cells fields)
     | Some (`Instance item) ->
         let standing = instance_standing ~off_requested:(off_requested snapshot item) item in
         let word = Masc.Tui_terminal_text.sanitize_terminal_text (phase_label ~ko item.phase) in
-        let symbol, tone =
+        let mark, tone =
           match item.phase with
           | Row.Failed _ ->
-              Card.Mark Masc_tui_value.Mark.Failed, Theme.bad ()
+              Masc_tui_value.Mark.Failed, Theme.bad ()
           | Row.Attached | Row.Observing ->
-              Card.Mark Masc_tui_value.Mark.Settled, Theme.ok ()
+              Masc_tui_value.Mark.Settled, Theme.ok ()
           | Row.Detaching ->
-              Card.Mark Masc_tui_value.Mark.Caution, Theme.warn ()
+              Masc_tui_value.Mark.Caution, Theme.warn ()
           | Row.Detached ->
-              Card.Mark Masc_tui_value.Mark.Paused, Theme.recede ()
+              Masc_tui_value.Mark.Paused, Theme.recede ()
         in
         let cat = category_heading ~ko (current_category snapshot (`Instance item)) in
         let records_text =
@@ -2058,17 +2059,18 @@ let overview_bottom_sheet ~ko ~width ~height view snapshot entries =
                 (Masc.Tui_terminal_text.sanitize_terminal_text path))
               item.source_path)
         in
-        Doc.bottom_sheet ~ko ~width ~height:7 ~role:Masc_tui_theme.Panel_neutral
+        let preview_indent = 1 in
+        let preview_cells = max 1 (width - preview_indent) in
+        Doc.docked_preview ~width ~height:8 ~indent:preview_indent
+          ~eyebrow:(say "선택한 작업자" "Selected Worker")
           ~title:(Masc.Tui_terminal_text.sanitize_terminal_text (instance_heading snapshot item))
-          ~status:{ Card.symbol; word; tone }
-          ~count:(Card.Whole (List.length fields))
-          ~footer_keys:
+          ~meta:(Masc_tui_value.Mark.glyph mark ^ " " ^ word)
+          ~footer_hints:
             [ { Card.key = "Enter"; label = say "상세" "open" }
             ; { key = "o"; label = say "관측" "observe" }
             ; { key = "r"; label = say "새로고침" "refresh" }
             ]
-          ~body:(fun ~cells -> Doc.kv_rows ~width:cells fields)
-          ()
+          (Doc.kv_rows ~width:preview_cells fields)
 
 let overview_lines ?(ko = false) ?(sheet_docked = false) ~width view =
   let wrap = document_rows ~width in

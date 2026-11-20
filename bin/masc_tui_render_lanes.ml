@@ -388,7 +388,7 @@ let standalone_lane_detail_lines ~ko ~now ~width (lane : Tui_decode.standalone_l
       in
       [ ( ""
         , Page_reading.detail_indent
-          ^ Chart.meter ~width:meter_w ~value:lane.sl_succeeded_count
+          ^ Chart.dot_meter ~width:meter_w ~value:lane.sl_succeeded_count
               ~max_value:total
               ~label:(t "성공률" "Success")
               ~label_style:(Theme.recede ())

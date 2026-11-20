@@ -9,8 +9,7 @@
     [Rejected_by_pre_hook], [Handler_error]) that never had a producer:
     capability rejection, pre-hook [Reject], and handler exceptions all
     resolve to [Some error] and are classified [Handled].  They were
-    removed so the type matches observed behaviour (RFC-0084 §6 D3;
-    CLAUDE.md anti-pattern #4). *)
+    removed so the type matches observed behaviour. *)
 
 (** Typed sum of dispatch outcomes. *)
 type t =

@@ -44,11 +44,11 @@ type read_result = {
 
 (** How many entries one read may return.
 
-    Abstract so that "no limit" cannot be constructed. Before RFC-0372 the
-    limit was a plain [int] where [n <= 0] meant unbounded, and the scan cap
-    that backed it applied per store rather than per request: with nine
-    sources, three of which fan out per keeper, one request could materialise
-    the whole store and the ceiling rose every time a keeper was added.
+    Abstract so that "no limit" cannot be constructed. With a plain [int]
+    where [n <= 0] means unbounded, only the per-store scan cap would bound
+    a request: with nine sources, three of which fan out per keeper, one
+    request could materialise the whole store, and the ceiling would rise
+    every time a keeper was added.
 
     Values are clamped into [1, max_read_entries] at construction, so every
     reader downstream holds a positive bound by type. A caller that wants
@@ -65,9 +65,9 @@ val default_read_entries : int
 
 (** Clamp into [1, max_read_entries].
 
-    Zero and negatives map to [default_read_entries], NOT to "unbounded":
-    the old permissive reading of [n = 0] is the defect RFC-0372 closes, so it
-    is mapped here once rather than re-checked at each reader. *)
+    Zero and negatives map to [default_read_entries], NOT to "unbounded".
+    The mapping happens here once rather than being re-checked at each
+    reader. *)
 val read_limit_of_int : int -> read_limit
 
 val read_limit_to_int : read_limit -> int

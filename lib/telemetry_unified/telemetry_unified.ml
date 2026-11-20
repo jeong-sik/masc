@@ -127,8 +127,8 @@ let latest_ts_probe_rows = 64
 (* Projects each scanned row to its timestamp instead of returning the parsed
    rows: this runs once per store, and the summary path runs it once per
    keeper, so retaining [latest_ts_probe_rows] trees per store made the
-   resident set scale with keeper count — the axis RFC-0372 §5 gates Phase 2
-   on. Same value as [latest_ts_of_entries] over the same window.
+   resident set scale with keeper count. Same value as [latest_ts_of_entries]
+   over the same window.
 
    The summary reruns on every trajectory write, at most once a second, and
    probes every keeper's metric and receipt store each time, while a minute
@@ -255,8 +255,8 @@ let string_field name json =
 module Execution_id_set = Set.Make (String)
 
 (* Both streams report the same physical tool call. [execution_id] is the
-   RFC-0233 join key: minted once at the MCP dispatch boundary, written to
-   the tool_calls row and carried on the [Tool_called] event for the same
+   join key: minted once at the MCP dispatch boundary, written to the
+   tool_calls row and carried on the [Tool_called] event for the same
    execution. A row without one is not matched against — an unidentified
    event is kept, because nothing proves it is a duplicate. *)
 let tool_call_io_execution_id json =
@@ -418,19 +418,18 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
    than reintroducing an unbounded scan. *)
 let unbounded_window_scan_cap = 50_000
 
-(* RFC-0372 — the per-REQUEST ceiling, as opposed to [unbounded_window_scan_cap]
+(* The per-REQUEST ceiling, as opposed to [unbounded_window_scan_cap]
    above which is per STORE. The distinction is the defect: with nine sources,
    three fanning out per keeper, a per-store cap lets one request materialise
    ~30 x 50k entries, and adding a keeper raises that ceiling. A bound that
    grows with the data it bounds is not a bound.
 
    [read_limit] is abstract in the mli so "unbounded" cannot be constructed.
-   Phase 1 of RFC-0372 caps what a caller may ask for; Phase 2 makes the
-   allowance span stores instead of applying to each.
+   It caps what a caller may ask for, and the allowance spans stores instead
+   of applying to each.
 
-   The ceiling is measured, not chosen. Phase 1 picked 10_000 provisionally;
-   a load run (8 keepers x 20k entries) then measured peak RSS
-   against it on this same reader:
+   The ceiling is measured, not chosen. A load run (8 keepers x 20k entries)
+   measured peak RSS on this same reader:
 
      n =  2_000 ->  80.2 MB, 0.49 s
      n =  5_000 -> 129.4 MB, 1.03 s
@@ -474,8 +473,7 @@ let bounded_entries_for_window store ~n ?since_ts ?until_ts () =
   in
   List.filter (within_requested_window ?since_ts ?until_ts) entries
 
-(* RFC-0372 Phase 2 — merge per-store slices while holding only the newest
-   [target] entries.
+(* Merge per-store slices while holding only the newest [target] entries.
 
    [List.concat_map] materialises every store's slice before anything is
    trimmed, so the working set scales with store count: at 8 keepers the
@@ -490,8 +488,7 @@ let bounded_entries_for_window store ~n ?since_ts ?until_ts () =
    anyway.
 
    [target <= 0] keeps the old concat behaviour; callers inside this module
-   always pass a positive limit since Phase 1, but the guard keeps the helper
-   total. *)
+   always pass a positive limit, but the guard keeps the helper total. *)
 let merge_newest_bounded ~target ~read items =
   if target <= 0 then List.concat_map read items
   else
@@ -546,8 +543,8 @@ let read_tool_metrics ~masc_root ?keeper_name ~n ?since_ts ?until_ts () =
    keeper directory: the newest timestamp that directory can offer. Reading its
    rows and keeping them made the resident set scale with keeper count — up to
    64 parsed rows per directory, held for every directory at once, at the
-   ~13 KB per entry this module measured above. That is the axis RFC-0372 §5
-   makes the Phase 2 gate: adding a keeper must not raise the ceiling.
+   ~13 KB per entry this module measured above. Adding a keeper must not
+   raise the ceiling.
 
    Projecting to the timestamp during the read costs one float per row instead
    of one tree. Store classification and failure handling mirror

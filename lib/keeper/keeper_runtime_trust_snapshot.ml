@@ -325,14 +325,14 @@ let latest_decision_result ~(config : Workspace.config) ~(keeper_name : string) 
     (Yojson.Safe.t option, Keeper_memory_recall_exn_class.t) result =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   match
-    Keeper_memory.read_tail_of_file
+    Keeper_memory_recall.read_tail_of_file
       path
       ~max_bytes:Keeper_row_facts.decision_window_bytes
       ~max_lines:Keeper_row_facts.decision_window_lines
   with
   | Error exn_class -> Error exn_class
-  | Ok Keeper_memory.No_file -> Ok None
-  | Ok (Keeper_memory.Tail { lines; completion; from_file_start = _ }) ->
+  | Ok Keeper_memory_recall.No_file -> Ok None
+  | Ok (Keeper_memory_recall.Tail { lines; completion; from_file_start = _ }) ->
     Ok
       (lines
        |> List.rev
@@ -351,10 +351,10 @@ let latest_decision_result ~(config : Workspace.config) ~(keeper_name : string) 
          | Keeper_row_facts.Not_json detail ->
            let reason =
              match index, completion with
-             | 0, Keeper_memory.Partial_last_line -> Read_drop_reason.Tail_partial_write
-             | 0, Keeper_memory.Complete
-             | _, Keeper_memory.Partial_last_line
-             | _, Keeper_memory.Complete -> Read_drop_reason.Entry_load_error
+             | 0, Keeper_memory_recall.Partial_last_line -> Read_drop_reason.Tail_partial_write
+             | 0, Keeper_memory_recall.Complete
+             | _, Keeper_memory_recall.Partial_last_line
+             | _, Keeper_memory_recall.Complete -> Read_drop_reason.Entry_load_error
            in
            report_decision_log_read_drop ~reason ~path ~detail;
            None
@@ -377,7 +377,7 @@ let latest_decision_json ~(config : Workspace.config) ~(keeper_name : string) :
   with
   | Fact_cell.Held row | Fact_cell.Read_and_kept row | Fact_cell.Read_not_kept row -> row
   | Fact_cell.Read_failed exn_class ->
-    Keeper_memory.record_memory_recall_read_error
+    Keeper_memory_recall.record_memory_recall_read_error
       ~site:"keeper_runtime_trust_decisions"
       path
       exn_class;

@@ -240,8 +240,7 @@ effect sink 직전에 opaque operation + normalized input으로 Keeper Gate를
 ### 6.1 계층 구조
 
 ```
-keeper_memory.ml (facade)
-  |-- keeper_memory_recall.ml (history/tail JSONL reading)
+keeper_memory_recall.ml (history/tail JSONL reading)
 ```
 
 ### 6.2 Memory Recall
@@ -492,11 +491,7 @@ Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가�
 
 `keeper_meta` 레코드가 약 100개 필드를 가지며 `meta_to_json`/`meta_of_json`이 각각 ~200줄이다. 필드 군(group)별 sub-record 분할이 필요하다.
 
-### 15.2 keeper_memory 계층의 include chain
-
-`keeper_memory.ml` -> `keeper_memory_recall.ml` 단층 facade가 남아 있다.
-
-### 15.3 Memory Boundary
+### 15.2 Memory Boundary
 
 경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage이며, memory storage 자체는 Memory OS fact store가 소유한다.
 

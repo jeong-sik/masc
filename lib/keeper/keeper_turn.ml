@@ -15,8 +15,7 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
-open Keeper_memory
-open Keeper_alerting
+open Keeper_memory_recall
 open Keeper_keepalive
 open Keeper_turn_setup
 open Otel_spans

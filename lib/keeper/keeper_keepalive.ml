@@ -26,7 +26,7 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
-open Keeper_memory
+open Keeper_memory_recall
 include Keeper_keepalive_signal
 include Keeper_heartbeat_snapshot
 include Keeper_heartbeat_loop

@@ -3,7 +3,7 @@ open Fs_compat_base_io
 
 (** Parse pre-read string lines as JSONL.
     Use when lines come from typed tail readers such as
-    [Keeper_memory.read_file_tail_lines_result] or other non-file
+    [Keeper_memory_recall.read_file_tail_lines_result] or other non-file
     sources.  Logs malformed lines with [source] tag.
 
     Matches [fold_jsonl]'s line-tracking semantics: [line_no] is

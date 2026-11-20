@@ -443,11 +443,10 @@ val note_tool_outcome :
   t -> execution_id:string -> outcome:tool_outcome -> duration:string option -> bool
 (** Folds in what the durable transcript recorded for one call -- its outcome
     and its [dur] -- matched by execution id; returns whether a call matched.
-    The wire does not carry either yet (RFC-0412 stage 4 moves them there), so
-    a turn drawn from its log would otherwise show a failed call as returned
-    and no durations once the loaded rows are left out of the timeline. A
-    durable outcome that says less than the stream saw ([Never_returned],
-    unrecorded) changes nothing. *)
+    The wire does not carry either, so a turn drawn from its log would
+    otherwise show a failed call as returned and no durations once the loaded
+    rows are left out of the timeline. A durable outcome that says less than
+    the stream saw ([Never_returned], unrecorded) changes nothing. *)
 
 val note_skill_activity : ?runtime_inventory:skill_activity list -> t -> skill_activity -> unit
 (** Folds in the exact delivery record of one skill read -- the states the
@@ -547,7 +546,7 @@ type trail_item =
       ; items : trail_item list
       }
       (** What runtime attempt [attempt] produced before the next attempt
-          began, in order. Kept rather than wiped (RFC-0412 §3.3) so a retry
+          began, in order. Kept rather than wiped so a retry
           never takes back what the reader was reading; the pane marks it.
           One block per superseded attempt, siblings in the trail in attempt
           order, never nested: a boundary folds only the stretches since the

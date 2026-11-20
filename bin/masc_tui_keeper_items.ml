@@ -31,7 +31,7 @@ let filter_name = function
 
 (* The balance a purchase must fit: the balance now when the roster's Candle
    basis says it, else the account's balance when it was read, the latest
-   the TUI has (RFC-0481 §3.7). *)
+   the TUI has. *)
 let spendable_milli (account : account) ~balance_milli =
   match balance_milli with
   | Some now -> now

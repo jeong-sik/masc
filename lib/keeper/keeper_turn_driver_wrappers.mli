@@ -24,6 +24,7 @@ val run_named_with_masc_tools :
   raw_trace:Agent_core.Raw_trace.t option ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
+  ?cache_system_prompt:bool ->
   ?attempt_continuation:
     (dispatch:Keeper_attempt_dispatch.t -> Agent_core.Error.t -> Runtime_attempt_dispatch.continuation) ->
   ?on_runtime_attempt_error:
@@ -59,4 +60,9 @@ val run_named_with_masc_tools :
 
     [goal_blocks] replaces the [goal] string as the turn input when present
     (same contract as {!Keeper_turn_driver.run_named}): the caller puts the
-    prompt itself in a [Text] block first, then any media blocks. *)
+    prompt itself in a [Text] block first, then any media blocks.
+
+    [cache_system_prompt] defaults to [false] (1-shot safe) and forwards
+    directly to {!Keeper_turn_driver.run_named}. Multi-turn tool-calling
+    reviewers pass [~cache_system_prompt:true] explicitly so provider prompt
+    caching stays active across tool rounds. *)

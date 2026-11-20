@@ -2658,6 +2658,34 @@ let test_no_active_tasks_stop_signal () =
       false
       (str_contains result "STOP calling"))
 
+let test_status_filter_empty_reports_status () =
+  with_test_env (fun config ->
+    Alcotest.(check string)
+      "empty backlog with todo filter names the filter"
+      "No tasks with status 'todo'."
+      (Workspace.list_tasks ~status:Masc_domain.Task_status_tag.Todo config);
+    Alcotest.(check string)
+      "empty backlog without filter keeps No tasks."
+      "No tasks."
+      (Workspace.list_tasks config);
+    let _ = Workspace.add_task config ~title:"Active Task" ~priority:1 ~description:"" in
+    let _ = Workspace.claim_task_r config ~agent_name:"alice" ~task_id:"task-001" () in
+    let awaiting_result =
+      Workspace.list_tasks ~status:Masc_domain.Task_status_tag.Awaiting_verification config
+    in
+    Alcotest.(check string)
+      "non-empty backlog with awaiting_verification filter names filter"
+      "No tasks with status 'awaiting_verification'."
+      awaiting_result;
+    Alcotest.(check bool)
+      "filtered empty result does not say all done/cancelled"
+      false
+      (str_contains awaiting_result "all done/cancelled");
+    Alcotest.(check string)
+      "non-empty backlog with todo filter names filter"
+      "No tasks with status 'todo'."
+      (Workspace.list_tasks ~status:Masc_domain.Task_status_tag.Todo config))
+
 let test_no_unclaimed_tasks_stop_signal () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Claimed" ~priority:1 ~description:"" in
@@ -3581,6 +3609,7 @@ let () =
     "idle_stop_signals", [
       Alcotest.test_case "empty backlog has stop signal" `Quick test_empty_backlog_stop_signal;
       Alcotest.test_case "no active tasks has stop signal" `Quick test_no_active_tasks_stop_signal;
+      Alcotest.test_case "empty status filter names filtered status" `Quick test_status_filter_empty_reports_status;
       Alcotest.test_case "no unclaimed tasks has stop signal" `Quick test_no_unclaimed_tasks_stop_signal;
     ];
   ]

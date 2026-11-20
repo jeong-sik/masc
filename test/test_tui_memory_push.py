@@ -9,26 +9,76 @@ import urllib.parse
 from typing import Callable, cast
 
 import test_tui_chat_owed_history as owed
-import tui_memory_health_rows as rows
 
 
 HEALTH_PATH = "/api/v1/dashboard/keeper-memory-health"
-def health_payload() -> dict[str, object]:
-    keeper = rows.keeper_row(
-        "alpha",
-        revision=1,
-        updated_at=1.0,
-        facts=1,
-        observed_facts=1,
-        snapshot_bytes=16,
-        added=1,
-        snapshot_present=True,
-        age_bins=[1] + [0] * 23,
-        facts_by_hour=[{"recorded_at": 1.0, "facts": 1}],
+# Every pass and change the server counts, none moved since it started.
+NO_MEMORY_CHANGES = {
+    commit_pass: {change: 0 for change in ("added", "absorbed", "superseded", "dropped")}
+    for commit_pass in (
+        "admission", "durable", "continuity", "cleanup", "keeper_write", "keeper_delete", "operator_delete",
     )
-    return rows.fleet(
-        [keeper],
-        execution={
+}
+
+
+def health_payload() -> dict:
+    available = {"kind": "available", "messages": []}
+    context_cycle = {
+        "saved": None,
+        "saved_read_error": None,
+        "read_position": None,
+        "read_position_read_error": None,
+        "rewriting_through": None,
+        "prepared": None,
+        "synthesis": None,
+        "unread": {"snapshot": available, "memory": available},
+    }
+    librarian = {
+        "state": "drained",
+        "detail": None,
+        "pending": None,
+        "admission_wait": None, "operator_action_required": False,
+        "measured_at": 1.0,
+        "unread_atom_turns": 0,
+        "unread_official_turns": 0,
+        "continuity_unread_atoms": 0,
+        "last_success_at": None,
+        "last_failure_kind": None,
+        "stalled": None,
+    }
+    keeper = {
+        "keeper_id": "alpha",
+        "revision": 1,
+        "updated_at": 1.0,
+        "facts": 1,
+        "observed_facts": 1,
+        "derived_facts": 0,
+        "support_invalidations": 0,
+        "snapshot_bytes": 16,
+        "added": 1,
+        "removed": 0,
+        "snapshot_present": True,
+        "age_bins": [1] + [0] * 23,
+        "facts_by_hour": [{"recorded_at": 1.0, "facts": 1}],
+        "changes_since_start": NO_MEMORY_CHANGES,
+        "context_cycle": context_cycle,
+        "librarian": librarian,
+        "librarian_failures": 0,
+        "vision_ingest_errors": 0,
+        "vision_ingest_error_reasons": [],
+        "read_error": None,
+        "source_revision": 0,
+        "source_facts": 0,
+        "source_invalidations": 0,
+        "source_snapshot_bytes": 0,
+        "source_snapshot_present": False,
+        "source_read_error": None,
+        "alerts": [],
+    }
+    return {
+        "schema": "keeper.memory_os.current_health.v15",
+        "generated_at": 1.0,
+        "execution": {
             "schema": "keeper.memory_execution_availability.v1",
             "status": "disabled",
             "operator_action_required": False,
@@ -37,8 +87,37 @@ def health_payload() -> dict[str, object]:
             "operations": [],
             "semantics": "Configuration and last-cycle observation only; no provider success, source consumption or Memory commit is implied",
         },
-        totals={"facts": 1, "observed_facts": 1, "snapshot_bytes": 16, "added": 1},
-    )
+        "keepers": [keeper],
+        "totals": {
+            "facts": 1,
+            "observed_facts": 1,
+            "derived_facts": 0,
+            "support_invalidations": 0,
+            "snapshot_bytes": 16,
+            "added": 1,
+            "removed": 0,
+            "source_facts": 0,
+            "source_invalidations": 0,
+            "source_snapshot_bytes": 0,
+            "librarian_unread_turns": 0,
+            "librarian_continuity_unread_atoms": 0,
+            "librarian_continuity_unmeasured": 0,
+            "librarian_failures": 0,
+            "vision_ingest_errors": 0,
+            "read_errors": 0,
+            "source_read_errors": 0,
+        },
+        "alert_summary": {
+            "total_alerts": 0,
+            "warn_alerts": 0,
+            "error_alerts": 0,
+            "keepers_with_alerts": 0,
+            "snapshot_read_error_keepers": 0,
+            "source_snapshot_read_error_keepers": 0,
+            "librarian_stopped_keepers": 0, "librarian_attention_required_keepers": 0,
+            "librarian_starving_keepers": 0,
+        },
+    }
 
 
 def memory_dataset(keeper: str = "alpha") -> dict[str, object]:

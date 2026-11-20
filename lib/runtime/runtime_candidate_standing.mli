@@ -28,9 +28,11 @@ val order :
 (** Resolve both projections from the same frozen row. Missing projections
     contribute no evidence and never remove an unresolved declared identity.
 
-    Failures classified as {!Runtime_candidate_backpressure_state.Keeper_scoped}
-    only demote walks owned by the matching [recorded_by] Keeper, so one
-    Keeper stalling on a candidate never blocks peer Keepers. *)
+    Every [failed_attempt] obeys RFC-0458 §3.4 (#38174): because failed
+    attempts carry no TTL, [Fresh_walk_by recorder] keeps marks recorded by
+    [recorder] undemoted so the next cycle retries recovery, while peer
+    Keepers and [Every_mark_demotes] walks demote the candidate behind its
+    siblings. *)
 
 val order_for_scoped :
   now:float -> policy:policy ->
@@ -38,7 +40,9 @@ val order_for_scoped :
   scoped_backpressure_of:('a -> Runtime_candidate_backpressure_state.scoped_state option) ->
   'a list -> 'a list
 (** Variant of {!order} reading per-Keeper isolated
-    {!Runtime_candidate_backpressure_state.scoped_state} rows directly. *)
+    {!Runtime_candidate_backpressure_state.scoped_state} rows directly.
+    Entries in [keeper_failures] demote only the matching [recorded_by]
+    Keeper on [Fresh_walk_by]; [shared] marks follow {!order}. *)
 
 val is_available :
   now:float ->
@@ -47,9 +51,9 @@ val is_available :
   quota_scope:Runtime_quota_window.scope option ->
   candidate_backpressure:Runtime_candidate_backpressure.candidate option ->
   unit -> bool
-(** [true] when the candidate is not demoted at [now] for [keeper_name].
-    When [?keeper_name] is omitted, [Keeper_scoped] marks do not block
-    availability while [Provider_wide] marks do. *)
+(** [true] when the candidate is not demoted at [now] for [keeper_name]
+    under {!order} ([Fresh_walk_by] when [Some keeper_name],
+    [Every_mark_demotes] when omitted). *)
 
 val is_available_for_scoped :
   now:float ->
@@ -59,7 +63,9 @@ val is_available_for_scoped :
   scoped_backpressure:Runtime_candidate_backpressure_state.scoped_state option ->
   unit -> bool
 (** Variant of {!is_available} over
-    {!Runtime_candidate_backpressure_state.scoped_state}. *)
+    {!Runtime_candidate_backpressure_state.scoped_state}. When [?keeper_name]
+    is omitted, [keeper_failures] entries do not block availability while
+    [shared] marks do. *)
 
 type 'a exact_order =
   { walk : 'a list

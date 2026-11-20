@@ -170,7 +170,7 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 
 ### 5.3 영수증 대기가 닿는 턴
 
-**[사실]** `keeper_receipt_wait` 로 기다릴 수 있는 턴은 채팅 실행을 맡은 턴(`turn_kind` 가 `direct`)뿐이에요. 도구는 모든 run 이 받지만, 채팅 실행이 없는 run(autonomous, verifier, metric hook)의 호출은 아무것도 읽기 전에 거절돼요(`Keeper_tool_receipt_wait.handle`, RFC `a-sent-request-prefix-changes-only-when-the-window-moves` §3.2). 도구가 턴을 채팅 operation 의 보관 체크포인트에서 끝내고, 대기를 `Chat_operation_store.defer_direct_checkpoint ~operation_id` 로 그 operation 에 적기 때문이에요. 채팅 턴은 `Keeper_repetition_scope.Execution.direct_operation operation_id` 로 operation 을 얻어요(`keeper_turn.ml`). autonomous 순환(`Keeper_unified_turn.run_keeper_cycle`)에는 `operation_id` 도 `Chat_operation_store` 참조도 없어요. autonomous 턴도 체크포인트는 저장하지만 대기를 적을 operation 기록이 없어요. 위 5.2 와 4절은 이 조건을 다루지 않았어요.
+**[사실]** `keeper_receipt_wait` 로 기다릴 수 있는 턴은 채팅 실행을 맡은 턴(`turn_kind` 가 `direct`)뿐이에요. 도구는 모든 run 이 받지만, 채팅 실행이 없는 run(autonomous, verifier, metric hook)의 호출은 아무것도 읽기 전에 거절돼요(`Keeper_tool_receipt_wait.handle`). 도구가 턴을 채팅 operation 의 보관 체크포인트에서 끝내고, 대기를 `Chat_operation_store.defer_direct_checkpoint ~operation_id` 로 그 operation 에 적기 때문이에요. 채팅 턴은 `Keeper_repetition_scope.Execution.direct_operation operation_id` 로 operation 을 얻어요(`keeper_turn.ml`). autonomous 순환(`Keeper_unified_turn.run_keeper_cycle`)에는 `operation_id` 도 `Chat_operation_store` 참조도 없어요. autonomous 턴도 체크포인트는 저장하지만 대기를 적을 operation 기록이 없어요. 위 5.2 와 4절은 이 조건을 다루지 않았어요.
 
 **[사실]** 기준선 창(11-09T07:40Z~11-12T07:40Z, 72시간)의 GitHub 대기를 `turn_kind` 로 나눴어요(`sleep_waits.py kinds`, 결과 `result-kinds-2026-11-09T07-40-23Z_11-12T07-40-23Z.json`). `sleep`+`gh` 열의 합은 2절의 535건과 같아요.
 

@@ -152,12 +152,10 @@ let listen_on_loopback_alone () =
 
    The config root is the one of the installation, whatever the shell of the
    run holds: no MASC_CONFIG_DIR, which a run that allows test overrides
-   would follow out of the temporary directory, and the default bootstrap,
-   which makes the folder of definitions the case reads. An empty value is
-   read as unset, and the child process of a case inherits it. *)
+   would follow out of the temporary directory. An empty value is read as
+   unset, and the child process of a case inherits it. *)
 let with_installation run =
   Unix.putenv Env_config_core.config_dir_env_key "";
-  Unix.putenv "MASC_CONFIG_BOOTSTRAP" "";
   let root = Unix.realpath (Filename.temp_dir "server-accounts-engine-" "") in
   Fun.protect ~finally:(fun () -> remove_tree root)
   @@ fun () ->

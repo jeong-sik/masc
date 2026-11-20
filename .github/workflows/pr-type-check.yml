@@ -158,6 +158,7 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         shell: bash
         run: |
           set -euo pipefail
@@ -175,7 +176,8 @@ jobs:
             --head-ref="$HEAD_REF" \
             --base-ref="$BASE_REF" \
             --default-branch="${DEFAULT_BRANCH:-main}" \
-            --same-repo="${SAME_REPO:-false}"
+            --same-repo="${SAME_REPO:-false}" \
+            --fetch-ref="refs/pull/${PR_NUMBER}/head"
 
   type-check:
     needs: [changes]

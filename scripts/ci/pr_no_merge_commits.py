@@ -144,6 +144,7 @@ def find_merge_commits(
     head_ref: str,
     base_ref: str,
     default_branch: str,
+    fetch_ref: str = "",
 ) -> tuple[int, list[tuple[str, int, str]]]:
     """Return (checked_commit_count, merge_commits) for `base..head`."""
     base_ref = _validate_ref(base_ref, "--base-ref")
@@ -158,25 +159,58 @@ def find_merge_commits(
     if base_ref != default_branch:
         excludes.append(f"--shallow-exclude=refs/heads/{default_branch}")
 
-    with tempfile.TemporaryDirectory(prefix="pr-no-merge-commits-") as tmp:
-        probe = str(pathlib.Path(tmp))
-        _git(probe, "init", "-q")
-        _git(probe, "remote", "add", "--", "origin", remote_url)
-        fetch = _fetch_pr_commits(probe, excludes, head_sha)
+    def _run_fetch(target_ref: str) -> tuple[str, subprocess.CompletedProcess[str], tempfile.TemporaryDirectory[str]]:
+        tmp_dir = tempfile.TemporaryDirectory(prefix="pr-no-merge-commits-")
+        probe_dir = str(pathlib.Path(tmp_dir.name))
+        _git(probe_dir, "init", "-q")
+        _git(probe_dir, "remote", "add", "--", "origin", remote_url)
+        res = _fetch_pr_commits(probe_dir, excludes, target_ref)
         if (
-            fetch.returncode != 0
+            res.returncode != 0
             and base_ref != default_branch
-            and _DEEPEN_NOT_MISSING in fetch.stderr
+            and _DEEPEN_NOT_MISSING in res.stderr
         ):
             # A stacked parent branch can be deleted after merging while a
             # re-run or in-flight job still carries the old base ref. Fall back
             # to excluding only the repository default branch.
-            fetch = _fetch_pr_commits(
-                probe, [f"--shallow-exclude=refs/heads/{default_branch}"], head_sha
+            res = _fetch_pr_commits(
+                probe_dir, [f"--shallow-exclude=refs/heads/{default_branch}"], target_ref
             )
+        return probe_dir, res, tmp_dir
+
+    # Fork PR head commits are advertised on the base repository under
+    # `refs/pull/<N>/head` rather than `refs/heads/*`, so prefer `--fetch-ref`
+    # when provided and fall back to raw `head_sha` if the ref moved past this
+    # workflow run's merge commit.
+    targets: list[str] = []
+    if fetch_ref:
+        targets.append(_validate_ref(fetch_ref, "--fetch-ref"))
+    targets.append(head_sha)
+
+    probe = ""
+    fetch: subprocess.CompletedProcess[str] | None = None
+    active_tmp: tempfile.TemporaryDirectory[str] | None = None
+    try:
+        for idx, target in enumerate(targets):
+            cand_probe, cand_fetch, cand_tmp = _run_fetch(target)
+            if cand_fetch.returncode != 0:
+                if _NO_COMMITS_SHALLOW in cand_fetch.stderr:
+                    cand_tmp.cleanup()
+                    return 0, []
+                if idx + 1 < len(targets):
+                    cand_tmp.cleanup()
+                    continue
+                probe, fetch, active_tmp = cand_probe, cand_fetch, cand_tmp
+                break
+            fetched_sha = _git(cand_probe, "rev-parse", "FETCH_HEAD").strip()
+            if fetched_sha != head_sha and idx + 1 < len(targets):
+                cand_tmp.cleanup()
+                continue
+            probe, fetch, active_tmp = cand_probe, cand_fetch, cand_tmp
+            break
+
+        assert fetch is not None
         if fetch.returncode != 0:
-            if _NO_COMMITS_SHALLOW in fetch.stderr:
-                return 0, []
             raise RuntimeError(
                 f"git fetch failed for {head_ref} ({head_sha[:12]}): "
                 f"{fetch.stderr.strip() or f'exit {fetch.returncode}'}"
@@ -207,6 +241,9 @@ def find_merge_commits(
             (entry for entry in parsed if entry[1] >= 2), key=lambda item: item[0]
         )
         return len(parsed), merges
+    finally:
+        if active_tmp is not None:
+            active_tmp.cleanup()
 
 
 def check(
@@ -217,13 +254,14 @@ def check(
     base_ref: str,
     default_branch: str,
     same_repo: bool,
+    fetch_ref: str = "",
 ) -> int:
     head_ref = _validate_ref(head_ref, "--head-ref")
     if same_repo and head_ref.startswith("release/v"):
         print(f"same-repo release branch '{head_ref}' is exempt from the merge-commit guard")
         return 0
     checked, merges = find_merge_commits(
-        git_dir, remote, merge, head_ref, base_ref, default_branch
+        git_dir, remote, merge, head_ref, base_ref, default_branch, fetch_ref=fetch_ref
     )
     if not merges:
         print(
@@ -267,6 +305,11 @@ def main() -> int:
         default="false",
         help="'true' only when the PR head branch lives in the target repository",
     )
+    parser.add_argument(
+        "--fetch-ref",
+        default="",
+        help="optional ref on --remote (e.g. refs/pull/<N>/head) for fork PRs",
+    )
     args = parser.parse_args()
     merge: str = args.merge
     if _SHA.fullmatch(merge) is None:
@@ -281,6 +324,7 @@ def main() -> int:
             args.base_ref,
             args.default_branch,
             same_repo,
+            fetch_ref=args.fetch_ref,
         )
     except subprocess.CalledProcessError as error:
         stderr = (

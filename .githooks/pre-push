@@ -3,6 +3,9 @@
 # This repository squash-merges onto main; merging main or another PR into a branch
 # accumulates ancestry and causes recurring conflicts. Rebase instead and push with
 # `--force-with-lease` (or bypass in an emergency with `git push --no-verify`).
+# Note: this local hook intentionally checks against local trunk refs (`main`) for
+# fast offline feedback, whereas the required CI gate (`scripts/ci/pr_no_merge_commits.py`)
+# is authoritative for exact PR `base..head` and `same_repo` `release/v*` exemptions.
 
 set -euo pipefail
 

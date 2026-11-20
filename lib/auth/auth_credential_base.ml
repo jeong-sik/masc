@@ -172,7 +172,7 @@ let verify_internal_keeper_token config ~token =
   | None -> false
 ;;
 
-let ensure_internal_keeper_token config =
+let ensure_internal_keeper_token ?(export_env = true) config =
   let existing_env =
     match Sys.getenv_opt internal_keeper_token_env_key with
     | Some raw ->
@@ -186,11 +186,16 @@ let ensure_internal_keeper_token config =
     Atomic.set internal_keeper_token_holder (Some raw_token);
     raw_token
   | None ->
-    let raw_token = generate_token () in
-    save_internal_keeper_token_hash config ~raw_token;
-    Unix.putenv internal_keeper_token_env_key raw_token;
-    Atomic.set internal_keeper_token_holder (Some raw_token);
-    raw_token
+    (match Atomic.get internal_keeper_token_holder with
+     | Some token when verify_internal_keeper_token config ~token ->
+       if export_env then Unix.putenv internal_keeper_token_env_key token;
+       token
+     | Some _ | None ->
+       let raw_token = generate_token () in
+       save_internal_keeper_token_hash config ~raw_token;
+       if export_env then Unix.putenv internal_keeper_token_env_key raw_token;
+       Atomic.set internal_keeper_token_holder (Some raw_token);
+       raw_token)
 ;;
 
 (** Read the initial admin agent name, if set. *)

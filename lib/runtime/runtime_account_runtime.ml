@@ -90,17 +90,14 @@ let credentials_of = function
      | Error (Runtime_api_key_file.Key_unreadable why) -> Error (Key_unreadable why))
 ;;
 
-let of_template
-      (config : Runtime_schema.config)
-      ~template
-      ~provider_id
-      ~account_home
-      ~account
-      ~binding:choice
+let materialize_single_runtime
+    (config : Runtime_schema.config)
+    ~(provider : Runtime_schema.provider)
+    ~(binding : Runtime_schema.binding)
+    ~provider_id
+    ~account_home
+    ~credentials
   =
-  let ( let* ) = Result.bind in
-  let* provider, binding = template_binding config ~template ~provider_id choice in
-  let* credentials = credentials_of account in
   let id = Runtime_schema.binding_key binding in
   let alone =
     { config with
@@ -127,4 +124,70 @@ let of_template
     (match List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id) runtimes with
      | Some runtime -> Ok runtime
      | None -> Error (Not_materialized ("no runtime " ^ id ^ " was materialized")))
+;;
+
+let of_template
+      (config : Runtime_schema.config)
+      ~template
+      ~provider_id
+      ~account_home
+      ~account
+      ~binding:choice
+  =
+  let ( let* ) = Result.bind in
+  let* provider, binding = template_binding config ~template ~provider_id choice in
+  let* credentials = credentials_of account in
+  materialize_single_runtime
+    config
+    ~provider
+    ~binding
+    ~provider_id
+    ~account_home
+    ~credentials
+;;
+
+let of_person_template
+      (config : Runtime_schema.config)
+      ~template
+      ~provider_account_id
+      ~integration_id
+      ~account_home
+      ~binding:choice
+  =
+  let ( let* ) = Result.bind in
+  let provider_id = Authz_types.Provider_account_id.to_string provider_account_id in
+  let* provider, binding = template_binding config ~template ~provider_id choice in
+  let person_cfg =
+    { config with
+      providers =
+        [ { provider with
+            id = provider_id
+          ; account_home = Some account_home
+          ; credentials = None
+          ; enabled = true
+          }
+        ]
+    }
+  in
+  match
+    Runtime_instance.of_person_binding
+      ~provider_account_id
+      ~integration_id
+      ~account_home
+      person_cfg
+      binding
+  with
+  | Error reason ->
+    Error (Not_materialized (Runtime_config_error.string_of_drop_reason reason))
+  | Ok runtime ->
+    let validation =
+      let* () = Runtime_config_validation.validate_runtime_max_context [ runtime ] in
+      Runtime_config_validation.validate_runtime_thinking_requests [ runtime ]
+    in
+    (match validation with
+     | Ok () -> Ok runtime
+     | Error failure ->
+       Error
+         (Not_materialized
+            (Runtime_config_error.to_diagnostic_text ~config_path:config_label failure)))
 ;;

@@ -38,6 +38,7 @@ let keeper_credential_write_authority config ~credentials ~agent_name stored
 ;;
 
 let ensure_keeper_credential_in_transaction
+    ?(export_env = true)
     ((Credential_transaction config) as transaction) ~credentials ~find_token ~agent_name =
   let create_fresh_keeper_token transaction existing =
     let raw_token = generate_token () in
@@ -83,7 +84,7 @@ let ensure_keeper_credential_in_transaction
         when constant_time_string_equal credential.token (sha256_hash raw_token) ->
           validate_file_backed_bearer raw_token
       | Some _, Some _ | Some _, None | None, Some _ | None, None -> Ok () in
-    let* _internal = credential_read_result (fun () -> ensure_internal_keeper_token config) in
+    let* _internal = credential_read_result (fun () -> ensure_internal_keeper_token ~export_env config) in
     match current, raw with
     | Some credential, Some raw_token
       when constant_time_string_equal credential.token (sha256_hash raw_token) ->
@@ -95,17 +96,17 @@ let ensure_keeper_credential_in_transaction
       create_fresh_keeper_token transaction current
 ;;
 
-let ensure_keeper_credential config ~agent_name =
+let ensure_keeper_credential ?(export_env = true) config ~agent_name =
   with_credential_transaction config (fun transaction ->
     let open Result.Syntax in
     let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
-    ensure_keeper_credential_in_transaction transaction ~agent_name
+    ensure_keeper_credential_in_transaction ~export_env transaction ~agent_name
       ~credentials:snapshot.current_credentials
       ~find_token:(find_static_credential_in_transaction ~leaf_policy:Follow_regular_symlink transaction))
   |> Result.join
 ;;
 
-let ensure_keeper_credentials config ~agent_names =
+let ensure_keeper_credentials ?(export_env = true) config ~agent_names =
   with_credential_transaction config (fun transaction ->
     let open Result.Syntax in
     let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
@@ -118,7 +119,7 @@ let ensure_keeper_credentials config ~agent_names =
             Error (Auth (Auth_error.InvalidToken "Credential bearer was shared at batch admission"))
           else find_static_credential_with_lookup
               ~lookup:(Credential_batch.owners_for_hash current) ~token in
-        let result = ensure_keeper_credential_in_transaction transaction ~agent_name
+        let result = ensure_keeper_credential_in_transaction ~export_env transaction ~agent_name
             ~credentials:(Credential_batch.ownership current)
             ~find_token in
         (agent_name, result) ::

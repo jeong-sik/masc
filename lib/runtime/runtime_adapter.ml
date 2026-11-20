@@ -1044,8 +1044,7 @@ let materialize_provider_binding ~construction (cfg : Runtime_schema.config) (bi
    alone, so a shell without ~/.local/bin on PATH -- the one the installer was
    run from -- could pick the client in the wizard and then fail to start it
    (masc #37747). *)
-let codex_app_server_execution (provider : Runtime_schema.provider)
-    (spec : Runtime_schema.model_spec) : (Runtime_execution.t, string) result =
+let validate_codex_provider (provider : Runtime_schema.provider) =
   match provider.transport with
   | Http _ ->
     Error
@@ -1069,16 +1068,46 @@ let codex_app_server_execution (provider : Runtime_schema.provider)
             "provider %S uses codex-app-server and must declare \
              is-non-interactive = true"
             provider.id)
-     | None ->
-       let open Result.Syntax in
-       let* captured = Runtime_official_account.capture ~client:Codex ~declaration:provider.account_home in
-       Ok
-         (Runtime_execution.Codex_app_server
-            { cli_path = Runtime_official_cli_install.spawn_path Codex ~command
-            ; account_home = Runtime_account_access.seal captured
-            ; model = Some spec.api_name
-            ; timeout_s = Runtime_codex_app_server.default_timeout_s
-            }))
+     | None -> Ok command)
+;;
+
+let codex_app_server_execution (provider : Runtime_schema.provider)
+    (spec : Runtime_schema.model_spec) : (Runtime_execution.t, string) result =
+  let open Result.Syntax in
+  let* command = validate_codex_provider provider in
+  let* captured = Runtime_official_account.capture ~client:Codex ~declaration:provider.account_home in
+  Ok
+    (Runtime_execution.Codex_app_server
+       { cli_path = Runtime_official_cli_install.spawn_path Codex ~command
+       ; account_home = Runtime_account_access.seal captured
+       ; model = Some spec.api_name
+       ; timeout_s = Runtime_codex_app_server.default_timeout_s
+       })
+;;
+
+let codex_app_server_person_execution
+    ~provider_account_id
+    ~integration_id
+    ~account_home
+    (provider : Runtime_schema.provider)
+    (spec : Runtime_schema.model_spec)
+  : (Runtime_execution.t, string) result
+  =
+  let open Result.Syntax in
+  let* command = validate_codex_provider provider in
+  let* home = Runtime_account_home.of_string account_home in
+  Ok
+    (Runtime_execution.Codex_app_server
+       { cli_path = Runtime_official_cli_install.spawn_path Codex ~command
+       ; account_home =
+           Runtime_account_access.seal_person
+             ~client:Codex
+             ~provider_account_id
+             ~integration_id
+             ~account_home:home
+       ; model = Some spec.api_name
+       ; timeout_s = Runtime_codex_app_server.default_timeout_s
+       })
 ;;
 
 let runtime_antigravity_effort = function
@@ -1146,8 +1175,11 @@ let antigravity_cli_execution (provider : Runtime_schema.provider)
             }))
 ;;
 
-let claude_code_execution (provider : Runtime_schema.provider)
-    (spec : Runtime_schema.model_spec) : (Runtime_execution.t, string) result =
+type claude_credential =
+  | No_claude_credential
+  | Key_file of string
+
+let validate_claude_provider (provider : Runtime_schema.provider) =
   match provider.transport with
   | Http _ ->
     Error
@@ -1161,14 +1193,6 @@ let claude_code_execution (provider : Runtime_schema.provider)
          "provider %S declares an empty Claude Code CLI command"
          provider.id)
   | Cli command ->
-    let execution captured =
-      Runtime_execution.Claude_code
-        { cli_path = Runtime_official_cli_install.spawn_path Claude ~command
-        ; account_home = Runtime_account_access.seal captured
-        ; model = Some spec.api_name
-        ; timeout_s = Runtime_claude_code.default_timeout_s
-        }
-    in
     (match provider.credentials with
      | Some (Runtime_schema.Env _ | Runtime_schema.Inline _) ->
        Error
@@ -1183,28 +1207,75 @@ let claude_code_execution (provider : Runtime_schema.provider)
             "provider %S uses claude-code and must declare \
              is-non-interactive = true"
             provider.id)
-     | None ->
-       let open Result.Syntax in
-       let* captured = Runtime_official_account.capture ~client:Claude_code ~declaration:provider.account_home in
-       Ok (execution captured)
-     | Some (Runtime_schema.File path) ->
-       (* The key goes the way of the declaration of the provider (RFC
-          a-persons-api-key-is-their-own-provider-account 3.4): read by the
-          check of every credential file, captured with the account, and
-          handed to a child only by [Runtime_account_access.authorize]. *)
-       (match
-          Runtime_official_account.capture_on_key
-            ~declaration:provider.account_home
-            ~key_file:path
-        with
-        | Ok captured -> Ok (execution captured)
-        | Error (Runtime_official_account.Key_not_read error) ->
-          Error
-            (Printf.sprintf
-               "provider %S uses claude-code on a file credential: %s"
-               provider.id
-               (Runtime_api_key_file.read_error_to_string error))
-        | Error (Runtime_official_account.Key_not_captured detail) -> Error detail))
+     | None -> Ok (command, No_claude_credential)
+     | Some (Runtime_schema.File path) -> Ok (command, Key_file path))
+;;
+
+let claude_code_execution_of ~command ~account_home ~(spec : Runtime_schema.model_spec) =
+  Runtime_execution.Claude_code
+    { cli_path = Runtime_official_cli_install.spawn_path Claude ~command
+    ; account_home
+    ; model = Some spec.api_name
+    ; timeout_s = Runtime_claude_code.default_timeout_s
+    }
+;;
+
+let claude_code_execution (provider : Runtime_schema.provider)
+    (spec : Runtime_schema.model_spec) : (Runtime_execution.t, string) result =
+  let open Result.Syntax in
+  let* command, credential = validate_claude_provider provider in
+  match credential with
+  | No_claude_credential ->
+    let* captured = Runtime_official_account.capture ~client:Claude_code ~declaration:provider.account_home in
+    Ok (claude_code_execution_of ~command ~account_home:(Runtime_account_access.seal captured) ~spec)
+  | Key_file path ->
+    (* The key goes the way of the declaration of the provider (RFC
+       a-persons-api-key-is-their-own-provider-account 3.4): read by the
+       check of every credential file, captured with the account, and
+       handed to a child only by [Runtime_account_access.authorize]. *)
+    (match
+       Runtime_official_account.capture_on_key
+         ~declaration:provider.account_home
+         ~key_file:path
+     with
+     | Ok captured ->
+       Ok (claude_code_execution_of ~command ~account_home:(Runtime_account_access.seal captured) ~spec)
+     | Error (Runtime_official_account.Key_not_read error) ->
+       Error
+         (Printf.sprintf
+            "provider %S uses claude-code on a file credential: %s"
+            provider.id
+            (Runtime_api_key_file.read_error_to_string error))
+     | Error (Runtime_official_account.Key_not_captured detail) -> Error detail)
+;;
+
+let claude_code_person_execution
+    ~provider_account_id
+    ~integration_id
+    ~account_home
+    (provider : Runtime_schema.provider)
+    (spec : Runtime_schema.model_spec)
+  : (Runtime_execution.t, string) result
+  =
+  let open Result.Syntax in
+  let* command, credential = validate_claude_provider provider in
+  match credential with
+  | Key_file _ ->
+    Error
+      (Printf.sprintf
+         "provider %S uses claude-code for a person account and must not declare \
+          credentials in runtime configuration"
+         provider.id)
+  | No_claude_credential ->
+    let* home = Runtime_account_home.of_string account_home in
+    let account_home =
+      Runtime_account_access.seal_person
+        ~client:Claude_code
+        ~provider_account_id
+        ~integration_id
+        ~account_home:home
+    in
+    Ok (claude_code_execution_of ~command ~account_home ~spec)
 ;;
 
 let muse_serve_execution (provider : Runtime_schema.provider)
@@ -1329,6 +1400,35 @@ let refuse_anthropic_thinking_control_on_official_client
   | Runtime_schema.Vertex_gemini_api -> Ok ()
 ;;
 
+let validate_official_binding
+    (provider : Runtime_schema.provider)
+    (spec : Runtime_schema.model_spec)
+    (binding : Runtime_schema.binding)
+  =
+  let open Result.Syntax in
+  let* () =
+    match provider.api_format with
+    | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api -> Ok ()
+    | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime | Muse_serve_runtime
+    | Vibe_cli_runtime ->
+      let* () =
+        validate_parallel_tool_policy provider ~model_id:binding.model_id
+          ~supports_parallel_tool_suppression:false
+          ~disable_parallel_tool_use:binding.disable_parallel_tool_use
+      in
+      (* An official client writes its own cache breakpoints, so a
+         declared lifetime would reach no request. *)
+      validate_cache_retention provider ~model_id:binding.model_id
+        ~supports_extended_cache_ttl:false ~cache_retention:binding.cache_retention
+      |> Result.map (fun (_ : bool) -> ())
+  in
+  refuse_anthropic_thinking_control_on_official_client provider spec
+;;
+
+let official_execution_materialization result =
+  Result.map (fun execution -> { execution; credential_admission = None }) result
+;;
+
 let materialize_execution ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
     : (execution_materialization, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
@@ -1338,32 +1438,18 @@ let materialize_execution ~construction (cfg : Runtime_schema.config) (binding :
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
        let open Result.Syntax in
-       let* () = match provider.api_format with
-         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api -> Ok ()
-         | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime | Muse_serve_runtime
-         | Vibe_cli_runtime ->
-           let* () = validate_parallel_tool_policy provider ~model_id:binding.model_id
-             ~supports_parallel_tool_suppression:false
-             ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
-           (* An official client writes its own cache breakpoints, so a
-              declared lifetime would reach no request. *)
-           validate_cache_retention provider ~model_id:binding.model_id
-             ~supports_extended_cache_ttl:false ~cache_retention:binding.cache_retention
-           |> Result.map (fun (_ : bool) -> ()) in
-       let* () = refuse_anthropic_thinking_control_on_official_client provider spec in
-       let official result = Result.map
-         (fun execution -> {execution;credential_admission=None}) result in
+       let* () = validate_official_binding provider spec binding in
        (match provider.api_format with
         | Runtime_schema.Codex_app_server_runtime ->
-          official (codex_app_server_execution provider spec)
+          official_execution_materialization (codex_app_server_execution provider spec)
         | Runtime_schema.Antigravity_cli_runtime ->
-          official (antigravity_cli_execution provider spec)
+          official_execution_materialization (antigravity_cli_execution provider spec)
         | Runtime_schema.Claude_code_runtime ->
-          official (claude_code_execution provider spec)
+          official_execution_materialization (claude_code_execution provider spec)
         | Runtime_schema.Muse_serve_runtime ->
-          official (muse_serve_execution provider spec)
+          official_execution_materialization (muse_serve_execution provider spec)
         | Runtime_schema.Vibe_cli_runtime ->
-          official (vibe_cli_execution provider spec)
+          official_execution_materialization (vibe_cli_execution provider spec)
         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api ->
           Result.map
             (fun (selected : provider_materialization) ->
@@ -1371,4 +1457,60 @@ let materialize_execution ~construction (cfg : Runtime_schema.config) (binding :
                   (Runtime_account_access.seal_api selected.provider_config);
                credential_admission=Some selected.credential_admission})
             (materialize_provider_binding ~construction cfg binding)))
+;;
+
+let materialize_person_execution
+    ~construction:(_ : construction)
+    ~provider_account_id
+    ~integration_id
+    ~account_home
+    (cfg : Runtime_schema.config)
+    (binding : Runtime_schema.binding)
+  : (execution_materialization, string) result
+  =
+  match Runtime_schema.model_of_id cfg binding.model_id with
+  | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
+  | Some spec ->
+    (match Runtime_schema.provider_of_id cfg binding.provider_id with
+     | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
+     | Some provider ->
+       (match provider.credentials with
+        | Some _ ->
+          Error
+            (Printf.sprintf
+               "provider %S declares credentials and cannot build a person runtime"
+               provider.id)
+        | None ->
+          let open Result.Syntax in
+          let* () = validate_official_binding provider spec binding in
+          (match provider.api_format with
+           | Runtime_schema.Codex_app_server_runtime ->
+             official_execution_materialization
+               (codex_app_server_person_execution
+                  ~provider_account_id
+                  ~integration_id
+                  ~account_home
+                  provider
+                  spec)
+           | Runtime_schema.Claude_code_runtime ->
+             official_execution_materialization
+               (claude_code_person_execution
+                  ~provider_account_id
+                  ~integration_id
+                  ~account_home
+                  provider
+                  spec)
+           | Runtime_schema.Muse_serve_runtime ->
+             official_execution_materialization
+               (muse_serve_execution
+                  { provider with account_home = Some account_home }
+                  spec)
+           | Runtime_schema.Antigravity_cli_runtime
+           | Runtime_schema.Vibe_cli_runtime
+           | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api ->
+             Error
+               (Printf.sprintf
+                  "provider %S uses protocol %s and cannot build a person runtime"
+                  provider.id
+                  provider.protocol))))
 ;;

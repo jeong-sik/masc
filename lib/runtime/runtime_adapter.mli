@@ -153,3 +153,22 @@ val materialize_execution
     its absence surfaces when the client is spawned, not here. A [vibe-cli]
     command is kept exactly as configured, and its binding is refused when it
     declares [reasoning-effort] or [turn-timeout-s]. *)
+
+val materialize_person_execution
+  :  construction:construction
+  -> provider_account_id:Authz_types.Provider_account_id.t
+  -> integration_id:Authz_types.Integration_id.t
+  -> account_home:string
+  -> Runtime_schema.config
+  -> Runtime_schema.binding
+  -> (execution_materialization, string) result
+(** Materialize an official-client execution for a person's account using
+    the explicit [~account_home] (never the provider declaration's
+    [account_home]), without reading key files, home configuration, or
+    process environment at build time.
+    - [Claude_code] and [Codex_app_server] hold credential-free person seals
+      ({!Runtime_account_access.seal_person}).
+    - [Muse_serve] declares its account home via
+      {!Runtime_account_access.declare_muse_home}.
+    - Providers declaring [credentials], HTTP protocols, [Antigravity_cli],
+      and [Vibe_cli] are refused. *)

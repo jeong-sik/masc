@@ -108,14 +108,6 @@ let error_of label body =
   | exception Yojson.Json_error detail -> Alcotest.failf "%s: %s: %S" label detail body
 ;;
 
-(* A token the engine put in the environment of the process. Its value is
-   sent and never printed. *)
-let token_of name =
-  match Sys.getenv_opt name with
-  | Some value when not (String.equal (String.trim value) "") -> value
-  | Some _ | None -> Alcotest.failf "the engine put no %s in the environment" name
-;;
-
 (* ---- the installation and the process ---- *)
 
 type installation =
@@ -242,6 +234,18 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
   @@ fun installation ->
   let multi_account = judged installation in
   let base = installation.base in
+  (* Pre-seed operator auth/ credentials BEFORE starting the multi-account
+     engine without placing either secret in process env, so we can prove BOTH:
+     1) multi-account boot leaves MASC_ADMIN_TOKEN and MASC_INTERNAL_MCP_TOKEN
+        absent from the process environment (CLI children cannot inherit them);
+     2) pre-seeded auth/ tokens are still rejected 401 Legacy_credential_forbidden
+        by the account server gate. *)
+  let preseeded_admin = "masc-preseeded-admin-token" in
+  (match Auth.prepare_startup_admin_token base ~raw_token:(Some preseeded_admin) with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf "pre-seeding admin token failed: %s" (Masc_domain.masc_error_to_string error));
+  let preseeded_internal = Auth.ensure_internal_keeper_token ~export_env:false base in
   with_the_process_of_a_server installation
   @@ fun ~env ~runtime_sw ~sw lease ->
   let port = free_port () in
@@ -300,10 +304,29 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     (Some [])
     (Keeper_types_profile_toml_io.keeper_toml_files
        (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base));
-  (* The engine put the admin token and the internal Keeper token of the
-     operator in the environment of the process. The gate of the account
-     server reads both as legacy credentials, and a route of a person refuses
-     them (RFC §5, "the tokens of the operator reach no person"). *)
+  (* Multi-account boot must NOT export MASC_ADMIN_TOKEN or
+     MASC_INTERNAL_MCP_TOKEN into the process environment where person/login
+     CLI children would inherit them, and pre-seeded auth/ tokens remain
+     rejected 401 Legacy_credential_forbidden on person routes. Note test/dune
+     initializes both env vars to "" so inherited shell values never leak. *)
+  let is_blank_env key =
+    match Sys.getenv_opt key with
+    | None -> true
+    | Some raw -> String.equal (String.trim raw) ""
+  in
+  Alcotest.(check bool)
+    "MASC_ADMIN_TOKEN is absent/blank in process env in multi-account mode"
+    true
+    (Option.is_none (Env_config_core.admin_token_opt ())
+     && is_blank_env Env_config_core.admin_token_env_key);
+  Alcotest.(check bool)
+    "MASC_INTERNAL_MCP_TOKEN is absent/blank in process env in multi-account mode"
+    true
+    (is_blank_env Auth.internal_keeper_token_env_key);
+  Alcotest.(check bool)
+    "Runtime.source_config retains parsed configuration after boot"
+    true
+    (Option.is_some (Runtime.source_config ()));
   within_the_watchdog ~clock "the listener of the account server" listening;
   let net = Eio.Stdenv.net env in
   (* The probe of the account server waits for this engine, which is ready
@@ -313,17 +336,89 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     "the readiness of the account server once its engine is ready"
     (200, {|{"ready":true}|})
     (status, Yojson.Safe.to_string (Yojson.Safe.from_string body));
+  let minted_internal =
+    match Auth.internal_keeper_token () with
+    | Some tok -> tok
+    | None -> Alcotest.fail "missing in-process internal keeper token after engine boot"
+  in
+  (* Provisioning a per-keeper credential in multi-account mode must reuse the
+     existing internal keeper token without rotating it or exporting it into
+     process env. *)
+  (match Auth.ensure_keeper_credential ~export_env:false base ~agent_name:"keeper-person-1" with
+   | Ok (_ : string * Masc_domain.agent_credential) -> ()
+   | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
+  Alcotest.(check (option string))
+    "ensure_keeper_credential ~export_env:false keeps internal keeper token unrotated"
+    (Some minted_internal)
+    (Auth.internal_keeper_token ());
+  Alcotest.(check bool)
+    "MASC_INTERNAL_MCP_TOKEN stays absent/blank after keeper credential sync"
+    true
+    (is_blank_env Auth.internal_keeper_token_env_key);
+  let request_authority =
+    match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port with
+    | Ok authority -> authority
+    | Error `Malformed -> Alcotest.fail "loopback request authority must be valid"
+  in
+  let health_json =
+    Server_routes_http_runtime.make_health_json
+      ~request_authority
+      (Httpun.Request.create `GET "/health")
+  in
+  let open Yojson.Safe.Util in
+  let internal_mcp_auth = health_json |> member "internal_mcp_auth" in
+  Alcotest.(check string)
+    "multi-account /health internal_mcp_auth.status is ok without env token"
+    "ok"
+    (internal_mcp_auth |> member "status" |> to_string);
+  Alcotest.(check string)
+    "multi-account /health internal_mcp_auth.source"
+    "in_memory_and_auth_hash"
+    (internal_mcp_auth |> member "source" |> to_string);
+  Alcotest.(check bool)
+    "multi-account /health internal_mcp_auth.keeper_internal_runtime_mcp_ready is true"
+    true
+    (internal_mcp_auth |> member "keeper_internal_runtime_mcp_ready" |> to_bool);
+  Alcotest.(check bool)
+    "multi-account /health internal_mcp_auth.operator_action_required is false"
+    false
+    (internal_mcp_auth |> member "operator_action_required" |> to_bool);
+  Alcotest.(check string)
+    "multi-account /health internal_mcp_auth.operator_next_action"
+    "none"
+    (internal_mcp_auth |> member "operator_next_action" |> to_string);
+  Alcotest.(check bool)
+    "multi-account /health reports env_token_present truthfully as false"
+    false
+    (internal_mcp_auth |> member "env_token_present" |> to_bool);
+  Alcotest.(check bool)
+    "multi-account /health reports env_token_verifies truthfully as false"
+    false
+    (internal_mcp_auth |> member "env_token_verifies" |> to_bool);
+  Alcotest.(check bool)
+    "multi-account /health reports token_hash_file_present as true"
+    true
+    (internal_mcp_auth |> member "token_hash_file_present" |> to_bool);
+  Alcotest.(check (list string))
+    "multi-account /health internal_mcp_auth.missing is empty"
+    []
+    (internal_mcp_auth |> member "missing" |> to_list |> List.map to_string);
+  Alcotest.(check bool)
+    "multi-account /health never leaks raw internal token"
+    false
+    (String_util.contains_substring (Yojson.Safe.to_string internal_mcp_auth) minted_internal);
   let legacy = Auth_gate.reason_to_string Auth_gate.Legacy_credential_forbidden in
   List.iter
     (fun (label, header) ->
       let status, body = get ~net ~port ~headers:[ header ] Auth_preview.provider_accounts_path in
       Alcotest.(check int) (label ^ ": the status") 401 status;
       Alcotest.(check string) (label ^ ": the reason") legacy (error_of label body))
-    [ ( "the admin token of the boot"
-      , (Server_auth.authorization_header_name, "Bearer " ^ token_of Env_config_core.admin_token_env_key)
-      )
-    ; ( "the internal Keeper token of the boot"
-      , (Server_auth.internal_token_header_name, token_of Auth.internal_keeper_token_env_key) )
+    [ ( "the pre-seeded admin token in auth/"
+      , (Server_auth.authorization_header_name, "Bearer " ^ preseeded_admin) )
+    ; ( "the pre-seeded internal Keeper token in auth/"
+      , (Server_auth.internal_token_header_name, preseeded_internal) )
+    ; ( "the active in-memory internal Keeper token of the boot"
+      , (Server_auth.internal_token_header_name, minted_internal) )
     ]
 ;;
 
@@ -384,12 +479,18 @@ let test_a_refused_store_ends_the_process () =
   listen_on_loopback_alone ();
   with_installation
   @@ fun installation ->
-  (* A Keeper configuration journal that does not decode. The first step of
-     the engine reads it before it builds any state, and refuses it
-     (Keeper_config_recovery_failed). *)
+  (* An undecodable Keeper Memory OS current snapshot in the keepers dir.
+     Server_accounts checks only .toml definitions and keeper-config-journal,
+     so it starts the engine, and prepare_keeper_persistence refuses the
+     undecodable store (~accept_store_quarantine:false) and ends the process
+     (updated after #53790 moved keeper-config-journal refusal pre-engine). *)
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:installation.base
+  in
+  Fs_compat.mkdir_p keepers_dir;
   write_file
-    (Keeper_config_journal.journal_path_for_base_path ~base_path:installation.base)
-    "not a journal";
+    (Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"refused")
+    "not a memory snapshot";
   (* The startup watchdog of the child ends an engine that is not ready one
      period after the engine starts, and the engine starts after the spawn.
      The parent waits one period from before the spawn, so an end it sees

@@ -191,6 +191,15 @@ let refused label request captured expected =
       Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
 ;;
 
+let refused_sealed (type c) label request (sealed : c Access.sealed) expected =
+  match Access.authorize request sealed with
+  | Ok (_ : c Access.authorized) -> Alcotest.failf "%s: authorized" label
+  | Error refusal ->
+    if not (expected refusal)
+    then
+      Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
+;;
+
 (* What the judgment says of a client on the Codex home [home], captured as
    the home is now. *)
 let codex_judged request home =
@@ -345,6 +354,10 @@ api-name = "first-model"
 max-context = 4096
 tools-support = true
 streaming = true
+
+[models.first.capabilities]
+supports-tool-choice = true
+
 [operator.first]
 |}
       port
@@ -1281,6 +1294,462 @@ let test_multi_account () =
           (fun refusal -> refusal = Access.Not_the_account_home dave.account);
         allowed "a turn on an account no purge names" (turn erin ()) erin_account;
         allowed "the own account no purge names" (own erin ()) erin_account;
+        (* RFC §3.4: credential-free person seals ([seal_person] /
+           [Runtime_account_runtime.of_person_template]) carry no key or env
+           at table-build time; [authorize] resolves namespace, home,
+           integration, and current-generation key on demand. *)
+        let grace = person zone ~base_path ~name:"grace" ~hex:'9' in
+        let claude_integration = get (Integration_id.of_string "claude_code") in
+        let other_integration = get (Integration_id.of_string "other_claude") in
+        let codex_integration = get (Integration_id.of_string "codex") in
+        let grace_key_account = get (Provider_account_id.of_string "account-grace-key") in
+        (match
+           Authz_provider_account.link_key
+             zone
+             ~user_id:grace.user_id
+             ~provider_account_id:grace_key_account
+             ~integration_id:claude_integration
+         with
+         | Ok () -> ()
+         | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
+        let grace_runtime, grace_keeper_name =
+          runtime_and_keeper zone ~user_id:grace.user_id ~account:grace_key_account ~name:"grace-key"
+        in
+        let grace_key =
+          { grace with
+            account = grace_key_account
+          ; runtime = grace_runtime
+          ; keeper = grace_keeper_name
+          ; home = claude_home ~runtime_root:grace.runtime_root grace_key_account
+          }
+        in
+        let grace_codex_account = get (Provider_account_id.of_string "account-grace-codex") in
+        (match
+           Authz_provider_account.link
+             zone
+             ~user_id:grace.user_id
+             ~provider_account_id:grace_codex_account
+             ~integration_id:codex_integration
+         with
+         | Ok () -> ()
+         | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
+        let grace_codex_runtime, grace_codex_keeper_name =
+          runtime_and_keeper zone ~user_id:grace.user_id ~account:grace_codex_account ~name:"grace-codex"
+        in
+        let grace_codex =
+          { grace with
+            account = grace_codex_account
+          ; runtime = grace_codex_runtime
+          ; keeper = grace_codex_keeper_name
+          ; home = codex_home ~runtime_root:grace.runtime_root grace_codex_account
+          }
+        in
+        let template_toml =
+          {|
+[models.sonnet]
+api-name = "claude-sonnet-4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[models.codex]
+api-name = "gpt-5-codex"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.muse]
+api-name = "muse-1"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[providers.claude_code]
+display-name = "Claude Code"
+protocol = "claude-code"
+command = "/bin/echo"
+account-home = "/tmp/operator-claude-home"
+is-non-interactive = true
+
+[providers.codex]
+display-name = "Codex"
+protocol = "codex-app-server"
+command = "/bin/echo"
+is-non-interactive = true
+
+[providers.muse]
+display-name = "Muse"
+protocol = "muse-serve"
+command = "/bin/echo"
+is-non-interactive = true
+
+[providers.local]
+display-name = "Local HTTP"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.agy]
+display-name = "Antigravity"
+protocol = "antigravity-cli"
+command = "/bin/echo"
+is-non-interactive = true
+timeout-s = 180.0
+
+[providers.vibe]
+display-name = "Vibe"
+protocol = "vibe-cli"
+command = "/bin/echo"
+is-non-interactive = true
+
+[claude_code.sonnet]
+[codex.codex]
+[muse.muse]
+[local.sonnet]
+[agy.sonnet]
+[vibe.sonnet]
+
+[runtime]
+default = "claude_code.sonnet"
+|}
+        in
+        let template_cfg =
+          match Runtime_toml.parse_string template_toml with
+          | Ok cfg -> cfg
+          | Error _ -> Alcotest.fail "the person template fixture does not parse"
+        in
+        (* Build both person seals and runtime BEFORE any key file exists on
+           disk AND with an operator credential in the process env. *)
+        let sealed_grace_person, grace_person_runtime =
+          with_env "ANTHROPIC_API_KEY" "sk-operator-should-not-leak" (fun () ->
+            let sealed =
+              Access.seal_person
+                ~client:Account.Claude_code
+                ~provider_account_id:grace_key.account
+                ~integration_id:claude_integration
+                ~account_home:grace_key.home
+            in
+            let runtime =
+              match
+                Runtime_account_runtime.of_person_template
+                  template_cfg
+                  ~template:"claude_code"
+                  ~provider_account_id:grace_key.account
+                  ~integration_id:claude_integration
+                  ~account_home:grace_key.home
+                  ~binding:(Runtime_account_runtime.Model "sonnet")
+              with
+              | Ok rt -> rt
+              | Error error -> Alcotest.fail (Runtime_account_runtime.error_to_string error)
+            in
+            sealed, runtime)
+        in
+        let sealed_grace_from_runtime =
+          match grace_person_runtime.Runtime_instance.execution with
+          | Runtime_execution.Claude_code exec -> exec.account_home
+          | Runtime_execution.Agent_core _
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Antigravity_cli _
+          | Runtime_execution.Muse_serve _
+          | Runtime_execution.Vibe_cli _ ->
+            Alcotest.fail "expected Claude_code execution from of_person_template"
+        in
+        Alcotest.(check string)
+          "seal_person preserves account_home without credentials"
+          grace_key.home
+          (Access.home sealed_grace_person);
+        Alcotest.(check bool)
+          "of_person_template uses matching person seal"
+          true
+          (Access.same sealed_grace_person sealed_grace_from_runtime);
+        Alcotest.(check string)
+          "of_person_template seals passed account_home rather than operator account-home"
+          grace_key.home
+          (Access.home sealed_grace_from_runtime);
+        let muse_integration = get (Integration_id.of_string "muse") in
+        let expected_muse_home = muse_path grace_key in
+        (match
+           Runtime_account_runtime.of_person_template
+             template_cfg
+             ~template:"muse"
+             ~provider_account_id:grace_key.account
+             ~integration_id:muse_integration
+             ~account_home:expected_muse_home
+             ~binding:(Runtime_account_runtime.Model "muse")
+         with
+         | Error error -> Alcotest.fail (Runtime_account_runtime.error_to_string error)
+         | Ok muse_runtime ->
+           (match muse_runtime.Runtime_instance.execution with
+            | Runtime_execution.Muse_serve exec ->
+              Alcotest.(check string)
+                "of_person_template declares Muse account_home"
+                expected_muse_home
+                (Access.muse_home_path exec.account_home)
+            | Runtime_execution.Agent_core _
+            | Runtime_execution.Codex_app_server _
+            | Runtime_execution.Claude_code _
+            | Runtime_execution.Antigravity_cli _
+            | Runtime_execution.Vibe_cli _ ->
+              Alcotest.fail "expected Muse_serve execution from muse of_person_template"));
+        (match
+           List.find_opt
+             (fun (b : Runtime_schema.binding) -> String.equal b.provider_id "local")
+             template_cfg.Runtime_schema.bindings
+         with
+         | None -> Alcotest.fail "missing local HTTP fixture binding"
+         | Some http_binding ->
+           (match
+              Runtime_instance.of_person_binding
+                ~provider_account_id:grace_key.account
+                ~integration_id:claude_integration
+                ~account_home:grace_key.home
+                template_cfg
+                http_binding
+            with
+            | Ok (_ : Runtime_instance.t) ->
+              Alcotest.fail "of_person_binding must refuse HTTP bindings"
+            | Error (Runtime_config_error.Execution_unbuildable _) -> ()
+            | Error reason ->
+              Alcotest.failf
+                "unexpected drop reason for HTTP binding: %s"
+                (Runtime_config_error.string_of_drop_reason reason)));
+        let claude_cred_cfg =
+          { template_cfg with
+            Runtime_schema.providers =
+              List.map
+                (fun (p : Runtime_schema.provider) ->
+                   if String.equal p.id "claude_code"
+                   then { p with credentials = Some (Runtime_schema.Env "ANTHROPIC_API_KEY") }
+                   else p)
+                template_cfg.Runtime_schema.providers
+          }
+        in
+        (match
+           List.find_opt
+             (fun (b : Runtime_schema.binding) -> String.equal b.provider_id "claude_code")
+             claude_cred_cfg.Runtime_schema.bindings
+         with
+         | None -> Alcotest.fail "missing claude_code fixture binding"
+         | Some claude_binding ->
+           (match
+              Runtime_instance.of_person_binding
+                ~provider_account_id:grace_key.account
+                ~integration_id:claude_integration
+                ~account_home:grace_key.home
+                claude_cred_cfg
+                claude_binding
+            with
+            | Ok (_ : Runtime_instance.t) ->
+              Alcotest.fail "of_person_binding must refuse providers declaring credentials"
+            | Error (Runtime_config_error.Execution_unbuildable _) -> ()
+            | Error reason ->
+              Alcotest.failf
+                "unexpected drop reason for credentialed provider: %s"
+                (Runtime_config_error.string_of_drop_reason reason)));
+        Alcotest.(check bool)
+          "person seal differs from Captured seal"
+          false
+          (Access.same sealed_grace_person (Access.seal (captured grace_key.home)));
+        Alcotest.(check bool)
+          "person seal differs when integration changes"
+          false
+          (Access.same
+             sealed_grace_person
+             (Access.seal_person
+                ~client:Account.Claude_code
+                ~provider_account_id:grace_key.account
+                ~integration_id:other_integration
+                ~account_home:grace_key.home));
+        (* Unlinked account refuses Own_account symmetrically with Keeper_turn
+           before any key file or capture runs. *)
+        let unlinked_account = get (Provider_account_id.of_string "account-grace-unlinked") in
+        let unlinked_home = claude_home ~runtime_root:grace.runtime_root unlinked_account in
+        refused_sealed
+          "unlinked person seal refuses Own_account cleanly"
+          (Access.Own_account { user_id = grace.user_id; provider_account_id = unlinked_account })
+          (Access.seal_person
+             ~client:Account.Claude_code
+             ~provider_account_id:unlinked_account
+             ~integration_id:claude_integration
+             ~account_home:unlinked_home)
+          (function
+            | Access.Not_the_account_home id -> Provider_account_id.equal id unlinked_account
+            | _ -> false);
+        (* Before generation 1 exists on disk, authorize fails with Key_missing
+           on demand rather than at table-build time. *)
+        refused_sealed
+          "person seal with missing gen-1 key file"
+          (own grace_key ())
+          sealed_grace_person
+          (function
+            | Access.Account_key_unusable
+                { provider_account_id; reason = Runtime_api_key_file.Key_missing } ->
+              Provider_account_id.equal provider_account_id grace_key.account
+            | _ -> false);
+        (* Write generation 1 and authorize with operator env still set. *)
+        let write_grace_key ~generation raw =
+          match
+            Option.map
+              (Runtime_api_key_file.write
+                 ~runtime_root:grace.runtime_root
+                 ~account_id:grace_key.account
+                 ~generation)
+              (Runtime_api_key_file.key_of_string raw)
+          with
+          | Some (Ok ()) -> ()
+          | _ -> Alcotest.fail ("failed writing grace key: " ^ raw)
+        in
+        write_grace_key ~generation:Key_generation.first "sk-grace-gen1";
+        with_env "ANTHROPIC_API_KEY" "sk-operator-should-not-leak" (fun () ->
+          (match Access.authorize (own grace_key ()) sealed_grace_person with
+           | Error refusal -> Alcotest.fail (Access.refusal_to_string refusal)
+           | Ok auth ->
+             Alcotest.(check (option string))
+               "own person seal captures gen-1 key on demand"
+               (Some "sk-grace-gen1")
+               (Account.environment_value (Access.account auth) "ANTHROPIC_API_KEY"));
+          (match Access.authorize (turn grace_key ()) sealed_grace_person with
+           | Error refusal -> Alcotest.fail (Access.refusal_to_string refusal)
+           | Ok auth ->
+             Alcotest.(check (option string))
+               "turn person seal captures gen-1 key on demand"
+               (Some "sk-grace-gen1")
+               (Account.environment_value (Access.account auth) "ANTHROPIC_API_KEY")));
+        (* Rotate key to generation 2; the SAME person seal refuses while gen-2
+           is missing, then picks up gen-2 dynamically once written. *)
+        let grace_gen2 =
+          match
+            Authz_provider_account.replace_key
+              zone
+              ~user_id:grace.user_id
+              ~provider_account_id:grace_key.account
+          with
+          | Ok gen -> gen
+          | Error _ -> Alcotest.fail "replace_key failed for grace_key"
+        in
+        refused_sealed
+          "same person seal sees missing gen-2 after rotation"
+          (own grace_key ())
+          sealed_grace_person
+          (function
+            | Access.Account_key_unusable
+                { provider_account_id; reason = Runtime_api_key_file.Key_missing } ->
+              Provider_account_id.equal provider_account_id grace_key.account
+            | _ -> false);
+        write_grace_key ~generation:grace_gen2 "sk-grace-gen2";
+        (match Access.authorize (turn grace_key ()) sealed_grace_person with
+         | Error refusal -> Alcotest.fail (Access.refusal_to_string refusal)
+         | Ok auth ->
+           Alcotest.(check (option string))
+             "same person seal picks up gen-2 key dynamically without rebuild"
+             (Some "sk-grace-gen2")
+             (Account.environment_value (Access.account auth) "ANTHROPIC_API_KEY"));
+        (* Integration mismatch, home mismatch, operator calls refused. *)
+        let wrong_integration_seal =
+          Access.seal_person
+            ~client:Account.Claude_code
+            ~provider_account_id:grace_key.account
+            ~integration_id:other_integration
+            ~account_home:grace_key.home
+        in
+        refused_sealed
+          "person seal refuses mismatched integration_id"
+          (own grace_key ())
+          wrong_integration_seal
+          (function
+            | Access.Not_the_account_integration { provider_account_id; expected; claimed } ->
+              Provider_account_id.equal provider_account_id grace_key.account
+              && Integration_id.equal expected claude_integration
+              && Integration_id.equal claimed other_integration
+            | _ -> false);
+        let wrong_home_seal =
+          Access.seal_person
+            ~client:Account.Claude_code
+            ~provider_account_id:grace_key.account
+            ~integration_id:claude_integration
+            ~account_home:alice.home
+        in
+        refused_sealed
+          "person seal refuses foreign account_home"
+          (turn grace_key ())
+          wrong_home_seal
+          (fun refusal -> refusal = Access.Not_the_account_home grace_key.account);
+        refused_sealed
+          "person seal refuses Operator_call"
+          Access.Operator_call
+          sealed_grace_person
+          (fun refusal -> refusal = Access.No_operator);
+        refused_sealed
+          "person seal refuses Operator_keeper_turn"
+          (Access.Operator_keeper_turn
+             { keeper_name = alice.keeper; runtime_id = Runtime_id.to_string grace_key.runtime })
+          sealed_grace_person
+          (function
+            | Access.No_operator_keeper name -> String.equal name alice.keeper
+            | _ -> false);
+        (* Codex person seal captures login when clean, refuses config.toml env_key. *)
+        let sealed_grace_codex =
+          match
+            Runtime_account_runtime.of_person_template
+              template_cfg
+              ~template:"codex"
+              ~provider_account_id:grace_codex.account
+              ~integration_id:codex_integration
+              ~account_home:grace_codex.home
+              ~binding:(Runtime_account_runtime.Model "codex")
+          with
+          | Ok rt ->
+            (match rt.Runtime_instance.execution with
+             | Runtime_execution.Codex_app_server exec -> exec.account_home
+             | Runtime_execution.Agent_core _
+             | Runtime_execution.Claude_code _
+             | Runtime_execution.Antigravity_cli _
+             | Runtime_execution.Muse_serve _
+             | Runtime_execution.Vibe_cli _ ->
+               Alcotest.fail "expected Codex_app_server execution")
+          | Error error -> Alcotest.fail (Runtime_account_runtime.error_to_string error)
+        in
+        (match Access.authorize (turn grace_codex ()) sealed_grace_codex with
+         | Ok _ -> ()
+         | Error refusal -> Alcotest.fail (Access.refusal_to_string refusal));
+        Out_channel.with_open_text
+          (Filename.concat grace_codex.home "config.toml")
+          (fun oc ->
+             Out_channel.output_string
+               oc
+               "[model_providers.custom]\nenv_key = \"OPENAI_API_KEY\"\n");
+        refused_sealed
+          "codex person seal asking for env_key is refused on demand"
+          (turn grace_codex ())
+          sealed_grace_codex
+          (fun refusal -> refusal = Access.Home_asks_for_environment grace_codex.account);
+        (* Purged account refuses as Account_unavailable even after key file removal. *)
+        (match
+           Authz_purge.start
+             zone
+             ~user_id:grace.user_id
+             (Authz_purge_event.Provider_account
+                { owner = grace.user_id; provider_account_id = grace_key.account })
+         with
+         | Ok () -> ()
+         | Error error -> Alcotest.fail (Authz_purge.error_detail error));
+        (match
+           Layout.key_file
+             ~runtime_root:grace.runtime_root
+             ~account_id:grace_key.account
+             ~generation:grace_gen2
+         with
+         | Ok p when Sys.file_exists p -> Sys.remove p
+         | _ -> ());
+        refused_sealed
+          "purged person seal fails availability before reading key file"
+          (own grace_key ())
+          sealed_grace_person
+          (fun refusal ->
+            refusal
+            = Access.Account_unavailable
+                { provider_account_id = grace_key.account
+                ; reason = Authz_provider_account.Defect Authz_decision.Resource_purged
+                });
         (* Bytes another writer added to the log: the next commit finds the
            end moved and stops the log. No decision rests on the state of the
            zone from then on, so no client starts for a person or for a turn
@@ -1307,7 +1776,24 @@ let test_multi_account () =
         refused "a turn in a stopped zone" (turn alice ()) alice_account log_stopped;
         refused "an operator call in a stopped zone" Access.Operator_call alice_account (function
           | Access.No_operator -> true
-          | _ -> false)))
+          | _ -> false);
+        refused_sealed
+          "person seal own account in a stopped zone"
+          (own grace_key ())
+          sealed_grace_person
+          log_stopped;
+        refused_sealed
+          "person seal turn in a stopped zone"
+          (turn grace_key ())
+          sealed_grace_person
+          log_stopped;
+        refused_sealed
+          "person seal operator call in a stopped zone"
+          Access.Operator_call
+          sealed_grace_person
+          (function
+            | Access.No_operator -> true
+            | _ -> false)))
 ;;
 
 let () =

@@ -81,3 +81,18 @@ val of_template
   -> account:account
   -> binding:binding
   -> (Runtime_instance.t, error) result
+
+(** Build a person's runtime from [template] with a credential-free person
+    seal ({!Runtime_account_access.seal_person}) for Claude Code / Codex or a
+    declared home ({!Runtime_account_access.declare_muse_home}) for Muse serve,
+    reading no key file, home configuration, or process environment at
+    table-build time (RFC §3.4). Unrelated providers and bindings in the
+    configuration are ignored. *)
+val of_person_template
+  :  Runtime_schema.config
+  -> template:string
+  -> provider_account_id:Authz_types.Provider_account_id.t
+  -> integration_id:Authz_types.Integration_id.t
+  -> account_home:string
+  -> binding:binding
+  -> (Runtime_instance.t, error) result

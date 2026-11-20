@@ -163,7 +163,13 @@ let quota_scope_of_materialized
    [models.qwen3."6-35b-uncensored"], and nothing reported the runtime's absence.
    Deciding fatality by matching the reason string would be the same defect one
    layer up, so the vocabulary is closed and {!Runtime.load_list} matches it. *)
-let materialize_binding ~construction (cfg : config) (b : binding) : (t, drop_reason) result =
+let materialize_binding_with
+    ~materialize_execution
+    ~construction
+    (cfg : config)
+    (b : binding)
+  : (t, drop_reason) result
+  =
   if not b.enabled
   then Error Binding_disabled
   else match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
@@ -175,7 +181,7 @@ let materialize_binding ~construction (cfg : config) (b : binding) : (t, drop_re
       | Error (catalog_provider, refusal) ->
         Error (Catalog_provider_refused { provider_id = provider.id; catalog_provider; refusal })
       | Ok () ->
-      (match Runtime_adapter.materialize_execution ~construction cfg b with
+      (match materialize_execution ~construction cfg b with
        | Ok selected ->
          let execution = selected.Runtime_adapter.execution in
          let credential_admission = selected.credential_admission in
@@ -208,6 +214,14 @@ let materialize_binding ~construction (cfg : config) (b : binding) : (t, drop_re
   | Some _, None -> Error (Model_not_declared b.model_id)
 ;;
 
+let materialize_binding ~construction (cfg : config) (b : binding) : (t, drop_reason) result =
+  materialize_binding_with
+    ~materialize_execution:Runtime_adapter.materialize_execution
+    ~construction
+    cfg
+    b
+;;
+
 let of_binding cfg binding =
   materialize_binding ~construction:(Runtime_adapter.create_construction ()) cfg binding
 ;;
@@ -231,9 +245,7 @@ let is_local_runtime (runtime : t) = is_local_provider runtime.provider
    the misleading "not found among N runtimes", which points the operator at a
    typo that does not exist. Materialize failure stays fail-closed: the binding
    is still excluded from [runtimes]. *)
-let partition_bindings (cfg : config) (bindings : binding list)
-  : t list * (string * drop_reason) list
-  =
+let partition_bindings cfg bindings =
   let construction = Runtime_adapter.create_construction () in
   let runtimes, dropped =
     List.fold_left
@@ -245,6 +257,18 @@ let partition_bindings (cfg : config) (bindings : binding list)
       bindings
   in
   List.rev runtimes, List.rev dropped
+;;
+
+let of_person_binding ~provider_account_id ~integration_id ~account_home cfg binding =
+  materialize_binding_with
+    ~materialize_execution:
+      (Runtime_adapter.materialize_person_execution
+         ~provider_account_id
+         ~integration_id
+         ~account_home)
+    ~construction:(Runtime_adapter.create_construction ())
+    cfg
+    binding
 ;;
 
 let capabilities_for_runtime (rt : t) =

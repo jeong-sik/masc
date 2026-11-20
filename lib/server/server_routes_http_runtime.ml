@@ -162,19 +162,42 @@ let internal_mcp_auth_json ~base_path =
   let env_token_present = Option.is_some env_token in
   let token_hash = internal_keeper_token_hash_opt ~base_path in
   let token_hash_file_present = Option.is_some token_hash in
-  let env_token_verifies =
-    match env_token, token_hash with
-    | Some token, Some hash -> String.equal hash (Auth.sha256_hash token)
+  let token_matches_hash token =
+    match token, token_hash with
+    | Some raw_token, Some hash -> String.equal hash (Auth.sha256_hash raw_token)
     | _ -> false
   in
-  let ready = env_token_present && token_hash_file_present && env_token_verifies in
-  let missing =
-    [ (not env_token_present, "env_token")
-    ; (not token_hash_file_present, "token_hash_file")
-    ; ( env_token_present && token_hash_file_present && not env_token_verifies
-      , "token_hash_mismatch" )
-    ]
-    |> List.filter_map (fun (missing, name) -> if missing then Some name else None)
+  let env_token_verifies = token_matches_hash env_token in
+  let source, ready, missing =
+    if Runtime_account_access.is_multi_account () then
+      let in_memory_token = Auth.internal_keeper_token () in
+      let in_memory_token_present = Option.is_some in_memory_token in
+      let in_memory_token_verifies = token_matches_hash in_memory_token in
+      let ready =
+        in_memory_token_present && token_hash_file_present && in_memory_token_verifies
+      in
+      let missing =
+        [ (not in_memory_token_present, "in_memory_token")
+        ; (not token_hash_file_present, "token_hash_file")
+        ; ( in_memory_token_present
+            && token_hash_file_present
+            && not in_memory_token_verifies
+          , "token_hash_mismatch" )
+        ]
+        |> List.filter_map (fun (missing, name) -> if missing then Some name else None)
+      in
+      ("in_memory_and_auth_hash", ready, missing)
+    else
+      let ready = env_token_present && token_hash_file_present && env_token_verifies in
+      let missing =
+        [ (not env_token_present, "env_token")
+        ; (not token_hash_file_present, "token_hash_file")
+        ; ( env_token_present && token_hash_file_present && not env_token_verifies
+          , "token_hash_mismatch" )
+        ]
+        |> List.filter_map (fun (missing, name) -> if missing then Some name else None)
+      in
+      ("running_process_env_and_auth_hash", ready, missing)
   in
   let status = if ready then "ok" else "degraded" in
   let operator_next_action =
@@ -183,7 +206,7 @@ let internal_mcp_auth_json ~base_path =
   `Assoc
     [ "schema", `String "masc.internal_mcp_auth.v1"
     ; "status", `String status
-    ; "source", `String "running_process_env_and_auth_hash"
+    ; "source", `String source
     ; "env_key", `String env_key
     ; "env_token_present", `Bool env_token_present
     ; "token_hash_file_present", `Bool token_hash_file_present

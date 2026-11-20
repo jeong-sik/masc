@@ -197,6 +197,13 @@ let client selected = selected.client
 let source selected = selected.source
 let key_file selected = selected.key_file
 let names_asked_by_the_home selected = selected.asked_names
+
+let codex_asked_names ~home =
+  let ( let* ) = Result.bind in
+  let* home = Runtime_account_home.of_string home in
+  codex_configured_keys home
+;;
+
 let environment selected = Array.copy selected.environment
 let environment_value selected name = value name selected.environment
 let same left right =

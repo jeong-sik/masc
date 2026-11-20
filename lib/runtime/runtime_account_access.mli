@@ -41,12 +41,23 @@ type 'client sealed
 
 val seal : 'client Runtime_official_account.t -> 'client sealed
 
+val seal_person
+  :  client:'client Runtime_official_account.client
+  -> provider_account_id:Authz_types.Provider_account_id.t
+  -> integration_id:Authz_types.Integration_id.t
+  -> account_home:string
+  -> 'client sealed
+(** Seal a person's account reference without reading any key file, home
+    configuration, or process environment at table-build time (RFC §3.4).
+    Inside {!authorize}, the account record and (when keyed) current-generation
+    key file are resolved on demand from the active authorization zone. *)
+
 (** The home of a sealed account. It names the account, as its quota window
     does, and carries no credential. *)
 val home : 'client sealed -> string
 
-(** Whether two sealed accounts are the same capture, for a reload of the
-    table. It renders no credential. *)
+(** Whether two sealed accounts represent the same capture or person account
+    reference, for a reload of the table. It renders no credential. *)
 val same : 'client sealed -> 'client sealed -> bool
 
 (** An account a CLI may start on. Only {!authorize} makes one. *)
@@ -179,6 +190,12 @@ val publish_host_tool
   -> config_dir:string option
   -> (unit, string * string list) result
 
+val is_multi_account : unit -> bool
+(** Whether this process has published {!Multi_account} access. Diagnostics use
+    this to know when operator tokens are intentionally kept out of process
+    environment variables; authorization decisions still read the published
+    witness directly. *)
+
 (** What a CLI starts for. *)
 type request =
   | Keeper_turn of
@@ -246,6 +263,13 @@ type refusal =
   | Not_the_account_home of Authz_types.Provider_account_id.t
       (** The account was captured from another home than the one of this
           account of the person. *)
+  | Not_the_account_integration of
+      { provider_account_id : Authz_types.Provider_account_id.t
+      ; expected : Authz_types.Integration_id.t
+      ; claimed : Authz_types.Integration_id.t
+      }
+      (** The sealed account names another integration than the one linked for
+          this account in the authorization log. *)
   | Not_the_account_key of Authz_types.Provider_account_id.t
       (** The account does not carry the key the log gives this account of
           the person. A key account carries the key of the file of the
@@ -257,6 +281,12 @@ type refusal =
           the request is for. For an account asked for as one's own it
           comes after the check of the owner, so it says nothing of an
           account of another person. *)
+  | Account_key_unusable of
+      { provider_account_id : Authz_types.Provider_account_id.t
+      ; reason : Runtime_api_key_file.read_error
+      }
+      (** The key file of the account's current generation could not be read
+          on demand at authorization time. *)
   | Home_asks_for_environment of Authz_types.Provider_account_id.t
       (** The configuration of the home of this account of the person names
           variables of the environment of the process

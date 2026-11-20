@@ -71,16 +71,16 @@ let recorded (person : Login.person) id ~integration_id =
        Error (Not_recorded error))
 ;;
 
-(* The third step: the runtime root of the person, the home of the account,
-   and then its key file. *)
-let made (person : Login.person) ~base_path id ~generation key =
+(* The third step: the runtime root of the person, the home of the account
+   (when the provider carries a CLI home), and then its key file. *)
+let made ~home (person : Login.person) ~base_path id ~generation key =
   match Login.person_runtime_root person ~base_path with
   | Error (_ : string) -> Error "the runtime root of the person was not made"
   | Ok runtime_root ->
-    Files.make ~runtime_root ~account_id:id ~generation key |> Result.map_error Files.make_error_detail
+    Files.make_for ~home ~runtime_root ~account_id:id ~generation key |> Result.map_error Files.make_error_detail
 ;;
 
-let register ~(person : Login.person) ~base_path ~integration_id key =
+let register ?(home = Files.Claude_home) ~(person : Login.person) ~base_path ~integration_id key =
   match Provider_account_id.of_string (Auth.generate_token ()) with
   | Error (_ : Authz_id.error) -> Error Id_not_usable
   | Ok id ->
@@ -90,11 +90,11 @@ let register ~(person : Login.person) ~base_path ~integration_id key =
        answers that a call runs until the files are there. *)
     Runtime_account_call.one_call_of id ~busy:Id_not_usable (fun in_call ->
       let* generation = recorded person id ~integration_id in
-      match made person ~base_path id ~generation key with
+      match made ~home person ~base_path id ~generation key with
       | Ok () -> Ok id
       | Error detail ->
         logged id "its files were not all made, and its removal starts" detail;
-        (match Purge.remove_in_call in_call ~person ~base_path id with
+        (match Purge.remove_in_call ~home in_call ~person ~base_path id with
          | Ok () -> Error Files_not_made
          | Error removal -> Error (Account_stays { provider_account_id = id; removal })))
 ;;

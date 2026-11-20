@@ -51,13 +51,13 @@ let held (person : Login.person) id =
    the folder is mended. The folder of the keys is not looked at here: a
    store that fails there is recorded ([Key_not_stored]). A root that goes
    away between this and the store is not held. *)
-let reached (person : Login.person) ~base_path id =
+let reached ?(home = Files.Claude_home) (person : Login.person) ~base_path id =
   match Login.person_runtime_root person ~base_path with
   | Error (_ : string) ->
     logged id "it was not recorded" "the runtime root of the person was not made";
     Error Files_not_reached
   | Ok runtime_root ->
-    (match Files.make_home ~runtime_root ~account_id:id with
+    (match Files.make_home_for ~home ~runtime_root ~account_id:id with
      | Ok () -> Ok runtime_root
      | Error detail ->
        logged id "it was not recorded" ("the home of the account was not reached: " ^ detail);
@@ -99,8 +99,8 @@ let recorded (person : Login.person) id ~held:before =
    not synced. So the folder of the keys goes, as it does first in a
    removal of the account, and the key before goes with it. The next
    replacement makes the folder again. *)
-let stored ~runtime_root id ~generation key =
-  match Files.replace ~runtime_root ~account_id:id ~generation key with
+let stored ?(home = Files.Claude_home) ~runtime_root id ~generation key =
+  match Files.replace_for ~home ~runtime_root ~account_id:id ~generation key with
   | Ok Files.Other_keys_removed -> Ok { old_keys_removed = true }
   | Ok (Files.Other_keys_left detail) ->
     logged id "its new key is in place, and a file of the folder of its keys stays" detail;
@@ -113,6 +113,14 @@ let stored ~runtime_root id ~generation key =
     Error Key_not_stored
 ;;
 
+let home_kind_of (person : Login.person) ~base_path id =
+  match Accounts.find (state_of person).Authz_state.provider_accounts id with
+  | Some { Accounts.kind = Accounts.Key { integration_id; generation = _ }; owner = _ } ->
+    Login.key_account_home_kind_at ~base_path ~integration_id
+  | Some { Accounts.kind = Accounts.Login { integration_id = _ }; owner = _ }
+  | None -> Files.Claude_home
+;;
+
 let replace ~(person : Login.person) ~base_path id key =
   (* Asked before the call is taken, so whether a call of another person's
      account runs is not told. *)
@@ -121,9 +129,10 @@ let replace ~(person : Login.person) ~base_path id key =
     (* Read again inside the call, whoever holds it: the records of that
        time say whose the account is and which generation it holds. *)
     let* before = held person id in
-    let* runtime_root = reached person ~base_path id in
+    let home = home_kind_of person ~base_path id in
+    let* runtime_root = reached ~home person ~base_path id in
     let* generation = recorded person id ~held:before in
-    stored ~runtime_root id ~generation key)
+    stored ~home ~runtime_root id ~generation key)
 ;;
 
 (* ---- the start of the server ---- *)

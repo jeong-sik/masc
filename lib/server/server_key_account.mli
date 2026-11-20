@@ -144,8 +144,13 @@ val replace
   -> body:string
   -> Login_routes.answer
 
-(** Whether {!register} takes a key for a provider of this client: in this
-    stage, the keys of Claude Code (RFC
-    a-persons-api-key-is-their-own-provider-account 3.8). The list of what a
-    person connects reads it ({!Server_person_integrations}). *)
+(** Whether {!register} takes a key for an official-client provider of this
+    client: the keys of Claude Code (RFC
+    a-persons-api-key-is-their-own-provider-account 3.8). HTTP API-key
+    providers are classified separately by {!http_takes_key}. The list of
+    what a person connects reads both ({!Server_person_integrations}). *)
 val takes_key : Runtime_setup_login_client.client -> bool
+
+(** Whether {!register} takes a key for this HTTP [Agent_core] provider
+    configuration (RFC a-persons-api-key-is-their-own-provider-account 3.9). *)
+val http_takes_key : Runtime_schema.provider -> bool

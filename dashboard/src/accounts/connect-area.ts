@@ -121,6 +121,12 @@ interface AreaProps {
 }
 
 function Choosing({ model, integrations }: AreaProps): VNode {
+  if (integrations.length === 0) {
+    return html`
+      <p class="hint">지금 이 서버에는 로그인으로 연결할 수 있는 구독이 없어요.</p>
+      <p class="actions"><button type="button" onClick=${model.close}>닫기</button></p>
+    `
+  }
   const onSubmit = (event: Event): void => {
     event.preventDefault()
     const picked = new FormData(event.currentTarget as HTMLFormElement).get('integration')
@@ -249,18 +255,20 @@ export function ConnectArea(props: AreaProps): VNode {
   const view = props.model.view.value
   const heading = useRef<HTMLHeadingElement>(null)
   const toggle = useRef<HTMLButtonElement>(null)
-  const before = useRef(view.kind)
+  const none = props.integrations.length === 0
+  const before = useRef({ kind: view.kind, none })
   // A step that takes the pressed control away with the step before moves
   // the focus to the heading of the steps, or to the button that opens them
-  // once they close, never to the body of the page. A focus the person moved
-  // elsewhere meanwhile stays.
+  // once they close, never to the body of the page. So does the last
+  // subscription that took a login leaving the list while choosing. A focus
+  // the person moved elsewhere meanwhile stays.
   useEffect(() => {
     const from = before.current
-    before.current = view.kind
-    if (from === view.kind || !fell()) return
+    before.current = { kind: view.kind, none }
+    if ((from.kind === view.kind && from.none === none) || !fell()) return
     if (view.kind === 'closed') toggle.current?.focus()
     else heading.current?.focus()
-  }, [view.kind])
+  }, [view.kind, none])
   const open = view.kind !== 'closed'
   const closable = view.kind === 'choosing' || view.kind === 'ended' || view.kind === 'failed' || view.kind === 'detached'
   return html`

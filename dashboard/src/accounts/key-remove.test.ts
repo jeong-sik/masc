@@ -252,7 +252,7 @@ describe('the removal of an account', () => {
 
 // ---- the button in the card of an account ----
 
-const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: true }
+const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: true }
 const keyAccount = (removal: Removal | null = null): ProviderAccount =>
   ({ id: 'acct_key', integration: 'claude_code', held: { kind: 'key', key: 'readable' }, left: removal === null ? null : { kind: 'removal', stage: removal } })
 const loginAccount: ProviderAccount = { id: 'acct_login', integration: 'claude_code', held: { kind: 'login' }, left: null }

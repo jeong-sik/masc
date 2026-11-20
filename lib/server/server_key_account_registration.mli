@@ -55,9 +55,11 @@ type error =
 
 (** Registers [key] as a new key account of [person] on [integration_id] and
     gives the id of the account. The details of a failure go to the log of
-    the server. *)
+    the server. [?home] defaults to {!Runtime_key_account_files.Claude_home};
+    HTTP providers pass {!Runtime_key_account_files.No_home}. *)
 val register
-  :  person:Server_setup_account_login.person
+  :  ?home:Runtime_key_account_files.home_kind
+  -> person:Server_setup_account_login.person
   -> base_path:string
   -> integration_id:Authz_types.Integration_id.t
   -> Runtime_api_key_file.key

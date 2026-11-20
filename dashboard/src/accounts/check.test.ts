@@ -283,12 +283,12 @@ describe('the checks of a person', () => {
 
 // ---- the card of an account ----
 
-const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5', 'claude-opus-9'], withheld: [], calls: { kind: 'allowed' }, takesKey: false }
+const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5', 'claude-opus-9'], withheld: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: false }
 const bare: Integration = {
-  id: 'bare', displayName: '', models: [], calls: { kind: 'allowed' }, takesKey: false,
+  id: 'bare', displayName: '', models: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: false,
   withheld: [{ model: 'bare-ghost', reason: 'model_undeclared' }, { model: 'bare-notools', reason: 'tools_not_declared' }],
 }
-const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' }, takesKey: false }
+const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' }, takesLogin: true, takesKey: false }
 const one = (integrationId: string): Owned => ({ accounts: [{ id: 'acct_1', integration: integrationId, held: { kind: 'login' }, left: null }], runtimes: [] })
 
 const card = (checks: ChecksModel, owned: Owned = one('claude_code')) =>

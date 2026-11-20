@@ -151,7 +151,7 @@ let takes_no_key =
   refused
     R.Bad_request_400
     ~code:"integration_takes_no_key"
-    "This integration takes no API key. In this stage a key is one of a Claude Code provider."
+    "This integration takes no API key."
 ;;
 
 let takes_key : Client.client -> bool = function
@@ -159,22 +159,34 @@ let takes_key : Client.client -> bool = function
   | Client.Codex | Client.Muse | Client.Antigravity -> false
 ;;
 
+let http_takes_key = Runtime_account_runtime.http_provider_takes_key
+
 (* Whether a person registers a key for the integration: a provider that
-   runtime.toml declares, of the client whose key this stage takes. It is
-   the target a verification of the account resolves again
-   ({!Login.person_runtime}), so a key is taken only where it is used. *)
+   runtime.toml declares, either an HTTP provider whose API key this stage
+   takes (returning [No_home], RFC §3.9) or an official client whose key
+   uses a Claude Code home. It is the target a verification of the account
+   resolves again ({!Login.person_runtime}), so a key is taken only where it
+   is used. *)
 let key_target config ~integration_id =
-  match Login.person_target config ~integration_id:(Authz_types.Integration_id.to_string integration_id) with
-  | Error (Login.Invalid_integration | Login.Not_declared) ->
+  let id = Authz_types.Integration_id.to_string integration_id in
+  match Runtime_schema.provider_of_id config id with
+  | None ->
     Error
       (refused
          R.Bad_request_400
          ~code:"unknown_integration"
          "This workspace declares no provider of this id.")
-  | Error (Login.No_login (_ : Server_runtime_setup_actions.error) | Login.Copy_without_owner) ->
-    Error takes_no_key
-  | Ok { Server_runtime_setup_actions.client; cli_path = _; spawn_path = _ } ->
-    if takes_key client then Ok () else Error takes_no_key
+  | Some provider when http_takes_key provider -> Ok Runtime_key_account_files.No_home
+  | Some (_ : Runtime_schema.provider) ->
+    (match Login.person_target config ~integration_id:id with
+     | Error
+         ( Login.Invalid_integration
+         | Login.Not_declared
+         | Login.No_login (_ : Server_runtime_setup_actions.error)
+         | Login.Copy_without_owner ) ->
+       Error takes_no_key
+     | Ok { Server_runtime_setup_actions.client; cli_path = _; spawn_path = _ } ->
+       if takes_key client then Ok Runtime_key_account_files.Claude_home else Error takes_no_key)
 ;;
 
 let not_recorded =
@@ -338,8 +350,8 @@ let register ~person ~base_path ~body =
      | Ok config ->
        (match key_target config ~integration_id with
         | Error answer -> answer
-        | Ok () ->
-          (match Registration.register ~person ~base_path ~integration_id key with
+        | Ok home ->
+          (match Registration.register ~home ~person ~base_path ~integration_id key with
            | Ok id ->
              R.json
                R.Ok_200

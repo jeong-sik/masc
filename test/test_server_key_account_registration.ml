@@ -1415,11 +1415,105 @@ let test_left_keys_of_two_accounts =
     else Alcotest.skip ())
 ;;
 
+(* HTTP provider key accounts (RFC 3.9): register, person_runtime, replace,
+   and remove work without creating or checking any CLI account home, while
+   vertex-gemini and uncredentialed local HTTP providers stay refused. *)
+let test_http_provider_key_lifecycle =
+  with_env_zone (fun ~env ~zone ~root:(_ : string) ~base_path ->
+    let config_path = Server_runtime_setup_actions.config_path ~base_path in
+    private_dirs (Filename.dirname config_path);
+    Out_channel.with_open_bin config_path (fun out ->
+      output_string
+        out
+        {|[runtime]
+default = "openrouter.sonnet"
+
+[providers.openrouter]
+display-name = "OpenRouter"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.vertex]
+display-name = "Vertex Gemini"
+protocol = "vertex-gemini"
+endpoint = "https://us-central1-aiplatform.googleapis.com/v1"
+
+[providers.local]
+display-name = "Local server"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.sonnet]
+api-name = "anthropic/claude-sonnet-5"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[openrouter.sonnet]
+|});
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let vertex_refused = register alice ~base_path (key_body ~integration:"vertex" the_key) in
+    answered "vertex-gemini takes no API key" vertex_refused ~status:400 ~code:(Some "integration_takes_no_key");
+    let local_refused = register alice ~base_path (key_body ~integration:"local" the_key) in
+    answered "uncredentialed local HTTP server takes no API key" local_refused ~status:400 ~code:(Some "integration_takes_no_key");
+    let created = register alice ~base_path (key_body ~integration:"openrouter" the_key) in
+    answered "HTTP provider registers a key" created ~status:200 ~code:None;
+    says_nothing_of "HTTP key registration" ~key:the_key created;
+    let account = account_in created in
+    let account_str = Provider_account_id.to_string account in
+    Alcotest.(check bool) "no Claude home was created" false (Sys.file_exists (home_of ~runtime_root account));
+    Alcotest.(check bool) "no clients directory was created" false (Sys.file_exists (Filename.concat runtime_root "clients"));
+    (match Accounts.find (state_of alice).Authz_state.provider_accounts account with
+     | Some { Accounts.owner; kind = Accounts.Key { integration_id; generation } } ->
+       Alcotest.(check bool) "owned by alice" true (User_id.equal owner alice.Login.user_id);
+       Alcotest.(check string) "linked to openrouter" "openrouter" (Integration_id.to_string integration_id);
+       let kf = get_text (Layout.key_file ~runtime_root ~account_id:account ~generation) in
+       Alcotest.(check string) "key file reads back" ("key:" ^ the_key) (read_name kf)
+     | _ -> Alcotest.fail "missing linked HTTP key account");
+    (match
+       Runtime_account_call.one_call_of account ~busy:None (fun in_call ->
+         Login.person_runtime in_call alice ~base_path ~binding:(Runtime_account_runtime.Model "sonnet")
+         |> Result.map_error Option.some)
+     with
+     | Ok { Login.runtime; _ } ->
+       (match runtime.Runtime_instance.execution with
+        | Runtime_execution.Agent_core sealed ->
+          Alcotest.(check bool)
+            "materialized runtime seals as Person_api"
+            true
+            (Runtime_account_access.is_person_api sealed)
+        | _ -> Alcotest.fail "expected Agent_core execution for HTTP key account")
+     | Error _ -> Alcotest.fail "person_runtime failed for HTTP key account");
+    let rotated = "sk-rotated-http-key" in
+    let replace_reply =
+      Server_key_account.replace ~person:alice ~base_path ~provider_account_id:account_str
+        ~body:(body [ "key", `String rotated ])
+    in
+    answered "HTTP provider key rotation succeeds" replace_reply ~status:200 ~code:None;
+    Alcotest.(check bool) "rotation did not create Claude home" false (Sys.file_exists (home_of ~runtime_root account));
+    Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path);
+    (match Accounts.find (state_of alice).Authz_state.provider_accounts account with
+     | Some { Accounts.kind = Accounts.Key { generation; _ }; _ } ->
+       let kf = get_text (Layout.key_file ~runtime_root ~account_id:account ~generation) in
+       Alcotest.(check string) "rotated key persists after start sweep" ("key:" ^ rotated) (read_name kf)
+     | _ -> Alcotest.fail "missing rotated HTTP key account");
+    (match Files.present_for ~home:Files.No_home ~runtime_root ~account_id:account with
+     | Ok there -> Alcotest.(check bool) "HTTP key files present before purge" true there
+     | Error detail -> Alcotest.failf "present_for before purge: %s" detail);
+    let remove_reply = Server_key_account.remove ~person:alice ~base_path ~provider_account_id:account_str in
+    answered "HTTP provider key purge succeeds" remove_reply ~status:200 ~code:None;
+    match Files.present_for ~home:Files.No_home ~runtime_root ~account_id:account with
+    | Ok there -> Alcotest.(check bool) "HTTP key files removed after purge" false there
+    | Error detail -> Alcotest.failf "present_for after purge: %s" detail)
+;;
+
 let () =
   Alcotest.run
     "server_key_account_registration"
     [ ( "register"
       , [ Alcotest.test_case "the record, the files, and a runtime on them" `Quick test_registered
+        ; Alcotest.test_case "HTTP provider key lifecycle without CLI home" `Quick test_http_provider_key_lifecycle
         ; Alcotest.test_case "a refused request leaves nothing" `Quick test_refused
         ; Alcotest.test_case "a person the zone turns down" `Quick test_not_active
         ; Alcotest.test_case "files that are not made" `Quick test_files_not_made

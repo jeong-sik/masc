@@ -16,8 +16,8 @@ import type { LoginEnd } from './login'
 import type { Integration } from './wire'
 
 const integrations: readonly Integration[] = [
-  { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
-  { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
+  { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: false },
+  { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesLogin: true, takesKey: false },
 ]
 const loginId = 'a'.repeat(64)
 const printed = 'Open https://claude.ai/oauth/authorize?code=true&state=x to sign in.\nPaste code here: '
@@ -90,7 +90,7 @@ afterEach(() => {
 describe('a subscription with no model to check', () => {
   it('names each model the server left out, before the subscription is picked', async () => {
     const bare: Integration = {
-      id: 'claude_code', displayName: 'Claude Code', models: [], calls: { kind: 'allowed' }, takesKey: false,
+      id: 'claude_code', displayName: 'Claude Code', models: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: false,
       withheld: [{ model: 'claude-ghost', reason: 'model_undeclared' }, { model: 'claude-notools', reason: 'tools_not_declared' }, { model: 'claude-later', reason: 'unrecognised' }],
     }
     const { container } = render(html`<${ConnectArea} model=${counting({ kind: 'choosing' })} integrations=${[bare]} />`)
@@ -353,5 +353,15 @@ describe('what a client printed', () => {
 
   it('loses the marks that turn the direction of text', () => {
     expect(printable('\u202ecode\u202c \u2066x\u2069')).toBe('code x')
+  })
+
+  it('offers a close action cleanly when no login subscription remains while choosing', async () => {
+    const model = counting({ kind: 'choosing' })
+    const { container } = render(html`<${ConnectArea} model=${model} integrations=${[]} />`)
+    expect(container.querySelectorAll('form').length).toBe(0)
+    const close = the<HTMLButtonElement>(container, '.actions button[type=button]')
+    fireEvent.click(close)
+    expect(model.close).toHaveBeenCalledTimes(1)
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

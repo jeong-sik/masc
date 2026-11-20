@@ -283,6 +283,13 @@ function leftWords(removing: ReadonlyMap<string, Removing>, replacing: ReadonlyM
   ].join(' ')
 }
 
+/** Whether the login-connect area is on the page: a subscription takes a
+    login, or the area is open. An open area stays when the last subscription
+    that took a login left the list, so what it says stays with it. */
+const showsConnectArea = (view: PanelView, connecting: ConnectModel): boolean =>
+  view.kind === 'read'
+  && (view.integrations.some((integration) => integration.takesLogin) || connecting.view.value.kind !== 'closed')
+
 /** Whether the area of a key is on the page: a subscription takes a key, or
     the form is open. An open form stays when the last subscription that took
     a key left the list, so what it says of the key it was given stays with
@@ -313,10 +320,11 @@ function PanelBody({ view, connecting, checking, adding, removing, replacing, on
         <${Retry} label="다시 시도" next=${view.next} onRetry=${onRetry} />
       `
     case 'read': {
+      const takingLogin = view.integrations.filter((integration) => integration.takesLogin)
       const takingKey = view.integrations.filter((integration) => integration.takesKey)
       return html`
         <${Offer} integrations=${view.integrations} />
-        ${view.integrations.length === 0 ? null : html`<${ConnectArea} model=${connecting} integrations=${view.integrations} />`}
+        ${showsConnectArea(view, connecting) ? html`<${ConnectArea} model=${connecting} integrations=${takingLogin} />` : null}
         ${showsKeyArea(view, adding) ? html`<${KeyArea} model=${adding} integrations=${takingKey} />` : null}
         <${AccountList} integrations=${view.integrations} owned=${view.owned} checks=${checking} removals=${removing} replacements=${replacing} />
         <p class="hint" role="status">${leftWords(removing.removing.value, replacing.replacing.value, view.owned)}</p>
@@ -340,18 +348,20 @@ export function SubscriptionsPanel({ model }: { readonly model: SubscriptionsMod
     if (before !== view.kind && hadControls && fell()) heading.current?.focus()
   }, [view.kind])
   // An account that left the list, removed here or elsewhere, takes its
-  // card away, and a focus on it with it. The area of a key leaves once its
-  // form closed and no subscription takes a key. That focus goes to the
+  // card away, and a focus on it with it. Each connect/key area leaves once
+  // it closed and no subscription supports that mode. That focus goes to the
   // heading of the panel in the same way.
   const cards = view.kind === 'read' ? view.owned.accounts.map((account) => account.id) : null
+  const connected = showsConnectArea(view, model.connecting)
   const keyed = showsKeyArea(view, model.adding)
-  const drawn = useRef({ cards, keyed })
+  const drawn = useRef({ cards, connected, keyed })
   useEffect(() => {
     const before = drawn.current
-    drawn.current = { cards, keyed }
+    drawn.current = { cards, connected, keyed }
     const cardLeft = before.cards !== null && cards !== null && before.cards.some((id) => !cards.includes(id))
-    const areaLeft = before.keyed && !keyed && view.kind === 'read'
-    if ((cardLeft || areaLeft) && fell()) heading.current?.focus()
+    const connectLeft = before.connected && !connected && view.kind === 'read'
+    const keyLeft = before.keyed && !keyed && view.kind === 'read'
+    if ((cardLeft || connectLeft || keyLeft) && fell()) heading.current?.focus()
   })
   return html`
     <section aria-labelledby="subscriptions-heading">

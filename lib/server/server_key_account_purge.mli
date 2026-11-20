@@ -81,9 +81,11 @@ val resume : zone:Authz_zone.t -> base_path:string -> unit
     of another person is answered [Not_a_key_account] or [Not_found] and
     nothing is removed. The call is not tied to [id] by its type: the
     caller hands the witness of the call of that account. [Account_busy] is
-    not answered. *)
+    not answered. [?home] overrides the workspace config lookup when the
+    caller already resolved {!Runtime_key_account_files.home_kind}. *)
 val remove_in_call
-  :  Runtime_account_call.t
+  :  ?home:Runtime_key_account_files.home_kind
+  -> Runtime_account_call.t
   -> person:Server_setup_account_login.person
   -> base_path:string
   -> Authz_types.Provider_account_id.t

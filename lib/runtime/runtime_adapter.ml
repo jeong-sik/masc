@@ -1018,6 +1018,45 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
       provider.id provider.protocol)
 ;;
 
+let http_model_declares_tools
+      (provider : Runtime_schema.provider)
+      (spec : Runtime_schema.model_spec)
+  : (bool, string) result
+  =
+  let open Result.Syntax in
+  let declarations = Declarations.current () in
+  let* declaration =
+    Result.map_error (catalog_row_refusal_text provider) (catalog_declaration declarations provider)
+  in
+  let* kind = provider_kind_for_http_provider ?declaration provider in
+  let request_policy =
+    Llm_provider.Capabilities.resolve_snapshot_request_policy
+      ~snapshot:declarations
+      ~wire:kind
+      ~provider_id:(Runtime_schema.catalog_provider_id provider)
+      ~model_id:spec.api_name
+  in
+  let model_capabilities_override =
+    model_capabilities_override_of_model_spec ~wire:kind ~request_policy spec
+  in
+  let cfg =
+    Llm_provider.Provider_config.make
+      ~kind
+      ~provider_id:(Runtime_schema.catalog_provider_id provider)
+      ~model_id:spec.api_name
+      ~base_url:""
+      ~api_key:""
+      ~request_path:""
+      ?model_capabilities_override
+      ()
+    |> Llm_provider.Provider_config.with_request_policy request_policy
+  in
+  let caps, (_ : Llm_provider.Provider_config.capability_source) =
+    Llm_provider.Provider_config.resolve_request_capabilities cfg
+  in
+  Ok caps.Llm_provider.Capabilities.supports_tools
+;;
+
 (* Materialize the exact HTTP binding and its credential authority together. *)
 let materialize_provider_binding_with ~person_api ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
     : (provider_materialization, string) result =

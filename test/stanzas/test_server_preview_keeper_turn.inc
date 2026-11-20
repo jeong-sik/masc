@@ -15,6 +15,7 @@
  (modules test_server_preview_keeper_turn)
  (libraries
   alcotest
+  bigstringaf
   eio
   eio_main
   httpun
@@ -23,6 +24,7 @@
   masc.config_dir_resolver
   masc.fs_compat
   masc.masc_core
+  masc.masc_eio_context
   masc.runtime
   masc.server
   unix

@@ -169,3 +169,18 @@ val person_runtime
     reached, is for whoever makes a file under it. The error is a sentence
     that names no path. *)
 val person_runtime_root : person -> base_path:string -> (string, string) result
+
+(** Whether a key account of [integration_id] carries a Claude Code home or
+    no CLI home (HTTP providers, RFC a-persons-api-key-is-their-own-provider-account 3.9). *)
+val key_account_home_kind
+  :  Runtime_schema.config
+  -> integration_id:Authz_types.Integration_id.t
+  -> Runtime_key_account_files.home_kind
+
+(** {!key_account_home_kind} against [base_path]'s runtime.toml; defaults to
+    {!Runtime_key_account_files.Claude_home} when the workspace config is
+    unreadable or does not declare [integration_id]. *)
+val key_account_home_kind_at
+  :  base_path:string
+  -> integration_id:Authz_types.Integration_id.t
+  -> Runtime_key_account_files.home_kind

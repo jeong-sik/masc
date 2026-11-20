@@ -245,8 +245,8 @@ describe('the giving of a key', () => {
 
 // ---- the area ----
 
-const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: true }
-const second: Integration = { id: 'claude_team', displayName: 'Claude Team', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: true }
+const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: true }
+const second: Integration = { id: 'claude_team', displayName: 'Claude Team', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesLogin: false, takesKey: true }
 
 /** A model that shows `view` and counts what it is asked. An add ends as `kept` says. */
 const showing = (view: AddView, kept: Kept = 'kept') => ({

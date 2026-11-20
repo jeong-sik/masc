@@ -836,6 +836,7 @@ let test_turn () =
            ; models
            ; withheld = []
            ; calls
+           ; takes_login = true
            ; takes_key = true
            }
          in
@@ -2164,7 +2165,332 @@ let test_turn () =
               "a key file open to its group is not read"
               (409, "key_unreadable")
               (refused (dave_turn ()));
-            Alcotest.(check bool) "and no client started" false (Sys.file_exists turn_record))))
+            Alcotest.(check bool) "and no client started" false (Sys.file_exists turn_record));
+        (* HTTP provider API key route lifecycle in Multi_account mode (RFC 3.9):
+           registration without CLI home, POST /setup/accounts/verify over HTTP/1
+           against loopback (401 -> key_refused, 200 -> runtime made), zero operator
+           credential leakage, and rotation -> existing runtime with updated key. *)
+        Eio.Switch.run (fun sw ->
+          let reply_status = ref 401 in
+          let observed_requests : ((string * string) list * string) list ref = ref [] in
+          let listening =
+            Eio.Net.listen
+              ~sw
+              ~backlog:8
+              ~reuse_addr:true
+              env#net
+              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+          in
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+            while true do
+              Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
+                let reader = Eio.Buf_read.of_flow ~max_size:65536 flow in
+                let _request_line = Eio.Buf_read.line reader in
+                let rec read_headers acc =
+                  let line = Eio.Buf_read.line reader in
+                  let trimmed =
+                    let n = String.length line in
+                    if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line
+                  in
+                  if String.equal trimmed ""
+                  then List.rev acc
+                  else (
+                    match String.index_opt trimmed ':' with
+                    | Some idx ->
+                      let k = String.lowercase_ascii (String.trim (String.sub trimmed 0 idx)) in
+                      let v =
+                        String.trim (String.sub trimmed (idx + 1) (String.length trimmed - idx - 1))
+                      in
+                      read_headers ((k, v) :: acc)
+                    | None -> read_headers acc)
+                in
+                let headers = read_headers [] in
+                let content_len =
+                  match List.assoc_opt "content-length" headers with
+                  | Some s -> Option.value (int_of_string_opt s) ~default:0
+                  | None -> 0
+                in
+                let req_body = Eio.Buf_read.take content_len reader in
+                observed_requests := (headers, req_body) :: !observed_requests;
+                let status, reason, resp_body =
+                  if !reply_status = 401
+                  then 401, "Unauthorized", {|{"error":{"message":"bad auth","type":"auth_error"}}|}
+                  else (
+                    let tool_content =
+                      match Yojson.Safe.from_string req_body with
+                      | `Assoc fields ->
+                        (match List.assoc_opt "messages" fields with
+                         | Some (`List msgs) ->
+                           List.find_map
+                             (function
+                               | `Assoc msg ->
+                                 (match List.assoc_opt "role" msg, List.assoc_opt "content" msg with
+                                  | Some (`String "tool"), Some (`String c) -> Some c
+                                  | _ -> None)
+                               | _ -> None)
+                             msgs
+                         | _ -> None)
+                      | _ | exception Yojson.Json_error _ -> None
+                    in
+                    let json =
+                      match tool_content with
+                      | None ->
+                        `Assoc
+                          [ "id", `String "chatcmpl-1"
+                          ; "object", `String "chat.completion"
+                          ; "model", `String "anthropic/claude-sonnet-5"
+                          ; ( "choices"
+                            , `List
+                                [ `Assoc
+                                    [ "index", `Int 0
+                                    ; ( "message"
+                                      , `Assoc
+                                          [ "role", `String "assistant"
+                                          ; "content", `Null
+                                          ; ( "tool_calls"
+                                            , `List
+                                                [ `Assoc
+                                                    [ "id", `String "call_1"
+                                                    ; "type", `String "function"
+                                                    ; ( "function"
+                                                      , `Assoc
+                                                          [ "name", `String "runtime_readiness_challenge"
+                                                          ; "arguments", `String "{}"
+                                                          ] )
+                                                    ]
+                                                ] )
+                                          ] )
+                                    ; "finish_reason", `String "tool_calls"
+                                    ]
+                                ] )
+                          ]
+                      | Some challenge_json ->
+                        `Assoc
+                          [ "id", `String "chatcmpl-2"
+                          ; "object", `String "chat.completion"
+                          ; "model", `String "anthropic/claude-sonnet-5"
+                          ; ( "choices"
+                            , `List
+                                [ `Assoc
+                                    [ "index", `Int 0
+                                    ; ( "message"
+                                      , `Assoc
+                                          [ "role", `String "assistant"
+                                          ; "content", `String challenge_json
+                                          ] )
+                                    ; "finish_reason", `String "stop"
+                                    ]
+                                ] )
+                          ]
+                    in
+                    200, "OK", Yojson.Safe.to_string json)
+                in
+                let response =
+                  Printf.sprintf
+                    "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+                    status
+                    reason
+                    (String.length resp_body)
+                    resp_body
+                in
+                Eio.Flow.copy_string response flow;
+                (try Eio.Flow.shutdown flow `Send with
+                 | Eio.Io _ | Unix.Unix_error _ -> ()))
+            done);
+          let port =
+            match Eio.Net.listening_addr listening with
+            | `Tcp (_, port) -> port
+            | `Unix _ -> Alcotest.fail "expected TCP listening port"
+          in
+          let http_toml =
+            Printf.sprintf
+              {|[runtime]
+default = "openrouter.or-sonnet"
+
+[providers.openrouter]
+display-name = "OpenRouter"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d/v1"
+
+[providers.openrouter.credentials]
+type = "inline"
+value = "sk-operator-http-must-not-leak"
+
+[providers.openrouter.headers]
+x-operator-secret = "op-header-must-not-leak"
+
+[providers.local]
+display-name = "Local server"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.or-sonnet]
+api-name = "anthropic/claude-sonnet-5"
+max-context = 200000
+tools-support = false
+streaming = true
+
+[openrouter.or-sonnet]
+|}
+              port
+          in
+          Out_channel.with_open_bin
+            (Server_runtime_setup_actions.config_path ~base_path)
+            (fun out -> output_string out http_toml);
+          let integrations = Server_person_integrations.of_config (match Runtime_toml.parse_string http_toml with Ok c -> c | Error _ -> Alcotest.fail "bad http_toml") in
+          Alcotest.(check (list (pair string (pair bool (pair bool (list string))))))
+            "HTTP integrations expose connect=[key] only and keep local excluded"
+            [ "openrouter", (false, (true, [ "or-sonnet" ])) ]
+            (List.map
+               (fun (i : Server_person_integrations.integration) ->
+                  i.integration_id, (i.takes_login, (i.takes_key, i.models)))
+               integrations);
+          let reg_reply =
+            Server_key_account.register
+              ~person:dave.person
+              ~base_path
+              ~body:(Yojson.Safe.to_string (`Assoc [ "integration_id", `String "openrouter"; "key", `String "sk-person-http-key-1" ]))
+          in
+          Alcotest.(check int) ("register HTTP key: " ^ reg_reply.R.body) 200 (R.status_code reg_reply.R.status);
+          let http_account_id =
+            match Yojson.Safe.from_string reg_reply.R.body with
+            | `Assoc fields ->
+              (match List.assoc_opt "provider_account_id" fields with
+               | Some (`String id) -> id
+               | _ -> Alcotest.fail "missing provider_account_id")
+            | _ -> Alcotest.fail "invalid registration response"
+          in
+          let dave_root = Layout.person_runtime_root ~base_path ~namespace:dave.person.namespace in
+          Alcotest.(check (result bool string))
+            "HTTP account has no Claude_home"
+            (Ok false)
+            (Layout.home ~runtime_root:dave_root Layout.Claude_home ~account_id:http_account_id
+             |> Result.map Sys.file_exists);
+          Eio_context.set_env env;
+          Eio_context.set_clock (Eio.Stdenv.clock env);
+          let run_verify body_str =
+            let out = Buffer.create 1024 in
+            let conn =
+              Httpun.Server_connection.create (fun reqd ->
+                Login.verify
+                  ~person:dave.person
+                  ~base_path
+                  ~body:body_str
+                  (Httpun.Reqd.request reqd)
+                  (Http_reqd.of_httpun reqd))
+            in
+            let raw =
+              Printf.sprintf
+                "POST %s HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: %d\r\n\r\n%s"
+                Auth_preview.verify_path
+                (String.length body_str)
+                body_str
+            in
+            let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+            ignore (Httpun.Server_connection.read_eof conn input ~off:0 ~len:(Bigstringaf.length input));
+            let rec drain () =
+              match Httpun.Server_connection.next_write_operation conn with
+              | `Write iovecs ->
+                let written =
+                  List.fold_left
+                    (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+                      Buffer.add_string out (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+                      total + iov.len)
+                    0
+                    iovecs
+                in
+                Httpun.Server_connection.report_write_result conn (`Ok written);
+                drain ()
+              | `Yield | `Close (_ : int) -> ()
+            in
+            drain ();
+            let resp_text = Buffer.contents out in
+            match String.index_opt resp_text '\n' with
+            | None -> Alcotest.failf "malformed verify HTTP response: %S" resp_text
+            | Some _ ->
+              let body_start =
+                let sep = "\r\n\r\n" in
+                let rec find i =
+                  if i + 4 > String.length resp_text then Alcotest.fail "no body separator"
+                  else if String.sub resp_text i 4 = sep then i + 4
+                  else find (i + 1)
+                in
+                find 0
+              in
+              let json_str = String.sub resp_text body_start (String.length resp_text - body_start) in
+              Yojson.Safe.from_string json_str
+          in
+          let verify_body =
+            Yojson.Safe.to_string (`Assoc [ "provider_account_id", `String http_account_id; "model", `String "or-sonnet" ])
+          in
+          let v401 = run_verify verify_body in
+          (match v401 with
+           | `Assoc fields ->
+             (match List.assoc_opt "verification" fields, List.assoc_opt "runtime" fields with
+              | Some (`Assoc verif), Some `Null ->
+                Alcotest.(check bool) "401 verification status=failed" true (List.assoc_opt "status" verif = Some (`String "failed"));
+                (match List.assoc_opt "failure" verif with
+                 | Some (`Assoc f) ->
+                   Alcotest.(check bool)
+                     "401 failure code is key_refused"
+                     true
+                     (List.assoc_opt "code" f = Some (`String "key_refused"))
+                 | _ -> Alcotest.failf "missing failure object in %S" (Yojson.Safe.to_string v401))
+              | _ -> Alcotest.failf "expected failed verification + null runtime in %S" (Yojson.Safe.to_string v401))
+           | _ -> Alcotest.fail "expected assoc verify response");
+          (match !observed_requests with
+           | (hdrs, _) :: _ ->
+             Alcotest.(check (option string))
+               "401 request carried person key 1"
+               (Some "Bearer sk-person-http-key-1")
+               (List.assoc_opt "authorization" hdrs);
+             Alcotest.(check (option string))
+               "operator header stripped from request"
+               None
+               (List.assoc_opt "x-operator-secret" hdrs)
+           | [] -> Alcotest.fail "expected loopback HTTP request on 401 verify");
+          reply_status := 200;
+          observed_requests := [];
+          let v200 = run_verify verify_body in
+          (match v200 with
+           | `Assoc fields ->
+             (match List.assoc_opt "verification" fields, List.assoc_opt "runtime" fields with
+              | Some (`Assoc verif), Some (`Assoc rt) ->
+                Alcotest.(check bool) "200 verification status=verified" true (List.assoc_opt "status" verif = Some (`String "verified"));
+                Alcotest.(check bool) "first pass records runtime=made" true (List.assoc_opt "record" rt = Some (`String "made"))
+              | _ -> Alcotest.failf "expected passed verification + made runtime in %S" (Yojson.Safe.to_string v200))
+           | _ -> Alcotest.fail "expected assoc verify response");
+          let rep_reply =
+            Server_key_account.replace
+              ~person:dave.person
+              ~base_path
+              ~provider_account_id:http_account_id
+              ~body:(Yojson.Safe.to_string (`Assoc [ "key", `String "sk-person-http-key-2" ]))
+          in
+          Alcotest.(check int) ("rotate HTTP key: " ^ rep_reply.R.body) 200 (R.status_code rep_reply.R.status);
+          observed_requests := [];
+          let v200_rot = run_verify verify_body in
+          (match v200_rot with
+           | `Assoc fields ->
+             (match List.assoc_opt "verification" fields, List.assoc_opt "runtime" fields with
+              | Some (`Assoc verif), Some (`Assoc rt) ->
+                Alcotest.(check bool) "rotated verification status=verified" true (List.assoc_opt "status" verif = Some (`String "verified"));
+                Alcotest.(check bool) "rotated verify records runtime=existing" true (List.assoc_opt "record" rt = Some (`String "existing"))
+              | _ -> Alcotest.failf "expected existing runtime after rotation in %S" (Yojson.Safe.to_string v200_rot))
+           | _ -> Alcotest.fail "expected assoc verify response");
+          Alcotest.(check bool)
+            "all requests after rotation carried rotated person key"
+            true
+            (!observed_requests <> []
+             && List.for_all
+                  (fun (hdrs, _) ->
+                     List.assoc_opt "authorization" hdrs = Some "Bearer sk-person-http-key-2"
+                     && List.assoc_opt "x-operator-secret" hdrs = None)
+                  !observed_requests);
+          let rem_reply =
+            Server_key_account.remove ~person:dave.person ~base_path ~provider_account_id:http_account_id
+          in
+          Alcotest.(check int) ("remove HTTP key: " ^ rem_reply.R.body) 200 (R.status_code rem_reply.R.status))))
 ;;
 
 let () =

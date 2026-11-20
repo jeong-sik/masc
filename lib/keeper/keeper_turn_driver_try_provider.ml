@@ -1323,7 +1323,12 @@ type past_max_context =
 let input_limit_of_provider_config (provider_config : Llm_provider.Provider_config.t) =
   match Llm_provider.Input_budget.of_provider_config provider_config with
   | Ok limit -> Some limit
-  | Error _ -> None
+  | Error err ->
+    Log.Keeper.debug
+      "input budget unavailable for %s: %s"
+      provider_config.model_id
+      (Llm_provider.Input_budget.error_to_string err);
+    None
 ;;
 
 let input_limit_of_runtime (runtime : Runtime_instance.t option) =

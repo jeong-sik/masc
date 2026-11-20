@@ -340,7 +340,7 @@ let attach_measurement
   }
 ;;
 
-let fit_error_of_budget_error = function
+let fit_error_of_budget_error ?(input_tokens = 0) = function
   | Input_budget.Missing_context_window { model_id } -> Context_limit_unknown { model_id }
   | Input_budget.Non_positive_context_window { model_id; max_context_tokens } ->
     Invalid_context_limit { model_id; max_context_tokens }
@@ -349,7 +349,7 @@ let fit_error_of_budget_error = function
   | Input_budget.Output_reservation_exceeds_window
       { model_id = _; max_context_tokens; reserved_output_tokens } ->
     Context_window_exceeded
-      { input_tokens = 0; reserved_output_tokens; max_context_tokens }
+      { input_tokens; reserved_output_tokens; max_context_tokens }
 ;;
 
 (* Pure single source for the context-token limit. Uses only the caller-owned
@@ -380,7 +380,7 @@ let admit ~now_unix_s ~max_context_tokens measured =
       output_token_receipt
   with
   | Error (Input_budget.Receipt_budget_error err) ->
-    Error (fit_error_of_budget_error err)
+    Error (fit_error_of_budget_error ~input_tokens err)
   | Error (Input_budget.Receipt_context_exceeded exceeded) ->
     Error (Context_window_exceeded exceeded)
   | Ok fit ->

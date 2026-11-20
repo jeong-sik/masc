@@ -318,6 +318,20 @@ let test_admit_receipt_matches_budget () =
        ~model_id:"m"
        ~max_context_tokens:32
        ~input_tokens:10
+       receipt_explicit);
+  Alcotest.check
+    (Alcotest.result fit_testable fit_err_testable)
+    "admit_receipt preserves input_tokens when reserved = window"
+    (Error
+       (Input_budget.Receipt_context_exceeded
+          { input_tokens = 10
+          ; reserved_output_tokens = 64
+          ; max_context_tokens = 64
+          }))
+    (Input_budget.admit_receipt
+       ~model_id:"m"
+       ~max_context_tokens:64
+       ~input_tokens:10
        receipt_explicit)
 ;;
 

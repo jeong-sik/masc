@@ -169,7 +169,7 @@ val health_version : string -> string option
     ({!Server_startup_takeover.announce_account_server}), publishes the
     access, gives the environment and [sw] to the transport of a login
     ([Eio_context]), hands the access to [start_engine] and does not wait
-    for what it starts, records the port for the CLI of the workspace
+    for the engine it starts, records the port for the CLI of the workspace
     ([Workspace_connection]), starts one fiber that ends what a stopped
     server left ({!Server_stopped_work.start}), calls [on_ready], and serves
     until [sw] is
@@ -179,6 +179,12 @@ val health_version : string -> string option
     [run] in it would replace what the first one set. The cleartext listener follows the HTTP mode of the
     environment, as the single-user server does. [lease] is the BasePath
     lease of the base path that was judged.
+
+    The routes serve while the engine initializes. The readiness probe
+    ({!Server_health_paths.readiness}) answers 503 until the promise that
+    [start_engine] returned is resolved, and then while the zone can be
+    trusted: an engine that fails before it is ready ends the process, so
+    [masc restart] takes the server for ready only once its engine is.
 
     An [Error] comes before a connection is accepted and before the port is
     recorded, and the refusals come in the order of the constructors of
@@ -217,6 +223,6 @@ val run
   -> port:int
   -> lease:Server_startup_takeover.base_path_lease
   -> ?on_ready:(unit -> unit)
-  -> start_engine:(Runtime_account_access.published -> unit)
+  -> start_engine:(Runtime_account_access.published -> 'engine Eio.Promise.t)
   -> Authz_boot_mode_read.multi_account
   -> (unit, refusal) result

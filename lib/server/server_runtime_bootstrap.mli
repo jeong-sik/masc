@@ -227,7 +227,9 @@ val initialize_owner_state_blocking
     base path they open passed the account mode judgment. That holds for
     every single-user access. It does not hold by type for a multi-account
     one, whose base path is the one its publisher gave: a caller that passes
-    one answers for the judgment itself. None does yet.
+    one answers for the judgment itself. {!start_engine} passes the one
+    [Server_accounts.run] published, on the base path of the installation
+    the boot judged, after it read the zone of that installation again.
     [runtime_sw] must outlive [sw], including session journal cleanup.
     Complete every transport-neutral, fallible owner-initialization step and
     return the still-unclaimed persistence preparation. A transport must
@@ -287,9 +289,11 @@ val start_post_ready_owner_lanes :
     a-persons-keeper-runs-on-the-engine, S1). As in the single-user server, a
     failure before readiness and no readiness within the timeout of the
     watchdog end the process, and a failure after readiness marks the server
-    degraded. The promise is resolved with the state once it is ready.
-    [Server_accounts.run] calls this on the access of a multi-account
-    installation. *)
+    degraded. The promise is resolved with the state once
+    {!mark_owner_state_ready} succeeded, before the lanes start, so a lane
+    that fails leaves it resolved. [Server_accounts.run] calls this on the
+    access of a multi-account installation, and its readiness probe waits
+    for the promise. *)
 val start_engine
   :  sw:Eio.Switch.t
   -> runtime_sw:Eio.Switch.t
@@ -349,8 +353,9 @@ val judge
     of a single user whose announcement is refused, raises
     [Env_config_core.Config_error]. Either runs on the base path that
     [judged] was read from. [input_base_path] is that path as the operator
-    typed it, before it was made canonical: the diagnostics of a single user
-    show it, nothing opens it, and the account server does not use it.
+    typed it, before it was made canonical: the diagnostics of the owner
+    state show it, the one of a single user or the engine of the account
+    server, and nothing opens it.
 
     [on_ready] runs once the owner is ready and the HTTP listener is bound;
     for the account server, once its listener is bound.

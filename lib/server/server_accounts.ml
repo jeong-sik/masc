@@ -110,17 +110,27 @@ let liveness (_ : Httpun.Request.t) reqd =
   Http.Response.json_value (`Assoc [ "live", `Bool true ]) reqd
 ;;
 
-(* Ready while a decision can rest on the zone: without that every route of a
-   person is a 503 ([Login_routes.zone_uncertain]). The reason names paths of
-   the server, so the probe says only that the server is not ready. *)
-let readiness zone (_ : Httpun.Request.t) reqd =
-  match Authz_zone.read zone with
-  | Ok (_ : Authz_zone.trusted) -> Http.Response.json_value (`Assoc [ "ready", `Bool true ]) reqd
-  | Error (_ : Authz_zone.uncertain) ->
+(* Ready once the engine is ready and while a decision can rest on the zone.
+   An engine that fails before it is ready ends the process
+   ([Server_runtime_bootstrap.start_engine]), so a ready answer before it
+   would name a server that may still end, and [masc restart] takes that
+   answer for a replacement that serves. Without the zone every route of a
+   person is a 503 ([Login_routes.zone_uncertain]). The reason names paths
+   of the server, so the probe says only that the server is not ready. *)
+let readiness ~engine zone (_ : Httpun.Request.t) reqd =
+  let not_ready () =
     Http.Response.json_value
       ~status:`Service_unavailable
       (`Assoc [ "ready", `Bool false ])
       reqd
+  in
+  if not (Eio.Promise.is_resolved engine)
+  then not_ready ()
+  else (
+    match Authz_zone.read zone with
+    | Ok (_ : Authz_zone.trusted) ->
+      Http.Response.json_value (`Assoc [ "ready", `Bool true ]) reqd
+    | Error (_ : Authz_zone.uncertain) -> not_ready ())
 ;;
 
 let add_routes_of_people login ~env ~base_path router =
@@ -130,11 +140,14 @@ let add_routes_of_people login ~env ~base_path router =
   |> Server_account_console.add_routes
 ;;
 
-let register ~login ~env ~base_path zone router =
+let register ~login ~env ~base_path ~engine zone router =
   router
   |> Server_route.get Server_route.Always_public Server_health_paths.health health
   |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness
-  |> Server_route.get Server_route.Always_public Server_health_paths.readiness (readiness zone)
+  |> Server_route.get
+       Server_route.Always_public
+       Server_health_paths.readiness
+       (readiness ~engine zone)
   |> add_routes_of_people login ~env ~base_path
 ;;
 
@@ -223,7 +236,17 @@ let serve ~sw ~clock ~http_mode ~(config : Http.config) ~socket ~https_listener 
       ~h2_error_handler
 ;;
 
-let run ~sw ~env ~address ~port ~lease ?on_ready ~start_engine multi_account =
+let run
+      (type engine)
+      ~sw
+      ~env
+      ~address
+      ~port
+      ~lease
+      ?on_ready
+      ~(start_engine : Runtime_account_access.published -> engine Eio.Promise.t)
+      multi_account
+  =
   let clock = Eio.Stdenv.clock env in
   let net = Eio.Stdenv.net env in
   let base_path = M.multi_account_base_path multi_account in
@@ -260,10 +283,14 @@ let run ~sw ~env ~address ~port ~lease ?on_ready ~start_engine multi_account =
    | None -> ()
    | Some reason ->
      Log.Server.warn "%s answers 503: %s" Server_account_console.page_path reason);
+  (* The probe of readiness is in the table, and the engine starts only once
+     the access is published, below. So the probe reads this promise, which
+     is resolved when the one of the engine is. *)
+  let engine_ready, engine_became_ready = Eio.Promise.create () in
   let* table =
     Result.map_error
       (fun refusal -> Route_of_another_kind refusal)
-      (Table.checked (register ~login ~env ~base_path zone))
+      (Table.checked (register ~login ~env ~base_path ~engine:engine_ready zone))
   in
   (* Read before [make_http_config], which writes the address the listener
      binds into this variable when the operator left it unset: after it, a
@@ -375,8 +402,12 @@ let run ~sw ~env ~address ~port ~lease ?on_ready ~start_engine multi_account =
   Eio_context.set_switch sw;
   (* The engine starts on the access published above, in a fiber
      ([Server_runtime_bootstrap.start_engine]). Nothing here waits for it:
-     the routes serve while it initializes. *)
-  start_engine access;
+     the routes serve while it initializes, and the probe of readiness
+     answers 503 until it is ready. *)
+  let engine = start_engine access in
+  Eio.Fiber.fork ~sw (fun () ->
+    let (_ : engine) = Eio.Promise.await engine in
+    Eio.Promise.resolve engine_became_ready ());
   record_port ~base_path config;
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   (* What a stopped server left ends beside the routes. The access is

@@ -251,15 +251,16 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
         ~lease
         ~on_ready:(Eio.Promise.resolve set_listening)
         ~start_engine:(fun access ->
-          Eio.Promise.resolve
-            start
-            ( access
-            , Server_runtime_bootstrap.start_engine
-                ~sw
-                ~runtime_sw
-                ~env
-                ~accept_store_quarantine:false
-                access ))
+          let engine =
+            Server_runtime_bootstrap.start_engine
+              ~sw
+              ~runtime_sw
+              ~env
+              ~accept_store_quarantine:false
+              access
+          in
+          Eio.Promise.resolve start (access, engine);
+          engine)
         multi_account
     with
     | Ok () -> ()
@@ -271,9 +272,9 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
      Alcotest.(check string) "the engine starts on the access of the installation" base base_path
    | Runtime_account_access.Single_user (_ : Read.single_user) ->
      Alcotest.fail "the engine started on the access of a single user");
-  (* A failure before readiness ends the process. A failure in the lanes
-     after readiness leaves the promise unresolved and the phase degraded, so
-     the wait is bounded. *)
+  (* A failure before readiness ends the process. The promise is resolved at
+     readiness, before the lanes start, so a lane that failed by the time the
+     case reads the phase shows as degraded below. *)
   let state = within_the_watchdog ~clock "the state of the engine" engine in
   let startup = Server_startup_state.snapshot () in
   Alcotest.(check bool) "the engine is ready" true startup.Server_startup_state.state_ready;
@@ -299,6 +300,13 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
      them (RFC §5, "the tokens of the operator reach no person"). *)
   within_the_watchdog ~clock "the listener of the account server" listening;
   let net = Eio.Stdenv.net env in
+  (* The probe of the account server waits for this engine, which is ready
+     above. *)
+  let status, body = get ~net ~port ~headers:[] Server_health_paths.readiness in
+  Alcotest.(check (pair int string))
+    "the readiness of the account server once its engine is ready"
+    (200, {|{"ready":true}|})
+    (status, Yojson.Safe.to_string (Yojson.Safe.from_string body));
   let legacy = Auth_gate.reason_to_string Auth_gate.Legacy_credential_forbidden in
   List.iter
     (fun (label, header) ->
@@ -344,9 +352,7 @@ let boot_the_installation_at root =
       ~lease
       ~start_engine:(fun access ->
         write_file (engine_started root) "";
-        ignore
-          (Server_runtime_bootstrap.start_engine ~sw ~runtime_sw ~env ~accept_store_quarantine:false access
-           : Mcp_server.server_state Eio.Promise.t))
+        Server_runtime_bootstrap.start_engine ~sw ~runtime_sw ~env ~accept_store_quarantine:false access)
       multi_account
   with
   | Ok () -> ()

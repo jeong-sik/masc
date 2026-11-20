@@ -32,17 +32,6 @@ let covering_error_to_string : Head.covering_error -> string = function
       (if has_previous then "one" else "none")
 ;;
 
-let read_error_to_string : Store.read_error -> string = function
-  | Read_failed { path; detail } -> Printf.sprintf "the turn log %s was not read: %s" path detail
-  | Row_undecodable { offset; reason = Not_json } ->
-    Printf.sprintf "the turn log line at byte %d is not JSON" offset
-  | Row_undecodable { offset; reason = Malformed error } ->
-    Printf.sprintf "the turn log line at byte %d: %s" offset
-      (Keeper_memory_os_types.wire_error_to_string error)
-  | Log_start_missing -> "the turn log has lines and none starts it"
-  | Moved_while_reading -> "the turn log changed while its tail was read"
-;;
-
 let append_error_to_string : Store.append_error -> string = function
   | End_moved { expected; actual } ->
     Printf.sprintf "the turn log was read to end at byte %d and is %d bytes long" expected actual
@@ -51,7 +40,7 @@ let append_error_to_string : Store.append_error -> string = function
 ;;
 
 let not_recorded_to_string = function
-  | Tail_unread error -> read_error_to_string error
+  | Tail_unread error -> Store.read_error_to_string error
   | Head_unread error -> Keeper_checkpoint_store_session.checkpoint_load_error_to_string error
   | Ends_unread error -> Ends.error_to_string error
   | Run_unnamed error -> covering_error_to_string error

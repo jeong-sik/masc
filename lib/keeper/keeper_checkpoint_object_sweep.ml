@@ -34,6 +34,7 @@ type error =
       ; segment : string
       ; detail : string
       }
+  | Unread_lines_unreadable of Keeper_unread_turn_bundles.error
 
 let error_to_string = function
   | Owner_stores_unreadable error ->
@@ -45,6 +46,9 @@ let error_to_string = function
     Printf.sprintf "root head %s is not one this binary reads: %s" root detail
   | Segment_unreachable { root; segment; detail } ->
     Printf.sprintf "segment %s behind root head %s could not be followed: %s" segment root detail
+  | Unread_lines_unreadable error ->
+    "the bundles unread turn-log lines point at are unknown: "
+    ^ Keeper_unread_turn_bundles.error_to_string error
 ;;
 
 (* A root head and where it was found, for the error that names it. *)
@@ -216,7 +220,19 @@ type session_plan =
   ; live : String_set.t
   }
 
-let plan_sessions ~session_root ~external_roots =
+(* The bundles unread turn-log lines point at, by session. *)
+let unread_by_session (unread : Keeper_unread_turn_bundles.root list) =
+  List.fold_left
+    (fun by_session ({ Keeper_unread_turn_bundles.session; bundle } : Keeper_unread_turn_bundles.root) ->
+       String_map.update session
+         (fun found ->
+            Some (String_set.add (bundle :> string) (Option.value ~default:String_set.empty found)))
+         by_session)
+    String_map.empty
+    unread
+;;
+
+let plan_sessions ~session_root ~external_roots ~unread =
   let* sessions = subdirectories session_root in
   List.fold_left
     (fun acc session_id ->
@@ -236,6 +252,9 @@ let plan_sessions ~session_root ~external_roots =
            |> List.map (fun root -> Root_bytes root)
          in
          let* current, live = reached ~session_root ~session_dir (own @ others) in
+         let live =
+           Option.fold ~none:live ~some:(String_set.union live) (String_map.find_opt session_id unread)
+         in
          Ok (roots_seen + current, { objects_dir; live } :: plans))
     (Ok (0, []))
     sessions
@@ -276,17 +295,24 @@ let remove_unreached report { objects_dir; live } =
       prefixes
 ;;
 
-let run ~runtime_root =
+let run ~runtime_root ~memory_dir =
   let* records =
     Keeper_retained_checkpoint_sweep.owner_records ~runtime_root
     |> Result.map_error (fun error -> Owner_stores_unreadable error)
   in
   let external_roots = gate_roots records in
+  let* unread =
+    Keeper_unread_turn_bundles.read
+      ~turns_dir:(Filename.concat runtime_root Common.keepers_runtime_dirname)
+      ~memory_dir
+    |> Result.map unread_by_session
+    |> Result.map_error (fun error -> Unread_lines_unreadable error)
+  in
   let* session_root = resolved (Keeper_fs.session_store_path_for_runtime_root runtime_root) in
   let* roots, plans =
     match session_root with
     | None -> Ok (0, [])
-    | Some session_root -> plan_sessions ~session_root ~external_roots
+    | Some session_root -> plan_sessions ~session_root ~external_roots ~unread
   in
   let empty =
     { sessions = List.length plans; roots; kept = 0; removed = 0; removed_bytes = 0; failures = [] }

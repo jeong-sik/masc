@@ -5,7 +5,10 @@
     roots are the session's canonical head, its history archive heads, its
     retained heads under [accepted-checkpoints/] and the Gate preparation heads
     the keepers' operation stores hold for that trace. A head of an earlier
-    [checkpoint_version] is not a root: no load reads it again.
+    [checkpoint_version] is not a root: no load reads it again. The bundles
+    that turn-log lines a Memory writer has yet to read point at are kept too
+    ({!Keeper_unread_turn_bundles}), so a purge before the writer reads them
+    does not take their content away.
 
     The pass is run only by the server process that holds the BasePath writer
     lease, after the retained checkpoint sweep and before the scheduler of
@@ -14,7 +17,8 @@
 
     Every root is read before anything is removed. A root that cannot be read
     or decoded, an [accepted-checkpoints] entry that is not a directory, a head
-    of a later version, a segment that cannot be followed,
+    of a later version, a segment that cannot be followed, a turn log or one
+    of its unread lines that cannot be read,
     or an operation store {!Keeper_retained_checkpoint_sweep.owner_records}
     cannot read stops the pass with nothing removed, because what that head or
     store names is unknown. Only entries named [objects/<aa>/<sha256>] for a
@@ -49,12 +53,15 @@ type error =
       ; segment : string
       ; detail : string
       }
+  | Unread_lines_unreadable of Keeper_unread_turn_bundles.error
 
 val error_to_string : error -> string
 
-(** [run ~runtime_root] removes the objects under
+(** [run ~runtime_root ~memory_dir] removes the objects under
     [<runtime_root>/traces/<session>/objects] that no root reaches. The
     session root is resolved as the store resolves it, so it may be a link;
     below it only entries that are directories themselves are read, and
-    nothing else there is touched. *)
-val run : runtime_root:string -> (report, error) result
+    nothing else there is touched. The turn logs are read under
+    [<runtime_root>/keepers] and the Memory writers' commit logs under
+    [memory_dir]. *)
+val run : runtime_root:string -> memory_dir:string -> (report, error) result

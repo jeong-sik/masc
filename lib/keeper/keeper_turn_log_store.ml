@@ -38,6 +38,17 @@ type read_error =
   | Log_start_missing
   | Moved_while_reading
 
+let read_error_to_string = function
+  | Read_failed { path; detail } -> Printf.sprintf "the turn log %s was not read: %s" path detail
+  | Row_undecodable { offset; reason = Not_json } ->
+    Printf.sprintf "the turn log line at byte %d is not JSON" offset
+  | Row_undecodable { offset; reason = Malformed error } ->
+    Printf.sprintf "the turn log line at byte %d: %s" offset
+      (Keeper_memory_os_types.wire_error_to_string error)
+  | Log_start_missing -> "the turn log has lines and none starts it"
+  | Moved_while_reading -> "the turn log changed while its tail was read"
+;;
+
 let decode row =
   match Yojson.Safe.from_string row with
   | exception Yojson.Json_error (_ : string) -> Error Not_json

@@ -3,7 +3,7 @@ rfc: "a-request-part-sits-where-its-change-rate-fits"
 title: "요청의 각 부분은 바뀌는 빈도에 맞는 자리에 둔다"
 status: Draft
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-21
 author: claude
 supersedes: []
 superseded_by: null
@@ -294,6 +294,9 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 
 지금 자리(Agent Core):
 - `Active_goals`·`Goals_awaiting_proof` 는 System 꼬리다(`keeper_run_prompt.ml`). 둘 중 하나가 바뀌면 그 뒤 전체를 다시 쓴다. §1.3 의 「Goal 사건 하나 131만 토큰」이 이것이다.
+  - 접두사 규칙을 배포한 뒤에도 그대로다. 2026-11-20 01:35Z~14:00Z 에 같은 서버 프로세스 안에서 이어진 881턴을 셌다(#53938 「배포 뒤 측정」, 스크립트는 그 PR 의 「다시 돌리기」).
+  - 앞 턴과 처음 달라진 곳이 system 의 Goal 절인 턴이 4.3% 다. 그 턴들은 첫 요청 입력의 40.2% 만 캐시에서 읽었다(토큰 가중).
+  - 뒤에 덧붙기만 한 턴(60.5%)은 91.2% 를 읽었다.
 - 나머지 층은 첫 요청의 턴 문맥이다. 계약을 선언한 모델(`reasoning_replay = "turn_scoped_system_context_preserve_always"`)에서는 `clear_at` system 메시지로 간다.
 - Anthropic 레인은 지난 턴 문맥을 이력에 `Historical_system_context` 로 남겨 제자리에 다시 보낸다. 앞부분이 늘기만 하게 하려는 설계다(`message_origin_lowering.ml`). `clear_at` 계약 모델에서는 API 가 그 글을 입력에서 뺀다.
 
@@ -304,8 +307,13 @@ L5 에서 정하는 것:
   - 「도착」 층은 매번 싣는다. 그 턴에 온 것이라 이력에 같은 글이 쌓이지 않는다.
   - 예외는 `Pending_mentions` 다. 답할 때까지 같은 mention 을 매 턴 다시 그린다. User 자리로 옮기기 전에 줄 단위로 바꾸고, 창이 든 줄을 뺀다.
 - 「창이 든 것」은 창 안 User 메시지가 실은 구획과 줄의 sha 다. 공식 클라이언트의 `held_context`(구획·줄 sha, `Keeper_official_client_session_store`)와 같은 모양이다.
-  - 창이 옮겨져 그 메시지가 빠지면 다음 턴에 다시 싣는다.
-  - 저장 자리는 접두사 규칙의 `Keeper_model_input_ledger` 와 맞춘다.
+- 「창이 든 것」은 따로 저장하지 않는다. 접두사 규칙 쪽과 2026-11-20 에 맞췄다.
+  - 턴 문맥을 실은 User 메시지가 자기 구획과 줄의 sha 를 메시지 `metadata` 로 든다.
+  - 그 칸은 타입이 있는 접근 모듈 하나로만 쓰고 읽는다. 지금의 `Conversation_metadata` 와 같은 방식이다.
+  - `metadata` 는 provider 요청에 실리지 않는다. Anthropic 직렬화(`backend_anthropic.ml`)는 이 칸을 읽지 않고, OpenAI Responses 는 자기 키(`openai.responses.phase`)만 읽는다. 그래서 sha 를 들어도 캐시에 닿는 바이트는 그대로다.
+  - 무엇을 실을지는 투영 앞단이 정한다. 이번 요청의 창에 든 메시지의 `metadata` 를 읽고, 창이 든 구획과 줄을 뺀다.
+  - 창이 옮겨져 그 메시지가 빠지면 다음 턴에 저절로 다시 싣는다. 창 밖에 사본이 없어서 둘이 어긋날 수 없다.
+  - `Keeper_model_input_ledger` 에는 칸을 더하지 않는다.
 - `Active_goals` 는 바깥 글이다. System 꼬리에서 빼 「바뀔 때」 규칙으로 User 자리에 싣는다. 그러면 Goal 사건이 System 을 바꾸지 않는다.
 - `Goals_awaiting_proof` 는 호스트 상태지만 System 꼬리에 있다. 턴 문맥으로 옮길지 같이 정한다.
 - `Scope_messages` 는 그리는 곳이 없다. 죽은 층이라 지운다.
@@ -416,6 +424,7 @@ L5 에서 정하는 것:
 - L3: 이 RFC §1.3 의 표를 투영으로 다시 낸다. 같은 기록이면 같은 표가 나온다. 비용 행의 `cache_write_lifetime` 이 그 요청 binding 의 선언과 같다. 선언을 바꾼 앞뒤 턴은 각자의 값으로 센다.
 - L4: 운영자가 실제 호출로 본다. 불러오기 직후 요청이 앞 요청의 입력을 캐시에서 읽는다.
 - L5: 층마다 실린 역할을 요청 캡처로 센다. 이력에 같은 글이 두 번 쌓이지 않는다.
+- L5 전후: #53938 의 `prefix_rows_with_hits.py` 로 「앞 턴과 처음 달라진 곳」 표를 다시 낸다. system 의 Goal 절 줄(배포 뒤 4.3%, 적중 40.2%)에 `Goals_awaiting_proof` 가 바뀐 턴만 남는지 본다. 요청 끝 문맥 줄(9.6%, 84.9%)이 덧붙기만 한 줄로 옮겨 가는지 본다.
 - L6 전: 레인별 안쪽 요청 크기에 머리를 더한 분포, 창을 연 때의 집합과 k 턴 뒤 집합의 겹침을 잰다. 둘을 넣은 계산이 이득을 보일 때만 코드로 간다.
 - L6 뒤: 회상 Keeper 의 안 닿은 입력, 창 옮김 비율, 턴 가운데 넘침을 레인별로 전후 견준다.
 

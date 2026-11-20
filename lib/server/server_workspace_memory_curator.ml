@@ -34,6 +34,10 @@ type lane_resolve_outcome =
   | Lane_disabled of string
   | Lane_busy of string
 
+(* The curator's own table. The Librarian's Memory lane starts no curator
+   call: the two share no declaration, slot order or limit evidence. *)
+let lane_id = Standalone_lane.to_id Standalone_lane.Workspace_memory_curator
+
 let resolve_lane_execution () =
   match Registry.current () with
   | Error Registry.Publication_busy ->
@@ -53,7 +57,6 @@ let resolve_lane_execution () =
        | Targets_refused _ ) as err) ->
     Lane_disabled (Registry.publication_error_to_string err)
   | Ok registry ->
-    let lane_id = Librarian_memory_lane.lane_id in
     (match Registry.resolve_lane registry ~lane_id with
      | Ok resolved ->
        let decl = Registry.declared_lane registry ~lane_id in
@@ -278,7 +281,7 @@ let execute_exact_prompt ~base_path ~(lane : resolved_lane_execution) ~schema ~r
      | Ok snapshot ->
        (match
           Exact.start_flow
-            ~admission_class:(Standalone_lane.admission_class Standalone_lane.Librarian_memory)
+            ~admission_class:(Standalone_lane.admission_class Standalone_lane.Workspace_memory_curator)
             snapshot
         with
         | Error (Exact.Flow_id_generation_failed detail) ->
@@ -1074,7 +1077,7 @@ let start ~sw ~config =
         if String.equal event.keepers_dir keepers_dir then ignore (wake_for_commit owner event))
     in
     let unsubscribe_lane =
-      Registry.subscribe_lane_changes ~lane_id:Librarian_memory_lane.lane_id (fun () ->
+      Registry.subscribe_lane_changes ~lane_id (fun () ->
         ignore (wake owner))
     in
     Eio.Switch.on_release sw (fun () ->

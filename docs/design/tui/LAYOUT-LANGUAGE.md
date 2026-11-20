@@ -104,9 +104,6 @@ Other-use windows use the terminal-aware receding token rather than forcing dim
 text. These choices follow the [GitHub CLI accessibility guidance](https://primer.style/accessibility/foundations/cli-accessibility/)
 and [Shopify CLI colour guidance](https://shopify.github.io/cli/cli-kit/ui-kit/guidelines.html).
 
-The [consistency ledger](CONSISTENCY-PROGRESS.md) tracks the remaining surfaces
-and separates source changes from observed executable behavior.
-
 ## Keeper list and Info
 
 The roster leads with the Keeper name, followed by its typed health and turn

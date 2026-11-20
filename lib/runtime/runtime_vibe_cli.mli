@@ -6,9 +6,9 @@
     that holds the prompt file and Vibe's [--output-dir]; this module removes
     it after the call. Both outputs are read with {!Runtime_vibe_headless}.
 
-    RFC-vibe-official-client-lane §2.1 fixes the shape of a call: the [ask]
-    agent, [--output json], and no auto-approval. §2.2 gives the child
-    environment: [MISTRAL_API_KEY] is never passed. Without it [vibe-rs] read
+    A call runs the [ask] agent with [--output json] and never auto-approves.
+    The child environment passes only a fixed allowlist of variables, so
+    [MISTRAL_API_KEY] is never passed. Without it [vibe-rs] read
     the key setup stored in the macOS Keychain (m4, m14). Whether [vibe-rs]
     reads [~/.vibe/.env] before the keychain, as [vibe-acp] does, is not
     measured.

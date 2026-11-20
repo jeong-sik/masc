@@ -49,7 +49,7 @@ there is no conversion. The affected file is
 sidecars. Choosing a separate fresh base path preserves the old workspace.
 For the exact per-store fresh-state scope and checkpoint ownership effects,
 see [the stored-state guide](../guides/DURABLE-STORE-HARD-CUT.md#keeper-chat-operation-journals)
-and [the #50583 fresh-state entry](../../changelog.d/50583.md).
+and [the #50583 fresh-state entry](../../CHANGELOG.md#0700---2026-11-09).
 This source change does not reset or alter an installed workspace.
 
 ## Read-only HTTP inspection

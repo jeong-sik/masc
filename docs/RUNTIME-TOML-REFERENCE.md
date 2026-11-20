@@ -14,8 +14,6 @@ Related documents, so this one does not repeat them:
 - Reload semantics per section: [TOML-RELOAD-MATRIX.md](TOML-RELOAD-MATRIX.md)
 - Keeper runtime selection and context-window precedence:
   [spec/14-configuration.md](spec/14-configuration.md) §3
-- Sharing one model row across provider accounts:
-  [SHARED-RUNTIME-MODELS.md](SHARED-RUNTIME-MODELS.md)
 - Native MiniMax Responses candidate setup and limits:
   [guides/minimax-responses.md](guides/minimax-responses.md)
 - Environment variables the server reads at boot: [ENV-CONTRACT.md](ENV-CONTRACT.md)
@@ -125,8 +123,6 @@ Fusion panel calls and `masc-lane-cli-probe` only:
 - Its calls have no MASC time limit. A binding whose model declares
   `turn-timeout-s` (even `0`) or `reasoning-effort` does not materialize, and
   a Fusion group that declares `timeout_s` refuses the panelist.
-
-See [RFC-vibe-official-client-lane](rfc/RFC-vibe-official-client-lane.md) §4.3.
 
 ### `[providers.<id>.credentials]`
 

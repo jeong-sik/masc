@@ -548,8 +548,7 @@ let prepare_passive_keeper_identity_config ~(config : Workspace.config) ~(agent_
 let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
 
-(* RFC-0182 Phase 5 PR-B.2: ctx-free body for [masc_keeper_up].  Same
-   pattern as [keeper_msg_body] — construct a fresh keeper context
+(* Ctx-free body for [masc_keeper_up]: construct a fresh keeper context
    from threaded Eio resources and delegate to the existing
    [Turn.handle_keeper_up] (via execute_keeper_up). *)
 let keeper_up_body

@@ -409,15 +409,15 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
   Masc_eio_env.init ~sw ~net ~clock ();
-  (* RFC-0257: own detached per-keeper memory-lane fibers on the server root
+  (* Own detached per-keeper memory-lane fibers on the server root
      switch. After [set_switch] so the lane and provider calls it forks share
      the same long-lived switch (cancelled together at shutdown). *)
   Keeper_memory_lane.init ~sw;
   Keeper_working_context_pass.install ();
-  (* RFC-0107 Phase D.2c — record full Eio.Stdenv for piaf-backed
-     Pool in Masc_http_client.  Optional: tests / pre-bootstrap
-     callers may omit [env], in which case Pool falls back to a
-     stub (request returns Error). *)
+  (* Record the full Eio.Stdenv for the piaf-backed Pool in
+     Masc_http_client.  Optional: tests / pre-bootstrap callers may
+     omit [env], in which case a Masc_http_client request returns
+     [Error Pool_unavailable]. *)
   Option.iter Eio_context.set_env env;
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   Exec_tap.install_from_env ();
@@ -437,7 +437,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
      did not reach Keeper_runtime_resolved is indistinguishable at runtime from an
      unset one — the exact ambiguity that blocked diagnosing #25128 (idle timeout
      configured yet never observed to fire). The body-timeout override is None
-     when unset; stream_idle_timeout_sec resolves to the RFC-0345 fail-safe
+     when unset; stream_idle_timeout_sec resolves to the fail-safe
      floor when unset (stated on the dedicated line below). No existing surface
      exposes the resolved value. *)
   Log.Runtime.info
@@ -445,7 +445,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     "resolved runtime config: %s"
     (Yojson.Safe.to_string
        (Keeper_runtime_resolved.to_yojson (Keeper_runtime_resolved.current ())));
-  (* RFC-0345 (#25128): state the effective streaming idle timeout and whether it
+  (* State the effective streaming idle timeout and whether it
      came from an operator value (runtime.toml) or the fail-safe floor, so operators
      can see the floor is active and raise it if their provider legitimately
      idles longer. *)
@@ -556,7 +556,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Server_startup_state.note_input_base_path input_base_path;
   Server_startup_state.note_runtime_resolution ~path_diagnostics
     ~config_resolution;
-  (* RFC-0107 Phase D.4 — wire piaf connection pool Otel_metric_store exporter.
+  (* Wire the piaf connection pool's Otel_metric_store exporter.
      Metric registration itself runs at [Otel_metric_store] module load; this
      call is the explicit dependency-order anchor and warms the snapshot
      accessor so a misconfigured pool surfaces here rather than at first
@@ -1063,11 +1063,11 @@ let initialize_owner_state_blocking
         ~operation_runner:
           (Some (Server_routes_http_keeper_stream.operation_runner ~state ~clock))
         (* The chat lane is told when its dependency is ready
-           ([wake_operation_drain]); the autonomous lane had no equivalent and
-           rediscovered a freed slot only on its next keepalive cadence, which
-           RFC-0373 measured as up to five consecutive lost cycles. The Owner
-           fires this only when the freed slot is still unclaimed, so the wake
-           means a turn can start now. *)
+           ([wake_operation_drain]); this wake does the same for the
+           autonomous lane, which would otherwise rediscover a freed slot only
+           on its next keepalive cadence. The Owner fires this only when the
+           freed slot is still unclaimed, so the wake means a turn can start
+           now. *)
         ~on_turn_slot_released:
           (Some
              (fun ~keeper_name ->
@@ -1154,7 +1154,7 @@ let initialize_owner_state_blocking
        hours
        stale_threshold_hours
    | _ -> ());
-  (* One budget for every domain of the process (RFC-0474 L1). The calling
+  (* One budget for every domain of the process. The calling
      domain counts as one; the systhread host, the snapshot codec and the
      optional serving domain each report their own. *)
   let main_domain = 1 in
@@ -1230,10 +1230,9 @@ let sync_managed_assets_from_binary ~label ~domain ~edit_layer ~dest_dir () =
     (fun (rel, msg) -> Log.Misc.warn "%s asset sync failed: %s: %s" label rel msg)
     sync.Managed_asset_sync.failed
 
-(* Tool definitions ship embedded in the binary and are read once at boot
-   (RFC prompts-and-tool-definitions-outside-ocaml §6). A definition that
-   does not decode refuses the boot here, before readiness, instead of
-   publishing a partial tool surface. *)
+(* Tool definitions ship embedded in the binary and are read once at boot.
+   A definition that does not decode refuses the boot here, before
+   readiness, instead of publishing a partial tool surface. *)
 let validate_embedded_tool_definitions () =
   match
     Tool_definition_toml.validate_embedded
@@ -1479,10 +1478,10 @@ let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
     ~clock
     ~config:(Mcp_server.workspace_config state)
 
-(* RFC-0387 stage 2 PR-2: the goal-side verifier caller. It must start in the
-   same post-readiness lane as the task completion authority — the stage-2
-   gate is illegal to merge without it (a gate no one calls wedges every goal
-   that enters [Verifying]). *)
+(* The goal-side verifier caller. It must start in the
+   same post-readiness lane as the task completion authority — without it
+   nothing judges a goal that enters [Verifying], and every such goal
+   wedges. *)
 let start_goal_verifier ~sw ~clock (state : Mcp_server.server_state) =
   Goal_criterion_agent.start ~sw ~clock ~config:(Mcp_server.workspace_config state);
   Goal_verification_agent.start ~sw ~clock ~config:(Mcp_server.workspace_config state)
@@ -1858,7 +1857,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~address ~port in
-  (* RFC-0512 D6: the certificate is loaded or generated before anything
+  (* The certificate is loaded or generated before anything
      binds, so a configuration the listener cannot use refuses the boot. *)
   let https =
     match
@@ -2366,9 +2365,8 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
             Server_bootstrap_http.listen_https_socket ~sw:serving_sw ~net ~address ~config https
           in
           let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
-          (* Handlers run on the main domain (RFC
-             http-transport-runs-on-its-own-domain §3.3), so the table is
-             built there, with the main switch for what handlers fork. *)
+          (* Handlers run on the main domain, so the table is built there,
+             with the main switch for what handlers fork. *)
           let routes =
             Eio_context.run_on_owner_domain (fun () ->
               make_routes

@@ -174,9 +174,9 @@ type t = { cause : cause }
 (* Projection from agent-core                                          *)
 (* ------------------------------------------------------------------ *)
 
-(* Everything RFC-0454 §2.2's table has not named yet. A MASC error travels
-   agent-core's carrier, so it is lifted back to the value it is before the
-   residual projection sees it. *)
+(* Every agent-core error [cause_of_core_error] has no named arm for. A MASC
+   error travels agent-core's carrier, so it is lifted back to the value it
+   is before the residual projection sees it. *)
 let unnamed_core_cause error =
   match Keeper_account_refusal.of_core_error error with
   | Some refusal -> Account_refused refusal
@@ -476,9 +476,9 @@ let provider_rate_limited_summary ~provider ~retry_after ~detail =
    assistant turn ...") reached dashboard chat verbatim, repeatedly, on
    2026-07-21. State the condition in the user's terms instead. Only the
    typed [Api ContextOverflow] arm exists: the [Provider] path collapses the
-   overflow into [InvalidRequest] with a string reason (the module-boundary
-   classification loss RFC-0353 tracks), and matching that string here would
-   be a classifier -- the fix for that path is upstream type preservation. *)
+   overflow into [InvalidRequest] with a string reason (the classification is
+   lost at the module boundary), and matching that string here would be a
+   classifier -- the fix for that path is upstream type preservation. *)
 let context_overflow_summary ~limit =
   let limit_part =
     match limit with

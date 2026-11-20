@@ -2457,8 +2457,8 @@ val append_fd_durable_for_testing :
     Backed by a process-local per-path fd cache (RFC-0162 §3.4).
     Each path keeps one cached descriptor reused across appends;
     cross-domain serialization is provided by the same per-path
-    mutex registry as [append_file_unix], preserving RFC-0108 §3.2's
-    Record-interleave-0 guarantee. The cache holds at most 32
+    mutex registry as [append_file_unix], so two records this process
+    appends to one path never interleave. The cache holds at most 32
     descriptors that are not in use, with LRU eviction, and closes
     them at [at_exit] ([Fd_cache]). *)
 val append_jsonl : string -> Yojson.Safe.t -> unit

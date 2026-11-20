@@ -272,7 +272,7 @@ let turn_record_raw_trace_run_ref
       }
 ;;
 
-(* Retention (RFC-0358) deletes every trace no TurnRecord names, so this
+(* Retention deletes every trace no TurnRecord names, so this
    reference is what keeps a turn's trace on disk. [run_result] carries one
    only when the turn succeeded: a failed turn still writes and closes its run
    — [finish_raw_error] calls [Raw_trace.finish_run] — but the failure travels
@@ -650,7 +650,7 @@ let run_turn
       ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
                     ~keeper_name:meta.name)) in
   (* Section 1: Setup — sanitize input, build context, compose prompt. *)
-  (* RFC-0468 §3.2: the speaker of the User message this turn creates. Stamped
+  (* The speaker of the User message this turn creates. Stamped
      where that message is born and never changed afterwards. *)
   let input_metadata = Keeper_input_speaker.metadata input_speaker in
   let deferred_runtime_lane_ref = ref None in
@@ -684,12 +684,12 @@ let run_turn
   (* Cancel-safe cleanup (#9747): [Eio_guard.protect] already uses
      [Eio.Switch.on_release], so cleanup runs under cooperative cancellation
      and does not mask the outer [Eio.Cancel.Cancelled]. The turn's durable
-     record is the keeper turn-records store (RFC-0378 §5.2). *)
+     record is the keeper turn-records store. *)
   let safe_emit_turn_end () = Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name () in
   Eio_guard.protect ~finally:safe_emit_turn_end
   @@ fun () ->
   try
-  (* RFC-0107 §3.3 Phase C.1 wiring — turn-scoped Eio.Switch.
+  (* Turn-scoped Eio.Switch.
      Resources opened during a turn (HTTP connections, sandbox exec
      handles, retry sub-tasks via [Keeper_turn_driver_try_provider])
      that read [Eio_context.get_switch_opt ()] now attach to [turn_sw],
@@ -698,7 +698,7 @@ let run_turn
      bounding per-turn FD growth.
 
      Server/dashboard fibers that read [get_switch_opt] from *outside*
-     this binding are unaffected (audit §10.2): they have no
+     this binding are unaffected: they have no
      [Eio.Fiber] binding for [sw_key], so [get_switch_opt] falls
      through to the global atomic = server root_sw.
 
@@ -1493,8 +1493,7 @@ let run_turn
             the save's own answer below, because only a [Saved] reaches the
             checkpoint a resumed operation reads; a [Stale_noop] leaves it as
             it was. The runtime lane reads this to decide whether a failed last
-            candidate has tool results to resume from
-            (RFC last-path-resumes-after-progress §3.2). *)
+            candidate has tool results to resume from. *)
          let checkpoint_progress =
            Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
          in
@@ -2181,7 +2180,7 @@ let run_turn
            ~settled_start
            ()
        in
-       (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
+       (* TurnRecord — same per-keeper-turn cadence as the
           receipt above. Trajectory IDs cover direct calls; committed inline
           child rows contribute their own canonical IDs from this run's scoped
           collector. Sampling reads the last agent-core turn's effective values
@@ -2282,7 +2281,7 @@ let run_turn
           | Error (Agent_core.Error.Internal _) | Error (Agent_core.Error.Internal_carried _) -> None
         in
         let request_latency_ms : int option =
-          (* RFC-0233 §9 — wall-clock duration of the provider call in
+          (* Wall-clock duration of the provider call in
              milliseconds, sourced from AGENT_CORE
              [inference_telemetry.request_latency_ms]. The AGENT_CORE transport
              layer ([complete_common.patch_telemetry] non-streaming,
@@ -2300,7 +2299,7 @@ let run_turn
           | Error _ -> None
         in
         let ttfrc_ms : float option =
-          (* RFC-0233 §10 — time-to-first-response-chunk (wall-clock, ms),
+          (* Time-to-first-response-chunk (wall-clock, ms),
              sourced from AGENT_CORE [inference_telemetry.ttfrc_ms]. The streaming
              transport ([complete_stream]) fills it for every provider on the
              first SSE chunk, so it is populated across the streaming keeper
@@ -2308,13 +2307,13 @@ let run_turn
              Both [inference_telemetry] and the field are [option], so
              [Option.bind] flattens (same pattern as [request_latency_ms]
              above). The decode (post-first-chunk) duration is NOT derived
-             from request_latency_ms - ttfrc_ms (§9.6 fabrication guard). *)
+             from request_latency_ms - ttfrc_ms. *)
           match turn_result with
           | Ok result ->
               Option.bind result.inference_telemetry (fun t -> t.ttfrc_ms)
           | Error _ -> None
         in
-        (* RFC-0233 §2.3 — views derive, no view-side repair: ground the
+        (* Views derive, no view-side repair: ground the
            inspector's [selected_model] and [finish_reason] in the same refs
            the execution receipt already records this turn. [selected_model]
            is the successful attempt's observed model; [finish_reason] is
@@ -2322,7 +2321,7 @@ let run_turn
            ([Keeper_execution_receipt.stop_reason_to_string]). Both are
            [None] on the error path (receipt refs unset), never a
            fabricated value. *)
-        (* RFC-0233 §8 — ground ctx-window/cost in real runtime facts so the
+        (* Ground ctx-window/cost in real runtime facts so the
            dashboard stops fabricating 200K / Claude $3·$15. [context_window]
            is the keeper-resolved effective budget ([max_context]); pricing
            comes from the runtime binding retained in the Runtime singleton
@@ -2557,7 +2556,7 @@ let run_turn
                 detail)
          | Keeper_memory_os_recall.Turn_committed, []
          | Keeper_memory_os_recall.Turn_not_committed, _ -> ());
-        (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
+        (* Project the same record onto the ambient
            turn span. Both turn drivers (unified "invoke_agent <keeper>"
            and direct "keeper_turn") keep their span open across this
            tail on the same fiber, so one add_attrs covers both. The

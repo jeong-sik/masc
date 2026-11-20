@@ -196,8 +196,8 @@ type chat_message = Keeper_chat_types.chat_message = {
   execution_id : Ids.Execution_id.t option;
   tool_call_name : string option;
   surface : Surface_ref.t option;
-      (** The typed surface (RFC-0232 §3.6).  [None] on rows written
-          before P5 and on rows whose persisted surface payload fails
+      (** The typed surface.  [None] on rows written before this field
+          and on rows whose persisted surface payload fails
           to decode (reported as a persistence read drop, row kept). *)
   conversation_id : string option;
   external_message_id : string option;
@@ -207,8 +207,8 @@ type chat_message = Keeper_chat_types.chat_message = {
           workspace-less deliveries (e.g. Discord DM), rows written before
           this field existed, and non-connector lines. *)
   speaker : speaker option;
-      (** Present on user lines written since RFC-0223 P1; [None] on
-          older lines, tool/assistant lines, and lines whose persisted
+      (** Present on user lines; [None] on lines written before this
+          field existed, tool/assistant lines, and lines whose persisted
           [speaker_authority] label fails to parse (reported as a
           persistence read drop, row otherwise kept). *)
   audio : audio_clip option;
@@ -222,20 +222,20 @@ type chat_message = Keeper_chat_types.chat_message = {
           over its local parser. [None] on rows written before this field
           and on non-assistant rows. *)
   mentions : Keeper_identity.Keeper_id.t list;
-      (** RFC-0232 §3.3: mention ids parsed once at append from the
+      (** Mention ids parsed once at append from the
           persisted user content (plus connector-supplied explicit
           mentions), unless the writer explicitly selected passive context.
           [[]] on passive context, tool/assistant lines, mention-free lines,
-          and rows written before P4 (the offline backfill tool stamps
-          those).  Malformed persisted entries are reported as
-          persistence read drops and skipped; the row stays valid. *)
+          and rows written before this field.  Malformed persisted entries
+          are reported as persistence read drops and skipped; the row stays
+          valid. *)
   turn_ref : Ids.Turn_ref.t option;
-      (** RFC-0233 §7: ["<trace_id>#<absolute_turn>"] join key for the turn
+      (** ["<trace_id>#<absolute_turn>"] join key for the turn
           that produced this row.  Stamped by {!append_turn} /
           {!append_assistant_message} when the caller supplies it; [None]
-          on inbound user lines (no turn yet) and rows written before §7.
-          A malformed persisted value is reported as a persistence read
-          drop and reads as [None]; the row stays valid. *)
+          on inbound user lines (no turn yet) and rows written before this
+          field.  A malformed persisted value is reported as a persistence
+          read drop and reads as [None]; the row stays valid. *)
   failure_kind : Keeper_request_failure.Failure_kind.t option;
       (** Closed typed failure classification for [Request_failure] rows.
           [None] on non-failure rows, legacy failure rows, or rows whose
@@ -508,7 +508,7 @@ val append_autonomous_tool_calls_once :
 (** [append_assistant_message ~base_dir ~keeper_name ~content ?surface
     ?conversation_id ()]
     appends one keeper-initiated assistant line with no paired user
-    turn (RFC-0223 P4 [keeper_surface_post]). Same failure policy as
+    turn (the kind [keeper_surface_post] writes). Same failure policy as
     {!append_turn} (failure is counted + logged, not raised). *)
 val append_assistant_message :
   base_dir:string ->
@@ -745,9 +745,8 @@ val transcript_of_messages :
     whose persisted [turn_ref] equals [turn_ref], then includes operator [user]
     lines carrying either that [turn_ref] or the same typed delivery key in an
     [Accepted_user] provenance slot. Input order is preserved. There is no
-    timestamp/text fallback (RFC-0233 §7 "no fuzzy attribution"). Pass
-    {!load}-produced messages so the content is already the redacted view;
-    this function does not re-redact. *)
+    timestamp/text fallback. Pass {!load}-produced messages so the content
+    is already the redacted view; this function does not re-redact. *)
 
 val turn_transcript_to_json :
   keeper:string ->

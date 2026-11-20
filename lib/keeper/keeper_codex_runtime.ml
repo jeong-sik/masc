@@ -668,8 +668,8 @@ let codex_error_to_core_error = function
      lane rotation chain ([core_error_to_runtime_outcome] returns [None] for
      [Internal _], which short-circuits [lane_should_retry]) can judge them.
      Mirrors [claude_error_to_core_error] / [runtime_error_to_core_error]
-     (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
-     must decide its rotation class at compile time. *)
+     (antigravity). No catch-all: a new client error variant must decide
+     its rotation class at compile time. *)
   | Runtime_codex_app_server.Spawn_refused refusal ->
     Keeper_provider_refusal.core_error
       (Keeper_provider_refusal.Spawn_refused
@@ -773,9 +773,9 @@ let codex_error_to_core_error = function
      not a provider fault, so rotation to another runtime would re-run a turn
      that was intentionally stopped. Both stay off the rotation chain — the
      carrier is still an agent-core internal error, which
-     [core_error_to_runtime_outcome] reads as [None] — and RFC-0454 P2 turned
-     the sentence into the value, because the chat pane was searching the
-     sentence to decide what to draw. *)
+     [core_error_to_runtime_outcome] reads as [None] — and carry the stop as
+     a typed value, so the chat pane reads what to draw from the value, not
+     from the sentence. *)
   | Runtime_codex_app_server.Turn_interrupted ->
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Host_stopped_turn

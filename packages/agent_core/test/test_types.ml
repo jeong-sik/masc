@@ -583,6 +583,7 @@ let test_usage_and_inference_telemetry_yojson_roundtrip () =
     ; inline_content_replay = None
   ; response_replay = None
     ; effective_context_window = Some 8192
+    ; cache_write_lifetime = Some One_hour
     ; provider_internal_action_count = Some 2
     ; ttfrc_ms = Some 10.0
     ; prefill_ms = Some 11.0
@@ -595,6 +596,8 @@ let test_usage_and_inference_telemetry_yojson_roundtrip () =
     Alcotest.(check (option string)) "fingerprint" (Some "fp") decoded.system_fingerprint;
     Alcotest.(check bool) "reported model evidence survives serialization" true
       (decoded.reported_model = Some (Provider_reported_model "wire-gpt"));
+    Alcotest.(check bool) "requested cache lifetime survives serialization" true
+      (decoded.cache_write_lifetime = Some One_hour);
     Alcotest.(check bool)
       "telemetry show"
       true

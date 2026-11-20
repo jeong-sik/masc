@@ -4,7 +4,7 @@
     infer provider identity from a model ID, strip namespaces, maintain a
     fallback table, or treat an unknown model as free. *)
 
-type cache_write_lifetime =
+type cache_write_lifetime = Types.cache_write_lifetime =
   | Provider_default
   | One_hour
 

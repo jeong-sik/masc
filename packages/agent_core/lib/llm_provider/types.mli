@@ -758,6 +758,16 @@ type reported_cache_usage =
   }
 [@@deriving show, yojson]
 
+(** The lifetime a request asked its cache writes to keep. *)
+type cache_write_lifetime =
+  | Provider_default
+      (** The request named no lifetime, so the provider's default applies
+          (five minutes on Anthropic). *)
+  | One_hour
+      (** The request asked for one hour (Anthropic [cache_control] with
+          [ttl = "1h"]). *)
+[@@deriving show, yojson]
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option
@@ -795,6 +805,11 @@ type inference_telemetry =
   ; effective_context_window : int option
     (** Context window in tokens the request was sized against, as
         [Provider_config.context_window] reports it for the request config. *)
+  ; cache_write_lifetime : cache_write_lifetime option [@default None]
+    (** The lifetime the request asked its cache writes to keep, as
+        [Provider_config.cache_write_lifetime] reports it for the request
+        config. [None] means no stamp: a raw parser result the inference
+        pipeline has not patched. *)
   ; provider_internal_action_count : int option
     (** Telemetry-only count of provider-native actions that are not surfaced as AGENT_CORE tool calls. *)
   ; ttfrc_ms : float option

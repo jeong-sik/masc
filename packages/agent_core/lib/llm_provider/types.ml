@@ -1223,6 +1223,11 @@ type reported_cache_usage =
   }
 [@@deriving show, yojson]
 
+type cache_write_lifetime =
+  | Provider_default
+  | One_hour
+[@@deriving show, yojson]
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option
@@ -1239,6 +1244,7 @@ type inference_telemetry =
   ; inline_content_replay : Inline_content_replay.t option [@default None]
   ; response_replay : Response_replay.t option [@default None]
   ; effective_context_window : int option
+  ; cache_write_lifetime : cache_write_lifetime option [@default None]
   ; provider_internal_action_count : int option
   ; ttfrc_ms : float option
   ; prefill_ms : float option
@@ -1261,6 +1267,7 @@ let default_inference_telemetry : inference_telemetry =
   ; inline_content_replay = None
   ; response_replay = None
   ; effective_context_window = None
+  ; cache_write_lifetime = None
   ; provider_internal_action_count = None
   ; ttfrc_ms = None
   ; prefill_ms = None

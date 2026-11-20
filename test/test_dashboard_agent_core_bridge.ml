@@ -72,6 +72,7 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ?ttfrc_ms ?prefill_ms ()
   ; inline_content_replay = None
   ; response_replay = None
   ; effective_context_window = None
+  ; cache_write_lifetime = None
   ; provider_internal_action_count = None
   ; ttfrc_ms
   ; prefill_ms

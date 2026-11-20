@@ -4,15 +4,13 @@
     catalog rows without both input and output rates remain explicit [None];
     they are never classified as free. *)
 
-(** The lifetime a request asked its cache writes to keep. A provider prices a
-    longer-lived write above a default one. *)
-type cache_write_lifetime =
+(** The lifetime a request asked its cache writes to keep ({!Types}). A
+    provider prices a longer-lived write above a default one. *)
+type cache_write_lifetime = Types.cache_write_lifetime =
   | Provider_default
-      (** The request named no lifetime, so the provider's default applies
-          (five minutes on Anthropic). Its writes pay [cache_write_multiplier]. *)
+      (** Its writes pay [cache_write_multiplier]. *)
   | One_hour
-      (** The request asked for one hour (Anthropic [cache_control] with
-          [ttl = "1h"]). Its writes pay [cache_write_1h_multiplier]. *)
+      (** Its writes pay [cache_write_1h_multiplier]. *)
 
 type pricing =
   { input_per_million : float
@@ -45,8 +43,9 @@ val of_snapshot :
 
 val with_cache_writes : cache_write_lifetime -> source -> source
 (** The same authority for a request whose cache writes asked for this
-    lifetime. [Provider_config.pricing_source] reads it from the request's
-    [cache_extended_ttl], the flag the Anthropic body writes its [ttl] from. *)
+    lifetime. [Provider_config.pricing_source] takes it from
+    [Provider_config.cache_write_lifetime], the value the response telemetry
+    also records. *)
 
 val pricing_for_model : source -> string -> pricing option
 (** Read the exact reported model from the captured catalog. A different

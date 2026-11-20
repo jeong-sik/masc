@@ -269,18 +269,21 @@ let freeze_for_request (config : t) =
     with_request_policy policy config
 ;;
 
+(* [Backend_anthropic.build_request] writes every breakpoint's [ttl] from
+   [cache_extended_ttl], so the writes a response reports were made at this
+   lifetime. *)
+let cache_write_lifetime (config : t) : Types.cache_write_lifetime =
+  match config.cache_extended_ttl with
+  | true -> Types.One_hour
+  | false -> Types.Provider_default
+;;
+
 let pricing_source (config : t) =
   let policy = match matching_request_policy config with
     | Some policy -> policy
     | None -> resolve_request_policy config in
-  (* [Backend_anthropic.build_request] writes every breakpoint's [ttl] from
-     this flag, so the writes it reports were made at this lifetime. *)
-  let cache_writes =
-    match config.cache_extended_ttl with
-    | true -> Pricing.One_hour
-    | false -> Pricing.Provider_default
-  in
-  Pricing.with_cache_writes cache_writes (Capabilities.request_policy_pricing_source policy)
+  Pricing.with_cache_writes (cache_write_lifetime config)
+    (Capabilities.request_policy_pricing_source policy)
 ;;
 
 let capabilities_for_config_model (config : t) =

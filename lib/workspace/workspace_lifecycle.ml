@@ -10,21 +10,25 @@ open Workspace_broadcast
 open Workspace_identity
 
 (** Bounded snapshot of a corrupt agent JSON file for error diagnostics.
-    Reads at most 200 bytes to avoid OOM on large/corrupt files. *)
+    Reads at most 200 bytes to avoid OOM on large/corrupt files. A file that
+    cannot be read says why, apart from a file that is empty. *)
 let agent_parse_error_snapshot ~agent_name ~agent_file =
-  let raw_head =
-    Safe_ops.protect ~default:"" (fun () ->
+  let head_fields =
+    match
       In_channel.with_open_text agent_file (fun ic ->
         let buf = Bytes.create 200 in
         let n = In_channel.input ic buf 0 200 in
-        Bytes.sub_string buf 0 n))
+        Bytes.sub_string buf 0 n)
+    with
+    | "" -> [ ("raw_head", `Null) ]
+    | raw_head -> [ ("raw_head", `String raw_head) ]
+    | exception Sys_error detail ->
+      [ ("raw_head", `Null); ("raw_head_read_error", `String detail) ]
   in
-  `Assoc [
-    ("agent_name", `String agent_name);
-    ("agent_file", `String agent_file);
-    ("raw_head",
-      if raw_head = "" then `Null else `String raw_head);
-  ]
+  `Assoc
+    (("agent_name", `String agent_name)
+     :: ("agent_file", `String agent_file)
+     :: head_fields)
 
 let log_lifecycle_broadcast_result ~operation ~agent_name = function
   | Ok _ -> ()

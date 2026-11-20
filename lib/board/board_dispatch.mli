@@ -148,7 +148,9 @@ val set_board_sse_hook : (board_sse_event -> unit) -> unit
     {!set_closed}, {!reopen} and {!delete_post} raise [Post_changed] once the
     store took the write, including an applied deletion whose snapshot
     persistence remains pending. A write the store refuses or a deletion whose
-    decision has not established model removal raises nothing. *)
+    decision has not established model removal raises nothing. An exception
+    from the hook reaches the caller of the mutating operation, after the
+    store took the write. *)
 
 val emit_board_sse_event : visibility:Board.visibility option -> board_sse_event -> unit
 (** Publish a public event, or a payload-free [Board_changed] invalidation for

@@ -114,7 +114,7 @@ let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt fail
 
 let notify_failure config failure =
   match config.on_failure with
-  | Some f -> Safe_ops.protect ~default:() (fun () -> f failure)
+  | Some f -> f failure
   | None -> ()
 
 let coalesce_changes ~clock ~config stream =

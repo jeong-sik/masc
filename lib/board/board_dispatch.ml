@@ -264,7 +264,7 @@ let emit_board_sse_event ~visibility event =
     | Some Board.Public -> event
     | Some (Board.Unlisted | Board.Internal | Board.Direct) | None -> Board_changed in
   match Atomic.get board_sse_hook with
-  | Some hook -> Safe_ops.protect ~default:() (fun () -> hook event)
+  | Some hook -> hook event
   | None -> ()
 
 (* The store keys a post by its parsed id, so the event names the post by the

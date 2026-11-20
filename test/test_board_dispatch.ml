@@ -637,6 +637,40 @@ let test_board_sse_post_created_includes_post_kind () =
   | Some _ -> Alcotest.fail "expected post_created SSE event"
   | None -> Alcotest.fail "expected board SSE event"
 
+exception Board_sse_hook_bug
+
+(* The post is stored before the SSE hook runs. A hook that raises makes the
+   publish an after-commit failure that still names the stored post; it does
+   not read as a clean publish while every dashboard update is lost. *)
+let test_board_sse_hook_failure_is_an_after_commit_failure () =
+  Board_dispatch.set_board_sse_hook (fun _ -> raise Board_sse_hook_bug);
+  let failure =
+    match
+      Board_dispatch.create_post ~author:"sse-hook-bug"
+        ~content:"stored before the SSE hook raises"
+        ~visibility:Board.Public ~post_kind:Board.Human_post ()
+    with
+    | Ok _ -> Alcotest.fail "a raising SSE hook must reach the writer"
+    | Error failure -> failure
+  in
+  (match Board.Post_publication_failure.cause failure with
+   | Board.Post_publication_failure.Raised Board_sse_hook_bug -> ()
+   | Board.Post_publication_failure.Raised _
+   | Board.Post_publication_failure.Board_error _ ->
+     Alcotest.fail ("expected the SSE hook exception, got "
+       ^ Board.Post_publication_failure.to_string failure));
+  let creation =
+    match Board.Post_publication_failure.committed failure with
+    | Some creation -> creation
+    | None -> Alcotest.fail "the after-commit failure lost the stored post"
+  in
+  let post_id = Board.Post_id.to_string creation.post.id in
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+  | Ok post ->
+    Alcotest.(check string) "the stored post is the one the failure names"
+      "stored before the SSE hook raises" post.body
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
 let test_list_posts () =
   ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 1"
             ~post_kind:Board.Human_post ());
@@ -3642,6 +3676,8 @@ let () =
         (with_eio test_direct_comments_cannot_expand_readership);
       Alcotest.test_case "SSE post_created includes post_kind" `Quick
         (with_eio test_board_sse_post_created_includes_post_kind);
+      Alcotest.test_case "a raising SSE hook is an after-commit failure" `Quick
+        (with_eio test_board_sse_hook_failure_is_an_after_commit_failure);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
       Alcotest.test_case "negative list limit" `Quick
         (with_eio test_list_posts_negative_limit_returns_empty);

@@ -1,16 +1,19 @@
 (* The children an official client starts on the account home of a person
    get no token of the operator (RFC a-persons-keeper-runs-on-the-engine,
-   S1, section 5). The engine of a multi-account installation puts the admin
-   token and the internal Keeper token in the environment of the process
-   (Server_runtime_startup_credentials).
+   S1, section 5). The engine of a multi-account installation does not
+   export the admin token and the internal Keeper token
+   (Server_runtime_bootstrap, Server_runtime_startup_credentials), but its
+   process keeps them when the shell that started it set them.
 
-   A person reaches the login children of Claude Code, Codex and Muse Code,
-   and the turn child of Claude Code on a login or on an API key. Login
-   refuses Antigravity for a person, and a turn refuses it and Muse Code
-   (Server_setup_account_login, Server_preview_keeper_turn). Each client
-   builds the environment of its child from names it lists: Claude Code and
-   Codex capture the account (Runtime_official_account.capture, and
-   capture_on_key for a key), and Muse Code filters by its own list.
+   Each child of Claude Code and Codex for a person takes the environment of
+   an account that Runtime_official_account captured: [capture] on a login,
+   as the login environment of each client does, and [capture_on_key] on a
+   key of Claude Code (a key account of Codex is refused). Muse Code filters
+   its login child by its own list. The cases call these four builders. The
+   capture of Codex also passes the names the config.toml of its home lists;
+   a turn or a check refuses a home that lists any
+   (Runtime_account_access, Home_asks_for_environment), and the login home
+   of a person is new and lists none, as the home of each case is.
 
    The process of the case holds a made-up value under both names. No child
    gets either name, and every child gets the PATH value of the process, so
@@ -66,21 +69,23 @@ let test_claude_code () =
 ;;
 
 (* A key account of Claude Code builds the environment of its child apart
-   from [capture]. The file of the key is made-up and private, as a key file
-   is. *)
+   from [capture]. The key is made-up, in a private file of a private folder
+   outside the home, as a key file is (Runtime_api_key_file). *)
 let test_claude_code_on_a_key () =
   on_a_person_home (fun account_home ->
-    let key_file = Filename.concat account_home "made-up-key" in
-    Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 key_file (fun channel ->
-      Out_channel.output_string channel "made-up-key-of-a-person");
-    (* The mode of the open is narrowed by the umask of the process. *)
-    Unix.chmod key_file 0o600;
-    match Runtime_official_account.capture_on_key ~declaration:(Some account_home) ~key_file with
-    | Ok account -> no_operator_token "Claude Code on a key" (Runtime_official_account.environment account)
-    | Error (Runtime_official_account.Key_not_read error) ->
-      Alcotest.failf "the key was not read: %s" (Runtime_api_key_file.read_error_to_string error)
-    | Error (Runtime_official_account.Key_not_captured detail) ->
-      Alcotest.failf "no environment: %s" detail)
+    let key_folder = Filename.temp_dir ~perms:0o700 "person-child-key-" "" in
+    Fun.protect ~finally:(fun () -> remove_tree key_folder) (fun () ->
+      let key_file = Filename.concat (Unix.realpath key_folder) "made-up-key" in
+      Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 key_file (fun channel ->
+        Out_channel.output_string channel "made-up-key-of-a-person");
+      (* The mode of the open is narrowed by the umask of the process. *)
+      Unix.chmod key_file 0o600;
+      match Runtime_official_account.capture_on_key ~declaration:(Some account_home) ~key_file with
+      | Ok account -> no_operator_token "Claude Code on a key" (Runtime_official_account.environment account)
+      | Error (Runtime_official_account.Key_not_read error) ->
+        Alcotest.failf "the key was not read: %s" (Runtime_api_key_file.read_error_to_string error)
+      | Error (Runtime_official_account.Key_not_captured detail) ->
+        Alcotest.failf "no environment: %s" detail))
 ;;
 
 let test_codex () =

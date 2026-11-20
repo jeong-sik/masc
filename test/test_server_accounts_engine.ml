@@ -236,8 +236,9 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
   let base = installation.base in
   (* Pre-seed operator auth/ credentials BEFORE starting the multi-account
      engine without placing either secret in process env, so we can prove BOTH:
-     1) multi-account boot leaves MASC_ADMIN_TOKEN and MASC_INTERNAL_MCP_TOKEN
-        absent from the process environment (CLI children cannot inherit them);
+     1) multi-account boot exports neither MASC_ADMIN_TOKEN nor
+        MASC_INTERNAL_MCP_TOKEN into the process environment, which test/dune
+        leaves empty (a value the shell set would stay);
      2) pre-seeded auth/ tokens are still rejected 401 Legacy_credential_forbidden
         by the account server gate. *)
   let preseeded_admin = "masc-preseeded-admin-token" in
@@ -304,11 +305,13 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     (Some [])
     (Keeper_types_profile_toml_io.keeper_toml_files
        (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base));
-  (* Multi-account boot must NOT export MASC_ADMIN_TOKEN or
-     MASC_INTERNAL_MCP_TOKEN into the process environment where person/login
-     CLI children would inherit them, and pre-seeded auth/ tokens remain
-     rejected 401 Legacy_credential_forbidden on person routes. Note test/dune
-     initializes both env vars to "" so inherited shell values never leak. *)
+  (* A multi-account boot exports neither MASC_ADMIN_TOKEN nor
+     MASC_INTERNAL_MCP_TOKEN into the process environment, and the pre-seeded
+     auth/ tokens stay refused (401 Legacy_credential_forbidden) on the routes
+     of a person. test/dune starts the case with both names empty, so the
+     checks below see what the boot exported. A value the shell set would stay
+     in the process; the builders of the children filter it
+     (test_person_child_environment). *)
   let is_blank_env key =
     match Sys.getenv_opt key with
     | None -> true
@@ -479,11 +482,11 @@ let test_a_refused_store_ends_the_process () =
   listen_on_loopback_alone ();
   with_installation
   @@ fun installation ->
-  (* An undecodable Keeper Memory OS current snapshot in the keepers dir.
-     Server_accounts checks only .toml definitions and keeper-config-journal,
-     so it starts the engine, and prepare_keeper_persistence refuses the
-     undecodable store (~accept_store_quarantine:false) and ends the process
-     (updated after #53790 moved keeper-config-journal refusal pre-engine). *)
+  (* A Keeper Memory snapshot that does not decode, in the folder of the
+     definitions. The account server looks there for definitions only, so it
+     starts the engine; the engine refuses the store
+     (prepare_keeper_persistence without accept_store_quarantine) and ends
+     the process. *)
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:installation.base
   in

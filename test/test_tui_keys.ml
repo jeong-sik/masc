@@ -1631,9 +1631,10 @@ let test_keeper_peer_retry_is_readable_on_narrow_failures () =
              | Keeper_peer_current _ | Keeper_peer_unread)
       | None -> Alcotest.fail "failure status disappeared" in
     let rendered = Masc_tui_message_layout.fit_width status (Masc_tui_frame.inner_width ~cols) in
-    let words = String.split_on_char ' ' rendered in
+    (* The cut mark follows the last kept character (#53483), so only the
+       visible start of the row is fixed. *)
     Alcotest.(check bool) "failure and retry key fit the fixed status" true
-      (List.mem "failed" words && List.mem "r" words && List.mem "retry" words) in
+      (String.starts_with ~prefix:"  failed r retry" rendered) in
   let check_document ~cols state =
     let reading = match current_detail_reading state with
       | Some reading -> reading

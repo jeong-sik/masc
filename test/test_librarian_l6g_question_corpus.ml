@@ -24,6 +24,7 @@ module Log = Masc.Librarian_log
 module Lane = Masc.Librarian_memory_lane
 module Answer = Masc.Librarian_answer
 module Effects = Masc.Librarian_effects
+module Plan = Masc.Librarian_plan
 module Scoring = Masc.Librarian_scoring
 module Current = Masc.Keeper_memory_os_current_types
 module Types = Masc.Keeper_memory_os_types
@@ -375,17 +376,127 @@ let test_l6g_corpus_via_librarian_question_make () =
   in
   let a4 = answer_json q4 [] in
 
-  let results = [ c1, a1; c2, a2; c3, a3; c4, a4 ] in
+  (* 5. Paired Case A: Keeper says "모른다/정보가 없다" after clear without Memory injection -> preserve all 3 Korean rules *)
+  let f_rule1 = held ~category:Types.Constraint "주 브랜치(main)에는 강제 푸시를 금지한다." in
+  let f_rule2 = held ~category:Types.Constraint "배포 승인은 두 명 이상의 리뷰 확인 뒤 진행한다." in
+  let f_rule3 = held ~category:Types.Constraint "운영 포트 8935와 운영 베이스 경로는 테스트에서 건드리지 않는다." in
+  let u_unknowing : Read_unit.t list =
+    [ { line = 220
+      ; at = 1_763_600_200.0
+      ; kind =
+          Read_unit.Turn
+            { turn = 4
+            ; outcome = Turn_log.Completed
+            ; opened = opened ~runtime:"ollama" ()
+            ; unattributed = []
+            ; own =
+                [ { index = 0
+                  ; body = Read_unit.Message (Agent.user_msg "배포 규칙이 뭐였죠?")
+                  }
+                ; { index = 1
+                  ; body =
+                      Read_unit.Message
+                        (Agent.assistant_msg "제공된 정보에 배포 규칙이 없어 모릅니다.")
+                  }
+                ]
+            }
+      ; missing = []
+      }
+    ]
+  in
+  let q5, _ = make_question ~working_state:None prompt [ f_rule1; f_rule2; f_rule3 ] u_unknowing in
+  let c5 : Scoring.case =
+    { name = "unknowing_keeper_reply_preserves_korean_rules"
+    ; question = q5.id
+    ; shown = q5.shown
+    ; facts = [ f_rule1; f_rule2; f_rule3 ]
+    ; planted = []
+    ; must_keep = []
+    }
+  in
+  let a5 = answer_json q5 [] in
+  (* Contrast check: overwriting m1..m3 into English "Provided context lacks..." destroys all 3 constraints *)
+  let a5_bad =
+    answer_json q5
+      [ {|{"op":"revise","ref":"m1","claim":"Provided context lacks deployment rules","category":"constraint","basis":{"kind":"observed"},"from":["u1"]}|}
+      ; {|{"op":"revise","ref":"m2","claim":"Provided context lacks approval rules","category":"constraint","basis":{"kind":"observed"},"from":["u1"]}|}
+      ; {|{"op":"revise","ref":"m3","claim":"Provided context lacks runtime rules","category":"constraint","basis":{"kind":"observed"},"from":["u1"]}|}
+      ]
+  in
+  (match Answer.of_string ~asked:q5.id a5_bad with
+   | Error rej -> failf "bad unknowing answer failed decode: %s" (Answer.rejection_kind rej)
+   | Ok decoded_bad ->
+     let bad_plan =
+       Plan.of_answer ~shown:q5.shown ~facts:[ f_rule1; f_rule2; f_rule3 ]
+         ~removed_since:[] ~at:1_763_600_250.0 ~trace_id:"trace-l6g" decoded_bad
+     in
+     check bool "bad English overwrite erases rule1" false
+       (List.exists (fun (f : Types.fact) -> String.equal f.claim f_rule1.claim) bad_plan.facts);
+     check bool "bad English overwrite erases rule2" false
+       (List.exists (fun (f : Types.fact) -> String.equal f.claim f_rule2.claim) bad_plan.facts);
+     check bool "bad English overwrite erases rule3" false
+       (List.exists (fun (f : Types.fact) -> String.equal f.claim f_rule3.claim) bad_plan.facts));
+
+  (* 6. Paired Case B: Same 3 Korean rules + explicit operator retraction of m2 and update of m3 *)
+  let u_operator_retract : Read_unit.t list =
+    [ { line = 260
+      ; at = 1_763_600_300.0
+      ; kind =
+          Read_unit.Turn
+            { turn = 5
+            ; outcome = Turn_log.Completed
+            ; opened = opened ()
+            ; unattributed = []
+            ; own =
+                [ { index = 0
+                  ; body =
+                      Read_unit.Message
+                        (Agent.user_msg
+                           "운영자 공지: 두 명 리뷰 규칙(m2)은 철회하고, 격리 포트 범위는 18935~18940으로 바꾼다.")
+                  }
+                ; { index = 1
+                  ; body = Read_unit.Message (Agent.assistant_msg "네, 격리 포트 범위 18935~18940을 확인했고 m2는 철회하겠습니다.")
+                  }
+                ]
+            }
+      ; missing = []
+      }
+    ]
+  in
+  let q6, _ =
+    make_question ~working_state:None prompt [ f_rule1; f_rule2; f_rule3 ] u_operator_retract
+  in
+  let c6 : Scoring.case =
+    { name = "explicit_operator_retraction_updates_korean_rules"
+    ; question = q6.id
+    ; shown = q6.shown
+    ; facts = [ f_rule1; f_rule2; f_rule3 ]
+    ; planted = [ "18935~18940" ]
+    ; must_keep = []
+    }
+  in
+  let a6 =
+    answer_json q6
+      [ {|{"op":"drop","ref":"m2","reason":"단위 u1에서 운영자가 두 명 리뷰 규칙을 명시적으로 철회함"}|}
+      ; {|{"op":"revise","ref":"m3","claim":"운영 포트 8935와 운영 베이스는 건드리지 않으며 격리 포트는 18935~18940을 사용한다.","category":"constraint","basis":{"kind":"observed"},"from":["u1"]}|}
+      ]
+  in
+
+  let results = [ c1, a1; c2, a2; c3, a3; c4, a4; c5, a5; c6, a6 ] in
   let tally =
     Scoring.tally (List.map (fun (c, a) -> c, Scoring.score c a) results)
   in
-  check int "4 answers evaluated" 4 tally.answers;
+  check int "6 answers evaluated" 6 tally.answers;
   check (list (pair string int)) "0 thrown away" [] tally.thrown_away;
   check (list (pair string int)) "0 ops left out" [] tally.not_applied;
-  check int "all planted recovered (1/1)" tally.planted tally.recovered;
+  check int "all planted recovered (2/2)" tally.planted tally.recovered;
   check int "all merge_kept preserved (5/5)" tally.merge_expected tally.merge_kept;
   let r4 = score_ok c4 a4 in
   check bool "self-echo empty ops makes no Memory changes" false r4.changed;
+  let r5 = score_ok c5 a5 in
+  check bool "unknowing reply empty ops keeps all rules untouched" false r5.changed;
+  let r6 = score_ok c6 a6 in
+  check bool "explicit operator retraction changes Memory" true r6.changed;
   (* Guardrail: code-fenced reply rejected as not_json *)
   (match Scoring.score c1 ("```json\n" ^ a1 ^ "\n```") with
    | Scoring.Thrown_away Answer.Not_json -> ()
@@ -400,6 +511,99 @@ let test_l6g_corpus_via_librarian_question_make () =
    | _ -> fail "swapped id halves must fail Echo_mismatch")
 ;;
 
+let test_prompt_contract () =
+  let contains_substring ~needle haystack = Astring.String.is_infix ~affix:needle haystack in
+  let ask_path = Masc_test_deps.source_path "config/prompts/librarian.ask.md" in
+  let old_l6_path = Masc_test_deps.source_path "config/prompts/librarian-l6.md" in
+  let legacy_path = Masc_test_deps.source_path "config/prompts/librarian.md" in
+  check bool "config/prompts/librarian.ask.md exists" true (Sys.file_exists ask_path);
+  check bool "old config/prompts/librarian-l6.md removed" false (Sys.file_exists old_l6_path);
+  check bool "config/prompts/librarian.md exists" true (Sys.file_exists legacy_path);
+  let ask_text = Masc_test_deps.read_file ask_path in
+  let legacy_text = Masc_test_deps.read_file legacy_path in
+  List.iter
+    (fun legacy_token ->
+       check bool ("legacy librarian.md retains " ^ legacy_token) true
+         (contains_substring ~needle:legacy_token legacy_text))
+    [ "new_claims"; "supersedes"; "absorbs"; "working_contexts"; "admission_policy" ];
+  List.iter
+    (fun wire_or_rule_token ->
+       check bool ("librarian.ask.md documents contract token " ^ wire_or_rule_token) true
+         (contains_substring ~needle:wire_or_rule_token ask_text))
+    [ {|"question"|}
+    ; {|"question_end"|}
+    ; {|"working_state"|}
+    ; {|"ops"|}
+    ; {|"ops": []|}
+    ; "빈 답 금지 규정을 따르지 않습니다"
+    ; {|"add"|}
+    ; {|"drop"|}
+    ; {|"merge"|}
+    ; {|"revise"|}
+    ; {|"seen"|}
+    ; {|{"op": "seen", "ref": "m5", "from": ["u1"]}|}
+    ; {|"from": []|}
+    ; "하나 이상"
+    ; "자기 발언에서 그대로 인용·되풀이한 것은 다시 본 것이 아닙니다"
+    ; "모른다·없다고 한 말은 그 기억을 바꾸거나 지울 근거가 아닙니다"
+    ; "단위의 언어로"
+    ; "중복 행은 새 재확인이 아니라 하나의 관측으로"
+    ; "last_seen"
+    ; {|"observed"|}
+    ; "m1"
+    ; "u1"
+    ; "closed_at"
+    ; "closed_after_admission"
+    ; "unattributed"
+    ; "runtime_context"
+    ; "missing"
+    ; "tool_observation"
+    ; "no_wall_clock_death"
+    ; "상대 날짜"
+    ; "절대 날짜"
+    ; "진행형"
+    ; "한정어"
+    ; "곁다리 fact"
+    ; "원천에서 다시 얻을 수 있는 세부"
+    ; "`claim` 내용 그대로"
+    ; "Memory fact 로도 함께 두고"
+    ];
+  List.iter
+    (fun legacy_output_key ->
+       check bool ("librarian.ask.md omits legacy output key " ^ legacy_output_key) false
+         (contains_substring ~needle:legacy_output_key ask_text))
+    [ {|"new_claims"|}
+    ; {|"working_contexts"|}
+    ; {|"supersedes"|}
+    ; {|"absorbs"|}
+    ];
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Masc.Prompt_defaults.init ();
+  Fun.protect
+    ~finally:Prompt_registry.clear
+    (fun () ->
+       check bool "librarian.ask resolves from File source" true
+         (match Prompt_registry.prompt_source "librarian.ask" with
+          | Prompt_registry.File -> true
+          | Prompt_registry.Override | Prompt_registry.Missing -> false);
+       check bool "old librarian-l6 key is Missing" true
+         (match Prompt_registry.prompt_source "librarian-l6" with
+          | Prompt_registry.Missing -> true
+          | Prompt_registry.File | Prompt_registry.Override -> false);
+       (match Prompt_registry.render_prompt_template "librarian.ask" [] with
+        | Ok rendered ->
+          check bool "rendered librarian.ask prompt is non-empty" true
+            (String.trim rendered <> "")
+        | Error detail -> failf "librarian.ask failed to render: %s" detail);
+       let ask_issues =
+         Prompt_registry.validate_prompt_templates ()
+         |> List.filter (fun (key, (_ : string)) -> String.equal key "librarian.ask")
+       in
+       check int "librarian.ask has zero undeclared template variables" 0
+         (List.length ask_issues))
+;;
+
 let () =
   run "librarian_l6g_question_corpus"
     [ ( "question_make"
@@ -408,5 +612,6 @@ let () =
         ; test_case "L6g synthetic corpus round-tripped through Librarian_question.make" `Quick
             test_l6g_corpus_via_librarian_question_make
         ] )
+    ; "prompt_contract", [ test_case "librarian.ask.md wire & registry contract" `Quick test_prompt_contract ]
     ]
 ;;

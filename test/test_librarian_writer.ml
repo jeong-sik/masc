@@ -104,6 +104,8 @@ let act_text : Machine.act_answer Writer.asked -> string = function
   | Answered (Not_done Snapshot_unreadable) -> "snapshot unreadable"
   | Answered (Not_done Not_replaced) -> "not replaced"
   | Answered (Not_done Turn_log_unread) -> "turn log unread"
+  | Answered (Not_done (Not_the_head _)) -> "not the head"
+  | Answered (Not_done Content_unread) -> "content unread"
   | Answered (Not_done (Act_unavailable why)) -> unavailable_text why
 ;;
 

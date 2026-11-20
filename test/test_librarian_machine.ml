@@ -246,6 +246,14 @@ let write_text : Machine.write_answer -> string = function
   | Unavailable why -> unavailable_text why
 ;;
 
+let target_text : Machine.skip_target option -> string = function
+  | None -> "none"
+  | Some (Head_item { turn_log = (_ : Turn_log.Log_id.t); line; item = { store; at } }) ->
+    Printf.sprintf "item %s %d of the unit at %d" (Masc.Librarian_log_codec.store_token store) at line
+  | Some (Unreadable_unit { turn_log = (_ : Turn_log.Log_id.t); line }) ->
+    Printf.sprintf "the unit at %d" line
+;;
+
 let act_text : Machine.act_answer -> string = function
   | Done -> "done"
   | Not_done Nothing_to_resume -> "nothing to resume"
@@ -254,6 +262,8 @@ let act_text : Machine.act_answer -> string = function
   | Not_done Snapshot_unreadable -> "snapshot unreadable"
   | Not_done Not_replaced -> "not replaced"
   | Not_done Turn_log_unread -> "turn log unread"
+  | Not_done (Not_the_head { now }) -> "not the head, now " ^ target_text now
+  | Not_done Content_unread -> "content unread"
   | Not_done (Act_unavailable why) -> unavailable_text why
 ;;
 
@@ -271,6 +281,8 @@ let cause_text : Log.cause -> string = function
       (Turn_log.Log_id.to_string from).[0] (Turn_log.Log_id.to_string to_).[0]
   | Skip { hole = Position_lost { offset; length } } ->
     Printf.sprintf "skip: offset %d of a file of %d bytes" offset length
+  | Skip { hole = Operator_skipped { by; missing } } ->
+    Printf.sprintf "skip by %s, %d units missing parts" by (List.length missing)
 ;;
 
 let not_applied_text (number, (why : Effects.why_not), (_ : Answer.new_fact option)) =

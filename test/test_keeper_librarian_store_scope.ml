@@ -404,6 +404,12 @@ let act_text : Act.answer -> string = function
   | Refused Snapshot_unreadable -> "refused: snapshot unreadable"
   | Refused Not_replaced -> "refused: not replaced"
   | Refused Turn_log_unread -> "refused: turn log unread"
+  | Refused (Not_the_head { now }) ->
+    "refused: not the head, now "
+    ^ (match now with
+       | Some target -> Yojson.Safe.to_string (Act.target_json target)
+       | None -> "none")
+  | Refused Content_unread -> "refused: content unread"
   | Refused (Act_unavailable (Store_stopped stop)) -> "refused: stopped: " ^ stop_text stop
   | Refused (Act_unavailable Keeper_retired) -> "refused: keeper not registered"
   | No_writers -> "no writers"
@@ -422,6 +428,7 @@ let test_act_route_and_requests () =
     | Ok (Adopt { observed }) -> "adopt " ^ hex observed
     | Ok (Restart_reading { observed }) ->
       "restart " ^ Masc.Keeper_turn_log.Log_id.to_string observed
+    | Ok (Skip_item { target }) -> "skip " ^ Yojson.Safe.to_string (Act.target_json target)
     | Error (_ : string) -> "refused"
   in
   let log_id = String.make 32 'e' in
@@ -439,7 +446,37 @@ let test_act_route_and_requests () =
     (parsed (Printf.sprintf {|{"observed":"%s","action":"restart_reading"}|} log_id));
   check string "a restart without one" "refused" (parsed {|{"action":"restart_reading"}|});
   check string "a turn log id that is not one" "refused"
-    (parsed {|{"action":"restart_reading","observed":"abc"}|})
+    (parsed {|{"action":"restart_reading","observed":"abc"}|});
+  let head_item =
+    Printf.sprintf {|{"kind":"head_item","turn_log":"%s","line":120,"store":"chat","at":3}|} log_id
+  in
+  check string "a skip names the head item" ("skip " ^ head_item)
+    (parsed (Printf.sprintf {|{"action":"skip_item","target":%s}|} head_item));
+  check string "or a unit that does not read, in any order"
+    (Printf.sprintf {|skip {"kind":"unreadable_unit","turn_log":"%s","line":7}|} log_id)
+    (parsed
+       (Printf.sprintf {|{"target":{"line":7,"turn_log":"%s","kind":"unreadable_unit"},"action":"skip_item"}|}
+          log_id));
+  check string "an item without its store" "refused"
+    (parsed
+       (Printf.sprintf {|{"action":"skip_item","target":{"kind":"head_item","turn_log":"%s","line":1,"at":0}}|}
+          log_id));
+  check string "a store that is not one" "refused"
+    (parsed
+       (Printf.sprintf
+          {|{"action":"skip_item","target":{"kind":"head_item","turn_log":"%s","line":1,"store":"disk","at":0}}|}
+          log_id));
+  check string "a negative offset" "refused"
+    (parsed
+       (Printf.sprintf {|{"action":"skip_item","target":{"kind":"unreadable_unit","turn_log":"%s","line":-1}}|}
+          log_id));
+  check string "a unit with an item's fields" "refused"
+    (parsed
+       (Printf.sprintf
+          {|{"action":"skip_item","target":{"kind":"unreadable_unit","turn_log":"%s","line":1,"store":"chat","at":0}}|}
+          log_id));
+  check string "a skip with a turn log id instead" "refused"
+    (parsed (Printf.sprintf {|{"action":"skip_item","observed":"%s"}|} log_id))
 ;;
 
 (* The Keeper's turn log is replaced from outside. Reading stands in the old

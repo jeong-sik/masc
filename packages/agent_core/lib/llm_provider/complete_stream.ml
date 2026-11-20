@@ -483,6 +483,12 @@ let complete_stream_http
       let ollama_usage = ref None in
       let stream_timings = ref None in
       let stream_upstream_provider = ref None in
+      (* Gemini reports [usageMetadata.totalTokenCount] beside the counts the
+         backend folds. The backend carries the disagreement as a value
+         ([Gemini_wire.gem_total_token_mismatch]) rather than failing the
+         response; this holds the first one the response reported, so a caller
+         records it once per response instead of once per chunk. *)
+      let stream_total_token_mismatch = ref None in
       (* Agent Core contract — stream-lifetime accumulators for the
          [Streaming_summary] variant that fires once at finalize.
          Hoisted out of [body_logic] so exception paths (timeout,
@@ -1019,6 +1025,11 @@ let complete_stream_http
                              | Provider_http_codec.Gemini_generate_content ->
                                (match Gemini_wire.parse_gemini_sse_chunk data with
                                 | Gemini_wire.Gemini_chunk chunk ->
+                                  (match !stream_total_token_mismatch with
+                                   | Some _ -> ()
+                                   | None ->
+                                     stream_total_token_mismatch :=
+                                       chunk.Gemini_wire.gem_total_token_mismatch);
                                   (match
                                      Streaming.gemini_chunk_to_events (get_state ()) chunk
                                    with
@@ -1293,6 +1304,21 @@ let complete_stream_http
                 resp.usage, Some base_with_meta
             in
             { resp with usage; telemetry }
+        in
+        (* A disagreement between the provider's own total and the sum the
+           backend assumes is a telemetry observation, not a failure: the
+           response keeps its usage and its stop reason. *)
+        let resp =
+          match !stream_total_token_mismatch with
+          | None -> resp
+          | Some (expected, reported) ->
+            let base =
+              Option.value resp.telemetry ~default:Types.default_inference_telemetry
+            in
+            { resp with
+              telemetry =
+                Some { base with Types.total_token_mismatch = Some (expected, reported) }
+            }
         in
         (match !stream_timings with
          | Some

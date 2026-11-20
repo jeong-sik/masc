@@ -1257,6 +1257,15 @@ type inference_telemetry =
   ; ttfrc_ms : float option
   ; prefill_ms : float option
   ; upstream_provider : string option [@default None]
+  ; total_token_mismatch : (int * int) option [@default None]
+    (** [(expected, reported)] when a provider's own total token count
+        disagrees with the sum this backend assumes. Gemini reports
+        [usageMetadata.totalTokenCount] beside [promptTokenCount],
+        [candidatesTokenCount] and [thoughtsTokenCount]; the backend folds
+        thoughts into [output_tokens], which assumes the provider counts them
+        outside [candidatesTokenCount]. That is a convention, not a documented
+        guarantee, so the verdict is carried here for a caller to record. It
+        never changes [usage] or cost. *)
   }
 [@@deriving show, yojson]
 
@@ -1281,6 +1290,7 @@ let default_inference_telemetry : inference_telemetry =
   ; ttfrc_ms = None
   ; prefill_ms = None
   ; upstream_provider = None
+  ; total_token_mismatch = None
   }
 ;;
 

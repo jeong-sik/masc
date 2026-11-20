@@ -1040,6 +1040,7 @@ let gemini_chunk ?(parts = []) ?finish_reason ?usage ?reasoning_tokens () : GW.g
       Option.map (fun reason -> GW.Gemini_candidate_finish_reason reason) finish_reason
   ; gem_usage = usage
   ; gem_reasoning_tokens = reasoning_tokens
+  ; gem_total_token_mismatch = None
   }
 ;;
 
@@ -1090,6 +1091,46 @@ let test_gemini_model_identity_is_single_and_fail_closed () =
        response"
       reason
   | Ok _ -> fail "changed modelVersion must not be silently accepted"
+;;
+
+let gemini_usage_payload ~prompt ~candidates ?thoughts ?total () =
+  let thoughts_field =
+    match thoughts with
+    | Some n -> Printf.sprintf ",\"thoughtsTokenCount\":%d" n
+    | None -> ""
+  in
+  let total_field =
+    match total with
+    | Some n -> Printf.sprintf ",\"totalTokenCount\":%d" n
+    | None -> ""
+  in
+  Printf.sprintf
+    {|{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":%d,"candidatesTokenCount":%d%s%s}}|}
+    prompt candidates thoughts_field total_field
+;;
+
+(* Gemini reports [totalTokenCount] beside the counts the backend folds. The
+   backend carries a disagreement as a value so a caller can record it; it must
+   never change [usage] and never fail the response. *)
+let test_gemini_total_token_invariant () =
+  let verdict label ~expect data =
+    let chunk =
+      match parse_gemini_chunk data with
+      | Some chunk -> chunk
+      | None -> fail (label ^ ": payload did not parse to a chunk")
+    in
+    check bool label true (chunk.GW.gem_total_token_mismatch = expect)
+  in
+  verdict "thoughts fold into the expected total" ~expect:None
+    (gemini_usage_payload ~prompt:1 ~candidates:1 ~thoughts:2 ~total:4 ());
+  verdict "a disagreeing total is reported" ~expect:(Some (4, 5))
+    (gemini_usage_payload ~prompt:1 ~candidates:1 ~thoughts:2 ~total:5 ());
+  verdict "an absent total reports nothing" ~expect:None
+    (gemini_usage_payload ~prompt:1 ~candidates:1 ~thoughts:2 ());
+  verdict "absent thoughts add nothing" ~expect:None
+    (gemini_usage_payload ~prompt:1 ~candidates:1 ~total:2 ());
+  verdict "absent thoughts still report a larger total" ~expect:(Some (2, 3))
+    (gemini_usage_payload ~prompt:1 ~candidates:1 ~total:3 ())
 ;;
 
 let test_gemini_event_edge_branches () =
@@ -1378,6 +1419,10 @@ let () =
             `Quick
             test_gemini_model_identity_is_single_and_fail_closed
         ; test_case "event edge branches" `Quick test_gemini_event_edge_branches
+        ; test_case
+            "usage total invariant is carried as a value"
+            `Quick
+            test_gemini_total_token_invariant
         ] )
     ; ( "ollama_ndjson"
       , [ test_case "parse edge shapes" `Quick test_ollama_parse_edge_shapes

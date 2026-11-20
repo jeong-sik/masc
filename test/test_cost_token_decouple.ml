@@ -292,6 +292,7 @@ let test_native_decode_rate_uses_current_field_only () =
     ; ttfrc_ms = None
     ; prefill_ms = None
     ; upstream_provider = None
+    ; total_token_mismatch = None
     }
   in
   let payload =
@@ -353,6 +354,7 @@ let test_timings_cache_fields_land_on_payload () =
     ; ttfrc_ms = None
     ; prefill_ms = None
     ; upstream_provider = None
+    ; total_token_mismatch = None
     }
   in
   let payload =

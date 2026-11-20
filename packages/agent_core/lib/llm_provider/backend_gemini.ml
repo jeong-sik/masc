@@ -1117,6 +1117,23 @@ let parse_response json =
           ; cost_usd = None
           }
     in
+    (* The same observation the streaming path carries: Gemini's own
+       [totalTokenCount] against the sum this backend folds. Recorded, never
+       enforced — a disagreement does not change [usage] or fail the response. *)
+    let total_token_mismatch =
+      if um = `Null
+      then None
+      else
+        match um |> member "totalTokenCount" |> to_int_option with
+        | Some total ->
+          let expected =
+            Cli_common_json.member_int "promptTokenCount" um
+            + Cli_common_json.member_int "candidatesTokenCount" um
+            + Option.value raw_thoughts ~default:0
+          in
+          if Int.equal total expected then None else Some (expected, total)
+        | None -> None
+    in
     let model_str = Cli_common_json.member_str "modelVersion" json in
     let telemetry =
       let base =
@@ -1125,7 +1142,11 @@ let parse_response json =
           ~cache_read_input_tokens:raw_cache_read
           (Some (Types.with_reported_model ~model:model_str None))
       in
-      Some { base with reasoning_tokens = raw_thoughts }
+      Some
+        { base with
+          reasoning_tokens = raw_thoughts
+        ; total_token_mismatch
+        }
     in
     { id = ""; model = model_str; unreadable_tool_uses = []; stop_reason; content; usage
     ; telemetry }

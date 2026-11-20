@@ -824,6 +824,15 @@ type inference_telemetry =
     (** Optional upstream provider label reported by a gateway (for example
         OpenRouter's top-level ["provider"] field). [None] on direct endpoints
         and when absent or blank. *)
+  ; total_token_mismatch : (int * int) option [@default None]
+    (** [(expected, reported)] when a provider's own total token count
+        disagrees with the sum the backend assumes. Gemini reports
+        [usageMetadata.totalTokenCount] beside [promptTokenCount],
+        [candidatesTokenCount] and [thoughtsTokenCount], and the backend folds
+        thoughts into [output_tokens], which assumes the provider counts them
+        outside [candidatesTokenCount]. That is a convention, not a documented
+        guarantee, so the verdict is carried here as an observation: it never
+        changes [usage] or cost, and it never fails a response. *)
   }
 [@@deriving show, yojson]
 

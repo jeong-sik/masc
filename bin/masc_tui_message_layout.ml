@@ -1701,7 +1701,7 @@ let pack_clauses ~max_cells (clauses : string list) =
               rows := row :: !rows;
               keep_last rest
         in
-        keep_last (wrap_words ~max_cells:room clause)
+        keep_last (wrap_styled_words ~max_cells:room clause)
       end)
     clauses;
   emit ();

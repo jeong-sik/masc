@@ -4446,18 +4446,22 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          under section 1 it read as part of the failure. *)
       add_numbered_section (t "4. 이번 달 효율" "4. This Month's Efficiency");
       (match Masc_tui_keeper_efficiency.lines ~ko state.keeper_efficiency ~keeper_name:k.k_name with
-       | [] -> wrap ~tone:Ansi.dim (t "읽기 전" "unread")
+       | [] -> wrap ~tone:(Theme.recede ()) (t "읽기 전" "unread")
        | lines ->
          List.iter
            (fun (tone, text) ->
              let color =
                match tone with
                | Masc_tui_keeper_efficiency.Plain -> ""
-               | Masc_tui_keeper_efficiency.Dim -> Ansi.dim
+               | Masc_tui_keeper_efficiency.Dim -> Theme.recede ()
                | Masc_tui_keeper_efficiency.Bad -> Theme.bad ()
              in
-             Message_layout.wrap_words ~max_cells:(max 1 (inner - 2)) text
-             |> List.iter (fun line -> add_line (indent ^ color ^ line ^ Ansi.reset)))
+             Message_layout.wrap_styled_words ~max_cells:(max 1 (inner - 2)) text
+             |> List.iter (fun line ->
+                  let body =
+                    if String.equal color "" then line else color ^ line ^ Ansi.reset
+                  in
+                  add_line (indent ^ body)))
            lines);
 
       (* Historical receipt evidence is a separate reading. A successful

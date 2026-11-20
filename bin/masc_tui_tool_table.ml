@@ -24,7 +24,7 @@ type names = {
 let names = function
   | Say.Ko ->
     { tool = "도구"; origin = "출처"; calls = "호출"; failures = "실패"; direct = "직접";
-      surfaces = "노출 위치"; keeper = "Keeper"; triggered = "호출"; delivered = "전달";
+      surfaces = "노출 위치"; keeper = "키퍼"; triggered = "호출"; delivered = "전달";
       actions = "동작"; last_used = "마지막 사용" }
   | Say.En ->
     { tool = "Tool"; origin = "Origin"; calls = "Calls"; failures = "Fail"; direct = "Direct";
@@ -51,14 +51,18 @@ let effective_row_indent = "   "
 let skill_usage_keeper_name_width = 22
 let skill_usage_count_width = 9
 
-let skill_usage_keeper_cells names ~keeper ~invocations ~deliveries ~actions =
+let skill_usage_keeper_cells names ~keeper ~(invocations : string * string)
+    ~(deliveries : string * string) ~(actions : string * string) =
+  let inv_text, inv_style = invocations in
+  let del_text, del_style = deliveries in
+  let act_text, act_style = actions in
   [ Table.cell ~header:names.keeper ~width:skill_usage_keeper_name_width keeper
-  ; Table.cell ~align:Table.Right ~header:names.triggered
-      ~width:skill_usage_count_width invocations
-  ; Table.cell ~align:Table.Right ~header:names.delivered
-      ~width:skill_usage_count_width deliveries
-  ; Table.cell ~align:Table.Right ~header:names.actions
-      ~width:skill_usage_count_width actions
+  ; Table.cell ~align:Table.Right ~style:inv_style ~header:names.triggered
+      ~width:skill_usage_count_width inv_text
+  ; Table.cell ~align:Table.Right ~style:del_style ~header:names.delivered
+      ~width:skill_usage_count_width del_text
+  ; Table.cell ~align:Table.Right ~style:act_style ~header:names.actions
+      ~width:skill_usage_count_width act_text
   ]
 
 let effective_tool_cells names name =
@@ -121,29 +125,29 @@ let catalog_layout ~language ~width ~surfaces_cells =
    only CALLS says [0]: a column of dashes under the tools nobody called would
    read as a column of missing data. *)
 let calls_reading = function
-  | Usage_unread -> unread_reading, Ansi.dim
-  | Never_called -> "0", Ansi.dim
+  | Usage_unread -> unread_reading, Theme.recede ()
+  | Never_called -> "0", Theme.recede ()
   | Called { calls; _ } -> Masc_tui_message_layout.compact_count calls, ""
 
-(* A zero is dim, and a count is dressed only when every call failed. Most
+(* A zero recedes, and a count is dressed only when every call failed. Most
    tools with any call have failed at least once, so a failure count alone
    says little; "every call failed" is the reading that is never routine. *)
 let failures_reading = function
-  | Usage_unread -> unread_reading, Ansi.dim
+  | Usage_unread -> unread_reading, Theme.recede ()
   | Never_called -> "", ""
   | Called { calls; failures; _ } ->
       ( Masc_tui_message_layout.compact_count failures
-      , if failures = 0 then Ansi.dim
+      , if failures = 0 then Theme.recede ()
         else if failures = calls then Theme.bad ()
         else "" )
 
 let p95_reading = function
-  | Usage_unread | Called { p95_ms = None; _ } -> unread_reading, Ansi.dim
+  | Usage_unread | Called { p95_ms = None; _ } -> unread_reading, Theme.recede ()
   | Never_called -> "", ""
   | Called { p95_ms = Some ms; _ } -> (
       match Masc_tui_message_layout.elapsed_text (ms /. 1000.) with
       | Some text -> text, ""
-      | None -> unread_reading, Ansi.dim)
+      | None -> unread_reading, Theme.recede ())
 
 (* The cells of one catalog line. The column names are drawn from the same
    cells with empty readings, so header and rows cannot place a column
@@ -201,21 +205,29 @@ let catalog_tool_header layout =
 
 let catalog_tool_line layout ~metadata ~name ~direct ~usage ~surfaces =
   in_each_language (fun language names ->
+    let surface_text = Say.render language surfaces in
+    let styled_tail =
+      if String.equal metadata "" then surface_text
+      else metadata ^ surface_text ^ Ansi.reset
+    in
     framed ~indent:catalog_row_indent
       ~cells:
         (Table.row
            (catalog_cells names layout ~metadata ~name
               ~direct:(Say.render language direct) ~usage))
-      ~tail:(metadata ^ Say.render language surfaces))
+      ~tail:styled_tail)
 
 let skill_usage_keeper_header =
   in_each_language (fun _ names ->
     framed ~indent:""
       ~cells:
         (Table.header_row
-           (skill_usage_keeper_cells names ~keeper:"" ~invocations:"" ~deliveries:""
-              ~actions:""))
+           (skill_usage_keeper_cells names ~keeper:"" ~invocations:("", "")
+              ~deliveries:("", "") ~actions:("", "")))
       ~tail:names.last_used)
+
+let skill_count_cell n =
+  (Masc_tui_value.Count.grouped n, if n = 0 then Theme.recede () else "")
 
 let skill_usage_keeper_line ~keeper ~invocations ~deliveries ~actions ~last_used =
   in_each_language (fun _ names ->
@@ -223,7 +235,7 @@ let skill_usage_keeper_line ~keeper ~invocations ~deliveries ~actions ~last_used
       ~cells:
         (Table.row
            (skill_usage_keeper_cells names ~keeper
-              ~invocations:(string_of_int invocations)
-              ~deliveries:(string_of_int deliveries)
-              ~actions:(string_of_int actions)))
+              ~invocations:(skill_count_cell invocations)
+              ~deliveries:(skill_count_cell deliveries)
+              ~actions:(skill_count_cell actions)))
       ~tail:last_used)

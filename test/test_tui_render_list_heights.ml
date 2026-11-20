@@ -568,9 +568,10 @@ let tools_window state lines =
   height, max 0 (layout.sc_count - height)
 
 (* Whether a page row starts the entry [name]: a row that wraps loses its
-   indent, and the selected entry's row has its mark before the name. *)
+   indent, the selected entry's row has its mark before the name, and a
+   list may draw the name in a style (Skills, #53864). *)
 let starts_entry name text =
-  let text = String.trim text in
+  let text = String.trim (Masc_tui_theme.strip_sgr text) in
   let unmarked =
     List.fold_left
       (fun text mark ->

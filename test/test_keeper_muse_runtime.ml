@@ -3772,8 +3772,7 @@ module Argument_start_fixture = struct
     Host.create_argument_source ~base_path ~keeper_name
       ~seed:(Some seed) ~replay_prefix:Keeper_replay_prefix.unchanged ~turn_start:(boundary seed)
   let librarian_front _ : (Host.librarian_position, Agent_core.Error.t) result = Ok
-      {point=Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1};
-       unread=Keeper_librarian_request_unread.empty}
+      (Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1})
   let snapshot () = List.map Agent_core.Checkpoint.message_to_json history
   let reader base_path =
     let schema = Keeper_runtime_schemas_toml.artifact_read in

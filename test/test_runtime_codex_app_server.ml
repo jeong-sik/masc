@@ -7239,14 +7239,11 @@ let test_keeper_context_lifecycle_three_settled_turns () =
     let acknowledged_blocks = List.filter_map (fun (held : Store.held_context) ->
       match held.context with
       | Store.Context_block block -> Some (Prompt_block_id.to_string block, held.sha256)
-      | Store.Librarian_unread | Store.Codex_system_prompt -> None
+      | Store.Codex_system_prompt -> None
       | Store.Context_section _ | Store.Context_section_row _ | Store.Context_carrier
       | Store.Librarian_working_state | Store.Historical_task_reference | Store.Tool_result_receipts ->
         fail "unexpected non-issuer context in the fixture") frontier.held_context in
     check int "both issuer identities remain acknowledged" 2 (List.length acknowledged_blocks);
-    check int "the independent native unread observation is also acknowledged" 1
-      (List.length (List.filter (fun (held : Store.held_context) ->
-        held.context=Store.Librarian_unread) frontier.held_context));
     let expected_blocks = List.map (fun (block,text) ->
       Prompt_block_id.to_string block, Agent_core_sha256.(digest_string text |> to_hex)) issued.blocks in
     check (list (pair string string)) "settlement replaces changed block digest and preserves unchanged digest"
@@ -8309,19 +8306,6 @@ let test_keeper_resume_sends_changed_working_state_once () =
          (String_util.contains_substring fifth "WORKING_STATE_VERSION_TWO"))
 ;;
 
-(* A new frozen Librarian unread observation precedes the per-turn context.
-   This fixture provides real filesystem readers: absent files yield available
-   empty lists. A resumed thread already holds that unchanged observation. *)
-let unread_envelope ~snapshot ~memory =
-  let unread = Keeper_librarian_request_unread.of_results ~snapshot ~memory in
-  match Keeper_librarian_request_unread.attach ~include_empty:true
-      ~role:Agent_core.Types.System unread [] with
-  | [carrier] -> Keeper_official_client_host.encode_history_message carrier
-  | [] | _ :: _ :: _ -> failwith "an unread observation must have one carrier"
-;;
-
-let empty_unread_envelope = unread_envelope ~snapshot:(Ok []) ~memory:(Ok [])
-
 let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
   let base_path = temp_workspace "masc-codex-context-wire-" in
   let start_capture = Filename.temp_file "masc-codex-context-start-" ".jsonl" in
@@ -8476,7 +8460,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        in
        check string "start config includes current context"
          (String.concat "\n\n"
-            [ system_prompt; posture_note; empty_unread_envelope; envelope dynamic_context ])
+            [ system_prompt; posture_note; envelope dynamic_context ])
          start_instructions;
        (* Resume config is also used by a later native compaction. The
           changed standing prompt must separately enter model-visible history
@@ -9514,8 +9498,7 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
        | Some _ | None -> fail "the resumed turn is not resolved against its thread")
 ;;
 
-(* The per-turn context envelope, as opposed to the unread observation that
-   travels in front of it. *)
+(* The per-turn context envelope. *)
 let carries_extra_system_context envelope =
   Yojson.Safe.Util.(envelope |> member "message" |> member "origin") = `String "system_context"
 ;;

@@ -299,6 +299,14 @@ let slot_visit
     Ok (Cli_visit (runtime_id, Visit.Cli_seats_full))
   | Exact_lane_walk.Failed
       { slot = _
+      ; failure = Exact_lane_slots.Http_unfit { slot_id; reason = (_ : string) }
+      } ->
+    (* The slot's own declaration could not become a flow candidate, so no
+       request left for it. That is a contract refusal of that one slot, not a
+       rejection any provider made. *)
+    Ok (Http_visit (slot_id, Visit.Rejected_before_dispatch Exact.Runtime_contract_rejected))
+  | Exact_lane_walk.Failed
+      { slot = _
       ; failure =
           Exact_lane_slots.Http_failed
             { slot_id = _

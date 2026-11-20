@@ -48,7 +48,7 @@ let visit visited slot seat =
   | Stops -> Walk.Stop slot.id
 ;;
 
-let walk ?(on_advance = fun ~failed:_ ~next:_ -> Ok ()) visited slots =
+let walk ?(on_advance = fun ~failed:_ ~next:_ -> Ok ()) ?(on_pass = fun _ -> ()) visited slots =
   Walk.walk
     ~now:Unix.gettimeofday
     ~kind:(fun slot -> slot.kind)
@@ -57,6 +57,7 @@ let walk ?(on_advance = fun ~failed:_ ~next:_ -> Ok ()) visited slots =
     ~seats:(fun slot -> slot.seats)
     ~visit:(visit visited)
     ~on_advance
+    ~on_pass
     ~rests:(fun ((_ : string), rests) -> rests)
     slots
 ;;
@@ -94,6 +95,30 @@ let test_a_full_slot_is_passed_for_a_free_slot_of_the_other_kind () =
   check int "the seat went back when the visit ended" 0 (active free);
   check int "the full slot's seat was not touched" 1 (active busy);
   check int "nothing waits on the full slot" 0 (queued busy)
+;;
+
+(* A pass is heard when it happens: the full slot before the slot called in
+   its place is visited, the failed slot after its visit. Each pass is noted
+   with the number of visits made by then. *)
+let test_each_pass_is_heard_when_it_happens () =
+  let busy = taken_elsewhere () in
+  let visited = ref [] in
+  let heard = ref [] in
+  let on_pass passed =
+    heard := !heard @ List.map (fun name -> name, List.length !visited) (passed_names [ passed ])
+  in
+  let called, passed =
+    answered
+      (walk ~on_pass visited
+         [ make "h1" Walk.Http (seats_of busy) Answers
+         ; make "c1" Walk.Cli (seats_of (scheduler ())) (Fails { rests = false })
+         ; make "c2" Walk.Cli (seats_of (scheduler ())) Answers
+         ])
+  in
+  check string "the second free slot answered" "c2" called;
+  check (list (pair string int)) "each pass when it happened"
+    [ "full h1", 0; "failed c1", 1 ] !heard;
+  check (list string) "in the order of the passes" (List.map fst !heard) passed
 ;;
 
 let test_a_failed_slot_moves_on_and_the_move_is_recorded () =
@@ -304,6 +329,10 @@ let () =
             `Quick
             test_a_refused_move_stops_before_the_next_slot_and_returns_its_seat
         ; test_case "a stopping visit ends the walk" `Quick test_a_stopping_visit_ends_the_walk
+        ; test_case
+            "each pass is heard when it happens"
+            `Quick
+            test_each_pass_is_heard_when_it_happens
         ] )
     ; ( "order"
       , [ test_case

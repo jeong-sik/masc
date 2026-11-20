@@ -32,6 +32,11 @@ let cli_outcome ~slot_id outcome = match Eio.Fiber.get key with
             ~generation_dispatched:visit.generation_dispatched ~outcome :: rest
         else visit::update rest in
     capture.visits <- Option.map update capture.visits
+let http_not_sent ~slot_id rejection = record [Observation.http_not_sent ~slot_id rejection]
+let cli_not_run failure =
+  record [Observation.cli ~slot_id:(slot_of_failure failure) ~started_at:None ~finished_at:None
+    ~generation_dispatched:false
+    ~outcome:(Observation.Cli_failed (Keeper_exact_walk_failure.cli_observation failure))]
 let cli_capture ?observe () =
   let started=ref [] in
   let observe event =

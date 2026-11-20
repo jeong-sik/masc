@@ -85,6 +85,9 @@ val dispatched_valid_output_failure : api_observation -> bool
     precomputed authority boolean. Measured input limits remain separate. *)
 type cli_observation
 val cli_observation : Keeper_lane_cli_oneshot.failure -> cli_observation
+val cli_invalid_domain_answer : runtime_id:string -> cli_observation
+(** The client answered one JSON value and the lane rejected it: the same
+    observation {!cli_observation} gives an [Invalid_domain_output]. *)
 val cli_observation_to_yojson : cli_observation -> Yojson.Safe.t
 val cli_observation_of_yojson : Yojson.Safe.t -> (cli_observation,string) result
 val of_cli_observation : cli_observation -> t

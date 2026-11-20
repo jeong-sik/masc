@@ -134,7 +134,13 @@ type ('accepted, 'rejection, 'record_error) walk_result =
     does, so the next order rests the slot; an answer clears the cell.
 
     [on_advance] records a move after a failed slot, as in
-    {!Exact_lane_walk.walk}. *)
+    {!Exact_lane_walk.walk}.
+
+    {b Capture.} Inside a run's {!Exact_lane_slot_capture.with_capture},
+    each flow and each client run is recorded as the walks before this one
+    recorded them, and so is a slot the walk passes: a full HTTP slot as a
+    candidate passed for its seats, a held CLI slot as the one-shot's held
+    refusal. Outside a capture nothing is recorded. *)
 val walk
   :  ?runner:Keeper_lane_cli_oneshot.runner
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

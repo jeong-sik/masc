@@ -42,3 +42,6 @@ val of_result :
 val cli : slot_id:string -> started_at:float option -> finished_at:float option ->
   generation_dispatched:bool -> outcome:outcome -> t
 (** The official client's provider endpoint is unobserved by the host. *)
+val http_not_sent : slot_id:string -> Keeper_exact_walk_failure.local_rejection -> t
+(** An HTTP slot a walk passed before any flow named it, such as one whose
+    seats were all taken. No binding, call or dispatch was observed. *)

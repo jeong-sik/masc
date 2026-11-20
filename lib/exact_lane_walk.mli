@@ -102,6 +102,13 @@ type ('slot, 'value, 'failure, 'stop) walk_result =
     the slot about to be called, while that slot's seat is held. An
     [Error] ends the walk as [Stopped] at [next].
 
+    {b Passes.} [on_pass] hears of each slot the walk passes when it
+    passes it, in the order of [passed]: a held slot when a step's order
+    sets it aside; a full slot while the seat of the slot called in its
+    place is held, before [on_advance] and the visit; a failed slot after
+    its visit. A raise in [on_pass] for a full slot returns that seat. A
+    lane records its run there.
+
     Cancellation propagates, and a seat the walk holds is returned. *)
 val walk
   :  now:(unit -> float)
@@ -114,6 +121,7 @@ val walk
         -> Llm_provider.Provider_admission.seat option
         -> ('value, 'failure, 'stop) visit_end)
   -> on_advance:(failed:'failure -> next:'slot -> (unit, 'stop) result)
+  -> on_pass:(('slot, 'failure) passed -> unit)
   -> rests:('failure -> bool)
   -> 'slot list
   -> ('slot, 'value, 'failure, 'stop) walk_result

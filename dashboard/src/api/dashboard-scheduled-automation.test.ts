@@ -251,4 +251,80 @@ describe('fetchDashboardScheduledAutomation', () => {
     expect(requested.some(url =>
       url.includes('/api/v1/dashboard/scheduled-automation?active_only=true'))).toBe(true)
   })
+
+  // The server echoes what a page is narrowed to in `active_only_selector`.
+  describe('the page answered against the page asked for', () => {
+    const page = (selector: Record<string, unknown>) => ({
+      status: 'ok',
+      schedule_store_known: true,
+      schedule_store_read_error: null,
+      request_count: 1,
+      request_limit: 20,
+      truncated: false,
+      counts: { scheduled: 1 },
+      fsm: { state: 'active', active_count: 1, terminal_count: 0, next_due_at: null },
+      requests: [{ schedule_id: 's1' }],
+      signals: [],
+      ...selector,
+    })
+    const answerWith = (body: unknown) => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))))
+    }
+
+    it('takes an active-only page for an active-only read', async () => {
+      answerWith(page({ active_only_selector: true }))
+
+      const projection = await fetchDashboardScheduledAutomation({ activeOnly: true })
+
+      expect(projection.state).toBe('available')
+    })
+
+    // A server from before the active-only page ignores the parameter and
+    // sends the fleet page, with no selector field at all.
+    it.each([
+      ['no selector field', {}],
+      ['a fleet page', { active_only_selector: false }],
+    ])('does not take %s for an active-only read', async (_name, selector) => {
+      answerWith(page(selector))
+
+      const projection = await fetchDashboardScheduledAutomation({ activeOnly: true })
+
+      expect(projection).toEqual({
+        state: 'unavailable',
+        reason: 'the server answered with another schedule page than the one asked for',
+      })
+    })
+
+    it.each([
+      ['no selector field', {}],
+      ['a fleet page', { active_only_selector: false }],
+    ])('takes %s for a fleet read', async (_name, selector) => {
+      answerWith(page(selector))
+
+      const projection = await fetchDashboardScheduledAutomation()
+
+      expect(projection.state).toBe('available')
+    })
+
+    it('does not take an active-only page for a fleet read', async () => {
+      answerWith(page({ active_only_selector: true }))
+
+      const projection = await fetchDashboardScheduledAutomation()
+
+      expect(projection.state).toBe('unavailable')
+    })
+
+    // What the store could not read is said with its own reason.
+    it('keeps the reason of a page that was unavailable to begin with', async () => {
+      answerWith({ status: 'unknown', schedule_store_known: false, schedule_store_read_error: 'corrupt ledger' })
+
+      const projection = await fetchDashboardScheduledAutomation({ activeOnly: true })
+
+      expect(projection).toEqual({ state: 'unavailable', reason: 'corrupt ledger' })
+    })
+  })
 })

@@ -2213,7 +2213,20 @@ let test_schedule_page_counts_retained_wakes () =
   check int "and none of the other target's failures" 0
     (scoped_counts |> member "failed" |> to_int);
   check int "beta's live definition has no failed newest wake" 0
-    (scoped_counts |> member "active_with_failed_newest_wake" |> to_int)
+    (scoped_counts |> member "active_with_failed_newest_wake" |> to_int);
+  (* The accepted one-shot has ended. The active-only page holds alpha's
+     retried schedule and beta's untouched one. *)
+  let active_counts =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~active_only:true config
+    |> member "wake_counts"
+  in
+  check int "an active-only page counts the wakes of the schedules still going to run" 1
+    (active_counts |> member "retained" |> to_int);
+  check int "which leaves out the wake of the schedule that ended" 0
+    (active_counts |> member "succeeded" |> to_int);
+  check int "and keeps the failure of the live one" 1
+    (active_counts |> member "failed" |> to_int)
 
 (* The window selects which rows the scan covers, so two windows must not share
    an entry. Seeding only the 24 h key and asking for 1 h has to miss. *)

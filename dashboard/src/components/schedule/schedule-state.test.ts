@@ -19,6 +19,7 @@ import {
   loadScheduledAutomation,
   scheduledAutomationProjection,
   scheduledAutomationError,
+  scheduledAutomationLoading,
 } from './schedule-state'
 
 function emptyProjection(): DashboardScheduledAutomationProjection {
@@ -195,7 +196,7 @@ describe('active schedules refresh', () => {
     } finally { stopFleet() }
   })
 
-  it('withdraws the page it held when the calendar opens again', async () => {
+  it('holds no page once the calendar has closed', async () => {
     let finish!: (projection: DashboardScheduledAutomationProjection) => void
     mocks.fetchDashboardScheduledAutomation.mockResolvedValueOnce(emptyProjection())
       .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
@@ -203,15 +204,52 @@ describe('active schedules refresh', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(activeSchedulesProjection.value?.state).toBe('available')
     stopFirst()
+    // A calendar that opens again draws once before it subscribes. The page
+    // read while it was last open is not there to be drawn as now.
+    expect(activeSchedulesProjection.value).toBeNull()
 
     const stopSecond = subscribeActiveSchedulesRefresh()
     try {
       await vi.advanceTimersByTimeAsync(0)
-      // The page read while the calendar was last open is not drawn as now.
       expect(activeSchedulesProjection.value).toBeNull()
       finish(emptyProjection())
       await vi.advanceTimersByTimeAsync(0)
       expect(activeSchedulesProjection.value?.state).toBe('available')
     } finally { stopSecond() }
+  })
+
+  // Both pages come from one kind of reader; the fleet page is the one whose
+  // loading state is exported.
+  it('drops the read that was on the wire when the last surface closed', async () => {
+    let finish!: (projection: DashboardScheduledAutomationProjection) => void
+    let readSignal!: AbortSignal
+    mocks.fetchDashboardScheduledAutomation.mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+      readSignal = signal
+      return new Promise(resolve => { finish = resolve })
+    })
+    const stop = subscribeScheduledAutomationRefresh()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(scheduledAutomationLoading.value).toBe(true)
+    stop()
+
+    expect(readSignal.aborted).toBe(true)
+    expect(scheduledAutomationLoading.value).toBe(false)
+    // Its answer arrives after the close and is not kept.
+    finish(emptyProjection())
+    await vi.advanceTimersByTimeAsync(0)
+    expect(scheduledAutomationProjection.value).toBeNull()
+  })
+
+  it('keeps the page while another surface still reads it', async () => {
+    mocks.fetchDashboardScheduledAutomation.mockResolvedValue(emptyProjection())
+    const stopFirst = subscribeScheduledAutomationRefresh()
+    const stopSecond = subscribeScheduledAutomationRefresh()
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      expect(scheduledAutomationProjection.value?.state).toBe('available')
+      stopFirst()
+      expect(scheduledAutomationProjection.value?.state).toBe('available')
+    } finally { stopSecond() }
+    expect(scheduledAutomationProjection.value).toBeNull()
   })
 })

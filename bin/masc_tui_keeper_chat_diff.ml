@@ -234,10 +234,12 @@ let omission_row ~ko ~max_line_cells omitted =
   else
     [ clipped ~max_cells:max_line_cells
         (if ko then
-           Printf.sprintf "(기록된 %d줄 더 있음 · 전체 보기는 변경 화면)" omitted
+           Printf.sprintf "(기록된 %s줄 더 있음 · 전체 보기는 변경 화면)"
+             (Masc_tui_value.Count.grouped omitted)
          else
-           Printf.sprintf "(%d more recorded row%s; open Changes for the full view)"
-             omitted (if omitted = 1 then "" else "s"))
+           Printf.sprintf "(%s recorded row%s; open Changes for the full view)"
+             (Masc_tui_value.Count.more ~ko:false omitted)
+             (if omitted = 1 then "" else "s"))
     ]
 
 let attempted_suffix ~ko (change : Masc.Tui_decode.file_change) =
@@ -329,11 +331,12 @@ let edited_evidence_rows ~ko ~max_line_cells ~replace_all
         [ clipped
             ~max_cells:max_line_cells
             (if ko then
-               Printf.sprintf "(기록된 줄 범위 %d건 생략)" hidden
+               Printf.sprintf "(기록된 줄 범위 %s건 생략)"
+                 (Masc_tui_value.Count.grouped hidden)
              else
                Printf.sprintf
-                 "(%d more recorded line range%s withheld)"
-                 hidden
+                 "(%s recorded line range%s withheld)"
+                 (Masc_tui_value.Count.more ~ko:false hidden)
                  (if hidden = 1 then "" else "s"))
         ]
     in
@@ -550,12 +553,13 @@ let rows ?(ko = false) ~mode ~max_line_cells ?(activity_details = fun _ -> []) i
                   [ clipped ~max_cells:max_line_cells
                       (if ko then
                          Printf.sprintf
-                           "(기록된 변경 주석 %d건 더 있음 · 변경 화면에서 확인)"
-                           withheld
+                           "(기록된 변경 주석 %s건 더 있음 · 변경 화면에서 확인)"
+                           (Masc_tui_value.Count.grouped withheld)
                        else
                          Printf.sprintf
-                           "(%d more recorded-change annotation%s withheld; open Changes)"
-                           withheld (if withheld = 1 then "" else "s"))
+                           "(%s recorded-change annotation%s withheld; open Changes)"
+                           (Masc_tui_value.Count.more ~ko:false withheld)
+                           (if withheld = 1 then "" else "s"))
                   ]
               in
               rows @ withheld_row @ remaining

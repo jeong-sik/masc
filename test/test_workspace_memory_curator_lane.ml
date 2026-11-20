@@ -249,13 +249,7 @@ let test_in_process_pipeline_and_mcp_resources () =
           (member "claims" claims_json |> Yojson.Safe.Util.to_list |> List.length);
         let log_json = read_resource Mcp_server_eio_resource.world_memory_log_uri in
         check bool "log resource shows committed_changes" true
-          (member "committed_changes" log_json |> Yojson.Safe.Util.to_list <> []);
-        let kmem = read_resource "masc://keepers/writer/memory" in
-        check string "keeper memory identifies writer" "writer"
-          (member "keeper" kmem |> Yojson.Safe.Util.to_string);
-        let khealth = read_resource "masc://keepers/writer/memory/health" in
-        check string "keeper health ordinary readable" "readable"
-          (member "ordinary" khealth |> member "status" |> Yojson.Safe.Util.to_string))))
+          (member "committed_changes" log_json |> Yojson.Safe.Util.to_list <> []))))
 ;;
 
 let test_capacity_refusal_bisects_batch () =

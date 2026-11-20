@@ -29,8 +29,6 @@ type resource_target =
   | Wiki_page_json of string
   | World_memory_claims
   | World_memory_log
-  | Keeper_memory of string
-  | Keeper_memory_health of string
   | Unknown of string
 
 val parse_resource_target : string -> resource_target

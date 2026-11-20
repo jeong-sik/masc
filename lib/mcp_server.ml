@@ -263,24 +263,6 @@ let world_memory_resources : mcp_resource list =
       ()
   ]
 
-let living_memory_resource_templates : mcp_resource_template list =
-  [ make_resource_template
-      ~uri_template:"masc://keepers/{keeper}/memory"
-      ~name:"Keeper Living Memory"
-      ~title:"Keeper Living Memory"
-      ~description:"Current living memory snapshot for a Keeper"
-      ~mime_type:"application/json"
-      ()
-  ; make_resource_template
-      ~uri_template:"masc://keepers/{keeper}/memory/health"
-      ~name:"Keeper Memory Health"
-      ~title:"Keeper Memory Health"
-      ~description:
-        "Living memory writer and store health diagnostics for a Keeper"
-      ~mime_type:"application/json"
-      ()
-  ]
-
 let resources : mcp_resource list =
   List.map resource_of_entry Mcp_surface_toml.resources @ world_memory_resources
 
@@ -291,7 +273,6 @@ let resource_template_of_entry (entry : Mcp_surface_toml.template_entry) =
 
 let resource_templates : mcp_resource_template list =
   List.map resource_template_of_entry Mcp_surface_toml.resource_templates
-  @ living_memory_resource_templates
 
 (** Parse a masc:// resource URI into (resource_id, Uri.t) *)
 let parse_masc_resource_uri uri_str =

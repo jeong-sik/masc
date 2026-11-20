@@ -54,8 +54,6 @@ type resource_target =
   | Wiki_page_json of string
   | World_memory_claims
   | World_memory_log
-  | Keeper_memory of string
-  | Keeper_memory_health of string
   | Unknown of string
 
 let world_memory_claims_uri = "masc://world-memory/claims"
@@ -90,13 +88,7 @@ let parse_resource_target resource_id =
       Wiki_page_markdown rest
   | "world-memory/claims" -> World_memory_claims
   | "world-memory/log" -> World_memory_log
-  | s ->
-    (match String.split_on_char '/' s with
-     | [ "keepers"; raw_keeper; "memory" ] when raw_keeper <> "" ->
-       Keeper_memory (Uri.pct_decode raw_keeper)
-     | [ "keepers"; raw_keeper; "memory"; "health" ] when raw_keeper <> "" ->
-       Keeper_memory_health (Uri.pct_decode raw_keeper)
-     | _ -> Unknown resource_id)
+  | _ -> Unknown resource_id
 ;;
 
 let session_resource_notifier : (uri:string -> unit) option Atomic.t = Atomic.make None
@@ -122,17 +114,6 @@ let notify_resource_updated uris =
 
 let notify_world_memory_updated () =
   notify_resource_updated [ world_memory_claims_uri; world_memory_log_uri ]
-;;
-
-let validate_keeper_name keeper =
-  if String.equal (String.trim keeper) ""
-     || String.contains keeper '/'
-     || String.contains keeper '\\'
-     || String.contains keeper '\000'
-     || String.equal keeper "."
-     || String.equal keeper ".."
-  then Error (Mcp_error_code.Invalid_params, Printf.sprintf "Invalid keeper name: %S" keeper)
-  else Ok ()
 ;;
 
 let briefing_to_json = function
@@ -259,190 +240,6 @@ let read_world_memory_log_json ~base_path =
         ; "incomplete_batches", `List incomplete_batches
         ; "aborted_batches", `List (List.map (fun id -> `String id) report.aborted_batches)
         ])
-;;
-
-let keeper_exists_hint ~base_path ~keepers_dir ~keeper ~ordinary ~source_bound =
-  Option.is_some (Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path keeper)
-  || (match ordinary with
-      | Keeper_memory_os_current.No_snapshot -> false
-      | Readable _ | Undecodable _ | Io_unreadable _ -> true)
-  || (match source_bound with
-      | Ok None -> false
-      | Ok (Some _) | Error _ -> true)
-  || Sys.file_exists (Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper)
-  || Sys.file_exists (Keeper_memory_os_events.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper)
-;;
-
-let read_keeper_memory_json ~base_path ~keeper =
-  match validate_keeper_name keeper with
-  | Error err -> Error err
-  | Ok () ->
-    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-    let ordinary = Keeper_memory_os_current.read_classified ~keepers_dir ~keeper_id:keeper in
-    let source_bound = Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper in
-    if not (keeper_exists_hint ~base_path ~keepers_dir ~keeper ~ordinary ~source_bound)
-    then Ok None
-    else
-      match ordinary with
-      | Keeper_memory_os_current.Undecodable { rejection } ->
-        Error (Mcp_error_code.Internal_error, "keeper ordinary memory undecodable: " ^ rejection)
-      | Keeper_memory_os_current.Io_unreadable { detail } ->
-        Error (Mcp_error_code.Internal_error, "keeper ordinary memory unreadable: " ^ detail)
-      | (No_snapshot | Readable _) as ordinary_ok ->
-        (match source_bound with
-         | Error detail ->
-           Error (Mcp_error_code.Internal_error, "keeper source memory unreadable: " ^ detail)
-         | Ok source_opt ->
-           let ordinary_json =
-             match ordinary_ok with
-             | Keeper_memory_os_current.No_snapshot -> `Null
-             | Keeper_memory_os_current.Readable snap -> Keeper_memory_os_current.to_json snap
-             | Undecodable _ | Io_unreadable _ -> `Null
-           in
-           let source_json =
-             match source_opt with
-             | None -> `Null
-             | Some snap -> Keeper_memory_source_current.to_json snap
-           in
-           Ok
-             (Some
-               (`Assoc
-                 [ "keeper", `String keeper
-                 ; "ordinary", ordinary_json
-                 ; "source_bound", source_json
-                 ])))
-;;
-
-let journal_entry_summary = function
-  | Keeper_memory_os_current.Journal_committed { recorded_at; revision; source; change; _ } ->
-    `Assoc
-      [ "outcome", `String "committed"
-      ; "recorded_at", `Float recorded_at
-      ; "revision", `Int revision
-      ; "source_trace_id", `String source.trace_id
-      ; "added_count", `Int (List.length change.added)
-      ; "removed_count", `Int (List.length change.removed)
-      ; "retained_count", `Int change.retained
-      ; "invalidated_count", `Int (List.length change.invalidated)
-      ]
-  | Keeper_memory_os_current.Journal_failed { recorded_at; trace_id; kind; detail; snapshot_present } ->
-    `Assoc
-      [ "outcome", `String "failed"
-      ; "recorded_at", `Float recorded_at
-      ; "trace_id", `String trace_id
-      ; "kind", `String (Keeper_memory_os_current.librarian_failure_kind_to_string kind)
-      ; "detail", `String detail
-      ; "snapshot_present", `Bool snapshot_present
-      ]
-  | Keeper_memory_os_current.Journal_quarantined { recorded_at; rejection; rejected_path } ->
-    `Assoc
-      [ "outcome", `String "quarantined"
-      ; "recorded_at", `Float recorded_at
-      ; "rejection", `String rejection
-      ; "rejected_path", `String rejected_path
-      ]
-;;
-
-let read_keeper_memory_health_json ~base_path ~keeper =
-  match validate_keeper_name keeper with
-  | Error err -> Error err
-  | Ok () ->
-    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-    let ordinary = Keeper_memory_os_current.read_classified ~keepers_dir ~keeper_id:keeper in
-    let source_bound = Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper in
-    if not (keeper_exists_hint ~base_path ~keepers_dir ~keeper ~ordinary ~source_bound)
-    then Ok None
-    else
-      let ordinary_json =
-        match ordinary with
-        | Keeper_memory_os_current.No_snapshot ->
-          `Assoc [ "status", `String "missing" ]
-        | Keeper_memory_os_current.Readable snap ->
-          let path = Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper in
-          let bytes_opt = Fs_compat.file_size path in
-          `Assoc
-            ([ "status", `String "readable"
-             ; "revision", `Int snap.revision
-             ; "updated_at", `Float snap.updated_at
-             ; "fact_count", `Int (List.length snap.facts)
-             ; "invalidated_count", `Int (List.length snap.change.invalidated)
-             ; "snapshot_sha256", `String (Keeper_memory_os_current.snapshot_sha256 snap)
-             ]
-             @ match bytes_opt with
-               | Some n -> [ "snapshot_bytes", `Int n ]
-               | None -> [])
-        | Keeper_memory_os_current.Undecodable { rejection } ->
-          `Assoc [ "status", `String "undecodable"; "rejection", `String rejection ]
-        | Keeper_memory_os_current.Io_unreadable { detail } ->
-          `Assoc [ "status", `String "io_unreadable"; "detail", `String detail ]
-      in
-      let source_bound_json =
-        match source_bound with
-        | Ok None -> `Assoc [ "status", `String "missing" ]
-        | Ok (Some snap) ->
-          `Assoc
-            [ "status", `String "readable"
-            ; "revision", `Int snap.revision
-            ; "updated_at", `Float snap.updated_at
-            ; "fact_count", `Int (List.length snap.facts)
-            ; "invalidation_count", `Int (List.length snap.invalidations)
-            ]
-        | Error detail ->
-          `Assoc [ "status", `String "unreadable"; "detail", `String detail ]
-      in
-      let events_json =
-        match Keeper_memory_os_events.read ~keepers_dir ~keeper_id:keeper with
-        | Error err ->
-          `Assoc
-            [ "status", `String "unreadable"
-            ; "detail", `String (Keeper_memory_os_events.file_read_error_to_string err)
-            ]
-        | Ok rows ->
-          let valid_count, error_count =
-            List.fold_left
-              (fun (ok_n, err_n) (_, item) ->
-                 match item with
-                 | Ok _ -> ok_n + 1, err_n
-                 | Error _ -> ok_n, err_n + 1)
-              (0, 0)
-              rows
-          in
-          `Assoc
-            [ "status", `String "readable"
-            ; "event_count", `Int valid_count
-            ; "undecodable_count", `Int error_count
-            ]
-      in
-      let journal_json =
-        match Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id:keeper ~limit:20 with
-        | Error detail ->
-          `Assoc [ "status", `String "unreadable"; "detail", `String detail ]
-        | Ok rows ->
-          let entries, undecodable_count =
-            List.fold_left
-              (fun (acc, bad) item ->
-                 match item with
-                 | Ok entry -> journal_entry_summary entry :: acc, bad
-                 | Error _ -> acc, bad + 1)
-              ([], 0)
-              rows
-          in
-          `Assoc
-            [ "status", `String "readable"
-            ; "undecodable_count", `Int undecodable_count
-            ; "recent_entries", `List (List.rev entries)
-            ]
-      in
-      Ok
-        (Some
-          (`Assoc
-            [ "schema", `String "keeper.memory.health.v1"
-            ; "keeper", `String keeper
-            ; "ordinary", ordinary_json
-            ; "source_bound", source_bound_json
-            ; "events", events_json
-            ; "journal", journal_json
-            ]))
 ;;
 
 module For_testing = struct
@@ -899,24 +696,6 @@ let handle_read_resource_eio state id params =
                    read_world_memory_log_json ~base_path:config.base_path)
                with
                | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-               | Error err -> Error err)
-          | Keeper_memory keeper ->
-              (match
-                 run_blocking_resource_io (fun () ->
-                   read_keeper_memory_json ~base_path:config.base_path ~keeper)
-               with
-               | Ok None -> Ok None
-               | Ok (Some json) ->
-                 Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-               | Error err -> Error err)
-          | Keeper_memory_health keeper ->
-              (match
-                 run_blocking_resource_io (fun () ->
-                   read_keeper_memory_health_json ~base_path:config.base_path ~keeper)
-               with
-               | Ok None -> Ok None
-               | Ok (Some json) ->
-                 Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
                | Error err -> Error err)
           | Unknown _ -> Ok None
         in

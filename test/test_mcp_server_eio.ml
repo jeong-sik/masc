@@ -3937,8 +3937,7 @@ let handled_resource_id id =
   | Who_markdown | Who_json | Messages_markdown | Messages_json
   | Events_markdown | Events_json
   | Wiki_index_markdown | Wiki_index_json | Wiki_page_markdown _ | Wiki_page_json _
-  | World_memory_claims | World_memory_log
-  | Keeper_memory _ | Keeper_memory_health _ ->
+  | World_memory_claims | World_memory_log ->
       true
   | Unknown _ -> false
 

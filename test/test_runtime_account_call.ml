@@ -139,6 +139,14 @@ let test_a_wait_cancelled_after_the_hand_over_does_not_run () =
            switch of the waiter fails before the waiter runs again. *)
         Eio.Promise.resolve end_first ();
         Eio.Fiber.yield ();
+        (* The first call ended, so it handed the account to the waiter, and
+           the waiter has not run. A schedule that cancels the waiter in the
+           queue, or runs it first, fails here and does not pass unseen. *)
+        check
+          (list string)
+          "the first call ended and handed the account on"
+          [ "first" ]
+          (List.rev !ran);
         Eio.Switch.fail waiter_sw Cancel_waiter)
     with
     | () -> fail "the failure of the switch did not surface"
@@ -159,6 +167,32 @@ let test_a_cancelled_fiber_does_not_run_on_a_free_account () =
    | () -> fail "the failure of the switch did not surface"
    | exception Cancel_waiter -> ());
   check bool "the work did not run" false !ran;
+  check bool "the account is free afterwards" true (free one)
+;;
+
+(* A domain that runs no Eio loop has no fiber to wait in. Without the check
+   before the lock, its call leaves the mutex inside the lock held, and the
+   first call never ends. *)
+let test_a_call_outside_a_fiber_leaves_a_busy_account_usable () =
+  Eio_main.run
+  @@ fun _env ->
+  let ran = ref [] in
+  let first_may_end, end_first = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Call.call_in_turn_of one (fun _ ->
+        Eio.Promise.await first_may_end;
+        ran := "first" :: !ran));
+    let raised =
+      Domain.join
+        (Domain.spawn (fun () ->
+           match Call.call_in_turn_of one (fun _ -> ()) with
+           | () -> false
+           | exception Effect.Unhandled _ -> true))
+    in
+    check bool "the call from outside a fiber raised" true raised;
+    Eio.Promise.resolve end_first ());
+  check (list string) "the first call ended" [ "first" ] !ran;
   check bool "the account is free afterwards" true (free one)
 ;;
 
@@ -185,6 +219,10 @@ let () =
             "a cancelled fiber does not run on a free account"
             `Quick
             test_a_cancelled_fiber_does_not_run_on_a_free_account
+        ; test_case
+            "a call outside a fiber leaves a busy account usable"
+            `Quick
+            test_a_call_outside_a_fiber_leaves_a_busy_account_usable
         ] )
     ]
 ;;

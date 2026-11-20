@@ -61,11 +61,15 @@ let one_call_of provider_account_id ~busy f =
 
 let call_in_turn_of provider_account_id f =
   with_entry provider_account_id (fun entry ->
+    (* Outside an Eio fiber this raises before the lock is touched. There
+       [Eio.Mutex.lock] on a busy account raises while it holds the mutex
+       inside the lock, and no later call of the account gets past it. A
+       fiber that comes cancelled stops here too. *)
+    Eio.Fiber.check ();
     Eio.Mutex.lock entry.lock;
     holding entry provider_account_id (fun call ->
       (* [Eio.Mutex.lock] returns to a fiber that was cancelled after the lock
-         was handed to it, and to a cancelled fiber that found the lock free.
-         Neither runs the work. *)
+         was handed to it. That fiber does not run the work. *)
       Eio.Fiber.check ();
       f call))
 ;;

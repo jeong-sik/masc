@@ -1360,10 +1360,20 @@ let exact_output_runtime_observations ~origin runtimes =
     List.filter_map (fun (runtime : t) ->
       let runtime = preserve_candidate previous runtime in
       match runtime.execution with
-      | Runtime_execution.Agent_core _ ->
+      | Runtime_execution.Agent_core sealed ->
+        (* The window an exact request is admitted against: Agent-Core's
+           input budget reads it from this configuration and no other. *)
+        let window =
+          match
+            Llm_provider.Input_budget.resolve_context_limit
+              (Runtime_account_access.api_declaration sealed)
+          with
+          | Ok window -> Some window
+          | Error (_ : Llm_provider.Input_budget.error) -> None
+        in
         Some (runtime.id, Runtime_exact_output_registry.{
           candidate = runtime.candidate_backpressure; quota_scope = runtime.quota_scope
-        ; window = Option.map fst (Runtime_instance.resolve_max_context_of_runtime runtime) })
+        ; window })
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
       | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _
       | Runtime_execution.Vibe_cli _ -> None) runtimes

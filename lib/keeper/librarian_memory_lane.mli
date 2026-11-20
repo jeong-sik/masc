@@ -42,15 +42,16 @@ type slot_key =
   { id : string  (** The declared slot id. *)
   ; target : target
   ; window : int
-        (** {!Runtime_instance.resolve_max_context_of_runtime} of the runtime
-            the id names: binding, then provider, then model, then the
-            capability catalog. An HTTP slot reads the window the registry
-            froze beside its target at publication
-            ({!Runtime_exact_output_registry.runtime_observation}), so the
+        (** The window the slot's calls run in. An HTTP slot reads the window
+            the registry froze beside its target at publication
+            ({!Runtime_exact_output_registry.runtime_observation}): the one
+            Agent-Core's input budget admits its requests against, so the
             target and the window come from one materialization. A CLI slot
-            reads the runtime table active when {!resolve} runs, which is the
-            table its call reads too. Config load refuses a [slots] id on this
-            lane that names no runtime ([Runtime.runtime_slot_references]). *)
+            reads {!Runtime_instance.resolve_max_context_of_runtime} of the
+            runtime table active when {!resolve} runs (binding, then
+            provider, then model, then the capability catalog), which is the
+            table its call reads too. Config load refuses a [slots] id on
+            this lane that names no runtime ([Runtime.runtime_slot_references]). *)
   }
 [@@deriving eq, show]
 

@@ -12,7 +12,7 @@ val generate_trace_id : ?now:float -> unit -> string
     for deterministic output.  The counter guarantees uniqueness even when
     [now] is pinned to the same value across consecutive calls. *)
 
-(** {1 Structural keeper identity (RFC-0232 §3.4, narrowed by RFC-0393)} *)
+(** {1 Structural keeper identity} *)
 
 (** A comparable author identity minted once at the parse boundary. *)
 module Keeper_id : sig

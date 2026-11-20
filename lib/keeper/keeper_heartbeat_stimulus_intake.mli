@@ -226,7 +226,7 @@ val reconcile_spent_selection
     is unavailable or retired, intake scans all of them. The Connector ID limit
     bounds requested IDs, not bytes read from the attention store.
 
-    RFC-0377's routing boundary remains: only members of the first ready
+    Connector attention keeps a routing boundary: only members of the first ready
     [Connector_attention] conversation are eligible, and only the selected
     batch is projected. Other connector conversations remain queued. Ready
     [Hitl_resolved] inputs share a turn only as an ordered cohort of fresh

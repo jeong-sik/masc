@@ -1,8 +1,7 @@
 (** Keeper Composite Lifecycle Observer — lifecycle projection.
 
     Projects a [Keeper_registry.registry_entry] into a composite snapshot
-    spanning Decision / Runtime / Memory sub-FSMs as
-    specified in RFC-0003.
+    spanning Decision / Runtime / Memory sub-FSMs.
 
     Contract:
     - Reads lifecycle state without changing it. [observe] records invariant
@@ -67,8 +66,8 @@ type event_priority_state = {
     binding per turn, and a live measurement excludes a pending one. *)
 val check_event_priority_monotone_pure : event_priority_state -> bool
 
-(** Frozen outcome of the most recently completed turn (RFC-0003
-    Phase 2). Surfaces terminal data ([Done]/[Guard_ok]/...) without
+(** Frozen outcome of the most recently completed turn.
+    Surfaces terminal data ([Done]/[Guard_ok]/...) without
     polluting the live sub-FSM fields. [None] until the first turn
     has finished after registration. *)
 type last_outcome = {
@@ -279,6 +278,5 @@ val turn_phase_to_string : Keeper_registry.packed_turn_phase -> string
 (** Stringify [decision_stage]. Mirrors KeeperDecisionPipeline.tla. *)
 (** Stringify the runtime-state compatibility field. *)
 
-(** Serialise a snapshot as the [/api/keepers/:name/composite] payload
-    documented in RFC-0003 §7. *)
+(** Serialise a snapshot as the [/api/v1/keepers/:name/composite] payload. *)
 val snapshot_to_json : snapshot -> Yojson.Safe.t

@@ -15,7 +15,7 @@ type canonical_source =
   | Source_is_expected
   | Source_is_other of Keeper_checkpoint_ref.t
 
-(* RFC-0225 §3.2 admission: the reference is the content digest, which the
+(* The source check: the reference is the content digest, which the
    head gives without a message object read, and its session
    and turn are the head's. The head is read and parsed under the lock every
    time, so a file rewritten in place under the summary's identity (#43575)

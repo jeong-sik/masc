@@ -114,8 +114,8 @@ type refusal_kind = Keeper_approval_queue_rules_types.observed_refusal_kind =
   | Setup_failed
   | Unattributed
 
-(** What one run of the request inside the executor's box came back as
-    (RFC-0422). The caller that owns the sandbox runs it; the Gate only
+(** What one run of the request inside the executor's box came back as.
+    The caller that owns the sandbox runs it; the Gate only
     decides when to ask, and what each answer means. Since review
     5192723206 no refusal answer allows on its own: the box's ack channel
     can only report the box failing to apply, never the payload being

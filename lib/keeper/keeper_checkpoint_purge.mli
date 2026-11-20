@@ -13,9 +13,8 @@
       Failed results ([Tool_failed]) are exempt and pass through byte-exact:
       their payload is the feedback the keeper reads on later turns and the
       only error evidence the durable history carries. The exemption is a
-      type-level distinction (the typed outcome), not content classification,
-      so it stays inside RFC-0351 §2's "judge by type, integer, or byte
-      comparison only" rule.
+      type-level distinction (the typed outcome), not content classification:
+      the purge judges by type, integer, or byte comparison only.
 
     {2 The atom sequence is kept}
 

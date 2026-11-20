@@ -3,8 +3,8 @@
     model-generated media (image / audio / document) streamed by AGENT_CORE as
     [MediaDelta { media_type; source }] is persisted here and surfaced in keeper chat
     by URL token, instead of being reduced to a byte count at the bridge. This
-    generalizes the voice-clip token/serve pattern (RFC-0235:
-    [/api/v1/voice/audio/<token>]) to an arbitrary [media_type].
+    generalizes the voice-clip token/serve pattern
+    ([/api/v1/voice/audio/<token>]) to an arbitrary [media_type].
 
     Files live under [<masc_dir>/media/] as [<token>.<ext>], where [token] is a
     deterministic SHA-256 hex locator derived from the media type and raw payload.

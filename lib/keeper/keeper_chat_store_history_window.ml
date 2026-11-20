@@ -120,11 +120,10 @@ let history_window ~window_history ~window_secondary =
   push, finish
 
 (* Lines of the byte slice [[from, upto)). When [from > 0] the first
-   element is a (potentially partial) line fragment — dropped, same
-   rationale as the RFC-0226 P2 tail read. A final element without a
-   terminating '\n' (mid-line [upto], or a writer-in-flight tail) is
-   dropped the same way; split yields [""] there for boundary cuts, so
-   only true fragments are removed. *)
+   element is a (potentially partial) line fragment — dropped. A final
+   element without a terminating '\n' (mid-line [upto], or a
+   writer-in-flight tail) is dropped the same way; split yields [""]
+   there for boundary cuts, so only true fragments are removed. *)
 let slice_lines ~path ~from ~upto : string list =
   if upto <= from then []
   else

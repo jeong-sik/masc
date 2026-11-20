@@ -474,7 +474,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
      another oversized request. Fitting still checks the runtime is selected
      and re-renders every chunk; neither an atom count nor a prompt is cached. *)
   let capacity = ref (last_input_capacity ~config ~keeper_name) in
-  (* RFC-0467: a committed round loops only while nothing waits on the lane.
+  (* A committed round loops only while nothing waits on the lane.
      A waiting unit starts with the durable pass for the turns that ended
      meanwhile, then resumes continuity at the same position and source mode, so
      ending here loses no progress and keeps Memory following the turns. *)
@@ -980,8 +980,8 @@ let after_durable ~durable ~following =
 (* The queue signal hands this unit a bare name, and the queue pass reads the
    Owner's meta, not the store read that refuses a blank name for the durable
    and continuity passes. So the name is parsed here, once, before any pass
-   runs. A blank one names no Keeper the Librarian could be told about
-   (RFC-0468 §3.1): the unit raises, and the memory lane logs and counts it
+   runs. A blank one names no Keeper the Librarian could be told about:
+   the unit raises, and the memory lane logs and counts it
    as a failed unit. *)
 let run_with_readers ~durable ~continuity ~cleanup ~base_path ~keeper_name =
   let keeper_id =

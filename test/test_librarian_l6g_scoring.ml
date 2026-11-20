@@ -179,6 +179,7 @@ let case_upcoming_usable_until : Scoring.case =
   ; facts = [ c1_dated_hold; c1_coord ]
   ; planted = [ "8935" ]
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 
@@ -195,6 +196,7 @@ let case_upcoming_usable_until_noop : Scoring.case =
   ; facts = [ c1_dated_hold; c1_coord ]
   ; planted = []
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 
@@ -221,6 +223,7 @@ let case_completed_usable_until : Scoring.case =
   ; facts = [ c3_completed_canary; c3_lesson ]
   ; planted = [ "schema version 14" ]
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 
@@ -293,6 +296,7 @@ let case_standing_vs_transient : Scoring.case =
   ; facts = [ c5_identity; c5_transient_queue; c5_approach ]
   ; planted = [ "One writer fiber" ]
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 
@@ -316,6 +320,7 @@ let case_revise_working_state : Scoring.case =
   ; facts = [ c6_endpoint; c6_snapshot ]
   ; planted = [ "9443" ]
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 
@@ -336,6 +341,7 @@ let case_read_item_alone : Scoring.case =
   ; facts = [ c5_identity ]
   ; planted = [ "8443" ]
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 
@@ -360,6 +366,7 @@ let case_keeper_echo_noop : Scoring.case =
   ; facts = [ c8_constraint; c8_endpoint ]
   ; planted = []
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 
@@ -387,6 +394,7 @@ let case_targeted_contradiction_relative_date : Scoring.case =
   ; facts = [ c9_region; c9_freeze; c9_worktree ]
   ; planted = [ "eu-west-1"; "2026-11-18" ]
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 
@@ -456,6 +464,7 @@ let case_unknowing_reply_non_erasure : Scoring.case =
   ; facts = [ c11_ci_owner; c11_endpoint ]
   ; planted = []
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 
@@ -486,6 +495,7 @@ let case_explicit_retraction_and_lang_keep : Scoring.case =
   ; facts = [ c12_freeze_rule; c12_old_host; c12_style ]
   ; planted = [ "api-eu2.staging.internal" ]
   ; must_keep = []
+  ; must_remain = []
   }
 ;;
 

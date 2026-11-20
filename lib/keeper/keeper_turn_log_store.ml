@@ -159,6 +159,26 @@ type appended =
   ; last_at : int
   }
 
+type start =
+  { id : Log.Log_id.t
+  ; at : float
+  ; mark : Log.mark
+  }
+
+let read_start path =
+  let ( let* ) = Result.bind in
+  let* first = window path ~from:0 ~previous_row_wanted:(fun (_ : string) -> false) in
+  match first with
+  | Fs_compat.Private_jsonl_window.Window_missing -> Ok None
+  | Window_present { rows = ""; _ } -> Ok None
+  | Window_present { rows; _ } ->
+    (* One complete line and its line break. *)
+    (match decode (String.sub rows 0 (String.length rows - 1)) with
+     | Error reason -> Error (Row_undecodable { offset = 0; reason })
+     | Ok (Log_started { id; at; mark }) -> Ok (Some { id; at; mark })
+     | Ok (Opened _ | Closed _ | Reset _) -> Error Log_start_missing)
+;;
+
 let row line = Yojson.Safe.to_string (Codec.to_json line) ^ "\n"
 
 let append ~path ~at_end (first, rest) =

@@ -223,6 +223,36 @@ let test_tail_that_cannot_be_read () =
 ;;
 
 (* An undecodable line farther back than the tail needs is not read. *)
+let start_text path =
+  match Store.read_start path with
+  | Error error -> read_error_text error
+  | Ok None -> "nothing written"
+  | Ok (Some { id; at; mark }) ->
+    Printf.sprintf "%s at %.0f, %d closed" (Log.Log_id.to_string id) at mark.closed_messages
+;;
+
+let test_start () =
+  let path = new_path () in
+  check string "no file" "nothing written" (start_text path);
+  let after_start = appended path ~at_end:0 (started, []) in
+  let first = Printf.sprintf "%s at 100, 4 closed" (Log.Log_id.to_string log_id) in
+  check string "the first line" first (start_text path);
+  let (_ : int) = appended path ~at_end:after_start (opened 4, [ closed 0 9 ]) in
+  check string "the first line, whatever follows it" first (start_text path);
+  let fragment = new_path () in
+  Unix.mkdir (Filename.dirname fragment) 0o700;
+  write_raw fragment {|{"line":"log_st|};
+  check string "a fragment is not a line" "nothing written" (start_text fragment);
+  let garbage = new_path () in
+  Unix.mkdir (Filename.dirname garbage) 0o700;
+  write_raw garbage "not json\n";
+  check string "a first line that does not decode" "row at 0 is not JSON" (start_text garbage);
+  let headless = new_path () in
+  let (_ : int) = appended headless ~at_end:0 (closed 0 9, []) in
+  check string "a first line that does not start the log" "log start missing"
+    (start_text headless)
+;;
+
 let test_reads_only_as_far_as_it_must () =
   let path = new_path () in
   Unix.mkdir (Filename.dirname path) 0o700;
@@ -241,6 +271,7 @@ let () =
         ; test_case "a torn fragment" `Quick test_torn_fragment
         ; test_case "a tail that cannot be read" `Quick test_tail_that_cannot_be_read
         ; test_case "reads only as far as it must" `Quick test_reads_only_as_far_as_it_must
+        ; test_case "the line that starts the log" `Quick test_start
         ] )
     ; ( "append"
       , [ test_case "two lines in one append" `Quick test_two_lines_in_one_append

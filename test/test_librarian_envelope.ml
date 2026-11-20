@@ -55,6 +55,7 @@ let refusal_text : Envelope.refusal -> string = function
   | Revision_not_next { snapshot; line } ->
     Printf.sprintf "the snapshot is at %d and the line says %d" snapshot line
   | Facts_inconsistent (_ : string) -> "facts inconsistent"
+  | Not_encodable (_ : string) -> "not encodable"
 ;;
 
 (* The line a direct write commits against [previous]. *)
@@ -79,7 +80,9 @@ let reads_back label (snapshot : Current.t) =
 
 let rewritten label ~previous line =
   match Envelope.after ~previous line with
-  | Ok (Rewritten snapshot) ->
+  | Ok (Rewritten { snapshot; bytes }) ->
+    check string (label ^ ": the bytes are the codec's") (Snapshot_codec.snapshot_bytes snapshot)
+      bytes;
     reads_back label snapshot;
     snapshot
   | Ok Unchanged -> failf "%s: the snapshot was left as it was" label
@@ -168,7 +171,7 @@ let test_an_adoption_changes_no_byte () =
   in
   match Envelope.after ~previous:before line with
   | Ok Unchanged -> ()
-  | Ok (Rewritten (_ : Current.t)) -> fail "an adoption rewrote the snapshot"
+  | Ok (Rewritten _) -> fail "an adoption rewrote the snapshot"
   | Error refusal -> fail (refusal_text refusal)
 ;;
 
@@ -183,7 +186,13 @@ let test_the_line_alone_gives_the_bytes () =
   check string "written again from the line it has the same bytes"
     (Snapshot_codec.snapshot_bytes first)
     (Snapshot_codec.snapshot_bytes again);
-  check bool "and the same digest" true (Envelope.digest first = Envelope.digest again)
+  check bool "and the same digest" true (Envelope.digest first = Envelope.digest again);
+  match Envelope.next ~previous:before ~at:line.at line.cause line.effects with
+  | Ok (Rewritten { bytes; snapshot = (_ : Current.t) }) ->
+    check string "the snapshot planned before the line exists is the one read from it" bytes
+      (Snapshot_codec.snapshot_bytes first)
+  | Ok Unchanged -> fail "a direct write left the snapshot as it was"
+  | Error refusal -> fail (refusal_text refusal)
 ;;
 
 let test_refusals () =
@@ -206,10 +215,31 @@ let test_refusals () =
       (Log.Direct { by = Keeper; trace = "turn"; write = remember port })
       { Effects.empty with added = [ held_fact ] }
   in
-  match Envelope.after ~previous:before twice with
+  (match Envelope.after ~previous:before twice with
+   | Error refusal ->
+     check string "effects that hold one fact twice" "facts inconsistent" (refusal_text refusal)
+   | Ok (Unchanged | Rewritten _) -> fail "a snapshot that holds one fact twice was made");
+  (* A line read back from disk can say a fact lost its support and name no
+     premise it lacks. The snapshot codec does not write that. *)
+  let derived_fact = List.nth before.facts 2 in
+  let nameless =
+    commit ~previous:before ~at:204.0
+      (Log.Direct
+         { by = Keeper
+         ; trace = "turn"
+         ; write = Direct.Retract { id = id_of_claim port; reason = "the port moved" }
+         })
+      { Effects.empty with
+        removed =
+          [ held_fact, Retracted { by = Keeper; reason = "the port moved" }
+          ; derived_fact, Support_lost { missing = [] }
+          ]
+      }
+  in
+  match Envelope.after ~previous:before nameless with
   | Error refusal ->
-    check string "effects that hold one fact twice" "facts inconsistent" (refusal_text refusal)
-  | Ok (Unchanged | Rewritten _) -> fail "a snapshot that holds one fact twice was made"
+    check string "lost support that names no premise" "not encodable" (refusal_text refusal)
+  | Ok (Unchanged | Rewritten _) -> fail "a snapshot the codec does not write was made"
 ;;
 
 let () =

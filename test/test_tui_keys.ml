@@ -2691,6 +2691,58 @@ let test_tools_footer_says_what_j_k_and_esc_do () =
   Alcotest.(check bool) "an open request does not say Esc:기능 in Korean" false
     (says Lang_ko K.Tools_reads_request "Esc:기능")
 
+(* #53423: five keys the screens answer that the registry left out or named
+   differently. The lists the help names come from the same lists the
+   screens draw, so each check walks those lists. *)
+let test_the_registry_names_what_the_screens_answer () =
+  let open Masc_tui_types in
+  let binding surface key =
+    match
+      List.find_opt
+        (fun (binding : Masc_tui_keys.binding) -> String.equal binding.key key)
+        (Masc_tui_keys.for_surface surface)
+    with
+    | Some binding -> binding
+    | None -> Alcotest.failf "no %S binding" key
+  in
+  let help surface key =
+    Option.value ~default:"" (binding surface key).Masc_tui_keys.help in
+  let names text name =
+    let length = String.length name in
+    let rec at index =
+      index + length <= String.length text
+      && (String.equal (String.sub text index length) name || at (index + 1))
+    in
+    at 0
+  in
+  ignore (binding (Keepers Keeper_list) "d");
+  ignore (binding (Keepers Keeper_detail) "d");
+  List.iter
+    (fun pane ->
+      Alcotest.(check bool) ("Tools p names " ^ tools_pane_label ~ko:false pane) true
+        (names (help Tools "p") (tools_pane_label ~ko:false pane)))
+    tools_panes;
+  let rec overview_sorts acc sort =
+    let acc = sort :: acc in
+    match next_memory_overview_sort sort with
+    | Mem_overview_facts -> acc
+    | next -> overview_sorts acc next
+  in
+  List.iter
+    (fun sort ->
+      Alcotest.(check bool) ("Memory s names " ^ memory_overview_sort_label sort) true
+        (names (help Memory "s") (memory_overview_sort_label sort)))
+    (overview_sorts [] Mem_overview_facts);
+  List.iter
+    (fun section ->
+      Alcotest.(check bool) ("Telemetry names " ^ metrics_section_label ~ko:false section) true
+        (names (help Metrics "1 / 2 / 3") (metrics_section_label ~ko:false section)))
+    metrics_sections;
+  Alcotest.(check bool) "Work lists Task detail's x" true
+    (List.exists
+       (fun (key, text) -> String.equal key "x" && names text "Task detail")
+       (section "Work"))
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -2874,5 +2926,7 @@ let () =
             `Quick test_unread_resource_offers_no_body_search
         ; Alcotest.test_case "Resources without a list answers nothing" `Quick
             test_resources_without_a_list_answers_nothing
+        ; Alcotest.test_case "the registry names what the screens answer" `Quick
+            test_the_registry_names_what_the_screens_answer
         ] )
     ]

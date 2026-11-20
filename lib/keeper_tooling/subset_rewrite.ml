@@ -45,7 +45,7 @@ let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
          "eval re-parses its arguments in the running shell. The keeper \
           sandbox image already exports the switch environment (OPAMROOT, \
           OPAM_SWITCH_PREFIX), so drop the eval $(opam env ...) wrapper \
-          entirely"   (* RFC-shell-ir-typed-command-substitution §1/§3 *)
+          entirely"
        | _ ->
          "source and . run text in the running shell; a shell runs this \
           line, so it does what you wrote — the typed argv form cannot \
@@ -97,8 +97,7 @@ let tag = function
    module picks the slot and supplies the data. A template that does not
    render is logged and falls back to the bare [because] — the one piece of
    data the caller always has — never to prose written here (#32848
-   precedent). [tag] stays inline: it is the census category identifier (RFC
-   execute-subset-dispositions §3.7 keys its corpus table on these), not
+   precedent). [tag] stays inline: it is the census category identifier, not
    model-facing prose. *)
 let render_advice key vars ~fallback =
   match Prompt_registry.render_prompt_template key vars with

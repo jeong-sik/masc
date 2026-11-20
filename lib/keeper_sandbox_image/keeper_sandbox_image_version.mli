@@ -9,8 +9,7 @@
     new tag. The minute is there because the same recipe still installs
     whatever its package mirrors serve that day, so two builds of one recipe
     are two images. A tag names one build: the build command refuses a tag
-    that is already in the image store rather than moving it to new content.
-    RFC keeper-sandbox-images-have-versions (#38699) §2.2. *)
+    that is already in the image store rather than moving it to new content. *)
 
 type input =
   { path : string  (** Relative to the source checkout, as listed in [inputs]. *)

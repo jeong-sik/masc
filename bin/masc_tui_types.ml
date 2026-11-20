@@ -5521,6 +5521,15 @@ type keeper_execute_reading =
       kes_observed_at : float;
     }
 
+(* What an Execute snapshot says about its processes. The logs view and the
+   Terminal tab both draw it, so they read the same words. *)
+let keeper_execute_state_text ~ko ~active_count ~closed =
+  if active_count > 0 then
+    if ko then "실행 중 " ^ Masc_tui_value.Count.grouped active_count ^ "개"
+    else Masc_tui_value.Count.grouped active_count ^ " active"
+  else if closed then (if ko then "끝남" else "closed")
+  else if ko then "상태 보고 안 됨" else "state not reported"
+
 (* The Execute output stream the logs view and the Terminal tab follow. The
    key says whose output and for which window; [kxf_reading] is the workspace reading the
    stream was opened under; [kxf_owner] tells this job from the next one for
@@ -24266,10 +24275,8 @@ let keeper_log_rows (state : state) ~cols =
           (say "이 서버 프로세스에서 관측된 Execute 출력이 없습니다." "No Execute output observed in this server process.")
       | Keeper_execute_snapshot reading ->
       let state_text =
-        if reading.kes_active_count > 0 then
-          Printf.sprintf (if ko then "실행 중 %d" else "%d active") reading.kes_active_count
-        else if reading.kes_closed then say "종료됨" "closed"
-        else say "상태 미보고" "state not reported" in
+        keeper_execute_state_text ~ko ~active_count:reading.kes_active_count
+          ~closed:reading.kes_closed in
       let status = match reading.kes_status with
         | `Null -> "" | status -> " · " ^ Yojson.Safe.to_string status in
       let header = text_rows Keeper_log_notice (say "Execute 출력 · " "Execute output · " ^ state_text ^ status) in
@@ -26886,7 +26893,7 @@ let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
 
 let keeper_assignment_activity keepers =
   match aggregate_keeper_stats keepers with
-  | None -> " (activity not observed)"
+  | None -> " (activity not reported)"
   | Some (turns, _, cost) when turns > 0 ->
     Printf.sprintf " (%d turns, %s)" turns (Tui_decode.keeper_cost_summary cost)
   | Some _ -> ""
@@ -28448,7 +28455,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
           let describe (row, due) =
             let proximity = chat_schedule_proximity ~now due in
             let clock = match due with
-              | None -> say "예정 시각 미보고" "due time unreported"
+              | None -> say "예정 시각 보고 없음" "due time not reported"
               | Some due ->
                   Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now due
                   ^ say " 예정" " due" in

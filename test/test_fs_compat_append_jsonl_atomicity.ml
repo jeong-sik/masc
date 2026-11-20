@@ -1,8 +1,7 @@
-(** RFC-0108 root fix: stress for [Fs_compat.append_jsonl] under
-    cross-domain contention. Same shape as
-    [test_trajectory_atomicity] / [test_system_log_atomicity], but
-    targets the root helper used by 30+ callers so a single proof
-    covers all of them. *)
+(** Stress for [Fs_compat.append_jsonl] under cross-domain contention.
+    Same shape as [test_trajectory_atomicity] /
+    [test_system_log_atomicity], but targets the root helper its callers
+    share, so a single proof covers all of them. *)
 
 open Alcotest
 

@@ -76,7 +76,12 @@ let test_waiting_calls_run_in_the_order_they_came () =
     check (list int) "no call ran while the first holds the account" [] !ran;
     check bool "a call that does not wait is refused meanwhile" false (free one);
     check bool "another account is free meanwhile" true (free other);
-    Eio.Promise.resolve end_first ());
+    Eio.Promise.resolve end_first ();
+    (* The first call ends and hands the account on while this fiber is behind
+       it; the call it was handed to has not run yet. *)
+    Eio.Fiber.yield ();
+    check (list int) "only the first call ran so far" [ 0 ] (List.rev !ran);
+    check bool "refused while the account is handed on" false (free one));
   check (list int) "the calls ran in the order they came" [ 0; 1; 2; 3 ] (List.rev !ran);
   check bool "the account is free after the last of them" true (free one)
 ;;
@@ -115,6 +120,48 @@ let test_a_cancelled_wait_does_not_take_the_call () =
   check bool "the account is free afterwards" true (free one)
 ;;
 
+let test_a_wait_cancelled_after_the_hand_over_does_not_run () =
+  Eio_main.run
+  @@ fun _env ->
+  let ran = ref [] in
+  let first_may_end, end_first = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Call.call_in_turn_of one (fun _ ->
+        Eio.Promise.await first_may_end;
+        ran := "first" :: !ran));
+    Eio.Fiber.yield ();
+    match
+      Eio.Switch.run (fun waiter_sw ->
+        Eio.Fiber.fork ~sw:waiter_sw (fun () ->
+          Call.call_in_turn_of one (fun _ -> ran := "handed" :: !ran));
+        (* The first call ends and hands the account to the waiter. The
+           switch of the waiter fails before the waiter runs again. *)
+        Eio.Promise.resolve end_first ();
+        Eio.Fiber.yield ();
+        Eio.Switch.fail waiter_sw Cancel_waiter)
+    with
+    | () -> fail "the failure of the switch did not surface"
+    | exception Cancel_waiter -> ());
+  check (list string) "the call handed to a cancelled wait did not run" [ "first" ] (List.rev !ran);
+  check bool "the account is free afterwards" true (free one)
+;;
+
+let test_a_cancelled_fiber_does_not_run_on_a_free_account () =
+  Eio_main.run
+  @@ fun _env ->
+  let ran = ref false in
+  (match
+     Eio.Switch.run (fun sw ->
+       Eio.Switch.fail sw Cancel_waiter;
+       Call.call_in_turn_of one (fun _ -> ran := true))
+   with
+   | () -> fail "the failure of the switch did not surface"
+   | exception Cancel_waiter -> ());
+  check bool "the work did not run" false !ran;
+  check bool "the account is free afterwards" true (free one)
+;;
+
 let () =
   run
     "runtime_account_call"
@@ -130,6 +177,14 @@ let () =
             "a cancelled wait does not take the call"
             `Quick
             test_a_cancelled_wait_does_not_take_the_call
+        ; test_case
+            "a wait cancelled after the hand over does not run"
+            `Quick
+            test_a_wait_cancelled_after_the_hand_over_does_not_run
+        ; test_case
+            "a cancelled fiber does not run on a free account"
+            `Quick
+            test_a_cancelled_fiber_does_not_run_on_a_free_account
         ] )
     ]
 ;;

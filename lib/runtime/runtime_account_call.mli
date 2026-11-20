@@ -30,5 +30,11 @@ val one_call_of
     runs in.
 
     The wait has no time limit of its own. It ends when the fiber that waits
-    is cancelled, and then [f] does not run. *)
+    is cancelled. [f] does not run in a cancelled fiber, whether the fiber
+    was cancelled before it came, while it waited or after the call was
+    handed to it.
+
+    It is called from an Eio fiber. A call made inside a call of the same
+    account waits for itself and never runs; {!one_call_of} gives [busy]
+    there. *)
 val call_in_turn_of : Authz_types.Provider_account_id.t -> (t -> 'a) -> 'a

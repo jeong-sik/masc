@@ -1791,7 +1791,7 @@ let newest_health_answer : Masc_tui_engine_samples.answer option Atomic.t =
 let note_health_answer reading =
   Atomic.set newest_health_answer
     (Some
-       { Masc_tui_engine_samples.at = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
+       { Masc_tui_engine_samples.at = Masc_tui_wake.Mono.now ()
        ; reading })
 
 let health_answer () = Atomic.get newest_health_answer

@@ -5,6 +5,11 @@
    over (RFC tui-one-screen-grammar section 5.6). *)
 
 module Samples = Masc_tui_engine_samples
+
+(* Instants on the loop's clock as seconds after a base far enough past
+   the clock's start that the times before a view opens stay on it. *)
+let base = Masc_tui_wake.Mono.after (Masc_tui_wake.Mono.now ()) 100.
+let instant s = Masc_tui_wake.Mono.after base (s +. 100.)
 module Braille = Masc_tui_braille
 module Decode = Masc.Tui_decode
 
@@ -71,14 +76,14 @@ let run ?(visible = fun _ -> true) ~from ~until sampler newest =
   while !now < until do
     (match !pending with
      | Some due when !now >= due ->
-       newest := Some { Samples.at = !now; reading = answered_point };
-       let next, _, _ = Samples.answered !sampler ~now:!now answered_point in
+       newest := Some { Samples.at = instant (!now); reading = answered_point };
+       let next, _, _ = Samples.answered !sampler ~now:(instant !now) answered_point in
        sampler := next;
        pending := None
      | Some _ | None -> ());
     if visible !now then begin
-      let shown = Samples.shown !sampler ~now:!now ~capacity in
-      let next, decision = Samples.tick shown ~now:!now ~newest:!newest in
+      let shown = Samples.shown !sampler ~now:(instant !now) ~capacity in
+      let next, decision = Samples.tick shown ~now:(instant !now) ~newest:!newest in
       sampler := next;
       match decision with
       | Samples.Read ->
@@ -109,53 +114,53 @@ let test_no_read_while_the_view_is_off_screen () =
   let off_screen = Samples.hidden on_screen in
   Alcotest.(check int) "closing the view drops its samples" 0
     (List.length (Samples.samples Samples.Live_heap off_screen));
-  let _, decision = Samples.tick off_screen ~now:100. ~newest:None in
+  let _, decision = Samples.tick off_screen ~now:(instant 100.) ~newest:None in
   Alcotest.check step "nothing is due once it closed" Samples.Nothing decision
 
 let test_an_answer_within_two_seconds_is_taken_without_a_read () =
   (* A refresh read [/health] half a second before the view opened. *)
-  let newest = Some { Samples.at = -0.5; reading = answered_point } in
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let opened, decision = Samples.tick opened ~now:0. ~newest in
+  let newest = Some { Samples.at = instant (-0.5); reading = answered_point } in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let opened, decision = Samples.tick opened ~now:(instant 0.) ~newest in
   Alcotest.check step "the first sample takes it" Samples.Sampled decision;
   (* Another refresh answers a second and a half later. *)
-  let newest = Some { Samples.at = 1.5; reading = answered_point } in
-  let before_due, decision = Samples.tick opened ~now:1.9 ~newest in
+  let newest = Some { Samples.at = instant (1.5); reading = answered_point } in
+  let before_due, decision = Samples.tick opened ~now:(instant 1.9) ~newest in
   Alcotest.check step "nothing before the next sample is due" Samples.Nothing decision;
-  let sampled, decision = Samples.tick before_due ~now:2.0 ~newest in
+  let sampled, decision = Samples.tick before_due ~now:(instant 2.0) ~newest in
   Alcotest.check step "the next sample takes it too" Samples.Sampled decision;
   (* The same answer is not taken twice: the sample after asks. *)
-  let _, decision = Samples.tick sampled ~now:4.0 ~newest in
+  let _, decision = Samples.tick sampled ~now:(instant 4.0) ~newest in
   Alcotest.check step "an answer already taken is read again" Samples.Read decision
 
 let test_an_answer_older_than_two_seconds_is_read_again () =
-  let newest = Some { Samples.at = -2.5; reading = answered_point } in
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let _, decision = Samples.tick opened ~now:0. ~newest in
+  let newest = Some { Samples.at = instant (-2.5); reading = answered_point } in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let _, decision = Samples.tick opened ~now:(instant 0.) ~newest in
   Alcotest.check step "too old to stand for now" Samples.Read decision
 
 let test_retry_wait_keeps_sample_slots_without_starting_a_read () =
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let blank, decision = Samples.tick ~allow_read:false opened ~now:0. ~newest:None in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let blank, decision = Samples.tick ~allow_read:false opened ~now:(instant 0.) ~newest:None in
   Alcotest.check step "the first slot is recorded without a read" Samples.Sampled decision;
   Alcotest.(check (list sample)) "the slot is blank" [ Braille.Absent ]
     (Samples.samples Samples.Live_heap blank);
-  let newest = Some { Samples.at = 1.5; reading = answered_point } in
-  let recorded, decision = Samples.tick ~allow_read:false blank ~now:2. ~newest in
+  let newest = Some { Samples.at = instant (1.5); reading = answered_point } in
+  let recorded, decision = Samples.tick ~allow_read:false blank ~now:(instant 2.) ~newest in
   Alcotest.check step "an existing answer fills a due slot" Samples.Sampled decision;
   Alcotest.(check (list sample)) "the blank and the measured slot are kept"
     [ Braille.Absent; Braille.of_count a_heap ]
     (Samples.samples Samples.Live_heap recorded);
-  let _, decision = Samples.tick recorded ~now:4. ~newest:None in
+  let _, decision = Samples.tick recorded ~now:(instant 4.) ~newest:None in
   Alcotest.check step "a new read starts once the wait is over" Samples.Read decision
 
 let test_one_read_is_out_at_a_time () =
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let asked, decision = Samples.tick opened ~now:0. ~newest:None in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let asked, decision = Samples.tick opened ~now:(instant 0.) ~newest:None in
   Alcotest.check step "the first sample asks" Samples.Read decision;
   (* Its answer takes ten seconds; the view closes and opens again. *)
-  let reopened = Samples.shown (Samples.hidden asked) ~now:5. ~capacity in
-  let _, decision = Samples.tick reopened ~now:5. ~newest:None in
+  let reopened = Samples.shown (Samples.hidden asked) ~now:(instant 5.) ~capacity in
+  let _, decision = Samples.tick reopened ~now:(instant 5.) ~newest:None in
   Alcotest.check step "the read already out answers the new view" Samples.Nothing decision
 
 let test_the_ring_keeps_the_graph_width_and_drops_the_oldest () =
@@ -173,9 +178,9 @@ let test_the_ring_keeps_the_graph_width_and_drops_the_oldest () =
   let rec every_interval sampler at =
     if at > 10. then sampler
     else
-      let shown = Samples.shown sampler ~now:at ~capacity:width in
-      let newest = Some { Samples.at; reading = heap_at at } in
-      let next, _ = Samples.tick shown ~now:at ~newest in
+      let shown = Samples.shown sampler ~now:(instant at) ~capacity:width in
+      let newest = Some { Samples.at = instant at; reading = heap_at at } in
+      let next, _ = Samples.tick shown ~now:(instant at) ~newest in
       every_interval next (at +. Samples.interval_s)
   in
   let sampler = every_interval Samples.stopped 0. in
@@ -184,10 +189,10 @@ let test_the_ring_keeps_the_graph_width_and_drops_the_oldest () =
     (Samples.samples Samples.Live_heap sampler)
 
 let test_a_failed_read_is_a_blank_and_said_once () =
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let asked, _ = Samples.tick opened ~now:(instant 0.) ~newest:None in
   let failed, decision, report =
-    Samples.answered asked ~now:0.03 (Samples.Failed "server identity load failed: refused")
+    Samples.answered asked ~now:(instant 0.03) (Samples.Failed "server identity load failed: refused")
   in
   Alcotest.check step "the failure is a sample" Samples.Sampled decision;
   Alcotest.(check (list sample)) "a blank heap" [ Braille.Absent ]
@@ -198,9 +203,9 @@ let test_a_failed_read_is_a_blank_and_said_once () =
     (match report with
      | Samples.Failure_began _ -> true
      | Samples.Quiet -> false);
-  let asked, _ = Samples.tick failed ~now:2.0 ~newest:None in
+  let asked, _ = Samples.tick failed ~now:(instant 2.0) ~newest:None in
   let _, _, report =
-    Samples.answered asked ~now:2.03 (Samples.Failed "server identity load failed: refused")
+    Samples.answered asked ~now:(instant 2.03) (Samples.Failed "server identity load failed: refused")
   in
   Alcotest.(check bool) "the failure that follows is not said again" true
     (match report with
@@ -214,24 +219,24 @@ let test_a_failed_read_is_a_blank_and_said_once () =
 let test_a_graph_never_read_is_the_unread_variant () =
   Alcotest.(check string) "closed" "Never_read"
     (graph_kind (Samples.graph ~tint:no_tint ~width:32 ~axis_cells ~axis Samples.Live_heap Samples.stopped));
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let asked, _ = Samples.tick opened ~now:(instant 0.) ~newest:None in
   Alcotest.(check string) "opened, its read still out" "Never_read"
     (graph_kind (Samples.graph ~tint:no_tint ~width:32 ~axis_cells ~axis Samples.Scheduler_p95 asked));
   Alcotest.(check string) "narrower than four cells, still never read" "Never_read"
     (graph_kind (Samples.graph ~tint:no_tint ~width:2 ~axis_cells ~axis Samples.Scheduler_p95 asked));
-  let read, _, _ = Samples.answered asked ~now:0.03 answered_point in
+  let read, _, _ = Samples.answered asked ~now:(instant 0.03) answered_point in
   Alcotest.(check string) "read" "Drawn"
     (graph_kind (Samples.graph ~tint:no_tint ~width:32 ~axis_cells ~axis Samples.Scheduler_p95 read));
   Alcotest.(check string) "read, with no room for dots" "Too_narrow"
     (graph_kind (Samples.graph ~tint:no_tint ~width:3 ~axis_cells ~axis Samples.Scheduler_p95 read))
 
 let test_times_without_a_sample_are_blank () =
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let asked, _ = Samples.tick opened ~now:(instant 0.) ~newest:None in
   (* The read takes five seconds: the samples due at 2 s and 4 s took
      nothing. *)
-  let read, _, _ = Samples.answered asked ~now:5. answered_point in
+  let read, _, _ = Samples.answered asked ~now:(instant 5.) answered_point in
   Alcotest.(check (list sample)) "two blanks before the answer"
     [ Braille.Absent; Braille.Absent; Braille.of_count a_heap ]
     (Samples.samples Samples.Live_heap read)
@@ -316,8 +321,8 @@ let sampled_readings ~capacity readings =
   let sampler, _ =
     List.fold_left
       (fun (sampler, at) reading ->
-        let newest = Some { Samples.at; reading } in
-        let next, _ = Samples.tick (Samples.shown sampler ~now:at ~capacity) ~now:at ~newest in
+        let newest = Some { Samples.at = instant at; reading } in
+        let next, _ = Samples.tick (Samples.shown sampler ~now:(instant at) ~capacity) ~now:(instant at) ~newest in
         (next, at +. Samples.interval_s))
       (Samples.stopped, 0.) readings
   in
@@ -406,10 +411,10 @@ let test_the_top_never_goes_under_the_floor () =
 
 (* A graph whose times were all blank measured nothing, so it has no top. *)
 let test_a_graph_with_nothing_measured_has_no_top () =
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let asked, _ = Samples.tick opened ~now:(instant 0.) ~newest:None in
   let failed, _, _ =
-    Samples.answered asked ~now:0.03 (Samples.Failed "server identity load failed: refused")
+    Samples.answered asked ~now:(instant 0.03) (Samples.Failed "server identity load failed: refused")
   in
   Alcotest.(check (option int)) "failed reads ask for no top" None
     (axis_top ~width:32 Samples.Live_heap failed);
@@ -417,8 +422,8 @@ let test_a_graph_with_nothing_measured_has_no_top () =
     Samples.reading_of_identity
       (Ok (identity ~gc:None ~scheduler:(Some (scheduler ~samples:0 ~p95_ms:0.))))
   in
-  let asked, _ = Samples.tick failed ~now:2.0 ~newest:None in
-  let unreported, _, _ = Samples.answered asked ~now:2.03 unreported in
+  let asked, _ = Samples.tick failed ~now:(instant 2.0) ~newest:None in
+  let unreported, _, _ = Samples.answered asked ~now:(instant 2.03) unreported in
   Alcotest.(check (option int)) "an unreported p95 asks for no top" None
     (axis_top ~width:32 Samples.Scheduler_p95 unreported)
 
@@ -426,9 +431,9 @@ let test_a_graph_with_nothing_measured_has_no_top () =
    time. *)
 let test_a_reopened_view_sets_its_top_again () =
   let sampler = sampled_heaps ~capacity (repeat 6 10_000_000) in
-  let reopened = Samples.shown (Samples.hidden sampler) ~now:100. ~capacity in
-  let newest = Some { Samples.at = 100.; reading = heap_reading steady } in
-  let reopened, _ = Samples.tick reopened ~now:100. ~newest in
+  let reopened = Samples.shown (Samples.hidden sampler) ~now:(instant 100.) ~capacity in
+  let newest = Some { Samples.at = instant (100.); reading = heap_reading steady } in
+  let reopened, _ = Samples.tick reopened ~now:(instant 100.) ~newest in
   Alcotest.(check (option int)) "1.3 times the first time after reopening" (Some first_top)
     (axis_top ~width:32 Samples.Live_heap reopened)
 
@@ -439,54 +444,54 @@ let count_sampled steps =
    applies the read's own message, and the loop ticks in between. That one
    answer is one sample. *)
 let test_the_own_answer_seen_early_is_one_sample () =
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let asked, decision = Samples.tick opened ~now:0. ~newest:None in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let asked, decision = Samples.tick opened ~now:(instant 0.) ~newest:None in
   Alcotest.check step "the first sample asks" Samples.Read decision;
-  let newest = Some { Samples.at = 0.02; reading = answered_point } in
-  let between, early = Samples.tick asked ~now:0.025 ~newest in
-  let applied, on_apply, _ = Samples.answered between ~now:0.03 answered_point in
-  let after, late = Samples.tick applied ~now:0.035 ~newest in
+  let newest = Some { Samples.at = instant (0.02); reading = answered_point } in
+  let between, early = Samples.tick asked ~now:(instant 0.025) ~newest in
+  let applied, on_apply, _ = Samples.answered between ~now:(instant 0.03) answered_point in
+  let after, late = Samples.tick applied ~now:(instant 0.035) ~newest in
   Alcotest.(check int) "one sample for one answer" 1 (count_sampled [ early; on_apply; late ]);
   Alcotest.(check int) "one time held" 1
     (List.length (Samples.samples Samples.Live_heap after));
-  let _, next = Samples.tick after ~now:2.0 ~newest in
+  let _, next = Samples.tick after ~now:(instant 2.0) ~newest in
   Alcotest.check step "the answer taken is not taken again" Samples.Read next
 
 (* Another reader's answer while the sampler's own read is out sends no
    second read. *)
 let test_another_answer_while_the_read_is_out_sends_no_read () =
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
-  let refresh = Some { Samples.at = 0.5; reading = answered_point } in
-  let waiting, first = Samples.tick asked ~now:0.6 ~newest:refresh in
-  let _, second = Samples.tick waiting ~now:1.9 ~newest:refresh in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let asked, _ = Samples.tick opened ~now:(instant 0.) ~newest:None in
+  let refresh = Some { Samples.at = instant (0.5); reading = answered_point } in
+  let waiting, first = Samples.tick asked ~now:(instant 0.6) ~newest:refresh in
+  let _, second = Samples.tick waiting ~now:(instant 1.9) ~newest:refresh in
   Alcotest.(check bool) "no read while one is out" false
     (List.exists (fun decision -> decision = Samples.Read) [ first; second ])
 
 (* A read still out when the view closed does not hold the next opening's
    reads: its answer takes no sample, and the next due sample reads. *)
 let test_a_read_out_when_the_view_closed_does_not_hold_the_next () =
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let asked, _ = Samples.tick opened ~now:(instant 0.) ~newest:None in
   let answered, decision, _ =
-    Samples.answered (Samples.hidden asked) ~now:0.03 answered_point
+    Samples.answered (Samples.hidden asked) ~now:(instant 0.03) answered_point
   in
   Alcotest.check step "a closed view takes no sample" Samples.Nothing decision;
   Alcotest.(check int) "and holds none" 0
     (List.length (Samples.samples Samples.Live_heap answered));
-  let reopened = Samples.shown answered ~now:10. ~capacity in
-  let newest = Some { Samples.at = 0.03; reading = answered_point } in
-  let _, decision = Samples.tick reopened ~now:10. ~newest in
+  let reopened = Samples.shown answered ~now:(instant 10.) ~capacity in
+  let newest = Some { Samples.at = instant (0.03); reading = answered_point } in
+  let _, decision = Samples.tick reopened ~now:(instant 10.) ~newest in
   Alcotest.check step "the next opening reads" Samples.Read decision
 
 (* A view opened again within two seconds of an answer takes that answer. *)
 let test_a_view_reopened_within_two_seconds_takes_the_answer () =
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
-  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
-  let read, _, _ = Samples.answered asked ~now:0.03 answered_point in
-  let newest = Some { Samples.at = 0.03; reading = answered_point } in
-  let reopened = Samples.shown (Samples.hidden read) ~now:1.0 ~capacity in
-  let _, decision = Samples.tick reopened ~now:1.0 ~newest in
+  let opened = Samples.shown Samples.stopped ~now:(instant 0.) ~capacity in
+  let asked, _ = Samples.tick opened ~now:(instant 0.) ~newest:None in
+  let read, _, _ = Samples.answered asked ~now:(instant 0.03) answered_point in
+  let newest = Some { Samples.at = instant (0.03); reading = answered_point } in
+  let reopened = Samples.shown (Samples.hidden read) ~now:(instant 1.0) ~capacity in
+  let _, decision = Samples.tick reopened ~now:(instant 1.0) ~newest in
   Alcotest.check step "taken without a read" Samples.Sampled decision
 
 (* Times under a tenth of the top pile up; a time above takes one off them,
@@ -552,11 +557,11 @@ let test_a_top_past_the_integer_range_stands_at_the_largest () =
 let test_a_resized_graph_keeps_its_top () =
   let sampler = sampled_heaps ~capacity [ steady ] in
   let at = Samples.interval_s in
-  let narrower = Samples.shown sampler ~now:at ~capacity:8 in
+  let narrower = Samples.shown sampler ~now:(instant at) ~capacity:8 in
   Alcotest.(check (option int)) "the same top in less room" (Some first_top)
     (axis_top ~width:32 Samples.Live_heap narrower);
-  let newest = Some { Samples.at; reading = heap_reading 1_200_000 } in
-  let sampled, _ = Samples.tick narrower ~now:at ~newest in
+  let newest = Some { Samples.at = instant at; reading = heap_reading 1_200_000 } in
+  let sampled, _ = Samples.tick narrower ~now:(instant at) ~newest in
   Alcotest.(check (option int)) "a time inside the band leaves it" (Some first_top)
     (axis_top ~width:32 Samples.Live_heap sampled)
 

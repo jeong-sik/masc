@@ -1265,6 +1265,7 @@
   masc.masc_types
   masc.string_util
   masc_tui_message_layout
+  masc_tui_value
   yojson))
 
 ;; The facts below a Keeper chat and the rows they wrap onto (RFC
@@ -1823,7 +1824,8 @@
  (name masc_tui_board_read_layout)
  (wrapped false)
  (modules masc_tui_board_read_layout)
- (libraries ptime masc_tui_types masc_tui_board_detail masc_tui_frame_timing))
+ (libraries ptime masc_tui_types masc_tui_board_detail masc_tui_frame_timing
+  masc_tui_value))
 
 (library
  (name masc_tui_browser_lane_layout)
@@ -2901,7 +2903,7 @@
  (name masc_tui_loader)
  (wrapped false)
  (modules masc_tui_loader masc_tui_http masc_tui_schedule_decode)
- (libraries masc_tui_engine_samples masc_tui_transport_failure masc_tui_preference_writer masc_tui_action_notice masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+ (libraries masc_tui_engine_samples masc_tui_wake masc_tui_transport_failure masc_tui_preference_writer masc_tui_action_notice masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
   masc_tui_chat_call_reader
   masc_tui_task_payloads
   masc_tui_backlog_read

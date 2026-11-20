@@ -31,8 +31,8 @@ val retire_read : t -> t
     A pending [Say] or [Leave] keeps its receipt. *)
 val key : t -> string -> t * intent
 val paste : t -> string -> t
-(** [now] is monotonic elapsed seconds, from the same clock as [receive]. *)
-val poll : t -> now:float -> machine:Masc.Machine_lane.t -> t * request option
+(** [now] is an instant on the loop's clock, the clock [receive] takes. *)
+val poll : t -> now:Masc_tui_wake.Mono.t -> machine:Masc.Machine_lane.t -> t * request option
 (** A successful active Read or Say has no periodic successor. A failed Read
     retries after two seconds, and a change during a pending request earns one
     trailing Read. An inactive view retries an unconfirmed leave at the normal
@@ -47,10 +47,12 @@ val send : t -> machine:Masc.Machine_lane.t -> t * request option
     Transport/refusal details are not typed at this boundary, so [Error]
     remains uncertain and cannot discard the receipt. *)
 val request_json : request -> Yojson.Safe.t
-val receive : ?viewer:string -> t -> request -> now:float -> (Masc.Play_room.snapshot, string) result -> t
+val receive :
+  ?viewer:string -> t -> request -> now:Masc_tui_wake.Mono.t ->
+  (Masc.Play_room.snapshot, string) result -> t
 (** [viewer] is the authenticated response principal, committed only with a
     successful response owned by this request. It identifies local messages. *)
-val kept_back : t -> request -> now:float -> string -> t
+val kept_back : t -> request -> now:Masc_tui_wake.Mono.t -> string -> t
 (** The workspace guard stopped [request] before it left. It settles like a
     failed answer, and [notice], the caller's kept-back notice, is drawn as it
     is. *)

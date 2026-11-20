@@ -6,7 +6,7 @@
 (** The registration of a person's API key as a key account (RFC
     a-persons-api-key-is-their-own-provider-account 3.3). The caller checked
     that the integration takes a key. All of it runs inside the call of the
-    account it makes ({!Server_setup_account_login.one_call_of}), so no
+    account it makes ({!Runtime_account_call.one_call_of}), so no
     verification, no turn and no removal of the account runs before its
     files are there.
 

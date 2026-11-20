@@ -146,7 +146,7 @@ agent-core 도 그 요청을 보내지 않는다.
   - 후보는 누적이다. 앞 단이 붙잡은 front 와 표시 바꾸기를 안고 한 단을 더 쓴다.
   - 지금 사다리도 그렇다(`turn_boundary_resend_sequence` 의 `restore_front` 조건, `this_turn_start_resend_sequence` 의 「whatever demotion [first] chose」).
   - 좁아지지 않는 단은 후보를 내지 않는다. 조건은 지금 단의 조건이다.
-- 목록은 유한하다. 첫 후보 뒤의 단은 thunk 이고, agent-core 는 앞에서부터 한 번씩만 부른다. 목록 길이가 다시 보내는 횟수의 상한이라 따로 세지 않는다.
+- 목록은 유한하다. 첫 후보 뒤의 단은 thunk 다. 목록 길이가 다시 보내는 횟수의 상한이라 따로 세지 않는다.
 - route 는 후보를 차례로 견주고, 처음 받아들여진 후보를 보낸다. provider 가 그 후보를 넘침으로 거절하면 다음 후보로 간다.
 - 후보가 다하면 지금처럼 `Retry.ContextOverflow` 로 턴을 끝낸다. lane 을 돌리는 것도 지금과 같다. 다음 턴 첫 요청에서 신호가 창을 옮긴다.
 - 받아들여진 후보의 좁힘은 run 의 다음 요청으로 이어진다.
@@ -157,6 +157,7 @@ agent-core 계약이 바뀐다.
 
 - 지금: 「Route exactly once. … AGENT_CORE does not mutate the transcript or retry implicitly」(`packages/agent_core/lib/pipeline/pipeline.ml:847`).
 - 바뀐 뒤: route 는 caller 가 준 후보마다 많아야 한 번 보낸다. transcript 는 바꾸지 않는다. 다시 보내는 것은 caller 가 후보로 적은 것뿐이다.
+  - thunk 는 앞 후보가 크기로 거절된 뒤에만, 앞에서부터, 하나에 한 번만 부른다. thunk 가 attempt 상태를 바꾸므로, 이 순서가 깨지면 누적이 틀어진다.
 
 run 안 후보가 checkpoint 앞뒤의 크기 거절을 모두 먼저 받는다.
 
@@ -184,6 +185,7 @@ run 안 후보가 checkpoint 앞뒤의 크기 거절을 모두 먼저 받는다.
    - 시험: 턴 가운데 안쪽 요청이 입력 한도를 넘으면 같은 run 에서 다음 후보가 받아들여진다. tool 은 다시 돌지 않고 checkpoint 수도 그대로다.
    - 시험: 거절된 후보는 ledger 를 바꾸지 않는다.
    - 시험: 좁힌 뒤의 안쪽 요청은 거절 없이 첫 후보로 들어간다.
+   - 시험: 받아들여진 후보 뒤의 thunk 는 불리지 않는다.
    - 시험: provider 가 넘침으로 거절하면 다음 후보를 보낸다.
    - 시험: 후보가 다하면 턴이 끝나고 lane 을 돌리는 것은 지금과 같다. 다음 턴 첫 요청에서 신호가 창을 옮긴다.
 

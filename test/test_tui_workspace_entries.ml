@@ -1674,11 +1674,11 @@ let test_lsp_pending_status_includes_refresh_and_retry () =
       (Fetched.in_flight state.code_lsp_query && Option.is_some (code_lsp_pending_query state)
        && not (Fetched.same_request ~equal:code_lsp_query_equal settled refreshed)
        && Option.is_none state.code_lsp_note);
-    Alcotest.(check bool) "Ready refresh retains its value while failed Join retry starts Loading" true
+    Alcotest.(check bool) "Ready refresh retains its value and failed Join retry retains its failure" true
       (match Fetched.current state.code_lsp_query with
        | Some (_, Fetched.Ready ()) -> Result.is_ok result
-       | Some (_, Fetched.Loading) -> Result.is_error result
-       | None | Some (_, (Fetched.Absent | Fetched.Failed _ | Fetched.Stale _)) -> false);
+       | Some (_, Fetched.Failed _) -> Result.is_error result
+       | None | Some (_, (Fetched.Absent | Fetched.Loading | Fetched.Stale _)) -> false);
     let note = Some (Code_note_server_words { symbol = "fixture"; words = "another observation" }) in
     state.code_lsp_note <- note;
     Alcotest.(check bool) "suppressed duplicate does not mutate an existing note" true

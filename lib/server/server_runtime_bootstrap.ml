@@ -1794,8 +1794,11 @@ let start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine 
       (match mark_owner_state_ready () with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
-      ignore (start_post_ready_owner_lanes ~sw ~clock ~env activated.state : string * string);
-      Eio.Promise.resolve set_engine activated.state);
+      (* Resolved at readiness, before the lanes start: a lane that fails
+         after it marks the engine degraded and leaves it ready, as the
+         single-user server goes on serving degraded. *)
+      Eio.Promise.resolve set_engine activated.state;
+      ignore (start_post_ready_owner_lanes ~sw ~clock ~env activated.state : string * string));
   start_startup_watchdog ~sw ~clock;
   engine
 ;;
@@ -2445,9 +2448,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~judged ?input_base_path ?on_ready
     (match
        Server_accounts.run ~sw ~env ~address ~port ~lease:judged.lease ?on_ready
          ~start_engine:(fun access ->
-           ignore
-             (start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine access
-              : Mcp_server.server_state Eio.Promise.t))
+           start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine access)
          multi_account
      with
      | Ok () -> ()

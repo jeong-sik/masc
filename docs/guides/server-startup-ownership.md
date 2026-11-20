@@ -57,6 +57,8 @@ after `scripts/install-local-build.sh`:
    When no server was running, restart starts plain `masc start` instead.
 4. It waits until `/health/ready` answers 200 and the process it started
    holds the announcement byte of the port, then prints how long it took.
+   The account server of a multi-account installation answers 200 only
+   once its engine is ready, so that time includes the start of the engine.
    Nothing in the answer is read. Ctrl-C stops the waiting, not the new
    server.
 

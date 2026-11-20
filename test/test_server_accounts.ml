@@ -982,8 +982,10 @@ let test_serves_its_table_alone () =
     let serve sw =
       let ready, set_ready = Eio.Promise.create () in
       (* The engine is started on what the boot published, once, and the
-         routes do not wait for it. This case starts none. *)
+         routes do not wait for it. This case starts none: the engine it
+         hands back is a promise the case resolves. *)
       let engine_started_on = ref [] in
+      let engine, engine_is_ready = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
         match
           Server_accounts.run
@@ -995,7 +997,8 @@ let test_serves_its_table_alone () =
             ~on_ready:(Eio.Promise.resolve set_ready)
             ~start_engine:(fun access ->
               engine_started_on
-              := Runtime_account_access.published_access access :: !engine_started_on)
+              := Runtime_account_access.published_access access :: !engine_started_on;
+              engine)
             multi_account
         with
         | Ok () -> ()
@@ -1057,20 +1060,27 @@ let test_serves_its_table_alone () =
           | Error detail -> Alcotest.failf "masc-tui refuses the health answer: %s" detail)
        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
          Alcotest.failf "the health answer is not an object: %S" body);
-      (* The probes say that the listener answers and that a decision can
-         rest on the zone, and nothing of the process: the whole answer is
-         compared. *)
-      List.iter
-        (fun (path, expected) ->
-          let status, body = request ~net ~port ~meth:"GET" path in
-          Alcotest.(check int) ("GET " ^ path) 200 status;
-          Alcotest.(check string)
-            ("the whole answer of " ^ path)
-            expected
-            (Yojson.Safe.to_string (json_of path body)))
-        [ Server_health_paths.liveness, {|{"live":true}|}
-        ; Server_health_paths.readiness, {|{"ready":true}|}
-        ];
+      (* The probes say that the listener answers, and that the engine is
+         ready and a decision can rest on the zone, and nothing of the
+         process: the whole answer is compared. The listener answers before
+         the engine is ready, and the server is not ready before it. *)
+      let probe ~moment path expected_status expected =
+        let status, body = request ~net ~port ~meth:"GET" path in
+        Alcotest.(check int) (Printf.sprintf "GET %s %s" path moment) expected_status status;
+        Alcotest.(check string)
+          (Printf.sprintf "the whole answer of %s %s" path moment)
+          expected
+          (Yojson.Safe.to_string (json_of path body))
+      in
+      let before = "before the engine is ready" in
+      probe ~moment:before Server_health_paths.liveness 200 {|{"live":true}|};
+      probe ~moment:before Server_health_paths.readiness 503 {|{"ready":false}|};
+      Eio.Promise.resolve engine_is_ready ();
+      probe
+        ~moment:"once the engine is ready"
+        Server_health_paths.readiness
+        200
+        {|{"ready":true}|};
       (* The routes of the single-user server are not in the table, the ones
          it answers without a credential included. *)
       List.iter

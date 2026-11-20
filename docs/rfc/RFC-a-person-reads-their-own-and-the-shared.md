@@ -152,7 +152,7 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 - `GET /api/v1/dashboard/workspace-memory-context` 는 원장이 아니라 모든 Keeper 의 기억 저장소를 준다(`lib/server/server_routes_http_routes_dashboard.ml:718`, `lib/server/server_dashboard_http_keeper_memory_health.ml:947`). 범위로는 Keeper 의 것이다.
 - 원장을 쓰는 것은 큐레이터 하나다. 원장(`lib/server/server_workspace_memory_curator.ml:640`, `:739`), 바뀐 기록(`:650`), briefing(`:806`, `:867`)을 쓴다.
 - 큐레이터는 준비 뒤 lane 에서 뜬다(`lib/server/server_runtime_bootstrap.ml:1576`). 다계정 엔진도 같은 길로 띄운다(`:1835`).
-- 큐레이터는 Librarian 기억 lane 을 `Exact.start_flow` 로 직접 부른다(`lib/server/server_workspace_memory_curator.ml:56`, `:280`). 주체 인자는 없고, slot 은 설치의 lane 표가 정한다. Draft #54088 은 큐레이터가 자기 표 `workspace_memory_curator` 로만 묻게 한다.
+- 큐레이터는 Librarian 기억 lane 을 `Exact.start_flow` 로 직접 부른다(`lib/server/server_workspace_memory_curator.ml:56`, `:280`). 주체 인자는 없고, slot 은 프로세스에 하나인 lane 표(registry)에서 푼다(`:37-38`). Draft #54088 은 큐레이터가 자기 표 `workspace_memory_curator` 로만 묻게 한다.
 - 분류 pass 는 lane 을 보기 전에 reconcile 을 돈다(`:624-666`). reconcile 은 모든 Keeper 의 저장소를 읽고, 사라진 사실이 있으면 원장과 바뀐 기록을 쓴다. 그래서 lane 표를 비워도 원장은 바뀐다.
 - reconcile 은 목록에 없는 Keeper 의 사실을 사라진 것으로 적는다(`vanished_keepers`, `lib/workspace_memory/workspace_memory_ledger.mli:161`).
 
@@ -376,6 +376,7 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
    단일 사용자에서도 같은 질문이다. 지금도 Keeper 들이 원장 하나를 같이 쓴다.
 7. **사람의 Keeper 사실을 누구의 provider 계정으로 큐레이트하나.** 지금 큐레이터는 설치의 lane slot 을 쓴다(§1.7).
    추천: 주인의 계정으로 한다. 엔진 RFC 는 곁에서 부르는 호출을 사람의 Keeper 에게 거절했다. 필요하면 「Librarian 을 주인의 계정으로 돌리는 규칙」을 둔다고 적었다(엔진 RFC 265행).
+   추천을 고르면 큐레이터 lane 을 주인마다 푸는 길이 L6 에 같이 든다. 지금 lane 표는 프로세스에 하나다.
    다른 안: 설치의 slot 으로 한다. 운영자가 비용을 내고, 운영자의 provider 가 사람의 사실을 받는다.
 
 ## 7. 층
@@ -389,7 +390,7 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 | L3 | 다계정 프로세스가 공개, 같이 쓰는 것, Keeper 의 것을 읽기로 연다. 자격 없는 접근은 공개만. Board 읽는 이는 보는 이에서 온다. Dashboard 가 범위로 화면을 고른다 | 구성원이 Board, task, goal 과 자기 Keeper 를 본다 |
 | L4 | Board RFC 를 고친 뒤 Board 의 principal 타입과 쓰기. 사람의 Keeper sandbox 에서 Board 파일을 뺀다 | 구성원이 Board 에 쓴다 |
 | L5 | Keeper 쓰기를 주인으로 연다. 중단, 대화, ask 답, 일정, 승인, 지시, run-next 다. 메시지와 `@` 는 같은 주인의 Keeper 에게만 간다 | 구성원이 자기 Keeper 를 Dashboard 에서 다룬다 |
-| L6 | 원장 폴더 함수가 주인을 받는다(원장, 바뀐 기록, briefing). 한 요청에 한 주인. 목록을 못 만든 pass 는 실패한다. 캐시 키, 알림, metric 을 주인마다 둔다. 결정 7 의 계정으로 큐레이트한다 | 다계정에서 큐레이터를 켤 수 있다 |
+| L6 | 원장 폴더 함수가 주인을 받는다(원장, 바뀐 기록, briefing). 한 요청에 한 주인. 목록을 못 만든 pass 는 실패한다. 캐시 키, 알림, metric 을 주인마다 둔다. 결정 7 의 계정으로 큐레이트한다. 주인의 계정이면 큐레이터 lane 을 주인마다 푼다 | 다계정에서 큐레이터를 켤 수 있다 |
 | L7 | 결정 2 를 따라 호스트의 것을 연다. 비밀값이 실리는 쓰기 응답을 고친다 | Admin 이 Dashboard 로 설정을 바꾼다 |
 
 - 「먼저」 줄은 다계정의 동작만 바꾼다. 큐레이터를 끈다.

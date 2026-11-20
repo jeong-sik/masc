@@ -237,9 +237,8 @@ type event =
      but it is the lane runtime's fact, not an agent's. *)
   | Lane_resource of lane_resource
   | Snapshot of projection
-  (* The execution snapshot: a backlog or goal index write, or the server's
-     periodic refresh. Readers of the Work surface and the Verification queue
-     read again on it. *)
+  (* The execution snapshot: the web's execution projection changed. The TUI
+     reads nothing on it; a task write reaches it as the Backlog dataset. *)
   | Execution_snapshot
   | Other of string
 

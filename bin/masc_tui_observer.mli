@@ -363,9 +363,10 @@ type event =
           ({!Masc.Dashboard_event_slices}) rather than a list here, because
           the list here had drifted by two. *)
   | Execution_snapshot
-      (** [execution_snapshot]: a backlog or goal index write, or the
-          server's periodic refresh. The Work surface and the Verification
-          queue read again on it. *)
+      (** [execution_snapshot]: the web's execution projection changed. The
+          TUI reads nothing on it. A task write reaches the TUI as the
+          {!Masc.Workspace_dataset_event.Backlog} dataset, which the Work
+          surface and the Verification queue read again on. *)
   | Other of string  (** A [type] this build was not taught, by name. *)
 
 (** One decoded frame. A frame that is not an event this build can read is
@@ -435,7 +436,9 @@ val dataset_owed : event -> Masc.Workspace_dataset_event.dataset option
 (** The workspace dataset a push owes a read: the dataset it names as
     written, or the verification requests when the verification run registry
     their rows read changed. The goal-verification and exact-lane registries
-    owe nothing. A backlog commit arrives as {!Execution_snapshot}. *)
+    owe nothing. A backlog commit owes
+    {!Masc.Workspace_dataset_event.Backlog}; {!Execution_snapshot} owes
+    nothing. *)
 
 val gate_connector_changed : event -> bool
 (** [true] for {!Gate_connector_changed}. The Connectors list and a Keeper's

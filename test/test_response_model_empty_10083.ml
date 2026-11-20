@@ -71,6 +71,7 @@ let make_telemetry ?canonical_model_id () : Agent_core.Types.inference_telemetry
   ; inline_content_replay = None
   ; response_replay = None
   ; effective_context_window = None
+  ; cache_write_lifetime = None
   ; provider_internal_action_count = None
   ; ttfrc_ms = None
   ; prefill_ms = None

@@ -251,6 +251,7 @@ let patch_telemetry
   let model = if String.trim resp.model = "" then config.model_id else resp.model in
   let caps, capability_source = resolve_capabilities_for_config config in
   let ctx_window = Provider_config.context_window config in
+  let cache_write_lifetime = Some (Provider_config.cache_write_lifetime config) in
   let canonical = Some config.model_id in
   let reasoning_source =
     match Reasoning_dialect.reasoning_source_for_provider_config config with
@@ -269,6 +270,7 @@ let patch_telemetry
         ; reasoning_source
         ; reasoning_prefix
         ; effective_context_window = ctx_window
+        ; cache_write_lifetime
         ; ttfrc_ms =
             (match ttfrc_ms with
              | Some _ as v -> v
@@ -287,6 +289,7 @@ let patch_telemetry
         ; reasoning_source
         ; reasoning_prefix
         ; effective_context_window = ctx_window
+        ; cache_write_lifetime
         ; ttfrc_ms
         ; prefill_ms
         }

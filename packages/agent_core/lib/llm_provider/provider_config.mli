@@ -352,13 +352,18 @@ val provider_reference : t -> Model_catalog.provider_reference
     including [None]. *)
 val capabilities_for_config_model : t -> Capabilities.capabilities option
 
+val cache_write_lifetime : t -> Types.cache_write_lifetime
+(** The lifetime this request's cache writes keep: [One_hour] when
+    [cache_extended_ttl] is set (the Anthropic body then writes [ttl = "1h"]
+    on every breakpoint), otherwise [Provider_default]. Pricing
+    ({!pricing_source}) and the response telemetry both read it here. *)
+
 val pricing_source : t -> Pricing.source
 (** Read request-owned price authority from a matching policy snapshot. An
     unfrozen config resolves its first source from the current catalog; request
     preparation freezes it before dispatch. Endpoint changes retain authority;
     provider/kind/model changes invalidate the old request snapshot. The
-    source prices cache writes at one hour when [cache_extended_ttl] is set,
-    the lifetime the request body asks for. *)
+    source prices cache writes at {!cache_write_lifetime}. *)
 
 type capability_source = Model_capability | Provider_default_capability
 

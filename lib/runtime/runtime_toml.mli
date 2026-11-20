@@ -1,8 +1,6 @@
-(** Declarative Runtime TOML parser (RFC-0206, runtime→Runtime rebirth).
+(** Declarative Runtime TOML parser.
 
-    Parses only
-    RFC-0058 layers 1-3 plus [\[runtime\].default] into a self-standing
-    {!Runtime_schema.config}:
+    Parses these tables into a self-standing {!Runtime_schema.config}:
 
     - [\[providers.*\]] — Layer 1; unknown provider fields are rejected with
       their full TOML path

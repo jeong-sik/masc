@@ -1,4 +1,4 @@
-(** Self-standing Runtime configuration types (RFC-0206, runtime→Runtime rebirth).
+(** Self-standing Runtime configuration types.
 
     Provider × Model × Binding declarative schema,
     as types owned by

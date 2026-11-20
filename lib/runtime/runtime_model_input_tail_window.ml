@@ -1,5 +1,5 @@
 (** Bounded transmission view over provider-bound history — see the
-    interface for the contract (RFC-0351 §3 L5, #26534 PR-C, #26535, #26551). *)
+    interface for the contract (#26535, #26551). *)
 
 let atoms_per_window = 60
 let preamble_marker_key = "masc.model_input_tail_window.v1"

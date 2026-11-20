@@ -1,11 +1,10 @@
-(** Self-standing Runtime configuration types (RFC-0206, runtime→Runtime rebirth).
+(** Self-standing Runtime configuration types.
 
-    Provider × Model × Binding declarative schema (RFC-0058 layers 1-3),
-    as types owned by
-    [lib/runtime/]. The routing layers (RFC-0058 layer 4 aliases, layer 5
-    routes/profiles, and the strategy ADT) are intentionally NOT modelled: a
-    Runtime is a single pre-selected (provider × model) binding, so there is
-    no routing indirection to model. *)
+    Provider × Model × Binding declarative schema, as types owned by
+    [lib/runtime/]. The routing layers (aliases, routes/profiles, and the
+    strategy ADT) are intentionally NOT modelled: a Runtime is a single
+    pre-selected (provider × model) binding, so there is no routing
+    indirection to model. *)
 
 (** {1 API format & transport} *)
 
@@ -316,8 +315,7 @@ let model_capabilities_default =
 ;;
 
 (** [models.<id>] — capability declaration. A requested model id resolves by
-    exact [api_name] equality. RFC-0206 R4 forbids porting the longest-prefix
-    matcher until a binding actually requires fuzzy resolution. *)
+    exact [api_name] equality; there is no longest-prefix matcher. *)
 type model_spec =
   { id : string
   ; api_name : string

@@ -207,6 +207,29 @@ let fork_job ?(observation = false) ?kind ?key ?on_withdrawn ?observe state
   Masc_tui_workspace_job.fork ~observation ?key ?on_withdrawn ?observe state ~sw
     (fun () -> in_scope run)
 
+(* A read of the screen that is open is on the wire from its launch until its
+   result is formed, it never ran, or its job is released. The reading slot
+   counts it meanwhile (RFC tui-one-screen-grammar section 8). Each of those
+   ends goes through the one function [reading_begin] returns, and that
+   function ignores every end after the first, so a read that reports two
+   ends counts once. The job release is the end of a read that was cancelled
+   and published no result. *)
+let track_reading (state : Masc_tui_types.state) ~on_not_run ~deliver =
+  let settle = Masc_tui_types.reading_begin state in
+  let on_not_run () =
+    settle ~ok:false;
+    on_not_run ()
+  in
+  let deliver result =
+    settle ~ok:(Result.is_ok result);
+    deliver result
+  in
+  let released = function
+    | Masc_tui_workspace_job.Registration_released -> settle ~ok:false
+    | Masc_tui_workspace_job.Cancellation_requested -> ()
+  in
+  (on_not_run, deliver, released)
+
 let launch_result ?key ?(operation = false) ?(observation = false) ?cancelled
     ?cancelled_by ?observe_job ?(on_not_run = fun () -> ()) ?withdrawn state
     ~mailbox ~boundary_error ~deliver perform =
@@ -222,10 +245,19 @@ let launch_result ?key ?(operation = false) ?(observation = false) ?cancelled
     capture_scope_runner ~kind:(workspace_scope_kind ~operation) ?withdrawn state
       ~mailbox ~boundary_error
   in
+  let deliver result = scoped (deliver result) in
+  (* An operation changes something on the server; only a read is counted. *)
+  let on_not_run, deliver, released =
+    if operation then (on_not_run, deliver, fun (_ : Masc_tui_workspace_job.event) -> ())
+    else track_reading state ~on_not_run ~deliver
+  in
+  let observe_job event =
+    released event;
+    Option.iter (fun observe -> observe event) observe_job
+  in
   Masc_tui_workspace_result.launch ?key ~observation ?cancelled ?cancelled_by
-    ?observe_job ~on_not_run state ~results:mailbox.workspace_results
-    ~boundary_error ~deliver:(fun result -> scoped (deliver result))
-    (fun () -> in_scope perform)
+    ~observe_job ~on_not_run state ~results:mailbox.workspace_results
+    ~boundary_error ~deliver (fun () -> in_scope perform)
 
 let launch_session state ~mailbox ~boundary_error ~deliver perform =
   let in_scope =
@@ -241,7 +273,16 @@ let launch_observation ?key ?observe_job ?on_not_run state ~mailbox
     capture_scope_runner ~kind:Masc_tui_workspace_precondition.Observation state
       ~mailbox ~boundary_error
   in
-  Masc_tui_workspace_result.launch_observation ?key ?observe_job ?on_not_run
+  let on_not_run, deliver, released =
+    track_reading state
+      ~on_not_run:(fun () -> Option.iter (fun release -> release ()) on_not_run)
+      ~deliver
+  in
+  let observe_job event =
+    released event;
+    Option.iter (fun observe -> observe event) observe_job
+  in
+  Masc_tui_workspace_result.launch_observation ?key ~observe_job ~on_not_run
     state ~results:mailbox.workspace_results ~boundary_error ~not_started
     ~cancelled ~progress ~deliver (fun publish ->
       in_scope (fun () -> perform publish))
@@ -252,7 +293,12 @@ let launch_async_read ?source ?on_not_run state ~mailbox ~deliver read =
       ~mailbox ~withdrawn:(fun (_ : Masc_tui_types.workspace_refusal) ->
         Error workspace_scope_refused_english)
   in
-  Masc_tui_async_read.launch ?source ?on_not_run ~deliver (fun () -> in_scope read)
+  let on_not_run, deliver, _released =
+    track_reading state
+      ~on_not_run:(fun () -> Option.iter (fun release -> release ()) on_not_run)
+      ~deliver
+  in
+  Masc_tui_async_read.launch ?source ~on_not_run ~deliver (fun () -> in_scope read)
 
 let launch_async_read_with ?on_not_run ?withdrawn state ~mailbox
     ~boundary_error ~deliver read =
@@ -260,7 +306,12 @@ let launch_async_read_with ?on_not_run ?withdrawn state ~mailbox
     capture_scope_runner ~kind:Masc_tui_workspace_precondition.Observation
       ?withdrawn state ~mailbox ~boundary_error
   in
-  Masc_tui_async_read.launch_with ?on_not_run ~boundary_error ~deliver
+  let on_not_run, deliver, _released =
+    track_reading state
+      ~on_not_run:(fun () -> Option.iter (fun release -> release ()) on_not_run)
+      ~deliver
+  in
+  Masc_tui_async_read.launch_with ~on_not_run ~boundary_error ~deliver
     (fun () -> in_scope read)
 
 let launch_async_read_pair state ~mailbox ~boundary_error ~withdrawn

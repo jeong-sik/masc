@@ -8826,7 +8826,13 @@ let start_http_refresh ~server_contact state ~host ~port ~intent ~refresh_inflig
           Masc_tui_transport.Workspace_admission.enqueue mailbox (Http_msg (Http_keeper_roster_loaded
             {er_ticket=refresh_ticket;er_authority=(!requests).hrr_authority;er_identity;er_observation})))
       else None in
+    (* The slot counts the whole pass. It ends before the answer is queued, so
+       the pass that applies the answer already finds it over; the [finally]
+       ends it when the worker is cancelled and queues no answer. *)
+    let settle_reading = Masc_tui_types.reading_begin state in
     let run_refresh () =
+      Fun.protect ~finally:(fun () -> settle_reading ~ok:false) (fun () ->
+      let failed = ref false in
       let completed = try
           Masc_tui_credential_preparation.await_initial state.credential_preparation;
           Http_msg (Http_refresh_done
@@ -8837,11 +8843,14 @@ let start_http_refresh ~server_contact state ~host ~port ~intent ~refresh_inflig
                 ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Http_msg (Http_refresh_failed
-          (Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn),
-           (!requests).hrr_approval, refresh_ticket))
+      | exn ->
+          failed := true;
+          Http_msg (Http_refresh_failed
+            (Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn),
+             (!requests).hrr_approval, refresh_ticket))
       in
-      Masc_tui_transport.Workspace_admission.enqueue mailbox (Http_surface_read_completed ((!requests).hrr_surfaces, completed))
+      settle_reading ~ok:(not !failed);
+      Masc_tui_transport.Workspace_admission.enqueue mailbox (Http_surface_read_completed ((!requests).hrr_surfaces, completed)))
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
@@ -8849,6 +8858,7 @@ let start_http_refresh ~server_contact state ~host ~port ~intent ~refresh_inflig
     | None ->
         Fun.protect
           ~finally:(fun () ->
+            settle_reading ~ok:false;
             refresh_inflight := false;
             Masc_tui_types.finish_http_surface_read state surface_request;
             Masc_tui_transport.Http_surface_collector.finish_observed_refresh state ~ticket:refresh_ticket)
@@ -8859,7 +8869,8 @@ let start_http_refresh ~server_contact state ~host ~port ~intent ~refresh_inflig
                   ~refresh_ticket ~host ~port ~approval_ticket
                   ~board_query
                 ~provider_history_days ~tool_series_days
-                ~needs));
+                ~needs);
+             settle_reading ~ok:true);
         log_http_surface_read_finished state surface_context
   end
 
@@ -16951,7 +16962,15 @@ let drain_async_messages ~server_contact ?deadline_ns ?(input_pending = fun () -
     if not (share_input_pending ()) then
       announce_retired_skill_image state
     else false in
-  let changed = changed || retired_image_changed in
+  (* The slot is no reader's view, so an answer that drew the same rows can
+     still have ended the last slow read. The pass owes the frame that turns
+     the slot off (RFC tui-one-screen-grammar section 8). *)
+  let reading_changed =
+    match Masc_tui_types.step_reading_slot state ~now:(Masc_tui_wake.Mono.now ()) with
+    | Drawn_changed -> true
+    | Drawn_unchanged -> false
+  in
+  let changed = changed || retired_image_changed || reading_changed in
   match state.resource_copy_ready with
   | Some copy when !copy_sweep_complete && not (share_input_pending ()) && not (over_budget ()) ->
     if not (Masc_tui_resources_control.Artifact_share_control.resource_public_copy_is_current state copy) then begin

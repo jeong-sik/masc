@@ -1,5 +1,4 @@
-(** See {!Keeper_vision_ingest} (.mli) for the contract and design trail
-    (RFC-keeper-vision-delegation-tool §2.3). *)
+(** See {!Keeper_vision_ingest} (.mli) for the contract and design trail. *)
 
 module Store = Multimodal.Vision_artifact_store
 
@@ -51,7 +50,7 @@ let record_eviction ?base_path ~keeper_name ~mode ~result ~reason () =
      The pipeline counter above keeps its mode/result/reason shape; this one
      answers "whose images failed and why" in a single lookup per reason. The
      Keeper's memory health row shows it, so the workspace whose vision store
-     this eviction uses is told (RFC-0487). *)
+     this eviction uses is told. *)
   if String.equal result "error"
   then (
     Otel_metric_store.inc_counter
@@ -158,7 +157,7 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
   | Agent_core.Types.Image { media_type; source } ->
     (match source with
      | Agent_core.Types.Url _ | Agent_core.Types.File_id _ ->
-       (* RFC-0430 / #33682: a reference carrier is not an eviction target.
+       (* #33682: a reference carrier is not an eviction target.
           Evict exists to trade the heavy inline payload for a local artifact
           handle; a URL or Files-API id costs a few dozen bytes of context,
           and the serializers put both on the wire in their native forms

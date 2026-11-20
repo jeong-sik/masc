@@ -39,13 +39,13 @@ let keeper_toml_fields =
   ; "telemetry_feedback_window_hours", Field_int
   ; "always_allow", Field_bool
   ; "voice_always_allow", Field_bool
-    (* RFC-0390. The [keeper.tools] key is declared, so any
+    (* The [keeper.tools] key is declared, so any
        other key in that table is unknown and fails the load rather than
        being a silently ignored sibling. A prefix rule would accept
        [tools.nativ] and leave the runtime on its default posture without a
        word, which is what naming them here prevents. *)
   ; "tools.native", Field_string
-    (* RFC-0403. Sits in the same [keeper.tools] table as [tools.native] and
+    (* Sits in the same [keeper.tools] table as [tools.native] and
        is declared for the same reason: an unlisted sibling fails the load
        rather than being read as no selection at all. *)
   ; "tools.attached_allow", Field_string_array
@@ -283,7 +283,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           "microvm_backend_requires_microvm: keeper.microvm_backend is only \
            valid with sandbox_profile = \"microvm\""
   in
-  (* RFC-0422 §3.4: [observation_run] chooses the box a tool_execute runs in
+  (* [observation_run] chooses the box a tool_execute runs in
      before the judge is asked. The spelling is checked whether or not a
      profile is declared; the profile pairing
      ({!Keeper_types_profile_sandbox.observation_run_rejection}) only when

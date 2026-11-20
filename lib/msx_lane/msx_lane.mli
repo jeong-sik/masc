@@ -102,7 +102,10 @@ type error =
           resolved BIOS directory is [Unreadable] ([read_bios]), because the
           caller named the directory, not the file. A directory the server
           itself supplies through the machine's environment is not a caller
-          argument, so its failures are not judged by this contract. *)
+          argument, so its failures are not judged by this contract. The
+          BIOS inventory directory the server itself finds on disk does not
+          share that exemption -- it takes the same check as a caller-named
+          [roms_dir], so this contract judges it too. *)
   | Effect_unknown of string  (** replacement happened; durable effect is unknown *)
   | Unreadable of string
       (** a file that is there and will not read: a ROM, a cartridge, a
@@ -378,7 +381,7 @@ val peek : address:Address.t -> length:int -> (string, error) result
 (** Reads [length] (1..{!peek_max_bytes}) bytes starting at [address] as hex
     pairs, and takes a full 64K snapshot of the machine for the next
     {!ram_diff}. The range must end inside the address space. Read-only:
-    writing is the cheat the lane refuses (RFC-0439). *)
+    writing is the cheat the lane refuses. *)
 
 val ram_diff : unit -> (ram_diff, error) result
 (** Changes since the last {!peek}: consecutive differing bytes as runs with

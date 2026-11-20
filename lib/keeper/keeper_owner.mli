@@ -621,14 +621,6 @@ val run_next_operation : ?priority_predecessors:Chat_operation.Operation_id.t li
     explicit run-next's absolute-front behavior. An operator pause can refuse
     the request; invalid or unavailable queued operations return an error. *)
 
-val interrupt_running_operation
-  :  t
-  -> Chat_operation.Operation_id.t
-  -> (operation_interrupt_result, error) result
-(** Signal only when this exact operation still owns the running child: the
-    slot holder must be on the chat-operation lane and the durable running id
-    must equal the requested one. *)
-
 val submit_operation
   :  t
   -> operation_id:Chat_operation.Operation_id.t

@@ -6,6 +6,21 @@ type t =
   | Gemini_generate_content
   | Glm_chat
 
+let anthropic_messages = Anthropic_messages
+let openai_chat = Openai_chat
+let openai_responses = Openai_responses
+let ollama_chat = Ollama_chat
+let gemini_generate_content = Gemini_generate_content
+let glm_chat = Glm_chat
+
+let output_token_envelope = function
+  | Anthropic_messages -> Types.Anthropic_messages_max_tokens
+  | Openai_chat | Glm_chat -> Types.Openai_chat_max_tokens
+  | Openai_responses -> Types.Openai_responses_max_output_tokens
+  | Ollama_chat -> Types.Ollama_options_num_predict
+  | Gemini_generate_content -> Types.Gemini_generation_config_max_output_tokens
+;;
+
 type json_schema_wire =
   | Raw_schema
   | Openai_named_schema

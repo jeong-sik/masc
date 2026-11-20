@@ -16,7 +16,7 @@ type canonical_source =
   | Source_is_other of Keeper_checkpoint_ref.t
 
 (* RFC-0225 §3.2 admission: the reference is the content digest, which the
-   head gives without a message object read (RFC-0476 §3.2), and its session
+   head gives without a message object read, and its session
    and turn are the head's. The head is read and parsed under the lock every
    time, so a file rewritten in place under the summary's identity (#43575)
    cannot pass for the expected source. A head that does not parse refuses
@@ -80,8 +80,8 @@ let with_checkpoint_cas_lock ~session_dir f =
       (fun () -> f session_dir)
     |> installation_of_lock_observation
 
-(* A plan's layout follows the canonical as it is when the plan is made
-   (RFC-0476 §3.3), and writes again what that head names but the session
+(* A plan's layout follows the canonical as it is when the plan is made,
+   and writes again what that head names but the session
    does not hold. Objects are not removed while a head names them, so the
    plan stays valid when the canonical moves before a lock is taken; the
    source check under the lock decides whether it is installed. A canonical

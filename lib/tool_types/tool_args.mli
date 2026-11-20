@@ -58,7 +58,7 @@ type error_code =
   | Internal_error        (** Unexpected server-side failure. *)
   | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound). *)
   | Unavailable
-      (** A store this build cannot read (RFC-0444: the goal store); wire
+      (** A store this build cannot read (the goal store); wire
           token [goal_store_unavailable]. The envelope names reason, field,
           file, mirror and reset step. *)
 

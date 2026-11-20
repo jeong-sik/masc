@@ -1,5 +1,4 @@
 (** Content-addressed durable store for input images.
-    RFC-keeper-vision-delegation-tool §2.5.
 
     Image bytes are written to a content-addressed file under a store directory;
     the handle is the content hash — a plain string that survives JSON and

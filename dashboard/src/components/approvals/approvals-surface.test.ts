@@ -130,10 +130,6 @@ function responseWithQueue(
     recent_resolved_state,
     approval_rules,
     approval_rules_state,
-    keeper_modes: [],
-    keeper_modes_state: { state: 'ready' },
-    keeper_exact_lanes: [],
-    keeper_exact_lanes_state: { state: 'ready' },
     hitl,
     ...extra,
   } as DashboardGateResponse
@@ -1868,80 +1864,6 @@ describe('ApprovalsSurface', () => {
       expect(el.tagName).toBe('BUTTON')
       expect(el.textContent).not.toContain('nonblocking')
     }
-  })
-
-  it('shows which Keepers were singled out', async () => {
-    const { ApprovalsSurface } = await loadSurface([], [], [], undefined, undefined, undefined, undefined, undefined, undefined, {
-      keeper_modes: [
-        {
-          keeper_name: 'exampleorg',
-          mode: 'manual',
-          updated_by: 'vincent',
-          updated_at: '2026-08-27T05:00:00Z',
-        },
-      ],
-      keeper_exact_lanes: [
-        {
-          keeper_name: 'exampleorg',
-          lane_id: 'hitl_auto_judge',
-          slot_id: 'glm-coding.glm-5-turbo',
-          updated_by: 'vincent',
-          updated_at: '2026-08-27T05:00:00Z',
-          offered: true,
-        },
-        {
-          keeper_name: 'exampleorg',
-          lane_id: 'librarian_exact',
-          slot_id: 'removed.slot',
-          updated_by: 'vincent',
-          updated_at: '2026-08-27T05:00:00Z',
-          offered: false,
-        },
-      ],
-    })
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    const modeRows = container.querySelectorAll('[data-testid="keeper-mode-row"]')
-    expect(modeRows.length).toBe(1)
-    expect(modeRows[0]?.textContent).toContain('exampleorg')
-    // The label an operator picked in the mode control, not the wire value.
-    expect(modeRows[0]?.textContent).toContain('Human')
-    const exactLaneRows = container.querySelectorAll('[data-testid="keeper-exact-lane-row"]')
-    expect(exactLaneRows.length).toBe(2)
-    expect(exactLaneRows[0]?.textContent).toContain('hitl_auto_judge')
-    expect(exactLaneRows[0]?.textContent).toContain('glm-coding.glm-5-turbo')
-    expect(exactLaneRows[0]?.textContent).not.toContain('레인에 없음')
-    // A preference the lane no longer offers has no effect; the row says so.
-    expect(exactLaneRows[1]?.textContent).toContain('removed.slot')
-    expect(exactLaneRows[1]?.textContent).toContain('레인에 없음')
-  })
-
-  it('says nobody was singled out rather than showing nothing', async () => {
-    const { ApprovalsSurface } = await loadSurface([], [], [])
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    expect(container.querySelector('[data-testid="keeper-gate-settings"]')?.textContent)
-      .toContain('모드를 따로 정한 Keeper 없음')
-  })
-
-  it('reports an unreadable override file instead of an empty list', async () => {
-    // Empty means nobody was singled out, which is a working configuration. A
-    // file that could not be read must not be able to look like one.
-    const { ApprovalsSurface } = await loadSurface([], [], [], undefined, undefined, undefined, undefined, undefined, undefined, {
-      keeper_modes: [],
-      keeper_modes_state: { state: 'unavailable', error: 'overrides unreadable' },
-    })
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    const warn = container.querySelector('[data-testid="keeper-modes-unavailable"]')
-    expect(warn?.textContent).toContain('overrides unreadable')
-    expect(container.querySelectorAll('[data-testid="keeper-mode-row"]').length).toBe(0)
   })
 
 })

@@ -259,7 +259,7 @@ let insert_or_reobserve current_facts (incoming : Keeper_memory_os_types.fact) =
               origin (an injected copy re-observed must not repaint an
               authored row) and refresh the observation time. Nothing is
               counted: seeing the same bytes again says nothing about the
-              fact's worth (RFC-0418). *)
+              fact's worth. *)
            { incoming with
              first_seen = existing.first_seen
            ; last_seen = Float.max existing.last_seen incoming.last_seen

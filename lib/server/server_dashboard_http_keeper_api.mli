@@ -43,8 +43,8 @@ val handle_keeper_operator_note_post :
   Mcp_server.server_state ->
   string ->
   Httpun.Request.t -> Http_reqd.t -> string -> unit
-(** Handle [POST /operator-note] by replacing this keeper's pending note
-    (RFC-0366). The note renders on the next turn that assembles and is then
+(** Handle [POST /operator-note] by replacing this keeper's pending note.
+    The note renders on the next turn that assembles and is then
     stamped consumed; oversized text is rejected rather than truncated. *)
 
 val handle_keeper_board_attention_quarantine_recovery_post :

@@ -453,7 +453,7 @@ function toolCallEntryMatchesTraceEvent(
   if (event.kind !== 'tool_call' || !event.toolName) return false
   if (event.gate?.status === 'reject') return false
 
-  // RFC-0233: when both sides carry the canonical execution_id, identity
+  // When both sides carry the canonical execution_id, identity
   // equality is the whole answer — the heuristic below only exists for
   // rows written before the id was minted (no backfill by design).
   if (entry.execution_id && event.executionId) {
@@ -578,7 +578,7 @@ function richerToolCallMatchesFallback(
 ): boolean {
   if (richer.kind !== 'tool_call' || fallback.kind !== 'tool_call') return false
 
-  // RFC-0233: canonical identity decides when both rows carry it.
+  // Canonical identity decides when both rows carry it.
   if (richer.executionId && fallback.executionId) {
     return richer.executionId === fallback.executionId
   }

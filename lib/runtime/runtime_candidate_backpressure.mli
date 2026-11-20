@@ -2,12 +2,12 @@
 
     A coarse HTTP 429 / provider rate limit names no credential scope, so it
     is held by the attempted runtime alone and read as ordering evidence by
-    the lane walk (RFC-0370 §3.3, RFC-0433): a candidate under backpressure
+    the lane walk: a candidate under backpressure
     is demoted behind its lane siblings, never excluded. An Exact-output walk
     also holds a candidate inside its own usable Retry-After, a time the
     provider stated, and returns it as held (RFC-exact-lane-waits-for-a-stated-reset). A server error,
     provider capacity refusal, network failure or timeout is held the same way until the candidate
-    answers (RFC-0458 §3.4). The observation cell lives on the materialized
+    answers. The observation cell lives on the materialized
     runtime; frozen attempts retain the same cell, and the runtime catalog
     owns its lifetime. *)
 

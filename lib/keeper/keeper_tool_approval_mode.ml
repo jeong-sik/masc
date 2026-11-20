@@ -59,18 +59,23 @@ let overrides t = (Atomic.get t.state).overrides
 let last_restore_error t = (Atomic.get t.state).restore_error
 
 (* One row per keeper an operator has moved off [Auto]. [actor] and
-   [changed_at] share the [Keeper_gate_mode] override row codec: the file
-   is small, so it doubles as the change record. *)
-type 'mode override_row_t = 'mode Keeper_gate_mode.override_row_t =
+   [changed_at] ride in the row: the file is small, so it doubles as the
+   change record. *)
+type override_row =
   { keeper_name : string
-  ; mode : 'mode
+  ; mode : mode
   ; actor : string
   ; changed_at : string
   }
 
-type override_row = mode override_row_t
-
-let override_row_json o = Keeper_gate_mode.override_row_to_json mode_to_string o
+let override_row_json o =
+  `Assoc
+    [ "keeper_name", `String o.keeper_name
+    ; "mode", `String (mode_to_string o.mode)
+    ; "updated_by", `String o.actor
+    ; "updated_at", `String o.changed_at
+    ]
+;;
 
 let parse_mode_json = function
   | `String raw ->
@@ -84,11 +89,43 @@ let parse_mode_json = function
   | _ -> Error "tool approval mode override mode must be a string"
 ;;
 
-let override_row_of_json json =
-  Keeper_gate_mode.override_row_of_json
-    ~label:"tool approval mode override"
-    ~parse_mode:parse_mode_json
-    json
+let override_row_of_json = function
+  | `Assoc fields ->
+    let string_field key =
+      match List.assoc_opt key fields with
+      | Some (`String value) when String.trim value <> "" -> Ok value
+      | Some _ | None ->
+        Error (Printf.sprintf "tool approval mode override is missing %s" key)
+    in
+    (match string_field "keeper_name" with
+     | Error detail -> Error detail
+     | Ok keeper_name ->
+       (match List.assoc_opt "mode" fields with
+        | None -> Error "tool approval mode override is missing mode"
+        | Some mode ->
+          (match parse_mode_json mode with
+           | Error detail -> Error detail
+           | Ok mode ->
+             let or_unknown = function Ok value -> value | Error _ -> "" in
+             Ok
+               { keeper_name
+               ; mode
+               ; actor = or_unknown (string_field "updated_by")
+               ; changed_at = or_unknown (string_field "updated_at")
+               })))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error "tool approval mode override must be an object"
+;;
+
+let override_rows_of_json_list rows =
+  List.fold_left
+    (fun acc row ->
+      match acc, override_row_of_json row with
+      | Error detail, _ -> Error detail
+      | Ok _, Error detail -> Error detail
+      | Ok kept, Ok parsed -> Ok (parsed :: kept))
+    (Ok []) rows
+  |> Result.map List.rev
 ;;
 
 let file_schema = "masc.tool_approval_modes.v1"
@@ -107,9 +144,7 @@ let rows_of_file_json = function
        (match List.assoc_opt "overrides" fields with
         | None -> Error "tool approval mode store is missing overrides"
         | Some (`List rows) ->
-          Keeper_gate_mode.override_rows_of_json_list
-            ~decode_row:override_row_of_json
-            rows
+          override_rows_of_json_list rows
         | Some _ -> Error "tool approval mode overrides must be a list")
      | Some (`String tag) ->
        Error
@@ -123,8 +158,7 @@ let rows_of_file_json = function
 
 (* An unreadable store is an error rather than an empty list. Reading it as
    "nobody was singled out" would silently fall back to the stricter [Auto]
-   default without distinguishing a broken store from an empty one (same rule
-   as [Keeper_gate_mode.keeper_overrides]). *)
+   default without distinguishing a broken store from an empty one. *)
 let keeper_overrides ~base_path =
   let file = Keeper_gate_path.tool_approval_modes ~base_path in
   if not (Sys.file_exists file)
@@ -186,18 +220,18 @@ let set t ~base_path ~actor ~keeper_name mode =
           Error returned_error
         | Ok rows ->
           let changed_at = Masc_domain.now_iso () in
-          let mode_opt =
-            match mode with
-            | Auto -> None
-            | Yolo -> Some Yolo
-          in
+          (* [Auto] removes the row rather than storing it: the file is then
+             also the list of keepers an operator has actually moved, and a
+             screen showing it does not have to filter. *)
           let rows =
-            Keeper_gate_mode.upsert_override_row
-              ~keeper_name
-              ~actor
-              ~changed_at
-              mode_opt
-              rows
+            let without =
+              List.filter
+                (fun o -> not (String.equal o.keeper_name keeper_name))
+                rows
+            in
+            match mode with
+            | Auto -> without
+            | Yolo -> without @ [ { keeper_name; mode = Yolo; actor; changed_at } ]
           in
           (match
              try

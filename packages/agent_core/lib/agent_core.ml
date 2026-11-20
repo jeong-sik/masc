@@ -109,7 +109,6 @@ module Otel_tracer = Otel_tracer
 module Otel_export = Otel_export
 module Runtime = Runtime
 module Sessions = Sessions
-module Harness = Harness
 module Trajectory = Trajectory
 module Metrics = Metrics
 module Async_agent = Async_agent

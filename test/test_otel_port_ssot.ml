@@ -1,4 +1,4 @@
-(* RFC-0089 — OTLP port SSOT. [Otel_spans.probe_endpoint] resolves the OTLP
+(* OTLP port SSOT. [Otel_spans.probe_endpoint] resolves the OTLP
    port via [port_of_uri], which falls back to
    [Masc_network_defaults.otel_default_port] instead of inlining 4318 (which
    would silently diverge if the configured default were tuned). *)

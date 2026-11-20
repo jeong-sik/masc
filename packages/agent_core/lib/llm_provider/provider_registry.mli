@@ -79,15 +79,8 @@ val default : unit -> t
     separately by the explicit registry/catalog binding. *)
 val provider_name_of_config : Provider_config.t -> string
 
-(** Pick the next llama endpoint via round-robin.
-    After [refresh_llama_endpoints], rotates across healthy declared endpoints.
-    Returns [None] until a typed refresh succeeds.
-    @since 0.78.0 *)
-val next_llama_endpoint : unit -> Discovery.endpoint option
-
-(** Peek at the current llama endpoint without advancing the round-robin.
-    Returns the endpoint that [next_llama_endpoint] will return on its
-    next call, but without the [fetch_and_add] side effect.
+(** The first healthy endpoint of the last successful
+    [refresh_llama_endpoints].
     Returns [None] when no typed endpoint declaration has been activated.
     @since 0.100.8 *)
 val current_llama_endpoint : unit -> Discovery.endpoint option

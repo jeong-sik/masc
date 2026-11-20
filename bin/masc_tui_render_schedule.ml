@@ -65,18 +65,14 @@ let take ~input_pending schedule ~now_ns =
 let completed schedule ~now_ns =
   schedule.last_completed_at_ns <- Some now_ns
 
-let input_timeout_seconds schedule ~now_ns ~maximum =
-  let maximum = max 0.0 maximum in
+let frame_due_ns schedule ~now_ns =
   match schedule.pending with
-  | None -> maximum
-  | Some (Force | Input) -> 0.0
+  | None -> None
+  | Some (Force | Input) -> Some now_ns
   | Some Background ->
     (match deadline ~after_work:false schedule with
-     | None -> 0.0
-     | Some due ->
-       let remaining_ns = Int64.sub due now_ns in
-       if Int64.compare remaining_ns 0L <= 0 then 0.0
-       else min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0))
+     | None -> Some now_ns
+     | Some due -> Some (if Int64.compare due now_ns < 0 then now_ns else due))
 
 (* The shared clamp, not a second copy of it. This was written out here --
    the floor on both inputs, the maximum, the clamp -- and read the same as
@@ -122,20 +118,23 @@ module Input_wait = struct
   let nanoseconds_per_second = 1_000_000_000.0
 
   let await ~now_ns ~timeout_ns ~poll =
-    if Int64.compare timeout_ns 0L < 0 then
-      invalid_arg "input wait must be non-negative";
-    let deadline_ns = Int64.add (now_ns ()) timeout_ns in
+    Option.iter (fun timeout_ns ->
+      if Int64.compare timeout_ns 0L < 0 then
+        invalid_arg "input wait must be non-negative") timeout_ns;
+    let deadline_ns = Option.map (Int64.add (now_ns ())) timeout_ns in
     let rec loop () =
-      let remaining_ns = Int64.sub deadline_ns (now_ns ()) in
-      let remaining_seconds =
+      let remaining_seconds = Option.map (fun deadline_ns ->
+        let remaining_ns = Int64.sub deadline_ns (now_ns ()) in
         if Int64.compare remaining_ns 0L <= 0 then 0.0
-        else Int64.to_float remaining_ns /. nanoseconds_per_second
+        else Int64.to_float remaining_ns /. nanoseconds_per_second) deadline_ns
       in
       match poll remaining_seconds with
       | Ready value -> Some value
       | Timed_out -> None
       | Interrupted ->
-          if Int64.compare (now_ns ()) deadline_ns >= 0 then None else loop ()
+          (match deadline_ns with
+           | Some deadline_ns when Int64.compare (now_ns ()) deadline_ns >= 0 -> None
+           | Some _ | None -> loop ())
     in
     loop ()
 end
@@ -197,7 +196,7 @@ end
    that hold identifiers worth reading whole -- the keeper's name first, then
    the runtime it is on -- before it goes to the task id and secondary badges. *)
 
-let keeper_marker_width = 3
+let keeper_marker_width = 2
 let keeper_status_width = 12
 
 (* The flag cell is two one-cell letters: an activation letter under "Mode" and
@@ -311,32 +310,33 @@ type waiting_group_layout = {
   segment_count : int;
 }
 
-let waiting_group_parts ~compact (summary : Masc_tui_keeper_list_model.waiting_summary) =
+let waiting_group_parts ~ko ~compact (summary : Masc_tui_keeper_list_model.waiting_summary) =
+  let say korean english = if ko then korean else english in
   let part activity label count =
     if count = 0 then None
     else Some (Masc_tui_keeper_mark.activity_glyph activity, label, count)
   in
-  [ part Masc_tui_keeper_list_model.Tool_waiting "tool" summary.tool
-  ; part Masc_tui_keeper_list_model.Model_waiting "model" summary.model
+  [ part Masc_tui_keeper_list_model.Tool_waiting (say "도구" "tool") summary.tool
+  ; part Masc_tui_keeper_list_model.Model_waiting (say "모델" "model") summary.model
   ; part Masc_tui_keeper_list_model.External_waiting
-      (if compact then "ext" else "external") summary.external_wait
+      (if compact then say "외부" "ext" else say "외부" "external") summary.external_wait
   ; part Masc_tui_keeper_list_model.Delegate_result
-      (if compact then "result" else "delegate result") summary.delegate
-  ; part Masc_tui_keeper_list_model.Verifying "verify" summary.verification
+      (if compact then say "결과" "result" else say "위임 결과" "delegate result") summary.delegate
+  ; part Masc_tui_keeper_list_model.Verifying (say "검증" "verify") summary.verification
   ; (if summary.background = 0 then None
      else
        Some
          ( Masc_tui_keeper_mark.badge_glyph
              (Masc_tui_keeper_list_model.Badge_async
                 { running = summary.background; ownership_unknown = 0 })
-         , "async"
+         , say "비동기" "async"
          , summary.background ))
   ]
   |> List.filter_map Fun.id
 
-let waiting_group_detail ~compact summary =
+let waiting_group_detail ~ko ~compact summary =
   let parts =
-    waiting_group_parts ~compact summary
+    waiting_group_parts ~ko ~compact summary
     |> List.map (fun (glyph, label, count) ->
       Printf.sprintf "%s %s %d" glyph label count)
   in
@@ -344,24 +344,27 @@ let waiting_group_detail ~compact summary =
   | [] -> ""
   | _ -> "  " ^ String.concat " · " parts
 
-let waiting_group_text ~compact ~group_count summary =
-  Printf.sprintf "\xe2\x97\x8c WAITING %d%s" group_count
-    (waiting_group_detail ~compact summary)
+let waiting_group_text ~ko ~compact ~group_count summary =
+  Printf.sprintf "\xe2\x97\x8c %s %d%s" (if ko then "대기" else "WAITING") group_count
+    (waiting_group_detail ~ko ~compact summary)
 
-let waiting_group_layout ~available_cells ~group_count summary =
-  let full = waiting_group_text ~compact:false ~group_count summary in
-  let compact_text = waiting_group_text ~compact:true ~group_count summary in
+let waiting_group_layout_for ~ko ~available_cells ~group_count summary =
+  let full = waiting_group_text ~ko ~compact:false ~group_count summary in
+  let compact_text = waiting_group_text ~ko ~compact:true ~group_count summary in
   let full_cells = Masc_tui_message_layout.display_width full in
   let compact_cells = Masc_tui_message_layout.display_width compact_text in
   let compact = full_cells > available_cells in
   { compact
   ; cells = (if compact then compact_cells else full_cells)
-  ; segment_count = List.length (waiting_group_parts ~compact:false summary)
+  ; segment_count = List.length (waiting_group_parts ~ko ~compact:false summary)
   }
 
-let waiting_group_heading_detail ~available_cells ~group_count summary =
-  let layout = waiting_group_layout ~available_cells ~group_count summary in
-  waiting_group_detail ~compact:layout.compact summary
+let waiting_group_layout ~available_cells ~group_count summary =
+  waiting_group_layout_for ~ko:false ~available_cells ~group_count summary
+
+let waiting_group_heading_detail ?(ko = false) ~available_cells ~group_count summary =
+  let layout = waiting_group_layout_for ~ko ~available_cells ~group_count summary in
+  waiting_group_detail ~ko ~compact:layout.compact summary
 
 let keeper_failure_context_for_detail ~show_runtime failure_context =
   if show_runtime then None else failure_context

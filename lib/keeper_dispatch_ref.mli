@@ -1,4 +1,4 @@
-(** RFC-0182 §3.1 — keeper dispatch dependency inversion ref.
+(** Keeper dispatch dependency inversion ref.
 
     Same pattern as [Workspace_dispatch_ref].
     [Keeper_tool_surface] lives in lib/ (late in module order) but is the

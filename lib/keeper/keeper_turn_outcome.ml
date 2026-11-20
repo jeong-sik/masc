@@ -1,4 +1,4 @@
-(** RFC-0232 P2 — producer-typed turn outcome.  See the interface for
+(** producer-typed turn outcome.  See the interface for
     the contract; this module is the single mapping site from
     {!Runtime_agent.stop_reason} to the reply-surface outcome. *)
 
@@ -85,7 +85,7 @@ let of_reply_payload payload =
   | Some _ -> Error Payload_not_object
 
 let turn_ref_of_reply_payload payload =
-  (* RFC-0233 §7: read the turn's join key the keeper minted into the
+  (* Read the turn's join key the keeper minted into the
      reply payload.  Parse, don't repair — an absent field (legacy or
      transport-failure rows) or a malformed value both decode to [None];
      [Ids.Turn_ref.of_string] never raises and never guesses. *)

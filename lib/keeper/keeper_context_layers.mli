@@ -23,12 +23,11 @@ type layer_id =
   | Goal_observations
       (** Each Active Goal's latest review and measurement and this keeper's
           held-Task link marker. These change without a Goal event, so they
-          stay out of the System prompt that precedes the history
-          (docs/rfc/RFC-goal-observations-leave-the-system-prompt.md). *)
+          stay out of the System prompt that precedes the history. *)
   | Goals_awaiting_proof
       (** The ids of the Goals in [Verifying] with the proof-pending mark.
           Agent Core carries this turn's state in System; official clients
-          receive it through their turn-scoped input (RFC-0491 §3.3). *)
+          receive it through their turn-scoped input. *)
   | Current_task
   | Approval_authority
   | Connected_surfaces

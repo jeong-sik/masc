@@ -335,7 +335,7 @@ let resolve_keeper_for_channel_result ~channel_id =
        | None -> Ok None))
 ;;
 
-(* RFC-0223 P2 presence surface. Recomputed per call — no cached state. *)
+(* Presence surface. Recomputed per call — no cached state. *)
 let bound_channels ~keeper_name =
   Store.bound_channels_result binding_store ~keeper_name
 ;;

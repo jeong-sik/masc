@@ -59,7 +59,7 @@ let dispatch
       ~start_time
       msg
   in
-  (* RFC-0189: separate *deliberate caller-misuse rejections* (wrong
+  (* Separate *deliberate caller-misuse rejections* (wrong
      client, wrong surface, deprecated tool) from *runtime/dispatch
      errors* (Tool_local_runtime non-zero exit, try-catch fallback).
      The [workflow_err] sites below answer caller-misuse: keeper

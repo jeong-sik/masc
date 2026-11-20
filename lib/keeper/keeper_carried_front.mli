@@ -90,16 +90,18 @@ type seed =
 
 (** Where a request with no absorbed point and no seed starts (RFC
     keeper-context-window-in-tokens §13.4), as {!Keeper_turn_driver_try_provider.turn_start}
-    reads it from the keeper's turn-boundary store and checks it against
-    the history in hand. *)
+    reads it from the keeper's turn log and checks it against the history in
+    hand. *)
 type turn_start =
   | Turn_boundary of { end_atom : int }
-      (** The end of the last completed turn on this history, verified
-          against it by digest. 0 on a history with no completed turn: the
-          short history of a new keeper, all of which goes out. *)
+      (** The end of the last unit of the turn log on this history, which
+          holds at least the closed messages the unit names. 0 when the log
+          has no line: the short history of a new keeper, all of which goes
+          out. *)
   | Turn_boundary_unknown of { reason : string }
-      (** The store could not be read, or no boundary in it matches this
-          history. Where this turn began is not known, and the request opens
+      (** The log could not be read, its last unit ends on another trace, or
+          the history holds fewer messages than the unit closed. Where this
+          turn began is not known, and the request opens
           on the newest atom alone ({!newest_atom}) rather than on everything:
           §13.4 does not fold an unknown start into the whole history, and a
           short range costs one turn of context where a 16 MB one costs the

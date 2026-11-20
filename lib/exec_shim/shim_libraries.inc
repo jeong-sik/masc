@@ -38,7 +38,7 @@
   (language c)
   (names stream_stub)))
 
-; RFC microvm-guest-agent-over-socket. The guest agent behind
+; The guest agent behind
 ; [masc-exec-shim --serve]; a leaf library for the same reason as the two
 ; above. It takes the signal-number conversion from exec_shim as an argument
 ; rather than depending on it, so exec_shim's main can dispatch to it.

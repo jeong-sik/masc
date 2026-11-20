@@ -638,7 +638,7 @@ let hint text =
         | [] -> Unknown_command word
         | entries -> Candidates { typed = word; entries })
 
-let em_dash = " \xe2\x80\x94 "
+let detail_sep = " \xc2\xb7 "
 
 (* The typed run always starts with the slash, so the highlight covers what
    the operator pressed rather than the word minus its first key. *)
@@ -697,7 +697,7 @@ let hint_spans = function
       Typed ("/" ^ entry.word)
       :: (if String.equal entry.args "" then []
           else [ Detail (" " ^ entry.args) ])
-      @ [ Detail (em_dash ^ entry.summary) ]
+      @ [ Detail (detail_sep ^ entry.summary) ]
   | Candidates { typed; entries = [ entry ] } ->
       (* Down to one word, so there is room to say how it ends even though the
          word itself is not typed out yet. *)
@@ -721,7 +721,7 @@ let hint_spans = function
            entries)
   | Unknown_command word ->
       [ Wrong ("/" ^ word)
-      ; Detail (" is not a command" ^ em_dash ^ "/help lists them")
+      ; Detail (" is not a command" ^ detail_sep ^ "/help lists them")
       ]
 
 (* How [/keeper <name>] finds its keeper. The command grammar stays closed —

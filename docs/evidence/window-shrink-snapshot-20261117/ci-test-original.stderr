@@ -1,4 +1,0 @@
-File "broken_test.ml", line 1129, characters 4-40:
-1129 |     Keeper_official_client_context_codec.(encode Canonical_source message)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Unbound module Keeper_official_client_context_codec

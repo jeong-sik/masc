@@ -799,7 +799,9 @@ let build_request_artifact
    | Error reason -> invalid_arg ("Backend_gemini.build_request: " ^ reason));
   let output_token_receipt =
     Backend_openai_request.output_token_receipt
-      ~envelope:Types.Gemini_generation_config_max_output_tokens
+      ~envelope:
+        (Provider_http_codec.output_token_envelope
+           Provider_http_codec.gemini_generate_content)
       config
   in
   let projected_messages =

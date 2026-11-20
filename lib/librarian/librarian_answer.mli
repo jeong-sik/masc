@@ -34,6 +34,14 @@ type op =
       { ref_ : string
       ; into : new_fact
       }
+  | Seen of
+      { ref_ : string
+      ; from_units : string list
+      (** At least one name: the units that said the fact again. *)
+      }
+  (** The units said again what a fact in Memory says. The answer names the
+      fact instead of copying its claim, so a reconfirmation cannot fork a
+      near copy of the fact it means. *)
 
 type working_state =
   | Keep
@@ -69,7 +77,8 @@ val rejection_kind : rejection -> string
         { "op": "merge", "refs": ["m1", "m3"], "claim": "…", "category": "fact",
           "basis": { "kind": "observed" }, "from": [] },
         { "op": "revise", "ref": "m4", "claim": "…", "category": "fact",
-          "basis": { "kind": "observed" }, "from": ["u2"] } ] }
+          "basis": { "kind": "observed" }, "from": ["u2"] },
+        { "op": "seen", "ref": "m5", "from": ["u1"] } ] }
     v}
 
     [basis] has the shape a fact's basis has in Memory, so the model writes

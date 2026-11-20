@@ -265,34 +265,6 @@ export interface KeeperApprovalRule {
   expires_at: number | null
 }
 
-/** One Keeper an operator has held to a stricter mode than the workspace. */
-export interface KeeperGateModeOverride {
-  keeper_name: string
-  mode: GateMode
-  updated_by: string
-  updated_at: string
-}
-
-/** One Keeper pointed at a particular admitted slot for one exact-output lane. */
-export interface KeeperExactLanePreference {
-  keeper_name: string
-  lane_id: string
-  slot_id: string
-  updated_by: string
-  updated_at: string
-  /** False when the published lane no longer offers slot_id: the lane then
-   *  walks its declared order and this preference has no effect. */
-  offered: boolean
-}
-
-/**
- * Unavailable carries why. An empty list is a working configuration -- nobody
- * singled out -- so a file that cannot be read must not look like one.
- */
-export type KeeperGateSettingsState =
-  | { state: 'ready' }
-  | { state: 'unavailable'; error: string }
-
 export type KeeperApprovalRulesState =
   | { state: 'ready' }
   | { state: 'unavailable'; error: string }
@@ -336,10 +308,6 @@ export interface DashboardGateResponse {
   recent_resolved_state: KeeperResolvedApprovalState
   approval_rules: KeeperApprovalRule[]
   approval_rules_state: KeeperApprovalRulesState
-  keeper_modes: KeeperGateModeOverride[]
-  keeper_modes_state: KeeperGateSettingsState
-  keeper_exact_lanes: KeeperExactLanePreference[]
-  keeper_exact_lanes_state: KeeperGateSettingsState
   hitl: {
     gate_mode: GateModeStatus
     /** The external-services lane: calls that leave for an attached outside

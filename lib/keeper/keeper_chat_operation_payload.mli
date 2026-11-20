@@ -18,7 +18,7 @@ type decoded_source =
           operation was submitted by an exact Keeper registry match on the
           submitter. [None] for the operator and for connector speakers.
           Written as ["sender_keeper"] (string or null); the field is
-          required on read (RFC-0468 §3.2). *)
+          required on read. *)
   ; user_row_origin : Keeper_chat_store.user_row_origin
   }
 

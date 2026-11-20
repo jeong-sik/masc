@@ -253,3 +253,25 @@ A Goal store path that cannot be read, including a dangling link, reports
 and in the task context of `.masc/keepers/<keeper>/turn-boundaries.jsonl`.
 Dashboard and TUI clients read them, so they are updated with the server. An
 older build does not read them; installing one is its own fresh state.
+
+### Execution journals
+
+An execution journal is an `events.v1.wal` file. A Keeper request keeps one at
+`.masc/keepers/<keeper>/request-executions/<call ID>/journal/`, and a native
+call keeps one at `native-executions/<call ID>/` under its session directory,
+for example `.masc/traces/<trace>/`. `validate-stores` does not scan them. The
+reader accepts a stored event only when its bytes equal what the current
+encoder writes, so a journal that spells `reasoning_prefix` as an explicit
+`null` is refused with `Corrupt_store` and `event bytes are not canonical`
+when its execution is read. A finished execution's history then fails to load,
+and an operation whose native call was still running when the server stopped
+is settled with an unknown effect at startup. Nothing has to be deleted. This
+lists the affected journals:
+
+```sh
+rg -a -l -F --hidden --no-ignore --glob events.v1.wal \
+  '"reasoning_prefix":null,' /path/to/workspace/.masc
+```
+
+Delete the `<call ID>` directory that holds a listed journal only when that
+execution's history is no longer needed.

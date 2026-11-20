@@ -27,7 +27,7 @@ let observations = function
   | Keeper { keeper = name; change = Async_requests } ->
       keeper name [`Async_requests]
   | Keeper { keeper = name; change =
-      Asks | Tool_approval_waits | Tool_approval_mode | Gate_settings
+      Asks | Tool_approval_waits | Tool_approval_mode
       | Event_queue | Waiting_inventory _ } ->
       keeper name [`Keeper_composite]
       @ workspace [`Gate]

@@ -1,4 +1,4 @@
-(* Lexical ranking of memory texts (RFC-memory-search-beyond-substring 3.1).
+(* Lexical ranking of memory texts.
    The SQLite plumbing follows [Keeper_capability_search]; see the interface
    for what the ranking is and is not. *)
 

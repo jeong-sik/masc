@@ -1,4 +1,4 @@
-(* RFC-0203 Phase 2 — Discord REST send_message.
+(* Discord REST send_message.
 
    Thin wrapper over Masc_http_client.post_sync. Splits into pure
    build_request and parse_response helpers so the wire-format

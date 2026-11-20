@@ -2063,7 +2063,7 @@ let task_descriptor ?ordinary_execution_mode ~capability_identity id name ~reado
     ()
 ;;
 
-(* RFC-0182 §3.1 — additional masc_* cluster descriptor helpers (task /
+(* Additional masc_* cluster descriptor helpers (task /
    plan / run / agent / workspace). The masc_board_descriptor lives above
    (registry-driven); these helpers follow the same projection pattern
    but use hardcoded id+description because their dispatchers
@@ -2526,7 +2526,7 @@ let internal_descriptors : t list =
        ~handler:Tool_capability_search
        ()
      |> with_eval_tags [ "capability_introspection" ])
-    (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
+    (* ── memory / context ─────────────────────────────────────── *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
@@ -2739,7 +2739,7 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_wiki_read
       ()
-    (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
+    (* ── connector surfaces ───────────────────────────────────── *)
   ; (in_process_descriptor
        ~keeper_model_projection:Internal_name
        ~id:"keeper.surface.read"
@@ -2764,7 +2764,7 @@ let internal_descriptors : t list =
       ~policy:(write_in_process_policy ())
       ~handler:Tool_surface_post
       ()
-    (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
+    (* ── IDE ──────────────────────────────────────────────────── *)
     (* A memo is a comment inserted into a file, so the tool is a
        filesystem write with Edit's roots, Gate and evidence. *)
   ; descriptor
@@ -2788,7 +2788,7 @@ let internal_descriptors : t list =
       ~runtime_handler:Tool_ide_annotate
       ~input_translation:(Identity Validate_once_after_translation)
       ()
-    (* ── fusion deliberation (RFC-0252) ───────────────────────── *)
+    (* ── fusion deliberation ──────────────────────────────────── *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
@@ -2812,7 +2812,7 @@ let internal_descriptors : t list =
       ~policy:(write_in_process_policy ())
       ~handler:Tool_masc_fusion_decision
       ()
-    (* ── fusion status (RFC-0266 §7 Phase 3) ──────────────────── *)
+    (* ── fusion status ────────────────────────────────────────── *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
@@ -2829,7 +2829,7 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_masc_fusion_status
       ()
-    (* ── provider Files tools (RFC-0430 Phase 3) ──────────────── *)
+    (* ── provider Files tools ─────────────────────────────────── *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
@@ -2881,7 +2881,7 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_read_image
       ()
-    (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
+    (* ── vision delegation ─ *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       (* Text-only runtimes can recover an owned image's meaning through this
@@ -2966,7 +2966,7 @@ let internal_descriptors : t list =
          finish is also barred from claiming anything else, and until this
          existed the only way back was shutting the keeper down. *)
       ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
+  (* ── masc_task_* cluster (7 entries) ─────────────────────────── *)
   (* Zero keeper dispatches in the live window (tool_usage 2026-07..08):
      keepers create and move tasks through the keeper_task_* surface, so the
      masc_* twins stay on the transport surface only. Transport_alias names
@@ -2995,7 +2995,7 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_task_descriptor "set_goal" "masc_task_set_goal"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries): the
+  (* ── masc_plan_* current-task trio (3 entries): the
      session pointer to the Keeper's current task. ── *)
   ; masc_plan_descriptor ~keeper_model_projection:Operator_only
        "set_task" "masc_plan_set_task"
@@ -3005,7 +3005,7 @@ let internal_descriptors : t list =
        ~readonly:true
   ; masc_plan_descriptor "clear_task" "masc_plan_clear_task"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_run_* cluster (4 entries) ──────────── *)
+  (* ── masc_run_* cluster (4 entries) ──────────────────────────── *)
   ; masc_run_descriptor "masc_run_init"
        ~readonly:false
   ; (masc_run_descriptor ~ordinary_execution_mode:Concurrent
@@ -3019,7 +3019,7 @@ let internal_descriptors : t list =
      admittable to Concurrent batches and Async admission on that hint. *)
   ; masc_run_descriptor "masc_run_plan"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries) ────────── *)
+  (* ── masc_agent_* cluster (3 entries) ────────────────────────── *)
   ; (masc_agent_descriptor ~keeper_model_projection:Operator_only
         ~ordinary_execution_mode:Concurrent
         "card" "masc_agent_card"
@@ -3039,7 +3039,7 @@ let internal_descriptors : t list =
        "get_metrics" "masc_get_metrics"
        ~readonly:true
      |> with_composable_output (Json_output { schema = get_metrics_output_schema }))
-  (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)
+  (* ── masc_workspace_* cluster (8 entries) ────────────────────────── *)
   (* Operator-only: [masc_status] answers with the operator's status *screen*.
      Workspace_status renders it for a terminal — emoji, a box-drawing rule, a
      [Players:] roster that includes non-Keeper MCP clients, a [Task binding:]
@@ -3083,7 +3083,7 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
        ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_misc_* cluster ─────────── *)
+  (* ── masc_misc_* cluster ─────────────────────────── *)
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
        "config" "masc_config"
        ~readonly:true
@@ -3161,14 +3161,14 @@ let internal_descriptors : t list =
      MASC-owned web descriptors above. Do not add
      duplicate internal descriptors here; that would make runtime receipt
      projection depend on list order. *)
-  (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
+  (* ── masc_agent_timeline singleton (1 entry) ── *)
   ; (masc_agent_timeline_descriptor ~keeper_model_projection:Operator_only
        ~ordinary_execution_mode:Concurrent
        "masc_agent_timeline"
        (* No composable output, for the same reason as masc_agent_card above:
           off the model surface since #29681, so no plan can name it. *)
        ~readonly:true)
-  (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
+  (* ── Scheduled internal automation (6 entries) ─────── *)
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ List.map keeper_owned_job_descriptor Tool_schemas_owned_job.definitions
@@ -3177,7 +3177,7 @@ let internal_descriptors : t list =
   @ [ keeper_code_query_descriptor () ]
   @ [ keeper_receipt_wait_descriptor () ]
   @ [
-  (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
+  (* ── masc_keeper cluster ──── *)
     masc_keeper_descriptor ~keeper_model_projection:Internal_name
       ~ordinary_execution_mode:Concurrent "list" Keeper_tool_name.(to_string Keeper_list)
       (* Read-only roster discovery lets a Keeper choose a delegation target.

@@ -6,7 +6,7 @@ status: reference
 
 > Status: Living draft
 > Last Updated: 2026-10-29
-> Snapshot baseline: `dune-project` version `0.73.1`
+> Snapshot baseline: `dune-project` version `0.74.0`
 
 MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 Goal, Task, Board, Schedule을 통해 작업하고 현재 실행 상태를 관찰·조정할 수 있게 한다. Keeper turn과 dashboard/operator visibility를 제공하며 MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다.
 
@@ -18,7 +18,7 @@ used as evidence.
 
 | 항목 | 값 |
 |------|-----|
-| Release baseline | 0.73.1 |
+| Release baseline | 0.74.0 |
 | Language | OCaml 5.x (Eio-native, effect-based concurrency) |
 | LOC (lib, `.ml` + `.mli`) | 994,693 |
 | LOC (test, `.ml` + `.mli`) | 1,036,706 |
@@ -78,7 +78,6 @@ graph TB
 
 | Document | Description | Related Spec |
 |----------|-------------|--------------|
-| `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-agent-core.md` |
 | `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-agent-core.md` |
 
 ## Conventions
@@ -117,8 +116,7 @@ graph TB
 선언하지 않는다. 새 접두어는 해당 spec 파일이 실제로 불변식을 선언할 때 이 표에
 더한다.
 
-`docs/design/`의 RFC는 자신의 식별자를 자체 소유한다. 예를 들어
-`checkpoint-truth-and-replay-rfc.md`는 `INV-AC-CHK-001`–`005`를 선언한다. 이 표는
+`docs/design/`의 설계 문서는 자신의 식별자를 자체 소유한다. 이 표는
 `docs/spec/`의 접두어만 다루며, 설계 문서의 식별자는 해당 문서에서 찾는다.
 
 ### Cross-Reference Format

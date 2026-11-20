@@ -1,5 +1,5 @@
 (** Pre-dispatch validation stage extracted from
-    [Keeper_unified_turn.run_keeper_cycle] per RFC-0136 PR-3.
+    [Keeper_unified_turn.run_keeper_cycle].
 
     Owns the runtime-execution builder: runtime-id validation,
     context-window resolution, and temperature inference. Returns a

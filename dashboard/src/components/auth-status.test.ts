@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// Behavior tests for AuthStatus's popover (RFC 0002 Iter 2 — useFocusScope
+// Behavior tests for AuthStatus's popover (useFocusScope
 // migration). Locks the user-observable contract: trigger toggles open/
 // closed, data-state surfaces the state, focus moves into the panel on
 // open and restores on close, ESC closes the popover.

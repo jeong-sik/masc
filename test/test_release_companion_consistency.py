@@ -27,8 +27,8 @@ stages and republishes as ``<name>-<platform>``.
   6. scripts/release-dashboard-bundle.py ``COMPANIONS``
   7. scripts/ci/prepare-release-publication.py ``validate_distribution``
   8. lib/installed_dashboard.ml - the closed ``parse_companions`` allowlist
-  9. lane-addon-native.yml and linux-x64-probe.yml - the probe runs that feed
-     the same packager its ``NAMES``
+  9. linux-x64-probe.yml - the probe run that feeds the same packager its
+     ``NAMES``
 
 Agreement alone missed #45119: every copy lacked the browser Add-on programs
 at once.  So the reference must also hold what the product looks for beside
@@ -431,8 +431,6 @@ def main():
                         help='scripts/install.sh')
     parser.add_argument('--bundle', type=Path, required=True,
                         help='scripts/release-dashboard-bundle.py')
-    parser.add_argument('--lane-addon-probe', type=Path, required=True,
-                        help='.github/workflows/lane-addon-native.yml')
     parser.add_argument('--runtime-probe', type=Path, required=True,
                         help='.github/workflows/linux-x64-probe.yml')
     parser.add_argument('--native-programs', type=Path, required=True,
@@ -459,9 +457,6 @@ def main():
     INSTALLER_UNINSTALL, INSTALLER_COMPANIONS = read_installer(args.installer)
     BUNDLE_COMPANIONS = set(read_bundle_companions(args.bundle))
     PROBES = {
-        'lane-addon-native.yml': read_probe(
-            args.lane_addon_probe, 'Build and test native integration',
-            'Package using the release runtime bundler', 'dist'),
         'linux-x64-probe.yml': read_probe(
             args.runtime_probe, 'Build runtime companions',
             'Bundle relocatable runtime with release filenames', '$PROBE_OUT'),

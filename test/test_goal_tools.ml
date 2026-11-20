@@ -175,7 +175,6 @@ let test_goal_list_preserves_source_failure () =
     (Fs_compat.load_file (path ^ ".last-good"))
 ;;
 
-(* RFC-0444 criterion 1. *)
 let test_goal_list_schema_rejected_envelope () =
   with_workspace @@ fun config ->
   ignore (seed_rows_without_criterion_revision config);
@@ -194,7 +193,7 @@ let test_goal_list_schema_rejected_envelope () =
   check bool "listing moves no bytes" true (before = goal_files config)
 ;;
 
-(* RFC-0444 criterion 4, first half: a store this build cannot read is the
+(* A store this build cannot read is the
    Unavailable code, never "goal not found". *)
 let test_goal_transition_unavailable_store () =
   with_workspace @@ fun config ->
@@ -209,7 +208,7 @@ let test_goal_transition_unavailable_store () =
   check bool "refused transition moves no bytes" true (before = goal_files config)
 ;;
 
-(* RFC-0444 criterion 4, second half: a healthy store with no such id is
+(* A healthy store with no such id is
    [not_found]. *)
 let test_goal_transition_unknown_goal_not_found () =
   with_workspace @@ fun config ->
@@ -1052,7 +1051,7 @@ let request_complete config goal_id =
          ])
 ;;
 
-(* RFC-0387 stage 2: [request_complete] enters [Verifying]; [Completed] is
+(* [request_complete] enters [Verifying]; [Completed] is
    reached only through the verifier's proof. *)
 let prove_complete config goal_id =
   let request_id, criterion =

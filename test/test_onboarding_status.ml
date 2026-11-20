@@ -115,7 +115,7 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
     check bool "invalid runtime references are not merely unverified" true
       (condition Onboarding_status.Runtime_configuration state = Onboarding_status.Invalid);
     check string "invalid config preserved" invalid (read runtime_path)) invalid_configs;
-  (* RFC-0456: an assignment may name a declared lane. The doctor resolves the
+  (* An assignment may name a declared lane. The doctor resolves the
      lane's entry candidate, so a lane-bound imp reads as declared but
      unverified, not as a load failure. *)
   write runtime_path

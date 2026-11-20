@@ -45,7 +45,7 @@ val handle_add_task :
   Yojson.Safe.t ->
   Tool_result.result
 
-(** RFC-0267 Phase 2: [masc_task_set_goal] — assign an existing goalless task to
+(** [masc_task_set_goal] — assign an existing goalless task to
     a goal. Thin adapter over {!Task_goal_assignment.set_task_goal}. *)
 val handle_set_goal :
   tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result

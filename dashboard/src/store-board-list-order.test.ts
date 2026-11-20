@@ -33,11 +33,15 @@ vi.mock('./components/common/toast', () => ({
 import {
   boardHasMore,
   boardHearthFilter,
+  boardListCurrent,
+  boardListNarrowed,
+  boardListOnScreen,
   boardListReadFailed,
   boardLoading,
   boardLoadingMore,
   boardOffset,
   boardPosts,
+  boardSearchText,
   boardSortMode,
   boardTotal,
   loadMoreBoardPosts,
@@ -53,6 +57,7 @@ interface ListAnswer {
 
 interface PendingListRead {
   hearth: string | undefined
+  search: string | undefined
   offset: number
   answer: (data: ListAnswer) => void
   fail: (error: Error) => void
@@ -83,9 +88,9 @@ function post(id: string): BoardPost {
 function holdListReads(): PendingListRead[] {
   const pending: PendingListRead[] = []
   apiMocks.fetchDashboardMemory.mockImplementation(
-    (_sort: string, options: { hearth?: string; offset: number }) =>
+    (_sort: string, options: { hearth?: string; search?: string; offset: number }) =>
       new Promise<ListAnswer>((resolve, reject) => {
-        pending.push({ hearth: options.hearth, offset: options.offset, answer: resolve, fail: reject })
+        pending.push({ hearth: options.hearth, search: options.search, offset: options.offset, answer: resolve, fail: reject })
       }),
   )
   return pending
@@ -128,8 +133,10 @@ beforeEach(() => {
   boardLoading.value = false
   boardLoadingMore.value = false
   boardListReadFailed.value = false
+  boardListOnScreen.value = null
   boardSortMode.value = 'recent'
   boardHearthFilter.value = ''
+  boardSearchText.value = ''
 })
 
 // #52956: the operator changes the sub-board while the previous list is still loading.
@@ -253,6 +260,58 @@ describe('board list reads after the sub-board changes', () => {
     expect(pending).toHaveLength(1)
     expect(shownIds()).toEqual(['a1'])
     expect(boardLoadingMore.value).toBe(false)
+  })
+})
+
+// #52957: the search text is part of the list a read answers.
+describe('board list reads after the search text changes', () => {
+  it('asks for the search text and keeps the current text when the replaced one answers later', async () => {
+    const pending = holdListReads()
+    boardSearchText.value = 'old needle'
+    const oldRead = refreshBoard()
+    await readsStarted(pending, 1)
+    boardSearchText.value = 'new needle'
+    const newRead = refreshBoard()
+    await readsStarted(pending, 2)
+    expect(pending.map(read => read.search)).toEqual(['old needle', 'new needle'])
+
+    pending[0]!.answer({ posts: [post('old-1')], has_more: false, total: 1 })
+    await oldRead
+    expect(shownIds()).toEqual([])
+    expect(boardLoading.value).toBe(true)
+
+    pending[1]!.answer({ posts: [post('new-1')], has_more: false, total: 1 })
+    await newRead
+    expect(shownIds()).toEqual(['new-1'])
+    expect(boardLoading.value).toBe(false)
+  })
+
+  it('asks for no search text when nothing is searched', async () => {
+    const pending = holdListReads()
+    const read = refreshBoard()
+    await readsStarted(pending, 1)
+    expect(pending[0]!.search).toBeUndefined()
+    pending[0]!.answer({ posts: [post('a1')], has_more: false, total: 1 })
+    await read
+  })
+
+  it('continues a searched list with the same text, and drops the page once the text changes', async () => {
+    const pending = holdListReads()
+    boardSearchText.value = 'needle'
+    const firstPage = refreshBoard()
+    await readsStarted(pending, 1)
+    pending[0]!.answer({ posts: [post('n1')], has_more: true, total: 2 })
+    await firstPage
+
+    const nextPage = loadMoreBoardPosts()
+    await readsStarted(pending, 2)
+    expect(pending[1]!.search).toBe('needle')
+    expect(pending[1]!.offset).toBe(1)
+    boardSearchText.value = 'another'
+    pending[1]!.answer({ posts: [post('n2')], has_more: false, total: 2 })
+    await nextPage
+
+    expect(shownIds()).toEqual(['n1'])
   })
 })
 
@@ -458,4 +517,78 @@ describe('board list reads that fail', () => {
     expect(shownIds()).toEqual(['b1'])
     expect(toastMocks.showToast).not.toHaveBeenCalled()
   }))
+})
+
+// The total and the rows are the list's on screen. What that list answers is
+// kept beside them, because the filters already say what the operator asks
+// for next: a count read against the filters would give the matches of one
+// search as the posts of the Board, or the other way round.
+describe('what the list on screen answers', () => {
+  it('answers nothing before a first page has answered', () => {
+    expect(boardListOnScreen.value).toBeNull()
+    expect(boardListNarrowed.value).toBe(false)
+    expect(boardListCurrent.value).toBe(false)
+  })
+
+  it('stays the search that filled it until the cleared one answers', async () => {
+    const pending = holdListReads()
+    boardSearchText.value = 'needle'
+    const searched = refreshBoard()
+    await readsStarted(pending, 1)
+    // The filters ask for the search; nothing on screen answers it yet.
+    expect(boardListNarrowed.value).toBe(false)
+    expect(boardListCurrent.value).toBe(false)
+    pending[0]!.answer({ posts: [post('n1')], has_more: false, total: 1 })
+    await searched
+    expect(boardListOnScreen.value?.query.search).toBe('needle')
+    expect(boardListNarrowed.value).toBe(true)
+    expect(boardListCurrent.value).toBe(true)
+
+    boardSearchText.value = ''
+    const whole = refreshBoard()
+    await readsStarted(pending, 2)
+    // The total is still the count of the matches, and says so.
+    expect(boardTotal.value).toBe(1)
+    expect(boardListOnScreen.value?.query.search).toBe('needle')
+    expect(boardListNarrowed.value).toBe(true)
+    expect(boardListCurrent.value).toBe(false)
+
+    pending[1]!.answer({ posts: [post('a1'), post('a2')], has_more: false, total: 2 })
+    await whole
+    expect(boardTotal.value).toBe(2)
+    expect(boardListOnScreen.value?.query.search).toBe('')
+    expect(boardListNarrowed.value).toBe(false)
+    expect(boardListCurrent.value).toBe(true)
+  })
+
+  it('counts a sub-board as narrowed', async () => {
+    const pending = holdListReads()
+    await showSubBoard(pending, 'hearth-a', { posts: [post('a1')], has_more: false, total: 1 })
+    expect(boardListNarrowed.value).toBe(true)
+    expect(boardListCurrent.value).toBe(true)
+
+    // The operator picks another sub-board: the list on screen is still A's.
+    boardHearthFilter.value = 'hearth-b'
+    expect(boardListOnScreen.value?.query.hearth).toBe('hearth-a')
+    expect(boardListCurrent.value).toBe(false)
+  })
+
+  it('answers nothing once a failed read took the previous list off the screen', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const pending = holdListReads()
+      await showSubBoard(pending, 'hearth-a', { posts: [post('a1')], has_more: false, total: 1 })
+      boardHearthFilter.value = 'hearth-b'
+      const readB = refreshBoard()
+      await readsStarted(pending, 2)
+      pendingRead(pending, 'hearth-b', 0).fail(new Error('fixture: read of the current sub-board failed'))
+      await readB
+
+      expect(boardListOnScreen.value).toBeNull()
+      expect(boardListNarrowed.value).toBe(false)
+      expect(boardListCurrent.value).toBe(false)
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })

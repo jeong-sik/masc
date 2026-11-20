@@ -1,4 +1,4 @@
-(** RFC-0128 §4.6 — [.masc-ide/] must not appear in the workspace
+(** [.masc-ide/] must not appear in the workspace
     file tree returned by [/api/v1/workspace/tree].
 
     Before this PR, [scan_dir] excluded [.masc/] (the keeper
@@ -103,7 +103,7 @@ let test_other_internal_dirs_still_excluded () =
     check bool "lib must appear in tree" true (List.exists (fun p -> p = "lib") ps))
 ;;
 
-(* --- Lazy children (RFC-0014 amendment) --- *)
+(* --- Lazy children --- *)
 
 let test_boundary_directory_is_expandable () =
   with_temp_dir (fun base ->

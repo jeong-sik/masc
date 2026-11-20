@@ -158,7 +158,7 @@ val moment_text : now:float -> string -> string
     so. Text that
     does not parse is returned as it arrived. *)
 
-val timeline_unavailability_detail : Tui_decode.goal_timeline_unavailability -> string
+val timeline_unavailability_detail : ?ko:bool -> Tui_decode.goal_timeline_unavailability -> string
 (** Preserve the typed source failure's cause at the history read boundary. *)
 
 type timeline_failure =

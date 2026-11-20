@@ -1712,7 +1712,7 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.updateKeeperRuntime).not.toHaveBeenCalled()
   })
 
-  // #38866: an assignment may name a declared lane (RFC-0457), but the select
+  // #38866: an assignment may name a declared lane, but the select
   // offered runtime ids only, so a lane could not be picked from the panel.
   it('offers declared lanes apart from runtimes and patches the picked lane as runtime_id', async () => {
     const execution = {
@@ -2543,8 +2543,7 @@ describe('KeeperConfigPanel', () => {
   })
 })
 
-// keeper-v2 design vocabulary (prototypes/keeper-v2/keeper-config.jsx +
-// organisms-5.jsx parity): top-bar kr/sandbox badges, avatar block, 표시 이름
+// keeper-v2 design vocabulary: top-bar kr/sandbox badges, avatar block, 표시 이름
 // field, 파생 사실, fallback chain, kcf-dead removal note, kcf-paths editor,
 // set-link navigation. Every assertion reads a live signal — the roster row
 // (storeMocks.keepers) or the loaded KeeperConfig — never a static mock.

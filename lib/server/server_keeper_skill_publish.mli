@@ -1,4 +1,4 @@
-(** Server side of [keeper_skill_publish] (RFC keeper-self-authored-skills).
+(** Server side of [keeper_skill_publish].
 
     The Keeper tool cannot reach the Skill editor, which lives in this
     library. At boot the server fills

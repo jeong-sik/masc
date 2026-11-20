@@ -32,9 +32,15 @@ type block =
 
 type turn_growth =
   { ended_at : int option
+        (** The count of the last request before the current turn, under
+            this window; [None] for the turn the window opened in. *)
   ; peak : int option
+        (** The largest count among the current turn's requests; [None] once
+            one of them went uncounted. *)
   ; largest : int option
-  ; last_input : int option
+        (** The largest [peak - ended_at] of a turn that finished since the
+            ledger started, under any of its windows. *)
+  ; last_input : int option  (** The count of the last request. *)
   }
 
 type t =

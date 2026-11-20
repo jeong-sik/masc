@@ -1,6 +1,6 @@
 (* Fusion config -> JSON projection for the dashboard read endpoint.
 
-   RFC-0306 §3.1. The dashboard fusion settings editor needs the full active
+   The dashboard fusion settings editor needs the full active
    product-relevant [Fusion_policy.t] fields as structured JSON to populate its
    form (panel roster, meta judge, JoJ first-round judges). The config types
    derive only [show]/[eq], so the shape is written by hand here, and the write

@@ -4,7 +4,7 @@ open Alcotest
 
 (* Every agent/message/task source extractor asks [identity_matches] whether
    a row belongs to the queried agent, so what it accepts is what a timeline
-   can find. RFC-0393: a keeper is written under its keeper_name, and the one
+   can find. A keeper is written under its keeper_name, and the one
    other form is the Activity_graph entity key ("keeper:<name>") -- a kind
    namespace, not a second spelling. Both are matched whole, so an agent
    whose name is a prefix of another's cannot collect its rows. *)

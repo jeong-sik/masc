@@ -1,4 +1,4 @@
-(** Ledger tests for the world constitution (RFC-0442). *)
+(** Ledger tests for the world constitution. *)
 
 open Masc.World_constitution_types
 module Store = Masc.World_constitution_store
@@ -217,7 +217,7 @@ let check_isolation ~line_number ~subject ~article_ids (ledger : Store.ledger) =
   | others ->
       Alcotest.failf "expected one isolated line, got %d" (List.length others)
 
-(* RFC-0491 §3.2: a System's basis names the ledger position it was read at.
+(* A System's basis names the ledger position it was read at.
    Later writes only append, so that position reads back the same articles,
    an edit in place included. *)
 let test_a_position_reads_back_the_articles_held_then () =
@@ -372,7 +372,7 @@ let test_an_unfinished_last_line_that_reads_whole_is_not_held () =
       | others ->
         Alcotest.failf "expected one rejection, got %d" (List.length others))
 
-(* RFC-0504: one line retires a bundle and names its replacement, so the
+(* One line retires a bundle and names its replacement, so the
    ledger keeps which norm replaced which. *)
 let test_replacing_retires_the_bundle_and_adds_the_replacement () =
   with_world (fun base_path ->
@@ -403,7 +403,7 @@ let test_replacing_keeps_unrelated_norms_in_place () =
         [ "an unrelated norm"; "the merged norm" ]
         (texts (load_or_fail ~base_path ())))
 
-(* RFC-0504 §2.4: a line whose subject the roster does not resolve folds out
+(* A line whose subject the roster does not resolve folds out
    of the live set and is reported beside the rejected lines, never dropped
    quietly. *)
 let test_a_line_from_outside_the_roster_is_isolated_not_dropped () =

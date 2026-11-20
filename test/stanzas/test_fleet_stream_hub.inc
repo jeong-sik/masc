@@ -1,4 +1,4 @@
-; The hub that turns fleet scans into events (RFC-0477): what makes an event and
+; The hub that turns fleet scans into events: what makes an event and
 ; what does not, outages, subscribers that raise, and several domains publishing
 ; while watchers connect and leave.
 

@@ -51,7 +51,7 @@ let goal_in phase id title =
 
 (* One goal per phase, so a future phase added to [Goal_phase.t] shows up here
    as an unclassified id rather than silently inheriting a neighbour's verdict.
-   [Verifying] (RFC-0387 stage 2) admits self-directed progress — the gate
+   [Verifying] admits self-directed progress — the gate
    holds the phase, not the work — so it survives alongside Executing. *)
 let seed_all_phases config =
   Goal_store.write_state config
@@ -190,7 +190,7 @@ let goal_observations_of partition =
 (* The Goal Observations row of [goal_id], found by its own template. The
    held-Task link marker lives here, not on the Active Goals row, because it
    changes on every claim and release and the Active Goals layer sits in the
-   System prompt (docs/rfc/RFC-goal-observations-leave-the-system-prompt.md). *)
+   System prompt. *)
 let observation_row observations ~goal_id =
   let row = fragment Prompt_names.keeper_world_goal_observations_row [ "goal_id", goal_id ] in
   match
@@ -465,7 +465,7 @@ max-concurrent = 1
     (Ok []) fresh.active_goals
 ;;
 
-(* RFC-0444 §2.3 row 6. The 2026-09-08 shape: every row lacks
+(* The 2026-09-08 shape: every row lacks
    [criterion_revision], the mirror still decodes. The Active Goals layer must
    say which member the decoder refused and which file, and must not draw a
    Goal count or heading, because a store that cannot be read holds an
@@ -601,7 +601,7 @@ let test_goal_measurement_tracks_current_revision_and_read_failure () =
     (contains_in unavailable_world "Its value is unknown; preserve the Goal")
 ;;
 
-(* RFC-goal-observations-leave-the-system-prompt. The Active Goals layer becomes
+(* The Active Goals layer becomes
    the System suffix that precedes the history, so a recorded measurement or a
    claimed linked Task must leave its bytes as they were; only the Goal
    Observations layer, which rides the trailing context, moves. *)

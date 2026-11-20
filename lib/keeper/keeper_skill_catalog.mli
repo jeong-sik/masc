@@ -1,4 +1,4 @@
-(** SKILL.md-backed catalog of Keeper skills (RFC skills-as-tools).
+(** SKILL.md-backed catalog of Keeper skills.
 
     {!Agent_core.Skill_document} is the parse authority for one SKILL.md file.
     This

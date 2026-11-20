@@ -1,5 +1,5 @@
 (** Goal_unavailable_envelope — the one wire projection of a goal store this
-    build cannot read (RFC-0444 §2.3 rows 1–3).
+    build cannot read.
 
     The envelope is
     [{ ok:false, error_code:"goal_store_unavailable", reason, field, file,
@@ -20,7 +20,7 @@ val fields : Goal_store.unavailable -> (string * Yojson.Safe.t) list
 (** The five descriptive members — [reason], [field], [file], [mirror],
     [reset_step] — without [ok] and [error_code]. Records that carry the
     value inside another object (a keeper decision record, a skipped
-    verifier scan row; RFC-0444 PR-5) splice these so every surface spells
+    verifier scan row) splice these so every surface spells
     the same keys. *)
 
 val to_yojson : Goal_store.unavailable -> Yojson.Safe.t

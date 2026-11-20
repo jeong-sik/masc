@@ -24,7 +24,7 @@ let round_trippable : (string * D.t) list =
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
   ; (* Runtime wires that Code.of_wire_exact recognises losslessly (no payload
-     or payload-loss is acceptable per RFC-0042 §5.2). *)
+     or payload-loss is acceptable). *)
     "Provider_error/Fiber", D.Provider_error Code.Fiber_unresolved
   ]
 ;;

@@ -289,7 +289,7 @@ let same_route a b =
     , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Gate _ | Keeper _ | Unrouted _) )
     -> false
 
-(* RFC-0377: batching pending Connector_attention stimuli needs "is this the
+(* Batching pending Connector_attention stimuli needs "is this the
    same conversation", which is deliberately looser than [same_route].
    [reply_to_message_id] (Discord) is stamped with the inbound message's own
    id at enqueue time (server_discord_in_process_gateway.handle_ambient), so

@@ -434,26 +434,13 @@ let trusted_state person =
   | Ok trusted -> Ok (trusted :> Authz_zone.snapshot).Authz_zone.state
   | Error uncertain -> Error (`Service_unavailable, Login_routes.zone_uncertain_message uncertain)
 
-(* One call of an account at a time, a verification or a turn of a Keeper:
-   each starts the official client on the home of the account, and no two
-   clients refresh the credential of one home at once. A call while another
-   runs gets [busy] (issue #50018). An account has one owner, so its id is
-   the key. *)
-let calling = Hashtbl.create 8
-let calling_mutex = Mutex.create ()
+(* One call of an account at a time, a verification or a turn of a Keeper
+   ([Runtime_account_call]). A call while another runs gets [busy]. *)
 let call_running = "A call of this account is running."
 
-(* The call of an account that is running. Only [one_call_of] makes one, so
-   what takes one runs inside the call of that account. *)
-type in_call = { of_account : Authz_types.Provider_account_id.t }
+type in_call = Runtime_account_call.t
 
-let one_call_of provider_account_id ~busy f =
-  let key = Authz_types.Provider_account_id.to_string provider_account_id in
-  let claimed = Mutex.protect calling_mutex (fun () ->
-    if Hashtbl.mem calling key then false else (Hashtbl.replace calling key (); true)) in
-  if not claimed then Error busy
-  else Fun.protect (fun () -> f { of_account = provider_account_id }) ~finally:(fun () ->
-    Mutex.protect calling_mutex (fun () -> Hashtbl.remove calling key))
+let one_call_of = Runtime_account_call.one_call_of
 
 (* The account of the person among the accounts of [state]. An account of
    another person is answered as one that does not exist (design 4.2: an id
@@ -481,7 +468,8 @@ let owned person id =
    the account and its key file are read inside that call. The files of an
    account change only inside its call too, so a runtime is never made on a
    key that a removal or a replacement was taking away. *)
-let person_runtime { of_account = id } person ~base_path ~binding =
+let person_runtime in_call person ~base_path ~binding =
+  let id = Runtime_account_call.account in_call in
   let provider_account_id = Authz_types.Provider_account_id.to_string id in
   let refused result =
     Result.map_error (fun (status, message) -> Refused (status, message)) result in

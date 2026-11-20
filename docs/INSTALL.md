@@ -166,7 +166,7 @@ To install one specific release instead of the latest one, take that tag's
 installer and pin it. Check that the tag is listed on GitHub Releases first:
 
 ```bash
-TAG=v0.73.1
+TAG=v0.74.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -722,8 +722,6 @@ configuration before using it.
 The server/dashboard and the companion executables in the prefix are restored
 to their previous state when an install fails. The workspace's guest shim and
 configuration you explicitly reset are not part of this prefix transaction.
-If the process was killed and a `.masc-install-transaction` is left behind,
-see the [distribution transaction guide](design/installed-dashboard-distribution.md).
 
 Some releases change a state file's contract instead of converting the old
 file. The `Fresh state required` entries in `CHANGELOG.md` list those files.

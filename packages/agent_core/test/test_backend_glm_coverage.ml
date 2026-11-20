@@ -166,7 +166,7 @@ let test_build_request_thinking_modes_and_tool_stream () =
   let passthrough =
     K.build_request ~config:(glm_config ()) ~messages () |> Yojson.Safe.from_string
   in
-  (* RFC-0488 §3.2: a row that declares neither control sends no [thinking]
+  (* A row that declares neither control sends no [thinking]
      object, so the endpoint's documented default applies. *)
   check int "undeclared row sends no thinking object" 0
     (field_count "thinking" passthrough)

@@ -47,7 +47,7 @@
   unix
   eio
   eio.unix
-  ; RFC-0203 Phase 1.2b + RFC-0287 — Discord Gateway WSS client.
+  ; Discord Gateway WSS client.
   ; masc owns the TLS flow (Tls_eio.client_of_flow) and hands it to the
   ; masc-owned ws-direct client, which speaks plain Eio.Flow.two_way and so
   ; composes with a TLS flow (no fd) directly — the impedance that made the

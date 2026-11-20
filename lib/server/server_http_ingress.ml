@@ -132,7 +132,7 @@ let try_mcp_validation_block ~request_authority ~request ~protocol_version ~orig
 
 (* [GET /ws] (same-origin WebSocket upgrade + discovery) is owned by the route
    table ([Server_routes_http_routes_frontend] via [Server_route.ws_get]) and
-   reached through [Http.Router.dispatch] below (RFC-0281). Board
+   reached through [Http.Router.dispatch] below. Board
    reads/reactions are owned by the typed route table: exact routes win over
    the board prefix route, and the prefix route resolves the bearer-bound
    reaction actor itself. *)

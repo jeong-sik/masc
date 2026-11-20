@@ -69,7 +69,7 @@ TUI 메인 루프는 `--refresh`(기본 2초)마다 화면에 필요한 데이�
 | `keeper_tool_call` | `lib/mcp_server_eio_call_tool.ml` 외 | 피드 줄. 상세 Changes 탭만 다시 읽는다 | Keeper_calls 화면 `GET /api/v1/keepers/<k>/tool-calls?limit=100` |
 | `keeper_heartbeat`, `keeper_phase_changed`, `keeper_turn_complete` | `keeper_heartbeat_snapshot.ml`, `keeper_registry.ml`, `keeper_hooks_agent_core.ml` | 피드 줄만 | `/api/v1/gate/keepers?detailed=true`, `/api/v1/keepers/turns` 를 매번 |
 | `approval:pending`, `approval:summary_updated`, `approval:resolved` | `lib/keeper/keeper_approval_queue_projection.ml` | 피드 줄만 | `/api/v1/dashboard/gate`, `/api/v1/keepers/tool-approvals` |
-| `gate_mode_changed`, `gate_keeper_mode_changed` 외 | `lib/server/server_routes_http_routes_dashboard.ml` | 피드 줄만 | 같은 gate 읽기 |
+| `gate_mode_changed` 외 | `lib/server/server_routes_http_routes_dashboard.ml` | 피드 줄만 | 같은 gate 읽기 |
 | `notifications/board` (JSON-RPC) | `Board_dispatch.set_board_sse_hook` 설치부, `lib/server/server_bootstrap_loops.ml` | 읽지 못한다. `type` 이 없어 `Undecodable "event carries no type"` 이 된다 | 게시판 목록, 열린 글 |
 | `masc/board_post`, `board_comment`, `masc/board_delete` | `lib/mcp_tool_runtime_board.ml` | 피드 줄만 | 같은 게시판 읽기 |
 | `internal_agent_runs_changed` | `lib/internal_agent_runs_event.ml` 의 이름, 서버 bootstrap | 피드 줄만 | Verification `GET /api/v1/verification/requests`. 같은 저장소의 변화인지는 확인하지 못했다 |
@@ -260,7 +260,7 @@ PR 열의 번호 중 #47994·#47997 만 병합됐고 나머지(#48003 부터 #48
 
 - TUI 시험은 보낸 요청과 저장한 상태만 본다(constitution `build_and_ci`). 화면 문구 시험은 만들지 않는다.
 - 층마다 알림 하나가 요청 하나를 만드는지 시험한다. 지운 2초 읽기가 없다는 것은 시험하지 않는다. 없어진 기능의 회귀 시험을 만들지 않는다는 constitution `testing` 규칙을 따른다. 시험 픽스처는 `--refresh` 를 시험 시간보다 길게 줘서, 알림이 아닌 tick 이 요청을 만들지 못하게 한다.
-- 실제 화면에서는 키퍼 40명 workspace 의 TUI 로그에서 `tui_surface_read_started` 수를 층 전후로 센다. 증거는 `docs/evidence/` 아래에 둔다.
+- 실제 화면에서는 키퍼 40명 workspace 의 TUI 로그에서 `tui_surface_read_started` 수를 층 전후로 센다. 센 값은 PR 본문에 적는다.
 
 ## 7. 트레이드오프와 한계
 

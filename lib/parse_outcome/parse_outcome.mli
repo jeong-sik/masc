@@ -3,7 +3,7 @@
     Replaces the [try f s with _ -> None / [] / default] pattern, which the
     PR audit of 2026-05-20 grouped as Cluster A "telemetry-as-fix".
 
-    Design constraints (RFC-0145):
+    Design constraints:
     - Cancellation [Eio.Cancel.Cancelled] is re-raised, never absorbed.
     - The base library has no Yojson dependency; callers that need
       Yojson-aware classification pass the exception to [of_exn].

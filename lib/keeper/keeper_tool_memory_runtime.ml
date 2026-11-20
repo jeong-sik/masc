@@ -65,21 +65,28 @@ let fact_store_to_string = function
   | Source_bound_current -> "source_bound_current_memory"
 ;;
 
-(* [origin] travels with the memory_id because only an ordinary current fact
-   has one; it tells the keeper which matches [supersedes] accepts. *)
+(* [origin] and [last_seen] travel with the memory_id because only an
+   ordinary current fact has them. [origin] tells the keeper which matches
+   [supersedes] accepts; [last_seen] is when the same claim bytes were last
+   observed again. A file-bound fact keeps no such time: every read checks it
+   against its file. *)
 type fact_identity =
   | Ordinary_memory_id of
       { memory_id : string
       ; origin : Keeper_memory_os_types.origin_kind
+      ; last_seen : float
       }
   | Source_sha256 of string
 
+(* [first_seen] is the stored insertion time. Every current fact has one, so
+   it is a field of the match, not of an identity. *)
 type fact_match =
   { identity : fact_identity
   ; claim : string
   ; category : string
   ; basis : Keeper_memory_os_types.basis
   ; store : fact_store
+  ; first_seen : float
   ; lookup_evidence : Keeper_memory_os_current.admission_recall_binding option
   ; successor_evidence : Keeper_memory_os_current.successor_recall_candidate option
   }
@@ -272,10 +279,14 @@ let search_durable_facts
     { claim = fact.claim
     ; identity =
         Ordinary_memory_id
-          { memory_id = Keeper_memory_os_types.memory_id fact; origin = fact.origin.kind }
+          { memory_id = Keeper_memory_os_types.memory_id fact
+          ; origin = fact.origin.kind
+          ; last_seen = fact.last_seen
+          }
     ; category = Keeper_memory_os_types.category_to_string fact.category
     ; basis = fact.basis
     ; store = Ordinary_current
+    ; first_seen = fact.first_seen
     ; lookup_evidence
     ; successor_evidence = None
     }
@@ -286,6 +297,7 @@ let search_durable_facts
     ; category = "fact"
     ; basis = Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript
     ; store = Source_bound_current
+    ; first_seen = fact.first_seen
     ; lookup_evidence = None
     ; successor_evidence = None
     }
@@ -374,9 +386,10 @@ let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_m
     | Ok (direct,total,deferred,corpus_revision) ->
       let successors = List.map (fun (candidate : Current.successor_recall_candidate) ->
         let fact = candidate.target in
-        {identity=Ordinary_memory_id {memory_id=Keeper_memory_os_types.memory_id fact;origin=fact.origin.kind};
+        {identity=Ordinary_memory_id {memory_id=Keeper_memory_os_types.memory_id fact;origin=fact.origin.kind;
+           last_seen=fact.last_seen};
          claim=fact.claim;category=Keeper_memory_os_types.category_to_string fact.category;
-         basis=fact.basis;store=Ordinary_current;lookup_evidence=Some candidate.binding;
+         basis=fact.basis;store=Ordinary_current;first_seen=fact.first_seen;lookup_evidence=Some candidate.binding;
          successor_evidence=Some candidate}) judged.selected in
       let whole,fragments = if successors=[] then direct,[] else
         answering ~claim_of:fact_match_lookup_text ~query (direct @ successors) in
@@ -389,12 +402,16 @@ let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_m
       Ok (facts,merged,total,deferred,extra_fields,unresolved<>[],corpus_revision))
 ;;
 
+(* [first_seen] and [last_seen] are absolute UTC ISO 8601, the form of the
+   [Temporal] line the keeper compares them with. A relative age would be
+   wrong in every later turn that rereads this result from history. *)
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
   `Assoc
     ([ "text", `String m.claim
      ; "category", `String m.category
      ; "basis", Keeper_memory_os_types.basis_to_json m.basis
      ; "store", `String (fact_store_to_string m.store)
+     ; "first_seen", `String (Masc_domain.iso8601_of_unix_seconds m.first_seen)
      ]
      @ (match m.successor_evidence with
         | None -> []
@@ -414,9 +431,10 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
               ] ])
      @
      match m.identity with
-     | Ordinary_memory_id { memory_id; origin } ->
+     | Ordinary_memory_id { memory_id; origin; last_seen } ->
        [ "memory_id", `String memory_id
        ; "origin", `String (Keeper_memory_os_types.origin_kind_to_string origin)
+       ; "last_seen", `String (Masc_domain.iso8601_of_unix_seconds last_seen)
        ]
      | Source_sha256 sha256 -> [ "source_sha256", `String sha256 ])
 ;;

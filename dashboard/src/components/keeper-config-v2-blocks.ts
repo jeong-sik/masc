@@ -1,4 +1,4 @@
-// Keeper config panel — keeper-v2 design blocks (prototypes/keeper-v2/keeper-config.jsx parity).
+// Keeper config panel — keeper-v2 design blocks.
 //
 // Two blocks the panel actually mounts:
 //   - kcf-plan badge: the design's own marker for a field that is planned but

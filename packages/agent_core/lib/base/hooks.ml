@@ -517,7 +517,7 @@ let%test "invoke_validated: Sys.Break remains reserved" =
   | Block _ -> false
 ;;
 
-(* ── Block variant (RFC-0321) regression tests ─────────────── *)
+(* ── Block variant regression tests ────────────────────────── *)
 
 let%test "Block: classify_decision tags as K_Block" =
   classify_decision (Block "forbidden") = K_Block

@@ -117,7 +117,7 @@ let ask_json (a : Keeper_ask.ask) =
     ]
 
 let handle_ask ?source_turn_ref ~tool_name ~start_time (ctx : context) : Tool_result.result option =
-  (* RFC-0393: a Keeper reaches its tools under its keeper_name — there is no
+  (* A Keeper reaches its tools under its keeper_name — there is no
      alias or nickname spelling to unwrap. A name the registry does not know
      fails the registry check, which is the honest answer for a caller that
      is not a Keeper. *)

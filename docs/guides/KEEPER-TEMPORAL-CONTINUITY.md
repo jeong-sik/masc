@@ -232,13 +232,6 @@ These are HTTP/MCP fixture tests of the collector and judge protocol. They do no
 execute real models. Retain real-run output separately under `artifacts/` and
 select private-data-free evidence intentionally before publication.
 
-The [2026-10-30 candidate observation](../evidence/keeper-temporal-retirement-20261030/README.md)
-retains a 12-turn bootstrap/catch-up campaign, actual organic-prefix omission,
-the final W/reply and native TUI frames. It also records quota-blocked attempts
-and the separate offline configuration parse failure
-([issue #46981](https://github.com/jeong-sik/masc/issues/46981)). Its limits belong
-with its results; it is not a steady-state or installed-main continuity verdict.
-
 ## Prior-art boundaries
 
 [Letta's context architecture](https://www.letta.com/constitution/#context-architecture)

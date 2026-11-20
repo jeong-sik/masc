@@ -511,6 +511,10 @@ val reading_connection_notice : Masc_tui_types.state -> string option
     [None], as does an exceptional state with nothing to add to the top row's
     word; each view keeps its own pending-read indication. *)
 
+val quiet_connection_tail : Masc_tui_types.state -> string
+(** Two-space-prefixed {!reading_connection_notice} for Zone 2 headers; returns
+    [""] when healthy so Zone 2 does not churn on ordinary background reads. *)
+
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)
 
@@ -556,6 +560,7 @@ val fit_runtime_id : int -> string -> string
 
 val keeper_roster_pane :
   ?focused:bool ->
+  ?top_spacer:bool ->
   Masc_tui_types.state -> rows:int -> cols:int -> Buffer.t -> unit
 
 val listing_rows_below_the_body : int
@@ -586,6 +591,7 @@ val write_list_sidebar :
     its row; an unfocused selection keeps a caret without claiming focus. *)
 
 val write_list_sidebar_selection :
+  ?framed:bool ->
   Buffer.t ->
   rows:int ->
   cols:int ->
@@ -960,20 +966,21 @@ val pane_surface_header : Buffer.t -> int -> Masc_tui_types.state ->
   path:string list -> split:bool -> position:Masc_tui_value.Position.t option -> unit
 val pane_surface_content_height : rows:int -> int
 
-val models_account_reading : provider:string -> overview_account_emails_reading -> string option * string list
+val models_account_reading : ?ko:bool -> provider:string -> overview_account_emails_reading -> string option * string list
 (** Account identity and visible evidence notes for the Models pane. Failed and
     partially decoded reads remain distinct from a read with no email. *)
 
-val models_source_account_reading : provider:string -> runtime_config_reading option -> string option * string list
+val models_source_account_reading : ?ko:bool -> provider:string -> runtime_config_reading option -> string option * string list
 (** Models labels come only from the account reading published with its source. *)
 
 val studio_panel : width:int -> title:string -> lines:string list -> string list
 (** Framed sub-panel box with a middle-truncated title header and cell-fitted rows. *)
 
 
-val detail_section_heading : ?first:bool -> string -> (string * string) list
-(** Numbered/grouped section header [  [ Title ]] in [(style, text)] pairs for
-    scrollable detail readers. *)
+val detail_section_heading : ?first:bool -> ?width:int -> string -> (string * string) list
+(** Numbered/grouped section header [  ── Title ─────] in [(style, text)] pairs
+    for scrollable detail readers. Wraps at word boundaries when [?width] is
+    supplied. *)
 
 val detail_page :
   width:int -> (string * Masc_tui_page_line.t list) list -> (string * string) list
@@ -984,8 +991,10 @@ val section_heading_line : string -> string
 (** A detail's section heading, [── title ─────] in bold on the reader's
     foreground (RFC tui-one-screen-grammar §5.2, §7.3). *)
 
-val detail_section_lines : ?first:bool -> string -> string list
-(** Numbered/grouped section header [  [ Title ]] as pre-styled strings. *)
+val detail_section_lines : ?first:bool -> ?width:int -> string -> string list
+(** Numbered/grouped section header [  ── Title ─────] as pre-styled strings.
+    Wraps at word boundaries when [?width] is supplied and the heading exceeds
+    [width - 2] cells. *)
 
 val split_summary_columns :
   titled:bool ->

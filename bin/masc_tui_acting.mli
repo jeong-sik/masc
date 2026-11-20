@@ -59,12 +59,12 @@ val retain :
 (** The glyph a row starts with. One vocabulary for the whole surface and
     the Keepers roster, so a column scans the same way on both. *)
 type glyph =
-  | Call_started  (** [▶] *)
-  | Call_returned  (** [✓] *)
+  | Call_started  (** [◐] *)
+  | Call_returned  (** [●] *)
   | Turn_boundary  (** [✧] *)
-  | Turn_done  (** [■] *)
-  | Failure  (** [✗] *)
-  | Attention  (** [?] *)
+  | Turn_done  (** [●] *)
+  | Failure  (** [✕] *)
+  | Attention  (** [▲] *)
   | Quiet  (** [·] the kinds [Everything] adds *)
 
 val glyph_text : glyph -> string

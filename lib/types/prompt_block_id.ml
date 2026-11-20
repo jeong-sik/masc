@@ -86,7 +86,7 @@ let all_known =
 let cache_rank = function
   | Keeper_instructions -> 0
   | Skill_compositions -> 1
-  (* RFC-0491 §3.2: the articles written or taken back since the System's
+  (* The articles written or taken back since the System's
      <norms>. Its text changes only when the world's article ledger is
      written (0 to 7 times a day, 2026-10-08 to 11-05), and it leaves when the
      System is rendered again, which happens when the range front moves and
@@ -105,7 +105,7 @@ let cache_rank = function
      one operation and change when another operation is admitted. How often
      that is has not been measured. *)
   | Direct_input_source -> 6
-  (* RFC-0491 §3.3: the ids of the Goals in [Verifying]. Its text changes when
+  (* The ids of the Goals in [Verifying]. Its text changes when
      a Goal is asked to complete or the verifier refutes the proof: after
      10-30 the two came 12 to 20 minutes apart. A Task decision is new on the
      turn it lands and gone on the next, so this block sits just in front of

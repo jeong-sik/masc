@@ -1,4 +1,4 @@
-(** RFC-0182 §3.1 — keeper dispatch dependency inversion ref.
+(** Keeper dispatch dependency inversion ref.
 
     See [keeper_dispatch_ref.mli] for the rationale. *)
 

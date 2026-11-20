@@ -1,4 +1,4 @@
-; Not a test: prints how long the fleet stream (RFC-0477) takes from a hub
+; Not a test: prints how long the fleet stream takes from a hub
 ; change to the terminal client's view, over loopback, for several fleet sizes
 ; and subscriber counts. Run by hand from _build/default/test.
 

@@ -317,7 +317,7 @@ let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
   let unavailable_lines =
     List.map
       (fun (name, detail) ->
-        { text = Printf.sprintf (if ko then "? %s \xc2\xb7 %s" else "? %s \xe2\x80\x94 %s") name detail
+        { text = Printf.sprintf "? %s \xc2\xb7 %s" name detail
         ; tone = Unknown
         ; target = None
         })

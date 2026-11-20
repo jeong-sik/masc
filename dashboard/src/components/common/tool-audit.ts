@@ -11,7 +11,7 @@ type ToolAuditEmptyState =
 
 export function linkedRuntimeState(keeper: Keeper | null | undefined): 'offline' | 'online' | 'unlinked' {
   if (!keeper) return 'unlinked'
-  // RFC-0139 PR-2: SSOT-routed offline check — see
+  // SSOT-routed offline check — see
   // keeper-store-normalize.ts for the parallel migration.
   if (isKeeperOffline(keeper)) {
     return 'offline'

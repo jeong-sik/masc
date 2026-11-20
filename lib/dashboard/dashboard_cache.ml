@@ -152,7 +152,7 @@ type entry = {
   stale_until : float;
 }
 
-(* RFC-0204 3.4 L4b. A [Computing] slot with no stale value records who runs
+(* A [Computing] slot with no stale value records who runs
    its compute. The pool job that starts it first claims it: the owner's job,
    or a pool job that looked the key up while the owner's job was still
    queued. Without the claim, that job would hold its worker polling for a
@@ -585,7 +585,7 @@ let inc_cache_miss () =
 
     A pool job that would wait on a compute whose owner's job has not started
     claims that compute and runs its own instead of holding its worker idle;
-    the owner's job then returns without computing (RFC-0204 3.4 L4b). *)
+    the owner's job then returns without computing. *)
 let get_or_compute_eio : type closed.
     window:closed compute_window -> string -> ttl:float -> cached_value Pool_work.t ->
     (entry, closed) result =
@@ -858,7 +858,7 @@ let get_or_compute_eio : type closed.
                 (* The reader returns the stale value without waiting, so no
                    request waits on this refresh. The fork inherits the
                    reader's lane, and as a read it could hold the 1-2 read
-                   domains for its whole compute budget (RFC-0204 3.4). The
+                   domains for its whole compute budget. The
                    inline path below stays a read: there the reader waits. *)
                 Eio.Fiber.fork ~sw (fun () ->
                   Pool_lane.with_background @@ fun () ->
@@ -1170,7 +1170,7 @@ let get_or_compute_value_with_timeout ~preparation
       | Window_closed -> Error Compute_owner
     in
     (* One window for every attempt of this lookup: a retry after a released
-       claim (RFC-0204 3.4 L4b) gets what is left of it, not a fresh one. *)
+       claim gets what is left of it, not a fresh one. *)
     let deadline = Eio.Time.now clock +. timeout_sec in
     let within f =
       compute_under_timeout ~clock ~key
@@ -1217,7 +1217,7 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec work =
     key ~ttl ~clock ~timeout_sec work
   |> json_of_cached_value
 
-(* RFC-0372 Phase 3 — make the timeout the default rather than the opt-in.
+(* Make the timeout the default rather than the opt-in.
 
    [get_or_compute_with_timeout] has existed for a while, but it requires an
    Eio clock at the call site, so most callers reach for the plain

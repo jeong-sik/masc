@@ -5,6 +5,7 @@
 ## 정책
 
 - **파일명**: 신규 RFC 는 `RFC-<slug>.md` (예: `RFC-keeper-background-wait-tool.md`). slug 는 소문자/숫자/하이픈이다.
+- **수명**: RFC는 진행 중인 제안만 둔다. 구현이 끝났거나, 다른 RFC로 대체됐거나, 하지 않기로 한 RFC는 지운다. 결정은 코드와 헌장에, 경위는 git 기록에 남는다.
 - **삭제 정합성**: RFC 파일을 삭제할 때는 frontmatter 관계, 본문 cross-reference를 같은 변경에서 함께 정리한다.
 - **Multi-phase RFC**: 한 설계를 여러 문서로 나눌 때는 같은 slug prefix를 사용하고 본문에서 현재 main spec을 직접 참조한다.
 - **인덱스 조회**: `python3 scripts/rfc-generate-index.py` 가 frontmatter 로부터 색인 표를 생성해 stdout 에 출력한다 (표는 커밋하지 않는다 — #35498). `--check` 로 파일명, RFC 식별자와 번호 중복을 확인한다.

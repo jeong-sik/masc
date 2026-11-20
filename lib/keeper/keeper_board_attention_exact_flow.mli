@@ -15,7 +15,6 @@ type setup_error =
           {!Runtime_exact_output_registry.subscribe_lane_changes} consumer. *)
   | Registry_unavailable
   | Lane_unavailable
-  | Lane_preference_unavailable of string
   | Lane_resolved_without_slots
   | Candidate_invalid of
       { position : int
@@ -122,7 +121,6 @@ val error_detail : 'callback_error execution_error -> string
     candidate is executable through the same exact flow as a normal pending one. *)
 val prepare :
   base_path:string ->
-  keeper_name:string ->
   net:Eio_context.eio_net option ->
   Keeper_board_attention_candidate.candidate ->
   (prepared, setup_error) result

@@ -23,7 +23,7 @@ import {
   normalizePhaseDiagnosis,
   PhaseConditionsPanel,
 } from './phase-conditions-panel'
-// RFC-0135 PR-2: phase casing SSOT — `toKeeperPhase` is the single
+// Phase casing SSOT — `toKeeperPhase` is the single
 // source. The local PHASE_ID_MAP (previously lines 42-69 of this file)
 // duplicated BACKEND_PHASE_MAP in keeper-store-normalize and drifted
 // independently; that map and the local `normalizePhase` export are
@@ -32,7 +32,7 @@ import { toKeeperPhase } from '../keeper-store-normalize'
 
 interface KeeperStateDiagramProps {
   keeperName: string
-  /** RFC-0046: parent-supplied composite snapshot. When provided,
+  /** parent-supplied composite snapshot. When provided,
    *  this panel reads the SSOT from the shared FsmHub fetch instead
    *  of issuing its own /composite call. */
   snapshot?: KeeperCompositeSnapshot | null
@@ -97,7 +97,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
     setDiagramError(null)
     setStateDiagram(null)
 
-    // RFC-0046 §7 #1: skip composite fetch when parent supplies it.
+    // Skip composite fetch when parent supplies it.
     // Caller-passed `undefined` means standalone mode (legacy); `null`
     // means parent is loading — wait rather than dual-fetch.
     const compositePromise: Promise<KeeperCompositeSnapshot | null> = externalSnapshot !== undefined

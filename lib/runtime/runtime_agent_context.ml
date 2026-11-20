@@ -81,7 +81,7 @@ type config =
   ; description : string option
     (** Human-facing label only. Logic must not parse it: the executing
         runtime's identity travels in {!field-runtime_id}
-        (RFC-0371 B12 — this field used to smuggle
+        (this field used to smuggle
         ["runtime:<id>/runtime"] for a downstream re-parse). *)
   ; runtime_id : string option
     (** The executing runtime's id, typed. [None] for callers that are

@@ -1,29 +1,23 @@
 import { html } from 'htm/preact'
 import type { CoverageGapDisplay } from './source-health'
 
-// Operator-actionable hint for a coverage gap: a canonical RFC link keyed by
-// the typed error class the backend already wrote.
+// Operator-facing cause label for a coverage gap, keyed by the typed error
+// class the backend already wrote.
 export type CoverageErrorHint = {
   reason: string
   label: string
-  href: string
 }
 
-// RFC-0154 PR-3: typed lookup keyed by backend short tag from
+// Typed lookup keyed by backend short tag from
 // `System_error_class.to_short_tag`. Lookup-only — no substring matching.
-// This is the SSOT for "given a typed error class, what RFC should the
-// operator read". Add a new entry here only when the backend variant +
-// canonical RFC both exist.
 const ERROR_CLASS_HINTS: Record<string, CoverageErrorHint> = {
   fd_exhaustion: {
     reason: 'fd_exhaustion',
-    label: 'FD exhaustion — see RFC-0097',
-    href: 'https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-0097-keeper-sandbox-container-reuse.md',
+    label: 'FD exhaustion',
   },
   disk_exhaustion: {
     reason: 'disk_exhaustion',
-    label: 'Disk pressure — see RFC-0122',
-    href: 'https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-0122-keeper-disk-pressure.md',
+    label: 'Disk pressure',
   },
 }
 
@@ -37,7 +31,7 @@ export function errorHintFromGap(display: CoverageGapDisplay): CoverageErrorHint
 }
 
 function causeLabel(display: CoverageGapDisplay, hint: CoverageErrorHint | null): string {
-  if (hint) return hint.label.split(' — ')[0] ?? hint.label
+  if (hint) return hint.label
   return display.structured.reason.replace(/_/g, ' ')
 }
 
@@ -62,8 +56,7 @@ function stateToneClass(stateLabel: string): string {
  * Visual hierarchy (top → bottom):
  *  1. Incident title + active/recent/historical chip.
  *  2. Operator summary (cause / impact / latest / store).
- *  3. Optional runbook link when the error maps to a known incident class.
- *  4. Collapsed raw evidence (reason / producer / surface / trace / error).
+ *  3. Collapsed raw evidence (reason / producer / surface / trace / error).
  *
  * Label spans use `${label + ' '}` (not adjacent siblings) so DOM
  * textContent preserves "label value" as a contiguous substring —
@@ -103,18 +96,6 @@ export function CoverageGapBlock({ display }: { display: CoverageGapDisplay }) {
           </div>
         `)}
       </div>
-      ${hint ? html`
-        <a
-          href=${hint.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="v2-mobile-operator-target inline-flex items-center gap-1 self-start rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--warn-10)] px-1.5 py-0.5 font-medium text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]"
-          data-testid=${`coverage-gap-hint-${hint.reason}`}
-        >
-          <span>${hint.label}</span>
-          <span aria-hidden="true">↗</span>
-        </a>
-      ` : null}
       ${(evidenceRows.length > 0 || structured.error) ? html`
         <details class="group">
           <summary class="flex cursor-pointer items-center gap-1.5 list-none text-[var(--color-fg-secondary)] [&::-webkit-details-marker]:hidden">

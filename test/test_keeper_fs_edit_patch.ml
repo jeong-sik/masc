@@ -1,6 +1,6 @@
 (** Tests for [handle_file_write] mode=patch.
 
-    RFC-0006 Phase A.4 — string-replace edit mode added so the
+    string-replace edit mode added so the
     Provider_a Code [Edit] cognate can be wired through AGENT_CORE dual
     registration. *)
 

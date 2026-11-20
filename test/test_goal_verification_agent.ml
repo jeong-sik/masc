@@ -1,4 +1,4 @@
-(** RFC-0387 stage 2 PR-2 — the goal verifier caller.
+(** The goal verifier caller.
 
     The lane drains the ledger's durable pending requests
     ([Proof_pending]) through
@@ -986,7 +986,7 @@ let strip_criterion_revision path =
   Fs_compat.save_file path (Yojson.Safe.to_string stripped)
 ;;
 
-(* RFC-0444 §2.3 row 7, criterion 3: every scan the store refuses leaves one
+(* Every scan the store refuses leaves one
    durable [Scan_skipped] row carrying the typed value and exactly one WARN
    line that starts with the counted literal. Two cycles, two of each. *)
 let test_skipped_scan_records_one_row_and_one_warn_per_cycle () =

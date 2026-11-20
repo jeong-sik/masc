@@ -77,9 +77,9 @@ const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   active_goals: { lbl: '현재 Goal', color: 'var(--volt)', mem: false },
   direct_input_source: { lbl: '요청 출처', color: 'var(--info)', mem: false },
   completion_authority: { lbl: 'Task 검증 판정', color: 'var(--volt)', mem: false },
-  // RFC-0491 §3.3: the Goals in Verifying, out of the System's Goal rows.
+  // The Goals in Verifying, out of the System's Goal rows.
   goals_awaiting_proof: { lbl: '증명 대기 Goal', color: 'var(--volt)', mem: false },
-  // RFC-0491 §3.2: the articles written or taken back since the System's
+  // The articles written or taken back since the System's
   // <norms> were rendered. Instructions, not recalled memory.
   constitution_amendments: { lbl: '조항 변경', color: 'var(--text-dim)', mem: false },
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
@@ -90,7 +90,7 @@ const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   // says which memories this turn carries and is not memory itself.
   recalled_memory: { lbl: '판정한 기억', color: 'var(--volt-strong)', mem: true },
   recalled_memory_status: { lbl: '기억 판정 줄', color: 'var(--volt-strong)', mem: false },
-  // RFC-0366: one operator sentence, rendered for one turn and then stamped
+  // One operator sentence, rendered for one turn and then stamped
   // consumed. Not memory — it never reaches the recall block.
   operator_note: { lbl: '운영자 노트', color: 'var(--status-warn)', mem: false },
   // The names of the composition Skills this turn carries (Prompt_block_id

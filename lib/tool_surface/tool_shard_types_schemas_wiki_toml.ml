@@ -5,8 +5,7 @@
     Decoded once at module initialization. A missing file or a declaration that
     does not decode refuses the boot rather than advertising a partial wiki
     surface, so a reader of these values never has to ask whether a schema
-    loaded. [test_wiki_tool_toml_parity] keeps the publication order; the
-    descriptions and schemas it also pinned were copies of these values. *)
+    loaded. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

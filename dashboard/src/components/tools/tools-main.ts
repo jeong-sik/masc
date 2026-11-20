@@ -46,7 +46,7 @@ function sourceFreshnessLabel(latestAge: number | null | undefined): string {
 }
 
 // The selected Keeper's surface comes from the tools answer and its
-// activations from their own route (RFC-0483); both must name that Keeper.
+// activations from their own route; both must name that Keeper.
 function keeperSkillReceipt(
   response: DashboardToolsResponse,
   activations: DashboardSkillActivationProjection,

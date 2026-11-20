@@ -636,8 +636,7 @@ let halve ~first_atom ~atom_count =
 #38062의 적용 범위를 나눈다. `workspace_metric_hooks`의 완료 검토는 임시 작업공간과 이름으로
 `run_named_with_masc_tools`를 호출하며 지속 Keeper의 trace를 전달하지 않는다. 이 입력을
 이전 대화의 기억을 보존하는 창과 같은 것으로 다루지 않는다. 아래 계약은 닫힌 입력 출처와
-완료 검토의 공급자 입력 경계에 적용한다. 구현·실행 증거와 남은 범위는
-[완료 검토 증거 보존 기록](../evidence/2026-10-23-completion-review-evidence/README.md)에 구분한다.
+완료 검토의 공급자 입력 경계에 적용한다.
 
 - 출처는 일반 Keeper 이력과 완료 검토의 닫힌 합타입으로 받는다. optional session ID의
   부재나 별도 `skip_shrink` bool 조합으로 정책을 추론하지 않는다. Keeper 이력은 실제

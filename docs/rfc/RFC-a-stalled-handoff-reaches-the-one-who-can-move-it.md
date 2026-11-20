@@ -211,7 +211,6 @@ L1 과 L2 가 고치는 자리만 적어요.
 - **[사실]** 결과 모름이면 walk 는 남은 칸으로 넘어가지 않고, 그 실패의 둘째 값도 버려요(`anti_rationalization.ml` 의 `must_preserve_original`). 저장되는 근거(`verifier_review_unknown/v1`)에는 다시 볼 runtime 이 비어 있어요. 그래서 `Reviews_again` 인 연결 끊김도 멈춰요.
 - **[사실]** 판정 보고를 셀 때는 정산된 호출만 세요(`agent_execution_projection.ml:791`). 시도가 시작되지 않은 호출은 수리로도 가지 않아요(`execution_agent_scope.ml:857-868`). 두 번째 보고 호출이 시도되기 전에 실행이 끊기면 그 호출은 보이지 않아요. 살아 있는 서버라면 보고 둘은 규칙 위반이에요(`anti_rationalization.ml` 의 `step_verdict_call`).
 - **[사실]** 살아 있는 서버의 walk 는 보고가 정산된 뒤 그 실행이 실패하면 그 판정을 버려요(`workspace_metric_hooks.ml` 의 `Error err` 갈래). 판정 보고 핸들러는 메모리에만 적고 Task 는 바꾸지 않아요.
-- **[사실]** 검증 정책 문서는 지금 규칙을 이렇게 적어요(`docs/verification-pipeline-policy.md` 4절). 불확실하면 다음 시도를 만들지 않아요. 성공으로 끝난 실행의 정산된 판정 보고 하나만 되살려요. 둘째 문장은 #49097 뒤의 코드보다 좁아요.
 - **[사실]** 같은 뿌리를 고친 PR 이 둘 있어요.
   - #47278(11-01)은 writer 가 사라진 실행을 "기다림"에서 "운영자 수리"로 옮겼어요. 본문은 "replay 나 자동 재시도 없이 실행 기록과 모르는 효과를 남긴다"예요.
   - #49097(11-06)은 취소로 끝나고 판정 보고가 없는 실행만 다음 시도로 넘겼어요. 본문은 실패로 끝난 실행을 그대로 둔 이유를 "같은 요청을 다시 해도 결과가 같을 것"이라고 적었어요. 1.2 에서 이 길로 온 실패 14개는 그 전제와 달라요. 모두 코드가 다시 해 볼 실패로 분류하는 종류예요.
@@ -428,7 +427,6 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
   - `known_observations` 가 새 관측 값을 읽어요. 다시 읽어 만든 거절에는 `outcome_unknown` 을 싣지 않아요. 지금 `known_observations` 는 그 값을 거부해요(`:296`).
   - `next_attempt` 는 지금 "근거를 읽지 못했다"와 "다시 돌 칸이 없다"를 같은 "다음 시도 없음"으로 받아요(`:431`). 둘을 나눠 돌려줘요. 근거를 읽지 못한 것은 오류예요.
 - `completion_authority_agent.ml`: 재시도 권한을 적은 주석 둘(`:615-617`, `:649-650`)을 고쳐요. 코드는 그대로예요. 다음 시도는 지금도 `Not_reviewed` 의 `retryable_runtimes` 로 전해져요.
-- `docs/verification-pipeline-policy.md` 4절: "불확실하면 다음 시도를 만들지 않는다"와 "성공으로 끝난 실행의 판정 보고만 되살린다"는 두 문장을 이 규칙으로 고쳐요.
 - `docs/constitution.xml` 의 `AwaitingVerification` invariant: walk 가 결과를 남기지 못한 시도가 다음 시도로 간다는 문장을 더해요. 지금 조항은 실패의 typed 판정만 적어요.
 - 시험: 다시 읽어 만든 거절에서 다음 시도가 생기는지 봐요. typed 판정이 `Producer_must_act` 일 때는 생기지 않는지도 봐요. 리뷰어 프로세스를 따로 띄워 보고 전, 보고 도중, 두 보고 사이, 보고 뒤에 끝낸 네 경우를 읽어요.
 - 새 상태와 새 Gate 는 없어요. 저장하는 근거 둘의 모양이 바뀌어요.
@@ -708,10 +706,10 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 | 층 | 바뀌는 곳 | 대가 |
 |---|---|---|
 | L1 | `keeper_board_attention_fanout.ml`, `keeper_board_attention_partition.ml(i)`, `keeper_board_attention_candidate.ml`, `keeper_board_attention_worker.ml`, `keeper_board_attention_quarantine_command.ml`, 그 시험 | `ensure_current_roots` 와 `judgment_delivery_outcome` 을 `match` 하는 곳을 모두 고친다. fanout 의 `claim` 마다 후보 원장을 한 번 더 읽는다 |
-| L2a | `anti_rationalization.ml(i)`(실패 관측에 판정을 싣는 것과 보고 도구 이름), `goal_criterion_agent.ml`·`goal_verifier_worker.ml`(패턴 한 줄씩), `verifier_review_worker.ml`, `verifier_review_walk_result.ml(i)`·`verifier_review_ending.ml(i)`(새 파일), `agent_execution_projection.ml`, `agent_execution_projection_intf.mli`, `agent.ml(i)`, `verifier_review_execution.ml(i)`, `verifier_review_owner.ml(i)`, `completion_authority_agent.ml`(주석), 그 시험, `docs/verification-pipeline-policy.md`, `docs/constitution.xml` | 끊긴 리뷰가 다시 돈다. 리뷰 한 번의 토큰이 다시 든다. 연결 실패가 이어지면 그 리뷰에 pulse 마다 시도 하나가 쌓인다(5.2). 헌법 invariant 와 검증 정책 문서의 문장이 바뀐다 |
+| L2a | `anti_rationalization.ml(i)`(실패 관측에 판정을 싣는 것과 보고 도구 이름), `goal_criterion_agent.ml`·`goal_verifier_worker.ml`(패턴 한 줄씩), `verifier_review_worker.ml`, `verifier_review_walk_result.ml(i)`·`verifier_review_ending.ml(i)`(새 파일), `agent_execution_projection.ml`, `agent_execution_projection_intf.mli`, `agent.ml(i)`, `verifier_review_execution.ml(i)`, `verifier_review_owner.ml(i)`, `completion_authority_agent.ml`(주석), 그 시험, `docs/constitution.xml` | 끊긴 리뷰가 다시 돈다. 리뷰 한 번의 토큰이 다시 든다. 연결 실패가 이어지면 그 리뷰에 pulse 마다 시도 하나가 쌓인다(5.2). 헌법 invariant 의 문장이 바뀐다 |
 | L2b | `operator_task_attention.ml` 과 그 목록을 그리는 곳 | 운영자 목록에 판정을 기다리는 제출이 모두 실린다. L2a 전에는 20행이었다. L2a 배포 뒤 잰 값은 18건이고(2026-11-12 13:59Z, 8절), L2c 뒤에는 돌고 있는 리뷰와 남은 10건으로 본다 |
 | L2c | `lane_addon_tool_request_owner.ml`(`load_listed` 와 신원 비교), `completion_authority_agent.ml`(실패 상세), 그 시험 | 목록 읽기를 쓰는 17곳(`load_scope` 14, `fold_all` 1, `load_listed` 직접 2)에서 목록 읽기 실패가 줄어든다. 공용 층이라, 그 자리들이 목록에서 본 진행에 기대지 않는지 리뷰가 봐야 한다 |
-| L2d | `verification_authority_tools.ml(i)`(해시 둘), `verifier_review_original.ml(i)`·`goal_verifier_original.ml(i)`(다음 attempt 를 지금 권한·답 형식·지시로, Goal 측정값 칸, Goal 답 형식 함수 하나로), `verifier_review_authority_change.ml(i)`(새 모듈, 바뀐 것을 닫힌 값으로), `verifier_review_owner.ml`(`next_attempt`, `retain_child`, 거절을 단계별로 읽기), `verifier_review_worker.ml`·`goal_verifier_worker.ml`(typed 검사, 거절 근거, 거절을 단계별로 읽기, `restore_child`), `verifier_review_execution.ml`(답 형식이 다른 끊긴 리뷰), `completion_authority_agent.ml`·`goal_verification_agent.ml`(같은 처리 안의 다음 attempt), `goal_verifier_host.ml`·`workspace_goals.ml`(Goal 오류 갈래), `lane_addon_request_progress.ml`(전이 하나), 그 시험, `docs/verification-pipeline-policy.md` | original 의 저장 모양이 바뀌어 hard cut 이다. 설치 때 두 리뷰 스코프의 이력을 지운다. 판정은 났지만 커밋 전인 attempt 는 리뷰를 한 번 더 한다. 공용 상태 기계를 쓰는 다른 곳(`Successor_intended` 를 다루는 lib 파일 10곳)이 새 전이를 내지 않는지 리뷰가 봐야 한다. 조회 권한의 경계라 사람이 리뷰한다 |
+| L2d | `verification_authority_tools.ml(i)`(해시 둘), `verifier_review_original.ml(i)`·`goal_verifier_original.ml(i)`(다음 attempt 를 지금 권한·답 형식·지시로, Goal 측정값 칸, Goal 답 형식 함수 하나로), `verifier_review_authority_change.ml(i)`(새 모듈, 바뀐 것을 닫힌 값으로), `verifier_review_owner.ml`(`next_attempt`, `retain_child`, 거절을 단계별로 읽기), `verifier_review_worker.ml`·`goal_verifier_worker.ml`(typed 검사, 거절 근거, 거절을 단계별로 읽기, `restore_child`), `verifier_review_execution.ml`(답 형식이 다른 끊긴 리뷰), `completion_authority_agent.ml`·`goal_verification_agent.ml`(같은 처리 안의 다음 attempt), `goal_verifier_host.ml`·`workspace_goals.ml`(Goal 오류 갈래), `lane_addon_request_progress.ml`(전이 하나), 그 시험 | original 의 저장 모양이 바뀌어 hard cut 이다. 설치 때 두 리뷰 스코프의 이력을 지운다. 판정은 났지만 커밋 전인 attempt 는 리뷰를 한 번 더 한다. 공용 상태 기계를 쓰는 다른 곳(`Successor_intended` 를 다루는 lib 파일 10곳)이 새 전이를 내지 않는지 리뷰가 봐야 한다. 조회 권한의 경계라 사람이 리뷰한다 |
 | 미디어 거절 | `keeper_turn_driver.ml` 의 미디어 갈래 | 7일 로그에 0줄이라 맨 뒤다 |
 | L3 | 그 RFC 의 8절 | 그 RFC 에 적혀 있다 |
 | L4 | 그 RFC 의 L3 | 그 RFC 에 적혀 있다 |
@@ -727,7 +725,6 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 | PR #47278, #49097 (병합됨) | writer 가 사라진 실행을 운영자 수리로 보낸 것과, 취소된 실행을 다음 시도로 넘긴 것. L2a 는 #49097 의 전제(시도된 채 결과가 없는 도구 호출이 없다)를 실패와 writer 유실에도 쓴다. #47278 의 "자동 재시도 없음"은 걸음이 결론을 남기지 못한 리뷰 시도에 한해 바뀐다 |
 | RFC-0489 (Goal 검증) | Goal 검증도 같은 walk 를 쓴다(`goal_criterion_agent.ml:117`). L2a 는 walk 의 걸음과 결과를 바꾸지 않아서 Goal 검증은 그대로다. Goal 쪽에 같은 멈춤이 있는지는 보지 않았다 |
 | `docs/constitution.xml` 의 `AwaitingVerification` invariant | 자동 재시도를 이어 갈지는 실패의 typed 판정이 정한다. L2a 는 결과 모름으로 끝난 걸음도 그 판정을 저장하게 한다. 걸음이 결론을 남기지 못한 시도(취소, 프로세스 종료)는 그 조항에 없어서 문장을 더한다 |
-| `docs/verification-pipeline-policy.md` 4절 | "불확실하면 다음 시도를 만들지 않는다"와 "성공으로 끝난 실행의 판정 보고만 되살린다"를 L2a 가 고친다 |
 | `board-attention-asks-jev-once-per-event` (Draft) | fanout 이 직접 판정하는 길(#40521)이다. worker 도 같은 후보를 Jev 에게 물어서 두 길이 claim 을 두고 겨룬다. L1a 는 그 겨룸에서 root 가 다시 생기는 틈만 닫는다. 한 사건을 한 번만 묻게 하는 일은 그 RFC 에 남긴다 |
 | `provider-path-rest` (Draft) | #45003 의 좌가 이 RFC 범위다. 이 글은 다루지 않는다 |
 | `keeper-github-apps` (Draft) | #46691 의 좌. 지금 하지 않는다(10절 3번) |

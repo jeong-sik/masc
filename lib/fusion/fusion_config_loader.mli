@@ -7,9 +7,7 @@
 
     경로 해석은 [Config_dir_resolver]의 SSOT API([inputs_from_env]/[resolve_with]/
     [runtime_toml_filename])를 재사용한다 — 경로 리터럴을 복제하지 않는다
-    ([Keeper_runtime_config]의 내부 패턴과 동일).
-
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §9 *)
+    ([Keeper_runtime_config]의 내부 패턴과 동일). *)
 
 (** [runtime_toml_path ~base_path] returns the runtime.toml path resolved with
     the same Config_dir_resolver recipe used by [load]. *)

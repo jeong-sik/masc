@@ -89,7 +89,7 @@ val of_binding : config -> binding -> (t, drop_reason) result
     provider transport/protocol cannot be materialized into a
     {!Llm_provider.Provider_config.t} (e.g. a [messages-http]
     provider the runtime adapter has no provider_config path for). The binding is
-    still excluded from the runtime list (fail-closed, RFC-0206 §2.1); this
+    still excluded from the runtime list (fail-closed); this
     surfaces *why*, so [\[runtime\].default] / [\[runtime.assignments\]] / lane
     validation can report a dropped target's materialize failure instead of a
     bare "not found among N runtimes" that points at a non-existent typo.

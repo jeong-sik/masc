@@ -48,11 +48,11 @@ let grant_order ~priority_run_limit waiters =
   List.rev !granted
 ;;
 
-let test_without_a_limit_both_classes_share_arrival_order () =
+let test_without_a_limit_strict_class_ordering_applies () =
   check
     (list string)
-    "arrival order"
-    [ "B1"; "S1"; "P1"; "S2"; "B2"; "P2" ]
+    "strict priority > standard > background arrival order"
+    [ "P1"; "P2"; "S1"; "S2"; "B1"; "B2" ]
     (grant_order ~priority_run_limit:None [ "B1"; "S1"; "P1"; "S2"; "B2"; "P2" ])
 ;;
 
@@ -539,9 +539,9 @@ let () =
     "slot_scheduler_priority"
     [ ( "grant order"
       , [ test_case
-            "without a limit all classes share arrival order"
+            "without a limit strict class ordering applies"
             `Quick
-            test_without_a_limit_both_classes_share_arrival_order
+            test_without_a_limit_strict_class_ordering_applies
         ; test_case
             "standard precedes background with bounded service"
             `Quick

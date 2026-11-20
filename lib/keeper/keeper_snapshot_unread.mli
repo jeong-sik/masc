@@ -5,7 +5,7 @@
     the Keeper still exists -- its name was listed -- so the snapshot reports
     it here instead of leaving it out of [items]. Readers count these next to
     the rows: a Keeper that vanished from the list reads the same as one that
-    was never there (RFC-0462). *)
+    was never there. *)
 
 type reason =
   | Meta_read_failed of string

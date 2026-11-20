@@ -120,7 +120,7 @@ let handle_registered_tool_with_outcome
     then Some (masc_tool_mint_rejected ~keeper_name ~name ~reason)
     else None
   | Ok token ->
-    (* RFC-0084 §1.1 + §2.2 — keeper turn routes through guarded_dispatch so
+    (* Keeper turn routes through guarded_dispatch so
        pre-hook chain + telemetry 4-tuple emission cover keeper-originated
        calls. Exactly once. *)
     (match Tool_dispatch.guarded_dispatch ~token ~args () with

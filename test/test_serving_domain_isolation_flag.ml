@@ -1,5 +1,5 @@
 (** Unit tests for MASC_SERVING_DOMAIN_ENABLED and
-    Env_config.Transport.serving_domain_enabled (RFC-0204 Phase 3). *)
+    Env_config.Transport.serving_domain_enabled. *)
 
 open Alcotest
 

@@ -38,8 +38,7 @@ type prepared_flow =
   ; transport : prepared_transport
   ; cli_slots : string list
         (* Official-client runtime ids the lane walks after every catalog
-           slot is exhausted, carried from the resolved lane declaration
-           (RFC cli-runtimes-as-lane-slots). *)
+           slot is exhausted, carried from the resolved lane declaration. *)
   ; system_prompt : string
   ; context_bundle : Yojson.Safe.t
         (* Kept beside the frozen HTTP attempt because a cli one-shot has no
@@ -105,18 +104,8 @@ let prepare_flow
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
-  (* Which admitted exact-output slot this Keeper uses first for this lane.
-     Only here: the readiness check below asks whether the lane can run at all,
-     which is a workspace question with no Keeper in it. *)
-  let* (ordered : Runtime_exact_lane_backpressure.ordered) =
-    Keeper_exact_lane_preference.apply
-      ~base_path:entry.Keeper_approval_queue_rules_types.audit_base_path
-      ~keeper_name:entry.Keeper_approval_queue_rules_types.keeper_name
-      ~lane_id
-      resolved
-    |> Result.map_error (fun detail ->
-      "HITL exact-lane preference unavailable: " ^ detail)
-    |> Result.map Runtime_exact_lane_backpressure.order
+  let (ordered : Runtime_exact_lane_backpressure.ordered) =
+    Runtime_exact_lane_backpressure.order resolved
   in
   let resolved = ordered.lane in
   let* transport =

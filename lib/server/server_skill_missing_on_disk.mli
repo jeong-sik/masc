@@ -1,4 +1,4 @@
-(** RFC-0506: detect Skill names activated recently whose package is gone
+(** Detect Skill names activated recently whose package is gone
     from every catalog source, and record a structured [skill_missing_on_disk]
     warning. Observation only — a ghost is never blocked or restored. *)
 
@@ -14,7 +14,7 @@ type ghost =
             marker when the snapshot cannot resolve that source. *)
   }
 
-(** RFC-0506 §1: the activation window, in seconds (7 days). *)
+(** The activation window, in seconds (7 days). *)
 val window_seconds : float
 
 (** Structured event name recorded for one ghost. *)

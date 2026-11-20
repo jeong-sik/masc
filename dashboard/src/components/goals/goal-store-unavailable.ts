@@ -1,4 +1,4 @@
-// RFC-0444 §2.3 row 4: the Goal tree's alert block for a Goal store this
+// The Goal tree's alert block for a Goal store this
 // build cannot read. Draws the file, the reason (with the refused field), the
 // .last-good mirror status and the reset step in plain words.
 

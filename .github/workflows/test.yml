@@ -1,23 +1,8 @@
 name: Test
 
-# Explicit full or targeted behavior checks on the selected ref.
-#
-# The nightly schedule is the lane that covers what no pull request can
-# select: @check type-checks test/ but links and runs nothing, and the
-# pull-request gate runs only the suites that request edits, names or
-# calls. A behavioural regression outside that selection used to reach
-# main unrun and wait for the release-candidate lane; the nightly runs
-# the full behavioural suite once a day so it surfaces within ~24h, and
-# files red nights as an issue (label nightly-test-lane) so the failure
-# reaches someone. See #33008, which added the lane, and #40280, which
-# removed the schedule on 2026-09-30 and whose gap this restores.
+# Explicit full or targeted behavior checks on the selected ref. It runs
+# only when someone dispatches it or a caller workflow asks for it.
 on:
-  schedule:
-    # 17:43 UTC = 02:43 KST, off-peak for both GitHub runners and the team.
-    - cron: "43 17 * * *"
-    # Restored 2026-10-06: with the trigger gone, a behavioural regression
-    # outside the pull-request gate selection (the suites it edits, names
-    # or calls) reaches main and waits for the release-candidate lane.
   workflow_dispatch:
     inputs:
       suite:
@@ -59,9 +44,6 @@ on:
 
 permissions:
   contents: read
-  # The scheduled failure below files an issue. A dispatch never reaches
-  # that step, so this scope is unused on every other path.
-  issues: write
 
 concurrency:
   group: test-${{ github.run_id }}
@@ -263,7 +245,7 @@ jobs:
           # name.
           MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log
           # The targeted path, from the dispatch inputs; both are empty on
-          # the schedule and on a dispatch that names no suite.
+          # a dispatch that names no suite.
           MINIMAL_CHECK: ${{ inputs.minimal }}
           TARGET_SUITES: ${{ inputs.suite }}
           TARGET_EIO_BACKEND: ${{ inputs.eio_backend }}
@@ -381,105 +363,3 @@ jobs:
           path: ${{ runner.temp }}/ci-run-tests.log
           if-no-files-found: warn
           retention-days: 14
-
-      # The lane's whole point is that a test-only regression surfaces
-      # within ~24h. Without this step it surfaced only to whoever opened
-      # the Actions tab, which is how the 2026-09-05 hang (#33200) sat
-      # unread. Scheduled runs only: a dispatcher already sees their own
-      # run. Cancellation counts as a failure here because the job-level
-      # 180-minute cap is exactly what a hung suite hits.
-      - name: File the scheduled failure as an issue
-        if: (failure() || cancelled()) && github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # gh infers the repo from the checkout's git remote. This step also
-          # runs when the job failed before Checkout, where there is no remote
-          # to read, so name the repo outright.
-          GH_REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          label=nightly-test-lane
-          # --force is a no-op when the label already exists, so the first
-          # red night does not fail on a label nobody created yet.
-          gh label create "${label}" \
-            --color B60205 \
-            --description "야간 테스트 레인이 실패한 실행" \
-            --force
-          # Failing suites first: per-suite verdicts live only in the runner
-          # log, and an issue that only links the run leaves the next reader
-          # downloading artifacts to learn which suite broke. Then Dune
-          # errors for the compile-break case. Every extraction is guarded:
-          # a digest that finds nothing says so instead of failing the step
-          # or printing a misleading empty block.
-          runner_log="${RUNNER_TEMP}/ci-run-tests.log"
-          dune_log="${RUNNER_TEMP}/test-suite.log"
-          # An issue body holds 65536 characters; a run where most of the
-          # suite fails must still be filed.
-          max_listed_commands=200
-          # The runner log holds the runner's verdict and only the last 120
-          # lines of dune's output, so a suite that failed earlier in the run
-          # is not in it. The failing commands come from dune's full log.
-          # The digest script is absent when the job failed before Checkout.
-          failing='(no failing-suite lines extracted; see the suite-runner-log artifact.)'
-          verdict=''
-          if [ -s "$runner_log" ]; then
-            verdict=$(grep -a -E '\[test-suite\] FAIL|FAIL native\.fixture' "$runner_log" | head -n 30 || true)
-          fi
-          commands=''
-          if [ -s "$dune_log" ] && [ -f scripts/ci_failing_suites.py ]; then
-            all_commands=$(python3 scripts/ci_failing_suites.py "$dune_log" || true)
-            if [ -n "$all_commands" ]; then
-              command_count=$(printf '%s\n' "$all_commands" | wc -l | tr -d ' ')
-              commands=$(printf '%s\n%s' \
-                "failing commands: ${command_count} (failed Alcotest cases, then the command; at most ${max_listed_commands} are listed)" \
-                "$(printf '%s\n' "$all_commands" | head -n "${max_listed_commands}")")
-            fi
-          fi
-          if [ -n "$verdict" ] && [ -n "$commands" ]; then
-            failing=$(printf '%s\n%s' "$verdict" "$commands")
-          elif [ -n "$verdict" ]; then
-            failing="$verdict"
-          elif [ -n "$commands" ]; then
-            failing="$commands"
-          fi
-          errors='(no Dune error block extracted.)'
-          if [ -s "$dune_log" ]; then
-            hits=$(grep -a -B4 -A8 '^Error' "$dune_log" | awk 'BEGIN{RS="--\n"; ORS=""} !/failed to delete sandbox/ {print $0 "--\n"}' | grep -av '^--$' | head -n 60 || true)
-            [ -n "$hits" ] && errors="$hits"
-          fi
-          last_green=$(gh run list --workflow test.yml --event schedule --branch main --status success --limit 1 --json headSha,url --jq '"\(.[0].headSha[0:9]) \(.[0].url)"' 2>/dev/null || true)
-          [ -z "$last_green" ] && last_green='(no successful scheduled run found)'
-          # The taxonomy workflow comments on any issue with no declaration
-          # block, so this body carries one. A red lane is a ci defect that
-          # degrades and whose root is that nothing said so.
-          body=$(printf '%s\n\n%s\n%s\n%s\n\n%s\n\n%s\n%s\n%s\n\n%s\n\n%s\n%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-            "야간 테스트 레인이 \`${JOB_STATUS}\` 로 끝났습니다." \
-            "- 실행: ${RUN_URL}" \
-            "- 커밋: \`${GITHUB_SHA}\`" \
-            "- 마지막 green nightly: ${last_green}" \
-            "실패 스위트:" \
-            '```' \
-            "${failing}" \
-            '```' \
-            "Dune 에러:" \
-            '```' \
-            "${errors}" \
-            '```' \
-            '```masc-triage' \
-            "kind: defect" \
-            "area: ci" \
-            "impact: degrades" \
-            "must-do: false" \
-            '```')
-          existing=$(gh issue list --state open --label "${label}" \
-            --limit 1 --json number --jq '.[0].number // empty')
-          if [ -n "${existing}" ]; then
-            gh issue comment "${existing}" --body "${body}"
-            echo "commented on #${existing}"
-          else
-            gh issue create --label "${label}" \
-              --title "야간 테스트 레인이 빨갛습니다" \
-              --body "${body}"
-          fi

@@ -231,7 +231,7 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
        ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle ()
       : (unit, string) result)
 
-(* RFC-0226: inbound user line recorded at delivery time, before (and
+(* Inbound user line recorded at delivery time, before (and
    independent of) any turn. A single user line — the assistant reply,
    if one ever comes, is appended separately by the reply path. *)
 let append_user_message ~base_dir ~keeper_name ~(content : string)

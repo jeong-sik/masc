@@ -18,14 +18,14 @@
     (declaration-over-probing, the same contract as [connect_timeout_s]).
 
     Waiting for a permit is not pre-dispatch denial: no request is refused or
-    dropped. Waiters are granted in arrival order unless the endpoint also
-    declares [admission_priority_run_limit]; then a request whose
-    [admission_class] is [Priority] is granted ahead of [Standard] ones, up to
-    that many priority grants while a [Standard] request waits. Deferrable
-    [Background] requests receive a slot after that many foreground grants
-    while they wait, without erasing the priority debt owed to [Standard].
-    All classes share the endpoint's permit allowance. Retry policy remains
-    the consumer's responsibility.
+    dropped. Waiters are queued in strict [Priority > Standard > Background]
+    order (within each class, grants follow arrival order). When an endpoint
+    also declares [admission_priority_run_limit], a waiting [Standard] request
+    runs after that many [Priority] grants, and deferrable [Background] requests
+    receive a slot after that many foreground grants while they wait, without
+    erasing the priority debt owed to [Standard]. All classes share the
+    endpoint's permit allowance. Retry policy remains the consumer's
+    responsibility.
 
     Registry decisions are pure immutable transitions. Scheduler creation,
     diagnostics, snapshots, and permit waiting are performed after leaving
@@ -38,9 +38,10 @@
 
 (** [with_admission ~config f] runs [f] under the endpoint's concurrency
     permit when [config.max_concurrent_requests] is declared, and directly
-    otherwise. A waiting request queues as [config.admission_class] (one
-    shared queue when the endpoint declares no run limit); cancellation
-    while waiting does not leak a permit (see {!Slot_scheduler.with_permit}).
+    otherwise. A waiting request queues as [config.admission_class] in strict
+    [Priority > Standard > Background] order (bounded when the endpoint declares
+    a run limit); cancellation while waiting does not leak a permit (see
+    {!Slot_scheduler.with_permit}).
 
     On an identity whose allowance was published ({!publish}), the request
     runs under the published allowance, whatever [config] declares. On an
@@ -166,16 +167,6 @@ val with_admission_and_work_until
   :  ?wait:permit_wait Atomic.t
   -> clock:_ Eio.Time.clock
   -> deadline_at:float
-  -> config:Provider_config.t
-  -> (unit -> 'a)
-  -> ('a, deadline_expiry) result
-
-(** Opens the shared permit-wait and work deadline [timeout_s] seconds from
-    now on the explicitly supplied [clock]. *)
-val with_admission_and_work_for
-  :  ?wait:permit_wait Atomic.t
-  -> clock:_ Eio.Time.clock
-  -> timeout_s:float
   -> config:Provider_config.t
   -> (unit -> 'a)
   -> ('a, deadline_expiry) result

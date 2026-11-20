@@ -1,5 +1,4 @@
-(** The recall judgment flow
-    (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, sections 4.3 and 4.6):
+(** The recall judgment flow:
     which requests are sent, in which order, and what a refused request comes
     to.
 

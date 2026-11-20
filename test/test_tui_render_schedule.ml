@@ -22,8 +22,8 @@ let test_idle_has_no_render_work () =
   for offset = 1 to 1000 do
     check_idle "one second idle" (Schedule.take ~input_pending:false schedule ~now_ns:(ms offset))
   done;
-  check (float 0.000_001) "idle keeps the maximum input wait" 0.1
-    (Schedule.input_timeout_seconds schedule ~now_ns:(ms 1000) ~maximum:0.1)
+  check (option int64) "idle has no frame to wake for" None
+    (Schedule.frame_due_ns schedule ~now_ns:(ms 1000))
 
 let test_burst_coalesces_to_one_frame () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
@@ -51,8 +51,8 @@ let test_input_does_not_wait_for_recent_frame () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
   check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Input;
-  check (float 0.0) "first input does not sleep" 0.0
-    (Schedule.input_timeout_seconds schedule ~now_ns:1L ~maximum:0.1);
+  check (option int64) "first input does not sleep" (Some 1L)
+    (Schedule.frame_due_ns schedule ~now_ns:1L);
   check_render "keypress immediately after a background frame"
     (Schedule.take ~input_pending:false schedule ~now_ns:1L)
 
@@ -62,8 +62,8 @@ let test_separate_repeated_inputs_render_when_drained () =
   Schedule.request schedule Schedule.Input;
   check_render "first input is immediate" (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1));
   Schedule.request schedule Schedule.Input;
-  check (float 0.0) "handled input does not sleep for the frame deadline" 0.0
-    (Schedule.input_timeout_seconds schedule ~now_ns:(ms 6) ~maximum:0.1);
+  check (option int64) "handled input does not sleep for the frame deadline" (Some (ms 6))
+    (Schedule.frame_due_ns schedule ~now_ns:(ms 6));
   check_render "second drained input preempts the recent input frame"
     (Schedule.take ~input_pending:false schedule ~now_ns:(ms 6));
   check_idle "drained input is consumed once"
@@ -92,8 +92,8 @@ let test_continuous_input_is_paced_and_final_input_is_immediate () =
     (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1001));
   check_idle "no redraw or busy poll after the burst"
     (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1002));
-  check (float 0.0) "reader can block once input is presented" 0.1
-    (Schedule.input_timeout_seconds schedule ~now_ns:(ms 1002) ~maximum:0.1)
+  check (option int64) "reader can block once input is presented" None
+    (Schedule.frame_due_ns schedule ~now_ns:(ms 1002))
 
 let test_buffered_input_renders_when_drained () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
@@ -113,8 +113,10 @@ let test_dirty_timeout_wakes_at_deadline () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
   check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Background;
-  check (float 0.000_001) "deadline caps the select wait" 0.006
-    (Schedule.input_timeout_seconds schedule ~now_ns:(ms 10) ~maximum:0.1)
+  check (option int64) "a deferred frame wakes the wait at its slot" (Some (ms 16))
+    (Schedule.frame_due_ns schedule ~now_ns:(ms 10));
+  check (option int64) "a slot already passed is due now" (Some (ms 40))
+    (Schedule.frame_due_ns schedule ~now_ns:(ms 40))
 
 let test_overrun_leaves_a_window_to_consume_pending_input () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
@@ -125,8 +127,8 @@ let test_overrun_leaves_a_window_to_consume_pending_input () =
    | Schedule.Wait_until due -> check int64 "pace from completion" (ms 80) due
    | Schedule.Render -> fail "another slow frame displaced queued input"
    | Schedule.Idle -> fail "pending input was lost");
-  check (float 0.0) "queued input can be read immediately" 0.0
-    (Schedule.input_timeout_seconds schedule ~now_ns:(ms 65) ~maximum:0.1);
+  check (option int64) "queued input can be read immediately" (Some (ms 65))
+    (Schedule.frame_due_ns schedule ~now_ns:(ms 65));
   check_render "the last input does not wait for the new deadline"
     (Schedule.take ~input_pending:false schedule ~now_ns:(ms 66))
 
@@ -283,7 +285,7 @@ let test_interrupted_input_wait_retries_until_deadline () =
       Schedule.Input_wait.Ready 'A'
   in
   check (option char) "byte survives an interrupted wait" (Some 'A')
-    (Schedule.Input_wait.await ~now_ns:(fun () -> !now) ~timeout_ns:(ms 16)
+    (Schedule.Input_wait.await ~now_ns:(fun () -> !now) ~timeout_ns:(Some (ms 16))
        ~poll);
   check int "wait retried exactly once" 2 !polls;
   now := 0L;
@@ -292,8 +294,22 @@ let test_interrupted_input_wait_retries_until_deadline () =
     Schedule.Input_wait.Interrupted
   in
   check (option char) "deadline stops repeated interruptions" None
-    (Schedule.Input_wait.await ~now_ns:(fun () -> !now) ~timeout_ns:(ms 16)
-       ~poll:expired_poll)
+    (Schedule.Input_wait.await ~now_ns:(fun () -> !now) ~timeout_ns:(Some (ms 16))
+       ~poll:expired_poll);
+  (* With no deadline the wait has no end of its own: an interruption polls
+     again, with no time limit, until something answers. *)
+  let unbounded_polls = ref [] in
+  let unbounded_poll remaining =
+    unbounded_polls := remaining :: !unbounded_polls;
+    now := Int64.add !now (ms 1000);
+    if List.length !unbounded_polls < 3 then Schedule.Input_wait.Interrupted
+    else Schedule.Input_wait.Ready 'B'
+  in
+  check (option char) "an unbounded wait outlasts interruptions" (Some 'B')
+    (Schedule.Input_wait.await ~now_ns:(fun () -> !now) ~timeout_ns:None
+       ~poll:unbounded_poll);
+  check (list (option (float 0.))) "every poll of an unbounded wait has no limit"
+    [ None; None; None ] !unbounded_polls
 
 let test_quit_shortcut_does_not_steal_message_input () =
   check bool "q quits outside message input" true

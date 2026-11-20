@@ -328,7 +328,7 @@ let union_lines form =
       let label = match choice with
         | Some (index,alternative) -> chosen index count alternative
         | None -> Printf.sprintf "none of %d chosen" count in
-      [(if focus form=Some Choice then "> " else "  ") ^ "Alternative: " ^ label]
+      [(if focus form=Some Choice then "› " else "  ") ^ "Alternative: " ^ label]
 let rec lines ?(show_description=false) form =
   match form.array_editor with
   | Some editor ->
@@ -370,7 +370,7 @@ let rec lines ?(show_description=false) form =
      | Some field ->
          let name = match member "title" field.schema with Some (`String title) -> title
            | _ -> String.concat "." field.path in
-         ["> " ^ name ^ (if field.required then " *" else "") ^ ": " ^
+         ["› " ^ name ^ (if field.required then " *" else "") ^ ": " ^
           (match form.draft with
            | Some draft -> display_draft field draft
            | None -> Option.fold ~none:"(unset)" ~some:Yojson.Safe.to_string field.value)])

@@ -189,7 +189,7 @@ let is_empty_completion_error (err : Agent_core.Error.t) : bool =
      test-only), so the substring guard that used to sit here matched
      nothing. If a future Agent Core promotes empty completions to
      [ParseError], that pin update is the place to classify them — as a
-     typed shape, not a message substring (RFC-0371 §3.7). *)
+     typed shape, not a message substring. *)
   | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
   | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
   | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
@@ -538,7 +538,7 @@ let is_invalid_request_error : Agent_core.Error.t -> bool = function
 (* Classification-only predicate: does this failure class describe a
    condition a later turn could clear without operator action?
 
-   RFC turn-failure-visible-stop (#32105): this predicate has NO crash
+   (#32105) This predicate has NO crash
    accounting authority. Every turn failure advances the durable
    crash-accounting streak in [Keeper_unified_turn_failure] regardless of
    class; the next successful turn (or an operator clear) resets it. The

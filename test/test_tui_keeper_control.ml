@@ -47,7 +47,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
 let complete rows = Control.roster_of_reading
     ~errors:[] ~rows ~truncated:false ~total:(List.length rows)
 
-(* RFC-0481 §3.3: a signal names one Keeper, and its read replaces that row. *)
+(* A signal names one Keeper, and its read replaces that row. *)
 let row_names rows = List.map (fun (row : Decode.keeper_runtime) -> row.kr_name) rows
 
 let spliced roster ~keeper_name reading =
@@ -1058,7 +1058,7 @@ let test_item_revision_hint_preserves_keeper_observation () =
      :: List.map (decode ~candle:ready)
           [`Null; `Int 1; `String "short"; `String (String.make 64 'A')])
 
-(* RFC-0481 §3.7: a ready Candle comes with the fold's basis and the other two
+(* A ready Candle comes with the fold's basis and the other two
    come without one. Any other pairing is a Candle failure that keeps the
    Keeper rows and their lifecycle actions. *)
 let test_roster_candle_reading_pairs_status_and_basis () =

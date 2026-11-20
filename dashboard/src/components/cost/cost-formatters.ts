@@ -1,4 +1,4 @@
-// RFC-0050 PR-1 — extracted from cost-dashboard.ts.
+// Extracted from cost-dashboard.ts.
 // Pure formatting helpers. No render dependencies.
 
 /**

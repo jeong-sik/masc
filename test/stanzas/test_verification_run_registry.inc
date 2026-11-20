@@ -1,4 +1,4 @@
-; RFC-0361 D4 — every completion-authority review outcome, including the ones
+; Every completion-authority review outcome, including the ones
 ; that produce no verdict, survives write and replay with its cause intact.
 
 (test

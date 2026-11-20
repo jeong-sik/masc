@@ -231,7 +231,7 @@ let examine_event_queue (config : Workspace.config) examination =
     discovery.keeper_names
 ;;
 
-(* RFC-0444 §2.3 row 8. Read only: nothing is created, repaired or moved,
+(* Read only: nothing is created, repaired or moved,
    and [load_source] logs nothing itself, so this is the one line. *)
 let examine_goal_store (config : Workspace.config) =
   match Goal_store.load_source config with

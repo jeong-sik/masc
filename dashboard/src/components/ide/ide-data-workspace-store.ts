@@ -229,7 +229,7 @@ const UNREACHABLE_WORKSPACE_SOURCES: ReadonlySet<string> = new Set([
   'repository_unknown',
 ])
 
-// RFC-0378 §5.4: the viewer's explicit choice is the only selection
+// The viewer's explicit choice is the only selection
 // authority — nothing infers "the repo the human cares about" from path
 // shape. The choice persists per viewer; when neither the live selection
 // nor the persisted one is usable, the honest answer is no selection.
@@ -489,7 +489,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       workspaceSourceSignal.value = source
       workspaceBasePathSignal.value = basePath
 
-      // Self-healing without guessing (RFC-0378 §5.4): when the selected
+      // Self-healing without guessing: when the selected
       // repo is unreachable, fall back to the persisted choice if it is
       // still usable — otherwise clear the selection. The empty state is
       // the honest answer; auto-switching to "the next preferred repo"

@@ -1,4 +1,4 @@
-(** Open pull requests of the registered GitHub repositories (RFC-0465 §2-§4).
+(** Open pull requests of the registered GitHub repositories.
 
     The server reads every repository registered in
     [.masc/config/repositories.toml] whose remote is on the configured GitHub

@@ -1,4 +1,4 @@
-(** Voice audio clip HTTP surface (RFC-0235 P1).
+(** Voice audio clip HTTP surface.
 
     See {!Server_routes_http_routes_voice} for the full contract
     (capability-token URLs, raw-bytes response, 24h TTL reaping). *)

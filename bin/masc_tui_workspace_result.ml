@@ -47,7 +47,9 @@ let publish results token message =
        | None -> ()
        | Some pending ->
          let after = Open { pending; ready_rev = ready :: state.ready_rev } in
-         if not (Atomic.compare_and_set results before after) then commit ()) in
+         if Atomic.compare_and_set results before after
+         then Masc_tui_wake.(ring loop Workspace_result)
+         else commit ()) in
   commit ()
 
 let publish_progress results token message =
@@ -59,7 +61,9 @@ let publish_progress results token message =
     | Open state ->
       if List.exists (fun held -> held==token) state.pending then
         let after=Open {state with ready_rev=ready::state.ready_rev} in
-        if not (Atomic.compare_and_set results before after) then commit () in
+        if Atomic.compare_and_set results before after
+        then Masc_tui_wake.(ring loop Workspace_result)
+        else commit () in
   commit ()
 
 let take_ready results =

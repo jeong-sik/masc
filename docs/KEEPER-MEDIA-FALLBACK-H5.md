@@ -239,9 +239,8 @@ coding session. Syntax checks are not behavior evidence. A real PDF extraction,
 STT endpoint, model response, restart and installed-binary continuity run remain
 separate evidence requirements.
 
-Attached MCP decoder, Gate and approval-sidecar cases are recorded in the
-[MCP candidate evidence](evidence/2026-11-16-farm-mcp-content/README.md). They are
-written source cases, not executed service/provider or restart evidence.
+Attached MCP decoder, Gate and approval-sidecar cases are written source cases,
+not executed service/provider or restart evidence.
 
 Request-time projection covers structured media in the selected Keeper-history
 view. It does not cover media introduced later by the caller's custom history

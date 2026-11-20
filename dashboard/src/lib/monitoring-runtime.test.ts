@@ -205,7 +205,7 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toBe('turn timed out after queue wait')
   })
 
-  // RFC-0135 PR-12 — stale-vs-live blocker via composite SSOT.
+  // stale-vs-live blocker via composite SSOT.
   describe('composite stale-blocker conditioning', () => {
     const keeper = {
       name: 'keeper-stale',

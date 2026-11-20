@@ -7,7 +7,7 @@ import { FusionBoardEvidence } from './fusion-evidence'
 afterEach(() => cleanup())
 
 // Build a current Fusion board post whose typed origin owns run identity and
-// whose meta carries the RFC-0284 `judges` observation array.
+// whose meta carries the `judges` observation array.
 function fusionPost(judges: unknown) {
   return {
     meta: {

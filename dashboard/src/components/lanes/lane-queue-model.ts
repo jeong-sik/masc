@@ -1,5 +1,5 @@
-// Lane · Queue panel — pure derivations and presentation vocabulary for
-// prototypes/keeper-v2/lanes.jsx, wired to live read models:
+// Lane · Queue panel — pure derivations and presentation vocabulary,
+// wired to live read models:
 //
 //   · 진행 타임라인 (sw-*)   — composite observations accumulated from the
 //     fleet composite snapshot stream (`/api/v1/keepers/composite`, the same

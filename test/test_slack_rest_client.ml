@@ -1,4 +1,4 @@
-(* RFC-0317 Slack_rest_client pure-helper tests.
+(* Slack_rest_client pure-helper tests.
 
    Verifies request shape and response classification without any HTTP
    round trip. *)

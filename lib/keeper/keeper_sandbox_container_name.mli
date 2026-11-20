@@ -23,7 +23,7 @@ type spec =
           its case and original helper spelling while bounding long names. *)
   | Micro_vm_volume_repair of { keeper_name : string }
       (** The one-shot helper that runs [e2fsck] on a Keeper's image-backed
-          volume (RFC keeper-volume-filesystem-repair §3.3). Stable, so a
+          volume. Stable, so a
           repair finds and removes one a dead server left behind. *)
   | Micro_vm_volume_claim of { keeper_name : string }
       (** The one-shot helper that reads and writes the work volume's claims

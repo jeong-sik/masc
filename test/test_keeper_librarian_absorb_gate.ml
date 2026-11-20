@@ -1927,7 +1927,7 @@ let test_a_statement_too_large_to_judge_keeps_its_memory_current () =
     (not (List.exists (fun s -> String.length s > Gate.request_bytes_limit) !asked))
 ;;
 
-(* --- The reverse question (RFC-0463 section 2.8) --- *)
+(* --- The reverse question --- *)
 
 (* Two copies of one lesson and a claim that tried to fold them. Forward
    judgments consume complete sources; reverse judgments consume claim statements. *)
@@ -2376,7 +2376,7 @@ let test_a_statement_never_asked_is_told_apart_from_one_not_conveyed () =
     Alcotest.fail "a statement asked and not conveyed is a new statement"
 ;;
 
-(* The runtime leaves a copy out of what it saves (RFC-0463 section 2.8):
+(* The runtime leaves a copy out of what it saves:
    a real Librarian answer through [run_best_effort], a judge that conveys
    no memory statement forward and every claim statement back. The claim
    is not saved, and the memories it named stay current. Without the

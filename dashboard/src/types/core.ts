@@ -167,7 +167,7 @@ export interface BoardActorIdentity {
 }
 
 /**
- * RFC-0233 §7: originating-turn provenance of a board post. `turn_ref` is the
+ * originating-turn provenance of a board post. `turn_ref` is the
  * join key "<trace_id>#<absolute_turn>" identical to the chat row the same turn
  * produced (board post -> exact chat turn navigation). `fusion_run_id` is the
  * distinct fusion run correlation id. All optional: legacy/system posts have no
@@ -740,7 +740,7 @@ export interface KeeperToolApprovalPending {
   settled: boolean
 }
 
-// RFC-0232 P2: producer-typed turn outcome carried in the reply payload
+// producer-typed turn outcome carried in the reply payload
 // (`turn_outcome`). `continuation_checkpoint` marks a resume-next-cycle
 // boundary, `external_effect_pending` marks a durable control wait,
 // `external_effect_completed` marks a reply delivered by an external
@@ -824,7 +824,7 @@ export type KeeperUserInputBlock =
   | { type: 'image'; url: string; mimeType?: string }
   | { type: 'image'; fileId: string; mimeType?: string }
 
-// RFC-0235 P1: synthesized voice clip attached to an assistant chat row.
+// Synthesized voice clip attached to an assistant chat row.
 // `audioUrl` is the absolute/relative URL the dashboard uses for playback;
 // `token` is the capability in `/api/v1/voice/audio/<token>` used as a
 // fallback when the backend did not emit a full URL.
@@ -938,7 +938,7 @@ export type ChatLinkBlock = { t: 'link'; url: string; title: string; desc?: stri
 export type ChatBroadcastAck = 'acked' | 'read' | 'delivered' | string
 export type ChatBroadcastRecipient = { id: string; ack: ChatBroadcastAck; at?: string }
 export type ChatBroadcastBlock = { t: 'broadcast'; scope: string; via?: string; note: string; recipients: ChatBroadcastRecipient[] }
-// RFC-0252: a reference from a keeper chat message to a fusion deliberation's
+// A reference from a keeper chat message to a fusion deliberation's
 // board post. Carries only ids (snake_case to match the backend wire shape in
 // keeper_chat_blocks.ml); ChatFusionCard lazy-fetches the board post by
 // board_post_id and renders its meta_json (panel answers + judge synthesis).
@@ -1053,7 +1053,7 @@ export interface KeeperConversationEntry {
   text: string
   rawText?: string | null
   timestamp?: string | null
-  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" correlation key.
+  // MASC-minted "<trace_id>#<absolute_turn>" correlation key.
   // Carries the originating turn for trace attachment; it is not row identity.
   turnRef?: string | null
   // Exact append-once identity for history reconciliation. This preserves the
@@ -1484,7 +1484,7 @@ export interface Keeper {
     context_ratio?: number | null
     context_tokens?: number | null
     context_max?: number | null
-    // Provenance of a turn_record-sourced measurement (RFC-0233): which
+    // Provenance of a turn_record-sourced measurement: which
     // completed turn produced the numbers and its serialized request size.
     observed_at?: string | null
     turn_ref?: string | null
@@ -1551,7 +1551,7 @@ export interface KeeperConstitutionRejectedLine {
 
 // A constitution ledger line that decoded but was written under a name the
 // keeper roster does not hold (its author, remover or replacer), so the
-// prompt leaves out the article ids it touches (RFC-0504 §2.4).
+// prompt leaves out the article ids it touches.
 export interface KeeperConstitutionIsolatedLine {
   line: number
   subject: string
@@ -1595,7 +1595,7 @@ interface KeeperConfigExecution {
   selected_runtime_canonical: string
   runtime_options: string[]
   /** Declared `[runtime.lanes.<id>]` lane ids. An assignment may name one
-   *  instead of a runtime (RFC-0457); the server resolves lanes first. */
+   *  instead of a runtime; the server resolves lanes first. */
   lane_options: string[]
 }
 

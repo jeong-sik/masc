@@ -773,7 +773,7 @@ type binding_writer = store:Lane_addon_store.t -> instance_id:string -> Yojson.S
   (unit, Lane_addon_store.binding_write_error) result
 let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
 (* Every binding write names the held observation, if any, so the write that
-   lands is its commit (RFC lane-addon-observation-commits-at-the-binding).
+   lands is its commit.
    A write that fails after its rename is visible and commits too: the staged
    writer's contract converges memory before propagating [After_rename].
    Whichever write commits, the commit converges, applies the held settle to
@@ -1186,8 +1186,8 @@ let host_status_json status =
       `Assoc ["request_id", `String request_id; "reason", reason]) status.waiting);
     "issue", Option.fold ~none:`Null ~some:host_issue_to_json status.issue]
 
-(* The frame the worker connection accepts is the package's [max_reply_bytes]
-   (RFC-0471 row 1). What is measured is the arguments object the host sends;
+(* The frame the worker connection accepts is the package's [max_reply_bytes].
+   What is measured is the arguments object the host sends;
    the JSON-RPC envelope around it is not counted. *)
 (* One cycle (RFC operator-quiz §4.4): list, deliver what is final or try each
    request once, list again until a listing delivers nothing. The host keeps
@@ -3124,7 +3124,7 @@ let historical_detach ~sw ?(wait = false) m fields =
     Ok (detaching, if not wait then Started else
           match !finished with Some state -> Finished state | None -> In_progress)
 (* The operator takes over the resources of a native instance whose cleanup
-   could not be confirmed (docs/design/browser-addon-lifecycle.md). The host
+   could not be confirmed. The host
    still confirms what it can observe, in [native_retain]. What it cannot
    observe, an allocation's contents, is not inferred: the
    record says the operator took it over, and the declaration may start a new
@@ -3490,7 +3490,7 @@ let superseded_count m (reading : retained_reading) =
     ~owner_faulted:(fun (o : Lane_addon_superseded.owner) ->
       blocking_faults ~id:o.id ~source_path:o.source_path reading.faults <> [])
     (List.map superseded_binding reading.readable)
-(* RFC-0497 sections 4.3 and 4.4: what one configuration pass removes, planned
+(* What one configuration pass removes, planned
    under the configuration lock from the folders listed before [reading] and
    the instances this process holds at that moment. *)
 type superseded_removal = { bindings : string list; folders : Lane_addon_store.instance_folder list }
@@ -4479,7 +4479,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     let live_for id = List.filter (fun e -> owned e id) (entries m) in
     let root_switch = match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
-    (* RFC-0497 section 4.3: the folders are listed before the bindings are
+    (* The folders are listed before the bindings are
        read, so a folder listed here belongs to a binding this reading holds
        unless that binding is gone. *)
     let folders = offload (fun () -> Lane_addon_store.instance_folders m.store) in
@@ -4911,7 +4911,7 @@ let start_configuration_service ~config ~sw ~clock =
       m.configuration_nudge <- (fun () -> ()));
     Pulse.run ~sw pulse)
 
-(* RFC lane-addon-shutdown-detaches-native-instances §3. The binary that
+(* The binary that
    wrote a native cleanup descriptor settles it, so the next server finds a
    Detached record and attaches instead of retiring the record. Configuration
    maintenance stops first: a settled Detach nudges reconciliation, and an

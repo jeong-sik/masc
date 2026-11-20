@@ -1,4 +1,4 @@
-(* RFC-0266 §7 Phase 3 — masc_fusion_status tool.
+(* masc_fusion_status tool.
 
    Two failure modes a stub could introduce while still compiling:
 

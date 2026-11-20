@@ -93,6 +93,7 @@ module For_testing : sig
 end
 
 val run :
+  ?on_guidance_prepared:(unit -> (unit, Agent_core.Error.t) result) ->
   input_source:Keeper_request_source.t ->
   media_store:Agent_core.History.media_store ->
   ?argument_source:Keeper_official_client_host.argument_source ->

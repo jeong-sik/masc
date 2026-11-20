@@ -2,8 +2,7 @@
    under the config/prompts/keeper.gate_replay prefix; without a loaded
    registry the
    execution path falls back to bare data and the wording assertions below
-   see nothing. Same repo-root idiom test_tool_task_coverage uses — that
-   executable passes inside the CI sandbox, so the mechanism is CI-proven. *)
+   see nothing. *)
 let () =
   Masc.Prompt_defaults.init ()
 ;;
@@ -1782,7 +1781,7 @@ let test_queue_writes_advance_the_projection_revision () =
          (AQ.store_revision_for_workspace ~base_path > after_enqueue))
 ;;
 
-(* RFC-0422 §3.3: what the box refused is written on the row and read back
+(* What the box refused is written on the row and read back
    after a restart, so the judge that runs later sees what the gate saw. *)
 let test_an_observation_survives_the_row_round_trip () =
   let base_path = temp_dir () in
@@ -4932,117 +4931,6 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-(* A stricter keeper override can hold one keeper in auto_judge above an
-   always_allow workspace. Boot recovery admits owners by their EFFECTIVE
-   mode, so that keeper's queue is still served — the old workspace-mode
-   short-circuit recovered nothing for it, leaving its approvals queued
-   with nothing sweeping them. *)
-let test_override_only_auto_judge_owner_is_recovered () =
-  let base_path = temp_dir () in
-  let keeper_name = "queue-override-island" in
-  let bystander = "queue-workspace-loose" in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       let config = Masc.Workspace.default_config base_path in
-       (match
-          Masc.Keeper_gate_mode.set config ~actor:"test"
-            Masc.Keeper_gate_mode.Always_allow
-        with
-        | Ok _ -> ()
-        | Error e -> Alcotest.fail e);
-       (match
-          Masc.Keeper_gate_mode.set_for_keeper config ~actor:"test"
-            ~keeper_name
-            (Some Masc.Keeper_gate_mode.Auto_judge)
-        with
-        | Ok _ -> ()
-        | Error e -> Alcotest.fail e);
-       let id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "request", `String "override-island" ])
-       in
-       let bystander_id =
-         submit
-           ~base_path
-           ~keeper_name:bystander
-           ~input:(`Assoc [ "request", `String "workspace-loose" ])
-       in
-       let report = Gate.resume_persisted_auto_judges ~base_path in
-       Alcotest.(check int)
-         "only the override-held owner is a recovery candidate"
-         1
-         report.requested;
-       Alcotest.(check bool)
-         "override owner's entry was picked up"
-         true
-         (List.mem id (report.started_ids @ report.finalized_ids)
-          || List.exists
-               (fun (failure : Gate.auto_judge_resume_failure) ->
-                  String.equal failure.approval_id id)
-               report.failures);
-       Alcotest.(check bool)
-         "workspace-loose bystander stays pending, untouched by auto-judge"
-         true
-         (Option.is_some
-            (AQ.For_testing.get_pending_entry_unchecked ~id:bystander_id)))
-;;
-
-(* The operator recovery entry point shares the sweep's per-owner admission
-   (#31321 residue): on an always_allow workspace with one keeper pinned to
-   auto_judge, the old workspace-mode guard refused with "requires auto_judge
-   mode" — the exact stalled-owner configuration the escape hatch exists
-   for. It must now run and report, not refuse. *)
-let test_operator_recovery_admits_override_only_workspace () =
-  let base_path = temp_dir () in
-  let keeper_name = "queue-recovery-override" in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       let config = Masc.Workspace.default_config base_path in
-       (match
-          Masc.Keeper_gate_mode.set config ~actor:"test"
-            Masc.Keeper_gate_mode.Always_allow
-        with
-        | Ok _ -> ()
-        | Error e -> Alcotest.fail e);
-       (match
-          Masc.Keeper_gate_mode.set_for_keeper config ~actor:"test"
-            ~keeper_name
-            (Some Masc.Keeper_gate_mode.Auto_judge)
-        with
-        | Ok _ -> ()
-        | Error e -> Alcotest.fail e);
-       let id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "request", `String "recovery-override" ])
-       in
-       ignore id;
-       (* This fixture publishes no exact-output registry, so the call may
-          stop at the later topology-readiness gate; the regression under
-          test is only the FIRST gate — the workspace-mode refusal that
-          used to fire before any per-owner resolution. *)
-       match Gate.request_operator_auto_judge_recovery ~base_path with
-       | Ok _ -> ()
-       | Error e ->
-           Alcotest.(check bool)
-             ("refusal is not the workspace-mode guard: " ^ e)
-             false
-             (String_util.contains_substring e "requires auto_judge mode"))
-;;
-
 let test_current_snapshot_rejects_unbound_available_summary () =
   let base_path = temp_dir () in
   let keeper_name = "queue-recovered-exact-unbound" in
@@ -8165,14 +8053,6 @@ let () =
               "exact restart finalization requires fsync"
               `Quick
               test_exact_completed_restart_requires_fsync_confirmation
-        ; Alcotest.test_case
-            "override-only auto_judge owner is recovered"
-            `Quick
-            test_override_only_auto_judge_owner_is_recovered
-        ; Alcotest.test_case
-            "operator recovery admits an override-only workspace"
-            `Quick
-            test_operator_recovery_admits_override_only_workspace
         ; Alcotest.test_case
             "current snapshot rejects unbound available summary"
             `Quick

@@ -2,7 +2,7 @@ module String_set = Set_util.StringSet
 
 (* A live blob is named either by a tool artifact reference, which carries
    the media type a manifest is recognised by, or by a history [Stored] media
-   source (RFC-0476), which names only digest and length. *)
+   source, which names only digest and length. *)
 type live_reference =
   | Artifact of Tool_output.artifact_ref
   | History_media of Agent_core_base.History.stored

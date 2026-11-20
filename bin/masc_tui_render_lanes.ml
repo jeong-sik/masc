@@ -87,13 +87,13 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
   let last_run = standalone_lane_last_run ~ko ~now lane in
   match lane.sl_configuration_state, lane.sl_status with
   | Tui_decode.Lane_registry_unavailable, _ ->
-    t "오류 — 런타임 레지스트리를 읽을 수 없음"
-      "Error — the runtime registry could not be read"
+    t "오류 · 런타임 레지스트리를 읽을 수 없음"
+      "Error · the runtime registry could not be read"
   | Tui_decode.Lane_unconfigured, _ ->
-    t "미설정 — 지정된 모델 후보가 없음" "Not configured — no model candidate is named"
+    t "미설정 · 지정된 모델 후보가 없음" "Not configured · no model candidate is named"
   | Tui_decode.Lane_slotless, _ ->
-    t "실행 불가 — 설정된 후보 중 사용 가능한 모델이 없음"
-      "Cannot run — no configured candidate is usable"
+    t "실행 불가 · 설정된 후보 중 사용 가능한 모델이 없음"
+      "Cannot run · no configured candidate is usable"
   | Tui_decode.Lane_off, _ | _, Tui_decode.Standalone_off ->
     if lane.sl_running_count > 0 then
       Printf.sprintf
@@ -105,7 +105,7 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
         (if ko then "꺼짐 (신규 실행 중지) · %s" else "Off (no new runs) · %s")
         last_run
   | Tui_decode.Lane_ready, Tui_decode.Standalone_degraded ->
-    Printf.sprintf (if ko then "주의 필요 — %s" else "Needs attention — %s") last_run
+    Printf.sprintf (if ko then "주의 필요 · %s" else "Needs attention · %s") last_run
   | Tui_decode.Lane_ready, Tui_decode.Standalone_running ->
     let started_note =
       match lane.sl_last_started_at with
@@ -119,7 +119,7 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
         Printf.sprintf (if ko then "%d건 진행 중" else "%d running")
           lane.sl_running_count
     in
-    Printf.sprintf (if ko then "실행 중 — %s · %s" else "Running — %s · %s")
+    Printf.sprintf (if ko then "실행 중 · %s · %s" else "Running · %s · %s")
       started_note last_run
   | Tui_decode.Lane_ready, Tui_decode.Standalone_idle ->
     Printf.sprintf (if ko then "모델 설정됨 · %s" else "Models configured · %s")
@@ -212,7 +212,7 @@ let standalone_lane_summary_lines state ~width ~standing
     | Lane_ready | Lane_slotless -> text "켜짐" "On"
     | Lane_off -> text "꺼짐" "Off"
     | Lane_unconfigured -> text "실행 후보 미설정" "No candidates configured"
-    | Lane_registry_unavailable -> text "레지스트리 미관측" "Registry not observed" in
+    | Lane_registry_unavailable -> text "레지스트리 조회 실패" "Registry unreadable" in
   let current = if lane.sl_running_count = 0 then text "보고된 실행 없음" "No runs reported"
     else Printf.sprintf (if state.ui_language = Lang_ko then "%d건 실행 관측" else "%d runs observed") lane.sl_running_count in
   let notices = Option.to_list (Option.map (fun error -> Theme.bad (),
@@ -244,13 +244,13 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
               Option.to_list (Option.map (fun error -> Theme.bad (), error) c.admission_error)
           | Disabled _ -> text "꺼짐" "Off", text "새 실행 중지" "New runs disabled", []
           | Unconfigured detail -> text "미설정" "Not configured", detail, []
-          | Registry_unavailable detail -> text "미관측" "Not observed", detail, [] in
+          | Registry_unavailable detail -> text "조회 실패" "Read failed", detail, [] in
         let actions = match row.selection with
           | Exact lane -> exact_lane_overview_actions state lane
           | Browser _ | Machine _ | Declaration _ | Manual_instance _ -> [] in
         [field (text "모델 설정" "Model configuration") declared;
          field (text "실행 준비" "Admission") applied;
-         field (text "실행 기록" "Run history") (text "미관측" "Not observed")],
+         field (text "실행 기록" "Run history") (text "미조회" "Not read")],
         errors, actions
     | Browser_clients reading ->
         let connection, notices = match reading with
@@ -267,7 +267,7 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
         let declared = match activity with
           | Machine_enabled -> text "켜짐" "On"
           | Machine_disabled -> text "꺼짐 · 머신 상태 보존" "Off; machine state retained"
-          | Machine_unobserved -> text "미관측" "Not observed" in
+          | Machine_unobserved -> text "보고 안 됨" "Not reported" in
         let publication = match publication with
           | No_screen -> text "게시된 화면 없음" "No screen published"
           | Stable -> text "보존된 화면 안정 상태" "Published screen stable"
@@ -279,9 +279,9 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
     | Package_state {declaration; instances} ->
         let declared, application, errors = match declaration with
           | None -> text "수동 연결 · 선언 파일 없음" "Manual attachment; no declaration file", text "선언 적용 대상 아님" "No declaration application", []
-          | Some Absent -> text "선언 파일 없음" "Declaration absent", text "미관측" "Not observed", []
-          | Some Unobserved -> text "디렉터리 읽기 미완료" "Directory not fully observed", text "미관측" "Not observed", []
-          | Some (Invalid messages) -> text "선언 오류" "Invalid declaration", text "미확인" "Unconfirmed",
+          | Some Absent -> text "선언 파일 없음" "Declaration absent", text "적용할 선언 없음" "No declaration to apply", []
+          | Some Unobserved -> text "디렉터리 읽기 미완료" "Directory not fully observed", text "보고 안 됨" "Not reported", []
+          | Some (Invalid messages) -> text "선언 오류" "Invalid declaration", text "보고 안 됨" "Not reported",
               List.map (fun message -> Theme.bad (), message) messages
           | Some (Valid value) ->
               let application, errors = match value.application with
@@ -290,7 +290,7 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
                 | Cleaning_workers -> text "이전 워커 정리 중" "Previous workers being cleaned", []
                 | Inactive -> text "워커 정리 확인" "Worker cleanup confirmed", []
                 | Failed messages -> text "적용 실패" "Application failed", List.map (fun message -> Theme.bad (), message) messages
-                | Unknown messages -> text "적용 미확인" "Application unconfirmed", List.map (fun message -> Theme.warn (), message) messages in
+                | Unknown messages -> text "적용 일부 관측" "Application partly read", List.map (fun message -> Theme.warn (), message) messages in
               (if value.enabled then text "켜짐" "On" else text "꺼짐" "Off"), application, errors in
         let live = List.filter (fun (item : instance) -> match item.presence with Live -> true | Retained -> false) instances in
         let phase_label = function
@@ -355,7 +355,7 @@ let standalone_lane_without_slot_rows ~ko (lane : Tui_decode.standalone_lane) =
     without.slws_vendor_system_one
   @ counted (t "서버 재시작으로 중단" "stopped by a server restart")
       without.slws_server_restarted
-  @ counted (t "슬롯 미기록" "no slot recorded") without.slws_no_slot
+  @ counted (t "슬롯 기록 없음" "no slot recorded") without.slws_no_slot
   @ gap
 
 (* A candidate list is a numbered list; none is the word for none, receded. *)
@@ -522,11 +522,11 @@ let render_exact_lane_provider_editor (state : state) editor =
   (match state.runtime_lane_write with
    | Masc_tui_types.Lane_write_posting ->
      box_line_styled buf cols ~style:(Theme.info ())
-       (ui_text state ~ko:"  후보 순서 저장 중…" ~en:"  Saving candidate order...")
+       (ui_text state ~ko:"  후보 순서 저장 중" ~en:"  Saving candidate order")
    | Masc_tui_types.Lane_write_rereading _ ->
      box_line_styled buf cols ~style:(Theme.info ())
-       (ui_text state ~ko:"  현재 후보 순서 조회 중…"
-          ~en:"  Reading current candidate order...")
+       (ui_text state ~ko:"  현재 후보 순서 조회 중"
+          ~en:"  Reading current candidate order")
    | Masc_tui_types.Lane_write_idle -> ());
   let picker =
     Masc_tui_types.runtime_picker_projection
@@ -537,11 +537,11 @@ let render_exact_lane_provider_editor (state : state) editor =
      let action = match picker.Masc_tui_types.rlp_pick with
        | Masc_tui_types.Pick_exact_lane_replacement _ ->
            ui_text state ~ko:"선택한 후보 교체" ~en:"Replace selected candidate",
-           ui_text state ~ko:"Enter 교체" ~en:"Enter replace"
+           ui_text state ~ko:"Enter:교체" ~en:"Enter:replace"
        | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
        | Pick_new_lane _ ->
            ui_text state ~ko:"후보 추가" ~en:"Add fallback candidate",
-           ui_text state ~ko:"Enter 추가" ~en:"Enter add" in
+           ui_text state ~ko:"Enter:추가" ~en:"Enter:add" in
      box_line_styled buf cols ~style:(Theme.info ())
        ("  " ^ fst action);
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -582,7 +582,7 @@ let render_exact_lane_provider_editor (state : state) editor =
             let line bracket note =
               Printf.sprintf "  %s [%s] %s%s"
                 (if picker.Masc_tui_types.rlp_selected_row = Some offset
-                 then ">" else " ")
+                 then "›" else " ")
                 bracket
                 (Masc_tui_types.runtime_model_picker_title runtime)
                 note
@@ -691,7 +691,7 @@ let render_exact_lane_provider_editor (state : state) editor =
               in
               let line =
                 Printf.sprintf "  %s %d/%d  [%s] %s%s"
-                  (if Some index = selected_index then ">" else " ")
+                  (if Some index = selected_index then "\xe2\x80\xba" else " ")
                   (index + 1) count kind
                   (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
                      String.equal runtime.ro_id row.Masc_tui_types.sr_slot) catalog with
@@ -705,8 +705,8 @@ let render_exact_lane_provider_editor (state : state) editor =
               else box_line buf cols line));
      if entries <> [] && Option.is_none (selected_index) then
        box_line_styled buf cols ~style:(Theme.warn ())
-         (ui_text state ~ko:"  선택한 슬롯 없음 · j/k 로 현재 슬롯 선택"
-            ~en:"  no slot selected; j/k selects a current slot");
+         (ui_text state ~ko:"  선택한 슬롯 없음  j/k:슬롯 선택"
+            ~en:"  no slot selected  j/k:select slot");
      (match Masc_tui_types.slot_editor_cursor_row state with
       | None -> ()
       | Some row ->
@@ -773,7 +773,6 @@ let render_lanes_overview (state : state) =
              (Masc_tui_value.Position.row
                 ~selected:(lane_inventory_visual_cursor state) ~total:entries))
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   projection.lop_links
@@ -784,7 +783,7 @@ let render_lanes_overview (state : state) =
          | None -> label) |> String.concat " · " in
        box_line_styled buf cols ~style:(Theme.info ()) line);
   let observed_heading = match state.lane_inventory with
-    | None -> ui_text state ~ko:"기능 상태 미관측 · r:조회" ~en:"Feature states not observed · r:read"
+    | None -> ui_text state ~ko:"기능 상태 미조회 · r:조회" ~en:"Feature states not read · r:read"
     | Some snapshot ->
         let observed =
           Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
@@ -825,38 +824,38 @@ let render_lanes_overview (state : state) =
   let status_width = List.fold_left (fun width row -> max width
       (Message_layout.display_width (summary row))) 0 inventory
     |> fun width -> min width (max 1 (list_cells / 3)) in
-  let label_width = max 1 (list_cells - status_width - 4) in
+  let label_width = max 1 (list_cells - status_width - 6) in
   let window = Rows.of_list ~first:scroll ~height entries in
   let listing = List.init height (fun offset ->
     let index = scroll + offset in
     match Rows.at window index with
     | None when offset = 0 && Option.is_none state.lane_inventory ->
-        Theme.recede () ^ ui_text state ~ko:"기능 목록 미관측 · r:조회" ~en:"Inventory not observed · r:read" ^ Ansi.reset
+        Theme.recede () ^ ui_text state ~ko:"기능 목록 미조회 · r:조회" ~en:"Inventory not read · r:read" ^ Ansi.reset
     | None -> ""
     | Some (Masc_tui_lane_inventory.Category_header category) ->
-        Theme.info () ^ Masc_tui_lane_inventory.category_label category ^ Ansi.reset
+        Theme.info ()
+        ^ "  "
+        ^ Masc_tui_lane_inventory.category_label ~ko:(state.ui_language = Lang_ko) category
+        ^ Ansi.reset
     | Some (Masc_tui_lane_inventory.Lane_row row) ->
         let observed = standing row in
+        let is_selected = selected_position = Some index in
+        let cursor_mark = if is_selected then "\xe2\x80\xba " else "  " in
         let label =
           (if not projection.lop_observation && Option.is_some state.standalone_lanes_error
            then ui_text state ~ko:"보존 · " ~en:"Retained · " else "")
           ^ Terminal_text.single_line row.label ^ " · " ^ Terminal_text.single_line row.purpose in
-        let plain = fit_width (Masc_tui_lane_standing.mark observed) 2
+        let plain = cursor_mark ^ fit_width (Masc_tui_lane_standing.mark observed) 2
           ^ fit_width label label_width ^ "  " ^ fit_width (summary row) status_width in
         let marked text = pressable (Press_lane_row (Masc_tui_lane_inventory.identity row))
             (fit_width text list_cells) in
-        if selected_position = Some index then Theme.selection_style () ^ marked plain ^ Ansi.reset
+        if is_selected then Theme.selection_style () ^ marked plain ^ Ansi.reset
         else
           let recede = if Masc_tui_lane_standing.recedes observed then Theme.recede () else "" in
-          marked (Masc_tui_lane_standing.colour observed
+          marked (cursor_mark ^ Masc_tui_lane_standing.colour observed
             ^ fit_width (Masc_tui_lane_standing.mark observed) 2 ^ Ansi.reset
             ^ recede ^ fit_width label label_width ^ "  " ^ Ansi.reset
             ^ Masc_tui_lane_standing.colour observed ^ fit_width (summary row) status_width ^ Ansi.reset)) in
-  let listing = if projection.lop_boxed then
-      studio_panel ~width:list_width
-        ~title:(ui_text state ~ko:"기능" ~en:"Features")
-        ~lines:listing
-    else listing in
   let detail_height = projection.lop_detail_height in
   let detail_cells = max 1 (detail_width - panel_padding) in
   let row_detail row =
@@ -878,11 +877,28 @@ let render_lanes_overview (state : state) =
                                      ~en:"… d: full observation and configuration evidence"))
       ~blank:(Ansi.reset, "") detail in
   let detail = List.map (fun (style, line) -> style ^ line ^ Ansi.reset) visible_detail in
-  let detail = if projection.lop_boxed then
-      studio_panel ~width:detail_width
-        ~title:(ui_text state ~ko:"선택한 기능" ~en:"Selected feature")
-        ~lines:detail
-    else detail in
+  let listing, detail =
+    if split && projection.lop_boxed then
+      let inner_h = max (List.length listing) (List.length detail) in
+      let pad xs = xs @ List.init (max 0 (inner_h - List.length xs)) (fun _ -> "") in
+      ( studio_panel ~width:list_width
+          ~title:(ui_text state ~ko:"기능" ~en:"Features")
+          ~lines:(pad listing)
+      , studio_panel ~width:detail_width
+          ~title:(ui_text state ~ko:"선택한 기능" ~en:"Selected feature")
+          ~lines:(pad detail) )
+    else
+      ( (if projection.lop_boxed then
+           studio_panel ~width:list_width
+             ~title:(ui_text state ~ko:"기능" ~en:"Features")
+             ~lines:listing
+         else listing)
+      , (if projection.lop_boxed then
+           studio_panel ~width:detail_width
+             ~title:(ui_text state ~ko:"선택한 기능" ~en:"Selected feature")
+             ~lines:detail
+         else detail) )
+  in
   if split then begin
     let pane_height = max (List.length listing) (List.length detail) in
     let left = Rows.of_list ~first:0 ~height:pane_height listing in
@@ -936,12 +952,12 @@ let render_lanes_overview (state : state) =
    | Some picker ->
        box_line_styled buf cols ~style:(Theme.info ())
          (Printf.sprintf
-            (if state.ui_language = Lang_ko then "  %s 의 후보 순서에 후보 추가 — %s — %s"
-             else "  adding a candidate to the candidate order of %s — %s — %s")
+            (if state.ui_language = Lang_ko then "  %s 의 후보 순서에 후보 추가 · %s · %s"
+             else "  adding a candidate to the candidate order of %s · %s · %s")
             (Terminal_text.single_line picker.Masc_tui_types.rlp_lane)
             picker.Masc_tui_types.rlp_summary
             (Masc_tui_types.runtime_picker_keys ~ko:(state.ui_language = Lang_ko)
-               (ui_text state ~ko:"Enter 추가" ~en:"Enter append")
+               (ui_text state ~ko:"Enter:추가" ~en:"Enter:append")
                picker.Masc_tui_types.rlp_filter));
        if picker.Masc_tui_types.rlp_choices = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
@@ -973,9 +989,8 @@ let render_lanes_overview (state : state) =
                         ~en:"  (same provider as a current slot)"
                     else "" )
               in
-              let mark =
-                if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
-              in
+              let is_selected = picker.Masc_tui_types.rlp_selected_row = Some offset in
+              let mark = if is_selected then "\xe2\x80\xba" else " " in
               let ctx =
                 Printf.sprintf
                   (if state.ui_language = Lang_ko then " [%s 컨텍스트]" else " [%s context]")
@@ -985,12 +1000,17 @@ let render_lanes_overview (state : state) =
                 if runtime.ro_is_default then ui_text state ~ko:" [기본]" ~en:" [default]"
                 else ""
               in
-              box_line buf cols
-                (Printf.sprintf "  %s %s%s%s%s%s"
-                   mark refusal_prefix
-                   (Masc_tui_types.runtime_model_picker_title runtime)
-                   ctx def
-                   (Ansi.dim ^ note ^ Ansi.reset));
+              let row_text =
+                Printf.sprintf "  %s %s%s%s%s%s"
+                  mark refusal_prefix
+                  (Masc_tui_types.runtime_model_picker_title runtime)
+                  ctx def
+                  (Ansi.dim ^ note ^ Ansi.reset)
+              in
+              if is_selected then
+                box_line_selected buf cols (Masc_tui_theme.strip_sgr row_text)
+              else
+                box_line buf cols row_text;
               box_line_styled buf cols ~style:(Theme.recede ())
                 (ui_text state ~ko:"      쿼터 범위 " ~en:"      Quota scope "
                   ^ Terminal_text.single_line
@@ -1148,7 +1168,6 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
       ~readings:(if state.lane_runs_loading then [ text "읽는 중" "loading" ] else [])
       ~position
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   let subject_kind, subject_heading =
@@ -1442,9 +1461,8 @@ let lane_run_tool_count_summary tools =
     if count = 0 then None
     else
       Some
-        (Printf.sprintf "%s%s%s %s %s %d %s" style Ansi.reverse Ansi.bold mark
-           (String.uppercase_ascii label) count Ansi.reset))
-  |> String.concat " "
+        (Printf.sprintf "%s%s%s %s %d%s" style Ansi.bold mark label count Ansi.reset))
+  |> String.concat "  "
 
 let lane_run_tool_summary = function
   | Tui_decode.Lane_run_no_tools_by_contract ->
@@ -1665,21 +1683,28 @@ let lane_run_payload_availability_lines ~width availability payload =
 let lane_run_input_lines ~width (detail : Tui_decode.lane_run_detail) =
   lane_run_payload_availability_lines ~width detail.lrd_input_availability (Some detail.lrd_input_payload)
 
-let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) =
+let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_detail) =
+  let say korean english = if ko then korean else english in
   let preflight_lines = match detail.lrd_librarian_preflight with
     | None -> []
     | Some reading ->
       let decision = match reading.lp_status with
-        | Tui_decode.Preflight_awaiting -> "응답 대기"
-        | Tui_decode.Preflight_not_called reason -> "호출하지 않음 · " ^ reason
-        | Tui_decode.Preflight_failed reason -> if details then "호출 실패 · " ^ reason else "호출 실패"
-        | Tui_decode.Preflight_invalid reason -> "답변 거절 · " ^ reason
+        | Tui_decode.Preflight_awaiting -> say "응답 대기" "awaiting response"
+        | Tui_decode.Preflight_not_called reason -> say "호출하지 않음 · " "not called · " ^ reason
+        | Tui_decode.Preflight_failed reason ->
+            if details then say "호출 실패 · " "call failed · " ^ reason
+            else say "호출 실패" "call failed"
+        | Tui_decode.Preflight_invalid reason -> say "답변 거절 · " "answer refused · " ^ reason
         | Tui_decode.Preflight_judged judgment ->
           Masc.Typesafeai_librarian_preflight.decision_label judgment.choice in
       let path = match reading.lp_generation_path with
-        | Tui_decode.Generation_not_entered -> "생성 Lane 진입 전"
-        | Tui_decode.Generation_full_lane -> "생성 Lane 진입 · 실제 요청 수는 별도 기록"
-        | Tui_decode.Generation_jev_no_change -> "생성 호출 생략 · 빈 변경 검증 통과" in
+        | Tui_decode.Generation_not_entered -> say "생성 Lane 진입 전" "before generation lane"
+        | Tui_decode.Generation_full_lane ->
+            say "생성 Lane 진입 · 실제 요청 수는 별도 기록"
+              "entered generation lane · actual request count recorded separately"
+        | Tui_decode.Generation_jev_no_change ->
+            say "생성 호출 생략 · 빈 변경 검증 통과"
+              "generation skipped · no-change verification passed" in
       let probabilities = match reading.lp_status with
         | Tui_decode.Preflight_judged judgment ->
           [Printf.sprintf "Confidence %.3f" judgment.confidence]
@@ -1691,38 +1716,59 @@ let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) 
         | None -> [] | Some seconds -> [Printf.sprintf "JEV elapsed %.3fs" seconds] in
       let model = match reading.lp_model with None -> [] | Some model -> ["Model " ^ model] in
       let rejection = match reading.lp_domain_rejection with
-        | None -> [] | Some reason -> ["검증 거절 → 생성 Lane · " ^ reason] in
+        | None -> []
+        | Some reason -> [say "검증 거절 → 생성 Lane · " "rejected → generation lane · " ^ reason] in
       let memory = match reading.lp_memory_scope, reading.lp_memory_result with
-        | Tui_decode.Memory_inference_scope, _ -> "기억 판정: 회차 메모리에만 보관 · 저장하지 않음"
-        | Tui_decode.Context_only_scope, None -> "기억 snapshot: Context 전용 · 저장하지 않음"
-        | Tui_decode.Memory_disposition_scope, None -> "기억 snapshot: 적용 결과가 기록되지 않음"
+        | Tui_decode.Memory_inference_scope, _ ->
+            say "기억 판정: 회차 메모리에만 보관 · 저장하지 않음"
+              "Memory judgment: turn memory only · not persisted"
+        | Tui_decode.Context_only_scope, None ->
+            say "기억 snapshot: Context 전용 · 저장하지 않음"
+              "Memory snapshot: Context only · not persisted"
+        | Tui_decode.Memory_disposition_scope, None ->
+            say "기억 snapshot: 적용 결과가 기록되지 않음"
+              "Memory snapshot: disposition not recorded"
         | (Tui_decode.Memory_disposition_scope | Tui_decode.Context_only_scope),
           Some (Tui_decode.Librarian_memory_unchanged (revision, facts)) ->
-          Printf.sprintf "기억 snapshot: 변경 없음 · revision %d · %d facts" revision facts
+          Printf.sprintf
+            (if ko then "기억 snapshot: 변경 없음 · revision %d · %d facts"
+             else "Memory snapshot: unchanged · revision %d · %d facts")
+            revision facts
         | (Tui_decode.Memory_disposition_scope | Tui_decode.Context_only_scope),
           Some (Tui_decode.Librarian_memory_rewritten {revision;facts;added;removed}) ->
-          Printf.sprintf "기억 snapshot: +%d / -%d · revision %d · %d facts" added removed revision facts in
+          Printf.sprintf
+            (if ko then "기억 snapshot: +%d / -%d · revision %d · %d facts"
+             else "Memory snapshot: +%d / -%d · revision %d · %d facts")
+            added removed revision facts in
       let side_writes = List.map (fun (kind, status) ->
         let label = match kind with
           | Tui_decode.Context_write -> "Context"
           | Tui_decode.Continuity_write -> "Continuity" in
         let outcome = match status with
-          | Tui_decode.Side_not_attempted -> "not attempted"
-          | Tui_decode.Side_answer_missing -> "answer missing"
-          | Tui_decode.Side_withheld -> "withheld"
-          | Tui_decode.Side_outcome_unconfirmed -> "outcome unconfirmed"
-          | Tui_decode.Side_committed -> "committed"
-          | Tui_decode.Side_answer_refused detail -> "answer refused · " ^ detail
-          | Tui_decode.Side_failed detail -> "failed · " ^ detail in
+          | Tui_decode.Side_not_attempted -> say "시도 안 함" "not attempted"
+          | Tui_decode.Side_answer_missing -> say "응답 없음" "answer missing"
+          | Tui_decode.Side_withheld -> say "보류됨" "withheld"
+          | Tui_decode.Side_outcome_unconfirmed -> say "결과 미확인" "outcome unconfirmed"
+          | Tui_decode.Side_committed -> say "반영 완료" "committed"
+          | Tui_decode.Side_answer_refused detail -> say "응답 거절 · " "answer refused · " ^ detail
+          | Tui_decode.Side_failed detail -> say "실패 · " "failed · " ^ detail in
         label ^ ": " ^ outcome) reading.lp_side_writes in
       let document = String.concat "\n"
-        ([path; memory] @ side_writes @ ["JEV 판정 · " ^ decision] @ rejection
-      @ (if details then model @ elapsed @ probabilities @ [""; "원문 실행 증거"]
-         else ["d: 모델·확률·원문 펼치기"])) in
+        ([path; memory] @ side_writes
+         @ [say "JEV 판정 · " "JEV judgment · " ^ decision] @ rejection
+         @ (if details then
+              model @ elapsed @ probabilities
+              @ [""; say "원문 실행 증거" "Raw execution evidence"]
+            else [say "d: 모델·확률·원문 펼치기" "d: expand model, probabilities, and raw evidence"])) in
       let document =
         if String.length document <= lane_run_preview_source_max_bytes then document
         else
-          let notice = Printf.sprintf "\n… truncated preflight, total %d bytes" (String.length document) in
+          let notice =
+            Printf.sprintf
+              (if ko then "\n… preflight 생략됨 · 전체 %d바이트"
+               else "\n… truncated preflight, total %d bytes")
+              (String.length document)
+          in
           let room = lane_run_preview_source_max_bytes - String.length notice in
           let cut = String_util.utf8_char_boundary document room in
           String.sub document 0 cut ^ notice in
@@ -1934,7 +1980,9 @@ let temporal_input_lines ~width ~sha256 (report : Temporal.t) =
 
 let temporal_output_lines ~width (report : Temporal.t) =
   let module T = Temporal in
-  let natural = function None -> "unknown" | Some value -> string_of_int value in
+  let natural = function
+    | None -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
+    | Some value -> string_of_int value in
   let detail (value : T.omission_detail) =
     ("TARGET EXCLUSIVE END  " ^ string_of_int value.target_end_atom)
     :: List.concat_map (fun (request : T.request_range) ->
@@ -2003,18 +2051,18 @@ let inspection_input_lines ~width = function
   | Inspection_measurement (sha256, Measurement.Snapshot report) -> measurement_input_lines ~width ~sha256 report
   | Inspection_measurement (sha256, Measurement.Temporal report) -> temporal_input_lines ~width ~sha256 report
 
-let inspection_output_lines ~details ~width = function
-  | Inspection_lane detail -> lane_run_output_lines ~details ~width detail
+let inspection_output_lines ~ko ~details ~width = function
+  | Inspection_lane detail -> lane_run_output_lines ~ko ~details ~width detail
   | Inspection_measurement (_, Measurement.Snapshot measurement) -> measurement_output_lines ~width measurement.report
   | Inspection_measurement (_, Measurement.Temporal report) -> temporal_output_lines ~width report
 
-let lane_run_stacked_lines ~details ~width detail =
+let lane_run_stacked_lines ~ko ~details ~width detail =
   let input_title, output_title = inspection_panel_titles detail in
   let indent lines = List.map (fun (style, line) -> style, "  " ^ line) lines in
   [ Ansi.bold, "  " ^ input_title ]
   @ indent (inspection_input_lines ~width detail)
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
-  @ indent (inspection_output_lines ~details ~width detail)
+  @ indent (inspection_output_lines ~ko ~details ~width detail)
 
 let lane_run_split_line buf cols ~left_width ~left ~right =
   let inner = framed_inner_width cols in
@@ -2115,7 +2163,10 @@ let render_lane_run_detail (state : state) ~run_id =
         let input_lines =
           inspection_input_lines ~width:left_width detail
         in
-        let output_lines = inspection_output_lines ~details:state.lane_run_preflight_details ~width:right_width detail in
+        let output_lines =
+          inspection_output_lines ~ko:(state.ui_language = Lang_ko)
+            ~details:state.lane_run_preflight_details ~width:right_width detail
+        in
         if payload_rows = 0
         then 0, None, content_height
         else begin
@@ -2160,9 +2211,10 @@ let render_lane_run_detail (state : state) ~run_id =
       end
       else begin
         let lines =
+          let ko = state.ui_language = Lang_ko in
           if compact_preflight then
-            inspection_output_lines ~details:false ~width:(max 1 (framed_inner_width cols - 4)) detail
-          else lane_run_stacked_lines ~details:state.lane_run_preflight_details ~width:(max 1 (framed_inner_width cols - 4)) detail
+            inspection_output_lines ~ko ~details:false ~width:(max 1 (framed_inner_width cols - 4)) detail
+          else lane_run_stacked_lines ~ko ~details:state.lane_run_preflight_details ~width:(max 1 (framed_inner_width cols - 4)) detail
         in
         let max_scroll =
           if content_height = 0
@@ -2296,7 +2348,6 @@ let render_clients (state : state) =
              (Masc_tui_value.Position.row
                 ~selected:(Some state.clients_surface_cursor) ~total:shown))
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   (* Measured from the rows like the verification submitter column: a fixed

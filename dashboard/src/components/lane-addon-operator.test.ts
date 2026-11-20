@@ -202,7 +202,7 @@ it('does not acknowledge a late capture after the original component is unmounte
 })
 
 it('connects actual backend capture receipts to the component and literal callback page before clearing', async () => {
-  const packet = JSON.parse(readFileSync(resolve(process.cwd(), '../docs/evidence/2026-10-25-onepassword-callback-capture/backend-receipts.json'), 'utf8'))
+  const packet = JSON.parse(readFileSync(resolve(process.cwd(), 'src/components/fixtures/onepassword-callback-backend-receipts.json'), 'utf8'))
   // This fixture is configured with the same HTTPS origin as its actual
   // backend. The transport port replays actual, source-bound Python replies.
   const previousUrl = window.location.href
@@ -237,7 +237,7 @@ it('connects actual backend capture receipts to the component and literal callba
 })
 
 it('keeps the manual Finish connection return through failure and clears it only for its own receipt', async () => {
-  const packet = JSON.parse(readFileSync(resolve(process.cwd(), '../docs/evidence/2026-10-25-onepassword-callback-capture/backend-receipts.json'), 'utf8'))
+  const packet = JSON.parse(readFileSync(resolve(process.cwd(), 'src/components/fixtures/onepassword-callback-backend-receipts.json'), 'utf8'))
   const previousUrl = window.location.href
   const browserFixture = (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM
   browserFixture.setURL('https://masc.example')

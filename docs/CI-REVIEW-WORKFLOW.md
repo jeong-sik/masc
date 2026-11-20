@@ -36,8 +36,8 @@ scripts it invokes) must be byte-identical to main's, or the dispatch fails;
 toolchain PRs re-dispatch with `trust-head-toolchain=true`, which is recorded
 in the settled status and receipt. Non-documentation inputs identical to an
 already built SHA settle instantly by input identity (docs-only heads build
-nothing — no dune rule in the four-executable closure reads `docs/`,
-`docs-site/` or `changelog.d/`); anything else builds asynchronously —
+nothing — no dune rule in the four-executable closure reads `docs/` or
+`changelog.d/`); anything else builds asynchronously —
 dispatch fire-and-forget. The record describes the head that was built; a new
 head needs a separate record. The status and freshness against the merge target
 are advisory for ordinary stacks.
@@ -71,8 +71,8 @@ Suite selection follows the content of the change, not a path heuristic. One
 standing mapping: a PR that edits anything under `config/tools/` selects
 `test_tool_definition_toml` for its targeted verification — that suite runs
 `Tool_definition_toml.validate_embedded` over the whole shipped tree, so it
-catches a wrong key in one file before landing instead of waiting for the
-nightly lane. The
+catches a wrong key in one file before landing instead of waiting for a
+full `@runtest` run. The
 2026-10-19 regression (#44011, a bad `[[tool.items]]` key that killed
 `main_eio`/`masc_tui` at boot while syntax checks stayed green) is the reason:
 the guard existed, but no review path ran it.
@@ -101,12 +101,7 @@ receipt scope. It has no PR, push or scheduled trigger. Request it deliberately
 when that coverage is needed; it is separate from leader-selected candidate
 verification and does not grant merge permission.
 
-`ci.yml` and `test.yml` are reusable components. The operator explicitly approved
-retaining the daily `test.yml` full behavior run on 2026-10-12: 17:43 UTC
-(02:43 KST), with its existing failure issue reporting. The
-[approval record](evidence/2026-10-12-nightly-ci-operator-approval.md) addresses
-the missing authorization raised on #42290. This regression observation does
-not grant PR approval or replace verification of a fixed release candidate.
+`ci.yml` and `test.yml` are reusable components.
 
 Full type checking, release
 profile, dashboard, behavioral suites and distribution/installation
@@ -211,9 +206,7 @@ To check this runner boundary without an OCaml build, run
 The Test workflow runs it after checkout, before the toolchain is set up.
 Its shell-runner fixture substitutes the build command; it is not a product
 test result. Keep this focused CI self-check separate from product behavior
-suites. The RC nightly cut gate has the same shape of suite: run
-`python3 -m unittest discover -s scripts/ci/tests -p test_nightly_cut_gate.py -v`;
-its stub `gh` serves fixture responses and no cut is recorded. The pin step's
+suites. The pin step's
 and the dependency install step's choice between asking apt and not asking it
 is checked the same way: run
 `python3 -m unittest discover -s scripts/ci/tests -p test_install_ocaml_deps.py -v`;

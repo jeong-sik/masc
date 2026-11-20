@@ -1,4 +1,4 @@
-(* Write and Edit over the remote lane (RFC-0400 C0).
+(* Write and Edit over the remote lane.
 
    A stub stands in for the endpoint's CLI: it decodes the framed request,
    answers a patch-source read from a file beside itself, records a write

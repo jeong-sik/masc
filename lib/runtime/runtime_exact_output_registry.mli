@@ -108,8 +108,7 @@ type resolved_lane =
             after every catalog slot is exhausted, in declaration order.
             Carried verbatim from [cli_slots]; whether an id resolves to a
             live official-client runtime is answered at execution with a
-            typed error, and a lane with only cli slots is still resolvable
-            (RFC cli-runtimes-as-lane-slots). *)
+            typed error, and a lane with only cli slots is still resolvable. *)
   }
 
 type lane_resolution_error =

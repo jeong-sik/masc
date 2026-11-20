@@ -20,7 +20,7 @@ related: ["0441", "0377", "event-queue-admit-all-ready", "keeper-recall-reaches-
 - 용어: **멈춘다**는 서버가 도는 턴을 도구 호출 사이에 끝내는 일이다. 그렇게 끝난 턴이 **체크포인트**다(TUI 의 노란 줄 `Continuation checkpoint recorded`).
   **intake** 는 턴이 시작할 때 큐에서 처리할 행을 고르는 단계이고, 고른 행을 **admit** 했다고 한다. 시스템 로그에는 `consumed` 로 남는다.
 - 근거 기준: `origin/main` = `3e41385b549` (2026-10-29). 측정 구간(10-29 02:54Z 까지)에 도는 서버 바이너리도 이 커밋이다. 서버는 10-29 03:07Z 에 `216f7ab8456` 으로, 06:06Z 에 `575e4665d63` 으로 다시 시작했다. 멈춤과 관련된 파일의 차이는 두 커밋 모두 이 RFC 와 상관없는 부분뿐이다.
-- 측정: [`docs/evidence/2026-10-29-keeper-backlog-preemption/`](../evidence/2026-10-29-keeper-backlog-preemption/README.md). 도구는 `scripts/keeper-queue-probe.py` 다.
+- 측정 도구는 `scripts/keeper-queue-probe.py` 다.
 - 표시: **[사실]** 은 코드나 데이터에서 확인한 것, **[추정]** 은 근거는 있지만 직접 보지 못한 것, **[제안]** 은 이 RFC 가 정하려는 것, **[확인 필요]** 는 아직 모르는 것이다.
 
 ## 0. 요약

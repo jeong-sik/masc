@@ -280,7 +280,7 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
                   ~base_path:t.config.base_path
                   ~container_root:t.container_root
                 @ github_identity.args
-                (* The working tree (RFC-0400): the keeper's checkouts live
+                (* The working tree: the keeper's checkouts live
                    on the work volume, a block device rather than the
                    virtiofs share that pinned one host vnode per file, and
                    the shim the remote lane drives is mounted read-only

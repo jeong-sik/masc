@@ -16,7 +16,7 @@ related: ["main-domain-scheduler-latency", "http-transport-runs-on-its-own-domai
 - 이슈: #52363. 마지막 사례는 #52360 이고, #52362 가 그 자리를 고쳤다.
 - 코드 좌표와 자리 수는 `origin/main` `706704b625a5` 에서 읽었다.
 - Eio 는 1.3 이다. eio, eio.unix, eio_posix 는 설치된 소스에서 읽었다. eio_linux 는 opam 이 남긴 eio 1.3 소스 묶음에서 읽었다. eio_linux 는 설치돼 있지 않아 돌려 보지 못했다.
-- D2 는 시험 프로그램으로 골랐다. 프로그램과 결과는 [시험 기록](../evidence/2026-11-16-os-mutex-suspension-probe.md)에 있다. 「기록 7b」는 그 결과 표의 경우 번호다.
+- D2 는 시험 프로그램으로 골랐다. 「기록 7b」는 그 시험 결과 표의 경우 번호다.
 - 이 RFC 는 masc 코드를 바꾸지 않는다.
 
 ## 0. 요약

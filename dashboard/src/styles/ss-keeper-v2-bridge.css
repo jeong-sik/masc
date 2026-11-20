@@ -5,7 +5,7 @@
    (app-shell-v2.css defines the full --ss-* set at :root with LIGHT
    values; styleseed-theme.css adds the --background/--card/--text-*
    semantic mirror). The dashboard's canonical design system is
-   keeper-v2 Dark Fantasy (RFC-0253), not StyleSeed light, so this file
+   keeper-v2 Dark Fantasy, not StyleSeed light, so this file
    re-points the token VALUES at the Dark Fantasy spine: every migrated
    surface renders charcoal + ice voltage + bone without touching
    component code.

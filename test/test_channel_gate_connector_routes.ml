@@ -696,7 +696,7 @@ let test_slack_connector_json_carries_identity () =
        |> String.trim |> String.length > 0))
 
 (* Regression: /api/v1/gate/keeper-status route error paths.
-   RFC-0371 B4 — the old handler derived 404 by substring-matching "keeper
+   The old handler derived 404 by substring-matching "keeper
    not found" in a rendered tool error.  The fix introduced a typed
    [keeper_exists] precheck so the route answers 400/404/503 directly.
    These tests pin the error_json wire contract and the four error-path

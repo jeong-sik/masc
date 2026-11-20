@@ -12,7 +12,7 @@
    같은 식별자로 패널을 지칭).
    [model] = 이번 시도의 후보 런타임 id. provider 에러 attribution(`Provider '...'`
    슬롯)에는 이 값만 쓴다 — panelist(예 "skeptic (claude)")는 실제 provider id가
-   아니므로 그 슬롯에 새면 provider 집계/로그 디버깅이 오염된다 (RFC-0278 §2.4). *)
+   아니므로 그 슬롯에 새면 provider 집계/로그 디버깅이 오염된다. *)
 (* 패널 답변 계약 = free text. 패널 답변은 의미상 단일 문자열이므로 {"answer": string}
    JSON envelope(#22768)는 정보 이득 0에 실패 클래스만 추가했다: envelope 파싱은
    provider-native schema 강제(response_format json_schema)에 100% 의존했고 프롬프트에는
@@ -126,7 +126,7 @@ type seat_result =
 let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_group)
     route : seat_result
   =
-  (* 정체성은 그룹 라벨 + 적힌 경로로 derive 한다 (RFC-0278). 경로가 lane 이면 lane
+  (* 정체성은 그룹 라벨 + 적힌 경로로 derive 한다. 경로가 lane 이면 lane
      이름이 정체성이고, 실제로 답한 후보는 seat_route 가 따로 기록한다. *)
   let panelist = Fusion_policy.panelist_id ~label:g.label ~model:route in
   let seat = Fusion_types.Panel_seat panelist in

@@ -1,4 +1,4 @@
-(** The server loop behind [until_github_run] (RFC-0379 §6.5) and
+(** The server loop behind [until_github_run] and
     [until_github_checks].
 
     Every {!poll_interval_sec} it runs one {!Schedule_run_watch.tick}: each

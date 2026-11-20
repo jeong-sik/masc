@@ -148,7 +148,7 @@ let summary_count field json =
   |> to_int
 ;;
 
-(* One Keeper's activations answer (RFC-0483) keeps the session's ledger
+(* One Keeper's activations answer keeps the session's ledger
    between requests and is told of each commit, so a recorded activation shows
    on the next read. The commit observer is the one the server installs. *)
 let test_keeper_activations_answer_reads_the_live_ledger () =
@@ -451,7 +451,7 @@ let test_absent_keeper_surface_is_keeper_not_found () =
     (surface |> member "keeper_name" |> to_string)
 ;;
 
-(* A Keeper's activation projection is its own route (RFC-0483); the tools
+(* A Keeper's activation projection is its own route; the tools
    answer carries none. *)
 let test_tools_answer_carries_no_activation_projection () =
   with_workspace @@ fun config ->

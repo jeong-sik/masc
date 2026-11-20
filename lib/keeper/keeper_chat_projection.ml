@@ -10,7 +10,7 @@ let speaker_fields = function
       @ Json_util.string_field_if_present "speaker_name" sp.speaker_name
       @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
 
-(* RFC-0235 P1: nested ["audio"] assoc so the clip stays one unit on the
+(* Nested ["audio"] assoc so the clip stays one unit on the
    JSONL row. Absent on rows written before voice transport; reads as
    [None] (the dashboard renders text-only, matching any non-voice turn).
    [expired] is written only when true so fresh clips stay byte-identical
@@ -235,7 +235,7 @@ let message_to_json ?(omit_stream_contract = false) ~trace_lookup_available
           | Some provenance ->
               Keeper_chat_delivery_identity.delivery_provenance_fields
                 provenance))
-(* RFC-0233 §7: a turn's terminal assistant row is selected by exact persisted
+(* A turn's terminal assistant row is selected by exact persisted
    [turn_ref] ("<trace_id>#<absolute_turn>"). Direct/queued accepted-user rows
    are persisted before the turn exists, so they carry no [turn_ref]; they join
    through the same typed delivery key and the [Accepted_user] transcript slot.

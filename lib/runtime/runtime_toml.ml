@@ -97,7 +97,7 @@ let parse_runtime_string_leaf ~path ~key value =
 ;;
 
 let parse_runtime_media_failover ~path value =
-  (* RFC-0265 — ordered runtime ids for modality-gated reroute. A genuine type
+  (* Ordered runtime ids for modality-gated reroute. A genuine type
      mismatch (a scalar where an ordered array is required — a bare string cannot
      mean a list) is surfaced as a load [Error], consistent with the sibling
      string leaves ({!parse_runtime_string_leaf}), instead of silently degrading
@@ -173,7 +173,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
    against materialized runtimes at load time, not here, so the parser returns
    declarations only.
 
-   [candidates] is the whole vocabulary. The RFC-0206 routing rebirth dropped
+   [candidates] is the whole vocabulary. The routing rebirth dropped
    the strategy ADT (a lane is ordered by construction), and until this check
    a leftover [strategy = "ordered"] line was accepted and ignored — a key an
    operator could edit with no effect. Unknown keys fail the load instead,

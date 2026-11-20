@@ -2,7 +2,7 @@
 
     The registries are [Atomic.t] maps updated by compare-and-set. A
     connection's response is written and closed only on the domain that runs
-    the connection (RFC-0493 §3.2). *)
+    the connection. *)
 
 type sse_conn_info = {
   session_id : string;
@@ -208,7 +208,7 @@ let stop_sse_session session_id =
 let stop_sse_session_preserve_guard session_id =
   stop_sse_session_impl ~clear_guard:false session_id
 
-(* RFC-0099 PR-3: the session is stopped as [stop_sse_session] does, and a
+(* The session is stopped as [stop_sse_session] does, and a
    typed Evict + Close event pair goes out on the bus topic. *)
 let stop_sse_session_evict session_id
     ~(reason : Session_lifecycle_event.evict_reason) =
@@ -266,7 +266,7 @@ let send_raw info data : Server_sse_response.outcome =
       close_sse_conn info;
       refused
 
-(* What a drain writes, in order (RFC-0493 §3.2). *)
+(* What a drain writes, in order. *)
 type drain_item =
   | Prime of string
   | Replayed of Sse.delivery

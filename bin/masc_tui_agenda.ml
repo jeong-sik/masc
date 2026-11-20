@@ -162,9 +162,10 @@ let waiting_phrases ~ko t =
 ;;
 
 (* What waits on the operator, by kind, for the surface strip at the top of
-   every frame. The key leads the badge. The panel behind [;] is the only
-   screen that lists this work, and the footer that names [;] is among the
-   first things a narrow terminal gives up, so the badge carries its own door.
+   every frame. The operator-action mark [◆] leads the badge and [(;)] closes
+   it. The panel behind [;] is the only screen that lists this work, and the
+   footer that names [;] is among the first things a narrow terminal gives up,
+   so the badge carries its own door.
 
    Three spellings, longest first, and the first that fits [cells] is drawn:
    the sentence, the kinds alone, the total alone. The total is the last
@@ -174,13 +175,16 @@ let waiting_label ~ko ~cells t =
   match waiting_phrases ~ko t with
   | [] -> ""
   | phrases ->
+    let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Yours in
     let listed = String.concat " \xc2\xb7 " phrases in
     let spellings =
-      [ (if ko then "; 확인 필요: " else "; Awaiting you: ") ^ listed
-      ; "; " ^ listed
+      [ Printf.sprintf (if ko then "%s 확인 필요: %s (;)" else "%s Awaiting you: %s (;)") mark listed
+      ; Printf.sprintf "%s %s (;)" mark listed
       ]
     in
-    let total = Printf.sprintf (if ko then "; 확인 필요 %d건" else "; %d waiting") (waiting t) in
+    let total =
+      Printf.sprintf (if ko then "%s 확인 필요 %d건 (;)" else "%s %d waiting (;)") mark (waiting t)
+    in
     let fits text = Masc_tui_message_layout.display_width text <= cells in
     (match List.find_opt fits spellings with
      | Some text -> text
@@ -424,7 +428,7 @@ let overlay ~ko ~now ~localtime ~cols t =
                two_column
                  ~cols
                  (Printf.sprintf
-                    (if ko then "%s \xc2\xb7 확인 대기" else "%s \xe2\x80\x94 awaiting confirmation")
+                    (if ko then "%s \xc2\xb7 확인 대기" else "%s \xc2\xb7 awaiting confirmation")
                     row.title)
                  (updated ~ko ~now row.since_iso)
            })

@@ -119,8 +119,6 @@ status: reference
   - goal navigator runtime status
 - `GET /api/v1/dashboard/telemetry/summary`, `GET /api/v1/dashboard/telemetry?source=tool_call_io`
   - Tool Monitor evidence-log lens and source freshness metadata
-- `GET /api/v1/dashboard/agent_core/telemetry/recent`, `GET /api/v1/dashboard/agent_core/telemetry/summary`
-  - in-process agent core runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `agent_core_event` replay
 - `GET /api/v1/attribution/summary`
   - fleet-health attribution view
 - `GET /api/v1/dashboard/transport-health`
@@ -171,8 +169,6 @@ status: reference
 - `GET /api/v1/dashboard/briefing/sections`
 - `GET /api/v1/dashboard/execution`
 - `GET /api/v1/dashboard/gate`
-- `GET /api/v1/dashboard/proof`
-  - compatibility proof index over verification requests, TLA result refs, keeper feature proof, execution trust, and surface readiness routes
 - `GET /api/v1/dashboard/goals`
 - `GET /api/v1/dashboard/config`
 

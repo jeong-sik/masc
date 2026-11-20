@@ -1,6 +1,6 @@
 (** Keeper_identity — trace ID generation and the keeper identity value.
 
-    RFC-0393: a keeper has exactly one name, its keeper_name. Nothing is
+    A keeper has exactly one name, its keeper_name. Nothing is
     encoded inside that string and no other identifier shape (wrapped
     [keeper-<name>-agent] alias, generated nickname) is recovered from it
     by parsing. Whether a string names a keeper is answered by a
@@ -20,7 +20,7 @@ module Keeper_id : sig
   (** Canonical form: trimmed and case-folded. A keeper's id is its
       keeper_name; every other author (humans, external bots) mints a
       comparable id from its own name the same way. No alias or nickname
-      recovery happens here (RFC-0393). *)
+      recovery happens here. *)
 
   val of_string : string -> t option
   (** [None] iff the input is whitespace-only. *)

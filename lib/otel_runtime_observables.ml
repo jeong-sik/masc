@@ -255,7 +255,7 @@ let register_once ~masc_root () =
     Stdlib.Mutex.protect registration_mu (fun () ->
       if not (Atomic.get registered)
       then (
-        (* One synchronous write keeps the RFC-0217 property: every
+        (* One synchronous write keeps the property: every
            sample is present from process start, absence never reads as
            zero. *)
         (* fire-and-forget: the count only serves callers that log it *)

@@ -45,7 +45,7 @@ val parse : ?account_groups:string list list -> string list -> (row list, string
     A model with a [\[models.NAME\]] table but no provider binding is
     skipped: it names no lane and has no [max-tokens] column to show. *)
 
-val render : width:int -> ?pane:int -> row list -> string list
+val render : ?ko:bool -> width:int -> ?pane:int -> row list -> string list
 (** Binding/model names and declared field values, in a fixed-column table
     when they fit and wrapped items otherwise. Exact provider/account labels
     accompany every binding name shared by more than one provider. The caller
@@ -60,7 +60,7 @@ val render : width:int -> ?pane:int -> row list -> string list
     happen. The two knob columns keep their width in table mode because a
     truncated number reads as a different number. *)
 
-val fits : width:int -> row list -> bool
+val fits : ?ko:bool -> width:int -> row list -> bool
 (** [fits ~width rows] reports whether the fixed-column table renders every
     mandatory reading (binding/model, effort, temperature, max-tokens and any
     ambiguous provider/account qualifier) in [width] cells. The pane needs
@@ -68,7 +68,7 @@ val fits : width:int -> row list -> bool
     stacked layout before drawing; the table itself always renders, so this
     is a query, not a precondition. *)
 
-val stacked_item_starts : pane:int -> row list -> int list
+val stacked_item_starts : ?ko:bool -> pane:int -> row list -> int list
 (** [stacked_item_starts ~pane rows] is the 0-based line index, into the
     document {!render} produces in stacked mode, where each binding's item
     begins -- one entry per row, in order. The pane's cursor walks bindings,
@@ -124,7 +124,7 @@ val keepers_on_login : rows:row list -> assignments:(string * string) list -> ro
     runtime id names the lane, not an account. *)
 
 val detail_lines :
-  ?account_email:string -> ?keepers:string list -> row -> string list
+  ?ko:bool -> ?account_email:string -> ?keepers:string list -> row -> string list
 (** Selected-binding explanation for the Models pane. It names the effective
     API model and the exact TOML sections that own each knob. A model name that
     is not a bare TOML key is quoted in the section path.

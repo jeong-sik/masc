@@ -356,6 +356,10 @@ let fold_private_jsonl_unique_regular_locked_with_io_for_testing ~io path ~init 
 ;;
 
 module Private_jsonl_window = struct
+  type previous_row_wanted =
+    | No_previous_row
+    | Nearest_accepted of (string -> bool)
+
   type t =
     | Window_missing
     | Window_present of
@@ -435,9 +439,10 @@ let read_private_jsonl_window_locked_with_io
         ; end_offset
         }
     else (
-      (* The nearest row before [row_end] the caller wants, as its start and
-         its bytes without the '\n'. *)
-      let rec previous ~row_end =
+      (* The nearest row before [row_end] that [wanted] accepts, as its start
+         and its bytes without the '\n'. It walks back a row at a time, to the
+         first row when none is accepted. *)
+      let rec previous ~wanted ~row_end =
         if row_end <= 0
         then None
         else (
@@ -449,11 +454,15 @@ let read_private_jsonl_window_locked_with_io
           let line = Bytes.create (row_end - 1 - row_start) in
           read_at ~offset:row_start line ~length:(Bytes.length line);
           let line = Bytes.unsafe_to_string line in
-          if previous_row_wanted line
+          if wanted line
           then Some (row_start, line)
-          else previous ~row_end:row_start)
+          else previous ~wanted ~row_end:row_start)
       in
-      let previous_row = previous ~row_end:from in
+      let previous_row =
+        match previous_row_wanted with
+        | No_previous_row -> None
+        | Nearest_accepted wanted -> previous ~wanted ~row_end:from
+      in
       let buffer = Buffer.create (Int.min (rows_end - from + 1) (Bytes.length chunk)) in
       let rec forward ~offset ~rows =
         if rows >= max_rows || offset >= rows_end

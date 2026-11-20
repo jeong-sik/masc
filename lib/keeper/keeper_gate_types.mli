@@ -87,10 +87,10 @@ type authorization_source =
   | Observed_in_box of boxed_execution
       (** The request ran once inside the executor's box. Under
           [Observe] the guest kernel refused every file write outside a
-          scratch and every socket (Landlock and seccomp, RFC-0422), so
+          scratch and every socket (Landlock and seccomp), so
           nothing it did could have left an effect; under [Guest_local] the
           writes it made landed inside the endpoint, and the operator chose
-          to let those pass without judgment (RFC-0422 §3.4). The Keeper
+          to let those pass without judgment. The Keeper
           microVM route currently refuses this mode because volume ownership
           is unverified; the OpenSSH route requires [private_home]. Either way
           its output is returned and no judge is

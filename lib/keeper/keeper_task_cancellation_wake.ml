@@ -33,7 +33,7 @@ let outcome_label = function
 ;;
 
 (* Only a typed agent actor is eligible for the Keeper self-cancellation check.
-   Its name and [created_by] use the canonical Keeper identity (RFC-0393).
+   Its name and [created_by] use the canonical Keeper identity.
    An operator or system identity may have the same spelling without being that
    Keeper. Every lookup is scoped to [config.base_path]. A Keeper of the same name in
    another workspace is not a lane here: enqueueing to it would write a

@@ -22,7 +22,7 @@ module Code_address : sig
       {!canonical_url_of_remote} output) and [path] is the file's
       repo-root-relative path.
 
-      RFC-0378 §5.1: the address is minted once where the write is
+      The address is minted once where the write is
       attributed; consumers carry the value and never re-derive either
       half from tool input or store layout. The type is abstract so a
       raw string cannot stand in for a parsed address. *)
@@ -62,7 +62,7 @@ end
 module Unattributed : sig
   (** Typed reasons a write's file path failed attribution to a codebase.
 
-      RFC-0378 §5.1: attribution failure is a fact kind, not a store
+      Attribution failure is a fact kind, not a store
       location — the reason rides the fact as a queryable field.
       Reasons distinguish unavailable Git observations, unknown origins and
       conflicting catalog identities at the write boundary. *)

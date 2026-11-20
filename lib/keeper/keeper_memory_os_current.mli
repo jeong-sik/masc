@@ -952,7 +952,7 @@ val apply_disposition
     An [absorbed] fact that is still current leaves the snapshot too, and its
     row is appended to {!Keeper_memory_absorbed} under the lock, after the next
     snapshot is built and printed and right before it replaces the old one; if
-    that append fails, nothing is committed (RFC-0456 §4.2). Required rather
+    that append fails, nothing is committed. Required rather
     than defaulted: a caller that leaves it out would add the merged claim and
     keep every fact it absorbs current.
 
@@ -1042,7 +1042,7 @@ val upsert_fact
     claim bytes) is a re-observation, not a duplicate: the authoritative
     [first_seen] and the original [origin] are preserved (an injected copy
     re-observing an authored row must not repaint it) and [last_seen] moves to
-    the later of the two; nothing is counted (RFC-0418). The
+    the later of the two; nothing is counted. The
     basis join preserves an existing observation, promotes a derived fact
     re-observed directly to an observation, replaces the premise set for an
     existing rule identity, and appends a distinct rule identity.
@@ -1139,7 +1139,7 @@ val to_json : t -> Yojson.Safe.t
 (** {1 Boot-time reconcile} *)
 
 (** Move one keeper's current snapshot to a fresh [.rejected-<now>] path and
-    journal the quarantine after the operator accepted it (RFC-0420). Under the
+    journal the quarantine after the operator accepted it. Under the
     aggregate and snapshot locks, re-read the file and require the exact
     [expected_snapshot_sha256] and the same decoder [rejection] before moving.
     A changed, readable, absent or unavailable snapshot is not quarantined.

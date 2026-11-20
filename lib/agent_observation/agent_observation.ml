@@ -1,4 +1,4 @@
-(* RFC-0128 §4.1 neutral codebase slug derivation.
+(* Neutral codebase slug derivation.
 
    Kept below the Keeper/IDE boundary so runtime producers can route
    observations without depending on the IDE storage module. *)
@@ -117,7 +117,7 @@ let remote_url_syntax raw =
   s <> "" && (strip_scheme s <> s || normalize_scp_like s <> s)
 ;;
 
-(* RFC-0378 §5.1: a code fact's address, minted once where the write is
+(* A code fact's address, minted once where the write is
    attributed and carried as a parsed value from then on. Consumers never
    re-derive either half from tool input or store layout — [v] is the only
    way in, and it rejects every shape the per-codebase store cannot join on
@@ -209,7 +209,7 @@ module Code_address = struct
 end
 
 (* Typed reasons a write's file path failed attribution to a codebase.
-   RFC-0378 §5.1: attribution failure is a fact kind, not a store
+   Attribution failure is a fact kind, not a store
    location — the reason rides the fact as a queryable field.
    Reasons distinguish unavailable Git observations, unknown origins and
    conflicting catalog identities at the write boundary. *)

@@ -510,7 +510,7 @@ let only_a_keeper_is_answered_on_its_queue () =
          (Ops.delegate_continuation_channel ~config ~submitted_by:"operator")))
 ;;
 
-(* RFC-0468 §3.2: the recipient records a Keeper's masc_keeper_msg /
+(* The recipient records a Keeper's masc_keeper_msg /
    delegate as that Keeper. Registry membership decides it, as it decides the
    reply route above; an operator driving the tool is not a Keeper. The typed
    sender then survives the durable operation source. *)

@@ -1,4 +1,4 @@
-(* RFC-0266 §7 Phase D — fusion run registry persistence.
+(* Fusion run registry persistence.
 
    Verify that register/complete append JSONL events and that replay restores
    the registry with completed-run pruning. Tests are isolated: each case gets

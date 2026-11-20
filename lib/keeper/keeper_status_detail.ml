@@ -124,7 +124,7 @@ let optional_int_argument fields key ~default ~minimum ~maximum =
       Error
         (Printf.sprintf "keeper_status argument %S must be an integer" key)
 
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* ctx-free body for keeper_dispatch_ref path. *)
 let effective_status_name_config ~(agent_name : string) fields =
   match
     status_argument fields Keeper_status_options_defaults.Argument.name
@@ -241,11 +241,11 @@ let apply_tail_order order items =
   | Oldest_first -> items
   | Newest_first -> List.rev items
 
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* ctx-free body for keeper_dispatch_ref path. *)
 (* Existence, answered by the same candidate spellings and the same
    effective-meta read the status resolver uses — but as a typed bool, so
    callers stop deriving it by substring-matching "keeper not found" in a
-   rendered status error (RFC-0371 B4). *)
+   rendered status error. *)
 let keeper_exists_config ~(config : Workspace.config) raw_name =
   let candidates =
     status_name_lookup_candidates raw_name |> List.filter validate_name
@@ -396,7 +396,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                        error) )
               ]
       in
-         (* The message count is the head's (RFC-0476 §3.5): no message is
+         (* The message count is the head's: no message is
             read for it. *)
          let ctx_stats =
            if not include_context then

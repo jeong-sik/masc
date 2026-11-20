@@ -1,5 +1,5 @@
 (** Keeper_identity_tool_allow — narrow an attached-service offering to the
-    tools the Keeper's profile named (RFC-0403).
+    tools the Keeper's profile named.
 
     A Keeper that attaches a service is handed that service's whole list.
     Measured 2026-09-02: one live keeper carried 122 tools and

@@ -93,9 +93,7 @@ recorded revision. Late publication receipts retain their original workspace
 even after the selection or credential changes, without a read under replacement
 credentials. There is no automatic publication or confirmation on editor input.
 
-The shared-draft editor and its human/Keeper collaboration contract are described
-in [artifact collaboration](artifact-collaboration.md). Authorship or publication
-alone is not evidence that a Keeper is currently viewing or editing a document.
+Authorship or publication alone is not evidence that a Keeper is currently viewing or editing a document.
 
 ## Storage and authority
 

@@ -1,4 +1,4 @@
-(** RFC-0085 PR-5 — Unified dispatch post-processing helper.
+(** Unified dispatch post-processing helper.
 
     Every dispatch path (keeper [guarded_dispatch], MCP [dispatch_by_tag],
     inline workspace) must call

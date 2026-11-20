@@ -1,5 +1,5 @@
-(* Pins the typed carriage of every Codex app-server client error variant
-   (RFC-0370 §3.1). The census (test_keeper_rotation_eligibility_census)
+(* Pins the typed carriage of every Codex app-server client error variant.
+   The census (test_keeper_rotation_eligibility_census)
    pins what each agent-core class does in the rotation loop; this test pins
    which class each client error lands in, so the boundary cannot silently
    fall back to [Internal] for a provider-side failure. *)
@@ -41,7 +41,7 @@ let class_of (err : Agent_core.Error.t) =
     "provider:unknown_variant"
   | Agent_core.Error.Internal _ -> "internal"
   (* A MASC error rides the carrier, so the class is the constructor it
-     carries, not the sentence the carrier's message renders (RFC-0454). *)
+     carries, not the sentence the carrier's message renders. *)
   | Agent_core.Error.Internal_carried _ as carried ->
     (match Keeper_internal_error.classify_masc_internal_error carried with
      | Some internal ->

@@ -472,7 +472,7 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
      [Terminal_effect_failed] because the effect is the fact, and
      [Runtime_connection_closed] because the agent-core family arm would read
      its carrier as a bare internal error and drop the retry the untyped
-     [ProviderUnavailable] used to earn (RFC-0454 P2). *)
+     [ProviderUnavailable] used to earn. *)
   | Some
       (( Keeper_internal_error.Terminal_effect_failed _
        | Keeper_internal_error.Runtime_connection_closed _ ) as internal) ->

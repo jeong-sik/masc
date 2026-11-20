@@ -406,7 +406,7 @@ let activation_row value =
 ;;
 
 (* Each write that appends tells the commit observer once; a write that only
-   re-observes what is stored tells nothing (RFC-0483 §4.2). *)
+   re-observes what is stored tells nothing. *)
 let test_each_appending_write_announces_once () =
   with_session @@ fun config trace_id _session_dir ->
   let heard = ref [] in

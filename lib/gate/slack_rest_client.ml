@@ -8,7 +8,7 @@
    Slack's response model differs from Discord's: every Web API call returns
    JSON [{ ok: bool, error?: string, ... }] with HTTP 200 even on logical
    failure. So the failure mode is [{ ok: false, error }] (typed as
-   [Slack_api]), not HTTP status. See RFC-0317. *)
+   [Slack_api]), not HTTP status. *)
 
 type error =
   | Network of string

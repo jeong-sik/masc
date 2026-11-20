@@ -81,7 +81,7 @@ val handle_keeper_turn_interrupt :
     observed switch. A changed or repeated token is declined without touching
     its successor. Tokens and [request_id] are mutually exclusive.
     Reads [{"name": "<keeper>", "request_id": "<operation>"}]. With a
-    request id it asks {!Keeper_owner.interrupt_running_operation} for a
+    request id it asks {!Keeper_owner_registry.pause_running_operation} for a
     mailbox-linearized compare-and-interrupt and echoes that id; a stale
     request can never cancel its replacement. The name-only form remains for
     operator surfaces that do not own a chat operation and uses

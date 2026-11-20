@@ -22,7 +22,7 @@ val current_task_id_for_agent : config:Workspace.config -> string -> string
     when a [@mention] targets a running keeper.
 
     [?stimulus] appends the payload to the keeper's Event Layer queue
-    before flipping the wakeup flag. See RFC-0020 §3. *)
+    before flipping the wakeup flag. *)
 val wakeup_keeper :
   ?base_path:string ->
   ?stimulus:Keeper_event_queue.stimulus ->
@@ -60,7 +60,7 @@ val wakeup_relevant_keeper_for_board_signal :
     one does. Resolve [stop] when the lane's heartbeat ends.
 
     A worker fatal stops the worker and is recorded; the lane continues
-    (RFC-0341: tool/persistence/resource failures are observations and never
+    (tool/persistence/resource failures are observations and never
     produce an implicit lifecycle transition). *)
 val fork_board_attention_worker :
   sw:Eio.Switch.t ->

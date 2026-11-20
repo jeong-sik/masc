@@ -1,4 +1,4 @@
-; RFC-0056 Phase 1H — tool call quality scoring (diagnostic metrics only).
+; Tool call quality scoring (diagnostic metrics only).
 ; Reward advice and post_verifier removed: tool call quality is a diagnostic
 ; metric, not a reward signal. Rewards should be outcome-based (task/goal).
 ;

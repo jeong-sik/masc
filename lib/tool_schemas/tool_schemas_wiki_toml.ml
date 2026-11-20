@@ -13,10 +13,7 @@
 
     [masc_wiki_create]'s [source] enum is a literal in its TOML file.
     [Tool_wiki.wiki_source] owns that vocabulary, and the "wiki source
-    enum" case in [test_enum_mirror_sync] compares the two.
-    [test_wiki_tool_toml_parity] keeps the publication order and which
-    tools declare a keeper_projection; the descriptions and schemas it also
-    pinned were copies of these values. *)
+    enum" case in [test_enum_mirror_sync] compares the two. *)
 
 let loaded_of_name = Tool_definition_embedded.load
 

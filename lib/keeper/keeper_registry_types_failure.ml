@@ -34,8 +34,8 @@ type failure_reason =
       ; detail : string
       ; runtime_id : string option
       ; agent_core_timeout : Keeper_turn_terminal_code.agent_core_timeout option
-          (** Typed timeout observation carried from the terminal code
-              (RFC-0371 §6.1(3)); [Some] only on the Provider_error
+          (** Typed timeout observation carried from the terminal code;
+              [Some] only on the Provider_error
               construction path where the original agent-core error was in
               hand. Lets consumers classify timeouts without re-parsing
               [code]. [None] on rehydrated or non-agent-core paths. *)
@@ -43,10 +43,8 @@ type failure_reason =
           (** Typed runtime-exhaustion reason, [Some] only on the
               runtime-exhausted construction path
               ([keeper_unified_turn_types.registry_failure_reason_of_raw_error]).
-              Lets the supervisor decide retryability via
-              [Keeper_internal_error.runtime_exhaustion_reason_retryable]
-              instead of reparsing [code]. [None] for non-exhaustion
-              provider/runtime errors. *)
+              Lets consumers read the typed reason instead of reparsing
+              [code]. [None] for non-exhaustion provider/runtime errors. *)
       ; fenced_empty_turn_runtime : string option
           (** Runtime id of a fenced provider attempt whose cause is the
               typed empty assistant turn

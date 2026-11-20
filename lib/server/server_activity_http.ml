@@ -88,7 +88,7 @@ let events_http_json ~deps ~state request =
   match snapshot_hit with
   | Some json -> json
   | None ->
-    (* RFC-0201 Step 5.  Cache wrap retired — non-default queries
+    (* Cache wrap retired — non-default queries
        (cursor / kinds filter) are operator-driven and rare, so a
        per-key Dashboard_cache entry has marginal hit-rate value.
        Offload via Domain_pool_ref still protects the HTTP main

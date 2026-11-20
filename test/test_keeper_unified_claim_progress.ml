@@ -3,7 +3,7 @@ open Alcotest
 module KAR = Masc.Keeper_agent_run
 module KUS = Masc.Keeper_unified_metrics_support
 
-(* RFC-0232: a control checkpoint may substitute a synthetic continuation
+(* A control checkpoint may substitute a synthetic continuation
    notice for the reply text. That text is display-only;
    the work preview must gate visible model text on [is_visible_reply] so the
    canned "Continuation checkpoint saved; ..." sentence never surfaces as

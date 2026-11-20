@@ -1,4 +1,4 @@
-(** RFC-0476 §3.6: the startup sweep keeps the checkpoint objects a root head
+(** The startup sweep keeps the checkpoint objects a root head
     reaches and removes the rest of a session's [objects/]. *)
 
 open Alcotest
@@ -30,19 +30,15 @@ let write path contents =
   mkdir_p (Filename.dirname path);
   Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel contents)
 
-let journal_input_head = Keeper_journal_preparation.input_checkpoint_basename
-
 let with_root f =
   let root = Filename.temp_dir "checkpoint-object-sweep-" "" in
   Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> f root)
-
-let journal_inputs_dir root = Filename.concat root "journal-inputs"
 
 let session_dir root session_id =
   Filename.concat (Masc.Keeper_fs.session_store_path_for_runtime_root root) session_id
 
 let sweep_result root =
-  Sweep.run ~runtime_root:root ~journal_inputs_dir:(journal_inputs_dir root) ~journal_input_head
+  Sweep.run ~runtime_root:root
 
 let sweep root =
   match sweep_result root with Ok report -> report | Error error -> fail (Sweep.error_to_string error)
@@ -180,7 +176,7 @@ let hold_in_gate_preparation root ~keeper_name ~session_id (plan : O.plan) =
        |> store_ok))
 
 let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
-  let main = "trace-main" and gated = "trace-gated" and copied = "trace-copied" in
+  let main = "trace-main" and gated = "trace-gated" in
   (* The canonical's turns before its last segment are named only through
      that segment and the one before it. *)
   let current = save_turns ~root ~session_id:main ~marker:"current" ((2 * O.turns_per_segment) + 6) in
@@ -210,10 +206,6 @@ let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
     accepted.head_bytes;
   let gate = save_turns ~root ~session_id:gated ~marker:"gate" 2 in
   hold_in_gate_preparation root ~keeper_name:"gate-keeper" ~session_id:gated gate;
-  let journal = save_turns ~root ~session_id:copied ~marker:"journal" 2 in
-  write
-    (List.fold_left Filename.concat (journal_inputs_dir root) [ "adoption-1"; journal_input_head ])
-    journal.head_bytes;
   (* Objects no head names: one turn saved without a head, so its plan
      lists every object the save wrote. Its own system prompt leaves its tools
      object the only one a root also names. *)
@@ -230,12 +222,11 @@ let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
   let misplaced = List.fold_left Filename.concat objects [ "00"; String.make 64 'f' ] in
   write notes "operator notes";
   write misplaced "a digest under another prefix";
-  (* Files beside the session directories and the journal inputs. *)
+  (* A file beside the session directories. *)
   write (session_dir root main ^ ".checkpoint.lock") "";
-  write (Filename.concat (journal_inputs_dir root) ".DS_Store") "";
   let report = sweep root in
-  check int "sessions with objects" 3 report.sessions;
-  check int "canonical, two archives, retained, Gate and journal heads" 6 report.roots;
+  check int "sessions with objects" 2 report.sessions;
+  check int "canonical, two archives, retained and Gate heads" 5 report.roots;
   check int "what no root reaches is removed" (List.length unreached) report.removed;
   check (list string) "no failures" [] report.failures;
   List.iter
@@ -247,7 +238,6 @@ let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
   loads root main archived;
   loads root main accepted;
   loads root gated gate;
-  loads root copied journal;
   check bool "a file not named as an object is left" true (Sys.file_exists notes);
   check bool "a digest under another prefix is left" true (Sys.file_exists misplaced))
 
@@ -314,13 +304,6 @@ let test_a_head_it_cannot_read_removes_nothing () =
         Masc_test_deps.checkpoint_head_bytes_with_field plan.head_bytes "version"
           (`Int (Agent_core.Checkpoint.checkpoint_version + 1))) ]
 
-let test_a_journal_head_it_cannot_read_removes_nothing () = with_root (fun root ->
-  ignore (save_turns ~root ~session_id:"trace-refused" ~marker:"unnamed" 2 : O.plan);
-  write (List.fold_left Filename.concat (journal_inputs_dir root) [ "adoption-1"; journal_input_head ]) "not a head";
-  refused root ~expect:(function
-    | Sweep.Root_unusable _ -> true
-    | Sweep.Owner_stores_unreadable _ | Listing_failed _ | Root_unreadable _ | Segment_unreachable _ -> false))
-
 let test_a_retained_entry_that_is_not_a_directory_removes_nothing () = with_root (fun root ->
   ignore (save_turns ~root ~session_id:"trace-refused" ~marker:"unnamed" 2 : O.plan);
   write (Filename.concat (session_dir root "trace-refused") Checkpoint.retained_dirname) "not a directory";
@@ -359,8 +342,6 @@ let () =
         ; test_case "an earlier version is not a root" `Quick test_an_earlier_version_is_not_a_root
         ; test_case "a head it cannot read removes nothing" `Quick
             test_a_head_it_cannot_read_removes_nothing
-        ; test_case "a journal head it cannot read removes nothing" `Quick
-            test_a_journal_head_it_cannot_read_removes_nothing
         ; test_case "a retained entry that is not a directory removes nothing" `Quick
             test_a_retained_entry_that_is_not_a_directory_removes_nothing
         ; test_case "a segment it cannot follow removes nothing" `Quick

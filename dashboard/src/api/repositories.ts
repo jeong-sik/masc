@@ -65,7 +65,7 @@ export interface Repository {
   id: string
   name: string
   url: string
-  /** RFC-0378 §5.3b: canonical codebase slug, minted by the server from
+  /** Canonical codebase slug, minted by the server from
    *  the git remote. Clients carry it into co-view context and scope
    *  queries; they never derive it from `url`. Null when the remote
    *  cannot canonicalize. */

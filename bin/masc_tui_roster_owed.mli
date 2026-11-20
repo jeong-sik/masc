@@ -11,7 +11,9 @@
     a read is owed until one that began after the change succeeds, and a
     failed read waits longer with each failure in a row. A whole read covers
     every owed row. A row can also be scheduled for a time, and is owed once
-    that time comes. Nothing here performs I/O or reads a clock. *)
+    that time comes. Nothing here performs I/O or reads a clock: [now] and
+    a scheduled time are instants on the main loop's clock
+    ({!Masc_tui_wake.Mono}). *)
 
 type t
 
@@ -30,22 +32,23 @@ val roster_changed : t -> t
 val reading : t -> bool
 (** A read this value started has not answered. *)
 
-val next_read : now:float -> t -> read option
+val next_read : now:Masc_tui_wake.Mono.t -> t -> read option
 (** The read to start now. [None] while a read is in flight or nothing is
     due. *)
 
 val started : read -> t -> t
 val succeeded : read -> t -> t
-val failed : retry_s:float -> max_retry_s:float -> now:float -> read -> t -> t
+val failed :
+  retry_s:float -> max_retry_s:float -> now:Masc_tui_wake.Mono.t -> read -> t -> t
 
 val abandoned : t -> t
 (** The read in flight will not answer: another read took the roster, or the
     read never ran. What it was reading is owed again. *)
 
-val schedule_rows : (string * float) list -> t -> t
-(** The rows to read again at a time, as [(keeper, at)] on the caller's
+val schedule_rows : (string * Masc_tui_wake.Mono.t) list -> t -> t
+(** The rows to read again at a time, as [(keeper, at)] on the loop's
     clock, for a value that changes with time and not with a write
     (RFC-0481 §3.6). It replaces the rows scheduled before. *)
 
-val release_scheduled : now:float -> t -> t
+val release_scheduled : now:Masc_tui_wake.Mono.t -> t -> t
 (** Each scheduled row whose time has come is owed, once. *)

@@ -19,29 +19,71 @@ type entry =
   | Label of string
   | Fetch_failed
 
+type cache_capacity =
+  | Unbounded
+  | Max_entries of int
+
+type config =
+  { success_ttl_sec : float
+  ; failure_ttl_sec : float
+  ; capacity : cache_capacity
+  }
+
+type cache_slot =
+  { entry : entry
+  ; fetched_at : float
+  ; mutable last_used_seq : int
+  }
+
 type t =
   { fetch :
       user_id:string ->
       (Slack_rest_client.user_info_ok, Slack_rest_client.error) result
   ; now : unit -> float
-  ; success_ttl_sec : float
-  ; failure_ttl_sec : float
+  ; config : config
   ; mu : Mutex.t
-  ; cache : (string, entry * float) Hashtbl.t
+  ; cache : (string, cache_slot) Hashtbl.t
+  ; mutable next_seq : int
   }
 
 let default_success_ttl_sec = 3600.0
 let default_failure_ttl_sec = 300.0
 
-let create ?(success_ttl_sec = default_success_ttl_sec)
-    ?(failure_ttl_sec = default_failure_ttl_sec) ~fetch ~now () =
+let validate_config config =
+  (match config.capacity with
+   | Unbounded -> ()
+   | Max_entries n when n > 0 -> ()
+   | Max_entries _ ->
+     invalid_arg "Slack_user_directory.create: Max_entries must be positive");
+  config
+
+let create_with_config ~config ~fetch ~now () =
+  let config = validate_config config in
   { fetch
   ; now
-  ; success_ttl_sec
-  ; failure_ttl_sec
+  ; config
   ; mu = Mutex.create ()
   ; cache = Hashtbl.create 32
+  ; next_seq = 0
   }
+
+let create ?(success_ttl_sec = default_success_ttl_sec)
+    ?(failure_ttl_sec = default_failure_ttl_sec)
+    ?(capacity = Unbounded)
+    ~fetch ~now () =
+  create_with_config
+    ~config:{ success_ttl_sec; failure_ttl_sec; capacity }
+    ~fetch ~now ()
+
+let config t = t.config
+
+let with_mu t f = Mutex.protect t.mu f
+
+let cache_size t = with_mu t (fun () -> Hashtbl.length t.cache)
+
+let entry_ttl t = function
+  | Label _ -> t.config.success_ttl_sec
+  | Fetch_failed -> t.config.failure_ttl_sec
 
 (* Slack's documented display precedence: the user-chosen display name, then
    the profile real name, then the legacy handle. A profile with no usable
@@ -53,24 +95,73 @@ let label_of_user_info (info : Slack_rest_client.user_info_ok) =
   | None, None, None -> None
 
 let live_entry t ~user_id =
-  Mutex.lock t.mu;
-  let found = Hashtbl.find_opt t.cache user_id in
-  Mutex.unlock t.mu;
+  let found = with_mu t (fun () -> Hashtbl.find_opt t.cache user_id) in
   match found with
   | None -> None
-  | Some (entry, fetched_at) ->
-    let ttl =
-      match entry with
-      | Label _ -> t.success_ttl_sec
-      | Fetch_failed -> t.failure_ttl_sec
-    in
-    if t.now () -. fetched_at < ttl then Some entry else None
+  | Some slot ->
+    let now = t.now () in
+    if now -. slot.fetched_at < entry_ttl t slot.entry
+    then (
+      with_mu t (fun () ->
+        match Hashtbl.find_opt t.cache user_id with
+        | Some current when Float.equal current.fetched_at slot.fetched_at ->
+          t.next_seq <- t.next_seq + 1;
+          current.last_used_seq <- t.next_seq
+        | Some _ | None -> ());
+      Some slot.entry)
+    else (
+      with_mu t (fun () ->
+        match Hashtbl.find_opt t.cache user_id with
+        | Some current when Float.equal current.fetched_at slot.fetched_at ->
+          Hashtbl.remove t.cache user_id
+        | Some _ | None -> ());
+      None)
+
+let prune_expired_locked t ~now =
+  let expired_keys =
+    Hashtbl.fold
+      (fun user_id slot acc ->
+         if now -. slot.fetched_at < entry_ttl t slot.entry
+         then acc
+         else user_id :: acc)
+      t.cache
+      []
+  in
+  List.iter (Hashtbl.remove t.cache) expired_keys
+
+let evict_lru_one_locked t =
+  let victim =
+    Hashtbl.fold
+      (fun key slot best ->
+         match best with
+         | None -> Some (key, slot.last_used_seq)
+         | Some (best_key, best_seq) ->
+           if slot.last_used_seq < best_seq
+              || (slot.last_used_seq = best_seq && String.compare key best_key < 0)
+           then Some (key, slot.last_used_seq)
+           else best)
+      t.cache
+      None
+  in
+  match victim with
+  | Some (key, _) -> Hashtbl.remove t.cache key
+  | None -> ()
 
 let store_entry t ~user_id entry =
-  let stamped = (entry, t.now ()) in
-  Mutex.lock t.mu;
-  Hashtbl.replace t.cache user_id stamped;
-  Mutex.unlock t.mu
+  let now = t.now () in
+  with_mu t (fun () ->
+    prune_expired_locked t ~now;
+    (match t.config.capacity with
+     | Unbounded -> ()
+     | Max_entries max_entries ->
+       if not (Hashtbl.mem t.cache user_id)
+       then
+         while Hashtbl.length t.cache >= max_entries do
+           evict_lru_one_locked t
+         done);
+    t.next_seq <- t.next_seq + 1;
+    Hashtbl.replace t.cache user_id
+      { entry; fetched_at = now; last_used_seq = t.next_seq })
 
 let display_label t ~user_id =
   (* Slack omits [user] on bot and system events, so an empty id reaches here.
@@ -94,7 +185,7 @@ let display_label t ~user_id =
         Log.Server.warn
           "slack users.info failed for %s (raw id will render until retry \
            in %.0fs): %s"
-          user_id t.failure_ttl_sec
+          user_id t.config.failure_ttl_sec
           (Format.asprintf "%a" Slack_rest_client.pp_error error);
         Fetch_failed
     in

@@ -67,9 +67,6 @@ module For_testing : sig
   val purge_agent_artifacts :
     Workspace.config -> string list -> (unit, string) result
 
-  val handle_board_close_post :
-    agent_name:string -> Httpun.Request.t -> Http_reqd.t -> string -> unit
-
   val purge_keeper_artifacts :
     Workspace.config ->
     keeper_name:string ->

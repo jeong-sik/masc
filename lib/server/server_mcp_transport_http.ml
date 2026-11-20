@@ -94,7 +94,7 @@ let body_jsonrpc_id body_str =
     | _ -> None
   with Yojson.Json_error _ -> None
 
-(* RFC-0100 PR-3: extract [params.name] from a [tools/call] body for
+(* Extract [params.name] from a [tools/call] body for
    streaming-registry lookup. Returns [None] when the body is malformed,
    not a [tools/call], or missing [params.name]. *)
 let body_tools_call_name body_str =
@@ -251,7 +251,7 @@ let should_stream_post_tools_call request body_str accept_mode =
   &&
   match body_jsonrpc_method body_str with
   | Some ("tools/call", true) -> (
-      (* RFC-0100 PR-3: the [tools/call] request only upgrades to SSE
+      (* The [tools/call] request only upgrades to SSE
          framing when the named tool is on the streaming registry
          ([Server_mcp_streaming_tools]). Tools outside the registry stay on
          the RFC-0100 PR-2 chunked-JSON default. Returns [false] when
@@ -1138,7 +1138,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               end else (
           (match evicted with
           | Some evicted_sid ->
-              (* RFC-0099 PR-3: cap-exceeded eviction publishes the typed
+              (* cap-exceeded eviction publishes the typed
                  Evict/Close event pair. *)
               stop_sse_session_evict evicted_sid
                 ~reason:Session_lifecycle_event.Cap_exceeded
@@ -1148,7 +1148,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
              | None -> deps.get_runtime_result ()) with
           | Error msg ->
               (* No supervisor could own the response, so the stream ends at
-                 once with the status it always had (RFC-0493 §3.2). *)
+                 once with the status it always had. *)
               Log.Server.debug "SSE runtime unavailable for session %s: %s"
                 session_id msg;
               Sse.unregister_if_current session_id client_id;
@@ -1197,8 +1197,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                    | `Stopped -> ());
                   `Stop_daemon)) observer_scope;
               (* The drain sends the prime and the replay too, under the
-                 supervisor, so a stop cancels one that waits for the socket
-                 (RFC-0493 §3.2). *)
+                 supervisor, so a stop cancels one that waits for the socket. *)
               run_sse_pumps ~sw info
                 ~drain:(fun () ->
                   match

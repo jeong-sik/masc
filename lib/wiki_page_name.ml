@@ -1,6 +1,6 @@
 (** Wiki page names: the one judgment readers and writers share. Pure: it
     reads nothing and writes nothing, so the lint and the tool agree by
-    construction (RFC-wiki-lint-and-page-contracts §4.4, step 1a). Moved out
+    construction. Moved out
     of [Tool_wiki] without changing a line of its behaviour. *)
 
 open Printf

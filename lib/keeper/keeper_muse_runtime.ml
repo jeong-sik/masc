@@ -410,7 +410,7 @@ let recovery_failure_for_attempt ~current ~admission error =
    not read. Only the host's refusal of [turn/start] itself, an error answer
    to the one request then outstanding, proves that no turn ran. After the
    host acknowledged the turn, only that turn's own durable range read after
-   its typed failure can prove it quiet (RFC-0509); the [Turn_items_read]
+   its typed failure can prove it quiet; the [Turn_items_read]
    event carries that proof, and every other ending stays unknown. *)
 let failure_leaves_effects_unknown ~admission ~turn_items (error : Serve.error) =
   match admission with
@@ -980,23 +980,13 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
-      Session_store.load ~base_path ~keeper_name
-      |> Result.map_error (fun detail ->
-        internal_error ("Muse Code session binding load failed: " ^ Session_store.read_error_to_string detail))
-    in
-    let* stored_session =
-      match stored_session with
-      | Some ({ phase = Start _ | Active _ | Turn_inflight _; _ } as expected) ->
-        Session_store.reconcile_process_restart
-          ~base_path
-          ~keeper_name
-          ~expected
-          ~current_owner_epoch:owner_epoch
-          ~required_at:(Time_compat.now ())
-        |> Result.map Option.some
-        |> Result.map_error Session_store.process_restart_error_to_core_error
-      | None | Some { phase = Ready | Recovery_required _ | Settled _; _ } ->
-        Ok stored_session
+      Session_store.load_reconciled_for_runtime
+        ~base_path
+        ~keeper_name
+        ~client_kind:Muse
+        ~runtime_id
+        ~current_owner_epoch:owner_epoch
+        ~required_at:(Time_compat.now ())
     in
     let* claim_plan =
       Session_store.plan_claim ~expected:stored_session ~client_kind:Muse ~runtime_id
@@ -2099,7 +2089,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     | true | false -> ()
   in
   (* A quiet turn's own durable range proves the host did nothing outside
-     its session (RFC-0509). That settles the uncertainty its acknowledgement
+     its session. That settles the uncertainty its acknowledgement
      raised; an effect MASC observed itself stays. *)
   let observe_quiet_turn () =
     match

@@ -226,7 +226,7 @@ let fork_background_refresh_or_cancel ~dir ~cancel_refresh run =
   else match Eio_context.get_switch_opt () with
   | None -> cancel_refresh dir
   | Some sw ->
-    (* No request waits on this refresh (RFC-0204 3.4). *)
+    (* No request waits on this refresh. *)
     (try Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background run) with
      | exn when eio_switch_fork_unavailable exn ->
        background_refresh_mark_domain_unavailable ();

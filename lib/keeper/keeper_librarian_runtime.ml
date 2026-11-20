@@ -31,7 +31,6 @@ let slot_reason_pairs ?(sep = "; ") (refusals : slot_refusal list) : string =
 type exact_setup_error =
   | Exact_registry_unavailable of Runtime_exact_output_registry.publication_error
   | Exact_lane_unavailable of Runtime_exact_output_registry.lane_resolution_error
-  | Exact_lane_preference_unavailable of string
   | Exact_candidate_invalid of
       { position : int
       ; slot_id : string
@@ -128,8 +127,6 @@ let exact_setup_error_to_string = function
     ^ Runtime_exact_output_registry.publication_error_to_string error
   | Exact_lane_unavailable error ->
     Runtime_exact_output_registry.lane_resolution_error_to_string error
-  | Exact_lane_preference_unavailable detail ->
-    "exact lane preference unavailable: " ^ detail
   | Exact_candidate_invalid { position; slot_id } ->
     Printf.sprintf
       "exact lane candidate invalid position=%d slot=%S"
@@ -882,7 +879,7 @@ let preflight_slots ~requirement ~selected_slots ~messages =
      | _ :: _ -> Ok { selected_slots; unusable })
 ;;
 
-let resolve_librarian_slots ~base_path ~keeper_id =
+let resolve_librarian_slots () =
   let open Result.Syntax in
   let* registry =
     Runtime_exact_output_registry.current ()
@@ -894,16 +891,8 @@ let resolve_librarian_slots ~base_path ~keeper_id =
     |> Result.map_error (fun error ->
       Exact_setup_failed (Exact_lane_unavailable error))
   in
-  let* (ordered : Runtime_exact_lane_backpressure.ordered) =
-    Keeper_exact_lane_preference.apply
-      ~base_path
-      ~keeper_name:keeper_id
-      ~lane_id:exact_lane_id
-      resolved
-    |> Result.map_error (fun detail ->
-      Exact_setup_failed
-        (Exact_lane_preference_unavailable detail))
-    |> Result.map Runtime_exact_lane_backpressure.order
+  let (ordered : Runtime_exact_lane_backpressure.ordered) =
+    Runtime_exact_lane_backpressure.order resolved
   in
   Ok
     ( ordered.lane.Runtime_exact_output_registry.selected_slots
@@ -1020,9 +1009,9 @@ let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
   }
 ;;
 
-let fit_continuity ~capacity ~base_path ~keeper_id ~source_lines ~input_for prepared =
+let fit_continuity ~capacity ~source_lines ~input_for prepared =
   let open Result.Syntax in
-  let* _, cli_slots, _ = resolve_librarian_slots ~base_path ~keeper_id
+  let* _, cli_slots, _ = resolve_librarian_slots ()
     |> Result.map_error extraction_error_to_string in
   if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
   then Ok (Some prepared)
@@ -1623,7 +1612,7 @@ let execute_exact_output_classified
       ()
   =
   let open Result.Syntax in
-  let* selected_slots, cli_slots, held_http = resolve_librarian_slots ~base_path ~keeper_id in
+  let* selected_slots, cli_slots, held_http = resolve_librarian_slots () in
   execute_answer ~selected_slots ~held_http ~cli_slots
     ~requirement:(output_requirement_of_pass (Memory_pass (continuity, ())))
     ~validate:(validate_selection ?continuity selected_input)
@@ -1940,7 +1929,7 @@ let run_pass
            Retain its slots across preflight: turning the lane off after this
            point must not revoke accepted work or make its HTTP/CLI fallback
            re-acquire from a different publication. *)
-        let acquired = resolve_librarian_slots ~base_path ~keeper_id in
+        let acquired = resolve_librarian_slots () in
         (match acquired with
          | Error (Exact_setup_failed (Exact_lane_unavailable (Exact_lane_off _))) ->
            let detail = "Librarian is off; pending input remains unconsumed" in
@@ -1951,7 +1940,6 @@ let run_pass
              (Exact_setup_failed
                ( Exact_registry_unavailable _
                | Exact_lane_unavailable (Exact_lane_unconfigured _ | No_admitted_lane_slots _)
-               | Exact_lane_preference_unavailable _
                | Exact_candidate_invalid _
                | Exact_flow_snapshot_failed _
                | Exact_flow_start_failed _
@@ -2463,7 +2451,7 @@ let run_pass
                        (List.map Keeper_librarian.claim_field_to_string ignored.differing)))
                selection.ignored_fields;
              (* An absorption the merged claim does not convey is not applied:
-                that memory stays current (RFC-librarian-absorb-gate). The
+                that memory stays current. The
                 gate only narrows the list. A gate switched off, or an
                 excluded Keeper, leaves the answer unchanged; a gate that is
                 on but cannot be asked absorbs nothing; a failed judgment
@@ -2471,7 +2459,7 @@ let run_pass
                 entire Memory range pending, including its proposed claims.
                 On a completed judgment, a new claim that absorbed nothing
                 and only repeats its current sources is a copy and is not
-                applied (RFC-0463 section 2.8). *)
+                applied. *)
              let absorption=absorption_input prompt_input accepted in
              let absorb_gate =
                Keeper_librarian_absorb_gate.run

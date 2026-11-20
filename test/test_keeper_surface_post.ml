@@ -1,4 +1,4 @@
-(* RFC-0223 P4 — Keeper_surface_post target resolution + assistant-only
+(* Keeper_surface_post target resolution + assistant-only
    store append.
 
    resolve_target is pure (surface label + channel arg + bindings in,

@@ -48,7 +48,7 @@ let tail = 0.95
 let milliseconds_per_second = 1000.0
 
 (* A call that ran this long or longer is a long call. One minute is the line
-   of the Execute wait census (docs/evidence/execute-waits-2026-11). *)
+   of the Execute wait census (2026-11). *)
 let long_call_threshold_ms = Masc_time_constants.minute *. milliseconds_per_second
 
 type window =

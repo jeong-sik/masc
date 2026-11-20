@@ -1,12 +1,12 @@
 /**
- * AgentPresenceManager — canonical agent registry (RFC 0008).
+ * AgentPresenceManager — canonical agent registry.
  *
  * Replaces today's drift across keeper-card / agent-monitor / lifeline /
  * composer mention popover where each surface owns its own roster cache.
  * One manager owns id / name / sigil / colorSlot / state / cursor /
  * heartbeat for every agent; consumers subscribe and render.
  *
- * MVP scope (RFC 0008 §3, §4, §5):
+ * MVP scope:
  *   - 6-state model (idle/working/thinking/waiting_for_human/error/completed)
  *   - 15 color slots (12 keeper + 3 reserve)
  *   - Ephemeral role/task/selection/focus metadata
@@ -23,7 +23,7 @@
  *   - reducedMotion getter (consumer keys off animation; primitive is
  *     animation-agnostic)
  *
- * Out of scope (RFC 0008 §10):
+ * Out of scope:
  *   - Network sync (consumer adapter calls update*)
  *   - RBAC / permission filtering
  *   - Stale heartbeat -> synthetic 'stalled' state (consumer-side

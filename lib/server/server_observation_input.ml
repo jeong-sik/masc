@@ -2,7 +2,7 @@ type keeper_change =
   | Phase of { previous : Keeper_state_machine.phase; current : Keeper_state_machine.phase }
   | Composite | Row | Turn | Turn_preview | Chat | Native_tasks | Child_content
   | Memory_journal | Async_requests | Asks | Tool_approval_waits
-  | Tool_approval_mode | Gate_settings | Event_queue
+  | Tool_approval_mode | Event_queue
   | Waiting_inventory of Keeper_waiting_inventory_broadcast.source
 
 type store_change =
@@ -193,8 +193,6 @@ let of_fields fields =
   | value when String.equal value Keeper_ask_broadcast.asks_changed_event -> named fields Asks
   | value when String.equal value Keeper_tool_approval_broadcast.waits_changed_event -> named fields Tool_approval_waits
   | value when String.equal value Keeper_tool_approval_broadcast.mode_changed_event -> named fields Tool_approval_mode
-  | "gate_keeper_mode_changed" | "keeper_exact_lane_preference_changed" ->
-      named ~key:"keeper_name" fields Gate_settings
   | value when String.equal value Keeper_event_queue_changed_event.event_type -> named ~key:"keeper" fields Event_queue
   | "keeper_waiting_inventory_changed" ->
       let* source = text fields "queue_kind" in

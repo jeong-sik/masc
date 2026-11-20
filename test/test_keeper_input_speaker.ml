@@ -1,4 +1,4 @@
-(* RFC-0468 §3.2: the host-attached speaker of a User message.
+(* The host-attached speaker of a User message.
 
    Pinned here:
    1. Codec totality: every speaker round-trips; an unknown kind, an extra

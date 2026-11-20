@@ -160,7 +160,7 @@ let sync_keeper_presence
       "workspace heartbeat failed (consecutive=%d): %s"
       !consecutive_failures
       (Printexc.to_string exn);
-    (* RFC-0002: dispatch heartbeat failure *)
+    (* Dispatch heartbeat failure *)
     dispatch_heartbeat_event_exact
       registry_entry
       (Keeper_state_machine.Heartbeat_failed

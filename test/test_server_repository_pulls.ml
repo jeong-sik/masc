@@ -1,4 +1,4 @@
-(** RFC-0465 §2-§4: the server reads the open pull requests of each
+(** The server reads the open pull requests of each
     registered GitHub repository with the declared reader Keeper's token.
 
     Every case answers from a stub transport, so what is under test is what
@@ -539,7 +539,7 @@ let test_a_raised_refresh_marks_the_rows_until_the_next_one_returns () =
 
 (* A Remote_ssh Keeper's GitHub login lives on its endpoint. A hosts.yml in
    this host's directory for that Keeper was not written by its login, so the
-   reader refuses it instead of sending it (RFC-0465 §4: no other credential). *)
+   reader refuses it instead of sending it (no other credential). *)
 let remote_endpoint_name = "pr-reader-box"
 
 let test_remote_ssh_reader_is_refused () =
@@ -726,7 +726,7 @@ let test_rate_limit_waits_for_reset () =
   let _third = Pulls.refresh ~now:after_reset ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:second in
   Alcotest.(check int) "asked again at the reset" 2 !calls
 
-(* --- Author, mergeable, Keeper join (RFC-0465: join by the newest
+(* --- Author, mergeable, Keeper join (join by the newest
    single-parent commit's author, because a Keeper leaves the branch once its
    pull request is open and a merge commit's author only brought the base in) --- *)
 

@@ -41,7 +41,7 @@ val observed_refusal :
     grant that cannot be consumed returns [Unavailable] without evaluating a
     second authorization path, so the durable grant remains single-use.
 
-    [observe] is the executor's box (RFC-0422): a [tool_execute] caller that
+    [observe] is the executor's box: a [tool_execute] caller that
     can run the request boxed passes it, every other caller omits it. The
     Gate calls it at exactly one point — Auto Judge mode, after the one-shot
     grant, both Always Allow switches, the exact rules and the observation

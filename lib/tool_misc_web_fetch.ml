@@ -334,7 +334,7 @@ let truncation_share_den = 4
    under the operator's HOME. *)
 let web_artifact_index_schema = "masc.web_artifact.v1"
 
-(* RFC-0383: one append-only fact line per offload. The index is a
+(* One append-only fact line per offload. The index is a
    projection — the content-addressed file stays the truth, so an
    append failure must not turn a successful offload into a failure.
    The same sha256 offloaded again writes another row: an independent
@@ -516,7 +516,7 @@ let truncate_text ~max_chars ~source_url ~title ~fetched_at_unix text =
               "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text_sha256=%s]"
               total (String.length head) (String.length tail) sha256
           in
-          (* RFC-0383: a failed index append never demotes a successful
+          (* A failed index append never demotes a successful
              offload — the artifact is the truth and the index only a
              projection — but it does not pass silently either. The
              marker carries the reason, mirroring full_text_unavailable. *)
@@ -582,7 +582,7 @@ let cache_store key response now =
     Atomic_util.update cache_entries (fun current ->
       Cache_by_key.add key { response; expires_at = now +. ttl } current)
 
-(* RFC-0189 PR-1b.8 — typed fetch-failure variant. Each arm carries
+(* Typed fetch-failure variant. Each arm carries
    the data needed to render an operator-facing message AND a
    [tool_failure_class] tag. This SSOT keeps message formatting (in
    [fetch_failure_to_string]) and class assignment (in

@@ -228,8 +228,7 @@ let terminal_reason_code_of_core_error = function
     | Some refusal -> Keeper_official_client_session_refusal.code refusal
     | None ->
       (* Typed carrier first; the string parse survives inside
-         classify_masc_internal_error for pre-carrier producers
-         (RFC-0371 B12). *)
+         classify_masc_internal_error for pre-carrier producers. *)
       (match Keeper_internal_error.classify_masc_internal_error err with
        | Some err -> Keeper_internal_error.kind_of_masc_internal_error err
        | None -> "internal_error"))
@@ -244,7 +243,7 @@ let terminal_reason_code_of_core_error = function
    a follow-up RFC. *)
 (* The typed timeout observation is derived here — the one site that still
    holds the original error — and rides the terminal code next to the
-   verbatim wire (RFC-0371 §6.1(3)). Consumers stop re-parsing
+   verbatim wire. Consumers stop re-parsing
    "provider_error_timeout:*" out of the wire for live values; the string
    classifier remains only for wire rehydrated from persistence. *)
 let agent_core_timeout_observation :

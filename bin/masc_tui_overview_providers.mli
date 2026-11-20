@@ -138,7 +138,9 @@ val scope_id_cells : int
 val scope_name : Masc.Tui_decode_usage.provider_usage_account -> string
 
 val minutes_label : int -> string
-(** Format a reported duration in whole days, hours, or minutes. *)
+(** A reported window of whole minutes as {!Masc_tui_value.Interval.text}
+    writes a set span: [45m], [5h], [1h30m], [1d], [1d12h], [7d]. A window at
+    or below zero reads [0s]. *)
 
 val account_email :
   account_emails:Masc_tui_types.overview_account_emails_reading ->

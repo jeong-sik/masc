@@ -56,6 +56,7 @@ val position : t -> Masc_tui_value.Position.t option
     with none listed. *)
 
 val lines : ?ko:bool -> height:int -> width:int -> t -> string list
+val lines_with_selection : ?ko:bool -> height:int -> width:int -> t -> (bool * string) list
 (** The overlay body at [width] cells. Prose wraps at spaces and the three
     machine keys stack when they do not fit one row, so nothing is cut at the
     frame's edge. Each invite takes the rows its text needs; the list shows the

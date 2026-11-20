@@ -597,13 +597,14 @@ let render_runtime_detail (state : state) target =
 let runtime_picker_choice_rows ~ko picker =
   let say korean english = if ko then korean else english in
   let rows = ref [] in
-  let push row = rows := row :: !rows in
+  let push ?(selected = false) row = rows := (selected, row) :: !rows in
   if picker.rlp_choices = [] then
     push
       (Masc_tui_types.runtime_picker_empty_note ~ko picker)
   else
     List.iteri (fun offset choice ->
-      let mark = if picker.rlp_selected_row = Some offset then "\xe2\x80\xba" else " " in
+      let selected = picker.rlp_selected_row = Some offset in
+      let mark = if selected then "\xe2\x80\xba" else " " in
       let label = match choice, picker.rlp_pick with
         | Masc_tui_types.Runtime_choice runtime,
           (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
@@ -621,7 +622,7 @@ let runtime_picker_choice_rows ~ko picker =
           let note =
             if List.exists (String.equal lane.rrl_id) picker.rlp_already
             then say "  (현재 경로)" "  (current route)" else "" in
-          push
+          push ~selected
             (Printf.sprintf "  %s %s%s" mark
                label
                (Ansi.dim ^ note ^ Ansi.reset))
@@ -652,7 +653,7 @@ let runtime_picker_choice_rows ~ko picker =
              | Pick_media_failover | Pick_conversation_lane _ | Pick_exact_lane _
              | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ ->
                  say " [기본]" " [default]") else "" in
-          push
+          push ~selected
             (Printf.sprintf "  %s %s%s%s%s" mark
                label
                ctx def
@@ -1173,11 +1174,15 @@ let render_runtime (state : state) =
              room, the filter/count precedes the same cursor-following page. *)
           let primary =
             if budget > 1 then
-              ((Theme.info ()) ^ "  " ^ picker.rlp_summary ^ Ansi.reset) :: choices
+              (false, (Theme.info ()) ^ "  " ^ picker.rlp_summary ^ Ansi.reset) :: choices
             else choices
           in
           let visible = List.take budget primary in
-          List.iter c.push visible;
+          List.iter
+            (fun (selected, row) ->
+              if selected then c.push_selected (Masc_tui_theme.strip_sgr row)
+              else c.push row)
+            visible;
           let remaining = budget - List.length visible in
           let count = List.length notes in
           List.iteri

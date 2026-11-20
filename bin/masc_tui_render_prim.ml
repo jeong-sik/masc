@@ -4753,6 +4753,16 @@ let quiet_connection_tail (state : state) =
   | None -> ""
   | Some badge -> "  " ^ badge
 
+let resolve_task_title (state : state) task_id =
+  match
+    List.find_opt
+      (fun (t : Tui_decode.task) -> String.equal t.id task_id)
+      state.tasks
+  with
+  | Some t when not (String.equal (String.trim t.title) "") ->
+      Terminal_text.single_line t.title
+  | Some _ | None -> Terminal_text.single_line task_id
+
 let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : state) =
   let name = here_path state ~path in
   let keys = config_pane_keys state in

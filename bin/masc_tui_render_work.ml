@@ -1727,7 +1727,13 @@ let schedule_delivery_summary ~ko ~freshness ~runner (row : schedule_row) =
                Render_schedule.schedule_hold_as_of_tag ~ko
                  ~checked:(Terminal_text.short_timestamp_of_unix checked))
   in
-  ( Printf.sprintf "%s \xc2\xb7 %s%s%s" row.sch_schedule_id (label "상태" "status")
+  let subject =
+    match row.sch_payload_summary with
+    | Some summary when not (String.equal (String.trim summary) "") ->
+        Terminal_text.single_line summary
+    | Some _ | None -> row.sch_schedule_id
+  in
+  ( Printf.sprintf "%s \xc2\xb7 %s%s%s" subject (label "상태" "status")
       (schedule_status_reading ~ko row.sch_status).word hold
   , Printf.sprintf "%s \xc2\xb7 %s" queue reaction )
 
@@ -2556,7 +2562,12 @@ let render_schedule_detail (state : state) ~runner (row : schedule_row) =
         match state.schedules with
         | None -> []
         | Some snapshot ->
-          List.map (fun (row : schedule_row) -> row.sch_schedule_id)
+          List.map
+            (fun (row : schedule_row) ->
+              match row.sch_payload_summary with
+              | Some summary when not (String.equal (String.trim summary) "") ->
+                  Terminal_text.single_line summary
+              | Some _ | None -> row.sch_schedule_id)
             snapshot.scs_rows
       in
       let left_buf = Buffer.create 1024 in

@@ -1583,12 +1583,21 @@ let render_account_login state view =
       let lines, position =
         Masc_tui_account_login.visible_lines ~ko ~height:budget ~width:(framed_inner_width cols) view in
       Option.iter c.position position;
-      let lines = lines
-        |> List.map (function
-          | Masc_tui_account_login.Text text -> Masc.Tui_terminal_text.sanitize_terminal_text text
+      let width = framed_inner_width cols in
+      List.iter
+        (function
+          | Masc_tui_account_login.Text text ->
+              let clean = Masc.Tui_terminal_text.sanitize_terminal_text text in
+              if String.starts_with ~prefix:"\xe2\x80\xba " clean then
+                c.push_selected (fit_width (Masc_tui_theme.strip_sgr clean) width)
+              else c.push (fit_width clean width)
           | Masc_tui_account_login.Terminal line ->
-            Masc_tui_sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text line) in
-      List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))) lines)
+              let rendered =
+                Masc_tui_sgr_text.render
+                  ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text line
+              in
+              c.push (fit_width rendered width))
+        lines)
 
 (* The address answers as the account server of a multi-account installation
    ([Masc_tui_types.Account_server]), which serves none of the screens. This
@@ -1655,8 +1664,12 @@ let render_collab state view =
     ~hints:(Masc_tui_collab.hints ~ko view)
     ~body:(fun ~budget c ->
       Option.iter c.position (Masc_tui_collab.position view);
-      Masc_tui_collab.lines ~ko ~height:budget ~width:(framed_inner_width cols) view
-      |> List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))))
+      let width = framed_inner_width cols in
+      Masc_tui_collab.lines_with_selection ~ko ~height:budget ~width view
+      |> List.iter (fun (is_selected, line) ->
+           if is_selected then
+             c.push_selected (fit_width (Masc_tui_theme.strip_sgr line) width)
+           else c.push (fit_width line width)))
 
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1683,11 +1696,43 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
           "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
       else String.concat "  " (Masc_tui_lane_addons.overview_hints view))
     ~body:(fun ~budget c ->
-      let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in
+      let inner_width = framed_inner_width cols in
+      let two_pane_results =
+        (match view.screen, view.presentation, view.focus with
+         | Masc_tui_lane_addons.Detail _, Masc_tui_lane_addons.Summary,
+           (Masc_tui_lane_addons.Timeline | Masc_tui_lane_addons.Instances) -> true
+         | Masc_tui_lane_addons.Overview,
+           (Masc_tui_lane_addons.Summary | Masc_tui_lane_addons.Technical | Masc_tui_lane_addons.Flow),
+           (Masc_tui_lane_addons.Timeline | Masc_tui_lane_addons.Connections
+            | Masc_tui_lane_addons.Configurations | Masc_tui_lane_addons.Instances
+            | Masc_tui_lane_addons.Rows)
+         | Masc_tui_lane_addons.Detail _,
+           (Masc_tui_lane_addons.Technical | Masc_tui_lane_addons.Flow),
+           (Masc_tui_lane_addons.Timeline | Masc_tui_lane_addons.Connections
+            | Masc_tui_lane_addons.Configurations | Masc_tui_lane_addons.Instances
+            | Masc_tui_lane_addons.Rows)
+         | Masc_tui_lane_addons.Detail _, Masc_tui_lane_addons.Summary,
+           (Masc_tui_lane_addons.Connections | Masc_tui_lane_addons.Configurations
+            | Masc_tui_lane_addons.Rows) -> false)
+        && not view.help_open
+        && Option.is_none view.document_key
+        && Option.is_none view.draft
+        && Option.is_none view.evidence_prompt
+        && Option.is_none view.subscription_panel
+        && Option.is_none view.installer
+        && Option.is_none view.records
+        && Option.is_none view.action_menu
+        && inner_width >= 90
+      in
+      let lines = Masc_tui_lane_addons.lines ~height:budget ~width:inner_width view in
       let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget view.scroll in
       Option.iter c.position
         (Masc_tui_value.Position.window ~first:scroll ~shown:budget ~total:(List.length lines));
       lines
       |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
-      |> List.iter c.push)
+      |> List.iter (fun line ->
+           let plain = Masc_tui_theme.strip_sgr line in
+           if not two_pane_results && String.starts_with ~prefix:"\xe2\x80\xba " plain then
+             c.push_selected plain
+           else c.push line))
 

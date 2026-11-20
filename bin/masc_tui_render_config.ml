@@ -812,11 +812,13 @@ let render_runtime_prompt_assets (state : state) =
          incr drawn;
          let mark = if asset.pra_file_exists then " "
            else (Theme.bad ()) ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ Ansi.reset in
+         let selected = index = cursor in
          let line = mark ^ " "
-             ^ Message_layout.fit_middle (max 1 (framed_inner_width cols - 3))
+             ^ Message_layout.fit_middle (max 1 (framed_inner_width cols - 4))
                  (Terminal_text.single_line asset.pra_path) in
-         if index = cursor then box_line_selected buf cols (" " ^ Masc_tui_theme.strip_sgr line)
-         else box_line buf cols (" " ^ line)
+         if selected then
+           box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
+         else box_line buf cols ("  " ^ line)
        end)
     assets;
   for _ = 1 to list_height - !drawn do

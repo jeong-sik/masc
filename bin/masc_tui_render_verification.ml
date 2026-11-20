@@ -387,7 +387,14 @@ let verification_contract_lines state ~width (request : Masc.Tui_decode.verifica
        wrap (say "별도 요구 목록 없음" "No separate list of required evidence.")
      else List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_required_artifacts)
   @ [Ansi.dim, ""; Ansi.bold, say "  제출 정보" "  Submission"]
-  @ wrap ("Task: " ^ request.vr_task_id ^ say " · 제출자: " " · submitted by: " ^ request.vr_submitted_by)
+  @ wrap
+      (say "작업: " "Task: "
+       ^ (if String.equal (String.trim request.vr_task_title) "" then
+            resolve_task_title state request.vr_task_id
+          else
+            Terminal_text.single_line request.vr_task_title
+            ^ " (" ^ request.vr_task_id ^ ")")
+       ^ say " · 제출자: " " · submitted by: " ^ request.vr_submitted_by)
   @ wrap (say "제출 시각: " "Submitted at: " ^ request.vr_created_at)
   @ wrap (say "서버의 저장 기록: " "Server record: " ^
       (match state.server_identity with
@@ -537,13 +544,16 @@ let verification_detail_pane (state : state) ~rows ~cols
             ~total:(List.length lines))
        ~title:(fun ~cols ->
          let details_step = ui_text state ~ko:"상세" ~en:"details" in
+         let task_label =
+           if String.equal (String.trim request.Masc.Tui_decode.vr_task_title) "" then
+             resolve_task_title state request.vr_task_id
+           else Terminal_text.single_line request.vr_task_title
+         in
          Printf.sprintf "%s  %s"
            (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
-              ~after:
-                (Printf.sprintf " \xe2\x96\xb8 %s  %s" details_step
-                   (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id))
+              ~after:(Printf.sprintf " \xe2\x96\xb8 %s  %s" details_step task_label)
             ^ " \xe2\x96\xb8 " ^ details_step)
-           (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id)));
+           task_label));
   box_divider buf cols;
   (* The frame cell of the first content row, counted from what was drawn
      above it, for the pictures placed over the rows under it. *)
@@ -1042,8 +1052,13 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_line buf cols
     (zone_two_title ~cols state
        ~title:
-         (harness_detail_heading state
-            ~task_id:verdict.Masc.Tui_decode.hv_task_id
+         (let task_label =
+            if String.equal (String.trim verdict.Masc.Tui_decode.hv_task_title) "" then
+              resolve_task_title state verdict.hv_task_id
+            else Terminal_text.single_line verdict.hv_task_title
+          in
+          harness_detail_heading state
+            ~task_id:task_label
             ~tail:(Option.value ~default:"" (reading_connection_notice state)))
        ~position:
          (Masc_tui_value.Position.window ~first:scroll ~shown:content_height

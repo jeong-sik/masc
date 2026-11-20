@@ -40,9 +40,7 @@ let current = `Assoc ["command",`String (String.make 4000 'c')]
 let raw_history = raw_seed @ [text T.User "Use the earlier commands."] @ exchange "current" current
 let completed_before = snd (Runtime_model_input_tail_window.annotate raw_seed)
 let turn_start = Keeper_carried_front.Turn_boundary {end_atom=completed_before}
-let position point : Host.librarian_position =
-  {point;unread=Keeper_librarian_request_unread.empty}
-let progress = position (Choice.Librarian_progress {end_atom=1})
+let progress = Choice.Librarian_progress {end_atom=1}
 let measure = Host.measure_message_bytes
 let size messages = List.fold_left (fun sum message -> sum+measure message) 0 messages
 
@@ -132,7 +130,7 @@ let test_seed_witness_uses_raw_source_and_dropped_arguments_are_not_written () =
   let seed = accepted_seed raw_history 2 and reads = ref 0 and fronts = ref [] in
   let carried_front_seed () = incr reads; {Keeper_carried_front.no_seed_read with seed=Some seed} in
   let sent = project ?argument_projection:(projection (source base) base) ~carried_front_seed
-    ~librarian_front:(position Choice.No_position)
+    ~librarian_front:Choice.No_position
     ~on_carried_front:(fun front ~transmitted_bytes:_ -> fronts:=front::!fronts) raw_history in
   check int "one authority read across select and recut" 1 !reads;
   check bool "the raw opener still admits its carried front" true
@@ -203,7 +201,7 @@ let snapshot () =
   |> Result.map_error Librarian_continuity_snapshot.error_to_string |> require
 
 let test_failed_materialization_repeats_summary_choice_without_displacing_atoms () = with_base @@ fun good_base ->
-  let librarian_front = position (Choice.Librarian_snapshot (snapshot ())) in
+  let librarian_front = Choice.Librarian_snapshot (snapshot ()) in
   let good = project ?argument_projection:(projection (source good_base) good_base) ~librarian_front raw_history in
   let capacity_bytes = size good in
   with_path ~blocked:true @@ fun failed_base ->
@@ -217,15 +215,13 @@ let test_failed_materialization_repeats_summary_choice_without_displacing_atoms 
   check bool "the retained command is its exact original JSON" true (input "beta" sent=beta)
 
 let test_zero_history_floor_does_not_write_dropped_slots () = with_base @@ fun base ->
-  let attached = Keeper_librarian_request_unread.attach ~include_empty:true ~role:T.System
-    Keeper_librarian_request_unread.empty raw_history in
   let _, atom_count = Runtime_model_input_tail_window.annotate raw_history in
   let floor, capacity_bytes = Runtime_model_input_tail_window.project_from_atom
-    ~allow_empty_history:true ~measure_message_bytes:measure ~first_atom:atom_count attached in
+    ~allow_empty_history:true ~measure_message_bytes:measure ~first_atom:atom_count raw_history in
   let observed = ref None in
   let sent = project ?argument_projection:(projection (source base) base) ~capacity_bytes
     ~on_model_input_window_observation:(fun observation -> observed := Some observation) raw_history in
-  check (list string) "the floor carries exactly its omission and frozen unread evidence"
+  check (list string) "the floor carries exactly its omission"
     (List.map Host.encode_history_message floor.messages)
     (List.map Host.encode_history_message sent);
   (* The synthetic User preamble explains omitted history; it is not a

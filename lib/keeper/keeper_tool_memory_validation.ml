@@ -103,6 +103,7 @@ let memory_unwritable_to_string = function
   | Store_stopped Memory_unreadable -> "store_stopped_memory_unreadable"
   | Store_stopped Log_unreadable -> "store_stopped_log_unreadable"
   | Store_stopped Store_unwritable -> "store_stopped_store_unwritable"
+  | Store_stopped (Raised _) -> "store_stopped_raised"
   | Keeper_not_registered -> "keeper_not_registered"
   | No_writer_in_process -> "no_writer_in_process"
   | Refused_past_validation refusal -> "refused_" ^ Librarian_direct.refusal_kind refusal

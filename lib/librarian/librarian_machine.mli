@@ -172,6 +172,13 @@ val booted
   -> (Librarian_store.t, Librarian_store.stop) result
   -> t
 
+(** A value whose store is not open: [Stopped stop], with no width or size
+    fact held. It reads and writes nothing, and [Resume] boots it again. A
+    boot that fails ends here, and so does a writer whose own code raised
+    while it booted or took an event (§9.2): it keeps its [lane] and its
+    [last_ask]. *)
+val stopped : lane:declared option -> last_ask:int -> Librarian_store.stop -> t
+
 (** How an ask ended, with what it was asked for. *)
 type ended =
   | Read_ended of

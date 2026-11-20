@@ -61,8 +61,15 @@ type fixture =
   }
 
 (* [keepers] are registered. Each has a turn log unless it is named in
-   [without_turn_log]. *)
-let fixture ?(without_turn_log = []) ~sw keepers =
+   [without_turn_log]. [store_start] is the first step of every store start
+   (§8.6), and [now] the clock every writer reads. *)
+let fixture
+      ?(without_turn_log = [])
+      ?(store_start = fun (_ : string) -> Ok ())
+      ?(now = ticking ())
+      ~sw
+      keepers
+  =
   let memory_dir = Filename.temp_dir "memory" "" in
   let turns_dir = Filename.temp_dir "turns" "" in
   let place keeper_id : Machine.place = { memory_dir; turns_dir; keeper_id } in
@@ -71,12 +78,12 @@ let fixture ?(without_turn_log = []) ~sw keepers =
     keepers;
   let registered = ref keepers in
   { writers =
-      Writers.create ~sw ~now:(ticking ())
+      Writers.create ~sw ~now
         ~registered:(fun keeper -> List.mem keeper !registered)
         ~place
         ~stores:(fun keeper -> Masc_test_deps.stores_of_place (place keeper))
         ~ask:Masc_test_deps.never_asks ~ask_room:Masc_test_deps.never_makes_room
-        ~start_turn_log:(fun (_ : string) -> Ok ())
+        ~start_turn_log:store_start
   ; registered
   ; memory_dir
   ; place
@@ -90,6 +97,7 @@ let stop_text : Store.stop -> string = function
   | Memory_unreadable -> "memory unreadable"
   | Log_unreadable -> "log unreadable"
   | Store_unwritable -> "store unwritable"
+  | Raised { detail } -> "raised: " ^ detail
 ;;
 
 let unavailable_text : Machine.unavailable -> string = function
@@ -273,6 +281,63 @@ let test_pulse_gives_every_registered_keeper_its_writer () =
       (write f "keeper-a" port))
 ;;
 
+(* §9.2: a writer whose own code raises stops, and no other writer does. It
+   stays in the table and takes its events, so nothing boots it again but a
+   resume. *)
+let test_a_boot_that_raises_stops_its_writer_only () =
+  with_switch (fun sw ->
+    let raising = ref true in
+    let store_start keeper =
+      if !raising && String.equal keeper "keeper-a"
+      then failwith "the store start raised"
+      else Ok ()
+    in
+    let f = fixture ~store_start ~sw [ "keeper-a"; "keeper-b" ] in
+    let stopped = "the store is stopped: raised: Failure(\"the store start raised\")" in
+    check string "a write to the writer whose boot raised" stopped (write f "keeper-a" port);
+    check string "another Keeper's writer goes on" "written as commit 1" (write f "keeper-b" port);
+    Writers.turn_closed f.writers "keeper-a";
+    Writers.pulse f.writers [ "keeper-a"; "keeper-b" ];
+    check string "a closed turn and a pulse do not boot it again" stopped
+      (write f "keeper-a" owner);
+    check (list string) "both stay in the table"
+      [ "keeper-a: stopped: raised: Failure(\"the store start raised\")"
+      ; "keeper-b: open at commit 1"
+      ]
+      (statuses f);
+    raising := false;
+    check string "a resume" "done" (act_text (Writers.resume f.writers "keeper-a"));
+    check string "boots it again" "written as commit 1" (write f "keeper-a" port))
+;;
+
+(* The event that raised is answered, and the next boot reads the log the
+   writer left. *)
+let test_an_event_that_raises_answers_its_caller () =
+  with_switch (fun sw ->
+    let raising = ref false in
+    let clock = ticking () in
+    let now () = if !raising then failwith "the clock raised" else clock () in
+    let f = fixture ~now ~sw [ "keeper-a"; "keeper-b" ] in
+    check string "a write before" "written as commit 1" (write f "keeper-a" port);
+    raising := true;
+    check string "the write whose event raised"
+      "the store is stopped: raised: Failure(\"the clock raised\")" (write f "keeper-a" owner);
+    raising := false;
+    check string "another Keeper's writer goes on" "written as commit 1" (write f "keeper-b" port);
+    check string "a resume" "done" (act_text (Writers.resume f.writers "keeper-a"));
+    check string "boots from the log the writer left" "written as commit 2"
+      (write f "keeper-a" owner))
+;;
+
+(* Cancellation and the reserved exceptions are not a writer's to stop on:
+   they end the switch the writers run in. *)
+let test_a_reserved_exception_goes_up () =
+  check_raises "Sys.Break ends the switch" Sys.Break (fun () ->
+    with_switch (fun sw ->
+      let f = fixture ~store_start:(fun (_ : string) -> raise Sys.Break) ~sw [ "keeper-a" ] in
+      ignore (write f "keeper-a" port : string)))
+;;
+
 let () =
   run "librarian_writers"
     [ ( "a registered Keeper"
@@ -286,6 +351,13 @@ let () =
         ; test_case "off and on again" `Quick test_off_and_on_again
         ; test_case "retire before the files go" `Quick test_retire_before_the_files_go
         ; test_case "the pulse" `Quick test_pulse_gives_every_registered_keeper_its_writer
+        ] )
+    ; ( "a writer whose code raises"
+      , [ test_case "a boot that raises stops its writer only" `Quick
+            test_a_boot_that_raises_stops_its_writer_only
+        ; test_case "an event that raises answers its caller" `Quick
+            test_an_event_that_raises_answers_its_caller
+        ; test_case "a reserved exception goes up" `Quick test_a_reserved_exception_goes_up
         ] )
     ]
 ;;

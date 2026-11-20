@@ -1084,6 +1084,7 @@ boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬
 | – | 반영 기록이나 스냅샷을 읽는 I/O 가 실패한다 | `Stopped Store_unwritable`. 해석되지 않는 꼬리, 없는 스냅샷과 다르다. `Adopt` 나 파일 되돌리기가 아니라 `Resume` 이 다시 읽어 본다 |
 | – | 잠금을 잡지 못한다 | `Stopped Store_unwritable`. `Resume` 이 다시 해 본다 |
 | – | boot 가 하는 쓰기(빈 envelope, `Started`, 스냅샷 다시 쓰기)가 실패한다 | `Stopped Store_unwritable` |
+| – | boot 가 예상하지 못한 예외를 던진다 | `Stopped (Raised _)`. `Resume` 이 다시 해 본다 |
 
 - boot 는 첫 boot 행에서만 줄을 쓴다. 두 번 복구해도 한 번 한 것과 같다.
 - 첫 boot 는 스냅샷을 먼저 쓰고 `Started` 를 나중에 쓴다. 그 사이에 죽으면 다음 boot 가 그 스냅샷으로 첫 boot 를 다시 한다.
@@ -1157,6 +1158,7 @@ and asking =
 type store_stop =
   | Log_diverged of { expected : Sha256.t; observed : Sha256.t }
   | Memory_unreadable | Log_unreadable | Store_unwritable
+  | Raised of { detail : string }   (* 쓰는 쪽 코드가 예상하지 못한 예외를 던졌다. 낱말은 사람이 읽는다 *)
 
 type event =
   | Boot_finished of boot_result | Turn_closed | Pulse
@@ -1332,7 +1334,7 @@ Memory 를 바꾼 쓰기 뒤에는 새 질문을 slot 마다 한 번 묻는다. 
 | `Adopt`, s 가 `Log_diverged` 나 `Log_unreadable` 이고, 파일의 sha 가 `observed` 와 같고 codec 으로 해석된다 | §8.7 의 줄을 쓴다. 폭 기억을 비운다 → 다음 묻기 |
 | `Adopt`, s 가 그 둘인데 파일의 sha 가 다르다 | `Refused Snapshot_mismatch` |
 | `Adopt`, s 가 그 둘이고 sha 는 같은데 파일이 해석되지 않는다 | `Refused Snapshot_unreadable` |
-| `Adopt`, s 가 `Memory_unreadable` 이나 `Store_unwritable` | `Refused (Store_stopped s)` |
+| `Adopt`, s 가 `Memory_unreadable`, `Store_unwritable`, `Raised _` | `Refused (Store_stopped s)` |
 | `Skip_item`, `Skip_line`, `Restart_reading` | `Refused (Store_stopped s)` |
 | `Retire` | `Retired` |
 | `Boot_finished` | 버린다 |
@@ -1360,6 +1362,11 @@ fiber 는 잠금을 잡고, boot 하고, mailbox 에서 사건을 하나씩 꺼�
 - 쓰는 쪽은 사건에 답하기 전에 바뀐 상태를 내놓는다. 그래서 답을 받은 쪽이 읽는 상태는 그 답 뒤의 상태다.
 - 읽는 쪽은 mailbox 를 거치지 않는다. 쓰는 쪽이 내놓은 값 하나를 읽는다. 열린 저장소에서는 반영 기록의 꼬리 줄이다.
 - 끝난 쓰는 쪽은 mailbox 를 꺼내지 않는다. 그래서 보낸 쪽은 답과 쓰는 쪽의 끝을 함께 기다린다. 끝이 먼저 오면 쓰는 쪽은 받지 않았다고 답한다. 그 요청으로는 아무 일도 하지 않았다.
+- boot 와 사건 하나는 경계 안에서 돈다. 쓰는 쪽 코드가 예상하지 못한 예외를 던지면 그 쓰는 쪽만 `Stopped (Raised _)` 로 간다. 다른 Keeper 의 쓰는 쪽과 서버는 그대로 돈다.
+  - 가던 묻기를 취소한다. 그 사건을 보낸 쪽에는 `Refused (Store_stopped (Raised _))` 로 답한다. 이미 답을 받았으면 그 답이 남는다.
+  - 그 사건의 줄이 디스크에 닿았는지는 반영 기록이 말한다. `Resume` 의 boot 가 그 기록을 읽는다. 위의 반영 실패와 같다.
+  - 쓰는 쪽은 등록부에 남아 mailbox 를 계속 꺼낸다. `Stopped` 의 표를 따르니 쓰기와 행동은 거절하고, hint 는 상태를 바꾸지 않는다. 다시 boot 하는 것은 `Resume` 뿐이다. 같은 곳에서 늘 던지는 쓰는 쪽은 `Resume` 한 번에 한 번 멈춘다. 쓰기가 쓰는 쪽을 끝없이 다시 만드는 일은 없다.
+  - 취소와 예약 예외(메모리 부족, 스택 넘침, `Sys.Break`, 그것을 담은 묶음)는 경계를 지나 올라간다. 프로세스의 일이라 쓰는 쪽 하나의 멈춤으로 바꾸지 않는다. 묻기 fiber 의 예외는 묻기의 그물이 `Ask_failed Raised` 로 받는다.
 - `Retired` 는 끝난 fiber 다. 그 함수에는 그 상태가 없다. 표의 `Retired` 행은 등록부가 답한다. 그 Keeper 가 등록돼 있으면 새 쓰는 쪽에 보내고, 아니면 `Keeper_retired` 다(§8.6).
 - 쓰는 쪽을 만드는 것과 그 fiber 를 돌리는 것은 다른 걸음이다. 만든 쓰는 쪽은 `Booting` 이고, 돌기 전에 온 사건은 mailbox 에서 기다린다.
 - `Retire` 의 답은 잠금을 놓은 뒤에 간다. Keeper 를 지우는 경로가 그 답을 받고 파일을 지운다.
@@ -2069,6 +2076,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5s | 서버가 workspace 의 쓰는 쪽 표를 시작하고 maintenance tick 이 pulse 한다. Keeper 의 `keeper_memory_write` 와 `keeper_memory_retract` 가 쓰는 쪽으로 쓴다. 운영자 cleanup route 와 Keeper 삭제는 다음 층이다 | 도구 시험이 영수증, 스냅샷, 반영 기록을 본다. Librarian 이 넣은 fact 를 `supersedes` 한다. 없는 대상은 claim 이 이미 있으면 `already_superseded` 이고 아니면 거절이다. 쓰는 쪽이 없으면 `memory_unwritable` 이다 |
 | L5t | 운영자의 철회 route 가 철회마다 쓰는 쪽에 `Retract` 하나를 쓴다. 요청은 스냅샷의 revision 과 sha 를 싣지 않는다. Keeper 삭제가 파일을 지우기 전에 쓰는 쪽을 끝낸다 | 운영자의 철회가 반영 기록의 줄이 되고, 그 뒤에 Keeper 의 쓰기가 반영된다. 같은 요청을 다시 보내면 줄이 늘지 않는다. 등록된 Keeper 의 파일은 지우지 않는다 |
 | L5u | 운영자 route `POST <k>/memory/act` 가 `Resume` 과 `Adopt` 를 쓰는 쪽에 보낸다. 답은 `Done` 과 그 뒤 저장소의 상태이거나 거절한 이유다 | 밖에서 바뀐 스냅샷으로 멈춘 저장소를 `Resume` 하면 같은 이유로 멈춘다. 파일의 sha 로 `Adopt` 하면 열리고 줄이 하나 붙는다. 열린 저장소는 둘 다 거절한다 |
+| L5v | 쓰는 쪽 코드가 예상하지 못한 예외를 던지면 그 쓰는 쪽만 `Stopped (Raised _)` 로 간다(§9.2). 서버 switch 와 다른 Keeper 의 쓰는 쪽은 그대로 돈다. 다시 boot 하는 것은 `Resume` 뿐이다 | 첫 boot 의 저장소 시작이 던지면 그 Keeper 의 쓰기가 `Store_stopped (Raised _)` 로 답을 받고, 다른 Keeper 는 쓴다. 닫힌 턴과 pulse 는 다시 boot 하지 않는다. 사건 하나가 던지면 그 사건을 보낸 쪽이 답을 받는다. `Resume` 이 연다. `Sys.Break` 는 switch 를 끝낸다 |
 | L5 | **전환.** 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 셋을 검사하고 어긋난 case 를 거절한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. token 이 처음 Memory 의 claim 에 없다. 채점기는 처음 Memory 가 가진 token 을 어느 수에도 세지 않는다. 그래서 셋째 검사가 없으면 `planted` 가 조용히 줄어든다 |
 | L6h | 저장소 시작의 첫 단계(§8.6). 턴 기록 writer 의 `start`, recorder 의 `record_start`, `Keeper_turn_log_store_start.run`. 쓰는 쪽이 boot 마다 먼저 부르고 서버가 그 함수를 넘긴다 | 턴 기록이 없는 Keeper 의 첫 boot 가 `Log_started` 를 쓰고 열린다. 첫 단계가 실패하면 `Stopped Store_unwritable` 이다. `Resume` 이 두 단계를 다시 한다. 열린 턴은 닫지 않는다. 턴이 먼저 시작한 기록에는 쓰지 않는다. 찢긴 첫 줄은 잘리고 0 자리에 쓴다. 메타데이터가 없는 Keeper 는 첫 줄을 쓰지 못한다 |
@@ -2363,5 +2371,4 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 ### 23.4 정하지 않고 남긴 것
 
 - 파일에 묶인 저장소의 무효 행은 늘기만 하고 턴마다 recall 에 실린다. 이 RFC 는 그 저장소의 쓰기 규칙을 바꾸지 않는다. 바이트 상한을 지우면 그 파일을 묶는 것이 없어진다(#53031).
-- 쓰는 쪽 fiber 가 예상하지 못한 예외로 끝났을 때. 지금은 예외가 그 fiber 를 띄운 switch 를 실패시킨다. 예외를 잡아 그 Keeper 의 쓰는 쪽만 다시 만들게 하면, 매번 같은 곳에서 죽는 쓰는 쪽을 쓰기가 끝없이 다시 만든다. 그 상태를 무엇으로 보이고 언제 다시 만들지는 경보(§12.2)와 함께 정한다. 등록부에 어느 switch 를 줄지는 전환 층이 정한다.
 - 반영 기록을 줄이는 방법. 가장 바쁜 Keeper 가 한 해 1.15 GB 까지 자란다(§10). 이 RFC 는 줄이지 않는다. 줄이는 일은 「지운 claim 을 언제까지 찾을 수 있어야 하는가」를 정해야 할 수 있다.

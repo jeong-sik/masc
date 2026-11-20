@@ -390,6 +390,7 @@ let stop_text : Masc.Librarian_store.stop -> string = function
   | Memory_unreadable -> "memory unreadable"
   | Log_unreadable -> "log unreadable"
   | Store_unwritable -> "store unwritable"
+  | Raised { detail } -> "raised: " ^ detail
 ;;
 
 let act_text : Act.answer -> string = function
@@ -461,7 +462,7 @@ let test_operator_resumes_and_adopts () =
    with
    | Unavailable (Store_stopped (Log_diverged _)) -> ()
    | Written _ | Already_held | Already_done | Already_absent | Refused _ | Not_a_snapshot _
-   | Unavailable (Store_stopped (Memory_unreadable | Log_unreadable | Store_unwritable))
+   | Unavailable (Store_stopped (Memory_unreadable | Log_unreadable | Store_unwritable | Raised _))
    | Unavailable Keeper_retired ->
      fail "a write on a snapshot the log does not name did not stop the store");
   let diverged =

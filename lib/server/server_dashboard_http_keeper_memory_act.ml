@@ -94,6 +94,7 @@ let stop_fields (stop : Librarian_store.stop) =
      [ "expected_snapshot", `String (expected :> string)
      ; "observed_snapshot", `String (observed :> string)
      ]
+   | Raised { detail } -> [ "raised", `String detail ]
    | Memory_unreadable | Log_unreadable | Store_unwritable -> [])
 ;;
 

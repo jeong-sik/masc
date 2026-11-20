@@ -463,6 +463,66 @@ let test_lane_addon_raw_evidence_keeps_tool_blobs_live () =
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "malformed reserved marker in raw evidence must stop the scan"))
 
+(* .masc/activity-events holds truncated 200-byte observability previews and its
+   _seq counter; classifying it as Truncated_copies lets the sweep examine
+   stale blobs without reading truncated previews back as live owners. *)
+let test_activity_events_leaves_sweep_classified () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let live = put store "live output owned by keeper history" in
+      let stale = put store "stale output mentioned only in truncated activity preview" in
+      reference_in_history ~base_path [ live ];
+      set_mtime store stale (long_ago ());
+      forget_marks ();
+      let activity_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "activity-events" in
+      let day_file = Filename.concat activity_dir "2026-11/2026-11-20.jsonl" in
+      Fs_compat.mkdir_p (Filename.dirname day_file);
+      Fs_compat.save_file (Filename.concat activity_dir "_seq") "1\n";
+      Fs_compat.save_file day_file
+        (Yojson.Safe.to_string
+           (`Assoc
+               [ "kind", `String "tool.called"
+               ; "payload", `Assoc [ "tool_args_preview", `String (O.encode_for_agent_core (O.Stored stale) ^ "...(truncated)") ]
+               ])
+         ^ "\n");
+      let first = observe_ok ~base_path in
+      Alcotest.(check (list string)) "activity-events is classified" []
+        first.unclassified;
+      Alcotest.(check int) "only stale blob becomes a candidate" 1 first.candidates;
+      let second = observe_ok ~base_path in
+      Alcotest.(check (list string)) "activity-events stays classified" []
+        second.unclassified;
+      Alcotest.(check int) "stale blob becomes deletable on second scan" 1
+        second.deletable)
+
+(* .masc/official-clients holds operator and Keeper vendor CLI homes, including
+   caches, arbitrary state files, and symlinks; classifying it as
+   Vendor_client_home keeps sweep unblocked without reading vendor files. *)
+let test_official_clients_leaves_sweep_classified () =
+  with_temp_dir (fun base_path ->
+      let masc = Common.masc_dir_from_base_path ~base_path in
+      Fs_compat.mkdir_p masc;
+      let store = B.create ~base_path in
+      let stale = put store "stale output beside official-clients home" in
+      set_mtime store stale (long_ago ());
+      forget_marks ();
+      let clients_root = Filename.concat masc Runtime_account_home_layout.clients_dir in
+      let codex_state = Filename.concat clients_root "codex/acct-1/state.bin" in
+      let codex_link = Filename.concat clients_root "codex-workspaces/abc/link" in
+      Fs_compat.mkdir_p (Filename.dirname codex_state);
+      Fs_compat.mkdir_p (Filename.dirname codex_link);
+      Fs_compat.save_file codex_state
+        ("\000not a JSON record\n" ^ O.encode_for_agent_core (O.Stored stale) ^ "\n");
+      Unix.symlink base_path codex_link;
+      let first = observe_ok ~base_path in
+      Alcotest.(check (list string)) "official-clients is classified" []
+        first.unclassified;
+      let second = observe_ok ~base_path in
+      Alcotest.(check (list string)) "official-clients stays classified" []
+        second.unclassified;
+      Alcotest.(check int) "stale blob becomes deletable on second scan" 1
+        second.deletable)
+
 let () =
   Alcotest.run "tool_blob_sweep"
     [ ( "sweep"
@@ -486,6 +546,10 @@ let () =
             test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified
         ; Alcotest.test_case "the folder of the persons leaves the sweep classified" `Quick
             test_person_folder_leaves_sweep_classified
+        ; Alcotest.test_case "activity-events leaves the sweep classified" `Quick
+            test_activity_events_leaves_sweep_classified
+        ; Alcotest.test_case "official-clients leaves the sweep classified" `Quick
+            test_official_clients_leaves_sweep_classified
         ; Alcotest.test_case "lane-addon records keep embedded tool blobs live" `Quick
             test_lane_addon_records_keep_embedded_tool_blobs_live
         ; Alcotest.test_case "lane-addon raw evidence keeps tool blobs live" `Quick

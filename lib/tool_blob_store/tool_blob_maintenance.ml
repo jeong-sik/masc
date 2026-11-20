@@ -684,6 +684,7 @@ type exclusion =
   | Other_media_store
   | Operator_config
   | Repository_mirror
+  | Vendor_client_home
   | Unpublished_write
   | Writes_no_reference
   | Repairable_pointer

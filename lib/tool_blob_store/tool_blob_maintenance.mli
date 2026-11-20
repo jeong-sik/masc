@@ -151,6 +151,11 @@ type exclusion =
   | Operator_config  (** Configuration an operator edits. *)
   | Repository_mirror
       (** Source repository clones. A reference there is source text. *)
+  | Vendor_client_home
+      (** Private third-party CLI homes (credentials, caches, symlinks, and
+          vendor transcripts). MASC never resolves blobs from them; its own
+          authoritative stores under [keepers/], [tool_calls/], and
+          [wire-capture/] remain in scope. *)
   | Unpublished_write  (** An atomic write's staging file. *)
   | Writes_no_reference
       (** A store whose producer writes no tool blob reference. *)

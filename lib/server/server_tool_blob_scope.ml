@@ -33,9 +33,12 @@ let dated_store root =
   | Costs
   | Provider_usage_history
   | Telemetry_coverage_gaps -> Some (no_reference name)
-  (* Rows here hold references the scan does not read (11-06: 1 file). No
-     decision yet, so the entry stays unclassified. *)
-  | Activity_events -> None
+  (* Rows carry observability previews truncated to 200 bytes
+     ([Observability_redact.default_max_len]) and [_seq] is a plain counter;
+     no reader resolves blobs from here, while authoritative stores
+     ([tool_calls], [wire-capture], [board_posts.jsonl], [keepers]) stay in
+     scope. *)
+  | Activity_events -> Some (excluded M.Truncated_copies name)
   (* [schedules/signals]: inside the schedule directory classified below. *)
   | Schedule_signals -> None
 ;;
@@ -120,6 +123,12 @@ let workspace =
          output of a masc tool is stored for it. The person MCP answers with
          the text of its routes. *)
     ; no_reference Runtime_account_home_layout.accounts_dir
+      (* Operator and Keeper vendor CLI homes under [.masc/official-clients/]
+         (codex, claude, muse, antigravity, codex-workspaces) hold logins,
+         caches, symlinks, and vendor logs that MASC never resolves blobs from.
+         MASC's own official-client outbox and consumed tool results sit under
+         [keepers/], which remains in scope. *)
+    ; excluded M.Vendor_client_home Runtime_account_home_layout.clients_dir
     ; no_reference Common.searxng_dirname
     ; no_reference Common.tui_dirname
     ; no_reference Common.tui_music_dirname

@@ -2888,18 +2888,18 @@ let test_carried_summaries_without_a_witness_name_one_carrier () =
 ;;
 
 (* World State sections: a fixture whose standing sections (memory ledger,
-   wiki, own Board posts, fleet messages) and inbox section (pending messages)
-   can each be held fixed or changed between turns. *)
+   wiki, own Board posts, fleet messages) and per-turn inbox section (board
+   activity) can each be held fixed or changed between turns. *)
 module Layers = Keeper_context_layers
 
-let world_state ?(wiki = "WIKI-ONE") ?(fleet = "FLEET-ONE") ?board_posts ?mentions () =
+let world_state ?(wiki = "WIKI-ONE") ?(fleet = "FLEET-ONE") ?board_posts ?board_activity () =
   Layers.assemble ~content_of:(function
     | Layers.Workspace_memory -> Some "## Shared workspace memory ledger\nMEMORY-LEDGER\n\n"
     | Layers.Wiki -> Some ("## Workspace wiki\n" ^ wiki ^ "\n\n")
     | Layers.Own_board_posts ->
       Option.map (fun posts -> "### Your Recent Board Posts (1)\n" ^ posts ^ "\n\n") board_posts
-    | Layers.Pending_mentions ->
-      Option.map (fun mention -> "### Pending Messages (1)\n" ^ mention ^ "\n\n") mentions
+    | Layers.Board_activity ->
+      Option.map (fun activity -> "### Board Activity (1)\n" ^ activity ^ "\n\n") board_activity
     | Layers.Fleet_messages -> Some ("### Fleet Messages (1)\n" ^ fleet ^ "\n\n")
     | _ -> None)
   |> Layers.prepend_unattributed World_frame "## Current World State\nWORLD-FRAME\n\n"
@@ -3645,11 +3645,64 @@ let test_a_partial_world_state_keeps_its_issuer_attribution () =
    same words from someone are a new message, not a copy the session holds. *)
 let test_an_inbox_section_is_sent_on_every_resume () =
   use_markdown_prompts ();
-  let turn = world_state_turn (world_state ~mentions:"MENTION" ()) in
+  let turn = world_state_turn (world_state ~board_activity:"BOARD-EVENT" ()) in
   let delivery = resume ~held:(start_holding turn) turn in
-  check bool "the repeated pending message is sent" true (contains delivery.prompt "MENTION");
+  check bool "the repeated board activity event is sent" true
+    (contains delivery.prompt "BOARD-EVENT");
   check (list string) "every standing section is left out"
     [ "workspace_memory"; "wiki"; "fleet_messages" ]
+    (section_names delivery.unchanged_sections)
+;;
+
+(* RFC §3.4 / §4.2: Pending_mentions and Fleet_messages use row-level framing
+   (Head_and_rows) and Sent_when_changed so a resumed session omits unchanged
+   mentions/broadcasts and receives only newly arrived rows. *)
+let test_pending_mentions_and_fleet_messages_resume_by_row () =
+  use_markdown_prompts ();
+  let make_world ~mentions ~fleet =
+    Layers.assemble_prepared ~content_of:(function
+      | Layers.Workspace_memory ->
+        Some (Layers.prepare_content "## Shared workspace memory ledger\nMEMORY-LEDGER\n\n")
+      | Layers.Pending_mentions ->
+        Some
+          (Layers.prepare_rows
+             ~head:(Printf.sprintf "### Pending Messages (%d)\n" (List.length mentions))
+             ~rows:(List.map (fun m -> Printf.sprintf "- mention %s\n" m) mentions)
+             ~tail:"\n")
+      | Layers.Fleet_messages ->
+        Some
+          (Layers.prepare_rows
+             ~head:(Printf.sprintf "### Fleet Messages (%d)\n" (List.length fleet))
+             ~rows:(List.map (fun f -> Printf.sprintf "- fleet %s\n" f) fleet)
+             ~tail:"\n")
+      | _ -> None)
+    |> Layers.prepend_unattributed World_frame "## Current World State\nWORLD-FRAME\n\n"
+  in
+  let first =
+    world_state_turn
+      (make_world ~mentions:[ "m1"; "m2" ] ~fleet:[ "f1"; "f2"; "f3" ])
+  in
+  let held = start_holding first in
+  (* Identical mentions & fleet broadcasts are fully held and omitted on resume. *)
+  let same = resume ~held first in
+  check string "unchanged mentions and fleet send the goal alone" "GOAL" same.prompt;
+  (* Appending a new mention and advancing the fleet window sends only the new rows. *)
+  let second =
+    world_state_turn
+      (make_world ~mentions:[ "m1"; "m2"; "m3" ] ~fleet:[ "f2"; "f3"; "f4" ])
+  in
+  let delivery = resume ~held second in
+  check bool "new mention row m3 is sent" true (contains delivery.prompt "- mention m3");
+  check bool "held mention rows m1/m2 are omitted" false
+    (contains delivery.prompt "- mention m1" || contains delivery.prompt "- mention m2");
+  check bool "new fleet row f4 is sent" true (contains delivery.prompt "- fleet f4");
+  check bool "held fleet rows f2/f3 are omitted" false
+    (contains delivery.prompt "- fleet f2" || contains delivery.prompt "- fleet f3");
+  check (list string) "both sections are reported as partly held"
+    [ "pending_mentions"; "fleet_messages" ]
+    (section_names delivery.partly_held_sections);
+  check (list string) "unchanged workspace_memory is omitted"
+    [ "workspace_memory" ]
     (section_names delivery.unchanged_sections)
 ;;
 
@@ -4047,6 +4100,10 @@ let () =
             "an inbox section is sent on every resume"
             `Quick
             test_an_inbox_section_is_sent_on_every_resume
+        ; test_case
+            "pending mentions and fleet messages resume by row"
+            `Quick
+            test_pending_mentions_and_fleet_messages_resume_by_row
         ; test_case
             "every section goes out when the session may not hold it"
             `Quick

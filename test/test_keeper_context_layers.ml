@@ -190,6 +190,44 @@ let test_a_section_without_rows_is_one_text () =
     check string "no rows is the head and tail as one text" "HEADTAIL" section_text
   | _ -> fail "a section with no rows is one text"
 
+let test_author_of_layer_partition () =
+  let expected_host_state =
+    [
+      L.Goals_awaiting_proof;
+      L.Approval_authority;
+      L.Connected_surfaces;
+      L.Namespace_state;
+      L.Workspace_memory;
+      L.Lane_updates;
+      L.Autonomous_trigger;
+      L.Scheduled_automation;
+    ]
+  in
+  List.iter
+    (fun layer ->
+      let expected =
+        if List.mem layer expected_host_state then L.Host_state else L.Outside_text
+      in
+      let label = L.source_name (L.Layer layer) ^ " author classification" in
+      check bool label true (L.author_of_layer layer = expected))
+    all_layers;
+  let host_count =
+    List.length (List.filter (fun l -> L.author_of_layer l = L.Host_state) all_layers)
+  in
+  let outside_count =
+    List.length (List.filter (fun l -> L.author_of_layer l = L.Outside_text) all_layers)
+  in
+  check int "exactly 8 Host_state layers" 8 host_count;
+  check int "exactly 13 Outside_text layers" 13 outside_count
+
+let test_pending_mentions_and_fleet_messages_resend_on_resume () =
+  check bool "Pending_mentions is Sent_when_changed for row-level resume dedup" true
+    (L.resend_on_resume (L.Layer L.Pending_mentions) = L.Sent_when_changed);
+  check bool "Fleet_messages is Sent_when_changed for row-level resume dedup" true
+    (L.resend_on_resume (L.Layer L.Fleet_messages) = L.Sent_when_changed);
+  check bool "Board_activity remains Sent_every_resume" true
+    (L.resend_on_resume (L.Layer L.Board_activity) = L.Sent_every_resume)
+
 let () =
   run "keeper_context_layers"
     [
@@ -201,6 +239,13 @@ let () =
             test_order_index_matches_position;
           test_case "order_index is injective" `Quick
             test_order_index_is_injective;
+        ] );
+      ( "classification",
+        [
+          test_case "author_of_layer partitions all 21 layers" `Quick
+            test_author_of_layer_partition;
+          test_case "pending mentions and fleet messages resend when changed" `Quick
+            test_pending_mentions_and_fleet_messages_resend_on_resume;
         ] );
       ( "assemble",
         [

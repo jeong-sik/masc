@@ -1,4 +1,4 @@
-; MSX HTTP control routes (RFC-0439 §3.7, RFC #38695).
+; MSX HTTP control routes.
 (test
  (name test_msx_routes)
  (modules test_msx_routes)

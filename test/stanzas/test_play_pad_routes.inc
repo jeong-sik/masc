@@ -1,5 +1,5 @@
-; RFC play-link-for-the-shared-machine §2.9 through the real router: the
-; loaded program's layout, and a button pressing its machine keys in turn.
+; The play pad routes, driven through the real router: the loaded program's
+; layout, and a button pressing its machine keys in turn.
 
 (test
  (name test_play_pad_routes)

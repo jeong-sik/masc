@@ -387,8 +387,3 @@ val evidence_receipt_lines : Yojson.Safe.t -> string list
 (** What an evidence receipt says in one or two readable lines: rows frozen
     and, separately, whether optional Keeper delivery or Broadcast committed. Empty for
     receipts of other operations. *)
-
-val status_text : t -> string
-(** What the Add-ons status row says about the reading or interaction in
-    flight, what the view holds, and the source of the last diagnostic. A
-    view that holds nothing has no previous reading to keep visible. *)

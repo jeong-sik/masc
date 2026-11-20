@@ -1183,8 +1183,7 @@ let move_lane view delta =
            | None -> view
            | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None})
   | _ -> view
-(* Nothing asked for yet, so the operator's next step is to ask. The status
-   row and the body under it both say this. *)
+(* Nothing asked for yet, so the operator's next step is to ask. *)
 let no_reading_yet_text = "No reading yet · r:refresh"
 
 let diagnostic_text = function
@@ -1215,46 +1214,14 @@ let diagnostic_lines view =
      | None, (Some _ | None) -> [])
   @ Option.to_list (detail_read_note view)
 
-(* What the body says while the view holds no reading. It used to say
-   [no_reading_yet_text] under a status row reading "Reading · nothing held
-   yet", telling the operator to press [r] for a read already on its way; the
-   list screens said "Refreshing…" over a first read that refreshes nothing. *)
+(* What the body says while the view holds no reading: the failure note, the
+   first-read word while that read runs, or [no_reading_yet_text] when nothing
+   was asked. *)
 let unread_body_text ?(ko = false) ~failed_note (view : t) =
   match view.error, view.snapshot_read_error, view.loading with
   | Some _, _, (true | false) | None, Some _, (true | false) -> failed_note
   | None, None, true -> if ko then "조회 중" else "Reading"
   | None, None, false -> if ko then "아직 조회된 내용이 없습니다." else no_reading_yet_text
-
-(* What the status row says about a read or interaction. Kept whole here rather than
-   inside the row it draws, so a view can be asked what the row would say.
-
-   The row used to match on [loading] alone, so a read in flight claimed a
-   previous reading whatever the view held: a first read said one remained
-   visible while the rows under it said "No reading yet" in the same frame. *)
-let status_text (view : t) =
-  let current = match view.loading, view.snapshot, view.error, view.snapshot_read_error with
-  | true, Some _, Some diagnostic, _ ->
-      diagnostic_text diagnostic ^ " · previous reading remains visible"
-  | false, Some _, Some diagnostic, _ -> diagnostic_text diagnostic
-  | true, Some _, None, Some detail ->
-      "Read: " ^ detail ^ " · previous reading remains visible"
-  | false, Some _, None, Some detail ->
-      "Read: " ^ detail ^ " · previous reading retained"
-  | true, Some _, None, None -> "Refreshing · previous reading remains visible"
-  (* A read that failed and is being tried again holds nothing either, and
-     the failure is the part an operator can act on. *)
-  | true, None, Some diagnostic, _ ->
-      diagnostic_text diagnostic ^ " · request in progress"
-  | false, None, Some diagnostic, _ -> diagnostic_text diagnostic
-  | true, None, None, Some detail -> "Read: " ^ detail ^ " · reading again"
-  | false, None, None, Some detail -> "Read: " ^ detail
-  | true, None, None, None -> "Reading · nothing held yet"
-  | false, None, None, None -> no_reading_yet_text
-  | false, Some _, None, None -> "Recorded observations · r:refresh"
-  in
-  String.concat " · "
-    (current :: Option.to_list (previous_read_note view)
-     @ Option.to_list (detail_read_note view))
 
 (* Enumerate only values explicitly closed by the package's schema. Required
    open-ended fields have no invented default and use the advanced command. *)

@@ -41,14 +41,22 @@ type focus =
   | Unfocused
   | Focused
 
-(** Observation only: it never authorizes focus, capture, editing or send. *)
-type metadata_status = Not_observed | Read_failed of string | Observed
+(** Observation only: it never authorizes focus, capture, editing or send.
+
+    The stage of a read under way rides only on the states that hold no Keeper
+    list: [Not_observed], and [Read_failed] while a retry runs. Over a list the
+    row already holds, a read says nothing here: the reading slot says it (RFC
+    tui-one-screen-grammar section 8), so [Observed] has no stage. *)
+type metadata_status =
+  | Not_observed of { pending : Masc_tui_local_read_observation.pending option }
+  | Read_failed of
+      { detail : string; pending : Masc_tui_local_read_observation.pending option }
+  | Observed
 type reading =
   | Workspace_not_observed
   | Workspace_unconfirmed
   | Different_workspace
-  | Metadata of
-      { status:metadata_status; pending:Masc_tui_local_read_observation.pending option }
+  | Metadata of metadata_status
 
 type t = {
   target : target;
@@ -92,9 +100,9 @@ val prompt : ko:bool -> t -> string
 
 val reading_note : ko:bool -> reading -> string option
 (** Current source observation, including retained failure during retry. [None]
-    means locally observed metadata without a pending read. Plain text: terminal
-    callers must escape it. It is appended outside the editable prompt so the
-    observation does not change the draft window or cursor. *)
+    means the Keeper list is observed, whether or not a read runs over it. Plain
+    text: terminal callers must escape it. It is appended outside the editable
+    prompt so the observation does not change the draft window or cursor. *)
 
 val row_note : ko:bool -> t -> string option
 (** The note the row draws after the draft: [reading_note], except for a

@@ -15,13 +15,16 @@ type focus =
   | Unfocused
   | Focused
 
-type metadata_status = Not_observed | Read_failed of string | Observed
+type metadata_status =
+  | Not_observed of { pending : Masc_tui_local_read_observation.pending option }
+  | Read_failed of
+      { detail : string; pending : Masc_tui_local_read_observation.pending option }
+  | Observed
 type reading =
   | Workspace_not_observed
   | Workspace_unconfirmed
   | Different_workspace
-  | Metadata of
-      { status:metadata_status; pending:Masc_tui_local_read_observation.pending option }
+  | Metadata of metadata_status
 
 type t = {
   target : target;
@@ -94,16 +97,14 @@ let reading_note ~ko reading =
   | Workspace_not_observed -> Some (sentence Masc_tui_words.workspace_identity_unread)
   | Workspace_unconfirmed -> Some (sentence Masc_tui_words.workspace_identity_unconfirmed)
   | Different_workspace -> Some (sentence Masc_tui_words.workspace_mismatch)
-  | Metadata {status=Observed;pending=None} -> None
-  | Metadata {status=Not_observed;pending=None} ->
+  | Metadata Observed -> None
+  | Metadata (Not_observed {pending=None}) ->
       Some (say "키퍼 목록 미조회" "Keeper list not observed")
-  | Metadata {status=Not_observed;pending=Some phase} ->
+  | Metadata (Not_observed {pending=Some phase}) ->
       Some (say "키퍼 목록: " "Keeper list: " ^ metadata_step ~ko phase)
-  | Metadata {status=Observed;pending=Some phase} ->
-      Some (say "키퍼 목록 새로 조회: " "Refreshing Keeper list: " ^ metadata_step ~ko phase)
-  | Metadata {status=Read_failed detail;pending=None} ->
+  | Metadata (Read_failed {detail;pending=None}) ->
       Some (say "키퍼 목록 조회 실패: " "Keeper list unavailable: " ^ detail)
-  | Metadata {status=Read_failed detail;pending=Some phase} ->
+  | Metadata (Read_failed {detail;pending=Some phase}) ->
       Some
         (say "키퍼 목록: " "Keeper list: " ^ metadata_step ~ko phase
          ^ say " · 지난 조회 실패: " " · last read failed: " ^ detail)

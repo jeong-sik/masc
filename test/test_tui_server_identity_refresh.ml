@@ -2933,8 +2933,9 @@ let test_local_source_failures_are_independent () =
   let composer=Masc_tui_composer_projection.of_state state in
   Alcotest.(check bool) "retry retains the admitted failure and cannot send the retained draft" true
     (let retains_failure=match composer.reading with
-       | Masc_tui_composer.Metadata {status;pending} ->
-           status = Masc_tui_composer.Read_failed "metadata unavailable" && Option.is_some pending
+       | Masc_tui_composer.Metadata (Masc_tui_composer.Read_failed {detail;pending=stage}) ->
+           String.equal detail "metadata unavailable" && Option.is_some stage
+       | Masc_tui_composer.Metadata (Masc_tui_composer.Not_observed _ | Masc_tui_composer.Observed)
        | Workspace_not_observed | Workspace_unconfirmed | Different_workspace -> false in
      retains_failure
        && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Edit
@@ -2943,7 +2944,7 @@ let test_local_source_failures_are_independent () =
   Alcotest.(check bool) "only owned metadata recovery restores the original recipient send" true
     (let composer=Masc_tui_composer_projection.of_state state in
      composer.target = Masc_tui_composer.Ready keeper.k_name
-       && composer.reading = Masc_tui_composer.Metadata {status=Observed;pending=None}
+       && composer.reading = Masc_tui_composer.Metadata Masc_tui_composer.Observed
        && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Send keeper.k_name
        && String.equal composer.draft "original draft survives metadata failure"
        && state.local_workspace = Local_workspace_failed "archive unavailable");

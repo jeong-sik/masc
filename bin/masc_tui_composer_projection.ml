@@ -6,12 +6,14 @@ let source_reading (state : Masc_tui_types.state) : Composer.reading =
     | Workspace_identity_match_unconfirmed _ -> Composer.Workspace_unconfirmed
     | Workspace_identity_mismatch _ -> Composer.Different_workspace
     | Workspace_identity_match ->
-        let status=match state.local_keepers,state.keepers_error with
-          | Local_workspace_failed detail,_
-          | (Local_workspace_unread | Local_workspace_read),Some detail -> Composer.Read_failed detail
-          | Local_workspace_unread,None -> Composer.Not_observed
-          | Local_workspace_read,None -> Composer.Observed in
-        Composer.Metadata {status;pending=Option.map fst (Masc_tui_types.local_source_slow_pending state Local_keepers)}
+        let pending=Option.map fst (Masc_tui_types.local_source_slow_pending state Local_keepers) in
+        Composer.Metadata
+          (match state.local_keepers,state.keepers_error with
+           | Local_workspace_failed detail,_
+           | (Local_workspace_unread | Local_workspace_read),Some detail ->
+               Composer.Read_failed {detail;pending}
+           | Local_workspace_unread,None -> Composer.Not_observed {pending}
+           | Local_workspace_read,None -> Composer.Observed)
 
 (* Taking focus binds the existing message target. A refreshed roster cursor
    is navigation, not permission to retarget that draft. Availability is still

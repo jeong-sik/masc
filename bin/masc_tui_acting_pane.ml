@@ -438,7 +438,7 @@ let tokens_sum_figure = function
 
 let calls_text ~ko n = Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Call n
 let files_text ~ko n = Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.File n
-let window_text hours = Printf.sprintf "%gh" hours
+let window_text = Masc_tui_value.Interval.of_hours
 
 let cost_text = function
   | Some usd -> Printf.sprintf "$%.4f" usd

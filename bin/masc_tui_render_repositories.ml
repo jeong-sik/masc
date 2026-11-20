@@ -1026,11 +1026,12 @@ let render_changes_list (state : state) =
         heading
           ~reading:
             (if state.ui_language = Lang_ko then
-               Printf.sprintf "변경 %d건 · 최근 %.0f시간 호출 %d건" shown
-                 s.Masc.Tui_decode.fcs_window_hours s.Masc.Tui_decode.fcs_calls_in_window
+               Printf.sprintf "변경 %d건 · 최근 %s 호출 %d건" shown
+                 (Masc_tui_value.Interval.of_hours s.Masc.Tui_decode.fcs_window_hours)
+                 s.Masc.Tui_decode.fcs_calls_in_window
              else
-               Printf.sprintf "%d in %.0fh of %s" shown
-                 s.Masc.Tui_decode.fcs_window_hours
+               Printf.sprintf "%d in %s of %s" shown
+                 (Masc_tui_value.Interval.of_hours s.Masc.Tui_decode.fcs_window_hours)
                  (Masc_tui_message_layout.count_noun
                     s.Masc.Tui_decode.fcs_calls_in_window "call"))
   in

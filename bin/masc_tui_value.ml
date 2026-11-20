@@ -359,6 +359,8 @@ module Interval = struct
     if Float.is_finite whole && Float.abs whole < largest_whole_setting then
       text (int_of_float whole)
     else Ongoing.text whole
+
+  let of_hours hours = of_seconds (hours *. Float.of_int seconds_per_hour)
 end
 
 module Mark = struct

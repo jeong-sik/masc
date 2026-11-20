@@ -50,17 +50,13 @@ import type {
   KeeperCompositeSnapshot,
 } from '../api/schemas/keeper-composite'
 import { deriveBlockerReason } from './keeper-blocker-reason'
-import {
-  isKeeperAutoRecoverPause,
-  keeperDisplayStatus,
-} from './keeper-runtime-display'
+import { keeperDisplayStatus } from './keeper-runtime-display'
 import {
   isKeeperOffline,
   isKeeperPaused,
 } from './keeper-predicates'
 
 export type OfflineCause = 'unbooted' | 'shutdown' | 'crashed' | 'unknown'
-export type PausedCause = 'operator' | 'auto_recover' | 'unknown'
 export type StuckReason = KeeperRuntimeBlockerClass | 'fiber_dead' | 'unknown'
 
 // RFC-0135 PR-14a — attention axis SSOT (Goal-2 typed-state expansion).
@@ -106,7 +102,7 @@ export interface KeeperOperationalAxes {
 // (forming an external axis-pair the typed sum couldn't enforce).
 export type KeeperOperationalState =
   | (KeeperOperationalAxes & { readonly kind: 'offline'; readonly cause: OfflineCause })
-  | (KeeperOperationalAxes & { readonly kind: 'paused'; readonly cause: PausedCause })
+  | (KeeperOperationalAxes & { readonly kind: 'paused' })
   | (KeeperOperationalAxes & { readonly kind: 'stuck'; readonly reason: StuckReason })
   | {
       readonly kind: 'running'
@@ -132,7 +128,7 @@ export function deriveKeeperOperationalState(
   const axes = computeKeeperOperationalAxes(keeper, composite)
 
   if (isPaused(keeper, composite)) {
-    return { kind: 'paused', ...axes, cause: derivePausedCause(keeper, composite) }
+    return { kind: 'paused', ...axes }
   }
   if (isOffline(keeper, composite)) {
     return { kind: 'offline', ...axes, cause: deriveOfflineCause(keeper) }
@@ -178,16 +174,6 @@ function isPaused(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {
   if (toKeeperPhase(c?.phase) === 'Paused') return true
   if (c?.phase_diagnosis?.conditions.operator_paused === true) return true
   return false
-}
-
-function derivePausedCause(k: Keeper, c: KeeperCompositeSnapshot | null): PausedCause {
-  if (isKeeperAutoRecoverPause(k)) return 'auto_recover'
-  if (c?.phase_diagnosis?.conditions.operator_paused === true) return 'operator'
-  if (k.pause_state === 'paused') return 'operator'
-  if (k.phase === 'Paused') return 'operator'
-  if (isKeeperPaused(k)) return 'operator'
-  if (toKeeperPhase(c?.phase) === 'Paused') return 'operator'
-  return 'unknown'
 }
 
 function isOffline(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {

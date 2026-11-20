@@ -69,11 +69,10 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
-      cause: 'operator',
     })
   })
 
-  it('paused operator cause when phase === Paused', () => {
+  it('paused when phase === Paused', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ phase: 'Paused' }),
       composite: null,
@@ -81,11 +80,10 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
-      cause: 'operator',
     })
   })
 
-  it('paused operator cause when pause_state === paused', () => {
+  it('paused when pause_state === paused', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ pause_state: 'paused' }),
       composite: null,
@@ -93,7 +91,6 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
-      cause: 'operator',
     })
   })
 
@@ -108,11 +105,10 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
-      cause: 'operator',
     })
   })
 
-  it('paused operator cause when only pipeline_stage === paused', () => {
+  it('paused when only pipeline_stage === paused', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         status: 'active',
@@ -125,11 +121,10 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
-      cause: 'operator',
     })
   })
 
-  it('paused operator cause when composite phase is paused', () => {
+  it('paused when composite phase is paused', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ phase: 'Running', status: 'active', paused: false }),
       composite: makeComposite({ phase: 'paused' }),
@@ -137,7 +132,6 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
-      cause: 'operator',
     })
   })
 })

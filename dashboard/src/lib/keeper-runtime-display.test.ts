@@ -4,7 +4,6 @@ import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import {
   keeperActivityDisplay,
   keeperDisplayRuntime,
-  isKeeperAutoRecoverPause,
   keeperDisplayStatus,
   keeperRuntimeBlockerHint,
   keeperRuntimeBlockerLabel,
@@ -280,20 +279,6 @@ describe('keeperRuntimeBlockerHint', () => {
       ).toBe(expected)
     },
   )
-})
-
-describe('isKeeperAutoRecoverPause', () => {
-  it('treats a TLS handshake failure under provider_runtime_error as an auto-retry pause', () => {
-    expect(
-      isKeeperAutoRecoverPause(makeKeeper({
-        status: 'paused',
-        paused: true,
-        runtime_blocker_class: 'provider_runtime_error',
-        runtime_blocker_summary:
-          'Provider runtime catch-all (internal_unhandled_exception): TLS alert from peer: handshake failure',
-      })),
-    ).toBe(true)
-  })
 })
 
 describe('keeperActivityDisplay', () => {

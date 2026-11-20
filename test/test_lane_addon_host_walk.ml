@@ -1,7 +1,5 @@
-(** The walk of one host cycle listing (RFC
-    host-cycle-runs-exact-requests-side-by-side 3.3 and 3.5). The requests
-    here are the steps themselves, so each test states what every request
-    does. *)
+(** The walk of one host cycle listing. The requests here are the steps
+    themselves, so each test states what every request does. *)
 open Alcotest
 module Walk = Masc.Lane_addon_host_walk
 module Config = Masc.Lane_addon_config

@@ -10,12 +10,12 @@ module Status_blocker = Masc.Keeper_status_bridge_blocker
 (* Round-trip is asymmetric:
    - [to_wire] is total (every disposition produces a string).
    - [of_wire] is best-effort. Recognised app strings round-trip.
-     Recognised runtime wires (RFC-0042) round-trip via projection.
+     Recognised runtime wires round-trip via projection.
      Parametrised runtime payloads (Provider_runtime_error of string,
-     Agent_core_error of string) and
+     Agent_core_error of { wire; timeout }) and
      unrecognised legacy wires deserialise to [Unknown { raw_error }];
-     no round-trip is possible without a wire-prefix scheme that
-     RFC-0042 explicitly defers (§3.1 "intentionally flat"). *)
+     no round-trip is possible because the wire is flat: no prefix
+     names the constructor a payload came from. *)
 let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "Checkpoint", D.Checkpoint

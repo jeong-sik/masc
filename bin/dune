@@ -1163,7 +1163,8 @@
  (name masc_tui_execute_result)
  (wrapped false)
  (modules masc_tui_execute_result)
- (libraries masc masc_string_util masc_tool_blob_store unix yojson))
+ (libraries masc masc_string_util masc_tool_blob_store masc_tui_message_layout
+   masc_tui_value unix yojson))
 
 (library
  (name masc_tui_execute_terminal)

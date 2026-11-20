@@ -6,7 +6,7 @@
 (** The removal of a person's key account (design 8.5, RFC
     a-persons-api-key-is-their-own-provider-account 3.6). The owner asks for
     it, and it runs inside the call of the account
-    ({!Server_setup_account_login.one_call_of}), as each verification and
+    ({!Runtime_account_call.one_call_of}), as each verification and
     each turn on the account does, so none of them runs meanwhile.
 
     The last purge record of the account decides where the removal starts.

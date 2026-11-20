@@ -438,10 +438,6 @@ let trusted_state person =
    ([Runtime_account_call]). A call while another runs gets [busy]. *)
 let call_running = "A call of this account is running."
 
-type in_call = Runtime_account_call.t
-
-let one_call_of = Runtime_account_call.one_call_of
-
 (* The account of the person among the accounts of [state]. An account of
    another person is answered as one that does not exist (design 4.2: an id
    grants nothing). *)
@@ -594,7 +590,7 @@ let verify ~person ~base_path ~body request reqd =
     let* () = owned person provider_account_id |> Result.map_error runtime_error_answer in
     let* env = Option.to_result (Eio_context.get_env_opt ())
       ~none:(`Service_unavailable, "Verification requires the server process environment.", None) in
-    one_call_of provider_account_id ~busy:(`Conflict, call_running, None) (fun in_call ->
+    Runtime_account_call.one_call_of provider_account_id ~busy:(`Conflict, call_running, None) (fun in_call ->
       let* prepared = person_runtime in_call person ~base_path
           ~binding:(Runtime_account_runtime.Model model)
         |> Result.map_error runtime_error_answer in

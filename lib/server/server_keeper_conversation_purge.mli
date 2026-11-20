@@ -7,7 +7,7 @@
 (** The deletion of a person's conversation with their Keeper (design 8.5,
     plan S1b-3c). The owner asks for it, and it runs inside the call of the
     account the conversation began on
-    ({!Server_setup_account_login.one_call_of}), as each turn of the
+    ({!Runtime_account_call.one_call_of}), as each turn of the
     conversation does, so no turn of it runs meanwhile.
 
     + The last purge record of the conversation decides where the deletion

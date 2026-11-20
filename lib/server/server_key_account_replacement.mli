@@ -22,7 +22,7 @@
       ({!Runtime_key_account_files.replace}).
 
     The steps after the first run inside the call of the account
-    ({!Server_setup_account_login.one_call_of}), where its turns, its
+    ({!Runtime_account_call.one_call_of}), where its turns, its
     verifications and its removal run too. From the record on, a use of the
     account reads the file of the new generation and no other. The account
     stays whatever becomes of its files: its Runtimes and the Keepers

@@ -1141,7 +1141,8 @@ let write_closed_turn_log ~keepers_dir ~keeper_name ~trace_id closings =
     the line a read the writer asked would leave, through the turn that
     [closing] closed, with [working_state] ([Keep] leaves the none a new
     store has). The store is booted first, which starts it when it has no
-    commit log. *)
+    commit log, and the question names the snapshot its tail names, as a
+    question the writer made would. *)
 let commit_memory_read
       ~(config : Masc.Workspace.config)
       ~keeper_name
@@ -1170,6 +1171,7 @@ let commit_memory_read
   let question : Masc.Librarian_read_result.question =
     { Masc.Librarian_read_result.id
     ; shown = { Masc.Librarian_plan.memory = Some []; units = [ "turn", closing.line ] }
+    ; basis = Masc.Librarian_log.snapshot_after (Masc.Librarian_store.tail store)
     ; reach =
         { Masc.Librarian_read_result.line = closing.line
         ; within = Masc.Librarian_log.Whole

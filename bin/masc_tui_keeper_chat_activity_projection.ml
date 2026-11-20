@@ -134,6 +134,21 @@ let tool_block ?(omitted_steps = 0) activities : tool_block =
    never seen before the attempt ended is a caution -- it does not establish
    a failure. An outcome the record does not carry stays the unreported [?]
    of 6.4. [◌] belongs to a value not read yet and no longer marks a call. *)
+(* The wait a provider asked for before its next attempt, in the duration
+   spellings of RFC tui-one-screen-grammar 6.2: a whole number of seconds is a
+   setting ([30s], [2m]), anything finer keeps its reading ([500ms], [1.5s]).
+   A negative delay is a reading that failed. *)
+let milliseconds_per_second = 1000
+
+let retry_delay_text ms =
+  if ms > 0 && ms mod milliseconds_per_second = 0 then
+    Masc_tui_value.Interval.text (ms / milliseconds_per_second)
+  else
+    Option.value
+      ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+      (Masc_tui_message_layout.elapsed_text
+         (float_of_int ms /. float_of_int milliseconds_per_second))
+
 let finished_marker = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
 
 let marker_of_outcome = function
@@ -331,9 +346,9 @@ let native_progress_text (key : native_progress_key) =
     | Runtime_native_tools.Retry_cleared agent ->
         "provider retry notice cleared · " ^ safe_line agent.subagent_type
     | Runtime_native_tools.Retry_reported note ->
-        Printf.sprintf "%sprovider retry %d/%d · delay %dms · %s · %s%s"
+        Printf.sprintf "%sprovider retry %d/%d · delay %s · %s · %s%s"
           (if key.running then "" else "last observed ")
-          note.attempt note.max_retries note.retry_delay_ms
+          note.attempt note.max_retries (retry_delay_text note.retry_delay_ms)
           (safe_line note.agent.subagent_type) (safe_line note.error_category)
           (Option.fold ~none:"" ~some:(fun code -> Printf.sprintf " · status %d" code) note.error_status))
     key.retry in

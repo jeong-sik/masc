@@ -1,0 +1,8 @@
+### Changed
+
+- A Keeper's metrics record rows say `?` for a reading the record left out
+  instead of `--`, group token and message counts (`12,840/1,203`), spell
+  latency on the duration ladder (`1.2s` instead of `1200ms`) and cost with
+  four decimals (`$1.0000`, which read `$1.`).
+- A provider retry in Keeper chat names its delay as a duration: `delay 30s`
+  or `delay 1.5s` instead of `delay 30000ms`.

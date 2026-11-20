@@ -1,4 +1,4 @@
-(* RFC-0203 Phase 1.2b.3 — I/O loop bridging Discord_wss_connection and
+(* Phase 1.2b.3 — I/O loop bridging Discord_wss_connection and
    Discord_gateway_state.
 
    Single session, no reconnect. Phase 1.4 will wrap this in a backoff

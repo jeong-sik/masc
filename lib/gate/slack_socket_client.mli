@@ -34,7 +34,7 @@ val run :
       read by [Channel_gate_slack_state] at send time, not here.
     - [on_event] receives [Message_create] / [App_mention] events that pass the
       trigger policy. [Reaction_added] and ignored events do not start a turn.
-    - [on_ambient] receives the record-only lane (RFC-0226 parity): human
+    - [on_ambient] receives the record-only lane (parity with the Discord gateway): human
       [Message_create] events that failed the trigger policy and
       [Reaction_added] events from users other than the bot itself. It must
       not start a turn.

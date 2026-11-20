@@ -1,4 +1,4 @@
-(* RFC-0203 Phase 1.1b — pure state machine.
+(* Phase 1.1b — pure state machine.
 
    This file defines the typed surface and the *shape* of the
    transition function. Concrete transitions are filled in by
@@ -779,8 +779,7 @@ let with_trigger_policy t trigger_policy =
    Two functions, one per event type. Each exhaustively matches over
    [trigger_policy]; adding a new policy variant breaks both bodies
    at compile time. Reactions in [Mention_only] are deliberately
-   suppressed (the "quiet, mention-triggered bot" default), per
-   RFC-0203 §Shape interpretation. *)
+   suppressed (the "quiet, mention-triggered bot" default). *)
 
 (* Self-skip guard: an inbound event whose actor is the bot itself
    is always suppressed, regardless of trigger policy. [Mention_only]

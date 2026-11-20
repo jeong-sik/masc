@@ -5,8 +5,7 @@
     opening handshake and drives the frame loop. ws-direct speaks a plain
     [Eio.Flow.two_way], so it composes with a TLS flow (which has no fd)
     directly — removing the impedance that made the [httpun-ws] client
-    unusable here (its constructor wants an fd-backed socket; see RFC-0203 §Why
-    and RFC-0287).
+    unusable here (its constructor wants an fd-backed socket).
 
     The driver fibers live on [sw]; tearing down the switch tears them down.
     Inbound text messages and the peer Close arrive as [inbound] events on an

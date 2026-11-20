@@ -1,4 +1,4 @@
-(* RFC-0203 Phase 1.2b.2 + 1.4b, RFC-0287 — TLS+WSS connection for the
+(* Phase 1.2b.2 + 1.4b — TLS+WSS connection for the
    Discord Gateway, driven by the masc-owned ws-direct stack.
 
    masc still owns the TLS setup (DNS, TCP connect, [Tls_eio.client_of_flow])
@@ -6,8 +6,7 @@
    RFC 6455 §4 opening handshake and drives the frame loop. ws-direct speaks a
    plain [Eio.Flow.two_way], so it composes with a TLS flow (which has no fd)
    directly — removing the impedance that made the httpun-ws client unusable
-   here (the httpun-ws client constructor wants an fd-backed socket; see
-   RFC-0203 §Why and RFC-0287).
+   here (the httpun-ws client constructor wants an fd-backed socket).
 
    Lifecycle (1.4b, unchanged): the socket, TLS flow, and ws-direct driver
    fibers all live inside a per-session [Eio.Switch] created inside an outer

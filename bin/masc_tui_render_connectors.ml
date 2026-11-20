@@ -428,7 +428,8 @@ let render_browser_history (state : state) (history : Browser_history.t) =
            c.push_styled ~style:(Theme.recede ())
              (ui_text state ~ko:"  선택된 관측 기록 없음" ~en:"  No selected observation")
        | Some entry -> c.push_styled ~style:(Theme.recede ())
-           ("  " ^ Terminal_text.single_line (Masc_domain.iso8601_of_unix_seconds entry.at)
+           ("  " ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
+                     ~now:(Unix.gettimeofday ()) entry.at
             ^ " · " ^ entry.execution_id));
       (match Browser_history.observation history with
        | None ->

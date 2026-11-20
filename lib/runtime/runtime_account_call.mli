@@ -34,7 +34,8 @@ val one_call_of
     was cancelled before it came, while it waited or after the call was
     handed to it.
 
-    It is called from an Eio fiber. A call made inside a call of the same
-    account waits for itself and never runs; {!one_call_of} gives [busy]
-    there. *)
+    It is called from an Eio fiber. Outside one it raises
+    [Effect.Unhandled] and leaves the account as it was. A call made inside
+    a call of the same account waits for itself and never runs;
+    {!one_call_of} gives [busy] there. *)
 val call_in_turn_of : Authz_types.Provider_account_id.t -> (t -> 'a) -> 'a

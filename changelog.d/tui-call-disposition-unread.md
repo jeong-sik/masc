@@ -1,0 +1,8 @@
+### Changed
+
+- An Acting tool call whose disposition this build could not read reads
+  `도구 호출 ✕` / `tool call ✕` in the EVENT column instead of `처리 결과
+  불명` / `unknown disposition`; the event detail still names the error. A
+  DOS controller the server could not ask reads `DOS 조작자를 읽지 못함` /
+  `DOS controller could not be read` instead of `미확인` / `unknown` (RFC
+  tui-one-screen-grammar 6.4).

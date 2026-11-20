@@ -816,14 +816,12 @@ let tools_pane_strip ~cols (state : state) =
     ~width:(tab_strip_width ~cols ~before:" " ~after:"")
     ~press:(fun pane text -> Masc_tui_press.(pressable (Press_tools_pane pane) text))
     (List.map
-       (fun (pane, label) -> (Say.render language label, active_pane = pane, pane))
-       [ (Masc_tui_types.Tools_surface, Say.both ~ko:"호출 범위" ~en:"Callable")
-       ; (Masc_tui_types.Tools_async, Say.both ~ko:"비동기 작업" ~en:"Async work")
-       ; (Masc_tui_types.Tools_activations, Say.both ~ko:"Skill 기록" ~en:"Skill log")
-       ; (Masc_tui_types.Tools_usage, Say.both ~ko:"Skill 사용 집계" ~en:"Skill usage")
-       ; (Masc_tui_types.Tools_catalog Tools_catalog_list, Say.both ~ko:"전체 도구" ~en:"All tools")
-       ; (Masc_tui_types.Tools_storage, Say.both ~ko:"저장 공간" ~en:"Storage")
-       ])
+       (fun pane ->
+         let label =
+           Say.both ~ko:(tools_pane_label ~ko:true pane) ~en:(tools_pane_label ~ko:false pane)
+         in
+         (Say.render language label, active_pane = pane, pane))
+       tools_panes)
 ;;
 
 let skill_usage_box ~cols rows =

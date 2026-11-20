@@ -67,6 +67,15 @@ type binding = {
 let b ?help ~ko ?(detail = Either) ?(rows = Rowless) ~role group key label =
   { key; label; label_ko = ko; help; group; detail; rows; role }
 
+(* What a key that steps [next] from [first] walks through, in order, so a
+   help sentence names every stop of the cycle the handler takes. *)
+let cycle_from first next =
+  let rec walk acc current =
+    let after = next current in
+    if after = first then List.rev (current :: acc) else walk (current :: acc) after
+  in
+  walk [] first
+
 (* The bindings zone 5 may name. *)
 let acting bindings =
   List.filter
@@ -443,6 +452,8 @@ let keeper_actions =
   ; b ~role:Acts ~ko:"내리기" Act "s" "shutdown"
   ; b ~role:Acts ~ko:"설정 TOML/JSON" Act "e/E" "settings TOML/JSON"
   ; b ~role:Acts ~ko:"파일" Act "f" "files" ~help:"file changes this keeper wrote"
+  ; b ~role:Acts ~ko:"Git 변경" Act "d" "Git changes"
+      ~help:"open the project's current Git working-tree changes"
   ; b ~role:Acts ~ko:"새 키퍼" Act "a" "new" ~help:"new keeper"
   ; b ~role:Acts ~ko:"삭제" Act "x" "delete" ~help:"stop and permanently remove the confirmed keeper"
   ; b ~role:Acts ~ko:"삭제 기록" Navigate "D" "deletions" ~help:"durable deletion records, failures and cleanup retry"
@@ -615,22 +626,25 @@ let tools_bindings ~moves ~back ~bracket =
   ; b ~role:Moves ~ko:"페이지" Navigate "PgUp/PgDn" "page"
   ; b ~role:Moves ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
   ; b ~role:Acts ~ko:"다음 탭" Navigate "p" "section"
-      ~help:"available / async runs / receipts / usage / all tools. \
-             Available shows the selected Keeper's exposed tools and Skills; \
-             ORIGIN names the tool source. Async runs shows workspace requests \
+      ~help:(String.concat " / " (List.map (tools_pane_label ~ko:false) tools_panes)
+             ^ ". \
+             Callable shows the selected Keeper's exposed tools and Skills; \
+             ORIGIN names the tool source. Async work shows workspace requests \
              and recovery: active counts active ledger requests, runtime-owned \
              means a current runtime owner, ownership-unknown is unconfirmed. \
-             Receipts keeps current-session Skill evidence: triggered=invoked, \
+             Skill log keeps current-session Skill evidence: triggered=invoked, \
              delivered/handed off=delivered, actions=later tool actions. \
              These are separate events; no record does not prove no use. \
-             Usage aggregates recorded calls by exact Skill revision across \
+             Skill usage aggregates recorded calls by exact Skill revision across \
              current Keeper sessions; last use is the ledger's recorded time, \
              and unread ledgers stay qualified. \
              All tools lists process-wide registrations, separately from \
              a Keeper's callable surface and observed calls. \
+             Storage shows the host disk and what the server's storage \
+             cleanup last did. \
              DIRECT=direct calls allowed; SURFACES=exposure paths; \
-             none=no exposure path. Use Skill receipts for usage evidence \
-             and Activity for tool input/output."
+             none=no exposure path. Use the Skill log for usage evidence \
+             and Activity for tool input/output.")
   ; b ~role:Acts ~ko:"조합 성능" Act "f" "Composition performance"
       ~help:"outside async requests, select the next Composition, load its \
              exact-revision performance charts and open its page at them; \
@@ -678,7 +692,9 @@ let metrics_bindings =
   ; b ~role:Acts ~ko:"1 / 7 / 14일" Navigate "w" "1d / 7d / 14d"
       ~help:"on Usage: cycle the exact UTC day window for provider report history and tool calls", Metrics_usage_sections [Usage_trend; Usage_calls]
   ; b ~role:Acts ~ko:"지표 선택" Navigate "1 / 2 / 3" "telemetry section"
-      ~help:"on Telemetry: Engine, Work, or Tools", Metrics_telemetry
+      ~help:("on Telemetry: "
+             ^ String.concat " / " (List.map (metrics_section_label ~ko:false) metrics_sections)),
+    Metrics_telemetry
   ; b ~role:Moves ~ko:"뒤로" Act "Esc" "Dashboard", Metrics_all
   ; b ~role:Moves ~ko:"새로 조회" Meta "r" "refresh", Metrics_all
   ; b ~role:Moves ~ko:"다음" Meta "Tab" "next", Metrics_all
@@ -1248,7 +1264,10 @@ let for_surface = function
       ; b ~role:Acts ~ko:"전체 Keeper" Act "a / A" "all fleet"
           ~help:"browse and search consolidated memory across the entire fleet"
       ; b ~role:Acts ~ko:"정렬" Act "s" "sort"
-          ~help:"cycle sort keepers (facts, size, delta, state, name)"
+          ~help:("cycle sort keepers: "
+                 ^ String.concat " / "
+                     (List.map memory_overview_sort_label
+                        (cycle_from Mem_overview_facts next_memory_overview_sort)))
       ; b ~role:Acts ~ko:"단위" Act "u" "units"
           ~help:"switch stored memory and request input between tokens and KiB"
       ; b ~role:Acts ~ko:"상세" Act "d" "detail"
@@ -2992,6 +3011,9 @@ let work_task_detail_bindings =
   [ b ~role:Acts ~ko:"이전 기록" Navigate "H" "earlier history"
       ~help:"in Task detail, extend the observed history with its known \
              earlier page"
+  ; b ~role:Acts ~ko:"취소" Act "x" "cancel"
+      ~help:"in Task detail, cancel the Task; $EDITOR asks for the reason \
+             and saving it is the confirmation"
   ]
 
 (* Each section with the surface it answers for; Global and the mark legends

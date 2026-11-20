@@ -6427,6 +6427,20 @@ type tools_pane =
       (** The host disk and what the server's storage cleanup last did. It
           reads the same envelope as the inventory. *)
 
+(* The panes [p] walks, in its order, so the strip and the key sheet name the
+   same six. The catalog stands for both of its views. *)
+let tools_panes =
+  [ Tools_surface; Tools_async; Tools_activations; Tools_usage
+  ; Tools_catalog Tools_catalog_list; Tools_storage ]
+
+let tools_pane_label ~ko = function
+  | Tools_surface -> if ko then "호출 범위" else "Callable"
+  | Tools_async -> if ko then "비동기 작업" else "Async work"
+  | Tools_activations -> if ko then "Skill 기록" else "Skill log"
+  | Tools_usage -> if ko then "Skill 사용 집계" else "Skill usage"
+  | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> if ko then "전체 도구" else "All tools"
+  | Tools_storage -> if ko then "저장 공간" else "Storage"
+
 let tools_volume_gc_parent_scroll = function
   | Tools_catalog (Tools_catalog_volumes {catalog_scroll}) -> Some catalog_scroll
   | Tools_surface | Tools_async | Tools_activations | Tools_usage | Tools_storage
@@ -7055,6 +7069,10 @@ let metrics_section_label ~ko = function
   | Section_fleet -> if ko then "엔진·스케줄러" else "Engine & Scheduler"
   | Section_resources -> if ko then "작업·결과" else "Work & Outcomes"
   | Section_tools -> if ko then "기억·Gate 안전" else "Memory & Gate Safety"
+
+(* The order 1, 2 and 3 select, which the strip draws and the key sheet
+   names. *)
+let metrics_sections = [ Section_fleet; Section_resources; Section_tools ]
 
 (* The row above a Metrics body that ends in the connection rows, which the
    End key reaches. Usage and Telemetry both draw it. *)

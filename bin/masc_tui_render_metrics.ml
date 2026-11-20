@@ -269,7 +269,7 @@ let section_pills_line ~ko ~cols ~(active : metrics_section) : string =
         ~width:(tab_strip_width ~cols ~before:"  " ~after:"")
         ~press:(fun section text ->
           Masc_tui_press.(pressable (Press_metrics_section section)) text)
-        (List.map tab [ Section_fleet; Section_resources; Section_tools ])
+        (List.map tab metrics_sections)
   in
   Layout.truncate_end inner_width line
 

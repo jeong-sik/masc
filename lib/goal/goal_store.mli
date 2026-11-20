@@ -69,7 +69,7 @@ val goal_to_yojson : goal -> Yojson.Safe.t
 
 (** {1 State} *)
 
-type event_kind = Created | Updated | Phase | Edited
+type event_kind = Created | Updated | Phase | Edited | Proof_reopened
 
 type pending_event = {
   event_id : string;

@@ -1694,14 +1694,27 @@ let test_document_rejection_order_through_public_consumers () =
   let events =
     [ created;
       { created with event_id = "event-a"; store_revision = 7; kind = Goal_store.Phase;
-        payload = `Assoc ["phase", `String "paused"] } ]
+        payload = `Assoc ["phase", `String "paused"] };
+      { created with event_id = "event-r"; store_revision = 8; kind = Goal_store.Proof_reopened;
+        payload = `Assoc ["phase", `String "executing"; "actor", `String "operator"] } ]
   in
+  let proof_reopened_json = Goal_store.pending_event_to_yojson (List.nth events 2) in
+  check string "Proof_reopened pending_event serializes its event_type" "goal_proof_reopened"
+    Yojson.Safe.Util.(proof_reopened_json |> member "event_type" |> to_string);
   let state : Goal_store.state =
-    { version = 7; updated_at = stamp; goals = [goal];
+    { version = 8; updated_at = stamp; goals = [goal];
       pending_events = events; pending_notifications = [] }
   in
   (match Goal_store.write_state_result config state with
    | Ok () -> () | Error detail -> fail detail);
+  (match Goal_store.load_source config with
+   | Goal_store.Available reloaded ->
+     check (list string) "Proof_reopened pending_event round-trips through state codec"
+       [ "goal_created"; "goal_phase"; "goal_proof_reopened" ]
+       (List.map (fun (e : Goal_store.pending_event) ->
+          Goal_store.event_kind_to_string e.kind) reloaded.pending_events)
+   | Goal_store.Uninitialized | Goal_store.Unavailable _ ->
+     fail "expected written Proof_reopened outbox state to reload");
   let primary = Goal_store.goals_path config in
   let mirror = mirror_path config in
   let read path = In_channel.with_open_bin path In_channel.input_all in

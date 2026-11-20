@@ -22,7 +22,7 @@ type criterion = Criterion of {
   procedure : string;
 }
 
-type event_kind = Created | Updated | Phase | Edited
+type event_kind = Created | Updated | Phase | Edited | Proof_reopened
 
 type pending_event = {
   event_id : string;

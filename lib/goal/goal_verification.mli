@@ -128,12 +128,12 @@ val reopen_goal :
   ?effects:(Goal_store.goal -> reopen_outcome * bool -> Goal_store.transition_effects) ->
   Workspace_utils.config -> goal_id:string -> actor:string -> note:string option ->
   (Goal_store.goal * reopen_outcome * bool, string) result
-(** Re-evaluates Reopen under the Goal lock, archives/resets proof under the
-    ledger lock, then writes the phase before releasing the Goal lock. The bool
-    reports an actual phase change. Archive failure leaves the prior phase.
-    Already-Executing preserves every existing proof and pending request. Call outside an existing Goal transaction. Archive
-    or ledger writes followed by later persistence failure may be retried; this
-    is serialized across the two stores, not a cross-file atomic filesystem write.
+(** Re-evaluates Reopen under the Goal lock, resets proof under the
+    verification ledger lock, then writes the phase (queueing
+    [goal_proof_reopened] in the Goal outbox ahead of any [effects] events
+    in that single store revision) before releasing the Goal lock. The bool
+    reports an actual phase change.
+    Already-Executing preserves every existing proof and pending request. Call outside an existing Goal transaction. Verification reset followed by later Goal persistence failure may leave the proof idle; this is serialized across the two stores, not a cross-file atomic filesystem write.
 
     [effects] goes to {!Goal_store.transact_goal}: it runs only when the phase
     is written, and its events and notifications commit in that same write. *)

@@ -1,4 +1,4 @@
-// Nav telemetry — RFC-0049 client observer.
+// Nav telemetry — client observer.
 // Posts one event per surface/section transition to /api/v1/dashboard/nav-event.
 // Aggregate counters only — no PII, no per-event storage on the server.
 

@@ -62,14 +62,13 @@ import './styles/ss-keeper-v2-bridge.css'
 import.meta.glob('./styles/*-v2.css', { eager: true })
 
 // ── keeper-v2 prototype CSS — the SSOT skin (big-bang v2 reskin) ──
-// Vendored verbatim from the design prototype (keeper-v2/styles/*), loaded
-// LAST so the prototype's shell/skin classes (.v2-top/.v2-body/.v2-nav/.kp-row
-// /.thread/.bubble/.ctx-*/.ov-*) win over any legacy *-v2.css drift on shared
-// names. Load order is the prototype's <link> order (notes/css-map.md): tokens
-// → v2 (shell+chat) → surfaces → per-surface overrides; craft.css after v2 so
-// density rules win. As surfaces migrate to prototype DOM, the legacy CSS above
-// is removed (final cleanup PR). Hot-path font loading is local/system only;
-// CSS theme files must not add their own external font requests.
+// Vendored verbatim, loaded LAST so the prototype's shell/skin classes
+// (.v2-top/.v2-body/.v2-nav/.kp-row/.thread/.bubble/.ctx-*/.ov-*) win over any
+// legacy *-v2.css drift on shared names. Load order: tokens → v2 (shell+chat)
+// → surfaces → per-surface overrides; craft.css after v2 so density rules win.
+// As surfaces migrate to prototype DOM, the legacy CSS above is removed (final
+// cleanup PR). Hot-path font loading is local/system only; CSS theme files must
+// not add their own external font requests.
 import './styles/keeper-v2/colors_and_type.css'
 import './styles/keeper-v2/v2.css'
 import './styles/keeper-v2/surfaces.css'

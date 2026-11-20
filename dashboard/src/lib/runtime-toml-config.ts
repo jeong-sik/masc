@@ -56,17 +56,17 @@ export interface RuntimeTomlBinding {
   // when the binding omits them (most bindings do).
   priceInput: number | null
   priceOutput: number | null
-  // llama-server prefill-liveness opt-in (runtime.toml `return-progress`,
-  // RFC-0382 §7); null when the binding omits it.
+  // llama-server prefill-liveness opt-in (runtime.toml `return-progress`);
+  // null when the binding omits it.
   returnProgress: boolean | null
 }
 
 export interface RuntimeTomlEnvironment {
   defaultRuntimeId: string
   assignments: Record<string, string>
-  // Declared [runtime.lanes.<id>] table names. Since RFC-0457 a keeper
-  // assignment may name a lane: the server validates assignments lane first,
-  // runtime second (runtime.ml assignment_references, Lane_then_runtime).
+  // Declared [runtime.lanes.<id>] table names. A keeper assignment may name
+  // a lane: the server validates assignments lane first, runtime second
+  // (runtime.ml assignment_references, Lane_then_runtime).
   laneIds: string[]
   providers: RuntimeTomlProvider[]
   models: RuntimeTomlModel[]

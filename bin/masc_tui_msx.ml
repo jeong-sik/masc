@@ -1,4 +1,4 @@
-(* The MSX spectator screen (RFC-0439 §3.7). The machine lives in the server;
+(* The MSX spectator screen. The machine lives in the server;
    this screen draws the frame the server hands over and never owns a Z80. The
    drawing half mirrors what [open_image] does for a picture: write the whole
    screen directly, because the retained frame underneath would otherwise
@@ -13,7 +13,7 @@
    interaction); it also handles F4 machine switching, F6/F7 checkpoints, F8
    media selection and Tab/room focus before game-key dispatch. This module
    cannot reach [Masc_tui_http]; eligible input is sent by the executable to
-   the shared server machine (RFC-0439 §3.3), then the frame is re-fetched. *)
+   the shared server machine, then the frame is re-fetched. *)
 
 module Frame = Masc_tui_image_mosaic
 
@@ -122,11 +122,10 @@ let viewport_size () =
   | Some size -> size
   | None -> Masc_tui_ansi.get_terminal_size ()
 
-(* The activity sidebar (RFC machine-spectating-goes-through-lanes §2.1's
-   [activity] field, drawn here for the first time): a fixed-width column of
-   "when who did-what" on the right, one row per entry. [Machine_action_feed.cap]
-   (20) was already sized for a column, not a wall of text, so one entry is
-   always one row here. *)
+(* The activity sidebar (the live answer's [activity] field): a fixed-width
+   column of "when who did-what" on the right, one row per entry.
+   [Machine_action_feed.cap] (20) was already sized for a column, not a wall
+   of text, so one entry is always one row here. *)
 let sidebar_cols = 28
 let sidebar_gap = 1
 
@@ -255,7 +254,7 @@ let step_fraction d =
 (* One step by the size keys: [+1.0] grows, [-1.0] shrinks, an eighth of the
    screen each way. Called by the key loop, which owns every key the spectator
    sees -- this module's [consume] answers [esc] only, the rest go to the
-   machine (RFC-0439 3.3), and the size keys are intercepted before that. *)
+   machine, and the size keys are intercepted before that. *)
 let adjust_size d = step_fraction d
 
 let footer interaction =
@@ -271,11 +270,11 @@ let footer interaction =
 let live_footer () =
   Printf.sprintf " Esc: back  +/-: %d%%" (int_of_float (!screen_fraction *. 100.0))
 
-(* RFC-msx-surface-focus-mode stage 1: the pixels this view draws arrive as a
-   surface frame ([Masc_tui_interactive.frame]) — the renderer knows the
-   contract, not [Masc_tui_types.msx_frame]'s pixel fields. The meta frame
-   (mode, media, who pressed) still rides the old type; only the picture went
-   through the contract. *)
+(* The pixels this view draws arrive as a surface frame
+   ([Masc_tui_interactive.frame]) — the renderer knows the contract, not
+   [Masc_tui_types.msx_frame]'s pixel fields. The meta frame (mode, media,
+   who pressed) still rides the old type; only the picture went through the
+   contract. *)
 let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     ?(activity = []) ?room ?room_footer (surface : Masc_tui_interactive.frame option) =
   let dims =
@@ -522,7 +521,7 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
     true
   end
 
-(* --- The load menu (RFC-0439 §3.7) ------------------------------------- *)
+(* --- The load menu ----------------------------------------------------- *)
 
 (* What a chosen row does. The keyboard I/O it implies -- fetching the
    inventory, POSTing the load -- is the executable layer's, the only one that

@@ -1,11 +1,10 @@
-(** One operation's keeper chat turn as an event log keyed by journal seq
-    (RFC-0412 §3.3, stage 3a). The live SSE decoder and the v2 journal
-    endpoint feed the same log; {!Masc_tui_keeper_chat_transcript} projects
-    it. Entries are kept in insertion order; both producers deliver seqs in
-    increasing order (the live wire in publish order, a v2 page in journal
-    order), so insertion order is seq order. A seq that arrives below the
-    position held ({!resume_position}) is accepted where it lands, not
-    reordered. *)
+(** One operation's keeper chat turn as an event log keyed by journal seq.
+    The live SSE decoder and the v2 journal endpoint feed the same log;
+    {!Masc_tui_keeper_chat_transcript} projects it. Entries are kept in
+    insertion order; both producers deliver seqs in increasing order (the
+    live wire in publish order, a v2 page in journal order), so insertion
+    order is seq order. A seq that arrives below the position held
+    ({!resume_position}) is accepted where it lands, not reordered. *)
 
 type entry =
   { seq : int option

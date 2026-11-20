@@ -85,7 +85,7 @@ let reading t =
   | Masc_tui_fetched.Failed failure -> Read_failed failure
 
 (* Translate only the server's typed briefing status. Fact age never selects
-   these states: RFC-0418 keeps age separate from source invalidation. The
+   these states: age and source invalidation are separate facts. The
    reference sheet retains its English keys. *)
 let unknown = "?"
 let claim_noun = "claim"

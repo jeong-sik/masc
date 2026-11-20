@@ -3,7 +3,7 @@
     Keys, pastes, mouse reports and the terminal's answers to our queries all
     arrive on one stream. This decoder is the only thing that decides which is
     which, and the only thing that holds a sequence that has started but not
-    finished (RFC tui-single-input-decoder).
+    finished.
 
     No I/O and no clock: the caller feeds bytes it read and says when a read
     came back empty. Everything here can be replayed byte for byte in a test. *)

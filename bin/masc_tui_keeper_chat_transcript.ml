@@ -232,7 +232,7 @@ type trail_node =
       ; nodes : trail_node list  (** In arrival order. *)
       }
       (** Everything one earlier runtime attempt produced, kept whole when
-          the next attempt began (RFC-0412 §3.3): the reader was reading it,
+          the next attempt began: the reader was reading it,
           so it stays, marked. One block per superseded attempt, siblings in
           the trail, never nested. *)
 

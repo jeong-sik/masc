@@ -1612,7 +1612,7 @@ let load_memory_health ~(host : string) ~(port : int) :
       decode_offloaded memo_memory_health ~name:"memory.health.decode_wait"
         Masc.Tui_decode_memory_health.decode_memory_health_snapshot json
 
-(** One Keeper's memory health row (RFC-0487). *)
+(** One Keeper's memory health row. *)
 let load_memory_health_row ~(host : string) ~(port : int) ~(keeper : string) :
     (Masc.Tui_decode_memory_health.memory_health_row_answer, string) result =
   match fetch_keeper_memory_health_row ~host ~port ~keeper with
@@ -1932,8 +1932,7 @@ let delete_preset ~(host : string) ~(port : int) ~(name : string) : (string, str
     rather than dropped: a clamped list cannot answer whether a keeper the TUI
     knows from disk has a running fiber, and the lifecycle actions depend on
     that answer. The read goes past the server's list cache, so a whole
-    roster is never older than a row the TUI read before it (RFC-0481
-    §3.3). *)
+    roster is never older than a row the TUI read before it. *)
 let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
     (Masc_tui_keeper_control.roster * (Tui_decode.candle_reading, string) result, Masc_tui_keeper_control.roster_failure)
     result =
@@ -1954,7 +1953,7 @@ let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
             | Ok (rows, errors, truncated, total, candle) ->
                 Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
 
-(** Load one Keeper's roster row (RFC-0481 §3.1). The answer must name the
+(** Load one Keeper's roster row. The answer must name the
     Keeper it was asked for, so it cannot be read as a whole roster. *)
 let load_keeper_row ~(host : string) ~(port : int) ~expected_workspace ~keeper_name :
     (Masc_tui_keeper_control.row_reading * (Tui_decode.candle_reading, string) result,

@@ -95,8 +95,7 @@ let roster_of_reading ~errors ~rows ~truncated ~total =
   in
   prepare_roster source
 
-(* One Keeper's row as [GET /api/v1/gate/keepers?name=] answers it
-   (RFC-0481 §3.1). *)
+(* One Keeper's row as [GET /api/v1/gate/keepers?name=] answers it. *)
 type row_reading =
   | Row of Decode.keeper_runtime
   | Row_invalid of string

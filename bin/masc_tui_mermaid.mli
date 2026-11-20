@@ -29,7 +29,7 @@
     text, notes and the framed blocks. A diagram of any other kind, or a
     line this grammar cannot read, comes back as a {!failure} naming the
     kind or the line, and the caller shows the source under that name. Nothing is guessed. [subgraph] blocks are
-    drawn as titled bounding boxes around their members (RFC-0429 §3.3);
+    drawn as titled bounding boxes around their members;
     [classDef], [class], [style] and [click] statements, and [linkStyle] in
     a flowchart, are accepted and do not change the text canvas. The rendering
     status reports those accepted but undrawn statements.

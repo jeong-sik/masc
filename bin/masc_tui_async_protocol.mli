@@ -273,8 +273,7 @@ type tools_read =
       ; result : (Masc.Tui_decode_tools.keeper_skill_usage, request_failure) result
       }
 
-(** What a memory health read answered: the fleet, or one Keeper's row
-    (RFC-0487). *)
+(** What a memory health read answered: the fleet, or one Keeper's row. *)
 type memory_health_read =
   | Fleet_health_read of (Masc.Tui_decode_memory_health.memory_health_snapshot, request_failure) result
   | Row_health_read of
@@ -974,10 +973,9 @@ type async_msg =
 
 (* Every async result carries the instant it was ready, so the loop can say
    how long it sat in the mailbox. A result that arrived in a second and was
-   applied ten seconds later names the loop, not the request (RFC-0429
-   §3.0). The instant is read off [Mtime_clock.elapsed_ns] so that a clock
-   correction landing between the two reads cannot fabricate the wait or
-   erase it. *)
+   applied ten seconds later names the loop, not the request. The instant
+   is read off [Mtime_clock.elapsed_ns] so that a clock correction landing
+   between the two reads cannot fabricate the wait or erase it. *)
 type 'a mailed = {
   ready_at_ns : int64;
   message : 'a;

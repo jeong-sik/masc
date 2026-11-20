@@ -156,7 +156,7 @@ type interruption_cause =
   | Runtime_turn_interrupted
   | Provider_connection_closed
 
-(* RFC-0454 P2. The runtime says which of the two stopped the turn, and the
+(* The runtime says which of the two stopped the turn, and the
    keeper carries that value to the turn boundary, so this reader matches a
    constructor. It used to search the row's words for two sentences the
    runtime happened to print ("MASC runtime shutdown interrupted the active
@@ -230,9 +230,8 @@ let effect_attempted_of_internal_error
 ;;
 
 (* The row keeps the failure as the prefixed JSON the keeper logged. Finding
-   the marker is still a scan over the row's text -- RFC-0454 P3 gives the row
-   a failure field of its own and this goes with it -- but what the scan finds
-   is decoded by the producer's own parser, so nothing here spells a kind. *)
+   the marker is still a scan over the row's text, but what the scan finds is
+   decoded by the producer's own parser, so nothing here spells a kind. *)
 let masc_error_marker = "[masc_agent_core_error]"
 
 let internal_error_of_failure text =
@@ -1269,8 +1268,8 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_so
     if summary.withheld = 0 then []
     else
       (* "content withheld" read as "someone is holding it back", and the
-         reader then looked for a way to see it. There is none: RFC-0358 s2
-         admits a reasoning step and its timestamp, and [Trajectory
+         reader then looked for a way to see it. There is none: the server
+         sends a reasoning step and its timestamp, not its text, and [Trajectory
          .withheld_thinking_entry] cannot carry text at all -- both producers
          of [Trace_think] hardcode an empty one. The count is the whole fact. *)
       [ Printf.sprintf "%s · text not recorded"

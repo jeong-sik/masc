@@ -34,7 +34,7 @@ val memory_index : Masc_tui_types.state -> Masc_tui_keeper_memory_reading.index
 (** {1 Readings for the Keepers views} (RFC-0515 §2.3)
 
     The bounds below are display values. They are not server state, and the
-    age of a snapshot is its age, not a verdict on it (RFC-0418). *)
+    age of a snapshot is its age, not a verdict on it. *)
 
 val due_of_next_run : now:float -> Masc_tui_keeper_next_run.t -> Masc_tui_keeper_list_model.due
 (** A scheduled time an hour or less ahead, or already passed without the run

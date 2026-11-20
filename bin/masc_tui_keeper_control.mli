@@ -70,8 +70,8 @@ val roster_of_reading :
     policy. First observed rows and first errors retain their
     meaning; errors take precedence over observed rows of the same name. *)
 
-(** One Keeper's row as [GET /api/v1/gate/keepers?name=<keeper>] answers it
-    (RFC-0481 §3.1): its row, its error row, or no row. *)
+(** One Keeper's row as [GET /api/v1/gate/keepers?name=<keeper>] answers it:
+    its row, its error row, or no row. *)
 type row_reading =
   | Row of Masc.Tui_decode.keeper_runtime
   | Row_invalid of string
@@ -92,8 +92,8 @@ val replace_row : roster -> keeper_name:string -> row_reading -> roster option
     whole roster instead. *)
 
 val starting_up_until : Masc.Tui_decode.keeper_runtime -> float option
-(** When a starting Keeper's [next_action] stops being [Probe]
-    (RFC-0481 §3.6), as a Unix time: its creation time plus
+(** When a starting Keeper's [next_action] stops being [Probe],
+    as a Unix time: its creation time plus
     {!Masc.Keeper_status_runtime.agent_staleness_threshold_s}. A Keeper is
     starting when its health is healthy or idle and its [next_action] is
     [Probe]; a failing Keeper probes too, and its value does not change with

@@ -156,8 +156,8 @@ let input_reader_has_pending_bytes reader =
    That is how a request the server answers in milliseconds reached the
    ten-second timeout: measured with masc-http-probe, the same 1.8 MB read
    takes 5.5 seconds beside a loop that waits this way and 26 ms beside one
-   that waits through Eio (RFC-0429 §3.0). Waiting through Eio takes this
-   fiber out of the run queue, and those fibers run until they block in turn.
+   that waits through Eio. Waiting through Eio takes this fiber out of the
+   run queue, and those fibers run until they block in turn.
 
    Only the readiness wait races the deadline. The read below is never
    cancelled, so no keystroke is taken from the terminal and then dropped
@@ -409,8 +409,7 @@ let return_input_byte reader =
    every byte and keeps an [ESC \[ 2 0 0] head in its own buffer as a possible
    paste start. The decoder then never sees the head, and a check of the
    decoder alone showed no notice and let Ctrl-C fall through to the quit
-   prompt. Both are asked until the probe becomes a reply consumer (RFC
-   tui-single-input-decoder, step 3). *)
+   prompt. Both are asked. *)
 let input_holds_incomplete_sequence reader =
   Masc_tui_input_decoder.pending reader.decoder
   = Some Masc_tui_input_decoder.Sequence
@@ -457,9 +456,8 @@ let paste_can_recover reader clock =
 (* A paste is not a key and does not become one. Encoding the payload into
    the key channel would put a second meaning on a string every surface reads
    as a key name, and the caller would have to tell the two apart by looking
-   at the text -- the classifier this codebase spent RFC-0042 removing. The
-   two kinds travel as two constructors instead, and only the paste path can
-   carry text. *)
+   at the text. The two kinds travel as two constructors instead, and only
+   the paste path can carry text. *)
 type input_event =
   | Key of string
   | Pasted of Masc_tui_paste.t

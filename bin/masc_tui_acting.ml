@@ -304,10 +304,10 @@ let batch_text = function
   | None -> ""
 
 (* Mirrors Keeper_tool_composition_catalog.{skill_tool_name,tool_name_prefix}.
-   Those tool names are a stable wire contract (RFC skills-as-tools keeps
-   them identical across migrations); this projection library deliberately
-   depends only on the observer, so it names them instead of linking the
-   keeper catalog. Display tagging only — never a dispatch decision. *)
+   Those tool names are a stable wire contract; this projection library
+   deliberately depends only on the observer, so it names them instead of
+   linking the keeper catalog. Display tagging only — never a dispatch
+   decision. *)
 let skill_read_tool_name = "keeper_skill"
 let composition_tool_name_prefix = "keeper_compose_"
 

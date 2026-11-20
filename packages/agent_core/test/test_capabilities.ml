@@ -1947,15 +1947,24 @@ let test_shared_preset_constructor_rejects_unknown () =
   | Some _ -> fail "unknown base label should not be constructible"
 ;;
 
-let test_shared_preset_constructor_canonicalizes () =
-  match Capability_preset.of_string " OpenAI_CHAT " with
-  | Some preset ->
-    check
-      string
-      "canonical base label"
-      "openai_chat"
-      (Capability_preset.to_string preset)
-  | None -> fail "known base label should parse"
+let test_shared_preset_constructor_accepts_only_its_spelling () =
+  List.iter
+    (fun preset ->
+       let label = Capability_preset.to_string preset in
+       check
+         bool
+         (Printf.sprintf "%s parses back" label)
+         true
+         (Capability_preset.of_string label = Some preset);
+       List.iter
+         (fun other ->
+            check
+              bool
+              (Printf.sprintf "%S is refused" other)
+              true
+              (Option.is_none (Capability_preset.of_string other)))
+         [ String.uppercase_ascii label; " " ^ label; label ^ " " ])
+    Capability_preset.all
 ;;
 
 let test_example_manifest_base_labels_are_canonical () =
@@ -3481,9 +3490,9 @@ let () =
             `Quick
             test_shared_preset_constructor_rejects_unknown
         ; test_case
-            "shared preset constructor canonicalizes"
+            "shared preset constructor accepts only its spelling"
             `Quick
-            test_shared_preset_constructor_canonicalizes
+            test_shared_preset_constructor_accepts_only_its_spelling
         ; test_case
             "example base labels are canonical"
             `Quick

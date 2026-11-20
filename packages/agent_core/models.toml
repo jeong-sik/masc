@@ -3188,7 +3188,7 @@ request_path = "/chat/completions"
 auth = "api-key"
 # The effort ladder is declared per grok row, not here: xAI documents it per
 # model (grok-4.3 accepts "none", grok-4.5 and later do not).
-capabilities_base = "xai"
+capabilities_base = "openai_chat_extended"
 
 [[providers]]
 id = "mistral"
@@ -3196,7 +3196,7 @@ kind = "openai_compat"
 base_url = "https://api.mistral.ai/v1"
 request_path = "/chat/completions"
 auth = "api-key"
-capabilities_base = "mistral"
+capabilities_base = "openai_chat_extended"
 
 # Thinking Machines Tinker, OpenAI-compatible inference (Beta). The key is the
 # Tinker API key, sent as the bearer token the OpenAI SDK sends.

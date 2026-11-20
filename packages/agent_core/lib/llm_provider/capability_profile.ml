@@ -785,23 +785,11 @@ let%test "capabilities_of_kind aliases the same presets as the label classifier"
        | None -> false)
     [ Provider_kind.Anthropic, "anthropic"
     ; Provider_kind.Kimi, "kimi"
-    ; Provider_kind.OpenAI_compat, "openai_compat"
+    ; Provider_kind.OpenAI_compat, "openai_chat"
     ; Provider_kind.Ollama, "ollama"
     ; Provider_kind.Gemini, "gemini"
     ; Provider_kind.Glm, "glm"
     ]
-;;
-
-let%test "every base_label vocab value resolves to a preset (no false-reject)" =
-  (* SSOT drift-guard (Agent Core contract): [Capability_vocab.base_label_values] is what
-     the catalog/manifest parsers accept for a [base] field. If a listed value
-     did NOT resolve here, the parser would accept a label that then silently
-     collapses to [default_capabilities] — reopening the gap this closes. So
-     every vocab value must resolve to [Some]. (The reverse — resolver labels not
-     in the vocab — is caught loudly at parse time, not silently.) *)
-  List.for_all
-    (fun label -> Option.is_some (capabilities_for_provider_label label))
-    Capability_vocab.base_label_values
 ;;
 
 let%test "unknown base label resolves to None, not a permissive default" =

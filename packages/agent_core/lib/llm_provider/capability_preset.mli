@@ -15,7 +15,14 @@ type t =
   | Ollama_cloud_v1
   | Nvidia
 
+val all : t list
+(** Every preset once, in declaration order. Derived from {!t}. *)
+
 val of_string : string -> t option
+(** The preset whose {!to_string} is exactly [raw]. Any other spelling,
+    including a change of case or surrounding whitespace, is [None]. *)
+
 val to_string : t -> string
+
 val labels : string list
-(** All accepted spellings, including aliases. Unknown labels remain absent. *)
+(** {!to_string} of every preset in {!all}. *)

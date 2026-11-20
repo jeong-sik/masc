@@ -1346,16 +1346,6 @@ let%test "capabilities_for_provider_label: anthropic" =
   | None -> false
 ;;
 
-let%test "capabilities_for_provider_label: openai alias" =
-  Option.is_some (capabilities_for_provider_label "openai")
-  && Option.is_some (capabilities_for_provider_label "openai_chat")
-;;
-
-let%test "capabilities_for_provider_label: glm alias" =
-  Option.is_some (capabilities_for_provider_label "glm")
-  && Option.is_some (capabilities_for_provider_label "glm-coding")
-;;
-
 let%test "capabilities_for_provider_label: unknown returns None" =
   Option.is_none (capabilities_for_provider_label "not_a_real_provider_xyz")
 ;;
@@ -1650,69 +1640,22 @@ let detect_drift (caps : capabilities) (resp : Types.api_response)
   List.rev !obs
 ;;
 
-(* ── Alias collision invariant ─────────────────────── *)
+(* ── Canonical preset label invariant ─────────────────────── *)
 
-(* Aliases must resolve to the same underlying capabilities record.
-   If a new provider is added with overlapping labels, this test catches
-   divergence. M06 regression guard. *)
-let%test "capabilities_for_provider_label: aliases resolve to identical capabilities" =
-  let resolve label = capabilities_for_provider_label label in
-  let same_base a b =
-    match resolve a, resolve b with
-    | Some ca, Some cb ->
-      ca.supports_tools = cb.supports_tools
-      && ca.supports_reasoning = cb.supports_reasoning
-      && ca.emits_usage_tokens = cb.emits_usage_tokens
-      && ca.max_context_tokens = cb.max_context_tokens
-      && ca.max_output_tokens = cb.max_output_tokens
-      && ca.supports_image_input = cb.supports_image_input
-      && ca.thinking_control_format = cb.thinking_control_format
-      && ca.accepted_reasoning_efforts = cb.accepted_reasoning_efforts
-      && ca.preserve_thinking_control_format = cb.preserve_thinking_control_format
-      && ca.content_inline_reasoning = cb.content_inline_reasoning
-      && ca.reasoning_output_format = cb.reasoning_output_format
-      && ca.reasoning_streaming_format = cb.reasoning_streaming_format
-      && ca.assistant_tool_content_format = cb.assistant_tool_content_format
-      && ca.ignored_sampling_parameters = cb.ignored_sampling_parameters
-      && ca.reasoning_replay_override = cb.reasoning_replay_override
-    | _ -> false
-  in
-  let alias_pairs = [ "openai", "openai_chat"; "glm", "glm-coding" ] in
-  List.for_all (fun (a, b) -> same_base a b) alias_pairs
-  && Option.is_some (resolve "anthropic")
-  && Option.is_some (resolve "gemini")
-  && Option.is_some (resolve "ollama")
-  && Option.is_some (resolve "kimi")
-  && Option.is_some (resolve "xai")
-  && Option.is_some (resolve "mistral")
-  && Option.is_some (resolve "cohere")
-  && Option.is_some (resolve "mimo")
-  && Option.is_some (resolve "nvidia")
+(* Removed aliases and non-canonical provider names must not resolve silently
+   now that [capabilities_for_provider_label] accepts only canonical
+   [Capability_preset.to_string] spellings. *)
+let%test "capabilities_for_provider_label: removed aliases are rejected" =
+  let removed = [ "openai"; "glm-coding"; "xai"; "mistral" ] in
+  List.for_all (fun l -> Option.is_none (capabilities_for_provider_label l)) removed
 ;;
 
-(* Every declared label is reachable — no dead branches in the match.
-   If a label is added to the match but has no corresponding capability
-   binding, this test will fail. *)
+(* Every declared canonical preset label is reachable — derived from
+   [Capability_preset.labels] so adding a constructor keeps this check in sync. *)
 let%test "capabilities_for_provider_label: all declared labels resolve" =
-  let labels =
-    [ "anthropic"
-    ; "openai"
-    ; "openai_chat"
-    ; "openai_chat_extended"
-    ; "openrouter"
-    ; "gemini"
-    ; "ollama"
-    ; "glm"
-    ; "glm-coding"
-    ; "xai"
-    ; "mistral"
-    ; "cohere"
-    ; "mimo"
-    ; "nvidia"
-    ; "kimi"
-    ]
-  in
-  List.for_all (fun l -> Option.is_some (capabilities_for_provider_label l)) labels
+  List.for_all
+    (fun l -> Option.is_some (capabilities_for_provider_label l))
+    Capability_preset.labels
 ;;
 
 (* Every label resolves to a distinct capability fingerprint unless

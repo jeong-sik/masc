@@ -738,8 +738,8 @@ let%test "sampling_parameter round-trips through to_string and of_string" =
 ;;
 
 (* Model-row bases accept only concrete presets. Provider declarations decode
-   their explicit models-only choice separately. One spelling table owns both
-   preset validation and resolution. *)
+   their explicit models-only choice separately. Each preset has the one
+   spelling {!Capability_preset.to_string} gives it. *)
 let base_label_values = Capability_preset.labels
 ;;
 

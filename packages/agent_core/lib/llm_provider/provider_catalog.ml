@@ -524,7 +524,7 @@ let capability_base json =
   then Error "removed provider catalog field \"base\"; use \"capabilities_base\""
   else
     let* raw = required_exact_string "capabilities_base" json in
-    match String.lowercase_ascii raw with
+    match raw with
     | "models_only" -> Ok None
     | _ -> (match Capability_preset.of_string raw with
         | Some preset -> Ok (Some preset)

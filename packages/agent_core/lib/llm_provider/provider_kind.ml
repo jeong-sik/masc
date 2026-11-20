@@ -15,6 +15,7 @@ type t =
   | Ollama
   | Gemini
   | Glm
+[@@deriving enumerate]
 
 let to_string = function
   | Anthropic -> "anthropic"
@@ -24,8 +25,6 @@ let to_string = function
   | Gemini -> "gemini"
   | Glm -> "glm"
 ;;
-
-let all : t list = [ Anthropic; Kimi; OpenAI_compat; Ollama; Gemini; Glm ]
 
 let of_canonical_string raw =
   List.find_opt (fun kind -> String.equal raw (to_string kind)) all

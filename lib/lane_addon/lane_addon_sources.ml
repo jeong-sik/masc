@@ -57,7 +57,8 @@ let offers : Lane_id.builtin -> kind list = function
       | Standalone_lane.Board_attention
       | Standalone_lane.Verifier
       | Standalone_lane.Candle_appraiser
-      | Standalone_lane.Librarian_memory ) -> []
+      | Standalone_lane.Librarian_memory
+      | Standalone_lane.Workspace_memory_curator ) -> []
   | Lane_id.Browser lane ->
     (match document_observer lane with
      | Operator_client_observer -> [ Browser_document_kind ])

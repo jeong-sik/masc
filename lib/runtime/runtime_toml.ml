@@ -370,7 +370,7 @@ let parse_exact_output_lane ~(owner : Runtime_schema.exact_lane_owner) (tbl : Ot
     | Standalone_lane.Librarian_memory -> true
     | Standalone_lane.Librarian | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Board_attention | Standalone_lane.Verifier
-    | Standalone_lane.Candle_appraiser -> false
+    | Standalone_lane.Candle_appraiser | Standalone_lane.Workspace_memory_curator -> false
   in
   let* () =
     match owner, max_output_tokens_result with

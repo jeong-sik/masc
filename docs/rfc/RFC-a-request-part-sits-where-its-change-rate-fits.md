@@ -199,8 +199,12 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 지금:
 - Anthropic 레인은 턴 문맥 전체를 대화 중간 system 메시지(`clear_at: next_user_message`)로 보낸다.
 - 그 안에는 호스트가 쓴 상태(Task, 승인, 완료 판정)와 바깥에서 온 글(Fleet 방송, Board 글, 다른 화자의 mention, 기억·wiki 본문)이 같이 있다.
-- 공식 문서는 대화 중간 system 메시지를 「application 이 관찰한 상태 변화」의 자리로 적는다. 믿지 못할 글을 둘 자리가 아니다.
+- 공식 문서(Mid-conversation system messages, Limitations)는 이렇게 적는다. "Not a place for untrusted content. Do not place text from outside the conversation, such as raw tool output, retrieved documents, or web content, directly in a system message; doing so gives that text operator-level authority."
 - 다른 provider 는 턴 문맥을 이미 User 끝 메시지로 보낸다.
+
+같은 문서에서 이 설계에 닿는 것:
+- tool_result 만 담은 user 메시지도 「다음 user 메시지」로 친다. 그래서 턴 문맥은 첫 도구 라운드 뒤 요청에서 지워진다. 입력 토큰도 0 이고 캐시 키에도 안 들어간다.
+- Sonnet 5.5·Haiku 5.5 는 도구 결과 바로 뒤의 system 메시지를 믿지 못할 글로 보고 무시할 수 있다고 적는다. 도구 라운드 뒤에 다시 싣는 블록이 그 자리로 나가는지는 L5 에서 요청 캡처로 확인한다.
 
 바꾸는 것:
 - `Keeper_context_layers.layer` 마다 쓴 사람을 닫힌 variant 로 붙인다.
@@ -220,12 +224,22 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 ### 3.5 같은 규범 목록을 두 번 싣지 않는다
 
 지금:
-- 기록된 System 이 있으면 `<norms_current>` 를 늘 덧붙인다. `<norms>` 의 조항과 같아도 그렇다.
+- 원장에 격리된 기록이 있으면(`Isolated_history`) masc 가 그린 System 에도 `<norms_current>` 를 늘 덧붙인다. `<norms>` 가 지금 조항으로 그려졌어도 그렇다.
+- `<norms_current>` 는 현재 조항 전체와 보류 안내다. 보류 안내는 「목록에 없는 조항이 승인된 삭제가 아니다」를 알린다(#50758).
+
+`<norms_current>` 가 필요한 때:
+- System 이 옛 조항으로 그려졌다. 변경분 안내는 보류된 조항을 「되돌린 조항」으로 보이게 하므로, 전체 목록이 변경분을 대신한다.
+- 어느 조항으로 그렸는지 모른다. 기록된 System 을 다시 보내는 native 이어가기와, 다른 바이트로 System 을 덮어쓴 요청이다.
+- 지금 조항으로 막 그린 System 은 아니다. `<norms>` 가 현재 조항 전체이고, 지난 턴의 변경분 안내는 모델에 안 보인다. Anthropic 레인은 `clear_at` 으로 지우고, 다른 레인은 보내지 않는다.
 
 바꾸는 것:
-- System 을 그린 조항과 지금 조항이 같으면 `<norms_current>` 를 싣지 않는다. 조항 목록을 구조로 견준다.
-- 다르면 지금처럼 현재 조항 전체를 싣는다.
-- #50758 이 보장한 것(현재 조항 전체가 모델에 닿는다)은 그대로다. 같을 때는 `<norms>` 가 현재 조항 전체다.
+- `Keeper_turn_system.t` 의 현재 조항 값을 닫힌 variant 로 둔다.
+  - `Not_carried`: 격리된 기록이 없다.
+  - `In_text`: System 이 지금 조항으로 그려졌다. 옆에 싣지 않고 블록만 들고 있다.
+  - `Beside_text`: System 뒤에 싣는다.
+- `issue` 가 원장의 투영 상태를 받아 정한다. 지금 조항으로 그렸거나 변경분이 없으면 `In_text`, 변경분이 있으면 `Beside_text` 다.
+- `with_bytes` 가 다른 바이트로 덮어쓰면 `In_text` 를 `Beside_text` 로 바꾼다. 덮어쓴 System 은 조항을 모르기 때문이다.
+- native 이어가기는 지금처럼 늘 `Beside_text` 다.
 
 ## 4. 논의 중
 
@@ -237,14 +251,23 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 - 붙잡는 조건은 창 시작이다. 머리 내용을 견주지 않는다.
 - 역할은 하던 일 메시지처럼 User 다. §3.4 의 문제를 머리로 옮기지 않는다.
 - 창이 그대로인 동안 고른 집합이 바뀌면, 꼬리에 바뀐 것만 싣는다. 새로 고른 본문과 빠진 id 다.
-- 붙잡는 값은 `Keeper_model_input_ledger` 의 `last` 에 그린 바이트 그대로 둔다. digest 만으로는 같은 바이트를 다시 실을 수 없다.
+- 머리는 저장된 사실에서 다시 그린다. 창을 연 자리, 고른 fact id 목록, Memory revision 이 그 사실이다.
+  - 그 revision 의 본문이 바뀌지 않고 그리기가 결정론이면 사본을 두지 않는다. 사본은 진실의 출처를 하나 더 만든다.
+  - 둘 중 하나라도 안 되면 그린 바이트를 `Keeper_model_input_ledger` 의 `last` 에 둔다. 하던 일 메시지와 같은 방식이다. digest 만으로는 같은 바이트를 다시 실을 수 없다.
+- 머리에 든 본문이 purge 처럼 고쳐 쓰이면 창이 그대로여도 머리를 바로 다시 그린다. 지운 글을 다음 창 이동까지 보내지 않는다. 그 요청은 캐시를 잃는다.
 - 이 값은 앞부분을 지키는 투영이다. 무엇을 허락하거나 막지 않는다.
 
 모르는 것과 대가:
 - 빠진 항목의 본문이 다음 창 이동까지 머리에 남는다. 모델이 꼬리의 「빠진 id」를 따르는지는 오프라인 하네스로 잰다.
-- 머리는 창 안 모든 요청의 입력 한도를 먹는다. 지금도 이번 턴 본문 한 벌이 같은 몫을 먹으므로, 창 옮김 빈도는 크게 달라지지 않는다고 본다. L6 에서 잰다.
-- 창이 옮겨지는 턴(이 Keeper 들의 4.5~16%)은 두 설계 모두 본문과 이력을 다시 쓴다. 나머지 턴에서 본문 다시 쓰기가 없어진다.
-- 계산상 이 Keeper 들의 캐시에 안 닿은 입력이 약 절반 준다.
+- 머리는 창 안 모든 요청의 입력 한도를 먹는다.
+  - Anthropic 레인은 지금 본문을 `clear_at: next_user_message` 로 보내, 턴 첫 요청에서만 입력을 먹는다. 안쪽 요청에서는 0 이다.
+  - 머리에 두면 본문이 안쪽 요청에도 실린다. 턴이 가장 커지는 곳이 안쪽 요청이라, 창이 더 자주 옮겨지고 턴 가운데 넘침도 는다.
+  - 다른 레인은 지난 턴 문맥을 보내지 않으므로 입력 몫이 지금과 비슷하다.
+  - 그래서 창 옮김 빈도와 넘침은 레인별로 나눠 잰다.
+- 꼬리의 변경분은 창을 연 때의 집합과 지금 집합의 누적 차이다. 턴 문맥은 턴마다 새로 실리므로 턴마다 다시 싣는다.
+  - 창 하나는 대략 6~22턴 간다(창 옮김 4.5~16%). 그사이 집합이 계속 바뀌면 꼬리가 본문 한 벌에 가까워질 수 있다.
+  - 회상 기록에서 창을 연 때의 집합과 k 턴 뒤 집합의 겹침을 k 별로 잰다.
+- 「캐시에 안 닿은 입력이 준다」는 위 두 측정을 넣어 레인별로 다시 계산한 뒤에만 쓴다. 아직 수치가 없다.
 - 입력 한도가 없는 공식 클라이언트 레인은 턴 첫 요청에서 창을 붙잡지 않는다(RFC #53512 §2.5). 그 레인에서는 아끼는 것이 없다.
 
 ### 4.2 Fleet 방송
@@ -292,12 +315,13 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 
 ## 8. 검증
 
-- L1: 같은 조항이면 `<norms_current>` 가 없고, 다르면 현재 조항 전체가 있다.
+- L1: 격리된 기록이 있는 원장에서 지금 조항으로 그린 System 에는 `<norms_current>` 가 없다. 변경분이 있는 System, native 이어가기, 다른 바이트로 덮어쓴 System 에는 현재 조항 전체가 있다.
 - L2: 설정 파서가 `"5m"`·`"1h"` 만 받는다. 1시간 binding 으로 돈 턴은 응답의 `cache_creation.ephemeral_1h_input_tokens` 가 0 보다 크다. 5~60분 쉰 뒤 첫 요청이 앞부분을 읽는다.
 - L3: 이 RFC §1.3 의 표를 투영으로 다시 낸다. 같은 기록이면 같은 표가 나온다.
 - L4: 운영자가 실제 호출로 본다. 불러오기 직후 요청이 앞 요청의 입력을 캐시에서 읽는다.
 - L5: 층마다 실린 역할을 요청 캡처로 센다. 이력에 같은 글이 두 번 쌓이지 않는다.
-- L6: 회상 Keeper 의 턴 첫 요청 안 닿은 입력과 창 옮김 비율을 L6 전후로 견준다.
+- L6 전: 레인별 안쪽 요청 크기에 머리를 더한 분포, 창을 연 때의 집합과 k 턴 뒤 집합의 겹침을 잰다. 둘을 넣은 계산이 이득을 보일 때만 코드로 간다.
+- L6 뒤: 회상 Keeper 의 안 닿은 입력, 창 옮김 비율, 턴 가운데 넘침을 레인별로 전후 견준다.
 
 ## 9. 모르는 것
 

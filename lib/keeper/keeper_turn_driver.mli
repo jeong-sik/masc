@@ -951,4 +951,13 @@ module For_testing : sig
       {!Keeper_official_client_session_refusal.Continuation_on_other_runtime},
       which the walk moves past (#38402). *)
 
+  val translate_person_api_result :
+    sealed:Runtime_account_access.api_sealed ->
+    provider:string ->
+    ('a, Agent_core.Error.t) result ->
+    ('a, Agent_core.Error.t) result
+  (** Maps HTTP 401 [AuthError] failures on a person's API key account to
+      {!Keeper_provider_refusal.Key_refused}, leaving HTTP 403
+      [AuthorizationError] and host/operator seals unchanged. *)
+
 end

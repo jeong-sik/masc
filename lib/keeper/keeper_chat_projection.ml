@@ -226,6 +226,11 @@ let message_to_json ?(omit_stream_contract = false) ~trace_lookup_available
        @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
        @ Json_util.string_field_if_present "turn_ref"
            (Option.map Ids.Turn_ref.to_string m.turn_ref)
+       @ (match m.role, m.failure_kind with
+          | Role.Request_failure, Some kind ->
+            [ ("failure_kind", `String (Keeper_request_failure.Failure_kind.to_wire kind)) ]
+          | (Role.User | Role.Assistant | Role.System | Role.Tool), _
+          | Role.Request_failure, None -> [])
        @ approval_lifecycle_fields m.approval_lifecycle
        (* Preserve the persisted provenance pair at the HTTP boundary.
           Dashboard convergence uses the same atomic identity as the

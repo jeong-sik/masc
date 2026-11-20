@@ -12,6 +12,8 @@
   keeper_owned_job_identity
   keeper_task_skill_resolution_error
   keeper_official_client_session_refusal
+  keeper_account_refusal
+  keeper_provider_refusal
   keeper_terminal_reason
   keeper_runtime_config
   keeper_disk_pressure
@@ -65,7 +67,8 @@
   masc_config
   masc_log
   masc_process
-   masc.agent_core.digest
+  masc.agent_core.digest
+  masc.secret_patterns
   str
   time_compat
   uri

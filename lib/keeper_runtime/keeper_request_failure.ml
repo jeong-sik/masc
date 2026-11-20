@@ -1,3 +1,59 @@
+module Failure_kind = struct
+  type t =
+    | Not_signed_in
+    | Key_refused
+    | Key_unusable
+    | No_quota
+    | Silent
+    | Not_started
+    | Configuration_refused
+    | Turn_refused
+    | Runtime_reassigned
+    | Server_unavailable
+    | Cancelled
+    | No_visible_reply
+    | No_answer
+
+  let all =
+    [ Not_signed_in
+    ; Key_refused
+    ; Key_unusable
+    ; No_quota
+    ; Silent
+    ; Not_started
+    ; Configuration_refused
+    ; Turn_refused
+    ; Runtime_reassigned
+    ; Server_unavailable
+    ; Cancelled
+    ; No_visible_reply
+    ; No_answer
+    ]
+  ;;
+
+  let equal left right = left = right
+
+  let to_wire = function
+    | Not_signed_in -> "not_signed_in"
+    | Key_refused -> "key_refused"
+    | Key_unusable -> "key_unusable"
+    | No_quota -> "no_quota"
+    | Silent -> "silent"
+    | Not_started -> "not_started"
+    | Configuration_refused -> "configuration_refused"
+    | Turn_refused -> "turn_refused"
+    | Runtime_reassigned -> "runtime_reassigned"
+    | Server_unavailable -> "server_unavailable"
+    | Cancelled -> "cancelled"
+    | No_visible_reply -> "no_visible_reply"
+    | No_answer -> "no_answer"
+  ;;
+
+  let of_wire raw =
+    List.find_opt (fun item -> String.equal (to_wire item) raw) all
+  ;;
+end
+
 type turn_resource =
   | Registry_entry_missing
   | Registry_entry_unhealthy
@@ -27,6 +83,33 @@ type failure_site =
 type cause =
   | Core of Keeper_request_failure_core.t
   | Masc of Keeper_internal_error.masc_internal_error
+  | Account_refused of Keeper_account_refusal.t
+  | Provider_auth_required of
+      { provider : string option
+      ; detail : string
+      }
+  | Provider_key_refused of
+      { provider : string
+      ; detail : string
+      }
+  | Provider_quota_exhausted of
+      { provider : string option
+      ; retry_after : float option
+      ; detail : string
+      }
+  | Provider_spawn_refused of
+      { provider : string
+      ; detail : string
+      }
+  | Provider_timeout of
+      { provider : string option
+      ; phase : string option
+      ; detail : string
+      }
+  | Configuration_refused of
+      { field : string
+      ; detail : string
+      }
   | Provider_network of
       { provider : string option
       ; kind : Llm_provider.Http_client.network_error_kind
@@ -95,9 +178,18 @@ type t = { cause : cause }
    agent-core's carrier, so it is lifted back to the value it is before the
    residual projection sees it. *)
 let unnamed_core_cause error =
-  match Keeper_internal_error.classify_masc_internal_error error with
-  | Some masc_error -> Masc masc_error
-  | None -> Core (Keeper_request_failure_core.of_core_error error)
+  match Keeper_account_refusal.of_core_error error with
+  | Some refusal -> Account_refused refusal
+  | None ->
+    (match Keeper_provider_refusal.of_core_error error with
+     | Some (Keeper_provider_refusal.Key_refused { provider; detail }) ->
+       Provider_key_refused { provider; detail }
+     | Some (Keeper_provider_refusal.Spawn_refused { provider; detail }) ->
+       Provider_spawn_refused { provider; detail }
+     | None ->
+       (match Keeper_internal_error.classify_masc_internal_error error with
+        | Some masc_error -> Masc masc_error
+        | None -> Core (Keeper_request_failure_core.of_core_error error)))
 ;;
 
 let cause_of_core_error (error : Agent_core.Error.t) =
@@ -108,19 +200,34 @@ let cause_of_core_error (error : Agent_core.Error.t) =
     Provider_connect_failed { provider = None; kind; detail = message }
   | Agent_core.Error.Api (Agent_core.Retry.RateLimited { message; retry_after }) ->
     Provider_rate_limited { provider = None; retry_after; detail = message }
+  | Agent_core.Error.Api (Agent_core.Retry.PaymentRequired { message }) ->
+    Provider_quota_exhausted { provider = None; retry_after = None; detail = message }
+  | Agent_core.Error.Api (Agent_core.Retry.AuthError { message })
+  | Agent_core.Error.Api (Agent_core.Retry.AuthorizationError { message }) ->
+    Provider_auth_required { provider = None; detail = message }
+  | Agent_core.Error.Api (Agent_core.Retry.Timeout { message; phase }) ->
+    Provider_timeout
+      { provider = None
+      ; phase = Option.map Llm_provider.Http_client.timeout_phase_to_label phase
+      ; detail = message
+      }
   | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit; _ }) ->
     Context_overflow { limit }
   | Agent_core.Error.Api (Agent_core.Retry.InputCapacity _) -> Input_capacity
   | Agent_core.Error.Api (Agent_core.Retry.Overloaded _)
   | Agent_core.Error.Api (Agent_core.Retry.ServerError _)
-  | Agent_core.Error.Api (Agent_core.Retry.AuthError _)
-  | Agent_core.Error.Api (Agent_core.Retry.AuthorizationError _)
-  | Agent_core.Error.Api (Agent_core.Retry.PaymentRequired _)
   | Agent_core.Error.Api (Agent_core.Retry.InvalidRequest _)
-  | Agent_core.Error.Api (Agent_core.Retry.NotFound _)
-  | Agent_core.Error.Api (Agent_core.Retry.Timeout _) -> unnamed_core_cause error
+  | Agent_core.Error.Api (Agent_core.Retry.NotFound _) -> unnamed_core_cause error
   | Agent_core.Error.Provider
-      (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
+      (Llm_provider.Error.NetworkError { provider; kind = _; timeout_phase = Some phase; detail })
+    ->
+    Provider_timeout
+      { provider = Some provider
+      ; phase = Some (Llm_provider.Http_client.timeout_phase_to_label phase)
+      ; detail
+      }
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError { provider; kind; timeout_phase = None; detail }) ->
     Provider_network { provider = Some provider; kind; detail }
   | Agent_core.Error.Provider (Llm_provider.Error.Connect_failed { provider; kind; detail })
     -> Provider_connect_failed { provider = Some provider; kind; detail }
@@ -128,25 +235,45 @@ let cause_of_core_error (error : Agent_core.Error.t) =
       (Llm_provider.Error.RateLimit { provider; retry_after; detail }) ->
     Provider_rate_limited { provider = Some provider; retry_after; detail }
   | Agent_core.Error.Provider
-      ( Llm_provider.Error.InvalidConfig _
-      | Llm_provider.Error.ParseError _
+      (Llm_provider.Error.HardQuota { provider; retry_after; detail }) ->
+    Provider_quota_exhausted { provider = Some provider; retry_after; detail }
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthError { provider; detail })
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError { provider; detail }) ->
+    Provider_auth_required { provider = Some provider; detail }
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout { provider; timeout_phase; detail }) ->
+    Provider_timeout
+      { provider = Some provider
+      ; phase = Option.map Llm_provider.Http_client.timeout_phase_to_label timeout_phase
+      ; detail
+      }
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig { field; detail }) ->
+    Configuration_refused { field; detail }
+  | Agent_core.Error.Provider
+      ( Llm_provider.Error.ParseError _
       | Llm_provider.Error.ProviderWireError _
       | Llm_provider.Error.ProviderReportedError _
       | Llm_provider.Error.UnknownVariant _
       | Llm_provider.Error.ProviderUnavailable _
       | Llm_provider.Error.EmptyCompletion _
-      | Llm_provider.Error.HardQuota _
       | Llm_provider.Error.CapacityExhausted _
-      | Llm_provider.Error.AuthError _
-      | Llm_provider.Error.AuthorizationError _
       | Llm_provider.Error.ServerError _
-      | Llm_provider.Error.Timeout _
       | Llm_provider.Error.InvalidRequest _
       | Llm_provider.Error.NotFound _
       | Llm_provider.Error.ProviderTerminal _ ) -> unnamed_core_cause error
+  | Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail }) ->
+    Configuration_refused { field; detail }
+  | Agent_core.Error.Config (Agent_core.Error.MissingEnvVar { var_name }) ->
+    Configuration_refused
+      { field = "env"; detail = "missing required environment variable " ^ var_name }
+  | Agent_core.Error.Config (Agent_core.Error.UnsupportedProvider { detail }) ->
+    Configuration_refused { field = "provider"; detail }
+  | Agent_core.Error.Config (Agent_core.Error.CredentialUnavailable { provider_id; carrier = _ }) ->
+    Configuration_refused
+      { field = "credentials"; detail = "credentials unavailable for provider " ^ provider_id }
+  | Agent_core.Error.Config (Agent_core.Error.SensitiveValueInConfig { detail }) ->
+    Configuration_refused { field = "config"; detail }
   | Agent_core.Error.Agent _
   | Agent_core.Error.Mcp _
-  | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
@@ -163,6 +290,119 @@ let of_core_error error = { cause = cause_of_core_error error }
 (* A leaf message is its producer's own text and may span lines; the summary
    is one line. *)
 let one_line text = String.map (function '\n' | '\r' -> ' ' | c -> c) text
+
+let server_path_prefixes =
+  [ "/Users/"
+  ; "/home/"
+  ; "/tmp/"
+  ; "/private/"
+  ; "/var/"
+  ; "/etc/"
+  ; "/opt/"
+  ; "/srv/"
+  ; "/mnt/"
+  ; "/root/"
+  ; "/usr/"
+  ; "/System/"
+  ; "/Library/"
+  ; "/Volumes/"
+  ]
+;;
+
+let is_path_delimiter = function
+  | ' ' | '\t' | '\n' | '\r' | '"' | '\'' | '`' | '(' | ')' | '[' | ']'
+  | '{' | '}' | '<' | '>' | ',' | ';' -> true
+  | _ -> false
+;;
+
+let is_ascii_alpha = function
+  | 'a' .. 'z' | 'A' .. 'Z' -> true
+  | _ -> false
+;;
+
+let matches_at text idx prefix =
+  let plen = String.length prefix in
+  idx + plen <= String.length text
+  && String.sub text idx plen = prefix
+;;
+
+let is_token_boundary text idx =
+  if idx = 0
+  then true
+  else (
+    match text.[idx - 1] with
+    | ch when is_path_delimiter ch -> true
+    | ':' | '=' -> true
+    | _ -> false)
+;;
+
+let scan_path_end text start =
+  let len = String.length text in
+  let rec loop j =
+    if j >= len || is_path_delimiter text.[j]
+    then j
+    else if text.[j] = ':' && (j + 1 >= len || is_path_delimiter text.[j + 1])
+    then j
+    else loop (j + 1)
+  in
+  loop start
+;;
+
+let has_masc_segment text start stop =
+  let len = stop - start in
+  len >= 5
+  && (matches_at text start ".masc/"
+      || String_util.contains_substring (String.sub text start len) "/.masc")
+;;
+
+let redact_server_paths text =
+  let len = String.length text in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len
+    then Buffer.contents buf
+    else if is_token_boundary text i && matches_at text i "file://"
+    then (
+      let stop = scan_path_end text (i + 7) in
+      Buffer.add_string buf "[REDACTED_PATH]";
+      loop stop)
+    else if
+      is_token_boundary text i
+      && i + 2 < len
+      && is_ascii_alpha text.[i]
+      && text.[i + 1] = ':'
+      && (text.[i + 2] = '\\' || text.[i + 2] = '/')
+    then (
+      let stop = scan_path_end text (i + 2) in
+      Buffer.add_string buf "[REDACTED_PATH]";
+      loop stop)
+    else if
+      is_token_boundary text i
+      && List.exists (matches_at text i) server_path_prefixes
+    then (
+      let stop = scan_path_end text i in
+      Buffer.add_string buf "[REDACTED_PATH]";
+      loop stop)
+    else if is_token_boundary text i && (text.[i] = '/' || text.[i] = '.')
+    then (
+      let stop = scan_path_end text i in
+      if has_masc_segment text i stop
+      then (
+        Buffer.add_string buf "[REDACTED_PATH]";
+        loop stop)
+      else (
+        Buffer.add_char buf text.[i];
+        loop (i + 1)))
+    else (
+      Buffer.add_char buf text.[i];
+      loop (i + 1))
+  in
+  loop 0
+;;
+
+let sanitize_person_text text =
+  text |> redact_server_paths |> Secret_patterns.redact_text |> one_line
+;;
 
 let runtime_provider_label provider =
   match Option.map String.trim provider with
@@ -283,6 +523,38 @@ let summary_of_cause = function
        one_line
          (Agent_core.Error.to_string
             (Keeper_internal_error.core_error_of_masc_internal_error masc_error)))
+  | Account_refused refusal -> Keeper_account_refusal.to_string refusal
+  | Provider_auth_required { provider; detail } ->
+    let who = runtime_provider_label provider in
+    (match String.trim detail with
+     | "" -> who ^ " requires authentication"
+     | trimmed -> who ^ " authentication required: " ^ one_line trimmed)
+  | Provider_key_refused { provider; detail = _ } ->
+    Printf.sprintf "Provider '%s' refused the account's API key." provider
+  | Provider_quota_exhausted { provider; retry_after; detail } ->
+    let who = runtime_provider_label provider in
+    let wait =
+      match retry_after with
+      | Some seconds -> Printf.sprintf " (retry after %.1fs)" seconds
+      | None -> ""
+    in
+    (match String.trim detail with
+     | "" -> who ^ " quota is exhausted" ^ wait
+     | trimmed -> who ^ " quota is exhausted" ^ wait ^ ": " ^ one_line trimmed)
+  | Provider_spawn_refused { provider; detail } ->
+    Printf.sprintf "Client '%s' could not start: %s" provider (one_line detail)
+  | Provider_timeout { provider; phase; detail } ->
+    let who = runtime_provider_label provider in
+    let phase_note =
+      match Option.map String.trim phase with
+      | Some value when value <> "" -> Printf.sprintf " during %s" value
+      | Some _ | None -> ""
+    in
+    (match String.trim detail with
+     | "" -> who ^ " timed out" ^ phase_note
+     | trimmed -> who ^ " timed out" ^ phase_note ^ ": " ^ one_line trimmed)
+  | Configuration_refused { field; detail } ->
+    Printf.sprintf "Configuration error (%s): %s" (one_line field) (one_line detail)
   | Provider_network { provider; kind; detail } ->
     provider_network_summary ~provider ~kind ~detail
   | Provider_connect_failed { provider; kind; detail } ->
@@ -342,7 +614,117 @@ let summary_of_cause = function
     Printf.sprintf "%s raised an exception: %s" (failure_site_clause site) (one_line exn)
 ;;
 
-let summary { cause } = summary_of_cause cause
+let summary { cause } = sanitize_person_text (summary_of_cause cause)
+
+let failure_kind_of_account_refusal = function
+  | Keeper_account_refusal.Key_unusable _ -> Failure_kind.Key_unusable
+  | Keeper_account_refusal.Runtime_reassigned -> Failure_kind.Runtime_reassigned
+  | Keeper_account_refusal.Authorization_zone_uncertain -> Failure_kind.Server_unavailable
+  | Keeper_account_refusal.Account_home_unresolved
+  | Keeper_account_refusal.Account_home_invalid -> Failure_kind.Configuration_refused
+  | Keeper_account_refusal.Unknown_keeper
+  | Keeper_account_refusal.Access_not_published
+  | Keeper_account_refusal.Operator_turn_refused
+  | Keeper_account_refusal.Channel_not_allowed
+  | Keeper_account_refusal.Caller_not_authorized
+  | Keeper_account_refusal.Pat_expired
+  | Keeper_account_refusal.Pat_scope_not_explicit
+  | Keeper_account_refusal.Scope_or_grant_refused
+  | Keeper_account_refusal.Owner_inactive
+  | Keeper_account_refusal.Provider_account_unavailable
+  | Keeper_account_refusal.Authorization_not_bootstrapped
+  | Keeper_account_refusal.Host_account_refused
+  | Keeper_account_refusal.Accounts_disabled -> Failure_kind.Turn_refused
+;;
+
+let failure_kind_of_cause = function
+  | Account_refused refusal -> failure_kind_of_account_refusal refusal
+  | Provider_auth_required _ -> Failure_kind.Not_signed_in
+  | Provider_key_refused _ -> Failure_kind.Key_refused
+  | Provider_rate_limited _ | Provider_quota_exhausted _ | Input_capacity ->
+    Failure_kind.No_quota
+  | Provider_timeout _ -> Failure_kind.Silent
+  | Provider_spawn_refused _ -> Failure_kind.Not_started
+  | Provider_connect_failed { kind = Llm_provider.Http_client.Timeout; _ }
+  | Provider_network { kind = Llm_provider.Http_client.Timeout; _ } ->
+    Failure_kind.Silent
+  | Provider_connect_failed
+      { kind =
+          ( Connection_refused
+          | Dns_failure
+          | Unreachable
+          | Tls_error
+          | Local_resource_exhaustion
+          | Connection_reset
+          | End_of_file
+          | Unknown )
+      ; _
+      } -> Failure_kind.Not_started
+  | Provider_network
+      { kind =
+          ( Connection_refused
+          | Dns_failure
+          | Unreachable
+          | Tls_error
+          | Local_resource_exhaustion
+          | Connection_reset
+          | End_of_file
+          | Unknown )
+      ; _
+      } -> Failure_kind.No_answer
+  | Configuration_refused _ -> Failure_kind.Configuration_refused
+  | Operator_cancelled -> Failure_kind.Cancelled
+  | No_visible_reply _ -> Failure_kind.No_visible_reply
+  | Server_not_initialized
+  | Server_restarted
+  | Dispatch_unavailable
+  | Turn_resources_unavailable _
+  | Runtime_selection_failed _
+  | Turn_continuation_unpersisted _
+  | User_row_unpersisted _ -> Failure_kind.Server_unavailable
+  | Masc (Keeper_internal_error.Accept_rejected _) -> Failure_kind.No_visible_reply
+  | Masc
+      ( Keeper_internal_error.Official_client_recovery_required _
+      | Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Provider_attempt_effect_fenced _
+      | Keeper_internal_error.Tool_correction_lost _
+      | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Runtime_connection_closed _
+      | Keeper_internal_error.Receipt_persistence_failed _
+      | Keeper_internal_error.Gate_replay_repair_required _ ) ->
+    Failure_kind.No_answer
+  | Core { Keeper_request_failure_core.category = Agent_core.Error.Config_category; _ } ->
+    Failure_kind.Configuration_refused
+  | Core
+      { Keeper_request_failure_core.category =
+          ( Agent_core.Error.Api_category
+          | Agent_core.Error.Provider_category
+          | Agent_core.Error.Agent_category
+          | Agent_core.Error.Mcp_category
+          | Agent_core.Error.Serialization_category
+          | Agent_core.Error.Io_category
+          | Agent_core.Error.Orchestration_category
+          | Agent_core.Error.Media_category
+          | Agent_core.Error.Internal_category )
+      ; _
+      }
+  | Context_overflow _
+  | Keeper_meta_unresolved _
+  | Keeper_not_registered _
+  | Invocation_rejected _
+  | Chat_identity_mismatch
+  | Gate_session_full _
+  | Reply_contract_rejected _
+  | Raised _ -> Failure_kind.No_answer
+;;
+
+let failure_kind { cause } = failure_kind_of_cause cause
 
 (* ------------------------------------------------------------------ *)
 (* Wire                                                                *)
@@ -435,6 +817,49 @@ let cause_to_yojson = function
     `Assoc
       [ "kind", `String "masc"
       ; "error", Keeper_internal_error.masc_internal_error_to_json masc_error
+      ]
+  | Account_refused refusal ->
+    `Assoc
+      [ "kind", `String "account_refused"
+      ; "refusal", `String (Keeper_account_refusal.to_wire refusal)
+      ]
+  | Provider_auth_required { provider; detail } ->
+    `Assoc
+      [ "kind", `String "provider_auth_required"
+      ; "provider", (match provider with Some value -> `String value | None -> `Null)
+      ; "detail", `String detail
+      ]
+  | Provider_key_refused { provider; detail } ->
+    `Assoc
+      [ "kind", `String "provider_key_refused"
+      ; "provider", `String provider
+      ; "detail", `String detail
+      ]
+  | Provider_quota_exhausted { provider; retry_after; detail } ->
+    `Assoc
+      [ "kind", `String "provider_quota_exhausted"
+      ; "provider", (match provider with Some value -> `String value | None -> `Null)
+      ; "retry_after", (match retry_after with Some value -> `Float value | None -> `Null)
+      ; "detail", `String detail
+      ]
+  | Provider_spawn_refused { provider; detail } ->
+    `Assoc
+      [ "kind", `String "provider_spawn_refused"
+      ; "provider", `String provider
+      ; "detail", `String detail
+      ]
+  | Provider_timeout { provider; phase; detail } ->
+    `Assoc
+      [ "kind", `String "provider_timeout"
+      ; "provider", (match provider with Some value -> `String value | None -> `Null)
+      ; "phase", (match phase with Some value -> `String value | None -> `Null)
+      ; "detail", `String detail
+      ]
+  | Configuration_refused { field; detail } ->
+    `Assoc
+      [ "kind", `String "configuration_refused"
+      ; "field", `String field
+      ; "detail", `String detail
       ]
   | Provider_network { provider; kind; detail } ->
     network_cause_to_yojson ~label:"provider_network" ~provider ~kind ~detail
@@ -586,6 +1011,21 @@ let network_cause kind fields build =
              (string_field kind fields "detail"))))
 ;;
 
+let opt_string_field kind fields name =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Ok (Some value)
+  | Some `Null -> Ok None
+  | Some _ | None -> field_error kind name
+;;
+
+let opt_float_field kind fields name =
+  match List.assoc_opt name fields with
+  | Some (`Float value) when Float.is_finite value -> Ok (Some value)
+  | Some (`Int value) -> Ok (Some (float_of_int value))
+  | Some `Null -> Ok None
+  | Some _ | None -> field_error kind name
+;;
+
 let cause_of_yojson (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
@@ -607,6 +1047,51 @@ let cause_of_yojson (json : Yojson.Safe.t) =
             with
             | Some masc_error -> Ok (Masc masc_error)
             | None -> field_error kind "error")
+        | "account_refused" ->
+          require kind [ "refusal" ] fields (fun () ->
+            Result.bind
+              (labelled kind "refusal"
+                 (fun raw -> Result.to_option (Keeper_account_refusal.of_wire raw))
+                 fields)
+              (fun refusal -> Ok (Account_refused refusal)))
+        | "provider_auth_required" ->
+          require kind [ "provider"; "detail" ] fields (fun () ->
+            Result.bind (opt_string_field kind fields "provider") (fun provider ->
+              Result.map
+                (fun detail -> Provider_auth_required { provider; detail })
+                (string_field kind fields "detail")))
+        | "provider_key_refused" ->
+          require kind [ "provider"; "detail" ] fields (fun () ->
+            Result.bind (string_field kind fields "provider") (fun provider ->
+              Result.map
+                (fun detail -> Provider_key_refused { provider; detail })
+                (string_field kind fields "detail")))
+        | "provider_quota_exhausted" ->
+          require kind [ "provider"; "retry_after"; "detail" ] fields (fun () ->
+            Result.bind (opt_string_field kind fields "provider") (fun provider ->
+              Result.bind (opt_float_field kind fields "retry_after") (fun retry_after ->
+                Result.map
+                  (fun detail -> Provider_quota_exhausted { provider; retry_after; detail })
+                  (string_field kind fields "detail"))))
+        | "provider_spawn_refused" ->
+          require kind [ "provider"; "detail" ] fields (fun () ->
+            Result.bind (string_field kind fields "provider") (fun provider ->
+              Result.map
+                (fun detail -> Provider_spawn_refused { provider; detail })
+                (string_field kind fields "detail")))
+        | "provider_timeout" ->
+          require kind [ "provider"; "phase"; "detail" ] fields (fun () ->
+            Result.bind (opt_string_field kind fields "provider") (fun provider ->
+              Result.bind (opt_string_field kind fields "phase") (fun phase ->
+                Result.map
+                  (fun detail -> Provider_timeout { provider; phase; detail })
+                  (string_field kind fields "detail"))))
+        | "configuration_refused" ->
+          require kind [ "field"; "detail" ] fields (fun () ->
+            Result.bind (string_field kind fields "field") (fun field ->
+              Result.map
+                (fun detail -> Configuration_refused { field; detail })
+                (string_field kind fields "detail")))
         | "provider_network" ->
           network_cause kind fields (fun ~provider ~network_kind ~detail ->
             Provider_network { provider; kind = network_kind; detail })

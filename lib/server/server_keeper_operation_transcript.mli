@@ -3,7 +3,10 @@
 type settlement =
   | Runtime_deferred
   | Reply of string
-  | Request_failed of string
+  | Request_failed of
+      { content : string
+      ; failure_kind : Keeper_request_failure.Failure_kind.t option
+      }
 val tool_delivery_key :
   operation_id:Keeper_chat_delivery_identity.Request_id.t ->
   resumed_from:Keeper_semantic_execution.gate_checkpoint option ->

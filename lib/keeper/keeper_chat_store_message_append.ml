@@ -8,7 +8,22 @@ open Keeper_chat_store_append_primitives
 open Keeper_chat_store_turn_append
 open Keeper_chat_store_append_once
 
-type terminal_row = Reply of string | Failed_request of string | Settled_failure of string
+type terminal_row =
+  | Reply of string
+  | Failed_request of
+      { content : string
+      ; failure_kind : Keeper_request_failure.Failure_kind.t option
+      }
+  | Settled_failure of
+      { content : string
+      ; failure_kind : Keeper_request_failure.Failure_kind.t option
+      }
+
+let scrub_request_failure_content redaction raw =
+  raw
+  |> Keeper_secret_redaction.redact_text redaction
+  |> Keeper_request_failure.sanitize_person_text
+;;
 
 let append_terminal_message_once
       ~base_dir
@@ -22,13 +37,22 @@ let append_terminal_message_once
       ?stream_lifecycle
       ()
   =
-  let role, content = match terminal with
-    | Reply content -> Role.Assistant, content
-    | Failed_request content | Settled_failure content -> Role.Request_failure, content in
+  let role, raw_content, failure_kind =
+    match terminal with
+    | Reply content -> Role.Assistant, content, None
+    | Failed_request { content; failure_kind }
+    | Settled_failure { content; failure_kind } ->
+      Role.Request_failure, content, failure_kind
+  in
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
-    let content = Keeper_secret_redaction.redact_text redaction content in
+    let content =
+      match role with
+      | Role.Request_failure -> scrub_request_failure_content redaction raw_content
+      | Role.User | Role.Assistant | Role.System | Role.Tool ->
+        Keeper_secret_redaction.redact_text redaction raw_content
+    in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let blocks = redact_blocks redaction blocks in
     let path = chat_path ~base_dir ~keeper_name in
@@ -50,6 +74,7 @@ let append_terminal_message_once
            ?conversation_id
            ?blocks
            ?turn_ref
+           ?failure_kind
            ?stream_lifecycle
            ~provenance:
              { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
@@ -86,22 +111,25 @@ let append_assistant_message_once ~base_dir ~keeper_name ~delivery_key ~content
 ;;
 
 let append_request_failure_once ~base_dir ~keeper_name ~delivery_key ~content
-    ?(route = Lazy.from_val Row_route.none) ?tool_calls ?blocks ?turn_ref
-    ?stream_lifecycle () =
+    ?failure_kind ?(route = Lazy.from_val Row_route.none) ?tool_calls ?blocks
+    ?turn_ref ?stream_lifecycle () =
   append_terminal_message_once ~base_dir ~keeper_name ~delivery_key
-    ~terminal:(Failed_request content) ~route ?tool_calls ?blocks ?turn_ref
-    ?stream_lifecycle ()
+    ~terminal:(Failed_request { content; failure_kind }) ~route ?tool_calls
+    ?blocks ?turn_ref ?stream_lifecycle ()
 ;;
 
-let append_settled_failure_once ~base_dir ~keeper_name ~delivery_key ~content ~route () =
+let append_settled_failure_once ~base_dir ~keeper_name ~delivery_key ~content
+    ?failure_kind ?turn_ref ~route () =
   append_terminal_message_once ~base_dir ~keeper_name ~delivery_key
-    ~terminal:(Settled_failure content) ~route ()
+    ~terminal:(Settled_failure { content; failure_kind }) ~route ?turn_ref ()
 ;;
 
 module Settled_failure = struct
   type t =
     { delivery_key : Keeper_chat_delivery_identity.delivery_key
     ; content : string
+    ; failure_kind : Keeper_request_failure.Failure_kind.t option
+    ; turn_ref : Ids.Turn_ref.t option
     ; route : Row_route.t Lazy.t
     }
 end
@@ -122,12 +150,12 @@ let append_settled_failures_once ~base_dir ~keeper_name failures =
        let transcript_slot = Keeper_chat_delivery_identity.Settled_failure in
        let candidates =
          List.map
-           (fun (tag, { Settled_failure.delivery_key; content; route }) ->
+           (fun (tag, { Settled_failure.delivery_key; content; failure_kind; turn_ref; route }) ->
               (* Each row takes its own time, as the single append does: the
                  history pages by [ts], so rows sharing one could fall on
                  both sides of a page boundary. *)
               let ts = Time_compat.now () in
-              let content = Keeper_secret_redaction.redact_text redaction content in
+              let content = scrub_request_failure_content redaction content in
               let row_id = mint_message_id ~ts in
               let line =
                 lazy
@@ -139,6 +167,8 @@ let append_settled_failures_once ~base_dir ~keeper_name failures =
                      ~message_id:row_id
                      ?surface
                      ?conversation_id
+                     ?turn_ref
+                     ?failure_kind
                      ~provenance:
                        { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
                      ())

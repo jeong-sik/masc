@@ -65,6 +65,7 @@ let msg ~role ?(id = "test-msg") ?(ts = 1.0) ?(surface = None) ?(speaker = None)
   ; blocks = None
   ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
   ; turn_ref
+  ; failure_kind = None
   ; stream_lifecycle = None
   ; approval_lifecycle = None
   ; delivery_provenance = None
@@ -420,6 +421,7 @@ let tool_line : Store.chat_message =
   ; blocks = None
   ; mentions = []
   ; turn_ref = None
+  ; failure_kind = None
   ; stream_lifecycle = None
   ; approval_lifecycle = None
   ; delivery_provenance = None

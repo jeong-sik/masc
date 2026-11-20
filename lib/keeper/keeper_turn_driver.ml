@@ -285,10 +285,83 @@ let account_request walk_owner ~runtime_id =
    its host account (plan D3b). The refusal is masc's own,
    made before anything is sent, so it is the non-rotating local refusal of a
    provider_config_transform: no provider evidence names the candidate. *)
+let account_refusal_of_authz_deny_reason = function
+  | Authz_decision.Authorization_uncertain ->
+    Keeper_account_refusal.Authorization_zone_uncertain
+  | Authz_decision.Principal_inactive Owner | Authz_decision.Membership_inactive Owner ->
+    Keeper_account_refusal.Owner_inactive
+  | Authz_decision.Principal_inactive (Initiator | Executor)
+  | Authz_decision.Membership_inactive (Initiator | Executor)
+  | Authz_decision.Auth_binding_inactive -> Keeper_account_refusal.Caller_not_authorized
+  | Authz_decision.Pat_expired -> Keeper_account_refusal.Pat_expired
+  | Authz_decision.Pat_scope_not_explicit -> Keeper_account_refusal.Pat_scope_not_explicit
+  | Authz_decision.Channel_out_of_scope -> Keeper_account_refusal.Channel_not_allowed
+  | Authz_decision.Runtime_unavailable _
+  | Authz_decision.Provider_account_unavailable _
+  | Authz_decision.Revocation_pending _ ->
+    Keeper_account_refusal.Provider_account_unavailable
+  | Authz_decision.Invocation_not_allowed
+  | Authz_decision.Initiator_grant_not_current _
+  | Authz_decision.Executor_grant_not_current _
+  | Authz_decision.Runtime_out_of_scope
+  | Authz_decision.Effects_out_of_scope _
+  | Authz_decision.Dependencies_not_cleared ->
+    Keeper_account_refusal.Scope_or_grant_refused
+;;
+
+let key_unusable_reason_of_read_error = function
+  | Runtime_api_key_file.Key_missing -> Keeper_account_refusal.Key_missing
+  | Runtime_api_key_file.Key_unreadable Runtime_api_key_file.Path_not_absolute ->
+    Keeper_account_refusal.Path_not_absolute
+  | Runtime_api_key_file.Key_unreadable Runtime_api_key_file.Not_a_regular_file ->
+    Keeper_account_refusal.Not_a_regular_file
+  | Runtime_api_key_file.Key_unreadable Runtime_api_key_file.Open_to_others ->
+    Keeper_account_refusal.Open_to_others
+  | Runtime_api_key_file.Key_unreadable Runtime_api_key_file.Not_a_key ->
+    Keeper_account_refusal.Not_a_key
+;;
+
+let account_refusal_to_typed = function
+  | Runtime_account_access.Not_published -> Keeper_account_refusal.Access_not_published
+  | Runtime_account_access.No_operator | Runtime_account_access.No_operator_keeper _ ->
+    Keeper_account_refusal.Operator_turn_refused
+  | Runtime_account_access.Zone_uncertain _ ->
+    Keeper_account_refusal.Authorization_zone_uncertain
+  | Runtime_account_access.Turn_refused turn_refusal ->
+    (match turn_refusal with
+     | Authz_keeper_turn.Not_bootstrapped ->
+       Keeper_account_refusal.Authorization_not_bootstrapped
+     | Authz_keeper_turn.Keeper_not_made _ -> Keeper_account_refusal.Unknown_keeper
+     | Authz_keeper_turn.No_authorized_runtime _ ->
+       Keeper_account_refusal.Runtime_reassigned
+     | Authz_keeper_turn.Denied reason -> account_refusal_of_authz_deny_reason reason)
+  | Runtime_account_access.Not_the_assigned_runtime _ ->
+    Keeper_account_refusal.Runtime_reassigned
+  | Runtime_account_access.Not_active _ | Runtime_account_access.No_membership _ ->
+    Keeper_account_refusal.Owner_inactive
+  | Runtime_account_access.Home_unresolved _ ->
+    Keeper_account_refusal.Account_home_unresolved
+  | Runtime_account_access.Not_a_declared_home
+  | Runtime_account_access.Not_the_account_home _
+  | Runtime_account_access.Not_the_account_integration _
+  | Runtime_account_access.Not_the_account_key _
+  | Runtime_account_access.Home_asks_for_environment _ ->
+    Keeper_account_refusal.Account_home_invalid
+  | Runtime_account_access.Account_key_unusable { reason; _ } ->
+    Keeper_account_refusal.Key_unusable (key_unusable_reason_of_read_error reason)
+  | Runtime_account_access.Account_unavailable _ ->
+    Keeper_account_refusal.Provider_account_unavailable
+  | Runtime_account_access.Host_account _ ->
+    Keeper_account_refusal.Host_account_refused
+  | Runtime_account_access.Off_keeper _
+  | Runtime_account_access.Off_runtime _
+  | Runtime_account_access.Off_person_home
+  | Runtime_account_access.Off_own_account _ ->
+    Keeper_account_refusal.Accounts_disabled
+;;
+
 let account_refused refusal =
-  Agent_core.Error.Config
-    (Agent_core.Error.InvalidConfig
-       { field = "account"; detail = Runtime_account_access.refusal_to_string refusal })
+  Keeper_account_refusal.core_error (account_refusal_to_typed refusal)
 ;;
 
 let authorize_account walk_owner ~runtime_id account =
@@ -335,6 +408,68 @@ let authorize_host_account client =
 let authorize_api_provider walk_owner ~runtime_id sealed =
   Runtime_account_access.authorize_api_for (account_request walk_owner ~runtime_id) sealed
   |> Result.map_error account_refused
+;;
+
+(* On a person's HTTP API-key account, an HTTP 401 ([AuthError]) means the
+   provider refused that key ([Key_refused]), whereas HTTP 403
+   ([AuthorizationError]) stays [Not_signed_in] / account access denial
+   (mirroring {!Runtime_verification} and {!Keeper_claude_code_runtime}). *)
+let translate_person_api_result ~sealed ~provider = function
+  | Ok _ as ok -> ok
+  | Error err as orig ->
+    if not (Runtime_account_access.is_person_api sealed)
+    then orig
+    else
+      (match err with
+       | Agent_core.Error.Api (Llm_provider.Retry.AuthError { message }) ->
+         Error
+           (Keeper_provider_refusal.core_error
+              (Keeper_provider_refusal.Key_refused { provider; detail = message }))
+       | Agent_core.Error.Provider (Llm_provider.Error.AuthError { provider; detail }) ->
+         Error
+           (Keeper_provider_refusal.core_error
+              (Keeper_provider_refusal.Key_refused { provider; detail }))
+       | Agent_core.Error.Api
+           ( Llm_provider.Retry.AuthorizationError _
+           | Llm_provider.Retry.RateLimited _
+           | Llm_provider.Retry.Overloaded _
+           | Llm_provider.Retry.ServerError _
+           | Llm_provider.Retry.PaymentRequired _
+           | Llm_provider.Retry.InvalidRequest _
+           | Llm_provider.Retry.NotFound _
+           | Llm_provider.Retry.ContextOverflow _
+           | Llm_provider.Retry.InputCapacity _
+           | Llm_provider.Retry.NetworkError _
+           | Llm_provider.Retry.Connect_failed _
+           | Llm_provider.Retry.Timeout _ )
+       | Agent_core.Error.Provider
+           ( Llm_provider.Error.AuthorizationError _
+           | Llm_provider.Error.NetworkError _
+           | Llm_provider.Error.Connect_failed _
+           | Llm_provider.Error.RateLimit _
+           | Llm_provider.Error.HardQuota _
+           | Llm_provider.Error.Timeout _
+           | Llm_provider.Error.InvalidConfig _
+           | Llm_provider.Error.ParseError _
+           | Llm_provider.Error.ProviderWireError _
+           | Llm_provider.Error.ProviderReportedError _
+           | Llm_provider.Error.UnknownVariant _
+           | Llm_provider.Error.ProviderUnavailable _
+           | Llm_provider.Error.EmptyCompletion _
+           | Llm_provider.Error.CapacityExhausted _
+           | Llm_provider.Error.ServerError _
+           | Llm_provider.Error.InvalidRequest _
+           | Llm_provider.Error.NotFound _
+           | Llm_provider.Error.ProviderTerminal _ )
+       | Agent_core.Error.Agent _
+       | Agent_core.Error.Mcp _
+       | Agent_core.Error.Config _
+       | Agent_core.Error.Serialization _
+       | Agent_core.Error.Io _
+       | Agent_core.Error.Orchestration _
+       | Agent_core.Error.Media _
+       | Agent_core.Error.Internal _
+       | Agent_core.Error.Internal_carried _ -> orig)
 ;;
 
 (* How long a rate observation holds its path back: the provider's usable
@@ -4057,6 +4192,12 @@ let run_named
           let { Keeper_attempt_checkpoint.turn_result; checkpoint_after } =
             Keeper_attempt_checkpoint.project ?checkpoint_after
               ~projection:replay_prefix_projection provider_result in
+          let turn_result =
+            translate_person_api_result
+              ~sealed
+              ~provider:runtime.provider.id
+              turn_result
+          in
           ( selected_runtime_result runtime ~lane_attempt_index:idx turn_result
           , checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
@@ -4128,5 +4269,7 @@ module For_testing = struct
   let lane_should_retry = lane_should_retry
 
   let official_continuation_admission = official_continuation_admission
+
+  let translate_person_api_result = translate_person_api_result
 
 end

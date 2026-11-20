@@ -163,6 +163,8 @@ let test_settled_failures_per_row () =
     , { K.Settled_failure.delivery_key =
           Keeper_chat_delivery_identity.Operation (request_id name)
       ; content = "failed"
+      ; failure_kind = None
+      ; turn_ref = None
       ; route = Lazy.from_val K.Row_route.none
       } )
   in

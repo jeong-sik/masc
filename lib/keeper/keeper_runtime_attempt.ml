@@ -199,4 +199,13 @@ let core_error_to_runtime_outcome err =
      | Agent_core.Error.Serialization _
      | Agent_core.Error.Io _
      | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
-     | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None)
+     | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
+       (match Keeper_provider_refusal.of_core_error err with
+        | Some (Keeper_provider_refusal.Key_refused { detail; _ }) ->
+          Some (Runtime_attempt_fsm.Call_err (http_error ~code:401 ~body:detail))
+        | Some (Keeper_provider_refusal.Spawn_refused { detail; _ }) ->
+          Some
+            (Runtime_attempt_fsm.Call_err
+               (Llm_provider.Http_client.NetworkError
+                  { message = detail; kind = Llm_provider.Http_client.Unknown }))
+        | None -> None))

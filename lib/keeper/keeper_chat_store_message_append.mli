@@ -20,7 +20,16 @@
 open Keeper_chat_store_append_once
 open Keeper_chat_types
 
-type terminal_row = Reply of string | Failed_request of string | Settled_failure of string
+type terminal_row =
+  | Reply of string
+  | Failed_request of
+      { content : string
+      ; failure_kind : Keeper_request_failure.Failure_kind.t option
+      }
+  | Settled_failure of
+      { content : string
+      ; failure_kind : Keeper_request_failure.Failure_kind.t option
+      }
 
 val append_assistant_message_once :
   base_dir:string ->
@@ -39,6 +48,7 @@ val append_assistant_message_once :
 val append_request_failure_once :
   base_dir:string -> keeper_name:string ->
   delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
+  ?failure_kind:Keeper_request_failure.Failure_kind.t ->
   ?route:Row_route.t Lazy.t -> ?tool_calls:tool_call list ->
   ?blocks:chat_block list -> ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list -> unit ->
@@ -47,6 +57,8 @@ val append_request_failure_once :
 val append_settled_failure_once :
   base_dir:string -> keeper_name:string ->
   delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
+  ?failure_kind:Keeper_request_failure.Failure_kind.t ->
+  ?turn_ref:Ids.Turn_ref.t ->
   route:Row_route.t Lazy.t -> unit -> (append_once_result, string) result
 
 module Settled_failure :
@@ -54,6 +66,8 @@ module Settled_failure :
     type t = {
       delivery_key : Keeper_chat_delivery_identity.delivery_key;
       content : string;
+      failure_kind : Keeper_request_failure.Failure_kind.t option;
+      turn_ref : Ids.Turn_ref.t option;
       route : Row_route.t lazy_t;
     }
   end

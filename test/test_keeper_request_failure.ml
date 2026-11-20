@@ -345,7 +345,19 @@ let every_cause =
   ; Krf.Raised { site = Krf.Stream_streaming_call; exn = "Not_found" }
   ; Krf.Raised { site = Krf.Stream_turn_body; exn = "Not_found" }
   ; Krf.Raised { site = Krf.Stream_submit; exn = "Not_found" }
+  ; Krf.Provider_auth_required { provider = Some "claude_code"; detail = "sign in required" }
+  ; Krf.Provider_auth_required { provider = None; detail = "missing session" }
+  ; Krf.Provider_key_refused { provider = "claude_code"; detail = "HTTP 401 invalid x-api-key" }
+  ; Krf.Provider_quota_exhausted
+      { provider = Some "claude_code"; retry_after = Some 120.0; detail = "quota spent" }
+  ; Krf.Provider_quota_exhausted { provider = None; retry_after = None; detail = "out of quota" }
+  ; Krf.Provider_spawn_refused { provider = "codex_app_server"; detail = "executable not found" }
+  ; Krf.Provider_timeout
+      { provider = Some "claude_code"; phase = Some "response_idle"; detail = "timed out" }
+  ; Krf.Provider_timeout { provider = None; phase = None; detail = "timed out" }
+  ; Krf.Configuration_refused { field = "model"; detail = "invalid config" }
   ]
+  @ List.map (fun refusal -> Krf.Account_refused refusal) Keeper_account_refusal.all
 ;;
 
 let test_every_constructor_round_trips () =
@@ -427,6 +439,136 @@ let test_the_decoder_refuses_what_it_does_not_write () =
   refused "a failure that is not an object" (`String "input_capacity")
 ;;
 
+let contains_sub haystack needle =
+  let hlen = String.length haystack and nlen = String.length needle in
+  if nlen = 0 then true
+  else
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+;;
+
+let test_failure_kind_wire_round_trip () =
+  List.iter
+    (fun kind ->
+       let wire = Krf.Failure_kind.to_wire kind in
+       match Krf.Failure_kind.of_wire wire with
+       | Some decoded ->
+         Alcotest.(check bool) ("wire round-trip " ^ wire) true
+           (Krf.Failure_kind.equal kind decoded)
+       | None -> Alcotest.fail ("failed to decode own failure_kind wire label: " ^ wire))
+    Krf.Failure_kind.all;
+  Alcotest.(check bool) "unknown wire label is None" true
+    (Option.is_none (Krf.Failure_kind.of_wire "unknown_kind"))
+;;
+
+let test_split_failure_kinds_stay_distinct () =
+  let check label expected cause =
+    let actual = Krf.failure_kind_of_cause cause in
+    Alcotest.(check string) label
+      (Krf.Failure_kind.to_wire expected)
+      (Krf.Failure_kind.to_wire actual)
+  in
+  check "auth error -> not_signed_in"
+    Krf.Failure_kind.Not_signed_in
+    (Krf.of_core_error
+       (Agent_core.Error.Provider
+          (Llm_provider.Error.AuthError { provider = "claude_code"; detail = "expired" })))
+      .Krf.cause;
+  check "key refused -> key_refused"
+    Krf.Failure_kind.Key_refused
+    (Krf.of_core_error
+       (Keeper_provider_refusal.core_error
+          (Keeper_provider_refusal.Key_refused { provider = "claude_code"; detail = "401" })))
+      .Krf.cause;
+  check "key file missing -> key_unusable"
+    Krf.Failure_kind.Key_unusable
+    (Krf.Account_refused (Keeper_account_refusal.Key_unusable Keeper_account_refusal.Key_missing));
+  check "hard quota -> no_quota"
+    Krf.Failure_kind.No_quota
+    (Krf.of_core_error
+       (Agent_core.Error.Provider
+          (Llm_provider.Error.HardQuota
+             { provider = "claude_code"; retry_after = None; detail = "spent" })))
+      .Krf.cause;
+  check "timeout -> silent"
+    Krf.Failure_kind.Silent
+    (Krf.of_core_error
+       (Agent_core.Error.Provider
+          (Llm_provider.Error.Timeout
+             { provider = "claude_code"; timeout_phase = None; detail = "idle" })))
+      .Krf.cause;
+  check "spawn refused -> not_started"
+    Krf.Failure_kind.Not_started
+    (Krf.of_core_error
+       (Keeper_provider_refusal.core_error
+          (Keeper_provider_refusal.Spawn_refused { provider = "codex_app_server"; detail = "enoent" })))
+      .Krf.cause;
+  check "unknown keeper -> turn_refused"
+    Krf.Failure_kind.Turn_refused
+    (Krf.Account_refused Keeper_account_refusal.Unknown_keeper);
+  check "runtime reassigned -> runtime_reassigned"
+    Krf.Failure_kind.Runtime_reassigned
+    (Krf.Account_refused Keeper_account_refusal.Runtime_reassigned);
+  check "zone uncertain -> server_unavailable"
+    Krf.Failure_kind.Server_unavailable
+    (Krf.Account_refused Keeper_account_refusal.Authorization_zone_uncertain);
+  check "pat expired -> turn_refused"
+    Krf.Failure_kind.Turn_refused
+    (Krf.Account_refused Keeper_account_refusal.Pat_expired);
+  check "config error -> configuration_refused"
+    Krf.Failure_kind.Configuration_refused
+    (Krf.of_core_error
+       (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "model"; detail = "bad" })))
+      .Krf.cause;
+  check "operator interrupt -> cancelled"
+    Krf.Failure_kind.Cancelled
+    Krf.Operator_cancelled;
+  check "no visible reply -> no_visible_reply"
+    Krf.Failure_kind.No_visible_reply
+    (Krf.No_visible_reply { stage = Krf.Queued_delivery; had_blocks = false })
+;;
+
+let test_account_refused_driver_and_redaction () =
+  let check_no_leak label text =
+    List.iter
+      (fun forbidden ->
+         if contains_sub text forbidden then
+           Alcotest.failf "%s leaked %S in %S" label forbidden text)
+      [ "/Users/"; "/tmp/"; "/private/"; "/var/"; "/home/"; ".masc/"; "sk-ant-" ]
+  in
+  List.iter
+    (fun refusal ->
+       let summary = summary_of (Krf.Account_refused refusal) in
+       check_no_leak ("account refusal " ^ Keeper_account_refusal.to_wire refusal) summary)
+    Keeper_account_refusal.all;
+  let core_err =
+    Masc.Keeper_turn_driver.account_refused
+      (Runtime_account_access.Home_unresolved "/Users/alice/.masc/accounts/p1/home")
+  in
+  let projected = Krf.of_core_error core_err in
+  Alcotest.check cause_testable "Home_unresolved stays typed without path"
+    (Krf.Account_refused Keeper_account_refusal.Account_home_unresolved)
+    projected.Krf.cause;
+  check_no_leak "projected Home_unresolved summary" (Krf.summary projected);
+  let dirty =
+    "failed reading file:///Users/alice/repo/.masc/accounts/p1/key and file:///tmp/secret.txt with \
+     sk-ant-api03-verysecretkeyvalue123456 on https://api.example.com/v1/messages and \
+     profile://alice/workspace/item\nnext"
+  in
+  let scrubbed = Krf.sanitize_person_text dirty in
+  check_no_leak "sanitize_person_text" scrubbed;
+  Alcotest.(check bool) "URLs stay intact" true
+    (contains_sub scrubbed "https://api.example.com/v1/messages");
+  Alcotest.(check bool) "profile:// scheme suffix is not treated as file://" true
+    (contains_sub scrubbed "profile://alice/workspace/item");
+  Alcotest.(check bool) "newlines collapsed" false
+    (String.contains scrubbed '\n')
+;;
+
 let test_a_nested_masc_error_is_an_object_not_a_string () =
   let failure =
     { Krf.cause = Krf.Masc (Kie.Receipt_persistence_failed { detail = "disk full" }) }
@@ -496,6 +638,14 @@ let () =
             "the operator interrupt detail"
             `Quick
             test_operator_interrupt_detail_is_the_typed_summary
+        ; Alcotest.test_case
+            "split failure kinds stay distinct"
+            `Quick
+            test_split_failure_kinds_stay_distinct
+        ; Alcotest.test_case
+            "account refusal carriage and redaction"
+            `Quick
+            test_account_refused_driver_and_redaction
         ] )
     ; ( "summary"
       , [ Alcotest.test_case "one line" `Quick test_a_summary_is_one_line
@@ -517,6 +667,10 @@ let () =
             "every constructor round trips"
             `Quick
             test_every_constructor_round_trips
+        ; Alcotest.test_case
+            "failure kind wire round trips"
+            `Quick
+            test_failure_kind_wire_round_trip
         ; Alcotest.test_case
             "strict decoding"
             `Quick

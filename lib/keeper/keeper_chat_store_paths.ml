@@ -34,7 +34,7 @@ let report_store_failure ~operation ~keeper_name ~what exn =
   let detail = Printexc.to_string exn in
   Log.Keeper.warn "keeper_chat_store: %s failed for %s: %s" what
     (sanitize_name keeper_name) detail;
-  detail
+  Keeper_request_failure.sanitize_person_text detail
 
 let ensure_dir_once ~base_dir =
   ignore (Keeper_fs.ensure_dir (chat_dir base_dir))

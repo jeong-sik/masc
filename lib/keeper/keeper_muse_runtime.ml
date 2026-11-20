@@ -141,9 +141,11 @@ let runtime_error_to_core_error ?(now = Time_compat.now ()) ?catalog (error : Se
   | Serve.Invalid_config detail -> config_error ~field:provider_name detail
   | Serve.Session_not_durable -> config_error ~field:"session_durability" (Serve.error_to_string error)
   | Serve.Spawn_refused refusal ->
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable
-         { provider = provider_name; detail = Process_eio.spawn_refusal_to_string refusal })
+    Keeper_provider_refusal.core_error
+      (Keeper_provider_refusal.Spawn_refused
+         { provider = provider_name
+         ; detail = Process_eio.spawn_refusal_to_string refusal
+         })
   | Serve.Turn_input_write_failed _ ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable

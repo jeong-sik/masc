@@ -46,7 +46,11 @@ let class_of (err : Agent_core.Error.t) =
     (match Keeper_internal_error.classify_masc_internal_error carried with
      | Some internal ->
        "masc:" ^ Keeper_internal_error.kind_of_masc_internal_error internal
-     | None -> "internal")
+     | None ->
+       (match Keeper_provider_refusal.of_core_error carried with
+        | Some (Keeper_provider_refusal.Spawn_refused _) -> "provider_refusal:spawn_refused"
+        | Some (Keeper_provider_refusal.Key_refused _) -> "provider_refusal:key_refused"
+        | None -> "internal"))
   | other -> "unexpected:" ^ Agent_core.Error.to_string other
 
 let check label error expected =
@@ -69,7 +73,7 @@ let test_every_variant_lands_in_its_class () =
     (Codex.Context_window_exceeded
        { message = "full"; tool_effect_attempted = true })
     "provider:reported:context_window_exceeded_after_tool_effect";
-  check "spawn_refused" (Codex.Spawn_refused (Process_eio.Executable_not_found "codex")) "provider:unavailable";
+  check "spawn_refused" (Codex.Spawn_refused (Process_eio.Executable_not_found "codex")) "provider_refusal:spawn_refused";
   check "reasoning effort admission failed"
     (Codex.Reasoning_effort_admission_failed {model="fixture";detail="no advertised tier"})
     "provider:unavailable";

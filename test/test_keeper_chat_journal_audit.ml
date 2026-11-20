@@ -71,6 +71,7 @@ let chat_message
   ; blocks = None
   ; mentions = []
   ; turn_ref
+  ; failure_kind = None
   ; stream_lifecycle
   ; approval_lifecycle = None
   ; delivery_provenance

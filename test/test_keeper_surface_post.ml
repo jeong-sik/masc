@@ -559,6 +559,7 @@ let roster_message ~surface ~speaker_id : Store.chat_message =
   ; blocks = None
   ; mentions = []
   ; turn_ref = None
+  ; failure_kind = None
   ; stream_lifecycle = None
   ; approval_lifecycle = None
   ; delivery_provenance = None

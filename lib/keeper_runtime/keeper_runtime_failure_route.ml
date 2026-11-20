@@ -460,7 +460,15 @@ let route_of_error_family (err : Agent_core.Error.t) : route =
            | Keeper_official_client_session_refusal.Next_candidate -> rotate Admission
            | Keeper_official_client_session_refusal.Stop_lane ->
              exhaust Session_claim_refused)
-        | None -> exhaust Internal_opaque))
+        | None ->
+          (match Keeper_account_refusal.of_core_error internal with
+           | Some (_ : Keeper_account_refusal.t) -> exhaust Config_mismatch
+           | None ->
+             (match Keeper_provider_refusal.of_core_error internal with
+              | Some (Keeper_provider_refusal.Key_refused _) -> rotate Auth_failed
+              | Some (Keeper_provider_refusal.Spawn_refused _) ->
+                observe_retry Server_error
+              | None -> exhaust Internal_opaque))))
 ;;
 
 let route_of_error ~boundary (err : Agent_core.Error.t) : route =

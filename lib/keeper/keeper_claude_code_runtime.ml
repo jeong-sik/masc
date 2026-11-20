@@ -377,7 +377,7 @@ let provider_error_of_quota_block ~detail
    error names it so an operator can tell it from the Agent Core runner. *)
 let runtime_boundary_site = "claude_code.runtime_boundary"
 
-let claude_error_to_core_error = function
+let claude_error_to_core_error ?account = function
   | Runtime_claude_code.Invalid_config detail ->
     config_error ~field:"claude_code" detail
   | Runtime_claude_code.Subscription_required detail ->
@@ -388,6 +388,16 @@ let claude_error_to_core_error = function
       (provider_error_of_quota_block
          ~detail:(Runtime_claude_code.error_to_string (Quota_blocked blocked))
          block)
+  (* When an account uses a registered API key and Claude reports 401/403,
+     preserve a typed [Key_refused] rather than collapsing it with
+     subscription sign-in ([Not_signed_in]). *)
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = (Some 401 | Some 403) as api_error_status; detail; _ }
+    when (match account with
+          | Some acc -> Runtime_claude_code.key_refused acc ~api_error_status
+          | None -> false) ->
+    Keeper_provider_refusal.core_error
+      (Keeper_provider_refusal.Key_refused { provider = "claude_code"; detail })
   (* The CLI reports these denials in a terminal result, even when its
      process subtype is [success]. Preserve the provider's HTTP distinction:
      the existing account-access route asks for operator action after the
@@ -436,10 +446,11 @@ let claude_error_to_core_error = function
          ; phase = None
          })
   | Runtime_claude_code.Spawn_refused refusal ->
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable
+    Keeper_provider_refusal.core_error
+      (Keeper_provider_refusal.Spawn_refused
          { provider = "claude_code"
-         ; detail = Process_eio.spawn_refusal_to_string refusal })
+         ; detail = Process_eio.spawn_refusal_to_string refusal
+         })
   (* The twin of the Codex runtime's closed connection: the
      client exited or its stdout reached EOF. Rotation is unchanged —
      [Keeper_runtime_attempt.core_error_to_runtime_outcome] rebuilds the
@@ -498,7 +509,7 @@ let claude_error_to_core_error = function
    A CLI that reports it is not logged in keeps its typed credential class
    ([AuthError]), and an invalid binding configuration keeps
    [Config_mismatch]. *)
-let admission_probe_error_to_core_error = function
+let admission_probe_error_to_core_error ?account = function
   | Runtime_claude_code.Protocol_error { stage; detail } ->
     Agent_core.Error.Api
       (Llm_provider.Retry.InvalidRequest
@@ -522,7 +533,7 @@ let admission_probe_error_to_core_error = function
     | Runtime_claude_code.Quota_blocked _
     | Runtime_claude_code.Process_exited _
     | Runtime_claude_code.Unhandled_exception _ ) as error ->
-    claude_error_to_core_error error
+    claude_error_to_core_error ?account error
 ;;
 
 let recovery_failure_of_client_error = function
@@ -650,7 +661,9 @@ let completed_turn_response ~latency_ms ~turn_id ~model ~text ~turn_total
 ;;
 
 module For_testing = struct
-  let claude_error_to_core_error = claude_error_to_core_error
+  let claude_error_to_core_error_for_account ~account error =
+    claude_error_to_core_error ~account error
+  let claude_error_to_core_error error = claude_error_to_core_error error
   let request_context_of_request_input = request_context_of_request_input
   let completed_turn_response = completed_turn_response
 
@@ -1103,7 +1116,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
           ~images
       with
       | Ok () -> Ok ()
-      | Error error -> Error (claude_error_to_core_error error)
+      | Error error -> Error (claude_error_to_core_error ~account error)
     in
     let process_mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
       ~grace_seconds:Process_eio.child_exit_grace_seconds) in
@@ -1121,7 +1134,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
           probe_config
       with
       | Ok subscription -> Ok subscription
-      | Error error -> Error (admission_probe_error_to_core_error error)
+      | Error error -> Error (admission_probe_error_to_core_error ~account error)
     in
     (* Claude Code owns the native vocabulary. The prepared intent reaches
        that admission directly, independent of a bare HTTP catalog row.
@@ -1619,7 +1632,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
                  ~session_mode
                  ~gate_continuation:(Option.is_some official_client_continuation)
                  error;
-           Error (claude_error_to_core_error error)
+           Error (claude_error_to_core_error ~account error)
          | Ok turn ->
            natural_completion := true;
            recovery_failure := Session_store.Protocol_failed;

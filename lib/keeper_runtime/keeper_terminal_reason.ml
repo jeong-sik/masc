@@ -38,6 +38,8 @@ type internal_cause =
   | Carried_agent of Agent_core.Error.agent_error
   | Task_skill of Keeper_task_skill_resolution_error.t
   | Session_refused of Keeper_official_client_session_refusal.t
+  | Account_refused of Keeper_account_refusal.t
+  | Provider_refused of Keeper_provider_refusal.t
   | Masc of Keeper_internal_error.masc_internal_error
   | Opaque_internal
 
@@ -55,9 +57,15 @@ let internal_cause err =
        (match Keeper_official_client_session_refusal.of_core_error err with
         | Some refusal -> Session_refused refusal
         | None ->
-          (match Keeper_internal_error.classify_masc_internal_error err with
-           | Some error -> Masc error
-           | None -> Opaque_internal)))
+          (match Keeper_account_refusal.of_core_error err with
+           | Some refusal -> Account_refused refusal
+           | None ->
+             (match Keeper_provider_refusal.of_core_error err with
+              | Some refusal -> Provider_refused refusal
+              | None ->
+                (match Keeper_internal_error.classify_masc_internal_error err with
+                 | Some error -> Masc error
+                 | None -> Opaque_internal)))))
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -183,6 +191,12 @@ let code_of_core_error = function
      | Carried_agent agent_error -> agent_error_code agent_error
      | Task_skill error -> Keeper_task_skill_resolution_error.code error
      | Session_refused refusal -> Keeper_official_client_session_refusal.code refusal
+     | Account_refused refusal ->
+       "account_refused:" ^ Keeper_account_refusal.to_wire refusal
+     | Provider_refused (Keeper_provider_refusal.Key_refused _) ->
+       "provider_error_key_refused"
+     | Provider_refused (Keeper_provider_refusal.Spawn_refused _) ->
+       "provider_error_spawn_refused"
      | Masc error -> Keeper_internal_error.kind_of_masc_internal_error error
      | Opaque_internal -> "internal_error")
 ;;
@@ -326,6 +340,29 @@ let failure_class = function
      | Carried_agent agent_error -> failure_class_of_agent_error agent_error
      | Task_skill _ -> Config_invalid
      | Session_refused refusal -> Official_client_session_refused refusal
+     | Account_refused refusal ->
+       (match refusal with
+        | Keeper_account_refusal.Account_home_unresolved
+        | Keeper_account_refusal.Account_home_invalid
+        | Keeper_account_refusal.Key_unusable _
+        | Keeper_account_refusal.Runtime_reassigned
+        | Keeper_account_refusal.Unknown_keeper
+        | Keeper_account_refusal.Authorization_not_bootstrapped
+        | Keeper_account_refusal.Accounts_disabled -> Config_invalid
+        | Keeper_account_refusal.Access_not_published
+        | Keeper_account_refusal.Operator_turn_refused
+        | Keeper_account_refusal.Authorization_zone_uncertain
+        | Keeper_account_refusal.Channel_not_allowed
+        | Keeper_account_refusal.Caller_not_authorized
+        | Keeper_account_refusal.Pat_expired
+        | Keeper_account_refusal.Pat_scope_not_explicit
+        | Keeper_account_refusal.Scope_or_grant_refused
+        | Keeper_account_refusal.Owner_inactive
+        | Keeper_account_refusal.Provider_account_unavailable
+        | Keeper_account_refusal.Host_account_refused -> Authorization_refused)
+     | Provider_refused (Keeper_provider_refusal.Key_refused _) -> Authorization_refused
+     | Provider_refused (Keeper_provider_refusal.Spawn_refused _) ->
+       Provider_runtime_failure Persistent
      | Masc error -> failure_class_of_masc_internal_error error
      | Opaque_internal -> Internal_error)
 ;;

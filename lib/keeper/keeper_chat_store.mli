@@ -236,6 +236,10 @@ type chat_message = Keeper_chat_types.chat_message = {
           on inbound user lines (no turn yet) and rows written before §7.
           A malformed persisted value is reported as a persistence read
           drop and reads as [None]; the row stays valid. *)
+  failure_kind : Keeper_request_failure.Failure_kind.t option;
+      (** Closed typed failure classification for [Request_failure] rows.
+          [None] on non-failure rows, legacy failure rows, or rows whose
+          persisted label fails to decode. *)
   stream_lifecycle : stream_lifecycle_event list option;
       (** K1f: durable server lifecycle replay for the chat stream response
           represented by this row. [None] means the row predates this field or
@@ -435,6 +439,7 @@ end
 val append_request_failure_once :
   base_dir:string -> keeper_name:string ->
   delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
+  ?failure_kind:Keeper_request_failure.Failure_kind.t ->
   ?route:Row_route.t Lazy.t -> ?tool_calls:tool_call list ->
   ?blocks:chat_block list -> ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list -> unit ->
@@ -443,6 +448,8 @@ val append_request_failure_once :
 val append_settled_failure_once :
   base_dir:string -> keeper_name:string ->
   delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
+  ?failure_kind:Keeper_request_failure.Failure_kind.t ->
+  ?turn_ref:Ids.Turn_ref.t ->
   route:Row_route.t Lazy.t -> unit -> (append_once_result, string) result
 (** Append the Owner's immutable failure under [Settled_failure]. This does
     not replace an earlier assistant result: a host rejection after output
@@ -452,6 +459,8 @@ module Settled_failure : sig
   type t =
     { delivery_key : Keeper_chat_delivery_identity.delivery_key
     ; content : string
+    ; failure_kind : Keeper_request_failure.Failure_kind.t option
+    ; turn_ref : Ids.Turn_ref.t option
     ; route : Row_route.t Lazy.t
           (** Forced under the transcript lock in a systhread, so it must
               belong to this one append and never be forced concurrently. *)

@@ -1,8 +1,8 @@
-(* RFC-0203 Phase 2 — Discord_rest_client pure helper tests.
+(* Discord_rest_client pure helper tests.
 
    Verifies wire-format contract of build_request and the four
    response classifications of parse_response. No HTTP round trip;
-   send_message itself is exercised by Phase 4 dual-run. *)
+   send_message itself is not called here. *)
 
 open Alcotest
 module R = Discord_rest_client

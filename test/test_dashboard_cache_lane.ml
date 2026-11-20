@@ -112,12 +112,12 @@ let test_an_inline_refresh_the_read_waits_for_is_a_read () =
     check lanes "the inline refresh entered the pool as a read" (1, 0) (entered_since before))
 ;;
 
-(* RFC-0474 L4b. The cache submits a compute once, with the weight of the
-   kind the caller declared. On the one worker, two I/O computes run side by
-   side while they wait, and two CPU computes take turns. Each compute holds
-   until the test releases it, so a compute the worker did not admit beside
-   the other cannot start before then. Every wait is bounded, so a failure
-   reports instead of hanging. *)
+(* The cache submits a compute once, with the weight of the kind the caller
+   declared. On the one worker, two I/O computes run side by side while they
+   wait, and two CPU computes take turns. Each compute holds until the test
+   releases it, so a compute the worker did not admit beside the other cannot
+   start before then. Every wait is bounded, so a failure reports instead of
+   hanging. *)
 
 let wait_bound_s = 5.0
 

@@ -305,7 +305,7 @@ let check_submitted_evidence config verification_id expected =
      | Error detail -> fail ("invalid submitted evidence: " ^ detail)
      | Ok refs -> check (list string) "submitted evidence refs" expected refs)
 
-(* Test A — non-owner completion is denied (RFC-0262 axis-2 ownership gate). *)
+(* Test A — non-owner completion is denied (ownership gate). *)
 let test_completion_denied_for_non_owner () =
   with_ws "completion_trust_non_owner"
     (fun ~sw:_ ~net:_ ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->

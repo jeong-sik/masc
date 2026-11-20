@@ -213,8 +213,8 @@ let test_login_rejects_a_window_outside_the_bound () =
     (Result.is_error (mint 8_761));
   check bool "a year exactly still is" true (Result.is_ok (mint 8_760))
 
-(* A Player credential is an invite (RFC play-link-for-the-shared-machine
-   §2.4), so login refuses the role before it enables auth or writes a file. *)
+(* A Player credential is an invite, so login refuses the role before it
+   enables auth or writes a file. *)
 let test_login_refuses_a_player () =
   with_temp_dir "auth-login-player" @@ fun base_path ->
   (match

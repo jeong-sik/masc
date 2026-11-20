@@ -113,6 +113,11 @@ let workspace =
     ; no_reference (Board.persisted_filename Board.Sub_boards)
     ; no_reference (Board.persisted_filename Board.Votes)
     ; no_reference Common.auth_dirname
+      (* The folder of the persons of a multi-account installation holds their
+         logins, keys, Keeper conversations and the homes of their official
+         clients. None writes a reference: a person's turn runs without native
+         tools (plan D3c), and the person MCP answers from its own tools. *)
+    ; no_reference Runtime_account_home_layout.accounts_dir
     ; no_reference Common.searxng_dirname
     ; no_reference Common.tui_dirname
     ; no_reference Common.tui_music_dirname

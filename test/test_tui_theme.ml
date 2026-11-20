@@ -66,11 +66,32 @@ let test_paint_row_background_preserves_fg_and_hit_marks () =
   check bool "non-SGR CSI sequence is preserved verbatim without scanning past K" true
     (contains non_sgr "\027[2Kitem")
 
+let test_with_styled_runs_coalesces_and_closes () =
+  let reset = Masc_tui_theme.Sgr.reset in
+  let red = "\027[31m" and green = "\027[32m" in
+  check Alcotest.string "empty run emits nothing" ""
+    (Masc_tui_theme.Sgr.emit_styled_cells []);
+  check Alcotest.string "unstyled cells emit zero escapes (NO_COLOR parity)" "abc"
+    (Masc_tui_theme.Sgr.emit_styled_cells [ "", "a"; "", "b"; "", "c" ]);
+  check Alcotest.string "empty text spans never emit dangling escapes" ""
+    (Masc_tui_theme.Sgr.emit_styled_cells [ red, ""; green, "" ]);
+  check Alcotest.string "same-style neighbours share one SGR opener and one reset"
+    (green ^ "ab" ^ reset ^ red ^ "cd" ^ reset ^ "e" ^ green ^ "f" ^ reset)
+    (Masc_tui_theme.Sgr.emit_styled_cells
+       [ green, "a"; green, "b"; red, "c"; red, ""; red, "d"; "", "e"; green, "f" ]);
+  check Alcotest.string "trailing unstyled cell leaves no extra reset at end"
+    (red ^ "x" ^ reset ^ "y")
+    (Masc_tui_theme.Sgr.with_styled_runs ~capacity:16 (fun emit ->
+       emit red "x";
+       emit "" "y"))
+
 let () =
   Alcotest.run "masc_tui_theme"
     [ ( "unconditional"
       , [ Alcotest.test_case "paint_row_background preserves foreground and hit marks" `Quick
             test_paint_row_background_preserves_fg_and_hit_marks
+        ; Alcotest.test_case "with_styled_runs coalesces transitions and resets once" `Quick
+            test_with_styled_runs_coalesces_and_closes
         ] )
     ; ( "conditional"
       , [ Alcotest.test_case "colour environment policy is deterministic" `Quick

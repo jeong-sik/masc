@@ -149,6 +149,20 @@ module Sgr : sig
   val reverse : string
   (** Unconditional even under NO_COLOR: the one selection signal every
       terminal renders without colour. *)
+
+  val with_styled_runs :
+    ?capacity:int -> ((string -> string -> unit) -> unit) -> string
+  (** Build a styled cell strip while emitting SGR transitions only when the
+      active style changes, appending one trailing {!reset} iff a non-empty
+      style was opened. Skips empty text spans and emits zero escape bytes when
+      every style is [""] (such as under [NO_COLOR]). Adjacent cells of the same
+      style carry no intermediate resets, so callers truncating the returned
+      string must use ANSI-aware helpers such as
+      [Masc_tui_message_layout.fit_width] or [truncate_end]. *)
+
+  val emit_styled_cells : (string * string) list -> string
+  (** Convenience wrapper around {!with_styled_runs} for a list of
+      [(style, text)] cells. *)
 end
 
 (** Terminal control sequences that are not styling. *)

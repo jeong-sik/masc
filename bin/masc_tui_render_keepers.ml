@@ -818,23 +818,6 @@ let make_half_hour_styler () =
   | Masc_tui_keeper_pulse.Half_hour_ok -> ok
   | Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_unknown -> recede
 
-(* Emit a sequence of [(style, glyph)] cells, writing ANSI SGR transitions only
-   when [style] changes and resetting once at the end. *)
-let emit_styled_cells cells =
-  let buf = Buffer.create (List.length cells * 6) in
-  let open_style = ref "" in
-  List.iter
-    (fun (style, glyph) ->
-      if not (String.equal style !open_style) then begin
-        if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
-        if not (String.equal style "") then Buffer.add_string buf style;
-        open_style := style
-      end;
-      Buffer.add_string buf glyph)
-    cells;
-  if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
-  Buffer.contents buf
-
 (* One mark per half hour of the column, the now slot on the right. *)
 let grid_half_hour_pulse _state (grid : Grid.t) ~now pulse =
   let slots = Masc_tui_keeper_pulse.half_hours ~now ~count:grid.side_cells pulse in
@@ -845,7 +828,7 @@ let grid_half_hour_pulse _state (grid : Grid.t) ~now pulse =
     Masc_tui_keeper_strip.history_unknown_label ~cells:grid.side_cells
   else
     let style_of = make_half_hour_styler () in
-    emit_styled_cells
+    Ansi.emit_styled_cells
       (List.map
          (fun half_hour ->
            let mark = match half_hour with
@@ -1271,7 +1254,7 @@ let group_pulse ~now members =
     let levels =
       Array.map (fun (count, _) -> if count > 0 then scale_dots count else 0) counts
     in
-    emit_styled_cells
+    Ansi.emit_styled_cells
       (List.init group_pulse_slots (fun i ->
         let count, unknown = counts.(i) in
         if count > 0 then
@@ -2175,7 +2158,7 @@ let matrix_keeper_row ?(selected = false) matrix ~now row =
     |> Masc_tui_keeper_pulse.half_hours ~now ~count:matrix.matrix_pulse_slots
     |> List.map (fun half_hour ->
          (style_of half_hour, Masc_tui_keeper_pulse.half_hour_mark half_hour))
-    |> emit_styled_cells in
+    |> Ansi.emit_styled_cells in
   grid_gutter ~selected Keeper_list_model.By_runtime verdict
   ^ fit_width (Terminal_text.single_line row.Keeper_list_model.keeper.Tui_decode.k_name) matrix.matrix_name_cells
   ^ " " ^ String.concat "" cells ^ " " ^ Theme.recede () ^ fit_width last 5 ^ Ansi.reset
@@ -3185,6 +3168,47 @@ let render_keeper_plain (state : state) =
   finish_surface state ~clamped:(Keeper_list_scroll projection.kpp_scroll)
     ~surface_key:"keeper-list" ~rows:terminal_rows ~cols buf
 
+type wall_frame_cache =
+  { wfc_rows : Keeper_list_model.row list
+  ; wfc_slot_start : int
+  ; wfc_cols : int
+  ; wfc_ko : bool
+  ; wfc_style_key : int * bool * bool
+  ; wfc_prepared : Masc_tui_keeper_wall.prepared
+  }
+
+let last_wall_frame : wall_frame_cache option ref = ref None
+
+let prepared_wall_frame ~ko ~cols ~now (model_rows : Keeper_list_model.row list) =
+  let slot_start = Masc.Keeper_turn_pulse.slot_start now in
+  let style_key = Theme.style_cache_key () in
+  match !last_wall_frame with
+  | Some cached
+    when cached.wfc_rows == model_rows
+         && cached.wfc_slot_start = slot_start
+         && cached.wfc_cols = cols
+         && cached.wfc_ko = ko
+         && cached.wfc_style_key = style_key ->
+      cached.wfc_prepared
+  | Some _ | None ->
+      let items =
+        List.map
+          (fun (row : Keeper_list_model.row) ->
+            row.Keeper_list_model.keeper.Tui_decode.k_name, keeper_row_runtime row)
+          model_rows
+      in
+      let prepared = Masc_tui_keeper_wall.prepare ~ko ~cols ~now items in
+      last_wall_frame :=
+        Some
+          { wfc_rows = model_rows
+          ; wfc_slot_start = slot_start
+          ; wfc_cols = cols
+          ; wfc_ko = ko
+          ; wfc_style_key = style_key
+          ; wfc_prepared = prepared
+          };
+      prepared
+
 let render_keeper_axes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -3199,11 +3223,12 @@ let render_keeper_axes (state : state) =
   (* Selection already follows this ordered model in list mode. Reuse it in
      this synchronous draw rather than rebuilding it through selected_keeper.
      A heading selects no Keeper. *)
-  let selected_row =
+  let selected_position =
     match stop with
-    | Some (Keeper_list_model.Stop_row position) -> List.nth_opt model_rows position
+    | Some (Keeper_list_model.Stop_row position) -> Some position
     | Some (Keeper_list_model.Stop_world | Keeper_list_model.Stop_heading _) | None -> None
   in
+  let selected_row = Option.bind selected_position (List.nth_opt model_rows) in
   let selected_reading =
     Option.map (fun (row : Keeper_list_model.row) -> row.reading) selected_row
   in
@@ -3222,13 +3247,17 @@ let render_keeper_axes (state : state) =
     | None, Axis_row.Grid _ -> keeper_grid_fleet_row state ~now:now_unix ~grid all_rows
     | Some _, _ | None, (Axis_row.Wall_columns | Axis_row.List_columns) -> None
   in
-  let wall_fleet_rows =
+  let wall_prepared =
     match matrix, shape with
     | None, Axis_row.Wall_columns ->
-        Masc_tui_keeper_wall.fleet_rows ~ko ~cols:inner ~now:now_unix
-          (List.map keeper_row_runtime model_rows)
+        Some (prepared_wall_frame ~ko ~cols:inner ~now:now_unix model_rows)
     | Some _, (Axis_row.Wall_columns | Axis_row.List_columns | Axis_row.Grid _)
-    | None, (Axis_row.List_columns | Axis_row.Grid _) -> []
+    | None, (Axis_row.List_columns | Axis_row.Grid _) -> None
+  in
+  let wall_fleet_rows =
+    match wall_prepared with
+    | Some prepared -> Masc_tui_keeper_wall.prepared_fleet_rows prepared
+    | None -> []
   in
   let col_header_rows =
     match matrix, shape with
@@ -3330,8 +3359,12 @@ let render_keeper_axes (state : state) =
        box_line_styled buf cols ~style:(Theme.recede ())
          (matrix_header ~ko matrix)
    | None, Axis_row.Wall_columns ->
-       box_line buf cols
-         (Masc_tui_keeper_wall.header ~ko ~cols:inner ~now:now_unix);
+       let wall_header =
+         match wall_prepared with
+         | Some prepared -> Masc_tui_keeper_wall.prepared_header prepared
+         | None -> Masc_tui_keeper_wall.header ~ko ~cols:inner ~now:now_unix
+       in
+       box_line buf cols wall_header;
        List.iter (box_line buf cols) wall_fleet_rows
    | None, Axis_row.List_columns ->
        box_line_styled buf cols ~style:(Theme.recede ())
@@ -3349,11 +3382,10 @@ let render_keeper_axes (state : state) =
   in
   (* A heading is one line whatever the density. *)
   let wall_separator position =
-    match shape, List.nth_opt model_rows position, List.nth_opt model_rows (max 0 (position - 1)) with
-    | Axis_row.Wall_columns, Some row, Some previous when position > 0 ->
-        Masc_tui_keeper_wall.group ~now:now_unix (keeper_row_runtime row) <>
-        Masc_tui_keeper_wall.group ~now:now_unix (keeper_row_runtime previous)
-    | (Axis_row.Wall_columns | Axis_row.List_columns | Axis_row.Grid _), (Some _ | None), (Some _ | None) -> false in
+    match wall_prepared with
+    | Some prepared -> Masc_tui_keeper_wall.prepared_separator prepared position
+    | None -> false
+  in
   let entry_lines = function
     | Keeper_world | Keeper_group_heading _ -> 1
     | Keeper_display_row (position, row) ->
@@ -3419,27 +3451,22 @@ let render_keeper_axes (state : state) =
     | None -> 0
   in
   let wall_cockpit_rows =
-    match shape with
-    | Axis_row.Wall_columns -> (
-        match matrix, state.keeper_story, portrait, selected_row with
-        | None, None, None, Some row when available_rows >= 9 ->
-            (* The summary carries the now cell's colour; the cockpit header
-               sanitises its subtitle and would draw the escape bytes as
-               "\x1B[…m", so it is handed the plain text. *)
-            let status =
-              Masc_tui_theme.strip_sgr
-                (keeper_selected_summary state ~now:now_unix row)
-            in
-            let cockpit =
-              Masc_tui_keeper_wall.selected_cockpit_rows ~ko ~cols:inner
-                ~now:now_unix
-                ~name:row.Keeper_list_model.keeper.Tui_decode.k_name
-                ~status (keeper_row_runtime row)
-            in
-            if available_rows - List.length cockpit >= 4 then cockpit else []
-        | (Some _ | None), (Some _ | None), (Some _ | None), (Some _ | None) ->
-            [])
-    | Axis_row.List_columns | Axis_row.Grid _ -> []
+    match wall_prepared, state.keeper_story, portrait, selected_position, selected_row with
+    | Some prepared, None, None, Some position, Some row when available_rows >= 9 ->
+        (* The summary carries the now cell's colour; the cockpit header
+           sanitises its subtitle and would draw the escape bytes as
+           "\x1B[…m", so it is handed the plain text. *)
+        let status =
+          Masc_tui_theme.strip_sgr
+            (keeper_selected_summary state ~now:now_unix row)
+        in
+        let cockpit =
+          Masc_tui_keeper_wall.prepared_selected_cockpit_rows prepared
+            ~index:position ~status
+        in
+        if available_rows - List.length cockpit >= 4 then cockpit else []
+    | (Some _ | None), (Some _ | None), (Some _ | None), (Some _ | None), (Some _ | None) ->
+        []
   in
   let selected_summary =
     if wall_cockpit_rows <> [] then None
@@ -3556,10 +3583,14 @@ let render_keeper_axes (state : state) =
             match matrix, shape with
             | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
                 matrix_keeper_row ~selected matrix ~now:now_unix row
-            | None, Axis_row.Wall_columns ->
-                Masc_tui_keeper_wall.row ~selected ~ko:(state.ui_language = Lang_ko)
-                  ~cols:inner ~now:now_unix
-                  ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row)
+            | None, Axis_row.Wall_columns -> (
+                match wall_prepared with
+                | Some prepared ->
+                    Masc_tui_keeper_wall.prepared_row ~selected prepared position
+                | None ->
+                    Masc_tui_keeper_wall.row ~selected ~ko:(state.ui_language = Lang_ko)
+                      ~cols:inner ~now:now_unix
+                      ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row))
             | None, Axis_row.List_columns ->
                 keeper_row_content ~tasks:state.tasks
                   ~ko:(state.ui_language = Lang_ko)

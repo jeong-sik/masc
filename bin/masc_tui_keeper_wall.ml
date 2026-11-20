@@ -27,7 +27,7 @@ let slots ~now ~count runtime = Pulse.half_hours ~now ~count (pulse runtime)
 
 type group = Failing | Other | Sound
 
-let group ~now runtime =
+let group_with_day_hours ~now ~day_hours runtime =
   match runtime with
   | Some runtime when runtime.Masc.Tui_decode.kr_paused -> Other
   | Some _ | None -> match Grid.verdict ~now runtime with
@@ -38,9 +38,16 @@ let group ~now runtime =
       (match pulse runtime with
        | None -> Other
        | Some _ ->
+           let day =
+             match day_hours with
+             | Some hours -> hours
+             | None -> slots ~now ~count:day_slots runtime
+           in
            (* Classification uses observed failures, not an exact total. *)
-           if Pulse.failure_lower_bound (Pulse.failure_count (slots ~now ~count:day_slots runtime)) > 0
+           if Pulse.failure_lower_bound (Pulse.failure_count day) > 0
            then Other else Sound)
+
+let group ~now runtime = group_with_day_hours ~now ~day_hours:None runtime
 
 let rank = function Failing -> 0 | Other -> 1 | Sound -> 2
 
@@ -49,9 +56,11 @@ let dimensions cols =
   let count = max 0 (min day_slots (cols - Grid.gutter_cells - name - 1 - 12)) in
   name, count
 
-let prefix ?(selected = false) name_cells mark name =
-  (if selected then "› " else "  ") ^ mark ^ " "
-  ^ Layout.fit_width (Terminal_text.single_line name) name_cells ^ " "
+let cell_prefix name_cells mark name =
+  mark ^ " " ^ Layout.fit_width (Terminal_text.single_line name) name_cells ^ " "
+
+let prefix name_cells mark name =
+  "  " ^ cell_prefix name_cells mark name
 
 let header ~ko ~cols ~now =
   let name, count = dimensions cols in
@@ -131,57 +140,46 @@ let tally_marks slot_tallies =
   let recede = Theme.recede () in
   let warn = Theme.warn () in
   let mixed_tone = thermal_tint 0.62 in
-  let buf = Buffer.create (n * 6) in
-  let open_style = ref "" in
-  let emit style glyph =
-    if not (String.equal style !open_style) then begin
-      if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
-      if not (String.equal style "") then Buffer.add_string buf style;
-      open_style := style
-    end;
-    Buffer.add_string buf glyph
-  in
-  for i = 0 to n - 1 do
-    match arr.(i) with
-    | Pulse.Slot_tally_unknown ->
-        emit recede Masc_tui_keeper_mark.grid_unknown_range_mark
-    | Pulse.Slot_tally_measured _ -> (
-        match classes.(i) with
-        | Class_quiet_or_unknown ->
-            emit recede Masc_tui_keeper_mark.grid_dot_mark
-        | Class_ok h ->
-            let left =
-              if i > 0 then
-                match classes.(i - 1) with
-                | Class_ok prev_h -> prev_h
-                | Class_quiet_or_unknown | Class_rested | Class_failed _
-                | Class_mixed _ -> 1
-              else 1
-            in
-            let glyph = Braille.braille_pair ~left ~right:h in
-            let tone = ok_tint (0.45 +. (0.40 *. float_of_int (h - 1))) in
-            emit tone glyph
-        | Class_failed h ->
-            let left =
-              if i > 0 then
-                match classes.(i - 1) with
-                | Class_failed prev_h -> prev_h
-                | Class_quiet_or_unknown | Class_rested | Class_ok _
-                | Class_mixed _ -> 1
-              else 1
-            in
-            let glyph = Braille.braille_pair_down ~left ~right:h in
-            let tone = warm_tint (0.45 +. (0.45 *. float_of_int (h - 1))) in
-            emit tone glyph
-        | Class_mixed ok_h ->
-            let glyph = Braille.braille_pair ~left:ok_h ~right:4 in
-            emit mixed_tone glyph
-        | Class_rested ->
-            let glyph = Braille.braille_pair ~left:1 ~right:0 in
-            emit warn glyph)
-  done;
-  if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
-  Buffer.contents buf
+  Ansi.with_styled_runs ~capacity:(n * 6) (fun emit ->
+    for i = 0 to n - 1 do
+      match arr.(i) with
+      | Pulse.Slot_tally_unknown ->
+          emit recede Masc_tui_keeper_mark.grid_unknown_range_mark
+      | Pulse.Slot_tally_measured _ -> (
+          match classes.(i) with
+          | Class_quiet_or_unknown ->
+              emit recede Masc_tui_keeper_mark.grid_dot_mark
+          | Class_ok h ->
+              let left =
+                if i > 0 then
+                  match classes.(i - 1) with
+                  | Class_ok prev_h -> prev_h
+                  | Class_quiet_or_unknown | Class_rested | Class_failed _
+                  | Class_mixed _ -> 1
+                else 1
+              in
+              let glyph = Braille.braille_pair ~left ~right:h in
+              let tone = ok_tint (0.45 +. (0.40 *. float_of_int (h - 1))) in
+              emit tone glyph
+          | Class_failed h ->
+              let left =
+                if i > 0 then
+                  match classes.(i - 1) with
+                  | Class_failed prev_h -> prev_h
+                  | Class_quiet_or_unknown | Class_rested | Class_ok _
+                  | Class_mixed _ -> 1
+                else 1
+              in
+              let glyph = Braille.braille_pair_down ~left ~right:h in
+              let tone = warm_tint (0.45 +. (0.45 *. float_of_int (h - 1))) in
+              emit tone glyph
+          | Class_mixed ok_h ->
+              let glyph = Braille.braille_pair ~left:ok_h ~right:4 in
+              emit mixed_tone glyph
+          | Class_rested ->
+              let glyph = Braille.braille_pair ~left:1 ~right:0 in
+              emit warn glyph)
+    done)
 
 (* A band nothing was read for says so once in the band's width, as the roster's
    history column does; a partly read band keeps one mark per half hour. *)
@@ -189,17 +187,23 @@ let band ~count readings marks_of =
   if Pulse.nothing_read readings then Masc_tui_keeper_strip.history_unknown_label ~cells:count
   else marks_of ()
 
+let row_body ~name_cells ~count ~now ~name runtime slot_tallies hours =
+  (* The row mark every view draws for this verdict (RFC
+     tui-one-screen-grammar §7.2); the wall does not mark a recovery. *)
+  let mark =
+    Grid.mark Masc_tui_keeper_list_model.Day_wall (Grid.verdict ~now runtime)
+  in
+  cell_prefix name_cells mark name
+  ^ band ~count [ hours ] (fun () -> tally_marks slot_tallies)
+  ^ Theme.recede () ^ " │ " ^ Ansi.reset
+  ^ Printf.sprintf "%s/%d" (count_text (Pulse.failure_count hours)) count
+
 let row ?(selected = false) ~ko:_ ~cols ~now ~name runtime =
   let name_cells, count = dimensions cols in
   let slot_tallies = tallies ~now ~count runtime in
   let hours = List.map Pulse.half_hour_of_tally slot_tallies in
-  (* The row mark every view draws for this verdict (RFC
-     tui-one-screen-grammar §7.2); the wall does not mark a recovery. *)
-  let mark =
-    Grid.mark Masc_tui_keeper_list_model.Day_wall (Grid.verdict ~now runtime) in
-  prefix ~selected name_cells mark name ^ band ~count [ hours ] (fun () -> tally_marks slot_tallies)
-  ^ Theme.recede () ^ " │ " ^ Ansi.reset
-  ^ Printf.sprintf "%s/%d" (count_text (Pulse.failure_count hours)) count
+  (if selected then "› " else "  ")
+  ^ row_body ~name_cells ~count ~now ~name runtime slot_tallies hours
 
 let legend_row ~ko ~cols =
   let say k e = if ko then k else e in
@@ -280,40 +284,26 @@ let dot_meter_summary_lines ~ko ~cells ~total_ok ~total_bad ~peak_ok ~peak_bad
 
 let build_baseline_ok_row ~count ~up_arr ~dn_arr ~ok_base_tone ~unknown_at =
   let recede = Theme.recede () in
-  let base_buf = Buffer.create (count * 6) in
-  let open_style = ref "" in
-  let emit tone glyph =
-    if not (String.equal tone !open_style) then begin
-      if not (String.equal !open_style "") then Buffer.add_string base_buf Ansi.reset;
-      if not (String.equal tone "") then Buffer.add_string base_buf tone;
-      open_style := tone
-    end;
-    Buffer.add_string base_buf glyph
-  in
-  for i = 0 to count - 1 do
-    let l, r = up_arr.(i) in
-    let dl, dr = dn_arr.(i) in
-    if l = 0 && r = 0 && dl = 0 && dr = 0 then
-      let mark =
-        if unknown_at i then Masc_tui_keeper_mark.grid_unknown_range_mark
-        else Masc_tui_keeper_mark.grid_dot_mark
-      in
-      emit recede mark
-    else
-      let bl = min 4 l and br = min 4 r in
-      let glyph = Braille.braille_pair ~left:bl ~right:br in
-      if bl = 0 && br = 0 then emit "" glyph
-      else emit ok_base_tone glyph
-  done;
-  if not (String.equal !open_style "") then Buffer.add_string base_buf Ansi.reset;
-  Buffer.contents base_buf
+  Ansi.with_styled_runs ~capacity:(count * 6) (fun emit ->
+    for i = 0 to count - 1 do
+      let l, r = up_arr.(i) in
+      let dl, dr = dn_arr.(i) in
+      if l = 0 && r = 0 && dl = 0 && dr = 0 then
+        let mark =
+          if unknown_at i then Masc_tui_keeper_mark.grid_unknown_range_mark
+          else Masc_tui_keeper_mark.grid_dot_mark
+        in
+        emit recede mark
+      else
+        let bl = min 4 l and br = min 4 r in
+        let glyph = Braille.braille_pair ~left:bl ~right:br in
+        if bl = 0 && br = 0 then emit "" glyph
+        else emit ok_base_tone glyph
+    done)
 
-let fleet_rows ~ko ~cols ~now runtimes =
+let fleet_rows_of_tallies ~ko ~cols ~name_cells ~count all_tallies all_hours =
   let say k e = if ko then k else e in
-  let name_cells, count = dimensions cols in
-  let all_tallies = List.map (tallies ~now ~count) runtimes in
   let all_tally_arrays = List.map Array.of_list all_tallies in
-  let all_hours = List.map (List.map Pulse.half_hour_of_tally) all_tallies in
   let slot_agg =
     Array.init count (fun position ->
       let slot_entries =
@@ -452,13 +442,16 @@ let fleet_rows ~ko ~cols ~now runtimes =
     in
     wave_rows @ [ legend_row ~ko ~cols ]
 
-let selected_cockpit_rows ~ko ~cols ~now ~name ~status runtime =
+let fleet_rows ~ko ~cols ~now runtimes =
+  let name_cells, count = dimensions cols in
+  let all_tallies = List.map (tallies ~now ~count) runtimes in
+  let all_hours = List.map (List.map Pulse.half_hour_of_tally) all_tallies in
+  fleet_rows_of_tallies ~ko ~cols ~name_cells ~count all_tallies all_hours
+
+let selected_cockpit_of_tallies ~ko ~cols ~count ~name ~status keeper_tallies hours =
   if cols < 44 then []
   else
     let fit_row line = Layout.truncate_end (max 0 cols) line ^ Ansi.reset in
-    let _, count = dimensions cols in
-    let keeper_tallies = tallies ~now ~count runtime in
-    let hours = List.map Pulse.half_hour_of_tally keeper_tallies in
     let hdr =
       Doc.section_header ~width:cols ~indent:2 ~subtitle:status
         (Terminal_text.single_line name)
@@ -551,3 +544,80 @@ let selected_cockpit_rows ~ko ~cols ~now ~name ~status runtime =
             wave_lines
         in
         hdr :: joined
+
+let selected_cockpit_rows ~ko ~cols ~now ~name ~status runtime =
+  if cols < 44 then []
+  else
+    let _, count = dimensions cols in
+    let keeper_tallies = tallies ~now ~count runtime in
+    let hours = List.map Pulse.half_hour_of_tally keeper_tallies in
+    selected_cockpit_of_tallies ~ko ~cols ~count ~name ~status keeper_tallies hours
+
+type prepared_row =
+  { separator_before : bool
+  ; body : string
+  ; tallies : Pulse.half_hour_tally list
+  ; hours : Pulse.half_hour list
+  ; name : string
+  }
+
+type prepared =
+  { ko : bool
+  ; cols : int
+  ; count : int
+  ; header : string
+  ; fleet_rows : string list
+  ; rows : prepared_row array
+  }
+
+let prepare ~ko ~cols ~now items =
+  let name_cells, count = dimensions cols in
+  let per_keeper =
+    List.map
+      (fun (name, runtime) ->
+        let slot_tallies = tallies ~now ~count runtime in
+        let hours = List.map Pulse.half_hour_of_tally slot_tallies in
+        (name, runtime, slot_tallies, hours))
+      items
+  in
+  let all_tallies = List.map (fun (_, _, t, _) -> t) per_keeper in
+  let all_hours = List.map (fun (_, _, _, h) -> h) per_keeper in
+  let fleet_rows =
+    fleet_rows_of_tallies ~ko ~cols ~name_cells ~count all_tallies all_hours
+  in
+  let header = header ~ko ~cols ~now in
+  let _, rev_rows =
+    List.fold_left
+      (fun (prev_group, acc) (name, runtime, slot_tallies, hours) ->
+        let day_hours = if count = day_slots then Some hours else None in
+        let g = group_with_day_hours ~now ~day_hours runtime in
+        let separator_before =
+          match prev_group with
+          | Some prev -> prev <> g
+          | None -> false
+        in
+        let body =
+          row_body ~name_cells ~count ~now ~name runtime slot_tallies hours
+        in
+        (Some g, { separator_before; body; tallies = slot_tallies; hours; name } :: acc))
+      (None, []) per_keeper
+  in
+  let rows = Array.of_list (List.rev rev_rows) in
+  { ko; cols; count; header; fleet_rows; rows }
+
+let prepared_header prepared = prepared.header
+let prepared_fleet_rows prepared = prepared.fleet_rows
+
+let prepared_separator prepared index =
+  index >= 0 && index < Array.length prepared.rows && prepared.rows.(index).separator_before
+
+let prepared_row ?(selected = false) prepared index =
+  if index < 0 || index >= Array.length prepared.rows then ""
+  else (if selected then "› " else "  ") ^ prepared.rows.(index).body
+
+let prepared_selected_cockpit_rows prepared ~index ~status =
+  if index < 0 || index >= Array.length prepared.rows then []
+  else
+    let row = prepared.rows.(index) in
+    selected_cockpit_of_tallies ~ko:prepared.ko ~cols:prepared.cols
+      ~count:prepared.count ~name:row.name ~status row.tallies row.hours

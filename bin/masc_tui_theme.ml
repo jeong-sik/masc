@@ -238,6 +238,27 @@ module Sgr = struct
   let bg_added = style "\027[48;5;22m"
 
   let reverse = "\027[7m"
+
+  let with_styled_runs ?(capacity = 64) f =
+    let buf = Buffer.create (max 0 capacity) in
+    let open_style = ref "" in
+    let emit sgr text =
+      if not (String.equal text "") then begin
+        if not (String.equal sgr !open_style) then begin
+          if not (String.equal !open_style "") then Buffer.add_string buf reset;
+          if not (String.equal sgr "") then Buffer.add_string buf sgr;
+          open_style := sgr
+        end;
+        Buffer.add_string buf text
+      end
+    in
+    f emit;
+    if not (String.equal !open_style "") then Buffer.add_string buf reset;
+    Buffer.contents buf
+
+  let emit_styled_cells cells =
+    with_styled_runs ~capacity:(List.length cells * 6) (fun emit ->
+      List.iter (fun (sgr, text) -> emit sgr text) cells)
 end
 
 let user_message_background palette =

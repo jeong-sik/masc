@@ -1633,8 +1633,8 @@ let memory_overview_scrolled ~cols ~budget (state : state) =
     ~context_rows:(List.length projection.context) state
 
 (* A row the operator picks a keeper from: the mark, the name, proportional
-   memory bar, counts, stored size and state word. Selected rows still strip
-   SGR down the line while preserving clean columns. *)
+   memory bar, counts, stored size and state word. Selected rows keep semantic
+   colors over the tinted selection band while preserving clean columns. *)
 let memory_selector_line ?(selected = false) ?(max_facts = 0) ~cols (state : state) keeper =
   let ko = state.ui_language = Lang_ko in
   let width = max 1 (framed_inner_width cols - 2) in
@@ -1841,7 +1841,7 @@ let render_memory_body ~cols ~budget (state : state)
               memory_row_line ~selected:is_selected ~ko ~unit:state.memory_unit columns k
             else memory_selector_line ~selected:is_selected ~max_facts ~cols state k in
           if is_selected then
-            push_selected (Masc_tui_theme.strip_sgr line)
+            push_selected line
           else push line
     done;
     hand_position (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown)
@@ -2139,11 +2139,14 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
       | Some row ->
           let line = memory_fact_row_line ~ko ~is_fleet ~sort:state.memory_facts_sort ~cols row in
           if idx = cursor then
-            let plain = Masc_tui_theme.strip_sgr line in
+            let lead =
+              if String.equal (Theme.accent ()) "" then "\xe2\x80\xba "
+              else Theme.accent () ^ Ansi.bold ^ "\xe2\x80\xba " ^ Ansi.reset
+            in
             let marked =
-              if String.length plain >= 2 && plain.[0] = ' ' && plain.[1] = ' ' then
-                "\xe2\x80\xba " ^ String.sub plain 2 (String.length plain - 2)
-              else "\xe2\x80\xba " ^ plain
+              if String.length line >= 2 && line.[0] = ' ' && line.[1] = ' ' then
+                lead ^ String.sub line 2 (String.length line - 2)
+              else lead ^ line
             in
             push_selected marked
           else push line
@@ -2176,14 +2179,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
         let styled = if style = "" then text else style ^ text ^ Ansi.reset in
         collect (true, styled))
       ~push_selected:(fun text ->
-        let fitted = fit_width text fact_inner_cols in
-        let painted =
-          match Theme.sidebar_selection_background () with
-          | Some bg when not (String.equal bg "") ->
-              Masc_tui_theme.paint_row_background ~bg fitted
-          | Some _ | None -> Theme.selection_style () ^ fitted ^ Ansi.reset
-        in
-        collect (false, painted))
+        collect (false, Masc_tui_ansi.selection_row_styled ~cells:fact_inner_cols text))
       ~push_divider:(fun () ->
         collect (true, Theme.border_muted () ^ draw_hline fact_inner_cols ^ Ansi.reset))
       ~push_empty:(fun () -> collect (false, ""));

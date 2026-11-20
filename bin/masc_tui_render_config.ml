@@ -2092,7 +2092,7 @@ let render_config_models (state : state) =
            ~width:(max 1 (framed_inner_width cols - 2)) ~height:content_height form in
        List.iter (fun (selected, line) ->
          let text = "  " ^ Terminal_text.single_line line in
-         if selected then box_line_selected buf cols text
+         if selected then box_line_selected_styled buf cols text
          else box_line buf cols text) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
    | None when Option.is_some state.runtime_model_jump ->
@@ -3205,7 +3205,7 @@ let render_config (state : state) =
          file, and what it saves is that file with one provider added. *)
       let ko = state.ui_language = Lang_ko in
       let push_form_row (selected, line) =
-        if selected then c.push_selected line else c.push line
+        if selected then c.push_selected_styled line else c.push line
       in
       match state.runtime_account_form with
       | Some form ->

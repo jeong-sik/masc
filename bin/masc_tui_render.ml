@@ -663,7 +663,7 @@ let render_overview (state : state) home =
       let draw_row (action,label) =
         let is_selected = Option.equal equal_home_action (Some action) selected in
         let line = (if is_selected then "› " else "  ") ^ label in
-        if is_selected then c.push_selected line
+        if is_selected then c.push_selected_styled line
         else c.push line in
       let available = List.length body.hb_rows + body.hb_spare in
       let card_rows =
@@ -879,7 +879,7 @@ let render_memory (state : state) =
     ~title ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
     ~body:(fun ~budget c ->
       Render_memory.render_memory_body ~cols ~budget state ~report_drawn_list
-        ~hand_position:c.position ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
+        ~hand_position:c.position ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected_styled
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
 let render_memory_changes (state : state) keeper_name =
@@ -980,7 +980,7 @@ and render_memory_facts_list (state : state) =
     ~title ~keys:(Masc_tui_keys.footer_row_memory_facts ~lang:state.ui_language ~cols)
     ~body:(fun ~budget c ->
       Render_memory.render_memory_facts_body ~cols ~budget state ~report_drawn_list
-        ~hand_position:c.position ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
+        ~hand_position:c.position ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected_styled
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
 

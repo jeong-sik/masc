@@ -1308,7 +1308,7 @@ let render_approvals (state : state) =
         in
         let is_selected = idx = state.approval_cursor in
         if is_selected then
-          box_line_selected buf cols (Masc_tui_theme.strip_sgr ("\xe2\x80\xba " ^ line))
+          box_line_selected_styled buf cols ("\xe2\x80\xba " ^ line)
         else
           box_line buf cols ("  " ^ line)
       end else

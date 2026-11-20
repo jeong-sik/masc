@@ -193,9 +193,11 @@ val next_call_order : call_order -> call_order
 
 type task_source = Task_source_unread | Task_source_read | Task_source_failed
 type keeper_task =
-  | Task_unavailable
-  | Task_not_observed
+  | Task_unread
+      (** The workspace is not confirmed, or the task source is not read yet. *)
+  | Task_none  (** The source was read; the Keeper holds no task. *)
   | Task_refresh_failed
+      (** The read failed, and no earlier task id is kept. *)
   | Task_observed of { id : string; refresh_failed : bool }
 
 val summarize_keeper_task :

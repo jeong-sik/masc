@@ -146,12 +146,28 @@ let published_base_path = function
   | Multi_account { zone = _; base_path; now = _ } -> base_path
 ;;
 
+let current () =
+  match Atomic.get state with
+  | Unpublished -> None
+  | Published access -> Some access
+;;
+
 let is_multi_account () =
   match Atomic.get state with
   | Published (Multi_account _) -> true
   | Unpublished | Published (Single_user _) -> false
 ;;
 
+let is_person_home path =
+  match Atomic.get state with
+  | Unpublished -> false
+  | Published access -> Layout.under_persons ~base_path:(published_base_path access) path
+;;
+
+let is_person_sealed = function
+  | Person_account _ -> true
+  | Captured _ -> false
+;;
 let publish_host_tool ~base_path ~config_dir =
   match Authz_boot_mode_read.tool ~base_path ~config_dir with
   | Error _ as refused -> refused

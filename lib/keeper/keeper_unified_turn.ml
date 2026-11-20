@@ -318,7 +318,7 @@ let run_keeper_cycle
       let source =
         match Runtime.runtime_id_for_keeper meta.name with
         | Some id when String.trim id <> "" -> "assigned"
-        | _ -> "default"
+        | _ -> if Runtime.is_multi_account () then "unassigned" else "default"
       in
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string RuntimeSelected)

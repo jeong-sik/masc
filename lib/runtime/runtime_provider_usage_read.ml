@@ -679,9 +679,13 @@ let read_codex_after_spent_usage_refusal ~clock ~cwd ~scope ~account codex =
 ;;
 
 let http_read_of_runtime (rt : Runtime_instance.t) =
-  match how_of_runtime rt with
-  | Some (Http http) -> Some http
-  | Some (Codex _ | Antigravity _) | None -> None
+  if Runtime_account_access.is_multi_account ()
+     || Runtime_execution.is_person_execution rt.execution
+  then None
+  else
+    match how_of_runtime rt with
+    | Some (Http http) -> Some http
+    | Some (Codex _ | Antigravity _) | None -> None
 ;;
 
 type account_refusal_skip =

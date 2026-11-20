@@ -6,7 +6,7 @@
     published: the runtime exists for the call that uses it. *)
 
 (** Which binding of the template. *)
-type binding =
+type binding = Runtime_person_template.binding =
   | Model of string
       (** The binding of this model: a verification, which then records the
           Runtime id the binding makes on the account. *)
@@ -23,7 +23,7 @@ type account =
       (** The API key in this file
           ({!Runtime_account_home_layout.key_file}). *)
 
-type error =
+type error = Runtime_person_template.error =
   | Template_not_declared of string  (** No provider of the configuration has this id. *)
   | Model_not_bound of
       { template : string

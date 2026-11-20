@@ -168,6 +168,9 @@ val scope_id : scope -> string
 val scope_equal : scope -> scope -> bool
 (** Whether two scopes name the same quota owner. *)
 
+val official_client_home : scope -> string option
+(** The home path of an official-client quota scope, if [scope] names one. *)
+
 val scope_of_credential :
   provider_id:string -> Runtime_schema.credential option -> scope
 (** Non-secret quota-scope identity for a provider row.  Provider hard quota

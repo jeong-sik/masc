@@ -133,7 +133,8 @@ let model_input_projection_for_capacity ~input_source
 (* Keep the account scope selected at turn start. Config may be reloaded while
    the CLI runs; a late report still belongs to the home that produced it. *)
 let record_usage_windows ~quota_scope report =
-  Runtime_provider_usage_window.record
+  if not (Runtime_provider_usage_window.is_person_or_multi_account_scope quota_scope)
+  then Runtime_provider_usage_window.record
     ~scope:quota_scope ~observed_at:(Time_compat.now ()) report
 ;;
 

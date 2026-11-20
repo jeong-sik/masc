@@ -768,6 +768,7 @@ type loaded_state =
   ; lsp_servers : (string * (string * string list)) list
   ; config_path : string option
   ; source_config : Runtime_schema.config option
+  ; source_config_version : int
   ; startup_degradation : startup_degradation option
   ; exact_slots : exact_slot_degradation
         (* Exact slots this file declares on a provider without
@@ -790,11 +791,13 @@ let empty_loaded_state : loaded_state =
   ; lsp_servers = []
   ; config_path = None
   ; source_config = None
+  ; source_config_version = 0
   ; startup_degradation = None
   ; exact_slots = { gaps = []; emptied_lane_ids = [] }
   }
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
+let source_config_version_counter = Atomic.make 0
 let catalogue_revision_ref = Atomic.make 0
 let catalogue_changed = Eio.Condition.create ()
 let catalogue_revision () = Atomic.get catalogue_revision_ref
@@ -844,6 +847,218 @@ let preserve_candidate previous (runtime : t) =
     | Some old -> { runtime with candidate_backpressure = old.candidate_backpressure }
     | None -> runtime
 
+;;
+
+type person_runtime_entry =
+  { integration_id : Authz_types.Integration_id.t
+  ; runtime : t
+  }
+
+type person_side_table_snapshot =
+  { by_version : ((string * int) * (string * person_runtime_entry) list) list
+  ; previous : ((string * string) * person_runtime_entry) list
+  }
+
+let person_runtimes_mu = Stdlib.Mutex.create ()
+let person_runtimes : (string * int, (string * person_runtime_entry) list) Hashtbl.t =
+  Hashtbl.create 8
+let previous_person_runtimes : (string * string, person_runtime_entry) Hashtbl.t =
+  Hashtbl.create 16
+
+let prune_stale_person_runtimes ~keep_version =
+  Stdlib.Mutex.protect person_runtimes_mu (fun () ->
+    let stale_keys =
+      Hashtbl.fold
+        (fun ((_account, version) as key) _ acc ->
+           if version <> keep_version then key :: acc else acc)
+        person_runtimes
+        []
+    in
+    List.iter (Hashtbl.remove person_runtimes) stale_keys)
+;;
+
+let snapshot_person_side_table () =
+  Stdlib.Mutex.protect person_runtimes_mu (fun () ->
+    let by_version = Hashtbl.fold (fun k v acc -> (k, v) :: acc) person_runtimes [] in
+    let previous = Hashtbl.fold (fun k v acc -> (k, v) :: acc) previous_person_runtimes [] in
+    { by_version; previous })
+;;
+
+let restore_person_side_table snap =
+  Stdlib.Mutex.protect person_runtimes_mu (fun () ->
+    Hashtbl.reset person_runtimes;
+    Hashtbl.reset previous_person_runtimes;
+    List.iter (fun (k, v) -> Hashtbl.replace person_runtimes k v) snap.by_version;
+    List.iter (fun (k, v) -> Hashtbl.replace previous_person_runtimes k v) snap.previous)
+;;
+
+let layout_client_of_provider (provider : Runtime_schema.provider) =
+  match provider.api_format with
+  | Runtime_schema.Codex_app_server_runtime -> Some Runtime_account_home_layout.Codex_home
+  | Runtime_schema.Claude_code_runtime -> Some Runtime_account_home_layout.Claude_home
+  | Runtime_schema.Muse_serve_runtime -> Some Runtime_account_home_layout.Muse_home
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Vibe_cli_runtime
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> None
+;;
+
+let run_blocking_fs fn =
+  Fs_compat.Systhread_host.run ~label:"person-account-home" fn
+;;
+
+let ensure_private_dir path =
+  (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Runtime_account_home_folder.directory ~private_:true path
+;;
+
+let ensure_person_account_home ~base_path ~namespace ~provider_account_id ~client =
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  let person_root =
+    Runtime_account_home_layout.person_runtime_root ~base_path ~namespace
+  in
+  let accounts_dir = Filename.dirname person_root in
+  let account_id = Authz_types.Provider_account_id.to_string provider_account_id in
+  let ( let* ) = Result.bind in
+  try
+    Fs_compat.mkdir_p masc_dir;
+    run_blocking_fs (fun () ->
+      let* () = ensure_private_dir accounts_dir in
+      let* () = ensure_private_dir person_root in
+      Runtime_account_home_folder.make ~runtime_root:person_root ~account_id ~client)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+  | Sys_error msg -> Error msg
+;;
+
+let lookup_person_runtime_in_trusted ~base_path (state : loaded_state) (trusted : Authz_zone.trusted) (id : string)
+  : t option
+  =
+  match state.source_config, Authz_types.Runtime_id.of_string id with
+  | None, _ | _, Error _ -> None
+  | Some config, Ok rt_id ->
+    let authz = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+    match Authz_runtime_state.find authz.Authz_state.runtimes rt_id with
+    | None -> None
+    | Some rt_rec ->
+      match
+        Authz_provider_account_state.find
+          authz.Authz_state.provider_accounts
+          rt_rec.provider_account_id
+      with
+      | None -> None
+      | Some account ->
+        let integration_id =
+          match account.kind with
+          | Authz_provider_account_state.Login { integration_id } -> integration_id
+          | Authz_provider_account_state.Key { integration_id; generation = _ } -> integration_id
+        in
+        match Authz_principal_state.find_membership authz.Authz_state.principals rt_rec.owner with
+        | None -> None
+        | Some membership ->
+          let template = Authz_types.Integration_id.to_string integration_id in
+          let home_plan =
+            match Runtime_schema.provider_of_id config template with
+            | None -> None
+            | Some provider ->
+              (match layout_client_of_provider provider with
+               | Some client -> Some (`Cli_client client)
+               | None ->
+                 if Runtime_person_template.http_provider_takes_key provider
+                 then
+                   (match account.kind with
+                    | Authz_provider_account_state.Key _ -> Some `Http_key_only
+                    | Authz_provider_account_state.Login _ -> None)
+                 else None)
+          in
+          match home_plan with
+          | None -> None
+          | Some plan ->
+            let account_key =
+              Authz_types.Provider_account_id.to_string rt_rec.provider_account_id
+            in
+            let version_key = account_key, state.source_config_version in
+            let cached =
+              Stdlib.Mutex.protect person_runtimes_mu (fun () ->
+                match Hashtbl.find_opt person_runtimes version_key with
+                | None -> None
+                | Some entries ->
+                  (match List.assoc_opt id entries with
+                   | Some entry when Authz_types.Integration_id.equal entry.integration_id integration_id ->
+                     Some entry.runtime
+                   | Some _ | None -> None))
+            in
+            match cached with
+            | Some rt -> Some rt
+            | None ->
+              let prepared_home =
+                match plan with
+                | `Http_key_only -> Ok None
+                | `Cli_client client ->
+                  ensure_person_account_home
+                    ~base_path
+                    ~namespace:membership.Authz_principal_state.account_home_namespace
+                    ~provider_account_id:rt_rec.provider_account_id
+                    ~client
+                  |> Result.map Option.some
+              in
+              match prepared_home with
+              | Error detail ->
+                Log.Runtime.warn "person runtime dir preparation failed for %s: %s" id detail;
+                None
+              | Ok account_home ->
+                match
+                  Runtime_person_template.of_person_template
+                    config
+                    ~template
+                    ~provider_account_id:rt_rec.provider_account_id
+                    ~integration_id
+                    ~account_home
+                    ~binding:(Runtime_person_template.Runtime id)
+                with
+                | Error err ->
+                  Log.Runtime.warn
+                    "person runtime build failed for %s: %s"
+                    id
+                    (Runtime_person_template.error_to_string err);
+                  None
+                | Ok built ->
+                  Stdlib.Mutex.protect person_runtimes_mu (fun () ->
+                    let existing =
+                      match Hashtbl.find_opt person_runtimes version_key with
+                      | Some entries -> List.assoc_opt id entries
+                      | None -> None
+                    in
+                    match existing with
+                    | Some entry when Authz_types.Integration_id.equal entry.integration_id integration_id ->
+                      Some entry.runtime
+                    | Some _ | None ->
+                      let candidate_key = account_key, id in
+                      let runtime =
+                        match Hashtbl.find_opt previous_person_runtimes candidate_key with
+                        | Some prev when Authz_types.Integration_id.equal prev.integration_id integration_id ->
+                          preserve_candidate [ prev.runtime ] built
+                        | Some _ | None -> built
+                      in
+                      let entry = { integration_id; runtime } in
+                      let current_entries =
+                        match Hashtbl.find_opt person_runtimes version_key with
+                        | Some entries -> List.remove_assoc id entries
+                        | None -> []
+                      in
+                      Hashtbl.replace person_runtimes version_key ((id, entry) :: current_entries);
+                      Hashtbl.replace previous_person_runtimes candidate_key entry;
+                      Some runtime)
+;;
+
+let lookup_or_build_person_runtime ~zone ~base_path (state : loaded_state) (id : string) =
+  match Authz_zone.read zone with
+  | Error (_ : Authz_zone.uncertain) -> None
+  | Ok trusted -> lookup_person_runtime_in_trusted ~base_path state trusted id
 ;;
 
 type librarian_lane_kind =
@@ -1163,6 +1378,8 @@ let set_loaded
   (* Before the runtimes are published, so a request on a new runtime is
      admitted under the account allowance it was configured with. *)
   Llm_provider.Provider_admission.publish loaded.admission_allowances;
+  let source_config_version = Atomic.fetch_and_add source_config_version_counter 1 + 1 in
+  prune_stale_person_runtimes ~keep_version:source_config_version;
   publish_loaded_state
     { default_runtime = Some rt
     ; default_route = Some loaded.default_route
@@ -1177,6 +1394,7 @@ let set_loaded
     ; lsp_servers = loaded.lsp_servers
     ; config_path = Some config_path
     ; source_config = Some loaded.source_config
+    ; source_config_version
     ; startup_degradation
     ; exact_slots =
         exact_slot_degradation_of
@@ -1474,40 +1692,62 @@ let init_default_degraded_observation (observation : config_observation) =
   |> initialize_degraded_loaded ~config_path:observation.path
 ;;
 
+let is_multi_account () = Runtime_account_access.is_multi_account ()
 let runtime_state () = Atomic.get loaded_state_ref
 let browser_configuration () = (runtime_state ()).browser
 let machine_configuration () = (runtime_state ()).machines
 let media_reader_declarations () = (runtime_state ()).media_readers
 let source_config () = (runtime_state ()).source_config
 
-let get_default_runtime () = (runtime_state ()).default_runtime
-let get_runtimes () = (runtime_state ()).runtimes
+let get_default_runtime () =
+  if is_multi_account () then None else (runtime_state ()).default_runtime
+;;
+
+let get_runtimes () =
+  if is_multi_account () then [] else (runtime_state ()).runtimes
+;;
 
 let get_default_route_and_runtimes () =
-  let state = runtime_state () in
-  let route = match state.default_route with
-    | Some _ as route -> route
-    | None -> Option.map (fun (runtime : t) -> runtime.id) state.default_runtime in
-  route, state.default_runtime, state.runtimes
-let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
+  if is_multi_account ()
+  then None, None, []
+  else
+    let state = runtime_state () in
+    let route = match state.default_route with
+      | Some _ as route -> route
+      | None -> Option.map (fun (runtime : t) -> runtime.id) state.default_runtime in
+    route, state.default_runtime, state.runtimes
+;;
+
+let get_runtime_ids () =
+  if is_multi_account () then [] else runtime_ids (runtime_state ()).runtimes
+;;
 let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
 let exact_slot_degradation () = (runtime_state ()).exact_slots
 let exact_slot_body_deadline_gaps () = (exact_slot_degradation ()).gaps
 
+let default_route_disabled_in_multi_account () =
+  failwith
+    "Runtime: default route fallback is disabled in multi-account mode \
+     (RFC a-persons-keeper-runs-on-the-engine)"
+;;
+
 let default_runtime_id_or_fail () =
-  match (runtime_state ()).default_runtime with
-  | Some rt -> rt.id
-  | None when Runtime_startup_state.requires_setup () ->
-    let message = match Runtime_startup_state.get () with
-      | Setup_required reason -> Runtime_startup_state.message reason
-      | Not_initialized | Available -> "Model setup required"
-    in
-    failwith message
-  | None ->
-    failwith
-      "Runtime.get_default_runtime_id: default runtime not initialized; \
-       Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
+  if is_multi_account ()
+  then default_route_disabled_in_multi_account ()
+  else
+    match (runtime_state ()).default_runtime with
+    | Some rt -> rt.id
+    | None when Runtime_startup_state.requires_setup () ->
+      let message = match Runtime_startup_state.get () with
+        | Setup_required reason -> Runtime_startup_state.message reason
+        | Not_initialized | Available -> "Model setup required"
+      in
+      failwith message
+    | None ->
+      failwith
+        "Runtime.get_default_runtime_id: default runtime not initialized; \
+         Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
 ;;
 
 (* The route [\[runtime\].default] names, as the file writes it: a declared
@@ -1518,26 +1758,46 @@ let default_runtime_id_or_fail () =
    naming a model wants. The two were one value while the default could only
    name a runtime. *)
 let get_default_route () =
-  match (runtime_state ()).default_route with
-  | Some route -> route
-  | None -> default_runtime_id_or_fail ()
+  if is_multi_account ()
+  then default_route_disabled_in_multi_account ()
+  else
+    match (runtime_state ()).default_route with
+    | Some route -> route
+    | None -> default_runtime_id_or_fail ()
 ;;
 
 let runtimes_and_media_failover () =
   let state = runtime_state () in
-  state.runtimes, state.media_failover
+  if is_multi_account ()
+  then [], []
+  else state.runtimes, state.media_failover
 ;;
 
 (* Keeper-to-runtime assignment is sourced from [[runtime.assignments]] in
-   runtime.toml, not from keeper TOML. [None] = no explicit assignment; the caller falls back to
-   {!get_default_route}. The returned id is opaque (masc never parses it;
-   only the AGENT_CORE adapter resolves it to provider/model/spec). Reads
-   the immutable loaded-state assignment snapshot. *)
+   runtime.toml in single-user mode, and from the authorization log in
+   multi-account mode (never falling back to operator defaults). [None] = no
+   explicit assignment; single-user callers fall back to {!get_default_route},
+   multi-account callers fail closed. The returned id is opaque (masc never
+   parses it; only the AGENT_CORE adapter resolves it to
+   provider/model/spec). *)
 let runtime_id_for_keeper (keeper_name : string) : string option =
-  List.assoc_opt keeper_name (runtime_state ()).keeper_assignments
+  match Runtime_account_access.current () with
+  | Some (Runtime_account_access.Multi_account { zone; base_path = _; now = _ }) ->
+    (match Authz_zone.read zone with
+     | Error (_ : Authz_zone.uncertain) -> None
+     | Ok trusted ->
+       let authz = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+       (match Authz_keeper_state.find_by_engine_name authz.Authz_state.keepers keeper_name with
+        | Some (_owner, _keeper_id, keeper) ->
+          Option.map Authz_types.Runtime_id.to_string keeper.Authz_keeper_state.runtime
+        | None -> None))
+  | Some (Runtime_account_access.Single_user _) | None ->
+    List.assoc_opt keeper_name (runtime_state ()).keeper_assignments
 ;;
 
-let keeper_assignments () = (runtime_state ()).keeper_assignments
+let keeper_assignments () =
+  if is_multi_account () then [] else (runtime_state ()).keeper_assignments
+;;
 
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
@@ -1548,11 +1808,19 @@ type dashboard_runtime_defaults_snapshot =
 
 let dashboard_runtime_defaults_snapshot () =
   let state = runtime_state () in
-  { default_runtime = state.default_runtime
-  ; runtimes = state.runtimes
-  ; media_failover = state.media_failover
-  ; config_path = state.config_path
-  }
+  if is_multi_account ()
+  then
+    { default_runtime = None
+    ; runtimes = []
+    ; media_failover = []
+    ; config_path = state.config_path
+    }
+  else
+    { default_runtime = state.default_runtime
+    ; runtimes = state.runtimes
+    ; media_failover = state.media_failover
+    ; config_path = state.config_path
+    }
 ;;
 
 (* Admitted [verifier_exact] slot ids in frozen declaration order from the
@@ -1832,17 +2100,26 @@ let lsp_servers () : Lsp_process_manager.language -> string * string list =
     | None -> Lsp_process_manager.command_of_language language
 
 let get_lane_by_id (id : string) : Runtime_lane.t option =
-  List.find_opt (fun (lane : Runtime_lane.t) -> String.equal lane.id id)
-    (runtime_state ()).lanes
+  if is_multi_account ()
+  then None
+  else
+    List.find_opt (fun (lane : Runtime_lane.t) -> String.equal lane.id id)
+      (runtime_state ()).lanes
 ;;
 
 (* Resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the requested runtime assignment (or the
    default) instead of unconditionally the default; an
    unknown id returns [None] so the driver fails fast (no silent substitution —
-   RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
+   RFC-0206 §2.1).  In multi-account mode, reads the person side-table rather
+   than operator runtime tables. *)
 let get_runtime_by_id (id : string) : t option =
-  List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
+  let state = runtime_state () in
+  match Runtime_account_access.current () with
+  | Some (Runtime_account_access.Multi_account { zone; base_path; now = _ }) ->
+    lookup_or_build_person_runtime ~zone ~base_path state id
+  | Some (Runtime_account_access.Single_user _) | None ->
+    List.find_opt (fun (rt : t) -> String.equal rt.id id) state.runtimes
 ;;
 
 let verifier_exact_slot_admission ~candidate_kind ~runtime_id =
@@ -1867,17 +2144,23 @@ let is_local_runtime_id (id : string) : bool option =
    [Unavailable] retains a configured ID whose capability catalog entry is
    absent; [Missing] means no configured lane or runtime has that ID. *)
 let resolve_assignment_in (state : loaded_state) (assigned_id : string) =
-  match find_declared_lane state.lanes assigned_id with
-  | Some lane -> `Lane lane
-  | None ->
-    (match List.find_opt (fun (runtime : t) -> String.equal runtime.id assigned_id) state.runtimes with
+  match Runtime_account_access.current () with
+  | Some (Runtime_account_access.Multi_account { zone; base_path; now = _ }) ->
+    (match lookup_or_build_person_runtime ~zone ~base_path state assigned_id with
      | Some runtime -> `Lane (Runtime_lane.make ~id:runtime.id [ runtime.id ])
+     | None -> `Missing)
+  | Some (Runtime_account_access.Single_user _) | None ->
+    (match find_declared_lane state.lanes assigned_id with
+     | Some lane -> `Lane lane
      | None ->
-       (match Option.bind state.startup_degradation (fun degradation ->
-          List.find_opt (fun (missing : missing_catalog_model) ->
-            String.equal missing.runtime_id assigned_id) degradation.report.missing_models) with
-        | Some missing -> `Unavailable missing
-        | None -> `Missing))
+       (match List.find_opt (fun (runtime : t) -> String.equal runtime.id assigned_id) state.runtimes with
+        | Some runtime -> `Lane (Runtime_lane.make ~id:runtime.id [ runtime.id ])
+        | None ->
+          (match Option.bind state.startup_degradation (fun degradation ->
+             List.find_opt (fun (missing : missing_catalog_model) ->
+               String.equal missing.runtime_id assigned_id) degradation.report.missing_models) with
+           | Some missing -> `Unavailable missing
+           | None -> `Missing)))
 ;;
 
 let resolve_assignment (assigned_id : string) =
@@ -1899,16 +2182,29 @@ type dashboard_runtime_resolved_snapshot =
 
 let dashboard_runtime_resolved_snapshot () =
   let state = runtime_state () in
-  { rs_default_route = state.default_route
-  ; rs_default_runtime = state.default_runtime
-  ; rs_runtimes = state.runtimes
-  ; rs_assignments = state.keeper_assignments
-  ; rs_lanes = state.lanes
-  ; rs_media_failover = state.media_failover
-  ; rs_declared_media_failover = state.declared_media_failover
-  ; rs_config_path = state.config_path
-  ; rs_resolve_assignment = resolve_assignment_in state
-  }
+  if is_multi_account ()
+  then
+    { rs_default_route = None
+    ; rs_default_runtime = None
+    ; rs_runtimes = []
+    ; rs_assignments = []
+    ; rs_lanes = []
+    ; rs_media_failover = []
+    ; rs_declared_media_failover = []
+    ; rs_config_path = state.config_path
+    ; rs_resolve_assignment = resolve_assignment_in state
+    }
+  else
+    { rs_default_route = state.default_route
+    ; rs_default_runtime = state.default_runtime
+    ; rs_runtimes = state.runtimes
+    ; rs_assignments = state.keeper_assignments
+    ; rs_lanes = state.lanes
+    ; rs_media_failover = state.media_failover
+    ; rs_declared_media_failover = state.declared_media_failover
+    ; rs_config_path = state.config_path
+    ; rs_resolve_assignment = resolve_assignment_in state
+    }
 ;;
 
 type keeper_dispatch_snapshot =
@@ -1918,22 +2214,41 @@ type keeper_dispatch_snapshot =
 
 let keeper_dispatch_snapshot ~keeper_name =
   let state = runtime_state () in
-  let route =
-    match List.assoc_opt keeper_name state.keeper_assignments with
-    | Some route -> Some route
-    | None -> state.default_route
-  in
-  let candidates =
-    match Option.map (resolve_assignment_in state) route with
-    | Some (`Lane lane) ->
-      Runtime_lane.ordered_candidates lane
-      |> List.map (fun id ->
-        id,
-        Option.map (fun (runtime : t) -> runtime.candidate_backpressure)
-          (List.find_opt (fun (runtime : t) -> String.equal runtime.id id) state.runtimes))
-    | Some (`Unavailable _ | `Missing) | None -> []
-  in
-  { route; candidates }
+  match Runtime_account_access.current () with
+  | Some (Runtime_account_access.Multi_account { zone; base_path; now = _ }) ->
+    (match Authz_zone.read zone with
+     | Error (_ : Authz_zone.uncertain) -> { route = None; candidates = [] }
+     | Ok trusted ->
+       let authz = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+       let route =
+         match Authz_keeper_state.find_by_engine_name authz.Authz_state.keepers keeper_name with
+         | Some (_owner, _keeper_id, keeper) ->
+           Option.map Authz_types.Runtime_id.to_string keeper.Authz_keeper_state.runtime
+         | None -> None
+       in
+       let candidates =
+         match Option.bind route (lookup_person_runtime_in_trusted ~base_path state trusted) with
+         | Some runtime -> [ runtime.id, Some runtime.candidate_backpressure ]
+         | None -> []
+       in
+       { route; candidates })
+  | Some (Runtime_account_access.Single_user _) | None ->
+    let route =
+      match List.assoc_opt keeper_name state.keeper_assignments with
+      | Some route -> Some route
+      | None -> state.default_route
+    in
+    let candidates =
+      match Option.map (resolve_assignment_in state) route with
+      | Some (`Lane lane) ->
+        Runtime_lane.ordered_candidates lane
+        |> List.map (fun id ->
+          id,
+          Option.map (fun (runtime : t) -> runtime.candidate_backpressure)
+            (List.find_opt (fun (runtime : t) -> String.equal runtime.id id) state.runtimes))
+      | Some (`Unavailable _ | `Missing) | None -> []
+    in
+    { route; candidates }
 ;;
 
 let same_keeper_dispatch left right =
@@ -3280,11 +3595,22 @@ let validate_config_text ?runtime_config_path content =
 ;;
 
 module For_testing = struct
-  type snapshot = loaded_state
+  type snapshot =
+    { loaded_state : loaded_state
+    ; person_side_table : person_side_table_snapshot
+    }
   (* TEL-OK: this module only exposes pure state and validation test helpers. *)
 
-  let snapshot () = runtime_state ()
-  let restore snapshot = publish_loaded_state snapshot
+  let snapshot () =
+    { loaded_state = runtime_state ()
+    ; person_side_table = snapshot_person_side_table ()
+    }
+  ;;
+
+  let restore snapshot =
+    restore_person_side_table snapshot.person_side_table;
+    publish_loaded_state snapshot.loaded_state
+  ;;
   let with_config_lock_observed_with_release_failure ~release_failure ~runtime_config_path action =
     with_runtime_config_write_lock_using
       (File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure ~release_failure)

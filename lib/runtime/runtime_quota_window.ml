@@ -225,6 +225,11 @@ let scope_equal left right =
     | Official_client_home _), _ -> false
 ;;
 
+let official_client_home = function
+  | Official_client_home (_client, home) -> Some home
+  | Provider_row _ | Credential_env _ | Credential_file _ -> None
+;;
+
 let official_client_scope ~client ~env_name ~default_subdir account_home =
   let selected =
     match account_home with

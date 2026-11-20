@@ -539,6 +539,11 @@ module For_testing : sig
 
 end
 
+val is_multi_account : unit -> bool
+(** Whether {!Runtime_account_access} published multi-account mode. In
+    multi-account mode, Keeper/Runtime lookup reads the person side-table and
+    authorization log rather than operator runtime tables or default routes. *)
+
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 
@@ -560,7 +565,8 @@ val await_config_text_change : after:int -> int
 
 val get_default_route_and_runtimes : unit -> string option * t option * t list
 (** The configured default route, its entry runtime and the runtime list from
-    one read of the loaded state. [None] means no default is initialized. *)
+    one read of the loaded state. [None] means no default is initialized, or
+    the process is in multi-account mode where default fallback is disabled. *)
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool
@@ -591,13 +597,19 @@ val runtimes_and_media_failover : unit -> t list * string list
     separate reads. *)
 
 val runtime_id_for_keeper : string -> string option
-(** [runtime_id_for_keeper keeper_name] is the route [keeper_name] is assigned
-    in [\[runtime.assignments\]] (runtime.toml SSOT) — a declared lane name or a
-    runtime id — or [None] when no explicit assignment exists (caller falls back
-    to {!get_default_route}). It is a routing label, not necessarily a
-    materialized binding: pass it to {!resolve_assignment} to walk the lane, or
-    to {!entry_runtime_id_of_route} for the binding the turn opens first. The id is opaque (only the AGENT_CORE adapter parses
-    it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
+(** [runtime_id_for_keeper keeper_name] is the route [keeper_name] is assigned.
+    In single-user mode it reads [\[runtime.assignments\]] (runtime.toml SSOT) —
+    a declared lane name or a runtime id — or [None] when no explicit assignment
+    exists (caller falls back to {!get_default_route}).
+    In multi-account mode it reads {!Authz_keeper_state.find_by_engine_name} for
+    [keeper_name] and returns its explicitly assigned Runtime id, or [None] when
+    the authorization zone is uncertain, no such Keeper exists, or the Keeper
+    has no assigned Runtime (never falling back to operator defaults). It is a
+    routing label, not necessarily a materialized binding: pass it to
+    {!resolve_assignment} to walk the lane, or to
+    {!entry_runtime_id_of_route} for the binding the turn opens first. The id
+    is opaque (only the AGENT_CORE adapter parses it). Keeper-to-runtime
+    assignment is not sourced from keeper TOML. *)
 
 val keeper_assignments : unit -> (string * string) list
 (** Snapshot of explicit [keeper_name -> runtime_id] assignments loaded from
@@ -893,13 +905,14 @@ val get_default_route : unit -> string
     {!resolve_assignment} like any assignment, so the default walks a lane's
     candidates whenever it names one. {!get_default_runtime_id} answers with
     the runtime that route enters on. Raises when no runtime is loaded, like
-    {!get_default_runtime_id}. *)
+    {!get_default_runtime_id}, or in multi-account mode where default-route
+    fallback is disabled. *)
 
 val get_default_runtime_id : unit -> string
 (** The runtime binding where the current default route enters: the route
     itself may be a lane name, which {!get_default_route} returns instead.
-    @raise Failure if {!init_default} has not run. No silent fallback:
-    an unresolved default is a startup-ordering bug, not a
+    @raise Failure if {!init_default} has not run or in multi-account mode. No
+    silent fallback: an unresolved default is a startup-ordering bug, not a
     recoverable condition. Callers must invoke this at runtime, never as a
     module-level [let] binding (would crash config-less test binaries). *)
 

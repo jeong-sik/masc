@@ -61,6 +61,16 @@ let same_account_selection left right =
     , _ -> false
 ;;
 
+let is_person_execution = function
+  | Claude_code { account_home; _ } -> Runtime_account_access.is_person_sealed account_home
+  | Codex_app_server { account_home; _ } -> Runtime_account_access.is_person_sealed account_home
+  | Muse_serve { account_home; _ } ->
+    Runtime_account_access.is_person_home
+      (Runtime_account_access.muse_home_path account_home)
+  | Agent_core sealed -> Runtime_account_access.is_person_api sealed
+  | Antigravity_cli _ | Vibe_cli _ -> false
+;;
+
 type checkpoint_owner =
   | Masc_agent_core
   | Official_client

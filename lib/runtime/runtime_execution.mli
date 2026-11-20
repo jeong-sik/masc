@@ -70,6 +70,10 @@ val same_account_selection : t -> t -> bool
 (** Compare captured official-client contexts without exposing credentials.
     Other same-kind execution owners retain their existing binding comparison. *)
 
+val is_person_execution : t -> bool
+(** Whether this execution owner targets a person's account rather than an
+    operator/host account. *)
+
 type checkpoint_owner =
   | Masc_agent_core
   | Official_client

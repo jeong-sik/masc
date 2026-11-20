@@ -31,7 +31,10 @@ let load_owned ~operation_id ~session_dir ~session_id =
 let current_assignment keeper_name =
   match Runtime.runtime_id_for_keeper keeper_name with
   | Some assignment -> assignment
-  | None -> Runtime.get_default_route ()
+  | None ->
+    if Runtime.is_multi_account ()
+    then ""
+    else Runtime.get_default_route ()
 
 let rebase_retry ~keeper_name (retry : Semantic.runtime_retry) =
   let assignment_id = current_assignment keeper_name in
@@ -210,6 +213,7 @@ let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispat
     |> owner_result |> Result.map (fun _ -> ())
 
 module For_testing = struct
+  let current_assignment = current_assignment
   let validate_scope = validate_scope
   let retry_not_before = retry_not_before
   let retry_wait = retry_wait

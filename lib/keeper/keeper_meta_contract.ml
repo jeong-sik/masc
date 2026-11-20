@@ -370,8 +370,11 @@ let runtime_route_of_keeper_name keeper_name =
   match Runtime.runtime_id_for_keeper keeper_name with
   | Some runtime_id when String.trim runtime_id <> "" -> Some (String.trim runtime_id)
   | Some _ | None ->
-    let route, _, _ = Runtime.get_default_route_and_runtimes () in
-    route
+    if Runtime.is_multi_account ()
+    then None
+    else
+      let route, _, _ = Runtime.get_default_route_and_runtimes () in
+      route
 ;;
 
 let runtime_id_of_meta (meta : keeper_meta) =
@@ -382,7 +385,10 @@ let runtime_id_of_meta (meta : keeper_meta) =
   (* The route, not the runtime it enters on: [\[runtime\].default] may name a
      declared lane, and a keeper with no assignment walks that lane's
      candidates the same way an assigned one does. *)
-  | Some _ | None -> Runtime.get_default_route ()
+  | Some _ | None ->
+    if Runtime.is_multi_account ()
+    then ""
+    else Runtime.get_default_route ()
 ;;
 
 let proactive_cycle_outcome_to_string = function

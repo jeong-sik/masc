@@ -1773,7 +1773,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                  (* Without a typed quota detail, modelError gives free text and retryable. The
                     account's typed usage/read can identify a spent window;
                     never infer it from the error sentence or replay this turn. *)
-                 (match model_input_refusal_of_error error with
+                 (if Runtime_provider_usage_window.is_person_or_multi_account_scope quota_scope
+                  then None
+                  else match model_input_refusal_of_error error with
                   | Some Turn_record.Model_error_not_retryable ->
                     (* This answer can mark the range it refused, and a spent
                        window is the one cause the mark must not cover. The

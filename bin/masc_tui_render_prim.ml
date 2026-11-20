@@ -1667,14 +1667,14 @@ let file_change_evidence_label ~ko = function
         { occurrence_count; occurrences = None }) ->
     Some
       (Printf.sprintf
-         (if ko then "%d건 일치 · 범위 생략" else "%d matches; ranges omitted")
-         occurrence_count)
+         (if ko then "%s건 일치 · 범위 생략" else "%s matches; ranges omitted")
+         (Masc_tui_value.Count.grouped occurrence_count))
   | Some
       (Masc.Keeper_file_change_evidence.Edited
         { occurrence_count; occurrences = Some occurrences }) ->
     (match occurrences with
      | [] ->
-       Some (Printf.sprintf (if ko then "%d건 일치" else "%d matches") occurrence_count)
+       Some (Printf.sprintf (if ko then "%s건 일치" else "%s matches") (Masc_tui_value.Count.grouped occurrence_count))
      | first :: _ ->
        let old_range = file_change_range_label first.old_range in
        let changed =
@@ -6154,9 +6154,9 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
           else
             context_wrapped_lines ~cols ~style:(Theme.warn ())
               (Printf.sprintf
-                 (if ko then "턴 #%d 기준 측정 (위 최신 수치보다 %d턴 이전)."
-                  else "Measured on turn #%d, %d turns before the readings above.")
-                 attributed.Turn_record.absolute_turn turns_behind_latest)
+                 (if ko then "턴 #%d 기준 측정 (위 최신 수치보다 %s턴 이전)."
+                  else "Measured on turn #%d, %s turns before the readings above.")
+                 attributed.Turn_record.absolute_turn (Masc_tui_value.Count.grouped turns_behind_latest))
         in
         let ranked =
           List.stable_sort
@@ -6481,11 +6481,11 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
           spark_row
           @ wrapped recede
               (Printf.sprintf
-                 (if ko then "오래된 순 → 최신 · 전체 %d턴 중 실측 %d, 추정 %d · %s%s."
-                  else "Oldest to newest; %d measured and %d estimated of %d turns; %s%s.")
-                 (if ko then List.length inputs else trend.Inspector.measured_count)
-                 (if ko then trend.Inspector.measured_count else trend.Inspector.estimate_count)
-                 (if ko then trend.Inspector.estimate_count else List.length inputs)
+                 (if ko then "오래된 순 → 최신 · 전체 %s턴 중 실측 %s, 추정 %s · %s%s."
+                  else "Oldest to newest; %s measured and %s estimated of %s turns; %s%s.")
+                 (Masc_tui_value.Count.grouped (if ko then List.length inputs else trend.Inspector.measured_count))
+                 (Masc_tui_value.Count.grouped (if ko then trend.Inspector.measured_count else trend.Inspector.estimate_count))
+                 (Masc_tui_value.Count.grouped (if ko then trend.Inspector.estimate_count else List.length inputs))
                  scale_range
                  (if legends = [] then "" else " · " ^ String.concat " · " legends))
           @ wrapped recede
@@ -6498,9 +6498,9 @@ let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~co
       | _ :: _, Some count ->
           wrapped (Theme.warn ())
             (Printf.sprintf
-               (if ko then "이 페이지에서 읽을 수 없는 기록 %d건이 생략되었습니다 (위치 미상)."
-                else "Source omitted %d unreadable records on this page; their positions are unknown.")
-               count)
+               (if ko then "이 페이지에서 읽을 수 없는 기록 %s건이 생략되었습니다 (위치 미상)."
+                else "Source omitted %s unreadable records on this page; their positions are unknown.")
+               (Masc_tui_value.Count.grouped count))
       | _ :: _, None ->
           wrapped recede
             (say "생략된 기록 수를 알 수 없어 페이지 완전성을 확인할 수 없습니다."
@@ -6775,8 +6775,8 @@ let context_exact_input_summary ~ko ~width ~scale
           ~title:(say "종류별 구성" "BY KIND")
           ~caption:
             (if ko then
-               Printf.sprintf "총 %d개 항목 · %s tok (%s) 보존"
-                 (List.length items)
+               Printf.sprintf "총 %s개 항목 · %s tok (%s) 보존"
+                 (Masc_tui_value.Count.grouped (List.length items))
                  (Masc_tui_token_scale.format_estimate scale total)
                  (Masc_tui_context_inspector.exact_bytes total)
              else
@@ -6924,7 +6924,7 @@ let context_response_summary ~ko observation =
           (0, 0) parts in
       let failure =
         if failures = 0 then ""
-        else Printf.sprintf (if ko then " · 요청 실패 %d건" else " · %d request failures") failures
+        else Printf.sprintf (if ko then " · 요청 실패 %s건" else " · %s request failures") (Masc_tui_value.Count.grouped failures)
       in
       let style = if failures = 0 then recede else Theme.bad () in
       "  "

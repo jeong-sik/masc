@@ -1,5 +1,51 @@
 ## [Unreleased]
 
+## [0.77.0] - 2026-11-20
+
+### 요약
+
+- 긴 답을 그리는 TUI 경로를 프레임 단위로 다시 세웠습니다. 1 MB 답의 한 프레임이 약 400 ms 에서 약 6 ms 로 줄고, 스크롤·`/find`·링크 카드도 같은 원칙으로 다시 그리지 않게 했습니다(#53977, #54005, #54043, #54080, #54096, #54140, #54143, #54164).
+- Keeper 의 사람(person) 런타임 쪽을 일급으로 세웠습니다. 사람별 side-table, `Person_keeper_turn`, `source.v3` 큐 페이로드, 타입이 붙은 거절 사유 enum 이 함께 들어갑니다(#53911, #53912, #53913).
+- 큐에 쌓인 Keeper 채팅 작업은 `source.v3` 페이로드를 요구합니다. `source.v2` 봉투는 거절되므로 큐 저장소를 새로 시작해야 합니다.
+- 사용량·캐시·비용 계산을 `llama-server`·OpenRouter BYOK·Gemini 세 경로에서 맞췄고, OpenRouter·xAI 의 프롬프트 캐시 자리도 다시 잡았습니다(#54108, #54117, #54122).
+- 이번 창에는 문서 주석에서 지운 RFC 인용을 걷어낸 정리 커밋 19건이 함께 들어갑니다.
+
+### Fresh state required
+
+- Queued Keeper chat operations now require `source.v3` payloads (`source.v2` envelopes are rejected; start with a fresh queued operation store) (#53912).
+
+### Added
+
+- Add the runtime person side-table keyed by `(provider_account_id, source_config snapshot)`, preserve `candidate_backpressure` per `(provider_account_id, runtime_id)` across reloads, ensure person account home directories exist on resolution, isolate person runtimes from operator usage writes and quota lists, and add `test_runtime_person_side_table` (#53911).
+- Add `Person_keeper_turn` to `Keeper_turn_driver.walk_owner`, carry optional `person_caller` (`user_id`, `stored_scope`) in `Keeper_chat_operation_payload` `source.v3`, enforce closed exhaustive channel gating in `Keeper_agent_run`, and add `test_keeper_person_turn_seams` (#53912).
+- Add typed `Keeper_account_refusal`, `Keeper_provider_refusal`, and `Keeper_request_failure.Failure_kind` enums preserving `Not_signed_in`, `Key_refused`, `Key_unusable`, `No_quota`, `Silent`, `Not_started`, `Configuration_refused`, `Turn_refused`, `Runtime_reassigned`, `Server_unavailable`, `Cancelled`, `No_visible_reply`, and `No_answer` across runtime, driver, stream, and chat persistence (#53913).
+- OpenRouter `anthropic/claude-*` pre-`System_context` block `cache_control` breakpoint placement (omitting top-level `cache_control` so ephemeral trailing `System_context` bills at 1.0x plain input) and OpenRouter `openai/gpt-5.6-{sol,terra,luna}` / `openai/gpt-6-astra` 1-shot explicit cache opt-out and pre-`System_context` `prompt_cache_breakpoint` (`#54108`, relates `#53917`).
+- Direct xAI provider `cache_session_header = "x-grok-conv-id"` declaration in `packages/agent_core/models.toml` for per-conversation prompt-cache routing affinity (`#54122`, relates `#53917`).
+
+### Changed
+
+- Route `runtime_id_for_keeper`, `get_runtime_by_id`, `resolve_assignment_in`, and `keeper_dispatch_snapshot` through `Authz_keeper_state.find_by_engine_name` and `Runtime_account_runtime.of_person_template`, and disable default/fallback route resolution when `Runtime_account_access` is `Multi_account _` (#53911).
+- Check PAT validity at operation admission and re-verify owner/Active/assignment/`stored_scope` per attempt, prevent `Keeper_chat_operation_batch` from coalescing across different callers or `stored_scope`s, and acquire `Runtime_account_call.call_in_turn_of` before `authorize_account` while propagating `Eio.Cancel.Cancelled` (#53912).
+- Preserve typed `failure_kind` and `turn_ref` on `Keeper_turn.Turn_failed`, `Server_keeper_operation_transcript`, `Server_routes_http_keeper_stream`, `Keeper_chat_failure_projection`, and persisted `Request_failure` rows (legacy rows without `failure_kind` remain readable as `None`), and scrub server filesystem paths and credentials from failure summaries and rows via `Keeper_request_failure.sanitize_person_text` (#53913).
+
+### Fixed
+
+- The first frame of a very long reply stalls less: the table that maps each byte to its row is built only when a scroll position is restored (#53977).
+- A streaming long reply no longer draws the whole reply again on every frame: one frame of a 300 KB reply goes from about 400 ms to about 6 ms (#54005).
+- `/find` no longer freezes the screen on a conversation with a long reply: candidates are drawn on a worker domain, so a 1 MB reply holds the UI for about 20 ms instead of about 450 ms (#54043).
+- Opening a long reply draws its first screen without drawing the whole reply again (about 1.4 s to about 0.15 s for a 1 MB reply), and the first scroll back through it no longer stalls (about 1.5 s to about 0.12 s). A streaming reply paused between paragraphs no longer draws the whole reply again (#54080).
+- Preserve right-aligned trailing column headers when `Masc_tui_table.header_row_with_dropped` drops columns by placing the dropped-columns badge inside left-aligned column slack whenever `used_width <= inner_width` (falling back to header trimming when overflowing), and add directional sort indicators (`↓`/`↑`) to the Planning Goals and Memory Overview compact table headers (#54094).
+- Replace stateless cursor-derived list scroll offsets with sticky viewport scrolling (`List_window_scroll`) across Schedules, Approvals, Fusion, Config Themes, Workspace Activity, and the Code file tree, preserving mouse-wheel cursor stepping and resetting scroll cleanly on page, scope, directory, and workspace transitions (#54095).
+- A frame where nothing changed no longer lays out a long reply again (about 55 ms to about 0.1 ms per frame for a 1 MB reply), and a streaming reply lays out only the rows its new text adds (#54096).
+- TUI writes a play invite with no expiry as the no-value mark instead of "expiry not recorded", since a credential without an expiry never expires (#54115)
+- Wire usage, cache-hit, and cost accounting across `llama-server` (`timings.cache_n` sync & split-chunk SSE backfill bounded by `prompt_tokens`), OpenRouter BYOK (`is_byok` + `cost_details.upstream_inference_cost`), and Gemini (`usageMetadata.thoughtsTokenCount` folded into inclusive `output_tokens` and `reasoning_tokens` telemetry across sync & SSE) (`#54117`, relates `#53917`).
+- TUI writes the server's commit age on the shared duration ladder, so it no longer rounds up to "60m" or "24h" and keeps the minutes of an hour and a half (#54119)
+- TUI writes a failed Fusion judge's run time, the Librarian preflight's JEV time and the repository activity window on the shared duration ladders, so they no longer read "(125s)", "1.234s" or "Last 24h" (#54124)
+- Drawing a long reply checks each Markdown line for a table without copying the line or raising an exception (about 55 ms to about 51 ms of Markdown work for a 1 MB reply) (#54140).
+- Drawing a long reply finds bare URLs by jumping between candidate bytes, and a row without a URL is no longer copied (about 9 ms to about 3.5 ms for a 1 MB reply) (#54143).
+- Goal screens print a quantity target as the value the ledger holds: 1048576 bytes no longer reads as 1.04858e+06 bytes on the confirmation screen (#54155).
+- A frame where nothing changed no longer builds the link cards of a long finished reply again: with #53935, a 1 MB reply with about 13,000 links goes from about 93 ms to about 0.1 ms per frame (#54164).
+
 ## [0.76.0] - 2026-11-20
 
 ### 요약

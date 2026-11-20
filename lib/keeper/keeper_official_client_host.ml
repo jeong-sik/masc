@@ -282,12 +282,10 @@ type carried_start =
 
 type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
-let project_source ~input_source ~unread source_projection messages =
-  let result=match source_projection with None -> Ok messages | Some project -> project messages in
-  match input_source with
-  | Keeper_request_source.Completion_review -> result
-  | Keeper_request_source.Keeper_history _ ->
-    Result.map (Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System unread) result
+let project_source source_projection messages =
+  match source_projection with
+  | None -> Ok messages
+  | Some project -> project messages
 
 type librarian_front_reader =
   Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
@@ -474,7 +472,6 @@ let carried_start_range_on_source
     | Some (accepted, _) -> max accepted first
     | None -> first
   in
-  let absorbed = librarian_front.Keeper_turn_driver_try_provider.point in
   (* RFC-librarian-lifecycle §4.10: the newest observation on this history is
      this runtime's own refusal of a range, so the next range opens strictly
      after where that one opened. Another runtime's refusal says nothing
@@ -482,7 +479,7 @@ let carried_start_range_on_source
      already names a range the refusal did not cover, and a held seed or a
      lane cut past it is already later. *)
   let librarian_end_atom =
-    match absorbed with
+    match librarian_front with
     | Keeper_turn_driver_try_provider.Librarian_snapshot
         (snapshot : Librarian_continuity_snapshot.t) -> Some snapshot.end_atom
     | Keeper_turn_driver_try_provider.Librarian_progress { end_atom } -> Some end_atom
@@ -551,7 +548,7 @@ let carried_start_range_on_source
            Some (refused_first_atom, front)))
   in
   let plan =
-    match past_refused_start, absorbed with
+    match past_refused_start, librarian_front with
     | Some (first_atom, front), _ -> Plain (first_atom, front)
     | None, Keeper_turn_driver_try_provider.Librarian_snapshot
         (snapshot : Librarian_continuity_snapshot.t)
@@ -594,8 +591,6 @@ let carried_start_range_on_source
       , Librarian_snapshot { absorbed_through; boundary_line } )
     | Plain (first_atom, front) -> messages, first_atom, front
   in
-  let carried_messages=Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System
-    librarian_front.Keeper_turn_driver_try_provider.unread carried_messages in
   (* The cut is the same for every front. The window's omission preamble
      goes in whenever the first kept atom cannot open a conversation, working
      state or not: the working state says what the atoms before the range
@@ -810,7 +805,7 @@ let has_accepted_empty_range (carried : carried_start) =
    request the position alone cannot carry is still refused, with the error
    of that composition. *)
 let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
-  match librarian_front.Keeper_turn_driver_try_provider.point with
+  match librarian_front with
   | Keeper_turn_driver_try_provider.Librarian_progress _
   | Keeper_turn_driver_try_provider.No_position -> compose librarian_front
   | Keeper_turn_driver_try_provider.Librarian_snapshot
@@ -829,8 +824,7 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
      | Ok _ | Error _ ->
        let* alone =
          compose
-           {librarian_front with Keeper_turn_driver_try_provider.point=
-             Keeper_turn_driver_try_provider.Librarian_progress {end_atom=snapshot.end_atom}}
+           (Keeper_turn_driver_try_provider.Librarian_progress {end_atom=snapshot.end_atom})
        in
        let leave_out reason =
          Log.Keeper.warn
@@ -978,10 +972,8 @@ let start_range_projection ~input_source ?argument_projection
   | Keeper_request_source.Keeper_history _ ->
   let* librarian_front = read_librarian_front librarian_front messages in
   let plan = plan_arguments argument_projection ~measure_message_bytes messages in
-  let attach messages = Keeper_librarian_request_unread.attach ~include_empty:true
-    ~role:Agent_core.Types.System librarian_front.Keeper_turn_driver_try_provider.unread messages in
-  let source_messages = attach messages in
-  let planned_messages = attach plan.messages in
+  let source_messages = messages in
+  let planned_messages = plan.messages in
   let _, history_atom_count = Runtime_model_input_tail_window.annotate source_messages in
   let observe_window projection =
     Option.iter
@@ -1088,8 +1080,7 @@ let carried_history_projection ~input_source
       (fun _ observed ~transmitted_bytes -> front := Some (observed,transmitted_bytes))
       on_carried_front)
     ~turn_start ~keeper_name ~runtime_id history_messages in
-  let* sent = project_source ~input_source
-    ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent in
+  let* sent = project_source source_projection sent in
   (* A refused custom projection returned no range. Publish the buffered
      raw-source observations only after the final transmitted copy exists. *)
   Option.iter (fun (front,transmitted_bytes) ->

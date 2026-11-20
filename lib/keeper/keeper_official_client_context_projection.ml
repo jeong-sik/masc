@@ -120,7 +120,6 @@ let working_state_message text =
 let is_composed_system_context (message : Agent_core.Types.message) =
   (message.origin = Agent_core.Types.System_context)
   || Runtime_model_input_tail_window.is_working_state message
-  || Runtime_model_input_tail_window.is_unread_context message
   || Keeper_client_tool_outbox.is_context_message message
 ;;
 
@@ -412,8 +411,6 @@ let block_body assembly = function
 let carried_of_message ~composed_context (message : Agent_core.Types.message) =
   if Keeper_official_task_reference.is_reference message
   then [ carried_message Session_store.Historical_task_reference message ]
-  else if Runtime_model_input_tail_window.is_unread_context message
-  then [ carried_message Session_store.Librarian_unread message ]
   else if Keeper_client_tool_outbox.is_context_message message
   then [ carried_message Session_store.Tool_result_receipts message ]
   else if Runtime_model_input_tail_window.is_working_state message
@@ -510,7 +507,6 @@ let carried_label = function
     "section_row:" ^ Keeper_context_layers.source_name section
   | Session_store.Context_carrier -> "carrier"
   | Session_store.Librarian_working_state -> "librarian_working_state"
-  | Session_store.Librarian_unread -> "librarian_unread"
   | Session_store.Historical_task_reference -> "historical_task_reference"
   | Session_store.Tool_result_receipts -> "tool_result_receipts"
   | Session_store.Codex_system_prompt -> "codex_system_prompt"
@@ -544,7 +540,6 @@ let is_block item =
      | Session_store.Context_section_row _
      | Session_store.Context_carrier
      | Session_store.Librarian_working_state
-     | Session_store.Librarian_unread
      | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
      | Session_store.Codex_system_prompt -> false)
 ;;
@@ -563,7 +558,7 @@ let block_id item = match item.held.Session_store.context with
   | Session_store.Context_block id -> Some id
   | Session_store.Context_section _ | Session_store.Context_section_row _
   | Session_store.Context_carrier
-  | Session_store.Librarian_working_state | Session_store.Librarian_unread
+  | Session_store.Librarian_working_state
   | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
   | Session_store.Codex_system_prompt -> None
 
@@ -634,7 +629,7 @@ let held_row_digests ~held section =
          when held_in = section -> Some row_sha256
        | Session_store.(
            Context_section_row _ | Context_block _ | Context_section _ | Context_carrier
-           | Librarian_working_state | Librarian_unread | Historical_task_reference
+           | Librarian_working_state | Historical_task_reference
            | Tool_result_receipts | Codex_system_prompt) -> None)
     held
 ;;
@@ -886,7 +881,6 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context
             | Constitution_amendments | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
             | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli)
       | Session_store.Librarian_working_state
-      | Session_store.Librarian_unread
       | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
       | Session_store.Codex_system_prompt ) -> false
     | Whole_text, previous_context ->
@@ -904,7 +898,6 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context
                | Session_store.Context_section_row _
                | Session_store.Context_carrier
                | Session_store.Librarian_working_state
-               | Session_store.Librarian_unread
                | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
                | Session_store.Codex_system_prompt ) as current_context)
             , (( Session_store.Context_block _
@@ -912,7 +905,6 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context
                | Session_store.Context_section_row _
                | Session_store.Context_carrier
                | Session_store.Librarian_working_state
-               | Session_store.Librarian_unread
                | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
                | Session_store.Codex_system_prompt ) as previous_context) ) ->
             current_context = previous_context)

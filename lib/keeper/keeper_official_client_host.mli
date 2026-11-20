@@ -500,15 +500,9 @@ type carried_start =
 type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
 val project_source :
-  input_source:Keeper_request_source.t ->
-  unread:Keeper_librarian_request_unread.t ->
   Keeper_history_projection.t option -> Keeper_history_projection.t
 (** Apply the caller's explicit source projection, preserving its errors.
-    [Completion_review] returns that view without adding or replacing Keeper
-    unread observations; without a projection the supplied evidence is exact.
-    [Keeper_history] preserves its frozen unread evidence after a custom view,
-    including known empty observations that supersede a resumed session's older
-    evidence. That Keeper carrier is also pinned before capacity measurement. *)
+    Without one the messages go as they are. *)
 
 type librarian_front_reader =
   Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result

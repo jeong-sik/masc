@@ -7776,5 +7776,6 @@
 (include stanzas/test_keeper_media_reading_outcome.inc)
 (include stanzas/test_keeper_media_reading_producer.inc)
 (include stanzas/test_tui_task_archive.inc)
+(include stanzas/test_tui_backlog_read.inc)
 (include stanzas/test_tui_tools_inventory_owed.inc)
 (include stanzas/test_tui_drawn_effect.inc)

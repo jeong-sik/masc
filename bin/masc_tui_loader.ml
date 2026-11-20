@@ -293,7 +293,7 @@ let load_active_tasks (base_path : string) :
     * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
-  match Workspace_backlog.read_backlog_observation_with_source_r config with
+  match Masc_tui_backlog_read.read config with
   | Error err ->
       report path err;
       let reason = "task backlog unavailable: " ^ err in

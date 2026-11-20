@@ -23,7 +23,7 @@ MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2(h2c 와 T
 
 - **httpun-eio** 기반 HTTP/1.1이 canonical transport. Eio direct-style async.
 - SSE는 per-session `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
-- HTTP/2는 `h2-eio` 기반이다. cleartext 리스너(8935)는 `MASC_USE_H2=auto|1|0`로 mode 를 고르고, 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다. TLS 리스너(8938, `transport.https_port`)는 ALPN 으로 h2 또는 http/1.1 을 고른다. 두 리스너와 두 프로토콜은 경로 표 하나(`Server_http_ingress` → `Router`)를 탄다(RFC-0512).
+- HTTP/2는 `h2-eio` 기반이다. cleartext 리스너(8935)는 `MASC_USE_H2=auto|1|0`로 mode 를 고르고, 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다. TLS 리스너(8938, `transport.https_port`)는 ALPN 으로 h2 또는 http/1.1 을 고른다. 두 리스너와 두 프로토콜은 경로 표 하나(`Server_http_ingress` → `Router`)를 탄다.
 - WebSocket은 기본 활성화(`MASC_WS_ENABLED=0`으로 비활성화), gRPC는 기본 비활성화(`MASC_GRPC_ENABLED=1`로 활성화)되는 보조 지원 트랜스포트다.
 - stdio 모드는 Claude Code 등 로컬 MCP 클라이언트의 표준 연결 방식.
 
@@ -355,7 +355,7 @@ typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다
 ### 6.0.1 Workspace precondition
 
 두 전송의 공용 입구 `Server_http_ingress` 는 rate limit 과 MCP origin 검사 다음,
-라우팅 바로 앞에서 `Server_workspace_precondition` 확인을 거친다(#43356, RFC-0512). 한
+라우팅 바로 앞에서 `Server_workspace_precondition` 확인을 거친다(#43356). 한
 작업공간을 보고 요청하는 client 는 두 헤더를 같이 보낸다.
 
 | 헤더 | 값 |
@@ -580,7 +580,7 @@ TLS 리스너(8938, `transport.https_port`, 0 이면 끔): TLS 1.3 handshake 의
 
 ### 8.2 동작 방식
 
-경로 표는 하나다(RFC-0512). H2 어댑터는 연결 층만 맡는다: 스트림 registry 와 요청 fiber(`Server_h2_stream_registry`), `H2.Request.t` 를 `Httpun.Request.t` 로 옮기기(`Http_reqd.request_of_h2`: `:authority` 가 `host` 로, version 2.0), `:scheme`/`:authority` 검사(`Server_request_authority.classify_h2_request`), `Http_reqd.Http2` 손잡이 만들기. 그 뒤는 HTTP/1.1 과 같은 `Server_http_ingress.serve` 를 부른다(rate limit → MCP origin·버전 검사 → workspace 전제조건 → `Router.dispatch`, 인증은 route 안). 핸들러 서명이 `Httpun.Request.t -> Http_reqd.t -> unit` 하나라서 한쪽 전송에만 경로를 더하는 일이 생기지 않는다.
+경로 표는 하나다. H2 어댑터는 연결 층만 맡는다: 스트림 registry 와 요청 fiber(`Server_h2_stream_registry`), `H2.Request.t` 를 `Httpun.Request.t` 로 옮기기(`Http_reqd.request_of_h2`: `:authority` 가 `host` 로, version 2.0), `:scheme`/`:authority` 검사(`Server_request_authority.classify_h2_request`), `Http_reqd.Http2` 손잡이 만들기. 그 뒤는 HTTP/1.1 과 같은 `Server_http_ingress.serve` 를 부른다(rate limit → MCP origin·버전 검사 → workspace 전제조건 → `Router.dispatch`, 인증은 route 안). 핸들러 서명이 `Httpun.Request.t -> Http_reqd.t -> unit` 하나라서 한쪽 전송에만 경로를 더하는 일이 생기지 않는다.
 
 응답은 `Http_reqd`(닫힌 합타입 `Http1 | Http2`)가 전송별로 쓴다. H2 쪽은 응답 자원 원장(`Http_h2_response_ledger`)에 바이트를 예약하고 flush 뒤 돌려준다. 예약이 안 되면 빈 503 `no-store` 로 답하고, 스트리밍 중 용량이 다하면 그 스트림만 리셋한다(`docs/guides/h2-response-resources.md`). connection 전용 헤더(`connection`, `keep-alive`, `proxy-connection`, `transfer-encoding`, `upgrade`)는 H2 응답에서 뺀다(RFC 9113 §8.2.2).
 

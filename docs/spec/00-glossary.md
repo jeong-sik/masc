@@ -618,7 +618,7 @@ status: reference
     (`Bounded_by_masc`). 증거가 여럿이면 가장 늦은 시각과 그 시각을 정한 쪽이
     `release_basis`가 된다(`Keeper_turn_driver.runtime_path_rest`).
   - 실패한 시도는 휴식이 아니다. 그 경로를 후보가 답할 때까지 뒤로 미룰 뿐, 발송을
-    기다리게 하지 않는다(`RFC-0458 §3.4`).
+    기다리게 하지 않는다.
   - 완료 검증도 같은 저장소를 읽는다. 검증 루프는 한 후보의 실패를
     `Reviews_again`·`Model_absent`·`Producer_must_act` 중 하나로 분류하고
     (`Anti_rationalization.candidate_failure`), provider가 말한 재개 시각이 아직 앞이면
@@ -672,7 +672,7 @@ status: reference
     요청당(`per_request`) 사용량, 입력 토큰, 양수인 용량과 용량 이하의 입력이 필요하며,
     이 근거가 없거나 조건에 맞지 않으면 비율을 표시하지 않는다. 클라이언트 보고치 누락만으로
     무조건 `unmeasured`가 되지는 않으며, 누적/턴 합계 토큰을 요청당 점유율로 쓰지 않는다.
-  - 관측 전용 불변식: 최신 TurnRecord tail(RFC-0233)에서 투영되는 문맥 수치([`keeper_context_observation_projection.mli`](../../lib/keeper/keeper_context_observation_projection.mli))는
+  - 관측 전용 불변식: 최신 TurnRecord tail에서 투영되는 문맥 수치([`keeper_context_observation_projection.mli`](../../lib/keeper/keeper_context_observation_projection.mli))는
     대시보드 트리아지(밴드·정렬·헬스 카운트) 관측 전용이며, 런타임의 다음 요청 진입 허가 결정에 직접 사용할 수 없다.
   → [turn-context-window.ts](../../dashboard/src/lib/turn-context-window.ts) ·
   [Keeper_context_observation_projection](../../lib/keeper/keeper_context_observation_projection.mli)
@@ -788,7 +788,7 @@ status: reference
   `keeper.identity` → `keeper.workspace` → `<role>`.
   `keeper.worldview`는 이 세계가 무엇을 잘한 일로 치는가다. 운영자가 덮어쓰며, 배포
   기본값은 "따로 정한 가치관이 없다 — 각 Keeper의 역할이 정한다"이다. 슬롯은 항상 렌더된다.
-  `keeper.constitution`은 세계가 쓴 규범(RFC-0442)이다. 원장(ledger) 파일이 아직 없는 세계(`Missing`)는
+  `keeper.constitution`은 세계가 쓴 규범이다. 원장(ledger) 파일이 아직 없는 세계(`Missing`)는
   조항 없이 통째로 빠진다. 반면 원장 파일이 실재하는데 읽을 수 없는 상태(`Unreadable`)는
   조항 없는 프롬프트로 턴을 돌리지 않고 `prepare_run_context` 단계에서 `prepare_error`
   (`Constitution_unreadable`)로 즉시 거절(`not-dispatched`)한다. 규범 없이 임의 실행되는
@@ -1124,8 +1124,8 @@ status: reference
   `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론이나 다른 Keeper(`masc_keeper_msg`·
   `masc_keeper_delegate`)도 이 operation을 제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상
   Keeper다. 소스 스키마는 `masc.keeper_chat_operation.source.v2`이며 `sender_keeper` 키를
-  반드시 싣는다. 값은 다른 Keeper가 보낸 경우 그 Keeper 식별자이고, 운영자·커넥터 화자면 `null`이다
-  (RFC-0468 §3.2). 접수 응답은 실행 완료를 뜻하지 않는다.
+  반드시 싣는다. 값은 다른 Keeper가 보낸 경우 그 Keeper 식별자이고, 운영자·커넥터 화자면 `null`이다.
+  접수 응답은 실행 완료를 뜻하지 않는다.
   → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
 
 **Keeper Turn Slot Admission Priority (키퍼 턴 슬롯 진입 우선순위)**
@@ -1285,12 +1285,12 @@ status: reference
 
 **Speaker Authority (화자 권한)**
 : Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
-  추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다(RFC-0223 §3,
-  RFC-0468 §3.2). 닫힌 세 변형이다 — `Owner` (인증된 대시보드/운영자 경로), `External`
+  추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다.
+  닫힌 세 변형이다 — `Owner` (인증된 대시보드/운영자 경로), `External`
   (Discord·Slack 등 커넥터 문맥을 나르는 외부 화자), `Keeper` (제출 지점이 Keeper
   레지스트리와 일치시킨 등록된 다른 Keeper). wire 값은 각각 `"owner"`·`"external"`·
   `"keeper"`다. `Keeper`인 경우 `speaker_id`와 `speaker_name`에 해당 Keeper 식별자가 실린다
-  (Keeper는 정확히 하나의 이름을 갖는다, RFC-0393).
+  (Keeper는 정확히 하나의 이름을 갖는다).
   Librarian의 대화 상대방 관측(`Keeper_counterpart_observation`)에서도 같은 닫힌 세
   변형(`Owner`·`External`·`Keeper`)으로 전달되어, 호스트 참조가 부족해도 운영자,
   등록된 Keeper, 외부 화자를 안전하게 분리한다.
@@ -1516,7 +1516,7 @@ status: reference
   `Admission`·`Provider_reported_failure`·`Request_refused`·
   `Provider_wire_defect`·`Context_window_exceeded`)은 `keeper_turn_driver.ml`의
   Rotate_now 매치에서 `()`로 실패가 이 후보의 고장을 증명하지 않는다. 남기면
-  자매 후보가 답하는 동안 head가 영영 뒤로 밀리므로(RFC-0458 §3.4, §6), 창
+  자매 후보가 답하는 동안 head가 영영 뒤로 밀리므로, 창
   초과(`Context_window_exceeded`)도 "작은 turn에 답 못 한 증거가 아니다"
   (#38984)로 같은 팔에 속한다. 이 팔과 구분되는 두 팔이 있다 —
   `Server_error_not_transient`는 `note_failed_attempt`로
@@ -1535,16 +1535,16 @@ status: reference
 : 어떤 항목을 제거하지 않고 우선순위·가시성·전송 여부만 낮추는 처분. 세 곳이 같은
   불변식을 지킨다 — 강등된 것은 사라지지 않는다.
   - 도구 결과 강등: 전송 사본에서만 blob 마커로 바뀌고 History 원본은 남는다
-    (`Keeper_model_input_demotion`, RFC-0363).
+    (`Keeper_model_input_demotion`).
   - 후보 강등: 쉬는 중이거나 실패한 runtime 후보를 세 무리(`Not_demoted` ·
     `Failed_without_rest` · `Told_to_rest`)로 나눠 뒤로 보낸다. 배제가 아니라 순서다 —
     쉬라는 말을 들은 후보는 뒤로 가므로, 앞에 쉬지 않는 후보가 있으면 그 후보부터
     보낸다. 강등한 뒤에도 맨 앞 후보가 쉬는 중이면 그 walk는 기다린다 — 맨 앞 후보가
     풀리는 때와, 뒤 후보 가운데 풀리는 순간 앞으로 올라오는 후보가 더 일찍 풀리는 때
     중 빠른 쪽까지다(`walk_rest`). 실패만 한 후보는 기다리게 하지 않는다
-    (`Runtime_candidate_standing.order`, RFC-0458 §3.4).
+    (`Runtime_candidate_standing.order`).
     실패 증거를 적은 Keeper(recorder)는 다음 사이클에 자기가 표시한 후보를
-    강등하지 않고 선언 자리에서 다시 부른다(RFC-0458 §3.4 rule 5, #38327).
+    강등하지 않고 선언 자리에서 다시 부른다(#38327).
   - 차단 강등: 낡은 blocker를 "이전 차단"으로 낮춰 보여준다. 감추지 않는다
     (`agent-roster.ts`).
   → [Runtime_candidate_standing.order](../../lib/runtime/runtime_candidate_standing.mli)
@@ -1787,7 +1787,7 @@ status: reference
 
 **Execution ID (실행 식별자)**
 : 이름이 같은 서로 다른 정체성이 여럿이다. 문장에 어느 것인지 함께 적는다.
-  (1) **Tool execution id** — `Ids.Execution_id.t` (RFC-0233). 도구 실행마다 dispatch
+  (1) **Tool execution id** — `Ids.Execution_id.t`. 도구 실행마다 dispatch
   경계에서 정확히 한 번 발급되고, 그 실행을 기록하는 모든 store(tool_calls JSONL,
   trajectory)에 찍혀 하나의 물리적 실행이 관측한 store 수와 무관하게 한 논리 행으로
   그려진다. `exec-<ms>-<seq>` 타임스탬프 접두사이고, 한 프로세스 안에서 사전순이 발급
@@ -1872,7 +1872,7 @@ status: reference
   exact-output 작업의 경로이고, chat lane은 Keeper에게 대화가 들어오고 결과가
   배달되는 표면이다. **Official Client Lane**(공식 클라이언트 실행 경로)과도
   다르다. heartbeat가 여는 자율 turn과 함께 Keeper turn을 시작하는 두 진입
-  경로를 이룬다(RFC-0225). 다른 축: Play Room 공용 대화는 Keeper chat store에
+  경로를 이룬다. 다른 축: Play Room 공용 대화는 Keeper chat store에
   남지 않는다.
   → [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
   [Keeper_msg_async](../../lib/keeper/keeper_msg_async.mli)
@@ -1905,7 +1905,7 @@ status: reference
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
-  그 값이다. TUI 화면은 "runtime candidate order"로 읽는다. RFC-0457부터 Keeper를
+  그 값이다. TUI 화면은 "runtime candidate order"로 읽는다. Keeper를
   특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
   Dashboard Settings는 선언된 후보 순서를 편집하며, 저장 전에 읽은 source revision이
   바뀌었으면 충돌로 거절해 새 순서를 덮어쓰지 않는다. 빈 후보 목록은 lane 제거와
@@ -2866,7 +2866,7 @@ status: reference
 
 **Goal Creation Input Check (목표 생성 입력 검증)**
 : 새 Goal 생성 입력의 제목·측정 조건·마감일을 검증하는 입력 불변식 계약(#41399).
-  새 Goal은 측정 가능한 성공 조건(`measure`)과 비어 있지 않은 측정 절차(`procedure`)를 요구한다(RFC-0387 B1).
+  새 Goal은 측정 가능한 성공 조건(`measure`)과 비어 있지 않은 측정 절차(`procedure`)를 요구한다.
   생성의 모든 진입 경로에서 빈 제목(`title` 누락 또는 공백 문자열)을 거절하며
   알 수 없는 ID 단독 지정 시 `"Untitled goal"`로 기본 명명하던 폴백을 금지한다. 또한
   `YYYY-MM-DD`로 읽을 수 없는 마감일(`due_date`)은 생성과 수정(`upsert_goal` 업데이트) 모두
@@ -3717,13 +3717,12 @@ status: reference
   runtime.toml 을 못 읽거나 `pr_reader` 가 Keeper 이름이 아니거나 Keeper 가 없거나
   토큰이 없으면 서버는 그 이유(`Reader_not_declared`·`Reader_declaration_invalid`·
   `Reader_keeper_missing`·`Reader_token_unavailable`)를 말하고, 다른 자격으로 대신
-  읽지 않는다. 결과는 메모리에만 두고 `GET /api/v1/repositories/pulls` 로 보인다
-  (RFC-0465).
+  읽지 않는다. 결과는 메모리에만 두고 `GET /api/v1/repositories/pulls` 로 보인다.
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli),
     [Repository_pulls](../../lib/repository_pulls.mli)
 
 **PR Attribution (PR 귀속)**
-: 열린 GitHub Pull Request를 작업한 Keeper와 잇는 표시 규칙(RFC-0465).
+: 열린 GitHub Pull Request를 작업한 Keeper와 잇는 표시 규칙.
   `GET /api/v1/repositories/pulls`가 PR의 `author`(머지 커밋을 건너뛴 최신 단일
   부모 커밋의 작성자 이름, #38277)와 저장된 Keeper 이름 목록(`Keepers_listed`)을 대조해
   일치하는 Keeper에게 귀속한다(`keeper`). 샌드박스 런타임은 실행 환경의
@@ -3802,8 +3801,7 @@ status: reference
 
 **Disposable Build Volume (일회용 빌드 볼륨)**
 : Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩
-  할당되는 일회용(disposable) 볼륨(RFC-keeper-build-output-returns-to-a-disposable-volume,
-  #38563 착지). 체크아웃이 놓이는 work volume(`work_volume_guest_root`)과 분리된
+  할당되는 일회용(disposable) 볼륨(#38563 착지). 체크아웃이 놓이는 work volume(`work_volume_guest_root`)과 분리된
   `/masc-build`(`build_volume_guest_root`)에 마운트된다. 일회용이라는 말 그대로
   게스트를 재시작할 때마다 `recreate_apple_build_volume`가 지우고 새로 만들어 빈
   상태로 시작하므로, 매번 콜드 빌드 한 번을 치르는 대신 재시작 사이에 쌓인 빌드
@@ -3874,7 +3872,7 @@ status: reference
 : 이번 빌드로 디코딩되지 않는 영속 store 를 만났을 때 부팅과 배포 preflight 가
   어떻게 행동할지를 정하는 닫힌 분류
   (`Keeper_durable_store.reader`의 `Refuse_boot`·`Degrade_typed`·`Preflight_only`,
-  RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4).
+  RFC every-durable-store-has-one-boot-policy).
   store 목록은 `Keeper_durable_store.Id.all` 하나이고, 배포 preflight
   (`deployment_preflight_helper validate-stores`)와 부팅 reconcile 이 같은 목록을
   읽는다. Lane Add-on 기록(binding·native claim·action receipt·Exact 요청·원래
@@ -3915,7 +3913,7 @@ status: reference
 
 **Checkpoint Purge (체크포인트 청소)**
 : 멈춘 Keeper의 canonical AGENT_CORE checkpoint를 LLM 없이 두 닫힌 규칙으로 줄이는
-  운영자 작업(RFC-0351 S1). 둘 다 atom을 여는 message는 지우지 않는다. 추론 제거는
+  운영자 작업. 둘 다 atom을 여는 message는 지우지 않는다. 추론 제거는
   assistant message의 서명 없는 `Thinking`·`ReasoningDetails` 블록을 지우되, 지우면
   빈 message가 되는 것은 그대로 둔다. tool 결과 비우기는 닫힌 tool cycle의 `ToolResult`
   내용을 고정 표시로 바꾸되, 실패한 결과(`Tool_failed`)는 예외로 바이트 그대로 남긴다 —
@@ -3958,7 +3956,7 @@ status: reference
   닫지 않으면 provider가 매 reload마다 history를 거절해 lane이 영영 resume되지
   못한다. Keeper마다 독립이라 하나가 실패해도 나머지 sweep을 멈추지 않는다.
   Keeper마다 history를 마지막 메시지부터 거꾸로 읽어 마지막 도구 요청에서 멈춘다.
-  그 요청이 결과를 기다릴 때만 history 전체를 읽어 닫는다(RFC-0476 §3.5).
+  그 요청이 결과를 기다릴 때만 history 전체를 읽어 닫는다.
   Keeper별 결과는 닫힌 여섯이다(`keeper_outcome`): `Nothing_to_close`(캐리어
   없음 — metadata가 없거나, canonical checkpoint가 아직 없거나, 이 빌드가 대체한
   버전이거나, 마지막 도구 요청에 결과가 다 있음),
@@ -4031,7 +4029,7 @@ status: reference
 **Input Speaker (입력 화자)**
 : Keeper 대화에서 각 `User` message를 누가 발화했는지를 나타내는 메타데이터
   (`agent_core.input_speaker.v1`, `Agent_core.Types.Input_speaker.key`). 메시지가 생성될
-  때 고정 스탬프되며, 이후 메시지 본문에서 추론하거나 변경하지 않는다(RFC-0468 §3.2).
+  때 고정 스탬프되며, 이후 메시지 본문에서 추론하거나 변경하지 않는다.
   닫힌 타입(`Keeper_input_speaker.t`)은 둘이다 — 외부 주체인 `Person`(`Owner`·`Keeper id`·
   `External {channel; user_id; user_name}`)과 호스트가 작성한 프롬프트인 `Host_prompt`
   (`Autonomous_wake {answered_asks}`·`Official_client_resume`). `Keeper`는 생성 지점에서
@@ -4072,8 +4070,6 @@ status: reference
   위치는 번호와 digest의 쌍이라, 손에 든 History가 같은 번호를 같은 Message로
   열 때만 쓴다(`for_history`). History의 Atom 개수는 비교하지 않는다.
   RFC 코퍼스는 이 자리를 **씨앗**이라 부른다. 이 사전은 뜻이 드러나게 시작 위치 근거라고 풀어 쓴다.
-  **다른 뜻**: `RFC-0457:85·150`의 "씨앗 설정"은 초기 예시 config를 가리키는 다른
-  말이다 — 이 항목의 씨앗과 구분한다.
   → [Keeper_carried_front.seed](../../lib/keeper/keeper_carried_front.mli)
 
 **Carried Front (요청에 넣을 기록의 첫 위치)**
@@ -4590,7 +4586,7 @@ status: reference
 : Librarian 회차가 내놓은 새 claim 중 `absorbs`에 기억을 적었으나 실제로는 그 중
   아무것도 흡수하지 못한 claim에 대해, 남겨진 기억들이 그 claim의 내용을 이미
   담고 있는지 묻는 역방향 판정. 흡수 판정이 완료된 회차에서 사본 claim은
-  저장하지 않는다(RFC-0463 §2.8·#38243).
+  저장하지 않는다(#38243).
   - 배경: Librarian이 매 회차 같은 주제를 조금씩 다른 문장으로 다시 써서 기존 Fact가
     흡수되지 않고 paraphrase 사본이 무한 축적되는 문제를 막는다.
   - 전이 및 판정:
@@ -4713,7 +4709,7 @@ status: reference
   호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.
   Librarian은 자기가 누구를 위해 정리하는지 대상 Keeper의 식별자(`keeper_id`)를
-  입력(`Keeper_librarian.input`)에 필수로 실어 보낸다(RFC-0468 §3.1).
+  입력(`Keeper_librarian.input`)에 필수로 실어 보낸다.
   세 프롬프트(`librarian`·`librarian.continuity`·`librarian.working_context`)는 이를
   `keeper_instructions` 옆 호스트 데이터로 전달받아 그 Keeper의 자리에서 대화를
   읽으며, 안내문의 호칭(\"너\"·\"당신\")이 이 대상 Keeper를 가리킴을 안다.

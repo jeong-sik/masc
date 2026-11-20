@@ -3,12 +3,12 @@ import { dashboardObservationOwnerHasWorkspace, dashboardObservationOwnerIsCurre
   type DashboardObservationOwner } from '../../lib/observation-read-owner'
 
 /**
- * RFC-0028 PR-α: keeper-trace store.
+ * keeper-trace store.
  *
  * Stitched read-side projection over existing IDE/runtime surfaces:
  *  - anchored-thread
  *  - runtime-hop
- *  - decision-log    (RFC-0026)
+ *  - decision-log
  *  - activity-event  (/api/v1/activity/events normalized context)
  *
  * The store is *append-only* from the producer's perspective. It enforces
@@ -21,8 +21,8 @@ import { dashboardObservationOwnerHasWorkspace, dashboardObservationOwnerIsCurre
  *   (3) Retention pruning of entries older than `RETENTION_MS` relative to
  *       the most recent event.
  *
- * Cap-on-render (RFC-0028 §5: "stacked gutter chip cap 3 + `+N`") is the
- * concern of `overlay-keeper-trace.tsx` (PR-β); the store is unbounded but
+ * Cap-on-render (3 stacked gutter chips plus a `+N` indicator) is the
+ * concern of `overlay-keeper-trace.ts`; the store is unbounded but
  * pruned by retention so memory stays O(events-in-last-10min).
  *
  * Existing source reads supply their captured observation owner to each

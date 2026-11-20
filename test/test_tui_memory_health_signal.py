@@ -17,6 +17,7 @@ import urllib.parse
 from typing import Callable, TypeAlias, cast
 
 import test_tui_chat_owed_history as owed
+import tui_memory_health_rows as rows
 
 
 HEALTH_PATH = "/api/v1/dashboard/keeper-memory-health"
@@ -30,115 +31,12 @@ TOGGLE_BROWSER_LANE = "\x1e"
 # [HealthServer].
 BaseChatServer: TypeAlias = owed.ChatServer
 
-# Every pass and change the server counts, none moved since it started.
-NO_MEMORY_CHANGES: dict[str, dict[str, int]] = {
-    commit_pass: {change: 0 for change in ("added", "absorbed", "superseded", "dropped")}
-    for commit_pass in (
-        "admission", "durable", "continuity", "cleanup", "keeper_write", "keeper_delete", "operator_delete",
-    )
-}
-
 # An empty fleet the TUI decodes: every total is zero because there is no row.
-EMPTY_FLEET: dict[str, object] = {
-    "schema": "keeper.memory_os.current_health.v15",
-    "generated_at": 1.0,
-    "execution": {},
-    "keepers": [],
-    "totals": {
-        name: 0
-        for name in (
-            "facts",
-            "observed_facts",
-            "derived_facts",
-            "support_invalidations",
-            "snapshot_bytes",
-            "added",
-            "removed",
-            "source_facts",
-            "source_invalidations",
-            "source_snapshot_bytes",
-            "librarian_unread_turns",
-            "librarian_continuity_unread_atoms",
-            "librarian_continuity_unmeasured",
-            "librarian_failures",
-            "vision_ingest_errors",
-            "read_errors",
-            "source_read_errors",
-        )
-    },
-    "alert_summary": {
-        name: 0
-        for name in (
-            "total_alerts",
-            "warn_alerts",
-            "error_alerts",
-            "keepers_with_alerts",
-            "snapshot_read_error_keepers",
-            "source_snapshot_read_error_keepers",
-            "librarian_stopped_keepers",
-            "librarian_attention_required_keepers",
-            "librarian_starving_keepers",
-        )
-    },
-}
-
-
+EMPTY_FLEET: dict[str, object] = rows.fleet([], execution={}, totals={})
 # The Keeper's row with nothing in it and no alert: the fleet that lists it
 # keeps every total and alert count at zero.
-EMPTY_ROW: dict[str, object] = {
-    "keeper_id": KEEPER,
-    "revision": 0,
-    "updated_at": None,
-    "facts": 0,
-    "observed_facts": 0,
-    "derived_facts": 0,
-    "support_invalidations": 0,
-    "snapshot_bytes": 0,
-    "added": 0,
-    "removed": 0,
-    "snapshot_present": False,
-    "age_bins": None,
-    "facts_by_hour": [],
-    "changes_since_start": NO_MEMORY_CHANGES,
-    "context_cycle": {
-        "saved": None,
-        "saved_read_error": None,
-        "read_position": None,
-        "read_position_read_error": None,
-        "rewriting_through": None,
-        "prepared": None,
-        "synthesis": None,
-        "unread": {
-            "snapshot": {"kind": "available", "messages": []},
-            "memory": {"kind": "available", "messages": []},
-        },
-    },
-    "librarian": {
-        "state": "drained",
-        "detail": None,
-        "pending": None,
-        "admission_wait": None, "operator_action_required": False,
-        "measured_at": 1.0,
-        "unread_atom_turns": 0,
-        "unread_official_turns": 0,
-        "continuity_unread_atoms": 0,
-        "last_success_at": None,
-        "last_failure_kind": None,
-        "stalled": None,
-    },
-    "librarian_failures": 0,
-    "vision_ingest_errors": 0,
-    "vision_ingest_error_reasons": [],
-    "read_error": None,
-    "source_revision": 0,
-    "source_facts": 0,
-    "source_invalidations": 0,
-    "source_snapshot_bytes": 0,
-    "source_snapshot_present": False,
-    "source_read_error": None,
-    "alerts": [],
-}
-LISTED_FLEET: dict[str, object] = {**EMPTY_FLEET, "keepers": [EMPTY_ROW]}
+EMPTY_ROW: dict[str, object] = rows.keeper_row(KEEPER)
+LISTED_FLEET: dict[str, object] = rows.fleet([EMPTY_ROW], execution={}, totals={})
 # The input pane's answer for the Keeper: no turn record yet.
 EMPTY_INPUT: dict[str, object] = {"keeper": KEEPER, "skipped_rows": 0, "entries": []}
 
@@ -157,7 +55,7 @@ class HealthHandler(owed.ChatHandler):
                 key = HEALTH_PATH + "?keeper=" + keeper[0]
                 phase = server.record(key)
                 body = {
-                    "schema": "keeper.memory_os.current_health.v15",
+                    "schema": rows.SCHEMA,
                     "generated_at": 2.0,
                     "keeper": server.row,
                 }

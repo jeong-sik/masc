@@ -103,16 +103,7 @@ let run
            match Eio.Cancel.protect (fun () -> register token intake_token) with
            | Error error -> Error (Registration_failed error)
            | Ok reg ->
-             (* The Librarian's catch-up is submitted before the launch
-                callback, so no launch path can forget it; the submission is
-                a queue hand-off and the launch does not wait for it (RFC
-                librarian-lifecycle section 4.3, I7). *)
-             (try
-                ignore (Keeper_librarian_queue_refresh.submit_durable
-                  ~base_path
-                  ~keeper_name);
-                Ok (launch intake_token token reg)
-              with
+             (try Ok (launch intake_token token reg) with
               | exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm dispatches on the exception below and re-throws Cancelled there, after the rollback has run under Eio.Cancel.protect. *)
                 let exception_detail = Printexc.to_string exn in
                 let rollback_error =

@@ -1,0 +1,358 @@
+module Log = Keeper_turn_log
+module Store = Keeper_turn_log_store
+module Scan = Private_jsonl_scan
+
+type segment =
+  { slices : Log.slice list
+  ; history : Librarian_unit.range
+  ; internal : Librarian_unit.range
+  ; chat : Librarian_unit.range
+  ; external_rows : Librarian_unit.range
+  }
+
+type source =
+  | Turn of
+      { turn : int
+      ; outcome : Log.outcome
+      ; opened : Librarian_read_unit.opened
+      ; unattributed : segment
+      ; own : segment
+      }
+  | Announced_reset of
+      { cause : Log.announced
+      ; segment : segment
+      }
+
+type span =
+  { line : int
+  ; past_line : int
+  ; at : float
+  ; through : Log.mark
+  ; next : Log.mark
+  ; source : source
+  }
+
+type unreadable =
+  | Undecodable of Store.undecodable
+  | Out_of_order of Log.order_error
+
+type stop =
+  | Log_end
+  | Limit_reached
+  | Unannounced_reset of
+      { line : int
+      ; past_line : int
+      ; before : Log.mark
+      ; after : Log.mark
+      }
+  | Unreadable_line of
+      { offset : int
+      ; reason : unreadable
+      }
+
+type reading =
+  { spans : span list
+  ; stop : stop
+  ; bytes : int
+  }
+
+type read_error =
+  | Fault of Librarian_unit.input_fault
+  | Unread of { detail : string }
+
+type until =
+  | To_end
+  | First_with_items of int
+
+let non_empty ({ from; until } : Librarian_unit.range) = until > from
+
+let segment_has_items { slices; history; internal; chat; external_rows } =
+  List.exists (fun ({ take; _ } : Log.slice) -> take > 0) slices
+  || non_empty history
+  || non_empty internal
+  || non_empty chat
+  || non_empty external_rows
+;;
+
+let has_items span =
+  match span.source with
+  | Turn { unattributed; own; _ } -> segment_has_items unattributed || segment_has_items own
+  | Announced_reset { segment; _ } -> segment_has_items segment
+;;
+
+let reach_whole span : Librarian_read_result.reach =
+  { line = span.line; within = Whole; covered = span.next; turn_log_offset = span.past_line }
+;;
+
+let has_unread = function
+  | Error (Fault (_ : Librarian_unit.input_fault) | Unread { detail = (_ : string) }) -> true
+  | Ok { spans; stop; bytes = (_ : int) } ->
+    (match stop with
+     | Log_end | Limit_reached -> List.exists has_items spans
+     | Unannounced_reset _ | Unreadable_line _ -> true)
+;;
+
+(* {1 What a unit holds} *)
+
+(* Every store from where the unit starts to where it ends. *)
+let whole ~(from : Log.mark) ~(through : Log.mark) slices =
+  let same_session = String.equal from.session through.session in
+  let official start until : Librarian_unit.range =
+    { from = (if same_session then start else 0); until }
+  in
+  { slices
+  ; history = official from.history_bytes through.history_bytes
+  ; internal = official from.internal_bytes through.internal_bytes
+  ; chat = { from = from.chat_bytes; until = through.chat_bytes }
+  ; external_rows = { from = from.external_rows; until = through.external_rows }
+  }
+;;
+
+(* One store's range cut at [at], kept inside it. *)
+let cut ({ from; until } : Librarian_unit.range) at : Librarian_unit.range * Librarian_unit.range =
+  let at = Int.max from (Int.min until at) in
+  { from; until = at }, { from = at; until }
+;;
+
+let turn_segments ~from ~(through : Log.mark) ~(baseline : Log.mark) ~reset_since ~unattributed ~own =
+  let all = whole ~from ~through [] in
+  let same_session = String.equal baseline.session through.session in
+  let at_baseline (range : Librarian_unit.range) value =
+    cut range (if reset_since then range.until else value)
+  in
+  let official (range : Librarian_unit.range) value =
+    at_baseline range (if same_session then value else range.until)
+  in
+  let history_before, history_after = official all.history baseline.history_bytes in
+  let internal_before, internal_after = official all.internal baseline.internal_bytes in
+  let chat_before, chat_after = at_baseline all.chat baseline.chat_bytes in
+  let external_before, external_after = at_baseline all.external_rows baseline.external_rows in
+  ( { slices = unattributed
+    ; history = history_before
+    ; internal = internal_before
+    ; chat = chat_before
+    ; external_rows = external_before
+    }
+  , { slices = own
+    ; history = history_after
+    ; internal = internal_after
+    ; chat = chat_after
+    ; external_rows = external_after
+    } )
+;;
+
+(* {1 Where reading stands among the lines} *)
+
+type open_turn =
+  { offset : int (** Byte offset of the [Opened] line. *)
+  ; opened : Librarian_read_unit.opened
+  ; baseline : Log.mark
+  }
+
+(* {!Log.position} with what the open turn's [Opened] said. *)
+type known =
+  | Not_started
+  | Between_turns
+  | In_turn of
+      { turn : open_turn
+      ; reset_since : bool
+      }
+
+type place =
+  | Resumed
+  (* Reading started past the first line and has read no [Opened] or
+     [Closed] yet, so whether a turn is open is not known. A [Reset] is in
+     order either way. *)
+  | Known of known
+
+let position : known -> Log.position = function
+  | Not_started -> Nothing_written
+  | Between_turns -> Between_turns
+  | In_turn { turn; reset_since } -> Turn_open { opened = turn.offset; reset_since }
+;;
+
+(* Where a line the order accepted leaves reading. *)
+let known_after known ~at : Log.line -> known = function
+  | Log_started _ | Closed _ -> Between_turns
+  | Opened { runtime; task; stimuli; baseline; _ } ->
+    In_turn { turn = { offset = at; opened = { runtime; task; stimuli }; baseline }; reset_since = false }
+  | Reset _ ->
+    (match known with
+     | In_turn { turn; reset_since = (_ : bool) } -> In_turn { turn; reset_since = true }
+     | Not_started | Between_turns -> Between_turns)
+;;
+
+type walk =
+  { place : place
+  ; from : Log.mark (** Where the next unit starts. *)
+  ; spans : span list (** Newest first. *)
+  ; with_items : int
+  ; bytes : int
+  }
+
+let read_failed error = Error (Unread { detail = Scan.error_to_string error })
+
+(* How reading a turn's lines again from its [Opened] ended. *)
+type replayed =
+  | Replayed of
+      { known : known
+      ; bytes : int
+      }
+  | Replay_refused of
+      { offset : int
+      ; reason : unreadable
+      }
+
+type replaying =
+  | Before_opened
+  | Replaying of known
+
+(* The lines of the turn whose [Opened] is at [turn], up to its [Closed] at
+   [closed]: they say what the turn's [Opened] held and whether a [Reset]
+   followed it. A [turn] that names no [Opened] is that [Closed] out of
+   order. *)
+let replay ~turns_path ~turn ~closed =
+  let no_opened = Replay_refused { offset = closed; reason = Out_of_order Closed_without_open } in
+  let ended state bytes =
+    match state with
+    | Before_opened -> no_opened
+    | Replaying known -> Replayed { known; bytes }
+  in
+  let read (state, bytes) ({ at; past; line } : Store.scanned) : (_, replayed) Scan.step =
+    if at >= closed
+    then Stop (ended state bytes)
+    else (
+      let bytes = bytes + past - at in
+      match line, state with
+      | Error reason, (Before_opened | Replaying _) ->
+        Stop (Replay_refused { offset = at; reason = Undecodable reason })
+      | Ok (Opened _ as opened), Before_opened ->
+        Continue (Replaying (known_after Not_started ~at opened), bytes)
+      | Ok (Log_started _ | Closed _ | Reset _), Before_opened -> Stop no_opened
+      | Ok line, Replaying known ->
+        (match Log.step (position known) ~offset:at line with
+         | Ok (_ : Log.position) -> Continue (Replaying (known_after known ~at line), bytes)
+         | Error error -> Stop (Replay_refused { offset = at; reason = Out_of_order error })))
+  in
+  match Store.fold_from turns_path ~from:turn ~init:(Before_opened, 0) ~f:read with
+  | Ok (Stopped replayed) -> Ok replayed
+  | Ok (Reached_end ((_ : replaying), (_ : int))) -> read_failed Scan.Moved
+  | Error (Not_a_row_start { from = (_ : int); length = (_ : int) }) -> Ok no_opened
+  | Error (Scan_failed error) -> read_failed error
+;;
+
+let stopped walk stop = Scan.Stop (Ok (walk, stop))
+let refused walk ~at reason = stopped walk (Unreadable_line { offset = at; reason })
+
+let add_span ~until walk span =
+  let items = has_items span in
+  let with_items = if items then walk.with_items + 1 else walk.with_items in
+  let walk = { walk with spans = span :: walk.spans; from = span.next; with_items } in
+  match until with
+  | First_with_items count when items && with_items >= count -> stopped walk Limit_reached
+  | To_end | First_with_items _ -> Scan.Continue walk
+;;
+
+let on_reset ~until walk ~at ~past ~written ~(cause : Log.reset_cause) ~before ~after ~closed_before =
+  match cause with
+  | Unannounced -> stopped walk (Unannounced_reset { line = at; past_line = past; before; after })
+  | Announced cause ->
+    add_span ~until walk
+      { line = at
+      ; past_line = past
+      ; at = written
+      ; through = before
+      ; next = after
+      ; source = Announced_reset { cause; segment = whole ~from:walk.from ~through:before closed_before }
+      }
+;;
+
+let on_known ~until walk known ~at ~past (line : Log.line) =
+  match Log.step (position known) ~offset:at line with
+  | Error error -> refused walk ~at (Out_of_order error)
+  | Ok (_ : Log.position) ->
+    let walk = { walk with place = Known (known_after known ~at line) } in
+    (match line with
+     | Log_started { mark; id = (_ : Log.Log_id.t); at = (_ : float) } ->
+       Scan.Continue { walk with from = mark }
+     | Opened _ -> Scan.Continue walk
+     | Reset { cause; before; after; closed_before; at = written } ->
+       on_reset ~until walk ~at ~past ~written ~cause ~before ~after ~closed_before
+     | Closed { turn; at = closed_at; outcome; after; unattributed; own } ->
+       (match known with
+        | In_turn { turn = open_turn; reset_since } ->
+          let unattributed, own =
+            turn_segments ~from:walk.from ~through:after ~baseline:open_turn.baseline ~reset_since
+              ~unattributed ~own
+          in
+          add_span ~until walk
+            { line = at
+            ; past_line = past
+            ; at = closed_at
+            ; through = after
+            ; next = after
+            ; source = Turn { turn; outcome; opened = open_turn.opened; unattributed; own }
+            }
+        (* The order refuses a [Closed] with no open turn before here. *)
+        | Not_started | Between_turns -> refused walk ~at (Out_of_order Closed_without_open)))
+;;
+
+let on_line ~turns_path ~until ~start walk ~at ~past (line : Log.line) =
+  match walk.place, line with
+  | Known known, (Log_started _ | Opened _ | Closed _ | Reset _) ->
+    on_known ~until walk known ~at ~past line
+  | Resumed, Reset { cause; before; after; closed_before; at = written } ->
+    on_reset ~until walk ~at ~past ~written ~cause ~before ~after ~closed_before
+  | Resumed, (Log_started _ | Opened _) -> on_known ~until walk Between_turns ~at ~past line
+  | Resumed, Closed { turn; _ } ->
+    if turn >= start
+    then on_known ~until walk Between_turns ~at ~past line
+    else (
+      match replay ~turns_path ~turn ~closed:at with
+      | Error error -> Scan.Stop (Error error)
+      | Ok (Replay_refused { offset; reason }) -> refused walk ~at:offset reason
+      | Ok (Replayed { known; bytes }) ->
+        on_known ~until { walk with bytes = walk.bytes + bytes } known ~at ~past line)
+;;
+
+let checked_id ~turns_path ~expected =
+  let replaced observed = Error (Fault (Turn_log_replaced { expected; observed })) in
+  match Store.read_start turns_path with
+  | Ok (Some { id; at = (_ : float); mark = (_ : Log.mark) }) ->
+    if Log.Log_id.equal id expected then Ok () else replaced (Some id)
+  | Ok None | Error (Row_undecodable _ | Log_start_missing) -> replaced None
+  | Error (Read_failed { path; detail }) -> read_failed (Scan.Read_failed { path; detail })
+  | Error Moved_while_reading -> read_failed Scan.Moved
+;;
+
+let read ~turns_path ~until (tail : Librarian_log.line) =
+  let expected, start, covered =
+    match tail with
+    | Started { turn_log; turn_log_offset; covered; _ } -> turn_log, turn_log_offset, covered
+    | Committed { turn_log; turn_log_offset; covered; _ } -> turn_log, turn_log_offset, covered
+  in
+  match checked_id ~turns_path ~expected with
+  | Error error -> Error error
+  | Ok () ->
+    let init =
+      { place = (if Int.equal start 0 then Known Not_started else Resumed)
+      ; from = covered
+      ; spans = []
+      ; with_items = 0
+      ; bytes = 0
+      }
+    in
+    let reading walk stop = Ok { spans = List.rev walk.spans; stop; bytes = walk.bytes } in
+    (match
+       Store.fold_from turns_path ~from:start ~init ~f:(fun walk ({ at; past; line } : Store.scanned) ->
+         let walk = { walk with bytes = walk.bytes + past - at } in
+         match line with
+         | Error reason -> refused walk ~at (Undecodable reason)
+         | Ok line -> on_line ~turns_path ~until ~start walk ~at ~past line)
+     with
+     | Ok (Reached_end walk) -> reading walk Log_end
+     | Ok (Stopped (Ok (walk, stop))) -> reading walk stop
+     | Ok (Stopped (Error error)) -> Error error
+     | Error (Not_a_row_start { from; length }) -> Error (Fault (Position_lost { offset = from; length }))
+     | Error (Scan_failed error) -> read_failed error)
+;;

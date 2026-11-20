@@ -26,6 +26,10 @@ val input
 (** The input the pass hands the Librarian. Reads the Goal store and
     goal-task links for [meta.current_task_id] through the IO pool. *)
 
+exception Blank_keeper_name
+(** A signal named no Keeper. The unit that meets it raises, and the memory
+    lane logs and counts it as a failed unit. *)
+
 val run
   :  base_path:string
   -> keeper_name:string
@@ -34,3 +38,8 @@ val run
 (** Captures the Keeper's pending sources and runs one pass when {!needed}
     says so. Does nothing when the Librarian is off, or when the Keeper has
     no owner, no meta, or is stopping. *)
+
+val install : unit -> unit
+(** Install after the detached memory executor. From then on each queue
+    signal submits one pass to that Keeper's memory lane; the lane keeps the
+    latest. The producer of a signal never waits for the pass. *)

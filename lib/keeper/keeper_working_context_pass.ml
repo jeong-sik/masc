@@ -75,6 +75,8 @@ let input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta)
   ; working_context
   ; messages = []; tool_observations = []; counterpart_observations = [] }
 
+exception Blank_keeper_name
+
 let run ~base_path ~keeper_name ~keeper_id =
   match
     ( Env_config.KeeperMemoryOs.librarian_config_state ()
@@ -101,4 +103,21 @@ let run ~base_path ~keeper_name ~keeper_id =
     , ( Owner_absent
       | Owner_projection { meta = None; _ }
       | Owner_projection { stopping = true; _ } ) ) -> ()
+;;
+
+let install () =
+  Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+    match Env_config.KeeperMemoryOs.librarian_config_state () with
+    | Disabled | Invalid -> ()
+    | Enabled ->
+      (* A signal can come from an HTTP or IO domain. Only the short submission
+         crosses to the root switch owner; the model call is detached. *)
+      Eio_context.run_on_owner_domain (fun () ->
+        let (_ : Keeper_memory_lane.outcome) =
+          Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
+            match Keeper_identity.Keeper_id.of_string keeper_name with
+            | Some keeper_id -> run ~base_path ~keeper_name ~keeper_id
+            | None -> raise Blank_keeper_name)
+        in
+        ()))
 ;;

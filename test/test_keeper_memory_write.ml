@@ -1,4 +1,4 @@
-(** Explicit writes distinguish durable pending input from admitted Memory. *)
+(** Explicit Memory writes through the Keeper's write tool. *)
 
 module Runtime = Masc.Keeper_tool_memory_runtime
 module Current = Masc.Keeper_memory_os_current
@@ -109,6 +109,23 @@ let make_meta name =
     { meta with runtime = { meta.runtime with usage } }
 ;;
 
+(* The Memory tools write through the Keeper's Memory writer, so every case
+   runs in an Eio loop and a Keeper gets its writer before its first tool
+   call. *)
+let tool_case name speed body =
+  Alcotest.test_case name speed (Masc_test_deps.Memory_tool_case.run body)
+;;
+
+let write_tool ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~args =
+  Masc_test_deps.Memory_tool_case.writer ~config meta.name;
+  Runtime.keeper_memory_write_with_outcome ~config ~meta ~args
+;;
+
+let retract_tool ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~args =
+  Masc_test_deps.Memory_tool_case.writer ~config meta.name;
+  Runtime.keeper_memory_retract_with_outcome ~config ~meta ~args
+;;
+
 let json_field key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with
@@ -200,19 +217,6 @@ let seed_current ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) claim =
       ~source:{Current.kind=Current.Explicit_write; trace_id="fixture"} value with
   | Ok _ -> Masc.Keeper_memory_os_types.memory_id value
   | Error _ -> Alcotest.fail "could not seed current fact"
-;;
-
-let admit_pending ~keepers_dir ~keeper_id =
-  let module Queue = Masc.Keeper_memory_admission_queue in
-  let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
-  let batch = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
-    | Some batch -> batch | None -> Alcotest.fail "pending input missing" in
-  let facts = Queue.candidates batch |> List.map (fun (row : Queue.candidate) -> row.fact) in
-  ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:(Queue.candidate_ids batch)
-    ~keepers_dir ~keeper_id ~now:(Time_compat.now ())
-    ~source:{Current.kind=Current.Librarian;trace_id="fixture-admission"}
-    ~absorbed:[] ~revisions:[] ~new_claims:facts () |> require);
-  Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require
 ;;
 
 (* A Board reference names where an observation was read. It is an observation
@@ -464,29 +468,27 @@ let test_valid_body_composition () =
      Alcotest.failf "unexpected validation error: %s" (error_label error_kind))
 ;;
 
-(* Nobody drains the admission queue while the Librarian switch is off, so a
-   plain observation must not enter it there: the write takes the direct
-   current-snapshot path and is recallable immediately. *)
-let test_an_ordinary_write_bypasses_the_queue_when_the_librarian_is_off () =
-  with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "0" (fun () ->
-    with_temp_dir
-    @@ fun base_path ->
-    let config = Masc.Workspace.default_config base_path in
-    let meta = make_meta "librarian-off" in
-    let args = make_args ~title:"t" ~content:"the standby region is eu-west-2" in
-    let receipt =
-      (Runtime.keeper_memory_write_with_outcome ~config ~meta ~args)
-        .Masc.Keeper_tool_execution.raw_output
-    in
-    let json = Yojson.Safe.from_string receipt in
-    Alcotest.(check string) "a switch-off write lands in current Memory"
-      "persisted_current_snapshot" (string_field "outcome" json);
-    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-    Alcotest.(check int) "the fact is recallable immediately" 1
-      (List.length (current_facts ~keepers_dir ~keeper_id:meta.name)))
+(* A plain observation commits to the current snapshot and is recallable
+   immediately. *)
+let test_an_ordinary_write_lands_in_current_memory () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "ordinary-write" in
+  let args = make_args ~title:"t" ~content:"the standby region is eu-west-2" in
+  let receipt =
+    (write_tool ~config ~meta ~args)
+      .Masc.Keeper_tool_execution.raw_output
+  in
+  let json = Yojson.Safe.from_string receipt in
+  Alcotest.(check string) "the write lands in current Memory"
+    "persisted_current_snapshot" (string_field "outcome" json);
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Alcotest.(check int) "the fact is recallable immediately" 1
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name))
 
-(* Pending receipt identity changes for each observation, but must not make
-   repeated identical writes look like useful progress to the repeat guard. *)
+(* Writing a claim Memory already holds moves the snapshot's stamps and nothing
+   else, so the repeat guard reads every such rewrite as the same answer. *)
 let test_a_rewrite_receipt_has_the_same_answer () =
   with_temp_dir
   @@ fun base_path ->
@@ -494,7 +496,7 @@ let test_a_rewrite_receipt_has_the_same_answer () =
   let meta = make_meta "rewrite-answer" in
   let args = make_args ~title:"t" ~content:"the deployment region is eu-west-1" in
   let write () =
-    (Runtime.keeper_memory_write_with_outcome ~config ~meta ~args)
+    (write_tool ~config ~meta ~args)
       .Masc.Keeper_tool_execution.raw_output
   in
   let fingerprint receipt =
@@ -507,19 +509,15 @@ let test_a_rewrite_receipt_has_the_same_answer () =
   in
   let first = write () in
   let second = write () in
-  let first_json = Yojson.Safe.from_string first in
-  let second_json = Yojson.Safe.from_string second in
-  Alcotest.(check string) "write is pending, not a current insertion"
-    "persisted_pending_admission" (string_field "outcome" first_json);
-  Alcotest.(check bool) "separate observations have distinct queue identities" false
-    (string_field "request_id" first_json = string_field "request_id" second_json);
-  Alcotest.(check string) "queue stamps cannot manufacture progress"
-    (fingerprint first) (fingerprint second);
+  let third = write () in
+  let disposition receipt = string_field "identity_disposition" (Yojson.Safe.from_string receipt) in
+  Alcotest.(check string) "the first write inserts the claim" "inserted" (disposition first);
+  Alcotest.(check string) "the second sees it again" "reobserved" (disposition second);
+  Alcotest.(check string) "snapshot stamps cannot manufacture progress"
+    (fingerprint second) (fingerprint third);
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Alcotest.(check int) "repeated pending writes do not change current Memory" 0
-    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
-  List.iter (fun field -> Alcotest.(check bool) ("no current identity field: " ^ field) true
-    (Yojson.Safe.Util.member field first_json = `Null)) ["memory_id";"revision";"identity_disposition"]
+  Alcotest.(check int) "Memory holds the claim once" 1
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name))
 ;;
 
 let test_write_comes_back_through_recall () =
@@ -527,11 +525,8 @@ let test_write_comes_back_through_recall () =
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "durable-write" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
   let execution =
-    Runtime.keeper_memory_write_with_outcome
+    write_tool
       ~config
       ~meta
       ~args:
@@ -548,7 +543,7 @@ let test_write_comes_back_through_recall () =
     (match json_field "ok" response with
      | `Bool value -> value
      | _ -> false);
-  Alcotest.(check string) "stored as pending input" "pending_memory_admission"
+  Alcotest.(check string) "stored in the current snapshot" "current_memory_snapshot"
     (string_field "store" response);
   let recorded_at = string_field "recorded_at" response in
   Alcotest.(check bool) "receipt carries a UTC stamp" true
@@ -557,36 +552,43 @@ let test_write_comes_back_through_recall () =
     ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
     ~args:(`Assoc ["query",`String "reasoning_content";"source",`String "current"])
     |> Yojson.Safe.from_string |> match_texts in
-  Alcotest.(check (list string)) "pending input is not recalled as current" [] (search ());
-  Alcotest.(check int) "no current fact before admission" 0
-    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
-  let pending_id = string_field "request_id" response in
-  (match Masc.Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id:meta.name with
-   | Ok (Some batch) ->
-     (match Masc.Keeper_memory_admission_queue.candidates batch with
-      | [row] ->
-        Alcotest.(check string) "receipt identifies the durable candidate" pending_id row.request_id;
-        Alcotest.(check int) "receipt sequence is authoritative" row.sequence (int_field "sequence" response);
-        Alcotest.(check string) "observed candidate retains original content"
-          "reasoning_content must be replayed unmodified" row.fact.claim
-      | _ -> Alcotest.fail "expected one pending candidate")
-   | _ -> Alcotest.fail "successful write omitted pending candidate");
-  let unsupported = Runtime.keeper_memory_write_with_outcome ~config ~meta
-    ~args:(make_derived_args ~content:"derived too early" ~rule_id:"rule"
-      ~premise_ids:[pending_id]) in
-  Alcotest.(check bool) "pending request identity is not a premise" false
-    (Yojson.Safe.Util.member "ok" (Yojson.Safe.from_string unsupported.raw_output) = `Bool true);
-  admit_pending ~keepers_dir ~keeper_id:meta.name;
-  Alcotest.(check (list string)) "admitted claim reaches demand recall"
-    ["reasoning_content must be replayed unmodified"] (search ());
-  (match Masc.Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id:meta.name with
-   | Ok None -> () | _ -> Alcotest.fail "committed admission was not acknowledged")
+  Alcotest.(check (list string)) "the claim reaches demand recall"
+    ["reasoning_content must be replayed unmodified"] (search ())
 ;;
 
-let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
-  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
-  | Ok rows -> rows
-  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+(* The commit lines of a Keeper's commit log, oldest first. The Memory tools
+   write through the Keeper's writer, whose record of a write is that log. *)
+let commit_lines ~keepers_dir ~keeper_id : Masc.Librarian_log.commit list =
+  let module Store = Masc.Librarian_log_store in
+  match
+    Store.fold
+      (Store.path_for_keepers_dir ~keepers_dir ~keeper_id)
+      ~init:[]
+      ~f:(fun seen (scanned : Store.scanned) ->
+        match scanned.line with
+        | Ok (Committed commit) -> commit :: seen
+        | Ok (Started _) -> seen
+        | Error (_ : Store.undecodable) -> Alcotest.fail "a commit log line does not decode")
+  with
+  | Ok seen -> List.rev seen
+  | Error error -> Alcotest.fail (Masc.Private_jsonl_scan.error_to_string error)
+;;
+
+(* Each fact a commit removed, with why it left. *)
+let removed_by (commit : Masc.Librarian_log.commit) =
+  List.map
+    (fun ((fact : Masc.Keeper_memory_os_types.fact), (removal : Masc.Librarian_effects.removal)) ->
+       ( Masc.Keeper_memory_os_types.memory_id fact
+       , match removal with
+         | Retracted { by = Keeper; reason } -> "retracted by the keeper: " ^ reason
+         | Retracted { by = Operator operator; reason } ->
+           "retracted by " ^ operator ^ ": " ^ reason
+         | Support_lost { missing } -> "support lost: " ^ String.concat "," missing
+         | Superseded_by successor -> "superseded by " ^ successor
+         | Dropped { reason } -> "dropped: " ^ reason
+         | Merged_into successor -> "merged into " ^ successor
+         | Revised_into successor -> "revised into " ^ successor ))
+    commit.effects.removed
 ;;
 
 let test_retract_cascades_through_public_tool_and_journals_reason () =
@@ -598,7 +600,7 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
   let write args =
-    Runtime.keeper_memory_write_with_outcome ~config ~meta ~args
+    write_tool ~config ~meta ~args
     |> fun execution ->
     execution.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
   in
@@ -621,7 +623,7 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
   in
   let consequence_id = string_field "memory_id" consequence in
   let execution =
-    Runtime.keeper_memory_retract_with_outcome
+    retract_tool
       ~config
       ~meta
       ~args:
@@ -670,29 +672,23 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
     [ second_id ]
     (current_facts ~keepers_dir ~keeper_id:meta.name
      |> List.map Masc.Keeper_memory_os_types.memory_id);
-  let journal =
-    readable_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10
-  in
-  Alcotest.(check int) "four writes and one retract are journaled" 5 (List.length journal);
-  (match List.rev journal |> List.hd with
-   | Ok
-       (Current.Journal_committed
-          { source = { kind = Current.Explicit_retract; _ }
-          ; dropped = Some [ dropped ]
-          ; change
-          ; _
-          }) ->
-     Alcotest.(check string) "journal direct target" first_id dropped.memory_id;
-     Alcotest.(check string)
-       "journal durable reason"
-       "manifest now selects region B"
-       dropped.reason;
-     Alcotest.(check int) "journal cascaded support evidence" 2 (List.length change.invalidated)
-   | Ok _ -> Alcotest.fail "last journal line is not the exact retract commit"
-   | Error detail -> Alcotest.fail detail);
+  (* The two premises were in the snapshot the writer's store opened on. The
+     two derived writes and the retraction are its commit lines. *)
+  let commits = commit_lines ~keepers_dir ~keeper_id:meta.name in
+  Alcotest.(check int) "two writes and one retract are commit lines" 3 (List.length commits);
+  (match List.rev commits with
+   | retraction :: _ ->
+     Alcotest.(check (list (pair string string)))
+       "the line keeps each removed fact with why it left"
+       [ first_id, "retracted by the keeper: manifest now selects region B"
+       ; conclusion_id, "support lost: " ^ first_id
+       ; consequence_id, "support lost: " ^ conclusion_id
+       ]
+       (removed_by retraction)
+   | [] -> Alcotest.fail "no commit line");
   let revision_before_missing = int_field "revision" response in
   let missing =
-    Runtime.keeper_memory_retract_with_outcome
+    retract_tool
       ~config
       ~meta
       ~args:
@@ -724,9 +720,9 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
   in
   Alcotest.(check int) "missing target does not advance revision" revision_before_missing current.revision;
   Alcotest.(check int)
-    "missing target does not append journal"
-    5
-    (List.length (readable_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10))
+    "missing target does not append a commit line"
+    3
+    (List.length (commit_lines ~keepers_dir ~keeper_id:meta.name))
 ;;
 
 let test_derived_write_uses_exact_premise_receipt () =
@@ -735,7 +731,7 @@ let test_derived_write_uses_exact_premise_receipt () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "derived-write" in
   let write args =
-    Runtime.keeper_memory_write_with_outcome ~config ~meta ~args
+    write_tool ~config ~meta ~args
   in
   let premise_id = seed_current ~config ~meta "dependency failed" in
   let conclusion =
@@ -776,7 +772,7 @@ let test_unsupported_derived_write_is_proven_pre_effect () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "unsupported-derived-write" in
   let execution =
-    Runtime.keeper_memory_write_with_outcome
+    write_tool
       ~config
       ~meta
       ~args:
@@ -815,7 +811,7 @@ let test_demand_recall_does_not_materialize_or_verify_all_memory () =
   let host_path = Filename.concat sandbox_root source_path in
   Fs_compat.save_file host_path "old bytes";
   let source_claim = "The source-bound deployment claim is not a standing instruction." in
-  let write = Runtime.keeper_memory_write_with_outcome ~config ~meta
+  let write = write_tool ~config ~meta
       ~args:(make_source_args ~title:"" ~content:source_claim ~source_path) in
   Alcotest.(check bool) "source write succeeds" true
     (json_field "ok" (Yojson.Safe.from_string write.raw_output) = `Bool true);
@@ -975,7 +971,7 @@ let test_search_revalidates_query_sources_only () =
   Fs_compat.mkdir_p sandbox_root;
   let write path claim =
     Fs_compat.save_file (Filename.concat sandbox_root path) "original";
-    let output = Runtime.keeper_memory_write_with_outcome ~config ~meta
+    let output = write_tool ~config ~meta
         ~args:(make_source_args ~title:"" ~content:claim ~source_path:path) in
     Alcotest.(check bool) "source write succeeds" true
       (json_field "ok" (Yojson.Safe.from_string output.raw_output) = `Bool true) in
@@ -1021,7 +1017,7 @@ let test_selected_source_rebound_digest_stays_unverified () =
   let path = "config.txt" in
   let host_path = Filename.concat sandbox_root path in
   Fs_compat.save_file host_path "first bytes";
-  let write claim = Runtime.keeper_memory_write_with_outcome ~config ~meta
+  let write claim = write_tool ~config ~meta
       ~args:(make_source_args ~title:"" ~content:claim ~source_path:path) |> ignore in
   let read () = match Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
     | Ok (Some snapshot) -> snapshot
@@ -1130,7 +1126,7 @@ let test_superseded_recall_pin_releases_only_after_history_retention () =
     let pin = Filename.concat keeper_dir "memory-recall-current.json" in
     let prior_pin = Fs_compat.load_file pin in
     if not demand then begin
-      let retracted = Runtime.keeper_memory_retract_with_outcome ~config ~meta
+      let retracted = retract_tool ~config ~meta
           ~args:(make_retract_args ~memory_id
             ~reason:"The last current fact was retracted.") in
       Alcotest.(check bool) "last fact retracts" true
@@ -1252,7 +1248,7 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     | Error detail -> Alcotest.fail detail
   in
   let write_claim content =
-    Runtime.keeper_memory_write_with_outcome
+    write_tool
       ~config
       ~meta
       ~args:(make_source_args ~title:"" ~content ~source_path)
@@ -1818,7 +1814,7 @@ let test_source_bound_write_is_not_gated_by_recall_size () =
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   let response =
-    Runtime.keeper_memory_write_with_outcome
+    write_tool
       ~config
       ~meta
       ~args:
@@ -1914,7 +1910,7 @@ let test_invalid_write_is_proven_pre_effect () =
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
   let result =
-    Runtime.keeper_memory_write_with_outcome
+    write_tool
       ~config
       ~meta:(make_meta "invalid-write")
       ~args:(make_args ~title:"" ~content:"")
@@ -2310,7 +2306,7 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
     [ fact "ambient decoy workspace only" ];
   with_env "MASC_BASE_PATH" decoy_base (fun () ->
     let write_response =
-      Runtime.keeper_memory_write_with_outcome
+      write_tool
         ~config
         ~meta
         ~args:(make_args ~title:"" ~content:"workspace A only")
@@ -2323,16 +2319,6 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
       (match json_field "ok" write_response with
        | `Bool value -> value
        | _ -> false);
-    let pending_claims keepers_dir = match Masc.Keeper_memory_admission_queue.read_pending
-        ~keepers_dir ~keeper_id:meta.name with
-      | Ok None -> []
-      | Ok (Some batch) -> Masc.Keeper_memory_admission_queue.candidates batch
-          |> List.map (fun (row : Masc.Keeper_memory_admission_queue.candidate) -> row.fact.claim)
-      | Error detail -> Alcotest.fail detail in
-    Alcotest.(check (list string)) "pending write uses config workspace" ["workspace A only"]
-      (pending_claims target_keepers);
-    Alcotest.(check (list string)) "ambient queue untouched" [] (pending_claims decoy_keepers);
-    admit_pending ~keepers_dir:target_keepers ~keeper_id:meta.name;
     let claims_at keepers_dir =
       current_facts ~keepers_dir ~keeper_id:meta.name
       |> List.map (fun fact -> fact.Masc.Keeper_memory_os_types.claim)
@@ -2485,29 +2471,6 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
   Alcotest.(check bool) "the detail names the file" true (mentions_path 0)
 ;;
 
-let test_pending_and_current_corruption_are_distinct () =
-  with_temp_dir @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "pending-corruption" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Fs_compat.mkdir_p keepers_dir;
-  let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
-  Fs_compat.save_file current_path "{broken-current";
-  let write () = Runtime.keeper_memory_write_with_outcome ~config ~meta
-    ~args:(make_args ~title:"" ~content:"a candidate, not yet current") in
-  let accepted = write () in
-  Alcotest.(check bool) "pending durability is independent of current decoding" true
-    (Yojson.Safe.Util.member "ok" (Yojson.Safe.from_string accepted.raw_output) = `Bool true);
-  Alcotest.(check string) "pending append does not repair or replace current"
-    "{broken-current" (Fs_compat.load_file current_path);
-  let queue_path = Masc.Keeper_memory_admission_queue.path ~keepers_dir ~keeper_id:meta.name in
-  Fs_compat.save_file queue_path "{broken-pending";
-  let rejected = write () in
-  check_failure_class "corrupt pending store" Tool_result.Dependency_unavailable rejected;
-  Alcotest.(check string) "malformed pending bytes are preserved"
-    "{broken-pending" (Fs_compat.load_file queue_path)
-;;
-
 (* A crash mid-append leaves a line with no newline. The next absorb commits
    anyway: the append cuts the torn line back to the last complete row before
    it writes. A librarian that could not commit would spend a provider call
@@ -2596,16 +2559,13 @@ let test_absorbed_search_preserves_board_basis source =
             @ List.map (fun (_, value) -> "board_comment_id", value) comment_fields)
        in
        let written =
-         Runtime.keeper_memory_write_with_outcome ~config ~meta ~args
+         write_tool ~config ~meta ~args
          |> fun execution -> Yojson.Safe.from_string execution.raw_output
        in
        Alcotest.(check bool) "public writer succeeded" true (json_field "ok" written = `Bool true);
-       Alcotest.(check bool) "pending receipt preserves the original Board source" true
-         (Yojson.Safe.equal (expected_basis comment_fields) (json_field "basis" written));
-       Alcotest.(check string) "Board observations are pending" "persisted_pending_admission"
-         (string_field "outcome" written))
+       Alcotest.(check bool) "the receipt preserves the original Board source" true
+         (Yojson.Safe.equal (expected_basis comment_fields) (json_field "basis" written)))
     cases;
-  admit_pending ~keepers_dir ~keeper_id:meta.name;
   let original = current_facts ~keepers_dir ~keeper_id:meta.name in
   Alcotest.(check int) "both original facts were stored" 2 (List.length original);
   List.iter
@@ -3546,34 +3506,6 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
    class tells the model that other arguments will not save the claim. A store
    error does not say whether the new snapshot was moved into place before it,
    so the commit is reported as unknown rather than as not saved. *)
-let test_pending_capacity_refusal_is_proven_before_effect () =
-  with_temp_dir @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "capacity-refusal" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let queue_path = Masc.Keeper_memory_admission_queue.path ~keepers_dir ~keeper_id:meta.name in
-  let write content = Runtime.keeper_memory_write_with_outcome
-    ~config ~meta ~args:(make_args ~title:"" ~content) in
-  let first = write "keep the first complete claim" in
-  Alcotest.(check bool) "first candidate accepted" true
-    (Yojson.Safe.Util.member "ok"
-       (Yojson.Safe.from_string first.Masc.Keeper_tool_execution.raw_output) = `Bool true);
-  let before = Fs_compat.load_file queue_path in
-  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.pending_max_bytes_env_key
-    (Some (string_of_int (String.length before))) @@ fun () ->
-  let refused = write "keep the second complete claim too" in
-  check_failure_class "full pending queue" Tool_result.Workflow_rejection refused;
-  Alcotest.(check bool) "refusal proves no effect" true
-    (refused.Masc.Keeper_tool_execution.failure_effect_disposition = Tool_result.Proven_pre_effect);
-  let response = Yojson.Safe.from_string refused.Masc.Keeper_tool_execution.raw_output in
-  Alcotest.(check string) "wire error preserves capacity refusal"
-    "pending_admission_capacity_exceeded" (string_field "error_kind" response);
-  Alcotest.(check string) "wire effect agrees with typed effect"
-    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_pre_effect)
-    (string_field "effect_disposition" response);
-  Alcotest.(check string) "existing pending input is untouched" before (Fs_compat.load_file queue_path)
-;;
-
 let test_unwritable_store_is_a_dependency_failure () =
   with_temp_dir
   @@ fun base_path ->
@@ -3582,11 +3514,11 @@ let test_unwritable_store_is_a_dependency_failure () =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
-  (* A directory where the pending queue file belongs: every open for writing
-     fails regardless of the user the test runs as. *)
-  Fs_compat.mkdir_p (Masc.Keeper_memory_admission_queue.path ~keepers_dir ~keeper_id:meta.name);
+  (* A directory where the snapshot file belongs: the writer's store cannot
+     read it as a snapshot, whatever user the test runs as. *)
+  Fs_compat.mkdir_p (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name);
   let execution =
-    Runtime.keeper_memory_write_with_outcome
+    write_tool
       ~config
       ~meta
       ~args:(make_args ~title:"" ~content:"a claim that cannot be saved")
@@ -3596,17 +3528,21 @@ let test_unwritable_store_is_a_dependency_failure () =
     execution.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
   in
   Alcotest.(check string)
-    "persistence, not validation"
-    "pending_admission_persistence_failed"
+    "Memory did not take the write"
+    "memory_unwritable"
     (string_field "error_kind" response);
+  Alcotest.(check string)
+    "the writer's store stopped on a snapshot it cannot read"
+    "store_stopped_memory_unreadable"
+    (string_field "unwritable" response);
   Alcotest.(check bool)
-    "the commit is unknown"
+    "nothing was committed"
     true
     (execution.Masc.Keeper_tool_execution.failure_effect_disposition
-     = Tool_result.Effect_outcome_unknown);
+     = Tool_result.Proven_pre_effect);
   Alcotest.(check string)
     "the payload names the same disposition"
-    (Tool_result.failure_effect_disposition_to_string Tool_result.Effect_outcome_unknown)
+    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_pre_effect)
     (string_field "effect_disposition" response)
 ;;
 
@@ -3632,21 +3568,21 @@ let test_input_and_state_failures_keep_their_own_classes () =
   check_failure_class
     "empty content is the caller's to fix"
     Tool_result.Policy_rejection
-    (Runtime.keeper_memory_write_with_outcome
+    (write_tool
        ~config
        ~meta
        ~args:(make_args ~title:"" ~content:""));
   check_failure_class
     "a malformed memory id is the caller's to fix"
     Tool_result.Policy_rejection
-    (Runtime.keeper_memory_retract_with_outcome
+    (retract_tool
        ~config
        ~meta
        ~args:(make_retract_args ~memory_id:"not-an-id" ~reason:"incorrect"));
   check_failure_class
     "an absent fact is the state refusing"
     Tool_result.Workflow_rejection
-    (Runtime.keeper_memory_retract_with_outcome
+    (retract_tool
        ~config
        ~meta
        ~args:(make_retract_args ~memory_id:(memory_id 'a') ~reason:"incorrect"))
@@ -3661,7 +3597,7 @@ let test_unreadable_source_path_is_the_callers_to_fix () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "source-path" in
   let write source_path =
-    Runtime.keeper_memory_write_with_outcome
+    write_tool
       ~config
       ~meta
       ~args:(make_source_args ~title:"" ~content:"a claim" ~source_path)
@@ -3720,7 +3656,7 @@ let test_current_search_pages_all_matching_memory () =
   List.iter (fun index ->
     let source_path = Printf.sprintf "decision-%02d.txt" index in
     Fs_compat.save_file (Filename.concat sandbox_root source_path) "original decision";
-    let written = Runtime.keeper_memory_write_with_outcome ~config ~meta
+    let written = write_tool ~config ~meta
         ~args:(make_source_args ~title:""
           ~content:(Printf.sprintf "deployment source decision %02d" index) ~source_path) in
     Alcotest.(check bool) "source fact persisted" true
@@ -3868,9 +3804,14 @@ let test_retract_records_a_retraction () =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
-  let written_id = seed_current ~config ~meta "the deploy needs assets" in
+  let write () =
+    (write_tool ~config ~meta ~args:(make_args ~title:"" ~content:"the deploy needs assets"))
+      .Masc.Keeper_tool_execution.raw_output
+    |> Yojson.Safe.from_string
+  in
+  let written_id = string_field "memory_id" (write ()) in
   let retract id =
-    Runtime.keeper_memory_retract_with_outcome
+    retract_tool
       ~config
       ~meta
       ~args:(make_retract_args ~memory_id:id ~reason:"superseded by the runbook")
@@ -3879,34 +3820,34 @@ let test_retract_records_a_retraction () =
     Yojson.Safe.from_string (retract written_id).Masc.Keeper_tool_execution.raw_output
   in
   Alcotest.(check bool) "retraction succeeds" true (json_field "ok" response = `Bool true);
+  (* Every retraction the commit log holds, as the fact and why it left. *)
   let retractions () =
-    match Current.read_commit_lineage ~keepers_dir ~keeper_id:meta.name with
-    | Ok lineage -> lineage.Current.retractions
-    | Error detail -> Alcotest.fail ("memory lineage unreadable: " ^ detail)
+    List.concat_map removed_by (commit_lines ~keepers_dir ~keeper_id:meta.name)
   in
-  Alcotest.(check (list string))
-    "the journal names the retracted id" [ written_id ] (retractions ());
+  let recorded = [ written_id, "retracted by the keeper: superseded by the runbook" ] in
+  Alcotest.(check (list (pair string string)))
+    "the commit line keeps the retracted fact with its reason" recorded (retractions ());
   Alcotest.(check int)
     "a retract writes no sidecar event" 0
     (List.length (events_for ~keepers_dir ~keeper_id:meta.name));
   ignore (retract (memory_id 'f'));
-  Alcotest.(check (list string))
-    "a retract of an unknown id records nothing" [ written_id ] (retractions ());
+  Alcotest.(check (list (pair string string)))
+    "a retract of an unknown id records nothing" recorded (retractions ());
   Alcotest.(check int) "the retracted fact is no longer current" 0
     (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
-  let restored_id = seed_current ~config ~meta "the deploy needs assets" in
-  Alcotest.(check string) "restored current claim keeps content identity" written_id restored_id;
-  (match current_facts ~keepers_dir ~keeper_id:meta.name with
-   | [ current ] ->
-       let current_id = Masc.Keeper_memory_os_types.memory_id current in
-       Alcotest.(check string) "the current fact reuses that identity" written_id current_id;
-       let history =
-         Events.summaries_for ~memory_ids:[current_id] ~revisions:[]
-           ~retractions:(retractions ())
-           (events_for ~keepers_dir ~keeper_id:meta.name) |> List.hd in
-       Alcotest.(check int) "current fact retains the previous retraction" 1 history.retracted_count;
-       Alcotest.(check int) "re-adding is not a retrieval" 0 history.retrieved_count
-   | _ -> Alcotest.fail "expected only the re-added fact")
+  let restored = write () in
+  Alcotest.(check string)
+    "the claim written again keeps its content identity" written_id
+    (string_field "memory_id" restored);
+  Alcotest.(check string)
+    "and is a new fact, not the retracted one seen again" "inserted"
+    (string_field "identity_disposition" restored);
+  Alcotest.(check (list string))
+    "it is current again" [ written_id ]
+    (current_facts ~keepers_dir ~keeper_id:meta.name
+     |> List.map Masc.Keeper_memory_os_types.memory_id);
+  Alcotest.(check (list (pair string string)))
+    "and the earlier retraction stays in the commit log" recorded (retractions ())
 ;;
 
 let test_source_snapshot_commit_notifications () =
@@ -4219,273 +4160,267 @@ let () =
   Alcotest.run
     "keeper_memory_write"
     [ ( "commit notification"
-      , [ Alcotest.test_case "source writes and invalidations notify after locks" `Quick test_source_snapshot_commit_notifications ] )
+      , [ tool_case "source writes and invalidations notify after locks" `Quick test_source_snapshot_commit_notifications ] )
     ; ( "repeat guard answer"
-      , [ Alcotest.test_case
+      , [ tool_case
             "a rewrite receipt has the same answer"
             `Quick
             test_a_rewrite_receipt_has_the_same_answer
         ] )
-    ; ( "librarian switch"
-      , [ Alcotest.test_case
-            "an ordinary write bypasses the queue when the Librarian is off"
+    ; ( "ordinary write"
+      , [ tool_case
+            "an ordinary write lands in current Memory"
             `Quick
-            test_an_ordinary_write_bypasses_the_queue_when_the_librarian_is_off
+            test_an_ordinary_write_lands_in_current_memory
         ] )
     ; ( "validation"
-      , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
-        ; Alcotest.test_case
+      , [ tool_case "typed validation failures" `Quick test_validation_taxonomy
+        ; tool_case
             "a refused derivation names the field and what it takes"
             `Quick
             test_a_refused_derivation_names_the_field_and_what_it_takes
-        ; Alcotest.test_case
+        ; tool_case
             "board reference validation"
             `Quick
             test_board_reference_validation
-        ; Alcotest.test_case
+        ; tool_case
             "typed retract validation failures"
             `Quick
             test_retract_validation_taxonomy
-        ; Alcotest.test_case
+        ; tool_case
             "runtime validation is proven pre-effect"
             `Quick
             test_invalid_write_is_proven_pre_effect
-        ; Alcotest.test_case
+        ; tool_case
             "valid input composes the stored body"
             `Quick
             test_valid_body_composition
-        ; Alcotest.test_case
+        ; tool_case
             "unsupported derived write is proven pre-effect"
             `Quick
             test_unsupported_derived_write_is_proven_pre_effect
         ] )
     ; ( "persistence"
-      , [ Alcotest.test_case
+      , [ tool_case
             "ordinary commit budget preserves snapshot and journal"
             `Quick
             test_ordinary_commit_budget_preserves_store_on_rejection
-        ; Alcotest.test_case
+        ; tool_case
             "over-budget retractions recover incrementally"
             `Quick
             test_over_budget_retraction_recovers_incrementally
-        ; Alcotest.test_case
+        ; tool_case
             "source commit budget counts ordinary facts"
             `Quick
             test_source_commit_budget_counts_ordinary_facts
-        ; Alcotest.test_case
+        ; tool_case
             "ordinary commit budget counts source facts"
             `Quick
             test_ordinary_commit_budget_counts_source_facts
-        ; Alcotest.test_case
+        ; tool_case
             "write comes back through recall"
             `Quick
             test_write_comes_back_through_recall
-        ; Alcotest.test_case
+        ; tool_case
             "derived write uses exact premise receipt"
             `Quick
             test_derived_write_uses_exact_premise_receipt
-        ; Alcotest.test_case
+        ; tool_case
             "retract cascades and journals durable reason"
             `Quick
             test_retract_cascades_through_public_tool_and_journals_reason
-        ; Alcotest.test_case
+        ; tool_case
             "recall snapshots survive GC until history retention releases them"
             `Quick
             test_recall_artifacts_follow_history_retention
-        ; Alcotest.test_case "superseded recall pins keep history then permit collection" `Quick
+        ; tool_case "superseded recall pins keep history then permit collection" `Quick
             test_superseded_recall_pin_releases_only_after_history_retention
-        ; Alcotest.test_case "late recall retirement preserves same-hash publication" `Quick
+        ; tool_case "late recall retirement preserves same-hash publication" `Quick
             test_late_pin_retirement_preserves_new_same_artifact_publication
-        ; Alcotest.test_case "demand recall avoids bulk artifact and source work" `Quick
+        ; tool_case "demand recall avoids bulk artifact and source work" `Quick
             test_demand_recall_does_not_materialize_or_verify_all_memory
-        ; Alcotest.test_case "same-count replacement updates notice and selective recall" `Quick
+        ; tool_case "same-count replacement updates notice and selective recall" `Quick
             test_same_count_replacement_updates_notice_and_demand_search
-        ; Alcotest.test_case "source search validates query candidates only" `Quick
+        ; tool_case "source search validates query candidates only" `Quick
             test_search_revalidates_query_sources_only
-        ; Alcotest.test_case "selected source replacement is not verified by an old query" `Quick
+        ; tool_case "selected source replacement is not verified by an old query" `Quick
             test_selected_source_rebound_digest_stays_unverified
-        ; Alcotest.test_case
+        ; tool_case
             "source change discards stale claim until recreation"
             `Quick
             test_source_bound_write_discards_stale_claim_and_recreates
-        ; Alcotest.test_case
+        ; tool_case
             "source write has no recall size gate"
             `Quick
             test_source_bound_write_is_not_gated_by_recall_size
-        ; Alcotest.test_case
+        ; tool_case
             "source rewrite renews the claim timestamp"
             `Quick
             test_source_bound_rewrite_renews_first_seen
-        ; Alcotest.test_case
+        ; tool_case
             "invalidation rendering only shrinks payload"
             `Quick
             test_invalidation_rendering_is_monotone
-        ; Alcotest.test_case
+        ; tool_case
             "tools isolate config BasePath from ambient decoy"
             `Quick
             test_tools_isolate_workspace_base_path_from_ambient_decoy
-        ; Alcotest.test_case
+        ; tool_case
             "history search preserves distinct message endings"
             `Quick
             test_history_search_preserves_distinct_message_endings
-        ; Alcotest.test_case
+        ; tool_case
             "history search deduplicates identical messages"
             `Quick
             test_history_search_deduplicates_identical_messages
-        ; Alcotest.test_case
+        ; tool_case
             "history and all search exclude runtime context from checkpoint and disk"
             `Quick
             test_history_search_excludes_runtime_context
-        ; Alcotest.test_case "history search reaches retained current messages" `Quick
+        ; tool_case "history search reaches retained current messages" `Quick
             (check_retained_history_match ~checkpoint_texts:[]
                ~current_texts:("Migration prerequisite: amber database" :: history_search_noise 75))
-        ; Alcotest.test_case "history search includes the newest current message" `Quick
+        ; tool_case "history search includes the newest current message" `Quick
             (check_retained_history_match ~checkpoint_texts:[]
                ~current_texts:(history_search_noise 50 @ [ "Migration prerequisite: amber database" ]))
-        ; Alcotest.test_case "history search reaches all working-context messages" `Quick
+        ; tool_case "history search reaches all working-context messages" `Quick
             (check_retained_history_match ~current_texts:[]
                ~checkpoint_texts:("Migration prerequisite: amber database" :: history_search_noise 100))
-        ; Alcotest.test_case
+        ; tool_case
             "history complete query outranks retained fragments"
             `Quick
             test_history_complete_query_outranks_retained_fragments
-        ; Alcotest.test_case "current search pages every matching fact and refuses stale cursors" `Quick
+        ; tool_case "current search pages every matching fact and refuses stale cursors" `Quick
             test_current_search_pages_all_matching_memory
-        ; Alcotest.test_case "history search limits distinct matches" `Quick
+        ; tool_case "history search limits distinct matches" `Quick
             test_history_search_limits_distinct_matches
-        ; Alcotest.test_case "history search orders selected messages" `Quick
+        ; tool_case "history search orders selected messages" `Quick
             test_history_search_order
-        ; Alcotest.test_case "history search reports malformed rows" `Quick
+        ; tool_case "history search reports malformed rows" `Quick
             (test_history_search_reports_read_errors ~malformed:true)
-        ; Alcotest.test_case "history search reports unreadable files" `Quick
+        ; tool_case "history search reports unreadable files" `Quick
             (test_history_search_reports_read_errors ~malformed:false)
-        ; Alcotest.test_case "short acronym search keeps Korean suffixes and excludes word interiors" `Quick
+        ; tool_case "short acronym search keeps Korean suffixes and excludes word interiors" `Quick
             test_short_acronym_search_does_not_select_word_interiors
-        ; Alcotest.test_case
+        ; tool_case
             "search keeps exact matches in store order"
             `Quick
             test_search_keeps_exact_matches_in_store_order
-        ; Alcotest.test_case
+        ; tool_case
             "search records a retrieval per ordinary match"
             `Quick
             test_search_records_a_retrieval_per_ordinary_match
-        ; Alcotest.test_case
+        ; tool_case
             "retract records removal and survives re-adding the claim"
             `Quick
             test_retract_records_a_retraction
-        ; Alcotest.test_case
+        ; tool_case
             "source parser accepts every supported value"
             `Quick
             test_source_parser_accepts_every_supported_value
-        ; Alcotest.test_case
+        ; tool_case
             "absorbed search preserves the original Board basis"
             `Quick
             (fun () -> test_absorbed_search_preserves_board_basis "absorbed")
-        ; Alcotest.test_case
+        ; tool_case
             "all search preserves the original Board basis"
             `Quick
             (fun () -> test_absorbed_search_preserves_board_basis "all")
-        ; Alcotest.test_case
+        ; tool_case
             "source parser rejects unknown value"
             `Quick
             test_source_parser_rejects_unknown_value
-        ; Alcotest.test_case
+        ; tool_case
             "source parser rejects removed memory alias"
             `Quick
             test_source_parser_rejects_removed_memory_alias
-        ; Alcotest.test_case
+        ; tool_case
             "source parser rejects a non-string rendering"
             `Quick
             test_source_parser_rejects_json_rendering_of_a_non_string
         ] )
     ; ( "failure class"
-      , [ Alcotest.test_case
+      , [ tool_case
             "corrupt snapshot is a dependency failure"
             `Quick
             test_corrupt_snapshot_is_a_dependency_failure
-        ; Alcotest.test_case "pending corruption stays distinct from current corruption" `Quick
-            test_pending_and_current_corruption_are_distinct
-        ; Alcotest.test_case
+        ; tool_case
             "a torn tail does not stop the next absorb"
             `Quick
             test_a_torn_tail_does_not_stop_the_next_absorb
-        ; Alcotest.test_case
+        ; tool_case
             "absorbed facts are searchable"
             `Quick
             test_absorbed_facts_are_searchable
-        ; Alcotest.test_case
+        ; tool_case
             "dropped originals remain historical, searchable and read-only"
             `Quick
             test_dropped_originals_are_historical_and_searchable
-        ; Alcotest.test_case
+        ; tool_case
             "absorbed rows follow later merges and leave room"
             `Quick
             test_absorbed_rows_follow_later_merges_and_leave_room
-        ; Alcotest.test_case
+        ; tool_case
             "absorbed chain prefers current and stops before a loop"
             `Quick
             test_absorbed_chain_prefers_current_and_stops_before_a_loop
-        ; Alcotest.test_case
+        ; tool_case
             "absorbed chain follows a revised claim"
             `Quick
             test_absorbed_chain_follows_a_revised_claim
-        ; Alcotest.test_case
+        ; tool_case
             "absorbed search reads events only for a stopped chain"
             `Quick
             test_absorbed_search_reads_events_only_for_a_stopped_chain
-        ; Alcotest.test_case
+        ; tool_case
             "absorbed search reads events only for an answered stopped chain"
             `Quick
             test_absorbed_search_reads_events_only_for_an_answered_stopped_chain
-        ; Alcotest.test_case
+        ; tool_case
             "a query of several words is answered"
             `Quick
             test_a_query_of_several_words_is_answered
-        ; Alcotest.test_case
+        ; tool_case
             "all ranks complete queries across stores"
             `Quick
             test_all_ranks_complete_queries_before_fragments_across_stores
-        ; Alcotest.test_case
+        ; tool_case
             "fragment matching contract is explicit"
             `Quick
             test_fragment_contract_is_whitespace_split_substring_matching
-        ; Alcotest.test_case
+        ; tool_case
             "an unreadable absorbed store leaves all its current facts"
             `Quick
             test_an_unreadable_absorbed_store_leaves_all_its_current_facts
-        ; Alcotest.test_case
-            "pending capacity refusal is proven before effect"
-            `Quick
-            test_pending_capacity_refusal_is_proven_before_effect
-        ; Alcotest.test_case
+        ; tool_case
             "unwritable store is a dependency failure"
             `Quick
             test_unwritable_store_is_a_dependency_failure
-        ; Alcotest.test_case
+        ; tool_case
             "a commit that omits the claim is after the effect"
             `Quick
             test_a_commit_that_omits_the_claim_is_after_the_effect
-        ; Alcotest.test_case
+        ; tool_case
             "input and state failures keep their own classes"
             `Quick
             test_input_and_state_failures_keep_their_own_classes
-        ; Alcotest.test_case
+        ; tool_case
             "unreadable source path is the caller's to fix"
             `Quick
             test_unreadable_source_path_is_the_callers_to_fix
-        ; Alcotest.test_case
+        ; tool_case
             "endpoint source read reports absence by exit status"
             `Quick
             test_endpoint_source_read_reports_by_exit_status
-        ; Alcotest.test_case
+        ; tool_case
             "an unreadable source keeps its fact, marked unverified"
             `Quick
             test_unreadable_source_keeps_its_fact_marked_unverified
-        ; Alcotest.test_case
+        ; tool_case
             "one unreadable source does not stop the pass"
             `Quick
             test_one_unreadable_source_does_not_stop_the_pass
-        ; Alcotest.test_case
+        ; tool_case
             "endpoint source outcome separates the endpoint from the file"
             `Quick
             test_endpoint_source_outcome_separates_endpoint_from_file

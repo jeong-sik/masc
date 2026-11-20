@@ -968,14 +968,6 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
 ;;
 
 
-(* The queue signal hands this unit a bare name, and the queue pass reads the
-   Owner's meta, not the store read that refuses a blank name for the durable
-   and continuity passes. So the name is parsed here, once, before any pass
-   runs. A blank one names no Keeper the Librarian could be told about
-   (RFC-0468 §3.1): the unit raises, and the memory lane logs and counts it
-   as a failed unit. *)
-exception Blank_keeper_name
-
 let after_durable ~durable ~following =
   match durable () with
   | Pending _ -> ()
@@ -985,11 +977,17 @@ let after_durable ~durable ~following =
   | Not_committed | Raised _ -> following ()
 ;;
 
+(* The queue signal hands this unit a bare name, and the queue pass reads the
+   Owner's meta, not the store read that refuses a blank name for the durable
+   and continuity passes. So the name is parsed here, once, before any pass
+   runs. A blank one names no Keeper the Librarian could be told about
+   (RFC-0468 §3.1): the unit raises, and the memory lane logs and counts it
+   as a failed unit. *)
 let run_with_readers ~durable ~continuity ~cleanup ~base_path ~keeper_name =
   let keeper_id =
     match Keeper_identity.Keeper_id.of_string keeper_name with
     | Some keeper_id -> keeper_id
-    | None -> raise Blank_keeper_name
+    | None -> raise Keeper_working_context_pass.Blank_keeper_name
   in
   after_durable ~durable ~following:(fun () ->
     continuity ();
@@ -1109,22 +1107,7 @@ let submit_durable ~base_path ~keeper_name =
           run_memory_cleanup ~base_path ~keeper_name))
 ;;
 
-let with_purge_then_catch_up ~base_path ~keeper_name action =
-  (* The purge cancels the running unit and discards wakes while it holds
-     the Keeper's files, so nothing else puts the unread backlog back on the
-     lane. A stopped Keeper ends no turn, and a purge refused for unread
-     atoms would stay refused. The lane is serial and coalesces, so a
-     submission with nothing unread ends at once. *)
-  match Keeper_memory_lane.with_librarian_purge ~base_path ~keeper_name action with
-  | result ->
-    ignore (submit_durable ~base_path ~keeper_name);
-    result
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    ignore (submit_durable ~base_path ~keeper_name);
-    Printexc.raise_with_backtrace exn backtrace
-;;
+let with_purge_then_catch_up = Keeper_memory_lane.with_librarian_purge
 
 let unlaunched_keeper_names ~persisted ~launched =
   List.filter (fun name -> not (List.mem name launched)) persisted

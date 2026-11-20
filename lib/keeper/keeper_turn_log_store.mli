@@ -75,10 +75,15 @@ val read_start : string -> (start option, read_error) result
 
 type scanned =
   { at : int (** Byte offset of the line. *)
+  ; past : int (** Just past the line's line break: where the next line starts. *)
   ; line : (Keeper_turn_log.line, undecodable) result
   (** A line that does not decode is given as such and does not end the
       scan. *)
   }
+
+(** How many lines one locked read takes. An append waits for one such read
+    at most. *)
+val scan_window_rows : int
 
 (** Every complete line from the first, in order ({!Private_jsonl_scan}).
     No file is no line. *)
@@ -87,6 +92,16 @@ val fold
   -> init:'acc
   -> f:('acc -> scanned -> 'acc)
   -> ('acc, Private_jsonl_scan.error) result
+
+(** The lines from the one that starts at [from], in order, until [f] stops
+    ({!Private_jsonl_scan.fold_from}). The lines before [from] are not read:
+    a reader that saved where it stopped reads on from there. *)
+val fold_from
+  :  string
+  -> from:int
+  -> init:'acc
+  -> f:('acc -> scanned -> ('acc, 'stop) Private_jsonl_scan.step)
+  -> (('acc, 'stop) Private_jsonl_scan.folded, Private_jsonl_scan.from_error) result
 
 (** Only {!End_moved} is worth reading the tail again for at once. After the
     other two the caller writes no line for this event; whoever writes next

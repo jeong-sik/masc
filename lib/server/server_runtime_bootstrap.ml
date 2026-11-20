@@ -414,7 +414,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
      switch. After [set_switch] so the lane and provider calls it forks share
      the same long-lived switch (cancelled together at shutdown). *)
   Keeper_memory_lane.init ~sw;
-  Keeper_librarian_queue_refresh.install ();
+  Keeper_working_context_pass.install ();
   (* RFC-0107 Phase D.2c — record full Eio.Stdenv for piaf-backed
      Pool in Masc_http_client.  Optional: tests / pre-bootstrap
      callers may omit [env], in which case Pool falls back to a
@@ -1396,6 +1396,10 @@ let claim_and_start_keeper_persistence
         (Owner_initialization_failed
            (Keeper_persistence_claim_failed error))
   in
+  (* The Memory writers of this workspace, on the server's switch: after the
+     persisted Keeper stores were reconciled, and before a Keeper's turn can
+     write. *)
+  Keeper_memory_writers.start ~sw ~config:(Mcp_server.workspace_config state);
   try
     Server_bootstrap_loops.start_keeper_loops
       ~claimed_persistence

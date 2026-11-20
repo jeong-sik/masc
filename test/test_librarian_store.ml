@@ -468,6 +468,33 @@ let test_adopt_refuses () =
   check string "nothing was appended" log (file_bytes (log_path place))
 ;;
 
+(* A link to itself where the snapshot belongs: opening it fails for every
+   user, and that is not "no snapshot". *)
+let link_to_itself path =
+  if Sys.file_exists path then Sys.remove path;
+  Unix.symlink (Filename.basename path) path
+;;
+
+let test_a_snapshot_whose_read_fails () =
+  let at_first_boot = started_place () in
+  link_to_itself (snapshot_path at_first_boot);
+  check string "the first boot" "store unwritable" (boot_text at_first_boot);
+  check bool "no commit log was started" false (Sys.file_exists (log_path at_first_boot));
+  let later = started_place () in
+  let store = booted later in
+  link_to_itself (snapshot_path later);
+  check string "a later boot" "store unwritable" (boot_text later);
+  let write = remember port in
+  (match commit store ~at:201.0 write (plan store ~at:201.0 write) with
+   | Stopped stop -> check string "a commit" "store unwritable" (stop_text stop)
+   | Committed _ | Committed_without_snapshot _ | Not_a_snapshot _ ->
+     fail "a commit went on without reading the snapshot");
+  let log = file_bytes (log_path later) in
+  check string "an adoption" "not adopted: store unwritable"
+    (adoption_text (adopt later (Digest.digest_of_bytes "any bytes")));
+  check string "nothing was appended" log (file_bytes (log_path later))
+;;
+
 (* The last line does not decode, so where reading had reached is lost. *)
 let test_adopt_after_an_unreadable_tail () =
   let place = started_place () in
@@ -531,6 +558,7 @@ let () =
     ; ( "adopt"
       , [ test_case "a diverged snapshot" `Quick test_adopt_a_diverged_snapshot
         ; test_case "what is refused" `Quick test_adopt_refuses
+        ; test_case "a snapshot whose read fails" `Quick test_a_snapshot_whose_read_fails
         ; test_case "after a last line that does not decode" `Quick
             test_adopt_after_an_unreadable_tail
         ] )

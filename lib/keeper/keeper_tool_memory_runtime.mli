@@ -50,9 +50,7 @@ val keeper_context_status_json
 
 (** Explicit memory write surface.
 
-    An observed claim without [source_path] or [supersedes] is durably queued
-    for Librarian admission; it is not current Memory yet. Derived and
-    superseding ordinary claims still write the current Memory OS snapshot.
+    Without [source_path], writes the current Memory OS snapshot.
     With [source_path], writes only the source-bound current store.
     Body is stored as [**title** content] when [title] is non-empty.
 
@@ -66,12 +64,7 @@ val keeper_context_status_json
       derived conclusion. Premises are exact ordinary Memory OS identities.
 
     Returns a JSON string with [{ok, error_kind, ...}]:
-    - On success: [ok=true], [rows_written], [outcome], [store]. Pending
-      admission returns [request_id], [sequence] and enqueue [recorded_at], with
-      no current identity, revision or disposition. This confirms persistence
-      for admission, not its current processing status.
-      A fresh call creates a fresh request; replay across consumption is not
-      idempotent.
+    - On success: [ok=true], [rows_written], [outcome], [store].
     - On validation or persistence failure: [ok=false] with the
       corresponding explicit [error_kind]. *)
 val keeper_memory_write_with_outcome
@@ -86,11 +79,11 @@ val keeper_memory_write_with_outcome
 (** The answer of a [keeper_memory_write] receipt for the repeat guard: the
     fields that say what the write did ([memory_id], [identity_disposition],
     [outcome], the source of a source-bound write, the error of a refused one),
-    without snapshot [revision], [recorded_at], or pending [request_id] and
-    [sequence] that change on repeated calls. [None] for output that is not a receipt object. *)
+    without snapshot [revision] and [recorded_at], which change on repeated
+    calls. [None] for output that is not a receipt object. *)
 val memory_write_answer_of_output : string -> Yojson.Safe.t option
 
-(** Current fact stores. The pending admission queue is not a fact store. *)
+(** Current fact stores. *)
 type fact_store = Keeper_tool_memory_validation.fact_store =
   | Ordinary_current
   | Source_bound_current
@@ -119,6 +112,24 @@ type derivation_rejection = Keeper_tool_memory_validation.derivation_rejection =
       { index : int
       ; premise_id : string
       }
+
+(** Why Memory took no write. None of them is in the arguments of the call,
+    and each is answered before a line is appended, so nothing was
+    committed. *)
+type memory_unwritable = Keeper_tool_memory_validation.memory_unwritable =
+  | Store_stopped of Librarian_store.stop
+  (** The Keeper's store is stopped. An operator resumes or adopts it. *)
+  | Keeper_not_registered
+  | No_writer_in_process
+  (** This process started no Memory writers for the workspace. The server
+      of the workspace has them. *)
+  | Refused_past_validation of Librarian_direct.refusal
+  (** The writer refused what this tool's validation lets through: a
+      turn without a trace, or a derivation it does not accept. *)
+  | Not_a_snapshot of Librarian_envelope.refusal
+  | Answer_of_another_write
+  (** The writer answered a claim as it answers a retraction, or a
+      retraction as it answers a claim. *)
 
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
@@ -150,17 +161,13 @@ type memory_write_error_kind = Keeper_tool_memory_validation.memory_write_error_
   | Supersedes_self
       (** The new claim has the exact bytes of the fact it supersedes. *)
   | Supersedes_not_current
-      (** No current fact of this keeper has the [supersedes] identity. *)
-  | Supersedes_not_authored
-      (** The [supersedes] fact is current but was not written by this
-          keeper through [keeper_memory_write]. *)
+      (** No current fact has the [supersedes] identity, and the claim is
+          not current either. *)
   | Supersedes_premise_of_successor
       (** The new claim is derived and one of its missing premises is the
           fact [supersedes] removes. *)
-  | Pending_admission_capacity_exceeded
-  | Pending_admission_persistence_failed
-      (** Queue append outcome is unknown; the receipt names its request_id.
-          Current search cannot prove absence from the pending queue. *)
+  | Memory_unwritable of memory_unwritable
+      (** Memory took no write, for a reason that is not in the arguments. *)
   | Persistence_failed of fact_store
       (** The store did not answer; which store decides what a repeat write
           does. *)
@@ -211,6 +218,7 @@ type memory_retract_error_kind =
   | Memory_id_invalid
   | Reason_empty
   | Fact_not_found
+  | Retract_unwritable of memory_unwritable
   | Retract_persistence_failed
   | No_memory_retract_error
 
@@ -224,6 +232,11 @@ type memory_retract_validation =
   | Memory_retract_invalid of memory_retract_error_kind
 
 val validate_memory_retract_args : Yojson.Safe.t -> memory_retract_validation
+
+(** The two receipt fields that say what a commit took out of Memory:
+    [removed_memory_ids], and [support_invalidations] for the derived facts
+    among them that left because a premise did. *)
+val removal_receipt : Librarian_effects.t -> (string * Yojson.Safe.t) list
 
 module For_testing : sig
   val successor_candidates_for_query : query:string ->

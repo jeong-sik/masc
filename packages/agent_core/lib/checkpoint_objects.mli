@@ -236,6 +236,15 @@ val load
   -> head
   -> (Checkpoint_types.t, load_error) result
 
+(** One bundle's messages, in order. The bundle is checked against
+    [digest] and each message against the digest its header names, as
+    {!load} checks them. No head is read, so the count and chain of the turn
+    the bundle closed are not checked. [read_object] is as for {!load}. *)
+val load_bundle
+  :  read_object:(digest -> (string option, string) result)
+  -> digest
+  -> (Types.message list, load_error) result
+
 (** Read the complete checkpoint with the same object, message, count and
     chain checks as {!load}, without retaining encoded message bytes in an
     encoding memo. This is for a snapshot that will not be saved through that

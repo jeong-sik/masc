@@ -49,8 +49,9 @@ val tail : t -> Librarian_log.line
       again from that line. Bytes that are not the ones the line names are
       not written: [Log_diverged].
     - Any other snapshot: [Log_diverged].
-    - A read that fails for the commit log or the turn log, and a write that
-      fails: [Store_unwritable].
+    - A read that fails for the snapshot, the commit log or the turn log, and
+      a write that fails: [Store_unwritable]. A snapshot that was not read is
+      not taken as absent.
 
     Only the first boot appends a line, so booting twice leaves what booting
     once does. *)
@@ -79,7 +80,9 @@ type committed =
     ({!Librarian_direct.plan} of [t]'s Memory at the same [at]).
 
     + The snapshot file is read. Bytes other than the ones the last line
-      names are [Stopped (Log_diverged _)].
+      names are [Stopped (Log_diverged _)], no file is
+      [Stopped Memory_unreadable], and a read that fails is
+      [Stopped Store_unwritable].
     + The line is made: it follows the last line's [seq], is committed on the
       last line's snapshot, and carries the last line's reading position and
       working state, which a direct write does not move.

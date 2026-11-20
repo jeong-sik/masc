@@ -29,6 +29,24 @@ type derivation_rejection =
       ; premise_id : string
       }
 
+(** Why Memory took no write. None of them is in the arguments of the call,
+    and each is answered before a line is appended, so nothing was
+    committed. *)
+type memory_unwritable =
+  | Store_stopped of Librarian_store.stop
+  (** The Keeper's store is stopped. An operator resumes or adopts it. *)
+  | Keeper_not_registered
+  | No_writer_in_process
+  (** This process started no Memory writers for the workspace. The server
+      of the workspace has them. *)
+  | Refused_past_validation of Librarian_direct.refusal
+  (** The writer refused what this tool's validation lets through: a
+      turn without a trace, or a derivation it does not accept. *)
+  | Not_a_snapshot of Librarian_envelope.refusal
+  | Answer_of_another_write
+  (** The writer answered a claim as it answers a retraction, or a
+      retraction as it answers a claim. *)
+
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
@@ -48,10 +66,8 @@ type memory_write_error_kind =
   | Supersedes_with_source_path_unsupported
   | Supersedes_self
   | Supersedes_not_current
-  | Supersedes_not_authored
   | Supersedes_premise_of_successor
-  | Pending_admission_capacity_exceeded
-  | Pending_admission_persistence_failed
+  | Memory_unwritable of memory_unwritable
   | Persistence_failed of fact_store
   | Commit_receipt_inconsistent
   | No_memory_write_error
@@ -72,13 +88,38 @@ let memory_write_error_kind_to_string = function
   | Supersedes_with_source_path_unsupported -> "supersedes_with_source_path_unsupported"
   | Supersedes_self -> "supersedes_self"
   | Supersedes_not_current -> "supersedes_not_current"
-  | Supersedes_not_authored -> "supersedes_not_authored"
   | Supersedes_premise_of_successor -> "supersedes_premise_of_successor"
+  | Memory_unwritable _ -> "memory_unwritable"
   | Persistence_failed (Ordinary_current | Source_bound_current) -> "persistence_failed"
-  | Pending_admission_capacity_exceeded -> "pending_admission_capacity_exceeded"
-  | Pending_admission_persistence_failed -> "pending_admission_persistence_failed"
   | Commit_receipt_inconsistent -> "commit_receipt_inconsistent"
   | No_memory_write_error -> ""
+;;
+
+(* Which of the reasons it was. A stopped store is named by why it stopped;
+   the digests of a diverged one are the operator's to read, on the Memory
+   screen. *)
+let memory_unwritable_to_string = function
+  | Store_stopped (Log_diverged _) -> "store_stopped_log_diverged"
+  | Store_stopped Memory_unreadable -> "store_stopped_memory_unreadable"
+  | Store_stopped Log_unreadable -> "store_stopped_log_unreadable"
+  | Store_stopped Store_unwritable -> "store_stopped_store_unwritable"
+  | Keeper_not_registered -> "keeper_not_registered"
+  | No_writer_in_process -> "no_writer_in_process"
+  | Refused_past_validation refusal -> "refused_" ^ Librarian_direct.refusal_kind refusal
+  | Not_a_snapshot (Revision_not_next _) -> "not_a_snapshot_revision_not_next"
+  | Not_a_snapshot (Facts_inconsistent _) -> "not_a_snapshot_facts_inconsistent"
+  | Not_a_snapshot (Not_encodable _) -> "not_a_snapshot_not_encodable"
+  | Answer_of_another_write -> "answer_of_another_write"
+;;
+
+(* A stopped store, a Keeper out of the registry and a process without
+   writers are a dependency that did not take the write. The rest cannot
+   come from a turn's write: reaching one is a producer bug. *)
+let class_of_memory_unwritable = function
+  | Store_stopped _ | Keeper_not_registered | No_writer_in_process ->
+    Tool_result.Dependency_unavailable
+  | Refused_past_validation _ | Not_a_snapshot _ | Answer_of_another_write ->
+    Tool_result.Runtime_failure
 ;;
 
 (* What the model does next depends on which side failed. Input the caller
@@ -100,7 +141,6 @@ let class_of_memory_write_error_kind = function
   | Supersedes_invalid
   | Supersedes_with_source_path_unsupported
   | Supersedes_self
-  | Supersedes_not_authored
   | Supersedes_premise_of_successor
   | Source_read_failed
       ( Keeper_memory_source_current.Source_path_rejected _
@@ -111,13 +151,13 @@ let class_of_memory_write_error_kind = function
     Tool_result.Policy_rejection
   (* Like a retraction of an absent fact: the store moved on since the id was
      read, which a fresh search answers. *)
-  | Supersedes_not_current | Pending_admission_capacity_exceeded -> Tool_result.Workflow_rejection
+  | Supersedes_not_current -> Tool_result.Workflow_rejection
   | Source_read_failed
       ( Keeper_memory_source_current.Source_io_failed _
       | Keeper_memory_source_current.Source_endpoint_unanswered _ )
-  | Pending_admission_persistence_failed
   | Persistence_failed (Ordinary_current | Source_bound_current) ->
     Tool_result.Dependency_unavailable
+  | Memory_unwritable unwritable -> class_of_memory_unwritable unwritable
   (* The store committed and then did not show what it committed: a
      producer bug, not a dependency that can answer on a later turn. *)
   | Commit_receipt_inconsistent | No_memory_write_error -> Tool_result.Runtime_failure
@@ -151,28 +191,16 @@ let memory_write_failure_effect = function
   | Unsupported_derivation
   | Supersedes_invalid
   | Supersedes_with_source_path_unsupported
-  | Supersedes_self ->
+  | Supersedes_self
+  | Memory_unwritable _ ->
     Tool_result.Proven_pre_effect, "The claim was not committed."
-  | Supersedes_not_current | Supersedes_not_authored | Supersedes_premise_of_successor ->
+  | Supersedes_not_current | Supersedes_premise_of_successor ->
     ( Tool_result.Proven_pre_effect
     , "The claim was not committed and no fact was removed." )
   | Commit_receipt_inconsistent ->
     ( Tool_result.Proven_post_effect
     , "A new snapshot revision was committed, but this claim is not in it. Search \
        memory for the claim before writing it again." )
-  | Pending_admission_capacity_exceeded ->
-    ( Tool_result.Proven_pre_effect
-    , "The candidate was not saved: the pending admission queue has no room. \
-       Existing pending input is unchanged. Retain the complete claim and retry \
-       after committed candidates are drained or the operator changes the queue \
-       capacity; do not shorten the claim to disguise this refusal." )
-  | Pending_admission_persistence_failed ->
-    ( Tool_result.Effect_outcome_unknown
-    , "The candidate may or may not have been saved to the pending admission queue. \
-       Current Memory search cannot establish whether it is pending. Retain and \
-       report this request_id for investigation. Do not retry merely because \
-       current search is empty: another tool call creates a new request and may \
-       duplicate the candidate. Admission has not been confirmed." )
   | Persistence_failed Ordinary_current ->
     ( Tool_result.Effect_outcome_unknown
     , "The claim may or may not have been committed. Search memory for it before \
@@ -201,8 +229,8 @@ let memory_write_failure_effect = function
 let premise_id_expectation =
   Printf.sprintf
     "A memory identity is %s. keeper_memory_search returns one as memory_id for \
-     current match it finds. A current-store keeper_memory_write receipt returns the \
-     identity it committed; a pending admission request_id is not a memory identity."
+     current match it finds. A keeper_memory_write receipt returns the identity it \
+     committed."
     Keeper_memory_os_types.memory_id_shape
 ;;
 
@@ -265,14 +293,13 @@ let memory_write_rejection_fields error_kind =
          premise_id
          premise_id_expectation)
   (* The store holds no fact under these identities, so this claim cannot rest
-     on them yet. Admission must finish before a candidate can be a premise. *)
+     on them. *)
   | Unsupported_derivation ->
     at
       "premise_ids"
       "The ids under missing_premise_ids name no current fact in the store. Search \
-       current Memory for supported premise identities. Newly submitted observations \
-       must pass admission first; their pending request_ids are not premises. Only \
-       submit this claim without derivation when it is itself an observation."
+       current Memory for supported premise identities. Only submit this claim \
+       without derivation when it is itself an observation."
   | Supersedes_invalid ->
     at
       "supersedes"
@@ -291,22 +318,16 @@ let memory_write_rejection_fields error_kind =
   | Supersedes_not_current ->
     at
       "supersedes"
-      "No current fact of yours has this memory_id. When supersedes_removed is \
-       present it names the commit that removed it; a superseded_by reason \
-       names the fact that replaced it. Otherwise search memory for the fact \
-       you mean to replace and pass the memory_id it returns."
+      "No current fact has this memory_id, and this claim is not current \
+       either. Search memory for the fact you mean to replace and pass the \
+       memory_id it returns, or drop supersedes to write the claim beside \
+       what is current."
   | Supersedes_premise_of_successor ->
     at
       "premise_ids"
       "A premise under missing_premise_ids is the fact supersedes removes, and a \
        claim cannot rest on the fact it replaces. Drop that premise, or drop \
        supersedes to keep both facts."
-  | Supersedes_not_authored ->
-    at
-      "supersedes"
-      "This fact is current but you did not write it with keeper_memory_write, \
-       so it cannot be superseded here. Drop supersedes to write the claim \
-       alongside it."
   | Content_empty
   | Source_path_invalid
   | Source_read_failed _
@@ -315,8 +336,7 @@ let memory_write_rejection_fields error_kind =
   | Board_comment_without_post
   | Board_ref_with_derivation_unsupported
   | Board_ref_with_source_path_unsupported
-  | Pending_admission_capacity_exceeded
-  | Pending_admission_persistence_failed
+  | Memory_unwritable _
   | Persistence_failed (Ordinary_current | Source_bound_current)
   | Commit_receipt_inconsistent
   | No_memory_write_error -> []
@@ -484,6 +504,7 @@ type memory_retract_error_kind =
   | Memory_id_invalid
   | Reason_empty
   | Fact_not_found
+  | Retract_unwritable of memory_unwritable
   | Retract_persistence_failed
   | No_memory_retract_error
 
@@ -491,6 +512,7 @@ let memory_retract_error_kind_to_string = function
   | Memory_id_invalid -> "memory_id_invalid"
   | Reason_empty -> "reason_empty"
   | Fact_not_found -> "fact_not_found"
+  | Retract_unwritable _ -> "memory_unwritable"
   | Retract_persistence_failed -> "persistence_failed"
   | No_memory_retract_error -> ""
 ;;
@@ -498,6 +520,7 @@ let memory_retract_error_kind_to_string = function
 let class_of_memory_retract_error_kind = function
   | Memory_id_invalid | Reason_empty -> Tool_result.Policy_rejection
   | Fact_not_found -> Tool_result.Workflow_rejection
+  | Retract_unwritable unwritable -> class_of_memory_unwritable unwritable
   | Retract_persistence_failed -> Tool_result.Dependency_unavailable
   | No_memory_retract_error -> Tool_result.Runtime_failure
 ;;
@@ -513,7 +536,7 @@ let class_of_memory_retract_error_kind = function
    snapshot the store set aside. The model is told all three, so a retry's
    refusal is not read as proof that the first attempt did nothing. *)
 let memory_retract_failure_effect = function
-  | Memory_id_invalid | Reason_empty ->
+  | Memory_id_invalid | Reason_empty | Retract_unwritable _ ->
     Tool_result.Proven_pre_effect, "The retraction was not committed."
   | Fact_not_found ->
     ( Tool_result.Proven_pre_effect

@@ -36,16 +36,26 @@ let named : Log.line -> Digest.digest = function
 
 let encoded line = Yojson.Safe.to_string (Librarian_log_codec.to_json line)
 
+(* What the snapshot path holds. A read that failed says nothing about the
+   file: it is not "no snapshot". *)
+type file_read =
+  | No_file
+  | Not_a_file
+  | Read_failed
+  | Bytes of string
+
 let read_bytes path =
   match Fs_compat.load_regular_file_opt path with
-  | Ok bytes -> Ok bytes
-  | Error (Fs_compat.Not_a_regular_file (_ : Unix.file_kind))
-  | Error (Fs_compat.Regular_file_unreadable (_ : string)) -> Error ()
+  | Ok None -> No_file
+  | Ok (Some bytes) -> Bytes bytes
+  | Error (Fs_compat.Not_a_regular_file (_ : Unix.file_kind)) -> Not_a_file
+  | Error (Fs_compat.Regular_file_unreadable (_ : string)) -> Read_failed
 ;;
 
 type snapshot_file =
   | Absent
   | Not_a_snapshot_file
+  | Not_read
   | Snapshot of
       { memory : Current.t
       ; digest : Digest.digest
@@ -64,9 +74,10 @@ let decoded bytes =
    would write for what they decode to. *)
 let read_snapshot path =
   match read_bytes path with
-  | Error () -> Not_a_snapshot_file
-  | Ok None -> Absent
-  | Ok (Some bytes) ->
+  | Read_failed -> Not_read
+  | Not_a_file -> Not_a_snapshot_file
+  | No_file -> Absent
+  | Bytes bytes ->
     (match decoded bytes with
      | None -> Not_a_snapshot_file
      | Some memory -> Snapshot { memory; digest = Digest.digest_of_bytes bytes })
@@ -110,6 +121,7 @@ let first_boot ~log_path ~snapshot_path ~turn_log_path ~at =
   let* memory, digest =
     match read_snapshot snapshot_path with
     | Not_a_snapshot_file -> Error Memory_unreadable
+    | Not_read -> Error Store_unwritable
     | Snapshot { memory; digest } -> Ok (memory, digest)
     | Absent ->
       let memory = Envelope.empty ~at ~turn_log:start.id in
@@ -129,6 +141,7 @@ let first_boot ~log_path ~snapshot_path ~turn_log_path ~at =
 let recover ~log_path ~snapshot_path ~log_end ~(tail : Log.line) =
   match read_snapshot snapshot_path with
   | Absent | Not_a_snapshot_file -> Error Memory_unreadable
+  | Not_read -> Error Store_unwritable
   | Snapshot { memory; digest = observed } ->
     let expected = named tail in
     let diverged = Error (Log_diverged { expected; observed }) in
@@ -226,8 +239,9 @@ let append t (line : Log.commit) =
 
 let commit_direct t ~at ~by ~trace write effects =
   match read_bytes t.snapshot_path with
-  | Error () | Ok None -> Stopped Memory_unreadable
-  | Ok (Some bytes) ->
+  | Read_failed -> Stopped Store_unwritable
+  | No_file | Not_a_file -> Stopped Memory_unreadable
+  | Bytes bytes ->
     let observed = Digest.digest_of_bytes bytes in
     if not (same observed t.digest)
     then Stopped (Log_diverged { expected = t.digest; observed })
@@ -270,8 +284,9 @@ let adopt ~memory_dir ~turns_dir ~keeper_id ~at ~by ~observed =
   in
   let* memory =
     match read_bytes snapshot_path with
-    | Error () | Ok None -> Error Snapshot_mismatch
-    | Ok (Some bytes) ->
+    | Read_failed -> Error (Not_adopted Store_unwritable)
+    | No_file | Not_a_file -> Error Snapshot_mismatch
+    | Bytes bytes ->
       if not (same (Digest.digest_of_bytes bytes) observed)
       then Error Snapshot_mismatch
       else (

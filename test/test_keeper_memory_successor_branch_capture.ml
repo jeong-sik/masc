@@ -23,9 +23,6 @@ let capture () =
   Masc_test_deps.with_typesafeai_policy
     {Runtime_schema.default_typesafeai with lane_enabled=false;absorb_gate=false} @@ fun () ->
   let keeper_id="synthetic-successor-branches" and trace_id="authored-event-lineage-fixture" in
-  let config=Masc.Workspace.default_config base_path in
-  let meta=Masc_test_deps.meta_of_json_fixture
-    (`Assoc ["name",`String keeper_id;"trace_id",`String trace_id]) |> require in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let now=Time_compat.now () in
   let fact claim = Memory.observed ~claim ~category:Memory.Fact ~now
@@ -34,13 +31,10 @@ let capture () =
     "Event E17: production R-015 requires owner approval.";
     "Event E17: staging R-015 requires owner approval.";
     "Event E18: an unrelated production R-015 release requires release-manager approval."] in
-  let request_ids=List.map (fun claim ->
-    let result=Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
-      ~config ~meta ~args:(`Assoc ["content",`String claim]) in
-    let json=Yojson.Safe.from_string result.raw_output in
-    check string "real write producer persists admission input" "persisted_pending_admission"
-      Yojson.Safe.Util.(json |> member "outcome" |> to_string);
-    Yojson.Safe.Util.(json |> member "request_id" |> to_string)) source_claims in
+  let request_ids=List.mapi (fun index claim ->
+    (Queue.append ~keepers_dir ~keeper_id
+       ~request_id:(Printf.sprintf "memory-admission-%d" index) (fact claim)
+     |> Result.map_error Queue.append_error_to_string |> require).request_id) source_claims in
   let batch=match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "producer queue missing" in
   let candidates=Queue.candidates batch and ids=Queue.candidate_ids batch in

@@ -15,6 +15,7 @@ module Types = Masc.Keeper_memory_os_types
 module Turn_log = Masc.Keeper_turn_log
 module Turn_store = Masc.Keeper_turn_log_store
 module Digest = Agent_core.Checkpoint_objects
+module Notifications = Masc.Keeper_memory_commit_notifications
 
 let keeper_id = "keeper-a"
 
@@ -212,6 +213,61 @@ let test_one_writer_holds_the_lock () =
     check string "and commits after it" "written as commit 3" (write second "the probe runs"))
 ;;
 
+(* What the writer says the snapshot holds, in the order it said it. *)
+let following (place : Machine.place) ~sw =
+  let memory_dir = Unix.realpath place.memory_dir in
+  let said = ref [] in
+  Eio.Switch.on_release sw
+    (Notifications.subscribe (fun (event : Notifications.event) ->
+       if String.equal event.keepers_dir memory_dir
+       then
+         said
+         := ( event.keeper_id
+            , (match event.store with
+               | Ordinary -> "ordinary"
+               | Source_bound -> "source bound")
+            , event.revision )
+            :: !said));
+  fun () -> List.rev !said
+;;
+
+let said = list (triple string string int)
+
+let test_says_the_revision_the_snapshot_holds () =
+  with_switch (fun sw ->
+    let place = started_place () in
+    let heard = following place ~sw in
+    let writer = start ~sw place in
+    check string "a write" "written as commit 1" (write writer "the port is 8935");
+    check said "the store that opened, then the commit"
+      [ keeper_id, "ordinary", 1; keeper_id, "ordinary", 2 ]
+      (heard ());
+    check string "a write that commits nothing" "already absent"
+      (write_text
+         (Writer.write writer ~by:Effects.Keeper ~trace:"turn"
+            (Direct.Retract { id = Types.memory_id_of_claim "never written"; reason = "wrong" })));
+    check int "says nothing" 2 (List.length (heard ()));
+    check string "the claim seen again" "written as commit 2" (write writer "the port is 8935");
+    check said "a commit that only moved last_seen left a new revision too"
+      [ keeper_id, "ordinary", 1; keeper_id, "ordinary", 2; keeper_id, "ordinary", 3 ]
+      (heard ()))
+;;
+
+let test_says_nothing_while_stopped () =
+  with_switch (fun sw ->
+    let place = new_place () in
+    let heard = following place ~sw in
+    let writer = start ~sw place in
+    check string "a Keeper without a turn log" "the store is stopped: store unwritable"
+      (write writer "the port is 8935");
+    check said "a store that did not open" [] (heard ());
+    start_turn_log place;
+    check string "resumed with a turn log" "done" (act_text (Writer.resume writer));
+    check said "the store that opened" [ keeper_id, "ordinary", 1 ] (heard ());
+    check string "resumed again" "nothing to resume" (act_text (Writer.resume writer));
+    check int "an open store that stays as it is says nothing more" 1 (List.length (heard ())))
+;;
+
 let () =
   run "librarian_writer"
     [ ( "writer"
@@ -220,6 +276,11 @@ let () =
             test_writes_are_answered_in_the_order_they_came
         ; test_case "stopped until resumed" `Quick test_stopped_until_resumed
         ; test_case "one writer holds the lock" `Quick test_one_writer_holds_the_lock
+        ] )
+    ; ( "what it says"
+      , [ test_case "the revision the snapshot holds" `Quick
+            test_says_the_revision_the_snapshot_holds
+        ; test_case "nothing while stopped" `Quick test_says_nothing_while_stopped
         ] )
     ]
 ;;

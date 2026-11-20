@@ -60,6 +60,61 @@ let loopback =
   | Error error -> Alcotest.fail (Server_bootstrap_http.bind_address_error_to_string error)
 ;;
 
+let max_response_bytes = 1 lsl 20
+
+(* The status line, the header lines up to the empty one, and the rest. *)
+let response =
+  let open Eio.Buf_read.Syntax in
+  let rec header_lines lines =
+    let* line = Eio.Buf_read.line in
+    if String.equal line "" then Eio.Buf_read.return (List.rev lines) else header_lines (line :: lines)
+  in
+  let* status_line = Eio.Buf_read.line in
+  let* (_ : string list) = header_lines [] in
+  let+ body = Eio.Buf_read.take_all in
+  status_line, body
+;;
+
+(* One HTTP/1.1 GET on a connection of its own: the status and the body. *)
+let get ~net ~port ~headers path =
+  Eio.Switch.run (fun sw ->
+    let flow = Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+    Eio.Flow.copy_string
+      (Printf.sprintf
+         "GET %s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n%sConnection: close\r\n\r\n"
+         path
+         port
+         (String.concat "" (List.map (fun (name, value) -> name ^ ": " ^ value ^ "\r\n") headers)))
+      flow;
+    let status_line, body = Eio.Buf_read.parse_exn ~max_size:max_response_bytes response flow in
+    match String.split_on_char ' ' status_line with
+    | (_ : string) :: status :: (_ : string list) ->
+      (match int_of_string_opt status with
+       | Some status -> status, body
+       | None -> Alcotest.failf "no status in %S" status_line)
+    | [] | [ (_ : string) ] -> Alcotest.failf "no status in %S" status_line)
+;;
+
+(* The reason a refusal of the account server gives. *)
+let error_of label body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields ->
+    (match List.assoc_opt "error" fields with
+     | Some (`String error) -> error
+     | Some _ | None -> Alcotest.failf "%s: no reason in %S" label body)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Alcotest.failf "%s: the answer is not an object: %S" label body
+  | exception Yojson.Json_error detail -> Alcotest.failf "%s: %s: %S" label detail body
+;;
+
+(* A token the engine put in the environment of the process. Its value is
+   sent and never printed. *)
+let token_of name =
+  match Sys.getenv_opt name with
+  | Some value when not (String.equal (String.trim value) "") -> value
+  | Some _ | None -> Alcotest.failf "the engine put no %s in the environment" name
+;;
+
 (* An activated installation that has no config root, and the judgment of its
    boot. Each runs in an Eio loop of its own, as [masc auth bootstrap] and the
    entry of the boot run them: the bootstrap must be called from a fiber, and
@@ -135,15 +190,18 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Server_session_switch.run
   @@ fun ~runtime_sw sw ->
+  let port = free_port () in
   let started, start = Eio.Promise.create () in
+  let listening, set_listening = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     match
       Server_accounts.run
         ~sw
         ~env
         ~address:loopback
-        ~port:(free_port ())
+        ~port
         ~lease
+        ~on_ready:(Eio.Promise.resolve set_listening)
         ~start_engine:(fun access ->
           Eio.Promise.resolve
             start
@@ -186,7 +244,25 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     "the folder of Keeper definitions holds none after the engine made the config root"
     (Some [])
     (Keeper_types_profile_toml_io.keeper_toml_files
-       (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base))
+       (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base));
+  (* The engine put the admin token and the internal Keeper token of the
+     operator in the environment of the process. The gate of the account
+     server reads both as legacy credentials, and a route of a person refuses
+     them (RFC §5, "the tokens of the operator reach no person"). *)
+  within_the_watchdog ~clock "the listener of the account server" listening;
+  let net = Eio.Stdenv.net env in
+  let legacy = Auth_gate.reason_to_string Auth_gate.Legacy_credential_forbidden in
+  List.iter
+    (fun (label, header) ->
+      let status, body = get ~net ~port ~headers:[ header ] Auth_preview.provider_accounts_path in
+      Alcotest.(check int) (label ^ ": the status") 401 status;
+      Alcotest.(check string) (label ^ ": the reason") legacy (error_of label body))
+    [ ( "the admin token of the boot"
+      , (Server_auth.authorization_header_name, "Bearer " ^ token_of Env_config_core.admin_token_env_key)
+      )
+    ; ( "the internal Keeper token of the boot"
+      , (Server_auth.internal_token_header_name, token_of Auth.internal_keeper_token_env_key) )
+    ]
 ;;
 
 let () =

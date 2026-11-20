@@ -713,7 +713,7 @@ let initialize_owner_state_blocking
       ~sw
       ~runtime_sw
       ~env
-      ~single_user
+      ~access
       ?input_base_path
       ~accept_store_quarantine
       ~clock
@@ -724,21 +724,20 @@ let initialize_owner_state_blocking
       ~fs
       ()
   =
-  (* HIGH-RISK-UNREVIEWED: a CLI starts on an account only by the access the
-     process published (plan D2-3), and the boot judged this one. *)
-  (match Runtime_account_access.publish (Runtime_account_access.Single_user single_user) with
-   | Ok (_ : Runtime_account_access.published) -> ()
-   | Error Runtime_account_access.Already_published ->
-     raise (Owner_initialization_failed Account_access_already_published));
-  let base_path = Authz_boot_mode_read.single_user_base_path single_user in
-  (* The turns that [Runtime_account_access.authorize_native] refuses are
-     named once here, before a Keeper meets the refusal (issue #51414). *)
-  (match
-     Runtime_account_access.person_homes_notice
-       (Runtime_account_home_layout.persons_remain ~base_path)
-   with
-   | None -> ()
-   | Some notice -> Log.Server.warn "%s" notice);
+  let base_path = Runtime_account_access.published_base_path access in
+  (* The turns that [Runtime_account_access.authorize_native] refuses for what
+     persons left under the workspace of a single user are named once here,
+     before a Keeper meets the refusal (issue #51414). A multi-account process
+     refuses those tools whatever is under the workspace, so it names nothing. *)
+  (match Runtime_account_access.published_access access with
+   | Runtime_account_access.Multi_account { zone = _; base_path = _; now = _ } -> ()
+   | Runtime_account_access.Single_user (_ : Authz_boot_mode_read.single_user) ->
+     (match
+        Runtime_account_access.person_homes_notice
+          (Runtime_account_home_layout.persons_remain ~base_path)
+      with
+      | None -> ()
+      | Some notice -> Log.Server.warn "%s" notice));
   (* DET-OK: the optional transport spelling and the required owner BasePath
      denote the same requested path when the former is absent. *)
   let requested_base_path = Option.value input_base_path ~default:base_path in
@@ -1798,8 +1797,18 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
     in
     try
       Server_startup_state.mark_blocking ();
+      (* HIGH-RISK-UNREVIEWED: a CLI starts on an account only by the access the
+         process published (plan D2-3), and the boot judged this one. *)
+      let access =
+        match
+          Runtime_account_access.publish (Runtime_account_access.Single_user single_user)
+        with
+        | Ok access -> access
+        | Error Runtime_account_access.Already_published ->
+          raise (Owner_initialization_failed Account_access_already_published)
+      in
       let initialized_owner =
-        initialize_owner_state_blocking ~sw ~runtime_sw ~env ~single_user ?input_base_path
+        initialize_owner_state_blocking ~sw ~runtime_sw ~env ~access ?input_base_path
           ~accept_store_quarantine ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
       in
       let activated_owner =

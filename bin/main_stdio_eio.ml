@@ -124,13 +124,24 @@ let run_cmd cli_base_path =
       if report.unprotected_files > 0 then Log.Server.warn "%s" message else Log.Server.info "%s" message);
   Server_startup_state.reset ();
   Server_startup_state.mark_blocking ();
+  (* HIGH-RISK-UNREVIEWED: a CLI starts on an account only by the access the
+     process published, and the boot above judged this one. *)
+  let access =
+    match Runtime_account_access.publish (Runtime_account_access.Single_user single_user) with
+    | Ok access -> access
+    | Error error ->
+      Log.Server.error
+        "[FATAL] stdio owner initialization failed before MCP publication: %s"
+        (Runtime_account_access.publish_error_to_string error);
+      exit 1
+  in
   let initialized =
     try
       Server_runtime_bootstrap.initialize_owner_state_blocking
         ~sw
         ~runtime_sw
         ~env
-        ~single_user
+        ~access
         ~input_base_path:workspace.Workspace_root.requested
           (* The stdio runtime has no --accept-store-quarantine: a keeper store
              this build cannot decode makes it refuse, and the operator strips

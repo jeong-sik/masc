@@ -254,6 +254,14 @@ let gemini_chunk_to_events_impl
        | None -> emit_non_text_part ())
     chunk.Gemini_wire.gem_parts;
   (* Finish reason *)
+  let delta_usage =
+    Option.map
+      (fun u ->
+         { (Types.delta_usage_of_api_usage u) with
+           Types.reasoning_tokens = chunk.Gemini_wire.gem_reasoning_tokens
+         })
+      chunk.Gemini_wire.gem_usage
+  in
   (match chunk.Gemini_wire.gem_finish_reason with
    | Some (Gemini_wire.Gemini_candidate_finish_reason reason) ->
      let stop_reason =
@@ -261,18 +269,10 @@ let gemini_chunk_to_events_impl
          ~has_tool_use:(Hashtbl.length state.tool_block_indices > 0)
          reason
      in
-     emit
-       (MessageDelta
-          { stop_reason = Some stop_reason
-          ; usage = Option.map Types.delta_usage_of_api_usage chunk.Gemini_wire.gem_usage
-          });
+     emit (MessageDelta { stop_reason = Some stop_reason; usage = delta_usage });
      emit MessageStop
    | Some (Gemini_wire.Gemini_prompt_block_reason _) ->
-     emit
-       (MessageDelta
-          { stop_reason = Some Refusal
-          ; usage = Option.map Types.delta_usage_of_api_usage chunk.Gemini_wire.gem_usage
-          });
+     emit (MessageDelta { stop_reason = Some Refusal; usage = delta_usage });
      emit MessageStop
    | None -> ());
   List.rev !events, !telemetry_event

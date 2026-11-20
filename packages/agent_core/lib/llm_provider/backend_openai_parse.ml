@@ -257,12 +257,29 @@ let delta_usage_of_openai_json json : Types.delta_usage option =
       | `Assoc _ as details -> Some details
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
     in
+    let input_tokens = member_int_fallback usage [ "prompt_tokens"; "input_tokens" ] in
     let cached_tokens =
       match member_int_fallback usage [ "prompt_cache_hit_tokens" ] with
       | Some _ as count -> count
       | None ->
-        Option.bind prompt_details (fun details ->
-          member_int_fallback details [ "cached_tokens" ])
+        (match
+           Option.bind prompt_details (fun details ->
+             member_int_fallback details [ "cached_tokens" ])
+         with
+         | Some _ as count -> count
+         | None ->
+           (* llama-server reports KV-cache reuse in top-level [timings.cache_n]
+              without populating [prompt_tokens_details.cached_tokens]; its
+              [usage.prompt_tokens] includes [cache_n], so only admit values in
+              [0 .. prompt_tokens]. *)
+           let raw_cache_n =
+             match json |> member "timings" with
+             | `Assoc _ as timings -> member_int_fallback timings [ "cache_n" ]
+             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+           in
+           (match raw_cache_n, input_tokens with
+            | Some n, Some pt when n >= 0 && n <= pt -> Some n
+            | Some _, (Some _ | None) | None, (Some _ | None) -> None))
     in
     let cache_creation_input_tokens =
       Option.bind prompt_details (fun details ->
@@ -273,18 +290,41 @@ let delta_usage_of_openai_json json : Types.delta_usage option =
       | `Assoc _ as details -> member_int_fallback details [ "reasoning_tokens" ]
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
     in
+    let parse_non_negative_cost = function
+      | `Float amount when Float.is_finite amount && amount >= 0.0 -> Some amount
+      | `Int amount when amount >= 0 -> Some (float_of_int amount)
+      | `Intlit raw ->
+        (match float_of_string_opt raw with
+         | Some amount when Float.is_finite amount && amount >= 0.0 -> Some amount
+         | Some _ | None -> None)
+      | `Float _ | `Int _ | `Null | `Bool _ | `String _ | `List _ | `Assoc _ -> None
+    in
+    let direct_cost = parse_non_negative_cost (member "cost" usage) in
     let cost_usd =
-      let cost = match member "cost" usage with
-        | `Float amount -> Some amount
-        | `Int amount -> Some (float_of_int amount)
-        | `Intlit amount -> float_of_string_opt amount
-        | `Null | `Bool _ | `String _ | `List _ | `Assoc _ -> None in
-      match cost with
-      | Some amount when Float.is_finite amount && amount >= 0.0 -> Some amount
-      | Some _ | None -> None
+      (* OpenRouter BYOK responses report OpenRouter's fee (often 0.0) in
+         [usage.cost] and the actual upstream provider charge in
+         [usage.cost_details.upstream_inference_cost]. Non-BYOK responses
+         already carry the full charge in [usage.cost] and must stay untouched. *)
+      match member "is_byok" usage with
+      | `Bool true ->
+        let upstream_cost =
+          match member "cost_details" usage with
+          | `Assoc _ as details ->
+            parse_non_negative_cost (member "upstream_inference_cost" details)
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+        in
+        (match direct_cost, upstream_cost with
+         | Some c, Some u ->
+           let total = c +. u in
+           if Float.is_finite total then Some total else None
+         | None, Some u -> Some u
+         | Some c, None -> Some c
+         | None, None -> None)
+      | `Bool false | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+        direct_cost
     in
     Some
-      { input_tokens = member_int_fallback usage [ "prompt_tokens"; "input_tokens" ]
+      { input_tokens
       ; output_tokens = member_int_fallback usage [ "completion_tokens"; "output_tokens" ]
       ; cache_creation_input_tokens
       ; cache_read_input_tokens = cached_tokens

@@ -642,7 +642,7 @@ let turn_log_store =
              Keeper_turn_log_store.fold
                (Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id)
                ~init:report
-               ~f:(fun report ({ at; line } : Keeper_turn_log_store.scanned) ->
+               ~f:(fun report ({ at; line; _ } : Keeper_turn_log_store.scanned) ->
                  count_row report
                    (match line with
                     | Ok (_ : Keeper_turn_log.line) -> Ok ()

@@ -1051,6 +1051,12 @@ let bundle_messages ~bundle bytes =
     digest, decoded)
 ;;
 
+let load_bundle ~read_object bundle =
+  let* bytes = read_checked ~read_object bundle in
+  let+ messages = bundle_messages ~bundle bytes in
+  List.map snd messages
+;;
+
 let header_object ~read_object digest =
   let* bytes = read_checked ~read_object digest in
   match Yojson.Safe.from_string bytes with

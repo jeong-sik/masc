@@ -329,6 +329,32 @@ let test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified () =
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "0-byte sqlite with companion WAL must not bypass sqlite inspection"))
 
+(* The folder of the persons of a multi-account installation is classified.
+   Its files are not read, so bytes that are no JSON record end no scan, and
+   the stale blob beside it becomes deletable on the second scan. *)
+let test_person_folder_leaves_sweep_classified () =
+  with_temp_dir (fun base_path ->
+      Unix.chmod base_path 0o700;
+      let masc = Common.masc_dir_from_base_path ~base_path in
+      Fs_compat.mkdir_p masc;
+      Unix.chmod masc 0o700;
+      let store = B.create ~base_path in
+      let stale = put store "stale output beside the folder of the persons" in
+      set_mtime store stale (long_ago ());
+      forget_marks ();
+      let person =
+        Filename.concat (Filename.concat masc Runtime_account_home_layout.accounts_dir) "person-a"
+      in
+      let client_file = Filename.concat person "official-clients/claude/state.bin" in
+      Fs_compat.mkdir_p (Filename.dirname client_file);
+      Fs_compat.save_file client_file "\000not a JSON record";
+      let first = observe_ok ~base_path in
+      Alcotest.(check (list string)) "the folder of the persons is classified" []
+        first.unclassified;
+      let second = observe_ok ~base_path in
+      Alcotest.(check int) "the stale blob becomes deletable on the second scan" 1
+        second.deletable)
+
 let test_lane_addon_records_keep_embedded_tool_blobs_live () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -455,6 +481,8 @@ let () =
             test_finder_file_below_a_store_does_not_end_the_scan
         ; Alcotest.test_case "empty sqlite and lane-addon stores leave sweep classified" `Quick
             test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified
+        ; Alcotest.test_case "the folder of the persons leaves the sweep classified" `Quick
+            test_person_folder_leaves_sweep_classified
         ; Alcotest.test_case "lane-addon records keep embedded tool blobs live" `Quick
             test_lane_addon_records_keep_embedded_tool_blobs_live
         ; Alcotest.test_case "lane-addon raw evidence keeps tool blobs live" `Quick

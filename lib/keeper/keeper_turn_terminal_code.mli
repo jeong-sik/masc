@@ -35,15 +35,9 @@ type t =
       }
   (** Catch-all for [Agent_core.Error.t] wire strings (agent / api /
           mcp / config / serialization / io / orchestration / a2a /
-          internal). The payload is the existing parametrised wire
+          internal). [wire] is the existing parametrised wire
           format produced by [Keeper_terminal_reason.code_of_core_error]
-          (e.g. ["api_error_server:502"]). PR-2.5 wraps the existing typed
-          accessors in this variant so the typed bridge becomes a
-          single source of truth for [Keeper_turn_terminal.t.code]
-          field swap (PR-3). RFC-0042 §5.2 explicitly defers refining
-          this into per-variant constructors (~25-variant explosion);
-          a follow-up RFC will split it once production traces narrow
-          the actual sub-kind set. *)
+          (e.g. ["api_error_server:502"]). *)
 
 (** Stable wire format consumed by receipt JSON, dashboards,
     [bin/masc-trace], and external consumers. *)

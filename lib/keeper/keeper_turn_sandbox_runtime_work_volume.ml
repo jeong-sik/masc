@@ -27,21 +27,20 @@ let microvm_work_volume ~backend ~keeper_name ~timeout_sec =
      | Ok _ -> Ok volume_name)
 ;;
 
-(** The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume),
-    `Apple_container` only: `msb` and `nerdctl`
+(** The build volume, `Apple_container` only: `msb` and `nerdctl`
     back their named work volumes with a host directory, so a guest [rm -rf
     _build] already returns host disk immediately there and this volume is
     not provisioned for them -- [None], not a refusal, since its absence
     costs a `Micro_vm` keeper on those backends nothing. On Apple, absence
     is a refusal like {!microvm_work_volume}'s: a guest that cannot get the
-    volume this RFC's disk-reclaim path depends on does not start rather
+    volume the disk-reclaim path depends on does not start rather
     than fall back to writing `_build` onto the unified work volume, which
     is exactly the unbounded growth this exists to bound. Recreated, not
     merely ensured: this runs only on a fresh [container run] (never on
     adoption of an already-running guest, the same boundary
     {!microvm_work_volume} keeps its own volume across), so "fresh boot"
     and "empty build volume" coincide by construction, and every guest
-    restart is the host-disk reclaim this RFC exists for. *)
+    restart is a host-disk reclaim. *)
 let microvm_build_volume ~backend ~keeper_name ~timeout_sec =
   match (backend : Keeper_microvm_backend.t) with
   | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok None

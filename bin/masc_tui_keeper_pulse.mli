@@ -106,7 +106,7 @@ val half_hours :
     is any pulse read against a [now] that is not a finite number. *)
 
 val half_hour_mark : half_hour -> string
-(** The mark one half hour draws: [·] quiet, [▁] ok, [█] failed, [▄] failed
+(** The mark one half hour draws: [·] quiet, [⣀] ok, [⠛] failed, [⠤] failed
     and ok, {!Masc_tui_keeper_mark.unknown_mark} unknown. *)
 
 val nothing_read : half_hour list list -> bool

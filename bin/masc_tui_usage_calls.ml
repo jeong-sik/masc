@@ -253,65 +253,6 @@ let totals_line ~ko ~calls ~failures ~deferred =
   in
   calls_part ^ sep ^ fail_part ^ deferred_part
 
-(* One glyph per bucket, scaled to the row's own largest value. A bucket in
-   which every call failed is red top to bottom, so an outage reads as one
-   column across the three rows. The row's largest value is not a limit, so
-   every other bucket walks the row's own hue by its height, deep for a short
-   column and bright for the tallest (RFC tui-one-screen-grammar section
-   7.3). *)
-let chart_cells ~tall ~(sample : Series.tool_series_calls -> Braille.sample) ~series buckets =
-  let tall = max 1 tall in
-  let dots = column_dots * tall in
-  let maximum =
-    Braille.graph_maximum
-      (List.filter_map
-         (fun (bucket : Series.tool_series_bucket) ->
-           match bucket.Series.tsb_activity with
-           | Series.Series_idle -> None
-           | Series.Series_active active -> Some (sample active))
-         buckets)
-  in
-  let tint = Theme.series_tint series in
-  (* A one-row chart colours a column by its own height
-     ([Braille.value_share]). A taller chart colours each row by the row's height, as a Braille graph
-     does, and a row the column does not reach keeps that colour, so the row
-     opens no code for it. *)
-  let row_tint ~level ~from_base =
-    if tall = 1 then tint (Braille.value_share ~dots level)
-    else tint (float_of_int from_base /. float_of_int (tall - 1))
-  in
-  let blank_style ~from_base = if tall = 1 then "" else row_tint ~level:0 ~from_base in
-  let columns =
-    List.map
-      (fun (bucket : Series.tool_series_bucket) ->
-        match bucket.Series.tsb_activity with
-        | Series.Series_idle ->
-            List.init tall (fun index ->
-              let from_base = tall - 1 - index in
-              if from_base = 0 then (no_call_mark, Theme.recede ())
-              else (Braille.braille_bar_mark ~level:0, blank_style ~from_base))
-        | Series.Series_active active ->
-            let reading = sample active in
-            let level = Braille.braille_level ~dots ~maximum reading in
-            List.mapi
-              (fun index glyph ->
-                let from_base = tall - 1 - index in
-                let reaches = level > column_dots * from_base in
-                let style =
-                  if every_call_failed active then Theme.bad ()
-                  else if not reaches then blank_style ~from_base
-                  else
-                    match reading with
-                    | Braille.Zero -> Theme.recede ()
-                    | Braille.Value _ -> row_tint ~level ~from_base
-                    | Braille.Absent | Braille.Unread -> ""
-                in
-                (glyph, style))
-              (Braille.braille_bar_rows ~rows:tall ~level))
-      buckets
-  in
-  (maximum, columns)
-
 let series_maximum ~sample buckets =
   Braille.graph_maximum
     (List.filter_map
@@ -320,32 +261,6 @@ let series_maximum ~sample buckets =
          | Series.Series_idle -> None
          | Series.Series_active active -> Some (sample active))
        buckets)
-
-(* A colour code goes out only where the colour changes; a gap is blank, so
-   the colour open across it does not show. *)
-let draw_cells ~stretch ~gap cells =
-  let buffer = Buffer.create 256 in
-  let separator = String.make gap ' ' in
-  let open_style =
-    List.fold_left
-      (fun (open_style, first) (glyph, style) ->
-        if not first then Buffer.add_string buffer separator;
-        let open_style =
-          if String.equal style open_style then open_style
-          else begin
-            (* An empty style is the foreground, which only a reset gives
-               back. *)
-            Buffer.add_string buffer (if String.equal style "" then Ansi.reset else style);
-            style
-          end
-        in
-        for _ = 1 to stretch do Buffer.add_string buffer glyph done;
-        (open_style, false))
-      ("", true) cells
-    |> fst
-  in
-  if not (String.equal open_style "") then Buffer.add_string buffer Ansi.reset;
-  Buffer.contents buffer
 
 (* The oldest and the newest bucket named at the two ends of a rule. *)
 let ruler ~span ~series_width buckets =
@@ -363,9 +278,6 @@ let ruler ~span ~series_width buckets =
           ^ String.concat "" (List.init (span - labels) (fun _ -> Ansi.box_h))
           ^ " " ^ newest ^ Ansi.reset ]
   | [], _ | _, [] -> []
-
-(* The [index]th text row of every column. *)
-let row_of columns index = List.map (fun column -> List.nth column index) columns
 
 (* Smooth interpolated btop-style Braille wave stretched continuously across
    [span] cells: consecutive active buckets are interpolated subcolumn by
@@ -767,11 +679,18 @@ let summary_line ?(ko = false) ~cells t =
     in
     let chart_room = List.length buckets + String.length summary_gap in
     if without_chart + chart_room <= cells then
-      let _, columns =
-        chart_cells ~tall:1 ~sample:calls_sample ~series:Masc_tui_theme.Calls buckets
+      let maximum = series_maximum ~sample:calls_sample buckets in
+      let tint = Theme.series_tint Masc_tui_theme.Calls in
+      let curve =
+        match
+          draw_curve_rows ~tall:1 ~span:(List.length buckets) ~maximum
+            ~sample:calls_sample ~tint buckets
+        with
+        | row :: _ -> row
+        | [] -> ""
       in
       Theme.recede () ^ label ^ Ansi.reset ^ summary_gap
-      ^ draw_cells ~stretch:1 ~gap:0 (row_of columns 0)
+      ^ curve
       ^ summary_gap ^ figures_styled
     else if without_chart <= cells then
       Theme.recede () ^ label ^ Ansi.reset ^ summary_gap ^ figures_styled

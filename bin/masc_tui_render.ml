@@ -290,13 +290,13 @@ let overview_capacity_lines ?(cells = 48) ~mark (state : state) =
       in
       let meters =
         if cells >= 28 && (fleet.fs_bootable_count > 0 || fleet.fs_target_reaction_capacity > 0) then
-          [ Chart.meter ~width:cells ~value:fleet.fs_running_count
+          [ Chart.dot_meter ~width:cells ~value:fleet.fs_running_count
               ~max_value:(max 1 fleet.fs_bootable_count)
               ~label:(text "실행" "Run ")
               ~suffix:(Printf.sprintf "%d/%d" fleet.fs_running_count fleet.fs_bootable_count)
               ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Capacity })
               ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
-          ; Chart.meter ~width:cells ~value:avail
+          ; Chart.dot_meter ~width:cells ~value:avail
               ~max_value:(max 1 fleet.fs_target_reaction_capacity)
               ~label:(text "여력" "Turn")
               ~suffix:

@@ -181,7 +181,7 @@ val grid_next_header : window:string -> string
 
 val grid_pulse_ok_mark : string
 val grid_pulse_failed_and_ok_mark : string
-(** [▁] a pulse half hour of ok turns only, [▄] one that holds a failed turn
+(** [⣀] a pulse half hour of ok turns only, [⠤] one that holds a failed turn
     and an ok one. A half hour of failed turns only draws {!grid_full_mark}. *)
 
 val grid_wait_glyph : string
@@ -189,7 +189,7 @@ val grid_wait_glyph : string
     failure line. *)
 
 val grid_full_mark : string
-(** [▆]: a filled cell of a pulse half hour of failed turns only. *)
+(** [⠛]: a top-row Braille spike for a pulse half hour of failed turns only. *)
 
 val grid_chain_link : string
 val grid_more_mark : string

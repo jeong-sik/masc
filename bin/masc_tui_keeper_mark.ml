@@ -249,18 +249,18 @@ let grid_lag_header = "lag"
 let grid_pulse_header ~window = axis_before_glyph ^ " " ^ window
 let grid_next_header ~window = "next " ^ axis_next_glyph ^ " " ^ window
 
-(* The views' pulse draws one mark per half hour (RFC-0515 §2.4.3): a crisp
-   small square pip for ok turns (so consecutive ok slots read as individual
-   dots instead of fusing into a line), a half block for mixed half hours,
-   and a tall block for failed turns ([grid_full_mark]). *)
-let grid_pulse_ok_mark = "\xe2\x96\xaa" (* ▪ *)
-let grid_pulse_failed_and_ok_mark = "\xe2\x96\x84" (* ▄ *)
+(* The views' pulse draws one fine Braille ECG mark per half hour
+   (RFC-0515 §2.4.3): bottom baseline dots [⣀] for ok turns, middle dots [⠤]
+   for mixed half hours, and top-row spike dots [⠛] for failed turns
+   ([grid_full_mark]). All five slot marks stay shape-disjoint under NO_COLOR. *)
+let grid_pulse_ok_mark = "\xe2\xa3\x80" (* ⣀ *)
+let grid_pulse_failed_and_ok_mark = "\xe2\xa0\xa4" (* ⠤ *)
 
 (* The memory and age views, the failure line and the group titles. *)
 (* A resting path waits: the waiting mark (RFC tui-one-screen-grammar 7.2).
    [◌] is a value not read yet (6.4). *)
 let grid_wait_glyph = Status.glyph Status.Waiting
-let grid_full_mark = "\xe2\x96\x86" (* ▆ *)
+let grid_full_mark = "\xe2\xa0\x9b" (* ⠛ *)
 let grid_chain_link = "\xe2\x94\x81" (* ━ *)
 let grid_more_mark = "\xe2\x80\xa6" (* … *)
 let grid_open_mark = "▾"

@@ -1912,30 +1912,25 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let detail_lines, detail_is_sheet =
     match selected_row with
     | Some row when sheet_height >= 5 ->
-        let sheet_cells = max 1 (Masc_tui_card.content_cells ~width) in
+        let preview_indent = 1 in
+        let preview_cells = max 1 (width - preview_indent) in
         let sheet_parts =
-          fact_detail_parts_for_width ~state ~ko ~width:sheet_cells row
+          fact_detail_parts_for_width ~state ~ko ~width:preview_cells row
         in
         let total_body =
           sheet_parts.claim_line_count + 1 + List.length sheet_parts.other_lines
         in
         let sheet =
-          Doc.bottom_sheet ~ko ~width ~height:sheet_height
-            ~role:Masc_tui_theme.Panel_memory
-            ~title:sheet_parts.heading_plain
-            ~count:(Masc_tui_card.Whole total_body)
-            ~footer_keys:
+          Doc.docked_preview ~width ~height:sheet_height ~indent:preview_indent
+            ~eyebrow:(if ko then "선택한 사실" else "Selected Fact")
+            ~title:(Masc_tui_theme.strip_sgr sheet_parts.heading_plain)
+            ~meta:(Printf.sprintf (if ko then "%d줄" else "%d lines") total_body)
+            ~footer_hints:
               [ { Masc_tui_card.key = "Enter"; label = (if ko then "전체" else "full") }
               ; { key = "d"; label = (if ko then "트리" else "tree") }
               ; { key = "c/C"; label = (if ko then "분류" else "cat") }
               ]
-            ~body:(fun ~cells ->
-              let inner =
-                if cells = sheet_cells then sheet_parts
-                else fact_detail_parts_for_width ~state ~ko ~width:cells row
-              in
-              inner.claim_lines @ [ "" ] @ inner.other_lines)
-            ()
+            (sheet_parts.claim_lines @ [ "" ] @ sheet_parts.other_lines)
         in
         sheet, true
     | Some row when detail_budget > 0 ->
@@ -2168,7 +2163,14 @@ let render_memory_facts_body ~cols ~budget (state : state)
         let styled = if style = "" then text else style ^ text ^ Ansi.reset in
         collect (true, styled))
       ~push_selected:(fun text ->
-        collect (false, Theme.selection_style () ^ fit_width text fact_inner_cols ^ Ansi.reset))
+        let fitted = fit_width text fact_inner_cols in
+        let painted =
+          match Theme.sidebar_selection_background () with
+          | Some bg when not (String.equal bg "") ->
+              Masc_tui_theme.paint_row_background ~bg fitted ^ Ansi.reset
+          | Some _ | None -> Theme.selection_style () ^ fitted ^ Ansi.reset
+        in
+        collect (false, painted))
       ~push_divider:(fun () ->
         collect (true, Theme.border_muted () ^ draw_hline fact_inner_cols ^ Ansi.reset))
       ~push_empty:(fun () -> collect (false, ""));

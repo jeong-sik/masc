@@ -479,11 +479,11 @@ let test_a_refused_store_ends_the_process () =
   listen_on_loopback_alone ();
   with_installation
   @@ fun installation ->
-  (* An undecodable Keeper Memory OS current snapshot in the keepers dir.
-     Server_accounts checks only .toml definitions and keeper-config-journal,
-     so it starts the engine, and prepare_keeper_persistence refuses the
-     undecodable store (~accept_store_quarantine:false) and ends the process
-     (updated after #53790 moved keeper-config-journal refusal pre-engine). *)
+  (* A Keeper Memory snapshot that does not decode, in the folder of the
+     definitions. The account server looks there for definitions only, so it
+     starts the engine; the engine refuses the store
+     (prepare_keeper_persistence without accept_store_quarantine) and ends
+     the process. *)
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:installation.base
   in

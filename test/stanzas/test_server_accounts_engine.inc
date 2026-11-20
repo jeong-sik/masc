@@ -24,7 +24,6 @@
   masc.auth
   masc.config
   masc.config_dir_resolver
-  masc.config_journal
   masc.crypto_rng
   masc.fs_compat
   masc.masc_core

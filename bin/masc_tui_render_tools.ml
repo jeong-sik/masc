@@ -2708,10 +2708,10 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                 <= Masc_tui_frame.inner_width ~cols - 4 in
               let table_mode = fits Tool_table.skill_usage_keeper_header
                 && List.for_all (fun (_, _, line) -> fits line) keeper_readings in
-              (if table_mode then [Ansi.dim, Tool_table.skill_usage_keeper_header] else [])
+              (if table_mode then [Theme.recede (), Tool_table.skill_usage_keeper_header] else [])
               @ List.concat_map
                   (fun ((keeper, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)), last_used, line) ->
-                      if table_mode then [Ansi.dim, line]
+                      if table_mode then ["", line]
                       else [ Ansi.bold, Say.as_received (Terminal_text.single_line keeper)
                            ; Ansi.dim, counts_text ~invocations:row.ksu_invocations
                                          ~deliveries:row.ksu_deliveries ~actions:row.ksu_actions

@@ -152,8 +152,33 @@ let summary_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
   let usage = match Fetched.value (facts_view state keeper_name) with
     | Some ({mfs_ordinary = Facts.Memory_store_present _ | Facts.Memory_store_absent; _}, _) ->
       let total = List.length (facts state keeper_name) in
-      [quiet (text (Printf.sprintf "현재 기억 %d · 조회 기록 %d / %d" total (List.length (frequent state keeper_name)) total)
-        (Printf.sprintf "%d current memories · %d / %d with recorded retrievals" total (List.length (frequent state keeper_name)) total))]
+      let retrieved = List.length (frequent state keeper_name) in
+      let summary =
+        quiet
+          (text
+             (Printf.sprintf "현재 기억 %d · 조회 기록 %d / %d" total retrieved total)
+             (Printf.sprintf "%d current memories · %d / %d with recorded retrievals"
+                total retrieved total))
+      in
+      let line =
+        if total <= 0 then summary
+        else
+          let summary_w = Layout.display_width summary in
+          let meter_room = width - summary_w - 2 in
+          if meter_room >= 10 then
+            let meter_w = min 24 meter_room in
+            let scale =
+              Masc_tui_chart.Series
+                { paint = Theme.paint (); series = Masc_tui_theme.Memory }
+            in
+            let meter =
+              Masc_tui_chart.meter ~width:meter_w ~value:retrieved ~max_value:total
+                ~scale ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+            in
+            summary ^ "  " ^ meter
+          else summary
+      in
+      [ line ]
     | Some ({mfs_ordinary = Facts.Memory_store_read_error _; _}, _) | None -> [] in
   List.take max_lines (List.map (fun line -> "  " ^ line)
     (notes @ List.take budget (usage @ claims @ changes) @ [nav]))
@@ -189,18 +214,24 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
       let row_cols = max 1 (cells - 2) in
       quiet ("  " ^ Table.header_row (event_cells ~ko ~now ~cols:row_cols first))
       :: List.mapi (fun i event ->
-          let sel = Theme.selection_style () in
-          let row = Table.row ~close:(if i = 0 then Ansi.reset ^ sel else Ansi.reset)
+          let row = Table.row
             (event_cells ~selected:(i = 0) ~ko ~now ~cols:row_cols event) in
-          if i = 0 then sel ^ "\xe2\x80\xba " ^ row ^ Ansi.reset else "  " ^ row) shown
+          if i = 0 then
+            Theme.selection_style ()
+            ^ Layout.fit_width ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr row) cells
+            ^ Ansi.reset
+          else "  " ^ row) shown
       @ [quiet (text "Enter:전문  .:변화 카드  Ctrl-O:연결 트리"
           "Enter:full text  .:change cards  Ctrl-O:connected tree")] in
   let height = max 0 (min (total + 4) (max_lines - 1 - List.length notes - List.length scope)) in
   let style : Card.style = {border=Theme.border_muted (); focused_border=Theme.border_focus ();
                             title_style=Ansi.bold; reset=Ansi.reset} in
-  let body = Card.render ~ko ~style ~width:(max 1 (cols - 4)) ~height
+  let scrollbar : Card.scrollbar =
+    { Card.offset; visible = max 1 (min budget total); total }
+  in
+  let body = Card.render ~scrollbar ~ko ~style ~width:(max 1 (cols - 4)) ~height
     {edge={name=text "기억의 흐름" "Memory flow"; key=None; status=None; count=None;
-           focus=Card.Unfocused;
+           focus=Card.Focused_list;
            border_accent=Some (Theme.panel_border Masc_tui_theme.Panel_memory);
            footer_keys=[]}; body} in
   List.take max_lines (List.map (fun line -> "  " ^ line) ([header] @ notes @ scope @ body))

@@ -534,11 +534,12 @@ let not_reported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreporte
 let value = Option.value ~default:not_reported
 
 let status_code = function
-  | `Ok -> Masc_tui_theme.status Masc_tui_theme.Ok
-  | `Warn -> Masc_tui_theme.status Masc_tui_theme.Warn
-  | `Bad -> Masc_tui_theme.status Masc_tui_theme.Bad
-  | `Info -> Masc_tui_theme.status Masc_tui_theme.Info
-  | `Muted -> Masc_tui_theme.status Masc_tui_theme.Muted
+  | `Ok -> Masc_tui_ansi.Theme.ok ()
+  | `Warn -> Masc_tui_ansi.Theme.warn ()
+  | `Bad -> Masc_tui_ansi.Theme.bad ()
+  | `Info -> Masc_tui_ansi.Theme.info ()
+  | `Muted -> Masc_tui_ansi.Theme.recede ()
+  | `Plain -> ""
 
 let row_geometry ~width ~label =
   let label_cells = Masc_tui_message_layout.display_width label in
@@ -548,7 +549,8 @@ let row_geometry ~width ~label =
 let wrapped_rows ~width ~label ~tone text =
   let label_cells = Masc_tui_message_layout.display_width label in
   let prefix_cells, body_width = row_geometry ~width ~label in
-  let prefix = "  " ^ label ^ String.make (max 0 (14 - label_cells)) ' ' ^ " " in
+  let styled_label = styled (Masc_tui_ansi.Theme.recede ()) label in
+  let prefix = "  " ^ styled_label ^ String.make (max 0 (14 - label_cells)) ' ' ^ " " in
   let continuation = String.make prefix_cells ' ' in
   match Masc_tui_message_layout.wrap_words ~max_cells:body_width text with
   | [] -> [ prefix ]
@@ -646,7 +648,7 @@ let legacy_status_lines ~ko ~width reading =
           header
           @ [ "  " ^ styled (status_code `Info) (tr "○ 시작 전" "○ NOT STARTED") ]
           @ wrapped_rows ~width ~label:(tr "다음" "Next") ~tone:`Info
-              (tr "첫 샌드박스 명령에서 이 Keeper의 VM을 만듭니다."
+              (tr "첫 샌드박스 명령에서 이 키퍼의 VM을 만듭니다."
                  "The first sandbox command creates this Keeper's VM.")
         | Some Docker ->
           header
@@ -768,22 +770,22 @@ let container_lines ~ko ~width reading =
       wrapped_rows ~width ~label:(tr "관측 상태" "Observed state") ~tone
         state
       @ wrapped_rows ~width ~label:(tr "런타임 원문" "Runtime status") ~tone:`Muted container.status
-      @ wrapped_rows ~width ~label:(tr "이름" "Name") ~tone:`Muted container.name
+      @ wrapped_rows ~width ~label:(tr "이름" "Name") ~tone:`Plain container.name
       @ (match compute with
          | None -> []
          | Some compute -> wrapped_rows ~width ~label:(tr "컴퓨팅" "Compute") ~tone:`Info compute)
       @ (match network with
          | None -> []
          | Some network -> wrapped_rows ~width ~label:(tr "네트워크" "Network") ~tone:`Info network)
-      @ wrapped_rows ~width ~label:(tr "이미지" "Image") ~tone:`Muted container.image
+      @ wrapped_rows ~width ~label:(tr "이미지" "Image") ~tone:`Plain container.image
       @ (match container.created_at with
          | None -> []
          | Some created -> wrapped_rows ~width ~label:(tr "생성 시각" "Created") ~tone:`Muted created)
-      @ wrapped_rows ~width ~label:(tr "인스턴스 ID" "Instance ID") ~tone:`Muted container.id
+      @ wrapped_rows ~width ~label:(tr "인스턴스 ID" "Instance ID") ~tone:`Plain container.id
       @ (match container.owner_pid with
          | None -> []
          | Some pid ->
-           wrapped_rows ~width ~label:(tr "소유 PID" "Owner PID") ~tone:`Muted (string_of_int pid))))
+           wrapped_rows ~width ~label:(tr "소유 PID" "Owner PID") ~tone:`Plain (string_of_int pid))))
 
 let resource_rows ~ko ~width = function
   | None -> []
@@ -840,7 +842,7 @@ let image_rows ~ko ~width reading =
       | Some Image_catalog_unreadable -> "이미지 목록을 읽지 못했습니다."
       | Some Image_unknown_name -> "설정한 이미지 이름이 목록에 없습니다."
       | Some Image_not_promoted -> "이 저장소에 등록된 이미지 빌드가 없습니다."
-      | Some Image_no_store -> "이 Keeper의 이미지 저장소를 확인할 수 없습니다."
+      | Some Image_no_store -> "이 키퍼의 이미지 저장소를 확인할 수 없습니다."
       | Some Image_issue_unclassified | None -> "이미지 구성을 확인하지 못했습니다." in
     wrapped_rows ~width ~label:"이미지" ~tone:`Bad summary
     @ wrapped_rows ~width ~label:"상세 원문" ~tone:`Muted reason
@@ -1153,9 +1155,12 @@ let logs_view_lines ~ko ~width logs =
   in
   (* A tail count belongs to a stream. Without one, neither it nor a backend
      name is printed: there is nothing they would describe. *)
-  let source_row backend =
-    if ko then Printf.sprintf "  출처            %s · 인스턴스별 최근 %d줄" (backend_label backend) logs.log_tail
-    else Printf.sprintf "  %-18s %s · last %d lines per instance" "Source" (backend_label backend) logs.log_tail
+  let source_rows backend =
+    wrapped_rows ~width ~label:(tr "출처" "Source") ~tone:`Plain
+      (if ko then
+         Printf.sprintf "%s · 인스턴스별 최근 %d줄" (backend_label backend) logs.log_tail
+       else
+         Printf.sprintf "%s · last %d lines per instance" (backend_label backend) logs.log_tail)
   in
   let context_rows backend =
     match backend with
@@ -1181,11 +1186,11 @@ let logs_view_lines ~ko ~width logs =
     @ wrapped_rows ~width ~label:(tr "위치" "Where") ~tone:`Info
         (match ko, location with
          | true, Remote_ssh_logs ->
-           "이 Keeper는 설정된 SSH 엔드포인트에서 실행됩니다. 로그는 해당 엔드포인트에서 확인하세요."
+           "이 키퍼는 설정된 SSH 엔드포인트에서 실행됩니다. 로그는 해당 엔드포인트에서 확인하세요."
          | (false, Remote_ssh_logs) | (_, (Local_log_stream | Unknown_log_location)) -> reason)
   | Local_no_instance backend ->
     title
-    @ [ source_row backend ]
+    @ source_rows backend
     @ context_rows backend
     @ wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Muted
         (match backend with
@@ -1197,24 +1202,25 @@ let logs_view_lines ~ko ~width logs =
              "No container instance exists yet; run a sandbox command first.")
   | Local_instances (backend, instances) ->
     title
-    @ [ source_row backend ]
+    @ source_rows backend
     @ context_rows backend
     @ List.concat_map
         (fun instance ->
           let state =
             match instance.log_instance_running with
-            | Some true -> tr "실행 관측" "observed running"
-            | Some false -> tr "중지 관측" "observed stopped"
-            | None -> tr "실행 상태 보고 안 됨" "run state not reported"
+            | Some true -> styled (status_code `Ok) ("● " ^ tr "실행 관측" "observed running")
+            | Some false -> styled (status_code `Warn) ("‖ " ^ tr "중지 관측" "observed stopped")
+            | None -> styled (status_code `Muted) ("? " ^ tr "실행 상태 보고 안 됨" "run state not reported")
           in
+          let sep = styled (status_code `Muted) " · " in
           [ ""
-          ; Printf.sprintf "  %s%s%s · %s · %s" Masc_tui_theme.Sgr.bold
-              instance.log_instance_name Masc_tui_theme.Sgr.reset
-              instance.log_instance_id state
+          ; "  " ^ styled Masc_tui_theme.Sgr.bold instance.log_instance_name
+            ^ sep ^ styled (status_code `Muted) instance.log_instance_id
+            ^ sep ^ state
           ]
           @ (match instance.log_error with
              | None -> []
              | Some detail -> wrapped_rows ~width ~label:(tr "오류" "Error") ~tone:`Bad detail)
           @ List.map (fun line -> "  out  " ^ line) instance.log_stdout
-          @ List.map (fun line -> "  err  " ^ line) instance.log_stderr)
+          @ List.map (fun line -> "  " ^ styled (status_code `Bad) ("err  " ^ line)) instance.log_stderr)
         instances

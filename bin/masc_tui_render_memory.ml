@@ -33,7 +33,7 @@ let librarian_failure_words ~ko kind =
    for, not how it should be read, so the title reads it as a phrase. The title
    is drawn at every terminal size; a body row is not. *)
 let facts_keeper_label ~ko = function
-  | Some "*" -> if ko then "전체 Keeper" else "all keepers"
+  | Some "*" -> if ko then "전체 키퍼" else "all keepers"
   | Some name -> name
   | None -> ""
 
@@ -305,7 +305,7 @@ let memory_librarian_stalled_lines ~ko (librarian : memory_librarian_health) =
   | Some (Masc.Tui_decode_memory_health.Stalled_unmeasured { mls_cause; mls_detail }) ->
     let cause =
       match mls_cause with
-      | Masc.Tui_decode_memory_health.Stall_meta_unreadable -> text "Keeper 메타 읽기 실패" "keeper meta unreadable"
+      | Masc.Tui_decode_memory_health.Stall_meta_unreadable -> text "키퍼 메타 읽기 실패" "keeper meta unreadable"
       | Masc.Tui_decode_memory_health.Stall_turn_records_unreadable -> text "턴 기록 읽기 실패" "turn records unreadable"
       | Masc.Tui_decode_memory_health.Stall_turn_boundary_refused -> text "턴 경계 읽기 실패" "turn boundaries unreadable"
       | Masc.Tui_decode_memory_health.Stall_snapshot_unreadable -> text "연속성 스냅샷 읽기 실패" "continuity snapshot unreadable"
@@ -567,7 +567,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       @ [ facts_line ]
       @ ladder_rows
       @ [ source_line;
-          text "  불러온 기억: Keeper 대화의 /context에서 확인"
+          text "  불러온 기억: 키퍼 대화의 /context에서 확인"
             "  Recall block detail: open Keeper chat /context." ]
       @ clause_rows ~full ~cols librarian_clauses
       @ librarian_stalled_lines
@@ -645,11 +645,12 @@ let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_heal
         Some (Theme.warn ())
     | Memory_ordinary -> None
 
-let memory_row_line ?(selected = false) ~unit columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+let memory_row_line ?(selected = false) ~ko ~unit columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let no_value = Masc_tui_theme.Glyph.no_value in
   let ordinary_reading value = if k.mkh_snapshot_present then value () else no_value in
   let source =
-    if Option.is_some k.mkh_source_read_error then "read error"
+    if Option.is_some k.mkh_source_read_error then
+      Theme.bad () ^ (if ko then "읽기 오류" else "read error") ^ Ansi.reset
     else if k.mkh_source_snapshot_present then
       Printf.sprintf "r%d i%d %s" k.mkh_source_revision
         k.mkh_source_invalidations
@@ -695,8 +696,10 @@ let memory_fact_row_line ~ko ?(is_fleet = false) ?(sort = Sort_recency) ~cols (r
   let usage, at = match row, sort with
     | Memory_row_fact fact, (Sort_retrieved_count | Sort_last_retrieved) ->
       (match fact.mf_events.mfe_retrieval with
-       | Retrieved {count; last_at; distinct_days = _} -> (Printf.sprintf "%d× " count, last_at)
-       | Never_retrieved -> ((if ko then "미조회 " else "unretrieved "), fact.mf_last_seen))
+       | Retrieved {count; last_at; distinct_days = _} ->
+           (Theme.info () ^ Printf.sprintf "%d× " count ^ Ansi.reset, last_at)
+       | Never_retrieved ->
+           (Theme.recede () ^ (if ko then "미조회 " else "unretrieved ") ^ Ansi.reset, fact.mf_last_seen))
     | Memory_row_fact fact, (Sort_recency | Sort_category | Sort_claim) -> ("", fact.mf_last_seen)
     | Memory_row_source_fact fact, (Sort_recency | Sort_retrieved_count | Sort_last_retrieved | Sort_category | Sort_claim) -> ("", fact.msf_first_seen)
     | Memory_row_invalidation fact, (Sort_recency | Sort_retrieved_count | Sort_last_retrieved | Sort_category | Sort_claim) -> ("", fact.mi_invalidated_at) in
@@ -957,13 +960,16 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
   let labelled label clauses =
     let prefix = prefix_of label in
     let prefix_cells = Message_layout.display_width prefix in
+    let styled_prefix = "  " ^ Theme.recede () ^ label ^ Ansi.reset ^ " " in
     Message_layout.pack_clauses ~max_cells:(room_after label) clauses
     |> List.mapi (fun index line ->
-           (if index = 0 then prefix else String.make prefix_cells ' ') ^ line)
+           (if index = 0 then styled_prefix else String.make prefix_cells ' ') ^ line)
   in
   let total =
     match state.memory_health with
-    | None -> [ text "  전체: " "  Total: " ^ missing_reading (text "메모리 관측 대기" "waiting for memory snapshots") ]
+    | None ->
+        [ "  " ^ Theme.recede () ^ text "전체:" "Total:" ^ Ansi.reset ^ " "
+          ^ missing_reading (text "메모리 관측 대기" "waiting for memory snapshots") ]
     | Some snapshot ->
        labelled (text "전체" "Total")
          ([ (if ko then Printf.sprintf "기억 %d개" (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
@@ -997,7 +1003,9 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
   in
   let readings =
     match state.memory_health with
-    | None -> [ "  Librarian: " ^ missing_reading (text "상태 관측 대기" "waiting for health data") ]
+    | None ->
+        [ "  " ^ Theme.recede () ^ "Librarian:" ^ Ansi.reset ^ " "
+          ^ missing_reading (text "상태 관측 대기" "waiting for health data") ]
     | Some snapshot ->
        (* Every count spells its own noun: each of these reads 1 on an
           ordinary day, and the line said "1 keepers", "1 atoms",
@@ -1006,14 +1014,21 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
        labelled (text "일반:" "Ordinary:")
          [ Printf.sprintf (if ko then "관측 %d / 파생 %d" else "%d observed / %d derived")
              snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
-         ; (if ko then Printf.sprintf "근거 무효화 %d건" snapshot.mhs_total_support_invalidations
-            else Masc_tui_message_layout.count_noun
-              snapshot.mhs_total_support_invalidations "support invalidation")
+         ; (let inv_text =
+              if ko then Printf.sprintf "근거 무효화 %d건" snapshot.mhs_total_support_invalidations
+              else Masc_tui_message_layout.count_noun
+                snapshot.mhs_total_support_invalidations "support invalidation"
+            in
+            if snapshot.mhs_total_support_invalidations > 0 then
+              Theme.warn () ^ inv_text ^ Ansi.reset
+            else inv_text)
          ]
        @ (if snapshot.mhs_total_read_errors = 0 then [] else
             labelled (text "일반:" "Ordinary:")
-              [Printf.sprintf (if ko then "읽기 실패 키퍼 %d명" else "read errors in %d keepers")
-                 snapshot.mhs_total_read_errors])
+              [ Theme.bad ()
+                ^ Printf.sprintf (if ko then "읽기 실패 키퍼 %d명" else "read errors in %d keepers")
+                    snapshot.mhs_total_read_errors
+                ^ Ansi.reset ])
        @ age_ladder_rows snapshot
        (* The source-bound snapshot is stored and invalidated apart from the
           ordinary facts above, and each Keeper's roster row and detail already
@@ -1024,15 +1039,22 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
           count, so the row also says how many Keepers that is, as the roster
           does with "read error". *)
        @ labelled (text "원본:" "Source:")
-         ([ (if ko then Printf.sprintf "무효화 %d건" snapshot.mhs_total_source_invalidations
-             else Masc_tui_message_layout.count_noun
-               snapshot.mhs_total_source_invalidations "invalidation")
+         ([ (let inv_text =
+               if ko then Printf.sprintf "무효화 %d건" snapshot.mhs_total_source_invalidations
+               else Masc_tui_message_layout.count_noun
+                 snapshot.mhs_total_source_invalidations "invalidation"
+             in
+             if snapshot.mhs_total_source_invalidations > 0 then
+               Theme.warn () ^ inv_text ^ Ansi.reset
+             else inv_text)
           ]
           @ (if snapshot.mhs_total_source_read_errors > 0
              then
-               [ if ko then Printf.sprintf "원본 읽기 실패 키퍼 %d명" snapshot.mhs_total_source_read_errors
-                 else Masc_tui_message_layout.count_noun
-                   snapshot.mhs_total_source_read_errors "keeper" ^ " with a source read error"
+               [ Theme.bad ()
+                 ^ (if ko then Printf.sprintf "원본 읽기 실패 키퍼 %d명" snapshot.mhs_total_source_read_errors
+                    else Masc_tui_message_layout.count_noun
+                      snapshot.mhs_total_source_read_errors "keeper" ^ " with a source read error")
+                 ^ Ansi.reset
                ]
              else []))
        @ labelled "Librarian:"
@@ -1044,24 +1066,43 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
               (match snapshot.mhs_total_librarian_unread_turns with
                | None -> "? turns"
                | Some turns -> Masc_tui_message_layout.count_noun turns "turn") ^ " unread")
-         ; (if ko then Printf.sprintf "연속성 지연 원자 %d개 (미측정 키퍼 %d명)"
+         ; (if ko then Printf.sprintf "연속성 지연 아톰 %d개 (미측정 키퍼 %d명)"
               snapshot.mhs_total_librarian_continuity_unread_atoms
               snapshot.mhs_total_librarian_continuity_unmeasured
             else Printf.sprintf "%s behind in continuity (%s not measured)"
               (Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_continuity_unread_atoms "atom")
               (Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_continuity_unmeasured "keeper"))
-         ; (if ko then Printf.sprintf "서버 시작 후 실패 %d건" snapshot.mhs_total_librarian_failures
-            else Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_failures "failure"
-              ^ " since server start")
+         ; (let fail_text =
+              if ko then Printf.sprintf "서버 시작 후 실패 %d건" snapshot.mhs_total_librarian_failures
+              else Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_failures "failure"
+                ^ " since server start"
+            in
+            if snapshot.mhs_total_librarian_failures > 0 then
+              Theme.warn () ^ fail_text ^ Ansi.reset
+            else fail_text)
          ]
        @ (if snapshot.mhs_warn_alerts + snapshot.mhs_error_alerts = 0
               && snapshot.mhs_total_vision_ingest_errors = 0 then []
-          else labelled (text "알림:" "Alerts:")
-            [ Printf.sprintf (if ko then "보고된 경고 %d / 오류 %d (이력 포함 가능)" else "reported warnings %d / errors %d (may include history)")
+          else
+            let alert_text =
+              Printf.sprintf (if ko then "보고된 경고 %d / 오류 %d (이력 포함 가능)" else "reported warnings %d / errors %d (may include history)")
                 snapshot.mhs_warn_alerts snapshot.mhs_error_alerts
-            ; Printf.sprintf (if ko then "보고된 이미지 수집 오류 %d건" else "reported image ingestion errors %d")
-                snapshot.mhs_total_vision_ingest_errors
-            ])
+            in
+            let alert_clause =
+              if snapshot.mhs_error_alerts > 0 then Theme.bad () ^ alert_text ^ Ansi.reset
+              else if snapshot.mhs_warn_alerts > 0 then Theme.warn () ^ alert_text ^ Ansi.reset
+              else alert_text
+            in
+            labelled (text "알림:" "Alerts:")
+              [ alert_clause
+              ; (let vis_text =
+                   Printf.sprintf (if ko then "보고된 이미지 수집 오류 %d건" else "reported image ingestion errors %d")
+                     snapshot.mhs_total_vision_ingest_errors
+                 in
+                 if snapshot.mhs_total_vision_ingest_errors > 0 then
+                   Theme.warn () ^ vis_text ^ Ansi.reset
+                 else vis_text)
+              ])
   in
   total
   @ readings
@@ -1188,7 +1229,7 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
   in
   let continuity = match librarian.mlh_continuity_unread_atoms with
     | None -> text ~ko:"연속성 지연 미측정" ~en:"continuity lag unmeasured"
-    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 원자 %d개" else "continuity behind %d atoms") atoms
+    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 아톰 %d개" else "continuity behind %d atoms") atoms
   in
   let pass = match librarian.mlh_state with
     | None -> text ~ko:"처리 결과 보고 안 됨" ~en:"pass not reported"
@@ -1204,15 +1245,16 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
     ; memory_world_axis state ~room:width
     ]
   in
+  let style_heading h = Ansi.bold ^ h ^ Ansi.reset in
   let card ~cells (heading, clauses) =
-    heading :: Message_layout.pack_clauses ~max_cells:cells clauses
+    style_heading heading :: Message_layout.pack_clauses ~max_cells:cells clauses
   in
   let axis_rows =
     if compact then
       List.map (fun (heading, clauses) ->
-        "  " ^ Message_layout.join_fitting ~sep:" · " ~cells:width (heading :: clauses)) axes
+        "  " ^ Message_layout.join_fitting ~sep:" · " ~cells:width (style_heading heading :: clauses)) axes
     else if cols >= Masc_tui_roster_pane.threshold_cols then
-      let gap = "  │  " in
+      let gap = Theme.border_muted () ^ "  │  " ^ Ansi.reset in
       let cells = max 1 ((width - Message_layout.display_width gap) / 2) in
       let rec pairs = function
         | [] -> []
@@ -1228,30 +1270,41 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
       pairs axes
     else
       List.concat_map (fun (heading, clauses) ->
-        Message_layout.pack_clauses ~max_cells:width (heading :: clauses)
+        Message_layout.pack_clauses ~max_cells:width (style_heading heading :: clauses)
         |> List.map (fun row -> "  " ^ row)) axes
   in
   let errors = List.filter_map Fun.id
-      [ Option.map (fun reason -> text ~ko:"일반 기억: " ~en:"Ordinary memory: " ^ Terminal_text.single_line reason) keeper.mkh_read_error
-      ; Option.map (fun reason -> text ~ko:"출처 기억: " ~en:"Source memory: " ^ Terminal_text.single_line reason) keeper.mkh_source_read_error
-      ; Option.map (fun reason -> "Librarian: " ^ Terminal_text.single_line reason)
+      [ Option.map (fun reason -> Theme.bad () ^ text ~ko:"일반 기억: " ~en:"Ordinary memory: " ^ Terminal_text.single_line reason ^ Ansi.reset) keeper.mkh_read_error
+      ; Option.map (fun reason -> Theme.bad () ^ text ~ko:"출처 기억: " ~en:"Source memory: " ^ Terminal_text.single_line reason ^ Ansi.reset) keeper.mkh_source_read_error
+      ; Option.map (fun reason -> Theme.warn () ^ "Librarian: " ^ Terminal_text.single_line reason ^ Ansi.reset)
           (Option.bind librarian.mlh_state memory_librarian_pass_end_cause)
       ] in
-  let stalled = memory_librarian_stalled_lines ~ko librarian in
+  let stalled =
+    List.map (fun row -> Theme.warn () ^ row ^ Ansi.reset)
+      (memory_librarian_stalled_lines ~ko librarian)
+  in
   let alerts = if keeper.mkh_alerts = [] then [] else
-      [Printf.sprintf
-         (if ko then "보고된 알림 %d건 (이력 포함) · v:근거" else "%d reported alerts (including history) · v:evidence")
-         (List.length keeper.mkh_alerts)] in
+      [ Theme.warn ()
+        ^ Printf.sprintf
+            (if ko then "보고된 알림 %d건 (이력 포함) · v:근거" else "%d reported alerts (including history) · v:evidence")
+            (List.length keeper.mkh_alerts)
+        ^ Ansi.reset ] in
   let warnings = List.map (fun row -> "  " ^ row) errors @ stalled
       @ List.map (fun row -> "  " ^ row) alerts in
   let observed = match state.memory_health with
     | None -> ""
     | Some snapshot ->
-        text ~ko:" · 관측 " ~en:" · observed " ^ memory_date snapshot.mhs_generated_at
+        Theme.recede () ^ text ~ko:" · 관측 " ~en:" · observed "
+        ^ memory_date snapshot.mhs_generated_at ^ Ansi.reset
   in
-  let heading = "  " ^ text ~ko:"선택 · " ~en:"Selected · "
-      ^ Terminal_text.single_line keeper.mkh_keeper_id
-      ^ " · " ^ memory_operator_state state keeper ^ observed in
+  let state_tone = Option.value (memory_deviation_style keeper) ~default:(Theme.ok ()) in
+  let heading =
+    "  " ^ Theme.recede () ^ text ~ko:"선택 · " ~en:"Selected · " ^ Ansi.reset
+    ^ Ansi.bold ^ Terminal_text.single_line keeper.mkh_keeper_id ^ Ansi.reset
+    ^ Theme.recede () ^ " · " ^ Ansi.reset
+    ^ state_tone ^ memory_operator_state state keeper ^ Ansi.reset
+    ^ observed
+  in
   { rows = heading :: warnings @ axis_rows
   ; primary_rows = 1 + List.length warnings
   ; stalled_row = (match stalled with [] -> None | row :: _ -> Some (1 + List.length errors, row))
@@ -1287,7 +1340,8 @@ let memory_health_reading ~cols (state : state) ~keeper ~original =
             ~key:keeper.mkh_keeper_id in
         let context = memory_context_lines ~full:true ~ko ~cols ~detail:true ~unit:state.memory_unit ~input keeper in
         let axes = memory_axis_context state ~cols ~compact:false keeper in
-        [ section (if ko then "선택한 기억의 관측" else "Selected memory observations") axes.rows
+        [ section (if ko then "선택한 기억의 관측" else "Selected memory observations")
+            (List.map Masc_tui_theme.strip_sgr axes.rows)
         ; section
            ((if ko then "선택한 키퍼 · " else "Selected Keeper · ") ^ keeper.mkh_keeper_id)
            context.rows]
@@ -1296,7 +1350,7 @@ let memory_health_reading ~cols (state : state) ~keeper ~original =
     | Some {Masc.Operator_action_reason.cause=Memory_attention {keeper;_};_}, None ->
         [section (if ko then "대상 기억 미조회" else "Target memory not read")
           [Terminal_text.single_line keeper;
-           (if ko then "이 Keeper의 기억 상태는 이 조회에서 확인하지 못했습니다."
+           (if ko then "이 키퍼의 기억 상태는 이 조회에서 확인하지 못했습니다."
             else "This reading did not establish this Keeper's memory state.")]]
     | Some {cause=(Memory_attention _ | Shutdown_fenced_backlog _ | Other_reported);_}, Some _
     | Some {cause=(Shutdown_fenced_backlog _ | Other_reported);_}, None
@@ -1317,7 +1371,7 @@ let memory_health_reading ~cols (state : state) ~keeper ~original =
             keeper.mkh_alerts) snapshot.mhs_keepers
   in
   let fleet = [section (if ko then "전체 기억" else "Fleet memory")
-      (observed @ memory_fleet_header_rows ~cols state)] in
+      (observed @ List.map Masc_tui_theme.strip_sgr (memory_fleet_header_rows ~cols state))] in
   let warnings = if warnings = [] then [] else
       [section (if ko then "조회 경고" else "Read warnings") warnings] in
   let alerts = if fleet_alerts = [] then [] else
@@ -1374,7 +1428,7 @@ let memory_compact_fleet_row ~cols (state : state) =
           @ (if snapshot.mhs_total_librarian_continuity_unmeasured > 0 then
                [Printf.sprintf (if ko then "연속성 미측정 %d명" else "continuity unmeasured: %d keepers") snapshot.mhs_total_librarian_continuity_unmeasured] else [])
           @ (if snapshot.mhs_total_librarian_continuity_unread_atoms > 0 then
-               [Printf.sprintf (if ko then "연속성 지연 원자 %d개" else "continuity behind: %d atoms") snapshot.mhs_total_librarian_continuity_unread_atoms] else [])
+               [Printf.sprintf (if ko then "연속성 지연 아톰 %d개" else "continuity behind: %d atoms") snapshot.mhs_total_librarian_continuity_unread_atoms] else [])
           @ (match snapshot.mhs_total_librarian_unread_turns with
              | None -> [if ko then "미읽은 턴 보고 안 됨" else "unread turns not reported"]
              | Some turns when turns > 0 -> [Printf.sprintf (if ko then "미읽은 턴 %d개" else "%d unread turns") turns]
@@ -1764,12 +1818,12 @@ let render_memory_body ~cols ~budget (state : state)
            (if ko then "  (기억 미조회)" else page_unread_note_while ~ko:false ~reading:false)
      | Page_empty when query <> "" ->
          push_styled ~style:(Theme.recede ())
-           (Printf.sprintf (if ko then "  (\"%s\"에 맞는 Keeper 없음 · Esc:필터 해제)"
+           (Printf.sprintf (if ko then "  (\"%s\"에 맞는 키퍼 없음 · Esc:필터 해제)"
               else "  (no keepers matching \"%s\" · Esc clears filter)")
               (Terminal_text.single_line query))
      | Page_empty ->
          push_styled ~style:(Theme.recede ())
-           (if ko then "  (기억 설정이나 스냅샷이 있는 Keeper 없음)"
+           (if ko then "  (기억 설정이나 스냅샷이 있는 키퍼 없음)"
             else "  (no keepers with a memory config or snapshot)"))
   else begin
     let keepers_window =
@@ -1784,7 +1838,7 @@ let render_memory_body ~cols ~budget (state : state)
           let is_selected = idx = cursor in
           let line =
             if state.memory_overview_detail then
-              memory_row_line ~selected:is_selected ~unit:state.memory_unit columns k
+              memory_row_line ~selected:is_selected ~ko ~unit:state.memory_unit columns k
             else memory_selector_line ~selected:is_selected ~max_facts ~cols state k in
           if is_selected then
             push_selected (Masc_tui_theme.strip_sgr line)
@@ -1796,8 +1850,7 @@ let render_memory_body ~cols ~budget (state : state)
    | [] -> ()
    | lines ->
        push_divider ();
-       if state.memory_overview_detail then List.iter (push_styled ~style:(Theme.recede ())) lines
-       else List.iter push lines)
+       List.iter push lines)
 
 (* How many fact rows the list keeps before the detail below it takes any.
    Enough to read the cursor against its neighbours -- one row above, one
@@ -1985,7 +2038,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
               | Sort_recency | Sort_last_retrieved | Sort_category | Sort_claim -> `Recent
             in
             Memory_tree.memory_mode_strip ~ko ~cols ~active:active_mode ()
-          else Ansi.dim ^ keys ^ Ansi.reset
+          else Theme.recede () ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after)
               ~press:(fun filt text ->
@@ -1997,7 +2050,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
                    , state.memory_facts_category = filt
                    , filt ))
                  (Category_all :: all_categories))
-          ^ Ansi.dim ^ after ^ Ansi.reset
+          ^ Theme.recede () ^ after ^ Ansi.reset
         in
         (stats, pills)
   in
@@ -2024,7 +2077,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
     List.iter (push_styled ~style:(Theme.bad ())) scope;
     push_divider ()
   end;
-  let col_header = if is_fleet then text "  Keeper · 분류 · 내용" "  Keeper · category · content"
+  let col_header = if is_fleet then text "  키퍼 · 분류 · 내용" "  Keeper · category · content"
     else text "  분류 · 내용" "  Category · content"
   in
   push_styled ~style:(Theme.recede ()) col_header;
@@ -2062,7 +2115,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
             else if Option.bind (memory_facts_snapshot state) (fun snapshot ->
               memory_fact_count ~complete:(memory_counts_complete state) snapshot All_facts) = None then
               text "  (읽힌 사실 없음 · 일부 관측)" "  (no facts read; partial reading)"
-            else if is_fleet then text "  (읽힌 Keeper에 사실 없음)" "  (no facts across the observed keepers)"
+            else if is_fleet then text "  (읽힌 키퍼에 사실 없음)" "  (no facts across the observed keepers)"
             else text "  (두 저장소에 사실 없음)" "  (no facts in either store)")
      | Page_empty, filt ->
          push_styled ~style:(Theme.recede ())

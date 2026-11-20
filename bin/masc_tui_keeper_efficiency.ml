@@ -1,4 +1,6 @@
 module Decode = Masc.Tui_decode_keeper_efficiency
+module Theme = Masc_tui_ansi.Theme
+module Ansi = Masc_tui_ansi.Ansi
 
 type month_view = Decode.month_view
 
@@ -18,12 +20,30 @@ type tone =
 let single_line = Masc.Tui_terminal_text.sanitize_terminal_text
 let per_turn ~turns value = value /. float_of_int turns
 
+let wrap_style style text =
+  if String.equal style "" then text else style ^ text ^ Ansi.reset
+;;
+
+let mini_bar ~series ~value ~reference =
+  let ceiling = Float.max value reference in
+  let scaled =
+    if not (Float.is_finite value) || value <= 0. || not (Float.is_finite ceiling) || ceiling <= 0.
+    then 0
+    else max 1 (min 1000 (Float.to_int (Float.round (value /. ceiling *. 1000.))))
+  in
+  let scale = Masc_tui_chart.Series { paint = Theme.paint (); series } in
+  Masc_tui_chart.meter_bar ~width:8 ~value:scaled ~max_value:1000 ~scale
+    ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+;;
+
 let row_lines ~ko ~month (view : month_view) (row : Decode.keeper_month) =
   let fleet = view.fleet in
+  let recede = wrap_style (Theme.recede ()) in
   let heading =
-    Printf.sprintf
-      (if ko then "%s 효율 (%d일, 전체 %d턴)" else "Efficiency %s (%d days, fleet %d turns)")
-      month view.days_covered fleet.turns_total
+    wrap_style Ansi.bold
+      (Printf.sprintf
+         (if ko then "%s 효율 (%d일, 전체 %d턴)" else "Efficiency %s (%d days, fleet %d turns)")
+         month view.days_covered fleet.turns_total)
   in
   if row.turns = 0
   then
@@ -36,24 +56,48 @@ let row_lines ~ko ~month (view : month_view) (row : Decode.keeper_month) =
     ]
   else
     let turns = row.turns in
+    let calls_pt = per_turn ~turns (float_of_int row.calls) in
+    let tool_s_pt = per_turn ~turns (row.tool_ms /. 1000.) in
+    let out_tok_pt = per_turn ~turns (float_of_int row.output_tokens) in
+    let calls_bar = mini_bar ~series:Masc_tui_theme.Calls ~value:calls_pt ~reference:fleet.calls_per_turn in
+    let tool_bar = mini_bar ~series:Masc_tui_theme.Latency ~value:tool_s_pt ~reference:fleet.tool_s_per_turn in
+    let tok_bar = mini_bar ~series:Masc_tui_theme.Usage ~value:out_tok_pt ~reference:fleet.output_tokens_per_turn in
+    let fail_style =
+      if row.failed > 0 && row.failed = row.calls then Theme.bad ()
+      else if row.failed > 0 then Theme.warn ()
+      else Theme.recede ()
+    in
+    let fail_text =
+      wrap_style fail_style
+        (if ko then Printf.sprintf "실패 %d / 호출 %d" row.failed row.calls
+         else Printf.sprintf "%d of %d calls failed" row.failed row.calls)
+    in
+    let sep = recede " · " in
     [ Plain, heading
     ; ( Plain
-      , Printf.sprintf
-          (if ko then "%d턴 · 턴당 호출 %.1f (전체 %.1f) · 턴당 도구 %.1f초 (전체 %.1f)"
-           else "%d turns · %.1f calls/turn (fleet %.1f) · %.1f tool s/turn (fleet %.1f)")
-          turns
-          (per_turn ~turns (float_of_int row.calls))
-          fleet.calls_per_turn
-          (per_turn ~turns (row.tool_ms /. 1000.))
-          fleet.tool_s_per_turn )
+      , if ko then
+          Printf.sprintf "%d턴%s턴당 호출 %.1f %s %s%s턴당 도구 %.1f초 %s %s"
+            turns sep calls_pt calls_bar
+            (recede (Printf.sprintf "(전체 %.1f)" fleet.calls_per_turn))
+            sep tool_s_pt tool_bar
+            (recede (Printf.sprintf "(전체 %.1f)" fleet.tool_s_per_turn))
+        else
+          Printf.sprintf "%d turns%s%.1f calls/turn %s %s%s%.1f tool s/turn %s %s"
+            turns sep calls_pt calls_bar
+            (recede (Printf.sprintf "(fleet %.1f)" fleet.calls_per_turn))
+            sep tool_s_pt tool_bar
+            (recede (Printf.sprintf "(fleet %.1f)" fleet.tool_s_per_turn)) )
     ; ( Plain
-      , Printf.sprintf
-          (if ko then "턴당 출력 토큰 %.0f (전체 %.0f) · 실패 %d / 호출 %d"
-           else "%.0f output tokens/turn (fleet %.0f) · %d of %d calls failed")
-          (per_turn ~turns (float_of_int row.output_tokens))
-          fleet.output_tokens_per_turn
-          row.failed
-          row.calls )
+      , if ko then
+          Printf.sprintf "턴당 출력 토큰 %.0f %s %s%s%s"
+            out_tok_pt tok_bar
+            (recede (Printf.sprintf "(전체 %.0f)" fleet.output_tokens_per_turn))
+            sep fail_text
+        else
+          Printf.sprintf "%.0f output tokens/turn %s %s%s%s"
+            out_tok_pt tok_bar
+            (recede (Printf.sprintf "(fleet %.0f)" fleet.output_tokens_per_turn))
+            sep fail_text )
     ]
 ;;
 
@@ -63,7 +107,7 @@ let view_lines ~ko ~month view ~keeper_name =
   | None ->
     [ ( Dim
       , Printf.sprintf
-          (if ko then "%s 효율: %d일 동안 이 Keeper 의 턴 없음"
+          (if ko then "%s 효율: %d일 동안 이 키퍼의 턴 없음"
            else "Efficiency %s: no turn of this Keeper in %d days")
           month view.days_covered )
     ]

@@ -3,6 +3,7 @@ module Message_layout = Masc_tui_message_layout
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Failure = Masc_tui_types.Verification_evidence_read
 module Ansi = Masc_tui_ansi.Ansi
+module Theme = Masc_tui_ansi.Theme
 module Terminal_text = Masc_tui_ansi.Terminal_text
 
 (* Complete judgement metadata is a physical document. Rows that fit keep
@@ -21,19 +22,21 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
   let workspace_unconfirmed =
     String.capitalize_ascii (Masc_tui_words.workspace_identity_unconfirmed ~ko) in
   let evidence_unread = text "증거 " "evidence " ^ Masc_tui_words.field_unread ~ko in
-  let wrap ~prefix text =
+  let wrap_styled ~style ~prefix text =
     Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
       ~sanitize:Keeper_chat.terminal_safe_text text
     |> List.mapi (fun index line ->
-           Ansi.reset, (if index = 0 then prefix else "      ") ^ line)
+           style, (if index = 0 then prefix else "      ") ^ line)
   in
+  let wrap ~prefix text = wrap_styled ~style:Ansi.reset ~prefix text in
   (* The links an item carries, one row each under it. Printed as text: an
      OSC 8 hyperlink would be counted as printable cells by the wrap and
      truncation code, which treats only CSI as zero-width. *)
   let link_rows item =
     Masc_tui_evidence_link.of_item item
     |> List.concat_map (fun link ->
-           wrap ~prefix:(text "      링크: " "      link: ") (Masc_tui_evidence_link.text link))
+           wrap_styled ~style:(Theme.recede ()) ~prefix:(text "      링크: " "      link: ")
+             (Masc_tui_evidence_link.text link))
   in
   let text_item_rows (item : Masc.Tui_decode.verification_evidence_item) =
     (match item with
@@ -57,7 +60,7 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
            (Picture.caption_of_preview ~ko ~reference:ev_b_reference ~bytes:ev_b_bytes
               ~sha256:ev_b_sha256 ~format:ev_b_format ev_b_preview)
      | Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reference; ev_u_reason } ->
-         wrap
+         wrap_styled ~style:(Theme.warn ())
            ~prefix:(text "    - 읽을 수 없는 파일: " "    - artifact unreadable: ")
            (Printf.sprintf "%s %s"
               (Option.value ev_u_reference ~default:(text "(참조 없음)" "(no reference)"))
@@ -83,20 +86,27 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
   in
   let message rows = wrap_rows ~width rows, [] in
   let failure_rows = function
-    | Failure.Transport detail -> wrap ~prefix:"    " detail
-    | Http_error detail -> wrap ~prefix:(text "    읽기 실패: " "    Read failed: ") detail
-    | Invalid_json detail -> wrap ~prefix:(text "    JSON 형식 오류: " "    Invalid JSON: ") detail
-    | Invalid_payload detail -> wrap ~prefix:(text "    해석 실패: " "    Decode failed: ") detail
+    | Failure.Transport detail -> wrap_styled ~style:(Theme.bad ()) ~prefix:"    " detail
+    | Http_error detail ->
+        wrap_styled ~style:(Theme.bad ()) ~prefix:(text "    읽기 실패: " "    Read failed: ") detail
+    | Invalid_json detail ->
+        wrap_styled ~style:(Theme.bad ()) ~prefix:(text "    JSON 형식 오류: " "    Invalid JSON: ") detail
+    | Invalid_payload detail ->
+        wrap_styled ~style:(Theme.bad ()) ~prefix:(text "    해석 실패: " "    Decode failed: ") detail
     | Launch_failure detail ->
-        wrap ~prefix:(text "    읽기를 끝내지 못함: " "    Read did not complete: ") detail
-    | Workspace_unconfirmed detail -> wrap ~prefix:("    " ^ workspace_unconfirmed ^ ": ") detail
+        wrap_styled ~style:(Theme.bad ())
+          ~prefix:(text "    읽기를 끝내지 못함: " "    Read did not complete: ") detail
+    | Workspace_unconfirmed detail ->
+        wrap_styled ~style:(Theme.warn ()) ~prefix:("    " ^ workspace_unconfirmed ^ ": ") detail
     | Kept_back refusal ->
-        wrap ~prefix:"    " (Masc_tui_types.workspace_refusal_text ~ko
-          ~request:Masc_tui_types.Kept_request.Verification_evidence_read refusal)
-    | Interrupted detail -> wrap ~prefix:(text "    읽기 중단: " "    Read interrupted: ") detail in
+        wrap_styled ~style:(Theme.warn ()) ~prefix:"    "
+          (Masc_tui_types.workspace_refusal_text ~ko
+             ~request:Masc_tui_types.Kept_request.Verification_evidence_read refusal)
+    | Interrupted detail ->
+        wrap_styled ~style:(Theme.warn ()) ~prefix:(text "    읽기 중단: " "    Read interrupted: ") detail in
   let contents = function
         | Picture.Items [] ->
-            message [ Ansi.dim, text "    (살펴볼 증거 없음)" "    (no inspectable evidence)" ]
+            message [ Theme.recede (), text "    (살펴볼 증거 없음)" "    (no inspectable evidence)" ]
         | Picture.Items items ->
             let items = match selection with
               | None -> items
@@ -128,25 +138,23 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
             List.rev rev_rows, List.rev rev_pictures
         | Picture.Access_unavailable reason ->
             (* The producer's reason is already the evidence access verdict. *)
-            message (wrap ~prefix:"    " reason)
+            message (wrap_styled ~style:(Theme.warn ()) ~prefix:"    " reason)
   in
   let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-  let info_wrap ~prefix text =
-    Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
-      ~sanitize:Keeper_chat.terminal_safe_text text
-    |> List.mapi (fun index line ->
-           Masc_tui_ansi.Theme.info (), (if index = 0 then prefix else "      ") ^ line)
-  in
+  let info_wrap ~prefix text = wrap_styled ~style:(Theme.info ()) ~prefix text in
   let rows, pictures = match evidence with
-    | Masc_tui_fetched.Absent -> message (wrap ~prefix:"    "
-        (if workspace_confirmed
-         then String.capitalize_ascii evidence_unread ^ text "  r:새로 읽기" "  r:refresh"
-         else workspace_unconfirmed ^ " · " ^ evidence_unread))
+    | Masc_tui_fetched.Absent ->
+        message
+          (wrap_styled ~style:(if workspace_confirmed then Theme.recede () else Theme.warn ())
+             ~prefix:"    "
+             (if workspace_confirmed
+              then String.capitalize_ascii evidence_unread ^ text "  r:새로 읽기" "  r:refresh"
+              else workspace_unconfirmed ^ " · " ^ evidence_unread))
     | Loading -> message (
         if workspace_confirmed
         then info_wrap ~prefix:("    " ^ under_way ^ " ")
                (text "원래 검증 증거를 읽는 중" "Reading the original verification evidence")
-        else wrap ~prefix:"    "
+        else wrap_styled ~style:(Theme.warn ()) ~prefix:"    "
                (workspace_unconfirmed ^ " · "
                 ^ text "증거 읽기 결과 미확인" "the evidence read is unconfirmed"))
     | Failed failure -> message
@@ -158,7 +166,7 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
     | Ready evidence ->
       let rows,pictures = contents evidence in
       let notes = if not workspace_confirmed then
-        wrap ~prefix:"    " (workspace_unconfirmed ^ " · "
+        wrap_styled ~style:(Theme.warn ()) ~prefix:"    " (workspace_unconfirmed ^ " · "
           ^ text "마지막 관측 증거를 보여 줌" "showing the last observed evidence")
         else if in_flight then
           info_wrap ~prefix:("    " ^ under_way ^ " ")
@@ -175,14 +183,14 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
             info_wrap ~prefix:("    " ^ under_way ^ " ")
               (text "다시 읽는 중 · 이전 증거를 보여 줌" "Retrying · showing the previous evidence")
           else
-            wrap ~prefix:"    "
+            wrap_styled ~style:(Theme.warn ()) ~prefix:"    "
               (text "마지막 관측 증거를 보여 줌" "Showing the last observed evidence"))
          @ failure_rows failure) in
       notes @ rows,List.map (fun ((slot : Picture.slot),pixels) ->
         {slot with first=List.length notes+slot.first},pixels) pictures
   in
   let heading = wrap_rows ~width
-      [ (Ansi.dim, "")
+      [ (Ansi.reset, "")
       ; (Ansi.bold, text "  증거 내용 · 제출 시 저장한 사본" "  Evidence content · the copy saved at submission") ] in
   let heading_rows = List.length heading in
   ( heading @ rows

@@ -8,7 +8,7 @@ import {
 } from './keeper-trace-context'
 
 /**
- * RFC-0028 PR-δ producer: decision-log → keeper-trace bridge.
+ * decision-log → keeper-trace bridge.
  *
  * Pure mapper — given a snapshot of KeeperDecision values
  * (from `/api/v1/dashboard/keeper-decisions`) and a set of dedup keys that have
@@ -23,8 +23,7 @@ import {
  *     millisecond.
  *   - The key never appears outside this module. The only consumer is
  *     `alreadyEmitted: ReadonlySet<string>` owned by the calling
- *     component — same lifecycle pattern as PR-δ-1 (#13375 anchored-
- *     thread) and PR-δ-2 (runtime-hop).
+ *     component — same lifecycle pattern as the anchored-thread bridge.
  *
  * Mapping (KeeperDecision → KeeperTraceEvent[decision-log]):
  *   id              ← `decision:${keeper_name}:${ts_unix}:${event_type}`
@@ -34,7 +33,7 @@ import {
  *                     runtime-hop which uses runtime_id as a logical
  *                     bucket)
  *   source          ← 'decision-log'
- *   decisionId      ← same as id (RFC-0026 KeeperDecision has no
+ *   decisionId      ← same as id (KeeperDecision has no
  *                     separate decision uuid — the synth tuple key
  *                     suffices for chip identity)
  *   semanticOutcome ← decision.outcome  (string | null; consumers can

@@ -4,7 +4,7 @@ import { dashboardObservationOwnerHasWorkspace, dashboardObservationOwnerIsCurre
   type DashboardObservationOwner } from '../../lib/observation-read-owner'
 
 /**
- * RFC-0028 PR-δ producer: anchored-thread → keeper-trace bridge.
+ * anchored-thread → keeper-trace bridge.
  *
  * Pure mapper — given a snapshot of anchored-thread posts and a set of
  * post ids that have already been emitted, push trace events for the
@@ -28,7 +28,7 @@ import { dashboardObservationOwnerHasWorkspace, dashboardObservationOwnerIsCurre
  *                board-thread file anchor; otherwise null
  *   line       ← post.line when the caller has already resolved a safe
  *                board-thread file anchor; otherwise null so consumers fall
- *                back to the keeper-level no-line bucket per RFC §5
+ *                back to the keeper-level no-line bucket
  *
  * NaN-guard rationale: a malformed `created_at` would otherwise
  * propagate `NaN` into the store and break binary-search insertion. We

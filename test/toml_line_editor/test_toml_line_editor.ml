@@ -167,6 +167,56 @@ let test_scalar_edit_is_table_scoped () =
   Alcotest.(check bool) "[fusion] scalar untouched" true
     (has_line out "enabled = true")
 
+let test_non_bool_edits_preserve_trailing_comments () =
+  let source =
+    {|[heartbeat]
+interval_sec = 30 # 측정값
+ratio = 0.5  # tuned
+
+[keeper]
+network_mode = "none"  # 메모
+url = "https://example.test/path#frag"  # endpoint
+plain_hash = "https://example.test/no-comment#frag"
+panel = [
+  "a",
+]  # tail note
+|}
+  in
+  let out1 =
+    Toml_line_editor.edit_table_int source ~path:"heartbeat" ~key:"interval_sec" ~value:45
+  in
+  Alcotest.(check bool) "int edit keeps trailing comment" true
+    (has_line out1 "interval_sec = 45 # 측정값");
+  let out2 =
+    Toml_line_editor.edit_table_float out1 ~path:"heartbeat" ~key:"ratio" ~value:0.75
+  in
+  Alcotest.(check bool) "float edit keeps trailing comment" true
+    (has_line out2 "ratio = 0.75  # tuned");
+  let out3 =
+    Toml_line_editor.edit_table_scalar out2 ~path:"keeper" ~key:"network_mode"
+      ~value:(Some "inherit")
+  in
+  Alcotest.(check bool) "string edit keeps trailing comment" true
+    (has_line out3 {|network_mode = "inherit"  # 메모|});
+  let out4 =
+    Toml_line_editor.edit_table_scalar out3 ~path:"keeper" ~key:"url"
+      ~value:(Some "https://example.test/next")
+  in
+  Alcotest.(check bool) "hash inside string is ignored and comment stays" true
+    (has_line out4 {|url = "https://example.test/next"  # endpoint|});
+  let out5 =
+    Toml_line_editor.edit_table_scalar out4 ~path:"keeper" ~key:"plain_hash"
+      ~value:(Some "https://example.test/updated")
+  in
+  Alcotest.(check bool) "hash inside string without comment stays comment-free" true
+    (has_line out5 {|plain_hash = "https://example.test/updated"|});
+  let out6 =
+    Toml_line_editor.edit_table_multiline_array out5 ~path:"keeper" ~key:"panel"
+      ~values:[ "b" ]
+  in
+  Alcotest.(check bool) "multiline array edit keeps closing trailing comment" true
+    (has_line out6 "]  # tail note")
+
 (* ── table headers ─────────────────────────────────────────────────────── *)
 
 let header =
@@ -1180,6 +1230,8 @@ let () =
             test_scalar_edit_is_table_scoped
         ; Alcotest.test_case "a bracket inside a comment does not close the array" `Quick
             test_multiline_array_close_ignores_bracket_in_comment
+        ; Alcotest.test_case "non-bool edits preserve trailing comments" `Quick
+            test_non_bool_edits_preserve_trailing_comments
         ] )
     ; ( "table headers"
       , [ Alcotest.test_case "header spellings read as one path" `Quick

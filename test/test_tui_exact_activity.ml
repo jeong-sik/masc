@@ -14,12 +14,23 @@ let read ?(generation=1) document session =
   let pending,request=A.start_read ~generation session |> some in
   A.finish_read request (Ok document) pending
 let loaded ?(lane=Standalone_lane.Librarian) document = read document (A.create (owner ~lane "A"))
-let receipt ?(durability=R.Durable) ?(registry=R.Exact_output_registry_applied R.Targets_runtime_bindings) () = R.{
-  source_revision="saved";order="9";durability;lock_warnings=[];ignored_legacy_keys=[];
+(* The revision the server names the saved text by: a SHA-256, as on the wire. *)
+let saved = String.make 64 'c'
+let commit durability =
+  let durability_json, detail_json = match durability with
+    | Runtime.Durable -> `String "durable", `Null
+    | Runtime.Durability_unconfirmed {detail} -> `String "unconfirmed", `String detail in
+  match Runtime.Config_commit_wire.of_yojson (`Assoc [
+    "source_revision",`String saved;"order",`String "9";"durability",durability_json;
+    "durability_detail",detail_json;"warnings",`List [];"ignored_legacy_keys",`List []]) with
+  | Ok commit -> commit
+  | Error detail -> Alcotest.fail detail
+let receipt ?(durability=Runtime.Durable) ?(registry=R.Exact_output_registry_applied R.Targets_runtime_bindings) () = R.{
+  commit=commit durability;
   application={operation="raw";routing_status=Routing_applied;routing_requires_restart=false;routing_applied_at=Not_applied;
     keeper_status=Keeper_not_configured;keeper_requires_restart=false;keeper_applied_at=Not_applied;
     keeper_configured_count=0;keeper_pending_keys=[];keeper_applied_keys=[];keeper_preempted_keys=[];
-    skills=Skill_unchanged {input_source_revision="saved";snapshot_revision="snapshot";catalog_revision="catalog";config_state=Configured};
+    skills=Skill_unchanged {input_source_revision=saved;snapshot_revision="snapshot";catalog_revision="catalog";config_state=Configured};
     exact_output_registry=registry}}
 let same expected actual = Alcotest.(check string) "source" expected actual
 let has needle lines = List.exists (fun line ->
@@ -41,10 +52,10 @@ let draft_and_save () =
   let session=A.finish_save request (A.Saved (receipt ())) pending in
   shows "File saved" session;
   rejected (A.start_save ~generation:3 session);
-  let session=read ~generation:4 (doc ~revision:"saved" off) session in
+  let session=read ~generation:4 (doc ~revision:saved off) session in
   rejected (A.start_save ~generation:5 session);
   let _,_,write=A.start_save ~generation:6 (A.toggle session) |> admitted in
-  same source write.source_text; same "saved" write.expected_source_revision
+  same source write.source_text; same saved write.expected_source_revision
 
 let conflict_reapply () =
   let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> admitted in
@@ -97,7 +108,7 @@ let uncertain_drafts_require_explicit_reapply () =
     shows "File changed" reread; rejected (A.start_save ~generation:4 reread);
     rejected (A.start_save ~generation:5 (A.reapply reread)))
     [A.finish_save request (A.Unconfirmed "connection lost") pending;
-     A.finish_save request (A.Saved (receipt ~durability:(R.Durability_unconfirmed "fixture fsync uncertainty") ())) pending;
+     A.finish_save request (A.Saved (receipt ~durability:(Runtime.Durability_unconfirmed {detail="fixture fsync uncertainty"}) ())) pending;
      A.suspend pending]
 
 let clean_draft_does_not_adopt_different_path () =
@@ -149,9 +160,9 @@ let ambiguous_write_and_refusal () =
   let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> admitted in
   let unanswered=A.finish_save request (A.Unconfirmed "connection lost") pending in
   shows "Activity draft: Off" unanswered; rejected (A.start_save ~generation:3 unanswered);
-  let uncertain=A.finish_save request (A.Saved (receipt ~durability:(R.Durability_unconfirmed "fixture fsync uncertainty") ())) pending in
+  let uncertain=A.finish_save request (A.Saved (receipt ~durability:(Runtime.Durability_unconfirmed {detail="fixture fsync uncertainty"}) ())) pending in
   shows "Activity draft: Off" uncertain; rejected (A.start_save ~generation:3 uncertain);
-  let reread=read ~generation:4 (doc ~revision:"saved" off) uncertain in
+  let reread=read ~generation:4 (doc ~revision:saved off) uncertain in
   shows "File changed" reread;
   rejected (A.start_save ~generation:5 reread);
   rejected (A.start_save ~generation:6 (A.reapply reread));

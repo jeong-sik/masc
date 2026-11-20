@@ -222,17 +222,25 @@ let answer_cases =
     | Ok _ -> Alcotest.failf "%s: read as a stored pick" label
     | Error _ -> ()
   in
+  (* The commit object as the server writes it: every field, a SHA-256
+     revision and a decimal order. *)
+  let committed ?(durability = {|"durable","durability_detail":null|}) ?(ignored = "[]") () =
+    Printf.sprintf
+      {|{"state":"committed","commit":{"source_revision":"%s","order":"3","durability":%s,"warnings":[],"ignored_legacy_keys":%s}}|}
+      (String.make 64 'a') durability ignored
+  in
   [ Alcotest.test_case "unchanged and committed answers are read" `Quick (fun () ->
         check "unchanged" (Ok Writer.Unchanged)
           {|{"state":"unchanged","warnings":[],"source_revision":"r1"}|};
         check "durable"
           (Ok (Writer.Committed { durability = Runtime.Durable; ignored_legacy_keys = [] }))
-          {|{"state":"committed","commit":{"durability":"durable","durability_detail":null,"ignored_legacy_keys":[]}}|};
+          (committed ());
         check "unconfirmed"
           (Ok (Writer.Committed
                  { durability = Runtime.Durability_unconfirmed { detail = "fsync failed" }
                  ; ignored_legacy_keys = [ "max-prompt-bytes" ] }))
-          {|{"state":"committed","commit":{"durability":"unconfirmed","durability_detail":"fsync failed","ignored_legacy_keys":["max-prompt-bytes"]}}|})
+          (committed ~durability:{|"unconfirmed","durability_detail":"fsync failed"|}
+             ~ignored:{|["max-prompt-bytes"]|} ()))
   ; Alcotest.test_case "other shapes are unread answers, not exceptions" `Quick (fun () ->
         unread "not JSON" "<html>";
         unread "not an object" "[]";
@@ -240,9 +248,10 @@ let answer_cases =
         unread "committed without a commit" {|{"state":"committed"}|};
         unread "a commit that is not an object" {|{"state":"committed","commit":"yes"}|};
         unread "unconfirmed without a detail"
-          {|{"state":"committed","commit":{"durability":"unconfirmed","ignored_legacy_keys":[]}}|};
-        unread "ignored keys that are not names"
-          {|{"state":"committed","commit":{"durability":"durable","ignored_legacy_keys":[1]}}|})
+          (committed ~durability:{|"unconfirmed","durability_detail":null|} ());
+        unread "ignored keys that are not names" (committed ~ignored:"[1]" ());
+        unread "a commit without its identity"
+          {|{"state":"committed","commit":{"durability":"durable","durability_detail":null,"ignored_legacy_keys":[]}}|})
   ]
 
 (* Picks that reach the writer in one order are sent in that order, one at a

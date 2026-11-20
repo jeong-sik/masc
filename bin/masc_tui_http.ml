@@ -2702,19 +2702,6 @@ let fetch_tui_preferences ~host ~port ~base_path ~masc_root =
       | exception Yojson.Json_error detail -> Error ("The settings answer is not JSON: " ^ detail)
     else Error (refusal ~status_code:status ~body)
 
-let string_list_of_json = function
-  | `List values ->
-    List.fold_right
-      (fun value acc ->
-         match value, acc with
-         | `String text, Ok texts -> Ok (text :: texts)
-         | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _), Error e ->
-           Error e
-         | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _), Ok _ ->
-           Error "a list entry is not a string")
-      values (Ok [])
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> Error "not a list"
-
 (* A field of an answer object; a body that is not an object has none. *)
 let answer_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -2733,27 +2720,14 @@ let tui_preference_answer body : (Masc_tui_preference_writer.saved, string) resu
   | Some (`String "committed") ->
     let* commit =
       match answer_field "commit" json with
-      | Some (`Assoc _ as commit) -> Ok commit
-      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
-        Error "the committed answer carries no commit"
+      | Some commit -> Runtime.Config_commit_wire.of_yojson commit
+      | None -> Error "the committed answer carries no commit"
     in
-    let* durability =
-      match answer_field "durability" commit with
-      | Some (`String "durable") -> Ok Runtime.Durable
-      | Some (`String "unconfirmed") ->
-        (match answer_field "durability_detail" commit with
-         | Some (`String detail) -> Ok (Runtime.Durability_unconfirmed { detail })
-         | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
-           Error "an unconfirmed commit gives no detail")
-      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
-        Error "the commit does not say whether it is durable"
-    in
-    let* ignored_legacy_keys =
-      match answer_field "ignored_legacy_keys" commit with
-      | Some keys -> string_list_of_json keys
-      | None -> Error "the commit does not list ignored keys"
-    in
-    Ok (Masc_tui_preference_writer.Committed { durability; ignored_legacy_keys })
+    Ok
+      (Masc_tui_preference_writer.Committed
+         { durability = commit.Runtime.Config_commit_wire.durability
+         ; ignored_legacy_keys = commit.Runtime.Config_commit_wire.ignored_legacy_keys
+         })
   | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
     Error "the answer names no state"
 
@@ -4318,7 +4292,9 @@ let post_runtime_config_raw ~(host : string) ~(port : int)
   | Ok (status_code, body) ->
     (match Result.bind (decode_json ~allow_empty:false ~status_code ~body)
         decode_runtime_config_commit_receipt with
-     | Ok receipt when String.equal receipt.source_revision
+     | Ok receipt when String.equal
+         (Runtime.config_source_revision_to_string
+            receipt.Masc_tui_runtime_config_receipt.commit.Runtime.Config_commit_wire.source_revision)
          (runtime_config_text_revision source_text) -> Ok receipt
      | Ok _ -> Error (Runtime_config_save_unconfirmed "Save receipt does not match the submitted draft.")
      | Error detail -> Error (Runtime_config_save_unconfirmed detail))

@@ -379,7 +379,7 @@ let prior_runtime_assignment revision =
 
 type runtime_assignment_unchanged = {
   revision : Yojson.Safe.t;
-  warnings : Masc_tui_runtime_config_receipt.lock_warning list;
+  warnings : Runtime.config_lock_warning list;
   response : Yojson.Safe.t;
 }
 
@@ -395,15 +395,12 @@ let decode_unchanged_runtime_assignment_response json =
              List.assoc_opt "assignment_revision" fields, List.assoc_opt "warnings" fields with
        | Some (`Bool true), Some (`Bool false), Some revision, Some (`List warnings) ->
            let* _ = runtime_assignment_revision_of_json revision in
-           let rec decode acc = function
-             | [] -> Ok (List.rev acc)
-             | `Assoc fields :: rest when exact_keys ["code";"detail"] fields ->
-                 (match List.assoc_opt "code" fields,List.assoc_opt "detail" fields with
-                  | Some (`String code),Some (`String detail) ->
-                      decode ({Masc_tui_runtime_config_receipt.code;detail} :: acc) rest
-                  | _ -> Error "malformed assignment lock warning")
-             | _ -> Error "malformed assignment lock warning" in
-           let* warnings = decode [] warnings in
+           let* warnings =
+             List.fold_right (fun warning acc ->
+                 let* rest = acc in
+                 let* warning = Runtime.config_lock_warning_of_yojson warning in
+                 Ok (warning :: rest))
+               warnings (Ok []) in
            Ok {revision;warnings;response=json}
        | _ -> Error "runtime assignment response is not an unchanged write")
   | _ -> Error "runtime assignment response must be an object"

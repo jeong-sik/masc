@@ -269,20 +269,6 @@ let apply_voice_setup ~clock server ~revision changes =
   | Ok (200, _) -> Ok ()
   | Ok (status, body) -> Error (error_of_body ~status body)
 
-let answer_string what name json =
-  match answer_field name json with
-  | Some (`String value) -> Ok value
-  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
-    Error (Printf.sprintf "%s has no readable %s" what name)
-
-let lock_warning_of_answer row =
-  match answer_field "code" row, answer_field "detail" row with
-  | Some (`String "runtime_config_lock_release_unconfirmed"), Some (`String detail) ->
-    Ok (Runtime.Config_lock_release_unconfirmed detail)
-  | (None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)),
-    (None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)) ->
-    Error "a lock warning this command does not know"
-
 (* The server's commit receipt in its answer to a text save, as the setup
    batch reports it. *)
 let commit_record_of_answer body =
@@ -294,34 +280,16 @@ let commit_record_of_answer body =
   in
   let* commit =
     match answer_field "commit" json with
-    | Some (`Assoc _ as commit) -> Ok commit
-    | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
-      Error "the answer carries no commit"
+    | Some commit -> Runtime.Config_commit_wire.of_yojson commit
+    | None -> Error "the answer carries no commit"
   in
-  let* source_revision = answer_string "the commit" "source_revision" commit in
-  let* order = answer_string "the commit" "order" commit in
-  let* durability =
-    match answer_string "the commit" "durability" commit with
-    | Ok "durable" -> Ok Runtime.Durable
-    | Ok "unconfirmed" ->
-      let* detail = answer_string "the commit" "durability_detail" commit in
-      Ok (Runtime.Durability_unconfirmed { detail })
-    | Ok other -> Error ("the commit names an unknown durability " ^ other)
-    | Error reason -> Error reason
-  in
-  let* lock_warnings =
-    match answer_field "warnings" commit with
-    | Some (`List rows) ->
-      List.fold_right
-        (fun row acc ->
-           let* rest = acc in
-           let* warning = lock_warning_of_answer row in
-           Ok (warning :: rest))
-        rows (Ok [])
-    | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) ->
-      Error "the commit lists no lock warnings"
-  in
-  Ok { Runtime_setup_batch.source_revision; order; durability; lock_warnings }
+  Ok
+    { Runtime_setup_batch.source_revision =
+        Runtime.config_source_revision_to_string commit.Runtime.Config_commit_wire.source_revision
+    ; order = Runtime.config_commit_order_to_string commit.Runtime.Config_commit_wire.order
+    ; durability = commit.Runtime.Config_commit_wire.durability
+    ; lock_warnings = commit.Runtime.Config_commit_wire.lock_warnings
+    }
 
 (* The server validates the whole file, commits it and writes its audit before
    it answers, so the batch waits longer than a plain read. A save that lands

@@ -1855,10 +1855,7 @@ type preset_registry_application =
   | Preset_registry_kept of string
 
 type preset_runtime_commit = {
-  prc_source_revision : string;
-  prc_order : string;
-  prc_durability : Runtime.config_durability;
-  prc_lock_warnings : Runtime.config_lock_warning list;
+  prc_commit : Runtime.Config_commit_wire.t;
   prc_registry : preset_registry_application;
 }
 (** Observed visible commit, with its independent durability and registry
@@ -1893,9 +1890,8 @@ val decode_preset_saved : Yojson.Safe.t -> (preset_manifest, string) result
 
 val decode_preset_restore : Yojson.Safe.t -> (preset_restore_report, string) result
 (** POST /api/v1/presets/restore — the per-surface report. Runtime commit
-    metadata follows {!Runtime.config_commit_receipt_to_yojson}, including its
-    required string-list diagnostics. A committed observation remains distinct
-    from a refused runtime write. *)
+    metadata is read by {!Runtime.Config_commit_wire.of_yojson}. A committed
+    observation remains distinct from a refused runtime write. *)
 
 val decode_preset_deleted : Yojson.Safe.t -> (string, string) result
 (** POST /api/v1/presets/delete — the name of the preset the server removed. *)

@@ -1,7 +1,3 @@
-type durability =
-  | Durable
-  | Durability_unconfirmed of string
-
 type config_state =
   | Configured
   | Rejected
@@ -69,22 +65,15 @@ type application =
   ; exact_output_registry : exact_output_registry_status
   }
 
-type lock_warning =
-  { code : string
-  ; detail : string
-  }
-
 type t =
-  { source_revision : string
-  ; order : string
-  ; durability : durability
-  ; lock_warnings : lock_warning list
-  ; ignored_legacy_keys : string list
+  { commit : Runtime.Config_commit_wire.t
   ; application : application
   }
 
 val decode : Yojson.Safe.t -> (t, string) result
-val summary : t -> string
+(** Reads a committed runtime.toml write answer. Its [commit] object goes
+    through {!Runtime.Config_commit_wire.of_yojson}, the codec the server
+    writes it with. *)
 
 val lane_summary : t -> string
 (** Operator-facing file and application outcome for a lane edit. Retains the

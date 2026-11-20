@@ -27,7 +27,7 @@ val prior_runtime_assignment :
 
 type runtime_assignment_unchanged = {
   revision : Yojson.Safe.t;
-  warnings : Masc_tui_runtime_config_receipt.lock_warning list;
+  warnings : Runtime.config_lock_warning list;
   response : Yojson.Safe.t;
 }
 type runtime_assignment_write =

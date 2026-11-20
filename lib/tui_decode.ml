@@ -5929,10 +5929,7 @@ type preset_registry_application =
   | Preset_registry_kept of string
 
 type preset_runtime_commit = {
-  prc_source_revision : string;
-  prc_order : string;
-  prc_durability : Runtime.config_durability;
-  prc_lock_warnings : Runtime.config_lock_warning list;
+  prc_commit : Runtime.Config_commit_wire.t;
   prc_registry : preset_registry_application;
 }
 (** Observed visible commit, with its independent durability and registry
@@ -6181,10 +6178,10 @@ let decode_preset_part json key =
 ;;
 
 let preset_runtime_commit_needs_attention commit =
-  (match commit.prc_durability with
+  (match commit.prc_commit.Runtime.Config_commit_wire.durability with
    | Runtime.Durable -> false
    | Runtime.Durability_unconfirmed _ -> true)
-  || commit.prc_lock_warnings <> []
+  || commit.prc_commit.Runtime.Config_commit_wire.lock_warnings <> []
   || match commit.prc_registry with
      | Preset_registry_applied _ -> false
      | Preset_registry_unpublished | Preset_registry_kept _ -> true
@@ -6231,48 +6228,9 @@ let decode_preset_registry json =
 ;;
 
 let decode_preset_commit runtime =
-  let commit = member "commit" runtime in
-  let* () = preset_receipt_object "preset runtime commit"
-    ["source_revision"; "order"; "durability"; "durability_detail"; "warnings"; "ignored_legacy_keys"] commit in
-  let* _ignored_legacy_keys = decode_string_list commit "ignored_legacy_keys" in
-  let* prc_source_revision = required_string_field commit "source_revision" in
-  let* () =
-    if String_util.is_lowercase_sha256_hex prc_source_revision then Ok ()
-    else Error "preset runtime source_revision must be lowercase SHA-256 hex"
-  in
-  let* prc_order = required_string_field commit "order" in
-  let* () =
-    match Int64.of_string_opt prc_order with
-    | Some order when Int64.compare order Int64.zero > 0 -> Ok ()
-    | Some _ | None -> Error "preset runtime commit order must be positive int64"
-  in
-  let* durability = required_string_field commit "durability" in
-  let* prc_durability =
-    match durability with
-    | "durable" ->
-      (match member "durability_detail" commit with
-       | `Null -> Ok Runtime.Durable
-       | _ -> Error "durable preset commit must have null durability_detail")
-    | "unconfirmed" ->
-      let* detail = preset_commit_detail commit "durability_detail" in
-      Ok (Runtime.Durability_unconfirmed { detail })
-    | other -> Error (Printf.sprintf "unknown preset durability %S" other)
-  in
-  let* warnings = required_list_field commit "warnings" in
-  let* prc_lock_warnings =
-    decode_list "runtime commit warnings"
-      (fun warning ->
-        let* () = preset_receipt_object "preset runtime warning" ["code"; "detail"] warning in
-        let* code = required_string_field warning "code" in
-        match code with
-        | "runtime_config_lock_release_unconfirmed" ->
-          let* detail = preset_commit_detail warning "detail" in
-          Ok (Runtime.Config_lock_release_unconfirmed detail)
-        | other -> Error (Printf.sprintf "unknown runtime commit warning %S" other))
-      warnings
-  in
+  let* prc_commit = Runtime.Config_commit_wire.of_yojson (member "commit" runtime) in
   let* prc_registry = decode_preset_registry (member "exact_output_registry" runtime) in
-  Ok { prc_source_revision; prc_order; prc_durability; prc_lock_warnings; prc_registry }
+  Ok { prc_commit; prc_registry }
 ;;
 
 let decode_preset_runtime json =

@@ -394,8 +394,15 @@ let sanitize_utf8 s =
     Buffer.contents buf
   end
 
-let is_blank value =
-  String.for_all (function ' ' | '\012' | '\n' | '\r' | '\t' -> true | _ -> false) value
+(* A top-level loop: String.for_all builds a closure on every call, and a
+   streaming reply asks this of each of its 60k lines on every frame. *)
+let rec blank_from value index =
+  index >= String.length value
+  || (match value.[index] with
+      | ' ' | '\012' | '\n' | '\r' | '\t' -> blank_from value (index + 1)
+      | _ -> false)
+
+let is_blank value = blank_from value 0
 
 let trim_nonempty value =
   let v = String.trim value in

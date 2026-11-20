@@ -87,7 +87,14 @@ let assert_incremental_matches_full ~label ~width chunks =
       let actual = render_growing cache calls ~width label text in
       check (list string)
         (Printf.sprintf "%s at chunk %d %S" label index chunk)
-        (full_markdown ~width text) actual)
+        (full_markdown ~width text) actual;
+      (* The blocks kept across chunks are the blocks of the text rendered
+         in one go. *)
+      check (option (array (pair int int)))
+        (Printf.sprintf "%s blocks at chunk %d %S" label index chunk)
+        (Some (Markdown.render_streaming ~palette:Markdown.plain_palette ~width text).blocks)
+        (Cache.growing_blocks cache ~theme_revision:1 ~palette_generation:0 ~width
+           ~identity:label ~text))
     chunks
 
 let one_byte_chunks text =

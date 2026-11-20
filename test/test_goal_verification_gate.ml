@@ -1110,20 +1110,49 @@ let test_reopen_archive_failure_is_recoverable_without_losing_proof () =
   ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
   ignore (must_succeed "proof"
     (verifier_transition config goal_id Workspace_goals.Proof_proven "preserve this proof"));
-  let original = ledger_record config goal_id in
   let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
   let history = Fs_compat.load_file path in
   Fs_compat.invalidate_cached_writer path;
   Sys.remove path;
   Unix.mkdir path 0o755;
-  let refused = must_fail "archive failure" (transition ctx goal_id "reopen") in
-  check string "archive failure is explicit" "internal_error" (json_state refused [ "error_code" ]);
-  check string "archive failure leaves the original phase" "awaiting_confirmation" (stored_phase config goal_id);
-  check bool "archive failure retains the original active proof" true
-    (original = ledger_record config goal_id);
+  let deferred = must_succeed "reopen defers archive delivery" (transition ctx goal_id "reopen") in
+  check string "archive delivery is deferred when ledger refuses appends" "deferred"
+    (json_state deferred [ "effect_delivery"; "status" ]);
+  check string "reopen enters executing even when archive ledger refuses appends" "executing"
+    (stored_phase config goal_id);
+  check bool "reopen resets the active proof immediately" true
+    ((ledger_record config goal_id).completion = Goal_verification.Completion_idle);
+  (match Goal_store.load_source config with
+   | Goal_store.Available state ->
+     check (list string) "outbox queues archive ahead of reopened phase"
+       [ "goal_proof_reopened"; "goal_phase" ]
+       (List.map (fun (e : Goal_store.pending_event) ->
+          Goal_store.event_kind_to_string e.kind) state.pending_events);
+     (match state.pending_events with
+      | archive :: _ ->
+        check string "pending archive preserves proof evidence" "preserve this proof"
+          (json_state archive.payload [ "previous_completion"; "verdict"; "evidence" ])
+      | [] -> fail "expected pending archive event")
+   | Goal_store.Uninitialized | Goal_store.Unavailable _ ->
+     fail "expected available Goal store with deferred outbox");
   Unix.rmdir path;
   Fs_compat.save_file path history;
-  ignore (must_succeed "reopen retries its unfinished reset" (transition ctx goal_id "reopen"));
+  let retried = must_succeed "reopen delivers deferred archive" (transition ctx goal_id "reopen") in
+  check bool "repeat reopen is a lifecycle no-op" true (json_bool retried [ "noop" ]);
+  check string "repeat reopen delivers deferred archive" "delivered"
+    (json_state retried [ "effect_delivery"; "status" ]);
+  let archived =
+    String.split_on_char '\n' (goal_events_text config)
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.filter (fun event ->
+      json_state event [ "event_type" ] = "goal_proof_reopened")
+  in
+  (match archived with
+   | [ event ] ->
+     check string "delivered archive preserves proof evidence" "preserve this proof"
+       (json_state event [ "payload"; "previous_completion"; "verdict"; "evidence" ])
+   | rows -> failf "expected one goal_proof_reopened ledger row, got %d" (List.length rows));
   ignore (must_succeed "new request after repair" (transition ctx goal_id "request_complete"));
   check string "repaired reopen does not remain blocked by old proof" "verifying"
     (stored_phase config goal_id)
@@ -2912,7 +2941,7 @@ let () =
             test_reopen_from_verifying_clears_the_pending_request
         ; test_case "repeated reopen preserves a newer refuted proof" `Quick
             test_repeated_reopen_preserves_a_new_refuted_proof
-        ; test_case "failed reopen archive can be retried without losing proof" `Quick
+        ; test_case "deferred reopen archive delivers cleanly without losing proof" `Quick
             test_reopen_archive_failure_is_recoverable_without_losing_proof
         ; test_case "unreadable goal cannot reset a proof" `Quick
             test_reopen_reset_refuses_an_unreadable_goal_source

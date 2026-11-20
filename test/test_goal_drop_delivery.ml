@@ -272,34 +272,87 @@ let test_reopen_keeps_its_audit_event () = with_workspace @@ fun config abandone
   check_phase_delivered_once config goal ~phase:"executing" event_id;
   check int "repeat does not notify the verifier again" 1 !abandoned
 
-(* A reopen that has a proof to archive appends that row inside the Goal
-   transaction, after the pending intents. While the ledger refuses appends the
-   reopen is refused and nothing moves. Once the ledger works again the rows
-   are in the order the phases were committed. *)
-let test_reopen_with_a_proof_waits_for_the_ledger () = with_workspace @@ fun config abandoned _ ->
+(* A reopen that has a proof to archive queues [goal_proof_reopened] ahead of
+   the reopened [goal_phase] event in the single Goal outbox transaction.
+   While the ledger refuses appends, reopen still commits once with both
+   intents pending; once the ledger works again, repeat reopen drains the
+   outbox in commit order without double-writing any revision (#53259). *)
+let test_reopen_with_a_proof_keeps_its_archive_event () = with_workspace @@ fun config abandoned _ ->
   let goal = create config in
   let old = Atomic.exchange Hooks.goal_verification_pending_fn (fun _ ~goal_id:_ -> ()) in
   Fun.protect ~finally:(fun () -> Atomic.set Hooks.goal_verification_pending_fn old) @@ fun () ->
   obstruct_audit config;
   ignore (transition config goal.id "request_complete" |> success);
+  let version_after_request = (saved config).version in
   let requested = committed_phase_pending config goal "verifying" in
-  let refused = transition config goal.id "reopen" in
-  check bool "reopen is refused while its proof cannot be archived" false
-    (Tool_result.is_success refused);
-  check string "the refused reopen leaves the phase and the request intent" requested
-    (committed_phase_pending config goal "verifying");
-  check int "a refused reopen does not cancel verification" 0 !abandoned;
+  let reopened = transition config goal.id "reopen" |> success in
+  check string "commit reported separately from delivery" "deferred"
+    (member "effect_delivery" reopened |> text "status");
+  let after_reopen = saved config in
+  let current = List.find (fun g -> g.Goal_store.id = goal.id) after_reopen.goals in
+  check string "reopened Goal is durably executing" "executing"
+    (Goal_phase.to_string current.phase);
+  (match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+   | Ok (Some { Goal_verification.completion = Goal_verification.Completion_idle; _ }) -> ()
+   | Ok _ -> fail "expected Completion_idle after reopen"
+   | Error detail -> fail detail);
+  check int "reopen advances Goal version once" (version_after_request + 1) after_reopen.version;
+  check (list string) "outbox queues pending events in commit order"
+    ["goal_phase"; "goal_proof_reopened"; "goal_phase"]
+    (List.map (fun (e : Goal_store.pending_event) ->
+       Goal_store.event_kind_to_string e.kind) after_reopen.pending_events);
+  check (list int) "pending events carry their single commit revisions"
+    [version_after_request; version_after_request + 1; version_after_request + 1]
+    (List.map (fun (e : Goal_store.pending_event) -> e.Goal_store.store_revision)
+       after_reopen.pending_events);
+  check int "verifier cancellation notified once" 1 !abandoned;
   restore_audit config;
-  let response = transition config goal.id "reopen" |> success in
+  let repeated = transition config goal.id "reopen" |> success in
+  check bool "repeat is a lifecycle no-op" true (member "noop" repeated |> Yojson.Safe.Util.to_bool);
   check string "reopen reports its delivery" "delivered"
-    (member "effect_delivery" response |> text "status");
+    (member "effect_delivery" repeated |> text "status");
   let rows = events config in
   check (list string) "ledger rows follow the commit order"
     ["goal_phase"; "goal_proof_reopened"; "goal_phase"] (List.map (text "event_type") rows);
   check (list string) "each row records its phase" ["verifying"; "executing"; "executing"]
     (List.map (fun row -> member "payload" row |> text "phase") rows);
   check string "the request event kept its identity" requested (text "event_id" (List.hd rows));
-  check int "outbox acknowledged" 0 (List.length (saved config).pending_events);
+  check (list int) "ledger rows carry distinct commit revisions"
+    [version_after_request; version_after_request + 1; version_after_request + 1]
+    (List.map (fun row -> member "store_revision" row |> Yojson.Safe.Util.to_int) rows);
+  let after_flush = saved config in
+  check int "outbox acknowledged" 0 (List.length after_flush.pending_events);
+  check int "outbox ack advances Goal version once" (version_after_request + 2) after_flush.version;
+  check int "verifier cancellation still notified once" 1 !abandoned
+
+(* Regression for #53259: when an earlier pending intent is already queued
+   and the ledger recovers before [reopen], [reopen] commits once at V+1 and
+   outbox ack commits at V+2, rather than flushing inside the callback and
+   overwriting V+1 with a re-queued intent. *)
+let test_reopen_with_pending_outbox_assigns_distinct_revisions () =
+  with_workspace @@ fun config abandoned _ ->
+  let goal = create config in
+  let old = Atomic.exchange Hooks.goal_verification_pending_fn (fun _ ~goal_id:_ -> ()) in
+  Fun.protect ~finally:(fun () -> Atomic.set Hooks.goal_verification_pending_fn old) @@ fun () ->
+  obstruct_audit config;
+  ignore (transition config goal.id "request_complete" |> success);
+  let version_after_request = (saved config).version in
+  let requested = committed_phase_pending config goal "verifying" in
+  restore_audit config;
+  let response = transition config goal.id "reopen" |> success in
+  check string "reopen delivers prior pending intent and reopen events" "delivered"
+    (member "effect_delivery" response |> text "status");
+  let rows = events config in
+  check (list string) "ledger rows follow the commit order"
+    ["goal_phase"; "goal_proof_reopened"; "goal_phase"] (List.map (text "event_type") rows);
+  check string "the request event kept its identity" requested (text "event_id" (List.hd rows));
+  check (list int) "ledger rows carry distinct commit revisions"
+    [version_after_request; version_after_request + 1; version_after_request + 1]
+    (List.map (fun row -> member "store_revision" row |> Yojson.Safe.Util.to_int) rows);
+  let final_state = saved config in
+  check int "outbox acknowledged" 0 (List.length final_state.pending_events);
+  check int "final version includes commit V+1 and ack V+2" (version_after_request + 2)
+    final_state.version;
   check int "verifier cancellation notified once" 1 !abandoned
 
 let () =
@@ -323,5 +376,7 @@ let () =
           test_completion_request_keeps_its_audit_event;
         test_case "reopen keeps its audit event while the ledger refuses it" `Quick
           test_reopen_keeps_its_audit_event;
-        test_case "reopen with a proof to archive waits for the ledger" `Quick
-          test_reopen_with_a_proof_waits_for_the_ledger]]
+        test_case "reopen with a proof queues archive in the outbox while ledger refuses it" `Quick
+          test_reopen_with_a_proof_keeps_its_archive_event;
+        test_case "reopen with pending outbox assigns distinct commit revisions" `Quick
+          test_reopen_with_pending_outbox_assigns_distinct_revisions]]

@@ -593,27 +593,36 @@ type reopen_outcome =
   | Proof_unchanged of record option
   | Proof_reset of record
 
-let archive_reopened_proof config ~goal_id ~actor ~at completion =
-  Goal_store.append_audit_event_after_pending_locked config
-    (`Assoc
-      [ "ts", `String at
-      ; "goal_id", `String goal_id
-      ; "event_type", `String "goal_proof_reopened"
-      ; "payload", `Assoc
-          [ "phase", Goal_phase.to_yojson Goal_phase.Executing
-          ; "actor", `String actor
-          ; "previous_completion", completion_state_to_yojson completion
-          ]
-      ])
-  |> Result.map_error (fun detail -> "could not preserve reopened Goal proof: " ^ detail)
+let reopened_proof_payload ~actor completion =
+  `Assoc
+    [ "phase", Goal_phase.to_yojson Goal_phase.Executing
+    ; "actor", `String actor
+    ; "previous_completion", completion_state_to_yojson completion
+    ]
 ;;
 
 let reopen_goal ?effects config ~goal_id ~actor ~note =
-  let* goal, (outcome, phase_changed) =
+  let combined_effects reopened (outcome, archived_completion, phase_changed) : Goal_store.transition_effects =
+    let archive_events =
+      match archived_completion with
+      | None -> []
+      | Some completion ->
+        [ Goal_store.Proof_reopened, reopened_proof_payload ~actor completion ]
+    in
+    let caller_effects =
+      match effects with
+      | None -> { Goal_store.events = []; notifications = [] }
+      | Some make -> make reopened (outcome, phase_changed)
+    in
+    { Goal_store.events = archive_events @ caller_effects.events
+    ; notifications = caller_effects.notifications
+    }
+  in
+  let* goal, (outcome, _archived_completion, phase_changed) =
     (* The reopen chain is a string [let*]; the store's typed refusal is
        rendered here at its end. *)
     Result.map_error Goal_store.write_error_to_string @@
-    Goal_store.transact_goal ?effects config ~goal_id (fun goal ->
+    Goal_store.transact_goal ~effects:combined_effects config ~goal_id (fun goal ->
       let* transition = Goal_phase.decide_transition ~phase:goal.Goal_store.phase
           ~action:Goal_phase.Reopen in
       let phase_changed, updated_goal = match transition with
@@ -635,19 +644,18 @@ let reopen_goal ?effects config ~goal_id ~actor ~note =
         in
         let reset record =
           let now = Masc_domain.now_iso () in
-          let* () = archive_reopened_proof config ~goal_id ~actor ~at:now record.completion in
           let updated = { record with completion = Completion_idle; updated_at = now } in
           let next = { version = state.version + 1; updated_at = now;
             records = replace_record state.records updated } in
           let* () = write_state_result config next in
-          Ok (updated_goal, (Proof_reset updated, phase_changed))
+          Ok (updated_goal, (Proof_reset updated, Some record.completion, phase_changed))
         in
         match current with
         | Some ({ completion = Human_confirmed _ | Proof_proven _ | Proof_refuted _ | Proof_pending _; _ } as record)
           when phase_changed -> reset record
         | None | Some { completion = Completion_idle | Proof_pending _
                        | Proof_proven _ | Proof_refuted _ | Human_confirmed _; _ } ->
-          Ok (updated_goal, (Proof_unchanged current, phase_changed))))
+          Ok (updated_goal, (Proof_unchanged current, None, phase_changed))))
   in
   Ok (goal, outcome, phase_changed)
 ;;

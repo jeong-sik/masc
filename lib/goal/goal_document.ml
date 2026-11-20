@@ -67,7 +67,7 @@ let criterion_of_yojson = function
                   revision and procedure must not be blank")
   | _ -> Error "criterion: expected object"
 
-type event_kind = Created | Updated | Phase | Edited
+type event_kind = Created | Updated | Phase | Edited | Proof_reopened
 
 type pending_event = {
   event_id : string;
@@ -81,6 +81,7 @@ type pending_event = {
 let event_kind_to_string = function
   | Created -> "goal_created" | Updated -> "goal_updated"
   | Phase -> "goal_phase" | Edited -> "goal_edited"
+  | Proof_reopened -> "goal_proof_reopened"
 
 let pending_event_to_yojson event =
   `Assoc [ "event_id", `String event.event_id;
@@ -313,6 +314,7 @@ let pending_event_of_yojson = function
         let* kind = match Json_util.get_string json "event_type" with
           | Some "goal_created" -> Ok Created | Some "goal_updated" -> Ok Updated
           | Some "goal_phase" -> Ok Phase | Some "goal_edited" -> Ok Edited
+          | Some "goal_proof_reopened" -> Ok Proof_reopened
           | _ -> rejected ~field:"pending_events" "unknown pending event kind" in
         (match Json_util.get_string json "event_id", Json_util.get_string json "goal_id",
                Json_util.get_int json "store_revision", Json_util.get_string json "ts",

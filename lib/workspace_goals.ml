@@ -1139,13 +1139,13 @@ let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~reason =
         ; "effect_delivery", delivery ]
 ;;
 
-(* The reopened phase and its audit intent share the Goal write: the store
-   asks for [effects] only when it writes the Goal, and a reopen writes it only
-   to move the phase. A repeated reopen finds the Goal already executing and
-   still drains the outbox, so an event the ledger refused earlier is delivered
-   then. A reopen that has a proof to archive is refused while the ledger
-   refuses appends: [Goal_verification.reopen_goal] appends that archive row
-   inside the transaction, before the phase is written. *)
+(* The reopened phase and its archive/phase audit intents share the single Goal
+   write: the store asks for [effects] only when it writes the Goal, and a
+   reopen writes it only to move the phase. [Goal_verification.reopen_goal]
+   queues [goal_proof_reopened] ahead of the reopened [goal_phase] event in
+   the Goal outbox at that revision, so reopen succeeds even while the audit
+   ledger refuses appends, and repeated reopen drains the outbox as a
+   lifecycle no-op (#53259). *)
 let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~note goal =
   let goal_id = goal.Goal_store.id in
   let effects (reopened : Goal_store.goal) _ : Goal_store.transition_effects =

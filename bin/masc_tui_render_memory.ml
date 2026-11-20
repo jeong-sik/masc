@@ -429,8 +429,14 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
             (if ko then " · 아톰 0부터 재작성 중 (아톰 %d까지 미사용)"
              else " · rewriting from atom 0, unused until atom %d") through in
       cut ^ read ^ rewriting in
+    let none_since_start = text "서버 시작 이후 기록 없음" "none since server start" in
     let prepared, input = match cycle.mcc_prepared with
-      | None -> text "서버 시작 이후 미관측" "not observed since server start", text "미관측" "not observed"
+      (* The server keeps the latest prepared request and synthesis in
+         memory only (Keeper_continuity_observation), so None is a read
+         that found none since this server started, not a value it failed
+         to read: the reason in words, and no context used (RFC
+         tui-one-screen-grammar 6.4). *)
+      | None -> none_since_start, Masc_tui_theme.Glyph.no_value
       | Some value ->
         let input = match value.mcp_input with
           | Masc.Tui_decode_memory_health.Context_summarized value -> text "요약 " "summary " ^ frontier value
@@ -449,7 +455,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
           (Masc_tui_context_inspector.format_bytes value.mcp_request_bytes)
           (Terminal_text.single_line value.mcp_runtime_id), input in
     let synthesis = match cycle.mcc_synthesis with
-      | None -> text "서버 시작 이후 미관측" "not observed since server start"
+      | None -> none_since_start
       | Some value ->
         let module O = Masc.Keeper_continuity_observation in
         let state = match value.state with

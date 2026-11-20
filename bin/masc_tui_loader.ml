@@ -1902,7 +1902,7 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
     : (Tui_decode.preset_restore_report, string) result =
   let unconfirmed message =
     Error
-      ("preset restore result unconfirmed — changes may already be applied; \
+      ("preset restore result unconfirmed · changes may already be applied; \
         inspect current settings and _autosave before restoring again, which \
         replaces the undo snapshot: " ^ message)
   in
@@ -1925,7 +1925,7 @@ let delete_preset ~(host : string) ~(port : int) ~(name : string) : (string, str
   | Post_refused detail -> Error ("preset delete refused: " ^ detail)
   | Post_unanswered detail ->
     Error
-      ("preset delete unanswered — the preset may be gone; \
+      ("preset delete unanswered · the preset may be gone; \
         check the preset list before retrying: " ^ detail)
 
 (** Load the live keeper roster. Truncation is carried into the typed roster

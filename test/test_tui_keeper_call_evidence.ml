@@ -85,8 +85,23 @@ let durable_and_transcript_evidence () =
       check string "literal tool identity is preserved" "failed · running, returned" call.kc_tool
   | _ -> fail "missing exact receipt"
 
+let pluralization_and_korean_labels () =
+  check bool "single mismatched row uses singular grammar" true
+    (resolve (Some (snapshot [row ~keeper:"beta" ()]))
+     = Evidence.Call_execution_coverage_gap "1 row named another keeper and was not drawn");
+  check bool "multiple mismatched rows use plural grammar" true
+    (resolve (Some (snapshot [row ~keeper:"beta" (); row ~keeper:"gamma" ()]))
+     = Evidence.Call_execution_coverage_gap "2 rows named another keeper and were not drawn");
+  check string "Korean outcome label" "결과 대기 중"
+    (Evidence.tool_outcome_label ~ko:true Transcript.Awaiting_result);
+  check string "English outcome label" "WAITING FOR RESULT"
+    (Evidence.tool_outcome_label Transcript.Awaiting_result);
+  check string "Korean result label" "호출 기록에 있음"
+    (Evidence.result_label ~ko:true Evidence.Durable_output)
+
 let () = run "keeper_call_evidence"
   ["receipt decisions", [
     test_case "identity and coverage boundaries" `Quick identity_and_coverage;
     test_case "refresh retains admitted evidence" `Quick refresh_retains_evidence;
-    test_case "durable and transcript evidence stay distinct" `Quick durable_and_transcript_evidence]]
+    test_case "durable and transcript evidence stay distinct" `Quick durable_and_transcript_evidence;
+    test_case "pluralization and Korean labels" `Quick pluralization_and_korean_labels]]

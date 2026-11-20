@@ -8,7 +8,8 @@
     missing forecast is named, not hidden. *)
 
 val lines
-  :  ?runtime_details:(string -> string list)
+  :  ?ko:bool
+  -> ?runtime_details:(string -> string list)
   -> prose:(string -> string list)
   -> fact:(string -> string list)
   -> detail:(dim:bool -> string -> string list)

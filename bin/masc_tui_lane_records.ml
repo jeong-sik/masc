@@ -381,25 +381,33 @@ let describe record =
     | _ -> "unknown kind" in
   record.source_id ^ " · " ^ record.kind ^ " · " ^ specific
 
-let lines_with_selection overlay =
+let lines_with_selection ?(ko = false) overlay =
+  let say korean english = if ko then korean else english in
   let plain lines = List.map (fun line -> false, line) lines in
-  let header = plain ["Record grants · " ^ overlay.title;
-    "New grant fields checked only; the host requires an operator-owned declaration."; ""] in
+  let header = plain [
+    say "기록 권한 · " "Record grants · " ^ overlay.title;
+    say "새 권한 필드만 검증하며, 호스트는 운영자 소유 선언이 필요합니다."
+      "New grant fields checked only; the host requires an operator-owned declaration."; ""] in
   let rows =
     match overlay.form, overlay.records with
     | Some _, _ ->
-        plain ["Board posts in granted visibilities can reach the configured providers.";
-         "Before granting internal or direct, confirm those providers may receive them."]
-    | None, [] -> plain ["No record grants yet · a adds one"]
+        plain [
+          say "허용된 공개 범위의 보드 글은 설정된 공급자로 전달될 수 있습니다."
+            "Board posts in granted visibilities can reach the configured providers.";
+          say "internal 또는 direct 권한을 부여하기 전에 해당 공급자에 전달해도 되는지 확인하세요."
+            "Before granting internal or direct, confirm those providers may receive them."]
+    | None, [] -> plain [say "기록 권한 없음 · a로 추가" "No record grants yet · a adds one"]
     | None, records ->
         (match List.nth_opt records overlay.cursor with
          | Some record -> [true, Printf.sprintf "› %d/%d · %s" (overlay.cursor + 1) (List.length records) (describe record)]
-         | None -> plain ["No selected record"]) in
+         | None -> plain [say "선택된 기록 없음" "No selected record"]) in
   let message = match overlay.message with None -> [] | Some text -> plain [""; text] in
   let form =
     match overlay.form with
     | None -> []
-    | Some form -> (false, "") :: Masc_tui_schema_form.lines_with_selection ~show_description:true form in
-  header @ rows @ message @ form @ plain [""; "a:add  d:remove  j/k:move  PageUp/Down:scroll  Esc:back · then s saves"]
+    | Some form -> (false, "") :: Masc_tui_schema_form.lines_with_selection ~ko ~show_description:true form in
+  header @ rows @ message @ form @ plain ["";
+    say "a:추가  d:제거  j/k:이동  PgUp/PgDn:스크롤  Esc:뒤로 · 이후 s로 저장"
+      "a:add  d:remove  j/k:move  PageUp/Down:scroll  Esc:back · then s saves"]
 
-let lines overlay = List.map snd (lines_with_selection overlay)
+let lines ?ko overlay = List.map snd (lines_with_selection ?ko overlay)

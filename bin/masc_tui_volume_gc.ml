@@ -236,7 +236,7 @@ let server_report_line ~timestamp = function
 ;;
 
 let lines ~server_report t =
-  ((Plain, Say.both ~ko:"은퇴 Keeper 볼륨 (" ~en:"Retired Keepers' volumes (" ++ Say.code tool ++ Say.code ")")
+  ((Plain, Say.both ~ko:"은퇴 키퍼 볼륨 (" ~en:"Retired Keepers' volumes (" ++ Say.code tool ++ Say.code ")")
    :: phase_line t.phase :: Option.to_list server_report)
   @ shown_lines t.shown
 ;;

@@ -287,10 +287,10 @@ val result_readings :
 val result_window : rows:int -> focus:int -> count:int -> int * int
 (** [(first, shown)]: the list rows the Results list draws when [count] rows
     meet a window of [rows] that must keep row [focus] in view. *)
-val lines : ?height:int -> ?failed_note:string -> width:int -> t -> string list
+val lines : ?ko:bool -> ?height:int -> ?failed_note:string -> width:int -> t -> string list
 (** Printable rows wrapped to the actual frame width. Rendering and scrolling
     must use the same width so every field and receipt remains reachable. *)
-val lines_with_selection : ?height:int -> ?failed_note:string -> width:int -> t -> (bool * string) list
+val lines_with_selection : ?ko:bool -> ?height:int -> ?failed_note:string -> width:int -> t -> (bool * string) list
 (** Same as {!lines}, pairing each row with whether the renderer should draw a
     full-row selection band on it. Two-pane Results rows leave selection false
     so the left-pane selection does not bleed across the vertical divider. *)

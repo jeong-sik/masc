@@ -1170,10 +1170,10 @@ let phase_facts ~ko ~show_timing ~now t =
       else
         work
         @ [ clause
-              (Printf.sprintf
-                 (if ko then "컨텍스트 체크포인트 %d번 넘기고 이어감"
-                  else "continued past %d context checkpoint(s)")
-                 t.checkpoints)
+              (if ko then Printf.sprintf "컨텍스트 체크포인트 %d번 넘기고 이어감" t.checkpoints
+               else
+                 Printf.sprintf "continued past %d context %s"
+                   t.checkpoints (if t.checkpoints = 1 then "checkpoint" else "checkpoints"))
           ]
   | Stream_ended -> said ["스트림 끝남"; "결과 확정 중"] ["stream ended; settling the outcome"]
   | Stream_failed message ->
@@ -1210,11 +1210,14 @@ let unreadable_text ~ko t =
   if t.unreadable_count = 0 then None
   else
     Some
-      (Printf.sprintf
-         (if ko then "실시간 스트림 진단 %d개 (마지막: %s) · 기록된 결과는 그대로"
-          else "%d live stream diagnostic(s) (last: %s); the recorded outcome is \
-                unaffected")
-         t.unreadable_count t.last_unreadable)
+      (if ko then
+         Printf.sprintf "실시간 스트림 진단 %d개 (마지막: %s) · 기록된 결과는 그대로"
+           t.unreadable_count t.last_unreadable
+       else
+         Printf.sprintf "%d live stream %s (last: %s); the recorded outcome is unaffected"
+           t.unreadable_count
+           (if t.unreadable_count = 1 then "diagnostic" else "diagnostics")
+           t.last_unreadable)
 
 (* An age, not a duration budget: the row says how long this turn has been
    outstanding so a watcher can tell slow from stuck. Rendered from a clock the

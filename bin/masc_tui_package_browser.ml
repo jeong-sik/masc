@@ -9,12 +9,14 @@ let category_rank = function
   | Some Category.External_communications -> 2 | Some Category.Voice_and_media -> 3
   | Some Category.Execution_environment -> 4 | Some Category.Analysis -> 5
   | None -> 6
-let category_label = function
-  | Some Category.Memory_and_judgment -> "Memory & judgment" | Some Category.Browser -> "Browser"
-  | Some Category.External_communications -> "External communications"
-  | Some Category.Voice_and_media -> "Voice & media"
-  | Some Category.Execution_environment -> "Execution environment"
-  | Some Category.Analysis -> "Analysis" | None -> "Unclassified"
+let category_label ?(ko = false) = function
+  | Some Category.Memory_and_judgment -> if ko then "기억·판정" else "Memory & judgment"
+  | Some Category.Browser -> if ko then "브라우저" else "Browser"
+  | Some Category.External_communications -> if ko then "외부 통신" else "External communications"
+  | Some Category.Voice_and_media -> if ko then "음성·미디어" else "Voice & media"
+  | Some Category.Execution_environment -> if ko then "실행 환경" else "Execution environment"
+  | Some Category.Analysis -> if ko then "분석" else "Analysis"
+  | None -> if ko then "미분류" else "Unclassified"
 type placement = Navigation | Role of Category.t option
 let placement = function
   | Catalog.Package package -> Role package.metadata.ui_category
@@ -68,19 +70,29 @@ let handle ~key t =
            if key="l" || key="right" then Ok (Browse (Some (Filename.dirname package.manifest_path)))
            else Ok (Preview package.manifest_path))
   | _ -> Ok (Updated t)
-let left_hint t = match t.snapshot,t.directory with
-  | None,Some _ -> "Left:workspace root"
-  | Some _,_ | None,None -> "Left:parent"
-let hints t = String.concat "  " ["j/k:select";"Enter:open";left_hint t;"Right:folder";
-  "g:directory";"p:manifest";"n:new TOML";"PgUp/PgDn:details";"Esc:cancel"]
-let lines_with_selection ~height ~render t =
+let left_hint ~ko t = match t.snapshot,t.directory with
+  | None,Some _ -> if ko then "←:워크스페이스 루트" else "Left:workspace root"
+  | Some _,_ | None,None -> if ko then "←:상위 폴더" else "Left:parent"
+let hints ?(ko = false) t =
+  if ko then
+    String.concat "  " ["j/k:선택";"Enter:열기";left_hint ~ko t;"→:폴더";
+      "g:디렉터리";"p:매니페스트";"n:새 TOML";"PgUp/PgDn:상세";"Esc:취소"]
+  else
+    String.concat "  " ["j/k:select";"Enter:open";left_hint ~ko t;"Right:folder";
+      "g:directory";"p:manifest";"n:new TOML";"PgUp/PgDn:details";"Esc:cancel"]
+let lines_with_selection ?(ko = false) ~height ~render t =
+  let say korean english = if ko then korean else english in
   let plain lines = List.map (fun line -> false, line) lines in
   let compact line = match render line with [] -> "" | [line] -> line | first::_ -> first in
   let rows = entries t in
-  let header = plain (List.map compact ["Choose a local package · j/k:select · Enter:open";
-    ("Folder: " ^ (match t.directory with None -> "workspace root" | Some path -> path));
-    left_hint t ^ " · Right:folder · g:directory · p:manifest · n:new TOML · r:reload · Esc:cancel";
-    Printf.sprintf "%d/%d entries · lane.toml in this folder and immediate child folders"
+  let header = plain (List.map compact [
+    say "로컬 패키지 선택 · j/k:선택 · Enter:열기" "Choose a local package · j/k:select · Enter:open";
+    (say "폴더: " "Folder: " ^ (match t.directory with None -> say "워크스페이스 루트" "workspace root" | Some path -> path));
+    left_hint ~ko t ^ say " · →:폴더 · g:디렉터리 · p:매니페스트 · n:새 TOML · r:새로고침 · Esc:취소"
+      " · Right:folder · g:directory · p:manifest · n:new TOML · r:reload · Esc:cancel";
+    Printf.sprintf
+      (if ko then "%d/%d 항목 · 이 폴더와 바로 아래 하위 폴더의 lane.toml"
+       else "%d/%d entries · lane.toml in this folder and immediate child folders")
       (if rows=[] then 0 else t.cursor+1) (List.length rows)]) in
   let capacity = max 1 (height - List.length header - 6) in
   (* Role headers occupy screen lines, so the window is computed over the drawn
@@ -90,11 +102,11 @@ let lines_with_selection ~height ~render t =
       | Navigation -> None
       | Role category ->
           let previous = if index=0 then Navigation else placement (List.nth rows (index-1)) in
-          if previous = Role category then None else Some (compact ("-- " ^ category_label category ^ " --")) in
+          if previous = Role category then None else Some (compact ("-- " ^ category_label ~ko category ^ " --")) in
     let label = match entry with
-      | Catalog.Folder path -> "Folder  " ^ Filename.basename path
-      | Package package -> "Package " ^ package.metadata.title ^ " · " ^ package.metadata.revision
-      | Issue issue -> "Issue   " ^ Filename.basename (Filename.dirname issue.path) ^ "/" ^ Filename.basename issue.path in
+      | Catalog.Folder path -> say "폴더    " "Folder  " ^ Filename.basename path
+      | Package package -> say "패키지  " "Package " ^ package.metadata.title ^ " · " ^ package.metadata.revision
+      | Issue issue -> say "문제    " "Issue   " ^ Filename.basename (Filename.dirname issue.path) ^ "/" ^ Filename.basename issue.path in
     (index, heading, compact ((if index=t.cursor then "› " else "  ") ^ label))) in
   let all_lines = List.concat_map (fun (index, heading, line) ->
     (match heading with Some h -> [(index, Some h, h)] | None -> []) @ [(index, None, line)]) drawn in
@@ -114,15 +126,22 @@ let lines_with_selection ~height ~render t =
     | _ -> List.map to_row window in
   let details = match selected t with
     | None -> [match t.snapshot,t.directory with
-               | None,None -> "Read a folder or use p to enter a manifest path."
-               | None,Some _ -> "No folder read yet. Left:workspace root · g:directory · p:manifest"
-               | Some _,_ -> "No local packages or child folders here. Left:parent · g:directory · p:manifest"]
-    | Some (Folder path) -> [path;"Enter opens this folder."]
+               | None,None ->
+                   say "폴더를 읽거나 p를 눌러 매니페스트 경로를 입력하세요."
+                     "Read a folder or use p to enter a manifest path."
+               | None,Some _ ->
+                   say "아직 읽은 폴더가 없습니다. ←:워크스페이스 루트 · g:디렉터리 · p:매니페스트"
+                     "No folder read yet. Left:workspace root · g:directory · p:manifest"
+               | Some _,_ ->
+                   say "여기에 로컬 패키지나 하위 폴더가 없습니다. ←:상위 폴더 · g:디렉터리 · p:매니페스트"
+                     "No local packages or child folders here. Left:parent · g:directory · p:manifest"]
+    | Some (Folder path) -> [path; say "Enter로 이 폴더를 엽니다." "Enter opens this folder."]
     | Some (Issue issue) -> [issue.path;issue.message]
     | Some (Package package) ->
-        [package.metadata.title ^ " · revision " ^ package.metadata.revision;package.manifest_path]
+        [package.metadata.title ^ (say " · 리비전 " " · revision ") ^ package.metadata.revision;package.manifest_path]
         @ Option.to_list package.metadata.description
-        @ ["Enter rereads the package execution; nothing is installed yet."] in
+        @ [say "Enter로 패키지 실행을 다시 읽습니다. 아직 설치되지 않습니다."
+             "Enter rereads the package execution; nothing is installed yet."] in
   header @ visible @ plain (List.concat_map render details)
 
-let lines ~height ~render t = List.map snd (lines_with_selection ~height ~render t)
+let lines ?(ko = false) ~height ~render t = List.map snd (lines_with_selection ~ko ~height ~render t)

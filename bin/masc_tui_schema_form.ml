@@ -314,50 +314,68 @@ let named_alternatives schema =
       Option.map (fun name -> name,alternative) (alternative_name alternative)) alternatives in
     let names = List.sort_uniq String.compare (List.map fst named) in
     if List.length names=List.length alternatives then Some named else None)
-let locked_lines form = List.map (fun (name,value) ->
-  "  " ^ name ^ ": " ^ Yojson.Safe.to_string value ^ " · locked") form.locked
-let union_lines form =
+let locked_lines ~ko form = List.map (fun (name,value) ->
+  "  " ^ name ^ ": " ^ Yojson.Safe.to_string value ^ (if ko then " · 고정" else " · locked")) form.locked
+let union_lines ~ko form =
   let chosen index count alternative =
     Printf.sprintf "%s (%d/%d)" (alternative_label index alternative) (index+1) count in
   match form.union with
   | None -> []
   | Some (Fixed {count;index;alternative}) ->
-      [false, "  Alternative: " ^ chosen index count alternative ^ " · locked"]
+      [false,
+       (if ko then "  선택지: " else "  Alternative: ")
+       ^ chosen index count alternative
+       ^ (if ko then " · 고정" else " · locked")]
   | Some (Choosable {alternatives;chosen=choice}) ->
       let count = List.length alternatives in
       let label = match choice with
         | Some (index,alternative) -> chosen index count alternative
-        | None -> Printf.sprintf "none of %d chosen" count in
+        | None ->
+            if ko then Printf.sprintf "%d개 중 미선택" count
+            else Printf.sprintf "none of %d chosen" count in
       let selected = focus form = Some Choice in
-      [selected, (if selected then "› " else "  ") ^ "Alternative: " ^ label]
+      [selected, (if selected then "› " else "  ") ^ (if ko then "선택지: " else "Alternative: ") ^ label]
 let plain lines = List.map (fun line -> false, line) lines
-let rec lines_with_selection ?(show_description=false) form =
+let rec lines_with_selection ?(ko = false) ?(show_description=false) form =
+  let say korean english = if ko then korean else english in
   match form.array_editor with
   | Some editor ->
       let name = match selected_field form with
-        | Some field -> String.concat "." field.path | None -> "Array" in
+        | Some field -> String.concat "." field.path | None -> say "배열" "Array" in
       (match editor.child with
        | Some (index,child) ->
            plain
-             [ name ^ (match index with None -> " · New item" | Some index -> Printf.sprintf " · Edit item %d" (index+1))
-             ; "Item review saves into this local array; it does not submit an action." ]
-           @ lines_with_selection ~show_description child
+             [ name ^ (match index with
+                 | None -> say " · 새 항목" " · New item"
+                 | Some index -> Printf.sprintf (if ko then " · 항목 %d 편집" else " · Edit item %d") (index+1))
+             ; say "항목 검토는 로컬 배열에만 반영되며 동작을 바로 실행하지 않습니다."
+                 "Item review saves into this local array; it does not submit an action." ]
+           @ lines_with_selection ~ko ~show_description child
        | None ->
            plain
-             ([name ^ " · Array items";"a:add  e/Enter:edit  d:remove  j/k:select  Ctrl-S:apply array  Esc:discard array edits";
-               Printf.sprintf "%d items · applying validates minItems/maxItems" (List.length editor.items)] @
+             ([name ^ say " · 배열 항목" " · Array items";
+               say "a:추가  e/Enter:편집  d:제거  j/k:선택  Ctrl-S:배열 적용  Esc:배열 편집 취소"
+                 "a:add  e/Enter:edit  d:remove  j/k:select  Ctrl-S:apply array  Esc:discard array edits";
+               Printf.sprintf
+                 (if ko then "%d개 항목 · 적용 시 minItems/maxItems를 검증합니다"
+                  else "%d items · applying validates minItems/maxItems")
+                 (List.length editor.items)] @
               (match List.nth_opt editor.items editor.item_cursor with
-               | None -> ["No items. a adds an explicit item."]
-               | Some value -> Printf.sprintf "Selected item %d/%d" (editor.item_cursor+1) (List.length editor.items)
+               | None -> [say "항목 없음 · a로 항목을 추가하세요." "No items. a adds an explicit item."]
+               | Some value ->
+                   Printf.sprintf (if ko then "선택된 항목 %d/%d" else "Selected item %d/%d")
+                     (editor.item_cursor+1) (List.length editor.items)
                    :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string value))))
   | None ->
   if form.reviewing then
-    plain (["Review input · Enter:submit once · Esc:edit · PageUp/PageDown:scroll"] @
+    plain ([say "입력 검토 · Enter:1회 실행 · Esc:편집 · PgUp/PgDn:스크롤"
+              "Review input · Enter:submit once · Esc:edit · PageUp/PageDown:scroll"] @
       (match value form with Ok value -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string value) | Error error -> [error]))
   else
     let selected = selected_field form in
     let array_hint = match selected with
-      | Some field when Option.is_some (object_items field.schema) -> " · Ctrl-E:array items"
+      | Some field when Option.is_some (object_items field.schema) ->
+          say " · Ctrl-E:배열 항목" " · Ctrl-E:array items"
       | Some _ | None -> "" in
     let description = match show_description, selected with
       | true, Some field -> (match member "description" field.schema with
@@ -365,11 +383,15 @@ let rec lines_with_selection ?(show_description=false) form =
           | Some _ | None -> [])
       | false, _ | true, None -> [] in
     let position = match focus form with
-      | Some (Input index) -> Printf.sprintf "Field %d/%d" (index+1) (List.length form.fields)
-      | Some Choice -> "Alternative"
-      | None -> "No field to fill" in
-    plain ["Tab/Up/Down:field · Left/Right:choice" ^ array_hint ^ " · Ctrl-U:unset · Ctrl-S:review · Esc:cancel";
-        position ^ " · PageUp/PageDown:scroll"] @ plain (locked_lines form) @ union_lines form @
+      | Some (Input index) ->
+          Printf.sprintf (if ko then "필드 %d/%d" else "Field %d/%d") (index+1) (List.length form.fields)
+      | Some Choice -> say "선택지" "Alternative"
+      | None -> say "입력할 필드 없음" "No field to fill" in
+    plain [say "Tab/↑/↓:필드 · ←/→:선택" "Tab/Up/Down:field · Left/Right:choice"
+           ^ array_hint
+           ^ say " · Ctrl-U:지우기 · Ctrl-S:검토 · Esc:취소" " · Ctrl-U:unset · Ctrl-S:review · Esc:cancel";
+        position ^ say " · PgUp/PgDn:스크롤" " · PageUp/PageDown:scroll"]
+    @ plain (locked_lines ~ko form) @ union_lines ~ko form @
     (match selected with
      | None -> []
      | Some field ->
@@ -378,7 +400,7 @@ let rec lines_with_selection ?(show_description=false) form =
          [true, "› " ^ name ^ (if field.required then " *" else "") ^ ": " ^
           (match form.draft with
            | Some draft -> display_draft field draft
-           | None -> Option.fold ~none:"(unset)" ~some:Yojson.Safe.to_string field.value)])
+           | None -> Option.fold ~none:(say "(미설정)" "(unset)") ~some:Yojson.Safe.to_string field.value)])
     @ plain description
-let lines ?(show_description=false) form =
-  List.map snd (lines_with_selection ~show_description form)
+let lines ?ko ?(show_description=false) form =
+  List.map snd (lines_with_selection ?ko ~show_description form)

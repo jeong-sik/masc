@@ -127,6 +127,25 @@ let test_command_catalog_and_feature_sheet_stay_aligned () =
     "every parser command is accounted for by the feature sheet or explicit exclusion list"
     expected covered
 
+let test_korean_feature_sheet_renders_headings_and_openers () =
+  let ko_lines = Masc_tui_features.lines_for ~ko:true ~width:80 in
+  let en_lines = Masc_tui_features.lines ~width:80 in
+  Alcotest.(check bool)
+    "Korean feature sheet renders Korean section heading"
+    true
+    (List.exists (fun line -> String.equal line "\xe2\x97\x86 어디서나 이동") ko_lines);
+  Alcotest.(check bool)
+    "English feature sheet keeps English section heading"
+    true
+    (List.exists (fun line -> String.equal line "\xe2\x97\x86 Get anywhere") en_lines);
+  let count_openers lines =
+    List.length
+      (List.filter (fun line -> String.starts_with ~prefix:"  \xe2\x80\xa2 " line) lines)
+  in
+  Alcotest.(check int)
+    "Korean and English feature sheets list the same number of openers"
+    (count_openers en_lines) (count_openers ko_lines)
+
 let () =
   Alcotest.run "masc_tui_features"
     [ ( "registry"
@@ -134,5 +153,7 @@ let () =
             test_every_feature_opener_is_real
         ; Alcotest.test_case "command catalog and feature sheet stay aligned" `Quick
             test_command_catalog_and_feature_sheet_stay_aligned
+        ; Alcotest.test_case "Korean feature sheet renders headings and openers" `Quick
+            test_korean_feature_sheet_renders_headings_and_openers
         ] )
     ]

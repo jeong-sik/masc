@@ -311,28 +311,34 @@ type reset_words = {
   reset_short : string;
 }
 
-let reset_words ~now resets_at =
+let reset_words ~ko ~now resets_at =
   match reset_state ~now resets_at with
   | Reset_not_reported ->
-      { reset_tone = None; reset_full = "reset not reported"; reset_short = "reset not reported" }
+      let text = if ko then "재설정 미보고" else "reset not reported" in
+      { reset_tone = None; reset_full = text; reset_short = text }
   | Reset_passed ->
       { reset_tone = Some (Theme.text_status Masc_tui_theme.Warn)
-      ; reset_full = "reset time passed"
-      ; reset_short = "reset passed"
+      ; reset_full = if ko then "재설정 시각 경과" else "reset time passed"
+      ; reset_short = if ko then "재설정 경과" else "reset passed"
       }
   | Reset_pending at ->
+      let detail = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at in
+      let until = Masc_tui_value.Ongoing.until ~now at in
       { reset_tone = None
       ; reset_full =
-          Printf.sprintf "resets %s (%s)"
-            (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at)
-            (Masc_tui_value.Ongoing.until ~now at)
-      ; reset_short = Printf.sprintf "resets in %s" (Masc_tui_value.Ongoing.until ~now at)
+          if ko then Printf.sprintf "%s 재설정 (%s 후)" detail until
+          else Printf.sprintf "resets %s (%s)" detail until
+      ; reset_short =
+          if ko then Printf.sprintf "%s 후 재설정" until
+          else Printf.sprintf "resets in %s" until
       }
 
 (* A clock that moved backwards says nothing rather than a negative age. *)
-let heard_text ~now observed_at =
+let heard_text ~ko ~now observed_at =
   Option.map
-    (fun age -> Printf.sprintf "reported %s ago" age)
+    (fun age ->
+      if ko then Printf.sprintf "%s 전 보고" age
+      else Printf.sprintf "reported %s ago" age)
     (Masc_tui_message_layout.age_text ~now ~since:observed_at)
 
 (* ---- accounts ----------------------------------------------------------- *)
@@ -399,17 +405,22 @@ let observed_exhaustion ~runtimes scope =
         Not_observed_exhausted options
   | Types.Quota_unread | Types.Quota_failed _ -> Not_observed_exhausted
 
-let exhausted_tag ~now = function
+let exhausted_tag ~ko ~now = function
   | Not_observed_exhausted -> None
   | Observed_exhausted None ->
-      Some "exhausted (observed) \xc2\xb7 catalogue reopen time not stated"
-  | Observed_exhausted (Some at) when at <= now ->
-      Some "exhausted (observed) \xc2\xb7 catalogue reopen time passed"
-  | Observed_exhausted (Some at) ->
       Some
-        (Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s"
-           (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at)
-           (Masc_tui_value.Ongoing.until ~now at))
+        (if ko then "소진됨 (관측) \xc2\xb7 카탈로그 재개 시각 미표기"
+         else "exhausted (observed) \xc2\xb7 catalogue reopen time not stated")
+  | Observed_exhausted (Some at) when at <= now ->
+      Some
+        (if ko then "소진됨 (관측) \xc2\xb7 카탈로그 재개 시각 경과"
+         else "exhausted (observed) \xc2\xb7 catalogue reopen time passed")
+  | Observed_exhausted (Some at) ->
+      let detail = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at in
+      let until = Masc_tui_value.Ongoing.until ~now at in
+      Some
+        (if ko then Printf.sprintf "소진됨 (관측) \xc2\xb7 카탈로그 %s 재개 (%s 후)" detail until
+         else Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s" detail until)
 
 (* ---- group the reported and observed evidence --------------------------- *)
 
@@ -674,30 +685,37 @@ let credit_used_total total remaining =
   | Some total when Float.compare total 0.0 > 0 -> Some (total -. remaining, total)
   | Some _ | None -> None
 
-let money_text = function
+let money_text ~ko = function
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } ->
       Some (usd_text used ^ "/" ^ usd_text limit)
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = None } ->
-      Some ("spent " ^ usd_text used)
+      Some ((if ko then "사용 " else "spent ") ^ usd_text used)
   | Masc.Tui_decode_usage.Utilization_credit_balance { currency; total; remaining } ->
       let context =
         match credit_used_total total remaining with
         | Some (used, total) ->
-            " \xc2\xb7 used " ^ credit_text currency used ^ "/" ^ credit_text currency total
+            (if ko then " \xc2\xb7 사용 " else " \xc2\xb7 used ")
+            ^ credit_text currency used ^ "/" ^ credit_text currency total
         | None -> ""
       in
-      Some (credit_remaining_text currency remaining ^ context)
-  | Masc.Tui_decode_usage.Utilization_credit_unlimited -> Some "Credit unlimited"
-  | Masc.Tui_decode_usage.Utilization_credit_retracted -> Some "Credit retracted"
+      let remaining_label =
+        if ko then "크레딧 " ^ credit_text currency remaining ^ " 남음"
+        else credit_remaining_text currency remaining
+      in
+      Some (remaining_label ^ context)
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited ->
+      Some (if ko then "크레딧 무제한" else "Credit unlimited")
+  | Masc.Tui_decode_usage.Utilization_credit_retracted ->
+      Some (if ko then "크레딧 회수됨" else "Credit retracted")
   | Masc.Tui_decode_usage.Utilization_fraction _
   | Masc.Tui_decode_usage.Utilization_percent _ -> None
 
 (* A window that gates model calls says nothing more; the others say what
    they are, since their tone alone does not. *)
-let role_tag = function
+let role_tag ~ko = function
   | Masc.Tui_decode_usage.Role_gates_model_calls -> None
-  | Masc.Tui_decode_usage.Role_counts_other_use -> Some "other use"
-  | Masc.Tui_decode_usage.Role_unclassified_limit -> Some "unclassified"
+  | Masc.Tui_decode_usage.Role_counts_other_use -> Some (if ko then "기타 사용" else "other use")
+  | Masc.Tui_decode_usage.Role_unclassified_limit -> Some (if ko then "미분류" else "unclassified")
 
 (* A window that counts something a model call does not need never alarms:
    it being full refuses no model call. A limit the server could not classify
@@ -771,7 +789,7 @@ let shows_reset = function
 
 (* A window heard at a different time than its account's newest report says
    so; otherwise the time is left out. *)
-let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_window) =
+let window_line ~ko ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_window) =
   let utilization = window.puw_utilization in
   let share = share_of_full utilization in
   let percent =
@@ -779,20 +797,20 @@ let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_wind
     | Some share -> utilization_text (Masc.Tui_decode_usage.Utilization_fraction share)
     | None -> ""
   in
-  let reset = reset_words ~now window.puw_resets_at in
+  let reset = reset_words ~ko ~now window.puw_resets_at in
   let heard =
     match newest with
     | Some newest when not (Float.equal newest window.puw_observed_at) ->
-        heard_text ~now window.puw_observed_at
+        heard_text ~ko ~now window.puw_observed_at
     | Some _ | None -> None
   in
-  let amount = money_text utilization in
+  let amount = money_text ~ko utilization in
   let detail_with reset_part notes =
     let reset_part = if shows_reset utilization then Some reset_part else None in
     String.concat detail_separator
       (List.filter_map Fun.id ([ amount; reset_part ] @ notes))
   in
-  let notes = [ heard; role_tag window.puw_role ] in
+  let notes = [ heard; role_tag ~ko window.puw_role ] in
   let tone = window_tone window in
   { label = window_label window
   ; at_limit = window_at_limit window
@@ -825,19 +843,27 @@ type drawn_entry = {
       (** Drawn once per account, with its first entry. *)
 }
 
-let not_reported_text = "No usage report since server start"
+let not_reported_text ~ko =
+  if ko then "서버 시작 이후 보고된 사용량 없음"
+  else "No usage report since server start"
 
-let no_window_body ~now (account : Masc.Tui_decode_usage.provider_usage_account) =
+let no_window_body ~ko ~now (account : Masc.Tui_decode_usage.provider_usage_account) =
   match account.pua_state with
   | Masc.Tui_decode_usage.Account_not_reported_since_start -> Not_reported
   | Masc.Tui_decode_usage.Account_reported_no_windows { observed_at; source } ->
+      let when_text = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now observed_at in
+      let source_text = Terminal_text.single_line source in
       State_text
-        ("Provider reported no usage windows \xc2\xb7 Last report "
-         ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now observed_at ^ " \xc2\xb7 " ^ Terminal_text.single_line source)
+        (if ko then
+           "제공자가 사용량 윈도우를 보고하지 않음 \xc2\xb7 마지막 보고 " ^ when_text ^ " \xc2\xb7 " ^ source_text
+         else
+           "Provider reported no usage windows \xc2\xb7 Last report " ^ when_text ^ " \xc2\xb7 " ^ source_text)
   | Masc.Tui_decode_usage.Account_reported _ ->
-      State_text "No reported window gates model calls"
+      State_text
+        (if ko then "모델 호출을 제한하는 보고된 윈도우 없음"
+         else "No reported window gates model calls")
 
-let drawn_groups ~now ~account_emails groups =
+let drawn_groups ~ko ~now ~account_emails groups =
   let _, drawn =
     List.fold_left
       (fun (seen, drawn) { pg_section; pg_entries } ->
@@ -849,12 +875,12 @@ let drawn_groups ~now ~account_emails groups =
               let newest = newest_report entry.pe_account in
               let body =
                 match entry.pe_windows with
-                | [] -> no_window_body ~now entry.pe_account
+                | [] -> no_window_body ~ko ~now entry.pe_account
                 | _ :: _ as windows ->
-                    Window_lines (List.map (window_line ~now ~newest) windows)
+                    Window_lines (List.map (window_line ~ko ~now ~newest) windows)
               in
               let tag =
-                exhausted_tag ~now (drawn_observation pg_section entry.pe_observed)
+                exhausted_tag ~ko ~now (drawn_observation pg_section entry.pe_observed)
               in
               let email =
                 if first_time then account_email ~account_emails entry.pe_account
@@ -880,10 +906,10 @@ let drawn_groups ~now ~account_emails groups =
   in
   List.rev drawn
 
-let section_title = function
-  | At_limit_or_exhausted -> "At limit / exhausted"
-  | Other_windows -> "Reported windows"
-  | No_windows -> "No windows"
+let section_title ~ko = function
+  | At_limit_or_exhausted -> if ko then "한도 도달 / 소진" else "At limit / exhausted"
+  | Other_windows -> if ko then "보고된 윈도우" else "Reported windows"
+  | No_windows -> if ko then "윈도우 없음" else "No windows"
 
 let section_tone = function
   | At_limit_or_exhausted -> Theme.text_status Masc_tui_theme.Bad
@@ -998,7 +1024,7 @@ let under_name_gap = "  "
 
 (* One entry's rows, at the columns [layout] settled on. With [~named:false]
    the name column stays blank: the name is drawn above the rows. *)
-let draw_entry ?(named = true) layout tone entry =
+let draw_entry ~ko ?(named = true) layout tone entry =
   let module Text = Masc_tui_message_layout in
   let name_cell tone name =
     Ansi.bold ^ tone ^ Text.fit_middle layout.name_cells (marked ~attention:entry.de_attention name) ^ Ansi.reset
@@ -1110,18 +1136,19 @@ let draw_entry ?(named = true) layout tone entry =
                window_row tone ~first:(if index = 0 && named then Some entry.de_name else None) line)
              lines)
     | State_text text -> state_rows text
-    | Not_reported -> state_rows not_reported_text
+    | Not_reported -> state_rows (not_reported_text ~ko)
   in
+  let catalogue_prefix = if ko then "카탈로그 \xc2\xb7 " else "Catalogue \xc2\xb7 " in
   rows
   @ (match entry.de_tag with
      | None -> []
-     | Some tag -> note_lines ~tone:(Theme.text_status Masc_tui_theme.Bad) ("Catalogue \xc2\xb7 " ^ tag))
+     | Some tag -> note_lines ~tone:(Theme.text_status Masc_tui_theme.Bad) (catalogue_prefix ^ tag))
   @ (match entry.de_email with
      | None -> []
      | Some email -> note_lines ~tone:(Theme.recede ()) email)
 
-let group_heading_text section entries =
-  Printf.sprintf "%s  %d" (section_title section) (List.length entries)
+let group_heading_text ~ko section entries =
+  Printf.sprintf "%s  %d" (section_title ~ko section) (List.length entries)
 
 let wrap_group_text ~width ~tone text =
   (* Preserve the six-cell [x:show] key on very narrow screens. *)
@@ -1129,8 +1156,8 @@ let wrap_group_text ~width ~tone text =
   Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - String.length indent)) text
   |> List.map (fun line -> indent ^ tone ^ line ^ Ansi.reset)
 
-let group_heading ?note ~width section entries =
-  let title = group_heading_text section entries in
+let group_heading ~ko ?note ~width section entries =
+  let title = group_heading_text ~ko section entries in
   let note_suffix = Option.fold ~none:"" ~some:(fun note -> " \xc2\xb7 " ^ note) note in
   let title_cells = cells_of (indent ^ title ^ note_suffix) in
   let heading =
@@ -1146,8 +1173,9 @@ let group_heading ?note ~width section entries =
     wrap_group_text ~width ~tone:(Ansi.bold ^ section_tone section) title
     @ Option.fold ~none:[] ~some:(wrap_group_text ~width ~tone:(Theme.recede ())) note
 
-let hidden_limit_heading ~width section entries =
-  group_heading ~note:("hidden \xc2\xb7 x:show") ~width section entries
+let hidden_limit_heading ~ko ~width section entries =
+  let note = if ko then "숨김 \xc2\xb7 x:보기" else "hidden \xc2\xb7 x:show" in
+  group_heading ~ko ~note ~width section entries
 
 (* One empty line between blocks so each reads as a unit. *)
 let rec separated = function
@@ -1178,7 +1206,7 @@ let email_gap = 2
 (* Accounts the server has not heard from all have the same thing to say, so
    one line says it and the accounts are listed under it. An email, when the
    account has one, follows the name or takes a line of its own. *)
-let draw_silent_accounts ~width ~tone entries =
+let draw_silent_accounts ~ko ~width ~tone entries =
   match entries with
   | [] -> []
   | _ :: _ ->
@@ -1199,10 +1227,10 @@ let draw_silent_accounts ~width ~tone entries =
         | None, _ -> List.map name_style name_lines
       in
       List.map (fun line -> indent ^ line)
-        (Masc_tui_message_layout.wrap_words ~max_cells:room not_reported_text)
+        (Masc_tui_message_layout.wrap_words ~max_cells:room (not_reported_text ~ko))
       @ List.concat_map account entries
 
-let draw_stacked_entry ~width ~tone entry =
+let draw_stacked_entry ~ko ~width ~tone entry =
   let wrap tone text =
     Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) text
     |> List.map (style tone) in
@@ -1211,17 +1239,18 @@ let draw_stacked_entry ~width ~tone entry =
     |> List.map (fun text -> Ansi.bold ^ tone ^ text ^ Ansi.reset) in
   let body = match entry.de_body with
     | State_text text -> wrap None text
-    | Not_reported -> wrap None not_reported_text
+    | Not_reported -> wrap None (not_reported_text ~ko)
     | Window_lines lines ->
         List.map (fun line ->
           (wrap_marked ~width ~attention:line.at_limit line.label |> List.map (style line.tone))
           @ (wrap_marked ~width ~attention:line.at_limit line.percent |> List.map (style line.tone))
           @ (wrap_marked ~width ~attention:line.at_limit line.detail |> List.map (style line.detail_tone))) lines |> separated in
+  let catalogue_prefix = if ko then "카탈로그 \xc2\xb7 " else "Catalogue \xc2\xb7 " in
   name @ body
-  @ Option.fold ~none:[] ~some:(fun tag -> wrap (Some (Theme.text_status Masc_tui_theme.Bad)) ("Catalogue · " ^ tag)) entry.de_tag
+  @ Option.fold ~none:[] ~some:(fun tag -> wrap (Some (Theme.text_status Masc_tui_theme.Bad)) (catalogue_prefix ^ tag)) entry.de_tag
   @ Option.fold ~none:[] ~some:(wrap (Some (Theme.recede ()))) entry.de_email
 
-let draw_groups ~show_limit_exhausted ~width groups =
+let draw_groups ~ko ~show_limit_exhausted ~width groups =
   let entries =
     List.concat_map (fun (section, entries) -> snd (split_silent section entries)) groups
   in
@@ -1229,13 +1258,13 @@ let draw_groups ~show_limit_exhausted ~width groups =
   let draw_group (section, entries) =
     match section with
     | At_limit_or_exhausted when not show_limit_exhausted ->
-        hidden_limit_heading ~width section entries
+        hidden_limit_heading ~ko ~width section entries
     | At_limit_or_exhausted | Other_windows | No_windows ->
         let tone = section_tone section in
         let draw entry =
-          if width < minimum_inline_cells then draw_stacked_entry ~width ~tone entry
+          if width < minimum_inline_cells then draw_stacked_entry ~ko ~width ~tone entry
           else if cells_of (marked ~attention:entry.de_attention entry.de_name) <= layout.name_cells then
-            draw_entry layout tone entry
+            draw_entry ~ko layout tone entry
           else
             (* A name wider than its column goes on a row of its own, and the
                windows keep the section's columns, so every bar in the list
@@ -1245,11 +1274,11 @@ let draw_groups ~show_limit_exhausted ~width groups =
               wrap_marked ~width:(width - 2) ~attention:entry.de_attention entry.de_name
               |> List.map (fun line -> indent ^ Ansi.bold ^ tone ^ line ^ Ansi.reset)
             in
-            heading @ draw_entry ~named:false layout tone entry
+            heading @ draw_entry ~ko ~named:false layout tone entry
         in
         let silent, listed = split_silent section entries in
-        group_heading ~width section entries
-        @ blocks [ separated (List.map draw listed); draw_silent_accounts ~width ~tone silent ]
+        group_heading ~ko ~width section entries
+        @ blocks [ separated (List.map draw listed); draw_silent_accounts ~ko ~width ~tone silent ]
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -1277,7 +1306,7 @@ let rec pairs = function
 (* An account's windows as a card titled with its name. The name column is
    empty inside the card: the title already says it. The section's shared
    layout keeps every window row on the same axes. *)
-let account_card ~tone ~layout entry =
+let account_card ~ko ~tone ~layout entry =
   { Masc_tui_card.edge =
       { Masc_tui_card.name = marked ~attention:entry.de_attention entry.de_name
       ; key = None
@@ -1294,7 +1323,7 @@ let account_card ~tone ~layout entry =
             wrap_marked ~width:cells ~attention:entry.de_attention entry.de_name
             |> List.map (fun line -> Ansi.bold ^ tone ^ line ^ Ansi.reset)
         in
-        full_name @ draw_entry layout tone entry)
+        full_name @ draw_entry ~ko layout tone entry)
   }
 
 (* Each pair of accounts is one row of cards that end on the same line; a lone
@@ -1318,7 +1347,7 @@ let draw_card_rows ~ko ~width ~tone entries =
   let row pair =
     (* No row of an account card can be selected. *)
     let cards =
-      List.map (fun entry -> (account_card ~tone ~layout entry, Masc_tui_card.Unselectable)) pair
+      List.map (fun entry -> (account_card ~ko ~tone ~layout entry, Masc_tui_card.Unselectable)) pair
     in
     let columns =
       match cards with
@@ -1338,12 +1367,12 @@ let draw_cards ~ko ~show_limit_exhausted ~width groups =
   let draw_group (section, entries) =
     match section with
     | At_limit_or_exhausted when not show_limit_exhausted ->
-        hidden_limit_heading ~width section entries
+        hidden_limit_heading ~ko ~width section entries
     | At_limit_or_exhausted | Other_windows | No_windows ->
         let tone = section_tone section in
         let silent, listed = split_silent section entries in
-        group_heading ~width section entries
-        @ blocks [ draw_card_rows ~ko ~width ~tone listed; draw_silent_accounts ~width ~tone silent ]
+        group_heading ~ko ~width section entries
+        @ blocks [ draw_card_rows ~ko ~width ~tone listed; draw_silent_accounts ~ko ~width ~tone silent ]
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -1409,7 +1438,7 @@ let error_visible_prefix ~width text =
       find next in
   find (min length (4 * (max 1 width + 1)))
 
-let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~runtimes
+let section_with ~ko ~draw ~bound ~(providers : Types.overview_providers_reading) ~runtimes
     ~account_emails ~now ~width ~rows =
   let detail text =
     let text = Terminal_text.single_line text in
@@ -1421,23 +1450,25 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
   match providers with
   | Types.Providers_unread -> None
   | Types.Providers_failed reason ->
+      let label = if ko then "사용량 정보 없음: " else "usage data unavailable: " in
       Some
         { lines =
-            [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.text_status Masc_tui_theme.Warn)
-                (detail reason) Ansi.reset
+            [ Printf.sprintf " %s%s%s%s" (Theme.text_status Masc_tui_theme.Warn)
+                label (detail reason) Ansi.reset
             ]
         }
   | Types.Providers_read { Masc.Tui_decode_usage.puws_since = _; puws_accounts } ->
       let rows =
-        draw (bound (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts)))
+        draw (bound (drawn_groups ~ko ~now ~account_emails (plan ~now ~runtimes puws_accounts)))
       in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
       let runtimes_note =
         match (runtimes : Types.overview_quota_reading) with
         | Types.Quota_failed reason ->
-            [ Printf.sprintf " %sexhausted tags unread: %s%s" (Theme.text_status Masc_tui_theme.Warn)
-                (detail reason) Ansi.reset
+            let label = if ko then "소진 태그 미조회: " else "exhausted tags unread: " in
+            [ Printf.sprintf " %s%s%s%s" (Theme.text_status Masc_tui_theme.Warn)
+                label (detail reason) Ansi.reset
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
       in
@@ -1446,12 +1477,18 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       let emails_note =
         match (account_emails : Types.overview_account_emails_reading) with
         | Types.Account_emails_failed reason ->
-            [ Printf.sprintf " %saccount emails unread: %s%s" (Theme.text_status Masc_tui_theme.Warn)
-                (detail reason) Ansi.reset
+            let label = if ko then "계정 이메일 미조회: " else "account emails unread: " in
+            [ Printf.sprintf " %s%s%s%s" (Theme.text_status Masc_tui_theme.Warn)
+                label (detail reason) Ansi.reset
             ]
         | Types.Account_emails_read { unreadable_rows; _ } when unreadable_rows > 0 ->
-            [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" (Theme.text_status Masc_tui_theme.Warn)
-                unreadable_rows Ansi.reset
+            [ if ko then
+                Printf.sprintf " %s계정 이메일: 이 빌드에서 읽지 못한 %d행%s"
+                  (Theme.text_status Masc_tui_theme.Warn) unreadable_rows Ansi.reset
+              else
+                Printf.sprintf " %saccount emails: %s this build cannot read%s"
+                  (Theme.text_status Masc_tui_theme.Warn)
+                  (Masc_tui_message_layout.count_noun unreadable_rows "row") Ansi.reset
             ]
         | Types.Account_emails_unread | Types.Account_emails_read _ -> []
       in
@@ -1470,11 +1507,12 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       let summary_width = max 1 (width - String.length summary_indent) in
       let metrics =
         Masc_tui_message_layout.pack_clauses ~max_cells:summary_width
-          [ metric "Accounts" (string_of_int counts.accounts)
-          ; metric "Reporting" (string_of_int counts.reporting)
+          [ metric (if ko then "계정" else "Accounts") (string_of_int counts.accounts)
+          ; metric (if ko then "보고됨" else "Reporting") (string_of_int counts.reporting)
           ; metric
               ~tone:(if counts.at_limit > 0 then Theme.text_status Masc_tui_theme.Bad else "")
-              "At limit (reported)" (string_of_int counts.at_limit)
+              (if ko then "한도 도달 (보고)" else "At limit (reported)")
+              (string_of_int counts.at_limit)
           ; metric
               ~tone:(match counts.exhausted with
                 | Exhausted_unknown Masc_tui_value.Unknown.Read_failed ->
@@ -1483,15 +1521,15 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
                     (Masc_tui_value.Unknown.Unread | Masc_tui_value.Unknown.Unreported) -> ""
                 | Exhausted_accounts count when count > 0 -> Theme.text_status Masc_tui_theme.Bad
                 | Exhausted_accounts _ -> "")
-              "Exhausted (observed)" exhausted
+              (if ko then "소진됨 (관측)" else "Exhausted (observed)") exhausted
           ]
         |> List.map (fun line -> summary_indent ^ line)
       in
       let legend =
         Masc_tui_message_layout.pack_clauses ~max_cells:summary_width
-          [ attention_mark ^ ": at limit or exhausted"
-          ; "Bar: used at last report"
-          ; "other use does not block model calls" ]
+          [ attention_mark ^ (if ko then ": 한도 도달 또는 소진" else ": at limit or exhausted")
+          ; (if ko then "막대: 마지막 보고 사용량" else "Bar: used at last report")
+          ; (if ko then "기타 사용량은 모델 호출을 막지 않음" else "other use does not block model calls") ]
         |> List.map (fun line -> summary_indent ^ Theme.recede () ^ line ^ Ansi.reset)
       in
       let summary = metrics @ legend in
@@ -1499,7 +1537,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       match rows with
       | [] ->
           Some
-            { lines = summary @ [ " no usage data" ] @ notes
+            { lines = summary @ [ if ko then " 사용량 데이터 없음" else " no usage data" ] @ notes
             }
       | _ :: _ ->
           Some
@@ -1523,12 +1561,14 @@ let bound_groups ~width ~rows groups =
   List.map (fun (section, entries) -> section, List.map bound_entry entries) groups
 
 let section ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
-  section_with ~draw:(draw_groups ~show_limit_exhausted ~width) ~bound:(bound_groups ~width ~rows)
+  section_with ~ko:false ~draw:(draw_groups ~ko:false ~show_limit_exhausted ~width)
+    ~bound:(bound_groups ~width ~rows)
     ~providers ~runtimes ~account_emails ~now ~width ~rows
 
 let section_cards ~ko ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
   let draw =
     if cards_fit ~width then draw_cards ~ko ~show_limit_exhausted ~width
-    else draw_groups ~show_limit_exhausted ~width
+    else draw_groups ~ko ~show_limit_exhausted ~width
   in
-  section_with ~draw ~bound:(bound_groups ~width ~rows) ~providers ~runtimes ~account_emails ~now ~width ~rows
+  section_with ~ko ~draw ~bound:(bound_groups ~width ~rows)
+    ~providers ~runtimes ~account_emails ~now ~width ~rows

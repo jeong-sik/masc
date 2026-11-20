@@ -239,6 +239,36 @@ let test_the_link_host_decides_the_address_advice () =
      "0.0.0.0:8935", Card.Wildcard_bind; "[::]:8935", Card.Wildcard_bind]
 ;;
 
+let test_korean_play_card_localizes_copy_and_keeps_link_isolated () =
+  let refused =
+    Card.make_for ~ko:true ~project:(fun _ -> None) ~name:"minsu" ~expires_at:"15m"
+      ~link:"javascript:alert(1)"
+  in
+  check bool "refused link error is localized in Korean" true
+    (match refused with
+     | Error msg -> contains ~sub:"초대 링크" msg
+     | Ok _ -> false);
+  let card = card () in
+  let notice = Card.issued_notice ~ko:true card ~retained:true in
+  check bool "Korean notice includes localized phrase" true (contains ~sub:"플레이 초대" notice);
+  check bool "Korean notice never carries the link" false (contains ~sub:"play#" notice);
+  let drawn = Card.draw ~ko:true card ~width:plenty ~rows:plenty in
+  check bool "Korean card heading is localized" true
+    (List.exists
+       (function
+         | Card.Heading text -> contains ~sub:"만료" text
+         | Card.Advice _ | Card.Link_row _ | Card.Qr_row _ | Card.Note _
+         | Card.Qr_needs _ | Card.Blank -> false)
+       drawn);
+  check bool "Korean card advice is localized" true
+    (List.exists
+       (function
+         | Card.Advice text -> contains ~sub:"한 사람에게만" text
+         | Card.Heading _ | Card.Link_row _ | Card.Qr_row _ | Card.Note _
+         | Card.Qr_needs _ | Card.Blank -> false)
+       drawn)
+;;
+
 let () =
   run "Masc_tui_play_card"
     [ ( "card"
@@ -254,6 +284,8 @@ let () =
             test_a_name_from_the_wire_is_drawn_safe
         ; test_case "the issue notice never carries the link" `Quick
             test_the_issue_notice_never_carries_the_link
+        ; test_case "Korean play card localizes copy and keeps link isolated" `Quick
+            test_korean_play_card_localizes_copy_and_keeps_link_isolated
         ] )
     ]
 ;;

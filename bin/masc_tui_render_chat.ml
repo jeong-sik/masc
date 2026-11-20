@@ -1313,7 +1313,7 @@ let tool_outcome_label_with_call ~ko outcome association =
       else "RESULT IN CALL LOG · NOT SEEN IN TURN"
   | (Keeper_chat_transcript.Never_returned, (Call_log_not_loaded | (Call_log_loading | (Call_execution_unrecorded | (Call_execution_missing | (Call_log_unavailable _ | Call_log_kept_back _ | (Call_execution_coverage_gap _ | Call_execution_ambiguous _)))))))
   | ((Keeper_chat_transcript.Started | (Keeper_chat_transcript.Awaiting_result | (Keeper_chat_transcript.Returned | (Keeper_chat_transcript.Native_running | (Keeper_chat_transcript.Native_ended | (Keeper_chat_transcript.Native_failed | (Keeper_chat_transcript.Failed | Keeper_chat_transcript.Outcome_unrecorded))))))), _)
-  | (Never_returned, Call_execution_exact _) -> tool_outcome_label outcome
+  | (Never_returned, Call_execution_exact _) -> tool_outcome_label ~ko outcome
 
 
 let tool_outcome_tone_with_call outcome association =
@@ -1338,7 +1338,7 @@ let keeper_message_tool_activity_details state ~keeper_name
     | Call_execution_exact call ->
         let schedule =
           match call.kc_schedule with
-          | Some schedule -> keeper_call_schedule_label schedule
+          | Some schedule -> keeper_call_schedule_label ~ko schedule
           | None -> say "기록되지 않음" "not recorded"
         in
         (* An Execute result read against the schema its descriptor
@@ -1563,13 +1563,15 @@ let tool_result_preview (activity : Keeper_chat_transcript.tool_activity) value 
 
 
 let tool_result_rows state ~keeper_name ~max_cells projection =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let rows =
     List.concat_map
       (fun (activity : Keeper_chat_transcript.tool_activity) ->
         let association = keeper_call_association state ~keeper_name activity in
         let result_state = Call_evidence.result_state activity.outcome association in
         let marker = Call_evidence.result_marker result_state in
-        let status = Call_evidence.result_label result_state in
+        let status = Call_evidence.result_label ~ko result_state in
         (* The name is the row's subject and is drawn whole (RFC
            tui-one-screen-grammar section 5.5): a name cut at a fixed width
            reads as a different tool, and two long names that share a prefix
@@ -1578,8 +1580,6 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
           Masc_tui_keeper_chat_projection.terminal_safe_text activity.tool_name
           |> String.trim
         in
-        let ko = state.ui_language = Lang_ko in
-        let say korean english = if ko then korean else english in
         let prefix = Printf.sprintf "%s %s · %s" marker name status in
         let preview, unavailable =
           match association with
@@ -1676,7 +1676,13 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
       projection.Keeper_chat_transcript.activities
   in
   if projection.omitted_steps = 0 then rows
-  else rows @ [Printf.sprintf "(%d tool steps omitted from transcript)" projection.omitted_steps]
+  else
+    rows
+    @ [ (if ko then
+           Printf.sprintf "(대화 기록에서 도구 단계 %d건 생략됨)" projection.omitted_steps
+         else
+           Printf.sprintf "(%s omitted from transcript)"
+             (Message_layout.count_noun projection.omitted_steps "tool step")) ]
 
 
 (* One reading of a Gate row's fold, for the two questions that need it: what
@@ -1707,7 +1713,7 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
     | Tools_results ->
         tool_result_rows state ~keeper_name ~max_cells:max_line_cells projection
     | Tools_compact | Tools_full ->
-        Keeper_chat_diff.rows ~mode ~max_line_cells
+        Keeper_chat_diff.rows ~ko:(state.ui_language = Lang_ko) ~mode ~max_line_cells
           ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
           file_change_index projection
   in
@@ -5216,11 +5222,12 @@ let render_keeper_message (state : state) =
      | None -> ());
     (if state.msg_loaded_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-         (Printf.sprintf
-            (if state.ui_language = Lang_ko then
-               "  저장된 행 %d개를 읽지 못해 표시하지 않음"
-             else "  %d saved row(s) could not be read and are not shown")
-            state.msg_loaded_dropped));
+         (if state.ui_language = Lang_ko then
+            Printf.sprintf "  저장된 행 %d개를 읽지 못해 표시하지 않음" state.msg_loaded_dropped
+          else
+            Printf.sprintf "  %s could not be read and %s not shown"
+              (Message_layout.count_noun state.msg_loaded_dropped "saved row")
+              (if state.msg_loaded_dropped = 1 then "is" else "are")));
     (match state.msg_memory_error with
      | None -> ()
      | Some (Request_failed _) ->
@@ -5231,11 +5238,12 @@ let render_keeper_message (state : state) =
          kept_back_line ~request:Masc_tui_types.Kept_request.Keeper_memory_read refusal);
     (if state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-         (Printf.sprintf
-            (if state.ui_language = Lang_ko then
-               "  기억 기록 행 %d개를 읽지 못해 표시하지 않음"
-             else "  %d memory journal row(s) could not be read and are not shown")
-            state.msg_memory_dropped));
+         (if state.ui_language = Lang_ko then
+            Printf.sprintf "  기억 기록 행 %d개를 읽지 못해 표시하지 않음" state.msg_memory_dropped
+          else
+            Printf.sprintf "  %s could not be read and %s not shown"
+              (Message_layout.count_noun state.msg_memory_dropped "memory journal row")
+              (if state.msg_memory_dropped = 1 then "is" else "are")));
     (* Where the pane is, when it is not at the newest row. The distance and
        the key back are what the footer used to carry seventh of nine hints,
        and the footer drops hints from its tail: on a narrow pane the one
@@ -5257,12 +5265,11 @@ let render_keeper_message (state : state) =
             ui_text state ~ko:"  \xe2\x86\x93 가장 최근 줄로 돌아옴"
               ~en:"  \xe2\x86\x93 back at the newest row"
           else if state.msg_older_exist then
-            Printf.sprintf
-              (if state.ui_language = Lang_ko then
-                 "  \xe2\x86\x91 %d줄 위를 읽는 중 \xc2\xb7 Ctrl-E 로 가장 최근 줄"
-               else
-                 "  \xe2\x86\x91 reading back %d row(s) \xc2\xb7 Ctrl-E returns to the newest")
-              scroll
+            if state.ui_language = Lang_ko then
+              Printf.sprintf "  \xe2\x86\x91 %d줄 위를 읽는 중 \xc2\xb7 Ctrl-E 로 가장 최근 줄" scroll
+            else
+              Printf.sprintf "  \xe2\x86\x91 reading back %s \xc2\xb7 Ctrl-E returns to the newest"
+                (Message_layout.count_noun scroll "row")
           else
             ui_text state
               ~ko:"  \xe2\x86\x91 이 대화의 처음 \xc2\xb7 Ctrl-E 로 가장 최근 줄"

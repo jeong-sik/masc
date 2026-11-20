@@ -210,38 +210,49 @@ let paste ~text = function
   | Directory (form,browser) -> Directory (Form.insert_text ~text form,browser)
   | Path form -> Path (Form.insert_text ~text form)
   | Binding (preview,form) -> Binding (preview,Form.insert_text ~text form)
-let hints = function
-  | Catalog browser -> Browser.hints browser
-  | Pending _ | Catalog_pending _ -> "Esc:cancel request"
-  | Path _ | Binding _ | Directory _ -> "Tab:field  Left/Right:choice  Ctrl-E:items  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
-let lines_with_selection ?(height=24) ?(render=fun line -> [line]) state =
+let hints ?(ko = false) = function
+  | Catalog browser -> Browser.hints ~ko browser
+  | Pending _ | Catalog_pending _ -> if ko then "Esc:요청 취소" else "Esc:cancel request"
+  | Path _ | Binding _ | Directory _ ->
+      if ko then "Tab:필드  ←/→:선택  Ctrl-E:항목  Ctrl-U:해제  Ctrl-S:검토  Esc:취소"
+      else "Tab:field  Left/Right:choice  Ctrl-E:items  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
+let lines_with_selection ?(ko = false) ?(height=24) ?(render=fun line -> [line]) state =
+  let say korean english = if ko then korean else english in
   let plain lines = List.map (fun line -> false, line) (List.concat_map render lines) in
   let render_selected rows =
     List.concat_map (fun (selected, line) ->
       List.map (fun row -> selected, row) (render line)) rows
   in
   match state with
-  | Catalog browser -> Browser.lines_with_selection ~height ~render browser
-  | Catalog_pending (_,path,_,_) -> plain ["Reading local packages · Esc:cancel";
-      "Folder: " ^ (match path with None -> "workspace root" | Some path -> path)]
-  | Directory (form,_) -> plain ["Open workspace folder"] @ render_selected (Form.lines_with_selection form)
-  | Pending (_,path,_) -> plain ["Reading package execution · Esc:cancel";"Manifest: " ^ path]
-  | Path form -> plain ["Install Add-on: manifest path on the connected server"] @ render_selected (Form.lines_with_selection form)
+  | Catalog browser -> Browser.lines_with_selection ~ko ~height ~render browser
+  | Catalog_pending (_,path,_,_) ->
+      plain [say "로컬 패키지 읽는 중 · Esc:취소" "Reading local packages · Esc:cancel";
+             say "폴더: " "Folder: " ^ (match path with None -> say "워크스페이스 루트" "workspace root" | Some path -> path)]
+  | Directory (form,_) ->
+      plain [say "워크스페이스 폴더 열기" "Open workspace folder"]
+      @ render_selected (Form.lines_with_selection ~ko form)
+  | Pending (_,path,_) ->
+      plain [say "패키지 실행 정보 읽는 중 · Esc:취소" "Reading package execution · Esc:cancel";
+             say "매니페스트: " "Manifest: " ^ path]
+  | Path form ->
+      plain [say "플러그인 설치: 연결된 서버의 매니페스트 경로" "Install Add-on: manifest path on the connected server"]
+      @ render_selected (Form.lines_with_selection ~ko form)
   | Binding (preview,form) ->
       let execution = match preview.execution with
-        | Host_process -> ["Runs as a host process."]
+        | Host_process -> [say "호스트 프로세스로 실행됩니다." "Runs as a host process."]
         | Container {runtime;image_name;inspection} ->
-            ["Runtime: " ^ (match runtime with Masc.Lane_addon_types.Docker -> "Docker" | Masc.Lane_addon_types.Apple_container -> "Apple container");
-             "Image: " ^ image_name;match inspection with
-              | Available digest -> "Available: " ^ digest
-              | Unverified detail -> "Image unverified: " ^ detail] in
-      let role = "Role: " ^ Browser.category_label preview.role in
+            [say "런타임: " "Runtime: " ^ (match runtime with Masc.Lane_addon_types.Docker -> "Docker" | Masc.Lane_addon_types.Apple_container -> "Apple container");
+             say "이미지: " "Image: " ^ image_name;match inspection with
+              | Available digest -> say "사용 가능: " "Available: " ^ digest
+              | Unverified detail -> say "이미지 미검증: " "Image unverified: " ^ detail] in
+      let role = say "역할: " "Role: " ^ Browser.category_label ~ko preview.role in
       let service = match preview.service with
-        | Mcp_tools -> "Worker service: MCP tools"
-        | Browser_service -> "Worker service: browser" in
-      plain (["Install " ^ preview.title ^ " · revision " ^ preview.revision;
-       "Manifest: " ^ preview.path; role; service] @ execution @
-       ["Preview does not start a worker. Enter after review creates a local TOML draft."])
-      @ render_selected (Form.lines_with_selection form)
+        | Mcp_tools -> say "워커 서비스: MCP 도구" "Worker service: MCP tools"
+        | Browser_service -> say "워커 서비스: 브라우저" "Worker service: browser" in
+      plain ([say "설치: " "Install " ^ preview.title ^ say " · 리비전 " " · revision " ^ preview.revision;
+       say "매니페스트: " "Manifest: " ^ preview.path; role; service] @ execution @
+       [say "미리보기에서는 워커를 시작하지 않습니다. 검토 후 Enter를 누르면 로컬 TOML 초안을 만듭니다."
+          "Preview does not start a worker. Enter after review creates a local TOML draft."])
+      @ render_selected (Form.lines_with_selection ~ko form)
 
-let lines ?height ?render state = List.map snd (lines_with_selection ?height ?render state)
+let lines ?ko ?height ?render state = List.map snd (lines_with_selection ?ko ?height ?render state)

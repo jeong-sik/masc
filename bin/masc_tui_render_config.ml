@@ -2044,7 +2044,8 @@ let render_config_models (state : state) =
   let content_height = max 1 (raw_content_height - List.length sheet_lines) in
   (match state.runtime_model_form with
    | Some form ->
-       let lines = Masc_tui_model_form.rows_with_selection ~input_locked:(runtime_form_input_locked state)
+       let lines = Masc_tui_model_form.rows_with_selection ~ko:(state.ui_language = Lang_ko)
+           ~input_locked:(runtime_form_input_locked state)
            ~width:(max 1 (framed_inner_width cols - 2)) ~height:content_height form in
        List.iter (fun (selected, line) ->
          let text = "  " ^ Terminal_text.single_line line in

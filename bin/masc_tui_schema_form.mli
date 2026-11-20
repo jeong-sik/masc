@@ -38,11 +38,11 @@ val named_alternatives : Yojson.Safe.t -> (string * Yojson.Safe.t) list option
     by alternative. *)
 val insert_text : text:string -> t -> t
 val handle : key:string -> t -> (event, string) result
-val lines : ?show_description:bool -> t -> string list
+val lines : ?ko:bool -> ?show_description:bool -> t -> string list
 (** Render the selected field and its available controls. When
     [show_description] is true, also render the selected field's schema
     description; it defaults to false. *)
-val lines_with_selection : ?show_description:bool -> t -> (bool * string) list
+val lines_with_selection : ?ko:bool -> ?show_description:bool -> t -> (bool * string) list
 (** Same as {!lines}, pairing each row with whether it is the focused field or
     alternative row. *)
 val value : t -> (Yojson.Safe.t, string) result

@@ -35,6 +35,7 @@ val associate :
     missing candidates answer [No_recorded_change]. *)
 
 val rows :
+  ?ko:bool ->
   mode:Masc_tui_keeper_chat_transcript.tool_projection_mode ->
   max_line_cells:int ->
   ?activity_details:(

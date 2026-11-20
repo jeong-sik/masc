@@ -415,7 +415,7 @@ let column_legend_for ~ko =
         ; grid_now_line; col Lag_bar_short_column; col Digest_column; col Gap_column ]
     , if ko then
         Printf.sprintf
-          "기억 뷰: 턴 흐름, Librarian 마지막 처리 결과(기억 행이 없으면 %s), 목록 중 가장 뒤처진 키퍼 대비 안 읽은 턴 막대, \
+          "기억 뷰: 턴 흐름, 기억 처리 마지막 결과(기억 행이 없으면 %s), 목록 중 가장 뒤처진 키퍼 대비 안 읽은 턴 막대, \
            마지막 요약 이후 경과(최초 요약 전은 %s), 요청이 건너뛴 아톰 수 · %s는 서버 미측정 값"
           (word No_data_word) Masc_tui_theme.Glyph.no_value
           Masc_tui_keeper_age_ladder.unmeasured_mark

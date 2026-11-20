@@ -699,6 +699,7 @@ val draw_list_idle :
     reading leaves are blank. *)
 
 val draw_ask_question :
+  ?ko:bool ->
   Buffer.t ->
   int ->
   text_entry:Masc_tui_types.ask_text_entry option ->
@@ -711,7 +712,7 @@ val draw_ask_question :
     A compact frame can defer this construction without retaining mutable UI
     state or changing the full answer reader's data and action authority. *)
 
-val draw_ask_context : Buffer.t -> int -> row:Masc.Tui_decode_asks.ask_row -> unit
+val draw_ask_context : ?ko:bool -> Buffer.t -> int -> row:Masc.Tui_decode_asks.ask_row -> unit
 
 val draw_ask_origin : Buffer.t -> int -> Masc_tui_types.state -> unit
 (** Explicit recorded-question diagnostics, shared by browsing and the
@@ -872,7 +873,7 @@ val fusion_run_state_text :
     that failed. *)
 
 val fusion_run_progress_text :
-  Masc.Tui_decode_fusion.fusion_run_stage -> string
+  ?ko:bool -> Masc.Tui_decode_fusion.fusion_run_stage -> string
 
 val sidebar_row_lead_cells : int
 (** What a list index spends before a row's label: the caret the cursor wears
@@ -900,7 +901,7 @@ val file_change_matches_path :
 val resolve_change_context :
   Masc_tui_types.state -> path_opt:string option -> change_context
 
-val build_change_context_lines : cols:int -> change_context -> string list
+val build_change_context_lines : ?ko:bool -> cols:int -> change_context -> string list
 
 val repository_changes_diff_context_visible :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> path:string -> bool
@@ -1011,6 +1012,7 @@ val context_split_width : int -> int
     estimated token figure; recorded input and observed serialization;
     history reach; recent turns. *)
 val context_composition_lines :
+  ?ko:bool ->
   ?runtime_details:(string -> string list) ->
   cols:int ->
   turn_back:int ->

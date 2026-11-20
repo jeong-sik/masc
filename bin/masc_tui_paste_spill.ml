@@ -38,7 +38,9 @@ let of_paste ~now_iso ~nonce text =
 (* Sizes an operator can act on: lines to recognise what they pasted, bytes
    because a line count says nothing about one long line. *)
 let described spill =
-  Printf.sprintf "%d line(s), %d bytes" spill.lines spill.bytes
+  Printf.sprintf "%d %s, %d %s"
+    spill.lines (if spill.lines = 1 then "line" else "lines")
+    spill.bytes (if spill.bytes = 1 then "byte" else "bytes")
 
 let draft_line spill =
   Printf.sprintf "[pasted %s \xe2\x86\x92 %s]" (described spill) spill.file_name

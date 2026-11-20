@@ -565,7 +565,8 @@ let repository_changes_geometry (state : state) ~cols ~budget ~cursor =
   let changes = Option.fold ~none:[] ~some:(fun snapshot -> snapshot.rcs_changes)
       state.repository_changes in
   let context_of (row : Tui_decode.repository_change) =
-    build_change_context_lines ~cols (resolve_change_context state ~path_opt:(Some row.rc_path))
+    build_change_context_lines ~ko:(state.ui_language = Lang_ko) ~cols
+      (resolve_change_context state ~path_opt:(Some row.rc_path))
     |> List.map Option.some in
   let selected = Option.fold ~none:[] ~some:context_of (List.nth_opt changes cursor) in
   let error_rows =
@@ -637,17 +638,20 @@ let same_repository_change_authority left right =
    from the upstream it tracks. Ref names cannot hold control bytes, but the
    text is still passed through the terminal-safe filter like every other
    server string in this title. *)
-let repository_branch_label (branch : Masc.Tui_decode.repository_branch) =
+let repository_branch_label ~ko (branch : Masc.Tui_decode.repository_branch) =
   match branch with
-  | Masc.Tui_decode.Repository_detached -> "detached HEAD"
+  | Masc.Tui_decode.Repository_detached ->
+      if ko then "분리된 HEAD" else "detached HEAD"
   | Masc.Tui_decode.Repository_on_branch { name; upstream } ->
       let name = Keeper_chat.terminal_safe_text name in
       (match upstream with
        | Masc.Tui_decode.Repository_no_upstream ->
-           Printf.sprintf "%s (no upstream)" name
+           if ko then Printf.sprintf "%s (업스트림 없음)" name
+           else Printf.sprintf "%s (no upstream)" name
        | Masc.Tui_decode.Repository_upstream_gone upstream ->
-           Printf.sprintf "%s (upstream %s gone)" name
-             (Keeper_chat.terminal_safe_text upstream)
+           let upstream = Keeper_chat.terminal_safe_text upstream in
+           if ko then Printf.sprintf "%s (업스트림 %s 사라짐)" name upstream
+           else Printf.sprintf "%s (upstream %s gone)" name upstream
        | Masc.Tui_decode.Repository_tracking { ahead; behind; _ } ->
            Printf.sprintf "%s ↑%d ↓%d" name ahead behind)
 
@@ -701,7 +705,7 @@ let render_repository_changes (state : state) =
           ~readings:
             [ (match state.repository_changes with
                | Some snapshot ->
-                   repository_branch_label snapshot.Masc.Tui_decode.rcs_branch
+                   repository_branch_label ~ko snapshot.Masc.Tui_decode.rcs_branch
                | None ->
                    if git_loading then
                      progress_inline ~ko ~now ?started_at:git_started
@@ -1132,13 +1136,14 @@ let render_changes_list (state : state) =
   let budget_note =
     match state.changes with
     | Some s when s.Masc.Tui_decode.fcs_over_budget > 0 ->
+        let count = s.Masc.Tui_decode.fcs_over_budget in
         Some
-          (Printf.sprintf
-             (if state.ui_language = Lang_ko then
-                "  변경 %d건은 도구 호출 기록의 한도를 넘어 글이 디스크에 없음"
-              else
-                "  %d change(s) outgrew the tool-call log's inline budget; their text is not on disk")
-             s.Masc.Tui_decode.fcs_over_budget)
+          (if state.ui_language = Lang_ko then
+             Printf.sprintf "  변경 %d건은 도구 호출 기록의 한도를 넘어 글이 디스크에 없음" count
+           else
+             Printf.sprintf
+               "  %s outgrew the tool-call log's inline budget; their text is not on disk"
+               (Message_layout.count_noun count "change"))
     | Some _ | None -> None
   in
   (match budget_note with
@@ -1205,11 +1210,11 @@ let render_changes_list (state : state) =
               (ui_text state ~ko:"변경 기록 읽는 중" ~en:"reading file changes"))
      | Page_unread ->
          box_line_styled buf cols ~style:(Theme.recede ())
-           (ui_text state ~ko:"  (키퍼 화면에서 Keeper 를 고른 뒤 r 누르기)"
+           (ui_text state ~ko:"  (키퍼 화면에서 키퍼를 고른 뒤 r 누르기)"
               ~en:"  (pick a keeper on the Keepers surface, then press r)")
      | Page_empty ->
          box_line_styled buf cols ~style:(Theme.recede ())
-           (ui_text state ~ko:"  (이 Keeper 가 이 기간에 쓴 파일 없음)"
+           (ui_text state ~ko:"  (이 키퍼가 이 기간에 쓴 파일 없음)"
               ~en:"  (this keeper wrote no files in the window)"));
     for _ = 1 to content_height - 1 do
       box_empty buf cols

@@ -1450,12 +1450,15 @@ type lane_run_prepared_field =
 let json_preview_lines ~width text =
   document_json ~width text |> List.map (fun line -> Ansi.reset, line)
 
-let lane_run_payload_lines ~width json =
+let lane_run_payload_lines ?(ko = false) ~width json =
   let fence = fenced_document_text ~language:"json" in
   let prepare_document value =
     let full_text = Yojson.Safe.pretty_to_string value in
     let document = fence full_text in
-    let notice = Printf.sprintf "… truncated, total %d bytes" (String.length full_text) in
+    let notice =
+      if ko then Printf.sprintf "… 잘림, 전체 %d바이트" (String.length full_text)
+      else Printf.sprintf "… truncated, total %d bytes" (String.length full_text)
+    in
     { full_text; document; notice }
   in
   let minimum_document_bytes prepared =
@@ -1482,7 +1485,10 @@ let lane_run_payload_lines ~width json =
   in
   match json with
   | `Assoc (_ :: _ as fields) ->
-    let omitted count = Printf.sprintf "… %d more field(s) not rendered" count in
+    let omitted count =
+      if ko then Printf.sprintf "… 필드 %d개 더 있음 (표시 생략)" count
+      else Printf.sprintf "… %d more %s not rendered" count (if count = 1 then "field" else "fields")
+    in
     let fields =
       List.mapi
         (fun index (name, value) ->
@@ -1844,7 +1850,7 @@ let lane_run_payload_availability_lines ~ko ~width availability payload =
   match availability with
   | Masc.Exact_lane_run_registry.Available ->
     (match payload with
-     | Some value -> lane_run_payload_lines ~width value
+     | Some value -> lane_run_payload_lines ~ko ~width value
      | None ->
        [ Theme.warn ()
        , if ko then "원문 상태 불일치: 사용 가능한 원문 필드가 없습니다"

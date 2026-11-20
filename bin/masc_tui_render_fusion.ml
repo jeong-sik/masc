@@ -26,7 +26,7 @@ let fusion_step = "Fusion"
 let fusion_run_summary ~ko run =
   match run.fur_status with
   | Fusion_running ->
-      ((Theme.accent ()), fusion_run_progress_text run.fur_stage)
+      ((Theme.accent ()), fusion_run_progress_text ~ko run.fur_stage)
   | Fusion_completed ->
       (match run.fur_decision, run.fur_summary with
        | Some decision, Some summary ->
@@ -656,20 +656,26 @@ let fusion_tool_event_lines ~ko ~width ~frame_width = function
 
 let fusion_tool_trace_uncached ~ko ~width ~frame_width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
       let coverage =
+        let actors = List.length trace.ftt_observed_actors in
         if trace.ftt_complete
         then
           ( Theme.ok ()
-          , Printf.sprintf
-              (if ko then "  추적 범위: AGENT_CORE 참여자 %d명 전체 수집 완료"
-               else "  Coverage: complete across %d AGENT_CORE actor(s)")
-              (List.length trace.ftt_observed_actors) )
+          , if ko then
+              Printf.sprintf "  추적 범위: AGENT_CORE 참여자 %d명 전체 수집 완료" actors
+            else
+              Printf.sprintf "  Coverage: complete across %s"
+                (Message_layout.count_noun actors "AGENT_CORE actor") )
         else
+          let gaps = List.length trace.ftt_gaps in
           ( Theme.warn ()
-          , Printf.sprintf
-              (if ko then "  추적 범위: 참여자 %d명 부분 수집 (누락 이벤트 %d건, 공백 %d건)"
-               else "  Coverage: partial across %d actor(s) (%d dropped event(s), %d gap(s))")
-              (List.length trace.ftt_observed_actors)
-              trace.ftt_dropped_events (List.length trace.ftt_gaps) )
+          , if ko then
+              Printf.sprintf "  추적 범위: 참여자 %d명 부분 수집 (누락 이벤트 %d건, 공백 %d건)"
+                actors trace.ftt_dropped_events gaps
+            else
+              Printf.sprintf "  Coverage: partial across %s (%s, %s)"
+                (Message_layout.count_noun actors "actor")
+                (Message_layout.count_noun trace.ftt_dropped_events "dropped event")
+                (Message_layout.count_noun gaps "gap") )
       in
       let observed =
         match trace.ftt_observed_actors with
@@ -792,7 +798,8 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
              | Fusion_panel_answered answer ->
                  [ ( (Theme.ok ())
                    , Printf.sprintf
-                       "  Panel %d [answered] %s  (%d in / %d out)"
+                       (if ko then "  패널 %d [응답] %s  (입력 %d / 출력 %d)"
+                        else "  Panel %d [answered] %s  (%d in / %d out)")
                        (index + 1)
                        (Terminal_text.single_line answer.fpa_model)
                        answer.fpa_input_tokens answer.fpa_output_tokens )
@@ -801,11 +808,13 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                      answer.fpa_answer
              | Fusion_panel_failed failure ->
                  [ ( (Theme.bad ())
-                   , Printf.sprintf "  Panel %d [failed] %s  [%s]"
+                   , Printf.sprintf
+                       (if ko then "  패널 %d [실패] %s  [%s]"
+                        else "  Panel %d [failed] %s  [%s]")
                        (index + 1)
                        (Terminal_text.single_line failure.fpf_model)
                        (Terminal_text.single_line failure.fpf_reason_code) )
-                 ; Ansi.dim, "    Token usage: not recorded"
+                 ; Ansi.dim, t "    토큰 사용량: 기록 없음" "    Token usage: not recorded"
                  ]
                  @ fusion_wrapped_block ~width ~indent:"    "
                      failure.fpf_reason_detail
@@ -828,8 +837,11 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
   let panel_chart_lines =
     if List.length panel_token_items >= 2 then
       ( Ansi.dim
-      , if failed = 0 then "  Model token distribution:"
-        else Printf.sprintf "  Model token distribution (measured %d/%d panels):"
+      , if failed = 0 then t "  모델별 토큰 분포:" "  Model token distribution:"
+        else
+          Printf.sprintf
+            (if ko then "  모델별 토큰 분포 (측정 %d/%d 패널):"
+             else "  Model token distribution (measured %d/%d panels):")
             answered (answered + failed) )
       :: List.map (fun row -> (Ansi.reset, row)) (Chart.distribution_bars ~width panel_token_items)
       @ [ Ansi.dim, "" ]
@@ -903,7 +915,8 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                    | Judge_node_synthesized synthesized ->
                        [ ( (Theme.info ())
                          , Printf.sprintf
-                             "  First %d [synthesized] %s  (%d in / %d out)"
+                             (if ko then "  1차 판정 %d [종합] %s  (입력 %d / 출력 %d)"
+                              else "  First %d [synthesized] %s  (%d in / %d out)")
                              (index + 1)
                              (Terminal_text.single_line node.fjn_identity)
                              synthesized.fjno_input_tokens
@@ -911,20 +924,23 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                        ]
                        @ fusion_labeled_markdown ~width
                            ~label:
-                             (Printf.sprintf "First %d %s" (index + 1)
+                             (Printf.sprintf
+                                (if ko then "1차 판정 %d %s" else "First %d %s")
+                                (index + 1)
                                 (Terminal_text.single_line node.fjn_identity))
                            synthesized.fjno_resolved_answer
                    | Judge_node_failed failed ->
                        let clock =
                          match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
-                         | true, _ -> "  (timed out)"
+                         | true, _ -> t "  (시간 초과)" "  (timed out)"
                          | false, Some seconds ->
                              Printf.sprintf "  (%.0fs)" seconds
                          | false, None -> ""
                        in
                        [ ( (Theme.bad ())
                          , Printf.sprintf
-                             "  First %d [failed] %s  [%s]%s"
+                             (if ko then "  1차 판정 %d [실패] %s  [%s]%s"
+                              else "  First %d [failed] %s  [%s]%s")
                              (index + 1)
                              (Terminal_text.single_line node.fjn_identity)
                              (Terminal_text.single_line failed.fjno_failure_code)
@@ -979,7 +995,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                 |> List.map (fun row -> prefix ^ row)
             in
             List.map (fun row -> Ansi.reset, "  " ^ row) wrapped)
-          (Masc_tui_fusion_seat_routes.lines routes)
+          (Masc_tui_fusion_seat_routes.lines ~ko routes)
   in
   [ Ansi.bold, t "  제목: " "  Title: " ^ Terminal_text.single_line evidence.fe_title ]
   @ detail_section_heading ~width
@@ -1068,7 +1084,7 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
        | Fusion_stage_completed | Fusion_stage_failed -> []
        | Fusion_stage_accepted | Fusion_stage_panel _ | Fusion_stage_judge _
        | Fusion_stage_computed _ | Fusion_stage_recording_evidence _ ->
-           [ Ansi.dim, say "  진행: " "  Progress: " ^ fusion_run_progress_text run.fur_stage ])
+           [ Ansi.dim, say "  진행: " "  Progress: " ^ fusion_run_progress_text ~ko run.fur_stage ])
     @ [ ( Ansi.reset
     , say "  구성: " "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )

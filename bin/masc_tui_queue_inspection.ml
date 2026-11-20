@@ -201,8 +201,11 @@ let peer_lines ~page_number { snapshot; next_sequence } =
       snapshot.queued_count (List.length snapshot.relations) in
   let coverage =
     if snapshot.source_redacted_count = 0 && snapshot.source_unverified_count = 0 then []
-    else [Printf.sprintf "%d source(s) redacted · %d unverified; relationships unknown"
-            snapshot.source_redacted_count snapshot.source_unverified_count] in
+    else
+      let redacted = snapshot.source_redacted_count in
+      [Printf.sprintf "%d %s redacted · %d unverified; relationships unknown"
+         redacted (if redacted = 1 then "source" else "sources")
+         snapshot.source_unverified_count] in
   let lines = List.map peer_relation_line snapshot.relations in
   let next = match next_sequence with
     | Some _ -> "> reads later queued requests"

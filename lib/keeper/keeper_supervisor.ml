@@ -134,17 +134,10 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)
   let entries = Keeper_registry.all ~base_path () in
-  (* R-A-6.c / A-7 wire-in: per-sweep snapshot invariant scan.
+  (* Per-sweep snapshot invariant scan over every registry entry.
 
-     Iter 14 audit (`docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md`)
-     identified that `keeper_invariant_check` was test-only — production
-     never invoked it.  Iter 16 (#14758) added [check_snapshot_invariants]
-     suitable for sweep-time scans.
-
-     Policy: WARN log per violation.  Intentionally NOT halting the sweep
-     or marking-dead — a violation here is a development/migration
-     signal, not a runtime emergency.  Metric/alarm escalation is a
-     follow-up. *)
+     Violations only log.  The scan does not halt the sweep or change keeper
+     state.  No metric or alarm is raised here. *)
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
        let vs =

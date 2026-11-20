@@ -1,18 +1,9 @@
 (** Closed sum type for the [reason] label of
-    [Otel_metric_store.metric_persistence_read_drops]. See RFC-0044
-    (`docs/rfc/RFC-0044-persistence-read-drop-typed.md`) for the full
-    motivation.
+    [Otel_metric_store.metric_persistence_read_drops].
 
-    This module is introduced in PR-1 of the RFC-0044 migration and is
-    intentionally inert: no caller in the tree references it yet.
-    PR-2 changes [Core.Safe_ops.report_persistence_read_drop] to
-    accept [t] instead of [string]; existing constants in
-    [safe_ops.ml] become wire-compatible aliases. PR-3 (optional)
-    introduces a [read_outcome] Result-style helper for opt-in
-    caller migration.
-
-    Adding a new variant here is, by construction, a compile
-    obligation for every callsite once PR-2 lands.
+    [Core.Safe_ops.report_persistence_read_drop] and its counted variant
+    take [t]. The approval queue load and install paths pass these
+    constructors.
 
     @stability Evolving
     @since 0.193.2 *)
@@ -59,11 +50,8 @@ type t =
           value that appears at a second site belongs in a
           constructor. *)
 
-(** Stable wire format. The strings produced here are byte-for-byte
-    compatible with the existing string constants in
-    [Core.Safe_ops] ([Read_drop_reason.List_dir_error],
-    [_entry_load_error], [_invalid_payload]) so swapping callers in
-    PR-2 does not change the Otel_metric_store label cardinality.
+(** Stable wire format. Each string is the value of the [reason] label,
+    so renaming one starts a new metric series.
 
     Wire mapping:
     - [List_dir_error] → ["list_dir_error"]

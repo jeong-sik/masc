@@ -1350,10 +1350,10 @@ let test_a_one_item_rest_says_whether_a_slot_was_silent () =
   let place = started_place () in
   close_turn place ~from:0 ~until:64;
   let value = booted ~lane:(declared [ fast; wide ]) place ~at:100.0 in
-  let question = question place value in
+  let shown = question place value in
   let rested =
     step "one slot sized, the other not in the walk" place value
-      (ended value 1 (No_answer { question; slots = sized Output_over_reserve }))
+      (ended value 1 (No_answer { question = shown; slots = sized Output_over_reserve }))
       ~state:"resting, holding: " ~fiber:"cancel"
   in
   check string "is a silent one-item rest" "lane, one item, a slot silent" (last_read_text rested);

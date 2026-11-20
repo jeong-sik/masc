@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """An open Keeper chat reads its history again when that Keeper's skill
 activation ledger changes, because the history carries the exact Skill
-evidence of its turns. Another Keeper's ledger change does not read it
-(RFC-0483 L5).
+evidence of its turns. Another Keeper's ledger change does not read it.
 
 The refresh cadence is pushed out of the test's lifetime, so every history
 read after the chat opens comes from an announcement.

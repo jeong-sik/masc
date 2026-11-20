@@ -494,10 +494,10 @@ let test_the_name_goes_before_the_mark_and_the_count () =
 (* The border's colour class follows focus. An unfocused card draws its
    border in the caller's border code. A focused card draws it in the
    caller's focused code, the border.focused token, and never in the other
-   (RFC tui-one-screen-grammar section 2, RFC-0459 section 3). The two codes
-   below are ones no other part of the card uses, so finding one in a row
-   means that row's border carried it. The body overflows, so the bottom edge
-   carries a count as well. *)
+   (RFC tui-one-screen-grammar section 2). The two codes below are ones no
+   other part of the card uses, so finding one in a row means that row's
+   border carried it. The body overflows, so the bottom edge carries a count
+   as well. *)
 let test_a_focused_card_borders_in_the_focus_token () =
   let caller_border = "\027[38;5;201m" and focused_border = "\027[38;5;45m" in
   let style =

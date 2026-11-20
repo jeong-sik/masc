@@ -224,10 +224,14 @@ let memory_input_lines ~ko ~cols ~unit reading =
     let measured = match unit with
       | Memory_usage.Tokens -> snapshot.tokens
       | Memory_usage.Bytes -> snapshot.bytes in
+    (* A figure the snapshot did not carry draws the not-reported mark (RFC
+       tui-one-screen-grammar 6.4), as the record count beside it says how
+       many turns were measured. *)
+    let not_reported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
     let avg, maximum, minimum, samples = match measured.distribution with
-      | None -> text "미보고" "unreported", text "미보고" "unreported", text "미보고" "unreported", 0
+      | None -> not_reported, not_reported, not_reported, 0
       | Some d -> format d.mean, format (float d.maximum), format (float d.minimum), d.samples in
-    let last = match measured.last with None -> text "미보고" "unreported" | Some n -> format (float n) in
+    let last = match measured.last with None -> not_reported | Some n -> format (float n) in
     wrap [label; text "평균 " "avg " ^ avg; text "최대 " "max " ^ maximum; text "최소 " "min " ^ minimum; text "최근 " "last " ^ last]
     @ wrap
         [ Printf.sprintf (if ko then "최근 기록 턴 %d개" else "Recent %d recorded turns") snapshot.records

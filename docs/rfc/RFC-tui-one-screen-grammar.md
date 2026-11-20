@@ -1207,8 +1207,17 @@ unit` 로 줄을 낸다. 옮긴 화면은 새 수집기로 줄을 낸다. 그 �
   - Collab 초대 화면의 `새로고침 중 · 마지막 조회`. 새로고침이 끝나기 전에는 열기·취소가 막힌다는
     안내를 겸해서 문장만 지우면 막힘이 이유 없이 보인다.
   - 메시지 준비 기록의 재조회(`Recheck_loading`).
-  - 연결 표시의 `조회 중: …`(`refresh_progress_pieces`). 연결 상태를 설명하는 곳이라 화면 글과 따로
-    정한다.
+  - 읽는 중 칸이 없는 제목. `surface_chrome` 은 제목을 문자열로 받고, 본문이 위치를 넘기거나 스크롤될 때만
+    제목을 `titled_row`(칸을 그리는 `zone_two_title`)로 놓는다. 위치가 없으면 문자열을 그대로 그려서 칸이
+    없다. `here_row` 로 만든 제목은 칸을 품고 있다. 코드를 읽어 확인한 칸 없는 화면은 다섯이다:
+    Usage(`render_metrics`), Config 설정 상태(`render_runtime_config_status`), Config 창(`surface_key`
+    `config`), Work 계획 목록(`planning-list`), Activity 이벤트·로그 탭(`detail_heading`). 오버레이
+    제목과 나머지 호출처는 아직 다 보지 않았다. 호출처 몇 곳만 `zone_two_title` 로 감싸면 M곳 중 N곳을
+    고치는 패치다. 근본 해결은 이슈 #53287 이 적은 `surface_chrome ~title:(cols:int -> string)` 이고,
+    그때 크롬이 오른쪽 끝(위치와 칸)을 한 곳에서 그린다. Usage 제목은 거기에 더해 정상 상태의 읽기에도
+    `connection_badge` 가 `◔ 조회 중: 제공자 한도` 같은 조각을 붙이므로 `reading_connection_notice` 로
+    바꿔야 하고, 좁은 폭에서 연결 상세를 `연결 상태` 줄(`connection_rows`)로 넘기는 갈래도 같이 본다.
+    제목 폭이 달라지므로 화면을 찍어 보고 정한다.
 - 가로로 긴 코드의 좌우 이동 키. 지금은 `h` `l` 인데 §3.1 에서 나오기·들어가기가 됐다.
 - 강조색(`status.attention`)의 실제 색.
 - 카드 아래 테두리에 그 카드에만 걸리는 키를 적을지(btop 처럼). 구역 5(§2)와 동작 창(§3.3)을

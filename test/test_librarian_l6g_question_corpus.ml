@@ -10,11 +10,10 @@
    [question.id] and [question.shown] back into [Librarian_answer],
    [Librarian_plan], and [Librarian_scoring].
 
-   Note on [seen] (#53543): [seen] is merged on [main] but not yet stacked
-   into this base ([Librarian_answer] accepts [add]/[drop]/[merge]/[revise]
-   only). [config/prompts/librarian.ask.md] therefore omits [seen] until the
-   L6 stack rebases atop #53543, and [test_prompt_contract] verifies the
-   prompt does not advertise unsupported [seen] ops. *)
+   Note on [seen] (#53543): [seen] is present in the stacked [#53605] base
+   ([Librarian_answer] accepts [add]/[seen]/[revise]/[merge]/[drop]), and
+   [config/prompts/librarian.ask.md] documents all five ops and
+   [test_prompt_contract] verifies the [seen] contract. *)
 
 open Alcotest
 module Question = Masc.Librarian_question
@@ -279,7 +278,7 @@ let test_l6g_corpus_via_librarian_question_make () =
     ; facts = [ f_hold ]
     ; planted = [ "18935" ]
     ; must_keep = []
-    ; must_remain = []
+    ; must_remain = [ "2026-11-23" ]
     }
   in
   let a1 =
@@ -333,7 +332,7 @@ let test_l6g_corpus_via_librarian_question_make () =
         [ Types.memory_id f_con, [ "protected main"; "force-push" ]
         ; Types.memory_id f_pref, [ "stacked PR"; "currently migrating"; "3/5" ]
         ]
-    ; must_remain = []
+    ; must_remain = [ "protected main"; "currently migrating" ]
     }
   in
   let a3 =
@@ -377,7 +376,7 @@ let test_l6g_corpus_via_librarian_question_make () =
     ; facts = [ f_con ]
     ; planted = []
     ; must_keep = []
-    ; must_remain = []
+    ; must_remain = [ "protected main" ]
     }
   in
   let a4 = answer_json q4 [] in
@@ -418,7 +417,7 @@ let test_l6g_corpus_via_librarian_question_make () =
     ; facts = [ f_rule1; f_rule2; f_rule3 ]
     ; planted = []
     ; must_keep = []
-    ; must_remain = []
+    ; must_remain = [ "강제 푸시"; "두 명 이상"; "8935" ]
     }
   in
   let a5 = answer_json q5 [] in
@@ -480,7 +479,7 @@ let test_l6g_corpus_via_librarian_question_make () =
     ; facts = [ f_rule1; f_rule2; f_rule3 ]
     ; planted = [ "18935~18940" ]
     ; must_keep = []
-    ; must_remain = []
+    ; must_remain = [ "강제 푸시"; "8935" ]
     }
   in
   let a6 =
@@ -499,12 +498,34 @@ let test_l6g_corpus_via_librarian_question_make () =
   check (list (pair string int)) "0 ops left out" [] tally.not_applied;
   check int "all planted recovered (2/2)" tally.planted tally.recovered;
   check int "all merge_kept preserved (5/5)" tally.merge_expected tally.merge_kept;
+  check int "all must_remain preserved" tally.remain_expected tally.remain_kept;
   let r4 = score_ok c4 a4 in
   check bool "self-echo empty ops makes no Memory changes" false r4.changed;
   let r5 = score_ok c5 a5 in
   check bool "unknowing reply empty ops keeps all rules untouched" false r5.changed;
+  let r5_bad = score_ok c5 a5_bad in
+  check int "bad English overwrite loses all 3 must_remain rules" 0 r5_bad.remain_kept;
   let r6 = score_ok c6 a6 in
   check bool "explicit operator retraction changes Memory" true r6.changed;
+  (* Seen op (#53543) round-trip through Answer.of_string + Plan.of_answer *)
+  (match Answer.of_string ~asked:q1.id (answer_json q1 [ {|{"op":"seen","ref":"m1","from":["u1"]}|} ]) with
+   | Error rej -> failf "valid seen answer rejected: %s" (Answer.rejection_kind rej)
+   | Ok decoded_seen ->
+     let seen_plan =
+       Plan.of_answer ~shown:q1.shown ~facts:[ f_hold ] ~removed_since:[]
+         ~at:1_763_600_500.0 ~trace_id:"trace-l6g" decoded_seen
+     in
+     check int "seen op has 0 not_applied" 0 (List.length seen_plan.effects.not_applied);
+     (match seen_plan.facts with
+      | [ updated ] ->
+        check string "seen keeps memory_id" (Types.memory_id f_hold) (Types.memory_id updated);
+        check (float 0.001) "seen preserves first_seen" f_hold.first_seen updated.first_seen;
+        check (float 0.001) "seen advances last_seen" 1_763_600_500.0 updated.last_seen
+      | facts -> failf "expected 1 fact after seen, got %d" (List.length facts)));
+  (match Answer.of_string ~asked:q1.id (answer_json q1 [ {|{"op":"seen","ref":"m1","from":[]}|} ]) with
+   | Error (Answer.Schema_violation _) -> ()
+   | Error rej -> failf "seen with empty from expected Schema_violation, got %s" (Answer.rejection_kind rej)
+   | Ok _ -> fail "seen with empty from must fail Schema_violation");
   (* Guardrail: code-fenced reply rejected as not_json *)
   (match Scoring.score c1 ("```json\n" ^ a1 ^ "\n```") with
    | Scoring.Thrown_away Answer.Not_json -> ()
@@ -545,12 +566,15 @@ let test_prompt_contract () =
     ; {|"ops": []|}
     ; "빈 답 금지 규정을 따르지 않습니다"
     ; {|"add"|}
+    ; {|"seen"|}
+    ; {|"op": "seen"|}
     ; {|"drop"|}
     ; {|"merge"|}
     ; {|"revise"|}
     ; {|"from": []|}
     ; "자기 발언에서 그대로 인용·되풀이한 것은 새 사실이 아니므로"
     ; "모른다·없다고 한 말은 그 기억을 바꾸거나 지울 근거가 아닙니다"
+    ; "수락·응답 문구를 옮겨 적지 말고"
     ; "단위의 언어로"
     ; "중복 행은 새 재확인이 아니라 하나의 관측으로"
     ; "last_seen"
@@ -581,8 +605,6 @@ let test_prompt_contract () =
     ; {|"working_contexts"|}
     ; {|"supersedes"|}
     ; {|"absorbs"|}
-    ; {|"seen"|}
-    ; {|"op": "seen"|}
     ];
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");

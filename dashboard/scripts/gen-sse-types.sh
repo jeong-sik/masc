@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RFC-0004 Phase A0.2 — generate TypeScript decoders from sse_event.atd.
+# Generate TypeScript decoders from sse_event.atd.
 #
 # Runs atdts (ahrefs/atd's TypeScript codegen) on the OCaml-side SSOT
 # (lib/sse_event/sse_event.atd) and writes the result to

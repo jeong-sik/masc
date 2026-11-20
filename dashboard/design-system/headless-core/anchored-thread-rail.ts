@@ -1,5 +1,5 @@
 /**
- * AnchoredThreadRail - framework-agnostic controller for RFC 0021.
+ * AnchoredThreadRail - framework-agnostic anchored-thread rail controller.
  *
  * The controller scopes review/conversation threads to the active file,
  * answers line-range lookup queries, and emits focus changes without

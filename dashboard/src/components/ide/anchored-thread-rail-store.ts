@@ -1,5 +1,5 @@
 /**
- * anchored-thread-rail-store - Preact signal adapter for RFC 0021.
+ * anchored-thread-rail-store - Preact signal adapter for AnchoredThreadRail.
  *
  * The headless controller owns file scoping, line lookup, and focus events.
  * This adapter publishes immutable snapshots for the IDE conversation rail.

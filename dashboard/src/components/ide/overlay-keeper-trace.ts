@@ -17,25 +17,25 @@ import { focusIdeContextAnchor } from './ide-state'
 import { routeLinkLabels } from './ide-context-route-helpers'
 
 /**
- * RFC-0028 PR-β: keeper-trace gutter chip overlay.
+ * keeper-trace gutter chip overlay.
  *
  * Reads `keeperTraceState` (the stitched trace store) and
- * renders a stacked gutter chip per RFC §5: cap=3 visible chips per
+ * renders a stacked gutter chip: cap=3 visible chips per
  * (keeperName, line) bucket plus a `+N` overflow indicator. Each chip is
  * colored by source (anchored-thread / runtime-hop / decision-log /
  * activity-event) and exposes a hover tooltip with the
  * underlying event details.
  *
- * Bucket key (RFC §5 + §11 #3):
+ * Bucket key:
  *   `${keeperName}@${line ?? 'no-line'}`
  *
  * Events without a line (decision-log without anchor) are
  * grouped under the keeper-level bucket, so a sidebar overlay can render
- * them next to the keeper avatar rather than at a specific line. PR-β
- * keeps the bucket-by-line shape; consumers (editor gutter, sidebar
+ * them next to the keeper avatar rather than at a specific line. The
+ * overlay keeps the bucket-by-line shape; consumers (editor gutter, sidebar
  * keeper rail) decide where to mount the chips.
  *
- * Conflict avoidance (RFC §10): the `keeper-trace` IDE_LAYERS entry used to
+ * Conflict avoidance: the `keeper-trace` IDE_LAYERS entry used to
  * declare `conflictsWith: ['runtime']` so activating either layer dropped
  * the other automatically (see `layered-overlay.ts`). The 'runtime' layer
  * was removed (masc#24069 #49 — decorative chip, no backing overlay), so

@@ -3,6 +3,7 @@ module Direct = Librarian_direct
 module Lane = Librarian_memory_lane
 module Read_result = Librarian_read_result
 module Room_result = Librarian_room_result
+module Last = Librarian_last
 
 type place =
   { memory_dir : string
@@ -47,6 +48,9 @@ type t =
   ; last_ask : int
   ; narrowing : Librarian_width.t
   ; bottom : Librarian_bottom.t
+  ; last_read : Last.read option
+  ; last_room : Last.room option
+  ; read_alone : bool
   }
 
 let boot { memory_dir; turns_dir; keeper_id } ~at =
@@ -127,6 +131,9 @@ let booted place ~at ~lane ~last_ask (opened : (Store.t, Store.stop) result) =
     ; last_ask
     ; narrowing = Librarian_width.empty
     ; bottom = Librarian_bottom.empty
+    ; last_read = None
+    ; last_room = None
+    ; read_alone = false
     }
   | Ok store ->
     next_ask place
@@ -135,6 +142,9 @@ let booted place ~at ~lane ~last_ask (opened : (Store.t, Store.stop) result) =
       ; last_ask
       ; narrowing = Librarian_width.empty
       ; bottom = Librarian_bottom.empty
+      ; last_read = None
+      ; last_room = None
+      ; read_alone = false
       }
       ~at store
 ;;
@@ -199,8 +209,11 @@ let settled t store ~after (committed : Store.committed) =
    item already passed (§7.4 「읽은 자리가 움직였다」). *)
 let moved t ~narrowing = { t with narrowing; bottom = Librarian_bottom.empty }
 
-let after_commit place t ~at store ~narrowing committed =
-  settled t store committed ~after:(fun store -> next_ask place (moved t ~narrowing) ~at store)
+(* [last] is what the commit sets once it is on disk: [Committed], or the
+   lane's result an item skipped alone ended in. *)
+let after_commit place t ~at store ~narrowing ?(last = Last.Committed) committed =
+  settled t store committed ~after:(fun store ->
+    next_ask place { (moved t ~narrowing) with last_read = Some last } ~at store)
 ;;
 
 (* §7.3 「Refused_by_lane, Silent_lane」 and §7.4: only the slots the lane
@@ -233,10 +246,19 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
     | None -> true
     | Some declared -> not (Lane.equal declared.value asking.lane.value)
   in
-  let rest t =
+  (* What the result was, for the row (§12.2): whether a slot declared now
+     said nothing is read against the slots declared now, as the verdict is. *)
+  let lane_result ~one_item =
+    Last.Lane
+      { one_item; silent = Last.silent ~declared:declared_now slots; basis = question.basis; slots }
+  in
+  let ended ~one_item t = { t with last_read = Some (lane_result ~one_item) } in
+  (* With no slot declared now in the result, the ask said nothing about the
+     lane held now, so it sets nothing. *)
+  let rest ~one_item t =
     if List.is_empty still_declared && lane_moved
     then next_ask place t ~at store
-    else { t with state = Resting store }
+    else { (ended ~one_item t) with state = Resting store }
   in
   (* §7.4 「옛 Memory 를 두고 한 판정으로 내려가지 않는다」. *)
   let judged_now =
@@ -261,18 +283,21 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
     in
     if refused
     then
-      next_ask place { t with narrowing = Librarian_width.refused t.narrowing ~asked wider } ~at
-        store
-    else rest t
+      next_ask place
+        { (ended ~one_item:false t) with
+          narrowing = Librarian_width.refused t.narrowing ~asked wider
+        }
+        ~at store
+    else rest ~one_item:false t
   | Read_range (_ : Librarian_width.width), One_item ->
     let t = { t with bottom = Librarian_bottom.learn t.bottom With_memory question.id slots } in
     if not judged_now
     then next_ask place t ~at store
     else (
       match verdict () with
-      | Input -> ask place t ~at store ~asked:Read_item_alone
-      | All_not_input -> { t with state = Refused_at_bottom store }
-      | Not_all -> rest t)
+      | Input -> ask place (ended ~one_item:true t) ~at store ~asked:Read_item_alone
+      | All_not_input -> { (ended ~one_item:true t) with state = Refused_at_bottom store }
+      | Not_all -> rest ~one_item:true t)
   | Read_item_alone, (One_item | Wider (_ : Librarian_width.wider)) ->
     let t = { t with bottom = Librarian_bottom.learn t.bottom Alone question.id slots } in
     if not judged_now
@@ -284,10 +309,10 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
           Librarian_width.committed t.narrowing
             (Librarian_width.passed question.offered question.reach.within)
         in
-        after_commit place t ~at store ~narrowing
+        after_commit place t ~at store ~narrowing ~last:(lane_result ~one_item:true)
           (Store.commit_skip store ~at ~hole:(Item_exceeds_window question.missing) question.reach)
-      | All_not_input -> { t with state = Refused_at_bottom store }
-      | Not_all -> rest t)
+      | All_not_input -> { (ended ~one_item:true t) with state = Refused_at_bottom store }
+      | Not_all -> rest ~one_item:true t)
 ;;
 
 (* After an item read alone, making room is asked at once, unless a direct
@@ -315,12 +340,23 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
         (Librarian_width.passed question.offered question.reach.within)
     in
     let committed = Store.commit_read store ~at ~question ~slot plan in
+    (* A range shows Memory, so its read is one with Memory, and what the
+       last room ask said is about a Memory before it (§12.2 E5, W3). *)
     (match asked with
      | Read_range (_ : Librarian_width.width) ->
-       after_commit place t ~at store ~narrowing committed
+       settled t store committed ~after:(fun store ->
+         next_ask place
+           { (moved t ~narrowing) with
+             last_read = Some Last.Committed
+           ; read_alone = false
+           ; last_room = None
+           }
+           ~at store)
      | Read_item_alone ->
        settled t store committed ~after:(fun store ->
-         after_alone place (moved t ~narrowing) ~at store asking ~trace:question.trace))
+         after_alone place
+           { (moved t ~narrowing) with last_read = Some Last.Committed; read_alone = true }
+           ~at store asking ~trace:question.trace))
   | Nothing_to_ask -> next_ask place t ~at store
   | No_answer { question; slots } -> no_answer place t ~at store asking ~asked question slots
   | Nothing_readable { reach; missing; offered } ->
@@ -339,8 +375,9 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
   (* A file the store does not open does not mend itself: the store stops
      as boot and a commit stop it for the same file. *)
   | Snapshot_fault fault -> { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
-  | Input_fault (_ : Librarian_unit.input_fault) | Ask_failed (_ : Read_result.failed) ->
-    { t with state = Resting store }
+  | Input_fault (_ : Librarian_unit.input_fault) ->
+    { t with state = Resting store; last_read = Some Last.Input_fault }
+  | Ask_failed failed -> { t with state = Resting store; last_read = Some (Last.Ask_failed failed) }
 ;;
 
 (* A token for a log field, one for each outcome. *)
@@ -419,7 +456,7 @@ let ended_room place t ~at store (asking : asking) : Room_result.t -> t = functi
        room_not_committed place Stale
          (Printf.sprintf "a direct write removed %d fact(s) while it was asked"
             (List.length removed));
-       next_ask place t ~at store
+       next_ask place { t with last_room = Some Last.Stale } ~at store
      | [] ->
        let plan =
          Librarian_plan.of_answer ~shown:(Room { memory = question.memory })
@@ -438,7 +475,8 @@ let ended_room place t ~at store (asking : asking) : Room_result.t -> t = functi
           | Not_a_snapshot refusal ->
             room_not_committed place Snapshot_refused
               (Printf.sprintf "the answer of %s: %s" slot (envelope_refusal_text refusal)));
-         settled t store committed ~after:(fun store -> next_ask place t ~at store))
+         settled t store committed ~after:(fun store ->
+           next_ask place { t with last_room = Some Last.Made } ~at store))
        else (
          (match plan.effects.not_applied with
           | [] -> room_not_committed place Proposed_nothing ("the answer of " ^ slot)
@@ -450,15 +488,25 @@ let ended_room place t ~at store (asking : asking) : Room_result.t -> t = functi
                        (fun (number, why, (_ : Librarian_answer.new_fact option)) ->
                           Printf.sprintf "%d:%s" number (Librarian_effects.why_not_kind why))
                        left_out))));
-         next_ask place t ~at store))
-  | Room_not_answered { question = (_ : Room_result.question); slots } ->
+         next_ask place { t with last_room = Some Last.Unchanged } ~at store))
+  | Room_not_answered { question; slots } ->
     room_not_committed place Unanswered
       (String.concat ", "
          (List.map
             (fun ((key : Lane.slot_key), outcome) ->
                Printf.sprintf "%s:%s" key.id (unanswered_token outcome))
             slots));
-    next_ask place t ~at store
+    (* Fits_none only when every slot declared now refused it for its input:
+       the same fold the head item's verdict is, over Memory alone. *)
+    let room =
+      match t.lane with
+      | Some declared ->
+        (match Librarian_bottom.fold declared.value slots with
+         | Input -> Last.Fits_none { memory = question.basis; lane = asking.lane.value }
+         | All_not_input | Not_all -> Last.Not_judged)
+      | None -> Last.Not_judged
+    in
+    next_ask place { t with last_room = Some room } ~at store
   | Room_memory_diverged { expected; observed } ->
     count_room place Store_stopped;
     { t with state = Stopped (Log_diverged { expected; observed }) }
@@ -467,7 +515,7 @@ let ended_room place t ~at store (asking : asking) : Room_result.t -> t = functi
     { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
   | Room_failed (_ : Read_result.failed) ->
     count_room place Failed;
-    next_ask place t ~at store
+    next_ask place { t with last_room = Some Last.Not_judged } ~at store
 ;;
 
 let ended place t ~at store (asking : asking) = function

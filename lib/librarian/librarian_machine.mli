@@ -58,11 +58,13 @@
     ([LaneRes]) are [No_answer]. Its ask kinds ["range"], ["alone"] and
     ["room"] are [Read (Read_range _)], [Read Read_item_alone] and [Room _].
     Its room results map to {!Librarian_room_result.t}: ["room_answer"] is
-    [Room_answered], and ["room_fits_none"] and ["room_other"] are the rest,
-    which this layer does not tell apart; the model's [room] values
-    ["stale"], ["unchanged"] and ["made"] are the three ways a
-    [Room_answered] ends here. The model's [last_room] and [read_alone]
-    ([room], [alone]) are the rows' (§12), which this layer does not keep. *)
+    [Room_answered], and ["room_fits_none"] and ["room_other"] are the rest:
+    [Room_not_answered] that every slot declared now refused for its input
+    is ["room_fits_none"]. The model's [room] values ["stale"],
+    ["unchanged"] and ["made"] are the three ways a [Room_answered] ends
+    here. The model's [last], [lastOne], [lastSil], [lastBasis], [room],
+    [roomMem], [roomLane] and [alone] are [t.last_read], [t.last_room] and
+    [t.read_alone] ({!Librarian_last}). *)
 
 module Digest := Agent_core.Checkpoint_objects
 
@@ -149,6 +151,14 @@ type t =
       adoption leave it: a fact is held under one question's id and one
       slot's key, so a fact about a question or slot not asked now is not
       found, and the item alone is the same question under every Memory. *)
+  ; last_read : Librarian_last.read option
+  (** How the last reading ask that set it ended (§12.2). [None]: none has
+      since the boot. A [Resume] of a rest and an adoption leave it. *)
+  ; last_room : Librarian_last.room option
+  (** How the last room ask ended. A committed range read empties it: what
+      it said is about the Memory before that read. *)
+  ; read_alone : bool
+  (** The last committed read was of an item alone, without Memory (W3). *)
   }
 
 (** The store's boot (§8.6): open, or the reason it stopped. *)

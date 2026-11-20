@@ -1320,7 +1320,7 @@
  ; bytes: a keeper named in Hangul would otherwise sit at a different offset
  ; from the header naming it.
  (modules masc_tui_table)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_layout)

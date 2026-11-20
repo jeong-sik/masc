@@ -144,11 +144,14 @@ let line ~pick ~dress cells =
 let header_row cells =
   line ~pick:(fun cell -> cell.header) ~dress:(fun _ text -> text) cells
 
+(* Columns the width left out: a cut-off count, never "+N" (RFC
+   tui-one-screen-grammar 6.3). *)
 let dropped_columns_badge ~ko dropped =
   if dropped <= 0 then None
-  else if ko then Some (Printf.sprintf "외 %d열" dropped)
-  else if dropped = 1 then Some "+1 col"
-  else Some (Printf.sprintf "+%d cols" dropped)
+  else
+    Some
+      (Masc_tui_value.Count.more ~ko dropped
+       ^ if ko then "열" else if dropped = 1 then " col" else " cols")
 
 let trim_trailing_spaces s =
   let len = ref (String.length s) in

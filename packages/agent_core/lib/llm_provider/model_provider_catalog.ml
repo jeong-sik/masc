@@ -32,6 +32,7 @@ type entry =
   ; supports_parallel_tool_suppression : bool
   ; supports_extended_cache_ttl : bool
   ; cache_session_wire : Capability_vocab.cache_session_wire
+  ; supports_provider_routing_filter : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 
@@ -114,6 +115,7 @@ let known_keys =
   ; "supports_parallel_tool_suppression"
   ; "supports_extended_cache_ttl"
   ; "cache_session_wire"
+  ; "supports_provider_routing_filter"
   ; "serves_bare_models"
   ]
 ;;
@@ -345,6 +347,15 @@ let parse_entry provider_toml =
               raw
               (String.concat ", " Capability_vocab.cache_session_wire_values)))
   in
+  let* supports_provider_routing_filter =
+    match Otoml.find_opt provider_toml Otoml.get_boolean
+            [ "supports_provider_routing_filter" ] with
+    | Some supported -> Ok supported
+    | None -> Ok false
+    | exception Otoml.Type_error _ ->
+      Error (Printf.sprintf
+        "provider entry %S field \"supports_provider_routing_filter\" expected bool" id)
+  in
   let* serves_bare_models =
     let* models = string_list_field ~entry_id:id "serves_bare_models" provider_toml in
     let rec parse acc = function
@@ -373,6 +384,7 @@ let parse_entry provider_toml =
     ; supports_parallel_tool_suppression
     ; supports_extended_cache_ttl
     ; cache_session_wire
+    ; supports_provider_routing_filter
     ; serves_bare_models
     }
 ;;

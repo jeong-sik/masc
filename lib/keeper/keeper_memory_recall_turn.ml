@@ -49,12 +49,18 @@ let record_judgment ~keeper_id ~seconds (judged : Flow.judged) =
     ~labels:[ "keeper", keeper_id; "outcome", J.status_token judged.status ]
     ();
   (match judged.status with
-   | J.Selected { selection; coverage = _; turn_question_contradicted = _ } ->
+   | J.Selected { selection; coverage = _; turn_question_contradicted } ->
      Otel_metric_store.inc_counter
        Keeper_metrics.(to_string MemoryRecallSelected)
        ~labels:[ "keeper", keeper_id ]
        ~delta:(Float.of_int (List.length (J.selection_ids selection)))
-       ()
+       ();
+     if turn_question_contradicted
+     then
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string MemoryRecallTurnContradicted)
+         ~labels:[ "keeper", keeper_id ]
+         ()
    | J.None_found _ | J.None_needed _ | J.Unavailable _ -> ());
   Otel_metric_store.observe_histogram
     Keeper_metrics.(to_string MemoryRecallJudgmentSeconds)

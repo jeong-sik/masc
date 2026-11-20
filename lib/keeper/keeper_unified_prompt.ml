@@ -86,33 +86,65 @@ let skills_unavailable_diagnostic_property () =
     ]
 ;;
 
-let format_pending_messages
+let format_pending_messages_section
       (messages : Keeper_world_observation_message_scope.pending_message list)
-  : string
+  : Keeper_context_layers.prepared_content option
   =
-  messages
-  |> List.map (fun message ->
-    match message.Keeper_world_observation_message_scope.kind with
-    | Keeper_world_observation_message_scope.Mention ->
+  match messages with
+  | [] -> None
+  | _ :: _ ->
+    let head =
       render_fragment
-        Prompt_names.keeper_world_pending_messages_mention_row
-        [ "speaker", message.speaker; "content", message.content ]
-    | Keeper_world_observation_message_scope.Scope ->
-      render_fragment
-        Prompt_names.keeper_world_pending_messages_scope_row
-        [ "speaker", message.speaker; "content", message.content ])
-  |> String.concat "\n"
+        Prompt_names.keeper_world_pending_messages_heading
+        [ "count", string_of_int (List.length messages) ]
+      ^ "\n"
+      ^ render_fragment Prompt_names.keeper_world_pending_messages_intro []
+      ^ "\n"
+    in
+    let rows =
+      List.map
+        (fun message ->
+           let row =
+             match message.Keeper_world_observation_message_scope.kind with
+             | Keeper_world_observation_message_scope.Mention ->
+               render_fragment
+                 Prompt_names.keeper_world_pending_messages_mention_row
+                 [ "speaker", message.speaker; "content", message.content ]
+             | Keeper_world_observation_message_scope.Scope ->
+               render_fragment
+                 Prompt_names.keeper_world_pending_messages_scope_row
+                 [ "speaker", message.speaker; "content", message.content ]
+           in
+           row ^ "\n")
+        messages
+    in
+    Some (Keeper_context_layers.prepare_rows ~head ~rows ~tail:"\n")
 
-let format_fleet_messages
+let format_fleet_messages_section
       (messages : Keeper_world_observation_message_scope.fleet_message list)
-  : string
+  : Keeper_context_layers.prepared_content option
   =
-  messages
-  |> List.map (fun (message : Keeper_world_observation_message_scope.fleet_message) ->
-    render_fragment
-      Prompt_names.keeper_world_fleet_messages_row
-      [ "speaker", message.fleet_speaker; "content", message.fleet_content ])
-  |> String.concat "\n"
+  match messages with
+  | [] -> None
+  | _ :: _ ->
+    let head =
+      render_fragment
+        Prompt_names.keeper_world_fleet_messages_heading
+        [ "count", string_of_int (List.length messages) ]
+      ^ "\n"
+      ^ render_fragment Prompt_names.keeper_world_fleet_messages_intro []
+      ^ "\n"
+    in
+    let rows =
+      List.map
+        (fun (message : Keeper_world_observation_message_scope.fleet_message) ->
+           render_fragment
+             Prompt_names.keeper_world_fleet_messages_row
+             [ "speaker", message.fleet_speaker; "content", message.fleet_content ]
+           ^ "\n")
+        messages
+    in
+    Some (Keeper_context_layers.prepare_rows ~head ~rows ~tail:"\n")
 
 (* The argument object rides on a refusal and not on a success, for the reason
    this module already gives for outputs: a call that landed is a fact, and
@@ -1859,21 +1891,10 @@ let prepare_prompt_internal
        cancellation produces no post. *)
     | Keeper_context_layers.Task_cancellations ->
       format_task_cancellation_observations observation.pending_board_events
-    (* Pending message rows are rendered once in exact source order. Mention and
-       scope remain typed for wake metrics, but splitting them into two prompt
-       sections would reorder interleaved arrivals. *)
-    | Keeper_context_layers.Pending_mentions ->
-      if observation.pending_messages <> [] then
-        Some
-          (render_fragment
-             Prompt_names.keeper_world_pending_messages_heading
-             [ "count", string_of_int (List.length observation.pending_messages) ]
-           ^ "\n"
-           ^ render_fragment Prompt_names.keeper_world_pending_messages_intro []
-           ^ "\n"
-           ^ format_pending_messages observation.pending_messages
-           ^ "\n\n")
-      else None
+    (* Pending message rows are rendered once in exact source order as
+       row-level [Head_and_rows] in [prepared_of] below so resumed sessions
+       omit already-held mention rows (RFC §3.4). *)
+    | Keeper_context_layers.Pending_mentions -> None
     (* 9b. Own recent board posts — the keeper's own published posts, newest
        first. Cursor-independent standing context: Board_activity only carries
        other authors' unseen posts, so this is the only in-prompt view of what
@@ -1916,31 +1937,23 @@ let prepare_prompt_internal
         Buffer.add_string ubuf "\n\n";
         Some (Buffer.contents ubuf))
       else None
-    (* 11. Fleet messages — what other keepers said, projected into this
-       keeper's transcript. Cursor-independent standing context: the reactive
-       lanes admit only rows addressed to this keeper, so without this section
-       a fleet broadcast reaches the dashboard and never the prompt. Neutral
-       rows, no advisory text; no watermark, so a keeper that never runs an
-       autonomous turn accumulates nothing. *)
-    (* What this keeper already did. Without it an autonomous turn re-claims a
-       task it finished and repeats a call the tool just rejected, because the
-       briefing describes the world and never the keeper's own history. Both
-       outcomes are shown: the rejections are what the keeper must not repeat,
-       the successes are what it must not redo. *)
+    (* 11. Fleet messages — rendered row-wise via [prepare_rows] in
+       [prepared_of] below (RFC §4.2) so resumed sessions omit broadcasts
+       already held in the window. *)
+    | Keeper_context_layers.Fleet_messages -> None
+  in
+  let prepared_of : Keeper_context_layers.layer_id -> Keeper_context_layers.prepared_content option =
+    function
+    | Keeper_context_layers.Pending_mentions ->
+      format_pending_messages_section observation.pending_messages
     | Keeper_context_layers.Fleet_messages ->
-      if observation.fleet_messages <> [] then (
-        let ubuf = Buffer.create 256 in
-        Buffer.add_string ubuf
-          (render_fragment
-             Prompt_names.keeper_world_fleet_messages_heading
-             [ "count", string_of_int (List.length observation.fleet_messages) ]
-           ^ "\n");
-        Buffer.add_string ubuf
-          (render_fragment Prompt_names.keeper_world_fleet_messages_intro [] ^ "\n");
-        Buffer.add_string ubuf (format_fleet_messages observation.fleet_messages);
-        Buffer.add_string ubuf "\n\n";
-        Some (Buffer.contents ubuf))
-      else None
+      format_fleet_messages_section observation.fleet_messages
+    | ( Active_goals | Direct_input_source | Goal_observations | Goals_awaiting_proof
+      | Current_task | Approval_authority | Connected_surfaces | Namespace_state
+      | Workspace_memory | Wiki | Lane_updates | Autonomous_trigger
+      | Scheduled_automation | Completion_authority | Task_cancellations
+      | Own_board_posts | Board_activity | Own_recent_actions | Recent_work ) as layer ->
+      Option.map Keeper_context_layers.prepare_content (content_of layer)
   in
   (* The frame is injected as ephemeral context. The turn call site passes an
      explicit [world_state_prompt] source to history persistence, so JSONL
@@ -1953,7 +1966,7 @@ let prepare_prompt_internal
      inventing a tool call. Stating where the frame came from is what makes
      that distinction available to the model. *)
   let common_layers = List.fold_left (fun layers layer ->
-    Layer_map.add layer (Option.map Keeper_context_layers.prepare_content (content_of layer)) layers)
+    Layer_map.add layer (prepared_of layer) layers)
       Layer_map.empty Keeper_context_layers.ordered in
   let frame = Keeper_context_layers.prepare_content
       (render_fragment Prompt_names.keeper_world_frame_frame [] ^ "\n\n") in

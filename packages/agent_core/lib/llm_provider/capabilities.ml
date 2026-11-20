@@ -576,14 +576,23 @@ type request_policy =
   ; anthropic_thinking_control : anthropic_thinking_control option
   ; pricing_source : Pricing.source
   ; cache_session_wire : cache_session_wire
+  ; supports_provider_routing_filter : bool
   }
 
 let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
   let pricing_source = Pricing.of_catalog ~catalog ~provider in
+  let provider_entry =
+    Option.bind catalog (fun c -> Model_catalog.provider_entry_for_reference c provider)
+  in
   let cache_session_wire =
-    match Option.bind catalog (fun c -> Model_catalog.provider_entry_for_reference c provider) with
+    match provider_entry with
     | Some entry -> entry.Model_catalog.cache_session_wire
     | None -> No_cache_session_wire
+  in
+  let supports_provider_routing_filter =
+    match provider_entry with
+    | Some entry -> entry.Model_catalog.supports_provider_routing_filter
+    | None -> false
   in
   match Model_identifiers.Model_id.of_string model_id with
   | Error _ ->
@@ -591,6 +600,7 @@ let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
     ; anthropic_thinking_control = None
     ; pricing_source
     ; cache_session_wire
+    ; supports_provider_routing_filter
     }
   | Ok model_id ->
   let catalog_answer = catalog_answer_from_catalog
@@ -603,13 +613,21 @@ let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
     | Provider_kind.Kimi | Provider_kind.OpenAI_compat | Provider_kind.Ollama
     | Provider_kind.Gemini | Provider_kind.Glm -> None
   in
-  { catalog_answer; anthropic_thinking_control; pricing_source; cache_session_wire }
+  { catalog_answer
+  ; anthropic_thinking_control
+  ; pricing_source
+  ; cache_session_wire
+  ; supports_provider_routing_filter
+  }
 ;;
 
 let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provider_entry)
     ~capabilities ~model_id =
   let pricing_source = Pricing.of_provider_entry ~catalog ~provider in
   let cache_session_wire = provider.Model_catalog.cache_session_wire in
+  let supports_provider_routing_filter =
+    provider.Model_catalog.supports_provider_routing_filter
+  in
   let capabilities = match provider_wire_preset ~wire:(Some wire) provider with
     | Some preset -> Some (capabilities_of_preset preset)
     | None -> capabilities in
@@ -622,7 +640,12 @@ let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provi
     let catalog_answer = match capabilities with
       | Some preset -> Provider_preset preset
       | None -> No_catalog_answer in
-    {catalog_answer;anthropic_thinking_control=None;pricing_source;cache_session_wire}
+    { catalog_answer
+    ; anthropic_thinking_control = None
+    ; pricing_source
+    ; cache_session_wire
+    ; supports_provider_routing_filter
+    }
   | Some row ->
     let scoped_provider = match row.Model_catalog.provider_name with
       | None -> None | Some _ -> Some provider in
@@ -632,7 +655,12 @@ let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provi
       | Provider_kind.Anthropic -> Option.map anthropic_thinking_control_of_vocab_value
           row.anthropic_thinking_control
       | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> None in
-    {catalog_answer;anthropic_thinking_control;pricing_source;cache_session_wire}
+    { catalog_answer
+    ; anthropic_thinking_control
+    ; pricing_source
+    ; cache_session_wire
+    ; supports_provider_routing_filter
+    }
 ;;
 
 let resolve_snapshot_request_policy ~snapshot ~wire ~provider_id ~model_id =
@@ -673,6 +701,8 @@ let request_policy_capabilities policy = capabilities_of_catalog_answer policy.c
 let request_policy_anthropic_thinking_control policy = policy.anthropic_thinking_control
 let request_policy_pricing_source policy = policy.pricing_source
 let request_policy_cache_session_wire policy = policy.cache_session_wire
+let request_policy_supports_provider_routing_filter policy =
+  policy.supports_provider_routing_filter
 
 (* The token is the single source of truth carried by the entry's
    [Chat_template_token] constructor (the parser validated its exactness), so it

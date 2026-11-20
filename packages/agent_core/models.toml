@@ -3017,6 +3017,7 @@ request_path = "/chat/completions"
 auth = "api-key"
 supports_extended_cache_ttl = true
 cache_session_wire = "openrouter_session_id"
+supports_provider_routing_filter = true
 # The router declares one effort contract for everything it serves, so the
 # accepted set belongs to this row rather than to a model row per served
 # model. See Capabilities.openrouter_capabilities for the source and for why

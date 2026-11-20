@@ -61,8 +61,8 @@ let app_form_key (state : state) ~save key =
     in
     (match key with
      | "esc" -> state.identity_app_form <- None
-     | "\127" | "\b" -> set (Masc_tui_message_layout.drop_last_utf8_scalar current)
-     | "\r" | "\n" ->
+     | "\127" | "\b" | "backspace" -> set (Masc_tui_message_layout.drop_last_utf8_scalar current)
+     | "\r" | "\n" | "enter" ->
        (match form.Masc_tui_identity_model.iaf_field with
         | Masc_tui_identity_model.App_client_id ->
           state.identity_app_form
@@ -158,11 +158,11 @@ let filter_key (state : state) ~move_cursor ~login key =
   | "esc" -> state.identity_filter <- None
   | "up" -> move_cursor ~delta:(-1)
   | "down" -> move_cursor ~delta:1
-  | "\127" | "\b" ->
+  | "\127" | "\b" | "backspace" ->
     if String.equal query ""
     then state.identity_filter <- None
     else narrow (Masc_tui_message_layout.drop_last_utf8_scalar query)
-  | "\r" | "\n" ->
+  | "\r" | "\n" | "enter" ->
     (match selected_keeper state, state.identity_view with
      | Some keeper, Some (stamp, providers) when String.equal stamp keeper.k_name ->
        (match

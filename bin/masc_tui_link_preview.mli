@@ -66,6 +66,9 @@ val mosaic_lookup : string -> mosaic_entry option
     has not decided yet. Refusals remain visible until an explicit retry;
     no refusal is evidence of permanent failure. *)
 
+val mosaic_pending : string -> bool
+(** Whether a background mosaic image fetch is currently in flight for this URL. *)
+
 val load_mosaic : compute:(unit -> mosaic_entry) -> string -> unit
 (** Atomically reserve an undecided URL, then compute and store its outcome.
     Existing decisions and pending work are left alone. The synchronous

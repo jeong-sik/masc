@@ -82,28 +82,63 @@ let context_split_lines ~cols ~left_width ~left ~right =
       let right = Option.value ~default:"" (List.nth_opt right index) in
       fit_width left left_width ^ divider ^ fit_width right right_width)
 
+let context_inspector_progress_spec state =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  let keeper =
+    Option.value ~default:(say "키퍼 없음" "no Keeper") state.context_inspector_keeper
+    |> Keeper_chat.terminal_safe_text
+  in
+  let gen = string_of_int state.context_inspector_generation in
+  if state.context_inspector_loading then
+    Some ("reading:" ^ gen, say "컨텍스트 읽는 중" "Loading context", Some keeper)
+  else if Masc_tui_fetched.in_flight state.context_inspector_part then
+    Some ("part:" ^ gen, say "컨텍스트 구간 읽는 중" "Loading context section", Some keeper)
+  else None
+
+let context_inspector_sheet_of_spec ~ko ?started_at = function
+  | None -> None
+  | Some (_, ps_title, ps_detail) ->
+      Some
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint = Some (if ko then "Esc:닫기" else "Esc:close")
+        ; ps_blocking = false
+        }
+
 (* The plain body's line count and the window the frame shows it in, for the
    keys that scroll it. *)
 let context_inspector_viewport state =
   let terminal_rows, cols = get_terminal_size () in
+  let progress_sheet =
+    context_inspector_sheet_of_spec ~ko:(state.ui_language = Lang_ko)
+      (context_inspector_progress_spec state)
+  in
   let count =
     match context_inspector_content_lines ~cols state with
     | Plain (lines, _) -> List.length lines
     | Split _ -> 0
   in
-  (count, surface_window_height state ~terminal_rows ~count)
+  (count, surface_window_height ?progress_sheet state ~terminal_rows ~count)
 
 (* The split detail column's body line count and its window height, for the
    keys that scroll it. The pinned header row is not theirs to scroll. *)
 let context_inspector_detail_viewport state =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let progress_sheet =
+    context_inspector_sheet_of_spec ~ko:(state.ui_language = Lang_ko)
+      (context_inspector_progress_spec state)
+  in
   match context_inspector_content_lines ~cols state with
   | Plain _ -> (0, 0)
   | Split { common; right; _ } ->
+      let content_height =
+        surface_chrome_budget ~frame:Chrome_overlay ?progress_sheet state ~terminal_rows
+      in
       let split_height =
-        context_split_pane_height ~content_height:(framed_content_height ~rows)
-          ~common_len:(List.length common)
+        context_split_pane_height ~content_height ~common_len:(List.length common)
       in
       ( List.length right - 1
       , max 0 (split_height - 1) )
@@ -124,25 +159,35 @@ let context_split_window ~height ~offset lines =
 let render_context_inspector state =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let say korean english = if ko then korean else english in
   let keeper =
     Option.value ~default:(say "키퍼 없음" "no Keeper") state.context_inspector_keeper
     |> Keeper_chat.terminal_safe_text
   in
+  let spec = context_inspector_progress_spec state in
+  let ctx_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"context-inspector" ~now
+      (Option.map (fun (sig_key, _, _) -> sig_key) spec)
+  in
+  let progress_sheet =
+    context_inspector_sheet_of_spec ~ko ?started_at:ctx_started_at spec
+  in
   (* What the numbers describe: a reading in flight, or one received some
      time ago. The pane does not poll, so without the age a reading from
      before the current turn read as the current turn. *)
   let refreshing =
-    if state.context_inspector_loading then
-      Ansi.dim ^ say "  새로고침 중" "  refreshing" ^ Ansi.reset
-    else
-      match state.context_inspector_reading, state.context_inspector_read_at with
-      | Some _, Some read_at ->
-          let ago = Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) read_at in
-          Ansi.dim
-          ^ (if ko then "  " ^ ago ^ " 전 조회" else "  read " ^ ago ^ " ago")
-          ^ Ansi.reset
-      | Some _, None | None, (Some _ | None) -> ""
+    match progress_sheet with
+    | Some sheet ->
+        "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+    | None ->
+        (match state.context_inspector_reading, state.context_inspector_read_at with
+         | Some _, Some read_at ->
+             let ago = Masc_tui_value.Ongoing.since ~now read_at in
+             Ansi.dim
+             ^ (if ko then "  " ^ ago ^ " 전 조회" else "  read " ^ ago ^ " ago")
+             ^ Ansi.reset
+         | Some _, None | None, (Some _ | None) -> "")
   in
   (* The search query, drawn where the typing lands: the Keepers strip's
      own indicator sits on a surface this pane replaced. *)
@@ -173,7 +218,7 @@ let render_context_inspector state =
     match content with
     | Plain (lines, selected) ->
         let height =
-          surface_window_height state ~terminal_rows ~count:(List.length lines)
+          surface_window_height ?progress_sheet state ~terminal_rows ~count:(List.length lines)
         in
         (* The cursor names a row, the window follows it: on the single-column
            shapes nothing lives under the row, so the smallest move that keeps
@@ -199,7 +244,7 @@ let render_context_inspector state =
               else Context_inspector_scroll scroll) }
     | Split _ -> Paged_by_cursor
   in
-  surface_chrome ~overflow state ~terminal_rows ~cols
+  surface_chrome ~overflow ?progress_sheet ~now state ~terminal_rows ~cols
     ~surface_key:"context-inspector"
     ~help_door:(Option.is_none state.search)
     ~frame:Chrome_overlay
@@ -292,13 +337,16 @@ let detail_peer_status state reading =
   match keeper_peer_status_for_reading state reading with
   | Some (Keeper_peer_loading {page; retained = previous; retry = failed}) ->
       Some (Theme.info (),
-        Printf.sprintf (if ko then "  %d페이지 읽는 중%s%s" else "  Loading page %d%s%s")
+        Printf.sprintf
+          (if ko then "  %s %d페이지 읽는 중%s%s" else "  %s Loading page %d%s%s")
+          (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way)
           page (retained previous) (retry failed))
   | Some (Keeper_peer_arrived {page; retained = previous; retry = failed}) ->
       Some (Theme.info (),
         Printf.sprintf
-          (if ko then "  %d페이지 응답 수신%s%s · 화면 반영 대기"
-           else "  Page %d response received%s%s · awaiting frame")
+          (if ko then "  %s %d페이지 응답 수신%s%s · 화면 반영 대기"
+           else "  %s Page %d response received%s%s · awaiting frame")
+          (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way)
           page (retained previous) (retry failed))
   | Some (Keeper_peer_failed {page; retained = previous; reason}) ->
       Some (Theme.warn (), keeper_peer_failure_status ~page ~retained:previous ~reason)
@@ -316,12 +364,92 @@ let detail_peer_status state reading =
           ~en:"  Relationship page unavailable · r retry")
   | None -> None
 
-let detail_reading_height state reading ~terminal_rows ~count =
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+let detail_reading_progress_spec state reading =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  match keeper_peer_status_for_reading state reading with
+  | Some (Keeper_peer_loading { page; _ }) ->
+      Some
+        ( "peer-loading:" ^ string_of_int page
+        , say "관계 페이지 읽는 중" "Loading relationship page"
+        , Some (Printf.sprintf (if ko then "%d페이지를 조회하고 있습니다" else "Fetching page %d") page)
+        , false )
+  | Some (Keeper_peer_arrived { page; _ }) ->
+      Some
+        ( "peer-arrived:" ^ string_of_int page
+        , say "관계 페이지 반영 중" "Applying relationship page"
+        , Some (Printf.sprintf (if ko then "%d페이지 응답을 반영하고 있습니다" else "Applying page %d response") page)
+        , false )
+  | Some (Keeper_peer_failed _ | Keeper_peer_kept_back _ | Keeper_peer_current _ | Keeper_peer_unread)
+  | None ->
+      (match current_board_reader state with
+       | Some reader when Masc_tui_board_reader.original_open_pending reader ->
+           Some
+             ( "board-open"
+             , say "원본 파일 여는 중" "Opening original file"
+             , Some (say "외부 뷰어에서 원본 첨부 파일을 열고 있습니다"
+                       "Opening verified attachment in viewer")
+             , true )
+       | Some reader when Option.is_some (Masc_tui_board_reader.pending reader) ->
+           Some
+             ( "board-read"
+             , say "첨부 파일 읽는 중" "Loading attachment"
+             , Some (say "서버에서 첨부 원본을 조회하고 있습니다"
+                       "Fetching attachment bytes from server")
+             , false )
+       | Some reader when Option.is_some (Masc_tui_board_reader.pending_preparation reader) ->
+           Some
+             ( "board-prep"
+             , say "첨부 문서 준비 중" "Preparing attachment"
+             , Some (say "선택한 형식으로 문서를 정리하고 있습니다"
+                       "Preparing attachment for display")
+             , false )
+       | Some _ | None ->
+           (match current_chat_call_reader state with
+            | Some reader when Masc_tui_chat_call_reader.pending reader ->
+                Some
+                  ( "chat-call"
+                  , say "원본 도구 실행 읽는 중" "Loading tool execution"
+                  , Some (say "선택한 실행의 원본 입출력을 조회하고 있습니다"
+                            "Reading original execution transcript")
+                  , false )
+            | Some _ | None ->
+                (match current_task_inspector state with
+                 | Some reader
+                   when Option.is_some (task_inspection_pending reader.tci_original)
+                        || Masc_tui_original_task_read.any_pending
+                             (task_inspection_source reader.tci_original) ->
+                     Some
+                       ( "task-inspect"
+                       , say "원본 작업 정보 읽는 중" "Loading original task"
+                       , Some (say "작업 상세·이력·검증 근거를 조회하고 있습니다"
+                                 "Reading original task details, history, and evidence")
+                       , false )
+                 | Some _ | None -> None)))
+
+let detail_reading_sheet_of_spec ~ko ?started_at = function
+  | None -> None
+  | Some (_, ps_title, ps_detail, ps_blocking) ->
+      Some
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint = Some (if ko then "Esc:뒤로" else "Esc:back")
+        ; ps_blocking
+        }
+
+let detail_reading_height state reading ~terminal_rows ~count:_ =
+  let ko = state.ui_language = Lang_ko in
+  let progress_sheet =
+    detail_reading_sheet_of_spec ~ko (detail_reading_progress_spec state reading)
+  in
+  let budget =
+    surface_chrome_budget ~frame:Chrome_overlay ?progress_sheet state ~terminal_rows
+  in
   match detail_peer_status state reading with
-  | None -> overlay_window_height ~rows ~count
-  | Some _ when surface_chrome_budget state ~terminal_rows <= 1 -> 0
-  | Some _ -> overlay_window_height ~rows:(rows - 1) ~count
+  | None -> max 0 budget
+  | Some _ -> max 0 (budget - 1)
 
 let detail_reading_viewport_at (state : state) reading ~terminal_rows ~cols =
   let count = List.length (detail_reading_document reading ~cols) in
@@ -333,14 +461,28 @@ let detail_reading_viewport (state : state) reading =
 
 let render_detail_reading (state : state) reading =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let say korean english = if ko then korean else english in
   let document = Masc_tui_detail_reading.rows_with_search
       ~width:(detail_reading_width cols) reading in
   let count = List.length document in
-  let height = detail_reading_height state reading ~terminal_rows ~count in
-  let scroll = Masc_tui_detail_reading.scroll ~count ~height reading in
+  let peer_status = detail_peer_status state reading in
+  let active_spec = detail_reading_progress_spec state reading in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"detail-reading" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) active_spec)
+  in
+  let progress_sheet =
+    detail_reading_sheet_of_spec ~ko ?started_at active_spec
+  in
+  let title_badge =
+    match progress_sheet with
+    | None -> ""
+    | Some sheet ->
+        "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+  in
   let source_title = Terminal_text.single_line (Masc_tui_detail_reading.title reading) in
-  let ko = state.ui_language = Lang_ko in
-  let say korean english = if ko then korean else english in
   let title, search_hint = match Masc_tui_detail_reading.search_query reading with
     | None -> source_title, say "/:찾기" "/:find"
     | Some query ->
@@ -361,12 +503,16 @@ let render_detail_reading (state : state) reading =
   let hints=Option.value (Masc_tui_detail_reading.hints reading)
       ~default:(say "j/k:스크롤  PgUp/PgDn:페이지  Home/End:처음/끝  Esc:뒤로"
                   "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back") in
-  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state
+  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay ?progress_sheet ~now state
     ~terminal_rows ~cols ~surface_key:"detail-reading"
-    ~title:(screen_title (" " ^ title))
+    ~title:(screen_title (" " ^ title) ^ title_badge)
     ~hints:(search_hint ^ "  " ^ hints)
-    ~body:(fun ~budget:_ c ->
-      Option.iter (fun (style, text) -> c.push_styled ~style text) (detail_peer_status state reading);
+    ~body:(fun ~budget c ->
+      let peer_rows = if Option.is_some peer_status then 1 else 0 in
+      let height = max 0 (budget - peer_rows) in
+      let scroll = Masc_tui_detail_reading.scroll ~count ~height reading in
+      if budget > 0 then
+        Option.iter (fun (style, text) -> c.push_styled ~style text) peer_status;
       List.iteri (fun index (row,mark) ->
         if index >= scroll && index < scroll + height then
           let text = match row with
@@ -439,6 +585,8 @@ let search_place (origin : code_finder_origin) =
    what is highlighted is what will run. *)
 let render_palette (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let typed_question =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
@@ -455,8 +603,72 @@ let render_palette (state : state) =
   let matches = Masc_tui_palette.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
-  let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
+  let palette_progress_spec =
+    match state.palette_mode with
+    | Masc_tui_types.Palette_worktrees _ ->
+        (match code_worktrees_view state with
+         | Masc_tui_fetched.Loading ->
+             Some
+               ( "worktrees"
+               , say "워크트리 읽는 중" "Reading worktrees"
+               , Some (say "Git 워크트리 목록을 조회하고 있습니다" "Listing Git worktrees")
+               , false )
+         | Absent | Ready _ | Stale _ | Failed _ -> None)
+    | Masc_tui_types.Palette_branches _ ->
+        (match code_branches_view state with
+         | Masc_tui_fetched.Loading ->
+             Some
+               ( "branches"
+               , say "브랜치 읽는 중" "Reading branches"
+               , Some (say "Git 브랜치 목록을 조회하고 있습니다" "Listing Git branches")
+               , false )
+         | Absent | Ready _ | Stale _ | Failed _ -> None)
+    | Masc_tui_types.Palette_search _ ->
+        (match code_search_current state with
+         | Some (key, Masc_tui_fetched.Loading) ->
+             Some
+               ( "search:" ^ key.css_query
+               , say "파일 내 검색 중" "Searching in files"
+               , Some (Terminal_text.single_line key.css_query)
+               , false )
+         | Some (_, (Absent | Ready _ | Stale _ | Failed _)) | None -> None)
+    | Masc_tui_types.Palette_files _ ->
+        (match Masc_tui_fetched.current state.code_finder_file with
+         | Some (_, Masc_tui_fetched.Loading) ->
+             Some
+               ( "open-file"
+               , say "선택한 파일 여는 중" "Opening selected file"
+               , Some (say "파일 내용을 불러오고 있습니다" "Loading file contents")
+               , true )
+         | Some (_, (Absent | Ready _ | Stale _ | Failed _)) | None ->
+             (match code_finder_catalog state with
+              | Masc_tui_fetched.Loading ->
+                  Some
+                    ( "files"
+                    , say "체크아웃 파일 읽는 중" "Reading checkout files"
+                    , Some (say "워크스페이스 파일 목록을 수집하고 있습니다"
+                              "Indexing checkout files")
+                    , false )
+              | Absent | Ready _ | Stale _ | Failed _ -> None))
+    | Masc_tui_types.Palette_jump | Palette_choice _ | Palette_locations _ -> None
+  in
+  let palette_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"palette" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) palette_progress_spec)
+  in
+  let progress_sheet =
+    Option.map
+      (fun (_, ps_title, ps_detail, ps_blocking) ->
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = palette_started_at
+        ; ps_meter = None
+        ; ps_action_hint = Some (say "Esc:닫기" "Esc:close")
+        ; ps_blocking
+        })
+      palette_progress_spec
+  in
   let title, prompt, action =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
@@ -514,95 +726,106 @@ let render_palette (state : state) =
       query
   in
   let finder_notes =
+    let plain text = Terminal_text.single_line text in
+    let loading text = progress_inline ~ko ~now ?started_at:palette_started_at text in
     match state.palette_mode with
     | Palette_jump | Palette_choice _ -> []
     | Palette_worktrees _ ->
-        List.map Terminal_text.single_line
-          (match code_worktrees_view state with
-           | Masc_tui_fetched.Absent ->
-               [ say "워크트리 목록이 비활성 상태입니다 · Esc로 코드 화면 복귀"
-                   "Worktrees are no longer active; Esc returns to Code" ]
-           | Masc_tui_fetched.Loading -> [ say "워크트리 읽는 중" "Reading worktrees" ]
-           | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
-           | Masc_tui_fetched.Ready listing ->
-               [ Printf.sprintf "%s · %s%s"
-                   (palette_count ~ko state.palette_mode
-                      (List.length listing.Tui_decode.gws_worktrees))
-                   (if String.equal listing.gws_root "" then
-                      say "워크스페이스 저장소" "workspace repository"
-                    else listing.gws_root)
-                   (if listing.gws_truncated then say " · 앞부분만 표시" " · first only" else "") ])
+        (match code_worktrees_view state with
+         | Masc_tui_fetched.Absent ->
+             [ plain (say "워크트리 목록이 비활성 상태입니다 · Esc로 코드 화면 복귀"
+                        "Worktrees are no longer active; Esc returns to Code") ]
+         | Masc_tui_fetched.Loading -> [ loading (say "워크트리 읽는 중" "Reading worktrees") ]
+         | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ plain detail ]
+         | Masc_tui_fetched.Ready listing ->
+             [ plain
+                 (Printf.sprintf "%s · %s%s"
+                    (palette_count ~ko state.palette_mode
+                       (List.length listing.Tui_decode.gws_worktrees))
+                    (if String.equal listing.gws_root "" then
+                       say "워크스페이스 저장소" "workspace repository"
+                     else listing.gws_root)
+                    (if listing.gws_truncated then say " · 앞부분만 표시" " · first only" else "")) ])
     | Palette_branches _ ->
-        List.map Terminal_text.single_line
-          (match code_branches_view state with
-           | Masc_tui_fetched.Absent ->
-               [ say "브랜치 목록이 비활성 상태입니다 · Esc로 코드 화면 복귀"
-                   "Branches are no longer active; Esc returns to Code" ]
-           | Masc_tui_fetched.Loading -> [ say "브랜치 읽는 중" "Reading branches" ]
-           | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
-           | Masc_tui_fetched.Ready listing ->
-               [ Printf.sprintf "%s · %s%s"
-                   (palette_count ~ko state.palette_mode
-                      (List.length listing.Tui_decode.gbs_branches))
-                   (if String.equal listing.gbs_root "" then
-                      say "워크스페이스 체크아웃" "workspace checkout"
-                    else listing.gbs_root)
-                   (if listing.gbs_truncated then say " · 최신만 표시" " · newest only" else "") ])
+        (match code_branches_view state with
+         | Masc_tui_fetched.Absent ->
+             [ plain (say "브랜치 목록이 비활성 상태입니다 · Esc로 코드 화면 복귀"
+                        "Branches are no longer active; Esc returns to Code") ]
+         | Masc_tui_fetched.Loading -> [ loading (say "브랜치 읽는 중" "Reading branches") ]
+         | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ plain detail ]
+         | Masc_tui_fetched.Ready listing ->
+             [ plain
+                 (Printf.sprintf "%s · %s%s"
+                    (palette_count ~ko state.palette_mode
+                       (List.length listing.Tui_decode.gbs_branches))
+                    (if String.equal listing.gbs_root "" then
+                       say "워크스페이스 체크아웃" "workspace checkout"
+                     else listing.gbs_root)
+                    (if listing.gbs_truncated then say " · 최신만 표시" " · newest only" else "")) ])
     | Palette_search search_origin ->
-        List.map Terminal_text.single_line
-          (match code_search_current state with
-           | None ->
-               [ Printf.sprintf
-                   (if ko then "%d자 이상 입력 후 Enter로 %s 검색"
-                    else "Type at least %d characters, then Enter to search %s")
-                   code_search_min_query_bytes
-                   (match search_place search_origin with
-                    | None -> say "체크아웃 전체" "the checkout"
-                    | Some dir -> if ko then dir ^ " 하위" else "under " ^ dir) ]
-           | Some (key, Masc_tui_fetched.Loading) ->
-               [ if ko then key.css_query ^ " 검색 중" else "Searching for " ^ key.css_query ]
-           | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) ->
-               [ detail ]
-           | Some (_, Masc_tui_fetched.Ready search) ->
-               (match search.Tui_decode.wss_matches, search.wss_truncated with
-                | _, false -> []
-                | [], true ->
-                    [ say "표시할 일치 항목 없음 · 검색어를 좁혀 주세요"
-                        "No match could be shown · narrow the text" ]
-                | shown, true ->
-                    [ Printf.sprintf
-                        (if ko then "앞의 %d건만 표시됨 · 검색어를 좁혀 주세요"
-                         else "Only the first %d are shown · narrow the text")
-                        (List.length shown) ])
-           | Some (_, Masc_tui_fetched.Absent) -> [])
+        (match code_search_current state with
+         | None ->
+             [ plain
+                 (Printf.sprintf
+                    (if ko then "%d자 이상 입력 후 Enter로 %s 검색"
+                     else "Type at least %d characters, then Enter to search %s")
+                    code_search_min_query_bytes
+                    (match search_place search_origin with
+                     | None -> say "체크아웃 전체" "the checkout"
+                     | Some dir -> if ko then dir ^ " 하위" else "under " ^ dir)) ]
+         | Some (key, Masc_tui_fetched.Loading) ->
+             let label =
+               if ko then Terminal_text.single_line key.css_query ^ " 검색 중"
+               else "Searching for " ^ Terminal_text.single_line key.css_query
+             in
+             [ loading label ]
+         | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) ->
+             [ plain detail ]
+         | Some (_, Masc_tui_fetched.Ready search) ->
+             (match search.Tui_decode.wss_matches, search.wss_truncated with
+              | _, false -> []
+              | [], true ->
+                  [ plain (say "표시할 일치 항목 없음 · 검색어를 좁혀 주세요"
+                             "No match could be shown · narrow the text") ]
+              | shown, true ->
+                  [ plain
+                      (Printf.sprintf
+                         (if ko then "앞의 %d건만 표시됨 · 검색어를 좁혀 주세요"
+                          else "Only the first %d are shown · narrow the text")
+                         (List.length shown)) ])
+         | Some (_, Masc_tui_fetched.Absent) -> [])
     | Palette_locations offer ->
         if code_location_offer_current state offer then
-          [ say "결과 파일과 줄 선택 · Esc:현재 위치 유지"
-              "Choose a returned file and line · Esc keeps the current reading" ]
+          [ plain (say "결과 파일과 줄 선택 · Esc:현재 위치 유지"
+                     "Choose a returned file and line · Esc keeps the current reading") ]
         else
-          [ say "이 위치 결과는 더 이상 최신이 아닙니다 · Esc로 코드 화면 복귀"
-              "These locations are no longer current · Esc returns to Code" ]
+          [ plain (say "이 위치 결과는 더 이상 최신이 아닙니다 · Esc로 코드 화면 복귀"
+                     "These locations are no longer current · Esc returns to Code") ]
     | Palette_files _ ->
         let catalog_note = match code_finder_catalog state with
           | Masc_tui_fetched.Absent ->
-              say "파일 찾기가 비활성 상태입니다 · Esc로 코드 화면 복귀"
-                "File finder is no longer active; Esc returns to Code"
-          | Masc_tui_fetched.Loading -> say "체크아웃 파일 읽는 중" "Reading checkout files"
-          | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> detail
+              plain (say "파일 찾기가 비활성 상태입니다 · Esc로 코드 화면 복귀"
+                       "File finder is no longer active; Esc returns to Code")
+          | Masc_tui_fetched.Loading -> loading (say "체크아웃 파일 읽는 중" "Reading checkout files")
+          | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> plain detail
           | Masc_tui_fetched.Ready catalog ->
-              Printf.sprintf "%s · %s"
-                (palette_count ~ko state.palette_mode
-                   (List.length catalog.Tui_decode.wfc_files))
-                (if String.equal catalog.wfc_root "" then
-                   say "워크스페이스 체크아웃" "workspace checkout"
-                 else catalog.wfc_root) in
+              plain
+                (Printf.sprintf "%s · %s"
+                   (palette_count ~ko state.palette_mode
+                      (List.length catalog.Tui_decode.wfc_files))
+                   (if String.equal catalog.wfc_root "" then
+                      say "워크스페이스 체크아웃" "workspace checkout"
+                    else catalog.wfc_root)) in
         let file_notes = match Masc_tui_fetched.current state.code_finder_file with
-          | Some (_, Masc_tui_fetched.Loading) -> [ say "선택한 파일 여는 중" "Opening selected file" ]
-          | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) -> [detail]
+          | Some (_, Masc_tui_fetched.Loading) ->
+              [ loading (say "선택한 파일 여는 중" "Opening selected file") ]
+          | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) ->
+              [ plain detail ]
           | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _)) -> [] in
-        List.map Terminal_text.single_line (catalog_note :: file_notes)
+        catalog_note :: file_notes
   in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"palette"
+  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols
+    ~surface_key:"palette"
     ~frame:Chrome_overlay
     ~title:
       (title ^ prompt ^ query
@@ -768,8 +991,11 @@ let link_modal_viewport (state : state) =
 
 let render_link_preview_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   match link_modal_card state with
   | None ->
+      ignore (Masc_tui_types.progress_clock_option state ~slot:"link-preview" ~now None);
       surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"link-modal"
         ~frame:Chrome_overlay
         ~title:
@@ -781,22 +1007,54 @@ let render_link_preview_modal (state : state) =
           c.push
             (ui_text state ~ko:"  (이 대화에서 미리볼 웹 링크가 없습니다)"
                ~en:"  (no web links found in this conversation to preview)"))
-  | Some (_url, preview, total_links, content_height, content_lines) ->
+  | Some (_url, preview, total_links, _content_height, content_lines) ->
       let site = Masc_tui_link_preview.site_label preview in
       let total = List.length content_lines in
-      let max_scroll = max 0 (total - content_height) in
-      let scroll = max 0 (min state.link_modal_scroll max_scroll) in
+      let mosaic_loading =
+        Option.exists Masc_tui_link_preview.mosaic_pending
+          preview.Masc_tui_link_preview.image_url
+      in
+      let started_at =
+        Masc_tui_types.progress_clock_option state ~slot:"link-preview" ~now
+          (if mosaic_loading then preview.Masc_tui_link_preview.image_url else None)
+      in
+      let progress_sheet =
+        if not mosaic_loading then None
+        else
+          Some
+            { ps_title =
+                ui_text state ~ko:"미리보기 이미지 불러오는 중"
+                  ~en:"Loading preview image"
+            ; ps_detail = Some (Terminal_text.single_line site)
+            ; ps_started_at = started_at
+            ; ps_meter = None
+            ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+            ; ps_blocking = false
+            }
+      in
+      let title_badge =
+        match progress_sheet with
+        | None -> ""
+        | Some sheet ->
+            "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+      in
+      let scroll_ref = ref 0 in
       surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
         ~frame:Chrome_overlay
-        ~overflow:(Self_scrolled (fun () -> Link_modal_scroll scroll))
+        ?progress_sheet ~now
+        ~overflow:(Self_scrolled (fun () -> Link_modal_scroll !scroll_ref))
         ~title:
           (screen_title (ui_text state ~ko:" 링크 미리보기" ~en:" Link preview")
            ^ "  " ^ Ansi.bold
-           ^ Terminal_text.single_line site ^ Ansi.reset)
+           ^ Terminal_text.single_line site ^ Ansi.reset ^ title_badge)
         ~hints:
           (Masc_tui_link_preview.modal_hints ~total_links
              ~has_image:(Option.is_some preview.Masc_tui_link_preview.image_url))
-        ~body:(fun ~budget:_ c ->
+        ~body:(fun ~budget c ->
+          let height = max 1 budget in
+          let max_scroll = max 0 (total - height) in
+          let scroll = max 0 (min state.link_modal_scroll max_scroll) in
+          scroll_ref := scroll;
           (* Which link of several is the position; a preview taller than
              its rows is read through a window, which then is. *)
           if total_links > 1 then
@@ -804,10 +1062,10 @@ let render_link_preview_modal (state : state) =
               (Masc_tui_value.Position.row ~selected:(Some state.link_modal_cursor)
                  ~total:total_links);
           Option.iter c.position
-            (Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total);
+            (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total);
           List.iteri
             (fun index line ->
-              if index >= scroll && index < scroll + content_height then
+              if index >= scroll && index < scroll + height then
                 c.push line)
             content_lines)
 
@@ -878,19 +1136,50 @@ let keeper_deletions_viewport (state : state) =
    failed read, footer on row 9). The contract fills to the bottom. *)
 let render_keeper_deletions (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let lines = keeper_deletions_lines state ~cols in
-  let count, height = keeper_deletions_viewport state in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
+  let count = List.length lines in
+  let loading = state.keeper_deletions_loading in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"keeper-deletions" ~now
+      (if loading then Some ("active:" ^ string_of_int state.keeper_deletions_generation)
+       else None)
+  in
+  let progress_sheet =
+    if not loading then None
+    else
+      Some
+        { ps_title =
+            ui_text state ~ko:"삭제 기록 조회·재시도 중" ~en:"Loading/retrying deletions"
+        ; ps_detail =
+            Some
+              (ui_text state ~ko:"키퍼 삭제 작업 이력과 복구 상태를 조회하고 있습니다"
+                 ~en:"Reading Keeper deletion operations and retry state")
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+        ; ps_blocking = true
+        }
+  in
+  let viewport_height =
+    max 1 (surface_chrome_budget ~frame:Chrome_overlay ?progress_sheet state ~terminal_rows)
+  in
+  let title_badge =
+    match progress_sheet with
+    | None -> ""
+    | Some sheet ->
+        "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+  in
+  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols
+    ~surface_key:"keeper-deletions"
     ~frame:Chrome_overlay
     ~title:
-      (let ko = state.ui_language = Lang_ko in
-       screen_title (if ko then " 키퍼 삭제 기록" else " Keeper deletion records")
-       ^ (if not state.keeper_deletions_loading then ""
-          else if ko then " · 조회/재시도 중" else " · loading/retrying"))
-    ~hints:(keeper_deletions_hints state ~scrollable:(count > height))
-    (* [keeper_deletions_viewport] rather than the budget it is derived from:
-       the keypress bounds the scroll against that pair. *)
-    ~body:(fun ~budget:_ c ->
+      (screen_title (if ko then " 키퍼 삭제 기록" else " Keeper deletion records")
+       ^ title_badge)
+    ~hints:(keeper_deletions_hints state ~scrollable:(count > viewport_height))
+    ~body:(fun ~budget c ->
+      let height = max 1 budget in
       let scroll =
         Masc_tui_scroll.normalize ~count ~height state.keeper_deletions_scroll
       in
@@ -1091,20 +1380,87 @@ let queue_panel_detail_lines state (panel : queue_panel) ~cols =
   Message_layout.wrap_body ~max_cells:(max 1 (framed_inner_width cols - 2))
     ~sanitize:Terminal_text.single_line content
 
+let queue_panel_progress_spec state (panel : queue_panel) =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  if Option.is_some panel.qp_detail then
+    let items = queue_panel_items state panel in
+    match queue_panel_detail_reading ~items panel with
+    | Queue_detail_loading ->
+        Some
+          ( "queue-detail"
+          , panel.qp_keeper
+          , say "대기열 요청 처리 중" "Processing queue request"
+          , Some
+              (say "서버 대기열 항목 응답을 기다리고 있습니다"
+                 "Waiting for server queue item response")
+          , Some (say "Esc:목록" "Esc:list")
+          , true )
+    | Queue_detail_ready _ | Queue_detail_unavailable _
+    | Queue_detail_missing | Queue_detail_none -> None
+  else
+    let queue_busy =
+      panel.qp_reading = Queue_loading
+      || List.mem panel.qp_keeper state.keeper_queue_inflight
+    in
+    let run_next_busy =
+      List.exists
+        (fun (r : Masc_tui_keeper_chat_projection.request) ->
+          String.equal r.keeper_name panel.qp_keeper)
+        state.keeper_run_next_inflight
+    in
+    if run_next_busy then
+      Some
+        ( "queue-list"
+        , "run-next:" ^ panel.qp_keeper
+        , say "다음 작업 실행 중" "Running next queued turn"
+        , Some (Terminal_text.single_line panel.qp_keeper)
+        , Some (say "Esc:닫기" "Esc:close")
+        , true )
+    else if queue_busy then
+      Some
+        ( "queue-list"
+        , "queue:" ^ panel.qp_keeper
+        , say "대기열 조회·전송 중" "Updating queue"
+        , Some
+            (say "서버 대기열 상태와 제어 요청을 처리하고 있습니다"
+               "Reading queue snapshot or applying queue action")
+        , Some (say "Esc:닫기" "Esc:close")
+        , false )
+    else None
+
+let queue_panel_sheet_of_spec ?started_at = function
+  | None -> None
+  | Some (_, _, ps_title, ps_detail, ps_action_hint, ps_blocking) ->
+      Some
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint
+        ; ps_blocking
+        }
+
 let queue_panel_detail_viewport state panel =
   let terminal_rows, cols = get_terminal_size () in
   let count = List.length (queue_panel_detail_lines state panel ~cols) in
-  let budget = surface_chrome_budget state ~terminal_rows in
+  let progress_sheet = queue_panel_sheet_of_spec (queue_panel_progress_spec state panel) in
+  let budget = surface_chrome_budget ?progress_sheet state ~terminal_rows in
   let height = queue_panel_window_height ~budget in
   count, height
 
-let queue_panel_layout state (panel : queue_panel) =
+let queue_panel_layout ?progress_sheet state (panel : queue_panel) =
   let terminal_rows, cols = get_terminal_size () in
+  let progress_sheet =
+    match progress_sheet with
+    | Some _ as sheet -> sheet
+    | None -> queue_panel_sheet_of_spec (queue_panel_progress_spec state panel)
+  in
   let has_context = view_is_chat state.view
       && state.msg_target_keeper_name = Some panel.qp_keeper
       && Option.is_none panel.qp_detail in
   Masc_tui_queue_layout.choose panel.qp_layout ~has_context ~cols
-    ~body_rows:(surface_chrome_budget state ~terminal_rows)
+    ~body_rows:(surface_chrome_budget ?progress_sheet state ~terminal_rows)
     (* Reserve status, a possible receipt and a possible selection note when
        choosing placement, so selecting or receiving a result does not move it. *)
     ~queue_fixed_rows:3
@@ -1112,8 +1468,10 @@ let queue_panel_layout state (panel : queue_panel) =
 
 let queue_panel_list_budget state panel =
   let terminal_rows, _ = get_terminal_size () in
+  let progress_sheet = queue_panel_sheet_of_spec (queue_panel_progress_spec state panel) in
   Masc_tui_queue_layout.queue_rows
-    ~body_rows:(surface_chrome_budget state ~terminal_rows) (queue_panel_layout state panel)
+    ~body_rows:(surface_chrome_budget ?progress_sheet state ~terminal_rows)
+    (queue_panel_layout ?progress_sheet state panel)
 
 let queue_panel_viewport state panel =
   let qv_placement = queue_panel_layout state panel in
@@ -1128,18 +1486,36 @@ let queue_panel_viewport state panel =
 let render_queue_panel (state : state) (panel : queue_panel) =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let say korean english = if ko then korean else english in
-  let title label = screen_title label ^ "  " ^ Terminal_text.single_line panel.qp_keeper
+  let title ?(badge = "") label =
+    screen_title label ^ "  " ^ Terminal_text.single_line panel.qp_keeper
     ^ (if Option.is_some panel.qp_detail then "" else match panel.qp_layout with
        | Masc_tui_queue_layout.Adaptive -> say " · 자동" " · automatic"
-       | Expanded -> say " · 전체" " · full") in
+       | Expanded -> say " · 전체" " · full")
+    ^ badge
+  in
+  let spec = queue_panel_progress_spec state panel in
   let owner () = Queue_panel_presented
       (queue_panel_owner state panel ~viewport:(queue_panel_viewport state panel)) in
-  if Option.is_some panel.qp_detail then
+  if Option.is_some panel.qp_detail then begin
+    Masc_tui_types.clear_progress_clock state ~slot:"queue-list";
+    let detail_started_at =
+      Masc_tui_types.progress_clock_option state ~slot:"queue-detail" ~now
+        (Option.map (fun (_, sig_key, _, _, _, _) -> sig_key) spec)
+    in
+    let progress_sheet = queue_panel_sheet_of_spec ?started_at:detail_started_at spec in
+    let badge =
+      match progress_sheet with
+      | None -> ""
+      | Some sheet ->
+          "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+    in
     let lines = queue_panel_detail_lines state panel ~cols in
-    surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
+    surface_chrome ~overflow:(Self_scrolled owner) ?progress_sheet ~now state
+      ~terminal_rows ~cols
       ~surface_key:"keeper-queue-detail" ~frame:Chrome_overlay
-      ~title:(title (say " 대기열 항목" " Queue item"))
+      ~title:(title ~badge (say " 대기열 항목" " Queue item"))
       ~hints:(Masc_tui_keys.footer_hints_queue state panel)
       ~body:(fun ~budget c ->
         let count = List.length lines in
@@ -1150,15 +1526,27 @@ let render_queue_panel (state : state) (panel : queue_panel) =
         if budget > 0 then
           Option.iter c.position
             (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
-  else
-  let placement = queue_panel_layout state panel in
+  end else begin
+  Masc_tui_types.clear_progress_clock state ~slot:"queue-detail";
+  let list_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"queue-list" ~now
+      (Option.map (fun (_, sig_key, _, _, _, _) -> sig_key) spec)
+  in
+  let progress_sheet = queue_panel_sheet_of_spec ?started_at:list_started_at spec in
+  let badge =
+    match progress_sheet with
+    | None -> ""
+    | Some sheet ->
+        "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+  in
+  let placement = queue_panel_layout ?progress_sheet state panel in
   let context_caption =
     let partial = Option.is_some state.msg_loaded_error || state.msg_loaded_dropped > 0
         || Option.is_some state.msg_memory_error || state.msg_memory_dropped > 0
         || Option.is_some state.msg_older_error in
     if partial then say "일부 대화만 로드됨 · Esc:전체 대화" "Partial conversation · Esc:full chat"
     else if state.msg_older_loading || Option.is_some state.msg_history_inflight then
-      say "대화 읽는 중 · Esc:전체 대화" "Reading conversation · Esc:full chat"
+      progress_inline ~ko ~now (say "대화 읽는 중 · Esc:전체 대화" "Reading conversation · Esc:full chat")
     else say "대화 미리보기 · Esc:전체 대화" "Conversation preview · Esc:full chat" in
   let context_lines ~cols ~height =
     Masc_tui_render_chat.queue_context_lines state ~keeper_name:panel.qp_keeper ~cols ~height in
@@ -1182,7 +1570,9 @@ let render_queue_panel (state : state) (panel : queue_panel) =
     say "워크스페이스 미확인 · 아래 영수증은 이전 관측입니다"
       "Workspace unconfirmed; any receipt is from the previous observation"
   else match panel.qp_reading, panel.qp_notice with
-    | Queue_loading, _ -> say "읽기 또는 전송 중" "Reading or sending"
+    | Queue_loading, _ ->
+        progress_inline ~ko ~now ?started_at:list_started_at
+          (say "읽기 또는 전송 중" "Reading or sending")
     | (Queue_current | Queue_unavailable), Some (Queue_info text | Queue_error text) -> Terminal_text.single_line text
     | Queue_current, None ->
       (match panel.qp_observation with
@@ -1193,21 +1583,28 @@ let render_queue_panel (state : state) (panel : queue_panel) =
        | None -> say "대기열 관측 불가 · r:재시도" "Queue observation unavailable · r retries")
     | Queue_unavailable, None -> say "스냅샷 조회 불가 · r:재시도" "Snapshot unavailable · r retries" in
   let hints = Masc_tui_keys.footer_hints_queue state panel in
-  let frame, clamped = surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
+  let frame, clamped = surface_chrome ~overflow:(Self_scrolled owner) ?progress_sheet ~now
+    state ~terminal_rows ~cols
     ?sidebar
     ~surface_key:"keeper-queue" ~frame:Chrome_overlay
-    ~title:(title (say " 대기열" " Queue"))
+    ~title:(title ~badge (say " 대기열" " Queue"))
     ~hints
     ~body:(fun ~budget c ->
-      (match placement with
-       | Masc_tui_queue_layout.Bottom {context_rows; queue_rows=_} ->
-           c.push context_caption;
-           let lines = context_lines ~cols:(framed_inner_width cols) ~height:(context_rows-1) in
-           List.iter c.push lines;
-           for _ = List.length lines to context_rows - 2 do c.push_empty () done;
-           c.push_divider ()
-       | Full | Side _ -> ());
-      let budget = Masc_tui_queue_layout.queue_rows ~body_rows:budget placement in
+      let queue_budget =
+        match placement with
+        | Masc_tui_queue_layout.Bottom {context_rows; queue_rows=_} ->
+            let ctx = min context_rows (max 0 (budget - 1)) in
+            if ctx >= 2 then begin
+              c.push context_caption;
+              let lines = context_lines ~cols:(framed_inner_width cols) ~height:(ctx - 1) in
+              List.iter c.push lines;
+              for _ = List.length lines to ctx - 2 do c.push_empty () done;
+              c.push_divider ();
+              max 0 (budget - ctx - 1)
+            end else budget
+        | Full | Side _ -> budget
+      in
+      let budget = queue_budget in
       if budget > 0 then c.push ("  " ^ status);
       (match panel.qp_receipt with
        | Some (Queue_action_receipt (Queue_info text) | Queue_read_receipt text) when budget > 1 ->
@@ -1255,8 +1652,9 @@ let render_queue_panel (state : state) (panel : queue_panel) =
      copies as separate documents, even though the terminal writes one row. *)
   frame_panes := Masc_tui_queue_layout.panes placement ~cols
       ~first_row:(strip_rows + surface_chrome_rows - 1)
-      ~body_rows:(surface_chrome_budget state ~terminal_rows);
+      ~body_rows:(surface_chrome_budget ?progress_sheet state ~terminal_rows);
   frame, clamped
+  end
 
 (* The answering overlay, through the overlay contract. Drawn by hand, a short
    list closed the box right under the preview panel, so the footer stood on
@@ -1581,13 +1979,36 @@ let render_terminal_too_small state (reason : Render_schedule.Viewport.too_small
 let render_account_login state view =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
-  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
+  let now = Unix.gettimeofday () in
+  let base_title = screen_title (ui_text state ~ko:" 계정 로그인" ~en:" Account Login") in
+  let title =
+    match Masc_tui_account_login.progress_badge ~ko ~now view with
+    | None -> base_title
+    | Some badge -> base_title ^ "  " ^ Theme.info () ^ badge ^ Ansi.reset
+  in
+  let progress_sheet =
+    Option.map
+      (fun (info : Masc_tui_account_login.progress_info) ->
+        { ps_title = info.title
+        ; ps_detail = info.detail
+        ; ps_started_at = info.started_at
+        ; ps_meter =
+            Option.map
+              (fun (pm_done, pm_total, pm_failed) -> { pm_done; pm_total; pm_failed })
+              info.meter
+        ; ps_action_hint = info.action_hint
+        ; ps_blocking = info.blocking
+        })
+      (Masc_tui_account_login.progress_info ~ko view)
+  in
+  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay ?progress_sheet ~now
+    state ~terminal_rows ~cols
     ~surface_key:"account-login"
-    ~title:(screen_title (ui_text state ~ko:" 계정 로그인" ~en:" Account Login"))
+    ~title
     ~hints:(Masc_tui_account_login.hints ~ko view)
     ~body:(fun ~budget c ->
       let lines, position =
-        Masc_tui_account_login.visible_lines ~ko ~height:budget ~width:(framed_inner_width cols) view in
+        Masc_tui_account_login.visible_lines ~ko ~now ~height:budget ~width:(framed_inner_width cols) view in
       Option.iter c.position position;
       let width = framed_inner_width cols in
       List.iter
@@ -1597,6 +2018,9 @@ let render_account_login state view =
               if String.starts_with ~prefix:"\xe2\x80\xba " clean then
                 c.push_selected (fit_width (Masc_tui_theme.strip_sgr clean) width)
               else c.push (fit_width clean width)
+          | Masc_tui_account_login.Progress text ->
+              let clean = Masc.Tui_terminal_text.sanitize_terminal_text text in
+              c.push (Theme.info () ^ fit_width clean width ^ Ansi.reset)
           | Masc_tui_account_login.Terminal line ->
               let rendered =
                 Masc_tui_sgr_text.render
@@ -1664,9 +2088,65 @@ let render_account_server state ~version =
 let render_collab state view =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let status = Masc_tui_collab.progress_status view in
+  let signature =
+    match status with
+    | `Idle -> None
+    | `Pending_write -> Some "write"
+    | `Write_access_pending _ -> Some "write-access-pending"
+    | `Loading -> Some "loading"
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"collab" ~now signature
+  in
+  let progress_sheet =
+    match status with
+    | `Idle -> None
+    | `Pending_write ->
+        Some
+          { ps_title = ui_text state ~ko:"협업 상태 변경 중" ~en:"Updating collaboration"
+          ; ps_detail =
+              Some
+                (ui_text state ~ko:"요청한 협업 변경을 서버에 반영하고 있습니다"
+                   ~en:"Applying the requested collaboration change")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+          ; ps_blocking = true
+          }
+    | `Write_access_pending detail ->
+        Some
+          { ps_title = ui_text state ~ko:"초대 변경 대기 중" ~en:"Invite change pending"
+          ; ps_detail = Some (Terminal_text.single_line detail)
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+          ; ps_blocking = true
+          }
+    | `Loading ->
+        Some
+          { ps_title = ui_text state ~ko:"협업 현황 읽는 중" ~en:"Loading collaboration"
+          ; ps_detail =
+              Some
+                (ui_text state ~ko:"협업 세션과 쓰기 권한 상태를 조회하고 있습니다"
+                   ~en:"Reading collaboration sessions and write access")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+          ; ps_blocking = false
+          }
+  in
+  let title_badge =
+    match progress_sheet with
+    | None -> ""
+    | Some sheet ->
+        "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+  in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ?progress_sheet ~now
     ~surface_key:"collab"
-    ~title:(screen_title (ui_text state ~ko:" 협업" ~en:" Collab"))
+    ~title:(screen_title (ui_text state ~ko:" 협업" ~en:" Collab") ^ title_badge)
     ~hints:(Masc_tui_collab.hints ~ko view)
     ~body:(fun ~budget c ->
       Option.iter c.position (Masc_tui_collab.position view);
@@ -1679,11 +2159,134 @@ let render_collab state view =
 
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
-  let say ko en = ui_text state ~ko ~en in
-  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols ~surface_key:"lanes"
-    ~title:(screen_title (say " 플러그인" " Plugins"))
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let say ko_text en_text = ui_text state ~ko:ko_text ~en:en_text in
+  let detaching_instance =
+    match view.screen, view.snapshot with
+    | Masc_tui_lane_addons.Detail (id, inc), Some snap ->
+        List.find_opt
+          (fun (inst : Masc_tui_lane_addons.instance) ->
+            String.equal inst.id id && String.equal inst.incarnation inc
+            && inst.phase = Masc_tui_lane_addons.Row.Detaching)
+          snap.instances
+    | Masc_tui_lane_addons.Detail _, None -> None
+    | Masc_tui_lane_addons.Overview, (Some _ | None) ->
+        (match Masc_tui_lane_addons.selected_instance view with
+         | Some inst when inst.phase = Masc_tui_lane_addons.Row.Detaching -> Some inst
+         | Some _ | None -> None)
+  in
+  let gen = string_of_int view.generation in
+  let active_spec =
+    match Option.bind view.installer Masc_tui_lane_installer.pending_read with
+    | Some (Masc_tui_lane_installer.Read_preview path) ->
+        Some
+          ( "preview:" ^ gen ^ ":" ^ path
+          , say "패키지 매니페스트 검사 중" "Inspecting package manifest"
+          , Some (Terminal_text.single_line path)
+          , Some (say "Esc:취소" "Esc:cancel")
+          , true )
+    | Some (Masc_tui_lane_installer.Read_catalog dir) ->
+        Some
+          ( "catalog:" ^ gen ^ ":" ^ Option.value ~default:"" dir
+          , say "패키지 목록 읽는 중" "Reading package catalog"
+          , Option.map Terminal_text.single_line dir
+          , Some (say "Esc:취소" "Esc:cancel")
+          , false )
+    | None ->
+        if view.loading then
+          if Option.exists Masc_tui_lane_subscriptions.is_confirming_save view.subscription_panel then
+            Some
+              ( "sub-save:" ^ gen
+              , say "구독 설정 저장 중" "Saving subscriptions"
+              , Some (say "선택한 키퍼 구독 구성을 저장하고 있습니다"
+                        "Saving Keeper subscription configuration")
+              , Some (say "Esc:뒤로" "Esc:back")
+              , true )
+          else if Option.is_some view.subscription_panel then
+            Some
+              ( "sub-read:" ^ gen
+              , say "구독 설정 읽는 중" "Loading subscriptions"
+              , Some (say "구독 구성과 읽기 위치를 조회하고 있습니다"
+                        "Reading subscriptions and reader positions")
+              , Some (say "Esc:뒤로" "Esc:back")
+              , false )
+          else
+            Some
+              ( "loading:" ^ gen
+              , say "플러그인 조회·처리 중" "Updating plugins"
+              , Some (say "플러그인 인스턴스와 선언 상태를 갱신하고 있습니다"
+                        "Refreshing plugin instances and declarations")
+              , Some (say "Esc:닫기" "Esc:close")
+              , false )
+        else
+          match view.action_receipt with
+          | Some ({ Masc_tui_lane_addons.Action.state = Queued; request_id; _ }) ->
+              Some
+                ( "action-queued:" ^ request_id
+                , say "플러그인 동작 대기 중" "Plugin action queued"
+                , Some (Terminal_text.single_line request_id)
+                , Some (say "Esc:닫기" "Esc:close")
+                , true )
+          | Some ({ Masc_tui_lane_addons.Action.state = Running; request_id; _ }) ->
+              Some
+                ( "action-running:" ^ request_id
+                , say "플러그인 동작 실행 중" "Running plugin action"
+                , Some (Terminal_text.single_line request_id)
+                , Some (say "Esc:닫기" "Esc:close")
+                , true )
+          | Some ({ Masc_tui_lane_addons.Action.state =
+                      (Confirmed | Failed_before_effect | Outcome_unknown); _ })
+          | None ->
+              if Masc_tui_lane_addons.Application.pending view.application_reading then
+                Some
+                  ( "app-read:" ^ gen
+                  , say "선언 적용 상태 확인 중" "Checking declaration state"
+                  , Some (say "저장된 TOML 선언이 워커에 반영되었는지 확인하고 있습니다"
+                            "Checking whether saved TOML declarations applied")
+                  , Some (say "Esc:닫기" "Esc:close")
+                  , false )
+              else
+                match detaching_instance with
+                | Some inst ->
+                    Some
+                      ( "detaching:" ^ inst.id ^ ":" ^ inst.incarnation
+                      , say "워커 분리 정리 중" "Detaching worker"
+                      , Some (Terminal_text.single_line inst.title)
+                      , Some (say "Esc:닫기" "Esc:close")
+                      , false )
+                | None -> None
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"lane-addons" ~now
+      (Option.map (fun (sig_key, _, _, _, _) -> sig_key) active_spec)
+  in
+  let progress_sheet =
+    Option.map
+      (fun (_, ps_title, ps_detail, ps_action_hint, ps_blocking) ->
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint
+        ; ps_blocking
+        })
+      active_spec
+  in
+  let title_badge =
+    match progress_sheet with
+    | None -> ""
+    | Some sheet ->
+        "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+  in
+  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ?progress_sheet ~now ~surface_key:"lanes"
+    ~title:(screen_title (say " 플러그인" " Plugins") ^ title_badge)
     ~hints:(if Option.is_some view.evidence_prompt then
         say "j/k:선택  Enter:보존  Esc:뒤로" "j/k:choose  Enter:preserve  Esc:back"
+      else if Option.is_some view.subscription_panel && view.loading then
+        say "구독 요청 진행 중  J/K:스크롤  Esc:뒤로"
+          "Subscription request in progress  J/K:scroll  Esc:back"
       else if Option.is_some view.subscription_panel then
         say "j/k:선택  Enter:선택/저장  a:추가  d:제거  J/K:스크롤  r:새로고침  Esc:뒤로"
           "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"

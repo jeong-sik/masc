@@ -632,7 +632,7 @@ let a_login_address_wraps_whole () =
   t.output <- "Open this address in your browser:\n\027[94m" ^ address ^ "\027[0m";
   let width = 32 in
   let rows = fst (Login.visible_lines ~height:40 ~width t) in
-  let terminal = List.filter_map (function Login.Terminal line -> Some line | Login.Text _ -> None) rows in
+  let terminal = List.filter_map (function Login.Terminal line -> Some line | Login.Text _ | Login.Progress _ -> None) rows in
   List.iter (fun line ->
     check bool "no row is wider than the pane" true
       (Masc_tui_message_layout.display_width (Sgr_text.text line) <= width)) terminal;
@@ -1300,7 +1300,144 @@ let quota_scope_group_id_is_opaque () =
   | [group] -> check string "32-character history scope ID is retained unchanged" scope_id group.group_id
   | _ -> fail "quota scope group was lost or rejected"
 
+let select_all_antigravity_batch () =
+  let t = Login.create "antigravity" in
+  t.provider <- Some { provider with client = Login.Antigravity };
+  t.account_ref <- Some account;
+  let ready = { (model 0) with context = Some 32768; tools = Some true } in
+  let unknown_a = { (model 1) with context = None; tools = Some true } in
+  let unknown_b = { (model 2) with context = None; tools = Some true } in
+  let no_tools = { (model 3) with context = None; tools = Some false } in
+  let bound = { (model 4) with context = None; tools = Some true } in
+  let doc rows =
+    `Assoc [ "models", `List (List.map (fun ((m : Login.model), is_bound) ->
+      `Assoc [ "id", `String m.id; "label", `String m.label; "bound", `Bool is_bound
+             ; "context", (match m.context with Some n -> `Int n | None -> `Null)
+             ; "tools", (match m.tools with Some b -> `Bool b | None -> `Null) ]) rows) ]
+  in
+  ok (Login.models t (doc [ ready, false; unknown_a, false; unknown_b, false; no_tools, false; bound, true ]));
+  let batch =
+    match Login.key t "a" with
+    | Login.Prepare_batch batch -> batch
+    | _ -> fail "select-all on Antigravity should queue unknown-context models"
+  in
+  check (list string) "ready models are selected immediately" [ ready.id ] t.selected_models;
+  check string "first unknown model leads the batch" unknown_a.id batch.current.id;
+  check (list string) "only unbound tool-capable unknown models enter the batch"
+    [ unknown_b.id ] (List.map (fun (m : Login.model) -> m.id) batch.remaining);
+  check int "batch total matches queued models" 2 batch.total;
+  Login.preparing_batch ~at:100.0 t batch;
+  check bool "batch preparation is in progress" true (Login.in_progress t);
+  (match Login.progress_info ~ko:true t with
+   | Some info ->
+       check bool "batch progress sheet is blocking" true info.blocking;
+       check (option (triple int int int)) "batch progress sheet carries determinate meter"
+         (Some (0, 2, 0)) info.meter;
+       check (option (float 0.001)) "batch progress sheet carries start timestamp"
+         (Some 100.0) info.started_at
+   | None -> fail "batch preparation must emit progress_info");
+  check bool "batch preparation does not claim text input" false (Login.text_input_active t);
+  check bool "cancel key stops batch preparation" true (Login.key t "c" = Login.Cancel_prepare);
+  check bool "other selection keys stay ignored while preparing" true (Login.key t "a" = Login.Nothing);
+  check bool "esc still closes during batch preparation" true (Login.key t "esc" = Login.Close);
+  (* First model succeeds; second model fails -> batch completes cleanly without dropping model 1. *)
+  let next_batch =
+    match Login.prepared_batch_step t batch (Ok (`Assoc [ "model", `String unknown_a.id; "context", `Int 131072 ])) with
+    | Some next -> next
+    | None -> fail "remaining model should advance the batch"
+  in
+  check string "second model becomes current" unknown_b.id next_batch.current.id;
+  check int "completed count increments" 1 next_batch.completed;
+  Login.preparing_batch ~at:105.0 t next_batch;
+  check (option (float 0.001)) "continuing batch preserves original start timestamp" (Some 100.0) t.activity_started_at;
+  check bool "final step finishes the batch" true
+    (Option.is_none (Login.prepared_batch_step t next_batch (Error "timeout")));
+  check bool "finished batch returns to model selection" true (t.phase = Login.Models && not (Login.in_progress t));
+  check (option (float 0.001)) "finished batch clears activity timer" None t.activity_started_at;
+  (match Login.key t "enter" with
+   | Login.Save chosen ->
+       check (list string) "verified and already-ready models reach save" [ ready.id; unknown_a.id ]
+         (List.map (fun (m : Login.model) -> m.id) chosen)
+   | _ -> fail "expected Save with ready and observed models");
+  (* Pressing a again deselects rather than looping forever on the failed model. *)
+  check bool "select-all toggles off instead of re-probing a failed model" true (Login.key t "a" = Login.Nothing);
+  check (list string) "selection clears cleanly" [] t.selected_models;
+  check bool "uppercase A selects all ready models" true (Login.key t "A" = Login.Nothing);
+  check (list string) "ready and observed models re-select" [ ready.id; unknown_a.id ] t.selected_models;
+  (* Space still explicitly retries a previously failed model. *)
+  t.cursor <- 2;
+  check bool "Space explicitly retries a previously failed model" true (Login.key t " " = Login.Prepare unknown_b);
+  (* Refresh resets failed history so select-all retries unknown_b again. *)
+  ok (Login.refreshed_models t (doc [ ready, false; unknown_a, false; unknown_b, false; no_tools, false; bound, true ]));
+  check (list string) "refresh clears prior context failures" [] t.failed_context_models;
+  let retry_batch =
+    match Login.key t "a" with
+    | Login.Prepare_batch retry -> check string "select-all retries after refresh" unknown_b.id retry.current.id; retry
+    | _ -> fail "expected Prepare_batch after refresh"
+  in
+  (* Cancelling or interrupting does not mark a model as failed and preserves observed selections. *)
+  Login.preparing_batch ~at:200.0 t retry_batch;
+  Login.cancel_prepare t;
+  check bool "cancel returns to models and keeps selections without marking failed" true
+    (t.phase = Login.Models && List.mem unknown_a.id t.selected_models && not (List.mem unknown_b.id t.failed_context_models));
+  (* Pressing a right after cancelling deselects all instead of re-trapping into the cancelled batch. *)
+  check bool "select-all after cancel deselects cleanly instead of re-launching" true
+    (Login.key t "a" = Login.Nothing);
+  check (list string) "selection clears after cancel + a" [] t.selected_models;
+  (* Pressing a once more restarts the batch from empty selection. *)
+  let restarted_batch =
+    match Login.key t "a" with
+    | Login.Prepare_batch restarted ->
+        check (list string) "restarted batch remembers empty prior selection" [] restarted.previous_selected;
+        check string "restarted batch probes unknown_b again" unknown_b.id restarted.current.id;
+        restarted
+    | _ -> fail "expected Prepare_batch on second a after deselect"
+  in
+  Login.preparing_batch ~at:210.0 t restarted_batch;
+  Login.prepare_interrupted t "workspace reconfirming";
+  check bool "interrupt returns to models and keeps selections without marking failed" true
+    (t.phase = Login.Models && List.mem unknown_a.id t.selected_models && not (List.mem unknown_b.id t.failed_context_models))
+
+let select_all_non_antigravity_and_progress_clock () =
+  List.iter (fun client ->
+    let t = Login.create "" in
+    t.provider <- Some { provider with client };
+    t.phase <- Login.Models;
+    let ready = { (model 0) with context = Some 32768; tools = Some true } in
+    let unknown = { (model 1) with context = None; tools = Some true } in
+    t.models <- [ ready; unknown ];
+    check bool "non-Antigravity select-all never dispatches native context probes" true
+      (Login.key t "a" = Login.Nothing);
+    check (list string) "ready models still select on non-Antigravity" [ ready.id ] t.selected_models;
+    t.models <- [ unknown ];
+    t.selected_models <- [];
+    check bool "all-unknown non-Antigravity select-all sends no request" true
+      (Login.key t "a" = Login.Nothing))
+    [ Login.Codex; Login.Claude; Login.Muse ];
+  let t = Login.create "antigravity" in
+  check bool "initial loading is in progress" true (Login.in_progress t);
+  check bool "loading does not claim text input" false (Login.text_input_active t);
+  Login.note_activity_started ~at:1000.0 t;
+  Masc_tui_value.Redraw.begin_frame ();
+  check bool "in-progress badge is present" true (Option.is_some (Login.progress_badge ~ko:true ~now:1003.2 t));
+  check bool "elapsed progress schedules a redraw" true (Option.is_some (Masc_tui_value.Redraw.next_change ()));
+  t.phase <- Login.Models;
+  check bool "model list is settled" false (Login.in_progress t);
+  check bool "settled screen has no progress badge" true (Option.is_none (Login.progress_badge ~ko:true ~now:1004.0 t));
+  t.phase <- Login.Logging;
+  t.login_id <- None;
+  check bool "logging session startup is in progress" true (Login.in_progress t);
+  check bool "logging claims text input" true (Login.text_input_active t);
+  t.login_id <- Some session;
+  check bool "logging waiting for code is settled" false (Login.in_progress t);
+  t.input_pending <- true;
+  check bool "logging input submission is in progress" true (Login.in_progress t);
+  t.phase <- Login.Documented_context (model 0);
+  check bool "documented context entry claims text input" true (Login.text_input_active t)
+
 let () = run "TUI account login" ["workflow",[
+  test_case "select-all on Antigravity batches unknown contexts cleanly" `Quick select_all_antigravity_batch;
+  test_case "non-Antigravity select-all and in-progress indicator clock" `Quick select_all_non_antigravity_and_progress_clock;
   test_case "quota scope group ID remains an opaque string" `Quick quota_scope_group_id_is_opaque;
   test_case "disabled client templates stay distinct from existing-account login" `Quick disabled_login_templates_and_existing_accounts;
   test_case "existing providers group by native account without partial deletion" `Quick grouped_existing_accounts;

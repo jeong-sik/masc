@@ -450,8 +450,10 @@ type identity_login_started =
     and a pane cuts it at its own width; a cut URL cannot be selected or
     copied. The TUI opens it as well -- this is what is left when the machine
     has no opener. *)
-let identity_started_rows ~cols ~keeper_name logins =
+let identity_started_rows ?(ko = false) ?now ~cols ~keeper_name logins =
   let open Masc_tui_ansi in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let say korean english = if ko then korean else english in
   List.concat_map
     (fun login ->
        let url = Terminal_text.single_line login.ils_url in
@@ -463,15 +465,29 @@ let identity_started_rows ~cols ~keeper_name logins =
            let take = min width (String.length url - at) in
            fold (at + take) (("    " ^ String.sub url at take) :: acc))
        in
+       let remaining_suffix =
+         match now with
+         | Some now when login.ils_expires_at > now ->
+             let left = Masc_tui_value.Ongoing.until ~now login.ils_expires_at in
+             if ko then " · 남은 시간 " ^ left else " · " ^ left ^ " left"
+         | Some _ | None -> ""
+       in
+       let label = Terminal_text.single_line login.ils_label in
        (""
-        :: (Ansi.bold
-            ^ "  A browser should have opened to consent as "
-            ^ Terminal_text.single_line login.ils_label
-            ^ "."
+        :: (Theme.info () ^ Ansi.bold
+            ^ "  " ^ under_way ^ " "
+            ^ (if ko then label ^ " 브라우저 동의 대기 중" ^ remaining_suffix
+               else "Waiting for browser consent as " ^ label ^ remaining_suffix)
             ^ Ansi.reset)
-        :: (Ansi.dim ^ "  If it did not, the URL is here:" ^ Ansi.reset)
+        :: (Ansi.dim
+            ^ say "  브라우저가 열리지 않았다면 아래 URL을 직접 여세요:"
+                  "  If a browser did not open, open this URL:"
+            ^ Ansi.reset)
         :: fold 0 [])
-       @ [ Ansi.dim ^ "  Nothing is written to this keeper until you come back." ^ Ansi.reset ])
+       @ [ Ansi.dim
+           ^ say "  동의를 마치고 돌아올 때까지 이 키퍼에는 아무것도 기록되지 않습니다."
+                 "  Nothing is written to this keeper until you come back."
+           ^ Ansi.reset ])
     (List.filter (fun login -> String.equal login.ils_keeper keeper_name) logins)
 ;;
 

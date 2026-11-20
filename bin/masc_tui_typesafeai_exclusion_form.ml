@@ -133,12 +133,22 @@ let toggle t =
     { t with picked; error = None }
 ;;
 
+let toggle_all t =
+  let all_names = List.map (fun (entry : entry) -> entry.keeper.name) t.entries in
+  let all_picked =
+    all_names <> [] && List.for_all (fun name -> List.mem name t.picked) all_names
+  in
+  let picked = if all_picked then [] else all_names in
+  { t with picked; error = None }
+;;
+
 let key t key =
   match key with
   | "esc" -> Cancelled
   | "\r" | "\n" | "enter" -> Submitted t
-  | "up" | "k" | "shift-tab" -> Editing (move t (-1))
-  | "down" | "j" | "tab" | "\t" -> Editing (move t 1)
+  | "up" | "k" | "\xe3\x85\x8f" | "shift-tab" -> Editing (move t (-1))
+  | "down" | "j" | "\xe3\x85\x93" | "tab" | "\t" -> Editing (move t 1)
+  | "a" | "A" | "\xe3\x85\x81" -> Editing (toggle_all t)
   | " " | "space" -> Editing (toggle t)
   | _ -> Editing t
 ;;

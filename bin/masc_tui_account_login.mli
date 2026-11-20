@@ -45,9 +45,19 @@ type activation = Activating | Activation_failed of string
           (RFC-tui-one-screen-grammar §2). r/Enter retries as after a failure. *)
   | Active of { exact_output_available : bool }
   (** Saving and owner activation are separate receipts. *)
+type context_batch = {
+  current : model;
+  remaining : model list;
+  total : int;
+  completed : int;
+  failed : (model * string) list;
+  previous_selected : string list;
+}
+(** Sequential native context observation queued by select-all on Antigravity. *)
 type phase = Loading | Providers of list_view | Logging | Models | Refreshing_models | Preparing_context of model
       (** The model selection remains available as an observation, while its
           context request owns further input until it settles or is closed. *)
+  | Preparing_context_batch of context_batch
   | Documented_context of model | Saving | Removing
   | Finished of { saved : saved; activation : activation; refresh_failed : bool }
       (** [refresh_failed]: the list read after the save did not arrive. *)
@@ -78,6 +88,9 @@ type t = {
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
   mutable account_emails : account_emails;
   mutable account_groups : account_group list;
+  mutable activity_started_at : float option;
+  mutable failed_context_models : string list;
+  mutable batch_cancelled : bool;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Screen of string | Input_ready
@@ -88,7 +101,10 @@ type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Ref
   | Start of { provider : provider; existing : bool }
       (** Log in through [provider]: a new account, or explicitly again. *)
   | Input of int * Yojson.Safe.t | Cancel
-  | Recover | Discover | Refresh_models | Prepare of model | Save of model list | Close | Nothing
+  | Recover | Discover | Refresh_models | Prepare of model
+  | Prepare_batch of context_batch
+  | Cancel_prepare
+  | Save of model list | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
       (** Read what removing [provider] changes. [refused] is why the server
           declined the removal just asked for, shown above the fresh preview. *)
@@ -99,6 +115,14 @@ type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Ref
   | Refresh_list of list_view
       (** Read the list again and reopen it on this view. *)
 val create : string -> t
+val text_input_active : t -> bool
+(** Whether the current phase accepts typed text (login code or documented
+    context entry). List and model-selection phases read keys as commands. *)
+val in_progress : t -> bool
+(** Whether an asynchronous operation is currently running on this view. *)
+val note_activity_started : at:float -> t -> unit
+(** Record the wall-clock start instant of the active in-progress phase so the
+    UI can display a live elapsed indicator. *)
 val begin_attempt : t -> provider -> existing:bool -> string option
 (** Capture the requested account, clear the previous live session identity and
     reset login input state before the next process is launched. *)
@@ -191,9 +215,23 @@ val selected_account : t -> provider -> Yojson.Safe.t -> (unit, string) result
 val preparing : t -> model -> unit
 (** Keep the model inventory and selection while the selected model's context
     observation is pending. Further selection/save requests wait for its result. *)
+val preparing_batch : ?at:float -> t -> context_batch -> unit
+(** Keep the model inventory and selection while a select-all context batch
+    observes each remaining model in turn. *)
+val prepared_batch_step :
+  t -> context_batch -> (Yojson.Safe.t, string) result -> context_batch option
+(** Apply one step of a select-all context batch, selecting the model when
+    observed or recording its failure, and return the next step when remaining
+    models exist. *)
 val prepare_failed : t -> string -> unit
 (** Return to the retained model selection without inventing a context or
     restarting login. The request's failure remains the notice. *)
+val prepare_interrupted : t -> string -> unit
+(** Stop a pending single or batch context observation without recording the
+    model as failed (used when workspace authority withdraws the request). *)
+val cancel_prepare : t -> unit
+(** Stop an in-flight context observation on operator request, keeping all
+    already-observed models and selections. *)
 val prepared : t -> model -> Yojson.Safe.t -> (unit, string) result
 val receipt : t -> Yojson.Safe.t -> (bool, string) result
 val event : generation:int -> t -> event -> action
@@ -201,10 +239,27 @@ val source : t -> Yojson.Safe.t
 val save_body : t -> model list -> Yojson.Safe.t
 type row =
   | Text of string  (** Written by this pane or the server: drawn as plain text. *)
+  | Progress of string
+      (** Active in-progress status or active model row: drawn in [status.info]. *)
   | Terminal of Masc_tui_sgr_text.line
       (** What the official client printed during login, with the colours it
           chose. *)
-val lines : ?ko:bool -> t -> row list
+type progress_info = {
+  title : string;
+  detail : string option;
+  started_at : float option;
+  meter : (int * int * int) option;
+      (** [(done_steps, total_steps, failed_steps)] when batch-probing models. *)
+  action_hint : string option;
+  blocking : bool;
+}
+val progress_info : ?ko:bool -> t -> progress_info option
+(** Structured progress payload for the docked bottom sheet while an async
+    account-login step is running. *)
+val progress_badge : ?ko:bool -> ?now:float -> t -> string option
+(** Compact in-progress indicator for the pinned title row when an async
+    operation is running, noting the next wall-clock second for redraw. *)
+val lines : ?ko:bool -> ?now:float -> t -> row list
 val row_text : row -> string
 (** The row's characters without colour, and the address of each link of
     the client's output that closed on it. *)
@@ -212,7 +267,7 @@ val row_text : row -> string
     retain a separate scroll position. Rendering clamps it to the current
     viewport. *)
 val visible_lines :
-  ?ko:bool -> height:int -> width:int -> t -> row list * Masc_tui_value.Position.t option
+  ?ko:bool -> ?now:float -> height:int -> width:int -> t -> row list * Masc_tui_value.Position.t option
 (** The rows that fit [height], the notice and the client's output wrapped
     at [width] cells so a server's reason and a login address are read whole,
     and where the reader stands for the title

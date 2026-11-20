@@ -59,6 +59,7 @@ val kept_back : notice:string -> t -> t
     intact. *)
 
 val submitting : t -> bool
+val waiting_keeper : t -> string option
 
 val request_body : request -> Yojson.Safe.t
 (** The launch endpoint's body: [prompt], [preset], [topology] and

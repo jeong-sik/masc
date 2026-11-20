@@ -757,12 +757,41 @@ let test_a_form_that_waits_stops_waiting_and_one_with_an_answer_does_not () =
     (text_of stopped)
 ;;
 
+let test_select_all_toggles_listed_keepers () =
+  let form = edited (opened probe) [ "right" ] in
+  (* In Listed scope with nobody selected, 'a' selects every listed keeper. *)
+  let all_selected = edited form [ "a" ] in
+  Alcotest.(check recall)
+    "a selects every keeper in listed scope"
+    (listed [ "a"; "b"; "c" ])
+    (recall_of (text_of all_selected));
+  (* Pressing 'a' again (or Korean IME 'ㅁ') clears all picks. *)
+  let cleared = edited all_selected [ "\xe3\x85\x81" ] in
+  Alcotest.(check bool)
+    "pressing ㅁ when all are picked clears selection so saving is refused"
+    true
+    (Result.is_error (F.text_on cleared));
+  (* Pressing 'A' selects all again; 'a' outside Listed scope does not change scope. *)
+  let reselected = edited cleared [ "A" ] in
+  Alcotest.(check recall)
+    "A re-selects every keeper"
+    (listed [ "a"; "b"; "c" ])
+    (recall_of (text_of reselected));
+  let all_scope = edited (opened probe) [ "right"; "right"; "a" ] in
+  Alcotest.(check recall)
+    "a is ignored outside listed scope"
+    (Runtime_schema.Memory_recall_on Runtime_schema.All_keepers)
+    (recall_of (text_of all_scope))
+;;
+
 let () =
   Alcotest.run
     "tui memory recall form"
     [ ( "what it writes"
       , [ Alcotest.test_case "a choice the file already has writes nothing" `Quick
             test_a_choice_the_file_already_has_writes_nothing
+        ; Alcotest.test_case "a / A / ㅁ toggles select-all in listed scope" `Quick
+            test_select_all_toggles_listed_keepers
         ; Alcotest.test_case "picks are written in the order they were made" `Quick
             test_picks_are_written_in_the_order_they_were_made
         ; Alcotest.test_case "a key that already holds the value keeps its comment" `Quick

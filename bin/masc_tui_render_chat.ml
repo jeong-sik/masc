@@ -951,8 +951,9 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
                        (say "컨텍스트 조회 실패" "Context read failed")
                    ]
                | Masc_tui_fetched.Loading ->
+                   let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
                    [ fact Chat_facts.Plain
-                       (say "컨텍스트 조회 중" "Context reading")
+                       (under_way ^ " " ^ say "컨텍스트 조회 중" "Context reading")
                    ]
                | Masc_tui_fetched.Absent -> [ context_unread ]))
       in
@@ -1390,7 +1391,8 @@ let keeper_message_tool_activity_details state ~keeper_name
         say "전체 호출 열기로 영속 일정 조회" "open full calls to load durable schedule",
         None, activity.args, None, None
     | Call_log_loading ->
-        say "영속 일정 불러오는 중" "loading durable schedule", None, activity.args, None, None
+        let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+        under_way ^ " " ^ say "영속 일정 불러오는 중" "loading durable schedule", None, activity.args, None, None
     | Call_log_unavailable detail ->
         say "조회 불가 · " "unavailable · " ^ detail, None, activity.args, None, None
     | Call_log_kept_back notice ->
@@ -1584,7 +1586,9 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
               Option.map (tool_result_preview activity) call.kc_output,
               say "결과 본문 미기록" "result text not recorded"
           | Call_log_not_loaded -> None, say "결과 미리보기 미조회" "result preview not loaded"
-          | Call_log_loading -> None, say "결과 미리보기 조회 중" "loading result preview"
+          | Call_log_loading ->
+              let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+              None, under_way ^ " " ^ say "결과 미리보기 조회 중" "loading result preview"
           | Call_log_unavailable _ | Call_log_kept_back _ ->
               None, say "결과 미리보기 조회 불가" "result preview unavailable"
           | Call_execution_unrecorded -> None, say "실행 ID 없음" "no execution id"
@@ -2220,13 +2224,16 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
    to a turn that has not opened one yet; RFC chat-turn-rail-and-side-lanes
    decides later what a turn's own opening looks like. *)
 let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   (* Delivery state belongs to the gutter/header. The pending text is exactly
      the submitted body; changing delivery state never rewrites its words. *)
   let delivery_label = function
-    | Local_pending -> "전송 대기"
-    | Awaiting_receipt -> "전송 중"
-    | Keeper_queued -> "처리 대기"
-    | Rechecking_delivery -> "전송 확인 중"
+    | Local_pending -> if ko then "전송 대기" else "Waiting"
+    | Awaiting_receipt -> if ko then "전송 중" else "Sending"
+    | Keeper_queued -> if ko then "처리 대기" else "Queued"
+    | Rechecking_delivery -> if ko then "전송 확인 중" else "Confirming"
   in
   let align_state_label ~style label =
     let mark_cells =
@@ -2269,19 +2276,27 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
       : Message_layout.entry)
   in
   let requests = Masc_tui_types.keeper_message_waiting_requests state ~keeper_name in
+  let submitted_at_of request =
+    match List.find_opt (fun (inflight : Masc_tui_types.inflight) ->
+        Keeper_chat.same_request_identity inflight.sent_request request)
+        state.msg_inflight with
+    | Some inflight -> inflight.submitted_at
+    | None ->
+        match List.find_opt (fun (item : Masc_tui_keeper_chat_queue.item) ->
+            Keeper_chat.same_request_identity item.request request)
+            (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name) with
+        | Some item -> item.submitted_at
+        | None -> now
+  in
+  let oldest_at =
+    List.fold_left
+      (fun acc (request, _) ->
+        let at = submitted_at_of request in
+        match acc with None -> Some at | Some prev -> Some (min prev at))
+      None requests
+  in
   let entries = List.map (fun (request, delivery) ->
-      let at =
-        match List.find_opt (fun (inflight : Masc_tui_types.inflight) ->
-            Keeper_chat.same_request_identity inflight.sent_request request)
-            state.msg_inflight with
-        | Some inflight -> inflight.submitted_at
-        | None ->
-            match List.find_opt (fun (item : Masc_tui_keeper_chat_queue.item) ->
-                Keeper_chat.same_request_identity item.request request)
-                (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name) with
-            | Some item -> item.submitted_at
-            | None -> Unix.gettimeofday ()
-      in
+      let at = submitted_at_of request in
       let label = delivery_label delivery in
       entry ~at ~request_id:request.Keeper_chat.request_id ~label
         ~body:request.Keeper_chat.message) requests in
@@ -2289,17 +2304,27 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
   | [] -> []
   | first :: _ ->
       let style = Message_layout.Status in
+      let heading_label = if ko then "대기 입력" else "Pending" in
       let role_label, role_label_mark_cells =
-        align_state_label ~style "대기 입력"
+        align_state_label ~style heading_label
+      in
+      let elapsed_part =
+        match oldest_at with
+        | Some at ->
+            let duration = Masc_tui_value.Ongoing.since ~now at in
+            if ko then " · " ^ duration ^ " 경과" else " · " ^ duration
+        | None -> ""
       in
       (* The heading is not the input it was copied from. *)
       { first with delivery_state = None; style; timestamp = ""; timeline_bucket = None;
           diagnostics = [];
-          speaker = "대기 입력";
+          speaker = heading_label;
           role_label;
           role_label_mark_cells;
           request_label = "";
-          body = Printf.sprintf "대기 입력 %d건" (List.length requests)
+          body =
+            if ko then Printf.sprintf "%s 대기 입력 %d건%s" under_way (List.length requests) elapsed_part
+            else Printf.sprintf "%s %d pending%s" under_way (List.length requests) elapsed_part
       } :: entries
 
 
@@ -2372,7 +2397,9 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
         let ko = state.ui_language = Lang_ko in
         let note =
           match state.keeper_turns_error with
-          | None -> if ko then "진행 중" else "in progress"
+          | None ->
+              Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+              ^ (if ko then "진행 중" else "in progress")
           | Some _ -> if ko then "마지막 관측, 갱신 실패" else "last observed; refresh failed"
         in
         let speech = ({ delivery_state = None; style
@@ -4952,7 +4979,12 @@ let render_keeper_message (state : state) =
     box_line chat_buf chat_cols title_row;
     box_divider chat_buf chat_cols;
     List.iter (fun line ->
-      box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ line))
+      let style =
+        if String.equal line "diffs loading" || String.equal line "diffs pending"
+        then Theme.info ()
+        else Theme.warn ()
+      in
+      box_line_styled chat_buf chat_cols ~style ("  " ^ line))
       status_frame.kmsf_evidence_rows;
 
     (* Message history. The fixed chrome is 8 rows — box top, navigation row,
@@ -5000,12 +5032,30 @@ let render_keeper_message (state : state) =
       Masc_tui_chat_row_actions.of_rows
         ~scope:(state.workspace_authority, state.workspace_read_authority)
         ~keeper:keeper_name (actionable_rows first_row visible_rows []);
+    let chat_now = Unix.gettimeofday () in
+    let chat_ko = state.ui_language = Lang_ko in
+    let history_loading = Masc_tui_types.keeper_message_history_loading state in
+    let history_started =
+      Masc_tui_types.progress_clock_option state
+        ~slot:"chat-history" ~now:chat_now
+        (if history_loading then Some keeper_name else None)
+    in
+    let older_started =
+      Masc_tui_types.progress_clock_option state
+        ~slot:"chat-older" ~now:chat_now
+        (if state.msg_older_loading then Some keeper_name else None)
+    in
     if visible_rows = [] then begin
       if history_height > 0 then
-        box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-          (ui_text state
-             ~ko:"  (메시지 없음 · 아래에 입력 후 Enter)"
-             ~en:"  (no messages yet · type below and press Enter)");
+        if history_loading then
+          box_line chat_buf chat_cols
+            ("  " ^ progress_inline ~ko:chat_ko ~now:chat_now ?started_at:history_started
+               (ui_text state ~ko:"대화 기록 불러오는 중" ~en:"Loading conversation history"))
+        else
+          box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+            (ui_text state
+               ~ko:"  (메시지 없음 · 아래에 입력 후 Enter)"
+               ~en:"  (no messages yet · type below and press Enter)");
       for _ = 1 to history_height - 1 do
         box_empty chat_buf chat_cols
       done
@@ -5053,9 +5103,9 @@ let render_keeper_message (state : state) =
 
     (* Input line *)
     List.iter
-      (fun (mine, line) ->
+      (fun (failed, line) ->
         box_line_styled chat_buf chat_cols
-          ~style:(if mine then Theme.warn () else Theme.recede ()) line)
+          ~style:(if failed then Theme.bad () else Theme.info ()) line)
       status_frame.kmsf_inflight_rows;
     (* The lead -- the mark, the lane, the age -- in the status colour; the
        detail after it receded. Drawn whole in the status colour, five rows of
@@ -5087,11 +5137,27 @@ let render_keeper_message (state : state) =
             (match state.msg_tool_visibility with Tools_full -> Theme.warn ()
              | Tools_compact | Tools_results ->
                  if Masc_tui_types.keeper_message_activity_needs_attention state
-                 then Theme.warn () else Theme.recede ()) lead Ansi.reset
+                 then Theme.warn () else Theme.info ()) lead Ansi.reset
             (Theme.recede ()) rest keys Ansi.reset in
         box_line chat_buf chat_cols content)
       status_frame.kmsf_activity_rows;
-    List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
+    let interrupt_in_progress =
+      match Masc_tui_types.keeper_observed_turn state keeper_name with
+      | None -> false
+      | Some (started_at_unix, _) ->
+          (match Masc_tui_types.keeper_observed_interrupt state keeper_name started_at_unix with
+           | Some { oi_status = Interrupt_sending | Interrupt_signalled; _ } -> true
+           | Some { oi_status = Interrupt_declined _ | Interrupt_failed _ | Interrupt_kept_back _; _ }
+           | None -> false)
+    in
+    List.iter
+      (fun text ->
+        if interrupt_in_progress then
+          let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+          box_line_styled chat_buf chat_cols ~style:(Theme.info ())
+            ("  " ^ under_way ^ " " ^ text)
+        else
+          box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       status_frame.kmsf_interrupt_rows;
     (* A read the workspace guard kept back is said as kept back, alone,
        never as a failed load (RFC §2). *)
@@ -5183,9 +5249,9 @@ let render_keeper_message (state : state) =
        fetch. Counting it without drawing it floated the footer a row up,
        and a failed page load was silent -- the one thing it must not be. *)
     (if state.msg_older_loading then
-       box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-         (ui_text state ~ko:"  (이전 메시지 조회 중)"
-            ~en:"  (loading older messages)")
+       box_line chat_buf chat_cols
+         ("  " ^ progress_inline ~ko:chat_ko ~now:chat_now ?started_at:older_started
+            (ui_text state ~ko:"이전 메시지 조회 중" ~en:"Loading older messages"))
      else
        match state.msg_older_error with
        | Some (Request_failed _) ->
@@ -5227,10 +5293,11 @@ let render_keeper_message (state : state) =
                  | Some seconds -> " " ^ Masc_tui_value.Ongoing.text seconds
                  | None -> ""
                in
+               let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
                Printf.sprintf
-                 (if ko then " · 자동 검토 중%s · 지금 답하면 바로 끝남"
-                  else " · the judge is deciding%s; your answer ends it now")
-                 age)
+                 (if ko then " · %s 자동 검토 중%s · 지금 답하면 바로 끝남"
+                  else " · %s the judge is deciding%s; your answer ends it now")
+                 under_way age)
          in
          let folded_away = status.kmsp_folded_count in
          let status_rows = status.kmsp_rows in
@@ -5370,24 +5437,32 @@ let render_keeper_message (state : state) =
                     (String.concat " · " named))));
     if not target_registered then begin
       let ko = state.ui_language = Lang_ko in
+      let creation_pending =
+        Option.is_none state.keepers_error && keeper_creation_matches state keeper_name
+      in
       let unavailable_message =
         match state.keepers_error with
         | Some _ ->
             if ko then "  키퍼 목록 조회 실패 · 초안 유지  Esc:다른 키퍼 선택"
             else "  Keeper roster unavailable · draft retained  Esc:choose another"
         | None ->
-            Printf.sprintf
-              (match keeper_creation_matches state keeper_name, ko with
-               | true, true ->
-                   "  키퍼 %s 생성 접수됨 · 목록 확인 대기 · 초안 유지 · Esc 후 목록에서 r:새로고침"
-               | true, false ->
-                   "  Keeper %s creation accepted · roster confirmation pending · draft retained · Esc to list, then r:refresh"
-               | false, true -> "  키퍼 %s 등록 해제됨 · 초안 유지  Esc:다른 키퍼 선택"
-               | false, false ->
-                   "  Keeper %s no longer registered · draft retained  Esc:choose another")
-              display_keeper_name
+            let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+            (match creation_pending, ko with
+             | true, true ->
+                 Printf.sprintf "  %s 키퍼 %s 생성 접수됨 · 목록 확인 대기 · 초안 유지 · Esc 후 목록에서 r:새로고침"
+                   under_way display_keeper_name
+             | true, false ->
+                 Printf.sprintf "  %s Keeper %s creation accepted · roster confirmation pending · draft retained · Esc to list, then r:refresh"
+                   under_way display_keeper_name
+             | false, true ->
+                 Printf.sprintf "  키퍼 %s 등록 해제됨 · 초안 유지  Esc:다른 키퍼 선택"
+                   display_keeper_name
+             | false, false ->
+                 Printf.sprintf "  Keeper %s no longer registered · draft retained  Esc:choose another"
+                   display_keeper_name)
       in
-      box_line_styled chat_buf chat_cols ~style:(Theme.bad ()) unavailable_message
+      let style = if creation_pending then Theme.info () else Theme.bad () in
+      box_line_styled chat_buf chat_cols ~style unavailable_message
     end;
     (match command_window with
      | None -> ()
@@ -5612,7 +5687,7 @@ let render_keeper_message (state : state) =
               db
           | Voice_recording, (Some _ | None)
           | (Voice_calibrating | Voice_starting | Voice_stopping | Voice_processing), (Some _ | None) ->
-              voice_meter_text state
+              Theme.info () ^ voice_meter_text state ^ Ansi.reset ^ Theme.recede ()
         in
         (* Both endings, because they are not the same and the difference is
            what the operator loses. Ctrl-Y keeps the sentence; Esc abandons it. *)

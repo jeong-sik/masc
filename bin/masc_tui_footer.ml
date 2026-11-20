@@ -98,7 +98,17 @@ type projected_status =
   ; shorter : string list
   }
 
-let status_item_projection ~ko = function
+let status_item_projection ?(show_progress_mark = false) ?(progress_style = "") ?(dim = "") ?(reset = "") ~ko =
+  let paint_progress text =
+    let marked =
+      if show_progress_mark || not (String.equal progress_style "") then
+        Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " ^ text
+      else text
+    in
+    if String.equal progress_style "" then marked
+    else progress_style ^ marked ^ reset ^ dim
+  in
+  function
   | Task_creation {keeper;phase} ->
     let say korean english = if ko then korean else english in
     let stage = match phase with
@@ -108,7 +118,9 @@ let status_item_projection ~ko = function
       | Task_awaiting_reply -> say "응답 대기" "awaiting reply"
       | Task_awaiting_application -> say "결과 반영 대기" "result awaiting UI" in
     Some
-      { text = Printf.sprintf (if ko then "%s 작업 만들기: %s" else "Task for %s: %s") keeper stage
+      { text =
+          paint_progress
+            (Printf.sprintf (if ko then "%s 작업 만들기: %s" else "Task for %s: %s") keeper stage)
       ; retention = Live_activity
       ; shorter = []
       }
@@ -170,8 +182,9 @@ let status_item_projection ~ko = function
   | Keeper_action_running { gerund; keeper } ->
     Some
       { text =
-          (if ko then Printf.sprintf "%s %s" keeper gerund
-           else Printf.sprintf "%s %s" gerund keeper)
+          paint_progress
+            (if ko then Printf.sprintf "%s %s" keeper gerund
+             else Printf.sprintf "%s %s" gerund keeper)
       ; retention = Armed_action
       ; shorter = []
       }
@@ -825,10 +838,14 @@ let notices_in_their_shorter_text conflicts =
    status list and the whole key row again. Shrinking in one pass left a row
    carrying only [q:quit  ...?] where the task line and the port all fit once
    the notice was gone. *)
-let rec fit_body ?literal_prefix ?action_text ?position ~more_key ~styled_more_key ~cut_marker ~max_cells ~conflicts ~hints
+let rec fit_body ?literal_prefix ?action_text ?(action_style = "") ?position ~dim ~reset ~more_key ~styled_more_key ~cut_marker ~max_cells ~conflicts ~hints
     ~omissions statuses =
+  let paint_action text =
+    if String.equal action_style "" || String.equal text "" then text
+    else action_style ^ text ^ reset ^ dim
+  in
   let prefix_with_action action =
-    match Option.to_list literal_prefix @ (if action = "" then [] else [ action ]) with
+    match Option.to_list literal_prefix @ (if action = "" then [] else [ paint_action action ]) with
     | [] -> None
     | parts -> Some (String.concat "  " parts)
   in
@@ -860,7 +877,7 @@ let rec fit_body ?literal_prefix ?action_text ?position ~more_key ~styled_more_k
     | None -> false
   in
   if outcome_present && shorter_notices <> conflicts then
-    fit_body ?literal_prefix ?action_text ?position ~more_key ~styled_more_key ~cut_marker ~max_cells
+    fit_body ?literal_prefix ?action_text ~action_style ?position ~dim ~reset ~more_key ~styled_more_key ~cut_marker ~max_cells
       ~conflicts:shorter_notices ~hints ~omissions statuses
   else
   let displayed_prefix, mark_omission =
@@ -898,7 +915,7 @@ let rec fit_body ?literal_prefix ?action_text ?position ~more_key ~styled_more_k
   | None ->
     (match conflicts with
      | _ :: _ ->
-       fit_body ?literal_prefix ?action_text ?position ~more_key ~styled_more_key ~cut_marker ~max_cells
+       fit_body ?literal_prefix ?action_text ~action_style ?position ~dim ~reset ~more_key ~styled_more_key ~cut_marker ~max_cells
          ~conflicts:
            (without_a_blocking_conflict ?literal_prefix ?position ~cut_marker ~max_cells ~hints
               conflicts)
@@ -990,7 +1007,7 @@ type question_place =
     A [Keys] row draws a refused key in [dim] in its place when the whole row
     fits and [refused_keys] is [Shown_dim]; a row that has to be cut, or one
     whose dim marks nothing, leaves every refused key out. *)
-let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = []) ?port
+let line ?literal_prefix ?action_text ?(action_style = "") ?(show_progress_mark = false) ?(progress_style = "") ?preferred_action ?position ?(status = []) ?port
     ?(help_key_answers = true) ?(key_style = "") ~ko ~dim ~reset ~refused_keys
     ~max_cells ~hints () =
   let max_cells = max 0 max_cells in
@@ -1010,7 +1027,7 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
     | Left_out -> { prepared with whole = None }
   in
   let statuses =
-    List.filter_map (status_item_projection ~ko)
+    List.filter_map (status_item_projection ~show_progress_mark ~progress_style ~dim ~reset ~ko)
       (status @ Option.to_list (Option.map (fun port -> Port port) port))
   in
   let conflicts, statuses = List.partition leads_the_row statuses in
@@ -1049,9 +1066,9 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
       drawable_conflicts ?literal_prefix ~max_cells ~hints
         (ordered_conflicts (Option.to_list question @ conflicts))
     in
-    let action_text =
+    let action_text, action_style =
       match question, preferred_action with
-      | Some _, _ -> None
+      | Some _, _ -> None, ""
       | None, Some (Outcome (text, mark)) ->
         let prefix = String.concat "  " (Option.to_list literal_prefix @ [text]) in
         let fits_beside conflicts =
@@ -1060,12 +1077,12 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
                ~max_cells ~conflicts ~hints ~omissions:omission_order statuses)
         in
         if fits_beside conflicts || fits_beside (notices_in_their_shorter_text conflicts)
-        then Some (mark text)
-        else action_text
-      | None, (Some (Pending_question _ | Menu_choices _) | None) -> action_text
+        then Some (mark text), ""
+        else action_text, action_style
+      | None, (Some (Pending_question _ | Menu_choices _) | None) -> action_text, action_style
     in
     let fitted =
-      fit_body ?literal_prefix ?action_text ?position ~more_key ~styled_more_key ~cut_marker ~max_cells
+      fit_body ?literal_prefix ?action_text ~action_style ?position ~dim ~reset ~more_key ~styled_more_key ~cut_marker ~max_cells
         ~conflicts ~hints ~omissions:omission_order statuses
     in
     Printf.sprintf "%s%s%s\n" dim fitted reset

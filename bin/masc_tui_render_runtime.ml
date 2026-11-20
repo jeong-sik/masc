@@ -764,8 +764,72 @@ let render_runtime_reading (state : state) =
           ~current
           ~after:[ Printf.sprintf "  %s%s" probe_status probe_read; "  " ^ timestamp ]
   in
+  let now = Unix.gettimeofday () in
+  let runtime_op =
+    match state.runtime_lane_write with
+    | Masc_tui_types.Lane_write_posting ->
+        Some
+          ( "lane-write-posting"
+          , ui_text state ~ko:"런타임 경로 변경 저장 중" ~en:"Saving runtime lane change"
+          , Some (ui_text state
+              ~ko:"서버 설정 저장과 반영 영수증을 기다리고 있습니다"
+              ~en:"Waiting for configuration save and receipt")
+          , true )
+    | Masc_tui_types.Lane_write_rereading _ ->
+        Some
+          ( "lane-write-rereading"
+          , ui_text state ~ko:"런타임 상태 다시 읽는 중" ~en:"Reloading runtime state"
+          , Some (ui_text state
+              ~ko:"저장 후 최신 실행 상태를 확인하고 있습니다"
+              ~en:"Verifying latest execution state after save")
+          , false )
+    | Masc_tui_types.Lane_write_idle ->
+        if state.runtime_surface_force_pending then
+          Some
+            ( "force-probe"
+            , ui_text state ~ko:"런타임 프로브 다시 실행 중" ~en:"Re-probing runtimes"
+            , Some (ui_text state
+                ~ko:"각 런타임 연결 상태를 새로 점검하고 있습니다"
+                ~en:"Checking each runtime connection live")
+            , false )
+        else if Option.is_some state.runtime_surface_inflight then
+          Some
+            ( "surface-read"
+            , ui_text state ~ko:"런타임 상태 읽는 중" ~en:"Reading runtime state"
+            , Some (ui_text state
+                ~ko:"구성된 레인과 런타임 프로브 결과를 불러오고 있습니다"
+                ~en:"Loading configured lanes and runtime probe status")
+            , false )
+        else None
+  in
+  let runtime_op_started =
+    Masc_tui_types.progress_clock_option state ~slot:"runtime-surface-op" ~now
+      (Option.map (fun (tok, _, _, _) -> tok) runtime_op)
+  in
+  let progress_sheet =
+    Option.map
+      (fun (_, title, detail, blocking) ->
+        { ps_title = title
+        ; ps_detail = detail
+        ; ps_started_at = runtime_op_started
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking = blocking
+        })
+      runtime_op
+  in
+  let sheet_rows =
+    let has_recovery =
+      Option.is_some (recovery_slot state ~max_cells:(framed_inner_width cols))
+    in
+    let total_budget = max 1 (rows - chrome_rows_for ~frame:Chrome_screen ~has_recovery) in
+    Option.fold ~none:0
+      ~some:(progress_sheet_height ~available:total_budget ~cols:(framed_inner_width cols))
+      progress_sheet
+  in
+  let effective_rows = max 1 (rows - sheet_rows) in
   let authority_rows = Masc_tui_types.runtime_authority_rows ~cols state in
-  let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in
+  let selection_rows = runtime_selection_summary_for_viewport ~rows:effective_rows ~cols state in
   (* One measured status width for the whole reading, shared by the header and
      every row. A report that has several independent limits can still exceed
      the pane; full evidence stays in the selected summary or Enter's detail. *)
@@ -782,8 +846,8 @@ let render_runtime_reading (state : state) =
       max width (Message_layout.display_width (Masc_tui_theme.strip_sgr cell))) 0 statuses in
   (* The budget counts the rows this screen draws, so it comes from the same
      call the drawing reads rather than a fixed one. *)
-  let chrome_rows = runtime_surface_listing_chrome ~rows ~cols state in
-  let content_height = max 0 (rows - chrome_rows) in
+  let chrome_rows = runtime_surface_listing_chrome ~rows:effective_rows ~cols state in
+  let content_height = max 0 (effective_rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
   let scroll =
@@ -799,7 +863,8 @@ let render_runtime_reading (state : state) =
     Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language
       ~mode:state.runtime_mode ~picker:None
   in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
+  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols
+    ~surface_key:"runtime" ~title:header ~hints
     ~body:(fun ~budget:_ c ->
   if shown > 0 then
     c.position
@@ -866,7 +931,7 @@ let render_runtime_reading (state : state) =
        (* A short viewport folds the media_failover row and its divider away so
           the table header and the selected row keep a place (#41143's rule for
           the status column, applied to height). *)
-       if not (Masc_tui_types.runtime_media_row_folded ~rows ~cols state) then begin
+       if not (Masc_tui_types.runtime_media_row_folded ~rows:effective_rows ~cols state) then begin
          c.push_styled ~style:(Theme.recede ())
            (Printf.sprintf "  %s %s   %s"
               (runtime_column runtime_lane_width "media_failover")
@@ -907,27 +972,32 @@ let render_runtime_reading (state : state) =
          lines;
        c.push_divider ());
   if shown = 0 then begin
-    let empty =
-      match
-        empty_page_of ~snapshot:state.runtime_surface
-          ~error:state.runtime_surface_error
-      with
-      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | Page_unread ->
-          page_unread_note_while ~ko:(state.ui_language = Lang_ko)
-            ~reading:(Option.is_some state.runtime_surface_inflight)
-      | Page_empty ->
-          (match state.runtime_mode with
-           | Masc_tui_types.Runtime_lanes ->
-               ui_text state ~ko:"  (설정된 런타임 후보 순서 없음)"
-                 ~en:"  (no runtime candidate orders configured)"
-           | Masc_tui_types.Runtime_all ->
-               ui_text state ~ko:"  (설정된 런타임 없음)" ~en:"  (no runtimes configured)")
-    in
-    c.push_styled ~style:(Theme.recede ()) empty;
-    for _ = 1 to content_height - 1 do
-      c.push_empty ()
-    done
+    if content_height > 0 then begin
+      (match
+         empty_page_of ~snapshot:state.runtime_surface
+           ~error:state.runtime_surface_error
+       with
+       | Page_failed ->
+           c.push_styled ~style:(Theme.recede ()) (page_failed_note ~ko)
+       | Page_unread when Option.is_some state.runtime_surface_inflight ->
+           c.push
+             ("  " ^ progress_inline ~ko ~now ?started_at:runtime_op_started
+                (ui_text state ~ko:"런타임 상태 읽는 중" ~en:"reading runtime state"))
+       | Page_unread ->
+           c.push_styled ~style:(Theme.recede ())
+             (page_unread_note_while ~ko ~reading:false)
+       | Page_empty ->
+           c.push_styled ~style:(Theme.recede ())
+             (match state.runtime_mode with
+              | Masc_tui_types.Runtime_lanes ->
+                  ui_text state ~ko:"  (설정된 런타임 후보 순서 없음)"
+                    ~en:"  (no runtime candidate orders configured)"
+              | Masc_tui_types.Runtime_all ->
+                  ui_text state ~ko:"  (설정된 런타임 없음)" ~en:"  (no runtimes configured)"));
+      for _ = 1 to content_height - 1 do
+        c.push_empty ()
+      done
+    end
   end
   else
     for index = 0 to content_height - 1 do
@@ -1208,19 +1278,71 @@ let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let volume_gc_op =
+    match state.volume_gc.Masc_tui_volume_gc.phase with
+    | Masc_tui_volume_gc.Reporting ->
+        Some
+          ( "reporting"
+          , ui_text state ~ko:"샌드박스 볼륨 정리 보고 생성 중" ~en:"Scanning sandbox volumes"
+          , Some (ui_text state
+              ~ko:"은퇴한 키퍼 볼륨과 컨테이너 점유 상태를 확인하고 있습니다"
+              ~en:"Inspecting retired keeper volumes and container claims")
+          , false )
+    | Masc_tui_volume_gc.Reclaiming ->
+        Some
+          ( "reclaiming"
+          , ui_text state ~ko:"은퇴한 키퍼 볼륨 회수 중" ~en:"Reclaiming retired keeper volumes"
+          , Some (ui_text state
+              ~ko:"서버가 대상 볼륨을 재확인한 뒤 안전하게 정리하고 있습니다"
+              ~en:"Server is re-checking candidate volumes and reclaiming them")
+          , true )
+    | Masc_tui_volume_gc.Idle | Masc_tui_volume_gc.Armed _ -> None
+  in
+  let volume_gc_started =
+    Masc_tui_types.progress_clock_option state ~slot:"tools-volume-gc" ~now
+      (Option.map (fun (tok, _, _, _) -> tok) volume_gc_op)
+  in
+  let volume_gc_sheet =
+    Option.map
+      (fun (_, title, detail, blocking) ->
+        { ps_title = title
+        ; ps_detail = detail
+        ; ps_started_at = volume_gc_started
+        ; ps_meter = None
+        ; ps_action_hint = Some (ui_text state ~ko:"Esc:목록으로 (요청 계속됨)" ~en:"Esc:back (request continues)")
+        ; ps_blocking = blocking
+        })
+      volume_gc_op
+  in
   let header ~position =
+    let readings =
+      match volume_gc_sheet with
+      | None -> []
+      | Some sheet ->
+          [ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title ]
+    in
     here_row ~cols state
       ~path:[ ui_text state ~ko:"도구·스킬" ~en:"tools & skills" ]
-      ~readings:[] ~position
+      ~readings ~position
   in
   let display = Render_tools.tools_display ~cols ~terminal_rows state in
   let display_lines = display.lines in
   let layout = tools_scrolled_for_lines state display_lines in
   let drawable = layout.sc_count in
-  let content_height =
+  let full_content_height =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:drawable ~preview_keep:layout.sc_preview_keep
   in
+  let sheet_lines =
+    match volume_gc_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:(max 0 (full_content_height - 1))
+          ~width:(framed_inner_width cols) sheet
+  in
+  let content_height = max 0 (full_content_height - List.length sheet_lines) in
   let max_scroll = max 0 (drawable - content_height) in
   let scroll = max 0 (min (tools_task_render_scroll state) max_scroll) in
   Option.iter
@@ -1257,6 +1379,7 @@ let render_tools (state : state) =
           box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
         else box_line_styled buf cols ~style line
   done;
+  List.iter (box_line buf cols) sheet_lines;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -1808,15 +1931,99 @@ let render_runtime_pick (state : state) =
   let target_width, route_width =
     Masc_tui_types.runtime_pick_column_widths ~cols items
   in
-  let view = Masc_tui_types.keeper_runtime_picker_view state ~terminal_rows in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let active_assignment_sheet =
+    Option.bind (Masc_tui_types.runtime_assignment_target_key state) (fun key ->
+      Option.bind
+        (List.find_opt
+           (fun attempt -> Masc_tui_types.keeper_settings_same_origin key attempt.raa_request.ras_key)
+           (Runtime_assignment_saves.all state.runtime_assignment_saves))
+        (fun attempt ->
+          let started_at =
+            Some (Masc_tui_types.progress_started_at_of_monotonic_ns ~now attempt.raa_request.ras_started_ns)
+          in
+          match attempt.raa_status with
+          | Assignment_checking ->
+              Some
+                { ps_title = ui_text state ~ko:"런타임 배정 확인 중" ~en:"Checking runtime assignment"
+                ; ps_detail = Some (Terminal_text.single_line key.ksk_keeper)
+                ; ps_started_at = started_at
+                ; ps_meter = None
+                ; ps_action_hint = Some (ui_text state ~ko:"Esc:돌아가기" ~en:"Esc:back")
+                ; ps_blocking = true
+                }
+          | Assignment_reading ->
+              Some
+                { ps_title = ui_text state ~ko:"현재 배정 버전 조회 중" ~en:"Reading current assignment revision"
+                ; ps_detail = Some (Terminal_text.single_line key.ksk_keeper)
+                ; ps_started_at = started_at
+                ; ps_meter = None
+                ; ps_action_hint = Some (ui_text state ~ko:"Esc:돌아가기" ~en:"Esc:back")
+                ; ps_blocking = true
+                }
+          | Assignment_posting _ ->
+              Some
+                { ps_title = ui_text state ~ko:"런타임 배정 저장 중" ~en:"Saving runtime assignment"
+                ; ps_detail = Some (Terminal_text.single_line key.ksk_keeper)
+                ; ps_started_at = started_at
+                ; ps_meter = None
+                ; ps_action_hint = Some (ui_text state ~ko:"Esc:돌아가기" ~en:"Esc:back")
+                ; ps_blocking = true
+                }
+          | Assignment_finished _ -> None))
+  in
+  let catalog_loading =
+    match state.runtime_catalog_reading with
+    | Runtime_catalog_loading | Runtime_catalog_refreshing _ -> true
+    | Runtime_catalog_read | Runtime_catalog_unread | Runtime_catalog_stale _
+    | Runtime_catalog_failed _ -> false
+  in
+  let catalog_started =
+    Masc_tui_types.progress_clock_option state ~slot:"runtime-catalog" ~now
+      (if catalog_loading then Some "loading" else None)
+  in
+  let progress_sheet =
+    match active_assignment_sheet with
+    | Some _ as s -> s
+    | None ->
+        if catalog_loading then
+          Some
+            { ps_title = ui_text state ~ko:"런타임 목록 조회 중" ~en:"Loading runtime catalogue"
+            ; ps_detail = None
+            ; ps_started_at = catalog_started
+            ; ps_meter = None
+            ; ps_action_hint = None
+            ; ps_blocking = false
+            }
+        else None
+  in
+  let sheet_rows =
+    let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+    let has_recovery =
+      Option.is_some (recovery_slot state ~max_cells:(framed_inner_width cols))
+    in
+    let total_budget = max 1 (rows - chrome_rows_for ~frame:Chrome_screen ~has_recovery) in
+    Option.fold ~none:0
+      ~some:(progress_sheet_height ~available:total_budget ~cols:(framed_inner_width cols))
+      progress_sheet
+  in
+  let view =
+    Masc_tui_types.keeper_runtime_picker_view state
+      ~terminal_rows:(max 1 (terminal_rows - sheet_rows))
+  in
   let current_id = Masc_tui_types.runtime_pick_current_id state in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime-pick"
+  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (here_row ~cols state
          ~path:[ keeper_name; runtime_step state ]
          ~readings:
-           [ Ansi.dim ^ ui_text state ~ko:"지금: " ~en:"current: " ^ current
-             ^ Ansi.reset ]
+           ([ Ansi.dim ^ ui_text state ~ko:"지금: " ~en:"current: " ^ current
+              ^ Ansi.reset ]
+            @ (match progress_sheet with
+               | None -> []
+               | Some sheet ->
+                   [ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title ]))
          ~position:
            (* The cursor indexes the list the filter keeps. *)
            (if view.Masc_tui_pick_list.shown = 0 then None
@@ -1827,14 +2034,20 @@ let render_runtime_pick (state : state) =
                    ~total:view.Masc_tui_pick_list.shown)))
     ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language (Keepers Keeper_runtime_pick))
     ~body:(fun ~budget:_ c ->
+      let mark_prefix =
+        if catalog_loading then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " else ""
+      in
       c.push_styled ~style:(Theme.info ())
-        ("  " ^ Masc_tui_types.keeper_runtime_picker_summary ~ko:(state.ui_language = Lang_ko) view
-          ^ Masc_tui_types.runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+        ("  " ^ mark_prefix ^ Masc_tui_types.keeper_runtime_picker_summary ~ko view
+          ^ Masc_tui_types.runtime_catalog_reading_suffix ~ko
               state.runtime_catalog_reading);
-      (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note ~ko:(state.ui_language = Lang_ko) ~reading:state.runtime_catalog_reading view with
+      (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note ~ko ~reading:state.runtime_catalog_reading view with
        | Runtime_catalog_failed err, _ -> c.push (data_unreliable_row ~cols err)
-       | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read
-          | Runtime_catalog_refreshing _ | Runtime_catalog_stale _), Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
+       | (Runtime_catalog_loading | Runtime_catalog_refreshing _), Some note ->
+           c.push
+             ("  " ^ progress_inline ~ko ~now ?started_at:catalog_started (String.trim note))
+       | (Runtime_catalog_unread | Runtime_catalog_read | Runtime_catalog_stale _), Some note ->
+           c.push (Ansi.dim ^ note ^ Ansi.reset)
        | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read
           | Runtime_catalog_refreshing _ | Runtime_catalog_stale _), None ->
            (* The first header cell spans badge and target, as the rows

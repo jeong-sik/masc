@@ -112,6 +112,7 @@ val disarm : t -> t
 type tone =
   | Plain
   | Dim
+  | Info
   | Bad
 
 (** The line under the next press for the server's periodic report: when

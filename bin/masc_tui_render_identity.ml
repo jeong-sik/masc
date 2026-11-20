@@ -25,7 +25,7 @@ type drawn =
    [Masc_tui_identity_model.identity_connectable], which is also what the key handler
    indexes, so the number on screen and the provider a keypress starts are
    the same list. *)
-let draw ?(ko = false) ~cols (view : view) =
+let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
   let say korean english = if ko then korean else english in
   let providers = view.providers in
   (* Everything on this pane reads the filtered list: the rows drawn, the
@@ -222,8 +222,25 @@ let draw ?(ko = false) ~cols (view : view) =
                Ansi.reset))
       providers
   in
+  let pending_login_rows =
+    match pending_logins with
+    | [] -> []
+    | names ->
+        let clean_names = String.concat ", " (List.map Terminal_text.single_line names) in
+        let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+        [ ""
+        ; Theme.info () ^ Ansi.bold ^ "  " ^ mark ^ " "
+          ^ say ("OAuth 로그인 시작 중 · " ^ clean_names)
+                ("Starting OAuth login · " ^ clean_names)
+          ^ Ansi.reset
+        ; Ansi.dim
+          ^ say "  서버에서 로그인 URL을 준비하고 있습니다."
+                "  Waiting for the server to prepare the consent URL."
+          ^ Ansi.reset
+        ]
+  in
   let started =
-    Masc_tui_identity_model.identity_started_rows ~cols ~keeper_name:view.keeper_name
+    Masc_tui_identity_model.identity_started_rows ~ko ?now ~cols ~keeper_name:view.keeper_name
       view.logins
   in
   (* The callback the server will name, coloured as a fact when it is known
@@ -290,6 +307,7 @@ let draw ?(ko = false) ~cols (view : view) =
       ~callback
       ~notice:
         (attempt
+         @ pending_login_rows
          @ started
          @ Masc_tui_identity_model.identity_app_form_rows ~ko view.app_form
          @ filter_rows)

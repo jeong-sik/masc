@@ -519,15 +519,45 @@ let render_exact_lane_provider_editor (state : state) editor =
     (fun line -> box_line_styled buf cols ~style:(Theme.warn ())
        ("  " ^ Keeper_chat.terminal_safe_text line))
     (Masc_tui_types.runtime_lane_stale_lines state);
-  (match state.runtime_lane_write with
-   | Masc_tui_types.Lane_write_posting ->
-     box_line_styled buf cols ~style:(Theme.info ())
-       (ui_text state ~ko:"  후보 순서 저장 중" ~en:"  Saving candidate order")
-   | Masc_tui_types.Lane_write_rereading _ ->
-     box_line_styled buf cols ~style:(Theme.info ())
-       (ui_text state ~ko:"  현재 후보 순서 조회 중"
-          ~en:"  Reading current candidate order")
-   | Masc_tui_types.Lane_write_idle -> ());
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let lane_write_spec =
+    match state.runtime_lane_write with
+    | Masc_tui_types.Lane_write_posting ->
+        Some
+          ( "posting"
+          , ui_text state ~ko:"후보 순서 저장 중" ~en:"Saving candidate order"
+          , Some (ui_text state ~ko:"runtime.toml 변경을 저장하고 있습니다" ~en:"Saving candidate order changes to runtime.toml")
+          , true )
+    | Masc_tui_types.Lane_write_rereading _ ->
+        Some
+          ( "rereading"
+          , ui_text state ~ko:"현재 후보 순서 조회 중" ~en:"Reading current candidate order"
+          , Some (ui_text state ~ko:"적용된 후보 순서를 서버에서 다시 확인하고 있습니다" ~en:"Reloading applied candidate order from server")
+          , true )
+    | Masc_tui_types.Lane_write_idle -> None
+  in
+  let lane_write_started =
+    Masc_tui_types.progress_clock_option state ~slot:"lane-write" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) lane_write_spec)
+  in
+  let lane_write_sheet =
+    Option.map
+      (fun (_, ps_title, ps_detail, ps_blocking) ->
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = lane_write_started
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking
+        })
+      lane_write_spec
+  in
+  (match lane_write_sheet with
+   | Some sheet ->
+       box_line buf cols
+         ("  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title)
+   | None -> ());
   let picker =
     Masc_tui_types.runtime_picker_projection
       ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows ~cols) state
@@ -634,19 +664,26 @@ let render_exact_lane_provider_editor (state : state) editor =
        | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
      (match state.runtime_catalog_reading with
       | Runtime_catalog_read -> ()
-      | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
+      | Runtime_catalog_refreshing _ ->
+          let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+          box_line_styled buf cols ~style:(Theme.info ())
+            ("  " ^ mark ^ " " ^ Terminal_text.single_line
+                      (Masc_tui_types.runtime_catalog_reading_suffix ~ko
+                         state.runtime_catalog_reading))
+      | Runtime_catalog_stale _ ->
           box_line_styled buf cols ~style:(Theme.warn ())
             ("  " ^ Terminal_text.single_line
-                      (Masc_tui_types.runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+                      (Masc_tui_types.runtime_catalog_reading_suffix ~ko
                          state.runtime_catalog_reading))
       | Runtime_catalog_unread ->
           box_line_styled buf cols ~style:(Theme.recede ())
             (ui_text state ~ko:"  런타임 목록 미조회 · 슬롯 ID 로 표시"
                ~en:"  runtime catalogue unread · showing slot IDs")
       | Runtime_catalog_loading ->
-          box_line_styled buf cols ~style:(Theme.recede ())
-            (ui_text state ~ko:"  런타임 목록 조회 중 · 슬롯 ID 로 표시"
-               ~en:"  runtime catalogue loading · showing slot IDs")
+          let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+          box_line_styled buf cols ~style:(Theme.info ())
+            ("  " ^ mark ^ " " ^ ui_text state ~ko:"런타임 목록 조회 중 · 슬롯 ID 로 표시"
+               ~en:"runtime catalogue loading · showing slot IDs")
       | Runtime_catalog_failed detail ->
           box_line_styled buf cols ~style:(Theme.warn ())
             (ui_text state ~ko:"  런타임 목록 조회 실패: " ~en:"  runtime catalogue read failed: "
@@ -655,8 +692,15 @@ let render_exact_lane_provider_editor (state : state) editor =
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
+     let sheet_preview_rows =
+       match lane_write_sheet with
+       | None -> 0
+       | Some sheet ->
+           progress_sheet_height ~available:(max 0 (rows - count_frame_lines buf - 5))
+             ~cols:(framed_inner_width cols) sheet
+     in
      let visible =
-       let reserved = if entries <> [] && Option.is_none selected_index then 6 else 5 in
+       let reserved = (if entries <> [] && Option.is_none selected_index then 6 else 5) + sheet_preview_rows in
        max 1 (min (List.length display_rows) (rows - count_frame_lines buf - reserved))
      in
      let selected_display_index =
@@ -740,9 +784,18 @@ let render_exact_lane_provider_editor (state : state) editor =
        (ui_text state
           ~ko:"  바꾸면 바로 저장됩니다. 파일 결과와 적용 결과는 따로 표시됩니다."
           ~en:"  Changes save immediately; file and application results are shown separately"));
-  for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
+  let remaining_rows = max 0 (rows - count_frame_lines buf - 2) in
+  let sheet_lines =
+    match lane_write_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:remaining_rows
+          ~width:(framed_inner_width cols) sheet
+  in
+  for _ = 1 to max 0 (remaining_rows - List.length sheet_lines) do
     box_empty buf cols
   done;
+  List.iter (box_line buf cols) sheet_lines;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -759,11 +812,57 @@ let render_lanes_overview (state : state) =
   let inner = max 1 (framed_inner_width cols) in
   let buf = Buffer.create 4096 in
   let korean = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let lanes_op =
+    match state.runtime_lane_write with
+    | Masc_tui_types.Lane_write_posting ->
+        Some
+          ( "lane-write-posting"
+          , ui_text state ~ko:"기능 경로 변경 저장 중" ~en:"Saving lane configuration"
+          , Some (ui_text state ~ko:"서버 설정 저장과 반영 영수증을 기다리고 있습니다" ~en:"Waiting for configuration save and receipt")
+          , true )
+    | Masc_tui_types.Lane_write_rereading _ ->
+        Some
+          ( "lane-write-rereading"
+          , ui_text state ~ko:"기능 목록 다시 읽는 중" ~en:"Reloading lane inventory"
+          , Some (ui_text state ~ko:"저장 후 최신 레인 상태를 확인하고 있습니다" ~en:"Verifying latest lane state after save")
+          , false )
+    | Masc_tui_types.Lane_write_idle ->
+        if state.standalone_lanes_inflight then
+          Some
+            ( "lanes-read"
+            , ui_text state ~ko:"기능 목록 읽는 중" ~en:"Reading feature inventory"
+            , Some (ui_text state ~ko:"서버에서 기능·레인 상태와 준비 여부를 조회하고 있습니다" ~en:"Reading feature lanes and readiness from the server")
+            , false )
+        else None
+  in
+  let lanes_op_started =
+    Masc_tui_types.progress_clock_option state ~slot:"lanes-overview-op" ~now
+      (Option.map (fun (tok, _, _, _) -> tok) lanes_op)
+  in
+  let lanes_progress_sheet =
+    Option.map
+      (fun (_, title, detail, blocking) ->
+        { ps_title = title
+        ; ps_detail = detail
+        ; ps_started_at = lanes_op_started
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking = blocking
+        })
+      lanes_op
+  in
   let projection = Masc_tui_types.lanes_overview_projection state ~rows ~cols in
   let header =
-    let readings = match state.lane_inventory with
-      | None -> [ here_missing_reading state ~error:state.standalone_lanes_error ]
-      | Some _ -> [] in
+    let readings =
+      match lanes_progress_sheet with
+      | Some sheet ->
+          [ progress_inline ~ko:korean ~now ?started_at:sheet.ps_started_at sheet.ps_title ]
+      | None ->
+          (match state.lane_inventory with
+           | None -> [ here_missing_reading state ~error:state.standalone_lanes_error ]
+           | Some _ -> [])
+    in
     let entries = List.length (Masc_tui_types.lane_inventory_entries state) in
     here_row ~cols state ~path:[] ~readings
       ~position:
@@ -782,22 +881,31 @@ let render_lanes_overview (state : state) =
          | Some surface -> pressable (Press_surface surface) label
          | None -> label) |> String.concat " · " in
        box_line_styled buf cols ~style:(Theme.info ()) line);
-  let observed_heading = match state.lane_inventory with
-    | None -> ui_text state ~ko:"기능 상태 미조회 · r:조회" ~en:"Feature states not read · r:read"
+  let observed_heading_styled =
+    match state.lane_inventory with
+    | None when state.standalone_lanes_inflight ->
+        progress_inline ~ko:korean ~now ?started_at:lanes_op_started
+          (ui_text state ~ko:"기능 상태 읽는 중" ~en:"Reading feature states")
+    | None ->
+        Theme.recede ()
+        ^ ui_text state ~ko:"기능 상태 미조회 · r:조회" ~en:"Feature states not read · r:read"
+        ^ Ansi.reset
     | Some snapshot ->
         let observed =
           Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
-            ~now:(Unix.gettimeofday ()) snapshot.Masc.Tui_decode_lane_inventory.observed_at in
+            ~now snapshot.Masc.Tui_decode_lane_inventory.observed_at in
         let standings = Masc_tui_lane_standing.count_items ~korean
             (List.map (Masc_tui_lane_inventory.row_standing_in snapshot) snapshot.rows) in
-        Message_layout.join_fitting ~sep:" · " ~cells:inner
-          ((match state.standalone_lanes_error with
-            | None -> ui_text state ~ko:"기능 목록 관측" ~en:"Feature inventory observed"
-            | Some _ -> ui_text state ~ko:"보존한 기능 목록 관측" ~en:"Retained inventory observation")
-           :: observed
-           :: standings) in
+        Theme.recede ()
+        ^ Message_layout.join_fitting ~sep:" · " ~cells:inner
+            ((match state.standalone_lanes_error with
+              | None -> ui_text state ~ko:"기능 목록 관측" ~en:"Feature inventory observed"
+              | Some _ -> ui_text state ~ko:"보존한 기능 목록 관측" ~en:"Retained inventory observation")
+             :: observed
+             :: standings)
+        ^ Ansi.reset in
   if projection.lop_observation then
-    box_line_styled buf cols ~style:(Theme.recede ()) observed_heading;
+    box_line buf cols observed_heading_styled;
   List.iter (fun notice -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ notice))
     projection.lop_notices;
   let inventory = lane_inventory_rows state in
@@ -808,7 +916,18 @@ let render_lanes_overview (state : state) =
   let panel_padding = if projection.lop_boxed then 4 else 0 in
   let list_cells = max 1 (list_width - panel_padding) in
   let layout = projection.lop_scroll in
-  let height = projection.lop_list_height in
+  let reserved_sheet_rows =
+    match lanes_progress_sheet with
+    | None -> 0
+    | Some sheet ->
+        let room =
+          if split then max 0 (min projection.lop_list_height projection.lop_detail_height - 2)
+          else max 0 (projection.lop_list_height - 2)
+        in
+        let h = progress_sheet_height ~available:room ~cols:(framed_inner_width cols) sheet in
+        if h >= 2 then h else 0
+  in
+  let height = max 1 (projection.lop_list_height - reserved_sheet_rows) in
   report_drawn_list Lane_inventory ~height;
   let selected_position = lane_inventory_visual_cursor state in
   let scroll = Masc_tui_scroll.normalize ~count:layout.sc_count ~height state.lanes_scroll in
@@ -830,7 +949,11 @@ let render_lanes_overview (state : state) =
     let index = scroll + offset in
     match Rows.at window index with
     | None when offset = 0 && Option.is_none state.lane_inventory ->
-        Theme.recede () ^ ui_text state ~ko:"기능 목록 미조회 · r:조회" ~en:"Inventory not read · r:read" ^ Ansi.reset
+        if state.standalone_lanes_inflight then
+          progress_inline ~ko:korean ~now ?started_at:lanes_op_started
+            (ui_text state ~ko:"기능 목록 읽는 중" ~en:"Reading inventory")
+        else
+          Theme.recede () ^ ui_text state ~ko:"기능 목록 미조회 · r:조회" ~en:"Inventory not read · r:read" ^ Ansi.reset
     | None -> ""
     | Some (Masc_tui_lane_inventory.Category_header category) ->
         Theme.info ()
@@ -856,7 +979,10 @@ let render_lanes_overview (state : state) =
             ^ fit_width (Masc_tui_lane_standing.mark observed) 2 ^ Ansi.reset
             ^ recede ^ fit_width label label_width ^ "  " ^ Ansi.reset
             ^ Masc_tui_lane_standing.colour observed ^ fit_width (summary row) status_width ^ Ansi.reset)) in
-  let detail_height = projection.lop_detail_height in
+  let detail_height =
+    if split then max 0 (projection.lop_detail_height - reserved_sheet_rows)
+    else projection.lop_detail_height
+  in
   let detail_cells = max 1 (detail_width - panel_padding) in
   let row_detail row =
     match Masc_tui_types.standalone_lane_of_inventory_row state row with
@@ -1020,9 +1146,18 @@ let render_lanes_overview (state : state) =
                   ^ " · " ^ Terminal_text.single_line runtime.ro_id))
            picker.Masc_tui_types.rlp_choices));
   let used_rows = count_frame_lines buf in
-  for _ = 1 to max 0 (rows - used_rows - 2) do
+  let remaining_rows = max 0 (rows - used_rows - 2) in
+  let sheet_lines =
+    match lanes_progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko:korean ~now ~available:remaining_rows
+          ~width:(framed_inner_width cols) sheet
+  in
+  for _ = 1 to max 0 (remaining_rows - List.length sheet_lines) do
     box_empty buf cols
   done;
+  List.iter (box_line buf cols) sheet_lines;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view));
@@ -1162,10 +1297,20 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
         Some (Masc_tui_value.Position.partial ~selected ~loaded:shown ~total)
     | Some _ | None -> Some (Masc_tui_value.Position.row ~selected ~total:shown)
   in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let runs_started =
+    Masc_tui_types.progress_clock_option state ~slot:"lane-runs" ~now
+      (if state.lane_runs_loading then Some (observed_lane_label lane) else None)
+  in
   let header =
     here_row ~cols state
       ~path:[ observed_lane_label lane; text "실행" "runs" ]
-      ~readings:(if state.lane_runs_loading then [ text "읽는 중" "loading" ] else [])
+      ~readings:
+        (if state.lane_runs_loading then
+           [ progress_inline ~ko ~now ?started_at:runs_started
+               (text "실행 읽는 중" "loading runs") ]
+         else [])
       ~position
   in
   box_line buf cols header;
@@ -1200,7 +1345,6 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   in
   (* One reading of the clock for the whole list, so two rows of one frame
      cannot disagree about which day today is. *)
-  let now = Unix.gettimeofday () in
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Render_schedule.lane_run_header_row run_table);
   box_divider buf cols;
@@ -1225,16 +1369,19 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   let runs_window = Rows.of_list ~first:scroll ~height:content_height runs in
   report_drawn_list Lane_runs ~height:content_height;
   if shown = 0 then begin
-    let empty =
-      match
-        empty_page_of ~snapshot:state.lane_runs ~error:state.lane_runs_error
-      with
-      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.lane_runs_loading
-      | Page_empty ->
-          text "  (보관된 실행이 없음)" "  (no retained runs for this lane)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    (match empty_page_of ~snapshot:state.lane_runs ~error:state.lane_runs_error with
+     | Page_failed ->
+         box_line_styled buf cols ~style:(Theme.recede ()) (page_failed_note ~ko)
+     | Page_unread when state.lane_runs_loading ->
+         box_line buf cols
+           ("  " ^ progress_inline ~ko ~now ?started_at:runs_started
+              (text "실행 목록 읽는 중" "loading runs"))
+     | Page_unread ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (page_unread_note_while ~ko ~reading:false)
+     | Page_empty ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (text "  (보관된 실행이 없음)" "  (no retained runs for this lane)"));
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -1788,7 +1935,11 @@ let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_deta
     | Some {lp_memory_scope=(Tui_decode.Context_only_scope | Tui_decode.Memory_inference_scope);_} | None -> false in
   preflight_lines @ (if not details && fold_memory_evidence then [] else
   match detail.lrd_output_availability, detail.lrd_output with
-  | None, _ -> [ Theme.muted (), "실행 중 · 아직 출력이 기록되지 않았습니다" ]
+  | None, _ ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      [ Theme.info (),
+        if ko then under_way ^ " 실행 중 · 아직 출력이 기록되지 않았습니다"
+        else under_way ^ " running · no output recorded yet" ]
   | Some availability, output ->
     lane_run_payload_availability_lines ~width availability output)
 
@@ -2101,6 +2252,13 @@ let render_lane_run_detail (state : state) ~run_id =
         Some (Inspection_lane detail)
     | Some _ | None -> None
   in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let loading_detail = Option.is_none detail && Option.is_none state.lane_run_detail_error in
+  let detail_started =
+    Masc_tui_types.progress_clock_option state ~slot:"lane-run-detail" ~now
+      (if loading_detail then Some run_id else None)
+  in
   (* The title names where the window stands, known once the payload is
      laid out, so it is drawn last and put first. *)
   let header ~position =
@@ -2112,7 +2270,14 @@ let render_lane_run_detail (state : state) ~run_id =
       | Lanes_measurement_detail _ -> [ text "측정" "measurement"; run_id ]
       | Lanes_overview | Lanes_run_list _ | Lanes_inventory_detail _ -> [ run_id ]
     in
-    here_row ~cols state ~path ~readings:[] ~position
+    let readings =
+      if loading_detail then
+        [ progress_inline ~ko ~now ?started_at:detail_started
+            (if measurement then text "측정 아티팩트 읽는 중" "loading measurement artifact"
+             else text "실행 기록 읽는 중" "loading exact run record") ]
+      else []
+    in
+    here_row ~cols state ~path ~readings ~position
   in
   (match state.lane_run_detail_error with
    | None -> ()
@@ -2132,15 +2297,35 @@ let render_lane_run_detail (state : state) ~run_id =
     match detail, state.lane_run_detail_error with
     | None, error ->
       let filler_rows = max 1 (rows - lane_run_chrome_rows_without_summary - chrome_rows_for_error) in
-      let line =
-        match error with
-        | None -> Ansi.dim, (if measurement then "  (loading measurement artifact)" else "  (loading exact run record)")
-        | Some _ -> Ansi.dim, page_failed_note ~ko:(state.ui_language = Lang_ko)
-      in
-      box_line_styled buf cols ~style:(fst line) (snd line);
-      for _ = 2 to filler_rows do
-        box_empty buf cols
-      done;
+      (match error with
+       | None ->
+           let label =
+             if measurement then ui_text state ~ko:"측정 아티팩트 읽는 중" ~en:"Loading measurement artifact"
+             else ui_text state ~ko:"실행 기록 읽는 중" ~en:"Loading exact run record"
+           in
+           box_line buf cols ("  " ^ progress_inline ~ko ~now ?started_at:detail_started label);
+           let sheet_lines =
+             render_progress_sheet ~ko ~now ~available:(max 0 (filler_rows - 1))
+               ~width:(framed_inner_width cols)
+               { ps_title = label
+               ; ps_detail = Some (ui_text state
+                   ~ko:"입력·출력 페이로드와 실행 증거를 불러오고 있습니다"
+                   ~en:"Reading input/output payloads and execution evidence")
+               ; ps_started_at = detail_started
+               ; ps_meter = None
+               ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로" ~en:"Esc:back")
+               ; ps_blocking = false
+               }
+           in
+           for _ = 2 to max 1 (filler_rows - List.length sheet_lines) do
+             box_empty buf cols
+           done;
+           List.iter (box_line buf cols) sheet_lines
+       | Some _ ->
+           box_line_styled buf cols ~style:Ansi.dim (page_failed_note ~ko);
+           for _ = 2 to filler_rows do
+             box_empty buf cols
+           done);
       0, None, 0
     | Some detail, (Some _ | None) ->
       let summary =
@@ -2354,10 +2539,20 @@ let render_clients (state : state) =
   let shown = List.length clients in
   (* Every row's span is a distance from the same read of the roster. *)
   let read_at = clients_read_at state in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let clients_started =
+    Masc_tui_types.progress_clock_option state ~slot:"clients-surface" ~now
+      (if state.clients_surface_inflight then Some "reading" else None)
+  in
   let header =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"클라이언트" ~en:"clients" ]
-      ~readings:[]
+      ~readings:
+        (if state.clients_surface_inflight then
+           [ progress_inline ~ko ~now ?started_at:clients_started
+               (ui_text state ~ko:"클라이언트 읽는 중" ~en:"reading clients") ]
+         else [])
       ~position:
         (if shown = 0 then None
          else
@@ -2450,13 +2645,19 @@ let render_clients (state : state) =
   let clients_window = Rows.of_list ~first:scroll ~height:content_height clients in
   report_drawn_list Client_rows ~height:content_height;
   if shown = 0 then begin
-    let empty =
-      match empty_page_of ~snapshot:state.clients_surface ~error:state.clients_surface_error with
-      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.clients_surface_inflight
-      | Page_empty -> ui_text state ~ko:"  (붙은 클라이언트 없음)" ~en:"  (nobody attached)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    (match empty_page_of ~snapshot:state.clients_surface ~error:state.clients_surface_error with
+     | Page_failed ->
+         box_line_styled buf cols ~style:(Theme.recede ()) (page_failed_note ~ko)
+     | Page_unread when state.clients_surface_inflight ->
+         box_line buf cols
+           ("  " ^ progress_inline ~ko ~now ?started_at:clients_started
+              (ui_text state ~ko:"클라이언트 목록 읽는 중" ~en:"reading client roster"))
+     | Page_unread ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (page_unread_note_while ~ko ~reading:false)
+     | Page_empty ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (ui_text state ~ko:"  (붙은 클라이언트 없음)" ~en:"  (nobody attached)"));
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -2521,18 +2722,34 @@ let render_clients (state : state) =
 ;;
 
 let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
-    ~surface_key ~path ~hints styled_lines =
+    ?progress_sheet ?now ~surface_key ~path ~hints styled_lines =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let height = max 1 (rows - Masc_tui_frame.chrome_rows) in
+  let total_height = max 1 (rows - Masc_tui_frame.chrome_rows) in
+  let ko = state.ui_language = Lang_ko in
+  let now = match now with Some now -> now | None -> Unix.gettimeofday () in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:total_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let height = max 1 (total_height - List.length sheet_lines) in
   let scroll =
     Masc_tui_scroll.normalize ~count:(List.length styled_lines) ~height
       state.lane_run_detail_scroll
   in
   let window = Rows.of_list ~first:scroll ~height styled_lines in
   let buf = Buffer.create 4096 in
+  let readings =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        [ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title ]
+  in
   box_top buf cols;
   box_line buf cols
-    (here_row ~cols state ~path ~readings:[]
+    (here_row ~cols state ~path ~readings
        ~position:
          (Masc_tui_value.Position.window ~first:scroll ~shown:height
             ~total:(List.length styled_lines)));
@@ -2542,6 +2759,7 @@ let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
     | None -> box_empty buf cols
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
+  List.iter (box_line buf cols) sheet_lines;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints);
@@ -2550,10 +2768,10 @@ let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
     ~surface_key ~rows:terminal_rows ~cols buf
 
 let render_lane_scrollable_reading (state : state) ~terminal_rows ~cols
-    ~surface_key ~path ~hints lines =
+    ?progress_sheet ?now ~surface_key ~path ~hints lines =
   let max_cells = max 1 (framed_inner_width cols - 2) in
   render_lane_scrollable_styled_reading state ~terminal_rows ~cols
-    ~surface_key ~path ~hints (Page_reading.rows ~max_cells lines)
+    ?progress_sheet ?now ~surface_key ~path ~hints (Page_reading.rows ~max_cells lines)
 
 (* The same words as the key that opens the reading ([Space] in the list). *)
 let lane_activity_step state = ui_text state ~ko:"켜고 끄기" ~en:"activity"
@@ -2564,8 +2782,52 @@ let render_lane_inventory_detail (state : state) target =
   let max_cells = max 1 (width - 2) in
   let wrap style text = Page_reading.wrap_indented_line ~max_cells style text in
   let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let t korean english = if ko then korean else english in
+  let detail_op =
+    match state.runtime_lane_write with
+    | Masc_tui_types.Lane_write_posting ->
+        Some
+          ( "lane-write-posting"
+          , t "기능 경로 변경 저장 중" "Saving lane configuration"
+          , Some (t "서버 설정 저장과 반영 영수증을 기다리고 있습니다" "Waiting for configuration save and receipt")
+          , true )
+    | Masc_tui_types.Lane_write_rereading _ ->
+        Some
+          ( "lane-write-rereading"
+          , t "기능 목록 다시 읽는 중" "Reloading lane inventory"
+          , Some (t "저장 후 최신 레인 상태를 확인하고 있습니다" "Verifying latest lane state after save")
+          , false )
+    | Masc_tui_types.Lane_write_idle ->
+        if state.standalone_lanes_inflight then
+          Some
+            ( "lanes-read"
+            , t "Lane 목록 읽는 중" "Reading lane inventory"
+            , Some (t "서버에서 최신 Lane 구성과 상태를 불러오고 있습니다" "Reading latest lane configuration and status from the server")
+            , false )
+        else None
+  in
+  let detail_op_started =
+    Masc_tui_types.progress_clock_option state ~slot:"lane-inventory-detail-op" ~now
+      (Option.map (fun (tok, _, _, _) -> tok) detail_op)
+  in
+  let progress_sheet =
+    Option.map
+      (fun (_, title, detail, blocking) ->
+        { ps_title = title
+        ; ps_detail = detail
+        ; ps_started_at = detail_op_started
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking = blocking
+        })
+      detail_op
+  in
   let content = match state.lane_inventory with
+    | None when state.standalone_lanes_inflight ->
+        let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+        wrap (Theme.info ())
+          (t (under_way ^ " Lane 목록 읽는 중") (under_way ^ " Reading lane inventory"))
     | None ->
         wrap (Theme.recede ())
           (t "Lane 목록을 아직 읽지 않았습니다. r: 새로고침"
@@ -2632,6 +2894,7 @@ let render_lane_inventory_detail (state : state) target =
         [ Terminal_text.single_line label ]
   in
   render_lane_scrollable_styled_reading state ~terminal_rows ~cols
+    ?progress_sheet ~now
     ~surface_key:"lane-inventory-detail" ~path
     ~hints:(Masc_tui_keys.footer_hints_lane_inventory_detail ~lang:state.ui_language
               ~exact_models:(Option.is_some (Masc_tui_types.lanes_screen_standalone_lane state)))
@@ -2639,37 +2902,140 @@ let render_lane_inventory_detail (state : state) target =
 
 let render_machine_activity (state : state) session =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let phase = Masc_tui_machine_activity.phase_status session in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"machine-activity" ~now
+      (match phase with
+       | `Idle -> None
+       | `Reading -> Some "reading"
+       | `Writing -> Some "writing")
+  in
+  let progress_sheet =
+    match phase with
+    | `Idle -> None
+    | `Reading ->
+        Some
+          { ps_title = ui_text state ~ko:"머신 설정 읽는 중" ~en:"Reading machine configuration"
+          ; ps_detail = Some (ui_text state ~ko:"현재 파일과 서버 활동 상태를 조회하고 있습니다"
+                                ~en:"Reading current file and server activity")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로" ~en:"Esc:back")
+          ; ps_blocking = true
+          }
+    | `Writing ->
+        Some
+          { ps_title = ui_text state ~ko:"머신 활동 저장 중" ~en:"Saving machine activity"
+          ; ps_detail = Some (ui_text state ~ko:"설정 검증과 저장 영수증을 기다리고 있습니다"
+                                ~en:"Waiting for configuration validation and write receipt")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로 (저장은 계속됨)" ~en:"Esc:back (save continues)")
+          ; ps_blocking = true
+          }
+  in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let hints =
+    match phase with
+    | `Idle -> Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language
+    | `Reading ->
+        under_way ^ " "
+        ^ ui_text state ~ko:"설정 읽는 중  j/k:스크롤  Esc:뒤로"
+            ~en:"Reading configuration  j/k:scroll  Esc:back"
+    | `Writing ->
+        under_way ^ " "
+        ^ ui_text state ~ko:"저장 중  j/k:스크롤  Esc:뒤로"
+            ~en:"Saving activity  j/k:scroll  Esc:back"
+  in
   render_lane_scrollable_reading state ~terminal_rows ~cols
+    ?progress_sheet ~now
     ~surface_key:"machine-activity"
     ~path:[ Masc.Machine_lane.to_wire (Masc_tui_machine_activity.owner session).machine
           ; lane_activity_step state ]
-    ~hints:(Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language)
-    (Masc_tui_machine_activity.lines ~ko:(state.ui_language = Lang_ko) session)
+    ~hints
+    (Masc_tui_machine_activity.lines ~ko session)
 
 let render_exact_activity (state : state) session =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let phase = Masc_tui_exact_activity.phase_status session in
+  let lane_id = Standalone_lane.to_id (Masc_tui_exact_activity.owner session).lane in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"exact-activity" ~now
+      (match phase with
+       | `Idle -> None
+       | `Reading -> Some ("reading:" ^ lane_id)
+       | `Writing -> Some ("writing:" ^ lane_id))
+  in
+  let progress_sheet =
+    match phase with
+    | `Idle -> None
+    | `Reading ->
+        Some
+          { ps_title = ui_text state ~ko:"정확 출력 설정 읽는 중" ~en:"Reading exact lane configuration"
+          ; ps_detail = Some (ui_text state ~ko:"현재 runtime.toml 선언을 조회하고 있습니다"
+                                ~en:"Reading current runtime.toml declaration")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로" ~en:"Esc:back")
+          ; ps_blocking = true
+          }
+    | `Writing ->
+        Some
+          { ps_title = ui_text state ~ko:"정확 출력 활동 저장 중" ~en:"Saving exact lane activity"
+          ; ps_detail = Some (ui_text state ~ko:"설정 검증과 저장 영수증을 기다리고 있습니다"
+                                ~en:"Waiting for configuration validation and write receipt")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로 (저장은 계속됨)" ~en:"Esc:back (save continues)")
+          ; ps_blocking = true
+          }
+  in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let hints =
+    match phase with
+    | `Idle -> Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language
+    | `Reading ->
+        under_way ^ " "
+        ^ ui_text state ~ko:"설정 읽는 중  j/k:스크롤  Esc:뒤로"
+            ~en:"Reading configuration  j/k:scroll  Esc:back"
+    | `Writing ->
+        under_way ^ " "
+        ^ ui_text state ~ko:"저장 중  j/k:스크롤  Esc:뒤로"
+            ~en:"Saving activity  j/k:scroll  Esc:back"
+  in
   render_lane_scrollable_reading state ~terminal_rows ~cols
+    ?progress_sheet ~now
     ~surface_key:"exact-activity"
-    ~path:[ Standalone_lane.to_id (Masc_tui_exact_activity.owner session).lane
+    ~path:[ lane_id
           ; lane_activity_step state ]
-    ~hints:(Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language)
-    (Masc_tui_exact_activity.lines ~ko:(state.ui_language = Lang_ko) session)
+    ~hints
+    (Masc_tui_exact_activity.lines ~ko session)
 
 let render_lanes (state : state) =
   match Masc_tui_types.shown_machine_activity state with
-  | Some session -> render_machine_activity state session
-  | None -> match Masc_tui_types.shown_exact_activity state with
-  | Some session -> render_exact_activity state session
-  (* The slot editor covers the overview or the inventory detail it was
-     opened from; [lanes_mode] keeps naming that screen for its Esc. *)
-  | None -> match state.slot_editor with
-  | Some ({ Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } as editor) ->
-    render_exact_lane_provider_editor state editor
-  | None | Some { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots; _ } ->
-  match state.lanes_mode with
-  | Lanes_overview -> render_lanes_overview state
-  | Lanes_inventory_detail target -> render_lane_inventory_detail state target
-  | Lanes_run_list lane -> render_lane_run_list state ~lane
-  | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
-  | Lanes_measurement_detail sha256 -> render_lane_run_detail state ~run_id:sha256
+  | Some session ->
+      Masc_tui_types.clear_progress_clock state ~slot:"exact-activity";
+      render_machine_activity state session
+  | None ->
+      Masc_tui_types.clear_progress_clock state ~slot:"machine-activity";
+      match Masc_tui_types.shown_exact_activity state with
+      | Some session -> render_exact_activity state session
+      | None ->
+          Masc_tui_types.clear_progress_clock state ~slot:"exact-activity";
+          (* The slot editor covers the overview or the inventory detail it was
+             opened from; [lanes_mode] keeps naming that screen for its Esc. *)
+          match state.slot_editor with
+          | Some ({ Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } as editor) ->
+            render_exact_lane_provider_editor state editor
+          | None | Some { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots; _ } ->
+          match state.lanes_mode with
+          | Lanes_overview -> render_lanes_overview state
+          | Lanes_inventory_detail target -> render_lane_inventory_detail state target
+          | Lanes_run_list lane -> render_lane_run_list state ~lane
+          | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
+          | Lanes_measurement_detail sha256 -> render_lane_run_detail state ~run_id:sha256
 

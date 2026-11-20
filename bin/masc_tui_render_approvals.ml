@@ -173,7 +173,34 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
            | Gate_string | Gate_string_bytes | Gate_json | Gate_unreadable -> false))
       lines
   in
-  let content_height = max 1 (rows - max 0 (framed_chrome_rows - 2)) in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let action_inflight = Masc_tui_operator_projection.Flow.action_inflight state.approval_flow in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"approvals-action" ~now
+      (if action_inflight then Some "approval-action" else None)
+  in
+  let progress_sheet =
+    if not action_inflight then None
+    else
+      Some
+        { ps_title = say "승인 요청 처리 중" "Submitting approval decision"
+        ; ps_detail = Some (say "서버에서 승인/거절 결정을 처리하고 있습니다" "Processing approval decision on server")
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint = Some (say "Esc:목록" "Esc:back")
+        ; ps_blocking = true
+        }
+  in
+  let raw_content_height = max 1 (rows - max 0 (framed_chrome_rows - 2)) in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:raw_content_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let content_height = max 0 (raw_content_height - List.length sheet_lines) in
   let total = List.length lines in
   viewport := Some
     { adv_count = total; adv_height = content_height;
@@ -194,15 +221,22 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
   box_line buf cols
     (zone_two_title ~cols state
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
-       ~title:(fun ~cols:_ -> screen_title
-         (if input_unreadable then say "!창 넓히기 필요 · 승인" "!WIDEN Approval"
-          else match value_hint, key_has_bytes with
-            | Masc_tui_keys.No_value_reading, false -> say " 승인 상세" " Approval"
-            | No_value_reading, true -> say "*N=bN 바이트 | 승인" "*N=bN bytes | Approval"
-            | Readable_values, false -> say "v:바이트 | 최상위 문자열" "v:bytes | top-level strings"
-            | Readable_values, true -> say "v:바이트 *N=bN | 승인" "v:bytes *N=bN | Approval"
-            | Byte_values, false -> say "v:텍스트 | 최상위 문자열 바이트" "v:text | top-level string bytes"
-            | Byte_values, true -> say "v:텍스트 *N=bN | 최상위 문자열" "v:text *N=bN | top-level strings")));
+       ~title:(fun ~cols:_ ->
+         let base =
+           screen_title
+             (if input_unreadable then say "!창 넓히기 필요 · 승인" "!WIDEN Approval"
+              else match value_hint, key_has_bytes with
+                | Masc_tui_keys.No_value_reading, false -> say " 승인 상세" " Approval"
+                | No_value_reading, true -> say "*N=bN 바이트 | 승인" "*N=bN bytes | Approval"
+                | Readable_values, false -> say "v:바이트 | 최상위 문자열" "v:bytes | top-level strings"
+                | Readable_values, true -> say "v:바이트 *N=bN | 승인" "v:bytes *N=bN | Approval"
+                | Byte_values, false -> say "v:텍스트 | 최상위 문자열 바이트" "v:text | top-level string bytes"
+                | Byte_values, true -> say "v:텍스트 *N=bN | 최상위 문자열" "v:text *N=bN | top-level strings")
+         in
+         match progress_sheet with
+         | None -> base
+         | Some sheet ->
+             base ^ "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title));
   box_divider buf cols;
   let drawn =
     lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
@@ -235,7 +269,8 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
     drawn;
   for _ = 1 to content_height - List.length drawn do
     box_empty buf cols
-  done
+  done;
+  List.iter (box_line buf cols) sheet_lines
 ;;
 
 (* The queue stays beside the ask. Reading one used to hide the rest, and the
@@ -383,18 +418,20 @@ let ask_answer_feedback_document (state : state) =
             ^ Yojson.Safe.pretty_to_string (Ask_projection.asker_to_json feedback.af_asker)));
     Option.iter (fun reading ->
       let observed = Ask_projection.followup_view reading in
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
       let source_notice source = match source.Ask_projection.fo_state with
         | Followup_pending ->
-            (match source.fo_value with None -> "" | Some _ -> say " · 최신 조회 중" " · reading latest")
+            (match source.fo_value with None -> "" | Some _ -> " · " ^ under_way ^ " " ^ say "최신 조회 중" "reading latest")
         | Followup_received -> ""
         | Followup_unconfirmed ->
             (match source.fo_value with None -> ""
              | Some _ -> say " · 이전 관측 · 최신 출처 미확인" " · earlier observation; latest source unconfirmed") in
       let source_style source observed = match source.Ask_projection.fo_state with
         | Followup_unconfirmed -> Theme.warn ()
-        | Followup_pending | Followup_received -> observed in
+        | Followup_pending -> Theme.info ()
+        | Followup_received -> observed in
       let absent source label = match source.Ask_projection.fo_state with
-        | Followup_pending -> label ^ say ": 조회 중" ": reading", Theme.recede ()
+        | Followup_pending -> under_way ^ " " ^ label ^ say ": 조회 중" ": reading", Theme.info ()
         | Followup_received -> label ^ say ": 관측 불가" ": observation unavailable", Theme.warn ()
         | Followup_unconfirmed -> label ^ say ": 최신 출처 미확인" ": latest source unconfirmed", Theme.warn () in
       Option.iter (fun identity ->
@@ -721,41 +758,77 @@ let draw_ask_questions buf cols (state : state) ~budget =
    Until 2026-08-31 the second row was spelled as a literal ["\\n"] --
    backslash and n, printed as those two characters -- because a real newline
    would have drawn a row nobody counted. *)
-let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
+let approvals_progress_sheet ~now (state : state) =
+  let action_inflight = Masc_tui_operator_projection.Flow.action_inflight state.approval_flow in
+  let action_started =
+    Masc_tui_types.progress_clock_option state ~slot:"approvals-action" ~now
+      (if action_inflight then Some "approval-action" else None)
+  in
+  let ask_started =
+    Masc_tui_types.progress_clock_option state ~slot:"approvals-ask" ~now
+      (if state.ask_submit_inflight then Some "ask-submit" else None)
+  in
+  if action_inflight then
+    Some
+      { ps_title = ui_text state ~ko:"승인 요청 처리 중" ~en:"Submitting approval decision"
+      ; ps_detail =
+          Some
+            (ui_text state ~ko:"서버에서 승인/거절 결정을 처리하고 있습니다"
+               ~en:"Processing approval decision on server")
+      ; ps_started_at = action_started
+      ; ps_meter = None
+      ; ps_action_hint = None
+      ; ps_blocking = true
+      }
+  else if state.ask_submit_inflight then
+    Some
+      { ps_title = ui_text state ~ko:"질문 답변 제출 중" ~en:"Submitting answer"
+      ; ps_detail =
+          Some
+            (ui_text state ~ko:"작성한 질문 답변을 서버로 전송하고 있습니다"
+               ~en:"Sending your answer to the server")
+      ; ps_started_at = ask_started
+      ; ps_meter = None
+      ; ps_action_hint = None
+      ; ps_blocking = true
+      }
+  else None
+;;
+
+let approval_detail_line (state : state) ~now ~started_at ~approvals ~cols ~action_inflight =
     let ko = state.ui_language = Lang_ko in
     let say korean english = if ko then korean else english in
+    if action_inflight && Option.is_some (List.nth_opt approvals state.approval_cursor) then
+      "  " ^ progress_inline ~ko ~now ?started_at
+        (say "승인 요청 처리 중" "Approval request in progress")
+    else
     match List.nth_opt approvals state.approval_cursor with
     | Some (Masc_tui_approvals_model.Operator_row a) -> (
-        if action_inflight then
-          Printf.sprintf "  %s%s%s" (Theme.warn ())
-            (say "승인 요청 처리 중" "Approval request in progress")
-            Ansi.reset
-        else
-          match state.pending_approval_action with
-          | Some { paa_token; paa_decision }
-            when String.equal paa_token a.ap_token ->
-              let key =
-                match paa_decision with
-                | Confirm -> "y"
-                | Deny -> "n"
-              in
-              let prefix =
-                if ko then Printf.sprintf "%s 키를 한 번 더 누르세요: " key
-                else Printf.sprintf "Press %s again: " key
-              in
-              let room =
-                max 8 (framed_inner_width cols - 2 - Message_layout.display_width prefix)
-              in
-              Printf.sprintf "  %s%s%s%s" (Theme.warn ()) prefix
-                (fit_width (Terminal_text.single_line a.ap_summary) room)
-                Ansi.reset
-          | _ ->
-              let summary =
-                fit_width (Terminal_text.single_line a.ap_summary) (max 8 (framed_inner_width cols - 30))
-              in
-              Printf.sprintf "  %s%s%s  %s%s%s"
-                Ansi.dim summary Ansi.reset
-                (Theme.info ()) (say "y:승인  n:거절" "y:approve  n:reject") Ansi.reset)
+        match state.pending_approval_action with
+        | Some { paa_token; paa_decision }
+          when String.equal paa_token a.ap_token ->
+            let key =
+              match paa_decision with
+              | Confirm -> "y"
+              | Deny -> "n"
+            in
+            let prefix =
+              if ko then Printf.sprintf "%s 키를 한 번 더 누르세요: " key
+              else Printf.sprintf "Press %s again: " key
+            in
+            let room =
+              max 8 (framed_inner_width cols - 2 - Message_layout.display_width prefix)
+            in
+            Printf.sprintf "  %s%s%s%s" (Theme.warn ()) prefix
+              (fit_width (Terminal_text.single_line a.ap_summary) room)
+              Ansi.reset
+        | _ ->
+            let summary =
+              fit_width (Terminal_text.single_line a.ap_summary) (max 8 (framed_inner_width cols - 30))
+            in
+            Printf.sprintf "  %s%s%s  %s%s%s"
+              Ansi.dim summary Ansi.reset
+              (Theme.info ()) (say "y:승인  n:거절" "y:approve  n:reject") Ansi.reset)
     | Some (Masc_tui_approvals_model.Keeper_tool_row held) ->
         Printf.sprintf "  %s%s%s  %s%s%s\n  %s%s%s%s"
           (Theme.warn ())
@@ -916,8 +989,12 @@ let render_approvals (state : state) =
   let action_inflight =
     Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
   in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let progress_sheet = approvals_progress_sheet ~now state in
+  let started_at = Option.bind progress_sheet (fun s -> s.ps_started_at) in
   let detail_line =
-    approval_detail_line state ~approvals ~cols ~action_inflight
+    approval_detail_line state ~now ~started_at ~approvals ~cols ~action_inflight
   in
   let metadata_line, payload_line =
     approval_metadata_lines state ~approvals ~cols
@@ -943,8 +1020,10 @@ let render_approvals (state : state) =
       ~path:[ ui_text state ~ko:"요청" ~en:"requests" ]
       ~readings:
         [ count_text ^ hidden_note
-        ; (if action_inflight then ui_text state ~ko:"제출 중" ~en:"submitting"
-           else "") ]
+        ; (match progress_sheet with
+           | Some sheet ->
+               progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+           | None -> "") ]
       ~position:
         (match approvals with
          | [] -> None
@@ -1014,9 +1093,14 @@ let render_approvals (state : state) =
         server's own sentence about the store, which does not name itself. *)
      | None, Some err -> [ data_unreliable_row ~cols err ]
      | None, None ->
-         [ Ansi.dim
-           ^ ui_text state ~ko:"  Gate 설정: 조회 중" ~en:"  Gate lanes: loading"
-           ^ Ansi.reset ]);
+         if server_authority_ready state then
+           [ Theme.info () ^ "  " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+             ^ ui_text state ~ko:"Gate 설정: 조회 중" ~en:"Gate lanes: loading"
+             ^ Ansi.reset ]
+         else
+           [ Ansi.dim
+             ^ ui_text state ~ko:"  Gate 설정: 미조회" ~en:"  Gate lanes: unread"
+             ^ Ansi.reset ]);
   (* Standing always-allow rules, on the row under the lanes. A rule answers
      its call before the call can reach the queue, so an operator reading an
      empty queue is reading the rules' work without seeing them. One row: the
@@ -1075,15 +1159,24 @@ let render_approvals (state : state) =
     if index < notice_room then box_line_styled buf cols ~style ("  " ^ text)) source_notices;
   Buffer.add_buffer buf policy_buf;
   let head_rows = count_frame_lines buf in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        let sheet_avail = max 0 (rows - head_rows - footer_rows - 2 - intro_rows - question_rows) in
+        render_progress_sheet ~ko ~now ~available:sheet_avail
+          ~width:(framed_inner_width cols) sheet
+  in
   let preview = Buffer.create 1024 in
   List.iter (fun line ->
     if not (String.equal line "") then Buffer.add_string preview (line ^ "\n"))
     [detail_line; metadata_line; payload_line];
-  let preview_room = max 0 (rows - head_rows - footer_rows - 1 - 1 - intro_rows - question_rows) in
+  let preview_room = max 0 (rows - head_rows - footer_rows - 1 - 1 - intro_rows - question_rows - List.length sheet_lines) in
   let preview_count = count_frame_lines preview in
   let preview_notice = preview_count > preview_room && preview_room > 1 in
   let shown_preview = min preview_count (if preview_notice then preview_room - 1 else preview_room) in
   let below_buf = Buffer.create 1024 in
+  List.iter (box_line below_buf cols) sheet_lines;
   box_bottom below_buf cols;
   let text = Buffer.contents preview in
   let rec copy_rows offset remaining =
@@ -1241,6 +1334,19 @@ let render_approvals (state : state) =
 
 (* Source diagnostics that cannot take space from the selected compact Ask
    remain reachable in the same full reader and its actual scroll domain. *)
+let question_reader_sheet_rows ~cols ~room (state : state) =
+  if Masc_tui_operator_projection.Flow.action_inflight state.approval_flow || state.ask_submit_inflight then
+    progress_sheet_height ~available:room ~cols:(framed_inner_width cols)
+      { ps_title = ""
+      ; ps_detail = None
+      ; ps_started_at = None
+      ; ps_meter = None
+      ; ps_action_hint = None
+      ; ps_blocking = true
+      }
+  else 0
+;;
+
 let question_reader_viewport state =
   let lines, room = ask_question_viewport state in
   (* The editor follows the last question row while typing. Diagnostics must
@@ -1255,7 +1361,8 @@ let question_reader_viewport state =
   List.iter (fun (style, text) -> box_wrapped_field buf cols ~head:"  " ~style text) notices;
   let notice_lines = String.split_on_char '\n' (Buffer.contents buf)
       |> List.filter (fun line -> line <> "") in
-  lines @ notice_lines, room
+  let sheet_rows = question_reader_sheet_rows ~cols ~room state in
+  lines @ notice_lines, max 0 (room - sheet_rows)
 
 let ask_question_page_size state = snd (question_reader_viewport state)
 
@@ -1269,13 +1376,35 @@ let render_question_reader (state : state) =
   let asks = open_ask_rows state in
   let selected_index = Ask_projection.selected_index asks state.ask_cursor in
   let selected = Option.bind selected_index (List.nth_opt asks) in
-  let lines, room = question_reader_viewport state in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let progress_sheet = approvals_progress_sheet ~now state in
+  let lines, raw_room =
+    let lines, room = ask_question_viewport state in
+    let notices = match state.ask_text_entry with
+      | Some _ -> []
+      | None -> approval_source_notices state
+          ~reading:(Masc_tui_approvals_model.approvals_reading state) in
+    let nbuf = Buffer.create 512 in
+    if notices <> [] then box_divider nbuf cols;
+    List.iter (fun (style, text) -> box_wrapped_field nbuf cols ~head:"  " ~style text) notices;
+    let notice_lines = String.split_on_char '\n' (Buffer.contents nbuf)
+        |> List.filter (fun line -> line <> "") in
+    lines @ notice_lines, room
+  in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:raw_room
+          ~width:(framed_inner_width cols) sheet
+  in
+  let room = max 0 (raw_room - List.length sheet_lines) in
   let limit = max 0 (List.length lines - room) in
   let scroll =
     if Option.is_some state.ask_text_entry then limit
     else max 0 (min state.ask_question_scroll limit)
   in
-  let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
   box_top buf cols;
   box_line buf cols
@@ -1283,11 +1412,18 @@ let render_question_reader (state : state) =
        ~position:
          (Masc_tui_value.Position.window ~first:scroll ~shown:room
             ~total:(List.length lines))
-       ~title:(fun ~cols:_ -> screen_title
-         (say " 승인 › 질문" " Approvals › Questions"
-          ^ Masc_tui_approvals_model.approval_list_note ~ko
-              ~name:(say "질문" "questions")
-              (Masc_tui_approvals_model.approvals_questions_reading state))));
+       ~title:(fun ~cols:_ ->
+         let base =
+           screen_title
+             (say " 승인 › 질문" " Approvals › Questions"
+              ^ Masc_tui_approvals_model.approval_list_note ~ko
+                  ~name:(say "질문" "questions")
+                  (Masc_tui_approvals_model.approvals_questions_reading state))
+         in
+         match progress_sheet with
+         | None -> base
+         | Some sheet ->
+             base ^ "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title));
   box_line buf cols
     (match selected with
      | None ->
@@ -1336,6 +1472,7 @@ let render_question_reader (state : state) =
     | Some line -> Buffer.add_string buf (line ^ "\n")
     | None -> box_empty buf cols
   done;
+  List.iter (box_line buf cols) sheet_lines;
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:(question_hints state));
   finish_surface state ~surface_key:"approval-questions" ~rows:terminal_rows ~cols buf

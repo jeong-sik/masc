@@ -95,6 +95,7 @@ let disarm t =
 type tone =
   | Plain
   | Dim
+  | Info
   | Bad
 
 module Say = Masc_tui_say
@@ -187,11 +188,14 @@ let shown_lines = function
   | Kept_back (_, notice) -> [ Bad, Say.as_received notice ]
 ;;
 
-let phase_line = function
+let phase_line =
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " in
+  function
   | Idle ->
     Dim, Say.code key ++ Say.both ~ko:": 은퇴한 Keeper 의 볼륨 보고 (지우지 않음)"
                           ~en:": report retired Keepers' volumes (removes nothing)"
-  | Reporting -> Dim, Say.both ~ko:"보고를 받는 중입니다." ~en:"Waiting for the report."
+  | Reporting ->
+    Info, Say.code under_way ++ Say.both ~ko:"보고를 받는 중입니다." ~en:"Waiting for the report."
   | Armed names ->
     ( Bad
     , Say.per_language (function
@@ -202,8 +206,9 @@ let phase_line = function
             "Press %s again to reclaim the build volumes of %s. Any other key cancels."
             key (names_text names)) )
   | Reclaiming ->
-    Dim, Say.both ~ko:"회수를 요청했습니다. 보낸 이름 가운데 지금도 후보인 Keeper 만 지웁니다."
-           ~en:"Reclaim requested. Only the Keepers sent that are still candidates are removed."
+    Info, Say.code under_way
+          ++ Say.both ~ko:"회수를 요청했습니다. 보낸 이름 가운데 지금도 후보인 Keeper 만 지웁니다."
+               ~en:"Reclaim requested. Only the Keepers sent that are still candidates are removed."
 ;;
 
 let server_report_line ~timestamp = function

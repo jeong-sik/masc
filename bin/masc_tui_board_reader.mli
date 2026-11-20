@@ -22,6 +22,7 @@ val open_read : ?content_kind:content_kind -> key:key -> t -> t * request option
 val close : t -> t
 val pending : t -> request option
 val pending_preparation : t -> preparation_request option
+val original_open_pending : t -> bool
 val validate : key -> string -> (content, string) result
 (** Verify exact byte length and digest before admitting content. *)
 val complete : t -> request -> (content, string) result -> t

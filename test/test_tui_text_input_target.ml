@@ -72,6 +72,42 @@ let test_collab_input_ownership () =
   check target "confirmation does not expose the hidden palette" None
     (Tui_types.text_input_target state ~compact_viewport:false)
 
+let test_account_login_input_ownership () =
+  let state = fresh_state () in
+  state.palette_open <- true;
+  let view = Masc_tui_account_login.create "antigravity" in
+  state.account_login <- Some view;
+  check bool "account login modal owns keys" true (Tui_types.modal_owns_keys state);
+  check bool "account login holds unclaimed paste" true
+    (Tui_types.unclaimed_paste state = Tui_types.Paste_held_by_overlay);
+  check target "loading hides the underlying palette without claiming text" None
+    (Tui_types.text_input_target state ~compact_viewport:false);
+  view.phase <- Masc_tui_account_login.Models;
+  check target "model selection reads keys as commands so IME shortcuts translate" None
+    (Tui_types.text_input_target state ~compact_viewport:false);
+  view.phase <- Masc_tui_account_login.Logging;
+  check target "login phase owns text input" (Some Tui_types.Text_account_login)
+    (Tui_types.text_input_target state ~compact_viewport:false);
+  check target "a hidden compact login takes no text" None
+    (Tui_types.text_input_target state ~compact_viewport:true);
+  view.phase <- Masc_tui_account_login.Documented_context
+      { id = "m0"; label = "Model 0"; context = None; tools = Some true };
+  check target "documented context entry owns text input" (Some Tui_types.Text_account_login)
+    (Tui_types.text_input_target state ~compact_viewport:false)
+
+let test_progress_clock_lifecycle () =
+  let state = fresh_state () in
+  check (float 0.001) "first observation starts the slot clock" 10.0
+    (Tui_types.progress_clock_for state ~slot:"collab" ~signature:"loading" ~now:10.0);
+  check (float 0.001) "same signature keeps original start timestamp" 10.0
+    (Tui_types.progress_clock_for state ~slot:"collab" ~signature:"loading" ~now:14.5);
+  check (float 0.001) "changed signature starts a fresh timestamp" 18.0
+    (Tui_types.progress_clock_for state ~slot:"collab" ~signature:"writing" ~now:18.0);
+  check (option (float 0.001)) "idle clears the slot clock" None
+    (Tui_types.progress_clock_option state ~slot:"collab" ~now:20.0 None);
+  check (option (float 0.001)) "restarting after idle gets a fresh timestamp" (Some 25.0)
+    (Tui_types.progress_clock_option state ~slot:"collab" ~now:25.0 (Some "loading"))
+
 let test_model_form_requires_current_workspace_reading () =
   let state = fresh_state () in
   let row : Masc_tui_model_runtime_table.row =
@@ -932,6 +968,7 @@ let () =
     "tui text input target"
     [ ( "which field takes text",
         [ test_case "Collab forms own pasted input" `Quick test_collab_input_ownership;
+          test_case "Account login forms own text only in input phases" `Quick test_account_login_input_ownership;
           test_case "model forms require current workspace config" `Quick test_model_form_requires_current_workspace_reading;
           test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
           test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
@@ -999,7 +1036,9 @@ let () =
         test_case "the recall form hears only the answer of its own open" `Quick
             test_the_recall_form_hears_only_the_answer_of_its_own_open;
         test_case "a retired reading does not leave the recall form waiting" `Quick
-            test_a_retired_reading_does_not_leave_the_recall_form_waiting
+            test_a_retired_reading_does_not_leave_the_recall_form_waiting;
+        test_case "progress clocks track, reset, and clear by slot and signature" `Quick
+            test_progress_clock_lifecycle
         ] )
     ]
 ;;

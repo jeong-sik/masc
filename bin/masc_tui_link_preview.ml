@@ -77,6 +77,12 @@ let mosaic_lookup url =
     | Some (Decided entry) -> Some entry
     | Some (Pending _) | None -> None)
 
+let mosaic_pending url =
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
+    match Hashtbl.find_opt mosaic_cache url with
+    | Some (Pending _) -> true
+    | Some (Decided _) | None -> false)
+
 let compute_mosaic request ~compute url =
   let claimed =
     Stdlib.Mutex.protect mosaic_cache_mu (fun () ->

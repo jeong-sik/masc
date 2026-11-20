@@ -853,6 +853,8 @@ type identity_msg =
 type account_msg =
   | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
   | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, Masc_tui_types.request_failure) result
+  | Account_login_batch_step of Masc_tui_account_login.t * int * Masc_tui_account_login.context_batch
+      * (Masc_tui_http.setup_post_outcome, Masc_tui_types.workspace_refusal) result
   (* A removal's answer keeps what is known about its effect: removed, declined
      by the server in its own words, or unknown. *)
   | Account_login_removal of Masc_tui_account_login.t * int * Masc_tui_account_login.provider * string option
@@ -1006,7 +1008,7 @@ let account_login_action_is_read = function
   | Masc_tui_account_login.Inventory | Refresh_saved _ | Refresh_retry | Recover | Discover | Refresh_models | Preview_removal _
   | Refresh_removed _ | Refresh_list _ -> true
   | Activate_saved _ | Select_existing _ | Start _ | Input _
-  | Cancel | Prepare _ | Save _ | Close | Nothing | Remove _ -> false
+  | Cancel | Prepare _ | Prepare_batch _ | Cancel_prepare | Save _ | Close | Nothing | Remove _ -> false
 
 let ask_answer_completion_message (submission : ask_submission)
     (completion : Ask_answer_completion.observation) =
@@ -1304,6 +1306,7 @@ let rec workspace_message_is_read = function
   | Identity_app_saved _
   | Identity_disconnected _)
   | Account_msg (Account_login_event _
+  | Account_login_batch_step _
   | Account_login_removal _)
   | Github_msg (Github_login_lines _
   | Github_login_finished _
@@ -1410,7 +1413,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Github_msg (Github_identity_view_loaded _) | Identity_msg (Identity_providers_loaded _ | Identity_switch_set _
   | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
   | Identity_disconnected _) | Account_msg (Account_login_event _ | Account_login_json _
-  | Account_login_removal _) | Github_msg (Github_login_lines _ | Github_login_finished _
+  | Account_login_batch_step _ | Account_login_removal _) | Github_msg (Github_login_lines _ | Github_login_finished _
   | Github_token_saved _) | Observer_msg (Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_opened _ | Observer_found_account_server _ | Observer_recovery_identity _)
   | Task_msg (Task_dispatch_completed _
   | Task_creation_read_done _) | Keeper_msg (Keeper_queue_action_received _
@@ -1581,7 +1584,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
     | Identity_disconnected (_, _, _))
     | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
-    | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
+    | Account_login_batch_step (_, _, _, _) | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _))
     | Observer_msg (Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_opened _ | Observer_found_account_server _ | Observer_recovery_identity _)
     | Task_msg (Task_dispatch_completed _) -> None in
@@ -1725,7 +1728,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
   | Identity_disconnected (_, _, _))
   | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
-  | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
+  | Account_login_batch_step (_, _, _, _) | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
   | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
   | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_opened _ | Observer_found_account_server _ | Observer_recovery_identity _)
   | Task_msg (Task_dispatch_completed _) -> message

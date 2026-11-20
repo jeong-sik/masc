@@ -32,6 +32,7 @@ val decode : Yojson.Safe.t -> (t, string) result
 type tone =
   | Plain
   | Dim
+  | Info
   | Warn
   | Bad
 

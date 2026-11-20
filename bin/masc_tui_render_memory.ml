@@ -241,7 +241,9 @@ let memory_input_lines ~ko ~cols ~unit reading =
   in
   match reading with
   | Masc_tui_fetched.Absent -> wrap [label ^ ": " ^ text "관측 없음" "no observation"]
-  | Loading -> wrap [label ^ ": " ^ text "조회 중" "loading"]
+  | Loading ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      wrap [label ^ ": " ^ under_way ^ " " ^ text "조회 중" "loading"]
   | Failed failure ->
       wrap [label ^ ": " ^ Terminal_text.single_line
               (request_failure_text ~ko ~request:Kept_request.Memory_input_read failure)]
@@ -923,9 +925,12 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
   (* A failed first read has no counts. The error row below owns the cause;
      keep these two labelled values unavailable without repeating its verdict.
      An unread first visit still says what it is waiting for. *)
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   let missing_reading waiting =
     if Option.is_some state.memory_health_error
     then Masc_tui_theme.Glyph.no_value
+    else if state.memory_health_inflight then
+      under_way ^ " " ^ waiting
     else waiting
   in
   (* Every reading in this header is a labelled row that asks the frame for its
@@ -957,20 +962,23 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
     | None -> [ text "  전체: " "  Total: " ^ missing_reading (text "메모리 관측 대기" "waiting for memory snapshots") ]
     | Some snapshot ->
        labelled (text "전체" "Total")
-         [ (if ko then Printf.sprintf "기억 %d개" (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
-            else Masc_tui_message_layout.count_noun
-              (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
-         ; Printf.sprintf (if ko then "일반 %d + 원본 %d" else "%d ordinary + %d source")
-             snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         ; Printf.sprintf (if ko then "저장 %s" else "stored %s")
-             (stored_amount state.memory_unit
-                (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
-         ; Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Keeper
-             (List.length snapshot.mhs_keepers)
-         ; (match state.memory_unit with
-            | Memory_usage.Tokens -> text "저장 추정량, 턴 입력 아님" "stored estimate, not turn input"
-            | Memory_usage.Bytes -> text "저장된 지식, 턴 입력 아님" "stored knowledge, not turn input")
-         ]
+         ([ (if ko then Printf.sprintf "기억 %d개" (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
+             else Masc_tui_message_layout.count_noun
+               (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
+          ; Printf.sprintf (if ko then "일반 %d + 원본 %d" else "%d ordinary + %d source")
+              snapshot.mhs_total_facts snapshot.mhs_total_source_facts
+          ; Printf.sprintf (if ko then "저장 %s" else "stored %s")
+              (stored_amount state.memory_unit
+                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
+          ; Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Keeper
+              (List.length snapshot.mhs_keepers)
+          ; (match state.memory_unit with
+             | Memory_usage.Tokens -> text "저장 추정량, 턴 입력 아님" "stored estimate, not turn input"
+             | Memory_usage.Bytes -> text "저장된 지식, 턴 입력 아님" "stored knowledge, not turn input")
+          ]
+          @ (if state.memory_health_inflight && Option.is_none state.memory_health_error then
+               [ under_way ^ " " ^ text "새로고침 중" "refreshing" ]
+             else []))
   in
   (* The ordinary facts counted by time since first seen, summed over the
      Keepers whose row carries the server's ladder (RFC-0515 §2.4.5). A Keeper
@@ -1129,9 +1137,11 @@ let memory_refused_keeper_lines (state : state) =
 let memory_world_axis (state : state) ~room =
   let ko = state.ui_language = Lang_ko in
   let reading = Masc_tui_memory_world.reading state.memory_world in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   let provenance = match reading with
     | Masc_tui_memory_world.Not_read -> [ui_text state ~ko:"미조회" ~en:"not read"]
-    | Masc_tui_memory_world.Reading -> [ui_text state ~ko:"조회 중" ~en:"reading"]
+    | Masc_tui_memory_world.Reading ->
+        [ui_text state ~ko:(under_way ^ " 조회 중") ~en:(under_way ^ " reading")]
     | Masc_tui_memory_world.Read_failed (Kept_back _) -> [ui_text state ~ko:"현재 값 미조회" ~en:"current value not read"]
     | Masc_tui_memory_world.Read_failed (Suspended | Request_failed _) -> [ui_text state ~ko:"조회 실패" ~en:"read failed"]
     | Masc_tui_memory_world.Loaded { refresh_failure = Some (Kept_back _); _ } ->
@@ -1680,22 +1690,27 @@ let render_memory_body ~cols ~budget (state : state)
   if shown = 0 then
     (* A failed read and an unread one say what every page says. Memory had its
        own words for both, and "server error" named a connection nobody made. *)
-    let note =
-      match
-        empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
-      with
-      | Page_failed -> page_failed_note ~ko
-      | Page_unread -> if ko then
-          (if state.memory_health_inflight then "  (기억 조회 중)" else "  (기억 미조회)")
-          else page_unread_note_while ~ko:false ~reading:state.memory_health_inflight
-      | Page_empty when query <> "" ->
-        Printf.sprintf (if ko then "  (\"%s\"에 맞는 Keeper 없음 · Esc:필터 해제)"
-          else "  (no keepers matching \"%s\" · Esc clears filter)")
-          (Terminal_text.single_line query)
-      | Page_empty -> if ko then "  (기억 설정이나 스냅샷이 있는 Keeper 없음)"
-          else "  (no keepers with a memory config or snapshot)"
-    in
-    push_styled ~style:(Theme.recede ()) note
+    (match
+       empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
+     with
+     | Page_failed -> push_styled ~style:(Theme.recede ()) (page_failed_note ~ko)
+     | Page_unread when state.memory_health_inflight ->
+         let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+         push_styled ~style:(Theme.info ())
+           (if ko then "  " ^ under_way ^ " 기억 조회 중"
+            else "  " ^ under_way ^ " reading memory")
+     | Page_unread ->
+         push_styled ~style:(Theme.recede ())
+           (if ko then "  (기억 미조회)" else page_unread_note_while ~ko:false ~reading:false)
+     | Page_empty when query <> "" ->
+         push_styled ~style:(Theme.recede ())
+           (Printf.sprintf (if ko then "  (\"%s\"에 맞는 Keeper 없음 · Esc:필터 해제)"
+              else "  (no keepers matching \"%s\" · Esc clears filter)")
+              (Terminal_text.single_line query))
+     | Page_empty ->
+         push_styled ~style:(Theme.recede ())
+           (if ko then "  (기억 설정이나 스냅샷이 있는 Keeper 없음)"
+            else "  (no keepers with a memory config or snapshot)"))
   else begin
     let keepers_window =
       Rows.of_list ~first:scroll ~height:content_height keepers
@@ -1862,7 +1877,9 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
      this row looked only at whether facts were held. *)
   let stats_line, pills_line =
     match memory_facts_view state with
-    | Masc_tui_fetched.Loading -> (text "  (사실 조회 중)" "  (loading facts)", "")
+    | Masc_tui_fetched.Loading ->
+        let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+        (Theme.info () ^ "  " ^ under_way ^ " " ^ text "사실 조회 중" "loading facts" ^ Ansi.reset, "")
     | Masc_tui_fetched.Absent -> ("  " ^ here_missing_reading state ~error:None, "")
     | Masc_tui_fetched.Failed failure ->
         ("  " ^ here_missing_reading state ~error:(Some failure), "")
@@ -1929,36 +1946,41 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
     memory_facts_layout ~cols ~budget ~cursor state rows
   in
   if total = 0 then
-    (let empty =
-       match
-         empty_page_of ~snapshot:(memory_facts_snapshot state) ~error:(memory_facts_failure state),
-         state.memory_facts_category
-       with
-       | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
-       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> page_failed_note ~ko
-       | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
-       | (Page_unread, Category_source) | (Page_unread, Category_dropped) ->
-           text (if view_is_loading (memory_facts_view state) then "  (조회 중)" else "  (미조회)")
-             (page_unread_note_while ~ko:false
-                ~reading:(view_is_loading (memory_facts_view state)))
-       | Page_empty, Category_all ->
-           (* [total] counts rows filtered by [memory_search_query], so the
-              note reads the same value; the store is not empty just because
-              a filter being typed matched nothing. *)
-           let filter = memory_search_query state in
-           if String.trim filter <> "" then
-             Printf.sprintf (if ko then "  (\"%s\"에 맞는 사실 없음 · Esc:필터 해제)" else "  (no facts matching \"%s\" · Esc clears filter)")
-               (Terminal_text.single_line filter)
-           else if Option.bind (memory_facts_snapshot state) (fun snapshot ->
-             memory_fact_count ~complete:(memory_counts_complete state) snapshot All_facts) = None then
-             text "  (읽힌 사실 없음 · 일부 관측)" "  (no facts read; partial reading)"
-           else if is_fleet then text "  (읽힌 Keeper에 사실 없음)" "  (no facts across the observed keepers)"
-           else text "  (두 저장소에 사실 없음)" "  (no facts in either store)"
-       | Page_empty, filt ->
-           Printf.sprintf (if ko then "  (분류 %s에 읽힌 사실 없음 · c/C:변경)" else "  (no facts read in category %s · c/C cycles)")
-             (memory_category_filter_text ~ko filt)
-     in
-     push_styled ~style:(Theme.recede ()) empty)
+    (match
+       empty_page_of ~snapshot:(memory_facts_snapshot state) ~error:(memory_facts_failure state),
+       state.memory_facts_category
+     with
+     | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
+     | (Page_failed, Category_source) | (Page_failed, Category_dropped) ->
+         push_styled ~style:(Theme.recede ()) (page_failed_note ~ko)
+     | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
+     | (Page_unread, Category_source) | (Page_unread, Category_dropped)
+       when view_is_loading (memory_facts_view state) ->
+         let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+         push_styled ~style:(Theme.info ())
+           (text ("  " ^ under_way ^ " 사실 조회 중") ("  " ^ under_way ^ " loading facts"))
+     | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
+     | (Page_unread, Category_source) | (Page_unread, Category_dropped) ->
+         push_styled ~style:(Theme.recede ())
+           (text "  (미조회)" (page_unread_note_while ~ko:false ~reading:false))
+     | Page_empty, Category_all ->
+         (* [total] counts rows filtered by [memory_search_query], so the
+            note reads the same value; the store is not empty just because
+            a filter being typed matched nothing. *)
+         let filter = memory_search_query state in
+         push_styled ~style:(Theme.recede ())
+           (if String.trim filter <> "" then
+              Printf.sprintf (if ko then "  (\"%s\"에 맞는 사실 없음 · Esc:필터 해제)" else "  (no facts matching \"%s\" · Esc clears filter)")
+                (Terminal_text.single_line filter)
+            else if Option.bind (memory_facts_snapshot state) (fun snapshot ->
+              memory_fact_count ~complete:(memory_counts_complete state) snapshot All_facts) = None then
+              text "  (읽힌 사실 없음 · 일부 관측)" "  (no facts read; partial reading)"
+            else if is_fleet then text "  (읽힌 Keeper에 사실 없음)" "  (no facts across the observed keepers)"
+            else text "  (두 저장소에 사실 없음)" "  (no facts in either store)")
+     | Page_empty, filt ->
+         push_styled ~style:(Theme.recede ())
+           (Printf.sprintf (if ko then "  (분류 %s에 읽힌 사실 없음 · c/C:변경)" else "  (no facts read in category %s · c/C cycles)")
+              (memory_category_filter_text ~ko filt)))
   else begin
     let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
     report_drawn_list Memory_fact_rows ~height:content_height;

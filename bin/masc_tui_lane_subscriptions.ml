@@ -115,6 +115,11 @@ let enter ~keepers ~targets t =
         then refuse "This Keeper already subscribes to that output."
         else save (List.map fst (entries t) @ [chosen])
   | Confirm_remove chosen -> save (List.map fst (entries t) |> List.filter (fun entry -> entry<>chosen))
+let is_confirming_save t =
+  match t.phase with
+  | Confirm_add _ | Confirm_remove _ -> true
+  | Browse _ | Keeper _ | Output _ -> false
+
 let identity (s:Subscription.subscription) =
   ["Keeper: " ^ s.keeper_name;"Installation: " ^ s.installation_id;
    "Run: " ^ s.run_id;"Output: " ^ s.output_id]

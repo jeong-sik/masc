@@ -73,12 +73,14 @@ let local_source_pending_note state source =
          (RFC tui-one-screen-grammar §6.2). *)
       let seconds = Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ())
           (Int64.to_float age_ns /. 1e9) in
-      let lead = match phase with
-        | Local_read_observation.Read_failed _ | Read_not_started -> name
+      let style, lead = match phase with
+        | Local_read_observation.Read_failed _ -> Theme.bad (), name
+        | Read_not_started -> Theme.recede (), name
         | Awaiting_start | Io_queued | Io_running | Io_returning | Preparing
         | Comparison_queued | Comparison_running | Comparison_returning | Awaiting_ui ->
-            ui_text state ~ko:(name ^ " 읽는 중") ~en:(name ^ " reading") in
-      Some (Theme.recede () ^ "  " ^ String.concat " · " [lead; step; seconds] ^ Ansi.reset)
+            let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+            Theme.info (), ui_text state ~ko:(mark ^ " " ^ name ^ " 읽는 중") ~en:(mark ^ " " ^ name ^ " reading") in
+      Some (style ^ "  " ^ String.concat " · " [lead; step; seconds] ^ Ansi.reset)
 module Markdown = Masc_tui_markdown
 module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
@@ -424,19 +426,21 @@ let document_json ~width text =
    Part of the prompt rather than drawn beside it, so the cursor column, which
    is computed from the prompt's width, does not have to know about it. *)
 let voice_meter_text (state : state) =
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   match state.voice_capture, state.voice_capture_phase, state.voice_level_db with
   (* The old capture still occupies the slot until its terminal reply; a
      retargeted draft must not advertise that it is recording new speech. *)
-  | Some _, _, _ when state.voice_capture_withdrawn -> "[이전 음성 종료 대기] "
+  | Some _, _, _ when state.voice_capture_withdrawn ->
+    Printf.sprintf "[%s 이전 음성 종료 대기] " under_way
   (* Continuous mode between utterances: no capture is running, but the row is
      still listening and the operator needs to know before speaking. *)
   | None, _, _ when state.voice_continuous <> None -> "[대기] "
   | None, _, _ -> ""
-  | Some _, Voice_calibrating, _ -> "[마이크 보정 중] "
-  | Some _, Voice_starting, _ -> "[음성 시작 중] "
-  | Some _, Voice_stopping, _ -> "[음성 종료 대기] "
-  | Some _, Voice_processing, _ -> "[음성 처리 중] "
-  | Some _, Voice_recording, None -> "[입력 관측 대기] "
+  | Some _, Voice_calibrating, _ -> Printf.sprintf "[%s 마이크 보정 중] " under_way
+  | Some _, Voice_starting, _ -> Printf.sprintf "[%s 음성 시작 중] " under_way
+  | Some _, Voice_stopping, _ -> Printf.sprintf "[%s 음성 종료 대기] " under_way
+  | Some _, Voice_processing, _ -> Printf.sprintf "[%s 음성 처리 중] " under_way
+  | Some _, Voice_recording, None -> Printf.sprintf "[%s 입력 관측 대기] " under_way
   | Some _, Voice_recording, Some db ->
     let width = 12 in
     let filled =
@@ -761,6 +765,71 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
   (* Acquisition belongs to the pending read, never to conversation history.
      Completion clears it; a cancelled generation or withdrawn source stops
      displaying it even before that worker's late result reaches the UI. *)
+  let now = Unix.gettimeofday () in
+  let ko = state.ui_language = Lang_ko in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let with_elapsed started_ns text =
+    let started_at = Masc_tui_types.progress_started_at_of_monotonic_ns ~now started_ns in
+    let elapsed = Masc_tui_value.Ongoing.since ~now started_at in
+    let suffix = if ko then " · " ^ elapsed ^ " 경과" else " · " ^ elapsed in
+    under_way ^ " " ^ text ^ suffix
+  in
+  let runtime_form_active_started_ns =
+    if state.view <> Config then None
+    else
+      let visible attempt =
+        match attempt.rfa_request.rfs_draft with
+        | Model_form_draft _ -> state.config_pane = Config_models
+        | Account_form_draft _ | Config_document_draft _ -> state.config_pane = Config_runtime
+      in
+      let attempt =
+        match Masc_tui_types.runtime_form_focused_attempt state with
+        | Some attempt when visible attempt -> Some attempt
+        | Some _ | None ->
+            List.find_opt
+              (fun attempt ->
+                visible attempt && attempt.rfa_recoverable
+                && Masc_tui_types.runtime_form_origin_matches state attempt.rfa_request)
+              (Runtime_form_saves.all state.runtime_form_saves)
+      in
+      Option.bind attempt (fun attempt ->
+        match attempt.rfa_status with
+        | Form_checking | Form_previewing _ | Form_posting _ -> Some attempt.rfa_request.rfs_started_ns
+        | Form_finished _ -> None)
+  in
+  let runtime_assignment_active_started_ns =
+    Option.bind (Masc_tui_types.runtime_assignment_target_key state) (fun key ->
+      Option.bind
+        (List.find_opt
+           (fun attempt -> Masc_tui_types.keeper_settings_same_origin key attempt.raa_request.ras_key)
+           (Runtime_assignment_saves.all state.runtime_assignment_saves))
+        (fun attempt ->
+          match attempt.raa_status with
+          | Assignment_checking | Assignment_reading | Assignment_posting _ ->
+              Some attempt.raa_request.ras_started_ns
+          | Assignment_finished _ -> None))
+  in
+  let keeper_settings_editor_active_started_ns =
+    match state.keeper_settings_intent with
+    | Some request
+      when Masc_tui_types.keeper_settings_request_current state request
+           && Masc_tui_fetched.is_current ~equal:Masc_tui_types.keeper_settings_equal_key
+                state.keeper_settings_editor request.ksr_request ->
+        Some request.ksr_started_ns
+    | Some _ | None -> None
+  in
+  let keeper_settings_save_active_started_ns =
+    Option.bind (Masc_tui_types.keeper_settings_target state) (fun key ->
+      List.find_map
+        (fun attempt ->
+          if Masc_tui_types.keeper_settings_same_origin key attempt.ksa_request.ksv_key then
+            match attempt.ksa_status with
+            | Settings_checking | Settings_reading | Settings_posting _ ->
+                Some attempt.ksa_request.ksv_started_ns
+            | Settings_finished _ -> None
+          else None)
+        (Keeper_settings_saves.all state.keeper_settings_saves))
+  in
   let image_progress =
     match state.sent_image_read with
     | Some pending
@@ -769,29 +838,53 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
            && Masc_tui_types.image_request_keeper_is_current state pending
            && Masc_tui_types.image_reading_is_current state pending
            && not state.msx_open ->
-        Some (Terminal_text.single_line
-          (Printf.sprintf (if state.ui_language = Lang_ko
+        let started_at =
+          Masc_tui_types.progress_clock_for state ~slot:"sent-image" ~now
+            ~signature:(string_of_int pending.sir_generation ^ ":" ^ pending.sir_name)
+        in
+        let elapsed = Masc_tui_value.Ongoing.since ~now started_at in
+        let suffix = if ko then " · " ^ elapsed ^ " 경과" else " · " ^ elapsed in
+        Some (under_way ^ " " ^ Terminal_text.single_line
+          (Printf.sprintf (if ko
              then "이미지 조회 중 (아무 키로 취소): %s"
-             else "Loading image (any key cancels): %s") pending.sir_name))
-    | Some _ | None -> None
+             else "Loading image (any key cancels): %s") pending.sir_name) ^ suffix)
+    | Some _ | None ->
+        Masc_tui_types.clear_progress_clock state ~slot:"sent-image";
+        None
   in
-  let current_quit = current_quit_confirmation state ~now:(Unix.gettimeofday ()) in
+  let current_quit = current_quit_confirmation state ~now in
   let quit_in_slot = Option.bind recovery_in_slot (fun row -> row.recovery_quit) in
-  let action_text, quit_action =
+  let action_text, quit_action, action_is_progress =
     match Masc_tui_types.runtime_form_save_notice state with
-    | Some notice -> Some (Terminal_text.single_line notice), None
+    | Some notice ->
+        let clean = Terminal_text.single_line notice in
+        (match runtime_form_active_started_ns with
+         | Some ns -> Some (with_elapsed ns clean), None, true
+         | None -> Some clean, None, false)
     | None -> (match Masc_tui_types.runtime_assignment_notice state with
-    | Some notice -> Some (Terminal_text.single_line notice), None
+    | Some notice ->
+        let clean = Terminal_text.single_line notice in
+        (match runtime_assignment_active_started_ns with
+         | Some ns -> Some (with_elapsed ns clean), None, true
+         | None -> Some clean, None, false)
     | None -> (match Masc_tui_types.keeper_settings_editor_notice state with
-    | Some notice -> Some (Terminal_text.single_line notice), None
+    | Some notice ->
+        let clean = Terminal_text.single_line notice in
+        (match keeper_settings_editor_active_started_ns with
+         | Some ns -> Some (with_elapsed ns clean), None, true
+         | None -> Some clean, None, false)
     | None -> (match Masc_tui_types.keeper_settings_save_notice state with
-    | Some notice -> Some (Terminal_text.single_line notice), None
+    | Some notice ->
+        let clean = Terminal_text.single_line notice in
+        (match keeper_settings_save_active_started_ns with
+         | Some ns -> Some (with_elapsed ns clean), None, true
+         | None -> Some clean, None, false)
     | None -> (match image_progress with
-    | Some _ -> image_progress, None
+    | Some _ -> image_progress, None, true
     | None -> (match Masc_tui_action_notice.ordinary_visible state.last_action
-        ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
+        ~now ~window:Masc_tui_types.last_action_window_s with
     | Some _ when Option.is_some recovery_in_slot
-                  && Masc_tui_action_notice.ordinary_is_csi state.last_action -> None, None
+                  && Masc_tui_action_notice.ordinary_is_csi state.last_action -> None, None, false
     | Some ((text, _) as ordinary)
       when (not
                  (String.starts_with
@@ -802,15 +895,15 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
            (match current_quit with
             | Some confirmation ->
                 if Option.exists (Masc_tui_action_notice.same_quit confirmation) quit_in_slot
-                then None, None
-                else Some (ui_text state ~ko:"창을 넓혀 종료 확인" ~en:"Resize to confirm quit"), Some confirmation
+                then None, None, false
+                else Some (ui_text state ~ko:"창을 넓혀 종료 확인" ~en:"Resize to confirm quit"), Some confirmation, false
             | None when Masc_tui_action_notice.csi_active state.last_action
                         || Option.is_some (Masc_tui_action_notice.rejection state.last_action
-                             ~now:(Unix.gettimeofday ()) ~window:last_action_window_s) ->
-                None, None
-            | None -> Some (ui_text state ~ko:"종료 조건 변경; 다시 시도" ~en:"Quit changed; retry"), None)
-       | Some _ | None -> Some text, None)
-    | Some _ | None -> None, None)))))
+                             ~now ~window:last_action_window_s) ->
+                None, None, false
+            | None -> Some (ui_text state ~ko:"종료 조건 변경; 다시 시도" ~en:"Quit changed; retry"), None, false)
+       | Some _ | None -> Some text, None, false)
+    | Some _ | None -> None, None, false)))))
   in
   let preferred_action =
     match quit_action with
@@ -821,7 +914,7 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
     | None when Option.is_some recovery_in_slot -> None
     | None -> (match Masc_tui_action_notice.preferred state.last_action
             ~existing_action:(Option.is_some action_text)
-            ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
+            ~now ~window:Masc_tui_types.last_action_window_s with
     | No_preferred ->
         Option.map (fun text -> Masc_tui_footer.Menu_choices text) choices
     | Csi_recovery ->
@@ -829,6 +922,13 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
     | Rejection notice ->
         Some (Masc_tui_footer.Outcome (Masc_tui_action_notice.rejection_text notice,
               pressable (Press_input_rejection notice)))) in
+  let action_style =
+    if not action_is_progress then ""
+    else
+      match zone4_notice state ~action_text ~preferred_action with
+      | Some { lead = Zone4_action; _ } -> Theme.info ()
+      | Some { lead = (Zone4_pending | Zone4_read_failure _); _ } | None -> ""
+  in
   let action_text = zone4_action_text state ~action_text ~preferred_action in
   let identity =
     match state.server_identity with
@@ -877,7 +977,7 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
              ~tui_age_s:
                (Option.map float_of_int
                   (Masc.Build_identity.embedded_commit_age_seconds
-                     ~now:(Unix.gettimeofday ())))
+                     ~now))
              ~server_commit:identity.Tui_decode.sid_binary_commit
              ~server_age_s:identity.Tui_decode.sid_binary_commit_age_s
          with
@@ -903,12 +1003,12 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
     | Masc_tui_types.Workspace_identity_unread
     | Masc_tui_types.Workspace_identity_match -> []
   in
-  Masc_tui_footer.line ?literal_prefix ?action_text ?preferred_action ?position
+  Masc_tui_footer.line ?literal_prefix ?action_text ~action_style ~show_progress_mark:true ~progress_style:(Theme.info ()) ?preferred_action ?position
     ~help_key_answers:door_answers ~key_style:(Ansi.bold ^ Theme.accent ())
     ~refused_keys:
       (if Masc_tui_theme.colors_enabled then Masc_tui_footer.Shown_dim
        else Masc_tui_footer.Left_out)
-    ~ko:(state.ui_language = Lang_ko)
+    ~ko
     ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item
           && not (List.mem item (keeper_action_status state))) status
@@ -2170,12 +2270,203 @@ let resolve_has_recovery ~frame ~has_recovery (state : state) =
       in
       Option.is_some (recovery_slot state ~max_cells)
 
-let surface_chrome_budget ?(frame = Chrome_overlay) ?has_recovery state
+type progress_meter = {
+  pm_done : int;
+  pm_total : int;
+  pm_failed : int;
+}
+
+type progress_sheet = {
+  ps_title : string;
+  ps_detail : string option;
+  ps_started_at : float option;
+  ps_meter : progress_meter option;
+  ps_action_hint : string option;
+  ps_blocking : bool;
+}
+
+let progress_inline ~ko ~now ?started_at ?detail label =
+  let sanitize = Terminal_text.single_line in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let detail_part =
+    match detail with
+    | Some text when String.trim text <> "" -> " · " ^ sanitize text
+    | Some _ | None -> ""
+  in
+  let elapsed_part =
+    match started_at with
+    | Some at ->
+        let duration = Masc_tui_value.Ongoing.since ~now at in
+        if ko then " · " ^ duration ^ " 경과" else " · " ^ duration
+    | None -> ""
+  in
+  Theme.info () ^ under_way ^ " " ^ sanitize label ^ detail_part ^ elapsed_part ^ Ansi.reset
+
+let progress_sheet_height ~available ~cols (_sheet : progress_sheet) =
+  if available <= 1 || cols < 12 then 0
+  else if available >= 6 && cols >= 32 then 3
+  else 1
+
+let progress_sheet_rows ~available ~cols = function
+  | None -> 0
+  | Some sheet -> progress_sheet_height ~available ~cols sheet
+
+let render_progress_sheet ~ko ~now ~available ~width (sheet : progress_sheet) =
+  let height = progress_sheet_height ~available ~cols:width sheet in
+  if height = 0 then []
+  else
+    let sanitize = Terminal_text.single_line in
+    let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+    let accent = Theme.info () in
+    let elapsed_text =
+      match sheet.ps_started_at with
+      | None -> ""
+      | Some at ->
+          let duration = Masc_tui_value.Ongoing.since ~now at in
+          if ko then duration ^ " 경과" else duration
+    in
+    let step_text =
+      match sheet.ps_meter with
+      | Some { pm_done; pm_total; pm_failed } when pm_total > 0 ->
+          let shown_done = min pm_total (max 0 pm_done) in
+          let fail_part =
+            if pm_failed > 0 then
+              Printf.sprintf (if ko then ", 실패 %d" else ", %d failed") pm_failed
+            else ""
+          in
+          Printf.sprintf (if ko then "완료 %d/%d%s" else "%d/%d done%s")
+            shown_done pm_total fail_part
+      | Some _ | None -> ""
+    in
+    if height = 1 then
+      let parts =
+        [ under_way ^ " " ^ sanitize sheet.ps_title ]
+        @ (if step_text = "" then [] else [ "(" ^ step_text ^ ")" ])
+        @ (match sheet.ps_detail with
+           | Some d when String.trim d <> "" -> [ sanitize d ]
+           | Some _ | None -> [])
+        @ (if elapsed_text = "" then [] else [ elapsed_text ])
+      in
+      let hint_suffix =
+        match sheet.ps_action_hint with
+        | Some h when String.trim h <> "" -> "  " ^ sanitize h
+        | Some _ | None -> ""
+      in
+      let raw = String.concat " · " parts ^ hint_suffix in
+      [ accent ^ fit_width raw width ^ Ansi.reset ]
+    else
+      let inner = max 1 (width - 4) in
+      let title_parts =
+        [ under_way ^ " " ^ sanitize sheet.ps_title ]
+        @ (if step_text = "" then [] else [ step_text ])
+        @ (if elapsed_text = "" then [] else [ elapsed_text ])
+      in
+      let title_raw = String.concat " · " title_parts in
+      let hint_opt =
+        match sheet.ps_action_hint with
+        | Some h when String.trim h <> "" -> Some (sanitize h)
+        | Some _ | None ->
+            if sheet.ps_blocking then
+              Some (if ko then "처리 대기 중" else "Waiting")
+            else None
+      in
+      let top_row =
+        match hint_opt with
+        | Some hint ->
+            let hint_w = Message_layout.display_width hint in
+            let title_w = Message_layout.display_width title_raw in
+            let gap = width - 8 - title_w - hint_w in
+            if gap >= 1 then
+              accent ^ Ansi.box_tl_round ^ Ansi.box_h ^ " " ^ Ansi.bold ^ title_raw
+              ^ Ansi.reset ^ accent ^ " " ^ draw_hline gap ^ " " ^ Ansi.reset
+              ^ Theme.recede () ^ hint ^ Ansi.reset ^ accent ^ " " ^ Ansi.box_h
+              ^ Ansi.box_tr_round ^ Ansi.reset
+            else if width - 9 - hint_w >= 10 then
+              let max_title = width - 9 - hint_w in
+              let title_fitted = Message_layout.truncate_end max_title title_raw in
+              let fitted_w = Message_layout.display_width title_fitted in
+              let gap = max 1 (width - 8 - fitted_w - hint_w) in
+              accent ^ Ansi.box_tl_round ^ Ansi.box_h ^ " " ^ Ansi.bold ^ title_fitted
+              ^ Ansi.reset ^ accent ^ " " ^ draw_hline gap ^ " " ^ Ansi.reset
+              ^ Theme.recede () ^ hint ^ Ansi.reset ^ accent ^ " " ^ Ansi.box_h
+              ^ Ansi.box_tr_round ^ Ansi.reset
+            else
+              let max_title = max 1 (width - 6) in
+              let title_fitted = Message_layout.truncate_end max_title title_raw in
+              let rem = max 0 (width - 5 - Message_layout.display_width title_fitted) in
+              accent ^ Ansi.box_tl_round ^ Ansi.box_h ^ " " ^ Ansi.bold ^ title_fitted
+              ^ Ansi.reset ^ accent ^ " " ^ draw_hline rem ^ Ansi.box_tr_round ^ Ansi.reset
+        | None ->
+            let max_title = max 1 (width - 6) in
+            let title_fitted = Message_layout.truncate_end max_title title_raw in
+            let rem = max 0 (width - 5 - Message_layout.display_width title_fitted) in
+            accent ^ Ansi.box_tl_round ^ Ansi.box_h ^ " " ^ Ansi.bold ^ title_fitted
+            ^ Ansi.reset ^ accent ^ " " ^ draw_hline rem ^ Ansi.box_tr_round ^ Ansi.reset
+      in
+      let detail_raw =
+        match sheet.ps_detail with
+        | Some d when String.trim d <> "" -> sanitize d
+        | Some _ | None ->
+            if sheet.ps_blocking then
+              if ko then "요청을 처리하고 있습니다. 완료되면 자동으로 돌아옵니다."
+              else "Processing request. The screen updates automatically when done."
+            else
+              if ko then "최신 상태를 불러오고 있습니다."
+              else "Loading the latest state."
+      in
+      let middle_content =
+        match sheet.ps_meter with
+        | Some { pm_done; pm_total; pm_failed = _ } when pm_total > 0 && inner >= 20 ->
+            let clamped = min pm_total (max 0 pm_done) in
+            let pct =
+              min 100
+                (max 0
+                   (int_of_float
+                      (Float.floor (float_of_int clamped *. 100. /. float_of_int pm_total))))
+            in
+            let bar_w = min 24 (max 8 (inner / 3)) in
+            let scale =
+              Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion }
+            in
+            let bar =
+              Chart.meter_bar ~width:bar_w ~value:clamped ~max_value:pm_total ~scale
+                ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+            in
+            let pct_label = Printf.sprintf " %3d%%" pct in
+            let readout =
+              Chart.meter_tip_style scale ~value:clamped ~max_value:pm_total
+              ^ pct_label ^ Ansi.reset
+            in
+            let right_w = bar_w + String.length pct_label in
+            let left_w = max 1 (inner - right_w - 2) in
+            let left = fit_width detail_raw left_w in
+            left ^ "  " ^ bar ^ readout
+        | Some _ | None ->
+            fit_width detail_raw inner
+      in
+      let middle_row =
+        accent ^ Ansi.box_v ^ Ansi.reset ^ " " ^ middle_content ^ " "
+        ^ accent ^ Ansi.box_v ^ Ansi.reset
+      in
+      let bottom_row =
+        accent ^ Ansi.box_bl_round ^ draw_hline (max 0 (width - 2))
+        ^ Ansi.box_br_round ^ Ansi.reset
+      in
+      [ top_row; middle_row; bottom_row ]
+
+let surface_chrome_budget ?(frame = Chrome_overlay) ?has_recovery ?progress_sheet state
     ~terminal_rows =
   let has_recovery = resolve_has_recovery ~frame ~has_recovery state in
-  max 1
-    (Masc_tui_types.surface_body_rows state ~terminal_rows
-    - chrome_rows_for ~frame ~has_recovery)
+  let total_budget =
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows
+      - chrome_rows_for ~frame ~has_recovery)
+  in
+  let _, cols = get_terminal_size () in
+  let sheet_rows =
+    progress_sheet_rows ~available:total_budget ~cols:(framed_inner_width cols) progress_sheet
+  in
+  max 1 (total_budget - sheet_rows)
 
 (* What a body does with rows past its budget, said at the call rather than
    left to a default. An optional clamp cost nothing to leave out, so a body
@@ -2190,22 +2481,28 @@ type overflow =
 (* The window a [Scrolled] body gets out of [count] rows: the whole budget,
    since its position is on the title row. The key handler that bounds the
    scroll and the frame that draws it both ask this. *)
-let surface_window_height ?(frame = Chrome_overlay) ?has_recovery state
+let surface_window_height ?(frame = Chrome_overlay) ?has_recovery ?progress_sheet state
     ~terminal_rows ~count =
   let has_recovery = resolve_has_recovery ~frame ~has_recovery state in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let base_chrome = chrome_rows_for ~frame ~has_recovery in
+  let total_budget = max 1 (rows - base_chrome) in
+  let _, cols = get_terminal_size () in
+  let sheet_rows =
+    progress_sheet_rows ~available:total_budget ~cols:(framed_inner_width cols) progress_sheet
+  in
   Masc_tui_scroll.content_height
-    ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
-    ~chrome:(chrome_rows_for ~frame ~has_recovery) ~count ~preview_keep:None
+    ~rows ~chrome:(base_chrome + sheet_rows) ~count ~preview_keep:None
 
 (* The window the contract cuts out of a [Scrolled] body of [count] rows,
    as its height and the scroll it draws from. The other kinds window
    themselves, or need no window. *)
-let chrome_window ?(frame = Chrome_overlay) ?has_recovery (state : state)
+let chrome_window ?(frame = Chrome_overlay) ?has_recovery ?progress_sheet (state : state)
     ~terminal_rows ~count = function
   | Fits | Paged_by_cursor | Self_scrolled _ -> None
   | Scrolled { scroll; report = _ } ->
       let height =
-        surface_window_height ~frame ?has_recovery state ~terminal_rows ~count
+        surface_window_height ~frame ?has_recovery ?progress_sheet state ~terminal_rows ~count
       in
       Some (height, Masc_tui_scroll.normalize ~count ~height scroll)
 
@@ -2217,12 +2514,11 @@ let chrome_position ~window ~count ~handed =
       Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count
   | None -> handed
 
-let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+let surface_chrome_position ~overflow ?progress_sheet (state : state) ~terminal_rows ~body =
   let has_recovery = resolve_has_recovery ~frame:Chrome_screen ~has_recovery:None state in
   let count = ref 0 and handed = ref None in
   let pushed () = incr count in
-  body ~budget:(max 1 (rows - chrome_rows_for ~frame:Chrome_screen ~has_recovery))
+  body ~budget:(surface_chrome_budget ~frame:Chrome_screen ~has_recovery ?progress_sheet state ~terminal_rows)
     { push = (fun _ -> pushed ())
     ; push_styled = (fun ~style:_ _ -> pushed ())
     ; push_selected = (fun _ -> pushed ())
@@ -2231,10 +2527,11 @@ let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
     ; next_origin = (fun () -> (0, 0))
     ; position = (fun position -> handed := Some position) };
   chrome_position
-    ~window:(chrome_window ~frame:Chrome_screen ~has_recovery state ~terminal_rows ~count:!count overflow)
+    ~window:(chrome_window ~frame:Chrome_screen ~has_recovery ?progress_sheet state ~terminal_rows ~count:!count overflow)
     ~count:!count ~handed:!handed
 
 let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar
+    ?progress_sheet ?now
     (state : state) ~terminal_rows ~cols ~surface_key ~title ~keys
     ~(body : budget:int -> chrome_body -> unit) =
   let setup_started = Masc_tui_frame_timing.start_stage () in
@@ -2280,7 +2577,18 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
     strip_rows + lines_ended_since head ~start:0
   in
   let has_recovery = Option.is_some recovery_in_slot in
-  let budget = max 1 (rows - chrome_rows_for ~frame ~has_recovery) in
+  let total_budget = max 1 (rows - chrome_rows_for ~frame ~has_recovery) in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        let now = match now with Some now -> now | None -> Unix.gettimeofday () in
+        render_progress_sheet ~ko:(state.ui_language = Lang_ko)
+          ~now ~available:total_budget
+          ~width:(framed_inner_width cols) sheet
+  in
+  let sheet_rows = List.length sheet_lines in
+  let budget = max 1 (total_budget - sheet_rows) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that
      says so reads, are the contract's to work out, not the body's. *)
@@ -2307,7 +2615,15 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
   let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in
-  let window = chrome_window ~frame ~has_recovery state ~terminal_rows ~count overflow in
+  let window =
+    if sheet_rows = 0 then
+      chrome_window ~frame ~has_recovery state ~terminal_rows ~count overflow
+    else
+      match overflow with
+      | Fits | Paged_by_cursor | Self_scrolled _ -> None
+      | Scrolled { scroll; report = _ } ->
+          Some (budget, Masc_tui_scroll.normalize ~count ~height:budget scroll)
+  in
   let position = chrome_position ~window ~count ~handed:!handed in
   (match frame with
    | Chrome_screen -> ()
@@ -2364,6 +2680,7 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
   for _ = !used + 1 to budget do
     empty buf cols
   done;
+  List.iter (fun sheet_line -> line buf cols sheet_line) sheet_lines;
   (match recovery_in_slot, frame with
    | None, Chrome_screen -> ()
    | Some row, Chrome_screen ->
@@ -2393,9 +2710,9 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
 
 (* A surface whose footer spelled its own row, filtered to the keys that
    answer. *)
-let surface_chrome ~overflow ?help_door ?frame ?status ?sidebar state ~terminal_rows ~cols
+let surface_chrome ~overflow ?help_door ?frame ?status ?sidebar ?progress_sheet ?now state ~terminal_rows ~cols
     ~surface_key ~title ~hints ~body =
-  surface_chrome_keys ~overflow ?help_door ?frame ?status ?sidebar state ~terminal_rows ~cols
+  surface_chrome_keys ~overflow ?help_door ?frame ?status ?sidebar ?progress_sheet ?now state ~terminal_rows ~cols
     ~surface_key ~title ~keys:(Masc_tui_footer.Written hints) ~body
 
 
@@ -2427,12 +2744,17 @@ let refresh_progress_pieces (state : state) =
     | Http_refresh_progress.Component_returned Part_received -> "관측됨"
     | Component_returned Part_failed | Component_exception -> "조회 실패"
     | Component_interrupted -> "조회 중단" | Component_unfinished -> "조회 미완료" in
+  let reading_piece label =
+    Theme.info () ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+    ^ label ^ Ansi.reset
+  in
   let foreground =
     match surface_reads_pending state with
     | [] -> []
     | source :: rest ->
-        [ text ~ko:"조회 중: " ~en:"reading " ^ surface_name source
-          ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) ]
+        [ reading_piece
+            (text ~ko:"조회 중: " ~en:"reading " ^ surface_name source
+             ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))) ]
   in
   match state.http_refresh_progress with
   | Some (authority, progress) when authority = state.workspace_authority ->
@@ -2472,14 +2794,18 @@ let refresh_progress_pieces (state : state) =
              | Http_refresh_progress.Component_pending -> true
              | Http_refresh_progress.Component_settled _ -> false) component_reads in
            let pending = match pending_components with
-             | part :: rest -> text ~ko:"조회 중: " ~en:"reading " ^ component_name part.cr_component
-                 ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))
+             | part :: rest ->
+                 reading_piece
+                   (text ~ko:"조회 중: " ~en:"reading " ^ component_name part.cr_component
+                    ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)))
              | [] -> (match Http_refresh_progress.pending_sources progress with
                  | [] -> (match progress.Http_refresh_progress.readings with
-                     | [] -> text ~ko:"새로 조회 중" ~en:"refreshing"
-                     | _ :: _ -> text ~ko:"조회 마무리 중" ~en:"finishing refresh")
-                 | source :: rest -> text ~ko:"조회 중: " ~en:"reading " ^ source_name source
-                     ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))) in
+                     | [] -> reading_piece (text ~ko:"새로 조회 중" ~en:"refreshing")
+                     | _ :: _ -> reading_piece (text ~ko:"조회 마무리 중" ~en:"finishing refresh"))
+                 | source :: rest ->
+                     reading_piece
+                       (text ~ko:"조회 중: " ~en:"reading " ^ source_name source
+                        ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)))) in
            notices @ [ pending ])
   | Some _ | None -> foreground
 
@@ -3235,7 +3561,11 @@ let draw_list_idle buf cols ~ko ~empty ~height idle =
        reason ~keep:1 detail;
        note (page_failed_note ~ko)
    | List_unread -> note (page_unread_note ~ko)
-   | List_loading -> note (page_reading_note ~ko)
+   | List_loading ->
+       if !drawn < height then begin
+         box_line_styled buf cols ~style:(Theme.info ()) (page_reading_note ~ko);
+         incr drawn
+       end
    | List_empty detail ->
        Option.iter (reason ~keep:1) detail;
        note ("  " ^ empty)
@@ -4492,14 +4822,45 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       (max 1 (cols - 1)));
     finish_surface state ~surface_key:ds.ds_surface_key ~rows:terminal_rows ~cols buf
   end else begin
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let diff_loading = Option.is_none ds.ds_diff && Option.is_none ds.ds_error in
+  let diff_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:("diff:" ^ ds.ds_surface_key) ~now
+      (if diff_loading then Some ds.ds_address else None)
+  in
+  let progress_sheet =
+    if not diff_loading then None
+    else
+      Some
+        { ps_title = ui_text state ~ko:"작업 트리 diff 읽는 중" ~en:"Reading working tree diff"
+        ; ps_detail = Some (Terminal_text.single_line ds.ds_address)
+        ; ps_started_at = diff_started_at
+        ; ps_meter = None
+        ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로" ~en:"Esc:back")
+        ; ps_blocking = false
+        }
+  in
   let geometry = diff_surface_geometry ~rows ~context_lines:ds.ds_context_lines
       ~has_error:(Option.is_some ds.ds_error) in
-  let content_height = geometry.dsg_content_height in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:geometry.dsg_content_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let content_height = max 0 (geometry.dsg_content_height - List.length sheet_lines) in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min ds.ds_scroll max_scroll) in
   let header =
     here_row ~cols state ~path:(ds.ds_path @ [ ds.ds_address ])
-      ~readings:[ ui_text state ~ko:"HEAD 대비" ~en:"vs HEAD" ]
+      ~readings:
+        ([ ui_text state ~ko:"HEAD 대비" ~en:"vs HEAD" ]
+         @ (match progress_sheet with
+            | None -> []
+            | Some sheet ->
+                [ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title ]))
       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
   in
   box_line buf cols header;
@@ -4511,7 +4872,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     geometry.dsg_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf
-       (if state.ui_language = Lang_ko then "  열 %d · 이전 / 현재 · 작업 트리 vs HEAD"
+       (if ko then "  열 %d · 이전 / 현재 · 작업 트리 vs HEAD"
         else "  col %d · old / new · working tree vs HEAD")
        (ds.ds_hscroll + 1));
   box_divider buf cols;
@@ -4523,26 +4884,38 @@ let render_diff_surface (state : state) (ds : diff_surface) =
        if count = 2 then box_divider buf cols
    | Some _, _ -> ());
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
-  if Option.is_some ds.ds_error && geometry.dsg_error_rows = 0 then
-    box_line_styled buf cols ~style:(Theme.bad ()) (page_failed_note ~ko:(state.ui_language = Lang_ko))
+  if Option.is_some ds.ds_error && geometry.dsg_error_rows = 0 then begin
+    if content_height > 0 then begin
+      box_line_styled buf cols ~style:(Theme.bad ()) (page_failed_note ~ko);
+      for _ = 1 to content_height - 1 do
+        box_empty buf cols
+      done
+    end
+  end
   else if total = 0 then begin
-    (* Three different facts, and none of them is the others: not read yet, a
-       failed read, and a file that matches its last commit. *)
-    let empty =
-      match (ds.ds_diff, ds.ds_error) with
-      | (Some _ | None), Some _ -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | None, None -> ui_text state ~ko:"  (작업 트리 읽는 중)" ~en:"  (reading the tree)"
-      | Some diff, None ->
-          if diff.Masc.Tui_decode.gd_has_changes then
-            ui_text state
-              ~ko:"  (작업 트리가 변경을 보고했으나 diff 줄이 비어 있음)"
-              ~en:"  (the tree reports a change and sent no lines)"
-          else ds.ds_unchanged
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
+    if content_height > 0 then begin
+      (* Three different facts, and none of them is the others: not read yet, a
+         failed read, and a file that matches its last commit. *)
+      (match (ds.ds_diff, ds.ds_error) with
+       | (Some _ | None), Some _ ->
+           box_line_styled buf cols ~style:(Theme.recede ()) (page_failed_note ~ko)
+       | None, None ->
+           box_line buf cols
+             ("  " ^ progress_inline ~ko ~now ?started_at:diff_started_at
+                (ui_text state ~ko:"작업 트리 읽는 중" ~en:"Reading the tree"))
+       | Some diff, None ->
+           let empty =
+             if diff.Masc.Tui_decode.gd_has_changes then
+               ui_text state
+                 ~ko:"  (작업 트리가 변경을 보고했으나 diff 줄이 비어 있음)"
+                 ~en:"  (the tree reports a change and sent no lines)"
+             else ds.ds_unchanged
+           in
+           box_line_styled buf cols ~style:(Theme.recede ()) empty);
+      for _ = 1 to content_height - 1 do
+        box_empty buf cols
+      done
+    end
   end
   else
     for i = 0 to content_height - 1 do
@@ -4551,6 +4924,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       | Some row ->
           box_line_span buf cols (tree_diff_row_span ~hscroll:ds.ds_hscroll ~width:(framed_inner_width cols) row)
     done;
+  List.iter (box_line buf cols) sheet_lines;
   (* The status line carries the esc hint at every count, so it is one of
      the fixed chrome rows above. *)
   box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ ds.ds_esc_hint);

@@ -130,18 +130,29 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
             (* The producer's reason is already the evidence access verdict. *)
             message (wrap ~prefix:"    " reason)
   in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let info_wrap ~prefix text =
+    Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
+      ~sanitize:Keeper_chat.terminal_safe_text text
+    |> List.mapi (fun index line ->
+           Masc_tui_ansi.Theme.info (), (if index = 0 then prefix else "      ") ^ line)
+  in
   let rows, pictures = match evidence with
     | Masc_tui_fetched.Absent -> message (wrap ~prefix:"    "
         (if workspace_confirmed
          then String.capitalize_ascii evidence_unread ^ text "  r:새로 읽기" "  r:refresh"
          else workspace_unconfirmed ^ " · " ^ evidence_unread))
-    | Loading -> message (wrap ~prefix:"    "
-        (if workspace_confirmed
-         then text "원래 검증 증거를 읽는 중" "Reading the original verification evidence"
-         else workspace_unconfirmed ^ " · "
-              ^ text "증거 읽기 결과 미확인" "the evidence read is unconfirmed"))
+    | Loading -> message (
+        if workspace_confirmed
+        then info_wrap ~prefix:("    " ^ under_way ^ " ")
+               (text "원래 검증 증거를 읽는 중" "Reading the original verification evidence")
+        else wrap ~prefix:"    "
+               (workspace_unconfirmed ^ " · "
+                ^ text "증거 읽기 결과 미확인" "the evidence read is unconfirmed"))
     | Failed failure -> message
-        ((if in_flight then wrap ~prefix:"    " (text "증거를 다시 읽는 중" "Retrying evidence read")
+        ((if in_flight then
+            info_wrap ~prefix:("    " ^ under_way ^ " ")
+              (text "증거를 다시 읽는 중" "Retrying evidence read")
           else [])
          @ failure_rows failure)
     | Ready evidence ->
@@ -150,8 +161,9 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
         wrap ~prefix:"    " (workspace_unconfirmed ^ " · "
           ^ text "마지막 관측 증거를 보여 줌" "showing the last observed evidence")
         else if in_flight then
-          wrap ~prefix:"    " (text "새로 읽는 중 · 이전 증거를 보여 줌"
-            "Refreshing · showing the previous evidence")
+          info_wrap ~prefix:("    " ^ under_way ^ " ")
+            (text "새로 읽는 중 · 이전 증거를 보여 줌"
+              "Refreshing · showing the previous evidence")
         else [] in
       let notes = wrap_rows ~width notes in
       notes @ rows,List.map (fun ((slot : Picture.slot),pixels) ->
@@ -159,9 +171,12 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
     | Stale (evidence,failure) ->
       let rows,pictures = contents evidence in
       let notes = wrap_rows ~width
-        (wrap ~prefix:"    " (if in_flight
-           then text "다시 읽는 중 · 이전 증거를 보여 줌" "Retrying · showing the previous evidence"
-           else text "마지막 관측 증거를 보여 줌" "Showing the last observed evidence")
+        ((if in_flight then
+            info_wrap ~prefix:("    " ^ under_way ^ " ")
+              (text "다시 읽는 중 · 이전 증거를 보여 줌" "Retrying · showing the previous evidence")
+          else
+            wrap ~prefix:"    "
+              (text "마지막 관측 증거를 보여 줌" "Showing the last observed evidence"))
          @ failure_rows failure) in
       notes @ rows,List.map (fun ((slot : Picture.slot),pixels) ->
         {slot with first=List.length notes+slot.first},pixels) pictures

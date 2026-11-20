@@ -322,9 +322,57 @@ val chrome_rows_for : frame:chrome_frame -> has_recovery:bool -> int
     collapses the empty Zone 4 notice row when [has_recovery] is [false],
     reclaiming up to 2 body rows (RFC tui-one-screen-grammar §2). *)
 
+(** Determinate step counter rendered as a gradient completion bar inside a
+    {!progress_sheet}. *)
+type progress_meter = {
+  pm_done : int;
+  pm_total : int;
+  pm_failed : int;
+}
+
+(** Docked bottom-sheet / compact progress banner for blocking or in-progress
+    operations (RFC tui-one-screen-grammar §6.2, §7.2, §7.3, §8). Draws static
+    [◐] in [Theme.info ()], a live 1Hz elapsed clock via {!Masc_tui_value.Ongoing.since}
+    (scheduling redraws via {!Masc_tui_value.Redraw.note_change_at}), an optional
+    determinate completion meter, and explicit cancel/background hints. *)
+type progress_sheet = {
+  ps_title : string;
+  ps_detail : string option;
+  ps_started_at : float option;
+  ps_meter : progress_meter option;
+  ps_action_hint : string option;
+  ps_blocking : bool;
+}
+
+val progress_inline :
+  ko:bool ->
+  now:float ->
+  ?started_at:float ->
+  ?detail:string ->
+  string ->
+  string
+(** Single-line styled in-progress reading: [Theme.info ()] [◐] mark, label,
+    optional detail, and live elapsed duration when [started_at] is given. *)
+
+val progress_sheet_height : available:int -> cols:int -> progress_sheet -> int
+(** Rows the bottom sheet takes inside [available] rows at [cols] columns:
+    3 for the full rounded bottom sheet, 1 for the compact progress bar on
+    short/narrow viewports, or 0 when [available <= 1]. *)
+
+val render_progress_sheet :
+  ko:bool ->
+  now:float ->
+  available:int ->
+  width:int ->
+  progress_sheet ->
+  string list
+(** Render the docked bottom sheet (3 rows) or compact bar (1 row) fitted to
+    exactly [width] display cells per row. *)
+
 val surface_chrome_budget :
   ?frame:chrome_frame ->
   ?has_recovery:bool ->
+  ?progress_sheet:progress_sheet ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   int
@@ -354,6 +402,7 @@ type overflow =
 val surface_window_height :
   ?frame:chrome_frame ->
   ?has_recovery:bool ->
+  ?progress_sheet:progress_sheet ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   count:int ->
@@ -364,6 +413,7 @@ val surface_window_height :
 
 val surface_chrome_position :
   overflow:overflow ->
+  ?progress_sheet:progress_sheet ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   body:(budget:int -> chrome_body -> unit) ->
@@ -379,6 +429,8 @@ val surface_chrome :
   ?frame:chrome_frame ->
   ?status:Masc_tui_footer.status_item list ->
   ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
+  ?progress_sheet:progress_sheet ->
+  ?now:float ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->
@@ -389,7 +441,9 @@ val surface_chrome :
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 (** [sidebar] reserves its width from [cols] and draws beside the body,
     above the full-width footer. The body must wrap for the remaining width.
-    A complete recovery notice may use the existing bottom row. *)
+    A complete recovery notice may use the existing bottom row. When
+    [progress_sheet] is supplied, it docks cleanly at the bottom of the body
+    area within the frame's exact row budget. *)
 
 val surface_chrome_keys :
   overflow:overflow ->
@@ -397,6 +451,8 @@ val surface_chrome_keys :
   ?frame:chrome_frame ->
   ?status:Masc_tui_footer.status_item list ->
   ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
+  ?progress_sheet:progress_sheet ->
+  ?now:float ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->

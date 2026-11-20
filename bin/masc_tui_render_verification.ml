@@ -63,15 +63,57 @@ let verification_reading_error state = function
       Read_kept_back (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
         ~request:Kept_request.Verification_read refusal)
 
+let verification_progress_sheet ~now (state : state) =
+  let writing_path =
+    List.find_map
+      (fun (_, _, progress) ->
+        match progress with
+        | Masc_tui_evidence_file.Writing path -> Some path
+        | Not_started | Saved _ | Aborted _ -> None)
+      state.verification_evidence_saved
+  in
+  let spec =
+    match state.verification_verdict_inflight, writing_path with
+    | Some (task_id, request_id), _ ->
+        Some
+          ( "verdict:" ^ task_id ^ ":" ^ request_id
+          , ui_text state ~ko:"검증 판정 전송 중" ~en:"Submitting verification verdict"
+          , Some (Terminal_text.single_line task_id ^ " [" ^ Terminal_text.single_line request_id ^ "]")
+          , true )
+    | None, Some path ->
+        Some
+          ( "evidence-save:" ^ path
+          , ui_text state ~ko:"증거 파일 저장 중" ~en:"Saving verification evidence"
+          , Some (Terminal_text.single_line path)
+          , false )
+    | None, None -> None
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"verification-op" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) spec)
+  in
+  Option.map
+    (fun (_, ps_title, ps_detail, ps_blocking) ->
+      { ps_title
+      ; ps_detail
+      ; ps_started_at = started_at
+      ; ps_meter = None
+      ; ps_action_hint = None
+      ; ps_blocking
+      })
+    spec
+;;
+
 let reading_notice_lines state ~width ~inflight ~error =
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   let notice = match error, inflight with
     | None, false -> None
-    | None, true -> Some (Theme.recede (),
-        ui_text state ~ko:"재조회 중 · 이전 조회 자료" ~en:"Refreshing · previous reading")
+    | None, true -> Some (Theme.info (),
+        under_way ^ " " ^ ui_text state ~ko:"재조회 중 · 이전 조회 자료" ~en:"Refreshing · previous reading")
     | Some (Read_kept_back notice), (false | true) -> Some (Theme.warn (), notice)
     | Some (Last_error detail), refreshing ->
         let prefix = if refreshing then
-            ui_text state ~ko:"재조회 중 · 이전 자료 · 마지막 오류: "
+            under_way ^ " " ^ ui_text state ~ko:"재조회 중 · 이전 자료 · 마지막 오류: "
               ~en:"Refreshing · previous reading · last error: "
           else ui_text state ~ko:"이전 관측 · 조회 실패: "
               ~en:"Previous reading · read failed: " in
@@ -203,34 +245,50 @@ let render_verification_list (state : state) =
        box_divider buf cols);
   (* The height the keypress bounds its step with, asked of the same layout:
      it counts the rows drawn under the list as well as the frame. *)
-  let content_height =
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let progress_sheet = verification_progress_sheet ~now state in
+  let raw_content_height =
     match scrolled_surface state ~cols Verification with
     | Some layout ->
         Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
           ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
     | None -> max 1 (rows - listing_chrome ~error:state.verification_error)
   in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:raw_content_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let content_height = max 0 (raw_content_height - List.length sheet_lines) in
   let scroll = Masc_tui_scroll.ensure_visible ~cursor:state.verification_cursor
       ~height:content_height state.verification_scroll
     |> Masc_tui_scroll.normalize ~count:shown ~height:content_height in
   let requests_window = Rows.of_list ~first:scroll ~height:content_height requests in
   report_drawn_list Verification_rows ~height:content_height;
   if shown = 0 then begin
-    let empty =
-      match
-        empty_page_of ~snapshot:state.verification
-          ~error:state.verification_error
-      with
-      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.verification_inflight
-      | Page_empty ->
-          ui_text state ~ko:"  (판정 대기 중인 항목 없음)"
-            ~en:"  (nothing waiting on a verdict)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
+    if content_height > 0 then begin
+      let style, empty =
+        match
+          empty_page_of ~snapshot:state.verification
+            ~error:state.verification_error
+        with
+        | Page_failed -> Theme.recede (), page_failed_note ~ko
+        | Page_unread ->
+            (if state.verification_inflight then Theme.info () else Theme.recede ()),
+            page_unread_note_while ~ko ~reading:state.verification_inflight
+        | Page_empty ->
+            Theme.recede (),
+            ui_text state ~ko:"  (판정 대기 중인 항목 없음)"
+              ~en:"  (nothing waiting on a verdict)"
+      in
+      box_line_styled buf cols ~style empty;
+      for _ = 1 to content_height - 1 do
+        box_empty buf cols
+      done
+    end
   end
   else
     for i = 0 to content_height - 1 do
@@ -343,6 +401,7 @@ let render_verification_list (state : state) =
          ^ fit_width (Terminal_text.single_line err) (framed_inner_width cols - 4)
          ^ Ansi.reset)
    | None -> ());
+  List.iter (box_line buf cols) sheet_lines;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line_keys state ~max_cells:cols
@@ -463,8 +522,9 @@ let verification_evidence_index state request ~width observation =
           then (match progress with
             | Masc_tui_evidence_file.Not_started -> None
             | Writing path ->
-              Some (Theme.warn (),
-                say "  저장 중(완료 보고 안 됨): " "  Saving to (completion not reported): " ^ path)
+              let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+              Some (Theme.info (),
+                "  " ^ mark ^ " " ^ say "저장 중(완료 보고 안 됨): " "Saving to (completion not reported): " ^ path)
             | Saved path -> Some (Ansi.reset, say "  이 기기에 저장한 파일: " "  Saved on this device: " ^ path)
             | Aborted path ->
               Some (Theme.warn (), say "  저장하지 못한 목적지: " "  Could not save to: " ^ path))
@@ -477,7 +537,9 @@ let verification_detail_pane (state : state) ~rows ~cols
     ~origin:(origin_row, origin_col) request buf =
   let width = max 1 (framed_inner_width cols) in
   let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let say korean english = if ko then korean else english in
+  let progress_sheet = verification_progress_sheet ~now state in
   let armed_note =
     match state.verification_verdict_armed with
     | Some (task_id, request_id)
@@ -504,7 +566,15 @@ let verification_detail_pane (state : state) ~rows ~cols
       + (if Option.is_some armed_note then 1 else 0)
       + (if Option.is_some state.verification_verdict_error then 1 else 0)
   in
-  let content_height = max 1 (rows - max 0 (framed_chrome_rows - 2) - fixed_rows) in
+  let raw_content_height = max 1 (rows - max 0 (framed_chrome_rows - 2) - fixed_rows) in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:raw_content_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let content_height = max 0 (raw_content_height - List.length sheet_lines) in
   (* The three parts are wrapped apart so the evidence section's row index is
      known: wrapping is per row, so this is the same rows as wrapping once. *)
   let before = judgement_detail_rows ~width
@@ -588,6 +658,7 @@ let verification_detail_pane (state : state) ~rows ~cols
   List.iter
     (box_line_styled buf cols ~style:(Theme.warn ()))
     verdict_action_rows;
+  List.iter (box_line buf cols) sheet_lines;
   scroll
 ;;
 
@@ -857,13 +928,17 @@ let render_harness_list (state : state) =
   let verdicts_window = Rows.of_list ~first:scroll ~height:content_height verdicts in
   report_drawn_list Harness_rows ~height:content_height;
   if shown = 0 then begin
-    let empty =
+    let ko = state.ui_language = Lang_ko in
+    let style, empty =
       match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
-      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.harness_inflight
-      | Page_empty -> ui_text state ~ko:"  (기록된 판정 없음)" ~en:"  (no verdicts recorded)"
+      | Page_failed -> Theme.recede (), page_failed_note ~ko
+      | Page_unread ->
+          (if state.harness_inflight then Theme.info () else Theme.recede ()),
+          page_unread_note_while ~ko ~reading:state.harness_inflight
+      | Page_empty ->
+          Theme.recede (), ui_text state ~ko:"  (기록된 판정 없음)" ~en:"  (no verdicts recorded)"
     in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    box_line_styled buf cols ~style empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done

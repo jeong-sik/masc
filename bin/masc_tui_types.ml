@@ -6730,6 +6730,7 @@ type voice_agent_session =
             the way the wizard carries it. *)
   ; vas_status : string option
   ; vas_saving : bool
+  ; vas_loading_voices : bool
   ; vas_lookup : (string * string option) option
   }
 
@@ -6741,6 +6742,7 @@ let voice_agent_open ~agents ~revision =
   ; vas_revision = revision
   ; vas_status = None
   ; vas_saving = false
+  ; vas_loading_voices = false
   ; vas_lookup = None
   }
 
@@ -10151,6 +10153,9 @@ type state = {
   mutable account_login_readings: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
   mutable account_login_activation_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.saved) list;
   mutable account_login_read_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
+  (* Wall-clock start instants for blocking/pending progress sheets that do not
+     carry their own timestamp, keyed by [(slot, state_signature, started_at)]. *)
+  mutable progress_clocks: (string * string * float) list;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -11846,6 +11851,7 @@ type state = {
      no arm -- its $EDITOR reason form is the confirmation step. *)
   mutable verification_verdict_armed: (string * string) option;
   mutable verification_verdict_error: request_failure option;
+  mutable verification_verdict_inflight: (string * string) option;
   mutable system_logs: System_logs_view.t;
   msg_input: Masc_tui_message_input.t;
   mutable msg_command_menu: Masc_tui_command.menu_state;
@@ -15083,8 +15089,10 @@ let suspend_keeper_deletions_read state =
 let suspend_account_login_read (view : Masc_tui_account_login.t) =
   view.phase <- (match view.phase with
     | Masc_tui_account_login.Finished outcome -> Finished {outcome with refresh_failed=true}
-    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Saving
+    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _
+    | Preparing_context_batch _ | Documented_context _ | Saving
     | Removing | Failed | Removal _ -> Failed);
+  view.activity_started_at <- None;
   view.notice <- "Workspace reading is unconfirmed; read again after identity returns."
 
 let suspend_voice_wizard_read state =
@@ -16244,6 +16252,7 @@ let suspend_workspace_readings state =
   state.overview_owed <- Masc_tui_owed_read.settled;
   state.harness_stale_at <- None;
   state.verification_inflight <- false;
+  state.verification_verdict_inflight <- None;
   state.verification_refresh_after_inflight <- false;
   state.verification_owed <- Masc_tui_owed_read.settled;
   state.fusion_detail_inflight <- None;
@@ -17190,7 +17199,10 @@ let text_input_target (state : state) ~compact_viewport =
     (match state.collab with
      | Some view when not compact_viewport && Masc_tui_collab.text_input_active view -> Some Text_collab_form
      | Some _ | None -> None)
-  else if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  else if Option.is_some state.account_login then
+    (match state.account_login with
+     | Some view when not compact_viewport && Masc_tui_account_login.text_input_active view -> Some Text_account_login
+     | Some _ | None -> None)
   else if state.keeper_deletions_open then None
   else if Option.is_some state.queue_panel then None
   else if state.view = Resources && Option.is_some state.resource_save_prompt then Some Text_resource_save
@@ -20928,6 +20940,14 @@ let modal_owns_keys (state : state) =
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
   || Option.is_some state.collab
+  || Option.is_some state.account_login
+  || Option.is_some state.lane_addons
+  || (state.view = Config && state.config_pane = Config_voice
+      && Option.is_some state.voice_agent_voices)
+  || (state.view = Fusion
+      && match state.fusion_launch with
+         | Some (Fusion_launch_reading_presets _) -> true
+         | Some (Fusion_launch_open _ | Fusion_launch_started _) | None -> false)
   || Option.is_some (play_card_shown state)
 
 (* Where a paste goes once no field has claimed it. A key reaches the chat
@@ -20987,7 +21007,9 @@ let close_context_inspector (state : state) =
   state.context_inspector_focus <- Left_pane;
   state.context_inspector_response_return <- Masc_tui_context_inspector.Composition;
   state.context_inspector_response_scroll <- 0;
-  state.context_inspector_target <- Masc_tui_context_inspector.Recent 0
+  state.context_inspector_target <- Masc_tui_context_inspector.Recent 0;
+  state.progress_clocks <-
+    List.filter (fun (s, _, _) -> not (String.equal s "context-inspector")) state.progress_clocks
 
 let close_agenda (state : state) =
   state.agenda_open <- false;
@@ -21013,10 +21035,11 @@ let close_repository_changes (state : state) =
   state.repository_changes_diff_scroll <- 0
 
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
-   it, except the invite card: an unrelated event that clears the screen must
-   not take the only copy of a link with it. The inspector and the agenda are
-   only closed when open: closing stops an inspector read in flight, and there
-   is none to stop otherwise. *)
+   it, except the invite card and account login: an unrelated event that
+   clears the screen must not take the only copy of a link, an active login
+   stream, or an in-flight save/activation receipt with it. The inspector and
+   the agenda are only closed when open: closing stops an inspector read in
+   flight, and there is none to stop otherwise. *)
 let close_key_modals (state : state) =
   state.chat_call_reader <- None;
   state.help_open <- false;
@@ -21030,11 +21053,22 @@ let close_key_modals (state : state) =
   state.client_detail <- None;
   state.client_detail_scroll <- 0;
   state.collab <- None;
+  state.lane_addons <- None;
+  state.voice_agent_voices <- None;
   state.exact_activity_open <- None;
   state.machine_activity_open <- None;
   if state.agenda_open then close_agenda state;
   if state.context_inspector_open then close_context_inspector state;
-  if state.repository_changes_open then close_repository_changes state
+  if state.repository_changes_open then close_repository_changes state;
+  state.progress_clocks <-
+    List.filter
+      (fun (s, _, _) ->
+        not
+          (List.mem s
+             [ "context-inspector"; "detail-reading"; "palette"; "link-preview"
+             ; "keeper-deletions"; "queue-detail"; "queue-list"; "collab"
+             ; "lane-addons"; "voice-agent"; "machine-activity"; "exact-activity" ]))
+      state.progress_clocks
 
 let begin_goal_timeline_read (state : state) ~goal_id =
   match Masc_tui_fetched.refresh ~equal:String.equal state.goal_timeline ~key:goal_id with
@@ -21397,6 +21431,7 @@ let create_state
   account_login_readings = [];
   account_login_read_resume = [];
   account_login_activation_resume = [];
+  progress_clocks = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -22265,6 +22300,7 @@ let create_state
   verification_detail_scroll = 0;
   verification_verdict_armed = None;
   verification_verdict_error = None;
+  verification_verdict_inflight = None;
   msg_input = Masc_tui_message_input.create ();
   msg_command_menu = Masc_tui_command.Menu_idle;
   msg_recovered_paste_keepers = [];
@@ -22387,7 +22423,8 @@ let page_unread_note ~ko =
    to it. Each surface keeps its own record of a read on the wire, so the
    caller passes that fact. *)
 let page_reading_note ~ko =
-  if ko then "  (조회 중)" else "  (reading)"
+  let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  if ko then "  (" ^ mark ^ " 조회 중)" else "  (" ^ mark ^ " reading)"
 
 let page_unread_note_while ~ko ~reading =
   if reading then page_reading_note ~ko else page_unread_note ~ko
@@ -28320,6 +28357,14 @@ let keeper_message_inflight_rows (state : state) ~now =
         | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
             ui_text state ~ko:"요청 실패" ~en:"failed"
   in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let group_failed group =
+    group.reconciling_count = 0
+    && not (Masc_tui_keeper_chat_transcript.awaiting_continuation group.representative.log.tl_transcript)
+    && (match Masc_tui_keeper_chat_transcript.phase group.representative.log.tl_transcript with
+        | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
+        | Waiting | Working | Stream_ended -> false)
+  in
   let summary group =
     let age =
       if not (keeper_message_timing_visible state) then "" else
@@ -28327,15 +28372,42 @@ let keeper_message_inflight_rows (state : state) ~now =
       | None -> ""
       | Some text -> " · " ^ text
     in
-    Printf.sprintf "  (%s%s %s%s)" (batch_label group) (activity group)
+    let failed = group_failed group in
+    let lead = if failed then "  " else "  " ^ under_way ^ " " in
+    failed,
+    Printf.sprintf "%s(%s%s %s%s)" lead (batch_label group) (activity group)
       (Masc_tui_keeper_chat_projection.compact_request_id
          (turn_log_execution_id group.representative.log)) age
   in
-  List.map (fun group -> true, summary group)
-    (keeper_message_inflight_drawn state)
+  let control_rows =
+    match state.msg_target_keeper_name with
+    | None -> []
+    | Some keeper_name ->
+        (match List.assoc_opt keeper_name state.keeper_chat_control_pending with
+         | None -> []
+         | Some requested_ns ->
+             let elapsed =
+               Masc_tui_value.Ongoing.age ~now
+                 (max 0.0 (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) requested_ns) /. 1e9))
+             in
+             [ false
+             , ui_text state
+                 ~ko:("  " ^ under_way ^ " 턴 제어 요청 전달 중 · " ^ elapsed)
+                 ~en:("  " ^ under_way ^ " Sending turn control · " ^ elapsed) ])
+        @ (if List.mem keeper_name state.keeper_queue_inflight then
+             [ false
+             , ui_text state
+                 ~ko:("  " ^ under_way ^ " 대기열 요청 처리 중")
+                 ~en:("  " ^ under_way ^ " Processing queue request") ]
+           else [])
+  in
+  List.map summary (keeper_message_inflight_drawn state)
+  @ control_rows
   @ if keeper_message_history_loading state then
       [ false
-      , ui_text state ~ko:"  대화 기록 조회 중" ~en:"  Loading conversation history" ]
+      , ui_text state
+          ~ko:("  " ^ under_way ^ " 대화 기록 조회 중")
+          ~en:("  " ^ under_way ^ " Loading conversation history") ]
     else []
 
 (* One drawn row of the chat's schedule block: what leads it and the facts it
@@ -28431,7 +28503,8 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
       | None ->
           unread
             (if failed then say "조회 실패" "read failed"
-             else if reading then say "조회 중" "reading"
+             else if reading then
+               Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " ^ say "조회 중" "reading"
              else say "미조회" "unread")
       | Some snapshot when Option.is_some snapshot.scs_read_error
                            || Option.is_none snapshot.scs_request_count ->
@@ -28452,7 +28525,8 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             then [fact ~label:(say "이전 관측 " "retained ") Facts.Plain
                     (observed
                      ^ if failed then say "/갱신 실패" "/refresh failed"
-                       else say "/갱신 중" "/refreshing")]
+                       else "/" ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+                            ^ say "갱신 중" "refreshing")]
             else [] in
           let partial =
             if snapshot.scs_truncated then [fact Facts.Plain (say "일부 목록" "partial list")]
@@ -28923,3 +28997,39 @@ let workspace_entries_count_label total =
   else if total >= workspace_entries_limit then
     Printf.sprintf " (%d+, more not listed)" total
   else Printf.sprintf " (%d)" total
+
+let progress_clock_for (state : state) ~slot ~signature ~now =
+  match
+    List.find_opt
+      (fun (s, _, _) -> String.equal s slot)
+      state.progress_clocks
+  with
+  | Some (_, prev_sig, started_at) when String.equal prev_sig signature ->
+      started_at
+  | Some _ | None ->
+      let rest =
+        List.filter
+          (fun (s, _, _) -> not (String.equal s slot))
+          state.progress_clocks
+      in
+      state.progress_clocks <- (slot, signature, now) :: rest;
+      now
+
+let clear_progress_clock (state : state) ~slot =
+  if List.exists (fun (s, _, _) -> String.equal s slot) state.progress_clocks then
+    state.progress_clocks <-
+      List.filter
+        (fun (s, _, _) -> not (String.equal s slot))
+        state.progress_clocks
+
+let progress_clock_option (state : state) ~slot ~now = function
+  | None ->
+      clear_progress_clock state ~slot;
+      None
+  | Some signature ->
+      Some (progress_clock_for state ~slot ~signature ~now)
+
+let progress_started_at_of_monotonic_ns ~now started_ns =
+  let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started_ns in
+  let elapsed_s = max 0.0 (Int64.to_float elapsed_ns /. 1e9) in
+  now -. elapsed_s

@@ -1661,7 +1661,8 @@ let keeper_operations_fields (state : state) ~keeper_name =
           ^ Terminal_text.single_line detail ^ Ansi.reset) :: fields
     | Some _, None | None, (Some _ | None) -> fields in
   if reading_now then
-    (execution, Theme.recede ()
+    let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+    (execution, Theme.info () ^ under_way ^ " "
       ^ (match reading with
          | None -> t "실행 상태 읽는 중" "reading execution snapshot"
          | Some _ ->
@@ -2207,10 +2208,11 @@ let keeper_waiting_refresh_line state =
          (RFC tui-one-screen-grammar §6.2). *)
       let elapsed = Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ())
           (Int64.to_float age /. 1e9) in
-      Theme.warn ()
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      Theme.info ()
       ^ ui_text state
-          ~ko:("  대기 목록 갱신 중 · 마지막 관측 표시 · " ^ elapsed)
-          ~en:("  waiting refresh pending · last observation · " ^ elapsed)
+          ~ko:("  " ^ under_way ^ " 대기 목록 갱신 중 · 마지막 관측 표시 · " ^ elapsed)
+          ~en:("  " ^ under_way ^ " waiting refresh pending · last observation · " ^ elapsed)
       ^ Ansi.reset
 
 (* Observation status warnings drawn above the divider only when a stream
@@ -2238,7 +2240,9 @@ let keeper_plain_work ?now (state : state) (row : Keeper_list_model.row) =
         | Page_unread -> text "배정 목록 미조회 · 보존된 배정 작업: " "assignment source not read · retained assignment: "
         | Page_empty ->
             if Option.is_some (local_source_pending state Local_work) then
-              text "배정 목록 갱신 중 · 보존된 배정 작업: " "assignment refresh pending · retained assignment: "
+              let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+              text (under_way ^ " 배정 목록 갱신 중 · 보존된 배정 작업: ")
+                (under_way ^ " assignment refresh pending · retained assignment: ")
             else ""
       in
       let keeper_source = match keeper_rows_page state ~error:state.keepers_error with
@@ -2246,7 +2250,10 @@ let keeper_plain_work ?now (state : state) (row : Keeper_list_model.row) =
         | Page_unread -> text "키퍼 배정 연결 미조회 · " "Keeper assignment link not read · "
         | Page_empty ->
             if Option.is_some (local_source_pending state Local_keepers) then
-              text "키퍼 배정 연결 갱신 중 · " "Keeper assignment link refreshing · " else ""
+              let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+              text (under_way ^ " 키퍼 배정 연결 갱신 중 · ")
+                (under_way ^ " Keeper assignment link refreshing · ")
+            else ""
       in
       (if row.reading.Keeper_control.paused then text "저장된 일시정지 · " "stored pause · " else "")
       ^ keeper_source ^ task_source ^ title
@@ -2261,14 +2268,18 @@ let keeper_plain_work ?now (state : state) (row : Keeper_list_model.row) =
                || Option.is_some state.keeper_turns_error then
               text "마지막 대기 관측 · 갱신 실패: " "last waiting observation · refresh failed: "
             else if Option.is_some (keeper_waiting_refresh_slow state) then
-              text "마지막 대기 관측 · 갱신 대기: " "last waiting observation · refresh pending: "
+              let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+              text (under_way ^ " 마지막 대기 관측 · 갱신 대기: ")
+                (under_way ^ " last waiting observation · refresh pending: ")
             else "") ^ reason
        | None ->
            let observed ko en =
              (if Option.is_some state.keeper_turns_error then
                 text "마지막 턴 관측 · 갱신 실패: " "last turn observation · refresh failed: "
               else if state.keeper_turns_inflight then
-                text "마지막 턴 관측 · 갱신 중: " "last turn observation · refreshing: "
+                let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+                text (under_way ^ " 마지막 턴 관측 · 갱신 중: ")
+                  (under_way ^ " last turn observation · refreshing: ")
               else "") ^ text ko en
            in
            match row.turn with
@@ -2314,7 +2325,9 @@ let keeper_plain_help ?now (state : state) (row : Keeper_list_model.row) =
             (match request with
              | Keeper_list_model.Held_item _ | Keeper_list_model.Confirmation_item _
                when Option.is_some (keeper_waiting_refresh_slow state) ->
-                 text "마지막 관측 · 갱신 대기 · " "last observed · refresh pending · "
+                 let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+                 text (under_way ^ " 마지막 관측 · 갱신 대기 · ")
+                   (under_way ^ " last observed · refresh pending · ")
              | Keeper_list_model.Held_item _ | Keeper_list_model.Confirmation_item _
              | Keeper_list_model.Held_tool _ | Keeper_list_model.Open_questions _ -> "")
       in
@@ -2346,7 +2359,9 @@ let keeper_plain_turn_record (state : state) ~now ~keeper_name =
   in
   match Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name with
   | Masc_tui_fetched.Absent -> text "턴 종료 기록 미조회 · Enter:스토리" "turn records not read · Enter:Story"
-  | Masc_tui_fetched.Loading -> text "턴 종료 기록 조회 중" "reading turn records"
+  | Masc_tui_fetched.Loading ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      text (under_way ^ " 턴 종료 기록 조회 중") (under_way ^ " reading turn records")
   | Masc_tui_fetched.Ready turns -> retained ^ observed turns
   | Masc_tui_fetched.Stale (turns, Request_failed reason) ->
       retained ^ text "갱신 실패: " "refresh failed: " ^ Terminal_text.single_line reason
@@ -2752,6 +2767,141 @@ let cap_keeper_headers (state : state) ~inner ~budget headers =
           else
             fit_width suffix inner) kept
 
+let keeper_progress_sheet (state : state) ~now ?keeper_name () =
+  let ko = state.ui_language = Lang_ko in
+  let now_ns = Mtime_clock.elapsed_ns () in
+  let started_at_of_ns ns =
+    Some (now -. max 0.0 (Int64.to_float (Int64.sub now_ns ns) /. 1e9))
+  in
+  let action_token =
+    match state.keeper_action_inflight with
+    | Some (name, action) -> Some (name ^ ":" ^ Keeper_control.action_gerund ~ko:false action)
+    | None -> None
+  in
+  let action_started =
+    Masc_tui_types.progress_clock_option state ~slot:"keeper-action" ~now action_token
+  in
+  let requeue_started =
+    Masc_tui_types.progress_clock_option state ~slot:"keeper-quarantine-requeue" ~now
+      state.board_quarantine_requeue_inflight
+  in
+  let unbind_started =
+    Masc_tui_types.progress_clock_option state ~slot:"keeper-connector-unbind" ~now
+      (if state.connector_unbind_all_inflight then Some "unbind" else None)
+  in
+  let matches_keeper name =
+    match keeper_name with
+    | None -> true
+    | Some target -> String.equal name target
+  in
+  match state.keeper_action_inflight with
+  | Some (name, action) ->
+      Some
+        { ps_title = ui_text state ~ko:"키퍼 제어 요청 실행 중" ~en:"Running keeper action"
+        ; ps_detail = Some (Terminal_text.single_line name ^ " · " ^ Keeper_control.action_gerund ~ko action)
+        ; ps_started_at = action_started
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking = true
+        }
+  | None ->
+      let active_creation =
+        List.find_opt
+          (fun (attempt : keeper_creation_attempt) ->
+            match attempt.kca_status with
+            | Creation_checking | Creation_posting -> true
+            | Creation_finished _ -> false)
+          state.keeper_creations
+      in
+      (match active_creation with
+       | Some attempt ->
+           let phase =
+             match attempt.kca_status with
+             | Creation_checking -> ui_text state ~ko:"선언 검증 중" ~en:"validating declaration"
+             | Creation_posting -> ui_text state ~ko:"서버 생성 요청 중" ~en:"posting to server"
+             | Creation_finished _ -> ""
+           in
+           Some
+             { ps_title = ui_text state ~ko:"새 키퍼 생성 중" ~en:"Creating keeper"
+             ; ps_detail = Some (Terminal_text.single_line attempt.kca_request.kcr_keeper ^ " · " ^ phase)
+             ; ps_started_at = started_at_of_ns attempt.kca_request.kcr_started_ns
+             ; ps_meter = None
+             ; ps_action_hint = None
+             ; ps_blocking = true
+             }
+       | None ->
+           let pending_settings =
+             let all = Keeper_settings_saves.pending state.keeper_settings_saves in
+             match List.find_opt (fun a -> matches_keeper a.ksa_request.ksv_key.ksk_keeper) all with
+             | Some _ as hit -> hit
+             | None -> List.nth_opt all 0
+           in
+           (match pending_settings with
+            | Some attempt ->
+                Some
+                  { ps_title = ui_text state ~ko:"키퍼 설정 저장 중" ~en:"Saving keeper settings"
+                  ; ps_detail = Some (Terminal_text.single_line attempt.ksa_request.ksv_key.ksk_keeper)
+                  ; ps_started_at = started_at_of_ns attempt.ksa_request.ksv_started_ns
+                  ; ps_meter = None
+                  ; ps_action_hint = None
+                  ; ps_blocking = true
+                  }
+            | None ->
+                let pending_runtime =
+                  let all = Runtime_assignment_saves.pending state.runtime_assignment_saves in
+                  match List.find_opt (fun a -> matches_keeper a.raa_request.ras_key.ksk_keeper) all with
+                  | Some _ as hit -> hit
+                  | None -> List.nth_opt all 0
+                in
+                (match pending_runtime with
+                 | Some attempt ->
+                     Some
+                       { ps_title = ui_text state ~ko:"런타임 배정 저장 중" ~en:"Saving runtime assignment"
+                       ; ps_detail = Some (Terminal_text.single_line attempt.raa_request.ras_key.ksk_keeper)
+                       ; ps_started_at = started_at_of_ns attempt.raa_request.ras_started_ns
+                       ; ps_meter = None
+                       ; ps_action_hint = None
+                       ; ps_blocking = true
+                       }
+                 | None ->
+                     (match state.keeper_settings_intent with
+                      | Some req
+                        when Masc_tui_types.keeper_settings_request_current state req
+                             && Masc_tui_fetched.is_current
+                                  ~equal:Masc_tui_types.keeper_settings_equal_key
+                                  state.keeper_settings_editor req.ksr_request ->
+                          let key = Masc_tui_fetched.request_key req.ksr_request in
+                          Some
+                            { ps_title = ui_text state ~ko:"키퍼 설정 편집기 준비 중" ~en:"Opening keeper settings editor"
+                            ; ps_detail = Some (Terminal_text.single_line key.ksk_keeper)
+                            ; ps_started_at = started_at_of_ns req.ksr_started_ns
+                            ; ps_meter = None
+                            ; ps_action_hint = None
+                            ; ps_blocking = true
+                            }
+                      | Some _ | None ->
+                          (match state.board_quarantine_requeue_inflight with
+                           | Some target ->
+                               Some
+                                 { ps_title = ui_text state ~ko:"보드 격리 재시도 요청 중" ~en:"Requeuing quarantined items"
+                                 ; ps_detail = Some (Terminal_text.single_line target)
+                                 ; ps_started_at = requeue_started
+                                 ; ps_meter = None
+                                 ; ps_action_hint = None
+                                 ; ps_blocking = true
+                                 }
+                           | None ->
+                               if state.connector_unbind_all_inflight then
+                                 Some
+                                   { ps_title = ui_text state ~ko:"채널 커넥터 전체 해제 중" ~en:"Unbinding all connectors"
+                                   ; ps_detail = Some (ui_text state ~ko:"서버의 바인딩 해제 응답을 기다리고 있습니다" ~en:"Waiting for connector unbind receipt")
+                                   ; ps_started_at = unbind_started
+                                   ; ps_meter = None
+                                   ; ps_action_hint = None
+                                   ; ps_blocking = true
+                                   }
+                               else None)))))
+
 type keeper_plain_projection =
   { kpp_headers : string list
   ; kpp_list_width : int
@@ -2768,6 +2918,7 @@ type keeper_plain_projection =
   ; kpp_density : Keeper_list_model.density
   ; kpp_selected_reading : Keeper_control.reading option
   ; kpp_selected_summary : string option
+  ; kpp_sheet_lines : string list
   }
 
 let keeper_plain_entry_height density = function
@@ -2804,15 +2955,23 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
     keeper_list_top_headers state ~now ~cols ~inner ~selected_reading
       ~selected_row ~stop ~model_rows:reading.klr_rows ~all_rows:reading.klr_all_rows
   in
+  let sheet_lines =
+    match keeper_progress_sheet state ~now () with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko:(state.ui_language = Lang_ko) ~now
+          ~available:(max 0 (rows - 1 - 2 - 3)) ~width:inner sheet
+  in
+  let sheet_rows = List.length sheet_lines in
   (* A long list of failed reads must not evict the selectable Keeper or the
      action footer. Keep a useful list and its selected summary first; top
      headers then take rows up to [header_budget] above the header divider. *)
-  let body_floor = min (list_floor + summary_rows) (max 1 (rows - 1 - 2 - 1)) in
-  let header_budget = max 0 (rows - 1 - 2 - body_floor) in
+  let body_floor = min (list_floor + summary_rows) (max 1 (rows - 1 - 2 - 1 - sheet_rows)) in
+  let header_budget = max 0 (rows - 1 - 2 - body_floor - sheet_rows) in
   let headers = cap_keeper_headers state ~inner ~budget:header_budget headers in
   (* One divider sits below [headers] and two rows (divider + footer) sit below
      the body; there is no leading blank line so Zone 2 starts on row 2. *)
-  let body_rows = max 0 (rows - List.length headers - 1 - 2 - summary_rows) in
+  let body_rows = max 0 (rows - List.length headers - 1 - 2 - summary_rows - sheet_rows) in
   let detail_budget = match detail_width with
     | Some _ -> body_rows
     | None ->
@@ -2845,7 +3004,8 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
   ; kpp_page = Masc_tui_scroll.items_always_shown ~heights ~rows:entry_rows
   ; kpp_count = List.length reading.klr_rows
   ; kpp_density = density
-  ; kpp_selected_reading = selected_reading; kpp_selected_summary = selected_summary }
+  ; kpp_selected_reading = selected_reading; kpp_selected_summary = selected_summary
+  ; kpp_sheet_lines = sheet_lines }
 
 let keeper_plain_list_lines (state : state) ~now projection =
   let width = projection.kpp_list_width in
@@ -2939,6 +3099,7 @@ let render_keeper_plain (state : state) =
                               ^ fit_width right detail_width))
          roster);
   Option.iter (draw_keeper_selected_summary buf ~cols) projection.kpp_selected_summary;
+  List.iter (box_line buf cols) projection.kpp_sheet_lines;
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state ~status:(keeper_action_status state) ~max_cells:cols
@@ -3150,6 +3311,14 @@ let render_keeper_axes (state : state) =
     | Some (_, portrait) -> portrait.Masc_tui_chat_portrait.roster_rows
   in
   let available_rows = max 0 (roster_rows - chrome_rows - footer_rows) in
+  let axes_sheet_lines =
+    match keeper_progress_sheet state ~now:now_unix () with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now:now_unix
+          ~available:(max 0 (available_rows - 3)) ~width:inner sheet
+  in
+  let available_rows = max 0 (available_rows - List.length axes_sheet_lines) in
   let story_rows =
     match state.keeper_story with
     | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule
@@ -3351,6 +3520,7 @@ let render_keeper_axes (state : state) =
     state.keeper_story;
 
   Option.iter (draw_keeper_selected_summary buf ~cols) selected_summary;
+  List.iter (box_line buf cols) axes_sheet_lines;
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state
@@ -3584,7 +3754,12 @@ let terminal_drawing (state : state) ~width =
   let rows = match observation with
     | Masc_tui_fetched.Absent ->
         note (text ~ko:"Execute 출력을 아직 읽지 않음" ~en:"Execute output has not been read.")
-    | Loading -> note (text ~ko:"Execute 출력 읽는 중" ~en:"Reading Execute output")
+    | Loading ->
+        let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+        wrapped
+          (Theme.info () ^ under_way ^ " "
+           ^ sanitize (text ~ko:"Execute 출력 읽는 중" ~en:"Reading Execute output")
+           ^ Ansi.reset)
     | Failed detail ->
         wrapped (Theme.bad () ^ sanitize
           (text ~ko:"Execute 출력 없음: " ~en:"Execute output unavailable: "
@@ -3684,6 +3859,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     (* The content rows under the title and divider, before an overflow
        indicator takes one of them. *)
     let base_height = max 0 (rows - framed_chrome_rows) in
+    let now_detail = Unix.gettimeofday () in
+    let detail_sheet_lines =
+      match keeper_progress_sheet state ~now:now_detail ~keeper_name:k.k_name () with
+      | None -> []
+      | Some sheet ->
+          render_progress_sheet ~ko:(state.ui_language = Lang_ko) ~now:now_detail
+            ~available:(max 0 (base_height - 2)) ~width:inner sheet
+    in
+    let base_height = max 0 (base_height - List.length detail_sheet_lines) in
     (* Info shows the current outfit; Items changes only the drawing for its
        selected preview. Both use the server's observed equipment. *)
     let portrait_reading =
@@ -3723,7 +3907,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           item_say "  계정 조회 불가: " "  Account unavailable: " ^ Terminal_text.single_line detail
       | None, None ->
           (match pending_detail_read state ~tab:Detail_items ~keeper:k.k_name with
-           | Some _ -> item_say "  아이템 계정 불러오는 중" "  Loading Item account"
+           | Some _ ->
+               let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+               Theme.info () ^ "  " ^ under_way ^ " "
+               ^ item_say "아이템 계정 불러오는 중" "Loading Item account" ^ Ansi.reset
            | None -> item_say "  아이템 계정 미조회" "  Item account not read")
     in
     let is_worn item =
@@ -4007,7 +4194,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Masc_tui_fetched.Absent ->
            add_row context_label (Ansi.dim ^ t "읽기 전" "not loaded" ^ Ansi.reset)
        | Masc_tui_fetched.Loading ->
-           add_row context_label (Ansi.dim ^ t "읽는 중" "reading" ^ Ansi.reset)
+           let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+           add_row context_label
+             (Theme.info () ^ under_way ^ " " ^ t "읽는 중" "reading" ^ Ansi.reset)
        | Masc_tui_fetched.Ready observation -> add_context observation
        | Masc_tui_fetched.Stale (observation, detail) ->
            add_row (t "갱신:" "Refresh:") ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset);
@@ -4085,6 +4274,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              match tone with
              | Masc_tui_board_quarantine.Plain -> ""
              | Masc_tui_board_quarantine.Dim -> Ansi.dim
+             | Masc_tui_board_quarantine.Info -> Theme.info ()
              | Masc_tui_board_quarantine.Warn -> Theme.warn ()
              | Masc_tui_board_quarantine.Bad -> Theme.bad ()
            in
@@ -4394,7 +4584,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        same frame cannot disagree about what time it is. *)
     let now_ns = Mtime_clock.elapsed_ns () in
     let loading_row ?started_ns what =
-      Ansi.dim ^ "  "
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      Theme.info () ^ "  " ^ under_way ^ " "
       ^ Masc_tui_types.loading_notice
           ?elapsed:(Masc_tui_types.pending_elapsed ~now_ns started_ns)
           what
@@ -4794,7 +4985,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       in
       match connectors_read_notice state with
       | None -> rows
-      | Some notice -> (Theme.info () ^ "  " ^ notice ^ Ansi.reset) :: rows
+      | Some notice ->
+          let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+          (Theme.info () ^ "  " ^ under_way ^ " " ^ notice ^ Ansi.reset) :: rows
     in
     let automation_lines () =
       (* This tab reads the Keeper's own page from the server rather than
@@ -5097,10 +5290,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              Theme.selection_style () ^ fit_width (Masc_tui_theme.strip_sgr row) inner ^ Ansi.reset
            else row) runs)
       in
-      match Masc_tui_fusion_model.keeper_runs_view state with
+      let view = Masc_tui_fusion_model.keeper_runs_view state in
+      let runs_started =
+        Masc_tui_types.progress_clock_option state ~slot:"keeper-detail-runs" ~now:now_detail
+          (match view with
+           | Masc_tui_fetched.Loading -> Some k.k_name
+           | Masc_tui_fetched.Absent | Masc_tui_fetched.Failed _
+           | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Ready _ -> None)
+      in
+      match view with
       | Masc_tui_fetched.Absent -> [ Ansi.dim ^ (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset ]
       | Masc_tui_fetched.Loading ->
-          [ loading_row (ui_text state ~ko:"Fusion 실행 불러오는 중" ~en:"loading Fusion runs") ]
+          [ "  " ^ progress_inline ~ko:(state.ui_language = Lang_ko) ~now:now_detail ?started_at:runs_started
+              (ui_text state ~ko:"Fusion 실행 불러오는 중" ~en:"loading Fusion runs") ]
       | Masc_tui_fetched.Failed detail -> [ failure detail ]
       (* Rows already held stay on a failed refresh, as they do on the Fusion
          surface, with the failure above them so they read as stale. *)
@@ -5112,10 +5314,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        on, which the scroll below keeps in view. *)
     let identity_drawn =
       lazy
-        (Option.map
+        (let now = Unix.gettimeofday () in
+         let pending_logins =
+           List.filter_map
+             (fun (req : identity_login_request) ->
+               if String.equal req.ilr_keeper k.k_name then Some req.ilr_provider else None)
+             state.identity_login_requests
+         in
+         Option.map
            (fun (stamp, providers) ->
              ( stamp
-             , Masc_tui_render_identity.draw ~ko:(state.ui_language = Lang_ko) ~cols
+             , Masc_tui_render_identity.draw ~ko:(state.ui_language = Lang_ko)
+                 ~now ~pending_logins ~cols
                  { keeper_name = k.k_name
                  ; providers
                  ; filter = state.identity_filter
@@ -5142,8 +5352,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text
                 ~ko:(state.ui_language = Lang_ko) ~width partial
             | Some _ | None ->
-              [ Ansi.dim ^ (if state.ui_language = Lang_ko then
-                    "  샌드박스 상태 미조회" else "  Sandbox status not read") ^ Ansi.reset ]
+              (match Masc_tui_types.detail_read_started state ~tab:Detail_sandbox ~keeper:k.k_name with
+               | Some started_ns ->
+                   [ loading_row ~started_ns
+                       (if state.ui_language = Lang_ko then "샌드박스 상태 불러오는 중"
+                        else "loading Sandbox status") ]
+               | None ->
+                   [ Ansi.dim ^ (if state.ui_language = Lang_ko then
+                         "  샌드박스 상태 미조회" else "  Sandbox status not read") ^ Ansi.reset ])
           in
           let logs =
             match state.keeper_sandbox_logs_inflight with
@@ -5177,11 +5393,16 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | Some detail ->
                 [ (Theme.bad ()) ^ "  " ^ (if observed then t "이전 관측 · " "STALE · " else "")
                   ^ Terminal_text.single_line detail ^ Ansi.reset ] in
+          let secrets_started =
+            Masc_tui_types.progress_clock_option state ~slot:"keeper-detail-secrets" ~now:now_detail
+              (if reading_now then Some k.k_name else None)
+          in
           let progress = if reading_now then
-              [ loading_row (if observed
-                  then t "실행 상태 갱신 중 · 마지막 관측"
-                      "refreshing execution snapshot · last observation"
-                  else t "실행 상태 읽는 중" "reading execution snapshot") ]
+              [ "  " ^ progress_inline ~ko ~now:now_detail ?started_at:secrets_started
+                  (if observed
+                   then t "실행 상태 갱신 중 · 마지막 관측"
+                       "refreshing execution snapshot · last observation"
+                   else t "실행 상태 읽는 중" "reading execution snapshot") ]
             else [] in
           let lines = match secret_lines state k with
             | Some lines -> lines
@@ -5340,6 +5561,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
 
     (* On the Terminal tab one row says what the view is doing. *)
     if terminal_tab then box_line buf cols (Lazy.force terminal).terminal_status;
+    List.iter (box_line buf cols) detail_sheet_lines;
 
     (* Bottom border *)
     box_bottom buf cols;
@@ -5448,9 +5670,21 @@ let render_keeper_logs (state : state) =
     let k = List.nth state.keepers state.keeper_cursor in
     let log_snapshot = keeper_log_snapshot state in
     let total_entries = List.length log_snapshot.entries in
-    let reading_label = match keeper_logs_view state with
+    let ko = state.ui_language = Lang_ko in
+    let now = Unix.gettimeofday () in
+    let logs_view = keeper_logs_view state in
+    let logs_started =
+      Masc_tui_types.progress_clock_option state ~slot:"keeper-logs" ~now
+        (match logs_view with
+         | Masc_tui_fetched.Loading -> Some k.k_name
+         | Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _
+         | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> None)
+    in
+    let reading_label = match logs_view with
       | Masc_tui_fetched.Absent -> ui_text state ~ko:"미조회" ~en:"not read"
-      | Loading -> ui_text state ~ko:"메트릭 조회 중" ~en:"reading metrics"
+      | Loading ->
+          progress_inline ~ko ~now ?started_at:logs_started
+            (ui_text state ~ko:"메트릭 조회 중" ~en:"reading metrics")
       | Failed _ -> ui_text state ~ko:"조회 불가" ~en:"unavailable"
       | Ready _ | Stale _ ->
           count_reading state Masc_tui_value.Count.Entry total_entries in
@@ -5489,10 +5723,16 @@ let render_keeper_logs (state : state) =
     let visible = Rows.of_list ~first:scroll ~height:content_height log_rows in
     for index = 0 to content_height - 1 do
       if row_count = 0 && index = 0 then
-        box_line_styled buf cols ~style:(Theme.recede ())
-          ("  "
-           ^ Metrics_tail.empty_message ~ko:(state.ui_language = Lang_ko)
-               log_snapshot.error)
+        (match logs_view with
+         | Masc_tui_fetched.Loading ->
+             box_line buf cols
+               ("  " ^ progress_inline ~ko ~now ?started_at:logs_started
+                  (ui_text state ~ko:"키퍼 로그 읽는 중" ~en:"reading keeper logs"))
+         | Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _
+         | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ->
+             box_line_styled buf cols ~style:(Theme.recede ())
+               ("  "
+                ^ Metrics_tail.empty_message ~ko log_snapshot.error))
       else
         match Rows.at visible (scroll + index) with
         | Some (diagnostic, line) ->

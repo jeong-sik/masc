@@ -189,9 +189,9 @@ let overview_capacity_status (state : state) : Masc_tui_card.status =
   let ko = state.ui_language = Lang_ko in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
-      { Masc_tui_card.symbol = Masc_tui_card.Unknown Masc_tui_value.Unknown.Unread
+      { Masc_tui_card.symbol = Masc_tui_card.Mark Masc_tui_value.Mark.Under_way
       ; word = ""
-      ; tone = Theme.recede () }
+      ; tone = Theme.info () }
   | Unreachable _ | Unavailable _ | Cannot_read _ ->
       { Masc_tui_card.symbol = Masc_tui_card.Unknown Masc_tui_value.Unknown.Read_failed
       ; word = ""
@@ -253,7 +253,12 @@ let overview_capacity_lines ?(cells = 48) ~mark (state : state) =
   in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
-      lead (text "fleet 첫 관측 대기" "Awaiting fleet reading")
+      let sentence = text "fleet 첫 관측 대기" "Awaiting fleet reading" in
+      (match mark with
+       | Mark_on_card_edge -> wrap (Theme.info () ^ sentence ^ Ansi.reset)
+       | Mark_in_body ->
+           let glyph = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+           wrap (Theme.info () ^ glyph ^ " " ^ sentence ^ Ansi.reset))
   (* With no reading the edge draws the failure mark, and one row says why:
      the row that names the cause with its age. A general row above it
      ("not observed · fleet unreachable") said the same thing again. *)
@@ -509,25 +514,75 @@ let render_overview (state : state) home =
   let selected = Masc_tui_home.home_selected_action home in
   let inner_cols = framed_inner_width cols in
   let capacity_lines = overview_capacity_lines ~cells:inner_cols ~mark:Mark_in_body state in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let overview_progress_spec =
+    match state.home_decision_inflight with
+    | Some _ ->
+        Some
+          ( "home-decision"
+          , ui_text state ~ko:"결정 요청 처리 중" ~en:"Submitting decision"
+          , Some
+              (ui_text state ~ko:"선택한 요청에 대한 응답을 서버로 전송하고 있습니다"
+                 ~en:"Sending your decision to the server")
+          , true )
+    | None -> (
+        match Masc_tui_credential_preparation.status state.credential_preparation with
+        | Preparing _ ->
+            Some
+              ( "cred-preparing"
+              , ui_text state ~ko:"워크스페이스 접근 준비 중" ~en:"Preparing workspace access"
+              , Some
+                  (ui_text state ~ko:"인증 정보와 워크스페이스 연결을 준비하고 있습니다"
+                     ~en:"Preparing credentials and workspace access")
+              , false )
+        | Awaiting_ui _ ->
+            Some
+              ( "cred-awaiting-ui"
+              , ui_text state ~ko:"워크스페이스 접근 결과 반영 대기"
+                  ~en:"Applying workspace access result"
+              , None
+              , false )
+        | Not_requested | Settled -> None)
+  in
+  let overview_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"overview-op" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) overview_progress_spec)
+  in
+  let overview_sheet =
+    Option.map
+      (fun (_, ps_title, ps_detail, ps_blocking) ->
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = overview_started_at
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking
+        })
+      overview_progress_spec
+  in
   (* The last day of tool calls, whatever window Usage's [w] holds
      ([tool_series_days]). A reading that is missing says so in words, never as
      a count of zero. A press on the line opens Usage on its Calls section. *)
   let tool_calls_line ~cells =
-    let ko = state.ui_language = Lang_ko in
     let window = Masc_tui_usage_calls.Last_day in
     pressable Press_usage_calls
       (match state.tool_series with
        | Tool_series_read calls when calls.Masc_tui_usage_calls.window = window ->
            Masc_tui_usage_calls.summary_line ~ko ~cells calls
+       | Tool_series_unread when state.workspace_identity = Workspace_identity_match ->
+           Masc_tui_usage_calls.summary_note ~ko ~cells window
+             (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+              ^ ui_text state ~ko:"불러오는 중" ~en:"reading")
        | Tool_series_read _ | Tool_series_unread ->
            Masc_tui_usage_calls.summary_note ~ko ~cells window
-             (ui_text state ~ko:"불러오는 중" ~en:"reading")
+             (ui_text state ~ko:"미조회" ~en:"not read")
        | Tool_series_error reason ->
            Masc_tui_usage_calls.summary_note ~ko ~cells window
              (ui_text state ~ko:"조회 불가: " ~en:"unavailable: "
               ^ Terminal_text.single_line reason))
   in
-  surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
+  surface_chrome ~overflow:Fits ?sidebar ?progress_sheet:overview_sheet ~now state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
     ~title:(overview_header state ~cols)
     ~status:[]
     ~hints:(if state.keeper_navigation_open then
@@ -945,21 +1000,49 @@ let render_surface ~home (state : state) =
                 | Some post -> Masc_tui_render_board.render_board_read state post
                 | None ->
                     let terminal_rows, cols = get_terminal_size () in
-                    surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
+                    let ko = state.ui_language = Lang_ko in
+                    let now = Unix.gettimeofday () in
+                    let detail_view = Board_detail.view_for state.board_detail ~post_id in
+                    let loading = detail_view = Board_detail.Loading in
+                    let started_at =
+                      Masc_tui_types.progress_clock_option state ~slot:"board-detail" ~now
+                        (if loading then Some post_id else None)
+                    in
+                    let progress_sheet =
+                      if not loading then None
+                      else
+                        Some
+                          { ps_title = ui_text state ~ko:"게시글 읽는 중" ~en:"Loading Board post"
+                          ; ps_detail = Some (Terminal_text.single_line post_id)
+                          ; ps_started_at = started_at
+                          ; ps_meter = None
+                          ; ps_action_hint = Some (ui_text state ~ko:"Esc:돌아가기" ~en:"Esc:back")
+                          ; ps_blocking = false
+                          }
+                    in
+                    surface_chrome ~overflow:Fits ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"board-read"
                       ~title:
                         (here_row ~cols state
                            ~path:
                              [ Masc_tui_render_board.board_step state
                              ; Terminal_text.single_line post_id ]
-                           ~readings:[] ~position:None)
+                           ~readings:
+                             (match progress_sheet with
+                              | None -> []
+                              | Some sheet ->
+                                  [ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title ])
+                           ~position:None)
                       ~hints:""
                       ~body:(fun ~budget:_ c ->
-                        match Board_detail.view_for state.board_detail ~post_id with
+                        match detail_view with
                         | Board_detail.Failed detail ->
                             c.push_styled ~style:(Theme.bad ())
                               ("  " ^ Terminal_text.single_line detail)
                         | Board_detail.Absent -> c.push (ui_text state ~ko:"  글을 아직 읽지 못했습니다. r로 다시 읽습니다." ~en:"  Board post has not been loaded. Press r to retry.")
-                        | Board_detail.Loading -> c.push (ui_text state ~ko:"  글을 읽는 중" ~en:"  Loading Board post")
+                        | Board_detail.Loading ->
+                            c.push
+                              ("  " ^ progress_inline ~ko ~now ?started_at
+                                 (ui_text state ~ko:"글을 읽는 중" ~en:"Loading Board post"))
                         | Board_detail.Ready _ -> ())))
   | Planning -> Masc_tui_render_work.render_planning state
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->

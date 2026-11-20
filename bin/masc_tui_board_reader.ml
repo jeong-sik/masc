@@ -31,6 +31,7 @@ let equal_preparation a b=equal_key a.key b.key && a.content==b.content
   && a.presentation=b.presentation && a.width=b.width && a.content_kind=b.content_kind
 let pending t=if F.in_flight t.source then t.read_request else None
 let pending_preparation t=if F.in_flight t.preparation then t.preparation_request else None
+let original_open_pending t=Option.is_some t.original_open_pending
 let close t={t with opened=None;source=F.clear t.source;preparation=F.clear t.preparation;
   read_request=None;preparation_request=None;content_kind=Document;original_open_pending=None;
   document=D.create ~ko:titles_in_korean ~title:"Board attachment" []}

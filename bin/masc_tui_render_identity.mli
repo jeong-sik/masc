@@ -27,4 +27,4 @@ type drawn =
 
 (** Preserve provider numbering, notices, filtered-empty readings and login URL
     wrapping. Styling uses the current terminal theme; no UI state is mutated. *)
-val draw : ?ko:bool -> cols:int -> view -> drawn
+val draw : ?ko:bool -> ?now:float -> ?pending_logins:string list -> cols:int -> view -> drawn

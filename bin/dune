@@ -1494,7 +1494,7 @@
  (name masc_tui_volume_gc)
  (wrapped false)
  (modules masc_tui_volume_gc)
- (libraries masc masc_tui_say yojson))
+ (libraries masc masc_tui_say masc_tui_value yojson))
 
 (library
  (name masc_tui_storage)
@@ -1557,7 +1557,7 @@
  (name masc_tui_footer)
  (wrapped false)
  (modules masc_tui_footer)
- (libraries masc_tui_message_layout masc_tui_theme masc_tui_words))
+ (libraries masc_tui_message_layout masc_tui_theme masc_tui_value masc_tui_words))
 
 (library
  (name masc_tui_board_selection)
@@ -2288,7 +2288,7 @@
  (wrapped false)
  (modules masc_tui_home)
  (libraries masc_tui_credential_preparation masc_tui_types masc_tui_ask_projection masc_tui_approvals_model masc_tui_ansi masc_tui_agenda
-  masc_tui_message_layout masc_tui_config masc_tui_health_section masc.keeper_registry masc masc_tui_scroll))
+  masc_tui_message_layout masc_tui_config masc_tui_health_section masc.keeper_registry masc masc_tui_scroll masc_tui_value))
 
 ; Which list the move keys walk on the surface on screen (RFC
 ; tui-one-screen-grammar section 3.1), outside the executable so a test links it.
@@ -2342,7 +2342,7 @@
  (modules masc_tui_resource_document)
  (libraries masc_tui_scroll masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_reading masc_tui_markdown masc_tui_detail_reading masc_tui_pick_list masc_tui_artifact_html masc_tui_artifact_html_rows masc_tui_types masc_tui_ansi masc_tui_message_layout masc_tui_text_block
   masc_tui_artifact_checks masc_tui_artifact_share_pending masc_tui_resource_catalog masc_tui_mcp masc_tui_resource_images
-  masc_tui_markdown_theme masc_tui_roster_pane masc_tui_theme masc_tui_terminal_palette masc masc.config yojson))
+  masc_tui_markdown_theme masc_tui_roster_pane masc_tui_theme masc_tui_terminal_palette masc_tui_value masc masc.config yojson))
 
 (library
  (name masc_tui_surface_search)
@@ -2439,7 +2439,7 @@
  (modules masc_tui_exact_activity)
  (libraries masc.runtime masc.runtime_toml_namespace otoml masc.toml_line_editor
   masc_tui_activity_notice masc_tui_page_line masc_tui_runtime_config_edit
-  masc_tui_runtime_config_receipt))
+  masc_tui_runtime_config_receipt masc_tui_value))
 
 (library
  (name masc_tui_editor_wire)
@@ -2482,7 +2482,7 @@
  (wrapped false)
  (modules masc_tui_task_document)
  (libraries masc masc_types masc_tui_ansi masc_tui_fetched masc_tui_message_layout
-  masc_tui_text_block masc_tui_tool_detail masc_tui_planning_detail masc_tui_theme masc_tui_link masc_skill_reference yojson))
+  masc_tui_text_block masc_tui_tool_detail masc_tui_planning_detail masc_tui_theme masc_tui_link masc_tui_value masc_skill_reference yojson))
 
 (library
  (name masc_tui_render_tools)
@@ -3089,7 +3089,8 @@
   masc_tui_render_prim masc_tui_rows masc_tui_runtime_account_form
   masc_tui_runtime_config_view masc_tui_scroll masc_tui_terminal_palette
   masc_tui_text_block masc_tui_theme masc_tui_theme_choice masc_tui_types
-  masc_tui_typesafeai_exclusion_form masc_tui_value masc_tui_voice_wizard_session))
+  masc_tui_typesafeai_exclusion_form masc_tui_value masc_tui_voice_wizard_session
+  unix))
 
 ;; The Work screens (Tasks, Goals, Schedules) as a library for the same
 ;; reason: a test draws the three lists and counts the rows each reports.
@@ -3609,6 +3610,7 @@
   masc_tui_message_layout
   masc_tui_portrait_view
   masc_tui_types
+  masc_tui_value
   masc_tui_words
   masc_tui_fetched))
 
@@ -3662,6 +3664,7 @@
   masc_tui_graphics
   masc_tui_image_mosaic
   masc_tui_frame_timing
+  masc_tui_value
   yojson))
 
 (library
@@ -3782,13 +3785,13 @@
  (name masc_tui_identity_model)
  (wrapped false)
  (modules masc_tui_identity_model)
- (libraries masc_tui_ansi masc_tui_frame masc_tui_pick_list masc_tui_message_layout yojson))
+ (libraries masc_tui_ansi masc_tui_frame masc_tui_pick_list masc_tui_message_layout masc_tui_value yojson))
 
 (library
  (name masc_tui_render_identity)
  (wrapped false)
  (modules masc_tui_render_identity)
- (libraries masc_tui_identity_model masc_tui_ansi masc_tui_message_layout masc_tui_theme))
+ (libraries masc_tui_identity_model masc_tui_ansi masc_tui_message_layout masc_tui_theme masc_tui_value))
 
 (library
  (name masc_tui_identity_input)
@@ -3825,7 +3828,7 @@
  (modules masc_tui_machine_activity)
  (libraries masc masc.machine_configuration masc.runtime masc.runtime_toml_namespace
   otoml masc.toml_line_editor masc_tui_activity_notice masc_tui_page_line
-  masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
+  masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_value))
 
 (library
  (name masc_tui_model_form)

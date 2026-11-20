@@ -94,14 +94,57 @@ let board_kind_mark kind =
     body. A reply sends the whole draft as one comment, so its hint drops
     the title convention. A draft taller than the viewport shows its tail,
     where the caret is -- the operator is always writing at the bottom. *)
+let board_write_progress_sheet ~now (state : state) =
+  let spec =
+    match state.board_write with
+    | Board_idle -> None
+    | Board_posting _ ->
+        Some
+          ( "posting"
+          , words state "게시글 등록 중" "Publishing Board post"
+          , Some (words state "서버에서 새 게시글을 저장하고 있습니다" "Saving new post on server") )
+    | Board_commenting _ ->
+        Some
+          ( "commenting"
+          , words state "댓글 등록 중" "Posting comment"
+          , Some (words state "서버에서 댓글을 저장하고 있습니다" "Saving comment on server") )
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"board-write" ~now
+      (Option.map (fun (sig_key, _, _) -> sig_key) spec)
+  in
+  Option.map
+    (fun (_, ps_title, ps_detail) ->
+      { ps_title
+      ; ps_detail
+      ; ps_started_at = started_at
+      ; ps_meter = None
+      ; ps_action_hint = None
+      ; ps_blocking = true
+      })
+    spec
+;;
+
 let render_board_compose (state : state) =
   let (rows, cols) = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let write_sheet = board_write_progress_sheet ~now state in
   let buf = Buffer.create 4096 in
   let draft_content = Buffer.contents state.board_draft in
   let raw_lines = String.split_on_char '\n' draft_content in
   (* What the draft is and where it goes. The keys are the footer's: this
      row carried "Enter: newline  Ctrl-E: $EDITOR" over a footer spelling
      Ctrl-E its own way and not naming Enter at all. *)
+  let compose_detail_started =
+    Masc_tui_types.progress_clock_option state ~slot:"board-detail" ~now
+      (match state.board_compose_reply_to with
+       | Some post_id ->
+           (match Board_detail.view_for state.board_detail ~post_id with
+            | Loading -> Some post_id
+            | Ready _ | Failed _ | Absent -> None)
+       | None -> None)
+  in
   let context_lines =
     match state.board_compose_reply_to with
     | Some post_id ->
@@ -114,7 +157,10 @@ let render_board_compose (state : state) =
                ^ Ansi.reset ^ Terminal_text.preview_line post.bp_body
              ]
          | Loading ->
-             [ unidentified; words state "원문 조회 중" "Loading the original post" ]
+             [ unidentified
+             ; progress_inline ~ko ~now ?started_at:compose_detail_started
+                 (words state "원문 조회 중" "Loading original post")
+             ]
          | Failed detail ->
              [ unidentified
              ; (Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset
@@ -138,7 +184,7 @@ let render_board_compose (state : state) =
         [ words state "첫 줄은 제목, 나머지는 본문 · 게시판: "
             "First line: title · rest: body · hearth: " ^ hearth_label
         ; Board_composer.format_addressing_hint
-            ~ko:(state.ui_language = Lang_ko)
+            ~ko
             ~max_cells:(framed_inner_width cols) addressing
         ]
   in
@@ -149,7 +195,12 @@ let render_board_compose (state : state) =
         ; (match state.board_compose_reply_to with
            | Some _ -> words state "댓글" "reply"
            | None -> words state "새 글" "new post") ]
-      ~readings:[] ~position:None
+      ~readings:
+        (match write_sheet with
+         | None -> []
+         | Some sheet ->
+             [ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title ])
+      ~position:None
   in
   (* Staged files ride the post being written; a comment has no attachment
      wire, so like the hearth they are not named on a reply's pane. *)
@@ -216,10 +267,19 @@ let render_board_compose (state : state) =
   let chrome_top_rows =
     3 + List.length context_lines + error_rows + attachment_rows + attach_input_rows
   in
-  let content_height = max 1 (rows - (chrome_top_rows + 3)) in
+  let raw_content_height = max 1 (rows - (chrome_top_rows + 3)) in
+  let sheet_lines =
+    match write_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:raw_content_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let content_height = max 0 (raw_content_height - List.length sheet_lines) in
   let visible_lines =
     let total = List.length draft_lines in
-    if total > content_height then
+    if content_height = 0 then []
+    else if total > content_height then
       List.filteri
         (fun index _ -> index >= total - content_height)
         draft_lines
@@ -231,6 +291,7 @@ let render_board_compose (state : state) =
   for _ = List.length visible_lines to content_height - 1 do
     box_line buf cols ""
   done;
+  List.iter (box_line buf cols) sheet_lines;
   box_bottom buf cols;
   let footer =
     match state.board_compose_attach_input with
@@ -242,7 +303,13 @@ let render_board_compose (state : state) =
           ; position = None
           }
     | None ->
-        if state.board_compose_armed then
+        if Option.is_some write_sheet then
+          Footer_hints
+            { hints =
+                ui_text state ~ko:"전송 중 · Esc:메뉴" ~en:"Submitting · Esc:menu"
+            ; position = None
+            }
+        else if state.board_compose_armed then
           let menu =
             Masc_tui_keys.board_compose_menu_hints ~lang:state.ui_language
               ~reply:(Option.is_some state.board_compose_reply_to)
@@ -258,7 +325,7 @@ let render_board_compose (state : state) =
             }
   in
   let cursor =
-    if state.board_compose_armed || Option.is_some state.board_compose_attach_input then
+    if Option.is_some write_sheet || state.board_compose_armed || Option.is_some state.board_compose_attach_input then
       Frame_presenter.Hidden
     else
       let (row, column) =
@@ -480,13 +547,47 @@ let render_board_list (state : state) =
      read that failed, "(0)" read as a board with nothing on it. A count
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
+  let now = Unix.gettimeofday () in
+  let write_sheet = board_write_progress_sheet ~now state in
+  let list_loading_started =
+    Masc_tui_types.progress_clock_option state ~slot:"board-list" ~now
+      (if pending || observation = Masc_tui_fetched.Loading then Some "loading" else None)
+  in
+  let progress_sheet =
+    match write_sheet with
+    | Some _ as s -> s
+    | None ->
+        if count = 0 && (pending || observation = Masc_tui_fetched.Loading) then
+          Some
+            { ps_title = words state "게시글 목록 읽는 중" "Loading Board posts"
+            ; ps_detail =
+                Option.map
+                  (fun h -> (if ko then "게시판:" else "hearth:") ^ Terminal_text.single_line h)
+                  query.bq_hearth
+            ; ps_started_at = list_loading_started
+            ; ps_meter = None
+            ; ps_action_hint = None
+            ; ps_blocking = false
+            }
+        else None
+  in
   let holding = board_census_holding state ~hearth:query.bq_hearth in
   let header =
     here_row ~cols state ~path:[ board_step state ]
       ~readings:
-        [ (match Masc_tui_fetched.value observation with
-           | Some _ -> ""
-           | None -> if pending then (words state "글 조회 중" "reading posts") else here_missing_reading state ~error:list_error)
+        [ (match write_sheet, Masc_tui_fetched.value observation with
+           | Some sheet, _ ->
+               progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+           | None, Some _ ->
+               if pending then
+                 progress_inline ~ko ~now ?started_at:list_loading_started
+                   (words state "글 갱신 중" "refreshing posts")
+               else ""
+           | None, None ->
+               if pending || observation = Masc_tui_fetched.Loading then
+                 progress_inline ~ko ~now ?started_at:list_loading_started
+                   (words state "글 조회 중" "reading posts")
+               else here_missing_reading state ~error:list_error)
         ; hearth ]
       ~position:
         (match Masc_tui_fetched.value observation with
@@ -505,7 +606,7 @@ let render_board_list (state : state) =
   (* The frame, its fill and the footer are the contract's: this surface
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"board-list"
+  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"board-list"
     ~title:header ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false state.view)
     ~body:(fun ~budget c ->
       (* Every post still occupies one row. Count the headings drawn above
@@ -536,11 +637,19 @@ let render_board_list (state : state) =
         (match observation with
          | Masc_tui_fetched.Failed _ | Stale _ -> Option.iter render_list_error list_error
          | Absent -> c.push (Ansi.dim ^ page_unread_note ~ko:(state.ui_language = Lang_ko) ^ Ansi.reset)
-         | Loading -> c.push (Ansi.dim ^ (words state "  (글 조회 중)" "  (reading Board posts)") ^ Ansi.reset)
-         | Ready _ -> c.push (Ansi.dim
-             ^ (if pending then (words state "  (이전 목록은 비어 있음 · 글 조회 중)" "  (last listing empty; reading posts)")
-                else if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미조회)" "  (last listing empty; requested query not read)")
-                else (words state "  (게시글 없음)" "  (no board posts)")) ^ Ansi.reset))
+         | Loading ->
+             c.push
+               ("  " ^ progress_inline ~ko ~now ?started_at:list_loading_started
+                  (words state "글 조회 중" "Reading Board posts"))
+         | Ready _ ->
+             if pending then
+               c.push
+                 ("  " ^ progress_inline ~ko ~now ?started_at:list_loading_started
+                    (words state "이전 목록은 비어 있음 · 글 조회 중" "Last listing empty · reading posts"))
+             else
+               c.push (Ansi.dim
+                 ^ (if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미조회)" "  (last listing empty; requested query not read)")
+                    else (words state "  (게시글 없음)" "  (no board posts)")) ^ Ansi.reset))
       else begin
         Option.iter render_list_error list_error;
         let error_rows = if Option.is_some list_error then 1 else 0 in
@@ -1007,8 +1116,10 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
             [ Board_read_layout.Thread_note
                 (Ansi.dim ^ (words state "  상세 미조회" "  Board detail not read") ^ Ansi.reset) ]
         | Board_detail.Loading ->
+            let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
             [ Board_read_layout.Thread_note
-                (Ansi.dim ^ (words state "  상세 조회 중" "  Loading Board detail") ^ Ansi.reset) ]
+                (Theme.info () ^ "  " ^ under_way ^ " "
+                 ^ words state "상세 조회 중" "Loading Board detail" ^ Ansi.reset) ]
         | Board_detail.Failed error ->
             [ Board_read_layout.Thread_note
                 ((Theme.bad ()) ^ "  "
@@ -1142,8 +1253,44 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
     | Board_detail.Ready (_, comments, _) -> List.length comments
     | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ -> 0
   in
-  let content_rows =
-    max 0 (rows - if Option.is_some state.board_attachment_status then 1 else 0) in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let detail_started =
+    Masc_tui_types.progress_clock_option state ~slot:"board-detail" ~now
+      (match detail with
+       | Board_detail.Loading -> Some post.bp_id
+       | Board_detail.Absent | Board_detail.Ready _ | Board_detail.Failed _ -> None)
+  in
+  let write_sheet = board_write_progress_sheet ~now state in
+  let active_sheet =
+    match write_sheet with
+    | Some _ as s -> s
+    | None ->
+        (match detail with
+         | Board_detail.Loading ->
+             Some
+               { ps_title = words state "게시글 상세 조회 중" "Loading Board detail"
+               ; ps_detail = Some (Terminal_text.single_line post.bp_title)
+               ; ps_started_at = detail_started
+               ; ps_meter = None
+               ; ps_action_hint = Some (words state "Esc:목록" "Esc:back")
+               ; ps_blocking = false
+               }
+         | Board_detail.Absent | Board_detail.Ready _ | Board_detail.Failed _ -> None)
+  in
+  let attach_rows = if Option.is_some state.board_attachment_status then 1 else 0 in
+  let raw_content_rows = max 0 (rows - attach_rows) in
+  let sheet_avail =
+    max 0 (raw_content_rows - Layout.board_read_box_rows - Layout.board_read_footer_rows)
+  in
+  let sheet_lines =
+    match active_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:sheet_avail
+          ~width:(framed_inner_width cols) sheet
+  in
+  let content_rows = max 0 (raw_content_rows - List.length sheet_lines) in
   (* [board_read_allocation] and [board_read_side_allocation] share field
      names but are different record types, so this match cannot return one
      of them -- only the scroll and the two drawn-row counts survive it. *)
@@ -1209,6 +1356,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
        box_line_styled buf cols ~style:(Theme.recede ())
          (Printf.sprintf "  %s" (fit_width status (framed_inner_width cols - 2)))
    | None -> ());
+  List.iter (box_line buf cols) sheet_lines;
   box_bottom buf cols;
   box_top outer cols;
   box_line outer cols (header ~position);

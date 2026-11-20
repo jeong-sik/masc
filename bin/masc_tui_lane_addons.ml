@@ -133,7 +133,7 @@ let initial = { installer=None;package_directory=None;subscription_panel=None;ev
    reading a Hangul character back into the Latin key a Korean input method
    replaced (Masc_tui_key_ime), so it does not restate the three. *)
 let text_entry_open view =
-  Option.is_some view.installer
+  Option.exists Masc_tui_lane_installer.text_entry_open view.installer
   || (match view.action_menu with
       | Some { form = Some _; _ } -> true
       | Some _ | None -> false)

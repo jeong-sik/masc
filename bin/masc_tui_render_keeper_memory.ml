@@ -7,6 +7,7 @@ module Table = Masc_tui_table
 module Card = Masc_tui_card
 
 let quiet text = Theme.recede () ^ text ^ Ansi.reset
+let info text = Theme.info () ^ text ^ Ansi.reset
 let warning text = Theme.warn () ^ text ^ Ansi.reset
 let clean = Terminal_text.single_line
 let age ~now at = Option.value (Layout.age_text ~now ~since:at) ~default:"—"
@@ -48,7 +49,9 @@ let selected_event state keeper_name =
 
 let observation_notes ~ko label = function
   | Fetched.Absent -> [quiet (label ^ if ko then " · 미조회" else " · not read")]
-  | Fetched.Loading -> [quiet (label ^ if ko then " · 읽는 중" else " · loading")]
+  | Fetched.Loading ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      [info (under_way ^ " " ^ label ^ if ko then " · 읽는 중" else " · loading")]
   | Fetched.Ready _ -> []
   | Fetched.Failed reason -> [warning (label ^ " · " ^ clean reason)]
   | Fetched.Stale (_, reason) ->

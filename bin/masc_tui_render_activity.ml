@@ -335,33 +335,50 @@ let render_system_logs (state : state) =
   in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
   report_drawn_list System_log_rows ~height:content_height;
+  let empty_page =
+    empty_page_of ~snapshot:(system_logs_page state).lp_snapshot
+      ~error:(system_logs_page state).lp_error
+  in
+  let stream_loading =
+    total_entries = 0 && empty_page = Page_unread && Option.is_some state.system_log_stream
+  in
+  let stream_now = Unix.gettimeofday () in
+  let stream_started =
+    Masc_tui_types.progress_clock_option state ~slot:"system-logs-stream" ~now:stream_now
+      (if stream_loading then Some "opening" else None)
+  in
   if total_entries = 0 then begin
-    let empty =
-      match
-        empty_page_of ~snapshot:(system_logs_page state).lp_snapshot ~error:(system_logs_page state).lp_error
-      with
+    (match empty_page with
       (* [empty_page_of] returns [Page_failed] for an error with no snapshot
          and for an error over one, so a note about the title's count is true
          only in the second: with no snapshot the header draws no count at
          all and the note pointed at a row that is not on the screen. The
          shared note holds in both, and the staleness is already said twice
          above -- by the badge and by the error row this listing draws. *)
-      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
+      | Page_failed ->
+          box_line_styled buf cols ~style:(Theme.recede ()) (page_failed_note ~ko:(state.ui_language = Lang_ko))
+      | Page_unread when Option.is_some state.system_log_stream ->
+          let ko = state.ui_language = Lang_ko in
+          box_line buf cols
+            ("  " ^ progress_inline ~ko ~now:stream_now ?started_at:stream_started
+               (ui_text state ~ko:"시스템 로그 스트림 읽는 중" ~en:"reading system log stream"))
       | Page_unread ->
           (* The server page reads through a stream that stays open while the
              page is on screen, and its first frame is the first answer. *)
-          page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:(Option.is_some state.system_log_stream)
+          box_line_styled buf cols ~style:(Theme.recede ())
+            (page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:false)
       | Page_empty when loaded_entries > 0 ->
-          ui_text state ~ko:"  (지금 분류 필터에 맞는 로그 줄 없음)"
-            ~en:"  (no entries match the current category filter)"
-      | Page_empty -> ui_text state ~ko:"  (로그 줄 없음)" ~en:"  (no entries)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+          box_line_styled buf cols ~style:(Theme.recede ())
+            (ui_text state ~ko:"  (지금 분류 필터에 맞는 로그 줄 없음)"
+               ~en:"  (no entries match the current category filter)")
+      | Page_empty ->
+          box_line_styled buf cols ~style:(Theme.recede ())
+            (ui_text state ~ko:"  (로그 줄 없음)" ~en:"  (no entries)"));
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
   end
-  else
+  else begin
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
       match Rows.at entries_window idx with
@@ -399,7 +416,8 @@ let render_system_logs (state : state) =
           if is_selected then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
           else box_line buf cols line
-    done;
+    done
+  end;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line_keys state ~max_cells:cols
@@ -435,16 +453,26 @@ let render_keeper_calls (state : state) =
       ~path:[ keeper_name; ui_text state ~ko:"호출" ~en:"calls" ]
       ~readings ~position
   in
-  let header =
-    match state.keeper_calls with
-    | Some snapshot when state.keeper_calls_loading ->
-        heading
-          ~readings:
-            [ count_reading state Masc_tui_value.Count.Call
-                (List.length snapshot.Masc.Tui_decode.kcs_entries)
-            ; ui_text state ~ko:"다시 읽는 중" ~en:"refreshing" ]
-    | None when state.keeper_calls_loading ->
-        heading ~readings:[ ui_text state ~ko:"읽는 중" ~en:"loading" ]
+    let ko = state.ui_language = Lang_ko in
+    let now = Unix.gettimeofday () in
+    let calls_started =
+      Masc_tui_types.progress_clock_option state ~slot:"keeper-calls" ~now
+        (if state.keeper_calls_loading then Some keeper_name else None)
+    in
+    let header =
+      match state.keeper_calls with
+      | Some snapshot when state.keeper_calls_loading ->
+          heading
+            ~readings:
+              [ count_reading state Masc_tui_value.Count.Call
+                  (List.length snapshot.Masc.Tui_decode.kcs_entries)
+              ; progress_inline ~ko ~now ?started_at:calls_started
+                  (ui_text state ~ko:"다시 읽는 중" ~en:"refreshing") ]
+      | None when state.keeper_calls_loading ->
+          heading
+            ~readings:
+              [ progress_inline ~ko ~now ?started_at:calls_started
+                  (ui_text state ~ko:"읽는 중" ~en:"loading") ]
     | None ->
         heading
           ~readings:
@@ -651,16 +679,18 @@ let render_keeper_calls (state : state) =
   let max_scroll = max 0 (total_rows - content_height) in
   let scroll = max 0 (min state.keeper_calls_scroll max_scroll) in
   if shown = 0 then begin
-    let empty =
-      if state.keeper_calls_loading && Option.is_none state.keeper_calls then
-        ui_text state ~ko:"  (호출 기록 조회 중)" ~en:"  (loading exact call records)"
-      else
-      match (state.keeper_calls, state.keeper_calls_error) with
-      | _, Some _ -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | None, None -> page_unread_note ~ko:(state.ui_language = Lang_ko)
-      | Some _, None -> ui_text state ~ko:"  (기록된 호출 없음)" ~en:"  (no calls recorded)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    (if state.keeper_calls_loading && Option.is_none state.keeper_calls then
+       box_line buf cols
+         ("  " ^ progress_inline ~ko ~now ?started_at:calls_started
+            (ui_text state ~ko:"호출 기록 조회 중" ~en:"loading exact call records"))
+     else
+       let empty =
+         match (state.keeper_calls, state.keeper_calls_error) with
+         | _, Some _ -> page_failed_note ~ko:(state.ui_language = Lang_ko)
+         | None, None -> page_unread_note ~ko:(state.ui_language = Lang_ko)
+         | Some _, None -> ui_text state ~ko:"  (기록된 호출 없음)" ~en:"  (no calls recorded)"
+       in
+       box_line_styled buf cols ~style:(Theme.recede ()) empty);
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -830,14 +860,16 @@ let acting_notices (state : state) ~trace_unavailable =
   let feed =
     match state.observer with
     | Observer_live _ -> None
-    | Observer_off -> Some (ui_text state ~ko:"수신 꺼짐" ~en:"Feed off" ^ retained)
-    | Observer_opening -> Some (ui_text state ~ko:"수신 연결 중" ~en:"Feed opening" ^ retained)
+    | Observer_off -> Some (Theme.warn (), ui_text state ~ko:"수신 꺼짐" ~en:"Feed off" ^ retained)
+    | Observer_opening ->
+        let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+        Some (Theme.info (), under_way ^ " " ^ ui_text state ~ko:"수신 연결 중" ~en:"Feed opening" ^ retained)
     | Observer_closed_after_live { events; reason; _ } ->
-        Some (Printf.sprintf "%s %d%s · %s"
+        Some (Theme.warn (), Printf.sprintf "%s %d%s · %s"
           (ui_text state ~ko:"수신 닫힘" ~en:"Feed closed") events retained
           (Terminal_text.single_line reason))
     | Observer_closed_before_answer { reason; _ } ->
-        Some (ui_text state ~ko:"수신 시작 실패" ~en:"Feed failed to open"
+        Some (Theme.warn (), ui_text state ~ko:"수신 시작 실패" ~en:"Feed failed to open"
           ^ retained ^ " · " ^ Terminal_text.single_line reason)
   in
   let dropped =
@@ -884,7 +916,7 @@ let acting_notices (state : state) ~trace_unavailable =
          trace_unavailable)
   in
   List.filter_map Fun.id
-    [ Option.map warning feed; Option.map warning dropped; Option.map warning undecodable
+    [ feed; Option.map warning dropped; Option.map warning undecodable
     ; Option.map warning unseen; Option.map warning replay; trace ]
 
 let acting_content_height ~rows ~notices =
@@ -1074,32 +1106,46 @@ let render_acting (state : state) =
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let feed_started =
+    Masc_tui_types.progress_clock_option state ~slot:"acting-feed" ~now
+      (match state.observer with
+       | Observer_opening -> Some "opening"
+       | Observer_off | Observer_live _ | Observer_closed_after_live _
+       | Observer_closed_before_answer _ -> None)
+  in
   if shown = 0 then begin
     let nothing_under_filter =
       ui_text state ~ko:"  (이 필터에 해당하는 것 없음 · f 로 전체 보기)"
         ~en:"  (nothing under this filter; f shows everything)"
     in
-    let empty =
-      match state.observer with
-      | Observer_off | Observer_opening ->
-          ui_text state ~ko:"  (아직 이벤트 없음: 피드가 열리지 않음)"
-            ~en:"  (no events yet: the feed is not open)"
-      | Observer_live _ ->
-          if held = 0 then
-            ui_text state ~ko:"  (아직 이벤트 없음)" ~en:"  (no events yet)"
-          else nothing_under_filter
-      | Observer_closed_after_live _ ->
-          if held = 0 then
-            ui_text state ~ko:"  (이벤트가 오기 전에 피드가 닫힘)"
-              ~en:"  (the feed closed before any event arrived)"
-          else nothing_under_filter
-      | Observer_closed_before_answer _ ->
-          if held = 0 then
-            ui_text state ~ko:"  (아직 이벤트 없음: 피드를 열지 못함)"
-              ~en:"  (no events yet: the feed failed to open)"
-          else nothing_under_filter
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    (match state.observer with
+     | Observer_opening ->
+         box_line buf cols
+           ("  " ^ progress_inline ~ko ~now ?started_at:feed_started
+              (ui_text state ~ko:"실시간 이벤트 피드 연결 중" ~en:"connecting to live event feed"))
+     | Observer_off ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (ui_text state ~ko:"  (아직 이벤트 없음: 피드가 열리지 않음)"
+              ~en:"  (no events yet: the feed is not open)")
+     | Observer_live _ ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (if held = 0 then
+              ui_text state ~ko:"  (아직 이벤트 없음)" ~en:"  (no events yet)"
+            else nothing_under_filter)
+     | Observer_closed_after_live _ ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (if held = 0 then
+              ui_text state ~ko:"  (이벤트가 오기 전에 피드가 닫힘)"
+                ~en:"  (the feed closed before any event arrived)"
+            else nothing_under_filter)
+     | Observer_closed_before_answer _ ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (if held = 0 then
+              ui_text state ~ko:"  (아직 이벤트 없음: 피드를 열지 못함)"
+                ~en:"  (no events yet: the feed failed to open)"
+            else nothing_under_filter));
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done

@@ -134,7 +134,7 @@ let audio_temp_suffix request =
     dashboard bearer.
 
     Input audio is a transient temp file registered with the Eio switch for
-    cleanup on every exit path; nothing is persisted (unlike RFC-0235 output
+    cleanup on every exit path; nothing is persisted (unlike TTS output
     clips, which are SSOT chat records). *)
 let handle_transcribe _state request reqd body =
   if String.length body = 0 then

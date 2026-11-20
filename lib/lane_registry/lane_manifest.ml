@@ -18,6 +18,8 @@ let purpose : Lane_id.builtin -> string = function
     "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights."
   | Lane_id.Exact Standalone_lane.Librarian_memory ->
     "Proposes how one Keeper's Memory changes; that Keeper's writer commits the answer in one record."
+  | Lane_id.Exact Standalone_lane.Workspace_memory_curator ->
+    "Sorts new Keeper Memory facts into World Memory claims and writes the World Memory briefing."
   | Lane_id.Browser Browser_lane.Lane_name.Live ->
     "Reads and drives tabs in the operator's own browser, through the browser-lane extension \
      and host."

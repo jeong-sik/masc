@@ -150,6 +150,23 @@
       }
     },
     {
+      "id": "exact/workspace_memory_curator",
+      "label": "Workspace Memory Curator",
+      "purpose": "Sorts new Keeper Memory facts into World Memory claims and writes the World Memory briefing.",
+      "ui_category": "memory_judgment",
+      "selection": {
+        "kind": "exact",
+        "lane_id": "workspace_memory_curator"
+      },
+      "state": {
+        "kind": "exact",
+        "configuration": {
+          "kind": "unconfigured",
+          "detail": "exact-output lane \"workspace_memory_curator\" is not configured"
+        }
+      }
+    },
+    {
       "id": "browser/live",
       "label": "Live browser",
       "purpose": "Browser backend observation.",
@@ -420,6 +437,37 @@
         "cli_slots": [],
         "dropped_slots": [],
         "admission_error": "exact-output lane \"librarian_memory\" is not configured",
+        "status": "unavailable",
+        "retained_run_count": 0,
+        "running_count": 0,
+        "succeeded_count": 0,
+        "failed_count": 0,
+        "cancelled_count": 0,
+        "last_started_at": null,
+        "last_terminal_at": null,
+        "last_outcome": null,
+        "p50_elapsed_s": null,
+        "selected_slots": [],
+        "runs_without_slot": {
+          "vendor_system_one": 0,
+          "server_restarted": 0,
+          "no_slot": 0
+        }
+      },
+      {
+        "lane_id": "workspace_memory_curator",
+        "label": "Workspace Memory Curator",
+        "purpose": "Sorts new Keeper Memory facts into World Memory claims and writes the World Memory briefing.",
+        "required": false,
+        "observation_only": true,
+        "configured": false,
+        "configuration_state": "unconfigured",
+        "declared_slots": [],
+        "declared_cli_slots": [],
+        "admitted_slots": [],
+        "cli_slots": [],
+        "dropped_slots": [],
+        "admission_error": "exact-output lane \"workspace_memory_curator\" is not configured",
         "status": "unavailable",
         "retained_run_count": 0,
         "running_count": 0,

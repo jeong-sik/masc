@@ -1247,7 +1247,8 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         match exact_lane with
         | Runtime.Verifier -> true
         | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
-        | Runtime.Candle_appraiser | Runtime.Librarian_memory -> false
+        | Runtime.Candle_appraiser | Runtime.Librarian_memory
+        | Runtime.Workspace_memory_curator -> false
       in
       let expected =
         if is_verifier && not judges
@@ -1276,7 +1277,8 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
       (List.filter
          (function
-           | Runtime.Candle_appraiser | Runtime.Librarian_memory -> false
+           | Runtime.Candle_appraiser | Runtime.Librarian_memory
+           | Runtime.Workspace_memory_curator -> false
            | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
            | Runtime.Verifier -> true)
          Standalone_lane.all);
@@ -1288,6 +1290,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
               config.exact_output_lane_decls))
       [ Standalone_lane.Candle_appraiser, "Candle appraisal"
       ; Standalone_lane.Librarian_memory, "The Librarian's Memory lane"
+      ; Standalone_lane.Workspace_memory_curator, "The World Memory curator's lane"
       ]
 ;;
 

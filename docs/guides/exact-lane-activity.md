@@ -17,8 +17,8 @@ requires at least one candidate and the usual admission checks. Malformed or
 duplicate candidates remain configuration errors even when off.
 
 The existing Required lanes, Board Attention and HITL auto-judge, cannot be
-disabled. Loading or saving such a declaration is refused. Librarian, Workspace
-Curator, Verifier and Candle Appraiser are Optional.
+disabled. Loading or saving such a declaration is refused. Librarian, Librarian
+Memory, Workspace Memory Curator, Verifier and Candle Appraiser are Optional.
 
 Save through the existing runtime TOML editor. Its revision check, validation
 and commit receipt still apply. A saved file alone does not establish that the
@@ -44,8 +44,9 @@ not an atomic census of all processes. The inventory read never starts or stops
 work.
 
 The TUI and Web provide the activity drafts described below. Publishing an
-enabled Workspace Curator declaration wakes its parked owner to reconsider
-retained facts without another memory commit or manual request. First registry
+enabled `workspace_memory_curator` declaration wakes the World Memory curator's
+parked owner to reconsider retained facts without another memory commit or
+manual request. A `librarian_memory` declaration does not wake it. First registry
 publication does the same. Work deferred while a configuration replacement
 fenced registry access is reconsidered when that fence closes, including a
 failed write that leaves the previous registry serving. The owner rereads

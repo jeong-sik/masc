@@ -671,6 +671,9 @@ type exact_lane = Standalone_lane.t =
       (** The lane the Librarian asks through for Memory changes
           ({!Librarian_memory_lane}). Not the working-context pass's
           [librarian_exact]. *)
+  | Workspace_memory_curator
+      (** The lane the World Memory curator asks through. Declaring
+          [librarian_memory] does not start the curator. *)
 
 val verifier_runtime_admission : t -> (unit, string) result
 (** The one answer to "can this runtime judge a completion review?", used by

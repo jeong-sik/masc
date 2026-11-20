@@ -6470,6 +6470,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ; standalone_lane_json ~required:false "librarian_memory" "Librarian Memory"
+            ; standalone_lane_json ~required:false "workspace_memory_curator" "Workspace Memory Curator"
             ] )
       ]
   in
@@ -6555,6 +6556,7 @@ let test_decode_standalone_lane_keeps_the_run_start () =
               "verifier_exact" "Verifier"
           ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
           ; standalone_lane_json ~required:false "librarian_memory" "Librarian Memory"
+          ; standalone_lane_json ~required:false "workspace_memory_curator" "Workspace Memory Curator"
           ]
       ]
   in
@@ -6601,6 +6603,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         "verifier_exact" "Verifier"
     ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
     ; standalone_lane_json ~required:false "librarian_memory" "Librarian Memory"
+    ; standalone_lane_json ~required:false "workspace_memory_curator" "Workspace Memory Curator"
     ]
   in
   let json =
@@ -6660,6 +6663,7 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ; standalone_lane_json ~required:false "librarian_memory" "Librarian Memory"
+            ; standalone_lane_json ~required:false "workspace_memory_curator" "Workspace Memory Curator"
             ] )
       ]
   in

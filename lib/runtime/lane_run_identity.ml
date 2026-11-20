@@ -6,6 +6,7 @@ type t =
   | Verifier
   | Candle_appraiser
   | Librarian_memory
+  | Workspace_memory_curator
 [@@deriving enumerate]
 
 let to_id = function
@@ -16,6 +17,7 @@ let to_id = function
   | Verifier -> "verifier_exact"
   | Candle_appraiser -> "candle_appraiser"
   | Librarian_memory -> "librarian_memory"
+  | Workspace_memory_curator -> "workspace_memory_curator"
 ;;
 
 let of_id id = List.find_opt (fun lane -> String.equal (to_id lane) id) all
@@ -29,6 +31,7 @@ let label = function
   | Verifier -> "Verifier"
   | Candle_appraiser -> "Candle Appraiser"
   | Librarian_memory -> "Librarian Memory"
+  | Workspace_memory_curator -> "Workspace Memory Curator"
 ;;
 
 let keeps_run_records = function
@@ -38,5 +41,5 @@ let keeps_run_records = function
   | Workspace_curator
   | Verifier
   | Candle_appraiser -> true
-  | Librarian_memory -> false
+  | Librarian_memory | Workspace_memory_curator -> false
 ;;

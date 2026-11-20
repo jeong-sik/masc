@@ -94,8 +94,8 @@ describe('common Lane inventory wire', () => {
   })
   it('reads the actual TUI fixture contract with every built-in and exact observation', () => {
     const parsed = parseLaneInventory(fixture)
-    expect(parsed.rows).toHaveLength(9)
-    expect(parsed.exact_snapshot.lanes).toHaveLength(6)
+    expect(parsed.rows).toHaveLength(10)
+    expect(parsed.exact_snapshot.lanes).toHaveLength(7)
   })
   it('keeps disabled candidates and running observations, rejecting contradictory activity', () => {
     const raw = structuredClone(fixture)

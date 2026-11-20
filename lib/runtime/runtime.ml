@@ -44,6 +44,7 @@ type exact_lane = Standalone_lane.t =
   | Verifier
   | Candle_appraiser
   | Librarian_memory
+  | Workspace_memory_curator
 
 (* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
    every reference-list builder in this file names one. *)
@@ -101,7 +102,7 @@ let exact_lane_reference ~owner ~key id =
    on every pass, with nothing at load saying why. *)
 let slots_name_runtimes : exact_lane -> bool = function
   | Verifier | Librarian_memory -> true
-  | Librarian | Hitl_auto_judge | Board_attention | Candle_appraiser -> false
+  | Librarian | Hitl_auto_judge | Board_attention | Candle_appraiser | Workspace_memory_curator -> false
 ;;
 
 let runtime_slot_references (decls : Runtime_schema.exact_output_lane_decl list) =
@@ -1303,7 +1304,8 @@ let detect_librarian_keeper_seat_overlaps
           ( Standalone_lane.Hitl_auto_judge
           | Standalone_lane.Board_attention
           | Standalone_lane.Verifier
-          | Standalone_lane.Candle_appraiser )
+          | Standalone_lane.Candle_appraiser
+          | Standalone_lane.Workspace_memory_curator )
       | Runtime_schema.Addon _ -> None)
   in
   let overlaps_rev = ref [] in
@@ -4153,7 +4155,8 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
       | Verifier, Ok () -> slots, cli_slots
       | Verifier, Error _ ->
         judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-      | (Librarian | Hitl_auto_judge | Board_attention | Candle_appraiser | Librarian_memory), _ ->
+      | ( Librarian | Hitl_auto_judge | Board_attention | Candle_appraiser | Librarian_memory
+        | Workspace_memory_curator ), _ ->
         slots, cli_slots
     in
     let next =
@@ -4169,13 +4172,14 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
             in
             Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
         next
-        (* Candle appraisal and the Librarian's Memory lane are explicitly
-           configured, not enabled by provisioning a general-purpose runtime:
-           the operator declares the Librarian's slots and their windows
-           before the cut. *)
+        (* Candle appraisal, the Librarian's Memory lane and the World Memory
+           curator's lane are explicitly configured, not enabled by
+           provisioning a general-purpose runtime: the operator declares the
+           Librarian's slots and their windows before the cut, and a curator
+           table is what starts the curator's model calls. *)
         (List.filter
            (function
-             | Candle_appraiser | Librarian_memory -> false
+             | Candle_appraiser | Librarian_memory | Workspace_memory_curator -> false
              | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
            Standalone_lane.all)
     in
@@ -4615,7 +4619,8 @@ let requirement_of_exact_lane
   | Hitl_auto_judge
   | Board_attention
   | Candle_appraiser
-  | Librarian_memory ->
+  | Librarian_memory
+  | Workspace_memory_curator ->
     { window = Unbounded_or_unknown
     ; overflow = Truncation_acceptable
     ; verdict = Json_syntax { schema }

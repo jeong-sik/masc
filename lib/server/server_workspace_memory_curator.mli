@@ -1,9 +1,10 @@
 (** One serialized in-process Workspace Memory Curator owner per physical
     workspace.
 
-    Drains pending Keeper ordinary and source-bound facts through
-    {!Librarian_memory_lane} via {!Agent_core.Exact_output.execute_flow_once}
-    (with declared CLI fallback), writes two-phase {!Workspace_memory_log}
+    Drains pending Keeper ordinary and source-bound facts through its own
+    lane, [Standalone_lane.Workspace_memory_curator], via
+    {!Agent_core.Exact_output.execute_flow_once} (with declared CLI
+    fallback), writes two-phase {!Workspace_memory_log}
     commits, updates {!Workspace_memory_ledger} and
     {!Workspace_memory_briefing}, and notifies subscribed MCP clients via
     {!Mcp_server_eio_resource.notify_world_memory_updated}. *)
@@ -11,8 +12,10 @@
 val start : sw:Eio.Switch.t -> config:Workspace.config -> unit
 (** Start one serialized daemon owner for the resolved physical workspace
     under [sw], recover any incomplete {!Workspace_memory_log} batches, and
-    subscribe to Keeper memory commits and {!Librarian_memory_lane} registry
-    updates. No-op when an owner for that physical workspace already runs. *)
+    subscribe to Keeper memory commits and to registry updates of its own
+    lane. Without a table for that lane the owner asks no model: declaring
+    the Librarian's Memory lane does not start it. No-op when an owner for
+    that physical workspace already runs. *)
 
 val retry_pending_observations : base_path:string -> unit
 (** Wake an existing owner only when its prior pass failed transiently or a

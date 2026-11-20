@@ -260,7 +260,7 @@ let state_json ?observation = function
 let builtin_category = function
   | Exact
       ( Standalone_lane.Librarian | Hitl_auto_judge | Board_attention | Verifier | Candle_appraiser
-      | Librarian_memory ) ->
+      | Librarian_memory | Workspace_memory_curator ) ->
       Some Lane_addon_category.Memory_and_judgment
   | Browser _ -> Some Lane_addon_category.Browser
   | Machine _ -> Some Lane_addon_category.Execution_environment

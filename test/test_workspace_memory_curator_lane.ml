@@ -62,13 +62,15 @@ let ready_summary base_path =
   | Missing | Stale _ -> false
 ;;
 
-let publish_lane base_path urls =
+let curator_lane_id = Standalone_lane.to_id Standalone_lane.Workspace_memory_curator
+
+let publish_lane ?(lane_id = curator_lane_id) base_path urls =
   let slots =
     List.mapi (fun i url -> { F.id = "candidate-" ^ string_of_int i; base_url = url }) urls
   in
   ignore
     (F.publish_registry
-       ~lane_id:Librarian_memory_lane.lane_id
+       ~lane_id
        ~slot_ids:(List.map (fun (s : F.target_fixture) -> s.id) slots)
        (F.resolver_snapshot ~source:base_path slots))
 ;;
@@ -390,6 +392,32 @@ let test_transient_retry_and_idle_barrier () =
         (Curator.request ~base_path = Curator.No_owner)))
 ;;
 
+(* The Librarian's Memory lane is another reader's table (#53982). With only
+   that lane declared, the first pass finds no curator lane and ends without a
+   request. *)
+let test_librarian_memory_lane_starts_no_curator_call () =
+  with_fixture (fun ~sw ~net ~clock ~base_path ~config ->
+    let requests = ref 0 in
+    let server =
+      F.start_server ~sw ~net ~clock
+        (F.Reply_with (fun _ body ->
+           incr requests;
+           `OK, F.openai_response (classify_or_briefing_response body)))
+    in
+    publish_lane ~lane_id:Librarian_memory_lane.lane_id base_path [ server.base_url ];
+    commit_facts ~base_path ~keeper_id:"writer" [ "Only the Librarian's Memory lane is declared" ];
+    Curator.start ~sw ~config;
+    Fun.protect ~finally:(fun () -> Curator.For_testing.stop ~base_path) (fun () ->
+      await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
+      check int "no request reaches the Librarian lane's slot" 0 !requests;
+      let snap =
+        match Curator.For_testing.snapshot ~base_path with
+        | Some s -> s
+        | None -> fail "curator owner missing"
+      in
+      check bool "an undeclared curator lane queues no retry" false snap.observation_retry))
+;;
+
 let test_unentered_restore_submission_is_not_a_call () =
   Eio_main.run (fun _ ->
     let calls_metric = "masc_workspace_curator_restore_calls_per_pass" in
@@ -433,6 +461,10 @@ let () =
             "transient provider failure retries via observation maintenance and stop clears owner"
             `Quick
             test_transient_retry_and_idle_barrier
+        ; test_case
+            "the Librarian's Memory lane alone starts no curator request"
+            `Quick
+            test_librarian_memory_lane_starts_no_curator_call
         ; test_case
             "unentered restore submission records no telemetry call"
             `Quick

@@ -3752,6 +3752,18 @@ let standalone_lane_answer ~ko (lane : standalone_lane) =
           "structured-output generation, not a MASC tool loop; this lane keeps \
            no run records, so no exact Input/Output is retained to open."
     }
+  | Standalone_lane.Workspace_memory_curator ->
+    { sla_output_meaning =
+        t "새 Keeper Memory fact 를 World Memory claim 으로 나눈 분류와 World Memory briefing 글."
+          "the sorting of new Keeper Memory facts into World Memory claims, and the World Memory briefing text."
+    ; sla_evidence =
+        (* [Lane_run_identity.keeps_run_records] is false for this lane. *)
+        t "구조화 출력 생성이며 MASC 도구 루프가 아닙니다. 이 lane 은 실행 기록을 \
+           남기지 않습니다. 반영한 결과는 World Memory 원장과 변경 기록에 있습니다."
+          "structured-output generation, not a MASC tool loop; this lane keeps \
+           no run records. What it committed is in the World Memory ledger and \
+           log."
+    }
   | Standalone_lane.Verifier ->
     { sla_output_meaning =
         t "태스크 완료 또는 목표 증명 판정, 사유, 평가 런타임."
@@ -3869,7 +3881,8 @@ let decode_standalone_lane json =
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
-    | Standalone_lane.Librarian_memory -> Ok None
+    | Standalone_lane.Librarian_memory
+    | Standalone_lane.Workspace_memory_curator -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -6311,7 +6324,8 @@ let decode_librarian_run_page json =
          | Lane_run_identity.Workspace_curator
          | Lane_run_identity.Candle_appraiser
          | Lane_run_identity.Verifier
-         | Lane_run_identity.Librarian_memory -> None)
+         | Lane_run_identity.Librarian_memory
+         | Lane_run_identity.Workspace_memory_curator -> None)
       rows
   in
   let* lrp_next =
@@ -6557,7 +6571,8 @@ let decode_lane_run_gate_judgment ~(lane : Lane_run_identity.t) ~status ~output 
   | Lane_run_identity.Workspace_curator
   | Lane_run_identity.Candle_appraiser
   | Lane_run_identity.Verifier
-  | Lane_run_identity.Librarian_memory -> Ok Lane_run_not_gate_judgment
+  | Lane_run_identity.Librarian_memory
+  | Lane_run_identity.Workspace_memory_curator -> Ok Lane_run_not_gate_judgment
   | Lane_run_identity.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
@@ -7088,7 +7103,8 @@ let decode_lane_run_detail json =
       | Lane_run_identity.Workspace_curator
       | Lane_run_identity.Candle_appraiser
       | Lane_run_identity.Verifier
-      | Lane_run_identity.Librarian_memory ->
+      | Lane_run_identity.Librarian_memory
+      | Lane_run_identity.Workspace_memory_curator ->
         false
     in
     match is_board_attention, answer_succeeded, lrd_output with
@@ -7128,7 +7144,8 @@ let decode_lane_run_detail json =
     | (Lane_run_identity.Board_attention, _) | (Lane_run_identity.Workspace_curator, _)
     | (Lane_run_identity.Verifier, _)
     | (Lane_run_identity.Candle_appraiser, _)
-    | (Lane_run_identity.Librarian_memory, _) -> Ok None
+    | (Lane_run_identity.Librarian_memory, _)
+    | (Lane_run_identity.Workspace_memory_curator, _) -> Ok None
   in
   let* () = match lrd_librarian_preflight, answer_succeeded with
     | Some {lp_generation_path = Generation_not_entered; _}, true ->
@@ -7238,7 +7255,8 @@ let decode_lane_run_detail json =
     | Lane_run_identity.Workspace_curator
     | Lane_run_identity.Candle_appraiser
     | Lane_run_identity.Verifier
-    | Lane_run_identity.Librarian_memory -> decode_judgment ()
+    | Lane_run_identity.Librarian_memory
+    | Lane_run_identity.Workspace_memory_curator -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id

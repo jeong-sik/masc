@@ -16,6 +16,9 @@ type t =
   | Verifier
   | Candle_appraiser
   | Librarian_memory
+  | Workspace_memory_curator
+      (** The lane the World Memory curator asks through. Without a table for
+          it the curator asks no model. *)
 [@@deriving enumerate]
 
 val to_id : t -> string
@@ -45,23 +48,22 @@ val admission_class : t -> Llm_provider.Admission_class.t
     waits only on an account that declares [admission-priority-run-limit].
     This is the one place that says which lanes go first: the verifier's
     reviewer config and every exact flow masc opens read their class here.
-    [Librarian] and [Librarian_memory] use [Background]; [Verifier],
-    [Hitl_auto_judge], [Board_attention], and [Candle_appraiser] use
-    [Standard], reserving [Priority] for interactive chat turns. A background
-    request still receives bounded service while higher classes wait; running
-    requests are not preempted. *)
+    [Librarian], [Librarian_memory] and [Workspace_memory_curator] use [Background];
+    [Verifier], [Hitl_auto_judge], [Board_attention], and [Candle_appraiser]
+    use [Standard], reserving [Priority] for interactive chat turns. A
+    background request still receives bounded service while higher classes
+    wait; running requests are not preempted. *)
 
 type caller_lane =
   | Interactive_chat
   | Standalone of t
-  | Workspace_curator
 
 val admission_class_of_caller : caller_lane -> Llm_provider.Admission_class.t
-(** Closed admission classification across interactive chat, standalone lanes,
-    and workspace curation:
+(** Closed admission classification across interactive chat and standalone
+    lanes:
     - [Interactive_chat] -> [Priority]
     - [Standalone (Verifier | Hitl_auto_judge | Board_attention | Candle_appraiser)] -> [Standard]
-    - [Standalone (Librarian | Librarian_memory) | Workspace_curator] -> [Background] *)
+    - [Standalone (Librarian | Librarian_memory | Workspace_memory_curator)] -> [Background] *)
 
 val required_ids : string list
 (** The {!to_id} of every [Required] lane, in {!all} order: the

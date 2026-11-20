@@ -1420,7 +1420,8 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     | Lane_run_identity.Board_attention
     | Lane_run_identity.Workspace_curator
     | Lane_run_identity.Candle_appraiser
-    | Lane_run_identity.Librarian_memory ->
+    | Lane_run_identity.Librarian_memory
+    | Lane_run_identity.Workspace_memory_curator ->
         Render_schedule.Run_actor_name, text "요청자" "Actor"
   in
   let run_table =

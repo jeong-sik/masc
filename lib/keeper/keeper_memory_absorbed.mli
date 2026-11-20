@@ -1,4 +1,4 @@
-(** Facts the librarian absorbed into a new claim (RFC-0456 §4.2).
+(** Facts the librarian absorbed into a new claim.
 
     A fact a new claim names in [absorbs] leaves the current snapshot because
     the new claim now says it, not because it was wrong. Its row is kept here,

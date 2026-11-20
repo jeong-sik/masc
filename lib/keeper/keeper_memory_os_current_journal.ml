@@ -280,7 +280,7 @@ let journal_holds_receipt_target ~keepers_dir ~keeper_id ~target_revision ~is_ta
    A publication's line and a removal receipt's line are written while the
    publication receipt is still on disk; a row read in that window recovers
    the publication again. The commit notification that follows them, after
-   the locks unwind, announces those (RFC-0487). A removal line written by the
+   the locks unwind, announces those. A removal line written by the
    recovery of a publication that never reached its target follows no commit;
    that recovery announces itself once its locks unwind
    ([recover_publication_with_sync]). *)

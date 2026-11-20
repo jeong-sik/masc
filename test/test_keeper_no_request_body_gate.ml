@@ -513,8 +513,21 @@ streaming = false
     |> Yojson.Safe.from_string in
   check bool "current-turn arguments remain exact on the second HTTP request" true
     (wire_arguments messages "active-call-1" = active_input);
-  check bool "historical arguments go as the original JSON" true
-    (wire_arguments messages "call-demote-1" = historical_input);
+  (* The call ended in an earlier turn, so its arguments go as a reference,
+     as its result does (RFC
+     a-sent-request-prefix-changes-only-when-the-window-moves §3.1). The
+     first request has no ledger and demotes them; the second keeps what
+     the first sent. *)
+  (match Tool_output.normalized_artifact_ref_of_json (wire_arguments messages "call-demote-1") with
+   | Tool_output.Decoded_normalized_artifact_ref reference ->
+     (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+              ~sha256:reference.Tool_output.sha256 with
+      | Ok (Some bytes) ->
+        check bool "the historical arguments' reference reads back the original JSON" true
+          (Yojson.Safe.from_string bytes = historical_input)
+      | Ok None | Error _ -> fail "the historical arguments' blob is not stored")
+   | Tool_output.Not_normalized_artifact_ref | Tool_output.Invalid_normalized_artifact_ref _ ->
+     fail "the historical arguments are not a reference");
   let first_messages = Yojson.Safe.Util.(
     List.hd (Exact_output_fixture.request_bodies server)
     |> Yojson.Safe.from_string |> member "messages" |> to_list) in
@@ -561,7 +574,7 @@ let () =
     [ "actual-dispatch",
       [ test_case "a large request reaches the peer and a refusal moves the lane" `Quick
           test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane
-      ; test_case "historical tool results go as markers and arguments as first sent" `Quick
+      ; test_case "historical tool results and arguments go as references, as first sent" `Quick
           test_historical_tool_results_go_as_markers
       ]
     ]

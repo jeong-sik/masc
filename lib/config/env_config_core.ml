@@ -272,10 +272,9 @@ let normalize_masc_base_path_input path =
   else
     normalized
 
-(* One stat answers each question. Asked as [Sys.file_exists] and then
-   [Sys.is_directory], a path removed between the two raised [Sys_error] out
-   of the caller, the resolution of a config root among them. A path that
-   does not stat, missing or a dangling link, is neither. *)
+(* One stat answers each question. A path that does not stat (missing,
+   removed while a config root resolves, a dangling link) is neither, and
+   nothing is raised to the caller. *)
 let existing_dir path =
   match Sys.is_directory path with
   | is_directory -> is_directory

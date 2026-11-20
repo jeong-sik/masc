@@ -597,9 +597,8 @@ let test_canonical_owner_over_a_symlink_alias () =
           check bool "the alias exists but is not the published owner" true
             (Sys.file_exists alias && not (String.equal alias owner))))))
 
-(* Each kind of path reads as the two checks read it before they took one
-   stat each. A path removed between two checks cannot be made in a case;
-   one stat leaves no second check to fail. *)
+(* What each kind of path reads as: a directory, a file, or neither when the
+   path does not stat. *)
 let test_existing_dir_and_file_read_each_kind_of_path () =
   with_temp_dir "config-existing-kinds" @@ fun root ->
   let directory = Filename.concat root "directory" in

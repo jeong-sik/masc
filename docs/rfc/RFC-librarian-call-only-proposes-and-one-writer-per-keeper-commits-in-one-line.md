@@ -50,8 +50,7 @@ durable Librarian 을 지우고 다시 만든다. 옛 Librarian 의 파일은 �
 
 ## 1. 지금
 
-이력과 그 숫자의 근거는 [연구 기록](../research/2026-11-17-librarian-failure-history.md)에 있다.
-이 설계가 쓰는 측정값은 [근거 폴더](../evidence/research/2026-11-18-librarian-rebuild-design/README.md)에 있다.
+이력과 그 숫자의 근거, 이 설계가 쓰는 측정값은 #53148 에 있다.
 여기에는 결정에 쓰는 것만 옮긴다. 코드 사실은 2026-11-17 과 11-18 의 main 에서 읽었다(`8eb70b2ebece` 부터 `55a024cc280e` 까지). 줄 번호는 읽은 때의 것이다.
 
 ### 1.1 잰 값
@@ -504,7 +503,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 
 - 답은 바뀌는 것만 적는다. 답이 이름 붙이지 않은 fact 는 그대로 남는다.
 - 다시 본 것은 이름으로 적는다(`Seen`). 단위가 Memory 의 fact 와 같은 것을 다시 말했으면, 답은 그 fact 의 이름과 그 단위들을 적는다. claim 은 옮겨 적지 않는다.
-  - 옮겨 적으면 글자가 조금 다른 새 fact 가 생긴다. 옛 반영에서 답이 글로 가리킨 기억 27개 가운데 18개가 입력 기억과 1~19자 달랐다(`docs/research/2026-11-16-librarian-dated-records-and-pass-time.md` §0).
+  - 옮겨 적으면 글자가 조금 다른 새 fact 가 생긴다. 옛 반영에서 답이 글로 가리킨 기억 27개 가운데 18개가 입력 기억과 1~19자 달랐다(연구 문서(#52376) §0).
   - 단위를 하나도 적지 않은 `Seen` 은 질문이 보여 준 Memory 를 되읽은 것이다. 관측이 아니라서 `Schema_violation` 이다.
   - 11-19 운영 Memory 의 fact 3,584개는 모두 `last_seen` 이 `first_seen` 과 같았다. 다시 본 기억이 단단해지는 길이 없었다.
 - 답 전체를 버리는 이유는 `rejection` 넷뿐이다. op 하나의 흠은 그 op 만 반영하지 않고 줄에 적는다(§8.2).

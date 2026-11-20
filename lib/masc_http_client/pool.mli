@@ -1,8 +1,7 @@
 (** RFC-0107 Phase D Connection Pool.
 
     Design rationale lives in [docs/rfc/RFC-0107-phase-d-pool-design.md].
-    Critical findings absorbed from Phase B Prior Art research
-    ([docs/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.md]):
+    Critical findings absorbed from Phase B Prior Art research:
 
     - piaf's [Client.t] is per-endpoint, not multi-host. We build the
       [Host_key -> piaf Client.t queue] layer ourselves on top.

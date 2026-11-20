@@ -797,7 +797,6 @@ Day to day:
   - the rows at `addons/README.md:22-23`;
   - the glossary entry `docs/spec/00-glossary.md:1912-1934` and the `quiz-grader` example at `:1878`;
   - the `quiz-grader` example at `docs/design/lane-addon-v0.md:40`;
-  - the four `docs/evidence/2026-09-30-quiz-*` directories, which only describe the deleted pair.
 - **O2. Name.** Decided: "operator quiz".
 - **O3. Who writes questions.** Decided: not a Keeper. "별도 lane", clarified as "Lane Add-on 안에 Exact Output Lane 이 포함된 스타일". Implemented as the package's `author` lane (K1).
 - **O4. Who grades free text.** Decided: not a Keeper, same words as O3. Implemented as the package's `grade` lane.

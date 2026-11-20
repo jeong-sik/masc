@@ -435,7 +435,6 @@ S1b와 S2의 성능은 roster 응답 크기로 비교한다.
 - RFC-0503: [`RFC-0503-keepers-list-shows-a-failed-last-turn-apart-from-the-activity-now.md`](RFC-0503-keepers-list-shows-a-failed-last-turn-apart-from-the-activity-now.md). 이 RFC 는 §4 의 제외 항목과 §6 의 서버 후속 후보를 이어받는다.
 - RFC-0418: 기억의 나이는 표시 값이고, 다시 관찰한 것은 강도 신호가 아니다.
 - RFC-0480 · RFC-0481: TUI 는 서버가 바뀌었다고 말할 때 읽는다. roster 행은 바뀐 Keeper 만 다시 읽고, 값은 읽는 시각에 따라 바뀌지 않는다.
-- 연구 문서: [`docs/research/2026-11-06-keepers-list-past-now-next.md`](../research/2026-11-06-keepers-list-past-now-next.md)
-- 근거 기록: [`docs/evidence/research/2026-11-06-keepers-list-past-now-next/README.md`](../evidence/research/2026-11-06-keepers-list-past-now-next/README.md)
+- 연구 문서와 근거 기록: #49202
 - 실행 규칙: [`docs/constitution.xml`](../constitution.xml) `<execution_protocol>`, [`docs/guides/NATIVE-GITHUB-STACKS.md`](../guides/NATIVE-GITHUB-STACKS.md)
 - 외부 문서(2026-11-07 확인): [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111.html) §4.2 · §5.1, [Prometheus querying basics](https://prometheus.io/docs/prometheus/latest/querying/basics/) 의 Staleness, [ratatui `Sparkline`](https://docs.rs/ratatui/latest/ratatui/widgets/struct.Sparkline.html)

@@ -41,7 +41,7 @@ implementation_prs: []
 
 ## 2. 앞에서 오래 기다린 시간이 어디에 쓰였나
 
-출처는 `~/me/.masc/tool_calls` 장부이고, 스크립트와 결과는 `docs/evidence/tool-efficiency-1112-2026-11/` 에 있어요(`sleep_waits.py`, 시험 `test_sleep_waits.py`). 결과마다 다시 내는 명령은 그 폴더의 `README.md` 에 있어요. 모양은 명령 글자로 가르는데, 세는 데만 쓰고 제품 규칙이 아니에요.
+출처는 `~/me/.masc/tool_calls` 장부이고, 센 스크립트(`sleep_waits.py`)와 결과는 #51606 에 있어요. 모양은 명령 글자로 가르는데, 세는 데만 쓰고 제품 규칙이 아니에요.
 
 | 모양 | 호출 | 시간 |
 |---|---:|---:|
@@ -64,7 +64,6 @@ implementation_prs: []
 
 - **[사실]** 같은 창에서 `Execute` 는 84,068건이고 `run_in_background` 는 109건(0.13%)이에요. 그 109건은 `wkbl-data` 47, `ocaml-agent-ic` 19, `goo-yang-bong` 12, `code-reviewer-father` 8 등에 몰려 있어요. 60초 이상 앞에서 기다린 호출 중 `run_in_background` 인 것은 정의상 없어요.
 - **[사실]** `sleep`+`gh` 535건의 호출 시간 중앙값은 242초예요(`result-shapes-2026-11-09T07-40-23Z_11-12T07-40-23Z.json` 의 `groups` 에서 `sleep+gh` 의 `median_s`). Keeper 를 가르지 않은 값이고, 리터럴 `sleep` 합이 아니라 호출 시간이에요.
-- **[확인 필요]** Keeper 별로 호출 하나의 리터럴 `sleep` 합이 얼마인지(p10·p50·p90)는 `sleep_waits.py turns` 의 `literal_sleep_s` 가 내요. 이 창의 결과는 아직 커밋되지 않았어요. 장부가 있는 기계에서 `python3 -I docs/evidence/tool-efficiency-1112-2026-11/sleep_waits.py turns 2026-11-09T07:40:23Z 2026-11-12T07:40:23Z ~/me` 를 돌려 `result-turns-2026-11-09T07-40-23Z_11-12T07-40-23Z.json` 에 다시 쓰고 커밋하면, 이 줄에 그 값을 적어요.
 - **[사실]** `keeper-wakes-when-a-pr-check-finishes` §1 은 창 A(11-08T05:40Z~11-11T05:40Z)의 `pr_checks`·`commit_checks` 를 308건, 18.946시간으로 셌어요. 이 글의 Actions run 315건과 check 147건은 창과 분류 규칙이 달라서 합치지 않아요. 같은 장부의 서로 다른 72시간이에요.
 - **[확인 필요]** 반복문 안의 `sleep` 276건(24.6시간)은 횟수를 몰라서 위 「절반 이상」에 들지 못했어요. 그 안에 `gh` 읽기가 얼마나 있는지 이 글은 가르지 않았어요.
 
@@ -182,8 +181,6 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 
 반복 조회는 반복문 안에서 GitHub 를 읽는 호출이에요(`for i in 1 2 …; do gh api …; sleep 30; done`). 2절의 `sleep` 276건(24.6시간) 중 253건(23.17시간, 92%)이에요. 리터럴 `sleep` 합이 호출 시간의 절반 미만이라 2절의 `sleep`+`gh` 535건에 들어가지 않았어요. 둘을 합친 GitHub 대기는 788건, 59.77시간이고 60초 이상 앞에서 기다린 76.8시간의 78%예요(`sleep_waits.py kinds`, 반복 조회는 `is_loop_sleep_gh`). 2절의 36.6시간은 GitHub 대기를 38% 적게 잡았어요.
 
-**[확인 필요]** 반복 조회 253건이 무엇을 읽었는지(Actions run, check run, PR 상태 등)는 `kinds` 의 `loop_sleep_gh_calls_by_what_gh_reads` 가 내요. 이 창의 결과는 아직 커밋되지 않았어요. 장부가 있는 기계에서 `python3 -I docs/evidence/tool-efficiency-1112-2026-11/sleep_waits.py kinds 2026-11-09T07:40:23Z 2026-11-12T07:40:23Z ~/me` 를 돌려 `result-kinds-2026-11-09T07-40-23Z_11-12T07-40-23Z.json` 에 다시 쓰고 커밋하면, 이 줄에 그 값을 적어요.
-
 Keeper 로 가르면 `masc-productor-owner` 는 196건 중 177건이 `autonomous` 예요. `rondo` 는 343건 중 190건이 `direct`, 153건이 `autonomous` 예요.
 
 **[사실]** 그래서 영수증 일정 대기가 줄일 수 있는 GitHub 대기는 최대 297건, 21.43시간(35.8%)이에요. 나머지 64.2%(491건, 38.34시간)는 이 도구를 못 써요.
@@ -195,8 +192,6 @@ Keeper 로 가르면 `masc-productor-owner` 는 196건 중 177건이 `autonomous
 **[사실]** 그 일정은 대기 도구 없이 끝까지 돌았어요. 일정 `sched-827f4693a31d3cd018d752c0e9bbcb02` 는 13:26 KST 에 만들어졌고 본문에 `receipt_key`(`schedule-receipt:` 로 시작하는 값, #51737)가 들어 있어요. run 이 끝나서 due 가 13:41:35 KST(epoch 1794544895)로 당겨졌고 상태는 `succeeded` 예요(`schedules.json`). `e-masc-the-leader` 는 13:51:16 KST 에 `tool_result_ready` 자극을 소비하고 새 턴에 들어갔어요(서버 로그 `turn entry: consumed stimulus … class=tool_result_ready`). 영수증 id 와 자극 id 를 맞춰 보지는 못했어요. 영수증 파일을 찾지 못했어요. 13:41:35 와 13:51:16 사이 9.7분은 그 Keeper 의 앞 턴이 1,389초(`long-turn` 경고) 걸려 13:51:15 에 끝났기 때문이에요.
 
 **[사실]** 이 길은 코드에서 나와요. `Keeper_client_tool_outbox_wake.notify` 는 어떤 실행도 소유하지 않은 영수증(`Unowned_only`)마다 `Tool_result_ready`(urgency `Immediate`) 자극을 큐에 넣고 Keeper 를 깨워요. 대기를 기록한 채팅 operation 이 있는 영수증만 그 실행이 소유해서 자극이 가지 않아요. `autonomous` 턴은 대기를 기록하지 않으니 영수증 일정을 만들고 턴을 끝내면 영수증이 자극으로 와요.
-
-**[확인 필요]** 배포 뒤 4.64시간(11-13 00:48:28Z~05:27:07Z)은 Execute 가 `autonomous` 572건, `direct` 125건이고 `sleep`+`gh` 는 0건이라고 읽었어요. 그 결과는 커밋되지 않았어요. 장부가 있는 기계에서 `python3 -I docs/evidence/tool-efficiency-1112-2026-11/sleep_waits.py kinds 2026-11-13T00:48:28Z 2026-11-13T05:27:07Z ~/me` 를 돌려 `result-kinds-2026-11-13T00-48-28Z_11-13T05-27-07Z.json` 으로 커밋하면 이 줄을 그 값으로 맞춰요. 활동량이 기준선 시간당 건수의 약 1/8이라 효과로 읽지 않아요.
 
 **[제안]** 6절의 지표는 `turn_kind` 로 나눠서 읽어요. 이 스택의 효과는 `direct` 턴의 GitHub 대기 시간(`github_wait_hours_by_turn_kind` 의 `direct`)이 줄었는지로 판정하고, `autonomous` 턴 값은 이 스택과 상관없는 값으로 따로 적어요. `autonomous` 턴이 같은 턴에서 영수증을 기다리게 하는 구조 변경은 하지 않아요. 위 두 [사실]처럼 그 턴은 영수증 일정을 만들고 끝내면 영수증이 와요. 남는 질문은 구조가 아니라 `autonomous` 턴이 왜 턴을 끝내지 않고 `sleep` 하는가예요(7절 5번).
 

@@ -2274,9 +2274,47 @@ let zone_two_position_cells = function
       Message_layout.display_width (Masc_tui_theme.strip_sgr text)
       + here_position_gap_cells
 
-(* Zone 2's row: [left], laid out in the cells the position leaves, then the
-   position at the right-hand end, where it keeps its column whatever the
-   left says. *)
+(* The cells the reading slot and its gap keep at the very end of zone 2's row
+   (RFC tui-one-screen-grammar section 8): the slot's own cells and the gap
+   ahead of it. *)
+let reading_slot_reserve_cells = here_position_gap_cells + Masc_tui_reading.width_cells
+
+(* The slot keeps its cells drawn or blank, so the path does not move when a
+   read becomes slow or ends; the slot's value is not an argument here. It
+   folds whole, neither drawn nor blank, when the path would be left with no
+   cell. *)
+let reading_slot_folded ~cols ~position_cells =
+  framed_inner_width cols - position_cells - reading_slot_reserve_cells < 1
+
+(* What zone 2 draws at its right-hand end: the position, then the reading
+   slot a gap after it. The slot is blank while no read is slow. It sits at
+   the very end and the position keeps its right edge a gap before it, so the
+   slot turning on or off moves no other cell, and a wider position moves only
+   its own left edge. *)
+let zone_two_right (state : state) ~cols position =
+  let position = zone_two_position state position in
+  let slot =
+    if reading_slot_folded ~cols ~position_cells:(zone_two_position_cells position)
+    then None
+    else
+      let text =
+        Masc_tui_reading.text ~now:(Masc_tui_wake.Mono.now ())
+          ~wall_now:(Unix.gettimeofday ()) state.reading_slot
+      in
+      Some
+        (match state.reading_slot with
+         | Masc_tui_reading.Hidden -> text
+         | Masc_tui_reading.Showing _ -> Ansi.dim ^ text ^ Ansi.reset)
+  in
+  match position, slot with
+  | None, None -> None
+  | Some text, None | None, Some text -> Some text
+  | Some position, Some slot ->
+      Some (position ^ String.make here_position_gap_cells ' ' ^ slot)
+
+(* Zone 2's row: [left], laid out in the cells the right-hand end leaves, then
+   the position and the reading slot there, where they keep their columns
+   whatever the left says. *)
 let zone_two_row ~cols ~left = function
   | None -> left
   | Some text ->
@@ -2299,7 +2337,7 @@ let zone_two_row ~cols ~left = function
    rows exist to keep: the last tab or the mark counting the hidden ones,
    and the connection badge (#53217 review). *)
 let titled_room ~cols (state : state) ~position =
-  max 0 (framed_inner_width cols - zone_two_position_cells (zone_two_position state position))
+  max 0 (framed_inner_width cols - zone_two_position_cells (zone_two_right state ~cols position))
 
 (* The title is asked for at the frame width whose inner width is [room]. *)
 let zone_two_title_text ~cols (state : state) ~position ~title =
@@ -2320,7 +2358,7 @@ let zone_two_title ~cols (state : state) ~position ~title =
     | Message_layout.Whole text -> text
     | Message_layout.Cut _ -> Message_layout.truncate_end room text
   in
-  zone_two_row ~cols ~left (zone_two_position state position)
+  zone_two_row ~cols ~left (zone_two_right state ~cols position)
 
 (* WORKAROUND: a title handed as text was laid out before the row knew the
    position's cells, so when it filled the row its end is cut.
@@ -3075,10 +3113,10 @@ let here_row ~cols (state : state) ~path ~readings ~position =
      that needs a style of its own is drawn with [here_path], by a caller
      that lays out its own row. *)
   let path = List.map Terminal_text.single_line path in
-  let position = zone_two_position state position in
+  let position = zone_two_right state ~cols position in
   let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
-  (* The path and the readings are laid out in the cells left of the
-     position. *)
+  (* The path and the readings are laid out in the cells left of the position
+     and the reading slot. *)
   let left_cols = cols - zone_two_position_cells position in
   (* Reads come and go with every refresh, and a row that changed with them
      would never sit still. Each screen says what it is still reading in its

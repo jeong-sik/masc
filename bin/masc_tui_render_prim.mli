@@ -477,6 +477,17 @@ val connection_badge : Masc_tui_types.state -> string
     the feed is whole and nothing is being read. The connection and the
     workspace it serves are named once, on the row above every screen. *)
 
+val reading_slot_reserve_cells : int
+(** The cells the reading slot and its gap keep at the very end of zone 2
+    (RFC tui-one-screen-grammar section 8): the slot's own cells and the gap
+    ahead of it. Kept whether the slot is drawn or blank. *)
+
+val reading_slot_folded : cols:int -> position_cells:int -> bool
+(** Whether zone 2 drops the slot whole, neither drawn nor blank, on a row
+    [cols] wide whose position and its gap take [position_cells]: the path
+    would be left with no cell. The slot's value is not an argument, so the
+    cells the path has do not change when a read becomes slow or ends. *)
+
 val here_row :
   cols:int ->
   Masc_tui_types.state ->
@@ -487,7 +498,8 @@ val here_row :
 (** The row under the top row: the top-row screen this one belongs to, each
     step in [path] taken into it, the screen's own [readings], then
     {!reading_connection_notice} -- nothing while reads merely come and go --
-    and the [position] at the right-hand end. Readings are set off from the
+    and the [position] at the right-hand end, then the reading slot
+    ({!reading_slot_folded}) at the very end. Readings are set off from the
     path by a gap and from each other by {!reading_separator}; an empty one
     is not drawn. The last
     step folds first when the row is narrow, readings give way whole from the
@@ -505,8 +517,9 @@ val zone_two_title :
   string
 (** A title row a surface lays out itself rather than through {!here_row},
     with [position] at its right-hand end. [title] is asked for the row at
-    the frame width its text has: [cols] less the cells the position and its
-    gap take. A strip, heading or badge it sizes to that width keeps its end;
+    the frame width its text has: [cols] less the cells the position, the
+    reading slot and their gaps take. A strip, heading or badge it sizes to
+    that width keeps its end;
     only a title wider than that loses its end, so the position keeps its
     column. *)
 
@@ -517,7 +530,8 @@ val zone_two_title_head :
   title:(cols:int -> string) ->
   Masc_tui_message_layout.head
 (** What {!zone_two_title} decides for [title]: [Whole] when the title fits
-    the cells the position leaves, [Cut] when the row has to cut its end.
+    the cells the position and the reading slot leave, [Cut] when the row has
+    to cut its end.
     Nothing is drawn. A test reads the decision here. *)
 
 val titled_row :

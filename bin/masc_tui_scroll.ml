@@ -135,13 +135,12 @@ let visible_target_for_scroll ~targets ~scroll ~height ~current move =
                  | Some hit -> Some hit
                  | None -> Some first)))
 
-let cursor_last ~count = Int.max 0 (count - 1)
+let cursor_last ~count = if count <= 0 then 0 else count - 1
 
-(* Not in the interface: every mover below normalises through it, and an
-   exported clamp with no caller outside is a surface the ratchet counts.
-   The upper bound is {!cursor_last} rather than a second [count - 1], so
-   "the last row" has one spelling and End cannot land past where a step
-   can reach. *)
+(* Shared cursor clamp used by both the movers below and render surfaces
+   reading a cursor against a list that may have shrunk. The upper bound is
+   {!cursor_last} rather than a second [count - 1], so "the last row" has one
+   spelling and End cannot land past where a step can reach. *)
 let cursor_normalized ~count cursor = Int.max 0 (Int.min cursor (cursor_last ~count))
 
 (* A cursor moved by however many rows the key asked for. The two steppers

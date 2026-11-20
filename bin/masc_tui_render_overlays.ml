@@ -18,9 +18,6 @@ let wrap_style style text =
   then text
   else style ^ text ^ Ansi.reset
 
-let clamped_cursor ~count cursor =
-  if count <= 0 then 0 else max 0 (min cursor (count - 1))
-
 (* /about: the candle over the surface, with what the TUI is running under
    -- its colour scheme and how many Keepers the workspace holds. *)
 let render_about (state : state) =
@@ -1076,7 +1073,10 @@ let render_link_preview_modal (state : state) =
           if total_links > 1 then
             c.position
               (Masc_tui_value.Position.row
-                 ~selected:(Some (clamped_cursor ~count:total_links state.link_modal_cursor))
+                 ~selected:
+                   (Some
+                      (Masc_tui_scroll.cursor_normalized ~count:total_links
+                         state.link_modal_cursor))
                  ~total:total_links);
           Option.iter c.position
             (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total);
@@ -1211,7 +1211,10 @@ let render_keeper_deletions (state : state) =
            let count = List.length inventory.Keeper_control.operations in
            c.position
              (Masc_tui_value.Position.row
-                ~selected:(Some (clamped_cursor ~count state.keeper_deletions_cursor))
+                ~selected:
+                  (Some
+                     (Masc_tui_scroll.cursor_normalized ~count
+                        state.keeper_deletions_cursor))
                 ~total:count)
        | Some (Ok _ | Error _) | None -> ());
       List.iteri
@@ -1359,7 +1362,7 @@ let answering_viewport (state : state) =
 
 let answering_selected_target (state : state) ~lines =
   let count = List.length lines in
-  let cursor = clamped_cursor ~count state.answering_cursor in
+  let cursor = Masc_tui_scroll.cursor_normalized ~count state.answering_cursor in
   let _, height = answering_viewport state in
   let scroll = Masc_tui_scroll.normalize ~count ~height state.answering_scroll in
   if cursor < scroll || cursor >= scroll + height then None
@@ -1754,7 +1757,7 @@ let render_answering (state : state) =
       let count = List.length lines in
       let selected_row =
         if state.answering_cursor < 0 then None
-        else Some (clamped_cursor ~count state.answering_cursor)
+        else Some (Masc_tui_scroll.cursor_normalized ~count state.answering_cursor)
       in
       let scroll =
         Masc_tui_scroll.normalize

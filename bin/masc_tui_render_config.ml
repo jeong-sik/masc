@@ -17,9 +17,6 @@ let wrap_style style text =
   then text
   else style ^ text ^ Ansi.reset
 
-let clamped_cursor ~count cursor =
-  if count <= 0 then 0 else max 0 (min cursor (count - 1))
-
 (* How long ago the running binary's commit landed. Coarse on purpose: the
    question is "is this the build I think it is", and minutes answer it while
    seconds only look precise. *)
@@ -88,7 +85,10 @@ let render_runtime_params (state : state) =
               let count = List.length rows in
               Some
                 (Masc_tui_value.Position.row
-                   ~selected:(Some (clamped_cursor ~count state.runtime_params_cursor))
+                   ~selected:
+                     (Some
+                        (Masc_tui_scroll.cursor_normalized ~count
+                           state.runtime_params_cursor))
                    ~total:count)));
   (* Where the overrides live leads, because it is the only thing on this row
      the reader cannot get anywhere else, and it was what the row cut first:
@@ -118,7 +118,8 @@ let render_runtime_params (state : state) =
                  ~request:Kept_request.Runtime_param_write refusal));
   let selected =
     List.nth_opt rows
-      (clamped_cursor ~count:(List.length rows) state.runtime_params_cursor)
+      (Masc_tui_scroll.cursor_normalized ~count:(List.length rows)
+         state.runtime_params_cursor)
   in
   (* The panel below draws [framed_inner_width - 4] cells a line, and a field
      is indented two of them. A field wrapped at the frame's own width has a
@@ -1814,7 +1815,8 @@ let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row
 
 let selected_model_reading (state : state) =
   let cursor =
-    clamped_cursor ~count:(List.length state.config_models_rows) state.config_models_cursor
+    Masc_tui_scroll.cursor_normalized ~count:(List.length state.config_models_rows)
+      state.config_models_cursor
   in
   Option.bind (List.nth_opt state.config_models_rows cursor)
     (fun (row : Masc_tui_model_runtime_table.row) ->
@@ -1880,7 +1882,11 @@ let config_models_projection state ~terminal_rows ~cols =
     @ List.map (fun line -> Model_identity line) (wrap identity)
   in
   let notes, prefix =
-    match List.nth_opt rows (clamped_cursor ~count:(List.length rows) state.config_models_cursor) with
+    match
+      List.nth_opt rows
+        (Masc_tui_scroll.cursor_normalized ~count:(List.length rows)
+           state.config_models_cursor)
+    with
     | None -> [], []
     | Some row -> account row
   in
@@ -2054,7 +2060,11 @@ let render_config_models (state : state) =
         else
           Some
             (Masc_tui_value.Position.row
-               ~selected:(Some (clamped_cursor ~count:total state.config_models_cursor)) ~total)
+               ~selected:
+                 (Some
+                    (Masc_tui_scroll.cursor_normalized ~count:total
+                       state.config_models_cursor))
+               ~total)
     | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _ | None, None, None, None -> None
   in
   let title_reading =
@@ -2140,7 +2150,8 @@ let render_config_models (state : state) =
        let table_mode = projection.model_table in
        let starts = projection.model_starts in
        let model_cursor =
-         clamped_cursor ~count:(List.length state.config_models_rows) state.config_models_cursor
+         Masc_tui_scroll.cursor_normalized ~count:(List.length state.config_models_rows)
+           state.config_models_cursor
        in
        let cursor_line, _ =
          Masc_tui_model_runtime_table.selected_lines ~table:table_mode ~starts ~total
@@ -2747,10 +2758,12 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
     Masc_tui_types.progress_clock_option state ~slot:"voice-agent" ~now signature
   in
   let agent_cursor =
-    clamped_cursor ~count:(List.length session.vas_agents) session.vas_agent_cursor
+    Masc_tui_scroll.cursor_normalized ~count:(List.length session.vas_agents)
+      session.vas_agent_cursor
   in
   let voice_cursor =
-    clamped_cursor ~count:(List.length session.vas_voices) session.vas_voice_cursor
+    Masc_tui_scroll.cursor_normalized ~count:(List.length session.vas_voices)
+      session.vas_voice_cursor
   in
   let selected_agent = List.nth_opt session.vas_agents agent_cursor in
   let selected_voice = List.nth_opt session.vas_voices voice_cursor in
@@ -3262,7 +3275,9 @@ let render_config (state : state) =
           let rows = runtime_config_active_rows state in
           report_drawn_list Config_runtime_rows ~height:content_height;
           let total = List.length rows in
-          let cursor = clamped_cursor ~count:total state.runtime_config_cursor in
+          let cursor =
+            Masc_tui_scroll.cursor_normalized ~count:total state.runtime_config_cursor
+          in
           let max_scroll = max 0 (total - content_height) in
           let scroll = max 0 (min state.config_scroll max_scroll) in
           (* The file has a cursor line, so the selected line is the

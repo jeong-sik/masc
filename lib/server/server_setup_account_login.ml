@@ -434,8 +434,8 @@ let trusted_state person =
   | Ok trusted -> Ok (trusted :> Authz_zone.snapshot).Authz_zone.state
   | Error uncertain -> Error (`Service_unavailable, Login_routes.zone_uncertain_message uncertain)
 
-(* One call of an account at a time, a verification or a turn of a Keeper
-   ([Runtime_account_call]). A call while another runs gets [busy]. *)
+(* What a request is told while another call of its account runs
+   ([Runtime_account_call.one_call_of]). *)
 let call_running = "A call of this account is running."
 
 (* The account of the person among the accounts of [state]. An account of

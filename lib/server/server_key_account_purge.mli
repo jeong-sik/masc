@@ -79,7 +79,7 @@ val resume : zone:Authz_zone.t -> base_path:string -> unit
     {!Server_key_account_registration}). It reads whose the account is and
     of which kind itself, as {!remove} does, so an id of a login account or
     of another person is answered [Not_a_key_account] or [Not_found] and
-    nothing is removed. [in_call] is not tied to [id] by its type: the
+    nothing is removed. The call is not tied to [id] by its type: the
     caller hands the witness of the call of that account. [Account_busy] is
     not answered. *)
 val remove_in_call

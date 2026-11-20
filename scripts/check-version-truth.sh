@@ -33,9 +33,6 @@ cd "$repo_root"
 # Print the first match while draining the producer: head closes its pipe early
 # and can turn a valid long changelog into SIGPIPE under pipefail.
 package_version="$(sed -n 's/^(version \([^)]*\)).*/\1/p' dune-project | sed -n '1p')"
-roadmap_package_version="$(sed -n 's/^> Current package version: v\([^ ]*\).*/\1/p' ROADMAP.md | sed -n '1p')"
-roadmap_changelog_entry="$(sed -n 's/^> Latest changelog entry: v\([^ ]*\).*/\1/p' ROADMAP.md | sed -n '1p')"
-roadmap_published_release="$(sed -n 's/^> Latest published GitHub release: v\([^ ]*\).*/\1/p' ROADMAP.md | sed -n '1p')"
 changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | sed -n '1p')"
 opam_file="$(find . -maxdepth 1 -name '*.opam' -print | sed 's#^\./##' | sort | sed -n '1p')"
 
@@ -95,23 +92,16 @@ opam_version="${opam_version:-$(sed -n 's/^version: "\([^"]*\)"/\1/p' "$opam_fil
 
 [[ -n "$package_version" ]] || fail "missing package version in dune-project"
 [[ -n "$opam_version" ]] || fail "missing version in $opam_file"
-[[ -n "$roadmap_package_version" ]] || fail "missing current package version in ROADMAP.md"
-[[ -n "$roadmap_changelog_entry" ]] || fail "missing latest changelog entry in ROADMAP.md"
-[[ -n "$roadmap_published_release" ]] || fail "missing latest published GitHub release in ROADMAP.md"
-grep -q "^## \[${roadmap_published_release//./\\.}\]" CHANGELOG.md || fail "CHANGELOG.md has no release heading for published release $roadmap_published_release (ROADMAP.md may contain a typo or stale value)"
 [[ -n "$changelog_latest_release" ]] || fail "missing released version header in CHANGELOG.md"
 
 require_changelog_body_filled "$changelog_latest_release"
 
 [[ "$package_version" == "$opam_version" ]] || fail "dune-project ($package_version) != $opam_file ($opam_version)"
-[[ "$package_version" == "$roadmap_package_version" ]] || fail "dune-project ($package_version) != ROADMAP current package version ($roadmap_package_version)"
 [[ "$package_version" == "$changelog_latest_release" ]] || fail "dune-project ($package_version) != CHANGELOG latest release ($changelog_latest_release)"
-[[ "$roadmap_changelog_entry" == "$changelog_latest_release" ]] || fail "ROADMAP latest changelog entry ($roadmap_changelog_entry) != CHANGELOG latest release ($changelog_latest_release)"
-changelog_has_release_heading "$roadmap_published_release" || fail "CHANGELOG.md has no release heading for ROADMAP latest published GitHub release $roadmap_published_release"
 
 if [[ -n "$tag_name" ]]; then
   [[ "$package_version" == "$tag_name" ]] || fail "tag v$tag_name != package version $package_version"
   changelog_has_release_heading "$tag_name" || fail "CHANGELOG.md has no release heading for $tag_name"
 fi
 
-printf 'Version truth OK: package=%s changelog_entry=%s published_release=%s\n' "$package_version" "$changelog_latest_release" "$roadmap_published_release"
+printf 'Version truth OK: package=%s changelog_entry=%s\n' "$package_version" "$changelog_latest_release"

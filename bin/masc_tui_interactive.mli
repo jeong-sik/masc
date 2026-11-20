@@ -1,6 +1,6 @@
-(** An interactive surface: a pane that owns its own loop (RFC-0439 §6.2's
-    real-time side, a game, a VM console one day) and that the TUI hosts
-    rather than draws.
+(** An interactive surface: a pane that owns its own loop (the MSX
+    spectator, a game, a VM console one day) and that the TUI hosts rather
+    than draws.
 
     The contract is deliberately renderer-independent: [frame] carries the
     pixels, so the terminal side — ANSI half-blocks today, Kitty pixels

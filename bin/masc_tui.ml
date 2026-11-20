@@ -10470,7 +10470,7 @@ let launch_engine_sample_read state ~mailbox =
    the whole terminal, and the graphs under it are not sampled. *)
 let step_engine_samples state ~mailbox ~render_schedule =
   let terminal_rows, cols = get_terminal_size () in
-  let now = monotonic_now_s () in
+  let now = Masc_tui_wake.Mono.now () in
   let capacity =
     match Masc_tui_render_metrics.engine_graph_capacity ~cols state with
     | None -> None
@@ -31313,7 +31313,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (* A sample answer is not compared with what is drawn, so it asks for a
          frame like an answer that did change it. *)
       let samples, (_ : Masc_tui_engine_samples.step), report =
-        Masc_tui_engine_samples.answered state.engine_samples ~now:(monotonic_now_s ()) reading
+        Masc_tui_engine_samples.answered state.engine_samples ~now:(Masc_tui_wake.Mono.now ()) reading
       in
       state.engine_samples <- samples;
       (match report with

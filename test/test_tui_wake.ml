@@ -313,13 +313,22 @@ let test_engine_sample_is_noted () =
   let module Samples = Masc_tui_engine_samples in
   let point = Samples.Answered
       { Samples.live_heap = Masc_tui_braille.of_count 1; scheduler_p95 = Masc_tui_braille.of_count 1 } in
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity:8 in
-  let opened, _ = Samples.tick opened ~now:0. ~newest:(Some { Samples.at = -0.5; reading = point }) in
-  let newest = Some { Samples.at = 1.5; reading = point } in
-  check_noted_in "engine sample" Wake.Engine_sample ~remaining_s:0.1
-    (fun () -> match Samples.tick opened ~now:1.9 ~newest with
-       | _, Samples.Nothing -> false
-       | _, (Samples.Sampled | Samples.Read) -> true)
+  let now = Wake.Mono.now () in
+  let opened = Samples.shown Samples.stopped ~now ~capacity:8 in
+  let opened, _ = Samples.tick opened ~now ~newest:(Some { Samples.at = now; reading = point }) in
+  let newest = Some { Samples.at = Wake.Mono.after now 1.5; reading = point } in
+  Wake.Pass.begin_pass ();
+  check bool "engine sample: not yet" false
+    (match Samples.tick opened ~now:(Wake.Mono.after now 1.9) ~newest with
+     | _, Samples.Nothing -> false
+     | _, (Samples.Sampled | Samples.Read) -> true);
+  check (option (pair int int64)) "engine sample: its slot is noted"
+    (Some (reason_number Engine_sample, Int64.add (now :> int64) (seconds 2))) (noted ());
+  Wake.Pass.begin_pass ();
+  check bool "engine sample: due at its slot" true
+    (match Samples.tick opened ~now:(Wake.Mono.after now 2.) ~newest with
+     | _, Samples.Nothing -> false
+     | _, (Samples.Sampled | Samples.Read) -> true)
 
 let test_play_room_read_is_noted () =
   let module Room = Masc_tui_play_room in

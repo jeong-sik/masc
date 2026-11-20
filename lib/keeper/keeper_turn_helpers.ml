@@ -123,7 +123,7 @@ let record_pre_dispatch_terminal_observation
       ~(meta : keeper_meta)
       ~(runtime_id : string)
       ~(outcome : Keeper_execution_receipt.outcome_kind)
-      ~(terminal_reason_code : string)
+      ~(terminal_reason : Keeper_terminal_reason.t)
       ~(activity_kind : string)
       ~(trajectory_outcome : Trajectory.trajectory_outcome)
       ~(keeper_turn_id : int)
@@ -135,6 +135,7 @@ let record_pre_dispatch_terminal_observation
   let runtime_id_string =
     runtime_id
   in
+  let terminal_reason_code = Keeper_terminal_reason.to_wire terminal_reason in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in
   let masc_root = Workspace.masc_dir config in
@@ -150,7 +151,7 @@ let record_pre_dispatch_terminal_observation
     ; agent_core_turn_count = None
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; outcome
-    ; terminal_reason_code
+    ; terminal_reason
     ; response_text_present = false
     ; completion_contract_result = Keeper_execution_receipt.Completion_not_dispatched
     ; actionable_signal = None

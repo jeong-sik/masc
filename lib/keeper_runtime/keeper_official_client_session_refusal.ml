@@ -30,8 +30,6 @@ let code = function
   | Continuation_on_other_runtime -> "official_client_continuation_on_other_runtime"
 ;;
 
-let of_code value = List.find_opt (fun refusal -> String.equal (code refusal) value) all
-
 let to_string = function
   | Gate_continuation_unresumable ->
     "original official-client Gate session is not resumable with this runtime and tool \

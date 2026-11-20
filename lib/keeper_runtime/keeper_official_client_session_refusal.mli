@@ -50,10 +50,6 @@ val all : t list
 val code : t -> string
 (** The turn terminal reason code. Distinct per constructor. *)
 
-val of_code : string -> t option
-(** Exact inverse of {!code}, for terminal reason codes read back from
-    receipts. *)
-
 val to_string : t -> string
 
 (** What the lane walk does after this refusal. *)

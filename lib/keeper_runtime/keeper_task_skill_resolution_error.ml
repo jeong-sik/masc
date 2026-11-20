@@ -19,8 +19,6 @@ type kind =
   | Source_unreadable
   | Entry_unreadable
 
-let all_kinds = [ Config_rejected; Config_unreadable; Source_unreadable; Entry_unreadable ]
-
 let kind = function
   | Skill_config_rejected _ -> Config_rejected
   | Skill_config_unreadable _ -> Config_unreadable
@@ -33,10 +31,6 @@ let kind_to_code = function
   | Config_unreadable -> "task_skill_config_unreadable"
   | Source_unreadable -> "task_skill_source_unreadable"
   | Entry_unreadable -> "task_skill_entry_unreadable"
-;;
-
-let kind_of_code code =
-  List.find_opt (fun candidate -> String.equal (kind_to_code candidate) code) all_kinds
 ;;
 
 let code error = kind_to_code (kind error)

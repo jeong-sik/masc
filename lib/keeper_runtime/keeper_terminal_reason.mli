@@ -1,198 +1,107 @@
-(** Closed sum for the keeper-side classification of a
-    receipt's [terminal_reason_code] string.
+(** Why a Keeper turn ended, as the code that ended it knew it.
 
-    {1 Why a third terminal-reason type}
-
-    Two typed terminal-reason modules already exist:
-
-    - [Keeper_turn_terminal_code] is the
-      {e producer-side} bridge from [Keeper_registry.failure_reason] /
-      [Agent_core.Error.t]. Its [of_wire] returns [None] for the
-      agent-core error codes ([api_error_*], agent observation wires, [internal_error]) because
-      they are all collapsed into its [Agent_core_error of string] blob.
-      Splitting that blob is designed in RFC-0371 §6.1(3), which carries a
-      typed observation beside the byte-identical wire and requires all four
-      types on the chain to be threaded in one batch. Matching on
-      [Agent_core_error s] would force the substring re-parse back into the
-      open, so it cannot be the consumer's parse target.
-    - [Keeper_turn_disposition] is the operator-facing layer;
-      its [of_termination_code] routes through the same producer collapse
-      and produces a different output type.
-
-    This module is the missing {e consumer-side} parse target that
-    RFC-0042 PR-4 calls for: it parses [receipt.terminal_reason_code]
-    {e once} into the exact distinctions [Keeper_execution_receipt.operator_disposition]
-    branches on, so that classifier becomes an exhaustive [match] instead
-    of a chain of [String.starts_with] / [string_contains] tests.
-
-    {1 Partition discipline}
-
-    [of_wire] runs in two stages. First it asks
-    {!Keeper_internal_error.wire_kind_of_string} whether the code is one the
-    keeper's own error envelope emits, and classifies from that type — so a
-    new envelope constructor is a compile error here rather than a wire
-    string nobody recognises. Whatever the enumeration does not claim falls
-    to the prefix tests for the agent-core and provider families, a
-    {e priority-ranked partition} that tests buckets in the same order the
-    old [operator_disposition] [if/else] chain tested its string predicates
-    and returns the first match. The order remains load-bearing there; see
-    the [.ml] for the ranked list. Only canonical producer wire forms select
-    specialized buckets.
-
-    The escape arm [Unknown] is a {e named} typed escape for unmatched or
-    non-canonical codes. Callers route it explicitly to the generic path.
-
-    {1 Wire byte-preservation}
-
-    [terminal_reason_code] is serialised verbatim into receipt JSON and
-    read + classified by dashboards. The receipt's JSON emission is
-    {b unchanged} — this module is used only inside the keeper-side
-    disposition classifier. [of_wire] carries the original string in every
-    variant, so [to_wire (of_wire s) = s] holds byte-for-byte. *)
+    The execution receipt holds this value. {!to_wire} writes the one spelling
+    that the receipt JSON, manifest rows and activity events carry; nothing
+    decodes that spelling back into this type. The operator disposition reads
+    {!failure_class} of the typed error, so a new error constructor is a
+    compile obligation in this module instead of a string nobody recognises. *)
 
 type t =
-  | Runtime_exhausted of string
-  (** Exact wire ["runtime_exhausted"]. Payload is the
-          original string, carried only so [to_wire] is a byte-identical
-          inverse; the disposition classifier ignores it. *)
-  | Config_invalid of string
-  (** Exact wire ["config_error"] or
-          [String.starts_with ~prefix:"provider_error_invalid_config:"]. A
-          setting the runtime rejected before dispatch. Arbitrary strings
-          containing ["config"] are not classified here. Payload is the
-          original string. *)
-  | Authorization_refused of string
-  (** Exact wires ["api_error_auth"], ["api_error_authorization"],
-          ["provider_error_auth"], ["provider_error_authorization"]. The
-          provider refused the request under authorization. The wire does not
-          say why, and measurement shows it carries usage limits far more
-          often than credential rejection (852 September turns: 838 weekly
-          limit, 14 five-hour limit), so the name stops at what the wire
-          states. Arbitrary strings containing ["auth"] are not classified
-          here. Payload is the original string. *)
-  | Provider_runtime_failure of string
-  (** Wire [String.starts_with ~prefix:"api_error_"], exact
-          ["provider_error"], or
-          [String.starts_with ~prefix:"provider_error_"]. Config and
-          authorization codes still land in [Config_invalid] /
-          [Authorization_refused] because those buckets are ranked earlier.
-          Payload is the original string. *)
-  | Transcript_corruption of string
-  (** Exact canonical wire
-      {!Keeper_internal_error.incomplete_tool_transcript_kind}. Provider
-      dispatch did not occur; automatic retry is forbidden until an operator
-      resets the corrupted checkpoint. *)
-  | Official_client_recovery_required of string
-  (** Exact canonical wire
-      {!Keeper_internal_error.official_client_recovery_required_kind}. The
-      durable official-client session refused a local claim before provider
-      dispatch and remains held until an operator resolves its recovery. *)
-  | Official_client_session_refused of Keeper_official_client_session_refusal.t
-  (** Exact codes {!Keeper_official_client_session_refusal.code}. An
-      official-client runtime refused the turn before provider dispatch
-      because of the state of its durable vendor session, not because of a
-      setting (#38402). The payload names which refusal; [to_wire] writes its
-      code, which is the only spelling [of_wire] accepts for it. *)
-  | Provider_attempt_effect_fenced of string
-  (** Exact canonical wire
-      {!Keeper_internal_error.provider_attempt_effect_fenced_kind}. A provider
-      attempt may have crossed an effect boundary, so same-turn replay is
-      forbidden and the operator-facing receipt must retain an explicit alert
-      rather than treating it as an unmapped internal state. *)
-  | Tool_correction_lost of string
-  (** Exact canonical wire
-      {!Keeper_internal_error.tool_correction_lost_kind}. The same fence, on a
-      turn that also recorded typed pre_tool_use rejections (masc#28885);
-      disposition matches {!Provider_attempt_effect_fenced}, only the label
-      differs so a lost correction is countable apart from ordinary fenced
-      provider failures. *)
-  | Accept_rejected of string
-  (** {!Keeper_internal_error.Wire_accept_rejected}. The provider answered and
-      the response was well formed; MASC's own accept contract found nothing
-      usable in it — no text, no tool call — and refused the turn. Nothing
-      failed on the provider side and nothing failed inside MASC, so this is
-      neither a provider error nor an internal one. The operator action it
-      points at is a lane's output budget, which is why it does not share a
-      label with either. *)
-  | Terminal_effect_failed of string
-  (** {!Keeper_internal_error.Wire_terminal_effect_failed}. The tool that ends
-      the turn by producing an external artifact reported failure, or returned
-      no typed receipt for what it did. Whether the artifact reached the
-      outside world is unknown, so the turn is never replayed and the
-      stimulus behind it is retired rather than requeued — an operator has to
-      decide what happened. Keeps the alert; only the label changes, from
-      "unmapped runtime state" to what actually occurred. *)
-  | Internal_error of string
-  (** Exact wire ["internal_error"], plus the three envelope spellings
-      {!Keeper_internal_error.Wire_internal_unhandled_exception},
-      [Wire_internal_bridge_exception] and [Wire_internal_contract_rejected].
-      All four take the same route — [Internal_opaque] /
-      [Exhausted_visible_alive] — and the receipt keeps the wire string
-      verbatim, so they stay countable apart without separate variants.
-      Payload is the original string, carried for [to_wire] round-trip
-      fidelity. *)
-  | Pre_dispatch_success of string
-  (** Exact wire ["pre_dispatch_success"]: a turn that
-          completed without dispatching to a provider. Payload is the
-          original string, carried only for [to_wire] round-trip fidelity. *)
-  | Unknown of string
-  (** Named typed escape for any wire string none of the canonical buckets
-          matched. The disposition classifier routes it through the generic
-          unknown path; its prose never selects a specialized route. Payload
-          is the original string. *)
+  | Completed
+  (** The turn finished. Wire ["success"]. *)
+  | Checkpoint
+  (** The turn yielded at a continuation boundary. Wire ["checkpoint"]. *)
+  | Input_required
+  (** The turn stopped on a typed input request. Wire ["input_required"]. *)
+  | Supervisor_stop
+  (** The supervisor's stop signal ended the turn. Wire ["supervisor_stop"]. *)
+  | External_cancel
+  (** Something other than the supervisor cancelled the streaming turn.
+      Wire ["external_cancel"]. *)
+  | Phase_not_executable of Keeper_state_machine.phase
+  (** The phase gate skipped the turn in this phase.
+      Wire ["non_executable_phase:<phase>"]. *)
+  | Registry_phase_missing
+  (** The phase gate found no registry phase before dispatch.
+      Wire ["registry_phase_missing"]. *)
+  | Failed of Agent_core.Error.t
+  (** The turn ended with this error. Wire {!code_of_core_error}. *)
 
-(** Parse a [terminal_reason_code] wire string into the typed
-    classification. Priority-ranked partition (see module doc); returns
-    the first matching bucket. Total — every string maps to exactly one
-    variant, with [Unknown] as the explicit escape. The argument is the
-    raw wire string. Classification accepts canonical producer bytes only;
-    non-canonical casing remains [Unknown]. *)
-val of_wire : string -> t
-
-(** Reconstruct the exact wire string [of_wire] parsed. Byte-identical
-    inverse: [to_wire (of_wire s) = s] for every [s]. *)
 val to_wire : t -> string
 
-(** {1 Transient provider-runtime wire codes (SSOT)}
+(** The wire of [Failed err]. Surfaces that carry only an error's code use it:
+    the typed bridge [Keeper_turn_terminal_code], trajectory outcomes and
+    event payloads. Provider text inside an error (a reported error type, an
+    unrecognised stop reason) is copied into the spelling as data. *)
+val code_of_core_error : Agent_core.Error.t -> string
 
-    Retry-recoverable transient wire codes inside the
-    [Provider_runtime_failure] family: a plain (non-structural)
-    [Api.Timeout], [Api.NetworkError], and provider-level timeout markers
-    such as ["provider_error_timeout:http_operation"]. These mirror the
-    [Agent_core.Error] variants
-    [Keeper_error_classify.is_transient_network_error] reports as transient.
-    The encoder [Keeper_agent_error.api_error_terminal_reason_code]
-    references these so producer and consumer cannot drift.
+(** Snake_case label of a closed terminal tool effect: ["proven_pre_effect"],
+    ["proven_post_effect"] or ["effect_outcome_unknown"]. *)
+val terminal_effect_disposition_to_wire : Agent_core.Error.closed_terminal_effect -> string
 
-    Agent execution observations do not enter this API/provider wire family. *)
-val wire_api_error_timeout : string
+(** Whether the next turn may simply try again: a timeout, a dropped
+    connection, or a connection that did not open. *)
+type provider_retry =
+  | Transient
+  | Persistent
 
-val wire_api_error_network : string
+(** The receipt disposition's view of a failed turn. Every error lands in
+    exactly one class through exhaustive matches on its constructors. *)
+type failure_class =
+  | Runtime_exhausted
+  (** Every runtime candidate was tried. *)
+  | Config_invalid
+  (** A setting was rejected before dispatch: an agent-core configuration
+      error, a provider's invalid config field, or a Task Skill pin that did
+      not resolve (#31131). *)
+  | Authorization_refused
+  (** The API or the provider refused under authorization. The error does not
+      say why; measurement shows it carries usage limits far more often than
+      credential rejection (852 September turns: 838 weekly limit, 14
+      five-hour limit). *)
+  | Provider_runtime_failure of provider_retry
+  (** Any other API or provider failure, and a closed runtime connection. *)
+  | Transcript_corruption
+  (** Stored history failed admission. Nothing was dispatched, and retry is
+      forbidden until an operator resets the checkpoint. *)
+  | Official_client_recovery_required
+  (** The durable official-client session refused a local claim and stays
+      held until an operator resolves its recovery. *)
+  | Official_client_session_refused of Keeper_official_client_session_refusal.t
+  (** An official-client runtime refused the turn before dispatch because of
+      the state of its vendor session, not because of a setting (#38402). *)
+  | Provider_attempt_effect_fenced
+  (** A provider attempt may have crossed an effect boundary; same-turn replay
+      is forbidden. *)
+  | Tool_correction_lost
+  (** The same fence on a turn that also recorded pre_tool_use rejections
+      (masc#28885). *)
+  | Accept_rejected
+  (** The provider answered, and MASC's accept contract found nothing usable
+      in the answer. *)
+  | Terminal_effect_failed
+  (** The tool that ends the turn by producing an external artifact failed or
+      returned no typed receipt. Whether the artifact left the process is
+      unknown. *)
+  | Internal_error
+  (** An internal error without a MASC envelope, an unhandled or bridge
+      exception, a contract rejection, or a host stop. *)
+  | No_failure_policy
+  (** Errors with no disposition of their own: agent-loop errors other than a
+      terminal effect failure, MCP, serialization, IO, orchestration and media
+      errors, and three MASC kinds never observed in receipts (a resumable CLI
+      session, a receipt persistence failure, a gate replay repair). The
+      disposition reads the receipt's outcome and lane facts for these. *)
 
-(** [Api.Connect_failed]: the connection did not open, so the request was not
-    sent. Transient like {!wire_api_error_network}, and its own code. *)
-val wire_api_error_connect_failed : string
+val failure_class : Agent_core.Error.t -> failure_class
 
-(** The [provider_error_*] codes both the producer and the classifier name.
-    Producer-only codes are matched by the shared [provider_error_] prefix
-    inside this module and are not listed individually. *)
-val wire_provider_error_auth : string
-val wire_provider_error_authorization : string
-val wire_provider_error_invalid_config_prefix : string
+(** {1 Provider timeout spellings}
+
+    [Keeper_provider_runtime_boundary] still reads a persisted registry
+    failure code with these. The encoder above writes the same constants. *)
+
 val wire_provider_error_timeout : string
 val wire_provider_error_timeout_prefix : string
 val wire_provider_error_network_timeout : string
 val wire_provider_error_network_timeout_prefix : string
-
-(** A provider [Connect_failed] is ["provider_error_connect_failed:<kind>"].
-    Only its [timeout] kind is transient, like the network timeout codes. *)
-val wire_provider_error_connect_failed_prefix : string
 val wire_provider_error_connect_failed_timeout : string
-
-(** [true] when [t] is a [Provider_runtime_failure] carrying one of the
-    transient wire codes: [wire_api_error_timeout], [wire_api_error_network],
-    [wire_api_error_connect_failed], a provider timeout or network-timeout
-    marker, or [wire_provider_error_connect_failed_timeout]. The [api_error_*]
-    matches remain exact, so every other [api_error_*] code returns [false]. Every
-    non-[Provider_runtime_failure] variant is [false]. *)
-val is_transient_provider_runtime_failure : t -> bool

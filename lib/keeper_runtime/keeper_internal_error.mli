@@ -233,15 +233,9 @@ val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 val summary_of_masc_internal_error : masc_internal_error -> string option
 
 (** The closed set of wire kinds {!kind_of_masc_internal_error} can emit — one
-    per {!masc_internal_error} constructor.
-
-    It exists because the wire is a string and the receipt classifier
-    ([Keeper_terminal_reason.of_wire]) had to guess the string back. It knew
-    five of the thirteen and read the rest as an unrecognised state, so a
-    keeper's own named failures reached the operator as "unmapped runtime
-    state" (#29929). Matching this type instead makes a new constructor a
-    compile obligation at every consumer, which is what
-    [Keeper_turn_terminal_code] already promises for the layer above. *)
+    per {!masc_internal_error} constructor, without its payload. The receipt's
+    failure class ([Keeper_terminal_reason.failure_class]) matches this type,
+    so a new constructor is a compile obligation there. *)
 type wire_kind =
   | Wire_official_client_recovery_required
   | Wire_runtime_exhausted
@@ -259,11 +253,8 @@ type wire_kind =
   | Wire_receipt_persistence_failed
   | Wire_gate_replay_repair_required
 
+val wire_kind_of_masc_internal_error : masc_internal_error -> wire_kind
 val wire_kind_to_string : wire_kind -> string
-
-(** [None] for any string this module does not emit, including the agent-core
-    and provider wire families that travel the same receipt field. *)
-val wire_kind_of_string : string -> wire_kind option
 
 val kind_of_masc_internal_error : masc_internal_error -> string
 

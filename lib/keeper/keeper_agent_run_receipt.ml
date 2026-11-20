@@ -100,18 +100,15 @@ let finalize
       : Keeper_execution_receipt.completion_contract_result =
     acc.receipt_completion_contract_result
   in
-  let terminal_reason_code =
+  let terminal_reason : Keeper_terminal_reason.t =
     match turn_result with
     | Ok _ ->
       (match !receipt_stop_reason_ref with
-       | Some sr ->
-         Keeper_execution_receipt.receipt_terminal_reason_code_of_stop_reason sr
-       | None ->
-         Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success)
-    | Error err ->
-      Keeper_agent_error.terminal_reason_code_of_core_error_typed err
-      |> Keeper_turn_terminal_code.to_wire
+       | Some sr -> Keeper_execution_receipt.terminal_reason_of_stop_reason sr
+       | None -> Keeper_terminal_reason.Completed)
+    | Error err -> Keeper_terminal_reason.Failed err
   in
+  let terminal_reason_code = Keeper_terminal_reason.to_wire terminal_reason in
   let runtime_observation : Runtime_observation.runtime_observation option =
     !receipt_runtime_observation_ref
   in
@@ -162,7 +159,7 @@ let finalize
          | Ok _ -> `Ok
          | Error err ->
            Keeper_agent_error.receipt_outcome_kind_of_core_error err)
-    ; terminal_reason_code
+    ; terminal_reason
     ; response_text_present = !receipt_response_text_present_ref
     ; completion_contract_result
     ; actionable_signal = acc.receipt_actionable_signal
@@ -223,7 +220,7 @@ let finalize
         ( "outcome",
           `String
             (Keeper_execution_receipt.outcome_kind_to_string receipt.outcome) );
-        ("terminal_reason_code", `String receipt.terminal_reason_code);
+        ("terminal_reason_code", `String terminal_reason_code);
         ( "runtime_id",
           `String (receipt.runtime_id) );
         ("runtime_attempt_count", `Int receipt.runtime_attempt_count);

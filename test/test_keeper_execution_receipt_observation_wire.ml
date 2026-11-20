@@ -23,7 +23,9 @@ let () =
     (Printf.sprintf "runtime stop keeps completed wire (got %S)" runtime_stop_wire)
     (String.equal runtime_stop_wire "completed");
   let success_wire =
-    Receipt.receipt_terminal_reason_code_of_stop_reason (Runtime_agent.Completed { provider_turn_ordinal = 17 })
+    Keeper_terminal_reason.to_wire
+      (Receipt.terminal_reason_of_stop_reason
+         (Runtime_agent.Completed { provider_turn_ordinal = 17 }))
   in
   check
     (Printf.sprintf "terminal receipt emits canonical success (got %S)" success_wire)
@@ -60,7 +62,7 @@ let () =
     "runtime input-required stop uses the typed disposition wire"
     (String.equal input_required_wire "input_required");
   let input_required_terminal =
-    Receipt.receipt_terminal_reason_code_of_stop_reason input_required_stop
+    Keeper_terminal_reason.to_wire (Receipt.terminal_reason_of_stop_reason input_required_stop)
   in
   check
     "terminal receipt preserves input-required instead of success"
@@ -74,7 +76,8 @@ let () =
     check "yield does not require operator attention" (not (D.requires_attention disposition));
     check "checkpoint is not completed success" (not (D.is_success disposition));
     check "receipt serializes canonical checkpoint"
-      (Receipt.receipt_terminal_reason_code_of_stop_reason stop = "checkpoint");
+      (Keeper_terminal_reason.to_wire (Receipt.terminal_reason_of_stop_reason stop)
+       = "checkpoint");
     check "original detailed stop reason remains independent"
       (Receipt.stop_reason_to_string stop <> "checkpoint"))
     [ Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 ; provider_turn_ordinal = 17 }

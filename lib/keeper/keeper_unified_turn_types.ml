@@ -520,9 +520,9 @@ type streaming_cancellation_source =
   | Supervisor_stop
   | External_cancel
 
-let streaming_cancellation_source_to_code = function
-  | Supervisor_stop -> "supervisor_stop"
-  | External_cancel -> "external_cancel"
+let streaming_cancellation_source_to_terminal_reason = function
+  | Supervisor_stop -> Keeper_terminal_reason.Supervisor_stop
+  | External_cancel -> Keeper_terminal_reason.External_cancel
 
 let streaming_cancellation_source_to_fsm = function
   | Supervisor_stop -> Keeper_turn_fsm.Cancelled_supervisor_stop
@@ -545,8 +545,8 @@ let record_streaming_cancelled_observation
   let cancellation_source =
     if fiber_stop_set then Supervisor_stop else External_cancel
   in
-  let terminal_reason_code =
-    streaming_cancellation_source_to_code cancellation_source
+  let terminal_reason =
+    streaming_cancellation_source_to_terminal_reason cancellation_source
   in
   if fiber_stop_set
   then
@@ -562,9 +562,9 @@ let record_streaming_cancelled_observation
     ~meta:run_meta
     ~runtime_id
     ~outcome:`Cancelled
-    ~terminal_reason_code
+    ~terminal_reason
     ~activity_kind:"keeper.turn_cancelled"
-    ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+    ~trajectory_outcome:(Trajectory.Gated (Keeper_terminal_reason.to_wire terminal_reason))
     ~keeper_turn_id
     ();
   Keeper_turn_fsm.emit_transition

@@ -88,7 +88,7 @@ type t =
       (** Internal agent loop iterations within this Keeper turn. *)
   ; current_task_id : string option
   ; outcome : outcome_kind
-  ; terminal_reason_code : string
+  ; terminal_reason : Keeper_terminal_reason.t
   ; response_text_present : bool
   ; completion_contract_result : completion_contract_result
   ; actionable_signal : Keeper_contract_classifier.actionable_signal option
@@ -141,8 +141,10 @@ let disposition_of_stop_reason = function
     Keeper_turn_disposition.Checkpoint
 ;;
 
-let receipt_terminal_reason_code_of_stop_reason stop_reason =
-  Keeper_turn_disposition.to_wire (disposition_of_stop_reason stop_reason)
+let terminal_reason_of_stop_reason = function
+  | Runtime_agent.Completed _ -> Keeper_terminal_reason.Completed
+  | Runtime_agent.InputRequired _ -> Keeper_terminal_reason.Input_required
+  | Runtime_agent.Yielded_to_durable_stimulus _ -> Keeper_terminal_reason.Checkpoint
 ;;
 
 let sandbox_kind_of_meta (meta : Keeper_meta_contract.keeper_meta) : Keeper_types_profile_sandbox.sandbox_profile =

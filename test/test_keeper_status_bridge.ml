@@ -679,7 +679,7 @@ let test_fenced_empty_turn_with_a_possible_effect_keeps_no_marker () =
    newest execution receipt instead, so the operator sees what failed. Rows
    go through the receipt serializer into the receipt store, which is the
    path a failed turn writes. *)
-let receipt_row ~keeper_name ~outcome ~terminal_reason_code ~error_message ~ended_at
+let receipt_row ~keeper_name ~outcome ~terminal_reason ~error_message ~ended_at
   : Keeper_execution_receipt.t
   =
   { Keeper_execution_receipt.keeper_name
@@ -688,7 +688,7 @@ let receipt_row ~keeper_name ~outcome ~terminal_reason_code ~error_message ~ende
   ; agent_core_turn_count = None
   ; current_task_id = None
   ; outcome
-  ; terminal_reason_code
+  ; terminal_reason
   ; response_text_present = false
   ; completion_contract_result = Keeper_execution_receipt.Completion_observation_unknown
   ; actionable_signal = None
@@ -727,6 +727,13 @@ let contains haystack needle =
 
 (* The roster row reads the newest receipt, so each append
    tells that workspace's roster readers to reread the Keeper. *)
+let rate_limited =
+  Keeper_terminal_reason.Failed
+    (Agent_core.Error.Api
+       (Agent_core.Retry.RateLimited
+          { message = "Rate limited: Rate limit reached for requests"; retry_after = None }))
+;;
+
 let test_receipt_append_announces_the_keeper_row () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -757,7 +764,7 @@ let test_receipt_append_announces_the_keeper_row () =
       (fun () ->
         Keeper_execution_receipt.append config
           (receipt_row ~keeper_name:"receipt-row" ~outcome:`Error
-             ~terminal_reason_code:"api_error_rate_limited" ~error_message:None
+             ~terminal_reason:rate_limited ~error_message:None
              ~ended_at:"2026-09-23T00:38:12Z");
         Alcotest.(check (list string)) "an appended receipt announces its Keeper"
           [ "receipt-row" ] !here;
@@ -803,7 +810,7 @@ let test_turn_failures_summary_names_the_newest_failed_receipt () =
            (receipt_row
               ~keeper_name
               ~outcome:`Error
-              ~terminal_reason_code:"api_error_rate_limited"
+              ~terminal_reason:rate_limited
               ~error_message:(Some "Rate limited: Rate limit reached for requests")
               ~ended_at:"2026-09-23T00:38:12Z"));
       let failed = summary () in
@@ -821,7 +828,7 @@ let test_turn_failures_summary_names_the_newest_failed_receipt () =
            (receipt_row
               ~keeper_name
               ~outcome:`Ok
-              ~terminal_reason_code:"success"
+              ~terminal_reason:Keeper_terminal_reason.Completed
               ~error_message:None
               ~ended_at:"2026-09-23T01:00:00Z"));
       let after_ok = summary () in
@@ -841,7 +848,11 @@ let test_turn_failures_summary_names_the_newest_failed_receipt () =
            (receipt_row
               ~keeper_name
               ~outcome:`Cancelled
-              ~terminal_reason_code:"api_error_timeout"
+              ~terminal_reason:
+                (Keeper_terminal_reason.Failed
+                   (Agent_core.Error.Api
+                      (Agent_core.Retry.Timeout
+                         { message = "provider wall-clock timeout"; phase = None })))
               ~error_message:(Some "provider wall-clock timeout")
               ~ended_at:"2026-09-23T01:10:00Z"));
       let after_cancelled = summary () in
@@ -869,7 +880,16 @@ let test_turn_failures_summary_names_the_newest_failed_receipt () =
            (receipt_row
               ~keeper_name
               ~outcome:`Error
-              ~terminal_reason_code:"terminal_effect_failed"
+              ~terminal_reason:
+                (Keeper_terminal_reason.Failed
+                   (Keeper_internal_error.core_error_of_masc_internal_error
+                      (Keeper_internal_error.Terminal_effect_failed
+                         { failure_class = Tool_result.Runtime_failure
+                         ; effect_disposition = Tool_result.Effect_outcome_unknown
+                         ; detail =
+                             Keeper_terminal_effect_detail.Agent_core_terminal_effect
+                               { detail = "tool_execute failed" }
+                         })))
               ~error_message:(Some long_cause)
               ~ended_at:"2026-09-23T02:00:00Z"));
       let long_summary = summary () in

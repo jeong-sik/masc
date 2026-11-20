@@ -33,7 +33,7 @@ type t = {
       (** Internal agent loop iterations within this Keeper turn. *)
   current_task_id : string option;
   outcome : outcome_kind;
-  terminal_reason_code : string;
+  terminal_reason : Keeper_terminal_reason.t;
   response_text_present : bool;
   completion_contract_result : completion_contract_result;
   actionable_signal : Keeper_contract_classifier.actionable_signal option;
@@ -84,9 +84,10 @@ val stop_reason_to_string : Runtime_agent.stop_reason -> string
     requests human input; yields are continuation checkpoints. *)
 val disposition_of_stop_reason : Runtime_agent.stop_reason -> Keeper_turn_disposition.t
 
-(** Canonical terminal-reason wire projection. The independent [stop_reason]
-    field preserves the precise yield cause and counts. *)
-val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> string
+(** The terminal reason of a turn that stopped without an error. The
+    independent [stop_reason] field preserves the precise yield cause and
+    counts. *)
+val terminal_reason_of_stop_reason : Runtime_agent.stop_reason -> Keeper_terminal_reason.t
 val sandbox_kind_of_meta :
   Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val list_json : 'a list -> [> `List of [> `String of 'a ] list ]

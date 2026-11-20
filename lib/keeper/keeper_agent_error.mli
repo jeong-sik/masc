@@ -25,16 +25,9 @@ val core_termination_semantics
 
 val core_termination_semantics_to_string : core_termination_semantics -> string
 
-(** Snake_case wire label for the disposition carried by a closed terminal
-    tool effect: ["proven_pre_effect"], ["proven_post_effect"] or
-    ["effect_outcome_unknown"]. *)
-val terminal_effect_disposition_to_wire
-  :  Agent_core.Error.closed_terminal_effect
-  -> string
-
 (** RFC-0042 PR-2.5: typed bridge variants of the wire accessors.
-    Wrap the existing parametrised wire string in
-    [Keeper_turn_terminal_code.Agent_core_error]. PR-3 swaps
+    Wrap the parametrised wire string [Keeper_terminal_reason.code_of_core_error]
+    writes in [Keeper_turn_terminal_code.Agent_core_error]. PR-3 swaps
     [Keeper_turn_terminal.t.code] from [string] to
     [Keeper_turn_terminal_code.t] and uses these accessors at every
     emit site. RFC §5.2 explicitly defers per-variant constructors
@@ -44,13 +37,11 @@ val terminal_effect_disposition_to_wire
     Byte invariant guarded by [test_keeper_core_error_typed_bridge].
 
     @since 0.193.1 *)
-val terminal_reason_code_of_core_error : Agent_core.Error.t -> string
-
 val terminal_reason_code_of_core_error_typed
   :  Agent_core.Error.t
   -> Keeper_turn_terminal_code.t
 
-(** Typed counterpart of [api_error_terminal_reason_code]. *)
+(** [terminal_reason_code_of_core_error_typed (Agent_core.Error.Api err)]. *)
 val api_error_terminal_reason_code_typed
   :  Agent_core.Error.api_error
   -> Keeper_turn_terminal_code.t

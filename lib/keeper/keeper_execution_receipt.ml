@@ -131,23 +131,6 @@ let receipt_operator_disposition receipt_json =
 let operator_disposition (receipt : t)
   : operator_disposition_kind * operator_disposition_reason
   =
-  (* Parse the wire string ONCE into the typed classification
-     ([Keeper_terminal_reason]). Each branch below is a variant test in
-     priority order. The error_kind sub-predicates read the receipt record,
-     not the wire string, and are OR'd with the variant test at the same
-     branch. *)
-  let terminal_reason = Keeper_terminal_reason.of_wire receipt.terminal_reason_code in
-  let input_required =
-    let open Keeper_turn_disposition in
-    match Keeper_turn_disposition.of_wire receipt.terminal_reason_code with
-    | Input_required -> true
-    | Success
-    | Checkpoint
-    | External_cancel
-    | Runtime_attempts_exhausted
-    | Provider_error _
-    | Unknown _ -> false
-  in
   (* Either half puts this turn on a degraded-retry lane: it dispatched on a
      lane an earlier turn deferred to, or it deferred one itself. The
      disposition is the same for both; only the receipt's label distinguishes
@@ -156,156 +139,29 @@ let operator_disposition (receipt : t)
     Option.is_some receipt.degraded_retry_applied
     || Option.is_some receipt.degraded_retry_deferred
   in
-  (* Runtime exhaustion reaches this branch via
-     [terminal_reason="runtime_exhausted"]; the closed [runtime_outcome] set
-     has no exhaustion value. *)
-  match terminal_reason with
-  | _ when input_required -> Disp_pass, Reason_input_required
-  | Keeper_terminal_reason.Transcript_corruption _ ->
-    (* Admission refused the stored history before provider dispatch, so
-       nothing left the process. What reaches this arm is a break no
-       synthesized tool result repairs: the Keeper cannot save a checkpoint
-       and fails every later turn at the same message, and boot recovery
-       leaves that latch standing. An operator repairs the history with a
-       checkpoint purge. *)
-    Disp_operator_action_required, Reason_transcript_corruption
-  | Keeper_terminal_reason.Official_client_recovery_required _ ->
-    (* The refusal happened while claiming the local durable session, before
-       provider dispatch. The same session remains held until an operator
-       resolves its recovery, so the receipt must not claim a runtime
-       continuation. *)
-    Disp_operator_action_required, Reason_official_client_recovery_required
-  | Keeper_terminal_reason.Official_client_session_refused refusal ->
-    (* Refused before provider dispatch because of the vendor session's
-       state, so no toml edit changes it (#38402). What follows depends on
-       which session fact refused. *)
-    (match refusal with
-     | Keeper_official_client_session_refusal.Gate_continuation_unresumable
-     | Keeper_official_client_session_refusal.Gate_context_frontier_missing
-     | Keeper_official_client_session_refusal.Gate_canonical_context_changed
-     | Keeper_official_client_session_refusal.Task_reference_unbound ->
-       (* The continuation or reference is bound to one vendor session that
-          no longer matches. Every later turn meets the same session, so a
-          person decides what happens to the bound work. *)
-       Disp_operator_action_required, Reason_official_client_session_refused
-     | Keeper_official_client_session_refusal.Claim_held_by_this_process ->
-       (* Another turn of this process holds the claim; a later cycle finds
-          it released. *)
-       Disp_retry_later, Reason_official_client_session_refused
-     | Keeper_official_client_session_refusal.Task_reference_unsupported
-     | Keeper_official_client_session_refusal.Continuation_on_other_runtime ->
-       (* A fact of this candidate alone (its client cannot carry the
-          reference, or it is not the continuation's runtime): the lane walks
-          on to the next candidate, and this receipt is reached only when none
-          was left. *)
-       Disp_fail_open_next_runtime, Reason_official_client_session_refused)
-  | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
-    (* Same-turn replay stays forbidden, and the runtime lifecycle selects a
-       later turn, so the Keeper keeps running. Nothing proves whether the
-       attempt changed anything outside, so a person checks the effect. *)
-    Disp_effect_review_required, Reason_provider_attempt_effect_fenced
-  | Keeper_terminal_reason.Tool_correction_lost _ ->
-    (* Identical disposition to the fence above; only the label differs so a
-       lost correction (masc#28885) is countable apart from an ordinary
-       fenced provider failure. *)
-    Disp_effect_review_required, Reason_tool_correction_lost
-  | Keeper_terminal_reason.Terminal_effect_failed _ ->
-    (* Third member of the same family: the turn's closing tool may or may not
-       have put something outside the process, so the turn is never replayed
-       and the stimulus behind it is retired rather than requeued. A human
-       decides what happened, which is why this sits with its siblings above
-       the retry-label guards — a degraded retry elsewhere in the turn must
-       not relabel an alert this one earns on its own. Until now it reached
-       the operator as an unmapped state (#29929). *)
-    Disp_effect_review_required, Reason_terminal_effect_failed
-  | Keeper_terminal_reason.Runtime_exhausted _ ->
-    Disp_fail_open_next_runtime, Reason_runtime_exhausted
-  (* Two refusals that both stop the turn before dispatch and both need a
-     human, but need different things from that human. They are constructor
-     arms rather than a boolean guard, so a third pre-dispatch refusal added
-     later cannot silently inherit either label. *)
-  | Keeper_terminal_reason.Config_invalid _ ->
-    Disp_operator_action_required, Reason_config_invalid
-  | Keeper_terminal_reason.Authorization_refused _ ->
-    (* The wire says the provider refused under authorization and nothing
-       more. In September every one of these 852 turns was a usage limit
-       (838 weekly, 14 five-hour), which holds that runtime for days, so
-       [Disp_retry_later] would put the keeper against the same wall on every
-       later cycle. The operator moves the slot instead, and the audit log
-       records that they do: all 316 [runtime_config_write] entries came from
-       operator surfaces, none from a keeper. Short-period limits arrive as
-       [api_error_rate_limited] and never reach this arm. *)
-    Disp_operator_action_required, Reason_authorization_refused
-  | Keeper_terminal_reason.Provider_runtime_failure _ ->
+  let fallback_on_the_receipt =
+    receipt.runtime_fallback_applied
+    || receipt.runtime_outcome = Runtime_passed_to_next_model
+  in
+  (* The path for a reason with no disposition of its own: what the system did
+     about the turn (degraded retry, fallback) and the turn's outcome decide. *)
+  let by_outcome ~accept_rejected =
     if degraded_retry_on_the_receipt
     then Disp_fail_open_next_runtime, Reason_degraded_retry
-    else if
-      receipt.runtime_fallback_applied
-      || receipt.runtime_outcome = Runtime_passed_to_next_model
+    else if fallback_on_the_receipt
     then Disp_pass_next_model, Reason_runtime_fallback
-    else if
-      Keeper_terminal_reason.is_transient_provider_runtime_failure
-        terminal_reason
-    then
-      (* This terminal receipt has already excluded both same-turn degraded retry
-         and cross-runtime fallback.  The Keeper remains live and its keepalive
-         cadence may run another turn later, but this turn did not move to a next
-         runtime.  Keep that future scheduling contract distinct from observed
-         same-turn routing. *)
-      Disp_retry_later, Reason_transient_runtime_retry
-    else
-      (* No degraded retry or cross-runtime fallback was observed above.  The
-         Keeper remains live and may try another turn later, but this terminal
-         receipt cannot claim a same-turn lane transition. *)
-      Disp_retry_later, Reason_provider_runtime_error
-  | Keeper_terminal_reason.Internal_error _ ->
-    Disp_fail_open_next_runtime, Reason_internal_error
-  | Accept_rejected _
-  | Pre_dispatch_success _
-  | Unknown _ ->
-    (* Generic fall-through for [Accept_rejected], [Pre_dispatch_success], and
-       [Unknown]. Pre-dispatch refusals and [Provider_runtime_failure] have
-       unguarded constructor arms above, which OCaml counts towards
-       exhaustiveness without a wildcard. *)
-    if degraded_retry_on_the_receipt
-    then Disp_fail_open_next_runtime, Reason_degraded_retry
-    else if
-      receipt.runtime_fallback_applied
-      || receipt.runtime_outcome = Runtime_passed_to_next_model
-    then Disp_pass_next_model, Reason_runtime_fallback
-    else if
-      receipt.outcome = `Ok
-      && receipt.runtime_outcome = Runtime_not_dispatched
-      &&
-      (match terminal_reason with
-       | Keeper_terminal_reason.Pre_dispatch_success _ -> true
-       | Runtime_exhausted _
-       | Config_invalid _
-       | Authorization_refused _
-       | Provider_runtime_failure _
-       | Transcript_corruption _
-       | Official_client_recovery_required _
-       | Official_client_session_refused _
-       | Provider_attempt_effect_fenced _
-       | Tool_correction_lost _
-       | Accept_rejected _
-       | Terminal_effect_failed _
-       | Internal_error _
-       | Unknown _ -> false)
-    then Disp_pass, Reason_healthy
     (* "healthy" requires an explicit success signal: turn completed without
        error AND runtime reached the configured terminal. Any other fallthrough
        is an unmapped state — surface it as "unknown" so a new runtime_outcome
-       or terminal_reason_code does not silently display as "healthy" on the
+       or terminal reason does not silently display as "healthy" on the
        dashboard. See #9900 and CLAUDE.md anti-pattern #2.
 
-       Cancelled is split out from the legacy binary outcome so dashboards
-       and replay decoders can distinguish a user-initiated cancellation
-       from a true failure. Skipped corresponds to the TLA+ [PhaseGateSkip]
-       action: a turn that intentionally never dispatched, so runtime
-       never engaged. It is a successful no-op rather than a failure or
-       an unmapped state. Spec parity with [ReceiptOutcomeSet] in
-       [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
+       Cancelled is split out from the binary outcome so dashboards and replay
+       decoders can distinguish a user-initiated cancellation from a true
+       failure. Skipped corresponds to the TLA+ [PhaseGateSkip] action: a turn
+       that intentionally never dispatched, so runtime never engaged. It is a
+       successful no-op rather than a failure or an unmapped state. Spec parity
+       with [ReceiptOutcomeSet] in [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
     else (
       match receipt.outcome with
       | `Cancelled -> Disp_user_cancelled, Reason_cancelled
@@ -322,22 +178,7 @@ let operator_disposition (receipt : t)
          observation (masc#31312), so a successful turn does not arrive as
          [Runtime_not_observed]. A receipt that does is a producer hole and
          belongs in unmapped, per the contract above. *)
-      | _
-        when (match terminal_reason with
-              | Keeper_terminal_reason.Accept_rejected _ -> true
-              | Runtime_exhausted _
-              | Config_invalid _
-              | Authorization_refused _
-              | Provider_runtime_failure _
-              | Transcript_corruption _
-              | Official_client_recovery_required _
-              | Official_client_session_refused _
-              | Provider_attempt_effect_fenced _
-              | Tool_correction_lost _
-              | Terminal_effect_failed _
-              | Internal_error _
-              | Pre_dispatch_success _
-              | Unknown _ -> false) ->
+      | _ when accept_rejected ->
         (* Last, not first: the degraded-retry and fallback labels above say
            what the system DID about the rejection, which is the more useful
            fact when one of them applies — and today they claim 41 of the 42
@@ -359,12 +200,117 @@ let operator_disposition (receipt : t)
            regression of #11651 silent-path fix"
           (outcome_kind_to_string receipt.outcome)
           (runtime_outcome_to_string receipt.runtime_outcome)
-          receipt.terminal_reason_code
+          (Keeper_terminal_reason.to_wire receipt.terminal_reason)
           (completion_contract_result_to_string receipt.completion_contract_result)
           (Option.value
              (Option.map error_kind_to_string receipt.error_kind)
              ~default:"<none>");
         Disp_unknown, Reason_unmapped_runtime_state)
+  in
+  match receipt.terminal_reason with
+  | Keeper_terminal_reason.Input_required -> Disp_pass, Reason_input_required
+  | Keeper_terminal_reason.Completed
+  | Keeper_terminal_reason.Checkpoint
+  | Keeper_terminal_reason.Supervisor_stop
+  | Keeper_terminal_reason.External_cancel
+  | Keeper_terminal_reason.Phase_not_executable _
+  | Keeper_terminal_reason.Registry_phase_missing -> by_outcome ~accept_rejected:false
+  | Keeper_terminal_reason.Failed err ->
+    (match Keeper_terminal_reason.failure_class err with
+     | Keeper_terminal_reason.Transcript_corruption ->
+       (* Admission refused the stored history before provider dispatch, so
+          nothing left the process. What reaches this arm is a break no
+          synthesized tool result repairs: the Keeper cannot save a checkpoint
+          and fails every later turn at the same message, and boot recovery
+          leaves that latch standing. An operator repairs the history with a
+          checkpoint purge. *)
+       Disp_operator_action_required, Reason_transcript_corruption
+     | Keeper_terminal_reason.Official_client_recovery_required ->
+       (* The refusal happened while claiming the local durable session, before
+          provider dispatch. The same session remains held until an operator
+          resolves its recovery, so the receipt must not claim a runtime
+          continuation. *)
+       Disp_operator_action_required, Reason_official_client_recovery_required
+     | Keeper_terminal_reason.Official_client_session_refused refusal ->
+       (* Refused before provider dispatch because of the vendor session's
+          state, so no toml edit changes it (#38402). What follows depends on
+          which session fact refused. *)
+       (match refusal with
+        | Keeper_official_client_session_refusal.Gate_continuation_unresumable
+        | Keeper_official_client_session_refusal.Gate_context_frontier_missing
+        | Keeper_official_client_session_refusal.Gate_canonical_context_changed
+        | Keeper_official_client_session_refusal.Task_reference_unbound ->
+          (* The continuation or reference is bound to one vendor session that
+             no longer matches. Every later turn meets the same session, so a
+             person decides what happens to the bound work. *)
+          Disp_operator_action_required, Reason_official_client_session_refused
+        | Keeper_official_client_session_refusal.Claim_held_by_this_process ->
+          (* Another turn of this process holds the claim; a later cycle finds
+             it released. *)
+          Disp_retry_later, Reason_official_client_session_refused
+        | Keeper_official_client_session_refusal.Task_reference_unsupported
+        | Keeper_official_client_session_refusal.Continuation_on_other_runtime ->
+          (* A fact of this candidate alone (its client cannot carry the
+             reference, or it is not the continuation's runtime): the lane walks
+             on to the next candidate, and this receipt is reached only when none
+             was left. *)
+          Disp_fail_open_next_runtime, Reason_official_client_session_refused)
+     | Keeper_terminal_reason.Provider_attempt_effect_fenced ->
+       (* Same-turn replay stays forbidden, and the runtime lifecycle selects a
+          later turn, so the Keeper keeps running. Nothing proves whether the
+          attempt changed anything outside, so a person checks the effect. *)
+       Disp_effect_review_required, Reason_provider_attempt_effect_fenced
+     | Keeper_terminal_reason.Tool_correction_lost ->
+       (* Identical disposition to the fence above; only the label differs so a
+          lost correction (masc#28885) is countable apart from an ordinary
+          fenced provider failure. *)
+       Disp_effect_review_required, Reason_tool_correction_lost
+     | Keeper_terminal_reason.Terminal_effect_failed ->
+       (* Third member of the same family: the turn's closing tool may or may not
+          have put something outside the process, so the turn is never replayed
+          and the stimulus behind it is retired rather than requeued. A human
+          decides what happened, which is why this sits with its siblings ahead
+          of the retry labels — a degraded retry elsewhere in the turn must not
+          relabel an alert this one earns on its own (#29929). *)
+       Disp_effect_review_required, Reason_terminal_effect_failed
+     | Keeper_terminal_reason.Runtime_exhausted ->
+       Disp_fail_open_next_runtime, Reason_runtime_exhausted
+     (* Two refusals that both stop the turn before dispatch and both need a
+        human, but need different things from that human. They are separate
+        classes, so a third pre-dispatch refusal added later cannot silently
+        inherit either label. *)
+     | Keeper_terminal_reason.Config_invalid ->
+       Disp_operator_action_required, Reason_config_invalid
+     | Keeper_terminal_reason.Authorization_refused ->
+       (* The error says the provider refused under authorization and nothing
+          more. In September every one of these 852 turns was a usage limit
+          (838 weekly, 14 five-hour), which holds that runtime for days, so
+          [Disp_retry_later] would put the keeper against the same wall on every
+          later cycle. The operator moves the slot instead, and the audit log
+          records that they do: all 316 [runtime_config_write] entries came from
+          operator surfaces, none from a keeper. Short-period limits arrive as
+          [api_error_rate_limited] and never reach this arm. *)
+       Disp_operator_action_required, Reason_authorization_refused
+     | Keeper_terminal_reason.Provider_runtime_failure retry ->
+       if degraded_retry_on_the_receipt
+       then Disp_fail_open_next_runtime, Reason_degraded_retry
+       else if fallback_on_the_receipt
+       then Disp_pass_next_model, Reason_runtime_fallback
+       else (
+         (* This terminal receipt has already excluded both same-turn degraded
+            retry and cross-runtime fallback. The Keeper remains live and its
+            keepalive cadence may run another turn later, but this turn did not
+            move to a next runtime, so the receipt claims no same-turn lane
+            transition. *)
+         match retry with
+         | Keeper_terminal_reason.Transient ->
+           Disp_retry_later, Reason_transient_runtime_retry
+         | Keeper_terminal_reason.Persistent ->
+           Disp_retry_later, Reason_provider_runtime_error)
+     | Keeper_terminal_reason.Internal_error ->
+       Disp_fail_open_next_runtime, Reason_internal_error
+     | Keeper_terminal_reason.Accept_rejected -> by_outcome ~accept_rejected:true
+     | Keeper_terminal_reason.No_failure_policy -> by_outcome ~accept_rejected:false)
 ;;
 
 let to_json_with_operator_disposition
@@ -372,7 +318,7 @@ let to_json_with_operator_disposition
       ~disposition
       ~disposition_reason
   =
-  let terminal_reason_code = receipt.terminal_reason_code in
+  let terminal_reason_code = Keeper_terminal_reason.to_wire receipt.terminal_reason in
   let operator_disposition = operator_disposition_kind_to_string disposition in
   let operator_disposition_reason =
     operator_disposition_reason_to_string disposition_reason
@@ -501,7 +447,7 @@ let needs_operator_broadcast = function
 ;;
 
 let operator_broadcast_payload (receipt : t) ~disposition ~reason =
-  let terminal_reason_code = receipt.terminal_reason_code in
+  let terminal_reason_code = Keeper_terminal_reason.to_wire receipt.terminal_reason in
   let disposition_s = operator_disposition_kind_to_string disposition in
   let reason_s = operator_disposition_reason_to_string reason in
   `Assoc

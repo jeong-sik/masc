@@ -38,10 +38,6 @@ val kind : t -> kind
 val kind_to_code : kind -> string
 (** The turn terminal reason code. *)
 
-val kind_of_code : string -> kind option
-(** Exact inverse of {!kind_to_code}, for terminal reason codes read back
-    from receipts. *)
-
 val code : t -> string
 (** [kind_to_code (kind error)]. *)
 

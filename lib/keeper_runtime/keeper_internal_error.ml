@@ -704,42 +704,6 @@ let wire_kind_to_string = function
   | Wire_receipt_persistence_failed -> "receipt_persistence_failed"
   | Wire_gate_replay_repair_required -> "gate_replay_repair_required"
 
-(* Decoding scans this list through [wire_kind_to_string] rather than
-   repeating the strings, so encoder and decoder cannot spell a kind
-   differently. *)
-let all_wire_kinds =
-  [ Wire_official_client_recovery_required
-  ; Wire_runtime_exhausted
-  ; Wire_resumable_cli_session
-  ; Wire_accept_rejected
-  ; Wire_internal_unhandled_exception
-  ; Wire_internal_bridge_exception
-  ; Wire_internal_contract_rejected
-  ; Wire_incomplete_tool_transcript
-  ; Wire_terminal_effect_failed
-  ; Wire_provider_attempt_effect_fenced
-  ; Wire_tool_correction_lost
-  ; Wire_host_stopped_turn
-  ; Wire_runtime_connection_closed
-  ; Wire_receipt_persistence_failed
-  ; Wire_gate_replay_repair_required
-  ]
-
-(* A wire reason is either the bare kind or [kind:params] -- a producer
-   appends the call's parameters after a colon. Read the kind and leave the
-   parameters to the payload, so a reason that carries them decodes to its
-   typed kind instead of falling through as [Unknown]. *)
-let wire_kind_of_string wire =
-  let kind =
-    match String.index_opt wire ':' with
-    | None -> wire
-    | Some colon -> String.sub wire 0 colon
-  in
-  List.find_opt
-    (fun candidate -> String.equal (wire_kind_to_string candidate) kind)
-    all_wire_kinds
-;;
-
 let kind_of_masc_internal_error error =
   wire_kind_to_string (wire_kind_of_masc_internal_error error)
 ;;

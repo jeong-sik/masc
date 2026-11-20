@@ -36,7 +36,7 @@ type t =
   (** Catch-all for [Agent_core.Error.t] wire strings (agent / api /
           mcp / config / serialization / io / orchestration / a2a /
           internal). The payload is the existing parametrised wire
-          format produced by [Keeper_agent_error.terminal_reason_code_of_core_error]
+          format produced by [Keeper_terminal_reason.code_of_core_error]
           (e.g. ["api_error_server:502"]). PR-2.5 wraps the existing typed
           accessors in this variant so the typed bridge becomes a
           single source of truth for [Keeper_turn_terminal.t.code]
@@ -57,9 +57,7 @@ val to_wire : t -> string
 val of_wire_exact : string -> t option
 
 (** Wrap an [Agent_core.Error.t] wire string produced by
-    [Keeper_agent_error.terminal_reason_code_of_core_error] /
-    [agent_error_terminal_reason_code] /
-    [api_error_terminal_reason_code], with the typed timeout observation the
-    producer derived from the original error. The wire stays verbatim:
+    [Keeper_terminal_reason.code_of_core_error], with the typed timeout
+    observation the producer derived from the original error. The wire stays verbatim:
     [to_wire] reproduces it byte-for-byte. *)
 val of_core_error : wire:string -> timeout:agent_core_timeout option -> t

@@ -7893,3 +7893,5 @@
  (modules test_librarian_l6g_question_corpus)
  (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc alcotest masc_test_deps masc.agent_core yojson))
+
+(include stanzas/test_runtime_official_client_seats.inc)

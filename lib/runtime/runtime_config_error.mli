@@ -126,6 +126,11 @@ type load_failure =
           [max-concurrent] or [admission-priority-run-limit]. Admission keeps
           one allowance per account, so the configuration is refused, naming
           each runtime and its values. *)
+  | Official_client_seats_disagree of Runtime_official_client_seats.disagreement list
+      (** Official client runtimes of one provider account that declare
+          different [max-concurrent]. The account's client processes run
+          under one number, so the configuration is refused, naming each
+          runtime and its number. *)
   | Thinking_requests_inadmissible of thinking_request_refusal list
       (** Runtimes whose every turn would be refused before it is sent: a turn
           applies the row's thinking request and meets the same admission. *)

@@ -4510,6 +4510,51 @@ let test_a_cli_slot_whose_binding_declares_seats_loads () =
   | Ok _ -> ()
 ;;
 
+(* One official client account runs its client processes under one number,
+   so its runtimes declare the same [max-concurrent] (RFC
+   exact-lane-walks-one-slot-list section 3.6). Two numbers on one account
+   are refused, naming each runtime; the same number on both loads. *)
+let official_client_account_with_seats ~sonnet ~haiku =
+  String.concat
+    "\n\n"
+    [ String.trim runtime_config
+    ; String.trim undeclared_claude_code_bindings ^ Printf.sprintf "\nmax-concurrent = %d" sonnet
+    ; Printf.sprintf
+        "[models.haiku]\napi-name = \"claude-haiku-5-5\"\nmax-context = 400000\n\n\
+         [claude_cli.haiku]\nmax-concurrent = %d"
+        haiku
+    ]
+;;
+
+let test_official_client_runtimes_of_one_account_declaring_two_numbers_are_refused () =
+  with_temp_dir "runtime-official-client-seats" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path (official_client_account_with_seats ~sonnet:2 ~haiku:4);
+  match Runtime.load_list ~config_path:path with
+  | Error (Runtime_config_error.Official_client_seats_disagree [ disagreement ]) ->
+    Alcotest.(check string) "the account" "claude_cli" disagreement.account;
+    Alcotest.(check (list (pair string int)))
+      "each runtime with its number"
+      [ "claude_cli.haiku", 4; "claude_cli.sonnet", 2 ]
+      (List.sort compare disagreement.declarations);
+    let text =
+      Runtime_config_error.to_diagnostic_text ~config_path:path
+        (Runtime_config_error.Official_client_seats_disagree [ disagreement ])
+    in
+    Alcotest.(check bool) "the refusal names the key" true
+      (string_contains text "max-concurrent")
+  | Error failure ->
+    Alcotest.failf "refused for another reason: %s"
+      (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+  | Ok _ -> Alcotest.fail "one official client account declaring two numbers loaded"
+;;
+
+let test_official_client_runtimes_of_one_account_declaring_one_number_load () =
+  match load_lane_config (official_client_account_with_seats ~sonnet:2 ~haiku:2) with
+  | Error msg -> Alcotest.failf "one number on one account must load: %s" msg
+  | Ok _ -> ()
+;;
+
 let test_an_undeclared_official_client_in_slots_is_not_held_to_seats () =
   let config =
     String.concat
@@ -5020,6 +5065,13 @@ let () =
         ; Alcotest.test_case
             "a cli slot whose binding declares seats loads" `Quick
             test_a_cli_slot_whose_binding_declares_seats_loads
+        ; Alcotest.test_case
+            "official client runtimes of one account declaring two numbers are refused"
+            `Quick
+            test_official_client_runtimes_of_one_account_declaring_two_numbers_are_refused
+        ; Alcotest.test_case
+            "official client runtimes of one account declaring one number load" `Quick
+            test_official_client_runtimes_of_one_account_declaring_one_number_load
         ; Alcotest.test_case
             "an undeclared official client in slots is not held to seats" `Quick
             test_an_undeclared_official_client_in_slots_is_not_held_to_seats

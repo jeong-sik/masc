@@ -107,6 +107,7 @@ type load_failure =
       }
   | Admission_allowances_disagree of
       Llm_provider.Provider_admission.allowance_disagreement list
+  | Official_client_seats_disagree of Runtime_official_client_seats.disagreement list
   | Thinking_requests_inadmissible of thinking_request_refusal list
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
@@ -288,6 +289,22 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
               disagreement.declarations
          |> String.concat "\n")
        |> String.concat "\n")
+  | Official_client_seats_disagree disagreements ->
+    Printf.sprintf
+      "%s: official client runtimes of one provider account declare different \
+       %s. The account's client processes run under one number, so give every \
+       runtime on it the same value:\n%s"
+      config_path
+      max_concurrent_key
+      (disagreements
+       |> List.map (fun (disagreement : Runtime_official_client_seats.disagreement) ->
+         Printf.sprintf "  provider %s:" disagreement.account
+         :: List.map
+              (fun (runtime_id, number) ->
+                 Printf.sprintf "    %s: %s = %d" runtime_id max_concurrent_key number)
+              disagreement.declarations
+         |> String.concat "\n")
+       |> String.concat "\n")
   | Exact_slot_body_deadlines_absent gaps ->
     Printf.sprintf
       "%s: this change adds %d exact-output slot(s) on a provider that declares \
@@ -364,6 +381,7 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Lane_candidate_unresolved _
   | Max_context_absent _
   | Admission_allowances_disagree _
+  | Official_client_seats_disagree _
   | Thinking_requests_inadmissible _
   | Exact_slot_body_deadlines_absent _
   | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure

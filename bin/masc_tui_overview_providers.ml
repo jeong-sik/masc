@@ -267,17 +267,13 @@ let utilization_text = function
   | Masc.Tui_decode_usage.Utilization_credit_unlimited -> "Credit unlimited"
   | Masc.Tui_decode_usage.Utilization_credit_retracted -> "Credit retracted"
 
-let minutes_per_hour = 60
-let minutes_per_day = 24 * minutes_per_hour
+let seconds_per_minute = 60
 
 (* The label only: a 300-minute window reads "5h" whatever the server called
-   it, and two rows are never merged because their labels agree. *)
-let minutes_label minutes =
-  if minutes > 0 && minutes mod minutes_per_day = 0 then
-    Printf.sprintf "%dd" (minutes / minutes_per_day)
-  else if minutes > 0 && minutes mod minutes_per_hour = 0 then
-    Printf.sprintf "%dh" (minutes / minutes_per_hour)
-  else Printf.sprintf "%dm" minutes
+   it, and two rows are never merged because their labels agree. A window is
+   a length the provider set, so it reads on the set-span ladder (RFC
+   tui-one-screen-grammar 6.2): 90 minutes is 1h30m, 36 hours 1d12h. *)
+let minutes_label minutes = Masc_tui_value.Interval.text (minutes * seconds_per_minute)
 
 let kind_label = function
   | Masc.Tui_decode_usage.Window_five_hour -> "5h"

@@ -60,23 +60,39 @@ let booted config =
     | Some Held_booting when tries > 0 ->
       Eio.Fiber.yield ();
       settle (tries - 1)
-    | Some (Held_booting | Held _ | Held_retired) | None -> ()
+    | Some Held_booting -> fail "the writer is still booting"
+    | Some (Held _ | Held_retired) | None -> ()
   in
   settle 10_000
+;;
+
+(* The Keeper's row as the section carries it. *)
+let row_of config =
+  match member "keepers" (Health.section_json ~config) with
+  | `List entries ->
+    (match
+       List.find_opt (fun entry -> String.equal (text "keeper" entry) keeper) entries
+     with
+     | Some entry -> member "row" entry
+     | None -> fail "the section has no row for the Keeper")
+  | other -> failf "keepers is not a list: %s" (Yojson.Safe.to_string other)
 ;;
 
 let test_a_process_without_writers () =
   let config = Masc.Workspace.default_config (Filename.temp_dir "writer-health" "") in
   check string "the section says so" "none_in_process"
     (text "writers" (Health.section_json ~config));
-  check bool "and a Keeper has no row" true (Health.row_for ~config ~keeper = `Null)
+  check bool "and it lists no Keeper" true
+    (match Health.section_json ~config with
+     | `Assoc fields -> not (List.mem_assoc "keepers" fields)
+     | other -> failf "the section is not an object: %s" (Yojson.Safe.to_string other))
 ;;
 
 (* A writer with no lane value and nothing unread is open and has no alarm. *)
 let test_an_open_writer () =
   in_workspace (fun ~sw config ->
     let (_ : Writer.view) = Deps.booted_memory_writer_view ~sw ~config keeper in
-    let row = Health.row_for ~config ~keeper in
+    let row = row_of config in
     check string "its state" "idle" (text "state" row);
     check string "its level" "ok" (text "level" row);
     check (list string) "no alarm" [] (alarms row);
@@ -110,7 +126,7 @@ let test_a_stopped_writer () =
     Fs_compat.mkdir_p (Filename.dirname log_path);
     Out_channel.with_open_bin log_path (fun channel -> output_string channel "not json\n");
     booted config;
-    let row = Health.row_for ~config ~keeper in
+    let row = row_of config in
     check string "its state" "stopped" (text "state" row);
     check (list string) "E1" [ "E1" ] (alarms row);
     check string "an error" "error" (text "level" row);

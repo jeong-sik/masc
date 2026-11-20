@@ -38,14 +38,6 @@ let failed_token : Librarian_read_result.failed -> string = function
   | Read_failed -> "read_failed"
 ;;
 
-let store_of : Machine.state -> Store.t option = function
-  | Idle { store; seen_length = (_ : int option) }
-  | Asking { store; asking = (_ : Machine.asking) }
-  | Resting store
-  | Refused_at_bottom store -> Some store
-  | Stopped (_ : Store.stop) -> None
-;;
-
 (* The same reading the writer's next ask makes (§9.2): the first unit with
    an item past the store's tail. A turn log that does not read is counted
    as unread, as the next ask counts it. *)
@@ -185,24 +177,26 @@ let row_with_level ~config ~keeper : Librarian_writer.held -> Level.level * Yojs
   | Held_booting -> shown ~state:"booting" ~alarms:(Level.alarms Booting) [ "unread", `Null ]
   | Held_retired -> shown ~state:"retired" ~alarms:(Level.alarms Retired) []
   | Held machine ->
-    let store = store_of machine.state in
+    (* An open store shows where reading stands and Memory; a stopped one
+       shows why it stopped. *)
+    let store, place =
+      match machine.state with
+      | Stopped stop -> None, stopped_fields ~config ~keeper stop
+      | Idle { store; seen_length = (_ : int option) }
+      | Asking { store; asking = (_ : Machine.asking) }
+      | Resting store
+      | Refused_at_bottom store ->
+        ( Some store
+        , tail_fields (Store.tail store)
+          @ [ ( "memory"
+              , `Assoc
+                  [ "snapshot", digest_json (Log_line.snapshot_after (Store.tail store))
+                  ; "facts", `Int (List.length (Store.memory store).facts)
+                  ] )
+            ] )
+    in
     let unread = Option.fold ~none:false ~some:(unread ~config ~keeper) store in
     let now = Option.map (fun store -> Log_line.snapshot_after (Store.tail store)) store in
-    let place =
-      match store with
-      | Some store ->
-        tail_fields (Store.tail store)
-        @ [ ( "memory"
-            , `Assoc
-                [ "snapshot", Option.fold ~none:`Null ~some:digest_json now
-                ; "facts", `Int (List.length (Store.memory store).facts)
-                ] )
-          ]
-      | None ->
-        (match machine.state with
-         | Stopped stop -> stopped_fields ~config ~keeper stop
-         | Idle _ | Asking _ | Resting _ | Refused_at_bottom _ -> [])
-    in
     shown
       ~state:(state_token machine.state)
       ~alarms:(Level.alarms (Running { machine; unread }))
@@ -215,17 +209,6 @@ let row_with_level ~config ~keeper : Librarian_writer.held -> Level.level * Yojs
        ; "read_alone", `Bool machine.read_alone
        ]
        @ place)
-;;
-
-let row ~config ~keeper held = snd (row_with_level ~config ~keeper held)
-
-let row_for ~config ~keeper =
-  match Keeper_memory_writers.find ~base_path:config.Workspace.base_path with
-  | None -> `Null
-  | Some writers ->
-    (match List.assoc_opt keeper (Librarian_writers.held writers) with
-     | Some held -> row ~config ~keeper held
-     | None -> `Null)
 ;;
 
 let section_json ~config =

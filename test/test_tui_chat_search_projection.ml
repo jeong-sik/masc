@@ -107,6 +107,23 @@ let test_held_turn_tool_blocks_follow_the_tool_stance () =
   check bool "Compact draws one block, at the first block's place" true
     (tool_origins T.Tools_compact = [ List.hd full ])
 
+(* The table from every visible byte to its row is built when a held pin or
+   a searched point asks for it, not by a frame that follows the live edge:
+   for a long reply it is a structural hash per byte, and the first frame
+   paid for it before anyone scrolled. *)
+let test_byte_rows_wait_for_a_pin () =
+  let state = state Layout.Origin_inline in
+  let text = String.concat "\n" (List.init 40 (Printf.sprintf "line %d of a long reply")) ^ "\nPIN_NEEDLE" in
+  state.msg_loaded <- [ row ~id:"reply" ~request_id:"first" ~role:T.Message_keeper ~text 1. ];
+  let built () = Render.For_testing.source_rows_build_count () in
+  let before = built () in
+  ignore (frame_lines state);
+  ignore (frame_lines state);
+  check int "frames at the live edge build no byte rows" before (built ());
+  ignore (find state "PIN_NEEDLE");
+  ignore (frame_lines state);
+  check bool "a searched point builds them" true (built () > before)
+
 let test_settled_reply_and_complete_suffix () = at_sizes (fun origin ->
   let state = state origin in
   state.msg_loaded <- [
@@ -1538,6 +1555,7 @@ let () = run "chat search projection" [
     test_case "a settled conversation keeps its measured list" `Quick
       test_a_settled_conversation_keeps_its_measured_list;
     test_case "held replies and full suffix geometry" `Quick test_settled_reply_and_complete_suffix;
+    test_case "byte rows wait for a pin" `Quick test_byte_rows_wait_for_a_pin;
     test_case "a held turn's tool blocks follow the tool stance" `Quick
       test_held_turn_tool_blocks_follow_the_tool_stance;
     test_case "repeated matches within one entry are newest first" `Quick

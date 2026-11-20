@@ -187,6 +187,7 @@ module For_testing : sig
   val chat_markdown_cache : chat_markdown_identity Masc_tui_markdown_render_cache.t
   val chat_markdown_theme_revision : int
   val source_index_build_count : unit -> int
+  val source_rows_build_count : unit -> int
   val source_url_discovery_count : unit -> int
   val search_candidate_build_count : unit -> int
 end

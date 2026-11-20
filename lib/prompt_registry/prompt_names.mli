@@ -260,9 +260,8 @@ val keeper_recall_turn_yes : string
 val keeper_recall_turn_no : string
 val keeper_recall_turn_unsure : string
 
-(** The two blocks of the recall judgment (RFC-keeper-recall-reaches-the-turn
-    section 4.4): the status line a judged turn always carries, and the body of
-    the memories the judgment carried. *)
+(** The two blocks of the recall judgment: the status line a judged turn
+    always carries, and the body of the memories the judgment carried. *)
 val keeper_recall_status_selected : string
 val keeper_recall_status_selected_ids : string
 val keeper_recall_status_capacity_deferred : string

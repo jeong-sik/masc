@@ -1,5 +1,4 @@
-(** Generic cross-domain tool-result guidance (RFC
-    prompts-and-tool-definitions-outside-ocaml §3.11).
+(** Generic cross-domain tool-result guidance.
 
     The closed variant below is the only way to reach a [tool_guidance.*]
     prompt key: call sites construct an arm with its data, {!to_string}

@@ -40,7 +40,7 @@ type parse_error = Provider_error of string | Empty_completion of empty_completi
 
 전파: `http_client.provider_failure_kind`에 `Empty_completion of { stop_reason : Types.stop_reason }`를 두고 모든 completion 경로가 공용 `Http_client.empty_completion_error`로 매핑한다. `retry_classify`의 `ProviderFailure _ -> None` 규칙으로 **non-retryable**이며, typed stop reason은 transport 경계까지 보존된다. 기존 공개 SDK 경계에서는 source compatibility를 위해 `ProviderUnavailable`로 일관되게 투영한다. 진단 문자열은 표시 전용이며 제어 흐름에서 다시 파싱하지 않는다.
 
-**문자열 분류기 아님**: string sentinel(`Error "empty_completion:…"`)은 RFC-AC-033/RFC-0042가 금하는 substring 분류기라 채택 안 함. typed variant로 닫음.
+**문자열 분류기 아님**: string sentinel(`Error "empty_completion:…"`)은 RFC-AC-033이 금하는 substring 분류기라 채택 안 함. typed variant로 닫음.
 
 ## 3. 범위에서 제외 (명시적 후속)
 

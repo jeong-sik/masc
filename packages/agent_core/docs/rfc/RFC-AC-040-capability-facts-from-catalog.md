@@ -6,7 +6,7 @@
 | Author | vincent (with Claude analysis) |
 | Created | 2026-09-18 |
 | Target | `agent_core` — `lib/llm_provider/`, `lib/provider_runtime_binding.ml`, `models.toml`; masc — `lib/runtime/runtime_adapter.ml`, `lib/keeper/keeper_effective_tool_surface.ml` |
-| Related | RFC-AC-018 §3·Phase 2, RFC-AC-023 §3.2·§3.3, RFC-AC-034 §2 규칙 4, masc RFC-0370 §3.2 |
+| Related | RFC-AC-018 §3·Phase 2, RFC-AC-023 §3.2·§3.3, RFC-AC-034 §2 규칙 4 |
 | 측정 기준 | `origin/main` `e50d28963b` (2026-09-19). 모든 수와 `파일:줄` 은 부록 A 의 명령으로 다시 낼 수 있다 |
 
 ## 0. 요약
@@ -196,7 +196,7 @@ OpenAI 호환 wire 에서 일반 경로는 `ollama_cloud_v1` 을 얹는다. `thi
   다만 §3.3 은 대신 `model_family_default_caps : Model_family.t -> model_caps` 를 코드에 두자고 한다. 이 RFC 는 이것을 받지 않는다. 계열 기본값은 지금의 preset 과 같은 종류다. 행이 필드를 빠뜨리면 계열 값이 조용히 들어간다.
   §2.2 의 `transport_caps`(wire 가 실어 나를 수 있는 것)는 원칙 3과 같은 방향이다.
 - **RFC-AC-034 §2 규칙 4** — 모르는 host·provider·model·label 은 Unknown/None/fail-closed 로 둔다. 원칙 2는 이 규칙을 조회 단위에서 필드 단위로 넓힌다.
-- **masc RFC-0370 §3.2** — 턴 타임아웃 300.0 을 "선언이 없을 때의 fallback" 으로 남겼다. 이것은 masc 런타임의 운영 상한이지 공급자·모델 사실이 아니다. 이 RFC 범위 밖이고 서로 어긋나지 않는다.
+- **masc 턴 타임아웃** — 선언이 없을 때의 fallback 으로 300.0 을 쓴다. 이것은 masc 런타임의 운영 상한이지 공급자·모델 사실이 아니다. 이 RFC 범위 밖이고 서로 어긋나지 않는다.
 
 ### 2.2 카탈로그와 `runtime.toml` 이 갈라지는 축
 
@@ -394,7 +394,7 @@ preset 을 fixture 바탕이나 인자로만 쓰는 파일이 20개다. `capabil
 - `Provider_kind.t`. wire 종류의 이름이다 (RFC-AC-023 §7.3 경계).
 - 모델 id 로 capability 를 고르는 코드. 인라인 테스트 밖에서 모델 id 모양 문자열은 22곳이다. 공급자 별칭 2, codec 이름 2, Gemini 진단 경로 17, 인라인 테스트 도우미 1이다. 모델 id 로 판정하는 곳은 없다.
 - 가격 필드(`input_per_million` 등). 이미 행 데이터다. `pricing.ml` 의 기본값은 이 RFC 에서 재지 않았다.
-- masc RFC-0370 §3.2 의 턴 타임아웃 fallback.
+- masc 의 턴 타임아웃 fallback.
 - Discovery 가 `/props` 에서 읽는 실측값 (RFC-AC-034 B5).
 
 ### 4.2 위험

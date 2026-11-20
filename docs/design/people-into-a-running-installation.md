@@ -810,3 +810,45 @@ config root 와 `runtime.toml` 두 줄은 직접 읽었다. 나머지는 조사�
 - `create_server_state` 가 놓는 observer 들, run registry replay, Gate 저장소 설치, Lane Add-on attach 와 fleet recovery, schedule runner, maintenance 의 recovery pulse 본문. 조사 에이전트도 읽지 않았다.
 - 사람의 Codex 홈 설정이 client 에게 명령을 실행시키는 항목(`mcp_servers`, `notify`). 판정은 environment 이름만 본다(#53704). 격리하지 않은 app-server 시작은 설정을 덮는 인자를 붙이지 않는다(`lib/runtime/runtime_codex_app_server.ml:2872-2881`).
 - 사람의 로그인이 늘 새 홈에서 뜬다는 조건(`lib/server/server_setup_account_login.ml:158-160`)을 고정하는 시험이 없다.
+
+## 22. S1 을 만든 뒤 공격 리뷰가 짚은 것
+
+줄 번호는 main `e25fdb1a` 기준이다. S1 의 RFC 와 PR 일곱(#53731, #53734, #53745, #53748, #53756, #53763, #53768)을 공격 리뷰가 읽었다. 리뷰가 짚은 줄을 다시 읽었다. 다시 읽지 않은 줄에는 "조사만 함" 을 붙였다.
+
+### 22.1 엔진이 띄우는 것
+
+- 계정 서버가 띄우는 엔진(`start_engine`)은 네 단계와 시작 감시를 띄운다(`lib/server/server_runtime_bootstrap.ml:1775-1801`). 시간 제한은 시작 감시 하나다(`:1753-1773`). 네 단계에는 시간 제한이 없다.
+- 넷째 단계의 background maintenance 가 Dashboard snapshot worker 를 띄운다(`:1591`, `lib/server/server_bootstrap_maintenance.ml:462-464`). 띄우지 않는 것은 단일 사용자 서버의 Dashboard refresh loop 들이다(`server_runtime_bootstrap.ml:2205-2215`).
+- 계정 서버의 준비 신호(`/health/ready`)는 zone 만 봤다. `masc restart` 는 그 200 을 교체한 서버가 준비됐다는 뜻으로 읽는다(`bin/masc_cli_restart.ml:285-310`). 엔진의 promise 는 준비 뒤 lane 을 띄운 다음에 풀렸다. 그래서 시작하다 실패한 lane 이 있으면 끝내 풀리지 않았다. 둘을 고치는 PR 은 #53795 다.
+- 엔진이 준비 전에 실패하면 프로세스가 끝난다. 계정 서버는 엔진보다 먼저 경로를 연다. 그래서 그때 받던 로그인과 사람의 쓰기가 끊긴다. 로그 쓰기가 반쯤 남는지는 읽지 않았다.
+
+### 22.2 Keeper 정의가 생기는 길
+
+- 첫 단계는 config root 를 다루기 전에 끝나지 않은 Keeper 설정 변경을 되돌린다(`server_runtime_bootstrap.ml:784`). 되돌리기는 변경 전 내용을 `<config root>/keepers/<이름>.toml` 에 다시 쓴다(`server_bootstrap_maintenance.ml:344-353`). 그래서 계정 서버는 journal 이 있으면 boot 를 멈춘다(`lib/server/server_accounts.ml:212-219`, #53790).
+- 정의 폴더 목록 함수는 stat 하지 못한 폴더를 없는 폴더로 읽는다(`lib/keeper/keeper_types_profile_toml_io.ml:199-201`). 계정 서버는 먼저 stat 하고, 없는 폴더만 정의가 없다고 본다(`server_accounts.ml:188-203`).
+- 정의 폴더 검사는 boot 때 한 번이다. supervisor sweep 이 돌 때마다 `keepalive_keeper_names` 가 정의 폴더를 다시 읽는다. meta 가 없고 `manual` 이 아닌 정의는 keepalive 후보가 된다(`lib/keeper/keeper_meta_store.ml:534-539, 577-610`, `lib/keeper/keeper_supervisor_reconcile_keepalive.ml:46`). 후보를 띄우는 단계는 읽지 않았다.
+- 실행 기록(`.masc/keepers/*.json`)은 검사하지 않는다. boot 가 그 파일로 owner 를 세운다(`server_runtime_bootstrap.ml:1054`). meta 만 있는 Keeper 가 도는지는 읽지 않았다.
+- config root 가 없던 다계정 설치는 빠진 것만 채우는 길로 간다(#53734). prompt 와 내장 `runtime.toml` 을 받는다(`lib/server/server_runtime_config_root_bootstrap.ml:574-605`). seed 가 원본 config 폴더에서 고르던 항목은 받지 않는다(`:157-163`). 조사만 함: 빠지는 것은 identity, mcp, pads, scripts, themes, tools, `model-releases.json`, `release-behavior.json`, `sandbox-images.toml` 이다. 그 영향은 읽지 않았다.
+
+### 22.3 운영자의 token
+
+- gate 를 지나는 것은 사람 경로(`lib/server/server_login_http.ml:268-317`)와 사람 MCP 경로(`lib/server/server_person_mcp.ml:30-36`)다. 둘은 엔진이 environment 에 넣은 admin token 과 internal Keeper token 을 legacy credential 로 읽고 거절한다. 시험은 `test/test_server_accounts_engine.ml` 이다(#53756).
+- 로그인 경로는 cookie 만 본다. cookie 없이 bearer 만 오면 session 이 없는 요청이다(`lib/auth/authz_browser_request.ml:127-141`). health 셋과 console 의 page·파일은 credential 을 읽지 않는다. token 으로 얻는 것은 없다.
+- 사람의 CLI 자식은 정해진 이름만 받는다. 시험은 `test/test_person_child_environment.ml` 이다(#53768). 조사만 함: 시험이 거치지 않는 길이 둘이다. Claude Code key 계정은 `Runtime_official_account.capture_on_key` 로 environment 를 만든다. Codex builder 는 홈의 `config.toml` 이 적은 이름을 허용 목록 밖에서도 넘긴다. 턴과 observe 에서는 판정이 그런 홈을 거절한다(#53704). 로그인 자식은 판정을 거치지 않고, 늘 새 홈에서 뜬다.
+
+### 22.4 엔진이 auth 폴더와 skills 에 남기는 것
+
+- `auth/agents/` 를 만든다(`lib/auth/auth_credential_base.ml:135-137`). internal Keeper token 의 hash 를 쓴다(`:175-192`).
+- startup admin token 의 만료는 auth 설정 파일에서 읽는다(`lib/auth/auth_credential_token.ml:449-457, 505-525`). 다계정 boot mode 를 읽는 바로 그 파일이다. 쓰지는 않는다.
+- Auto 모드에서는 boot 마다 내장 Skill 을 `.masc/skills/` 에 맞춘다(`server_runtime_config_root_bootstrap.ml:393-400`).
+
+### 22.5 판정을 지나지 않는 것
+
+- 조사만 함(공격 리뷰가 `62900e072` 에서 읽음): 판정 받은 값을 받는 실행 함수 다섯, exact registry, CLI one-shot, 사용량 읽기, Dashboard probe 는 판정을 지난다.
+- 조사만 함: 실행 표를 만들 때 공식 client 값이 host 계정 파일을 읽어 봉인한다(`lib/runtime/runtime_adapter.ml:1294` 의 `materialize_execution`). 판정보다 먼저 일어난다. GitHub pull reader 는 reader Keeper 의 token 을 curl 에 넘기고, 그 Keeper 정의가 없으면 서지 않는다. Vertex 의 `credential_source` 는 `gcloud` 를 부르는 closure 다.
+- 읽지 않았다: lane add-on 의 fleet, configuration service, worker.
+
+### 22.6 S2 에 넘기는 것
+
+- 볼륨 damage watch 는 이 작업 공간의 Keeper meta 만 본다. 손상을 찾으면 Board 에 System post 를 쓴다(`lib/server/server_keeper_volume_maintenance.ml:97-106`). 사람의 Keeper 가 생기면 그 알림이 Board(③)로 간다.
+- tool blob sweep 은 `.masc/activity-events`(일부러 미분류)나 `.masc/official-clients`(범위에 없음)가 있으면 지울 blob 을 고르지 않는다(#53783). Keeper 턴이 끝날 때마다 앞의 폴더에 쓰니, 사람의 Keeper 가 돌기 시작하면 그 폴더가 생긴다.

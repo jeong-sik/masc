@@ -383,6 +383,7 @@ type try_provider_ctx =
   ; goal_metadata : Agent_core.Types.metadata
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
+  ; deferred_tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection

@@ -32,6 +32,7 @@ type config =
   ; model_id : string
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
+  ; deferred_tools : Agent_core.Tool.t list
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
     (** Bound on the silent wait for the FIRST streaming provider event
@@ -153,6 +154,7 @@ let default_config
   ; model_id = provider_cfg.model_id
   ; system_prompt
   ; tools
+  ; deferred_tools = []
   ; stream_idle_timeout_s = None
   ; first_event_timeout_s = None
   ; body_timeout_s = None
@@ -258,6 +260,7 @@ let agent_config_for_request (config : config) : Agent_core.Types.agent_config =
 let agent_options ~(config : config) ~transport : Agent_core.Agent.options =
   { Agent_core.Agent.default_options with
     provider_config = Some config.provider_cfg
+  ; deferred_tools = config.deferred_tools
   ; reasoning_source_change =
       Llm_provider.Reasoning_history_projection.Exclude_unselected
   ; stream_idle_timeout_s = config.stream_idle_timeout_s

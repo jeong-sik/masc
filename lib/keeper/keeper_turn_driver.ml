@@ -4139,6 +4139,10 @@ let run_named
                  deferring anything, so this lane sends every tool too --
                  which is what every caller did before the listing existed. *)
               tools = agent_core_tools
+            ; deferred_tools =
+                (if Llm_provider.Provider_config.supports_deferred_tool_loading provider_config
+                 then tools
+                 else [])
             ; initial_messages
             ; model_input_projection
             ; (* Keeper policy knobs, injected from the resolved layer like

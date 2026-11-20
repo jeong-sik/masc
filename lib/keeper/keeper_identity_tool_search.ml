@@ -226,7 +226,15 @@ let load_found ~agent ~entries ~usage ~receipts ~invocation found =
       }
   | Ok () ->
     List.iter (fun entry -> note usage.loaded entry.name) found;
-    Ok ("now callable:\n" ^ String.concat "\n" (List.map describe found))
+    let references =
+      List.filter_map
+        (fun entry ->
+           if List.exists (fun loaded -> String.equal loaded.name entry.name) found
+           then Some entry.name
+           else None)
+        entries
+    in
+    Ok ("now callable:\n" ^ String.concat "\n" (List.map describe found), references)
 ;;
 
 let load ~held_schemas ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requested =
@@ -293,13 +301,13 @@ let load ~held_schemas ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invoc
     | [], [] -> refusal (Printf.sprintf "not in the list: %s" (String.concat ", " unknown))
     | _ ->
       let loaded = match found with
-        | [] -> Ok []
+        | [] -> Ok ([], [])
         | _ :: _ ->
           load_found ~agent ~entries ~usage ~receipts ~invocation found
-          |> Result.map (fun content -> [content])
+          |> Result.map (fun (content, references) -> [content], references)
       in
       Result.map
-        (fun loaded ->
+        (fun (loaded, references) ->
            let available = match callable with
              | [] -> []
              | _ -> ["already callable:\n" ^ String.concat "\n" callable]
@@ -308,8 +316,13 @@ let load ~held_schemas ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invoc
              | [] -> []
              | _ -> ["not in the list: " ^ String.concat ", " unknown]
            in
+           let content_blocks =
+             match references with
+             | [] -> None
+             | _ :: _ -> Some (List.map (fun tool_name -> Agent_core.Types.ToolReference { tool_name }) references)
+           in
            { Agent_core.Types.content = String.concat "\n" (loaded @ available @ missing)
-           ; content_blocks = None; _meta = None })
+           ; content_blocks; _meta = None })
         loaded
 ;;
 
@@ -463,27 +476,52 @@ let carry_from_history ~carry_window ~entries history =
 (* [entries] order, not carry order: the tool array is a cache prefix keyed by
    the exact bytes in the exact order sent, so a tool that leaves the window
    and comes back must come back in the slot it left. *)
-let already_used_from_history ~carry_window ~entries ~receipts history =
-  let carried_names, dropped = carry_from_history ~carry_window ~entries history in
-  (* Successful loads stay callable until their own dispatch, a changed
-     work/surface scope, or the end of the turn after the one that made them
-     ([Keeper_tool_load_receipts.create]). Sibling calls say nothing about
-     whether a loaded tool is still needed. Carry diagnostics describe actual
-     use separately. *)
-  let pending = Keeper_tool_load_receipts.pending_names receipts in
-  let placed_name name =
-    List.exists (String.equal name) carried_names
-    || List.exists (String.equal name) pending
+let referenced_names history =
+  let rec collect_block names = function
+    | Agent_core.Types.ToolReference { tool_name } -> Tool_name_set.add tool_name names
+    | Agent_core.Types.ToolResult { content_blocks = Some blocks; _ } ->
+      List.fold_left collect_block names blocks
+    | _ -> names
   in
-  let placed =
-    List.filter_map
-      (fun entry -> if placed_name entry.name then Some entry.callable else None)
-      entries
-  in
-  placed, carried_names, dropped
+  List.fold_left
+    (fun names (message : Agent_core.Types.message) ->
+       List.fold_left collect_block names message.Agent_core.Types.content)
+    Tool_name_set.empty
+    history
 ;;
 
-let make ?(carried=[]) ?held_schemas ~keeper_name { deferred; agent_cell; history; carry_window; receipts } =
+let already_used_from_history ~placement_policy ~carry_window ~entries ~receipts history =
+  match placement_policy with
+  | Tool_references ->
+    let references = referenced_names history in
+    let placed =
+      List.filter_map
+        (fun entry ->
+           if Tool_name_set.mem entry.name references then Some entry.callable else None)
+        entries
+    in
+    placed, [], []
+  | History_carry ->
+    let carried_names, dropped = carry_from_history ~carry_window ~entries history in
+    (* Successful loads stay callable until their own dispatch, a changed
+       work/surface scope, or the end of the turn after the one that made them
+       ([Keeper_tool_load_receipts.create]). Sibling calls say nothing about
+       whether a loaded tool is still needed. Carry diagnostics describe actual
+       use separately. *)
+    let pending = Keeper_tool_load_receipts.pending_names receipts in
+    let placed_name name =
+      List.exists (String.equal name) carried_names
+      || List.exists (String.equal name) pending
+    in
+    let placed =
+      List.filter_map
+        (fun entry -> if placed_name entry.name then Some entry.callable else None)
+        entries
+    in
+    placed, carried_names, dropped
+;;
+
+let make ?(placement_policy = History_carry) ?(carried=[]) ?held_schemas ~keeper_name { deferred; agent_cell; history; carry_window; receipts } =
   match deferred with
   | [] -> None
   | _ :: _ ->
@@ -498,7 +536,7 @@ let make ?(carried=[]) ?held_schemas ~keeper_name { deferred; agent_cell; histor
         deferred
     in
     let already_used, carried_names, dropped =
-      already_used_from_history ~carry_window ~entries ~receipts history
+      already_used_from_history ~placement_policy ~carry_window ~entries ~receipts history
     in
     (* Resolve prior loaded names only inside this view. Never transplant a
        previous attempt's callable or its broader listing into the new one. *)

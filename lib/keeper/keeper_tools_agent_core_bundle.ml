@@ -895,12 +895,13 @@ let make_tool_bundle_for_descriptors_with_policy
   in
   let listings = ref [] in
   let make_identity_listing ?held_schemas ?(identity_tools = identity_agent_tools)
+        ?(placement_policy = Keeper_identity_tool_search.History_carry)
         ~admitted ~carried () =
     match identity_listing_data with
     | None -> None
     | Some (surface, receipts) ->
       let deferred = List.map deferred_entry (identity_tools @ deferred_builtin_tools) in
-      let listing = Keeper_identity_tool_search.make ~carried ?held_schemas
+      let listing = Keeper_identity_tool_search.make ~placement_policy ~carried ?held_schemas
         ~keeper_name:meta.Keeper_meta_contract.name
         { Keeper_identity_tool_search.deferred = List.filter
             (fun (entry : Keeper_identity_tool_search.deferred) -> admitted entry.tool) deferred
@@ -1010,7 +1011,18 @@ let make_tool_bundle_for_descriptors_with_policy
     let deferred = List.filter admitted deferred_builtin_tools in
     let tools = List.filter admitted (descriptor_tools @ composition_tools @ identity_tools) in
     let held_schemas = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) tools in
-    let listing = make_identity_listing ~held_schemas ~identity_tools ~admitted ~carried () in
+    let placement_policy =
+      match runtime.Runtime_instance.execution with
+      | Runtime_execution.Agent_core sealed ->
+        if Llm_provider.Provider_config.supports_deferred_tool_loading
+            (Runtime_account_access.api_declaration sealed)
+        then Keeper_identity_tool_search.Tool_references
+        else Keeper_identity_tool_search.History_carry
+      | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
+      | Runtime_execution.Muse_serve _ | Runtime_execution.Antigravity_cli _
+      | Runtime_execution.Vibe_cli _ -> Keeper_identity_tool_search.History_carry
+    in
+    let listing = make_identity_listing ~placement_policy ~held_schemas ~identity_tools ~admitted ~carried () in
     let names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
     assemble_model_tool_surface
       ~image_admission ~tools

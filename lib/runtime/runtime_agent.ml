@@ -64,6 +64,7 @@ type config =
   model_id : string;
   system_prompt : string;
   tools : Agent_core.Tool.t list;
+  deferred_tools : Agent_core.Tool.t list;
   stream_idle_timeout_s : float option;
   first_event_timeout_s : float option;
   body_timeout_s : float option;

@@ -181,8 +181,70 @@ let run_restart () =
    | Error _ -> () | Ok _ -> Alcotest.fail "terminal scope executed again");
   assert_counts root ~providers:2
 
+let test_deferred_tools_reach_create_and_resume_options () =
+  let tool =
+    Agent_core.Tool.create ~name:"deferred" ~description:"Deferred tool" ~parameters:[] (fun _ ->
+      Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None })
+  in
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~provider_id:"claude"
+      ~model_id:"claude-haiku-5-5"
+      ~base_url:""
+      ()
+  in
+  let config =
+    Runtime_agent.default_config
+      ~media_store:(Agent_core.History.Memory_store.create ())
+      ~name:"deferred-test"
+      ~provider_cfg
+      ~system_prompt:"fixture"
+      ~tools:[ tool ]
+  in
+  Alcotest.(check (list string)) "default has no deferred surface" [] config.deferred_tools;
+  let config = { config with deferred_tools = [ tool ] } in
+  let options = Runtime_agent_context.agent_options ~config ~transport:None in
+  let names options =
+    List.map (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name) options.deferred_tools
+  in
+  Alcotest.(check (list string)) "create options carry the surface" [ "deferred" ] (names options);
+  let checkpoint : Agent_core.Checkpoint.t =
+    { provider_binding = None
+    ; version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = "deferred-test"
+    ; agent_name = "deferred-test"
+    ; model = "claude-haiku-5-5"
+    ; system_prompt = Some "fixture"
+    ; messages = []
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 0
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = None
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off
+    ; reasoning_effort = None
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; pending_input = None
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint ~transport:None in
+  Alcotest.(check (list string)) "resume options carry the same surface" [ "deferred" ] (names prepared.options)
+;;
+
 let () =
   match Array.to_list Sys.argv with
   | [_; "--execution-restart-child"; root] -> child root
   | _ -> Alcotest.run "native execution process restart"
-      ["settled ToolResult", [Alcotest.test_case "replay and identity boundaries" `Quick run_restart]]
+      [ "settled ToolResult", [Alcotest.test_case "replay and identity boundaries" `Quick run_restart]
+      ; "deferred tool surface", [Alcotest.test_case "create and resume options" `Quick test_deferred_tools_reach_create_and_resume_options]
+      ]

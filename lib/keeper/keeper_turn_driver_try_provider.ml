@@ -278,6 +278,7 @@ type try_provider_ctx =
     goal_metadata : Agent_core.Types.metadata
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
+  ; deferred_tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection
@@ -2962,9 +2963,10 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     in
     Ok
       { base_config with
+        deferred_tools = ctx.deferred_tools
         (* AGENT_CORE boundary: the keeper's two stream floors are always set,
            so the option AGENT_CORE reads is built here and nowhere else. *)
-        stream_idle_timeout_s = Some ctx.stream_idle_timeout_s
+      ; stream_idle_timeout_s = Some ctx.stream_idle_timeout_s
           ; first_event_timeout_s = Some ctx.first_event_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
           ; (* The wait for the binding's admission permit is time in which

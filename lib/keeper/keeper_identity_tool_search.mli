@@ -99,6 +99,13 @@ val summary_of : string -> string
 
 val tool_name : string
 
+type placement_policy =
+  | History_carry
+  | Tool_references
+    (** [History_carry] uses calls and outstanding load receipts. [Tool_references]
+        keeps a tool callable exactly while its typed reference remains in the
+        supplied history window, without applying either retirement rule. *)
+
 (** What one turn got out of the listing. *)
 type turn_discovery =
   | Listing_unused  (** The model never asked for a tool through it. *)
@@ -121,12 +128,18 @@ type placement =
             that used the listing loaded a tool the turn then ended before
             using.
 
-            ToolUse history supplies tools already dispatched. Successful
-            outstanding loads come from [receipts], so another sibling call
-            cannot revoke them. A load is consumed when its own handler is
-            reached, and retired when its Task/trace or deferred surface
-            changes or when the turn after the one that made it ends without
-            calling it. Failed and unknown requests never enter that state.
+            With [History_carry], ToolUse history supplies tools already
+            dispatched and successful outstanding loads come from [receipts],
+            so another sibling call cannot revoke them. A load is consumed when
+            its own handler is reached, and retired when its Task/trace or
+            deferred surface changes or when the turn after the one that made it
+            ends without calling it. Failed and unknown requests never enter that
+            state.
+
+            With [Tool_references], the typed ToolReference history itself is the
+            authority: a tool remains callable exactly while its reference is in
+            this window, and neither of those retirement rules applies. This is
+            the direct Anthropic native deferred-loading path.
 
             Checkpoint Context preserves these receipts even when successful
             result bodies are purged. The tool result's prose is not parsed.
@@ -171,6 +184,7 @@ type placement =
   }
 
 val make :
+  ?placement_policy:placement_policy ->
   ?carried:Agent_core.Tool.t list ->
   ?held_schemas:Agent_core.Types.tool_schema list ->
   keeper_name:string -> surface -> placement option

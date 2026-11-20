@@ -641,6 +641,7 @@ let media_projection_admission entry projection () =
       | Unchanged_projection -> messages
       | No_projection -> fail "raw admission cannot invoke a projection" in
     Agent_core.History.to_wire_messages media_store messages
+      |> Result.map Agent_core.Agent.one_request
       |> Result.map_error (fun error -> Agent_core.Error.Media error) in
   let config = media_runtime_config ~base_url:server.base_url ~media_store ~tools:[] in
   let config = {config with model_input_projection=(match projection with
@@ -728,6 +729,7 @@ let projected_tool_media_is_validated_on_the_next_request () =
   let project messages =
     incr projections;
     Agent_core.History.to_wire_messages media_store messages
+      |> Result.map Agent_core.Agent.one_request
       |> Result.map_error (fun error -> Agent_core.Error.Media error) in
   let config = media_runtime_config ~base_url:server.base_url ~media_store ~tools:[tool] in
   let config = {config with model_input_projection=Some project} in

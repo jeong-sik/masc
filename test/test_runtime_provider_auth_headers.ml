@@ -3089,6 +3089,7 @@ let test_runtime_trimmed_reasoning_boundary () =
             (* The window cuts history; the request carries its wire form. *)
             Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ())
               projection.messages
+            |> Result.map Agent_core.Agent.one_request
             |> Result.map_error (fun error -> Agent_core.Error.Media error) in
           let effects = ref 0 in
           let tool = Agent_core.Tool.create ~name:"inspect" ~description:"Inspect"
@@ -3172,6 +3173,7 @@ let run_projection_case ~resume =
                incr projection_calls;
                Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ())
                  (projection_messages projected_marker messages)
+               |> Result.map Agent_core.Agent.one_request
                |> Result.map_error (fun error -> Agent_core.Error.Media error))
       }
     in

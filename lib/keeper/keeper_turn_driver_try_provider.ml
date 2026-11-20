@@ -2996,7 +2996,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                  | None -> history
                  | Some retained ->
                    Keeper_client_tool_outbox.place_carrier retained history) !resolved_history;
-               messages) (project messages))
+               messages) (project messages)
+               |> Result.map Agent_core.Agent.one_request)
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's

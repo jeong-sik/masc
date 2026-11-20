@@ -748,12 +748,9 @@ let test_failed_commit_and_restart_retry_the_same_range () =
   check (list string) "restart reads identical range" !first !after_restart
 ;;
 
-(* #32461. A decode rejection is the one failure the write path can recover:
-   the commit below re-reads under the store lock and the quarantine branch in
-   [update_locked_with_error] moves the undecodable bytes aside, then the
-   replacement writes a fresh revision-1 snapshot. Feeding the empty current
-   in with no expected revision is what routes the pass through that branch
-   instead of skipping the write and leaving the keeper wedged. *)
+(* #32461 / fail-closed decode guard: an undecodable current snapshot must
+   halt before any Memory commit ([Consumer.Memory_snapshot_unreadable])
+   without quarantining, moving, or overwriting the corrupt bytes on disk. *)
 let test_undecodable_current_snapshot_fails_closed_without_quarantine () =
   with_workspace @@ fun config ->
   let module Current = Masc.Keeper_memory_os_current in

@@ -646,3 +646,60 @@ HTTP provider 의 자격 증명이 호스트 계정이라는 결정(계획 D4)�
 - 줄 하나를 붙일 때 그 Keeper 의 줄 전부의 칸 이름을 본다(`lib/keeper/keeper_chat_store_provenance_index.ml:11-19`, `lib/keeper/keeper_chat_store_transcript_index.ml:50-65`, `lib/keeper/keeper_chat_store_append_once.ml:160`). 모르는 칸이 든 줄이 하나 있으면 붙이기가 거절된다. 그래서 옛 빌드는 새 칸이 든 줄이 있는 Keeper 의 대화 기록에 더 쓰지 못한다.
 - 조사만 함: 줄 없이 끝나는 길은 취소, 운영자의 멈춤, 턴 본문의 예외, 줄 쓰기 실패다(`server_routes_http_keeper_stream.ml:2099-2165`). 끝 줄의 자리는 연산마다 하나이고 먼저 쓴 줄이 남는다(`keeper_chat_store_append_once.ml:164-212`). 대화를 읽는 projection 은 줄의 글을 그대로 낸다(`keeper_chat_projection.ml:180-237`). 엔진의 실패 값 codec 은 갈래와 칸이 정확히 맞아야 풀리고 판 표시가 없다(`lib/keeper_runtime/keeper_request_failure.ml:727-742`).
 - 그래서 줄에는 실패 값 전체가 아니라 사람이 읽는 종류를 둔다. 스물일곱 갈래의 타입이 지워지지 않는 기록의 형식이 되지 않고, 글이 없어서 가릴 것도 없다. 갈래 수는 조사만 했다.
+
+## 19. 엔진을 다계정 프로세스에서 띄우기 전에 읽은 것
+
+RFC §4 가 S1 앞에 남긴 읽지 않은 것을 읽었다. "조사만 함"은 조사 에이전트만 읽은 자리다. 줄 번호는 main `40b3ae4da` 의 것이다.
+
+### 19.1 엔진 boot 가 단일 사용자 값을 읽는 곳
+
+- `initialize_owner_state_blocking` 이 단일 사용자 값을 읽는 줄은 둘이다. 접근 값을 올리는 줄(`lib/server/server_runtime_bootstrap.ml:729`)과 base path 를 꺼내는 줄(`:733`)이다.
+- 그 뒤의 경고(`:735-741`)는 base path 만 읽는다. 문장은 단일 사용자 규칙이다(`lib/runtime/runtime_account_access.ml:564-573`). 다계정은 native 도구를 무엇이 남았든 거절한다(`:558-562`).
+- 부르는 곳은 둘이다. 단일 사용자 서버(`server_runtime_bootstrap.ml:1802`)와 stdio 서버(`bin/main_stdio_eio.ml:129`)다. stdio 서버는 listener 없이 같은 순서를 스스로 짠다(`:125-176`).
+- 조사만 함: `activate_owner_state`(`server_runtime_bootstrap.ml:1636-1677`)와 Keeper loop, 뒤 lane 을 띄우는 함수는 server state 만 받고 단일 사용자 값을 받지 않는다.
+
+### 19.2 계정 서버가 서는 순서
+
+`Server_accounts.run`(`lib/server/server_accounts.ml:194-367`)의 순서다.
+
+| 순서 | 하는 일 | 줄 |
+|---|---|---|
+| 1 | zone 을 열고 다시 판정한다 | `:199-207` |
+| 2 | 로그인 client 와 경로표를 만든다 | `:208-234` |
+| 3 | http 설정을 읽고 socket 을 잡는다 | `:237-299` (조사만 함) |
+| 4 | 포트를 host 에 알린다 | `:311-326` |
+| 5 | 접근 값 `Multi_account` 를 올린다 | `:327-333` |
+| 6 | `Eio_context` 에 environment 와 switch 를 놓는다 | `:340-341` |
+| 7 | rate limit loop 와 멈춘 일을 끝내는 fiber 를 띄운다 | `:343-346` |
+| 8 | serve. 돌아오지 않는다 | `:365` |
+
+- 5 뒤로는 거절하는 단계가 없다(`:334-335` 의 주석). 4 는 boot 를 멈출 수 있는 검사를 다 지난 뒤에 온다(`:306-310` 의 주석).
+- 이 함수는 server state 를 만들지 않는다. 인자에 `runtime_sw`, 입력 base path, store 격리 승인이 없다(`lib/server/server_accounts.mli:194-202`, 조사만 함).
+- 엔진 boot 는 `Server_runtime_bootstrap` 에 있고, 그 모듈이 `Server_accounts.run` 을 부른다(`server_runtime_bootstrap.ml:2357-2359`). 둘은 같은 라이브러리다. 계정 서버가 엔진 boot 를 직접 부르면 두 모듈이 서로를 가리켜 컴파일되지 않는다.
+
+### 19.3 한 프로세스에서 한 번만 되는 것
+
+| 것 | 자리 | 두 번째 호출 | 계정 서버도 하는가 |
+|---|---|---|---|
+| 접근 값 | `runtime_account_access.ml:86-97` | 거절 | 한다(`server_accounts.ml:330`) |
+| run registry 넷 | `lib/run_registry_core/run_registry_core.ml:1109-1118` | 거절 | 안 한다 |
+| native 실행 runtime | `lib/runtime/runtime_agent_execution_runtime.ml:11-23` | 거절 | 안 한다 |
+| `Eio_context` 의 switch | `lib/eio_context/eio_context.ml:99-126` | 덮어쓴다. 부를 때마다 dispatch daemon 을 하나 더 띄운다 | 한다(`server_accounts.ml:341`) |
+| 포트 알림 | `lib/server/server_startup_takeover.ml:1705-1759` (조사만 함) | lease 하나에 하나 | 한다(`server_accounts.ml:311-326`) |
+
+- 조사만 함: 엔진 boot 가 switch 를 놓는 줄(`server_runtime_bootstrap.ml:408-411`). 단일 사용자의 포트 알림은 serve 단계에 있고(`:2206`) 엔진 boot 안에 없다. rate limit loop 는 단일 사용자 서버 함수(`:1697`)가 띄우고 엔진 boot 는 띄우지 않는다.
+- 그래서 엔진 boot 와 계정 서버가 겹치는 것은 접근 값과 `Eio_context` 의 switch 둘이다. 접근 값은 계정 서버가 올린 것을 엔진 boot 가 받으면 풀린다. switch 는 두 번 놓아도 거절되지 않는다. 먼저 뜬 daemon 은 아무도 넣지 않는 큐를 기다리며 남는다.
+
+### 19.4 다계정 접근 값이 엔진에게 거절하는 것
+
+- 엔진은 lane Keeper 의 턴에 `Operator_keeper_turn` 을, one-shot 호출에 `Operator_call` 을 만든다(`lib/keeper/keeper_turn_driver.ml:259-265`). 다계정 접근 값은 둘을 거절한다(`runtime_account_access.ml:329, 348`). 엔진 이름을 바꾸기 전에는 다계정 프로세스의 엔진이 어떤 Keeper 턴도 CLI 로 돌리지 못한다.
+- host 의 계정은 나누지 않는다(`runtime_account_access.ml:465`).
+- boot 는 exact-output 등록에 실패하면 경고를 남기고 등록표를 올리지 않은 채 계속한다(`server_runtime_bootstrap.ml:1020-1027`). 조사만 함: 다계정에서는 Agent_core runtime 이 하나라도 있으면 API 판정(`lib/runtime/runtime.ml:1275`)이 거절해 이 경고가 난다. 하나도 없으면 통과한다.
+- 조사만 함: `lib/keeper` 에는 사람의 요청(`Keeper_turn`)을 만드는 곳이 없다. 만드는 곳은 계정 서버의 직접 호출 하나다(`lib/server/server_preview_keeper_turn.ml:386`).
+
+### 19.5 아직 읽지 않은 것
+
+- 다계정 base path 에서 Keeper loop 가 무엇을 띄우는지(`lib/server/server_bootstrap_loops.ml:1582` 의 본문).
+- 준비된 뒤에 뜨는 lane 들(`server_runtime_bootstrap.ml:1514-1557`)과 gateway, gRPC, Dashboard loop(`:2025-2124`) 가운데 무엇이 엔진이고 무엇이 단일 사용자 서버의 것인지.
+- boot 의 token 과 credential 단계(`lib/server/server_runtime_startup_credentials.ml:6-135`)가 다계정에서 쓰는 것. 조사만 함: admin token 의 environment 를 읽고 작업 공간의 Auth 저장소에 쓴다.
+- 준비 전에 실패한 엔진 boot 가 프로세스를 끝내는 길(`server_runtime_bootstrap.ml:1783-1792`)을 계정 서버가 그대로 따를지. 계정 서버는 그때 이미 포트를 알렸다.

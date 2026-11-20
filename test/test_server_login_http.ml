@@ -1826,6 +1826,9 @@ max-context = 128000
 tools-support = true
 streaming = true
 
+[models.custom-tool-model.capabilities]
+supports-tool-choice = true
+
 [models.custom-notools]
 api-name = "custom-notools"
 max-context = 128000

@@ -58,11 +58,10 @@ let http_verdict
   | Some model ->
     (match Runtime_adapter.http_model_declares_tools provider model with
      | Ok true -> Ok ()
-     | Ok false -> Error (Model_refused Runtime_verification.Tools_not_declared)
-     | Error (_ : string) ->
-       (match Runtime_verification.model_refusal model with
-        | Some unavailable -> Error (Model_refused unavailable)
-        | None -> Ok ()))
+     | Ok false | Error (_ : string) ->
+       (* Fail closed: if provider/catalog resolution rejects the declaration,
+          never fall back to trusting bare TOML tools-support. *)
+       Error (Model_refused Runtime_verification.Tools_not_declared))
 ;;
 
 (* The bindings of the provider in declared order, each on the side its

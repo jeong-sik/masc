@@ -1,6 +1,6 @@
 # MicroVM Remote Lane Runbook
 
-게스트가 자기 작업 트리를 가지는 구조(RFC-0400)의 운영 절차.
+게스트가 자기 작업 트리를 가지는 구조의 운영 절차.
 
 ## 어느 런타임이 게스트를 주는가 (RFC-0405)
 
@@ -88,7 +88,7 @@ MASC_CONFIG_DIR`. `scratch_root=` 는
 서버와 shim 은 따로 배포되므로 한 버전 차이는 서로 참는다. 서버는 첫 실행 전에
 shim 을 `--probe` 해서 그 shim 이 말하는 프로토콜 major(v2 또는 v3)로 프레임을
 보내고, shim 은 받은 major 로 답한다. 그래서 서버만 먼저 올려도, shim 만 먼저
-바꿔도 tool_execute 는 끊기지 않는다. 다만 v2 shim 은 관측 상자(RFC-0422)를
+바꿔도 tool_execute 는 끊기지 않는다. 다만 v2 shim 은 관측 상자를
 만들 수 없어서 그 요청들은 예전처럼 judge 로 간다. shim 은 모르는 설정 키를
 거부하므로, 서버는 모든 shim 이 아는 키만 설정에 쓴다. 두 major 밖의 shim 만
 `remote_shim_version_skew` 로 거부된다.
@@ -118,14 +118,14 @@ WARN 은 서버를 다시 띄운 뒤에야 새 shim 을 반영한다.
 게스트가 마운트하는 것: 설정 디렉터리(읽기 전용, `/tmp/masc-runtime/.masc/config`),
 GitHub identity 스냅샷, 작업 볼륨(`masc-keeper-work-<keeper>` →
 `/masc-work`), shim 디렉터리(읽기 전용, `/opt/masc-exec-shim`), 그리고
-메모리 파일시스템 `/tmp`(`--tmpfs /tmp`). 마지막 것은 RFC-0422 의 관측 상자가
+메모리 파일시스템 `/tmp`(`--tmpfs /tmp`). 마지막 것은 관측 상자가
 쓰는 스크래치 자리다. 루트는 읽기 전용이라 이게 없으면 상자 안의 명령은 아무
 데도 쓸 수 없다. 크기는 커널 기본값(게스트 메모리의 절반, 기본 게스트에서
 551M 실측)이고 게스트가 내려가면 사라진다. 그게 전부다.
 
 ## shim 받기
 
-shim 은 서버 릴리즈의 자산이고(RFC-0427 B-1), 설치기가 놓는다(B-2). 릴리즈마다
+shim 은 서버 릴리즈의 자산이고, 설치기가 놓는다. 릴리즈마다
 `masc-exec-shim-linux-arm64` 와 `masc-exec-shim-linux-amd64` 가 서버 바이너리
 옆에 올라오고, 릴리즈 워크플로가 같은 아키텍처의 러너에서 정적으로 빌드해
 `--probe` 까지 확인한 것이다. 게스트는 arm64 다.

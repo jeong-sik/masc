@@ -25,8 +25,7 @@ let register_ws_cleanup (f : unit -> int * int) =
 ;;
 
 (** Registered Lane Add-on native detach — WORM Atomic. The HTTP server runs
-    it alongside [run_all] under the same cleanup timeout (RFC
-    lane-addon-shutdown-detaches-native-instances §3). *)
+    it alongside [run_all] under the same cleanup timeout. *)
 let lane_addon_shutdown_ref : (unit -> unit) option Atomic.t = Atomic.make None
 
 let register_lane_addon_shutdown (f : unit -> unit) =

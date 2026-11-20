@@ -35,12 +35,7 @@
  (wrapped false)
  (preprocess
   (pps ppx_enumerate))
- ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
- ; Closed-variant fragile sites fixed in this PR: the two Shell_timeout.bucket
- ; matches in env_config_sandbox.ml (now routed through
- ; Shell_timeout.is_floor_bucket, itself an exhaustive match). The remaining
- ; catch-all (env_config_runtime.ml string scrutinee) is open-type and warning
- ; 4 ignores it.
+ ; Warning 4 (fragile pattern match), 33 (unused open) and 37 (unused constructor) on.
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries

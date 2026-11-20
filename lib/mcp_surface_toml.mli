@@ -1,6 +1,5 @@
 (** Mcp_surface_toml — parse the [config/mcp/] declarations into the values
-    the MCP wire surface publishes (RFC
-    prompts-and-tool-definitions-outside-ocaml §3 item 8).
+    the MCP wire surface publishes.
 
     Two files, decoded once each at module initialization:
 
@@ -14,8 +13,8 @@
     Decoding is fail-closed like {!Tool_definition_toml}: every key is matched
     against a closed set and anything unknown is an [Error]; at module init
     that error is a [failwith], so a bad file refuses the boot rather than
-    publishing a partial surface. There is no hot reload (RFC §6) — boot
-    re-decodes the embedded tree through {!validate_embedded}. *)
+    publishing a partial surface. There is no hot reload — boot re-decodes
+    the embedded tree through {!validate_embedded}. *)
 
 (** {1 resources.toml} *)
 

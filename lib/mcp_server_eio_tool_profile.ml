@@ -161,8 +161,7 @@ let label_words_from_identifier ident =
                (String.sub word 1 (String.length word - 1)))
 
 (** Human-readable tool titles now live in each tool's own
-    [config/tools/<name>.toml] as the optional [title] key (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2). One parse of the
+    [config/tools/<name>.toml] as the optional [title] key. One parse of the
     embedded tool tree, on first ask — the same idiom as
     [Tool_loading_declarations]: the files are crunched into the binary, so a
     second parse would read the same bytes to the same answer. A file that

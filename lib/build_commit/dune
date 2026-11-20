@@ -11,14 +11,13 @@
  (modules build_commit_generated source_identity))
 
 ; Embed the git commit, its timestamp and the source identity together
-; (RFC-0382 follow-up, "binary unknown" root fix; RFC
-; host-and-shim-share-one-build-identity). The probe is a script rather than
-; an inline command so the checkout path, the container fallback and the
-; validation of the injected value stay readable; it carries its own
-; reasoning. (universe) re-runs the probe every build; downstream recompiles
-; only when the emitted values change. Sandboxing is disabled so git can
-; ascend to the checkout being built. sh, not bash: the shim's Alpine builder
-; runs this rule as well.
+; ("binary unknown" root fix; RFC host-and-shim-share-one-build-identity).
+; The probe is a script rather than an inline command so the checkout path,
+; the container fallback and the validation of the injected value stay
+; readable; it carries its own reasoning. (universe) re-runs the probe every
+; build; downstream recompiles only when the emitted values change.
+; Sandboxing is disabled so git can ascend to the checkout being built. sh,
+; not bash: the shim's Alpine builder runs this rule as well.
 (rule
  (targets build_commit_generated.ml)
  (deps

@@ -178,8 +178,7 @@ val repos_relative_path : id:string -> string
     by [Repo_store.local_path], which concats it onto the base path. A caller
     that needs that default must not use {!repos_dir}: the result would be
     resolved twice. Before this existed the HTTP repository constructor built
-    the literal inline, and the RFC-0121 audit did not see it because an
-    unanchored allowlist entry suppressed the pattern repo-wide. *)
+    the literal inline. *)
 
 val tmp_dir : base_path:string -> string
 (** [<base_path>/.masc/tmp/]. Short-lived process artifacts. *)
@@ -209,9 +208,9 @@ val microvm_identity_dir : base_path:string -> backend:string -> string
 
 val microvm_agent_socket_dir : base_path:string -> string
 (** [<base_path>/.masc/microvm/agent/]. The host ends of the sockets Apple
-    [container] publishes for guest agents (RFC microvm-guest-agent-over-socket
-    3.6). A process that can connect to one can have that guest's agent run a
-    request as its keeper, so the directory is the server's alone. *)
+    [container] publishes for guest agents. A process that can connect to one
+    can have that guest's agent run a request as its keeper, so the directory
+    is the server's alone. *)
 
 val wiki_dir : base_path:string -> string
 (** [<base_path>/.masc/wiki/]. The wiki's pages with its [index.md] and

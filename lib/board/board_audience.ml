@@ -5,8 +5,7 @@ include Board_types
    boundary through [Board_addressing] (issue #25601).  This module owns the
    Board audience policy.  A name written after [@] is only a candidate; it
    becomes a target when the [Recipient_lookup] installed at server start
-   declares it, and it is prose otherwise (RFC-at-name-resolves-to-declared-
-   recipient). *)
+   declares it, and it is prose otherwise. *)
 
 type explicit_address =
   | No_explicit_address
@@ -54,9 +53,9 @@ let address_of_text ~lookup content =
         | _ :: _ as recipients -> Ok (Explicit_targets recipients, unresolved)))
 ;;
 
-(* The Keeper side reads the text again for its explicit-mention flag
-   (RFC section 3.4); it asks for names the way an author wrote them and does
-   not decide who receives the post. *)
+(* The Keeper side reads the text again for its explicit-mention flag; it
+   asks for names the way an author wrote them and does not decide who
+   receives the post. *)
 let direct_targets_of_text content =
   match Board_addressing.parse content with
   | Board_addressing.Raw_targets candidates ->

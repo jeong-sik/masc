@@ -41,13 +41,13 @@ let trim_opt = Env_config_core.trim_opt
 let existing_dir = Env_config_core.existing_dir
 let existing_file = Env_config_core.existing_file
 
-(* RFC-0084 host-config-cleanup-F — typed test-mode predicate.
+(* Typed test-mode predicate.
    Replaces the ad-hoc [test_]-prefix substring classifier with
-   the typed [Host_config.test_mode_kind] surface from
-   PR-12.  The previous helper accepted an arbitrary executable name
-   argument but every caller passed [Sys.executable_name] — the
-   typed surface always reads the current binary so the parameter is
-   dropped.  See [test_host_config_resolution] for the typed test-mode behavior. *)
+   the typed [Host_config.test_mode_kind] surface.  The previous helper
+   accepted an arbitrary executable name argument but every caller
+   passed [Sys.executable_name] — the typed surface always reads the
+   current binary so the parameter is dropped.  See
+   [test_host_config_resolution] for the typed test-mode behavior. *)
 let running_under_test_executable () =
   Host_config.is_test_mode
     (Host_config.host ()).test_mode

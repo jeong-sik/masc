@@ -247,13 +247,11 @@ let parse_events_from_file config path =
       if String.trim line = "" then None else parse_event_line line)
     lines
 
-(* RFC-0201 Step 4 — past-day file cache.
+(* Past-day file cache.
 
    [read_all_events] historically full-scans every activity-events
    JSONL file on every call.  With 15+ MB of historic data that
-   compute dominated the background refresh fiber and undermined
-   the Step 1 wait-free read (snapshot only refreshes after the
-   fiber finishes one full scan).
+   compute dominated the background refresh fiber.
 
    Past-day files are immutable: once the calendar day rolls over,
    no process appends to that JSONL again.  Cache the parsed event
@@ -310,8 +308,8 @@ let same_file_signature left right =
    off /health, and multiplying the on-disk JSONL by a guessed parse factor --
    an estimate that lands within a factor of two and settles nothing. The
    parsed record count is the number that matters: it is what a retention
-   change moves, and RFC-0201 Step 4 sized this design against "15+ MB of
-   historic data" that is now an order of magnitude larger.
+   change moves, and this design was sized against "15+ MB of historic
+   data" that is now an order of magnitude larger.
 
    A read, not a gauge: this module has no metric dependency, and the caller
    that already exports gauges decides how often to look. *)

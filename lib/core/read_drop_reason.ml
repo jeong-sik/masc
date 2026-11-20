@@ -1,18 +1,14 @@
-(* RFC-0044 PR-1: closed sum type for persistence read-drop reason.
+(* Closed sum type for persistence read-drop reason.
 
    See [.mli] for the public contract. This file holds the type
    definition and the wire-format serialisation chosen to be
-   byte-for-byte compatible with the legacy [string] constants in
-   [Core.Safe_ops] as of main.
+   byte-for-byte compatible with the [string] constants
+   [Core.Safe_ops] used before it took [t].
 
-   RFC-0134 PR-1 (2026-05-19): adds [Concurrent_removal] and
-   [Transient_fd_pressure] as typed surfaces for the two operational
-   causes measured on 2026-05-19 (TOCTOU race between [list_dir] and
-   delete-then-replace writers, and [ENFILE]/[EMFILE] FD pressure).
-   PR-1 is pure additive: callers continue to use [Entry_load_error].
-   PR-2 promotes [Workspace_verification_store.load_request_header] to a
-   typed [load_error]. PR-3 routes the new variants away from the
-   data-integrity WARN/counter path. *)
+   [Concurrent_removal] and [Transient_fd_pressure] are typed surfaces
+   for the two operational causes measured on 2026-05-19 (TOCTOU race
+   between [list_dir] and delete-then-replace writers, and
+   [ENFILE]/[EMFILE] FD pressure). *)
 
 type t =
   | List_dir_error
@@ -24,13 +20,12 @@ type t =
   | Decompression_error
   | Path_normalization_error
   | Stat_error
-  | Concurrent_removal (* RFC-0134 PR-1. *)
-  | Transient_fd_pressure (* RFC-0134 PR-1. *)
+  | Concurrent_removal
+  | Transient_fd_pressure
   | Tail_partial_write
-      (* RFC-0134 classification: the last line of an append-only file was
-         still being written when the reader reached it. Not data loss; the
-         reader skips to the previous complete line and the next read sees
-         the row whole. *)
+      (* The last line of an append-only file was still being written when
+         the reader reached it. Not data loss; the reader skips to the
+         previous complete line and the next read sees the row whole. *)
   | Other of string
 
 let to_wire = function

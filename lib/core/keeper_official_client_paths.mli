@@ -12,8 +12,8 @@ val consumed_results_dir : base_path:string -> keeper_name:string -> (string, st
     artifact owners and are not loaded as pending deliveries. *)
 
 val muse_storage_dir : base_path:string -> keeper_name:string -> (string, string) result
-(** The one root a Keeper's Muse Code host keeps its native files in
-    (RFC-0495). A new session empties it; a resumed one keeps it. *)
+(** The one root a Keeper's Muse Code host keeps its native files in.
+    A new session empties it; a resumed one keeps it. *)
 
 type tool_result_source
 (** One exact direct file path in a Keeper's pending or consumed result directory.

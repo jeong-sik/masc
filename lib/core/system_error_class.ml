@@ -19,9 +19,9 @@ type t =
   | Timeout
   | Other of string
 
-(* Vocabulary union of the four pre-existing inline matchers documented in
-   RFC-0154 §1.1.  Add a new entry here only when paired with a backend
-   reactor + RFC (see .mli docstring). *)
+(* Vocabulary union of the four pre-existing inline matchers.  Add a new
+   entry here only when paired with a backend reactor + RFC (see .mli
+   docstring). *)
 
 let fd_needles =
   [ "too many open files"

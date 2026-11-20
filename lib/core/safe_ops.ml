@@ -411,11 +411,6 @@ let read_json_file_safe path : (Yojson.Safe.t, string) result =
   | Error e -> Error e
   | Ok content -> parse_json_off_fiber ~context:path content
 
-(* The last line of an append-only file was still being written when a tail
-   reader reached it. Kept apart from [entry_load_error] because it is not a
-   loss: the reader falls through to the previous complete line and the next
-   read sees the row whole. Same not-a-loss family as RFC-0134's
-   [concurrent_removal] and [transient_fd_pressure]. *)
 let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
   let reason = Read_drop_reason.to_wire reason in
   Log.Misc.warn "[%s] persistence read drop (%s) path=%s: %s"

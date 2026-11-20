@@ -86,8 +86,7 @@ val summary : t -> (Summary.t, string) result
     revision ({!Workspace_memory_revision.of_briefing}). *)
 val classification_size :
   (Request_id.t * Summary.t * Lane_addon_request_progress.phase) list -> Workspace_memory_request.size
-(** The size of the next classification batch
-    (RFC-workspace-curator-curates-changed-facts 2.4, "다음 묶음"), from the
+(** The size of the next classification batch, from the
     latest-minted classification a provider answered ([Finished] or
     [Conflicted]):
     - A child exists only after a size refusal, so its count fit: [Up_to]

@@ -8,8 +8,8 @@ open Workspace_backlog
 include Workspace_task_classify
 include Workspace_task_create
 include Workspace_task_claim
-(* RFC-0088 §1 follow-up (#21065 review): typed surface for the idempotent
-   no-op transition. Previously the only signal was the "(no-op)" substring in
+(* Typed surface for the idempotent no-op transition (#21065 review).
+   Previously the only signal was the "(no-op)" substring in
    the [Ok msg] string, which callers had to sniff with substring matching. *)
 type transition_outcome =
   { message : string
@@ -1148,7 +1148,7 @@ let commit_verdict_r
                  transition surface, so nothing emitted the audit entry or the
                  [Task_completed] telemetry for a task finished this way. The
                  audit trail stopped at [submit_for_verification] and never said
-                 who approved the completion. RFC-0323 G-3 already states that a
+                 who approved the completion. A
                  Done produced by an approval verdict is a Done like any other,
                  and the actor is the record's assignee — the authority is not an
                  agent. [authority] rides in the details so the trail keeps the

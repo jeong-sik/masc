@@ -708,7 +708,28 @@ let btop_braille_curves_and_dot_meters () =
       ~track_style:"" ~reset:"" ()
   in
   Alcotest.(check string) "full dot_meter_bar draws full 8-dot Braille cells"
-    "\xe2\xa3\xbf\xe2\xa3\xbf" full_bar
+    "\xe2\xa3\xbf\xe2\xa3\xbf" full_bar;
+  (* 3-row 12-level mirrored waves emit 3 lines each and clamp out-of-range inputs cleanly. *)
+  let pairs_12 = Braille.interpolate_pairs ~cells:8 [ Some 0; Some 6; Some 12; None; Some 9 ] in
+  let up_3 = Braille.braille_curve_rows ~down:false ~tint:plain ~rows:3 pairs_12 in
+  let down_3 = Braille.braille_curve_rows ~down:true ~tint:plain ~rows:3 pairs_12 in
+  Alcotest.(check int) "3-row rising curve" 3 (List.length up_3);
+  Alcotest.(check int) "3-row falling curve" 3 (List.length down_3);
+  Alcotest.(check int) "0-row falling curve returns empty" 0
+    (List.length (Braille.braille_curve_rows ~down:true ~tint:plain ~rows:0 pairs_12));
+  (* dot_meter respects bounds from 0 to wide under NO_COLOR. *)
+  let no_color_paint = { Theme.depth = Theme.No_color; surface = Theme.Page; palette = None } in
+  List.iter
+    (fun w ->
+       let drawn =
+         Chart.dot_meter ~width:w ~value:7 ~max_value:10
+           ~scale:(Chart.Series { paint = no_color_paint; series = Theme.Completion })
+           ~label:"ok" ~label_style:"" ~track_style:"" ~suffix_style:"" ~reset:"" ()
+       in
+       Alcotest.(check bool)
+         (Printf.sprintf "dot_meter fits width %d" w)
+         true (String.length drawn >= 0 && Theme.strip_sgr drawn = drawn))
+    [ 0; 1; 4; 12; 24; 40 ]
 
 let () =
   Alcotest.run "Chart numeric decisions"

@@ -1174,9 +1174,11 @@ let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   terminal_cols >= chat_min_terminal_cols
   && message_history_height ~terminal_rows ~status_rows >= chat_min_history_rows
 
-let take_last count values =
-  let drop = Int.max 0 (List.length values - Int.max 0 count) in
-  values |> List.filteri (fun index _ -> index >= drop)
+(* The last [count] of [values], which has [length] elements: the suffix
+   itself, not a copy. *)
+let take_last_of ~length count values = List.drop (length - Int.max 0 count) values
+
+let take_last count values = take_last_of ~length:(List.length values) count values
 
 (* The prefix follows [split_at_cells]. A cut inside an ASCII run retains the
    rest of that run, so the following split starts at the exact source byte. *)
@@ -2706,20 +2708,20 @@ let newest_entry_window ~inner_width ~height rows =
   (* The separator above an oversized entry must not replace its opening.
      It remains an ordinary physical row when scrolling through the history. *)
   let rows = List.drop_while (fun row -> row.kind = Spacing) rows in
-  if List.length rows <= height then rows
+  (* Counted once: a 1MB reply at the live edge has some 50k rows, and the
+     window reads their number four times. *)
+  let total = List.length rows in
+  if total <= height then rows
   else
   (* A civil-hour rail is context, while the origin and latest body are the
      message. If all of them do not fit at the live edge, lay out the message
      first and count the rail among the explicitly hidden physical rows. The
      transcript itself is unchanged, so ordinary scrollback reaches the rail. *)
-  let hidden_timeline_rows, rows =
+  let hidden_timeline_rows, rows, total =
     match rows with
-    | { kind = Metadata (Timeline_break _); _ } :: rest
-      when List.length rows > height ->
-        1, rest
+    | { kind = Metadata (Timeline_break _); _ } :: rest -> 1, rest, total - 1
     | { kind = Metadata (Diagnostic | (Sender | (Origin _ | Continued_at _)));_}::_
-    | { kind = (Body | (Spacing | Viewport_gap _));_}::_ | []
-    | {kind=Metadata (Timeline_break _); _ }::_ -> 0, rows
+    | { kind = (Body | (Spacing | Viewport_gap _));_}::_ | [] -> 0, rows, total
   in
   (* Diagnostics trail the body, and scrolling back slices physical rows from
      the bottom up, so a diagnostic dropped at the live edge could never be
@@ -2740,16 +2742,19 @@ let newest_entry_window ~inner_width ~height rows =
   | _, first :: rest ->
       (* Most entries carry no diagnostic; partitioning one would copy every
          row of it to find none. *)
-      let diagnostics, output =
-        if List.exists is_diagnostic rest then List.partition is_diagnostic rest else [], rest
+      let diagnostics, output, output_length =
+        if List.exists is_diagnostic rest then
+          let diagnostics, output = List.partition is_diagnostic rest in
+          diagnostics, output, total - 1 - List.length diagnostics
+        else [], rest, total - 1
       in
       (* The first row, the gap and one row of the latest output come before
          any diagnostic: a pane too short for all of them keeps the last. *)
       let diagnostics = take_last (Int.max 1 (height - 3)) diagnostics in
       let budget = height - 1 - List.length diagnostics in
-      let start, output =
+      let start, output, output_length =
         match first.kind, output with
-        | _, _ when height = 3 && diagnostics <> [] -> [], first :: output
+        | _, _ when height = 3 && diagnostics <> [] -> [], first :: output, output_length + 1
         | Metadata _, _ when budget >= 3 -> (
             (* A long sender name wraps to several metadata rows, so the
                opening is the first [Body] row after the whole prefix, not the
@@ -2757,17 +2762,19 @@ let newest_entry_window ~inner_width ~height rows =
                opening and one row of the latest output; otherwise its
                continuation rows join the hidden count. *)
             match split_before_first_body output with
-            | prefix, Some (opening, output) ->
+            | prefix, Some (opening, after) ->
                 let whole = (first :: prefix) @ [ opening ] in
-                if List.length whole < budget then whole, output
-                else [ first; opening ], output
-            | _, None -> [ first ], output)
-        | (Metadata _ | Body | Spacing | Viewport_gap _), _ -> [ first ], output
+                let after_length = output_length - List.length prefix - 1 in
+                if List.length whole < budget then whole, after, after_length
+                else [ first; opening ], after, after_length
+            | _, None -> [ first ], output, output_length)
+        | (Metadata _ | Body | Spacing | Viewport_gap _), _ -> [ first ], output, output_length
       in
-      let physical_tail = take_last (budget - List.length start) output in
+      let physical_tail =
+        take_last_of ~length:output_length (budget - List.length start) output in
       let tail = collapse_repeated_body_rows ~inner_width physical_tail @ diagnostics in
       let hidden_rows =
-        List.length rows - List.length start - List.length physical_tail
+        total - List.length start - List.length physical_tail
         - List.length diagnostics + hidden_timeline_rows
       in
       let gap =

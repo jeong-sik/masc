@@ -127,13 +127,6 @@ let native_report_says_failed (completion : Runtime_native_tools.completion opti
 let tool_block ?(omitted_steps = 0) activities : tool_block =
   { activities; omitted_steps }
 
-(* The status marks of RFC tui-one-screen-grammar 7.2 (5.4 asks them of the
-   chat). Arguments still arriving and a native step running are under way;
-   a call sent and waiting on its result waits, the 도구 대기 7.2 names; a
-   result back or a native step ended is settled; a failure failed. A result
-   never seen before the attempt ended is a caution -- it does not establish
-   a failure. An outcome the record does not carry stays the unreported [?]
-   of 6.4. [◌] belongs to a value not read yet and no longer marks a call. *)
 (* The wait a provider asked for before its next attempt, in the duration
    spellings of RFC tui-one-screen-grammar 6.2: a whole number of seconds is a
    setting ([30s], [2m]), anything finer keeps its reading ([500ms], [1.5s]).
@@ -149,6 +142,13 @@ let retry_delay_text ms =
       (Masc_tui_message_layout.elapsed_text
          (float_of_int ms /. float_of_int milliseconds_per_second))
 
+(* The status marks of RFC tui-one-screen-grammar 7.2 (5.4 asks them of the
+   chat). Arguments still arriving and a native step running are under way;
+   a call sent and waiting on its result waits, the 도구 대기 7.2 names; a
+   result back or a native step ended is settled; a failure failed. A result
+   never seen before the attempt ended is a caution -- it does not establish
+   a failure. An outcome the record does not carry stays the unreported [?]
+   of 6.4. [◌] belongs to a value not read yet and no longer marks a call. *)
 let finished_marker = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
 
 let marker_of_outcome = function

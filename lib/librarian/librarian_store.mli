@@ -176,6 +176,17 @@ val commit_skip
   -> Librarian_read_result.reach
   -> committed
 
+(** An operator's [Restart_reading] (§12.4): a [Skip] of [hole] whose line
+    names [start]'s turn log and reads it from its first line, as a first
+    boot does. Like {!commit_skip}, it keeps the working state and leaves
+    the snapshot. *)
+val commit_restart
+  :  t
+  -> at:float
+  -> hole:Librarian_log.hole
+  -> start:Keeper_turn_log_store.start
+  -> committed
+
 type adoption_refusal =
   | Snapshot_mismatch (** The snapshot file does not hold the bytes named. *)
   | Snapshot_unreadable (** It holds them, and they are not a snapshot. *)

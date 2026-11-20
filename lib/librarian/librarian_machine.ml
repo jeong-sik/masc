@@ -657,6 +657,8 @@ type act_refusal =
   | Not_stopped
   | Snapshot_mismatch
   | Snapshot_unreadable
+  | Not_replaced
+  | Turn_log_unread
   | Act_unavailable of unavailable
 
 type act_answer =
@@ -686,6 +688,65 @@ let adopt { memory_dir; turns_dir; keeper_id } t ~at ~by ~observed =
      | Error Snapshot_mismatch -> t, Not_done Snapshot_mismatch
      | Error Snapshot_unreadable -> t, Not_done Snapshot_unreadable
      | Error (Not_adopted stop) -> t, Not_done (Act_unavailable (Store_stopped stop)))
+;;
+
+(* The turn log a line reads. *)
+let reading_log : Librarian_log.line -> Keeper_turn_log.Log_id.t = function
+  | Started { turn_log; _ } | Committed { turn_log; _ } -> turn_log
+;;
+
+(* What a restart passes, read from the disk when it is taken: the file's
+   first line names [observed], and the reader, run again from the tail,
+   finds that file is another turn log or that the stored offset is not one
+   of its lines. The reader reads the first line again, so each fault is
+   taken only when the file it saw is the one [observed] names: a file
+   replaced in between is refused, not recorded as what it is not. Any other
+   answer of the reader is no reason to start over. *)
+let restart_from place store ~observed =
+  let turns_path = turns_path place in
+  let is_observed id = Keeper_turn_log.Log_id.equal id observed in
+  match Keeper_turn_log_store.read_start turns_path with
+  | Error (Read_failed { path = (_ : string); detail = (_ : string) } | Moved_while_reading) ->
+    Error Turn_log_unread
+  | Ok None
+  | Error
+      ( Row_undecodable
+          { offset = (_ : int); reason = (_ : Keeper_turn_log_store.undecodable) }
+      | Log_start_missing ) ->
+    (* No [Log_started] line names [observed]. *)
+    Error Not_replaced
+  | Ok (Some (start : Keeper_turn_log_store.start)) ->
+    if not (is_observed start.id)
+    then Error Not_replaced
+    else (
+      let tail = Store.tail store in
+      match Librarian_unread.read ~turns_path ~until:(First_with_items 1) tail with
+      | Error (Fault (Turn_log_replaced { expected; observed = Some now })) when is_observed now ->
+        Ok (Librarian_log.Turn_log_replaced { from = expected; to_ = now }, start)
+      | Error (Fault (Position_lost { offset; length })) when is_observed (reading_log tail) ->
+        Ok (Librarian_log.Position_lost { offset; length }, start)
+      | Error (Fault (Turn_log_replaced _ | Position_lost _ | Line_unreadable _ | Content_unreadable _))
+      | Ok (_ : Librarian_unread.reading) -> Error Not_replaced
+      | Error (Unread { detail = (_ : string) }) -> Error Turn_log_unread)
+;;
+
+(* §12.4: a refusal leaves the value as it is, so an ask that is out goes
+   on. An accepted restart cancels it, and the next ask reads the file from
+   its first line with no width or size fact kept (§7.6). *)
+let restart_reading place t ~at ~observed =
+  match t.state with
+  | Stopped stop -> t, Not_done (Act_unavailable (Store_stopped stop))
+  | Idle { store; seen_length = (_ : int option) }
+  | Asking { store; asking = (_ : asking) }
+  | Resting store
+  | Refused_at_bottom store ->
+    (match restart_from place store ~observed with
+     | Error refusal -> t, Not_done refusal
+     | Ok (hole, start) ->
+       let t = { t with narrowing = Librarian_width.empty; bottom = Librarian_bottom.empty } in
+       ( settled t store (Store.commit_restart store ~at ~hole ~start) ~after:(fun store ->
+           next_ask place t ~at store)
+       , Done ))
 ;;
 
 type fiber_change =

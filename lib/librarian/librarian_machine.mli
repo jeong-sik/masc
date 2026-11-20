@@ -34,6 +34,7 @@
     Write, HandleWrite                write
     Resume                            resume
     Adopt                             adopt
+    RestartReading                    restart_reading
     BootFinish                        booted
     FreshMem(m.lane)                  booted from the lane and the last number only
     Start(m, c, fb)                   the next ask, inside these functions
@@ -365,6 +366,12 @@ type act_refusal =
   | Not_stopped
   | Snapshot_mismatch
   | Snapshot_unreadable
+  | Not_replaced
+  (** The turn log is not the one named, or it is the one reading names and
+      the stored offset is one of its lines: there is nothing to restart. *)
+  | Turn_log_unread
+  (** The turn log could not be read now, so the act's condition was not
+      read. Nothing changed. *)
   | Act_unavailable of unavailable
 
 type act_answer =
@@ -401,6 +408,33 @@ val adopt
   -> at:float
   -> by:string
   -> observed:Digest.digest
+  -> t * act_answer
+
+(** An operator restarts reading on the turn log the file is now (§12.4).
+    The condition is read from the disk when the act is taken, not from the
+    state or the last ask's result. The file's first line names [observed],
+    and the reader, run again from the tail, finds either:
+
+    - another turn log than the tail names: a [Skip (Turn_log_replaced _)];
+    - the same one, and the stored offset past its end or not at the start
+      of a line: a [Skip (Position_lost _)].
+
+    The line names the file and reads it from its first line, as a first
+    boot does. It keeps the working state and leaves the snapshot. The
+    narrowing and the size facts are emptied, an ask that is out is
+    cancelled, and the next ask follows.
+
+    In [Idle], [Asking], [Resting] and [Refused_at_bottom]. Any other answer
+    of the reader is [Not_done Not_replaced]; a file that cannot be read now
+    is [Not_done Turn_log_unread]. A refusal leaves the value as it was, an
+    ask that is out included. [Stopped s] is
+    [Not_done (Act_unavailable (Store_stopped s))]. A commit that fails is
+    [Done] with the store's state, as for any commit. *)
+val restart_reading
+  :  place
+  -> t
+  -> at:float
+  -> observed:Keeper_turn_log.Log_id.t
   -> t * act_answer
 
 (** What the writer's fiber does to the ask's fiber after one step. *)

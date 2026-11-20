@@ -132,6 +132,11 @@ val write
 val resume : t -> Librarian_machine.act_answer asked
 val adopt : t -> by:string -> observed:Digest.digest -> Librarian_machine.act_answer asked
 
+val restart_reading
+  :  t
+  -> observed:Keeper_turn_log.Log_id.t
+  -> Librarian_machine.act_answer asked
+
 type retirement =
   | Retired_now (** The lock is released and the fiber has ended. *)
   | Still_registered (** The Keeper is registered. The writer goes on. *)

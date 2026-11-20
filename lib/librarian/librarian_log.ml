@@ -18,6 +18,14 @@ type hole =
       ; after : Keeper_turn_log.mark
       }
   | Item_exceeds_window of Librarian_unit.missing_at list
+  | Turn_log_replaced of
+      { from : Keeper_turn_log.Log_id.t
+      ; to_ : Keeper_turn_log.Log_id.t
+      }
+  | Position_lost of
+      { offset : int
+      ; length : int
+      }
 
 type shown =
   | With_memory

@@ -20,29 +20,60 @@ let route path =
 type action =
   | Resume
   | Adopt of { observed : Digest.digest }
+  | Restart_reading of { observed : Keeper_turn_log.Log_id.t }
 
-let action_resume = "resume"
-let action_adopt = "adopt"
+(* The wire name of each action, from one closed list. *)
+type kind =
+  | Kind_resume
+  | Kind_adopt
+  | Kind_restart_reading
+
+let kind_token = function
+  | Kind_resume -> "resume"
+  | Kind_adopt -> "adopt"
+  | Kind_restart_reading -> "restart_reading"
+;;
+
+let kinds = [ Kind_resume; Kind_adopt; Kind_restart_reading ]
+let kind_of_token token = List.find_opt (fun kind -> String.equal (kind_token kind) token) kinds
+let field_action = "action"
+let field_observed = "observed"
 
 let request_shape =
   Printf.sprintf
-    {|the request is {"action":"%s"} or {"action":"%s","observed":"<sha256 hex>"}|}
-    action_resume
-    action_adopt
+    {|the request is {"%s":"%s"}, {"%s":"%s","%s":"<sha256 hex>"} or {"%s":"%s","%s":"<turn log id>"}|}
+    field_action (kind_token Kind_resume)
+    field_action (kind_token Kind_adopt) field_observed
+    field_action (kind_token Kind_restart_reading) field_observed
 ;;
 
 let parse body =
   let adopt hex =
     match Digest.digest_of_hex hex with
     | Ok observed -> Ok (Adopt { observed })
-    | Error detail -> Error ("observed: " ^ detail)
+    | Error detail -> Error (field_observed ^ ": " ^ detail)
   in
+  let restart text =
+    match Keeper_turn_log.Log_id.of_string text with
+    | Some observed -> Ok (Restart_reading { observed })
+    | None -> Error (field_observed ^ ": not a turn log id")
+  in
+  let by_name (left, (_ : Yojson.Safe.t)) (right, (_ : Yojson.Safe.t)) = String.compare left right in
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
-  | `Assoc [ ("action", `String action) ] when String.equal action action_resume -> Ok Resume
-  | `Assoc [ ("action", `String action); ("observed", `String hex) ]
-  | `Assoc [ ("observed", `String hex); ("action", `String action) ]
-    when String.equal action action_adopt -> adopt hex
+  | `Assoc fields ->
+    (match List.sort by_name fields with
+     | [ (action, `String token) ] when String.equal action field_action ->
+       (match kind_of_token token with
+        | Some Kind_resume -> Ok Resume
+        | Some (Kind_adopt | Kind_restart_reading) | None -> Error request_shape)
+     | [ (action, `String token); (observed, `String value) ]
+       when String.equal action field_action && String.equal observed field_observed ->
+       (match kind_of_token token with
+        | Some Kind_adopt -> adopt value
+        | Some Kind_restart_reading -> restart value
+        | Some Kind_resume | None -> Error request_shape)
+     | _ -> Error request_shape)
   | _ -> Error request_shape
 ;;
 
@@ -65,6 +96,7 @@ let act ~base_path ~keeper ~actor action =
       match action with
       | Resume -> Librarian_writers.resume writers keeper
       | Adopt { observed } -> Librarian_writers.adopt writers keeper ~by:actor ~observed
+      | Restart_reading { observed } -> Librarian_writers.restart_reading writers keeper ~observed
     in
     (match answer with
      | Not_done refusal -> Refused refusal
@@ -78,8 +110,9 @@ let act ~base_path ~keeper ~actor action =
 ;;
 
 let action_name = function
-  | Resume -> action_resume
-  | Adopt { observed = (_ : Digest.digest) } -> action_adopt
+  | Resume -> kind_token Kind_resume
+  | Adopt { observed = (_ : Digest.digest) } -> kind_token Kind_adopt
+  | Restart_reading { observed = (_ : Keeper_turn_log.Log_id.t) } -> kind_token Kind_restart_reading
 ;;
 
 (* A stopped store says why in the words the Memory tools use. A store whose
@@ -110,6 +143,8 @@ let refusal_fields : Librarian_machine.act_refusal -> (string * Yojson.Safe.t) l
   | Not_stopped -> [ "code", `String "not_stopped" ]
   | Snapshot_mismatch -> [ "code", `String "snapshot_mismatch" ]
   | Snapshot_unreadable -> [ "code", `String "snapshot_unreadable" ]
+  | Not_replaced -> [ "code", `String "not_replaced" ]
+  | Turn_log_unread -> [ "code", `String "turn_log_unread" ]
   | Act_unavailable (Store_stopped stop) -> ("code", `String "store_stopped") :: stop_fields stop
   | Act_unavailable Keeper_retired -> [ "code", `String "keeper_not_registered" ]
 ;;

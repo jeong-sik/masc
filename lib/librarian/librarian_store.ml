@@ -194,6 +194,9 @@ type reading =
   | Stays_with of Librarian_plan.working_state
   (* An answer that makes room does not move it, and may replace the working
      state. *)
+  | Starts_over of Turn_store.start
+  (* An operator's restart reads the turn log that starts this way from its
+     first line (§12.4), as a first boot does. *)
 
 (* The working state a line carries: the plan's when it replaced it,
    otherwise the line before's. *)
@@ -204,8 +207,9 @@ let working_state_after ~(before : string option) : Librarian_plan.working_state
 ;;
 
 (* A line carries the reading position and the working state of the line
-   before it, unless it moves them. The turn log it reads is always the one
-   before it names: an event that replaces the file cancels the ask. *)
+   before it, unless it moves them. The turn log it reads is the one before
+   it names, unless an operator restarts reading: every other event that
+   finds another file cancels the ask and writes no line. *)
 let line_after (tail : Log.line) ~at ~basis ~after ~revision ~cause ~effects ~reading
   : Log.commit
   =
@@ -239,6 +243,13 @@ let line_after (tail : Log.line) ~at ~basis ~after ~revision ~cause ~effects ~re
     }
   | Stays_with working_state ->
     { kept with working_state = working_state_after ~before:kept.working_state working_state }
+  | Starts_over start ->
+    { kept with
+      turn_log = start.id
+    ; turn_log_offset = 0
+    ; covers_through = Before_first
+    ; covered = start.mark
+    }
 ;;
 
 (* The error of an append does not say whether the line is on disk: a write
@@ -358,6 +369,11 @@ let changes t (plan : Librarian_plan.t) =
 let commit_skip t ~at ~hole reach =
   commit t ~at ~cause:(Log.Skip { hole }) ~effects:Librarian_effects.empty
     ~reading:(Moves { reach; working_state = Kept })
+;;
+
+let commit_restart t ~at ~hole ~start =
+  commit t ~at ~cause:(Log.Skip { hole }) ~effects:Librarian_effects.empty
+    ~reading:(Starts_over start)
 ;;
 
 type adoption_refusal =

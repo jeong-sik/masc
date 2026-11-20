@@ -176,7 +176,9 @@ let cells ~now = function
         match updated_at with
         | Some at ->
             [ { Masc_tui_keeper_axis_cell.text =
-                  Printf.sprintf "+%s +%d -%d" (span_since ~now at) added removed
+                  Printf.sprintf "+%s %s %s" (span_since ~now at)
+                    (Masc_tui_value.Count.increase added)
+                    (Masc_tui_value.Count.decrease removed)
               ; tone = Quiet
               } ]
         | None -> []

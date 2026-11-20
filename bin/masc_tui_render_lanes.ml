@@ -1890,9 +1890,10 @@ let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_deta
         | (Tui_decode.Memory_disposition_scope | Tui_decode.Context_only_scope),
           Some (Tui_decode.Librarian_memory_rewritten {revision;facts;added;removed}) ->
           Printf.sprintf
-            (if ko then "기억 snapshot: +%d / -%d · revision %d · %d facts"
-             else "Memory snapshot: +%d / -%d · revision %d · %d facts")
-            added removed revision facts in
+            (if ko then "기억 snapshot: %s / %s · revision %d · %d facts"
+             else "Memory snapshot: %s / %s · revision %d · %d facts")
+            (Masc_tui_value.Count.increase added)
+            (Masc_tui_value.Count.decrease removed) revision facts in
       let side_writes = List.map (fun (kind, status) ->
         let label = match kind with
           | Tui_decode.Context_write -> "Context"

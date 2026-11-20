@@ -331,9 +331,10 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   in
   let facts_line =
     Printf.sprintf
-      (if ko then "  사실 %d개 (관측 %d / 파생 %d) · 최근 변경 +%d / -%d / 근거 무효화 %d" else "  facts %d (observed %d / derived %d) · last change +%d / -%d / support-invalidated %d")
-      k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts k.mkh_added
-      k.mkh_removed k.mkh_support_invalidations
+      (if ko then "  사실 %d개 (관측 %d / 파생 %d) · 최근 변경 %s / %s / 근거 무효화 %d" else "  facts %d (observed %d / derived %d) · last change %s / %s / support-invalidated %d")
+      k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts
+      (Masc_tui_value.Count.increase k.mkh_added)
+      (Masc_tui_value.Count.decrease k.mkh_removed) k.mkh_support_invalidations
   in
   (* The facts line above already counts the facts, so the ages follow
      without a count of their own. *)
@@ -655,9 +656,10 @@ let memory_row_line ?(selected = false) ~unit columns (k : Masc.Tui_decode_memor
   let delta =
     match k.mkh_added, k.mkh_removed with
     | 0, 0 -> ""
-    | added, 0 -> Printf.sprintf "+%d" added
-    | 0, removed -> Printf.sprintf "-%d" removed
-    | added, removed -> Printf.sprintf "+%d -%d" added removed
+    | added, 0 -> Masc_tui_value.Count.increase added
+    | 0, removed -> Masc_tui_value.Count.decrease removed
+    | added, removed ->
+      Masc_tui_value.Count.increase added ^ " " ^ Masc_tui_value.Count.decrease removed
   in
   let deviation = Option.value (memory_deviation_style k) ~default:"" in
   let state_style = deviation in

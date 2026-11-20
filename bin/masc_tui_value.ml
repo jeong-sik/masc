@@ -488,6 +488,11 @@ module Count = struct
     if ko then "외 " ^ grouped count else grouped count ^ " more"
 
   let times count = "×" ^ grouped count
+
+  let increase count = "+" ^ grouped count
+
+  (* U+2212, not the hyphen: the sign reads at the width of its "+". *)
+  let decrease count = "\xe2\x88\x92" ^ grouped count
 end
 
 module Hash = struct

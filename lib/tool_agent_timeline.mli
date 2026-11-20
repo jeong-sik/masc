@@ -63,8 +63,7 @@ type chat_line = {
 }
 (** Neutral projection of one keeper chat line (user or assistant) for the
     timeline. Constructed by a keeper-aware caller that reads the keeper
-    chat store — this module must not reference that store directly
-    (RFC-0194 §3 tool -> keeper boundary). *)
+    chat store — this module must not reference that store directly. *)
 
 val build_timeline :
   ?load_chat:(agent_name:string -> chat_line list) ->

@@ -1,5 +1,5 @@
 (* Fusion — 패널+심판 심의 루프의 타입드 계약 (구현).
-   계약/문서: fusion_types.mli, docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md *)
+   계약: fusion_types.mli *)
 
 type usage =
   { input_tokens : int
@@ -133,8 +133,8 @@ let render_skip_reason = function
 (* judge 실행 전 panel 입력 계약 검사 (런타임 quorum = preset.min_answered).
    응답 0이면 [No_panel_answers](objective input absence), 0 < 응답 < [min_answered]면
    [Quorum_shortfall](N-of-M 정책 미달), 응답 >= [min_answered]면 [None] = judge 진행.
-   미달 응답을 judge에 넘기는 silent degrade는 금지다 — quorum은 RFC-0252 §5.1 (a)의
-   meta-degrade(실행 후 첫 성공으로 폭빽)와 다른 축(실행 전 입력 계약)이다.
+   미달 응답을 judge에 넘기는 silent degrade는 금지다 — quorum은 meta-degrade(실행 후
+   첫 성공으로 폴백)와 다른 축(실행 전 입력 계약)이다.
    [min_answered] 기본값(1)에서는 "응답 0일 때만 skip"으로 강제 전 동작과 정확히 동일.
    [Validated_preset]가 1..패널 총합 범위를 증명하므로 여기선 범위 재검증을 하지 않는다.
    순수 — 테스트 가능. *)
@@ -415,7 +415,7 @@ type judge_error_node =
   { failed_role : judge_role
   ; failure : judge_failure
   ; usage : usage
-      (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E).
+      (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(적대 리뷰 #22112 E).
           패널 실패와 마찬가지로 보고된 사용량을 보존한다. *)
   ; elapsed_s : float option
       (** 이 심판 노드가 시작된 시점부터 실패까지 경과한 시간(초). [None]은
@@ -537,9 +537,9 @@ type gate_decision =
 
 (* 심의 위상(topology) — 패널 답을 어떤 합성 구조로 reduce할지. 닫힌 합:
    keeper는 masc_fusion 도구에서 이름으로 고르고, 게이트는 보지 않으며, 오케스트레이터가
-   이 변형으로 dispatch한다. 그래프 datatype이 아니라 named composition의 닫힌 집합
-   (RFC-0252 §13 P2 확장; "Fusion as a Tool"의 합성-by-selection). 새 위상은 여기 추가하면
-   orchestrator dispatch가 exhaustive-match 컴파일 에러로 누락을 강제한다. *)
+   이 변형으로 dispatch한다. 그래프 datatype이 아니라 named composition의 닫힌 집합.
+   새 위상은 여기 추가하면 orchestrator dispatch가 exhaustive-match 컴파일 에러로
+   누락을 강제한다. *)
 type fusion_topology =
   | Simple  (** panel → judge → sink (현행, byte-identical) *)
   | Refine  (** panel → judge → judge'(1차 종합을 재검토) → sink *)

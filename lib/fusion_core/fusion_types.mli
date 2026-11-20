@@ -93,7 +93,7 @@ val panel_failure_of_yojson : Yojson.Safe.t -> (panel_failure, string) result
     named record로 분리한다.) *)
 type panel_answer =
   { model : string
-      (** 패널 정체성 (RFC-0278, {!Fusion_policy.panelist_id}): 라벨 없으면 provider
+      (** 패널 정체성 ({!Fusion_policy.panelist_id}): 라벨 없으면 provider
           model id, 라벨 있으면 ["label (model)"]. 심판/sink가 이 문자열로 패널을
           지칭한다. 라벨 없는(legacy/단일-occurrence) 패널은 = provider model. *)
   ; answer : string
@@ -388,7 +388,7 @@ type judge_error_node =
   { failed_role : judge_role
   ; failure : judge_failure
   ; usage : usage
-      (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E). *)
+      (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(적대 리뷰 #22112 E). *)
   ; elapsed_s : float option
       (** Wave start부터 실패까지 경과한 시간(초). [None]은 clock 미가용으로
           관측할 수 없었음을 뜻한다. *)

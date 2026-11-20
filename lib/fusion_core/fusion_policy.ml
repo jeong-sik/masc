@@ -1,5 +1,5 @@
 (* Fusion — 결정론적 발동 게이트 (구현).
-   계약/문서: fusion_policy.mli, docs/rfc/RFC-0252 §6 *)
+   계약: fusion_policy.mli *)
 
 (* 한 패널 그룹 — 공통 system_prompt/web_tools 설정으로 실행되는
    모델 묶음. 한 preset이 이종(heterogeneous) 그룹 여럿을 가질 수 있다.
@@ -409,7 +409,7 @@ let effective_preset ~(policy : t) ~preset ~roster =
    판단해 masc_fusion을 호출하는 것으로 표현한다. 따라서 [req.trigger]는
    발동 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다.
    size 재검증은 없다 — [find_preset]이 [Validated_preset.t]를 돌려주므로 size는
-   타입으로 증명됨 (RFC-0280, 기존 dead 재검증 제거). *)
+   타입으로 증명됨. *)
 let decide ~(policy : t)
     (req : Fusion_types.fusion_request) : Fusion_types.gate_decision =
   match decide_top_level ~policy ~preset:req.preset with

@@ -2,9 +2,10 @@
     (RFC librarian-call-only-proposes §5.1, §5.3, §5.5, §5.6).
 
     {!Librarian_unread} names what a unit holds in each store. This reads it:
-    the Agent-Core messages its slices name, and the rows of the
-    official-client files, the chat file and the external store that lie in
-    its ranges. Each item is the value its store holds, in the order
+    the rows of the chat file and the external store that lie in its ranges,
+    and the conversation from the one record each segment names: the
+    Agent-Core messages its slices name, or the rows of the official-client
+    files in its ranges. Each item is the value its store holds, in the order
     {!Librarian_unit} gives. Nothing is reduced here: the question reduces
     the items as §5.5 says when it writes them out.
 

@@ -164,10 +164,20 @@ let messages ~line ~session_dir (slices : Keeper_turn_log.slice list) =
   |> Result.map List.rev
 ;;
 
+(* The segment's conversation from the one record that holds it (§5.1):
+   the checkpoint's messages, or the official-client files' rows. *)
+let conversation stores ~line ~(through : Keeper_turn_log.mark) : Librarian_unread.record -> _ = function
+  | Checkpoint slices -> messages ~line ~session_dir:(stores.session_dir ~session:through.trace) slices
+  | Official_files { history; internal } ->
+    let official = stores.session_dir ~session:through.session in
+    let* history = official_rows (Keeper_turn_fragments.path ~session_dir:official Main) Main history in
+    let* internal = official_rows (Keeper_turn_fragments.path ~session_dir:official Internal) Internal internal in
+    Ok [ history; internal ]
+;;
+
 (* One segment's items in the order {!Librarian_unit} gives: chat rows,
-   external rows, Agent-Core messages, history rows, internal rows. *)
-let segment stores ~line ~(through : Keeper_turn_log.mark) (segment : Librarian_unread.segment) =
-  let official = stores.session_dir ~session:through.session in
+   external rows, then the conversation. *)
+let segment stores ~line ~through (segment : Librarian_unread.segment) =
   let* chat =
     chat_rows (Keeper_chat_store.chat_path ~base_dir:stores.base_path ~keeper_name:stores.keeper_name)
       segment.chat
@@ -177,12 +187,8 @@ let segment stores ~line ~(through : Keeper_turn_log.mark) (segment : Librarian_
       (Keeper_external_attention.attention_path ~base_path:stores.base_path ~keeper_name:stores.keeper_name)
       segment.external_rows
   in
-  let* messages = messages ~line ~session_dir:(stores.session_dir ~session:through.trace) segment.slices in
-  let* history = official_rows (Keeper_turn_fragments.path ~session_dir:official Main) Main segment.history in
-  let* internal =
-    official_rows (Keeper_turn_fragments.path ~session_dir:official Internal) Internal segment.internal
-  in
-  let parts = (chat :: external_ :: messages) @ [ history; internal ] in
+  let* conversation = conversation stores ~line ~through segment.record in
+  let parts = chat :: external_ :: conversation in
   Ok
     ( List.concat_map (fun part -> part.bodies) parts
     , List.concat_map (fun (part : part) -> part.missing) parts )

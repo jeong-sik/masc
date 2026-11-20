@@ -18,11 +18,31 @@
     holds the end session's files from their first byte, since no unit
     before it covered them. The chat and external stores are the Keeper's
     own and are not split by session. *)
+(** Where a segment's conversation is recorded (§5.1).
+
+    A turn on Agent Core saves the messages it closed in its checkpoint. Its
+    context runtime also writes the same exchange to the session's history
+    files, so in that segment those files say again what the messages say.
+    A turn on an official client saves no Agent Core checkpoint
+    ({!Runtime_execution.checkpoint_owner}), and its history files are its
+    record. A segment is read from one of the two: the turn log line says
+    which, by whether a slice takes a message. *)
+type record =
+  | Checkpoint of Keeper_turn_log.slice list
+  (** A slice takes a message. These are the Agent Core messages, as the
+      line names them. The history files' bytes in the segment are not
+      read. *)
+  | Official_files of
+      { history : Librarian_unit.range
+      ; internal : Librarian_unit.range
+      (** Bytes of the official-client files of the session the unit ends in. *)
+      }
+  (** No slice takes a message: a turn on an official client, or a turn on
+      Agent Core that closed no message and left its words only in these
+      files. *)
+
 type segment =
-  { slices : Keeper_turn_log.slice list (** The Agent-Core messages, as the line names them. *)
-  ; history : Librarian_unit.range
-  ; internal : Librarian_unit.range
-  (** Bytes of the official-client files of the session the unit ends in. *)
+  { record : record
   ; chat : Librarian_unit.range
   ; external_rows : Librarian_unit.range
   }

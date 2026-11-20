@@ -2,10 +2,15 @@ module Log = Keeper_turn_log
 module Store = Keeper_turn_log_store
 module Scan = Private_jsonl_scan
 
+type record =
+  | Checkpoint of Log.slice list
+  | Official_files of
+      { history : Librarian_unit.range
+      ; internal : Librarian_unit.range
+      }
+
 type segment =
-  { slices : Log.slice list
-  ; history : Librarian_unit.range
-  ; internal : Librarian_unit.range
+  { record : record
   ; chat : Librarian_unit.range
   ; external_rows : Librarian_unit.range
   }
@@ -66,12 +71,15 @@ type until =
 
 let non_empty ({ from; until } : Librarian_unit.range) = until > from
 
-let segment_has_items { slices; history; internal; chat; external_rows } =
-  List.exists (fun ({ take; _ } : Log.slice) -> take > 0) slices
-  || non_empty history
-  || non_empty internal
-  || non_empty chat
-  || non_empty external_rows
+let takes_a_message slices = List.exists (fun ({ take; _ } : Log.slice) -> take > 0) slices
+
+let record_has_items = function
+  | Checkpoint slices -> takes_a_message slices
+  | Official_files { history; internal } -> non_empty history || non_empty internal
+;;
+
+let segment_has_items { record; chat; external_rows } =
+  record_has_items record || non_empty chat || non_empty external_rows
 ;;
 
 let has_items span =
@@ -94,19 +102,37 @@ let has_unread = function
 
 (* {1 What a unit holds} *)
 
-(* Every store from where the unit starts to where it ends. *)
-let whole ~(from : Log.mark) ~(through : Log.mark) slices =
+(* Every store's range from where the unit starts to where it ends. *)
+type ranges =
+  { history : Librarian_unit.range
+  ; internal : Librarian_unit.range
+  ; chat : Librarian_unit.range
+  ; external_rows : Librarian_unit.range
+  }
+
+let ranges ~(from : Log.mark) ~(through : Log.mark) =
   let same_session = String.equal from.session through.session in
   let official start until : Librarian_unit.range =
     { from = (if same_session then start else 0); until }
   in
-  { slices
-  ; history = official from.history_bytes through.history_bytes
+  { history = official from.history_bytes through.history_bytes
   ; internal = official from.internal_bytes through.internal_bytes
   ; chat = { from = from.chat_bytes; until = through.chat_bytes }
   ; external_rows = { from = from.external_rows; until = through.external_rows }
   }
 ;;
+
+(* §5.1: a segment whose slices take a message is read from the checkpoint,
+   and one whose slices take none from the official-client files. *)
+let segment_of ~slices ({ history; internal; chat; external_rows } : ranges) =
+  { record =
+      (if takes_a_message slices then Checkpoint slices else Official_files { history; internal })
+  ; chat
+  ; external_rows
+  }
+;;
+
+let whole ~from ~through slices = segment_of ~slices (ranges ~from ~through)
 
 (* One store's range cut at [at], kept inside it. *)
 let cut ({ from; until } : Librarian_unit.range) at : Librarian_unit.range * Librarian_unit.range =
@@ -115,7 +141,7 @@ let cut ({ from; until } : Librarian_unit.range) at : Librarian_unit.range * Lib
 ;;
 
 let turn_segments ~from ~(through : Log.mark) ~(baseline : Log.mark) ~reset_since ~unattributed ~own =
-  let all = whole ~from ~through [] in
+  let all = ranges ~from ~through in
   let same_session = String.equal baseline.session through.session in
   let at_baseline (range : Librarian_unit.range) value =
     cut range (if reset_since then range.until else value)
@@ -127,18 +153,18 @@ let turn_segments ~from ~(through : Log.mark) ~(baseline : Log.mark) ~reset_sinc
   let internal_before, internal_after = official all.internal baseline.internal_bytes in
   let chat_before, chat_after = at_baseline all.chat baseline.chat_bytes in
   let external_before, external_after = at_baseline all.external_rows baseline.external_rows in
-  ( { slices = unattributed
-    ; history = history_before
-    ; internal = internal_before
-    ; chat = chat_before
-    ; external_rows = external_before
-    }
-  , { slices = own
-    ; history = history_after
-    ; internal = internal_after
-    ; chat = chat_after
-    ; external_rows = external_after
-    } )
+  ( segment_of ~slices:unattributed
+      { history = history_before
+      ; internal = internal_before
+      ; chat = chat_before
+      ; external_rows = external_before
+      }
+  , segment_of ~slices:own
+      { history = history_after
+      ; internal = internal_after
+      ; chat = chat_after
+      ; external_rows = external_after
+      } )
 ;;
 
 (* {1 Where reading stands among the lines} *)

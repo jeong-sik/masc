@@ -336,7 +336,7 @@ val paste_records : text:string -> t -> t
 (** Pasted text goes to the overlay's open add form. *)
 val can_observe : instance -> bool
 val removal_block_reason : t -> instance -> string option
-val overview_hints : t -> string list
+val overview_hints : ?ko:bool -> t -> string list
 (** The keys the current Plugins screen answers, one item per key or notice,
     the way out first. The footer joins them two spaces apart and drops whole
     items from the back on a short row; the overview body packs whole items

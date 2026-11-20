@@ -378,7 +378,7 @@ let async_logical_lines value =
   | Detail.Not_composition ->
     [Ansi.dim, Say.both ~ko:" 논리: Composition 원본 없음" ~en:" Logical: no original Composition"]
   | Original_run run ->
-    [Theme.info (), Say.both ~ko:" 원본 run: " ~en:" Original run: " ++ safe run.run_id;
+    [Theme.series_tint Masc_tui_theme.Calls 0.8, Say.both ~ko:" 원본 run: " ~en:" Original run: " ++ safe run.run_id;
      Ansi.dim, Say.both ~ko:" 원본 Task: " ~en:" Original Task: "
        ++ Option.fold ~none:(Say.both ~ko:"없음(기록)" ~en:"none (recorded)") ~some:safe run.source_task_id;
      Ansi.dim, Say.both ~ko:" 현재 run owner: " ~en:" Current run owner: " ++ safe run.owner.request_id
@@ -399,7 +399,7 @@ let async_logical_lines value =
                | Cancelled_continuation -> Say.both ~ko:"취소" ~en:"cancelled");
          Ansi.dim, Say.both ~ko:" 결정: " ~en:" Decided by: " ++ safe resolution.requested_by
            ++ say_dot ++ Say.code (Printf.sprintf "%.3f" resolution.resolved_at);
-         Theme.info (), Say.both ~ko:" 사유: " ~en:" Reason: " ++ safe resolution.reason])
+         Theme.series_tint Masc_tui_theme.Calls 0.8, Say.both ~ko:" 사유: " ~en:" Reason: " ++ safe resolution.reason])
 
 let async_request_detail_lines ~cols state target =
   let module Detail = Masc.Tui_decode_async_request in
@@ -443,7 +443,7 @@ let async_request_detail_lines ~cols state target =
         | Persistence_failed -> Say.both ~ko:"저장 실패" ~en:"persistence failed"
         | Done true -> Say.both ~ko:"끝남 (물리 성공)" ~en:"done (physical success)"
         | Done false -> Say.both ~ko:"오류 (물리 실패)" ~en:"error (physical failure)" in
-      let physical = [Theme.info (), Say.both ~ko:" 물리 상태: " ~en:" Physical state: " ++ phase;
+      let physical = [Theme.series_tint Masc_tui_theme.Calls 0.8, Say.both ~ko:" 물리 상태: " ~en:" Physical state: " ++ phase;
         Ansi.dim, Say.both ~ko:" 접수: " ~en:" Submitted: " ++ Say.code (Printf.sprintf "%.3f" snapshot.submitted_at)
           ++ say_dot ++ Say.both ~ko:"종료: " ~en:"Ended: "
           ++ Option.fold ~none:(Say.both ~ko:"미종료" ~en:"not ended")
@@ -833,7 +833,7 @@ let tools_pane_strip ~cols (state : state) =
     | (Tools_surface | Tools_async | Tools_activations | Tools_usage | Tools_storage
       | Tools_catalog Tools_catalog_list) as pane -> pane in
   let language = say_language state in
-  tab_strip
+  tab_strip ~numbered:true
     ~width:(tab_strip_width ~cols ~before:" " ~after:"")
     ~press:(fun pane text -> Masc_tui_press.(pressable (Press_tools_pane pane) text))
     (List.map
@@ -987,7 +987,7 @@ let skill_statistics_lines ~cols = function
           ++ Say.code (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported) in
       let width = max 1 (Masc_tui_frame.inner_width ~cols - 4) in
       rows
-        ([ Theme.info (),
+        ([ Theme.series_tint Masc_tui_theme.Calls 0.8,
            Say.per_language (function
              | Say.Ko -> Printf.sprintf "executor 실행 시간 · 보존된 원래 실행 %d건" stats.scst_records
              | Say.En -> Printf.sprintf "executor run time · %d original runs retained" stats.scst_records)
@@ -1478,16 +1478,22 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           List.mapi
             (fun index (profile : Masc.Tui_decode_tools.effective_skill_profile) ->
                let instruction = is_normal profile in
-               let execution =
+               let glyph, mode_tone, execution =
                  match profile.esp_surface with
                  | Masc.Keeper_skill_observability.Instruction_skill ->
-                   Say.both ~ko:"필요할 때" ~en:"on-demand"
+                   ( "\xe2\x97\x87" (* ◇ *)
+                   , Theme.series_tint Masc_tui_theme.Memory 0.8
+                   , Say.both ~ko:"필요할 때" ~en:"on-demand" )
                  | Masc.Keeper_skill_observability.Composition_skill
                      Masc.Keeper_tool_composition_catalog.Inline ->
-                   Say.both ~ko:"동기 실행" ~en:"inline"
+                   ( "\xe2\x97\x86" (* ◆ *)
+                   , Theme.series_tint Masc_tui_theme.Calls 0.8
+                   , Say.both ~ko:"동기 실행" ~en:"inline" )
                  | Masc.Keeper_skill_observability.Composition_skill
                      Masc.Keeper_tool_composition_catalog.Async ->
-                   Say.both ~ko:"비동기 실행" ~en:"async"
+                   ( "\xe2\x97\x88" (* ◈ *)
+                   , Theme.warn ()
+                   , Say.both ~ko:"비동기 실행" ~en:"async" )
                in
                (* An instruction skill is text the model reads; it has no
                   flow, so its node, batch and parallel counts are zero on
@@ -1520,27 +1526,43 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                     | None -> true
                     | Some previous -> is_normal previous <> instruction) in
                  if not first_in_group then [] else
-                   [Ansi.bold,
-                    Say.code "   "
-                    (* Headings follow the screen language and are not
-                       written in capitals only (RFC tui-one-screen-grammar
-                       section 5.1); Skill and Composition are product
-                       nouns and stay as they are. *)
-                    ++ (if instruction
-                        then Say.both ~ko:"지침 Skill" ~en:"Normal Skills · instructions"
-                        else Say.both ~ko:"Composition Skill · 실행 계획"
-                            ~en:"Composition Skills · executable plans")
-                    ++ Say.code (Printf.sprintf " (%d)"
-                         (List.length (List.filter (fun value -> is_normal value = instruction) ets_skill_profiles)))] in
+                   [ Ansi.bold ^ Theme.series_tint Masc_tui_theme.Calls 0.8,
+                     Say.code "   "
+                     (* Headings follow the screen language and are not
+                        written in capitals only (RFC tui-one-screen-grammar
+                        section 5.1); Skill and Composition are product
+                        nouns and stay as they are. *)
+                     ++ (if instruction
+                         then Say.both ~ko:"지침 Skill" ~en:"Normal Skills · instructions"
+                         else Say.both ~ko:"Composition Skill · 실행 계획"
+                             ~en:"Composition Skills · executable plans")
+                     ++ Say.code (Printf.sprintf " (%d)"
+                          (List.length (List.filter (fun value -> is_normal value = instruction) ets_skill_profiles)))] in
                let selected = index = state.tools_skill_cursor in
-               let skill_row =
-                 Say.code (Printf.sprintf " %s "
-                   (if selected then Masc_tui_theme.Glyph.current_entry else " "))
-                 ++ Say.as_received (Masc_tui_message_layout.fit_middle skill_name_cells
-                      (Terminal_text.single_line profile.esp_name))
-                 ++ Say.code " " ++ Say.map (pad_cells 11) execution
+               let name_fitted =
+                 Masc_tui_message_layout.fit_middle skill_name_cells
+                   (Terminal_text.single_line profile.esp_name)
+               in
+               let skill_row_plain =
+                 Say.code (Printf.sprintf " %s " Masc_tui_theme.Glyph.current_entry)
+                 ++ Say.as_received name_fitted
+                 ++ Say.code (" " ^ glyph ^ " ")
+                 ++ Say.map (pad_cells 11) execution
                  ++ Say.code (Printf.sprintf "%s discovery=%dB body=%dB"
                       flow profile.esp_discovery_bytes profile.esp_body_bytes)
+               in
+               let skill_row_styled =
+                 Say.per_language (fun language ->
+                   let exec_col = pad_cells 11 (Say.render language execution) in
+                   let name_col = Ansi.bold ^ name_fitted ^ Ansi.reset in
+                   let badge_col = mode_tone ^ glyph ^ " " ^ exec_col ^ Ansi.reset in
+                   let stats_col =
+                     Theme.recede ()
+                     ^ Printf.sprintf "%s discovery=%dB body=%dB"
+                         flow profile.esp_discovery_bytes profile.esp_body_bytes
+                     ^ Ansi.reset
+                   in
+                   "   " ^ name_col ^ " " ^ badge_col ^ stats_col)
                in
                (* The rows that say why the selected Skill was loaded are
                   its rows too, so following the cursor brings them in. *)
@@ -1550,15 +1572,15 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                in
                List_entry
                  (rows heading
-                  @ [ (if selected then Cursor (Theme.selection_style (), skill_row)
-                       else Row (Ansi.dim, skill_row)) ]
+                  @ [ (if selected then Cursor (Theme.selection_style (), skill_row_plain)
+                       else Row ("", skill_row_styled)) ]
                   @ entry_rows (match profile.esp_load_reasons, chosen with
                       | [], _ ->
                           [ ( Theme.warn ()
                             , Say.both ~ko:"     불러온 이유: 알 수 없음" ~en:"     why loaded: unattributed" ) ]
                       | _, [] -> []
                       | _, chosen ->
-                          [ ( Ansi.dim
+                          [ ( Theme.recede ()
                             , Say.both ~ko:"     불러온 이유: " ~en:"     why loaded: "
                               ++ Say.concat ~sep:(Say.code " + ") chosen )
                           ])))
@@ -2649,7 +2671,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                    (List.length sc_surfaces) (List.length used)
                | Say.En -> Printf.sprintf "Skill Usage · %d of %d catalog Skills observed"
                    (List.length used) (List.length sc_surfaces))
-           ; Theme.info (),
+           ; Theme.series_tint Masc_tui_theme.Calls 0.8,
              Say.per_language (function
                | Say.Ko -> Printf.sprintf "Keeper %d · " keepers
                | Say.En -> Printf.sprintf "Keepers %d · " keepers)
@@ -2706,7 +2728,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
               (rows
                  [ Ansi.bold, Say.as_received (Terminal_text.single_line (surface_name surface))
                      ++ Say.code "  " ++ Say.as_received (Terminal_text.single_line surface.scs_kind)
-                 ; Theme.info (), counts_text ~invocations:(invocations usage)
+                 ; Theme.series_tint Masc_tui_theme.Calls 0.8, counts_text ~invocations:(invocations usage)
                      ~deliveries:(deliveries usage) ~actions:(actions usage)
                  ]
                @ [ Laid_out (fun language -> draw language (rows (keeper_rows language))) ]
@@ -2945,8 +2967,13 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           wrapped marked row becomes keeps the mark, so its run is whole, and
           every row keeps the instant its time text changes at. *)
        if Masc_tui_message_layout.display_width text <= width then [ (style, text), mark ]
-       else Masc_tui_message_layout.wrap_words ~max_cells:width text
-            |> List.map (fun line -> (style, line), mark))
+       else
+         let splitter =
+           if String.equal style "" then Masc_tui_message_layout.wrap_styled_words
+           else Masc_tui_message_layout.wrap_words
+         in
+         splitter ~max_cells:width text
+         |> List.map (fun line -> (style, line), mark))
        (draw_marked language pieces) in
   let drafts = List.map (fun draft ->
       Theme.warn (),
@@ -3122,3 +3149,112 @@ let request_landing (state : state) display =
 let follow landing ~height scroll =
   Masc_tui_scroll.ensure_visible_with_lead ~cursor:landing.entry.first_row ~lead:landing.lead
     ~height (Masc_tui_scroll.ensure_visible ~cursor:landing.entry.last_row ~height scroll)
+
+let selected_skill_bottom_sheet ~cols ~height (state : state) =
+  let width = Masc_tui_frame.inner_width ~cols in
+  if state.tools_pane <> Tools_surface
+     || Option.is_some state.tools_skill_source_picker
+     || height < Masc_tui_card.min_height
+     || width < Masc_tui_card.min_width
+  then []
+  else
+    match selected_tools_skill_profile state with
+    | None -> []
+    | Some profile ->
+        let ko = state.ui_language = Lang_ko in
+        let say korean english = if ko then korean else english in
+        let glyph, mode_word, mode_tone =
+          match profile.esp_surface with
+          | Masc.Keeper_skill_observability.Instruction_skill ->
+              ( "\xe2\x97\x87" (* ◇ *)
+              , say "지침 · 필요할 때" "instruction · on-demand"
+              , Theme.series_tint Masc_tui_theme.Memory 0.8 )
+          | Masc.Keeper_skill_observability.Composition_skill
+              Masc.Keeper_tool_composition_catalog.Inline ->
+              ( "\xe2\x97\x86" (* ◆ *)
+              , say "조합 · 동기 실행" "composition · inline"
+              , Theme.series_tint Masc_tui_theme.Calls 0.8 )
+          | Masc.Keeper_skill_observability.Composition_skill
+              Masc.Keeper_tool_composition_catalog.Async ->
+              ( "\xe2\x97\x88" (* ◈ *)
+              , say "조합 · 비동기 실행" "composition · async"
+              , Theme.warn () )
+        in
+        let reference = profile.esp_reference in
+        let src_id =
+          Terminal_text.single_line
+            (Skill_reference.identity_source_id_to_string reference.identity)
+        in
+        let pkg_id =
+          Terminal_text.single_line
+            (Skill_reference.identity_package_id_to_string reference.identity)
+        in
+        let rev =
+          Masc_tui_value.Hash.short
+            (Terminal_text.single_line
+               (Skill_reference.content_revision_to_string reference.content_revision))
+        in
+        let load_reasons =
+          match profile.esp_load_reasons with
+          | [] -> say "직접 지정 없음" "unattributed"
+          | reasons ->
+              reasons
+              |> List.map (function
+                   | Masc.Tui_decode_tools.Skill_catalog_default ->
+                       say "기본 카탈로그" "catalog default"
+                   | Masc.Tui_decode_tools.Skill_keeper_profile ->
+                       say "Keeper 프로필" "Keeper profile"
+                   | Masc.Tui_decode_tools.Skill_task task_id ->
+                       "Task " ^ Terminal_text.single_line task_id)
+              |> String.concat " · "
+        in
+        let plan_summary =
+          match profile.esp_surface with
+          | Masc.Keeper_skill_observability.Instruction_skill ->
+              Printf.sprintf "discovery=%dB · body=%dB"
+                profile.esp_discovery_bytes profile.esp_body_bytes
+          | Masc.Keeper_skill_observability.Composition_skill _ ->
+              Printf.sprintf
+                (if ko then "노드 %d · 배치 %d · 병렬 %d · discovery=%dB · body=%dB"
+                 else "nodes=%d · batches=%d · parallel=%d · discovery=%dB · body=%dB")
+                profile.esp_node_count profile.esp_batch_count
+                profile.esp_max_parallelism profile.esp_discovery_bytes
+                profile.esp_body_bytes
+        in
+        let io_summary =
+          match profile.esp_io with
+          | Masc.Tui_decode_tools.Model_orchestrated ->
+              say "모델 자율 선택 (지침 본문 온디맨드)" "model-orchestrated (on-demand body)"
+          | Masc.Tui_decode_tools.Composition_io { exports; _ } ->
+              Printf.sprintf
+                (if ko then "고정 실행 그래프 · exports %d개"
+                 else "fixed composition graph · %d export(s)")
+                (List.length exports)
+        in
+        let fields =
+          [ Masc_tui_doc.kv ~tone:mode_tone
+              (say "실행 방식" "Execution") (glyph ^ " " ^ mode_word)
+          ; Masc_tui_doc.kv (say "호출 구조" "Shape") io_summary
+          ; Masc_tui_doc.kv (say "규모 · 맥락" "Plan / Bytes") plan_summary
+          ; Masc_tui_doc.kv (say "출처 · 패키지" "Source / Pkg")
+              (Printf.sprintf "%s / %s @ %s" src_id pkg_id rev)
+          ; Masc_tui_doc.kv (say "불러온 이유" "Load reason") load_reasons
+          ]
+        in
+        Masc_tui_doc.bottom_sheet ~ko ~width ~height
+          ~role:Masc_tui_theme.Panel_neutral
+          ~title:(Terminal_text.single_line profile.esp_name)
+          ~status:
+            { Masc_tui_card.symbol = Masc_tui_card.Mark Masc_tui_value.Mark.Settled
+            ; word = mode_word
+            ; tone = mode_tone
+            }
+          ~count:(Masc_tui_card.Whole (List.length fields))
+          ~footer_keys:
+            [ { Masc_tui_card.key = "Enter"; label = say "실측" "evidence" }
+            ; { key = "f"; label = say "조합" "comp" }
+            ; { key = "1-6"; label = say "탭" "tabs" }
+            ]
+          ~body:(fun ~cells -> Masc_tui_doc.kv_rows ~width:cells fields)
+          ()
+;;

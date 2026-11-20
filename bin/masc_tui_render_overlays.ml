@@ -2309,7 +2309,9 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       else if Option.is_some view.action_menu then
         say "j/k:동작 선택  Enter:1회 실행  J/K:상세 스크롤  Esc:취소"
           "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
-      else String.concat "  " (Masc_tui_lane_addons.overview_hints view))
+      else
+        String.concat "  "
+          (Masc_tui_lane_addons.overview_hints ~ko:(state.ui_language = Lang_ko) view))
     ~body:(fun ~budget c ->
       let inner_width = framed_inner_width cols in
       let lines =

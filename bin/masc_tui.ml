@@ -33779,6 +33779,20 @@ Use relative paths for resources already held in the package. -->
        | Some "p" | Some "P"
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            goto_surface state ~mailbox:async_messages Runtime
+       | Some ("1" | "2" | "3" | "4" | "5" | "6" as digit)
+         when state.view = Tools
+              && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           enter_tools_pane state
+             (match digit with
+              | "1" -> Tools_surface
+              | "2" -> Tools_async
+              | "3" -> Tools_activations
+              | "4" -> Tools_usage
+              | "5" -> Tools_catalog Tools_catalog_list
+              | "6" | _ -> Tools_storage)
        | Some "p" | Some "P" when state.view = Tools ->
            (* Six sections, one at a time. Concatenated the first five ran to 326 rows
               on this workspace and the terminal draws twenty, so four of

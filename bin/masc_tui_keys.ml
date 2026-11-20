@@ -645,6 +645,8 @@ let tools_bindings ~moves ~back ~bracket =
              DIRECT=direct calls allowed; SURFACES=exposure paths; \
              none=no exposure path. Use the Skill log for usage evidence \
              and Activity for tool input/output.")
+  ; b ~role:Moves ~ko:"탭 이동" Navigate "1-6" "jump section"
+      ~help:"1: Callable, 2: Async, 3: Skill log, 4: Skill usage, 5: All tools, 6: Storage"
   ; b ~role:Acts ~ko:"조합 성능" Act "f" "Composition performance"
       ~help:"outside async requests, select the next Composition, load its \
              exact-revision performance charts and open its page at them; \

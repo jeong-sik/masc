@@ -384,10 +384,8 @@ end
 (** {1 AGENT_CORE SSE Bridge Configuration} *)
 
 module Agent_core_sse = struct
-  (** SSE relay retry delay in seconds. Default: 2.0. *)
-  let drain_interval_sec =
-    let v = get_float ~default:2.0 "MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC" in
-    if v < 0.1 then 2.0 else v
+  (** SSE relay retry delay after a failure, in seconds. *)
+  let drain_interval_sec = 2.0
 end
 
 (** {1 Dashboard Signal Thresholds} *)
@@ -546,21 +544,17 @@ end
     centralized here to eliminate scattered magic 300.0/3600.0 literals. *)
 
 module InternalTimers = struct
-  (** Dashboard label "quiet" threshold (seconds). Default: 300 (5 min). *)
-  let label_quiet_threshold_sec =
-    get_float ~default:300.0 "MASC_LABEL_QUIET_THRESHOLD_SEC"
+  (** Dashboard label "quiet" threshold (seconds, 5 min). *)
+  let label_quiet_threshold_sec = 300.0
 
-  (** Dashboard label "stuck" threshold (seconds). Default: 900 (15 min). *)
-  let label_stuck_threshold_sec =
-    get_float ~default:900.0 "MASC_LABEL_STUCK_THRESHOLD_SEC"
+  (** Dashboard label "stuck" threshold (seconds, 15 min). *)
+  let label_stuck_threshold_sec = 900.0
 
-  (** Dashboard mission briefing cache TTL (seconds). Default: 300 (5 min). *)
-  let briefing_cache_ttl_sec =
-    get_float ~default:300.0 "MASC_BRIEFING_CACHE_TTL_SEC"
+  (** Dashboard mission briefing cache TTL (seconds, 5 min). *)
+  let briefing_cache_ttl_sec = 300.0
 
-  (** SSE buffer TTL (seconds). Default: 300 (5 min). *)
-  let sse_buffer_ttl_sec =
-    get_float ~default:300.0 "MASC_SSE_BUFFER_TTL_SEC"
+  (** SSE buffer TTL (seconds, 5 min). *)
+  let sse_buffer_ttl_sec = 300.0
 
   (** Repository auto-sync interval (seconds). The repo_sync fiber in
       [server_bootstrap_loops] wakes at this cadence to fetch repositories

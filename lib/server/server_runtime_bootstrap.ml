@@ -1772,6 +1772,34 @@ let start_startup_watchdog ~sw ~clock =
     `Stop_daemon)
 ;;
 
+(* The engine on an access its caller published: the four steps the stdio
+   server starts, in a fiber, as the single-user server starts its owner. No
+   server state is published and no HTTP surface of the owner starts (RFC
+   a-persons-keeper-runs-on-the-engine, S1). *)
+let start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine access =
+  let clock, mono_clock, net, domain_mgr, proc_mgr, fs = init_runtime_context env in
+  let engine, set_engine = Eio.Promise.create () in
+  Server_startup_state.reset ();
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"engine-initialization" @@ fun _ ->
+    owner_initialization @@ fun () ->
+      Server_startup_state.mark_blocking ();
+      let initialized =
+        initialize_owner_state_blocking ~sw ~runtime_sw ~env ~access ?input_base_path
+          ~accept_store_quarantine ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
+      in
+      let activated =
+        activate_owner_state ~sw ~clock ~mono_clock ~net ~proc_mgr initialized
+      in
+      (match mark_owner_state_ready () with
+       | Ok () -> ()
+       | Error error -> raise (Owner_initialization_failed error));
+      ignore (start_post_ready_owner_lanes ~sw ~clock ~env activated.state : string * string);
+      Eio.Promise.resolve set_engine activated.state);
+  start_startup_watchdog ~sw ~clock;
+  engine
+;;
+
 let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user ~lease
     ?input_base_path ?on_ready ~accept_store_quarantine ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler () =
@@ -2409,12 +2437,18 @@ let run ~sw ~runtime_sw ~env ~address ~port ~judged ?input_base_path ?on_ready
        (Env_config_core.Config_error
           (Server_auth.configure_error_to_string error)));
   (* A multi-account installation gets the account server and its own route
-     table (plan S1a); the owner state, the Keepers and the routes of the
-     single-user server are not started for it. *)
+     table (plan S1a), and the engine the account server starts once it
+     published its access (RFC a-persons-keeper-runs-on-the-engine, S1). The
+     routes of the single-user server are not started for it. *)
   match judged.booted with
   | Authz_boot_mode_read.Multi_account multi_account ->
     (match
-       Server_accounts.run ~sw ~env ~address ~port ~lease:judged.lease ?on_ready multi_account
+       Server_accounts.run ~sw ~env ~address ~port ~lease:judged.lease ?on_ready
+         ~start_engine:(fun access ->
+           ignore
+             (start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine access
+              : Mcp_server.server_state Eio.Promise.t))
+         multi_account
      with
      | Ok () -> ()
      | Error refusal ->

@@ -313,9 +313,10 @@ let acquire_base_path_lock ~previous_owner ~lease_root base_path =
    objects, the settled archive) and one only counts (original request
    bodies). It takes the judgment of the boot and reads the base path out of
    it, so it runs neither before the judgment nor on another base path. It
-   does nothing for the account server, which starts no Keeper and writes
-   none of this state, and a boot that the judgment refuses does not reach
-   it. *)
+   does nothing for a multi-account installation, whose engine runs no Keeper
+   and so writes none of this state: the account server stops at a Keeper
+   definition ([Server_accounts.Keeper_definitions_not_named]). A boot that
+   the judgment refuses does not reach it. *)
 let sweep_single_user_state (judged : Server_runtime_bootstrap.judged) =
   match judged.Server_runtime_bootstrap.booted with
   | Authz_boot_mode_read.Multi_account (_ : Authz_boot_mode_read.multi_account) -> ()

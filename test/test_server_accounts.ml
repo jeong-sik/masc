@@ -431,7 +431,17 @@ let boot_outcome_under lease env ~port multi_account =
     Eio.Switch.run (fun sw ->
       Eio.Fiber.first
         (fun () ->
-          match Server_accounts.run ~sw ~env ~address:loopback ~port ~lease multi_account with
+          match
+            Server_accounts.run
+              ~sw
+              ~env
+              ~address:loopback
+              ~port
+              ~lease
+              ~start_engine:(fun (_ : Runtime_account_access.published) ->
+                Alcotest.fail "a boot that stops started the engine")
+              multi_account
+          with
           | Ok () -> "returned"
           | Error refusal -> refusal_label refusal)
         (fun () ->
@@ -940,6 +950,9 @@ let test_serves_its_table_alone () =
     @@ fun lease ->
     let serve sw =
       let ready, set_ready = Eio.Promise.create () in
+      (* The engine is started on what the boot published, once, and the
+         routes do not wait for it. This case starts none. *)
+      let engine_started_on = ref [] in
       Eio.Fiber.fork ~sw (fun () ->
         match
           Server_accounts.run
@@ -949,11 +962,24 @@ let test_serves_its_table_alone () =
             ~port
             ~lease
             ~on_ready:(Eio.Promise.resolve set_ready)
+            ~start_engine:(fun access ->
+              engine_started_on
+              := Runtime_account_access.published_access access :: !engine_started_on)
             multi_account
         with
         | Ok () -> ()
         | Error refusal -> Alcotest.fail (Server_accounts.refusal_to_string refusal));
       Eio.Promise.await ready;
+      (match !engine_started_on with
+       | [ Runtime_account_access.Multi_account { zone = _; base_path; now = _ } ] ->
+         Alcotest.(check string)
+           "the engine starts on the access of the installation"
+           (Read.multi_account_base_path multi_account)
+           base_path
+       | [ Runtime_account_access.Single_user (_ : Read.single_user) ] ->
+         Alcotest.fail "the engine started on the access of a single user"
+       | [] -> Alcotest.fail "the engine was not started before the server was ready"
+       | _ :: _ :: _ -> Alcotest.fail "the engine was started more than once");
       let status, body = request ~net ~port ~meth:"GET" Server_health_paths.health in
       Alcotest.(check int) "GET /health" 200 status;
       (match json_of "GET /health" body with

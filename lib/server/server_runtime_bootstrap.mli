@@ -278,6 +278,27 @@ val start_post_ready_owner_lanes :
     the application-owned system-LLM completion authority, then background
     maintenance. Both HTTP and stdio use this sequence. *)
 
+(** Starts the engine on [access], which the caller published: the four
+    steps the stdio server starts ({!initialize_owner_state_blocking},
+    {!activate_owner_state}, {!mark_owner_state_ready},
+    {!start_post_ready_owner_lanes}), in a fiber of [sw], and the startup
+    watchdog. No server state is published and no HTTP surface of the owner
+    (gateways, gRPC, WebSocket, Dashboard) starts (RFC
+    a-persons-keeper-runs-on-the-engine, S1). As in the single-user server, a
+    failure before readiness and no readiness within the timeout of the
+    watchdog end the process, and a failure after readiness marks the server
+    degraded. The promise is resolved with the state once it is ready.
+    [Server_accounts.run] calls this on the access of a multi-account
+    installation. *)
+val start_engine
+  :  sw:Eio.Switch.t
+  -> runtime_sw:Eio.Switch.t
+  -> env:Eio_unix.Stdenv.base
+  -> ?input_base_path:string
+  -> accept_store_quarantine:bool
+  -> Runtime_account_access.published
+  -> Mcp_server.server_state Eio.Promise.t
+
 (** {1 Main Entry Point} *)
 
 (** What one boot decided about a base path before anything that belongs to
@@ -316,9 +337,9 @@ val judge
 (** Runs what [judged] names. A single user gets the owner state and the
     routes of [make_routes]. An active multi-account installation gets
     {!Server_accounts.run} on the same [address] and [port], with its own
-    route table: no owner state, no Keeper and no route of [make_routes] is
-    started for it, and [runtime_sw], [accept_store_quarantine] and the
-    handler makers are not used. Each server announces its HTTP port to the
+    route table, and the engine the account server starts once it published
+    its access ({!start_engine}). No route of [make_routes] is started for it,
+    and the handler makers are not used. Each server announces its HTTP port to the
     host under the lease of [judged] once its listener is bound
     ({!Server_startup_takeover.announce_account_server},
     {!Server_startup_takeover.announce_single_user_server}), when a command

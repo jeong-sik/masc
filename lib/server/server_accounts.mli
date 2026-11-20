@@ -7,11 +7,13 @@
     S1a).
 
     A boot that judges a base path [Multi_account]
-    ({!Authz_boot_mode_read.boot}) runs this server and not the owner state of
-    a single user. This server builds no [Mcp_server.server_state], starts no
-    Keeper, and registers none of the routes whose wrappers read the
-    credentials of a single user ([Server_auth]). A request for one of those
-    routes is the 404 of the router.
+    ({!Authz_boot_mode_read.boot}) runs this server and not the server of a
+    single user. This server builds no [Mcp_server.server_state] and starts no
+    Keeper itself: once it published its access, it hands the access to the
+    function that starts the engine (RFC a-persons-keeper-runs-on-the-engine,
+    S1). It registers none of the routes whose wrappers read the credentials
+    of a single user ([Server_auth]). A request for one of those routes is
+    the 404 of the router.
 
     What the two servers share: the listener code ({!Server_bootstrap_http}),
     the admission of the Host and of the Origin of a request and the limit
@@ -166,11 +168,13 @@ val health_version : string -> string option
     makes the trust policy, announces the port to the host under [lease]
     ({!Server_startup_takeover.announce_account_server}), publishes the
     access, gives the environment and [sw] to the transport of a login
-    ([Eio_context]), records the port for the CLI of the workspace
+    ([Eio_context]), hands the access to [start_engine] and does not wait
+    for what it starts, records the port for the CLI of the workspace
     ([Workspace_connection]), starts one fiber that ends what a stopped
     server left ({!Server_stopped_work.start}), calls [on_ready], and serves
     until [sw] is
-    cancelled. A refused boot has not set the two. The two are one value
+    cancelled. A refused boot has not set the two and has not called
+    [start_engine]. The two are one value
     each for the process: a process runs one account server, and a second
     [run] in it would replace what the first one set. The cleartext listener follows the HTTP mode of the
     environment, as the single-user server does. [lease] is the BasePath
@@ -213,5 +217,6 @@ val run
   -> port:int
   -> lease:Server_startup_takeover.base_path_lease
   -> ?on_ready:(unit -> unit)
+  -> start_engine:(Runtime_account_access.published -> unit)
   -> Authz_boot_mode_read.multi_account
   -> (unit, refusal) result

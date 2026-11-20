@@ -26,6 +26,7 @@
   masc.fs_compat
   masc.masc_eio_context
   masc.masc_types
+  masc.runtime
   masc.server
   masc.workspace_connection
   unix

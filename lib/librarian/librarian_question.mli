@@ -72,13 +72,15 @@ type made =
 
 (** [units] is every unit read, those without items included. [missing]
     collects the parts each unit lacks, in unit order, so the commit records
-    them whether or not a question is made. [reach] and [trace] are what the
-    reader gave for the last unit; the question carries them unchanged. *)
+    them whether or not a question is made. [reach], [trace] and [offered]
+    are what the reader gave for the units; the question carries them
+    unchanged. *)
 val make
   :  lane:Librarian_memory_lane.question_side
   -> memory:Keeper_memory_os_current_types.t
   -> from:Librarian_log.line
   -> reach:Librarian_read_result.reach
   -> trace:string
+  -> offered:Librarian_width.offered
   -> Librarian_read_unit.t list
   -> made

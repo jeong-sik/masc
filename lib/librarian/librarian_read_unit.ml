@@ -15,6 +15,7 @@ type body =
 
 type item =
   { index : int
+  ; name : Librarian_unit.item_name
   ; body : body
   }
 

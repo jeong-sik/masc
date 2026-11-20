@@ -12,10 +12,11 @@
     runs in a fiber of its own: {!fiber_change} says how to keep that fiber
     in step with the value.
 
-    [Booting] and [Retired] are {!Librarian_writer.status}'s. The width of a
-    question, what the bottom learned and [Refused_at_bottom] come with the
-    width layer (§20 L7): here every ask reads the whole unread range, and a
-    lane that answers nothing leaves the writer [Resting].
+    [Booting] and [Retired] are {!Librarian_writer.status}'s. An ask reads at
+    the width the writer's narrowing gives ({!Librarian_width}, §7.6). What
+    the bottom learned and [Refused_at_bottom] come with the bottom layer
+    (§20 L7): here a question of one item that the lane refuses leaves the
+    writer [Resting], as a lane that answers nothing does.
 
     {b The model.} [specs/bug-models/LibrarianWriter.tla] (§21) has the same
     transitions. Its names are these:
@@ -44,6 +45,9 @@
     c.gid                             t.last_ask
     msg.no, msg.res                   Ask_ended's ask and result
     v}
+
+    The narrowing's own rules are [specs/bug-models/LibrarianWidth.tla]'s;
+    {!Librarian_width} names them.
 
     The model's results map to {!Librarian_read_result.t}: ["answer"] is
     [Answered], ["nothing"] [Nothing_to_ask], ["missing"] [Nothing_readable],
@@ -81,6 +85,9 @@ type asking =
   (** Every fact a direct write removed while it was out, with the [seq] of
       the commit that removed it, in commit order: what
       {!Librarian_plan.of_answer} takes. *)
+  ; asked : Librarian_read_result.asked
+  (** The width it reads at: {!Librarian_width.next} of the narrowing when it
+      started. A refusal goes onto the level this names. *)
   }
 
 type state =
@@ -107,6 +114,10 @@ type t =
   { state : state
   ; lane : declared option (** [None]: no lane value is declared. *)
   ; last_ask : int (** The last number an ask was given. *)
+  ; narrowing : Librarian_width.t
+  (** The ranges the lane refused. A boot starts with none; another lane
+      value and an adoption empty it. A pulse, a direct write and a
+      [Resume] of a rest leave it as it is. *)
   }
 
 (** The store's boot (§8.6): open, or the reason it stopped. *)
@@ -115,7 +126,8 @@ val boot : place -> at:float -> (Librarian_store.t, Librarian_store.stop) result
 (** The value of a writer whose boot ended in [opened]: [Stopped], or the
     next ask on the store it opened. A writer is made with this, and a
     resumed one is made again with it: nothing of the value before the boot
-    is kept but [lane], the declaration the writer holds, and [last_ask].
+    is kept but [lane], the declaration the writer holds, and [last_ask]. The
+    narrowing starts empty.
 
     [last_ask] is the last number this writer's mailbox can still hold an
     answer for: 0 for a new writer. A resumed writer passes its own, because
@@ -146,14 +158,16 @@ type event =
     it on every publication. Its resolution replaces the held one and
     nothing else changes, so the next ask and a rest's held check go through
     the target the registry published last (a new credential or body
-    timeout comes with the same value).
+    timeout comes with the same value). One with another value empties the
+    narrowing, in every state.
 
     {b The next ask} (§9.2). The turn log's length is read first. With no
     lane value the writer is [Idle] with that length. Otherwise the turn log
     is read from the tail ({!Librarian_unread.read} up to the first unit
     with items): something unread is [Asking] with the number after
-    [last_ask]; nothing is [Idle] with the length read first, so a turn
-    appended during the read is not counted as seen.
+    [last_ask], at the width {!Librarian_width.next} gives; nothing is
+    [Idle] with the length read first, so a turn appended during the read
+    is not counted as seen.
 
     {b A late answer.} An [Ask_ended] whose number is not the current ask's
     is dropped in every state. One that carried an answer is counted
@@ -188,12 +202,17 @@ type event =
 
     {v
     Answered          planned ({!Librarian_plan.of_answer} with removed_since),
-                      committed ({!Librarian_store.commit_read}); the next ask
+                      committed ({!Librarian_store.commit_read}); the narrowing counts
+                      what it passed; the next ask
     Nothing_to_ask    the next ask
-    No_answer         Resting. The slots the lane declares now are the ones read: when
-                      none of them is in the result and the lane value is not the one
-                      the ask started with, the next ask
-    Nothing_readable  Skip (Content_missing missing) committed at reach; the next ask
+    No_answer         The slots the lane declares now are the ones read. One of them
+                      refused and the question carried more than one item: narrowed
+                      by what it carried; the next ask. One refused and it carried one
+                      item: Resting. None refused: Resting, or the next ask when none
+                      of them is in the result and the lane value is not the one the
+                      ask started with
+    Nothing_readable  Skip (Content_missing missing) committed at reach; the narrowing
+                      counts what it passed; the next ask
     Span_unknown      Skip (Unknown_span {before; after = reach.covered}) committed
                       at reach; the next ask
     Memory_diverged   Stopped (Log_diverged _)
@@ -274,7 +293,8 @@ val resume
   -> t * act_answer
 
 (** An operator adopts the snapshot file of a store stopped as
-    [Log_diverged] or [Log_unreadable] (§8.7); the next ask follows. A store
+    [Log_diverged] or [Log_unreadable] (§8.7); the narrowing is emptied and
+    the next ask follows. A store
     stopped for another reason is [Act_unavailable (Store_stopped _)]:
     booting again is its way out. A store that is not stopped is
     [Not_stopped]. A refusal leaves the value as it was. *)

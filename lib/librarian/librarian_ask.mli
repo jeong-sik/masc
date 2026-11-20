@@ -29,6 +29,7 @@ type input =
   ; lane : Librarian_memory_lane.t (** The lane value the walk starts with. *)
   ; resolved : Runtime_exact_output_registry.resolved_lane
   (** The lane's slots, from the publication [lane] was resolved under. *)
+  ; asked : Librarian_read_result.asked (** What the writer asks for. *)
   }
 
 (** Asks once about every unit not yet read (§7.1, steps 1 to 6).
@@ -37,13 +38,20 @@ type input =
       that changed starts over, so a direct write that lands between the two
       reads is read with its own line. The same tail with other bytes is
       [Memory_diverged].
-    + Reads the turn log from the tail to its end. When no unit holds an item
-      before where reading stopped, the ask ends there: [Nothing_to_ask] at
-      the log's end, [Span_unknown] at an [Unannounced] reset,
-      [Input_fault (Line_unreadable _)] at a line that cannot be read,
-      whatever its reason. Otherwise every unit read is asked about.
-    + Reads each unit's content and makes the question. A question with no
-      item that can be read is [Nothing_readable].
+    + Reads the turn log from the tail at the asked width
+      ({!Librarian_width.width}): to its end for [All], up to the [n]th
+      unit with items for [Units n], up to the first for [Items _]. When no
+      unit holds an item before where reading stopped, the ask ends there:
+      [Nothing_to_ask] at the log's end, [Span_unknown] at an
+      [Unannounced] reset, [Input_fault (Line_unreadable _)] at a line that
+      cannot be read, whatever its reason. Otherwise every unit read is
+      asked about.
+    + Reads each unit's content and makes the question. [Items k] reads the
+      first [k] items of the first unit with items; every other unit is
+      read to its end. The question carries what was read
+      ({!Librarian_width.offered}), and its reach ends where the last unit's
+      read ended. A question with no item that can be read is
+      [Nothing_readable].
     + Sends the question's text as one user message with no system prompt.
       The answer schema is the walk's requirement: the flow and a CLI run
       each write its sentence after the text. The HTTP slots go in the

@@ -40,9 +40,11 @@ type span =
   { line : int
   ; past_line : int
   ; at : float
+  ; from : Log.mark
   ; through : Log.mark
   ; next : Log.mark
   ; source : source
+  ; resume : Librarian_unit.item_name option
   }
 
 type unreadable =
@@ -98,8 +100,9 @@ let has_items span =
   | Announced_reset { segment; _ } -> segment_has_items segment
 ;;
 
-let reach_whole span : Librarian_read_result.reach =
-  { line = span.line; within = Whole; covered = span.next; turn_log_offset = span.past_line }
+let reach span : Librarian_log.within -> Librarian_read_result.reach = function
+  | Whole -> { line = span.line; within = Whole; covered = span.next; turn_log_offset = span.past_line }
+  | Item name -> { line = span.line; within = Item name; covered = span.from; turn_log_offset = span.line }
 ;;
 
 let has_unread = function
@@ -228,6 +231,8 @@ let known_after known ~at : Log.line -> known = function
 
 type walk =
   { place : place
+  ; resumed : (int * Librarian_unit.item_name) option
+  (** The unit the tail read through an item, by its line, and that item. *)
   ; from : Log.mark (** Where the next unit starts. *)
   ; spans : span list (** Newest first. *)
   ; with_items : int
@@ -286,6 +291,13 @@ let replay ~turns_path ~turn ~closed =
 ;;
 
 let stopped walk stop = Scan.Stop (Ok (walk, stop))
+
+let resume_at walk ~line =
+  match walk.resumed with
+  | Some (resumed, name) when Int.equal resumed line -> Some name
+  | Some (_ : int * Librarian_unit.item_name) | None -> None
+;;
+
 let refused walk ~at reason = stopped walk (Unreadable_line { offset = at; reason })
 
 let add_span ~until walk span =
@@ -305,9 +317,11 @@ let on_reset ~until walk ~at ~past ~written ~(cause : Log.reset_cause) ~before ~
       { line = at
       ; past_line = past
       ; at = written
+      ; from = walk.from
       ; through = before
       ; next = after
       ; source = Announced_reset { cause; segment = whole ~from:walk.from ~through:before closed_before }
+      ; resume = resume_at walk ~line:at
       }
 ;;
 
@@ -333,9 +347,11 @@ let on_known ~until walk known ~at ~past (line : Log.line) =
             { line = at
             ; past_line = past
             ; at = closed_at
+            ; from = walk.from
             ; through = after
             ; next = after
             ; source = Turn { turn; outcome; opened = open_turn.opened; unattributed; own }
+            ; resume = resume_at walk ~line:at
             }
         (* The order refuses a [Closed] with no open turn before here. *)
         | Not_started | Between_turns -> refused walk ~at (Out_of_order Closed_without_open)))
@@ -370,16 +386,23 @@ let checked_id ~turns_path ~expected =
 ;;
 
 let read ~turns_path ~until (tail : Librarian_log.line) =
-  let expected, start, covered =
+  let expected, start, covered, resumed =
     match tail with
-    | Started { turn_log; turn_log_offset; covered; _ } -> turn_log, turn_log_offset, covered
-    | Committed { turn_log; turn_log_offset; covered; _ } -> turn_log, turn_log_offset, covered
+    | Started { turn_log; turn_log_offset; covered; _ } -> turn_log, turn_log_offset, covered, None
+    | Committed { turn_log; turn_log_offset; covered; covers_through; _ } ->
+      let resumed =
+        match covers_through with
+        | Through { line; within = Item name } -> Some (line, name)
+        | Through { within = Whole; line = (_ : int) } | Before_first -> None
+      in
+      turn_log, turn_log_offset, covered, resumed
   in
   match checked_id ~turns_path ~expected with
   | Error error -> Error error
   | Ok () ->
     let init =
       { place = (if Int.equal start 0 then Known Not_started else Resumed)
+      ; resumed
       ; from = covered
       ; spans = []
       ; with_items = 0

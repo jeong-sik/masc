@@ -394,8 +394,9 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 - **Agent Core 턴의 internal 행은 그 답뿐이다.** internal 파일에 가는 것은 `Internal_assistant` 답과 tool 관찰이다. tool 관찰은 official client 턴만 쓴다(`checkpoint_owner` 가 `Masc_agent_core` 이면 관찰 목록이 비어 있다).
 - official client 로 돈 턴은 Agent Core checkpoint 를 남기지 않는다(`Runtime_execution.checkpoint_owner`). 그 턴의 기록은 history 파일뿐이다. 메시지를 닫지 못한 Agent Core 턴도 history 파일만 남긴다. 둘 다 slice 가 메시지를 가리키지 않는다.
 - **턴이 여럿 섞일 수 있는 구간은 모두 읽는다.** `unattributed` 와 알린 `Reset` 의 구간에는 줄을 못 쓴 턴이 들 수 있다. 그 가운데 Agent Core 턴과 official client 턴이 섞일 수 있다. slice 는 자기 턴을 말하지 않는다. 그래서 history 행이 checkpoint 메시지를 다시 쓴 것인지 가를 수 없다. 셋을 다 읽는다. 같은 말이 두 번 들 수 있지만 빠지는 것은 없다.
-항목의 이름은 `{ line; index }` 다. `line` 은 그 단위의 줄이 시작하는 바이트 offset 이다.
-순서는 줄이 정한다. 그래서 bundle 하나가 없어지거나 돌아와도 번호가 밀리지 않는다.
+항목의 이름은 `{ line; item = { store; at } }` 다. `line` 은 그 단위의 줄이 시작하는 바이트 offset 이다.
+`store` 는 항목이 나온 저장소이고 `at` 은 그 저장소 안의 좌표다. chat, history, internal 은 행이 시작하는 바이트 offset, 외부 저장소는 0 부터 센 행 번호, Agent-Core 는 그 trace 의 닫힌 메시지 번호다.
+좌표는 끝자리가 이미 쓰는 것이라 행을 세지 않는다. 그래서 bundle 하나가 없어지거나 돌아와도, 한 저장소가 무엇을 잃어도 다른 항목의 이름이 바뀌지 않는다.
 
 `Announced` reset 인데 그 앞에 닫힌 것이 없으면 항목이 없는 단위다. 항목 없는 단위는 따로 묻지 않고 다음 반영과 같이 지나간다.
 
@@ -849,7 +850,7 @@ type narrowing = { units : entry list; items : entry list }   (* 안쪽부터 *)
 
 ```ocaml
 type position = Before_first | Through of { line : int; within : within }
-and within = Whole | Item of int
+and within = Whole | Item of item_name    (* §5.3 의 { store; at } *)
 
 type actor = Keeper | Operator of string    (* 그 Memory 의 Keeper 자신, 또는 운영자의 이름 *)
 type removal =

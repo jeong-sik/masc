@@ -7,12 +7,15 @@ type reach =
   ; turn_log_offset : int
   }
 
+type asked = Read_range of Librarian_width.width
+
 type question =
   { id : Librarian_question_id.t
   ; shown : Librarian_plan.shown
   ; reach : reach
   ; trace : string
   ; missing : Librarian_unit.missing_at list
+  ; offered : Librarian_width.offered
   }
 
 type failed =
@@ -28,10 +31,13 @@ type t =
       }
   | Nothing_to_ask
   | No_answer of
-      { slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.unanswered) list }
+      { question : question
+      ; slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.unanswered) list
+      }
   | Nothing_readable of
       { reach : reach
       ; missing : Librarian_unit.missing_at list
+      ; offered : Librarian_width.offered
       }
   | Span_unknown of
       { before : Keeper_turn_log.mark

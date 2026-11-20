@@ -33,9 +33,30 @@ type read_error =
   (** A byte file or the external store could not be read, or it changed
       while it was read. *)
 
-(** Reads every item of [span]. A bundle that is not stored is [Bundle] of
-    the slice that names it. Bytes or rows a file does not hold are the range
-    of them that it lacks. A row that does not decode is its offset, or its
-    row number in the external store; a chat row is an item with what the
-    chat reader made of it. *)
-val read : stores -> Librarian_unread.span -> (Librarian_read_unit.t, read_error) result
+(** How much of a unit to read. *)
+type take =
+  | Rest_of_unit
+  | First_items of Librarian_width.count
+  (** The first this many items. Missing parts do not count. *)
+
+type read =
+  { unit : Librarian_read_unit.t
+  ; ends : Librarian_log.within
+  (** [Whole]: the unit was read to its end, missing parts after its last
+      item included. [Item _]: an item follows this one, and the next read
+      starts after it. *)
+  }
+
+(** Reads the items of [span] from where its [resume] says: after that item,
+    or from the first. Each item carries its {!Librarian_unit.item_name}. A
+    bundle that is not stored is [Bundle] of the part of the slice that was
+    to be read. Bytes or rows a file does not hold are the range of them
+    that it lacks. A row that does not decode is its offset, or its row
+    number in the external store; a chat row is an item with what the chat
+    reader made of it.
+
+    A byte file is read from the resumed row's offset. The row there is not
+    decoded again: the next row starts after the line break that ends it.
+    [First_items k] reads until it finds the item after the k-th, and keeps
+    only the k. *)
+val read : stores -> Librarian_unread.span -> take:take -> (read, read_error) result

@@ -203,6 +203,7 @@ let live t ~sw =
       ; tail = tail t
       ; lane = asking.lane.value
       ; resolved = asking.lane.resolved
+      ; asked = asking.asked
       }
     in
     Eio.Fiber.fork_daemon ~sw (fun () ->

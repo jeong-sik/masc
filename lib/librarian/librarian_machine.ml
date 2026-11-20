@@ -19,6 +19,7 @@ type asking =
   ; since : float
   ; lane : declared
   ; removed_since : (string * int) list
+  ; asked : Read_result.asked
   }
 
 type state =
@@ -37,6 +38,7 @@ type t =
   { state : state
   ; lane : declared option
   ; last_ask : int
+  ; narrowing : Librarian_width.t
   }
 
 let boot { memory_dir; turns_dir; keeper_id } ~at =
@@ -65,7 +67,16 @@ let next_ask place t ~at store =
       let ask = t.last_ask + 1 in
       { t with
         state =
-          Asking { store; asking = { ask; since = at; lane = declared; removed_since = [] } }
+          Asking
+            { store
+            ; asking =
+                { ask
+                ; since = at
+                ; lane = declared
+                ; removed_since = []
+                ; asked = Read_range (Librarian_width.next t.narrowing)
+                }
+            }
       ; last_ask = ask
       })
     else idle
@@ -73,9 +84,11 @@ let next_ask place t ~at store =
 
 let booted place ~at ~lane ~last_ask (opened : (Store.t, Store.stop) result) =
   match opened with
-  | Error stop -> { state = Stopped stop; lane; last_ask }
+  | Error stop -> { state = Stopped stop; lane; last_ask; narrowing = Librarian_width.empty }
   | Ok store ->
-    next_ask place { state = Idle { store; seen_length = None }; lane; last_ask } ~at store
+    next_ask place
+      { state = Idle { store; seen_length = None }; lane; last_ask; narrowing = Librarian_width.empty }
+      ~at store
 ;;
 
 type ended = Read_ended of Read_result.t
@@ -105,10 +118,12 @@ let late place t (result : Read_result.t) =
 
 (* §9.2 "a failed commit". Effects that make no snapshot mean the plan and
    the snapshot codec disagree. The store is as it was, and asking again at
-   once would ask the same question, so the writer rests until a pulse. *)
-let after_commit place t ~at store (committed : Store.committed) =
+   once would ask the same question, so the writer rests until a pulse.
+   [narrowing] is what the writer remembers once the commit is on disk. *)
+let after_commit place t ~at store ~narrowing (committed : Store.committed) =
   match committed with
-  | Committed { store; line = (_ : Librarian_log.commit) } -> next_ask place t ~at store
+  | Committed { store; line = (_ : Librarian_log.commit) } ->
+    next_ask place { t with narrowing } ~at store
   | Committed_without_snapshot (_ : Librarian_log.commit) ->
     { t with state = Stopped Store_unwritable }
   | Stopped stop -> { t with state = Stopped stop }
@@ -116,11 +131,14 @@ let after_commit place t ~at store (committed : Store.committed) =
 ;;
 
 (* §9.3 "Refused_by_lane, Silent_lane": only the slots the lane declares now
-   are read. When none of them is in the result and the lane value moved
-   while the ask was out, asking again uses the new value and does not
-   repeat; otherwise the writer rests. The width layer reads the outcomes
-   themselves. *)
-let no_answer place t ~at store (asking : asking) slots =
+   are read. A refusal from one of them narrows by what the question carried
+   and asks again at once (§7.6), unless the question carried one item: that
+   is the bottom, and the writer rests. With no refusal, when none of them
+   is in the result and the lane value moved while the ask was out, asking
+   again uses the new value and does not repeat; otherwise the writer rests.
+   A refusal narrows what the writer holds now: after a declaration that
+   changed only slots, the ask is still out and what it holds is empty. *)
+let no_answer place t ~at store (asking : asking) (question : Read_result.question) slots =
   let declared_now =
     match t.lane with
     | None -> []
@@ -131,14 +149,27 @@ let no_answer place t ~at store (asking : asking) slots =
       (fun ((key : Lane.slot_key), _) -> List.exists (Lane.equal_slot_key key) declared_now)
       slots
   in
+  let refused =
+    List.exists
+      (fun ((_ : Lane.slot_key), (outcome : Librarian_slot_outcome.unanswered)) ->
+         match outcome with
+         | Refused (_ : Librarian_slot_outcome.refusal) -> true
+         | Silent (_ : Librarian_slot_outcome.silence) -> false)
+      still_declared
+  in
   let lane_moved =
     match t.lane with
     | None -> true
     | Some declared -> not (Lane.equal declared.value asking.lane.value)
   in
-  if List.is_empty still_declared && lane_moved
-  then next_ask place t ~at store
-  else { t with state = Resting store }
+  match refused, Librarian_width.breadth question.offered, asking.asked with
+  | true, Wider wider, Read_range asked ->
+    next_ask place { t with narrowing = Librarian_width.refused t.narrowing ~asked wider } ~at store
+  | true, One_item, Read_range (_ : Librarian_width.width) -> { t with state = Resting store }
+  | false, (One_item | Wider (_ : Librarian_width.wider)), Read_range (_ : Librarian_width.width) ->
+    if List.is_empty still_declared && lane_moved
+    then next_ask place t ~at store
+    else { t with state = Resting store }
 ;;
 
 (* The current ask's result (§9.3, the table under "Asking a"). *)
@@ -148,14 +179,23 @@ let ended place t ~at store (asking : asking) : Read_result.t -> t = function
       Librarian_plan.of_answer ~shown:question.shown ~facts:(Store.memory store).facts
         ~removed_since:asking.removed_since ~at ~trace_id:question.trace answer
     in
-    after_commit place t ~at store (Store.commit_read store ~at ~question ~slot plan)
+    let narrowing =
+      Librarian_width.committed t.narrowing
+        (Librarian_width.passed question.offered question.reach.within)
+    in
+    after_commit place t ~at store ~narrowing (Store.commit_read store ~at ~question ~slot plan)
   | Nothing_to_ask -> next_ask place t ~at store
-  | No_answer { slots } -> no_answer place t ~at store asking slots
-  | Nothing_readable { reach; missing } ->
-    after_commit place t ~at store
+  | No_answer { question; slots } -> no_answer place t ~at store asking question slots
+  | Nothing_readable { reach; missing; offered } ->
+    (* A skip counts as a commit of what it passed (§7.6). *)
+    let narrowing =
+      Librarian_width.committed t.narrowing (Librarian_width.passed offered reach.within)
+    in
+    after_commit place t ~at store ~narrowing
       (Store.commit_skip store ~at ~hole:(Content_missing missing) reach)
   | Span_unknown { before; reach } ->
-    after_commit place t ~at store
+    (* It passes no unit with items. *)
+    after_commit place t ~at store ~narrowing:t.narrowing
       (Store.commit_skip store ~at ~hole:(Unknown_span { before; after = reach.covered }) reach)
   | Memory_diverged { expected; observed } ->
     { t with state = Stopped (Log_diverged { expected; observed }) }
@@ -220,11 +260,14 @@ let table place t ~at event =
 (* The same value changes no state, but its resolution is the one the
    registry published last: the admitted target with its credential and body
    timeout, and the slots a provider holds. The next ask and a rest's held
-   check go through it. *)
+   check go through it. Another lane value empties the narrowing in every
+   state (§7.6 "비움"): what one lane refused says nothing of another. *)
 let decide place t ~at event =
   match event with
   | Declaration_changed lane when same_lane t.lane lane -> { t with lane }
-  | Turn_closed | Pulse | Ask_ended _ | Declaration_changed _ -> table place t ~at event
+  | Declaration_changed (_ : declared option) ->
+    table place { t with narrowing = Librarian_width.empty } ~at event
+  | Turn_closed | Pulse | Ask_ended _ -> table place t ~at event
 ;;
 
 type unavailable =
@@ -300,7 +343,10 @@ let adopt { memory_dir; turns_dir; keeper_id } t ~at ~by ~observed =
     t, Not_done (Act_unavailable (Store_stopped stop))
   | Stopped (Log_diverged _ | Log_unreadable) ->
     (match Store.adopt ~memory_dir ~turns_dir ~keeper_id ~at ~by ~observed with
-     | Ok store -> next_ask { memory_dir; turns_dir; keeper_id } t ~at store, Done
+     | Ok store ->
+       next_ask { memory_dir; turns_dir; keeper_id } { t with narrowing = Librarian_width.empty } ~at
+         store
+       , Done
      | Error Snapshot_mismatch -> t, Not_done Snapshot_mismatch
      | Error Snapshot_unreadable -> t, Not_done Snapshot_unreadable
      | Error (Not_adopted stop) -> t, Not_done (Act_unavailable (Store_stopped stop)))

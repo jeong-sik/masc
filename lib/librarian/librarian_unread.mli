@@ -89,6 +89,9 @@ type span =
   { line : int (** Byte offset of the unit's line. *)
   ; past_line : int (** Just past the line: where reading goes on after the unit. *)
   ; at : float (** When the line was written. *)
+  ; from : Keeper_turn_log.mark
+  (** Where the unit's content starts: the mark the unit before it ended
+      at. Its [closed_messages] is the number of the unit's first message. *)
   ; through : Keeper_turn_log.mark
   (** Where the unit's content ends: a [Closed]'s [after], a [Reset]'s
       [before]. Its [trace] names the session that keeps the unit's bundles. *)
@@ -96,6 +99,9 @@ type span =
   (** Where the unit after it starts: a [Closed]'s [after], a [Reset]'s
       [after]. *)
   ; source : source
+  ; resume : Librarian_unit.item_name option
+  (** The item the tail names when it read this unit through an item:
+      reading the unit goes on after it. [None]: nothing of it was read. *)
   }
 
 (** Why a line cannot be read. *)
@@ -148,9 +154,11 @@ type until =
     a store whose range is not empty. Its content is not read. *)
 val has_items : span -> bool
 
-(** Where reading stands once the unit is read whole: through its line,
-    [covered] at [next], and the next read starting just past the line. *)
-val reach_whole : span -> Librarian_read_result.reach
+(** Where reading stands once the unit is read through [within]. [Whole]:
+    through its line, [covered] at [next], and the next read starting just
+    past the line. [Item _]: [covered] at [from], and the next read starting
+    at the line again, since the unit is not finished. *)
+val reach : span -> Librarian_log.within -> Librarian_read_result.reach
 
 (** §9.2 "there is something unread": a unit with items was read, or reading
     stopped at a line it cannot go past, or the read failed. A failed read is

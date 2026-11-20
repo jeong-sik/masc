@@ -1,3 +1,18 @@
+type store =
+  | Chat
+  | External
+  | Agent_core
+  | History
+  | Internal
+[@@deriving eq]
+
+let stores = [ Chat; External; Agent_core; History; Internal ]
+
+type item_name =
+  { store : store
+  ; at : int
+  }
+
 type range =
   { from : int
   ; until : int

@@ -16,7 +16,9 @@ module Digest := Agent_core.Checkpoint_objects
 (** How far into one unit of the turn log reading got. *)
 type within =
   | Whole
-  | Item of int (** Through this item of the unit, counted from 0. *)
+  | Item of Librarian_unit.item_name
+  (** Through this item: every item before it in the unit's order was read
+      with it. *)
 
 (** The last thing that was read. *)
 type position =

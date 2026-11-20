@@ -33,7 +33,7 @@ let f_reason = wire_field_reason
 let f_old = "old"
 let f_id = "id"
 let f_within = "within"
-let f_index = "index"
+let f_store = "store"
 let f_added = "added"
 let f_touched = "touched"
 let f_removed = "removed"
@@ -187,6 +187,14 @@ let within_kind_token = function
 ;;
 
 let within_kinds = [ Kind_whole; Kind_item ]
+
+let store_token : Librarian_unit.store -> string = function
+  | Chat -> "chat"
+  | External -> "external"
+  | Agent_core -> "agent_core"
+  | History -> "history"
+  | Internal -> "internal"
+;;
 
 type removal_kind =
   | Kind_dropped
@@ -352,7 +360,9 @@ let cause_to_json = function
 
 let within_to_json = function
   | Whole -> `Assoc [ kind (within_kind_token Kind_whole) ]
-  | Item index -> `Assoc [ kind (within_kind_token Kind_item); f_index, `Int index ]
+  | Item { store; at } ->
+    `Assoc
+      [ kind (within_kind_token Kind_item); f_store, `String (store_token store); f_at, `Int at ]
 ;;
 
 let position_to_json = function
@@ -660,9 +670,10 @@ let within_of_json json =
     let* () = exact_field_names_result [ f_kind ] fields in
     Ok Whole
   | Kind_item ->
-    let* () = exact_field_names_result [ f_kind; f_index ] fields in
-    let* index = count_field f_index fields in
-    Ok (Item index)
+    let* () = exact_field_names_result [ f_kind; f_store; f_at ] fields in
+    let* store = of_token ~token_of:store_token Librarian_unit.stores f_store fields in
+    let* at = count_field f_at fields in
+    Ok (Item { store; at })
 ;;
 
 let position_of_json json =

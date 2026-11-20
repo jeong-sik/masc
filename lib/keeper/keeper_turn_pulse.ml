@@ -173,13 +173,13 @@ let read_tail ~now ~window_start path =
   then Ok Log_absent
   else (
     match
-      Keeper_memory.read_file_tail_lines_with_completion
+      Keeper_memory_recall.read_file_tail_lines_with_completion
         path
         ~max_bytes:seed_tail_max_bytes
         ~max_lines:seed_tail_max_lines
     with
     | Error exn_class ->
-      Keeper_memory.record_memory_recall_read_error
+      Keeper_memory_recall.record_memory_recall_read_error
         ~site:"keeper_turn_pulse_seed"
         path
         exn_class;

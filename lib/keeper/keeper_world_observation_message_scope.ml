@@ -3,7 +3,7 @@
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_memory
+open Keeper_memory_recall
 open Keeper_context_runtime
 
 let message_feed_targets (meta : keeper_meta) =

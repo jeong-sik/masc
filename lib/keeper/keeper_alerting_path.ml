@@ -1,4 +1,4 @@
-(** Keeper_alerting path safety and tool output helpers. *)
+(** Keeper_alerting_path — path safety and tool output helpers. *)
 
 include Keeper_path_rejection
 

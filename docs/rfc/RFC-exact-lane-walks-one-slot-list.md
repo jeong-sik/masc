@@ -148,6 +148,7 @@ CLI 방문의 모양은 HITL 이 이미 쓰는 것을 옮긴다(`hitl_summary_cl
 나머지 실패는 HTTP 든 CLI 든 다음 slot 으로 넘어간다. 도메인 검증 거절도 넘어간다.
 - flow 안의 판정은 1단계(#39718, #39740)가 이미 이렇게 바꿨다. walker 는 걸음마다 `Exact_output.flow_execution_terminal_kind` 로 넘길지 정한다.
 - HITL 의 CLI bind 실패도 이 규칙을 따른다. bind 실패는 masc 자기 기록 실패이니 HTTP 와 CLI 모두 멈춘다.
+- 설정 오류로 시작할 수 없는 slot 은 멈추지 않는다. 빈 candidate id·중복 candidate id 로 flow 를 시작하지 못한 경우는 그 slot 하나의 선언 오류라 그 slot 을 실패 방문으로 적고 다음 slot 으로 넘어간다. flow 에 id 를 주지 못한 경우는 masc 자기 실패라 멈춘다.
 
 ### 3.4 lane 이 walker 에 넘기는 것
 

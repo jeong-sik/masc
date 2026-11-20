@@ -17,6 +17,29 @@ let requirement =
 
 let unknown_runtime runtime_id = Slots.Cli_slot { runtime_id; runtime = None }
 
+(* An admitted HTTP target, so a slot can carry a real target. *)
+let admitted_target () =
+  let target : Exact.declared_target =
+    { target_ref = "openrouter.probe"
+    ; binding =
+        Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat
+          ~provider_id:"openrouter" ~model_id:"z-ai/glm-5.3-flash"
+          ~base_url:"https://openrouter.ai/api/v1" ~request_path:"/chat/completions" ()
+    ; credential = Exact.Credential_not_declared
+    ; body_timeout_s = None
+    ; model_declaration = Exact.No_model_declaration
+    }
+  in
+  match Exact.load_resolver_snapshot ~catalog:(Exact.Embedded_with_targets [ target ]) () with
+  | Error (_ : Exact.resolver_snapshot_error) -> fail "the fixture's resolver did not load"
+  | Ok snapshot ->
+    (match Exact.admit_target_ref snapshot target.target_ref with
+     | Ok admitted -> admitted
+     | Error (_ : Exact.target_catalog_admission_error) ->
+       fail "the fixture's target was refused")
+;;
+
 let rests_on failure = Slots.rests (Slots.Cli_failed { runtime_id = "cli.a"; failure })
 
 let test_a_cli_refusal_rests_only_on_its_account_standing () =
@@ -54,6 +77,8 @@ let failure_names passed =
           { slot
           ; failure = Slots.Cli_failed { runtime_id = _; failure = Keeper_lane_cli_oneshot.Unknown_runtime _ }
           } -> "unknown " ^ Slots.id slot
+      | Walk.Failed { slot; failure = Slots.Http_unfit { slot_id = _; reason = _ } } ->
+        "unfit"
       | Walk.Failed { slot; failure = _ } -> "other failure " ^ Slots.id slot
       | Walk.Held { slot; until = _ } -> "held " ^ Slots.id slot
       | Walk.Seats_full slot -> "full " ^ Slots.id slot)
@@ -100,6 +125,57 @@ let test_a_cli_slot_with_no_runtime_fails_without_running_a_client () =
   | Walk.Answered _ | Walk.Stopped _ -> fail "the walk was meant to be exhausted"
 ;;
 
+(* A slot whose own declaration cannot start a flow is a failed visit, not a
+   stop: RFC section 3.3 Q1 stops the walk only for masc's own failure. *)
+let test_a_slot_its_own_declaration_cannot_start_does_not_stop_the_walk () =
+  Eio_main.run
+  @@ fun env ->
+  let ran = ref 0 in
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr ran;
+    Ok "{}"
+  in
+  let proceed _ = Ok () in
+  let slot : Runtime_exact_output_registry.selected_slot =
+    { slot_id = ""; admitted_target = admitted_target (); runtime_observation = None }
+  in
+  let slots =
+    Slots.of_resolved_lane
+      { Runtime_exact_output_registry.selected_slots = [ slot ]
+      ; cli_slots = [ "ghost.b" ]
+      }
+  in
+  match
+    Slots.walk
+      ~runner
+      ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~base_dir:"."
+      ~admission_class:Llm_provider.Admission_class.Standard
+      ~messages:[]
+      ~requirement
+      ~cli_request:(Some { Slots.system_prompt = ""; prompt = "say {}" })
+      ~before_measurement_dispatch:proceed
+      ~on_measurement_terminal:proceed
+      ~before_dispatch:proceed
+      ~validate_http:(fun (_ : Exact.flow_success) -> Exact.Reject_and_advance "unused")
+      ~validate_cli:(fun (_ : Yojson.Safe.t) -> Ok ())
+      ~before_cli_visit:(fun ~runtime_id:_ -> Ok ())
+      ~on_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      slots
+  with
+  | Walk.Exhausted { passed; standing } ->
+    check (list string) "the blank slot is a failed visit, then the cli slot fails"
+      [ "unfit"; "unknown ghost.b" ] (failure_names passed);
+    check bool "neither failure is a rest" false
+      (match standing with
+       | Walk.Every_slot_resting -> true
+       | Walk.Not_every_slot_resting -> false);
+    check int "no client ran" 0 !ran
+  | Walk.Answered _ | Walk.Stopped _ ->
+    fail "a slot's own declaration error must not stop the walk"
+;;
+
 let () =
   run
     "exact_lane_slots"
@@ -116,6 +192,10 @@ let () =
             "a cli slot with no runtime fails without running a client"
             `Quick
             test_a_cli_slot_with_no_runtime_fails_without_running_a_client
+        ; test_case
+            "a slot its own declaration cannot start does not stop the walk"
+            `Quick
+            test_a_slot_its_own_declaration_cannot_start_does_not_stop_the_walk
         ] )
     ]
 ;;

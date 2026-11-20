@@ -581,7 +581,7 @@ let claude_status_refusal ~account ~status detail =
   else claude_auth_refusal ~account ~named:(http_status_name status) detail
 ;;
 
-let failure_of_agent_core_error error =
+let failure_of_agent_core_error ~is_person_key error =
   let module Route = Keeper_runtime_failure_route in
   let detail = Agent_core.Error.to_string error in
   match Route.route_of_error ~boundary:Route.Agent_core_execution error with
@@ -599,7 +599,9 @@ let failure_of_agent_core_error error =
       { retry_class = Route.Provider_timeout | Route.Local_admission_timeout; _ } -> Timed_out
   | Route.Retry_after_observed { retry_class = Route.Empty_completion _; _ } ->
     Provider_rejected detail
-  | Route.Rotate_now { rotate = Route.Auth_failed | Route.Authorization_refused } ->
+  | Route.Rotate_now { rotate = Route.Auth_failed } ->
+    if is_person_key then Key_refused detail else Provider_auth_refused detail
+  | Route.Rotate_now { rotate = Route.Authorization_refused } ->
     Provider_auth_refused detail
   | Route.Rotate_now { rotate = Route.Model_unavailable } -> Model_not_found detail
   (* Listed, not wildcarded: a new rotate class must be placed here on
@@ -666,10 +668,11 @@ let authorize_host client =
   Runtime_account_access.authorize_host client |> Result.map_error not_authorized
 ;;
 
-(* HIGH-RISK-UNREVIEWED: an API provider sends with the credential its
-   operator declared, whoever asks for the check: only a single-user process shares it (plan D4). *)
-let authorize_api sealed =
-  Runtime_account_access.authorize_api sealed |> Result.map_error not_authorized
+(* HIGH-RISK-UNREVIEWED: an API provider sends with the host operator's
+   credential ([Single_user]) or a person's API key account on an authorized
+   request ([authorize_api_for]). *)
+let authorize_api ~account_request sealed =
+  Runtime_account_access.authorize_api_for account_request sealed |> Result.map_error not_authorized
 ;;
 
 (* The verification asks the model to call a tool, so a model that declares
@@ -841,7 +844,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
            Error (Provider_rejected (Runtime_antigravity.error_to_string err))))
       | Runtime_execution.Vibe_cli _ -> Error (Unavailable Unsupported_runtime)
       | Runtime_execution.Agent_core sealed ->
-        (match authorize_api sealed with
+        (match authorize_api ~account_request sealed with
          | Error failure -> Error failure
          | Ok provider_cfg ->
         (match
@@ -973,7 +976,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                     | Agent_core.Error.Media _
                     | Agent_core.Error.Internal _
                     | Agent_core.Error.Internal_carried _ ) as error) ->
-                 Error (failure_of_agent_core_error error)
+                 Error
+                   (failure_of_agent_core_error
+                      ~is_person_key:(Runtime_account_access.is_person_api sealed)
+                      error)
                | Ok result ->
                  (match result.stop_reason with
                   | Runtime_agent.Completed _ ->

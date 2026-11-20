@@ -71,6 +71,13 @@ let provider_id admission = admission.provider_id
 let requirement admission = admission.requirement
 let quota_scope admission = admission.quota_scope
 
+let person_key_admission ~provider_id =
+  { provider_id
+  ; requirement = Required_file
+  ; quota_scope = Runtime_quota_window.scope_of_credential ~provider_id None
+  }
+;;
+
 let require_nonempty value =
   if Llm_provider.Secret.is_empty value then Error "Required provider credential is unavailable"
   else Ok value

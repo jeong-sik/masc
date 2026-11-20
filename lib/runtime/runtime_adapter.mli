@@ -158,17 +158,20 @@ val materialize_person_execution
   :  construction:construction
   -> provider_account_id:Authz_types.Provider_account_id.t
   -> integration_id:Authz_types.Integration_id.t
-  -> account_home:string
+  -> account_home:string option
   -> Runtime_schema.config
   -> Runtime_schema.binding
   -> (execution_materialization, string) result
-(** Materialize an official-client execution for a person's account using
-    the explicit [~account_home] (never the provider declaration's
-    [account_home]), without reading key files, home configuration, or
-    process environment at build time.
-    - [Claude_code] and [Codex_app_server] hold credential-free person seals
-      ({!Runtime_account_access.seal_person}).
-    - [Muse_serve] declares its account home via
-      {!Runtime_account_access.declare_muse_home}.
-    - Providers declaring [credentials], HTTP protocols, [Antigravity_cli],
+(** Materialize an execution for a person's account using the explicit
+    [~account_home] (never the provider declaration's [account_home]), without
+    reading key files, home configuration, or process environment at build time.
+    - Official clients ([Claude_code], [Codex_app_server], [Muse_serve]) require
+      [Some home]; [Claude_code] and [Codex_app_server] hold credential-free
+      person seals ({!Runtime_account_access.seal_person}), and [Muse_serve]
+      declares its home via {!Runtime_account_access.declare_muse_home}.
+    - HTTP [Agent_core] providers ([Messages_api], [Chat_completions_api],
+      [Ollama_api], [Gemini_api]) require [account_home = None], drop any
+      custom headers, and carry a credential-free person API seal
+      ({!Runtime_account_access.seal_person_api}).
+    - Providers declaring [credentials], [Vertex_gemini_api], [Antigravity_cli],
       and [Vibe_cli] are refused. *)

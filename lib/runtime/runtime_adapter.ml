@@ -840,7 +840,7 @@ let validate_cache_retention (provider : Runtime_schema.provider)
          provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.protocol)
 ;;
 
-let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num_ctx ?repeat_penalty
+let provider_config_from_declared_provider ?(person_api = false) ?binding_max_context ?keep_alive ?num_ctx ?repeat_penalty
     ?max_tokens
     ?repeat_last_n ?return_progress
     ?max_concurrent_requests
@@ -920,14 +920,29 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
        let request_path =
          request_path_for_http_provider ~provider ~declaration ~kind ~base_url
        in
-       let* credential = materialize_credentials_from_declaration ~provider_id:provider.id
-           ~declaration ~credential:provider.credentials in
+       let* credential =
+         if person_api
+         then
+           Ok
+             { Runtime_credential_selection.api_key = Llm_provider.Secret.empty
+             ; admission =
+                 Runtime_credential_selection.person_key_admission ~provider_id:provider.id
+             }
+         else
+           materialize_credentials_from_declaration
+             ~provider_id:provider.id
+             ~declaration
+             ~credential:provider.credentials
+       in
        let default_headers = Provider_binding.default_headers_for_kind kind in
        let custom_headers =
-         match provider.headers with
-         | None -> []
-         | Some headers ->
-           List.filter (fun (key, _) -> not (is_auth_header_key key)) headers
+         if person_api
+         then []
+         else
+           match provider.headers with
+           | None -> []
+           | Some headers ->
+             List.filter (fun (key, _) -> not (is_auth_header_key key)) headers
        in
        (* TOML-declared custom headers override generated non-auth headers by
           key. Auth is carried only by [api_key] and is merged by AGENT_CORE at HTTP
@@ -1004,7 +1019,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
 ;;
 
 (* Materialize the exact HTTP binding and its credential authority together. *)
-let materialize_provider_binding ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
+let materialize_provider_binding ?(person_api = false) ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
     : (provider_materialization, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
@@ -1019,6 +1034,7 @@ let materialize_provider_binding ~construction (cfg : Runtime_schema.config) (bi
           verbatim instead of collapsing to a generic "resolution failed" that
           hid which provider/protocol was unmapped. *)
        provider_config_from_declared_provider
+         ~person_api
          ~declarations
          ?binding_max_context:binding.max_context
          ?keep_alive:binding.keep_alive
@@ -1460,7 +1476,7 @@ let materialize_execution ~construction (cfg : Runtime_schema.config) (binding :
 ;;
 
 let materialize_person_execution
-    ~construction:(_ : construction)
+    ~construction
     ~provider_account_id
     ~integration_id
     ~account_home
@@ -1482,32 +1498,80 @@ let materialize_person_execution
                provider.id)
         | None ->
           let open Result.Syntax in
-          let* () = validate_official_binding provider spec binding in
-          (match provider.api_format with
-           | Runtime_schema.Codex_app_server_runtime ->
+          (match provider.api_format, account_home with
+           | ( ( Runtime_schema.Codex_app_server_runtime
+               | Runtime_schema.Claude_code_runtime
+               | Runtime_schema.Muse_serve_runtime )
+             , None ) ->
+             Error
+               (Printf.sprintf
+                  "provider %S uses protocol %s and requires an account home"
+                  provider.id
+                  provider.protocol)
+           | Runtime_schema.Codex_app_server_runtime, Some home ->
+             let* () = validate_official_binding provider spec binding in
              official_execution_materialization
                (codex_app_server_person_execution
                   ~provider_account_id
                   ~integration_id
-                  ~account_home
+                  ~account_home:home
                   provider
                   spec)
-           | Runtime_schema.Claude_code_runtime ->
+           | Runtime_schema.Claude_code_runtime, Some home ->
+             let* () = validate_official_binding provider spec binding in
              official_execution_materialization
                (claude_code_person_execution
                   ~provider_account_id
                   ~integration_id
-                  ~account_home
+                  ~account_home:home
                   provider
                   spec)
-           | Runtime_schema.Muse_serve_runtime ->
+           | Runtime_schema.Muse_serve_runtime, Some home ->
+             let* () = validate_official_binding provider spec binding in
              official_execution_materialization
                (muse_serve_execution
-                  { provider with account_home = Some account_home }
+                  { provider with account_home = Some home }
                   spec)
-           | Runtime_schema.Antigravity_cli_runtime
-           | Runtime_schema.Vibe_cli_runtime
-           | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api ->
+           | ( ( Runtime_schema.Messages_api
+               | Runtime_schema.Chat_completions_api
+               | Runtime_schema.Ollama_api
+               | Runtime_schema.Gemini_api )
+             , Some (_ : string) ) ->
+             Error
+               (Printf.sprintf
+                  "provider %S uses HTTP protocol %s and has no CLI account home"
+                  provider.id
+                  provider.protocol)
+           | ( ( Runtime_schema.Messages_api
+               | Runtime_schema.Chat_completions_api
+               | Runtime_schema.Ollama_api
+               | Runtime_schema.Gemini_api )
+             , None ) ->
+             let clean_cfg =
+               { cfg with
+                 providers =
+                   List.map
+                     (fun (p : Runtime_schema.provider) ->
+                        if String.equal p.id provider.id
+                        then { p with account_home = None; headers = None }
+                        else p)
+                     cfg.providers
+               }
+             in
+             Result.map
+               (fun (selected : provider_materialization) ->
+                  { execution =
+                      Runtime_execution.Agent_core
+                        (Runtime_account_access.seal_person_api
+                           ~provider_account_id
+                           selected.provider_config)
+                  ; credential_admission = Some selected.credential_admission
+                  })
+               (materialize_provider_binding ~person_api:true ~construction clean_cfg binding)
+           | ( ( Runtime_schema.Antigravity_cli_runtime
+               | Runtime_schema.Vibe_cli_runtime
+               | Runtime_schema.Vertex_gemini_api )
+             , (None | Some (_ : string)) ) ->
              Error
                (Printf.sprintf
                   "provider %S uses protocol %s and cannot build a person runtime"

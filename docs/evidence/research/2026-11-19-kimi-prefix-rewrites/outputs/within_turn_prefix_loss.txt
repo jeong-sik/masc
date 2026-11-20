@@ -1,9 +1,0 @@
-provider                  pairs hit<50%prev  zero  lost(M)
-ollama_cloud              26485    482 ( 1.8%)    22   123.77
-glm-coding                 5018    228 ( 4.5%)   180    41.55
-claude_account_A      4517     16 ( 0.4%)    13     2.36
-claude_account_B            2229      9 ( 0.4%)     8     0.81
-kimi_coding                1729      9 ( 0.5%)     0     0.74
-claude_account_C          1632     19 ( 1.2%)    19     3.27
-claude_account_D              940      6 ( 0.6%)     6     0.69
-openai-responses            199      0 ( 0.0%)     0     0.00

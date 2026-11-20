@@ -55,7 +55,7 @@ type slot_key =
 [@@deriving eq, show]
 
 type question_side =
-  { prompt : string  (** The system prompt every question carries. *)
+  { prompt : string  (** The first part of every question's text. *)
   ; answer_schema : Yojson.Safe.t  (** The schema every answer must match. *)
   ; max_output_tokens : int  (** The lane's declared output reserve. *)
   ; thinking : bool option  (** The lane's declared thinking setting. *)

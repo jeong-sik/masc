@@ -591,7 +591,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 폭을 줄이지 않는다. 상태를 갖지 않는다. 폭과 바닥의 판단은 모두 쓰는 쪽의, 모델을 기다리지 않는 동기 함수다.
 
 1. 쓰는 쪽이 메모리에 둔 마지막 줄의 값을 읽는다. 스냅샷 sha, 읽은 자리, 턴 기록의 offset 이다.
-2. 스냅샷 바이트를 읽고 그 값을 다시 읽는다. 값이 그대로인데 바이트의 sha 가 다르면 `Memory_diverged` 로 끝난다. 값이 달라졌으면 처음부터 다시 읽는다.
+2. 스냅샷 바이트를 읽고 그 값을 다시 읽는다. 값이 그대로인데 바이트의 sha 가 다르면 `Memory_diverged` 로 끝난다. 값이 달라졌으면 처음부터 다시 읽는다. 스냅샷은 반영(§8.2)이 읽는 함수로 읽고, sha 를 해석보다 먼저 비교한다. 파일이 없거나, 일반 파일이 아니거나, 읽기가 실패하거나, sha 는 맞는데 해석되지 않으면 `Snapshot_fault` 로 끝난다. 쓰는 쪽은 그 결함에 저장소와 같은 이유로 멈춘다. 이 결함은 저절로 낫지 않으니 쉬고 다시 묻지 않는다.
 3. 턴 기록을 그 offset 부터 읽어 질문을 만든다(§5, §6).
 4. slot 을 걷는다. 자리를 잡는 방법은 #52986 의 §3.1 이다. 빈 자리가 있는 slot 가운데 앞의 것, 없으면 먼저 비는 자리다. HTTP slot 이 모두 실패하거나 쉬거나 빠졌을 때만 CLI slot 으로 간다.
 5. 걷기 전에 `Runtime_exact_lane_backpressure.order` 를 읽는다. provider 가 「이 시각까지 두라」고 한 slot 은 부르지 않는다. slot 결과마다 `observe` 를 부른다.
@@ -601,20 +601,22 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 type ask_result =                        (* 코드는 Librarian_read_result.t *)
   | Answered of { question : question; answer : answer; slot : string }
   | Nothing_to_ask
-  | No_answer of { slots : (slot_key * slot_outcome) list }   (* 답한 slot 이 없다 *)
+  | No_answer of { slots : (slot_key * unanswered) list }     (* 답한 slot 이 없다. 그래서 답한 slot 을 담지 못한다 *)
   | Nothing_readable of { reach : reach; missing : missing_at list }
   | Span_unknown of { before : mark; reach : reach }          (* reach 는 그 reset 줄까지 Whole *)
   | Memory_diverged of { expected : Sha256.t; observed : Sha256.t }
+  | Snapshot_fault of snapshot_fault
   | Input_fault of input_fault
   | Ask_failed of failed
 and reach = { line : int; within : within; covered : mark; turn_log_offset : int }   (* 반영 줄이 그대로 적는 값 *)
-and failed = Raised | Flow_stopped | Read_failed                 (* Read_failed: 턴 기록이나 단위의 파일을 읽지 못했다 *)
+and snapshot_fault = Absent | Not_a_snapshot_file | Not_read     (* 코드는 Librarian_snapshot_fault.t. 반영·boot 와 같은 판정 *)
+and failed = Raised | Flow_stopped | Read_failed                 (* Read_failed: 턴 기록, 단위의 파일을 읽지 못했다 *)
 ```
 
 - `Refused_by_lane` 은 지금 선언된 slot 가운데 질문을 거절한 slot 이 하나는 있는 `No_answer` 이고, `Silent_lane` 은 그런 slot 이 없는 `No_answer` 다. 둘은 `decide` 의 조건이다(§9.3). 폭이 드는 `offered` 와 `lane_result` 의 나머지 칸(`question`, `basis`, `head`)은 L7 이 더한다.
 
 - 폭과 반영한 수는 결과의 `offered` 에서 읽는다. 쓰는 쪽이 따로 세지 않는다. fiber 가 읽은 뒤에 턴이 닫혔을 수 있다.
-- 걷기가 masc 쪽에서 멈춘 것(측정이나 시도를 시작하지 못함, callback 실패)은 slot 결과가 아니다. `Ask_failed Flow_stopped` 다.
+- 걷기가 masc 쪽에서 멈춘 것(측정이나 시도를 시작하지 못함, callback 실패)과 쓰는 쪽이 더는 열려 있지 않은 것은 slot 결과가 아니다. `Ask_failed Flow_stopped` 다.
 - 예외의 글은 구조화 로그로 간다. 행에는 오지 않는다.
 - 기다린 시간, 호출 시간, 버린 본문은 결과에 없다. metric 과 span 으로 간다.
 
@@ -627,7 +629,8 @@ type size_fact =
   | Window_reached         (* 입력과 출력이 창에 닿아 멈췄다. 내용이 있든 없든. 생성 하나를 썼다 *)
 type refusal = Sized of size_fact | Unsized      (* Unsized: provider 가 이 요청을 거절했고 크기를 말하지 않았다 *)
 type silence = Not_called | Unavailable | Busy | Lost | Unusable of rejection
-type slot_outcome = Slot_answered | Refused of refusal | Silent of silence
+type unanswered = Refused of refusal | Silent of silence   (* No_answer 가 slot 마다 싣는다 *)
+type slot_outcome = Slot_answered | Unanswered of unanswered
 ```
 
 - 분류는 함수 하나다. `classify : slot_visit -> slot_outcome` 이고 결과 타입마다 와일드카드 없는 `match` 다.

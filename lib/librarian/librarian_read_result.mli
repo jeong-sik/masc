@@ -43,10 +43,11 @@ type question =
 type failed =
   | Raised (** The ask raised. *)
   | Flow_stopped
-  (** A measurement or an attempt could not start, or a callback failed. *)
+  (** A measurement or an attempt could not start, a callback failed, or the
+      writer was no longer open. *)
   | Read_failed
-  (** The turn log or a byte file of a unit could not be read: an IO
-      error, or the file changed while it was read. *)
+  (** The turn log or a byte file of a unit could not be read: an IO error,
+      or the file changed while it was read. *)
 
 type t =
   | Answered of
@@ -56,7 +57,7 @@ type t =
       }
   | Nothing_to_ask
   | No_answer of
-      { slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.t) list
+      { slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.unanswered) list
       (** Every slot of the lane value the walk started with: the admitted
           HTTP slots, then the declared CLI slots, each in declared order.
           The writer reads only the slots the lane declares now; whether
@@ -81,5 +82,10 @@ type t =
       { expected : Digest.digest (** The snapshot the last commit line names. *)
       ; observed : Digest.digest (** The snapshot the file holds. *)
       }
+  | Snapshot_fault of Librarian_snapshot_fault.t
+  (** The file at the snapshot path is not one the store opens: no file,
+      not a regular file, a failed read, or bytes the tail names that do not
+      decode. The file is read as the store reads it before a commit, and
+      the writer stops for it as the store does. *)
   | Input_fault of Librarian_unit.input_fault
   | Ask_failed of failed

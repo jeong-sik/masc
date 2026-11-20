@@ -36,7 +36,12 @@ type silence =
   | Lost (** Transport, body deadline, or a failure no type explains. *)
   | Unusable of Librarian_answer.rejection (** A body came and cannot be used. *)
 
-type t =
-  | Slot_answered
+(** A slot that gave no answer. An ask that ends with no answer carries one
+    of these for every slot, so its slots cannot hold an answer. *)
+type unanswered =
   | Refused of refusal
   | Silent of silence
+
+type t =
+  | Slot_answered
+  | Unanswered of unanswered

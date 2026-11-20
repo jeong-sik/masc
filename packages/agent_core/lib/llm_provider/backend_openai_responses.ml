@@ -513,9 +513,28 @@ let build_request_artifact
     | Error rejection ->
       invalid_arg (Reasoning_dialect.request_control_rejection_to_message rejection)
   in
+  let has_previous_response_id =
+    match config.previous_response_id with
+    | Some id when not (Api_common.string_is_blank id) -> true
+    | Some _ | None -> false
+  in
+  let use_developer_system_carrier =
+    match caps.Capabilities.responses_system_prompt_carrier with
+    | Capabilities.Responses_developer_message -> not has_previous_response_id
+    | Capabilities.Responses_instructions -> false
+  in
+  let developer_system_items =
+    match use_developer_system_carrier, config.system_prompt with
+    | true, Some s when not (Api_common.string_is_blank s) ->
+      message_item ~role:"developer" [ Text s ]
+    | true, (Some _ | None) | false, (Some _ | None) -> []
+  in
   let body =
     [ "model", `String config.model_id
-    ; "input", `List (List.concat_map input_items_of_message projected_messages)
+    ; ( "input"
+      , `List
+          (developer_system_items
+           @ List.concat_map input_items_of_message projected_messages) )
     ]
   in
   let body =
@@ -530,10 +549,15 @@ let build_request_artifact
     | Some _ | None -> body
   in
   let body =
-    match config.system_prompt with
-    | Some s when not (Api_common.string_is_blank s) ->
+    match use_developer_system_carrier, config.system_prompt with
+    | false, Some s when not (Api_common.string_is_blank s) ->
       ("instructions", `String (Utf8_sanitize.sanitize s)) :: body
-    | Some _ | None -> body
+    | true, (Some _ | None) | false, (Some _ | None) -> body
+  in
+  let body =
+    if caps.Capabilities.supports_explicit_cache_opt_out && not config.cache_system_prompt
+    then ("prompt_cache_options", `Assoc [ "mode", `String "explicit" ]) :: body
+    else body
   in
   let body =
     match config.temperature with

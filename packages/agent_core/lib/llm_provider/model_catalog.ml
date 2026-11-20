@@ -24,6 +24,7 @@ type model_entry =
   ; supports_function_response_parts : bool option
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
+  ; responses_system_prompt_carrier : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; emits_usage_tokens : bool option
@@ -43,6 +44,7 @@ type model_entry =
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
+  ; supports_explicit_cache_opt_out : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option
@@ -149,6 +151,7 @@ let with_model_overrides catalog declarations =
     ; supports_function_response_parts = entry.supports_function_response_parts
     ; assistant_tool_content_format = entry.assistant_tool_content_format
     ; chat_output_budget_field = entry.chat_output_budget_field
+    ; responses_system_prompt_carrier = entry.responses_system_prompt_carrier
     ; tool_schema_conformance = entry.tool_schema_conformance
     ; supports_reasoning = entry.supports_reasoning
     ; emits_usage_tokens = entry.emits_usage_tokens
@@ -168,6 +171,7 @@ let with_model_overrides catalog declarations =
     ; supports_system_prompt = entry.supports_system_prompt
     ; supports_assistant_prefill = entry.supports_assistant_prefill
     ; supports_prompt_caching = entry.supports_prompt_caching
+    ; supports_explicit_cache_opt_out = entry.supports_explicit_cache_opt_out
     ; supports_top_k = entry.supports_top_k
     ; supports_min_p = entry.supports_min_p
     ; supports_seed = entry.supports_seed
@@ -447,6 +451,7 @@ let known_entry_keys =
   ; "supports_function_response_parts"
   ; "assistant_tool_content_format"
   ; "chat_output_budget_field"
+  ; "responses_system_prompt_carrier"
   ; "tool_schema_conformance"
   ; "supports_reasoning"
   ; "emits_usage_tokens"
@@ -466,6 +471,7 @@ let known_entry_keys =
   ; "supports_system_prompt"
   ; "supports_assistant_prefill"
   ; "supports_prompt_caching"
+  ; "supports_explicit_cache_opt_out"
   ; "supports_top_k"
   ; "supports_min_p"
   ; "supports_seed"
@@ -584,6 +590,13 @@ let parse_entry entry_toml =
       ~allowed:Capability_vocab.chat_output_budget_field_values
       entry_toml
   in
+  let* responses_system_prompt_carrier =
+    canonical_string_opt
+      ~entry_id
+      "responses_system_prompt_carrier"
+      ~allowed:Capability_vocab.responses_system_prompt_carrier_values
+      entry_toml
+  in
   let* tool_schema_conformance =
     canonical_string_opt
       ~entry_id
@@ -654,6 +667,9 @@ let parse_entry entry_toml =
   in
   let* supports_prompt_caching =
     bool_field ~entry_id "supports_prompt_caching" entry_toml
+  in
+  let* supports_explicit_cache_opt_out =
+    bool_field ~entry_id "supports_explicit_cache_opt_out" entry_toml
   in
   let* supports_top_k = bool_field ~entry_id "supports_top_k" entry_toml in
   let* supports_min_p = bool_field ~entry_id "supports_min_p" entry_toml in
@@ -748,6 +764,7 @@ let parse_entry entry_toml =
     ; supports_function_response_parts
     ; assistant_tool_content_format
     ; chat_output_budget_field
+    ; responses_system_prompt_carrier
     ; tool_schema_conformance
     ; supports_reasoning
     ; emits_usage_tokens
@@ -767,6 +784,7 @@ let parse_entry entry_toml =
     ; supports_system_prompt
     ; supports_assistant_prefill
     ; supports_prompt_caching
+    ; supports_explicit_cache_opt_out
     ; supports_top_k
     ; supports_min_p
     ; supports_seed

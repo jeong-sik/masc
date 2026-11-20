@@ -33,6 +33,7 @@ type model_entry =
         selected capability base, whose generic Gemini value is false. *)
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
+  ; responses_system_prompt_carrier : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; emits_usage_tokens : bool option
@@ -61,6 +62,7 @@ type model_entry =
     (** Whether Anthropic Messages accepts a final assistant continuation.
         Model-catalog declarations override the provider default. *)
   ; supports_prompt_caching : bool option
+  ; supports_explicit_cache_opt_out : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option

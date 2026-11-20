@@ -15,6 +15,7 @@ type entry =
   ; supports_function_response_parts : bool option
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
+  ; responses_system_prompt_carrier : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; accepted_reasoning_efforts : string list option
@@ -37,6 +38,7 @@ type entry =
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
+  ; supports_explicit_cache_opt_out : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option
@@ -315,6 +317,7 @@ let known_entry_keys =
   ; "supports_function_response_parts"
   ; "assistant_tool_content_format"
   ; "chat_output_budget_field"
+  ; "responses_system_prompt_carrier"
   ; "tool_schema_conformance"
   ; "supports_reasoning"
   ; "accepted_reasoning_efforts"
@@ -331,6 +334,7 @@ let known_entry_keys =
   ; "supports_system_prompt"
   ; "supports_assistant_prefill"
   ; "supports_prompt_caching"
+  ; "supports_explicit_cache_opt_out"
   ; "supports_top_k"
   ; "supports_min_p"
   ; "supports_seed"
@@ -475,6 +479,12 @@ let parse_entry json =
       ~allowed:Capability_vocab.chat_output_budget_field_values
       json
   in
+  let* responses_system_prompt_carrier =
+    canonical_choice
+      "responses_system_prompt_carrier"
+      ~allowed:Capability_vocab.responses_system_prompt_carrier_values
+      json
+  in
   let* tool_schema_conformance =
     canonical_choice
       "tool_schema_conformance"
@@ -520,6 +530,9 @@ let parse_entry json =
   let* supports_system_prompt = member_bool "supports_system_prompt" json in
   let* supports_assistant_prefill = member_bool "supports_assistant_prefill" json in
   let* supports_prompt_caching = member_bool "supports_prompt_caching" json in
+  let* supports_explicit_cache_opt_out =
+    member_bool "supports_explicit_cache_opt_out" json
+  in
   let* supports_top_k = member_bool "supports_top_k" json in
   let* supports_min_p = member_bool "supports_min_p" json in
   let* supports_seed = member_bool "supports_seed" json in
@@ -544,6 +557,7 @@ let parse_entry json =
     ; supports_function_response_parts
     ; assistant_tool_content_format
     ; chat_output_budget_field
+    ; responses_system_prompt_carrier
     ; tool_schema_conformance
     ; supports_reasoning
     ; accepted_reasoning_efforts
@@ -560,6 +574,7 @@ let parse_entry json =
     ; supports_system_prompt
     ; supports_assistant_prefill
     ; supports_prompt_caching
+    ; supports_explicit_cache_opt_out
     ; supports_top_k
     ; supports_min_p
     ; supports_seed

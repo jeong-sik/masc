@@ -56,6 +56,7 @@ type entry =
         selected capability base's declaration unchanged. *)
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
+  ; responses_system_prompt_carrier : string option
   ; tool_schema_conformance : string option
     (** Wire shape for assistant messages that contain tool calls but no visible
         text (null / empty_string). *)
@@ -80,6 +81,7 @@ type entry =
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
+  ; supports_explicit_cache_opt_out : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option

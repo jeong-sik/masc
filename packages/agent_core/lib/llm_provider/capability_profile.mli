@@ -63,6 +63,11 @@ type chat_output_budget_field = Capability_vocab.chat_output_budget_field =
   | Chat_max_tokens
   | Chat_max_completion_tokens
 
+type responses_system_prompt_carrier =
+      Capability_vocab.responses_system_prompt_carrier =
+  | Responses_instructions
+  | Responses_developer_message
+
 type cache_session_wire = Capability_vocab.cache_session_wire =
   | No_cache_session_wire
   | Openrouter_session_id
@@ -168,6 +173,10 @@ type capabilities =
         [max_tokens] or the reasoning-era [max_completion_tokens] OpenAI's
         gpt-5 family requires. Field name only; the #2517 omit/clamp receipt
         policy is unchanged. *)
+  ; responses_system_prompt_carrier : responses_system_prompt_carrier
+    (** How OpenAI Responses carries [system_prompt] when [previous_response_id]
+        is absent: top-level ["instructions"] or a leading [role = "developer"]
+        message at [input[0]]. *)
   ; tool_schema_conformance : tool_schema_conformance
     (** Whether the provider rejects enum/oneOf/anyOf/allOf inside function
         parameter schemas; when conformant-only, the serializer projects tool
@@ -225,6 +234,10 @@ type capabilities =
         Model-catalog and explicit capability declarations override the provider
         default, which preserves existing continuation behavior. *)
   ; supports_prompt_caching : bool
+  ; supports_explicit_cache_opt_out : bool
+    (** Whether the OpenAI Responses endpoint accepts
+        [prompt_cache_options = {"mode": "explicit"}] (with zero breakpoints)
+        to opt out of automatic cache writes when [cache_system_prompt = false]. *)
   ; (* Sampling parameters *)
     supports_top_k : bool
   ; supports_min_p : bool

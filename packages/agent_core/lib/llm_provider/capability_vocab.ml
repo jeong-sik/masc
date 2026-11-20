@@ -64,6 +64,10 @@ type chat_output_budget_field =
   | Chat_max_tokens
   | Chat_max_completion_tokens
 
+type responses_system_prompt_carrier =
+  | Responses_instructions
+  | Responses_developer_message
+
 (* Whether the provider rejects JSON-Schema constructs (enum, oneOf/anyOf/
    allOf) inside function-parameter schemas — OpenAI's function-tool rule.
    When set, the request serializer projects each tool schema down to the
@@ -494,6 +498,7 @@ let capability_fields =
   ; "supports_function_response_parts"
   ; "assistant_tool_content_format"
   ; "chat_output_budget_field"
+  ; "responses_system_prompt_carrier"
   ; "tool_schema_conformance"
   ; "supports_reasoning"
   ; "accepted_reasoning_efforts"
@@ -517,6 +522,7 @@ let capability_fields =
   ; "supports_system_prompt"
   ; "supports_assistant_prefill"
   ; "supports_prompt_caching"
+  ; "supports_explicit_cache_opt_out"
   ; "supports_top_k"
   ; "supports_min_p"
   ; "supports_seed"
@@ -614,6 +620,22 @@ let chat_output_budget_field_of_string raw =
   match normalize raw with
   | "" -> None
   | normalized -> List.assoc_opt normalized chat_output_budget_field_table
+;;
+
+let responses_system_prompt_carrier_table =
+  [ "instructions", Responses_instructions
+  ; "developer_message", Responses_developer_message
+  ]
+;;
+
+let responses_system_prompt_carrier_values =
+  List.map fst responses_system_prompt_carrier_table
+;;
+
+let responses_system_prompt_carrier_of_string raw =
+  match normalize raw with
+  | "" -> None
+  | normalized -> List.assoc_opt normalized responses_system_prompt_carrier_table
 ;;
 
 let tool_schema_conformance_table =

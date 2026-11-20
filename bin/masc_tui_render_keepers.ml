@@ -2724,24 +2724,30 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
           [ Theme.warn () ^ text "일부 관측" "partial reading" ^ Ansi.reset ]
         else []
   in
-  let alerts =
-    errors
-    @ waiting
+  let advisories =
+    fleet_gaps
     @ roster
-    @ fleet_gaps
+    @ waiting
     @ Option.to_list
         (Option.map (warning (text "보기 설정: " "view preferences: "))
            state.keeper_list_preference_notice)
     @ Option.to_list (local_source_pending_note state Local_keepers)
   in
   let status_slot =
-    match alerts with
-    | first :: rest ->
-        if rest = [] then [ fit_width first inner ]
+    match advisories with
+    | [] -> (
+        match keeper_pulse_counts_header state ~now ~inner ~selected_row all_rows with
+        | line :: _ -> [ line ]
+        | [] ->
+            [ Theme.recede () ^ "  " ^ text "관측 대기 중" "observing fleet" ^ Ansi.reset ])
+    | [ single ] -> [ fit_width single inner ]
+    | first :: second :: rest ->
+        if rest = [] then
+          [ fit_width first inner; fit_width second inner ]
         else
           let more =
             Theme.recede ()
-            (* The alerts after the first: a cut-off count, never "+N"
+            (* The advisories after the first two: a cut-off count, never "+N"
                (RFC tui-one-screen-grammar 6.3). *)
             ^ " (" ^ Masc_tui_value.Count.more ~ko (List.length rest) ^ ")"
             ^ Ansi.reset
@@ -2749,12 +2755,9 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
           let more_cells =
             Message_layout.display_width (Masc_tui_theme.strip_sgr more)
           in
-          [ fit_width first (max 1 (inner - more_cells)) ^ more ]
-    | [] -> (
-        match keeper_pulse_counts_header state ~now ~inner ~selected_row all_rows with
-        | line :: _ -> [ line ]
-        | [] ->
-            [ Theme.recede () ^ "  " ^ text "관측 대기 중" "observing fleet" ^ Ansi.reset ])
+          [ fit_width first inner
+          ; fit_width second (max 1 (inner - more_cells)) ^ more
+          ]
   in
   [ here_row ~cols state ~path:[]
       ~readings:title_readings
@@ -2764,6 +2767,7 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
       state.keeper_list_view
   ]
   @ keeper_plain_fleet_lines state ~now ~inner
+  @ errors
   @ status_slot
 
 let cap_keeper_headers (state : state) ~inner ~budget headers =

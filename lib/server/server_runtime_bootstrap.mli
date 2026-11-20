@@ -224,7 +224,10 @@ val initialize_owner_state_blocking
     the caller published the access before anything opens here, and this
     function publishes nothing. The single-user server and the stdio runtime
     publish the single user that {!Authz_boot_mode_read.boot} judged, so the
-    base path they open passed the account mode judgment.
+    base path they open passed the account mode judgment. That holds for
+    every single-user access. It does not hold by type for a multi-account
+    one, whose base path is the one its publisher gave: a caller that passes
+    one answers for the judgment itself. None does yet.
     [runtime_sw] must outlive [sw], including session journal cleanup.
     Complete every transport-neutral, fallible owner-initialization step and
     return the still-unclaimed persistence preparation. A transport must

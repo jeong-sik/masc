@@ -728,7 +728,8 @@ let initialize_owner_state_blocking
   (* The turns that [Runtime_account_access.authorize_native] refuses for what
      persons left under the workspace of a single user are named once here,
      before a Keeper meets the refusal (issue #51414). A multi-account process
-     refuses those tools whatever is under the workspace, so it names nothing. *)
+     refuses the native read and full tools whatever is under the workspace,
+     so it names nothing. *)
   (match Runtime_account_access.published_access access with
    | Runtime_account_access.Multi_account { zone = _; base_path = _; now = _ } -> ()
    | Runtime_account_access.Single_user (_ : Authz_boot_mode_read.single_user) ->

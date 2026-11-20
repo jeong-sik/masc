@@ -528,7 +528,10 @@ let styled code text =
   if String.equal code "" then text else code ^ text ^ Masc_tui_theme.Sgr.reset
 
 let text ~ko korean english = if ko then korean else english
-let value ~ko = Option.value ~default:(text ~ko "미보고" "not reported")
+(* A field the reading did not carry draws the mark for a value the server
+   did not report (RFC tui-one-screen-grammar 6.4), in either language. *)
+let not_reported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
+let value = Option.value ~default:not_reported
 
 let status_code = function
   | `Ok -> Masc_tui_theme.status Masc_tui_theme.Ok
@@ -585,7 +588,7 @@ let profile_label ~ko = function
   | Some Docker -> "Docker"
   | Some Micro_vm -> text ~ko "microVM 게스트" "microVM guest"
   | Some Remote_ssh -> "Remote SSH"
-  | None -> text ~ko "미보고" "not reported"
+  | None -> not_reported
 
 let legacy_status_lines ~ko ~width reading =
   let tr = text ~ko in
@@ -787,7 +790,7 @@ let resource_rows ~ko ~width = function
   | Some resources ->
     let compute =
       [ Option.map (fun value -> text ~ko "메모리 " "memory " ^ value) resources.memory
-      ; Some ("CPU " ^ value ~ko resources.cpus)
+      ; Some ("CPU " ^ value resources.cpus)
       ; Option.map (fun value -> Printf.sprintf "pids %d" value) resources.pids_limit
       ; Option.map (fun value -> "tmpfs " ^ value) resources.tmpfs_size
       ]
@@ -850,7 +853,7 @@ let configured_lines ~ko ~width reading =
       (profile_label ~ko reading.sandbox_profile)
   @ image_rows ~ko ~width reading
   @ wrapped_rows ~width ~label:(text ~ko "네트워크" "Network") ~tone:`Info
-      (value ~ko reading.configured_network_mode)
+      (value reading.configured_network_mode)
   @ resource_rows ~ko ~width reading.resource_config
 
 let path_lines ~ko ~width = function
@@ -859,12 +862,12 @@ let path_lines ~ko ~width = function
     [ ""; " " ^ styled Masc_tui_theme.Sgr.bold (text ~ko "4. 파일시스템 마운트" "4. Filesystem mounts") ]
     @ wrapped_rows ~width
         ~label:(String.capitalize_ascii (Masc_tui_words.workspace_name ~ko)) ~tone:`Info
-        (value ~ko paths.guest_workspace)
+        (value paths.guest_workspace)
     @ wrapped_rows ~width ~label:"HOME" ~tone:`Muted
-        (Option.value paths.guest_home ~default:(text ~ko "확인 불가" "unavailable"))
-    @ wrapped_rows ~width ~label:(text ~ko "설정" "Config") ~tone:`Muted (value ~ko paths.guest_config)
+        (value paths.guest_home)
+    @ wrapped_rows ~width ~label:(text ~ko "설정" "Config") ~tone:`Muted (value paths.guest_config)
     @ wrapped_rows ~width ~label:(text ~ko "호스트 번들" "Host bundle") ~tone:`Muted
-        (value ~ko paths.host_workspace)
+        (value paths.host_workspace)
     @ (match paths.guest_work_volume with
        | None -> []
        | Some path -> wrapped_rows ~width ~label:(text ~ko "작업 볼륨" "Work volume") ~tone:`Muted path)

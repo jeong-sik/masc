@@ -1912,7 +1912,7 @@
  (name masc_tui_keeper_sandbox)
  (wrapped false)
  (modules masc_tui_keeper_sandbox)
- (libraries yojson masc_tui_theme masc_tui_message_layout masc_tui_words))
+ (libraries yojson masc_tui_theme masc_tui_message_layout masc_tui_words masc_tui_value))
 
 ;; The Keeper GitHub tab. Own library so the rows -- one where the stored and
 ;; effective readings agree, one each where they differ -- have a test that

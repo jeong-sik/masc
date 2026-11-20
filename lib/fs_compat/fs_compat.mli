@@ -1254,13 +1254,22 @@ val append_file : string -> string -> unit
     written. *)
 val append_lines : string -> string -> unit
 
-(** Check if file exists. *)
+(** Check if path exists (follows symlinks via [Eio.Path.stat] when Eio fs
+    is installed, falling back to [Stdlib.Sys.file_exists]). *)
 val file_exists : string -> bool
 
 (** Single-stat directory check. Follows symbolic links like
     [Stdlib.Sys.is_directory] and returns [false] when missing, not a
-    directory, or unreadable ([Sys_error] / [Eio.Io]). *)
+    directory, or unreadable ([Sys_error] / [Eio.Io]). Unlike {!path_kind} and
+    {!exact_path_kind}, non-missing I/O errors are folded into [false]. *)
 val is_directory : string -> bool
+
+(** Single-stat existing non-directory check. Follows symbolic links and
+    returns [true] iff [path] exists and is not a directory, folding missing
+    or unreadable ([Sys_error] / [Eio.Io]) paths into [false]. Unlike
+    {!path_kind} and {!exact_path_kind}, non-missing I/O errors are folded into
+    [false]. *)
+val is_file : string -> bool
 
 (** Return file size or None *)
 val file_size : string -> int option

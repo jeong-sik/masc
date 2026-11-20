@@ -1263,7 +1263,7 @@ let matches_saved_settings ~base_path snapshot =
     in
     let dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let* instructions =
-      if Sys.file_exists dir && not (Sys.is_directory dir) then
+      if Fs_compat.is_file dir then
         Error (dir ^ ": expected a Keeper configuration directory")
       else
         Keeper_types_profile_toml.discover_keepers_toml_with_paths dir

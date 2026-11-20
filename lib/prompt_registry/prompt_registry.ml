@@ -160,7 +160,7 @@ let is_valid_prompt_key key =
 (** Read a markdown file, stripping YAML frontmatter if present.
     Returns only the body after the closing [---] delimiter. *)
 let read_file_if_exists path =
-  if Sys.file_exists path && not (Sys.is_directory path) then
+  if Fs_compat.is_file path then
     let content = In_channel.with_open_text path In_channel.input_all in
     Some (markdown_body content)
   else None

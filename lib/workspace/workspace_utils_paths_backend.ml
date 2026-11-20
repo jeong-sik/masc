@@ -251,16 +251,24 @@ let list_dir config path =
 (* Initialization check                         *)
 (* ============================================ *)
 
-(* Server-level filesystem cache for is_initialized — avoids 3 syscalls per
+(* Server-level filesystem cache for is_initialized — avoids 2 syscalls per
    request. Memory backends have independent state even at the same path and
-   perform an inexpensive key lookup instead of using this cache. *)
+   perform an inexpensive key lookup instead of using this cache. A generation
+   counter ensures an Eio fiber suspended on [Fs_compat] never overwrites a
+   concurrent [invalidate_initialized_cache] call with a pre-invalidation read. *)
 type init_cache_entry = {
   cache_key : string;
   cached_result : bool;
   cached_at : float;
 }
 
-let initialized_cache : init_cache_entry option Atomic.t = Atomic.make None
+type init_cache_state = {
+  generation : int;
+  entry : init_cache_entry option;
+}
+
+let initialized_cache : init_cache_state Atomic.t =
+  Atomic.make { generation = 0; entry = None }
 let initialized_cache_ttl = 1.0  (* seconds *)
 
 let init_cache_key config = config.base_path
@@ -278,25 +286,32 @@ let is_initialized config =
   | FileSystem _ ->
       let now = Time_compat.now () in
       let cache_key = init_cache_key config in
-      match Atomic.get initialized_cache with
+      let prev = Atomic.get initialized_cache in
+      match prev.entry with
       | Some entry
         when entry.cache_key = cache_key
              && now -. entry.cached_at < initialized_cache_ttl ->
           entry.cached_result
-      | _ ->
+      | Some _ | None ->
           let result =
-            Sys.file_exists (masc_dir config) &&
-            Sys.is_directory (masc_dir config) &&
-            Sys.file_exists (state_path config)
+            Fs_compat.is_directory (masc_dir config) &&
+            Fs_compat.file_exists (state_path config)
           in
-          Atomic.set initialized_cache
-            (Some { cache_key; cached_result = result; cached_at = now });
+          let next =
+            { generation = prev.generation
+            ; entry = Some { cache_key; cached_result = result; cached_at = now }
+            }
+          in
+          ignore (Atomic.compare_and_set initialized_cache prev next);
           result
 
 (** Invalidate the is_initialized cache. Call this when workspace state
     changes (e.g., after init, reset, or cleanup operations). *)
-let invalidate_initialized_cache () =
-  Atomic.set initialized_cache None
+let rec invalidate_initialized_cache () =
+  let prev = Atomic.get initialized_cache in
+  let next = { generation = prev.generation + 1; entry = None } in
+  if not (Atomic.compare_and_set initialized_cache prev next) then
+    invalidate_initialized_cache ()
 
 (* ============================================ *)
 (* Validation helpers                           *)

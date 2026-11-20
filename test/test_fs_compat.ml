@@ -1282,21 +1282,45 @@ let test_is_directory_kinds () =
   let dangling = Filename.concat base "dangling" in
   let dir_link = Filename.concat base "dir_link" in
   let file_link = Filename.concat base "file_link" in
+  let fifo = Filename.concat base "pipe" in
   Unix.mkdir dir 0o755;
   Fs_compat.save_file file "x";
   Unix.symlink missing dangling;
   Unix.symlink dir dir_link;
   Unix.symlink file file_link;
+  Unix.mkfifo fifo 0o600;
   List.iter
-    (fun (label, path, expected) ->
-       check bool label expected (Fs_compat.is_directory path))
-    [ "directory", dir, true
-    ; "regular file", file, false
-    ; "missing", missing, false
-    ; "dangling symlink", dangling, false
-    ; "symlink to directory", dir_link, true
-    ; "symlink to regular file", file_link, false
-    ]
+    (fun (label, path, expected_dir, expected_file) ->
+       check bool ("is_directory: " ^ label) expected_dir (Fs_compat.is_directory path);
+       check bool ("is_file: " ^ label) expected_file (Fs_compat.is_file path))
+    [ "directory", dir, true, false
+    ; "regular file", file, false, true
+    ; "missing", missing, false, false
+    ; "empty path", "", false, false
+    ; "dangling symlink", dangling, false, false
+    ; "symlink to directory", dir_link, true, false
+    ; "symlink to regular file", file_link, false, true
+    ; "fifo (non-directory special file)", fifo, false, true
+    ];
+  check bool "file_exists: empty path" false (Fs_compat.file_exists "");
+  (* Unsearchable parent yields EACCES on stat; skip when running as root
+     since CAP_DAC_OVERRIDE bypasses mode 0o000. *)
+  if Unix.geteuid () <> 0 then begin
+    let locked_parent = Filename.concat base "locked_parent" in
+    let hidden_dir = Filename.concat locked_parent "dir" in
+    let hidden_file = Filename.concat locked_parent "file" in
+    Unix.mkdir locked_parent 0o755;
+    Unix.mkdir hidden_dir 0o755;
+    Fs_compat.save_file hidden_file "x";
+    Unix.chmod locked_parent 0o000;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod locked_parent 0o755)
+      (fun () ->
+         check bool "is_directory: permission denied returns false" false
+           (Fs_compat.is_directory hidden_dir);
+         check bool "is_file: permission denied returns false" false
+           (Fs_compat.is_file hidden_file))
+  end
 ;;
 
 let () =
@@ -1428,11 +1452,11 @@ let () =
             (test_read_dir_of_a_large_directory_forces_no_minor_collection
                ~fs:(Eio.Stdenv.fs env))
         ; test_case
-            "is_directory classifies kinds, fallback"
+            "is_directory and is_file classify kinds, fallback"
             `Quick
             (with_optional_read_fs None test_is_directory_kinds)
         ; test_case
-            "is_directory classifies kinds, Eio"
+            "is_directory and is_file classify kinds, Eio"
             `Quick
             (with_optional_read_fs (Some (Eio.Stdenv.fs env)) test_is_directory_kinds)
         ] )

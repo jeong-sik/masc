@@ -206,7 +206,7 @@ let is_directory source ~site path =
 
 let is_jsonl_file source ~site path =
   protect_source_read source ~site ~default:false (fun () ->
-    Sys.file_exists path && (not (Sys.is_directory path))
+    Env_config_core.existing_file path
     && Filename.check_suffix path ".jsonl")
 
 let discover_trajectory_keeper_dirs_in_root trajectories_root =

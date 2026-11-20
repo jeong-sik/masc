@@ -34,30 +34,51 @@ let append_lines (path : string) (lines : string) : unit =
     lines
 ;;
 
-(** Check if file exists.
-    Uses Stdlib.Sys.file_exists (works in both Eio and non-Eio contexts). *)
+(** Check if path exists (follows symlinks via [Eio.Path.stat] when Eio fs
+    is installed, falling back to [Stdlib.Sys.file_exists]). *)
 let file_exists (path : string) : bool =
-  with_fs_or_fallback
-    ~path
-    ~fallback:(fun () -> Stdlib.Sys.file_exists path)
-    (fun fs ->
-       try
-         let _ = Eio.Path.stat ~follow:true Eio.Path.(fs / path) in
-         true
-       with
-       | Eio.Io _ -> false)
+  if String.equal path "" then
+    false
+  else
+    with_fs_or_fallback
+      ~path
+      ~fallback:(fun () -> Stdlib.Sys.file_exists path)
+      (fun fs ->
+         try
+           let _ = Eio.Path.stat ~follow:true Eio.Path.(fs / path) in
+           true
+         with
+         | Eio.Io _ -> false)
 ;;
 
 let is_directory (path : string) : bool =
-  with_fs_or_fallback
-    ~path
-    ~fallback:(fun () ->
-      match Stdlib.Sys.is_directory path with
-      | is_dir -> is_dir
-      | exception Sys_error (_ : string) -> false)
-    (fun fs ->
-       try (Eio.Path.stat ~follow:true Eio.Path.(fs / path)).kind = `Directory with
-       | Eio.Io _ -> false)
+  if String.equal path "" then
+    false
+  else
+    with_fs_or_fallback
+      ~path
+      ~fallback:(fun () ->
+        match Stdlib.Sys.is_directory path with
+        | is_dir -> is_dir
+        | exception Sys_error (_ : string) -> false)
+      (fun fs ->
+         try (Eio.Path.stat ~follow:true Eio.Path.(fs / path)).kind = `Directory with
+         | Eio.Io _ -> false)
+;;
+
+let is_file (path : string) : bool =
+  if String.equal path "" then
+    false
+  else
+    with_fs_or_fallback
+      ~path
+      ~fallback:(fun () ->
+        match Stdlib.Sys.is_directory path with
+        | is_dir -> not is_dir
+        | exception Sys_error (_ : string) -> false)
+      (fun fs ->
+         try (Eio.Path.stat ~follow:true Eio.Path.(fs / path)).kind <> `Directory with
+         | Eio.Io _ -> false)
 ;;
 
 type path_kind =

@@ -20,11 +20,10 @@ let existing_file path =
   let path = String.trim path in
   if String.equal path "" then
     None
+  else if Fs_compat.is_file path then
+    Some path
   else
-    try
-      if Sys.file_exists path && not (Sys.is_directory path) then Some path else None
-    with
-    | Sys_error _ -> None
+    None
 
 let warn_ignored_config_root_full_catalogs
       ?env

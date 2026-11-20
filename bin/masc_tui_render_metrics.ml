@@ -72,7 +72,7 @@ let observation_count observation =
   | Read_failed _ | Unavailable _ | Stale _ -> Unknown.(glyph Read_failed)
 
 (* A section row's value. Without one, the row names the state of the
-   reading in RFC-0519 section 2's words, then the reason the source gave;
+   reading, then the reason the source gave;
    [current] says what a current reading reads as. A loader's message already
    names its subject and its verdict, so it stands alone. The card above the
    section draws the same observation as a mark ({!observation_count}). *)

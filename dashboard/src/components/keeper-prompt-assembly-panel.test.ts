@@ -56,7 +56,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
     ])
     // The world message carries no prompt asset: keeper.turn_intent was its
     // only one and #26823 removed it. Its computed observation placeholders
-    // were dropped with RFC prompts-outside-ocaml §2.3 item 3.
+    // were dropped in #30132.
     expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(0)
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
     expect(report.rows.find(row => row.promptKey === 'keeper')?.source).toBe('override')

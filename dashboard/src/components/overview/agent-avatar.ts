@@ -5,8 +5,8 @@
 // chat/primitives.ts, board/board-surface.ts, keeper-badge.ts,
 // ide/ide-editor-ownership.ts and v2/primitives-v2.ts. The pixel-grid
 // renderer (pixel-avatar.css + config/avatar-palettes.ts) and its overlays
-// (activity dot, speech bubble, blocker ring, signal ring) were removed per
-// docs/DESIGN-EXTRA-UI.md "Two avatar systems"; roster/profile rows carry
+// (activity dot, speech bubble, blocker ring, signal ring) were removed so
+// the dashboard draws one avatar system; roster/profile rows carry
 // that operational context in their own cells. Heartbeat mirrors the old
 // animated statuses (running/active/working/busy), matching the design's
 // PHASE_PULSE bucket.

@@ -414,11 +414,9 @@
 }
 
 /* ── Live roster responsive tiers ───────────────────────────────────────────
-   Migrated from keeper-v2/fleet.css in the 2026-08-23 design re-sync
-   (planned split, docs/DESIGN-PARITY.md): fleet.css now carries only the
-   design's five-track mock tiers (1320px / 720px); the live row's sixth cell
-   (.fl-runtime) keeps its own breakpoints here, scoped to
-   .v2-monitoring-surface so the design mock keeps the vendored tiers. */
+   keeper-v2/fleet.css carries the roster's base tiers. The live row's sixth
+   cell (.fl-runtime) keeps its own breakpoints here, scoped to
+   .v2-monitoring-surface. */
 
 /* mid width — aside still present, but main is tight: drop 최근 도구 first,
    keep 런타임 (5 tracks remain: Keeper / 운영판정 / 컨텍스트 / 런타임 / 액션). */

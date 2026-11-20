@@ -164,9 +164,6 @@ let get_tasks_safe config =
   if not (is_initialized config) then []
   else (read_backlog config).tasks
 
-let safe_yield () =
-  Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
-
 let list_leaf_json_names config dir =
   list_dir config dir
   |> List.filter (fun name ->
@@ -183,7 +180,7 @@ let agents_persistence_surface = "workspace_agents"
 let load_agents_from_dir config dir ~include_inactive =
   list_leaf_json_names config dir
   |> List.filter_map (fun name ->
-         safe_yield ();
+         Eio_guard.fair_yield ();
          let path = Filename.concat dir name in
          match read_agent_result config path with
          | Ok agent when include_inactive || agent.status <> Masc_domain.Inactive ->
@@ -439,7 +436,7 @@ let select_recent_message_names ~since_seq ~limit names =
   names
   |> List.fold_left
        (fun acc name ->
-         safe_yield ();
+         Eio_guard.fair_yield ();
          insert_candidate acc name)
        []
   |> List.map snd
@@ -502,7 +499,7 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_labe
       | _ when remaining <= 0 -> List.rev acc
       | [] -> List.rev acc
       | name :: rest ->
-          safe_yield ();
+          Eio_guard.fair_yield ();
           match message_seq_of_filename name with
           | Some seq when seq <= since_seq -> List.rev acc
           | None -> loop remaining acc rest
@@ -564,7 +561,7 @@ let get_all_messages_raw config ~since_seq =
       let rec loop acc = function
         | [] -> List.rev acc
         | name :: rest ->
-            safe_yield ();
+            Eio_guard.fair_yield ();
             let path = Filename.concat msgs_path name in
             match read_json config path with
             | json ->

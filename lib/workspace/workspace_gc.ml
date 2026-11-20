@@ -262,7 +262,7 @@ let gc config ~days () =
 
   if Sys.file_exists messages_path then begin
     Sys.readdir messages_path |> Array.iter (fun name ->
-        Workspace_query.safe_yield ();
+        Eio_guard.fair_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat messages_path name in
         let json = read_json config path in

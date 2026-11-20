@@ -27661,8 +27661,6 @@ let main
                 (match state.board_mode with
                  | Board_read _ ->
                      Masc_tui_board_updates.leave_board_detail state
-                 | Board_list when state.board_preview_mode <> Preview_compact ->
-                     state.board_preview_mode <- Preview_compact
                  | Board_list -> state.view <- Overview
                  | Board_compose -> ())
             | Planning ->
@@ -28902,11 +28900,7 @@ let main
          when ((state.view = Planning && state.planning_mode = Planning_list
                 && Option.is_none state.task_detail_id
                 && not (Masc_tui_overview_tasks.is_focused state.task_focus))
-               || (state.view = Harness && Option.is_none state.harness_detail)
-               || (state.view = Board
-                   && (match state.board_mode with
-                       | Board_list -> true
-                       | Board_read _ | Board_compose -> false)))
+               || (state.view = Harness && Option.is_none state.harness_detail))
               && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
               && not state.answering_open && not state.link_modal_open
@@ -28915,11 +28909,8 @@ let main
             | Planning ->
                 state.planning_preview_mode <-
                   Masc_tui_types.cycle_docked_preview_mode state.planning_preview_mode
-            | Board ->
-                state.board_preview_mode <-
-                  Masc_tui_types.cycle_docked_preview_mode state.board_preview_mode
             | Harness | Overview | Acting | Metrics | Keepers _ | Memory | Lanes
-            | Clients | Approvals | Schedules | Verification | Fusion
+            | Clients | Board | Approvals | Schedules | Verification | Fusion
             | Repositories | Code | Changes | Connectors | Runtime | Config
             | Resources | Tools | System_logs ->
                 state.harness_preview_mode <-

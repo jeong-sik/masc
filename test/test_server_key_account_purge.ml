@@ -213,7 +213,7 @@ let spent label (who : someone) expected =
 (* Runs [work] while a call of the account of [who] runs. *)
 let during_a_call_of (who : someone) work =
   match
-    Login.one_call_of who.account ~busy:() (fun (_ : Login.in_call) ->
+    Runtime_account_call.one_call_of who.account ~busy:() (fun (_ : Runtime_account_call.t) ->
       work ();
       Ok ())
   with
@@ -287,7 +287,7 @@ let test_login_account =
        the account itself, and the home of a login is not its to remove. *)
     let in_the_call (who : someone) ~of_ =
       result_name
-        (Login.one_call_of of_ ~busy:Purge.Account_busy (fun in_call ->
+        (Runtime_account_call.one_call_of of_ ~busy:Purge.Account_busy (fun in_call ->
            Purge.remove_in_call in_call ~person:who.person ~base_path of_))
     in
     Alcotest.(check string)

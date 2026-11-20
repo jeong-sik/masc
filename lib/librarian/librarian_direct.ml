@@ -144,6 +144,11 @@ let plan_write ~by ~at ~trace_id facts write =
          | None, None -> Refused Unknown_fact
          | None, Some (_ : fact) -> Already_done
          | Some superseded, None ->
+           (* The claim says what [superseded] said, corrected, so Memory has
+              known it since that fact was first seen. *)
+           let fact =
+             { fact with first_seen = Float.min (superseded : fact).first_seen at }
+           in
            settle ~at ~facts ~states:(Some id)
              ~removed:[ superseded, Effects.Superseded_by id ]
              ~added:[ fact ] ~touched:[]

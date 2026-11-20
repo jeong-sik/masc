@@ -970,7 +970,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
               @ (match closed.bpc_closed_at with
                | None -> []
                | Some at ->
-                   (match Board_read_layout.close_time at with
+                   (match Board_read_layout.close_time ~now:(Unix.gettimeofday ()) at with
                     | Ok time -> field (words state "종료 시각 " "Closed at ") time
                     | Error raw -> field (words state "종료 시각을 읽을 수 없음 · 원래 Unix 초 " "Close time unreadable · raw Unix seconds ")
                         (Printf.sprintf "%.17g" raw))) in

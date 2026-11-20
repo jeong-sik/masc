@@ -437,7 +437,7 @@ let test_registered =
     (* What a verification and a turn do first: the runtime of a model of
        the provider, on the account, inside its call. *)
     (match
-       Login.one_call_of account ~busy:None (fun in_call ->
+       Runtime_account_call.one_call_of account ~busy:None (fun in_call ->
          Login.person_runtime
            in_call
            alice
@@ -825,14 +825,14 @@ let test_replacement_refused =
       ~code:"unknown_account";
     (* A call of the account runs: a turn, a verification, or its removal. *)
     (match
-       Login.one_call_of account ~busy:None (fun (_ : Login.in_call) ->
+       Runtime_account_call.one_call_of account ~busy:None (fun (_ : Runtime_account_call.t) ->
          Ok (replace alice ~base_path account (replacement_body second_key)))
      with
      | Ok answer -> refused "while a call of the account runs" answer ~status:409 ~code:"account_call_running"
      | Error (_ : unit option) -> Alcotest.fail "the call of the account was not taken");
     (* Whether a call of another person's account runs is not told. *)
     (match
-       Login.one_call_of account ~busy:None (fun (_ : Login.in_call) ->
+       Runtime_account_call.one_call_of account ~busy:None (fun (_ : Runtime_account_call.t) ->
          Ok (replace bob ~base_path account (replacement_body second_key)))
      with
      | Ok answer ->
@@ -1198,7 +1198,7 @@ let test_left_keys_at_start =
       (fun out -> output_string out the_key);
     let at_start () = Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path) in
     (match
-       Login.one_call_of account ~busy:None (fun (_ : Login.in_call) ->
+       Runtime_account_call.one_call_of account ~busy:None (fun (_ : Runtime_account_call.t) ->
          at_start ();
          Ok ())
      with
@@ -1372,7 +1372,7 @@ let test_left_keys_of_two_accounts =
       in
       let at_start () = Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path) in
       (match
-         Login.one_call_of first.account ~busy:None (fun (_ : Login.in_call) ->
+         Runtime_account_call.one_call_of first.account ~busy:None (fun (_ : Runtime_account_call.t) ->
            at_start ();
            Ok ())
        with

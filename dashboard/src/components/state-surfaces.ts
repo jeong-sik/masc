@@ -1,5 +1,5 @@
 // MASC Dashboard v2 — empty / error / loading state surfaces
-// Ported from keeper-v2 organisms-5 (organisms-5.jsx). Local-only, no backend.
+// Local-only, no backend.
 
 import { html } from 'htm/preact'
 import type { JSX } from 'preact'

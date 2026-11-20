@@ -1,5 +1,5 @@
 // KvRow — atomic primitive ported from design-system v0.4
-// primitives.html (`<div class="kv-row"><span class="k">LABEL</span>
+// (`<div class="kv-row"><span class="k">LABEL</span>
 // <span class="v">value</span></div>`). The SPEC defines a single
 // label / value row with a fixed 80px label column, 4px vertical
 // padding, baseline alignment, uppercase muted label, and a mono

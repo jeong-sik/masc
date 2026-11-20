@@ -1,8 +1,7 @@
 // KPI strip — composite container for a row of KpiCell tiles.
 //
-// Ports the design-system v0.4 cb-group-a `.cb-kpi` strip pattern
-// (preview/components.css lines 91-112). The strip owns the surface,
-// the cells are flat columns inside it:
+// Ports the design-system v0.4 `.cb-kpi` strip pattern. The strip owns
+// the surface, the cells are flat columns inside it:
 //
 //   .cb-kpi {
 //     display:grid; grid-template-columns: repeat(6, 1fr);

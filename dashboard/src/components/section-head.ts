@@ -1,5 +1,5 @@
 // SectionHead — atomic primitive ported from design-system v0.4
-// primitives.html (`<div class="section-head"><span>LABEL</span>
+// (`<div class="section-head"><span>LABEL</span>
 // <span class="count">N</span></div>`). The SPEC defines a 28px panel
 // header *strip* — uppercase label on the left, optional count or
 // arbitrary tail content right-aligned, and a hairline border-bottom

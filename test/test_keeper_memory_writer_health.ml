@@ -49,21 +49,21 @@ let writers config =
   | None -> fail "the workspace has no Memory writers"
 ;;
 
-(* A reading makes the writer; its boot runs on the case's switch. *)
-let booted config =
-  let writers = writers config in
-  (match Writers.view writers keeper with
-   | Ok (_ : Writer.view) | Error (`Booting | `Stopped (_ : Masc.Librarian_store.stop)) -> ()
-   | Error `No_writer -> fail "the Keeper has no writer");
-  let rec settle tries =
-    match List.assoc_opt keeper (Writers.held writers) with
-    | Some Held_booting when tries > 0 ->
-      Eio.Fiber.yield ();
-      settle (tries - 1)
-    | Some Held_booting -> fail "the writer is still booting"
-    | Some (Held _ | Held_retired) | None -> ()
-  in
-  settle 10_000
+(* A write waits for the writer's boot, and a store that did not open
+   refuses it. *)
+let refused_by_a_stopped_store config =
+  match
+    Writers.write (writers config) keeper ~by:Masc.Librarian_effects.Keeper ~trace:"turn"
+      (Masc.Librarian_direct.Remember
+         { claim = "the port is 8935"
+         ; category = Masc.Keeper_memory_os_types.Constraint
+         ; basis = Masc.Keeper_memory_os_types.Observed Masc.Keeper_memory_os_types.Transcript
+         })
+  with
+  | Unavailable (Store_stopped (_ : Masc.Librarian_store.stop)) -> ()
+  | Unavailable Keeper_retired -> fail "the Keeper has no writer"
+  | Written _ | Already_held | Already_done | Already_absent | Refused _ | Not_a_snapshot _ ->
+    fail "the store opened"
 ;;
 
 (* The Keeper's row as the section carries it. *)
@@ -125,7 +125,7 @@ let test_a_stopped_writer () =
     in
     Fs_compat.mkdir_p (Filename.dirname log_path);
     Out_channel.with_open_bin log_path (fun channel -> output_string channel "not json\n");
-    booted config;
+    refused_by_a_stopped_store config;
     let row = row_of config in
     check string "its state" "stopped" (text "state" row);
     check (list string) "E1" [ "E1" ] (alarms row);

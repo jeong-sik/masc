@@ -1,0 +1,34 @@
+(library
+ (name masc_tui_work_requests)
+ (wrapped true)
+ (libraries
+  masc
+  masc.masc_candle
+  masc.voice_config
+  masc.voice_setup
+  masc.voice_wizard
+  masc_log
+  masc_eio_context
+  masc_tui_types
+  masc_tui_loader
+  masc_tui_words
+  masc_tui_async_protocol
+  masc_tui_async_read
+  masc_tui_transport
+  masc_tui_operator_projection
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_transcript
+  masc_tui_palette
+  masc_tui_owed_read
+  masc_tui_workspace_job
+  masc_tui_fetched
+  masc_tui_theme
+  masc_tui_message_layout
+  masc_tui_audio_device
+  masc_tui_voice_wizard_session
+  masc_tui_chat_call_reader
+  masc_tui_task_document
+  masc_tui_task_document_observation
+  eio
+  yojson
+  mtime.clock.os))

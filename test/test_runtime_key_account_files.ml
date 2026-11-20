@@ -561,11 +561,11 @@ let test_no_home =
     Alcotest.(check (result bool string))
       "present is false before any HTTP key file"
       (Ok false)
-      (F.present ~home:F.No_home ~runtime_root ~account_id:account);
+      (F.present_for ~home:F.No_home ~runtime_root ~account_id:account);
     Alcotest.(check string)
       "HTTP key files make no CLI home"
       "made"
-      (make_name (F.make ~home:F.No_home ~runtime_root ~account_id:account ~generation (key the_key)));
+      (make_name (F.make_for ~home:F.No_home ~runtime_root ~account_id:account ~generation (key the_key)));
     let home = home_of ~runtime_root account in
     let keys = keys_of ~runtime_root account in
     Alcotest.(check bool) "no Claude Code home was created" false (there home);
@@ -575,11 +575,11 @@ let test_no_home =
     Alcotest.(check (result bool string))
       "present sees the HTTP key folder"
       (Ok true)
-      (F.present ~home:F.No_home ~runtime_root ~account_id:account);
+      (F.present_for ~home:F.No_home ~runtime_root ~account_id:account);
     Alcotest.(check string)
       "HTTP key rotation keeps no CLI home"
       "replaced"
-      (match F.replace ~home:F.No_home ~runtime_root ~account_id:account ~generation:second (key "sk-test-http-2") with
+      (match F.replace_for ~home:F.No_home ~runtime_root ~account_id:account ~generation:second (key "sk-test-http-2") with
        | Ok F.Other_keys_removed -> "replaced"
        | Ok (F.Other_keys_left (_ : string)) -> "replaced, other keys left"
        | Error error -> make_name (Error error));
@@ -591,17 +591,17 @@ let test_no_home =
     Alcotest.(check string)
       "HTTP key removal removes the keys cleanly"
       "removed"
-      (remove_name (F.remove ~home:F.No_home ~runtime_root ~account_id:account));
+      (remove_name (F.remove_for ~home:F.No_home ~runtime_root ~account_id:account));
     Alcotest.(check bool) "the HTTP key folder is gone" false (there keys);
     Alcotest.(check (result bool string))
       "present is false after removal"
       (Ok false)
-      (F.present ~home:F.No_home ~runtime_root ~account_id:account);
+      (F.present_for ~home:F.No_home ~runtime_root ~account_id:account);
     let missing_root = Filename.concat (Filename.dirname runtime_root) "missing-root" in
     Alcotest.(check string)
       "No_home make_home refuses a missing runtime root"
       "home_not_made"
-      (make_name (F.make ~home:F.No_home ~runtime_root:missing_root ~account_id:account ~generation (key the_key))))
+      (make_name (F.make_for ~home:F.No_home ~runtime_root:missing_root ~account_id:account ~generation (key the_key))))
 ;;
 
 let () =

@@ -424,7 +424,7 @@ streaming = true
       (match Runtime_api_key_file.key_of_string "sk-test-http-key" with
        | None -> Alcotest.fail "a fixture key was refused"
        | Some key ->
-         (match Files.make ~home:Files.No_home ~runtime_root ~account_id:account ~generation:Key_generation.first key with
+         (match Files.make_for ~home:Files.No_home ~runtime_root ~account_id:account ~generation:Key_generation.first key with
           | Ok () -> ()
           | Error err -> Alcotest.fail (Files.make_error_detail err)));
       who
@@ -432,7 +432,7 @@ streaming = true
     let alice = with_http_key ~name:"alice" ~hex:'a' in
     let bob = with_http_key ~name:"bob" ~hex:'b' in
     let no_home_there label who expected =
-      match Files.present ~home:Files.No_home ~runtime_root:(runtime_root_of ~base_path who) ~account_id:who.account with
+      match Files.present_for ~home:Files.No_home ~runtime_root:(runtime_root_of ~base_path who) ~account_id:who.account with
       | Ok there -> Alcotest.(check bool) label expected there
       | Error detail -> Alcotest.failf "%s: %s" label detail
     in

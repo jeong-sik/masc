@@ -46,13 +46,18 @@ type make_error =
     home this process does not reach turns the replacement down while
     nothing is recorded. The detail is for the log of the server: it can
     name a path of the server. *)
-val make_home
-  :  ?home:home_kind
+val make_home_for
+  :  home:home_kind
   -> runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> (unit, string) result
 
-(** Makes the home of [account_id] ({!make_home}) and then writes [key] as
+val make_home
+  :  runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> (unit, string) result
+
+(** Makes the home of [account_id] ({!make_home_for}) and then writes [key] as
     the key of [generation] ({!Runtime_api_key_file.write}). The home comes
     first, so an account whose key file is there has its home when [home] is
     {!Claude_home}; for {!No_home}, only [runtime_root] and the key file
@@ -62,8 +67,8 @@ val make_home
     once, inside the call of the account it has just recorded. After an
     error there, nothing under the id is a key the account was given, and
     whoever asked removes the account with what is under its id
-    ({!remove}). A replacement calls it for the next generation of an
-    account that has its files ({!replace}): the home that is there is
+    ({!remove_for}). A replacement calls it for the next generation of an
+    account that has its files ({!replace_for}): the home that is there is
     looked at and left as it is.
 
     {!remove} is not the undo of a call, and neither is {!remove_keys}:
@@ -73,9 +78,16 @@ val make_home
     place is the one that was there, and a removal after it takes that key
     away. A replacement asks for that after its record ({!remove_keys}),
     where the key before is not read any more. *)
-val make
-  :  ?home:home_kind
+val make_for
+  :  home:home_kind
   -> runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> generation:Authz_types.Key_generation.t
+  -> Runtime_api_key_file.key
+  -> (unit, make_error) result
+
+val make
+  :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> generation:Authz_types.Key_generation.t
   -> Runtime_api_key_file.key
@@ -98,8 +110,8 @@ type remove_error =
 
 (** Removes the folder of the keys of [account_id] with everything in it, a
     key of any generation and a file a write did not put in place, and then
-    its home. The key goes first: it is the secret, and a removal that stops
-    leaves the home rather than the key.
+    its home when [home] is {!Claude_home}. The key goes first: it is the
+    secret, and a removal that stops leaves the home rather than the key.
 
     A folder that is not there is removed already, so a removal that stopped
     is asked again, and an account whose files were never made is removed
@@ -110,9 +122,14 @@ type remove_error =
     ([fsync]). A folder that went and whose parent was not synced is
     reported as not removed; the removal asked again finds it gone and syncs
     again. *)
-val remove
-  :  ?home:home_kind
+val remove_for
+  :  home:home_kind
   -> runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> (unit, remove_error) result
+
+val remove
+  :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> (unit, remove_error) result
 
@@ -138,9 +155,14 @@ val remove_keys
     removal went through, and the start of the server asks this of each such
     account. [Error] when a name could not be looked at; the detail can name
     a path of the server. *)
-val present
-  :  ?home:home_kind
+val present_for
+  :  home:home_kind
   -> runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> (bool, string) result
+
+val present
+  :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> (bool, string) result
 
@@ -238,9 +260,16 @@ type other_keys =
     replacement that answered an error removes the folder
     ({!remove_keys}): the key of the generation before is on disk and is
     not read, and the file of [generation] is not known to be absent. *)
-val replace
-  :  ?home:home_kind
+val replace_for
+  :  home:home_kind
   -> runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> generation:Authz_types.Key_generation.t
+  -> Runtime_api_key_file.key
+  -> (other_keys, make_error) result
+
+val replace
+  :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> generation:Authz_types.Key_generation.t
   -> Runtime_api_key_file.key

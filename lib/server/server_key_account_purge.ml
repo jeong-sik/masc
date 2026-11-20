@@ -68,7 +68,7 @@ let finish ?home (_ : Runtime_account_call.t) (person : Login.person) ~base_path
       logged id "the end was not recorded" (Authz_purge.error_detail error);
       Error (Not_ended error)
   in
-  match Files.remove ~home ~runtime_root:(runtime_root_of person ~base_path) ~account_id:id with
+  match Files.remove_for ~home ~runtime_root:(runtime_root_of person ~base_path) ~account_id:id with
   | Ok () -> ended (Authz_purge.purged person.zone (Event.Account_purged { account })) ~then_:(Ok ())
   | Error stayed ->
     let failed_stage, detail =
@@ -148,7 +148,7 @@ let resume_one ~zone ~base_path ~owner ~namespace ~home id =
       match status_of person id with
       | Some Purges.Account_pending -> ended in_call
       | Some Purges.Account_purged ->
-        (match Files.present ~home ~runtime_root:(runtime_root_of person ~base_path) ~account_id:id with
+        (match Files.present_for ~home ~runtime_root:(runtime_root_of person ~base_path) ~account_id:id with
          | Ok true -> ended in_call
          | Ok false -> Ok false
          | Error detail ->
@@ -215,7 +215,7 @@ let resume ~zone ~base_path =
        | Purges.Account_purged, Some namespace ->
          (* An account that went through and is not back takes no call. *)
          (match
-            Files.present
+            Files.present_for
               ~home
               ~runtime_root:(runtime_root_of { Login.zone; user_id = owner; namespace } ~base_path)
               ~account_id:id

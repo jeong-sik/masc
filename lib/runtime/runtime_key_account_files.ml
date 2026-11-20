@@ -21,7 +21,7 @@ type make_error =
   | Home_not_made of string
   | Key_not_written of Runtime_api_key_file.write_error
 
-let make_home ?(home = Claude_home) ~runtime_root ~account_id =
+let make_home_for ~home ~runtime_root ~account_id =
   Fs_compat.Systhread_host.run ~label:thread_label (fun () ->
     match home with
     | Claude_home ->
@@ -41,12 +41,18 @@ let make_home ?(home = Claude_home) ~runtime_root ~account_id =
        | exception Sys_error detail -> Error detail))
 ;;
 
-let make ?(home = Claude_home) ~runtime_root ~account_id ~generation key =
-  match make_home ~home ~runtime_root ~account_id with
+let make_home ~runtime_root ~account_id = make_home_for ~home:Claude_home ~runtime_root ~account_id
+
+let make_for ~home ~runtime_root ~account_id ~generation key =
+  match make_home_for ~home ~runtime_root ~account_id with
   | Error detail -> Error (Home_not_made detail)
   | Ok () ->
     Runtime_api_key_file.write ~runtime_root ~account_id ~generation key
     |> Result.map_error (fun error -> Key_not_written error)
+;;
+
+let make ~runtime_root ~account_id ~generation key =
+  make_for ~home:Claude_home ~runtime_root ~account_id ~generation key
 ;;
 
 let make_error_detail = function
@@ -124,7 +130,7 @@ let remove_keys ~runtime_root ~account_id =
   if there then keys_removed ~runtime_root ~account_id else Ok ()
 ;;
 
-let remove ?(home = Claude_home) ~runtime_root ~account_id =
+let remove_for ~home ~runtime_root ~account_id =
   match root_there ~runtime_root with
   | Error detail -> Error (Key_not_removed detail)
   | Ok false -> Ok ()
@@ -143,7 +149,9 @@ let remove ?(home = Claude_home) ~runtime_root ~account_id =
            | Ok () -> Ok ())))
 ;;
 
-let present ?(home = Claude_home) ~runtime_root ~account_id =
+let remove ~runtime_root ~account_id = remove_for ~home:Claude_home ~runtime_root ~account_id
+
+let present_for ~home ~runtime_root ~account_id =
   let* there = root_there ~runtime_root in
   if not there
   then Ok false
@@ -157,6 +165,8 @@ let present ?(home = Claude_home) ~runtime_root ~account_id =
         let* keys_there = named keys in
         if keys_there then Ok true else named account_home)
 ;;
+
+let present ~runtime_root ~account_id = present_for ~home:Claude_home ~runtime_root ~account_id
 
 type key_state =
   | Key_readable
@@ -228,11 +238,15 @@ type other_keys =
   | Other_keys_removed
   | Other_keys_left of string
 
-let replace ?(home = Claude_home) ~runtime_root ~account_id ~generation key =
-  match make ~home ~runtime_root ~account_id ~generation key with
+let replace_for ~home ~runtime_root ~account_id ~generation key =
+  match make_for ~home ~runtime_root ~account_id ~generation key with
   | Error error -> Error error
   | Ok () ->
     (match remove_other_keys ~runtime_root ~account_id ~generation with
      | Ok { gone = (_ : int); stayed = None } -> Ok Other_keys_removed
      | Ok { gone = (_ : int); stayed = Some detail } | Error detail -> Ok (Other_keys_left detail))
+;;
+
+let replace ~runtime_root ~account_id ~generation key =
+  replace_for ~home:Claude_home ~runtime_root ~account_id ~generation key
 ;;

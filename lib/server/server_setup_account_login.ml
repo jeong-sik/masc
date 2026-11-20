@@ -530,45 +530,60 @@ let person_runtime in_call person ~base_path ~binding =
   in
   let* config = Server_runtime_setup_actions.config ~base_path |> setup in
   let* runtime_root = runtime_root_of ~base_path (Person person) |> unavailable in
+  let provider_opt = Runtime_schema.provider_of_id config template in
+  let official_runtime ~account_home ~account =
+    Runtime_account_runtime.of_template config ~template ~provider_id:provider_account_id
+      ~account_home:(Some account_home) ~account ~binding
+    |> Result.map_error (template_error id) in
+  let official_login () =
+    let* target =
+      Server_runtime_setup_actions.login_target_of_config config ~integration_id:template |> setup in
+    let client = target.Server_runtime_setup_actions.client in
+    let* account_home =
+      Client.account_home ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
+    official_runtime ~account_home ~account:Runtime_account_runtime.Login in
+  let official_key ~generation =
+    let* target =
+      Server_runtime_setup_actions.login_target_of_config config ~integration_id:template |> setup in
+    let client = target.Server_runtime_setup_actions.client in
+    (* The key is read before the home is looked at. A process that died
+       between the record of the account and its files left neither, and
+       that account answers that its key is missing (the same RFC, 3.3). *)
+    let* key_file =
+      Runtime_account_home_layout.key_file ~runtime_root ~account_id:id ~generation |> unavailable in
+    let* account_home =
+      Client.account_home_path ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
+    let* runtime =
+      official_runtime ~account_home ~account:(Runtime_account_runtime.Key { key_file }) in
+    let* (_ : string) =
+      Client.account_home ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
+    Ok runtime in
   let* runtime =
-    match account.Authz_provider_account_state.kind, Runtime_schema.provider_of_id config template with
-    | Authz_provider_account_state.Key { integration_id = _; generation }, Some provider
-      when Runtime_account_runtime.http_provider_takes_key provider ->
-      let* key_file =
-        Runtime_account_home_layout.key_file ~runtime_root ~account_id:id ~generation |> unavailable in
-      Runtime_account_runtime.of_template config ~template ~provider_id:provider_account_id
-        ~account_home:None ~account:(Runtime_account_runtime.Key { key_file }) ~binding
-      |> Result.map_error (template_error id)
-    | Authz_provider_account_state.Key { integration_id = _; generation = _ },
-      Some { api_format = Runtime_schema.(Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api); _ } ->
-      setup (Error Server_runtime_setup_actions.Unsupported_connection)
-    | Authz_provider_account_state.Key _, (Some _ | None)
-    | Authz_provider_account_state.Login { integration_id = _ }, (Some _ | None) ->
-      let* target =
-        Server_runtime_setup_actions.login_target_of_config config ~integration_id:template |> setup in
-      let client = target.Server_runtime_setup_actions.client in
-      let home () =
-        Client.account_home ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
-      let runtime ~account_home ~account =
-        Runtime_account_runtime.of_template config ~template ~provider_id:provider_account_id
-          ~account_home:(Some account_home) ~account ~binding
-        |> Result.map_error (template_error id) in
-      (match account.Authz_provider_account_state.kind with
-       | Authz_provider_account_state.Login { integration_id = _ } ->
-         let* account_home = home () in
-         runtime ~account_home ~account:Runtime_account_runtime.Login
-       | Authz_provider_account_state.Key { integration_id = _; generation } ->
-         (* The key is read before the home is looked at. A process that died
-            between the record of the account and its files left neither, and
-            that account answers that its key is missing (the same RFC, 3.3). *)
-         let* key_file =
-           Runtime_account_home_layout.key_file ~runtime_root ~account_id:id ~generation |> unavailable in
-         let* account_home =
-           Client.account_home_path ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
-         let* runtime =
-           runtime ~account_home ~account:(Runtime_account_runtime.Key { key_file }) in
-         let* (_ : string) = home () in
-         Ok runtime) in
+    match account.Authz_provider_account_state.kind with
+    | Authz_provider_account_state.Login { integration_id = _ } -> official_login ()
+    | Authz_provider_account_state.Key { integration_id = _; generation } ->
+      (match provider_opt with
+       | None -> official_key ~generation
+       | Some provider ->
+         (match provider.Runtime_schema.api_format with
+          | Runtime_schema.Messages_api
+          | Runtime_schema.Chat_completions_api
+          | Runtime_schema.Ollama_api
+          | Runtime_schema.Gemini_api
+          | Runtime_schema.Vertex_gemini_api ->
+            if Runtime_account_runtime.http_provider_takes_key provider then
+              let* key_file =
+                Runtime_account_home_layout.key_file ~runtime_root ~account_id:id ~generation |> unavailable in
+              Runtime_account_runtime.of_template config ~template ~provider_id:provider_account_id
+                ~account_home:None ~account:(Runtime_account_runtime.Key { key_file }) ~binding
+              |> Result.map_error (template_error id)
+            else
+              setup (Error Server_runtime_setup_actions.Unsupported_connection)
+          | Runtime_schema.Codex_app_server_runtime
+          | Runtime_schema.Claude_code_runtime
+          | Runtime_schema.Antigravity_cli_runtime
+          | Runtime_schema.Muse_serve_runtime
+          | Runtime_schema.Vibe_cli_runtime -> official_key ~generation)) in
   (* Checked before the call, so a model that makes no Runtime id is not
      called for two minutes first. A [Runtime] binding makes the id it was
      chosen by, which is one. *)

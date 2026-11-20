@@ -77,7 +77,7 @@ let made ~home (person : Login.person) ~base_path id ~generation key =
   match Login.person_runtime_root person ~base_path with
   | Error (_ : string) -> Error "the runtime root of the person was not made"
   | Ok runtime_root ->
-    Files.make ~home ~runtime_root ~account_id:id ~generation key |> Result.map_error Files.make_error_detail
+    Files.make_for ~home ~runtime_root ~account_id:id ~generation key |> Result.map_error Files.make_error_detail
 ;;
 
 let register ?(home = Files.Claude_home) ~(person : Login.person) ~base_path ~integration_id key =

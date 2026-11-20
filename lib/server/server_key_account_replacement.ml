@@ -57,7 +57,7 @@ let reached ?(home = Files.Claude_home) (person : Login.person) ~base_path id =
     logged id "it was not recorded" "the runtime root of the person was not made";
     Error Files_not_reached
   | Ok runtime_root ->
-    (match Files.make_home ~home ~runtime_root ~account_id:id with
+    (match Files.make_home_for ~home ~runtime_root ~account_id:id with
      | Ok () -> Ok runtime_root
      | Error detail ->
        logged id "it was not recorded" ("the home of the account was not reached: " ^ detail);
@@ -100,7 +100,7 @@ let recorded (person : Login.person) id ~held:before =
    removal of the account, and the key before goes with it. The next
    replacement makes the folder again. *)
 let stored ?(home = Files.Claude_home) ~runtime_root id ~generation key =
-  match Files.replace ~home ~runtime_root ~account_id:id ~generation key with
+  match Files.replace_for ~home ~runtime_root ~account_id:id ~generation key with
   | Ok Files.Other_keys_removed -> Ok { old_keys_removed = true }
   | Ok (Files.Other_keys_left detail) ->
     logged id "its new key is in place, and a file of the folder of its keys stays" detail;

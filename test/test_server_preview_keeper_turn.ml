@@ -2368,7 +2368,6 @@ streaming = true
              |> Result.map Sys.file_exists);
           Eio_context.set_env env;
           Eio_context.set_clock (Eio.Stdenv.clock env);
-          Time_compat.set_clock (Eio.Stdenv.clock env);
           let run_verify body_str =
             let out = Buffer.create 1024 in
             let conn =

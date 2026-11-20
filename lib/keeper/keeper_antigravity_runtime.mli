@@ -41,7 +41,7 @@ val run :
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
-  ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
+  ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
   ?on_carried_front:
     (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit) ->
   turn_start:Keeper_carried_front.turn_start ->
@@ -92,10 +92,11 @@ val run :
     re-sends just the new turn, so what the model reads is not this process's
     to measure.
 
-    [librarian_front] reads the turn's continuity choice as a position in the
-    history a fresh conversation starts from
-    ({!Keeper_official_client_host.read_librarian_front}); a reader error
-    refuses the request, as the same check refuses an Agent Core request.
+    [librarian_front] is the turn's continuity
+    ({!Keeper_turn_driver_try_provider.read_keeper_continuity}): where the
+    Memory writer has read to in the history a fresh conversation starts
+    from, and the working state it committed. Without it the turn has no
+    read end.
     [on_carried_front] receives the front that history started from and its
     bytes in the canonical encoding; the caller records it where the Agent
     Core lane records its own request

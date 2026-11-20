@@ -86,9 +86,6 @@ let model_input_projection_for_capacity ~input_source
     ~runtime_id
     source_projection
     messages =
-  let* frozen = match input_source with
-    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
-    | Keeper_request_source.Keeper_history _ -> Host.read_librarian_front librarian_front messages in
   let* windowed =
     Host.start_range_projection
       ~input_source
@@ -99,7 +96,7 @@ let model_input_projection_for_capacity ~input_source
       ~reserved_bytes:0
       ?on_model_input_window_observation
       ?carried_front_seed
-      ~librarian_front:(fun _ -> Ok frozen)
+      ?librarian_front
       ?on_carried_front
       ~turn_start
       ~keeper_name

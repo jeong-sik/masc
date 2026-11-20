@@ -21,7 +21,7 @@ NO_MEMORY_CHANGES = {
 }
 
 
-def health_payload() -> dict:
+def keeper_payload() -> dict:
     available = {"kind": "available", "messages": []}
     context_cycle = {
         "saved": None,
@@ -46,7 +46,7 @@ def health_payload() -> dict:
         "last_failure_kind": None,
         "stalled": None,
     }
-    keeper = {
+    return {
         "keeper_id": "alpha",
         "revision": 1,
         "updated_at": 1.0,
@@ -75,6 +75,17 @@ def health_payload() -> dict:
         "source_read_error": None,
         "alerts": [],
     }
+
+
+def health_row_payload(keeper_id: str) -> dict:
+    return {
+        "schema": "keeper.memory_os.current_health.v15",
+        "generated_at": 1.0,
+        "keeper": keeper_payload() if keeper_id == "alpha" else None,
+    }
+
+
+def health_payload() -> dict:
     return {
         "schema": "keeper.memory_os.current_health.v15",
         "generated_at": 1.0,
@@ -87,7 +98,7 @@ def health_payload() -> dict:
             "operations": [],
             "semantics": "Configuration and last-cycle observation only; no provider success, source consumption or Memory commit is implied",
         },
-        "keepers": [keeper],
+        "keepers": [keeper_payload()],
         "totals": {
             "facts": 1,
             "observed_facts": 1,
@@ -137,7 +148,9 @@ class MemoryHandler(owed.ChatHandler):
             with server.condition:
                 fail = server.failures_left > 0
                 server.failures_left = max(0, server.failures_left - 1)
-            sent = self.respond(503 if fail else 200, health_payload())
+            keeper = urllib.parse.parse_qs(request.query).get("keeper")
+            payload = health_row_payload(keeper[0]) if keeper else health_payload()
+            sent = self.respond(503 if fail else 200, payload)
             if sent:
                 server.responded(phase, "health")
             return

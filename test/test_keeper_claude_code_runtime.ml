@@ -3021,7 +3021,7 @@ let test_dated_quota_refusal_rests_the_keeper () =
    the cycle's proactive outcome an error. *)
 let expect_turn_failure label ~check_route ~base_path ~keeper_name = function
   | Error (failure : Keeper_unified_turn.turn_failure) ->
-    check_route failure.route;
+    check_route ~error:failure.error failure.route;
     check int (label ^ ": the turn-failure streak advances") 1
       (Keeper_registry.get_turn_failures ~base_path keeper_name);
     (match Keeper_meta_store.read_meta (Workspace.default_config base_path) keeper_name with
@@ -3047,11 +3047,12 @@ let test_a_429_after_an_allowed_event_is_a_turn_failure () =
   let module Route = Keeper_runtime_failure_route in
   run_refused_autonomous_cycle
     [ Emit (rate_limit_event ~status:"allowed" (an_hour_from_now ())); Emit quota_result ]
-    (expect_turn_failure "a 429 after an allowed event" ~check_route:(function
+    (expect_turn_failure "a 429 after an allowed event" ~check_route:(fun ~error -> function
        | Route.Retry_after_observed { retry_class = Route.Rate_limited; retry_after = None } ->
          ()
        | route ->
-         failf "a 429 after an allowed event routed as %s" (Route.route_class_label route)))
+         failf "a 429 after an allowed event routed as %s: %s"
+           (Route.route_class_label route) (Agent_core.Error.to_string error)))
 ;;
 
 (* Response text reached the operator before the refusal, so the attempt is
@@ -3064,12 +3065,13 @@ let test_a_fenced_dated_quota_refusal_is_a_turn_failure () =
     ; Emit (rate_limit_event ~status:"rejected" (an_hour_from_now ()))
     ; Emit quota_result
     ]
-    (expect_turn_failure "a dated refusal after response text" ~check_route:(function
+    (expect_turn_failure "a dated refusal after response text" ~check_route:(fun ~error -> function
        | Route.Exhausted_visible_alive
            { terminal = Route.Provider_attempt_effect_fenced Route.Fenced_observation_unavailable }
          -> ()
        | route ->
-         failf "a dated refusal after response text routed as %s" (Route.route_class_label route)))
+         failf "a dated refusal after response text routed as %s: %s"
+           (Route.route_class_label route) (Agent_core.Error.to_string error)))
 ;;
 
 (* The runtime tells a spent window from a throttle. A spent window routes as
@@ -3291,14 +3293,16 @@ let test_spawn_failure_fences_claim () =
        with_fixture ~remove_after_auth:true [] (fun cli_path ->
          (match run_keeper_turn ~base_path ~cli_path ~goal:"SPAWN_GOAL"
              ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ -> incr reports) () with
-          | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "claude_code"; _ })) ->
+          | Error
+              (Agent_core.Error.Provider
+                 (Llm_provider.Error.ProviderUnavailable { provider = "claude_code"; _ })) ->
             ()
           | Error error -> fail (Agent_core.Error.to_string error)
           | Ok _ -> fail "removed CLI unexpectedly completed the Keeper turn");
          check int "prepared turn with missing CLI reports no input" 0 !reports;
          let state = load_state base_path in
          (match state.phase with
-          | Recovery_required { failure = Protocol_failed; _ } -> ()
+          | Recovery_required { failure = Spawn_refused_same_input; _ } -> ()
           | _ ->
             fail "a fatal missing-CLI spawn failure did not fence the claim for recovery");
          match state.last_transient_release with
@@ -5221,11 +5225,9 @@ let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
         | _ -> fail "exactly the witnessed new native owner must bind"))
 ;;
 
-let check_pre_dispatch_attempt label attempt =
+let check_pre_dispatch_attempt label ~expected_error attempt =
   (match attempt.Keeper_official_client_attempt.result with
-   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "claude_code"; _ })) ->
-     ()
-   | Error error -> fail (Agent_core.Error.to_string error)
+   | Error error -> expected_error error
    | Ok _ -> fail (label ^ " unexpectedly ran"));
   check string
     (label ^ " is proven pre-dispatch")
@@ -5245,7 +5247,12 @@ let test_subscription_spawn_failure_is_pre_dispatch () =
          ~goal:"subscription probe should fail"
          ~tools:[]
          ()
-       |> check_pre_dispatch_attempt "subscription probe spawn failure")
+       |> check_pre_dispatch_attempt "subscription probe spawn failure"
+            ~expected_error:(function
+              | Agent_core.Error.Api
+                  (Llm_provider.Retry.InvalidRequest
+                     { reason = Llm_provider.Retry.Attempt_rejected; _ }) -> ()
+              | error -> fail (Agent_core.Error.to_string error)))
 ;;
 
 (* A CLI that dies mid-status leaves its reason on stderr: the probe keeps
@@ -5401,7 +5408,11 @@ let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
            ~goal:"turn process spawn should fail"
            ~tools:[ tool ]
            ()
-         |> check_pre_dispatch_attempt "turn process spawn failure"))
+         |> check_pre_dispatch_attempt "turn process spawn failure"
+              ~expected_error:(function
+                | Agent_core.Error.Provider
+                    (Llm_provider.Error.ProviderUnavailable { provider = "claude_code"; _ }) -> ()
+                | error -> fail (Agent_core.Error.to_string error))))
 ;;
 
 let test_unbounded_turn_keeps_subscription_probe_bounded () =

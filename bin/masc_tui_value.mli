@@ -356,6 +356,10 @@ module Count : sig
   val more : ko:bool -> int -> string
   (** Rows that were cut off, not where the reader is: [외 3], [3 more]
       (RFC tui-one-screen-grammar, section 6.3). *)
+
+  val times : int -> string
+  (** How many times one thing happened, after its name: [×13], [×1,234]
+      in both languages (RFC tui-one-screen-grammar, section 6.3). *)
 end
 
 (** A digest, such as a revision or a SHA-256. *)

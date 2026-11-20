@@ -58,7 +58,7 @@ let test_identical_calls_collapse_to_one_counted_clause () =
   | [ group ] ->
       check int "count" 13 (calls_of group);
       check string "counted clause"
-        (Printf.sprintf "%s x13: %s" (tool_label "Execute")
+        (Printf.sprintf "%s ×13: %s" (tool_label "Execute")
            (Transcript.native_completion_status result_without_flag))
         (Transcript.native_status_clause group)
   | groups -> failf "expected one group, got %d" (List.length groups)
@@ -200,7 +200,7 @@ let test_unrecognized_status_words_share_a_clause () =
   | [ group ] ->
       check int "both calls" 2 (calls_of group);
       check string "the clause is the generated wording, not the provider's word"
-        (Printf.sprintf "%s x2: %s" (tool_label "Read")
+        (Printf.sprintf "%s ×2: %s" (tool_label "Read")
            (Transcript.native_completion_status (unrecognized "")))
         (Transcript.native_status_clause group)
   | groups -> failf "expected one group, got %d" (List.length groups)
@@ -306,7 +306,7 @@ let test_identical_progress_collapses_to_one_counted_clause () =
   | [ group ] ->
       check string "tool" "McpMascExecute" group.progress_tool;
       check int "count" 13 group.progress_calls;
-      check string "counted clause" "McpMascExecute x13: output arriving"
+      check string "counted clause" "McpMascExecute ×13: output arriving"
         (Transcript.native_progress_clause group)
   | groups -> failf "expected one group, got %d" (List.length groups)
 
@@ -414,7 +414,7 @@ let test_headers_draw_one_progress_clause () =
       let projection = Transcript.project_tool_block mode (Transcript.tool_block activities) in
       let summary = summary_of projection in
       check int "the clause is drawn once" 1
-        (count_occurrences ~needle:"McpMascExecute x13: output arriving" summary);
+        (count_occurrences ~needle:"McpMascExecute ×13: output arriving" summary);
       check int "no per-call repeat" 1 (count_occurrences ~needle:"output arriving" summary))
     [ Transcript.Compact
     , (fun projection ->

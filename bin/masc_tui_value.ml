@@ -484,6 +484,8 @@ module Count = struct
 
   let more ~ko count =
     if ko then "외 " ^ grouped count else grouped count ^ " more"
+
+  let times count = "×" ^ grouped count
 end
 
 module Hash = struct

@@ -250,7 +250,7 @@ let count_in_order_of_first_appearance (keys : 'key list) : ('key * int) list =
 (* The clause of [calls] equal observations of one tool: the single call
    reads as it always did, a larger group carries its count. *)
 let counted_clause ~tool ~calls text =
-  if calls = 1 then tool ^ ": " ^ text else Printf.sprintf "%s x%d: %s" tool calls text
+  if calls = 1 then tool ^ ": " ^ text else tool ^ " " ^ Masc_tui_value.Count.times calls ^ ": " ^ text
 
 (* One status clause for every call of one tool that ended the same way.
    Thirteen [Execute] calls that each returned a result with no error flag

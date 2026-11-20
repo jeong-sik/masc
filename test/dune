@@ -500,6 +500,14 @@
    ; A key exported in the shell would turn TypeSafe AI Jev on in every
    ; board-attention test; the cases that need it set it themselves.
    (TYPESAFEAI_API_KEY "")
+   ; The operator tokens of the shell would be registered in the temporary
+   ; installation of every case that boots a server, and a value the startup
+   ; refuses fails that boot. The cases that need a token set it themselves.
+   (MASC_ADMIN_TOKEN "")
+   (MASC_INTERNAL_MCP_TOKEN "")
+   ; A bootstrap mode of the shell (skip, empty) would change the config root
+   ; of every case that boots a server. The empty value reads as unset.
+   (MASC_CONFIG_BOOTSTRAP "")
    (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false))))
 
 ; All standard tests share the masc_test_deps wrapper library

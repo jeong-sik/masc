@@ -236,11 +236,13 @@ let test_cost_estimation_non_negative =
          { Llm_provider.Pricing.input_per_million = rate
          ; output_per_million = rate
          ; cache_write_multiplier = Some 1.25
+         ; cache_write_1h_multiplier = Some 2.0
          ; cache_read_multiplier = Some 0.1
          }
        in
        match
-         Llm_provider.Pricing.estimate_cost ~pricing ~input_tokens ~output_tokens ()
+         Llm_provider.Pricing.estimate_cost ~pricing
+           ~cache_writes:Llm_provider.Pricing.Provider_default ~input_tokens ~output_tokens ()
        with
        | Llm_provider.Pricing.Estimated cost -> cost >= 0.0
        | Llm_provider.Pricing.Incomplete _ -> false)
@@ -258,15 +260,18 @@ let test_cost_scales_with_tokens =
          { Llm_provider.Pricing.input_per_million = 3.0
          ; output_per_million = 15.0
          ; cache_write_multiplier = Some 1.25
+         ; cache_write_1h_multiplier = Some 2.0
          ; cache_read_multiplier = Some 0.1
          }
        in
        let cost_a =
-         Llm_provider.Pricing.estimate_cost ~pricing ~input_tokens:a ~output_tokens:0 ()
+         Llm_provider.Pricing.estimate_cost ~pricing
+           ~cache_writes:Llm_provider.Pricing.Provider_default ~input_tokens:a ~output_tokens:0 ()
        in
        let cost_b =
          Llm_provider.Pricing.estimate_cost
            ~pricing
+           ~cache_writes:Llm_provider.Pricing.Provider_default
            ~input_tokens:(a + b)
            ~output_tokens:0
            ()

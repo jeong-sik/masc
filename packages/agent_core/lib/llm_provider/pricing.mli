@@ -4,16 +4,31 @@
     catalog rows without both input and output rates remain explicit [None];
     they are never classified as free. *)
 
+(** The lifetime a request asked its cache writes to keep. A provider prices a
+    longer-lived write above a default one. *)
+type cache_write_lifetime =
+  | Provider_default
+      (** The request named no lifetime, so the provider's default applies
+          (five minutes on Anthropic). Its writes pay [cache_write_multiplier]. *)
+  | One_hour
+      (** The request asked for one hour (Anthropic [cache_control] with
+          [ttl = "1h"]). Its writes pay [cache_write_1h_multiplier]. *)
+
 type pricing =
   { input_per_million : float
   ; output_per_million : float
   ; cache_write_multiplier : float option
+  ; cache_write_1h_multiplier : float option
   ; cache_read_multiplier : float option
   }
 
-(** Immutable catalog and provider authority for observing one request's cost.
+(** Immutable catalog and provider authority for observing one request's cost,
+    together with the lifetime that request asked its cache writes to keep.
     A missing row/rate stays missing across global catalog replacement. *)
 type source
+
+(** The three constructors describe a request that named no cache lifetime
+    ({!Provider_default}); {!with_cache_writes} states another. *)
 
 val of_catalog :
   catalog:Model_catalog.t option -> provider:Model_catalog.provider_reference -> source
@@ -27,6 +42,11 @@ val of_snapshot :
   snapshot:Catalog_snapshot.t -> provider:Model_catalog.provider_reference -> source
 (** Preserve the admitted provider authority in this whole selection. Removed
     aliases cannot recover seed permissions. Exact custom scoped rows survive. *)
+
+val with_cache_writes : cache_write_lifetime -> source -> source
+(** The same authority for a request whose cache writes asked for this
+    lifetime. [Provider_config.pricing_source] reads it from the request's
+    [cache_extended_ttl], the flag the Anthropic body writes its [ttl] from. *)
 
 val pricing_for_model : source -> string -> pricing option
 (** Read the exact reported model from the captured catalog. A different
@@ -57,9 +77,13 @@ val pricing_for_model_opt
   : ?provider:Model_catalog.provider_reference -> string -> pricing option
 
 (** Estimate USD cost from an explicit pricing value and provider token usage.
-    This function never synthesizes a missing cache multiplier. *)
+    [cache_writes] picks the multiplier that prices
+    [cache_creation_input_tokens]. This function never synthesizes a missing
+    cache multiplier: a one-hour write on a row without
+    [cache_write_1h_multiplier] is [Incomplete [Cache_creation]]. *)
 val estimate_cost
   :  pricing:pricing
+  -> cache_writes:cache_write_lifetime
   -> input_tokens:int
   -> output_tokens:int
   -> ?cache_creation_input_tokens:int
@@ -68,7 +92,8 @@ val estimate_cost
   -> cost_estimate
 
 (** Fill [usage.cost_usd] only when catalog pricing is available and exact for
-    the observed usage.  An absent or incomplete price remains absent. *)
+    the observed usage, pricing cache writes at the lifetime [source] carries.
+    An absent or incomplete price remains absent. *)
 val annotate_usage_cost
   :  source:source
   -> model_id:string

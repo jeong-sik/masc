@@ -273,7 +273,14 @@ let pricing_source (config : t) =
   let policy = match matching_request_policy config with
     | Some policy -> policy
     | None -> resolve_request_policy config in
-  Capabilities.request_policy_pricing_source policy
+  (* [Backend_anthropic.build_request] writes every breakpoint's [ttl] from
+     this flag, so the writes it reports were made at this lifetime. *)
+  let cache_writes =
+    match config.cache_extended_ttl with
+    | true -> Pricing.One_hour
+    | false -> Pricing.Provider_default
+  in
+  Pricing.with_cache_writes cache_writes (Capabilities.request_policy_pricing_source policy)
 ;;
 
 let capabilities_for_config_model (config : t) =

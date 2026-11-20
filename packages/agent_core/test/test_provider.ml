@@ -134,6 +134,7 @@ let test_estimate_cost () =
   let cost =
     Llm_provider.Pricing.estimate_cost
       ~pricing:p
+      ~cache_writes:Llm_provider.Pricing.Provider_default
       ~input_tokens:1_000_000
       ~output_tokens:500_000
       ~cache_creation_input_tokens:100_000

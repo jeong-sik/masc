@@ -243,7 +243,7 @@ type t =
     (* USD per 1M output tokens, same source/absence rule as
        [price_input_per_million]. *)
   ; request_latency_ms : int option
-    (* RFC-0233 §9 — wall-clock duration of the provider call in
+    (* Wall-clock duration of the provider call in
        milliseconds, sourced from AGENT_CORE
        [inference_telemetry.request_latency_ms] (the AGENT_CORE transport layer
        synthesizes it for every provider — [complete_common.patch_telemetry]
@@ -256,9 +256,9 @@ type t =
        keepers' runtimes do not report them, so emitting them would show
        mostly-empty columns rather than measured signal. [ttfrc_ms] is the
        one phase-level signal every streaming provider reports, so it is
-       lifted to its own §10 field below. *)
+       lifted to its own field below. *)
   ; ttfrc_ms : float option
-    (* RFC-0233 §10 — time-to-first-response-chunk in milliseconds
+    (* Time-to-first-response-chunk in milliseconds
        (wall-clock), sourced from AGENT_CORE [inference_telemetry.ttfrc_ms]. Unlike
        [request_latency_ms] (end-to-end), this measures only the wait for
        the first response chunk, isolating time-to-first-token on the
@@ -268,7 +268,7 @@ type t =
        and the error path leave it [None]. The decode (post-first-chunk)
        duration is intentionally NOT derived as
        request_latency_ms - ttfrc_ms: that would fabricate a number
-       indistinguishable from a measurement (§9.6), so decode stays
+       indistinguishable from a measurement, so decode stays
        not_recorded until a provider reports it natively. *)
   ; request_wire_observation : request_wire_observation option
   ; model_input_window : model_input_window option

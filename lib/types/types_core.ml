@@ -372,8 +372,7 @@ let task_status_of_yojson json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in
   (* Write-boundary format validation: a lifecycle timestamp stays the wire
-     string because no in-process consumer reads it as a time (RFC-0371
-     audit), but a missing or non-RFC 3339 value is a corrupt row. It is
+     string, but a missing or non-RFC 3339 value is a corrupt row. It is
      rejected here for every status, never read as the empty string. *)
   let clock ~status key =
     match opt key with
@@ -552,8 +551,8 @@ type task = {
   created_by: string option; [@default None]
   (* write-once lineage pointer to the terminal task this one
      re-runs. Set only at creation (masc_add_task); every transition carries
-     it through unchanged. Distinct from RFC-0267 goal linkage (many-to-many
-     side registry). *)
+     it through unchanged. Distinct from goal linkage (many-to-many side
+     registry). *)
   predecessor_task_id: string option; [@default None]
   contract: task_contract option; [@default None]
   (* Runtime identifiers attached after the task is created, by whichever

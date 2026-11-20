@@ -1176,7 +1176,7 @@ let commit_memory_read
   in
   let question : Masc.Librarian_read_result.question =
     { Masc.Librarian_read_result.id
-    ; shown = { Masc.Librarian_plan.memory = Some []; units = [ "turn", closing.line ] }
+    ; shown = Masc.Librarian_plan.Range { memory = []; units = [ "turn", closing.line ] }
     ; basis = Masc.Librarian_log.snapshot_after (Masc.Librarian_store.tail store)
     ; reach =
         { Masc.Librarian_read_result.line = closing.line
@@ -1191,7 +1191,7 @@ let commit_memory_read
   in
   let plan =
     Masc.Librarian_plan.of_answer
-      ~shown:question.Masc.Librarian_read_result.shown
+      ~shown:(Masc.Librarian_plan.Read question.Masc.Librarian_read_result.shown)
       ~facts:(Masc.Librarian_store.memory store).Masc.Keeper_memory_os_current_types.facts
       ~removed_since:[]
       ~at:11.

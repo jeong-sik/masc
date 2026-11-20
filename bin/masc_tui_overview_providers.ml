@@ -213,10 +213,6 @@ let bar_fill = function
    written beside the bar, floored the same way, so the colour and the figure
    agree at each band's edge. A fill exists only for a finite share above zero,
    clamped at [percent_of_full] so huge ratios never overflow [int_of_float]. *)
-let wrap_style style text =
-  if String.equal style "" || String.equal text "" then text
-  else style ^ text ^ Ansi.reset
-
 let coloured_meter ~cells ~fill:bar ~track_style share =
   let fill, track = meter_glyphs ~cells share in
   let width = max 0 cells in
@@ -231,9 +227,9 @@ let coloured_meter ~cells ~fill:bar ~track_style share =
         Masc_tui_chart.meter_fill_run ~scale ~width ~value
           ~max_value:percent_of_full ~reset:Ansi.reset fill
     | Foreground_fill, fill -> String.concat "" fill
-    | Row_tone_fill, fill -> wrap_style track_style (String.concat "" fill)
+    | Row_tone_fill, fill -> Ansi.wrap_style track_style (String.concat "" fill)
   in
-  drawn_fill ^ wrap_style track_style (String.concat "" track)
+  drawn_fill ^ Ansi.wrap_style track_style (String.concat "" track)
 
 let credit_decimals = 2
 let credit_small_amount = 0.01
@@ -934,7 +930,7 @@ let rstrip_spaces text =
 let style tone text =
   match tone with
   | None -> text
-  | Some tone -> wrap_style tone text
+  | Some tone -> Ansi.wrap_style tone text
 
 (* Every line is cut to the screen: a column that cannot shrink further loses
    its tail rather than the row's edge. *)
@@ -1076,12 +1072,12 @@ let draw_entry ~ko ?(named = true) layout tone entry =
                     ~max_value:percent_of_full
             | Foreground_fill | Row_tone_fill -> Option.value ~default:"" line.tone
           in
-          wrap_style chrome_style meter_open
+          Ansi.wrap_style chrome_style meter_open
           ^ coloured_meter ~cells:layout.bar_cells ~fill:line.fill
               ~track_style:chrome_style share
-          ^ wrap_style chrome_style meter_close
+          ^ Ansi.wrap_style chrome_style meter_close
           ^ " "
-          ^ wrap_style percent_style (pad_left line.percent layout.percent_cells)
+          ^ Ansi.wrap_style percent_style (pad_left line.percent layout.percent_cells)
       | None -> String.make gauge_width ' '
     in
     let styled_label = style line.tone label in
@@ -1354,7 +1350,7 @@ let account_card ~ko ~section ~tone ~layout entry =
           if cells_of (marked ~attention:entry.de_attention entry.de_name) <= max 0 (cells - 1) then []
           else
             wrap_marked ~width:cells ~attention:entry.de_attention entry.de_name
-            |> List.map (fun line -> wrap_style (Ansi.bold ^ tone) line)
+            |> List.map (fun line -> Ansi.wrap_style (Ansi.bold ^ tone) line)
         in
         full_name @ draw_entry ~ko ~named:false layout tone entry)
   }
@@ -1538,7 +1534,7 @@ let section_with ~ko ~draw ~bound ~(providers : Types.overview_providers_reading
       (* Metrics lead and the legend recedes. A row that is too wide still ends
          where a clause ends, rather than splitting a count from its meaning. *)
       let metric ?(tone = "") label value =
-        wrap_style (Theme.recede ()) label ^ " " ^ wrap_style (Ansi.bold ^ tone) value
+        Ansi.wrap_style (Theme.recede ()) label ^ " " ^ Ansi.wrap_style (Ansi.bold ^ tone) value
       in
       let summary_indent = if width > indent_cells then indent else "" in
       let summary_width = max 1 (width - String.length summary_indent) in

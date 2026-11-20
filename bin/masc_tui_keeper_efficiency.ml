@@ -20,10 +20,6 @@ type tone =
 let single_line = Masc.Tui_terminal_text.sanitize_terminal_text
 let per_turn ~turns value = value /. float_of_int turns
 
-let wrap_style style text =
-  if String.equal style "" then text else style ^ text ^ Ansi.reset
-;;
-
 let mini_bar ~series ~value ~reference =
   let ceiling = Float.max value reference in
   let scaled =
@@ -38,9 +34,9 @@ let mini_bar ~series ~value ~reference =
 
 let row_lines ~ko ~month (view : month_view) (row : Decode.keeper_month) =
   let fleet = view.fleet in
-  let recede = wrap_style (Theme.recede ()) in
+  let recede = Ansi.wrap_style (Theme.recede ()) in
   let heading =
-    wrap_style Ansi.bold
+    Ansi.wrap_style Ansi.bold
       (Printf.sprintf
          (if ko then "%s 효율 (%d일, 전체 %s턴)" else "Efficiency %s (%d days, fleet %s turns)")
          month view.days_covered (Masc_tui_value.Count.grouped fleet.turns_total))
@@ -68,7 +64,7 @@ let row_lines ~ko ~month (view : month_view) (row : Decode.keeper_month) =
       else Theme.recede ()
     in
     let fail_text =
-      wrap_style fail_style
+      Ansi.wrap_style fail_style
         (if ko then Printf.sprintf "실패 %s / 호출 %s" (Masc_tui_value.Count.grouped row.failed) (Masc_tui_value.Count.grouped row.calls)
          else Printf.sprintf "%s of %s calls failed" (Masc_tui_value.Count.grouped row.failed) (Masc_tui_value.Count.grouped row.calls))
     in

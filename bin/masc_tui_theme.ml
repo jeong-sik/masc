@@ -259,6 +259,11 @@ module Sgr = struct
   let emit_styled_cells cells =
     with_styled_runs ~capacity:(List.length cells * 6) (fun emit ->
       List.iter (fun (sgr, text) -> emit sgr text) cells)
+
+  let wrap_style sgr text =
+    if String.equal sgr "" || String.equal sgr reset || String.equal text ""
+    then text
+    else sgr ^ text ^ reset
 end
 
 let user_message_background palette =

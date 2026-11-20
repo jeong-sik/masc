@@ -299,9 +299,6 @@ let plot ?(ko = false) ~width trend row =
     let warn_style = Masc_tui_ansi.Theme.warn () in
     let info_style = Masc_tui_ansi.Theme.info () in
     let reset = Masc_tui_theme.Sgr.reset in
-    let wrap_style s text =
-      if String.equal s "" then text else s ^ text ^ reset
-    in
     let bands =
       List.init plot_height (fun index ->
           let band = plot_height - index - 1 in
@@ -326,27 +323,27 @@ let plot ?(ko = false) ~width trend row =
                 (Masc_tui_braille.braille_cell ~mask:grid.(index).(cx))
           done;
           if not (String.equal !open_style "") then Buffer.add_string buf reset;
-          wrap_style recede
+          Masc_tui_theme.Sgr.wrap_style recede
             (Printf.sprintf "%3d%% │ " ((band + 1) * 100 / plot_height))
           ^ Buffer.contents buf)
     in
     let baseline =
-      wrap_style recede "  0% └ "
+      Masc_tui_theme.Sgr.wrap_style recede "  0% └ "
       ^ (List.map (function
-           | None -> wrap_style recede (pad no_report_mark)
+           | None -> Masc_tui_theme.Sgr.wrap_style recede (pad no_report_mark)
            | Some {report = Measured (_, Some share); _} when share < 0.0 ->
-               wrap_style warn_style (pad "↓")
+               Masc_tui_theme.Sgr.wrap_style warn_style (pad "↓")
            | Some {report = Measured (value, Some _); _} when reported_zero value ->
                pad "0"
            | Some {report = Measured (value, None); _} ->
-               wrap_style info_style (pad (no_share_mark value))
+               Masc_tui_theme.Sgr.wrap_style info_style (pad (no_share_mark value))
            | Some {report = Reported_no_windows; _} ->
-               wrap_style recede (pad empty_report_mark)
+               Masc_tui_theme.Sgr.wrap_style recede (pad empty_report_mark)
            | Some {report = Measured (_, Some _); _} ->
-               wrap_style recede (pad "─")) row.samples |> String.concat "")
+               Masc_tui_theme.Sgr.wrap_style recede (pad "─")) row.samples |> String.concat "")
     in
     let dates = List.map (fun (day, _) ->
       Masc_tui_value.Utc_day.day_of_month_text day ^ String.make (max 0 (step - 2)) ' ')
       (dated_samples trend row)
       |> String.concat "" in
-    bands @ [baseline; wrap_style recede (" UTC   " ^ dates)]
+    bands @ [baseline; Masc_tui_theme.Sgr.wrap_style recede (" UTC   " ^ dates)]

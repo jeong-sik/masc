@@ -85,6 +85,22 @@ let test_with_styled_runs_coalesces_and_closes () =
        emit red "x";
        emit "" "y"))
 
+let test_wrap_style_guards_empty_and_reset () =
+  let reset = Masc_tui_theme.Sgr.reset in
+  let red = "\027[31m" in
+  check Alcotest.string "wraps non-empty text with style and reset"
+    (red ^ "hello" ^ reset)
+    (Masc_tui_theme.Sgr.wrap_style red "hello");
+  check Alcotest.string "empty style (NO_COLOR) returns text verbatim"
+    "hello"
+    (Masc_tui_theme.Sgr.wrap_style "" "hello");
+  check Alcotest.string "reset style returns text verbatim without redundant reset"
+    "hello"
+    (Masc_tui_theme.Sgr.wrap_style reset "hello");
+  check Alcotest.string "empty text avoids dangling escape sequences"
+    ""
+    (Masc_tui_theme.Sgr.wrap_style red "")
+
 let () =
   Alcotest.run "masc_tui_theme"
     [ ( "unconditional"
@@ -92,6 +108,8 @@ let () =
             test_paint_row_background_preserves_fg_and_hit_marks
         ; Alcotest.test_case "with_styled_runs coalesces transitions and resets once" `Quick
             test_with_styled_runs_coalesces_and_closes
+        ; Alcotest.test_case "wrap_style guards empty style, reset, and empty text" `Quick
+            test_wrap_style_guards_empty_and_reset
         ] )
     ; ( "conditional"
       , [ Alcotest.test_case "colour environment policy is deterministic" `Quick

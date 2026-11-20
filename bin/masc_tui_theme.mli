@@ -163,6 +163,11 @@ module Sgr : sig
   val emit_styled_cells : (string * string) list -> string
   (** Convenience wrapper around {!with_styled_runs} for a list of
       [(style, text)] cells. *)
+
+  val wrap_style : string -> string -> string
+  (** Wrap [text] in [style] and close with {!reset}. Returns [text] unchanged
+      when [style] is [""] (such as under [NO_COLOR]), equals {!reset}, or when
+      [text] is empty, avoiding dangling empty escape spans. *)
 end
 
 (** Terminal control sequences that are not styling. *)

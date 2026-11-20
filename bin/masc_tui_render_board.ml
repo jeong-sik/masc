@@ -423,7 +423,13 @@ let board_hearth_census_line ~cols (state : state) =
            axis from how big it is, and the adaptive selection highlight says
            the first without leaving the second unsaid -- the count is in the
            text. *)
-        if selected then Theme.selection_style () ^ Ansi.bold ^ text ^ Ansi.reset
+        if selected then
+          match Theme.sidebar_selection_background () with
+          | Some bg when not (String.equal bg "") ->
+              Masc_tui_theme.paint_row_background ~bg
+                (Theme.accent () ^ Ansi.bold ^ text ^ Ansi.reset)
+          | Some _ | None ->
+              Theme.selection_style () ^ Ansi.bold ^ text ^ Ansi.reset
         else magnitude_tone band ^ text ^ Ansi.reset
       in
       (* What fits, then how many it could not carry. The board here holds
@@ -791,7 +797,8 @@ let render_board_list (state : state) =
               Render_schedule.board_row ~ko ~styles ~age_header ~layout values
             in
             if is_selected then
-              c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr content)
+              c.push_selected_styled
+                (Theme.accent () ^ Ansi.bold ^ "\xe2\x80\xba " ^ Ansi.reset ^ content)
             else c.push ("  " ^ content)
         done;
         if split.preview_rows > 0 then
@@ -902,7 +909,7 @@ let draw_board_read_side ~focus buf (state : state) document ~rows ~body_cols
   for i = 0 to rows_drawn - 1 do
     if i = 0 && comment_header_rows > 0 then
       box_line comment_buf comment_cols
-        (Ansi.bold
+        (Ansi.bold ^ Theme.section_heading ()
         ^ Printf.sprintf (if state.ui_language = Lang_ko then "%s댓글 (%d)" else "%sComments (%d)")
             (if focus = Right_pane && state.board_comments_focused
              then "\xe2\x96\xb8 " else "  ")
@@ -1082,7 +1089,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         | [] -> []
         | referenced ->
           ""
-          :: (Ansi.bold ^ words state "  연결" "  Points at" ^ Ansi.reset)
+          :: (Ansi.bold ^ Theme.section_heading () ^ words state "  연결" "  Points at" ^ Ansi.reset)
           :: List.map
                (fun (kind, id) ->
                  (* [Link.parse] percent-decodes the id segment, so a body that
@@ -1100,7 +1107,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         | [] -> []
         | related ->
           ""
-          :: (Ansi.bold
+          :: (Ansi.bold ^ Theme.section_heading ()
               ^ Printf.sprintf (if state.ui_language = Lang_ko then "  같은 대상을 다룬 글 (%d)" else "  Also about this (%d)") (List.length related)
               ^ Ansi.reset)
           :: (related
@@ -1125,7 +1132,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         | [] -> []
         | attachments ->
           ""
-          :: (Ansi.bold ^ words state "  첨부" "  Attachments" ^ Ansi.reset)
+          :: (Ansi.bold ^ Theme.section_heading () ^ words state "  첨부" "  Attachments" ^ Ansi.reset)
           :: List.mapi
                (fun index (entry : board_attachment_entry) ->
                  Printf.sprintf "  %s[%d]%s %s" Ansi.bold (index + 1) Ansi.reset
@@ -1390,7 +1397,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         if comment_height > 0 then begin
           box_divider buf cols;
           box_line buf cols
-            (Ansi.bold
+            (Ansi.bold ^ Theme.section_heading ()
              ^ (if focus = Right_pane && state.board_comments_focused
                 then words state "\xe2\x96\xb8 댓글" "\xe2\x96\xb8 Comments" else words state "  댓글" "  Comments")
              ^ Ansi.reset);

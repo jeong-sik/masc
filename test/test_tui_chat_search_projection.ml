@@ -283,6 +283,45 @@ let test_preview_and_journal_search_reflow () = at_sizes (fun origin ->
   check bool "journal search exhausts without repeating a field" true
     ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"journalhit" ~older_than:(Some older)).match_result=None))
 
+(* A frame where nothing changed takes a finished reply's body with its link
+   cards as the frame before it composed it; a fetched card, another width or
+   another preview mode composes it again, and the screen shows the change. *)
+let test_link_cards_are_composed_again_only_when_the_store_changes () =
+  let state = state Layout.Origin_inline in
+  state.link_previews_mode <- `Compact;
+  let url index = Printf.sprintf "https://example.test/composed-%02d" index in
+  let text = String.concat "\n" (List.init 12 (fun index -> "see " ^ url index)) in
+  state.msg_loaded <- [row ~id:"cards" ~request_id:"cards" ~role:T.Message_keeper ~text 1.];
+  let composed = Render.For_testing.bodies_composed in
+  (* The first sight of a link stores its synthesized card, which may move the
+     store's generation once; the second frame composes from the settled
+     store. *)
+  ignore (frame_lines state);
+  let first = frame_lines state in
+  let before = composed () in
+  let again = frame_lines state in
+  check int "an unchanged frame composes nothing" before (composed ());
+  check (list string) "an unchanged frame shows the same cards" first again;
+  let fetched = Masc_tui_link_preview.synthesize_preview (url 11) in
+  Masc_tui_link_preview.cache_store
+    { fetched with has_metadata = true; site_name = Some "Fixture"; title = Some "FETCHED_TITLE" };
+  let after_fetch = frame_lines state in
+  check bool "a fetched card composes the body again" true (composed () > before);
+  check bool "the fetched card is drawn" true
+    (List.exists (fun line -> Astring.String.is_infix ~affix:"FETCHED_TITLE" line) after_fetch);
+  let settled = composed () in
+  ignore (frame_lines state);
+  check int "the fetched body is kept in turn" settled (composed ());
+  state.link_previews_mode <- `Rich;
+  ignore (frame_lines state);
+  check bool "another preview mode composes again" true (composed () > settled);
+  state.link_previews_mode <- `Off;
+  let off = composed () in
+  let plain = frame_lines state in
+  check int "previews off compose no cards" off (composed ());
+  check bool "previews off draw no fetched title" false
+    (List.exists (fun line -> Astring.String.is_infix ~affix:"FETCHED_TITLE" line) plain)
+
 let test_search_freezes_preview_lookup () = at_sizes (fun origin ->
   let state=state origin in
   state.link_previews_mode <- `Rich;
@@ -1593,6 +1632,8 @@ let () = run "chat search projection" [
     test_case "search executor owns frozen source and keeps repeat cursor" `Quick test_search_executor_owns_frozen_source;
     test_case "rich card repeat follows interleaved source sequence" `Quick test_rich_card_repeat_follows_interleaved_source_order;
     test_case "replaced preview title is searched whole" `Quick test_replaced_preview_title_is_searched_whole;
+    test_case "link cards are composed again only when the store changes" `Quick
+      test_link_cards_are_composed_again_only_when_the_store_changes;
     test_case "partially mapped document keeps its mapped runs" `Quick
       test_partially_mapped_document_keeps_its_mapped_runs;
     test_case "replaced body is searched whole" `Quick test_replaced_body_is_searched_whole;

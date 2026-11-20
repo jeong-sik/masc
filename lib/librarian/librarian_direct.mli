@@ -22,6 +22,8 @@
     - [Supersede], [old] is the claim itself: [Refused Supersedes_itself].
     - [Remember] or [Supersede] of a blank claim: [Refused Blank_claim]. The
       snapshot does not write one.
+    - Any write on a blank trace: [Refused Blank_trace]. The snapshot names
+      the trace of the write that made it, and is not read back without one.
     - [Retract], fact held: it leaves as {!Librarian_effects.Retracted}.
     - [Retract], fact not held: {!Already_absent}.
 
@@ -54,6 +56,7 @@ type refusal =
   | Unknown_fact
   | Supersedes_itself
   | Blank_claim
+  | Blank_trace
   | Malformed_derivation
   (** The basis is derived and {!Keeper_memory_os_types.derived} does not
       accept its derivations. *)
@@ -76,8 +79,9 @@ type t =
 val refusal_kind : refusal -> string
 
 (** [facts] is Memory now. A fact the write adds is first seen at [at], is
-    authored, and carries [trace_id] as its origin. [by] is recorded on a
-    retraction. *)
+    authored, and carries [trace_id] as its origin. [trace_id] is the trace
+    the write arrived on: a Keeper's turn, or what an operator's route names
+    its request. [by] is recorded on a retraction. *)
 val plan
   :  by:Librarian_effects.actor
   -> at:float

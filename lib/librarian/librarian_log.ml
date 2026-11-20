@@ -14,6 +14,7 @@ type position =
 type cause =
   | Direct of
       { by : Librarian_effects.actor
+      ; trace : string
       ; write : Librarian_direct.write
       }
   | Adopt of

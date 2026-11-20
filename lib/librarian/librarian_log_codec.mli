@@ -6,7 +6,7 @@
       "revision": 0, "turn_log_offset": 0, "covered": { … } }
     { "line": "committed", "seq": 1, "at": 2.0,
       "basis": "<sha256 hex>", "after": "<sha256 hex>", "revision": 1,
-      "cause": { "kind": "direct", "by": { "kind": "keeper" },
+      "cause": { "kind": "direct", "by": { "kind": "keeper" }, "trace": "…",
                  "write": { "kind": "retract", "id": "sha256:…", "reason": "…" } },
       "effects": { "added": [], "touched": [],
                    "removed": [ { "fact": { … },

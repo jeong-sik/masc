@@ -28,6 +28,9 @@ type position =
 type cause =
   | Direct of
       { by : Librarian_effects.actor
+      ; trace : string
+      (** The trace the write arrived on. The snapshot the commit leaves names
+          it, so the snapshot can be written again from the line alone. *)
       ; write : Librarian_direct.write
       }
   | Adopt of

@@ -80,6 +80,10 @@ val visibility_of_string : string -> Board.visibility option
     [Board_tool.visibility_of_string] without importing
     {!Board} directly. *)
 
+val parse_visibility : string -> (Board.visibility, string) Result.t
+(** Strict parser for board visibility values; rejects unknown values with an
+    explicit error listing valid options instead of silently defaulting. *)
+
 (** {1 Tools advertised to MCP} *)
 
 val tool_post_create : Masc_domain.tool_schema

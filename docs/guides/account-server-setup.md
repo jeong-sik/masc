@@ -133,7 +133,8 @@ masc start --base-path <base> --port <port>
 - The log says that the account server listens on the port and serves the
   routes of its own table, and no route that reads the credentials of a
   single user.
-- `GET /health/ready` answers `{"ready":true}`.
+- `GET /health/ready` answers `{"ready":true}` once the engine is ready. It
+  answers 503 while the engine starts, and the login routes answer then.
 - `masc restart` replaces it as it replaces a single-user server. The new
   server takes the environment of the shell that runs `masc restart`, so
   export `MASC_HTTP_BASE_URL` and the client secrets there too.

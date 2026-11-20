@@ -52,8 +52,8 @@ let refusal_to_string = function
   | Keeper_definitions_not_named { folder; files = first, rest } ->
     Printf.sprintf
       "%s holds Keeper definitions the authorization log does not name: %s. A multi-account \
-       installation runs only the Keepers of its log, and boots once these files are out of \
-       the folder"
+       installation runs only the Keepers of its log, and its boot stops while these files \
+       are in the folder"
       folder
       (String.concat ", " (first :: rest))
   | Keeper_definitions_not_read { folder; detail } ->
@@ -62,8 +62,8 @@ let refusal_to_string = function
     Printf.sprintf
       "%s records a change of a Keeper configuration that did not finish, and the engine \
        would roll it back by writing or removing a Keeper definition the authorization log \
-       does not name. A single-user boot rolls it back; a multi-account installation boots \
-       once the journal is gone"
+       does not name. Removing the journal gives the rollback up: the Keeper definition and \
+       runtime.toml stay as the change left them"
       journal
   | Keeper_configuration_journal_not_read { journal; detail } ->
     Printf.sprintf "the Keeper configuration journal %s cannot be read: %s" journal detail
@@ -194,10 +194,10 @@ let judged_again zone =
    names, and the log names none by the name of a definition yet: the engine
    name of a Keeper comes in S2 (RFC a-persons-keeper-runs-on-the-engine). So
    a definition in the folder the engine reads is one the log does not name.
-   The listing is the engine's own ([Keeper_types_profile_toml_io]). Only an
-   absent folder holds none: the listing reads a folder it cannot stat as
-   absent, so the stat comes first and a folder in an unknown state stops the
-   boot. *)
+   The listing is the engine's own ([Keeper_types_profile_toml_io]). It reads
+   a path that is absent or not a folder as holding none, as the engine reads
+   it, and a path it cannot stat too: so the stat comes first, and a path in
+   an unknown state stops the boot. *)
 let no_keeper_definition ~base_path =
   let folder = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let not_read detail = Error (Keeper_definitions_not_read { folder; detail }) in
@@ -218,9 +218,8 @@ let no_keeper_definition ~base_path =
 (* The journal of a change of a Keeper configuration that did not finish.
    The first step of the engine rolls such a change back, after this check:
    it writes the definition the journal recorded, or removes the one the
-   change wrote ([Keeper_config_journal.recover_interrupted]). A
-   multi-account installation makes no such change, so a journal is one a
-   single-user boot left, and the boot stops on it as on the definition its
+   change wrote ([Keeper_config_journal.recover_interrupted]). Whichever
+   process left the journal, the boot stops on it as on the definition its
    rollback would write. *)
 let no_keeper_configuration_change ~base_path =
   let journal = Keeper_config_journal.journal_path_for_base_path ~base_path in
@@ -442,9 +441,9 @@ let run
   Eio_context.set_env env;
   Eio_context.set_switch sw;
   (* The engine starts on the access published above, in a fiber
-     ([Server_runtime_bootstrap.start_engine]). Nothing here waits for it:
-     the routes serve while it initializes, and the probe of readiness
-     answers 503 until it is ready. *)
+     ([Server_runtime_bootstrap.start_engine]). The boot does not wait for
+     it: the routes serve while it initializes. The fiber below resolves the
+     promise the probe of readiness reads once the engine is ready. *)
   let engine = start_engine access in
   Eio.Fiber.fork ~sw (fun () ->
     let (_ : engine) = Eio.Promise.await engine in

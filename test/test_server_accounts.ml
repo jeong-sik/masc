@@ -536,11 +536,26 @@ let test_stops_when_the_folder_of_definitions_cannot_be_read () =
 
 (* A journal of a change of a Keeper configuration that did not finish stops
    the boot, with no definition in the folder: the first step of the engine
-   would roll the change back by writing one after the folder was looked in.
-   The journal is the one the engine resolves for the base. *)
+   would roll the change back by writing the definition the journal records,
+   after the folder was looked in. The journal is the one the engine resolves
+   for the base. *)
 let test_stops_on_a_keeper_configuration_journal () =
   with_installation (fun env { base; config = _; store = _; multi_account } ->
-    write_file (Keeper_config_journal.journal_path_for_base_path ~base_path:base) "{}";
+    let folder = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+    let change =
+      { Keeper_config_journal.tx_id = "made-up-change"
+      ; keeper_name = "made-up"
+      ; manifest_before = Keeper_config_journal.Manifest_bytes "[keeper]\n"
+      ; runtime_before = None
+      ; manifest_path = Filename.concat folder "made-up.toml"
+      ; runtime_path = None
+      ; started_at_unix = 0.0
+      ; phase = Keeper_config_journal.Prepared
+      }
+    in
+    write_file
+      (Keeper_config_journal.journal_path_for_base_path ~base_path:base)
+      (Yojson.Safe.to_string (Keeper_config_journal.record_to_yojson change));
     Alcotest.(check string)
       "the boot over a journal of a Keeper configuration change"
       "Keeper configuration change left"

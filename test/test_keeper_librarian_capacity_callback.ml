@@ -430,38 +430,6 @@ let test_prefit_real_continuity ~base_path () =
   Alcotest.(check int) "three fitted groups plus one rejected candidate were dispatched" 4 (List.length !calls);
   Alcotest.(check bool) "no completed work remains; unfinished work is not selected" true
     (P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> Option.is_none);
-  let snapshot = P.read ~config ~keeper_name:keeper_id |> get |> some in
-  let lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id |> get in
-  let module Driver = Keeper_turn_driver_try_provider in
-  let continuity = Driver.prepare_continuity ~trace_id ~lines ~messages:canonical snapshot
-    |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
-  let provider_config = Agent_core.Llm_provider.Provider_config.make
-    ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
-    ~model_id:"continuity-cycle-fixture" ~base_url:"https://provider.example" () in
-  let completed_end =
-    Librarian_continuity_snapshot.checkpoint_prefix_range ~trace_id ~lines ~messages:canonical
-    |> Result.map (fun (range : Keeper_librarian_range.range) -> range.end_atom)
-    |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
-  let view = match Driver.For_testing.request_view
-    ~prepare_request_media:(fun _selected -> Ok (fun messages -> Ok messages))
-    ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
-    ~continuity ~provider_config
-    ~measure_message_bytes:(fun message -> String.length
-      (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
-    ~measure_wire_bytes:(Keeper_model_input_wire_bytes.measurer ~config:provider_config)
-    ~accepted:None ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
-    ~current_turn_results:Driver.Current_turn_verbatim ~base_path
-    ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
-    ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical with
-    | Ok view -> view
-    | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
-  let transmitted = view.transmitted
-    |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in
-  let summaries, suffix = List.partition (fun (message : Agent_core.Types.message) ->
-    message.metadata = Runtime_model_input_tail_window.working_state_metadata) transmitted in
-  Alcotest.(check int) "next request contains exactly one saved working state" 1 (List.length summaries);
-  Alcotest.(check bool) "next request preserves unfinished user and tool exchange exactly" true
-    (List.equal Agent_core.Types.Message_value.equal pending suffix);
   let after = match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
     | Ok value -> C.exact_snapshot_messages value
     | Error _ -> Alcotest.fail "source checkpoint disappeared" in

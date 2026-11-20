@@ -115,6 +115,7 @@ type hole_kind =
   | Kind_item_exceeds_window
   | Kind_turn_log_replaced
   | Kind_position_lost
+  | Kind_operator_skipped
 
 let hole_kind_token = function
   | Kind_content_missing -> "content_missing"
@@ -122,6 +123,7 @@ let hole_kind_token = function
   | Kind_item_exceeds_window -> "item_exceeds_window"
   | Kind_turn_log_replaced -> "turn_log_replaced"
   | Kind_position_lost -> "position_lost"
+  | Kind_operator_skipped -> "operator_skipped"
 ;;
 
 let hole_kinds =
@@ -130,6 +132,7 @@ let hole_kinds =
   ; Kind_item_exceeds_window
   ; Kind_turn_log_replaced
   ; Kind_position_lost
+  ; Kind_operator_skipped
   ]
 ;;
 
@@ -368,6 +371,12 @@ let hole_to_json = function
   | Position_lost { offset; length } ->
     `Assoc
       [ kind (hole_kind_token Kind_position_lost); f_offset, `Int offset; f_length, `Int length ]
+  | Operator_skipped { by; missing } ->
+    `Assoc
+      [ kind (hole_kind_token Kind_operator_skipped)
+      ; f_by, `String by
+      ; f_missing, missing_to_json missing
+      ]
 ;;
 
 let shown_to_json = function
@@ -689,6 +698,11 @@ let hole_of_json json =
     let* offset = count_field f_offset fields in
     let* length = count_field f_length fields in
     Ok (Position_lost { offset; length })
+  | Kind_operator_skipped ->
+    let* () = exact_field_names_result [ f_kind; f_by; f_missing ] fields in
+    let* by = wire_string_field f_by fields in
+    let* missing = list_field f_missing fields missing_at_of_json in
+    Ok (Operator_skipped { by; missing })
 ;;
 
 let shown_of_json json =

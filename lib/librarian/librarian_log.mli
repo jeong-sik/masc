@@ -57,6 +57,13 @@ type hole =
   (** An operator's [Restart_reading]: the same turn log, and the stored
       offset is past its end or not at the start of a line. It is read from
       its first line, so what was read before is read again. *)
+  | Operator_skipped of
+      { by : string (** Who asked for the skip. *)
+      ; missing : Librarian_unit.missing_at list
+      (** Parts of the passed unit that were not there. *)
+      }
+  (** An operator's [Skip_item] (§12.4): the head item, or the rest of a
+      unit whose content does not read. Its words are not read. *)
 
 (** What a [Read] question showed besides its units. *)
 type shown =

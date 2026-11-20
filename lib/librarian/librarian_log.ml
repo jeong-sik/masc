@@ -26,6 +26,10 @@ type hole =
       { offset : int
       ; length : int
       }
+  | Operator_skipped of
+      { by : string
+      ; missing : Librarian_unit.missing_at list
+      }
 
 type shown =
   | With_memory

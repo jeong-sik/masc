@@ -882,10 +882,9 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
     "terminal text selection bg (brass-tinted — same family as state-active-bg)"));
 
   // ── Menu / Tooltip / Toast chrome role tokens ───────────────────────
-  // Stage 1.4 follow-up to RFC 0005 (Menu), RFC 0006 (Tooltip), RFC 0007
-  // (Toast). All values resolve through the brass canon (bg-N, fg-N,
-  // line-N, brass-glow, status semantic 4-slot soft tints) so SKILL.md's
-  // brass-only "active state" rule applies — only --menuitem-active-bg
+  // All values resolve through the brass canon (bg-N, fg-N, line-N,
+  // brass-glow, status semantic 4-slot soft tints) so the brass-only
+  // "active state" rule applies — only --menuitem-active-bg
   // pulls --brass-glow tint. Toast severity bgs use the existing
   // --(ok|warn|err|info)-soft semantic tokens for cross-surface canon
   // consistency. No new dependency on variables.css (SSOT-2).

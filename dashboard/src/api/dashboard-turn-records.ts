@@ -194,13 +194,13 @@ export type TurnRecordEntry = {
   // before a response existed; the inspector renders "측정 없음" rather than a
   // fabricated duration for the response-generation phase.
   request_latency_ms?: number
-  // RFC-0233 §10 — time-to-first-response-chunk (ms, wall-clock), sourced from
+  // time-to-first-response-chunk (ms, wall-clock), sourced from
   // Agent Core inference_telemetry.ttfrc_ms. Unlike request_latency_ms (end-to-end),
   // this isolates time-to-first-token on the streaming path; the streaming
   // transport fills it for every provider, so it is populated across the
   // streaming keeper fleet. Absent for non-streaming turns and on the error
   // path. The decode (post-first-chunk) duration is NOT derived from
-  // request_latency_ms - ttfrc_ms (§9.6 fabrication guard).
+  // request_latency_ms - ttfrc_ms (that would fabricate a measurement).
   ttfrc_ms?: number
   ts: number
 }
@@ -271,7 +271,7 @@ export function parseMemoryOsFactCategory(raw: string): MemoryOsFactCategory | n
 }
 
 // One fact row as projected by memory_os_fact_json (server_dashboard_http_keeper_memory_reads.ml).
-// Carries only the structure RFC-0247 left on the record — there is no salience /
+// Carries only the structure on the record — there is no salience /
 // uses / confidence field to decode because the backend has none to emit.
 export type MemoryOsFact = {
   readonly memory_id: string

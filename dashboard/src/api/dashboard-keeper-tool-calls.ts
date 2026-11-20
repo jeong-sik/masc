@@ -145,14 +145,14 @@ export type ToolCallEntry = {
   // from work the keeper started on its own. Absent on rows written outside
   // a keeper turn (runtime MCP) and on pre-#28977 logs.
   turn_kind?: string
-  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
+  // Canonical execution identity minted at dispatch (absent on older rows)
   execution_id?: string
   result_bytes?: number
   truncated_to?: number
-  // RFC-0233 PR-2: provider call id (agent-core-event join key). Equals the chat tool
+  // Provider call id (agent-core-event join key). Equals the chat tool
   // row's tool_call_id for the same execution, so the chat ToolCallBubble can
   // join this entry's output onto the transcript. Absent when the call carried
-  // no provider id (synthesised tc-<position> rows) or on pre-PR-2 logs.
+  // no provider id (synthesised tc-<position> rows) or on older logs.
   tool_use_id?: string
   // Agent Core model-tool occurrence slot. Together with turn it scopes provider ids
   // that may be blank or repeated.

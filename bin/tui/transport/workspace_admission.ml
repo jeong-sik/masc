@@ -273,16 +273,10 @@ let launch_observation ?key ?observe_job ?on_not_run state ~mailbox
     capture_scope_runner ~kind:Masc_tui_workspace_precondition.Observation state
       ~mailbox ~boundary_error
   in
-  let on_not_run, deliver, released =
-    track_reading state
-      ~on_not_run:(fun () -> Option.iter (fun release -> release ()) on_not_run)
-      ~deliver
-  in
-  let observe_job event =
-    released event;
-    Option.iter (fun observe -> observe event) observe_job
-  in
-  Masc_tui_workspace_result.launch_observation ?key ~observe_job ~on_not_run
+  (* Not counted by the reading slot. An observation stays open and publishes
+     progress until a Keeper or a person answers, so counting it would show
+     the whole wait as a slow read (RFC tui-one-screen-grammar section 8). *)
+  Masc_tui_workspace_result.launch_observation ?key ?observe_job ?on_not_run
     state ~results:mailbox.workspace_results ~boundary_error ~not_started
     ~cancelled ~progress ~deliver (fun publish ->
       in_scope (fun () -> perform publish))

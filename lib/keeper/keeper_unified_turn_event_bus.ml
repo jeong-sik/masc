@@ -206,7 +206,7 @@ let drain ?(site = "unspecified") t =
            ~pending_count:new_state.pending_tool_count)
         transitions;
       (* Mirror the in-flight count to the registry only when it moved, so the
-         supervisor sweep can exclude active tool execution (RFC-0197 P1-4a).
+         supervisor sweep can exclude active tool execution.
          The count is the authoritative FSM value, not a re-derived counter. *)
       if old.pending_tool_count <> new_state.pending_tool_count
       then t.on_pending_count_change new_state.pending_tool_count;

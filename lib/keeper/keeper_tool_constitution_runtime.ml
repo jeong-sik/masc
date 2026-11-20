@@ -139,8 +139,8 @@ let replaces_arg args =
   | _ -> Ok []
 
 (* Every replaced id must name a norm the world holds now — retiring what is
-   not held is a failure, not a quiet success, like removing it (RFC-0504
-   §2.2). Answers the articles in [replaces] order. *)
+   not held is a failure, not a quiet success, like removing it. Answers the
+   articles in [replaces] order. *)
 let resolve_superseded held ids =
   let rec resolve acc = function
     | [] -> Ok (List.rev acc)

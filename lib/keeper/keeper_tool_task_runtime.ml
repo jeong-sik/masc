@@ -6,11 +6,10 @@ let workflow_rejection_error_json
       ?(typed_outcome : Keeper_tool_outcome.t option)
       message
   =
-  (* RFC-0239 / audit D1: [typed_outcome] carries a top-level
-     [typed_outcome] field (extracted by the PostToolUse hook into
-     [tool_call_detail.typed_outcome]) so a rejected completion is seen
-     as no-progress by the loop detector rather than counted as
-     evidence by tool name alone. *)
+  (* [typed_outcome] carries a top-level [typed_outcome] field (extracted by
+     the PostToolUse hook into [tool_call_detail.typed_outcome]) so a rejected
+     completion is seen as no-progress by the loop detector rather than
+     counted as evidence by tool name alone. *)
   let extra_fields =
     match typed_outcome with
     | Some outcome -> [ "typed_outcome", Keeper_tool_outcome.to_json outcome ]
@@ -96,8 +95,8 @@ let validation_error_json message =
    exhaustively (no catch-all) so a future [add_task_error] variant forces a
    classification decision here rather than defaulting into one bucket.
 
-   [keeper_task_create] never threads [predecessor_task_id] (RFC-0323 W2
-   scopes that arg to [masc_add_task]), so [Unknown_predecessor] /
+   [keeper_task_create] never threads [predecessor_task_id] (only
+   [masc_add_task] takes that arg), so [Unknown_predecessor] /
    [Predecessor_not_terminal] cannot be produced through this tool's live
    args today. Exposed (like [validation_error_json] above) so the route
    split can be tested directly against all variants without depending
@@ -700,7 +699,7 @@ let handle_keeper_task_tool_with_outcome
                           , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
                         ]))
               | Error err ->
-                (* RFC-0239 / audit D1 shape (Task_done, above): a task-creation
+                (* Same shape as [Task_done] below: a task-creation
                    failure is not progress, regardless of failure class.
                    Previously [Workspace_task.add_task] folded [Error err] into
                    a string and this branch always returned [ok:true,
@@ -1034,8 +1033,8 @@ let handle_keeper_task_tool_with_outcome
              | Tool_result.Completed _ -> Some Keeper_tool_outcome.Progress
              | Tool_result.Deferred _ -> None
              | Tool_result.Failed _ ->
-               (* RFC-0239 / audit D1: a rejected completion (wrong owner, stale
-                  or invalid transition) is not progress. Emit a typed Error so the
+               (* A rejected completion (wrong owner, stale or invalid
+                  transition) is not progress. Emit a typed Error so the
                   no-progress detector demotes it instead of counting the tool name
                   as evidence. *)
                Some

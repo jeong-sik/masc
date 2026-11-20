@@ -119,8 +119,8 @@ let safe_is_dir path =
   Fs_compat.is_directory path
 ;;
 
-(* Whose filesystem says whether a cwd exists follows where the tree is
-   (RFC-0427 A-1). A shared-mount tree is on this host, so the host answers.
+(* Whose filesystem says whether a cwd exists follows where the tree is.
+   A shared-mount tree is on this host, so the host answers.
    A tree the endpoint owns (a microvm work volume, a remote_ssh account) is
    not: the host directory of the same name is the bookkeeping bundle, and
    the endpoint answers ENOENT itself when the tool runs there. Asking the

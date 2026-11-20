@@ -1,7 +1,7 @@
 (** Operator-facing disposition for keeper turns.
 
     This module is the *application-layer* counterpart of
-    [Keeper_turn_terminal_code] (RFC-0042, runtime/agent-core layer). The
+    [Keeper_turn_terminal_code] (runtime/agent-core layer). The
     runtime layer answers "what terminated this turn at the
     agent-core/registry boundary?"; this layer answers "what should the
     operator see and do?".
@@ -33,7 +33,7 @@ type t =
           disposition. The inner code preserves the typed runtime cause
           for diagnostics (Otel_metric_store / dashboard / bin/masc-trace).
           [to_wire (Provider_error code) = Keeper_turn_terminal_code.to_wire code].
-          PR-3 readers match on this constructor instead of
+          Readers match on this constructor instead of
           [String.starts_with ~prefix:"api_error_"]. *)
   | Unknown of { raw_error : string }
   (** Opaque display-only wire value. It does not carry typed failure

@@ -100,9 +100,9 @@ type held_task_link =
     pursue its success conditions without a second read. [summary_criterion]
     and [summary_phase] are options for a caller that states a summary
     directly; {!active_goal_summaries} always fills both from the store.
-    RFC-0387 stage 2 carries the phase so a [Verifying] goal is named in the
+    [summary_phase] carries the phase so a [Verifying] goal is named in the
     Goals Awaiting Proof layer — the gate must not make the goal disappear from
-    the keeper (review P0-1). [summary_priority] and [summary_created_at] are
+    the keeper. [summary_priority] and [summary_created_at] are
     the stored values the Active Goals layer orders the Goals by. *)
 type goal_summary = {
   summary_goal_id : string;
@@ -137,7 +137,7 @@ val format_active_goal_summaries :
   (goal_summary list, Goal_store.unavailable) result -> string option
 (** The shared Active Goals prompt layer: each Goal's id, title and current
     criterion, ordered by (priority, created_at, id) so a phase move or a
-    refuted proof leaves its bytes as they were (RFC-0491 §3.3). [Ok []]
+    refuted proof leaves its bytes as they were. [Ok []]
     explicitly renders the empty observation; [Error] renders the
     authoritative store failure. This projection grants no effect
     authority. *)
@@ -249,21 +249,21 @@ val build_prompt :
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts
-(** RFC-0315 wake-turn self-description:
+(** What each argument renders:
     - [turn_decision]: the scheduler's actual cycle decision, required so the
       rendered wake reason matches the decision that fired the turn.
     - [current_task] renders the held task or its explicit missing/unavailable
       state. [No_current_task] omits the layer.
-    - [?active_goal_summaries]: the Active Goals layer, with a proof-pending
-      annotation on [Verifying] goals (RFC-0387 stage 2), a [yours]
-      annotation on goals a held task serves, and an unknown-link annotation
-      on every goal when the held tasks or their links cannot be read. These
-      are the workspace's open goals ({!active_goal_summaries}). [Ok []] renders
-      the authoritative empty observation. When omitted, empty observed Goal
-      IDs render empty; nonempty IDs without summaries keep the layer absent.
-      [Error] is the typed store failure ({!Goal_store.unavailable}, RFC-0444
-      §2.3 row 6): a failed world or summary source renders its reason,
-      file, mirror and reset step without blocking other context.
+    - [?active_goal_summaries]: the Active Goals layer, the Goals Awaiting
+      Proof rows for [Verifying] goals, and the Goal observation rows, with a
+      [yours] annotation on goals a held task serves and an unknown-link
+      annotation on every goal when the held tasks or their links cannot be
+      read. These are the workspace's open goals ({!active_goal_summaries}).
+      [Ok []] renders the authoritative empty observation. When omitted,
+      empty observed Goal IDs render empty; nonempty IDs without summaries
+      keep the layer absent. [Error] is the typed store failure
+      ({!Goal_store.unavailable}): a failed world or summary source renders
+      its reason, file, mirror and reset step without blocking other context.
     - [?recent_work]: recent attributed conversation and the latest autonomous
       conclusion, read from the selected Keeper trace. Historical context only;
       missing history and unavailable sources do not infer work completion.

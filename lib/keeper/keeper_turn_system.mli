@@ -1,5 +1,5 @@
 (** Keeper_turn_system — the System a keeper turn sends, and the articles
-    that changed since it was rendered (RFC-0491 §3.2).
+    that changed since it was rendered.
 
     An Agent Core request is the System, the carried history, then the end
     context. A System whose bytes change makes the provider miss the cache

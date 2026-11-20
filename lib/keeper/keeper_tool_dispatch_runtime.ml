@@ -366,8 +366,8 @@ let execute_keeper_tool_call_with_authority
       ?prepared_write
       ?turn_sandbox_factory
       ?artifact_draft_scope
-      (* RFC-0182 Phase 5 PR-A.2: optional Eio resources threaded to
-         Keeper_tool_runtime.context for Eio-bound descriptor handlers. *)
+      (* Optional Eio resources threaded to Keeper_tool_runtime.context for
+         Eio-bound descriptor handlers. *)
       ?sw
       ?clock
       ?proc_mgr

@@ -7,10 +7,10 @@
 
 val render_byte_ceiling : int
 (** Bytes the rendered articles may occupy. The articles ride every turn of
-    every keeper in the world, so this is the one brake RFC-0442 keeps. A world
-    at the ceiling takes no new article until someone decides what to drop;
-    nothing expires on its own, because a silent deletion is worse than a
-    blocked write nobody can miss. *)
+    every keeper in the world, so this is the one brake on their total size.
+    A world at the ceiling takes no new article until someone decides what to
+    drop; nothing expires on its own, because a silent deletion is worse than
+    a blocked write nobody can miss. *)
 
 val read_with_outcome : config:Workspace.config -> Keeper_tool_execution.t
 (** Read the ordered durable entries, active article count, rejected-line
@@ -25,15 +25,14 @@ val write_with_outcome :
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
-(** Write one norm, or merge a bundle of held norms into one (RFC-0504 §2.2).
+(** Write one norm, or merge a bundle of held norms into one.
     An absent or empty [replaces] argument writes a plain [Added] line, capped
     at 512 bytes as before. A non-empty [replaces] names held articles and
     writes a [Replaced] line retiring them: every id must be held now, each
     named once, and the replacement must render smaller than the bundle it
-    retires while the projected render stays within the ceiling (RFC-0504
-    §2.3). An optional [reason] argument lands in the [Replaced] line beside
-    [by]/[at]; it is refused on a plain write, where there is nothing it
-    could explain. *)
+    retires while the projected render stays within the ceiling. An optional
+    [reason] argument lands in the [Replaced] line beside [by]/[at]; it is
+    refused on a plain write, where there is nothing it could explain. *)
 
 val remove_with_outcome :
   config:Workspace.config ->

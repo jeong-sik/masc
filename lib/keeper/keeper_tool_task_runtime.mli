@@ -9,9 +9,9 @@
     {!Tool_result.log_level_of_failure_class}. Exposed (like
     [validation_error_json] above) so the split can be tested directly
     against all variants: [keeper_task_create]'s live tool args never
-    set [predecessor_task_id] (RFC-0323 W2 scopes that arg to
-    [masc_add_task]), so [Unknown_predecessor] / [Predecessor_not_terminal]
-    cannot be produced end-to-end through this tool today. *)
+    set [predecessor_task_id] (only [masc_add_task] takes that arg), so
+    [Unknown_predecessor] / [Predecessor_not_terminal] cannot be produced
+    end-to-end through this tool today. *)
 type task_create_failure_route =
   | Task_create_workflow_rejection
   | Task_create_runtime_failure

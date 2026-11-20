@@ -4,6 +4,8 @@
  (libraries
   masc
   masc.keeper_chat_operations
+  masc.masc_random_id
+  masc.runtime
   masc_log
   masc_eio_context
   masc_tui_types
@@ -14,12 +16,19 @@
   masc_tui_async_read
   masc_tui_owed_read
   masc_tui_workspace_precondition
+  masc_tui_workspace_job
   masc_tui_transport
   masc_tui_chat_input
+  masc_tui_esc_interrupt
   masc_tui_preparation_details
   masc_tui_context_inspector
   masc_tui_context_results
   masc_tui_fetched
+  masc_tui_pick_list
+  masc_tui_response_decode
+  masc_tui_server_lifecycle
+  masc_tui_keeper_config
+  masc_tui_runtime_config_receipt
   masc_tui_keeper_items
   masc_tui_keeper_selection
   masc_tui_keeper_chat_projection
@@ -27,6 +36,10 @@
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_chat_history
+  masc_tui_keeper_chat_queue
+  masc_tui_original_results
+  masc_tui_original_task_read
+  masc_tui_task_dispatch
   masc_tui_message_layout
   masc_tui_image_preview
   masc_tui_chat_media

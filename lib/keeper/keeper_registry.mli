@@ -546,7 +546,7 @@ val set_tool_usage_entry :
   base_path:string -> name:string -> tool_name:string
   -> Keeper_types.tool_call_entry -> unit
 
-(** {1 RFC-0002 Event Dispatch} *)
+(** {1 Event Dispatch} *)
 
 
 (** Dispatch a typed event through the state machine.

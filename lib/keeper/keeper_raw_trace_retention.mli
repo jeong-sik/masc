@@ -7,7 +7,7 @@
 
 val history_limit : int
 (** Number of newest physical TurnRecord rows inspected by both the dashboard
-    reader and retention. This is the single source of truth for RFC-0358. *)
+    reader and retention. Both read this one value. *)
 
 type deletion_failure =
   { path : string

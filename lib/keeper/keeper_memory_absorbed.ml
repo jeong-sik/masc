@@ -1,4 +1,4 @@
-(* Absorbed memory records (RFC-0456 §4.2). See the interface for the contract. *)
+(* Absorbed memory records. See the interface for the contract. *)
 
 module W = Keeper_memory_os_types
 

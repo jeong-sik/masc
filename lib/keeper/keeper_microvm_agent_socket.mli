@@ -1,12 +1,11 @@
-(** The guest agent of an Apple microVM keeper, seen from its boot (RFC
-    microvm-guest-agent-over-socket 3.2, 3.6): where its socket is on both
-    sides, the boot plan that starts it, and the host path made ready just
-    before that boot. *)
+(** The guest agent of an Apple microVM keeper, seen from its boot: where its
+    socket is on both sides, the boot plan that starts it, and the host path
+    made ready just before that boot. *)
 
 val guest_path : string
 (** Where the agent binds inside the guest. It is on the root filesystem:
     [--publish-socket] does not reach a socket on a tmpfs, a named volume or
-    a host directory mount (RFC 4.2). The guest's vminitd connects to it under
+    a host directory mount. The guest's vminitd connects to it under
     [/run/container/<guest name>/rootfs], and that whole path fits Linux's
     107-byte socket path for the longest guest name. *)
 
@@ -36,7 +35,7 @@ val plan :
   environment:(string * string) list ->
   labels:(string * string) list ->
   Keeper_microvm_boot_plan.t
-(** The plan every Apple Keeper guest boots with (RFC 0, 3.2). The first
+(** The plan every Apple Keeper guest boots with. The first
     process is [masc-exec-shim --serve] started as [0:0]; it binds
     {!guest_path}, re-mounts the root read-only and drops to [uid:gid]. So
     the plan holds every {!Keeper_microvm_backend.all_guest_constraints} but
@@ -67,7 +66,7 @@ type agent_check =
 val check_agent :
   host_socket:string -> expected:Keeper_guest_socket.expected ->
   connect_budget_sec:float -> budget_sec:float -> agent_check
-(** One [Probe] through the agent's socket (RFC 3.6): what an attach reads
+(** One [Probe] through the agent's socket: what an attach reads
     before it adopts a running agent guest, since attaching does not go
     through the boot plan assessment. Only [Agent_unusable] says anything
     about the guest. *)
@@ -94,7 +93,7 @@ val prepare_host_socket :
   (unit, preparation_error) result
 (** Run just before the boot that publishes [path]. Its directory is made,
     or kept, a directory of this uid with mode 0700. A socket file already at
-    [path] stops [container run] (RFC 4.5); the runtime removes the file when
+    [path] stops [container run]; the runtime removes the file when
     a guest ends cleanly, so one is left only by a guest that did not. It is
     removed only when [guest_presence] reports the guest absent, read only
     when there is a file to remove. Anything at [path] that is not a socket is

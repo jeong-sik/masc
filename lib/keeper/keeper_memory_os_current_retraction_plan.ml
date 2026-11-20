@@ -199,7 +199,7 @@ let append_removal_journal_and_clear_receipt
      snapshot as its prior, and beside a published one the publication's own
      line, just finalized, is the removal line. The writer can still fail
      before it commits anything, so the memory health row's readers are told
-     now, whether or not the receipt removal below succeeds (RFC-0487). *)
+     now, whether or not the receipt removal below succeeds. *)
   Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
   remove_retraction_plan_receipt ~keepers_dir ~keeper_id
 ;;

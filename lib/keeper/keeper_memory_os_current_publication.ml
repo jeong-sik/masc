@@ -393,7 +393,7 @@ let recover_publication_with_sync ~sync_parent ~keepers_dir ~keeper_id =
   | Never_published ->
     (* The target was never published: the receipt is gone and the
        retraction plan is reconciled, perhaps with a removal line. No commit
-       notification follows, so the row's readers are told here (RFC-0487). *)
+       notification follows, so the row's readers are told here. *)
     Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
     Ok ()
   | Notification_owed receipt -> dispatch_publication ~sync_parent ~keepers_dir ~keeper_id receipt

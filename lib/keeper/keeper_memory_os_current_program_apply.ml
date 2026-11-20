@@ -206,7 +206,7 @@ let apply_disposition_guarded
     ; revisions_applied
     }
   in
-  (* RFC-0456 §4.2: an absorbed fact leaves the snapshot only with its row kept.
+  (* An absorbed fact leaves the snapshot only with its row kept.
      The rows are the absorbed facts the locked snapshot held and the next one
      does not, so a fact the keeper retracted during the pass has no row, and
      they are written just before the replace; a failed write fails this

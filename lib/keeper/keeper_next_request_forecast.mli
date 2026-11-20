@@ -102,8 +102,8 @@ type slot =
 (** Where a candidate stands in the walk the next fresh cycle takes: the
     lane as declared, then quota and backpressure demotion
     ({!Keeper_turn_driver.assignment_walk_order}). Two things the walk does
-    are not forecast: a head replaced for an input modality it cannot take
-    (RFC-0265), and a turn that failed and deferred its input, whose next
+    are not forecast: a head replaced for an input modality it cannot take,
+    and a turn that failed and deferred its input, whose next
     cycle walks the remaining candidates instead; that hint lives in the
     heartbeat loop. *)
 type place =

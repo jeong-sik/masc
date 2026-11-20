@@ -259,7 +259,7 @@ type composition =
 
 (* Keeper instructions and the Goal observation ride in the system prompt; the
    remaining prompt blocks, Completion Authority, the constitution amendments
-   and the Goals awaiting proof among them (RFC-0491 §3.1-§3.3), are counted
+   and the Goals awaiting proof among them, are counted
    as pinned extra context. A turn record names a block by its id, not by the
    carrier it rode, so the two an Agent Core request carries in its issued
    System, the Goals awaiting proof and the complete current norms
@@ -603,7 +603,7 @@ let forecast ~config ~keeper_name =
        let readings = readings_of_records records in
        let walk, candidates =
          (* The walk this Keeper's next turn takes: a failed attempt it
-            recorded itself does not move the head (RFC-0458 §3.4). *)
+            recorded itself does not move the head. *)
          let walk =
            Keeper_turn_driver.Fresh_walk_by
              (Runtime_candidate_backpressure.keeper_recorder ~keeper_name:meta.name)

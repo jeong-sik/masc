@@ -29,7 +29,7 @@ type 'error equal_facts =
   | Write_revision of 'error retraction_plan option
 
 (* What a commit owes the readers of the Keeper's memory health row once both
-   locks unwind (RFC-0487). *)
+   locks unwind. *)
 type owed_announcement =
   | Nothing_owed
       (* No replacement became durable. A kept snapshot's journal line tells

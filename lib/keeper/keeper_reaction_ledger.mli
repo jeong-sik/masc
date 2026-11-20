@@ -82,7 +82,7 @@ val stimulus_kind_of_string : string -> stimulus_kind option
 (** Inverse of {!stimulus_kind_to_string}.  Strings outside the closed sum
     (schema drift / corruption) map to [None].  Summary classification parses
     through this and matches the variant exhaustively, so adding a stimulus
-    variant forces the classifier to be updated (RFC-0266 regression guard). *)
+    variant forces the classifier to be updated. *)
 
 val stimulus_payload_preview : Keeper_event_queue.stimulus_payload -> string
 (** One line that names what a queued stimulus is: its kind and the ids, or the

@@ -10,7 +10,7 @@
     consumers reach through {!Keeper_sandbox_microvm} — and the parse of what
     that CLI reports back. Everything above that line is shared: the work
     volume, the shim mount, the identity snapshot, the session ceiling. Those
-    are RFC-0400's model of a guest, and they do not change with the
+    are this codebase's model of a guest, and they do not change with the
     hypervisor under it. *)
 
 type t =
@@ -92,7 +92,7 @@ type request_delivery =
 val request_delivery : t -> request_delivery
 (** [Guest_agent] for Apple's [container]: it is the one runtime that
     publishes a guest socket, and its [container exec -i] leaves a pipe end
-    open in the VM runtime on every call (RFC 4.1). [Exec_per_request] for
+    open in the VM runtime on every call. [Exec_per_request] for
     [msb] and [nerdctl]. *)
 
 val default_for_host : unit -> t option

@@ -24,7 +24,7 @@ val wire_field_supersedes : string
 val wire_field_absorbs : string
 
 (** A new claim's [evidence]: the observations of the librarian's own input it
-    relied on (RFC-0456 §4.1). *)
+    relied on. *)
 val wire_field_evidence : string
 
 val wire_evidence_conversation : string
@@ -176,13 +176,12 @@ type absorbed_statement =
   ; into : string
   }
 
-(** The observations of the librarian's input a new claim says it relied on
-    (RFC-0456 §4.1): conversation messages by the position the prompt shows as
-    [turn=N], tool observations by their 0-based index in the prompt's tool
-    observation array, and whether it used the counterpart block or the
-    historical task contexts. The absorb gate asks a claim's pairs with these
-    observations only (RFC-deferred-contextual-memory, Jev forward review).
-    Both position lists are ascending with no repeats. *)
+(** The observations of the librarian's input a new claim says it relied on:
+    conversation messages by the position the prompt shows as [turn=N], tool
+    observations by their 0-based index in the prompt's tool observation
+    array, and whether it used the counterpart block or the historical task
+    contexts. The absorb gate asks a claim's pairs with these observations
+    only. Both position lists are ascending with no repeats. *)
 type evidence = private
   { conversation : int list
   ; tools : int list
@@ -285,9 +284,8 @@ val normalize_derivation : derivation -> derivation
     measurement can count how much Board knowledge reaches a store instead of
     guessing from a post id that happens to appear in the claim text. The ids
     are the Board's own parsed identities, so a reference that fails the Board
-    grammar cannot be built. Whether the post still exists is not checked by
-    any reader today; RFC-0402 piece 2 revalidates at recall the way a
-    source-bound fact is revalidated against its file. *)
+    grammar cannot be built. Recall does not check that the post still exists
+    the way it revalidates a source-bound fact against its file. *)
 type board_ref =
   { post_id : Board_types.Post_id.t
   ; comment_id : Board_types.Comment_id.t option

@@ -356,11 +356,10 @@ type registry_entry = {
           any turn. Anti-stale barrier: sub-FSM live states are only
           observable while [Some]. *)
   last_completed_turn : completed_turn_observation option;
-      (** Frozen snapshot of the most recently completed turn
-          (RFC-0003 Phase 2 design A3). Populated by
-          [mark_turn_finished] when [current_turn_observation] is
-          [Some]; carries terminal data for the composite observer's
-          [last_outcome] snapshot field.
+      (** Frozen snapshot of the most recently completed turn.
+          Populated by [mark_turn_finished] when
+          [current_turn_observation] is [Some]; carries terminal data
+          for the composite observer's [last_outcome] snapshot field.
 
           Distinct from [current_turn_observation] so the observer
           can distinguish "live in-turn state" from "previous turn
@@ -401,7 +400,7 @@ and turn_observation = {
           (tools issued but not yet completed). Maintained from the
           authoritative FSM via [record_turn_tool_inflight]; the supervisor
           sweep reads it to exclude active tool execution from the
-          [Mid_turn_no_progress] no-progress window (RFC-0197 points 2-3).
+          [Mid_turn_no_progress] no-progress window.
           [0] outside any tool call. *)
   turn_phase : packed_turn_phase;
   decision_stage : packed_decision_stage;

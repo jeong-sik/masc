@@ -1,10 +1,9 @@
-(** The three recall questions on the Jev wire
-    (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, sections 4.2 and 4.3):
-    how a request is built and how an answer is read. Nothing is sent here.
+(** The three recall questions on the Jev wire: how a request is built and
+    how an answer is read. Nothing is sent here.
 
     Question (a) asks per candidate whether the turn could use the memory.
-    Its wording is the one measured in layer 0 (two labels, 10 runs on one
-    Keeper). Questions (b) and (c) have not been run against Jev yet. *)
+    Its wording is the one measured (two labels, 10 runs on one Keeper).
+    Questions (b) and (c) have not been run against Jev yet. *)
 
 (** Which of the three questions a request asks: (a) per candidate, (b) per
     turn, (c) per carried candidate. *)

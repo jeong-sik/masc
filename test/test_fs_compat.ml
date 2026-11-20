@@ -218,6 +218,62 @@ let test_mkdir_p_does_not_shell_inject () =
     (Sys.file_exists dangerous && Sys.is_directory dangerous)
 ;;
 
+let test_mkdir_p_fallback_rejects_non_directories () =
+  with_tmp_dir
+  @@ fun base ->
+  let blocking_file = Filename.concat base "file" in
+  let file_payload = "blocked" in
+  Fs_compat.save_file blocking_file file_payload;
+  let assert_enotdir label path =
+    match Fs_compat.mkdir_p path with
+    | () -> failf "%s unexpectedly succeeded on %s" label path
+    | exception Unix.Unix_error (Unix.ENOTDIR, "mkdir", _) -> ()
+    | exception exn ->
+      failf "%s raised %s instead of ENOTDIR" label (Printexc.to_string exn)
+  in
+  assert_enotdir "regular file" blocking_file;
+  assert_enotdir "regular file with trailing slash" (blocking_file ^ "/");
+  let file_link = Filename.concat base "file_link" in
+  Unix.symlink blocking_file file_link;
+  assert_enotdir "symlink to regular file" file_link;
+  let dangling = Filename.concat base "dangling" in
+  Unix.symlink (Filename.concat base "missing_target") dangling;
+  assert_enotdir "dangling symlink" dangling;
+  assert_enotdir "nested child under regular file" (Filename.concat blocking_file "child");
+  check string "blocking file contents intact" file_payload (Fs_compat.load_file blocking_file);
+  let target_dir = Filename.concat base "target_dir" in
+  Unix.mkdir target_dir 0o755;
+  let dir_link = Filename.concat base "dir_link" in
+  Unix.symlink target_dir dir_link;
+  Fs_compat.mkdir_p dir_link;
+  let under_link = Filename.concat dir_link "sub" in
+  Fs_compat.mkdir_p under_link;
+  check bool "created subdir via symlink" true (Sys.is_directory under_link)
+;;
+
+let test_mkdir_p_eio_rejects_regular_file_and_accepts_dir_symlink () =
+  with_tmp_dir
+  @@ fun base ->
+  let blocking_file = Filename.concat base "file" in
+  let file_payload = "blocked" in
+  Fs_compat.save_file blocking_file file_payload;
+  (match Fs_compat.mkdir_p blocking_file with
+   | () -> fail "mkdir_p inside Eio unexpectedly succeeded on regular file"
+   | exception Sys_error _ -> ()
+   | exception exn ->
+     failf "mkdir_p inside Eio raised %s instead of Sys_error" (Printexc.to_string exn));
+  check string "blocking file contents intact under Eio" file_payload
+    (Fs_compat.load_file blocking_file);
+  let target_dir = Filename.concat base "target_dir" in
+  Unix.mkdir target_dir 0o755;
+  let dir_link = Filename.concat base "dir_link" in
+  Unix.symlink target_dir dir_link;
+  Fs_compat.mkdir_p dir_link;
+  let under_link = Filename.concat dir_link "sub" in
+  Fs_compat.mkdir_p under_link;
+  check bool "created subdir via symlink under Eio" true (Sys.is_directory under_link)
+;;
+
 let test_remove_tree_does_not_shell_inject () =
   Fs_compat.clear_fs ();
   with_tmp_dir
@@ -1238,6 +1294,16 @@ let () =
     ; ( "mkdir_p"
       , [ test_case "creates nested dirs" `Quick test_mkdir_p_creates_nested_dirs
         ; test_case "no shell injection" `Quick test_mkdir_p_does_not_shell_inject
+        ; test_case
+            "fallback rejects non-directories with ENOTDIR"
+            `Quick
+            (with_optional_read_fs None test_mkdir_p_fallback_rejects_non_directories)
+        ; test_case
+            "Eio rejects regular file and accepts dir symlink"
+            `Quick
+            (with_optional_read_fs
+               (Some (Eio.Stdenv.fs env))
+               test_mkdir_p_eio_rejects_regular_file_and_accepts_dir_symlink)
         ] )
     ; ( "subdirectory_names"
       , [ test_case

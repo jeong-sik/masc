@@ -363,15 +363,28 @@ let append_lines_unix (path : string) (lines : string) : unit =
 let append_file_unix_with_io_for_testing = append_file_unix_with_io
 
 let mkdir_p_unix (path : string) : unit =
+  let require_directory p =
+    match Unix.stat p with
+    | { Unix.st_kind = Unix.S_DIR; _ } -> ()
+    | { Unix.st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ }
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+      raise (Unix.Unix_error (Unix.ENOTDIR, "mkdir", p))
+  in
   let rec ensure_dir (p : string) : unit =
     if String.equal p "" || String.equal p "." || String.equal p "/"
     then ()
-    else if Stdlib.Sys.file_exists p
-    then ()
     else (
-      ensure_dir (Stdlib.Filename.dirname p);
-      try Unix.mkdir p 0o755 with
-      | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+      match Unix.stat p with
+      | { Unix.st_kind = Unix.S_DIR; _ } -> ()
+      | { Unix.st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ } ->
+        raise (Unix.Unix_error (Unix.ENOTDIR, "mkdir", p))
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+        let parent = Stdlib.Filename.dirname p in
+        if not (String.equal parent p) then ensure_dir parent;
+        (try Unix.mkdir p 0o755 with
+         | Unix.Unix_error (Unix.EEXIST, _, _) -> require_directory p)
+      | exception Unix.Unix_error (Unix.ENOTDIR, _, _) ->
+        raise (Unix.Unix_error (Unix.ENOTDIR, "mkdir", p)))
   in
   ensure_dir path
 ;;

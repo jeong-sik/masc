@@ -582,6 +582,31 @@ let test_articles_only_load_folds_out_isolated_lines () =
            (load_articles_or_fail ~base_path
               ~resolve_subject:(String.equal "lane-smith") ())))
 
+let test_append_at_reports_directory_unavailable_when_regular_file_blocks_dir () =
+  with_world (fun base_path ->
+      let masc_dir = Filename.concat base_path ".masc" in
+      Unix.mkdir masc_dir 0o700;
+      let blocking_path = Filename.dirname (Store.ledger_path ~base_path) in
+      let payload = "regular file blocking constitution dir" in
+      Fs_compat.save_file blocking_path payload;
+      let previous = Fs_compat.get_fs_opt () in
+      Fs_compat.clear_fs ();
+      Fun.protect
+        ~finally:(fun () ->
+          match previous with
+          | None -> Fs_compat.clear_fs ()
+          | Some fs -> Fs_compat.set_fs fs)
+        (fun () ->
+          match Store.append_at ~base_path ~expected_end_offset:0 (Added (article "norm")) with
+          | Error (Store.Directory_unavailable _) -> ()
+          | Error (Store.Write_failed { detail; _ }) ->
+            Alcotest.failf "expected Directory_unavailable, got Write_failed: %s" detail
+          | Error (Store.Ledger_moved _) ->
+            Alcotest.fail "expected Directory_unavailable, got Ledger_moved"
+          | Ok () -> Alcotest.fail "expected Directory_unavailable, got Ok ()");
+      Alcotest.(check string) "blocking regular file kept intact" payload
+        (Fs_compat.load_file blocking_path))
+
 let () =
   Alcotest.run "world_constitution_store"
     [ ( "paths",
@@ -642,5 +667,8 @@ let () =
             test_an_article_is_added_to_a_ledger_that_is_only_an_unfinished_line;
           Alcotest.test_case "an unfinished last line that reads whole is not held" `Quick
             test_an_unfinished_last_line_that_reads_whole_is_not_held;
+          Alcotest.test_case
+            "regular file at constitution directory reports Directory_unavailable" `Quick
+            test_append_at_reports_directory_unavailable_when_regular_file_blocks_dir;
         ] );
     ]

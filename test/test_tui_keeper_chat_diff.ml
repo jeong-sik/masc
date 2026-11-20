@@ -343,8 +343,9 @@ let test_a_path_wider_than_the_row_is_drawn_whole () =
       in
       check bool ("the whole path is drawn at " ^ at) true
         (contains ~needle:("masc:" ^ path) without_spaces);
+      (* A decrease is signed with U+2212, the width of its "+" (#53934). *)
       check bool ("the size of the change is drawn at " ^ at) true
-        (contains ~needle:"(+1-1)" without_spaces);
+        (contains ~needle:"(+1\u{2212}1)" without_spaces);
       check bool ("no row of the change is wider than the pane at " ^ at) true
         (List.for_all
            (fun row -> Masc_tui_message_layout.display_width row <= max_line_cells)

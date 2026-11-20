@@ -539,11 +539,11 @@ is-default = true
         | _ -> false) contents |> List.length)))
 
 
-(* RFC last-path-resumes-after-progress §7, on a lane with one path. The model
-   runs a tool and the next call gets a 502, so the operation is deferred to
-   that same path. After an owner restart the same operation resumes on it from
-   the saved tool result. When the resumed call fails before any tool runs,
-   nothing new was saved to resume from, and the operation fails. *)
+(* On a lane with one path, the model runs a tool and the next call gets a
+   502, so the operation is deferred to that same path. After an owner
+   restart the same operation resumes on it from the saved tool result. When
+   the resumed call fails before any tool runs, nothing new was saved to
+   resume from, and the operation fails. *)
 let test_http_same_path_resume_after_tool_result ?(durable_native = false) ~resume_fails () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

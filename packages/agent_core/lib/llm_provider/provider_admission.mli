@@ -217,6 +217,12 @@ val take_first_seat
   -> ('owner * seat_source) list
   -> 'owner * seat
 
+(** The first source of the list, in order, that gives a seat without
+    waiting, with the value the caller paired with it; the same question
+    {!take_first_seat} asks before it waits. [None] when every source is
+    full: nothing waits, queues or stays held. *)
+val try_first_seat : ('owner * seat_source) list -> ('owner * seat) option
+
 (** Return the seat's permit to its source. Returning a seat twice returns
     it once. *)
 val release_seat : seat -> unit

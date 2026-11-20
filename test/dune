@@ -7884,3 +7884,5 @@
  (libraries masc alcotest masc_test_deps masc.agent_core yojson))
 
 (include stanzas/test_runtime_official_client_seats.inc)
+
+(include stanzas/test_exact_lane_walk.inc)

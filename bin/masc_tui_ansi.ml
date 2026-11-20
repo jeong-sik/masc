@@ -42,6 +42,8 @@ module Ansi = struct
 
   let move_to = Masc_tui_theme.Term.move_to
   let reverse = Masc_tui_theme.Sgr.reverse
+  let with_styled_runs = Masc_tui_theme.Sgr.with_styled_runs
+  let emit_styled_cells = Masc_tui_theme.Sgr.emit_styled_cells
 
   let box_h = Masc_tui_theme.Box.h
   let box_v = Masc_tui_theme.Box.v
@@ -200,6 +202,15 @@ module Theme = struct
   let cache_on : Masc_tui_theme.surface -> resolved option Atomic.t = function
     | Masc_tui_theme.Page -> page_cache
     | Masc_tui_theme.Side_pane -> side_pane_cache
+
+  (* Cache key covering every runtime knob that changes resolved ANSI styling:
+     the monotonic terminal-palette generation, contrast-lift toggle, and
+     direct-truecolor toggle ([colors_enabled] is fixed at process start). *)
+  let style_cache_key () =
+    let probed = Masc_tui_terminal_palette.snapshot () in
+    ( Masc_tui_terminal_palette.snapshot_generation probed
+    , Masc_tui_theme.lift_is_enabled ()
+    , Masc_tui_theme.direct_truecolor_is_enabled () )
 
   let rec resolved_on surface =
     let cache = cache_on surface in

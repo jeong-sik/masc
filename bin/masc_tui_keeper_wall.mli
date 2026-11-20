@@ -22,3 +22,20 @@ val row :
   ?selected:bool -> ko:bool -> cols:int -> now:float -> name:string ->
   Masc.Tui_decode.keeper_runtime option -> string
 (** Same band rule as {!fleet_rows}. *)
+
+type prepared
+(** Immutable snapshot of a 24h wall frame precomputed once per roster snapshot,
+    30-minute slot boundary, terminal width, language, and theme style key so
+    [j/k] selection movement stays [O(1)] without re-bucketing tallies or
+    re-rendering the fleet wave. *)
+
+val prepare :
+  ko:bool -> cols:int -> now:float ->
+  (string * Masc.Tui_decode.keeper_runtime option) list -> prepared
+
+val prepared_header : prepared -> string
+val prepared_fleet_rows : prepared -> string list
+val prepared_separator : prepared -> int -> bool
+val prepared_row : ?selected:bool -> prepared -> int -> string
+val prepared_selected_cockpit_rows :
+  prepared -> index:int -> status:string -> string list

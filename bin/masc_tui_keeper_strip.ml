@@ -137,21 +137,6 @@ let wake_summary ~ko slots =
         (if ko then Printf.sprintf "예약 %d" count else Printf.sprintf "%d wakes" count)
         (string_of_int count)
 
-let with_styled_cells ~capacity f =
-  let buf = Buffer.create capacity in
-  let open_style = ref "" in
-  let emit sgr glyph =
-    if not (String.equal sgr !open_style) then begin
-      if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
-      if not (String.equal sgr "") then Buffer.add_string buf sgr;
-      open_style := sgr
-    end;
-    Buffer.add_string buf glyph
-  in
-  f emit;
-  if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
-  Buffer.contents buf
-
 let wake_strip ~style slots =
   let cells = List.length slots in
   if cells = 0 then ""
@@ -192,7 +177,7 @@ let wake_strip ~style slots =
             else tint (0.35 +. (0.65 *. (float_of_int count /. float_of_int (max 1 peak))))
     in
     let recede = Theme.recede () in
-    with_styled_cells ~capacity:(cells * 6) (fun emit ->
+    Ansi.with_styled_runs ~capacity:(cells * 6) (fun emit ->
       List.iter (fun slot ->
         match slot with
         | Next.Wakes_unknown -> emit recede (Grid.strip_mark Grid.Strip_unknown)
@@ -208,6 +193,8 @@ let wake_strip ~style slots =
 
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 
+(* Readings shorter than [side_cells] are counted as unknown at the missing
+   slot rather than raising, keeping fleet aggregation total. *)
 let failed_count reading_arrays index =
   List.fold_left (fun (count, unknown) slots ->
     if index < Array.length slots then
@@ -243,7 +230,7 @@ let fleet_cells ?(summarize_wakes = false) ~ko ~now ~(grid : Grid.t) ~wakes rows
       let level_arr =
         Array.map (fun (n, _) -> if n > 0 then scale_dots n else 0) count_arr
       in
-      with_styled_cells ~capacity:(grid.side_cells * 6) (fun emit ->
+      Ansi.with_styled_runs ~capacity:(grid.side_cells * 6) (fun emit ->
         Array.iteri (fun i (n, unknown) ->
           if n > 0 then
             let h = level_arr.(i) in

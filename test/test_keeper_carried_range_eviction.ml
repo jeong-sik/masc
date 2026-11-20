@@ -103,7 +103,7 @@ let test_stale_working_value_preserves_a_newer_table_observation () =
 let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
   Ledger.Table.For_testing.reset ();
   let keeper_name = "seed-refused" and session_id = "trace-seed" in
-  let continuity = Some Try_provider.without_snapshot in
+  let continuity = Some Try_provider.No_read_end in
   let run_candidate ~held ~runtime_id ~limit ~boundary history =
     let digest_at = Window.atom_opening_digest history in
     let atom_count = List.length history in
@@ -226,29 +226,16 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
    own pieces run here: [turn_boundary_resend_sequence] answers the refusal,
    and [compose_carried_model_input] composes every request with the turn's
    held front or, without one, the accepted start the turn record keeps.
-   [trace_id] and the Librarian's read position name atom [point] of the
-   history; the provider accepts at most [limit] atoms. *)
-let librarian_trace = "librarian-behind"
+   The writer's read end is atom [point] of the history; the provider
+   accepts at most [limit] atoms. *)
 
-let absorbed_at ~point history =
-  let digest_at = Window.atom_opening_digest history in
-  let progress : Masc.Keeper_librarian_progress.t =
-    { position =
-        { trace_id = librarian_trace
-        ; end_atom = point
-        ; last_atom_digest = Option.get (digest_at (point - 1))
-        }
-    ; boundary_lines_seen = 1
-    }
-  in
-  match Try_provider.absorbed_history ~trace_id:librarian_trace ~messages:history progress with
-  | Some (_, continuity) -> continuity
-  | None -> fail "the read position does not name an atom of this history"
+let absorbed_at ~point =
+  Try_provider.Covered { Try_provider.end_atom = point; working_state = None }
 ;;
 
 let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
       ?(held = ref None) ~point ~accepted ~limit ~boundary history =
-  let continuity = absorbed_at ~point history in
+  let continuity = absorbed_at ~point in
   let digest_at = Window.atom_opening_digest history in
   let atom_count = List.length history in
   let last = ref None and sent = ref [] in
@@ -300,7 +287,7 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
 let opened_past_the_point = function
   | Some (Front.Past_librarian_point { librarian_end_atom; _ }, _) -> Some librarian_end_atom
   | Some
-      ( ( Front.Carried _ | Front.Librarian_snapshot _ | Front.Librarian_progress _
+      ( ( Front.Carried _ | Front.Librarian_progress _
         | Front.Turn_start _ | Front.Turn_start_unknown _ )
       , _ )
   | None -> None
@@ -408,7 +395,7 @@ let accepted_at ?(source = Front.Turn_record { turn = 1 }) history first_atom : 
 
 let past_point_start = function
   | Try_provider.Past_librarian_point { accepted; _ } -> Some accepted.Front.first_atom
-  | Try_provider.From_snapshot _ | Try_provider.From_read_position _
+  | Try_provider.From_covered _
   | Try_provider.From_seed _ | Try_provider.From_turn_boundary _ -> None
 ;;
 
@@ -444,7 +431,7 @@ let test_a_resumed_turn_names_no_start () =
 
 let test_an_accepted_start_is_bounded_by_the_turn_boundary () =
   let history = exchanges ~from:0 10 in
-  let continuity = absorbed_at ~point:2 history in
+  let continuity = absorbed_at ~point:2 in
   let start ?source ~this_turn_start accepted =
     (Try_provider.choose_range_start ~past_max_context:None ~held_window:None
        ~continuity:(Some continuity) ~front:None
@@ -737,8 +724,7 @@ let test_the_size_signal_reads_the_ledger_and_the_declaration () =
 let opens = function
   | Try_provider.From_seed seed -> seed.Front.first_atom
   | Try_provider.Past_librarian_point { accepted; _ } -> accepted.Front.first_atom
-  | Try_provider.From_read_position { end_atom } -> end_atom
-  | Try_provider.From_snapshot snapshot -> snapshot.Masc.Librarian_continuity_snapshot.end_atom
+  | Try_provider.From_covered { Try_provider.end_atom; _ } -> end_atom
   | Try_provider.From_turn_boundary (Front.Turn_boundary { end_atom }) -> end_atom
   | Try_provider.From_turn_boundary (Front.Turn_boundary_unknown _) -> -1
 ;;
@@ -751,7 +737,7 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
   let start ?continuity ?front ?accepted past_max_context =
     let { Try_provider.start; _ } =
       Try_provider.choose_range_start ~past_max_context ~held_window:None
-        ~continuity:(Option.map (fun point -> absorbed_at ~point history) continuity)
+        ~continuity:(Option.map (fun point -> absorbed_at ~point) continuity)
         ~front ~accepted ~history_digest_at:digest_at ~turn_boundary:boundary_8
         ~this_turn_start:None
     in
@@ -785,7 +771,7 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
   let forecast =
     Masc.Keeper_next_request_forecast.carry ?past_max_context:signal
       ~measure:(Masc.Keeper_context_core.message_measurer ())
-      ~continuity:(Some Try_provider.without_snapshot) ~front:(Some ledger_4) ~accepted:None
+      ~continuity:(Some Try_provider.No_read_end) ~front:(Some ledger_4) ~accepted:None
       ~turn_start:boundary_8 ~this_turn_start:None
       ~counted_tokens:(Some 2_400) history
   in
@@ -806,7 +792,7 @@ let test_a_window_that_stays_holds_behind_the_librarian_point () =
   let start ~held_window ~point accepted =
     let { Try_provider.start; _ } =
       Try_provider.choose_range_start ~past_max_context:None ~held_window
-        ~continuity:(Some (absorbed_at ~point history)) ~front:None
+        ~continuity:(Some (absorbed_at ~point)) ~front:None
         ~accepted:(Some (accepted_at history accepted))
         ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary:boundary_8
         ~this_turn_start:None
@@ -836,7 +822,7 @@ let test_the_size_signal_moves_to_the_librarian_point () =
     Option.map
       (fun (signal : Try_provider.past_max_context) ->
          signal.moved_to.Front.first_atom, Front.source_to_string signal.moved_to.Front.source)
-      (signal_over ~continuity:(absorbed_at ~point history) ~history ledger)
+      (signal_over ~continuity:(absorbed_at ~point) ~history ledger)
   in
   let to_ = option (pair int string) in
   check to_ "a point past the window" (Some (6, "librarian_point_at_max_context"))
@@ -850,7 +836,7 @@ let test_the_size_signal_moves_to_the_librarian_point () =
         ~held_window:
           (Some
              { Try_provider.window_opened_at = held_at; markers_before = 0; working_state = None })
-        ~continuity:(Some (absorbed_at ~point history)) ~front:None ~accepted:(Some accepted)
+        ~continuity:(Some (absorbed_at ~point)) ~front:None ~accepted:(Some accepted)
         ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary:boundary_8
         ~this_turn_start:None
     in
@@ -858,7 +844,7 @@ let test_the_size_signal_moves_to_the_librarian_point () =
     , Option.map (fun (seed : Front.seed) -> seed.first_atom) choice.moved_at_max_context )
   in
   let moved = pair int (option int) in
-  let signal = signal_over ~continuity:(absorbed_at ~point:6 history) ~history ledger in
+  let signal = signal_over ~continuity:(absorbed_at ~point:6) ~history ledger in
   check moved "the turn's first request opens at the point and names it to hold" (6, Some 6)
     (choose ?past_max_context:signal ~held_at:4 ~point:6 (accepted_at history 4));
   let held_front = (Option.get signal).Try_provider.moved_to in

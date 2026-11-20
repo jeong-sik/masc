@@ -149,7 +149,7 @@ val run_keeper_cycle
     [turn_decision] below, which carries the scheduler verdict into the
     prompt text and owns the execution channel rather than the registry
     observation.
-    @param turn_decision The scheduler's cycle decision that fired this turn
-    (RFC-0315). Its [channel] drives execution and it is threaded into
+    @param turn_decision The scheduler's cycle decision that fired this turn.
+    Its [channel] drives execution and it is threaded into
     [Keeper_unified_prompt.build_prompt] so the prompt renders the same
     decision without a context-blind recompute. *)

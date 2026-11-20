@@ -7,7 +7,7 @@
 type t
 
 (** [on_pending_count_change] is invoked with the new [pending_tool_count]
-    whenever a drain changes it (RFC-0197 P1-4a). Used to mirror the in-flight
+    whenever a drain changes it. Used to mirror the in-flight
     tool count into the registry's live [turn_observation] so the supervisor
     sweep can exclude active tool execution from the no-progress window.
     Defaults to a no-op. *)

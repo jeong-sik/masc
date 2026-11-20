@@ -1,15 +1,14 @@
 (** Failure-path post-processing for [Keeper_unified_turn]. *)
 
-(* RFC turn-failure-visible-stop (#32105): every turn failure advances the
-   durable crash-accounting streak. There is no exemption class and no
-   per-class budget. The historical exemption design kept a persistent
-   transport outage retrying forever with [consecutive] pinned at 0 while
-   fleet health stayed [ok] (#31958), and its "every exemption carries its
-   own compensating accounting" invariant was enforced only by a comment
-   that drifted from the code. Failure classification still exists for
-   telemetry and routing; it no longer decides crash accounting. A provider's
-   dated quota refusal with no tool effect is not a turn failure: the turn
-   ends as [Turn_rested] and never reaches this function (RFC §2.4). *)
+(* Every turn failure advances the durable crash-accounting streak. There is
+   no exemption class and no per-class budget. The historical exemption design
+   kept a persistent transport outage retrying forever with [consecutive]
+   pinned at 0 while fleet health stayed [ok] (#31958), and its "every
+   exemption carries its own compensating accounting" invariant was enforced
+   only by a comment that drifted from the code. Failure classification still
+   exists for telemetry and routing; it no longer decides crash accounting. A
+   provider's dated quota refusal with no tool effect is not a turn failure:
+   the turn ends as [Turn_rested] and never reaches this function. *)
 let record_failure_observation
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)

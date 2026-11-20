@@ -307,6 +307,9 @@ let carried_start_front_to_string = function
   | Covered_with_working_state _ -> "covered_with_working_state"
 ;;
 
+type carried_front_observer =
+  carried_start_front -> transmitted_bytes:int -> sends_from:int -> unit
+
 let warn_if_sent_on_unknown_start ~keeper_name = function
   | Turn_start_unknown { reason } ->
     Keeper_carried_front.warn_range_opens_on_newest_atom ~keeper_name ~reason
@@ -941,7 +944,7 @@ let plan_arguments argument_projection ~measure_message_bytes messages =
 type selected_start_range =
   { selected_messages : Agent_core.Types.message list
   ; selected_projection : Runtime_model_input_tail_window.projection
-  ; selected_front : carried_start_front option
+  ; selected_front : carried_start_front
   }
 
 (* Claude Code and a fresh Codex thread apply their capacity before choosing
@@ -989,8 +992,10 @@ let start_range_projection ~input_source ?argument_projection
   match capacity_cut with
   | Some projection
     when projection.Runtime_model_input_tail_window.dropped_atoms >= history_atom_count ->
+    (* The lane's own cut left no atom, so it names the front. The request
+       still goes out, and its start is past every atom. *)
     Ok {selected_messages=projection.Runtime_model_input_tail_window.messages;
-        selected_projection=projection;selected_front=None}
+        selected_projection=projection;selected_front=Lane_cut}
   | Some _ | None ->
     let own_first_atom =
       match capacity_cut with
@@ -1013,7 +1018,7 @@ let start_range_projection ~input_source ?argument_projection
       compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
     in
     Ok {selected_messages=windowed.sent;selected_projection=windowed_projection windowed;
-        selected_front=Some windowed.carried.front}
+        selected_front=windowed.carried.front}
   in
   let* selected = select planned_messages in
   let* selected = match argument_projection,plan.pending with
@@ -1034,15 +1039,19 @@ let start_range_projection ~input_source ?argument_projection
          and range decision, with no second materialization or invented refs. *)
       select actual_messages in
   observe_window selected.selected_projection;
-  Option.iter (fun front ->
-    Option.iter
-      (fun observe ->
-         observe front
-           ~transmitted_bytes:
-             (List.fold_left
-                (fun total message -> total + measure_message_bytes message)
-                0 selected.selected_messages))
-      on_carried_front) selected.selected_front;
+  Option.iter
+    (fun observe ->
+       observe selected.selected_front
+         ~transmitted_bytes:
+           (List.fold_left
+              (fun total message -> total + measure_message_bytes message)
+              0 selected.selected_messages)
+         ~sends_from:
+           (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+              Keeper_request_start.sends_from source_messages
+                ~first_atom:
+                  selected.selected_projection.Runtime_model_input_tail_window.dropped_atoms)))
+    on_carried_front;
   Ok selected.selected_messages
 ;;
 
@@ -1064,14 +1073,16 @@ let carried_history_projection ~input_source
     ?carried_front_seed
     ?librarian_front
     ?on_carried_front:(Option.map
-      (fun _ observed ~transmitted_bytes -> front := Some (observed,transmitted_bytes))
+      (fun _ observed ~transmitted_bytes ~sends_from ->
+        front := Some (observed,transmitted_bytes,sends_from))
       on_carried_front)
     ~turn_start ~keeper_name ~runtime_id history_messages in
   let* sent = project_source source_projection sent in
   (* A refused custom projection returned no range. Publish the buffered
      raw-source observations only after the final transmitted copy exists. *)
-  Option.iter (fun (front,transmitted_bytes) ->
-    Option.iter (fun observe -> observe front ~transmitted_bytes) on_carried_front) !front;
+  Option.iter (fun (front,transmitted_bytes,sends_from) ->
+    Option.iter (fun observe -> observe front ~transmitted_bytes ~sends_from) on_carried_front)
+    !front;
   Option.iter (fun observation ->
     Option.iter (fun observe -> observe observation) on_model_input_window_observation) !window;
   Ok sent

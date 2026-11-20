@@ -6408,7 +6408,8 @@ let test_the_librarian_front_reaches_the_list () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~librarian_front
-      ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
+      ~on_carried_front:(fun front ~transmitted_bytes ~sends_from ->
+        seen_front := Some (front, transmitted_bytes, sends_from))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -6421,8 +6422,9 @@ let test_the_librarian_front_reaches_the_list () =
        (encoded (List.filteri (fun i _ -> i >= 100) messages))
        (encoded carried));
   (match !seen_front with
-   | Some (Keeper_official_client_host.Covered { end_atom = 100 }, bytes) ->
-     check bool "the front is reported with the range's bytes" true (bytes > 0)
+   | Some (Keeper_official_client_host.Covered { end_atom = 100 }, bytes, sends_from) ->
+     check bool "the front is reported with the range's bytes" true (bytes > 0);
+     check int "the request sends from the message the writer read up to" 100 sends_from
    | Some _ -> fail "the reported front is not the read end"
    | None -> fail "the composition reported no front");
   let state = "Fifty asks answered so far." in

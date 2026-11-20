@@ -1959,15 +1959,17 @@ let test_the_librarian_front_reaches_the_list () =
   let projected =
     project_range
       ~librarian_front:(Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 53; working_state = None })
-      ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
+      ~on_carried_front:(fun front ~transmitted_bytes ~sends_from ->
+        seen_front := Some (front, transmitted_bytes, sends_from))
       messages
   in
   check (list string) "the range starts at the read end"
     (encoded_history (List.filteri (fun index _ -> index >= 53) messages))
     (encoded_history projected);
   match !seen_front with
-  | Some (Keeper_official_client_host.Covered { end_atom = 53 }, bytes) ->
-    check bool "the front is reported with the range's bytes" true (bytes > 0)
+  | Some (Keeper_official_client_host.Covered { end_atom = 53 }, bytes, sends_from) ->
+    check bool "the front is reported with the range's bytes" true (bytes > 0);
+    check int "the request sends from the message the writer read up to" 53 sends_from
   | Some _ -> fail "the reported front is not the read end"
   | None -> fail "the composition reported no front"
 ;;
@@ -1991,7 +1993,7 @@ let test_a_read_end_leads_with_its_working_state () =
   let projected =
     project_range
       ~librarian_front:(Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 53; working_state = Some state })
-      ~on_carried_front:(fun front ~transmitted_bytes:_ -> seen_front := Some front)
+      ~on_carried_front:(fun front ~transmitted_bytes:_ ~sends_from:_ -> seen_front := Some front)
       messages
   in
   (match projected with
@@ -2528,7 +2530,7 @@ let test_projection_refusal_emits_no_carried_observations () =
   let projected = ref 0 and observed = ref 0 in
   let result = Keeper_official_client_host.carried_history_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "refusal-fixture" })
     ~on_model_input_window_observation:(fun _ -> incr observed)
-    ~on_carried_front:(fun _ ~transmitted_bytes:_ -> incr observed)
+    ~on_carried_front:(fun _ ~transmitted_bytes:_ ~sends_from:_ -> incr observed)
     ~librarian_front:Argument_start_fixture.librarian_front
     ~turn_start:(Argument_start_fixture.boundary Argument_start_fixture.seed)
     ~keeper_name:"refusal-fixture" ~runtime_id:"antigravity.gemini"

@@ -3950,7 +3950,7 @@ let test_projection_refusal_emits_no_carried_observations () =
       ~model_input_projection:(fun _ -> incr projected;
         Error (Agent_core.Error.Internal "projection refused"))
       ~on_model_input_window_observation:(fun _ -> incr observed)
-      ~on_carried_front:(fun _ ~transmitted_bytes:_ -> incr observed) () in
+      ~on_carried_front:(fun _ ~transmitted_bytes:_ ~sends_from:_ -> incr observed) () in
     (match run.outcome.result with
      | Error (Agent_core.Error.Internal "projection refused") -> ()
      | Error error -> fail (Agent_core.Error.to_string error)

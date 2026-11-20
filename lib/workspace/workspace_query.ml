@@ -605,10 +605,16 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
         ) backlog.tasks
   in
   if tasks = [] then
-    if backlog.tasks = [] then
-      "No tasks."
-    else
-      "No active tasks (all done/cancelled)."
+    match status with
+    | Some status_filter ->
+      Printf.sprintf
+        "No tasks with status '%s'."
+        (Masc_domain.Task_status_tag.to_string status_filter)
+    | None ->
+      if backlog.tasks = [] then
+        "No tasks."
+      else
+        "No active tasks (all done/cancelled)."
   else begin
     let buf = Buffer.create 256 in
     Buffer.add_string buf "Quest Board\n";

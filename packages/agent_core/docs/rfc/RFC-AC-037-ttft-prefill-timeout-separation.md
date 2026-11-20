@@ -6,7 +6,7 @@
 | Author | vincent (with Claude analysis) |
 | Created | 2026-07-20 |
 | Target | `agent_sdk` (agent_core) |
-| Related | [[RFC-AC-020]] (TTFT instrumentation), [[RFC-AC-026]] (transport-liveness-carrier), masc [[RFC-0345]] (stream-idle fail-safe floor) |
+| Related | [[RFC-AC-020]] (TTFT instrumentation), [[RFC-AC-026]] (transport-liveness-carrier) |
 
 ## 0. Summary
 
@@ -71,9 +71,9 @@ A dead connect on the all-unset path is bounded by the connect timeout and by th
 
 **Attribution.** A fired deadline names the knob that actually armed it. Before the split every phase was governed by `stream_idle_timeout_s`; naming that knob for a first-event timeout sourced from `body_timeout_s` would send the operator to tune a value with no effect on the phase that failed — defeating the diagnosis this RFC exists to enable. Attribution is derived from the same resolver as the armed bound, so the precedence chain has one definition and the message cannot drift from behaviour.
 
-### 4.3 Interaction with masc RFC-0345
+### 4.3 Interaction with masc's stream-idle floor
 
-RFC-0345 (merged) adds a masc-side fail-safe floor for `stream_idle_timeout_s`. With this separation, that floor applies to inter-token idle (its intended target); the first-event phase gets its own (larger) bound, so the floor no longer risks cutting a long prefill.
+masc substitutes a fail-safe floor for `stream_idle_timeout_s` when none is configured. With this separation, that floor applies to inter-token idle (its intended target); the first-event phase gets its own (larger) bound, so the floor no longer risks cutting a long prefill.
 
 ## 5. Acceptance
 

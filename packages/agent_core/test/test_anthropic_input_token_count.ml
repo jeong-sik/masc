@@ -1651,8 +1651,7 @@ let test_agent_projection_exception_is_typed () =
           (Agent_core.Error.Internal (Printexc.to_string exception_)))
 ;;
 
-(* In-run narrower requests (RFC a-request-fits-by-the-one-input-limit-
-   agent-core-decides §4.2). Every request carries one marker message. The
+(* In-run narrower requests. Every request carries one marker message. The
    count endpoint measures a request whose marker says too-large past the
    512-token limit and any other request at 10 tokens. *)
 let contains ~sub text =
@@ -1874,9 +1873,9 @@ let test_a_provider_refusal_asks_no_narrower_request () =
 
 module Projection = Agent_core.Agent.Execution_projection
 
-(* RFC section 5: when the third of three requests fits, the turn's journal
-   keeps one provider attempt, ordinal 0, and the request that attempt
-   records is the third, the one sent. *)
+(* When the third of three requests fits, the turn's journal keeps one
+   provider attempt, ordinal 0, and the request that attempt records is the
+   third, the one sent. *)
 let test_the_one_provider_attempt_records_the_request_sent () =
   Eio_main.run
   @@ fun env ->

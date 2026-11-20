@@ -1,4 +1,4 @@
-(* Provider Files API client — RFC-0430 Phase 3, first slice.
+(* Provider Files API client.
 
    DeepSeek's Files API (https://api-docs.deepseek.com/guides/files_api,
    probed live 2026-09-06: upload→file_id vision reference→list→retrieve→
@@ -7,8 +7,8 @@
    rides [Http_client.post_sync] once the body is encoded — no new transport.
 
    Scope of this module: encode + dispatch + decode. Keeper tool registration
-   and the vision request's {"type":"file","file_id":…} part are separate
-   slices; nothing here is wired into a turn. *)
+   and the vision request's {"type":"file","file_id":…} part live in other
+   modules. *)
 
 type file_object =
   { id : string

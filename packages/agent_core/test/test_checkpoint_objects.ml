@@ -1,4 +1,4 @@
-(* RFC-0476 L1-3a: a checkpoint as a head and content-addressed objects. *)
+(* A checkpoint as a head and content-addressed objects. *)
 open Agent_core
 module O = Checkpoint_objects
 

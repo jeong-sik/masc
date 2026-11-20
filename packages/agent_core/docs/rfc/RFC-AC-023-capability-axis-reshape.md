@@ -6,16 +6,15 @@
 | Author | jeong-sik |
 | Created | 2026-05-26 |
 | Target | `agent_sdk` (agent_core) — `lib/llm_provider/`, `lib/provider.ml` |
-| Supersedes (partial) | RFC-0001 vendor purge (naming policy portion) — see §7.1 |
 | Supplements | RFC-AC-018 catalog externalization (adds axis reshape on top of externalization) — see §7.2 |
 | Sibling | RFC-AC-017 (coordinator-shape leak) |
-| Boundary | masc-mcp depends on `Provider_kind.t` variant names (RFC-0174~0177) — see §7.3 |
+| Boundary | masc-mcp depends on `Provider_kind.t` variant names — see §7.3 |
 
 ## 0. Summary
 
 agent_core capability catalog가 두 가지 동시 결함을 가지고 있다.
 
-1. **표기 결함** — RFC-0001 후 brand가 알파벳 부호로 1:1 치환되었다 (`Anthropic → Provider_a`, `Kimi → Provider_c`, `OpenAI_compat → Provider_d_compat` 등 14×N). [feedback_vendor_brand_substitution_is_encryption_not_abstraction] 메모리(2026-05-24)의 자기 비판이 그대로 적용된다 — abstraction이 아니라 encryption.
+1. **표기 결함** — brand가 알파벳 부호로 1:1 치환되었다 (`Anthropic → Provider_a`, `Kimi → Provider_c`, `OpenAI_compat → Provider_d_compat` 등 14×N). [feedback_vendor_brand_substitution_is_encryption_not_abstraction] 메모리(2026-05-24)의 자기 비판이 그대로 적용된다 — abstraction이 아니라 encryption.
 2. **축 결함** — capability의 1차 축은 *model*인데 catalog는 *provider* 부호로 분류되어 있다. 같은 모델(`kimi-k2.6`)이 여러 provider(Moonshot direct / Ollama Turbo cloud / OpenRouter / local quantization)로 갈 수 있고, capability는 `model_caps ∩ transport_caps`의 cross-product에서 결정되는데, 지금 catalog는 두 record를 한 record로 압축하여 *둘 다*를 잃었다.
 
 본 RFC는 두 결함을 동시에 해결한다:
@@ -25,9 +24,9 @@ agent_core capability catalog가 두 가지 동시 결함을 가지고 있다.
 
 ## 1. Problem
 
-### 1.1 RFC-0001 substitution = encryption
+### 1.1 Brand substitution = encryption
 
-RFC-0001은 "agent_core 가 그쪽이니까 같이 폭파에 동참하자", "전체 폭파 . 어차피 레거시 지원 안할거임" 지시로 14개 brand를 알파벳 부호로 1:1 치환했다. 결과:
+"agent_core 가 그쪽이니까 같이 폭파에 동참하자", "전체 폭파 . 어차피 레거시 지원 안할거임" 지시로 14개 brand를 알파벳 부호로 1:1 치환했다. 결과:
 
 ```
 Anthropic       → Provider_a
@@ -45,7 +44,7 @@ Kimi_cli        → Cli_tool_c
 Codex_cli       → Cli_tool_a
 ```
 
-[feedback_vendor_brand_substitution_is_encryption_not_abstraction] (2026-05-24, masc-mcp RFC-0174~0177 sweep 후):
+[feedback_vendor_brand_substitution_is_encryption_not_abstraction] (2026-05-24):
 
 > Vendor brand → 알파벳 부호 1:1 substitution 은 abstraction 아닌 *암호화*. coupling 본질 보존 + 가독성 감소 + 매핑 테이블 외부 분산.
 
@@ -117,7 +116,7 @@ kimi-k2.6  →  Moonshot direct           (chat_completions_v1)
 
 | 축 | 명명 정책 | 예 |
 |----|----------|----|
-| **Model id** | Brand 그대로 (RFC-0001 substitution 역방향) | `kimi-k2.6`, `claude-opus-4`, `gpt-5`, `gemini-2.5-pro`, `glm-5.1`, `deepseek-v4-pro`, `qwen-3.5-35b` |
+| **Model id** | Brand 그대로 (부호 substitution 역방향) | `kimi-k2.6`, `claude-opus-4`, `gpt-5`, `gemini-2.5-pro`, `glm-5.1`, `deepseek-v4-pro`, `qwen-3.5-35b` |
 | **Transport / wire protocol** | Wire-protocol 명명 (brand 노출 없음) | `messages_v1`, `chat_completions_v1`, `gemini_generate_v1`, `ollama_chat_v1`, `glm_native_v1` |
 | **Model family** (관용적 grouping) | Brand + size/version | `claude-4-family`, `gpt-5-family`, `k2-family` |
 
@@ -262,7 +261,7 @@ type transport_caps = {
 
 ### 4.1 Provider_kind.t variant 복원
 
-| RFC-0001 (현행) | RFC-AC-023 (목표) | 축 |
+| 부호 (현행) | RFC-AC-023 (목표) | 축 |
 |----------------|---------------------|-----|
 | `Provider_a` | `Anthropic` | model brand |
 | `Provider_b` | `Moonshot` | model brand |
@@ -298,7 +297,7 @@ provider_k_capabilities             → glm_model_default_caps
 
 **Model caps 함수 (brand-based)**:
 
-| RFC-0001 (현행) | RFC-AC-023 (목표) |
+| 부호 (현행) | RFC-AC-023 (목표) |
 |---|---|
 | `provider_a_capabilities` | `anthropic_model_caps` |
 | `provider_c_capabilities` | `kimi_model_caps` |
@@ -311,14 +310,14 @@ provider_k_capabilities             → glm_model_default_caps
 
 **Transport caps 분리 (wire-protocol based)**:
 
-| RFC-0001 | RFC-AC-023 |
+| 부호 | RFC-AC-023 |
 |---|---|
 | `provider_d_chat_capabilities` | `chat_completions_v1_transport_caps` + `openai_model_caps` (분리) |
 | `provider_d_chat_extended_capabilities` | **폐지** — Qwen-3 부분은 `qwen_3_model_caps` 흡수 |
 
 **파일명 rename**:
 
-| RFC-0001 | RFC-AC-023 |
+| 부호 | RFC-AC-023 |
 |---|---|
 | `backend_provider_a.ml/.mli` | `backend_messages_v1.ml/.mli` |
 | `backend_provider_d.ml + _parse/_request/_serialize` | `backend_chat_completions_v1.ml + ...` |
@@ -330,7 +329,7 @@ provider_k_capabilities             → glm_model_default_caps
 
 **Error type rename**:
 
-| RFC-0001 | RFC-AC-023 |
+| 부호 | RFC-AC-023 |
 |---|---|
 | `provider_k_error_class` | `glm_error_class` |
 | `Provider_k_quota_exceeded` | `Glm_quota_exceeded` |
@@ -344,7 +343,7 @@ provider_k_capabilities             → glm_model_default_caps
 
 `<MASC_BASE>/.masc/config/cascade.toml` 의 모든 `api-name` 을 agent_core `Capabilities.for_model_id` 의 prefix table (capabilities.ml `String.starts_with` 30 prefixes) 과 대조한 결과:
 
-| api-name (wire에 흐르는 그대로) | Brand | RFC-0001 cipher | agent_core prefix가 기대하는 형태 | Match |
+| api-name (wire에 흐르는 그대로) | Brand | Cipher | agent_core prefix가 기대하는 형태 | Match |
 |---|---|---|---|---|
 | `gpt-5.3-codex-spark` | OpenAI | Provider_d | `model-d-5*` | **MISS** |
 | `gpt-4.1` | OpenAI | Provider_d | `model-d-4.1*` | **MISS** |
@@ -364,13 +363,13 @@ provider_k_capabilities             → glm_model_default_caps
 
 해석:
 
-- RFC-0001 이 *source-level brand* 는 cipher 로 바꿨지만, *wire 에 들어오는 model_id 문자열* 은 brand 그대로다. cascade 가 `kimi-k2.6:cloud` 를 그대로 흘리는데 agent_core catalog 의 prefix table 은 `provider_c-k2*` 를 기대 — 100% miss.
+- 부호 치환이 *source-level brand* 는 cipher 로 바꿨지만, *wire 에 들어오는 model_id 문자열* 은 brand 그대로다. cascade 가 `kimi-k2.6:cloud` 를 그대로 흘리는데 agent_core catalog 의 prefix table 은 `provider_c-k2*` 를 기대 — 100% miss.
 - 결과적으로 cascade.toml 의 모든 모델이 `default_provider_d_compat_capabilities` (≡ `provider_d_chat_capabilities`, reasoning=false) 보수적 default 로 fallback 중. 즉 cascade.toml 의 `[models.X.capabilities]` 블록에 사용자가 *명시적으로 적은* capability 선언이 agent_core 가 보는 effective_caps 와 *전혀 일치하지 않는다*.
 - drift WARN (`Thinking_returned_but_declared_unsupported`, `Tools_used_but_declared_unsupported` 등) 이 *전체 cascade 모델* 에서 발생 가능 상태. kimi-k2.6 만 본 것이 아니라 *시스템 전체* 가 catalog miss 영역에 있다.
 
 평면 불일치 문제로서의 함의:
 
-- catalog 에 새 entry 를 추가하는 식의 *etry-by-entry fix* 는 *원천적으로 불가능*. RFC-0001 정책상 새 entry 의 `id_prefix` 도 cipher 여야 하는데 wire 는 brand 를 그대로 흘리므로 매핑이 닫히지 않는다.
+- catalog 에 새 entry 를 추가하는 식의 *etry-by-entry fix* 는 *원천적으로 불가능*. 부호 명명 정책상 새 entry 의 `id_prefix` 도 cipher 여야 하는데 wire 는 brand 를 그대로 흘리므로 매핑이 닫히지 않는다.
 - RFC-AC-018 catalog externalization 도 이 평면 불일치를 *해결하지 못함*. JSON manifest 로 빼내도 `id_prefix` 를 brand 로 쓸지 cipher 로 쓸지가 또 결정점이 된다.
 - 즉 **RFC-AC-023 (hybrid: model=brand 복원) 이 RFC-AC-018 보다 *논리적으로 선행*** 한다. RFC-AC-023 으로 catalog 의 key 평면을 wire 평면과 일치시킨 *후에* 만 RFC-AC-018 의 externalization 이 의미 있는 데이터를 받을 수 있다.
 
@@ -403,7 +402,7 @@ RFC-AC-018 의 inventory (2026-05-12 측정) 를 14일 후 재측정 (2026-05-26
 **핵심 관찰: model_id literal leak 이 *자가 가속*** —
 
 - 14일 동안 +218 literal = ~15 literal/일
-- RFC-0001/0018 미해결 상태에서 새 PR 들이 *literal 을 더 박는* 패턴 지속
+- 부호 명명·RFC-AC-018 미해결 상태에서 새 PR 들이 *literal 을 더 박는* 패턴 지속
 - §5.1 의 0/13 audit + 16:42 runtime drift WARN 과 일관 — catalog 가 평면 불일치 상태라 entry-by-entry fix 동기 약함
 
 **시급성**: 현재 추세 (15 literal/일) 가 유지되면 3개월 후 ~1800 literal 누적, 비가역화. RFC-AC-023 + RFC-AC-018 즉시 진행 안 하면 self-fulfilling spiral.
@@ -554,11 +553,9 @@ agent_core 외부 codebase 에서 vendor sweep 진행 후 발생한 사고 (`gh 
 
 ## 7. Relations
 
-### 7.1 RFC-0001 vendor purge — supersede partial
+### 7.1 부호 명명 — 역방향 sweep
 
-RFC-0001의 **명명 정책 부분**을 *역방향으로 supersede*. 즉 RFC-0001의 14×N 부호 매핑을 표 그대로 *반대 방향으로 sweep*. RFC-0001의 다른 동기(SDK 경계 폐쇄, masc-mcp와의 일관성)는 유효하나 substitution이 abstraction이 아니라 encryption이었다는 자기 평가에 따라 폐기.
-
-RFC-0001 status를 Draft → Withdrawn (superseded by RFC-AC-023)로 변경.
+brand 를 알파벳 부호로 바꾼 **명명 정책**을 되돌린다. 즉 14×N 부호 매핑을 표 그대로 *반대 방향으로 sweep*. 그 치환의 다른 동기(SDK 경계 폐쇄, masc-mcp와의 일관성)는 유효하나 substitution이 abstraction이 아니라 encryption이었다는 자기 평가에 따라 부호 명명은 폐기.
 
 ### 7.2 RFC-AC-018 catalog externalization — supplement
 
@@ -594,9 +591,9 @@ RFC-AC-023 stack merge (this RFC)
 
 **가속 효과**: §5.2 의 +91% literal leak 가 RFC-AC-018 진입 직전까지 자가 가속. Phase 1-5 sweep 이 catalog 데이터를 *brand 평면* 으로 정착시켜 RFC-AC-018 시점 anchor 정확. 두 RFC 합쳐서 leak 곡선 *반전*.
 
-### 7.3 masc-mcp RFC-0174~0177 boundary
+### 7.3 masc-mcp boundary
 
-masc-mcp는 agent_core SDK의 `Provider_kind.t` variant 이름에 의존한다 (RFC-0174~0177 client-agnostic family에서 부호 매핑 적용). 본 RFC의 variant rename은 **breaking change**.
+masc-mcp는 agent_core SDK의 `Provider_kind.t` variant 이름에 의존한다. 본 RFC의 variant rename은 **breaking change**.
 
 옵션:
 

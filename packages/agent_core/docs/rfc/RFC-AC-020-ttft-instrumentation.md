@@ -7,7 +7,7 @@
 | Created | 2026-05-17 |
 | Target | `agent_sdk` (agent_core) |
 | Extends | [[RFC-AC-019]] (stream-lifecycle-aggregation) — adds two fields to its `Streaming_summary` |
-| Related | [[RFC-AC-018]] (provider-model-catalog-externalization), masc-mcp [[RFC-0098]] (typed JSON-RPC envelope, IMPROVE-01 sibling) |
+| Related | [[RFC-AC-018]] (provider-model-catalog-externalization) |
 
 ## 0. Summary
 
@@ -20,7 +20,7 @@ This RFC adds two timing fields to the `Streaming_summary` variant introduced by
 
 TTFT is the canonical chatbot UX latency metric (IBM "Time to First Token", BentoML LLM inference metrics — both 2025). It has been absent from the SDK and from masc-mcp's PERFORMANCE-SLO. This RFC closes the measurement gap on the SDK side.
 
-This RFC is **IMPROVE-04** of the cross-repo (masc-mcp + agent_core) improvement series; sibling [[RFC-0098]] (masc-mcp) closes the silent-failure / typed-envelope side.
+This RFC is **IMPROVE-04** of the cross-repo (masc-mcp + agent_core) improvement series.
 
 ## 1. Problem (line-pinned, 2026-05-17 agent_core main `d88e2fe4`)
 
@@ -245,4 +245,3 @@ PR-1 updates §3.3 table to within 2× of these measured values. If measured P95
 - [Anthropic API Streaming (Messages API)](https://docs.anthropic.com/en/api/messages-streaming)
 - [OpenAI Chat Completions streaming](https://platform.openai.com/docs/api-reference/chat/streaming)
 - [[RFC-AC-019]] — Streaming Lifecycle Aggregation (companion RFC; this RFC extends its `Streaming_summary`).
-- masc-mcp [[RFC-0098]] — Typed JSON-RPC error envelope (sibling IMPROVE-01).

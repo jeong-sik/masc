@@ -1,9 +1,6 @@
 open Alcotest
 
-(** RFC-0084 PR-12 — Host_config typed record invariants.
-
-    PR-12 introduces the typed [Host_config.t] record; the 11 hardcode-site
-    migrations are scoped to *follow-up cleanup PRs* (one per sub-domain).
+(** Host_config typed record invariants.
 
     Tests cover:
     - host defaults and host-derived temporary directories

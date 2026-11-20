@@ -1908,7 +1908,8 @@ class MultipleSelection(unittest.TestCase):
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class WorkspaceFromCurrentDirectory(unittest.TestCase):
-    """RFC workspace-root-resolution stage 1, run against the real binary.
+    """A current directory holding `.masc/config` is the workspace, run against
+    the real binary.
 
     Measured on 0.35.16 with an empty HOME: inside a workspace, `masc init`
     exited 1 with "MASC_BASE_PATH is not set" right after logging the cwd.

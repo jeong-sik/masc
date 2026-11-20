@@ -94,10 +94,8 @@ val clauses : ko:bool -> room:int -> reading -> string list
     mark, and left out when too few cells are left for a cut text to name
     anything, or when the text is blank. *)
 
-val legend : (string * string) list
 val legend_for : ko:bool -> (string * string) list
-(** One row for each word the line can draw, keyed by that word. [legend]
-    returns the English entries; [legend_for ~ko] returns Korean ([~ko:true])
-    or English ([~ko:false]). The cause after [read failed] has no row of its
-    own: [workspace unconfirmed] is wider than the sheet's key column, so the
+(** One row for each word the line can draw, keyed by that word. [legend_for ~ko]
+    returns Korean ([~ko:true]) or English ([~ko:false]). The cause after [read failed] has no row
+    of its own: [workspace unconfirmed] is wider than the sheet's key column, so the
     [read failed] row explains it. *)

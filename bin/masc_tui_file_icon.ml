@@ -82,5 +82,3 @@ let folder_word_for ~ko =
 let legend_for ~ko =
   (folder_glyph, folder_word_for ~ko)
   :: List.map (fun kind -> (glyph kind, word_for ~ko kind)) kinds
-
-let legend = legend_for ~ko:false

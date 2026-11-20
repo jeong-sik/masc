@@ -120,8 +120,6 @@ let column_legend_for ~ko ~empty =
       (edge Bins.Week)
 ;;
 
-let column_legend ~empty = column_legend_for ~ko:false ~empty
-
 (* {1 Words and the second-row strip} *)
 
 let span_number = function
@@ -210,8 +208,6 @@ let legend_for ~ko =
       empty_mark
       unmeasured_mark
 ;;
-
-let legend = legend_for ~ko:false
 
 let ages_clauses ~ko = function
   | None -> [ (if ko then "기억 나이 " else "fact ages ") ^ unmeasured_mark ]

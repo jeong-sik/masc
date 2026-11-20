@@ -23,21 +23,36 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
   let sandbox_letters = List.map Mark.sandbox_letter sandboxes in
   check_int "each sandbox draws its own letter" 3
     (List.length (List.sort_uniq String.compare sandbox_letters));
-  let keys = String.concat " " (List.map fst Mark.column_legend) in
+  let en_legend = Mark.column_legend_for ~ko:false in
+  let ko_legend = Mark.column_legend_for ~ko:true in
+  let en_keys = String.concat " " (List.map fst en_legend) in
+  let ko_keys = String.concat " " (List.map fst ko_legend) in
   List.iter
-    (fun letter -> check_bool ("the legend shows letter " ^ letter) true (contains keys letter))
+    (fun letter ->
+      check_bool ("EN legend shows letter " ^ letter) true (contains en_keys letter);
+      check_bool ("KO legend shows letter " ^ letter) true (contains ko_keys letter))
     (mode_letters @ sandbox_letters);
   List.iter
-    (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
-    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.grid_due_header; "mem"; Masc_tui_keeper_age_ladder.cell_label; "사람 몫"
+    (fun header -> check_bool ("EN legend names " ^ header) true (contains en_keys header))
+    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.grid_due_header; "mem"; Masc_tui_keeper_age_ladder.cell_label; "human"
     ; Mark.axis_now_header; Mark.grid_now_line; Mark.grid_due_header
     ; Mark.grid_lag_header; Mark.grid_librarian_header; Mark.grid_digest_header
     ; Mark.grid_gap_header; Mark.grid_facts_by_age_header; Mark.grid_saved_header
-    ; Mark.grid_stale_header; Mark.grid_facts_header ]
+    ; Mark.grid_stale_header; Mark.grid_facts_header ];
+  List.iter
+    (fun header -> check_bool ("KO legend names " ^ header) true (contains ko_keys header))
+    [ "현재"; "경과"; "단계 / 런타임"; Mark.failing_glyph; "모드"; "S "; "예정"; "mem"
+    ; Masc_tui_keeper_age_ladder.cell_label; "사람 몫"; "효과 확인"; "분류 안 됨"; "쉬는 중" ]
 
 let test_the_column_legend_names_the_failing_cell () =
-  check_bool "the failing-for word is a legend key" true
-    (List.exists (fun (key, _) -> String.equal key Mark.failing_since_word) Mark.column_legend)
+  check_bool "EN failing-for word is a legend key" true
+    (List.exists
+       (fun (key, _) -> String.equal key Mark.failing_since_word)
+       (Mark.column_legend_for ~ko:false));
+  check_bool "KO failing-for word is a legend key" true
+    (List.exists
+       (fun (key, _) -> String.equal key "실패 경과")
+       (Mark.column_legend_for ~ko:true))
 
 let test_the_column_legend_names_the_pulse_cell () =
   let contains haystack needle =
@@ -53,10 +68,15 @@ let test_the_column_legend_names_the_pulse_cell () =
     ; Mark.unknown_mark
     ]
   in
-  check_bool "one legend entry is keyed by all five pulse marks" true
-    (List.exists
-       (fun (key, _) -> List.for_all (fun mark -> contains key mark) pulse_marks)
-       Mark.column_legend)
+  List.iter
+    (fun ko ->
+      check_bool
+        (Printf.sprintf "one legend entry (ko=%b) is keyed by all five pulse marks" ko)
+        true
+        (List.exists
+           (fun (key, _) -> List.for_all (fun mark -> contains key mark) pulse_marks)
+           (Mark.column_legend_for ~ko)))
+    [ false; true ]
 
 let test_operator_disposition_words () =
   let kinds =
@@ -193,9 +213,17 @@ let test_english_legends_have_no_hangul () =
     (Mark.legend_for ~ko:false);
   List.iter
     (fun (k, v) ->
+      Alcotest.(check bool) ("legend_for ~ko:true desc is localized in Hangul: " ^ k) true (has_hangul v))
+    (Mark.legend_for ~ko:true);
+  List.iter
+    (fun (k, v) ->
       Alcotest.(check bool) ("column_legend_for ~ko:false key has no Hangul: " ^ k) false (has_hangul k);
       Alcotest.(check bool) ("column_legend_for ~ko:false desc has no Hangul: " ^ k) false (has_hangul v))
     (Mark.column_legend_for ~ko:false);
+  List.iter
+    (fun (k, v) ->
+      Alcotest.(check bool) ("column_legend_for ~ko:true desc is localized in Hangul: " ^ k) true (has_hangul v))
+    (Mark.column_legend_for ~ko:true);
   Alcotest.(check int) "KO and EN legend_for have matching row counts"
     (List.length (Mark.legend_for ~ko:false)) (List.length (Mark.legend_for ~ko:true));
   Alcotest.(check int) "KO and EN column_legend_for have matching row counts"

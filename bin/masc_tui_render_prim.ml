@@ -923,7 +923,7 @@ let footer_line ?help_door ?status ?recovery_in_slot ?choices state ~max_cells ~
    around it is drawn in, so a painted span hands that back rather than
    resetting it. *)
 
-let slash_hint_text_with ?(ko = false) ~accent ~bad ~restore draft =
+let slash_hint_text_with ~ko ~accent ~bad ~restore draft =
   let paint (span : Masc_tui_command.hint_span) =
     match span with
     | Masc_tui_command.Typed text -> accent ^ text ^ restore
@@ -934,7 +934,7 @@ let slash_hint_text_with ?(ko = false) ~accent ~bad ~restore draft =
   | [] -> None
   | spans -> Some (String.concat "" (List.map paint spans))
 
-let slash_hint_text ?(ko = false) ~restore draft =
+let slash_hint_text ~ko ~restore draft =
   slash_hint_text_with ~ko ~accent:(Theme.accent ()) ~bad:(Theme.bad ()) ~restore draft
 
 (* One synchronous frame owns the recipient, prompt and fitted draft used by

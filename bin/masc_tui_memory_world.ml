@@ -236,5 +236,3 @@ let legend_for ~ko =
       , "world line: a briefing pass is open on disk, not proof that a model is running now; \
          N of M left counts entries still to summarize, and N equal to M starts from nothing" )
     ]
-
-let legend = legend_for ~ko:false

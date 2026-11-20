@@ -137,22 +137,13 @@ let due_glyph : Masc_tui_keeper_list_model.due -> string = function
   | Due_unknown -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
 let legend_for ~ko =
-  if ko then
-    [ health_glyph Reading.Health_running, "정상"
-    ; health_glyph Reading.Health_failing, "실패 중"
-    ; health_glyph Reading.Health_idle, "대기 중"
-    ; paused_glyph, "일시정지 또는 오프라인"
-    ; unread_glyph, "미조회"
-    ]
-  else
-    [ health_glyph Reading.Health_running, "healthy"
-    ; health_glyph Reading.Health_failing, "failing"
-    ; health_glyph Reading.Health_idle, "idle"
-    ; paused_glyph, "paused, or offline"
-    ; unread_glyph, "unread"
-    ]
-
-let legend = legend_for ~ko:false
+  let say korean english = if ko then korean else english in
+  [ health_glyph Reading.Health_running, say "정상" "healthy"
+  ; health_glyph Reading.Health_failing, say "실패 중" "failing"
+  ; health_glyph Reading.Health_idle, say "대기 중" "idle"
+  ; paused_glyph, say "일시정지 또는 오프라인" "paused, or offline"
+  ; unread_glyph, say "미조회" "unread"
+  ]
 
 (* The roster's Mode S cell: a letter for how the keeper is started and a
    letter for the sandbox its row declares. The letters and the words the
@@ -163,10 +154,10 @@ let activation_letter : Reading.keeper_activation_mode -> string = function
   | Reading.Activation_on_demand -> "D"
   | Reading.Activation_autonomous -> "A"
 
-let activation_word : Reading.keeper_activation_mode -> string = function
-  | Reading.Activation_manual -> "manual"
-  | Reading.Activation_on_demand -> "on demand"
-  | Reading.Activation_autonomous -> "autonomous"
+let activation_word ~ko : Reading.keeper_activation_mode -> string = function
+  | Reading.Activation_manual -> if ko then "수동" else "manual"
+  | Reading.Activation_on_demand -> if ko then "요청 시" else "on demand"
+  | Reading.Activation_autonomous -> if ko then "자율" else "autonomous"
 
 let activations =
   [ Reading.Activation_manual; Reading.Activation_on_demand; Reading.Activation_autonomous ]
@@ -354,35 +345,54 @@ let grid_next_column_word ~ko ~window =
   if ko then "다음 " ^ axis_next_glyph ^ " " ^ window else grid_next_header ~window
 
 let column_legend_for ~ko =
+  let say korean english = if ko then korean else english in
+  let col column = grid_column_word ~ko column in
+  let word cell_word = grid_word ~ko cell_word in
   let letters letter values = String.concat "/" (List.map letter values) in
-  let words word values = String.concat " / " (List.map word values) in
-  if not ko then
-    let pulse_marks =
-      [ pulse_ok_mark, "ok"
-      ; pulse_rested_mark, "rested"
-      ; pulse_failed_mark, "failed"
-      ; pulse_quiet_mark, "no turn"
-      ; unknown_mark, "unknown"
-      ]
-    in
-    let half_hour_marks =
-      [ grid_dot_mark, "no turn"
-      ; grid_pulse_ok_mark, "ok"
-      ; grid_pulse_failed_and_ok_mark, "failed and ok"
-      ; grid_full_mark, "failed"
-      ; unknown_mark, "unknown"
-      ]
-    in
-    let marked marks = String.concat " / " (List.map (fun (mark, word) -> mark ^ " " ^ word) marks) in
-    [ now_header, "what the keeper is doing at this moment"
-    ; ( age_header
-      , "time since it last moved: the open turn's latest update (its start before it \
+  let words to_word values = String.concat " / " (List.map to_word values) in
+  let pulse_marks =
+    [ pulse_ok_mark, say "정상" "ok"
+    ; pulse_rested_mark, say "휴식" "rested"
+    ; pulse_failed_mark, say "실패" "failed"
+    ; pulse_quiet_mark, say "턴 없음" "no turn"
+    ; unknown_mark, say "모름" "unknown"
+    ]
+  in
+  let half_hour_marks =
+    [ grid_dot_mark, say "턴 없음" "no turn"
+    ; grid_pulse_ok_mark, say "정상" "ok"
+    ; grid_pulse_failed_and_ok_mark, say "실패·정상 혼재" "failed and ok"
+    ; grid_full_mark, say "실패" "failed"
+    ; unknown_mark, say "모름" "unknown"
+    ]
+  in
+  let marked marks =
+    String.concat " / " (List.map (fun (mark, label) -> mark ^ " " ^ label) marks)
+  in
+  [ ( say "현재" now_header
+    , say "키퍼가 지금 하고 있는 일" "what the keeper is doing at this moment" )
+  ; ( say "경과" age_header
+    , say
+        "마지막 움직임 이후 시간: 진행 중 턴의 최근 갱신(보고 전이면 시작), 없으면 마지막 턴과 대기 시작 중 최근 시각"
+        "time since it last moved: the open turn's latest update (its start before it \
          reports one), else the later of its last turn and the start of its wait" )
-    ; "LIFECYCLE", "the keeper process"
-    ; ( String.concat " "
-          [ axis_before_glyph; grid_now_line; axis_now_header; grid_now_line
-          ; "next " ^ axis_next_glyph; grid_due_header; grid_lag_header ]
-      , Printf.sprintf
+  ; ( say "단계 / 런타임" "LIFECYCLE"
+    , say "키퍼 프로세스 단계와 실행 런타임" "the keeper process" )
+  ; ( String.concat " "
+        [ axis_before_glyph; grid_now_line; col Now_column; grid_now_line
+        ; say "다음 " "next " ^ axis_next_glyph; col Due_column; col Lag_column ]
+    , if ko then
+        Printf.sprintf
+          "목록 외 모든 뷰는 오른쪽 끝 기준으로 같은 열에 맞춰 %s 선이 일렬로 섭니다: 줄 기호(%s 실패, %s 일시정지, \
+           원인 뷰의 %s 복구됨, %s 그 외), 이름, 턴 흐름, 현재 칸, 예정 시각(%s 예약 깨움, 빈칸 없음, %s 알 수 없는 구간), \
+           다음 예약 실행(하루 내 시각, %s, %s, %s%s 이전 조회, %s 모름), 그리고 가장 뒤처진 키퍼 대비 미처리 턴 막대. \
+           2줄 보기에서는 실패 키퍼 아래에 실패 시작(%s), 시도(%s%s%s)와 원인, 다음 런타임(%s, 휴식 중이면 %s %s)이 붙습니다"
+          grid_now_line grid_failing_mark grid_paused_mark grid_recovered_mark grid_ok_mark
+          grid_wake_mark grid_unknown_range_mark (word Late_word) (word Held_word)
+          (word Held_word) unknown_mark unknown_mark axis_before_glyph attempt_glyph
+          grid_chain_link attempt_glyph axis_next_glyph grid_wait_glyph (word Wait_word)
+      else
+        Printf.sprintf
           "every view but the list draws a keeper on the same columns, fixed from the right \
            edge so the %s lines stand in one column: the row mark (%s failing, %s paused, %s \
            recovered in the cause view, %s the rest), the name, the turn pulse, the NOW cell, \
@@ -396,175 +406,131 @@ let column_legend_for ~ko =
            %s since when it fails, the attempts of the failed turn (%s%s%s) and the failure \
            word, and the runtime of the next dispatch (%s, or %s %s while the path rests)"
           grid_now_line grid_failing_mark grid_paused_mark grid_recovered_mark grid_ok_mark
-          grid_wake_mark grid_unknown_range_mark grid_late_word grid_held_word grid_held_word
-          unknown_mark unknown_mark axis_before_glyph
-          attempt_glyph grid_chain_link attempt_glyph axis_next_glyph grid_wait_glyph grid_wait_word )
-    ; ( String.concat " "
-          [ axis_before_glyph ^ " " ^ grid_turns_word; grid_now_line; grid_librarian_header
-          ; grid_now_line; grid_lag_bar_short_header; grid_digest_header; grid_gap_header ]
-      , Printf.sprintf
+          grid_wake_mark grid_unknown_range_mark (word Late_word) (word Held_word)
+          (word Held_word) unknown_mark unknown_mark axis_before_glyph attempt_glyph
+          grid_chain_link attempt_glyph axis_next_glyph grid_wait_glyph (word Wait_word) )
+  ; ( String.concat " "
+        [ axis_before_glyph ^ " " ^ col Turns_column; grid_now_line; col Librarian_column
+        ; grid_now_line; col Lag_bar_short_column; col Digest_column; col Gap_column ]
+    , if ko then
+        Printf.sprintf
+          "기억 뷰: 턴 흐름, Librarian 마지막 처리 결과(기억 행이 없으면 %s), 목록 중 가장 뒤처진 키퍼 대비 안 읽은 턴 막대, \
+           마지막 요약 이후 경과(최초 요약 전은 %s), 요청이 건너뛴 아톰 수 · %s는 서버 미측정 값"
+          (word No_data_word) Masc_tui_theme.Glyph.no_value
+          Masc_tui_keeper_age_ladder.unmeasured_mark
+      else
+        Printf.sprintf
           "the memory view: the turn pulse, how the librarian's last pass ended (%s without a \
            memory row), the unread turns as a bar against the listed keeper furthest behind, \
            the time since the last digest (%s before the first) and the atoms requests skip; %s \
            is a value the server did not measure, a pass this server has not seen yet too"
-          grid_no_data_word Masc_tui_theme.Glyph.no_value Masc_tui_keeper_age_ladder.unmeasured_mark )
-    ; ( String.concat " "
-          [ grid_facts_by_age_header; grid_now_line; grid_saved_header; grid_now_line
-          ; grid_lag_bar_short_header; grid_stale_header; grid_facts_header ]
-      , Printf.sprintf
+          (word No_data_word) Masc_tui_theme.Glyph.no_value
+          Masc_tui_keeper_age_ladder.unmeasured_mark )
+  ; ( String.concat " "
+        [ col Facts_by_age_column; grid_now_line; col Saved_column; grid_now_line
+        ; col Lag_bar_short_column; col Stale_column; col Facts_column ]
+    , if ko then
+        Printf.sprintf
+          "나이 뷰: %s(그룹 제목은 소속 키퍼 합계), %s 스냅샷 저장 경과(스냅샷 없으면 %s %s), 안 읽은 턴 막대, \
+           %sN 무효화된 출처 수, 최다 사실 키퍼 대비 사실 수 막대 · %s는 서버 미측정 값"
+          (Masc_tui_keeper_age_ladder.column_legend_for ~ko ~empty:grid_dot_mark)
+          grid_saved_mark Masc_tui_theme.Glyph.no_value (word No_snapshot_word) grid_stale_mark
+          Masc_tui_keeper_age_ladder.unmeasured_mark
+      else
+        Printf.sprintf
           "the age view: the keeper's facts in %s, and a group title adds up its keepers; %s \
            the time since its memory snapshot was saved (%s %s without one), the unread-turn \
            bar, %sN invalidated sources and the fact count with a level against the keeper with \
            the most facts; %s is a value the server did not measure"
-          (Masc_tui_keeper_age_ladder.column_legend_for ~ko:false ~empty:grid_dot_mark)
-          grid_saved_mark Masc_tui_theme.Glyph.no_value grid_no_snapshot_word grid_stale_mark
+          (Masc_tui_keeper_age_ladder.column_legend_for ~ko ~empty:grid_dot_mark)
+          grid_saved_mark Masc_tui_theme.Glyph.no_value (word No_snapshot_word) grid_stale_mark
           Masc_tui_keeper_age_ladder.unmeasured_mark )
-    ; ( String.concat " " (List.map fst half_hour_marks)
-      , Printf.sprintf
+  ; ( String.concat " " (List.map fst half_hour_marks)
+    , if ko then
+        Printf.sprintf
+          "턴 흐름(30분 단위): 최근 자율 턴 결과를 30분당 한 기호로 오른쪽이 최신이 되게 표시(%s) · \
+           휴식 턴은 실패로 집계, 채팅 턴은 제외, 키퍼 기록 이전 구간은 %s"
+          (marked half_hour_marks) unknown_mark
+      else
+        Printf.sprintf
           "the views' turn pulse: autonomous turn results of the last half hours, one mark \
            per half hour, newest on the right: %s; a rested turn counts as failed, chat turns \
            are not counted, and a half hour from before the server's record of the keeper \
            reads %s. The header names how long the marks span"
           (marked half_hour_marks) unknown_mark )
-    ; ( failing_glyph
-      , "a failing keeper's last failure: how long ago · cause · the runtime that ended it \
+  ; ( failing_glyph
+    , say
+        "실패 중인 키퍼의 마지막 실패: 경과 · 원인 · 종료 런타임 · 시도한 후보"
+        "a failing keeper's last failure: how long ago · cause · the runtime that ended it \
          · candidates tried. The list draws it in place of its runtime or first in DETAIL" )
-    ; ( failing_since_word
-      , Printf.sprintf
+  ; ( say "실패 경과" failing_since_word
+    , if ko then
+        Printf.sprintf
+          "실패 상태가 이어진 시간 · 시작 시각 미기록 또는 시계 앞섬이면 %s (상세 2줄)"
+          unknown_mark
+      else
+        Printf.sprintf
           "how long the keeper has been in the failing phase; %s when the server recorded \
            no start, or the start is ahead of this screen's clock (Detailed second row)"
           unknown_mark )
-    ; ( String.concat " " (List.map fst pulse_marks)
-      , Printf.sprintf
+  ; ( String.concat " " (List.map fst pulse_marks)
+    , if ko then
+        Printf.sprintf
+          "최근 %d시간 자율 턴 결과(시간당 한 기호, 오른쪽이 최신): %s · 채팅 턴 제외, 기록 이전 구간은 %s (상세 2줄)"
+          pulse_hours (marked pulse_marks) unknown_mark
+      else
+        Printf.sprintf
           "autonomous turn results of the last %d clock hours, one mark per hour, newest \
            on the right: %s; chat turns are not counted, and an hour from before the \
            server's record of the keeper reads %s (Detailed second row)"
           pulse_hours (marked pulse_marks) unknown_mark )
-    ; "Mode " ^ letters activation_letter activations, words activation_word activations
-    ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
-    ; ( "resting"
-      , Printf.sprintf
+  ; ( say "모드 " "Mode " ^ letters activation_letter activations
+    , words (activation_word ~ko) activations )
+  ; (* Both KO ("모드 S") and EN ("Mode S") roster headers use "S" for the sandbox column. *)
+    ( "S " ^ letters sandbox_letter sandboxes
+    , say "샌드박스: " "sandbox: " ^ words sandbox_word sandboxes )
+  ; ( say "쉬는 중" "resting"
+    , if ko then
+        Printf.sprintf
+          "휴식 중인 경로: 남은 휴식 시간(제공자 안내 / 상한 제한) · 상세에서는 턴 실패 뒤 다음 후보 앞에 %s 표시"
+          axis_next_glyph
+      else
+        Printf.sprintf
           "resting path: relative duration (provider stated / bounded); in DETAIL %s prefixes next candidate after turn failure"
           axis_next_glyph )
-    ; ( grid_due_header
-      , "the views' next scheduled run or hold status; DETAIL's schedule badge says the same" )
-    ; ( "mem · lag · stale"
-      , Printf.sprintf
+  ; ( col Due_column
+    , say
+        "다음 예약 실행 시각 또는 보류 상태 · 상세 일정 배지와 같은 정보"
+        "the views' next scheduled run or hold status; DETAIL's schedule badge says the same" )
+  ; ( say "mem · 지연 · 무효화" "mem · lag · stale"
+    , if ko then
+        Printf.sprintf
+          "키퍼 기억 상태: 안 읽은 턴 지연, 갱신 시각, 무효화된 출처 · mem %s는 미조회 또는 거부된 행, \
+           mem !은 이 키퍼 행 조회 거부, %s는 기억 스냅샷 없음"
+          Masc_tui_keeper_age_ladder.unmeasured_mark Masc_tui_theme.Glyph.no_value
+      else
+        Printf.sprintf
           "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second \
            row; its lag under %s in the views, and the memory and age views draw their own cells). \
            mem %s is memory health not read yet, or a refused row that may be this keeper's; mem \
            ! is this keeper's row, refused; %s is a keeper with no memory snapshot"
           grid_lag_header Masc_tui_keeper_age_ladder.unmeasured_mark
           Masc_tui_theme.Glyph.no_value )
-    ; ( Masc_tui_keeper_age_ladder.cell_label
-      , Printf.sprintf "%s (Detailed second row; the age view draws the bins under %s, %s for an \
-                         empty one)"
-          (Masc_tui_keeper_age_ladder.legend_for ~ko:false) grid_facts_by_age_header grid_dot_mark )
-    ; "human / review / unclassed", "requires human operator action, effect review, or unmapped fault (NOW column)"
-    ]
-  else
-    let pulse_marks =
-      [ pulse_ok_mark, "정상"
-      ; pulse_rested_mark, "휴식"
-      ; pulse_failed_mark, "실패"
-      ; pulse_quiet_mark, "턴 없음"
-      ; unknown_mark, "모름"
-      ]
-    in
-    let half_hour_marks =
-      [ grid_dot_mark, "턴 없음"
-      ; grid_pulse_ok_mark, "정상"
-      ; grid_pulse_failed_and_ok_mark, "실패·정상 혼재"
-      ; grid_full_mark, "실패"
-      ; unknown_mark, "모름"
-      ]
-    in
-    let marked marks = String.concat " / " (List.map (fun (mark, word) -> mark ^ " " ^ word) marks) in
-    let activation_word_ko = function
-      | Reading.Activation_manual -> "수동"
-      | Reading.Activation_on_demand -> "요청 시"
-      | Reading.Activation_autonomous -> "자율"
-    in
-    [ "현재", "키퍼가 지금 하고 있는 일"
-    ; "경과", "마지막 움직임 이후 시간: 진행 중 턴의 최근 갱신(보고 전이면 시작), 없으면 마지막 턴과 대기 시작 중 최근 시각"
-    ; "단계 / 런타임", "키퍼 프로세스 단계와 실행 런타임"
-    ; ( String.concat " "
-          [ axis_before_glyph; grid_now_line; grid_column_word ~ko:true Now_column; grid_now_line
-          ; "다음 " ^ axis_next_glyph; grid_column_word ~ko:true Due_column; grid_column_word ~ko:true Lag_column ]
-      , Printf.sprintf
-          "목록 외 모든 뷰는 오른쪽 끝 기준으로 같은 열에 맞춰 %s 선이 일렬로 섭니다: 줄 기호(%s 실패, %s 일시정지, \
-           원인 뷰의 %s 복구됨, %s 그 외), 이름, 턴 흐름, 현재 칸, 예정 시각(%s 예약 깨움, 빈칸 없음, %s 알 수 없는 구간), \
-           다음 예약 실행(하루 내 시각, %s, %s, %s%s 이전 조회, %s 모름), 그리고 가장 뒤처진 키퍼 대비 미처리 턴 막대. \
-           2줄 보기에서는 실패 키퍼 아래에 실패 시작(%s), 시도(%s%s%s)와 원인, 다음 런타임(%s, 휴식 중이면 %s %s)이 붙습니다"
-          grid_now_line grid_failing_mark grid_paused_mark grid_recovered_mark grid_ok_mark
-          grid_wake_mark grid_unknown_range_mark (grid_word ~ko:true Late_word)
-          (grid_word ~ko:true Held_word) (grid_word ~ko:true Held_word)
-          unknown_mark unknown_mark axis_before_glyph
-          attempt_glyph grid_chain_link attempt_glyph axis_next_glyph grid_wait_glyph
-          (grid_word ~ko:true Wait_word) )
-    ; ( String.concat " "
-          [ axis_before_glyph ^ " " ^ grid_column_word ~ko:true Turns_column; grid_now_line
-          ; grid_column_word ~ko:true Librarian_column; grid_now_line
-          ; grid_column_word ~ko:true Lag_bar_short_column; grid_column_word ~ko:true Digest_column
-          ; grid_column_word ~ko:true Gap_column ]
-      , Printf.sprintf
-          "기억 뷰: 턴 흐름, Librarian 마지막 처리 결과(기억 행이 없으면 %s), 목록 중 가장 뒤처진 키퍼 대비 안 읽은 턴 막대, \
-           마지막 요약 이후 경과(최초 요약 전은 %s), 요청이 건너뛴 아톰 수 · %s는 서버 미측정 값"
-          (grid_word ~ko:true No_data_word) Masc_tui_theme.Glyph.no_value
-          Masc_tui_keeper_age_ladder.unmeasured_mark )
-    ; ( String.concat " "
-          [ grid_column_word ~ko:true Facts_by_age_column; grid_now_line
-          ; grid_column_word ~ko:true Saved_column; grid_now_line
-          ; grid_column_word ~ko:true Lag_bar_short_column; grid_column_word ~ko:true Stale_column
-          ; grid_column_word ~ko:true Facts_column ]
-      , Printf.sprintf
-          "나이 뷰: %s(그룹 제목은 소속 키퍼 합계), %s 스냅샷 저장 경과(스냅샷 없으면 %s %s), 안 읽은 턴 막대, \
-           %sN 무효화된 출처 수, 최다 사실 키퍼 대비 사실 수 막대 · %s는 서버 미측정 값"
-          (Masc_tui_keeper_age_ladder.column_legend_for ~ko:true ~empty:grid_dot_mark)
-          grid_saved_mark Masc_tui_theme.Glyph.no_value (grid_word ~ko:true No_snapshot_word)
-          grid_stale_mark Masc_tui_keeper_age_ladder.unmeasured_mark )
-    ; ( String.concat " " (List.map fst half_hour_marks)
-      , Printf.sprintf
-          "턴 흐름(30분 단위): 최근 자율 턴 결과를 30분당 한 기호로 오른쪽이 최신이 되게 표시(%s) · \
-           휴식 턴은 실패로 집계, 채팅 턴은 제외, 키퍼 기록 이전 구간은 %s"
-          (marked half_hour_marks) unknown_mark )
-    ; ( failing_glyph
-      , "실패 중인 키퍼의 마지막 실패: 경과 · 원인 · 종료 런타임 · 시도한 후보" )
-    ; ( "실패 경과"
-      , Printf.sprintf
-          "실패 상태가 이어진 시간 · 시작 시각 미기록 또는 시계 앞섬이면 %s (상세 2줄)"
-          unknown_mark )
-    ; ( String.concat " " (List.map fst pulse_marks)
-      , Printf.sprintf
-          "최근 %d시간 자율 턴 결과(시간당 한 기호, 오른쪽이 최신): %s · 채팅 턴 제외, 기록 이전 구간은 %s (상세 2줄)"
-          pulse_hours (marked pulse_marks) unknown_mark )
-    ; "모드 " ^ letters activation_letter activations, words activation_word_ko activations
-    ; "S " ^ letters sandbox_letter sandboxes, "샌드박스: " ^ words sandbox_word sandboxes
-    ; ( "쉬는 중"
-      , Printf.sprintf
-          "휴식 중인 경로: 남은 휴식 시간(제공자 안내 / 상한 제한) · 상세에서는 턴 실패 뒤 다음 후보 앞에 %s 표시"
-          axis_next_glyph )
-    ; ( grid_column_word ~ko:true Due_column
-      , "다음 예약 실행 시각 또는 보류 상태 · 상세 일정 배지와 같은 정보" )
-    ; ( "mem · 지연 · 무효화"
-      , Printf.sprintf
-          "키퍼 기억 상태: 안 읽은 턴 지연, 갱신 시각, 무효화된 출처 · mem %s는 미조회 또는 거부된 행, \
-           mem !은 이 키퍼 행 조회 거부, %s는 기억 스냅샷 없음"
-          Masc_tui_keeper_age_ladder.unmeasured_mark Masc_tui_theme.Glyph.no_value )
-    ; ( Masc_tui_keeper_age_ladder.cell_label
-      , Printf.sprintf "%s (상세 2줄 · 나이 뷰는 %s 아래 구간 표시, 빈 구간은 %s)"
-          (Masc_tui_keeper_age_ladder.legend_for ~ko:true)
-          (grid_column_word ~ko:true Facts_by_age_column) grid_dot_mark )
-    ; "사람 몫 / 효과 확인 / 분류 안 됨", "사람 조치 필요, 효과 확인 필요, 또는 미분류 오류(현재 열)"
-    ]
-
-let column_legend =
-  (* Preserved for existing legend key tests; live help sheets use [column_legend_for]. *)
-  List.map
-    (fun (k, v) ->
-      if String.equal k "resting" then
-        ("쉬는 중", v)
-      else if String.equal k "human / review / unclassed" then
-        ("사람 몫 / 효과 확인 / 분류 안 됨", v)
-      else (k, v))
-    (column_legend_for ~ko:false)
+  ; ( Masc_tui_keeper_age_ladder.cell_label
+    , if ko then
+        Printf.sprintf "%s (상세 2줄 · 나이 뷰는 %s 아래 구간 표시, 빈 구간은 %s)"
+          (Masc_tui_keeper_age_ladder.legend_for ~ko) (col Facts_by_age_column) grid_dot_mark
+      else
+        Printf.sprintf
+          "%s (Detailed second row; the age view draws the bins under %s, %s for an empty one)"
+          (Masc_tui_keeper_age_ladder.legend_for ~ko) (col Facts_by_age_column) grid_dot_mark )
+  ; ( String.concat " / "
+        (List.map (operator_disposition_word ~ko)
+           [ Masc.Keeper_execution_receipt.Disp_operator_action_required
+           ; Masc.Keeper_execution_receipt.Disp_effect_review_required
+           ; Masc.Keeper_execution_receipt.Disp_unknown
+           ])
+    , say
+        "사람 조치 필요, 효과 확인 필요, 또는 미분류 오류(현재 열)"
+        "requires human operator action, effect review, or unmapped fault (NOW column)" )
+  ]

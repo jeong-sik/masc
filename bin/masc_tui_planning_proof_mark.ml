@@ -72,8 +72,6 @@ let tone proof = Option.map status (kind_of_proof proof)
 
 let legend_for ~ko = List.map (if ko then entry_korean else entry) kinds
 
-let legend = legend_for ~ko:false
-
 let legend_rows ~ko ~max_cells ~max_rows proofs =
   let label = if ko then "  판정  " else "  JUDGE  " in
   let label_cells = Masc_tui_message_layout.display_width label in

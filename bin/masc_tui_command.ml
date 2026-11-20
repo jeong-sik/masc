@@ -423,8 +423,6 @@ let help_lines_for ~ko =
        text ^ help_summary_padding text ^ summary_for ~ko entry)
     catalog
 
-let help_lines = help_lines_for ~ko:false
-
 (* Every spelling the parser answers to, one entry each. An alias is not a
    second command: the parser folds the pair into a single arm
    ("metrics", _ | "telemetry", _ -> Open_metrics), so the catalog describes the
@@ -790,8 +788,6 @@ let hint_spans_for ~ko = function
            else " is not a command" ^ detail_sep ^ "/help lists them")
       ]
 
-let hint_spans h = hint_spans_for ~ko:false h
-
 (* How [/keeper <name>] finds its keeper. The command grammar stays closed —
    no prefix matching on command words — but a keeper NAME is an argument,
    and an operator mid-thought types the least of it that still names one
@@ -885,7 +881,7 @@ type menu_state = Menu_idle | Menu_dismissed of string | Menu_selected of { draf
 type menu_item = { completion : string; label : string; description : string }
 type menu = { items : menu_item list; selected : int }
 
-let menu ?(ko = false) ~keeper_names ~state text =
+let menu ~ko ~keeper_names ~state text =
   let dismissed = match state with
     | Menu_dismissed draft -> String.equal draft text
     | Menu_idle | Menu_selected _ -> false in

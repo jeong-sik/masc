@@ -28,5 +28,4 @@ val folder_glyph : string
 
 (* Each mark and what the file behind it is. The tree draws the mark with no
    word beside it, so this is what the help sheet prints. *)
-val legend : (string * string) list
 val legend_for : ko:bool -> (string * string) list

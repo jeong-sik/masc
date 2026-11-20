@@ -54,5 +54,3 @@ let glyph post_kind =
   | Some kind -> fst (entry kind)
 
 let legend_for ~ko = List.map (entry_for ~ko) kinds
-
-let legend = legend_for ~ko:false

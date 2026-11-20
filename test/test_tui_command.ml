@@ -146,7 +146,7 @@ let test_play_commands_are_explicit () =
 
 let test_play_menu_requires_explicit_execution () =
   let menu draft =
-    match Command.menu ~keeper_names:[] ~state:Command.Menu_idle draft with
+    match Command.menu ~ko:false ~keeper_names:[] ~state:Command.Menu_idle draft with
     | Some menu -> menu
     | None -> fail ("missing Play suggestions for " ^ draft)
   in
@@ -156,7 +156,7 @@ let test_play_menu_requires_explicit_execution () =
     (List.map (fun (item : Command.menu_item) -> item.label) choices.items);
   let draft = "/play " in
   let selecting = Command.menu_step ~direction:Command.Next ~draft choices in
-  let selected = match Command.menu ~keeper_names:[] ~state:selecting draft with
+  let selected = match Command.menu ~ko:false ~keeper_names:[] ~state:selecting draft with
     | Some menu -> menu | None -> fail "moving selection closed the Play menu" in
   let completion = Command.menu_accept selected in
   check string "selection inserts the issue verb, not guessed arguments"
@@ -170,7 +170,7 @@ let test_play_menu_requires_explicit_execution () =
     "/play revoke" (Command.menu_accept (menu "/play r"));
   List.iter (fun draft ->
     check bool (draft ^ " is ready for execution, not another menu acceptance") true
-      (Option.is_none (Command.menu ~keeper_names:[] ~state:Command.Menu_idle draft)))
+      (Option.is_none (Command.menu ~ko:false ~keeper_names:[] ~state:Command.Menu_idle draft)))
     ["/play invites"; "/play link"; "/play invite guest1 24"; "/play revoke guest1"]
 
 let test_ref_command_parses_url_and_bare_id () =
@@ -398,7 +398,7 @@ let test_every_command_has_a_help_line () =
       check bool (Printf.sprintf "help mentions /%s" word) true
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
-           Command.help_lines);
+           (Command.help_lines_for ~ko:false));
       check bool (Printf.sprintf "KO help mentions /%s" word) true
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
@@ -756,17 +756,18 @@ let test_an_alias_shares_its_command_row () =
     (List.exists
        (fun (entry : Command.command_help) -> entry.Command.aliases <> [])
        Command.catalog);
+  let en_help = Command.help_lines_for ~ko:false in
   check bool "/metrics spells /telemetry in its own column" true
     (List.exists
        (fun line -> String.starts_with ~prefix:"/metrics (/telemetry)" line)
-       Command.help_lines);
+       en_help);
   check int "and /telemetry opens no row of its own" 0
     (List.length
        (List.filter
           (fun line -> String.starts_with ~prefix:"/telemetry" line)
-          Command.help_lines));
+          en_help));
   check int "one row per command" (List.length Command.catalog)
-    (List.length Command.help_lines)
+    (List.length en_help)
 
 (* An alias is one command under another spelling, so every composer path must
    answer the two the same way. The pairs are read off the catalog rather than
@@ -977,7 +978,7 @@ let test_resource_read_keeps_each_part_type () =
         (List.length contents)
 
 let test_command_menu_keeps_selection_separate_from_draft () =
-  let menu state draft = Command.menu ~keeper_names:["가람"; "가온"] ~state draft |> Option.get in
+  let menu state draft = Command.menu ~ko:false ~keeper_names:["가람"; "가온"] ~state draft |> Option.get in
   let draft = "/t\nkeep the original body" in
   let initial = menu Command.Menu_idle draft in
   let next = menu (Command.menu_step ~direction:Command.Next ~draft initial) draft in
@@ -994,11 +995,11 @@ let test_command_menu_keeps_selection_separate_from_draft () =
   check int "window contains one selection" 1
     (Command.menu_window ~max_rows:2 next |> List.filter fst |> List.length);
   check bool "dismissed exact draft closes" true
-    (Option.is_none (Command.menu ~keeper_names:[] ~state:(Command.Menu_dismissed draft) draft));
+    (Option.is_none (Command.menu ~ko:false ~keeper_names:[] ~state:(Command.Menu_dismissed draft) draft));
   check bool "changed query opens" true
-    (Option.is_some (Command.menu ~keeper_names:[] ~state:(Command.Menu_dismissed draft) "/d"));
+    (Option.is_some (Command.menu ~ko:false ~keeper_names:[] ~state:(Command.Menu_dismissed draft) "/d"));
   check bool "complete command can execute normally" true
-    (Option.is_none (Command.menu ~keeper_names:[] ~state:Command.Menu_idle "/help"));
+    (Option.is_none (Command.menu ~ko:false ~keeper_names:[] ~state:Command.Menu_idle "/help"));
   check string "Korean keeper argument remains whole" "/keeper 가온"
     (let draft = "/keeper 가" in
      let initial = menu Command.Menu_idle draft in

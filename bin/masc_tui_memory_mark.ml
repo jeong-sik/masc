@@ -47,5 +47,3 @@ let legend_for ~ko =
   (* The words of the header's world line follow the marks, its `?` among them:
      they are what a reader of that line would look up. *)
   @ Masc_tui_memory_world.legend_for ~ko
-
-let legend = legend_for ~ko:false

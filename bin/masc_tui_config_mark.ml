@@ -50,8 +50,6 @@ let prompt_legend_for ~ko =
     ; (missing_glyph, "no prompt file behind this key")
     ]
 
-let prompt_legend = prompt_legend_for ~ko:false
-
 (* A param the reader set takes the prompt registry's override mark, and the
    registered default draws a blank, as a shipped prompt file does. The two
    were ● and ○, the settled and waiting status marks (7.2), which a value's
@@ -69,5 +67,3 @@ let param_legend_for ~ko =
     [ (param_override_glyph, "직접 설정한 값 · 기호 없음은 등록된 기본값") ]
   else
     [ (param_override_glyph, "set by you; unmarked is the registered default") ]
-
-let param_legend = param_legend_for ~ko:false

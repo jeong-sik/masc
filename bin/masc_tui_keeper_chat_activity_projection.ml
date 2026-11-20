@@ -963,8 +963,6 @@ let legend_for ~ko =
         else "a tool call the server attributes to the skill above it" )
     ]
 
-let legend = legend_for ~ko:false
-
 let proof_edge_bytes = 8
 let proof_full_bytes = 18
 

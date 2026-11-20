@@ -356,136 +356,6 @@ let approval_decision_unverified = function
 
 open Masc_tui_async_protocol
 
-let machine_view = ref (ref ())
-let retire_machine_view () = machine_view := ref ()
-type pending_msx_checkpoint = {
-  checkpoint_operation_id : string;
-  checkpoint_restore : bool;
-  checkpoint_slot : string;
-  checkpoint_workspace : Tui_decode.server_identity;
-}
-module Checkpoint_pending = Masc_tui_msx_checkpoint_pending
-let pending_msx_checkpoints : pending_msx_checkpoint list ref = ref []
-let checkpoint_storage_errors : (string, string) Hashtbl.t = Hashtbl.create 4
-let checkpoint_root workspace = Tui_decode.Canonical_path.to_string workspace.Tui_decode.sid_masc_root
-let checkpoint_binding pending =
-  Result.map (fun operation_id ->
-    {Checkpoint_pending.operation_id; restore=pending.checkpoint_restore; slot=pending.checkpoint_slot;
-     base_path=Tui_decode.Canonical_path.to_string pending.checkpoint_workspace.sid_base_path;
-     masc_root=checkpoint_root pending.checkpoint_workspace})
-    (Keeper_operation_id.of_string pending.checkpoint_operation_id)
-let recover_checkpoints state workspace =
-  let root = checkpoint_root workspace in
-  let base_path = Tui_decode.Canonical_path.to_string workspace.Tui_decode.sid_base_path in
-  (* Other TUI processes can publish an unresolved intent after our first read.
-     Read the shared inventory on every write-admission check. *)
-  if Result.is_ok (Masc_tui_types.workspace_change_origin state) then
-    match Checkpoint_pending.load ~masc_root:root with
-    | Error detail ->
-        Hashtbl.replace checkpoint_storage_errors root detail;
-        state.msx_notice <- Some ("Checkpoint intent storage unavailable; machine changes blocked: " ^ detail)
-    | Ok bindings ->
-        (* [load] keeps only bindings under [root], and the filter keeps only
-           those under [base_path], so each one names [workspace]'s paths. *)
-        let recovered = List.map (fun (binding : Checkpoint_pending.binding) ->
-          {checkpoint_operation_id=Keeper_operation_id.to_string binding.operation_id;
-           checkpoint_restore=binding.restore; checkpoint_slot=binding.slot;
-           checkpoint_workspace=workspace})
-          (List.filter (fun (binding : Checkpoint_pending.binding) -> binding.base_path=base_path) bindings) in
-        pending_msx_checkpoints := recovered @ List.filter (fun pending ->
-          Tui_decode.Canonical_path.to_string pending.checkpoint_workspace.sid_base_path <> base_path
-          || checkpoint_root pending.checkpoint_workspace <> root) !pending_msx_checkpoints;
-        Hashtbl.remove checkpoint_storage_errors root;
-        if recovered <> [] then
-          state.msx_notice <- Some "Unresolved checkpoint recovered; F5 inspects its original receipt before machine control resumes."
-let checkpoint_for_workspace state =
-  match state.server_identity with
-  | None -> None
-  | Some workspace ->
-      recover_checkpoints state workspace;
-      List.find_opt (fun pending ->
-        Tui_decode.Canonical_path.equal pending.checkpoint_workspace.sid_base_path
-          workspace.sid_base_path
-        && checkpoint_root pending.checkpoint_workspace = checkpoint_root workspace)
-        !pending_msx_checkpoints
-let remember_checkpoint pending =
-  let root = checkpoint_root pending.checkpoint_workspace in
-  match checkpoint_binding pending with
-  | Error detail -> Error detail
-  | Ok binding ->
-      (match Checkpoint_pending.remember ~masc_root:root binding with
-       | Error detail -> Error detail
-       | Ok () -> pending_msx_checkpoints := pending :: !pending_msx_checkpoints; Ok ())
-let forget_checkpoint pending =
-  let root = checkpoint_root pending.checkpoint_workspace in
-  match Result.bind (checkpoint_binding pending) (Checkpoint_pending.forget ~masc_root:root) with
-  | Error detail -> Hashtbl.replace checkpoint_storage_errors root detail
-  | Ok () ->
-      Hashtbl.remove checkpoint_storage_errors root;
-      pending_msx_checkpoints := List.filter (fun held ->
-        held.checkpoint_operation_id <> pending.checkpoint_operation_id
-        || checkpoint_root held.checkpoint_workspace <> root) !pending_msx_checkpoints
-let machine_changes_allowed state =
-  Result.is_ok (Masc_tui_types.workspace_change_origin state)
-  && Option.is_none (checkpoint_for_workspace state)
-  && not (Option.exists (fun workspace -> Hashtbl.mem checkpoint_storage_errors (checkpoint_root workspace)) state.server_identity)
-let machine_change_refusal = "MSX control requires a verified server matching this TUI's local workspace."
-
-(* The cached identity only describes the last read. A machine mutation
-   revalidates its captured endpoint immediately before dispatch, and its
-   completion owns only the view and authority that requested it. A change
-   the workspace guard stops never left, so it goes to [withdrawn] with its
-   refusal, apart from [deliver]'s refusals and unknown outcomes (RFC §2). *)
-let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unknown ~withdrawn ~deliver write =
-  let authority = state.workspace_authority in
-  let view = ref !machine_view in
-  let port = state.port in
-  let identity = state.server_identity in
-  let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox in
-  let current () =
-    authority = state.workspace_authority && !view == !machine_view && port = state.port
-  in
-  (* The identity the check confirmed is the one the request carries, so the
-     server compares it again at the moment it applies the change. *)
-  let admission =
-    try
-      if not (machine_changes_allowed state) then Error (Request_failed machine_change_refusal)
-      else match identity, check () with
-      | _, Error refusal -> Error (Request_withdrawn refusal)
-      | None, Ok () -> Error (Request_withdrawn Workspace_identity_not_confirmed)
-      | Some expected, Ok () when current () && machine_changes_allowed state -> Ok expected
-      | Some _, Ok () -> Error (Request_failed "MSX control view or workspace authority withdrawn")
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Request_failed (Printexc.to_string exn))
-  in
-  match admission with
-  | Error (Request_failed detail) when current () ->
-      state.machine_interaction <- Observe_machine;
-      deliver None (Error (refused detail))
-  | Error (Request_withdrawn refusal) when current () ->
-      state.machine_interaction <- Observe_machine;
-      withdrawn refusal
-  | Error (Request_failed _ | Request_withdrawn _) -> ()
-  | Ok expected_workspace ->
-      let result =
-        try
-            if checkpoint_boundary then begin
-              retire_machine_view ();
-              view := !machine_view;
-              state.msx_live_in_flight <- None
-            end;
-            (* No yield separates retirement from the checkpoint callback,
-               which records its pending identity before sending HTTP. *)
-            write ~port ~expected_workspace
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (unknown (Printexc.to_string exn))
-      in
-      if current () then deliver (Some expected_workspace) result
-
-;;
-
 let launch_artifact_checks_load state ~mailbox =
   if server_authority_ready state then
     match Masc_tui_fetched.refresh ~equal:Unit.equal state.artifact_checks ~key:() with
@@ -893,47 +763,6 @@ let () =
 (* Load the keeper's durable transcript. Runs on its own fiber: the pane stays
    responsive, and a slow or unreachable server costs the scrollback rather than
    the keypress that asked for it. *)
-let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
-  if not (server_authority_ready state) || Option.is_some (checkpoint_for_workspace state) then () else
-  let current_view = !machine_view in
-  match state.msx_live_in_flight with
-  | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
-  | Some _ | None ->
-    (* An abandoned view's slow read does not own the reopened screen. Its
-       reply still has to match this exact slot before it can settle it. *)
-    let request = { live_view = current_view; live_port = state.port } in
-    let since = Masc_tui_machine_live.since state.msx_live in
-    let expected_workspace = state.server_identity in
-    state.msx_live_owed <- Masc_tui_owed_read.started state.msx_live_owed;
-    state.msx_live_in_flight <- Some request;
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-      ~deliver:(fun result -> Msx_msg (Msx_live_loaded (request, result)))
-      (fun () -> Masc_tui_http.fetch_machine_live ?expected_workspace ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-        ~port:request.live_port Masc.Machine_lane.Msx ~since
-        |> Result.map_error (fun detail -> Request_failed detail))
-;;
-
-
-let launch_dos_live_read (state : Masc_tui_types.state) ~mailbox =
-  if server_authority_ready state then begin
-  let current_view = !machine_view in
-  match state.dos_live_in_flight with
-  | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
-  | Some _ | None ->
-    let request = { live_view = !machine_view; live_port = state.port } in
-    state.dos_live_owed <- Masc_tui_owed_read.started state.dos_live_owed;
-    state.dos_live_in_flight <- Some request;
-    let since = Masc_tui_machine_live.since state.dos_live in
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-      ~deliver:(fun result -> Dos_live_loaded (request, result))
-      (fun () -> Masc_tui_http.fetch_machine_live ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-        ~port:request.live_port Masc.Machine_lane.Dos ~since
-        |> Result.map_error (fun detail -> Request_failed detail))
-  end
-;;
-
 let cancel_board_preparation state =
   Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state
     ~key:(Masc_tui_board_reader.preparation_job request))
@@ -2852,9 +2681,9 @@ let launch_owed_machine_live state ~mailbox =
   in
   launch Masc.Machine_lane.Msx (state.msx_open && not state.msx_menu_open)
     state.msx_live_owed state.msx_live_in_flight
-    (fun owed -> state.msx_live_owed <- owed) launch_msx_live_read;
+    (fun owed -> state.msx_live_owed <- owed) Masc_tui_msx_control.Live_read.launch_msx_live_read;
   launch Masc.Machine_lane.Dos state.msx_open state.dos_live_owed state.dos_live_in_flight
-    (fun owed -> state.dos_live_owed <- owed) launch_dos_live_read
+    (fun owed -> state.dos_live_owed <- owed) Masc_tui_msx_control.Live_read.launch_dos_live_read
 
 let launch_owed_browser_observation state ~mailbox =
   match browser_lane_on_screen state with
@@ -5228,8 +5057,8 @@ let observe_msx_carts state ~mailbox =
 
 let observe_msx_frame ?expected_workspace
     ?(current = fun () -> true) (state : Masc_tui_types.state) ~mailbox =
-  if Option.is_some (checkpoint_for_workspace state) then () else
-  let captured_view = !machine_view in
+  if Option.is_some (Masc_tui_msx_control.Checkpoint_control.checkpoint_for_workspace state) then () else
+  let captured_view = Masc_tui_msx_control.Checkpoint_control.capture_machine_view state in
   (* The read that follows a change the server admitted for [expected_workspace]
      carries that workspace, and the server that answers it compares it with
      its own. A server swapped in at any point, including A -> B -> A, answers
@@ -5242,8 +5071,8 @@ let observe_msx_frame ?expected_workspace
          ~port:state.port Masc.Machine_lane.Msx
          ~since:(Masc_tui_machine_live.since state.msx_live)))
     (fun result ->
-  if current () && captured_view == !machine_view
-     && Option.is_none (checkpoint_for_workspace state) then begin
+  if current () && Masc_tui_msx_control.Checkpoint_control.machine_view_is_current state captured_view
+     && Option.is_none (Masc_tui_msx_control.Checkpoint_control.checkpoint_for_workspace state) then begin
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
    | Some view ->
@@ -5260,8 +5089,8 @@ let observe_msx_frame ?expected_workspace
 (* The response binds workspace and operation together; health samples around
    an unrelated live read cannot establish either completion or pixel identity. *)
 let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
-  let authority = state.workspace_authority and view = !machine_view and port = state.port in
-  let current () = authority=state.workspace_authority && view == !machine_view && port=state.port in
+  let authority = state.workspace_authority and view = Masc_tui_msx_control.Checkpoint_control.capture_machine_view state and port = state.port in
+  let current () = authority=state.workspace_authority && Masc_tui_msx_control.Checkpoint_control.machine_view_is_current state view && port=state.port in
   let result = Masc_tui_http.inspect_msx_checkpoint
     ~expected_workspace:pending.checkpoint_workspace
     ~operation_id:pending.checkpoint_operation_id ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port
@@ -5272,10 +5101,10 @@ let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
     | Ok Tui_decode.Checkpoint_pending -> state.msx_notice <- Some "Checkpoint is still pending; F5 inspects its receipt."
     | Ok (Checkpoint_unknown detail) -> state.msx_notice <- Some ("Checkpoint remains unknown: " ^ detail)
     | Ok (Checkpoint_refused detail) ->
-        forget_checkpoint pending;
+        Masc_tui_msx_control.Checkpoint_control.forget_checkpoint state pending;
         state.msx_notice <- Some ("Checkpoint refused: " ^ detail)
     | Ok (Checkpoint_committed _) when not pending.checkpoint_restore ->
-        forget_checkpoint pending;
+        Masc_tui_msx_control.Checkpoint_control.forget_checkpoint state pending;
         state.msx_notice <- Some "Saved quick checkpoint; operation receipt verified."
     | Ok (Checkpoint_committed None) ->
         state.msx_notice <- Some "Restore completed; awaiting its workspace-bound current screen."
@@ -5293,7 +5122,7 @@ let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
                  ~previous_frame:state.msx_frame live in
                state.msx_live <- live; state.msx_frame <- frame; msx_surface_frame := frame)
                (Masc_tui_machine_live.advance state.msx_live (Ok answer));
-             forget_checkpoint pending;
+             Masc_tui_msx_control.Checkpoint_control.forget_checkpoint state pending;
              state.msx_notice <- Some "Restore completed; showing workspace state observed afterwards.")
 ;;
 
@@ -5307,7 +5136,7 @@ let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
    [&] opens Collab, whose watch actions go directly to observation. *)
 let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   withdraw_resource_diagram_pending state;
-  retire_machine_view ();
+  Masc_tui_msx_control.Checkpoint_control.retire_machine_view state;
   state.machine_interaction <- Observe_machine;
   (* The spectator takes ownership from any image preview. A pending async
      preview must not keep its old surface alive underneath the game. *)
@@ -5326,13 +5155,13 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   Masc_tui_msx.open_menu ~write:write_to_terminal state;
   (* A first DOS read may carry a full screen. Let the menu accept keys while
      the read is in flight, and redraw its watch row when it arrives. *)
-  launch_dos_live_read state ~mailbox
+  Masc_tui_msx_control.Live_read.launch_dos_live_read state ~mailbox
 
 (* An inventory row names the shared machine itself. Opening it observes the
    current screen; Collab's [g] action opens the separate media selection menu. *)
 let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   withdraw_resource_diagram_pending state;
-  retire_machine_view ();
+  Masc_tui_msx_control.Checkpoint_control.retire_machine_view state;
   state.machine_interaction <- Observe_machine;
   state.image_request_generation <- state.image_request_generation + 1;
   state.browser_viewport <- None;
@@ -5352,14 +5181,14 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   msx_surface_frame := None;
   state.msx_notice <- None;
   render_spectator state;
-  launch_msx_live_read state ~mailbox
+  Masc_tui_msx_control.Live_read.launch_msx_live_read state ~mailbox
 
 (* DOS has a spectator of its own. Enter it directly from the palette; the
    MSX media picker is only for choosing MSX media. No key from this view is
    forwarded to DOS, whose input and controller remain server-owned. *)
 let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   withdraw_resource_diagram_pending state;
-  retire_machine_view ();
+  Masc_tui_msx_control.Checkpoint_control.retire_machine_view state;
   state.image_request_generation <- state.image_request_generation + 1;
   state.browser_viewport <- None;
   if state.image_open then begin
@@ -5375,7 +5204,7 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   state.msx_menu_open <- false;
   state.dos_live <- Masc_tui_machine_live.Unread;
   render_spectator state;
-  launch_dos_live_read state ~mailbox
+  Masc_tui_msx_control.Live_read.launch_dos_live_read state ~mailbox
 
 let handle_collab_action state ~mailbox view action =
   let owner = Masc_tui_collab.owner view in
@@ -8384,7 +8213,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      cards; only a confirmed different workspace discards them. Old replies
      are independently rejected by Workspace_scoped. *)
   state.collab <- None;
-  retire_machine_view ();
+  Masc_tui_msx_control.Checkpoint_control.retire_machine_view state;
   Masc_tui_msx.close ~write:write_to_terminal state;
   msx_surface_frame := None;
   Masc_tui_types.withdraw_machine_control state;
@@ -10774,9 +10603,9 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
     if state.msx_open && state.machine_source = Masc.Machine_lane.Msx
        && state.msx_live = Masc_tui_machine_live.Unread
        && Option.is_none state.msx_live_in_flight then
-      launch_msx_live_read state ~mailbox;
+      Masc_tui_msx_control.Live_read.launch_msx_live_read state ~mailbox;
     if state.msx_open && state.msx_menu_open then
-      launch_dos_live_read state ~mailbox;
+      Masc_tui_msx_control.Live_read.launch_dos_live_read state ~mailbox;
     (* The surface on view asks again from the list it reads on arrival.
        Its request went out under the old authority, and a surface outside
        the bundle has no tick of its own to recover it. *)
@@ -16282,7 +16111,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       (match state.msx_live_in_flight with
        | Some pending when pending == request ->
            state.msx_live_in_flight <- None;
-           if request.live_view == !machine_view && request.live_port = state.port
+           if Masc_tui_msx_control.Checkpoint_control.live_request_is_current state request
               && state.msx_open && not state.msx_menu_open
               && state.machine_source = Masc.Machine_lane.Msx then begin
              state.msx_live_owed <- (match result with
@@ -16317,7 +16146,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              | Masc.Machine_lane.Dos -> true
              | Masc.Machine_lane.Msx -> false
            in
-           if request.live_view == !machine_view && request.live_port = state.port
+           if Masc_tui_msx_control.Checkpoint_control.live_request_is_current state request
               && state.msx_open && (state.msx_menu_open || watching_dos) then begin
              let result =
                match result with
@@ -16356,7 +16185,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                   else render_spectator state)
            end
            else if state.msx_open && state.msx_menu_open then
-             launch_dos_live_read state ~mailbox
+             Masc_tui_msx_control.Live_read.launch_dos_live_read state ~mailbox
        | Some _ | None -> ());
       Drawn_changed
   | Keeper_msg (Keeper_chat_control_received (keeper_name, generation, token)) ->
@@ -20677,23 +20506,23 @@ let main
       (match msx_key, state.machine_source with
        | Some _, _ when room_focused -> ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
-         when state.msx_menu_open -> retire_machine_view ()
+         when state.msx_menu_open -> Masc_tui_msx_control.Checkpoint_control.retire_machine_view state
        | Some "esc", (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) ->
-           retire_machine_view ()
-       | Some "f5", Masc.Machine_lane.Msx -> retire_machine_view ()
+           Masc_tui_msx_control.Checkpoint_control.retire_machine_view state
+       | Some "f5", Masc.Machine_lane.Msx -> Masc_tui_msx_control.Checkpoint_control.retire_machine_view state
        | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx
-         when state.machine_interaction = Control_machine -> retire_machine_view ()
+         when state.machine_interaction = Control_machine -> Masc_tui_msx_control.Checkpoint_control.retire_machine_view state
        | Some name, Masc.Machine_lane.Msx
          when state.machine_interaction = Control_machine
               && Option.is_some (Masc_tui_msx.server_key name) ->
-           retire_machine_view ()
+           Masc_tui_msx_control.Checkpoint_control.retire_machine_view state
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
        | None, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) -> ());
       (match msx_key with
       | None -> ()
       | Some ("f5" | "f6" | "f7") when state.machine_source = Masc.Machine_lane.Msx
-          && Option.is_some (checkpoint_for_workspace state) ->
-          Option.iter (inspect_pending_msx_checkpoint state) (checkpoint_for_workspace state);
+          && Option.is_some (Masc_tui_msx_control.Checkpoint_control.checkpoint_for_workspace state) ->
+          Option.iter (inspect_pending_msx_checkpoint state) (Masc_tui_msx_control.Checkpoint_control.checkpoint_for_workspace state);
           state.machine_interaction <- Observe_machine;
           render_spectator state
       (* Switching the observed machine belongs to the whole spectator,
@@ -20753,7 +20582,7 @@ let main
                 | Load _ | Stay | Closed | Watch _ -> false
               in
               let request = if swapping then Kept_request.Msx_disk_change else Kept_request.Msx_load in
-              run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+              Masc_tui_msx_control.Checkpoint_control.run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
                 ~withdrawn:(fun refusal ->
                   Masc_tui_msx.render_menu ~write:write_to_terminal
                     ~status:(workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal) state)
@@ -20776,12 +20605,12 @@ let main
                   else Masc_tui_http.post_msx_load ~expected_workspace
                     ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port ~cart))
       | Some name when state.machine_source = Masc.Machine_lane.Msx
-          && not (machine_changes_allowed state)
+          && not (Masc_tui_msx_control.Checkpoint_control.machine_changes_allowed state)
           && (List.mem name ["f5"; "f6"; "f7"; "f8"]
               || (state.machine_interaction = Control_machine
                   && Option.is_some (Masc_tui_msx.server_key name))) ->
           state.machine_interaction <- Observe_machine;
-          state.msx_notice <- Some machine_change_refusal;
+          state.msx_notice <- Some Masc_tui_msx_control.Checkpoint_control.machine_change_refusal;
           render_spectator state
       (* A watched machine has no key of its own, so [r] is the operator's
          manual refresh: it owes the visible machine one more read instead of
@@ -20809,7 +20638,7 @@ let main
                state.machine_interaction <- Observe_machine;
                render_spectator state
            | Observe_machine ->
-               run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+               Masc_tui_msx_control.Checkpoint_control.run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
                  ~withdrawn:(fun refusal ->
                    state.msx_notice <- Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                      ~request:Kept_request.Msx_control refusal);
@@ -20830,7 +20659,7 @@ let main
           launch_owed_machine_live state ~mailbox:async_messages;
           (let restore = name="f7" in
                let requested = ref None in
-               run_machine_change ~checkpoint_boundary:true state ~mailbox:async_messages
+               Masc_tui_msx_control.Checkpoint_control.run_machine_change ~checkpoint_boundary:true state ~mailbox:async_messages
                  ~refused:(fun detail -> Masc_tui_http.Checkpoint_refused detail)
                  ~unknown:(fun detail -> Masc_tui_http.Checkpoint_outcome_unknown detail)
                  (* Nothing was asked of the server: no intent is retained, so
@@ -20849,8 +20678,8 @@ let main
                     | None -> ()
                     | Some pending ->
                         (match result with
-                         | Error (Checkpoint_refused _) -> forget_checkpoint pending
-                         | Ok () when not restore -> forget_checkpoint pending
+                         | Error (Checkpoint_refused _) -> Masc_tui_msx_control.Checkpoint_control.forget_checkpoint state pending
+                         | Ok () when not restore -> Masc_tui_msx_control.Checkpoint_control.forget_checkpoint state pending
                          | Ok () | Error (Checkpoint_outcome_unknown _) ->
                              state.machine_interaction <- Observe_machine;
                              inspect_pending_msx_checkpoint state pending));
@@ -20859,7 +20688,7 @@ let main
                    let pending = {checkpoint_operation_id=Random_id.uuid_v7 ();
                      checkpoint_restore=restore;checkpoint_slot="quick";
                      checkpoint_workspace=expected_workspace} in
-                   match remember_checkpoint pending with
+                   match Masc_tui_msx_control.Checkpoint_control.remember_checkpoint state pending with
                    | Error detail -> Error (Masc_tui_http.Checkpoint_refused
                        ("Cannot durably retain checkpoint intent: " ^ detail))
                    | Ok () ->
@@ -20869,8 +20698,8 @@ let main
                    (* Knowledge of this operation survives a presentation scope
                       change; never strand a proven refusal behind an old view. *)
                    (match result with
-                    | Error (Checkpoint_refused _) -> forget_checkpoint pending
-                    | Ok () when not restore -> forget_checkpoint pending
+                    | Error (Checkpoint_refused _) -> Masc_tui_msx_control.Checkpoint_control.forget_checkpoint state pending
+                    | Ok () when not restore -> Masc_tui_msx_control.Checkpoint_control.forget_checkpoint state pending
                     | Ok () | Error (Checkpoint_outcome_unknown _) -> ());
                    result))
       | Some "esc" ->
@@ -20892,7 +20721,7 @@ let main
              (e.g. deliberate non-key input) just repaints the cache. *)
           match Masc_tui_msx.server_key name with
           | Some server_key ->
-              run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+              Masc_tui_msx_control.Checkpoint_control.run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
                 ~withdrawn:(fun refusal ->
                   state.msx_notice <- Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                     ~request:Kept_request.Msx_key refusal);

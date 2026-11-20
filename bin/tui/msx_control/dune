@@ -1,0 +1,14 @@
+(library
+ (name masc_tui_msx_control)
+ (wrapped true)
+ (libraries
+  masc
+  masc.keeper_operation_identity
+  masc_tui_types
+  masc_tui_loader
+  masc_tui_async_protocol
+  masc_tui_transport
+  masc_tui_msx_checkpoint_pending
+  masc_tui_machine_live
+  masc_tui_owed_read
+  eio))

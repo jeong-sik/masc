@@ -9058,6 +9058,12 @@ let msx_carts_of_names = function
 (* A DOS live read belongs to the view and server port that asked for it.
    A reopened screen may start a fresh read while an old one is still ending. *)
 type machine_live_request = { live_view : unit ref; live_port : int }
+type pending_msx_checkpoint = {
+  checkpoint_operation_id : string;
+  checkpoint_restore : bool;
+  checkpoint_slot : string;
+  checkpoint_workspace : Tui_decode.server_identity;
+}
 
 type msx_meta = {
   msx_mode : string;
@@ -10441,6 +10447,9 @@ type state = {
   mutable msx_live: Masc_tui_machine_live.view;
   mutable dos_live: Masc_tui_machine_live.view;
   mutable msx_live_in_flight: machine_live_request option;
+  mutable msx_view_authority: unit ref;
+  mutable msx_pending_checkpoints: pending_msx_checkpoint list;
+  msx_checkpoint_storage_errors: (string, string) Hashtbl.t;
   mutable dos_live_in_flight: machine_live_request option;
   mutable msx_live_owed: Masc_tui_owed_read.t;
   mutable dos_live_owed: Masc_tui_owed_read.t;
@@ -21639,6 +21648,9 @@ let create_state
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   msx_live_in_flight = None;
+  msx_view_authority = ref ();
+  msx_pending_checkpoints = [];
+  msx_checkpoint_storage_errors = Hashtbl.create 4;
   dos_live_in_flight = None;
   msx_live_owed = Masc_tui_owed_read.settled;
   dos_live_owed = Masc_tui_owed_read.settled;

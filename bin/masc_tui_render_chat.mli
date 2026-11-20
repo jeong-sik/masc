@@ -193,6 +193,12 @@ module For_testing : sig
   val source_rows_build_count : unit -> int
   val source_url_discovery_count : unit -> int
   val search_candidate_build_count : unit -> int
+  val search_candidate_ui_build_count : unit -> int
+  (** Candidates rendered on the main domain, where the UI runs. A /find
+      launched with a worker pool renders none there. *)
+  val search_job_bytes : int
+  (** Body bytes of consecutive candidates one worker job renders; a larger
+      entry is a job of its own. *)
   val growing_row_end_sources :
     width:int -> Message_layout.entry ->
     (int * Masc_tui_types.chat_source_position) list

@@ -1447,22 +1447,35 @@ let test_navigation_retires_a_running_search () = at_sizes (fun origin ->
       (Option.is_none (Render.admit_keeper_message_search state work answer)))
     ["scrolling back", 3; "returning to the live edge", 0])
 
-(* /find reads a plan and returns. A daemon fiber on the UI domain renders the
-   candidates afterwards, one entry per yield, and a newer generation stops it
-   before it delivers anything. [seek_in_chat] posts its notice between the
-   plan and the launch, so nothing is rendered before the notice either. *)
+(* /find reads a plan and returns. A daemon fiber on the UI domain sends the
+   candidates to the worker domain afterwards, a job at a time with a yield
+   before each entry, and a newer generation stops it before it delivers
+   anything. None is rendered on the UI domain. Each entry here is larger
+   than a job, so each is a job of its own. [seek_in_chat] posts its notice
+   between the plan and the launch, so nothing is rendered before the notice
+   either. *)
 let test_find_renders_candidates_after_the_handler_returns () = at_sizes (fun origin ->
   let state = state origin in
-  let entries = 40 in
+  let entries = 6 in
+  let filler =
+    String.concat "\n\n" (List.init (Render.For_testing.search_job_bytes / 40 + 1) (fun line ->
+      Printf.sprintf "filler paragraph %05d of the step" line)) in
   state.msg_loaded <- List.init entries (fun index ->
     let id = Printf.sprintf "steps-%02d" index in
-    row ~id ~request_id:id ~role:user ~text:(Printf.sprintf "STEP_MATCH %02d" index)
+    row ~id ~request_id:id ~role:user
+      ~text:(Printf.sprintf "STEP_MATCH %02d\n\n%s" index filler)
       (float_of_int index));
   let built = Render.For_testing.search_candidate_build_count in
+  let on_ui = Render.For_testing.search_candidate_ui_build_count in
+  let on_ui_before = on_ui () in
   Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       Eio_context.set_switch sw;
-      Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      (* The one worker runs jobs in order: an empty job returns after every
+         job submitted before it. *)
+      let worker_drained () = Domain_pool.submit_cpu ~name:"drained" pool Fun.id in
       let start ~deliver =
         Atomic.incr state.msg_search_generation;
         let before_plan = built () in
@@ -1478,21 +1491,130 @@ let test_find_renders_candidates_after_the_handler_returns () = at_sizes (fun or
        | Error detail -> fail detail
        | Ok (work, matched) ->
            check int "a search left alone renders every candidate" entries (built () - first);
+           check int "none of them on the UI domain" on_ui_before (on_ui ());
            check bool "and its answer lands on a match" true
              (Option.is_some (Render.complete_keeper_message_search work matched).match_result));
       let delivered = ref 0 in
       let second = start ~deliver:(fun _ -> incr delivered) in
       let rec until_rendering () =
-        if built () - second < 3 then (Eio.Fiber.yield (); until_rendering ()) in
+        if built () - second < 2 then (Eio.Fiber.yield (); until_rendering ()) in
       until_rendering ();
       Atomic.incr state.msg_search_generation;
       let at_retire = built () in
-      (* Each yield here lets the fiber take one more step, enough to finish
-         every remaining entry and submit the matcher had it kept going. *)
+      (* The job in progress finishes first. Each yield after it lets the
+         fiber take one more step, enough to submit the next job or the
+         matcher had it kept going, and the second drain waits for that. *)
+      worker_drained ();
       for _ = 1 to 4 * entries do Eio.Fiber.yield () done;
+      worker_drained ();
       check int "a retired generation renders no further candidate" at_retire (built ());
       check bool "it stopped before the last candidate" true (at_retire - second < entries);
       check int "a retired search delivers nothing" 0 !delivered))))
+
+(* Entries shorter than one job go to the worker as the trailing batch, after
+   the last entry's [proceed]. A search retired while that batch waits or
+   renders seals no work: it submits no matcher and delivers nothing. *)
+let test_find_retired_during_the_trailing_batch_delivers_nothing () = at_sizes (fun origin ->
+  let state = state origin in
+  let entries = 4 in
+  state.msg_loaded <- List.init entries (fun index ->
+    let id = Printf.sprintf "tail-%02d" index in
+    row ~id ~request_id:id ~role:user ~text:(Printf.sprintf "TAIL_MATCH %02d" index)
+      (float_of_int index));
+  let built = Render.For_testing.search_candidate_build_count in
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.set_switch sw;
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      let worker_drained () = Domain_pool.submit_cpu ~name:"drained" pool Fun.id in
+      (* The one worker holds this job until [gate] opens, so the trailing
+         batch waits behind it. *)
+      let gate = Atomic.make false in
+      Eio.Fiber.fork ~sw (fun () ->
+        Domain_pool.submit_cpu ~name:"gate" pool (fun () ->
+          while not (Atomic.get gate) do Domain.cpu_relax () done));
+      Atomic.incr state.msg_search_generation;
+      let plan = Render.plan_keeper_message_search state ~keeper_name:"alpha"
+          ~needle:"TAIL_MATCH" ~older_than:None in
+      let delivered = ref 0 in
+      let before = built () in
+      Render.launch_keeper_message_search state plan ~deliver:(fun _ -> incr delivered);
+      (* Every entry's [proceed] yields once, twice over, before the batch
+         is submitted. *)
+      for _ = 1 to 4 * entries + 8 do Eio.Fiber.yield () done;
+      check int "the trailing batch waits behind the held job" before (built ());
+      Atomic.incr state.msg_search_generation;
+      Atomic.set gate true;
+      worker_drained ();
+      for _ = 1 to 4 * entries do Eio.Fiber.yield () done;
+      worker_drained ();
+      check int "the trailing batch rendered" entries (built () - before);
+      check int "a search retired during it delivers nothing" 0 !delivered))))
+
+(* The worker renders with the Markdown settings the plan read on the UI
+   domain. A table frame turned on after the plan, while the candidates wait
+   behind a held job, adds no border row to what the worker renders: the
+   answer lands where the same search finds it in place without the frame. *)
+let test_find_worker_renders_with_the_settings_the_plan_read () = at_sizes (fun origin ->
+  let state = state origin in
+  let text = "before the table\n\n| key | value |\n|---|---|\n| first | plain |\n\
+              | second | FRAME_MATCH |\n\nafter the table" in
+  state.msg_loaded <- [row ~id:"framed" ~request_id:"framed" ~role:user ~text 1.];
+  let frame = Masc_tui_markdown_theme.table_frame_enabled in
+  let in_place = (Render.keeper_message_find_scroll state ~keeper_name:"alpha"
+    ~needle:"FRAME_MATCH" ~older_than:None).match_result in
+  check bool "the search in place matches" true (Option.is_some in_place);
+  Fun.protect ~finally:(fun () -> frame := false; Domain_pool_ref.clear_for_tests ()) (fun () ->
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.set_switch sw;
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      let gate = Atomic.make false in
+      Eio.Fiber.fork ~sw (fun () ->
+        Domain_pool.submit_cpu ~name:"gate" pool (fun () ->
+          while not (Atomic.get gate) do Domain.cpu_relax () done));
+      Atomic.incr state.msg_search_generation;
+      let plan = Render.plan_keeper_message_search state ~keeper_name:"alpha"
+          ~needle:"FRAME_MATCH" ~older_than:None in
+      let answer, resolve = Eio.Promise.create () in
+      Render.launch_keeper_message_search state plan ~deliver:(Eio.Promise.resolve resolve);
+      for _ = 1 to 16 do Eio.Fiber.yield () done;
+      frame := true;
+      Atomic.set gate true;
+      match Eio.Promise.await answer with
+      | Error detail -> fail detail
+      | Ok (work, matched) ->
+          frame := false;
+          check bool "the worker answers as the plan's settings draw it" true
+            ((Render.complete_keeper_message_search work matched).match_result = in_place)))))
+
+(* Short entries go to the worker together, one job for several. The answer
+   it delivers is the one the same search finds in place: the newest match,
+   and the cursor that names it. *)
+let test_batched_find_answers_like_the_find_in_place () = at_sizes (fun origin ->
+  let state = state origin in
+  state.msg_loaded <- List.init 5 (fun index ->
+    let id = Printf.sprintf "order-%d" index in
+    row ~id ~request_id:id ~role:user ~text:(Printf.sprintf "ORDER_MATCH %d" index)
+      (float_of_int index));
+  let in_place = (Render.keeper_message_find_scroll state ~keeper_name:"alpha"
+    ~needle:"ORDER_MATCH" ~older_than:None).match_result in
+  check bool "the search in place matches" true (Option.is_some in_place);
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.set_switch sw;
+      Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+      Atomic.incr state.msg_search_generation;
+      let plan = Render.plan_keeper_message_search state ~keeper_name:"alpha"
+          ~needle:"ORDER_MATCH" ~older_than:None in
+      let answer, resolve = Eio.Promise.create () in
+      Render.launch_keeper_message_search state plan ~deliver:(Eio.Promise.resolve resolve);
+      match Eio.Promise.await answer with
+      | Error detail -> fail detail
+      | Ok (work, matched) ->
+          check bool "the worker answers the same" true
+            ((Render.complete_keeper_message_search work matched).match_result = in_place)))))
 
 (* A no-match answer is about the durable rows. Pending input that arrives
    while the worker runs sits after them and must not make the answer stale. *)
@@ -1629,6 +1751,12 @@ let () = run "chat search projection" [
       test_retired_matcher_stops_before_next_candidate;
     test_case "find renders candidates after the handler returns" `Quick
       test_find_renders_candidates_after_the_handler_returns;
+    test_case "find worker renders with the settings the plan read" `Quick
+      test_find_worker_renders_with_the_settings_the_plan_read;
+    test_case "find retired during the trailing batch delivers nothing" `Quick
+      test_find_retired_during_the_trailing_batch_delivers_nothing;
+    test_case "batched find answers like the find in place" `Quick
+      test_batched_find_answers_like_the_find_in_place;
     test_case "search executor owns frozen source and keeps repeat cursor" `Quick test_search_executor_owns_frozen_source;
     test_case "rich card repeat follows interleaved source sequence" `Quick test_rich_card_repeat_follows_interleaved_source_order;
     test_case "replaced preview title is searched whole" `Quick test_replaced_preview_title_is_searched_whole;

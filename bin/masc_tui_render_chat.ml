@@ -151,31 +151,33 @@ let bare_urls_for_entry entry =
           Source_entry_cache.replace entry_urls entry urls;
           urls)
 
-let chat_body_with_previews_internal ?on_field ~preview ~mode ~(entry : Message_layout.entry) ~width () =
+(* The urls an entry draws link cards for, in body order. Tool output, a
+   reply still arriving and [`Off] draw none. *)
+let preview_urls ~mode (entry : Message_layout.entry) =
+  match entry.style,entry.markdown_source,mode with
+    | (Message_layout.Tool | Skill _),_,_
+    | _,(Message_layout.Markdown_growing _ | Markdown_streaming),_
+    | _,_,`Off -> []
+    | (Message_layout.User, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Inbound, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Keeper, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Status, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Local, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Journal, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Error, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Thinking _, Message_layout.Markdown_stable _, (`Compact | `Rich)) -> bare_urls_for_entry entry
+
+(* Each card url with the preview its card is drawn from. *)
+let link_cards ~preview ~mode entry =
+  List.map (fun url -> url,preview url) (preview_urls ~mode entry)
+
+(* [cards] come from [link_cards]; their order numbers the cards. A caller
+   off the UI domain passes cards the UI domain took, since the url and
+   preview caches belong to it. *)
+let chat_body_with_previews_internal ?on_field ~cards ~mode ~(entry : Message_layout.entry) ~width () =
   let body = entry.body in
-  match entry.style, entry.markdown_source with
-  | ((Message_layout.Tool | Skill _), _)
-  | (Message_layout.User, (Message_layout.Markdown_growing _ | Markdown_streaming))
-  | (Message_layout.Inbound, (Message_layout.Markdown_growing _ | Markdown_streaming))
-  | (Message_layout.Keeper, (Message_layout.Markdown_growing _ | Markdown_streaming))
-  | (Message_layout.Status, (Message_layout.Markdown_growing _ | Markdown_streaming))
-  | (Message_layout.Local, (Message_layout.Markdown_growing _ | Markdown_streaming))
-  | (Message_layout.Journal, (Message_layout.Markdown_growing _ | Markdown_streaming))
-  | (Message_layout.Error, (Message_layout.Markdown_growing _ | Markdown_streaming))
-  | (Message_layout.Thinking _, (Message_layout.Markdown_growing _ | Markdown_streaming)) -> body
-  | (Message_layout.User, Message_layout.Markdown_stable _)
-  | (Message_layout.Inbound, Message_layout.Markdown_stable _)
-  | (Message_layout.Keeper, Message_layout.Markdown_stable _)
-  | (Message_layout.Status, Message_layout.Markdown_stable _)
-  | (Message_layout.Local, Message_layout.Markdown_stable _)
-  | (Message_layout.Journal, Message_layout.Markdown_stable _)
-  | (Message_layout.Error, Message_layout.Markdown_stable _)
-  | (Message_layout.Thinking _, Message_layout.Markdown_stable _) ->
-    let cards = match mode with
-      | `Off -> []
-      | (`Compact | `Rich) -> List.mapi (fun index url -> index,url) (bare_urls_for_entry entry)
-          |> List.filter_map (fun (index,url) ->
-            let p=preview url in
+  let cards = List.mapi (fun index (url,p) -> index,url,p) cards
+          |> List.filter_map (fun (index,url,p) ->
             let mapped = match mode,on_field with
               | `Compact,None -> Option.map (fun row -> [row],[]) (Masc_tui_link_preview.render_compact_badge p)
               | `Compact,Some _ -> Option.map (fun (mapped : Masc_tui_link_preview.card_render) -> mapped.rows,mapped.fields)
@@ -186,9 +188,9 @@ let chat_body_with_previews_internal ?on_field ~preview ~mode ~(entry : Message_
                   Some(mapped.rows,mapped.fields)
               | `Off,_ -> None in
             Option.map (fun (rows,fields) -> index,url,rows,fields) mapped) in
-    match cards with
-    | [] -> body
-    | _ ->
+  match cards with
+  | [] -> body
+  | _ ->
         let offset=ref (String.length body+1) in
         let texts=List.map (fun (index,url,rows,fields) ->
           Option.iter (fun emit ->
@@ -200,7 +202,7 @@ let chat_body_with_previews_internal ?on_field ~preview ~mode ~(entry : Message_
         body ^ "\n" ^ String.concat "\n" texts
 
 let chat_body_with_previews ~preview ~mode ~entry ~width =
-  chat_body_with_previews_internal ~preview ~mode ~entry ~width ()
+  chat_body_with_previews_internal ~cards:(link_cards ~preview ~mode entry) ~mode ~entry ~width ()
 
 (* A journal revision's lines, in the columns [Message_layout.journal_rows]
    cut. Two questions, two channels: the sign keeps the diff colours, since
@@ -209,8 +211,7 @@ let chat_body_with_previews ~preview ~mode ~entry ~width =
    -- eight hues is a legend to memorise, and the theme has measured contrast
    for the ones already in it. A drop is dim: the reason a fact was let go is
    not the change itself. The claim keeps the body's own colour. *)
-let chat_journal_rows ~(context : Chat_theme.body_context) ~width lines =
-  let palette = chat_markdown_palette ~closing:context.Chat_theme.markdown_close in
+let chat_journal_rows ~(palette : Markdown.palette) ~width lines =
   let span_of : Message_layout.journal_piece -> string * string = function
     | Journal_piece_sign Journal_added -> palette.code_diff_added
     | Journal_piece_sign Journal_removed -> palette.code_diff_removed
@@ -311,7 +312,10 @@ let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
   let journal =
     match entry.journal with
     | [] -> []
-    | lines -> "" :: chat_journal_rows ~context ~width lines
+    | lines ->
+        "" :: chat_journal_rows
+          ~palette:(chat_markdown_palette ~closing:context.Chat_theme.markdown_close)
+          ~width lines
   in
   let body_rows =
     Masc_tui_frame_timing.time_stage ~name:"chat.markdown" (fun () ->
@@ -353,10 +357,10 @@ let body_byte_origin (entry : Message_layout.entry) body_identity offset =
   | Thinking_summary -> Search.Thinking_summary_byte {body=body_identity;offset}
   | Projected_body projection -> Search.Projected_byte {body=body_identity;projection;offset;expansion=0}
 
-let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_layout.entry) ~width =
+let search_chat_markdown ~link_previews_mode ~theme ~dress ~cards ~(entry : Message_layout.entry) ~width =
   let fields=ref [] in
   let body=chat_body_with_previews_internal ~on_field:(fun ~index ~url ~start field ->
-    fields:=(index,url,start,field):: !fields) ~preview ~mode:link_previews_mode ~entry ~width () in
+    fields:=(index,url,start,field):: !fields) ~cards ~mode:link_previews_mode ~entry ~width () in
   let body_identity=Search.body_identity entry.body in
   let origins=Array.init (String.length body) (fun offset ->
     if offset<String.length entry.body then Some(body_byte_origin entry body_identity offset)
@@ -367,7 +371,7 @@ let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_l
         value=field.value;byte=field.source_start_byte+delta;expansion=0})
     done) !fields;
   let context=Chat_theme.body_context theme entry.style in
-  let palette=chat_markdown_palette ~closing:context.Chat_theme.markdown_close in
+  let palette=Masc_tui_markdown_theme.palette_of dress ~closing:context.Chat_theme.markdown_close in
   let document=Markdown.render_document_with_spans ~palette ~width body in
   let runs,unavailable=Search.of_document ~presentation:entry.body_presentation ~body:body_identity ~body_length:(String.length entry.body) ~origins document in
   let journal_rows,journal_runs=match entry.journal with
@@ -385,7 +389,7 @@ let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_l
               visible_rows=[first+span.row,ranges];joins_previous=false;reading=Markdown.Source_order}
           | Some (run : Search.run) -> Hashtbl.replace fields key {run with visible_rows=(first+span.row,ranges)::run.visible_rows}) mapped.journal_fields;
         let runs=Hashtbl.to_seq fields |> List.of_seq |> List.sort (fun (a,_) (b,_) -> compare a b) |> List.map snd in
-        "" :: chat_journal_rows ~context ~width lines,runs in
+        "" :: chat_journal_rows ~palette ~width lines,runs in
   {mapped_rows=document.document_rows @ journal_rows;runs=runs @ journal_runs;unavailable}
 
 
@@ -4326,25 +4330,13 @@ let source_mapping_owner state ~keeper_name projection entry_index =
   | Some (Scroll_durable _ | Scroll_pending _) | None ->
       Durable_source, None
 
-let source_body_key state ~width ~theme ~preview ~polled_input ~unavailable
+let source_body_key state ~width ~theme ~cards ~polled_input ~unavailable
     (entry : Message_layout.entry) =
   let context = Chat_theme.body_context theme entry.Message_layout.style in
-  let urls = match entry.style, entry.markdown_source, state.link_previews_mode with
-    | (Message_layout.Tool | Skill _), _, _
-    | _, (Message_layout.Markdown_growing _ | Markdown_streaming), _
-    | _, _, `Off -> []
-    | (Message_layout.User, Message_layout.Markdown_stable _, (`Compact | `Rich))
-    | (Message_layout.Inbound, Message_layout.Markdown_stable _, (`Compact | `Rich))
-    | (Message_layout.Keeper, Message_layout.Markdown_stable _, (`Compact | `Rich))
-    | (Message_layout.Status, Message_layout.Markdown_stable _, (`Compact | `Rich))
-    | (Message_layout.Local, Message_layout.Markdown_stable _, (`Compact | `Rich))
-    | (Message_layout.Journal, Message_layout.Markdown_stable _, (`Compact | `Rich))
-    | (Message_layout.Error, Message_layout.Markdown_stable _, (`Compact | `Rich))
-    | (Message_layout.Thinking _, Message_layout.Markdown_stable _, (`Compact | `Rich)) -> bare_urls_for_entry entry in
   {source_workspace=state.workspace_authority;
    source_width=width;source_palette_generation=context.palette_generation;
    source_origin=state.msg_origin_display;source_preview_mode=state.link_previews_mode;
-   source_previews=List.map preview urls;source_polled_input=polled_input;
+   source_previews=List.map snd cards;source_polled_input=polled_input;
    source_polled_unavailable=unavailable}
 
 let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~preview =
@@ -4359,14 +4351,15 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
           let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
             ~inner_width entry in
           let owner, polled_input = source_mapping_owner state ~keeper_name projection entry_index in
-          let key = source_body_key state ~width ~theme ~preview ~polled_input
+          let cards = link_cards ~preview ~mode:state.link_previews_mode entry in
+          let key = source_body_key state ~width ~theme ~cards ~polled_input
             ~unavailable:(owner = Unknown_polled_source) entry in
           match Source_entry_cache.find_opt source_body_indexes entry with
           | Some memo when same_source_body_key memo.key key -> memo.index
           | Some _ | None ->
           incr source_index_builds;
           let body = search_chat_markdown ~link_previews_mode:state.link_previews_mode
-            ~theme ~preview ~entry ~width in
+            ~theme ~dress:(Masc_tui_markdown_theme.dress ()) ~cards ~entry ~width in
           (* A partial body still indexes its mapped runs; a row of an omitted
              label has no source and reads as a generated row. *)
           let index = if owner = Unknown_polled_source then None else
@@ -4663,6 +4656,9 @@ type chat_search_plan = {
   search_memory:memory_visibility;
   search_markdown:entry:Message_layout.entry -> width:int -> string list;
   search_theme:Chat_theme.snapshot;
+  search_dress:Masc_tui_markdown_theme.dress;
+    (** The Markdown codes read on the UI domain; the worker renders with
+        these rather than reading the settings itself. *)
   search_preview:string -> Masc_tui_link_preview.og_preview;
     (** First lookup per URL wins; [search_preview_values] records it. *)
   search_preview_values:(string * Masc_tui_link_preview.og_preview) list ref;
@@ -4754,42 +4750,55 @@ let plan_keeper_message_search ?(preview_lookup=Masc_tui_link_preview.get_previe
      search_selected_keeper=Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state);
      search_reasoning=state.msg_reasoning_visibility;search_tools=state.msg_tool_visibility;
      search_memory=state.msg_memory_visibility;
-     search_markdown=markdown;search_theme=theme;search_preview=preview;
+     search_markdown=markdown;search_theme=theme;
+     search_dress=Masc_tui_markdown_theme.dress ();search_preview=preview;
      search_preview_values=preview_values;search_sources=sources 0 None [] tagged}
 
 (* Suffix geometry may include newer entries than a repeated cursor. Freeze
    their actually displayed metadata too, before any worker is launched. *)
 let freeze_search_previews plan (entry : Message_layout.entry) =
-  match entry.style,entry.markdown_source,plan.search_preview_mode with
-  | (Message_layout.Tool | Skill _),_,_
-  | _,(Message_layout.Markdown_growing _ | Markdown_streaming),_
-  | _,_,`Off -> ()
-  | (Message_layout.User, Message_layout.Markdown_stable _, (`Compact | `Rich))
-  | (Message_layout.Inbound, Message_layout.Markdown_stable _, (`Compact | `Rich))
-  | (Message_layout.Keeper, Message_layout.Markdown_stable _, (`Compact | `Rich))
-  | (Message_layout.Status, Message_layout.Markdown_stable _, (`Compact | `Rich))
-  | (Message_layout.Local, Message_layout.Markdown_stable _, (`Compact | `Rich))
-  | (Message_layout.Journal, Message_layout.Markdown_stable _, (`Compact | `Rich))
-  | (Message_layout.Error, Message_layout.Markdown_stable _, (`Compact | `Rich))
-  | (Message_layout.Thinking _, Message_layout.Markdown_stable _, (`Compact | `Rich)) ->
-      List.iter (fun url -> ignore (plan.search_preview url)) (bare_urls_for_entry entry)
+  List.iter (fun url -> ignore (plan.search_preview url))
+    (preview_urls ~mode:plan.search_preview_mode entry)
 
-let search_candidate_builds = ref 0
+(* What rendering a candidate reads besides its entry and cards. Plain values
+   from the plan, with none of its lookups, so the worker domain can hold it. *)
+type search_render = {
+  render_mode:[`Off | `Compact | `Rich];
+  render_theme:Chat_theme.snapshot;
+  render_dress:Masc_tui_markdown_theme.dress;
+  render_origin:Message_layout.origin_display;
+  render_inner_width:int;
+}
+
+let search_render plan =
+  {render_mode=plan.search_preview_mode;render_theme=plan.search_theme;render_dress=plan.search_dress;
+   render_origin=plan.search_origin;render_inner_width=plan.search_inner_width}
+
+(* A candidate's link cards, taken on the UI domain. Freezing every entry
+   first means each lookup here finds the preview the search froze. *)
+let search_source_cards plan = function
+  | Unanchored_source -> []
+  | Anchored_source source ->
+      link_cards ~preview:plan.search_preview ~mode:plan.search_preview_mode source.source_entry
+
+let search_candidate_builds = Atomic.make 0
+let search_candidate_ui_builds = Atomic.make 0
 
 (* Rendering one entry's semantic runs is the expensive step of a /find. It
-   reads the render caches of the UI domain, so it runs on that domain. *)
-let build_search_candidate plan = function
+   reads only [render], [cards] and the entry, so the worker domain runs it. *)
+let build_search_candidate render ~cards = function
   | Unanchored_source -> Search_unavailable
   | Anchored_source source ->
-  incr search_candidate_builds;
+  Atomic.incr search_candidate_builds;
+  if Domain.is_main_domain () then Atomic.incr search_candidate_ui_builds;
   let mapped=ref None in
   let observe ~entry ~width =
-    let body=search_chat_markdown ~link_previews_mode:plan.search_preview_mode
-      ~theme:plan.search_theme ~preview:plan.search_preview ~entry ~width in
+    let body=search_chat_markdown ~link_previews_mode:render.render_mode
+      ~theme:render.render_theme ~dress:render.render_dress ~cards ~entry ~width in
     mapped:=Some body;
     body.mapped_rows in
-  let rows=Message_layout.rows_of_entry ~markdown:observe ~origin:plan.search_origin
-    ~inner_width:plan.search_inner_width ~previous:source.source_previous source.source_entry in
+  let rows=Message_layout.rows_of_entry ~markdown:observe ~origin:render.render_origin
+    ~inner_width:render.render_inner_width ~previous:source.source_previous source.source_entry in
   match !mapped with
   | None -> Search_unavailable
   | Some body ->
@@ -4811,20 +4820,53 @@ let work_of_plan plan candidates =
 let prepare_keeper_message_search ?preview_lookup state ~keeper_name ~needle ~older_than =
   let plan=plan_keeper_message_search ?preview_lookup state ~keeper_name ~needle ~older_than in
   List.iter (freeze_search_previews plan) plan.search_entries;
-  work_of_plan plan (List.map (build_search_candidate plan) plan.search_sources)
+  let render=search_render plan in
+  work_of_plan plan (List.map (fun source ->
+    build_search_candidate render ~cards:(search_source_cards plan source) source) plan.search_sources)
+
+(* Body bytes of consecutive candidates one worker job renders. Other worker
+   jobs, answer decoding among them, wait for the job in progress. On
+   2026-11-21 at load 60-180, 1 MB of chat Markdown rendered in about 440 ms,
+   so a job of 32 KB holds them about 14 ms. One job per entry cost about
+   0.3 ms of hand-off each: 2,000 short entries took 510-730 ms against
+   120 ms rendered in place. An entry larger than this is a job of its own. *)
+let search_job_bytes = 32 * 1024
+
+let search_source_bytes = function
+  | Unanchored_source -> 0
+  | Anchored_source source -> String.length source.source_entry.Message_layout.body
 
 (* The steps of [prepare_keeper_message_search], asking [proceed] before each
-   entry and once more before sealing the work. [None]: [proceed] refused, and
-   no work exists to match or deliver. *)
-let build_keeper_message_search_in_steps ~proceed plan =
+   entry and once more before sealing the work. [run] renders a batch of
+   candidates from values this domain has already taken. [None]: [proceed]
+   refused, and no work exists to match or deliver. *)
+let build_keeper_message_search_in_steps ~proceed ~run plan =
+  let render=search_render plan in
   let rec freeze = function
     | [] -> true
     | entry :: rest -> proceed () && (freeze_search_previews plan entry; freeze rest) in
-  let rec build built = function
-    | [] -> if proceed () then Some (work_of_plan plan (List.rev built)) else None
+  (* [built] and [batch] are newest last, reversed. *)
+  let flush built = function
+    | [] -> built
+    | batch ->
+        let ordered=List.rev batch in
+        List.rev_append (run (fun () ->
+          List.map (fun (cards,source) -> build_search_candidate render ~cards source) ordered)) built in
+  let rec build built batch bytes = function
+    | [] ->
+        (* The trailing batch renders after the last entry's [proceed], so
+           [proceed] is asked once more after it: a search retired while it
+           waited or rendered seals no work. *)
+        let built = flush built batch in
+        if proceed () then Some (work_of_plan plan (List.rev built)) else None
     | source :: rest ->
-        if proceed () then build (build_search_candidate plan source :: built) rest else None in
-  if freeze plan.search_entries then build [] plan.search_sources else None
+        if proceed () then
+          let batch=(search_source_cards plan source,source) :: batch in
+          let bytes=bytes+search_source_bytes source in
+          if bytes >= search_job_bytes then build (flush built batch) [] 0 rest
+          else build built batch bytes rest
+        else None in
+  if freeze plan.search_entries then build [] [] 0 plan.search_sources else None
 
 (* Only immutable producer-owned runs cross into the CPU worker. No UI state,
    render caches, lookup effects or scroll publication is read by this step. *)
@@ -4925,18 +4967,7 @@ let admit_keeper_message_search state work ({matched;unavailable_entries} as ans
         | Some original ->
           let current=entries.(entry_index) in
           if search_source_signature original <> search_source_signature current then None else
-          let urls=match current.style,current.markdown_source,plan.search_preview_mode with
-            | (Message_layout.Tool | Skill _),_,_
-            | _,(Message_layout.Markdown_growing _ | Markdown_streaming),_
-            | _,_,`Off -> []
-            | (Message_layout.User, Message_layout.Markdown_stable _, (`Compact | `Rich))
-            | (Message_layout.Inbound, Message_layout.Markdown_stable _, (`Compact | `Rich))
-            | (Message_layout.Keeper, Message_layout.Markdown_stable _, (`Compact | `Rich))
-            | (Message_layout.Status, Message_layout.Markdown_stable _, (`Compact | `Rich))
-            | (Message_layout.Local, Message_layout.Markdown_stable _, (`Compact | `Rich))
-            | (Message_layout.Journal, Message_layout.Markdown_stable _, (`Compact | `Rich))
-            | (Message_layout.Error, Message_layout.Markdown_stable _, (`Compact | `Rich))
-            | (Message_layout.Thinking _, Message_layout.Markdown_stable _, (`Compact | `Rich)) -> bare_urls_for_entry current in
+          let urls=preview_urls ~mode:plan.search_preview_mode current in
           if not (List.for_all (fun url -> match List.assoc_opt url work.search_previews with
               | Some value -> Masc_tui_link_preview.get_preview url=value | None -> false) urls)
           then None else
@@ -4973,13 +5004,17 @@ let keeper_message_search_identity (plan : chat_search_plan) =
   plan.search_workspace,plan.search_keeper,plan.search_needle
 
 (* The command handler takes the plan, announces, and calls this; it returns
-   before any candidate is built. Rendering the candidates is the expensive
-   step, and the render caches it reads ([Message_layout.display_pieces],
-   [bare_urls_for_entry]) take no lock and belong to the UI domain, so it runs
-   in a daemon fiber on that domain. The fiber yields before each entry, so
-   input and frames run between entries, and it stops without delivering once
-   a newer search or a navigation has retired this generation. Only the
-   matcher over frozen runs goes to the CPU pool.
+   before any candidate is built. A daemon fiber on the UI domain freezes the
+   link previews and, entry by entry, each candidate's cards, since the url
+   and preview caches take no lock and belong to that domain. Rendering a
+   candidate is the expensive step: the fiber sends consecutive candidates
+   to the worker domain in jobs of about [search_job_bytes], each under a
+   private [Message_layout] pieces cache, and waits for each, so input and
+   frames run while a long reply renders, and the worker's other jobs
+   (answer decoding) run between jobs. The fiber
+   yields before each entry and stops without delivering once a newer search
+   or a navigation has retired this generation. The matcher over frozen runs
+   goes to the worker last.
 
    [launch_with] forks on [Eio_context.get_switch_opt]. The TUI binds no turn
    switch, so that is the root switch [run_with_eio_context] installs, and the
@@ -4995,12 +5030,14 @@ let launch_keeper_message_search (state : state) plan ~deliver =
       | Ok (Some found) -> deliver (Ok found)
       | Error detail -> deliver (Error detail))
     (fun () ->
-      match build_keeper_message_search_in_steps ~proceed plan with
-      | None -> Ok None
-      | Some work ->
-          (match Domain_pool_ref.get () with
-           | None -> Error "chat search CPU executor is unavailable"
-           | Some pool ->
+      match Domain_pool_ref.get () with
+      | None -> Error "chat search CPU executor is unavailable"
+      | Some pool ->
+          let run build = Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
+            Message_layout.with_isolated_pieces_cache build) in
+          (match build_keeper_message_search_in_steps ~proceed ~run plan with
+           | None -> Ok None
+           | Some work ->
                (* The generation is an Atomic, so the CPU domain can read it
                   while the UI domain retires the search. *)
                let live () = Atomic.get state.msg_search_generation = plan.search_generation in
@@ -6092,7 +6129,9 @@ module For_testing = struct
   let source_index_build_count () = !source_index_builds
   let source_rows_build_count () = !source_rows_builds
   let source_url_discovery_count () = !source_url_discoveries
-  let search_candidate_build_count () = !search_candidate_builds
+  let search_candidate_build_count () = Atomic.get search_candidate_builds
+  let search_candidate_ui_build_count () = Atomic.get search_candidate_ui_builds
+  let search_job_bytes = search_job_bytes
   let growing_row_end_sources ~width (entry : Message_layout.entry) =
     let theme = Chat_theme.snapshot () in
     let previews = shared_previews () in
@@ -6101,7 +6140,9 @@ module For_testing = struct
       ~entry ~width);
     let sorted table =
       List.sort compare (Hashtbl.fold (fun row position rows -> (row, position) :: rows) table []) in
-    let whole = search_chat_markdown ~link_previews_mode:`Off ~theme ~preview ~entry ~width in
+    let whole = search_chat_markdown ~link_previews_mode:`Off ~theme
+      ~dress:(Masc_tui_markdown_theme.dress ())
+      ~cards:(link_cards ~preview ~mode:`Off entry) ~entry ~width in
     let whole_index = source_body_index_of_runs
       ~convert:(fun position -> Some (Durable_position position))
       ~body_rows:(List.length whole.mapped_rows) whole.runs in

@@ -223,7 +223,7 @@ let serve ~sw ~clock ~http_mode ~(config : Http.config) ~socket ~https_listener 
       ~h2_error_handler
 ;;
 
-let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
+let run ~sw ~env ~address ~port ~lease ?on_ready ~start_engine multi_account =
   let clock = Eio.Stdenv.clock env in
   let net = Eio.Stdenv.net env in
   let base_path = M.multi_account_base_path multi_account in
@@ -357,7 +357,7 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
            listener
            ~withdraw_with:(Eio.Switch.on_release sw))
   in
-  let* (_ : Runtime_account_access.published) =
+  let* access =
     Result.map_error
       (fun error -> Access_not_published error)
       (Runtime_account_access.publish
@@ -368,10 +368,15 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
      fiber behind. *)
   (* A login reaches its provider over [Masc_http_client], which makes its
      connections from the environment and under the switch of the process
-     ([Eio_context]). The single-user boot sets the two in its owner state,
-     which this server does not build. *)
+     ([Eio_context]). The single-user boot sets the two in its owner state.
+     The engine below sets them again when it builds its own, and a login
+     does not wait for it. *)
   Eio_context.set_env env;
   Eio_context.set_switch sw;
+  (* The engine starts on the access published above, in a fiber
+     ([Server_runtime_bootstrap.start_engine]). Nothing here waits for it:
+     the routes serve while it initializes. *)
+  start_engine access;
   record_port ~base_path config;
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   (* What a stopped server left ends beside the routes. The access is

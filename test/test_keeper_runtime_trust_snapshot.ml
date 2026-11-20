@@ -1380,10 +1380,60 @@ let test_approval_queue_failure_remains_typed_unavailable () =
           |> to_string))
 ;;
 
+let test_trust_snapshot_overlays_toml_sandbox_and_network_without_receipt () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default_for_tests ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-toml-overlay" in
+       let toml_path =
+         Keeper_sandbox_config.keeper_toml_path
+           ~base_path:base_dir
+           ~agent_name:keeper_name
+       in
+       write_file toml_path
+         {|[keeper]
+instructions = "Trust snapshot TOML overlay"
+sandbox_profile = "microvm"
+microvm_backend = "microsandbox"
+sandbox_image = "base"
+network_mode = "none"
+|};
+       let meta = make_meta keeper_name in
+       let summary = K.summary_json ~config ~meta in
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "summary execution.sandbox_summary uses TOML"
+         "microvm / none"
+         (summary |> member "execution" |> member "sandbox_summary" |> to_string);
+       Alcotest.(check string) "snapshot execution.sandbox_summary uses TOML"
+         "microvm / none"
+         (snapshot |> member "execution" |> member "sandbox_summary" |> to_string);
+       Alcotest.(check string) "snapshot runtime_contract.sandbox_profile uses TOML"
+         "microvm"
+         (snapshot |> member "runtime_contract" |> member "sandbox_profile" |> to_string);
+       Alcotest.(check string) "snapshot runtime_contract.network_mode uses TOML"
+         "none"
+         (snapshot |> member "runtime_contract" |> member "network_mode" |> to_string))
+;;
+
 let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
-    [ ( "status_runtime_provenance"
+    [ ( "toml_overlay"
+      , [ Alcotest.test_case
+            "summary and snapshot overlay TOML sandbox and network without receipt"
+            `Quick
+            test_trust_snapshot_overlays_toml_sandbox_and_network_without_receipt
+        ] )
+    ; ( "status_runtime_provenance"
       , [ Alcotest.test_case "active blocker survives historical success" `Quick
             test_active_blocker_overrides_success_until_cleared
         ; Alcotest.test_case "historical candidate evidence survives trust and compact projections"

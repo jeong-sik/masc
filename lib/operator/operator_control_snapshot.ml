@@ -120,6 +120,15 @@ let stored_meta config name =
     Keeper_meta_store.read_meta config name)
 ;;
 
+let effective_meta_with_profile_snapshot profile_snapshot (meta : Keeper_meta_contract.keeper_meta) =
+  match Keeper_types_profile.snapshot_profile_defaults profile_snapshot meta.name with
+  | Ok defaults ->
+    (match Keeper_meta_contract.effective_meta_of_profile_defaults defaults meta with
+     | Ok effective -> effective
+     | Error _ -> meta)
+  | Error _ -> meta
+;;
+
 (* What one Keeper name became in [keepers_json]. *)
 type keeper_row_outcome =
   | Keeper_row of Dashboard_projection_read.observation
@@ -131,8 +140,11 @@ let keepers_json
       ~keeper_names
       ?(include_recent_activity = false)
       ?(lightweight = false)
-      config
+      (config : Workspace.config)
   =
+  let profile_snapshot =
+    Keeper_types_profile.read_keeper_profile_snapshot ~base_path:config.Workspace.base_path
+  in
   (* A name list that did not read has no name to build a row for, and no
      name to put in [unread] either. The section says so in its own field
      rather than reading as a fleet of none (#38120). *)
@@ -210,6 +222,7 @@ let keepers_json
                     }
                 | Ok None -> Keeper_gone
                 | Ok (Some meta) ->
+                  let meta = effective_meta_with_profile_snapshot profile_snapshot meta in
                   dt_meta := Time_compat.now () -. t0;
                   if lightweight && meta.paused
                   then (

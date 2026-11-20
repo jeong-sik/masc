@@ -72,6 +72,9 @@ val supports_provider_routing_filter : t -> provider_id:string -> bool
 (** The model-policy provider of [provider_id] declares upstream provider
     routing filter support ([provider: { only; ignore }]). An unknown provider
     returns [false]. *)
+val default_cache_ttl_s : t -> provider_id:string -> float option
+(** The seconds the model-policy provider of [provider_id] keeps a cache write
+    that names no lifetime. An unknown or undeclared provider is [None]. *)
 
 type default_error =
   | Invalid_model_catalog of string

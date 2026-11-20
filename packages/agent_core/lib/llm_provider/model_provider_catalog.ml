@@ -34,6 +34,7 @@ type entry =
   ; cache_session_wire : Capability_vocab.cache_session_wire
   ; cache_session_header : string option
   ; supports_provider_routing_filter : bool
+  ; default_cache_ttl_s : float option
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 
@@ -118,6 +119,7 @@ let known_keys =
   ; "cache_session_wire"
   ; "cache_session_header"
   ; "supports_provider_routing_filter"
+  ; "default_cache_ttl_s"
   ; "serves_bare_models"
   ]
 ;;
@@ -406,6 +408,9 @@ let parse_entry provider_toml =
       Error (Printf.sprintf
         "provider entry %S field \"supports_provider_routing_filter\" expected bool" id)
   in
+  let* default_cache_ttl_s =
+    positive_finite_float_field ~entry_id:id "default_cache_ttl_s" provider_toml
+  in
   let* serves_bare_models =
     let* models = string_list_field ~entry_id:id "serves_bare_models" provider_toml in
     let rec parse acc = function
@@ -436,6 +441,7 @@ let parse_entry provider_toml =
     ; cache_session_wire
     ; cache_session_header
     ; supports_provider_routing_filter
+    ; default_cache_ttl_s
     ; serves_bare_models
     }
 ;;

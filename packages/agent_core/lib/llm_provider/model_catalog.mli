@@ -111,6 +111,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; cache_session_wire : Capability_vocab.cache_session_wire
   ; cache_session_header : string option
   ; supports_provider_routing_filter : bool
+  ; default_cache_ttl_s : float option
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 

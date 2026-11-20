@@ -48,6 +48,12 @@ type entry =
         ([provider: { only; ignore }]) on Chat Completions requests. Missing
         declarations are false so non-router endpoints never receive an unknown
         [provider] field. *)
+  ; default_cache_ttl_s : float option
+    (** The documented prompt-cache lifetime in seconds of a write whose
+        request names no [ttl] ([Types.Provider_default]). The provider's own
+        docs measure it from the start of the request that writes or reads the
+        entry. [None] declares none: the cache outcome projection then shows
+        the idle time and does not judge an expiry. *)
   ; serves_bare_models : Model_identifiers.Model_id.t list
     (** Explicit exact provider-independent model IDs served by this endpoint.
         Authorization uses ASCII case equality, never a family prefix. Absence or an empty list grants no

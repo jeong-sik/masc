@@ -48,6 +48,8 @@ val render_link_preview_modal :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
+val play_card_page_rows : Masc_tui_types.state -> int
+
 val render_play_card :
   Masc_tui_types.state ->
   Masc_tui_play_card.t ->

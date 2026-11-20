@@ -885,6 +885,8 @@ let for_surface = function
       ; b ~role:Acts ~ko:"대기열" Act "Ctrl-T" "queue"
           ~help:"inspect and manage waiting turns"
       ; b ~role:Moves ~ko:"이전 대화" Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
+      ; b ~role:Moves ~ko:"처음" Navigate "Home" "oldest"
+          ~help:"jump to the top of loaded history and request older messages"
       ; b ~role:Acts ~ko:"최신" Navigate "Ctrl-E / End" "newest"
           ~help:"after reading back, jump to the newest row"
       ; b ~role:Acts ~ko:"추론" Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"

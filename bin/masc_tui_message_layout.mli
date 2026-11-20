@@ -1012,6 +1012,7 @@ type scroll_window = {
 val clamped_scrolled_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
   ?origin:origin_display ->
+  ?from_oldest:int ->
   inner_width:int ->
   height:int ->
   requested:int ->

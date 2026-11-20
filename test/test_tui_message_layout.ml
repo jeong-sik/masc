@@ -780,6 +780,45 @@ let test_origin_bare_separates_tool_block_from_following_speech () =
   check int "bare transcript inserts breathing row after tool block before speech"
     2 spacing_count
 
+let test_clamped_scrolled_rows_home_and_from_oldest () =
+  let entries =
+    List.init 10 (fun i ->
+      entry Layout.Keeper "echo" "" (Printf.sprintf "line-%02d" i))
+  in
+  let height = 4 in
+  let total =
+    let full =
+      Layout.clamped_scrolled_rows ~origin:Layout.Origin_bare ~inner_width:60
+        ~height:100 ~requested:0 entries
+    in
+    List.length full.rows
+  in
+  let expected_max = max 0 (total - height) in
+  let at_max_int =
+    Layout.clamped_scrolled_rows ~origin:Layout.Origin_bare ~inner_width:60
+      ~height ~requested:max_int entries
+  in
+  check int "requested=max_int clamps to max scroll without overflowing"
+    expected_max at_max_int.scroll;
+  check int "requested=max_int draws full oldest window"
+    height (List.length at_max_int.rows);
+  let from_oldest_0 =
+    Layout.clamped_scrolled_rows ~origin:Layout.Origin_bare ~from_oldest:0
+      ~inner_width:60 ~height ~requested:max_int entries
+  in
+  check int "from_oldest=0 lands on exact max scroll"
+    expected_max from_oldest_0.scroll;
+  check int "from_oldest=0 draws full window"
+    height (List.length from_oldest_0.rows);
+  let from_oldest_3 =
+    Layout.clamped_scrolled_rows ~origin:Layout.Origin_bare ~from_oldest:3
+      ~inner_width:60 ~height ~requested:max_int entries
+  in
+  check int "from_oldest=3 steps 3 rows down from oldest"
+    (max 0 (expected_max - 3)) from_oldest_3.scroll;
+  check int "from_oldest=3 draws full window"
+    height (List.length from_oldest_3.rows)
+
 let () =
   run "tui_message_layout"
     [
@@ -853,5 +892,7 @@ let () =
         ; test_case "journal source spans" `Quick test_journal_source_spans
         ; test_case "live-edge positions own actual selected rows" `Quick
             test_live_edge_positions_belong_to_actual_selected_rows
+        ; test_case "Home max_int and from_oldest step down without overflow" `Quick
+            test_clamped_scrolled_rows_home_and_from_oldest
         ] )
     ]

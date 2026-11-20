@@ -1081,6 +1081,10 @@ let render_link_preview_modal (state : state) =
    turn the code into a picture that no phone reads. *)
 let play_card_indent = "  "
 
+let play_card_page_rows (state : state) =
+  let terminal_rows, _ = get_terminal_size () in
+  Masc_tui_scroll.page_step ~height:(surface_chrome_budget state ~terminal_rows)
+
 let render_play_card (state : state) card =
   let terminal_rows, cols = get_terminal_size () in
   (* The window as the operator sees it. The rows and columns a frame is laid
@@ -1762,7 +1766,8 @@ let render_answering (state : state) =
          the list above never reflows with the cursor. *)
       if lines <> [] then
         c.position
-          (Masc_tui_value.Position.row ~selected:(Some state.answering_cursor)
+          (Masc_tui_value.Position.row
+             ~selected:(if state.answering_cursor >= 0 then Some state.answering_cursor else None)
              ~total:(List.length lines));
       c.push_divider ();
       List.iter c.push preview_lines)

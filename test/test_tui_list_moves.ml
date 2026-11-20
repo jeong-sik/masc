@@ -758,6 +758,147 @@ let test_tools_follow_sees_where_the_key_landed () =
   Alcotest.(check (list (option string))) "each follow sees the request its key selected"
     [ Some "c"; Some "b" ] !seen
 
+let test_queue_panel_page_snaps_and_clears () =
+  let prose text : Masc_tui_queue_inspection.item = { id = None; text } in
+  let local id : Masc_tui_queue_inspection.item =
+    { id = Some (Masc_tui_queue_inspection.Local_message id); text = id }
+  in
+  let server id : Masc_tui_queue_inspection.item =
+    { id = Some (Masc_tui_queue_inspection.Server_message id); text = id }
+  in
+  (* Rows 0-3: prose, prose, local "a", server "b" (selecting server adds 1 fixed note row).
+     Rows 4-7: four prose rows (prose-only middle window).
+     Rows 8-9: local "c", local "d". *)
+  let items =
+    [ prose "h0"; prose "h1"; local "a"; server "b"
+    ; prose "p4"; prose "p5"; prose "p6"; prose "p7"
+    ; local "c"; local "d"
+    ]
+  in
+  let panel : Masc_tui_types.queue_panel =
+    { qp_keeper = "echo"
+    ; qp_layout = Masc_tui_queue_layout.Adaptive
+    ; qp_reading = Masc_tui_types.Queue_current
+    ; qp_observation = None
+    ; qp_notice = None
+    ; qp_receipt = None
+    ; qp_selected = Some (Masc_tui_queue_inspection.Local_message "a")
+    ; qp_scroll = 0
+    ; qp_detail = None
+    ; qp_detail_scroll = 0
+    ; qp_refresh_after_priority = false
+    }
+  in
+  (* Budget 5 -> fixed=1 (no note) -> height=4 (rows 0..3).
+     Page_down steps by page_step(4)=3 -> scroll=3 (rows 3..6), where row 3 is server "b". *)
+  let p1 =
+    Masc_tui_types.queue_panel_page ~items ~budget_for:(fun _ -> 5)
+      ~move:Masc_tui_scroll.Page_down panel
+  in
+  Alcotest.(check int) "page down lands at scroll 3" 3 p1.qp_scroll;
+  Alcotest.(check bool) "snaps to server b in new window" true
+    (p1.qp_selected = Some (Masc_tui_queue_inspection.Server_message "b"));
+  (* With server "b" selected, fixed=2 -> height=3. Next Page_down steps by 2 -> scroll=5 (rows 5..7),
+     which is prose-only -> selection clears to None so Enter cannot act off-screen. *)
+  let p2 =
+    Masc_tui_types.queue_panel_page ~items ~budget_for:(fun _ -> 5)
+      ~move:Masc_tui_scroll.Page_down p1
+  in
+  Alcotest.(check bool) "prose-only window clears selection" true (p2.qp_selected = None);
+  Alcotest.(check int) "prose-only scroll stays at 5" 5 p2.qp_scroll;
+  (* To_end jumps to bottom (rows 6..9) and selects last visible target local "d". *)
+  let p3 =
+    Masc_tui_types.queue_panel_page ~items ~budget_for:(fun _ -> 5)
+      ~move:Masc_tui_scroll.To_end p2
+  in
+  Alcotest.(check bool) "To_end snaps to last target" true
+    (p3.qp_selected = Some (Masc_tui_queue_inspection.Local_message "d"));
+  (* To_top with budget 4 (height 3 -> rows 0..2 when no note, or 0..1 if a server note appears):
+     even if row 2 were a server item, To_top keeps scroll=0 so top prose stays reachable. *)
+  let top_note_items = [ prose "h0"; prose "h1"; server "s2"; prose "p3"; local "e4" ] in
+  let p4 =
+    Masc_tui_types.queue_panel_page ~items:top_note_items ~budget_for:(fun _ -> 4)
+      ~move:Masc_tui_scroll.To_top { panel with qp_selected = None; qp_scroll = 2 }
+  in
+  Alcotest.(check int) "To_top stays anchored at row 0 despite note shrink" 0 p4.qp_scroll;
+  Alcotest.(check bool) "To_top clears selection when shrunk window hides s2" true
+    (p4.qp_selected = None);
+  (* To_end onto a trailing Server_message adds 1 fixed note row (height 4 -> 3);
+     re-anchoring to maximum ~height:3 keeps the last row s5 visible and selected. *)
+  let trailing_server = [ local "a0"; prose "p1"; prose "p2"; server "s3"; prose "p4"; server "s5" ] in
+  let p5 =
+    Masc_tui_types.queue_panel_page ~items:trailing_server ~budget_for:(fun _ -> 5)
+      ~move:Masc_tui_scroll.To_end panel
+  in
+  Alcotest.(check int) "To_end re-anchors scroll to bottom after note shrink" 3 p5.qp_scroll;
+  Alcotest.(check bool) "To_end keeps trailing server s5 selected" true
+    (p5.qp_selected = Some (Masc_tui_queue_inspection.Server_message "s5"));
+  (* To_end with trailing prose after a Server_message reaches the trailing prose on the first press. *)
+  let trailing_prose =
+    [ local "a0"; prose "p1"; prose "p2"; local "a3"; prose "p4"; server "s5"; prose "p6" ]
+  in
+  let p6 =
+    Masc_tui_types.queue_panel_page ~items:trailing_prose ~budget_for:(fun _ -> 5)
+      ~move:Masc_tui_scroll.To_end panel
+  in
+  Alcotest.(check int) "To_end reaches trailing prose on first press" 4 p6.qp_scroll;
+  Alcotest.(check bool) "To_end selects s5 inside final bottom window" true
+    (p6.qp_selected = Some (Masc_tui_queue_inspection.Server_message "s5"))
+
+let test_chat_home_and_overflow_guard () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Masc_tui_types.Keepers Masc_tui_types.Keeper_message;
+  state.msg_older_exist <- true;
+  state.msg_older_cursor <- Some "cur-1";
+  let loaded = ref [] in
+  let send key =
+    Masc_tui_chat_input.Message_keymap.handle_message_key
+      ~terminal_size:(fun () -> (30, 100))
+      ~wheel_notch_rows:3 state
+      ~submit_message:(fun _ -> ())
+      ~load_older:(fun ~cursor -> loaded := cursor :: !loaded)
+      ~paste_image:(fun () -> ())
+      ~open_named_image:(fun () -> ())
+      ~inspect_context:(fun () -> ())
+      ~inspect_queue:(fun () -> ())
+      ~load_tool_changes:(fun () -> ())
+      ~load_preparation:(fun () -> ())
+      ~drain_queue:(fun () -> ())
+      ~start_voice:(fun () -> ())
+      ~toggle_voice_continuous:(fun () -> ())
+      key
+  in
+  Alcotest.(check bool) "Home handled in chat" true (send "home");
+  Alcotest.(check int) "Home jumps to clamped_scroll_end"
+    Masc_tui_types.clamped_scroll_end state.msg_scroll;
+  Alcotest.(check bool) "Home records Chat_scroll_from_oldest 0" true
+    (state.msg_scroll_anchor = Masc_tui_types.Chat_scroll_from_oldest 0);
+  Alcotest.(check (list (option string))) "Home requests older page"
+    [ Some "cur-1" ] !loaded;
+  (* PgUp immediately after Home stays anchored at oldest offset 0 without wrapping. *)
+  Alcotest.(check bool) "PgUp after Home handled" true (send "pageup");
+  Alcotest.(check bool) "PgUp after Home stays at Chat_scroll_from_oldest 0" true
+    (state.msg_scroll_anchor = Masc_tui_types.Chat_scroll_from_oldest 0);
+  (* Down / wheel-down / PgDn immediately after Home before repaint records exact
+     downward offset from oldest instead of subtracting from max_int. *)
+  Alcotest.(check bool) "down after Home handled" true (send "down");
+  Alcotest.(check bool) "down after Home steps oldest offset to 1" true
+    (state.msg_scroll_anchor = Masc_tui_types.Chat_scroll_from_oldest 1);
+  Alcotest.(check bool) "wheel-down after Home handled" true (send "wheel-down");
+  Alcotest.(check bool) "wheel-down after Home steps oldest offset to 4" true
+    (state.msg_scroll_anchor = Masc_tui_types.Chat_scroll_from_oldest 4);
+  Alcotest.(check bool) "End jumps back to live bottom" true (send "end");
+  Alcotest.(check int) "End sets msg_scroll to 0" 0 state.msg_scroll;
+  Alcotest.(check bool) "End resets anchor to Chat_scroll_from_bottom" true
+    (state.msg_scroll_anchor = Masc_tui_types.Chat_scroll_from_bottom);
+  (* Outside Keeper_message (e.g. composer row on Overview), Home must not mutate msg_scroll. *)
+  state.view <- Masc_tui_types.Overview;
+  state.msg_scroll <- 4;
+  ignore (send "home");
+  Alcotest.(check int) "Home outside chat leaves msg_scroll unchanged" 4 state.msg_scroll;
+  Alcotest.(check bool) "Home outside chat leaves anchor unchanged" true
+    (state.msg_scroll_anchor = Masc_tui_types.Chat_scroll_from_bottom)
+
 let () =
   Alcotest.run "tui list moves"
     [ ( "keeper list"
@@ -805,5 +946,11 @@ let () =
     ; ( "workspace"
       , [ Alcotest.test_case "the detail card keeps one height" `Quick
             test_workspace_detail_keeps_one_height
+        ] )
+    ; ( "mixed modals and chat home"
+      , [ Alcotest.test_case "queue panel paging snaps and clears selection" `Quick
+            test_queue_panel_page_snaps_and_clears
+        ; Alcotest.test_case "chat Home jumps to oldest and guards overflow" `Quick
+            test_chat_home_and_overflow_guard
         ] )
     ]

@@ -4319,8 +4319,13 @@ let surviving_entry_row projection entry_index (point : chat_scroll_point) =
               if presentation = entries.(entry_index).Message_layout.body_presentation then None
               else Some 0
 
+let chat_scroll_from_oldest (state : state) =
+  match state.msg_scroll_anchor with
+  | Chat_scroll_from_bottom -> None
+  | Chat_scroll_from_oldest offset -> Some offset
+
 let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_body ~inner_width =
-  if state.msg_scroll = max_int then max_int
+  if state.msg_scroll = max_int || Option.is_some (chat_scroll_from_oldest state) then max_int
   else match state.msg_scroll_pin with
   | Some pin when pin.pin_workspace = state.workspace_authority
       && String.equal pin.pin_keeper keeper_name
@@ -4329,8 +4334,11 @@ let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_bo
         Option.bind (projection_index_of_scroll_anchor projection point.scroll_anchor)
           (fun entry_index ->
             Option.bind (row_of entry_index point) (fun body_row ->
-              Option.map (fun suffix -> max 0
-                (suffix - point.rows_below + state.msg_scroll - pin.pin_scroll))
+              Option.map (fun suffix ->
+                let base = suffix - point.rows_below in
+                let delta = state.msg_scroll - pin.pin_scroll in
+                if delta > 0 && base > max_int - delta then max_int
+                else max 0 (base + delta))
                 (Message_layout.scroll_for_body_row ~markdown
                   ~origin:state.msg_origin_display ~inner_width ~entry_index
                   ~body_row projection.layout_entries))) in
@@ -4852,8 +4860,8 @@ let queue_context_lines (state : state) ~keeper_name ~cols ~height =
   let requested = requested_scroll_from_pin state ~keeper_name projection
       ~markdown ~source_body ~inner_width:cols in
   let window = Message_layout.clamped_scrolled_rows ~markdown
-      ~origin:state.msg_origin_display ~inner_width:cols ~height
-      ~requested projection.layout_entries in
+      ~origin:state.msg_origin_display ?from_oldest:(chat_scroll_from_oldest state)
+      ~inner_width:cols ~height ~requested projection.layout_entries in
   let buf = Buffer.create 1024 in
   List.iter (render_chat_row ~theme ~origin:state.msg_origin_display buf chat_cols) window.rows;
   (* The preview has no interactive chat controls, including any marks a
@@ -5038,8 +5046,8 @@ let render_keeper_message (state : state) =
     let window_started = Masc_tui_frame_timing.start_stage () in
     let window =
       Message_layout.clamped_scrolled_rows ~markdown
-        ~origin:state.msg_origin_display ~inner_width ~height:history_height
-        ~requested layout_entries
+        ~origin:state.msg_origin_display ?from_oldest:(chat_scroll_from_oldest state)
+        ~inner_width ~height:history_height ~requested layout_entries
     in
     Masc_tui_frame_timing.finish_stage ~name:"chat.window" window_started;
     let scroll = window.scroll and visible_rows = window.rows in

@@ -57,6 +57,8 @@ type read_error =
       was cut or replaced in between, or the rows were not handed over one by
       one from the end. No offset from this read is to be trusted. *)
 
+val read_error_to_string : read_error -> string
+
 (** Reads back from the end only as far as it must: to the last line that
     ends a unit and to the last [Opened] or [Closed]. In a file the writing
     rules produced that is a few lines. *)

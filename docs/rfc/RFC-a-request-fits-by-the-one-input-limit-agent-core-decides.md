@@ -130,26 +130,47 @@ agent-core 도 그 요청을 보내지 않는다.
 
 ### 4.2 규칙
 
-보내기 전 거절(agent-core `admit` 의 `Context_window_exceeded`)에서는 completion 요청이 나가지 않았다.
-그래서 run 안에서 다시 투영해 다시 견줘도 tool 을 다시 돌리지 않고, checkpoint 도 되돌리지 않는다.
+크기 거절에서는 답이 나오지 않았다.
+그래서 run 안에서 더 좁은 요청을 보내도 tool 을 다시 돌리지 않고, checkpoint 도 되돌리지 않는다.
 
-- agent-core pipeline 은 그 거절을 caller 의 투영(`model_input_projection`, `packages/agent_core/lib/agent/agent_types.mli:57`)에 돌려준다. 투영이 더 좁은 요청을 내면 다시 `admit` 한다.
-- masc 투영은 사다리의 단을 차례로 하나씩 쓴다. 단마다 한 번 다시 견준다.
-- 단이 다하거나 좁힐 곳이 없으면 지금처럼 보내지 않고 턴을 끝낸다. 다음 턴 첫 요청에서 신호가 창을 옮긴다.
+크기 거절은 둘이고, agent-core 밖으로는 둘 다 `Retry.ContextOverflow` 로 나간다.
 
-다른 도구도 넘치면 한 번 줄여 다시 보내고, 줄일 것이 없으면 끝낸다.
+- 보내기 전 거절: `admit` 이 입력 한도를 넘는다고 본 요청이다(`Complete.Context_window_exceeded`, `packages/agent_core/lib/pipeline/pipeline_stage_route.ml:166-171`).
+- provider 거절: provider 가 넘침으로 돌려준 요청이다(`packages/agent_core/lib/provider_failure_attribution.ml:65-78`).
+  - 빈 completion 으로 끝난 넘침도 여기 든다. 이때는 provider 가 입력을 읽어서 값이 매겨진다.
+
+투영(`model_input_projection`, `packages/agent_core/lib/agent/agent_types.mli:57`)은 요청 하나 대신 후보 목록을 돌려준다.
+
+- 첫 후보는 지금 요청이다. 창을 붙잡는다.
+- 다음 후보들은 크기 거절 사다리의 단이고, 순서도 §4.1 과 같다.
+  - 후보는 누적이다. 앞 단이 붙잡은 front 와 표시 바꾸기를 안고 한 단을 더 쓴다.
+  - 지금 사다리도 그렇다(`turn_boundary_resend_sequence` 의 `restore_front` 조건, `this_turn_start_resend_sequence` 의 「whatever demotion [first] chose」).
+  - 좁아지지 않는 단은 후보를 내지 않는다. 조건은 지금 단의 조건이다.
+- 목록은 유한하다. 첫 후보 뒤의 단은 thunk 이고, agent-core 는 앞에서부터 한 번씩만 부른다. 목록 길이가 다시 보내는 횟수의 상한이라 따로 세지 않는다.
+- route 는 후보를 차례로 견주고, 처음 받아들여진 후보를 보낸다. provider 가 그 후보를 넘침으로 거절하면 다음 후보로 간다.
+- 후보가 다하면 지금처럼 `Retry.ContextOverflow` 로 턴을 끝낸다. lane 을 돌리는 것도 지금과 같다. 다음 턴 첫 요청에서 신호가 창을 옮긴다.
+- 받아들여진 후보의 좁힘은 run 의 다음 요청으로 이어진다.
+  - 턴 가운데 요청은 ledger 의 마지막 요청이 연 곳을 붙잡는다(`held_window`, `lib/keeper/keeper_turn_driver_try_provider.ml:1429`). ledger 는 응답 때 바뀐다(`:2770`).
+  - 표시 바꾸기는 attempt 가 들고 있는 상태다(`:2108`).
+
+agent-core 계약이 바뀐다.
+
+- 지금: 「Route exactly once. … AGENT_CORE does not mutate the transcript or retry implicitly」(`packages/agent_core/lib/pipeline/pipeline.ml:847`).
+- 바뀐 뒤: route 는 caller 가 준 후보마다 많아야 한 번 보낸다. transcript 는 바꾸지 않는다. 다시 보내는 것은 caller 가 후보로 적은 것뿐이다.
+
+run 안 후보가 checkpoint 앞뒤의 크기 거절을 모두 먼저 받는다.
+
+- attempt 를 다시 돌리는 API 레인 사다리 셋은 지운다. 단이 attempt 상태를 바꾸는 부분(front 붙잡기, 표시 바꾸기)만 후보 thunk 로 옮긴다.
+- 공식 클라이언트 런타임 둘이 부르는 `context_overflow_shrink_sequence` 는 이 RFC 가 다루지 않는다.
+
+다른 도구는 넘치면 한 번 줄여 다시 보내고, 줄일 것이 없으면 끝낸다.
 
 - pi: 「one compact-and-retry recovery attempt」. 그것도 실패하면 다시 보내지 않는다.
 - OpenClaw: 줄여서 다시 보낸다. 그래도 안 들어가면 /reset, /new, 더 큰 창의 모델을 권한다.
 - Hermes: provider 가 거절한 뒤에는 「one bounded attempt」(`max_compression_attempts`)만 다시 줄인다. https://hermes-agent.nousresearch.com/docs/developer-guide/context-compression-and-caching
   - 보내기 전에 줄일 것이 없는데 창을 넘으면 보내지 않는다. 새 세션(`/new`)을 권하며 턴을 끝낸다. https://hermes-agent.nousresearch.com/docs/user-guide/configuration
 
-### 4.3 정할 것
-
-- 거절을 투영에 돌려주는 모양.
-  - (가) `model_input_projection` 이 거절을 인자로 받는다. 요청 모양을 정하는 곳이 이미 투영 하나라서, 좁히는 것도 같은 곳에서 정한다. 추천.
-  - (나) 투영 옆에 callback 을 하나 더 둔다. 투영의 타입은 그대로지만 요청 모양을 정하는 곳이 둘이 된다.
-- provider 가 받은 뒤 타입 있는 넘침으로 거절한 요청도 같은 길로 받을지. provider 가 답을 만들지 않았으니 같은 이유로 안전하다. 다만 이미 보낸 요청이라 한 번 더 비용이 든다.
+여기서는 단 수가 상한이다. 단은 모델을 부르지 않고 범위만 다시 자른다.
 
 ## 5. 층
 
@@ -159,9 +180,12 @@ agent-core 도 그 요청을 보내지 않는다.
    - 시험: 창 400,000, 예약 128,000 에서 다음 턴 예측이 272,000 을 넘으면 신호가 켜진다.
 3. 턴의 `effective_budget`. 고칠 코드는 없다. 입력과 견주는 곳이 없다(§1.2).
 4. Librarian 레인. 지금 고칠 코드는 없다. Librarian RFC §6.3 의 비교를 만드는 층이 입력 한도 타입을 받는다. Librarian 담당이 한다.
-5. 넘칠 때 run 안에서 다시 투영하기(§4.2). §4.3 을 정한 뒤 한다.
-   - 시험: 턴 가운데 안쪽 요청이 입력 한도를 넘으면 같은 run 에서 좁힌 요청이 받아들여진다. tool 은 다시 돌지 않고 checkpoint 수도 그대로다.
-   - 시험: 단이 다하면 턴이 끝나고, 다음 턴 첫 요청에서 신호가 창을 옮긴다.
+5. 넘칠 때 run 안에서 후보로 좁히기(§4.2). agent-core 의 투영 타입과 route, masc 의 투영과 사다리를 고친다.
+   - 시험: 턴 가운데 안쪽 요청이 입력 한도를 넘으면 같은 run 에서 다음 후보가 받아들여진다. tool 은 다시 돌지 않고 checkpoint 수도 그대로다.
+   - 시험: 거절된 후보는 ledger 를 바꾸지 않는다.
+   - 시험: 좁힌 뒤의 안쪽 요청은 거절 없이 첫 후보로 들어간다.
+   - 시험: provider 가 넘침으로 거절하면 다음 후보를 보낸다.
+   - 시험: 후보가 다하면 턴이 끝나고 lane 을 돌리는 것은 지금과 같다. 다음 턴 첫 요청에서 신호가 창을 옮긴다.
 
 ## 6. 조사할 것
 

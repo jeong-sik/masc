@@ -16079,7 +16079,6 @@ let suspend_workspace_readings state =
   (* The open post reads again when authority is recovered
      ([resume_reads_after_authority_change]). *)
   state.board_post_owed <- None;
-  state.board_list_owed <- Masc_tui_owed_read.settled;
   state.pushed_reads <- [];
   state.ask_followup_owed <- Masc_tui_owed_read.settled;
   state.asks_owed <- Masc_tui_owed_read.settled;
@@ -16196,8 +16195,6 @@ let suspend_workspace_readings state =
   state.tools_skill_generation <- state.tools_skill_generation + 1;
   state.tools_skill_pending <- [];
   state.tools_catalog_owed <- Masc_tui_owed_read.settled;
-  state.overview_inflight <- false;
-  state.overview_owed <- Masc_tui_owed_read.settled;
   state.harness_inflight <- false;
   state.harness_owed <- Masc_tui_owed_read.settled;
   state.overview_inflight <- false;

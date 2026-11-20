@@ -139,7 +139,86 @@ let run_refusal ~body_limit () =
   Alcotest.(check bool) "the original review request remains" true
     (List.exists (fun row -> Yojson.Safe.Util.member "content" row = `String goal) messages)
 
+let test_cache_system_prompt_defaults_false_and_forwards_true () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
+  let base_path = Filename.temp_file "completion-review-cache-" ".dir" in
+  Unix.unlink base_path;
+  Unix.mkdir base_path 0o700;
+  Eio.Switch.on_release sw (fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    Llm_provider.Catalog_snapshot.publish catalog_snapshot;
+    Fs_compat.remove_tree base_path);
+  let bodies = ref [] in
+  let callback _connection _request body =
+    let text = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    bodies := !bodies @ [ text ];
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:wrong_success ()
+  in
+  let socket = Eio.Net.listen env#net ~sw ~backlog:8 ~reuse_addr:true
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port | `Unix _ -> Alcotest.fail "expected TCP peer" in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback ())
+      ~on_error:raise);
+  let catalog_path = Filename.concat base_path "models.toml" in
+  write catalog_path (Printf.sprintf
+    "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\nsupports_prompt_caching = true\nprompt_cache_wire = \"openrouter_top_level_cache_control\"\n"
+    model_id);
+  (match Llm_provider.Model_catalog.load_file catalog_path with
+   | Ok catalog ->
+     Llm_provider.Catalog_snapshot.publish
+       (Masc_test_deps.admit_catalogs ~models:(Some catalog) ~providers:None)
+   | Error detail -> Alcotest.fail detail);
+  let config_path = Filename.concat base_path "runtime.toml" in
+  write config_path (Printf.sprintf
+    "[runtime]\ndefault = \"fixture.sample\"\n[providers.fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = \"http://127.0.0.1:%d\"\n[models.sample]\napi-name = %S\nmax-context = 1048576\ntools-support = true\nstreaming = false\n[fixture.sample]\n"
+    port model_id);
+  (match Runtime.init_default ~config_path with
+   | Ok () -> () | Error detail -> Alcotest.fail detail);
+  let run ?cache_system_prompt () =
+    bodies := [];
+    let res =
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools
+        ~input_source:Masc.Keeper_request_source.Completion_review
+        ~runtime_id:"fixture.sample"
+        ~keeper_name:"completion-review-cache"
+        ~walk_owner:Keeper_turn_driver.One_shot_walk
+        ~base_path
+        ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+        ~goal
+        ~system_prompt:"Review the original evidence."
+        ?cache_system_prompt
+        ~raw_trace:None
+        ~masc_tools:[]
+        ~dispatch:(fun ~name ~args:_ ->
+          Tool_result.ok ~tool_name:name ~start_time:(Tool_timing.start ()) "ok")
+        ~sw
+        ~net:env#net
+        ()
+    in
+    (match res with
+     | Ok _ -> ()
+     | Error err -> Alcotest.fail (Agent_core.Error.to_string err));
+    match !bodies with
+    | [ raw ] -> Yojson.Safe.from_string raw |> Yojson.Safe.Util.to_assoc
+    | other -> Alcotest.failf "expected 1 wire request, got %d" (List.length other)
+  in
+  let default_fields = run () in
+  Alcotest.(check bool) "omitted cache_system_prompt defaults false (no cache_control)" false
+    (List.mem_assoc "cache_control" default_fields);
+  let enabled_fields = run ~cache_system_prompt:true () in
+  Alcotest.(check bool) "explicit ~cache_system_prompt:true emits cache_control" true
+    (List.assoc_opt "cache_control" enabled_fields
+     = Some (`Assoc [ "type", `String "ephemeral" ]))
+
 let () = Alcotest.run "completion review immutable evidence"
   ["actual wrapper and peer",
     [Alcotest.test_case "context refusal preserves current lookup" `Quick (run_refusal ~body_limit:false);
-     Alcotest.test_case "body refusal preserves current lookup" `Quick (run_refusal ~body_limit:true)]]
+     Alcotest.test_case "body refusal preserves current lookup" `Quick (run_refusal ~body_limit:true);
+     Alcotest.test_case "cache_system_prompt defaults false and forwards true" `Quick
+       test_cache_system_prompt_defaults_false_and_forwards_true]]

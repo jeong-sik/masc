@@ -29,6 +29,7 @@ let run_named_with_masc_tools
     ~raw_trace
     ?on_yield
     ?on_resume
+    ?(cache_system_prompt = false)
     ?attempt_continuation
     ?on_runtime_attempt_error
     ?context
@@ -77,6 +78,7 @@ let run_named_with_masc_tools
       ~raw_trace
       ?on_yield
       ?on_resume
+      ~cache_system_prompt
       ?attempt_continuation
       ?on_runtime_attempt_error
       ?on_request_execution_ready

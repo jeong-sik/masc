@@ -400,6 +400,7 @@ let install () =
                failure it would record. *)
             ~walk_owner:Keeper_turn_driver.One_shot_walk
             ~system_prompt
+            ~cache_system_prompt:true
             ~masc_tools:(report_tool_schema :: lookup_schemas)
             ~dispatch
             ~context:(Agent_core.Context.create ())

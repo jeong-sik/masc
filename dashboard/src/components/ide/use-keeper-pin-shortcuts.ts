@@ -6,8 +6,8 @@ import { promotePinAt, unpinHead } from './multi-keeper-pin-store'
  * Register the 5 multi-keeper-pin keyboard shortcuts on the supplied manager
  * and dispose them on unmount.
  *
- * Chord choices avoid RFC-0012 §4 default IDE set:
- *   - `Mod+1..9` is reserved for `ide.tab.switch.1..9` → use `Mod+Shift+1..4`
+ * Chord choices:
+ *   - promote is `Mod+Shift+1..4`, not plain `Mod+1..9`
  *   - unpin is `Mod+Shift+0`, beside the promote slots. `Mod+Shift+W`
  *     closes the browser window on every platform before the page sees the
  *     key, and macOS Chrome opens "Clear browsing data" on
@@ -16,7 +16,7 @@ import { promotePinAt, unpinHead } from './multi-keeper-pin-store'
  *   - digit chords match on `KeyboardEvent.code`: with Shift held the
  *     browser reports the layout's symbol as `key`.
  *
- * Defaults follow RFC-0012 §3 conventions:
+ * Defaults:
  *   - `scope: 'global'` — promote/unpin should fire from anywhere in the
  *     dashboard, not only when the multi-keeper inspector has focus
  *   - `preserveInInputs: false` — typing `Cmd+Shift+1` in a name field

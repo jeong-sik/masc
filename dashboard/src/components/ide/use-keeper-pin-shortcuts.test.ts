@@ -120,9 +120,8 @@ describe('useKeeperPinShortcuts', () => {
   })
 
   it('Mod+1 (without Shift) does NOT match — exact-match chord policy', async () => {
-    // RFC-0012 §4 reserves Mod+1 for ide.tab.switch.1. Our chord is
-    // Mod+Shift+1; chordMatches() rejects Mod+1 because wantsShift=true
-    // but event.shiftKey=false.
+    // Our chord is Mod+Shift+1; matchesShortcutChord() rejects Mod+1
+    // because wantsShift=true but event.shiftKey=false.
     const manager = createKeyboardShortcutManager({ platform: 'mac' })
     await mountHost(manager)
     pinKeeper('a')

@@ -1,13 +1,7 @@
 // KPI cell — single tile in a fleet/health KPI strip.
 //
-// Ported from design-system v0.4 cb-group-a (preview/cb-group-a.jsx,
-// see KpiStandard / KpiCompact / KpiStacked + KPI_CELLS data shape).
-// The original css selectors `.cb-kpi .cell.live.is-{kind}` live in
-// design-system/source_styles/, which the dashboard does NOT import
-// (CSS-ARCHITECTURE keeps preview styles isolated). This module is a
-// re-implementation against the dashboard token set + Tailwind v4 utility
-// + htm/preact convention, so the layout/spacing intent translates while
-// the surface fits the dashboard shell.
+// This module renders with the dashboard token set (inline style objects) +
+// htm/preact convention, so the surface fits the dashboard shell.
 //
 // Usage: parent renders `<KpiCell ... />` inside a `role="list"` strip
 // container. Each cell self-emits `role="listitem"` + an aria-label

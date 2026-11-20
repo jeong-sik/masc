@@ -1333,6 +1333,9 @@ provider 가 범위를 크다고 거절하면 Keeper 쪽에서 시작점을 당�
 | 이 턴이 시작한 곳으로 | `history_at_start` 의 atom 번호와 digest | `Opened.baseline.closed_messages` 를 atom 번호로 바꾼 값. digest 대신 「그 trace 의 head 가 닫힌 메시지를 그만큼은 갖고 있다」를 본다 |
 
 - 미리 세는 provider 는 보내기 전 거절로 같은 단계에 닿는다.
+- 셋째 단계는 run 이 `Opened` 를 이번 턴의 입력보다 먼저 썼을 때만 있다(`Keeper_run_prompt.this_turn_opening`).
+  - 이어 받은 checkpoint 가 이번 턴의 입력을 이미 갖고 있으면, 그 입력은 이 run 이 `Opened` 를 쓰기 전부터 이력에 있다. 그래서 baseline 이 입력 뒤다.
+  - 그 baseline 에서 다시 보내면 이번 턴의 요청이 빠진다. 그래서 driver 는 그 줄을 읽지 않고, 이 턴이 시작한 곳을 모르는 것으로 둔다.
 - 시작점의 출처 가운데 Librarian 것 다섯을 지운다(`Librarian_snapshot`, `Librarian_progress`, `Past_librarian_point`, `Turn_start_after_librarian_refusal`, `This_turn_start_after_librarian_refusal`). `Covered` 하나를 더한다.
 - 자리는 수와 끝자리로 적는다. 읽은 이력의 bundle digest 를 쓰지 않는다. 그래서 읽은 턴을 purge 해도 시작점이 풀린다.
 

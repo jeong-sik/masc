@@ -663,5 +663,4 @@ On ego-browser 0.6.2.5, dialogs that cut `click`, `dblclick`, `dragAndDrop`,
 `press` and `keyboard.press` left no key or button down on the same Page or
 another Page of the Space. A cut `keyboard.type` left the next press of the
 interrupted key on that Page marked `repeat: true`; the typed value was right
-and the flag cleared after that key went up once. RFC #48037 has the
-measurements.
+and the flag cleared after that key went up once.

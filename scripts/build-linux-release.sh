@@ -159,10 +159,9 @@ fi
 # Only tracked files are copied into the container, so /src has no .git and the
 # probe in lib/build_commit/ finds no checkout to ask. Left alone it embeds
 # None, `masc build-commit` then exits 1, and scripts/release-dashboard-bundle.py
-# refuses to package a binary that cannot name its own commit -- the "binary
-# unknown" state RFC-0382 set out to end. The checkout's HEAD is read here and
-# handed to that probe through the environment; the build step below verifies
-# the binaries came out carrying it.
+# refuses to package a binary that cannot name its own commit. The checkout's
+# HEAD is read here and handed to that probe through the environment; the build
+# step below verifies the binaries came out carrying it.
 build_commit="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)"
 if [ -z "$build_commit" ]; then
   echo "build-linux-release: no git HEAD here; release binaries must carry a commit" >&2

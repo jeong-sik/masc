@@ -812,7 +812,7 @@ let fact_detail_parts_for_width ?state ~ko ~width (row : memory_fact_row) =
 
            [Retracted] and [Revised from] keep their zeros. Both are measured
            counts the server always sends, and hiding a measured zero makes it
-           read as "not measured" -- the shape RFC-0462 closed. *)
+           read as "not measured". *)
         let read =
           match fact.mf_events.mfe_retrieval with
           | Never_retrieved -> text "조회된 적 없음" "Never retrieved"

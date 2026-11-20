@@ -94,21 +94,39 @@ let unchecked_on_day ~reports_complete ~day ~entries inventory =
             | Some check -> check.state = Check.Unchecked in
           Ok (if unchecked && Catalog.on_day day entry then count + 1 else count)) (Ok 0) entries
 
-let next_unchecked ~reports_complete ~entries ~cursor inventory =
+let localized_detail ~ko = function
+  | "confirmation query in progress" when ko -> "확인 목록을 조회하는 중입니다"
+  | "confirmation inventory has not been read" when ko -> "확인 목록을 아직 읽지 않았습니다"
+  | "some confirmation records could not be read" when ko -> "일부 확인 기록을 읽지 못했습니다"
+  | "confirmation record refers to a different report body" when ko ->
+      "확인 기록이 다른 보고서 본문을 가리킵니다"
+  | "saving confirmation; a fresh query is required" when ko ->
+      "확인 변경을 저장하는 중입니다. 다시 조회해야 합니다"
+  | "workspace identity is unconfirmed" when ko ->
+      "워크스페이스 식별이 확인되지 않았습니다"
+  | detail -> detail
+
+let next_unchecked ?(ko = false) ~reports_complete ~entries ~cursor inventory =
   let* () =
-    if not reports_complete then Error "report inventory is incomplete; refresh before navigating confirmations"
-    else if Fetched.in_flight inventory then Error "confirmation query in progress"
+    if not reports_complete then
+      Error
+        (if ko then "보고서 목록이 불완전합니다. 확인 이동 전에 새로고침하세요"
+         else "report inventory is incomplete; refresh before navigating confirmations")
+    else if Fetched.in_flight inventory then
+      Error (localized_detail ~ko "confirmation query in progress")
     else match Fetched.view_for ~equal:Unit.equal inventory ~key:() with
       | Ready { diagnostics = []; _ } -> Ok ()
-      | Ready { diagnostics = _ :: _; _ } -> Error "some confirmation records could not be read"
-      | Absent -> Error "confirmation inventory has not been read"
-      | Loading -> Error "confirmation query in progress"
+      | Ready { diagnostics = _ :: _; _ } ->
+          Error (localized_detail ~ko "some confirmation records could not be read")
+      | Absent -> Error (localized_detail ~ko "confirmation inventory has not been read")
+      | Loading -> Error (localized_detail ~ko "confirmation query in progress")
       | Stale (_, (Read_failed detail | Read_kept_back detail))
       | Failed (Read_failed detail | Read_kept_back detail) -> Error detail in
   let* candidates = traverse (fun (index, entry) -> match entry with
     | Catalog.Mcp _ -> Ok None
     | Report report -> match resolve inventory report with
-      | Unknown (_, detail) | Kept_back detail -> Error detail
+      | Unknown (_, detail) -> Error (localized_detail ~ko detail)
+      | Kept_back detail -> Error detail
       | Known None | Known (Some {state=Check.Unchecked;_}) -> Ok (Some index)
       | Known (Some {state=Check.Checked;_}) -> Ok None)
     (List.mapi (fun index entry -> index, entry) entries) in
@@ -153,7 +171,8 @@ let widest_label_cells =
 
 let description ?(ko = false) status = match status with
   | Unknown (gap, detail) ->
-      (if ko then "확인 " else "Confirmation ") ^ gap_word ~ko gap ^ ": " ^ detail
+      (if ko then "확인 " else "Confirmation ") ^ gap_word ~ko gap ^ ": "
+      ^ localized_detail ~ko detail
   | Kept_back notice -> notice
   | Known None ->
       if ko then "이 보고서 리비전에 대한 확인 기록이 없습니다."

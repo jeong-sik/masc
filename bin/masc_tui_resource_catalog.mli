@@ -35,9 +35,9 @@ val owns_key : t -> key -> bool
 val entry_for_key : t list -> key -> t option
 val adjacent_revision : direction -> current:report -> report list -> report option
 val mcp_reading : Masc_tui_mcp.resource_content list -> reading
-val metadata : t -> Masc_tui_mcp.resource
+val metadata : ?ko:bool -> t -> Masc_tui_mcp.resource
 val display_name : t -> string
-val origin : t -> string
+val origin : ?ko:bool -> t -> string
 val report_path : report -> string
 val reports_of_json : Yojson.Safe.t -> (t list * string list, string) result
 val report_contents : report -> Yojson.Safe.t ->

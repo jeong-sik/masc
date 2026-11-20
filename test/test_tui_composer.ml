@@ -222,11 +222,23 @@ let test_band_surface_tracks_focus_and_reachability () =
          ])
     [ Composer.Focused; Composer.Unfocused ]
 
+let test_korean_recipient_attaches_particle () =
+  let composer = make ~target:(Composer.Ready "wkbl-web-leader") () in
+  Alcotest.(check string) "Korean recipient particle has no leading space"
+    "wkbl-web-leader에게"
+    (Composer.prompt ~ko:true composer);
+  let with_images = { composer with staged_images = 2 } in
+  Alcotest.(check string) "Korean recipient with staged images"
+    "wkbl-web-leader에게 [그림 2장]"
+    (Composer.prompt ~ko:true with_images)
+
 let () =
   Alcotest.run "tui-composer"
     [ ( "what the row says"
       , [ Alcotest.test_case "an unreachable target keeps its name" `Quick
             test_unreachable_target_keeps_its_name_and_reason
+        ; Alcotest.test_case "Korean recipient attaches particle without stray space" `Quick
+            test_korean_recipient_attaches_particle
         ; Alcotest.test_case "send needs a reachable target" `Quick
             test_send_requires_a_reachable_target
         ] )

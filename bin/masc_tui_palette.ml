@@ -24,14 +24,17 @@ let palette_equals ~needle haystack =
    a chat the roster can open. *)
 type gate_lane = Workspace_gate | External_gate
 
-let gate_lane_label = function
-  | Workspace_gate -> "Workspace"
-  | External_gate -> "Outside services"
+let gate_lane_label ?(ko = false) = function
+  | Workspace_gate -> if ko then "워크스페이스" else "Workspace"
+  | External_gate -> if ko then "외부 서비스" else "Outside services"
 
-let gate_mode_label = function
-  | Masc.Keeper_gate_mode.Manual -> "Ask me for each decision"
-  | Masc.Keeper_gate_mode.Auto_judge -> "Let Auto Judge decide"
-  | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
+let gate_mode_label ?(ko = false) = function
+  | Masc.Keeper_gate_mode.Manual ->
+      if ko then "매번 나에게 묻기" else "Ask me for each decision"
+  | Masc.Keeper_gate_mode.Auto_judge ->
+      if ko then "Auto Judge가 판단" else "Let Auto Judge decide"
+  | Masc.Keeper_gate_mode.Always_allow ->
+      if ko then "검토 없이 모두 허용" else "Allow every call without review"
 
 type palette_action =
   | Palette_browser_lane
@@ -649,10 +652,10 @@ let single_line_description text =
 
 let action_description_raw ~ko = function
   | Palette_browser_lane ->
-      if ko then "Connectors 안의 Browser Lane 화면을 엽니다"
+      if ko then "커넥터 안의 브라우저 레인 화면을 엽니다"
       else "Open Browser Lane inside Connectors"
   | Palette_hide_browser_lane ->
-      if ko then "Browser Lane을 닫고 Connectors 목록으로 돌아갑니다"
+      if ko then "브라우저 레인을 닫고 커넥터 목록으로 돌아갑니다"
       else "Close Browser Lane and return to the Connectors list"
   | Palette_connectors ->
       if ko then "외부 채널·전송 커넥터 목록을 엽니다"
@@ -667,7 +670,7 @@ let action_description_raw ~ko = function
       if ko then "DOS 플레이 화면을 엽니다"
       else "Open the DOS play view"
   | Palette_lane_addons ->
-      if ko then "설치된 플러그인·Lane 애드온 목록을 엽니다"
+      if ko then "설치된 플러그인·레인 애드온 목록을 엽니다"
       else "Open installed plugins and Lane Add-ons"
   | Palette_lane_history lane ->
       let label = Lane_run_identity.label lane in
@@ -697,9 +700,14 @@ let action_description_raw ~ko = function
       if ko then "TUI 표시 언어를 영어(English)로 전환합니다"
       else "Switch the TUI interface language to English"
   | Palette_gate_mode (lane, mode) ->
-      let lane_text = gate_lane_label lane in
-      let mode_text = gate_mode_label mode in
-      if ko then Printf.sprintf "%s 게이트 정책을 %s 모드로 변경합니다" lane_text mode_text
+      let lane_text = gate_lane_label ~ko lane in
+      let mode_text = gate_mode_label ~ko mode in
+      let particle =
+        match mode with
+        | Masc.Keeper_gate_mode.Manual -> "로"
+        | Masc.Keeper_gate_mode.Auto_judge | Masc.Keeper_gate_mode.Always_allow -> "으로"
+      in
+      if ko then Printf.sprintf "%s 게이트 정책을 '%s'%s 변경합니다" lane_text mode_text particle
       else Printf.sprintf "Set %s gate policy to %s" lane_text mode_text
   | Palette_chat keeper ->
       if ko then Printf.sprintf "%s 키퍼와의 실시간 채팅 화면을 엽니다" keeper
@@ -720,23 +728,30 @@ let action_description_raw ~ko = function
       if ko then Printf.sprintf "보드 게시글 %s 본문과 댓글을 엽니다" id
       else Printf.sprintf "Open Board post %s and its thread" id
   | Palette_lsp (question, symbol) ->
-      if ko then Printf.sprintf "Code에서 심볼 %s에 대해 %s 질의를 실행합니다" symbol question
+      let question_ko =
+        match question with
+        | "definition" -> "정의"
+        | "hover" -> "호버 정보"
+        | "references" -> "참조"
+        | other -> other
+      in
+      if ko then Printf.sprintf "코드 화면에서 심볼 %s의 %s를 조회합니다" symbol question_ko
       else Printf.sprintf "Run %s query for symbol %s in Code" question symbol
   | Palette_code_file path ->
-      if ko then Printf.sprintf "Code 뷰어에서 %s 파일을 엽니다" path
+      if ko then Printf.sprintf "코드 뷰어에서 %s 파일을 엽니다" path
       else Printf.sprintf "Open %s in the Code viewer" path
   | Palette_code_location (_, location) ->
       let open Masc.Tui_decode in
       if location.ll_inside then
         if ko then
-          Printf.sprintf "Code에서 %s:%d 위치로 바로 이동합니다"
+          Printf.sprintf "코드 화면에서 %s:%d 위치로 바로 이동합니다"
             location.ll_path location.ll_line
         else
           Printf.sprintf "Jump to %s:%d in Code"
             location.ll_path location.ll_line
       else
         if ko then
-          Printf.sprintf "워크스페이스 외부 위치(%s:%d)입니다 · Code에서 직접 열리지 않습니다"
+          Printf.sprintf "워크스페이스 외부 위치(%s:%d)입니다 · 코드 화면에서 직접 열리지 않습니다"
             location.ll_path location.ll_line
         else
           Printf.sprintf "Outside workspace (%s:%d) · cannot open directly in Code"
@@ -752,7 +767,7 @@ let action_description_raw ~ko = function
   | Palette_code_search_match found ->
       let open Masc.Tui_decode in
       if ko then
-        Printf.sprintf "검색 결과가 나온 %s:%d 줄을 Code에서 엽니다"
+        Printf.sprintf "검색 결과가 나온 %s:%d 줄을 코드 화면에서 엽니다"
           found.wsm_path found.wsm_line
       else
         Printf.sprintf "Open search match at %s:%d in Code"

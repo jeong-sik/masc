@@ -285,6 +285,18 @@ let navigation_retains_read_owner () =
   refused (Updates.select_next_unchecked state);
   read_preserved ()
 
+let korean_descriptions_and_navigation () =
+  let item = report "body" in
+  let desc = Checks.description ~ko:true (Checks.resolve Fetched.initial item) in
+  check string "Korean unread description has localized detail"
+    "확인 미조회: 확인 목록을 아직 읽지 않았습니다" desc;
+  match Checks.next_unchecked ~ko:true ~reports_complete:false
+          ~entries:[Catalog.Report item] ~cursor:0 (ready (inventory [])) with
+  | Error msg ->
+      check string "Korean incomplete navigation error"
+        "보고서 목록이 불완전합니다. 확인 이동 전에 새로고침하세요" msg
+  | Ok _ -> fail "incomplete inventory should refuse navigation"
+
 let () = run "Shared artifact confirmation reads"
   ["state", [test_case "exact revision and explicit uncheck" `Quick exact_revision;
     test_case "uncertain and partial inventories" `Quick uncertain_inventory;
@@ -296,4 +308,5 @@ let () = run "Shared artifact confirmation reads"
     test_case "request-owned workspace write precondition" `Quick workspace_write_binding;
     test_case "next unchecked exact revision and wrap" `Quick next_unchecked_revision;
     test_case "unknown inventories cannot navigate" `Quick uncertain_navigation;
-    test_case "scoped navigation preserves caller read ownership" `Quick navigation_retains_read_owner]]
+    test_case "scoped navigation preserves caller read ownership" `Quick navigation_retains_read_owner;
+    test_case "Korean descriptions and navigation errors" `Quick korean_descriptions_and_navigation]]

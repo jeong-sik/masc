@@ -98,6 +98,7 @@ let last_cell cells = List.nth_opt (List.rev cells) 0
 
 let test_segments_extracts_scheduled_and_memory_cells () =
   let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
+  state.ui_language <- Masc_tui_types.Lang_en;
   let row : Masc_tui_types.schedule_row =
     { sch_schedule_id = "sch-1"
     ; sch_schedule_instance_id = "inst-1"
@@ -243,6 +244,20 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   let refused = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"gamma" ~runtime:None in
   Alcotest.(check int) "a refused keeper has one cell and no ladder" 1 (List.length refused);
   state.memory_health <- Some (make_snapshot [ kh ]);
+
+  (* Korean language switches memory axis cells to Korean *)
+  state.ui_language <- Masc_tui_types.Lang_ko;
+  let ko_cells = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" ~runtime:None in
+  Alcotest.(check string) "edgar Korean lag cell" "지연 4"
+    (List.nth ko_cells 1).Masc_tui_keeper_axis_cell.text;
+  Alcotest.(check string) "edgar Korean stale cell" "무효화 ×1"
+    (List.nth ko_cells 3).Masc_tui_keeper_axis_cell.text;
+  state.memory_health <- None;
+  let ko_unknown = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"other" ~runtime:None in
+  Alcotest.(check string) "Korean unknown cell is 기억 ?" "기억 ?"
+    (List.hd ko_unknown).Masc_tui_keeper_axis_cell.text;
+  state.memory_health <- Some (make_snapshot [ kh ]);
+  state.ui_language <- Masc_tui_types.Lang_en;
 
   (* other is absent from snapshot without anonymous refusal -> No_row (0 cells) *)
   let other_clean = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"other" ~runtime:None in

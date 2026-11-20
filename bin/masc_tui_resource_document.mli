@@ -33,7 +33,7 @@ val rows : ?ko:bool -> cols:int -> t -> string list
     fencing/joining and terminal sanitization. HTML document whitespace follows
     HTML parsing; original parts and copy bytes are unchanged. Source mode
     keeps standalone CR escaped. *)
-val recovery_preview_fits : cols:int -> height:int -> requested:bool -> t -> bool
+val recovery_preview_fits : ?ko:bool -> cols:int -> height:int -> requested:bool -> t -> bool
 (** Whether the change direction and retry instruction occupy the visible
     document height when the reader is at its first row. *)
 type diagram = {

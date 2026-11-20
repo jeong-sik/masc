@@ -166,7 +166,11 @@ let segments (state : Masc_tui_types.state) ~now ~keeper_name ~runtime
   let memory_reading =
     Masc_tui_keeper_memory_reading.find (memory_index state) ~keeper_name
   in
-  let memory_cells = Masc_tui_keeper_memory_reading.cells ~now memory_reading in
+  let memory_cells =
+    Masc_tui_keeper_memory_reading.cells
+      ~ko:(state.ui_language = Masc_tui_types.Lang_ko)
+      ~now memory_reading
+  in
   let failing_cells, pulse_cells = runtime_cells ~now runtime in
   (* Last, so a row too narrow for every cell drops the ladder first. Only a
      health row carries a ladder; for the other three readings the [mem] cell,

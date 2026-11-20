@@ -222,7 +222,7 @@ let validation_line ~ko validation =
    so the verdict lives in one place and the revision is the caller's: the
    compact summary has three rows for the whole read and prints the prefix, the
    detail screen has the room for the revision a reader pastes into [git show]. *)
-let revision_row ~ko revision = Neutral, say ~ko "원본 revision: " "Source revision: " ^ revision
+let revision_row ~ko revision = Neutral, say ~ko "원본 리비전: " "Source revision: " ^ revision
 
 (* The tone of the routing and of the keeper state. The compact summary prints
    both in one row and takes the worse of the two; the status page prints each
@@ -244,7 +244,7 @@ let verdict_rows ~ko metadata =
   in
   [ validation_line ~ko metadata.validation;
     tone,
-      Printf.sprintf (if ko then "라우팅 %s · Keeper %s" else "Routing %s · Keeper %s")
+      Printf.sprintf (if ko then "라우팅 %s · 키퍼 %s" else "Routing %s · Keeper %s")
         (routing_label ~ko metadata.routing
            ~requires_restart:metadata.routing_requires_restart)
         (keeper_label ~ko metadata.keeper) ]
@@ -285,20 +285,20 @@ let detail_blocks ~ko ?(notices = []) ~lead metadata =
     @ [ fact validation_tone (say ~ko "검증" "Validation") validation_value;
         fact (routing_tone metadata) (say ~ko "라우팅" "Routing")
           (routing_label ~ko metadata.routing ~requires_restart:metadata.routing_requires_restart);
-        fact (keeper_tone metadata) "Keeper" (keeper_label ~ko metadata.keeper) ]
+        fact (keeper_tone metadata) (say ~ko "키퍼" "Keeper") (keeper_label ~ko metadata.keeper) ]
     @ validation
-    @ [ fact Neutral (say ~ko "Keeper 설정" "Keeper settings")
+    @ [ fact Neutral (say ~ko "키퍼 설정" "Keeper settings")
           (Printf.sprintf (if ko then "%d개 설정됨" else "%d configured") metadata.configured_count) ]
   in
   let source =
-    lead @ [ fact Neutral (say ~ko "원본 revision" "Source revision") metadata.source_revision ]
+    lead @ [ fact Neutral (say ~ko "원본 리비전" "Source revision") metadata.source_revision ]
   in
   let keys label tone values = Line.items ~tone:(page_tone tone) label values in
   [ say ~ko "적용 상태" "Application", application;
     source_heading ~ko, source ]
   @ (if metadata.pending_keys = [] && metadata.preempted_keys = [] && metadata.applied_keys = [] then []
      else
-       [ say ~ko "Keeper 설정" "Settings",
+       [ say ~ko "키퍼 설정" "Settings",
          [ keys (say ~ko "재시작 대기" "Pending restart") Warning metadata.pending_keys;
            keys (say ~ko "환경 변수가 앞섬" "Preempted by environment") Warning metadata.preempted_keys;
            keys (say ~ko "적용됨" "Applied") Neutral metadata.applied_keys ] ])

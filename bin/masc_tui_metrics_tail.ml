@@ -235,9 +235,9 @@ let empty_message ~ko error =
   match error, ko with
   | None, true -> "(로그 항목 없음)"
   | None, false -> "(no log entries found)"
-  | Some Remote_workspace, true -> "(원격 워크스페이스의 metrics 는 읽지 않음)"
+  | Some Remote_workspace, true -> "(원격 워크스페이스의 메트릭은 읽지 않음)"
   | Some Remote_workspace, false -> "(metrics not read for the remote workspace)"
-  | Some Workspace_unconfirmed, true -> "(metrics 를 읽지 않음: 서버 워크스페이스 미관측)"
+  | Some Workspace_unconfirmed, true -> "(메트릭을 읽지 않음: 서버 워크스페이스 미관측)"
   | Some Workspace_unconfirmed, false -> "(metrics not read: server workspace not observed)"
   | Some (Storage_error _), true -> "(로그 항목을 읽지 못함)"
   | Some (Storage_error _), false -> "(log entries unavailable)"

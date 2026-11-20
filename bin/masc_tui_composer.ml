@@ -65,7 +65,7 @@ let prompt ~ko composer =
   | Unreachable { keeper; reason } ->
       Printf.sprintf "%s · %s" keeper (unreachable_text ~ko reason)
   | Ready keeper ->
-    let recipient = if ko then keeper ^ " 에게" else "to " ^ keeper in
+    let recipient = if ko then keeper ^ "에게" else "to " ^ keeper in
     if composer.staged_images = 0
     then recipient
     else

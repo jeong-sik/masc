@@ -77,7 +77,10 @@ let checks_loaded state request result =
 let begin_check state ~report =
   if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
   else match state.artifact_check_pending with
-  | Some _ -> Error (Request_failed "A confirmation change is still pending")
+  | Some _ ->
+      Error (Request_failed
+        (ui_text state ~ko:"확인 변경 요청이 아직 처리 중입니다"
+           ~en:"A confirmation change is still pending"))
   | None ->
     let open Result.Syntax in
     let* request = Masc_tui_artifact_check_action.prepare state.artifact_checks report
@@ -116,7 +119,9 @@ let retain_unread_revision state key =
   | None, None ->
     (* A retired read can be the only owner of this fixed revision. *)
     state.resource_content_error <- Some
-      (key, "Report is not currently read; press R to reread this revision")
+      (key, ui_text state
+              ~ko:"보고서를 아직 읽지 않았습니다. R을 눌러 이 리비전을 다시 읽으세요"
+              ~en:"Report is not currently read; press R to reread this revision")
   | (Some _ | None), (Some _ | None) -> ()
 
 let begin_share_recovery_lookup state ~origin ~report =
@@ -126,7 +131,10 @@ let begin_share_recovery_lookup state ~origin ~report =
    | Some pending when Catalog.equal_key pending key ->
      (match state.resource_content with
       | Some (held, _) when Catalog.equal_key held key -> ()
-      | Some _ | None -> state.resource_content_error <- Some (key, "Press R to reread this report"));
+      | Some _ | None ->
+          state.resource_content_error <-
+            Some (key, ui_text state ~ko:"R을 눌러 이 보고서를 다시 읽으세요"
+                         ~en:"Press R to reread this report"));
      state.resource_pending_key <- None
    | Some _ | None -> ());
   state.resource_read_owner <- None;
@@ -138,22 +146,31 @@ let begin_share_recovery_lookup state ~origin ~report =
 (* The guard's refusal comes back as [Request_withdrawn] so the caller says the
    change is kept back (RFC §2). *)
 let begin_share_change ?(recovery = false) state ~report ~(entry : Masc_tui_artifact_share_pending.entry) =
+  let say ko en = ui_text state ~ko ~en in
   if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
   else if resource_share_uncertain state report && not recovery then
-    Error (Request_failed "External sharing outcome is unconfirmed; an operation receipt is required")
+    Error (Request_failed
+      (say "외부 공유 결과가 미확인 상태입니다. 작업 영수증이 필요합니다"
+         "External sharing outcome is unconfirmed; an operation receipt is required"))
   else match workspace_input_identity_of_server state.server_identity with
   | None -> Error (Request_withdrawn Workspace_identity_not_confirmed)
   | Some share_workspace_identity when
       entry.base_path <> share_workspace_identity.wi_base_path
       || entry.masc_root <> share_workspace_identity.wi_masc_root
       || entry.artifact_id <> report.Catalog.id ->
-    Error (Request_failed "The share request belongs to another workspace or artifact")
+    Error (Request_failed
+      (say "공유 요청이 다른 워크스페이스나 아티팩트에 속합니다"
+         "The share request belongs to another workspace or artifact"))
   | Some _ when resource_share_identity_conflict state entry ->
-    Error (Request_failed "The recovered operation ID does not match the originally observed request")
+    Error (Request_failed
+      (say "복구된 작업 ID가 처음 관측된 요청과 일치하지 않습니다"
+         "The recovered operation ID does not match the originally observed request"))
   | Some share_workspace_identity when List.exists (fun request ->
       request.share_workspace_identity = share_workspace_identity
       && String.equal request.share_report.id report.id) state.resource_share_pending ->
-    Error (Request_failed "An external sharing change for this artifact is still pending")
+    Error (Request_failed
+      (say "이 아티팩트의 외부 공유 변경이 아직 처리 중입니다"
+         "An external sharing change for this artifact is still pending"))
   | Some share_workspace_identity ->
     let request = { share_owner = ref (); share_workspace = state.workspace_authority;
       share_workspace_identity; share_report = report; share_target = entry.request.requested;
@@ -278,15 +295,21 @@ let step_revision state ~direction ~read =
    move is kept back (RFC §2). *)
 let select_next_unchecked state =
   let open Result.Syntax in
+  let ko = state.ui_language = Lang_ko in
   let* () =
     if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
     else if Option.is_some state.artifact_check_pending then
-      Error (Request_failed "A confirmation change is still pending")
+      Error (Request_failed
+        (if ko then "확인 변경 요청이 아직 처리 중입니다"
+         else "A confirmation change is still pending"))
     else Ok () in
   let* entries = match visible_resources state with
-    | None -> Error (Request_failed "Report inventory has not been read")
+    | None ->
+        Error (Request_failed
+          (if ko then "보고서 목록을 아직 읽지 않았습니다"
+           else "Report inventory has not been read"))
     | Some entries -> Ok entries in
-  let* selected = Masc_tui_artifact_checks.next_unchecked
+  let* selected = Masc_tui_artifact_checks.next_unchecked ~ko
     ~reports_complete:state.resources_reports_complete ~entries
     ~cursor:state.resources_cursor state.artifact_checks
     |> Result.map_error (fun detail -> Request_failed detail) in

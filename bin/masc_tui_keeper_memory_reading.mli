@@ -40,9 +40,9 @@ val index_of_snapshot : Masc.Tui_decode_memory_health.memory_health_snapshot opt
 
 val find : index -> keeper_name:string -> t
 
-val cells : now:float -> t -> Masc_tui_keeper_axis_cell.t list
+val cells : ?ko:bool -> now:float -> t -> Masc_tui_keeper_axis_cell.t list
 
-val lag_cell : t -> Masc_tui_keeper_axis_cell.t option
+val lag_cell : ?ko:bool -> t -> Masc_tui_keeper_axis_cell.t option
 (** The lag cell of {!cells}. A reading with no row has no lag, so it gives the
     cell that stands for the whole reading in {!cells}, or [None] for a
     snapshot with no row for the Keeper. *)
@@ -77,8 +77,8 @@ val pass_word : ?ko:bool -> Masc.Tui_decode_memory_health.memory_librarian_pass_
     the memory view. *)
 
 val pass_cell : ?ko:bool -> t -> Masc_tui_keeper_axis_cell.t
-val updated_cell : now:float -> t -> Masc_tui_keeper_axis_cell.t
-val fact_ages_cell : t -> Masc_tui_keeper_axis_cell.t
+val updated_cell : ?ko:bool -> now:float -> t -> Masc_tui_keeper_axis_cell.t
+val fact_ages_cell : ?ko:bool -> t -> Masc_tui_keeper_axis_cell.t
 (** The ● cell of the memory view (the pass end), the ● cell of the age view
     (how long ago the snapshot changed) and the ◂ cell of the age view (the
     age strip). A value the row came without draws

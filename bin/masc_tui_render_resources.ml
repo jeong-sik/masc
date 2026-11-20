@@ -386,7 +386,7 @@ let render_resources (state : state) =
     framed_top pane_buf pane_cols;
     let list_focused = state.resource_focus = Left_pane in
     framed_line pane_buf pane_cols
-      ((if list_focused then Ansi.bold else Ansi.dim)
+      ((if list_focused then Ansi.bold else Theme.recede ())
        ^ (if list_focused then " \xe2\x96\xb8 " else "   ")
        ^ Catalog.scope_label ~ko:(state.ui_language = Lang_ko) state.resource_scope
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
@@ -396,7 +396,9 @@ let render_resources (state : state) =
        an extra row pushed the pane past its height and the frame's last
        casualty was the footer. *)
     let ko = state.ui_language = Lang_ko in
-    let status_note note = framed_line pane_buf pane_cols (Ansi.dim ^ " " ^ note ^ Ansi.reset) in
+    let status_note note =
+      framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ note ^ Ansi.reset)
+    in
     (match inventory_idle state with
      | Masc_tui_list_idle.List_failed detail
      | List_empty (Some detail) | Rows_ready (Some detail) ->
@@ -482,7 +484,10 @@ let render_resources (state : state) =
              ground. Content colours are for the neighbouring rows; inner
              resets must not punch holes in the selected band. *)
           if selected then
-            styled_line pane_buf pane_cols ~style:(Theme.sidebar_selection ())
+            let sel_style =
+              if list_focused then Theme.selection_style () else Theme.sidebar_selection ()
+            in
+            styled_line pane_buf pane_cols ~style:sel_style
               (Masc_tui_theme.strip_sgr line)
           else framed_line pane_buf pane_cols line
       | None -> framed_empty pane_buf pane_cols
@@ -494,27 +499,42 @@ let render_resources (state : state) =
     let reading = Option.map fst (Lazy.force document) in
     let shown_resource = Option.map Masc_tui_resource_document.entry reading in
     let sheet_lines = document_sheet_lines in
-    let title =
+    let right_focused = state.resource_focus = Right_pane in
+    let title_line =
       match shown_resource with
       | Some resource ->
           let share_badge =
             match resource, Option.bind reading (fun r -> r.Masc_tui_resource_reading.shared) with
             | Catalog.Report _, Some true ->
-                ui_text state ~ko:" · [마지막 확인: 외부 공유]" ~en:" · [last observed: shared]"
+                let badge =
+                  ui_text state ~ko:"[마지막 확인: 외부 공유]" ~en:"[last observed: shared]"
+                in
+                if right_focused then
+                  Ansi.reset ^ " · " ^ Theme.info () ^ badge
+                else " · " ^ badge
             | Catalog.Report _, Some false ->
-                ui_text state ~ko:" · [마지막 확인: 비공개]" ~en:" · [last observed: private]"
+                let badge =
+                  ui_text state ~ko:"[마지막 확인: 비공개]" ~en:"[last observed: private]"
+                in
+                if right_focused then
+                  Ansi.reset ^ " · " ^ Theme.recede () ^ badge
+                else " · " ^ badge
             | Catalog.Report _, None | Catalog.Mcp _, _ -> ""
           in
-          ui_text state ~ko:"리소스 · " ~en:"Resource · "
-          ^ Terminal_text.single_line (Catalog.display_name resource) ^ share_badge
-      | None -> ui_text state ~ko:"리소스 상세" ~en:"Resource detail"
+          let base =
+            ui_text state ~ko:"리소스 · " ~en:"Resource · "
+            ^ Terminal_text.single_line (Catalog.display_name resource)
+          in
+          if right_focused then
+            Ansi.bold ^ " \xe2\x96\xb8 " ^ base ^ share_badge ^ Ansi.reset
+          else Theme.recede () ^ "   " ^ base ^ share_badge ^ Ansi.reset
+      | None ->
+          let base = ui_text state ~ko:"리소스 상세" ~en:"Resource detail" in
+          (if right_focused then Ansi.bold ^ " \xe2\x96\xb8 " else Theme.recede () ^ "   ")
+          ^ base ^ Ansi.reset
     in
     if split then box_top pane_buf pane_cols;
-    box_line pane_buf pane_cols
-      ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
-       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else "   ")
-       ^ title
-       ^ Ansi.reset);
+    box_line pane_buf pane_cols title_line;
     box_divider pane_buf pane_cols;
     let content_origin = strip_rows + lines_ended_since pane_buf ~start:0
       + (if pane_buf == buf then 0 else lines_ended_since buf ~start:0) in
@@ -543,8 +563,9 @@ let render_resources (state : state) =
                (match mark with
                 | Masc_tui_detail_reading.Current_match ->
                     box_line_selected pane_buf pane_cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
-                | Match -> box_line_styled pane_buf pane_cols ~style:Ansi.underline
-                    ("* " ^ Masc_tui_theme.strip_sgr line)
+                | Match ->
+                    box_line_styled pane_buf pane_cols ~style:(Theme.info () ^ Ansi.underline)
+                      ("* " ^ Masc_tui_theme.strip_sgr line)
                 | No_match -> box_line pane_buf pane_cols ("  " ^ line))
            | None -> box_empty pane_buf pane_cols
          done;

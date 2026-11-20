@@ -4150,8 +4150,8 @@ let draw_prepared_image ?scene ?(caption=[]) ~origin state ~refuse ~title = func
 let show_image_link_card state ~origin ~page_url ~copy ~unsaved ~last_open =
   let path, title, caption, alternate = match copy, unsaved with
     | None, Some source ->
-        page_url, "Captured image", Printf.sprintf "Original held until closed (%d bytes); s saves a temporary copy."
-          (String.length source.uri_bytes), page_url
+        page_url, "Captured image", Printf.sprintf "Original held until closed (%s bytes); s saves a temporary copy."
+          (Masc_tui_value.Count.grouped (String.length source.uri_bytes)), page_url
     | None, None -> page_url, "Original image link", "Inline preview unavailable.", page_url
     | Some (path, openable), (Some _ | None) ->
         path, "Temporary image copy", "y keeps and copies the path; move it for long-term storage.",
@@ -5287,10 +5287,10 @@ let apply_chat_search_result state ~target ~restart ~needle result =
   let ko = state.ui_language = Lang_ko in
       let partial=if result.unavailable_entries=0 then "" else
         if ko then
-          Printf.sprintf " · 항목 %d건 검색 불가 · 결과가 일부 누락될 수 있습니다" result.unavailable_entries
+          Printf.sprintf " · 항목 %s건 검색 불가 · 결과가 일부 누락될 수 있습니다" (Masc_tui_value.Count.grouped result.unavailable_entries)
         else
-          Printf.sprintf " · search unavailable for %d %s; results may be incomplete"
-            result.unavailable_entries (if result.unavailable_entries = 1 then "entry" else "entries") in
+          Printf.sprintf " · search unavailable for %s %s; results may be incomplete"
+            (Masc_tui_value.Count.grouped result.unavailable_entries) (if result.unavailable_entries = 1 then "entry" else "entries") in
       match result.match_result with
       | Some (position, anchor) ->
           state.msg_find_at <- Some anchor;
@@ -5830,10 +5830,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
           Masc_tui_chat_input.Message_draft_recall.note_attachment_staged state;
           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
             (Printf.sprintf
-               "attached %s (%s, %d bytes) · %d staged for the next message"
+               "attached %s (%s, %s bytes) · %d staged for the next message"
                attachment.Masc_tui_keeper_chat_projection.name
                attachment.Masc_tui_keeper_chat_projection.mime_type
-               attachment.Masc_tui_keeper_chat_projection.size
+               (Masc_tui_value.Count.grouped attachment.Masc_tui_keeper_chat_projection.size)
                (List.length state.msg_attachments)))
   | Masc_tui_command.Show_load_errors ->
       Masc_tui_message_input.clear state.msg_input;
@@ -15130,7 +15130,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                 notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
                   (if dropped > 0 then
                      if ko then
-                       Printf.sprintf "/copy: 완료된 응답이 없어요 (저장 기록 %d건 읽기 불가)" dropped
+                       Printf.sprintf "/copy: 완료된 응답이 없어요 (저장 기록 %s건 읽기 불가)" (Masc_tui_value.Count.grouped dropped)
                      else
                        Printf.sprintf "/copy found no completed reply (%s could not be read)"
                          (Masc_tui_message_layout.count_noun dropped "saved row")
@@ -15145,11 +15145,11 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                   if ko then
                     let assessment = if dropped > 0 then "최근 읽힌 응답" else "최근 응답" in
                     let unreadable =
-                      if dropped > 0 then Printf.sprintf "; 저장 기록 %d건 읽기 불가" dropped
+                      if dropped > 0 then Printf.sprintf "; 저장 기록 %s건 읽기 불가" (Masc_tui_value.Count.grouped dropped)
                       else ""
                     in
-                    Printf.sprintf "%s의 %s (%d자, %d바이트)을 %s%s"
-                      keeper_name assessment characters (String.length row.text)
+                    Printf.sprintf "%s의 %s (%s자, %s바이트)을 %s%s"
+                      keeper_name assessment (Masc_tui_value.Count.grouped characters) (Masc_tui_value.Count.grouped (String.length row.text))
                       (Masc_tui_clipboard.copy_outcome_text_korean outcome) unreadable
                   else
                     let assessment =
@@ -15161,8 +15161,8 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                           (Masc_tui_message_layout.count_noun dropped "saved row")
                       else ""
                     in
-                    Printf.sprintf "%s's %s (%d characters, %d bytes): %s%s"
-                      keeper_name assessment characters (String.length row.text)
+                    Printf.sprintf "%s's %s (%s characters, %s bytes): %s%s"
+                      keeper_name assessment (Masc_tui_value.Count.grouped characters) (Masc_tui_value.Count.grouped (String.length row.text))
                       (Masc_tui_clipboard.copy_outcome_text outcome) unreadable
                 in
                 notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply msg));
@@ -15997,8 +15997,8 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            let lag = match Masc_tui_keeper_memory_reading.unread_lag librarian with
              | None -> say "미처리 턴 미관측" "unprocessed turns not observed"
              | Some count ->
-               if ko then Printf.sprintf "미처리 %d턴" count
-               else Printf.sprintf "%d turns unprocessed" count in
+               if ko then Printf.sprintf "미처리 %s턴" (Masc_tui_value.Count.grouped count)
+               else Printf.sprintf "%s turns unprocessed" (Masc_tui_value.Count.grouped count) in
            let measured = match librarian.mlh_measured_at with
              | None -> say "처리 관측 시각 없음" "no pass time observed"
              | Some at ->
@@ -25773,12 +25773,12 @@ let main
                      let outcome = copy_reference render_schedule source in
                      report_action state "system"
                        (if state.ui_language = Lang_ko then
-                          Printf.sprintf "%s 원본 (%d바이트)을 %s"
-                            label (String.length source)
+                          Printf.sprintf "%s 원본 (%s바이트)을 %s"
+                            label (Masc_tui_value.Count.grouped (String.length source))
                             (Masc_tui_clipboard.copy_outcome_text_korean outcome)
                         else
-                          Printf.sprintf "%s source (%d bytes) %s"
-                            label (String.length source)
+                          Printf.sprintf "%s source (%s bytes) %s"
+                            label (Masc_tui_value.Count.grouped (String.length source))
                             (Masc_tui_clipboard.copy_outcome_text outcome)))
             | Code ->
                 (match Masc_tui_code_results.copy_file_source state with
@@ -25787,12 +25787,12 @@ let main
                      let outcome = copy_reference render_schedule source in
                      report_action state "system"
                        (if state.ui_language = Lang_ko then
-                          Printf.sprintf "%s 원본 (%d바이트)을 %s"
-                            path (String.length source)
+                          Printf.sprintf "%s 원본 (%s바이트)을 %s"
+                            path (Masc_tui_value.Count.grouped (String.length source))
                             (Masc_tui_clipboard.copy_outcome_text_korean outcome)
                         else
-                          Printf.sprintf "%s source (%d bytes) %s"
-                            path (String.length source)
+                          Printf.sprintf "%s source (%s bytes) %s"
+                            path (Masc_tui_value.Count.grouped (String.length source))
                             (Masc_tui_clipboard.copy_outcome_text outcome)))
             | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules
             | Verification | Fusion | Repositories | Changes | Connectors | Runtime | Config

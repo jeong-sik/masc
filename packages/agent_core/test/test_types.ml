@@ -587,22 +587,42 @@ let test_usage_and_inference_telemetry_yojson_roundtrip () =
     ; provider_internal_action_count = Some 2
     ; ttfrc_ms = Some 10.0
     ; prefill_ms = Some 11.0
+    ; upstream_provider = Some "Anthropic"
     }
   in
-  match
-    Types.inference_telemetry_of_yojson (Types.inference_telemetry_to_yojson telemetry)
-  with
+  (match
+     Types.inference_telemetry_of_yojson (Types.inference_telemetry_to_yojson telemetry)
+   with
+   | Ok decoded ->
+     Alcotest.(check (option string)) "fingerprint" (Some "fp") decoded.system_fingerprint;
+     Alcotest.(check (option string))
+       "upstream provider survives serialization"
+       (Some "Anthropic")
+       decoded.upstream_provider;
+     Alcotest.(check bool) "reported model evidence survives serialization" true
+       (decoded.reported_model = Some (Provider_reported_model "wire-gpt"));
+     Alcotest.(check bool) "requested cache lifetime survives serialization" true
+       (decoded.cache_write_lifetime = Some One_hour);
+     Alcotest.(check bool)
+       "telemetry show"
+       true
+       (String.length (Types.show_inference_telemetry decoded) > 0)
+   | Error msg -> Alcotest.fail msg);
+  (* Backward compatibility: pre-existing serialized telemetry JSON without
+     upstream_provider must still decode cleanly with upstream_provider = None. *)
+  let legacy_json =
+    match Types.inference_telemetry_to_yojson telemetry with
+    | `Assoc fields ->
+      `Assoc (List.filter (fun (k, _) -> not (String.equal k "upstream_provider")) fields)
+    | other -> other
+  in
+  match Types.inference_telemetry_of_yojson legacy_json with
   | Ok decoded ->
-    Alcotest.(check (option string)) "fingerprint" (Some "fp") decoded.system_fingerprint;
-    Alcotest.(check bool) "reported model evidence survives serialization" true
-      (decoded.reported_model = Some (Provider_reported_model "wire-gpt"));
-    Alcotest.(check bool) "requested cache lifetime survives serialization" true
-      (decoded.cache_write_lifetime = Some One_hour);
-    Alcotest.(check bool)
-      "telemetry show"
-      true
-      (String.length (Types.show_inference_telemetry decoded) > 0)
-  | Error msg -> Alcotest.fail msg
+    Alcotest.(check (option string))
+      "absent upstream_provider decodes as None"
+      None
+      decoded.upstream_provider
+  | Error msg -> Alcotest.fail ("legacy telemetry decode failed: " ^ msg)
 ;;
 
 let test_default_inference_telemetry () =

@@ -135,6 +135,44 @@ let test_parse_final_chunk_timings_cache_hit () =
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
+let test_parse_sse_chunk_cache_write_reasoning_and_upstream_provider () =
+  let data =
+    {|{"id":"gen-or-sse-1","provider":"Anthropic","model":"anthropic/claude-opus-5","choices":[],"usage":{"prompt_tokens":1500,"completion_tokens":320,"prompt_tokens_details":{"cached_tokens":900,"cache_write_tokens":450},"completion_tokens_details":{"reasoning_tokens":140},"cost":0.0125}}|}
+  in
+  (match OW.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
+   | OW.Openai_chunk chunk ->
+     Alcotest.(check (option string))
+       "sse upstream_provider"
+       (Some "Anthropic")
+       chunk.chunk_upstream_provider;
+     (match chunk.chunk_usage with
+      | Some u ->
+        Alcotest.(check (option int)) "sse input" (Some 1500) u.input_tokens;
+        Alcotest.(check (option int)) "sse output" (Some 320) u.output_tokens;
+        Alcotest.(check (option int)) "sse cache_read" (Some 900) u.cache_read_input_tokens;
+        Alcotest.(check (option int))
+          "sse cache_write"
+          (Some 450)
+          u.cache_creation_input_tokens;
+        Alcotest.(check (option int)) "sse reasoning_tokens" (Some 140) u.reasoning_tokens
+      | None -> Alcotest.fail "expected chunk_usage")
+   | OW.Openai_done | OW.Openai_empty | OW.Openai_provider_error _
+   | OW.Openai_parse_failed _
+   | OW.Openai_undeclared_reasoning_member _ -> Alcotest.fail "expected OpenAI chunk");
+  let plain =
+    {|{"id":"chatcmpl-plain","provider":"  ","model":"gpt-5.5","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}|}
+  in
+  match OW.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning plain with
+  | OW.Openai_chunk chunk ->
+    Alcotest.(check (option string))
+      "blank upstream_provider is None"
+      None
+      chunk.chunk_upstream_provider
+  | OW.Openai_done | OW.Openai_empty | OW.Openai_provider_error _
+  | OW.Openai_parse_failed _
+  | OW.Openai_undeclared_reasoning_member _ -> Alcotest.fail "expected OpenAI chunk"
+;;
+
 let test_parse_tool_call_start () =
   let data =
     {|{"id":"c-2","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}|}
@@ -229,6 +267,7 @@ let test_events_text_first_chunk () =
     ; finish_reason = None
     ; chunk_usage = None
     ; chunk_timings = None
+    ; chunk_upstream_provider = None
     }
   in
   let events, _tel = S.openai_chunk_to_events state chunk in
@@ -260,6 +299,7 @@ let test_events_text_subsequent () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   (* Second chunk: no ContentBlockStart *)
@@ -276,6 +316,7 @@ let test_events_text_subsequent () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   Alcotest.(check int) "1 event" 1 (List.length events);
@@ -306,6 +347,7 @@ let test_events_tool_call () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let events = expect_reported_start events in
@@ -343,6 +385,7 @@ let idless_openai_tool_start () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   match events with
@@ -370,6 +413,7 @@ let test_events_idless_tool_identity_matches_final_response () =
       ; finish_reason = Some "tool_calls"
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   List.iter (Acc.accumulate_event acc) terminal;
@@ -419,6 +463,7 @@ let test_events_parallel_idless_tool_ids_are_distinct () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let ids =
@@ -455,6 +500,7 @@ let test_events_late_provider_tool_id_fails_closed () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   match events with
@@ -482,6 +528,7 @@ let test_events_finish_reason () =
       ; finish_reason = Some "stop"
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let events = expect_reported_start events in
@@ -506,6 +553,7 @@ let test_events_tool_calls_finish () =
       ; finish_reason = Some "tool_calls"
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let events = expect_reported_start events in
@@ -542,6 +590,7 @@ let test_events_finish_closes_open_tool_block () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let events, _tel =
@@ -557,6 +606,7 @@ let test_events_finish_closes_open_tool_block () =
       ; finish_reason = Some "tool_calls"
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   Alcotest.(check int) "stop + message_delta" 2 (List.length events);
@@ -588,6 +638,7 @@ let test_events_length_finish () =
       ; finish_reason = Some "length"
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let events = expect_reported_start events in
@@ -611,6 +662,7 @@ let test_events_empty_content_ignored () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let events = expect_reported_start events in
@@ -962,6 +1014,7 @@ let test_events_reasoning_then_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let r_events = expect_reported_start r_events in
@@ -987,6 +1040,7 @@ let test_events_reasoning_then_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   Alcotest.(check int) "2 events (start+delta)" 2 (List.length t_events);
@@ -1018,6 +1072,7 @@ let test_events_reasoning_delta_index_multi_chunk () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let r1 = expect_reported_start r1 in
@@ -1045,6 +1100,7 @@ let test_events_reasoning_delta_index_multi_chunk () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   Alcotest.(check int) "1 event (delta only)" 1 (List.length r2);
@@ -1067,6 +1123,7 @@ let test_events_reasoning_delta_index_multi_chunk () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   match List.nth t_events 1 with
@@ -1100,6 +1157,7 @@ let test_events_tool_first_then_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   let tool_events = expect_reported_start tool_events in
@@ -1127,6 +1185,7 @@ let test_events_tool_first_then_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   Alcotest.(check int) "2 text events" 2 (List.length text_events);
@@ -1154,6 +1213,7 @@ let test_events_tool_first_then_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   Alcotest.(check int) "1 event (delta only)" 1 (List.length text2_events);
@@ -1195,6 +1255,7 @@ let test_events_multi_tool_then_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   (* Text must get index 2 *)
@@ -1211,6 +1272,7 @@ let test_events_multi_tool_then_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   (match List.nth text_events 0 with
@@ -1240,6 +1302,7 @@ let test_events_thinking_tool_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   (* Tool call: gets index 1 *)
@@ -1263,6 +1326,7 @@ let test_events_thinking_tool_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   (* Text: must get index 2 *)
@@ -1279,6 +1343,7 @@ let test_events_thinking_tool_text () =
       ; finish_reason = None
       ; chunk_usage = None
       ; chunk_timings = None
+      ; chunk_upstream_provider = None
       }
   in
   (match List.nth text_events 0 with
@@ -1356,6 +1421,38 @@ let test_responses_non_object_frame_is_parse_failure () =
          Alcotest.(check bool) "reason non-empty" true (String.length reason > 0)
        | _ -> Alcotest.fail ("non-object frame must fail closed: " ^ frame))
     [ "null"; "[]"; "42" ]
+;;
+
+let test_responses_stream_cache_write_and_reasoning_tokens () =
+  let state =
+    S.create_openai_stream_state ~provider:"openai_compat" ~model:"gpt-5.6-sol" ()
+  in
+  let acc = Acc.create_stream_acc () in
+  let feed event_type frame =
+    let events, _ = S.responses_sse_to_events state (Some event_type) frame in
+    List.iter (Acc.accumulate_event acc) events
+  in
+  feed
+    "response.created"
+    {|{"type":"response.created","response":{"id":"resp_sse_1","model":"gpt-5.6-sol","status":"in_progress","usage":null}}|}
+  ;
+  feed
+    "response.output_text.delta"
+    {|{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"ok"}|}
+  ;
+  feed
+    "response.completed"
+    {|{"type":"response.completed","response":{"id":"resp_sse_1","model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1600,"output_tokens":200,"input_tokens_details":{"cached_tokens":1000,"cache_write_tokens":320},"output_tokens_details":{"reasoning_tokens":64}}}}|}
+  ;
+  match Acc.finalize_stream_acc acc with
+  | Ok { usage = Some u; telemetry = Some tel; _ } ->
+    Alcotest.(check int) "responses sse input" 1600 u.input_tokens;
+    Alcotest.(check int) "responses sse output" 200 u.output_tokens;
+    Alcotest.(check int) "responses sse cache_read" 1000 u.cache_read_input_tokens;
+    Alcotest.(check int) "responses sse cache_write" 320 u.cache_creation_input_tokens;
+    Alcotest.(check (option int)) "responses sse reasoning_tokens" (Some 64) tel.reasoning_tokens
+  | Ok _ -> Alcotest.fail "expected finalized responses usage and telemetry"
+  | Error _ -> Alcotest.fail "responses stream with usage details must finalize"
 ;;
 
 let test_responses_stream_reasoning_tool_and_terminal () =
@@ -2316,6 +2413,10 @@ let () =
     [ ( "parse_openai_sse_chunk"
       , [ test_case "text chunk" `Quick test_parse_text_chunk
         ; test_case "[DONE] sentinel" `Quick test_parse_done_sentinel
+        ; test_case
+            "sse cache_write, reasoning_tokens, and upstream_provider"
+            `Quick
+            test_parse_sse_chunk_cache_write_reasoning_and_upstream_provider
         ; test_case "finish_reason" `Quick test_parse_finish_reason
         ; test_case
             "final chunk llama-server timings"
@@ -2438,6 +2539,10 @@ let () =
             "non-object frame is a typed parse failure"
             `Quick
             test_responses_non_object_frame_is_parse_failure
+        ; test_case
+            "responses sse cache_write and reasoning_tokens"
+            `Quick
+            test_responses_stream_cache_write_and_reasoning_tokens
         ; test_case
             "reasoning tool and terminal"
             `Quick

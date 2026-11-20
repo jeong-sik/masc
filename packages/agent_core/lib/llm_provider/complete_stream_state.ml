@@ -299,6 +299,7 @@ let overlay_delta_usage current (delta : Types.delta_usage) =
     && Option.is_none delta.cache_creation_input_tokens
     && Option.is_none delta.cache_read_input_tokens
     && Option.is_none delta.cost_usd
+    && Option.is_none delta.reasoning_tokens
   then current
   else
     match current with
@@ -316,6 +317,8 @@ let overlay_delta_usage current (delta : Types.delta_usage) =
         ; cache_read_input_tokens =
             reported_or_previous delta.cache_read_input_tokens previous.cache_read_input_tokens
         ; cost_usd = reported_or_previous delta.cost_usd previous.cost_usd
+        ; reasoning_tokens =
+            reported_or_previous delta.reasoning_tokens previous.reasoning_tokens
         }
       in
       Some merged
@@ -1314,6 +1317,10 @@ let finalize_completed state stop_reason =
     Option.bind state.usage (fun (u : Types.delta_usage) ->
       u.cache_read_input_tokens)
   in
+  let reasoning_tokens =
+    Option.bind state.usage (fun (u : Types.delta_usage) ->
+      u.reasoning_tokens)
+  in
   Ok
     { Types.id = state.id
     ; model = state.model
@@ -1328,13 +1335,14 @@ let finalize_completed state stop_reason =
              ~cache_read_input_tokens
              (Some
                 (Types.with_reported_model ~model:state.model
-                   (match response_replay, inline_content_replay with
-                    | None, None -> None
+                   (match response_replay, inline_content_replay, reasoning_tokens with
+                    | None, None, None -> None
                     | _ ->
                       Some
                         { Types.default_inference_telemetry with
                           response_replay
                         ; inline_content_replay
+                        ; reasoning_tokens
                         }))))
     }
 ;;

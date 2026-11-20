@@ -157,6 +157,7 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
                   ; cache_creation_input_tokens = None
                   ; cache_read_input_tokens = None
                   ; cost_usd = u.cost_usd
+                  ; reasoning_tokens = None
                   })
                chunk.oll_usage
          });

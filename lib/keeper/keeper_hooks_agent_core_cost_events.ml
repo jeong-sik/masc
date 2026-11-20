@@ -254,6 +254,17 @@ let assemble_cost_event_payload
     | (Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _), _ ->
         [ "vendor_total_tokens", `Null ]
   in
+  let upstream_provider_fields =
+    match usage_projection, telemetry with
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _),
+      Some { upstream_provider = Some provider; _ } ->
+      (match String_util.trim_nonempty provider with
+       | Some provider -> [ "upstream_provider", `String provider ]
+       | None -> [])
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _),
+      (Some { upstream_provider = None; _ } | None)
+    | Cost_ledger.Resolved_delta, _ -> []
+  in
   let telemetry_fields = match telemetry with
     | Some t ->
       int_field "reasoning_tokens" t.reasoning_tokens
@@ -321,6 +332,7 @@ let assemble_cost_event_payload
          @ Keeper_usage_trust.json_fields usage_trust
          @ cache_token_fields
          @ wall_tok_s_fields
+         @ upstream_provider_fields
          @ telemetry_fields)
       row
   in

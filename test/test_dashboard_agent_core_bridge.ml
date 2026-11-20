@@ -76,6 +76,7 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ?ttfrc_ms ?prefill_ms ()
   ; provider_internal_action_count = None
   ; ttfrc_ms
   ; prefill_ms
+  ; upstream_provider = None
   }
 ;;
 

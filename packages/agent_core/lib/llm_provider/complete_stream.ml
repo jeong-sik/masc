@@ -482,6 +482,7 @@ let complete_stream_http
       in
       let ollama_usage = ref None in
       let stream_timings = ref None in
+      let stream_upstream_provider = ref None in
       (* Agent Core contract — stream-lifetime accumulators for the
          [Streaming_summary] variant that fires once at finalize.
          Hoisted out of [body_logic] so exception paths (timeout,
@@ -999,10 +1000,13 @@ let complete_stream_http
                                    data
                                in
                                (match parsed with
-                                | Openai_wire.Openai_chunk
-                                    { chunk_timings = Some _ as t; _ } ->
-                                  stream_timings := t
-                                | Openai_wire.Openai_chunk { chunk_timings = None; _ }
+                                | Openai_wire.Openai_chunk chunk ->
+                                  (match chunk.chunk_timings with
+                                   | Some _ as t -> stream_timings := t
+                                   | None -> ());
+                                  (match chunk.chunk_upstream_provider with
+                                   | Some _ as p -> stream_upstream_provider := p
+                                   | None -> ())
                                 | Openai_wire.Openai_done
                                 | Openai_wire.Openai_empty
                                 | Openai_wire.Openai_provider_error _
@@ -1059,10 +1063,13 @@ let complete_stream_http
                                    data
                                in
                                (match parsed with
-                                | Openai_wire.Openai_chunk
-                                    { chunk_timings = Some _ as t; _ } ->
-                                  stream_timings := t
-                                | Openai_wire.Openai_chunk { chunk_timings = None; _ }
+                                | Openai_wire.Openai_chunk chunk ->
+                                  (match chunk.chunk_timings with
+                                   | Some _ as t -> stream_timings := t
+                                   | None -> ());
+                                  (match chunk.chunk_upstream_provider with
+                                   | Some _ as p -> stream_upstream_provider := p
+                                   | None -> ())
                                 | Openai_wire.Openai_done
                                 | Openai_wire.Openai_empty
                                 | Openai_wire.Openai_provider_error _
@@ -1237,18 +1244,29 @@ let complete_stream_http
             }
           | Anthropic | Kimi | OpenAI_compat | Gemini | Glm -> resp
         in
-        (* Wire timings (Ollama done line, llama-server final SSE chunk)
-         populate the otherwise-None telemetry slot before patch_telemetry
-         layers in latency. Provider-independent: whichever branch trapped
-         a timings payload above wins. *)
+        (* Wire timings (Ollama done line, llama-server final SSE chunk) and
+         gateway upstream provider labels populate the otherwise-None telemetry
+         slots before patch_telemetry layers in latency. Provider-independent:
+         whichever branch trapped a payload above wins. *)
         let resp =
-          match !stream_timings with
-          | None -> resp
-          | Some _ as timings ->
+          match !stream_timings, !stream_upstream_provider with
+          | None, None -> resp
+          | timings, upstream_provider ->
+            let base =
+              Option.value resp.telemetry ~default:Types.default_inference_telemetry
+            in
             let telemetry =
-              match resp.telemetry with
-              | Some t -> Some { t with timings }
-              | None -> Some { Types.default_inference_telemetry with timings }
+              Some
+                { base with
+                  timings =
+                    (match timings with
+                     | Some _ -> timings
+                     | None -> base.timings)
+                ; upstream_provider =
+                    (match upstream_provider with
+                     | Some _ -> upstream_provider
+                     | None -> base.upstream_provider)
+                }
             in
             { resp with telemetry }
         in

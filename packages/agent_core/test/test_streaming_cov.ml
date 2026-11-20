@@ -345,6 +345,7 @@ let test_finalize_with_usage () =
              ; cache_creation_input_tokens = None
              ; cache_read_input_tokens = None
              ; cost_usd = None
+             ; reasoning_tokens = None
              }
        });
   let resp = finalize_ok acc in

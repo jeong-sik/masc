@@ -1769,6 +1769,81 @@ let test_usage_openai_fallbacks () =
   | None -> Alcotest.fail "expected usage with details"
 ;;
 
+let test_usage_cache_write_reasoning_and_upstream_provider () =
+  let json =
+    `Assoc
+      [ "id", `String "gen-or-1"
+      ; "model", `String "anthropic/claude-opus-5"
+      ; "provider", `String "Anthropic"
+      ; ( "choices"
+        , `List
+            [ `Assoc
+                [ "finish_reason", `String "stop"
+                ; "message", `Assoc [ "role", `String "assistant"; "content", `String "ok" ]
+                ]
+            ] )
+      ; ( "usage"
+        , `Assoc
+            [ "prompt_tokens", `Int 1000
+            ; "completion_tokens", `Int 250
+            ; ( "prompt_tokens_details"
+              , `Assoc [ "cached_tokens", `Int 600; "cache_write_tokens", `Int 300 ] )
+            ; "completion_tokens_details", `Assoc [ "reasoning_tokens", `Int 120 ]
+            ] )
+      ]
+  in
+  (match Parse.delta_usage_of_openai_json json with
+   | Some d ->
+     Alcotest.(check (option int)) "delta input" (Some 1000) d.input_tokens;
+     Alcotest.(check (option int)) "delta output" (Some 250) d.output_tokens;
+     Alcotest.(check (option int)) "delta cache_read" (Some 600) d.cache_read_input_tokens;
+     Alcotest.(check (option int))
+       "delta cache_write"
+       (Some 300)
+       d.cache_creation_input_tokens;
+     Alcotest.(check (option int)) "delta reasoning" (Some 120) d.reasoning_tokens
+   | None -> Alcotest.fail "expected delta usage");
+  let resp = parse_ok json in
+  (match resp.usage with
+   | Some u ->
+     check_int "sync cache_write" 300 u.cache_creation_input_tokens;
+     check_int "sync cache_read" 600 u.cache_read_input_tokens
+   | None -> Alcotest.fail "expected sync usage");
+  (match resp.telemetry with
+   | Some tel ->
+     Alcotest.(check (option int)) "sync reasoning_tokens" (Some 120) tel.reasoning_tokens;
+     Alcotest.(check (option string))
+       "sync upstream_provider"
+       (Some "Anthropic")
+       tel.upstream_provider
+   | None -> Alcotest.fail "expected sync telemetry");
+  (* Absent or blank top-level provider and absent details stay None without failing. *)
+  let minimal =
+    parse_ok
+      (`Assoc
+          [ "id", `String "chatcmpl-plain"
+          ; "model", `String "gpt-5.5"
+          ; "provider", `String "   "
+          ; ( "choices"
+            , `List
+                [ `Assoc
+                    [ "finish_reason", `String "stop"
+                    ; "message", `Assoc [ "role", `String "assistant"; "content", `String "hi" ]
+                    ]
+                ] )
+          ; "usage", `Assoc [ "prompt_tokens", `Int 10; "completion_tokens", `Int 4 ]
+          ])
+  in
+  (match minimal.usage with
+   | Some u -> check_int "absent cache_write defaults to 0" 0 u.cache_creation_input_tokens
+   | None -> Alcotest.fail "expected minimal usage");
+  match minimal.telemetry with
+  | Some tel ->
+    Alcotest.(check (option string)) "blank provider stays None" None tel.upstream_provider;
+    Alcotest.(check (option int)) "absent reasoning stays None" None tel.reasoning_tokens
+  | None -> ()
+;;
+
 let test_parse_text_list_reasoning_and_reported_telemetry () =
   let json =
     response_json
@@ -2519,6 +2594,42 @@ let test_responses_lifecycle_is_distinct_from_stop_reason () =
         Responses.Ambiguous_envelope
     ; {|{"status":|}, Responses.Unreadable_json
     ]
+;;
+
+let test_responses_parse_cache_write_and_reasoning_tokens () =
+  let body =
+    {|{"id":"resp_cache_1","model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":2000,"output_tokens":180,"input_tokens_details":{"cached_tokens":1200,"cache_write_tokens":500},"output_tokens_details":{"reasoning_tokens":95}}}|}
+  in
+  (match Responses.parse_response_result body with
+   | Ok parsed ->
+     (match parsed.response.usage with
+      | Some u ->
+        check_int "responses input" 2000 u.input_tokens;
+        check_int "responses output" 180 u.output_tokens;
+        check_int "responses cache_read" 1200 u.cache_read_input_tokens;
+        check_int "responses cache_write" 500 u.cache_creation_input_tokens
+      | None -> Alcotest.fail "expected responses usage");
+     (match parsed.response.telemetry with
+      | Some tel ->
+        Alcotest.(check (option int)) "responses reasoning" (Some 95) tel.reasoning_tokens;
+        Alcotest.(check (option string))
+          "responses has no upstream_provider"
+          None
+          tel.upstream_provider
+      | None -> Alcotest.fail "expected responses telemetry")
+   | Error { detail; _ } -> Alcotest.fail ("unexpected parse error: " ^ detail));
+  (* Pre-5.6 Responses payload without cache_write_tokens parses cleanly with 0. *)
+  let legacy_body =
+    {|{"id":"resp_cache_0","model":"gpt-5.5","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":50,"output_tokens":10,"input_tokens_details":{"cached_tokens":20}}}|}
+  in
+  match Responses.parse_response_result legacy_body with
+  | Ok parsed ->
+    (match parsed.response.usage with
+     | Some u ->
+       check_int "legacy cache_write is 0" 0 u.cache_creation_input_tokens;
+       check_int "legacy cache_read" 20 u.cache_read_input_tokens
+     | None -> Alcotest.fail "expected legacy responses usage")
+  | Error { detail; _ } -> Alcotest.fail ("unexpected legacy parse error: " ^ detail)
 ;;
 
 let test_responses_preserves_encrypted_reasoning_item_for_replay () =
@@ -3857,6 +3968,10 @@ let () =
             test_partial_stream_usage_preserves_counter_presence
         ; Alcotest.test_case "usage fallbacks" `Quick test_usage_openai_fallbacks
         ; Alcotest.test_case
+            "usage cache_write, reasoning_tokens, and upstream_provider"
+            `Quick
+            test_usage_cache_write_reasoning_and_upstream_provider
+        ; Alcotest.test_case
             "text list reasoning and reported telemetry"
             `Quick
             test_parse_text_list_reasoning_and_reported_telemetry
@@ -3976,6 +4091,10 @@ let () =
             "original lifecycle survives stop reason projection"
             `Quick
             test_responses_lifecycle_is_distinct_from_stop_reason
+        ; Alcotest.test_case
+            "parse cache_write_tokens and reasoning_tokens"
+            `Quick
+            test_responses_parse_cache_write_and_reasoning_tokens
         ; Alcotest.test_case
             "preserve encrypted reasoning item for replay"
             `Quick

@@ -75,6 +75,7 @@ let make_telemetry ?canonical_model_id () : Agent_core.Types.inference_telemetry
   ; provider_internal_action_count = None
   ; ttfrc_ms = None
   ; prefill_ms = None
+  ; upstream_provider = None
   }
 ;;
 

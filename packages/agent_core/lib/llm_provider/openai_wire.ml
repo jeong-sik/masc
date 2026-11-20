@@ -40,6 +40,7 @@ type openai_chunk =
   ; finish_reason : string option
   ; chunk_usage : delta_usage option
   ; chunk_timings : inference_timings option
+  ; chunk_upstream_provider : string option
   }
 
 type openai_sse_parse_result =
@@ -314,6 +315,20 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
             (try
                let chunk_id = Cli_common_json.member_str "id" json in
                let chunk_model = Cli_common_json.member_str "model" json in
+               let chunk_upstream_provider =
+                 match Json_util.assoc_member_opt "provider" json with
+                 | Some (`String s) when not (Api_common.string_is_blank s) -> Some s
+                 | Some
+                     ( `String _
+                     | `Assoc _
+                     | `List _
+                     | `Int _
+                     | `Intlit _
+                     | `Float _
+                     | `Bool _
+                     | `Null )
+                 | None -> None
+               in
                (* [usage] is top-level, not under a choice, so it is read even
                   for the final [choices=[]] usage chunk. *)
                let chunk_usage = Backend_openai_parse.delta_usage_of_openai_json json in
@@ -360,6 +375,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                       ; finish_reason = None
                       ; chunk_usage
                       ; chunk_timings
+                      ; chunk_upstream_provider
                       })
                | Some (`List (choice :: _)) when choice_finished_with_provider_error choice ->
                  openai_choice_provider_error ~raw:data_str choice
@@ -495,6 +511,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                          ; finish_reason
                          ; chunk_usage
                          ; chunk_timings
+                         ; chunk_upstream_provider
                          }))
                | None | Some `Null ->
                  openai_parse_failed

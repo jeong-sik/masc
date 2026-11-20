@@ -35,6 +35,7 @@ let openai_chunk
   ; finish_reason
   ; chunk_usage
   ; chunk_timings = None
+  ; chunk_upstream_provider = None
   }
 ;;
 

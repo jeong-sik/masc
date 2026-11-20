@@ -1952,6 +1952,7 @@ let test_stream_acc_text () =
               ; cache_creation_input_tokens = None
               ; cache_read_input_tokens = None
               ; cost_usd = None
+              ; reasoning_tokens = None
               }
         }
     ; MessageStop

@@ -118,6 +118,7 @@ let redacts_inference_telemetry_key key =
   | "provider_id"
   | "provider_kind"
   | "provider_name"
+  | "upstream_provider"
   | "model"
   | "model_id"
   | "canonical_model_id"

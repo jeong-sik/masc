@@ -161,6 +161,7 @@ let parse_sse_event event_type data_str =
                ; cache_creation_input_tokens
                ; cache_read_input_tokens
                ; cost_usd = None
+               ; reasoning_tokens = None
                })
          in
          Some (MessageDelta { stop_reason; usage })

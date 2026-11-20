@@ -699,33 +699,31 @@ RFC §4 가 S1 앞에 남긴 읽지 않은 것을 읽었다. "조사만 함"은 
 
 ### 19.5 아직 읽지 않은 것
 
-§20 이 이 넷을 읽었다.
+§20 이 읽었다.
 
-- 다계정 base path 에서 Keeper loop 가 무엇을 띄우는지(`lib/server/server_bootstrap_loops.ml:1582` 의 본문).
-- 준비된 뒤에 뜨는 lane 들(`server_runtime_bootstrap.ml:1514-1557`)과 gateway, gRPC, Dashboard loop(`:2025-2124`) 가운데 무엇이 엔진이고 무엇이 단일 사용자 서버의 것인지.
-- boot 의 token 과 credential 단계(`lib/server/server_runtime_startup_credentials.ml:6-135`)가 다계정에서 쓰는 것. 조사만 함: admin token 의 environment 를 읽고 작업 공간의 Auth 저장소에 쓴다.
-- 준비 전에 실패한 엔진 boot 가 프로세스를 끝내는 길(`server_runtime_bootstrap.ml:1783-1792`)을 계정 서버가 그대로 따를지. 계정 서버는 그때 이미 포트를 알렸다.
-
-## 20. 다계정 프로세스에 엔진을 조립하는 길
+## 20. 다계정 프로세스에 엔진을 띄우는 길
 
 §19.5 의 넷을 읽었다. "조사만 함"은 조사 에이전트만 읽은 자리다. 줄 번호는 main `40b3ae4da` 의 것이다.
 
-### 20.1 stdio 서버의 조립이 선례다
+### 20.1 stdio 서버와 단일 사용자 서버가 엔진을 띄우는 방식
 
 - stdio 서버는 listener 없이 엔진만 조립한다(`bin/main_stdio_eio.ml:125-204`). 순서는 준비 상태 초기화, owner state 초기화, 활성화(`:161`), 준비 표시(`:182`), 준비 뒤 lane(`:189-194`), serve(`:204`)다. serve 앞까지는 그 자리에서 끝까지 돈다. 하나가 실패하면 `[FATAL]` 을 남기고 프로세스를 끝낸다(`:146-179, 183-188`).
-- stdio 서버는 server state 를 전역에 올리지 않고, gateway, gRPC, WebSocket, Dashboard loop 를 띄우는 `Server_auxiliary_startup.run_all` 도 부르지 않는다. 준비 뒤 lane 을 띄우는 함수의 주석은 HTTP 와 stdio 가 같은 순서를 쓴다고 적는다(`lib/server/server_runtime_bootstrap.ml:1522-1524`).
+- stdio 서버는 server state 를 전역에 올리지 않고, gateway, gRPC, WebSocket, Dashboard loop 를 띄우는 `Server_auxiliary_startup.run_all` 도 부르지 않는다. 준비 뒤 lane 을 띄우는 함수의 주석은 HTTP 와 stdio 가 같은 순서를 쓴다고 적는다(`lib/server/server_runtime_bootstrap.ml:1520-1522`).
 - owner state 초기화(`:712`)가 부르는 `create_server_state`(`:392, 957`)가 `Eio_context` 의 switch, net, clock 을 놓는다(`:408-411`). environment 는 받았을 때만 놓는다(`:422`). stdio 서버는 초기화에 environment 를 넘기고(`bin/main_stdio_eio.ml:132`) 초기화는 그것을 그대로 넘긴다(`:966`).
-- 계정 서버는 포트를 알린 뒤에 접근 값을 올린다(`lib/server/server_accounts.ml:311-333`). 주석은 알림이 boot 를 멈출 수 있는 검사 뒤에 온다고 적고, 알림 뒤에 거절할 수 있는 단계로 접근 값 올리기 하나를 든다(`:307-310`). 엔진 조립은 올린 접근 값을 받고 boot 를 멈출 수 있다. 조립을 알림 앞에 두려면 접근 값 올리기도 알림 앞으로 간다.
-- 계정 서버는 `Eio_context` 의 environment 와 switch 를 직접 놓는다(`:340-341`). 주석은 단일 사용자 boot 가 owner state 에서 놓는 것을 이 서버가 만들지 않아서라고 적는다(`:336-339`). 엔진을 조립하면 둘이 같은 것을 놓는다.
+- 계정 서버는 포트를 알린 뒤에 접근 값을 올린다(`lib/server/server_accounts.ml:311-333`). 주석은 알림이 boot 를 멈출 수 있는 검사 뒤에 온다고 적고, 알림 뒤에 거절할 수 있는 단계로 접근 값 올리기 하나를 든다(`:307-310`). 접근 값 올리기 뒤에는 거절하는 단계가 없다고 주석이 적는다(`:334-335`). 조사만 함: socket 은 그 앞에서 이미 잡혀 있다(`:246-253`).
+- 계정 서버는 `Eio_context` 의 environment 와 switch 를 직접 놓는다(`:340-341`). 주석은 단일 사용자 boot 가 owner state 에서 놓는 것을 이 서버가 만들지 않아서라고 적는다(`:336-339`). 엔진을 띄우면 둘이 같은 것을 놓는다. 조사만 함: 같은 switch 로 두 번 놓으면 stream 과 daemon 이 둘 남고 일은 한 번만 돈다(`lib/eio_context/eio_context.ml:99-138`).
 - 다계정 boot 는 계정 서버의 거절을 `[FATAL]` 로 남기고 `Config_error` 를 던진다(`server_runtime_bootstrap.ml:2356-2366`). 계정 서버에 넘기는 인자에는 runtime switch, store quarantine 수락, 입력 base path 가 없다(`:2359`). 엔진 조립은 셋을 받고(`bin/main_stdio_eio.ml:129-145`), 다계정 boot 는 셋을 인자로 갖고 있다(`server_runtime_bootstrap.ml:2344-2346`).
-- 계정 서버를 직접 부르는 시험이 둘 있다(`test/test_server_accounts.ml:430, 926`). 읽지 않았다.
-- 조사만 함: 단일 사용자 HTTP 서버는 같은 조립을 fiber 에서 돌린다(`:1781`). 포트 알림은 그 뒤 serve 단계에 있고(`:2206`) 초기화를 기다리지 않는다. 그래서 포트를 알린 뒤 초기화가 실패해 프로세스가 끝나는 길이 있다(`:1783-1798`). 정해진 시간 안에 준비되지 않으면 프로세스를 끝내는 watchdog 도 있다(`:2164-2182`).
+- 계정 서버 시험은 실행 파일 하나다. 접근 값을 올리는 case 가 하나이고 멈추는 case 는 올리기 전에 멈춘다는 전제에 기댄다(`test/test_server_accounts.ml:397-400, 760-779`, `test/stanzas/test_server_accounts.inc:3-4`).
+- 단일 사용자 HTTP 서버는 같은 초기화를 fiber 에서 돌린다(`server_runtime_bootstrap.ml:1781`). 준비 전에 실패하면 `[FATAL]` 을 남기고 프로세스를 끝내고(`:1783-1792`), 준비 뒤의 실패는 degraded 로 남긴다(`:1793-1797`). 정해진 시간 안에 준비되지 않으면 watchdog 이 프로세스를 끝낸다(`:2160-2182`). serve 는 초기화를 기다리지 않는다(`:2184`). 조사만 함: 포트 알림은 serve 단계에 있다(`:2206`).
+- 단일 사용자 HTTP boot 는 Keeper 가 뜨기 전에 파일을 지우는 정리 셋을 돈다. 다계정이면 건너뛰고, 주석은 계정 서버가 Keeper 를 띄우지 않아서라고 적는다(`bin/main_eio.ml:312-323, 604`). 조사만 함: stdio 서버는 초기화 앞에서 inventory 를 돈다(`bin/main_stdio_eio.ml:106-124`).
 
 ### 20.2 Keeper loop 가 띄우는 것
 
-전부 조사만 했다.
+config root 와 `runtime.toml` 두 줄은 직접 읽었다. 나머지는 조사만 했다.
 
-- 띄울 이름은 정의 TOML 폴더에서 읽는다(`lib/server/server_bootstrap_loops.ml:2004`). 폴더가 없으면 경고 한 번을 남기고 빈 목록을 쓴다(`lib/keeper/keeper_types_profile_toml_io.ml:200-217`). 폴더 위치에는 config dir 환경 값이 든다(`lib/config_dir_resolver.ml:374-386`).
+- 엔진 boot 는 config root 를 채운다(`lib/server/server_runtime_bootstrap.ml:427`). root 가 있으면 빠진 prompt 와 시작에 필요한 설정 파일을 채운다(`lib/server/server_runtime_config_root_bootstrap.ml:574-605`). root 가 없으면 seed 를 복사하고, 거기에 기본 Keeper 정의가 든다(`:139-168, 617-639`). 조사만 함: `masc auth bootstrap` 이 root 를 만든다(`bin/masc_cli_auth.ml:187-189`).
+- `runtime.toml` 의 설정 값을 적용하는 단계가 실패하면 `Config_error` 가 올라온다(`server_runtime_bootstrap.ml:382-390, 434`). 실행 표를 만들지 못하면 설정을 기다리는 상태로 선다(`:974-997`).
+- 띄울 이름은 정의 TOML 폴더에서 읽는다(`lib/server/server_bootstrap_loops.ml:2004`). 폴더가 없으면 경고 한 번을 남기고 빈 목록을 쓴다(`lib/keeper/keeper_types_profile_toml_io.ml:200-217`). 폴더 위치에는 config dir 환경 값이 든다(`lib/config_dir_resolver/config_dir_resolver.ml:374-386`).
 - autoboot fiber 는 실행 표가 쓸 수 있게 될 때까지 기다린다(`server_bootstrap_loops.ml:1975`). 표가 설정을 기다리는 동안은 넘어가지 않는다.
 - Keeper 가 하나도 없어도 fiber 아홉 종류가 남고 프로세스 전역이 여럿 놓인다(`:1593-1938`). SSE callback, Board hook 둘, Goal backend, 종료 hook 이 그 전역이다.
 - persistence 준비는 base path 아래를 고친다(`:971-1094`). 못 읽는 Keeper store 를 옆으로 옮기고, 열린 tool cycle 과 열린 턴에 끝 줄을 쓴다. 실패는 owner state 초기화의 실패로 올라온다(`server_runtime_bootstrap.ml:1094-1098`). 준비는 프로세스에서 한 번이다(`server_bootstrap_loops.ml:630, 943-954`).
@@ -741,13 +739,14 @@ RFC §4 가 S1 앞에 남긴 읽지 않은 것을 읽었다. "조사만 함"은 
 ### 20.4 boot 의 token 과 credential
 
 - owner state 초기화가 세 함수를 부른다(`server_runtime_bootstrap.ml:1031-1036`, 조사만 함). 셋 다 `<base>/.masc/auth/` 에 쓴다. 다계정의 authz log 와 같은 폴더다.
-- 첫째는 Admin credential 이 없으면 만든다. 주인 이름은 기본이 `admin` 이다(`lib/auth/auth_credential_token.ml:487-534`). 만든 token 을 프로세스 environment 에 넣는다(`lib/server/server_runtime_startup_credentials.ml:12`).
+- 첫째는 Admin credential 이 없으면 만든다. 주인 이름은 기본이 `admin` 이다(`lib/auth/auth_credential_token.ml:487-534`). 운영자가 environment 에 준 admin token 은 그대로 credential 로 낸다(`:506-509`). 그 token 을 프로세스 environment 에 넣는다(`lib/server/server_runtime_startup_credentials.ml:12`).
 - 둘째는 internal Keeper token 을 만들어 프로세스 environment 에 넣는다(`:28-29`). 셋째는 띄울 Keeper 마다 credential 을 만든다(`:49-135`, 조사만 함).
 - 계정 모드 판정은 `<base>/.masc/auth/config.json`, authz log, 바깥 저장소를 읽는다(`lib/auth/authz_boot_mode_read.ml:50-64`, `lib/auth/authz_boot_mode.ml:34-40`). 첫째 함수는 읽은 범위에서 `config.json` 을 쓰지 않는다. `config.json` 을 쓰는 곳은 auth 켜기와 끄기, 로그인 준비, workspace secret 만들기다(`lib/auth/auth.ml:404, 425`, `auth_credential_token.ml:548, 554`, `lib/auth/auth_credential_base.ml:268`). 그 쓰기는 계정 모드와 로그인 client 를 든 record 를 다시 적으므로(`lib/types/types_auth.mli:151-166`) 두 칸을 지우지 않는다.
 - 다계정 판정을 지난 설정은 auth 가 켜져 있고 token 을 요구한다(`lib/auth/authz_boot_mode.ml:132-145, 158-161`). 그 설정에서 로그인 준비는 아무것도 쓰지 않는다(`auth_credential_token.ml:544-545`).
 - Claude Code 로 띄우는 CLI 는 프로세스 environment 에서 정해진 이름만 가져온다(`lib/runtime/runtime_official_account.ml:127-147`, `lib/runtime/runtime_claude_environment_projection.ml:7`). 두 token 의 이름(`lib/config/env_config_core.ml:692`, `server_runtime_startup_credentials.ml:29`)은 그 파일에 없다.
 - Codex 로 띄우는 CLI 는 정해진 이름에 더해 계정 홈의 `config.toml` 이 provider 의 `env_key` 와 `env_http_headers` 로 적은 이름을 가져온다(`runtime_official_account.ml:96-120, 144-147`, `lib/runtime/runtime_codex_environment_projection.ml:7-27, 38-51`). 사람의 계정에는 Codex 홈이 있다(`lib/runtime/runtime_account_access.ml:225-229`).
-- 읽지 않은 것이다. credential 을 내는 함수의 본문(`publish_requested_file_backed_token_in_transaction`). 사람이 자기 Codex 홈의 `config.toml` 에 이름을 적을 수 있는지. 다계정 프로세스가 사람의 Codex 계정으로 CLI 를 띄우는 길이 지금 있는지.
+- 사람이 Codex 로그인을 마치면 구독 확인이 그 홈으로 capture 한다(`lib/runtime/runtime_setup_login_client.ml:183-190`). 사람은 기존 홈을 지정하지 못한다(`lib/server/server_setup_account_login.ml:158-160`). 조사만 함: 서버는 사람 홈의 `config.toml` 을 쓰지도 검사하지도 않는다. #53704 가 이름을 요구하는 사람의 홈을 판정에서 거절한다.
+- 읽지 않은 것이다. credential 을 내는 함수의 본문(`publish_requested_file_backed_token_in_transaction`).
 - 조사만 함: 계정 서버의 경로는 작업 공간의 credential 로 여는 wrapper(`lib/server/server_auth.ml:1347-1467`)를 쓰지 않는다.
 
 ### 20.5 아직 읽지 않은 것
@@ -755,5 +754,7 @@ RFC §4 가 S1 앞에 남긴 읽지 않은 것을 읽었다. "조사만 함"은 
 - 다계정에서 거절되는 운영자 요청이 남기는 로그의 양(§20.3).
 - 엔진 초기화에 걸리는 시간.
 - persistence 준비가 고치는 기록이 계정 서버가 지금 쓰는 사람의 대화 기록과 겹치는지.
-- 사람이 자기 Codex 홈의 `config.toml` 로 프로세스 environment 의 값을 CLI 에 가져올 수 있는지(§20.4).
-- 계정 서버를 직접 부르는 시험 둘이 접근 값 올리기의 순서에 기대는지(§20.1).
+- Keeper loop 와 준비 뒤 lane 의 본문(§20.2, §20.3). 띄우는 범위는 이것을 읽은 뒤에 정한다.
+- completion authority 와 goal verifier 가 판정에 넘기는 요청(§20.3).
+- `Runtime_setup_batch` 가 프로세스 environment 전체를 자식에게 넘기는 길(`lib/runtime/runtime_setup_batch.ml:102-104`)이 사람의 요청에서 닿는지.
+- 계정 서버의 로그인 경로가 작업 공간의 credential 로 여는 wrapper 를 쓰는지.

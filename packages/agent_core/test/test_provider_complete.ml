@@ -2254,7 +2254,13 @@ let test_anthropic_tool_reference_result () =
   let config =
     PC.make ~kind:Anthropic ~model_id:"claude-haiku-5-5" ~base_url:"" ~max_tokens:128 ()
   in
-  let body = BA.build_request ~config ~messages:[ make_message ~role:Tool [ reference_result () ] ] () in
+  let body =
+    BA.build_request
+      ~config
+      ~messages:[ make_message ~role:Tool [ reference_result () ] ]
+      ~tools:[ `Assoc [ "name", `String "masc_board_list" ] ]
+      ()
+  in
   let json = Yojson.Safe.from_string body in
   let open Yojson.Safe.Util in
   let result = json |> member "messages" |> index 0 |> member "content" |> index 0 in
@@ -2282,6 +2288,44 @@ let test_kimi_tool_reference_falls_back_to_text () =
     "existing result text remains"
     "now callable:\n- masc_board_list"
     (text |> member "text" |> to_string)
+;;
+
+let test_anthropic_stale_reference_falls_back_to_text () =
+  let config =
+    PC.make ~kind:Anthropic ~model_id:"claude-haiku-5-5" ~base_url:"" ~max_tokens:128 ()
+  in
+  let body =
+    BA.build_request
+      ~config
+      ~messages:[ make_message ~role:Tool [ reference_result () ] ]
+      ~tools:[ `Assoc [ "name", `String "another_tool" ] ]
+      ()
+  in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  let content = json |> member "messages" |> index 0 |> member "content" |> index 0 |> member "content" in
+  Alcotest.(check string)
+    "a removed tool is not replayed as a reference"
+    "now callable:\n- masc_board_list"
+    (content |> to_string)
+;;
+
+let test_anthropic_unsupported_reference_falls_back_to_text () =
+  let config = PC.make ~kind:Anthropic ~model_id:"m" ~base_url:"" ~max_tokens:128 () in
+  let body =
+    BA.build_request
+      ~config
+      ~messages:[ make_message ~role:Tool [ reference_result () ] ]
+      ~tools:[ `Assoc [ "name", `String "masc_board_list" ] ]
+      ()
+  in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  let content = json |> member "messages" |> index 0 |> member "content" |> index 0 |> member "content" in
+  Alcotest.(check string)
+    "an unsupported model gets canonical text instead of a reference"
+    "now callable:\n- masc_board_list"
+    (content |> to_string)
 ;;
 
 let () =
@@ -2515,6 +2559,8 @@ let () =
     ; ( "tool_reference"
       , [ test_case "Anthropic emits a tool reference" `Quick test_anthropic_tool_reference_result
         ; test_case "Kimi falls back to result text" `Quick test_kimi_tool_reference_falls_back_to_text
+        ; test_case "stale reference falls back to text" `Quick test_anthropic_stale_reference_falls_back_to_text
+        ; test_case "unsupported reference falls back to text" `Quick test_anthropic_unsupported_reference_falls_back_to_text
         ] )
     ]
 ;;

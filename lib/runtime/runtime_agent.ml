@@ -404,7 +404,8 @@ let rec required_modalities_of_content_blocks
        | Agent_core.Types.Thinking _
        | Agent_core.Types.ReasoningDetails _
        | Agent_core.Types.RedactedThinking _
-       | Agent_core.Types.ToolUse _ ->
+       | Agent_core.Types.ToolUse _
+       | Agent_core.Types.ToolReference _ ->
            acc
        | Agent_core.Types.Image _ -> add_unique_string "image" acc
        | Agent_core.Types.Document _ -> add_unique_string "document" acc
@@ -619,7 +620,8 @@ let rec strip_unsupported_modality_blocks
          | Agent_core.Types.Thinking _
          | Agent_core.Types.ReasoningDetails _
          | Agent_core.Types.RedactedThinking _
-         | Agent_core.Types.ToolUse _ -> (block :: kept, dropped))
+         | Agent_core.Types.ToolUse _
+         | Agent_core.Types.ToolReference _ -> (block :: kept, dropped))
       ([], [])
       blocks
   in

@@ -584,7 +584,7 @@ let tool_result_of_call ~base_path ~inline_ceiling_bytes ~accepts_image_input ~r
                            | Llm_provider.Types.Text _ -> false
                            | Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _
                            | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ToolUse _
-                           | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Image _
+                           | Llm_provider.Types.ToolResult _ | Llm_provider.Types.ToolReference _ | Llm_provider.Types.Image _
                            | Llm_provider.Types.Audio _ | Llm_provider.Types.Document _ -> true) blocks in
                        if String.length full_content > inline_ceiling_bytes
                        then Some (Llm_provider.Types.Text content :: native)

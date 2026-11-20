@@ -174,7 +174,7 @@ let trailing_tool_result_contents messages =
       let results = List.filter_map (function
         | Agent_core.Types.ToolResult {tool_use_id;content;_} -> Some (tool_use_id,content)
         | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | Image _ | Document _ | Audio _ -> None) content in
+        | ToolReference _ | Image _ | Document _ | Audio _ -> None) content in
       take (results @ acc) rest
     | {role=(User | System | Assistant);_}::_ | [] -> acc
   in take [] (List.rev messages)

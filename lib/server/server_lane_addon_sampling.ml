@@ -113,7 +113,7 @@ let response_content (response : L.api_response) =
          | Ok _ | Error _ -> Error (Invalid_response "MCP sampling image must contain valid nonempty base64"))
     | [L.Image {source=(L.Url _ | L.File_id _);_}] -> Error (Invalid_response "MCP sampling requires a base64 image response")
     | (L.Text _)::_ | (L.Thinking _)::_ | (L.ReasoningDetails _)::_ | (L.RedactedThinking _)::_
-    | (L.ToolUse _)::_ | (L.ToolResult _)::_ | (L.Image {source=(L.Base64 _ | L.Url _ | L.File_id _);_})::_ | (L.Document _)::_ | (L.Audio _)::_ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
+    | (L.ToolUse _)::_ | (L.ToolResult _)::_ | (L.ToolReference _)::_ | (L.Image {source=(L.Base64 _ | L.Url _ | L.File_id _);_})::_ | (L.Document _)::_ | (L.Audio _)::_ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
     | [] -> Error (Provider_error (Llm_provider.Http_client.empty_completion_error
         ~stop_reason:response.stop_reason))
 

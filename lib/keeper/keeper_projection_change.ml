@@ -58,6 +58,8 @@ let rec content_block_wire_equal left right =
         { json = right_json; content_blocks = right_blocks; _ } ) ->
     Option.equal json_wire_equal left_json right_json
     && Option.equal (List.equal content_block_wire_equal) left_blocks right_blocks
+  | Agent_core.Types.ToolReference { tool_name = left }, Agent_core.Types.ToolReference { tool_name = right } ->
+    String.equal left right
   | Agent_core.Types.Text _, Agent_core.Types.Text _
   | Agent_core.Types.Thinking _, Agent_core.Types.Thinking _
   | Agent_core.Types.RedactedThinking _, Agent_core.Types.RedactedThinking _
@@ -66,11 +68,11 @@ let rec content_block_wire_equal left right =
   | Agent_core.Types.Audio _, Agent_core.Types.Audio _ -> true
   | ( (Agent_core.Types.Text _ | Agent_core.Types.Thinking _
       | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-      | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _
+      | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.ToolResult _
       | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _)
     , (Agent_core.Types.Text _ | Agent_core.Types.Thinking _
       | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-      | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _
+      | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.ToolResult _
       | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) ) ->
     false
 ;;

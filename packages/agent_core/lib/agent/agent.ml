@@ -835,6 +835,7 @@ let resume
   ; lifecycle = None
   ; pending_input = checkpoint.pending_input
   ; tools = Tool_set.of_list tools
+  ; eager_tools = Tool_set.of_list tools
   ; net
   ; context = ctx
   ; options = {options with provider_config}

@@ -357,7 +357,7 @@ let reasoning_text_of_response (response : Agent_core.Types.api_response) =
     | Llm_provider.Types.ToolResult _
     | Llm_provider.Types.Image _
     | Llm_provider.Types.Document _
-    | Llm_provider.Types.Audio _ -> None)
+    | Llm_provider.Types.ToolReference _ | Llm_provider.Types.Audio _ -> None)
   |> String.concat ""
 
 let capture_rejected_reasoning ~base_path ~keeper_name ?turn_id ?trace_id

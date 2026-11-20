@@ -161,10 +161,11 @@ type t =
   ; mutable lifecycle : lifecycle_snapshot option
   ; mutable pending_input : Agent_input_request.pending option
   ; mutable tools : Tool_set.t
-      (** Widened during a turn by {!extend_tools} and never narrowed. A
-          deferred tool surface hands the model an index and supplies the
-          schema when it is asked for, so the set this agent can call is not
-          known when the turn starts. *)
+      (** Callable tools for the selected request. Widened by {!extend_tools};
+          native reference placement can narrow it again when that request's
+          projection drops a reference. *)
+  ; mutable eager_tools : Tool_set.t
+      (** Tools admitted independently of history references. *)
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; context : Context.t
   ; options : options
@@ -280,6 +281,19 @@ let extend_tools ?order t added =
           (fun (tool : Tool.t) -> not (Tool_set.mem tool.schema.name t.tools))
           added
       in
+      let fresh_eager =
+        List.filter
+          (fun (tool : Tool.t) ->
+             not
+               (List.exists
+                  (fun (deferred : Tool.t) -> String.equal tool.schema.name deferred.schema.name)
+                  t.options.deferred_tools))
+          fresh
+      in
+      (match fresh_eager with
+       | [] -> ()
+       | _ :: _ ->
+         t.eager_tools <- Tool_set.merge t.eager_tools (Tool_set.of_list fresh_eager));
       match fresh, order with
       | [], (Some _ | None) -> ()
       | _ :: _, None -> t.tools <- Tool_set.merge t.tools (Tool_set.of_list fresh)
@@ -289,6 +303,10 @@ let extend_tools ?order t added =
         let fresh = Tool_set.to_list (Tool_set.of_list fresh) in
         t.tools <-
           Tool_set.of_list (insert_ranked ~order (Tool_set.to_list t.tools) fresh))
+;;
+
+let set_request_tools t tools =
+  Eio.Mutex.use_rw ~protect:true t.mu (fun () -> t.tools <- tools)
 ;;
 
 let description t = t.options.description
@@ -417,6 +435,7 @@ let create
   ; lifecycle = None
   ; pending_input = None
   ; tools = all_tools
+  ; eager_tools = all_tools
   ; net
   ; context = ctx
   ; options
@@ -443,6 +462,7 @@ let clone ?(copy_context = false) agent =
   ; lifecycle = agent.lifecycle
   ; pending_input = agent.pending_input
   ; tools = agent.tools
+  ; eager_tools = agent.eager_tools
   ; net = agent.net
   ; context = ctx
   ; options = agent.options

@@ -202,7 +202,7 @@ let test_deferred_tools_reach_create_and_resume_options () =
       ~system_prompt:"fixture"
       ~tools:[ tool ]
   in
-  Alcotest.(check (list string)) "default has no deferred surface" [] config.deferred_tools;
+  Alcotest.(check bool) "default has no deferred surface" true (config.deferred_tools = []);
   let config = { config with deferred_tools = [ tool ] } in
   let options = Runtime_agent_context.agent_options ~config ~transport:None in
   let names options =

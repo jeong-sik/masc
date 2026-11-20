@@ -207,6 +207,7 @@ let gemini_chunk_to_events_impl
            | ReasoningDetails _
            | RedactedThinking _
            | ToolUse _
+           | ToolReference _
            | ToolResult _ ->
              raise
                (Backend_gemini.Gemini_api_error

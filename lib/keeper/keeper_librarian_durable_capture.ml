@@ -235,6 +235,7 @@ let tool_observations messages =
               | Agent_core.Types.ToolUse { id; name; _ } -> ((id, name) :: calls_rev), results
               | Agent_core.Types.ToolResult { tool_use_id; outcome; _ } ->
                 calls_rev, Tool_map.add tool_use_id outcome results
+              | Agent_core.Types.ToolReference _ -> calls_rev, results
               | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
               | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
               | Agent_core.Types.Image _ | Agent_core.Types.Document _

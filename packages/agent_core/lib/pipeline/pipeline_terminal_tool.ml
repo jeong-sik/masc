@@ -136,6 +136,7 @@ let recovered_report ~response ~turn ~invocations ~tool_results tool_uses =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolUse _
+        | ToolReference _
         | Image _
         | Document _
         | Audio _ )

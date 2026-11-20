@@ -384,6 +384,10 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
   ; deferred_tools : Agent_core.Tool.t list
+        (** Deferrable catalog only when the current view has a deferred loader;
+            eager schemas are excluded. This is a breaking field addition for
+            direct [try_provider_ctx] constructors; use the turn driver's
+            record update. *)
   ; initial_messages : Agent_core.Types.message list
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection

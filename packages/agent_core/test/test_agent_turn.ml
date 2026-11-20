@@ -899,8 +899,8 @@ let test_deferred_wire_surface_is_stable_across_loading () =
   let after_json, after_visible = prepare () in
   Alcotest.(check string)
     "loading does not change the wire tools"
-    (Yojson.Safe.to_string before_json)
-    (Yojson.Safe.to_string after_json);
+    (Yojson.Safe.to_string (`List (required_tools_json before_json)))
+    (Yojson.Safe.to_string (`List (required_tools_json after_json)));
   Alcotest.(check (list string)) "initial callable names" [ "always"; "keeper_tool_search" ] before_visible;
   Alcotest.(check (list string))
     "a loaded name becomes callable without exposing the other deferred name"
@@ -952,8 +952,26 @@ let test_deferred_wire_surface_is_stable_across_loading () =
     "the non-deferred loader holds the breakpoint"
     "ephemeral"
     (loader_json |> Yojson.Safe.Util.member "cache_control" |> Yojson.Safe.Util.member "type" |> Yojson.Safe.Util.to_string);
-  match request (required_tools_json (Some [ Llm_provider.Tool.schema_to_json first ]) ) with
-  | _ -> Alcotest.fail "an all-deferred request must be refused"
+  let all_deferred =
+    required_tools_json
+      (Agent_turn.prepare_tools
+         ~tools:Tool_set.empty
+         ~deferred_tools:[ first ]
+         ~defer_loading:true
+         ())
+  in
+  (match request all_deferred with
+   | _ -> Alcotest.fail "an all-deferred request must be refused"
+   | exception Invalid_argument _ -> ());
+  let cache_disabled = { config with cache_system_prompt = false } in
+  match
+    Llm_provider.Backend_anthropic.build_request
+      ~config:cache_disabled
+      ~messages:[ Llm_provider.Types.user_msg "load" ]
+      ~tools:all_deferred
+      ()
+  with
+  | _ -> Alcotest.fail "cache-disabled all-deferred must also be refused"
   | exception Invalid_argument _ -> ()
 ;;
 
@@ -971,6 +989,85 @@ let test_deferred_surface_is_ignored_without_capability () =
     "the unsupported path carries no defer marker"
     true
     (List.hd (required_tools_json json) |> Yojson.Safe.Util.member "defer_loading" = `Null)
+;;
+
+let reference_history name =
+  [ { Types.origin = Types.Conversation
+    ; role = Types.Tool
+    ; content =
+        [ Types.ToolResult
+            { tool_use_id = "load"
+            ; content = "now callable"
+            ; outcome = Types.Tool_succeeded
+            ; json = None
+            ; content_blocks = Some [ Types.ToolReference { tool_name = name } ]
+            }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  ]
+;;
+
+let prepare_referenced_turn ~model_input_projection =
+  let loader = deferred_fixture_tool "keeper_tool_search" in
+  let first = deferred_fixture_tool "first" in
+  let second = deferred_fixture_tool "second" in
+  Agent_turn.prepare_turn
+    ~media_store:(History.Memory_store.create ())
+    ~tools:(Tool_set.of_list [ loader; first ])
+    ~eager_tools:(Tool_set.of_list [ loader ])
+    ~deferred_tools:[ first; second ]
+    ~defer_loading:true
+    ~messages:(reference_history "first")
+    ~turn_params:Hooks.default_turn_params
+    ~model_input_projection
+    ()
+  |> prepared_turn
+;;
+
+let test_reference_admission_uses_projected_history () =
+  let prep =
+    prepare_referenced_turn ~model_input_projection:(fun _ ->
+      Ok (Agent_core.Agent.one_request []))
+  in
+  Alcotest.(check (list string))
+    "a reference outside the actual request does not admit the stale callable"
+    [ "keeper_tool_search" ]
+    prep.visible_tool_names
+;;
+
+let test_reference_admission_recomputed_for_narrower_request () =
+  let media_store = History.Memory_store.create () in
+  let prep =
+    prepare_referenced_turn ~model_input_projection:(fun messages ->
+      History.to_wire_messages media_store messages
+      |> Result.map (fun request ->
+        { Agent_core.Agent.request
+        ; narrower = [ fun _ -> Ok (Some []) ]
+        })
+      |> Result.map_error (fun error -> Error.Media error))
+  in
+  Alcotest.(check (list string))
+    "the projected reference admits its tool"
+    [ "keeper_tool_search"; "first" ]
+    prep.request.visible_tool_names;
+  match prep.narrower with
+  | [ narrow ] ->
+    (match narrow (Error.Internal "fixture refusal") with
+     | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+     | Ok None -> Alcotest.fail "expected the narrower fixture request"
+     | Ok Some narrowed ->
+       Alcotest.(check (list string))
+         "the narrower window retires the missing reference"
+         [ "keeper_tool_search" ]
+         narrowed.visible_tool_names;
+       Alcotest.(check string)
+         "admission changes do not alter the deferred wire catalog"
+         (Yojson.Safe.to_string (`List (required_tools_json prep.request.tools_json)))
+         (Yojson.Safe.to_string (`List (required_tools_json narrowed.tools_json))))
+  | _ -> Alcotest.fail "expected one narrower fixture"
 ;;
 
 (* ── Test runner ────────────────────────────────────────── *)
@@ -1001,6 +1098,14 @@ let () =
             "deferred surface is ignored without capability"
             `Quick
             test_deferred_surface_is_ignored_without_capability
+        ; Alcotest.test_case
+            "reference admission uses projected history"
+            `Quick
+            test_reference_admission_uses_projected_history
+        ; Alcotest.test_case
+            "reference admission is recomputed for a narrower request"
+            `Quick
+            test_reference_admission_recomputed_for_narrower_request
         ] )
     ; ( "prepare_messages"
       , [ Alcotest.test_case

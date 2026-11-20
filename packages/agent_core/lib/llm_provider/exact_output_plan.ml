@@ -230,7 +230,7 @@ let content_uses_exact_cross_feature = function
   | Types.Thinking _
   | Types.ReasoningDetails _
   | Types.RedactedThinking _ -> true
-  | Types.Text _ | Types.ToolReference _ | Types.Image _ | Types.Document _ | Types.Audio _ -> false
+  | Types.Text _ | Types.Image _ | Types.Document _ | Types.Audio _ -> false
 ;;
 
 let contains_reserved_response_phase_metadata metadata =
@@ -710,6 +710,7 @@ let structured_text content =
     | (Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _) :: rest ->
       loop texts rest
     | ( Types.ToolUse _
+      | Types.ToolReference _
       | Types.ToolResult _
       | Types.Image _
       | Types.Document _

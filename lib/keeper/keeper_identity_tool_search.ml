@@ -454,6 +454,7 @@ let carry_from_history ~carry_window ~entries history =
               | Agent_core.Types.Thinking _
               | Agent_core.Types.RedactedThinking _
               | Agent_core.Types.ToolResult _
+              | Agent_core.Types.ToolReference _
               | Agent_core.Types.Image _
               | Agent_core.Types.Document _
               | Agent_core.Types.ReasoningDetails _
@@ -481,7 +482,15 @@ let referenced_names history =
     | Agent_core.Types.ToolReference { tool_name } -> Tool_name_set.add tool_name names
     | Agent_core.Types.ToolResult { content_blocks = Some blocks; _ } ->
       List.fold_left collect_block names blocks
-    | _ -> names
+    | Agent_core.Types.Text _
+    | Agent_core.Types.Thinking _
+    | Agent_core.Types.ReasoningDetails _
+    | Agent_core.Types.RedactedThinking _
+    | Agent_core.Types.ToolUse _
+    | Agent_core.Types.ToolResult { content_blocks = None; _ }
+    | Agent_core.Types.Image _
+    | Agent_core.Types.Document _
+    | Agent_core.Types.Audio _ -> names
   in
   List.fold_left
     (fun names (message : Agent_core.Types.message) ->

@@ -67,6 +67,10 @@ type serialization_executor = Agent_types.serialization_executor = { run : 'a. (
 
 type options = Agent_types.options =
   { provider_config : Llm_provider.Provider_config.t option
+  ; deferred_tools : Tool.t list
+    (** Deferrable schemas. Eager tools stay outside this list; reference-based
+        admission does not widen this catalog. Adding this field is a breaking
+        change for direct [options] constructors. *)
   ; reasoning_source_change : Llm_provider.Reasoning_history_projection.source_change_policy
     (** Defaults to [Reject_incompatible]. [Exclude_unselected] admits a
         provider/model change without deleting canonical reasoning. Resume is

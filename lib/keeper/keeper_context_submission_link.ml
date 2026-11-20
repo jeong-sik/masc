@@ -159,7 +159,7 @@ let source assembly selected_blocks ~omitted_sections ~omitted_rows
      | System, [Text _], None -> Unavailable Missing_issuer
      | System, [Text actual], Some assembly -> inspect assembly actual
      | (Agent_core.Types.System, (Agent_core.Types.Text _)::_::_, _)
-     | (Agent_core.Types.System, (Agent_core.Types.Thinking _ | (Agent_core.Types.ReasoningDetails _ | (Agent_core.Types.RedactedThinking _ | (Agent_core.Types.ToolUse _ | (Agent_core.Types.ToolResult _ | (Agent_core.Types.Image _ | (Agent_core.Types.Document _ | Agent_core.Types.Audio _)))))))::_, _)
+     | (Agent_core.Types.System, (Agent_core.Types.Thinking _ | (Agent_core.Types.ReasoningDetails _ | (Agent_core.Types.RedactedThinking _ | (Agent_core.Types.ToolUse _ | (Agent_core.Types.ToolResult _ | (Agent_core.Types.ToolReference _ | (Agent_core.Types.Image _ | (Agent_core.Types.Document _ | Agent_core.Types.Audio _))))))))::_, _)
      | (Agent_core.Types.System, [], _)
      | ((Agent_core.Types.User | (Agent_core.Types.Assistant | Agent_core.Types.Tool)), _, _) -> Unavailable Unsupported_carrier)
 
@@ -199,7 +199,7 @@ let system_observation_source ~block assembly (message : Agent_core.Types.messag
   | (System | Assistant | Tool), _, _
   | User, ([] | _ :: _ :: _), _
   | User, [(Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-      | ToolResult _ | Document _ | Image _ | Audio _)], _ -> Unavailable Unsupported_carrier
+      | ToolResult _ | ToolReference _ | Document _ | Image _ | Audio _)], _ -> Unavailable Unsupported_carrier
 
 let encode_with_evidence evidence message =
   let text = Keeper_official_client_context_codec.(encode Canonical_source) message in

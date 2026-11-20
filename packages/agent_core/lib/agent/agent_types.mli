@@ -101,8 +101,13 @@ type serialization_executor = { run : 'a. (unit -> 'a) -> 'a }
 type options =
   { provider_config : Llm_provider.Provider_config.t option
   ; deferred_tools : Tool.t list
-    (** Full schemas that a provider may hold behind tool search. These never
-        widen the callable set in {!tools}; loading only changes that set. *)
+    (** Deferrable schemas that a provider may hold behind tool search. Eager
+        tools stay outside this list. References in each projected request admit
+        their schemas for that request without changing the wire catalog.
+
+        Source-compatibility note: adding this field is a breaking change for
+        downstream code that constructs [options] directly. Use
+        {!default_options} or a record update so the default [[]] is preserved. *)
   ; reasoning_source_change : Llm_provider.Reasoning_history_projection.source_change_policy
     (** Defaults to [Reject_incompatible]. [Exclude_unselected] admits a
         provider/model change without deleting canonical reasoning. Resume is
@@ -277,7 +282,13 @@ type t =
   ; mutable lifecycle : lifecycle_snapshot option
   ; mutable pending_input : Agent_input_request.pending option
   ; mutable tools : Tool_set.t
-      (** Widened during a turn by {!extend_tools} and never narrowed. *)
+      (** Callable tools for the selected request. Widened by {!extend_tools};
+          native reference placement can narrow it again when that request's
+          projection drops a reference. *)
+  ; mutable eager_tools : Tool_set.t
+      (** Tools admitted independently of history references. Non-deferred
+          extensions join this set; deferred extensions require a reference in
+          each projected request. *)
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; context : Context.t
   ; options : options
@@ -301,10 +312,15 @@ val lifecycle : t -> lifecycle_snapshot option
 val pending_input : t -> Agent_input_request.pending option
 val tools : t -> Tool_set.t
 
+val set_request_tools : t -> Tool_set.t -> unit
+(** Select the callable set computed for the request being dispatched. Native
+    reference placement uses this before each first or narrower request. *)
+
 val extend_tools : ?order:string list -> t -> Tool.t list -> unit
 (** Widen the callable tool set mid-turn, under the same mutex as [state].
-    Widening only, and a name already held is ignored — see [Agent.extend_tools]
-    for why neither is a restriction that can be relaxed, and for [order]. *)
+    A name already held is ignored — see [Agent.extend_tools] for why this is a
+    restriction that cannot be relaxed, and for [order]. Non-deferred additions
+    also join [eager_tools]; deferred additions still need a request reference. *)
 val context : t -> Context.t
 val options : t -> options
 val provider_config : t -> Llm_provider.Provider_config.t option

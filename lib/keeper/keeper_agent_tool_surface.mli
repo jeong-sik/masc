@@ -48,11 +48,13 @@ type attempt_surface =
 
 val deferred_for_native :
   supports:bool ->
+  loader_present:bool ->
   full_tools:Agent_core.Tool.t list ->
   callable_tools:Agent_core.Tool.t list ->
   Agent_core.Tool.t list
-(** Full catalog only when the current view has a deferred loader. An eager view
-    returns [[]] even on a capable provider, preventing an all-deferred request. *)
+(** Deferrable catalog only when the current view has a deferred loader. Eager
+    callable schemas are excluded so at least the loader remains non-deferred.
+    An eager view returns [[]] even on a capable provider. *)
 
 val for_attempt :
   checkpoint_owner:Runtime_execution.checkpoint_owner option ->

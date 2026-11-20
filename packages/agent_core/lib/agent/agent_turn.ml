@@ -21,6 +21,9 @@ let provider_turn_ordinal (state : agent_state) : int = state.turn_count
 
 type turn_request =
   { effective_messages : Llm_provider.Types.message list
+  ; tools : Tool_set.t
+  ; tools_json : Yojson.Safe.t list option
+  ; visible_tool_names : string list
   ; context_message : (message option, Error.t) result
   }
 
@@ -64,6 +67,40 @@ let prepare_tools ~(tools : Tool_set.t) ?(deferred_tools = []) ?(defer_loading =
   let tools_json = if tool_schemas = [] then None else Some tool_schemas in
   let visible_tool_names = List.map (fun (t : Tool.t) -> t.schema.name) selected in
   tools_json, visible_tool_names
+;;
+
+let referenced_tool_names messages =
+  let rec collect_block names = function
+    | ToolReference { tool_name } -> Deferred_name_set.add tool_name names
+    | ToolResult { content_blocks = Some blocks; _ } ->
+      List.fold_left collect_block names blocks
+    | Text _
+    | Thinking _
+    | ReasoningDetails _
+    | RedactedThinking _
+    | ToolUse _
+    | ToolResult { content_blocks = None; _ }
+    | Image _
+    | Document _
+    | Audio _ -> names
+  in
+  List.fold_left
+    (fun names (message : Llm_provider.Types.message) ->
+       List.fold_left collect_block names message.content)
+    Deferred_name_set.empty
+    messages
+;;
+
+let request_tools ~tools ~eager_tools ~deferred_tools ~defer_loading messages =
+  match eager_tools with
+  | Some eager when defer_loading ->
+    let references = referenced_tool_names messages in
+    Tool_set.of_list
+      (Tool_set.to_list eager
+       @ List.filter
+           (fun (tool : Tool.t) -> Deferred_name_set.mem tool.schema.name references)
+           deferred_tools)
+  | Some _ | None -> tools
 ;;
 
 (* Cadence premise: at most one fresh carrier per prepare call. The hook may
@@ -114,15 +151,21 @@ let prepare_turn
       ~tools
       ~messages
       ~turn_params
+      ?eager_tools
       ?(deferred_tools = [])
       ?(defer_loading = false)
       ?model_input_projection
       ()
   =
-  let tools_json, visible_tool_names = prepare_tools ~tools ~deferred_tools ~defer_loading () in
   let context_message = context_message turn_params in
   let prepared = append_context_message ~messages ~context_message in
   let request_of effective_messages =
+    let tools =
+      request_tools ~tools ~eager_tools ~deferred_tools ~defer_loading effective_messages
+    in
+    let tools_json, visible_tool_names =
+      prepare_tools ~tools ~deferred_tools ~defer_loading ()
+    in
     let context_message =
       match context_message with
       | None -> Ok None
@@ -139,7 +182,7 @@ let prepare_turn
            |> Result.map_error (fun error -> Error.Media error)
          | _ -> Error (Error.Internal "model input projection returned multiple current context carriers"))
     in
-    { effective_messages; context_message }
+    { effective_messages; tools; tools_json; visible_tool_names; context_message }
   in
   let candidates =
     match model_input_projection with
@@ -150,15 +193,16 @@ let prepare_turn
     | Some project -> caller_result (fun () -> project prepared)
   in
   Result.map (fun (candidates : Agent_types.model_input_candidates) ->
+    let request = request_of candidates.Agent_types.request in
     let narrower =
       List.map (fun (narrow : Agent_types.narrower_model_input) refusal ->
           caller_result (fun () -> narrow refusal) |> Result.map (Option.map request_of))
         candidates.Agent_types.narrower
     in
-    { tools_json
-    ; request = request_of candidates.Agent_types.request
+    { tools_json = request.tools_json
+    ; request
     ; narrower
-    ; visible_tool_names
+    ; visible_tool_names = request.visible_tool_names
     })
     candidates
 ;;

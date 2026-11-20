@@ -238,7 +238,7 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
                          ~handle
                          ~media_type
                          ~reason:"not read"))))))
-  | (Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) as other -> other
+  | (Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) as other -> other
 ;;
 
 (* Routing and delegation share the transport-plus-model capability view. *)
@@ -323,7 +323,7 @@ let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~media_s
         | Agent_core.Types.Image { source = Agent_core.Types.Stored _;_}
         | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
         | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-        | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _
+        | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.ToolResult _
         | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> evict_block ?base_path ~media_store
             ~read:(read ~exclude_runtime_ids)
             ~mode ~keeper_name ~eager_budget block
@@ -351,6 +351,7 @@ let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~media_s
             | Agent_core.Types.ReasoningDetails _
             | Agent_core.Types.RedactedThinking _
             | Agent_core.Types.ToolUse _
+            | Agent_core.Types.ToolReference _
             | Agent_core.Types.ToolResult { content_blocks = None; _ }
             | Agent_core.Types.Document _
             | Agent_core.Types.Audio _ ) as other -> other :: reversed, count)

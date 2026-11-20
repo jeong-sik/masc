@@ -427,7 +427,20 @@ let function_response_payload ~supports_function_response_parts ~content ~outcom
      "is_error", `Bool (tool_result_outcome_is_error outcome)]
     @ (match json with None -> [] | Some data -> ["data", data])
     @ (match content_blocks with
-       | Some blocks when List.exists (function ToolReference _ -> true | _ -> false) blocks -> []
+       | Some blocks
+         when List.exists
+                (function
+                  | ToolReference _ -> true
+                  | Text _
+                  | Thinking _
+                  | ReasoningDetails _
+                  | RedactedThinking _
+                  | ToolUse _
+                  | ToolResult _
+                  | Image _
+                  | Document _
+                  | Audio _ -> false)
+                blocks -> []
        | Some blocks -> ["content_blocks", `List (List.map nested blocks)]
        | None -> [])
   in
@@ -449,6 +462,7 @@ let part_of_content_block ~supports_function_response_parts tool_signatures
     inline_data_part ~block:"audio" ~media_type source
   | Document { media_type; source } ->
     inline_data_part ~block:"document" ~media_type source
+  | ToolReference _ -> None
   | ToolUse { id; name; input } ->
     let fields =
       [ "functionCall", `Assoc [ "id", `String id; "name", `String name; "args", input ] ]

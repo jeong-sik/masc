@@ -89,6 +89,7 @@ let rec content_json : A.content_block -> Yojson.Safe.t = function
   | ToolResult {tool_use_id;content;outcome;json;content_blocks} -> `Assoc ["kind",`String "tool_result";
       "tool_use_id",`String tool_use_id;"content",`String content;"outcome",outcome_json outcome;
       "json",json_option json;"content_blocks",optional (fun blocks -> `List (List.map content_json blocks)) content_blocks]
+  | ToolReference {tool_name} -> `Assoc ["kind",`String "tool_reference";"tool_name",`String tool_name]
   | (Image _ | Document _ | Audio _) as block -> media_content_json block
 (* Media are captured by reference, in the history codec's source shape. *)
 and media_content_json block = match Agent_core.History.content_block_to_json block with
@@ -113,6 +114,9 @@ let rec content_of_json json : (A.content_block,string) result =
     let+ content_blocks=option (list content_of_json) (value "content_blocks" f) in
     A.ToolResult {tool_use_id;content;outcome;json;content_blocks}
   | "image" | "document" | "audio" -> media_content_of_json kind json
+  | "tool_reference" ->
+    let* f=fields ["kind";"tool_name"] json in
+    let+ tool_name=text (value "tool_name" f) in A.ToolReference {tool_name}
   | _ -> Error "Unknown captured content block"
 and media_content_of_json kind json = let* f=fields ["kind";"source"] json in
   Agent_core.History.content_block_of_json (`Assoc ["type",`String kind;"source",value "source" f])

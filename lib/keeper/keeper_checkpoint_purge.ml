@@ -220,7 +220,7 @@ let strip_reasoning_blocks (message : Agent_core.Types.message) =
          | Agent_core.Types.ReasoningDetails _ -> kept, stripped + 1
          | Agent_core.Types.Thinking { signature = Some _;_} | Agent_core.Types.Text _
          | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
-         | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+         | Agent_core.Types.ToolReference _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
          | Agent_core.Types.Audio _ -> block :: kept, stripped)
       ([], 0)
       message.content
@@ -264,7 +264,7 @@ let clear_tool_result_blocks (message : Agent_core.Types.message) =
                })
          | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
          | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-         | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+         | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
          | Agent_core.Types.Audio _ -> block)
       message.content
   in

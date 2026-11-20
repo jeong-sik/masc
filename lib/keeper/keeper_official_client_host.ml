@@ -1408,6 +1408,7 @@ let image_capability_error ~accepts_image_input content_blocks =
              | Llm_provider.Types.ReasoningDetails _
              | Llm_provider.Types.RedactedThinking _
              | Llm_provider.Types.ToolUse _
+             | Llm_provider.Types.ToolReference _
              | Llm_provider.Types.ToolResult _
              | Llm_provider.Types.Document _
              | Llm_provider.Types.Audio _ -> false)

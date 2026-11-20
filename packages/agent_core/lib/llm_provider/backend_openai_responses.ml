@@ -144,7 +144,20 @@ let responses_tool_json tool =
 
 let content_string_of_tool_result ~content ~content_blocks =
   match content_blocks with
-  | Some blocks when List.exists (function ToolReference _ -> true | _ -> false) blocks ->
+  | Some blocks
+    when List.exists
+           (function
+             | ToolReference _ -> true
+             | Text _
+             | Thinking _
+             | ReasoningDetails _
+             | RedactedThinking _
+             | ToolUse _
+             | ToolResult _
+             | Image _
+             | Document _
+             | Audio _ -> false)
+           blocks ->
     Utf8_sanitize.sanitize content
   | Some blocks ->
     Yojson.Safe.to_string (`List (List.map Api_common.content_block_to_json blocks))

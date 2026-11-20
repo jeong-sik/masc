@@ -13,7 +13,7 @@ let source_ordinal ~tool_name ~(response : Agent_core.Types.api_response)
   let admitted = List.filter_map (function
     | Llm_provider.Types.ToolUse {id;name;_} -> Some (id,name)
     | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-    | ToolResult _ | Image _ | Document _ | Audio _ -> None) response.content in
+    | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> None) response.content in
   let selected_sources = List.filter (fun (source : Agent_core.Hooks.admitted_tool_use_source) ->
     source.planned_index = planned_index) source_map.admitted_tool_sources in
   match selected_sources, List.nth_opt admitted planned_index with

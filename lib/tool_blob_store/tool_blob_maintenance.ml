@@ -279,6 +279,7 @@ let history_tool_payload_fields fields =
   match decoded with
   | Some (Ok (Agent_core_base.Types.ToolUse _)) -> ["input"]
   | Some (Ok (Agent_core_base.Types.ToolResult _)) -> ["tool_result_json"]
+  | Some (Ok (Agent_core_base.Types.ToolReference _)) -> []
   | Some (Ok (Agent_core_base.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
        | Image _ | Document _ | Audio _))
   | Some (Error _) | None -> []

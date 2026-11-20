@@ -906,7 +906,14 @@ let make_tool_bundle_for_descriptors_with_policy
         { Keeper_identity_tool_search.deferred = List.filter
             (fun (entry : Keeper_identity_tool_search.deferred) -> admitted entry.tool) deferred
         ; agent_cell = surface.Keeper_tools_agent_core.agent_cell
-        ; history = surface.Keeper_tools_agent_core.history
+        ; history =
+            (match placement_policy with
+             (* Native reference admission is recomputed by Agent_turn from the
+                exact projected request. This initial view supplies only the
+                eager tools, never a reference retained by canonical history. *)
+             | Keeper_identity_tool_search.Tool_references -> []
+             | Keeper_identity_tool_search.History_carry ->
+               surface.Keeper_tools_agent_core.history)
         ; carry_window = Keeper_config.keeper_tool_carry_window ()
         ; receipts
         } in

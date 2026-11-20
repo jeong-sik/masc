@@ -477,7 +477,19 @@ and tool_result_wire_fields_with
   let has_tool_reference =
     match content_blocks with
     | Some blocks ->
-      List.exists (function ToolReference _ -> true | _ -> false) blocks
+      List.exists
+        (function
+          | ToolReference _ -> true
+          | Text _
+          | Thinking _
+          | ReasoningDetails _
+          | RedactedThinking _
+          | ToolUse _
+          | ToolResult _
+          | Image _
+          | Document _
+          | Audio _ -> false)
+        blocks
     | None -> false
   in
   let content_json =

@@ -158,6 +158,7 @@ let prepare_turn_for_agent agent ~turn_params =
     ~defer_loading
     ~messages:agent.state.messages
     ~turn_params
+    ~eager_tools:agent.eager_tools
     ?model_input_projection:agent.model_input_projection
     ()
 ;;

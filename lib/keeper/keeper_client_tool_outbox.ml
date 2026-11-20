@@ -167,7 +167,7 @@ let host_result_text_bytes ~content = function
       (List.fold_left (fun sum (block : Llm_provider.Types.content_block) ->
          match block with
          | Llm_provider.Types.Text text -> sum + String.length text
-         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _
          | Image _ | Document _ | Audio _ -> sum) 0 blocks)
 
 (* Whether [text] goes as its marker: the marker's serialized length against the

@@ -35,6 +35,7 @@ let is_media : Types.content_block -> bool = function
   | Types.ReasoningDetails _
   | Types.RedactedThinking _
   | Types.ToolUse _
+  | Types.ToolReference _
   | Types.ToolResult _ -> false
 ;;
 
@@ -50,6 +51,7 @@ let record_tool_names names (message : Types.message) =
        | Types.ReasoningDetails _
        | Types.RedactedThinking _
        | Types.ToolResult _
+       | Types.ToolReference _
        | Types.Image _
        | Types.Document _
        | Types.Audio _ -> names)

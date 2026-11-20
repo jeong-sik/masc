@@ -771,6 +771,7 @@ module Message_value_with = struct
     | ToolUse { id; name; _ } -> mix (mix 5 (string_hint id)) (string_hint name)
     | ToolResult { tool_use_id; content; _ } ->
       mix (mix 6 (string_hint tool_use_id)) (string_hint content)
+    | ToolReference { tool_name } -> mix 10 (string_hint tool_name)
     | Image { source; _ } -> mix 7 (source_hint source)
     | Document { source; _ } -> mix 8 (source_hint source)
     | Audio { source; _ } -> mix 9 (source_hint source)

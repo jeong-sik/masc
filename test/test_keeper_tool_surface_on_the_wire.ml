@@ -152,21 +152,32 @@ let test_deferred_for_native_requires_a_loader () =
     []
     (Keeper_agent_tool_surface.deferred_for_native
        ~supports:true
+       ~loader_present:false
        ~full_tools:full
-       ~callable_tools:full);
+       ~callable_tools:[ search ]);
   Alcotest.(check (list string))
-    "a loader admits the full deferred catalog"
-    (names full)
+    "only tools outside the eager set are deferred"
+    (names [ second ])
     (names
        (Keeper_agent_tool_surface.deferred_for_native
           ~supports:true
+          ~loader_present:true
           ~full_tools:full
           ~callable_tools:[ search; first ]));
+  Alcotest.(check (list string))
+    "an eager catalog stays non-deferred even with a loader"
+    []
+    (Keeper_agent_tool_surface.deferred_for_native
+       ~supports:true
+       ~loader_present:true
+       ~full_tools:full
+       ~callable_tools:full);
   Alcotest.(check (list string))
     "an unsupported provider keeps the old surface"
     []
     (Keeper_agent_tool_surface.deferred_for_native
        ~supports:false
+       ~loader_present:true
        ~full_tools:full
        ~callable_tools:[ search; first ])
 ;;

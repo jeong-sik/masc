@@ -18,7 +18,7 @@ let same_message x y =
 let contains_tool_result (message:Agent_core.Types.message) = List.exists (function
   | Agent_core.Types.ToolResult _ -> true
   | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-  | ToolUse _ | Image _ | Document _ | Audio _ -> false) message.content
+  | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ -> false) message.content
 let json checkpoint = Agent_core.Checkpoint.to_json_result checkpoint
   |> Result.map_error Agent_core.Error.to_string
 let prepare ~source ~candidate =

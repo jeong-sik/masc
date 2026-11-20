@@ -189,6 +189,8 @@ let project_content transport ~content ~content_blocks =
     | Llm_provider.Types.Thinking _
     | Llm_provider.Types.ReasoningDetails _
     | Llm_provider.Types.RedactedThinking _ -> unsupported "reasoning content as a tool result"
+    | Llm_provider.Types.ToolReference _ as block ->
+      Ok (Llm_provider.Api_common.content_block_to_json block)
     | Llm_provider.Types.ToolUse _
     | Llm_provider.Types.ToolResult _ -> unsupported "nested tool-call content"
   in
@@ -253,7 +255,7 @@ let response_observer transport (result : dynamic_tool_result) =
       | Some blocks -> List.for_all (function
           | Llm_provider.Types.Text text -> String_util.is_valid_utf8 text
           | Llm_provider.Types.Image _ | Audio _ | Document _ | Thinking _
-          | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ -> true) blocks in
+          | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _ -> true) blocks in
     if not text_is_valid then None
     else match project_content transport ~content:result.content ~content_blocks:result.content_blocks with
       | Ok _ -> Some observer

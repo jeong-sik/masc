@@ -39,8 +39,18 @@ type attempt_surface =
   ; loader_alive : bool
   }
 
-let deferred_for_native ~supports ~full_tools ~callable_tools =
-  if supports && callable_tools <> full_tools then full_tools else []
+let deferred_for_native ~supports ~loader_present ~full_tools ~callable_tools =
+  if supports && loader_present
+  then
+    List.filter
+      (fun (tool : Agent_core.Tool.t) ->
+         not
+           (List.exists
+              (fun (callable : Agent_core.Tool.t) ->
+                 String.equal tool.schema.name callable.schema.name)
+              callable_tools))
+      full_tools
+  else []
 ;;
 
 let for_attempt ~checkpoint_owner ~agent_cell ~built =

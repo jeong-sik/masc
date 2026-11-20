@@ -456,7 +456,20 @@ let assistant_chunk_list_content_of_blocks blocks =
 
 let tool_result_content_string ~content ~content_blocks =
   match content_blocks with
-  | Some blocks when List.exists (function ToolReference _ -> true | _ -> false) blocks ->
+  | Some blocks
+    when List.exists
+           (function
+             | ToolReference _ -> true
+             | Text _
+             | Thinking _
+             | ReasoningDetails _
+             | RedactedThinking _
+             | ToolUse _
+             | ToolResult _
+             | Image _
+             | Document _
+             | Audio _ -> false)
+           blocks ->
     Utf8_sanitize.sanitize content
   | Some blocks ->
     (* Both OpenAI and Ollama tool messages accept scalar string content.

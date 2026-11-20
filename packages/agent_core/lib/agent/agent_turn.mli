@@ -16,6 +16,12 @@ type turn_request =
   { effective_messages : Llm_provider.Types.message list
     (** The request messages: the caller projection's output, or the
         history converted with {!History.to_wire_message}. *)
+  ; tools : Tool_set.t
+    (** Callable tools admitted by this exact request window. *)
+  ; tools_json : Yojson.Safe.t list option
+    (** Stable wire catalog paired with [effective_messages]. *)
+  ; visible_tool_names : string list
+    (** Callable names admitted by this exact request window. *)
   ; context_message : (Types.message option, Error.t) result
     (** The fresh carrier as actually transmitted after projection, or [None]
         if no carrier was generated or the projection removed it. An ambiguous
@@ -39,12 +45,12 @@ type turn_preparation =
         ({!Agent_types.model_input_candidates}). Empty without a caller
         projection. *)
   ; visible_tool_names : string list
-    (** Names of the caller-supplied tools. This is exactly the list the LLM
-        sees this turn. Useful for [Event_bus.TurnReady] subscribers and
-        deterministic substrate observability. Empty list when no
-        tools are presented to the LLM.
+    (** Names of the callable tools admitted for dispatch. With native deferred
+        loading, [tools_json] also contains deferred schemas that are not in this
+        list. Useful for [Event_bus.TurnReady] subscribers and deterministic
+        substrate observability. Empty list when no callable tools are presented.
 
-        Order matches [tools_json] and [Tool_set.to_list].
+        Order matches the callable set in [Tool_set.to_list].
 
         @since 0.162.0 *)
   }
@@ -58,8 +64,9 @@ val prepare_tools
   -> unit
   -> Yojson.Safe.t list option * string list
 (** Returns [(tools_json, visible_tool_names)].
-    [visible_tool_names] mirrors the order of [tools_json] and is empty
-    when no tools were supplied.
+    [visible_tool_names] contains only callable names; deferred schemas remain
+    in [tools_json] when native deferred loading is enabled. It is empty when no
+    callable tools were supplied.
 
     @since 0.162.0 third tuple element added (visible_tool_names) *)
 
@@ -83,6 +90,7 @@ val prepare_turn
   -> tools:Tool_set.t
   -> messages:Types.message list
   -> turn_params:Hooks.turn_params
+  -> ?eager_tools:Tool_set.t
   -> ?deferred_tools:Tool.t list
   -> ?defer_loading:bool
   -> ?model_input_projection:Agent_types.model_input_projection

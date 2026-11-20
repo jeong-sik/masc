@@ -513,6 +513,40 @@ let anthropic_message_to_json ~policy (msg : message) =
      @ ["content", `List (List.map anthropic_content_block_to_json msg.content)])
 ;;
 
+let project_tool_references ~config ~tools messages =
+  let supports = Provider_config.supports_deferred_tool_loading config in
+  let catalog_names =
+    List.filter_map
+      (fun tool ->
+         tool
+         |> Yojson.Safe.Util.member "name"
+         |> Yojson.Safe.Util.to_string_option)
+      tools
+  in
+  let valid_name name = supports && List.mem name catalog_names in
+  let rec project_block = function
+    | ToolReference { tool_name } as block -> if valid_name tool_name then Some block else None
+    | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
+      let blocks = List.filter_map project_block blocks in
+      (match blocks with
+       | [] -> Some (ToolResult { result with content_blocks = None })
+       | _ :: _ -> Some (ToolResult { result with content_blocks = Some blocks }))
+    | ToolResult { content_blocks = None; _ } as block -> Some block
+    | ( Text _
+      | Thinking _
+      | ReasoningDetails _
+      | RedactedThinking _
+      | ToolUse _
+      | Image _
+      | Document _
+      | Audio _ ) as block -> Some block
+  in
+  List.map
+    (fun (message : message) ->
+       { message with content = List.filter_map project_block message.content })
+    messages
+;;
+
 (* The Anthropic Messages API rejects a tool whose input_schema carries a
    combinator at the top level, answering the whole request with a 400:
    "tools.N.custom.input_schema: input_schema does not support oneOf, allOf,
@@ -871,6 +905,7 @@ let build_request_payload
    | Ok () -> ()
    | Error error ->
      invalid_arg ("Backend_anthropic.build_request: " ^ Message_origin_lowering.error_to_string error));
+  let messages = project_tool_references ~config ~tools lowered in
   (match config.kind, caps.supports_assistant_prefill, List.rev messages with
    | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->
      invalid_arg
@@ -1022,6 +1057,12 @@ let build_request_payload
     | [] -> body
     | ts ->
       let ts = project_tools_for_kind config.kind ts in
+      let () =
+        if List.exists tool_is_deferred ts && List.for_all tool_is_deferred ts
+        then
+          invalid_arg
+            "Backend_anthropic.build_request: at least one tool must have defer_loading=false"
+      in
       if config.cache_system_prompt
       then (
         let ts_with_cache = add_cache_control_to_last_non_deferred cache_control_json ts in

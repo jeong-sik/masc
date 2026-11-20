@@ -68,6 +68,7 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
           append_entry ~keeper_name ~failure_label:"redacted thinking" acc entry
         | Llm_provider.Types.Text _
         | Llm_provider.Types.ToolUse _
+        | Llm_provider.Types.ToolReference _
         | Llm_provider.Types.ToolResult _
         | Llm_provider.Types.Image _
         | Llm_provider.Types.Document _

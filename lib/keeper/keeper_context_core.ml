@@ -266,7 +266,7 @@ let patch_checkpoint_last_assistant
          | Agent_core.Types.ReasoningDetails _
          | Agent_core.Types.RedactedThinking _
          | Agent_core.Types.ToolUse _
-         | Agent_core.Types.ToolResult _
+         | Agent_core.Types.ToolReference _ | Agent_core.Types.ToolResult _
          | Agent_core.Types.Image _
          | Agent_core.Types.Document _
          | Agent_core.Types.Audio _ as block) :: rest ->
@@ -296,7 +296,7 @@ let patch_checkpoint_last_assistant
         | Agent_core.Types.ReasoningDetails _
         | Agent_core.Types.RedactedThinking _
         | Agent_core.Types.ToolUse _
-        | Agent_core.Types.ToolResult _
+        | Agent_core.Types.ToolReference _ | Agent_core.Types.ToolResult _
         | Agent_core.Types.Image _
         | Agent_core.Types.Document _
         | Agent_core.Types.Audio _ ) :: _
@@ -305,7 +305,7 @@ let patch_checkpoint_last_assistant
         | Agent_core.Types.ReasoningDetails _
         | Agent_core.Types.RedactedThinking _
         | Agent_core.Types.ToolUse _
-        | Agent_core.Types.ToolResult _
+        | Agent_core.Types.ToolReference _ | Agent_core.Types.ToolResult _
         | Agent_core.Types.Image _
         | Agent_core.Types.Document _
         | Agent_core.Types.Audio _ ) :: _ -> false

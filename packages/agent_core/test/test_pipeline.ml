@@ -6240,6 +6240,67 @@ let test_unattempted_tool_has_no_bus_execution_observation () =
   | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error)
 ;;
 
+let test_pipeline_uses_resolved_deferred_capability () =
+  Eio_main.run
+  @@ fun env ->
+  let loader =
+    Tool.create ~name:"keeper_tool_search" ~description:"Find tools" ~parameters:[] (fun _ ->
+      Ok { Types.content = "loaded"; content_blocks = None; _meta = None })
+  in
+  let deferred =
+    Tool.create ~name:"deferred" ~description:"Deferred" ~parameters:[] (fun _ ->
+      Ok { Types.content = "loaded"; content_blocks = None; _meta = None })
+  in
+  let agent_with_capability supported =
+    let provider_config =
+      Llm_provider.Provider_config.make
+        ~kind:Llm_provider.Provider_config.Anthropic
+        ~provider_id:"claude"
+        ~model_id:"m"
+        ~base_url:""
+        ~model_capabilities_override:
+          (Some
+             { Llm_provider.Capabilities.anthropic_capabilities with
+               supports_deferred_tool_loading = supported })
+        ()
+    in
+    let options =
+      { Agent.default_options with
+        provider_config = Some provider_config
+      ; deferred_tools = [ deferred ]
+      }
+    in
+    Agent.create
+      ~media_store:(History.Memory_store.create ())
+      ~config:(Types.default_config ~model:"m")
+      ~net:env#net
+      ~tools:[ loader ]
+      ~options
+      ()
+  in
+  let prepare agent =
+    Internal_pipeline.stage_parse agent ~turn_params:Hooks.default_turn_params
+  in
+  (match prepare (agent_with_capability false) with
+   | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+   | Ok (prep, _, _) ->
+     (match prep.tools_json with
+      | Some [ _ ] -> ()
+      | Some _ -> Alcotest.fail "unsupported model received a deferred catalog"
+      | None -> Alcotest.fail "unsupported model lost its callable tool"));
+  match prepare (agent_with_capability true) with
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+  | Ok (prep, _, _) ->
+    (match prep.tools_json with
+     | Some [ _; deferred_json ] ->
+       Alcotest.(check bool)
+         "supported model receives the deferred schema"
+         true
+         (deferred_json |> Yojson.Safe.Util.member "defer_loading" |> Yojson.Safe.Util.to_bool)
+     | Some _ -> Alcotest.fail "supported model received the wrong catalog"
+     | None -> Alcotest.fail "supported model lost its deferred catalog")
+;;
+
 let () =
   Alcotest.run
     "Pipeline"
@@ -6656,6 +6717,10 @@ let () =
             `Quick
             (test_native_parent_cancellation ~tracer:failing_scope_observer
               Parent_switch Tool_effect)
+        ] )
+    ; ( "deferred_tool_loading"
+      , [ Alcotest.test_case "pipeline uses resolved capability" `Quick
+            test_pipeline_uses_resolved_deferred_capability
         ] )
     ]
 ;;

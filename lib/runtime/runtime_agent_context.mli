@@ -31,9 +31,14 @@ type config = {
   system_prompt : string;
   tools : Agent_core.Tool.t list;
   deferred_tools : Agent_core.Tool.t list;
-      (** Full catalog sent with defer_loading only when the selected provider
-          declares support. Callable dispatch remains governed by [tools] and
-          tools loaded during the turn. *)
+      (** Deferrable catalog sent with defer_loading only when the selected
+          provider declares support. Eager tools stay outside this list.
+          Callable dispatch is recomputed from references in each projected
+          request window.
+
+          Source-compatibility note: adding this field is a breaking change for
+          direct [config] constructors. Use {!default_config} or a record update
+          so the default [[]] is preserved. *)
   stream_idle_timeout_s : float option;
   first_event_timeout_s : float option;
       (** Bound on the silent wait for the FIRST streaming provider event

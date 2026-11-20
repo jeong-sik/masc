@@ -1,7 +1,7 @@
 # HTTPS and HTTP/2
 
-The server has two HTTP listeners. Both serve the same route table
-(RFC-0512): a route registered once answers on every transport.
+The server has two HTTP listeners. Both serve the same route table:
+a route registered once answers on every transport.
 
 | Default port | Transport | Protocols on the connection |
 | --- | --- | --- |

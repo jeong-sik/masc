@@ -1,6 +1,6 @@
 # llama-server 로컬 레인 Runbook — KV 재사용 극대화
 
-RFC-0382의 실측을 운영 절차로 옮긴 문서다. 대상은 llama.cpp `llama-server`로 로컬 모델을 keeper 레인에 붙이는 배포이며, 목표는 멀티턴 keeper의 턴당 prefill 비용을 "새 입력 분량"으로 유지하는 것이다.
+로컬 레인 실측을 운영 절차로 옮긴 문서다. 대상은 llama.cpp `llama-server`로 로컬 모델을 keeper 레인에 붙이는 배포이며, 목표는 멀티턴 keeper의 턴당 prefill 비용을 "새 입력 분량"으로 유지하는 것이다.
 
 검증 기준 빌드: llama.cpp **b10180 (11b068d06)**, 모델 Qwen3.8-27B UD-Q4_K_XL. 다른 빌드에서는 `llama-server --help`로 플래그 존재를 재확인한다 (`--reasoning-preserve`, `--ctx-checkpoints`는 2026년 추가분).
 
@@ -36,7 +36,7 @@ llama-server \
 llama-server의 프리픽스 캐시는 요청 토큰열이 슬롯의 기존 열과 **바이트 단위로 이어질 때만** 작동한다. MASC agent-core는 이미 이 계약을 지킨다:
 
 1. **안정 프리픽스**: system prompt는 세대 내 고정 (`keeper_unified_prompt.mli`), 히스토리는 append-only, 윈도우 컷은 atoms_per_window 배수로 양자화 (`runtime_model_input_tail_window.mli`).
-2. **변동 정보는 꼬리로**: world_state·타임스탬프·recall 주입은 extra_system_context로 히스토리 **뒤에** 붙는다 (`agent_turn.ml:31`). 프리픽스 헤드에 매턴 변하는 내용을 넣으면 재처리 비용이 히스토리 길이에 비례해 커진다 — 실측 31배 (RFC-0382 §3.1).
+2. **변동 정보는 꼬리로**: world_state·타임스탬프·recall 주입은 extra_system_context로 히스토리 **뒤에** 붙는다 (`agent_turn.ml:31`). 프리픽스 헤드에 매턴 변하는 내용을 넣으면 재처리 비용이 히스토리 길이에 비례해 커진다 — 실측 31배.
 3. **reasoning 보존**: `preserve_thinking` 활성 시 이전 턴 생성물(thinking 포함)의 KV가 그대로 이어져 턴당 prefill이 새 user 메시지 분량(26~34 tok)으로 수렴한다.
 
 실측 요약 (Qwen3.8-27B, 4턴, max_tokens 512):
@@ -136,7 +136,7 @@ curl -s -X POST localhost:8935/api/v1/runtime/config/raw ...
 | 함정 | 증상 | 근거 |
 |---|---|---|
 | mlx_vlm.server를 같은 자리에 쓰기 | 매 요청 풀 re-prefill (Metal 캐시 소거), `apc_enabled:false` | Blaizzy/mlx-vlm#999 |
-| hybrid 모델 + 프리픽스 헤드 변형 | 체크포인트 고갈 → cache_n 붕괴 (실측: 559→68) | RFC-0382 §3.1 |
-| ollama 경유 서빙 | 같은 GGUF에서 decode 1/5 (3.2 vs 17.6 t/s, qwen35 arch 기준) + cache_n 무보고 | RFC-0382 §3.3 |
+| hybrid 모델 + 프리픽스 헤드 변형 | 체크포인트 고갈 → cache_n 붕괴 (실측: 559→68) | 로컬 실측 |
+| ollama 경유 서빙 | 같은 GGUF에서 decode 1/5 (3.2 vs 17.6 t/s, qwen35 arch 기준) + cache_n 무보고 | 로컬 실측 |
 | `-np 1`에 다중 keeper | 뒤 요청 무기한 대기 | 2026-08-11 HITL 사례 |
 | draft(speculative) + response_format | 서버가 거부 | 2026-08-15 mlx 실측과 동일 계열 — draft 미사용 인스턴스 분리 |

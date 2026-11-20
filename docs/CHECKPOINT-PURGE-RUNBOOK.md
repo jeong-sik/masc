@@ -1,7 +1,6 @@
-# Checkpoint Purge Runbook (RFC-0351 S1)
+# Checkpoint Purge Runbook
 
-RFC-0351:105 requires the operational cleanup procedure (backup included) to
-be documented before S2. This runbook covers the Dashboard action and
+This runbook covers the Dashboard action and
 `masc-checkpoint-purge` (#25537): the deterministic reduction of a stopped
 keeper's canonical agent core checkpoint. No LLM is involved at any step.
 
@@ -82,8 +81,8 @@ equal-watermark re-save through the locked validated store.
 ### Backup and rollback
 
 The canonical checkpoint is a small head, `<session>/<trace>.json`, and the
-messages are objects it names under `<session>/objects/<aa>/<sha256>`
-(RFC-0476). The backup copies the head and every object it names, byte for
+messages are objects it names under `<session>/objects/<aa>/<sha256>`.
+The backup copies the head and every object it names, byte for
 byte, at the same relative paths:
 
 ```text
@@ -106,7 +105,7 @@ head reads only with its objects.
 An apply also deletes the session's history archive entries
 (`agent-core-snapshot-*.json`). They are heads of the checkpoint before the
 purge, and while one is there the startup object sweep keeps the content the
-purge removed (RFC-0476 §3.3). The backup holds only the canonical head and
+purge removed. The backup holds only the canonical head and
 its objects, so a rollback does not bring the archive entries back; the
 dashboard's checkpoint list fills again as the keeper saves.
 

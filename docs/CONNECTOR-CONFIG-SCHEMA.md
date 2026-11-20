@@ -11,7 +11,7 @@ The dashboard exposes connection state, setup instructions and Keeper bindings.
 
 ## Connector settings
 
-### Discord (in-process gateway — RFC-0203 §Phase 3)
+### Discord (in-process gateway)
 
 The Discord connector runs **inside the server process**.
 Module: `lib/server/server_discord_in_process_gateway.{ml,mli}` plus
@@ -137,7 +137,7 @@ cannot be discovered from masc — see #30596.
 This connector never reports `stale`. Liveness is a value the poll fiber
 publishes.
 
-### Slack (in-process gateway — RFC-0317)
+### Slack (in-process gateway)
 
 The Slack connector runs **inside the server process** over **Socket Mode** —
 no public endpoint and no OAuth callback. Modules:

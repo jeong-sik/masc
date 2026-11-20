@@ -239,7 +239,7 @@ let overlay_string_array_guidance_and_input () =
   let board = open_form () in
   check_contains (visible board) "Unique name, e.g. wkbl";
   let quoted_source = board |> Records.insert_text ~text:{|news"desk|} in
-  check_contains (visible quoted_source) {|> source_id *: "news\"desk"|};
+  check_contains (visible quoted_source) {|› source_id *: "news\"desk"|};
   let board = board |> Records.insert_text ~text:"news" |> step "tab" in
   check_contains (visible board) "What the installation may read";
   let board = board |> step "right" |> step "tab" in
@@ -247,15 +247,15 @@ let overlay_string_array_guidance_and_input () =
   check_contains (visible board) "Allowed: public, unlisted, internal, direct";
   no_object_array_hint board;
   let incomplete = board |> type_text {|["public"|} in
-  check_contains (visible incomplete) {|> visibilities: "[\"public\""|};
+  check_contains (visible incomplete) {|› visibilities: "[\"public\""|};
   check bool "incomplete JSON is still refused" true
     (Result.is_error (Records.handle ~key:"tab" incomplete));
   let invalid = board |> type_text "[oops]" in
-  check_contains (visible invalid) {|> visibilities: "[oops]"|};
+  check_contains (visible invalid) {|› visibilities: "[oops]"|};
   check bool "invalid JSON is still refused" true
     (Result.is_error (Records.handle ~key:"tab" invalid));
   let board = board |> type_text {|["public", "internal"]|} in
-  check_contains (visible board) {|> visibilities: ["public","internal"]|};
+  check_contains (visible board) {|› visibilities: ["public","internal"]|};
   let board = submit board in
   check (list string) "board example is accepted" ["public"; "internal"] board.visibilities;
   let repository = open_form () |> Records.insert_text ~text:"code" |> step "tab"

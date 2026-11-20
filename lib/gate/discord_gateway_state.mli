@@ -5,7 +5,7 @@
     ticks + supervision signals); all outputs are typed effects
     ({!effect}) that the I/O layer (Discord_gateway_client) interprets.
 
-    Rationale (RFC-0203 §Modules):
+    Rationale:
 
     - Phase 1.6 unit tests drive this module with recorded fixture
       frames; no live WSS required.
@@ -17,10 +17,9 @@
 
     Closed sums everywhere. New opcode / state / effect must be added
     explicitly; warning [-w +4] (fragile match) blocks catch-all
-    [_ -> Ok ()] anti-patterns (RFC-0203 §Non-goals).
+    [_ -> Ok ()] anti-patterns.
 
     See also:
-    - docs/rfc/RFC-0203-discord-builtin-gateway.md §Modules
     - Discord Developer Docs — Gateway v10 opcodes and lifecycle *)
 
 (** {1 Opcodes — closed sum of the ones we handle} *)
@@ -28,8 +27,7 @@
 (** Discord Gateway opcodes. Closed sum: only the opcodes this client
     speaks or interprets are listed. Frames carrying unknown opcodes
     surface as {!Decode_error} in {!parse_frame}, not as a catch-all
-    arm — RFC-0203 §Non-goals "no catch-all [_ -> Ok ()] on opcode
-    dispatch". *)
+    arm. *)
 type opcode =
   | Op_dispatch          (** 0 — server → client event. *)
   | Op_heartbeat         (** 1 — bidirectional liveness ping. *)

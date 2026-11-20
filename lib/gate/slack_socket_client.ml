@@ -29,8 +29,8 @@
      failure is indistinguishable from an early peer close, which is fine:
      both retry the same way.
 
-   See: docs/rfc/RFC-0317-slack-builtin-gateway.md (and RFC-0203 for the
-   Discord original this is modeled on). *)
+   See: lib/gate/discord_gateway_state.mli, the Discord state machine
+   this module is modeled on. *)
 
 (* Re-export the caller-facing types so callers don't reach into the state
    machine module directly. Matches the {!mli}. *)
@@ -309,7 +309,7 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
         Eio.Fiber.fork ~sw (fun () ->
             (* ±25% jitter, same shape as Discord_gateway_client. The FSM's
                delay_ms stays deterministic for testability; jitter belongs
-               in the I/O layer per RFC-0203 to prevent thundering herd. *)
+               in the I/O layer to prevent thundering herd. *)
             let jitter_factor =
               let raw = Crypto_rng.generate 1 in
               let byte = Char.code raw.[0] in

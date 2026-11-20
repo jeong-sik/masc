@@ -4,12 +4,7 @@
     Thin wrapper: open WSS, parse frames, hand them to
     {!Discord_gateway_state.step}, run the returned effects, repeat.
     All correctness lives in the pure state machine; this module
-    only translates between bytes and typed inputs/effects.
-
-    Phase 1.1 (RFC-0203): typed surface only. {!run} raises until
-    Phase 1.2 ships the WSS handshake.
-
-    See: docs/rfc/RFC-0203-discord-builtin-gateway.md *)
+    only translates between bytes and typed inputs/effects. *)
 
 (** Re-export the public-facing types so callers don't reach into
     the state machine module directly. *)
@@ -104,7 +99,7 @@ val run :
     [sw] is closed.
 
     [on_ambient] receives [Message_create] events that fail
-    [trigger_policy] but are not the bot's own echo (RFC-0226):
+    [trigger_policy] but are not the bot's own echo:
     record-only delivery — the handler persists the line to the bound
     keeper's lane history and must not start a turn.
 

@@ -4642,7 +4642,7 @@ let setup_validate_runtime base_path =
     | None -> prerr_endline "imp's assigned runtime is unavailable. Choose a model in the installation wizard."; 1
     | Some runtime ->
       Printf.printf "Model connection: %s / %s\n%!" runtime.provider.display_name runtime.model.api_name;
-      if not runtime.model.tools_support then (
+      if not (Runtime_tool_support.declares_tools runtime) then (
         prerr_endline "This model has tool calling disabled. Select a tool-capable model in the installation wizard before starting imp."; 1)
       else
         match verify_runtime_execution ~base_path runtime runtime_verification_timeout_s with

@@ -1665,7 +1665,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
     ; "available", `Bool (not is_official_client_runtime)
     ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
     ; "max_context", `Int (Runtime_instance.max_context_of_runtime rt)
-    ; "tools_support", `Bool (rt.model.tools_support && not is_official_client_runtime)
+    ; "tools_support", `Bool (Runtime_tool_support.declares_tools rt && not is_official_client_runtime)
     ; "thinking_support", Json_util.bool_opt_to_json
         (if is_official_client_runtime then Some false else rt.model.thinking_support)
     ; "streaming", `Bool (rt.model.streaming && not is_official_client_runtime)

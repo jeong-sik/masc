@@ -364,6 +364,14 @@ module Count : sig
   val times : int -> string
   (** How many times one thing happened, after its name: [×13], [×1,234]
       in both languages (RFC tui-one-screen-grammar, section 6.3). *)
+
+  val increase : int -> string
+  (** How many were added: [+3], [+1,234] (RFC tui-one-screen-grammar,
+      section 6.3). [+] means an increase and nothing else. *)
+
+  val decrease : int -> string
+  (** How many were removed, with the minus sign U+2212: [−2], [−1,234]
+      (RFC tui-one-screen-grammar, section 6.3). *)
 end
 
 (** A digest, such as a revision or a SHA-256. *)

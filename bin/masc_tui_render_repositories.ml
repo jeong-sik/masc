@@ -1258,10 +1258,11 @@ let render_changes_list (state : state) =
        box_divider buf cols;
        box_line_styled buf cols ~style:(Theme.recede ())
          (Printf.sprintf
-            (if state.ui_language = Lang_ko then "  미리보기 %s  -%d +%d  Enter:열기·스크롤"
-             else "  preview %s  -%d +%d  Enter:open/scroll")
+            (if state.ui_language = Lang_ko then "  미리보기 %s  %s %s  Enter:열기·스크롤"
+             else "  preview %s  %s %s  Enter:open/scroll")
             (Terminal_text.single_line (change_row_address change))
-            removed added);
+            (Masc_tui_value.Count.decrease removed)
+            (Masc_tui_value.Count.increase added));
        let body_height = preview_height - 2 in
        let diff_rows_window = Rows.of_list ~first:0 ~height:body_height diff_rows in
        for i = 0 to body_height - 1 do

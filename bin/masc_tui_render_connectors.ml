@@ -323,9 +323,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                        let changed_text = if changed = 0 then ""
                          else Printf.sprintf (if ko then " · 변경 %d" else " · %d changed") changed in
                        Printf.sprintf
-                         (if ko then " · Δ +%d 신규 · -%d 제거 · =%d 유지%s"
-                          else " · Δ +%d new · -%d out · =%d same%s")
-                         added removed unchanged changed_text in
+                         (if ko then " · Δ %s 신규 · %s 제거 · =%d 유지%s"
+                          else " · Δ %s new · %s out · =%d same%s")
+                         (Masc_tui_value.Count.increase added)
+                         (Masc_tui_value.Count.decrease removed)
+                         unchanged changed_text in
                  let truncation =
                    if scene.content.truncated then ui_text state ~ko:" · 일부 생략" ~en:" · truncated"
                    else ""

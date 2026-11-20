@@ -794,7 +794,11 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   let run args =
     let argv=Array.of_list ("python3"::args) in
     let pid=Unix.create_process "python3" argv Unix.stdin Unix.stdout Unix.stderr in
-    snd (Unix.waitpid [] pid) in
+    (* A signal can interrupt the wait before the child ends (macOS). *)
+    let rec reaped () = match Unix.waitpid [] pid with
+      | _, status -> status
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> reaped () in
+    reaped () in
   let materialize_plan path output=run [Filename.concat script_dir "tui_ask_followup_packet.py";path;
     "--source-root";packet_dir;"--output";output] in
   let materialize=materialize_plan plan_path in

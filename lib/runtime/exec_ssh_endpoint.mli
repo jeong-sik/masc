@@ -70,7 +70,7 @@ type t =
     (** The operator's declaration that this account's home is the keeper's
         alone: nothing else reads or writes there. Required before a keeper
         on this endpoint may run its box as [guest_local], which lets writes
-        land inside the account without the judge (RFC-0422 §3.4). Default
+        land inside the account without the judge. Default
         [false]: a shared account keeps the judge for every write. *)
   ; allowed_paths : string list
     (** Extra endpoint-side roots an Execute command on this endpoint may

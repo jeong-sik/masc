@@ -563,7 +563,7 @@
   }
 }
 
-/* RFC-0266 §7 Phase 4 — fusion run status panel (registry-backed live strip).
+/* Fusion run status panel (registry-backed live strip).
    Reuses the `.fus-status.tone-*` chip; only layout is defined here. */
 
 .v2-fusion-surface .fus-runs-head-meta {

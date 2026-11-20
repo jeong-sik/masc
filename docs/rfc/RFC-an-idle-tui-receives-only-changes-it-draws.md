@@ -17,8 +17,6 @@ related: ["0480", "0481", "0474", "0477", "tui-one-screen-grammar"]
   - turn 조각은 그 키퍼 채팅을 연 client 에게만 간다.
   - 1초마다 다시 읽는 `keepers/turns` 는 바뀐 것이 있을 때만 몸통을 받는다.
 - 코드 좌표는 `origin/main` `0a0a961b480f` 에서 읽었다.
-- 측정은 [연구 노트](../research/2026-11-18-tui-btop-visual-grammar-and-idle-cost.md) 4절과 같은 중계 기록이다.
-
 ## 0. 결정
 
 1. 알림에는 무엇이 바뀌었는지만 싣는다. 값은 GET 이 준다.

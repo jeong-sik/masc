@@ -1,14 +1,14 @@
-(** Keeper_surface_read — pull-based lane context (RFC-0223 P3).
+(** Keeper_surface_read — pull-based lane context.
 
     Pure projection behind the [keeper_surface_read] tool: filter the
     keeper's chat log to one connector lane and derive the lane's
     participant roster by folding over the rows. No store of its own —
     the chat log is the only source, so the roster ages out with log
-    retention (RFC-0223 §5: log-bounded by design, no separate person
+    retention (log-bounded by design, no separate person
     store). Paging uses the chat store's physical cursor. *)
 
 (** One person seen on the lane, derived from user lines carrying a
-    [speaker_id] (RFC-0223 P1). Keeper/assistant lines are the
+    [speaker_id]. Keeper/assistant lines are the
     keeper's own output and are never participants. *)
 type participant = {
   id : string;

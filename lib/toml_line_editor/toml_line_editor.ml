@@ -9,7 +9,7 @@
 
    The primitives originate from the runtime.toml routing/assignment editor in
    [Runtime]; they are hoisted here as the single home for comment-preserving TOML
-   editing (RFC-0306 §3.2) so the fusion settings writer can reuse them without
+   editing so the fusion settings writer can reuse them without
    depending on the runtime library. [Runtime] delegates to these. *)
 
 (* ── string / line helpers ─────────────────────────────────────────────── *)
@@ -796,7 +796,7 @@ let edit_table_float content ~path ~key ~value =
 
 (* Replace (or append) a multi-line array inside a section. An existing
    single-line array collapses to the multi-line form; comments between array
-   elements are not preserved (elements are data, RFC-0306 §7.1). Comments
+   elements are not preserved (elements are data). Comments
    outside the value are untouched.
 
    The span ends where the scanner says the value closes, rather than at the

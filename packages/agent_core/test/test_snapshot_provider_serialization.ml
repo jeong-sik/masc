@@ -542,7 +542,7 @@ let test_raw_openai_compat_does_not_infer_glm_thinking_or_replay () =
 (* Native [kind:Glm] reasoning_content replay gate (agent-core boundary). Typed [Glm] is
    the sole positive native GLM path. Historical reasoning_content is dropped
    only when the row declares [preserve_thinking = false]; a declared or an
-   undeclared preservation replays it as sent (RFC-0488 §3.2). *)
+   undeclared preservation replays it as sent. *)
 let native_glm_cfg ?(enable_thinking = Some true) ?preserve_thinking () =
   Provider_config.make
     ~kind:Glm

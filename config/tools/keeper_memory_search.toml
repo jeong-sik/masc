@@ -18,7 +18,9 @@ with the same query and source=current to read the rest. A changed current \
 corpus or query rejects the cursor; restart without it. Historical scopes \
 do not accept cursors. Fact results name their store and \
 original basis; current facts include exact memory_id, category and origin \
-(authored is yours to supersede). Use a memory_id as a derived \
+(authored is yours to supersede). Current facts carry first_seen and \
+ordinary ones last_seen (latest re-observation), in UTC ISO 8601. \
+Use a memory_id as a derived \
 conclusion's premise_id only for store='current_memory_snapshot'. \
 source='absorbed' finds facts merged into a newer claim: into is the claim \
 now holding it; into_current=false if not current. source='dropped' retrieves \

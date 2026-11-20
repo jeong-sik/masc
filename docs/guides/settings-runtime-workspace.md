@@ -29,6 +29,5 @@ unsaved draft; compare it with the current file before choosing a save basis.
 Changing workspace stops further effects from the old operation; it cannot undo
 an earlier server-side write.
 
-The source and synthetic-HTTP checks are recorded in
-[the B10 evidence](../evidence/dashboard/2026-10-05-settings-runtime-workspace/README.md).
-They do not establish deployment or native TUI behavior.
+The source and synthetic-HTTP checks do not establish deployment or native TUI
+behavior.

@@ -9,7 +9,7 @@ val compact_preview : max_chars:int -> string -> string * bool
     non-Assoc input. *)
 val json_member : string -> Yojson.Safe.t -> Yojson.Safe.t
 
-(** RFC-0142 PR-5 typed-failure variant: accepts both [`Float] and
+(** typed-failure variant: accepts both [`Float] and
     [`Int]; collapses Wrong_shape / Field_absent to [None] at the
     boundary. *)
 val json_number : string -> Yojson.Safe.t -> float option

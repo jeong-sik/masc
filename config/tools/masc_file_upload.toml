@@ -9,7 +9,7 @@ size limit. Only images are accepted; the largest allowed file is 64 MiB \
 and files are stored for reuse. Use masc_file_delete when the file is no \
 longer needed."""
 
-# RFC-0430 Phase 3. Fleet data decides defer_loading after the first
+# Fleet data decides defer_loading after the first
 # week of calls; uploading is rare enough that the default (schema on
 # every request) is the wrong side to start on.
 defer_loading = true

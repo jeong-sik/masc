@@ -251,7 +251,7 @@ let muse_none_supported = false
    they stay out of the read set until the RFC widens it deliberately. *)
 let claude_code_read_tool_names = [ "Read"; "Glob"; "Grep" ]
 
-(* RFC-0390 admission review: a declared posture that admission cannot
+(* A declared posture that admission cannot
    honor resolves to the posture the client actually runs, instead of
    failing the whole runtime call. [full] under a non-yolo approval mode
    becomes [read] (effects stay behind the gate) — a true downgrade,

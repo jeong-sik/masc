@@ -8,7 +8,6 @@
 
   이 파일은 2026-08-20 코드 감사(14개 영역) 결과와 2026-09-01 사용자 재확인을
   반영해 레포에 버전 관리되는 SSOT다.
-  잔여 갭 추적: docs/audits/constitution-code-parity-matrix.md
 -->
 
 <masc_constitution version="2026-09-01">
@@ -58,14 +57,14 @@
             measure 는 개수, 수량 또는 참·거짓으로 확인할 수 있는 조건이다.</rule>
       <rule>성공조건은 구체적 내용을 포함하고, Verifier(내부 Standalone LLM Agent)가
             현실에 실재하고 도달 가능한지 체크한다.
-            [parity B2: Goal upsert 후 Goal_criterion_agent 가 성공조건 revision 별 실재성·도달 가능성을 비동기 심사한다.
-            판정은 Goal_criterion_review 원장과 criterion_review 에 남으며 완료 증명·사람 확인이나 실행 허가를 대신하지 않는다.]</rule>
+            Goal upsert 후 Goal_criterion_agent 가 성공조건 revision 별 실재성·도달 가능성을 비동기 심사한다.
+            판정은 Goal_criterion_review 원장과 criterion_review 에 남으며 완료 증명·사람 확인이나 실행 허가를 대신하지 않는다.</rule>
       <rule>1개의 Goal 에 여러 Task 가 관련될 수 있다.</rule>
       <rule>삭제(취소) 가능. 사유는 전용 필드가 아니라 transition 공용 note 로 기록한다
             (workspace_goals.ml 의 last_review_note).</rule>
       <rule>완료 조건: 생성 시 지정한 성공조건을 Verifier 가 증명 + 사람의 최종 확인.
-            [parity B3: Request_complete → Verifying → Record_proof_proven → Awaiting_confirmation → Confirm_completion → Completed
-            (goal_phase.ml, #34976). 사람의 최종 확인 단계는 현행 계약이다.]</rule>
+            Request_complete → Verifying → Record_proof_proven → Awaiting_confirmation → Confirm_completion → Completed
+            (goal_phase.ml). 사람의 최종 확인 단계는 현행 계약이다.</rule>
       <lifecycle>
         <phase>Executing</phase>
         <phase>Verifying</phase>
@@ -75,8 +74,8 @@
         <phase>Completed</phase>
         <phase>Dropped</phase>
         <action>Request_complete | Record_proof_proven | Record_proof_refuted | Confirm_completion | Pause | Resume | Block | Unblock | Drop | Reopen</action>
-        [parity B8: Paused/Blocked는 이전 진행 상태를 보존한다. Pause/Block은 새 Goal 검증 진입을 멈추고,
-         Resume/Unblock은 보존한 상태를 복원한다. 연결된 Task는 별도로 진행된다 (goal_phase.mli, #41151).]
+        <invariant>Paused/Blocked는 이전 진행 상태를 보존한다. Pause/Block은 새 Goal 검증 진입을 멈추고,
+                   Resume/Unblock은 보존한 상태를 복원한다. 연결된 Task는 별도로 진행된다 (goal_phase.mli).</invariant>
         <invariant>status 필드는 받지 않는다. 들어오면 decode 실패 → 손상 정책 적용.
                    (goal_store.ml 화이트리스트 디코드)</invariant>
       </lifecycle>
@@ -90,7 +89,7 @@
       <rule>완료는 자기 선언이 아니라 검증 제출(AwaitingVerification)을 거친다.
             verification_id 가 증거 레코드와 조인된다.</rule>
       <rule>맡은 쪽은 자기 Task 를 바로 취소한다. 판정 제출 중인 Task 도 같다.
-            취소는 판정이나 승인을 거치지 않는다. (RFC-0417 §4.1, workspace_task_lifecycle.ml)</rule>
+            취소는 판정이나 승인을 거치지 않는다. (workspace_task_lifecycle.ml)</rule>
 
       <lifecycle src="lib/types/types_core.mli">
         <state>Todo</state>
@@ -124,9 +123,9 @@
       </expiry>
 
       <goal_link src="lib/task/task_goal_assignment.mli">
-        <rule>goalless Task 는 정상 상태다. Goal 없이 살아 있어도 된다 (RFC-0267 §2).</rule>
+        <rule>goalless Task 는 정상 상태다. Goal 없이 살아 있어도 된다.</rule>
         <rule>나중에 set_task_goal 로 기존 Goal 에 연결할 수 있다.</rule>
-        <rule>이미 Goal 링크가 있으면 Already_assigned 로 거절한다. 재할당과 해제는 범위 밖이다 (RFC-0267 §4).</rule>
+        <rule>이미 Goal 링크가 있으면 Already_assigned 로 거절한다. 재할당과 해제는 범위 밖이다.</rule>
         <rule>backlog 를 읽지 못하면 복구 스냅샷으로 이 변경을 승인하지 않는다.
               (workspace_backlog.ml: recovery snapshot 은 "non-authoritative for mutation")</rule>
       </goal_link>
@@ -191,8 +190,8 @@
         패널 답변 계약은 free text 다. JSON envelope 를 요구하지 않는다.
         panel_failure variant 는 Bridge_error | Invalid_max_output_tokens | Invalid_timeout_s 등
         구현 현행을 따른다 (fusion_types.ml). fusion_request 는 web_tools : bool 필드를 가진다.
-        topology(Refine/Conditional/Judge_of_judges/Staged)는 RFC-0283/0284 로 확장됐다.
-        설계 SSOT 는 RFC-0252 (docs/rfc/).
+        topology 는 Simple/Refine/Conditional/Judge_of_judges/Staged_judge_of_judges 의 닫힌 합이다
+        (fusion_types.mli 의 fusion_topology). 설계 SSOT 는 그 타입이다.
       </not_board>
     </board>
 
@@ -273,8 +272,8 @@
     <group name="io">Connector, Dashboard, Broadcast, Discord, Slack, File System</group>
     <group name="autonomy">Autonomous, Proactive, Schedule Job, Drain Queue</group>
     <group name="tools">Multitools, AsyncTools, Batch Tools,
-          Parallel Tool [parity B4: 선언된 Concurrent 호출과 producer 가 자원을 확정한 호출을
-          병렬 실행한다. 자원 충돌 선행 호출의 settlement 를 기다리고 Serial 경계는 유지한다],
+          Parallel Tool (선언된 Concurrent 호출과 producer 가 자원을 확정한 호출을
+          병렬 실행한다. 자원 충돌 선행 호출의 settlement 를 기다리고 Serial 경계는 유지한다),
           Sandbox</group>
     <group name="runtime">Multi Runtime, Model Free, Provider Free
           (코드 명칭: lib/runtime_model/ 의 provider-runtime 해소), Multi Lane, 병렬 레인</group>
@@ -457,8 +456,6 @@
       String / SubString / RegEx 비교로 다음 로직을 결정하지 않는다.
       "걸려라 곱타입" 하면서 휴리스틱한 단어나 상상 속 문장이 걸리길 바라는 구현은 제거한다.
       String 을 비교해야만 코드를 짤 수 있게 됐다면 바닥까지 온 것이다.
-      [parity C3-C4: 완료 — "SKIP:" 분기는 사라졌고, empty completion 은
-       Llm_provider.Error.EmptyCompletion variant 로 typed]
     </item>
 
     <item id="budget_gate">
@@ -531,9 +528,10 @@
 
   <!-- ================= 증거 ================= -->
   <evidence mandatory="true">
-    <req>실측된 것을 로그로 증명하거나 저장소로 증거물을 제시한다.</req>
+    <req>실측한 것은 로그와 측정값으로 증명한다.</req>
     <req>대시보드 구현을 증명하려면 대시보드 표시를 실제로 진행시킨다.</req>
-    <req>결과물에 로그 + 실측 + 브라우저 스크린샷을 포함한다.</req>
+    <req>증거(로그, 실측, 브라우저 스크린샷)는 PR 본문과 CI artifact 에 둔다. 저장소에 커밋하지 않는다.</req>
+    <req>저장소에는 테스트가 읽는 입력만 fixture 로 둔다.</req>
   </evidence>
 
   <runtime_data path="&lt;base-path&gt;/.masc">

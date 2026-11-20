@@ -546,7 +546,7 @@ function FusionKeeperLink({ keeper, size = 'sm' }: { keeper: string; size?: 'sm'
   `
 }
 
-// RFC-0284 PR 2: render the observed judge nodes as a structural strip so the
+// Render the observed judge nodes as a structural strip so the
 // execution topology (JoJ = N 1차 + 메타, refine = 2, simple = 1) is visible
 // instead of collapsing into the single canonical judge. Topology is read from
 // the array shape alone; the canonical synthesis below is unchanged. Renders
@@ -598,7 +598,7 @@ export function FusionJudgesStrip({ nodes }: { nodes: readonly FusionJudgeNode[]
 // truth: the array shape + per-node role/failed). Shared by the pipeline strip,
 // the first-judge card grid, the meta-drop isolation banner, and the topology
 // chip so those four surfaces never diverge. `isolatedFirst` are the failed 1차
-// 심판 nodes that meta reconcile excludes (RFC-0283 §2.3).
+// 심판 nodes that meta reconcile excludes.
 interface FusionShapeInfo {
   shape: FusionJudgeShape
   isJoj: boolean
@@ -667,7 +667,7 @@ function firstJudgeContradictionCount(judge: FusionJudge, identity: string): num
 }
 
 // One 1차 심판 card (design FirstJudges). A failed node renders an isolation card
-// (excluded from meta reconcile, RFC-0283 §2.3); a synthesized node shows its
+// (excluded from meta reconcile); a synthesized node shows its
 // decision badge, resolved-answer gist, derived 합의/상충 counts, and token spend.
 // No lens/model split — the backend carries only `identity` (= panelist_id) for a
 // first node, so inventing an identity/model split would fabricate data.

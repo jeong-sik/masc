@@ -63,11 +63,17 @@ end
    not read as something running. Every detail page draws its headings with
    these two. *)
 module Section = struct
-  let rule_text title =
-    "\xe2\x94\x80\xe2\x94\x80 " ^ title
-    ^ " \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+  let rule_lead = "\xe2\x94\x80\xe2\x94\x80 "
+  let rule_tail = " \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+
+  let rule_text title = rule_lead ^ title ^ rule_tail
 
   let style = Ansi.bold
+
+  let styled_heading ~rule_style title =
+    rule_style ^ rule_lead ^ Ansi.reset
+    ^ style ^ title ^ Ansi.reset
+    ^ rule_style ^ rule_tail ^ Ansi.reset
 end
 
 (** Semantic styles for state and content syntax.

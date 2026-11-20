@@ -21,7 +21,7 @@ type declared_lane_failure =
 (* How this lane continues after a failed turn. It restarts its cycle: the next
    cycle is a new turn, and a hint that named the path this one failed on would
    become [turn_state.deferred_runtime_lane] below and start the next cycle on
-   that path again (RFC last-path-resumes-after-progress §3.5). Read by a test,
+   that path again. Read by a test,
    because the only caller of [run] is production.  *)
 let lane_retry_continuation = Keeper_turn_driver.Restart_cycle
 

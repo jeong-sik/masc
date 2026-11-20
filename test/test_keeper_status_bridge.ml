@@ -725,7 +725,7 @@ let contains haystack needle =
   go 0
 ;;
 
-(* RFC-0481 §3.2: the roster row reads the newest receipt, so each append
+(* The roster row reads the newest receipt, so each append
    tells that workspace's roster readers to reread the Keeper. *)
 let test_receipt_append_announces_the_keeper_row () =
   Eio_main.run @@ fun env ->

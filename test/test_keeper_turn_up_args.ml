@@ -143,7 +143,7 @@ let test_remote_endpoint_validation () =
     ~finally:(fun () ->
       Unix.putenv preflight_key (Option.value previous_preflight ~default:""))
   @@ fun () ->
-  (* RFC-0121: the resolver reads .masc/config/runtime.toml — the path the
+  (* The resolver reads .masc/config/runtime.toml — the path the
      live layout uses — not the .masc root this fixture used to write to. *)
   let masc_dir = Filename.concat ctx.config.base_path ".masc" in
   let config_dir = Filename.concat masc_dir "config" in
@@ -289,7 +289,7 @@ let test_remote_endpoint_persistence_round_trip () =
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   let masc_dir = Filename.concat ctx.config.base_path ".masc" in
   if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o700;
-  (* RFC-0121: the resolver reads .masc/config/runtime.toml. *)
+  (* The resolver reads .masc/config/runtime.toml. *)
   let config_dir = Filename.concat masc_dir "config" in
   if not (Sys.file_exists config_dir) then Unix.mkdir config_dir 0o700;
   let runtime_oc = open_out_bin (Filename.concat config_dir "runtime.toml") in
@@ -347,7 +347,7 @@ remote_root = "/srv/masc/playground"
          ; "remote_endpoint", `String "fixture"
          ])
   in
-  (* RFC-0487: creating the manifest adds the Keeper's memory health row. *)
+  (* Creating the manifest adds the Keeper's memory health row. *)
   let told = ref [] in
   let unsubscribe =
     Keeper_memory_health_input.subscribe
@@ -415,7 +415,7 @@ let test_microvm_backend_persistence_round_trip () =
    | Error error -> fail (Catalog.save_error_to_string error));
   let masc_dir = Filename.concat ctx.config.base_path ".masc" in
   if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o700;
-  (* RFC-0121: the resolver reads .masc/config/runtime.toml. *)
+  (* The resolver reads .masc/config/runtime.toml. *)
   let config_dir = Filename.concat masc_dir "config" in
   if not (Sys.file_exists config_dir) then Unix.mkdir config_dir 0o700;
   let name = "microvm-persist-fixture" in
@@ -2265,7 +2265,7 @@ let test_every_profile_and_mode_pair_has_a_decided_answer () =
     (* microVM is the backend policy mode was built for. *)
     | S.Micro_vm, _ -> `Accepted
     | S.Docker, (S.Network_none | S.Network_inherit) -> `Accepted
-    (* RFC-0415: the Docker egress boundary is unmeasured. *)
+    (* The Docker egress boundary is unmeasured. *)
     | S.Docker, S.Network_policy -> `Refused
     | S.Remote_ssh, S.Network_inherit -> `Accepted
     (* Phase 1 is transport-only and holds no network knob. *)

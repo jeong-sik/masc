@@ -44,18 +44,18 @@ val paste : t -> string -> t
 (** Append single-line field text without submitting. Browsing and revoke
     confirmation discard pasted text. Validation remains on Enter. *)
 val key : t -> string -> t * action
-val hints : t -> string
-val controller_note : Masc.Tui_decode.play_controller -> string -> string
+val hints : ?ko:bool -> t -> string
+val controller_note : ?ko:bool -> Masc.Tui_decode.play_controller -> string -> string
 (** The suffix the invite row named by the string shows when it holds the DOS
     controller. Shared by the Collab list and the chat [/play] list. *)
-val controller_summary : Masc.Tui_decode.play_controller -> string list
+val controller_summary : ?ko:bool -> Masc.Tui_decode.play_controller -> string list
 (** The line the invite list shows about the DOS controller, if any: who
     holds it, that no machine is loaded, or why it could not be asked. *)
 val position : t -> Masc_tui_value.Position.t option
 (** The selected invite among the invites listed, for the title row; [None]
     with none listed. *)
 
-val lines : height:int -> width:int -> t -> string list
+val lines : ?ko:bool -> height:int -> width:int -> t -> string list
 (** The overlay body at [width] cells. Prose wraps at spaces and the three
     machine keys stack when they do not fit one row, so nothing is cut at the
     frame's edge. Each invite takes the rows its text needs; the list shows the

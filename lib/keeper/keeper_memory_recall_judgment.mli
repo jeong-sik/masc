@@ -1,5 +1,4 @@
-(** Closed vocabulary and reduction rule of Keeper memory recall
-    (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, sections 4.3 and 4.4).
+(** Closed vocabulary and reduction rule of Keeper memory recall.
 
     Nothing here depends on the TypeSafe client. A judgment made by Jev in the
     run path and one made by a re-judging model offline use the same types.

@@ -51,6 +51,24 @@ val dashboard_memory_http_payload :
   ?config:Workspace.config -> reader:Masc_board_handlers.Board_access.reader -> actor:string option ->
   Httpun.Request.t -> Dashboard_cache.cached_payload
 
+val board_memory_cache_key :
+  reader:Masc_board_handlers.Board_access.reader ->
+  base_path:string option ->
+  hearth:string option ->
+  author_filter:string option ->
+  text_query:string option ->
+  sort_by:Board_dispatch.sort_order ->
+  exclude_system:bool ->
+  exclude_automation:bool ->
+  limit:int ->
+  offset:int ->
+  voter:string option ->
+  string
+(** The cache key of the Board list read that {!dashboard_memory_http_payload}
+    answers with these values, after its bounds and trims. Reads that differ
+    in any part have different keys: a part taken from the request is written
+    with its length, so it cannot read as the part after it. *)
+
 val dashboard_gate_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 
@@ -63,19 +81,18 @@ val dashboard_gate_tool_events_http_json :
 
 val dashboard_scheduled_automation_http_json :
   config:Workspace.config -> Yojson.Safe.t
-(** Schedule projection for [GET /api/v1/dashboard/scheduled-automation],
-    cached and offloaded. Both the HTTP/1 router and the H2 gateway call this
-    rather than the projection directly, so the two transports cannot serve
-    different data or drift on cache policy. *)
+(** The fleet list of the schedule projection, cached and offloaded: the
+    answer to [GET /api/v1/dashboard/scheduled-automation] with no selector.
+    The route calls {!dashboard_scheduled_automation_query_http_json}, which
+    delegates here. *)
 
 val dashboard_scheduled_automation_query_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
-(** Query-aware owner for the scheduled-automation route. With no [schedule_id]
-    it delegates to {!dashboard_scheduled_automation_http_json}; an exact lookup
-    reads the schedule store without populating a client-controlled cache key. *)
-
-val dashboard_proof_http_json :
-  config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
+(** Query-aware owner for the scheduled-automation route. With no selector it
+    delegates to {!dashboard_scheduled_automation_http_json}.
+    [active_only=true] answers the active-only list, cached the same way. A
+    [payload_target], a [cursor] and an exact [schedule_id] lookup read the
+    schedule store without populating a client-controlled cache key. *)
 
 val dashboard_gate_resolve_http_json :
   ?workspace_config:Workspace.config ->
@@ -136,7 +153,7 @@ val cached_goals_tree_payload :
 (** The goals tree as a cached read. Its key names the goal projection
     generation; when the current generation has no entry yet, the tree of the
     highest generation this function filled for the workspace answers at once
-    and the new one is computed in the background (RFC-0474 L4d). *)
+    and the new one is computed in the background. *)
 
 val dashboard_goal_detail_http_json :
   config:Workspace.config -> goal_id:string -> Yojson.Safe.t

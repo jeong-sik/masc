@@ -1220,10 +1220,12 @@ let schedule_request_rows_dashboard_json ~config ~now ~runner_status state reque
 (* A target-scoped page answers "what is scheduled for this one Keeper", which
    the fleet page cannot: it caps at 20 rows with active ones first, so a
    Keeper whose schedules are terminal or simply further down is invisible
-   there. The scoped limit is its own number because the fleet cap exists to
-   bound a whole-store scan and this request is already bounded by the
-   target. *)
-let schedule_projection_target_request_limit = 200
+   there. An active-only page answers what is still going to run, which the
+   fleet page cannot either: polling schedules alone can take all 20 rows.
+   The selected limit is its own number because the fleet cap exists to bound
+   a whole-store scan and a selected request is already narrowed, to one
+   target or to the schedules that have not ended. *)
+let schedule_projection_selected_request_limit = 200
 
 (* A cursor records the actual ordering key and selector, not a list offset.
    The store may change between requests; the cursor preserves the boundary but
@@ -1270,10 +1272,13 @@ let compare_schedule_request_to_key (request : Schedule_domain.schedule_request)
     ~right_due_at:key.page_due_at ~right_id:key.page_schedule_id
 ;;
 
-let schedule_page_cursor ~payload_target key =
+let schedule_page_cursor_version = 2
+
+let schedule_page_cursor ~payload_target ~active_only key =
   `Assoc
-    [ "version", `Int 1
+    [ "version", `Int schedule_page_cursor_version
     ; "target", (match payload_target with None -> `Null | Some target -> `String target)
+    ; "active_only", `Bool active_only
     ; "active", `Bool key.page_active
     ; "due_at", `Float key.page_due_at
     ; "schedule_id", `String key.page_schedule_id
@@ -1282,7 +1287,7 @@ let schedule_page_cursor ~payload_target key =
   |> Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
 ;;
 
-let schedule_page_key_of_cursor ~payload_target raw =
+let schedule_page_key_of_cursor ~payload_target ~active_only raw =
   let invalid = Error "invalid schedule page cursor; start again from the first page" in
   match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet raw with
   | Error (`Msg _) -> invalid
@@ -1301,24 +1306,33 @@ let schedule_page_key_of_cursor ~payload_target raw =
          | Some (`Int due) -> Some (float_of_int due)
          | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
        in
-       (match List.assoc_opt "version" fields, target,
+       let active_only_field =
+         match List.assoc_opt "active_only" fields with
+         | Some (`Bool value) -> Some value
+         | None | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) -> None
+       in
+       (match List.assoc_opt "version" fields, target, active_only_field,
               List.assoc_opt "active" fields, due_at,
               List.assoc_opt "schedule_id" fields with
-        | Some (`Int 1), Some target, Some (`Bool active), Some due,
-          Some (`String schedule_id)
-          when Option.equal String.equal target payload_target && schedule_id <> "" ->
+        | Some (`Int version), Some target, Some cursor_active_only, Some (`Bool active),
+          Some due, Some (`String schedule_id)
+          when Int.equal version schedule_page_cursor_version
+               && Option.equal String.equal target payload_target
+               && Bool.equal cursor_active_only active_only
+               && schedule_id <> "" ->
           (match classify_float due with
            | FP_normal | FP_subnormal | FP_zero ->
              Ok { page_active = active; page_due_at = due; page_schedule_id = schedule_id }
            | FP_infinite | FP_nan -> invalid)
         | (Some _ | None), (Some _ | None), (Some _ | None), (Some _ | None),
-          (Some _ | None) -> invalid)
+          (Some _ | None), (Some _ | None) -> invalid)
      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> invalid
      | exception Yojson.Json_error _ -> invalid)
 ;;
 
 let scheduled_automation_dashboard_page_json
   ?(payload_target : string option)
+  ~active_only
   ?(cursor : string option)
   ?(after : schedule_page_key option)
   (config : Workspace.config)
@@ -1329,12 +1343,15 @@ let scheduled_automation_dashboard_page_json
   (* One read of the runner for the whole page, so each row's hold and the
      runner status beside the rows describe the same tick. *)
   let runner_status = Schedule_runner_status.snapshot () in
+  let narrowed = active_only || Option.is_some payload_target in
   let request_limit =
-    match payload_target with
-    | Some _ -> schedule_projection_target_request_limit
-    | None -> schedule_projection_request_limit
+    if narrowed
+    then schedule_projection_selected_request_limit
+    else schedule_projection_request_limit
   in
   let selects (request : Schedule_domain.schedule_request) =
+    ((not active_only) || schedule_request_active request)
+    &&
     match payload_target with
     | None -> true
     | Some target ->
@@ -1345,15 +1362,16 @@ let scheduled_automation_dashboard_page_json
   let all_signal_rows, signal_errors =
     schedule_signal_rows_and_errors config schedule_signal_projection_limit
   in
-  (* A scoped page keeps only the signals of the schedules it selected.
-     Fleet-wide signal rows on a one-Keeper page read as that Keeper's. The
-     store read below is the only place that knows which schedule ids belong to
-     the target, so the filter is applied there and this is the unscoped
-     default. *)
+  (* A narrowed page keeps only the signals of the schedules it selected.
+     Fleet-wide signal rows on a one-Keeper page read as that Keeper's, and on
+     an active-only page the signal of a schedule that has ended reads as a
+     live one's. The store read below is the only place that knows which
+     schedule ids were selected, so the filter is applied there and this is the
+     unnarrowed default. *)
   let signal_rows_for schedules =
-    match payload_target with
-    | None -> all_signal_rows
-    | Some _ ->
+    if not narrowed
+    then all_signal_rows
+    else
       let selected_ids =
         List.fold_left
           (fun acc (request : Schedule_domain.schedule_request) ->
@@ -1373,6 +1391,9 @@ let scheduled_automation_dashboard_page_json
          read one Keeper's counts as the fleet's. *)
     ; ( "payload_target_selector"
       , match payload_target with None -> `Null | Some target -> `String target )
+      (* An active-only page counts no terminal schedule; without this a
+         reader would take that zero for the ledger's. *)
+    ; "active_only_selector", `Bool active_only
     ; "generated_at", `String (Masc_domain.now_iso ())
       (* A row's [runner_hold] is only as current as this says. *)
     ; "schedule_runner", schedule_runner_dashboard_json ~now runner_status
@@ -1439,7 +1460,8 @@ let scheduled_automation_dashboard_page_json
       else
         match List.rev request_rows with
         | [] -> None
-        | last :: _ -> Some (schedule_page_cursor ~payload_target (schedule_page_key last))
+        | last :: _ ->
+          Some (schedule_page_cursor ~payload_target ~active_only (schedule_page_key last))
     in
     let request_jsons =
       schedule_request_rows_dashboard_json
@@ -1475,13 +1497,14 @@ let scheduled_automation_dashboard_page_json
          ])
 ;;
 
-let scheduled_automation_dashboard_json ?payload_target ?cursor config =
+let scheduled_automation_dashboard_json ?payload_target ?(active_only = false) ?cursor config =
   match cursor with
-  | None -> scheduled_automation_dashboard_page_json ?payload_target config
+  | None -> scheduled_automation_dashboard_page_json ?payload_target ~active_only config
   | Some raw ->
-    (match schedule_page_key_of_cursor ~payload_target raw with
+    (match schedule_page_key_of_cursor ~payload_target ~active_only raw with
      | Ok after ->
-       scheduled_automation_dashboard_page_json ?payload_target ~cursor:raw ~after config
+       scheduled_automation_dashboard_page_json
+         ?payload_target ~active_only ~cursor:raw ~after config
      | Error message ->
        `Assoc
          [ "schema", `String "masc.dashboard.scheduled_automation.v1"

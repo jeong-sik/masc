@@ -14,7 +14,7 @@ the request, and omitted_ask_ids names the asks left out, in the same order. \
 Pass ask_id to read one ask whole; an answered or withdrawn ask also needs \
 include_resolved."""
 additional_properties = false
-# RFC-0403 후속. 이 셋은 2026-08-03 ~ 09-02 31일간 fleet 전체에서 호출 0회이고,
+# 이 셋은 2026-08-03 ~ 09-02 31일간 fleet 전체에서 호출 0회이고,
 # 그 사이 agent-core keeper 4곳의 요청마다 5,498 B 를 싣고 있었다. 지연의
 # 손익은 호출 수가 아니라 "그 도구가 필요했던 서로 다른 턴 수"로 가르는데
 # (masc #32062), 그 값이 0이므로 우변이 0이다 — 되는 쪽이 확정이다.

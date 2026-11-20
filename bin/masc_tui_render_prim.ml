@@ -171,7 +171,6 @@ let clamped_scroll_now (state : state) = function
       System_log_detail_scroll (system_logs_page state).lp_detail_scroll
   | Planning_detail_scroll _ | Planning_confirmation_scroll _ ->
       Planning_detail_scroll (planning_scroll_value state.planning_scroll)
-  | Planning_list_page_rows _ -> Planning_list_page_rows state.planning_list_page_rows
   | Lane_run_detail_scroll _ ->
       Lane_run_detail_scroll
         { scroll = state.lane_run_detail_scroll;
@@ -297,7 +296,7 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Logs use their own bounded Metrics_tail movement through the key path. *)
   | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
-  | Acting _ | Acting_selection _ | Keeper_list_scroll _ | Planning_list_page_rows _ -> None
+  | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
   | Resource_scroll _ -> None
 
@@ -946,11 +945,11 @@ let composer_row state ~rows ~cols =
   if state.view = Overview && not state.composer_focused then
     let note=match Composer.reading_note ~ko (Composer_projection.source_reading state) with
       | None ->
-          ui_text state ~ko:"쓰기 전에 키퍼를 고르세요"
+          ui_text state ~ko:"키퍼 선택 후 입력"
             ~en:"Choose a Keeper before writing"
       | Some note -> Terminal_text.single_line note in
-    let choose = focus_hint (ui_text state ~ko:"고르기" ~en:"choose") in
-    (Theme.recede () ^ fit_width (" " ^ note ^ " · " ^ choose) cols ^ Ansi.reset,
+    let choose = focus_hint (ui_text state ~ko:"선택" ~en:"choose") in
+    (Theme.recede () ^ fit_width (" " ^ note ^ "  " ^ choose) cols ^ Ansi.reset,
      Frame_presenter.Hidden)
   else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
@@ -2330,8 +2329,10 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
       List.iteri (fun index draw -> if index < budget - 1 then draw_row draw) held;
       let hidden = count - (budget - 1) in
       draw_note
-        (Printf.sprintf "  +%d %s not shown" hidden
-           (if hidden = 1 then "row" else "rows"))
+        (ui_text state
+           ~ko:(Printf.sprintf "  +%d줄 더 있음" hidden)
+           ~en:(Printf.sprintf "  +%d %s not shown" hidden
+                  (if hidden = 1 then "row" else "rows")))
     end
   in
   let clamped =
@@ -2852,7 +2853,7 @@ let sidebar_heading ~cols ~title ~count =
 (* A quiet rail beside the conversation. Only the cursor row gets a band when
    this pane owns the keys; the selected Keeper's readings sit below the list.
    [rows] includes the caller's footer, as it does for the detail/chat panes. *)
-let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
+let keeper_roster_pane ?(focused = false) ?(top_spacer = true) (state : state) ~rows ~cols buf =
   let height = max 0 (rows - 1) in
   let inner = max 0 (cols - 1) in
   let ground = Theme.side_pane_background () in
@@ -2904,7 +2905,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
               (Terminal_text.single_line runtime)
           ]
   in
-  let header_rows = min 3 height in
+  let header_rows = min (if top_spacer then 3 else 2) height in
   let available = height - header_rows in
   let count = List.length state.keepers in
   (* Supplementary details get no more rows than the list keeps, unless the
@@ -2937,15 +2938,15 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
      title row's to say. *)
   let hidden = count - Rows.length window in
   let header =
-    [ ""
-    ; sidebar_heading ~cols ~title:"KEEPERS"
-        ~count:
-          (Masc_tui_value.Count.grouped count
-          ^ (if hidden <= 0 then ""
-             else
-               " \xc2\xb7 "
-               ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden))
-    ; rule ]
+    (if top_spacer then [ "" ] else [])
+    @ [ sidebar_heading ~cols ~title:(ui_text state ~ko:"키퍼" ~en:"KEEPERS")
+          ~count:
+            (Masc_tui_value.Count.grouped count
+            ^ (if hidden <= 0 then ""
+               else
+                 " \xc2\xb7 "
+                 ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden))
+      ; rule ]
   in
   List.iter (draw ~style:(Theme.Side_pane.recede ())) (List.take header_rows header);
   for i = 0 to capacity - 1 do
@@ -2973,7 +2974,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
         draw ~style:(Theme.Side_pane.recede ())
           (match state.keeper_roster_error with
            | Some error -> "  " ^ Terminal_text.single_line error
-           | None -> "  No Keepers listed")
+           | None -> ui_text state ~ko:"  조회된 키퍼 없음" ~en:"  No Keepers listed")
     | None -> draw ""
   done;
   List.iter (fun (style, text) -> draw ~style text) details;
@@ -3045,15 +3046,16 @@ let list_count_text ~loaded ~holding =
    Asked of every caller rather than defaulted: a list that is filtered
    rather than paged has nothing more to hold, and passing [None] says so
    where leaving it out could not be told from forgetting. *)
-let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
+let write_list_sidebar_selection ?(framed = true) buf ~rows ~cols ~title ~focused ~holding
     ~labels ~selection =
   let draw ?style text = sidebar_line ?style buf ~cols text in
-  draw "";
+  if framed then draw "";
   draw ~style:(Theme.Side_pane.recede ())
     (sidebar_heading ~cols ~title
        ~count:(list_count_text ~loaded:(List.length labels) ~holding));
   draw ~style:(Theme.Side_pane.border_muted ()) (sidebar_rule ~cols);
-  let content_height = max 0 (rows - framed_chrome_rows) in
+  let chrome = if framed then framed_chrome_rows else max 0 (framed_chrome_rows - 2) in
+  let content_height = max 0 (rows - chrome) in
   let first =
     match selection with
     | Some selected when selected >= content_height ->
@@ -3088,7 +3090,7 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
       else draw (String.make sidebar_row_lead_cells ' ' ^ drawn)
     | None -> draw ""
   done;
-  draw ""
+  if framed then draw ""
 
 (* The same index for a list whose open row is always in it. *)
 let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels
@@ -3270,7 +3272,7 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
   (* The caret is the only thing saying where the cursor is: which question
      [a] opens while browsing, and which one the digits land on while
      answering. A blank on every row reads as no selection at all. *)
-  let caret = if selected_question then ">" else " " in
+  let caret = if selected_question then "\xe2\x80\xba" else " " in
   box_wrapped_field buf cols
     ~head:
       (Printf.sprintf " %s%s%s%s%s  " caret
@@ -4202,7 +4204,7 @@ let repository_change_status (row : Masc.Tui_decode.repository_change) =
     | true, true -> "staged+worktree"
     | true, false -> "staged"
     | false, true -> "worktree"
-    | false, false -> "unknown"
+    | false, false -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
 
 let box_line_span buf cols span =
@@ -4486,7 +4488,9 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   let total = List.length diff_rows in
   if rows < diff_surface_minimum_rows then begin
     Buffer.add_string buf (Message_layout.fit_width
-      " Git diff needs a larger terminal; resize to inspect (Esc:back)"
+      (ui_text state
+         ~ko:" Git diff를 보려면 창을 늘려 주세요 (Esc:뒤로)"
+         ~en:" Git diff needs a larger terminal; resize to inspect (Esc:back)")
       (max 1 (cols - 1)));
     finish_surface state ~surface_key:ds.ds_surface_key ~rows:terminal_rows ~cols buf
   end else begin
@@ -4497,7 +4501,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   let scroll = max 0 (min ds.ds_scroll max_scroll) in
   let header =
     here_row ~cols state ~path:(ds.ds_path @ [ ds.ds_address ])
-      ~readings:[ "vs HEAD" ]
+      ~readings:[ ui_text state ~ko:"HEAD 대비" ~en:"vs HEAD" ]
       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
   in
   box_top buf cols;
@@ -4509,7 +4513,10 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       box_divider buf cols)
     geometry.dsg_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  col %d · old / new · working tree vs HEAD" (ds.ds_hscroll + 1));
+    (Printf.sprintf
+       (if state.ui_language = Lang_ko then "  열 %d · 이전 / 현재 · 작업 트리 vs HEAD"
+        else "  col %d · old / new · working tree vs HEAD")
+       (ds.ds_hscroll + 1));
   box_divider buf cols;
   (match ds.ds_error, geometry.dsg_error_rows with
    | None, _ -> ()
@@ -4741,6 +4748,11 @@ let config_pane_title_head ~room ~name ~reading =
    none of them could tell the strip to leave room for it: at a hundred
    columns the strip took the row and the frame cut the badge, the clock and
    half of "(load failed)" with it. Built once, the row knows both halves. *)
+let quiet_connection_tail (state : state) =
+  match reading_connection_notice state with
+  | None -> ""
+  | Some badge -> "  " ^ badge
+
 let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : state) =
   let name = here_path state ~path in
   let keys = config_pane_keys state in
@@ -4748,7 +4760,7 @@ let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : s
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
-  let tail = "  " ^ connection_badge state in
+  let tail = quiet_connection_tail state in
   (* The note is the one part of this row whose width a workspace chooses: it
      is the path of the file the pane is reading. Everything else either
      cannot give way or knows how to. The badge says whether the screen is a
@@ -4783,8 +4795,13 @@ let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : s
                |> List.filter_map (fun (label, active, _) ->
                       if active then Some label else None))
     in
-    let badge = surface_connection_badge state
-        ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  ")) in
+    let badge =
+      match reading_connection_notice state with
+      | None -> ""
+      | Some _ ->
+          surface_connection_badge state
+            ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  "))
+    in
     detail_heading ~cols ~lead:(Lead_text active_name) ~id:""
       ~after:[piece reading; piece keys; piece note] ~tail:badge
   else
@@ -4878,11 +4895,12 @@ let help_lines ~width (state : state) =
      the sheet is whole until something is typed. *)
   let query = Masc_tui_help.filter_query state.help_filter in
   let matches_query text = Masc_tui_pick_list.lowercase_contains ~needle:query text in
+  let here_marker = Masc_tui_keys.here_marker_for state.ui_language in
   (* A section's name without the mark that says it is the reader's own. *)
   let heading title =
-    if String.ends_with ~suffix:Masc_tui_keys.here_marker title then
+    if String.ends_with ~suffix:here_marker title then
       String.sub title 0
-        (String.length title - String.length Masc_tui_keys.here_marker)
+        (String.length title - String.length here_marker)
     else title
   in
   (* A section's heading and each key's rows, a wrapped sentence kept with
@@ -4890,7 +4908,7 @@ let help_lines ~width (state : state) =
      end of its own sentence. *)
   let section_parts (title, entries) =
     let is_current =
-      String.ends_with ~suffix:Masc_tui_keys.here_marker title
+      String.ends_with ~suffix:here_marker title
     in
     (* One heading style, named as the key table names the section. The
        surface being read wears the mark the tab row gives the current tab;
@@ -4953,7 +4971,7 @@ let help_lines ~width (state : state) =
     | [] -> []
     | _ :: _ ->
     [ Masc_tui_help.Whole
-    (("  " ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
+    (("  " ^ Ansi.bold ^ ui_text state ~ko:"슬래시 명령" ~en:"Slash commands" ^ Ansi.reset)
     :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
@@ -4996,7 +5014,7 @@ let help_lines ~width (state : state) =
     | _ :: _ when not (String.equal query "") -> []
     | lines ->
       [ Masc_tui_help.Whole
-          (("  " ^ Ansi.bold ^ "Candle details" ^ Ansi.reset)
+          (("  " ^ Ansi.bold ^ ui_text state ~ko:"Candle 상세" ~en:"Candle details" ^ Ansi.reset)
            :: List.concat_map
                 (fun line ->
                   List.map (fun row -> "  " ^ row)
@@ -5018,9 +5036,9 @@ let help_lines ~width (state : state) =
     in
     let nav_text =
       if ko then
-        dim "j/k 한 줄 · Enter 안으로 · Esc 밖으로 · [ ] 옆 항목 · v 보기 · Tab 화면 · / 찾기 · r 새로고침 · ? 전체"
+        dim "j/k:이동  Enter:열기  Esc:뒤로  [/]:옆 항목  v:보기  Tab:화면  /:찾기  r:새로고침  ?:전체"
       else
-        dim "j/k row · Enter open · Esc back · [ ] sibling · v view · Tab screen · / find · r refresh · ? all"
+        dim "j/k:row  Enter:open  Esc:back  [/]:sibling  v:view  Tab:screen  /:find  r:refresh  ?:all"
     in
     let mark_text =
       if ko then
@@ -5063,7 +5081,7 @@ let help_lines ~width (state : state) =
   | [] ->
       [ Masc_tui_help.Whole
           [ Printf.sprintf
-              (if ko then "%s  \"%s\" 와 일치하는 키나 명령이 없습니다.%s"
+              (if ko then "%s  \"%s\" 일치 항목 없음%s"
                else "%s  No key or command matches \"%s\".%s")
               (Theme.recede ()) (Terminal_text.single_line query) Ansi.reset ] ]
 
@@ -5810,14 +5828,19 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                   | Inspector.Input_invalid _ | Inspector.Input_unavailable -> minimum) inputs in
                 Chart.sparkline_marks ~min:minimum ~max:maximum scaled_inputs,
                 Printf.sprintf "scale %d–%d tokens" minimum maximum in
+          (* A turn whose record carries no input count is a value read but
+             not reported, and a negative count is a reading that failed:
+             the 6.4 marks of RFC tui-one-screen-grammar, not [·] and [!]. *)
+          let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
+          let invalid = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed in
           let marks = List.map2 (fun sample bar -> match sample with
-            | Inspector.Input_unavailable -> "·"
-            | Inspector.Input_invalid _ -> "!"
+            | Inspector.Input_unavailable -> unreported
+            | Inspector.Input_invalid _ -> invalid
             | Inspector.Input_estimate _ -> "~"
             | Inspector.Input_count 0 -> "0"
             | Inspector.Input_count _ -> bar) inputs bars |> String.concat "" in
           let legends =
-            [ (List.exists (( = ) Inspector.Input_unavailable) inputs, "· unavailable")
+            [ (List.exists (( = ) Inspector.Input_unavailable) inputs, unreported ^ " not reported")
             ; (List.exists (( = ) (Inspector.Input_count 0)) inputs, "0 recorded zero")
             ; (List.exists (function Inspector.Input_estimate _ -> true
                        | Inspector.Input_count _ | Inspector.Input_invalid _
@@ -5826,7 +5849,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             ; (List.exists (function Inspector.Input_invalid _ -> true
                        | Inspector.Input_count _ | Inspector.Input_estimate _
                        | Inspector.Input_unavailable -> false) inputs,
-               "! invalid negative count")
+               invalid ^ " invalid negative count")
             ]
             |> List.filter_map (fun (present, text) -> if present then Some text else None) in
           wrapped "" ("Input by turn: " ^ marks)
@@ -5930,7 +5953,7 @@ let context_part_view state (input : Masc_tui_context_inspector.provider_input)
 let context_part_text_or_status = function
   | Masc_tui_fetched.Ready text | Masc_tui_fetched.Stale (text, _) -> Ok text
   | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading ->
-      Error (Ansi.dim ^ "Reading this part…" ^ Ansi.reset)
+      Error (Ansi.dim ^ "Reading this part" ^ Ansi.reset)
   | Masc_tui_fetched.Failed detail ->
       Error
         ((Theme.bad ()) ^ "This part could not be read: "
@@ -5976,7 +5999,8 @@ let context_retained_body_lines ~width text =
 let section_rule_text = Masc_tui_ansi.Section.rule_text
 let section_heading_style = Masc_tui_ansi.Section.style
 
-let section_heading_line title = section_heading_style ^ section_rule_text title ^ Ansi.reset
+let section_heading_line title =
+  Masc_tui_ansi.Section.styled_heading ~rule_style:(Theme.recede ()) title
 
 let context_exact_item_detail_lines ~width ~scale ~part
     (item : Masc_tui_context_inspector.exact_input_item) =
@@ -5990,16 +6014,16 @@ let context_exact_item_detail_lines ~width ~scale ~part
     | Error status -> [ status ]
     | Ok text -> context_retained_body_lines ~width text
   in
-  [ section_heading_line "RETAINED ITEM"
+  [ section_heading_line "Retained item"
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
       (Masc_tui_token_scale.format_estimate scale item.bytes)
       (Inspector.exact_bytes item.bytes)
       (String.sub item.sha256 0 12)
   ; ""
-  ; Ansi.dim ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+  ; Theme.recede () ^ Masc_tui_token_scale.note scale ^ Ansi.reset
   ; ""
-  ; Ansi.dim ^ "RETAINED PRE-DISPATCH CONTENT" ^ Ansi.reset
+  ; Theme.recede () ^ "Retained pre-dispatch content" ^ Ansi.reset
   ]
   @ body
 
@@ -6352,7 +6376,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
           (fun index (item : Inspector.exact_input_item) ->
              let selected = index = state.context_inspector_cursor in
              let marker, style =
-               if selected then ">", Theme.selection_style () else " ", Ansi.reset
+               if selected then "\xe2\x80\xba", Theme.selection_style () else " ", Ansi.reset
              in
              let label_width = max 8 (width - 22) in
              (* The list carries the producer's colour the summary above it
@@ -6374,10 +6398,13 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                Ansi.reset)
           items
       in
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
       let legend =
         ("  " ^ context_source_legend)
         :: (Context_bars.wrap ~width
-              "P system prompt (may include turn observations) · H history · N new this turn · S schema"
+              (say "P 시스템 프롬프트(턴 관측 포함 가능) · H 대화 이력 · N 이번 턴 신규 · S 스키마"
+                 "P system prompt (may include turn observations) · H history · N new this turn · S schema")
            |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       let common = common @ legend @ [ "" ] in
@@ -6391,19 +6418,19 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         let selected = List.nth_opt items cursor in
         (* The caret names the pane that hears j/k, the way the roster and
            the board say it; the keys themselves stay in the footer. *)
-        let caret pane = if state.context_inspector_focus = pane then "▸ " else "" in
+        let caret pane = if state.context_inspector_focus = pane then "▸ " else "  " in
         let left =
           (Ansi.bold
-           ^ "╭─ " ^ caret Left_pane ^ "REQUEST ITEMS"
+           ^ "╭─ " ^ caret Left_pane ^ say "요청 항목" "REQUEST ITEMS"
            ^ Ansi.reset)
           :: (match rows left_width with
-              | [] -> [ Ansi.dim ^ "  (no retained items)" ^ Ansi.reset ]
+              | [] -> [ Ansi.dim ^ say "  (보존된 항목 없음)" "  (no retained items)" ^ Ansi.reset ]
               | rows -> rows)
         in
         let right_width = max 8 (framed_inner_width cols - left_width - 3) in
         let selected_detail =
           match selected with
-          | None -> [ Ansi.dim ^ "  Select an item with j/k" ^ Ansi.reset ]
+          | None -> [ Ansi.dim ^ say "  j/k로 항목을 선택하세요" "  Select an item with j/k" ^ Ansi.reset ]
           | Some item ->
               context_exact_item_detail_lines ~width:right_width ~scale
                 ~part:(context_part_view state input item) item
@@ -6415,7 +6442,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
            show. *)
         let right =
           (Ansi.bold
-           ^ "╭─ " ^ caret Right_pane ^ "SELECTED INPUT"
+           ^ "╭─ " ^ caret Right_pane ^ say "선택한 입력" "SELECTED INPUT"
            ^ Ansi.reset)
           :: selected_detail
         in
@@ -6583,7 +6610,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
           (fun index (row : Inspector.input_map_row) ->
              let selected = index = state.context_inspector_cursor in
              let marker, selection =
-               if selected then ">", Theme.selection_style () else " ", Ansi.reset
+               if selected then "\xe2\x80\xba", Theme.selection_style () else " ", Ansi.reset
              in
              let branch = if index = List.length rows - 1 then "└─" else "├─" in
              let label =
@@ -6603,6 +6630,8 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                Ansi.reset)
           rows
       in
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
       if cols >= keeper_split_threshold_cols then
         let left_width = context_split_width cols in
         let cursor =
@@ -6610,25 +6639,25 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
             ~count:(List.length rows)
             state.context_inspector_cursor
         in
-        let caret pane = if state.context_inspector_focus = pane then "▸ " else "" in
+        let caret pane = if state.context_inspector_focus = pane then "▸ " else "  " in
         let left =
           (Ansi.bold
-           ^ "╭─ " ^ caret Left_pane ^ "CONTEXT STACK"
+           ^ "╭─ " ^ caret Left_pane ^ say "컨텍스트 구성" "CONTEXT STACK"
            ^ Ansi.reset)
           :: (match mapped left_width with
-              | [] -> [ Ansi.dim ^ "  (no component attribution)" ^ Ansi.reset ]
+              | [] -> [ Ansi.dim ^ say "  (구성요소 정보 없음)" "  (no component attribution)" ^ Ansi.reset ]
               | mapped -> mapped)
         in
         let right_width = max 8 (framed_inner_width cols - left_width - 3) in
         let selected_detail =
           match List.nth_opt rows cursor with
-          | None -> [ Ansi.dim ^ "  Select a block with j/k" ^ Ansi.reset ]
+          | None -> [ Ansi.dim ^ say "  j/k로 블록을 선택하세요" "  Select a block with j/k" ^ Ansi.reset ]
           | Some row ->
               context_input_map_detail_lines ~width:right_width ~scale ~part_of row
         in
         let right =
           (Ansi.bold
-           ^ "╭─ " ^ caret Right_pane ^ "SELECTED BLOCK"
+           ^ "╭─ " ^ caret Right_pane ^ say "선택한 블록" "SELECTED BLOCK"
            ^ Ansi.reset)
           :: selected_detail
         in
@@ -6708,43 +6737,59 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
    and a caller that guessed would scroll to the wrong row every time the
    header changed. *)
 let context_inspector_content_lines ~cols state : context_pane_body =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let runtime_details id =
     match state.runtime_catalog_reading with
     | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
       let notice = match state.runtime_catalog_reading with
         | Runtime_catalog_read -> []
         | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
-            [Masc_tui_types.runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+            [Masc_tui_types.runtime_catalog_reading_suffix ~ko
                state.runtime_catalog_reading]
         | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
       notice @ (match List.find_opt (fun (r:Tui_decode.runtime_option) -> String.equal r.ro_id id) state.runtime_catalog with
-       | None -> ["Connection/model configuration unavailable in the current catalogue"]
+       | None ->
+           [ say "현재 카탈로그에서 연결·모델 설정을 찾을 수 없습니다"
+               "Connection/model configuration unavailable in the current catalogue" ]
        | Some runtime ->
-         (* Every line of this block is English, so the scope fallback is too. *)
-         [ Printf.sprintf "Quota scope %s · %s" (runtime_quota_scope_label ~ko:false runtime) runtime.ro_provider
-         ; "Connection " ^ runtime.ro_provider_id
-         ; Printf.sprintf "Configured context %d tokens (%s) · model %s"
-             runtime.ro_effective_max_context (Tui_decode.runtime_context_source_label runtime.ro_max_context_source) runtime.ro_model
-         ; "Last observed configuration; the captured turn above retains its own runtime and context." ])
-    | Runtime_catalog_loading -> ["Loading connection/model configuration…"]
-    | Runtime_catalog_unread | Runtime_catalog_failed _ -> ["Connection/model configuration unavailable; refresh to read it"] in
+         [ Printf.sprintf
+             (if ko then "쿼터 범위 %s · %s" else "Quota scope %s · %s")
+             (runtime_quota_scope_label ~ko runtime) runtime.ro_provider
+         ; say "연결 " "Connection " ^ runtime.ro_provider_id
+         ; Printf.sprintf
+             (if ko then "설정 컨텍스트 %d 토큰 (%s) · 모델 %s"
+              else "Configured context %d tokens (%s) · model %s")
+             runtime.ro_effective_max_context
+             (Tui_decode.runtime_context_source_label runtime.ro_max_context_source)
+             runtime.ro_model
+         ; say "마지막 관측 설정 · 위 캡처된 턴은 자체 런타임과 컨텍스트를 유지합니다"
+             "Last observed configuration; the captured turn above retains its own runtime and context." ])
+    | Runtime_catalog_loading ->
+        [ say "연결·모델 설정 불러오는 중" "Loading connection/model configuration" ]
+    | Runtime_catalog_unread | Runtime_catalog_failed _ ->
+        [ say "연결·모델 설정 미조회 · 새로고침으로 조회하세요"
+            "Connection/model configuration unavailable; refresh to read it" ] in
   match state.context_inspector_reading with
   | None ->
       Plain
         ( [ (if state.context_inspector_loading then
-                "  Loading provider-input evidence..."
-              else "  No context reading has been requested.")
+                say "  프로바이더 입력 근거 불러오는 중"
+                  "  Loading provider-input evidence"
+              else
+                say "  요청된 컨텍스트 관측이 없습니다"
+                  "  No context reading has been requested.")
           ]
         , None )
   | Some (_, Masc_tui_context_inspector.Request_failed detail) ->
       Plain
-        ( context_error_lines ~cols ~label:"Context read failed" detail
+        ( context_error_lines ~cols ~label:(say "컨텍스트 조회 실패" "Context read failed") detail
         , None )
   | Some (_, Masc_tui_context_inspector.Turn_read_failed { detail; forecast }) ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            Plain
-             ( context_error_lines ~cols ~label:"Composition unavailable" detail
+             ( context_error_lines ~cols ~label:(say "구성 조회 불가" "Composition unavailable") detail
                @ [ "" ]
                @ context_next_request_lines ~runtime_details ~cols
                    ~scale:Masc_tui_token_scale.fleet
@@ -6752,13 +6797,13 @@ let context_inspector_content_lines ~cols state : context_pane_body =
              , None )
        | Masc_tui_context_inspector.Exact_input ->
            Plain
-             ( context_error_lines ~cols ~label:"Exact input unavailable" detail
+             ( context_error_lines ~cols ~label:(say "요청 입력 조회 불가" "Exact input unavailable") detail
              , None )
        | Masc_tui_context_inspector.Response ->
            context_response_lines ~cols state (Masc_tui_context_inspector.Observed (Error detail))
        | Masc_tui_context_inspector.Input_map ->
            Plain
-             ( context_error_lines ~cols ~label:"Input map unavailable" detail
+             ( context_error_lines ~cols ~label:(say "입력 구성 조회 불가" "Input map unavailable") detail
              , None ))
   | Some (_, Masc_tui_context_inspector.Exact_read reading) ->
       let module Inspector = Masc_tui_context_inspector in
@@ -6899,7 +6944,7 @@ let keeper_deletions_lines (state : state) ~cols =
   let receipt = Option.fold ~none:[] ~some:(fun (_, message) -> [message])
       state.keeper_deletions_retry_receipt in
   let lines = match state.keeper_deletions with
-    | None -> [ say "삭제 기록 조회 중…" "Loading deletion records…" ]
+    | None -> [ say "삭제 기록 조회 중" "Loading deletion records" ]
     | Some (Error (Request_failed detail)) ->
       [ say "삭제 기록 조회 실패: " "Deletion records load failed: " ^ detail ]
     (* Kept back by the workspace guard: the notice, alone (RFC §2). *)
@@ -6912,11 +6957,11 @@ let keeper_deletions_lines (state : state) ~cols =
           inventory.errors in
       let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
       errors @ (match selected with
-        | None -> [ say "저장된 키퍼 삭제 기록이 없습니다." "No saved keeper deletion records." ]
+        | None -> [ say "저장된 키퍼 삭제 기록 없음" "No saved keeper deletion records." ]
         | Some row ->
           [Keeper_control.deletion_keeper_name row ^ " · " ^ Keeper_control.deletion_status ~ko row]
           @ (if row.Keeper_control.can_retry then []
-             else [ say "이 단계는 정리 재시도 대상이 아닙니다." "This phase cannot retry cleanup." ])
+             else [ say "정리 재시도 불가 단계" "This phase cannot retry cleanup." ])
           @ [ say "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"
                 "Shutdown ledger record (including cleanup failure causes):" ]
           @ String.split_on_char '\n'
@@ -7001,30 +7046,38 @@ let pane_surface_header buf cols (state : state) ~path ~split ~position =
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)
 
-let models_account_reading ~provider = function
-  | Account_emails_unread -> None, ["Account emails: not yet read"]
+let models_account_reading ?(ko = false) ~provider = function
+  | Account_emails_unread ->
+      None, [ if ko then "계정 이메일: 미조회" else "Account emails: not yet read" ]
   | Account_emails_failed reason ->
-      None, ["Account emails unread: " ^ Masc.Tui_terminal_text.sanitize_terminal_text reason]
+      None,
+      [ (if ko then "계정 이메일 미조회: " else "Account emails unread: ")
+        ^ Masc.Tui_terminal_text.sanitize_terminal_text reason ]
   | Account_emails_read { emails; unreadable_rows } ->
       let email = List.assoc_opt provider emails
         |> Option.map Masc.Tui_terminal_text.sanitize_terminal_text in
       let notes = if unreadable_rows > 0 then
-          [Printf.sprintf "Account emails: %d rows this build cannot read" unreadable_rows]
+          [ Printf.sprintf
+              (if ko then "계정 이메일: 이 빌드에서 읽지 못한 행 %d개"
+               else "Account emails: %d rows this build cannot read")
+              unreadable_rows ]
         else [] in
       email, notes
 
 (* Read from the same published source observation as Models rows. Usage's
    loaded-runtime observation is deliberately not an input to this join. *)
-let models_source_account_reading ~provider reading =
+let models_source_account_reading ?(ko = false) ~provider reading =
   let open Masc_tui_account_login in
   match reading with
-  | None -> models_account_reading ~provider Account_emails_unread
+  | None -> models_account_reading ~ko ~provider Account_emails_unread
   | Some reading ->
     match reading.rcv_account_emails with
-    | Error detail -> models_account_reading ~provider (Account_emails_failed detail)
+    | Error detail -> models_account_reading ~ko ~provider (Account_emails_failed detail)
     | Ok Email_list_unrecognized ->
-        models_account_reading ~provider
-          (Account_emails_failed "the response carries no readable account email list")
+        models_account_reading ~ko ~provider
+          (Account_emails_failed
+             (if ko then "응답에 읽을 수 있는 계정 이메일 목록이 없습니다"
+              else "the response carries no readable account email list"))
     | Ok (Email_rows {rows; unattributed}) ->
         let unreadable_rows = unattributed + List.length (List.filter (function
           | _, Unrecognized -> true
@@ -7032,14 +7085,24 @@ let models_source_account_reading ~provider reading =
         let emails = List.filter_map (function
           | id, Email email -> Some (id, email)
           | _, (Not_read _ | Unrecognized) -> None) rows in
-        let email, notes = models_account_reading ~provider
+        let email, notes = models_account_reading ~ko ~provider
           (Account_emails_read {emails; unreadable_rows}) in
         let gap = match List.assoc_opt provider rows with
-          | Some (Not_read Login_file_unreadable) -> Some "Account email unread: login file unavailable"
-          | Some (Not_read Login_file_unrecognized) -> Some "Account email unread: unrecognized login file"
-          | Some (Not_read Email_not_displayable) -> Some "Account email unread: invalid email"
-          | Some (Not_read Email_not_reported) -> Some "Account email: not reported by the client"
-          | Some (Not_read Environment_credential) -> Some "Account email: environment credential"
+          | Some (Not_read Login_file_unreadable) ->
+              Some (if ko then "계정 이메일 미조회: 로그인 파일을 읽을 수 없음"
+                    else "Account email unread: login file unavailable")
+          | Some (Not_read Login_file_unrecognized) ->
+              Some (if ko then "계정 이메일 미조회: 로그인 파일 형식 미인식"
+                    else "Account email unread: unrecognized login file")
+          | Some (Not_read Email_not_displayable) ->
+              Some (if ko then "계정 이메일 미조회: 유효하지 않은 이메일"
+                    else "Account email unread: invalid email")
+          | Some (Not_read Email_not_reported) ->
+              Some (if ko then "계정 이메일: 클라이언트가 보고하지 않음"
+                    else "Account email: not reported by the client")
+          | Some (Not_read Environment_credential) ->
+              Some (if ko then "계정 이메일: 환경변수 자격 증명 사용 중"
+                    else "Account email: environment credential")
           | Some (Email _ | Unrecognized) | None -> None in
         email, (match gap with Some note -> note :: notes | None -> notes)
 
@@ -7050,20 +7113,26 @@ let studio_panel ~width ~title ~lines =
   let border left right =
     edge ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
   in
-  [ Theme.info () ^ "┌ " ^ heading ^ " "
+  [ edge ^ "╭ " ^ Ansi.reset ^ Ansi.bold ^ heading ^ Ansi.reset ^ edge ^ " "
     ^ draw_hline (max 0 (width - Message_layout.display_width heading - 4))
-    ^ "┐" ^ Ansi.reset ]
+    ^ "╮" ^ Ansi.reset ]
   @ List.map (fun line ->
       edge ^ "│ " ^ Ansi.reset ^ fit_width line inner
       ^ edge ^ " │" ^ Ansi.reset) lines
-  @ [ border "└" "┘" ]
+  @ [ border "╰" "╯" ]
 
 let detail_heading_rows ~first lines =
   let heading = List.map (fun line -> section_heading_style, "  " ^ line) lines in
   if first then heading else (Ansi.dim, "") :: heading
 
-let detail_section_heading ?(first = false) title =
-  detail_heading_rows ~first [ section_rule_text title ]
+let detail_section_heading ?(first = false) ?width title =
+  let ruled = section_rule_text title in
+  let lines =
+    match width with
+    | Some w -> Message_layout.wrap_words ~max_cells:(max 1 (w - 2)) ruled
+    | None -> [ ruled ]
+  in
+  detail_heading_rows ~first lines
 
 (* A detail page of headed blocks of [Page_line] lines. One label column
    serves every block, so the values of the whole page start at one cell and
@@ -7135,8 +7204,18 @@ let runtime_config_status_lines state ~cols =
   in
   detail_page ~width:(framed_inner_width cols) blocks
 
-let detail_section_lines ?(first = false) title =
-  let heading = [ "  " ^ section_heading_line title ] in
+let detail_section_lines ?(first = false) ?width title =
+  let heading =
+    match width with
+    | None -> [ "  " ^ section_heading_line title ]
+    | Some w ->
+        let ruled = section_rule_text title in
+        if Message_layout.display_width ruled <= max 1 (w - 2) then
+          [ "  " ^ section_heading_line title ]
+        else
+          Message_layout.wrap_words ~max_cells:(max 1 (w - 2)) ruled
+          |> List.map (fun line -> "  " ^ section_heading_style ^ line ^ Ansi.reset)
+  in
   if first then heading else "" :: heading
 
 let wrap_summary_column_items ~width items =
@@ -7288,4 +7367,5 @@ let runtime_substrate_heading (state : state) ~cols ~title ~current ~after =
                | "" -> title
                | strip -> before ^ strip)
          })
-    ~id:"" ~after:("" :: after) ~tail:(connection_badge state)
+    ~id:"" ~after:("" :: after)
+    ~tail:(Option.value ~default:"" (reading_connection_notice state))

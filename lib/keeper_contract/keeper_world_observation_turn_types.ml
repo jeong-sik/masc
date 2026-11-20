@@ -37,7 +37,7 @@ type event_queue_trigger =
           enqueues it (P3). *)
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
-      (** RFC-0320 W3b: an operator resolved a gated-tool approval this keeper
+      (** An operator resolved a gated-tool approval this keeper
           was waiting on. When the original turn already ended (the approval
           outlived it), the wake arrives with no live tool call to resume, so
           the keeper must be steered back to the originating conversation
@@ -89,7 +89,7 @@ type skip_reason =
   | Scheduled_autonomous_disabled
   | No_periodic_or_scheduled_stimulus
   | Reactive_disabled
-      (** RFC-0297 P0-1: the global reactive kill-switch
+      (** The global reactive kill-switch
           ([reactive] enabled) is off, so a pending reactive trigger
           (mention / board event / scope message) does not open a turn. *)
 

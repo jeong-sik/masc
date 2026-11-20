@@ -548,7 +548,7 @@ val get_sync
 
 (** DELETE synchronously, returning the full response — same receipt shape
     and deadline semantics as {!get_sync} over the DELETE verb. The Files API
-    (RFC-0430 Phase 3) answers deletion with a JSON body even on 2xx. *)
+    answers deletion with a JSON body even on 2xx. *)
 val delete_sync
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock

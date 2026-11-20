@@ -578,8 +578,7 @@ let cancel state (record : R.t) =
      | Authz_records.Author.Authenticated (Authz_types.Principal.Human _ | Authz_types.Principal.Service _)
      | Authz_records.Author.Local_operator
      | Authz_records.Author.System_cron
-     | Authz_records.Author.System_maintenance
-     | Authz_records.Author.System_migration -> Error (Canceller_is_not_an_admin record.R.author))
+     | Authz_records.Author.System_maintenance -> Error (Canceller_is_not_an_admin record.R.author))
 ;;
 
 (* A sign-out, and a sign-in that ends the session its browser held, end a
@@ -806,7 +805,6 @@ let read state (record : R.t) =
       | K.Trigger_evidence
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
-      | K.Migration_diagnostic
       | K.Local_recovery
       | K.Invite
       | K.Admission
@@ -826,7 +824,6 @@ let read state (record : R.t) =
       | K.Trigger_evidence
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
-      | K.Migration_diagnostic
       | K.Local_recovery ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
@@ -856,8 +853,7 @@ let author_refusal state (author : Authz_records.Author.t) =
       | Authz_types.Principal.Human _ | Authz_types.Principal.Service _ -> None)
   | Authz_records.Author.Local_operator
   | Authz_records.Author.System_cron
-  | Authz_records.Author.System_maintenance
-  | Authz_records.Author.System_migration -> None
+  | Authz_records.Author.System_maintenance -> None
 ;;
 
 (* Every record that is read moves the latest time, whatever its kind. *)
@@ -914,7 +910,6 @@ let closed_by (record : R.t) =
   | K.Trigger_evidence
   | K.Lease_terminal_evidence
   | K.Preauthorized_expiry
-  | K.Migration_diagnostic
   | K.Local_recovery
   | K.Mode_event
   | K.Invite

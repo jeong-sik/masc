@@ -1,7 +1,7 @@
 import { setupObservationRefresh } from '../../lib/observation-refresh'
 // VerifyQueue — keeper-v2 verify-queue surface (검증 요청 큐).
 //
-// Design: prototypes/keeper-v2/verify-queue.jsx + styles/keeper-v2/verify.css.
+// Styles: styles/keeper-v2/verify.css.
 // Queue: store `tasks` rows in `awaiting_verification`, enriched per task_id
 // from GET /api/v1/verification/requests (submitted_by / created_at /
 // evidence_projection_error).

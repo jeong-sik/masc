@@ -1,5 +1,4 @@
-(** Lexical ranking of memory texts for [keeper_memory_search]
-    (RFC-memory-search-beyond-substring section 3.1).
+(** Lexical ranking of memory texts for [keeper_memory_search].
 
     Each call builds a private in-memory SQLite FTS5 table over the texts it
     is given, asks it for every text holding any whitespace-separated term of

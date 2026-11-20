@@ -1592,7 +1592,7 @@ describe('board context inference', () => {
 })
 
 // ================================================================
-// board attachments decode (RFC-0000 §3.1)
+// board attachments decode
 // ================================================================
 
 describe('board attachments decode', () => {

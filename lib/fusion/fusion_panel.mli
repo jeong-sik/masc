@@ -6,9 +6,7 @@
 
     [web_tools=true]면 [masc_web_search] / [masc_web_fetch]를 패널 에이전트에
     주입해 OpenRouter Fusion의 패널 web tool semantics를 따른다. 재귀 가드는
-    [masc_fusion] 도구가 web tool descriptor에 포함되지 않으므로 자동 충족된다.
-
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.1 *)
+    [masc_fusion] 도구가 web tool descriptor에 포함되지 않으므로 자동 충족된다. *)
 
 (** 패널 자리들을 동시에 실행해 결과를 [panel_outcome]으로 반환한다.
 

@@ -1,4 +1,4 @@
-(** RFC-keeper-vision-delegation-tool §2.3 — write-boundary image eviction.
+(** write-boundary image eviction.
 
     Replaces an [Agent_core.Types.Image] content block with a text placeholder
     whose handle keys the raw bytes in the per-keeper

@@ -408,7 +408,7 @@ let mutate_runtime_param_with_effects ~base_path ~param_key mutate =
   else mutate_and_apply_effects ()
 ;;
 
-(* RFC-0483: a read of one Keeper's skill activation ledger, named by the
+(* A read of one Keeper's skill activation ledger, named by the
    [keeper] query parameter. Loading and encoding the ledger keeps a core
    busy, so it runs on the pool like the tools projection that read it
    before. *)
@@ -1579,7 +1579,7 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value json reqd
        )
 
-  (* RFC-0483: one Keeper's ledger, read on its own. The activations answer
+  (* One Keeper's ledger, read on its own. The activations answer
      carries the projection; the usage answer carries only the per-surface
      counts, so a reader of every Keeper does not receive every ledger. *)
   |> Server_route.get Server_route.Public_read "/api/v1/keepers/skill-activations"

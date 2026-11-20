@@ -23,7 +23,7 @@ type block_state =
       ; chunks : Agent_core.Types.media_chunks
       ; encoded_bytes : int
       }
-      (* RFC-0301: model-generated media accumulates here across [MediaDelta]
+      (* model-generated media accumulates here across [MediaDelta]
          chunks and is persisted to {!Keeper_chat_media_store} at the block stop,
          emitting a reader-facing URL instead of a byte count. *)
 
@@ -1137,7 +1137,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          })
   | ContentBlockDelta
       { index; delta = MediaDelta { media_type; source } } ->
-      (* RFC-0301: accumulate the media payload across chunks in the block state;
+      (* Accumulate the media payload across chunks in the block state;
          the persisted URL is emitted once at the block stop (or at message end if
          the stream never closes the block), not a per-chunk count. *)
       (match
@@ -1518,7 +1518,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           ; chat_events = [ block_stop ]
           }
       | Some (Active_media { media_type; chunks; encoded_bytes }) ->
-          (* RFC-0301: the media block is complete — persist the accumulated
+          (* The media block is complete — persist the accumulated
              source to the media store, and emit the reader-facing URL (not a
              byte count). *)
           { bridge_state =

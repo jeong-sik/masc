@@ -384,7 +384,7 @@ let full_fields
     | Some names -> ("skills.names", Keeper_toml_loader.Toml_string_array names) :: fields
     | None -> fields
   in
-  (* RFC-0403. Carried straight from the profile: this axis has no
+  (* Carried straight from the profile: this axis has no
      [masc_keeper_up] argument, so the file is its only source. Leaving it out
      of this list would delete an operator's selection the next time anything
      called keeper_up on this Keeper, with nothing said. *)
@@ -659,7 +659,7 @@ let persist_manifest_with_publication_using ~write_manifest ~with_lock ~restore_
            | Some (Runtime_config_lock_release_unconfirmed _) ->
              Keeper_types_profile.invalidate_keeper_profile_snapshots ();
              (* The memory health row lists the Keepers whose manifest is on
-                disk, under the name it declares (RFC-0487). *)
+                disk, under the name it declares. *)
              if manifest_written
              then
                Keeper_memory_health_input.written

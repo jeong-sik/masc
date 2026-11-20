@@ -17,9 +17,8 @@
     recording is O(1) amortized and memory stays bounded regardless of emit
     volume.
 
-    AGENT_CORE workers call {!record} after each LLM turn (tool path or chat path),
-    and the REST/SSE endpoints read from {!recent} and {!summary}. Each
-    recorded sample is also emitted to Observer SSE sessions as an additive
+    AGENT_CORE workers call {!record} after each LLM turn (tool path or chat path).
+    Each recorded sample is emitted to Observer SSE sessions as an additive
     [agent_core_telemetry_sample] dashboard event.
 
     Cross-domain: guarded by [Stdlib.Mutex]. Eio fibers may call these
@@ -175,22 +174,10 @@ val summary : ?provider:string -> ?limit:int -> unit -> summary
     very small windows (e.g. one sample → p50 = p95 = the only value). *)
 
 val status_to_yojson : status -> Yojson.Safe.t
-(** JSON projection used by the dashboard REST/SSE surface. *)
+(** JSON projection used by the dashboard SSE event. *)
 
 val sample_to_yojson : sample -> Yojson.Safe.t
 (** JSON projection of the twelve-signal sample fields. *)
-
-val recent_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
-(** Dashboard payload for
-    [GET /api/v1/dashboard/agent_core/telemetry/recent?provider=P&limit=N].
-    The envelope includes [dashboard_surface], [source], and [retention] so
-    operators can distinguish this in-process runtime-lane cache from the
-    durable [agent_core_event] replay surface. *)
-
-val summary_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
-(** Dashboard payload for
-    [GET /api/v1/dashboard/agent_core/telemetry/summary?provider=P&limit=N].
-    The envelope carries the same provenance metadata as {!recent_json}. *)
 
 val clear : ?provider:string -> unit -> unit
 (** [clear ?provider ()] drops samples and provider-error counts. With

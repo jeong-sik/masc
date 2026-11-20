@@ -451,7 +451,7 @@ module Shutdown_detach : sig
   }
 end
 
-(** Graceful stop (RFC lane-addon-shutdown-detaches-native-instances §3). Stop
+(** Graceful stop. Stop
     this workspace's configuration maintenance, Detach every live native
     instance that is not Detached and wait for each cleanup to settle. The
     configuration mutex is held for the whole wait. A settled instance leaves

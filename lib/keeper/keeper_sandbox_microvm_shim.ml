@@ -16,7 +16,7 @@ let shim_binary_name = "masc-exec-shim"
 let shim_config_name = "masc-exec-shim.conf"
 let shim_sidecar_name = "masc-exec-shim.sha256"
 
-(* RFC-0427 B-2. The installer places the release's shim and, beside it, the
+(* The installer places the release's shim and, beside it, the
    sha256 the release's SHA256SUMS gave for that asset. The boot reads the
    pair: a binary that does not match its own sidecar is refused by name,
    because a shim the release did not ship is the 2026-09-05 outage waiting

@@ -24,7 +24,11 @@ val completed : t -> now_ns:int64 -> unit
     after the work returns, even when the frame overran that interval. Drained
     input and [Force] still render immediately. Background pacing and deferred
     frames that did no work keep the start timestamp recorded by [take]. *)
-val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
+val frame_due_ns : t -> now_ns:int64 -> int64 option
+(** When the pending request may render, on the same clock as [now_ns]:
+    [now_ns] for [Force], [Input] and a [Background] whose interval has
+    passed, the end of that interval otherwise, [None] when nothing is
+    pending. The main loop wakes for it (RFC tui-idle-wait §2.2 [Frame_slot]). *)
 val normalize_keeper_detail_scroll :
   line_count:int -> content_height:int -> int -> int
 
@@ -53,9 +57,11 @@ module Input_wait : sig
 
   val await :
     now_ns:(unit -> int64) ->
-    timeout_ns:int64 ->
-    poll:(float -> 'a poll_result) ->
+    timeout_ns:int64 option ->
+    poll:(float option -> 'a poll_result) ->
     'a option
+  (** Poll until [Ready] or [Timed_out]. [Interrupted] polls again with the
+      time left; with no [timeout_ns] the wait has no end of its own. *)
 end
 
 module Input_shortcut : sig
@@ -187,6 +193,7 @@ val waiting_group_layout :
     The compact decision never drops a nonzero summary segment. *)
 
 val waiting_group_heading_detail :
+  ?ko:bool ->
   available_cells:int ->
   group_count:int ->
   Masc_tui_keeper_list_model.waiting_summary ->

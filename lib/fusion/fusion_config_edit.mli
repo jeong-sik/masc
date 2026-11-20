@@ -1,6 +1,6 @@
 (** Fusion 설정 쓰기 — typed 연산 하나를 runtime.toml 에 적용한다.
 
-    흐름 (RFC fusion-seat-routes §2.5):
+    흐름:
     + 쓰기 전: preset 검증({!Fusion_policy.Validated_preset.of_preset})과 모든 자리의
       경로 풀기({!Runtime.resolve_assignment}). 못 풀면 쓰지 않는다.
     + 설정 잠금 안에서: 파일을 다시 읽어 revision 이 [expected_revision] 과 같은지

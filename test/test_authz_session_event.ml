@@ -329,7 +329,6 @@ let no_other_author_may_write_one () =
     [ "the local operator", Authz_records.Author.Local_operator
     ; "system cron", Authz_records.Author.System_cron
     ; "system maintenance", Authz_records.Author.System_maintenance
-    ; "system migration", Authz_records.Author.System_migration
     ]
 ;;
 

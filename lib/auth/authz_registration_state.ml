@@ -62,7 +62,6 @@ let author_label : Author.t -> string = function
   | Author.Local_operator -> "the local operator"
   | Author.System_cron -> "the system cron"
   | Author.System_maintenance -> "the system maintenance"
-  | Author.System_migration -> "the system migration"
 ;;
 
 let refusal_to_string = function
@@ -161,6 +160,6 @@ let apply t ~(author : Author.t) ~is_admin ~is_bound (event : E.t) =
     remove t ~registration_id
   | ( Author.Authenticated ((Principal.Human _ | Principal.Service _) as principal)
     , (E.Registered _ | E.Removed _) ) -> Error (Author_is_not_an_admin principal)
-  | ( (Author.Local_operator | Author.System_cron | Author.System_maintenance | Author.System_migration)
+  | ( (Author.Local_operator | Author.System_cron | Author.System_maintenance)
     , (E.Registered _ | E.Removed _) ) -> Error (Not_a_registration_author author)
 ;;

@@ -27,8 +27,7 @@ type verdict = {
           evaluator and tool observations supporting this verdict. *)
   authority : Masc_domain.completion_authority;
       (** Typed provenance, reused from the Task completion protocol. The
-          stage-2 verifier lane commits with its own run identity
-          (RFC-0387 §4.3). *)
+          stage-2 verifier lane commits with its own run identity. *)
   evidence : string;
   recorded_at : string;
 }

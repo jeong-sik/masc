@@ -100,8 +100,7 @@ status: reference
   callback 존재만으로 그 상호작용이 구현됐다고 보지 않는다.
   → [MCP Sampling specification (2026-07-28)](https://modelcontextprotocol.io/specification/2026-07-28/client/sampling),
   [MCP Sampling specification (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/client/sampling),
-  [Mcp.connect](../../packages/agent_core/lib/protocol/mcp.mli),
-  [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
+  [Mcp.connect](../../packages/agent_core/lib/protocol/mcp.mli)
 
 **Lane Add-on Sampling Outcome (Lane Add-on 샘플링 결과)**
 : `Lane_addon_sampling`이 호스트 소유 모델 호출 하나의 종단 상태를 적는 닫힌 네 값
@@ -114,14 +113,12 @@ status: reference
   경계: 여기의 `outcome_unknown`은 **Lane Action Receipt & Uncertainty** 항목의 같은
   이름과 다른 층이다 — 저쪽은 파견된 액션의 내구 결과가 없는 상태이고, 이쪽은 모델
   호출 자체가 예외로 끝난 상태다. 두 값 모두 임의 재실행을 정당화하지 않는다.
-  → [Lane_addon_sampling](../../lib/lane_addon/lane_addon_sampling.mli) ·
-  [Model access for isolated Lane packages](../design/lane-addon-model-boundary.md)
+  → [Lane_addon_sampling](../../lib/lane_addon/lane_addon_sampling.mli)
 
 **Sampling Response Attestation (샘플링 응답 증명)**
 : `Lane_addon_sampling`의 호스트 투영 샘플링 영수증(`host-projected sampling receipt`)에서 거대한 모델 응답 본문을 인입 봉투마다 복제하지 않고 응답의 무결성을 증명하는 계약(#41752). 응답의 `content.text`와 `content.data` 문자열을 정규화나 Base64 디코딩 없이 원본 UTF-8 바이트 그대로 SHA-256 다이제스트(`text_sha256`·`data_sha256`)로 투영하여 전달한다. 원시 샘플링 응답이 사전에 다이제스트 필드를 직접 주장하는 것은 즉시 거절되며(`InvalidInput`), 패키지에 노출되는 기타 응답 필드는 있는 그대로 보존·대조된다. 패키지 소비자는 브로커 샘플링 좌표만 제거한 뒤 동일한 투영을 계산하여 호스트 영수증과 일치하는지 검증한다. 호스트 전용 메타데이터는 비공개로 유지되며 불변 요청·종단 블롭에 완전한 원본 응답과 오류 진단이 유지되므로, 결합 소스 인입 봉투(`combined source ingress envelope`)의 바이트 비대화를 방지하면서도 엄격한 재생 검증을 보장한다.
   → [Lane_addon_sampling](../../lib/lane_addon/lane_addon_sampling.mli) ·
-  [fusion_sampling](../../addons/fusion_sampling.py) ·
-  [Fusion lane composition](../design/fusion-lane-composition.md)
+  [fusion_sampling](../../addons/fusion_sampling.py)
 
 **HITL**
 : Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
@@ -553,7 +550,6 @@ status: reference
   Goal의 정체 시간(`stagnation_seconds`)은 연결 Task 갱신·승인 요청·Keeper 영수증·
   runtime trust 이벤트·Goal 메타데이터 중 가장 최근에 관측된 활동 이후 지난 시간이다.
   Keeper의 작업 배정 상태와는 별개이며, Goal의 실제 측정값으로 환산하지 않는다.
-  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md)
 
 **Fleet (Keeper fleet)**
 : 한 워크스페이스에 등록된 Keeper 묶음. `fleet ok` 상태 줄과 fleet scan은 이 묶음을
@@ -579,8 +575,7 @@ status: reference
   Keeper Info에서 본다. `/cost`는 이 화면으로 이동한다. 값이 보고되지 않은 날이나
   Keeper의 비용을 0으로 추정하지 않는다. Keeper 상태와 작업 목록은 각각 Keepers와
   Work에서 본다.
-  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md) ·
-  [Masc_tui_render](../../bin/masc_tui_render.ml)
+  → [Masc_tui_render](../../bin/masc_tui_render.ml)
 
 **Attention (Dashboard)**
 : 운영자가 처리해야 하는 사건을 요약한다. 자세한 Keeper 상태는 Keepers에서,
@@ -680,8 +675,7 @@ status: reference
   - 관측 전용 불변식: 최신 TurnRecord tail(RFC-0233)에서 투영되는 문맥 수치([`keeper_context_observation_projection.mli`](../../lib/keeper/keeper_context_observation_projection.mli))는
     대시보드 트리아지(밴드·정렬·헬스 카운트) 관측 전용이며, 런타임의 다음 요청 진입 허가 결정에 직접 사용할 수 없다.
   → [turn-context-window.ts](../../dashboard/src/lib/turn-context-window.ts) ·
-  [Keeper_context_observation_projection](../../lib/keeper/keeper_context_observation_projection.mli) ·
-  [docs/SHARED-RUNTIME-MODELS.md](../SHARED-RUNTIME-MODELS.md)
+  [Keeper_context_observation_projection](../../lib/keeper/keeper_context_observation_projection.mli)
 
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
@@ -876,8 +870,7 @@ status: reference
     표시 데이터일 뿐 대기를 식별하지 못한다. 이 `run_id`는 `AgentInputRequired.task_id`가
     싣는 시작 호출의 id이며, outcome envelope의 raw-trace run id와 다른 값이다.
   → [Agent](../../packages/agent_core/lib/agent/agent.mli) ·
-  [Agent_input_request](../../packages/agent_core/lib/base/agent_input_request.mli) ·
-  [agent-input-wait-ownership 설계](../../docs/design/agent-input-wait-ownership.md)
+  [Agent_input_request](../../packages/agent_core/lib/base/agent_input_request.mli)
 
 **Keeper Input Wait Observation (retained-input 대기 관측)**
 : 현재 Keeper Owner가 소유한 정확한 retained 입력을 읽는 관측 계약
@@ -944,7 +937,6 @@ status: reference
   서로 fallback하지 않는다. 판정 입력은 typed signal과
   `keeper_role {name, board_interests}`뿐이다. 과거 post/comment thread,
   instructions, runtime/task identity, mention 목록은 저장하거나 보내지 않는다.
-  → [Board 읽기 권한 미구현 범위](../rfc/RFC-board-read-access-follows-visibility.md)
 
 **Board Comment Count Cap (게시물 댓글 수 상한)**
 : 한 Board 게시물에 붙을 수 있는 활성 댓글 수의 쓰기 한도(`Board.Limits.comment_count_cap`).
@@ -1222,8 +1214,7 @@ status: reference
   이벤트의 시계열 순서와 타이밍을 유지한다. 옵서버 증분 알림은 알림 자체의
   페이로드를 추가하지 않고 마지막 수락 시퀀스 이후의 저널을 읽어 일관성을
   유지한다.
-  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
-  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli)
 
 **Pending Chat Input Separation (대기 채팅 입력 분리)**
 : 사용자의 입력이 로컬 디스패치(`local dispatch`), 미확인 전송(`unconfirmed transport`),
@@ -1233,8 +1224,7 @@ status: reference
   처리가 시작된 것으로 간주하지 않으며, 검증된 거절(refusal) 시 원본 회상 텍스트를
   보존한 채 실패로 표시한다. 배치 입력의 경우 단일 공유 응답에 앞서 모든 묶인
   입력 식별자가 차례대로 보존된다.
-  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
-  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli)
 
 **Thinking Stream Index Separation (사고 스트림 인덱스 분리)**
 : 프로바이더 런타임(Codex, Claude, GLM 등)의 추론/사고 스트림(`ThinkingDelta` /
@@ -1242,8 +1232,7 @@ status: reference
   점유하거나 오염시키지 않도록 식별자와 블록 인덱스를 엄격히 분리하는 경계 계약(#41661, #41667).
   완료된 추론 블록은 누락된 접미사(suffix)만 기여하며, 불투명 서명(opaque signatures)이나
   비공개 페이로드는 공개 텍스트로 노출하지 않는다.
-  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
-  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli)
 
 **Native Tool Observed Occurrence (네이티브 도구 관측 출현)**
 : 공식 클라이언트나 네이티브 런타임의 내장 도구 시작/종료 관측(`tool_stream_occurrence`,
@@ -1252,8 +1241,7 @@ status: reference
   같은 진행 중 출현(`in-flight occurrence`) 범위 안에서 동일한 프로바이더 도구 식별자의
   반복 관측은 단일 콘텐츠 인덱스를 유지하며, 이후의 종료 관측이 최초 출현을 닫고
   어댑터의 식별자 매핑을 정리한다.
-  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
-  [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli)
 
 **Native Tool Completion (네이티브 도구 완료)**
 : 공식 클라이언트 런타임이 한 네이티브 도구의 끝을 어떻게 보고했는지에 대한 닫힌 일곱
@@ -1350,10 +1338,8 @@ status: reference
     (사용법: `docs/guides/tui-chat-queue.md`).
   - 검증과 증거: OCaml 생애주기 테스트(`test/test_tui_chat_queue_wiring.ml`,
     `test/test_tui_chat_activity.ml`)가 재연결 불확실성·Keeper 이동 후 복귀 계약을
-    다룬다. 실행 증거와 한계는
-    아래 증거 문서에 기록한다.
+    다룬다.
   → [Masc_tui_types](../../bin/masc_tui_types.ml) ·
-  [docs/evidence/2026-09-30-chat-queue-visibility/README.md](../evidence/2026-09-30-chat-queue-visibility/README.md) ·
   [docs/TUI-GUIDE.md](../TUI-GUIDE.md)
 
 **Keeper Call Association (Keeper 호출 결합)**
@@ -1646,8 +1632,7 @@ status: reference
   → [Keeper_cost_coverage](../../lib/keeper_cost_coverage/keeper_cost_coverage.mli) ·
   [Keeper_turn_spend.cost_coverage](../../lib/keeper/keeper_turn_spend.mli) ·
   [keeper_cost_summary](../../lib/tui_decode.mli) ·
-  [keeper-cost-coverage.ts](../../dashboard/src/lib/keeper-cost-coverage.ts) ·
-  [Cumulative reported cost and pricing coverage](../design/keeper-cost-coverage.md)
+  [keeper-cost-coverage.ts](../../dashboard/src/lib/keeper-cost-coverage.ts)
 
 **Provider Usage Window (제공자 사용량 창)**
 : 제공자가 보고한 계정 사용량 한도 창의 관측값(`Runtime_provider_usage_window.t`).
@@ -1792,8 +1777,8 @@ status: reference
   `Recorded_deferred`는 독자적인 경우로 남는다: 호출은 받아들여졌으나 효과가 아직
   일어나지 않았으므로 성공도 실패도 아니다. `Recorded_unsettled`는 `wire_outcome`이
   `unknown`이거나 disposition·wire_outcome 어느 쪽도 적지 않은 레코드 — 아직 결과가
-  없다는 뜻이며, 실패도 malformed도 아니다(bench의 `tool_outcomes.sh`가 이 경우를
-  실패 대신 '미정'으로 세는 근거, #38721). `Recorded_malformed`는 JSON 타입이
+  없다는 뜻이며, 실패도 malformed도 아니다.
+  `Recorded_malformed`는 JSON 타입이
   틀렸거나 엄격 디코더가 거절하는 철자, 또는 객체가 아닌 레코드 — 생산자와 읽는 쪽의
   스키마 불일치다. Tool Call Outcome(외부 wire 투영)·Execution Disposition(실행의
   권위 분류)과 다른 단위다: 이 둘이 호출의 실행을 말할 때, 이 분류는 그 실행이
@@ -2170,8 +2155,7 @@ status: reference
     여부를 재검증한다. 유효한 일반 파일로 이어지는 심볼릭 링크는 작업공간 오버라이드로 수용된다.
   - **버튼 정의 엄격성**: 각 버튼은 비어 있지 않은 `keys` 배열과 `label`을 가져야 하며,
     알 수 없는 테이블·필드·키 이름은 즉시 오류로 거절된다(타이포로 인한 무반응 방지).
-  → [Dos_pad](../../lib/dos_pad/dos_pad.mli) ·
-  [RFC Play Link for Shared Machine](../rfc/RFC-play-link-for-the-shared-machine.md)
+  → [Dos_pad](../../lib/dos_pad/dos_pad.mli)
 
 **기계 체크포인트 (Machine Checkpoint)**
 : 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과
@@ -2314,8 +2298,7 @@ status: reference
     이 카탈로그는 공개 도구 동작 이름과 그 지원 정도다 — 두 축을 섞어 한쪽 표로 다른
     쪽을 판정하지 않는다.
   → [Browser_capabilities](../../lib/browser_capabilities.mli) ·
-  [Browser_selection](../../lib/browser_selection.mli) ·
-  [browser-action-catalog 설계](../../docs/design/browser-action-catalog.md)
+  [Browser_selection](../../lib/browser_selection.mli)
 
 **Browser Scene Region (브라우저 장면 구역)**
 : 브라우저 장면(`Browser_scene`)이 문서 구조에서 갈라 읽는 의미 구역. 구역 역할
@@ -2442,8 +2425,7 @@ status: reference
   코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다. 내장 lane은
   바인딩에 제공하는 원천 종류를 정하며, `browser_document`는 목록에 든 Browser Lane
   백엔드만 받는다.
-  → [설계 계약](../design/lane-addon-v0.md),
-  [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
+  → [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
   [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.mli)
 
 **Lane application (Lane 적용)**
@@ -2895,13 +2877,13 @@ status: reference
 **Goal Measurement (목표 관측값)**
 : Goal의 선언된 지표(`metric`)를 누가 언제 얼마로 봤는지 남긴 기록 한 건. 값, 증거,
   기록한 사람, 시각, 그 값을 잰 기준의 `criterion_revision`을 함께 적는다.
-  Keeper는 `masc_goal_measure`로, 운영자는 `POST /api/v1/dashboard/goals/measurements`로
-  남긴다. 증거는 **Evidence Reference** 형식(`artifact:`·`note:`·`board:`·`fusion:`)만
-  받고, 다른 글자는 `Invalid_request`로 거절한다.
+  Keeper가 `masc_goal_measure`로 남긴다. 증거는 **Evidence Reference**
+  형식(`artifact:`·`note:`·`board:`·`fusion:`)만 받고, 다른 글자는
+  `Invalid_request`로 거절한다.
   - 완료가 아니다: 관측은 Goal phase를 바꾸지 않고 목표 달성을 증명하지도 않는다.
     완료는 **Goal**의 verifier 증명과 사람 확인으로만 정해진다. 그래서 `Completed`·
     `Dropped` Goal도 관측을 받는다.
-  - 기록 영수증: MCP와 HTTP가 같은 `measurement_status: reported_only`,
+  - 기록 영수증: MCP가 `measurement_status: reported_only`,
     `measurement`, `goal_at_recording`, `completion_effect: unchanged`를 반환한다.
     `goal_at_recording`은 측정을 기록한 같은 잠금 트랜잭션의 실제 Goal이며,
     나중에 다시 읽은 값이나 완료 판정이 아니다. 이 Goal 사본은 측정 파일에 저장하지 않는다.
@@ -3056,15 +3038,13 @@ status: reference
   이를 에이전트가 읽을 보고서로 렌더한다. MASC의 native Fusion 실행과는 실행 경로가 다르다.
   계산 완료는 보고서 전달·게시를 뜻하지 않는다. 보고서 읽기나 Broadcast에는 명시적
   evidence action이 필요하다.
-  → [fusion-compute](../../addons/fusion-compute/README.md),
-  [model access boundary](../design/lane-addon-model-boundary.md)
+  → [fusion-compute](../../addons/fusion-compute/README.md)
 
 **Fusion Input Lineage (Fusion 입력 계보)**
 : `fusion-compute` Lane Add-on의 조립형 계산에서 모델의 현재 관측 증거와 상속된 이전 입력 참조를 엄격히 분리하는 불변식(#41732). 각 계산의 행 증거(`row evidence`)는 오직 현재 모델 요청과 허용된 결과만을 포함하며, 이전 단계에서 상속된 불변 참조들은 `fields.input_evidence`에 격리되어 모델 요청 내부에 보존된다. 심판(`judge`)은 입력 참조들을 검증하여 후속 단계로 계승하고, 보고서(`fusion-report`)는 현재의 `model_evidence`와 나란히 전체 입력 계보를 노출한다. `input_evidence` 배열은 필수이며 오직 `uri`와 `sha256`만을 갖는 불변 참조만을 허용한다(현재 모델 영수증 주소 검증의 `lane-evidence:<sha256>`는 상속 URI의 한 예시이며, 계보 형식 검증은 정확한 {uri, sha256} 키 집합과 불변 digest를 검사함). 이를 통해 워커는 이전 요청 이력을 안전하게 분석할 수 있으면서도, 호스트가 낡은 영수증을 새 관측 입력의 유효한 결과로 오인하는 재생 취약점을 방지한다.
   → [fusion_sampling](../../addons/fusion_sampling.py) ·
   [fusion-compute](../../addons/fusion-compute/server.py) ·
-  [fusion-report](../../addons/fusion-report/server.py) ·
-  [Fusion lane composition](../design/fusion-lane-composition.md)
+  [fusion-report](../../addons/fusion-report/server.py)
 
 **Fusion Seat (자리)**
 : Fusion 실행에서 답을 내는 한 자리. panel 한 명과 judge 하나가 각각 한 자리다
@@ -3098,8 +3078,7 @@ status: reference
   넘는 내용을 뜻한다. 제시된 배열 항목 하나가 잘못되면 종합 전체를 `Error`로
   거절한다. 이 종합은 Board meta_json과 요청 Keeper의 메인 chat lane으로 전달된다
   (Fusion Delivery Obligation).
-  → [Fusion_judge_parse](../../lib/fusion_core/fusion_judge_parse.mli),
-  [RFC-0252 §7.2](../rfc/RFC-0252-fusion-panel-judge-deliberation.md)
+  → [Fusion_judge_parse](../../lib/fusion_core/fusion_judge_parse.mli)
 
 **Fusion Route (경로 이름)**
 : Fusion 자리에 적히는 값. Keeper 배정과 같은 규칙(`Runtime.resolve_assignment`)으로
@@ -3794,7 +3773,6 @@ status: reference
     `full-check.yml` 및 `release-candidate.yml`)은 개별 PR이 아닌 `release/vX.Y.Z` 브랜치나
     Tag 단계에 집약하여 수행한다.
   → [docs/constitution.xml](../constitution.xml) ·
-  [docs/AGENTIC-WORKFLOW.md](../AGENTIC-WORKFLOW.md) ·
   [docs/CI-REVIEW-WORKFLOW.md](../CI-REVIEW-WORKFLOW.md)
 
 **ROLL (롤 / 일괄 착지 규약)**
@@ -4285,9 +4263,8 @@ status: reference
   소스 바인딩 사실은 반환되기 전에 저장된 SHA-256과 대상 파일의 정확한 바이트를 대조한다. 검색 표면은 쿼리에 맞는 소스 후보만 재검증하고, 아티팩트 전용 표면은 전체 투영을 확인한다. 변경·삭제가 입증된 소스는 이전 주장 대신 타입화된 무효화(`typed invalidation`)가 된다. 읽기 실패·접근 불능이면 주장 본문(`claim text`)을 보류(`withheld`)하고 소스 식별자·사유·재읽기 안내(`deferred source identity, reason, re-read instructions`)만 전달한다. 출판된 스냅샷 참조는 키퍼 런타임 트리에 구조적으로 고정(`current pin`)되어 dated reference 이력이 유지되는 동안 롱텀 히스토리 GC에서 보존된다(#40486·#40557).
   작업 중심의 유계 투영(Bounded Task-linked Projection with Explicit Omission)은 아직 구현이
   아니라 설계 제안이다 — 그 설계의 이름들(`Standing`·`Candidate`·`Validity & Expiry`·
-  `Recall Scope & Withdrawal` 등)은 코드에 없고, 전문은
-  [`RFC-memory-os-recall-selection`](../../docs/rfc/RFC-memory-os-recall-selection.md) 한 곳에만 둔다.
-  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli) · [RFC-memory-os-recall-selection](../../docs/rfc/RFC-memory-os-recall-selection.md)
+  `Recall Scope & Withdrawal` 등)은 코드에 없다.
+  → [Keeper_memory_os_recall](../../lib/keeper/keeper_memory_os_recall.mli) · [keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.ml) · [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli)
 
 **Keeper Demand Recall (요구 기반 회상)**
 : 저장된 기억과 현재 턴의 문맥을 분리해, 필요한 사실을 쓸 때 현재 검색 결과를 다시 얻도록 하는 방식. 저장소 상태·건수 안내는 사실을 회상했다는 증거가 아니며, 이전 검색 결과도 이번 턴의 사실 확인을 대신하지 않는다. 회상 경로의 제한이나 실패는 저장 사실을 삭제하지 않고, 사실 전량을 대신 프롬프트에 싣지도 않는다.

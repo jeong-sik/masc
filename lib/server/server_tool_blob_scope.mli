@@ -1,4 +1,4 @@
-(** What the tool blob sweep reads (RFC-0499 §5.3). Each name comes from the
+(** What the tool blob sweep reads. Each name comes from the
     module that makes it, so a renamed constant breaks this module's build.
 
     Stores whose files hold references the scan does not read stay

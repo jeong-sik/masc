@@ -1,4 +1,4 @@
-(* RFC-0228 P2 — fact-retention harness, deterministic half.
+(* fact-retention harness, deterministic half.
 
    Proves the *mechanism*: every fact planted in a lane is reachable
    through the actual local surface-read handler and its physical cursor, at the expected

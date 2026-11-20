@@ -16,7 +16,7 @@ let exact_snapshot_checkpoint snapshot = snapshot.checkpoint
 let exact_snapshot_reference snapshot = snapshot.reference
 let exact_snapshot_messages snapshot = snapshot.checkpoint.messages
 
-(* RFC-0476 §3.2: a reference names the checkpoint's content digest, which a
+(* A reference names the checkpoint's content digest, which a
    value and every head written for it share. *)
 let checkpoint_ref_of_content (content : Objects.digest) (checkpoint : Agent_core.Checkpoint.t) =
   match Keeper_id.Trace_id.of_string checkpoint.Agent_core.Checkpoint.session_id with
@@ -197,7 +197,7 @@ let read_since_locked ~session_dir ~(known : exact_source) =
    The objects a head names do not change, so reading them now gives what
    they held then. That holds only while nothing removes them between the
    head's read under the lock and this decode after it; the object sweep
-   (RFC-0476 §3.6) has to keep that true. *)
+   has to keep that true. *)
 let decode_changed_bytes changed =
   let decoded =
     match

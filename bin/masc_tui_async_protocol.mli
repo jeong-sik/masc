@@ -387,10 +387,6 @@ type keeper_msg =
       * (Masc.Tui_decode.keeper_turns_projection, request_failure) result
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now. *)
-  (* Its own message rather than a field on the stance one: the two come from
-     different endpoints and one failing must not blank the other. *)
-  | Keeper_gate_settings_loaded of
-      (((string * Masc.Tui_decode.gate_mode) list * Masc.Tui_decode.keeper_exact_lane_first list), request_failure) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, request_failure) result
       * Masc_tui_operator_projection.Listing_order.ticket
@@ -985,6 +981,9 @@ type 'a mailed = {
   message : 'a;
 }
 
+val mail : 'a mailed Eio.Stream.t -> 'a -> unit
+(** Queue a message for the main loop, stamped now, and ring its bell. *)
+
 val capture_workspace_message : state -> (async_msg -> async_msg)
 (** Capture the original workspace authority/read epoch now; envelope formation
     later never borrows a successor workspace. Operation projection/admission
@@ -1003,7 +1002,10 @@ module Delivery_round : sig
   type 'a t
   val empty : 'a t
   (** Drain the captured shared FIFO prefix before collecting a finite set of
-      owned results. A paused round retains that prefix or result remainder. *)
+      owned results. [can_take] is asked only with an item in hand, so a
+      [false] always leaves work; capturing the prefix and collecting the
+      owned results do not ask. A paused round retains that prefix or result
+      remainder. *)
   val take : 'a t -> can_take:(unit -> bool) -> queued:(unit -> int) ->
     take_shared:(unit -> 'a option) -> collect_owned:(unit -> 'a list) ->
     'a option * 'a t

@@ -1,7 +1,7 @@
 // VerificationRunsPanel — what the completion authority actually did.
 //
 // Consumes:
-//   GET /api/v1/dashboard/verification-runs   (RFC-0361 D4)
+//   GET /api/v1/dashboard/verification-runs
 //
 // Sits beside VerificationRequestsPanel and answers the other half of the
 // question. A *request* is what a Keeper submitted; a *run* is the review of

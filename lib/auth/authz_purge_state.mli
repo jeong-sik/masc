@@ -94,7 +94,7 @@ type refusal =
       (** The maintenance does not start a purge: the owner of the target
           does. *)
   | Not_a_purge_author of Authz_records.Author.t
-      (** The local operator, the system cron, or the system migration, which
+      (** The local operator or the system cron, which
           {!Authz_record.admits} does not let write a purge record. *)
 
 val refusal_to_string : refusal -> string

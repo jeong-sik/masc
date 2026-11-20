@@ -40,7 +40,7 @@ let curation_answer_matches_arg args =
 
 (** {1 Handlers} *)
 
-(* RFC-0189 PR-1b.3 — handlers in this module return typed
+(* Handlers in this module return typed
    [Tool_result.result]. Curation snapshots are passed as typed JSON
    [~data] directly. *)
 

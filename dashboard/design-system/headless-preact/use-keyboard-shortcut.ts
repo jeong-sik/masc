@@ -2,7 +2,7 @@
  * useKeyboardShortcut + useKeyboardShortcutHost — Preact adapters
  * over headless-core/KeyboardShortcutManager.
  *
- * Per RFC 0012 §3.2. The host hook binds a single document-level
+ * The host hook binds a single document-level
  * keydown listener and delegates to manager.dispatch. The per-shortcut
  * hook registers a chord on mount and disposes on unmount, returning
  * the human-readable + ARIA chord strings for tooltip / aria-keyshortcuts.

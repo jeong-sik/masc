@@ -26,9 +26,3 @@ val read_result :
     releases only that refresh's exact ownership. A cancelled switch cannot
     reserve new work; an evicted refresh cannot restore or overwrite its key.
     [now] supplies boundary time without changing process-wide configuration. *)
-
-val read :
-  sync_first:bool -> sw:Eio.Switch.t -> cache:t -> key:string ->
-  placeholder:Yojson.Safe.t -> compute:(unit -> Yojson.Safe.t) -> Yojson.Safe.t
-(** [read_result] with the system clock and a computation that raises on
-    failure. The same cancellation, eviction and publication rules apply. *)

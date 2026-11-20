@@ -789,7 +789,7 @@ let has_accepted_empty_range (carried : carried_start) =
   | None -> false
 ;;
 
-(* RFC-0460. A working state stands in for the atoms before the range it
+(* A working state stands in for the atoms before the range it
    leads, so it goes out only where it displaces none of the atoms after it.
    Pinned in front of a range the window then has to cut, it would leave
    atoms that the summary does not cover and the request does not hold -- the
@@ -1737,8 +1737,8 @@ let retain_original_result producer ~invocation ~call_id ~tool_name ~input
     ~call_id ~tool_name ~arguments:(Keeper_client_tool_outbox.Known input) ~response
 
 (* A queue is read when a turn starts, so a row that reaches it while an
-   official client runs the turn waits for the turn to end
-   (RFC-arrived-stimuli-reach-the-running-turn). The client owns its own model
+   official client runs the turn waits for the turn to end.
+   The client owns its own model
    loop and asks MASC for nothing between rounds, so a tool result is the one
    place a MASC-written line reaches it. [arrival_source] gives the claim for
    the next result: the rows that arrived since this projection was built and
@@ -2452,7 +2452,7 @@ let admit_native_posture ~posture ~approval_mode ~none_supported ~client_label =
   | Native_none, true | Native_read, _ -> Ok ()
 ;;
 
-(* RFC-0390 admission review (P0): an admission refusal must not kill the
+(* An admission refusal must not kill the
    runtime call — the keeper would lose every turn until an operator flips
    an in-memory approval mode after each restart. [admit_native_posture]
    stays a pure typed predicate (tests pin its refusals); the resolver

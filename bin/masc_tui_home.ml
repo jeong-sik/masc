@@ -81,7 +81,7 @@ let decision_rows_of_state (state : state) =
     else []
   in
   let source_notes =
-    approval_row_lists reading @ ["questions", reading.questions]
+    approval_row_lists ~ko reading @ [text "질문" "questions", reading.questions]
     |> List.filter_map (fun (name, status) -> match status with
         | List_read -> None
         | List_not_read _ -> Some name)
@@ -230,11 +230,11 @@ let continue_rows_of_state (state : state) =
     | Saving_chat name, _ ->
         Some (Keeper_id.Keeper_name.to_string name, text " · 저장 중" " · save pending")
     | Unobserved_chat { keeper; _ }, _ ->
-        Some (Keeper_id.Keeper_name.to_string keeper, text " · 저장 결과 미확인" " · save outcome unknown")
+        Some (Keeper_id.Keeper_name.to_string keeper, text " · 저장 결과 보고 안 됨" " · save outcome not reported")
     | Session_chat { keeper; _ }, _ ->
         Some (Keeper_id.Keeper_name.to_string keeper, text " · 이번 세션에서만" " · this session only")
     | Unconfirmed_chat { keeper; _ }, _ ->
-        Some (Keeper_id.Keeper_name.to_string keeper, text " · 저장 유지 여부 미확인" " · save durability unconfirmed")
+        Some (Keeper_id.Keeper_name.to_string keeper, text " · 저장 유지 보고 안 됨" " · save durability not reported")
     | No_chat_receipt, Masc_tui_config.Last (Some name) ->
         Some (Keeper_id.Keeper_name.to_string name, "")
     | Unreadable_chat_receipt _, _
@@ -316,7 +316,7 @@ let operator_action_label state (item : Masc.Operator_action_reason.t) =
               (Masc.Keeper_librarian_pending.admission_pending admission))
           |> List.map (memory_admission_text ~ko) in
       let causes = durable @ admission in
-      "Memory · " ^ clean keeper ^ " · " ^ String.concat " · " causes
+      text "기억 · " "Memory · " ^ clean keeper ^ " · " ^ String.concat " · " causes
       ^ text " · Enter:상세" " · Enter:details"
   | Shutdown_fenced_backlog {count; keepers=Some [(keeper,_)]; complete=true} ->
       text "대기 목록 · " "Queue · " ^ clean keeper
@@ -325,7 +325,7 @@ let operator_action_label state (item : Masc.Operator_action_reason.t) =
       text "진단 · " "Reading · "
       ^ Printf.sprintf (if state.ui_language=Lang_ko then "종료 보류 %d건" else "%d shutdown-fenced events") count
       ^ (if complete then text " · 대상 확인" " · inspect owners"
-         else text " · 전체 미확인" " · coverage unknown")
+         else text " · 일부 관측" " · partial reading")
   | Other_reported ->
       let component = match Masc_tui_health_section.of_wire item.component with
         | Ok section ->
@@ -358,13 +358,13 @@ let notice_lines_of_state state =
   let clean = Masc_tui_ansi.Terminal_text.single_line in
   (match Masc_tui_credential_preparation.status state.credential_preparation with
    | Not_requested | Settled -> []
-   | Preparing _ -> [text " 워크스페이스 접근 준비 중…" " Preparing workspace access…"]
-   | Awaiting_ui _ -> [text " 워크스페이스 접근 준비 결과 반영 대기…" " Workspace access result awaiting application…"])
+   | Preparing _ -> [text " 워크스페이스 접근 준비 중" " Preparing workspace access"]
+   | Awaiting_ui _ -> [text " 워크스페이스 접근 준비 결과 반영 대기" " Workspace access result awaiting application"])
   @ (match state.opening_notice with
    | None -> []
    | Some notice -> [" " ^ clean notice])
   @ (match operator_actions state with
-     | None -> [text " 조치 원인 미관측 · v:진단" " Action reasons unobserved · v:reading"]
+     | None -> [text " 조치 원인 미조회 · v:진단" " Action reasons not read · v:reading"]
      | Some _ -> [])
   @ (match state.home_decision_receipt with
      | None -> []

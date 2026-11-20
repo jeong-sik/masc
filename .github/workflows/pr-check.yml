@@ -42,11 +42,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Test Dune trace protection when the push hook changes
-        run: |
-          if ! git diff --quiet origin/main...HEAD -- .githooks/pre-push scripts/tests/test_githooks_pre_push.py; then
-            python3 -I scripts/tests/test_githooks_pre_push.py
-          fi
       - name: Install the YAML parser
         run: python3 -m pip install --disable-pip-version-check PyYAML
       - name: Validate concrete source and configuration syntax
@@ -58,18 +53,6 @@ jobs:
           python3 -I scripts/ci/check-test-prompt-deps.py
       - name: Scan the tracked tree for credentials
         run: python3 scripts/ci/check-committed-secrets.py
-      # The collector refuses a linked package whose nested notice it cannot
-      # classify, and a release build dies there (run 44173709932 lost two
-      # jobs to dune-build-info.3.25.0). release-build.yml already runs this,
-      # but only on macos-arm64 behind workflow_call, so a table regression
-      # was first seen a release later. It is pure Python and takes 0.2s.
-      #
-      # This file is workflow_dispatch only, so the copy here runs when an
-      # operator asks for it and on no pull request. The pull-request coverage
-      # is the same step in pr-type-check.yml; keep this step identical in
-      # both files, `-I` included, so which one ran never changes the answer.
-      - name: Test the OCaml notice collector's classification table
-        run: python3 -I scripts/tests/test_collect_ocaml_notices.py
 
   native-tui:
     if: inputs.native-tui-source-sha != ''

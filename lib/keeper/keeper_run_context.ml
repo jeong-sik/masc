@@ -73,7 +73,7 @@ let build_base_system_prompt
   Ok (workspace_root, prompt)
 
 (* Who composes the turn's first request, and for Agent Core where its range
-   opens against the last request on that runtime (RFC-0491 §3.2). The
+   opens against the last request on that runtime. The
    runtime is the head of the walk a fresh turn takes, as the turn driver
    orders it; the range is the one the driver composes over [history] before
    the turn's input is appended, read the way the forecast reads it. *)
@@ -224,6 +224,29 @@ let prepare_run_context
       Error (Checkpoint_unread error)
   in
   let loaded_checkpoint_present = Option.is_some ctx_opt in
+  let existing_history_messages =
+    Option.fold ~none:[] ~some:Keeper_context_runtime.messages_of_context ctx_opt
+  in
+  let bridged_messages =
+    match checkpoint with
+    | Some _ -> []
+    | None ->
+      (match
+         Keeper_turn_bridge.uncheckpointed_official_turns
+           ~keepers_dir:(Workspace.keepers_runtime_dir config)
+           ~keeper_name:meta.name
+           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           ~session_dir
+           ~existing_messages:existing_history_messages
+       with
+       | Ok msgs -> msgs
+       | Error error ->
+         Log.Keeper.warn
+           ~keeper_name:meta.name
+           "uncheckpointed official-client turn bridge skipped: %s"
+           (Keeper_turn_bridge.bridge_load_error_to_string error);
+         [])
+  in
   (* 3. Build base system prompt from meta *)
   let config_root =
     let inputs = Config_dir_resolver.inputs_from_env () in
@@ -246,7 +269,7 @@ let prepare_run_context
        fails to render; that is a typed refusal here, not a crashed cycle. *)
     (try
        issue_system ~config ~profile_defaults ~meta ~runtime_id ~held ?recorded_system
-         (Option.fold ~none:[] ~some:Keeper_context_runtime.messages_of_context ctx_opt)
+         (existing_history_messages @ bridged_messages)
        |> Result.map_error (fun error -> Base_prompt_unavailable error)
      with Invalid_argument detail -> Error (Prompt_unrenderable detail))
   in
@@ -256,10 +279,13 @@ let prepare_run_context
   Option.iter (Keeper_turn_system.write shared_context) held;
   (* 4. Create or restore working context, re-apply current prompt *)
   let base_ctx =
-    match ctx_opt with
-    | Some c -> c
-    | None ->
-      Keeper_context_runtime.create ~eio:true ~system_prompt:system.Keeper_turn_system.text
+    let restored =
+      match ctx_opt with
+      | Some c -> c
+      | None ->
+        Keeper_context_runtime.create ~eio:true ~system_prompt:system.Keeper_turn_system.text
+    in
+    List.fold_left Keeper_context_runtime.append restored bridged_messages
   in
   let ctx_work =
     Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:system.Keeper_turn_system.text

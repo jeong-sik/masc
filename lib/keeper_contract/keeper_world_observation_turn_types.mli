@@ -15,7 +15,7 @@ type event_queue_trigger =
           pointer. Dormant until a producer enqueues it (P3). *)
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
-      (** RFC-0320 W3b: an operator resolved a gated-tool approval this keeper
+      (** An operator resolved a gated-tool approval this keeper
           waited on; when the original turn already ended, the wake has no live
           tool call to resume and must steer the keeper back to the originating
           conversation. *)

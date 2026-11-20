@@ -2,7 +2,7 @@
 
 val blank_evidence_ref : string -> bool
 (** [true] when the entry trims to the empty string. Shared element-level
-    predicate for evidence-ref boundary checks (RFC-0337 decision 4):
+    predicate for evidence-ref boundary checks:
     boundaries reject flagged entries instead of silently dropping them. *)
 
 val unresolvable_evidence_ref : string -> bool

@@ -739,17 +739,6 @@ let install_task_mutation_cache_invalidation ~invalidate_full_health_snapshot ()
     (invalidate_task_mutation_caches ~invalidate_full_health_snapshot)
 ;;
 
-(** Bypass the proactive warm-up guard so tests that call
-    [dashboard_namespace_truth_http_json] get the full response instead of
-    the "initializing" short-circuit. *)
-let seed_execution_cache_for_test ~state () =
-  let owner = execution_owner_for_scope ~state (Mcp_server.workspace_scope state) in
-  with_execution_publication_lock ~owner (fun () ->
-    Server_dashboard_http_cache.mark_cached_surface_success
-      owner.cache
-      (`Assoc [ "status", `String "seeded_for_test" ]))
-;;
-
 let transport_health_cache =
   Server_dashboard_http_cache.create_cached_surface
     (`Assoc
@@ -866,10 +855,9 @@ let with_cached_dashboard_surface_metadata
   | other -> other
 ;;
 
-let execution_query_json ~actor ~fixture ~full_mode ~light ~default_light_request ~force =
+let execution_query_json ~actor ~full_mode ~light ~default_light_request ~force =
   `Assoc
     [ "actor", Json_util.string_opt_to_json actor
-    ; "fixture", Json_util.string_opt_to_json fixture
     ; "full", `Bool full_mode
     ; "light", `Bool light
     ; "default_light_request", `Bool default_light_request
@@ -880,7 +868,6 @@ let execution_query_json ~actor ~fixture ~full_mode ~light ~default_light_reques
 let default_light_execution_query =
   execution_query_json
     ~actor:None
-    ~fixture:None
     ~full_mode:false
     ~light:true
     ~default_light_request:true
@@ -905,9 +892,9 @@ let with_execution_metadata ~config ?cache_key ~query json =
    the gates read back -- keeper-row overlays, the Candle summary, and the
    observation sequence stamp it sets. The producer's own fill carries all
    three already (its snapshot is projected and its sequence copied); a fill
-   that reaches this surface any other way -- a test fixture, a future
-   publisher -- becomes a fixed point of the gate here instead of silently
-   losing prepared-bytes reuse.
+   that reaches this surface any other way -- a test, a future publisher --
+   becomes a fixed point of the gate here instead of silently losing
+   prepared-bytes reuse.
 
    Built outside the publication lock: the projection reads configuration
    and the Candle ledger from the filesystem, and the lock guards
@@ -917,9 +904,7 @@ let with_execution_metadata ~config ?cache_key ~query json =
 let build_default_light_response_json ~owner ~config =
   Server_dashboard_http_cache.cached_surface_json owner.cache
   |> with_execution_observer_instance ~owner
-  |> (match Dashboard_execution_helpers.execution_fixture_name () with
-      | Some _ -> Fun.id
-      | None -> Dashboard_projection_cache.with_current_keeper_observations ~config)
+  |> Dashboard_projection_cache.with_current_keeper_observations ~config
   |> with_execution_metadata
        ~config
        ~cache_key:execution_default_light_cache_key
@@ -1057,9 +1042,7 @@ let execution_ready_alert ~owner ~publication =
    lock, so a completed purchase/equip is not replaced by an older snapshot. *)
 let prepare_execution_snapshot_broadcast ~owner ~config () =
   refresh_execution_default_light_http_body ~owner ~config
-  |> (match Dashboard_execution_helpers.execution_fixture_name () with
-      | Some _ -> Fun.id
-      | None -> Dashboard_projection_cache.with_current_keeper_observations ~config)
+  |> Dashboard_projection_cache.with_current_keeper_observations ~config
 ;;
 
 type execution_read =
@@ -1281,7 +1264,7 @@ let patched_keeper_status row ~event ~keepalive_running =
     `String (Keeper_status_runtime.control_plane_status_to_string status)
   | None when not keepalive_running -> `String "offline"
   | None ->
-    (* RFC-0089: classify the row's display status via the typed operator
+    (* Classify the row's display status via the typed operator
        SSOT. busy/active/listening/idle pass through; inactive/offline collapse
        to "offline"; an operator pause survives the patch, because a running
        keepalive fiber does not un-pause a keeper — collapsing it here made
@@ -1497,7 +1480,6 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
 ;;
 
 let patchexecution_cache_for_keeper ~owner ~keeper_name ~event ~keepalive_running =
-  if Option.is_none (Dashboard_execution_helpers.execution_fixture_name ()) then
   let patch =
     with_execution_publication_lock ~owner (fun () ->
       let previous_generation = !(owner.generation) in
@@ -1565,9 +1547,7 @@ let compute_execution_observation ~state ~config ~sw ~clock ?net ?mono_clock () 
       let observation = Dashboard_execution.observe_current ~light:true ~config
           ~sw ~clock ~proc_mgr:state.Mcp_server.proc_mgr () in
       let json = observation.json
-        |> (match Dashboard_execution_helpers.execution_fixture_name () with
-            | Some _ -> Fun.id
-            | None -> patch_surface_json_for_running_keepers config)
+        |> patch_surface_json_for_running_keepers config
         |> Server_dashboard_http_core_cache.with_projection_diagnostics
              ~surface:"execution" ~started_at
              ~extra:["readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json ()] in
@@ -1666,18 +1646,16 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
 ;;
 
 type execution_parameters =
-  { fixture : string option
-  ; actor : string option
+  { actor : string option
   ; full_mode : bool
   ; force : bool
   }
 
 let execution_parameters ~(config : Workspace.config) request =
-  let fixture = query_param request "fixture" in
   let actor = execution_actor_for_request ~base_path:config.base_path request in
   let full_mode = bool_query_param request "full" ~default:false in
   let force = bool_query_param request "force" ~default:false in
-  { fixture; actor; full_mode; force }
+  { actor; full_mode; force }
 
 type execution_http_request =
   { state : Mcp_server.server_state
@@ -1706,12 +1684,9 @@ let execution_publication_of_request (request : execution_http_request) =
 
 let execution_cached_http_response ~owner ~observe ~(config : Workspace.config)
       ~(parameters : execution_parameters) =
-  let { fixture = requested_fixture; actor; full_mode; force } = parameters in
-  let fixture =
-    Dashboard_execution_helpers.execution_fixture_name ?fixture:requested_fixture ()
-  in
-  match fixture, actor, full_mode, force with
-  | None, None, false, false when requested_fixture = None ->
+  let { actor; full_mode; force } = parameters in
+  match actor, full_mode, force with
+  | None, false, false ->
     let selected = with_execution_publication_lock ~owner (fun () ->
       match !(owner.default_light_http) with
       | Ready payload
@@ -1899,16 +1874,14 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
   let config = context.config in
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
-  let { fixture = requested_fixture; actor; full_mode; force } = context.parameters in
-  let fixture = Dashboard_execution_helpers.execution_fixture_name ?fixture:requested_fixture () in
+  let { actor; full_mode; force } = context.parameters in
   let light = not full_mode in
   let query =
     execution_query_json
       ~actor
-      ~fixture
       ~full_mode
       ~light
-      ~default_light_request:(requested_fixture = None && fixture = None && actor = None && not full_mode && not force)
+      ~default_light_request:(actor = None && not full_mode && not force)
       ~force
   in
   let compute ?actor ~light () =
@@ -1924,7 +1897,6 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       (fun ~config ~sw ->
          Dashboard_execution.observe_current
            ?actor
-           ?fixture:requested_fixture
            ~light
            ~config
            ~sw
@@ -1932,9 +1904,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
            ~proc_mgr:state.Mcp_server.proc_mgr
            ()
          |> Dashboard_projection_read.json_with_read_diagnostics
-         |> (match fixture with
-             | Some _ -> Fun.id
-             | None -> patch_surface_json_for_running_keepers config)
+         |> patch_surface_json_for_running_keepers config
          |> Server_dashboard_http_core_cache.with_projection_diagnostics
               ~surface:"execution"
               ~started_at
@@ -1942,8 +1912,8 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
                 [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json ()
                 ])
   in
-  match fixture, actor, full_mode with
-  | None, None, false when requested_fixture = None && force ->
+  match actor, full_mode with
+  | None, false when force ->
     let timeout_sec = Env_config_runtime.Dashboard.execution_timeout_sec in
     let attempt = ref None in
     let publish_failure message =
@@ -1999,7 +1969,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
          ~cache_key:execution_default_light_cache_key
          ~query
     |> fun json -> Execution_json json
-  | None, None, false when requested_fixture = None ->
+  | None, false ->
     (* Default light serves complete or partial actual observations. A
        retained partial body cannot turn each GET into a read ahead of the
        source worker's failure-only backoff. *)
@@ -2046,19 +2016,14 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
     in
     let compute_with_generation = Pool_work.cpu ~name:__FUNCTION__ @@ fun () ->
       compute ?actor ~light ()
-      (* The request wrapper below re-projects every non-fixture response and
-         serves the cached payload's bytes only when that changes nothing, so
-         the parameterized fill projects here first -- same rule as the
+      (* The request wrapper below re-projects every response and serves the
+         cached payload's bytes only when that changes nothing, so the
+         parameterized fill projects here first -- same rule as the
          default-light body above. Without it a fill whose keepers came from
-         the fixture-seeded cache rather than a projected snapshot carries no
-         observation stamp, and every repeat request recomputes instead of
-         reusing the bytes it already prepared. An explicit fixture is the
-         exception both places: its Candle, portraits and balances are
-         synthetic by contract, and the wrapper skips its gate for fixture
-         requests -- so the fill leaves them alone too. *)
-      |> (match fixture with
-          | None -> Dashboard_projection_cache.with_current_keeper_observations ~config
-          | Some _ -> fun json -> json)
+         a cache rather than a projected snapshot carries no observation
+         stamp, and every repeat request recomputes instead of reusing the
+         bytes it already prepared. *)
+      |> Dashboard_projection_cache.with_current_keeper_observations ~config
       |> with_execution_publication_generation ~owner ~generation
       |> with_execution_metadata ~config ~cache_key ~query
     in
@@ -2082,10 +2047,8 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
 let dashboard_execution_http_response ~sw ~clock context =
   let response = cached_dashboard_execution_http_response ~sw ~clock context in
   let refresh json =
-    let json = with_execution_observer_instance ~owner:context.owner json in
-    match Dashboard_execution_helpers.execution_fixture_name ?fixture:context.parameters.fixture () with
-    | Some _ -> json
-    | None -> Dashboard_projection_cache.with_current_keeper_observations ~config:context.config json in
+    with_execution_observer_instance ~owner:context.owner json
+    |> Dashboard_projection_cache.with_current_keeper_observations ~config:context.config in
   match response with
   | Execution_json json -> Execution_json (refresh json)
   | Execution_payload payload ->

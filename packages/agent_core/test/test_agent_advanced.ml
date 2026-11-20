@@ -242,7 +242,7 @@ let test_advanced_run_emits_lifecycle_events () =
     lifecycle_event_kinds
 ;;
 
-(* RFC-0468 §3.2: the caller's input metadata is stamped on the User message
+(* The caller's input metadata is stamped on the User message
    when AGENT_CORE creates it, on both entry points the keeper uses. *)
 let speaker_entry = Types.Input_speaker.entry (`Assoc [ "kind", `String "owner" ])
 

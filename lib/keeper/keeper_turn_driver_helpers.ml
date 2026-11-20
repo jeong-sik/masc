@@ -7,11 +7,9 @@
     [keeper_turn_driver.ml] separates agent-core calls, runtime strategy,
     and keeper bookkeeping.
 
-    No behavior change. Mechanical extraction.
+    No behavior change. Mechanical extraction. *)
 
-    @since RFC-0048 — keeper_turn_driver split, helpers slice *)
-
-(* RFC-0206: provider_rejections_for_no_tool_error deleted — multi-candidate
+(* provider_rejections_for_no_tool_error deleted — multi-candidate
    tool-filter rejection lists have no meaning under single-runtime dispatch. *)
 
 let checkpoint_after_attempt ?agent_before_attempt ?session_id ?working_context ?agent_ref = function

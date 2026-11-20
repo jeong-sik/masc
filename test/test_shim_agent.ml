@@ -1,4 +1,4 @@
-(* masc-exec-shim --serve (RFC microvm-guest-agent-over-socket): owner
+(* masc-exec-shim --serve: owner
    parsing, the refusal that comes before any root step, one relay against
    small shell programs, and serve against the real shim binary.
 

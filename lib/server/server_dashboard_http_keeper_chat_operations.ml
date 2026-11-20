@@ -202,7 +202,7 @@ let parse_after_sequence request =
      | Some _ | None -> Error (invalid_input "after_sequence must be a non-negative int64"))
 ;;
 
-(* RFC-0412 §3.2, v2 events endpoint: the journal as written, paged over seq.
+(* v2 events endpoint: the journal as written, paged over seq.
    The default page and the ceiling are the journal's own
    ([Keeper_chat_event_log.page_default_limit], [page_max_limit]), read here
    and by the TUI that pages at the ceiling. *)
@@ -595,7 +595,7 @@ let handle_get state request reqd = function
            | Error error -> respond_error request reqd (api_error_of_command_error error))
         | Error (Journal_unreadable detail) ->
           (* This endpoint exists to serve the log, so the log's failure is
-             the response (RFC-0412 §3.5: loud from day one on v2). *)
+             the response (loud from day one on v2). *)
           respond_error request reqd (unavailable Public_error.Journal_unreadable detail)
         | Error (Journal_unsupported_version version) ->
           respond_error request reqd (public_error Public_error.Journal_unsupported_version

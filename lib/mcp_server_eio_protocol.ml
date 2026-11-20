@@ -928,7 +928,7 @@ let handle_request
            (fun _auth_token -> handle_dashboard_ack_notification ?mcp_session_id req.params)
        | _ -> `Null)
     | Mcp_request_admission.Request
-        { id; message = json; request = req; protocol = (_ : Mcp_transport_protocol.request_protocol) } ->
+        { id; message = json; request = req; protocol } ->
       let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
       (try
               match req.method_ with
@@ -1264,7 +1264,7 @@ let handle_request
                           Mcp_server_eio_call_tool.handle_call_tool_eio
                             ~execute_tool_eio:execute ~maybe_emit_resource_notifications
                             ~broadcast_tools_list_changed ~wire_result:(fun () -> !wire_result)
-                            ~sw ~clock ~profile:call_profile ?mcp_session_id ~bearer
+                            ~protocol ~sw ~clock ~profile:call_profile ?mcp_session_id ~bearer
                             state id call
                       | Ok (None, None) ->
                       if
@@ -1303,6 +1303,7 @@ let handle_request
                                  ~sw
                                  ~clock
                                  ~profile
+                                 ~protocol
                                  ?mcp_session_id
                                  ~bearer
                                  state

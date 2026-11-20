@@ -1,4 +1,4 @@
-(** The observe stage of a [tool_execute] call (RFC-0422).
+(** The observe stage of a [tool_execute] call.
 
     Between the gate's tables and its judge sits one run of the request
     inside the executor's box. [Observe] refuses writes outside a scratch
@@ -60,4 +60,4 @@ val dispatch_authorized
 val outcome : t -> Keeper_gate.observation option
 (** What {!observe} answered the gate, [None] until the gate asked. A caller
     whose request was deferred reads a refusal here to tell the keeper what
-    the box refused (RFC-0422 §3.3), with the same bytes the judge sees. *)
+    the box refused, with the same bytes the judge sees. *)

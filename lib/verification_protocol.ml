@@ -211,7 +211,7 @@ let create_submit_request ~(config : Workspace.config)
       task.id verification_id e;
     Error e
 
-(* RFC-0221 §3.1: compensation for atomic submit. Remove the verification record
+(* Compensation for atomic submit. Remove the verification record
    for [verification_id] when the task_status commit it was written for did not
    land, so the record store and [task_status] are never left disagreeing.
    Mirrors {!create_submit_request}'s base_path derivation. A missing record is

@@ -1,6 +1,6 @@
 (** The workspace a command runs against, chosen once at its entry point.
 
-    Order (RFC workspace-root-resolution §3.1):
+    Order:
     [--base-path] > [MASC_BASE_PATH] > a current directory holding
     [.masc/config] > the recorded default when it still holds [.masc/config].
 

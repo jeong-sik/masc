@@ -71,7 +71,7 @@ end = struct
   (* This is a shape gate, not an identity. It answers "can this string be used
      as an id" -- it does not answer "who is this" and does not know whether the
      name belongs to a keeper, a human, or an external bot. That question is a
-     registry lookup at the caller (RFC-0393).
+     registry lookup at the caller.
 
      Its counterpart on the other axis is [Keeper_identity.Keeper_id], which
      folds two names for comparison and validates nothing. The two names read

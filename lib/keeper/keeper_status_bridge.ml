@@ -406,7 +406,7 @@ let optional_existing_path_json ?source = function
   | None -> `Null
 ;;
 
-(* RFC-0058 §9 Phase 9.3: on-disk runtime JSON is no longer generated or
+(* on-disk runtime JSON is no longer generated or
    consumed. [runtime_runtime_json_path] / [runtime_runtime_json_editable]
    dropped from the status payload because there is no runtime JSON
    sibling to point at. Source identity is now fully described by the

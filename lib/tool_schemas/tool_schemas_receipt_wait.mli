@@ -1,5 +1,4 @@
-(** The keeper_receipt_wait tool, read from [config/tools/keeper_receipt_wait.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+(** The keeper_receipt_wait tool, read from [config/tools/keeper_receipt_wait.toml].
 
     Decoded once at module initialization. A missing file or a declaration that
     does not decode refuses the boot rather than advertising a tool that cannot

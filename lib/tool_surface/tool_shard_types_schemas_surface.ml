@@ -1,5 +1,4 @@
-(** Tool_shard_types_schemas_surface — keeper_surface_* tool schemas
-    (RFC-0223 P3). *)
+(** Tool_shard_types_schemas_surface — keeper_surface_* tool schemas. *)
 
 (* Slack's chat.postMessage caps top-level blocks at 50. This lower tool-surface
    layer owns the wire limit; the Keeper executor consumes the public value. *)

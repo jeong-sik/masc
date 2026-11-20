@@ -50,7 +50,7 @@ val record :
     downstream consumers can distinguish "missing" from
     "deliberately blank".
 
-    [exn] is the RFC-0154 typed path: when present, [record] calls
+    [exn] is the typed path: when present, [record] calls
     [System_error_class.classify_exn] internally to derive
     [error_class] (errno match → typed variant) and uses
     [Printexc.to_string exn] as the raw [error] string unless an

@@ -2,7 +2,7 @@
 
     The queue is read when a turn starts. A row that arrives afterwards waits
     for the turn to end, and a turn that runs for hours keeps it waiting for
-    hours (docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md). This module
+    hours. This module
     picks the rows a later provider round can show and renders them. It opens
     no file and writes nothing: the caller passes the reader, the queue stays
     the only authority, the row stays queued, and it starts its own turn after

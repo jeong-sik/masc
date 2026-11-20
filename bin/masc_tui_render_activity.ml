@@ -16,7 +16,7 @@ module Page_line = Masc_tui_page_line
 let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> "\xc2\xb7"
   | System_info -> "\xe2\x80\xa2"
-  | System_warn -> "!"
+  | System_warn -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
   | System_error -> "\xc3\x97"
   | System_level_unknown _ -> "?"
 
@@ -97,7 +97,7 @@ let system_log_detail_lines (state : state) ~seq ~width =
              (blocks @ [ details_title, [ Page_line.note ~tone:Page_line.Quiet (t "없음" "none") ] ])
        | json ->
            detail_page ~width blocks
-           @ system_log_detail_section details_title
+           @ system_log_detail_section ~width details_title
            @ (document_json ~width (Yojson.Safe.pretty_to_string json)
               |> List.map (fun line -> Ansi.reset, "  " ^ line)))
 
@@ -288,7 +288,6 @@ let render_system_logs (state : state) =
                  | Some seq -> [ Printf.sprintf "  seq %d" seq ])
              @ filter_pieces)
   in
-  box_top buf cols;
   box_line buf cols
     (zone_two_title ~cols state ~title:header
        ~position:
@@ -370,8 +369,9 @@ let render_system_logs (state : state) =
           let level_style = system_log_level_style e.sl_level in
           (* Every cell is fitted to the width its header is drawn at; a long
              module name used to push every column right of it out of line. *)
+          let is_selected = idx = (system_logs_page state).lp_cursor in
           let line =
-            "  "
+            (if is_selected then "\xe2\x80\xba " else "  ")
             ^ Render_schedule.system_log_row ~layout:log_layout ~level_style
                 ~styles:
                   { Render_schedule.slog_time_style = Ansi.dim
@@ -391,7 +391,7 @@ let render_system_logs (state : state) =
                 ; slog_message = Terminal_text.single_line e.sl_message
                 }
           in
-          if idx = (system_logs_page state).lp_cursor then
+          if is_selected then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
           else box_line buf cols line
     done;
@@ -489,8 +489,8 @@ let render_keeper_calls (state : state) =
             ; freshness ]
   in
   let col_hdr =
-    ui_text state ~ko:"  j/k 줄 단위 · 원문 필드: tool | input | output"
-      ~en:"  j/k rows · exact fields: tool | input | output"
+    ui_text state ~ko:"  j/k:줄 단위  원문 필드: tool | input | output"
+      ~en:"  j/k:rows  exact fields: tool | input | output"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -639,7 +639,8 @@ let render_keeper_calls (state : state) =
                     Ansi.dim)
                ~label:"output" output
          in
-         (call_index, style, summary) :: exact_rows @ output_rows)
+         let call_rows = (call_index, style, summary) :: exact_rows @ output_rows in
+         if call_index = 0 then call_rows else (call_index, Ansi.dim, "") :: call_rows)
     |> List.concat
   in
   let total_rows = List.length rows in
@@ -648,7 +649,7 @@ let render_keeper_calls (state : state) =
   if shown = 0 then begin
     let empty =
       if state.keeper_calls_loading && Option.is_none state.keeper_calls then
-        ui_text state ~ko:"  (호출 기록 조회 중…)" ~en:"  (loading exact call records...)"
+        ui_text state ~ko:"  (호출 기록 조회 중)" ~en:"  (loading exact call records)"
       else
       match (state.keeper_calls, state.keeper_calls_error) with
       | _, Some _ -> page_failed_note ~ko:(state.ui_language = Lang_ko)
@@ -729,7 +730,7 @@ let render_acting_evidence (state : state) entry =
   (* A field the event did not carry, as opposed to one it carried empty. *)
   let not_carried = ui_text state ~ko:"실려 오지 않음" ~en:"not carried" in
   let lines =
-    detail_section_lines ~first:true
+    detail_section_lines ~first:true ~width:(framed_inner_width cols)
       (ui_text state ~ko:"1. 이벤트 식별 · 실행 컨텍스트"
          ~en:"1. Event Identity & Execution Context")
     @ ((ui_text state ~ko:"TUI 수신 시각" ~en:"TUI received at",
@@ -766,13 +767,13 @@ let render_acting_evidence (state : state) entry =
               :: (document_markdown ~width:(max 1 (framed_inner_width cols - 3))
                     (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
                   |> List.map (fun line -> "  " ^ line)) in
-        detail_section_lines
+        detail_section_lines ~width:(framed_inner_width cols)
           (ui_text state ~ko:"2. 입출력 관측 기록" ~en:"2. Input / Output Observations")
         @ json (ui_text state ~ko:"입력" ~en:"Input") call.kt_tool_args
-        @ preview (ui_text state ~ko:"입력 미리보기" ~en:"Input preview") call.kt_tool_args_preview
-        @ json (ui_text state ~ko:"출력" ~en:"Output") call.kt_tool_result
-        @ preview (ui_text state ~ko:"출력 미리보기" ~en:"Output preview")
-            call.kt_tool_output_preview
+        @ ("" :: preview (ui_text state ~ko:"입력 미리보기" ~en:"Input preview") call.kt_tool_args_preview)
+        @ ("" :: json (ui_text state ~ko:"출력" ~en:"Output") call.kt_tool_result)
+        @ ("" :: preview (ui_text state ~ko:"출력 미리보기" ~en:"Output preview")
+             call.kt_tool_output_preview)
     | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Workspace_store_changed _ | Masc_tui_observer.Dataset_changed _ | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _ | Masc_tui_observer.Agent_core _
     (* A skill node's frame carries no input or output; its call log row does. *)
     | Masc_tui_observer.Keeper_tool_call_evidence_committed _
@@ -879,7 +880,7 @@ let acting_notices (state : state) ~trace_unavailable =
     ; Option.map warning unseen; Option.map warning replay; trace ]
 
 let acting_content_height ~rows ~notices =
-  (* Top/title/divider, column heading, then bottom/footer. *)
+  (* Title/divider, column heading/divider, then bottom/footer. *)
   max 1 (rows - (4 + List.length notices + listing_rows_below_the_body))
 
 let acting_list_height state ~terminal_rows =
@@ -1025,7 +1026,6 @@ let render_acting (state : state) =
       | Actions | Everything ->
           Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown)
   in
-  box_top buf cols;
   box_line buf cols (zone_two_title ~cols state ~title:header ~position);
   box_divider buf cols;
   List.iter
@@ -1065,6 +1065,7 @@ let render_acting (state : state) =
       ~clock:(ui_text state ~ko:"시각" ~en:"TIME")
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
+  box_divider buf cols;
   if shown = 0 then begin
     let nothing_under_filter =
       ui_text state ~ko:"  (이 필터에 해당하는 것 없음 · f 로 전체 보기)"
@@ -1129,8 +1130,10 @@ let render_acting (state : state) =
               ~clock
           in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
-          let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in
-          box_line_styled buf cols ~style:(if selected then Theme.selection_style () else style) line
+          if selected then
+            let marked = "\xe2\x80\xba " ^ String.sub line 2 (String.length line - 2) in
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr marked)
+          else box_line_styled buf cols ~style line
     done;
   box_bottom buf cols;
   (* A Turns row is a fold with no cursor on it: "/" and n have no row to

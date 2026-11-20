@@ -5,7 +5,7 @@ import { KeeperTurnInspector, type TurnAnchor } from './keeper-turn-inspector'
 /**
  * Right-side drawer hosting {@link KeeperTurnInspector}. Shared by the keeper
  * chat workspace (anchored to a chat entry's turn) and the board post detail
- * (anchored to a post's origin turn_ref, RFC-0233 §7). KeeperTurnInspector
+ * (anchored to a post's origin turn_ref). KeeperTurnInspector
  * self-fetches the keeper's turn records by `keeperName`, so a caller only
  * supplies a typed anchor and chrome.
  *

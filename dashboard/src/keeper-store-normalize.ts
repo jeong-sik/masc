@@ -346,7 +346,7 @@ export function toKeeperLifecycleState(raw: string | null | undefined): KeeperLi
 }
 
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
-  // RFC-0139 PR-2: strict-superset migration off `isOfflineStatus`
+  // strict-superset migration off `isOfflineStatus`
   // (status-only). `isKeeperOffline` adds the terminal-FSM-phase axis
   // (Offline/Stopped/Crashed) so a keeper crashed mid-tick
   // is caught even when its wire-format status hasn't transitioned yet.

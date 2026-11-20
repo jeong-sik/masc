@@ -3,7 +3,7 @@ open Repo_manager_types
 open Result.Syntax
 
 let repos_toml_path base_path =
-  (* RFC-0121: layout SSOT via [Config_dir_resolver]. Byte-equal to the
+  (* Layout SSOT via [Config_dir_resolver]. Byte-equal to the
      previous direct concat (test_rfc0121_repositories_toml). *)
   Config_dir_resolver.repositories_toml_path ~base_path
 

@@ -74,7 +74,7 @@ let board_document_markdown ~width body =
 
 (* The header and rows use one title-first column layout inside the frame. *)
 let board_layout ~cols =
-  Render_schedule.board_layout ~inner_width:(framed_inner_width cols)
+  Render_schedule.board_layout ~inner_width:(max 1 (framed_inner_width cols - 2))
 
 (* Colour here, the glyph in {!Masc_tui_board_kind_mark}, which the help sheet
    reads from the same function. Nothing explained these marks anywhere before:
@@ -138,6 +138,7 @@ let render_board_compose (state : state) =
         [ words state "첫 줄은 제목, 나머지는 본문 · 게시판: "
             "First line: title · rest: body · hearth: " ^ hearth_label
         ; Board_composer.format_addressing_hint
+            ~ko:(state.ui_language = Lang_ko)
             ~max_cells:(framed_inner_width cols) addressing
         ]
   in
@@ -326,7 +327,7 @@ let board_hearth_census_line ~cols (state : state) =
   let notice text = tone
     ^ Message_layout.truncate_middle (framed_inner_width cols) ((words "게시판 · " "hearths · ") ^ text) ^ Ansi.reset in
   match Masc_tui_fetched.value observation with
-  | None -> notice (match status with Some text -> text | None -> (words "집계 미관측" "census not observed"))
+  | None -> notice (match status with Some text -> text | None -> (words "집계 미조회" "census not read"))
   | Some [] -> notice (match status with Some text -> (words "이전 집계는 비어 있음 · " "last census empty; ") ^ text | None -> (words "집계 결과 없음" "census empty"))
   | Some census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
@@ -352,9 +353,10 @@ let board_hearth_census_line ~cols (state : state) =
       let entry (name, text, band) =
         let selected = Option.equal String.equal state.board_hearth (Some name) in
         (* Selection wins over size: which hearth is being read is a different
-           axis from how big it is, and the reverse block says the first
-           without leaving the second unsaid -- the count is in the text. *)
-        if selected then Ansi.reverse ^ text ^ Ansi.reset
+           axis from how big it is, and the adaptive selection highlight says
+           the first without leaving the second unsaid -- the count is in the
+           text. *)
+        if selected then Theme.selection_style () ^ Ansi.bold ^ text ^ Ansi.reset
         else magnitude_tone band ^ text ^ Ansi.reset
       in
       (* What fits, then how many it could not carry. The board here holds
@@ -524,7 +526,7 @@ let render_board_list (state : state) =
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
-              (Render_schedule.board_header_row ~ko ~age_header ~layout))
+              ("  " ^ Render_schedule.board_header_row ~ko ~age_header ~layout))
         ; c.push_divider
         ]
       in
@@ -537,7 +539,7 @@ let render_board_list (state : state) =
          | Loading -> c.push (Ansi.dim ^ (words state "  (글 조회 중)" "  (reading Board posts)") ^ Ansi.reset)
          | Ready _ -> c.push (Ansi.dim
              ^ (if pending then (words state "  (이전 목록은 비어 있음 · 글 조회 중)" "  (last listing empty; reading posts)")
-                else if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미관측)" "  (last listing empty; requested query not observed)")
+                else if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미조회)" "  (last listing empty; requested query not read)")
                 else (words state "  (게시글 없음)" "  (no board posts)")) ^ Ansi.reset))
       else begin
         Option.iter render_list_error list_error;
@@ -628,8 +630,8 @@ let render_board_list (state : state) =
               Render_schedule.board_row ~ko ~styles ~age_header ~layout values
             in
             if is_selected then
-              c.push_selected (Masc_tui_theme.strip_sgr content)
-            else c.push content
+              c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr content)
+            else c.push ("  " ^ content)
         done
       end)
 
@@ -650,7 +652,7 @@ let comment_gutter = String.make Board_read_layout.comment_gutter_cells ' '
 
 (* Same cell count as [comment_gutter]: a marker cell, then blanks. *)
 let selected_comment_gutter () =
-  Theme.accent () ^ Ansi.bold ^ ">" ^ Ansi.reset
+  Theme.accent () ^ Ansi.bold ^ "\xe2\x80\xba" ^ Ansi.reset
   ^ String.make (Board_read_layout.comment_gutter_cells - 1) ' '
 
 let comment_row_gutter ~focus (state : state) =
@@ -736,7 +738,7 @@ let draw_board_read_side ~focus buf (state : state) document ~rows ~body_cols
         (Ansi.bold
         ^ Printf.sprintf (if state.ui_language = Lang_ko then "%s댓글 (%d)" else "%sComments (%d)")
             (if focus = Right_pane && state.board_comments_focused
-             then "> " else "  ")
+             then "\xe2\x96\xb8 " else "  ")
             detail_comment_count
         ^ Ansi.reset)
     else if i < side_budget.comment_rows then
@@ -784,7 +786,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
 
   let title_line = Printf.sprintf "%s%s%s%s"
     (if focus = Right_pane && not state.board_comments_focused
-     then "> " else "  ")
+     then "\xe2\x96\xb8 " else "  ")
     Ansi.bold
     (fit_width (Terminal_text.single_line post.bp_title) (framed_inner_width cols - 2))
     Ansi.reset
@@ -970,7 +972,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                | Some at ->
                    (match Board_read_layout.close_time at with
                     | Ok time -> field (words state "종료 시각 " "Closed at ") time
-                    | Error raw -> field (words state "종료 시각 미확인 · 원래 Unix 초 " "Close time unavailable · raw Unix seconds ")
+                    | Error raw -> field (words state "종료 시각을 읽을 수 없음 · 원래 Unix 초 " "Close time unreadable · raw Unix seconds ")
                         (Printf.sprintf "%.17g" raw))) in
             let conclusion =
               (match closed.bpc_successor_id with
@@ -1002,10 +1004,10 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         match detail with
         | Board_detail.Absent ->
             [ Board_read_layout.Thread_note
-                (Ansi.dim ^ (words state "  상세 미관측" "  Board detail unavailable") ^ Ansi.reset) ]
+                (Ansi.dim ^ (words state "  상세 미조회" "  Board detail not read") ^ Ansi.reset) ]
         | Board_detail.Loading ->
             [ Board_read_layout.Thread_note
-                (Ansi.dim ^ (words state "  상세 조회 중" "  Loading Board detail...") ^ Ansi.reset) ]
+                (Ansi.dim ^ (words state "  상세 조회 중" "  Loading Board detail") ^ Ansi.reset) ]
         | Board_detail.Failed error ->
             [ Board_read_layout.Thread_note
                 ((Theme.bad ()) ^ "  "
@@ -1121,7 +1123,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                 Option.map (fun (comment_id, row) -> comment_id, row + 1)
                   !initial_comment_offset;
               Board_read_layout.Thread_note
-                (Printf.sprintf (if state.ui_language = Lang_ko then "  댓글 %d/%d개 (o:전체 댓글)" else "  Showing %d of %d comments (o: all comments)")
+                (Printf.sprintf (if state.ui_language = Lang_ko then "  댓글 %d/%d개  o:전체 댓글" else "  Showing %d of %d comments  o:all comments")
                    (List.length comments) post.bp_comment_count)
               :: comment_lines
             end else
@@ -1176,7 +1178,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
           box_line buf cols
             (Ansi.bold
              ^ (if focus = Right_pane && state.board_comments_focused
-                then words state "> 댓글" "> Comments" else words state "  댓글" "  Comments")
+                then words state "\xe2\x96\xb8 댓글" "\xe2\x96\xb8 Comments" else words state "  댓글" "  Comments")
              ^ Ansi.reset);
           let gutter = comment_row_gutter ~focus state in
           for i = 0 to comment_height - 1 do

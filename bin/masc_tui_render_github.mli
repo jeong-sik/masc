@@ -7,4 +7,4 @@ type view =
   ; login_scopes : Masc.Keeper_github_identity.login_scope list
   }
 
-val lines : view -> base:string list -> string list
+val lines : ?ko:bool -> view -> base:string list -> string list

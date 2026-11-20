@@ -11,7 +11,8 @@ module Decode = Masc.Tui_decode
 (* These tests read what a graph draws, not its colour. *)
 let no_tint : Braille.tint = fun _ -> ""
 
-(* The loop polls input at most 16 ms apart. *)
+(* The test runs a pass this often, one frame interval: more often than the
+   sampler needs, so a sample is never late because of the step. *)
 let loop_step_s = 0.016
 
 (* A read that answers this long after it is sent. *)

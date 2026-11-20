@@ -1,4 +1,4 @@
-(* RFC-0232 P2: producer-typed turn outcome.
+(* producer-typed turn outcome.
 
    The reply payload's [turn_outcome] field is the only carrier of the
    checkpoint/visible/no-visible distinction; the legacy "Continuation
@@ -17,8 +17,8 @@ module Ops = Masc.Keeper_tool_surface_ops
 module Stream = Server_routes_http_keeper_stream
 module Response_text = Masc.Keeper_agent_run_response_text
 
-(* [direct_reply_terminal_error] answers with a cause, not a sentence
-   (RFC-0454 D2); these cases only assert whether there is one. *)
+(* [direct_reply_terminal_error] answers with a cause, not a sentence;
+   these cases only assert whether there is one. *)
 let summary_of_cause cause =
   Keeper_request_failure.summary { Keeper_request_failure.cause }
 ;;
@@ -917,7 +917,7 @@ let turn_ref_t : Ids.Turn_ref.t testable =
     (fun fmt t -> Format.pp_print_string fmt (Ids.Turn_ref.to_string t))
     Ids.Turn_ref.equal
 
-(* RFC-0233 §7: the consumer-side decode of the turn join key the keeper
+(* The consumer-side decode of the turn join key the keeper
    minted into the reply payload.  Parse, don't repair — absent and
    malformed both decode to None; of_string splits on the LAST '#'. *)
 let test_turn_ref_payload_decode () =

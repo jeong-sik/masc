@@ -179,7 +179,7 @@ let do_bg_compute ~key ~token ~ttl ~stale_value compute =
   match Eio_context.get_switch_opt () with
   | Some sw ->
     (* Readers already have the stale value; the inline fallback below is
-       waited on and keeps the caller's lane (RFC-0204 3.4). *)
+       waited on and keeps the caller's lane. *)
     (try Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background run) with
      | Invalid_argument _ -> run ()
      | Eio.Cancel.Cancelled _ -> ())

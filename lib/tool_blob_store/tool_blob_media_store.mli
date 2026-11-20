@@ -1,4 +1,4 @@
-(** The agent history media store over {!Tool_blob_store} (RFC-0476 §3.4).
+(** The agent history media store over {!Tool_blob_store}.
 
     [put] publishes the raw bytes durably with {!Tool_blob_store.put_durable_reuse},
     so a history that names them survives a restart; [get] reads them back

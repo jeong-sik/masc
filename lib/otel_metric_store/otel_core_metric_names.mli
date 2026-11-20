@@ -30,7 +30,7 @@ val metric_errors : string
 val metric_error_events : string
 val metric_workspace_route_failures : string
 val metric_active_agents : string
-(** RFC-0294 PR-4: gauge of orphaned tasks, labeled by status_class. *)
+(** Gauge of orphaned tasks, labeled by status_class. *)
 val metric_orphan_tasks : string
 
 val metric_sse_reconnects : string

@@ -242,7 +242,7 @@ let resolved_keeper_name config name =
   | Ok resolved -> resolved
   | Error err -> Alcotest.failf "resolve_keeper_name_config failed: %s" err
 
-(* RFC-0371 B4: typed existence for the channel-gate routes. Pins that the
+(* Typed existence for the channel-gate routes. Pins that the
    new keeper_exists_config answers through the same candidate spellings as
    the status resolver, and that unknown and invalid names are a typed
    [Ok false] — the answer the removed "keeper not found" substring
@@ -270,7 +270,7 @@ let test_keeper_exists_config_answers_typed () =
     false
     (exists "not/a valid;name")
 
-(* RFC-0393: the keeper name is the only spelling a status/surface call
+(* The keeper name is the only spelling a status/surface call
    understands — wrapper forms are ordinary (unknown) names. *)
 let test_status_reads_the_keeper_name_only () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -360,7 +360,7 @@ let test_sandbox_log_target_uses_effective_meta () =
       , effective_name ) ->
     Alcotest.(check string) "effective keeper name" name effective_name
 
-(* RFC keeper-volume-filesystem-repair §3.2: the volume sweep starts from the
+(* The volume sweep starts from the
    Owner projection, which is durable meta. Its volumes come from the TOML. *)
 let test_volume_sweep_names_volumes_from_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -1012,7 +1012,7 @@ let test_status_keeps_short_answers_and_excludes_internal_sources () =
     answers visible
 
 (* The status's message count is the head's: it holds with the messages'
-   objects gone (RFC-0476 §3.5). *)
+   objects gone. *)
 let test_status_message_count_reads_the_head () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "status-message-count" in
@@ -1616,7 +1616,7 @@ let test_config_snapshot_exposes_sandbox_image () =
   | `OK, json -> Alcotest.(check (option string)) "effective config image"
       (Some "documents") (json_string_field "sandbox_image" json)
 
-(* #38866: an assignment may name a declared lane (RFC-0457), but the snapshot
+(* #38866: an assignment may name a declared lane, but the snapshot
    carried runtime ids only, and a keeper already on a lane had that lane's id
    mixed into [runtime_options]. The lanes travel as their own list. *)
 let runtime_toml_with_lane ~keeper_name =
@@ -1960,7 +1960,7 @@ let test_config_snapshot_names_constitution_lines_the_prompt_left_out () =
     (rejected_lines broken)
 
 (* #52169: a line whose author the roster does not name decodes, yet the turn
-   leaves its norm out (RFC-0504 §2.4). The preview names that line, its
+   leaves its norm out. The preview names that line, its
    author and the ids it withholds beside the lines that did not decode. *)
 let test_config_snapshot_names_constitution_lines_whose_author_left_the_roster () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

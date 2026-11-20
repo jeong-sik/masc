@@ -1,5 +1,4 @@
-(** Capability probing that does not write into the keeper's conversation
-    (RFC-0374).
+(** Capability probing that does not write into the keeper's conversation.
 
     Asking "can keeper K reach tool T" used to cost a real turn, and a real
     turn is durable in the chat transcript, the checkpoint, and — through the

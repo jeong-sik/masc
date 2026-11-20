@@ -404,7 +404,7 @@ let test_keeper_voice_speak_exempt_keeper_is_refused_when_unconfigured () =
       fail "an exempt keeper without voice did not refuse")
 ;;
 
-(* The legacy memory bank is gone (RFC keeper-memory-consolidation Stage 4):
+(* The legacy memory bank is gone:
    a spoken or fallback utterance persists via the chat store only, and the
    speak response no longer reports a memory write. This pins the removal —
    if the memory_* response fields return, this fails. *)

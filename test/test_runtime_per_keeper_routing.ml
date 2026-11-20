@@ -6,7 +6,7 @@
    reaches the turn driver; an unassigned keeper falls through to
    [[runtime].default]; and the driver's [Runtime.get_runtime_by_id] returns
    [None] for an id that does not materialize, so dispatch fails fast (no silent
-   substitution — RFC-0206 §2.1).
+   substitution).
 
    This is the SAME runtime source as
    [Keeper_runtime.effective_declarative_runtime_id] (declare/status), which

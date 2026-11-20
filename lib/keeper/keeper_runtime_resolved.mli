@@ -10,7 +10,7 @@
     late env drift cannot change keeper execution behaviour.
 
     [stream_idle_timeout_sec] additionally substitutes a fail-safe liveness floor
-    ({!stream_idle_failsafe_floor_sec}) when unset (RFC-0345, #25128),
+    ({!stream_idle_failsafe_floor_sec}) when unset (#25128),
     [first_event_timeout_sec] substitutes {!first_event_failsafe_floor_sec}
     (RFC-AC-037) and [provider_call_deadline_sec] substitutes
     {!provider_call_deadline_failsafe_floor_sec}; an explicit value still
@@ -22,8 +22,8 @@ type source =
   | Default
   | Failsafe_floor
       (** The compiled default was [None] (unset) and a fail-safe liveness
-          floor was substituted. Applies to [stream_idle_timeout_sec]
-          (RFC-0345), [first_event_timeout_sec] (RFC-AC-037) and
+          floor was substituted. Applies to [stream_idle_timeout_sec],
+          [first_event_timeout_sec] (RFC-AC-037) and
           [provider_call_deadline_sec]. *)
 
 type 'a field = {
@@ -51,7 +51,7 @@ val source_to_string : source -> string
 val to_yojson : t -> Yojson.Safe.t
 
 val stream_idle_failsafe_floor_sec : float
-(** RFC-0345 fail-safe liveness floor for the streaming inter-line idle timeout,
+(** fail-safe liveness floor for the streaming inter-line idle timeout,
     in seconds (600.0 = 10 min). Substituted for [stream_idle_timeout_sec] when
     no explicit value is configured, so a hung provider stream cannot freeze the
     keeper chat lane indefinitely (#25128). A universal liveness ceiling, not a

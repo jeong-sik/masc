@@ -238,7 +238,7 @@ let catalog_provider_id (provider : provider) =
 
 - **관측 칸 하나가 계정을 잃는다.**
   - 자리 대기 사건 `masc.provider_admission.waited` 는 provider 칸에 `Provider_config.provider_id` 를 싣는다(`provider_admission.ml` 213행, `lib/provider_admission_events.ml` 23행). 계정 provider 의 이 칸은 모두 `claude` 가 된다.
-  - 이 칸으로 나눠 세는 것은 오프라인 측정 스크립트 둘이다(`docs/evidence/judgment-lane-admission-20261006/admission_waits.py`, `docs/evidence/lane-time-2026-11/measure_lane_time.py` 456행). 런타임 코드는 없다.
+  - 이 칸으로 나눠 세는 런타임 코드는 없다.
   - Exact receipt 의 provider 칸도 이미 catalog 행 id 를 싣는다(§1.1). slot id 는 runtime id 라서 계정을 담는다.
 - **같은 모델로 본다.** `Runtime_response_identity.same_model_identity`(`types/runtime_response_identity.ml` 56행)는 `claude_a` 와 `claude_b` 의 같은 모델을 같은 모델로 보게 된다. 지금은 다른 모델로 본다. 모델이 같으니 이쪽이 맞다고 본다.
 - **운영자가 고칠 것이 있다.**

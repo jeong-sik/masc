@@ -140,7 +140,7 @@ let log_outcome name outcome =
   match outcome with
   | Nothing_to_close -> ()
   | Closed { tool_use_ids } ->
-    (* RFC-0240 §2.4. This is the line that says a lane was saved from
+    (* This is the line that says a lane was saved from
        latching, so it is not silent even on the happy path. *)
     Log.Keeper.warn
       "transcript_tail_recovery: closed interrupted tool cycle keeper=%s \

@@ -121,7 +121,7 @@ val failed_cadence_notifications : unit -> int
     false delivery claim. If no live registry entry exists, callers
     must supply [base_path] so the payload can be persisted for replay. Callers
     that only need to break the keeper out of [interruptible_sleep] may omit the
-    stimulus. See RFC-0020 §3 (data channel vs hint signal). *)
+    stimulus. *)
 val wakeup_keeper :
   ?base_path:string ->
   ?stimulus:Keeper_event_queue.stimulus ->

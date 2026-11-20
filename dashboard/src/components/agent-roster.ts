@@ -60,7 +60,7 @@ import {
   keeperRuntimeBlockerLabel,
   keeperWorkPreview,
 } from '../lib/keeper-runtime-display'
-// RFC-0135 PR-4: roster card derives its blocker note through the typed
+// Roster card derives its blocker note through the typed
 // KeeperOperationalState SSOT so the headline (`현재 차단` vs `이전 차단`
 // vs `실행중`) matches the detail panel for the same keeper. Previously
 // `rosterStateNote` read `keeper.runtime_blocker_*` flat and never saw
@@ -738,7 +738,7 @@ function countAgentsByStatus(
 
   for (const agent of agentList) {
     const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperLookup)
-    // RFC-0135 PR-12: pass composite to band derivation so stale
+    // Pass composite to band derivation so stale
     // blockers are demoted via SSOT instead of inflating attention.
     const composite = compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const band = runtimeBandMetaForAgent(agent, keeperRuntime, composite).key
@@ -933,7 +933,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     () => new Map(
       scopedAgents.map(agent => {
         const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
-        // RFC-0135 PR-12: thread composite snapshot through band
+        // Thread composite snapshot through band
         // derivation so stale-blocker demotion in the typed SSOT
         // applies to the badge color too.
         const composite = compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)

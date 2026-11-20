@@ -46,7 +46,7 @@ type input =
         already holds, minted through {!Keeper_identity.Keeper_id.of_string},
         so it is case-folded. The prompt shows it as host-attached data so the
         librarian reads the conversation from this Keeper's side and knows
-        whom [keeper_instructions] addresses (RFC-0468 §3.1). *)
+        whom [keeper_instructions] addresses. *)
   ; keeper_instructions : string
     (** The same instructions the keeper's own system prompt carries.
         The librarian curates on the keeper's behalf, so it judges
@@ -147,8 +147,8 @@ type selection =
     (** One statement per retired memory. The librarian names only what
         changes; a current memory it does not name here stays. *)
   ; absorbed : Keeper_memory_os_types.absorbed_statement list
-    (** One statement per current memory a new claim names in [absorbs]
-        (RFC-0456 §4.2). Each is current, in no [dropped] statement, and
+    (** One statement per current memory a new claim names in [absorbs].
+        Each is current, in no [dropped] statement, and
         absorbed by one claim only; [into] is that claim's identity, which is
         the current memory itself when the claim restated one. *)
   ; facts : Keeper_memory_os_types.fact list

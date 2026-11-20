@@ -45,15 +45,11 @@ val reconcile_replacement : config:Workspace.config -> reserved:string list ->
     confirmed-predecessor authority. This never reads/submits worker state or
     grants Memory/ACK authority; pending and unknown originals remain owned. *)
 
-val observe_relation : config:Workspace.config -> reserved:string list ->
-  Keeper_librarian_durable_request.destination ->
-  (Lane_addon_captured_destination.relation, Lane_addon_submit_once.error) result
-(** Compare the original with a fresh complete configured destination and its
-    ready worker. A changed file without that worker remains unavailable,
-    never [Replaced]. This observation alone neither dispatches nor settles. *)
-
 val observe_destination : config:Workspace.config -> reserved:string list ->
   Keeper_librarian_durable_request.destination ->
   (Keeper_librarian_durable_request.destination, Lane_addon_submit_once.error) result
-(** The same complete fresh check as {!observe_relation}, retaining the actual
-    ready destination for a bound before-admission replacement refusal. *)
+(** Compare the original with a fresh complete configured destination and its
+    ready worker, retaining the actual ready destination for a bound
+    before-admission replacement refusal. A changed file without that worker
+    remains unavailable, never [Replaced]. This observation alone neither
+    dispatches nor settles. *)

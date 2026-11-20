@@ -743,8 +743,8 @@ let allowed_environment_key key =
 
 (* agy starts a background self-update when it launches. A Keeper turn would
    then swap the binary under the next turn, and parallel turns would each
-   start one (RFC-0490 §2.4). Only the value "true" stops it; "1" does not
-   (RFC-0490 measurement 11). The key is not on the allowlist above, so the
+   start one. Only the value "true" stops it; "1" does not.
+   The key is not on the allowlist above, so the
    operator's own setting never reaches the child and this entry is the only one. *)
 let auto_update_disabled = "AGY_CLI_DISABLE_AUTO_UPDATE=true"
 

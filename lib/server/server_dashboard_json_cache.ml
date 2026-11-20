@@ -145,7 +145,3 @@ let read_result ~now:clock ~sync_first ~sw ~cache ~key ~placeholder ~compute =
          with exn ->
            release owner;
            raise exn)
-
-let read ~sync_first ~sw ~cache ~key ~placeholder ~compute =
-  read_result ~now:Unix.gettimeofday
-    ~sync_first ~sw ~cache ~key ~placeholder ~compute:(fun () -> Ok (compute ()))

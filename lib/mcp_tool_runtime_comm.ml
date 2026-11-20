@@ -29,7 +29,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
     Workspace_broadcast.task_cache_signal_of_args ctx.arguments
   in
   if String.equal trimmed "" then
-    (* RFC-0189: caller-input violation (empty broadcast content).
+    (* caller-input violation (empty broadcast content).
        The producer supplies [Workflow_rejection] explicitly; body text
        never participates in classification. *)
     Some (Tool_result.error
@@ -48,7 +48,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
     | Ok task_cache_signal ->
   let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
   if not allowed then
-    (* RFC-0189: rate-limit hit — caller should retry after [wait_secs].
+    (* rate-limit hit — caller should retry after [wait_secs].
        [Dependency_unavailable] is the closest existing variant for
        retry-friendly failure, mirroring the same tag used by
        [tool_misc_web_fetch] / [tool_misc_web_search] for rate

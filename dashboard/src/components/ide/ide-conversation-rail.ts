@@ -221,7 +221,7 @@ export function IdeConversationRail() {
     publishIdeConversationThreads(threadStore.filePath(), threadStore.visibleThreads())
   }, [replayUntilMs, threadStore])
 
-  // RFC-0028 PR-δ anchored-thread producer: each fetched post becomes a
+  // anchored-thread producer: each fetched post becomes a
   // keeper-trace event the first time it is observed, deduplicated by id
   // across renders. The ref carries the cumulative known-id set so a
   // re-render with the same posts is a no-op.
@@ -234,7 +234,7 @@ export function IdeConversationRail() {
     knownPostIds.current = { owner, ids: bridgePostsToTrace(posts.map(postToTraceInput), ids, owner) }
   }, [posts, boardSource.snapshotOwner])
 
-  // RFC-0028 PR-δ-3 decision-log producer: each KeeperDecision becomes a
+  // decision-log producer: each KeeperDecision becomes a
   // keeper-trace event the first time it is observed. Dedup key is
   // `decision:${keeper_name}:${ts_unix}:${event_type}` since the
   // KeeperDecision payload has no native id field.

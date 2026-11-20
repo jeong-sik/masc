@@ -115,8 +115,7 @@ type socket_path_problem =
 
 (* [sun_path] holds the path and its terminating NUL: 104 bytes on macOS,
    108 on Linux. container 1.6.1 accepted a 112-byte host path and then failed
-   at bootstrap (docs/evidence/2026-11-03-microvm-request-transport,
-   agent-boot-flags-results.json), so the limit is checked here instead. *)
+   at bootstrap (2026-11-03), so the limit is checked here instead. *)
 let host_socket_path_limit = 103
 let guest_socket_path_limit = 107
 

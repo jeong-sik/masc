@@ -312,7 +312,7 @@ let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reaso
       | Some Starting_up | None ->
           "Keeper is reachable. Send a direct message for an immediate response.")
 
-(* RFC-0089 — the keeper "surface status" is the display status that
+(* The keeper "surface status" is the display status that
    [keeper_surface_status] derives from keeper health. It is carried on the wire
    as a string and re-classified by the server row patcher and dashboard
    pressure ranker. Close it into a sum so the producer builds it exhaustively

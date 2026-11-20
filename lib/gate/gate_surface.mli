@@ -23,7 +23,7 @@ val label : t -> string
 (** Current connector label: ["dashboard"], ["discord"], ["slack"], or the
     generic gate channel label verbatim. *)
 
-(** {1 Presence (RFC-0223 P2)} *)
+(** {1 Presence} *)
 
 type surface_presence = { surface : t; alive : bool }
 

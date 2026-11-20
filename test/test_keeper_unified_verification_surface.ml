@@ -1292,7 +1292,7 @@ let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.r
     check int "one complete attributed answer remains after ten later wakes" 1
       (List.length (List.filter (fun message -> message = original) messages)))
 
-(* RFC-0468 §3.2: the autonomous turn's User message is host text that quotes
+(* The autonomous turn's User message is host text that quotes
    each answered Ask as a row. Its speaker names the host cue and, row for
    row in the order the rows are joined, who answered. *)
 let test_autonomous_wake_speaker_names_each_answer () =

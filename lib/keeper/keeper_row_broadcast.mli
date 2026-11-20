@@ -1,4 +1,4 @@
-(** Says that one Keeper's roster row may have changed (RFC-0481 §3.2).
+(** Says that one Keeper's roster row may have changed.
 
     The event is [{"type":"keeper_row_changed","name":<keeper>,"ts_unix":...}].
     It carries the Keeper name only. A reader that shows the row reads

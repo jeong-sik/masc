@@ -512,7 +512,7 @@ let rec dispatch_simple_with_timeout ?base_host_env ?stdin_content ?on_output_ch
   let s, subst_stderr =
     eval_substitutions ?base_host_env ?stdin_content ~timeout s in
   (* The parent runs in what remains of its budget after its substitutions
-     (RFC shell-ir-typed-command-substitution §2.3: a child runs inside what
+     (a child runs inside what
      remains of the parent's timeout, and the parent spends only what the
      children left). *)
   let timeout_sec = remaining_timeout timeout in

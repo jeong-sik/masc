@@ -412,7 +412,7 @@ let identity_app_form_rows form =
   match form with
   | None -> []
   | Some f ->
-    let mark field = if f.iaf_field = field then ">" else " " in
+    let mark field = if f.iaf_field = field then "›" else " " in
     [ Printf.sprintf "  %s \xec\x95\xb1" f.iaf_label
     ; Printf.sprintf "  %s client id      %s" (mark App_client_id) f.iaf_client_id
     ; Printf.sprintf

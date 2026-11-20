@@ -325,7 +325,7 @@ let test_quarantine_orphan_keeps_valid_prefix () =
   check_exact "orphan protected under quarantine" [ orphan ] output.protected_suffix
 ;;
 
-(* RFC-0240 §2.4 / §5.4. A tool cycle left open by process death is the state
+(* A tool cycle left open by process death is the state
    checkpoint persistence stores on purpose; before [close_open_tail] nothing
    closed it, so provider admission rejected the history on every reload and the
    lane latched permanently (2026-07-27: four keepers). *)

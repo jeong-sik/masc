@@ -1,4 +1,4 @@
-(** Dashboard surface/section open counters (RFC-0049).
+(** Dashboard surface/section open counters.
 
     Increments aggregate Otel_metric_store counters
     [dashboard_surface_open_total] and [dashboard_section_open_total] in

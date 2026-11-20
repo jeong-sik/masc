@@ -9,7 +9,7 @@
 // docs/DESIGN-EXTRA-UI.md "Two avatar systems"; roster/profile rows carry
 // that operational context in their own cells. Heartbeat mirrors the old
 // animated statuses (running/active/working/busy), matching the design's
-// PHASE_PULSE bucket (prototypes/keeper-v2/data.jsx).
+// PHASE_PULSE bucket.
 
 import { html } from 'htm/preact'
 import { Sigil } from '../common/sigil-chip'

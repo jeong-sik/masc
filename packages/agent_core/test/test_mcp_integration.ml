@@ -179,9 +179,11 @@ for line in sys.stdin:
             "outputSchema":{"type":"object", "required":["value"]}}]}})
     elif method == "tools/call":
         args = request["params"]["arguments"]
-        send({"jsonrpc":"2.0", "id":request["id"], "result":{
-            "content":[{"type":"text","text":args["value"]}],
-            "isError":args["error"], "structuredContent":args}})
+        result = {"content":[{"type":"text","text":args["value"]}],
+            "isError":args["error"]}
+        if args["value"] != "absent":
+            result["structuredContent"] = None if args["value"] == "null" else args
+        send({"jsonrpc":"2.0", "id":request["id"], "result":result})
     elif method == "owner/probe":
         print("owner still open", flush=True)
 |}
@@ -249,6 +251,24 @@ let test_channel_preserves_full_results_and_flow_ownership () =
     (match Mcp.Channel.call_tool_full channel ~name:"echo" ~arguments:(`Assoc []) with
      | Error _ -> () | Ok _ -> Alcotest.fail "closed channel accepted a call");
     expect_owner_flows_open ~input ~output)
+;;
+
+let test_channel_distinguishes_null_and_absent_structured_content () =
+  with_owned_channel_flows (fun ~input ~output ->
+    let channel = channel_or_fail ~input ~output () in
+    (match Mcp.Channel.initialize channel ~client_version:"channel-test" with
+     | Ok () -> () | Error error -> Alcotest.fail (Error.to_string error));
+    let call value =
+      let arguments = `Assoc ["value", `String value; "error", `Bool false] in
+      match Mcp.Channel.call_tool_full channel ~name:"echo" ~arguments with
+      | Error error -> Alcotest.fail (Error.to_string error)
+      | Ok result -> result
+    in
+    Alcotest.(check bool) "explicit null survives stdio decoding" true
+      ((call "null").structured_content = Some `Null);
+    Alcotest.(check bool) "absent structured content stays absent" true
+      ((call "absent").structured_content = None);
+    Mcp.Channel.close channel)
 ;;
 
 let test_channel_rejects_limit_without_consuming_flows () =
@@ -338,6 +358,8 @@ let () =
     ; ( "borrowed_channel"
       , [ test_case "full results and caller-owned flows" `Quick
             test_channel_preserves_full_results_and_flow_ownership
+        ; test_case "null and absent structured content stay distinct" `Quick
+            test_channel_distinguishes_null_and_absent_structured_content
         ; test_case "invalid limit leaves flows untouched" `Quick
             test_channel_rejects_limit_without_consuming_flows
         ; test_case "response limit applies to borrowed flows" `Quick

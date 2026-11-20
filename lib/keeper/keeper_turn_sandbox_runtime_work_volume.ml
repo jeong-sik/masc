@@ -6,7 +6,7 @@ open Keeper_turn_sandbox_runtime_record
 open Keeper_turn_sandbox_runtime_run_argv
 open Keeper_turn_sandbox_runtime_container
 
-(** The work volume (RFC-0400): Apple's working tree is on a guest ext4 disk;
+(** The work volume: Apple's working tree is on a guest ext4 disk;
     Linux nerdctl uses a persistent runtime-managed directory, without Apple's
     capacity or flat host-descriptor guarantee. Created if
     it is not there yet; refusing rather than booting without it follows
@@ -178,7 +178,7 @@ let microvm_guest_provisions (t : t) ~backend ~(shim : boot_shim) ~timeout_sec =
        Ok { work_volume_name; build_volume_name; shim_host_dir })
 ;;
 
-(** Boot invariant (RFC-0052), fail-closed:
+(** Boot invariant, fail-closed:
     {!Keeper_sandbox_microvm.work_volume_guest_root} must be a real mountpoint
     inside the guest before anything is written there. The
     mkdir and write probe below both succeed against a writable rootfs

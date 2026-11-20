@@ -1,4 +1,4 @@
-(* RFC-0252 standalone fusion harness.
+(* Standalone fusion harness.
 
    Runs four arms on the same prompt and prints them side by side so a human
    can judge whether panel+judge deliberation beats the alternatives:
@@ -267,7 +267,7 @@ let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
   =
   let models_all = Fusion_policy.preset_models preset in
   let n = List.length models_all in
-  (* 하네스는 동질 arm 비교 도구다(RFC-0252 §11). 이종 preset이면 첫 그룹의 plumbing
+  (* 하네스는 동질 arm 비교 도구다. 이종 preset이면 첫 그룹의 plumbing
      (system_prompt/web_tools)을 대표로 써 모든 arm을 같은
      설정으로 돌린다 — arm 차이는 모델 집합·judge이지 plumbing이 아니다(legacy 단일
      그룹이면 그 그룹 값 = 오늘과 동일). *)
@@ -605,7 +605,7 @@ let () =
        Printf.eprintf "preset not found: %s\n" preset_name;
        exit 1
      | Some vp ->
-       (* RFC-0280: find_preset가 검증된 preset을 돌려준다. 하네스는 raw preset으로
+       (* find_preset가 검증된 preset을 돌려준다. 하네스는 raw preset으로
           coerce해 arm을 구성한다(read-only). *)
        let preset = Fusion_policy.Validated_preset.preset vp in
        (match !topology_override with

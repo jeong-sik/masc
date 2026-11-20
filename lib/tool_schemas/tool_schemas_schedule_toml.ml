@@ -1,5 +1,4 @@
-(** The schedule tools, read from [config/tools/masc_schedule_*.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+(** The schedule tools, read from [config/tools/masc_schedule_*.toml].
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a
@@ -10,10 +9,7 @@
     [Schedule_contract_values] stays the owner, and [test_enum_mirror_sync]
     compares each of the six advertised vocabularies against it, so a
     constructor added on one side without editing the file fails there instead
-    of shipping a schema that never offers the value.
-    [test_schedule_tool_toml_parity] pins the four migrated declarations
-    against what the list published before the move and separately checks
-    that the later update declaration shares the create field set. *)
+    of shipping a schema that never offers the value. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

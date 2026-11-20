@@ -1,4 +1,4 @@
-(** Keeper State Machine — Deterministic Core (RFC-0002).
+(** Keeper State Machine — Deterministic Core.
     See .mli for documentation. *)
 
 (* ── Phase ─────────────────────────────────────────────── *)
@@ -261,7 +261,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
    listed explicitly in the final arm.
 
    Background:
-     - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
      - iter 9 PR #14730 (systematic gap class) *)
 let check_event_precondition (c : conditions) (ev : event)
   : (unit, transition_error) result

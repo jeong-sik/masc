@@ -564,7 +564,7 @@ describe('Goal proof projection through tree and detail APIs', () => {
 })
 
 
-// RFC-0444 §2.3 row 4: the wire envelope Goal_unavailable_envelope.to_yojson
+// The wire envelope Goal_unavailable_envelope.to_yojson
 // emits for a store this build rejected on the criterion_revision field.
 const schemaRejectedEnvelope = {
   ok: false,

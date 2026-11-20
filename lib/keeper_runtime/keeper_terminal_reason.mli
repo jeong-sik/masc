@@ -1,11 +1,11 @@
-(** RFC-0042 PR-4: closed sum for the keeper-side classification of a
+(** Closed sum for the keeper-side classification of a
     receipt's [terminal_reason_code] string.
 
     {1 Why a third terminal-reason type}
 
     Two typed terminal-reason modules already exist:
 
-    - [Keeper_turn_terminal_code] (RFC-0042 PR-1/PR-2.5) is the
+    - [Keeper_turn_terminal_code] is the
       {e producer-side} bridge from [Keeper_registry.failure_reason] /
       [Agent_core.Error.t]. Its [of_wire] returns [None] for the
       agent-core error codes ([api_error_*], agent observation wires, [internal_error]) because

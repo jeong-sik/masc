@@ -10,8 +10,8 @@
 type tool_result = Keeper_types_profile.tool_result
 
 (** What an admitted chat turn answers with: the tool result its caller
-    carries, and — when the turn failed — the typed cause beside it
-    (RFC-0454 D2). The cause crosses this boundary as the value it is; the
+    carries, and — when the turn failed — the typed cause beside it.
+    The cause crosses this boundary as the value it is; the
     tool result's [data] is dropped downstream, so encoding it there and
     decoding it back would be a JSON round trip inside one process. *)
 type dispatch =
@@ -94,7 +94,7 @@ val handle_keeper_msg_admitted :
 (** Execute a direct message under an already-held chat admission token. Only
     the Owner operation child uses this path, after atomically claiming the
     latest durable operation body. [input_speaker] is who sent it, decided by
-    the route from the typed request (RFC-0468 §3.2). *)
+    the route from the typed request. *)
 
 (** Stop a running keeper agent. *)
 val handle_keeper_down : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

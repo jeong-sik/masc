@@ -25,7 +25,14 @@ let connect_cause (origin : Pool.origin) (failure : Pool.connect_failure) =
   | Pool.Client_failure detail ->
     Printf.sprintf "%s connection setup failed: %s" (host_port origin) detail
 
-let retry_clause seconds = Printf.sprintf "; retry in %.0fs" (Float.ceil seconds)
+(* Durations in the spellings of RFC tui-one-screen-grammar 6.2. A timeout is
+   a setting, so it reads exactly in at most two units ([30s], [1m30s], [2m]).
+   The wait before a retry is a coming moment and reads like one ([5s], [2m]).
+   Both round up, so a wait under a second never reads [0s]. *)
+let setting_text = Masc_tui_value.Interval.of_seconds
+
+let retry_clause seconds =
+  "; retry in " ^ Masc_tui_value.Ongoing.text (Float.ceil seconds)
 
 let exchange_line ~verb ~url detail =
   Printf.sprintf "%s failed: %s (%s)" verb detail url
@@ -43,10 +50,10 @@ let line ~verb ~url = function
        connect_cause origin failure ^ retry_clause retry_in_seconds
      | Pool.Timed_out { after_seconds } ->
        exchange_line ~verb ~url
-         (Printf.sprintf "no answer within %.0fs" (Float.ceil after_seconds))
+         ("no answer within " ^ setting_text after_seconds)
      | Pool.Idle_timed_out { after_seconds } ->
        exchange_line ~verb ~url
-         (Printf.sprintf "the response stopped for %.0fs" (Float.ceil after_seconds))
+         ("the response stopped for " ^ setting_text after_seconds)
      | Pool.Body_limit_exceeded { status; limit } ->
        exchange_line ~verb ~url
          (Printf.sprintf "the HTTP %d response is larger than %d bytes" status limit)

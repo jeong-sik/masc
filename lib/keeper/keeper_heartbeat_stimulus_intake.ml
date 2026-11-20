@@ -230,7 +230,7 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
        let it proceed on its own state as if nothing came back. *)
     Some Keeper_world_observation.Ask_answered_stimulus
   | Keeper_event_queue.Hitl_resolved _ ->
-    (* RFC-0320 W3b: give the HITL-resolution wake a dedicated turn_reason so
+    (* Give the HITL-resolution wake a dedicated turn_reason so
        the prompt can steer the keeper back to the originating conversation
        instead of silently proceeding on its own state. This changes only how
        the turn is described, not whether it runs. *)
@@ -278,7 +278,7 @@ let consume_single_heartbeat_stimulus
     | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
       pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Fusion_completed c ->
-      (* RFC-0266: an async fusion deliberation finished and woke this keeper.
+      (* An async fusion deliberation finished and woke this keeper.
          Surface the resolved answer as a pending_board_event so this turn acts
          on it (a non-empty list, unlike Bootstrap which injects nothing). *)
       let terminal =
@@ -339,7 +339,7 @@ let consume_single_heartbeat_stimulus
         meta_after_triage.name;
       Stimulus_consumed []
     | Keeper_event_queue.Connector_attention ca ->
-      (* RFC-connector-ambient-attention-wake: the stimulus woke this keeper.
+      (* The stimulus woke this keeper.
          The event_id is a pointer only; the message/surface content stays in
          Keeper_external_attention. Load it here and promote it to a pending
          observation so the turn has real connector context instead of a
@@ -347,7 +347,7 @@ let consume_single_heartbeat_stimulus
       let recorded_item =
         match connector_attention_items with
         | Some preloaded ->
-          (* RFC-0377 P1-1: the caller already loaded every batch member's
+          (* The caller already loaded every batch member's
              attention item in one scan (see
              [connector_attention_items_of_batch] below) — reuse it instead
              of re-scanning the whole event log for this one id. *)
@@ -864,7 +864,7 @@ let heartbeat_event_intake
       ~meta_after_triage
       ~pending_board_events
   =
-  (* RFC-event-queue-admit-all-ready — one turn observes a bounded batch of
+  (* One turn observes a bounded batch of
      ready sources from this durable snapshot. The queue is a wake/attention
      layer, not a second work tracker: admitting one row per turn made a
      steady arrival rate an unbounded backlog even while every Keeper remained

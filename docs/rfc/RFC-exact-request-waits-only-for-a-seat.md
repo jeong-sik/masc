@@ -110,7 +110,7 @@ host cycle 은 worker 의 요청 목록을 바퀴로 돈다(`lib/lane_addon/lane
 - 전달이 있었으면 그 뒤에 목록을 다시 읽는다(`lane_addon_runtime.ml` 1491행).
 - cycle 도중에 Keeper 가 새 요청을 넣으면 `wake_host` 는 cycle 을 하나 더 예약할 뿐이다(601~606행). 도는 cycle 은 그 요청을 보지 않는다.
 
-Librarian 의 다음 요청은 앞 요청의 결과가 반영된 뒤에 생긴다(`RFC-host-cycle-runs-exact-requests-side-by-side.md` §2.3).
+Librarian 의 다음 요청은 앞 요청의 결과가 반영된 뒤에 생긴다.
 그래서 먼저 끝난 Keeper 의 다음 요청은 그 바퀴의 가장 늦은 요청이 끝난 뒤에야 시작된다.
 
 13:40:21 부터 몇 초 사이에 요청 18개가 시작됐다.
@@ -228,7 +228,7 @@ official client 의 자리:
 
 ### 3.3 host 는 수를 세지 않는다
 
-`RFC-operator-quiz-lane.md` §4.4 "One cycle" 의 2번과 3번을 이렇게 바꾼다. `RFC-host-cycle-runs-exact-requests-side-by-side.md` §3.1~3.3 이 바꾼 문장을 다시 바꾼다.
+`RFC-operator-quiz-lane.md` §4.4 "One cycle" 의 2번과 3번을 이렇게 바꾼다.
 
 > 2. For each request in order: deliver a final result the host already holds, or try the work once and deliver its result if it is final.
 >    - An `exact_output` request runs beside the walk. The walk starts every `exact_output` request it lists.
@@ -334,7 +334,6 @@ Librarian lane 의 HTTP slot 이 선언 순서로 A(자리 8, Keeper 턴과 같�
 ## 6. 바뀌는 계약과 문서
 
 - `docs/rfc/RFC-operator-quiz-lane.md` §4.4 (§3.3 의 문장)
-- `docs/rfc/RFC-host-cycle-runs-exact-requests-side-by-side.md` §3.1~3.3 (이 RFC 가 바꾼다는 한 줄)
 - `docs/guides/lane-addon-toml.md` 38행·454행, `docs/guides/keeper-memory-execution.md` 223행
 - `packages/agent_core/lib/llm_provider/provider_admission.mli` 의 `with_admission_until` 설명, `slot_scheduler.mli`
 - `lib/runtime/runtime_toml_bindings.ml` 의 `max-concurrent` 주석, `lib/runtime/runtime_toml.ml` 의 official client 거절 문구

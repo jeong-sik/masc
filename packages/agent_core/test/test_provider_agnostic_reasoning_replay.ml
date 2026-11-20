@@ -2192,7 +2192,7 @@ let test_provider_replay_policy_matrix_pinned () =
     (fun model_id ->
        let base_url = "https://api.z.ai" in
        let label suffix = Printf.sprintf "glm/%s %s" model_id suffix in
-       (* RFC-0488 §3.2: an undeclared row keeps every assistant message as
+       (* An undeclared row keeps every assistant message as
           sent; only a declared [preserve_thinking = false] clears completed
           user turns. *)
        check
@@ -2510,7 +2510,7 @@ let test_rotation_policy_is_declared_per_dialect () =
        ())
 ;;
 
-(* RFC-0507: only the Anthropic Messages wire lets a request omit selected
+(* Only the Anthropic Messages wire lets a request omit selected
    reasoning, and only before the latest caller query. Every other wire keeps
    the whole selection required until its documents are read again. *)
 let test_replay_obligation_is_declared_per_dialect () =

@@ -24,6 +24,10 @@ const mocks = vi.hoisted(() => ({
   scheduledAutomationLoading: { value: false },
   scheduledAutomationError: { value: null as string | null },
   subscribeScheduledAutomationRefresh: vi.fn(() => () => {}),
+  activeSchedulesProjection: { value: null as null | DashboardScheduledAutomationProjection },
+  activeSchedulesError: { value: null as string | null },
+  stopActiveSchedulesRefresh: vi.fn(),
+  subscribeActiveSchedulesRefresh: vi.fn(),
   pruneSchedules: vi.fn(),
   fetchScheduledAutomationLookup: vi.fn(),
   replaceRoute: vi.fn(),
@@ -48,6 +52,9 @@ vi.mock('./schedule-state', () => ({
   scheduledAutomationError: mocks.scheduledAutomationError,
   scheduledAutomationLoading: mocks.scheduledAutomationLoading,
   subscribeScheduledAutomationRefresh: mocks.subscribeScheduledAutomationRefresh,
+  activeSchedulesProjection: mocks.activeSchedulesProjection,
+  activeSchedulesError: mocks.activeSchedulesError,
+  subscribeActiveSchedulesRefresh: mocks.subscribeActiveSchedulesRefresh,
 }))
 
 vi.mock('../../api/dashboard-schedule', () => ({
@@ -115,8 +122,10 @@ function sampleAutomation(): DashboardScheduledAutomationAvailableData {
   }
 }
 
-function setAutomation(data: DashboardScheduledAutomationAvailableData): void {
-  mocks.scheduledAutomationProjection.value = {
+function availableProjection(
+  data: DashboardScheduledAutomationAvailableData,
+): DashboardScheduledAutomationProjection {
+  return {
     state: 'available',
     data,
     page: {
@@ -126,6 +135,18 @@ function setAutomation(data: DashboardScheduledAutomationAvailableData): void {
       truncated: data.truncated,
     },
   }
+}
+
+/** The active-only page, which the calendar draws. */
+function setActiveSchedules(data: DashboardScheduledAutomationAvailableData): void {
+  mocks.activeSchedulesProjection.value = availableProjection(data)
+}
+
+/** The fleet page. The calendar's page holds the same rows unless a test
+ *  hands it another with `setActiveSchedules`. */
+function setAutomation(data: DashboardScheduledAutomationAvailableData): void {
+  mocks.scheduledAutomationProjection.value = availableProjection(data)
+  setActiveSchedules(data)
 }
 
 function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
@@ -194,6 +215,11 @@ describe('ScheduleSurface', () => {
     mocks.scheduledAutomationProjection.value = null
     mocks.scheduledAutomationLoading.value = false
     mocks.scheduledAutomationError.value = null
+    mocks.activeSchedulesProjection.value = null
+    mocks.activeSchedulesError.value = null
+    mocks.stopActiveSchedulesRefresh.mockReset()
+    mocks.subscribeActiveSchedulesRefresh.mockReset()
+    mocks.subscribeActiveSchedulesRefresh.mockReturnValue(mocks.stopActiveSchedulesRefresh)
     mocks.fetchScheduledAutomationLookup.mockReset()
     mocks.replaceRoute.mockReset()
     mocks.route.value = { tab: 'schedule', params: {}, postId: null }
@@ -475,21 +501,28 @@ describe('ScheduleSurface', () => {
     const totalKpi = Array.from(summary?.querySelectorAll('.ov-kpi') ?? [])
       .find(element => element.textContent?.includes('총 예약'))
     expect(totalKpi?.textContent).toContain('42')
-    expect(container.querySelector('[data-testid="schedule-page-metadata"]')?.textContent)
-      .toContain('표시 1 / 전체 42 · 최대 20 · 일부만 표시')
     // The rows left out are terminal ones: the one active schedule is on the
-    // page, so the calendar is not short of anything.
+    // calendar's page, so the calendar is not short of anything. The fleet
+    // page's numbers are not the calendar's, so they are not drawn above it.
     expect(container.querySelector('[data-testid="sch-calendar"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="sch-calendar-partial"]')).toBeNull()
+    expect(container.querySelector('[data-testid="schedule-page-metadata"]')).toBeNull()
+
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
+
+    expect(container.querySelector('[data-testid="schedule-page-metadata"]')?.textContent)
+      .toContain('표시 1 / 전체 42 · 최대 20 · 일부만 표시')
   })
 
-  it('says the calendar is partial when the page leaves active schedules out (#52961)', async () => {
-    const automation = sampleAutomation()
-    automation.request_count = 42
-    automation.truncated = true
-    // One active row on the page; the server counts five in the ledger.
-    automation.fsm = { ...automation.fsm, active_count: 5 }
-    setAutomation(automation)
+  it('says the calendar is partial when its own page leaves active schedules out (#52961)', async () => {
+    setAutomation(sampleAutomation())
+    const active = sampleAutomation()
+    active.truncated = true
+    // One active row on the calendar's page; the server counts five.
+    active.request_count = 5
+    active.fsm = { ...active.fsm, active_count: 5, terminal_count: 0 }
+    setActiveSchedules(active)
     mocks.toolsData.value = {
       tool_inventory: { tools: [] },
       tool_usage: {},
@@ -499,6 +532,146 @@ describe('ScheduleSurface', () => {
     await flush()
 
     expect(container.querySelector('[data-testid="sch-calendar-partial"]')?.textContent).toContain('4건')
+  })
+
+  describe('the calendar reads the active-only page (#52961)', () => {
+    const agendaEvent = (scheduleId: string) => container.querySelector(
+      `[data-testid="sch-agenda-event"][data-schedule-id="${scheduleId}"]`,
+    )
+    const oneshotChipCount = () => container.querySelector(
+      '[data-testid="sch-cadsum-oneshot"] .sch-cadsum-n',
+    )?.textContent
+    const later: DashboardScheduledAutomationRequest = {
+      ...sampleAutomation().requests[0]!,
+      schedule_id: 'sched-after-the-fleet-page',
+    }
+    // The fleet page is cut before `later`: the server counts two active
+    // schedules and the page holds one.
+    const cutFleetPage = (): DashboardScheduledAutomationAvailableData => {
+      const fleet = sampleAutomation()
+      fleet.request_count = 42
+      fleet.truncated = true
+      fleet.fsm = { ...fleet.fsm, active_count: 2 }
+      return fleet
+    }
+    const wholeActivePage = (): DashboardScheduledAutomationAvailableData => {
+      const active = sampleAutomation()
+      active.request_count = 2
+      active.request_limit = 200
+      active.fsm = { ...active.fsm, active_count: 2, terminal_count: 0 }
+      active.requests = [...active.requests, later]
+      return active
+    }
+    const mount = async () => {
+      mocks.toolsData.value = { tool_inventory: { tools: [] }, tool_usage: {} }
+      render(html`<${ScheduleSurface} />`, container)
+      await flush()
+    }
+
+    it('draws a schedule the fleet page was cut before, and calls nothing missing', async () => {
+      setAutomation(cutFleetPage())
+      setActiveSchedules(wholeActivePage())
+
+      await mount()
+
+      expect(agendaEvent('sched-1')).not.toBeNull()
+      expect(agendaEvent(later.schedule_id)).not.toBeNull()
+      expect(container.querySelector('[data-testid="sch-calendar-partial"]')).toBeNull()
+      // The cadence chips count what the calendar draws.
+      expect(oneshotChipCount()).toBe('2')
+    })
+
+    it('leaves the list on the fleet page', async () => {
+      setAutomation(cutFleetPage())
+      setActiveSchedules(wholeActivePage())
+      await mount()
+
+      container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+      await flush()
+      // Both rows are due; the list shows due rows under this filter.
+      container.querySelector<HTMLButtonElement>('[data-schedule-filter="due"]')?.click()
+      await flush()
+
+      expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
+      expect(container.querySelector(`[data-schedule-id="${later.schedule_id}"]`)).toBeNull()
+      expect(oneshotChipCount()).toBe('1')
+    })
+
+    it('opens a schedule of its own page without an exact lookup', async () => {
+      setAutomation(cutFleetPage())
+      setActiveSchedules(wholeActivePage())
+      mocks.route.value = {
+        tab: 'schedule',
+        params: { schedule_id: later.schedule_id },
+        postId: null,
+      }
+
+      await mount()
+
+      expect(mocks.fetchScheduledAutomationLookup).not.toHaveBeenCalled()
+      expect(container.querySelector(
+        `[data-schedule-detail-panel="${later.schedule_id}"]`,
+      )).not.toBeNull()
+    })
+
+    it('reads that page only while the calendar is open', async () => {
+      setAutomation(sampleAutomation())
+      await mount()
+      expect(mocks.subscribeActiveSchedulesRefresh).toHaveBeenCalledTimes(1)
+      expect(mocks.stopActiveSchedulesRefresh).not.toHaveBeenCalled()
+
+      container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+      await flush()
+      expect(mocks.stopActiveSchedulesRefresh).toHaveBeenCalledTimes(1)
+      expect(mocks.subscribeActiveSchedulesRefresh).toHaveBeenCalledTimes(1)
+
+      container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-calendar"]')?.click()
+      await flush()
+      expect(mocks.subscribeActiveSchedulesRefresh).toHaveBeenCalledTimes(2)
+    })
+
+    it('draws no calendar before that page is read', async () => {
+      setAutomation(cutFleetPage())
+      mocks.activeSchedulesProjection.value = null
+
+      await mount()
+
+      // The fleet page is not a stand-in: its rows would draw a week with
+      // most of its schedules missing.
+      expect(container.querySelector('[data-testid="sch-calendar"]')).toBeNull()
+      expect(container.querySelector('[data-testid="sch-cadsum"]')).toBeNull()
+      expect(container.textContent).toContain('캘린더에 쓸 예약 불러오는 중')
+      // The KPI strip is the fleet page's and is already known.
+      expect(container.querySelector('[aria-label="예약 요약"]')?.textContent).toContain('42')
+    })
+
+    it('says so when that page could not be read, and calls no day empty', async () => {
+      setAutomation(cutFleetPage())
+      mocks.activeSchedulesProjection.value = {
+        state: 'unavailable',
+        reason: 'schedule store read failed: fixture',
+      }
+
+      await mount()
+
+      expect(container.querySelector('[data-testid="schedule-calendar-unavailable"]')?.textContent)
+        .toContain('schedule store read failed: fixture')
+      expect(container.querySelector('[data-testid="sch-calendar"]')).toBeNull()
+      expect(container.textContent).not.toContain('캘린더에 쓸 예약 불러오는 중')
+      expect(container.textContent).not.toContain('다가오는 7일에 예정된 예약이 없습니다')
+    })
+
+    it('keeps the last page on screen when reading it again fails', async () => {
+      setAutomation(cutFleetPage())
+      setActiveSchedules(wholeActivePage())
+      mocks.activeSchedulesError.value = 'fixture: offline'
+
+      await mount()
+
+      expect(container.querySelector('[data-testid="schedule-calendar-unavailable"]')?.textContent)
+        .toContain('fixture: offline')
+      expect(agendaEvent(later.schedule_id)).not.toBeNull()
+    })
   })
 
   it('prunes completed schedules through the live dashboard API and refreshes projection', async () => {

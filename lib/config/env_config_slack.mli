@@ -1,4 +1,4 @@
-(** Env_config_slack — Slack connector env accessors (RFC-0317).
+(** Env_config_slack — Slack connector env accessors.
 
     Config-boundary reads for the in-process Slack connector. Disabled or
     invalid configuration suppresses both tokens even when inherited. *)

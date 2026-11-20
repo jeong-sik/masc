@@ -130,8 +130,9 @@ val waiting : t -> int
 val waiting_label : ko:bool -> cells:int -> t -> string
 (** The badge for the surface strip, as plain text; styling belongs to the
     renderer. It names what waits, by kind and in that order of attention --
-    questions, held calls, Goals to confirm -- led by the [;] key
-    that opens the panel, and is [""] when nothing waits.
+    questions, held calls, Goals to confirm -- led by the operator-action mark
+    [◆] and closed by the [(;)] key hint that opens the panel, and is [""] when
+    nothing waits.
 
     The longest of three spellings that fits [cells] is returned: the
     sentence, the kinds alone, the {!waiting} total alone. The total is

@@ -1,4 +1,4 @@
-(* RFC play-link-for-the-shared-machine §2.7: /mcp/play is the seat door an
+(* /mcp/play is the seat door an
    invited agent plays through. It lets an invite's Player credential in,
    answers the handshake and the CanPlayMachine tools, and nothing else. *)
 

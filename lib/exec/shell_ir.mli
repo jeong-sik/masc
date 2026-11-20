@@ -84,7 +84,7 @@ val with_sandbox : Sandbox_target.t -> t -> t
     is the delegation's. Execution reads the target from the IR
     ({!Exec_dispatch.dispatch} takes none), so a caller re-running a command
     under a different target must pass a rewritten IR — the observation
-    stage (RFC-0422) does exactly this. *)
+    stage does exactly this. *)
 
 val with_sandbox_cwd : Sandbox_target.t -> Path_scope.t option -> t -> t
 (** [with_sandbox_cwd target parent_cwd ir] is {!with_sandbox} with the

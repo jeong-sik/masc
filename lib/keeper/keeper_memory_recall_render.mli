@@ -1,5 +1,4 @@
-(** The text of the two blocks a judged turn carries
-    (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, section 4.4).
+(** The text of the two blocks a judged turn carries.
 
     The status line says what the judgment came to and is sent every turn. The
     body holds the memories the judgment carried and is sent when that set

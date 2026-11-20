@@ -1,19 +1,16 @@
-(** Fusion — 결정론적 발동 게이트 (RFC-0252 §6).
+(** Fusion — 결정론적 발동 게이트.
 
     config 상한과 구조적 적격성을 대조해 [Allow]/[Deny]를 내는 순수 함수.
     "이 턴이 심의할 가치가 있나"의 판단은 키퍼(이미 LLM)가 masc_fusion을 호출하는
-    것으로 표현되고, 게이트는 enabled/preset/depth의 구조적 안전만 본다.
-
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md *)
+    것으로 표현되고, 게이트는 enabled/preset/depth의 구조적 안전만 본다. *)
 
 (** 한 패널 그룹 — 공통 설정으로 실행되는 모델 묶음. 한 preset이 이종
-    그룹 여럿을 가질 수 있다 (RFC-0252-A). 닫힌 record. *)
+    그룹 여럿을 가질 수 있다. 닫힌 record. *)
 type panel_group =
   { models : string list
-      (** 자리마다 경로 이름 하나: [\[runtime.lanes\]] lane 이름 또는 런타임 id
-          (RFC fusion-seat-routes). *)
+      (** 자리마다 경로 이름 하나: [\[runtime.lanes\]] lane 이름 또는 런타임 id. *)
   ; label : string
-      (** 패널 정체성 라벨 (RFC-0278). 같은 model을 다른 system_prompt로 여러 그룹에
+      (** 패널 정체성 라벨. 같은 model을 다른 system_prompt로 여러 그룹에
           둘 때 패널을 구분한다. ""(기본)이면 정체성=model 그대로 → legacy byte-identical.
           정체성 derive는 {!panelist_id}. *)
   ; system_prompt : string
@@ -31,7 +28,7 @@ type panel_group =
   }
 [@@deriving show, eq]
 
-(** JOJ(judge-of-judges, RFC-0283)의 1차 심판 한 명. {!panel_group}과 동형이되 모델이
+(** JOJ(judge-of-judges)의 1차 심판 한 명. {!panel_group}과 동형이되 모델이
     단수다(심판은 한 모델이 한 종합을 낸다). 필드는 [j] 접두 — panel_group의 동명 필드와
     타입 추론 충돌을 피한다. 정체성 derive는 {!panelist_id}([jlabel]/[jmodel]). *)
 type judge_spec =
@@ -46,9 +43,9 @@ type judge_spec =
   }
 [@@deriving show, eq]
 
-(** 패널 preset — 이종 패널 그룹 리스트 + 단일 심판 (RFC-0252 §9, RFC-0252-A).
-    [judge]는 경로 이름(lane 이름 또는 런타임 id, RFC fusion-seat-routes)이며,
-    simple/refine/conditional 위상의 심판이자 JOJ의 meta-judge(reducer)다 (RFC-0283).
+(** 패널 preset — 이종 패널 그룹 리스트 + 단일 심판.
+    [judge]는 경로 이름(lane 이름 또는 런타임 id)이며,
+    simple/refine/conditional 위상의 심판이자 JOJ의 meta-judge(reducer)다.
     legacy flat 문법(panel=[...])은 {!Fusion_config}가 정확히 길이-1 그룹으로
     desugar한다 — 그 경우 오늘과 byte-identical 동작. *)
 type preset =
@@ -65,7 +62,7 @@ type preset =
           [timeout_s]와 같다(official-client 는 스트림 무응답 한도). [None]이면
           런타임/provider 설정. *)
   ; judges : judge_spec list
-      (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
+      (** JOJ 1차 심판들. 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   ; min_answered : int
       (** 심판을 돌리기 위해 응답해야 하는 패널 최소 수 (런타임 quorum). 기본 1.
@@ -120,7 +117,7 @@ val preset_seat_routes : preset -> (seat_kind * string) list
     그대로다. *)
 val map_seat_routes : (string -> string) -> preset -> preset
 
-(** 패널 정체성 (RFC-0278). [label]이 비면 [model] 그대로(legacy byte-identical),
+(** 패널 정체성. [label]이 비면 [model] 그대로(legacy byte-identical),
     있으면 ["label (model)"]. agent 카드명·심판 패널 태그·[panel_answer.model]에
     쓰이는 유일 식별자. provider 라우팅은 원 model로 build 시점에 따로 한다. *)
 val panelist_id : label:string -> model:string -> string
@@ -131,7 +128,7 @@ val preset_panelist_ids : preset -> string list
 (** 두 패널이 같은 {!panelist_id}를 가지면 그 id를 반환 (없으면 [None]). 중복 정체성은
     [Async_agent.all] 결과/synthesis에서 패널 구분 불가(모호성)를 부르므로 config 로드
     시 거부한다. 한 그룹 내 동일 model·라벨 없는 두 그룹의 동일 model·동일 라벨+model을
-    한 invariant로 흡수하고, 서로 다른 라벨의 동일 model은 통과한다 (RFC-0278). *)
+    한 invariant로 흡수하고, 서로 다른 라벨의 동일 model은 통과한다. *)
 val preset_duplicate_panelist : preset -> string option
 
 (** Staged JOJ preset grouping validation. This is runtime topology validation
@@ -165,7 +162,7 @@ val staged_judge_groups
     단일 그룹이면 [req_web_tools || group.web_tools] (오늘과 byte-identical). *)
 val judge_web_tools_of : req_web_tools:bool -> panel_group list -> bool
 
-(** RFC-0280: 검증을 통과한 preset (Parse, don't validate). [t = private preset]이라
+(** 검증을 통과한 preset (Parse, don't validate). [t = private preset]이라
     필드는 자유롭게 읽되([preset] 또는 coercion [(vp :> preset)]) 검증 없이 생성할 수
     없다 → invalid preset이 게이트·orchestrator로 흐를 수 없다. 검증 SSOT는
     [of_preset] 한 곳이며, 호출처는 재검증하지 않는다. *)
@@ -182,8 +179,8 @@ module Validated_preset : sig
         (** 그룹/심판 max_output_tokens override가 양수가 아님 *)
     | Bad_timeout_s of float
         (** 그룹/심판/1차 심판 응답 데드라인이 유한 양수가 아님 *)
-    | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
-    | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
+    | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 *)
+    | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 *)
     | Min_answered_below_min of int
         (** [min_answered]가 하한 [min_answered_floor] 미만. *)
     | Min_answered_above_max of int
@@ -210,7 +207,7 @@ val with_roster
   :  preset
   -> Fusion_types.roster
   -> (Validated_preset.t, Validated_preset.invalid) result
-(** 요청의 명단을 preset 에 얹은 이번 실행의 preset (RFC fusion-seat-routes §2.4).
+(** 요청의 명단을 preset 에 얹은 이번 실행의 preset.
 
     - [judge_route] 가 있으면 [judge] 를 바꾼다.
     - [panel_routes] 가 있으면 panel 명단을 라벨 없는 그룹 하나로 바꾼다. 그 그룹의
@@ -223,7 +220,7 @@ val with_roster
     를 주면 검사를 통과한 preset 이 그대로 돌아온다. *)
 
 (** 해석된 [fusion] config. {!Fusion_config}가 runtime.toml에서 생성한다.
-    [presets]는 검증된 preset만 담는다 (RFC-0280). *)
+    [presets]는 검증된 preset만 담는다. *)
 type t =
   { enabled : bool
   ; default_preset : string
@@ -233,7 +230,7 @@ type t =
 [@@deriving show, eq]
 
 (** preset 이름으로 조회. 없으면 [None] (게이트가 [Preset_unknown]으로 변환).
-    검증된 preset을 돌려주므로 호출처는 invariant를 재검증할 필요가 없다 (RFC-0280). *)
+    검증된 preset을 돌려주므로 호출처는 invariant를 재검증할 필요가 없다. *)
 val find_preset : t -> string -> Validated_preset.t option
 
 (** Structural admission for a top-level Fusion submission before its
@@ -251,14 +248,14 @@ val effective_preset
 
 (** 결정론적 게이트 (순수, side-effect 없음).
 
-    판정 순서 (RFC-0252 §6) — 구조/자원 안전만 본다:
+    판정 순서 — 구조/자원 안전만 본다:
     + [enabled = false] → [Deny Disabled]
     + preset 없음 → [Deny (Preset_unknown _)]
     + [depth = Nested] → [Deny Depth_exceeded]
     + 그 외 → [Allow request]
 
-    size는 [Validated_preset.t]로 타입 증명되므로 게이트가 재검증하지 않는다
-    (RFC-0280). "이 턴이 심의할 가치가 있나"는 게이트가 score/문자열로 판정하지
+    size는 [Validated_preset.t]로 타입 증명되므로 게이트가 재검증하지 않는다.
+    "이 턴이 심의할 가치가 있나"는 게이트가 score/문자열로 판정하지
     않는다 — 그 판단은 키퍼(이미 LLM)가 masc_fusion을 호출하는 것으로 표현되고,
     trigger는 발동 이유 라벨일 뿐이다. *)
 val decide

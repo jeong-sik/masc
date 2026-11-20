@@ -38,7 +38,7 @@ val make_routes_with_transport :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Http.Router.t
 (** {!make_routes} for a server whose connections run on another domain than
-    its handlers (RFC http-transport-runs-on-its-own-domain §3.3). [sw] is
+    its handlers. [sw] is
     the switch handlers fork under. [transport_sw] is a switch of the domain
     that runs the connections, for the route whose handler stays on that
     domain and keeps fibers beside its connection: the IDE LSP proxy (its

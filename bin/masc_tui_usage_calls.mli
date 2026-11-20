@@ -55,12 +55,12 @@ val of_series :
     than the window draws is an error: its labels would be wrong or its chart
     shorter than the window it names. *)
 
-val note_lines : days:int -> string -> string list
+val note_lines : ?ko:bool -> days:int -> string -> string list
 (** The heading followed by [note], drawn while there is no series to chart:
     before the first read and when a read failed. A number of days the section
     does not draw is named by its days. *)
 
-val lines : width:int -> rows:int -> t -> string list
+val lines : ?ko:bool -> width:int -> rows:int -> t -> string list
 (** The section as styled rows, none wider than [width] cells: a heading, the
     window's totals, a bar for calls, failed calls and p95, a legend, and a
     table of the same numbers with the newest bucket first. A bucket in which
@@ -74,7 +74,7 @@ val lines : width:int -> rows:int -> t -> string list
     legend takes one row and the blank rows go, so the table shows more of its
     rows before the reader has to scroll. *)
 
-val summary_line : cells:int -> t -> string
+val summary_line : ?ko:bool -> cells:int -> t -> string
 (** The Dashboard's one row, none wider than [cells]: the window named in a few
     characters ([24h], [7d], [14d]), the calls as one glyph per bucket, then the
     window's calls and failed calls. The glyphs scale to the window's own
@@ -82,7 +82,7 @@ val summary_line : cells:int -> t -> string
     {!lines}. A width without room for the glyphs drops them; a narrower one
     cuts the rest. A window in which no call ran says [no calls], not zero. *)
 
-val summary_note : cells:int -> window -> string -> string
+val summary_note : ?ko:bool -> cells:int -> window -> string -> string
 (** The same row while there is no series to chart: the window and [note], cut
     to [cells]. The Dashboard draws it before the first read and when a read
     failed, so a reading that is missing is never drawn as a count of zero. *)

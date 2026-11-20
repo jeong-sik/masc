@@ -129,7 +129,7 @@ type dispatched_event =
       ; author_name : string option
         (** Display name: [author.global_name] when set, else
             [author.username]; [None] only when the payload carries
-            neither (RFC-0223 P1). *)
+            neither. *)
       ; attachments : inbound_attachment list
         (** Files Discord says came with the message. Required fields per the
             Attachment object are [id], [filename], [size], [url] and
@@ -151,7 +151,7 @@ type dispatched_event =
         (** The bot identity this message was decoded against; [mentions_bot]
             and [explicit_mentions_bot] were judged with it. *)
       ; mention_user_ids : string list
-            (* RFC-0232 §3.3: the structured [mentions] member ids are
+            (* The structured [mentions] member ids are
                kept at decode instead of being reduced to a bot bool;
                the gate maps what its bindings can resolve. *)
       ; mentions_bot : bool
@@ -276,7 +276,7 @@ type gateway_effect =
   | Schedule_backoff of { delay_ms : int }
   | Emit_event of dispatched_event   (** Surface to caller's on_event. *)
   | Emit_ambient of dispatched_event
-      (** Record-only delivery (RFC-0226): a [Message_create] that
+      (** Record-only delivery: a [Message_create] that
           failed [trigger_policy] but is not the bot's own echo. The
           I/O layer persists it to the bound keeper's lane history;
           it must not start a turn. *)
@@ -305,8 +305,7 @@ and trigger_policy =
 val parse_trigger_policy : string -> (trigger_policy, string) result
 (** Decodes [DISCORD_TRIGGER_POLICY] env value. Accepts exactly
     ["mention_only"], ["mention_or_thread"], ["user_only:<snowflake>"], ["all"]. Anything
-    else returns [Error] — no string-classifier inference
-    (RFC-0203 §Non-goals). *)
+    else returns [Error] — no string-classifier inference. *)
 
 val trigger_policy_to_string : trigger_policy -> string
 (** Inverse of {!parse_trigger_policy}. Used for diagnostics and API exposure. *)

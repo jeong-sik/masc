@@ -1,4 +1,4 @@
-(** RFC-0233 §2.2 — one record per keeper turn, written at the same
+(** One record per keeper turn, written at the same
     point that writes the execution receipt.
 
     Block *text* is never duplicated into the record; [digest] (sha256
@@ -182,7 +182,7 @@ type t =
   ; trace_id : string
   ; absolute_turn : int
   ; turn_ref : Ids.Turn_ref.t
-    (* RFC-0233 §7 — required "<trace_id>#<absolute_turn>" join key for
+    (* Required "<trace_id>#<absolute_turn>" join key for
        chat/board. The decoder rejects a key that does not exactly match the
        row's [trace_id] and [absolute_turn]. *)
   ; blocks : prompt_block list (* assembly order *)
@@ -194,13 +194,13 @@ type t =
        attribution was unavailable; an observed empty input is [Some []]. *)
   ; runtime_profile : string
   ; selected_model : string option
-    (* RFC-0233 §2.2/§2.3 — exact model selected by the successful runtime
+    (* Exact model selected by the successful runtime
        attempt, sourced from that attempt's [Runtime_observation]. This is
        durable operator evidence, not an aggregate telemetry label. [None]
        when the turn completed without selected-model evidence; the inspector
        renders absence rather than a fabricated name. *)
   ; finish_reason : string option
-    (* RFC-0233 §2.3 — keeper turn stop reason, serialized via the
+    (* Keeper turn stop reason, serialized via the
        receipt SSOT [Keeper_execution_receipt.stop_reason_to_string].
        [None] when the turn errored before a stop reason was recorded;
        an unknown reason is never collapsed to a fake "stop". *)
@@ -220,7 +220,7 @@ type t =
 
        [None] when the turn recorded no surface. *)
   ; context_window : int option
-    (* RFC-0233 §8 — keeper-resolved effective context budget (tokens) for
+    (* keeper-resolved effective context budget (tokens) for
        this turn, the denominator the dashboard ctx-fill% uses. [None] on
        the error path; the inspector renders absence rather
        than the fabricated 200K. This is the keeper conversation ceiling
@@ -235,12 +235,12 @@ type t =
         no separate occupancy field, and never a conversation-cumulative
         one. *)
   ; price_input_per_million : float option
-    (* RFC-0233 §8 — USD per 1M input tokens declared on the runtime
+    (* USD per 1M input tokens declared on the runtime
        binding in runtime.toml. [None] when the operator left it unset;
        the inspector renders cost absence rather than a fabricated Claude
        $3/$15 default. *)
   ; price_output_per_million : float option
-    (* RFC-0233 §8 — USD per 1M output tokens, same source/absence rule as
+    (* USD per 1M output tokens, same source/absence rule as
        [price_input_per_million]. *)
   ; request_latency_ms : int option
     (* RFC-0233 §9 — wall-clock duration of the provider call in
@@ -337,7 +337,7 @@ val turn_kind_to_string : turn_kind -> string
 val to_json : t -> Yojson.Safe.t
 
 val of_json : Yojson.Safe.t -> (t, string) result
-(** Fails loudly on malformed rows instead of repairing them — RFC-0233 §4.
+(** Fails loudly on malformed rows instead of repairing them.
     [turn_ref] and provider-input observation fields are required. Unknown or
     duplicate fields, prompt blocks, or input-component ids, negative byte
     counts, partial request-runtime/request-bytes pairs, and a [turn_ref]

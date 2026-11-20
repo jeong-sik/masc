@@ -1,6 +1,6 @@
 (** Name, description and parameters for the four filesystem tools, read from
     the binary-embedded [config/tools/tool_{read,edit,write,search}_file*.toml]
-    declarations (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+    declarations.
 
     One file declares one tool; [schema_of_name] decodes it through
     [Tool_definition_toml] once at module initialization. A missing file or a

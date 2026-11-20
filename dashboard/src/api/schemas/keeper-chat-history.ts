@@ -107,7 +107,7 @@ const KeeperChatTraceStepSchema = union([
   }),
 ])
 
-// RFC-0235 P3: server-parsed rich chat blocks carried on persisted history
+// server-parsed rich chat blocks carried on persisted history
 // rows. Keep this aligned with keeper_chat_blocks.ml and the dashboard
 // renderer's ChatBlock union. safeParseKeeperChatHistoryMessage rejects rows
 // with malformed block arrays; history readers reject the whole observation.
@@ -185,7 +185,7 @@ export const KeeperChatBlockSchema = union([
     desc: optional(string()),
     meta: optional(string()),
   }),
-  // RFC-0252: fusion deliberation card. Must be accepted here or a message
+  // Fusion deliberation card. Must be accepted here or a message
   // carrying a fusion block (the keeper conclusion) is dropped wholesale.
   object({
     t: literal('fusion'),
@@ -280,7 +280,7 @@ export const KeeperChatHistoryMessageSchema = object({
   speaker_id: optional(string()),
   speaker_name: optional(string()),
   speaker_authority: optional(string()),
-  // RFC-0233 §7: turn join key "<trace_id>#<absolute_turn>" the keeper minted
+  // Turn join key "<trace_id>#<absolute_turn>" the keeper minted
   // onto every row of the turn (Keeper_chat_store.to_json_array emits it).
   // Read-only here; the board post that the same turn produced carries the
   // identical string in its origin, so a board post can anchor to the exact
@@ -288,7 +288,7 @@ export const KeeperChatHistoryMessageSchema = object({
   // undefined, never drops the message). Consumed for navigation in a
   // follow-up (KeeperConversationEntry.turnRef).
   turn_ref: optional(string()),
-  // RFC-0235 P1/P3: audio clip field. The wire object is accepted as
+  // Audio clip field. The wire object is accepted as
   // `unknown` at the boundary so malformed clips do not cause the whole
   // message to be dropped; `normalizeAudioClip` validates before use.
   audio: optional(unknown()),
@@ -303,7 +303,7 @@ export const KeeperChatHistoryMessageSchema = object({
   // escape this module; callers receive the closed delivery_provenance ADT.
   delivery_key: optional(unknown()),
   transcript_slot: optional(unknown()),
-  // RFC-0235 P3: server-parsed rich chat blocks. Carried on history rows so
+  // server-parsed rich chat blocks. Carried on history rows so
   // reloads preserve the structured render instead of re-parsing plain text.
   blocks: optional(array(KeeperChatBlockSchema)),
   // Durable typed Gate lifecycle projection. Kept unknown at this transport

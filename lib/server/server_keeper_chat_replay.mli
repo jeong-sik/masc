@@ -1,4 +1,4 @@
-(** RFC-0412 stage 2: replay a journaled keeper chat turn through the AG-UI
+(** Replay a journaled keeper chat turn through the AG-UI
     projection for a reconnecting SSE client. *)
 
 val replay :

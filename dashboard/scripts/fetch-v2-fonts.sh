@@ -13,18 +13,9 @@
 # The Cinzel TTF (public/assets/fonts/Cinzel-Regular.ttf) predates this script
 # and is left in place untouched.
 #
-# The same run also fills prototypes/keeper-v2/styles/fonts/ with the static
-# TTFs the prototype's own colors_and_type.css @font-face rules point at
-# (Cinzel + Noto Sans KR). Without them the prototype side of the parity
-# harness renders those faces from system fallbacks while the vendored side
-# loads real files, and the SSIM delta measures font availability, not skin
-# drift. That directory is gitignored; run this script after cloning.
-#
-# The UA matters: css2 serves different files per client, and the parity
-# harness browses with Playwright's headless Chromium, so the woff2 bytes the
-# dashboard serves must be the bytes that same browser would fetch itself —
-# "same font, same bytes" (e2e/design-parity-css.mjs). If the Playwright
-# version changes its UA, update it here and re-run.
+# The UA matters: css2 serves different files per client. The UA below is
+# headless Chromium's, so the served woff2 bytes are the ones that browser
+# would fetch itself.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -128,16 +119,3 @@ total = sum(os.path.getsize(os.path.join(DEST, f)) for f in os.listdir(DEST) if 
 print(f"wrote {len(eb_jb)} latin faces + {len(noto)} Noto KR slices ({n} files, {total/1024/1024:.2f}MB total)")
 PYEOF
 
-# ── Prototype-side TTFs ──────────────────────────────────────────────────────
-# css2 answers with static TTF urls when the client sends no modern UA.
-mkdir -p prototypes/keeper-v2/styles/fonts
-fetch_ttf() {  # family-arg, out-file
-  local url
-  url=$(curl -s "https://fonts.googleapis.com/css2?family=$1&display=swap" \
-        | sed -n 's/.*src: url(\([^)]*\)) format.*/\1/p')
-  [ -n "$url" ] || { echo "no ttf url for $1" >&2; exit 1; }
-  [ -f "prototypes/keeper-v2/styles/fonts/$2" ] || curl -s -o "prototypes/keeper-v2/styles/fonts/$2" "$url"
-  echo "proto font: $2"
-}
-fetch_ttf "Cinzel:wght@400" "Cinzel-Regular.ttf"
-fetch_ttf "Noto+Sans+KR:wght@400" "NotoSansKR-Regular.ttf"

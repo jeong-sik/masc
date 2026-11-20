@@ -597,7 +597,7 @@ let test_create_publishes_without_host_path_input () =
 ;;
 
 (* When two sources declare one name, the earlier source wins and the later
-   package is its shadow (RFC keeper-self-authored-skills). Keeper turns list
+   package is its shadow. Keeper turns list
    Skills by name, so a create that lands behind an earlier source is written
    and published but never seen, and the answer has to say whose package is
    seen instead. *)

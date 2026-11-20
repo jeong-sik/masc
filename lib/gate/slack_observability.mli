@@ -1,4 +1,4 @@
-(** Slack connector observability helpers (RFC-0317).
+(** Slack connector observability helpers.
 
     The outcome vocabularies and their labels come from
     {!Gate_connector_observability}, shared with the Discord connector — the

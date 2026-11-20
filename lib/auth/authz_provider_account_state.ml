@@ -205,7 +205,6 @@ let apply t ~(author : Author.t) ~is_active ~removal (event : E.t) =
     , (E.Linked _ | E.Key_linked _ | E.Key_replaced _) ) -> Error (Not_a_human principal)
   | ( ( Author.Local_operator
       | Author.System_cron
-      | Author.System_maintenance
-      | Author.System_migration )
+      | Author.System_maintenance )
     , (E.Linked _ | E.Key_linked _ | E.Key_replaced _) ) -> Error (Not_an_account_author author)
 ;;

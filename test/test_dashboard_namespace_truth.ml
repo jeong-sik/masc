@@ -314,11 +314,11 @@ let test_dashboard_namespace_truth_execution_fixture () =
         let json =
           Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
-            (request "/api/v1/dashboard/namespace-truth?fixture=execution_smoke")
+            (request "/api/v1/dashboard/namespace-truth")
         in
         let open Yojson.Safe.Util in
         (* top_queue is null when cache has no execution_queue entries *)
-        check bool "fixture top queue absent when no blockers"
+        check bool "top queue absent when no blockers"
           true
           (json |> member "execution" |> member "top_queue" = `Null);
       ))
@@ -739,9 +739,21 @@ let test_warm_dashboard_surfaces_populates_caches () =
       in
       check bool "keeper_memory_health cache key populated" true
         (Option.is_some (Dashboard_cache.peek keeper_health_key));
+      (* The read the warm-up makes: the operator's first page of 100, hot
+         first, nothing narrowed. *)
       let board_key =
-        Printf.sprintf "board:memory:%s;-;-;hot;false;false;100;0;%s;-"
-          Masc_board_handlers.Board_access.(cache_key Operator) dir
+        Server_dashboard_http.board_memory_cache_key
+          ~reader:Masc_board_handlers.Board_access.Operator
+          ~base_path:(Some dir)
+          ~hearth:None
+          ~author_filter:None
+          ~text_query:None
+          ~sort_by:Lib.Board_dispatch.Hot
+          ~exclude_system:false
+          ~exclude_automation:false
+          ~limit:100
+          ~offset:0
+          ~voter:None
       in
       check bool "board cache key populated" true
         (Option.is_some (Dashboard_cache.peek_payload board_key)))

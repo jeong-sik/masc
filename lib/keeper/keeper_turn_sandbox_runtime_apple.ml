@@ -309,7 +309,7 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       | Plan.Matches_plan ->
         (* The plan matched, but the plan cannot see the agent: only its
            hello says it is there, answers, and was built from this
-           server's source (RFC microvm-guest-agent-over-socket 3.6). One
+           server's source. One
            that does not is replaced rather than adopted. *)
         (match
            Keeper_microvm_agent_socket.check_agent
@@ -414,7 +414,7 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
           | Keeper_sandbox_microvm.Apple_constraints_unexpressible refusals ->
             Constraints_unexpressible {backend; refusals}) in
       (* Last before the boot: a socket file left by a guest that did not end
-         cleanly stops [container run] (RFC microvm-guest-agent-over-socket 3.6). *)
+         cleanly stops [container run]. *)
       let guest_presence () =
         Keeper_microvm_guest_inventory.read ~backend ~guest_name:container_name ~timeout_sec
         |> Result.map_error Keeper_microvm_guest_inventory.error_message in

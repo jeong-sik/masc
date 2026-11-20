@@ -1,4 +1,4 @@
-# MCP surface prose (RFC prompts-and-tool-definitions-outside-ocaml §3 item 8):
+# MCP surface prose:
 # the static resource catalogue advertised by resources/list and
 # resources/templates/list, the server description carried in every initialize
 # result, and the per-tool help-resource name suffix composed by

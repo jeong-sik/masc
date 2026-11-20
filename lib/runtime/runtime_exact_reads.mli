@@ -1,5 +1,5 @@
 (** The five capabilities of its model an exact-output slot needs runtime.toml
-    to state for a binding (RFC-0514 §2.2).
+    to state for a binding.
 
     A model the AGENT_CORE catalog has no row for is an exact slot only when
     runtime.toml states all five: the window, the effort ladder, JSON mode,

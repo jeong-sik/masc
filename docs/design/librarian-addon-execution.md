@@ -6,9 +6,7 @@ host for absorption, Memory and ACK. The completed-history production queue now
 also uses an immutable Addon owner for checkpoint, official-client and mixed
 input. Continuity and other purposes remain on their existing host paths.
 
-[Current execution evidence](../evidence/2026-10-23-librarian-history-owner/README.md)
-separates successful Pending-foundation and Python-worker checks from the new
-host integration selection. Earlier failures and their repairs remain in the
+Earlier failures and their repairs remain in the
 worklist. E03 stays incomplete until its original memory lineage, failure
 semantics, pending-work and actual Keeper-continuity criteria are verified.
 
@@ -520,9 +518,7 @@ suspends the same wake's following Memory phases; ordinary Pending does not
 carry a separate live detail string. Neither unknown work nor a malformed
 inventory is absence.
 
-The [execution receipt](../evidence/2026-10-23-librarian-history-owner/README.md)
-separates passing foundation/worker checks, the actual first host integration
-failures and later repairs. The integration fixture uses real Runtime, Python
+The integration fixture uses real Runtime, Python
 worker, host Exact HTTP/server authorization, Memory lane and files; resource
 launch/cleanup and provider HTTP are substituted. Absorption-model policy is
 disabled in that fixture. History capacity/failure descent, remaining Librarian

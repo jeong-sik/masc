@@ -177,16 +177,16 @@ let sandboxes = Masc.Keeper_types_profile.all_sandbox_profiles
 let now_header = "NOW"
 let age_header = "AGE"
 
-let operator_disposition_word : Masc.Keeper_execution_receipt.operator_disposition_kind -> string = function
-  | Disp_operator_action_required -> "사람 몫"
-  | Disp_effect_review_required -> "효과 확인"
-  | Disp_unknown -> "분류 안 됨"
-  | Disp_pass -> "pass"
-  | Disp_fail_open_next_runtime -> "fail open"
-  | Disp_retry_later -> "retry later"
-  | Disp_pass_next_model -> "next model"
-  | Disp_user_cancelled -> "cancelled"
-  | Disp_skipped -> "skipped"
+let operator_disposition_word ~ko : Masc.Keeper_execution_receipt.operator_disposition_kind -> string = function
+  | Disp_operator_action_required -> if ko then "사람 몫" else "human"
+  | Disp_effect_review_required -> if ko then "효과 확인" else "review"
+  | Disp_unknown -> if ko then "분류 안 됨" else "unclassed"
+  | Disp_pass -> if ko then "통과" else "pass"
+  | Disp_fail_open_next_runtime -> if ko then "다음 런타임" else "fail open"
+  | Disp_retry_later -> if ko then "나중에 재시도" else "retry later"
+  | Disp_pass_next_model -> if ko then "다음 모델" else "next model"
+  | Disp_user_cancelled -> if ko then "취소됨" else "cancelled"
+  | Disp_skipped -> if ko then "건너뜀" else "skipped"
 ;;
 
 let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity) =
@@ -258,7 +258,7 @@ let grid_pulse_failed_and_ok_mark = "\xe2\x96\x84" (* ▄ *)
 (* A resting path waits: the waiting mark (RFC tui-one-screen-grammar 7.2).
    [◌] is a value not read yet (6.4). *)
 let grid_wait_glyph = Status.glyph Status.Waiting
-let grid_full_mark = "\xe2\x96\x88" (* █ *)
+let grid_full_mark = "\xe2\x96\x86" (* ▆ *)
 let grid_chain_link = "\xe2\x94\x81" (* ━ *)
 let grid_more_mark = "\xe2\x80\xa6" (* … *)
 let grid_open_mark = "▾"
@@ -301,8 +301,8 @@ type grid_column =
    tui-one-screen-grammar 7.1). The legend is English prose, so it names the
    English words above. The Korean words are the ones the Keeper story and the
    memory screen already use for the same readings: 현재 and 다음 in the story
-   window, 사실 and 무효화 on the memory screen, and Librarian, a product name,
-   as it is. *)
+   window, 사실 and 무효화 on the memory screen, and 기억 처리 for the Librarian
+   pass column. *)
 let grid_column_word ~ko column =
   let say korean english = if ko then korean else english in
   match column with
@@ -311,7 +311,7 @@ let grid_column_word ~ko column =
   | Due_column -> say "예정" grid_due_header
   | Lag_column -> say "지연" grid_lag_header
   | Turns_column -> say "턴" grid_turns_word
-  | Librarian_column -> say "Librarian" grid_librarian_header
+  | Librarian_column -> say "기억 처리" grid_librarian_header
   | Lag_bar_column -> say ("지연 \xc2\xb7 안 읽은 턴 " ^ axis_next_glyph) grid_lag_bar_header
   | Lag_bar_short_column -> say ("지연 " ^ axis_next_glyph) grid_lag_bar_short_header
   | Digest_column -> say "요약" grid_digest_header

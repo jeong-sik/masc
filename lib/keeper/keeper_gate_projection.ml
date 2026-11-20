@@ -160,7 +160,7 @@ let decision_to_yojson = function
         [ "auto_judge_error", `String detail ]
       | Human_requested | Judge_requested -> []
     in
-    (* RFC-0356 host replay, stated where the model reads it: without
+    (* Host replay, stated where the model reads it: without
        this line the payload reads as a plain block and the model
        resubmits the same call while the approval is in flight —
        measured as three duplicate approvals in #28866. The promise is

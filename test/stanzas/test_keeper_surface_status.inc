@@ -1,4 +1,4 @@
-; Per-file dune stanza for the typed keeper surface_status suite (RFC-0089).
+; Per-file dune stanza for the typed keeper surface_status suite.
 ; Lives here per test/stanzas/README.md to avoid the conflict-runtime hotspot
 ; in the legacy grouped (tests ...) stanza.
 

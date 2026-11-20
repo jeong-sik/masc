@@ -716,7 +716,7 @@ let record_rule_deleted ~base_path ~deleted_by (rule : approval_rule) =
 
 let read_recent_max_rows = Audit_recent_index.max_rows
 
-(* RFC-0474 L4f. One index per store, shared by every read. A read must see
+(* One index per store, shared by every read. A read must see
    the store as it is at that read, so it can use an advance only if the
    advance began after the read arrived. Reads that arrive while an advance
    runs wait for the next one instead of each reading the changed files:

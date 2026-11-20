@@ -18,13 +18,13 @@
   (:standard -w +4 -w +33 -w +37))
  (libraries
    masc.agent_core.digest
-  ; History media sources are live blob references (RFC-0476).
+  ; History media sources are live blob references.
   masc.agent_core.base
   masc.keeper_client_tool_outbox_codec
   unix
   yojson
   fs_compat
   masc_core
-  ; The sweep's period is Masc_time_constants.day (RFC-0499 §4.1).
+  ; The sweep's period is Masc_time_constants.day.
   masc.config
   masc.keeper_chat_operations))

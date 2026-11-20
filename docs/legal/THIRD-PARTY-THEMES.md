@@ -18,9 +18,6 @@ masc 가 직접 base16 으로 옮긴 것이라 다른 사람의 라이선스 조
 `artifacts/` 아래 실행 산출물이라 저장소에는 남지 않고, 지속하는 증거는 계약
 테스트 쪽이다.
 
-`LICENSE-AUDIT-2026-04.md` 가 "의존성 license 인벤토리 | 미점검" 으로 남겨둔 항목 중
-색 스킴 부분에 해당한다.
-
 ## 값을 어디서 가져왔나
 
 전부 [tinted-theming/schemes](https://github.com/tinted-theming/schemes) 의

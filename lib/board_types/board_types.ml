@@ -217,7 +217,7 @@ type post_origin = {
   fusion_producer: string option;
 }
 
-(* RFC-0233 §7: constructor for a keeper-authored post's origin. A keeper post
+(* Constructor for a keeper-authored post's origin. A keeper post
    is the output of a specific keeper turn, so [turn_ref] is the turn-level join
    key and [source] names the producing channel (e.g. "keeper_speech",
    "keeper_alert"). [fusion_run_id] is always [None] here: fusion's
@@ -254,7 +254,7 @@ type post = {
   pinned: bool;              (* Operator-curated pin (owner-gated): floats the post to the top of its category *)
   hearth: string option;     (* Topic category within the Board *)
   thread_id: string option;  (* Linked Conversation thread *)
-  origin: post_origin option; (* RFC-0233 §7: originating turn / channel provenance *)
+  origin: post_origin option; (* Originating turn / channel provenance *)
   closed: post_close_state option; (* None = open; absent key on read = open *)
 }
 
@@ -1387,7 +1387,7 @@ type store = {
   flusher_inbox: flusher_msg Eio.Stream.t;                               (** Last deferred flush time *)
   sub_boards: (string, sub_board) Hashtbl.t;               (** sub_board_id -> sub_board *)
   sub_boards_by_slug: (string, string) Hashtbl.t;          (** slug -> sub_board_id *)
-  (* RFC-0233 §7 guard #2: real secondary indexes for origin lookup, mirroring
+  (* Real secondary indexes for origin lookup, mirroring
      [sub_boards_by_slug]. Maintained on create and rebuilt on load (derive-on-
      load, no separately-persisted SSOT). Never a meta_json substring scan. *)
   posts_by_turn_ref: (string, string) Hashtbl.t;           (** Turn_ref.to_string -> post_id *)

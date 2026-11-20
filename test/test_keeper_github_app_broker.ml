@@ -1,4 +1,4 @@
-(** RFC keeper-github-apps: installation-token broker unit contract. *)
+(** installation-token broker unit contract. *)
 open Alcotest
 module Broker = Masc.Keeper_github_app_broker
 

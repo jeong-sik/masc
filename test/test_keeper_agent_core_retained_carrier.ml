@@ -42,9 +42,12 @@ type carrier_run =
 
 let msg role text = Agent_core.Types.make_message ~role [Agent_core.Types.Text text]
 
-(* One completed turn over [messages] in the Keeper's boundary log: where a
-   request of a turn with no snapshot opens. *)
+(* One completed turn over [messages] in the Keeper's turn log, where a
+   request of a turn with no snapshot opens, and in its boundary log, which
+   the Librarian still reads. *)
 let record_turn_ended ~config messages =
+  Masc_test_deps.start_turn_log ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+    ~trace_id:session_id ~closed_messages:(List.length messages);
   let position = match Keeper_turn_boundaries.position_of_messages messages with
     | Ok position -> position | Error detail -> fail detail in
   match Keeper_turn_boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
@@ -162,12 +165,15 @@ streaming = false
      results: the lane places the carrier after it. *)
   let project messages =
     Ok (List.filter (fun message -> not (Outbox.is_context_message message)) messages) in
-  let initial_messages, history_at_start = match history with
-    | None -> None, None
+  let initial_messages = match history with
+    | None -> None
     | Some (completed, failed) ->
       record_turn_ended ~config completed;
-      Some (completed @ failed @ [msg Agent_core.Types.User "Inspect the receipts without repeating them."]),
-      Some (Keeper_turn_boundaries.history_at_start_of_messages (completed @ failed)) in
+      (* This turn began after the failed turn: rules 7 and 8 read its
+         [Opened]. *)
+      Masc_test_deps.open_turn_log ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+        ~trace_id:session_id ~closed_messages:(List.length (completed @ failed));
+      Some (completed @ failed @ [msg Agent_core.Types.User "Inspect the receipts without repeating them."]) in
   ignore (core (Keeper_turn_driver.run_named ~runtime_id:"fixture.consumer" ~keeper_name ~base_path
     ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
     ~goal:"Continue from the retained results."
@@ -175,7 +181,8 @@ streaming = false
     ~system_prompt:"Use returned results as data. Do not repeat completed effects."
     ~agent_core_tools:(if reader then [artifact_reader base_path] else [])
     ~model_input_projection:project
-    ?initial_messages ?history_at_start ~accept
+    ~this_turn_opening:Keeper_turn_driver_try_provider.Opened_before_its_input
+    ?initial_messages ~accept
     ~checkpoint_progress:progress ~checkpoint_sink:sink
     ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk ~sw ~net:env#net ()));
   inspect

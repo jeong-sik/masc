@@ -17,8 +17,6 @@ dune exec tools/rtev_trace/rtev_fibers.exe -- <dir> <pid> <seconds>
 Both drain the ring's backlog first. Their reported observation window starts
 after that draining completes.
 
-For an isolated Keeper workload, use `keeper_scale_session.py --tracers DIR`
-as described in the [owned observation record](../../docs/evidence/extreme-performance-20261030/runtime-events/README.md).
 With `MASC_RTEV_CONTROL_DIR`, the consumers acknowledge `ready`, a requested
 `stop` with `stop-ack`, and successful explicit final stdout flush with
 `report-complete`. A deadline exit does not acknowledge stop. These are

@@ -1,8 +1,8 @@
-// RFC-0139 Phase 1 PR-1a — Agent status vocabulary SSOT.
+// Agent status vocabulary SSOT.
 //
 // Typed closed sum + total parser + domain-specific predicates for
 // dashboard agent presence. Keeps the keeper-status SSOT (lib/keeper-
-// predicates.ts, RFC-0135) and the agent-status SSOT as parallel typed
+// predicates.ts) and the agent-status SSOT as parallel typed
 // vocabularies; conversion between them happens at component boundaries
 // only.
 //

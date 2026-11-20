@@ -124,7 +124,7 @@ type dispatched_event =
                one [mentions_bot] and [explicit_mentions_bot] were judged
                with. *)
       ; mention_user_ids : string list
-            (* RFC-0232 §3.3: the structured [mentions] member ids are
+            (* The structured [mentions] member ids are
                kept at decode instead of being reduced to a bot bool;
                the gate maps what its bindings can resolve. *)
       ; mentions_bot : bool
@@ -580,7 +580,7 @@ let decode_message_create ~bot_user_id ~payload =
     | Some a -> field_string_opt "id" a
     | None -> None
   in
-  (* RFC-0223 P1: [global_name] is the user-facing display name and is
+  (* [global_name] is the user-facing display name and is
      nullable; [username] is the unique handle and always present on
      real payloads. Prefer the display name. *)
   let author_name =
@@ -893,7 +893,7 @@ let no_op t = (t, [])
 
 (* ── Per-opcode handlers (state-sensitive cases enumerate every
       connection_state variant; no [_] wildcards, so adding a state
-      breaks the build at every relevant site — RFC-0203 §Non-goals). *)
+      breaks the build at every relevant site). *)
 
 let handle_hello t (frame : frame) =
   match t.state with
@@ -1007,7 +1007,7 @@ let rec apply_dispatch t ~seq ~event_name ~payload =
                 gateway echo would double-record by another route. *)
              no_op t
            else
-             (* RFC-0226: policy decides turn start only. A message
+             (* Policy decides turn start only. A message
                 that fails the trigger policy is still conversation
                 in a channel the bot sits in — deliver it for
                 record-only handling. *)

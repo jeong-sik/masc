@@ -5,7 +5,7 @@ _build/
 # that symlink and every CI dune build then fails on open(_build/.lock) (#39561).
 /_build
 _build_*/
-# Dune build trace dumps (RFC-0209: env serialization footgun — DUNE_BUILD_DIR=_build-* writes trace.csexp with full env including API keys)
+# Dune build trace dumps (env serialization footgun — DUNE_BUILD_DIR=_build-* writes trace.csexp with full env including API keys)
 _build-*/
 trace.csexp
 *.install
@@ -57,7 +57,6 @@ Thumbs.db
 # path the old line named is still covered.
 benchmarks/**/results/
 _coverage/
-.health/
 
 
 # Downloaded release binary
@@ -78,8 +77,6 @@ audits/*.jsonl
 
 # Private release-evidence bundles must not be committed.
 .release-evidence/
-# Written by scripts/exec_corpus_report.py --write; regenerated on demand.
-audits/local-exec-core-inventory.md
 
 # Trunk linter lock files
 .trunk-lock/

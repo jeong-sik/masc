@@ -279,7 +279,7 @@ let sse_retry_ms = 3000
 let sse_prime_event () =
   Printf.sprintf "retry: %d\n\n" sse_retry_ms
 
-(* RFC-0089: SSE comment line + reconnect [retry:] directive, sourced from the
+(* SSE comment line + reconnect [retry:] directive, sourced from the
    [sse_retry_ms] SSOT. Stream priming sites (presence, activity) used to inline
    "retry: 3000", which would silently diverge from [sse_retry_ms] if the
    reconnect interval were ever tuned. *)

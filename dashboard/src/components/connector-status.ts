@@ -498,7 +498,7 @@ function ConnectorLivePanel({
   const bindingActionsEnabled = connector != null && connector.capabilities.includes('bindings')
   const directLabel = connectorStateLabel(connector)
   const directTone = connectorStateTone(connector)
-  // In-process gateway machine state (RFC-0203 / #20813). Shown only
+  // In-process gateway machine state (#20813). Shown only
   // when the connector advertises it AND it adds information beyond
   // the coarse 4-word label (reconnect_pending, identifying, failed...).
   const gatewayState = connector?.gateway_state ?? ''

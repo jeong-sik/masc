@@ -18,7 +18,7 @@ exception Operator_interrupt = Keeper_operator_interrupt.Operator_interrupt
    outcomes, tool responses) so the incident class stays greppable as one
    thing. The classification itself is typed on the exception; this is only
    the human-facing detail, and the typed request failure renders it
-   (RFC-0454 D2) so the chat row and this path cannot word it apart. *)
+   so the chat row and this path cannot word it apart. *)
 let operator_interrupt_detail =
   Keeper_request_failure.summary
     { Keeper_request_failure.cause = Keeper_request_failure.Operator_cancelled }

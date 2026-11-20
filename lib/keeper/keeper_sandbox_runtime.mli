@@ -101,7 +101,7 @@ val docker_label_args
   -> unit
   -> string list
 
-(** {2 Label building blocks (RFC-0070 Phase 3e — exposed so the
+(** {2 Label building blocks (exposed so the
     *deterministic* subset of [docker_label_args] can be composed
     byte-identically without re-defining the keys and risking drift)} *)
 

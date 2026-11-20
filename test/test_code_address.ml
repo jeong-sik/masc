@@ -1,4 +1,4 @@
-(* RFC-0378 §5.1 — the address parse boundary.
+(* The address parse boundary.
 
    Feature under test: every slug the attribution path can emit is
    constructible into a [Code_address.t], two transport spellings of the

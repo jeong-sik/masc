@@ -570,7 +570,7 @@ type loaded =
   ; same_turn_result : same_turn_result
   ; operator_remote_description : string option
   ; shell_command : string list option
-        (** RFC tools-as-shell-commands: the sub-command path this tool is
+        (** The sub-command path this tool is
             reachable under inside a keeper's shell line ([board post get]
             makes [masc board post get p-1] callable without a provider
             round trip).  Stored word-split once here rather than split at

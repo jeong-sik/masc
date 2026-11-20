@@ -10,7 +10,7 @@
 (* Directory Creation (no lock)                                     *)
 (* ================================================================ *)
 
-(* RFC-0474 L4g. [ensure_dir] held one process-wide Eio mutex while it
+(* [ensure_dir] held one process-wide Eio mutex while it
    checked that a cached directory still existed. The check is a stat that
    eio_posix runs on a system thread, so the holder suspended inside the
    lock and every other caller, on every domain, queued behind the slowest

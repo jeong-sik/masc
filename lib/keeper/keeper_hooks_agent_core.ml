@@ -24,7 +24,7 @@ include Keeper_hooks_agent_core_types
 
 (** Keeper-facing telemetry uses a neutral runtime lane.  Concrete
     provider/model identity belongs to AGENT_CORE and lower-level runtime adapters.
-    RFC-0132 PR-2: telemetry lane label = external boundary; redact via SSOT. *)
+    Telemetry lane label = external boundary; redact via SSOT. *)
 let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
 let sse_turn_complete = "keeper_turn_complete"
 let sse_turn_observation = "keeper_turn_observation"
@@ -281,8 +281,7 @@ type tool_result_commit_policy = Require_commit | Observe_commit
    never entered [Tool_dispatch] and no dispatch observer saw it. The dashboard
    series ([Tool_metrics_persist]) is written by one of those observers, so it
    counted the call in neither its calls nor its failures.
-   docs/evidence/tool-metrics-refused-calls-2026-11 compares the series with the
-   tool-call ledger per tool and day. The result names the rejection class and
+   The result names the rejection class and
    says no effect began, the shape [handle_validation_error] gives a
    descriptor-level rejection, under the internal tool name the other observers
    receive. Keep the validation duration Agent Core already measured. *)
@@ -628,7 +627,7 @@ let make_hooks
              response.content
          | None -> ());
         (try
-           (* Cache observability rides this per-request event (RFC-0382):
+           (* Cache observability rides this per-request event:
               [cache_read_tokens] is usage-reported (cloud providers),
               [cache_n]/[prompt_n] are wire timings (llama-server, Ollama) —
               KV-reused vs freshly prefilled prompt tokens. The two sources
@@ -825,14 +824,14 @@ let make_hooks
             ~output_text ()
         in
         (* Full record read: log_call no longer falls back to ambient
-           context (RFC-0225 §3.3), so every field this row should carry
+           context, so every field this row should carry
            must be passed explicitly from the run's own cell. *)
         let tctx : Keeper_tool_call_log_context.turn_context =
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
         in
         let invocation_turn = Some (Agent_core.Tool_contract.Invocation.turn invocation) in
-        (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
+        (* One mint per execution at this dispatch boundary;
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
         let execution_id = Keeper_tool_call_log.invocation_execution_id ~invocation in
@@ -852,7 +851,7 @@ let make_hooks
             attribute_tool_input
         in
         let schedule = Agent_core.Tool_contract.Invocation.schedule invocation in
-        (* RFC-0233 PR-2: register the provider-call ↔ execution pair now,
+        (* Register the provider-call ↔ execution pair now,
            strictly before AGENT_CORE publishes ToolCompleted for this call, so the
            event bridge can stamp the same id onto the agent_core:tool_completed
            row (insert happens-before publish happens-before drain). *)

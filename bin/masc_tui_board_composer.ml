@@ -57,17 +57,19 @@ let analyze_addressing text =
   | Board_addressing.No_explicit_address -> Discoverable_unaddressed
 ;;
 
-let format_addressing_hint ~max_cells kind =
+let format_addressing_hint ?(ko = false) ~max_cells kind =
   match kind with
   | Broadcast_all ->
-      Printf.sprintf "%s%s[Broadcast: @@all -> wakes all active keepers]%s"
+      Printf.sprintf "%s%s%s%s"
         Ansi.bold
         (Theme.accent ())
+        (if ko then "[전체 알림: @@all -> 모든 활성 키퍼 호출]"
+         else "[Broadcast: @@all -> wakes all active keepers]")
         Ansi.reset
   | Mentions targets ->
       let target_str = String.concat ", @" targets in
-      let prefix = "[Mentions: @" in
-      let suffix = " -> notifies targeted keepers]" in
+      let prefix = if ko then "[멘션: @" else "[Mentions: @" in
+      let suffix = if ko then " -> 지정 키퍼에 알림]" else " -> notifies targeted keepers]" in
       let cells = Masc_tui_message_layout.display_width in
       let target_cells = max 0 (max_cells - cells prefix - cells suffix) in
       let fit text width =
@@ -80,13 +82,18 @@ let format_addressing_hint ~max_cells kind =
         (fit line (max 0 max_cells))
         Ansi.reset
   | Unsupported_broadcast selectors ->
-      Printf.sprintf "%s[Warning: unsupported broadcast @@%s (use @@all)]%s"
+      Printf.sprintf
+        (if ko then "%s[경고: 지원하지 않는 브로드캐스트 @@%s (@@all 사용)]%s"
+         else "%s[Warning: unsupported broadcast @@%s (use @@all)]%s")
         (Theme.bad ())
         (String.concat ", " selectors)
         Ansi.reset
   | Discoverable_unaddressed ->
-      Printf.sprintf "%s[Tip: Unmentioned posts are Discoverable — use @<keeper> or @@all to wake keepers]%s"
-        Ansi.dim Ansi.reset
+      Printf.sprintf "%s%s%s"
+        Ansi.dim
+        (if ko then "[안내: 멘션 없는 글은 탐색 가능 상태 · @<키퍼> 또는 @@all로 키퍼를 깨우세요]"
+         else "[Tip: Unmentioned posts are Discoverable · use @<keeper> or @@all to wake keepers]")
+        Ansi.reset
 ;;
 
 (* The caret sits one cell past the last character typed, so a draft row

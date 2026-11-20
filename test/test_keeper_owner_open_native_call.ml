@@ -152,11 +152,13 @@ let cancelled_by_turn =
 ;;
 
 let interrupt_running owner id =
-  match owner_ok (Owner.interrupt_running_operation owner id) with
-  | Owner.Operation_interrupt_signalled -> ()
-  | Owner.Operation_not_current _ | Owner.Operation_settling
-  | Owner.Operation_maintenance_running | Owner.Operation_slot_held_by_autonomous_turn
-  | Owner.Operation_interrupt_failed _ ->
+  match fst (owner_ok (Owner.interrupt_turn owner (Owner.Direct_operation id))) with
+  | Owner.Interrupt_result Owner.Operation_interrupt_signalled -> ()
+  | Owner.Interrupt_result
+      ( Owner.Operation_not_current _ | Owner.Operation_settling
+      | Owner.Operation_maintenance_running | Owner.Operation_slot_held_by_autonomous_turn
+      | Owner.Operation_interrupt_failed _ )
+  | Owner.Pending_admission_paused ->
     fail "the interrupt did not reach the running child"
 ;;
 
@@ -626,7 +628,7 @@ let test_owned_input_wait ?response fixture () =
          | Missing_retained -> Unix.unlink retained
          | Corrupt_retained -> Fs_compat.save_file retained "corrupt retained"
          | Changed_retained ->
-           (* Other content under the same name (RFC-0476 §3.2). *)
+           (* Other content under the same name. *)
            Fs_compat.save_file retained
              (Masc_test_deps.checkpoint_head_bytes_with_field (Fs_compat.load_file retained)
                 "turn_count" (`Int 1000))

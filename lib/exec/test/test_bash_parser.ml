@@ -321,7 +321,7 @@ let test_here_string_rejected () =
 
 let test_cmd_subst_parses_to_subst_node () =
   (* $( ) opens: the child is a complete IR under Subst, one argv element
-     of the parent (RFC shell-ir-typed-command-substitution §2.1). *)
+     of the parent. *)
   match Bash.parse_string "echo $(date)" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     (match s.args with
@@ -367,7 +367,7 @@ let test_cmd_subst_nested () =
 
 let test_cmd_subst_inner_exclusion_rides_up () =
   (* An inner refusal is the answer, unchanged — the same rules, the same
-     reasons (RFC shell-ir-typed-command-substitution §2.2). *)
+     reasons. *)
   (match Bash.parse_string "echo $(cat <<EOF)" with
    | Parsed.Too_complex `Heredoc -> ()
    | _ -> assert false);

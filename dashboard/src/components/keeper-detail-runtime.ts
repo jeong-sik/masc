@@ -177,7 +177,7 @@ export function deriveKeeperLiveTruth({
       },
       {
         label: '차단',
-        // RFC-0135 PR-5: typed reason takes precedence so the row text
+        // Typed reason takes precedence so the row text
         // matches the roster card ("synthetic_stall" vs bare "blocked").
         // When the receipt is from a prior turn (`staleBlocker` set),
         // the row stays at 'none' (current execution is not blocked)

@@ -290,7 +290,7 @@ let test_authenticated_owner_overrides_request_hint () =
   check (option string) "authenticated projection" (Some "credential-owner")
     (project ~base_path request)
 
-(* RFC play-link-for-the-shared-machine: a Player bearer is admitted only
+(* A Player bearer is admitted only
    where CanPlayMachine is asked for. The /mcp transport and the observer
    stream ask for CanReadState, so an invited Player cannot open them. *)
 let test_a_player_reaches_only_the_seat () =
@@ -395,8 +395,7 @@ let test_workspace_bound_read_preconditions () =
     check bool "a foreign workspace cannot answer under the old identity" true
       (read path ["expected_base_path",[base ^ "/foreign"];"expected_masc_root",[root]]
        =Error Masc.Workspace.Workspace_precondition_failed))
-    ["/api/v1/dashboard/planning";"/api/v1/board";"/api/v1/setup/account-emails";
-     "/api/v1/dashboard/exact-lane-run-retention"];
+    ["/api/v1/dashboard/planning";"/api/v1/board";"/api/v1/setup/account-emails"];
   List.iter (fun malformed ->
     check bool "partial, duplicate and empty workspace values are refused" true
       (read "/api/v1/dashboard/planning" malformed

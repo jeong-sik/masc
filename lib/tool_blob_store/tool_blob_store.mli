@@ -288,7 +288,7 @@ val delete : t -> sha256:string -> (bool, delete_error) result
     exclusively by offline {!Tool_blob_maintenance} under the BasePath process
     lease; callers must not synthesize a partial consumer keep-set. *)
 
-(** {1 Sweep ledger (RFC-0499 §4.2)} *)
+(** {1 Sweep ledger} *)
 
 type touch =
   { put : bool

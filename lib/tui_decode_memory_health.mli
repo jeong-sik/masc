@@ -239,7 +239,7 @@ val memory_keeper_totals_row : memory_keeper_health -> Keeper_memory_health_tota
     when every row decoded. *)
 
 (** One Keeper's row as [GET /api/v1/dashboard/keeper-memory-health?keeper=]
-    answers it (RFC-0487). *)
+    answers it. *)
 type memory_health_row_keeper =
   | Row_present of memory_keeper_health
   | Row_refused of memory_keeper_refusal

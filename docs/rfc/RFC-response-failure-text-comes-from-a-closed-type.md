@@ -279,7 +279,7 @@ L0 이 Draft 인 동안 L1 부터 같은 native stack 으로 묶는다(헌법 `w
 
 - RFC-0106 P3(ppxlib AST lint)은 만들지 않았다. 진행 표가 「`scripts/lint/cancel-guard-ast*` 없음」이라 적는다.
 - 그 표가 「아직 돈다」고 적은 regex lint `scripts/lint-cancel-guard.sh` 는 #37495(2026-09-21)가 `scripts/ci/check-cancel-guard.py` 로 바꿨다. 그 파일도 #40298(2026-09-30)이 bulk lint driver 와 함께 지웠다. 지금 main 에는 cancel guard 검사가 없다. 코드의 `cancel-guard-ok` 주석을 읽는 것도 없다.
-- typed tree 를 읽는 틀은 `tools/ocaml_boundary_audit` 하나다. compiler-libs 로 `.cmt` 를 읽고 이름을 해석된 경로로 비교한다. 모듈 별칭으로 `Printexc` 를 가려도 찾는다. `docs/architecture/functional-core-effect-boundary.md` 는 CI 가 이 도구를 돈다고 적는다. 그러나 `.github` 에서 이 도구를 부르는 workflow 는 없다.
+- typed tree 를 읽는 틀은 `tools/ocaml_boundary_audit` 하나다. compiler-libs 로 `.cmt` 를 읽고 이름을 해석된 경로로 비교한다. 모듈 별칭으로 `Printexc` 를 가려도 찾는다. `.github` 에서 이 도구를 부르는 workflow 는 없다.
 
 정하는 것:
 

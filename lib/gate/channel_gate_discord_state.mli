@@ -99,7 +99,7 @@ val bound_channels :
   (string list, Channel_gate_binding_store.binding_store_error) result
 (** Channel snowflakes bound to [keeper_name], freshly read from the
     binding store on each call. Store failure remains distinct from an empty
-    binding set. RFC-0223 P2 presence. *)
+    binding set. *)
 
 val bound_channels_result :
   keeper_name:string -> (string list, binding_lookup_error) result
@@ -115,7 +115,7 @@ val configured_channel_ids_result :
 val connected : unit -> bool
 (** Whether the in-process gateway's run loop currently reports
     [Connected]. Reads {!Discord_gateway_client.connection_state};
-    no file indirection. RFC-0223 P2 presence. *)
+    no file indirection. *)
 
 val record_ready :
   bot_user_id:string ->

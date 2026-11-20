@@ -1,5 +1,4 @@
-(** Tells roster readers which Keepers' shown provider rest moved
-    (RFC-0481 §3.2, §3.7).
+(** Tells roster readers which Keepers' shown provider rest moved.
 
     A roster row shows [runtime_path_rest]: whether the Keeper's walk is
     serving or resting, on which runtime, and when a resting walk releases.

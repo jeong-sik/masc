@@ -49,7 +49,7 @@ must exit 0 after complete exploration. Every `*-buggy.cfg` must fail its named
 safety property (exit 12), or the original anywhere-live property (exit 13).
 Parser, evaluator, tool and resource failures are not successful bug detection.
 The repository harness discovers every negative config and explicitly includes
-the new positive recorded-messages config; `specs/Makefile` discovers both sets.
+the new positive recorded-messages config.
 
 | Configuration | Exit | Result |
 | --- | ---: | --- |

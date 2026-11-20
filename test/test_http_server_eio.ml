@@ -170,7 +170,7 @@ let test_frontend_transport_routes_present () =
          true
          (has_route meth "/mcp/operator"))
     [ `GET; `POST; `DELETE ];
-  (* RFC-0281: /ws must be a typed WebSocket-upgrade route ([Router.Ws]),
+  (* /ws must be a typed WebSocket-upgrade route ([Router.Ws]),
      not a plain route.  Only a Ws route receives the Gluten [upgrade]
      capability and thus actually drives the post-101 connection.  A
      regression to an in-band route (or to a main_eio special-case that
@@ -189,7 +189,7 @@ let test_frontend_transport_routes_present () =
     (has_route `GET "/api/v1/voice/config")
 ;;
 
-(* RFC-0281: typed WebSocket-upgrade routes.  [ws_get] registers a
+(* Typed WebSocket-upgrade routes.  [ws_get] registers a
    [Router.Ws] route (carrying the Gluten upgrade capability); [get]
    registers a [Router.Owner] route and [Serving.get] a [Router.Serving]
    one.  The variant is what lets [Router.dispatch] thread the optional

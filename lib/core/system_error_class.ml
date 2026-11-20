@@ -1,4 +1,4 @@
-(* RFC-0154 PR-1.  SSOT for OS-level / runtime error classification.
+(* SSOT for OS-level / runtime error classification.
    See system_error_class.mli for the contract.  This module stays total and
    light on dependencies ([String_util], [Unix] and the Eio exception shapes
    this library already links) so that [Telemetry_coverage_gap.record] and the

@@ -4,10 +4,10 @@
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | Fusion_completed  (* RFC-0266: async masc_fusion completion wake *)
+  | Fusion_completed  (* Async masc_fusion completion wake *)
   | Schedule_due  (* Scheduled automation due wake for a specific keeper *)
   | Connector_attention
-      (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
+      (* Ambient connector message wake *)
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Ask_answered  (* A human answered a question this Keeper asked *)
   | Completion_authority_rejected

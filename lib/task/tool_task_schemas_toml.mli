@@ -1,5 +1,5 @@
-(** The task tools whose declarations moved to [config/tools/masc_*.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2), read from the
+(** The task tools whose declarations moved to [config/tools/masc_*.toml],
+    read from the
     binary-embedded config tree.
 
     Each value is decoded once at module initialization. A missing file or a
@@ -9,8 +9,7 @@
 
     [masc_add_task], [masc_batch_add_tasks] and [masc_transition] carry nested
     shapes: an object parameter with its own params, and an array whose object
-    items declare required children. [test_task_tool_toml_parity] pins all
-    seven against the literals this module replaced. *)
+    items declare required children. *)
 
 val task_history : Masc_domain.tool_schema
 val tasks : Masc_domain.tool_schema

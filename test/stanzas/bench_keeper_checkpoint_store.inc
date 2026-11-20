@@ -1,5 +1,5 @@
 ; Not a test: prints what the Keeper checkpoint store writes per tool round
-; and reads per load against the history size (RFC-0476 L0). Run by hand from
+; and reads per load against the history size. Run by hand from
 ; _build/default/test.
 
 (executable

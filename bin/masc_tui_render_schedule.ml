@@ -1752,10 +1752,10 @@ let board_cell ~ko ~styles ~age_header ~title_width values = function
       Table.cell ~align:Table.Right ~style:styles.bstyle_age
         ~header:age_header ~width:board_age_width values.brow_age
   | Board_score ->
-      Table.cell ~style:styles.bstyle_score ~header:(if ko then "점수" else "SCORE")
+      Table.cell ~align:Table.Right ~style:styles.bstyle_score ~header:(if ko then "점수" else "SCORE")
         ~width:board_score_width values.brow_score
   | Board_replies ->
-      Table.cell ~style:styles.bstyle_replies ~header:(if ko then "댓글" else "REPLIES")
+      Table.cell ~align:Table.Right ~style:styles.bstyle_replies ~header:(if ko then "댓글" else "REPLIES")
         ~width:board_replies_width values.brow_replies
 
 let board_cells ?(styles = board_no_styles) ~ko ~age_header
@@ -1793,6 +1793,10 @@ let sidebar_row_label ~about ~apart =
 
 let board_header_row ~ko ~age_header ~layout =
   Table.header_row (board_cells ~ko ~age_header ~layout board_no_values)
+
+let board_header_row_with_dropped ~ko ~inner_width ~age_header ~layout =
+  Table.header_row_with_dropped ~ko ~inner_width ~dropped:layout.Table.dropped
+    (board_cells ~ko ~age_header ~layout board_no_values)
 
 let board_row ?close ~ko ~styles ~age_header ~layout values =
   Table.row ?close (board_cells ~ko ~styles ~age_header ~layout values)
@@ -1932,17 +1936,17 @@ let classify_wake_reading ~history_error ~history =
 (* A schedule the runner holds back (#38205). Its status stays [due] and its
    last wake is still the previous occurrence's, so without this reading a
    held heartbeat looks like a late one. *)
-let schedule_hold_tag ~ko ~due = if ko then due ^ " 부터 보류" else "held since " ^ due
+let schedule_hold_tag ~ko ~due = if ko then due ^ "부터 보류" else "held since " ^ due
 
 let schedule_hold_reading ~ko ~due =
   schedule_hold_tag ~ko ~due
-  ^ (if ko then ": Keeper 가 앞선 실행을 아직 받지 않음"
+  ^ (if ko then ": 키퍼가 앞선 실행을 아직 받지 않음"
      else ": the keeper has not taken the previous wake yet")
 
 (* #34642: a schedule held on its target's shutdown fence. *)
 let schedule_fence_hold_reading ~ko ~due ~target ~fence_owner =
   Printf.sprintf
-    (if ko then "%s: %s 가 종료 중(%s)이라 끝날 때까지 실행을 받지 않음"
+    (if ko then "%s: %s 종료 중(%s)이라 끝날 때까지 실행을 받지 않음"
      else "%s: %s is shutting down (%s) and takes no wakes until that finishes")
     (schedule_hold_tag ~ko ~due)
     target
@@ -1957,14 +1961,14 @@ let schedule_hold_as_of_tag ~ko ~checked =
 
 let schedule_hold_as_of_reading ~ko ~checked =
   schedule_hold_as_of_tag ~ko ~checked
-  ^ (if ko then ": 그때까지 Keeper 가 앞선 실행을 받지 않았음"
+  ^ (if ko then ": 그때까지 키퍼가 앞선 실행을 아직 받지 않았음"
      else ": the keeper had not taken the previous wake by then")
 
 (* The fence hold drawn the same way, at the time it was [checked]: a failed
    tick does not re-read why it held either (#38411, #34642). *)
 let schedule_fence_hold_as_of_reading ~ko ~checked ~target ~fence_owner =
   Printf.sprintf
-    (if ko then "%s: %s 가 종료 중(%s)이었고 끝날 때까지 실행을 받지 않았음"
+    (if ko then "%s: %s 종료 중(%s)이었고 끝날 때까지 실행을 받지 않았음"
      else "%s: %s was shutting down (%s) and took no wakes until that finished")
     (schedule_hold_as_of_tag ~ko ~checked)
     target

@@ -114,9 +114,14 @@ let toggle (state : state) ~switch ~report =
         | Some (Some _, _, Some problem) ->
           state.identity_attempt_error
           <- Some
-               (Masc_tui_identity_model.Notice_bad, "switch store unreadable: " ^ problem)
+               ( Masc_tui_identity_model.Notice_bad
+               , ui_text state ~ko:"스위치 저장소 읽기 불가: " ~en:"switch store unreadable: "
+                 ^ problem )
         | Some (None, _, _) | None ->
-          report "system" "connect it first; the switch is for an attached service")
+          report "system"
+            (ui_text state
+               ~ko:"먼저 서비스를 연결해 주세요. 스위치는 연결된 서비스에만 사용할 수 있습니다"
+               ~en:"connect it first; the switch is for an attached service"))
      | None -> ())
   | Some _, (Some _ | None) | None, _ -> ()
 ;;
@@ -292,7 +297,9 @@ let disconnect (state : state) ~unbind ~report =
        if not attached
        then (
          state.identity_disconnect_armed <- None;
-         report "system" "nothing is attached to disconnect here")
+         report "system"
+           (ui_text state ~ko:"연결 해제할 서비스가 없습니다"
+              ~en:"nothing is attached to disconnect here"))
        else if state.identity_disconnect_armed = Some (keeper.k_name, provider_id)
        then (
          state.identity_disconnect_armed <- None;
@@ -307,8 +314,12 @@ let disconnect (state : state) ~unbind ~report =
          <- Some
               ( Masc_tui_identity_model.Notice_ok
               , Printf.sprintf
-                  "%s (%s): press D again to forget the stored token and drop the tools \
-                   it attached; nothing is sent yet"
+                  (if state.ui_language = Lang_ko then
+                     "%s (%s): 저장된 토큰을 지우고 연결된 도구를 제거하려면 D를 한 번 더 \
+                      누르세요 · 아직 전송되지 않았습니다"
+                   else
+                     "%s (%s): press D again to forget the stored token and drop the tools \
+                      it attached; nothing is sent yet")
                   label
                   provider_id ))
      | None -> state.identity_disconnect_armed <- None)

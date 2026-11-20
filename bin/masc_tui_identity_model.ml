@@ -168,7 +168,7 @@ let identity_connectable ~listing providers =
     many this Keeper has, and what the drawn ones report. The states a row
     already spells one by one are summed here only where one holds: a pane of
     nothing but unattached services says so by having no tally to print. *)
-let identity_summary ~providers ~listing =
+let identity_summary_for ~ko ~providers ~listing =
   let shown = identity_connectable ~listing providers in
   let total =
     List.length (identity_connectable ~listing:identity_listing_default providers)
@@ -187,16 +187,24 @@ let identity_summary ~providers ~listing =
   (* These are states, not nouns: "3 attached", not "3 attacheds". *)
   let parts =
     List.filter_map
-      (fun (label, n) -> if n > 0 then Some (Printf.sprintf "%d %s" n label) else None)
-      [ "attached", attached
-      ; "switched off", count Identity_switched_off
-      ; "attached with no tools", count Identity_attached_without_tools
-      ; "with an unreadable switch", count Identity_switch_unreadable
+      (fun (ko_label, en_label, n) ->
+         if n > 0 then
+           Some
+             (if ko then Printf.sprintf "%s %d" ko_label n
+              else Printf.sprintf "%d %s" n en_label)
+         else None)
+      [ "연결됨", "attached", attached
+      ; "꺼짐", "switched off", count Identity_switched_off
+      ; "연결됨(도구 없음)", "attached with no tools", count Identity_attached_without_tools
+      ; "스위치 읽기 불가", "with an unreadable switch", count Identity_switch_unreadable
       ]
   in
   let drawn = List.length shown in
   let head =
-    if drawn = total
+    if ko then
+      if drawn = total then Printf.sprintf "서비스 %d개" total
+      else Printf.sprintf "서비스 %d / %d개" drawn total
+    else if drawn = total
     then Masc_tui_message_layout.count_noun total "service"
     else
       Printf.sprintf "%d of %s" drawn (Masc_tui_message_layout.count_noun total "service")
@@ -204,6 +212,10 @@ let identity_summary ~providers ~listing =
   match parts with
   | [] -> "  " ^ head
   | parts -> "  " ^ head ^ " \xc2\xb7 " ^ String.concat " \xc2\xb7 " parts
+;;
+
+let identity_summary ~providers ~listing =
+  identity_summary_for ~ko:false ~providers ~listing
 ;;
 
 (** A pasted value flattened to one line, for a field that holds one.
@@ -255,7 +267,7 @@ type identity_notice_kind =
     provider that registers no client says what to make and where to put it,
     and a single truncated line is the half of that sentence an operator
     cannot act on. *)
-let identity_notice ~cols detail =
+let identity_notice ?(ko = false) ~cols detail =
   match detail with
   | None -> []
   | Some (kind, text) ->
@@ -271,22 +283,30 @@ let identity_notice ~cols detail =
        the dashboard: the form is here now. *)
     (match kind with
       | Notice_ok -> [ "" ]
-      | Notice_bad -> [ "  A records an app for the row the cursor is on."; "" ])
+      | Notice_bad ->
+        [ (if ko then "  A로 현재 행의 앱을 등록할 수 있습니다."
+           else "  A records an app for the row the cursor is on.")
+        ; ""
+        ])
 ;;
 
 (** The filter's own two rows: what was typed, and how much of the set is
     left. Built here for the same reason the notice is -- the key handler
     counts these to know where the list starts, and a count that disagreed
     with what is drawn would scroll the cursor to the wrong row. *)
-let identity_filter_rows ~providers ~listing filter =
+let identity_filter_rows ?(ko = false) ~providers ~listing filter =
   match filter with
   | None -> []
   | Some typed ->
+    let shown =
+      List.length (identity_connectable ~listing:{ listing with query = typed } providers)
+    in
+    let total =
+      List.length (identity_connectable ~listing:{ listing with query = "" } providers)
+    in
     [ Printf.sprintf
-        "  /%s   %d of %d"
-        typed
-        (List.length (identity_connectable ~listing:{ listing with query = typed } providers))
-        (List.length (identity_connectable ~listing:{ listing with query = "" } providers))
+        (if ko then "  /%s   %d / %d" else "  /%s   %d of %d")
+        typed shown total
     ; ""
     ]
 ;;
@@ -314,17 +334,19 @@ let identity_preamble ~summary ~callback ~notice = (summary :: callback) @ ("" :
 (** The callback line under the summary. The value comes from the server,
     which follows [MASC_HTTP_BASE_URL] or the address it bound, so this is
     the line that says where providers will send the browser back to. *)
-let identity_server_callback_rows = function
+let identity_server_callback_rows ?(ko = false) = function
   | None -> []
   | Some (Callback_url url) ->
-    [ "  callback  " ^ Masc_tui_ansi.Terminal_text.single_line url ]
+    [ (if ko then "  콜백      " else "  callback  ")
+      ^ Masc_tui_ansi.Terminal_text.single_line url ]
   | Some (Callback_unknown why) ->
-    [ "  callback  unknown: " ^ Masc_tui_ansi.Terminal_text.single_line why ]
+    [ (if ko then "  콜백      알 수 없음: " else "  callback  unknown: ")
+      ^ Masc_tui_ansi.Terminal_text.single_line why ]
 ;;
 
 (* Every loopback service names the same URL -- this server on 127.0.0.1 --
    so one line says it, with the condition it carries. *)
-let identity_loopback_callback_rows providers =
+let identity_loopback_callback_rows ?(ko = false) providers =
   let named =
     List.filter_map
       (function
@@ -339,10 +361,12 @@ let identity_loopback_callback_rows providers =
   List.map
     (function
       | Callback_url url ->
-        "  loopback  " ^ Masc_tui_ansi.Terminal_text.single_line url
-        ^ "  (browser on this machine)"
+        (if ko then "  로컬 콜백 " else "  loopback  ")
+        ^ Masc_tui_ansi.Terminal_text.single_line url
+        ^ (if ko then "  (이 기기의 브라우저 사용)" else "  (browser on this machine)")
       | Callback_unknown why ->
-        "  loopback  unavailable: " ^ Masc_tui_ansi.Terminal_text.single_line why)
+        (if ko then "  로컬 콜백 사용 불가: " else "  loopback  unavailable: ")
+        ^ Masc_tui_ansi.Terminal_text.single_line why)
     named
 ;;
 

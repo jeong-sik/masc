@@ -153,7 +153,7 @@ let render_board_compose (state : state) =
         (match Board_detail.view_for state.board_detail ~post_id with
          | Ready (post, _, _) when String.equal post.bp_id post_id ->
              [ target ^ Terminal_text.single_line post.bp_title
-             ; Ansi.dim ^ Terminal_text.single_line post.bp_author ^ " · "
+             ; Theme.recede () ^ Terminal_text.single_line post.bp_author ^ " · "
                ^ Ansi.reset ^ Terminal_text.preview_line post.bp_body
              ]
          | Loading ->
@@ -240,7 +240,7 @@ let render_board_compose (state : state) =
   box_divider buf cols;
   List.iter (box_line buf cols) context_lines;
   (match attachments_line with
-   | Some line -> box_line buf cols (Ansi.dim ^ line ^ Ansi.reset)
+   | Some line -> box_line buf cols (Theme.recede () ^ line ^ Ansi.reset)
    | None -> ());
   (match attach_input_line with
    | Some line -> box_line buf cols line
@@ -390,7 +390,7 @@ let board_hearth_census_line ~cols (state : state) =
         ^ (words "조회 실패: " "unavailable: ") ^ Terminal_text.single_line detail) in
   let tone=match observation with
     | Masc_tui_fetched.Stale _ | Failed _ -> Theme.bad ()
-    | Absent | Loading | Ready _ -> Ansi.dim in
+    | Absent | Loading | Ready _ -> Theme.recede () in
   let notice text = tone
     ^ Message_layout.truncate_middle (framed_inner_width cols) ((words "게시판 · " "hearths · ") ^ text) ^ Ansi.reset in
   match Masc_tui_fetched.value observation with
@@ -488,13 +488,13 @@ let board_hearth_census_line ~cols (state : state) =
       let kept, note = fit ~note_cells:0 in
       let shown =
         List.map entry kept
-        |> String.concat (Ansi.dim ^ census_separator ^ Ansi.reset)
+        |> String.concat (Theme.recede () ^ census_separator ^ Ansi.reset)
       in
       Printf.sprintf "%s%s%s%s%s%s%s" tone label Ansi.reset label_gap shown
         (match note with
          | None -> ""
-         | Some note -> Printf.sprintf "%s%s%s" Ansi.dim note Ansi.reset)
-        (Printf.sprintf "%s%s%s" Ansi.dim tail Ansi.reset)
+         | Some note -> Printf.sprintf "%s%s%s" (Theme.recede ()) note Ansi.reset)
+        (Printf.sprintf "%s%s%s" (Theme.recede ()) tail Ansi.reset)
 
 let board_posts_status state =
   let words ko en = words state ko en in
@@ -518,6 +518,9 @@ let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
 
   let count = List.length (board_posts state) in
+  let cursor =
+    if count = 0 then 0 else max 0 (min state.board_cursor (count - 1))
+  in
   (* Read once for the whole list: the header word and every row's number name
      the same time, and they would drift the moment two readings of the sort
      disagreed. *)
@@ -598,7 +601,7 @@ let render_board_list (state : state) =
          | None -> None
          | Some _ when count = 0 -> None
          | Some _ ->
-             let selected = Some state.board_cursor in
+             let selected = Some cursor in
              Some
                (match holding with
                 | Some total when total > count ->
@@ -631,7 +634,10 @@ let render_board_list (state : state) =
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
-              ("  " ^ Render_schedule.board_header_row ~ko ~age_header ~layout))
+              ("  "
+               ^ Render_schedule.board_header_row_with_dropped ~ko
+                   ~inner_width:(max 0 (framed_inner_width cols - 2))
+                   ~age_header ~layout))
         ; c.push_divider
         ]
       in
@@ -640,7 +646,7 @@ let render_board_list (state : state) =
       if count = 0 then
         (match observation with
          | Masc_tui_fetched.Failed _ | Stale _ -> Option.iter render_list_error list_error
-         | Absent -> c.push (Ansi.dim ^ page_unread_note ~ko:(state.ui_language = Lang_ko) ^ Ansi.reset)
+         | Absent -> c.push (Theme.recede () ^ page_unread_note ~ko:(state.ui_language = Lang_ko) ^ Ansi.reset)
          | Loading ->
              c.push
                ("  " ^ progress_inline ~ko ~now ?started_at:list_loading_started
@@ -651,7 +657,7 @@ let render_board_list (state : state) =
                  ("  " ^ progress_inline ~ko ~now ?started_at:list_loading_started
                     (words state "이전 목록은 비어 있음 · 글 조회 중" "Last listing empty · reading posts"))
              else
-               c.push (Ansi.dim
+               c.push (Theme.recede ()
                  ^ (if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미조회)" "  (last listing empty; requested query not read)")
                     else (words state "  (게시글 없음)" "  (no board posts)")) ^ Ansi.reset))
       else begin
@@ -661,8 +667,8 @@ let render_board_list (state : state) =
           max 0 (budget - List.length heading - error_rows)
         in
         let scroll_offset =
-          if state.board_cursor >= content_height then
-            state.board_cursor - content_height + 1
+          if cursor >= content_height then
+            cursor - content_height + 1
           else 0
         in
         (* One clock read for the whole page, so two rows drawn in the same
@@ -678,7 +684,7 @@ let render_board_list (state : state) =
           match Rows.at board_posts_window idx with
           | None -> ()
           | Some p ->
-            let is_selected = idx = state.board_cursor in
+            let is_selected = idx = cursor in
             (* The age is since the post or one of its comments last moved.
                A board's list had no timestamp at all, so "what is still
                alive" -- the question the [recent] and [updated] sort orders
@@ -730,13 +736,13 @@ let render_board_list (state : state) =
             in
             let styles =
               { Render_schedule.bstyle_hearth =
-                  if String.equal hearth_text "" then Ansi.dim
+                  if String.equal hearth_text "" then Theme.recede ()
                   else Theme.info ()
               ; bstyle_author = Theme.ok ()
-              ; bstyle_age = Ansi.dim
+              ; bstyle_age = Theme.recede ()
               ; bstyle_score = board_score_style p.bp_votes
               ; bstyle_replies =
-                  if p.bp_comment_count > 0 then Theme.ok () else Ansi.dim
+                  if p.bp_comment_count > 0 then Theme.ok () else Theme.recede ()
               }
             in
             let content =
@@ -929,13 +935,23 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
           author_name
           Ansi.reset
   in
+  let sep = Theme.recede () ^ " · " ^ Ansi.reset in
+  let state_chip =
+    match post.bp_closed with
+    | None -> Theme.ok () ^ words state "열린 글" "open" ^ Ansi.reset
+    | Some _ -> Theme.warn () ^ words state "종료된 글" "closed" ^ Ansi.reset
+  in
+  let score_part =
+    if post.bp_votes = 0 then ""
+    else sep ^ board_score_style post.bp_votes ^ board_score_text post.bp_votes ^ Ansi.reset
+  in
   box_line buf cols
-    (Printf.sprintf "  %s · %s · %s · %s%d%s"
-       author_chip (Terminal_text.short_timestamp post.bp_created_at)
-       (match post.bp_closed with None -> words state "열린 글" "open"
-        | Some _ -> words state "종료된 글" "closed")
-       (words state "댓글 " "replies ") post.bp_comment_count
-       (if post.bp_votes = 0 then "" else " · " ^ board_score_text post.bp_votes));
+    (Printf.sprintf "  %s%s%s%s%s%s%s%s%s%d%s"
+       author_chip sep
+       (Theme.recede ()) (Terminal_text.short_timestamp post.bp_created_at) Ansi.reset
+       sep state_chip sep
+       (Theme.recede () ^ words state "댓글 " "replies " ^ Ansi.reset)
+       post.bp_comment_count score_part);
   box_divider buf cols;
 
   (* The thread sits beside the post, not under it, when the pane is wide
@@ -1017,7 +1033,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         match referenced with
         | [] -> []
         | referenced ->
-          (Ansi.dim ^ "" ^ Ansi.reset)
+          ""
           :: (Ansi.bold ^ words state "  연결" "  Points at" ^ Ansi.reset)
           :: List.map
                (fun (kind, id) ->
@@ -1025,18 +1041,17 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                     writes masc://board/%1b%5b2J hands this line real escape
                     bytes. The kind is a closed variant and needs no sanitizer;
                     the id is whatever the writer typed. *)
-                 Printf.sprintf "  %s%-10s %s%s" Ansi.reset
-                   (Link.kind_label kind)
+                 Printf.sprintf "  %s%-10s%s %s" (Theme.recede ())
+                   (Link.kind_label kind) Ansi.reset
                    (fit_width (Terminal_text.single_line id)
-                      (max 8 (framed_inner_width body_wrap_cols - 12)))
-                   Ansi.reset)
+                      (max 8 (framed_inner_width body_wrap_cols - 12))))
                referenced
       in
       let related_lines =
         match related with
         | [] -> []
         | related ->
-          (Ansi.dim ^ "" ^ Ansi.reset)
+          ""
           :: (Ansi.bold
               ^ Printf.sprintf (if state.ui_language = Lang_ko then "  같은 대상을 다룬 글 (%d)" else "  Also about this (%d)") (List.length related)
               ^ Ansi.reset)
@@ -1045,7 +1060,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
               |> List.map (fun (other : board_post) ->
                    Printf.sprintf "  %s  %s%s%s"
                      (fit_width (Terminal_text.single_line other.bp_id) 12)
-                     Ansi.dim
+                     (Theme.recede ())
                      (fit_width (Terminal_text.single_line other.bp_title)
                         (max 8 (framed_inner_width body_wrap_cols - 22)))
                      Ansi.reset))
@@ -1061,16 +1076,15 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         match post.bp_attachments with
         | [] -> []
         | attachments ->
-          (Ansi.dim ^ "" ^ Ansi.reset)
+          ""
           :: (Ansi.bold ^ words state "  첨부" "  Attachments" ^ Ansi.reset)
           :: List.mapi
                (fun index (entry : board_attachment_entry) ->
-                 Printf.sprintf "  [%d] %s%s%s" (index + 1) Ansi.reset
+                 Printf.sprintf "  %s[%d]%s %s" Ansi.bold (index + 1) Ansi.reset
                    (fit_width
                       (Terminal_text.single_line
                         (Board_attachments.label ~ko:(state.ui_language = Lang_ko) entry))
-                      (max 8 (framed_inner_width body_wrap_cols - 8)))
-                   Ansi.reset)
+                      (max 8 (framed_inner_width body_wrap_cols - 8))))
                attachments
       in
       let closure_lines, closure_provenance = match post.bp_closed with
@@ -1118,7 +1132,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         match detail with
         | Board_detail.Absent ->
             [ Board_read_layout.Thread_note
-                (Ansi.dim ^ (words state "  상세 미조회" "  Board detail not read") ^ Ansi.reset) ]
+                (Theme.recede () ^ (words state "  상세 미조회" "  Board detail not read") ^ Ansi.reset) ]
         | Board_detail.Loading ->
             let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
             [ Board_read_layout.Thread_note
@@ -1160,7 +1174,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                    if String.equal author (Terminal_text.single_line post.bp_author) then
                      " " ^ (Theme.info ()) ^ (words state "[작성자]" "[Author]") ^ Ansi.reset
                    else if List.exists (fun (k : Tui_decode.keeper) -> String.equal k.k_name author) state.keepers then
-                     " " ^ (Theme.warn ()) ^ "[Keeper]" ^ Ansi.reset
+                     " " ^ (Theme.warn ()) ^ (words state "[키퍼]" "[Keeper]") ^ Ansi.reset
                    else ""
                  in
                  let score = board_comment_score c.bc_votes in
@@ -1174,7 +1188,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                      author
                      Ansi.reset
                      author_role
-                     Ansi.dim
+                     (Theme.recede ())
                      created_at
                      Ansi.reset
                      (board_score_style score)
@@ -1217,7 +1231,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                              Ansi.reset
                          in
                          let timestamp =
-                           Printf.sprintf "%s%s%s%s" rail Ansi.dim created_at
+                           Printf.sprintf "%s%s%s%s" rail (Theme.recede ()) created_at
                              Ansi.reset
                          in
                          [ identity; timestamp ]

@@ -474,8 +474,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       let scroll = min max_scroll view.scroll in
       (* Read the window out of the retained array. [List.filteri] walked every
          row of a 50,000-character page to reach the ones on screen. *)
+      let selected_row = Browser_lane_layout.selected_row lines in
       for index = scroll to min (scroll + room - 1) (total - 1) do
-        c.push_styled ~style:Ansi.reset ("  " ^ Browser_lane_layout.line lines index)
+        let raw = Browser_lane_layout.line lines index in
+        if selected_row = Some index then
+          c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr raw)
+        else
+          c.push_styled ~style:Ansi.reset ("  " ^ raw)
       done;
       Option.iter c.position
         (Masc_tui_value.Position.window ~first:scroll ~shown:room ~total))
@@ -779,31 +784,47 @@ let render_connectors (state : state) =
               let open Masc.Tui_decode_connectors in
               let available = connector_available connector in
               let connected = connector_connected connector in
-              let yes_no flag =
-                if flag then ui_text state ~ko:"예" ~en:"yes"
-                else ui_text state ~ko:"아니오" ~en:"no"
+              let configured_cell =
+                if available then
+                  Theme.ok () ^ "\xe2\x97\x8f " ^ ui_text state ~ko:"예" ~en:"yes" ^ Ansi.reset
+                else
+                  Theme.recede () ^ "\xe2\x97\x8b " ^ ui_text state ~ko:"아니오" ~en:"no" ^ Ansi.reset
+              in
+              let reachable_cell =
+                if connected then
+                  Theme.ok () ^ "\xe2\x97\x8f " ^ ui_text state ~ko:"예" ~en:"yes" ^ Ansi.reset
+                else if available then
+                  Theme.bad () ^ "\xc3\x97 " ^ ui_text state ~ko:"아니오" ~en:"no" ^ Ansi.reset
+                else
+                  Theme.recede () ^ "\xe2\x97\x8b " ^ ui_text state ~ko:"아니오" ~en:"no" ^ Ansi.reset
+              in
+              let channel_text =
+                Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
+                  connector.cn_channel
+              in
+              let channel_cell =
+                if String.equal channel_text Masc_tui_theme.Glyph.no_value then
+                  Theme.recede () ^ channel_text ^ Ansi.reset
+                else channel_text
               in
               let is_selected = idx = cursor in
               let line =
                 (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row (cells
                   ~name:(Terminal_text.single_line connector.cn_display_name)
-                  ~configured:(yes_no available)
-                  ~reachable:(yes_no connected)
+                  ~configured:configured_cell
+                  ~reachable:reachable_cell
                   ~status:(Terminal_text.single_line (connector_status connector))
-                  ~channel:(Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
-                     connector.cn_channel))
+                  ~channel:channel_cell)
               in
-              let style =
+              if is_selected then c.push_selected (Masc_tui_theme.strip_sgr line)
+              else if available && not connected then
                 (* Set up and unreachable is the row to act on: it was
-                   working. Never configured is dim -- it is a choice, not a
+                   working. Never configured recedes -- it is a choice, not a
                    fault. *)
-                if available && not connected then
-                  Theme.bad ()
-                else if not available then Ansi.dim
-                else Ansi.reset
-              in
-              if is_selected then c.push_selected line
-              else c.push_styled ~style line
+                c.push_styled ~style:(Theme.bad ()) (Masc_tui_theme.strip_sgr line)
+              else if not available then
+                c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
+              else c.push line
         done;
         c.position
           (Masc_tui_value.Position.row ~selected:(Some cursor)

@@ -66,9 +66,9 @@ let new_path () =
 
 let read_error_text : Store.read_error -> string = function
   | Read_failed { detail; _ } -> "read failed: " ^ detail
-  | Tail_undecodable { offset; reason = Not_json } ->
-    Printf.sprintf "tail at %d is not JSON" offset
-  | Tail_undecodable { offset; reason = Malformed error } ->
+  | Tail_undecodable { offset; rows_end; reason = Not_json } ->
+    Printf.sprintf "tail at %d to %d is not JSON" offset rows_end
+  | Tail_undecodable { offset; rows_end = (_ : int); reason = Malformed error } ->
     Printf.sprintf "tail at %d: %s" offset
       (Masc.Keeper_memory_os_types.wire_error_to_string error)
   | Moved_while_reading -> "moved while reading"
@@ -172,7 +172,8 @@ let test_tail_that_cannot_be_read () =
   let first = appended path ~at_end:0 started in
   write_raw path "not json\n";
   check string "a line that is not JSON"
-    (Printf.sprintf "tail at %d is not JSON" first.new_end)
+    (Printf.sprintf "tail at %d to %d is not JSON" first.new_end
+       (first.new_end + String.length "not json\n"))
     (tail_text path);
   let other = new_path () in
   let first = appended other ~at_end:0 started in

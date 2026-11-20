@@ -26,6 +26,7 @@ type read_error =
       }
   | Tail_undecodable of
       { offset : int
+      ; rows_end : int
       ; reason : undecodable
       }
   | Moved_while_reading
@@ -69,7 +70,7 @@ let read_tail path =
        else (
          match decode row with
          | Ok last -> Ok (Written { rows_end; last_at = offset; last })
-         | Error reason -> Error (Tail_undecodable { offset; reason })))
+         | Error reason -> Error (Tail_undecodable { offset; rows_end; reason })))
 ;;
 
 type append_error =

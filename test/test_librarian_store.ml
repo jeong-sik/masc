@@ -403,6 +403,111 @@ let test_effects_that_make_no_snapshot () =
     fail "effects that hold one fact twice were committed"
 ;;
 
+let adoption_text : (Store.t, Store.adoption_refusal) result -> string = function
+  | Ok (_ : Store.t) -> "adopted"
+  | Error Snapshot_mismatch -> "snapshot mismatch"
+  | Error Snapshot_unreadable -> "snapshot unreadable"
+  | Error (Not_adopted stop) -> "not adopted: " ^ stop_text stop
+;;
+
+let adopt ?(at = 400.0) place observed =
+  Store.adopt ~memory_dir:place.memory_dir ~turns_dir:place.turns_dir ~keeper_id ~at
+    ~by:"operator-1" ~observed
+;;
+
+(* A store with one commit whose snapshot was then replaced from outside by
+   another snapshot. *)
+let diverged_place () =
+  let place = started_place () in
+  let (_ : Store.t), line = committed (booted place) ~at:201.0 (remember port) in
+  let other = Snapshot_codec.snapshot_bytes (Envelope.empty ~at:999.0 ~turn_log) in
+  write_file (snapshot_path place) other;
+  place, line, other
+;;
+
+let test_adopt_a_diverged_snapshot () =
+  let place, before, other = diverged_place () in
+  let observed = Digest.digest_of_bytes other in
+  let store =
+    match adopt place observed with
+    | Ok store -> store
+    | Error (_ : Store.adoption_refusal) as refused -> fail (adoption_text refused)
+  in
+  check string "the file is not written" other (file_bytes (snapshot_path place));
+  check (list string) "Memory is what the file holds" [] (claims (Store.memory store));
+  (match Store.tail store with
+   | Committed line ->
+     check int "the commit after the last one" (before.seq + 1) line.seq;
+     check string "committed on the snapshot the last line named" (hex before.after)
+       (hex line.basis);
+     check string "it names the bytes the operator named" (hex observed) (hex line.after);
+     check int "and their revision" 1 line.revision;
+     check int "reading goes on where it was" before.turn_log_offset line.turn_log_offset;
+     check string "the cause is the adoption" "operator-1"
+       (match line.cause with
+        | Adopt { by; observed = (_ : Digest.digest) } -> by
+        | Direct _ -> "a direct write")
+   | Started _ -> fail "a log whose last line decodes was started over");
+  check string "boot now opens the store" "booted" (boot_text place);
+  let (_ : Store.t), next = committed store ~at:401.0 (remember owner) in
+  check int "the next commit follows the adoption" (before.seq + 2) next.seq;
+  check string "and is committed on the adopted bytes" (hex observed) (hex next.basis)
+;;
+
+let test_adopt_refuses () =
+  let place, (_ : Log.commit), other = diverged_place () in
+  let log = file_bytes (log_path place) in
+  check string "bytes the file does not hold" "snapshot mismatch"
+    (adoption_text (adopt place (Digest.digest_of_bytes "another snapshot")));
+  write_file (snapshot_path place) "not a snapshot";
+  check string "bytes that are not a snapshot" "snapshot unreadable"
+    (adoption_text (adopt place (Digest.digest_of_bytes "not a snapshot")));
+  Sys.remove (snapshot_path place);
+  check string "no file" "snapshot mismatch"
+    (adoption_text (adopt place (Digest.digest_of_bytes other)));
+  check string "nothing was appended" log (file_bytes (log_path place))
+;;
+
+(* The last line does not decode, so where reading had reached is lost. *)
+let test_adopt_after_an_unreadable_tail () =
+  let place = started_place () in
+  let (_ : Store.t), (_ : Log.commit) = committed (booted place) ~at:201.0 (remember port) in
+  append_raw (log_path place) "not json\n";
+  let log = file_bytes (log_path place) in
+  let held = file_bytes (snapshot_path place) in
+  let observed = Digest.digest_of_bytes held in
+  let store =
+    match adopt place observed with
+    | Ok store -> store
+    | Error (_ : Store.adoption_refusal) as refused -> fail (adoption_text refused)
+  in
+  (match Store.tail store with
+   | Started { at; snapshot; revision; turn_log_offset; covered; turn_log = (_ : Turn_log.Log_id.t) }
+     ->
+     check (float 0.0) "written when adopted" 400.0 at;
+     check string "it names the bytes the operator named" (hex observed) (hex snapshot);
+     check int "and their revision" 2 revision;
+     check int "reading starts over" 0 turn_log_offset;
+     check int "at the mark the turn log started with" 4 covered.closed_messages
+   | Committed (_ : Log.commit) -> fail "reading went on from a line that was not read");
+  check string "the line follows the one that does not decode"
+    (log ^ encoded (Store.tail store) ^ "\n")
+    (file_bytes (log_path place));
+  check (list string) "Memory is what the file holds" [ port ] (claims (Store.memory store));
+  check string "boot now opens the store" "booted" (boot_text place);
+  let (_ : Store.t), next = committed store ~at:401.0 (remember owner) in
+  check int "commits count from the new start" 1 next.seq;
+  let no_turn_log = started_place () in
+  let (_ : Store.t) = booted no_turn_log in
+  append_raw (log_path no_turn_log) "not json\n";
+  Sys.remove (turn_log_path no_turn_log);
+  let log = file_bytes (log_path no_turn_log) in
+  check string "without a turn log there is nothing to start over from"
+    "not adopted: store unwritable"
+    (adoption_text (adopt no_turn_log (digest_of_file (snapshot_path no_turn_log))));
+  check string "and nothing is appended" log (file_bytes (log_path no_turn_log))
+;;
+
 let () =
   run "librarian_store"
     [ ( "first boot"
@@ -422,6 +527,12 @@ let () =
         ; test_case "a line that does not make its snapshot" `Quick
             test_a_line_that_does_not_make_its_snapshot
         ; test_case "files that cannot be read" `Quick test_files_that_cannot_be_read
+        ] )
+    ; ( "adopt"
+      , [ test_case "a diverged snapshot" `Quick test_adopt_a_diverged_snapshot
+        ; test_case "what is refused" `Quick test_adopt_refuses
+        ; test_case "after a last line that does not decode" `Quick
+            test_adopt_after_an_unreadable_tail
         ] )
     ]
 ;;

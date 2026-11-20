@@ -36,6 +36,7 @@ type read_error =
       }
   | Tail_undecodable of
       { offset : int
+      ; rows_end : int (** Just past the line that does not decode. *)
       ; reason : undecodable
       }
   (** The tail line does not decode. Where reading stood was on that line,

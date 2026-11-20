@@ -378,6 +378,17 @@ let take_first_seat first rest =
      | Error rest_full -> wait_for_first_seat first_full rest_full)
 ;;
 
+let try_first_seat sources =
+  let rec ask = function
+    | [] -> None
+    | source :: sources ->
+      (match ask_now source with
+       | Ok taken -> Some taken
+       | Error (_, (_ : full_source)) -> ask sources)
+  in
+  ask sources
+;;
+
 let seat_is_of_endpoint seat (config : Provider_config.t) =
   match seat, scheduler_of config with
   | Unadmitted, None -> true

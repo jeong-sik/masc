@@ -1227,6 +1227,29 @@ let test_a_full_walk_takes_the_first_permit_of_an_endpoint_or_an_owned_scheduler
   check (pair int int) "every permit returned" (0, 0) (active a, owned_active owned)
 ;;
 
+(* Asking without waiting takes the first source with a free permit and
+   leaves every other source as it was; when all are full nothing is taken
+   and nothing queues. *)
+let test_asking_without_waiting_takes_the_first_free_source () =
+  let full = owned_scheduler () in
+  check bool "the first source is full" true (Slot_scheduler.try_acquire full);
+  let free = owned_scheduler () in
+  (match
+     Provider_admission.try_first_seat [ 0, scheduler_source full; 1, scheduler_source free ]
+   with
+   | Some (owner, seat) ->
+     check int "the free source gave the seat" 1 owner;
+     check int "the seat holds its permit" 1 (owned_active free);
+     Provider_admission.release_seat seat;
+     check int "the permit went back" 0 (owned_active free)
+   | None -> fail "a free source gave no seat");
+  check int "the full source was left as it was" 1 (owned_active full);
+  check bool "no seat when every source is full" true
+    (Option.is_none (Provider_admission.try_first_seat [ 0, scheduler_source full ]));
+  check int "and no request queues" 0
+    (Slot_scheduler.snapshot full).Slot_scheduler.queue_length
+;;
+
 let test_a_seat_knows_the_endpoint_that_gave_it () =
   Eio_main.run
   @@ fun _env ->
@@ -1362,6 +1385,10 @@ let () =
             "a seat knows the endpoint that gave it"
             `Quick
             test_a_seat_knows_the_endpoint_that_gave_it
+        ; test_case
+            "asking without waiting takes the first free source"
+            `Quick
+            test_asking_without_waiting_takes_the_first_free_source
         ] )
     ; ( "call_deadline"
       , [ test_case

@@ -206,7 +206,7 @@ candidates = ["overflow.sample", "fixture.sample"]
    turn, the canonical reader, and a completed raw seed. The result of the
    turn that ended goes as a marker the reader opens, and as the same marker
    on both requests. Its call keeps the arguments it was made with, and this
-   turn's result stays in the prompt (RFC-0363 §3.4.1, with the exception of
+   turn's result stays in the prompt (with the exception of
    RFC-tool-results-age-out-of-context). *)
 let test_historical_tool_results_go_as_markers () =
   let module Observation = Agent_core.Base.Schema_observation in

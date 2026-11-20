@@ -1272,6 +1272,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
                ~frame_width:(framed_inner_width cols) detail)
   in
   let total = List.length lines in
+  report_drawn_list Fusion_detail_rows ~height:content_height;
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.fusion_scroll max_scroll) in
   let header =
@@ -1460,4 +1461,6 @@ let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t optio
          ~path:[ fusion_step; ui_text state ~ko:"실행 시작" ~en:"launch" ]
          ~readings:title_readings ~position:None)
     ~hints
-    ~body:(fun ~budget:_ c -> List.iter c.push lines)
+    ~body:(fun ~budget c ->
+      report_drawn_list Fusion_launch_rows ~height:budget;
+      List.iter c.push lines)

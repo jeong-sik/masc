@@ -470,6 +470,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       let lines = browser_lane_rows ~cols view in
       let total = Browser_lane_layout.count lines in
       let room = max 0 (budget - fixed_rows) in
+      report_drawn_list Browser_lane_rows ~height:room;
       let max_scroll = max 0 (total - room) in
       let scroll = min max_scroll view.scroll in
       (* Read the window out of the retained array. [List.filteri] walked every
@@ -592,6 +593,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
       let lines = browser_lane_rows ~cols view in
       let count = Browser_lane_layout.count lines in
       let room = max 0 (budget - browser_history_fixed_rows) in
+      report_drawn_list Browser_history_rows ~height:room;
       let scroll = min history.scroll (max 0 (count-room)) in
       for index=scroll to min (scroll+room-1) (count-1) do
         c.push_styled ~style:Ansi.reset ("  " ^ Browser_lane_layout.line lines index)

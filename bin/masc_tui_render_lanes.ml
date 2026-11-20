@@ -2563,7 +2563,9 @@ let render_client_detail state (client : Masc.Tui_decode.client_row) =
     ~hints:(Masc_tui_keys.footer_hints_client_detail ~lang:state.ui_language)
     ~overflow:(Scrolled {scroll=state.client_detail_scroll;
                         report=(fun scroll -> Client_detail_scroll scroll)})
-    ~body:(fun ~budget:_ c -> List.iter c.push lines)
+    ~body:(fun ~budget c ->
+      report_drawn_list Client_detail_rows ~height:budget;
+      List.iter c.push lines)
 
 let render_clients (state : state) =
   let terminal_rows, cols = get_terminal_size () in

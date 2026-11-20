@@ -583,6 +583,7 @@ let render_runtime_detail (state : state) target =
   let lines = runtime_detail_lines state target ~width:(max 1 (framed_inner_width cols - 4)) in
   let total = List.length lines in
   let content_height = max 1 (rows - 5) in
+  report_drawn_list Runtime_detail_rows ~height:content_height;
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.runtime_detail_scroll max_scroll) in
   box_top buf cols;

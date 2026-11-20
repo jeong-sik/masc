@@ -647,6 +647,7 @@ val boxed_head_rows : int -> int
 
 val write_list_sidebar :
   ?framed:bool ->
+  ?list:Masc_tui_types.paged_list ->
   Buffer.t ->
   rows:int ->
   cols:int ->
@@ -667,6 +668,7 @@ val write_list_sidebar :
 
 val write_list_sidebar_selection :
   ?framed:bool ->
+  ?list:Masc_tui_types.paged_list ->
   Buffer.t ->
   rows:int ->
   cols:int ->

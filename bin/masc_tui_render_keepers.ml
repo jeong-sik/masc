@@ -4107,7 +4107,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             "  Requests open a chat draft; the Keeper reports the result." ] in
       let reserved = List.length headline + List.length selected_facts + List.length outfit_lines
         + List.length observation + List.length empty + List.length footer in
-      let visible = min count (max 1 (base_height - reserved)) in
+      let item_window_height = max 1 (base_height - reserved) in
+      report_drawn_list Keeper_items_rows ~height:item_window_height;
+      let visible = min count item_window_height in
       let first = max 0 (min (cursor - visible / 2) (count - visible)) in
       let row_width = match portrait with
         | None -> inner
@@ -5553,11 +5555,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           | Some (stamp, (drawn : Masc_tui_render_identity.drawn))
             when String.equal stamp k.k_name ->
               report_drawn_list Identity_services
-                ~height:(content_height - drawn.separator_rows)
+                ~height:(max 0 (content_height - drawn.separator_rows))
           | Some _ | None -> ())
-     | Detail_info | Detail_items | Detail_sandbox | Detail_instructions
-     | Detail_secrets | Detail_github | Detail_channels | Detail_automation
-     | Detail_terminal -> ());
+     | Detail_items -> ()
+     | Detail_terminal ->
+         report_drawn_list Keeper_terminal_rows ~height:content_height
+     | Detail_info | Detail_sandbox | Detail_instructions
+     | Detail_secrets | Detail_github | Detail_channels | Detail_automation ->
+         report_drawn_list Keeper_detail_rows ~height:content_height);
     (* How far back from the bottom this window can go, and how far it is. *)
     let terminal_scroll, terminal_back =
       if terminal_tab then

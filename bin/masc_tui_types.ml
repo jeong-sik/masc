@@ -6030,6 +6030,24 @@ type paged_list =
   | Model_bindings
   | Palette_entries
   | Keeper_roster_entries
+  | Board_read_sidebar_rows
+  | Fusion_detail_rows
+  | Fusion_launch_rows
+  | Verification_detail_rows
+  | Harness_detail_rows
+  | Runtime_detail_rows
+  | System_log_detail_rows
+  | Keeper_detail_rows
+  | Keeper_terminal_rows
+  | Keeper_items_rows
+  | Client_detail_rows
+  | Config_themes_rows
+  | Config_runtime_rows
+  | Config_voice_rows
+  | Resource_document_rows
+  | Browser_history_rows
+  | Browser_lane_rows
+  | Workspace_activity_rows
 
 (* One list a frame drew: which, and the rows of it the frame drew. *)
 type drawn_list = { dl_list : paged_list; dl_height : int }
@@ -8714,7 +8732,8 @@ end
 module Browser_history = struct
   let owns_key = function
     | "esc" | "left" | "h" | "[" | "]" | "r" | "y" | "j" | "k" | "up" | "down"
-    | "pageup" | "pagedown" | "home" | "s" | "v" | "g" | "o" | "x" | "a" | "l" | "b"
+    | "pageup" | "pagedown" | "home" | "end" | "g" | "G" | "wheel-up"
+    | "wheel-down" | "s" | "v" | "o" | "x" | "a" | "l" | "b"
     | "n" | "p" | "\r" | "\n" | "enter" | "\015" -> true
     | _ -> false
   type entry = {
@@ -19285,7 +19304,6 @@ let workspace_activity_rows (state : state) =
           |> List.sort (fun ((a : Tui_decode.file_change), _) ((b : Tui_decode.file_change), _) ->
               Float.compare b.fc_at a.fc_at)
 
-let workspace_activity_page_rows ~surface_rows = max 1 (surface_rows - 12)
 
 (* The frame, Enter and a completed refresh share the same visible selection,
    including when the latest reading contains fewer rows. *)

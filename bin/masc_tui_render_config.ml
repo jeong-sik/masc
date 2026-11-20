@@ -1551,6 +1551,7 @@ let render_themes (state : state) =
   let show_sample = rows >= 21 in
   let chrome_rows = if show_sample then 11 else 8 in
   let content_height = max 1 (rows - chrome_rows) in
+  report_drawn_list Config_themes_rows ~height:content_height;
   let cursor =
     max 0 (min state.theme_cursor (max 0 (List.length entries - 1)))
   in
@@ -2385,6 +2386,7 @@ let finish_voice_surface ?(progress_sheet : progress_sheet option)
           ~available:raw_height ~width:(framed_inner_width cols) sheet
   in
   let height = max 1 (raw_height - List.length sheet_lines) in
+  report_drawn_list Config_voice_rows ~height;
   let scroll =
     Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.config_scroll
   in
@@ -3198,6 +3200,7 @@ let render_config (state : state) =
               c.push_styled ~style:Ansi.dim (page_unread_note ~ko)
       | Some _ ->
           let rows = runtime_config_active_rows state in
+          report_drawn_list Config_runtime_rows ~height:content_height;
           let total = List.length rows in
           let max_scroll = max 0 (total - content_height) in
           let scroll = max 0 (min state.config_scroll max_scroll) in

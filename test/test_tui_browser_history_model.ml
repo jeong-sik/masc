@@ -4,6 +4,8 @@ let ok = function Ok value -> value | Error detail -> failwith detail
 let () =
   List.iter (fun key -> expect "global keys remain outside history ownership" (not (History.owns_key key)))
     ["tab";"\t";"shift-tab";"q";"Q";"B";"?";":";"\020";"\002";"\012";"\030"];
+  List.iter (fun key -> expect ("history owns navigation key " ^ key) (History.owns_key key))
+    ["home";"end";"g";"G";"pageup";"pagedown";"wheel-up";"wheel-down"];
   expect "history owns the browser screenshot key" (History.owns_key "\015");
   let deferred = Masc_tui_types.Browser_lane_view.defer_read
     (Masc_tui_types.Browser_lane_view.create ()) in

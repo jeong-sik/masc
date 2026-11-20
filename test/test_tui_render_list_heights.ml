@@ -950,6 +950,50 @@ let test_requests_page_by_the_entries_a_window_holds () =
       state.tools_async_selection <- Some (request_target ~cols:!width index))
     state
 
+let test_board_read_sidebar_reports_drawn_rows () =
+  let open_post = { (board_post 0) with bp_title = "open-selected" } in
+  let posts = open_post :: List.init 39 (fun i -> board_post (i + 1)) in
+  with_size (40, 120) (fun () ->
+    let state = create_state ~workspace:"" ~port:0 () in
+    state.view <- Board;
+    state.board_mode <- Board_read open_post.bp_id;
+    state.board_listing <-
+      Masc_tui_fetched.Ready { bl_query = board_query state; bl_posts = posts };
+    let lines, lists = draw (fun s -> Masc_tui_render_board.render_board_read s open_post) state in
+    (* Open post fills the first sidebar slot; the remaining sidebar slots draw "zq-*" rows. *)
+    Alcotest.(check (list int))
+      "Board_read split sidebar reports the exact post rows drawn"
+      [ rows_naming "zq-" lines + 1 ] (reported Board_read_sidebar_rows lists))
+
+let test_config_themes_and_voice_report_drawn_heights () =
+  let measure size pane render list =
+    with_size size (fun () ->
+      let state = create_state ~workspace:"" ~port:0 () in
+      state.view <- Config;
+      state.config_pane <- pane;
+      let _lines, lists = draw render state in
+      match reported list lists with
+      | [ h ] -> h
+      | other ->
+          Alcotest.failf "expected one reported height, got %d" (List.length other))
+  in
+  let themes_small =
+    measure (24, 80) Config_themes Masc_tui_render_config.render_themes Config_themes_rows
+  in
+  let themes_large =
+    measure (40, 120) Config_themes Masc_tui_render_config.render_themes Config_themes_rows
+  in
+  Alcotest.(check bool) "themes drawn height grows with terminal height" true
+    (themes_small >= 1 && themes_small < themes_large);
+  let voice_small =
+    measure (24, 80) Config_voice Masc_tui_render_config.render_voice Config_voice_rows
+  in
+  let voice_large =
+    measure (40, 120) Config_voice Masc_tui_render_config.render_voice Config_voice_rows
+  in
+  Alcotest.(check bool) "voice drawn height grows with terminal height" true
+    (voice_small >= 1 && voice_small < voice_large)
+
 let () =
   Alcotest.run "tui render list heights"
     [ ( "reported heights"
@@ -979,5 +1023,9 @@ let () =
             test_skills_page_by_the_entries_a_window_holds
         ; Alcotest.test_case "the request list pages by the entries a window holds" `Quick
             test_requests_page_by_the_entries_a_window_holds
+        ; Alcotest.test_case "the Board_read sidebar reports the post rows it drew" `Quick
+            test_board_read_sidebar_reports_drawn_rows
+        ; Alcotest.test_case "Config themes and voice report their drawn heights" `Quick
+            test_config_themes_and_voice_report_drawn_heights
         ] )
     ]

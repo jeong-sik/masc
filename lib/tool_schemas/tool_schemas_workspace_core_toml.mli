@@ -1,6 +1,5 @@
 (** The three workspace-core tool declarations, moved to
-    [config/tools/masc_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/masc_*.toml].
 
     Decoded once at module initialization; a missing or undecodable file
     refuses the boot. [Tool_schemas_workspace_core] is the only consumer. *)

@@ -312,6 +312,19 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # The disk-band evidence ci-run-test-suite.sh streams while the suite
+      # runs. It is uploaded because a runner that dies mid-suite still leaves
+      # this file behind, and that run is exactly when the numbers are read.
+      - name: Upload the disk evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-suite-disk-evidence
+          overwrite: ${{ inputs.candidate_verification == true }}
+          path: ${{ runner.temp }}/test-suite-disk-evidence.log
+          if-no-files-found: ignore
+          retention-days: 14
+
       # Where the same run's time went: seconds per kind of dune process
       # (compile, link, test run) and the slowest of each, summarised by
       # scripts/ci-run-test-suite.sh from dune's trace. The trace itself

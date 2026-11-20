@@ -179,7 +179,10 @@ sandbox_root="_build/.sandbox"
 # deadline, and nothing in the surviving log named the consumer. When free
 # space falls past a band edge, record what holds the bytes once per band, so
 # the next full run names its eater instead of guessing.
-disk_bands="30 20 10 5"
+# 50G is the early-warning rung: a long run can die of "the hosted runner lost
+# communication" before it ever reaches 30G, and then only this band's line has
+# been recorded. Each band costs two du passes, and only when it is crossed.
+disk_bands="50 30 20 10 5"
 disk_bands_seen=" "
 disk_evidence_log="$tmp/test-suite-disk-evidence.log"
 disk_usage() {
@@ -194,6 +197,9 @@ disk_usage() {
   fi
 }
 disk_evidence() {
+  # An annotation line is collected by the runner as it streams, so it survives
+  # even when the job dies before the evidence file can be uploaded.
+  echo "::warning::disk band ${1}G crossed: $(df -BG --output=avail / | tail -1) available"
   echo "[test-suite] free space fell below ${1}G; what holds the bytes:"
   df -h /
   echo "[test-suite] largest _build entries (two levels: subtree then its biggest children):"
@@ -247,12 +253,19 @@ run_suite_under_deadline() {
   : > "$alcotest_outputs_at_deadline_file"
   # Disk traversal can take minutes. Keep its band state and all diagnostics
   # in one child so it cannot delay the deadline supervisor or suite verdict.
+  # Band evidence streams to the job log while it is collected, and a copy
+  # stays in the file for the upload step. Run 44801868642 ended as "the
+  # hosted runner lost communication" and run 44814053702 as "No space left
+  # on device", both after the Test step had started: neither reached the
+  # read that used to happen after the wait, so a file-only copy loses
+  # exactly the observation the next run needs to name its eater.
   (
+    exec > >(tee -a "$disk_evidence_log") 2>&1
     while kill -0 "$dune_pid" 2>/dev/null; do
       watch_disk
       sleep 5
     done
-  ) > "$disk_evidence_log" 2>&1 &
+  ) &
   disk_watcher_pid=$!
   while kill -0 "$dune_pid" 2>/dev/null; do
     now=$(date +%s)
@@ -277,7 +290,8 @@ run_suite_under_deadline() {
   fi
   wait "$disk_watcher_pid" 2>/dev/null
   disk_watcher_exited=$?
-  cat "$disk_evidence_log"
+  # The watcher already streamed these lines through tee; re-reading the file
+  # would print them twice.
   if [ "$disk_watcher_stopped" = false ] && [ "$disk_watcher_exited" -ne 0 ]; then
     echo "[test-suite] disk watcher failed (exit ${disk_watcher_exited}); disk observations may be incomplete"
   fi

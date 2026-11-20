@@ -4369,7 +4369,7 @@ let build_change_context_lines ~cols (change_ctx : change_context) : string list
     ; Option.map (fun turn -> Printf.sprintf "Turn #%d" turn) change_ctx.ctx_turn
     ; (match change_ctx.ctx_pr, change_ctx.ctx_pr_slug with
        | Some pr, Some slug -> Some (Printf.sprintf "PR: %s#%d" slug (Masc_tui_pr_ref.number pr))
-       | Some pr, None -> Some (Printf.sprintf "PR: #%d (repository unknown)" (Masc_tui_pr_ref.number pr))
+       | Some pr, None -> Some (Printf.sprintf "PR: #%d (repository not reported)" (Masc_tui_pr_ref.number pr))
        | None, (Some _ | None) -> None)
     ; (match change_ctx.ctx_comment with
        | Some text when String.trim text <> "" -> Some ("Note: " ^ first_line_summary ~max_len:34 text)

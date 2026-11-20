@@ -1413,10 +1413,12 @@ let claim_and_start_keeper_persistence
      write. A writer's ask calls the Librarian lane with the server's network
      and clock. *)
   let workspace_config = Mcp_server.workspace_config state in
+  let ask_env : Librarian_ask.env = { net; clock; base_dir = workspace_config.base_path } in
   let memory_writers =
     Keeper_memory_writers.start
       ~sw
-      ~ask:(Librarian_ask.run { net; clock; base_dir = workspace_config.base_path })
+      ~ask:(Librarian_ask.run ask_env)
+      ~ask_room:(Librarian_ask.run_room ask_env)
       ~start_turn_log:(Keeper_turn_log_store_start.run workspace_config)
       ~config:workspace_config
   in
@@ -1429,7 +1431,7 @@ let claim_and_start_keeper_persistence
      Keeper_memory_writers.follow_declaration
        ~sw
        ~prompt
-       ~answer_schema:Librarian_answer.schema
+       ~answer_schemas:Librarian_answer.schemas
        memory_writers
    | Error reason ->
      Log.Server.warn

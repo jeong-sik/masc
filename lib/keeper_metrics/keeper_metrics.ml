@@ -184,6 +184,7 @@ type t =
   | LibrarianAbsorbSources      (* counter: sources of a finished absorb-gate judgment, by keeper, forward outcome and the choice they got *)
   | LibrarianAbsorbCopyChecks   (* counter: reverse copy checks of a finished absorb-gate judgment, by keeper and verdict *)
   | LibrarianLateAnswers        (* counter: Librarian answers that arrived after their ask had stopped being the writer's current one, by keeper; none is committed *)
+  | LibrarianRoomOutcomes       (* counter: how each Librarian question that makes room ended, by keeper and outcome; only an answer that changes Memory or the working state writes a line *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -379,6 +380,7 @@ let to_string = function
   | LibrarianAbsorbSources -> "masc_keeper_librarian_absorb_sources_total"
   | LibrarianAbsorbCopyChecks -> "masc_keeper_librarian_absorb_copy_checks_total"
   | LibrarianLateAnswers -> "masc_keeper_librarian_late_answers_total"
+  | LibrarianRoomOutcomes -> "masc_keeper_librarian_room_outcomes_total"
 ;;
 
 type collection =
@@ -436,7 +438,7 @@ let collection = function
   | MemoryRecallRequestSeconds | MemoryRecallTotal | MemoryRecallSelected
   | MemoryRecallJudgmentSeconds | MemoryRecallPreparationFailures | MemoryChanges | MemoryFacts
   | MemorySnapshotBytes | LibrarianAbsorbSources | LibrarianAbsorbCopyChecks
-  | LibrarianLateAnswers -> Metric_store
+  | LibrarianLateAnswers | LibrarianRoomOutcomes -> Metric_store
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

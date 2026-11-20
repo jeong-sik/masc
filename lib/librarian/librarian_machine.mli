@@ -13,10 +13,10 @@
     in step with the value.
 
     [Booting] and [Retired] are {!Librarian_writer.status}'s. An ask reads at
-    the width the writer's narrowing gives ({!Librarian_width}, §7.6). What
-    the bottom learned and [Refused_at_bottom] come with the bottom layer
-    (§20 L7): here a question of one item that the lane refuses leaves the
-    writer [Resting], as a lane that answers nothing does.
+    the width the writer's narrowing gives ({!Librarian_width}, §7.6). At one
+    item the bottom decides ({!Librarian_bottom}, §7.4): the item alone, a
+    skip, or [Refused_at_bottom]. An item read alone is followed by the
+    question that makes room.
 
     {b The model.} [specs/bug-models/LibrarianWriter.tla] (§21) has the same
     transitions. Its names are these:
@@ -25,7 +25,7 @@
     model                             here
     "Idle" "Asking" "Resting"         Idle, Asking, Resting
     "Stopped", Stop(m, why)           Stopped
-    "RaB"                             none: the width layer's Refused_at_bottom
+    "RaB"                             Refused_at_bottom
     "Booting" "Retired" "Absent"      Librarian_writer.status, Librarian_writers
     HandleHint                        decide _ Turn_closed
     PulseIdle, PulseResting           decide _ Pulse
@@ -55,7 +55,14 @@
     [Snapshot_fault] (the model's [snapBad] is a snapshot that does not
     decode, and it stops the store either way), ["fault"]
     [Input_fault], ["failed"] [Ask_failed], and the lane results
-    ([LaneRes]) are [No_answer]. *)
+    ([LaneRes]) are [No_answer]. Its ask kinds ["range"], ["alone"] and
+    ["room"] are [Read (Read_range _)], [Read Read_item_alone] and [Room _].
+    Its room results map to {!Librarian_room_result.t}: ["room_answer"] is
+    [Room_answered], and ["room_fits_none"] and ["room_other"] are the rest,
+    which this layer does not tell apart; the model's [room] values
+    ["stale"], ["unchanged"] and ["made"] are the three ways a
+    [Room_answered] ends here. The model's [last_room] and [read_alone]
+    ([room], [alone]) are the rows' (§12), which this layer does not keep. *)
 
 module Digest := Agent_core.Checkpoint_objects
 
@@ -74,6 +81,17 @@ type declared =
   ; resolved : Runtime_exact_output_registry.resolved_lane
   }
 
+(** What an ask asks for. *)
+type asked =
+  | Read of Librarian_read_result.asked
+  (** [Read_range]: the width it reads at, {!Librarian_width.next} of the
+      narrowing when it started; a refusal goes onto the level this names.
+      [Read_item_alone]: the head item alone, asked only on the bottom's
+      verdict. *)
+  | Room of Librarian_room_result.asked
+  (** Memory and the working state, with no unit: asked only right after an
+      item read alone was committed (§7.4). *)
+
 (** The ask that is out. *)
 type asking =
   { ask : int (** Its number. A writer never gives a number twice. *)
@@ -85,11 +103,7 @@ type asking =
   (** Every fact a direct write removed while it was out, with the [seq] of
       the commit that removed it, in commit order: what
       {!Librarian_plan.of_answer} takes. *)
-  ; asked : Librarian_read_result.asked
-  (** [Read_range]: the width it reads at, {!Librarian_width.next} of the
-      narrowing when it started; a refusal goes onto the level this names.
-      [Read_item_alone]: the head item alone, asked only on the bottom's
-      verdict. *)
+  ; asked : asked
   ; bottom : Librarian_bottom.t
   (** The head item's size facts when it started. The ask calls no slot
       that has one under its question's id. *)
@@ -158,8 +172,13 @@ val booted
   -> (Librarian_store.t, Librarian_store.stop) result
   -> t
 
-(** How an ask ended. *)
-type ended = Read_ended of Librarian_read_result.t
+(** How an ask ended, with what it was asked for. *)
+type ended =
+  | Read_ended of
+      { asked : Librarian_read_result.asked
+      ; result : Librarian_read_result.t
+      }
+  | Room_ended of Librarian_room_result.t
 
 type event =
   | Turn_closed (** A [Closed] or a [Reset] line was appended to the turn log. *)
@@ -218,12 +237,15 @@ type event =
     any       Ask_ended, not the current ask     as it was: a late answer
     v}
 
-    The current ask's result:
+    The current reading ask's result:
 
     {v
     Answered          planned ({!Librarian_plan.of_answer} with removed_since),
                       committed ({!Librarian_store.commit_read}); the narrowing counts
-                      what it passed; the next ask
+                      what it passed. A range: the next ask. The item alone: the
+                      question that makes room at once, when no fact was removed and
+                      the lane value is the one the item was asked with; otherwise
+                      the next ask
     Nothing_to_ask    the next ask
     No_answer         The slots the lane declares now are the ones read.
                       More than one item: one of them refused, narrowed by what the
@@ -250,7 +272,25 @@ type event =
                       Store_unwritable
     Input_fault       Resting
     Ask_failed        Resting
-    v} *)
+    v}
+
+    The current room ask's result (§7.4: making room never holds reading
+    up, and the narrowing and the size facts stay as they are):
+
+    {v
+    Room_answered          a fact removed while it was asked: not committed; the
+                           next ask. Otherwise planned against Memory now: a plan
+                           that {!Librarian_store.changes} is committed
+                           ({!Librarian_store.commit_room}), one that does not is
+                           not; the next ask
+    Room_not_answered      the next ask
+    Room_failed            the next ask
+    Room_memory_diverged   Stopped (Log_diverged _)
+    Room_snapshot_fault    Stopped, as Snapshot_fault
+    v}
+
+    An answer that is not committed, and an ask no slot answered, leave
+    their outcome in the Keeper's log only. *)
 val decide : place -> t -> at:float -> event -> t
 
 (** Why a Keeper's Memory takes neither a write nor an act. *)
@@ -326,8 +366,9 @@ val resume
   -> t * act_answer
 
 (** An operator adopts the snapshot file of a store stopped as
-    [Log_diverged] or [Log_unreadable] (§8.7); the narrowing and the size
-    facts are emptied and the next ask follows. A store
+    [Log_diverged] or [Log_unreadable] (§8.7); the narrowing is emptied and
+    the next ask follows. The size facts stay, as {!t}'s [bottom] says. A
+    store
     stopped for another reason is [Act_unavailable (Store_stopped _)]:
     booting again is its way out. A store that is not stopped is
     [Not_stopped]. A refusal leaves the value as it was. *)

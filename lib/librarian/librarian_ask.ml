@@ -3,6 +3,7 @@ module Exact = Agent_core.Exact_output
 module Backpressure = Runtime_exact_lane_backpressure
 module Oneshot = Keeper_lane_cli_oneshot
 module Read_result = Librarian_read_result
+module Room_result = Librarian_room_result
 module Visit = Librarian_slot_visit
 module Lane = Librarian_memory_lane
 module Registry = Runtime_exact_output_registry
@@ -23,10 +24,18 @@ type input =
   ; bottom : Librarian_bottom.t
   }
 
+type room_input =
+  { place : Librarian_machine.place
+  ; tail : unit -> Librarian_log.line option
+  ; lane : Librarian_memory_lane.t
+  ; resolved : Runtime_exact_output_registry.resolved_lane
+  ; asked : Room_result.asked
+  }
+
 (* An ask that ends before its walk does: with a result of its own, or with a
    failure whose text goes to the log. *)
-type ended =
-  | Ended of Read_result.t
+type 'result ended =
+  | Ended of 'result
   | Failed of Read_result.failed * string
 
 let ( let* ) = Result.bind
@@ -43,36 +52,61 @@ let same_line a b =
 
 let not_open = Failed (Flow_stopped, "the writer is no longer open")
 
+(* What ends an ask whose snapshot is not the one the tail names, in the
+   result type of the question asked. *)
+type 'result unread_memory =
+  { diverged : expected:Digest.digest -> observed:Digest.digest -> 'result
+  ; fault : Librarian_snapshot_fault.t -> 'result
+  }
+
+let read_unread : Read_result.t unread_memory =
+  { diverged = (fun ~expected ~observed -> Memory_diverged { expected; observed })
+  ; fault = (fun fault -> Snapshot_fault fault)
+  }
+;;
+
+let room_unread : Room_result.t unread_memory =
+  { diverged = (fun ~expected ~observed -> Room_memory_diverged { expected; observed })
+  ; fault = (fun fault -> Room_snapshot_fault fault)
+  }
+;;
+
 (* The file is read as the store reads it before a commit: a file the store
    does not open ends the ask with its fault, and the writer stops for it as
    the store does. The digest is of the bytes the file holds and is compared
    before they are decoded, so bytes other than the ones the tail names
    diverged, as they do for a commit. *)
-let memory_of_bytes tail = function
-  | Error fault -> Error (Ended (Snapshot_fault fault))
+let memory_of_bytes unread tail = function
+  | Error fault -> Error (Ended (unread.fault fault))
   | Ok bytes ->
     let expected = Librarian_log.snapshot_after tail in
     let observed = Digest.digest_of_bytes bytes in
     if not (same_digest expected observed)
-    then Error (Ended (Memory_diverged { expected; observed }))
+    then Error (Ended (unread.diverged ~expected ~observed))
     else (
       match Librarian_store.decode_snapshot bytes with
       | Some memory -> Ok (tail, memory)
-      | None -> Error (Ended (Snapshot_fault Not_a_snapshot_file)))
+      | None -> Error (Ended (unread.fault Not_a_snapshot_file)))
+;;
+
+let snapshot_path (place : Librarian_machine.place) =
+  Keeper_memory_os_current_layout.path_for_keepers_dir
+    ~keepers_dir:place.memory_dir
+    ~keeper_id:place.keeper_id
 ;;
 
 (* The tail is read on both sides of the bytes. A direct write that commits
    in between changes it, and the bytes are read again under the new line:
    they were never another snapshot than the log names. *)
-let rec read_memory input ~snapshot_path =
-  match input.tail () with
+let rec read_memory unread ~tail ~snapshot_path =
+  match tail () with
   | None -> Error not_open
-  | Some tail ->
+  | Some line ->
     let read = Librarian_store.read_snapshot_bytes snapshot_path in
-    (match input.tail () with
+    (match tail () with
      | None -> Error not_open
-     | Some again when not (same_line tail again) -> read_memory input ~snapshot_path
-     | Some (_ : Librarian_log.line) -> memory_of_bytes tail read)
+     | Some again when not (same_line line again) -> read_memory unread ~tail ~snapshot_path
+     | Some (_ : Librarian_log.line) -> memory_of_bytes unread line read)
 ;;
 
 (* --- The units and the question (§7.1 step 3) --- *)
@@ -106,7 +140,7 @@ let rec head_of before = function
    after that many units with items, and a width of items after the first.
    Reading that stopped at a line it cannot pass asks about the units before
    that line. *)
-let read_units input ~(width : Librarian_width.width) tail =
+let read_units (input : input) ~(width : Librarian_width.width) tail =
   let turns_path =
     Keeper_turn_log_store.path_for_keepers_dir
       ~keepers_dir:input.place.turns_dir
@@ -119,7 +153,7 @@ let read_units input ~(width : Librarian_width.width) tail =
     | Items (_ : Librarian_width.count) -> First_with_items 1
   in
   match Librarian_unread.read ~turns_path ~until tail with
-  | Error (Fault fault) -> Error (Ended (Input_fault fault))
+  | Error (Fault fault) -> Error (Ended (Read_result.Input_fault fault))
   | Error (Unread { detail }) -> Error (Failed (Read_failed, "turn log: " ^ detail))
   | Ok { spans; stop; bytes = (_ : int) } ->
     (match head_of [] spans with
@@ -127,14 +161,14 @@ let read_units input ~(width : Librarian_width.width) tail =
      | None -> Error (Ended (nothing_before stop)))
 ;;
 
-let read_content input span ~take =
+let read_content (input : input) span ~take =
   match Librarian_unit_content.read input.stores span ~take with
   | Ok content -> Ok (span, content)
-  | Error (Fault fault) -> Error (Ended (Input_fault fault))
+  | Error (Fault fault) -> Error (Ended (Read_result.Input_fault fault))
   | Error (Unread { detail }) -> Error (Failed (Read_failed, "unit content: " ^ detail))
 ;;
 
-let rec read_whole input reads = function
+let rec read_whole (input : input) reads = function
   | [] -> Ok (List.rev reads)
   | span :: rest ->
     let* read = read_content input span ~take:Rest_of_unit in
@@ -157,7 +191,7 @@ type contents =
 
 (* Only the head is cut by a width of items; every other unit is read to its
    end. The reach is where the last unit's read ended. *)
-let read_range input ~(width : Librarian_width.width) { before; head; after } =
+let read_range (input : input) ~(width : Librarian_width.width) { before; head; after } =
   let head_take : Librarian_unit_content.take =
     match width with
     | Items count -> First_items count
@@ -230,7 +264,7 @@ let answer_rejected (receipt : Librarian_answer.rejection Exact.semantic_rejecti
    [Non_advanceable_terminal]. *)
 let last_visit
   : no_callback_error Exact.flow_execution_error
-  -> ((string * Visit.http) * Exact.flow_evidence, ended) result
+  -> ((string * Visit.http) * Exact.flow_evidence, 'result ended) result
   = function
   | Flow_candidates_exhausted { rejection; evidence } -> Ok (passed rejection, evidence)
   | Flow_exact_execution_failed { candidate; cause; evidence } ->
@@ -419,35 +453,40 @@ let to_call (lane : Lane.t) ~known (resolved : Registry.resolved_lane) : Registr
   }
 ;;
 
-(* HTTP first, CLI only when no HTTP slot answered. *)
-let walk env input ~which (question : Read_result.question) text =
-  let requirement =
-    Exact.make_output_requirement
-      ~schema:input.lane.question.answer_schema
-      ~minimum_guarantee:Json_syntax
-  in
-  let known = Librarian_bottom.known input.bottom which question.id in
-  let resolved = to_call input.lane ~known input.resolved in
-  let asked = question.id in
-  let answered slot answer : Read_result.t = Answered { question; answer; slot } in
+type lane_walked =
+  | Lane_answered of
+      { slot : string
+      ; answer : Librarian_answer.t
+      }
+  | Lane_unanswered of (Lane.slot_key * Librarian_slot_outcome.unanswered) list
+
+(* HTTP first, CLI only when no HTTP slot answered. Every slot is asked to
+   match the schema of the question's kind. *)
+let walk_lane env ~(lane : Lane.t) ~resolved ~known ~schema ~asked text =
+  let requirement = Exact.make_output_requirement ~schema ~minimum_guarantee:Json_syntax in
+  let resolved = to_call lane ~known resolved in
   let* http = walk_http env ~resolved ~asked ~requirement ~text in
   match http with
-  | Walk_answered { slot; answer } -> Ok (answered slot answer)
+  | Walk_answered { slot; answer } -> Ok (Lane_answered { slot; answer })
   | Walk_unanswered http ->
     (match walk_cli env ~cli_slots:resolved.cli_slots ~asked ~requirement ~text with
-     | Walk_answered { slot; answer } -> Ok (answered slot answer)
-     | Walk_unanswered cli ->
-       Ok (Read_result.No_answer { question; slots = outcomes input.lane ~known ~http ~cli }))
+     | Walk_answered { slot; answer } -> Ok (Lane_answered { slot; answer })
+     | Walk_unanswered cli -> Ok (Lane_unanswered (outcomes lane ~known ~http ~cli)))
 ;;
 
-let ask env input =
+let walk env (input : input) ~which ~schema (question : Read_result.question) text =
+  let known = Librarian_bottom.known input.bottom which question.id in
+  let* walked =
+    walk_lane env ~lane:input.lane ~resolved:input.resolved ~known ~schema ~asked:question.id text
+  in
+  match walked with
+  | Lane_answered { slot; answer } -> Ok (Read_result.Answered { question; answer; slot })
+  | Lane_unanswered slots -> Ok (Read_result.No_answer { question; slots })
+;;
+
+let ask env (input : input) =
   let* tail, memory =
-    read_memory
-      input
-      ~snapshot_path:
-        (Keeper_memory_os_current_layout.path_for_keepers_dir
-           ~keepers_dir:input.place.memory_dir
-           ~keeper_id:input.place.keeper_id)
+    read_memory read_unread ~tail:input.tail ~snapshot_path:(snapshot_path input.place)
   in
   (* The item alone is read as the head item is at the narrowest width, and
      the snapshot is still read under the tail: the question is made against
@@ -464,7 +503,28 @@ let ask env input =
   with
   | Nothing_readable { reach; missing } ->
     Ok (Read_result.Nothing_readable { reach; missing; offered })
-  | Made { question; text } -> walk env input ~which question text
+  | Made { question; text; schema } -> walk env input ~which ~schema question text
+;;
+
+(* §7.4 「자리 내기」: Memory under the tail, then one walk. No turn log is
+   read, and the bottom's facts are not about this question: every slot is
+   called. *)
+let ask_room env (input : room_input) =
+  let* tail, memory =
+    read_memory room_unread ~tail:input.tail ~snapshot_path:(snapshot_path input.place)
+  in
+  let room =
+    Librarian_question.make_room ~lane:input.lane.question ~from:tail ~memory
+      ~trace:input.asked.trace
+  in
+  let* walked =
+    walk_lane env ~lane:input.lane ~resolved:input.resolved ~known:[] ~schema:room.schema
+      ~asked:room.question.id room.text
+  in
+  match walked with
+  | Lane_answered { slot; answer } ->
+    Ok (Room_result.Room_answered { question = room.question; answer; slot })
+  | Lane_unanswered slots -> Ok (Room_result.Room_not_answered { question = room.question; slots })
 ;;
 
 let failed_kind : Read_result.failed -> string = function
@@ -473,16 +533,19 @@ let failed_kind : Read_result.failed -> string = function
   | Read_failed -> "read_failed"
 ;;
 
-let run env input =
-  let failed failure detail : Read_result.t =
+(* The failure's text goes to the structured log; the result carries its
+   kind. *)
+let finished ~(place : Librarian_machine.place) ~what ~failed asked =
+  let failed failure detail =
     Log.Keeper.warn
-      ~keeper_name:input.place.keeper_id
-      "librarian ask failed (%s): %s"
+      ~keeper_name:place.keeper_id
+      "librarian %s failed (%s): %s"
+      what
       (failed_kind failure)
       detail;
-    Ask_failed failure
+    failed failure
   in
-  match ask env input with
+  match asked () with
   | Ok result | Error (Ended result) -> result
   | Error (Failed (failure, detail)) -> failed failure detail
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -491,4 +554,16 @@ let run env input =
        cancellation goes on up as it is. *)
     Llm_provider.Reserved_exn.reraise_if_reserved exn;
     failed Raised (Printexc.to_string exn)
+;;
+
+let run env (input : input) =
+  finished ~place:input.place ~what:"ask"
+    ~failed:(fun failure -> Read_result.Ask_failed failure)
+    (fun () -> ask env input)
+;;
+
+let run_room env (input : room_input) =
+  finished ~place:input.place ~what:"make room"
+    ~failed:(fun failure -> Room_result.Room_failed failure)
+    (fun () -> ask_room env input)
 ;;

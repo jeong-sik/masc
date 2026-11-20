@@ -2,6 +2,7 @@ module Store = Librarian_store
 module Direct = Librarian_direct
 module Lane = Librarian_memory_lane
 module Read_result = Librarian_read_result
+module Room_result = Librarian_room_result
 
 type place =
   { memory_dir : string
@@ -14,12 +15,16 @@ type declared =
   ; resolved : Runtime_exact_output_registry.resolved_lane
   }
 
+type asked =
+  | Read of Read_result.asked
+  | Room of Room_result.asked
+
 type asking =
   { ask : int
   ; since : float
   ; lane : declared
   ; removed_since : (string * int) list
-  ; asked : Read_result.asked
+  ; asked : asked
   ; bottom : Librarian_bottom.t
   }
 
@@ -77,13 +82,35 @@ let ask place t ~at store ~asked =
                 ; since = at
                 ; lane = declared
                 ; removed_since = []
-                ; asked
+                ; asked = Read asked
                 ; bottom = t.bottom
                 }
             }
       ; last_ask = ask
       })
     else idle
+;;
+
+(* §7.4 「자리 내기」: asked once, right after an item read alone was
+   committed, under the lane value that item was asked with. It reads no
+   turn log, so it is asked whatever is unread. *)
+let ask_room t ~at store ~(declared : declared) ~trace =
+  let ask = t.last_ask + 1 in
+  { t with
+    state =
+      Asking
+        { store
+        ; asking =
+            { ask
+            ; since = at
+            ; lane = declared
+            ; removed_since = []
+            ; asked = Room { trace }
+            ; bottom = t.bottom
+            }
+        }
+  ; last_ask = ask
+  }
 ;;
 
 (* The width memory says how wide; the head item alone is asked only from
@@ -112,7 +139,12 @@ let booted place ~at ~lane ~last_ask (opened : (Store.t, Store.stop) result) =
       ~at store
 ;;
 
-type ended = Read_ended of Read_result.t
+type ended =
+  | Read_ended of
+      { asked : Read_result.asked
+      ; result : Read_result.t
+      }
+  | Room_ended of Room_result.t
 
 type event =
   | Turn_closed
@@ -125,32 +157,50 @@ type event =
 
 (* The answer of an ask that is not the current one is dropped; only one
    that carried an answer is counted. *)
-let late place t (result : Read_result.t) =
-  (match result with
-   | Answered _ ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string LibrarianLateAnswers)
-       ~labels:[ "keeper", place.keeper_id ]
-       ()
-   | Nothing_to_ask | No_answer _ | Nothing_readable _ | Span_unknown _ | Memory_diverged _
-   | Snapshot_fault _ | Input_fault _ | Ask_failed _ -> ());
+let late place t (result : ended) =
+  let answered =
+    match result with
+    | Read_ended { result = Answered _; asked = (_ : Read_result.asked) }
+    | Room_ended (Room_answered _) -> true
+    | Read_ended
+        { result =
+            ( Nothing_to_ask | No_answer _ | Nothing_readable _ | Span_unknown _
+            | Memory_diverged _ | Snapshot_fault _ | Input_fault _ | Ask_failed _ )
+        ; asked = (_ : Read_result.asked)
+        }
+    | Room_ended
+        ( Room_not_answered _ | Room_memory_diverged _ | Room_snapshot_fault _
+        | Room_failed _ ) -> false
+  in
+  if answered
+  then
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string LibrarianLateAnswers)
+      ~labels:[ "keeper", place.keeper_id ]
+      ();
   t
 ;;
 
 (* §9.2 "a failed commit". Effects that make no snapshot mean the plan and
    the snapshot codec disagree. The store is as it was, and asking again at
    once would ask the same question, so the writer rests until a pulse.
-   [narrowing] is what the writer remembers once the commit is on disk.
-   Every commit here moves reading, so the head item's size facts are about
-   an item already passed (§7.4 「읽은 자리가 움직였다」). *)
-let after_commit place t ~at store ~narrowing (committed : Store.committed) =
+   [after] goes on from the store a commit left. *)
+let settled t store ~after (committed : Store.committed) =
   match committed with
-  | Committed { store; line = (_ : Librarian_log.commit) } ->
-    next_ask place { t with narrowing; bottom = Librarian_bottom.empty } ~at store
+  | Committed { store; line = (_ : Librarian_log.commit) } -> after store
   | Committed_without_snapshot (_ : Librarian_log.commit) ->
     { t with state = Stopped Store_unwritable }
   | Stopped stop -> { t with state = Stopped stop }
   | Not_a_snapshot (_ : Librarian_envelope.refusal) -> { t with state = Resting store }
+;;
+
+(* A commit that moved reading: [narrowing] is what the writer remembers
+   once the commit is on disk, and the head item's size facts are about an
+   item already passed (§7.4 「읽은 자리가 움직였다」). *)
+let moved t ~narrowing = { t with narrowing; bottom = Librarian_bottom.empty }
+
+let after_commit place t ~at store ~narrowing committed =
+  settled t store committed ~after:(fun store -> next_ask place (moved t ~narrowing) ~at store)
 ;;
 
 (* §7.3 「Refused_by_lane, Silent_lane」 and §7.4: only the slots the lane
@@ -167,7 +217,7 @@ let after_commit place t ~at store ~narrowing (committed : Store.committed) =
    repeat. A refusal narrows what the writer holds now: after a declaration
    that changed only slots, the ask is still out and what it holds is
    empty. *)
-let no_answer place t ~at store (asking : asking) (question : Read_result.question) slots =
+let no_answer place t ~at store (asking : asking) ~asked (question : Read_result.question) slots =
   let declared_now =
     match t.lane with
     | None -> []
@@ -199,7 +249,7 @@ let no_answer place t ~at store (asking : asking) (question : Read_result.questi
     | None -> Not_all
     | Some declared -> Librarian_bottom.fold declared.value slots
   in
-  match asking.asked, Librarian_width.breadth question.offered with
+  match (asked : Read_result.asked), Librarian_width.breadth question.offered with
   | Read_range asked, Wider wider ->
     let refused =
       List.exists
@@ -240,20 +290,39 @@ let no_answer place t ~at store (asking : asking) (question : Read_result.questi
       | Not_all -> rest t)
 ;;
 
-(* The current ask's result (§9.3, the table under "Asking a"). *)
-let ended place t ~at store (asking : asking) : Read_result.t -> t = function
+(* After an item read alone, making room is asked at once, unless a direct
+   write removed a fact or the lane value moved while the item was asked:
+   what it showed is already old (§7.4 「자리 내기」). *)
+let after_alone place t ~at store (asking : asking) ~trace =
+  match t.lane with
+  | Some declared
+    when List.is_empty asking.removed_since && Lane.equal declared.value asking.lane.value ->
+    ask_room t ~at store ~declared ~trace
+  | Some _ | None -> next_ask place t ~at store
+;;
+
+(* The current reading ask's result (§9.3, the table under "Asking a"). *)
+let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
+  : Read_result.t -> t
+  = function
   | Answered { question; answer; slot } ->
     let plan =
-      Librarian_plan.of_answer ~shown:question.shown ~facts:(Store.memory store).facts
+      Librarian_plan.of_answer ~shown:(Read question.shown) ~facts:(Store.memory store).facts
         ~removed_since:asking.removed_since ~at ~trace_id:question.trace answer
     in
     let narrowing =
       Librarian_width.committed t.narrowing
         (Librarian_width.passed question.offered question.reach.within)
     in
-    after_commit place t ~at store ~narrowing (Store.commit_read store ~at ~question ~slot plan)
+    let committed = Store.commit_read store ~at ~question ~slot plan in
+    (match asked with
+     | Read_range (_ : Librarian_width.width) ->
+       after_commit place t ~at store ~narrowing committed
+     | Read_item_alone ->
+       settled t store committed ~after:(fun store ->
+         after_alone place (moved t ~narrowing) ~at store asking ~trace:question.trace))
   | Nothing_to_ask -> next_ask place t ~at store
-  | No_answer { question; slots } -> no_answer place t ~at store asking question slots
+  | No_answer { question; slots } -> no_answer place t ~at store asking ~asked question slots
   | Nothing_readable { reach; missing; offered } ->
     (* A skip counts as a commit of what it passed (§7.6). *)
     let narrowing =
@@ -272,6 +341,116 @@ let ended place t ~at store (asking : asking) : Read_result.t -> t = function
   | Snapshot_fault fault -> { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
   | Input_fault (_ : Librarian_unit.input_fault) | Ask_failed (_ : Read_result.failed) ->
     { t with state = Resting store }
+;;
+
+(* A token for a log field, one for each outcome. *)
+let unanswered_token : Librarian_slot_outcome.unanswered -> string = function
+  | Refused (Sized Input_too_large) -> "input_too_large"
+  | Refused (Sized Output_over_reserve) -> "output_over_reserve"
+  | Refused (Sized Window_reached) -> "window_reached"
+  | Refused Unsized -> "refused"
+  | Silent Not_called -> "not_called"
+  | Silent Unavailable -> "unavailable"
+  | Silent Busy -> "busy"
+  | Silent Lost -> "lost"
+  | Silent (Unusable (_ : Librarian_answer.rejection)) -> "unusable"
+;;
+
+(* How a current room ask ended, as [LibrarianRoomOutcomes] names it. Only
+   [Made] writes a line, so the counter is where the others are seen. *)
+type room_end =
+  | Made
+  (** Its plan changes Memory or the working state, so it goes to the commit
+      log, whose failure stops the store as any commit's does. *)
+  | Proposed_nothing (** Its answer had no op, and kept the working state. *)
+  | Left_out (** Every op it proposed was left out (§8.2). *)
+  | Stale (** A direct write removed a fact while it was asked (§8.3). *)
+  | Unanswered (** No slot answered. *)
+  | Failed (** The ask failed before or during its walk. *)
+  | Store_stopped (** The snapshot is not the one the log names. *)
+
+let room_end_token = function
+  | Made -> "made"
+  | Proposed_nothing -> "proposed_nothing"
+  | Left_out -> "left_out"
+  | Stale -> "stale"
+  | Unanswered -> "unanswered"
+  | Failed -> "failed"
+  | Store_stopped -> "store_stopped"
+;;
+
+let count_room place room_end =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LibrarianRoomOutcomes)
+    ~labels:[ "keeper", place.keeper_id; "outcome", room_end_token room_end ]
+    ()
+;;
+
+(* A room ask that writes no line leaves its outcome in the Keeper's log
+   too: the commit log holds what changed Memory or the working state. *)
+let room_not_committed place room_end why =
+  count_room place room_end;
+  Log.Keeper.info ~keeper_name:place.keeper_id "librarian make room (%s): %s"
+    (room_end_token room_end) why
+;;
+
+(* The current room ask's result (§9.3, the rows of [Make_room]). Making room
+   never holds reading up: whatever it ends in, the next ask reads on, and
+   the narrowing and the size facts stay as they are. *)
+let ended_room place t ~at store (asking : asking) : Room_result.t -> t = function
+  | Room_answered { question; answer; slot } ->
+    (match asking.removed_since with
+     | _ :: _ as removed ->
+       (* An answer about facts that are gone is not committed (§8.3). *)
+       room_not_committed place Stale
+         (Printf.sprintf "a direct write removed %d fact(s) while it was asked"
+            (List.length removed));
+       next_ask place t ~at store
+     | [] ->
+       let plan =
+         Librarian_plan.of_answer ~shown:(Room { memory = question.memory })
+           ~facts:(Store.memory store).facts ~removed_since:[] ~at ~trace_id:question.trace
+           answer
+       in
+       if Store.changes store plan
+       then (
+         count_room place Made;
+         settled t store (Store.commit_room store ~at ~question ~slot plan) ~after:(fun store ->
+           next_ask place t ~at store))
+       else (
+         (match plan.effects.not_applied with
+          | [] -> room_not_committed place Proposed_nothing ("the answer of " ^ slot)
+          | _ :: _ as left_out ->
+            room_not_committed place Left_out
+              (Printf.sprintf "the answer of %s: [%s]" slot
+                 (String.concat ", "
+                    (List.map
+                       (fun (number, why, (_ : Librarian_answer.new_fact option)) ->
+                          Printf.sprintf "%d:%s" number (Librarian_effects.why_not_kind why))
+                       left_out))));
+         next_ask place t ~at store))
+  | Room_not_answered { question = (_ : Room_result.question); slots } ->
+    room_not_committed place Unanswered
+      (String.concat ", "
+         (List.map
+            (fun ((key : Lane.slot_key), outcome) ->
+               Printf.sprintf "%s:%s" key.id (unanswered_token outcome))
+            slots));
+    next_ask place t ~at store
+  | Room_memory_diverged { expected; observed } ->
+    count_room place Store_stopped;
+    { t with state = Stopped (Log_diverged { expected; observed }) }
+  | Room_snapshot_fault fault ->
+    count_room place Store_stopped;
+    { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
+  | Room_failed (_ : Read_result.failed) ->
+    count_room place Failed;
+    next_ask place t ~at store
+;;
+
+let ended place t ~at store (asking : asking) = function
+  | Read_ended { asked; result } -> ended_read place t ~at store asking ~asked result
+  | Room_ended result -> ended_room place t ~at store asking result
 ;;
 
 let same_lane (held : declared option) (next : declared option) =
@@ -306,12 +485,12 @@ let table place t ~at event =
   | (Asking _ | Refused_at_bottom _ | Stopped _), Pulse -> t
   (* Asking, Ask_ended of the current ask: its result is committed or ends
      the ask. *)
-  | Asking { store; asking }, Ask_ended { ask; result = Read_ended result }
-    when Int.equal ask asking.ask -> ended place t ~at store asking result
+  | Asking { store; asking }, Ask_ended { ask; result } when Int.equal ask asking.ask ->
+    ended place t ~at store asking result
   (* Asking, Ask_ended of another number; Idle, Resting, Refused_at_bottom,
      Stopped, Ask_ended: a late answer. *)
-  | ( (Idle _ | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _)
-    , Ask_ended { ask = (_ : int); result = Read_ended result } ) -> late place t result
+  | (Idle _ | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _), Ask_ended { ask = (_ : int); result }
+    -> late place t result
   (* Idle, Resting, Refused_at_bottom, Declaration_changed: the new value is
      held and the next ask reads with it; with no value that is Idle. A size
      fact needs no clearing: a slot of another value has another key. *)

@@ -9,19 +9,21 @@ type t =
   ; place : string -> Machine.place
   ; stores : string -> Librarian_unit_content.stores
   ; ask : Librarian_ask.input -> Librarian_read_result.t
+  ; ask_room : Librarian_ask.room_input -> Librarian_room_result.t
   ; start_turn_log : string -> (unit, string) result
   ; declared : Machine.declared option Atomic.t
   ; writers : Writer.t By_keeper.t Atomic.t
   ; to_run : Writer.t Eio.Stream.t
   }
 
-let create ~sw ~now ~registered ~place ~stores ~ask ~start_turn_log =
+let create ~sw ~now ~registered ~place ~stores ~ask ~ask_room ~start_turn_log =
   let t =
     { now
     ; registered
     ; place
     ; stores
     ; ask
+    ; ask_room
     ; start_turn_log
     ; declared = Atomic.make None
     ; writers = Atomic.make By_keeper.empty
@@ -69,6 +71,7 @@ let rec ensure t keeper =
           ~declared:(fun () -> Atomic.get t.declared)
           ~stores:(t.stores keeper)
           ~ask:t.ask
+          ~ask_room:t.ask_room
           ~start_turn_log:(fun () -> t.start_turn_log keeper)
           (t.place keeper)
       in

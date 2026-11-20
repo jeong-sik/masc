@@ -1,5 +1,5 @@
-(** One ask of a reading question (RFC librarian-call-only-proposes §7.1,
-    §7.2).
+(** One ask of a reading question, or of the question that makes room (RFC
+    librarian-call-only-proposes §7.1, §7.2, §7.4).
 
     An ask reads Memory and the units not yet read, makes one question, walks
     the lane's slots once and returns how that ended. It keeps no state: the
@@ -35,6 +35,15 @@ type input =
       started. A slot with one under the question's id is not called. *)
   }
 
+(** What making room reads: no turn log and no size fact. *)
+type room_input =
+  { place : Librarian_machine.place
+  ; tail : unit -> Librarian_log.line option (** As {!input}'s [tail]. *)
+  ; lane : Librarian_memory_lane.t (** The lane value the walk starts with. *)
+  ; resolved : Runtime_exact_output_registry.resolved_lane
+  ; asked : Librarian_room_result.asked
+  }
+
 (** Asks once about every unit not yet read (§7.1, steps 1 to 6).
 
     + Reads the tail, the snapshot bytes it names, and the tail again. A tail
@@ -62,7 +71,8 @@ type input =
       [bottom] ({!Librarian_bottom.known}), HTTP and CLI alike. Their
       outcomes are those facts. With no slot left, nothing is called.
     + Sends the question's text as one user message with no system prompt.
-      The answer schema is the walk's requirement: the flow and a CLI run
+      The answer schema of the question's kind
+      ({!Librarian_question.Made}'s [schema]) is the walk's requirement: the flow and a CLI run
       each write its sentence after the text. The HTTP slots go in the
       order {!Runtime_exact_lane_backpressure.order_at} gives at the clock's
       time, in one flow. A slot whose answer {!Librarian_answer.of_json}
@@ -81,3 +91,18 @@ type input =
     a cancellation is raised again. The text of an [Ask_failed] goes to the
     Keeper's log. *)
 val run : env -> input -> Librarian_read_result.t
+
+(** Asks once to make room (§7.4): reads Memory under the tail as {!run}
+    does, makes {!Librarian_question.make_room} of it, and walks every slot
+    of the lane as {!run} does, asking each to match the [room] schema. No
+    slot is left out: a size fact is about the head item, and this question
+    shows no item. No turn log is read.
+
+    The first answer accepted is [Room_answered]. Otherwise
+    [Room_not_answered] holds an outcome for every slot of [lane]. The
+    snapshot ends it as it ends a reading question: [Room_memory_diverged],
+    [Room_snapshot_fault]. A walk that stops on masc's side, a writer that is
+    no longer open, or an exception is [Room_failed]; its text goes to the
+    Keeper's log. *)
+val run_room : env -> room_input -> Librarian_room_result.t
+

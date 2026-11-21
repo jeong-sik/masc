@@ -32,6 +32,11 @@ type ask_failure =
 
 type last_read =
   | Read_committed
+  | Read_refused_not_all_sized of
+      { about_memory_now : bool
+      ; about_lane_now : bool
+      ; slots : (string * slot_outcome) list
+      }
   | Read_lane of
       { one_item : bool
       ; silent : bool
@@ -231,6 +236,17 @@ let decode_last_read json =
   | "committed" ->
     let* () = require_exact_object_fields "writer last read" [ "ended" ] json in
     Ok Read_committed
+  | "refused_not_all_sized" ->
+    let* () =
+      require_exact_object_fields
+        "writer last read"
+        [ "ended"; "about_memory_now"; "about_lane_now"; "slots" ]
+        json
+    in
+    let* about_memory_now = required_bool_field json "about_memory_now" in
+    let* about_lane_now = required_bool_field json "about_lane_now" in
+    let* slots = Result.bind (required_list_field json "slots") (decode_list "slots" decode_slot) in
+    Ok (Read_refused_not_all_sized { about_memory_now; about_lane_now; slots })
   | "lane" ->
     let* () =
       require_exact_object_fields

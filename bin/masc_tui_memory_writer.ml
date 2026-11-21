@@ -12,6 +12,12 @@ let level_text ~ko : Level.level -> string = function
   | Level.Error -> text ~ko "오류" "error"
 ;;
 
+(* The refusal E4 reads, in the words its alarm row and its last-read row
+   share: the two rows of one detail say it in one order. *)
+let every_slot_refused_the_one_item ~ko =
+  text ~ko "항목 하나를 모든 slot 이 거절함" "every slot refused the one item"
+;;
+
 let alarm_text ~ko : Level.alarm -> string = function
   | Level.E1 -> text ~ko "E1 저장소가 멈춤" "E1 the store is stopped"
   | Level.E2 ->
@@ -25,10 +31,9 @@ let alarm_text ~ko : Level.alarm -> string = function
       "E3 안 읽은 것이 있고 마지막 읽기가 입력 결함이나 실패로 끝남"
       "E3 unread; the last read ended in an input fault or failure"
   | Level.E4 ->
-    text
-      ~ko
-      "E4 한 항목을 slot 이 모두 거절함, 크기 사실 없는 거절 있음"
-      "E4 every slot refused the one item, one without a size fact"
+    "E4 "
+    ^ every_slot_refused_the_one_item ~ko
+    ^ text ~ko ", 크기 사실 없는 거절 있음" ", one without a size fact"
   | Level.E5 ->
     text
       ~ko
@@ -132,25 +137,38 @@ let ask_failure_text ~ko = function
 
 let none_since_start ~ko = text ~ko "시작 뒤 끝난 것 없음" "none ended since the start"
 
+(* An end is about the Memory and the lane value of its ask. Once either is
+   another, the alarm that reads the end is off, and the end says which. *)
+let memory_changed_since ~ko = text ~ko "그 뒤 Memory 가 바뀜" "Memory changed since"
+let lane_changed_since ~ko = text ~ko "그 뒤 lane 값이 바뀜" "the lane value changed since"
+
 (* The ending alone, for a clause beside the state. *)
 let last_read_short ~ko = function
   | None -> none_since_start ~ko
   | Some Read_committed -> text ~ko "반영됨" "committed"
+  | Some (Read_refused_not_all_sized _) -> every_slot_refused_the_one_item ~ko
   | Some (Read_lane _) -> text ~ko "답한 slot 없음" "no slot answered"
   | Some (Read_input_fault _) -> text ~ko "입력 결함" "input fault"
   | Some (Read_ask_failed _) -> text ~ko "묻기 실패" "ask failed"
 ;;
 
-let last_read_clauses ~ko = function
+let last_read_clauses ~ko =
+  let slot_clauses slots =
+    List.map (fun (slot, outcome) -> slot ^ " " ^ slot_outcome_text ~ko outcome) slots
+  in
+  function
   | (None | Some Read_committed) as last -> [ last_read_short ~ko last ]
+  | Some (Read_refused_not_all_sized { about_memory_now; about_lane_now; slots }) as last ->
+    [ last_read_short ~ko last ]
+    @ (if about_memory_now then [] else [ memory_changed_since ~ko ])
+    @ (if about_lane_now then [] else [ lane_changed_since ~ko ])
+    @ slot_clauses slots
   | Some (Read_lane { one_item; silent; about_memory_now; slots }) as last ->
     [ last_read_short ~ko last ]
     @ (if one_item then [ text ~ko "항목 하나를 물음" "asked one item" ] else [])
     @ (if silent then [ text ~ko "말 없는 slot 있음" "a slot was silent" ] else [])
-    @ (if about_memory_now
-       then []
-       else [ text ~ko "그 뒤 Memory 가 바뀜" "Memory changed since" ])
-    @ List.map (fun (slot, outcome) -> slot ^ " " ^ slot_outcome_text ~ko outcome) slots
+    @ (if about_memory_now then [] else [ memory_changed_since ~ko ])
+    @ slot_clauses slots
   | Some (Read_input_fault fault) as last ->
     [ last_read_short ~ko last; input_fault_text ~ko fault ]
   | Some (Read_ask_failed failure) as last ->
@@ -168,8 +186,8 @@ let last_room_text ~ko = function
   | Some Room_not_judged -> text ~ko "판정하지 못함" "not judged"
   | Some (Room_fits_none { about_memory_now; about_lane_now }) ->
     text ~ko "어느 slot 에도 들어가지 않음" "fits no slot"
-    ^ (if about_memory_now then "" else text ~ko " · 그 뒤 Memory 가 바뀜" " · Memory changed since")
-    ^ if about_lane_now then "" else text ~ko " · 그 뒤 lane 값이 바뀜" " · the lane value changed since"
+    ^ (if about_memory_now then "" else " · " ^ memory_changed_since ~ko)
+    ^ if about_lane_now then "" else " · " ^ lane_changed_since ~ko
 ;;
 
 let position_text ~ko = function

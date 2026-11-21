@@ -142,12 +142,14 @@ let turns_path config =
     ~keeper_id:keeper
 ;;
 
-let turn_log_id config =
+let turn_log_start config =
   match Masc.Keeper_turn_log_store.read_start (turns_path config) with
-  | Ok (Some start) -> Masc.Keeper_turn_log.Log_id.to_string start.id
+  | Ok (Some start) -> start
   | Ok None -> fail "the turn log has no first line"
   | Error (_ : Masc.Keeper_turn_log_store.read_error) -> fail "the turn log was not read"
 ;;
+
+let turn_log_id config = Masc.Keeper_turn_log.Log_id.to_string (turn_log_start config).id
 
 (* A writer with no lane value and nothing unread is open and has no alarm. *)
 let test_an_open_writer () =
@@ -223,8 +225,11 @@ let test_a_stopped_writer () =
     ()
 ;;
 
-(* A lane value that names one CLI slot: the ask below stops at the turn
-   log before any slot is asked. *)
+(* The one slot the lane value below declares. *)
+let slot_id = "claude_code.fast"
+
+(* A lane value that names one CLI slot. No case runs the slot: one ask stops
+   at the turn log before any slot is asked, and the other is made here. *)
 let declared : Masc.Librarian_machine.declared =
   { value =
       { question =
@@ -239,8 +244,8 @@ let declared : Masc.Librarian_machine.declared =
           }
       ; http = []
       ; cli =
-          [ { id = "claude_code.fast"
-            ; target = Cli { runtime_id = "claude_code.fast"; api_name = "claude-sonnet-5" }
+          [ { id = slot_id
+            ; target = Cli { runtime_id = slot_id; api_name = "claude-sonnet-5" }
             ; window = 200_000
             }
           ]
@@ -255,18 +260,26 @@ let declared : Masc.Librarian_machine.declared =
 let wait_s = 30.0
 let poll_s = 0.001
 
-let rested ~clock writers =
+(* Waits until the writer's machine is what [reached] says. *)
+let held_as ~clock writers ~what reached =
   let deadline = Eio.Time.now clock +. wait_s in
   let rec look () =
     match List.assoc_opt keeper (Writers.held writers) with
-    | Some (Writer.Held { Masc.Librarian_machine.state = Resting (_ : Masc.Librarian_store.t); _ }) -> ()
+    | Some (Writer.Held machine) when reached machine -> ()
     | Some (Writer.Held (_ : Masc.Librarian_machine.t) | Writer.Held_booting | Writer.Held_retired)
     | None ->
-      if Eio.Time.now clock > deadline then failf "the writer did not rest in %.0f s" wait_s;
+      if Eio.Time.now clock > deadline then failf "the writer did not %s in %.0f s" what wait_s;
       Eio.Time.sleep clock poll_s;
       look ()
   in
   look ()
+;;
+
+let rested ~clock writers =
+  held_as ~clock writers ~what:"rest" (fun (machine : Masc.Librarian_machine.t) ->
+    match machine.state with
+    | Resting (_ : Masc.Librarian_store.t) -> true
+    | Idle _ | Asking _ | Refused_at_bottom _ | Stopped _ -> false)
 ;;
 
 (* §12.4: a line that does not decode, with nothing to read before it, ends
@@ -314,6 +327,150 @@ let test_a_writer_resting_on_an_input_fault () =
     ()
 ;;
 
+(* One completed turn whose chat grew by a byte: a unit with an item, past
+   where the writer has read. *)
+let close_a_turn_with_an_item config =
+  let path = turns_path config in
+  let mark : Masc.Keeper_turn_log.mark = (turn_log_start config).mark in
+  let opened_at = Int64.to_int (In_channel.with_open_bin path In_channel.length) in
+  match
+    Masc.Keeper_turn_log_store.append ~path ~at_end:opened_at
+      ( Masc.Keeper_turn_log.Opened
+          { at = 2.0
+          ; turn_ref = Ids.Turn_ref.make ~trace_id:mark.trace ~absolute_turn:1
+          ; runtime = "fixture"
+          ; task = Masc.Keeper_turn_log.No_task
+          ; stimuli = []
+          ; baseline = mark
+          }
+      , [ Masc.Keeper_turn_log.Closed
+            { turn = opened_at
+            ; at = 3.0
+            ; outcome = Masc.Keeper_turn_log.Completed
+            ; after = { mark with chat_bytes = mark.chat_bytes + 1 }
+            ; unattributed = []
+            ; own = []
+            }
+        ] )
+  with
+  | Ok (_ : Masc.Keeper_turn_log_store.appended) -> ()
+  | Error (_ : Masc.Keeper_turn_log_store.append_error) -> fail "the turn was not appended"
+;;
+
+let question_id =
+  match
+    Masc.Librarian_question_id.of_halves ~front:(String.make 32 'c') ~back:(String.make 32 'd')
+  with
+  | Some id -> id
+  | None -> fail "the test question halves are not 32 hexadecimal characters"
+;;
+
+(* An ask no model answers: every slot of the lane value it started with
+   refused the first unread unit, read whole as one item, and gave no size.
+   The question names the snapshot the writer's tail names, as the
+   Librarian's own ask does. *)
+let refused_without_a_size config (input : Masc.Librarian_ask.input)
+  : Masc.Librarian_read_result.t
+  =
+  let tail =
+    match input.tail () with
+    | Some tail -> tail
+    | None -> fail "the writer that asked is not open"
+  in
+  let span =
+    match
+      Masc.Librarian_unread.read ~turns_path:(turns_path config) ~until:(First_with_items 1) tail
+    with
+    | Ok { spans; stop = (_ : Masc.Librarian_unread.stop); bytes = (_ : int) } ->
+      (match List.rev spans with
+       | last :: _ -> last
+       | [] -> fail "nothing is unread")
+    | Error (_ : Masc.Librarian_unread.read_error) -> fail "the turn log was not read"
+  in
+  No_answer
+    { question =
+        { id = question_id
+        ; shown = Range { memory = []; units = [ "u1", span.line ] }
+        ; basis = Masc.Librarian_log.snapshot_after tail
+        ; reach = Masc.Librarian_unread.reach span Whole
+        ; trace = span.through.trace
+        ; missing = []
+        ; offered = { units = 1; head_items = 1 }
+        }
+    ; slots =
+        List.map
+          (fun slot -> slot, Masc.Librarian_slot_outcome.Refused Unsized)
+          (input.lane.http @ input.lane.cli)
+    }
+;;
+
+(* §12.2 E4: every slot the lane declares refused one item, and not every one
+   gave a size. The row names that end by its own word and says whether the
+   lane value the refusals were read against is the one declared now, so a
+   lane value that is gone shows on the row and E4 is off. *)
+let test_a_writer_every_slot_refused () =
+  in_workspace_with_ask (fun ~sw ~env config ->
+    let (_ : Writers.t) =
+      Masc.Keeper_memory_writers.start ~sw ~ask:(refused_without_a_size config)
+        ~ask_room:Deps.never_makes_room
+        ~start_turn_log:(Masc.Keeper_turn_log_store_start.run config) ~config
+    in
+    let (_ : Writer.view) = Deps.booted_memory_writer_view ~sw ~config keeper in
+    close_a_turn_with_an_item config;
+    Writers.declaration_changed (writers config) (Some declared);
+    rested ~clock:env.clock (writers config);
+    let wire ~about_lane_now : Yojson.Safe.t =
+      `Assoc
+        [ "ended", `String "refused_not_all_sized"
+        ; "about_memory_now", `Bool true
+        ; "about_lane_now", `Bool about_lane_now
+        ; "slots", `List [ `Assoc [ "slot", `String slot_id; "outcome", `String "refused" ] ]
+        ]
+    in
+    let read ~about_lane_now =
+      Some
+        (Shown.Read_refused_not_all_sized
+           { about_memory_now = true; about_lane_now; slots = [ slot_id, Shown.Refused ] })
+    in
+    let row = row_of config in
+    check string "its state" "resting" (text "state" row);
+    check (list string) "E4, and W1 for what is still unread" [ "E4"; "W1" ] (alarms row);
+    check string "the refusal has its own end, about the lane value declared now"
+      (Yojson.Safe.to_string (wire ~about_lane_now:true))
+      (Yojson.Safe.to_string (member "last_read" row));
+    check bool "the Keeper's row shows the same refusal" true
+      (match shown_of config keeper with
+       | Shown.Writer
+           { Shown.level = Level.Error
+           ; alarms = [ Level.E4; Level.W1 ]
+           ; row =
+               Shown.Open
+                 { activity = Shown.Resting
+                 ; unread = true
+                 ; kept = { Shown.lane = true; last_read; _ }
+                 ; _
+                 }
+           } -> last_read = read ~about_lane_now:true
+       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false);
+    Writers.declaration_changed (writers config) None;
+    held_as ~clock:env.clock (writers config) ~what:"let the lane value go"
+      (fun (machine : Masc.Librarian_machine.t) -> Option.is_none machine.lane);
+    let row = row_of config in
+    check (list string) "with the lane value gone E4 is off" [ "W1" ] (alarms row);
+    check string "and the refusal is about a lane value that is not declared now"
+      (Yojson.Safe.to_string (wire ~about_lane_now:false))
+      (Yojson.Safe.to_string (member "last_read" row));
+    check bool "which the Keeper's row shows" true
+      (match shown_of config keeper with
+       | Shown.Writer
+           { Shown.level = Level.Warn
+           ; alarms = [ Level.W1 ]
+           ; row = Shown.Open { unread = true; kept = { Shown.lane = false; last_read; _ }; _ }
+           } -> last_read = read ~about_lane_now:false
+       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false))
+    ()
+;;
+
 let () =
   run "keeper_memory_writer_health"
     [ ( "row"
@@ -322,6 +479,8 @@ let () =
         ; test_case "an open writer" `Quick test_an_open_writer
         ; test_case "a stopped writer" `Quick test_a_stopped_writer
         ; test_case "a writer resting on an input fault" `Quick test_a_writer_resting_on_an_input_fault
+        ; test_case "a writer every slot refused without a size" `Quick
+            test_a_writer_every_slot_refused
         ] )
     ]
 ;;

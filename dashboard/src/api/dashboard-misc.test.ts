@@ -30,7 +30,7 @@ function noMemoryChanges(): KeeperMemoryChangesByPass {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v16',
+    schema: 'keeper.memory_os.current_health.v17',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -171,7 +171,7 @@ function addLibrarianAttention(payload: KeeperMemoryHealthResponse) {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v16',
+    schema: 'keeper.memory_os.current_health.v17',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -551,6 +551,7 @@ describe('fetchKeeperMemoryHealth', () => {
     'keeper.memory_os.current_health.v13',
     'keeper.memory_os.current_health.v14',
     'keeper.memory_os.current_health.v15',
+    'keeper.memory_os.current_health.v16',
   ])('rejects an older memory-health envelope: %s', async schema => {
     getMock.mockResolvedValue({ ...keeperMemoryHealthPayload(), schema })
 
@@ -601,7 +602,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v16')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v17')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,

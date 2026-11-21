@@ -41,6 +41,15 @@ type ask_failure =
 (** How the last reading ask ended, of those the writer keeps. *)
 type last_read =
   | Read_committed
+  | Read_refused_not_all_sized of
+      { about_memory_now : bool
+      ; about_lane_now : bool
+      (** The lane value the refusals were read against is the one declared
+          now. *)
+      ; slots : (string * slot_outcome) list  (** By declared slot id. *)
+      }
+  (** Every slot declared then refused a question of one item, and not every
+      one gave a size: the end E4 reads (§12.2). No slot was silent. *)
   | Read_lane of
       { one_item : bool
       ; silent : bool  (** A slot declared then said nothing. *)

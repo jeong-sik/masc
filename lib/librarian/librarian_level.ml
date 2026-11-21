@@ -35,14 +35,20 @@ let snapshot_now : Machine.state -> Digest.digest option = function
   | Stopped (_ : Store.stop) -> None
 ;;
 
-let held_now ~now (basis : Digest.digest) =
-  match now with
+let snapshot_held_now (t : Machine.t) (basis : Digest.digest) =
+  match snapshot_now t.state with
   | Some (now : Digest.digest) -> String.equal (now :> string) (basis :> string)
   | None -> false
 ;;
 
+(* A writer without a lane value holds none, and no verdict holds for it. *)
+let lane_value_held_now (t : Machine.t) (value : Memory_lane.t) =
+  match t.lane with
+  | Some (declared : Machine.declared) -> Memory_lane.equal value declared.value
+  | None -> false
+;;
+
 let running (t : Machine.t) ~unread =
-  let now = snapshot_now t.state in
   let e1 =
     match t.state with
     | Stopped (_ : Store.stop) -> true
@@ -69,19 +75,15 @@ let running (t : Machine.t) ~unread =
   let e4 =
     unread
     &&
-    match t.last_read, t.lane with
-    | Some (Refused_not_all_sized { basis; lane; slots = _ }), Some (declared : Machine.declared) ->
-      held_now ~now basis && Memory_lane.equal lane declared.value
-    | Some (Refused_not_all_sized _), None -> false
-    | Some (Committed | Lane _ | Input_fault _ | Ask_failed _), (Some _ | None)
-    | None, (Some _ | None) -> false
+    match t.last_read with
+    | Some (Refused_not_all_sized { basis; lane; slots = _ }) ->
+      snapshot_held_now t basis && lane_value_held_now t lane
+    | Some (Committed | Lane _ | Input_fault _ | Ask_failed _) | None -> false
   in
   let e5 =
-    match t.last_room, t.lane with
-    | Some (Fits_none { memory; lane }), Some (declared : Machine.declared) ->
-      held_now ~now memory && Memory_lane.equal lane declared.value
-    | Some (Fits_none _), None -> false
-    | Some (Made | Unchanged | Stale | Not_judged), (Some _ | None) | None, (Some _ | None) -> false
+    match t.last_room with
+    | Some (Fits_none { memory; lane }) -> snapshot_held_now t memory && lane_value_held_now t lane
+    | Some (Made | Unchanged | Stale | Not_judged) | None -> false
   in
   let w1 =
     unread

@@ -181,7 +181,7 @@ let warn_seed_read_failures ~keeper_name ~runtime_id (read : seed_read) =
     (fun detail ->
        Log.Keeper.warn
          ~keeper_name
-         "model input carried range seed read refused the turn-boundary store \
+         "model input carried range seed read refused the turn log \
           runtime=%s detail=%s"
          runtime_id
          detail)
@@ -224,62 +224,141 @@ let seed_read_of_rows ~trace_id rows =
   }
 ;;
 
-let read_generation_floor ~keepers_dir ~keeper_name ~trace_id =
-  Result.bind
-    (Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:keeper_name)
-    (fun lines ->
-       let rec loop latest_turn floor = function
-         | [] -> Ok floor
-         | (line, Error error) :: _ ->
-           Error
-             (Printf.sprintf
-                "turn boundary line %d: %s"
-                line
-                (Keeper_turn_boundaries.read_error_to_string error))
-         | (_, Ok record) :: rest
-           when Keeper_turn_boundaries.restarts_history ~trace_id record ->
-           (match record.Keeper_turn_boundaries.event with
-            | Keeper_turn_boundaries.Turn_ended { turn_ref; _ } ->
-              (* The turn began from an empty history, so its end line states
-                 the atoms are numbered from zero again: the generation
-                 boundary, whether or not a turn-start marker was ever
-                 written. The boundary covers the turns that ended before the
-                 restarting turn, not the turn itself. *)
-              let turn = Ids.Turn_ref.absolute_turn turn_ref in
-              loop
-                (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn))
-                latest_turn
-                rest
-            | Keeper_turn_boundaries.History_restarted _ ->
-              loop latest_turn latest_turn rest)
-         | (_, Ok record) :: rest ->
-           (match record.Keeper_turn_boundaries.event with
-            | Keeper_turn_boundaries.Turn_ended { turn_ref; _ }
-              when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id ->
-              (* A restart is fenced by the last turn that ended before it,
-                 and that turn is the running latest. A turn that merely
-                 continues the history leaves [floor] alone, but it still
-                 moves the latest, so a restart marker written without a
-                 fresh-history end line can name its own boundary. *)
-              let turn = Ids.Turn_ref.absolute_turn turn_ref in
-              loop
-                (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn))
-                floor
-                rest
-            | Keeper_turn_boundaries.Turn_ended _
-            | Keeper_turn_boundaries.History_restarted _ -> loop latest_turn floor rest)
-       in
-       loop None None lines)
+(* Why the turn log gave no generation boundary. Each one refuses the seed:
+   the boundary it could not read may stand above any record the scan would
+   take. *)
+type floor_refusal =
+  | Log_unread of Private_jsonl_scan.error
+  | Line_undecodable of
+      { offset : int
+      ; reason : Keeper_turn_log_store.undecodable
+      }
+  | Line_out_of_order of
+      { offset : int
+      ; error : Keeper_turn_log.order_error
+      }
+
+let order_error_to_string : Keeper_turn_log.order_error -> string = function
+  | Not_started -> "a line comes before the log's start"
+  | Started_twice -> "the log starts twice"
+  | Opened_while_open { opened } ->
+    Printf.sprintf "a turn opens while the turn opened at %d is open" opened
+  | Closed_without_open -> "a turn closes with no turn open"
+  | Closed_another_turn { opened; closed } ->
+    Printf.sprintf "the turn opened at %d closes while the one opened at %d is open" closed
+      opened
+  | Own_after_reset { opened } ->
+    Printf.sprintf "the turn opened at %d names messages as its own after a reset" opened
 ;;
 
-(* The floor is folded over the whole boundary store, which only grows (a
-   turn's end appends) or is replaced. A floor that was read is kept per store
-   and trace with the identity the file had before the read, so a store that
-   has not changed since is not read again: an idle Keeper's next read reuses
-   it, and an append reads it once. A failed read is not kept. *)
+let floor_refusal_to_string = function
+  | Log_unread error -> "turn log unread: " ^ Private_jsonl_scan.error_to_string error
+  | Line_undecodable { offset; reason = Not_json } ->
+    Printf.sprintf "turn log line at %d is not JSON" offset
+  | Line_undecodable { offset; reason = Malformed error } ->
+    Printf.sprintf
+      "turn log line at %d does not decode: %s"
+      offset
+      (Keeper_memory_os_types.wire_error_to_string error)
+  | Line_out_of_order { offset; error } ->
+    Printf.sprintf "turn log line at %d is out of order: %s" offset
+      (order_error_to_string error)
+;;
+
+(* RFC librarian-call-only-proposes §11.2. A reset that drops the history
+   counts; a recovering purge keeps the history it names and does not. *)
+let counts_as_restart : Keeper_turn_log.reset_cause -> bool = function
+  | Announced Cleared | Unannounced -> true
+  | Announced Recovered -> false
+;;
+
+(* One pass over the turn log, oldest line first. [open_turn] is the open
+   turn's number when that turn is this trace's. [closed] is the highest
+   number among this trace's closed turns so far, whatever their outcome.
+   At each counted reset of this trace, [floor] becomes [closed]: a turn
+   that closes after the reset, the turn whose tool cleared the history
+   among them, is above the floor. *)
+type floor_scan =
+  { position : Keeper_turn_log.position
+  ; open_turn : int option
+  ; closed : int option
+  ; floor : int option
+  }
+
+let floor_scan_start =
+  { position = Keeper_turn_log.Nothing_written; open_turn = None; closed = None; floor = None }
+;;
+
+let floor_step ~trace_id scan (line : Keeper_turn_log.line) =
+  match line with
+  | Log_started _ -> scan
+  | Opened { turn_ref; _ } ->
+    let open_turn =
+      if String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+      then Some (Ids.Turn_ref.absolute_turn turn_ref)
+      else None
+    in
+    { scan with open_turn }
+  | Closed _ ->
+    let closed =
+      match scan.open_turn, scan.closed with
+      | Some turn, Some closed -> Some (Int.max turn closed)
+      | Some turn, None -> Some turn
+      | None, (Some _ | None) -> scan.closed
+    in
+    { scan with open_turn = None; closed }
+  | Reset { cause; after; _ } ->
+    if counts_as_restart cause && String.equal after.trace trace_id
+    then { scan with floor = scan.closed }
+    else scan
+;;
+
+(* The lines from [from] on, folded onto [scan], with where the line after
+   the last one read starts. [Keeper_turn_log.step] keeps the order, so a
+   [Closed] always closes the turn [open_turn] names. A line that does not
+   decode or breaks the order stops the read and refuses the floor instead
+   of being passed over. A kept scan resumes at its [from]; when that offset
+   no longer starts a line, the file is not the one the scan read, and it is
+   read again from its first line. *)
+let rec read_generation_floor ~path ~trace_id ~from scan =
+  match
+    Keeper_turn_log_store.fold_from path ~from ~init:(scan, from)
+      ~f:(fun (scan, (_ : int)) (scanned : Keeper_turn_log_store.scanned) ->
+        match scanned.line with
+        | Error reason ->
+          Private_jsonl_scan.Stop (Line_undecodable { offset = scanned.at; reason })
+        | Ok line ->
+          (match Keeper_turn_log.step scan.position ~offset:scanned.at line with
+           | Error error ->
+             Private_jsonl_scan.Stop (Line_out_of_order { offset = scanned.at; error })
+           | Ok position ->
+             Private_jsonl_scan.Continue
+               (floor_step ~trace_id { scan with position } line, scanned.past)))
+  with
+  | Ok (Private_jsonl_scan.Reached_end read) -> Ok read
+  | Ok (Private_jsonl_scan.Stopped refusal) -> Error refusal
+  | Error (Private_jsonl_scan.Scan_failed error) -> Error (Log_unread error)
+  | Error (Private_jsonl_scan.Not_a_row_start { from = (_ : int); length = (_ : int) }) ->
+    if from > 0
+    then read_generation_floor ~path ~trace_id ~from:0 floor_scan_start
+    else
+      (* Offset 0 starts a line in any file, so the file changed under the
+         read. *)
+      Error (Log_unread Private_jsonl_scan.Moved)
+;;
+
+(* A floor that was read is kept per log and trace with the scan behind it,
+   where that scan stopped, and the identity the file had before the read.
+   A log that has not changed since is not read again: an idle Keeper's next
+   read reuses the floor. A log that grew is read from where the scan
+   stopped: the log only appends lines and cuts a torn fragment after its
+   last one, so the lines before that point are as the scan read them. A log
+   replaced since, or shorter than that point, is read from its first line.
+   A failed read is not kept. *)
 type floor_kept =
   { identity : int * int * int * float
-  ; floor : int option
+  ; through : int (* Where the line after the last one read starts. *)
+  ; scan : floor_scan
   }
 
 let floor_kept : (string * string, floor_kept) Hashtbl.t = Hashtbl.create 16
@@ -291,29 +370,40 @@ let file_identity path =
   | exception Unix.Unix_error _ -> None
 ;;
 
+let resume_point identity kept =
+  match identity, kept with
+  | Some (dev, ino, size, (_ : float)), Some kept ->
+    let kept_dev, kept_ino, (_ : int), (_ : float) = kept.identity in
+    if Int.equal dev kept_dev && Int.equal ino kept_ino && size >= kept.through
+    then kept.through, kept.scan
+    else 0, floor_scan_start
+  | (Some _ | None), (Some _ | None) -> 0, floor_scan_start
+;;
+
 let current_generation_floor ~config ~keeper_name ~trace_id =
   let keepers_dir = Workspace.keepers_runtime_dir config in
-  let path = Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+  let path = Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
   let key = path, trace_id in
   let identity = file_identity path in
   let kept = Stdlib.Mutex.protect floor_kept_mu (fun () -> Hashtbl.find_opt floor_kept key) in
   match identity, kept with
-  | Some identity, Some kept when kept.identity = identity -> Ok kept.floor
+  | Some identity, Some kept when kept.identity = identity -> Ok kept.scan.floor
   | (Some _ | None), (Some _ | None) ->
-    let read = read_generation_floor ~keepers_dir ~keeper_name ~trace_id in
+    let from, scan = resume_point identity kept in
+    let read = read_generation_floor ~path ~trace_id ~from scan in
     (match identity, read with
-     | Some identity, Ok floor ->
+     | Some identity, Ok (scan, through) ->
        Stdlib.Mutex.protect floor_kept_mu (fun () ->
-         Hashtbl.replace floor_kept key { identity; floor })
+         Hashtbl.replace floor_kept key { identity; through; scan })
      | None, (Ok _ | Error _) | Some _, Error _ -> ());
-    read
+    Result.map (fun (scan, (_ : int)) -> scan.floor) read
 ;;
 
 let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
   match current_generation_floor ~config ~keeper_name ~trace_id with
-  | Error detail ->
-    { no_seed_read with boundary_error = Some detail }
+  | Error refusal ->
+    { no_seed_read with boundary_error = Some (floor_refusal_to_string refusal) }
   | Ok generation_floor ->
     let unreadable = ref None in
     (* [scan_refusal], seed or not: a response-observed record ends the
@@ -322,8 +412,8 @@ let read_seed ~config ~keeper_name ~trace_id =
     let exception Trace_boundary in
     (* Count observations, not intervening rows. A direct retry may reuse its
        turn number, so the last stored response is the latest observation.
-       A different trace is the durable generation boundary; a history
-       restart is the same-trace boundary after an operator clear. *)
+       A different trace is the durable generation boundary; a counted reset
+       in the turn log is the same-trace boundary after a clear. *)
     let seeds =
       try
         Dated_jsonl.collect_matching store 1 ~f:(fun json ->

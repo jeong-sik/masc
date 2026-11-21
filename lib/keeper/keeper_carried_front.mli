@@ -119,8 +119,8 @@ type origin =
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own
           atoms go out and the atoms before them wait for the Librarian
-          (§13.4). [end_atom] is that boundary as the turn-boundary store
-          states it, not the atom the range opened on: a boundary at or past
+          (§13.4). [end_atom] is that boundary as the turn log states it
+          (§11.2), not the atom the range opened on: a boundary at or past
           the newest atom still carries that atom ({!clamp}). It is 0 on a
           history with no completed turn, where that is the short history a
           fresh keeper has. *)
@@ -207,9 +207,10 @@ type seed_read =
             the records that did, so [seed = None] with [Some _] here is
             "records unreadable", not "no record". *)
   ; boundary_error : string option
-        (** A refusal from the turn-boundary store that defines the current
-            history generation. Kept separate from [unreadable], whose count
-            is only for TurnRecord rows. A boundary error admits no seed. *)
+        (** The turn log, which defines the current history generation, could
+            not be read: the file, a line that does not decode, or a line out
+            of order. Kept separate from [unreadable], whose count is only
+            for TurnRecord rows. A boundary error admits no seed. *)
   }
 
 val no_seed_read : seed_read
@@ -242,21 +243,24 @@ val read_seed
   -> seed_read
 (** The last stored response observation in the current history generation,
     scanning newest first until a match, a different trace, or a turn at or
-    before the boundary the log states: a [History_restarted] line, or a turn
-    that began from an empty history, whose end line states the atoms are
-    numbered from zero again -- when the turn-start marker a fresh turn owed
-    failed to be written, that line is the only record of the restart, and it
-    fences the old generation all the same. The
-    boundary is expressed
-    in the same [absolute_turn] coordinate as TurnRecord: it is the highest
-    completed turn preceding that restart in file order, never a wall-clock
-    comparison. Unobserved rows do not hide an older seed within that
-    generation. Storage order also resolves direct retries that reuse a turn
-    number. Unreadable rows visited before the match are counted; rows older
-    than the match or generation boundary are not read. A boundary-store read
-    failure returns no seed and is reported in [boundary_error]. Reads on the
-    calling fiber; the turn driver calls it once per provider attempt, and
-    only while the pair has no ledger. *)
+    below the generation boundary the Keeper's turn log states
+    (RFC librarian-call-only-proposes §11.2). That boundary is set by the
+    last [Reset] of this trace (its [after.trace]) whose cause is
+    [Announced Cleared] or [Unannounced]; an [Announced Recovered] reset
+    keeps the history and sets none. It is the highest turn number, read
+    from the [Opened] line's [turn_ref], among this trace's turns closed
+    before that [Reset], whatever their outcome: the same [absolute_turn]
+    coordinate as TurnRecord, never a wall-clock comparison. A turn that
+    closes after the [Reset] is above it, the turn whose tool cleared the
+    history among them. With no such [Reset], or no turn closed before it,
+    there is no boundary. Unobserved rows do not hide an older seed within
+    that generation. Storage order also resolves direct retries that reuse a
+    turn number. Unreadable rows visited before the match are counted; rows
+    older than the match or generation boundary are not read. A turn log
+    that cannot be read, holds a line that does not decode, or breaks the
+    line order ({!Keeper_turn_log.step}) returns no seed and is reported in
+    [boundary_error]. Reads on the calling fiber; the turn driver calls it
+    once per provider attempt, and only while the pair has no ledger. *)
 
 (** Why {!for_history} dropped a seed. *)
 type dropped_front =

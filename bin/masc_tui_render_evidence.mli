@@ -23,7 +23,9 @@ val section :
   (string * string) list
   * (Masc_tui_evidence_picture.slot * Masc_tui_evidence_picture.pixels) list
 (** The original detail's typed evidence observation. Never-asked, pending,
-    previous-value refresh and typed failures remain distinct. The caller
+    held evidence and typed failures remain distinct; an in-flight refresh over
+    held evidence or a held failure leaves rows and picture slots stationary
+    while the zone-2 reading slot reports the read. The caller
     projects the exact verification-request/Task key; another key is absent. Each binary artifact is a caption row. On a terminal that
     draws pixels, a picture that fits ({!Masc_tui_evidence_picture.block}) is
     also a run of blank rows under its caption; its slot gives the index of the

@@ -15,7 +15,7 @@ let wrap_rows ~width lines =
        else Message_layout.wrap_words ~max_cells:(max 1 width) text
             |> List.map (fun row -> style, row)) lines
 
-let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~content_height ~display =
+let section ~ko ~selection ~evidence ~in_flight:_ ~workspace_confirmed ~width ~content_height ~display =
   let text korean english = if ko then korean else english in
   (* A row that starts with the workspace word capitalises it in English, as
      its neighbours do. *)
@@ -157,21 +157,16 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
         else wrap_styled ~style:(Theme.warn ()) ~prefix:"    "
                (workspace_unconfirmed ^ " · "
                 ^ text "증거 읽기 결과 미확인" "the evidence read is unconfirmed"))
-    | Failed failure -> message
-        ((if in_flight then
-            info_wrap ~prefix:("    " ^ under_way ^ " ")
-              (text "증거를 다시 읽는 중" "Retrying evidence read")
-          else [])
-         @ failure_rows failure)
+    | Failed failure -> message (failure_rows failure)
     | Ready evidence ->
       let rows,pictures = contents evidence in
+      (* A read in flight over held evidence is reported by the zone-2
+         reading slot rather than prepending a banner that shifts both
+         text rows and image pixel offsets (RFC tui-one-screen-grammar
+         section 8). *)
       let notes = if not workspace_confirmed then
         wrap_styled ~style:(Theme.warn ()) ~prefix:"    " (workspace_unconfirmed ^ " · "
           ^ text "마지막 관측 증거를 보여 줌" "showing the last observed evidence")
-        else if in_flight then
-          info_wrap ~prefix:("    " ^ under_way ^ " ")
-            (text "새로 읽는 중 · 이전 증거를 보여 줌"
-              "Refreshing · showing the previous evidence")
         else [] in
       let notes = wrap_rows ~width notes in
       notes @ rows,List.map (fun ((slot : Picture.slot),pixels) ->
@@ -179,12 +174,8 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
     | Stale (evidence,failure) ->
       let rows,pictures = contents evidence in
       let notes = wrap_rows ~width
-        ((if in_flight then
-            info_wrap ~prefix:("    " ^ under_way ^ " ")
-              (text "다시 읽는 중 · 이전 증거를 보여 줌" "Retrying · showing the previous evidence")
-          else
-            wrap_styled ~style:(Theme.warn ()) ~prefix:"    "
-              (text "마지막 관측 증거를 보여 줌" "Showing the last observed evidence"))
+        (wrap_styled ~style:(Theme.warn ()) ~prefix:"    "
+           (text "마지막 관측 증거를 보여 줌" "Showing the last observed evidence")
          @ failure_rows failure) in
       notes @ rows,List.map (fun ((slot : Picture.slot),pixels) ->
         {slot with first=List.length notes+slot.first},pixels) pictures

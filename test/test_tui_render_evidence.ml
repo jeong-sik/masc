@@ -253,6 +253,42 @@ let test_no_row_carries_a_control_or_bidi_byte_from_the_evidence () =
   Alcotest.(check bool) "the readable part of the link survives" true
     (List.exists (fun text -> contains ~needle:"https://x.example/a" text) (texts rows))
 
+let test_refresh_in_flight_keeps_held_evidence_rows_and_picture_slots_stable () =
+  let items =
+    Picture.Items
+      [ note "tests green"; binary (prepared_png ~width:1000 ~height:500 ()); unreadable ]
+  in
+  let observations =
+    [ "ready", Masc_tui_fetched.Ready items
+    ; "stale", Masc_tui_fetched.Stale (items, Failure.Transport "temporary")
+    ; "failed", Masc_tui_fetched.Failed (Failure.Transport "temporary")
+    ]
+  in
+  let slot_positions pictures =
+    List.map (fun ((slot : Picture.slot), _) -> (slot.first, slot.box.rows)) pictures
+  in
+  List.iter
+    (fun ko ->
+      List.iter
+        (fun (label, evidence) ->
+          let idle_rows, idle_pics =
+            Section.section ~ko ~selection:None ~evidence ~in_flight:false
+              ~workspace_confirmed:true ~width:80 ~content_height:40 ~display:kitty
+          in
+          let active_rows, active_pics =
+            Section.section ~ko ~selection:None ~evidence ~in_flight:true
+              ~workspace_confirmed:true ~width:80 ~content_height:40 ~display:kitty
+          in
+          let ctx = Printf.sprintf "%s (ko=%b)" label ko in
+          Alcotest.(check (list (pair string string)))
+            (ctx ^ ": rows stay identical during refresh")
+            idle_rows active_rows;
+          Alcotest.(check (list (pair int int)))
+            (ctx ^ ": picture slots stay at the same rows during refresh")
+            (slot_positions idle_pics) (slot_positions active_pics))
+        observations)
+    [ false; true ]
+
 (* {2 requests: where the pictures go on the frame} *)
 
 let one_picture () =
@@ -361,6 +397,8 @@ let () =
             test_links_follow_the_item_that_carries_them
         ; Alcotest.test_case "no row carries a control or bidi byte from the evidence" `Quick
             test_no_row_carries_a_control_or_bidi_byte_from_the_evidence
+        ; Alcotest.test_case "refresh in flight keeps held evidence rows and picture slots stable" `Quick
+            test_refresh_in_flight_keeps_held_evidence_rows_and_picture_slots_stable
         ] )
     ; ( "requests"
       , [ Alcotest.test_case "a picture lands at the origin plus its row" `Quick

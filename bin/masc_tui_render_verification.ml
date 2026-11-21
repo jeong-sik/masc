@@ -65,10 +65,12 @@ let verdict_failure_text state failure =
   request_failure_text ~ko:(state.ui_language = Lang_ko)
     ~request:Kept_request.Verification_verdict failure
 
-(* These are readings of the retained snapshot, including while a new read is
-   outstanding. The label qualifies the value even if a narrow title clips. *)
-let previous_reading_label state ~inflight ~error label =
-  if inflight || Option.is_some error then
+(* A retained snapshot qualifies its values once a refresh has failed.
+   While a healthy read is in flight over a held snapshot, the zone-2
+   reading slot reports the read instead of widening every status cell
+   and shrinking every title column (RFC tui-one-screen-grammar section 8). *)
+let previous_reading_label state ~inflight:_ ~error label =
+  if Option.is_some error then
     ui_text state ~ko:"이전 " ~en:"last " ^ label
   else label
 
@@ -1108,11 +1110,12 @@ let render_harness_list (state : state) =
       ~status_header:(ui_text state ~ko:"판정" ~en:"Verdict")
       ~statuses:(List.map (fun v -> fst (verdict_status_and_style v)) verdicts) in
   (* This is the newest record in the returned page, not evidence that the
-     judge is running or has stopped. A retained page keeps its qualification
-     while a new read is outstanding or failed. *)
+     judge is running or has stopped. A retained page qualifies the heading
+     once a refresh fails; a healthy read in flight is reported by the
+     zone-2 reading slot. *)
   let latest_label =
     match state.harness with
-    | Some _ when state.harness_inflight || Option.is_some state.harness_error ->
+    | Some _ when Option.is_some state.harness_error ->
         ui_text state ~ko:"이전 판정" ~en:"Prior verdict"
     | Some _ | None -> ui_text state ~ko:"최근 판정" ~en:"Latest verdict"
   in

@@ -100,24 +100,32 @@ let input_fault_json : Librarian_unit.input_fault -> Yojson.Safe.t = function
   | Content_unreadable { line } -> `Assoc [ "kind", `String "content_unreadable"; "line", `Int line ]
 ;;
 
+(* An end with no slot answering. *)
+let lane_json ~now ~one_item ~silent ~basis slots : Yojson.Safe.t =
+  `Assoc
+    [ "ended", `String "lane"
+    ; "one_item", `Bool one_item
+    ; "silent", `Bool silent
+    ; "about_memory_now", `Bool (Option.fold ~none:false ~some:(same basis) now)
+    ; ( "slots"
+      , `List
+          (List.map
+             (fun ((key : Librarian_memory_lane.slot_key), outcome) ->
+                `Assoc
+                  [ "slot", `String key.id
+                  ; "outcome", `String (Machine.unanswered_token outcome)
+                  ])
+             slots) )
+    ]
+;;
+
+(* The refusal E4 reads goes out as the lane end it is: one item, no slot
+   silent. Whether E4 is on is in the row's alarms. *)
 let read_json ~now : Last.read -> Yojson.Safe.t = function
   | Committed -> `Assoc [ "ended", `String "committed" ]
-  | Lane { one_item; silent; basis; slots } ->
-    `Assoc
-      [ "ended", `String "lane"
-      ; "one_item", `Bool one_item
-      ; "silent", `Bool silent
-      ; "about_memory_now", `Bool (Option.fold ~none:false ~some:(same basis) now)
-      ; ( "slots"
-        , `List
-            (List.map
-               (fun ((key : Librarian_memory_lane.slot_key), outcome) ->
-                  `Assoc
-                    [ "slot", `String key.id
-                    ; "outcome", `String (Machine.unanswered_token outcome)
-                    ])
-               slots) )
-      ]
+  | Refused_not_all_sized { basis; lane = (_ : Librarian_memory_lane.t); slots } ->
+    lane_json ~now ~one_item:true ~silent:false ~basis slots
+  | Lane { one_item; silent; basis; slots } -> lane_json ~now ~one_item ~silent ~basis slots
   | Input_fault fault -> `Assoc [ "ended", `String "input_fault"; "fault", input_fault_json fault ]
   | Ask_failed failed -> `Assoc [ "ended", `String "ask_failed"; "failed", `String (failed_token failed) ]
 ;;

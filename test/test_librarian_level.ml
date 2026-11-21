@@ -100,8 +100,9 @@ let machine ?(lane = Some (declared ())) ?last_read ?last_room ?(read_alone = fa
 let resting () = Machine.Resting (Lazy.force store)
 let idle () = Machine.Idle { store = Lazy.force store; seen_length = None }
 
-(* The ask a pulse starts from a rest: the unread range, with Memory. *)
-let asking () =
+(* A reading ask that is out. The one a pulse starts from a rest asks for
+   the unread range, with Memory. *)
+let asking ?(asked = Masc.Librarian_read_result.Read_range Masc.Librarian_width.All) () =
   Machine.Asking
     { store = Lazy.force store
     ; asking =
@@ -109,7 +110,7 @@ let asking () =
         ; since = 100.0
         ; lane = declared ()
         ; removed_since = []
-        ; asked = Machine.Read (Masc.Librarian_read_result.Read_range Masc.Librarian_width.All)
+        ; asked = Machine.Read asked
         ; bottom = Masc.Librarian_bottom.empty
         }
     }
@@ -117,6 +118,12 @@ let asking () =
 
 let one_item ?(silent = false) basis =
   Last.Lane { one_item = true; silent; basis; slots = [] }
+;;
+
+(* The one-item refusal E4 reads: every slot of [lane] refused, not every
+   one with a size. *)
+let not_all_sized ?(lane = (declared ()).value) basis =
+  Last.Refused_not_all_sized { basis; lane; slots = [] }
 ;;
 
 let alarm_text : Level.alarm -> string = function
@@ -160,20 +167,35 @@ let test_e3_a_fault_with_something_unread () =
   check_alarms "nothing unread" [] (running ~unread:false (machine ~last_read:fault (idle ())))
 ;;
 
-(* E4 stands only on a one-item rest with no silent slot, about the snapshot
-   now: a silent slot or a write since then leaves only W1, and so does the
-   same verdict on a writer that is not resting ([E4Rule = "narrow"]). *)
-let test_e4_a_one_item_rest_about_the_snapshot_now () =
-  check_alarms "every slot judged it" [ "E4"; "W1" ]
-    (running (machine ~last_read:(one_item (now ())) (resting ())));
-  check_alarms "the writer is not resting" [ "W1" ]
-    (running (machine ~last_read:(one_item (now ())) (idle ())));
-  check_alarms "the next pulse is asking it again" [ "W1" ]
+(* E4 stands on the refusal the last ask left, while something is unread and
+   the refusal is about the snapshot and the lane value held now. The
+   writer's state is not read, so the ask a pulse starts from the rest
+   leaves it on. A write since, another lane value and every other one-item
+   end leave only W1 ([E4Rule = "held_now"]). *)
+let test_e4_a_refusal_about_the_snapshot_and_the_lane_now () =
+  let refusal = not_all_sized (now ()) in
+  check_alarms "every slot refused it, not every one with a size" [ "E4"; "W1" ]
+    (running (machine ~last_read:refusal (resting ())));
+  check_alarms "the next pulse is asking it again" [ "E4"; "W1" ]
+    (running (machine ~last_read:refusal (asking ())));
+  check_alarms "nothing unread" []
+    (running ~unread:false (machine ~last_read:refusal (resting ())));
+  check_alarms "Memory changed since" [ "W1" ]
+    (running (machine ~last_read:(not_all_sized another_snapshot) (asking ())));
+  check_alarms "the lane value changed since" [ "W1" ]
+    (running
+       (machine
+          ~last_read:(not_all_sized ~lane:(declared ~prompt:"another prompt" ()).value (now ()))
+          (asking ())));
+  check_alarms "no lane value" [ "W1" ] (running (machine ~lane:None ~last_read:refusal (idle ())));
+  check_alarms "every slot sized it for its input: the item is asked alone" [ "W1" ]
+    (running
+       (machine ~last_read:(one_item (now ()))
+          (asking ~asked:Masc.Librarian_read_result.Read_item_alone ())));
+  check_alarms "the item alone was skipped for its size: the next one is asked" [ "W1" ]
     (running (machine ~last_read:(one_item (now ())) (asking ())));
   check_alarms "a slot was silent" [ "W1" ]
     (running (machine ~last_read:(one_item ~silent:true (now ())) (resting ())));
-  check_alarms "Memory changed since" [ "W1" ]
-    (running (machine ~last_read:(one_item another_snapshot) (resting ())));
   check_alarms "a wider question" [ "W1" ]
     (running
        (machine
@@ -225,8 +247,8 @@ let () =
         ; test_case "E2, refused at the bottom" `Quick test_e2_refused_at_the_bottom
         ; test_case "E3, a fault with something unread" `Quick
             test_e3_a_fault_with_something_unread
-        ; test_case "E4, a one-item rest about the snapshot now" `Quick
-            test_e4_a_one_item_rest_about_the_snapshot_now
+        ; test_case "E4, a refusal about the snapshot and the lane now" `Quick
+            test_e4_a_refusal_about_the_snapshot_and_the_lane_now
         ; test_case "E5, a room that fits no slot now" `Quick test_e5_a_room_that_fits_no_slot_now
         ; test_case "W1, booting and an unread turn not judged" `Quick
             test_w1_booting_and_an_unread_turn_not_judged

@@ -5,6 +5,7 @@
 
 open Alcotest
 module Machine = Masc.Librarian_machine
+module Level = Masc.Librarian_level
 module Store = Masc.Librarian_store
 module Log = Masc.Librarian_log
 module Log_store = Masc.Librarian_log_store
@@ -1323,6 +1324,8 @@ let last_read_text (value : Machine.t) =
   match value.last_read with
   | None -> "none"
   | Some Committed -> "committed"
+  | Some (Refused_not_all_sized { basis = (_ : Digest.digest); lane = (_ : Lane.t); slots = _ }) ->
+    "refused, not every slot with a size"
   | Some (Lane { one_item; silent; basis = (_ : Digest.digest); slots = _ }) ->
     Printf.sprintf "lane, %s, %s"
       (if one_item then "one item" else "wider")
@@ -1346,7 +1349,7 @@ let last_room_text (value : Machine.t) =
 
 let last_basis (value : Machine.t) =
   match value.last_read with
-  | Some (Lane { basis; _ }) -> hex basis
+  | Some (Refused_not_all_sized { basis; _ } | Lane { basis; _ }) -> hex basis
   | Some (Committed | Input_fault _ | Ask_failed _) | None -> fail "the last read is not the lane's"
 ;;
 
@@ -1368,8 +1371,10 @@ let test_the_row_starts_empty_and_keeps_each_failure () =
 ;;
 
 (* At one item the row says whether a slot declared now was silent: one not
-   in the walk is, one that refused without a size is not. The basis is the
-   snapshot the question was made against. *)
+   in the walk is, one that refused without a size is not. With none silent
+   and not every slot giving a size, the end is the refusal E4 reads, with
+   the snapshot the question was made against and the lane value declared
+   then. *)
 let test_a_one_item_rest_says_whether_a_slot_was_silent () =
   let place = started_place () in
   close_turn place ~from:0 ~until:64;
@@ -1388,8 +1393,92 @@ let test_a_one_item_rest_says_whether_a_slot_was_silent () =
       (ended value 1 (No_answer { question; slots = [ fast, Refused Unsized ] }))
       ~state:"resting, holding: " ~fiber:"cancel"
   in
-  check string "is not silent" "lane, one item, none silent" (last_read_text rested);
-  check string "about the snapshot it was asked against" (hex question.basis) (last_basis rested)
+  check string "is the refusal E4 reads" "refused, not every slot with a size"
+    (last_read_text rested);
+  check string "about the snapshot it was asked against" (hex question.basis) (last_basis rested);
+  match rested.last_read with
+  | Some (Refused_not_all_sized { lane; _ }) ->
+    check bool "and the lane value declared then" true (Lane.equal (declared [ fast ]).value lane)
+  | Some (Committed | Lane _ | Input_fault _ | Ask_failed _) | None ->
+    fail "the last read is not that refusal"
+;;
+
+(* Every slot sized the item for its input: the item is asked alone, and
+   then skipped for its size. Neither end is the refusal E4 reads, and the
+   writer goes on. *)
+let test_an_item_every_slot_sized_is_not_the_refusal_e4_reads () =
+  let place, value = asking_place () in
+  let question = question place value in
+  let alone =
+    Machine.decide place value ~at:300.0
+      (ended value 1 (No_answer { question; slots = sized Input_too_large }))
+  in
+  check string "the item is asked alone" "lane, one item, none silent" (last_read_text alone);
+  let passed =
+    Machine.decide place alone ~at:310.0
+      (ended alone 2 (No_answer { question = alone_of question; slots = sized Input_too_large }))
+  in
+  check string "the item was skipped for its size" "lane, one item, none silent"
+    (last_read_text passed)
+;;
+
+let alarm_text : Level.alarm -> string = function
+  | E1 -> "E1"
+  | E2 -> "E2"
+  | E3 -> "E3"
+  | E4 -> "E4"
+  | E5 -> "E5"
+  | W1 -> "W1"
+  | W3 -> "W3"
+;;
+
+(* The alarms of a writer with something unread. *)
+let alarms_of (value : Machine.t) =
+  List.map alarm_text (Level.alarms (Level.Running { machine = value; unread = true }))
+;;
+
+(* E4 reads the refusal the last ask left, not the writer's state: it stays
+   on while the pulse asks the item again (#54141). Other slots are another
+   lane value and a write is another Memory, so the refusal is off until an
+   ask judges that question. *)
+let test_e4_stands_while_the_pulse_asks_the_item_again () =
+  let place, value = asking_place () in
+  let question = question place value in
+  let refused value ask =
+    Machine.decide place value ~at:300.0
+      (ended value ask (No_answer { question; slots = [ fast, Refused Unsized ] }))
+  in
+  let rested = refused value 1 in
+  check (list string) "the rest" [ "E4"; "W1" ] (alarms_of rested);
+  let again =
+    step "the pulse" place rested Pulse ~state:"asking #2, holding: " ~fiber:"start #2"
+  in
+  check (list string) "while the item is asked again" [ "E4"; "W1" ] (alarms_of again);
+  check (list string) "and when it is refused again" [ "E4"; "W1" ] (alarms_of (refused again 2));
+  let other_slots =
+    Machine.decide place again ~at:310.0 (Declaration_changed (Some (declared [ fast; wide ])))
+  in
+  check (list string) "other slots declared" [ "W1" ] (alarms_of other_slots);
+  let written, (_ : Machine.write_answer) = write place again ~at:310.0 (remember port) in
+  check (list string) "a write since" [ "W1" ] (alarms_of written)
+;;
+
+(* A declared slot the registry did not admit said nothing (§7.2). With one,
+   the end at one item is a silent lane end whatever the walked slots said,
+   and E4 stays off: the operator's row names the slot that is missing, not
+   an item the lane refused. *)
+let test_a_slot_not_admitted_is_a_silent_slot () =
+  let place = started_place () in
+  close_turn place ~from:0 ~until:64;
+  let value = booted ~lane:(declared ~unadmitted:[ "openrouter.down" ] [ fast ]) place ~at:100.0 in
+  let rested =
+    step "the walked slot refused without a size" place value
+      (ended value 1
+         (No_answer { question = question place value; slots = [ fast, Refused Unsized ] }))
+      ~state:"resting, holding: " ~fiber:"cancel"
+  in
+  check string "the end is a silent one" "lane, one item, a slot silent" (last_read_text rested);
+  check (list string) "and E4 is off" [ "W1" ] (alarms_of rested)
 ;;
 
 (* The item read alone marks the read, and the room ask after it that every
@@ -1643,6 +1732,12 @@ let () =
             test_the_row_starts_empty_and_keeps_each_failure
         ; test_case "a one-item rest says whether a slot was silent" `Quick
             test_a_one_item_rest_says_whether_a_slot_was_silent
+        ; test_case "an item every slot sized is not the refusal E4 reads" `Quick
+            test_an_item_every_slot_sized_is_not_the_refusal_e4_reads
+        ; test_case "E4 stands while the pulse asks the item again" `Quick
+            test_e4_stands_while_the_pulse_asks_the_item_again
+        ; test_case "a slot not admitted is a silent slot" `Quick
+            test_a_slot_not_admitted_is_a_silent_slot
         ; test_case "an item read alone and a room that fits no slot" `Quick
             test_an_item_read_alone_and_a_room_that_fits_no_slot
         ; test_case "each room end is kept" `Quick test_each_room_end_is_kept

@@ -63,9 +63,9 @@
     [Room_not_answered] that every slot declared now refused for its input
     is ["room_fits_none"]. The model's [room] values ["stale"],
     ["unchanged"] and ["made"] are the three ways a [Room_answered] ends
-    here. The model's [last], [lastOne], [lastSil], [lastBasis], [room],
-    [roomMem], [roomLane] and [alone] are [t.last_read], [t.last_room] and
-    [t.read_alone] ({!Librarian_last}). *)
+    here. The model's [last], [lastOne], [lastSil], [lastBasis], [lastLane],
+    [room], [roomMem], [roomLane] and [alone] are [t.last_read],
+    [t.last_room] and [t.read_alone] ({!Librarian_last}). *)
 
 module Digest := Agent_core.Checkpoint_objects
 

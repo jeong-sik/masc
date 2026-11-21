@@ -73,6 +73,12 @@
 (*  NoSilentPark          something unread and nothing in flight means an  *)
 (*                        alert is on.                                     *)
 (*  E3OnHeadLine          E3 never stands on a line the position passed.   *)
+(*  E4OnHeadLine          nor does E4.                                     *)
+(*  E4OnlyOnBytesHeldNow  E4 stands only on a verdict about the Memory and *)
+(*                        the lane value held now.                         *)
+(*  E4OffWhileAskingAlone an item every slot sized for its input and that  *)
+(*                        is asked alone is not E4.                        *)
+(*  PulseKeepsE4          the ask a pulse starts changes no E4.            *)
 (*  EveryAskEnds          the writer does not sit on one ask for ever.     *)
 (*                                                                         *)
 (* Not modelled                                                            *)
@@ -139,7 +145,7 @@ Line(b, a, cause, from, p, tl, gid, added, gret, cur, clean) ==
 FreshMem(l) ==
   [state |-> "Booting", stop |-> "none", facts |-> {}, pos |-> 0, tl |-> 0, askNo |-> 0, asked |-> "none",
    rs |-> {}, lane |-> l, askLane |-> 0,
-   last |-> "none", lastOne |-> FALSE, lastSil |-> FALSE, lastBasis |-> {},
+   last |-> "none", lastOne |-> FALSE, lastSil |-> FALSE, lastBasis |-> {}, lastLane |-> 0,
    room |-> "none", roomMem |-> {}, roomLane |-> 0,
    alone |-> FALSE, bottom |-> FALSE, seen |-> NoLen, stopEnd |-> 0,
    retq |-> FALSE, lastPos |-> 0, lastTl |-> 0]
@@ -224,11 +230,16 @@ StartKind(mm, cc, fb, kind) ==
 Stop(mm, why) ==
   [mm EXCEPT !.state = "Stopped", !.stop = why, !.askNo = 0, !.asked = "none", !.rs = {}, !.askLane = 0]
 
+(* "lane" and "notall_r" are the two ends with no slot answering. "notall_r" is the one-item end
+   E4 reads: every slot declared refused the question or held a size fact for it, none was silent,
+   and not every one gave a size. It carries the lane value its slots were folded over. *)
+LaneEnds == {"lane", "notall_r"}
 SetLast(mm, v, one, sil, basis) ==
   [mm EXCEPT !.last = v, !.lastOne = one, !.lastSil = sil,
-             !.lastBasis = IF v = "lane" /\ one /\ ~sil THEN basis ELSE {},
-             !.lastPos = IF v \in {"lane", "fault", "failed"} THEN m.pos ELSE 0,    \* ghost: the head the result was about
-             !.lastTl = IF v \in {"lane", "fault", "failed"} THEN m.tl ELSE 0]
+             !.lastBasis = IF v \in LaneEnds /\ one /\ ~sil THEN basis ELSE {},
+             !.lastLane = IF v = "notall_r" THEN m.lane ELSE 0,
+             !.lastPos = IF v \in LaneEnds \cup {"fault", "failed"} THEN m.pos ELSE 0,    \* ghost: the head the result was about
+             !.lastTl = IF v \in LaneEnds \cup {"fault", "failed"} THEN m.tl ELSE 0]
 Emptied(mm) == IF SkipEmptiesLast THEN SetLast(mm, "none", FALSE, FALSE, {}) ELSE mm
 Sef == IF m.last \in {"fault", "failed"} THEN 1 ELSE c.sef
 SetRoom(mm, v) == [mm EXCEPT !.room = v, !.roomMem = {}, !.roomLane = 0]
@@ -450,7 +461,7 @@ HandleAsk(msg) ==
              [] res = "refused"  -> atOnce(SetLast(m, "lane", FALSE, FALSE, {}), "range", "oth")   \* above one item: narrow at once
              [] res = "silent"   -> quiet(park("Resting", "lane", FALSE, TRUE, m.bottom), "oth")
              [] res \in {"input", "allnot", "notall_r", "notall_s"} /\ ~basisNow -> askNext(m, "oth")
-             [] res = "notall_r" /\ basisNow -> quiet(park("Resting", "lane", TRUE, FALSE, m.bottom), "ref")
+             [] res = "notall_r" /\ basisNow -> quiet(park("Resting", "notall_r", TRUE, FALSE, m.bottom), "ref")
              [] res = "notall_s" /\ basisNow -> quiet(park("Resting", "lane", TRUE, TRUE, m.bottom), "sil")
              [] res = "allnot" /\ basisNow -> quiet(park("RaB", "lane", TRUE, FALSE, TRUE), "ref")
              [] res = "input" /\ basisNow /\ msg.kind = "range" ->
@@ -854,7 +865,7 @@ TypeOK ==
   /\ m.state \in States
   /\ m.stop \in {"none", "diverged", "log_unreadable", "mem_unreadable", "unwritable"}
   /\ m.asked \in {"none", "range", "alone", "room"}
-  /\ m.last \in {"none", "answered", "lane", "fault", "failed"}
+  /\ m.last \in {"none", "answered", "fault", "failed"} \cup LaneEnds
   /\ m.room \in {"none", "made", "unchanged", "stale", "fits_none", "not_judged"}
   /\ m.facts \subseteq Facts /\ snap \subseteq Facts
   /\ closed \in 0..MaxTurns /\ Len(kinds) = closed
@@ -906,15 +917,21 @@ SkipsOnlyItemless == (c.cut = 0 /\ c.replace = 0) => \A i \in 1..Len(log) : log[
 E1 == m.state = "Stopped"
 E2 == m.state = "RaB"
 E3 == Unread(m) /\ m.last \in {"fault", "failed"}
-OneItemRefusal == m.state = "Resting" /\ m.last = "lane" /\ m.lastOne      \* Resting on a lane result that offered one item
-E4 == CASE E4Rule = "narrow" -> OneItemRefusal /\ ~m.lastSil /\ m.lastBasis = m.facts
+OneItemRefusal == m.state = "Resting" /\ m.last \in LaneEnds /\ m.lastOne      \* Resting on a lane result that offered one item
+(* "held_now" is the RFC's rule: the verdict the last ask left, while it is about the Memory and
+   the lane value held now, whatever the writer has done since. "narrow" reads the writer's state,
+   so the ask a pulse starts turns it off. "stateless" reads every one-item end with no silent slot,
+   so it is on while the item is asked alone and after the item was skipped for its size. *)
+E4 == CASE E4Rule = "held_now" -> /\ m.state \in Running /\ Unread(m) /\ m.last = "notall_r"
+                                  /\ m.lastBasis = m.facts /\ m.lastLane = m.lane
+        [] E4Rule = "narrow" -> OneItemRefusal /\ ~m.lastSil /\ m.lastBasis = m.facts
         [] E4Rule = "any_one_item" -> OneItemRefusal
-        [] E4Rule = "stateless" -> m.state # "RaB" /\ Unread(m) /\ m.last = "lane" /\ m.lastOne /\ ~m.lastSil /\ m.lastBasis = m.facts
+        [] E4Rule = "stateless" -> m.state # "RaB" /\ Unread(m) /\ m.last \in LaneEnds /\ m.lastOne /\ ~m.lastSil /\ m.lastBasis = m.facts
         [] OTHER -> FALSE
 E5 == IF E5Rule = "held_now"
         THEN m.room = "fits_none" /\ m.roomMem = m.facts /\ m.roomLane = m.lane
         ELSE m.room = "fits_none"
-W1 == m.state = "Booting" \/ (Unread(m) /\ (Q(m.lane) = 0 \/ m.last = "none" \/ m.last = "lane"))
+W1 == m.state = "Booting" \/ (Unread(m) /\ (Q(m.lane) = 0 \/ m.last = "none" \/ m.last \in LaneEnds))
 W3 == m.alone
 RowOn == E1 \/ E2 \/ E3 \/ E4 \/ E5 \/ W1
 ErrorOn == E1 \/ E2 \/ E3 \/ E4 \/ E5
@@ -928,7 +945,7 @@ Park == Live /\ Unread(m) /\ ~InFlight
 NoSilentPark == Park => RowOn
 (* The same with W1's "last is None" left out. *)
 NoSilentParkWithoutSinceBoot ==
-  Park => (E1 \/ E2 \/ E3 \/ E4 \/ E5 \/ m.state = "Booting" \/ (Unread(m) /\ (Q(m.lane) = 0 \/ m.last = "lane")))
+  Park => (E1 \/ E2 \/ E3 \/ E4 \/ E5 \/ m.state = "Booting" \/ (Unread(m) /\ (Q(m.lane) = 0 \/ m.last \in LaneEnds)))
 
 (* E4 is never on when a slot was silent in the last ask (c.gl is kept by the model, not read from `last`). *)
 E4NeverWithSilentSlot == E4 => c.gl = "ref"
@@ -1152,6 +1169,14 @@ UnmarkedReadIsChecked == (Untouched /\ ~Marked /\ m.state # "Stopped") => snap =
 OnHead == m.lastPos = m.pos /\ m.lastTl = m.tl
 E3OnHeadLine == E3 => OnHead
 E4OnHeadLine == E4 => OnHead
+(* E4 stands only on a verdict about the Memory and the lane value held now: a write and a
+   declaration with another value turn it off for as long as what is held is not what the
+   verdict was about. *)
+E4OnlyOnBytesHeldNow == E4 => (m.last = "notall_r" /\ m.lastBasis = m.facts /\ m.lastLane = m.lane)
+(* Every slot sized the head item for its input, so it is asked alone: that end is not E4's. *)
+E4OffWhileAskingAlone == (m.state = "Asking" /\ m.asked = "alone") => ~E4
+(* The ask a pulse starts from a rest changes no E4: the function reads the last ask that ended. *)
+PulseKeepsE4 == [][(c'.pulse # c.pulse) => (E4' = E4)]_vars
 \* witnesses
 NeverWriteByANewWriter == c.wnew = 0                 \* a Keeper stopped and turned on again; a new writer commits its Write
 NeverRemade == c.remade = 0

@@ -252,18 +252,35 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
     | Some declared -> not (Lane.equal declared.value asking.lane.value)
   in
   (* What the result was, for the row (§12.2): whether a slot declared now
-     said nothing is read against the slots declared now, as the verdict is. *)
-  let lane_result ~one_item =
-    Last.Lane
-      { one_item; silent = Last.silent ~declared:declared_now slots; basis = question.basis; slots }
+     said nothing is read against the lane value declared now, as the
+     verdict is. A declared slot the registry did not admit said nothing. *)
+  let silent =
+    match t.lane with
+    | None -> false
+    | Some declared -> Last.silent declared.value slots
   in
+  let lane_result ~one_item = Last.Lane { one_item; silent; basis = question.basis; slots } in
   let ended ~one_item t = { t with last_read = Some (lane_result ~one_item) } in
   (* With no slot declared now in the result, the ask said nothing about the
      lane held now, so it sets nothing. *)
-  let rest ~one_item t =
+  let rest t ~last =
     if List.is_empty still_declared && lane_moved
     then next_ask place t ~at store
-    else { (ended ~one_item t) with state = Resting store }
+    else { t with state = Resting store; last_read = Some last }
+  in
+  (* [Not_all] at one item. With no slot silent, every slot the lane
+     declares now refused the question and not every one gave a size: the
+     end E4 reads (§12.2). It keeps the lane value the verdict was
+     folded over, the one declared now, which is not the one the ask started
+     with after a declaration that changed only slots. *)
+  let not_all (t : t) =
+    match t.lane with
+    | Some declared when not silent ->
+      rest t
+        ~last:
+          (Last.Refused_not_all_sized
+             { basis = question.basis; lane = declared.value; slots })
+    | Some (_ : declared) | None -> rest t ~last:(lane_result ~one_item:true)
   in
   (* §7.4 「옛 Memory 를 두고 한 판정으로 내려가지 않는다」. *)
   let judged_now =
@@ -293,7 +310,7 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
           narrowing = Librarian_width.refused t.narrowing ~asked wider
         }
         ~at store
-    else rest ~one_item:false t
+    else rest t ~last:(lane_result ~one_item:false)
   | Read_range (_ : Librarian_width.width), One_item ->
     let t = { t with bottom = Librarian_bottom.learn t.bottom With_memory question.id slots } in
     if not judged_now
@@ -302,7 +319,7 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
       match verdict () with
       | Input -> ask place (ended ~one_item:true t) ~at store ~asked:Read_item_alone
       | All_not_input -> { (ended ~one_item:true t) with state = Refused_at_bottom store }
-      | Not_all -> rest ~one_item:true t)
+      | Not_all -> not_all t)
   | Read_item_alone, (One_item | Wider (_ : Librarian_width.wider)) ->
     let t = { t with bottom = Librarian_bottom.learn t.bottom Alone question.id slots } in
     if not judged_now
@@ -317,7 +334,7 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
         after_skip place t ~at ~narrowing ~last:(lane_result ~one_item:true)
           (Store.commit_skip store ~at ~hole:(Item_exceeds_window question.missing) question.reach)
       | All_not_input -> { (ended ~one_item:true t) with state = Refused_at_bottom store }
-      | Not_all -> rest ~one_item:true t)
+      | Not_all -> not_all t)
 ;;
 
 (* After an item read alone, making room is asked at once, unless a direct

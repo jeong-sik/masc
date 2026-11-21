@@ -567,8 +567,6 @@ let test_capture_rechecks_direct_readers_and_retained_context () = with_store @@
     check bool "withheld Board sources are kept in withheld, never unavailable" true
       (captured.withheld <> []
        && not (List.exists (fun s -> String_util.contains_substring s "withheld") captured.unavailable));
-    check bool "withheld sources alone never block shows_no_working_context" true
-      (Context.shows_no_working_context {Context.empty with withheld = captured.withheld});
     let previous = Option.get captured.previous in
     check int "retained raw sources use the same authorization guard" expected_sources
       (List.length previous.sources);

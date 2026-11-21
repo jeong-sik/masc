@@ -1,7 +1,6 @@
 module Store = Lane_addon_store
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
-module Preflight = Keeper_librarian_store_preflight
 module Consumer = Server_tool_request_consumer
 module Names = Set.Make (String)
 open Result.Syntax
@@ -50,36 +49,6 @@ let progress_ids progress =
       | Progress.Observer _ -> [])
     (Progress.events progress)
 
-(* The function each gate inventory groups its records by. [None] for a
-   record that names only the request IDs of its progress events. *)
-let payload_ids =
-  let gate parent original=Result.map (fun id -> [id]) (parent original) in
-  function
-  | Consumer.Librarian Preflight.Admission_gate ->
-    Some (gate Keeper_librarian_admission_gate.parent_execution_id)
-  | Consumer.Librarian Preflight.History_gate ->
-    Some (gate Keeper_librarian_durable_gate.parent_execution_id)
-  | Consumer.Librarian Preflight.Floor_gate ->
-    Some (gate Keeper_librarian_floor_step_gate.parent_execution_id)
-  | Consumer.Librarian Preflight.Admission_closure -> Some (fun (original:Owner.retained) ->
-      let* owner=match original.request with
-        | `Assoc fields -> Option.to_result ~none:"Closure has no captured owner" (List.assoc_opt "owner" fields)
-        | _ -> Error "Closure payload is not an object" in
-      let* owner=Keeper_librarian_admission_capture.owner_of_json owner in
-      let+ closure=Keeper_librarian_admission_closure.restore ~owner original in
-      Keeper_librarian_admission_closure.named_ids closure)
-  | Consumer.One_scope Consumer.Media_reading ->
-      (* Media originals name no other original request in their body.
-         Preflight and the media owner decode that body; this startup pass
-         checks metadata and the progress references below. *)
-      None
-  | Consumer.Librarian
-      ( Preflight.Admission_execution | Preflight.Admission_part | Preflight.Admission_partition
-      | Preflight.History_execution | Preflight.Floor_execution )
-  | Consumer.One_scope
-      ( Consumer.Workspace_curator | Consumer.Completion_review | Consumer.Goal_proof_review
-      | Consumer.Candle_appraisal ) -> None
-
 (* Parser errors can carry snippets of private records or bodies, so a
    refusal names only the class of failure. *)
 let refuse detail _ = Sweep_refused detail
@@ -96,29 +65,18 @@ let live_names ~store =
     List.fold_left
       (fun names record ->
         let* names = names in
-        let* consumer =
+        (* Every consumer's originals name only the request IDs of their
+           progress events; the body is decoded by the consumer and the
+           install preflight, not here. *)
+        let* (_ : Consumer.t) =
           Option.to_result ~none:(Sweep_refused "a live record is in a scope no owner claims")
             (Consumer.of_scope (Owner.Record.scope record))
-        in
-        let* parent =
-          match payload_ids consumer with
-          | None -> Ok []
-          | Some named_ids ->
-            let* original =
-              Owner.load_listed ~store record
-              |> Result.map_error (refuse "a live gate record could not be loaded")
-            in
-            let+ ids =
-              named_ids original
-              |> Result.map_error (refuse "a live gate record names no parent execution")
-            in
-            ids
         in
         Ok
           (List.fold_left
              (fun names id -> Names.add id names)
              names
-             (parent @ progress_ids (Owner.Record.progress record))))
+             (progress_ids (Owner.Record.progress record))))
       (Ok Names.empty) records
   in
   Ok (List.length records, names)

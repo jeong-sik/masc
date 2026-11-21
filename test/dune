@@ -4860,6 +4860,8 @@
   masc_tui_keeper_axis_cell
   masc_tui_keeper_memory_reading))
 
+(include stanzas/test_tui_keeper_memory_reading_librarian_pending.inc)
+
 (test
  (name test_tui_editor)
  (modules test_tui_editor)

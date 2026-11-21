@@ -141,7 +141,17 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # newly served vectors, made while page 0 is RAM, got no served answer.
 # Which game paths issue those calls is not verified here. The top-level lib
 # source digest moves cc6489f2ddae4a48596b4879b3c0e368 -> 78f5ad93c70d726594517af5e0f4c57b.
-readonly OCAML_MSX_SHA="cec423387a7335f7d095e3a3489ec3e7272581fa"
+# 581da90 = ocaml-msx main, 29 commits after cec4233 (git log cec423387..581da90).
+# The Z80 gets an M1 wait state (Msx.create passes ~m1_wait:1), counts R and
+# takes IRQs with their T-states; RAM powers on at 0xFF; the RTC, PPI, PSG and
+# VDP ports read and write differently in several places; a plain ROM sits
+# where its "AB" header points and a Konami cart mirrors into pages 0 and 3.
+# Save-state format is v6 and the reader takes formats 1-6
+# (lib/state_codec.ml), so a v3 checkpoint written on the previous pin
+# restores. Msx.load_disk drops ?real_rom for ?disk_rom and Msx.cart_mapper
+# gains Ram64; lib/msx_lane uses neither. The top-level lib source digest
+# moves 78f5ad93c70d726594517af5e0f4c57b -> e01ef0dc768c1ff252b8c78d3ea57038.
+readonly OCAML_MSX_SHA="581da9079377968474da3cf10310b5a65b66b505"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
 # Path-pinned locally for core development; SHA-pinned here for CI.
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and

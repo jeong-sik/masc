@@ -312,13 +312,13 @@ let with_current_config_revision_at_base_path ~base_path ~keeper_name project =
   | Ok { value = Ok (value, runtime_warnings); warnings } ->
     Ok { value; warnings = warnings @ runtime_warnings }
 
-let with_current_config_revision ~config ~keeper_name project =
+let with_current_config_revision ~(config : Workspace.config) ~keeper_name project =
   with_current_config_revision_at_base_path
     ~base_path:config.base_path
     ~keeper_name
     project
 
-let current_config_revision ~config ~keeper_name =
+let current_config_revision ~(config : Workspace.config) ~keeper_name =
   with_current_config_revision ~config ~keeper_name Fun.id
   |> Result.map (fun receipt -> receipt.value)
 
@@ -720,7 +720,8 @@ let persist_manifest_with_publication_using ~write_manifest ~with_lock ~restore_
   | Ok () -> transaction ()
 
 let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot
-    ~restore_runtime ~read_revision ~expected_revision ~config
+    ~restore_runtime ~read_revision ~expected_revision
+    ~(config : Workspace.config)
     ~(parsed : Keeper_turn_up_args.parsed_args) ~(meta : keeper_meta) ~publish () =
   let write_manifest ~created path =
     match write_manifest with
@@ -823,7 +824,8 @@ let commit_declaration_at_base_path
       |> Result.map_error (fun error -> Configuration_error error)
 ;;
 
-let commit_declaration ~expected_revision ~config ~keeper_name ~content ~publish () =
+let commit_declaration ~expected_revision ~(config : Workspace.config) ~keeper_name
+      ~content ~publish () =
   commit_declaration_at_base_path
     ~expected_revision
     ~base_path:config.base_path

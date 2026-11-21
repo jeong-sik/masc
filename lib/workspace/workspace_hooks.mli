@@ -144,7 +144,6 @@ val cache_desync_cleared_fn :
 val workspace_telemetry_drop_fn : (Workspace_telemetry_drop_event.t -> unit) Atomic.t
 val active_agents_change_fn : ([ `Inc | `Dec ] -> unit) Atomic.t
 val telemetry_observe_failure_fn : (string -> unit) Atomic.t
-val get_default_runtime_id_fn : (unit -> string) Atomic.t
 
 (** Admitted [\[runtime.exact_output_lanes.verifier_exact\]] slot ids and kinds in frozen
     declaration order for the completion-authority evaluator.

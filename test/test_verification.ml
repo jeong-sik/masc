@@ -1368,7 +1368,6 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
     in
     Prompt_registry.set_markdown_dir prompt_dir;
     Masc.Prompt_defaults.init ();
-    let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
     let previous_lane_slots =
       Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn
     in
@@ -1384,7 +1383,6 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
     in
     Fun.protect
       ~finally:(fun () ->
-        Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
         Atomic.set
           Workspace_hooks.get_verifier_exact_lane_slots_fn
           previous_lane_slots;
@@ -1395,11 +1393,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           Masc.Verification_run_registry.change_observer_fn
           previous_change_observer)
       (fun () ->
-        Atomic.set Workspace_hooks.get_default_runtime_id_fn
-          (fun () -> "test-system-evaluator");
-        (* The completion-authority review resolves only the
-           verifier_exact lane; the default runtime hook above no longer
-           reaches it. *)
+        (* The completion-authority review resolves only the verifier_exact lane. *)
         Atomic.set
           Workspace_hooks.get_verifier_exact_lane_slots_fn
           (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-system-evaluator" ]));
@@ -1636,7 +1630,6 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     in
     Prompt_registry.set_markdown_dir prompt_dir;
     Masc.Prompt_defaults.init ();
-    let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
     let previous_lane_slots =
       Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn
     in
@@ -1652,7 +1645,6 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     in
     Fun.protect
       ~finally:(fun () ->
-        Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
         Atomic.set
           Workspace_hooks.get_verifier_exact_lane_slots_fn
           previous_lane_slots;
@@ -1669,8 +1661,6 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
         Unix.putenv "MASC_BASE_PATH" base_path;
         Masc.Board.reset_global_for_test ();
         Masc.Board_dispatch.reset_for_test ();
-        Atomic.set Workspace_hooks.get_default_runtime_id_fn
-          (fun () -> "test-system-evaluator");
         Atomic.set
           Workspace_hooks.get_verifier_exact_lane_slots_fn
           (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-system-evaluator" ]));

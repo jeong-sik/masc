@@ -1581,6 +1581,10 @@ let test_runtime_route_writer_rejects_unknown_default_without_write () =
    one names it the lane cannot be removed: the assignment would otherwise point
    at nothing and the next load would fail. Once no keeper names it, removal
    takes the table out of the file and the resolver forgets it. *)
+let find_lane id =
+  List.find_opt (fun (lane : Runtime_lane.t) -> String.equal lane.id id) (Runtime.lanes ())
+;;
+
 let test_a_created_lane_is_assigned_then_removed () =
   with_runtime_file (fun path ->
     let ok label = function
@@ -1590,7 +1594,7 @@ let test_a_created_lane_is_assigned_then_removed () =
     Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
       ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ] ()
     |> ok "create";
-    (match Runtime.get_lane_by_id "coding" with
+    (match find_lane "coding" with
      | None -> Alcotest.fail "the created lane does not resolve"
      | Some lane ->
        Alcotest.(check (list string)) "the created lane walks what it was given"
@@ -1619,7 +1623,7 @@ let test_a_created_lane_is_assigned_then_removed () =
     Alcotest.(check bool) "the table left the file" false
       (string_contains (Fs_compat.load_file path) "[runtime.lanes.coding]");
     Alcotest.(check bool) "the resolver forgot the lane" true
-      (Option.is_none (Runtime.get_lane_by_id "coding"));
+      (Option.is_none (find_lane "coding"));
     match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" () with
     | Ok _ -> Alcotest.fail "removing an undeclared lane reported success"
     | Error _ -> ())
@@ -1666,7 +1670,7 @@ let test_a_new_lane_under_a_runtime_id_is_declared () =
     lane_write_ok "create under a runtime id"
       (Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small"
          ~runtime_ids:[ "openai.small"; "openai.gpt" ] ());
-    match Runtime.get_lane_by_id "openai.small" with
+    match find_lane "openai.small" with
     | None -> Alcotest.fail "the lane was not declared"
     | Some lane -> (
       Alcotest.(check (list string))
@@ -1970,7 +1974,7 @@ let test_a_rename_carries_the_references_with_it () =
       (String_util.contains_substring text "\"coding\"");
     Alcotest.(check (option (list string))) "the candidates came with it"
       (Some [ "openai.gpt"; "openai.small" ])
-      (Option.map Runtime_lane.ordered_candidates (Runtime.get_lane_by_id "pairing"));
+      (Option.map Runtime_lane.ordered_candidates (find_lane "pairing"));
     Alcotest.(check (option string)) "the keeper routes to the new name"
       (Some "pairing") (Runtime.runtime_id_for_keeper "routingtest");
     (* The reference the rename rewrote is the one [remove] refuses on, so
@@ -3784,7 +3788,8 @@ let test_max_context_accessor_clamps_to_provider_cap () =
     Alcotest.(check (option int))
       "runtime TOML 524288 is clamped to provider/AGENT_CORE qwen36 cap 131072"
       (Some 131072)
-      (Runtime.max_context_of_runtime_id "ollama_cloud.stalecontext");
+      (Runtime.get_runtime_by_id "ollama_cloud.stalecontext"
+       |> Option.map Runtime_instance.max_context_of_runtime);
     let resolution =
       resolve_budget ~requested_override:None "ollama_cloud.stalecontext"
     in
@@ -3875,7 +3880,11 @@ let test_max_context_of_uncatalogued_model_keeps_runtime_declaration () =
       (match Runtime.init_default ~config_path:path with
        | Ok () -> ()
        | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
-      match Runtime.resolve_max_context_of_runtime_id "ollama_cloud.wide" with
+      match
+        Option.bind
+          (Runtime.get_runtime_by_id "ollama_cloud.wide")
+          Runtime_instance.resolve_max_context_of_runtime
+      with
       | None -> Alcotest.fail "ollama_cloud.wide must resolve a context window"
       | Some (window, source) ->
         Alcotest.(check int) "runtime.toml window stands" 1048576 window;
@@ -3911,7 +3920,8 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
     Alcotest.(check (option int))
       "current runtime accessor replays fixture through provider cap"
       (Some agent_core_provider_limit)
-      (Runtime.max_context_of_runtime_id runtime_id);
+      (Runtime.get_runtime_by_id runtime_id
+       |> Option.map Runtime_instance.max_context_of_runtime);
     let resolution = resolve_budget ~requested_override:None runtime_id in
     Alcotest.(check int)
       "current keeper budget no longer reproduces historical oversized value"
@@ -4925,7 +4935,7 @@ let () =
             `Quick
             test_resolved_rows_carry_their_own_binding
         ; Alcotest.test_case
-            "max_context_of_runtime_id clamps runtime TOML to provider cap"
+            "max_context_of_runtime clamps runtime TOML to provider cap"
             `Quick
             test_max_context_accessor_clamps_to_provider_cap
         ; Alcotest.test_case

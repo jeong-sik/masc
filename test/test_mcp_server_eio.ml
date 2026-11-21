@@ -22,7 +22,6 @@ let () =
   Mirage_crypto_rng_unix.use_default ();
   let (_operator_force_link : unit) = Operator_tool.force_link in
   let (_dashboard_ws_sessions : int) = Server_mcp_transport_ws.session_count () in
-  Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test.local");
   Atomic.set
     Workspace_hooks.get_verifier_exact_lane_slots_fn
     (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test.local" ]))
@@ -32,11 +31,7 @@ let () =
      production server path.  Force them in this standalone test executable so
      profile-specific fixtures do not depend on link/load order. *)
   ignore (Operator_tool.remote_tool_names : string list);
-  ignore (Server_mcp_transport_ws.session_count : unit -> int);
-  (* The transition-done guidance fixture reaches completion review; production
-     wires this runtime hook during startup.  A fixed dummy id lets the test
-     exercise guidance behavior without booting runtime.toml. *)
-  Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime")
+  ignore (Server_mcp_transport_ws.session_count : unit -> int)
 
 (* ===== Test Helpers ===== *)
 

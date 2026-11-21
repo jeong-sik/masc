@@ -23,20 +23,13 @@ let composite_config_drift_json ~config ~keeper_name =
     let override_fields =
       List.map Keeper_status_bridge_override.field_name sources.overrides
     in
-    let runtime_drift = Keeper_status_bridge_override.runtime_drift sources.overrides in
-    let default_runtime_id, live_runtime_id =
-      match runtime_drift with
-      | Some { default; live } -> Some default, Some live
-      | None -> None, None
-    in
-    let runtime_override = Option.is_some runtime_drift in
     `Assoc
       [ "present", `Bool true
-      ; "status", `String (if runtime_override then "drift" else "ok")
-      ; "runtime_override", `Bool runtime_override
+      ; "status", `String "ok"
+      ; "runtime_override", `Bool false
       ; "override_fields", Json_util.json_string_list override_fields
-      ; "default_runtime_id", Json_util.string_opt_to_json default_runtime_id
-      ; "live_runtime_id", Json_util.string_opt_to_json live_runtime_id
+      ; "default_runtime_id", `Null
+      ; "live_runtime_id", `Null
       ; "active_config_root", `String (Keeper_status_bridge.active_config_root sources)
       ]
   | Ok None ->

@@ -563,7 +563,11 @@ let reload_runtime_config toml =
 
 let test_lane_loads_ordered_candidates () =
   with_runtime_config runtime_toml_with_lane (fun () ->
-    match Runtime.get_lane_by_id "resilient" with
+    match
+      List.find_opt
+        (fun (lane : Runtime_lane.t) -> String.equal lane.id "resilient")
+        (Runtime.lanes ())
+    with
     | None -> Alcotest.fail "expected lane 'resilient' to be configured"
     | Some lane ->
       Alcotest.(check string) "lane id" "resilient" (Runtime_lane.id lane);

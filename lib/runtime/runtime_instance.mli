@@ -73,9 +73,8 @@ type max_context_source =
   | Binding_override_clamped_by_capability
 
 val max_context_of_runtime : t -> int
-(** Effective input context window for a materialized runtime.  This applies the
-    same provider-cap clamp as {!Runtime.max_context_of_runtime_id} without re-resolving
-    the runtime id. Derived from {!resolve_max_context_of_runtime}.
+(** Effective input context window for a materialized runtime.  Derived from
+    {!resolve_max_context_of_runtime}.
     @raise Failure if that resolves to [None] — unreachable for any [t]
     loaded by {!Runtime.load_list}, which rejects a runtime whose max
     context cannot be resolved at load time (no silent default). *)

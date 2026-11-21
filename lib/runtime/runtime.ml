@@ -2138,14 +2138,6 @@ let lsp_servers () : Lsp_process_manager.language -> string * string list =
     | Some command -> command
     | None -> Lsp_process_manager.command_of_language language
 
-let get_lane_by_id (id : string) : Runtime_lane.t option =
-  if is_multi_account ()
-  then None
-  else
-    List.find_opt (fun (lane : Runtime_lane.t) -> String.equal lane.id id)
-      (runtime_state ()).lanes
-;;
-
 (* Resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the requested runtime assignment (or the
    default) instead of unconditionally the default; an
@@ -2168,10 +2160,6 @@ let verifier_exact_slot_admission ~candidate_kind ~runtime_id =
     (match get_runtime_by_id runtime_id with
      | Some runtime -> verifier_runtime_admission runtime
      | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime"))
-;;
-
-let is_local_runtime_id (id : string) : bool option =
-  get_runtime_by_id id |> Option.map is_local_runtime
 ;;
 
 
@@ -2318,20 +2306,6 @@ let entry_runtime_id_of_route (route : string) : string option =
   | `Unavailable _ | `Missing -> None
 ;;
 
-let resolve_max_context_of_runtime_id (id : string)
-  : (int * max_context_source) option
-  =
-  match get_runtime_by_id id with
-  | Some rt -> resolve_max_context_of_runtime rt
-  | None -> None
-;;
-
-let max_context_of_runtime_id (id : string) : int option =
-  match get_runtime_by_id id with
-  | Some rt -> Some (max_context_of_runtime rt)
-  | None -> None
-;;
-
 (* The per-model [temperature] override declared in runtime.toml
    ([models.<id>.temperature]), or [None] when the runtime is unknown or the
    model leaves it unset. Projects the runtime.toml [model] record (per-binding
@@ -2379,7 +2353,7 @@ let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option 
 (* per-million-token pricing declared on the [id] binding's
    runtime.toml table. Projects straight off the retained [rt.binding]
    (price_input/price_output are [Runtime_schema.binding] option fields),
-   same shape as [max_context_of_runtime_id]. Returns (None, None) when the
+   same shape as [Runtime_instance.max_context_of_runtime]. Returns (None, None) when the
    runtime is unknown OR the operator left the rates unset — the turn-record
    writer stores those Nones so the dashboard renders cost absence ("미상")
    rather than fabricating Claude $3/$15 defaults. Partial config (only one

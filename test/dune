@@ -4281,6 +4281,8 @@
  (modules test_tui_measurement)
  (libraries alcotest  masc.agent_core.digest masc masc_tui_types yojson))
 
+(include stanzas/test_tui_measurement_continuity_report.inc)
+
 (test
  (name test_tui_terminal_json)
  (modules test_tui_terminal_json)

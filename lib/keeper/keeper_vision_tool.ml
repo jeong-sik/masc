@@ -281,15 +281,6 @@ let err_json ?detail ~failure_class code =
   in
   Yojson.Safe.to_string (`Assoc fields)
 
-(* AcceptRejected is the caller's own transport wiring refused before dispatch
-   (a missing clock, an invalid deadline). Every candidate would refuse the
-   same wiring, so this one still ends the walk. *)
-let wiring_rejected = function
-  | Llm_provider.Http_client.AcceptRejected _ -> true
-  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.Connect_failed _
-  | Llm_provider.Http_client.TimeoutError _ | Llm_provider.Http_client.ProviderTerminal _
-  | Llm_provider.Http_client.ProviderFailure _ -> false
-
 (* Capacity belongs to the selected binding. A later image runtime may admit
    the same pixels under a different request/context ceiling. HTTP 413 states
    that cause directly; arbitrary HTTP 400/422 prose must not infer it. *)
@@ -332,12 +323,18 @@ let candidate_policy_http_error err =
     && code < 500
     && (not (candidate_capacity_http_error err))
     && not (Runtime_attempt_fsm.should_try_next err)
+  (* The request was refused locally, before any call: this candidate's own
+     validation (request path, output schema, tool choice, reasoning effort,
+     thinking control, admission declaration) or the caller's wiring. Nothing
+     reached an endpoint, so advancing costs no call. If the wiring is what is
+     wrong, every candidate refuses it and the last refusal is the outcome. *)
+  | Llm_provider.Http_client.AcceptRejected _ -> true
   | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.Connect_failed _ | Llm_provider.Http_client.TimeoutError _
-  | Llm_provider.Http_client.AcceptRejected _ | Llm_provider.Http_client.ProviderTerminal _
+  | Llm_provider.Http_client.ProviderTerminal _
   | Llm_provider.Http_client.ProviderFailure _ -> false
 
 let failure_class_of_http_error = function
-  | err when wiring_rejected err || candidate_policy_http_error err ->
+  | err when candidate_policy_http_error err ->
     Tool_result.Policy_rejection
   | err when candidate_capacity_http_error err -> Tool_result.Runtime_failure
   | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Dependency_unavailable
@@ -830,16 +827,6 @@ let run_candidates_outcome
                 ~last_error:(Some (Candidate_provider_error err))
                 ~attempt_index:(attempt_index + 1)
                 rest)
-            else if wiring_rejected err
-            then (
-              record_vision_candidate_attempt
-                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
-                ~reason:"terminal_provider_error" ~duration_ms:0.0
-                ~success:false ();
-              Vo_provider
-                { failure_class = failure_class_of_http_error err
-                ; detail = Provider_http_error.to_message err
-                })
             else if candidate_policy_http_error err
             then (
               record_vision_candidate_attempt

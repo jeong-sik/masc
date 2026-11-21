@@ -47,8 +47,7 @@ type prepared_prompt =
 let autonomous_wake_marker = Env_config_keeper.KeeperAutonomous.default_wake_prompt
 
 (* Every line the keeper reads comes from a fragment under config/prompts, so
-   an operator rewords it without an OCaml change (RFC
-   prompts-and-tool-definitions-outside-ocaml). A render can only fail when a
+   an operator rewords it without an OCaml change. A render can only fail when a
    template and its call disagree about variables, which is a build-time
    mistake; the failure is placed in the line rather than dropped, because a
    silently missing line reads as an absent condition rather than a broken
@@ -262,11 +261,11 @@ type held_task_link =
 
 (* What the prompt knows about one active goal. [phase] and [criterion] are
    options for a caller that states a summary directly;
-   [active_goal_summaries] always fills both from the store. RFC-0387 stage 2
+   [active_goal_summaries] always fills both from the store. The summary
    carries the phase so a [Verifying] goal is named under proof rather than
    reading as ordinary open work — the gate must not make the goal disappear
-   from the keeper's view (review P0-1). [priority] and [created_at] are the
-   stored values the System orders the Goals by (RFC-0491 §3.3). *)
+   from the keeper's view. [priority] and [created_at] are the stored values
+   the System orders the Goals by. *)
 type goal_summary =
   { summary_goal_id : string
   ; summary_title : string
@@ -279,7 +278,7 @@ type goal_summary =
   ; summary_held_task_link : held_task_link
   }
 
-(** Format active Goal rows with their titles (RFC-0315): id, title and the
+(** Format active Goal rows with their titles: id, title and the
     criterion. These change only when a Goal is created or its criterion is
     edited, so the block can sit in the System prompt. Each Goal's latest
     review, measurement and this keeper's held-Task link are
@@ -543,7 +542,7 @@ let format_current_task_with_heading ?skill_surfaces ~heading
           [ "reason", reason ]
         ^ "\n")
    | Some (Masc_domain.Handoff_decoded h) ->
-       (* RFC-0365: a handoff can now come from a previous owner, so the note
+       (* A handoff can come from a previous owner, so the note
           must say whose it is. Without this the model reads another agent's
           first-person account ("I already verified the spec") as its own
           recollection, which is worse than not showing the note at all. The
@@ -600,9 +599,9 @@ let format_current_task_with_heading ?skill_surfaces ~heading
              [ "attribution", attribution; "refs", String.concat ", " refs ]
            ^ "\n"))
    | None -> ());
-  (* RFC skills-declared-not-discovered: the task names its skills, so this
-     block does not list what is available and let the model match — there is
-     nothing to choose between by the time the turn starts.
+  (* The task names its skills, so this block does not list what is available
+     and let the model match — there is nothing to choose between by the time
+     the turn starts.
 
      Exact references, not the instruction itself. A skill body is written to
      be read whole and some run to tens of kilobytes (the published
@@ -1180,9 +1179,9 @@ let effective_instructions
 ;;
 (* Titles, phases and stored criteria of every Goal still open to progress,
    read from the store under the same phase predicate the world observation
-   uses. The phase rides along so the Active Goals block can annotate a
-   [Verifying] goal (RFC-0387 stage 2: the gate must not make the goal read as
-   ordinary open work, nor disappear — review P0-1).
+   uses. The phase rides along so the Goals_awaiting_proof layer can name a
+   [Verifying] goal: the gate must not make the goal read as ordinary open
+   work, nor disappear.
 
    A Goal is shared intent and names no keeper, so every turn carries the same
    list whether or not the keeper holds a task. The keeper chooses which Goal
@@ -1407,11 +1406,10 @@ let format_workspace_memory_observation ?access = function
         "briefing_status", briefing_status;
         "retrieval_route", render_fragment route [] ] ^ "\n\n")
 
-(* The wiki table of contents (RFC keepers-see-the-wiki-table-of-contents).
+(* The wiki table of contents.
    Keepers did not read the wiki because nothing in a turn said it existed:
    on 2026-10-13 a Keeper answered "I do not know" to a question whose answer
-   sat in a wiki page. The whole list rides every turn; choosing pages by the
-   current task is a later stage the RFC leaves to measurement. *)
+   sat in a wiki page. The whole list rides every turn. *)
 let format_wiki_observation ?access = function
   | Keeper_wiki_contents.Off | Keeper_wiki_contents.Listed [] -> None
   | Keeper_wiki_contents.Unlisted _ ->
@@ -1479,8 +1477,7 @@ let format_recent_actions_section ~current_task_id own_recent_actions
      | [] -> ()
      | failures ->
        (* Both lines are model-facing prose, so they live in
-          config/prompts assets (RFC prompts-and-tool-definitions-
-          outside-ocaml); a registry failure degrades to the bare data,
+          config/prompts assets; a registry failure degrades to the bare data,
           mirroring the held-task skills render above. *)
        let render key vars ~fallback =
          match Prompt_registry.render_prompt_template key vars with

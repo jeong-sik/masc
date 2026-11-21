@@ -436,10 +436,9 @@ let test_scoped_boundary_error_stops_immediately () =
     [ "Codex"; "Claude Code"; "Antigravity" ]
 ;;
 
-(* RFC-0454 P1b: [Keeper_request_failure_core.message] is a sentence for
-   people. A boundary observation that hands back a carried MASC error renders
-   as prefixed JSON, which is the escaping this RFC removes, so the host keeps
-   that error's one-line summary instead. *)
+(* [Keeper_request_failure_core.message] is a sentence for people. A boundary
+   observation that hands back a carried MASC error renders as prefixed JSON,
+   so the host keeps that error's one-line summary instead. *)
 let test_a_carried_masc_boundary_error_keeps_no_json () =
   with_active_raw_trace (fun ~path:_ ~active ->
     let carried =
@@ -1691,8 +1690,8 @@ let test_seed_reaches_the_provider_whole () =
    surviving turn already persists. *)
 
 
-(* RFC-0390 admission: built-in calls never reach the approval gate, so the
-   rule below is the only thing standing between a TOML line and unasked
+(* Native posture admission: built-in calls never reach the approval gate, so
+   the rule below is the only thing standing between a TOML line and unasked
    native effects. *)
 let expect_admit label expected result =
   match (result : (unit, string) result) with
@@ -3337,9 +3336,9 @@ let prepare_authority_turn ~system_prompt assembly =
 
 let authority_text = "Approved task-approved; verification vrf-approved; authority operator-fixture"
 
-(* Before RFC-0491 the authority text reached the System through
-   [sanitize_text_utf8]; as a carrier block it keeps that. An official client
-   JSON-encodes the carrier, and Yojson writes bytes from 0x80 up as given. *)
+(* As a carrier block the authority text goes through [sanitize_text_utf8]:
+   an official client JSON-encodes the carrier, and Yojson writes bytes from
+   0x80 up as given. *)
 let test_carrier_authority_block_is_valid_utf8 () =
   let module A = Keeper_context_assembly in
   let truncated_dash = "\xE2\x80" in

@@ -208,6 +208,38 @@ jobs:
           python3 -I -m unittest discover -s "$checker/tests" -p test_pr_tui_value_strings.py
           python3 -I "$checker/pr_tui_value_strings.py" --git-dir "$work" --merge "$GITHUB_SHA"
 
+      # The fifth thing this required job answers: does any regular file this
+      # pull request adds or edits carry an unpinned credential-shaped string?
+      # Previously scripts/ci/check-committed-secrets.py only ran in
+      # full-check.yml (release gate) and manual pr-check.yml, so unpinned
+      # secrets or fixtures could merge to main and break the release cut
+      # (task-3834). Running here blocks merges even for docs/config-only PRs
+      # where `type-check` is skipped, using the blobless merge commit already
+      # fetched above and the scanner + allowlist from `$GITHUB_SHA`.
+      - name: Refuse unpinned committed secrets in changed files
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/pr-changes"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          checker="$RUNNER_TEMP/pr-committed-secrets"
+          mkdir -p "$checker/tests"
+          git -C "$work" show "$GITHUB_SHA:scripts/ci/check-committed-secrets.py" \
+            > "$checker/check-committed-secrets.py"
+          git -C "$work" show "$GITHUB_SHA:scripts/ci/pr_committed_secrets.py" \
+            > "$checker/pr_committed_secrets.py"
+          git -C "$work" show "$GITHUB_SHA:scripts/ci/tests/test_pr_committed_secrets.py" \
+            > "$checker/tests/test_pr_committed_secrets.py"
+          env -u GIT_CONFIG_COUNT -u GIT_CONFIG_KEY_0 -u GIT_CONFIG_VALUE_0 \
+            python3 -I -m unittest discover -s "$checker/tests" -p test_pr_committed_secrets.py
+          python3 -I "$checker/pr_committed_secrets.py" --git-dir "$work" --merge "$GITHUB_SHA"
+
   type-check:
     needs: [changes]
     # Skipped here rather than at the workflow level so the check context

@@ -1836,7 +1836,7 @@ status: reference
   `Librarian_memory`)은 닫힌 타입 `Standalone_lane.t` 하나다.
   `Standalone_lane.all`이 열거하고 `to_id`가 이름을 적는다. `Runtime.exact_lane`은
   이 타입을 그대로 쓴다. 실행 기록의 `Exact_lane_run_registry.lane`은 `Librarian`·
-  `Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Candle_appraiser` 다섯이고,
+  `Hitl_auto_judge`·`Board_attention`·`Candle_appraiser` 넷이고,
   `lane_of_standalone`이 `Standalone_lane.t`를 이 타입으로 바꾼다(`Verifier`·
   `Librarian_memory`는 `None`). Verifier 검토는 Task·Goal 검증 기록에 남는다.
   `Librarian_memory`는 실행 기록을 남기지 않는다(`Lane_run_identity.keeps_run_records`). 그 경로를 선언하는 설정은

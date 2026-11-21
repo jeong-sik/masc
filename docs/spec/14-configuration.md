@@ -80,9 +80,7 @@ Workspace Curator selects models per installed Addon, using
 `[runtime.addon_exact_lanes.<installation-id>.classification]` and
 `[runtime.addon_exact_lanes.<installation-id>.briefing]`. Each output independently
 declares ordered `slots` and `cli_slots`; the installation's actual ID selects
-these tables. `workspace_curator_exact` is a retained observation identity, not
-a builtin model configuration route. Dashboard and TUI retained history remain
-readable without a current builtin row or a configured Addon.
+these tables.
 
 A Keeper assignment (`[runtime.assignments]`, or a lane id in
 `[runtime.lanes]`) names a routing id, not a binding. `resolve_assignment`

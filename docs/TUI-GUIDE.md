@@ -651,8 +651,8 @@ process holding a connection is still an `lsof` question.
 ### Exact-output Lane detail
 
 To open retained observations without a current configuration row or installed
-Addon, press `:` and choose `go Workspace Curator history` (or search by the
-logical lane ID, such as `workspace_curator_exact`). Each history destination
+Addon, press `:` and choose `go Candle Appraiser history` (or search by the
+logical lane ID, such as `candle_appraiser`). Each history destination
 uses the original lane identity; Enter on a run opens its retained detail.
 
 A client with no output-schema channel fits no exact lane, so the picker lists

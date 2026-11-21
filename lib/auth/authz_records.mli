@@ -98,7 +98,9 @@ end
     their revocations are intents too. [Keeper_conversation] is a
     conversation of a person with one of their Keepers, named by its owner and
     its id (plan S1b-3c). The start of its purge takes it out of reads (design
-    8.5-1 and 8.5-2), so that start is an intent too. *)
+    8.5-1 and 8.5-2), so that start is an intent too. [Policy] is one delegate
+    policy, so a revocation closes that policy alone instead of the whole
+    principal it names (design 4.2-2). *)
 module Subject : sig
   type t =
     | Grant of Grant_id.t
@@ -110,6 +112,7 @@ module Subject : sig
     | Service_credential of Service_credential_id.t
     | Invite of Invite_id.t
     | Registration of Registration_id.t
+    | Policy of Policy_id.t
     | Keeper_conversation of
         { owner : User_id.t
         ; conversation_id : Conversation_id.t

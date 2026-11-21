@@ -264,6 +264,7 @@ let subject_text = function
   | Subject.Invite id -> {|{"type":"invite","id":|} ^ literal (Invite_id.to_string id) ^ "}"
   | Subject.Registration id ->
     {|{"type":"registration","id":|} ^ literal (Registration_id.to_string id) ^ "}"
+  | Subject.Policy id -> {|{"type":"policy","id":|} ^ literal (Policy_id.to_string id) ^ "}"
   | Subject.Keeper_conversation { owner; conversation_id } ->
     {|{"type":"keeper_conversation","owner":|}
     ^ literal (User_id.to_string owner)
@@ -352,6 +353,8 @@ let subject_of_json = function
     Option.map
       (fun id -> Subject.Registration id)
       (Result.to_option (Registration_id.of_string id))
+  | `Assoc [ ("type", `String "policy"); ("id", `String id) ] ->
+    Option.map (fun id -> Subject.Policy id) (Result.to_option (Policy_id.of_string id))
   | `Assoc
       [ ("type", `String "keeper_conversation")
       ; ("owner", `String owner)

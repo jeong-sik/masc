@@ -7097,16 +7097,19 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
           |> List.map (fun line -> "  " ^ style ^ line ^ Ansi.reset)
         in
         match cache_outcome with
-        | Inspector.Not_requested -> styled Ansi.dim "First request cache reason not read"
-        | Inspector.Pending -> styled Ansi.dim "First request cache reason is still loading"
+        | Inspector.Not_requested ->
+            styled recede (say "첫 요청 캐시 이유 안 읽음" "First request cache reason not read")
+        | Inspector.Pending ->
+            styled recede
+              (say "첫 요청 캐시 이유 불러오는 중" "First request cache reason is still loading")
         | Inspector.Observed (Error detail) ->
             (* The same colour as the unavailable response line below. *)
             styled (Theme.bad ())
-              ("First request cache reason unavailable: "
+              (say "첫 요청 캐시 이유 조회 불가: " "First request cache reason unavailable: "
                ^ Keeper_chat.terminal_safe_text detail)
         | Inspector.Observed (Ok reading) ->
             Context_bars.wrap ~width
-              (Keeper_chat.terminal_safe_text (Inspector.cache_outcome_summary reading))
+              (Keeper_chat.terminal_safe_text (Inspector.cache_outcome_summary ~ko reading))
             |> List.map (fun line -> "  " ^ line)
       in
       let common =

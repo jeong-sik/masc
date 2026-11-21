@@ -887,8 +887,8 @@ let test_cache_outcome_line_states_the_server_facts () =
   in
   let counts = Printf.sprintf "First request on claude.sonnet · cache read %s · cache created %s"
       (Inspector.format_tokens 0) (Inspector.format_tokens 139_000) in
-  let first ?other_runtime_since ?unattributed_rows earlier =
-    Inspector.cache_outcome_summary
+  let first ?ko ?other_runtime_since ?unattributed_rows earlier =
+    Inspector.cache_outcome_summary ?ko
       (cache_reading ?unattributed_rows
          (R.First_request
             { request = request ~read:(Some 0) ~created:(Some 139_000) 9
@@ -904,6 +904,15 @@ let test_cache_outcome_line_states_the_server_facts () =
   check string "an outlived lifetime, a kept prefix, a runtime between"
     (counts ^ " · idle 6m55s, past its 5m lifetime · 12 messages kept, 2 added · glm.air ran in between")
     (first ~other_runtime_since:"glm.air"
+       (earlier ~idle:(idle 300. R.Outlived)
+          (R.Compared
+             { system_changed = false; tools_changed = false
+             ; messages = Message_list_change.Appended { kept = 12; added = 2 } })));
+  check string "the operator's language is Korean"
+    (Printf.sprintf "첫 요청 claude.sonnet · 캐시 읽기 %s · 캐시 생성 %s"
+       (Inspector.format_tokens 0) (Inspector.format_tokens 139_000)
+     ^ " · 쉰 시간 6m55s, 유지 시간 5m 넘김 · 메시지 12개 그대로, 2개 추가 · 사이에 glm.air 실행")
+    (first ~ko:true ~other_runtime_since:"glm.air"
        (earlier ~idle:(idle 300. R.Outlived)
           (R.Compared
              { system_changed = false; tools_changed = false

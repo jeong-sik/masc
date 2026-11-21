@@ -262,7 +262,9 @@ val activate_owner_state
     cleanup cannot hold readiness. Readiness remains an explicit transport
     commit after its required surfaces are installed. [boot_stage] is the
     optional release-smoke timing observer; direct test/stdio callers may
-    omit it. *)
+    omit it. The Librarian's Memory writers start only where
+    {!runs_memory_lanes} holds for the access the state was initialized
+    on. *)
 
 val mark_owner_state_ready
   :  unit
@@ -270,14 +272,17 @@ val mark_owner_state_ready
 (** Publish and verify readiness after the transport has installed every
     surface required by its own serving contract. *)
 
-(** Whether the post-readiness lanes start the World Memory curator on
-    [access]: on the access of a single user, whose curator keeps the
-    operator's ledger, and not on the access of the multi-account engine.
-    The engine's Keepers belong to people, and the one ledger of the
-    installation would put each person's facts into the turns of every
-    other person's Keepers (RFC a-person-reads-their-own-and-the-shared,
-    §3.8). *)
-val curates_workspace_memory : Runtime_account_access.published -> bool
+(** Whether this process runs the memory lanes on [access]: the Librarian's
+    Memory writers, the wake of the Librarian Addon, and the World Memory
+    curator. They know one owner, the operator. They run on the access of a
+    single user, whose Keepers are all the operator's, and not on the access
+    of the multi-account engine, whose Keepers belong to people. There a
+    writer would send a person's turns to the Librarian slot of the
+    installation, and the curator would put each person's facts into the
+    turns of every other person's Keepers (RFC
+    a-person-reads-their-own-and-the-shared, §3.8 and §6 decision 7).
+    Without the writers, {!Keeper_memory_writers.find} answers [None]. *)
+val runs_memory_lanes : Runtime_account_access.published -> bool
 
 val start_post_ready_owner_lanes :
   sw:Eio.Switch.t ->
@@ -288,9 +293,9 @@ val start_post_ready_owner_lanes :
   string * string
 (** Start the transport-neutral post-readiness lanes in their required order:
     the application-owned system-LLM completion authority, then background
-    maintenance. Both HTTP and stdio use this sequence. The World Memory
-    curator starts only where {!curates_workspace_memory} holds for
-    [access]. *)
+    maintenance. Both HTTP and stdio use this sequence. The wake of the
+    Librarian Addon and the World Memory curator start only where
+    {!runs_memory_lanes} holds for [access]. *)
 
 (** Starts the engine on [access], which the caller published: the four
     steps the stdio server starts ({!initialize_owner_state_blocking},

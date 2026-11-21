@@ -99,6 +99,9 @@ let machine_change_refusal = "MSX control requires a verified server matching th
    refusal, apart from [deliver]'s refusals and unknown outcomes (RFC §2). *)
 let run_machine_change ?(checkpoint_boundary = false) (state : T.state) ~mailbox ~refused ~unknown ~withdrawn ~deliver write =
   let authority = state.T.workspace_authority in
+  (* Hold the [unit ref] authority token in a local [ref] cell so
+     [checkpoint_boundary] can rebind it after [retire_machine_view] while
+     [current ()] still checks physical identity ([==]). *)
   let view = ref state.T.msx_view_authority in
   let port = state.T.port in
   let identity = state.T.server_identity in

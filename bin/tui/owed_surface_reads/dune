@@ -1,0 +1,37 @@
+(library
+ (name masc_tui_owed_surface_reads)
+ (wrapped true)
+ (libraries
+  masc
+  masc_tui_types
+  masc_tui_loader
+  masc_tui_async_protocol
+  masc_tui_transport
+  masc_tui_surface_requests
+  masc_tui_work_requests
+  masc_tui_work_actions
+  masc_tui_ops_requests
+  masc_tui_resources_control
+  masc_tui_repo_changes
+  masc_tui_msx_control
+  masc_tui_chat_dispatch
+  masc_tui_domain_requests
+  masc_tui_board_requests
+  masc_tui_board_detail
+  masc_tui_operator_projection
+  masc_tui_agenda
+  masc_tui_async_read
+  masc_tui_engine_samples
+  masc_tui_fetched
+  masc_tui_fusion_updates
+  masc_tui_keeper_chat_queue
+  masc_tui_keeper_list_model
+  masc_tui_lane_addons
+  masc_tui_lane_read_decision
+  masc_tui_memory_world
+  masc_tui_owed_read
+  masc_tui_play_room
+  masc_tui_wake
+  masc_tui_workspace_precondition
+  masc_tui_workspace_read
+  unix))

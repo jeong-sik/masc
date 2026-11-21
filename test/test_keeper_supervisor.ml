@@ -30,8 +30,6 @@ module Supervisor_cleanup = Masc.Keeper_supervisor_cleanup
 module Latched_reason = Keeper_latched_reason
 module Lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Launch_transaction = Masc.Keeper_keepalive_launch_transaction
-module Librarian_boundaries = Masc.Keeper_turn_boundaries
-module Librarian_checkpoint_store = Masc.Keeper_checkpoint_store
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    unit projection over [resolve_with_policy] (production resolution path). *)
@@ -297,92 +295,6 @@ let make_meta name =
   with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
-
-let seed_durable_librarian_baseline
-  config
-  (meta : Keeper_meta_contract.keeper_meta)
-  =
-  let config_dir = Filename.concat (Workspace.masc_dir config) "config" in
-  write_keeper_toml config_dir ~name:meta.name;
-  Keeper_types_profile.invalidate_keeper_profile_snapshots ();
-  (match Keeper_meta_store.replace_snapshot config meta with
-   | Ok () -> ()
-   | Error detail -> fail ("write Librarian fixture metadata: " ^ detail));
-  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  let messages =
-    [ Agent_core.Types.make_message
-        ~role:Agent_core.Types.User
-        [ Agent_core.Types.Text "durable baseline" ]
-    ]
-  in
-  let checkpoint : Agent_core.Checkpoint.t =
-    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
-    ; session_id = trace_id
-    ; agent_name = meta.name
-    ; model = "fixture-model"
-    ; system_prompt = None
-    ; messages
-    ; usage = Agent_core.Types.empty_usage
-    ; turn_count = 1
-    ; created_at = 1.0
-    ; tools = []
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; temperature = None
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; reasoning_effort = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; response_format = Agent_core.Types.Off
-    ; cache_system_prompt = false
-    ; context = Agent_core.Context.create_sync ()
-    ; pending_input = None
-    ; working_context = None
-    }
-  in
-  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
-  (match
-     Librarian_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
-       ~session_dir
-       ~history_retained:0
-       checkpoint
-   with
-   | Ok (Librarian_checkpoint_store.Saved _) -> ()
-   | Ok (Librarian_checkpoint_store.Stale_noop _) ->
-     fail "Librarian fixture checkpoint was stale"
-   | Error detail -> fail ("save Librarian fixture checkpoint: " ^ detail));
-  let position =
-    match Librarian_boundaries.position_of_messages messages with
-    | Ok position -> position
-    | Error detail -> fail ("Librarian fixture boundary: " ^ detail)
-  in
-  let record : Librarian_boundaries.record =
-    { recorded_at = 1.0
-    ; event =
-        Librarian_boundaries.Turn_ended
-          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
-          ; history_at_start = Librarian_boundaries.Continued_history
-          ; position
-          }
-    }
-  in
-  match
-    Librarian_boundaries.append
-      ~keepers_dir:(Workspace.keepers_runtime_dir config)
-      ~keeper_id:meta.name
-      record
-  with
-  | Ok () -> ()
-  | Error error -> fail (Librarian_boundaries.append_error_to_string error)
-
-let with_librarian_enabled f =
-  Masc_test_deps.with_process_env
-    Env_config.KeeperMemoryOs.librarian_env_key
-    (Some "true")
-    f
-;;
 
 let create_started_task_for_meta config (meta : Keeper_meta_contract.keeper_meta) ~title =
   let created =
@@ -2539,140 +2451,6 @@ let register_restart ~base_path ~name ~meta token intake_token =
     meta
 ;;
 
-let test_launch_callback_failure_rolls_back_restart_transaction () =
-  with_librarian_enabled @@ fun () ->
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  ensure_test_runtime ();
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Memory_lane.For_testing.reset ();
-      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_dir in
-       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
-       Memory_lane.For_testing.reset ();
-       Memory_lane.init ~sw;
-       let name = "librarian-launch-exception-rollback" in
-       let meta = make_meta name in
-       seed_durable_librarian_baseline config meta;
-       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
-       (match
-          Launch_transaction.run
-            ~base_path:config.base_path
-            ~keeper_name:name
-            ~register:(register_restart ~base_path:config.base_path ~name ~meta)
-            ~rollback:(Launch_transaction.Restore_previous crashed)
-            (fun _intake_token _token _replacement ->
-              failwith "injected launch callback failure")
-        with
-        | Error
-            (Launch_transaction.Launch_failed { rollback_error = None; _ }) -> ()
-        | Error _ -> fail "launch exception produced the wrong transaction outcome"
-        | Ok _ -> fail "launch exception unexpectedly committed");
-       (match Reg.get ~base_path:config.base_path name with
-        | Some current ->
-          check bool "launch exception restores exact crashed authority" true
-            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane))
-        | None -> fail "launch exception removed the durable restart authority");
-       (* I7: a failed launch closes nothing on the Librarian lane. *)
-       (match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
-        | Memory_lane.Submitted | Memory_lane.Coalesced | Memory_lane.Ran_inline -> ()
-        | Memory_lane.Dropped -> fail "failed launch left the Librarian lane unusable");
-       Memory_lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name:name;
-       match
-         Launch_transaction.run
-           ~base_path:config.base_path
-           ~keeper_name:name
-           ~register:(register_restart ~base_path:config.base_path ~name ~meta)
-           ~rollback:(Launch_transaction.Restore_previous crashed)
-           (fun _intake_token _token replacement -> replacement)
-       with
-       | Ok replacement ->
-         check bool "retry installs a fresh restart lane" false
-           (Lane.Id.equal (Lane.id replacement.lane) (Lane.id crashed.lane))
-       | Error _ -> fail "retry did not reopen the rolled-back Librarian lifecycle")
-;;
-
-let test_launch_callback_cancellation_rolls_back_restart_transaction () =
-  with_librarian_enabled @@ fun () ->
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  ensure_test_runtime ();
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Memory_lane.For_testing.reset ();
-      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_dir in
-       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
-       Memory_lane.For_testing.reset ();
-       Memory_lane.init ~sw;
-       let name = "librarian-launch-cancellation-rollback" in
-       let meta = make_meta name in
-       seed_durable_librarian_baseline config meta;
-       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
-       let cancel_context, resolve_cancel_context = Eio.Promise.create () in
-       let launch_entered, resolve_launch_entered = Eio.Promise.create () in
-       let cancelled, resolve_cancelled = Eio.Promise.create () in
-       let never, _resolve_never = Eio.Promise.create () in
-       Eio.Fiber.fork ~sw (fun () ->
-         let saw_cancellation =
-           try
-             Eio.Cancel.sub (fun context ->
-               Eio.Promise.resolve resolve_cancel_context context;
-               ignore
-                 (Launch_transaction.run
-                    ~base_path:config.base_path
-                    ~keeper_name:name
-                    ~register:
-                      (register_restart ~base_path:config.base_path ~name ~meta)
-                    ~rollback:(Launch_transaction.Restore_previous crashed)
-                    (fun _intake_token _token _replacement ->
-                       Eio.Promise.resolve resolve_launch_entered ();
-                       Eio.Promise.await never)
-                   : (_, _) result);
-               false)
-           with
-           | Eio.Cancel.Cancelled _ -> true
-         in
-         Eio.Promise.resolve resolve_cancelled saw_cancellation);
-       let context = Eio.Promise.await cancel_context in
-       Eio.Promise.await launch_entered;
-       Eio.Cancel.cancel context (Failure "cancel injected launch callback");
-       check bool "launch cancellation propagates after rollback" true
-         (Eio.Promise.await cancelled);
-       (match Reg.get ~base_path:config.base_path name with
-        | Some current ->
-          check bool "launch cancellation restores exact crashed authority" true
-            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane))
-        | None -> fail "launch cancellation removed the durable restart authority");
-       (match
-          Lifecycle_reservation.current
-            ~base_path:config.base_path
-            ~keeper_name:name
-        with
-        | None -> ()
-        | Some owner ->
-          fail
-            ("launch cancellation leaked lifecycle reservation: "
-             ^ Lifecycle_reservation.snapshot_to_string owner));
-       (* I7: a cancelled launch closes nothing on the Librarian lane. *)
-       match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
-       | Memory_lane.Submitted | Memory_lane.Coalesced | Memory_lane.Ran_inline -> ()
-       | Memory_lane.Dropped -> fail "cancelled launch left the Librarian lane unusable")
-;;
-
 let test_register_cancellation_rolls_back_restart_transaction () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -3034,10 +2812,6 @@ let () =
         test_restart_path_emits_meta_unavailable_outcome_metric;
       test_case "a running Librarian does not defer restart" `Quick
         test_running_librarian_does_not_defer_restart;
-      test_case "launch callback failure rolls back restart transaction" `Quick
-        test_launch_callback_failure_rolls_back_restart_transaction;
-      test_case "launch callback cancellation rolls back restart transaction" `Quick
-        test_launch_callback_cancellation_rolls_back_restart_transaction;
       test_case "register cancellation rolls back restart transaction" `Quick
         test_register_cancellation_rolls_back_restart_transaction;
       test_case "started launch exception retains registered lane" `Quick

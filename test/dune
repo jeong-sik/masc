@@ -1325,6 +1325,8 @@
   masc_test_deps
   masc.embedded_config masc.config))
 
+(include stanzas/test_keeper_supervisor_turn_boundaries.inc)
+
 (test
  (name test_channel_gate_connector_routes)
  (modules test_channel_gate_connector_routes)

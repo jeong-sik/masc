@@ -253,3 +253,10 @@ type order_error =
 
 (** [offset] is the byte offset at which [line] starts. *)
 val step : position -> offset:int -> line -> (position, order_error) result
+
+val order_error_to_string : order_error -> string
+
+(** Whether a [Reset] drops the history before it (RFC §11.2). A clear and an
+    unannounced reset do. A recovering purge keeps the history it names and
+    does not. *)
+val counts_as_restart : reset_cause -> bool

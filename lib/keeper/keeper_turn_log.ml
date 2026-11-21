@@ -211,3 +211,21 @@ let step position ~offset line =
   | Turn_open { opened; reset_since = (_ : bool) }, Reset _ ->
     Ok (Turn_open { opened; reset_since = true })
 ;;
+
+let order_error_to_string = function
+  | Not_started -> "a line comes before the log's start"
+  | Started_twice -> "the log starts twice"
+  | Opened_while_open { opened } ->
+    Printf.sprintf "a turn opens while the turn opened at %d is open" opened
+  | Closed_without_open -> "a turn closes with no turn open"
+  | Closed_another_turn { opened; closed } ->
+    Printf.sprintf "the turn opened at %d closes while the one opened at %d is open" closed
+      opened
+  | Own_after_reset { opened } ->
+    Printf.sprintf "the turn opened at %d names messages as its own after a reset" opened
+;;
+
+let counts_as_restart = function
+  | Announced Cleared | Unannounced -> true
+  | Announced Recovered -> false
+;;

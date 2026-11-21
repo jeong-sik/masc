@@ -5,8 +5,18 @@
 ### 요약
 
 - 이 창은 `v0.77.1`(태그 `2bbe20cd`) 뒤 main 에 들어간 열다섯 PR 을 `0.78.0`(minor)으로 내보냅니다. 그중 셋(#54191·#54285·#54289)은 `### Exempt` 라 절에 넣지 않았고, 아래 절이 나머지 열두 PR 을 담습니다. 사용자가 보는 동작이 바뀌는 항목은 TUI 두 건(#54221·#54243), 서버 권한·엔진 두 건(#54278·#54236), Librarian 경보 수리 한 건(#54280), MSX 코어 핀 상향 한 건(#54291), Keeper 프롬프트 접두 보존 한 건(#53895)이고, 나머지는 규약·RFC 문서 세 건(#54284·#54204·#54219), 온보딩 시험 단언 한 건(#54277), 전량 회귀 샤딩 스크립트 한 건(#54281)입니다.
-- 이 릴리스는 main `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 위에 버전 올림 커밋 하나만 얹었습니다. changelog 조각(`changelog.d/`)은 접지 않았습니다.
+- 이 릴리스 브랜치는 동결 기준 main `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 위에 버전 올림 커밋을 얹은 뒤, 동결 뒤 main 에 착지한 두 PR(`#54288`·`#54286`, tip `7ac7d0e71e3477f821026034f7d358c7b2702ea0`)을 이 브랜치로 가져와 그 조각을 이 절에 접어 넣었습니다. 그래서 바로 위 문단의 셈은 창 열다섯 PR 기준이고, 이 절은 그 둘을 더한 열네 PR 을 담습니다.
+- 접은 조각은 `changelog.d/54286.md`·`changelog.d/54288.md` 두 개이며, 나머지 changelog 조각은 종전대로 남겼습니다.
 - `#54281` 의 샤딩은 스크립트에만 들어갔고 `Test` 워크플로는 아직 `SUITE_SHARD_COUNT` 를 넘기지 않습니다(기본값 1 이면 종전과 같은 한 번의 `@runtest` 빌드). 이 릴리스 자체로 CI 디스크 피크가 낮아지지는 않습니다.
+
+### Added
+
+- The TUI Memory screen shows each Keeper's Memory writer: a "Memory writer"
+  card in the selected Keeper's reading with its state, what is unread and how
+  the last reading ask ended, a warning row for each alarm that is on, and in
+  the detail every reading (level, alarms, each slot's outcome, the last room
+  ask, where reading stands or why the store stopped). A server that runs no
+  writer and a writer that has not started read differently (#54286).
 
 ### Changed
 
@@ -16,6 +26,11 @@
 - An Admin credential no longer reads every Keeper's Direct board posts: it answers as a workspace member of that person, so it reads only the Direct posts addressed to that person's Board id and no longer sees another person's Direct hearth names or counts. The single-user path (`require_token = false`) still answers as the operator, and the `/health` route keeps its existing `Reads` semantics for the new reader (#54278).
 - Pins ocaml-msx to main `581da90`, 29 commits after the previous pin `cec4233`. The Z80 takes an M1 wait state per instruction, RAM powers on at 0xFF, a plain ROM cartridge sits where its "AB" header points, and several RTC, PPI, PSG and VDP port reads and writes change, so an MSX game can run at a different speed and boot differently than on the previous pin. The save-state format moves from v3 to v6. The new core reads formats 1-6, so a checkpoint saved on the previous pin restores, and the previous core cannot read a checkpoint the new core saves. Servers built from this version link the new core; individual games are not re-verified by this change. (#54291)
 - Preserve Anthropic prompt prefixes during deferred tool loading by separating callable and deferred catalogs, emitting typed `tool_reference` results, and keeping cache breakpoints on non-deferred tools. Other providers retain their text fallback. Adding `deferred_tools` to the public `Agent.options` and `Runtime_agent_context.config` records is a breaking change for direct record constructors. The new public `ToolReference` content-block constructor also requires exhaustive-match updates (#53895, fixes #53896).
+- `GET /api/v1/dashboard/keeper-memory-health` rows carry a `writer` member and
+  the schema is `keeper.memory_os.current_health.v16`. The TUI and the
+  dashboard refuse a v15 answer, and a build before this one refuses v16
+  (#54286).
+- The runtime catalogue read now counts in the reading slot, so a slow one is drawn by the slot on the screen that started it. A read started on another screen is not counted (#54288).
 
 ### Fixed
 

@@ -459,6 +459,16 @@ let recover_keeper_msg_requests_on_startup ~base_path =
   report
 ;;
 
+(* A3-2b: which host maintenance loops start under each account shape. The
+   volume reclaim and the sandbox GC report only touch the workspace base_path
+   and its own durable metadata, so they start on both shapes; the Keeper build
+   maintenance reclaims per-Keeper build output and stays single-account. *)
+let host_maintenance_loops ~multi_account =
+  if multi_account
+  then [ `Volume_reclaim; `Sandbox_gc_report ]
+  else [ `Keeper_build; `Volume_reclaim; `Sandbox_gc_report ]
+;;
+
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
   Server_dashboard_snapshot_sources.install ~state ~sw ~clock
@@ -472,10 +482,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      workspace/process scoped loops start on every host shape. The Keeper build
      maintenance stays single-account, because it reclaims per-Keeper build
      output and a multi-account host must not walk another person's home. *)
-  if not (Runtime_account_access.is_multi_account ()) then
-    Server_keeper_build_maintenance.start ~sw ~clock ~config;
-  Server_keeper_volume_maintenance.start ~sw ~clock ~config;
-  Server_sandbox_volume_gc_report.start ~sw ~clock ~config;
+  List.iter
+    (function
+      | `Keeper_build -> Server_keeper_build_maintenance.start ~sw ~clock ~config
+      | `Volume_reclaim -> Server_keeper_volume_maintenance.start ~sw ~clock ~config
+      | `Sandbox_gc_report -> Server_sandbox_volume_gc_report.start ~sw ~clock ~config)
+    (host_maintenance_loops
+       ~multi_account:(Runtime_account_access.is_multi_account ()));
   Server_tool_blob_sweep.start ~sw ~clock ~config;
   (* A restart empties the usage table; the reports are still on disk. A
      store that cannot be read leaves the table empty and does not stop the

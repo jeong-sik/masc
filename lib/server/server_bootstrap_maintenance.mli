@@ -1,3 +1,7 @@
+val host_maintenance_loops : multi_account:bool -> [ `Keeper_build | `Volume_reclaim | `Sandbox_gc_report ] list
+(** A3-2b: the loops that start under each account shape. [Keeper_build] is
+    single-account only; the other two are workspace/process scoped. *)
+
 val fork_logged_fiber :
   sw:Eio.Switch.t -> on_error:(exn -> unit) -> (unit -> unit) -> unit
 val log_server_fiber_crash : string -> exn -> unit

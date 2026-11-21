@@ -146,6 +146,22 @@ let test_failed_post_does_not_stop_other_volumes () =
   | Some _ | None -> fail "the second volume was not observed"
 ;;
 
+(* A3-2b: a multi-account host starts the volume reclaim and the sandbox GC
+   report, and keeps only the Keeper build maintenance off. *)
+let test_host_maintenance_loops_per_account_shape () =
+  let loops ~multi_account = Server_bootstrap_maintenance.host_maintenance_loops ~multi_account in
+  check bool "multi-account reclaims volumes" true
+    (List.mem `Volume_reclaim (loops ~multi_account:true));
+  check bool "multi-account reports sandbox GC" true
+    (List.mem `Sandbox_gc_report (loops ~multi_account:true));
+  check bool "multi-account skips the Keeper build maintenance" false
+    (List.mem `Keeper_build (loops ~multi_account:true));
+  check bool "single account keeps the Keeper build maintenance" true
+    (List.mem `Keeper_build (loops ~multi_account:false));
+  check int "single account starts all three loops" 3
+    (List.length (loops ~multi_account:false))
+;;
+
 let () =
   run
     "server_keeper_volume_maintenance"
@@ -158,6 +174,8 @@ let () =
             test_interrupted_post_and_reentrant_sweep_do_not_replay
         ; test_case "one post exception does not stop the sweep" `Quick
             test_failed_post_does_not_stop_other_volumes
+        ; test_case "a multi-account host starts the workspace scoped loops" `Quick
+            test_host_maintenance_loops_per_account_shape
         ] )
     ]
 ;;

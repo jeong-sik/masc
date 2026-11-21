@@ -267,7 +267,7 @@ let claim_task_with_details_r
                Printf.sprintf
                  "Task %s is %s — completed work is terminal. To run it \
                   again, create a new task with predecessor_task_id=%s \
-                  (masc_add_task, RFC-0323)."
+                  (masc_add_task)."
                  task_id
                  (Masc_domain.task_status_to_string status)
                  task_id
@@ -275,7 +275,7 @@ let claim_task_with_details_r
                Printf.sprintf
                  "Task %s is %s — cancelled work is terminal and cannot be \
                   claimed. To run it again, create a new task with \
-                  predecessor_task_id=%s (masc_add_task, RFC-0323)."
+                  predecessor_task_id=%s (masc_add_task)."
                  task_id
                  (Masc_domain.task_status_to_string status)
                  task_id

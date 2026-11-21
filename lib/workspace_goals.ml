@@ -568,7 +568,7 @@ let validate_gate_evidence args action =
           ; message =
               Printf.sprintf
                 "%s requires non-blank evidence — a verdict without evidence \
-                 is not a judgment (RFC-0387)"
+                 is not a judgment"
                 (Goal_phase.action_to_string action)
           ; expected = Some "non-blank string"
           ; received

@@ -85,6 +85,20 @@ let run_server ~sw ~runtime_sw ~env ~address ~port ~judged ~input_base_path ~on_
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Server.error "[main] the server stopped with an exception: %s" (Printexc.to_string exn);
+    (* A fatal server error must still end the process. The re-raise below
+       crosses [Server_session_switch.run]'s switch teardown, which waits for
+       every fiber on the session switch — including the
+       owner-initialization fiber that [Server_runtime_bootstrap.run_single_user]
+       forks before serving starts. When that fiber sits in a non-cancellable
+       stretch, teardown outlives the error and the [FATAL] handler in [start]
+       is never reached: the process keeps booting with its port held (run
+       44946173785, head 21a49d25, "the server went on booting with its port
+       held"; the same case hung 600s at 3b90e7a). Arm the existing process
+       deadline watchdog so a fatal error always exits nonzero even when
+       teardown stalls. *)
+    let (_ : Masc.Shutdown.watchdog) =
+      Masc.Shutdown.start_process_deadline_watchdog_or_exit ~timeout_s:10.0
+    in
     raise exn
 
 (** CLI options *)

@@ -95,17 +95,17 @@ let installs_every_package_once () = with_workspace (fun ~base_path ~docker ~sta
 let a_changed_folder_is_left_as_it_is () = with_workspace (fun ~base_path ~docker ~state:_ ->
   ignore (reports ~base_path ~docker);
   let packages = Config_dir_resolver.packages_dir ~base_path in
-  let folder = match Carried.folder ~packages Carried.Keeper_librarian with
+  let folder = match Carried.folder ~packages Carried.Hitl_auto_judge with
     | Ok folder -> folder | Error message -> fail message in
   let server = Filename.concat folder "server.py" in
   let changed = "# another worker\n" in
   write server changed;
   List.iter (fun (report : Setup.report) ->
       match report.package, report.result with
-      | Carried.Keeper_librarian, Error (Setup.Folder (Carried.Folder_differs { detail; _ })) ->
+      | Carried.Hitl_auto_judge, Error (Setup.Folder (Carried.Folder_differs { detail; _ })) ->
           check string "the difference is named" "server.py has other bytes" detail
-      | Carried.Keeper_librarian, (Ok _ | Error _) -> fail (Setup.report_line report)
-      | (Carried.Workspace_curator | Carried.Candle_appraiser | Carried.Hitl_auto_judge), _ ->
+      | Carried.Hitl_auto_judge, (Ok _ | Error _) -> fail (Setup.report_line report)
+      | (Carried.Workspace_curator | Carried.Candle_appraiser), _ ->
           ignore (installed report))
     (reports ~base_path ~docker);
   check string "the folder is not rewritten" changed (read server))
@@ -129,7 +129,7 @@ let declared_installs_only_what_the_declarations_name () =
   let declare file keys =
     write (Filename.concat directory file)
       (Printf.sprintf "id = %S\nrun_id = \"memory\"\n%s[binding]\nsources = []\n" file keys) in
-  declare "librarian.toml" "package = \"keeper-librarian\"\n";
+  declare "judge.toml" "package = \"hitl-auto-judge\"\n";
   declare "placed.toml" "manifest_path = \"../elsewhere/lane.toml\"\n";
   declare "broken.toml" "package = 1\n";
   with_env "MASC_CONFIG_DIR" config_root (fun () ->
@@ -137,7 +137,7 @@ let declared_installs_only_what_the_declarations_name () =
     | Error error -> fail (Setup.error_message error)
     | Ok { Setup.reports; unread } ->
         check (list string) "only the carried package a declaration names"
-          [Carried.name Carried.Keeper_librarian]
+          [Carried.name Carried.Hitl_auto_judge]
           (List.map (fun (report : Setup.report) -> Carried.name report.package) reports);
         List.iter (fun report -> ignore (installed report)) reports;
         check (list string) "a declaration whose package choice does not read is named"

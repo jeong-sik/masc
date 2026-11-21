@@ -77,7 +77,7 @@ let completed_history_changed ~config ~keeper_name =
     match Env_config.KeeperMemoryOs.librarian_config_state () with
   | Disabled | Invalid -> ()
   | Enabled ->
-    Keeper_librarian_queue_signal.changed
+    Keeper_working_context_signal.changed
       ~base_path:config.Workspace.base_path ~keeper_name
 ;;
 

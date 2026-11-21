@@ -989,7 +989,7 @@ let submit_interactive_operation ~base_path ~keeper_name ~operation_id ~source ~
     Keeper_owner.submit_interactive_operation owner ~operation_id ~source ~input
       ~intent:{Keeper_owner.control_token; target})
   in
-  (match result with Ok _ -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name | Error _ -> ());
+  (match result with Ok _ -> Keeper_working_context_signal.changed ~base_path ~keeper_name | Error _ -> ());
   result
 ;;
 
@@ -998,7 +998,7 @@ let submit_operation ~base_path ~keeper_name ~operation_id ~source ~input =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.submit_operation owner ~operation_id ~source ~input)
   in
-  (match result with Ok _ -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name | Error _ -> ());
+  (match result with Ok _ -> Keeper_working_context_signal.changed ~base_path ~keeper_name | Error _ -> ());
   result
 ;;
 
@@ -1012,7 +1012,7 @@ let edit_queued_operation ~base_path ~keeper_name ~operation_id ~input =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.edit_queued_operation owner ~operation_id ~input)
   in
-  (match result with Ok _ -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name | Error _ -> ());
+  (match result with Ok _ -> Keeper_working_context_signal.changed ~base_path ~keeper_name | Error _ -> ());
   result
 ;;
 

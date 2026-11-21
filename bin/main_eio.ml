@@ -2754,8 +2754,7 @@ let exact_addon_setup_cmd =
        ~man:
          [ `S Manpage.s_description
          ; `P
-             "For keeper-librarian, workspace-curator, candle-appraiser and \
-              hitl-auto-judge, it writes the package this masc carries to \
+             "For workspace-curator, candle-appraiser and hitl-auto-judge, it writes the package this masc carries to \
               .masc/packages/<name>-<revision> when that folder does not exist, and \
               builds the Docker image the package names. An existing folder is never \
               rewritten; one that holds other files is reported. An image that already \

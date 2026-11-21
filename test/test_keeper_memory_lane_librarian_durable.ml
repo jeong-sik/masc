@@ -7,7 +7,7 @@ module Original = Masc.Keeper_librarian_durable_capture
 
 module Lane = Masc.Keeper_memory_lane
 module Queue_refresh = Masc.Keeper_librarian_queue_refresh
-module Queue_signal = Masc.Keeper_librarian_queue_signal
+module Queue_signal = Masc.Keeper_working_context_signal
 
 let base_path = Filename.concat (Filename.get_temp_dir_name ()) "test-memory-lane"
 

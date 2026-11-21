@@ -59,10 +59,10 @@ let test_durable_enqueue_replays_write_and_signal_nothing () =
     let enqueue () =
       Registry_event_queue.enqueue_stimulus_once_durable_result ~base_path keeper_name source
     in
-    Masc.Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> incr signals);
+    Masc.Keeper_working_context_signal.install (fun ~base_path:_ ~keeper_name:_ -> incr signals);
     Fun.protect
       ~finally:(fun () ->
-        Masc.Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ()))
+        Masc.Keeper_working_context_signal.install (fun ~base_path:_ ~keeper_name:_ -> ()))
       (fun () ->
         with_state_change_observer (fun () -> incr writes) (fun () ->
           (match enqueue () with
@@ -100,7 +100,7 @@ let test_durable_enqueue_replays_write_and_signal_nothing () =
 
 let () =
   Alcotest.run
-    "keeper_event_queue_state_v2_librarian_queue_signal"
+    "keeper_event_queue_state_v2_working_context_signal"
     [ ( "one-shot durability"
       , [ Alcotest.test_case "durable enqueue replays write and signal nothing" `Quick
             test_durable_enqueue_replays_write_and_signal_nothing

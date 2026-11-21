@@ -47,7 +47,6 @@ let guarded f =
 
 let original_required (declaration : Lane_addon_config.declaration) =
   Server_workspace_memory_addon_validation.original_required declaration.package
-  || Server_librarian_addon_validation.original_required declaration.package
 
 type listed = { file_name : string; path : string; size : int64 }
 

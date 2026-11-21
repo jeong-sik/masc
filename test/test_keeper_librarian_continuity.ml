@@ -2199,7 +2199,7 @@ let test_cached_fit_refusal_reaches_its_original_message_floor () =
 
 let with_signalled_continuity_lane ~config ~pass ~expected_signals check_outcome =
   let module Lane = Masc.Keeper_memory_lane in
-  let module Signal = Masc.Keeper_librarian_queue_signal in
+  let module Signal = Masc.Keeper_working_context_signal in
   let base_path = config.Masc.Workspace.base_path in
   Lane.For_testing.reset ();
   Fun.protect

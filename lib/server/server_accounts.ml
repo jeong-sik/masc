@@ -158,15 +158,23 @@ let add_routes_of_people login ~env ~base_path router =
   |> Server_account_console.add_routes
 ;;
 
-let register ~login ~env ~base_path ~engine zone router =
-  router
-  |> Server_route.get Server_route.Always_public Server_health_paths.health health
-  |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness
-  |> Server_route.get
-       Server_route.Always_public
-       Server_health_paths.readiness
-       (readiness ~engine zone)
-  |> add_routes_of_people login ~env ~base_path
+let register ?person_keeper_routes ~login ~env ~base_path ~engine zone router =
+  let router =
+    router
+    |> Server_route.get Server_route.Always_public Server_health_paths.health health
+    |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness
+    |> Server_route.get
+         Server_route.Always_public
+         Server_health_paths.readiness
+         (readiness ~engine zone)
+    |> add_routes_of_people login ~env ~base_path
+  in
+  (* The routes whose subject is a Keeper of the engine are added by the layer
+     that holds the engine: the caller supplies [person_keeper_routes], so this
+     module composes them without naming [Mcp_server.server_state]. *)
+  match person_keeper_routes with
+  | None -> router
+  | Some add -> add ~base_path router
 ;;
 
 (* A value of the HTTP mode that is not in its vocabulary stops the boot here,
@@ -308,6 +316,7 @@ let run
       ~port
       ~lease
       ?on_ready
+      ?person_keeper_routes
       ~(start_engine : Runtime_account_access.published -> engine Eio.Promise.t)
       multi_account
   =
@@ -355,7 +364,14 @@ let run
   let* table =
     Result.map_error
       (fun refusal -> Route_of_another_kind refusal)
-      (Table.checked (register ~login ~env ~base_path ~engine:engine_ready zone))
+      (Table.checked
+         (register
+            ?person_keeper_routes
+            ~login
+            ~env
+            ~base_path
+            ~engine:engine_ready
+            zone))
   in
   (* Read before [make_http_config], which writes the address the listener
      binds into this variable when the operator left it unset: after it, a

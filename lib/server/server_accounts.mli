@@ -198,6 +198,13 @@ val health_version : string -> string option
     environment, as the single-user server does. [lease] is the BasePath
     lease of the base path that was judged.
 
+    [person_keeper_routes] adds the routes whose subject is a Keeper of the
+    engine. It is called once, with the base path this boot judged, while the
+    table is made and before the listener binds. The caller supplies it so that
+    this module composes those routes without naming [Mcp_server.server_state]:
+    the router it hands over already fixes that type. Omitted, the table holds
+    the routes of this module alone, as it did before the parameter existed.
+
     The routes serve while the engine initializes. The readiness probe
     ({!Server_health_paths.readiness}) answers 503 until the promise that
     [start_engine] returned is resolved, and after it whenever the zone
@@ -246,6 +253,8 @@ val run
   -> port:int
   -> lease:Server_startup_takeover.base_path_lease
   -> ?on_ready:(unit -> unit)
+  -> ?person_keeper_routes:
+       (base_path:string -> Http_server_eio.Router.t -> Http_server_eio.Router.t)
   -> start_engine:(Runtime_account_access.published -> 'engine Eio.Promise.t)
   -> Authz_boot_mode_read.multi_account
   -> (unit, refusal) result

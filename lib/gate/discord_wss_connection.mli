@@ -5,8 +5,7 @@
     opening handshake and drives the frame loop. ws-direct speaks a plain
     [Eio.Flow.two_way], so it composes with a TLS flow (which has no fd)
     directly — removing the impedance that made the [httpun-ws] client
-    unusable here (its constructor wants an fd-backed socket; see RFC-0203 §Why
-    and RFC-0287).
+    unusable here (its constructor wants an fd-backed socket).
 
     The driver fibers live on [sw]; tearing down the switch tears them down.
     Inbound text messages and the peer Close arrive as [inbound] events on an
@@ -55,8 +54,7 @@ val spawn : conn -> (unit -> unit) -> unit
     when [close conn] tears the connection down. The gateway runs its reader
     loop through this so the reader's lifetime is the connection's: a
     per-connection close cancels the reader (its blocking [read] raises
-    [Cancelled]) rather than leaking it on the gateway-wide switch (RFC-0287
-    P0). Call before [close]; forking onto an already-closed connection raises. *)
+    [Cancelled]) rather than leaking it on the gateway-wide switch. Call before [close]; forking onto an already-closed connection raises. *)
 
 (** Pure bridge helpers, exposed for unit tests. *)
 module For_testing : sig

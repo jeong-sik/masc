@@ -34,7 +34,7 @@ val record_inbound_dispatch : inbound_outcome -> unit
 
 val record_ambient : ambient_outcome -> unit
 (** Increment [masc_slack_ambient_record_total] with an [outcome] label for a
-    record-only ambient message after keeper binding lookup (RFC-0226 parity
+    record-only ambient message after keeper binding lookup (parity
     with the Discord gateway). *)
 
 val record_reply : reply_outcome -> unit

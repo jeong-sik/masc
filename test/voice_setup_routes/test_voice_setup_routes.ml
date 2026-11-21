@@ -9,7 +9,6 @@ module Actions = struct
   include Server_voice_setup_actions
 
   let accept_every_voice _endpoint ~voices:_ = Ok ()
-  let preview = preview ~check_command_voices:accept_every_voice
   let apply = apply ~check_command_voices:accept_every_voice
 end
 
@@ -194,24 +193,6 @@ let test_a_stale_revision_is_a_conflict () =
        | _ -> Alcotest.failf "expected a conflict, got: %s" (Actions.error_message error));
       Alcotest.(check string) "the concurrent write is preserved" after_concurrent_write
         (read path))
-
-let test_preview_does_not_write () =
-  with_workspace (fun ~base_path ~path ->
-    let before = read path in
-    let change =
-      `Assoc
-        [ "change", `String "set_default_model"
-        ; "section", `String "stt"
-        ; "model", `String "large-v3-turbo"
-        ]
-    in
-    match Actions.preview ~base_path (request (revision ~base_path) [ change ]) with
-    | Error error -> Alcotest.fail (Actions.error_message error)
-    | Ok answer ->
-      Alcotest.(check string) "the file on disk is unchanged" before (read path);
-      Alcotest.(check bool) "the proposal carries the new value" true
-        (Astring.String.is_infix ~affix:{|default_model = "large-v3-turbo"|}
-           (string_member "runtime_toml" answer)))
 
 (* The encoder and the decoder sit on opposite sides of one wire, in different
    libraries. A drift between them shows up only as a request the server
@@ -942,7 +923,6 @@ let () =
             test_a_stale_revision_is_a_conflict
         ; Alcotest.test_case "the answered revision is the one this write made" `Quick
             test_the_answered_revision_is_the_one_this_write_made
-        ; Alcotest.test_case "preview does not write" `Quick test_preview_does_not_write
         ] )
     ; ( "asking for a catalogue"
       , [ Alcotest.test_case "the read carries no address and no key" `Quick

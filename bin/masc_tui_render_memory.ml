@@ -336,10 +336,10 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   in
   let facts_line =
     Printf.sprintf
-      (if ko then "  사실 %d개 (관측 %d / 파생 %d) · 최근 변경 %s / %s / 근거 무효화 %d" else "  facts %d (observed %d / derived %d) · last change %s / %s / support-invalidated %d")
-      k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts
+      (if ko then "  사실 %s개 (관측 %s / 파생 %s) · 최근 변경 %s / %s / 근거 무효화 %s" else "  facts %s (observed %s / derived %s) · last change %s / %s / support-invalidated %s")
+      (Masc_tui_value.Count.grouped k.mkh_facts) (Masc_tui_value.Count.grouped k.mkh_observed_facts) (Masc_tui_value.Count.grouped k.mkh_derived_facts)
       (Masc_tui_value.Count.increase k.mkh_added)
-      (Masc_tui_value.Count.decrease k.mkh_removed) k.mkh_support_invalidations
+      (Masc_tui_value.Count.decrease k.mkh_removed) (Masc_tui_value.Count.grouped k.mkh_support_invalidations)
   in
   (* The facts line above already counts the facts, so the ages follow
      without a count of their own. *)
@@ -372,7 +372,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
        | Some kind -> librarian_failure_words ~ko kind
        | None -> Masc_tui_theme.Glyph.no_value)
   in
-  let failed = Printf.sprintf (if ko then "서버 시작 후 실패 %d회" else "failed %d since server start") k.mkh_librarian_failures in
+  let failed = Printf.sprintf (if ko then "서버 시작 후 실패 %s회" else "failed %s since server start") (Masc_tui_value.Count.grouped k.mkh_librarian_failures) in
   let librarian_clauses =
     [ "Librarian"
     ; (match librarian.mlh_state with
@@ -422,8 +422,8 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
           else text " · 아직 읽은 기록 없음" " · nothing read yet"
         | Some position, Some value when position > value.mcf_end_atom ->
           if ko then
-            Printf.sprintf " · 아톰 %d까지 읽음 (경계 이후 %d개)" position
-              (position - value.mcf_end_atom)
+            Printf.sprintf " · 아톰 %d까지 읽음 (경계 이후 %s개)" position
+              (Masc_tui_value.Count.grouped (position - value.mcf_end_atom))
           else
             Printf.sprintf " · read to atom %d, %s past the cut" position
               (Masc_tui_message_layout.count_noun
@@ -522,8 +522,8 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
              (fun (reason, count) -> reason ^ " " ^ Masc_tui_value.Count.times count)
              reasons)
     in
-    Printf.sprintf (if ko then "  이미지 수집 오류 %d건 · 사유 %s" else "  vision ingest errors %d · reasons %s")
-      k.mkh_vision_ingest_errors reasons
+    Printf.sprintf (if ko then "  이미지 수집 오류 %s건 · 사유 %s" else "  vision ingest errors %s · reasons %s")
+      (Masc_tui_value.Count.grouped k.mkh_vision_ingest_errors) reasons
   in
   let alert_lines =
     List.map
@@ -699,7 +699,9 @@ let memory_fact_row_line ~ko ?(is_fleet = false) ?(sort = Sort_recency) ~cols (r
     | Memory_row_fact fact, (Sort_retrieved_count | Sort_last_retrieved) ->
       (match fact.mf_events.mfe_retrieval with
        | Retrieved {count; last_at; distinct_days = _} ->
-           (Theme.info () ^ Printf.sprintf "%d× " count ^ Ansi.reset, last_at)
+           (* How many times, on the count ladder (RFC tui-one-screen-grammar
+              6.3): [×12], [×1,234]. *)
+           (Theme.info () ^ Masc_tui_value.Count.times count ^ " " ^ Ansi.reset, last_at)
        | Never_retrieved ->
            (Theme.recede () ^ (if ko then "미조회 " else "unretrieved ") ^ Ansi.reset, fact.mf_last_seen))
     | Memory_row_fact fact, (Sort_recency | Sort_category | Sort_claim) -> ("", fact.mf_last_seen)
@@ -1028,8 +1030,8 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
        @ (if snapshot.mhs_total_read_errors = 0 then [] else
             labelled (text "일반:" "Ordinary:")
               [ Theme.bad ()
-                ^ Printf.sprintf (if ko then "읽기 실패 키퍼 %d명" else "read errors in %d keepers")
-                    snapshot.mhs_total_read_errors
+                ^ Printf.sprintf (if ko then "읽기 실패 키퍼 %s명" else "read errors in %s keepers")
+                    (Masc_tui_value.Count.grouped snapshot.mhs_total_read_errors)
                 ^ Ansi.reset ])
        @ age_ladder_rows snapshot
        (* The source-bound snapshot is stored and invalidated apart from the
@@ -1053,7 +1055,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
           @ (if snapshot.mhs_total_source_read_errors > 0
              then
                [ Theme.bad ()
-                 ^ (if ko then Printf.sprintf "원본 읽기 실패 키퍼 %d명" snapshot.mhs_total_source_read_errors
+                 ^ (if ko then Printf.sprintf "원본 읽기 실패 키퍼 %s명" (Masc_tui_value.Count.grouped snapshot.mhs_total_source_read_errors)
                     else Masc_tui_message_layout.count_noun
                       snapshot.mhs_total_source_read_errors "keeper" ^ " with a source read error")
                  ^ Ansi.reset
@@ -1068,14 +1070,14 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
               (match snapshot.mhs_total_librarian_unread_turns with
                | None -> "? turns"
                | Some turns -> Masc_tui_message_layout.count_noun turns "turn") ^ " unread")
-         ; (if ko then Printf.sprintf "연속성 지연 아톰 %s개 (미측정 키퍼 %d명)"
+         ; (if ko then Printf.sprintf "연속성 지연 아톰 %s개 (미측정 키퍼 %s명)"
               (Masc_tui_value.Count.grouped snapshot.mhs_total_librarian_continuity_unread_atoms)
-              snapshot.mhs_total_librarian_continuity_unmeasured
+              (Masc_tui_value.Count.grouped snapshot.mhs_total_librarian_continuity_unmeasured)
             else Printf.sprintf "%s behind in continuity (%s not measured)"
               (Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_continuity_unread_atoms "atom")
               (Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_continuity_unmeasured "keeper"))
          ; (let fail_text =
-              if ko then Printf.sprintf "서버 시작 후 실패 %d건" snapshot.mhs_total_librarian_failures
+              if ko then Printf.sprintf "서버 시작 후 실패 %s건" (Masc_tui_value.Count.grouped snapshot.mhs_total_librarian_failures)
               else Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_failures "failure"
                 ^ " since server start"
             in
@@ -1087,8 +1089,8 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
               && snapshot.mhs_total_vision_ingest_errors = 0 then []
           else
             let alert_text =
-              Printf.sprintf (if ko then "보고된 경고 %d / 오류 %d (이력 포함 가능)" else "reported warnings %d / errors %d (may include history)")
-                snapshot.mhs_warn_alerts snapshot.mhs_error_alerts
+              Printf.sprintf (if ko then "보고된 경고 %s / 오류 %s (이력 포함 가능)" else "reported warnings %s / errors %s (may include history)")
+                (Masc_tui_value.Count.grouped snapshot.mhs_warn_alerts) (Masc_tui_value.Count.grouped snapshot.mhs_error_alerts)
             in
             let alert_clause =
               if snapshot.mhs_error_alerts > 0 then Theme.bad () ^ alert_text ^ Ansi.reset
@@ -1098,8 +1100,8 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
             labelled (text "알림:" "Alerts:")
               [ alert_clause
               ; (let vis_text =
-                   Printf.sprintf (if ko then "보고된 이미지 수집 오류 %d건" else "reported image ingestion errors %d")
-                     snapshot.mhs_total_vision_ingest_errors
+                   Printf.sprintf (if ko then "보고된 이미지 수집 오류 %s건" else "reported image ingestion errors %s")
+                     (Masc_tui_value.Count.grouped snapshot.mhs_total_vision_ingest_errors)
                  in
                  if snapshot.mhs_total_vision_ingest_errors > 0 then
                    Theme.warn () ^ vis_text ^ Ansi.reset
@@ -1130,8 +1132,8 @@ let fold_memory_rows ~ko ~subject ~max_rows rows =
     let trailing = max_rows - 1 - leading in
     let hidden = count - leading - trailing in
     let note =
-      if ko then Printf.sprintf "  … %s %d행 생략됨 · 창을 늘려 주세요" subject hidden
-      else Printf.sprintf "  … %d %s rows hidden; enlarge terminal" hidden subject
+      if ko then Printf.sprintf "  … %s %s행 생략됨 · 창을 늘려 주세요" subject (Masc_tui_value.Count.grouped hidden)
+      else Printf.sprintf "  … %s %s rows hidden; enlarge terminal" (Masc_tui_value.Count.grouped hidden) subject
     in
     List.filteri (fun index _ -> index < leading) rows
     @ [ note ]
@@ -1160,8 +1162,8 @@ let fold_memory_context_rows ~ko ~max_rows context =
     let hidden = count - leading - stalled_count - List.length tail in
     List.take leading rows
     @ [Printf.sprintf
-         (if ko then "  … 상세 %d행 숨김 · v:전체" else "  … %d Keeper detail rows hidden · v:full reading")
-         hidden]
+         (if ko then "  … 상세 %s행 숨김 · v:전체" else "  … %s Keeper detail rows hidden · v:full reading")
+         (Masc_tui_value.Count.grouped hidden)]
     @ (match stalled with Some (_, row) -> [row] | None -> [])
     @ tail
 
@@ -1290,8 +1292,8 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
   let alerts = if keeper.mkh_alerts = [] then [] else
       [ Theme.warn ()
         ^ Printf.sprintf
-            (if ko then "보고된 알림 %d건 (이력 포함) · v:근거" else "%d reported alerts (including history) · v:evidence")
-            (List.length keeper.mkh_alerts)
+            (if ko then "보고된 알림 %s건 (이력 포함) · v:근거" else "%s reported alerts (including history) · v:evidence")
+            (Masc_tui_value.Count.grouped (List.length keeper.mkh_alerts))
         ^ Ansi.reset ] in
   let warnings = List.map (fun row -> "  " ^ row) errors @ stalled
       @ List.map (fun row -> "  " ^ row) alerts in
@@ -1416,31 +1418,31 @@ let memory_compact_fleet_row ~cols (state : state) =
     | Some snapshot ->
         let attention =
           (if snapshot.mhs_refused_keepers <> [] then
-             [Printf.sprintf (if ko then "읽지 못한 키퍼 행 %d개" else "%d Keeper rows not read")
-                (List.length snapshot.mhs_refused_keepers)] else [])
+             [Printf.sprintf (if ko then "읽지 못한 키퍼 행 %s개" else "%s Keeper rows not read")
+                (Masc_tui_value.Count.grouped (List.length snapshot.mhs_refused_keepers))] else [])
           @ (if snapshot.mhs_total_read_errors > 0 then
-             [Printf.sprintf (if ko then "일반 읽기 실패 %d명" else "ordinary read errors: %d keepers") snapshot.mhs_total_read_errors] else [])
+             [Printf.sprintf (if ko then "일반 읽기 실패 %s명" else "ordinary read errors: %s keepers") (Masc_tui_value.Count.grouped snapshot.mhs_total_read_errors)] else [])
           @ (if snapshot.mhs_total_source_read_errors > 0 then
-               [Printf.sprintf (if ko then "원본 읽기 실패 %d명" else "source read errors: %d keepers") snapshot.mhs_total_source_read_errors] else [])
+               [Printf.sprintf (if ko then "원본 읽기 실패 %s명" else "source read errors: %s keepers") (Masc_tui_value.Count.grouped snapshot.mhs_total_source_read_errors)] else [])
           @ (if snapshot.mhs_total_librarian_failures > 0 then
-               [Printf.sprintf (if ko then "서버 시작 후 Librarian 실패 %d건" else "Librarian failures since server start: %d") snapshot.mhs_total_librarian_failures] else [])
+               [Printf.sprintf (if ko then "서버 시작 후 Librarian 실패 %s건" else "Librarian failures since server start: %s") (Masc_tui_value.Count.grouped snapshot.mhs_total_librarian_failures)] else [])
           @ (if snapshot.mhs_warn_alerts + snapshot.mhs_error_alerts > 0 then
-               [Printf.sprintf (if ko then "보고된 알림 %d건 (이력 포함 가능)" else "%d reported alerts (may include history)")
-                  (snapshot.mhs_warn_alerts + snapshot.mhs_error_alerts)] else [])
+               [Printf.sprintf (if ko then "보고된 알림 %s건 (이력 포함 가능)" else "%s reported alerts (may include history)")
+                  (Masc_tui_value.Count.grouped (snapshot.mhs_warn_alerts + snapshot.mhs_error_alerts))] else [])
           @ (if snapshot.mhs_total_vision_ingest_errors > 0 then
-               [Printf.sprintf (if ko then "이미지 수집 오류 %d건" else "%d image ingestion errors") snapshot.mhs_total_vision_ingest_errors] else [])
+               [Printf.sprintf (if ko then "이미지 수집 오류 %s건" else "%s image ingestion errors") (Masc_tui_value.Count.grouped snapshot.mhs_total_vision_ingest_errors)] else [])
           @ (if snapshot.mhs_total_librarian_continuity_unmeasured > 0 then
-               [Printf.sprintf (if ko then "연속성 미측정 %d명" else "continuity unmeasured: %d keepers") snapshot.mhs_total_librarian_continuity_unmeasured] else [])
+               [Printf.sprintf (if ko then "연속성 미측정 %s명" else "continuity unmeasured: %s keepers") (Masc_tui_value.Count.grouped snapshot.mhs_total_librarian_continuity_unmeasured)] else [])
           @ (if snapshot.mhs_total_librarian_continuity_unread_atoms > 0 then
-               [Printf.sprintf (if ko then "연속성 지연 아톰 %d개" else "continuity behind: %d atoms") snapshot.mhs_total_librarian_continuity_unread_atoms] else [])
+               [Printf.sprintf (if ko then "연속성 지연 아톰 %s개" else "continuity behind: %s atoms") (Masc_tui_value.Count.grouped snapshot.mhs_total_librarian_continuity_unread_atoms)] else [])
           @ (match snapshot.mhs_total_librarian_unread_turns with
              | None -> [if ko then "미읽은 턴 보고 안 됨" else "unread turns not reported"]
-             | Some turns when turns > 0 -> [Printf.sprintf (if ko then "미읽은 턴 %d개" else "%d unread turns") turns]
+             | Some turns when turns > 0 -> [Printf.sprintf (if ko then "미읽은 턴 %s개" else "%s unread turns") (Masc_tui_value.Count.grouped turns)]
              | Some _ -> [])
         in
         match attention with
-        | [] -> Printf.sprintf (if ko then "전체 기억 %d개" else "%d total facts")
-                  (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts), false
+        | [] -> Printf.sprintf (if ko then "전체 기억 %s개" else "%s total facts")
+                  (Masc_tui_value.Count.grouped (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)), false
         | [one] -> one, true
         | _ :: _ :: _ -> (if ko then "주의 있음" else "attention reported"), true
   in
@@ -1753,8 +1755,8 @@ let render_memory_body ~cols ~budget (state : state)
        rows up already counts through the helper that declines the plural. *)
     if query <> "" then
       if ko then
-        Printf.sprintf "  %s필터 [/]:%s \"%s\" (키퍼 %d명)  %sEsc:해제%s"
-          Ansi.bold Ansi.reset (Terminal_text.single_line query) shown (Theme.recede ()) Ansi.reset
+        Printf.sprintf "  %s필터 [/]:%s \"%s\" (키퍼 %s명)  %sEsc:해제%s"
+          Ansi.bold Ansi.reset (Terminal_text.single_line query) (Masc_tui_value.Count.grouped shown) (Theme.recede ()) Ansi.reset
       else
         Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %sEsc:clear%s"
           Ansi.bold Ansi.reset (Terminal_text.single_line query)
@@ -1974,7 +1976,7 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
           Doc.docked_preview ~width ~height:sheet_height ~indent:preview_indent
             ~eyebrow:preview_eyebrow
             ~title:(Masc_tui_theme.strip_sgr sheet_parts.heading_plain)
-            ~meta:(Printf.sprintf (if ko then "%d줄" else "%d lines") total_body)
+            ~meta:(Printf.sprintf (if ko then "%s줄" else "%s lines") (Masc_tui_value.Count.grouped total_body))
             ~footer_hints:preview_footer_hints
             (sheet_parts.claim_lines @ [ "" ] @ sheet_parts.other_lines)
         in
@@ -2107,7 +2109,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
     if String.trim filter <> "" then
       Printf.sprintf (if ko then "  %s필터 [/]:%s \"%s\" (%s)  %sEsc:해제%s" else "  %sFilter [/]:%s \"%s\" (%s)  %sEsc:clear%s")
         Ansi.bold Ansi.reset (Terminal_text.single_line filter)
-        (if ko then Printf.sprintf "일치 %d개" total else Masc_tui_message_layout.count_noun total "matching fact")
+        (if ko then Printf.sprintf "일치 %s개" (Masc_tui_value.Count.grouped total) else Masc_tui_message_layout.count_noun total "matching fact")
         (Theme.recede ()) Ansi.reset
     else ""
   in

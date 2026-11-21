@@ -239,7 +239,19 @@ let test_about_facts_localized () =
     (Screen.about_facts ~ko:true ~theme:"기본" Screen.Keepers_unreadable);
   check string "korean unread is the unread mark"
     "테마: 기본  \xc2\xb7  키퍼: \xe2\x97\x8c"
-    (Screen.about_facts ~ko:true ~theme:"기본" Screen.Keepers_unread)
+    (Screen.about_facts ~ko:true ~theme:"기본" Screen.Keepers_unread);
+  check string "english unreadable is the failed mark"
+    "Theme: nord  \xc2\xb7  Keepers: \xe2\x9c\x95"
+    (Screen.about_facts ~theme:"nord" Screen.Keepers_unreadable);
+  check string "english unread is the unread mark"
+    "Theme: nord  \xc2\xb7  Keepers: \xe2\x97\x8c"
+    (Screen.about_facts ~theme:"nord" Screen.Keepers_unread);
+  check string "english grouped read count"
+    "Theme: nord  \xc2\xb7  Keepers: 1,234"
+    (Screen.about_facts ~theme:"nord" (Screen.Keepers_read 1234));
+  check string "korean grouped read count"
+    "테마: nord  \xc2\xb7  키퍼: 1,234명"
+    (Screen.about_facts ~ko:true ~theme:"nord" (Screen.Keepers_read 1234))
 
 let () =
   run "tui_emblem_screen"

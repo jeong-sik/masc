@@ -76,6 +76,13 @@ type store_error =
       (** {!insert_request} or {!update_request} refused an [Interval] shorter
           than the schedule runner tick. See
           {!Schedule_domain.interval_fires_as_declared}. *)
+  | Expiry_before_reachable_due of
+      { schedule_id : string
+      ; expiry : Schedule_domain.expiry_before_reachable_due
+      }
+      (** {!insert_request} or {!update_request} refused an [expires_at] that
+          falls at or before [due_at + runner_tick_sec]. See
+          {!Schedule_domain.expiry_reaches_first_due}. *)
   | Running_wake_absent of { schedule_id : string }
       (** A [Running] request has no wake record at all to settle or
           recover. *)

@@ -798,6 +798,20 @@ let refusal_of_service_error (err : Schedule_service.service_error) =
       ; "runner_tick_sec", `Float runner_tick_sec
       ]
   | Schedule_service.Store_error
+      (Schedule_store.Expiry_before_reachable_due
+        { schedule_id
+        ; expiry = { due_at; expires_at; runner_tick_sec; minimum_expires_at }
+        }) ->
+    typed
+      Schedule_contract_values.Refusal_argument_out_of_range
+      [ "field", `String "expires_at_unix"
+      ; "schedule_id", `String schedule_id
+      ; "due_at_iso", iso_json due_at
+      ; "expires_at_iso", iso_json expires_at
+      ; "minimum_expires_at_iso", iso_json minimum_expires_at
+      ; "runner_tick_sec", `Float runner_tick_sec
+      ]
+  | Schedule_service.Store_error
       (Schedule_store.Not_schedule_owner
         { schedule_id; caller; scheduled_by_id; wake_target }) ->
     typed Schedule_contract_values.Refusal_not_schedule_owner
@@ -1585,6 +1599,7 @@ let handle_note_add ~tool_name ~start_time ctx args =
           | Schedule_store.Transition_refused _
           | Schedule_store.Changed_due_already_past _
           | Schedule_store.Interval_below_runner_tick _
+          | Schedule_store.Expiry_before_reachable_due _
           | Schedule_store.Running_wake_absent _
           | Schedule_store.Running_wake_settled _
           | Schedule_store.Schedule_not_due_candidate

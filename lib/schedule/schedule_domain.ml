@@ -331,6 +331,33 @@ let interval_fires_as_declared ~runner_tick_sec recurrence =
     else Error { interval_sec; runner_tick_sec }
 ;;
 
+type expiry_before_reachable_due =
+  { due_at : float
+  ; expires_at : float
+  ; runner_tick_sec : float
+  ; minimum_expires_at : float
+  }
+
+(* [mark_due] checks [expires_at <= now] before [due_at <= now], and the runner
+   samples once per [runner_tick_sec] pass. A schedule whose expiry is at or
+   before [due_at + runner_tick_sec] can therefore expire before any pass runs
+   after [due_at]. Refuse that on create and modify so no schedule is admitted
+   dead on arrival. *)
+let expiry_reaches_first_due ~runner_tick_sec ~due_at ~expires_at =
+  match expires_at with
+  | None -> Ok ()
+  | Some expires_at ->
+    let tick =
+      if Float.is_finite runner_tick_sec && Float.compare runner_tick_sec 0.0 > 0
+      then runner_tick_sec
+      else 0.0
+    in
+    let minimum_expires_at = due_at +. tick in
+    if Float.compare expires_at minimum_expires_at > 0
+    then Ok ()
+    else Error { due_at; expires_at; runner_tick_sec = tick; minimum_expires_at }
+;;
+
 (* Daily recurrence intentionally uses fixed offsets only. This keeps dispatch
    deterministic across host timezone changes and avoids pretending to support
    DST-aware IANA zone rules. *)

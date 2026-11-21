@@ -1345,6 +1345,7 @@ let test_pending_settlements_replay_only_original_store_decision () =
          | Schedule_store.Transition_refused _
          | Schedule_store.Changed_due_already_past _
          | Schedule_store.Interval_below_runner_tick _
+         | Schedule_store.Expiry_before_reachable_due _
          | Schedule_store.Running_wake_absent _
          | Schedule_store.Running_wake_settled _
          | Schedule_store.Schedule_not_due_candidate
@@ -1484,6 +1485,7 @@ let test_pending_read_error_does_not_block_unrelated_due_work () =
        | Schedule_store.Transition_refused _
        | Schedule_store.Changed_due_already_past _
        | Schedule_store.Interval_below_runner_tick _
+       | Schedule_store.Expiry_before_reachable_due _
        | Schedule_store.Running_wake_absent _
        | Schedule_store.Running_wake_settled _
        | Schedule_store.Schedule_not_due_candidate

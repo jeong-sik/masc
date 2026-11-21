@@ -543,6 +543,7 @@ let replay_settlement config ~clock (pending : pending_settlement) =
      | Schedule_store.Transition_refused _
      | Schedule_store.Changed_due_already_past _
      | Schedule_store.Interval_below_runner_tick _
+     | Schedule_store.Expiry_before_reachable_due _
      | Schedule_store.Running_wake_absent _
      | Schedule_store.Running_wake_settled _
      | Schedule_store.Schedule_not_due_candidate

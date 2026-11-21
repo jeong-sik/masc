@@ -6313,6 +6313,7 @@
 (include stanzas/test_browser_interaction.inc)
 
 (include stanzas/test_keeper_nerdctl_image_admission.inc)
+(include stanzas/test_keeper_next_request_forecast_turn_boundaries_and_progress.inc)
 
 (include stanzas/test_keeper_kata_inventory.inc)
 (include stanzas/test_keeper_kata_vmm_identity.inc)

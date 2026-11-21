@@ -82,7 +82,8 @@ let text_content ~message_index content =
 let is_turn_scoped_context policy (message : _ Types.message_with) =
   match policy, message.origin with
   | Turn_scoped_system_context, (System_context | Historical_system_context) -> true
-  | Turn_scoped_system_context, (Conversation | Recovery_instruction | Tool_result_followup | Agent_instruction)
+  | Turn_scoped_system_context,
+    (Conversation | Recovery_instruction | Tool_result_followup | Agent_instruction | Outside_context)
   | (Preserve_positions | Omit_historical_system_context | Initial_system_native_tools
     | Initial_system_tool_response_media), _ -> false
 ;;
@@ -184,7 +185,7 @@ let lower policy messages =
         match message.origin with
         | Historical_system_context -> false
         | Conversation | System_context | Recovery_instruction | Tool_result_followup
-        | Agent_instruction -> true)
+        | Agent_instruction | Outside_context -> true)
         (List.mapi (fun index message -> index, message) messages)
     in
     Ok {messages = List.map snd kept; source_indices = List.map fst kept}
@@ -209,7 +210,7 @@ let lower policy messages =
         | User, Conversation -> Some index
         | (System | Assistant | Tool), _
         | User, (System_context | Historical_system_context | Recovery_instruction
-                 | Tool_result_followup | Agent_instruction) -> latest)
+                 | Tool_result_followup | Agent_instruction | Outside_context) -> latest)
         None (List.mapi (fun index message -> index, message) messages)
     in
     (match latest_caller with
@@ -251,7 +252,7 @@ let lower policy messages =
            let control =
              match message.origin, message.role with
              | Conversation, System -> Some true
-             | Conversation, (User | Assistant | Tool) | Tool_result_followup, _ -> None
+             | Conversation, (User | Assistant | Tool) | (Tool_result_followup | Outside_context), _ -> None
              | (System_context | Agent_instruction), _ -> Some true
              | Historical_system_context, _ -> Some false
              | Recovery_instruction, _ -> Some (index > recovery_frontier)
@@ -286,7 +287,8 @@ let lower policy messages =
 
 let encode_user_boundary policy ~(message : Types.message) wire =
   match policy, message.role, message.origin with
-  | (Initial_system_native_tools | Initial_system_tool_response_media), User, Conversation ->
+  | (Initial_system_native_tools | Initial_system_tool_response_media), User,
+    (Conversation | Outside_context) ->
     let quote text = `String (Yojson.Safe.to_string (`String text)) in
     let content = function
       | `String text -> Ok (quote text)

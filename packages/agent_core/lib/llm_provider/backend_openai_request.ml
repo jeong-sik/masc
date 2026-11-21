@@ -258,6 +258,7 @@ type pre_ext_breakpoint_mode =
 let is_system_context_origin = function
   | System_context -> true
   | Conversation
+  | Outside_context
   | Historical_system_context
   | Recovery_instruction
   | Tool_result_followup

@@ -20,7 +20,8 @@ let is_conversation = function
   | Types.Historical_system_context
   | Types.Recovery_instruction
   | Types.Tool_result_followup
-  | Types.Agent_instruction -> false
+  | Types.Agent_instruction
+  | Types.Outside_context -> false
 ;;
 
 let starts_turn (message : Types.message) =

@@ -88,6 +88,7 @@
   test_async_agent
   test_backend_openai_codec
   test_provider_agnostic_reasoning_replay
+  test_outside_context_origin
   test_backend_glm_coverage
   test_backend_gemini
   test_snapshot_provider_serialization
@@ -208,6 +209,7 @@
   test_async_agent
   test_backend_openai_codec
   test_provider_agnostic_reasoning_replay
+  test_outside_context_origin
   test_backend_glm_coverage
   test_backend_gemini
   test_snapshot_provider_serialization

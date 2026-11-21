@@ -704,7 +704,8 @@ let merge_tool_result_followup_user_messages_with_source_indices messages =
     msg.role = User
     && (match msg.origin with
         | Recovery_instruction | Tool_result_followup -> true
-        | Conversation | System_context | Historical_system_context | Agent_instruction -> false)
+        | Conversation | System_context | Historical_system_context | Agent_instruction
+        | Outside_context -> false)
     && msg.name = None
     && msg.tool_call_id = None
     && Conversation_metadata.is_mergeable_followup msg.metadata

@@ -534,6 +534,7 @@ let split_trailing_system_context (messages : message list) =
     match m.origin with
     | System_context -> true
     | Conversation
+    | Outside_context
     | Historical_system_context
     | Recovery_instruction
     | Tool_result_followup

@@ -180,7 +180,7 @@ let carrier_text (message : Agent_core.Types.message) =
     | _ :: _ :: _ )
   | Agent_core.Types.(
       Conversation | Historical_system_context | Recovery_instruction
-      | Tool_result_followup | Agent_instruction), _ -> None
+      | Tool_result_followup | Agent_instruction | Outside_context), _ -> None
 ;;
 
 (* Take every turn block out of [issuer]'s carrier, one after another in

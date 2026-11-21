@@ -53,7 +53,8 @@ type t = Types.media_source lowered
     Initial-system policies consolidate controls into a single initial frame. Fresh system context and
     agent instructions are active. Historical system context is quoted data;
     a recovery instruction is active only after both the latest Conversation User
-    and the latest assistant response.
+    and the latest assistant response. Outside context is not a control: it
+    stays in place as user text.
     Plain System messages remain system instructions. A template request needs
     an actual caller query; controls never manufacture one.
 
@@ -61,8 +62,9 @@ type t = Types.media_source lowered
     followup has no owning result identity and is rejected, not guessed. *)
 val lower : policy -> 'source Types.message_with list -> ('source lowered, error) result
 
-(** Quote ordinary caller text as a JSON string at the wire boundary, so a
-    caller cannot collide with the template's reserved tool_response syntax.
+(** Quote ordinary caller text and outside context as a JSON string at the
+    wire boundary, so neither can collide with the template's reserved
+    tool_response syntax.
     Media parts retain their native shape. Encode a true typed tool-media followup using the template's tool_response
     protocol. This runs after tool-result media projection and modality ordering
     so the protocol delimiters enclose the actual emitted media parts. *)

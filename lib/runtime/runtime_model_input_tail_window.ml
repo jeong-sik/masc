@@ -116,12 +116,13 @@ let budget_error_to_core_error error =
 ;;
 
 (* Current runtime context and the Librarian working state survive cuts.
-   Historical system context is ordinary replay history and may be trimmed. *)
+   Historical system context and outside context are ordinary replay history
+   and may be trimmed. *)
 let is_extra_context (msg : Agent_core.Types.message) =
   match msg.origin with
   | System_context -> true
   | Conversation | Historical_system_context | Recovery_instruction
-  | Tool_result_followup | Agent_instruction -> false
+  | Tool_result_followup | Agent_instruction | Outside_context -> false
 ;;
 
 let is_pinned msg = is_extra_context msg || is_working_state msg
@@ -154,10 +155,11 @@ let annotate_by message_of values =
              then ((value, Atom 0) :: acc, 1)
              else ((value, Atom (count - 1)) :: acc, count)
            | System, (System_context | Conversation | Recovery_instruction
-                     | Tool_result_followup | Agent_instruction) ->
+                     | Tool_result_followup | Agent_instruction | Outside_context) ->
              ((value, Pinned) :: acc, count)
            | (User | Assistant), (System_context | Conversation | Recovery_instruction
-                                 | Tool_result_followup | Agent_instruction) ->
+                                 | Tool_result_followup | Agent_instruction
+                                 | Outside_context) ->
              ((value, Atom count) :: acc, count + 1)))
       ([], 0)
       values

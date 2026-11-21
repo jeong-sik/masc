@@ -568,9 +568,12 @@ end
 
 (** Canonical source identity, independent of the provider's wire role.
     [Conversation] is an ordinary caller/model/tool transcript message; only
-    its [User] role opens a caller-input boundary. The remaining origins are
-    SDK control messages, never a new human query. Current context is pinned;
-    historical context is retained replay history. *)
+    its [User] role opens a caller-input boundary. [Outside_context] is text
+    written outside the conversation (messages, posts, recalled facts) that a
+    host keeps in the history as a [User] message: every provider sends it in
+    place as user text, and it never opens a caller-input boundary. The
+    remaining origins are SDK control messages, never a new human query.
+    Current context is pinned; historical context is retained replay history. *)
 type message_origin =
   | Conversation
   | System_context
@@ -578,6 +581,7 @@ type message_origin =
   | Recovery_instruction
   | Tool_result_followup
   | Agent_instruction
+  | Outside_context
 [@@deriving show]
 
 val message_origin_to_string : message_origin -> string

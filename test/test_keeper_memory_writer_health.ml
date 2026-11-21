@@ -18,6 +18,20 @@ let in_workspace case () =
       case ~sw config))
 ;;
 
+(* The same, with what the Librarian's own ask needs. *)
+let in_workspace_with_ask case () =
+  Eio_main.run (fun stdenv ->
+    Eio.Switch.run (fun sw ->
+      let config = Masc.Workspace.default_config (Filename.temp_dir "writer-health" "") in
+      let env : Masc.Librarian_ask.env =
+        { net = Eio.Stdenv.net stdenv
+        ; clock = Eio.Stdenv.clock stdenv
+        ; base_dir = config.base_path
+        }
+      in
+      case ~sw ~env config))
+;;
+
 let member key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with
@@ -103,6 +117,19 @@ let test_a_keeper_before_its_writer () =
     ()
 ;;
 
+let turns_path config =
+  Masc.Keeper_turn_log_store.path_for_keepers_dir
+    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+    ~keeper_id:keeper
+;;
+
+let turn_log_id config =
+  match Masc.Keeper_turn_log_store.read_start (turns_path config) with
+  | Ok (Some start) -> Masc.Keeper_turn_log.Log_id.to_string start.id
+  | Ok None -> fail "the turn log has no first line"
+  | Error (_ : Masc.Keeper_turn_log_store.read_error) -> fail "the turn log was not read"
+;;
+
 (* A writer with no lane value and nothing unread is open and has no alarm. *)
 let test_an_open_writer () =
   in_workspace (fun ~sw config ->
@@ -114,6 +141,7 @@ let test_an_open_writer () =
     check bool "no lane value" true (member "lane" row = `Bool false);
     check bool "nothing unread" true (member "unread" row = `Bool false);
     check string "reading stands at the log's start" "started" (text "last_line" row);
+    check string "of the turn log the Keeper has" (turn_log_id config) (text "turn_log" row);
     check bool "no ask has ended" true (member "last_read" row = `Null);
     check bool "Memory holds no fact" true (member "facts" (member "memory" row) = `Int 0);
     let section = Health.section_json ~config in
@@ -151,6 +179,80 @@ let test_a_stopped_writer () =
     ()
 ;;
 
+(* A lane value that names one CLI slot: the ask below stops at the turn
+   log before any slot is asked. *)
+let declared : Masc.Librarian_machine.declared =
+  { value =
+      { question =
+          { prompt = "memory prompt"
+          ; answer_schemas =
+              { Masc.Librarian_memory_lane.range = `Assoc [ "type", `String "object" ]
+              ; item_alone = `Assoc [ "type", `String "object" ]
+              ; room = `Assoc [ "type", `String "object" ]
+              }
+          ; max_output_tokens = 4096
+          ; thinking = None
+          }
+      ; http = []
+      ; cli =
+          [ { id = "claude_code.fast"
+            ; target = Cli { runtime_id = "claude_code.fast"; api_name = "claude-sonnet-5" }
+            ; window = 200_000
+            }
+          ]
+      ; unadmitted = []
+      }
+  ; resolved = { Runtime_exact_output_registry.selected_slots = []; cli_slots = [] }
+  }
+;;
+
+(* How long the case waits for the writer's ask to end, and how often it
+   looks: the bounds the writer's ask cases use. *)
+let wait_s = 30.0
+let poll_s = 0.001
+
+let rested ~clock writers =
+  let deadline = Eio.Time.now clock +. wait_s in
+  let rec look () =
+    match List.assoc_opt keeper (Writers.held writers) with
+    | Some (Writer.Held { Masc.Librarian_machine.state = Resting (_ : Masc.Librarian_store.t); _ }) -> ()
+    | Some (Writer.Held (_ : Masc.Librarian_machine.t) | Writer.Held_booting | Writer.Held_retired)
+    | None ->
+      if Eio.Time.now clock > deadline then failf "the writer did not rest in %.0f s" wait_s;
+      Eio.Time.sleep clock poll_s;
+      look ()
+  in
+  look ()
+;;
+
+(* §12.4: a line that does not decode, with nothing to read before it, ends
+   the Librarian's own ask as an input fault. The row names the fault in the
+   commit log's words, with the line's offset the operator's [Skip_line]
+   sends. *)
+let test_a_writer_resting_on_an_input_fault () =
+  in_workspace_with_ask (fun ~sw ~env config ->
+    let (_ : Writers.t) =
+      Masc.Keeper_memory_writers.start ~sw ~ask:(Masc.Librarian_ask.run env)
+        ~ask_room:Deps.never_makes_room
+        ~start_turn_log:(Masc.Keeper_turn_log_store_start.run config) ~config
+    in
+    let (_ : Writer.view) = Deps.booted_memory_writer_view ~sw ~config keeper in
+    let offset = Int64.to_int (In_channel.with_open_bin (turns_path config) In_channel.length) in
+    Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 (turns_path config) (fun channel ->
+      output_string channel "not json\n");
+    Writers.declaration_changed (writers config) (Some declared);
+    rested ~clock:env.clock (writers config);
+    let row = row_of config in
+    check string "its state" "resting" (text "state" row);
+    check (list string) "E3" [ "E3" ] (alarms row);
+    let read = member "last_read" row in
+    check string "the ask ended on an input fault" "input_fault" (text "ended" read);
+    let fault = member "fault" read in
+    check string "the line does not decode" "line_unreadable" (text "kind" fault);
+    check bool "at the offset the operator sends" true (member "offset" fault = `Int offset))
+    ()
+;;
+
 let () =
   run "keeper_memory_writer_health"
     [ ( "row"
@@ -158,6 +260,7 @@ let () =
         ; test_case "a registered Keeper before its writer" `Quick test_a_keeper_before_its_writer
         ; test_case "an open writer" `Quick test_an_open_writer
         ; test_case "a stopped writer" `Quick test_a_stopped_writer
+        ; test_case "a writer resting on an input fault" `Quick test_a_writer_resting_on_an_input_fault
         ] )
     ]
 ;;

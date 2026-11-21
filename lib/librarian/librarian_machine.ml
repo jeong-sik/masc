@@ -380,8 +380,7 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
   (* A file the store does not open does not mend itself: the store stops
      as boot and a commit stop it for the same file. *)
   | Snapshot_fault fault -> { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
-  | Input_fault (_ : Librarian_unit.input_fault) ->
-    { t with state = Resting store; last_read = Some Last.Input_fault }
+  | Input_fault fault -> { t with state = Resting store; last_read = Some (Last.Input_fault fault) }
   | Ask_failed failed -> { t with state = Resting store; last_read = Some (Last.Ask_failed failed) }
 ;;
 

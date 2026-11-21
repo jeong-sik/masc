@@ -1315,7 +1315,8 @@ let last_read_text (value : Machine.t) =
     Printf.sprintf "lane, %s, %s"
       (if one_item then "one item" else "wider")
       (if silent then "a slot silent" else "none silent")
-  | Some Input_fault -> "input fault"
+  | Some (Input_fault (Line_unreadable { offset })) -> Printf.sprintf "input fault: line at %d" offset
+  | Some (Input_fault (Turn_log_replaced _ | Position_lost _ | Content_unreadable _)) -> "input fault"
   | Some (Ask_failed Raised) -> "failed: raised"
   | Some (Ask_failed Flow_stopped) -> "failed: flow stopped"
   | Some (Ask_failed Read_failed) -> "failed: read failed"
@@ -1334,7 +1335,7 @@ let last_room_text (value : Machine.t) =
 let last_basis (value : Machine.t) =
   match value.last_read with
   | Some (Lane { basis; _ }) -> hex basis
-  | Some (Committed | Input_fault | Ask_failed _) | None -> fail "the last read is not the lane's"
+  | Some (Committed | Input_fault _ | Ask_failed _) | None -> fail "the last read is not the lane's"
 ;;
 
 (* A boot holds none; a failed ask and an input fault are kept as they
@@ -1348,7 +1349,8 @@ let test_the_row_starts_empty_and_keeps_each_failure () =
     Machine.decide place value ~at:300.0
       (ended value 1 (Input_fault (Line_unreadable { offset = 0 })))
   in
-  check string "an input fault" "input fault" (last_read_text faulted);
+  check string "an input fault, with the line the operator skips" "input fault: line at 0"
+    (last_read_text faulted);
   let failed = resting (started_place ()) in
   check string "a failed ask" "failed: raised" (last_read_text failed)
 ;;

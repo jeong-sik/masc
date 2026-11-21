@@ -57,7 +57,8 @@ let running (t : Machine.t) ~unread =
     unread
     &&
     match t.last_read with
-    | Some (Input_fault | Ask_failed (_ : Librarian_read_result.failed)) -> true
+    | Some (Input_fault (_ : Librarian_unit.input_fault) | Ask_failed (_ : Librarian_read_result.failed)) ->
+      true
     | Some (Committed | Lane _) | None -> false
   in
   (* The model's OneItemRefusal with no silent slot, about the snapshot now:
@@ -68,7 +69,7 @@ let running (t : Machine.t) ~unread =
       (match t.last_read with
        | Some (Lane { one_item; silent; basis; slots = _ }) ->
          one_item && (not silent) && held_now ~now basis
-       | Some (Committed | Input_fault | Ask_failed _) | None -> false)
+       | Some (Committed | Input_fault _ | Ask_failed _) | None -> false)
     | Idle _ | Asking _ | Refused_at_bottom _ | Stopped _ -> false
   in
   let e5 =
@@ -84,7 +85,7 @@ let running (t : Machine.t) ~unread =
     match t.lane, t.last_read with
     | None, (Some _ | None) -> true
     | Some (_ : Machine.declared), (None | Some (Lane _)) -> true
-    | Some _, Some (Committed | Input_fault | Ask_failed _) -> false
+    | Some _, Some (Committed | Input_fault _ | Ask_failed _) -> false
   in
   List.filter_map
     (fun (on, alarm) -> if on then Some alarm else None)

@@ -153,10 +153,11 @@ let test_e2_refused_at_the_bottom () =
 ;;
 
 let test_e3_a_fault_with_something_unread () =
-  check_alarms "an input fault" [ "E3" ] (running (machine ~last_read:Input_fault (resting ())));
+  let fault : Last.read = Input_fault (Line_unreadable { offset = 0 }) in
+  check_alarms "an input fault" [ "E3" ] (running (machine ~last_read:fault (resting ())));
   check_alarms "a failed ask" [ "E3" ]
     (running (machine ~last_read:(Ask_failed Flow_stopped) (resting ())));
-  check_alarms "nothing unread" [] (running ~unread:false (machine ~last_read:Input_fault (idle ())))
+  check_alarms "nothing unread" [] (running ~unread:false (machine ~last_read:fault (idle ())))
 ;;
 
 (* E4 stands only on a one-item rest with no silent slot, about the snapshot

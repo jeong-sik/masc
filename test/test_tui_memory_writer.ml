@@ -150,6 +150,7 @@ let slot_outcomes =
   ; "not_called", Not_called
   ; "unavailable", Unavailable
   ; "busy", Busy
+  ; "overdue", Overdue
   ; "lost", Lost
   ; "unusable", Unusable
   ]

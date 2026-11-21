@@ -9,6 +9,7 @@ type slot_outcome =
   | Not_called
   | Unavailable
   | Busy
+  | Overdue
   | Lost
   | Unusable
 
@@ -160,6 +161,7 @@ let slot_outcome_of_wire = function
   | "not_called" -> Ok Not_called
   | "unavailable" -> Ok Unavailable
   | "busy" -> Ok Busy
+  | "overdue" -> Ok Overdue
   | "lost" -> Ok Lost
   | "unusable" -> Ok Unusable
   | other -> unknown "slot outcome" other

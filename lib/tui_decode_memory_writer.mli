@@ -15,6 +15,7 @@ type slot_outcome =
   | Not_called
   | Unavailable
   | Busy
+  | Overdue
   | Lost
   | Unusable  (** It answered, and the answer could not be used. *)
 

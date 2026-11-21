@@ -410,6 +410,7 @@ let unanswered_token : Librarian_slot_outcome.unanswered -> string = function
   | Silent Not_called -> "not_called"
   | Silent Unavailable -> "unavailable"
   | Silent Busy -> "busy"
+  | Silent Overdue -> "overdue"
   | Silent Lost -> "lost"
   | Silent (Unusable (_ : Librarian_answer.rejection)) -> "unusable"
 ;;

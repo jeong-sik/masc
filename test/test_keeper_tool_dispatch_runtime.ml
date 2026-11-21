@@ -5425,7 +5425,18 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "raw append failure retains the exact full chat target"
                  true
-                 (String_util.contains_substring error_detail chat_path)
+                 (String_util.contains_substring error_detail chat_path);
+               (* The diagnostic above keeps the coordinate, so the redaction
+                  that guards what leaves the workspace has to still bite on an
+                  absolute path token: that is the half this change must not
+                  weaken. *)
+               check bool
+                 "an absolute server path token is still redacted"
+                 true
+                 (String_util.contains_substring
+                    (Keeper_request_failure.sanitize_person_text
+                       ("durable append failed argument=\"" ^ chat_path ^ "\""))
+                    "[REDACTED_PATH]")
              | Ok _ -> fail "durable dashboard append failure became Completed");
             check int
               "failed append emits no keeper chat broadcast"

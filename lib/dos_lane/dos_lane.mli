@@ -254,18 +254,17 @@ val escapes : string -> bool
     the saves directory. *)
 
 type image
-(** A program image the loaders can place: an MZ signature makes it an EXE,
-    anything else a COM, by the image's own bytes and not the file name. *)
+(** A program image the loaders can place: an MZ or ZM signature makes it an
+    EXE, anything else a COM, by the image's own bytes and not the file name. *)
 
 val image_of_bytes : program_name:string -> string -> (image, error) result
 (** Checks what the core's loaders would otherwise meet as an exception: an
-    empty image, an MZ header or relocation table that runs past the file, a
-    payload that does not fit in memory. For an MZ image that is exactly when
-    the loader raises. It also refuses two images the loader would accept and
-    damage: a COM longer than {!max_com_bytes}, whose tail the loader
-    overwrites with a return word, and the signature ZM, which the loader
-    would run as a COM. Anything refused is [Invalid_request] naming
-    [program_name]. *)
+    empty image, and an EXE the core says it cannot load
+    ([Dos_machine.exe_payload_bytes]). It also refuses two images the loader
+    would accept and damage: a COM longer than {!max_com_bytes}, whose tail the
+    loader overwrites with a return word, and an EXE module longer than
+    {!max_exe_payload_bytes}, whose tail wraps onto address 0. Anything refused
+    is [Invalid_request] naming [program_name]. *)
 
 val max_com_bytes : int
 (** 65,278: the largest COM image that leaves the return word the loader
@@ -273,8 +272,9 @@ val max_com_bytes : int
     overwrites the tail. *)
 
 val max_exe_payload_bytes : int
-(** The most program an MZ image may carry after its header: the memory above
-    the lowest place the loader puts an image. *)
+(** The most program an EXE module may carry after its header: the memory above
+    the lowest place the loader puts an image. The loader accepts more and
+    wraps the rest onto address 0. *)
 
 type prepared_load
 (** In-memory validated guest and save snapshot. No open file handles; discarded

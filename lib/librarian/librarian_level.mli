@@ -9,6 +9,8 @@
     reads where the Keeper's latest request started (§11), which the writer
     does not hold. An alarm stops nothing: it is read, not a gate. *)
 
+module Digest := Agent_core.Checkpoint_objects
+
 type alarm =
   | E1 (** The store is stopped. *)
   | E2
@@ -46,6 +48,20 @@ type writer =
 
 (** The alarms on, in the order of {!alarm}. *)
 val alarms : writer -> alarm list
+
+(** {1 Whether a verdict is about what the writer holds now}
+
+    The two halves of "held now" that {!E4} and {!E5} read of the verdict
+    the last ask left. The health row says the same of the end it shows by
+    calling these, so a row and its alarms cannot say different things. *)
+
+(** Whether the snapshot is the one the store's last line names now. [false]
+    for a stopped store, which names none. *)
+val snapshot_held_now : Librarian_machine.t -> Digest.digest -> bool
+
+(** Whether the lane value is the one declared now. [false] for a writer
+    with no lane value. *)
+val lane_value_held_now : Librarian_machine.t -> Librarian_memory_lane.t -> bool
 
 type level =
   | Ok

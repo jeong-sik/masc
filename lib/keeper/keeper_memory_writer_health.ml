@@ -5,7 +5,6 @@ module Last = Librarian_last
 module Log_line = Librarian_log
 module Digest = Agent_core.Checkpoint_objects
 
-let same (a : Digest.digest) (b : Digest.digest) = String.equal (a :> string) (b :> string)
 let digest_json (digest : Digest.digest) = `String (digest :> string)
 
 let state_token : Machine.state -> string = function
@@ -110,34 +109,21 @@ let slots_json slots : Yojson.Safe.t =
        slots)
 ;;
 
-(* Whether an end is about what the writer holds now: the snapshot the
-   store's tail names, and the lane value declared. A stopped store names no
-   snapshot and a writer without a lane holds no value, so an end is about
-   neither. *)
-let about_memory_now ~now (basis : Digest.digest) : Yojson.Safe.t =
-  `Bool (Option.fold ~none:false ~some:(same basis) now)
-;;
-
-let about_lane_now ~(lane : Machine.declared option) (value : Librarian_memory_lane.t)
-  : Yojson.Safe.t
-  =
-  `Bool
-    (match lane with
-     | Some (declared : Machine.declared) -> Librarian_memory_lane.equal value declared.value
-     | None -> false)
-;;
-
 (* Each end is its constructor's name. The refusal E4 reads keeps the lane
    value its verdict was folded over, so it says whether that is the value
    declared now, as [fits_none] does for a room ask. It carries no
-   [one_item] and no [silent]: it is always one item with no slot silent. *)
-let read_json ~now ~lane : Last.read -> Yojson.Safe.t = function
+   [one_item] and no [silent]: it is always one item with no slot silent.
+
+   Whether an end is about what the writer holds now is the alarms' to judge
+   (§12.2), and the row asks them: [about_memory_now] and [about_lane_now]
+   are the two halves of what turns E4 and E5 on. *)
+let read_json (machine : Machine.t) : Last.read -> Yojson.Safe.t = function
   | Committed -> `Assoc [ "ended", `String "committed" ]
-  | Refused_not_all_sized { basis; lane = folded_over; slots } ->
+  | Refused_not_all_sized { basis; lane; slots } ->
     `Assoc
       [ "ended", `String "refused_not_all_sized"
-      ; "about_memory_now", about_memory_now ~now basis
-      ; "about_lane_now", about_lane_now ~lane folded_over
+      ; "about_memory_now", `Bool (Level.snapshot_held_now machine basis)
+      ; "about_lane_now", `Bool (Level.lane_value_held_now machine lane)
       ; "slots", slots_json slots
       ]
   | Lane { one_item; silent; basis; slots } ->
@@ -145,23 +131,23 @@ let read_json ~now ~lane : Last.read -> Yojson.Safe.t = function
       [ "ended", `String "lane"
       ; "one_item", `Bool one_item
       ; "silent", `Bool silent
-      ; "about_memory_now", about_memory_now ~now basis
+      ; "about_memory_now", `Bool (Level.snapshot_held_now machine basis)
       ; "slots", slots_json slots
       ]
   | Input_fault fault -> `Assoc [ "ended", `String "input_fault"; "fault", input_fault_json fault ]
   | Ask_failed failed -> `Assoc [ "ended", `String "ask_failed"; "failed", `String (failed_token failed) ]
 ;;
 
-let room_json ~now ~lane : Last.room -> Yojson.Safe.t = function
+let room_json (machine : Machine.t) : Last.room -> Yojson.Safe.t = function
   | Made -> `Assoc [ "ended", `String "made" ]
   | Unchanged -> `Assoc [ "ended", `String "unchanged" ]
   | Stale -> `Assoc [ "ended", `String "stale" ]
   | Not_judged -> `Assoc [ "ended", `String "not_judged" ]
-  | Fits_none { memory; lane = asked_with } ->
+  | Fits_none { memory; lane } ->
     `Assoc
       [ "ended", `String "fits_none"
-      ; "about_memory_now", about_memory_now ~now memory
-      ; "about_lane_now", about_lane_now ~lane asked_with
+      ; "about_memory_now", `Bool (Level.snapshot_held_now machine memory)
+      ; "about_lane_now", `Bool (Level.lane_value_held_now machine lane)
       ]
 ;;
 
@@ -245,17 +231,14 @@ let row_with_level ~config ~keeper : Librarian_writer.held -> Level.level * Yojs
             ] )
     in
     let unread = Option.fold ~none:false ~some:(unread ~config ~keeper) store in
-    let now = Option.map (fun store -> Log_line.snapshot_after (Store.tail store)) store in
     shown
       ~state:(state_token machine.state)
       ~alarms:(Level.alarms (Running { machine; unread }))
       ([ "unread", (match store with Some _ -> `Bool unread | None -> `Null)
        ; "lane", `Bool (Option.is_some machine.lane)
        ; "asking", asking_json machine.state
-       ; ( "last_read"
-         , Option.fold ~none:`Null ~some:(read_json ~now ~lane:machine.lane) machine.last_read )
-       ; ( "last_room"
-         , Option.fold ~none:`Null ~some:(room_json ~now ~lane:machine.lane) machine.last_room )
+       ; "last_read", Option.fold ~none:`Null ~some:(read_json machine) machine.last_read
+       ; "last_room", Option.fold ~none:`Null ~some:(room_json machine) machine.last_room
        ; "read_alone", `Bool machine.read_alone
        ]
        @ place)

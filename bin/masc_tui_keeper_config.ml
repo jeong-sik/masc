@@ -740,12 +740,16 @@ let marked_row glyph colour label value =
 let editable_row label value = marked_row editable_glyph Masc_tui_theme.Sgr.cyan label value
 let read_only_row label value = marked_row read_only_glyph Masc_tui_theme.Sgr.dim label value
 
-let string_value ?(missing = "not observed") = function
+(* The marks of RFC tui-one-screen-grammar 6.4: a field the document holds
+   empty is absent (Masc_tui_theme.Glyph.no_value), and a field the read document does not carry
+   was not reported (the unreported mark). [null] is not absent: the
+   server falls back to its default, so it says so. *)
+let string_value = function
   | Some (`String value) when String.trim value <> "" -> value
-  | Some (`String _) -> "(empty)"
+  | Some (`String _) -> Masc_tui_theme.Glyph.no_value
   | Some `Null -> "default"
   | Some value -> Yojson.Safe.to_string value
-  | None -> missing
+  | None -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
 let bool_value = function
   | Some (`Bool true) -> "on"
@@ -753,7 +757,7 @@ let bool_value = function
   | value -> string_value value
 
 let string_list_value = function
-  | Some (`List []) -> "none"
+  | Some (`List []) -> Masc_tui_theme.Glyph.no_value
   | Some (`List values) ->
       values
       |> List.map (function
@@ -769,7 +773,7 @@ let int_override_value = function
 
 let skill_selection_value = function
   | Some `Null -> "all published Skills"
-  | Some (`List []) -> "none"
+  | Some (`List []) -> Masc_tui_theme.Glyph.no_value
   | Some (`List names) -> string_list_value (Some (`List names))
   | value -> string_value value
 
@@ -1059,7 +1063,7 @@ let view_lines ?(ko = true) ~sanitize json =
       (fun () -> string_value (at [ "remote_endpoint" ]))
   ; read_only_value_row (say "등록된 SSH 엔드포인트" "Registered SSH endpoints")
       (fun () -> match remote_endpoint_names json with
-         | Ok [] -> say "설정 없음" "none configured"
+         | Ok [] -> Masc_tui_theme.Glyph.no_value
          | Ok names -> String.concat ", " names
          | Error detail -> detail)
   ; editable_value_row (say "멘션 대상" "Mention targets")

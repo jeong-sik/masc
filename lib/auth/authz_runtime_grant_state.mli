@@ -31,7 +31,9 @@ val find : t -> Authz_types.Grant_id.t -> Authz_records.Runtime_grant.t option
 (** Whether the log named this grant id already. *)
 val mem : t -> Authz_types.Grant_id.t -> bool
 
-(** The grants of one Runtime, in the order of their ids. *)
+(** The grants of one Runtime, in the order the log named them. An id is an
+    arbitrary safe string, so that order is not the order of the ids and not a
+    time order either: it is the only order the log itself has. *)
 val of_runtime
   :  t
   -> Authz_types.Runtime_id.t
@@ -46,10 +48,16 @@ val of_grantee
 (** The grant one principal holds on one Runtime — the design's
     [(Principal.t * Runtime_id.t)] lookup (design 4.2-1). The state keeps the
     grants of a Runtime under that Runtime, so this answers without a scan over
-    the log. A log that names two grants for the pair reads as the lower id
-    first and the higher id last; the last one, the grant the log named most
-    recently, is answered. Deciding whether more than one may live at a time is
-    admission's ([Authz_state]), not this projection's. *)
+    the log.
+
+    {b Which one.} A log may name the pair more than once (a revoke and a
+    fresh grant). Ids do not sort by time, so the state keeps the log's own
+    order and answers the live grant: the last [Active] one. When no
+    grant of the pair is active, it answers the last one, so a caller that must
+    explain a refusal sees the record that closed the pair. Deciding whether
+    more than one may live at a time is admission's ([Authz_state]), not this
+    projection's.
+*)
 val find_for
   :  t
   -> grantee:Authz_types.Principal.t

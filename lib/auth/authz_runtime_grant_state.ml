@@ -30,15 +30,28 @@ let of_grantee t principal =
 
 (* The design lets one (grantee, Runtime) pair hold one live delegate grant
    (design 4.2-1 requires a revoke before a second grant). The state holds what
-   the log named, so a log that names two is read as the lower id first and the
-   higher id last: a caller that must choose takes the last, which is the one
-   the log named most recently. *)
+   the log named, and ids do not sort by time (an id is any safe string), so a
+   log that names two is read in the order it named them and the live one is
+   answered: the last [Active] grant, and otherwise the last grant, so a caller
+   that must explain a refusal sees the record that closed it. *)
+let is_active = function
+  | Grant_status.Active -> true
+  | Grant_status.Revoked -> false
+  | Grant_status.Purged -> false
+;;
+
 let find_for t ~grantee ~runtime_id =
-  of_runtime t runtime_id
-  |> List.fold_left
-       (fun found (_, grant) ->
-          if Principal.equal grant.Runtime_grant.grantee grantee then Some grant else found)
-       None
+  let matching =
+    of_runtime t runtime_id
+    |> List.filter (fun (_, grant) -> Principal.equal grant.Runtime_grant.grantee grantee)
+  in
+  let latest = List.rev matching in
+  match List.find_opt (fun (_, grant) -> is_active grant.Runtime_grant.status) latest with
+  | Some (_, grant) -> Some grant
+  | None ->
+    (match latest with
+     | [] -> None
+     | (_, grant) :: _ -> Some grant)
 ;;
 
 type refusal = Already_named of Grant_id.t
@@ -52,15 +65,13 @@ let add t (grant : Runtime_grant.t) =
   if Grant_map.mem grant.id t.grants
   then Error (Already_named grant.id)
   else (
-    let entry = grant.id, grant in
     let existing =
       Option.value ~default:[] (Runtime_map.find_opt grant.runtime_id t.by_runtime)
     in
+    (* Appended, not sorted: the list is the order the log named these grants,
+       which is the only order that says which came last. *)
     let by_runtime =
-      Runtime_map.add
-        grant.runtime_id
-        (List.sort (fun (a, _) (b, _) -> Grant_id.compare a b) (entry :: existing))
-        t.by_runtime
+      Runtime_map.add grant.runtime_id (existing @ [ grant.id, grant ]) t.by_runtime
     in
     Ok { grants = Grant_map.add grant.id grant t.grants; by_runtime })
 ;;

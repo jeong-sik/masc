@@ -133,7 +133,9 @@ let test_of_runtime_in_id_order () =
     |> fun t -> add_ok t (grant ~id:"grant-1" ())
     |> fun t -> add_ok t (grant ~id:"grant-3" ~runtime:"runtime-2" ())
   in
-  check_ids "runtime-1" (G.of_runtime t (runtime_id "runtime-1")) [ "grant-1"; "grant-2" ];
+  (* The log named grant-2 first, so that is the order of its grants: an id is
+     an arbitrary safe string and does not sort by time. *)
+  check_ids "runtime-1" (G.of_runtime t (runtime_id "runtime-1")) [ "grant-2"; "grant-1" ];
   check_ids "runtime-2" (G.of_runtime t (runtime_id "runtime-2")) [ "grant-3" ];
   check_ids "no such runtime" (G.of_runtime t (runtime_id "runtime-3")) []
 ;;
@@ -179,6 +181,30 @@ let test_find_for_pair () =
     (found twice ~grantee:alice ~runtime:"runtime-1")
 ;;
 
+(* A newer record that closed the pair does not hide the grant that is still
+   live, and the live one is answered even when its id sorts first. *)
+let test_find_for_prefers_the_live_grant () =
+  let t =
+    G.empty
+    |> fun t -> add_ok t (grant ~id:"grant-a" ())
+    |> fun t -> add_ok t (grant ~id:"grant-z" ~status:Grant_status.Revoked ())
+  in
+  let found t =
+    G.find_for t ~grantee:alice ~runtime_id:(runtime_id "runtime-1")
+    |> Option.map (fun grant -> Grant_id.to_string grant.Runtime_grant.id)
+  in
+  Alcotest.(check (option string)) "the live grant, not the newer revoked one" (Some "grant-a")
+    (found t);
+  (* With nothing live, the last record the log named is answered. *)
+  let closed =
+    G.empty
+    |> fun t -> add_ok t (grant ~id:"grant-a" ~status:Grant_status.Revoked ())
+    |> fun t -> add_ok t (grant ~id:"grant-b" ~status:Grant_status.Purged ())
+  in
+  Alcotest.(check (option string)) "the last record of a closed pair" (Some "grant-b")
+    (found closed)
+;;
+
 let () =
   Alcotest.run
     "authz_runtime_grant_state"
@@ -190,6 +216,8 @@ let () =
         ; Alcotest.test_case "the grants of a principal" `Quick test_of_grantee
         ; Alcotest.test_case "the grant of one principal on one runtime" `Quick
             test_find_for_pair
+        ; Alcotest.test_case "the live grant is answered first" `Quick
+            test_find_for_prefers_the_live_grant
         ] )
     ]
 ;;

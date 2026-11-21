@@ -6548,7 +6548,13 @@ let test_queue_selection_requires_visible_source () =
   Alcotest.(check bool) "cut wide grapheme grants no authority" false
     (visible ~inner_width:4 ~marker:"› " ~text:"가나다");
   Alcotest.(check bool) "a visible wide grapheme grants authority" true
-    (visible ~inner_width:5 ~marker:"› " ~text:"가나다")
+    (visible ~inner_width:5 ~marker:"› " ~text:"가나다");
+  Alcotest.(check bool) "SGR-styled marker and nonblank prefix grant authority" true
+    (visible ~inner_width:3 ~marker:"\027[36m>\027[0m" ~text:"\027[32mmessage\027[0m");
+  Alcotest.(check bool) "SGR-styled marker alone without body grants no authority" false
+    (visible ~inner_width:2 ~marker:"\027[36m>\027[0m" ~text:"\027[32mmessage\027[0m");
+  Alcotest.(check bool) "SGR-styled blank text grants no authority" false
+    (visible ~inner_width:20 ~marker:"\027[36m› \027[0m" ~text:"\027[33m   \027[0m")
 
 let test_queue_presented_selection_authority () =
   let open Masc_tui_types in

@@ -119,6 +119,8 @@ let queue_selection_for_item state panel (item : Masc_tui_queue_inspection.item)
 
 let queue_selection_visible ~inner_width ~marker ~text =
   let module Layout = Masc_tui_message_layout in
+  let marker = Masc_tui_theme.strip_sgr marker in
+  let text = Masc_tui_theme.strip_sgr text in
   let plain = marker ^ text in
   let marker_bytes = String.length marker in
   let retained = Layout.fitted_source_bytes plain inner_width in

@@ -231,14 +231,6 @@ let add_routes ?clock router =
        (serve_playground_asset "static/css/middleware.css")
   |> Server_route.get Server_route.Always_public "/static/js/middleware.js"
        (serve_playground_asset "static/js/middleware.js")
-  |> Server_route.get Server_route.Always_public "/graphiql/graphiql.min.css"
-       (serve_graphiql_asset "graphiql.min.css")
-  |> Server_route.get Server_route.Always_public "/graphiql/graphiql.min.js"
-       (serve_graphiql_asset "graphiql.min.js")
-  |> Server_route.get Server_route.Always_public "/graphiql/react.production.min.js"
-       (serve_graphiql_asset "react.production.min.js")
-  |> Server_route.get Server_route.Always_public "/graphiql/react-dom.production.min.js"
-       (serve_graphiql_asset "react-dom.production.min.js")
   |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/mcp" (fun request reqd ->
        (* Observer/presence SSE streams authenticate via the `token` query
           param — an EventSource cannot set an Authorization header. Parse

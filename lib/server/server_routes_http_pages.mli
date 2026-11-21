@@ -1,5 +1,5 @@
 (** Server_routes_http_pages — static HTML / asset
-    handlers + GraphQL playground / iql.
+    handlers + GraphQL playground.
 
     Reached three different ways depending on the
     consumer:
@@ -10,13 +10,13 @@
       server_runtime_bootstrap, bin/main_eio).
     - [open Server_routes_http_pages] in
       {!Server_routes_http_routes_frontend} — reaches
-      the 6 handlers below unqualified.
+      the 5 handlers below unqualified.
     - [module Pages = Server_routes_http_pages] aliases
       in 4 sister routing modules + the test —
       production sister aliases are unused leftovers
       (cycle 223 unused-alias pattern).
 
-    External surface (20 entries):
+    External surface (18 entries):
     - {b Legacy dashboard handlers}
       ({!serve_dashboard_index},
       {!serve_dashboard_asset},
@@ -24,7 +24,6 @@
     - {b GraphQL handlers + assets}
       ({!handle_graphql},
       {!handle_post_graphql},
-      {!serve_graphiql_asset},
       {!serve_playground_asset},
       {!graphql_playground_html},
       {!graphql_csp_header}).
@@ -41,12 +40,11 @@
     - {b Misc} ({!serve_favicon}).
 
     Internal helpers stay private at this boundary
-    (~9 internal lets — [graphiql_asset_path] /
-    [graphiql_asset_root], [assets_root] /
+    (~7 internal lets — [assets_root] /
     [playground_asset_root], [handle_get_graphql],
     [graphql_headers] helper). *)
 
-(** {1 GraphQL Playground / iql assets} *)
+(** {1 GraphQL Playground assets} *)
 
 (* HIGH-RISK-UNREVIEWED: the nonce decides which inline script a browser runs
    on this origin. Only {!Csp_nonce.draw} makes one. *)
@@ -58,11 +56,6 @@ val graphql_csp_header : Csp_nonce.t -> string
 (** Builds the [Content-Security-Policy] header value
     pinned to the GraphQL Playground asset set, threading
     the per-request nonce. *)
-
-val serve_graphiql_asset :
-  string -> Httpun.Request.t -> Http_reqd.t -> unit
-(** Serves a GraphiQL static asset by name (CSS / JS /
-    favicon).  404s on miss. *)
 
 val serve_playground_asset :
   string -> Httpun.Request.t -> Http_reqd.t -> unit

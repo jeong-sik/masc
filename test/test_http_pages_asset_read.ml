@@ -1,6 +1,6 @@
 (** [Server_routes_http_pages.read_file] coverage.
 
-    [read_file] backs GraphiQL / Playground static-asset serving.  It was
+    [read_file] backs Playground static-asset serving.  It was
     migrated from [In_channel.with_open_bin path In_channel.input_all] to
     [Fs_compat.load_file path] so the read is Eio-native (non-blocking on
     the HTTP handler's domain) when the global fs is wired.  These tests

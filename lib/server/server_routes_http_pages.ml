@@ -151,13 +151,6 @@ let graphql_csp_header nonce =
 
 let assets_root = Web_dashboard.assets_root
 
-(** Local GraphiQL assets *)
-let graphiql_asset_root () =
-  Option.map (fun root -> Filename.concat root "graphiql") (assets_root ())
-
-let graphiql_asset_path name =
-  Option.map (fun root -> Filename.concat root name) (graphiql_asset_root ())
-
 let asset_content_type name =
   if Filename.check_suffix name ".css" then
     "text/css; charset=utf-8"
@@ -182,19 +175,12 @@ let asset_content_type name =
   else
     "application/octet-stream"
 
-(* Static asset bodies (GraphiQL / Playground) served on the HTTP handler
+(* Static asset bodies (Playground) served on the HTTP handler
    fiber.  [Fs_compat.load_file] is Eio-native when the global fs is wired
    (prod boot), so the file read no longer blocks the whole domain. *)
 let read_file path =
   try Ok (Fs_compat.load_file path)
   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
-
-let serve_graphiql_asset name _request reqd =
-  match Option.map read_file (graphiql_asset_path name) with
-  | Some (Ok body) ->
-      Http.Response.bytes ~content_type:(asset_content_type name) body reqd
-  | None | Some (Error _) ->
-      Http.Response.not_found reqd
 
 (** Local GraphQL Playground assets *)
 let playground_asset_root () =

@@ -10,7 +10,7 @@ let signed_tokens n =
   else Inspector.format_tokens n
 ;;
 
-let rec origin_sentence ~ko ~safe_detail = function
+let origin_sentence ~ko ~safe_detail = function
   | Inspector.Carried_from_ledger ->
       if ko then "이 런타임의 원장에서 시작 위치를 가져옴"
       else "front from this runtime's ledger"
@@ -29,14 +29,6 @@ let rec origin_sentence ~ko ~safe_detail = function
   | Inspector.Carried_librarian_point_at_max_context ->
       if ko then "직전 요청과 최대 턴 증가량 합이 max-context를 초과해 사서가 읽은 끝 지점으로 옮김"
       else "the last request plus the largest growth of one turn passed max-context: front moved to the end of what the Librarian read"
-  | Inspector.Carried_past_librarian_point { librarian_end_atom; front } ->
-      if ko then
-        Printf.sprintf "사서 기준점은 아톰 %d이며, 공급자가 마지막으로 수락한 위치(%s)부터 포함"
-          librarian_end_atom (origin_sentence ~ko ~safe_detail front)
-      else
-        Printf.sprintf
-          "the Librarian point is atom %d; the range opens where the provider last accepted it (%s)"
-          librarian_end_atom (origin_sentence ~ko ~safe_detail front)
   | Inspector.Carried_turn_start { end_atom } ->
       (* The fact line ahead of this sentence already says which atom the
          range opens on ([first_atom]); [end_atom] is the completed boundary
@@ -179,7 +171,7 @@ let candidate_lines ~ko ~runtime_details ~prose ~fact ~detail ~safe ~safe_detail
          | Inspector.Carried_this_turn_start_after_refusal
          | Inspector.Carried_turn_start_at_max_context
          | Inspector.Carried_librarian_point_at_max_context
-         | Inspector.Carried_past_librarian_point _ | Inspector.Carried_turn_start _
+         | Inspector.Carried_turn_start _
          | Inspector.Carried_covered _ ->
              fact history)
         @ (match carried.counted_tokens with

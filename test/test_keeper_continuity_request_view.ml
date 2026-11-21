@@ -358,10 +358,7 @@ let test_the_forecast_takes_the_drivers_start () =
       "a read end alone", alone, Some held_seed, None, boundary,
       (function Front.Covered { end_atom = 1 } -> true | _ -> false);
       "an accepted start past the read end", alone, Some held_seed, Some accepted, boundary,
-      (function
-        | Front.Past_librarian_point
-            { librarian_end_atom = 1; source = Front.Turn_record { turn = 3 } } -> true
-        | _ -> false);
+      (function Front.Carried (Front.Turn_record { turn = 3 }) -> true | _ -> false);
       "a held seed", Driver.No_read_end, Some held_seed, None, boundary,
       (function Front.Carried Front.Ledger -> true | _ -> false);
       "an outlived seed", Driver.No_read_end, Some outlived_seed, None, boundary,
@@ -444,15 +441,29 @@ let test_a_start_past_the_read_end_keeps_the_working_state () =
       ~turn_boundary:(Front.Turn_boundary { end_atom = 4 })
       ~materialize:(fun ~pending:_ messages -> messages) messages in
   (match projected.composed.origin with
-   | Front.Past_librarian_point
-       { librarian_end_atom; source = Front.Turn_record { turn = 5 } } ->
-     check int "the gap opens at the read end" source_end librarian_end_atom
-   | _ -> fail "the request was not attributed to the start past the read end");
+   | Front.Carried (Front.Turn_record { turn = 5 }) -> ()
+   | _ -> fail "the request did not report the turn record its start came from");
   check int "the range opens at the accepted start" 3 projected.composed.projection.dropped_atoms;
   let sent = without_working_state (wire projected) in
   check bool "the skipped atom is not sent" false (List.mem skipped sent);
   check bool "the accepted atom is sent" true (List.mem accepted_atom sent);
   check bool "this turn's input is sent" true (List.mem current sent);
+  check string "under the working state, the range from the accepted start and nothing else"
+    (encode [pinned; accepted_atom; current]) (encode (without_preamble sent));
+  (* The origin names where the start came from, so the same seed with no
+     read end reports the same one. The requests differ all the same: that
+     one opens the same range with no working state ahead of it. *)
+  let seeded =
+    request_view ~continuity:Driver.No_read_end ~provider_config
+      ~measure_message_bytes:measure ~accepted:None ~front:(Some accepted)
+      ~history_digest_at:digest_at ~current_turn_results:Driver.Current_turn_verbatim
+      ~base_path:(Filename.get_temp_dir_name ())
+      ~turn_boundary:(Front.Turn_boundary { end_atom = 4 })
+      ~materialize:(fun ~pending:_ messages -> messages) messages in
+  check bool "the seed with no read end reports the same origin" true
+    (seeded.composed.origin = projected.composed.origin);
+  check string "and sends that range alone"
+    (encode [pinned; accepted_atom; current]) (encode (without_preamble (wire seeded)));
   (* The review's case: the last turn had no fitting snapshot and started at
      the read position R, which was accepted; this turn a snapshot with the
      earlier cut S fits. The request starts at R, and the atoms from S to R

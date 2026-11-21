@@ -4092,12 +4092,11 @@ status: reference
   그 위치를 쓴다. 완료 turn 경계로 옮긴 위치는 같은 turn의 다음 후보에도 전달한다.
   다른 History의 위치는 witness digest가 맞지 않으면 쓰지 않는다.
   → [Model_input_front.t](../../lib/types/model_input_front.mli)
-  이 위치의 출처(`Keeper_carried_front.origin`)는 다섯이다 — `Carried`(seed에서 온
-  위치: 원장, turn 기록, 크기 거절 뒤 turn 경계),
+  이 위치의 출처(`Keeper_carried_front.origin`)는 넷이다 — `Carried`(seed에서 온
+  위치: 원장, turn 기록, 크기 거절 뒤 turn 경계. 읽은 끝이 있는데 provider가 수용한
+  시작점에서 열린 요청도 그 시작점이 나온 곳을 `Carried`로 알린다),
   `Covered`(Keeper의 Memory writer가 이 History에서 읽은 끝(read end): 그 앞 Atom은
   Memory에 있어 다시 보내지 않고, writer가 커밋한 하던 일 상태가 있으면 그 자리에 싣는다),
-  `Past_librarian_point`(읽은 끝이 뒤처져 있고 provider가 수용한
-  시작점이 앞서 있을 때 그 수용된 자리에서 시작하는 경계),
   `Turn_start`(읽은 끝도 맞는 seed도 없음: 이 History에서 마지막으로
   끝난 turn이 끝난 자리에서 시작한다), `Turn_start_unknown`(그 경계마저 못 읽음:
   가장 새 Atom 하나에서 시작한다). Agent Core는 읽은 끝 → 읽은 끝 뒤 수용된 시작점 →
@@ -4113,7 +4112,7 @@ status: reference
   되돌려준다 — 크기가 아닌 거절로 인해 다음 후보나 이후 턴의 앞머리가 영구히 잘려나가는 것을
   막는다(#38537). provider가 수용한 시작점(`accepted_start`)은 최신
   응답 관측 턴 기록에서 읽혀 다음 turn의 `choose_range_start`로 전달되며, 읽은
-  끝이 뒤처져 있는 동안 요청은 그 자리에서 열리고(`Past_librarian_point`), 결코 이번
+  끝이 뒤처져 있는 동안 요청은 그 자리에서 열리고(`range_start`의 `Past_librarian_point`), 결코 이번
   turn의 경계를 넘지 않는다(`within_turn_boundary`). 읽은 끝이 없는 turn에서
   provider가 시작 위치 근거 범위를 크기 때문에 거절해도 turn 경계가 그 turn의 앞머리가 되고
   (`Turn_start_after_refusal`), 같은 후보에 한 번 더 보낸다. 다음 후보와 공식
@@ -4124,8 +4123,8 @@ status: reference
   시작한다 (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).
   `Covered`는 writer의 view가 이 trace를 지목하고 이 History가 view가 센 닫힌 Message를
   모두 가질 때만 채택하며, 그때 요청은 읽지 않은 Atom부터 싣는다.
-  `Past_librarian_point`는 읽은 끝부터 수용된 시작점
-  직전까지의 Atom을 요청에 싣지 않으며, 이 중 요약도 안 되고 메모리에도 없는 Atom들의
+  읽은 끝 뒤의 수용된 시작점에서 열린 요청은 읽은 끝부터 그 시작점
+  직전까지의 Atom을 싣지 않으며, 이 중 요약도 안 되고 메모리에도 없는 Atom들의
   빠진 구간은 `librarian_gap`이 계산한다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은
   Librarian의 다음 회차를 기다린다. `Turn_start`의 `end_atom`은 그 경계 자체를 적는다 —
   범위가 열린 Atom이 아니라 turn-boundary 저장소가 말하는 완료 경계다. 그래서 경계가

@@ -137,10 +137,6 @@ type forecast_carried_origin =
   | Carried_turn_start of { end_atom : int }
   | Carried_turn_start_unknown of { reason : string }
   | Carried_covered of { end_atom : int }
-  | Carried_past_librarian_point of
-      { librarian_end_atom : int
-      ; front : forecast_carried_origin
-      }
 
 type forecast_carried =
   { first_atom : int
@@ -1156,7 +1152,7 @@ let decode_forecast_parts = function
          })
   | _ -> Error "parts is not an object"
 
-let rec decode_forecast_origin = function
+let decode_forecast_origin = function
   | `Assoc fields ->
     let* kind_json = field "kind" fields in
     let* kind = nonempty_string "origin.kind" kind_json in
@@ -1173,19 +1169,6 @@ let rec decode_forecast_origin = function
       Ok Carried_turn_start_at_max_context
     else if String.equal kind "librarian_point_at_max_context" then
       Ok Carried_librarian_point_at_max_context
-    else if String.equal kind "past_librarian_point" then
-      let* end_atom_json = field "librarian_end_atom" fields in
-      let* librarian_end_atom = nonnegative_int "origin.librarian_end_atom" end_atom_json in
-      let* front_json = field "front" fields in
-      let* front = decode_forecast_origin front_json in
-      (match front with
-       | Carried_from_ledger | Carried_from_turn_record _ | Carried_turn_start_after_refusal
-       | Carried_this_turn_start_after_refusal | Carried_turn_start_at_max_context
-       | Carried_librarian_point_at_max_context ->
-         Ok (Carried_past_librarian_point { librarian_end_atom; front })
-       | Carried_turn_start _ | Carried_turn_start_unknown _ | Carried_covered _
-       | Carried_past_librarian_point _ ->
-         Error "origin.front is not a carried front")
     else if String.equal kind "turn_start" then
       let* end_atom_json = field "end_atom" fields in
       let* end_atom = nonnegative_int "origin.end_atom" end_atom_json in

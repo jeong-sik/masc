@@ -17,7 +17,6 @@ type seed =
 type origin =
   | Carried of source
   | Covered of { end_atom : int }
-  | Past_librarian_point of { librarian_end_atom : int; source : source }
   | Turn_start of { end_atom : int }
   | Turn_start_unknown of { reason : string }
 
@@ -416,7 +415,7 @@ let warn_range_opens_on_newest_atom ~keeper_name ~reason =
 
 let warn_if_origin_is_unknown_start ~keeper_name = function
   | Turn_start_unknown { reason } -> warn_range_opens_on_newest_atom ~keeper_name ~reason
-  | Carried _ | Covered _ | Past_librarian_point _ | Turn_start _ -> ()
+  | Carried _ | Covered _ | Turn_start _ -> ()
 ;;
 
 let source_to_string = function
@@ -438,13 +437,12 @@ let seed_to_json (seed : seed) =
 
 let origin_to_string = function
   | Covered _ -> "covered"
-  | Past_librarian_point { source; _ } -> "past_librarian_point:" ^ source_to_string source
   | Carried source -> source_to_string source
   | Turn_start _ -> "turn_start"
   | Turn_start_unknown _ -> "turn_start_unknown"
 ;;
 
-let rec origin_to_json = function
+let origin_to_json = function
   | Carried Ledger -> `Assoc [ "kind", `String "ledger" ]
   | Carried (Turn_record { turn }) ->
     `Assoc [ "kind", `String "turn_record"; "turn", `Int turn ]
@@ -456,12 +454,6 @@ let rec origin_to_json = function
     `Assoc [ "kind", `String "turn_start_at_max_context" ]
   | Carried Librarian_point_at_max_context ->
     `Assoc [ "kind", `String "librarian_point_at_max_context" ]
-  | Past_librarian_point { librarian_end_atom; source } ->
-    `Assoc
-      [ "kind", `String "past_librarian_point"
-      ; "librarian_end_atom", `Int librarian_end_atom
-      ; "front", origin_to_json (Carried source)
-      ]
   | Covered { end_atom } ->
     `Assoc [ "kind", `String "covered"; "end_atom", `Int end_atom ]
   | Turn_start { end_atom } ->

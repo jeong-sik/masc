@@ -43,7 +43,7 @@ let origin_to_json = function
   | Keeper_carried_front.Turn_start_unknown _ ->
     `Assoc [ "kind", `String "turn_start_unknown" ]
   | (Keeper_carried_front.Carried _
-    | Covered _ | Past_librarian_point _
+    | Covered _
     | Turn_start _) as origin -> Keeper_carried_front.origin_to_json origin
 
 let to_json ~keeper ~turn_ref ~runtime_id ~selection ~range ~wire =

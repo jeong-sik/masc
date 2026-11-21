@@ -294,7 +294,9 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
 - Keeper 마다 덮어쓰기: Keeper 설정(TOML)에 `activation_mode` 와 같이 둔다. 정하지 않은 Keeper 는 기본값을 쓴다.
   - `masc_keeper_up` 이 revision compare-and-swap 으로 쓴다. 충돌하면 아무것도 바꾸지 않고 실패한다(`keeper_config_revision_conflict`).
   - 돌고 있는 Keeper 에는 hot-reload 가 한 sweep(약 30초) 안에 적용한다. 서버를 다시 시작하지 않아도 된다.
-  - 구현은 `rg -n activation_mode lib/` 로 그 값이 지나는 곳(profile 기본값, meta overlay, owner reducer 의 `Update_profile`, `masc_keeper_up` 인자, snapshot)을 따라간다. 루프가 간격을 읽는 곳은 `Keeper_heartbeat_snapshot.keepalive_interval_sec` 를 부르는 두 곳이다.
+  - 구현은 `rg -n activation_mode lib/` 로 그 값이 지나는 곳(profile 기본값, meta overlay, owner reducer 의 `Update_profile`, `masc_keeper_up` 인자, snapshot)을 따라간다. 루프가 간격을 읽는 곳은 `Keeper_heartbeat_snapshot.keepalive_interval_sec` 를 부르는 두 곳(주기 도래 판단, sleep 길이)이다.
+  - 두 곳이 같은 「유효 간격」 함수 하나를 부른다. 한 곳만 바뀌는 일을 막는다.
+  - 그 함수는 「깨우기를 올린 행이 남았나」를 §4.2 의 술어로 직접 읽는다. `next_cycle_starts_now` 는 `stimuli_acked` 가 참일 때만 큐를 읽어서, 실패한 턴 뒤에는 답을 주지 않는다.
 - 예약이 잦은 Keeper 는 예약 턴이 간격을 계속 시작값으로 돌린다. 그런 Keeper 는 덮어쓰기가 없어도 늘 30분 안에 움직인다.
 
 ### 4.5 결정론과 비결정론의 경계
@@ -394,6 +396,7 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 - 예약 전달의 답할 곳 갈래(§3.2). 예약은 제 시각에 깨고, 이 RFC 는 예약의 묶음 규칙을 바꾸지 않는다.
 - Keeper 여럿과 고정 시차(`offset(k)`). Keeper 하나의 모델에서는 보이지 않는다. 같은 초에 몰리는지는 §8 에서 잰다.
 - provider 쉼(`Serve_wakeup_after_duration`). 쉬는 동안은 사람 입력도 쉼이 끝날 때까지 기다린다. 사람 입력의 상한은 쉼이 없을 때의 값이다.
+- 실패하거나 체크포인트에서 멈춘 턴. 모델의 `CycleStart` 는 기다리던 입력을 한 번에 가져가 모두 처리한다. 그래서 §5.2 의 나이 상한은 턴이 끝까지 돌 때만 선다. 그런 턴이 남긴 행은 시작값 간격(§4.4)으로 다시 시도한다.
 - 실패한 턴을 이어 받는 사이클(`cycle_wake = Deferred_runtime_lane`, 판정의 `deferred_runtime_lane_pending`). 입력도 주기도 아닌 세 번째 원인이다. 구현은 `TurnHasCause` 를 옮길 때 이 사이클을 막지 않는다.
 
 ## 6. Librarian 제약

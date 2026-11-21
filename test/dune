@@ -1390,6 +1390,8 @@
   (setenv MASC_TEST_CHECKPOINT_PURGE_EXE %{dep:../bin/masc_checkpoint_purge.exe}
    (run %{test}))))
 
+(include stanzas/test_keeper_checkpoint_purge_librarian_stores.inc)
+
 (test
  (name test_exec_dispatch_file_redirect)
  (modules test_exec_dispatch_file_redirect)

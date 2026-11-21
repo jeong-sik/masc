@@ -14,7 +14,12 @@ type decision =
 let decide entries ~path ~method_ =
   match Server_account_route.covering entries ~path ~method_ with
   | Some entry -> Allowed entry
-  | None -> Refused (Uninventoried { path; method_ })
+  | None ->
+    if
+      (not (Server_account_route.keeper_prefix_present entries))
+      && String.starts_with ~prefix:Server_account_route.keeper_prefix path
+    then Refused Keeper_prefix_missing
+    else Refused (Uninventoried { path; method_ })
 ;;
 
 let same_access left right =

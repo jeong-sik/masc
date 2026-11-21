@@ -205,6 +205,64 @@ let test_reconcile_refuses_a_prefix_without_a_slash () =
      | Ok () -> false)
 ;;
 
+(* dispatch answers a HEAD request from the GET route and keeps no HEAD table,
+   so the inventory must answer the same way. *)
+let test_head_is_answered_by_the_get_route () =
+  let entries =
+    [ exact ~methods:[ get ] "/api/v1/dashboard/board"
+        (Route_access.Public_read Route_access.Credential_when_strict)
+    ]
+  in
+  check bool "HEAD reaches the GET route" true
+    (Server_account_route.covers entries ~path:"/api/v1/dashboard/board" ~method_:`HEAD);
+  check bool "the gate allows the HEAD request dispatch would serve" false
+    (is_refused_uninventoried
+       (Server_account_gate.decide
+          entries
+          ~path:"/api/v1/dashboard/board"
+          ~method_:`HEAD))
+;;
+
+let test_exact_wins_over_a_prefix () =
+  let entries =
+    [ prefix "/a/" Route_access.Read_auth; exact "/a/b" Route_access.Always_public ]
+  in
+  check string "the exact row is the one dispatch reaches" "/a/b"
+    (match Server_account_route.covering entries ~path:"/a/b" ~method_:get with
+     | Some (entry : Server_account_route.entry) -> entry.path
+     | None -> "none")
+;;
+
+let test_longest_prefix_wins () =
+  let entries =
+    [ prefix "/a/" Route_access.Read_auth; prefix "/a/b/" Route_access.Always_public ]
+  in
+  check string "the longer prefix names the access"
+    (Yojson.Safe.to_string (Route_access.to_json Route_access.Always_public))
+    (match Server_account_route.covering entries ~path:"/a/b/c" ~method_:get with
+     | Some (entry : Server_account_route.entry) ->
+       Yojson.Safe.to_string (Route_access.to_json entry.access)
+     | None -> "none")
+;;
+
+let test_methods_at_names_head_after_get () =
+  let entries = [ exact ~methods:[ get ] "/m" Route_access.Always_public ] in
+  check (list string) "405 lists HEAD after GET, and so does this" [ "GET"; "HEAD" ]
+    (method_names (Server_account_route.methods_at entries ~path:"/m"))
+;;
+
+let test_keeper_prefix_missing_is_a_refusal () =
+  let entries = [ exact "/x" Route_access.Always_public ] in
+  check bool "a keeper sub-route without its prefix names the missing prefix" true
+    (match
+       Server_account_gate.decide entries ~path:"/api/v1/keepers/alice" ~method_:get
+     with
+     | Server_account_gate.Refused Server_account_gate.Keeper_prefix_missing -> true
+     | Server_account_gate.Refused _
+     | Server_account_gate.Allowed _ ->
+       false)
+;;
+
 let () =
   Alcotest.run
     "server_account_gate"
@@ -237,6 +295,13 @@ let () =
       , [ test_case "names what a path answers" `Quick
             test_methods_at_names_what_the_path_answers
         ; test_case "sees every registration" `Quick test_of_router_sees_every_registration
+        ; test_case "HEAD is answered by the GET route" `Quick
+            test_head_is_answered_by_the_get_route
+        ; test_case "an exact row wins over a prefix" `Quick test_exact_wins_over_a_prefix
+        ; test_case "the longest prefix wins" `Quick test_longest_prefix_wins
+        ; test_case "methods name HEAD after GET" `Quick test_methods_at_names_head_after_get
+        ; test_case "a keeper sub-route without its prefix is named" `Quick
+            test_keeper_prefix_missing_is_a_refusal
         ] )
     ]
 ;;

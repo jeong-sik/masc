@@ -30,11 +30,14 @@ val keeper_prefix : string
 (** The prefix whose sub-routes the route table cannot name. *)
 
 val covers : entry list -> path:string -> method_:Httpun.Method.t -> bool
-(** [covers entries ~path ~method_] is true when an entry answers [path]: an
-    [Exact] entry whose path is equal, or a [Prefix] entry whose path is a
-    prefix of [path]. The method must be one the entry lists; a route that
-    dispatches the path but not the method is not covered, because the inventory
-    speaks about accesses and a method the router does not index has none. *)
+(** [covers entries ~path ~method_] is true when an entry answers [path]. The
+    row is the one dispatch reaches, not the first row in the list: an exact
+    row is looked up before any prefix row, the longest prefix wins, and a tie
+    goes to the later registration ([Http_server_eio.Router.resolve]). A
+    [HEAD] request is asked as [GET], because dispatch keeps no HEAD table
+    ([Http_server_eio.Router.request_routes]). The method must be one the entry
+    lists; a route that dispatches the path but not the method is not covered.
+*)
 
 val covering : entry list -> path:string -> method_:Httpun.Method.t -> entry option
 (** {!covers} as the route it matched, for a caller that wants the access. *)

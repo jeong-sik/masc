@@ -252,7 +252,11 @@ class MemoryActTest(unittest.TestCase):
                     "now": {"kind": "unreadable_unit", "turn_log": TURN_LOG, "line": 9},
                 },
             ),
-            b"code=not_the_head now=unreadable_unit log-1:9",
+            # The footer keeps the start of a notice longer than its room: beside
+            # the fixture's build notice the line is cut inside the target, so the
+            # code it leads with is what this checks. A body whose target did not
+            # read would draw as an unanswered act, without the code.
+            b"code=not_the_head",
         )
 
 

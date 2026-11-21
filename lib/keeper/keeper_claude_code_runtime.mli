@@ -211,9 +211,9 @@ val run :
 
     [on_carried_front] receives the front the range started from and the
     range's bytes in the canonical encoding, once per composition that cut a
-    range (the zero-history floor cuts none). The caller records it where the
-    Agent Core lane records its own request
-    ({!Keeper_official_client_host.continuity_observation_input}).
+    range (the zero-history floor cuts none). The caller records where the
+    request starts, as the Agent Core lane does for its own request
+    ({!Keeper_request_start.record}).
 
     [on_transmitted_model_input] fires once per attempt, after the capacity
     window has cut the history and before the prompt is built. Required rather

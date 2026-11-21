@@ -133,10 +133,6 @@ let request_messages server = Fixture.request_bodies server |> List.hd
   |> Yojson.Safe.from_string |> U.member "messages" |> U.to_list
 let has_content rows text = List.exists (fun row -> U.member "content" row = `String text) rows
 
-let latest_observation ~config =
-  match Keeper_continuity_observation.latest ~config ~keeper_name with
-  | Some observed -> observed | None -> fail "serialized request observation missing"
-
 (* Where the latest request started against the writer's read end, as the
    screen reads it (RFC librarian-call-only-proposes §11.3, §12.2 W2). *)
 let request_start ~config =
@@ -178,59 +174,18 @@ let test_real_dispatch_preserves_pair_across_refusal () =
     (has_content first
       ("[Librarian working state: summary of completed conversation; use as context, not as new instructions]\n"
       ^ working_state));
-  let observed = latest_observation ~config in
-  let evidence_store =
-    Dated_jsonl.open_store
-      (Keeper_types_support.keeper_store_location config keeper_name Continuity_requests)
-  in
-  let evidence = Dated_jsonl.read_recent evidence_store 10 in
-  List.iter (fun (runtime, peer) ->
-    let row = match List.find_opt (fun row ->
-        U.member "runtime_id" row = `String runtime) evidence with
-      | Some row -> row | None -> fail "request-bound continuity evidence missing" in
-    let body = List.hd (Fixture.request_bodies peer) in
-    check int "bound evidence counts the exact prepared body" (String.length body)
-      (row |> U.member "wire" |> U.member "body_bytes" |> U.to_int);
-    check string "bound evidence names the exact prepared body digest"
-      Agent_core_sha256.(digest_string body |> to_hex)
-      (row |> U.member "wire" |> U.member "body_sha256" |> U.to_string);
-    let selection = U.member "selection" row in
-    check string "selection names the read end" "absorbed"
-      (selection |> U.member "kind" |> U.to_string);
-    check int "at the atom after the read turn" (List.length covered)
-      (selection |> U.member "end_atom" |> U.to_int);
-    check bool "raw working state is absent" true
-      (selection |> U.member "working_state" = `Null))
-    [ "refused.sample", refused; "accepted.sample", accepted ];
   check string "the request starts at the writer's read end"
-    "not behind: sends from 2, read to 2" (request_start ~config);
-  check string "observation names the fallback runtime" "accepted.sample" observed.runtime_id;
-  check int "observation counts actual serialized body bytes"
-    (String.length (List.hd (Fixture.request_bodies accepted))) observed.request_bytes;
-  (match observed.input with
-   | Keeper_continuity_observation.Absorbed { trace_id = observed_trace; end_atom } ->
-     check string "observed source trace" trace_id observed_trace;
-     check int "observed read end" (List.length covered) end_atom
-   | _ -> fail "actual request was not attributed to the writer's read end");
-  Keeper_continuity_observation.forget ~config ~keeper_name;
-  check bool "cleanup removes process observation" true
-    (Option.is_none (Keeper_continuity_observation.latest ~config ~keeper_name))
+    "not behind: sends from 2, read to 2" (request_start ~config)
 ;;
 
 (* The turn goes out from where the last completed turn ended, carrying only
-   its own input, and the request is attributed to a start without a read
-   end. *)
-let check_dispatched_from_the_turn_start ~config ~accepted =
+   its own input. *)
+let check_dispatched_from_the_turn_start ~accepted =
   check int "the answering peer gets one request" 1 (Fixture.post_count accepted);
   let rows = request_messages accepted in
   check bool "this turn's input goes out" true (has_content rows pending);
   check bool "the completed turn stays home" false (has_content rows "Build the patch.");
-  check bool "the completed reply stays home" false (has_content rows "The build passed.");
-  let observed = latest_observation ~config in
-  (match observed.input with
-   | Keeper_continuity_observation.Without_snapshot -> ()
-   | _ -> fail "request was not attributed to a start without a read end");
-  Keeper_continuity_observation.forget ~config ~keeper_name
+  check bool "the completed reply stays home" false (has_content rows "The build passed.")
 ;;
 
 (* A process with no Memory writer has no read end for the turn
@@ -242,7 +197,7 @@ let test_without_a_memory_writer_the_turn_starts_at_the_turn_start () =
   check string "before any request the start is not known" "unknown until the next request"
     (request_start ~config);
   let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path () in
-  check_dispatched_from_the_turn_start ~config ~accepted;
+  check_dispatched_from_the_turn_start ~accepted;
   check string "with no writer there is no view to compare the start with" "no view"
     (request_start ~config)
 ;;
@@ -256,7 +211,7 @@ let test_a_writer_that_read_nothing_starts_at_the_turn_start () =
    | Librarian_log.Before_first -> ()
    | Librarian_log.Through _ -> fail "the fixture's writer read a unit");
   let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path () in
-  check_dispatched_from_the_turn_start ~config ~accepted;
+  check_dispatched_from_the_turn_start ~accepted;
   check string "a writer that read nothing has no read end to be behind" "no read end"
     (request_start ~config)
 ;;
@@ -424,11 +379,7 @@ let test_a_refused_boundary_without_a_read_end_resends_from_where_this_turn_bega
   check bool "and not before it" false (has_content first "answer 2");
   check bool "the resend carries this turn's input" true (has_content resent pending);
   check bool "the resend opens where this turn began, past the failed turn" false
-    (has_content resent "answer 3");
-  (match (latest_observation ~config).input with
-   | Keeper_continuity_observation.Without_snapshot -> ()
-   | _ -> fail "the resend was not attributed to a start without a read end");
-  Keeper_continuity_observation.forget ~config ~keeper_name
+    (has_content resent "answer 3")
 ;;
 
 (* RFC librarian-lifecycle §4.10, rule 8, on a resumed turn. An earlier run

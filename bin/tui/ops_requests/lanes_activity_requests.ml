@@ -208,7 +208,6 @@ let open_lane_run_detail (state : T.state) ~mailbox ~(lane : Lane_run_identity.t
   state.T.lane_run_detail <- None;
   state.T.lane_run_detail_error <- None;
   state.T.lane_run_detail_scroll <- 0;
-  state.T.lane_run_preflight_details <- false;
   state.T.lane_run_detail_content_height <- 0;
   launch_lane_run_detail_load state ~mailbox ~run_id
 

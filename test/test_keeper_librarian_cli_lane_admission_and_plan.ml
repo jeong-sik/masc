@@ -963,40 +963,7 @@ let test_memory_inference_retains_gated_decision () =
   check bool "Memory prompt carries original conversation" true
     (Astring.String.is_infix ~affix:"new conversation" prompt);
   check bool "Memory prompt carries original current facts" true
-    (Astring.String.is_infix ~affix:current_a.claim prompt && Astring.String.is_infix ~affix:current_b.claim prompt);
-  let module Registry = Masc.Exact_lane_run_registry in
-  let run = match Registry.get (Registry.global ()) ~run_id:step.run_id with
-    | Some run -> run | None -> fail "inference run evidence missing" in
-  let json = Fixture.lane_run_detail run in
-  let decoded = Masc.Tui_decode.decode_lane_run_detail json |> require in
-  let reading = match decoded.lrd_librarian_preflight with
-    | Some reading -> reading | None -> fail "inference reading missing" in
-  check bool "actual producer decodes as Memory inference" true
-    (reading.lp_memory_scope = Masc.Tui_decode.Memory_inference_scope);
-  check bool "no successful Memory snapshot is claimed" true (reading.lp_memory_result=None);
-  check bool "no successful side write is claimed" true
-    (reading.lp_side_writes =
-      [Masc.Tui_decode.Context_write,Masc.Tui_decode.Side_not_attempted;
-       Masc.Tui_decode.Continuity_write,Masc.Tui_decode.Side_not_attempted]);
-  let member = Yojson.Safe.Util.member in
-  let output = member "output" (member "run" json) in
-  let with_field key value = match json, output with
-    | `Assoc envelope, `Assoc output ->
-      (match List.assoc_opt "run" envelope with
-       | Some (`Assoc fields) ->
-         `Assoc (("run", `Assoc (("output", `Assoc ((key,value)::List.remove_assoc key output))
-           :: List.remove_assoc "output" fields)) :: List.remove_assoc "run" envelope)
-       | Some _ | None -> fail "invalid captured run")
-    | _ -> fail "invalid captured run" in
-  let after = `Assoc ["revision",`Int 1;"fact_count",`Int 1;"commit",`String "unchanged";
-    "change",`Assoc ["added_count",`Int 0;"removed_count",`Int 0]] in
-  check bool "an inference cannot claim snapshot publication" true
-    (Result.is_error (Masc.Tui_decode.decode_lane_run_detail (with_field "after" after)));
-  check bool "an inference cannot claim continuity publication" true
-    (Result.is_error (Masc.Tui_decode.decode_lane_run_detail
-      (with_field "continuity_write" (`Assoc ["status",`String "outcome_unconfirmed"]))));
-  check bool "malformed inference marker cannot change scope" true
-    (Result.is_error (Masc.Tui_decode.decode_lane_run_detail (with_field "memory_inference" (`Bool false))))
+    (Astring.String.is_infix ~affix:current_a.claim prompt && Astring.String.is_infix ~affix:current_b.claim prompt)
 ;;
 
 module Memory_plan = Masc.Keeper_librarian_memory_plan

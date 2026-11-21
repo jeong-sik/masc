@@ -152,7 +152,7 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 - 관측 metric 은 프로세스에 하나다(`lib/keeper/keeper_workspace_memory_observation_metrics.ml:9-12`).
 - `GET /api/v1/dashboard/workspace-memory-context` 는 원장이 아니라 모든 Keeper 의 기억 저장소를 준다(`lib/server/server_routes_http_routes_dashboard.ml:718`, `lib/server/server_dashboard_http_keeper_memory_health.ml:947`). 범위로는 Keeper 의 것이다.
 - 원장을 쓰는 것은 큐레이터 하나다. 원장(`lib/server/server_workspace_memory_curator.ml:640`, `:739`), 바뀐 기록(`:650`), briefing(`:806`, `:867`)을 쓴다.
-- 큐레이터는 준비 뒤 lane 에서 뜬다(`lib/server/server_runtime_bootstrap.ml:1576`). 다계정 엔진도 같은 길로 띄운다(`:1835`).
+- 큐레이터는 준비 뒤 lane 에서 뜬다(`lib/server/server_runtime_bootstrap.ml` 의 `Server_workspace_memory_curator.start`). 다계정 엔진은 띄우지 않는다. #54193 이 `curates_workspace_memory`(다계정이면 `false`)로 이 시작 호출을 막았다.
 - 큐레이터는 Librarian 기억 lane 을 `Exact.start_flow` 로 직접 부른다(`lib/server/server_workspace_memory_curator.ml:56`, `:280`). 주체 인자는 없고, slot 은 프로세스에 하나인 lane 표(registry)에서 푼다(`:37-38`). #54088 이 병합된 뒤로 큐레이터는 자기 표 `workspace_memory_curator` 로만 묻는다.
 - 분류 pass 는 lane 을 보기 전에 reconcile 을 돈다(`:624-666`). reconcile 은 모든 Keeper 의 저장소를 읽고, 사라진 사실이 있으면 원장과 바뀐 기록을 쓴다. 그래서 lane 표를 비워도 원장은 바뀐다.
 - reconcile 은 목록에 없는 Keeper 의 사실을 사라진 것으로 적는다(`vanished_keepers`, `lib/workspace_memory/workspace_memory_ledger.mli:161`).
@@ -463,3 +463,4 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 - 2026-11-21: 병합 뒤 사실을 고쳤다. main 의 엔진은 아직 사람의 Keeper 를 돌리지 않아서, 「먼저」는 지금의 노출이 아니라 그 길보다 먼저 들어갈 일이다. 큐레이터 줄은 #54193 이다. #54088 병합을 §1.7 에 적었다.
 - 2026-11-21: §6 을 「정한 것」으로 바꿨다. 6 의 한 주인 안 나누기는 사용자 결정을 기다린다. 결정 7 을 Librarian 까지 넓히고, 「먼저」에 다계정 엔진이 Librarian 을 묻지 않는 일을 더했다.
 - 2026-11-21: 리뷰를 반영했다. 「먼저」 줄을 들어간 것(#54193)과 남은 것(#54236, 기억 폴더)으로 나눴다. 계획 문장과 지금 사실을 나눠 적었다. #54189 병합을 적었다. 결정 4 에 이름 바꾸기를 정했다. 로그를 믿을 수 없을 때 다시 연결이 거절된다는 것과, 보낼 것 없는 연결은 다음에 보낼 때 닫힌다는 것을 적었다.
+- 2026-11-21: 리뷰를 반영했다. §1.7 의 큐레이터 줄이 다계정 엔진도 큐레이터를 띄운다고 적어 #54193 과 반대였다. 지금 사실로 고쳤다.

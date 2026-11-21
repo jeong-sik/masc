@@ -4355,7 +4355,6 @@ status: reference
   대체한다(#38477). 이때 이전 작업 상태(`working_state`)는 하드컷 정책에 따라 폐기되며,
   재구축 중에도 `catch_up_end_atom`을 유지하여 턴 드라이버가 Librarian 위치에서 안정적으로
   시작하도록 보장한다. 파일 읽기 실패(`Sys_error`)는 영구 오류로 남는다.
-  `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
 
 **Working State (대화 작업 상태)**
@@ -4728,8 +4727,8 @@ status: reference
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
   이 이름은 프롬프트 category `librarian`(`config/prompts/librarian.md`,
-  `workspace_memory_curator.md`)과 CLI `masc-librarian-replay`·`masc-librarian-continuity`가
-  공유한다. 셋은 서로 다른 것이고, 어느 것도 Skill이 아니다.
+  `workspace_memory_curator.md`)과 CLI `masc-librarian-replay`가
+  공유한다. 둘은 서로 다른 것이고, 어느 것도 Skill이 아니다.
   → [Keeper_librarian](../../lib/keeper/keeper_librarian.mli)
 
 **Librarian Gap (빠진 구간)**
@@ -4815,11 +4814,3 @@ status: reference
   아니라 그 lane이 JEV를 쓸 수 있는지의 구성 상태다. decode는 `state` 값 `off`·
   `configured`(+`model`)·`cli_only`·`lane_unavailable`을 받는다.
 
-**Continuity Measurement (의미 보존 측정)**
-: 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과
-  비교해 그 답을 평가하는 관측. CLI `masc-librarian-continuity`가 이 측정을
-  돌리는 하네스이며, 명시한 합성 입력과 각 단계의 결과를 JSON 파일에 저장한다.
-  TUI의 `/measurement SHA`는 게시한 결과 사본을 읽는다. 운영 Librarian 실행이나
-  Memory 변경을 승인하는 Gate가 아니다. 실행 방법과 결과의 한계는
-  [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.
-  → [masc_librarian_continuity](../../bin/masc_librarian_continuity.ml)

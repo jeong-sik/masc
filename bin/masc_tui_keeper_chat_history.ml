@@ -646,8 +646,8 @@ let journal_line_text = function
       Printf.sprintf "%s [%s] %s"
         (Masc_tui_message_layout.journal_sign_text sign) category claim
   | Masc_tui_message_layout.Journal_drop { memory_id; reason } ->
-      Printf.sprintf "drop %s%s%s" memory_id
-        Masc_tui_message_layout.journal_drop_separator reason
+      Printf.sprintf "%s %s%s%s" Masc_tui_message_layout.journal_drop_label
+        memory_id Masc_tui_message_layout.journal_drop_separator reason
 
 let memory_source_label (fields : (string * Yojson.Safe.t) list) =
   match assoc_opt "source" fields with

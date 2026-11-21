@@ -251,6 +251,9 @@ type entry = {
     removed one. *)
 val journal_sign_text : journal_sign -> string
 
+(** What stands in the category column of a dropped memory, [drop]. *)
+val journal_drop_label : string
+
 (** What joins a dropped memory's id and its reason, [" · "]: two facts of
     one rank (RFC tui-one-screen-grammar 6.5). *)
 val journal_drop_separator : string

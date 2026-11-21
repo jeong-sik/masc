@@ -7151,6 +7151,7 @@
 (include stanzas/test_keeper_continuity_dispatch.inc)
 
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
+(include stanzas/test_keeper_librarian_capacity_callback_continuity_and_durable.inc)
 (include stanzas/test_keeper_librarian_preflight.inc)
 (include stanzas/test_keeper_librarian_walk_failure_algebra.inc)
 

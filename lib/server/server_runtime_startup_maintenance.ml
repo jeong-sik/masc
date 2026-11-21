@@ -177,28 +177,6 @@ let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
       outcomes
 ;;
 
-(* The links are read whole (about 2.7GB on 2026-11-06), so
-   the sweep takes a worker domain instead of holding back readiness. *)
-let startup_sweep_unowned_exact (state : Mcp_server.server_state) =
-  let config = Mcp_server.workspace_config state in
-  match
-    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-      Server_unowned_exact_sweep.run_for_workspace config)
-  with
-  | Error error ->
-    Log.Server.warn "[Startup] %s" (Server_unowned_exact_sweep.error_to_string error)
-  | Ok report ->
-    Log.Server.info
-      "[Startup] unowned Exact sweep: declarations=%d live_originals=%d kept_exact_records=%d \
-       kept_proofs=%d removed_proofs=%d removed_proof_bytes=%Ld removed_exact_records=%d \
-       removed_exact_record_bytes=%Ld kept_observations=%d removed_observations=%d \
-       removed_observation_bytes=%Ld"
-      report.declarations report.live_originals report.kept_exact_records report.kept_proofs
-      report.removed_proofs report.removed_proof_bytes report.removed_exact_records
-      report.removed_exact_record_bytes report.kept_observations report.removed_observations
-      report.removed_observation_bytes
-;;
-
 (* The pass counts instances every minute; the
    bytes are read here once, because the observation tree holds hundreds of
    thousands of files. *)
@@ -315,13 +293,11 @@ let report_unarmed_typesafeai_destinations () =
 type task =
   | Jsonl_retention
   | Microvm_guest_sweep
-  | Unowned_exact_sweep
   | Superseded_lane_census
 
 let task_name = function
   | Jsonl_retention -> "jsonl_prune"
   | Microvm_guest_sweep -> "microvm_guest_sweep"
-  | Unowned_exact_sweep -> "unowned_exact_sweep"
   | Superseded_lane_census -> "superseded_lane_census"
 
 let start_maintenance ~sw ~task ~run =

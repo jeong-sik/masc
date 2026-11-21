@@ -15,7 +15,6 @@
 
 (** Each consumer keeps every original under one scope. *)
 type t =
-  | Workspace_curator
   | Completion_review
   | Goal_proof_review
   | Candle_appraisal

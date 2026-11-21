@@ -36,13 +36,11 @@
 
 val runner : base_path:string -> Lane_addon_exact.runner
 val authorize_request : base_path:string -> Lane_addon_exact.execution_authority
-(** Host-owned consumer authority. Register together with [runner]; the common
-    Exact owner composes it with mandatory package/request schema checks before
-    accepting a candidate and when delivering a retained answer. Existing
-    requests receive Standard admission only after the original Curator binding
-    checks succeed. Worker package/lane names never select another class.
-    [runner] preserves the supplied host class through the real HTTP flow;
-    retained delivery rechecks authority without running a provider again. *)
+(** Host-owned consumer authority. Register together with [runner]. Every
+    request receives Standard admission, and its answer is checked only by the
+    package and request schemas the common Exact owner applies. Worker
+    package/lane names never select another class. [runner] preserves the
+    supplied host class through the real HTTP flow. *)
 
 module For_testing : sig
   val runner : base_path:string -> cli_runner:Keeper_lane_cli_oneshot.runner -> Lane_addon_exact.runner

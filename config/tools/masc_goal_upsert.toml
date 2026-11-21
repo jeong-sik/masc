@@ -3,7 +3,7 @@ description = """
 Create or update flat Goal metadata.
 
 Creation requires a \
-measurable success condition: measure and procedure (RFC-0387 B1). A changed \
+measurable success condition: measure and procedure. A changed \
 effective criterion must keep title and procedure non-blank; \
 omitted fields retain their stored values. This checks input completeness, \
 not semantic feasibility. Use masc_goal_transition for lifecycle changes."""
@@ -21,16 +21,17 @@ type = "string"
 name = "title"
 type = "string"
 
-# B1 is NOT expressed as required = true on purpose: this one tool serves both
-# create and update, and JSON Schema `required` is unconditional, so listing
-# measure/procedure would reject every metadata update of an existing goal.
-# The store checks creation and changed effective criteria inside the write
-# lock. Omitted fields preserve stored values, so partial updates remain valid.
+# The creation requirement is NOT expressed as required = true on purpose:
+# this one tool serves both create and update, and JSON Schema `required` is
+# unconditional, so listing measure/procedure would reject every metadata
+# update of an existing goal. The store checks creation and changed effective
+# criteria inside the write lock. Omitted fields preserve stored values, so
+# partial updates remain valid.
 [[params]]
 name = "measure"
 type = "object"
 description = """
-What counts as done, as one of three shapes. A count: {"kind":"count","noun":"층","total":14}. A quantity against a limit: {"kind":"quantity","unit":"ms","direction":"at_most","target":100} (direction is at_least or at_most). A condition that holds or not: {"kind":"done_when","condition":"..."}. An unknown kind, a missing field or an extra field is refused. Required when the upsert creates a new goal (RFC-0387 B1); optional on update, preserving its stored value when omitted."""
+What counts as done, as one of three shapes. A count: {"kind":"count","noun":"층","total":14}. A quantity against a limit: {"kind":"quantity","unit":"ms","direction":"at_most","target":100} (direction is at_least or at_most). A condition that holds or not: {"kind":"done_when","condition":"..."}. An unknown kind, a missing field or an extra field is refused. Required when the upsert creates a new goal; optional on update, preserving its stored value when omitted."""
 
 [[params]]
 name = "procedure"

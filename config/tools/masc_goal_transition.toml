@@ -1,6 +1,6 @@
 name = "masc_goal_transition"
 description = """
-Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate).
+Apply an explicit Goal lifecycle transition.
 
 \
 request_complete moves executing -> verifying and persists a proof request \

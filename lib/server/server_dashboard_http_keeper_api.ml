@@ -547,8 +547,6 @@ let handle_keeper_get_subroutes state req request reqd =
          reqd))
   | Some Route.(Keeper (Last_prompt, name)) ->
     Prompt_reads.handle_last_prompt_get state req reqd name
-  | Some Route.(Keeper (Provider_input_continuity, name)) ->
-    Prompt_reads.handle_provider_input_continuity_get state req reqd name
   | Some Route.(Keeper (Provider_input_part, name)) ->
     Prompt_reads.handle_provider_input_part_get state req reqd name
   | Some Route.(Keeper (Provider_input, name)) ->

@@ -25,7 +25,6 @@ type keeper_route =
   | Operator_note
   | Next_request
   | Last_prompt
-  | Provider_input_continuity
   | Provider_input_part
   | Provider_input
   | Cache_outcome
@@ -71,7 +70,6 @@ let suffix = function
   | Operator_note -> Types.keeper_suffix_operator_note
   | Next_request -> "/next-request"
   | Last_prompt -> "/last-prompt"
-  | Provider_input_continuity -> Types.keeper_suffix_provider_input_continuity
   | Provider_input_part -> Types.keeper_suffix_provider_input_part
   | Provider_input -> Types.keeper_suffix_provider_input
   | Cache_outcome -> Types.keeper_suffix_cache_outcome
@@ -134,11 +132,9 @@ let permission ?(include_thinking = false) = function
      | Github_identity
      | Raw_traces
      | Raw_trace
-     (* A part and the continuity record are items of the request the list
-        door describes. *)
+     (* A part is an item of the request the list door describes. *)
      | Provider_input
      | Provider_input_part
-     | Provider_input_continuity
      | Memory_journal
      (* The fact rows are the journal's committed content, read back as the
         current set. *)

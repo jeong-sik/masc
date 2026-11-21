@@ -317,10 +317,11 @@ spec 은 `specs/keeper-state-machine/KeeperReactionQueue.tla` 와 cfg 열 개다
 
 ### 5.1 모델
 
-- Keeper 하나의 큐다. 입력은 셋이다. 모델의 「사람 입력」은 §4.2 의 `Now`, 「Keeper 입력」은 `At_tick` 이다.
-  - 사람 입력: 넣을 때 깨운다.
-  - Keeper 입력: 다음 틱 경계에서 깨운다. 그때 기다리던 Keeper 입력을 모두 한 번에 깨운다.
-  - Carry: 깨우지 않는다.
+- Keeper 하나의 큐다. 입력의 깨우기 종류는 §4.2 의 셋이다(모델 이름 `now`·`at_tick`·`carry`).
+  - `Now`: 넣을 때 깨운다.
+  - `At_tick`: 다음 틱 경계에서 깨운다. 그때 기다리던 `At_tick` 입력을 모두 한 번에 깨운다.
+  - `Carry`: 깨우지 않는다.
+- 입력마다 출처(`source`)가 있다. 출처는 지금 `select` 가 묶음을 가르는 기준이다(묶음 RFC §2.2). 보낸 사람 종류(§3.4)와 다르다. 버그 cfg 둘만 출처를 쓴다.
 - 어느 까닭으로 열린 턴이든 기다리던 입력을 모두 가져간다.
 - 시간은 틱 경계로 센다. 주기는 `Period` 경계마다 온다. 턴 하나는 `TurnBound` 경계 안에 끝난다.
 - 깨운 Keeper 는 다음 경계 전에 사이클을 연다.
@@ -333,11 +334,11 @@ spec 은 `specs/keeper-state-machine/KeeperReactionQueue.tla` 와 cfg 열 개다
 
 | 이름 | 뜻 |
 |---|---|
-| `HumanRoutable` | 기다리는 사람 입력에는 깨우기 신호나 도는 턴이 있다 |
+| `NowRoutable` | 기다리는 `Now` 입력에는 깨우기 신호나 도는 턴이 있다 |
 | `RaisedRoutable` | 깨우기를 올린 입력에는 깨우기 신호나 도는 턴이 있다 |
-| `HumanAgeBound` | 사람 입력은 도는 턴 하나(`TurnBound`)보다 오래 기다리지 않는다 |
-| `KeeperAgeBound` | Keeper 입력은 `max(1, TurnBound)` 보다 오래 기다리지 않는다. 입력 수와 보낸 사람 수에 상관없다 |
-| `CarryAgeBound` | Carry 는 `Period + TurnBound` 보다 오래 기다리지 않는다 |
+| `NowAgeBound` | `Now` 입력은 도는 턴 하나(`TurnBound`)보다 오래 기다리지 않는다 |
+| `AtTickAgeBound` | `At_tick` 입력은 `max(1, TurnBound)` 보다 오래 기다리지 않는다. 입력 수와 출처 수에 상관없다 |
+| `CarryAgeBound` | `Carry` 입력은 `Period + TurnBound` 보다 오래 기다리지 않는다 |
 | `TurnHasCause` | 턴은 깨우기를 올린 입력이 있거나 주기 경계가 될 때만 열린다 |
 | `EveryInputReachesATurn` | 공정성 아래에서 기다리는 입력은 모두 턴에 실린다(활성) |
 
@@ -351,22 +352,22 @@ cfg 마다 버그 하나를 더한다. 버그 cfg 는 반드시 위반해야 한
 | cfg | 버그 | 깨지는 성질 |
 |---|---|---|
 | `-buggy` | 깨우기 신호를 소비하고 사이클을 열지 않는다(옛 spec 의 버그) | `RaisedRoutable` |
-| `-human-waits-for-boundary-buggy` | 사람 입력이 깨우지 않고 경계를 기다린다 | `HumanRoutable` |
-| `-claim-one-sender-buggy` | 턴이 가장 오래된 입력의 보낸 사람 것만 가져간다 | `KeeperAgeBound` |
+| `-now-waits-for-boundary-buggy` | `Now` 입력이 깨우지 않고 경계를 기다린다 | `NowRoutable` |
+| `-claim-one-source-buggy` | 턴이 가장 오래된 입력과 출처가 같은 것만 가져간다 | `AtTickAgeBound` |
 | `-one-turn-per-tick-buggy` | 위와 같고, 남은 입력이 다음 경계까지 깨우기를 잃는다 | `RaisedRoutable` |
 | `-periodic-skips-carry-buggy` | 주기 사이클이 Carry 를 두고 턴 없이 경계를 쓴다 | `CarryAgeBound` |
 | `-turn-for-unraised-input-buggy` | 판정이 깨우기를 올리지 않은 입력에 턴을 연다 | `TurnHasCause` |
 | `-fair-periodic-skips-carry-buggy` | 주기 사이클이 매번 Carry 를 두고 Skip 한다 | `EveryInputReachesATurn` |
 
-- `-claim-one-sender-buggy` 는 §4.3 선행 조건의 근거다.
-  - 반례: Carry(보낸 사람 1)와 Keeper 입력(보낸 사람 2)이 같이 기다린다.
-  - 경계 뒤의 턴이 보낸 사람 1 의 것만 가져간다.
-  - 다음 경계에서 Keeper 입력의 나이가 2 가 된다. 보낸 사람이 하나 늘 때마다 턴 하나씩 더 기다린다.
+- `-claim-one-source-buggy` 는 §4.3 선행 조건의 근거다.
+  - 반례: `Carry` 입력(출처 1)과 `At_tick` 입력(출처 2)이 같이 기다린다.
+  - 경계 뒤의 턴이 출처 1 의 것만 가져간다.
+  - 다음 경계에서 `At_tick` 입력의 나이가 2 가 된다. 출처가 하나 늘 때마다 턴 하나씩 더 기다린다.
 - `-one-turn-per-tick-buggy` 는 「틱 하나에 턴 하나」를 같은 출처만 묶는 select 와 같이 둔 모양이다. 한 턴에 못 실은 입력을 다음 경계까지 아무도 맡지 않는다.
 
 ### 5.4 돌린 결과
 
-TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime = 8`, `Period = 3`, `TurnBound = 1`, `LastArrival = 7`, `Senders = {"s1", "s2"}` 다.
+TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime = 8`, `Period = 3`, `TurnBound = 1`, `LastArrival = 7`, `Sources = {"s1", "s2"}` 다.
 
 | cfg | 결과 | 상태 수 |
 |---|---|---|
@@ -382,9 +383,9 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 
 모델의 성질은 아래를 지킬 때만 코드에서도 선다.
 
-1. `Now` 입력은 넣을 때 깨운다(`HumanRoutable`).
-2. 틱 경계는 그때 기다리던 Keeper 입력을 개수와 상관없이 모두 깨운다. 턴은 기다리던 입력을 보낸 사람과 상관없이 모두 가져간다(`KeeperAgeBound`).
-3. 판정은 깨우기를 올린 입력이 있거나 주기·예약 시각이 될 때만 턴을 연다. Carry 행이나 경계 전 Keeper 행만 있으면 턴을 열지 않는다(`TurnHasCause`).
+1. `Now` 입력은 넣을 때 깨운다(`NowRoutable`).
+2. 틱 경계는 그때 기다리던 `At_tick` 입력을 개수와 상관없이 모두 깨운다. 턴은 기다리던 입력을 출처와 상관없이 모두 가져간다(`AtTickAgeBound`).
+3. 판정은 깨우기를 올린 입력이 있거나 주기·예약 시각이 될 때만 턴을 연다. `Carry` 행이나 경계 전 `At_tick` 행만 있으면 턴을 열지 않는다(`TurnHasCause`).
 4. `pending_stimulus_remains`(`next_cycle_starts_now` 가 읽는다)는 깨우기를 올린 행만 센다. 아니면 턴 도중 들어온 Carry 가 턴이 끝나자마자 다음 사이클을 연다.
 5. 주기 경계가 된 사이클은 Carry 가 기다리면 턴을 연다(`CarryAgeBound`).
    - 지금 판정은 scheduled-autonomous gate 가 꺼진 Keeper 의 주기 사이클을 `Scheduled_autonomous_disabled` 로 Skip 한다.
@@ -395,7 +396,7 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 
 - 예약 전달의 답할 곳 갈래(§3.2). 예약은 제 시각에 깨고, 이 RFC 는 예약의 묶음 규칙을 바꾸지 않는다.
 - Keeper 여럿과 고정 시차(`offset(k)`). Keeper 하나의 모델에서는 보이지 않는다. 같은 초에 몰리는지는 §8 에서 잰다.
-- provider 쉼(`Serve_wakeup_after_duration`). 쉬는 동안은 사람 입력도 쉼이 끝날 때까지 기다린다. 사람 입력의 상한은 쉼이 없을 때의 값이다.
+- provider 쉼(`Serve_wakeup_after_duration`). 쉬는 동안은 `Now` 입력도 쉼이 끝날 때까지 기다린다. `NowAgeBound` 는 쉼이 없을 때의 값이다.
 - 실패하거나 체크포인트에서 멈춘 턴. 모델의 `CycleStart` 는 기다리던 입력을 한 번에 가져가 모두 처리한다. 그래서 §5.2 의 나이 상한은 턴이 끝까지 돌 때만 선다. 그런 턴이 남긴 행은 시작값 간격(§4.4)으로 다시 시도한다.
 - 실패한 턴을 이어 받는 사이클(`cycle_wake = Deferred_runtime_lane`, 판정의 `deferred_runtime_lane_pending`). 입력도 주기도 아닌 세 번째 원인이다. 구현은 `TurnHasCause` 를 옮길 때 이 사이클을 막지 않는다.
 

@@ -3,12 +3,15 @@
 \* An input's kind decides only when it raises the Keeper's wake. Whatever
 \* opens a turn, the turn takes every input that is waiting, raised or not.
 \*
-\*   human   operator chat, HITL answer, Ask answer. Raised at enqueue.
-\*   keeper  a React input another Keeper made. Raised at the next tick
-\*           boundary of this Keeper's fixed phase, together with every other
-\*           keeper input that waited through that boundary.
-\*   carry   never raised. It rides the next turn, at the latest the turn of
-\*           the next periodic boundary.
+\*   now      raised at enqueue.
+\*   at_tick  raised at the next tick boundary of this Keeper's fixed phase,
+\*            together with every other at_tick input that waited through
+\*            that boundary.
+\*   carry    never raised. It rides the next turn, at the latest the turn of
+\*            the next periodic boundary.
+\*
+\* The producer of an input picks its kind. The RFC's input table (section
+\* 4.1) lists which payload takes which kind.
 \*
 \* Time counts tick boundaries. A turn spans at most TurnBound boundaries: a
 \* turn closes at the typed end the model reports, and the bound stands for
@@ -17,13 +20,14 @@
 \* Keepers off the same instant is not visible in one Keeper's model.
 \*
 \* Runtime correspondence the RFC steps write:
-\*   - Keeper_keepalive_signal.wakeup_keeper raises the wake for human input
-\*     at enqueue. The tick boundary raises it for keeper input. Carry input
+\*   - Keeper_keepalive_signal.wakeup_keeper raises the wake for now input
+\*     at enqueue. The tick boundary raises it for at_tick input. Carry input
 \*     is enqueued without it.
 \*   - The keepalive verdict opens a turn only for a raised input or a due
 \*     clock (CycleStart). The turn's claim takes every waiting entry across
-\*     senders (steps 2-3 of
-\*     RFC-a-keeper-takes-every-waiting-message-in-one-turn).
+\*     sources (steps 2-3 of
+\*     RFC-a-keeper-takes-every-waiting-message-in-one-turn). A source is the
+\*     key today's select groups a batch by (that RFC, section 2.2).
 \*   - pending_stimulus_remains, read by next_cycle_starts_now, counts only
 \*     raised entries.
 \*   - periodic_cadence_after_cycle consumes the periodic boundary when the
@@ -31,10 +35,10 @@
 \*
 \* Planted bugs, one buggy cfg each:
 \*   MissedDirectedWake     the wake is consumed but no cycle starts.
-\*   HumanWaitsForBoundary  human input is enqueued without its wake.
-\*   ClaimOneSender         a turn takes only the oldest input's sender; the
-\*                          next sender waits for the next turn.
-\*   OneTurnPerTick         ClaimOneSender, and the inputs left behind lose
+\*   NowWaitsForBoundary    now input is enqueued without its wake.
+\*   ClaimOneSource         a turn takes only the oldest input's source; the
+\*                          next source waits for the next turn.
+\*   OneTurnPerTick         ClaimOneSource, and the inputs left behind lose
 \*                          their wake until the next boundary.
 \*   PeriodicSkipsCarry     a due periodic cycle opens no turn while only
 \*                          carry input waits, and consumes the boundary.
@@ -48,7 +52,7 @@ CONSTANTS
     Period,      \* periodic interval, in tick boundaries
     TurnBound,   \* longest turn, in tick boundaries
     LastArrival, \* the last tick boundary an input may arrive at
-    Senders
+    Sources
 
 ASSUME ConstantsOK ==
     /\ MaxStimuli \in Nat /\ MaxStimuli >= 2
@@ -56,22 +60,22 @@ ASSUME ConstantsOK ==
     /\ Period \in Nat \ {0}
     /\ TurnBound \in Nat \ {0}
     /\ LastArrival \in Nat /\ LastArrival < MaxTime
-    /\ Senders # {}
+    /\ Sources # {}
 
-Kinds == {"human", "keeper", "carry"}
+Kinds == {"now", "at_tick", "carry"}
 
 Entries ==
-    [ id : 1..MaxStimuli, kind : Kinds, sender : Senders,
+    [ id : 1..MaxStimuli, kind : Kinds, source : Sources,
       arrived : 0..MaxTime, raised : BOOLEAN ]
 
 Max(a, b) == IF a >= b THEN a ELSE b
 
-\* The longest a human input waits: the turn that was running when it came.
-HumanDelay == TurnBound
+\* The longest a now input waits: the turn that was running when it came.
+NowDelay == TurnBound
 
-\* The longest a keeper input waits: one boundary, or the turn that was
+\* The longest an at_tick input waits: one boundary, or the turn that was
 \* running when it came.
-KeeperDelay == Max(1, TurnBound)
+AtTickDelay == Max(1, TurnBound)
 
 \* The longest a carry input waits: one periodic interval, counted from the
 \* end of the turn that served the last periodic boundary.
@@ -119,23 +123,23 @@ Init ==
 
 PeriodicDue == now - last_periodic >= Period
 
-Entry(kind, sender) ==
-    [ id |-> enqueued_total + 1, kind |-> kind, sender |-> sender,
-      arrived |-> now, raised |-> kind = "human" ]
+Entry(kind, source) ==
+    [ id |-> enqueued_total + 1, kind |-> kind, source |-> source,
+      arrived |-> now, raised |-> kind = "now" ]
 
 Enqueue ==
     /\ enqueued_total < MaxStimuli
     /\ now <= LastArrival
-    /\ \E kind \in Kinds, sender \in Senders :
-         /\ waiting' = waiting \cup { Entry(kind, sender) }
-         /\ wake' = (wake \/ kind = "human")
+    /\ \E kind \in Kinds, source \in Sources :
+         /\ waiting' = waiting \cup { Entry(kind, source) }
+         /\ wake' = (wake \/ kind = "now")
     /\ enqueued_total' = enqueued_total + 1
     /\ UNCHANGED << now, claimed_total, cycle, turn_started, turn_periodic,
                     turn_cause, last_periodic >>
 
 \* The next tick boundary. A Keeper whose wake is raised or whose periodic
 \* boundary is due has started its cycle before it, and a running turn ends
-\* within TurnBound boundaries. Every keeper input that waited through the
+\* within TurnBound boundaries. Every at_tick input that waited through the
 \* boundary is raised at once, whatever its count.
 Boundary ==
     /\ now < MaxTime
@@ -143,8 +147,8 @@ Boundary ==
     /\ ~(cycle = "running" /\ now - turn_started >= TurnBound)
     /\ now' = now + 1
     /\ waiting' =
-         { [ e EXCEPT !.raised = (e.raised \/ e.kind = "keeper") ] : e \in waiting }
-    /\ wake' = (wake \/ \E e \in waiting : e.kind = "keeper" /\ ~e.raised)
+         { [ e EXCEPT !.raised = (e.raised \/ e.kind = "at_tick") ] : e \in waiting }
+    /\ wake' = (wake \/ \E e \in waiting : e.kind = "at_tick" /\ ~e.raised)
     /\ UNCHANGED << enqueued_total, claimed_total, cycle, turn_started,
                     turn_periodic, turn_cause, last_periodic >>
 
@@ -212,21 +216,21 @@ MissedDirectedWake ==
     /\ UNCHANGED << now, waiting, enqueued_total, claimed_total, cycle,
                     turn_started, turn_periodic, turn_cause, last_periodic >>
 
-HumanWaitsForBoundary ==
+NowWaitsForBoundary ==
     /\ enqueued_total < MaxStimuli
     /\ now <= LastArrival
-    /\ \E sender \in Senders :
+    /\ \E source \in Sources :
          waiting' = waiting \cup
-           { [ Entry("human", sender) EXCEPT !.raised = FALSE ] }
+           { [ Entry("now", source) EXCEPT !.raised = FALSE ] }
     /\ enqueued_total' = enqueued_total + 1
     /\ UNCHANGED << now, claimed_total, wake, cycle, turn_started,
                     turn_periodic, turn_cause, last_periodic >>
 
 Oldest == CHOOSE e \in waiting : \A f \in waiting : e.id <= f.id
 
-Taken == { e \in waiting : e.sender = Oldest.sender }
+Taken == { e \in waiting : e.source = Oldest.source }
 
-StartTakingOneSender(keep_wake) ==
+StartTakingOneSource(keep_wake) ==
     /\ cycle = "sleeping"
     /\ wake \/ PeriodicDue
     /\ TurnCause # "none"
@@ -240,9 +244,9 @@ StartTakingOneSender(keep_wake) ==
     /\ wake' = (keep_wake /\ \E e \in waiting \ Taken : e.raised)
     /\ UNCHANGED << now, enqueued_total, last_periodic >>
 
-ClaimOneSender == StartTakingOneSender(TRUE)
+ClaimOneSource == StartTakingOneSource(TRUE)
 
-OneTurnPerTick == StartTakingOneSender(FALSE)
+OneTurnPerTick == StartTakingOneSource(FALSE)
 
 PeriodicSkipsCarry ==
     /\ cycle = "sleeping"
@@ -269,8 +273,8 @@ TurnForUnraisedInput ==
 
 Spec                        == Init /\ [][Next]_vars
 SpecMissedDirectedWake      == Init /\ [][Next \/ MissedDirectedWake]_vars
-SpecHumanWaitsForBoundary   == Init /\ [][Next \/ HumanWaitsForBoundary]_vars
-SpecClaimOneSender          == Init /\ [][Next \/ ClaimOneSender]_vars
+SpecNowWaitsForBoundary   == Init /\ [][Next \/ NowWaitsForBoundary]_vars
+SpecClaimOneSource          == Init /\ [][Next \/ ClaimOneSource]_vars
 SpecOneTurnPerTick          == Init /\ [][Next \/ OneTurnPerTick]_vars
 SpecPeriodicSkipsCarry      == Init /\ [][Next \/ PeriodicSkipsCarry]_vars
 SpecTurnForUnraisedInput    == Init /\ [][Next \/ TurnForUnraisedInput]_vars
@@ -289,21 +293,21 @@ FairSpecPeriodicSkipsCarry  == SpecPeriodicSkipsCarry /\ Fairness
 
 Conservation == claimed_total + Cardinality(waiting) = enqueued_total
 
-\* Human input never waits for a boundary: a wake or a running turn owns it.
-HumanRoutable ==
-    \A e \in waiting : e.kind = "human" => (wake \/ cycle = "running")
+\* Now input never waits for a boundary: a wake or a running turn owns it.
+NowRoutable ==
+    \A e \in waiting : e.kind = "now" => (wake \/ cycle = "running")
 
 \* An input whose wake was raised is owned by a wake or a running turn.
 RaisedRoutable ==
     \A e \in waiting : e.raised => (wake \/ cycle = "running")
 
-HumanAgeBound ==
-    \A e \in waiting : e.kind = "human" => now - e.arrived <= HumanDelay
+NowAgeBound ==
+    \A e \in waiting : e.kind = "now" => now - e.arrived <= NowDelay
 
-\* Whatever the count of inputs or senders, a keeper input waits one
+\* Whatever the count of inputs or sources, an at_tick input waits one
 \* boundary or one running turn.
-KeeperAgeBound ==
-    \A e \in waiting : e.kind = "keeper" => now - e.arrived <= KeeperDelay
+AtTickAgeBound ==
+    \A e \in waiting : e.kind = "at_tick" => now - e.arrived <= AtTickDelay
 
 CarryAgeBound ==
     \A e \in waiting : e.kind = "carry" => now - e.arrived <= CarryDelay
@@ -318,10 +322,10 @@ EveryInputReachesATurn == (waiting # {}) ~> (waiting = {})
 
 SafetyInvariant ==
     /\ Conservation
-    /\ HumanRoutable
+    /\ NowRoutable
     /\ RaisedRoutable
-    /\ HumanAgeBound
-    /\ KeeperAgeBound
+    /\ NowAgeBound
+    /\ AtTickAgeBound
     /\ CarryAgeBound
     /\ TurnHasCause
 

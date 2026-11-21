@@ -4047,6 +4047,13 @@
  (package masc)
  (libraries masc masc.time_compat masc.browser_configuration masc.browser_lane mcp_protocol.eio eio eio.unix eio_main))
 
+(executable
+ (name masc_acp_probe)
+ (modules masc_acp_probe)
+ (public_name masc-acp-probe)
+ (package masc)
+ (libraries masc.runtime masc.agent_core eio eio_main yojson unix))
+
 (library
  (name masc_tui_code_draft)
  (wrapped false)

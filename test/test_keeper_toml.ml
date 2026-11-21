@@ -2422,6 +2422,147 @@ let test_person_keeper_declaration_loads () =
        | None -> false)
 ;;
 
+(* The writer is the request path that creates a person's Keeper: it knows a
+   [base_path] and nothing else. The cases below are the promises the caller
+   relies on — one write, a retry that answers the same thing, a different
+   declaration that is refused rather than replaced, and bytes the loader would
+   refuse that never reach the disk. *)
+let test_person_keeper_declaration_write_creates_and_reads_back () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir:_ ->
+  let content = Masc.Person_keeper_declaration.content () in
+  (match
+     Masc.Person_keeper_declaration.commit
+       ~base_path
+       ~engine_name:"kp-created"
+       ~content
+       ~replace:false
+   with
+   | Ok Masc.Person_keeper_declaration.Created -> ()
+   | Ok Masc.Person_keeper_declaration.Already_present ->
+     fail "a fresh base path cannot already hold the declaration"
+   | Ok Masc.Person_keeper_declaration.Replaced ->
+     fail "a fresh base path has nothing to replace"
+   | Error error -> fail (Masc.Person_keeper_declaration.error_message error));
+  let path =
+    match Masc.Person_keeper_declaration.path_for ~base_path ~engine_name:"kp-created" with
+    | Ok path -> path
+    | Error error -> fail (Masc.Person_keeper_declaration.error_message error)
+  in
+  check string "the bytes on disk are the bytes asked for" content (Masc.Fs_compat.load_file path);
+  (match Masc.Keeper_types_profile_toml.inspect_keeper_toml path with
+   | Error error ->
+     fail
+       ("the written declaration does not load: "
+        ^ Masc.Keeper_types_profile_toml.keeper_toml_load_error_to_string error)
+   | Ok (name, _) -> check string "the file name is the engine name" "kp-created" name)
+;;
+
+let test_person_keeper_declaration_write_retry_is_the_same_answer () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir:_ ->
+  let content = Masc.Person_keeper_declaration.content () in
+  let commit () =
+    Masc.Person_keeper_declaration.commit
+      ~base_path
+      ~engine_name:"kp-retried"
+      ~content
+      ~replace:false
+  in
+  (match commit () with
+   | Ok Masc.Person_keeper_declaration.Created -> ()
+   | Ok _ -> fail "the first write has to create the declaration"
+   | Error error -> fail (Masc.Person_keeper_declaration.error_message error));
+  let path =
+    match Masc.Person_keeper_declaration.path_for ~base_path ~engine_name:"kp-retried" with
+    | Ok path -> path
+    | Error error -> fail (Masc.Person_keeper_declaration.error_message error)
+  in
+  let before = Masc.Fs_compat.load_file path in
+  (match commit () with
+   | Ok Masc.Person_keeper_declaration.Already_present -> ()
+   | Ok _ -> fail "a retry of the same creation request has to answer Already_present"
+   | Error error -> fail (Masc.Person_keeper_declaration.error_message error));
+  check string "a retry does not rewrite the file" before (Masc.Fs_compat.load_file path)
+;;
+
+let test_person_keeper_declaration_write_refuses_a_different_declaration () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir:_ ->
+  let content = Masc.Person_keeper_declaration.content () in
+  (match
+     Masc.Person_keeper_declaration.commit
+       ~base_path
+       ~engine_name:"kp-refused"
+       ~content
+       ~replace:false
+   with
+   | Ok Masc.Person_keeper_declaration.Created -> ()
+   | Ok _ -> fail "the first write has to create the declaration"
+   | Error error -> fail (Masc.Person_keeper_declaration.error_message error));
+  let edited = content ^ "\n# an operator edit\n" in
+  (match
+     Masc.Person_keeper_declaration.commit
+       ~base_path
+       ~engine_name:"kp-refused"
+       ~content:edited
+       ~replace:false
+   with
+   | Error (Masc.Person_keeper_declaration.Different_declaration_present _) -> ()
+   | Ok _ -> fail "a different declaration must not be replaced without the option"
+   | Error error -> fail ("expected a refusal, got: " ^ Masc.Person_keeper_declaration.error_message error));
+  let path =
+    match Masc.Person_keeper_declaration.path_for ~base_path ~engine_name:"kp-refused" with
+    | Ok path -> path
+    | Error error -> fail (Masc.Person_keeper_declaration.error_message error)
+  in
+  check string "the refused write left the bytes alone" content (Masc.Fs_compat.load_file path);
+  (match
+     Masc.Person_keeper_declaration.commit
+       ~base_path
+       ~engine_name:"kp-refused"
+       ~content:edited
+       ~replace:true
+   with
+   | Ok Masc.Person_keeper_declaration.Replaced -> ()
+   | Ok _ -> fail "an explicit replace has to report Replaced"
+   | Error error -> fail (Masc.Person_keeper_declaration.error_message error));
+  check string "an explicit replace writes the new bytes" edited (Masc.Fs_compat.load_file path)
+;;
+
+let test_person_keeper_declaration_write_refuses_a_name_that_is_not_a_component () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir:_ ->
+  let content = Masc.Person_keeper_declaration.content () in
+  List.iter
+    (fun name ->
+       match
+         Masc.Person_keeper_declaration.commit ~base_path ~engine_name:name ~content ~replace:false
+       with
+       | Error (Masc.Person_keeper_declaration.Name_not_a_file_component refused) ->
+         check string "the refused name is the one asked for" name refused
+       | Ok _ -> failf "%S must not name a file" name
+       | Error error -> fail (Masc.Person_keeper_declaration.error_message error))
+    [ "../escaped"; "nested/name"; ".."; "."; "" ]
+;;
+
+let test_person_keeper_declaration_write_refuses_bytes_the_loader_refuses () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir:_ ->
+  let refusing = "[keeper]\nname = \"another\"\n" in
+  (match
+     Masc.Person_keeper_declaration.commit
+       ~base_path
+       ~engine_name:"kp-unloadable"
+       ~content:refusing
+       ~replace:false
+   with
+   | Error (Masc.Person_keeper_declaration.Declaration_refused _) -> ()
+   | Ok _ -> fail "a declaration the loader refuses must not be written"
+   | Error error -> fail ("expected a refusal, got: " ^ Masc.Person_keeper_declaration.error_message error));
+  let path =
+    match Masc.Person_keeper_declaration.path_for ~base_path ~engine_name:"kp-unloadable" with
+    | Ok path -> path
+    | Error error -> fail (Masc.Person_keeper_declaration.error_message error)
+  in
+  check bool "nothing reached the disk" true (not (Sys.file_exists path))
+;;
+
 let () =
   run "Keeper TOML Loader"
     [
@@ -2576,6 +2717,16 @@ let () =
             test_keeper_config_directory_probe_is_typed;
           test_case "a person's Keeper declaration loads" `Quick
             test_person_keeper_declaration_loads;
+          test_case "a person's Keeper declaration is written once" `Quick
+            test_person_keeper_declaration_write_creates_and_reads_back;
+          test_case "a creation retry answers the same thing" `Quick
+            test_person_keeper_declaration_write_retry_is_the_same_answer;
+          test_case "a different declaration is refused, an explicit replace is not" `Quick
+            test_person_keeper_declaration_write_refuses_a_different_declaration;
+          test_case "an engine name that is not a path component is refused" `Quick
+            test_person_keeper_declaration_write_refuses_a_name_that_is_not_a_component;
+          test_case "bytes the loader refuses never reach the disk" `Quick
+            test_person_keeper_declaration_write_refuses_bytes_the_loader_refuses;
         ] );
       ( "discovery",
         [

@@ -41,11 +41,11 @@ related: ["tui-a-streaming-reply-only-grows-at-its-end", "tui-a-long-reply-opens
 
 닫힌 줄 전부를 지나는 훑기도 남아 있다.
 
-- `find_kept_rows` 가 줄 목록을 `List.equal` 로 비교한다(`message_layout.ml:2365`). 끝에 가서야 다르다.
-- `last_content`(2419행)가 내용 있는 마지막 줄을 찾는다.
-- `shared_lines`(2290행)가 지난 줄 배열과 줄마다 비교한다.
-- 맨 아래 창(2705행)이 행을 세고 끝을 고른다. #54181 이 다섯 번을 두 번으로 줄였다.
-- `body_rows_of_chosen`(2799행)이 고른 행의 body row 를 찾으려고 entry 의 행을 처음부터 훑는다.
+- `find_kept_rows` 가 줄 목록을 `List.equal` 로 비교한다. 끝에 가서야 다르다.
+- `last_content` 가 내용 있는 마지막 줄을 찾는다.
+- `shared_lines` 가 지난 줄 배열과 줄마다 비교한다.
+- 맨 아래 창(`newest_entry_window`)이 행을 세고 끝을 고른다. #54181 이 다섯 번을 두 번으로 줄였다.
+- `body_rows_of_chosen`(#54214 전 이름)이 고른 행의 body row 를 찾으려고 entry 의 행을 처음부터 훑는다.
 
 측정(macOS M3 Max, `test_tui_chat_search_projection` 안 stream bench: 1MB 답, 1500 frame, frame 마다 delta 하나, 2026-11-21):
 
@@ -130,7 +130,7 @@ type entry_rows = {
   - 행 수는 `List.length head + length closed + List.length tail` 이다.
   - 끝 행은 `tail` 과 `closed` 끝에서 index 로 꺼낸다.
   - 진단 행은 `tail` 끝에만 있다. 배치가 진단 행을 body 뒤에 붙이니(`body_rows @ diagnostic_rows`) 지금도 그렇다. 지금 창은 `partition` 으로 어디에 있어도 받았다.
-- `body_rows_of_chosen` 은 고른 행의 index 로 body row 를 바로 계산한다.
+- `body_rows_of_chosen`(#54214 에서 `body_rows_of_indexed` 가 됐다)은 고른 행의 index 로 body row 를 바로 계산한다.
 - 공개 `rows_of_entry` 는 `head @ to_list closed @ tail` 을 돌려준다. 행 값이 같은 값(physical)이라 시험의 identity 비교가 그대로 맞는다.
 
 ### 3.4 다른 방법

@@ -40,6 +40,13 @@ every message after them passes through byte-exact; the CLI report's
 log line that names everything the head holds, then installs. A purge that
 changes nothing installs nothing and backs nothing up.
 
+When the head was replaced since the turn log's last line (it is on another
+trace, or holds fewer closed messages than that line counts), no message is
+below the mark: the report shows `turn log: names the messages below 0`, and
+a purge that drops nothing changes nothing. The keeper's next turn writes the
+lines that name the head's messages; stop the keeper after that turn and
+purge again.
+
 ## Procedure
 
 ### Dashboard

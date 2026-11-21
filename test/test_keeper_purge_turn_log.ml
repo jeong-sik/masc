@@ -1,8 +1,11 @@
-(* A purge that drops what follows a break shrinks the head, so it writes the
-   Keeper's turn log line first (RFC librarian-call-only-proposes §5.2, §5.6):
-   one save closes the open messages, and the line names everything closed
-   since the last unit before the purged head goes in. A line that is not
-   written replaces nothing. A purge that only rewrites writes no line. *)
+(* A dashboard purge and the Keeper's turn log (RFC
+   librarian-call-only-proposes §5.2, §5.6). A purge that drops what follows
+   a break shrinks the head, so it writes the turn log line first: one save
+   closes the open messages, and the line names everything closed since the
+   last unit before the purged head goes in. A line that is not written
+   replaces nothing. A purge that drops nothing writes no line and rewrites
+   only what the log has named: the next unit reads the messages past the
+   last unit's mark from the head, so they go out as they are. *)
 
 open Alcotest
 open Masc
@@ -211,7 +214,7 @@ let test_a_recovery_names_what_it_drops =
     check int "with nothing open" 0 installed.open_messages
 ;;
 
-let test_a_recovery_whose_line_fails_replaces_nothing =
+let test_a_purge_against_an_unreadable_turn_log_replaces_nothing =
   with_keeper
   @@ fun ~config ~trace_id ->
   write_head config trace_id broken;
@@ -220,9 +223,9 @@ let test_a_recovery_whose_line_fails_replaces_nothing =
   Fs_compat.save_file (log_path config) unreadable;
   let source = Fs_compat.load_file (canonical config trace_id) in
   (match Checkpoints.purge_current config ~keeper_name ~apply:true with
-   | Error (Checkpoints.Purge_turn_log_not_written _) -> ()
+   | Error (Checkpoints.Purge_turn_log_unreadable _) -> ()
    | Error error -> fail (Checkpoints.purge_error_to_string error)
-   | Ok _ -> fail "a recovery replaced the head with no line");
+   | Ok _ -> fail "a purge replaced the head against a turn log it could not read");
   check string "the head is as it was" source (Fs_compat.load_file (canonical config trace_id));
   check string "the log is as it was" unreadable (Fs_compat.load_file (log_path config));
   check (list string) "nothing was backed up" [] (backups config)
@@ -240,6 +243,62 @@ let test_a_rewrite_writes_no_line =
      check bool "applied" true result.applied;
      check int "nothing dropped" 0 result.report.messages_dropped_at_structural_break);
   check string "no line" log (Fs_compat.load_file (log_path config))
+;;
+
+(* The head grew past the log's last line. The next unit reads those
+   messages from the head, so the purge leaves them byte-exact and rewrites
+   only what the log has named. It reads no Memory writer and waits on none:
+   none runs here. *)
+let test_a_rewrite_leaves_what_no_line_has_named =
+  with_keeper
+  @@ fun ~config ~trace_id ->
+  write_head config trace_id sound;
+  start_log config trace_id;
+  let later =
+    assistant [ Types.Thinking { content = "not read yet"; signature = None }; Types.Text "later" ]
+  in
+  let grown = sound @ [ Types.user_msg "(autonomous wake)"; later ] @ recent in
+  write_head config trace_id grown;
+  let log = Fs_compat.load_file (log_path config) in
+  (match Checkpoints.purge_current config ~keeper_name ~apply:true with
+   | Error error -> fail (Checkpoints.purge_error_to_string error)
+   | Ok result ->
+     check bool "applied" true result.applied;
+     check int "only the reasoning the log has named is stripped" 1
+       result.report.reasoning_blocks_stripped);
+  check string "no line" log (Fs_compat.load_file (log_path config));
+  let past_the_mark messages =
+    List.map Types.show_message
+      (List.filteri (fun index _ -> index >= List.length sound) messages)
+  in
+  match Store.load_agent_core ~session_dir:(session_dir config trace_id) ~session_id:trace_id with
+  | Error _ -> fail "the purged head is not readable"
+  | Ok purged ->
+    check (list string) "the messages past the log's last line are as they were"
+      (past_the_mark grown) (past_the_mark purged.messages)
+;;
+
+(* The head was replaced since the log's last line: it holds fewer closed
+   messages than the line counts. The next unit reads all of it from the
+   head, after the reset the next line writes, so the purge rewrites nothing
+   and installs nothing, though the head's reasoning lies ahead of the
+   protected tail. *)
+let test_a_purge_of_a_replaced_head_rewrites_nothing =
+  with_keeper
+  @@ fun ~config ~trace_id ->
+  write_head config trace_id (sound @ recent @ recent);
+  start_log config trace_id;
+  write_head config trace_id (sound @ recent);
+  let head_bytes = Fs_compat.load_file (canonical config trace_id) in
+  let log = Fs_compat.load_file (log_path config) in
+  (match Checkpoints.purge_current config ~keeper_name ~apply:true with
+   | Error error -> fail (Checkpoints.purge_error_to_string error)
+   | Ok result ->
+     check bool "not applied" false result.applied;
+     check int "nothing stripped" 0 result.report.reasoning_blocks_stripped);
+  check string "the head is as it was" head_bytes (Fs_compat.load_file (canonical config trace_id));
+  check string "no line" log (Fs_compat.load_file (log_path config));
+  check (list string) "nothing was backed up" [] (backups config)
 ;;
 
 let test_a_preview_writes_no_line =
@@ -265,9 +324,13 @@ let () =
   run "keeper_purge_turn_log"
     [ ( "dashboard purge"
       , [ test_case "a recovery names what it drops" `Quick test_a_recovery_names_what_it_drops
-        ; test_case "a recovery whose line fails replaces nothing" `Quick
-            test_a_recovery_whose_line_fails_replaces_nothing
+        ; test_case "a purge against a turn log it cannot read replaces nothing" `Quick
+            test_a_purge_against_an_unreadable_turn_log_replaces_nothing
         ; test_case "a rewrite writes no line" `Quick test_a_rewrite_writes_no_line
+        ; test_case "a rewrite leaves what no line has named" `Quick
+            test_a_rewrite_leaves_what_no_line_has_named
+        ; test_case "a purge of a replaced head rewrites nothing" `Quick
+            test_a_purge_of_a_replaced_head_rewrites_nothing
         ; test_case "a preview writes no line" `Quick test_a_preview_writes_no_line
         ] )
     ]

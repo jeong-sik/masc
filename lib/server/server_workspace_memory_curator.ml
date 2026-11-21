@@ -4,7 +4,6 @@ module Request = Workspace_memory_request
 module Decision = Workspace_memory_decision
 module Briefing = Workspace_memory_briefing
 module Log_store = Workspace_memory_log
-module Pass = Server_workspace_memory_curator_pass
 module Exact = Agent_core.Exact_output
 module Registry = Runtime_exact_output_registry
 module Slots = Exact_lane_slots
@@ -497,248 +496,245 @@ let run_reconciliation ~base_path =
 ;;
 
 let run_classification ~base_path ~(owner : owner) =
-  Pass.with_domain Pass.Classification (fun () ->
-    match run_reconciliation ~base_path with
-    | Error detail -> Failed detail
-    | Ok (context, reconciliation, reconciled_changed) ->
-      let blocked_indivisible =
-        Stdlib.Mutex.protect owner.mutex (fun () -> owner.indivisible_facts)
-      in
-      let pending =
-        List.filter
-          (fun (f : Ledger.pending_fact) -> not (List.mem f.fact blocked_indivisible))
-          reconciliation.new_facts
-      in
-      if pending = [] then
-        if reconciled_changed then Progressed else Idle
-      else
-        match resolve_lane_execution () with
-        | Lane_busy detail ->
-          Log.Server.debug "workspace curator classification deferred: %s" detail;
-          Transient_retry
-        | Lane_disabled detail ->
-          Log.Server.debug "workspace curator classification lane unavailable: %s" detail;
-          Idle
-        | Lane_ready lane ->
-          Stdlib.Mutex.protect owner.mutex (fun () ->
-            if not (String.equal owner.indivisible_generation lane.generation) then (
-              owner.indivisible_generation <- lane.generation;
-              owner.indivisible_facts <- [];
-              owner.classification_size <- Request.Fill_frame));
-          let size = Stdlib.Mutex.protect owner.mutex (fun () -> owner.classification_size) in
-          let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
-          let render input =
-            Prompt_registry.render_resolved_prompt_template
-              Prompt_names.workspace_memory_curator
-              resolution
-              [ "workspace_memory_changes", Yojson.Safe.to_string input ]
-          in
-          let neighbor_limit = max 0 (List.length (Context.keepers context) - 1) in
-          (match
-             Request.prepare
-               ~neighbor_limit
-               ~render
-               ~ledger:reconciliation.ledger
-               ~current:reconciliation.current_facts
-               ~pending
-               ~size
-               ~frame:max_int
-               ~measure:(fun batch -> Ok (String.length batch.rendered_prompt))
-           with
-           | Error err -> Failed (Request.error_to_string err)
-           | Ok None -> if reconciled_changed then Progressed else Idle
-           | Ok (Some initial_batch) ->
-             let rec attempt_batch batch ~narrowed =
-               let validate json = Decision.decode ~batch json in
-               match
-                 execute_exact_prompt
-                   ~base_path
-                   ~lane
-                   ~schema:Decision.output_schema
-                   ~rendered_prompt:batch.rendered_prompt
-                   ~allow_output_limit_split:true
-                   ~validate
-               with
-               | Ok assignments ->
-                 if narrowed then
-                   Stdlib.Mutex.protect owner.mutex (fun () ->
-                     owner.classification_size <- Request.Up_to (List.length batch.selected));
-                 let commit_res =
-                   io (fun () ->
-                     commit_two_phase_log_dynamic
-                       ~base_path
-                       ~author:"workspace-memory-curator"
-                       ~expected_changes:(List.length assignments)
-                       ~apply_and_entries:(fun () ->
-                         let* applied_ledger =
-                           Ledger.update ~base_path (fun latest ->
-                             Ledger.apply latest ~selected:batch.selected assignments
-                             |> Result.map_error Ledger.apply_error_to_string)
-                         in
-                         let entries =
-                           log_entries_of_assignments ~ledger:applied_ledger assignments
-                         in
-                         Ok ((), entries)))
-                 in
-                 (match commit_res with
-                  | Ok () ->
-                    Mcp_server_eio_resource.notify_world_memory_updated ();
-                    Progressed
-                  | Error detail -> Failed detail)
-               | Error failure when failure.capacity_refused ->
-                 (match Request.narrow ~ledger:reconciliation.ledger ~render batch with
-                  | Error err -> Failed (Request.error_to_string err)
-                  | Ok (Some smaller) -> attempt_batch smaller ~narrowed:true
-                  | Ok None ->
-                    (match batch.selected with
-                     | single :: _ ->
-                       Stdlib.Mutex.protect owner.mutex (fun () ->
-                         if not (List.mem single.fact owner.indivisible_facts) then
-                           owner.indivisible_facts <- single.fact :: owner.indivisible_facts);
-                       Log.Server.error
-                         "workspace curator indivisible fact refused for capacity: %s"
-                         failure.detail
-                     | [] -> ());
-                    if reconciled_changed then Progressed else Idle)
-               | Error failure ->
-                 if failure.transient then (
-                   Log.Server.warn
-                     "workspace curator classification transient refusal: %s"
-                     failure.detail;
-                   Transient_retry)
-                 else Failed failure.detail
-             in
-             attempt_batch initial_batch ~narrowed:false))
+  match run_reconciliation ~base_path with
+  | Error detail -> Failed detail
+  | Ok (context, reconciliation, reconciled_changed) ->
+    let blocked_indivisible =
+      Stdlib.Mutex.protect owner.mutex (fun () -> owner.indivisible_facts)
+    in
+    let pending =
+      List.filter
+        (fun (f : Ledger.pending_fact) -> not (List.mem f.fact blocked_indivisible))
+        reconciliation.new_facts
+    in
+    if pending = [] then
+      if reconciled_changed then Progressed else Idle
+    else
+      match resolve_lane_execution () with
+      | Lane_busy detail ->
+        Log.Server.debug "workspace curator classification deferred: %s" detail;
+        Transient_retry
+      | Lane_disabled detail ->
+        Log.Server.debug "workspace curator classification lane unavailable: %s" detail;
+        Idle
+      | Lane_ready lane ->
+        Stdlib.Mutex.protect owner.mutex (fun () ->
+          if not (String.equal owner.indivisible_generation lane.generation) then (
+            owner.indivisible_generation <- lane.generation;
+            owner.indivisible_facts <- [];
+            owner.classification_size <- Request.Fill_frame));
+        let size = Stdlib.Mutex.protect owner.mutex (fun () -> owner.classification_size) in
+        let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
+        let render input =
+          Prompt_registry.render_resolved_prompt_template
+            Prompt_names.workspace_memory_curator
+            resolution
+            [ "workspace_memory_changes", Yojson.Safe.to_string input ]
+        in
+        let neighbor_limit = max 0 (List.length (Context.keepers context) - 1) in
+        (match
+           Request.prepare
+             ~neighbor_limit
+             ~render
+             ~ledger:reconciliation.ledger
+             ~current:reconciliation.current_facts
+             ~pending
+             ~size
+             ~frame:max_int
+             ~measure:(fun batch -> Ok (String.length batch.rendered_prompt))
+         with
+         | Error err -> Failed (Request.error_to_string err)
+         | Ok None -> if reconciled_changed then Progressed else Idle
+         | Ok (Some initial_batch) ->
+           let rec attempt_batch batch ~narrowed =
+             let validate json = Decision.decode ~batch json in
+             match
+               execute_exact_prompt
+                 ~base_path
+                 ~lane
+                 ~schema:Decision.output_schema
+                 ~rendered_prompt:batch.rendered_prompt
+                 ~allow_output_limit_split:true
+                 ~validate
+             with
+             | Ok assignments ->
+               if narrowed then
+                 Stdlib.Mutex.protect owner.mutex (fun () ->
+                   owner.classification_size <- Request.Up_to (List.length batch.selected));
+               let commit_res =
+                 io (fun () ->
+                   commit_two_phase_log_dynamic
+                     ~base_path
+                     ~author:"workspace-memory-curator"
+                     ~expected_changes:(List.length assignments)
+                     ~apply_and_entries:(fun () ->
+                       let* applied_ledger =
+                         Ledger.update ~base_path (fun latest ->
+                           Ledger.apply latest ~selected:batch.selected assignments
+                           |> Result.map_error Ledger.apply_error_to_string)
+                       in
+                       let entries =
+                         log_entries_of_assignments ~ledger:applied_ledger assignments
+                       in
+                       Ok ((), entries)))
+               in
+               (match commit_res with
+                | Ok () ->
+                  Mcp_server_eio_resource.notify_world_memory_updated ();
+                  Progressed
+                | Error detail -> Failed detail)
+             | Error failure when failure.capacity_refused ->
+               (match Request.narrow ~ledger:reconciliation.ledger ~render batch with
+                | Error err -> Failed (Request.error_to_string err)
+                | Ok (Some smaller) -> attempt_batch smaller ~narrowed:true
+                | Ok None ->
+                  (match batch.selected with
+                   | single :: _ ->
+                     Stdlib.Mutex.protect owner.mutex (fun () ->
+                       if not (List.mem single.fact owner.indivisible_facts) then
+                         owner.indivisible_facts <- single.fact :: owner.indivisible_facts);
+                     Log.Server.error
+                       "workspace curator indivisible fact refused for capacity: %s"
+                       failure.detail
+                   | [] -> ());
+                  if reconciled_changed then Progressed else Idle)
+             | Error failure ->
+               if failure.transient then (
+                 Log.Server.warn
+                   "workspace curator classification transient refusal: %s"
+                   failure.detail;
+                 Transient_retry)
+               else Failed failure.detail
+           in
+           attempt_batch initial_batch ~narrowed:false)
 ;;
 
 let run_briefing ~base_path =
-  Pass.with_domain Pass.Briefing (fun () ->
-    let directory = Ledger.directory ~base_path in
-    match
-      io (fun () ->
-        let* ledger = Ledger.load ~base_path in
-        let* state = Briefing.load ~directory in
-        Ok (ledger, state))
-    with
+  let directory = Ledger.directory ~base_path in
+  match
+    io (fun () ->
+      let* ledger = Ledger.load ~base_path in
+      let* state = Briefing.load ~directory in
+      Ok (ledger, state))
+  with
+  | Error detail -> Failed detail
+  | Ok (ledger, state) ->
+    let sources = Ledger.briefing_sources ledger in
+    let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
+    let contract = Briefing.contract ~template:resolution.effective in
+    let render input =
+      Prompt_registry.render_resolved_prompt_template
+        Prompt_names.workspace_memory_briefing
+        resolution
+        [ "workspace_memory_briefing", Yojson.Safe.to_string input ]
+    in
+    match Briefing.prepare ~sources ~contract ~render state with
     | Error detail -> Failed detail
-    | Ok (ledger, state) ->
-      let sources = Ledger.briefing_sources ledger in
-      let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
-      let contract = Briefing.contract ~template:resolution.effective in
-      let render input =
-        Prompt_registry.render_resolved_prompt_template
-          Prompt_names.workspace_memory_briefing
-          resolution
-          [ "workspace_memory_briefing", Yojson.Safe.to_string input ]
-      in
-      match Briefing.prepare ~sources ~contract ~render state with
-      | Error detail -> Failed detail
-      | Ok Briefing.Unchanged -> Idle
-      | Ok (Briefing.Cleanup _ | Briefing.Prepared _) ->
-        let step = ref None in
-        (match
-           io (fun () ->
-             Briefing.update ~directory (fun current ->
-               let* prep = Briefing.prepare ~sources ~contract ~render current in
-               step := Some prep;
-               match prep with
-               | Briefing.Unchanged -> Ok current
-               | Briefing.Cleanup cleaned -> Ok cleaned
-               | Briefing.Prepared batch -> Ok (Briefing.prepared_state batch)))
-         with
-         | Error detail -> Failed detail
-         | Ok _ ->
-           (match !step with
-            | None | Some Briefing.Unchanged -> Idle
-            | Some (Briefing.Cleanup _) ->
-              Mcp_server_eio_resource.notify_world_memory_updated ();
-              Progressed
-            | Some (Briefing.Prepared initial_batch) ->
-              (match resolve_lane_execution () with
-            | Lane_busy detail ->
-              Log.Server.debug "workspace curator briefing deferred: %s" detail;
-              Transient_retry
-            | Lane_disabled detail ->
-              Log.Server.debug "workspace curator briefing lane unavailable: %s" detail;
-              Idle
-            | Lane_ready lane ->
-              let rec attempt_batch batch =
-                let prompt = Briefing.rendered_prompt batch in
-                let validate json = Briefing.decode_output json in
-                match
-                  execute_exact_prompt
-                    ~base_path
-                    ~lane
-                    ~schema:Briefing.output_schema
-                    ~rendered_prompt:prompt
-                    ~allow_output_limit_split:false
-                    ~validate
-                with
-                | Ok text ->
-                  (match Briefing.accept batch ~text with
-                   | Error detail -> Failed detail
-                   | Ok next_state ->
-                     let remaining = Briefing.remaining_count batch in
-                     let entries =
-                       [ ( "briefing"
-                         , Printf.sprintf
-                             "Workspace briefing updated (selected=%d, remaining=%d)"
-                             (Briefing.selected_count batch)
-                             remaining
-                         , `Assoc
-                             [ "kind", `String "briefing_updated"
-                             ; "selected_count", `Int (Briefing.selected_count batch)
-                             ; "remaining_count", `Int remaining
-                             ; "complete", `Bool (remaining = 0)
-                             ] )
-                       ]
-                     in
-                     (match
-                        io (fun () ->
-                          commit_two_phase_log
-                            ~base_path
-                            ~author:"workspace-memory-curator"
-                            ~entries
-                            ~apply_state:(fun () -> Briefing.save ~directory next_state))
-                      with
-                      | Ok () ->
-                        Mcp_server_eio_resource.notify_world_memory_updated ();
-                        Progressed
-                      | Error detail -> Failed detail))
-                | Error failure when failure.capacity_refused ->
-                  (match Briefing.narrow ~render batch with
-                   | Error detail -> Failed detail
-                   | Ok (Some smaller) -> attempt_batch smaller
-                   | Ok None -> Failed ("indivisible briefing chunk refused: " ^ failure.detail))
-                | Error failure ->
-                  if failure.transient then (
-                    Log.Server.warn
-                      "workspace curator briefing transient refusal: %s"
-                      failure.detail;
-                    Transient_retry)
-                  else Failed failure.detail
-              in
-              attempt_batch initial_batch))))
+    | Ok Briefing.Unchanged -> Idle
+    | Ok (Briefing.Cleanup _ | Briefing.Prepared _) ->
+      let step = ref None in
+      (match
+         io (fun () ->
+           Briefing.update ~directory (fun current ->
+             let* prep = Briefing.prepare ~sources ~contract ~render current in
+             step := Some prep;
+             match prep with
+             | Briefing.Unchanged -> Ok current
+             | Briefing.Cleanup cleaned -> Ok cleaned
+             | Briefing.Prepared batch -> Ok (Briefing.prepared_state batch)))
+       with
+       | Error detail -> Failed detail
+       | Ok _ ->
+         (match !step with
+          | None | Some Briefing.Unchanged -> Idle
+          | Some (Briefing.Cleanup _) ->
+            Mcp_server_eio_resource.notify_world_memory_updated ();
+            Progressed
+          | Some (Briefing.Prepared initial_batch) ->
+            (match resolve_lane_execution () with
+          | Lane_busy detail ->
+            Log.Server.debug "workspace curator briefing deferred: %s" detail;
+            Transient_retry
+          | Lane_disabled detail ->
+            Log.Server.debug "workspace curator briefing lane unavailable: %s" detail;
+            Idle
+          | Lane_ready lane ->
+            let rec attempt_batch batch =
+              let prompt = Briefing.rendered_prompt batch in
+              let validate json = Briefing.decode_output json in
+              match
+                execute_exact_prompt
+                  ~base_path
+                  ~lane
+                  ~schema:Briefing.output_schema
+                  ~rendered_prompt:prompt
+                  ~allow_output_limit_split:false
+                  ~validate
+              with
+              | Ok text ->
+                (match Briefing.accept batch ~text with
+                 | Error detail -> Failed detail
+                 | Ok next_state ->
+                   let remaining = Briefing.remaining_count batch in
+                   let entries =
+                     [ ( "briefing"
+                       , Printf.sprintf
+                           "Workspace briefing updated (selected=%d, remaining=%d)"
+                           (Briefing.selected_count batch)
+                           remaining
+                       , `Assoc
+                           [ "kind", `String "briefing_updated"
+                           ; "selected_count", `Int (Briefing.selected_count batch)
+                           ; "remaining_count", `Int remaining
+                           ; "complete", `Bool (remaining = 0)
+                           ] )
+                     ]
+                   in
+                   (match
+                      io (fun () ->
+                        commit_two_phase_log
+                          ~base_path
+                          ~author:"workspace-memory-curator"
+                          ~entries
+                          ~apply_state:(fun () -> Briefing.save ~directory next_state))
+                    with
+                    | Ok () ->
+                      Mcp_server_eio_resource.notify_world_memory_updated ();
+                      Progressed
+                    | Error detail -> Failed detail))
+              | Error failure when failure.capacity_refused ->
+                (match Briefing.narrow ~render batch with
+                 | Error detail -> Failed detail
+                 | Ok (Some smaller) -> attempt_batch smaller
+                 | Ok None -> Failed ("indivisible briefing chunk refused: " ^ failure.detail))
+              | Error failure ->
+                if failure.transient then (
+                  Log.Server.warn
+                    "workspace curator briefing transient refusal: %s"
+                    failure.detail;
+                  Transient_retry)
+                else Failed failure.detail
+            in
+            attempt_batch initial_batch)))
 ;;
 
 let run_pass ~base_path ~(owner : owner) ~on_observation_failure =
-  Pass.with_pass ~base_path (fun () ->
-    let c = run_classification ~base_path ~owner in
-    let b = run_briefing ~base_path in
-    let interpret label = function
-      | Progressed -> true
-      | Idle -> false
-      | Transient_retry ->
-        on_observation_failure ();
-        false
-      | Failed detail ->
-        on_observation_failure ();
-        Log.Server.error "workspace curator %s: %s" label detail;
-        false
-    in
-    let cp = interpret "classification" c in
-    let bp = interpret "briefing" b in
-    cp || bp)
+  let c = run_classification ~base_path ~owner in
+  let b = run_briefing ~base_path in
+  let interpret label = function
+    | Progressed -> true
+    | Idle -> false
+    | Transient_retry ->
+      on_observation_failure ();
+      false
+    | Failed detail ->
+      on_observation_failure ();
+      Log.Server.error "workspace curator %s: %s" label detail;
+      false
+  in
+  let cp = interpret "classification" c in
+  let bp = interpret "briefing" b in
+  cp || bp
 ;;
 
 (* The caller holds [owner.mutex]. Resolving promises happens after releasing

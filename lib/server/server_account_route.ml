@@ -16,7 +16,7 @@ let of_router router =
 let keeper_prefix = "/api/v1/keepers/"
 
 let method_listed entry method_ =
-  List.exists (fun listed -> Httpun.Method.equal listed method_) entry.methods
+  List.exists (fun listed -> listed = method_) entry.methods
 ;;
 
 let covering entries ~path ~method_ =

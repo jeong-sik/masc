@@ -2,8 +2,8 @@
    the guard it names: a gate that refuses nothing would pass a test that only
    checks the allowed path, so the refusal cases are the point. *)
 
-let get = Httpun.Method.Get
-let post = Httpun.Method.Post
+let get = `GET
+let post = `POST
 
 let exact ?(methods = [ get ]) path access =
   { Server_account_route.path

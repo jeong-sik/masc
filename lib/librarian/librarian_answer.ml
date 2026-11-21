@@ -3,7 +3,7 @@ open Keeper_memory_os_types
 type new_fact =
   { claim : string
   ; category : category
-  ; observation : observation
+  ; basis : basis
   ; from_units : string list
   }
 
@@ -24,6 +24,24 @@ type op =
   | Seen of
       { ref_ : string
       ; from_units : string list
+      }
+  | Synthesize of
+      { refs : string list
+      ; claim : string
+      ; category : category
+      ; rule_id : string
+      ; from_units : string list
+      }
+  | Molt of
+      { refs : string list
+      ; reason : string
+      }
+  | Promote_to_world of
+      { refs : string list
+      ; scope : string
+      ; claim : string
+      ; category : category
+      ; facets : string list
       }
 
 type working_state =
@@ -61,6 +79,9 @@ let field_from = "from"
 let field_ref = "ref"
 let field_refs = "refs"
 let field_reason = wire_field_reason
+let field_rule_id = "rule_id"
+let field_scope = "scope"
+let field_facets = "facets"
 
 type op_kind =
   | Kind_add
@@ -68,8 +89,21 @@ type op_kind =
   | Kind_merge
   | Kind_revise
   | Kind_seen
+  | Kind_synthesize
+  | Kind_molt
+  | Kind_promote_to_world
 
-let op_kinds = [ Kind_add; Kind_drop; Kind_merge; Kind_revise; Kind_seen ]
+let op_kinds =
+  [ Kind_add
+  ; Kind_drop
+  ; Kind_merge
+  ; Kind_revise
+  ; Kind_seen
+  ; Kind_synthesize
+  ; Kind_molt
+  ; Kind_promote_to_world
+  ]
+;;
 
 let op_kind_token = function
   | Kind_add -> "add"
@@ -77,6 +111,9 @@ let op_kind_token = function
   | Kind_merge -> "merge"
   | Kind_revise -> "revise"
   | Kind_seen -> "seen"
+  | Kind_synthesize -> "synthesize"
+  | Kind_molt -> "molt"
+  | Kind_promote_to_world -> "promote_to_world"
 ;;
 
 let op_kind_of_token token =
@@ -85,12 +122,6 @@ let op_kind_of_token token =
 
 let op_field kind = field_op, `String (op_kind_token kind)
 
-(* The wire shape, once: each object is its fields with the schema of each
-   value. The decoder takes its closed field sets from these lists and
-   {!schema} is built from them, so the two name the same fields. Every
-   property is required, and Keep is a required null. What a schema does not
-   state here (a blank string, an empty or repeated [refs], a [seen] with no
-   unit, a category token the Memory types refuse) the decoder refuses. *)
 let string_schema = `Assoc [ "type", `String "string" ]
 let names_schema = `Assoc [ "type", `String "array"; "items", string_schema ]
 
@@ -105,21 +136,53 @@ let closed_schema properties =
 
 let field_names properties = List.map fst properties
 
+let derivation_schema =
+  closed_schema
+    [ "rule_id", string_schema
+    ; "premise_ids", names_schema
+    ]
+;;
+
+let derived_basis_schema =
+  closed_schema
+    [ wire_field_kind, `Assoc [ "type", `String "string"; "enum", `List [ `String "derived" ] ]
+    ; wire_field_derivations, `Assoc [ "type", `String "array"; "items", derivation_schema ]
+    ]
+;;
+
+let basis_schema =
+  `Assoc [ "anyOf", `List [ observed_basis_schema; derived_basis_schema ] ]
+;;
+
 let new_fact_properties =
   [ field_claim, string_schema
   ; field_category, string_schema
-  ; field_basis, observed_basis_schema
+  ; field_basis, basis_schema
   ; field_from, names_schema
   ]
 ;;
 
-(* The fields of an op beside [op]. *)
 let op_properties = function
   | Kind_add -> new_fact_properties
   | Kind_drop -> [ field_ref, string_schema; field_reason, string_schema ]
   | Kind_merge -> (field_refs, names_schema) :: new_fact_properties
   | Kind_revise -> (field_ref, string_schema) :: new_fact_properties
   | Kind_seen -> [ field_ref, string_schema; field_from, names_schema ]
+  | Kind_synthesize ->
+    [ field_refs, names_schema
+    ; field_claim, string_schema
+    ; field_category, string_schema
+    ; field_rule_id, string_schema
+    ; field_from, names_schema
+    ]
+  | Kind_molt -> [ field_refs, names_schema; field_reason, string_schema ]
+  | Kind_promote_to_world ->
+    [ field_refs, names_schema
+    ; field_scope, string_schema
+    ; field_claim, string_schema
+    ; field_category, string_schema
+    ; field_facets, names_schema
+    ]
 ;;
 
 let op_schema kind =
@@ -130,11 +193,6 @@ let op_schema kind =
      :: op_properties kind)
 ;;
 
-(* The decoder takes every op and both working states whatever the question
-   was. A schema names only what the question's answer can use: the ops that
-   point at something it showed, and a working state only when it showed
-   one. A slot that keeps to its schema then never writes what the plan
-   would leave out. *)
 let answer_properties ~ops ~working_state =
   [ field_question, string_schema
   ; field_question_end, string_schema
@@ -148,28 +206,26 @@ let answer_properties ~ops ~working_state =
 
 let answer_schema ~ops ~working_state = closed_schema (answer_properties ~ops ~working_state)
 let string_or_null = `List [ `String "string"; `String "null" ]
-
-(* The fields every answer has, whatever its question. *)
 let answer_fields = field_names (answer_properties ~ops:op_kinds ~working_state:string_or_null)
 
-(* Memory and units shown: every op. One item alone: only what it says anew,
-   and Keep. Memory with no unit: the ops that name a fact without a unit,
-   and either working state. *)
 let schemas : Librarian_memory_lane.answer_schemas =
   { range = answer_schema ~ops:op_kinds ~working_state:string_or_null
   ; item_alone = answer_schema ~ops:[ Kind_add ] ~working_state:(`String "null")
   ; room =
-      answer_schema ~ops:[ Kind_drop; Kind_merge; Kind_revise ] ~working_state:string_or_null
+      answer_schema
+        ~ops:[ Kind_drop; Kind_merge; Kind_revise; Kind_synthesize; Kind_molt; Kind_promote_to_world ]
+        ~working_state:string_or_null
   }
 ;;
+
 let new_fact_fields = field_names new_fact_properties
-let units_json names = `List (List.map (fun unit_name -> `String unit_name) names)
+let strings_json items = `List (List.map (fun s -> `String s) items)
 
 let new_fact_to_fields (fact : new_fact) =
   [ field_claim, `String fact.claim
   ; field_category, `String (category_to_string fact.category)
-  ; field_basis, basis_to_json (Observed fact.observation)
-  ; field_from, units_json fact.from_units
+  ; field_basis, basis_to_json fact.basis
+  ; field_from, strings_json fact.from_units
   ]
 ;;
 
@@ -178,14 +234,31 @@ let op_to_json = function
   | Drop { ref_; reason } ->
     `Assoc [ op_field Kind_drop; field_ref, `String ref_; field_reason, `String reason ]
   | Merge { refs; into } ->
-    `Assoc
-      (op_field Kind_merge
-       :: (field_refs, `List (List.map (fun name -> `String name) refs))
-       :: new_fact_to_fields into)
+    `Assoc (op_field Kind_merge :: (field_refs, strings_json refs) :: new_fact_to_fields into)
   | Revise { ref_; into } ->
     `Assoc (op_field Kind_revise :: (field_ref, `String ref_) :: new_fact_to_fields into)
   | Seen { ref_; from_units } ->
-    `Assoc [ op_field Kind_seen; field_ref, `String ref_; field_from, units_json from_units ]
+    `Assoc [ op_field Kind_seen; field_ref, `String ref_; field_from, strings_json from_units ]
+  | Synthesize { refs; claim; category; rule_id; from_units } ->
+    `Assoc
+      [ op_field Kind_synthesize
+      ; field_refs, strings_json refs
+      ; field_claim, `String claim
+      ; field_category, `String (category_to_string category)
+      ; field_rule_id, `String rule_id
+      ; field_from, strings_json from_units
+      ]
+  | Molt { refs; reason } ->
+    `Assoc [ op_field Kind_molt; field_refs, strings_json refs; field_reason, `String reason ]
+  | Promote_to_world { refs; scope; claim; category; facets } ->
+    `Assoc
+      [ op_field Kind_promote_to_world
+      ; field_refs, strings_json refs
+      ; field_scope, `String scope
+      ; field_claim, `String claim
+      ; field_category, `String (category_to_string category)
+      ; field_facets, strings_json facets
+      ]
 ;;
 
 let to_json answer =
@@ -209,8 +282,6 @@ let nonblank_field field fields =
   else Ok value
 ;;
 
-(* Names are kept as written. Only what no table could resolve is refused
-   here: a value that is not a string, or a blank one. *)
 let names_field field fields =
   let* items = wire_list_field field fields in
   let rec collect index names = function
@@ -236,24 +307,28 @@ let first_repeated names =
   scan Set_util.StringSet.empty names
 ;;
 
+let unique_nonempty_refs field fields =
+  let* refs = names_field field fields in
+  match refs, first_repeated refs with
+  | [], _ -> wire_fail [ Wire_field field ] Empty_list
+  | _ :: _, Some name -> wire_fail [ Wire_field field ] (Duplicate_entry name)
+  | _ :: _, None -> Ok refs
+;;
+
+let category_field fields =
+  let* category_token = wire_string_field field_category fields in
+  match category_of_string category_token with
+  | Some category -> Ok category
+  | None -> wire_fail [ Wire_field field_category ] (Unknown_token category_token)
+;;
+
 let new_fact_of_fields fields =
   let* claim = nonblank_field field_claim fields in
-  let* category_token = wire_string_field field_category fields in
-  let* category =
-    match category_of_string category_token with
-    | Some category -> Ok category
-    | None -> wire_fail [ Wire_field field_category ] (Unknown_token category_token)
-  in
+  let* category = category_field fields in
   let* basis_json = wire_json_field field_basis fields in
   let* basis = wire_at (Wire_field field_basis) (basis_of_json basis_json) in
-  let* observation =
-    match basis with
-    | Observed observation -> Ok observation
-    | Derived _ ->
-      wire_fail [ Wire_field field_basis; Wire_field wire_field_kind ] (Unknown_token "derived")
-  in
   let* from_units = names_field field_from fields in
-  Ok { claim; category; observation; from_units }
+  Ok { claim; category; basis; from_units }
 ;;
 
 let new_fact_to_json fact = `Assoc (new_fact_to_fields fact)
@@ -284,13 +359,7 @@ let op_of_json = function
           let* reason = nonblank_field field_reason fields in
           Ok (Drop { ref_; reason })
         | Kind_merge ->
-          let* refs = names_field field_refs fields in
-          let* () =
-            match refs, first_repeated refs with
-            | [], _ -> wire_fail [ Wire_field field_refs ] Empty_list
-            | _ :: _, Some name -> wire_fail [ Wire_field field_refs ] (Duplicate_entry name)
-            | _ :: _, None -> Ok ()
-          in
+          let* refs = unique_nonempty_refs field_refs fields in
           let* into = new_fact_of_fields fields in
           Ok (Merge { refs; into })
         | Kind_revise ->
@@ -300,11 +369,27 @@ let op_of_json = function
         | Kind_seen ->
           let* ref_ = nonblank_field field_ref fields in
           let* from_units = names_field field_from fields in
-          (* Seen again says where. Without a unit it is the question's own
-             Memory read back, which is no observation. *)
           (match from_units with
            | [] -> wire_fail [ Wire_field field_from ] Empty_list
-           | _ :: _ -> Ok (Seen { ref_; from_units }))))
+           | _ :: _ -> Ok (Seen { ref_; from_units }))
+        | Kind_synthesize ->
+          let* refs = unique_nonempty_refs field_refs fields in
+          let* claim = nonblank_field field_claim fields in
+          let* category = category_field fields in
+          let* rule_id = nonblank_field field_rule_id fields in
+          let* from_units = names_field field_from fields in
+          Ok (Synthesize { refs; claim; category; rule_id; from_units })
+        | Kind_molt ->
+          let* refs = unique_nonempty_refs field_refs fields in
+          let* reason = nonblank_field field_reason fields in
+          Ok (Molt { refs; reason })
+        | Kind_promote_to_world ->
+          let* refs = unique_nonempty_refs field_refs fields in
+          let* scope = nonblank_field field_scope fields in
+          let* claim = nonblank_field field_claim fields in
+          let* category = category_field fields in
+          let* facets = names_field field_facets fields in
+          Ok (Promote_to_world { refs; scope; claim; category; facets })))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire_here Expected_object
 ;;
@@ -333,9 +418,7 @@ let of_json ~(asked : Librarian_question_id.t) json =
   let schema result = Result.map_error (fun error -> Schema_violation error) result in
   match json with
   | `Assoc fields ->
-    let* () =
-      schema (exact_field_names_result answer_fields fields)
-    in
+    let* () = schema (exact_field_names_result answer_fields fields) in
     let* front = schema (wire_string_field field_question fields) in
     let* back = schema (wire_string_field field_question_end fields) in
     if not (String.equal front asked.front && String.equal back asked.back)
@@ -352,8 +435,6 @@ let of_string ~asked text =
   if String.equal (String.trim text) ""
   then Error Empty_or_partial
   else (
-    (* Parsed as written. A helper that repairs the text first would turn a
-       damaged answer into a different, accepted one. *)
     match Yojson.Safe.from_string text with
     | exception Yojson.Json_error (_ : string) -> Error Not_json
     | json -> of_json ~asked json)

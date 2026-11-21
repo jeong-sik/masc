@@ -71,7 +71,8 @@ type status =
       [Store_unwritable], with its text in the log. The writer only calls
       it: it writes no turn log line itself. *)
 val create
-  :  now:(unit -> float)
+  :  ?on_world_promotions:(keeper_id:string -> Librarian_lifecycle.world_promotion list -> unit)
+  -> now:(unit -> float)
   -> registered:(unit -> bool)
   -> declared:(unit -> Librarian_machine.declared option)
   -> stores:Librarian_unit_content.stores
@@ -113,6 +114,10 @@ val pulse : t -> unit
 (** The declaration may have changed. The writer reads it when it takes
     this. *)
 val declaration_changed : t -> unit
+
+(** Notify the writer that the Keeper's anchored compaction epoch advanced,
+    scheduling proactive declarative molting and synthesis when open. *)
+val compaction_epoch_advanced : t -> epoch_id:int -> unit
 
 type 'answer asked =
   | Answered of 'answer

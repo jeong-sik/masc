@@ -112,6 +112,7 @@ let removal_text : Effects.removal -> string = function
   | Retracted { by = Keeper; reason } -> "retracted by the keeper: " ^ reason
   | Retracted { by = Operator operator; reason } -> "retracted by " ^ operator ^ ": " ^ reason
   | Support_lost { missing } -> "support lost: " ^ String.concat "," missing
+  | Molted { reason } -> "molted: " ^ reason
 ;;
 
 let removed (commit : Log.commit) =

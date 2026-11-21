@@ -93,8 +93,11 @@ type asked =
       [Read_item_alone]: the head item alone, asked only on the bottom's
       verdict. *)
   | Room of Librarian_room_result.asked
-  (** Memory and the working state, with no unit: asked only right after an
-      item read alone was committed (§7.4). *)
+  (** Memory and the working state, with no unit: asked right after an item
+      read alone was committed (§7.4) with [molt_trigger = None], or on a
+      structural lifecycle boundary ([Compaction_epoch_advanced]) with
+      [molt_trigger = Some _] to commit via {!Librarian_store.commit_molt}
+      followed by {!Librarian_store.compact_log}. *)
 
 (** The ask that is out. *)
 type asking =
@@ -214,6 +217,10 @@ type event =
       ; result : ended
       }
   | Declaration_changed of declared option
+  | Compaction_epoch_advanced of { epoch_id : int }
+  (** Structural lifecycle boundary: the Keeper's anchored compaction epoch
+      advanced, triggering proactive declarative molting and cross-category
+      synthesis when the store is open and idle/resting. *)
 
 (** One event (§9.3). A [Declaration_changed] whose lane value is the one
     held does not reach the table: the registry and the runtime table send

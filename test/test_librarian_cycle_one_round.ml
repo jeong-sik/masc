@@ -126,7 +126,7 @@ let labelled label text =
 let answering (_ : int) body =
   let text = text_of body in
   let fact : Librarian_answer.new_fact =
-    { claim; category = Types.Fact; observation = Types.Transcript; from_units = [ first_unit ] }
+    { claim; category = Types.Fact; basis = Types.Observed Types.Transcript; from_units = [ first_unit ] }
   in
   let ops : Librarian_answer.op list = [ Librarian_answer.Add fact ] in
   match labelled "question" text, labelled "question-end" text with
@@ -221,6 +221,8 @@ let cause_text : Log_line.cause -> string = function
   | Log_line.Read _ -> "read"
   | Log_line.Make_room _ -> "make_room"
   | Log_line.Skip _ -> "skip"
+  | Log_line.Molt_and_synthesize _ -> "molt_and_synthesize"
+  | Log_line.Checkpoint _ -> "checkpoint"
 ;;
 
 (* The cause of every commit in the Keeper's commit log, in order. *)
@@ -414,7 +416,8 @@ let test_a_closed_turn_is_asked_committed_and_shown () =
   (match commit.cause with
    | Log_line.Read { slot = answered; _ } ->
      check string "the declared slot answered" slot answered
-   | Log_line.Direct _ | Log_line.Adopt _ | Log_line.Make_room _ | Log_line.Skip _ ->
+   | Log_line.Direct _ | Log_line.Adopt _ | Log_line.Make_room _ | Log_line.Skip _
+   | Log_line.Molt_and_synthesize _ | Log_line.Checkpoint _ ->
      fail "the commit is not of a read");
   check (list string) "the answer added its fact" [ claim ]
     (List.map (fun (fact : Types.fact) -> fact.claim) commit.effects.added);

@@ -39,9 +39,9 @@ template_variables: []
 
 ### 모드별 허용 범위
 
-- **`Read_range`**: `add`, `seen`, `revise`, `merge`, `drop` 및 `working_state` 변경(`null` 또는 문자열) 모두 가능합니다.
-- **`Read_item_alone`**: **`add` 와 `"working_state": null` 만 허용**됩니다. 보이지 않는 Memory를 추측해 `drop`·`merge`·`revise`·`seen`을 내거나 `working_state`를 덮어쓰지 마세요.
-- **`Make_room`**: 단위가 없으므로 `"from": []`를 쓰는 기존 Memory 정리(`merge`·`revise`·`drop`)와 `working_state` 정리만 합니다. 다시 본 근거가 없으니 `seen` 을, 새로 읽은 것이 없으니 `add` 를 쓰지 마세요. 상시 제약·정체성 결정·쓸 날이 남은 기록은 지우지 마세요.
+- **`Read_range`**: `add`, `seen`, `revise`, `merge`, `drop`, `synthesize`, `molt`, `promote_to_world` 및 `working_state` 변경(`null` 또는 문자열) 모두 가능합니다.
+- **`Read_item_alone`**: **`add` 와 `"working_state": null` 만 허용**됩니다. 보이지 않는 Memory를 추측해 다른 op 를 내거나 `working_state`를 덮어쓰지 마세요.
+- **`Make_room` / `Molt_and_synthesize`**: 단위가 없으므로 `"from": []`를 쓰는 기존 Memory 정리·교차 합성·탈피·세계 승격(`merge`·`revise`·`drop`·`synthesize`·`molt`·`promote_to_world`)과 `working_state` 정리만 합니다. 다시 본 근거가 없으니 `seen` 을, 새로 읽은 것이 없으니 `add` 를 쓰지 마세요. 상시 제약·정체성 결정·쓸 날이 남은 기록은 지우지 마세요.
 
 ## 출력 와이어 계약 (`Librarian_answer`)
 
@@ -62,7 +62,7 @@ template_variables: []
 - `"working_state"`: 바꿀 내용이 없거나 `Read_item_alone` 모드면 `null`(`Keep`), 바꿀 때만 문자열(`Set`; 빈 문자열 `""`은 비움)을 적습니다.
 - `"ops"`: **바뀌는 것만** 적습니다. 이름 붙이지 않은 현재 기억 `mN`은 그대로 남습니다. **새 증거가 없거나 바꿀 것이 없으면 `"ops": []`를 출력하는 것이 정상입니다** (빈 답 금지 규정을 따르지 않습니다).
 
-### `ops` 안의 5가지 연산과 인식적 역할
+### `ops` 안의 8가지 연산과 인식적 역할
 
 1. **`add`** — 단위에서 **새로 안 것** (필드: `op`, `claim`, `category`, `basis`, `from`)
    ```json
@@ -92,14 +92,29 @@ template_variables: []
    ```json
    {"op": "drop", "ref": "m2", "reason": "단위 u1 닫힌 시각 기준 완료 확인 한 문장"}
    ```
+6. **`synthesize`** — **서로 다른 측면(교차 카테고리 포함)의 기억을 전제(`Derived` provenance)로 유지하며 더 풍부한 통찰을 파생 합성** (필드: `op`, `refs`, `claim`, `category`, `rule_id`, `from`)
+   ```json
+   {"op": "synthesize", "refs": ["m1", "m3"], "claim": "...", "category": "lesson", "rule_id": "cross_category_synthesis", "from": ["u1"]}
+   ```
+   - `merge`와 달리 전제 기억(`m1`, `m3`)을 삭제하지 않고 보존하며, 새 fact의 `basis`를 `Derived` 증명 경로로 자동 연결합니다.
+7. **`molt`** — **구조적 생애주기 경계(압축 에포크 전진 또는 합성 주기 완료)에서 대체되었거나 일시적 잡음인 기억을 능동적으로 차가운 아카이브로 탈피(Ship-of-Theseus Molting)** (필드: `op`, `refs`, `reason`)
+   ```json
+   {"op": "molt", "refs": ["m6", "m7"], "reason": "압축 에포크 전진 시 이미 통합 완료된 일시적 작업 상태 정리"}
+   ```
+   - `Make_room` 용량 초과를 기다리지 않고 구조적 경계에서 선제적으로 불필요한 잡음을 덜어냅니다. 시간 경과(TTL)나 숫자 점수를 이유로 탈피하지 마세요.
+8. **`promote_to_world`** — **여러 Keeper와 공유할 가치가 검증된 지역 기억을 MASC World Memory 후보로 승격 제안** (필드: `op`, `refs`, `scope`, `claim`, `category`, `facets`)
+   ```json
+   {"op": "promote_to_world", "refs": ["m1", "m4"], "scope": "workspace", "claim": "...", "category": "validated_approach", "facets": ["compaction", "sqlite_wal"]}
+   ```
+   - 지역 기억은 삭제되지 않으며, 검증된 `source_fact_ids` 출처와 함께 비동기 `World_curator`에 전달됩니다.
 
 ### 와이어·계획 거부 방지 규칙
 
-- **한 기억 한 번 규칙**: 현재 Memory의 짧은 ID `mN`은 한 응답의 `ops` 전체에서 **최대 한 번만** 이름 붙입니다. `revise`·`merge`·`seen`·`drop`을 같은 `mN`에 겹쳐 쓰지 마세요(`Ref_used_twice`).
-- **`merge`의 `refs`**: 1개 이상의 서로 다른 `mN`을 적습니다. 빈 배열이나 중복 `mN`은 `Schema_violation`입니다.
-- **`from`**: 이 질문에 실제 실린 단위 이름(`"u1"`, …)만 적습니다. 단위가 없는 `Make_room` 정리는 `"from": []`를 씁니다(질문 밖 단위는 `Source_outside_question`).
-- **`basis`**: 반드시 `observed` 모양만 출력합니다(`{"kind": "observed"}`, 또는 단위에 실제 Board ID가 있을 때 `{"kind": "observed", "board": {"post_id": "p-...", "comment_id": "c-..."}}`). **`"kind": "derived"`는 절대 출력하지 마세요**(`Schema_violation`).
-- **`derived` 전제 보호**: 현재 Memory에 `basis.kind = "derived"`인 fact가 있으면, 그 `derivations` 전제가 끊어지지 않는지 확인하세요(`Support_lost` 방지).
+- **변경 연산 한 기억 한 번 규칙**: `revise`·`merge`·`seen`·`drop`·`molt`는 한 응답의 `ops` 전체에서 같은 `mN`에 **최대 한 번만** 이름 붙입니다(`Ref_used_twice`). 읽기 전용 전제 인용인 `synthesize`·`promote_to_world`는 같은 응답 안에서 함께 살아남는 전제 `mN`을 공유할 수 있습니다.
+- **`merge`/`synthesize`/`molt`/`promote_to_world`의 `refs`**: 1개 이상의 서로 다른 `mN`을 적습니다. 빈 배열이나 중복 `mN`은 `Schema_violation`입니다.
+- **`from`**: 이 질문에 실제 실린 단위 이름(`"u1"`, …)만 적습니다. 단위가 없는 `Make_room` / `Molt_and_synthesize` 정리는 `"from": []`를 씁니다(질문 밖 단위는 `Source_outside_question`).
+- **`basis`**: `observed`(`{"kind": "observed"}` 또는 Board 출처 포함)와 `derived`(`{"kind": "derived", "derivations": [{"rule_id": "...", "premise_ids": ["sha256:..."]}]}`)를 모두 허용합니다. 단, `mN` 짧은 이름으로 교차 합성할 때는 `synthesize` 연산을 사용하세요.
+- **`derived` 전제 보호**: 현재 Memory에 `basis.kind = "derived"`인 fact가 있으면, 그 `derivations` 전제가 끊어지지 않는지 확인하세요(`Support_lost` / `Successor_unsupported` 방지).
 - **`claim`과 `reason`**: 공백이 아닌 비어 있지 않은 문자열이어야 합니다.
 - **숫자 임계값 금지**: 감쇠 상수·importance 점수·횟수 문턱값은 두지 않습니다.
 

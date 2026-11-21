@@ -21,6 +21,7 @@ type why =
       ; reason : string
       }
   | Support_lost of { missing : string list }
+  | Molted of { reason : string }
 
 type dropped =
   { left : Librarian_archive.left
@@ -45,6 +46,7 @@ let sort_removal : Librarian_effects.removal -> sorted = function
   | Dropped { reason } -> Ended (Dropped { reason })
   | Retracted { by; reason } -> Ended (Retracted { by; reason })
   | Support_lost { missing } -> Ended (Support_lost { missing })
+  | Molted { reason } -> Ended (Molted { reason })
 ;;
 
 (* [named] maps a fact that left for another fact to that fact's id. *)
@@ -147,6 +149,11 @@ let why_fields = function
   | Support_lost { missing } ->
     [ "removal", `String "support_lost"
     ; "missing_premises", `List (List.map (fun id -> `String id) missing)
+    ]
+  | Molted { reason } ->
+    [ "removal", `String "molted"
+    ; "removed_by", `String "librarian"
+    ; "reason", `String reason
     ]
 ;;
 

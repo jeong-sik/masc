@@ -72,3 +72,11 @@ val store_of_token : string -> Librarian_unit.store option
 val of_json
   :  Yojson.Safe.t
   -> (Librarian_log.line, Keeper_memory_os_types.wire_error) result
+
+(** Canonical JSON codec for {!Librarian_effects.removal}, shared with
+    {!Librarian_archive} for compacted cold archive sidecars. *)
+val removal_to_json : Librarian_effects.removal -> Yojson.Safe.t
+
+val removal_of_json
+  :  Yojson.Safe.t
+  -> (Librarian_effects.removal, Keeper_memory_os_types.wire_error) result

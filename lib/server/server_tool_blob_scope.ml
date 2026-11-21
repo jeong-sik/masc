@@ -299,7 +299,19 @@ let config_keepers =
       ; reason = M.Writes_no_reference
       }
   ; M.Keeper_files
+      { suffix = Librarian_log_store.archive_suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
       { suffix = Librarian_writer.lock_suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_digest.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_search_index.db_suffix
       ; reason = M.Writes_no_reference
       }
     (* Per-Keeper compaction WAL stores immutable compaction anchors, raw

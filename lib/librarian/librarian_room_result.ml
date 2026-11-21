@@ -1,6 +1,9 @@
 module Digest = Agent_core.Checkpoint_objects
 
-type asked = { trace : string }
+type asked =
+  { trace : string
+  ; molt_trigger : Librarian_lifecycle.molt_trigger option
+  }
 
 type question =
   { id : Librarian_question_id.t

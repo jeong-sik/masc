@@ -27,7 +27,7 @@ let board ?comment_id () =
 ;;
 
 let new_fact ?(observation = Types.Transcript) ?(from_units = []) claim : Answer.new_fact =
-  { claim; category = Types.Fact; observation; from_units }
+  { claim; category = Types.Fact; basis = Types.Observed observation; from_units }
 ;;
 
 let every_op : Answer.op list =
@@ -38,6 +38,21 @@ let every_op : Answer.op list =
   ; Merge { refs = [ "m1"; "m3" ]; into = new_fact "one sentence for both" }
   ; Revise { ref_ = "m4"; into = new_fact ~from_units:[ "u2" ] "the port is 8936" }
   ; Seen { ref_ = "m5"; from_units = [ "u1"; "u2" ] }
+  ; Synthesize
+      { refs = [ "m1"; "m3" ]
+      ; claim = "port and owner jointly constrain deploy"
+      ; category = Types.Lesson
+      ; rule_id = "cross_category_synthesis"
+      ; from_units = [ "u1" ]
+      }
+  ; Molt { refs = [ "m6" ]; reason = "compaction epoch advanced" }
+  ; Promote_to_world
+      { refs = [ "m1" ]
+      ; scope = "workspace"
+      ; claim = "shared port policy is 8935"
+      ; category = Types.Constraint
+      ; facets = [ "port"; "network" ]
+      }
   ]
 ;;
 
@@ -81,10 +96,10 @@ let test_golden () =
   | [ Add first; Add second; Drop dropped; Merge merged; Revise revised; Seen seen ] ->
     check string "add claim" "the port is 8935" first.claim;
     check (list string) "add units" [ "u1" ] first.from_units;
-    check bool "add is read from the transcript" true (first.observation = Types.Transcript);
+    check bool "add is read from the transcript" true (first.basis = Types.Observed Types.Transcript);
     check string "known category" "validated_approach"
       (Types.category_to_string second.category);
-    check bool "board comment" true (second.observation = board ~comment_id:comment ());
+    check bool "board comment" true (second.basis = Types.Observed (board ~comment_id:comment ()));
     check string "drop ref" "m2" dropped.ref_;
     check string "drop reason" "the build moved" dropped.reason;
     check (list string) "merge refs" [ "m1"; "m3" ] merged.refs;
@@ -189,17 +204,19 @@ let test_op_rejections () =
   expect_schema "a reserved category" ~path:(at_op 0 [ Wire_field "category" ])
     ~reason:(Unknown_token "dropped")
     (document (add_with ~category:{|"dropped"|} ()));
-  (* Only a Keeper's direct write makes a derived fact. *)
-  expect_schema "a derived basis"
-    ~path:(at_op 0 [ Wire_field "basis"; Wire_field "kind" ])
-    ~reason:(Unknown_token "derived")
-    (document
-       (add_with
-          ~basis:
-            (Printf.sprintf
-               {|{"kind":"derived","derivations":[{"rule_id":"r","premise_ids":["%s"]}]}|}
-               (Types.memory_id_of_claim "premise"))
-          ()));
+  (* Derived provenance is unlocked for Librarian synthesis and derivation. *)
+  let derived_answer =
+    decoded "a derived basis"
+      (Answer.of_string ~asked
+         (document
+            (add_with
+               ~basis:
+                 (Printf.sprintf
+                    {|{"kind":"derived","derivations":[{"rule_id":"r","premise_ids":["%s"]}]}|}
+                    (Types.memory_id_of_claim "premise"))
+               ())))
+  in
+  check int "derived add decodes" 1 (List.length derived_answer.ops);
   expect_schema "a unit name that is a number" ~path:(at_op 0 [ Wire_field "from"; Wire_index 1 ])
     ~reason:Expected_string
     (document (add_with ~from:{|["u1",2]|} ()));
@@ -248,13 +265,15 @@ let schema_offers (schema : Yojson.Safe.t) =
 let test_schema_of_each_question () =
   let offers = Alcotest.(pair (list string) string) in
   check offers "Memory and units: every op, either working state"
-    ([ "add"; "drop"; "merge"; "revise"; "seen" ], {|["string","null"]|})
+    ( [ "add"; "drop"; "merge"; "revise"; "seen"; "synthesize"; "molt"; "promote_to_world" ]
+    , {|["string","null"]|} )
     (schema_offers Answer.schemas.range);
   check offers "one item alone: what it says anew, no working state"
     ([ "add" ], {|"null"|})
     (schema_offers Answer.schemas.item_alone);
   check offers "Memory and no unit: the ops that name a fact without a unit"
-    ([ "drop"; "merge"; "revise" ], {|["string","null"]|})
+    ( [ "drop"; "merge"; "revise"; "synthesize"; "molt"; "promote_to_world" ]
+    , {|["string","null"]|} )
     (schema_offers Answer.schemas.room)
 ;;
 

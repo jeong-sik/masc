@@ -15,6 +15,7 @@ type removal =
       ; reason : string
       }
   | Support_lost of { missing : string list }
+  | Molted of { reason : string }
 
 type why_not =
   | Unknown_ref
@@ -31,9 +32,18 @@ type t =
   ; removed : (fact * removal) list
   ; not_applied : (int * why_not * Librarian_answer.new_fact option) list
   ; sources : (string * int list) list
+  ; promotions : Librarian_lifecycle.world_promotion list
   }
 
-let empty = { added = []; touched = []; removed = []; not_applied = []; sources = [] }
+let empty =
+  { added = []
+  ; touched = []
+  ; removed = []
+  ; not_applied = []
+  ; sources = []
+  ; promotions = []
+  }
+;;
 
 let why_not_kind = function
   | Unknown_ref -> "unknown_ref"

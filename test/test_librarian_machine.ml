@@ -288,6 +288,9 @@ let cause_text : Log.cause -> string = function
     Printf.sprintf "skip: the line at %d, %s" offset (hex sha)
   | Skip { hole = Operator_skipped { by; missing } } ->
     Printf.sprintf "skip by %s, %d units missing parts" by (List.length missing)
+  | Molt_and_synthesize { slot; _ } -> "molt by " ^ slot
+  | Checkpoint { compacted_lines; archived_entries } ->
+    Printf.sprintf "checkpoint %d/%d" compacted_lines archived_entries
 ;;
 
 let not_applied_text (number, (why : Effects.why_not), (_ : Answer.new_fact option)) =
@@ -409,7 +412,7 @@ let question place (value : Machine.t) : Read_result.question =
 ;;
 
 let stated claim : Answer.new_fact =
-  { claim; category = Types.Fact; observation = Types.Transcript; from_units = [ "u1" ] }
+  { claim; category = Types.Fact; basis = Types.Observed Types.Transcript; from_units = [ "u1" ] }
 ;;
 
 let answered ?(working_state = Answer.Keep) (question : Read_result.question) ops : Read_result.t =
@@ -799,7 +802,7 @@ let test_the_item_alone_keeps_the_working_state () =
   let line = last_commit read in
   (match line.cause with
    | Read { shown = Item_alone Not_valid_alone; _ } -> ()
-   | Read { shown = With_memory | Item_alone Untouched; _ } | Make_room _ | Direct _ | Adopt _ | Skip _ ->
+   | Read { shown = With_memory | Item_alone Untouched; _ } | Make_room _ | Direct _ | Adopt _ | Skip _ | Molt_and_synthesize _ | Checkpoint _ ->
      fail "the line does not say the working state was kept");
   check (option string) "the working state is as it was" None line.working_state;
   check int "no fact is left" 0 (facts_held read With_memory + facts_held read Alone)

@@ -124,6 +124,20 @@ type cause =
       Only an answer that changes the snapshot or the working state is
       committed. *)
   | Skip of { hole : hole }
+  | Molt_and_synthesize of
+      { question : Librarian_question_id.t
+      ; slot : string
+      ; trace : string
+      ; trigger : Librarian_lifecycle.molt_trigger
+      }
+  (** Proactive declarative consolidation, cross-category synthesis, and
+      archival molting triggered at a structural lifecycle boundary. *)
+  | Checkpoint of
+      { compacted_lines : int
+      ; archived_entries : int
+      }
+  (** Finite-storage log compaction baseline: historical removals were flushed
+      to the cold archive sidecar and the live commit log now starts here. *)
 
 type commit =
   { seq : int

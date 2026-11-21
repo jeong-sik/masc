@@ -488,6 +488,9 @@ let cause_text : Log.cause -> string = function
     Printf.sprintf "made room for %s by %s on %s"
       (if Masc.Librarian_question_id.equal id question_id then "the question" else "another")
       slot trace
+  | Molt_and_synthesize { slot; trace; _ } -> Printf.sprintf "molt by %s on %s" slot trace
+  | Checkpoint { compacted_lines; archived_entries } ->
+    Printf.sprintf "checkpoint compacted=%d archived=%d" compacted_lines archived_entries
 ;;
 
 let source_text ({ kind; trace_id } : Current.source) =
@@ -506,7 +509,7 @@ let test_an_answer_moves_reading () =
       [ Add
           { claim = owner
           ; category = Types.Fact
-          ; observation = Types.Transcript
+          ; basis = Types.Observed Types.Transcript
           ; from_units = [ "u1" ]
           }
       ]
@@ -666,7 +669,7 @@ let test_adopt_a_diverged_snapshot () =
      check string "the cause is the adoption" "operator-1"
        (match line.cause with
         | Adopt { by; observed = (_ : Digest.digest) } -> by
-        | Direct _ | Read _ | Make_room _ | Skip _ -> "another cause")
+        | Direct _ | Read _ | Make_room _ | Skip _ | Molt_and_synthesize _ | Checkpoint _ -> "another cause")
    | Started _ -> fail "a log whose last line decodes was started over");
   check string "boot now opens the store" "booted" (boot_text place);
   let (_ : Store.t), next = committed store ~at:401.0 (remember owner) in

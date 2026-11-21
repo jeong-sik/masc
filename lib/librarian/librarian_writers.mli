@@ -39,6 +39,13 @@ val create
   -> start_turn_log:(string -> (unit, string) result)
   -> t
 
+(** Install or clear the callback invoked whenever a Keeper's Librarian commits
+    verified [Promote_to_world] proposals. *)
+val set_world_promotions_callback
+  :  t
+  -> (keeper_id:string -> Librarian_lifecycle.world_promotion list -> unit) option
+  -> unit
+
 (** What a Keeper's request reads (§11.1). It does not wait for the writer.
 
     - [`Booting]: the writer is opening its store. A registered Keeper that
@@ -106,8 +113,12 @@ val declaration_changed : t -> Librarian_machine.declared option -> unit
 
 (** The maintenance tick. Every Keeper of [keepers] that is registered gets
     its writer and a pulse, and the writer of every Keeper that is no longer
-    registered is retired. *)
+    registered is retired asynchronously so a retiring writer never stalls the
+    maintenance loop. *)
 val pulse : t -> string list -> unit
+
+(** Notify a Keeper's writer that its anchored compaction epoch advanced. *)
+val compaction_epoch_advanced : t -> string -> epoch_id:int -> unit
 
 (** The writers this table holds, by Keeper, with what each one shows. A
     reading only: it makes no writer. *)

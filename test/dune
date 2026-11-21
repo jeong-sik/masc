@@ -7784,3 +7784,5 @@
 (include stanzas/test_exact_lane_slots.inc)
 
 (include stanzas/test_keeper_compaction.inc)
+
+(include stanzas/test_living_librarian.inc)

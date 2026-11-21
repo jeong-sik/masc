@@ -146,12 +146,12 @@ let ranking_failure_logged = Atomic.make false
    second tier keeps store order, the same query matching still answers, and
    the log says so once per process: a host whose SQLite lacks the trigram
    tokenizer (older than 3.34) fails every search the same way. *)
-let answering ~claim_of ~query items =
+let answering_with_rank ~rank_fn ~claim_of ~query items =
   if String.equal query ""
   then items, []
   else (
     let scores =
-      match Keeper_memory_search_index.rank ~query (List.map claim_of items) with
+      match rank_fn () with
       | Ok ranked ->
         List.fold_left
           (fun acc (position, score) -> IntMap.add position score acc)
@@ -186,6 +186,12 @@ let answering ~claim_of ~query items =
               Option.is_some (score entry)
               || String_util.contains_all_query_terms_ci (claim_of item) query)
            rest) ))
+;;
+
+let answering ~claim_of ~query items =
+  answering_with_rank
+    ~rank_fn:(fun () -> Keeper_memory_search_index.rank ~query (List.map claim_of items))
+    ~claim_of ~query items
 ;;
 
 (* The keeper's current facts that answer the query ({!answering}): ordinary
@@ -238,10 +244,19 @@ let search_durable_facts
       Option.map (fun target -> target, Some binding)
         (StringMap.find_opt binding.target_memory_id by_id)) recall_bindings in
   let ordinary_whole, ordinary_fragments =
-    answering ~query ~claim_of:(fun ((fact : Keeper_memory_os_types.fact),
-        (evidence : Keeper_memory_os_current.admission_recall_binding option)) ->
-      match evidence with None -> fact.claim | Some binding -> binding.source_fact.claim)
-      (ordinary_entries @ lookup_entries)
+    let claim_of
+        ((fact : Keeper_memory_os_types.fact),
+         (evidence : Keeper_memory_os_current.admission_recall_binding option)) =
+      match evidence with None -> fact.claim | Some binding -> binding.source_fact.claim
+    in
+    if lookup_entries = []
+    then
+      answering_with_rank
+        ~rank_fn:(fun () ->
+          Keeper_memory_search_index.rank_persistent_for_facts
+            ~keepers_dir ~keeper_id:meta.name ~query facts)
+        ~query ~claim_of ordinary_entries
+    else answering ~query ~claim_of (ordinary_entries @ lookup_entries)
   in
   (* Keep the query's ranked order without building a second index. A
      concurrently rewritten claim is not the selected claim, even if its
@@ -1304,7 +1319,7 @@ let removal_receipt (effects : Librarian_effects.t) =
             ; ( "missing_premise_ids"
               , `List (List.map (fun premise_id -> `String premise_id) missing) )
             ])
-    | Dropped _ | Merged_into _ | Revised_into _ | Superseded_by _ | Retracted _ -> None
+    | Dropped _ | Merged_into _ | Revised_into _ | Superseded_by _ | Retracted _ | Molted _ -> None
   in
   [ ( Write_receipt_key.removed_memory_ids
     , `List

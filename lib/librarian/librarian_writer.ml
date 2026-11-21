@@ -38,6 +38,7 @@ type event =
   | Turn_closed
   | Pulse
   | Declaration_changed
+  | Compaction_epoch_advanced of { epoch_id : int }
   (* The writer reads the declaration when it takes this: of two that come
      close together, the one taken last carries the newer value. *)
   | Ask_ended of
@@ -73,6 +74,7 @@ type event =
 
 type t =
   { place : Machine.place
+  ; on_world_promotions : (keeper_id:string -> Librarian_lifecycle.world_promotion list -> unit) option
   ; now : unit -> float
   ; registered : unit -> bool
   ; declared : unit -> Machine.declared option
@@ -106,15 +108,16 @@ let lock_file_permissions = 0o600
 (* The lock is taken on a file that exists. It is made once and never
    replaced: a second file under the same name would be a second lock. *)
 let ensure_lock_file path =
-  match
-    Fs_compat.mkdir_p (Filename.dirname path);
-    Unix.close (Unix.openfile path [ O_WRONLY; O_CREAT; O_CLOEXEC ] lock_file_permissions)
-  with
-  | () -> Ok ()
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception Unix.Unix_error (error, operation, (_ : string)) ->
-    Error (operation ^ ": " ^ Unix.error_message error)
-  | exception Sys_error detail -> Error detail
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    match
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Unix.close (Unix.openfile path [ O_WRONLY; O_CREAT; O_CLOEXEC ] lock_file_permissions)
+    with
+    | () -> Ok ()
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception Unix.Unix_error (error, operation, (_ : string)) ->
+      Error (operation ^ ": " ^ Unix.error_message error)
+    | exception Sys_error detail -> Error detail)
 ;;
 
 let stop_text : Store.stop -> string = function
@@ -171,16 +174,57 @@ let revision (value : Machine.t) =
    again. [was] is the revision before the step, [None] for a store that was
    not open. So a store that opens says its revision too: the boot or the
    adoption that opened it can be what put that revision in the file. *)
-let announce t ~was (value : Machine.t) =
-  match revision value with
-  | Some now when not (Option.equal Int.equal was (Some now)) ->
-    Keeper_memory_commit_notifications.notify_committed
-      { keepers_dir = Unix.realpath t.place.memory_dir
-      ; keeper_id = t.place.keeper_id
-      ; store = Ordinary
-      ; revision = now
-      }
-  | Some (_ : int) | None -> ()
+let safe_realpath dir =
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    try Unix.realpath dir with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Unix.Unix_error _ | Sys_error _ -> dir)
+;;
+
+let store_of_machine (value : Machine.t) =
+  match value.state with
+  | Idle { store; seen_length = (_ : int option) }
+  | Asking { store; asking = (_ : Machine.asking) }
+  | Resting store
+  | Refused_at_bottom store -> Some store
+  | Stopped (_ : Store.stop) -> None
+;;
+
+let tail_promotions (value : Machine.t) =
+  Option.bind (store_of_machine value) Store.last_promotions
+;;
+
+let tail_promo_seq (value : Machine.t) = Option.map fst (tail_promotions value)
+
+let announce t ~was ~was_promo_seq (value : Machine.t) =
+  (match revision value, store_of_machine value with
+   | Some now, Some store when not (Option.equal Int.equal was (Some now)) ->
+     (match
+        Keeper_memory_search_index.sync_snapshot
+          ~keepers_dir:t.place.memory_dir
+          ~keeper_id:t.place.keeper_id
+          (Store.memory store)
+      with
+      | Ok (_ : int) -> ()
+      | Error err ->
+        Log.Keeper.warn ~keeper_name:t.place.keeper_id
+          "persistent memory FTS5 sync failed: %s"
+          (Keeper_memory_search_index.error_to_string err));
+     Keeper_memory_commit_notifications.notify_committed
+       { keepers_dir = safe_realpath t.place.memory_dir
+       ; keeper_id = t.place.keeper_id
+       ; store = Ordinary
+       ; revision = now
+       }
+   | Some (_ : int), (Some _ | None) | None, (Some _ | None) -> ());
+  match t.on_world_promotions, tail_promotions value with
+  | Some cb, Some (seq, promos) when not (Option.equal Int.equal was_promo_seq (Some seq)) ->
+    (try cb ~keeper_id:t.place.keeper_id promos with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.warn ~keeper_name:t.place.keeper_id
+         "world memory promotion callback failed: %s" (Printexc.to_string exn))
+  | _ -> ()
 ;;
 
 let take_lock t ~sw =
@@ -224,7 +268,7 @@ type step =
 let answer_stopped event (stop : Store.stop) =
   let tell reply answer = ignore (Eio.Promise.try_resolve reply answer : bool) in
   match event with
-  | Turn_closed | Pulse | Declaration_changed | Ask_ended _ -> ()
+  | Turn_closed | Pulse | Declaration_changed | Compaction_epoch_advanced _ | Ask_ended _ -> ()
   | Write { reply; _ } -> tell reply (Machine.Unavailable (Store_stopped stop))
   | Resume reply
   | Adopt { reply; _ }
@@ -308,16 +352,17 @@ let live t ~sw =
       let opened : (Store.t, Store.stop) result =
         if not !locked
         then Error Store_unwritable
-        else (
-          (* §8.6: the store start is the turn log's first line, then the
-             boot. A first boot and a resume both do the two. *)
-          match t.start_turn_log () with
-          | Ok () -> Machine.boot t.place ~at:(t.now ())
-          | Error detail ->
-            Log.Keeper.error ~keeper_name:t.place.keeper_id
-              "librarian memory store start: the turn log's first line was not written: %s"
-              detail;
-            Error Store_unwritable)
+        else
+          Domain_pool_ref.submit_io_or_inline ~name:"librarian_writer.boot" (fun () ->
+            (* §8.6: the store start is the turn log's first line, then the
+               boot. A first boot and a resume both do the two. *)
+            match t.start_turn_log () with
+            | Ok () -> Machine.boot t.place ~at:(t.now ())
+            | Error detail ->
+              Log.Keeper.error ~keeper_name:t.place.keeper_id
+                "librarian memory store start: the turn log's first line was not written: %s"
+                detail;
+              Error Store_unwritable)
       in
       (match opened with
        | Error stop ->
@@ -327,34 +372,40 @@ let live t ~sw =
       opened)
   in
   (* One event. The caller has its answer before anyone is told to read
-     Memory. *)
+     Memory. All synchronous store/turn-log I/O runs off the main Eio domain
+     via [Domain_pool_ref.submit_io_or_inline]. *)
   let step (state : Machine.t) event =
     let settle next reply answer =
       publish t ~was:state next;
       follow ~before:state ~after:next;
       Eio.Promise.resolve reply answer;
-      announce t ~was:(revision state) next;
+      announce t ~was:(revision state) ~was_promo_seq:(tail_promo_seq state) next;
       Next next
     in
     (* A commit and the reads before the next ask are not cancelled. *)
     let decided (event : Machine.event) =
       let next =
-        Eio.Cancel.protect (fun () -> Machine.decide t.place state ~at:(t.now ()) event)
+        Eio.Cancel.protect (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:"librarian_writer.decide" (fun () ->
+            Machine.decide t.place state ~at:(t.now ()) event))
       in
       publish t ~was:state next;
       follow ~before:state ~after:next;
-      announce t ~was:(revision state) next;
+      announce t ~was:(revision state) ~was_promo_seq:(tail_promo_seq state) next;
       Next next
     in
     match event with
     | Turn_closed -> decided Machine.Turn_closed
     | Pulse -> decided Machine.Pulse
     | Declaration_changed -> decided (Machine.Declaration_changed (t.declared ()))
+    | Compaction_epoch_advanced { epoch_id } ->
+      decided (Machine.Compaction_epoch_advanced { epoch_id })
     | Ask_ended { ask; result } -> decided (Machine.Ask_ended { ask; result })
     | Write { by; trace; write; reply } ->
       let next, answer =
         Eio.Cancel.protect (fun () ->
-          Machine.write t.place state ~at:(t.now ()) ~by ~trace write)
+          Domain_pool_ref.submit_io_or_inline ~name:"librarian_writer.write" (fun () ->
+            Machine.write t.place state ~at:(t.now ()) ~by ~trace write))
       in
       settle next reply answer
     | Resume reply ->
@@ -362,29 +413,34 @@ let live t ~sw =
       Atomic.set t.held (Held next);
       follow ~before:state ~after:next;
       Eio.Promise.resolve reply answer;
-      announce t ~was:(revision state) next;
+      announce t ~was:(revision state) ~was_promo_seq:(tail_promo_seq state) next;
       Next next
     | Adopt { by; observed; reply } ->
       let next, answer =
         Eio.Cancel.protect (fun () ->
-          Machine.adopt t.place state ~at:(t.now ()) ~by ~observed)
+          Domain_pool_ref.submit_io_or_inline ~name:"librarian_writer.adopt" (fun () ->
+            Machine.adopt t.place state ~at:(t.now ()) ~by ~observed))
       in
       settle next reply answer
     | Restart_reading { observed; reply } ->
       let next, answer =
         Eio.Cancel.protect (fun () ->
-          Machine.restart_reading t.place state ~at:(t.now ()) ~observed)
+          Domain_pool_ref.submit_io_or_inline ~name:"librarian_writer.restart_reading" (fun () ->
+            Machine.restart_reading t.place state ~at:(t.now ()) ~observed))
       in
       settle next reply answer
     | Skip_item { by; target; reply } ->
       let next, answer =
         Eio.Cancel.protect (fun () ->
-          Machine.skip_item t.place ~stores:t.stores state ~at:(t.now ()) ~by ~target)
+          Domain_pool_ref.submit_io_or_inline ~name:"librarian_writer.skip_item" (fun () ->
+            Machine.skip_item t.place ~stores:t.stores state ~at:(t.now ()) ~by ~target))
       in
       settle next reply answer
     | Skip_line { offset; reply } ->
       let next, answer =
-        Eio.Cancel.protect (fun () -> Machine.skip_line t.place state ~at:(t.now ()) ~offset)
+        Eio.Cancel.protect (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:"librarian_writer.skip_line" (fun () ->
+            Machine.skip_line t.place state ~at:(t.now ()) ~offset))
       in
       settle next reply answer
     | Retire reply ->
@@ -429,9 +485,13 @@ let live t ~sw =
   (* A writer boots with no lane value, so the boot does not ask. The
      declaration is the first event in its mailbox. *)
   let first () =
-    let state = Machine.booted t.place ~at:(t.now ()) ~lane:None ~last_ask:0 (boot ()) in
+    let opened = boot () in
+    let state =
+      Domain_pool_ref.submit_io_or_inline ~name:"librarian_writer.booted" (fun () ->
+        Machine.booted t.place ~at:(t.now ()) ~lane:None ~last_ask:0 opened)
+    in
     Atomic.set t.held (Held state);
-    announce t ~was:None state;
+    announce t ~was:None ~was_promo_seq:None state;
     state
   in
   match first () with
@@ -443,11 +503,12 @@ let live t ~sw =
          ~answer:(fun (_ : Store.stop) -> ()))
 ;;
 
-let create ~now ~registered ~declared ~stores ~ask ~ask_room ~start_turn_log place =
+let create ?on_world_promotions ~now ~registered ~declared ~stores ~ask ~ask_room ~start_turn_log place =
   let gone, ended = Eio.Promise.create () in
   let mailbox = Eio.Stream.create max_int in
   Eio.Stream.add mailbox Declaration_changed;
   { place
+  ; on_world_promotions
   ; now
   ; registered
   ; declared
@@ -498,6 +559,10 @@ let ask t event =
 let turn_closed t = Eio.Stream.add t.mailbox Turn_closed
 let pulse t = Eio.Stream.add t.mailbox Pulse
 let declaration_changed t = Eio.Stream.add t.mailbox Declaration_changed
+
+let compaction_epoch_advanced t ~epoch_id =
+  Eio.Stream.add t.mailbox (Compaction_epoch_advanced { epoch_id })
+;;
 let write t ~by ~trace write = ask t (fun reply -> Write { by; trace; write; reply })
 let resume t = ask t (fun reply -> Resume reply)
 let adopt t ~by ~observed = ask t (fun reply -> Adopt { by; observed; reply })

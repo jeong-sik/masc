@@ -2,9 +2,13 @@ module Digest = Agent_core.Checkpoint_objects
 module Machine = Librarian_machine
 module Writer = Librarian_writer
 module By_keeper = Map.Make (String)
+module StringSet = Set_util.StringSet
 
 type t =
-  { now : unit -> float
+  { sw : Eio.Switch.t
+  ; on_world_promotions :
+      (keeper_id:string -> Librarian_lifecycle.world_promotion list -> unit) option Atomic.t
+  ; now : unit -> float
   ; registered : string -> bool
   ; place : string -> Machine.place
   ; stores : string -> Librarian_unit_content.stores
@@ -13,12 +17,15 @@ type t =
   ; start_turn_log : string -> (unit, string) result
   ; declared : Machine.declared option Atomic.t
   ; writers : Writer.t By_keeper.t Atomic.t
+  ; retiring : StringSet.t Atomic.t
   ; to_run : Writer.t Eio.Stream.t
   }
 
 let create ~sw ~now ~registered ~place ~stores ~ask ~ask_room ~start_turn_log =
   let t =
-    { now
+    { sw
+    ; on_world_promotions = Atomic.make None
+    ; now
     ; registered
     ; place
     ; stores
@@ -27,6 +34,7 @@ let create ~sw ~now ~registered ~place ~stores ~ask ~ask_room ~start_turn_log =
     ; start_turn_log
     ; declared = Atomic.make None
     ; writers = Atomic.make By_keeper.empty
+    ; retiring = Atomic.make StringSet.empty
     ; to_run = Eio.Stream.create max_int
     }
   in
@@ -43,6 +51,8 @@ let create ~sw ~now ~registered ~place ~stores ~ask ~ask_room ~start_turn_log =
     run_next ());
   t
 ;;
+
+let set_world_promotions_callback t cb = Atomic.set t.on_world_promotions cb
 
 let live_writer writers keeper =
   match By_keeper.find_opt keeper writers with
@@ -66,6 +76,8 @@ let rec ensure t keeper =
     else (
       let writer =
         Writer.create
+          ~on_world_promotions:(fun ~keeper_id promos ->
+            Option.iter (fun cb -> cb ~keeper_id promos) (Atomic.get t.on_world_promotions))
           ~now:t.now
           ~registered:(fun () -> t.registered keeper)
           ~declared:(fun () -> Atomic.get t.declared)
@@ -167,13 +179,42 @@ let declaration_changed t declared =
     (Atomic.get t.writers)
 ;;
 
+let rec claim_retiring t keeper =
+  let cur = Atomic.get t.retiring in
+  if StringSet.mem keeper cur
+  then false
+  else if Atomic.compare_and_set t.retiring cur (StringSet.add keeper cur)
+  then true
+  else claim_retiring t keeper
+;;
+
+let rec release_retiring t keeper =
+  let cur = Atomic.get t.retiring in
+  if not (StringSet.mem keeper cur)
+  then ()
+  else if Atomic.compare_and_set t.retiring cur (StringSet.remove keeper cur)
+  then ()
+  else release_retiring t keeper
+;;
+
 let pulse t keepers =
   List.iter (fun keeper -> Option.iter Writer.pulse (ensure t keeper)) keepers;
+  (* Never block the global maintenance loop waiting on one retiring writer:
+     fork each unregistered writer's retirement asynchronously on [t.sw]. *)
   By_keeper.iter
     (fun keeper writer ->
-       if not (t.registered keeper)
-       then ignore (retire_writer t keeper writer : Writer.retirement))
+       if (not (t.registered keeper)) && claim_retiring t keeper
+       then
+         Eio.Fiber.fork_daemon ~sw:t.sw (fun () ->
+           Fun.protect
+             ~finally:(fun () -> release_retiring t keeper)
+             (fun () -> ignore (retire_writer t keeper writer : Writer.retirement));
+           `Stop_daemon))
     (Atomic.get t.writers)
+;;
+
+let compaction_epoch_advanced t keeper ~epoch_id =
+  Option.iter (fun w -> Writer.compaction_epoch_advanced w ~epoch_id) (ensure t keeper)
 ;;
 
 let statuses t =

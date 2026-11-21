@@ -106,7 +106,7 @@ let transcript = Types.Observed Types.Transcript
 let stated : Answer.new_fact =
   { claim = "the probe runs every minute"
   ; category = Types.Fact
-  ; observation = Types.Transcript
+  ; basis = Types.Observed Types.Transcript
   ; from_units = [ "u1" ]
   }
 ;;
@@ -142,6 +142,7 @@ let full_effects : Effects.t =
         (fun number why -> number, why, if number mod 2 = 0 then Some stated else None)
         every_why
   ; sources = [ id owner, [ 0; 256 ]; id rests, [] ]
+  ; promotions = []
   }
 ;;
 

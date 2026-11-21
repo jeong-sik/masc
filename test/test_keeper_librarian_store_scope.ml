@@ -158,7 +158,7 @@ let test_operator_retractions_go_through_the_writer () =
           [ "operator-1"; "plan-1"; memory_id_of port; "wrong" ]
           [ operator; trace; id; reason ]
       | Direct { by = Keeper | Operator _; write = Remember _ | Supersede _ | Retract _; _ }
-      | Adopt _ | Read _ | Make_room _ | Skip _ ->
+      | Adopt _ | Read _ | Make_room _ | Skip _ | Molt_and_synthesize _ | Checkpoint _ ->
         fail "the last commit line is not the operator's retraction");
      (match last.effects.removed with
       | [ ((fact : Masc.Keeper_memory_os_types.fact), Retracted { by = Operator by; reason }) ] ->
@@ -378,7 +378,7 @@ let test_operator_restarts_reading () =
           (Masc.Keeper_turn_log.Log_id.to_string start.id, String.make 32 'e')
           (Masc.Keeper_turn_log.Log_id.to_string from, Masc.Keeper_turn_log.Log_id.to_string to_);
         check int "and reads the new one from its first line" 0 last_line.turn_log_offset
-      | Direct _ | Read _ | Make_room _ | Adopt _ | Skip _ -> fail "the last commit line is not the restart")
+      | Direct _ | Read _ | Make_room _ | Adopt _ | Skip _ | Molt_and_synthesize _ | Checkpoint _ -> fail "the last commit line is not the restart")
    | [] -> fail "nothing was committed");
   check int "one line was appended" (before + 1) (List.length (commits a));
   check string "the file it now reads" "refused: not replaced"
@@ -446,7 +446,7 @@ let test_operator_skips_a_line () =
           (passed, hex sha);
         check int "and reading goes on just past it" (offset + String.length row + 1)
           last_line.turn_log_offset
-      | Direct _ | Read _ | Make_room _ | Adopt _ | Skip _ -> fail "the last commit line is not the skip")
+      | Direct _ | Read _ | Make_room _ | Adopt _ | Skip _ | Molt_and_synthesize _ | Checkpoint _ -> fail "the last commit line is not the skip")
    | [] -> fail "nothing was committed");
   check int "one line was appended" (before + 1) (List.length (commits a));
   check string "the same offset again" "refused: not the faulted line"
@@ -505,7 +505,7 @@ let test_operator_resumes_and_adopts () =
         check (pair string string) "the line names the operator and the snapshot"
           ("operator-1", hex (Digest.digest_of_bytes first))
           (by, hex observed)
-      | Direct _ | Read _ | Make_room _ | Skip _ -> fail "the last commit line is not the adoption")
+      | Direct _ | Read _ | Make_room _ | Skip _ | Molt_and_synthesize _ | Checkpoint _ -> fail "the last commit line is not the adoption")
    | [] -> fail "nothing was committed");
   check int "one line was appended" (before + 1) (List.length (commits a));
   keeper_remembers a owner;

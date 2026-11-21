@@ -107,6 +107,7 @@ let settle ~at ~facts ~states ~removed ~added ~touched =
               unsupported
       ; not_applied = []
       ; sources = []
+      ; promotions = []
       }
     in
     Writes { facts = Effects.apply ~at facts effects; effects }

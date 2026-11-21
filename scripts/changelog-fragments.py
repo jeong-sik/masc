@@ -55,6 +55,7 @@ Modes:
 """
 
 import argparse
+import os
 import pathlib
 import re
 import subprocess
@@ -303,6 +304,16 @@ def assemble(directory: pathlib.Path, changelog: pathlib.Path,
         # whatever [Unreleased] still holds moves into it in the same run:
         # one command, no hand-moved entries.
         before, body, after = split_section(lines, into)
+        # The gap slice below assumes the target section sits after
+        # [Unreleased]. split_unreleased already refuses a changelog whose
+        # first heading is a release, so the degenerate reach here is
+        # --into Unreleased itself; reject that loudly instead of letting
+        # the index arithmetic silently reorder sections.
+        if len(before) <= len(unrel_before) + len(unrel_body):
+            raise FragmentError(
+                f"{CHANGELOG}: section '{SECTION_HEADING.format(into)}' must come "
+                f"after '{UNRELEASED}' - refusing to fold"
+            )
         moved_preamble, moved = parse_body(unrel_body)
     release_fragments = [(path, sections) for path, sections in fragments if not is_exempt(sections)]
     exempt_fragments = [path for path, sections in fragments if is_exempt(sections)]
@@ -396,7 +407,17 @@ def assemble(directory: pathlib.Path, changelog: pathlib.Path,
             head + ([""] if gap else []) + gap
             + out_body + ([""] if after else []) + after
         ) + "\n"
-    changelog.write_text(text, encoding="utf-8")
+    # Replace CHANGELOG.md atomically: writing in place would leave a
+    # truncated changelog behind if the process dies mid-write, and the
+    # fragments are only unlinked after this succeeds. A sibling temp file
+    # keeps os.replace on the same filesystem.
+    tmp = changelog.with_name(changelog.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, changelog)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     for path, _ in fragments:
         path.unlink()
     suffix = f" ({len(exempt_fragments)} exempt removed)" if exempt_fragments else ""

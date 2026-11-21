@@ -4909,27 +4909,6 @@ max_context_tokens = 32768
 supports_tools = true
 supports_native_streaming = true
 
-# Local Ollama Qwen3.8 27B build, probed 2026-09-12.
-[[models]]
-model_id = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
-provider_name = "ollama"
-base = "ollama"
-max_context_tokens = 262144
-supports_tools = true
-# Native /api/chat does not serialize tool_choice, so a forced choice would be
-# dropped with no error. Declared false rather than inherited.
-supports_tool_choice = false
-supports_reasoning = true
-# Answers the native /api/chat top-level "think" field, not a template token.
-thinking_control_format = "ollama_think"
-supports_multimodal_inputs = true
-supports_image_input = true
-supports_native_streaming = true
-supports_seed = true
-supports_top_k = true
-input_per_million = 0.0
-output_per_million = 0.0
-
 # ollama.com's glm-5.3. Its /v1 wire streams reasoning under delta.reasoning;
 # the glm-coding row for the same model spells it reasoning_content, because
 # Z.AI's wire does.

@@ -8,6 +8,8 @@ module Health = Masc.Keeper_memory_writer_health
 module Writers = Masc.Librarian_writers
 module Writer = Masc.Librarian_writer
 module Deps = Masc_test_deps
+module Shown = Masc.Tui_decode_memory_writer
+module Level = Masc.Librarian_level
 
 let keeper = "health-keeper"
 
@@ -92,8 +94,20 @@ let row_of config =
   | other -> failf "keepers is not a list: %s" (Yojson.Safe.to_string other)
 ;;
 
+(* The same writer as the Keeper's memory-health row carries it under
+   [writer], read by the decoder the TUI reads the row with. *)
+let shown_of config name =
+  match Shown.decode (Health.keeper_rows ~config name) with
+  | Ok shown -> shown
+  | Error reason -> failf "the TUI does not read the row's writer: %s" reason
+;;
+
 let test_a_process_without_writers () =
   let config = Masc.Workspace.default_config (Filename.temp_dir "writer-health" "") in
+  check bool "a Keeper's row says the process runs none" true
+    (match shown_of config keeper with
+     | Shown.None_in_process -> true
+     | Shown.No_writer | Shown.Writer (_ : Shown.shown) -> false);
   check string "the section says so" "none_in_process"
     (text "writers" (Health.section_json ~config));
   check bool "and it lists no Keeper" true
@@ -113,6 +127,11 @@ let test_a_keeper_before_its_writer () =
     check (list string) "W1" [ "W1" ] (alarms row);
     check string "a warning" "warn" (text "level" row);
     check bool "the section counts it" true (member "warn" (Health.section_json ~config) = `Int 1);
+    check bool "the Keeper's row shows a writer that has not started" true
+      (shown_of config keeper
+       = Shown.Writer { Shown.level = Level.Warn; alarms = [ Level.W1 ]; row = Shown.Booting });
+    check bool "and a Keeper outside the registry has no writer" true
+      (shown_of config "outside-the-registry" = Shown.No_writer);
     check int "and the table still holds no writer" 0 (List.length (Writers.held (writers config))))
     ()
 ;;
@@ -144,6 +163,23 @@ let test_an_open_writer () =
     check string "of the turn log the Keeper has" (turn_log_id config) (text "turn_log" row);
     check bool "no ask has ended" true (member "last_read" row = `Null);
     check bool "Memory holds no fact" true (member "facts" (member "memory" row) = `Int 0);
+    check bool "the Keeper's row shows the same open writer" true
+      (match shown_of config keeper with
+       | Shown.Writer
+           { Shown.level = Level.Ok
+           ; alarms = []
+           ; row =
+               Shown.Open
+                 { activity = Shown.Idle
+                 ; unread = false
+                 ; kept = { Shown.lane = false; last_read = None; _ }
+                 ; last_line = Shown.Line_started
+                 ; facts = 0
+                 ; turn_log
+                 ; _
+                 }
+           } -> String.equal turn_log (turn_log_id config)
+       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false);
     let section = Health.section_json ~config in
     check string "the section runs" "running" (text "writers" section);
     check bool "with none at error" true (member "error" section = `Int 0);
@@ -175,6 +211,14 @@ let test_a_stopped_writer () =
     check string "an error" "error" (text "level" row);
     check string "why" "store_stopped_log_unreadable" (text "stop" row);
     check string "the snapshot file" "absent" (text "fault" (member "snapshot_file" row));
+    check bool "the Keeper's row shows the same stopped store" true
+      (match shown_of config keeper with
+       | Shown.Writer
+           { Shown.level = Level.Error
+           ; alarms = [ Level.E1 ]
+           ; row = Shown.Stopped { stop = Shown.Log_unreadable; snapshot_file = Shown.File_absent; _ }
+           } -> true
+       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false);
     check bool "the section counts it" true (member "error" (Health.section_json ~config) = `Int 1))
     ()
 ;;
@@ -249,7 +293,24 @@ let test_a_writer_resting_on_an_input_fault () =
     check string "the ask ended on an input fault" "input_fault" (text "ended" read);
     let fault = member "fault" read in
     check string "the line does not decode" "line_unreadable" (text "kind" fault);
-    check bool "at the offset the operator sends" true (member "offset" fault = `Int offset))
+    check bool "at the offset the operator sends" true (member "offset" fault = `Int offset);
+    check bool "the Keeper's row shows the same fault" true
+      (match shown_of config keeper with
+       | Shown.Writer
+           { Shown.level = Level.Error
+           ; alarms = [ Level.E3 ]
+           ; row =
+               Shown.Open
+                 { activity = Shown.Resting
+                 ; unread = true
+                 ; kept =
+                     { Shown.last_read = Some (Shown.Read_input_fault (Shown.Line_unreadable { offset = at }))
+                     ; _
+                     }
+                 ; _
+                 }
+           } -> at = offset
+       | Shown.Writer (_ : Shown.shown) | Shown.None_in_process | Shown.No_writer -> false))
     ()
 ;;
 

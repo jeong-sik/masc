@@ -725,7 +725,7 @@ let alerts (h : keeper_health) =
 ;;
 
 
-let keeper_health_entry_to_json ~now (h : keeper_health) =
+let keeper_health_entry_to_json ~now ~writer (h : keeper_health) =
   let age_bins_json =
     match h.first_seen with
     | None -> `Null
@@ -824,6 +824,11 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
                            unmeasured) )
                   ] )
           ] )
+      (* The Keeper's Memory writer (RFC librarian-call-only-proposes
+         §12.3), read from what the writer holds when the answer is written.
+         Nothing a row is emptied by says the writer moved, so it is not
+         kept in the cached row. *)
+    ; "writer", writer h.keeper_id
     ; "librarian_failures", `Int h.librarian_failures
     ; "vision_ingest_errors", `Int h.vision_ingest_errors
     ; ( "vision_ingest_error_reasons"
@@ -849,7 +854,7 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
     ]
 ;;
 
-let schema = "keeper.memory_os.current_health.v15"
+let schema = "keeper.memory_os.current_health.v16"
 
 let fleet_cache_key ~base_path = "keeper_memory_health:" ^ base_path
 
@@ -913,11 +918,13 @@ let keeper_memory_health_http_json ~base_path =
         (left.snapshot_bytes + left.source_snapshot_bytes))
   in
   let totals = Keeper_memory_health_totals.of_rows (List.map totals_row entries) in
+  let writer = Keeper_memory_writer_health.keeper_rows ~config in
   `Assoc
     [ "schema", `String schema
     ; "generated_at", `Float generated_at
     ; "execution", Keeper_memory_execution_availability.(to_json (snapshot ~config ~mode:`Live))
-    ; "keepers", `List (List.map (keeper_health_entry_to_json ~now:generated_at) entries)
+    ; ( "keepers"
+      , `List (List.map (keeper_health_entry_to_json ~now:generated_at ~writer) entries) )
     ; "totals", Keeper_memory_health_totals.totals_to_json totals
     ; "alert_summary", Keeper_memory_health_totals.alert_summary_to_json totals
     ]
@@ -936,7 +943,11 @@ let keeper_memory_health_row_http_json ~base_path ~keeper =
   register_row_roots ~config ~keepers_dir;
   let row =
     if List.exists (String.equal keeper) (health_keeper_ids ~keepers_dir)
-    then keeper_health_entry_to_json ~now:generated_at (cached_keeper_health ~config ~keepers_dir keeper)
+    then
+      keeper_health_entry_to_json
+        ~now:generated_at
+        ~writer:(Keeper_memory_writer_health.keeper_rows ~config)
+        (cached_keeper_health ~config ~keepers_dir keeper)
     else `Null
   in
   `Assoc [ "schema", `String schema; "generated_at", `Float generated_at; "keeper", row ]

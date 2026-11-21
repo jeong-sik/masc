@@ -234,6 +234,36 @@ const KEEPER_MEMORY_CHANGES: readonly (keyof KeeperMemoryChangeCounts)[] = [
 /** Every pass's counts since the server started; the counter is not kept across restarts. */
 export type KeeperMemoryChangesByPass = Record<KeeperMemoryCommitPass, KeeperMemoryChangeCounts>
 
+export type KeeperMemoryWriterState =
+  | 'booting'
+  | 'retired'
+  | 'idle'
+  | 'asking'
+  | 'resting'
+  | 'refused_at_bottom'
+  | 'stopped'
+export type KeeperMemoryWriterLevel = 'ok' | 'warn' | 'error'
+export type KeeperMemoryWriterAlarm = 'E1' | 'E2' | 'E3' | 'E4' | 'E5' | 'W1' | 'W3'
+
+/** The Keeper's Memory writer as its row carries it under `writer`: the one
+ *  that commits to the Keeper's Memory. `librarian` is the Librarian that ran
+ *  before it and says nothing of this writer. The dashboard draws none of the
+ *  writer yet, so it reads the closed tags and leaves the fields each state
+ *  carries unread. */
+export type KeeperMemoryWriter =
+  /** The answering process runs no writer. */
+  | { kind: 'none_in_process' }
+  /** The Keeper is not in the registry, so no writer is made for it. */
+  | { kind: 'no_writer' }
+  | {
+    kind: 'writer'
+    row: {
+      state: KeeperMemoryWriterState
+      level: KeeperMemoryWriterLevel
+      alarms: KeeperMemoryWriterAlarm[]
+    }
+  }
+
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
   revision: number
@@ -251,6 +281,7 @@ export interface KeeperMemoryHealthKeeperEntry {
   facts_by_hour: KeeperMemoryFactsAtHour[]
   changes_since_start: KeeperMemoryChangesByPass
   librarian: KeeperMemoryHealthLibrarian
+  writer: KeeperMemoryWriter
   context_cycle: ContextCycle
   librarian_failures: number
   vision_ingest_errors: number
@@ -266,7 +297,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v15'
+  schema: 'keeper.memory_os.current_health.v16'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -732,6 +763,50 @@ function decodeKeeperMemoryChangesByPass(raw: unknown): KeeperMemoryChangesByPas
   return { admission, durable, continuity, cleanup, keeper_write, keeper_delete, operator_delete }
 }
 
+const KEEPER_MEMORY_WRITER_STATES: readonly KeeperMemoryWriterState[] = [
+  'booting',
+  'retired',
+  'idle',
+  'asking',
+  'resting',
+  'refused_at_bottom',
+  'stopped',
+]
+const KEEPER_MEMORY_WRITER_LEVELS: readonly KeeperMemoryWriterLevel[] = ['ok', 'warn', 'error']
+const KEEPER_MEMORY_WRITER_ALARMS: readonly KeeperMemoryWriterAlarm[] = [
+  'E1',
+  'E2',
+  'E3',
+  'E4',
+  'E5',
+  'W1',
+  'W3',
+]
+
+function closedToken<T extends string>(raw: unknown, tokens: readonly T[]): T | null {
+  return tokens.find(token => token === raw) ?? null
+}
+
+function decodeKeeperMemoryWriter(raw: unknown): KeeperMemoryWriter | null {
+  if (!isRecord(raw)) return null
+  const kind = raw.kind
+  if (kind === 'none_in_process' || kind === 'no_writer') {
+    return exactKeys(raw, ['kind']) ? { kind } : null
+  }
+  if (kind !== 'writer' || !exactKeys(raw, ['kind', 'row']) || !isRecord(raw.row)) return null
+  const state = closedToken(raw.row.state, KEEPER_MEMORY_WRITER_STATES)
+  const level = closedToken(raw.row.level, KEEPER_MEMORY_WRITER_LEVELS)
+  const alarms: KeeperMemoryWriterAlarm[] = []
+  if (!Array.isArray(raw.row.alarms)) return null
+  for (const token of raw.row.alarms) {
+    const alarm = closedToken(token, KEEPER_MEMORY_WRITER_ALARMS)
+    if (alarm === null) return null
+    alarms.push(alarm)
+  }
+  if (state === null || level === null) return null
+  return { kind: 'writer', row: { state, level, alarms } }
+}
+
 function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEntry | null {
   if (!isRecord(raw) || !exactKeys(raw, [
     'keeper_id',
@@ -749,6 +824,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'facts_by_hour',
     'changes_since_start',
     'librarian',
+    'writer',
     'context_cycle',
     'librarian_failures',
     'vision_ingest_errors',
@@ -779,6 +855,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   const changes_since_start = decodeKeeperMemoryChangesByPass(raw.changes_since_start)
   const context_cycle = decodeContextCycle(raw.context_cycle)
   const librarian = decodeKeeperMemoryHealthLibrarian(raw.librarian)
+  const writer = decodeKeeperMemoryWriter(raw.writer)
   const librarian_failures = nonNegativeInteger(raw.librarian_failures)
   const vision_ingest_errors = nonNegativeInteger(raw.vision_ingest_errors)
   const vision_ingest_error_reasons = Array.isArray(raw.vision_ingest_error_reasons)
@@ -822,6 +899,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || changes_since_start === null
     || context_cycle === null
     || librarian === null
+    || writer === null
     || librarian_failures === null
     || vision_ingest_errors === null
     || vision_ingest_error_reasons === null
@@ -859,6 +937,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     facts_by_hour,
     changes_since_start,
     librarian,
+    writer,
     context_cycle,
     librarian_failures,
     vision_ingest_errors,
@@ -882,7 +961,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     ? ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary', 'execution']
     : ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary']
   if (!exactKeys(raw, expectedKeys)) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v15') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v16') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

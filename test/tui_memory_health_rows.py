@@ -3,7 +3,7 @@ serve it. A test changes only the fields it reads, so a field the server adds
 to a row is written here once. The TUI refuses a row whose fields are not
 exactly these."""
 
-SCHEMA = "keeper.memory_os.current_health.v15"
+SCHEMA = "keeper.memory_os.current_health.v16"
 
 # Every pass and change the server counts, none moved since it started.
 NO_MEMORY_CHANGES: dict[str, dict[str, int]] = {
@@ -89,6 +89,8 @@ def keeper_row(keeper_id: str, **fields: object) -> dict[str, object]:
             "last_failure_kind": None,
             "stalled": None,
         },
+        # A Keeper outside the registry: no Memory writer is made for it.
+        "writer": {"kind": "no_writer"},
         "librarian_failures": 0,
         "vision_ingest_errors": 0,
         "vision_ingest_error_reasons": [],

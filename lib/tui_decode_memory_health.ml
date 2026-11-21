@@ -5,7 +5,7 @@ open Tui_decode_fields
 open Result.Syntax
 
 (* The fleet response and the one-Keeper row carry the same schema. *)
-let current_health_schema = "keeper.memory_os.current_health.v15"
+let current_health_schema = "keeper.memory_os.current_health.v16"
 
 type memory_alert_code =
   | Snapshot_read_error
@@ -150,6 +150,7 @@ type memory_keeper_health = {
   mkh_changes_since_start : Keeper_memory_commit_change.by_pass;
   mkh_context_cycle : memory_context_cycle;
   mkh_librarian : memory_librarian_health;
+  mkh_writer : Tui_decode_memory_writer.t;
   mkh_librarian_failures : int;
   mkh_vision_ingest_errors : int;
   mkh_vision_ingest_error_reasons : (string * int) list;
@@ -535,6 +536,7 @@ let decode_memory_keeper_health json =
       ; "changes_since_start"
       ; "context_cycle"
       ; "librarian"
+      ; "writer"
       ; "librarian_failures"
       ; "vision_ingest_errors"
       ; "vision_ingest_error_reasons"
@@ -601,6 +603,9 @@ let decode_memory_keeper_health json =
   in
   let* mkh_context_cycle = decode_memory_context_cycle json in
   let* mkh_librarian = decode_memory_librarian_health json in
+  let* mkh_writer =
+    Result.bind (required_object_field json "writer") Tui_decode_memory_writer.decode
+  in
   let* mkh_librarian_failures = required_int_field json "librarian_failures" in
   let* vision_reasons_json =
     required_list_field json "vision_ingest_error_reasons"
@@ -705,6 +710,7 @@ let decode_memory_keeper_health json =
     ; mkh_changes_since_start
     ; mkh_context_cycle
     ; mkh_librarian
+    ; mkh_writer
     ; mkh_librarian_failures
     ; mkh_vision_ingest_errors
     ; mkh_vision_ingest_error_reasons

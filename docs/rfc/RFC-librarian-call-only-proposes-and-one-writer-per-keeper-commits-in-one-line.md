@@ -1616,6 +1616,14 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 
 - `/health?full=1` 의 Librarian 절과 `keeper-memory-health` 가 Keeper 별 행과 fleet 행을 싣는다.
 - TUI 의 Keeper memory 화면이 그 행을 그린다. 생성자마다 해석 시험이 있다.
+- `keeper-memory-health` 의 Keeper 행은 쓰는 쪽을 `writer` 칸에 싣는다. `kind` 가 셋 가운데 하나다.
+  - `writer`: 쓰는 쪽의 행을 `row` 에 싣는다. 등록된 Keeper 의 쓰는 쪽이 아직 만들어지지 않았으면 `Booting` 행이다.
+  - `no_writer`: 등록되지 않은 Keeper 다. 쓰는 쪽이 만들어지지 않는다(§11.1).
+  - `none_in_process`: 답한 프로세스가 쓰는 쪽을 띄우지 않았다.
+- `writer` 칸은 캐시된 Keeper 행에 두지 않는다. 응답을 쓸 때 쓰는 쪽이 가진 것에서 읽는다. `totals` 와 `alert_summary` 에는 들지 않는다.
+- 이 칸을 싣는 응답의 schema 이름은 `keeper.memory_os.current_health.v16` 이다.
+- TUI 는 이 칸을 닫힌 타입으로 읽는다. 모르는 낱말이나 칸이 있으면 그 Keeper 의 행만 거절한다. 수준이 경보에서 나온 수준과 다를 때도 그렇다.
+- 반영 없는 상태 변화는 다음 갱신까지 늦게 보인다. Keeper 를 모두 싣는 응답은 캐시되고, 그런 변화는 캐시를 비우지 않는다.
 - Home 의 Health 줄에는 수 둘만 더한다. error 인 쓰는 쪽의 수와 warn 인 쓰는 쪽의 수다. 그 줄은 지금처럼 120초마다 다시 계산한다. workspace health 낱말은 바꾸지 않는다. 그 낱말은 운영자 digest 가 attention 항목에서 계산한다.
 - 호출 시간, 자리를 기다린 시간, 버린 답의 수, slot 별 `Output_over_reserve`·`Window_reached`·보낸 뒤의 `Lost` 수는 metric 이다.
 - 자리를 기다린 시간은 지금도 저장된다(`masc.provider_admission.waited`). 바꾸기 전과 뒤를 이 사건으로 견준다.

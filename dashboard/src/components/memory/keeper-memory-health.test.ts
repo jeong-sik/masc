@@ -60,6 +60,7 @@ function makeEntry(
       unread_atom_turns: 0, unread_official_turns: 0,
       continuity_unread_atoms: 0,
       last_success_at: null, last_failure_kind: null, stalled: null },
+    writer: { kind: 'no_writer' },
     librarian_failures: 0,
     vision_ingest_errors: 0,
     vision_ingest_error_reasons: [],
@@ -98,7 +99,7 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v15',
+    schema: 'keeper.memory_os.current_health.v16',
     generated_at: 1_700_000_000,
     keepers,
     totals: {

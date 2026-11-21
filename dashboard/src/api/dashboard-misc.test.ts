@@ -30,7 +30,7 @@ function noMemoryChanges(): KeeperMemoryChangesByPass {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v15',
+    schema: 'keeper.memory_os.current_health.v16',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -66,6 +66,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
         last_failure_kind: null,
         stalled: null,
       },
+      writer: { kind: 'no_writer' },
       librarian_failures: 0,
       vision_ingest_errors: 0,
       vision_ingest_error_reasons: [],
@@ -105,6 +106,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
         last_failure_kind: null,
         stalled: null,
       },
+      writer: { kind: 'no_writer' },
       librarian_failures: 0,
       vision_ingest_errors: 0,
       vision_ingest_error_reasons: [],
@@ -169,7 +171,7 @@ function addLibrarianAttention(payload: KeeperMemoryHealthResponse) {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v15',
+    schema: 'keeper.memory_os.current_health.v16',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -199,6 +201,7 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
         last_failure_kind: null,
         stalled: null,
       },
+      writer: { kind: 'no_writer' },
       librarian_failures: 4,
       vision_ingest_errors: 0,
       vision_ingest_error_reasons: [],
@@ -547,8 +550,46 @@ describe('fetchKeeperMemoryHealth', () => {
     'keeper.memory_os.current_health.v12',
     'keeper.memory_os.current_health.v13',
     'keeper.memory_os.current_health.v14',
+    'keeper.memory_os.current_health.v15',
   ])('rejects an older memory-health envelope: %s', async schema => {
     getMock.mockResolvedValue({ ...keeperMemoryHealthPayload(), schema })
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
+  })
+
+  it('reads the closed tags of a row writer and leaves its state fields unread', async () => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!, { writer: { kind: 'writer', row: {
+      state: 'resting', level: 'error', alarms: ['E3', 'W1'], unread: true,
+    } } })
+    getMock.mockResolvedValue(payload)
+
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.writer).toEqual({
+      kind: 'writer', row: { state: 'resting', level: 'error', alarms: ['E3', 'W1'] },
+    })
+  })
+
+  it('reads a row from a process that runs no writer', async () => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!, { writer: { kind: 'none_in_process' } })
+    getMock.mockResolvedValue(payload)
+
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.writer).toEqual({ kind: 'none_in_process' })
+  })
+
+  it.each([
+    { kind: 'later' },
+    { kind: 'no_writer', row: {} },
+    { kind: 'writer' },
+    { kind: 'writer', row: { state: 'paused', level: 'ok', alarms: [] } },
+    { kind: 'writer', row: { state: 'idle', level: 'fine', alarms: [] } },
+    { kind: 'writer', row: { state: 'idle', level: 'warn', alarms: ['W2'] } },
+  ])('rejects a row writer this build does not know: %j', async writer => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!, { writer })
+    getMock.mockResolvedValue(payload)
 
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
       '유효하지 않은 keeper memory health payload',
@@ -560,7 +601,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v15')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v16')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,

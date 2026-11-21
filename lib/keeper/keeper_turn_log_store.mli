@@ -78,6 +78,10 @@ val read_start : string -> (start option, read_error) result
 type scanned =
   { at : int (** Byte offset of the line. *)
   ; past : int (** Just past the line's line break: where the next line starts. *)
+  ; row : string
+  (** The line's bytes without its line break: what [line] was decoded
+      from. They say which bytes the line is, as their hash does. What the
+      line says is read from [line], not from them. *)
   ; line : (Keeper_turn_log.line, undecodable) result
   (** A line that does not decode is given as such and does not end the
       scan. *)

@@ -7,6 +7,12 @@
     again, because its [Closed] needs what they say. So what a read costs
     follows the lines not yet read, not the lines before them.
 
+    A line before the stored offset is one reading already went past. When
+    such a line does not decode, or is not where {!Keeper_turn_log.step}
+    accepts it, reading a turn again passes it and reads the [Closed]
+    without what the line said (§5.4). So a read never stops at a line
+    before the stored offset.
+
     A unit is named here, not read: what its line and the marks around it
     say each store holds. Its content is read by {!Librarian_unit_content}. *)
 
@@ -71,12 +77,18 @@ type segment =
     A turn splits each store at its [Opened]'s [baseline]: before it is
     [unattributed], after it is [own]. When a [Reset] followed that [Opened],
     or the baseline names another session's official-client files than the
-    unit ends in, the store is not split and all of it is [unattributed]. *)
+    unit ends in, the store is not split and all of it is [unattributed].
+
+    When reading went past a line of the turn without reading it (§5.4), no
+    store is split and the turn claims nothing: every range is
+    [unattributed], and so are the slices its [Closed] calls its own. The
+    passed line is the [Opened], which holds the baseline, or a line after
+    it, which may have been a [Reset]. *)
 type source =
   | Turn of
       { turn : int (** Byte offset of the turn's [Opened] line. *)
       ; outcome : Keeper_turn_log.outcome
-      ; opened : Librarian_read_unit.opened
+      ; opened : Librarian_read_unit.opened_line
       ; unattributed : segment
       ; own : segment
       }
@@ -124,8 +136,21 @@ type stop =
       past it. *)
   | Unreadable_line of
       { offset : int
+      (** Byte offset of the line. It is at or after the tail's
+          [turn_log_offset]. *)
+      ; past_line : int
+      (** Just past the line's line break: where reading goes on once the
+          line is passed. *)
+      ; from : Keeper_turn_log.mark
+      (** Where the units before the line ended, as a {!span}'s [from]: the
+          mark reading is covered to when the line is passed. *)
+      ; sha : Agent_core.Checkpoint_objects.digest
+      (** Of the line's bytes without its line break: the bytes that were
+          judged. *)
       ; reason : unreadable
       }
+  (** Reading does not go past the line. The spans before it are the units
+      read on the way to it. *)
 
 type reading =
   { spans : span list (** In line order. Units with no item are included. *)
@@ -169,7 +194,11 @@ val has_unread : (reading, read_error) result -> bool
     [Committed] alike, until [until] or a line that stops reading. The
     file's id is checked first, then the stored offset, then the lines
     (§5.4). The first unit starts at the tail's [covered], or at the mark of
-    the [Log_started] line when reading starts there. *)
+    the [Log_started] line when reading starts there.
+
+    Every line a read stops at is at or after the tail's [turn_log_offset]:
+    an [Unannounced_reset]'s [line] and an [Unreadable_line]'s [offset] are
+    never before it, and their [past_line] is past it. *)
 val read
   :  turns_path:string
   -> until:until

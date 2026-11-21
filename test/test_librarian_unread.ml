@@ -1,8 +1,8 @@
 (* Reading a Keeper's turn log on from where its commit log stands
    (RFC librarian-call-only-proposes §5.3, §5.4, §9.2, §16): where each unit
    starts and ends, the faults in the order the reader looks for them, a
-   unit with no item, reading that starts inside a turn, and a read whose
-   cost is the new lines only. *)
+   unit with no item, reading that starts inside a turn, a turn with a line
+   reading went past, and a read whose cost is the new lines only. *)
 
 open Alcotest
 module Log = Masc.Keeper_turn_log
@@ -98,6 +98,17 @@ let write_raw log text =
   log.rows_end <- log.rows_end + String.length text
 ;;
 
+(* A line no reader decodes, and its length with the line break. *)
+let bad_row = "not json"
+let bad_line_length = String.length bad_row + 1
+let write_bad_line log = write_raw log (bad_row ^ "\n")
+
+(* The bytes of the line from [at] to just before the line break at
+   [past - 1]. *)
+let row_between log ~at ~past =
+  String.sub (In_channel.with_open_bin log.path In_channel.input_all) at (past - at - 1)
+;;
+
 let started_tail : Commit_log.line =
   Started
     { at = 100.0
@@ -188,10 +199,35 @@ let stop_text : Unread.stop -> string = function
   | Limit_reached -> "limit reached"
   | Unannounced_reset { line; past_line; _ } ->
     Printf.sprintf "unannounced reset at %d, read on from %d" line past_line
-  | Unreadable_line { offset; reason = Undecodable Not_json } -> Printf.sprintf "line %d is not JSON" offset
-  | Unreadable_line { offset; reason = Undecodable (Malformed _) } ->
+  | Unreadable_line { offset; reason = Undecodable Not_json; _ } ->
+    Printf.sprintf "line %d is not JSON" offset
+  | Unreadable_line { offset; reason = Undecodable (Malformed _); _ } ->
     Printf.sprintf "line %d is malformed" offset
-  | Unreadable_line { offset; reason = Out_of_order _ } -> Printf.sprintf "line %d is out of order" offset
+  | Unreadable_line { offset; reason = Out_of_order _; _ } ->
+    Printf.sprintf "line %d is out of order" offset
+;;
+
+(* What a stop at a line says an act that passes the line needs: where the
+   line ends, the mark the units before it ended at, and its bytes' hash. *)
+let passing_text : Unread.stop -> string = function
+  | Unreadable_line { offset; past_line; from; sha; reason = (_ : Unread.unreadable) } ->
+    Printf.sprintf "line %d to %d, covered to %d/%d, sha %s" offset past_line from.closed_messages
+      from.history_bytes
+      (sha :> string)
+  | Log_end | Limit_reached | Unannounced_reset _ -> "no unreadable line"
+;;
+
+let passing_of ~offset ~past_line ~(from : Log.mark) ~row =
+  Printf.sprintf "line %d to %d, covered to %d/%d, sha %s" offset past_line from.closed_messages
+    from.history_bytes
+    (Agent_core.Checkpoint_objects.digest_of_bytes row :> string)
+;;
+
+let opened_text (span : Unread.span) =
+  match span.source with
+  | Turn { opened = Opened_read { runtime; _ }; _ } -> "opened on " ^ runtime
+  | Turn { opened = Opened_passed; _ } -> "its Opened was passed"
+  | Announced_reset _ -> "a reset"
 ;;
 
 let reading_lines ?base (reading : Unread.reading) =
@@ -396,6 +432,91 @@ let test_unit_after_a_session_change () =
     (reading_lines (read_ok log skipped))
 ;;
 
+(* §5.4: a stop at a line reading cannot go past says where the line ends,
+   where the units before it ended and what its bytes hash to. A [Closed]
+   that names no [Opened] says them of itself, not of the line it names. *)
+let test_unreadable_line_says_where_reading_goes_on () =
+  let log = new_log () in
+  let (_ : int) = append log started in
+  let empty_reset = append log (announced (mark 1) (cleared 1)) in
+  let bad = log.rows_end in
+  write_bad_line log;
+  let reading = read_ok log started_tail in
+  check (list string) "the unit with no item before the line, then the line"
+    [ Printf.sprintf "reset at %d: all [] history 10-10 internal 20-20 chat 30-30 external 1-1; next 0/10"
+        empty_reset
+    ; Printf.sprintf "line %d is not JSON" bad
+    ]
+    (reading_lines reading);
+  check string "the line's end, the mark the reset left, the hash of the line without its line break"
+    (passing_of ~offset:bad ~past_line:(bad + bad_line_length) ~from:(cleared 1) ~row:bad_row)
+    (passing_text reading.stop);
+  let stray_log = new_log () in
+  let (_ : int) = append stray_log started in
+  let turn = append stray_log (opened (mark 1)) in
+  let (_ : int) = append stray_log (closed ~own:[ slice 0 1 ] turn (mark 2)) in
+  let turn_span = last_span (read_ok stray_log started_tail) in
+  (* Offset 0 is the [Log_started] line: it reads and is not an [Opened]. *)
+  let stray = append stray_log (closed 0 (mark 3)) in
+  let stopped = read_ok stray_log (committed_through turn_span) in
+  check (list string) "a Closed that names a line that is not an Opened"
+    [ Printf.sprintf "line %d is out of order" stray ]
+    (reading_lines stopped);
+  check string "is reported with its own end and its own bytes"
+    (passing_of ~offset:stray ~past_line:stray_log.rows_end ~from:(mark 2)
+       ~row:(row_between stray_log ~at:stray ~past:stray_log.rows_end))
+    (passing_text stopped.stop)
+;;
+
+(* §5.4: once reading stands past a line it could not read, the turn that
+   line belongs to is read without what the line said, and the read does not
+   stop at the line again. A passed [Opened] leaves a turn with no Task that
+   claims nothing. A passed line after the [Opened] may have been a [Reset],
+   so the turn keeps its Task and is not split. *)
+let test_turn_with_a_passed_line () =
+  let passed_tail ~bad ~covered =
+    committed ~offset:(bad + bad_line_length) ~covered ~through:(Through { line = bad; within = Whole }) ()
+  in
+  let no_opened = new_log () in
+  let (_ : int) = append no_opened started in
+  let bad_opened = no_opened.rows_end in
+  write_bad_line no_opened;
+  let closed_at =
+    append no_opened (closed ~unattributed:[ slice 0 1 ] ~own:[ slice 1 1 ] bad_opened (mark 2))
+  in
+  check (list string) "reading stops at the line that should be the Opened"
+    [ Printf.sprintf "line %d is not JSON" bad_opened ]
+    (reading_lines (read_ok no_opened started_tail));
+  let after_opened = read_ok no_opened (passed_tail ~bad:bad_opened ~covered:(mark 1)) in
+  check (list string) "past it, the turn's Closed is read and all of it is unattributed"
+    [ Printf.sprintf
+        "turn %d closed at %d: unattributed all [0+1 1+1] history 10-20 internal 20-40 chat 30-60 \
+         external 1-2; own files history 20-20 internal 40-40 chat 60-60 external 2-2; next 2/20"
+        bad_opened closed_at
+    ; "log end"
+    ]
+    (reading_lines after_opened);
+  check string "without a Task" "its Opened was passed" (opened_text (last_span after_opened));
+  let inside = new_log () in
+  let (_ : int) = append inside started in
+  let turn = append inside (opened (mark 2)) in
+  let bad_inside = inside.rows_end in
+  write_bad_line inside;
+  let inside_closed =
+    append inside (closed ~unattributed:[ slice 0 1 ] ~own:[ slice 1 1 ] turn (mark 3))
+  in
+  let after_inside = read_ok inside (passed_tail ~bad:bad_inside ~covered:(mark 1)) in
+  check (list string) "past a line inside a turn, the turn is not split at its baseline"
+    [ Printf.sprintf
+        "turn %d closed at %d: unattributed all [0+1 1+1] history 10-30 internal 20-60 chat 30-90 \
+         external 1-3; own files history 30-30 internal 60-60 chat 90-90 external 3-3; next 3/30"
+        turn inside_closed
+    ; "log end"
+    ]
+    (reading_lines after_inside);
+  check string "and keeps its Task" "opened on glm-main" (opened_text (last_span after_inside))
+;;
+
 (* §16, F10: whether ten lines or a hundred thousand come before them, a
    read goes through the new lines and no other. The lines before do not
    decode, so a reader that went through them would stop there. A [Closed]
@@ -429,8 +550,14 @@ let () =
         ; test_case "a unit with no item" `Quick test_unit_with_no_item
         ; test_case "reading that starts inside a turn" `Quick test_reading_that_starts_inside_a_turn
         ; test_case "a unit after a session change" `Quick test_unit_after_a_session_change
+        ; test_case "a turn whose Opened was passed is read without a Task" `Quick
+            test_turn_with_a_passed_line
         ] )
-    ; "faults", [ test_case "in the order the reader looks" `Quick test_faults_in_order ]
+    ; ( "faults"
+      , [ test_case "in the order the reader looks" `Quick test_faults_in_order
+        ; test_case "an unreadable line says where reading goes on" `Quick
+            test_unreadable_line_says_where_reading_goes_on
+        ] )
     ; "cost", [ test_case "follows the new lines" `Quick test_cost_follows_the_new_lines ]
     ]
 ;;

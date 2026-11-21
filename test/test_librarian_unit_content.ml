@@ -283,7 +283,9 @@ let test_each_store_in_order () =
     segment ~record:(checkpoint [ slice stored.bundle 1 2 ]) ~chat:(range after_c1 after_c2)
       ~external_rows:(range 1 2) ()
   in
-  let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
+  let opened : Read_unit.opened_line =
+    Opened_read { runtime = "glm-main"; task = No_task; stimuli = [] }
+  in
   check (list string) "every item, in the unit's order"
     [ "unattributed 0 chat c1"
     ; "unattributed 1 external e1"
@@ -512,7 +514,9 @@ let test_layer2_witness_dedup_chat_mirrors () =
     }
   in
   let bundle = stored_bundle ~session_dir [ message ~role:User "u-mirror"; tool_msg ] in
-  let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
+  let opened : Read_unit.opened_line =
+    Opened_read { runtime = "glm-main"; task = No_task; stimuli = [] }
+  in
   check (list string) "checkpoint witnesses deduplicate exact user/call_id/assistant matches only"
     [ "unattributed 0 chat tool read_file(tc-other)"
     ; "unattributed 1 chat other-turn user"
@@ -565,7 +569,9 @@ let test_layer2_preserves_concurrent_op_and_request_failure_drops_external_dupe 
   let bundle =
     stored_bundle ~session_dir [ message ~role:User "turn prompt"; message ~role:Assistant "turn reply" ]
   in
-  let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
+  let opened : Read_unit.opened_line =
+    Opened_read { runtime = "glm-main"; task = No_task; stimuli = [] }
+  in
   check (list string) "keeps unlinked Operation, unmatched connector, failure, corrupt; drops matched connector mirror"
     [ "unattributed 0 chat concurrent request B"
     ; "unattributed 1 chat unmatched connector"
@@ -630,7 +636,9 @@ let test_layer2_dedup_invariant_under_first_items_and_resume () =
     }
   in
   let bundle = stored_bundle ~session_dir [ message ~role:User "ckpt user"; tool_msg ] in
-  let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
+  let opened : Read_unit.opened_line =
+    Opened_read { runtime = "glm-main"; task = No_task; stimuli = [] }
+  in
   let base_span =
     span
       (Turn

@@ -98,7 +98,9 @@ let facts () =
   | Error detail -> fail detail
 ;;
 
-let opened : Read_unit.opened = { runtime = "glm"; task = Turn_log.No_task; stimuli = [] }
+let opened : Read_unit.opened_line =
+  Opened_read { runtime = "glm"; task = Turn_log.No_task; stimuli = [] }
+;;
 
 let units () : Read_unit.t list =
   [ { line = 120

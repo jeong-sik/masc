@@ -46,6 +46,7 @@ let f_last_seen = Types.wire_field_last_seen
 let f_name = "name"
 let f_closed_at = "closed_at"
 let f_turn = "turn"
+let f_opened = "opened"
 let f_runtime = "runtime"
 let f_outcome = "outcome"
 let f_task = "task"
@@ -148,6 +149,11 @@ let announced_token : Turn_log.announced -> string = function
   | Cleared -> "cleared"
   | Recovered -> "recovered"
 ;;
+
+(* RFC §5.4, §5.5: what a turn says of its [Opened] line when reading went
+   past that line without reading it. It stands where [runtime], [task] and
+   [stimuli] would. *)
+let opened_unreadable = "unreadable"
 
 let task_json : Turn_log.task_evidence -> Yojson.Safe.t = function
   | No_task -> tagged "no_task" []
@@ -309,7 +315,9 @@ let missing_part_json : Librarian_unit.missing_part -> Yojson.Safe.t = function
 let unit_json index ({ line = _; at; kind; missing } : Read_unit.t) =
   let shown =
     match kind with
-    | Turn { turn; outcome; opened; unattributed; own } ->
+    (* A turn whose [Opened] was read has no [opened] field: its [runtime],
+       [task] and [stimuli] are what that line said. *)
+    | Turn { turn; outcome; opened = Opened_read opened; unattributed; own } ->
       [ f_kind, `String "turn"
       ; f_closed_at, time at
       ; f_turn, `Int turn
@@ -317,6 +325,15 @@ let unit_json index ({ line = _; at; kind; missing } : Read_unit.t) =
       ; f_outcome, `String (outcome_token outcome)
       ; f_task, task_json opened.task
       ; f_stimuli, `List (List.map Keeper_turn_log_stimulus_codec.to_json opened.stimuli)
+      ; f_unattributed, items_json unattributed
+      ; own_field outcome, items_json own
+      ]
+    | Turn { turn; outcome; opened = Opened_passed; unattributed; own } ->
+      [ f_kind, `String "turn"
+      ; f_closed_at, time at
+      ; f_turn, `Int turn
+      ; f_opened, `String opened_unreadable
+      ; f_outcome, `String (outcome_token outcome)
       ; f_unattributed, items_json unattributed
       ; own_field outcome, items_json own
       ]

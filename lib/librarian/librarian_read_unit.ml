@@ -4,6 +4,10 @@ type opened =
   ; stimuli : Keeper_turn_log.stimulus list
   }
 
+type opened_line =
+  | Opened_read of opened
+  | Opened_passed
+
 type body =
   | Chat_row of Keeper_chat_store_line_decode.parsed_line
   | External_row of Keeper_external_attention.item
@@ -23,7 +27,7 @@ type kind =
   | Turn of
       { turn : int
       ; outcome : Keeper_turn_log.outcome
-      ; opened : opened
+      ; opened : opened_line
       ; unattributed : item list
       ; own : item list
       }

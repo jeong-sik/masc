@@ -45,6 +45,7 @@ let tool_use_ids_of_message (message : Agent_core.Types.message) =
        | Agent_core.Types.ToolUse { id; _ } -> Some id
        | Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
        | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolResult _
+       | Agent_core.Types.ToolReference _
        | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
     message.content
 ;;
@@ -55,7 +56,7 @@ let tool_result_ids_of_message (message : Agent_core.Types.message) =
        match block with
        | Agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
        | Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
-       | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+       | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
        | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
     message.content
 ;;

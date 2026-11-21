@@ -37,7 +37,7 @@ let with_source source role content =
 
 let reasoning_supported = function
   | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
-  | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false
+  | Text _ | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false
 ;;
 
 (* Rotation defaults to the strictest declared rule so existing expectations
@@ -69,7 +69,7 @@ let project
 let content_has_reasoning =
   List.exists (function
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
-    | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+    | Text _ | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
 ;;
 
 let content_has_tool_use =
@@ -79,7 +79,7 @@ let content_has_tool_use =
     | Thinking _
     | ReasoningDetails _
     | RedactedThinking _
-    | ToolResult _
+    | ToolReference _ | ToolResult _
     | Image _
     | Document _
     | Audio _ -> false)

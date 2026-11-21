@@ -44,7 +44,7 @@ let host_block json =
      ToolResult is kept whole like the other non-media blocks. *)
   | Ok
       ( P.Text _ | P.Thinking _ | P.ReasoningDetails _ | P.RedactedThinking _
-      | P.ToolUse _ | P.ToolResult _ ) -> json
+      | P.ToolUse _ | P.ToolReference _ | P.ToolResult _ ) -> json
 ;;
 
 (* [Runtime_official_client_tool.project_content] writes a Codex image as
@@ -236,7 +236,7 @@ let retained_slot ~slot json =
                 unavailable ~media_type:(Some media_type) (Some kind) reason
               | Error _
               | Ok (P.Image _ | P.Text _ | P.Thinking _ | P.ReasoningDetails _
-                   | P.RedactedThinking _ | P.ToolUse _ | P.ToolResult _) ->
+                   | P.RedactedThinking _ | P.ToolUse _ | P.ToolReference _ | P.ToolResult _) ->
                 unavailable (Some kind) Malformed_attachment)
            | [] | _ :: _ -> unavailable (Some kind) Malformed_attachment))
      | [] -> None

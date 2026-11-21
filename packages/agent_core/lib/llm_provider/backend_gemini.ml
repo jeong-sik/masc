@@ -285,6 +285,7 @@ let validate_projected_thought_signatures (messages : message list) =
             | Thinking _
             | ReasoningDetails _
             | ToolUse _
+            | ToolReference _
             | ToolResult _
             | Image _
             | Document _
@@ -306,6 +307,7 @@ let gemini_tool_signatures_of_blocks blocks =
       | Thinking _
       | ReasoningDetails _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Document _
@@ -384,7 +386,7 @@ let function_response_payload ~supports_function_response_parts ~content ~outcom
       reserve_blocks (reserve_json names (Option.value json ~default:`Null))
         (Option.value content_blocks ~default:[])
     | Image _ | Document _ | Audio _ -> names
-    | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _) as block ->
+    | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _) as block ->
       reserve_json names (Api_common.content_block_to_json block)) names blocks in
   let reserved_names = reserve_blocks
     (reserve_json String_map.empty (Option.value json ~default:`Null))
@@ -417,6 +419,7 @@ let function_response_payload ~supports_function_response_parts ~content ~outcom
       `Assoc (["type", `String "tool_result";
                "tool_use_id", `String tool_use_id] @
         response_fields ~content ~outcome ~json ~content_blocks)
+    | ToolReference _ as block -> Api_common.content_block_to_json block
     | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _) as block ->
       Api_common.content_block_to_json block
   and response_fields ~content ~outcome ~json ~content_blocks =
@@ -424,8 +427,22 @@ let function_response_payload ~supports_function_response_parts ~content ~outcom
      "is_error", `Bool (tool_result_outcome_is_error outcome)]
     @ (match json with None -> [] | Some data -> ["data", data])
     @ (match content_blocks with
-       | None -> []
-       | Some blocks -> ["content_blocks", `List (List.map nested blocks)])
+       | Some blocks
+         when List.exists
+                (function
+                  | ToolReference _ -> true
+                  | Text _
+                  | Thinking _
+                  | ReasoningDetails _
+                  | RedactedThinking _
+                  | ToolUse _
+                  | ToolResult _
+                  | Image _
+                  | Document _
+                  | Audio _ -> false)
+                blocks -> []
+       | Some blocks -> ["content_blocks", `List (List.map nested blocks)]
+       | None -> [])
   in
   let response = `Assoc (response_fields ~content ~outcome ~json ~content_blocks) in
   response, List.rev !parts
@@ -445,6 +462,7 @@ let part_of_content_block ~supports_function_response_parts tool_signatures
     inline_data_part ~block:"audio" ~media_type source
   | Document { media_type; source } ->
     inline_data_part ~block:"document" ~media_type source
+  | ToolReference _ -> None
   | ToolUse { id; name; input } ->
     let fields =
       [ "functionCall", `Assoc [ "id", `String id; "name", `String name; "args", input ] ]
@@ -483,7 +501,7 @@ let signature_target_of_content_block = function
   | Image _ -> Some Gemini_image_part
   | Audio _ -> Some Gemini_audio_part
   | Document _ -> Some Gemini_document_part
-  | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ -> None
+  | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _ -> None
 ;;
 
 let same_signature_target left right =
@@ -576,7 +594,7 @@ let parts_of_content_blocks ~role ~supports_function_response_parts tool_signatu
            (Gemini_api_error
               "Malformed Gemini thoughtSignature carrier in conversation history")
        | Not_gemini_part_signature -> List.rev acc)
-    | (((Text _ | Thinking _ | ReasoningDetails _ | ToolUse _ | ToolResult _
+    | (((Text _ | Thinking _ | ReasoningDetails _ | ToolUse _ | ToolReference _ | ToolResult _
          | Image _ | Document _ | Audio _), _) as block) :: rest ->
       let acc =
         match part_of_content_block ~supports_function_response_parts tool_signatures block with
@@ -608,7 +626,7 @@ let with_function_response_image_followups messages =
           (fun index block -> project (index :: path) outcome block) blocks) in
         ToolResult {result with content_blocks = Some blocks}, List.concat images
       | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-        | ToolUse _ | Document _ | Audio _ | ToolResult {content_blocks = None; _}) as block ->
+        | ToolUse _ | ToolReference _ | Document _ | Audio _ | ToolResult {content_blocks = None; _}) as block ->
         block, []
     in
     project [] Tool_succeeded block
@@ -626,7 +644,7 @@ let with_function_response_image_followups messages =
         let block, images = match block with
           | ToolResult {tool_use_id; _} -> project_result tool_use_id block
           | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-            | ToolUse _ | Image _ | Document _ | Audio _) -> block, [] in
+            | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _) -> block, [] in
         block :: content, List.rev_append images pending) ([], pending) message.content in
       loop ({message with content = List.rev content} :: reversed) pending rest
     | ({role = System | User | Assistant; _} as message) :: rest ->
@@ -744,13 +762,13 @@ let project_function_response_media messages =
         | _ :: _ -> String.concat "\n" (result.content :: notes) in
       ToolResult {result with content; content_blocks = Some blocks}, notes
     | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-      | ToolUse _ | Image _ | ToolResult {content_blocks = None; _}) as block -> block, []
+      | ToolUse _ | ToolReference _ | Image _ | ToolResult {content_blocks = None; _}) as block -> block, []
   in
   List.map (fun (message : 'source Types.message_with) ->
     let content = List.map (function
       | ToolResult _ as block -> fst (nested block)
       | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-        | ToolUse _ | Image _ | Document _ | Audio _) as block -> block)
+        | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _) as block -> block)
       message.content in
     {message with content}) messages
 ;;
@@ -786,6 +804,7 @@ let project_history ?(tools_present = false) config messages =
       | ReasoningDetails _
       | Text _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Document _
@@ -1082,6 +1101,7 @@ let parse_response json =
            | Thinking _
            | ReasoningDetails _
            | RedactedThinking _
+           | ToolReference _
            | ToolResult _
            | Image _
            | Document _

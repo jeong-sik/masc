@@ -30,6 +30,7 @@ let rec block_sections (block : Types.content_block) : section list =
         match json with Some payload -> [ Json (Yojson.Safe.pretty_to_string payload) ] | None -> []
       in
       Marker marker :: structured @ payload
+  | Types.ToolReference { tool_name } -> [ Marker ("tool reference " ^ tool_name) ]
   | Types.Image { media_type; source } ->
       [ Marker
           (Printf.sprintf "image %s, %d bytes" media_type

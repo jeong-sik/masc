@@ -194,6 +194,7 @@ let block_json : Agent_core.Types.content_block -> Yojson.Safe.t option = functi
       (tagged
          "tool_result"
          [ f_id, `String tool_use_id; f_outcome, `String (tool_result_token outcome) ])
+  | ToolReference { tool_name } -> Some (tagged "tool_reference" [ f_name, `String tool_name ])
   | Image _ -> Some (tagged "image" [])
   | Document _ -> Some (tagged "document" [])
   | Audio _ -> Some (tagged "audio" [])

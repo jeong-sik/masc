@@ -147,6 +147,7 @@ let rec map_block_sources f (block : _ P.content_block_with) =
     Ok (P.ReasoningDetails { reasoning_content; details })
   | P.RedactedThinking data -> Ok (P.RedactedThinking data)
   | P.ToolUse { id; name; input } -> Ok (P.ToolUse { id; name; input })
+  | P.ToolReference { tool_name } -> Ok (P.ToolReference { tool_name })
   | P.ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
     let+ content_blocks = map_option (map_list (map_block_sources f)) content_blocks in
     P.ToolResult { tool_use_id; content; outcome; json; content_blocks }
@@ -204,7 +205,8 @@ let rec media_bytes = function
   | P.Thinking _
   | P.ReasoningDetails _
   | P.RedactedThinking _
-  | P.ToolUse _ -> 0
+  | P.ToolUse _
+  | P.ToolReference _ -> 0
 ;;
 
 let rec stored_media = function
@@ -219,7 +221,8 @@ let rec stored_media = function
   | P.Thinking _
   | P.ReasoningDetails _
   | P.RedactedThinking _
-  | P.ToolUse _ -> []
+  | P.ToolUse _
+  | P.ToolReference _ -> []
   | P.ToolResult { content_blocks = Some blocks; _ } -> List.concat_map stored_media blocks
 ;;
 
@@ -233,7 +236,8 @@ let rec media_wire_length = function
   | P.Thinking _
   | P.ReasoningDetails _
   | P.RedactedThinking _
-  | P.ToolUse _ -> 0
+  | P.ToolUse _
+  | P.ToolReference _ -> 0
 ;;
 
 (* ================================================================ *)
@@ -284,6 +288,7 @@ let rec content_block_to_json block =
     wire (P.ReasoningDetails { reasoning_content; details })
   | P.RedactedThinking data -> wire (P.RedactedThinking data)
   | P.ToolUse { id; name; input } -> wire (P.ToolUse { id; name; input })
+  | P.ToolReference { tool_name } -> wire (P.ToolReference { tool_name })
   | P.ToolResult { tool_use_id; content; outcome; json = _; content_blocks } ->
     (* Field order of the journal codec's ToolResult: the provider fields,
        then provenance, then [text_content] when [content] is an array. *)
@@ -687,6 +692,10 @@ let rec content_block_of_json_at ~at json =
     let* name = required_identifier ~at "name" fields in
     let+ input = required ~at "input" fields in
     P.ToolUse { id; name; input }
+  | "tool_reference" ->
+    let* () = exact ~required:[ "type"; "tool_name" ] ~optional:[] in
+    let+ tool_name = required_identifier ~at "tool_name" fields in
+    P.ToolReference { tool_name }
   | "tool_result" ->
     let* () =
       exact

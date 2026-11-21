@@ -142,6 +142,49 @@ let test_failover_uses_current_owner_without_clearing_agent () =
       (names built) (names (surface ()).tools))
 ;;
 
+let test_deferred_for_native_requires_a_loader () =
+  let search = tool "keeper_tool_search" in
+  let first = tool "first" in
+  let second = tool "second" in
+  let full = [ search; first; second ] in
+  Alcotest.(check (list string))
+    "no listing means no deferred catalog"
+    []
+    (names
+       (Keeper_agent_tool_surface.deferred_for_native
+          ~supports:true
+          ~loader_present:false
+          ~full_tools:full
+          ~callable_tools:[ search ]));
+  Alcotest.(check (list string))
+    "only tools outside the eager set are deferred"
+    (names [ second ])
+    (names
+       (Keeper_agent_tool_surface.deferred_for_native
+          ~supports:true
+          ~loader_present:true
+          ~full_tools:full
+          ~callable_tools:[ search; first ]));
+  Alcotest.(check (list string))
+    "an eager catalog stays non-deferred even with a loader"
+    []
+    (names
+       (Keeper_agent_tool_surface.deferred_for_native
+          ~supports:true
+          ~loader_present:true
+          ~full_tools:full
+          ~callable_tools:full));
+  Alcotest.(check (list string))
+    "an unsupported provider keeps the old surface"
+    []
+    (names
+       (Keeper_agent_tool_surface.deferred_for_native
+          ~supports:false
+          ~loader_present:true
+          ~full_tools:full
+          ~callable_tools:[ search; first ]))
+;;
+
 let () =
   run
     "keeper tool surface on the wire"
@@ -156,6 +199,8 @@ let () =
             test_failover_uses_current_owner_without_clearing_agent
         ; test_case "a mid-turn widening is visible" `Quick
             test_a_mid_turn_widening_is_visible
+        ; test_case "deferred native surface requires a loader" `Quick
+            test_deferred_for_native_requires_a_loader
         ] )
     ]
 ;;

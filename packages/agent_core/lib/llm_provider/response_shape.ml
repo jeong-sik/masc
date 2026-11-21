@@ -82,6 +82,10 @@ let summarize_blocks (content : Types.content_block list) =
            { (add_kind "tool_result" shape) with
              tool_result_count = shape.tool_result_count + 1
            }
+         | Types.ToolReference _ ->
+           { (add_kind "tool_reference" shape) with
+             tool_result_count = shape.tool_result_count + 1
+           }
          | Types.Image _ ->
            { (add_kind "image" shape) with image_count = shape.image_count + 1 }
          | Types.Document _ ->

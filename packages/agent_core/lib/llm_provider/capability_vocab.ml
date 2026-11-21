@@ -528,6 +528,7 @@ let capability_fields =
   ; "supports_prompt_caching"
   ; "prompt_cache_wire"
   ; "supports_explicit_cache_opt_out"
+  ; "supports_deferred_tool_loading"
   ; "supports_top_k"
   ; "supports_min_p"
   ; "supports_seed"

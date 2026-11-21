@@ -97,11 +97,11 @@ let malformed_terminal_calls ()=
  match Acc.finalize_stream_acc acc with
  | Error _->Alcotest.fail"an unreadable terminal call failed the stream"
  | Ok response->
-   Alcotest.(check bool)"unreadable terminal call is not executable"false(List.exists(function ToolUse _->true| Llm_provider.Types.Text _| Llm_provider.Types.Thinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->false)response.content);
+   Alcotest.(check bool)"unreadable terminal call is not executable"false(List.exists(function ToolUse _->true| Llm_provider.Types.Text _| Llm_provider.Types.Thinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ToolReference _ | Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->false)response.content);
    Alcotest.(check (list string))"kept as unreadable"["call"](List.map(fun(c:Llm_provider.Types.unreadable_tool_use)->c.tool_use_id)response.unreadable_tool_uses)
 let unsupported_custom ()=
  let state,acc=start()in terminal state acc[`Assoc["type",`String"custom_tool_call";"call_id",`String"custom";"name",`String"test";"input",`String"plain input"]];
- match Acc.finalize_stream_acc acc with Error _->()|Ok response->Alcotest.(check bool)"unsupported custom terminal is never promoted"false(List.exists(function ToolUse _->true| Llm_provider.Types.Text _| Llm_provider.Types.Thinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->false)response.content)
+ match Acc.finalize_stream_acc acc with Error _->()|Ok response->Alcotest.(check bool)"unsupported custom terminal is never promoted"false(List.exists(function ToolUse _->true| Llm_provider.Types.Text _| Llm_provider.Types.Thinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ToolReference _ | Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->false)response.content)
 let incomplete_malformed_tool ()=
  let state,acc=start()in let message=item ~phase:(`String"commentary")["checking"]in
  let partial=`Assoc["type",`String"function_call";"name",`String"test";"arguments",`String"{"]in

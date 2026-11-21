@@ -40,6 +40,7 @@ type entry =
   ; supports_prompt_caching : bool option
   ; prompt_cache_wire : string option
   ; supports_explicit_cache_opt_out : bool option
+  ; supports_deferred_tool_loading : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option
@@ -337,6 +338,7 @@ let known_entry_keys =
   ; "supports_prompt_caching"
   ; "prompt_cache_wire"
   ; "supports_explicit_cache_opt_out"
+  ; "supports_deferred_tool_loading"
   ; "supports_top_k"
   ; "supports_min_p"
   ; "supports_seed"
@@ -541,6 +543,7 @@ let parse_entry json =
   let* supports_explicit_cache_opt_out =
     member_bool "supports_explicit_cache_opt_out" json
   in
+  let* supports_deferred_tool_loading = member_bool "supports_deferred_tool_loading" json in
   let* supports_top_k = member_bool "supports_top_k" json in
   let* supports_min_p = member_bool "supports_min_p" json in
   let* supports_seed = member_bool "supports_seed" json in
@@ -584,6 +587,7 @@ let parse_entry json =
     ; supports_prompt_caching
     ; prompt_cache_wire
     ; supports_explicit_cache_opt_out
+    ; supports_deferred_tool_loading
     ; supports_top_k
     ; supports_min_p
     ; supports_seed

@@ -10,6 +10,8 @@ open Types
 
 let _log = Log.create ~module_name:"agent_turn" ()
 
+module Deferred_name_set = Set.Make (String)
+
 (* [turn_count] is advanced by the collect stage at the end of a provider
    turn, so before a fresh turn starts it is exactly the zero-based ordinal of
    the turn about to run. Read here only, by the turn frontier resolution. *)
@@ -19,6 +21,9 @@ let provider_turn_ordinal (state : agent_state) : int = state.turn_count
 
 type turn_request =
   { effective_messages : Llm_provider.Types.message list
+  ; tools : Tool_set.t
+  ; tools_json : Yojson.Safe.t list option
+  ; visible_tool_names : string list
   ; context_message : (message option, Error.t) result
   }
 
@@ -31,16 +36,71 @@ type turn_preparation =
   ; visible_tool_names : string list
   }
 
-let prepare_tools ~(tools : Tool_set.t) () =
+let prepare_tools ~(tools : Tool_set.t) ?(deferred_tools = []) ?(defer_loading = false) () =
   let selected = Tool_set.to_list tools in
+  let wire_selected =
+    if defer_loading
+    then Tool_set.to_list (Tool_set.of_list (selected @ deferred_tools))
+    else selected
+  in
+  let deferred_names =
+    List.fold_left
+      (fun names (tool : Tool.t) -> Deferred_name_set.add tool.schema.name names)
+      Deferred_name_set.empty
+      deferred_tools
+  in
   Schema_observation.surface ~site:Sdk_prepare_json (fun () ->
-    List.map (fun (tool : Tool.t) -> tool.schema) selected);
+    List.map (fun (tool : Tool.t) -> tool.schema) wire_selected);
   let tool_schemas =
     Schema_observation.with_site Sdk_prepare_json (fun () ->
-      List.map Tool.schema_to_json selected) in
+      List.map
+        (fun (tool : Tool.t) ->
+           let json = Tool.schema_to_json tool in
+           if defer_loading && Deferred_name_set.mem tool.schema.name deferred_names
+           then
+             (match json with
+              | `Assoc fields -> `Assoc (("defer_loading", `Bool true) :: fields)
+              | other -> other)
+           else json)
+        wire_selected)
+  in
   let tools_json = if tool_schemas = [] then None else Some tool_schemas in
   let visible_tool_names = List.map (fun (t : Tool.t) -> t.schema.name) selected in
   tools_json, visible_tool_names
+;;
+
+let referenced_tool_names messages =
+  let rec collect_block names = function
+    | ToolReference { tool_name } -> Deferred_name_set.add tool_name names
+    | ToolResult { content_blocks = Some blocks; _ } ->
+      List.fold_left collect_block names blocks
+    | Text _
+    | Thinking _
+    | ReasoningDetails _
+    | RedactedThinking _
+    | ToolUse _
+    | ToolResult { content_blocks = None; _ }
+    | Image _
+    | Document _
+    | Audio _ -> names
+  in
+  List.fold_left
+    (fun names (message : Llm_provider.Types.message) ->
+       List.fold_left collect_block names message.content)
+    Deferred_name_set.empty
+    messages
+;;
+
+let request_tools ~tools ~eager_tools ~deferred_tools ~defer_loading messages =
+  match eager_tools with
+  | Some eager when defer_loading ->
+    let references = referenced_tool_names messages in
+    Tool_set.of_list
+      (Tool_set.to_list eager
+       @ List.filter
+           (fun (tool : Tool.t) -> Deferred_name_set.mem tool.schema.name references)
+           deferred_tools)
+  | Some _ | None -> tools
 ;;
 
 (* Cadence premise: at most one fresh carrier per prepare call. The hook may
@@ -86,11 +146,26 @@ let caller_result f =
     Error (Error.Internal (Printexc.to_string exn))
 ;;
 
-let prepare_turn ~media_store ~tools ~messages ~turn_params ?model_input_projection () =
-  let tools_json, visible_tool_names = prepare_tools ~tools () in
+let prepare_turn
+      ~media_store
+      ~tools
+      ~messages
+      ~turn_params
+      ?eager_tools
+      ?(deferred_tools = [])
+      ?(defer_loading = false)
+      ?model_input_projection
+      ()
+  =
   let context_message = context_message turn_params in
   let prepared = append_context_message ~messages ~context_message in
   let request_of effective_messages =
+    let tools =
+      request_tools ~tools ~eager_tools ~deferred_tools ~defer_loading effective_messages
+    in
+    let tools_json, visible_tool_names =
+      prepare_tools ~tools ~deferred_tools ~defer_loading ()
+    in
     let context_message =
       match context_message with
       | None -> Ok None
@@ -107,7 +182,7 @@ let prepare_turn ~media_store ~tools ~messages ~turn_params ?model_input_project
            |> Result.map_error (fun error -> Error.Media error)
          | _ -> Error (Error.Internal "model input projection returned multiple current context carriers"))
     in
-    { effective_messages; context_message }
+    { effective_messages; tools; tools_json; visible_tool_names; context_message }
   in
   let candidates =
     match model_input_projection with
@@ -118,15 +193,16 @@ let prepare_turn ~media_store ~tools ~messages ~turn_params ?model_input_project
     | Some project -> caller_result (fun () -> project prepared)
   in
   Result.map (fun (candidates : Agent_types.model_input_candidates) ->
+    let request = request_of candidates.Agent_types.request in
     let narrower =
       List.map (fun (narrow : Agent_types.narrower_model_input) refusal ->
           caller_result (fun () -> narrow refusal) |> Result.map (Option.map request_of))
         candidates.Agent_types.narrower
     in
-    { tools_json
-    ; request = request_of candidates.Agent_types.request
+    { tools_json = request.tools_json
+    ; request
     ; narrower
-    ; visible_tool_names
+    ; visible_tool_names = request.visible_tool_names
     })
     candidates
 ;;
@@ -222,7 +298,7 @@ let history_tool_result_of_block : content_block -> Hooks.history_tool_result op
   function
   | ToolResult { tool_use_id; content; outcome; content_blocks; json = _ } ->
     Some { tool_use_id; content; outcome; content_blocks }
-  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _
   | Document _ | Audio _ -> None
 ;;
 
@@ -233,7 +309,7 @@ let last_tool_results_from messages =
       when List.for_all
              (function
                | ToolResult _ -> true
-               | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _
+               | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _
                | Document _ | Audio _ -> false)
              content ->
       List.filter_map history_tool_result_of_block content
@@ -315,6 +391,7 @@ let apply_context_injection ~context ~messages ~injector ~tool_uses ~results =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolResult _
+        | ToolReference _
         | Image _
         | Document _
         | Audio _ )
@@ -444,6 +521,7 @@ let[@warning "-32"] single_tool_result = function
       | [ ReasoningDetails _ ]
       | [ RedactedThinking _ ]
       | [ ToolUse _ ]
+      | [ ToolReference _ ]
       | [ Image _ ]
       | [ Document _ ]
       | [ Audio _ ]

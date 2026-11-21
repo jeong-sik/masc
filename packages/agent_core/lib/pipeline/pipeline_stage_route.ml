@@ -343,7 +343,6 @@ let dispatch_sync
     | Ok value -> next value
     | Error error -> Llm_provider.Completion_outcome.before_serialization (Error error)
   in
-  let tools = Option.value prep.Agent_turn.tools_json ~default:[] in
   let* binding =
     binding_identity_for_call agent provider_config
     |> Result.map_error (binding_identity_error ?on_provider_failure)
@@ -357,6 +356,8 @@ let dispatch_sync
     Llm_provider.Completion_outcome.map_result (finish_call ?on_provider_failure) outcome
   in
   let send position (request : Agent_turn.turn_request) =
+    Agent_types.set_request_tools agent request.tools;
+    let tools = Option.value request.Agent_turn.tools_json ~default:[] in
     (* A narrower request that fails before it is sent is no request. The
        turn ends with the refusal before it, as the turn would end without
        narrower requests; the failure itself goes to the log. *)
@@ -559,7 +560,6 @@ let dispatch_stream
     | Ok value -> next value
     | Error error -> Llm_provider.Completion_outcome.before_serialization (Error error)
   in
-  let tools = Option.value prep.Agent_turn.tools_json ~default:[] in
   let* binding =
     binding_identity_for_call agent provider_config
     |> Result.map_error (binding_identity_error ?on_provider_failure)
@@ -581,6 +581,8 @@ let dispatch_stream
       ~next_stage:"stream"
   in
   let send position (request : Agent_turn.turn_request) =
+    Agent_types.set_request_tools agent request.tools;
+    let tools = Option.value request.Agent_turn.tools_json ~default:[] in
     (* A narrower request that fails before it is sent is no request. The
        turn ends with the refusal before it, as the turn would end without
        narrower requests; the failure itself goes to the log. *)

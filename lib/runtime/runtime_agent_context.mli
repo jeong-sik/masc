@@ -30,6 +30,15 @@ type config = {
   model_id : string;
   system_prompt : string;
   tools : Agent_core.Tool.t list;
+  deferred_tools : Agent_core.Tool.t list;
+      (** Deferrable catalog sent with defer_loading only when the selected
+          provider declares support. Eager tools stay outside this list.
+          Callable dispatch is recomputed from references in each projected
+          request window.
+
+          Source-compatibility note: adding this field is a breaking change for
+          direct [config] constructors. Use {!default_config} or a record update
+          so the default [[]] is preserved. *)
   stream_idle_timeout_s : float option;
   first_event_timeout_s : float option;
       (** Bound on the silent wait for the FIRST streaming provider event
@@ -175,7 +184,7 @@ val agent_options :
 (** The options record both {!create_agent} and {!prepare_resume} hand to
     AGENT_CORE. Every option the runtime config carries goes here once, so a
     fresh agent and a resumed one see the same hooks, tool-approval callback,
-    tracer, keeper-turn span link and timeouts. *)
+    deferred tool surface, tracer, keeper-turn span link and timeouts. *)
 
 val create_agent :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

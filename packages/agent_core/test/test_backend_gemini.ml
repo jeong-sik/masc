@@ -53,7 +53,7 @@ let gemini_events state chunk =
 let content_has_reasoning =
   List.exists (function
     | Types.Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
-    | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+    | Text _ | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
 ;;
 
 let stamp_reasoning_history config messages =
@@ -905,6 +905,35 @@ let test_textual_part_signature_broken_adjacency_fails_closed () =
 
 let message_with_blocks role content : Types.message =
   { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
+;;
+
+let test_gemini_tool_reference_falls_back_to_result_text () =
+  let messages =
+    [ message_with_blocks
+        Assistant
+        [ ToolUse { id = "load-1"; name = "keeper_tool_search"; input = `Assoc [] } ]
+    ; message_with_blocks
+        Tool
+        [ ToolResult
+            { tool_use_id = "load-1"
+            ; content = "now callable:\n- masc_board_list"
+            ; outcome = Tool_succeeded
+            ; json = None
+            ; content_blocks = Some [ ToolReference { tool_name = "masc_board_list" } ]
+            }
+        ]
+    ]
+  in
+  let contents, _ = Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages in
+  match List.nth contents 1 |> member "parts" |> to_list with
+  | [ part ] ->
+    let response = part |> member "functionResponse" |> member "response" in
+    check string
+      "existing result text remains"
+      "now callable:\n- masc_board_list"
+      (response |> member "result" |> to_string);
+    check bool "no reference carrier on Gemini" true (response |> member "content_blocks" = `Null)
+  | _ -> fail "expected one Gemini function response"
 ;;
 
 let test_textual_part_signature_non_assistant_fails_closed () =
@@ -2151,6 +2180,8 @@ let () =
       , [ test_case "system extraction" `Quick test_contents_system_extraction
         ; test_case "role mapping" `Quick test_contents_role_mapping
         ; test_case "multimodal" `Quick test_contents_multimodal
+        ; test_case "tool reference falls back to result text" `Quick
+            test_gemini_tool_reference_falls_back_to_result_text
         ] )
     ; ( "streaming"
       , [ test_case "text chunk" `Quick test_gemini_stream_text

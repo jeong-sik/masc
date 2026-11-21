@@ -177,6 +177,37 @@ let message ?(metadata = []) role content : Types.message =
   { origin = Llm_provider.Types.Conversation;  role; content = [ content ]; name = None; tool_call_id = None; metadata }
 ;;
 
+let test_tool_reference_survives_checkpoint () =
+  let open Types in
+  let checkpoint =
+    make_checkpoint
+      ~messages:
+        [ message
+            Tool
+            (ToolResult
+               { tool_use_id = "load-1"
+               ; content = "now callable:\n- masc_board_list"
+               ; outcome = Tool_succeeded
+               ; json = None
+               ; content_blocks = Some [ ToolReference { tool_name = "masc_board_list" } ]
+               })
+        ]
+      ()
+  in
+  match Checkpoint.of_json (Checkpoint.to_json checkpoint) with
+  | Error error -> Alcotest.fail (Error.to_string error)
+  | Ok
+      { messages =
+          [ { content =
+                [ ToolResult { content_blocks = Some [ ToolReference { tool_name } ]; _ } ]
+            ; _
+            }
+          ]
+      ; _
+      } -> Alcotest.(check string) "reference name survives" "masc_board_list" tool_name
+  | Ok _ -> Alcotest.fail "checkpoint did not preserve the tool reference"
+;;
+
 let check_checkpoint_rejected label checkpoint =
   match Checkpoint.to_json_result checkpoint with
   | Error (Error.Serialization _) -> ()
@@ -350,7 +381,7 @@ let tool_result_json (cp : Checkpoint.t) =
          (function
            | Types.ToolResult { json; _ } -> Some json
            | Types.Text _ | Types.Thinking _ | Types.RedactedThinking _
-           | Types.ToolUse _ | Types.Image _ | Types.Document _ | Types.Audio _
+           | Types.ToolUse _ | Types.ToolReference _ | Types.Image _ | Types.Document _ | Types.Audio _
            | Types.ReasoningDetails _ -> None)
          m.content)
     cp.messages
@@ -1081,7 +1112,9 @@ let () =
       , [ test_case "image carriers remain canonical" `Quick
             test_image_carriers_remain_canonical
         ; test_case "tool PNG reaches provider after checkpoint" `Quick
-            test_tool_image_survives_dispatch_and_checkpoint ] )
+            test_tool_image_survives_dispatch_and_checkpoint
+        ; test_case "tool reference survives checkpoint" `Quick
+            test_tool_reference_survives_checkpoint ] )
     ; ( "v19 contract"
       , [ test_case "a failure deep in nested lists names its element" `Quick
             test_a_failure_deep_in_nested_lists_names_its_element

@@ -1773,7 +1773,7 @@ let test_h5_request_selected_and_new_tool_media_preserve_canonical_history () =
           [List.rev reversed_path, block]
         | ToolResult {content_blocks = Some nested; _} -> media_at reversed_path nested
         | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolResult {content_blocks = None; _} -> []) blocks
+        | ToolReference _ | ToolResult {content_blocks = None; _} -> []) blocks
       |> List.concat in
     let media_by_message messages =
       List.map (fun (message : Agent_core.Types.message) -> media_at [] message.content) messages in

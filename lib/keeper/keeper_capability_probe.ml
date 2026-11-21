@@ -251,6 +251,7 @@ let tool_use_names (response : Agent_core.Types.api_response) =
       | Llm_provider.Types.RedactedThinking _
       | Llm_provider.Types.ReasoningDetails _
       | Llm_provider.Types.ToolResult _
+      | Llm_provider.Types.ToolReference _
       | Llm_provider.Types.Image _
       | Llm_provider.Types.Document _
       | Llm_provider.Types.Audio _ -> None)
@@ -267,6 +268,7 @@ let reply_bytes (response : Agent_core.Types.api_response) =
       | Llm_provider.Types.ReasoningDetails _
       | Llm_provider.Types.ToolUse _
       | Llm_provider.Types.ToolResult _
+      | Llm_provider.Types.ToolReference _
       | Llm_provider.Types.Image _
       | Llm_provider.Types.Document _
       | Llm_provider.Types.Audio _ -> acc)

@@ -153,7 +153,7 @@ let verdict_of_report (report : Agent.Execution_projection.settled_tool_invocati
   let successful = report.attempt_admitted && (match report.result with
     | Llm_provider.Types.ToolResult {outcome=Tool_succeeded;_} -> true
     | ToolResult {outcome=Tool_failed _;_} | Text _ | Thinking _ | ReasoningDetails _
-    | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _ -> false) in
+    | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ -> false) in
   if not successful then Error "report invocation has no successful handler settlement"
   else
     match AR.step_verdict_call AR.empty_verdict_call report.input with

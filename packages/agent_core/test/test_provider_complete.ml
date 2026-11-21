@@ -44,7 +44,7 @@ let catalog_capabilities ?provider_label model_id =
 let content_has_reasoning =
   List.exists (function
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
-    | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+    | Text _ | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
 ;;
 
 (* A replayed assistant message carries both the reasoning source and the
@@ -2240,6 +2240,128 @@ let test_cache_default_false () =
   Alcotest.(check bool) "default cache off" false cfg.cache_system_prompt
 ;;
 
+let reference_result () =
+  ToolResult
+    { tool_use_id = "load-1"
+    ; content = "now callable:\n- masc_board_list"
+    ; outcome = Tool_succeeded
+    ; json = None
+    ; content_blocks = Some [ ToolReference { tool_name = "masc_board_list" } ]
+    }
+;;
+
+let test_anthropic_tool_reference_result () =
+  let config =
+    PC.make ~kind:Anthropic ~model_id:"claude-haiku-5-5" ~base_url:"" ~max_tokens:128 ()
+  in
+  let body =
+    BA.build_request
+      ~config
+      ~messages:[ make_message ~role:Tool [ reference_result () ] ]
+      ~tools:[ `Assoc [ "name", `String "masc_board_list" ] ]
+      ()
+  in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  let result = json |> member "messages" |> index 0 |> member "content" |> index 0 in
+  let content = result |> member "content" |> to_list in
+  Alcotest.(check int) "reference-only content" 1 (List.length content);
+  let reference = List.hd content in
+  Alcotest.(check string) "reference block type" "tool_reference" (reference |> member "type" |> to_string);
+  Alcotest.(check string)
+    "reference tool name"
+    "masc_board_list"
+    (reference |> member "tool_name" |> to_string)
+;;
+
+let test_kimi_tool_reference_falls_back_to_text () =
+  let config = PC.make ~kind:Kimi ~model_id:"kimi-for-coding" ~base_url:"" ~max_tokens:128 () in
+  let body = BA.build_request ~config ~messages:[ make_message ~role:Tool [ reference_result () ] ] () in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  let result = json |> member "messages" |> index 0 |> member "content" |> index 0 in
+  let content = result |> member "content" |> to_list in
+  Alcotest.(check int) "text fallback only" 1 (List.length content);
+  let text = List.hd content in
+  Alcotest.(check string) "fallback block type" "text" (text |> member "type" |> to_string);
+  Alcotest.(check string)
+    "existing result text remains"
+    "now callable:\n- masc_board_list"
+    (text |> member "text" |> to_string)
+;;
+
+let test_anthropic_stale_reference_falls_back_to_text () =
+  let config =
+    PC.make ~kind:Anthropic ~model_id:"claude-haiku-5-5" ~base_url:"" ~max_tokens:128 ()
+  in
+  let body =
+    BA.build_request
+      ~config
+      ~messages:[ make_message ~role:Tool [ reference_result () ] ]
+      ~tools:[ `Assoc [ "name", `String "another_tool" ] ]
+      ()
+  in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  let content = json |> member "messages" |> index 0 |> member "content" |> index 0 |> member "content" in
+  Alcotest.(check string)
+    "a removed tool is not replayed as a reference"
+    "now callable:\n- masc_board_list"
+    (content |> to_string)
+;;
+
+let test_anthropic_unsupported_reference_falls_back_to_text () =
+  let config = PC.make ~kind:Anthropic ~model_id:"m" ~base_url:"" ~max_tokens:128 () in
+  let body =
+    BA.build_request
+      ~config
+      ~messages:[ make_message ~role:Tool [ reference_result () ] ]
+      ~tools:[ `Assoc [ "name", `String "masc_board_list" ] ]
+      ()
+  in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  let content = json |> member "messages" |> index 0 |> member "content" |> index 0 |> member "content" in
+  Alcotest.(check string)
+    "an unsupported model gets canonical text instead of a reference"
+    "now callable:\n- masc_board_list"
+    (content |> to_string)
+;;
+
+let test_anthropic_reference_projection_precedes_prefix_digest () =
+  let config =
+    PC.make ~kind:Anthropic ~model_id:"claude-haiku-5-5" ~base_url:"" ~max_tokens:128 ()
+  in
+  let tools = [ `Assoc [ "name", `String "another_tool" ] ] in
+  let stale = make_message ~role:Tool [ reference_result () ] in
+  let fallback =
+    make_message
+      ~role:Tool
+      [ ToolResult
+          { tool_use_id = "load-1"
+          ; content = "now callable:\n- masc_board_list"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let body messages = BA.build_request ~config ~messages ~tools () in
+  Alcotest.(check string)
+    "stale reference and its text fallback have the same wire body"
+    (body [ fallback ])
+    (body [ stale ]);
+  let response_content = [ Thinking { content = "stable"; signature = Some "signature" } ] in
+  let prefix messages =
+    BA.transmitted_reasoning_prefix ~config ~messages ~tools ~response_content ()
+  in
+  Alcotest.(check bool) "the digest has a signed reasoning prefix" true (Option.is_some (prefix [ stale ]));
+  Alcotest.(check bool)
+    "the digest covers the same sanitized messages that are transmitted"
+    true
+    (prefix [ stale ] = prefix [ fallback ])
+;;
+
 let () =
   let open Alcotest in
   run
@@ -2467,6 +2589,14 @@ let () =
             "short prompt preserves opt-in"
             `Quick
             test_cache_short_prompt_preserves_opt_in
+        ] )
+    ; ( "tool_reference"
+      , [ test_case "Anthropic emits a tool reference" `Quick test_anthropic_tool_reference_result
+        ; test_case "Kimi falls back to result text" `Quick test_kimi_tool_reference_falls_back_to_text
+        ; test_case "stale reference falls back to text" `Quick test_anthropic_stale_reference_falls_back_to_text
+        ; test_case "unsupported reference falls back to text" `Quick test_anthropic_unsupported_reference_falls_back_to_text
+        ; test_case "reference projection precedes the prefix digest" `Quick
+            test_anthropic_reference_projection_precedes_prefix_digest
         ] )
     ]
 ;;

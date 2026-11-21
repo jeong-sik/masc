@@ -126,6 +126,8 @@ let text_of_content (block : Agent_core.Types.content_block) =
          (Agent_core.Types.tool_result_outcome_is_error outcome))
   | Agent_core.Types.ToolUse { id; name; _ } ->
     Some (Printf.sprintf "[tool use omitted: id=%s name=%s]" id name)
+  | Agent_core.Types.ToolReference { tool_name } ->
+    Some (Printf.sprintf "[tool reference omitted: name=%s]" tool_name)
   | Agent_core.Types.Text s -> trim_nonempty s
   | Agent_core.Types.Thinking _
   | Agent_core.Types.ReasoningDetails _

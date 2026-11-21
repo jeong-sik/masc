@@ -24,7 +24,7 @@ let calls_of (message : Agent_core.Types.message) =
               { id = tool_use_id; name = measured_call_name; input = `Assoc [] })
        | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
        | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-       | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+       | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
        | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
     message.content
 ;;

@@ -50,7 +50,7 @@ let text_blocks (messages : Agent_core.Types.message list) =
            | Agent_core.Types.ReasoningDetails _
            | Agent_core.Types.RedactedThinking _
            | Agent_core.Types.ToolUse _
-           | Agent_core.Types.ToolResult _
+           | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolReference _
            | Agent_core.Types.Image _
            | Agent_core.Types.Document _
            | Agent_core.Types.Audio _ -> None)

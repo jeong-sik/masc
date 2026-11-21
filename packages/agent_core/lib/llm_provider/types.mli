@@ -375,6 +375,7 @@ type 'source content_block_with =
             providers that accept an array tool_result content serialize the
             blocks; [content] stays the canonical string fallback. *)
       }
+  | ToolReference of { tool_name : string }
   | Image of
       { media_type : string
       ; source : 'source

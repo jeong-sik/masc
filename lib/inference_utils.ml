@@ -150,6 +150,7 @@ let rec sanitize_content_blocks_utf8
                 content_blocks;
               }
         | Agent_core.Types.Thinking _ | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolReference _
         | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> block
       in
       let sanitized_rest = sanitize_content_blocks_utf8 rest in

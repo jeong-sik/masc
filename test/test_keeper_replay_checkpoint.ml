@@ -185,7 +185,7 @@ let test_finalization_preserves_reasoning_source_through_restore () =
           ~assistant_has_payload:(fun content -> content <> [])
           ~reasoning_block_supported:(function
             | Llm_provider.Types.Thinking _ | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ReasoningDetails _ -> true
-            | Llm_provider.Types.Text _ | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Image _
+            | Llm_provider.Types.Text _ | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _ | Llm_provider.Types.ToolReference _ | Llm_provider.Types.Image _
             | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> false)
           ~replay_capability
           (Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ())

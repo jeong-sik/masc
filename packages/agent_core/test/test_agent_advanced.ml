@@ -143,6 +143,7 @@ let messages_contain_text expected messages =
            | Types.RedactedThinking _
            | Types.ToolUse _
            | Types.ToolResult _
+           | Types.ToolReference _
            | Types.Image _
            | Types.Document _
            | Types.Audio _ -> false)

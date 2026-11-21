@@ -286,6 +286,7 @@ type 'source content_block_with =
                         providers that accept an array tool_result content serialize
                         the blocks; [content] stays the canonical string fallback. *)
       }
+  | ToolReference of { tool_name : string }
   | Image of
       { media_type : string
       ; source : 'source
@@ -770,6 +771,7 @@ module Message_value_with = struct
     | ToolUse { id; name; _ } -> mix (mix 5 (string_hint id)) (string_hint name)
     | ToolResult { tool_use_id; content; _ } ->
       mix (mix 6 (string_hint tool_use_id)) (string_hint content)
+    | ToolReference { tool_name } -> mix 10 (string_hint tool_name)
     | Image { source; _ } -> mix 7 (source_hint source)
     | Document { source; _ } -> mix 8 (source_hint source)
     | Audio { source; _ } -> mix 9 (source_hint source)
@@ -1044,12 +1046,12 @@ module Inline_content_replay = struct
           | Thinking {content; signature=None} ->
             collect index (Inline_reasoning_split.Reasoning content :: pieces) rest
           | Thinking {signature=Some _;_} | ReasoningDetails _ | RedactedThinking _
-          | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ ->
+          | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ ->
             Error "inline_content_replay:invalid_content_kind"
     in
     let covered = List.for_all (fun (index, block) -> match block with
       | Text _ -> List.mem index block_indices
-      | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ -> true
+      | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ -> true
       | ToolResult _ | Image _ | Document _ | Audio _ -> false)
         (List.mapi (fun index block -> index,block) content) in
     if covered then collect (-1) [] block_indices
@@ -1133,7 +1135,7 @@ module Response_replay = struct
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ ->
       (match kind with Reasoning -> true | Message _ | Function_call -> false)
     | ToolUse _ -> (match kind with Function_call -> true | Message _ | Reasoning -> false)
-    | ToolResult _ | Image _ | Document _ | Audio _ -> false
+    | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false
   ;;
 
   let partition ~content groups =
@@ -1406,7 +1408,7 @@ let content_has_reasoning_artifact content =
   List.exists
     (function
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
-      | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+      | Text _ | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
     content
 ;;
 
@@ -1416,7 +1418,7 @@ let rec content_has_image content =
       | Image _ -> true
       | ToolResult { content_blocks = Some blocks; _ } -> content_has_image blocks
       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-      | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> false)
+      | ToolReference _ | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> false)
     content
 ;;
 
@@ -1761,8 +1763,8 @@ let validate_tool_result_shape
         Error
           (Expected_object_or_array
              "ToolResult JSON is neither an object nor an array"))
-  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
-  | Audio _ -> Ok ()
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _
+  | Document _ | Audio _ -> Ok ()
 ;;
 
 (** Extract text from content blocks, concatenating with newlines.
@@ -1772,8 +1774,8 @@ let text_of_content content =
   |> List.filter_map (function
     | Text s -> Some s
     | ToolResult { content; _ } -> Some content
-    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
-    | Audio _ -> None)
+    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _
+    | Document _ | Audio _ -> None)
   |> String.concat "\n"
 ;;
 
@@ -1795,6 +1797,7 @@ let visible_text_of_content content =
     | ReasoningDetails _
     | RedactedThinking _
     | ToolUse _
+    | ToolReference _
     | ToolResult _
     | Image _
     | Document _

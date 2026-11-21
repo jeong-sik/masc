@@ -1973,7 +1973,7 @@ let project_input_for_attempt
                   (function
                     | Agent_core.Types.Text text ->
                       Agent_core.Types.Text (Llm_provider.Utf8_sanitize.sanitize text)
-                    | (Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) as block -> block)
+                    | (Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) as block -> block)
                   blocks)
            in
            Keeper_replay_prefix.media_degraded_with_current_input
@@ -2031,7 +2031,7 @@ let prepare_request_images ~eager_images ~project_images messages =
       | Image { media_type; source } -> Request_image_map.add (media_type, source) () keys
       | ToolResult { content_blocks = Some nested; _ } -> collect_eager keys nested
       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-      | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> keys)
+      | ToolReference _ | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> keys)
       keys blocks
   in
   let eager = collect_eager Request_image_map.empty eager_images in
@@ -2051,7 +2051,7 @@ let prepare_request_images ~eager_images ~project_images messages =
           Request_image_map.add key projected.Keeper_vision_ingest.blocks images
       | ToolResult { content_blocks = Some nested; _ } -> capture images nested
       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-      | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> images)
+      | ToolReference _ | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> images)
       images blocks
   in
   List.fold_left (fun images (message : Agent_core.Types.message) ->
@@ -2076,7 +2076,7 @@ let project_prepared_request_images images blocks =
            project (Agent_core.Types.ToolResult
              { result with content_blocks = Some content_blocks } :: reversed) rest)
       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-      | ToolResult { content_blocks = None; _ } | Document _ | Audio _ ->
+      | ToolReference _ | ToolResult { content_blocks = None; _ } | Document _ | Audio _ ->
         project (block :: reversed) rest
   in
   project [] blocks
@@ -3074,14 +3074,15 @@ let run_named
         , Keeper_provider_attempt_effect.No_effect_observed
         , Keeper_attempt_dispatch.Rejected_before_dispatch )
       | Resolved_runtime runtime ->
-      let accepts_image_input, tools, agent_core_tools, loading_plan =
+      let accepts_image_input, tools, agent_core_tools, loading_plan, native_loader_present =
         match project_for_runtime with
         | Some (_ : Keeper_tools_agent_core.model_tool_projection)
           when not masc_tools_enabled ->
           ( Runtime_agent.runtime_accepts_image_input ~runtime
           , []
           , []
-          , Keeper_official_client_host.All_on_demand )
+          , Keeper_official_client_host.All_on_demand
+          , false )
         | Some (project : Keeper_tools_agent_core.model_tool_projection) ->
           let carried = match agent_ref with
             | None -> []
@@ -3092,9 +3093,15 @@ let run_named
           let accepts_image_input = match view.image_admission with
             | Keeper_tools_agent_core.Image_input_admitted -> true
             | Image_input_unavailable -> false in
+          let loader_present =
+            match view.Keeper_tools_agent_core.listing with
+            | Keeper_tools_agent_core.Listing _ -> true
+            | Keeper_tools_agent_core.No_listing -> false
+          in
           accepts_image_input, view.tools, view.agent_core_tools,
           Keeper_official_client_host.Declared {
-            on_demand=view.on_demand_tool_names;result_bounds=view.result_bounds}
+            on_demand=view.on_demand_tool_names;result_bounds=view.result_bounds},
+          loader_present
         | None ->
           let tools_on_wire = match runtime.Runtime_instance.execution, agent_ref with
             | Runtime_execution.Agent_core _, Some agent_cell ->
@@ -3102,7 +3109,7 @@ let run_named
             | (Runtime_execution.Agent_core _, None)
             | ((Runtime_execution.Codex_app_server _ | Antigravity_cli _
                 | Claude_code _ | Muse_serve _ | Vibe_cli _), _) -> agent_core_tools in
-          Runtime_agent.runtime_accepts_image_input ~runtime, tools, tools_on_wire, loading_plan
+          Runtime_agent.runtime_accepts_image_input ~runtime, tools, tools_on_wire, loading_plan, false
       in
       (* Freeze admission with this selected candidate, including tools loaded
          later in the loop. A text-only attempt can recover through the explicit
@@ -3569,6 +3576,7 @@ let run_named
                    | Llm_provider.Types.RedactedThinking _
                    | Llm_provider.Types.ToolUse _
                    | Llm_provider.Types.ToolResult _
+                   | Llm_provider.Types.ToolReference _
                    | Llm_provider.Types.Image _
                    | Llm_provider.Types.Document _
                    | Llm_provider.Types.Audio _ )
@@ -4139,6 +4147,12 @@ let run_named
                  deferring anything, so this lane sends every tool too --
                  which is what every caller did before the listing existed. *)
               tools = agent_core_tools
+            ; deferred_tools =
+                Keeper_agent_tool_surface.deferred_for_native
+                  ~supports:(Llm_provider.Provider_config.supports_deferred_tool_loading provider_config)
+                  ~loader_present:native_loader_present
+                  ~full_tools:tools
+                  ~callable_tools:agent_core_tools
             ; initial_messages
             ; model_input_projection
             ; (* Keeper policy knobs, injected from the resolved layer like

@@ -183,6 +183,7 @@ let parse_response json =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolResult _
+        | ToolReference _
         | Image _
         | Document _
         | Audio _ -> false)
@@ -431,6 +432,7 @@ let project_history ?(tools_present = false) config messages =
       | ReasoningDetails _
       | Text _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Document _
@@ -469,6 +471,7 @@ let rec anthropic_content_block_to_json = function
   | ToolUse { id; name; input } ->
     Api_common.content_block_to_json
       (ToolUse { id = Tool_call_id_wire.wire_id_for_anthropic id; name; input })
+  | ToolReference _ as block -> Api_common.content_block_to_json block
   | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ } ->
     `Assoc
       [ "type", `String "tool_result"
@@ -485,7 +488,7 @@ let rec anthropic_content_block_to_json = function
   | ( Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | Audio _ ) as block
     -> Api_common.content_block_to_json block
 and anthropic_tool_result_content_block_to_json = function
-  | (Text _ | Image _ | Document _) as block -> anthropic_content_block_to_json block
+  | (Text _ | ToolReference _ | Image _ | Document _) as block -> anthropic_content_block_to_json block
   | (Thinking _ | ReasoningDetails _ | RedactedThinking _
     | ToolUse _ | ToolResult _ | Audio _) as block ->
     (* Tool output is data, not a nested assistant turn. Messages accepts
@@ -508,6 +511,40 @@ let anthropic_message_to_json ~policy (msg : message) =
   `Assoc
     (Message_origin_lowering.anthropic_message_header policy msg
      @ ["content", `List (List.map anthropic_content_block_to_json msg.content)])
+;;
+
+let project_tool_references ~config ~tools messages =
+  let supports = Provider_config.supports_deferred_tool_loading config in
+  let catalog_names =
+    List.filter_map
+      (fun tool ->
+         tool
+         |> Yojson.Safe.Util.member "name"
+         |> Yojson.Safe.Util.to_string_option)
+      tools
+  in
+  let valid_name name = supports && List.mem name catalog_names in
+  let rec project_block = function
+    | ToolReference { tool_name } as block -> if valid_name tool_name then Some block else None
+    | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
+      let blocks = List.filter_map project_block blocks in
+      (match blocks with
+       | [] -> Some (ToolResult { result with content_blocks = None })
+       | _ :: _ -> Some (ToolResult { result with content_blocks = Some blocks }))
+    | ToolResult { content_blocks = None; _ } as block -> Some block
+    | ( Text _
+      | Thinking _
+      | ReasoningDetails _
+      | RedactedThinking _
+      | ToolUse _
+      | Image _
+      | Document _
+      | Audio _ ) as block -> Some block
+  in
+  List.map
+    (fun (message : message) ->
+       { message with content = List.filter_map project_block message.content })
+    messages
 ;;
 
 (* The Anthropic Messages API rejects a tool whose input_schema carries a
@@ -575,6 +612,30 @@ let project_tools_for_kind kind tools =
   | Provider_config.Ollama
   | Provider_config.Gemini
   | Provider_config.Glm -> tools
+;;
+
+let tool_is_deferred = function
+  | `Assoc fields ->
+    (match List.assoc_opt "defer_loading" fields with
+     | Some (`Bool true) -> true
+     | Some _ | None -> false)
+  | _ -> false
+;;
+
+let add_cache_control_to_last_non_deferred cache_control tools =
+  let rec visit = function
+    | [] ->
+      invalid_arg
+        "Backend_anthropic.build_request: at least one tool must have defer_loading=false"
+    | tool :: rest ->
+      if tool_is_deferred tool
+      then visit rest
+      else
+        (match tool with
+         | `Assoc fields -> `Assoc (("cache_control", cache_control) :: fields) :: rest
+         | other -> other :: rest)
+  in
+  List.rev (visit (List.rev tools))
 ;;
 
 (* The request head the prefix digest chains from. This models the API's own
@@ -671,6 +732,7 @@ let observe_spent_context_lowered ~stage ~before ~after =
    lowers away after the fold, in the wrapper below and at the serializer's
    own boundary, so every reader sees the transcript the wire sends (#49549). *)
 let merged_prefix_history ~policy ~tools (config : Provider_config.t) projected_messages =
+  let projected_messages = project_tool_references ~config ~tools projected_messages in
   let lowered =
     Message_origin_lowering.drop_expired_turn_scoped_contexts policy projected_messages
   in
@@ -844,6 +906,7 @@ let build_request_payload
    | Ok () -> ()
    | Error error ->
      invalid_arg ("Backend_anthropic.build_request: " ^ Message_origin_lowering.error_to_string error));
+  let messages = lowered in
   (match config.kind, caps.supports_assistant_prefill, List.rev messages with
    | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->
      invalid_arg
@@ -995,22 +1058,15 @@ let build_request_payload
     | [] -> body
     | ts ->
       let ts = project_tools_for_kind config.kind ts in
+      let () =
+        if List.exists tool_is_deferred ts && List.for_all tool_is_deferred ts
+        then
+          invalid_arg
+            "Backend_anthropic.build_request: at least one tool must have defer_loading=false"
+      in
       if config.cache_system_prompt
       then (
-        (* Add cache_control to last tool for extended cache prefix *)
-        let ts_with_cache =
-          (* ts is non-empty (outer match guarantees), safe to destructure *)
-          let rev = List.rev ts in
-          let last = List.hd rev
-          and rest = List.tl rev in
-          let last_with_cache =
-            match last with
-            | `Assoc fields ->
-              `Assoc (("cache_control", cache_control_json) :: fields)
-            | other -> other
-          in
-          List.rev (last_with_cache :: rest)
-        in
+        let ts_with_cache = add_cache_control_to_last_non_deferred cache_control_json ts in
         ("tools", `List ts_with_cache) :: body)
       else ("tools", `List ts) :: body
   in

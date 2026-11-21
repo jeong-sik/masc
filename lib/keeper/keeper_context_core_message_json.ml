@@ -26,7 +26,7 @@ let content_block_to_history_json (block : Agent_core.Types.content_block) =
   | Agent_core.Types.ToolResult { json = None; _ }, _
   | ( ( Agent_core.Types.Text _ | Agent_core.Types.Thinking _
       | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-      | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+      | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
       | Agent_core.Types.Document _ | Agent_core.Types.Audio _ ),
       _ ) -> json
 
@@ -44,13 +44,13 @@ let content_block_of_history_json (json : Yojson.Safe.t) =
   | Ok
       (( Agent_core.Types.Text _ | Agent_core.Types.Thinking _
        | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-       | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+       | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
        | Agent_core.Types.Document _ | Agent_core.Types.Audio _ ) as block),
     None -> Some block
   | Ok
       ( Agent_core.Types.Text _ | Agent_core.Types.Thinking _
       | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-      | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+      | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
       | Agent_core.Types.Document _ | Agent_core.Types.Audio _ ),
     Some _
   | Error _, _ -> None
@@ -92,7 +92,7 @@ let message_to_json (m : Agent_core.Types.message) : Yojson.Safe.t =
                 | Agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
                 | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
                 | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-                | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+                | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
                 | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
               m.content
         (* Non-Tool roles never own a tool_call_id. *)

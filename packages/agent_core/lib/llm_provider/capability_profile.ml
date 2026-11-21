@@ -253,6 +253,7 @@ type capabilities =
   ; supports_prompt_caching : bool
   ; prompt_cache_wire : prompt_cache_wire
   ; supports_explicit_cache_opt_out : bool
+  ; supports_deferred_tool_loading : bool
   ; (* ── Sampling parameters ───────────────────────────── *)
     supports_top_k : bool
   ; supports_min_p : bool
@@ -314,6 +315,7 @@ let default_capabilities =
   ; supports_prompt_caching = false
   ; prompt_cache_wire = No_prompt_cache_wire
   ; supports_explicit_cache_opt_out = false
+  ; supports_deferred_tool_loading = false
   ; supports_top_k = false
   ; supports_min_p = false
   ; supports_seed = false

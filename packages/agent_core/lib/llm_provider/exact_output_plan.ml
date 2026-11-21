@@ -225,6 +225,7 @@ let[@warning "-32"] normalization_error_name = function
 
 let content_uses_exact_cross_feature = function
   | Types.ToolUse _
+  | Types.ToolReference _
   | Types.ToolResult _
   | Types.Thinking _
   | Types.ReasoningDetails _
@@ -316,6 +317,7 @@ let rec content_capability_rejection capabilities = function
     | Types.ReasoningDetails _
     | Types.RedactedThinking _
     | Types.ToolUse _
+    | Types.ToolReference _
     | Types.ToolResult _
     | Types.Image _
     | Types.Document _ )
@@ -708,6 +710,7 @@ let structured_text content =
     | (Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _) :: rest ->
       loop texts rest
     | ( Types.ToolUse _
+      | Types.ToolReference _
       | Types.ToolResult _
       | Types.Image _
       | Types.Document _

@@ -215,7 +215,7 @@ let rec block_json block =
   let parsed_json, children = match block with
     | Llm_provider.Types.ToolResult {json; content_blocks; _} -> json, content_blocks
     | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-    | ToolUse _ | Image _ | Document _ | Audio _ -> None, None in
+    | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ -> None, None in
   `Assoc ["checkpoint", checkpoint; "tool_result_json", option_json Fun.id parsed_json;
           "children", option_json (fun blocks -> `List (List.map block_json blocks)) children]
 
@@ -230,7 +230,7 @@ let rec block_of_json json =
     require (Option.is_some result.content_blocks = Option.is_some children) "content sidecar shape mismatch";
     Llm_provider.Types.ToolResult {result with json = parsed_json; content_blocks = children}
   | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-  | ToolUse _ | Image _ | Document _ | Audio _ ->
+  | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ ->
     require (parsed_json = None && children = None) "sidecar on non-result content"; block in
   let encoded = block_json restored in
   require (canonical_equal encoded json) "checkpoint/sidecar content identity mismatch";

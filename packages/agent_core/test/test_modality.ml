@@ -14,6 +14,7 @@ let block_kind = function
   | Types.RedactedThinking _ -> "RedactedThinking"
   | Types.ToolUse _ -> "ToolUse"
   | Types.ToolResult _ -> "ToolResult"
+  | Types.ToolReference _ -> "ToolReference"
 ;;
 
 let kinds bs = List.map block_kind bs

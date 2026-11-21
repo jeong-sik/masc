@@ -824,6 +824,16 @@ let resume
   in
   Log.debug _log "checkpoint resume admitted"
     [Log.S ("binding_disposition", Agent_checkpoint.binding_disposition_to_string binding_disposition)];
+  let eager_tools =
+    Tool_set.of_list
+      (List.filter
+         (fun (tool : Tool.t) ->
+            not
+              (List.exists
+                 (fun (deferred : Tool.t) -> String.equal tool.schema.name deferred.schema.name)
+                 options.deferred_tools))
+         tools)
+  in
   (match binding_disposition with
    | Agent_checkpoint.Rebound_pending_dispatch exclusion ->
      record_reasoning_replay_exclusion exclusion
@@ -835,6 +845,7 @@ let resume
   ; lifecycle = None
   ; pending_input = checkpoint.pending_input
   ; tools = Tool_set.of_list tools
+  ; eager_tools
   ; net
   ; context = ctx
   ; options = {options with provider_config}

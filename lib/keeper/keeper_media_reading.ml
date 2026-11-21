@@ -605,6 +605,7 @@ let project_with ~read_stored ~needs_projection blocks =
     | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
     | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
     | Agent_core.Types.ToolUse _
+    | Agent_core.Types.ToolReference _
     | Agent_core.Types.ToolResult { content_blocks = None; _ }
     | Agent_core.Types.Image _ -> Ok block
   and project_blocks acc = function
@@ -671,7 +672,7 @@ let prepare ?source_reader projector ~needs_projection bundle =
     | ToolResult { content_blocks = Some nested; _ } ->
       List.fold_left prepare_block outcomes nested
     | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-    | ToolResult { content_blocks = None; _ } | Image _ -> outcomes
+    | ToolReference _ | ToolResult { content_blocks = None; _ } | Image _ -> outcomes
   in
   let outcomes = List.fold_left (List.fold_left prepare_block) Prepared_sources.empty bundle in
   { audio; document; outcomes }

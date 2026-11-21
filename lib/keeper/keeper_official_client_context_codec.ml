@@ -67,6 +67,7 @@ let rec content_block_to_json = function
        @ failure)
   (* Media by reference, in the history codec's shape: a [Stored] source
      names the blob, it does not carry it. *)
+  | ToolReference _ as block -> Agent_core.History.content_block_to_json block
   | (Image _ | Document _ | Audio _) as block -> Agent_core.History.content_block_to_json block
 ;;
 

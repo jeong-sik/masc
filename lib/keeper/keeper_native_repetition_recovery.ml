@@ -50,7 +50,7 @@ let observation ?base_path (settled : Projection.settled_tool_invocation) =
             fingerprints) |> repetition in
       Ok (Some observation)
   | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-  | ToolUse _ | Image _ | Document _ | Audio _ -> Error Invalid_settled_result
+  | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ -> Error Invalid_settled_result
 
 let remove_once expected observations =
   let rec remove earlier = function

@@ -75,6 +75,27 @@ let isolate_ambient_runtime_sources () =
   Model_catalog_test_support.install_embedded_model_catalog ~suite:"Capabilities"
 ;;
 
+let test_deferred_tool_loading_capability () =
+  let supports kind provider_id model_id =
+    Provider_config.make ~kind ~provider_id ~model_id ~base_url:"" ()
+    |> Provider_config.supports_deferred_tool_loading
+  in
+  List.iter
+    (fun (model_id, expected) ->
+       check bool (model_id ^ " native deferred loading") expected (supports Provider_config.Anthropic "claude" model_id))
+    [ "claude-haiku-5-5", true
+    ; "claude-sonnet-5-5", true
+    ; "claude-sonnet-5", true
+    ; "claude-opus-5-5", true
+    ; "claude_code", false
+    ; "m", false
+    ];
+  check bool
+    "Kimi never inherits the Anthropic-only contract"
+    false
+    (supports Provider_config.Kimi "kimi" "kimi-for-coding")
+;;
+
 (* ── Default capabilities ────────────────────────────── *)
 
 let test_default_no_limits () =
@@ -3340,6 +3361,8 @@ let () =
       , [ test_case "no limits" `Quick test_default_no_limits
         ; test_case "new fields false" `Quick test_default_new_fields_false
         ] )
+    ; ( "deferred_tool_loading"
+      , [ test_case "catalog and provider gates" `Quick test_deferred_tool_loading_capability ] )
     ; ( "presets"
       , [ test_case "anthropic" `Quick test_anthropic_capabilities
         ; test_case "openai" `Quick test_openai_capabilities

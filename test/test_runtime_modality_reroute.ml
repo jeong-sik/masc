@@ -377,7 +377,7 @@ let tool_result_blocks = function
   | Agent_core.Types.ToolUse _
   | Agent_core.Types.Image _
   | Agent_core.Types.Document _
-  | Agent_core.Types.Audio _ -> fail "expected a ToolResult carrying blocks"
+  | Agent_core.Types.ToolReference _ | Agent_core.Types.Audio _ -> fail "expected a ToolResult carrying blocks"
 
 (* The keeper "analyst" died for four days on this shape. A tool result carrying
    an image made [required_modalities_of_content_blocks] report [image], so the
@@ -478,7 +478,7 @@ let tool_result_fields = function
   | Agent_core.Types.ToolUse _
   | Agent_core.Types.Image _
   | Agent_core.Types.Document _
-  | Agent_core.Types.Audio _ -> fail "expected a ToolResult"
+  | Agent_core.Types.ToolReference _ | Agent_core.Types.Audio _ -> fail "expected a ToolResult"
 
 let only_tool_result_fields = function
   | [ block ] -> tool_result_fields block

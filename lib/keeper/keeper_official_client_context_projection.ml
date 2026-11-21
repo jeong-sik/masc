@@ -33,7 +33,7 @@ let text_and_images_of_blocks ~media_store ~runtime_label ~field blocks =
               (runtime_label ^ " image projection admits stored sources only")))
     | Agent_core.Types.(
         Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolResult _ | Document _ | Audio _)
+        | ToolReference _ | ToolResult _ | Document _ | Audio _)
       :: _ ->
       Error
         (config_error
@@ -49,7 +49,7 @@ let text_of_blocks ~runtime_label ~field blocks =
     | Agent_core.Types.Text text :: rest -> loop (text :: texts) rest
     | Agent_core.Types.(
         Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolResult _ | Document _ | Image _ | Audio _)
+        | ToolReference _ | ToolResult _ | Document _ | Image _ | Audio _)
       :: _ ->
       Error
         (config_error
@@ -176,7 +176,7 @@ let carrier_text (message : Agent_core.Types.message) =
     ( []
     | [ Agent_core.Types.(
           Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-          | ToolResult _ | Document _ | Image _ | Audio _) ]
+          | ToolReference _ | ToolResult _ | Document _ | Image _ | Audio _) ]
     | _ :: _ :: _ )
   | Agent_core.Types.(
       Conversation | Historical_system_context | Recovery_instruction
@@ -488,7 +488,7 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
         ( []
         | [ Agent_core.Types.(
               Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-              | ToolResult _ | Document _ | Image _ | Audio _) ]
+              | ToolReference _ | ToolResult _ | Document _ | Image _ | Audio _) ]
         | _ :: _ :: _ )
       | None, _ -> None
     in
@@ -612,7 +612,7 @@ let block_text item =
   | []
   | [ Agent_core.Types.(
         Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolResult _ | Document _ | Image _ | Audio _) ]
+        | ToolReference _ | ToolResult _ | Document _ | Image _ | Audio _) ]
   | _ :: _ :: _ -> None
 ;;
 
@@ -1038,7 +1038,7 @@ let last_tool_results messages =
                Some { Agent_core.Hooks.tool_use_id; content; outcome; content_blocks }
              | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
              | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-             | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+             | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
              | Agent_core.Types.Audio _ -> None)
            message.content)
     | System | User | Assistant -> None)

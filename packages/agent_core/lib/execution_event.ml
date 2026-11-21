@@ -42,7 +42,7 @@ let classify_content_block (block : Llm_provider.Types.content_block) =
   | ReasoningDetails _ -> Output_content Reasoning_details_block
   | RedactedThinking _ -> Output_content Redacted_thinking_block
   | ToolUse _ -> Tool_use_content
-  | ToolResult _ -> Tool_result_content
+  | ToolReference _ | ToolResult _ -> Tool_result_content
   | Image _ -> Output_content Image_block
   | Document _ -> Output_content Document_block
   | Audio _ -> Output_content Audio_block
@@ -307,6 +307,7 @@ let validate_content_block block =
   let* (_ : content_block) = durable_content_of_yojson json in
   match block with
   | ToolUse { id = _; name; _ } -> validate_non_blank "tool-use name" name
+  | ToolReference { tool_name } -> validate_non_blank "tool-reference tool_name" tool_name
   | ToolResult { tool_use_id = _; _ } -> Ok ()
   | Text _
   | Thinking _

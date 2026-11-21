@@ -17,7 +17,7 @@ let all_admitted_snapshot (response : Llm_provider.Types.api_response)
          (function
            | Llm_provider.Types.ToolUse _ -> true
            | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-           | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+           | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> false)
          response.content)
   in
   { Agent_core__.Execution_provider_response_snapshot.response

@@ -1315,7 +1315,7 @@ let test_finalize_unreadable_call_keeps_its_readable_siblings () =
         (function
           | ToolUse { id; _ } -> Some id
           | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolResult _
-          | Image _ | Document _ | Audio _ -> None)
+          | ToolReference _ | Image _ | Document _ | Audio _ -> None)
         response.content
     in
     Alcotest.(check (list string)) "readable calls" [ "c0"; "c1" ] runnable;

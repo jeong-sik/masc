@@ -696,6 +696,7 @@ let restored_tool_uses (response : Agent_core.Types.api_response) =
        | Llm_provider.Types.ReasoningDetails _
        | Llm_provider.Types.RedactedThinking _
        | Llm_provider.Types.ToolResult _
+       | Llm_provider.Types.ToolReference _
        | Llm_provider.Types.Image _
        | Llm_provider.Types.Document _
        | Llm_provider.Types.Audio _ -> None)

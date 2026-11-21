@@ -801,7 +801,7 @@ let%test "parse_openai_response_result list content" =
          | ReasoningDetails _
          | RedactedThinking _
          | ToolUse _
-         | ToolResult _
+         | ToolReference _ | ToolResult _
          | Image _
          | Document _
          | Audio _ )
@@ -841,7 +841,7 @@ let%test "parse_openai_response_result list content with assoc text blocks" =
          | ReasoningDetails _
          | RedactedThinking _
          | ToolUse _
-         | ToolResult _
+         | ToolReference _ | ToolResult _
          | Image _
          | Document _
          | Audio _ )
@@ -882,7 +882,7 @@ let%test "parse_openai_response_result with reasoning_content" =
          | ReasoningDetails _
          | RedactedThinking _
          | ToolUse _
-         | ToolResult _
+         | ToolReference _ | ToolResult _
          | Image _
          | Document _
          | Audio _ -> false)

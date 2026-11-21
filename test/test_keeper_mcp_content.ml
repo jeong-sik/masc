@@ -38,12 +38,13 @@ let kind = function
   | P.Audio _ -> "audio"
   | P.Document _ -> "document"
   | P.Thinking _ | P.RedactedThinking _ | P.ReasoningDetails _ -> "reasoning"
+  | P.ToolReference _ -> "tool_reference"
   | P.ToolUse _ | P.ToolResult _ -> "tool"
 
 let text_blocks values = List.filter_map (function
   | P.Text text -> Some text
   | P.Image _ | P.Audio _ | P.Document _ | P.Thinking _ | P.RedactedThinking _
-  | P.ReasoningDetails _ | P.ToolUse _ | P.ToolResult _ -> None) values
+  | P.ReasoningDetails _ | P.ToolUse _ | P.ToolReference _ | P.ToolResult _ -> None) values
 
 let media_payload = function
   | P.Image { media_type; source = P.Base64 data }
@@ -53,7 +54,7 @@ let media_payload = function
   | P.Audio { source = (P.Url _ | P.File_id _); _ }
   | P.Document { source = (P.Url _ | P.File_id _); _ }
   | P.Text _ | P.Thinking _ | P.RedactedThinking _ | P.ReasoningDetails _
-  | P.ToolUse _ | P.ToolResult _ -> fail "expected a native base64 media block"
+  | P.ToolUse _ | P.ToolReference _ | P.ToolResult _ -> fail "expected a native base64 media block"
 
 let check_refused raw = match Keeper_mcp_content.project raw with
   | Error _ -> ()

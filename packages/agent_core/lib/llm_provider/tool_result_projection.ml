@@ -84,6 +84,8 @@ let assistant_message_content blocks =
               { tool_use_id = id; first_name; conflicting_name = name }))
     | (ToolResult { tool_use_id; _ } as _block) :: _ ->
       Error (Invalid_tool_result_role { tool_use_id; role = Assistant })
+    | ToolReference { tool_name } :: _ ->
+      Error (Invalid_tool_result_role { tool_use_id = tool_name; role = Assistant })
     | (( Text _
        | Thinking _
        | ReasoningDetails _
@@ -102,6 +104,8 @@ let plain_message_content ~role blocks =
     | ToolUse { id; _ } :: _ -> Error (Invalid_tool_use_role { tool_use_id = id; role })
     | ToolResult { tool_use_id; _ } :: _ ->
       Error (Invalid_tool_result_role { tool_use_id; role })
+    | ToolReference { tool_name } :: _ ->
+      Error (Invalid_tool_result_role { tool_use_id = tool_name; role })
     | (( Text _
        | Thinking _
        | ReasoningDetails _
@@ -119,6 +123,8 @@ let tool_message_content active blocks =
     | [] -> Ok ((if saw_result then active else None), List.rev resolved)
     | ToolUse { id; _ } :: _ ->
       Error (Invalid_tool_use_role { tool_use_id = id; role = Tool })
+    | ToolReference { tool_name } :: _ ->
+      Error (Invalid_tool_result_role { tool_use_id = tool_name; role = Tool })
     | (ToolResult { tool_use_id; _ } as block) :: rest ->
       (match active with
        | None -> Error (Missing_tool_use_id { tool_use_id })
@@ -194,7 +200,7 @@ let rec media_parts = function
   | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ } ->
     result_label tool_use_id outcome :: List.concat_map media_parts blocks
   | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-    | ToolResult { content_blocks = None; _ }) as block ->
+    | ToolReference _ | ToolResult { content_blocks = None; _ }) as block ->
     [ Text (Yojson.Safe.to_string (Api_common.content_block_to_json block)) ]
 ;;
 
@@ -224,6 +230,7 @@ let with_image_followups messages =
                | ReasoningDetails _
                | RedactedThinking _
                | ToolUse _
+               | ToolReference _
                | ToolResult _
                | Image _
                | Document _

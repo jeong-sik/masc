@@ -55,6 +55,7 @@ type serialization_executor = { run : 'a. (unit -> 'a) -> 'a }
 
 type options =
   { provider_config : Llm_provider.Provider_config.t option
+  ; deferred_tools : Tool.t list
   ; reasoning_source_change : Llm_provider.Reasoning_history_projection.source_change_policy
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
@@ -130,6 +131,7 @@ type lifecycle_snapshot = Agent_lifecycle.lifecycle_snapshot =
 
 let default_options =
   { provider_config = None
+  ; deferred_tools = []
   ; reasoning_source_change = Llm_provider.Reasoning_history_projection.Reject_incompatible
   ; stream_idle_timeout_s = None
   ; first_event_timeout_s = None
@@ -159,10 +161,11 @@ type t =
   ; mutable lifecycle : lifecycle_snapshot option
   ; mutable pending_input : Agent_input_request.pending option
   ; mutable tools : Tool_set.t
-      (** Widened during a turn by {!extend_tools} and never narrowed. A
-          deferred tool surface hands the model an index and supplies the
-          schema when it is asked for, so the set this agent can call is not
-          known when the turn starts. *)
+      (** Callable tools for the selected request. Widened by {!extend_tools};
+          native reference placement can narrow it again when that request's
+          projection drops a reference. *)
+  ; mutable eager_tools : Tool_set.t
+      (** Tools admitted independently of history references. *)
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; context : Context.t
   ; options : options
@@ -179,6 +182,7 @@ let state t = t.state
 let lifecycle t = t.lifecycle
 let pending_input t = t.pending_input
 let tools t = t.tools
+let eager_tools t = t.eager_tools
 let context t = t.context
 let options t = t.options
 let provider_config t = t.options.provider_config
@@ -278,6 +282,19 @@ let extend_tools ?order t added =
           (fun (tool : Tool.t) -> not (Tool_set.mem tool.schema.name t.tools))
           added
       in
+      let fresh_eager =
+        List.filter
+          (fun (tool : Tool.t) ->
+             not
+               (List.exists
+                  (fun (deferred : Tool.t) -> String.equal tool.schema.name deferred.schema.name)
+                  t.options.deferred_tools))
+          fresh
+      in
+      (match fresh_eager with
+       | [] -> ()
+       | _ :: _ ->
+         t.eager_tools <- Tool_set.merge t.eager_tools (Tool_set.of_list fresh_eager));
       match fresh, order with
       | [], (Some _ | None) -> ()
       | _ :: _, None -> t.tools <- Tool_set.merge t.tools (Tool_set.of_list fresh)
@@ -287,6 +304,10 @@ let extend_tools ?order t added =
         let fresh = Tool_set.to_list (Tool_set.of_list fresh) in
         t.tools <-
           Tool_set.of_list (insert_ranked ~order (Tool_set.to_list t.tools) fresh))
+;;
+
+let set_request_tools t tools =
+  Eio.Mutex.use_rw ~protect:true t.mu (fun () -> t.tools <- tools)
 ;;
 
 let description t = t.options.description
@@ -402,6 +423,16 @@ let create
       ()
   =
   let all_tools = Tool_set.of_list tools in
+  let eager_tools =
+    Tool_set.of_list
+      (List.filter
+         (fun (tool : Tool.t) ->
+            not
+              (List.exists
+                 (fun (deferred : Tool.t) -> String.equal tool.schema.name deferred.schema.name)
+                 options.deferred_tools))
+         tools)
+  in
   let state =
     { config; provider_binding = None; messages = config.initial_messages; turn_count = 0; usage = empty_usage }
   in
@@ -415,6 +446,7 @@ let create
   ; lifecycle = None
   ; pending_input = None
   ; tools = all_tools
+  ; eager_tools
   ; net
   ; context = ctx
   ; options
@@ -441,6 +473,7 @@ let clone ?(copy_context = false) agent =
   ; lifecycle = agent.lifecycle
   ; pending_input = agent.pending_input
   ; tools = agent.tools
+  ; eager_tools = agent.eager_tools
   ; net = agent.net
   ; context = ctx
   ; options = agent.options

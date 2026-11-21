@@ -24,7 +24,7 @@ let msg role content : message =
 let content_has_reasoning =
   List.exists (function
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
-    | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+    | Text _ | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
 ;;
 
 let reasoning_source_for_dialect dialect =
@@ -643,7 +643,7 @@ let test_minimax_native_catalog_replay_for_model model_id =
          (member "content" replay = content);
        let visible = String.concat "\n" (List.filter_map (function Text text -> Some text
           | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
-          | Image _ | Document _ | Audio _ -> None) first.content) in
+          | ToolReference _ | Image _ | Document _ | Audio _ -> None) first.content) in
        let expected_visible = match content with
          | `String raw ->
            let split = Inline_reasoning_split.create () in
@@ -1163,7 +1163,7 @@ let test_openai_user_messages_reject_tool_result_and_drop_empty () =
                          | ToolUse _
                          | Image _
                          | Document _
-                         | Audio _ -> false)
+                         | ToolReference _ | Audio _ -> false)
                        user.content
                  })))
     [ Assistant; System ];
@@ -1512,6 +1512,7 @@ let test_serializer_ignored_block_variants () =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolUse _
+        | ToolReference _
         | Image _
         | Audio _ -> true)
       ignored_blocks
@@ -2081,7 +2082,7 @@ let test_unreadable_call_keeps_its_place_through_the_synthetic_stream () =
         (function
           | ToolUse { id; _ } -> Some id
           | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolResult _
-          | Image _ | Document _ | Audio _ -> None)
+          | ToolReference _ | Image _ | Document _ | Audio _ -> None)
         reread.content
     in
     Alcotest.(check (list string)) "readable calls" [ "c0"; "c2" ] ids;
@@ -4801,11 +4802,75 @@ let test_tool_document_audio_degrade_without_declared_capability () =
      | _ -> false)
 ;;
 
+let test_openai_tool_reference_falls_back_to_result_text () =
+  let message =
+    msg
+      Tool
+      [ ToolResult
+          { tool_use_id = "load-1"
+          ; content = "now callable:\n- masc_board_list"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks = Some [ ToolReference { tool_name = "masc_board_list" } ]
+          }
+      ]
+  in
+  match Serialize.openai_messages_of_message message with
+  | [ json ] ->
+    check_string
+      "existing result text remains"
+      "now callable:\n- masc_board_list"
+      (Yojson.Safe.Util.(json |> member "content" |> to_string))
+  | _ -> Alcotest.fail "expected one OpenAI tool message"
+;;
+
+let test_openai_responses_mixed_reference_image_falls_back_to_text () =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"mixed-reference-model"
+      ~base_url:""
+      ~max_tokens:128
+      ()
+  in
+  let message =
+    msg
+      Tool
+      [ ToolResult
+          { tool_use_id = "load-1"
+          ; content = "now callable:\n- masc_board_list"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks =
+              Some
+                [ ToolReference { tool_name = "masc_board_list" }
+                ; Image { media_type = "image/png"; source = Base64 "aGVsbG8=" }
+                ]
+          }
+      ]
+  in
+  let body = Backend_openai_responses.build_request ~config ~messages:[ message ] () in
+  let output =
+    Yojson.Safe.from_string body
+    |> Yojson.Safe.Util.member "input"
+    |> Yojson.Safe.Util.index 0
+    |> Yojson.Safe.Util.member "output"
+  in
+  Alcotest.(check string)
+    "mixed reference and image keep the canonical text"
+    "now callable:\n- masc_board_list"
+    (Yojson.Safe.Util.to_string output)
+;;
+
 let () =
   Alcotest.run
     "backend_openai_codec"
     [ ( "serialize"
-      , [ Alcotest.test_case "tool PNG followups keep parallel batch order" `Quick
+      , [ Alcotest.test_case "tool reference falls back to result text" `Quick
+            test_openai_tool_reference_falls_back_to_result_text
+        ; Alcotest.test_case "mixed reference and image falls back to result text" `Quick
+            test_openai_responses_mixed_reference_image_falls_back_to_text
+        ; Alcotest.test_case "tool PNG followups keep parallel batch order" `Quick
             test_tool_image_followups_preserve_batch_order
         ; Alcotest.test_case "Ollama tool media retains occurrence ownership" `Quick
             test_ollama_tool_media_occurrence_ownership

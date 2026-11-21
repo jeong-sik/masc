@@ -181,6 +181,7 @@ let tool_calls_to_openai_json blocks =
     | Thinking _
     | ReasoningDetails _
     | RedactedThinking _
+    | ToolReference _
     | ToolResult _
     | Image _
     | Document _
@@ -204,6 +205,7 @@ let tool_calls_to_ollama_json blocks =
     | Thinking _
     | ReasoningDetails _
     | RedactedThinking _
+    | ToolReference _
     | ToolResult _
     | Image _
     | Document _
@@ -337,7 +339,7 @@ let openai_content_parts_of_blocks blocks =
             [ "type", `String "input_audio"
             ; "input_audio", `Assoc [ "data", `String data; "format", `String format ]
             ])
-    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ ->
+    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _ ->
       None)
 ;;
 
@@ -349,6 +351,7 @@ let assistant_text_content_of_blocks blocks =
     | ReasoningDetails _
     | RedactedThinking _
     | ToolUse _
+    | ToolReference _
     | ToolResult _
     | Image _
     | Document _
@@ -368,6 +371,7 @@ let assistant_reasoning_content_of_blocks blocks =
     | Text _
     | RedactedThinking _
     | ToolUse _
+    | ToolReference _
     | ToolResult _
     | Image _
     | Document _
@@ -385,6 +389,7 @@ let assistant_reasoning_details_of_blocks blocks =
       | Thinking _
       | RedactedThinking _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Document _
@@ -411,6 +416,7 @@ let assistant_chunk_list_content_of_blocks blocks =
          | RedactedThinking _
          | Text _
          | ToolUse _
+         | ToolReference _
          | ToolResult _
          | Image _
          | Document _
@@ -427,6 +433,7 @@ let assistant_chunk_list_content_of_blocks blocks =
          | ReasoningDetails _
          | RedactedThinking _
          | ToolUse _
+         | ToolReference _
          | ToolResult _
          | Image _
          | Document _
@@ -449,6 +456,21 @@ let assistant_chunk_list_content_of_blocks blocks =
 
 let tool_result_content_string ~content ~content_blocks =
   match content_blocks with
+  | Some blocks
+    when List.exists
+           (function
+             | ToolReference _ -> true
+             | Text _
+             | Thinking _
+             | ReasoningDetails _
+             | RedactedThinking _
+             | ToolUse _
+             | ToolResult _
+             | Image _
+             | Document _
+             | Audio _ -> false)
+           blocks ->
+    Utf8_sanitize.sanitize content
   | Some blocks ->
     (* Both OpenAI and Ollama tool messages accept scalar string content.
        Preserve structured canonical results as a JSON string rather than
@@ -476,6 +498,7 @@ let openai_tool_messages_of_blocks blocks =
     | ReasoningDetails _
     | RedactedThinking _
     | ToolUse _
+    | ToolReference _
     | Image _
     | Document _
     | Audio _ -> None)
@@ -491,6 +514,7 @@ let validate_tool_result_role (msg : message) =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolUse _
+        | ToolReference _
         | Image _
         | Document _
         | Audio _ -> false)
@@ -506,6 +530,7 @@ let validate_tool_result_role (msg : message) =
              | ReasoningDetails _
              | RedactedThinking _
              | ToolUse _
+             | ToolReference _
              | Image _
              | Document _
              | Audio _ -> false)
@@ -550,6 +575,7 @@ let messages_of_message_with
           | ReasoningDetails _
           | RedactedThinking _
           | ToolUse _
+          | ToolReference _
           | ToolResult _ -> false)
         msg.content
     in
@@ -635,7 +661,7 @@ type history_projection =
 let content_has_reasoning =
   List.exists (function
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
-    | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+    | Text _ | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
 ;;
 
 let content_has_tool_use content =
@@ -645,6 +671,7 @@ let content_has_tool_use content =
     | Thinking _
     | ReasoningDetails _
     | RedactedThinking _
+    | ToolReference _
     | ToolResult _
     | Image _
     | Document _
@@ -659,6 +686,7 @@ let content_has_visible_assistant_text content =
     | ReasoningDetails _
     | RedactedThinking _
     | ToolUse _
+    | ToolReference _
     | ToolResult _
     | Image _
     | Document _
@@ -701,6 +729,7 @@ let typed_history_projection
       | RedactedThinking _
       | Text _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Document _
@@ -880,7 +909,7 @@ let ollama_native_user_message ~modality_priority content : Yojson.Safe.t option
              ~backend:"ollama_native"
              ~block:"audio"
              source
-         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _
            -> texts, images)
       ([], [])
       ordered_content
@@ -920,7 +949,7 @@ let rec ollama_tool_images blocks =
         (List.rev_append nested_images images)
         rest
     | ((Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-       | ToolResult { content_blocks = None; _ } | Document _ | Audio _) as block)
+       | ToolReference _ | ToolResult { content_blocks = None; _ } | Document _ | Audio _) as block)
       :: rest -> split (block :: retained) images rest
   in
   split [] [] blocks
@@ -963,6 +992,7 @@ let ollama_tool_messages_of_blocks blocks =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolUse _
+        | ToolReference _
         | Image _
         | Document _
         | Audio _ )
@@ -983,6 +1013,7 @@ let ollama_tool_block_role_contract (message : message) =
       | Thinking _
       | ReasoningDetails _
       | RedactedThinking _
+      | ToolReference _
       | Image _
       | Document _
       | Audio _ )
@@ -1039,6 +1070,7 @@ let ollama_messages_of_history
       | ReasoningDetails _
       | RedactedThinking _
       | ToolUse _
+      | ToolReference _
       | ToolResult { content_blocks = None; _ }
       | Image _
       | Audio _)

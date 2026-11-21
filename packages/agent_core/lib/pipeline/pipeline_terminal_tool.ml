@@ -72,7 +72,7 @@ let validate_response_tool_uses ~(response : Llm_provider.Types.api_response) ~t
         | Thinking _
         | ReasoningDetails _
         | RedactedThinking _
-        | ToolResult _
+        | ToolReference _ | ToolResult _
         | Image _
         | Document _
         | Audio _ -> false)
@@ -136,6 +136,7 @@ let recovered_report ~response ~turn ~invocations ~tool_results tool_uses =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolUse _
+        | ToolReference _
         | Image _
         | Document _
         | Audio _ )
@@ -145,7 +146,7 @@ let recovered_report ~response ~turn ~invocations ~tool_results tool_uses =
         | Thinking _
         | ReasoningDetails _
         | RedactedThinking _
-        | ToolResult _
+        | ToolReference _ | ToolResult _
         | Image _
         | Document _
         | Audio _ )

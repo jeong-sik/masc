@@ -361,6 +361,7 @@ let add_message_tool_call_ids acc (message : Agent_core.Types.message) =
     (fun ids -> function
       | Agent_core.Types.ToolUse { id; _ } -> add_non_empty id ids
       | Agent_core.Types.ToolResult { tool_use_id; _ } -> add_non_empty tool_use_id ids
+      | Agent_core.Types.ToolReference _ -> ids
       | Agent_core.Types.Text _
       | Agent_core.Types.Thinking _
       | Agent_core.Types.ReasoningDetails _

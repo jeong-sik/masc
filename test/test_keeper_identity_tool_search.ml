@@ -279,6 +279,7 @@ let placement
       ?(agent_cell = ref None)
       ?(history = [])
       ?(carry_window = 0)
+      ?(placement_policy = Keeper_identity_tool_search.History_carry)
       ?receipts
       offering
   =
@@ -288,6 +289,7 @@ let placement
     | None -> make_receipts ~context:(Agent_core.Context.create_sync ()) offering
   in
   Keeper_identity_tool_search.make
+    ~placement_policy
     ~keeper_name:"search-test"
     { Keeper_identity_tool_search.deferred =
         List.map
@@ -669,6 +671,23 @@ let called tool_name_called =
   ; content =
       [ Agent_core.Types.ToolUse
           { id = "toolu_fixture"; name = tool_name_called; input = `Assoc [] }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+let reference_result tool_name =
+  { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Tool
+  ; content =
+      [ Agent_core.Types.ToolResult
+          { tool_use_id = "toolu_load"
+          ; content = "now callable:\n- " ^ tool_name
+          ; outcome = Agent_core.Types.Tool_succeeded
+          ; json = None
+          ; content_blocks = Some [ Agent_core.Types.ToolReference { tool_name } ]
+          }
       ]
   ; name = None
   ; tool_call_id = None
@@ -1657,6 +1676,57 @@ let test_search_refusal_emits_one_failed_observation () =
    | None -> fail "refusal must carry a failure class")
 ;;
 
+let test_load_result_has_unique_references_and_text_fallback () =
+  with_placement (offered two_offered) (fun _agent p ->
+    match
+      execute
+        p.Keeper_identity_tool_search.tool
+        (names_input [ "atlassian_jira_search"; "atlassian_jira_search"; "atlassian_unknown" ])
+    with
+    | Error error -> fail error.Agent_core.Types.message
+    | Ok { content; content_blocks = Some blocks; _ } ->
+      check bool "the existing load summary remains" true (contains content "now callable");
+      check bool "unknown names remain a text error" true (contains content "atlassian_unknown");
+      let references =
+        List.fold_left
+          (fun names block ->
+             match block with
+             | Agent_core.Types.ToolReference { tool_name } -> tool_name :: names
+             | _ -> names)
+          []
+          blocks
+        |> List.rev
+      in
+      check
+        (list string)
+        "only the newly loaded name appears once"
+        [ "atlassian_jira_search" ]
+        references
+    | Ok { content_blocks = None; _ } -> fail "the load must return typed references")
+;;
+
+let test_reference_history_places_tools_without_carry_or_receipts () =
+  let policy = Keeper_identity_tool_search.Tool_references in
+  let with_reference =
+    placement
+      ~placement_policy:policy
+      ~carry_window:1
+      ~history:[ reference_result "atlassian_jira_search" ]
+      (offered two_offered)
+    |> require_placement
+  in
+  check
+    (list string)
+    "the reference itself keeps the tool callable"
+    [ "atlassian_jira_search" ]
+    (placed_names with_reference);
+  let without_reference =
+    placement ~placement_policy:policy ~carry_window:1 ~history:[] (offered two_offered)
+    |> require_placement
+  in
+  check (list string) "losing the reference drops the next placement" [] (placed_names without_reference)
+;;
+
 let () =
   run
     "keeper_identity_tool_search"
@@ -1735,6 +1805,12 @@ let () =
             test_a_returning_tool_keeps_its_place
         ; test_case "places everything when it is zero" `Quick
             test_a_zero_window_places_everything
+        ] )
+    ; ( "tool references"
+      , [ test_case "load result has unique references and fallback" `Quick
+            test_load_result_has_unique_references_and_text_fallback
+        ; test_case "reference history places tools without carry or receipts" `Quick
+            test_reference_history_places_tools_without_carry_or_receipts
         ] )
     ; ( "loading"
       , [ test_case "makes a named tool callable in the running agent" `Quick

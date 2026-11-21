@@ -70,7 +70,7 @@ let reasoning_of_block ~order_index (block : Types.content_block) =
     Some { order_index; kind = Redacted_thinking; signature = None }
   | Types.Text _
   | Types.ToolUse _
-  | Types.ToolResult _
+  | Types.ToolReference _ | Types.ToolResult _
   | Types.Image _
   | Types.Document _
   | Types.Audio _ -> None
@@ -103,7 +103,7 @@ let tool_call_of_block
   | Types.Thinking _
   | Types.ReasoningDetails _
   | Types.RedactedThinking _
-  | Types.ToolResult _
+  | Types.ToolReference _ | Types.ToolResult _
   | Types.Image _
   | Types.Document _
   | Types.Audio _ -> None
@@ -137,7 +137,7 @@ let scan_tool_call state (block : Types.content_block) =
        { state with block_index = state.block_index + 1; pending_reasoning_rev }
      | Types.Text _
      | Types.ToolUse _
-     | Types.ToolResult _
+     | Types.ToolReference _ | Types.ToolResult _
      | Types.Image _
      | Types.Document _
      | Types.Audio _ ->
@@ -172,6 +172,7 @@ let tool_result_of_block (block : Types.content_block) : provider_tool_result op
   | Types.ReasoningDetails _
   | Types.RedactedThinking _
   | Types.ToolUse _
+  | Types.ToolReference _
   | Types.Image _
   | Types.Document _
   | Types.Audio _ -> None

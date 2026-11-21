@@ -400,7 +400,7 @@ let stage_collect
            match block with
            | Thinking { signature = Some _; _ } | RedactedThinking _ -> true
            | Thinking { signature = None; _ } | ReasoningDetails _ | Text _
-           | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+           | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
            response.content
        in
        let* context_message =
@@ -426,7 +426,7 @@ let stage_collect
                | Thinking _
                | ReasoningDetails _
                | RedactedThinking _
-               | ToolResult _
+               | ToolReference _ | ToolResult _
                | Image _
                | Document _
                | Audio _ -> false)
@@ -698,7 +698,7 @@ let stage_output ?raw_trace_run ?clock ?before_tool_execution ~turn ~rejected_to
                 | Thinking _
                 | ReasoningDetails _
                 | RedactedThinking _
-                | ToolResult _
+                | ToolReference _ | ToolResult _
                 | Image _
                 | Document _
                 | Audio _ -> false)

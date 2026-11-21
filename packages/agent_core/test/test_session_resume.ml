@@ -1053,7 +1053,7 @@ let test_binding_source_change_respects_active_replay () =
     (List.fold_left (fun n (message : Llm_provider.Types.message) -> n + List.length (List.filter
       (function Llm_provider.Types.Thinking _ -> true
         | Text _ | RedactedThinking _ | ReasoningDetails _ | ToolUse _
-        | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content)) 0 projected.messages)
+        | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> false) message.content)) 0 projected.messages)
 ;;
 
 let test_binding_source_change_uses_effective_request_tools () = with_net (fun net ->

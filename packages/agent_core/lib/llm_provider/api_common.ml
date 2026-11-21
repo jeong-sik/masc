@@ -78,7 +78,7 @@ let text_blocks_to_string blocks =
     | Thinking { content = s; _ } -> Some (Utf8_sanitize.sanitize s)
     | ReasoningDetails _ -> None
     | RedactedThinking _ -> None
-    | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> None)
+    | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> None)
   |> String.concat "\n"
 ;;
 
@@ -202,6 +202,7 @@ let admit_document_blocks ~wire_form ~model_id ~supports_document_input blocks =
       | ReasoningDetails _
       | RedactedThinking _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Audio _ )
@@ -268,7 +269,7 @@ let degrade_blocks_messages rewrite_block messages =
            ToolResult { result with content; content_blocks = Some blocks }, notes)
       | ToolResult { content_blocks = None; _ }
       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-      | ToolUse _ | Image _ | Document _ | Audio _ -> block, []
+      | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ -> block, []
   in
   let rewrite_message (message : 'source Types.message_with) =
     let content = List.map (fun block -> fst (rewrite block)) message.content in
@@ -300,7 +301,7 @@ let degrade_document_messages ~wire_form ~supports_document_input messages =
            Some
              ( document_omitted_note ~media_type
              , document_omitted_placeholder ~media_type )
-       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _
        | Image _ | Audio _ -> None)
     messages
 ;;
@@ -352,7 +353,7 @@ let degrade_audio_messages ~supports_audio_input messages =
          Some
            ( audio_omitted_note ~media_type
            , audio_omitted_placeholder ~media_type )
-       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _
        | Image _ | Document _ | Audio _ -> None)
     messages
 ;;
@@ -365,7 +366,7 @@ let degrade_image_messages ~supports_image_input messages =
          Some
            ( image_omitted_note ~media_type
            , image_omitted_placeholder ~media_type )
-       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _
        | Document _ | Audio _ | Image _ -> None)
     messages
 ;;
@@ -423,6 +424,8 @@ let rec content_block_to_json_with
       ; "name", `String name
       ; "input", input
       ]
+  | ToolReference { tool_name } ->
+    `Assoc [ "type", `String "tool_reference"; "tool_name", `String tool_name ]
   | ToolResult { tool_use_id; content; outcome; content_blocks; _ } ->
     `Assoc
       (tool_result_wire_fields_with
@@ -471,14 +474,30 @@ and tool_result_wire_fields_with
       ~outcome
       content_blocks
   =
-  let content_json =
+  let has_tool_reference =
     match content_blocks with
     | Some blocks ->
-      (* Structured result: emit the blocks (text/image/...) as the
-         tool_result content array. *)
+      List.exists
+        (function
+          | ToolReference _ -> true
+          | Text _
+          | Thinking _
+          | ReasoningDetails _
+          | RedactedThinking _
+          | ToolUse _
+          | ToolResult _
+          | Image _
+          | Document _
+          | Audio _ -> false)
+        blocks
+    | None -> false
+  in
+  let content_json =
+    match content_blocks with
+    | Some blocks when not has_tool_reference ->
       `List
         (List.map (content_block_to_json_with ~map_tool_id ~tool_result_content_style) blocks)
-    | None ->
+    | Some _ | None ->
       (match tool_result_content_style with
        | Tool_result_content_string -> `String (Utf8_sanitize.sanitize content)
        | Tool_result_content_text_blocks ->
@@ -624,6 +643,10 @@ let rec content_block_of_json_result ?(parse_tool_result_json = true) json =
     let* name = required_identifier_field ~block_type:"tool_use" ~field:"name" json in
     let input = json |> member "input" in
     Ok (ToolUse { id; name; input })
+  | Some "tool_reference" ->
+    Result.map
+      (fun tool_name -> ToolReference { tool_name })
+      (required_identifier_field ~block_type:"tool_reference" ~field:"tool_name" json)
   | Some "tool_result" ->
     let open Result.Syntax in
     let* tool_use_id =
@@ -693,6 +716,7 @@ let message_has_tool_result (msg : message) =
       | ReasoningDetails _
       | RedactedThinking _
       | ToolUse _
+      | ToolReference _
       | Image _
       | Document _
       | Audio _ -> false)

@@ -384,6 +384,15 @@ let capabilities_for_config_model (config : t) =
          ~model_id:config.model_id)
 ;;
 
+let supports_deferred_tool_loading (config : t) =
+  match config.kind with
+  | Anthropic ->
+    (match capabilities_for_config_model config with
+     | Some capabilities -> capabilities.Capabilities.supports_deferred_tool_loading
+     | None -> false)
+  | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> false
+;;
+
 let anthropic_thinking_control (config : t) =
   match config.kind with
   | Anthropic ->

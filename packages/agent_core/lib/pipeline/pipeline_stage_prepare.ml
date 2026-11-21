@@ -146,11 +146,19 @@ let%test "last_tool_results_from keeps each result's id, content and outcome" =
 ;;
 
 let prepare_turn_for_agent agent ~turn_params =
+  let defer_loading =
+    match agent.Agent_types.options.provider_config with
+    | Some config -> Llm_provider.Provider_config.supports_deferred_tool_loading config
+    | None -> false
+  in
   Agent_turn.prepare_turn
     ~media_store:agent.media_store
     ~tools:agent.tools
+    ~deferred_tools:agent.Agent_types.options.deferred_tools
+    ~defer_loading
     ~messages:agent.state.messages
     ~turn_params
+    ~eager_tools:agent.eager_tools
     ?model_input_projection:agent.model_input_projection
     ()
 ;;
@@ -235,11 +243,11 @@ let stage_parse ?raw_trace_run ?clock ~turn agent =
    | None -> ());
   let* prep = prepare_turn_for_agent agent ~turn_params in
   let ready_tool_names = prep.visible_tool_names in
-  (* TurnReady reports the exact caller-supplied tool list the LLM will see
-     this turn. Downstream substrate observability subscribers use this
-     to verify deterministically
-     which tools the autonomous agent actually has access to, before
-     making claims about LLM behaviour from a missing tool call.
+  (* TurnReady reports the first request's callable tool names. A narrower
+     request selected later can retire references and use a different set;
+     route selects that exact sent surface separately. Downstream substrate
+     observability subscribers use this first-request reading before making
+     claims about LLM behaviour from a missing tool call.
      Durable TurnCompleted follows the owning turn's successful settlement;
      store-free runs report successful assistant collection. *)
   (match Pipeline_common.transient_event_bus agent with

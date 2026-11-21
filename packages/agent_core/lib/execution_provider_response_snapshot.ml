@@ -265,6 +265,7 @@ let validate_admission (response : Types.api_response) admission =
          | Types.ReasoningDetails _
          | Types.RedactedThinking _
          | Types.ToolResult _
+         | Types.ToolReference _
          | Types.Image _
          | Types.Document _
          | Types.Audio _ -> count)

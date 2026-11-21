@@ -50,7 +50,7 @@ let tool_uses (message : Agent_core.Types.message) =
     | Agent_core.Types.ToolUse _ -> true
     | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
     | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-    | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+    | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
     | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> false)
 ;;
 
@@ -99,7 +99,7 @@ let bind_completed_arguments ~completed_before ~seed ~replay_prefix messages =
            | Tool_output.Decoded_normalized_artifact_ref _ -> arguments)
         | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
         | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-        | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+        | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
         | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> arguments
       in
       bind_blocks message_index arguments expected actual
@@ -200,7 +200,7 @@ let inner_texts blocks =
           | Agent_core.Types.Text text -> [ index, text ]
           | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
           | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
-          | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+          | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
           | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> [])
        blocks)
 ;;
@@ -236,6 +236,7 @@ let demotable_bodies ~min_bytes (block : Agent_core.Types.content_block) =
   | Agent_core.Types.ReasoningDetails _
   | Agent_core.Types.RedactedThinking _
   | Agent_core.Types.ToolUse _
+  | Agent_core.Types.ToolReference _
   | Agent_core.Types.Image _
   | Agent_core.Types.Document _
   | Agent_core.Types.Audio _ -> []
@@ -256,7 +257,7 @@ let with_result_block index replacement (block : Agent_core.Types.content_block)
   | Agent_core.Types.ToolResult { content_blocks = Some _ | None; _ }
   | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
   | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-  | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+  | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
   | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None
 ;;
 
@@ -267,7 +268,7 @@ let with_result_content content (block : Agent_core.Types.content_block) =
   | Agent_core.Types.ToolResult fields -> Some (Agent_core.Types.ToolResult { fields with content })
   | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
   | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-  | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+  | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
   | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None
 ;;
 
@@ -287,7 +288,7 @@ let with_reference kind (block : Agent_core.Types.content_block) reference =
             { fields with input = Tool_output.normalized_artifact_ref_to_json reference })
      | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
      | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-     | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+     | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
      | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
 ;;
 
@@ -470,7 +471,7 @@ let pending_lookup pending =
                    | Agent_core.Types.Text text -> marker_reference text
                    | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
                    | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
-                   | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+                   | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
                    | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
                 blocks
           in
@@ -482,7 +483,7 @@ let pending_lookup pending =
            | Tool_output.Decoded_normalized_artifact_ref reference -> [ reference ])
         | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
         | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ReasoningDetails _
-        | Agent_core.Types.Image _ | Agent_core.Types.Document _
+        | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
         | Agent_core.Types.Audio _ -> []
       in
       List.concat_map

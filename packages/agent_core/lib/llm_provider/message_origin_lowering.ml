@@ -73,7 +73,7 @@ let text_content ~message_index content =
     | [] -> Ok (String.concat "\n" (List.rev texts))
     | Text text :: rest -> collect (text :: texts) rest
     | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-      | ToolResult _ | Image _ | Document _ | Audio _) :: _ ->
+      | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _) :: _ ->
       Error (Non_text_control {message_index})
   in
   collect [] content

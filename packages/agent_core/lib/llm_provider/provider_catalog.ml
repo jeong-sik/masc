@@ -642,6 +642,7 @@ let parse_capability_overrides ~base cap_json =
   let* supports_explicit_cache_opt_out =
     member_bool "supports_explicit_cache_opt_out" cap_json
   in
+  let* supports_deferred_tool_loading = member_bool "supports_deferred_tool_loading" cap_json in
   let* supports_top_k = member_bool "supports_top_k" cap_json in
   let* supports_min_p = member_bool "supports_min_p" cap_json in
   let* supports_seed = member_bool "supports_seed" cap_json in
@@ -739,6 +740,9 @@ let parse_capability_overrides ~base cap_json =
     |> fun caps ->
     override supports_explicit_cache_opt_out caps (fun caps value ->
       { caps with Capability_profile.supports_explicit_cache_opt_out = value })
+    |> fun caps ->
+    override supports_deferred_tool_loading caps (fun caps value ->
+      { caps with Capability_profile.supports_deferred_tool_loading = value })
     |> fun caps ->
     override supports_top_k caps (fun caps value ->
       { caps with Capability_profile.supports_top_k = value })

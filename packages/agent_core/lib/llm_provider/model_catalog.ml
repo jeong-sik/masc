@@ -46,6 +46,7 @@ type model_entry =
   ; supports_prompt_caching : bool option
   ; prompt_cache_wire : string option
   ; supports_explicit_cache_opt_out : bool option
+  ; supports_deferred_tool_loading : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option
@@ -177,6 +178,7 @@ let with_model_overrides catalog declarations =
     ; supports_prompt_caching = entry.supports_prompt_caching
     ; prompt_cache_wire = entry.prompt_cache_wire
     ; supports_explicit_cache_opt_out = entry.supports_explicit_cache_opt_out
+    ; supports_deferred_tool_loading = entry.supports_deferred_tool_loading
     ; supports_top_k = entry.supports_top_k
     ; supports_min_p = entry.supports_min_p
     ; supports_seed = entry.supports_seed
@@ -478,6 +480,7 @@ let known_entry_keys =
   ; "supports_prompt_caching"
   ; "prompt_cache_wire"
   ; "supports_explicit_cache_opt_out"
+  ; "supports_deferred_tool_loading"
   ; "supports_top_k"
   ; "supports_min_p"
   ; "supports_seed"
@@ -684,6 +687,9 @@ let parse_entry entry_toml =
   let* supports_explicit_cache_opt_out =
     bool_field ~entry_id "supports_explicit_cache_opt_out" entry_toml
   in
+  let* supports_deferred_tool_loading =
+    bool_field ~entry_id "supports_deferred_tool_loading" entry_toml
+  in
   let* supports_top_k = bool_field ~entry_id "supports_top_k" entry_toml in
   let* supports_min_p = bool_field ~entry_id "supports_min_p" entry_toml in
   let* supports_seed = bool_field ~entry_id "supports_seed" entry_toml in
@@ -799,6 +805,7 @@ let parse_entry entry_toml =
     ; supports_prompt_caching
     ; prompt_cache_wire
     ; supports_explicit_cache_opt_out
+    ; supports_deferred_tool_loading
     ; supports_top_k
     ; supports_min_p
     ; supports_seed

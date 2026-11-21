@@ -91,7 +91,7 @@ let test_observe_and_effect_ports_are_distinct () = with_fixture (fun _base medi
        (match (block : Agent_core.Types.content_block) with
         | Text text -> String_util.contains_substring text "reader_not_started"
         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolResult _ | Image _ | Audio _ | Document _ -> false)
+        | ToolResult _ | ToolReference _ | Image _ | Audio _ | Document _ -> false)
      | [] | _ :: _ :: _ -> false);
   let read_effect ~kind:_ ~media_type:_ _ =
     incr effects; M.Owned (M.Unavailable (M.External_failed (M.Approval_rejected "approval"))) in

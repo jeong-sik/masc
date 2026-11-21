@@ -1209,7 +1209,7 @@ let collect_content state stop_reason =
          loop ((index, item) :: content) unreadable (tool_calls + 1) rest
        | Content
            (( Types.Text _ | Types.Thinking _ | Types.ReasoningDetails _
-            | Types.RedactedThinking _ | Types.ToolResult _ | Types.Image _
+            | Types.RedactedThinking _ | Types.ToolReference _ | Types.ToolResult _ | Types.Image _
             | Types.Document _ | Types.Audio _ ) as item) ->
          loop ((index, item) :: content) unreadable tool_calls rest
        | No_content -> loop content unreadable tool_calls rest
@@ -1276,7 +1276,7 @@ let has_tool_block =
     | Types.Thinking _
     | Types.ReasoningDetails _
     | Types.RedactedThinking _
-    | Types.ToolResult _
+    | Types.ToolReference _ | Types.ToolResult _
     | Types.Image _
     | Types.Document _
     | Types.Audio _ -> false)
@@ -1438,7 +1438,7 @@ let%test "snapshot delta replaces an earlier complete tool input" =
               | Types.Thinking _
               | Types.ReasoningDetails _
               | Types.RedactedThinking _
-              | Types.ToolResult _
+              | Types.ToolReference _ | Types.ToolResult _
               | Types.Image _
               | Types.Document _
               | Types.Audio _ )
@@ -1448,7 +1448,7 @@ let%test "snapshot delta replaces an earlier complete tool input" =
             | Types.ReasoningDetails _
             | Types.RedactedThinking _
             | Types.ToolUse _
-            | Types.ToolResult _
+            | Types.ToolReference _ | Types.ToolResult _
             | Types.Image _
             | Types.Document _
             | Types.Audio _ )

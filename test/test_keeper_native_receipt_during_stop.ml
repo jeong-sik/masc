@@ -154,7 +154,7 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
           |> List.concat_map (fun (message : Agent_core.Types.message) -> message.content)
           |> List.filter_map (function
             | Agent_core.Types.ToolResult {tool_use_id; content; _} -> Some (tool_use_id, content)
-            | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+            | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _
             | Image _ | Document _ | Audio _ -> None) in
         check (list (pair string string)) "Owner's final checkpoint preserves both original results"
           ["stop-effect-1", "original effect 1"; "stop-effect-2", "original effect 2"] results)) in

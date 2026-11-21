@@ -99,6 +99,7 @@ let top_level_anchors ~message_index blocks =
       | T.Thinking _
       | T.ReasoningDetails _
       | T.RedactedThinking _
+      | T.ToolReference _
       | T.Image _
       | T.Document _
       | T.Audio _)
@@ -288,6 +289,7 @@ let add_requested_and_completed (requested_rev, completed) (message : T.message)
        | T.Thinking _
        | T.ReasoningDetails _
        | T.RedactedThinking _
+       | T.ToolReference _
        | T.Image _
        | T.Document _
        | T.Audio _ ->

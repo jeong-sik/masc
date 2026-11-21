@@ -30,7 +30,7 @@ let observation ?base_path (call : Projection.settled_tool_invocation) =
   let output_text = match call.result with
     | Llm_provider.Types.ToolResult {content; _} -> content
     | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-    | ToolUse _ | Image _ | Document _ | Audio _ -> fail "fixture result must be a ToolResult" in
+    | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ -> fail "fixture result must be a ToolResult" in
   let io = match Keeper_tool_progress_identity.digest_tool_io ?base_path
       ~tool_name:call.tool_name ~input:call.input ~output_text () with
     | Some io -> io | None -> fail "fixture I/O has no fingerprint" in

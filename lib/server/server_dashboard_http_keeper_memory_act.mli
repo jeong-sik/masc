@@ -6,6 +6,7 @@
     {v
     { "action": "resume" }
     { "action": "adopt", "observed": "<sha256 hex of the snapshot file>" }
+    { "action": "restart_reading", "observed": "<id of the turn log file>" }
     v}
 
     - [resume] starts a stopped store again: its boot runs once more. The
@@ -14,6 +15,11 @@
     - [adopt] says the bytes the snapshot file holds are Memory: the way out
       of a store stopped because the commit log and the snapshot disagree, or
       because the log's last line does not decode (§8.7).
+    - [restart_reading] reads the turn log file from its first line: the
+      way out of reading that stands in another turn log than the file is,
+      or at an offset the file does not hold. [observed] is the id the
+      file's [Log_started] line names, so a file replaced again meanwhile is
+      not read.
 
     The writer decides whether it takes the action. A refusal changes
     nothing. *)
@@ -28,6 +34,7 @@ val route : string -> string option
 type action =
   | Resume
   | Adopt of { observed : Digest.digest }
+  | Restart_reading of { observed : Keeper_turn_log.Log_id.t }
 
 val parse : string -> (action, string) result
 

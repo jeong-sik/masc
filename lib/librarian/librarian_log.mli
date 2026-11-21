@@ -43,6 +43,20 @@ type hole =
   (** The head item fit no slot the lane declares, even alone: each one
       refused the item alone for the input's size (§7.4). These parts of its
       unit were not there. *)
+  | Turn_log_replaced of
+      { from : Keeper_turn_log.Log_id.t (** The turn log the line before names. *)
+      ; to_ : Keeper_turn_log.Log_id.t (** The one the file names now. *)
+      }
+  (** An operator's [Restart_reading] (§12.4): the file is another turn
+      log, and it is read from its first line. What the old one held past
+      where reading stood is not read. *)
+  | Position_lost of
+      { offset : int (** The offset the line before names. *)
+      ; length : int (** The file's length when reading restarted. *)
+      }
+  (** An operator's [Restart_reading]: the same turn log, and the stored
+      offset is past its end or not at the start of a line. It is read from
+      its first line, so what was read before is read again. *)
 
 (** What a [Read] question showed besides its units. *)
 type shown =

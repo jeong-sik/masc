@@ -252,6 +252,8 @@ let act_text : Machine.act_answer -> string = function
   | Not_done Not_stopped -> "not stopped"
   | Not_done Snapshot_mismatch -> "snapshot mismatch"
   | Not_done Snapshot_unreadable -> "snapshot unreadable"
+  | Not_done Not_replaced -> "not replaced"
+  | Not_done Turn_log_unread -> "turn log unread"
   | Not_done (Act_unavailable why) -> unavailable_text why
 ;;
 
@@ -264,6 +266,11 @@ let cause_text : Log.cause -> string = function
   | Skip { hole = Unknown_span { before; after } } ->
     Printf.sprintf "skip: an unknown span from chat %d to %d" before.chat_bytes after.chat_bytes
   | Skip { hole = Item_exceeds_window _ } -> "skip: the item fits no slot"
+  | Skip { hole = Turn_log_replaced { from; to_ } } ->
+    Printf.sprintf "skip: turn log %c to %c"
+      (Turn_log.Log_id.to_string from).[0] (Turn_log.Log_id.to_string to_).[0]
+  | Skip { hole = Position_lost { offset; length } } ->
+    Printf.sprintf "skip: offset %d of a file of %d bytes" offset length
 ;;
 
 let not_applied_text (number, (why : Effects.why_not), (_ : Answer.new_fact option)) =
@@ -322,6 +329,20 @@ let last_commit (value : Machine.t) =
   match Store.tail (open_store value) with
   | Committed line -> line
   | Started _ -> fail "nothing was committed"
+;;
+
+(* The width of the ask that is out (§7.6). *)
+let asked_text (value : Machine.t) =
+  match value.state with
+  | Asking { asking = { asked = Read (Read_range width); _ }; _ } -> (
+    match width with
+    | All -> "all"
+    | Units count -> Printf.sprintf "%d units" (count :> int)
+    | Items count -> Printf.sprintf "%d items" (count :> int))
+  | Asking { asking = { asked = Read Read_item_alone; _ }; _ } -> "the item alone"
+  | Asking { asking = { asked = Room (_ : Masc.Librarian_room_result.asked); _ }; _ } ->
+    "making room"
+  | Idle _ | Resting _ | Refused_at_bottom _ | Stopped _ -> "no ask out"
 ;;
 
 let late_answers () =
@@ -654,18 +675,6 @@ let test_no_answer () =
    items. Silence says nothing of size, so it does not narrow: the writer
    rests. *)
 let test_a_refusal_narrows () =
-  let asked_text (value : Machine.t) =
-    match value.state with
-    | Asking { asking = { asked = Read (Read_range width); _ }; _ } -> (
-      match width with
-      | All -> "all"
-      | Units count -> Printf.sprintf "%d units" (count :> int)
-      | Items count -> Printf.sprintf "%d items" (count :> int))
-    | Asking { asking = { asked = Read Read_item_alone; _ }; _ } -> "the item alone"
-    | Asking { asking = { asked = Room (_ : Masc.Librarian_room_result.asked); _ }; _ } ->
-      "making room"
-    | Idle _ | Resting _ | Refused_at_bottom _ | Stopped _ -> "no ask out"
-  in
   let place, value = asking_place () in
   check string "the first ask reads every unit" "all" (asked_text value);
   let refused value ask offered =
@@ -1431,6 +1440,137 @@ let test_each_room_end_is_kept () =
   check string "a failed ask" "not judged" (last_room_text failed)
 ;;
 
+(* {1 Restarting reading (§12.4)} *)
+
+let other_log =
+  match Turn_log.Log_id.of_string (String.make 32 'b') with
+  | Some id -> id
+  | None -> fail "the other log id is not 32 hexadecimal characters"
+;;
+
+(* The turn log file is now another one: [id]'s first line and, with
+   [until], one closed turn. *)
+let replace_turn_log ?until place ~id =
+  Sys.remove (turns_path place);
+  let (_ : int) =
+    append place ~at_end:0 (Turn_log.Log_started { id; at = 60.0; mark = mark 0 })
+  in
+  Option.iter (fun until -> close_turn place ~from:0 ~until) until
+;;
+
+let restart place value ~observed = Machine.restart_reading place value ~at:400.0 ~observed
+
+let test_restart_on_another_turn_log () =
+  let place, asking = asking_place () in
+  let same, answer = restart place asking ~observed:turn_log in
+  check string "the file reading stands in" "not replaced" (act_text answer);
+  check string "changes nothing" (state_text asking) (state_text same);
+  replace_turn_log place ~id:other_log ~until:32;
+  let same, answer = restart place asking ~observed:turn_log in
+  check string "an id the file does not name" "not replaced" (act_text answer);
+  check string "leaves the ask out" "keep"
+    (fiber_text (Machine.fiber_change ~before:asking ~after:same));
+  let restarted, answer = restart place asking ~observed:other_log in
+  check string "the id the file names" "done" (act_text answer);
+  check string "asks again" "asking #2, holding: " (state_text restarted);
+  check string "in place of the ask that was out" "cancel, then start #2"
+    (fiber_text (Machine.fiber_change ~before:asking ~after:restarted));
+  let line = last_commit restarted in
+  check string "the line says what was passed" "skip: turn log a to b" (cause_text line.cause);
+  check bool "names the new file" true (Turn_log.Log_id.equal line.turn_log other_log);
+  check int "from its first line" 0 line.turn_log_offset;
+  let (_ : Machine.t) =
+    step "the answer about the new file's turn" place restarted
+      (ended restarted 2 (answered (question place restarted) [ Add (stated owner) ]))
+      ~state:("idle, holding: " ^ owner) ~fiber:"cancel"
+  in
+  let stopped_place = new_place () in
+  let (_ : Machine.t), answer =
+    restart stopped_place (booted stopped_place ~at:100.0) ~observed:other_log
+  in
+  check string "a stopped store" "the store is stopped: store unwritable" (act_text answer)
+;;
+
+(* A copy restored from before the turn: the same id, and the offset
+   reading stands at is past its end. *)
+let test_restart_where_the_position_is_lost () =
+  let place, asking = asking_place () in
+  let idle =
+    step "the answer" place asking
+      (ended asking 1 (answered (question place asking) [ Add (stated owner) ]))
+      ~state:("idle, holding: " ^ owner) ~fiber:"cancel"
+  in
+  let offset = (last_commit idle).turn_log_offset in
+  replace_turn_log place ~id:turn_log;
+  let restarted, answer = restart place idle ~observed:turn_log in
+  check string "the same id" "done" (act_text answer);
+  check string "the line says where reading stood"
+    (Printf.sprintf "skip: offset %d of a file of %d bytes" offset (length place))
+    (cause_text (last_commit restarted).cause);
+  check string "keeps Memory and finds nothing unread" ("idle, holding: " ^ owner)
+    (state_text restarted)
+;;
+
+(* §9.2: a restart whose line does not reach the disk is refused, and the
+   store stops as for any commit that appends no line. *)
+let test_restart_that_appends_no_line () =
+  let place, asking = asking_place () in
+  replace_turn_log place ~id:other_log ~until:32;
+  let named = Digest.digest_of_bytes (file_bytes (snapshot_path place)) in
+  let other = other_snapshot () in
+  write_file (snapshot_path place) other;
+  let stop : Store.stop =
+    Log_diverged { expected = named; observed = Digest.digest_of_bytes other }
+  in
+  let log = file_bytes (log_path place) in
+  let stopped, answer = restart place asking ~observed:other_log in
+  check string "is refused as the store stops" ("the store is stopped: " ^ stop_text stop)
+    (act_text answer);
+  check string "stops the store" ("stopped: " ^ stop_text stop) (state_text stopped);
+  check string "appends no line" log (file_bytes (log_path place))
+;;
+
+(* §7.6 「비움」 and §7.4: an accepted restart forgets the refused widths and
+   the head item's size facts. *)
+let test_restart_forgets_widths_and_size_facts () =
+  let place, value = asking_place () in
+  let wider = { (question place value) with offered = { units = 4; head_items = 2 } } in
+  let narrowed =
+    Machine.decide place value ~at:300.0
+      (ended value 1 (No_answer { question = wider; slots = sized Input_too_large }))
+  in
+  check string "a refusal of four units narrows" "2 units" (asked_text narrowed);
+  check string "and is how the last ask ended" "lane, wider, none silent" (last_read_text narrowed);
+  replace_turn_log place ~id:other_log ~until:32;
+  let restarted, answer = restart place narrowed ~observed:other_log in
+  check string "the restart" "done" (act_text answer);
+  check string "reads every unit again" "all" (asked_text restarted);
+  check string "and forgets how the last ask ended" "none" (last_read_text restarted);
+  let place, value = asking_place () in
+  let alone =
+    Machine.decide place value ~at:300.0
+      (ended value 1 (No_answer { question = question place value; slots = sized Input_too_large }))
+  in
+  check int "the item's fact is held" 1 (facts_held alone With_memory);
+  replace_turn_log place ~id:other_log ~until:32;
+  let restarted, answer = restart place alone ~observed:other_log in
+  check string "the restart at the bottom" "done" (act_text answer);
+  check int "holds no fact" 0 (facts_held restarted With_memory + facts_held restarted Alone);
+  check string "and reads every unit" "all" (asked_text restarted)
+;;
+
+(* A file that cannot be read now says nothing of the condition: the act is
+   refused for that, and the ask that is out goes on. *)
+let test_restart_on_an_unread_turn_log () =
+  let place, asking = asking_place () in
+  Sys.remove (turns_path place);
+  Unix.mkdir (turns_path place) 0o700;
+  let same, answer = restart place asking ~observed:other_log in
+  check string "is refused as unread" "turn log unread" (act_text answer);
+  check string "leaves the ask out" "keep"
+    (fiber_text (Machine.fiber_change ~before:asking ~after:same))
+;;
+
 let () =
   run "librarian_machine"
     [ "boot", [ test_case "opens or stops, and asks" `Quick test_boot ]
@@ -1505,6 +1645,13 @@ let () =
         ; test_case "adopt" `Quick test_adopt
         ; test_case "adopt is not the way out of every stop" `Quick
             test_adopt_is_not_the_way_out_of_every_stop
+        ; test_case "restart on another turn log" `Quick test_restart_on_another_turn_log
+        ; test_case "restart where the position is lost" `Quick
+            test_restart_where_the_position_is_lost
+        ; test_case "a restart that appends no line" `Quick test_restart_that_appends_no_line
+        ; test_case "a restart forgets widths and size facts" `Quick
+            test_restart_forgets_widths_and_size_facts
+        ; test_case "a restart on an unread turn log" `Quick test_restart_on_an_unread_turn_log
         ] )
     ]
 ;;

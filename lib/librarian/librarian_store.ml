@@ -194,6 +194,9 @@ type reading =
   | Stays_with of Librarian_plan.working_state
   (* An answer that makes room does not move it, and may replace the working
      state. *)
+  | Starts_over of Turn_store.start
+  (* An operator's restart reads the turn log that starts this way from its
+     first line (§12.4), as a first boot does. *)
 
 (* The working state a line carries: the plan's when it replaced it,
    otherwise the line before's. *)
@@ -204,8 +207,9 @@ let working_state_after ~(before : string option) : Librarian_plan.working_state
 ;;
 
 (* A line carries the reading position and the working state of the line
-   before it, unless it moves them. The turn log it reads is always the one
-   before it names: an event that replaces the file cancels the ask. *)
+   before it, unless it moves them. The turn log it reads is the one before
+   it names, unless an operator restarts reading: every other event that
+   finds another file cancels the ask and writes no line. *)
 let line_after (tail : Log.line) ~at ~basis ~after ~revision ~cause ~effects ~reading
   : Log.commit
   =
@@ -239,6 +243,13 @@ let line_after (tail : Log.line) ~at ~basis ~after ~revision ~cause ~effects ~re
     }
   | Stays_with working_state ->
     { kept with working_state = working_state_after ~before:kept.working_state working_state }
+  | Starts_over start ->
+    { kept with
+      turn_log = start.id
+    ; turn_log_offset = 0
+    ; covers_through = Before_first
+    ; covered = start.mark
+    }
 ;;
 
 (* The error of an append does not say whether the line is on disk: a write
@@ -264,38 +275,45 @@ let append t (line : Log.commit) =
        else Error (Log_diverged { expected = named last; observed = t.digest }))
 ;;
 
+(* Step 2 of §8.2: the file holds the snapshot the last line names. *)
+let snapshot_held t =
+  match read_snapshot_bytes t.snapshot_path with
+  | Error fault -> Error (stop_of_snapshot_fault fault)
+  | Ok bytes ->
+    let observed = Digest.digest_of_bytes bytes in
+    if same observed t.digest
+    then Ok ()
+    else Error (Log_diverged { expected = t.digest; observed })
+;;
+
 (* Steps 2 to 5 of §8.2: the file holds the snapshot the last line names,
    the line follows that one, it is appended and synced, and the snapshot is
    written when the line changes it. *)
 let commit t ~at ~cause ~effects ~reading =
-  match read_snapshot_bytes t.snapshot_path with
-  | Error fault -> Stopped (stop_of_snapshot_fault fault)
-  | Ok bytes ->
-    let observed = Digest.digest_of_bytes bytes in
-    if not (same observed t.digest)
-    then Stopped (Log_diverged { expected = t.digest; observed })
-    else (
-      match Envelope.next ~previous:t.memory ~at cause effects with
-      | Error refusal -> Not_a_snapshot refusal
-      | Ok next ->
-        let after, revision =
-          match next with
-          | Unchanged -> t.digest, t.memory.revision
-          | Rewritten { snapshot; bytes } -> Digest.digest_of_bytes bytes, snapshot.revision
-        in
-        let line =
-          line_after t.tail ~at ~basis:t.digest ~after ~revision ~cause ~effects ~reading
-        in
-        (match append t line with
-         | Error stop -> Stopped stop
-         | Ok log_end ->
-           let store = { t with log_end; tail = Committed line } in
-           (match next with
-            | Unchanged -> Committed { store; line }
-            | Rewritten { snapshot; bytes } ->
-              (match write_snapshot t.snapshot_path bytes with
-               | Ok () -> Committed { store = { store with memory = snapshot; digest = after }; line }
-               | Error () -> Committed_without_snapshot line))))
+  match snapshot_held t with
+  | Error stop -> Stopped stop
+  | Ok () ->
+    (match Envelope.next ~previous:t.memory ~at cause effects with
+     | Error refusal -> Not_a_snapshot refusal
+     | Ok next ->
+       let after, revision =
+         match next with
+         | Unchanged -> t.digest, t.memory.revision
+         | Rewritten { snapshot; bytes } -> Digest.digest_of_bytes bytes, snapshot.revision
+       in
+       let line =
+         line_after t.tail ~at ~basis:t.digest ~after ~revision ~cause ~effects ~reading
+       in
+       (match append t line with
+        | Error stop -> Stopped stop
+        | Ok log_end ->
+          let store = { t with log_end; tail = Committed line } in
+          (match next with
+           | Unchanged -> Committed { store; line }
+           | Rewritten { snapshot; bytes } ->
+             (match write_snapshot t.snapshot_path bytes with
+              | Ok () -> Committed { store = { store with memory = snapshot; digest = after }; line }
+              | Error () -> Committed_without_snapshot line))))
 ;;
 
 let commit_direct t ~at ~by ~trace write effects =
@@ -355,9 +373,32 @@ let changes t (plan : Librarian_plan.t) =
        (stated (working_state_after ~before plan.working_state)))
 ;;
 
+type skipped =
+  { store : t
+  ; line : Log.commit
+  }
+
+(* A Skip line has no effects, so it leaves Memory and the snapshot
+   ([Envelope.next] gives [Unchanged] for every Skip): steps 2 to 4 of §8.2,
+   and the line on disk is the whole commit. *)
+let skip t ~at ~hole ~reading =
+  match snapshot_held t with
+  | Error stop -> Error stop
+  | Ok () ->
+    let line =
+      line_after t.tail ~at ~basis:t.digest ~after:t.digest ~revision:t.memory.revision
+        ~cause:(Log.Skip { hole }) ~effects:Librarian_effects.empty ~reading
+    in
+    (match append t line with
+     | Error stop -> Error stop
+     | Ok log_end -> Ok { store = { t with log_end; tail = Committed line }; line })
+;;
+
 let commit_skip t ~at ~hole reach =
-  commit t ~at ~cause:(Log.Skip { hole }) ~effects:Librarian_effects.empty
-    ~reading:(Moves { reach; working_state = Kept })
+  skip t ~at ~hole ~reading:(Moves { reach; working_state = Kept })
+;;
+
+let commit_restart t ~at ~hole ~start = skip t ~at ~hole ~reading:(Starts_over start)
 ;;
 
 type adoption_refusal =

@@ -56,6 +56,10 @@ type event =
       ; observed : Digest.digest
       ; reply : Machine.act_answer Eio.Promise.u
       }
+  | Restart_reading of
+      { observed : Keeper_turn_log.Log_id.t
+      ; reply : Machine.act_answer Eio.Promise.u
+      }
   | Retire of retirement Eio.Promise.u
 
 type t =
@@ -213,7 +217,7 @@ let answer_stopped event (stop : Store.stop) =
   match event with
   | Turn_closed | Pulse | Declaration_changed | Ask_ended _ -> ()
   | Write { reply; _ } -> tell reply (Machine.Unavailable (Store_stopped stop))
-  | Resume reply | Adopt { reply; _ } ->
+  | Resume reply | Adopt { reply; _ } | Restart_reading { reply; _ } ->
     tell reply (Machine.Not_done (Act_unavailable (Store_stopped stop)))
   | Retire reply -> tell reply Still_registered
 ;;
@@ -354,6 +358,12 @@ let live t ~sw =
           Machine.adopt t.place state ~at:(t.now ()) ~by ~observed)
       in
       settle next reply answer
+    | Restart_reading { observed; reply } ->
+      let next, answer =
+        Eio.Cancel.protect (fun () ->
+          Machine.restart_reading t.place state ~at:(t.now ()) ~observed)
+      in
+      settle next reply answer
     | Retire reply ->
       if t.registered ()
       then (
@@ -468,6 +478,7 @@ let declaration_changed t = Eio.Stream.add t.mailbox Declaration_changed
 let write t ~by ~trace write = ask t (fun reply -> Write { by; trace; write; reply })
 let resume t = ask t (fun reply -> Resume reply)
 let adopt t ~by ~observed = ask t (fun reply -> Adopt { by; observed; reply })
+let restart_reading t ~observed = ask t (fun reply -> Restart_reading { observed; reply })
 
 let retire t =
   match ask t (fun reply -> Retire reply) with

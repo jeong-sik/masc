@@ -166,15 +166,34 @@ val commit_room
     op that takes effect is committed (§7.4). *)
 val changes : t -> Librarian_plan.t -> bool
 
-(** Passes [hole] with no answer, in the steps of {!commit_direct}: the line
-    moves reading to [reach] as {!commit_read} does, has no effects, keeps
-    the working state, and leaves the snapshot: [after] is [basis]. *)
+(** A [Skip] line on disk. A skip has no effects, so it leaves Memory and
+    the snapshot, and the line is the whole commit. *)
+type skipped =
+  { store : t
+  ; line : Librarian_log.commit
+  }
+
+(** Passes [hole] with no answer, in steps 2 to 4 of §8.2: the line moves
+    reading to [reach] as {!commit_read} does, has no effects, keeps the
+    working state, and leaves the snapshot: [after] is [basis]. An [Error]
+    appended no line. *)
 val commit_skip
   :  t
   -> at:float
   -> hole:Librarian_log.hole
   -> Librarian_read_result.reach
-  -> committed
+  -> (skipped, stop) result
+
+(** An operator's [Restart_reading] (§12.4): a [Skip] of [hole] whose line
+    names [start]'s turn log and reads it from its first line, as a first
+    boot does. Like {!commit_skip}, it keeps the working state and leaves
+    the snapshot, and an [Error] appended no line. *)
+val commit_restart
+  :  t
+  -> at:float
+  -> hole:Librarian_log.hole
+  -> start:Keeper_turn_log_store.start
+  -> (skipped, stop) result
 
 type adoption_refusal =
   | Snapshot_mismatch (** The snapshot file does not hold the bytes named. *)

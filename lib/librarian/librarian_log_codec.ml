@@ -59,6 +59,8 @@ let f_slice = "slice"
 let f_from = "from"
 let f_until = "until"
 let f_offset = "offset"
+let f_to = "to"
+let f_length = "length"
 let f_row = "row"
 
 type line_kind =
@@ -111,14 +113,25 @@ type hole_kind =
   | Kind_content_missing
   | Kind_unknown_span
   | Kind_item_exceeds_window
+  | Kind_turn_log_replaced
+  | Kind_position_lost
 
 let hole_kind_token = function
   | Kind_content_missing -> "content_missing"
   | Kind_unknown_span -> "unknown_span"
   | Kind_item_exceeds_window -> "item_exceeds_window"
+  | Kind_turn_log_replaced -> "turn_log_replaced"
+  | Kind_position_lost -> "position_lost"
 ;;
 
-let hole_kinds = [ Kind_content_missing; Kind_unknown_span; Kind_item_exceeds_window ]
+let hole_kinds =
+  [ Kind_content_missing
+  ; Kind_unknown_span
+  ; Kind_item_exceeds_window
+  ; Kind_turn_log_replaced
+  ; Kind_position_lost
+  ]
+;;
 
 type part_kind =
   | Kind_bundle
@@ -346,6 +359,15 @@ let hole_to_json = function
       ]
   | Item_exceeds_window missing ->
     `Assoc [ kind (hole_kind_token Kind_item_exceeds_window); f_missing, missing_to_json missing ]
+  | Turn_log_replaced { from; to_ } ->
+    `Assoc
+      [ kind (hole_kind_token Kind_turn_log_replaced)
+      ; f_from, `String (Log_id.to_string from)
+      ; f_to, `String (Log_id.to_string to_)
+      ]
+  | Position_lost { offset; length } ->
+    `Assoc
+      [ kind (hole_kind_token Kind_position_lost); f_offset, `Int offset; f_length, `Int length ]
 ;;
 
 let shown_to_json = function
@@ -657,6 +679,16 @@ let hole_of_json json =
     let* () = exact_field_names_result [ f_kind; f_missing ] fields in
     let* missing = list_field f_missing fields missing_at_of_json in
     Ok (Item_exceeds_window missing)
+  | Kind_turn_log_replaced ->
+    let* () = exact_field_names_result [ f_kind; f_from; f_to ] fields in
+    let* from = log_id_field f_from fields in
+    let* to_ = log_id_field f_to fields in
+    Ok (Turn_log_replaced { from; to_ })
+  | Kind_position_lost ->
+    let* () = exact_field_names_result [ f_kind; f_offset; f_length ] fields in
+    let* offset = count_field f_offset fields in
+    let* length = count_field f_length fields in
+    Ok (Position_lost { offset; length })
 ;;
 
 let shown_of_json json =

@@ -121,6 +121,8 @@ let act_text : Machine.act_answer -> string = function
   | Not_done Not_stopped -> "not stopped"
   | Not_done Snapshot_mismatch -> "snapshot mismatch"
   | Not_done Snapshot_unreadable -> "snapshot unreadable"
+  | Not_done Not_replaced -> "not replaced"
+  | Not_done Turn_log_unread -> "turn log unread"
   | Not_done (Act_unavailable why) -> unavailable_text why
 ;;
 

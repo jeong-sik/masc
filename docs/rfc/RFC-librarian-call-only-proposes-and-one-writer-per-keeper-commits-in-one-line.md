@@ -1633,7 +1633,9 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 - 읽는 쪽은 잘못을 정해진 순서로 본다. 턴 기록의 id, 저장한 offset, 줄 해석이다. 그래서 바뀌었거나 잘린 파일의 줄 토막을 `Skip_line` 으로 지나칠 수 없다. 그때 받는 행동은 `Restart_reading` 이다.
 - `Skip_line` 은 읽을 수 있는 단위를 지나치지 못한다. 읽는 쪽은 해석 못 하는 줄 앞의 항목 든 단위를 먼저 묻고 반영한다. 그 줄 앞에 항목 든 단위가 없을 때만 받는다. 앞에 놓인 항목 없는 단위는 같이 지나간다.
 - 받아들인 건너뛰기는 가던 묻기를 취소한다. 거절한 행동은 아무것도 바꾸지 않는다.
-- route 는 `Done` 이나 `Refused of reason` 으로 답하고, 화면이 그 이유를 그린다. 이유는 닫힌 타입이다: `Not_the_head`, `Not_the_faulted_line`, `Not_replaced`, `Not_stopped`, `Nothing_to_resume`, `Snapshot_mismatch`, `Snapshot_unreadable`, `Store_stopped s`, `Keeper_retired`.
+- route 는 `Done` 이나 `Refused of reason` 으로 답하고, 화면이 그 이유를 그린다. 이유는 닫힌 타입이다: `Not_the_head`, `Not_the_faulted_line`, `Not_replaced`, `Turn_log_unread`, `Not_stopped`, `Nothing_to_resume`, `Snapshot_mismatch`, `Snapshot_unreadable`, `Store_stopped s`, `Keeper_retired`.
+- 턴 기록을 그 순간 읽지 못하면 조건을 보지 못한 것이다. `Turn_log_unread` 로 거절한다. 조건이 틀렸다는 답(`Not_replaced` 등)과 섞지 않는다.
+- `Restart_reading` 은 읽는 쪽이 본 파일이 `observed` 의 파일일 때만 받는다. 읽는 쪽은 첫 줄을 다시 읽으므로, 그 사이 또 바뀐 파일의 결함을 `observed` 의 것으로 적지 않는다.
 - `Done` 의 답은 그 뒤 저장소의 상태를 같이 싣는다. `Resume` 이 boot 를 다시 돌렸는데 같은 이유로 멈췄으면 그 이유가 답에 있다. `Log_diverged` 로 멈췄으면 반영 기록이 가리키는 sha 와 파일의 sha 를 싣는다. 파일의 sha 가 `Adopt` 에 넣을 값이다.
 - 옛 route 인 `memory-catch-up` 은 쓰는 쪽을 켜기 전에 지운다(§20 L5p). 쓰는 쪽은 턴 기록과 pulse 로 할 일을 찾으므로 운영자가 깨우는 길을 두지 않는다. 일괄 cleanup 의 Memory 철회는 쓰는 쪽으로 쓴다(§8.5). `memory-journal`, `memory-facts` 는 지우는 층에서 저마다 지우거나 반영 기록을 읽게 고친다(§19.2).
 
@@ -2174,7 +2176,7 @@ Keeper 하나와 그 쓰는 쪽이다. Memory 는 fact 이름의 집합이고, �
 | `E3OnHeadLine` | E3 은 읽은 자리가 이미 지난 줄 위에 서지 않는다 |
 | `QueuedWriteEnds`, `ReadsAllOnceRunning` | boot 를 기다린 쓰기는 끝난다. 쓰는 쪽이 계속 돌면 운영자 없이 다 읽는다 |
 
-정상 설정 다섯이 지킨다.
+정상 설정 여섯이 지킨다.
 
 | 설정 | 모양 | 상태 수 |
 |---|---|---|
@@ -2183,6 +2185,7 @@ Keeper 하나와 그 쓰는 쪽이다. Memory 는 fact 이름의 집합이고, �
 | `-boot` | boot. 멈추는 첫 boot(스냅샷, 잠금, `Started` 쓰기 실패), `Resume`, 해석되지 않는 꼬리 줄, `Adopt`, 죽음 | 121,949 |
 | `-turnlog` | 턴 기록의 흠. 해석되지 않는 줄, 알리지 않은 reset, 없어진 내용, `Skip_line`, `Skip_item` | 46,668 |
 | `-live` | 살아 있음 속성 셋 | 7,624 |
+| `-restart` | 턴 기록이 바뀌거나 잘린다, `Restart_reading` | 1,835,459 |
 
 | 옛 규칙이나 심은 버그 | 어긴 속성 |
 |---|---|
@@ -2195,10 +2198,11 @@ Keeper 하나와 그 쓰는 쪽이다. Memory 는 fact 이름의 집합이고, �
 | 반영 기록이 없을 때 턴 줄을 잃은 기록으로 읽는다 | `PassedAccounted` |
 | 줄이 들어가기 전에 읽은 자리를 옮긴다 | `PositionHasLine` |
 | 받아들인 `Skip_line` 이 마지막 묻기의 결과를 남긴다 | `E3OnHeadLine` |
+| 거절한 운영자 행동이 가던 묻기를 취소한다 | `AskingHasAnAsk` |
 | 지금 묻기가 아닌 답을 반영한다 | `AnswerOnlyWhenCurrent` |
 | 계획이 그사이의 철회를 보지 않는다 | `NoUndoRetract` |
 
-닿는다는 것을 보인 가지는 다섯이다. 다시 켠 Keeper 의 쓰기를 새 쓰는 쪽이 반영한다, 맡긴 뒤에 단위를 처음부터 한 번 더 읽는다, 쓰기가 boot 를 기다렸다가 반영된다, boot 중에 턴이 닫힌다, `Retire` 가 boot 하는 쓰는 쪽의 mailbox 에서 기다린다.
+닿는다는 것을 보인 가지는 여섯이다. 다시 켠 Keeper 의 쓰기를 새 쓰는 쪽이 반영한다, 맡긴 뒤에 단위를 처음부터 한 번 더 읽는다, 쓰기가 boot 를 기다렸다가 반영된다, boot 중에 턴이 닫힌다, `Retire` 가 boot 하는 쓰는 쪽의 mailbox 에서 기다린다, `Restart_reading` 줄이 쓰인다.
 
 다루지 않는 것: Keeper 여럿, 파일의 바이트, slot 별 크기 사실.
 

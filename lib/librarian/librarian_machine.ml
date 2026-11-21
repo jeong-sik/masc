@@ -212,11 +212,13 @@ let settled t store ~after (committed : Store.committed) =
    item already passed (§7.4 「읽은 자리가 움직였다」). *)
 let moved t ~narrowing = { t with narrowing; bottom = Librarian_bottom.empty }
 
-(* [last] is what the commit sets once it is on disk: [Committed], or the
-   lane's result an item skipped alone ended in. *)
-let after_commit place t ~at store ~narrowing ?(last = Last.Committed) committed =
-  settled t store committed ~after:(fun store ->
-    next_ask place { (moved t ~narrowing) with last_read = Some last } ~at store)
+(* A skip changes no snapshot, so it ends with its line on disk or with no
+   line, and no line stops the store (§9.2 「건너뛰기 규칙」). [last] is what
+   the line sets once it is on disk, as for a commit. *)
+let after_skip place t ~at ~narrowing ~last : (Store.skipped, Store.stop) result -> t = function
+  | Ok { store; line = (_ : Librarian_log.commit) } ->
+    next_ask place { (moved t ~narrowing) with last_read = Some last } ~at store
+  | Error stop -> { t with state = Stopped stop }
 ;;
 
 (* §7.3 「Refused_by_lane, Silent_lane」 and §7.4: only the slots the lane
@@ -312,7 +314,7 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
           Librarian_width.committed t.narrowing
             (Librarian_width.passed question.offered question.reach.within)
         in
-        after_commit place t ~at store ~narrowing ~last:(lane_result ~one_item:true)
+        after_skip place t ~at ~narrowing ~last:(lane_result ~one_item:true)
           (Store.commit_skip store ~at ~hole:(Item_exceeds_window question.missing) question.reach)
       | All_not_input -> { (ended ~one_item:true t) with state = Refused_at_bottom store }
       | Not_all -> rest ~one_item:true t)
@@ -367,11 +369,11 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
     let narrowing =
       Librarian_width.committed t.narrowing (Librarian_width.passed offered reach.within)
     in
-    after_commit place t ~at store ~narrowing
+    after_skip place t ~at ~narrowing ~last:Last.Committed
       (Store.commit_skip store ~at ~hole:(Content_missing missing) reach)
   | Span_unknown { before; reach } ->
     (* It passes no unit with items. *)
-    after_commit place t ~at store ~narrowing:t.narrowing
+    after_skip place t ~at ~narrowing:t.narrowing ~last:Last.Committed
       (Store.commit_skip store ~at ~hole:(Unknown_span { before; after = reach.covered }) reach)
   | Memory_diverged { expected; observed } ->
     { t with state = Stopped (Log_diverged { expected; observed }) }
@@ -657,6 +659,8 @@ type act_refusal =
   | Not_stopped
   | Snapshot_mismatch
   | Snapshot_unreadable
+  | Not_replaced
+  | Turn_log_unread
   | Act_unavailable of unavailable
 
 type act_answer =
@@ -686,6 +690,83 @@ let adopt { memory_dir; turns_dir; keeper_id } t ~at ~by ~observed =
      | Error Snapshot_mismatch -> t, Not_done Snapshot_mismatch
      | Error Snapshot_unreadable -> t, Not_done Snapshot_unreadable
      | Error (Not_adopted stop) -> t, Not_done (Act_unavailable (Store_stopped stop)))
+;;
+
+(* The turn log a line reads. *)
+let reading_log : Librarian_log.line -> Keeper_turn_log.Log_id.t = function
+  | Started { turn_log; _ } | Committed { turn_log; _ } -> turn_log
+;;
+
+(* The file's first line, when it names [observed]. *)
+let observed_start turns_path ~observed =
+  match Keeper_turn_log_store.read_start turns_path with
+  | Error (Read_failed { path = (_ : string); detail = (_ : string) } | Moved_while_reading) ->
+    Error Turn_log_unread
+  | Ok None
+  | Error
+      ( Row_undecodable
+          { offset = (_ : int); reason = (_ : Keeper_turn_log_store.undecodable) }
+      | Log_start_missing ) ->
+    (* No [Log_started] line names [observed]. *)
+    Error Not_replaced
+  | Ok (Some (start : Keeper_turn_log_store.start)) ->
+    if Keeper_turn_log.Log_id.equal start.id observed then Ok start else Error Not_replaced
+;;
+
+(* What a restart passes, read from the disk when it is taken: the file's
+   first line names [observed], and the reader, run again from the tail,
+   finds that file is another turn log or that the stored offset is not one
+   of its lines. Each fault is taken only when the file it is about is the
+   one [observed] names, so a file replaced in between is refused, not
+   recorded as what it is not. [Turn_log_replaced] carries the first line
+   the reader read. [Position_lost] comes from the reader's own open of the
+   file after that line, so the first line is read once more after it. Any
+   other answer of the reader is no reason to start over. *)
+let restart_from place store ~observed =
+  let turns_path = turns_path place in
+  let is_observed id = Keeper_turn_log.Log_id.equal id observed in
+  match observed_start turns_path ~observed with
+  | Error refusal -> Error refusal
+  | Ok start ->
+    let tail = Store.tail store in
+    (match Librarian_unread.read ~turns_path ~until:(First_with_items 1) tail with
+     | Error (Fault (Turn_log_replaced { expected; observed = Some now })) when is_observed now ->
+       Ok (Librarian_log.Turn_log_replaced { from = expected; to_ = now }, start)
+     | Error (Fault (Position_lost { offset; length })) when is_observed (reading_log tail) ->
+       Result.map
+         (fun (again : Keeper_turn_log_store.start) ->
+            Librarian_log.Position_lost { offset; length }, again)
+         (observed_start turns_path ~observed)
+     | Error (Fault (Turn_log_replaced _ | Position_lost _ | Line_unreadable _ | Content_unreadable _))
+     | Ok (_ : Librarian_unread.reading) -> Error Not_replaced
+     | Error (Unread { detail = (_ : string) }) -> Error Turn_log_unread)
+;;
+
+(* §12.4: a refusal leaves the value as it is, so an ask that is out goes
+   on. An accepted restart cancels it, and the next ask reads the file from
+   its first line with no width or size fact kept (§7.6) and without how the
+   last ask ended, which was about where reading stood before (§9.2, §12.2
+   E3). *)
+let restart_reading place t ~at ~observed =
+  match t.state with
+  | Stopped stop -> t, Not_done (Act_unavailable (Store_stopped stop))
+  | Idle { store; seen_length = (_ : int option) }
+  | Asking { store; asking = (_ : asking) }
+  | Resting store
+  | Refused_at_bottom store ->
+    (match restart_from place store ~observed with
+     | Error refusal -> t, Not_done refusal
+     | Ok (hole, start) ->
+       (match Store.commit_restart store ~at ~hole ~start with
+        | Ok { store; line = (_ : Librarian_log.commit) } ->
+          ( next_ask place
+              { (moved t ~narrowing:Librarian_width.empty) with last_read = None }
+              ~at store
+          , Done )
+        | Error stop ->
+          (* §9.2: the line is not on disk, so the act is refused as the
+             store stops. *)
+          { t with state = Stopped stop }, Not_done (Act_unavailable (Store_stopped stop))))
 ;;
 
 type fiber_change =

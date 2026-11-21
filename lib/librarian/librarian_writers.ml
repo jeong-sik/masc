@@ -115,6 +115,11 @@ let adopt t keeper ~by ~observed =
   asked t keeper ~unregistered:act_unregistered (fun writer -> Writer.adopt writer ~by ~observed)
 ;;
 
+let restart_reading t keeper ~observed =
+  asked t keeper ~unregistered:act_unregistered (fun writer ->
+    Writer.restart_reading writer ~observed)
+;;
+
 (* Only the writer that retired leaves the table: by now the Keeper may be
    registered again and have another. *)
 let rec forget t keeper writer =

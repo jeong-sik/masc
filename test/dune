@@ -3698,6 +3698,7 @@
 (include stanzas/test_event_bus_subscription_contract.inc)
 
 (include stanzas/test_tool_diversity.inc)
+(include stanzas/test_tool_blob_store_librarian_input_capture.inc)
 
 (include stanzas/test_tool_help_registry_shard_coverage_10101.inc)
 

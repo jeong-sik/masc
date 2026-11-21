@@ -205,6 +205,11 @@ disk_evidence() {
   echo "[test-suite] largest _build entries (two levels: subtree then its biggest children):"
   disk_usage 90 1 8
   disk_usage 120 2 15
+  echo "[test-suite] largest files under _build/default/test (bytes, path), then the file count and byte total:"
+  # awk reads the whole sorted listing, so a closed pipe cannot hide behind pipefail.
+  timeout 120 find "$repo_root/_build/default/test" -type f -printf '%s %p\n' 2>/dev/null \
+    | sort -rn \
+    | awk 'NR <= 20 { print } { count++; total += $1 } END { print "[test-suite] files: " count + 0 ", bytes: " total + 0 }'
   echo "[test-suite] runner temp:"
   du -sh "$tmp" || echo "[test-suite] runner temp disk usage is incomplete"
   ls -lh "$log" "$trace" 2>/dev/null || true

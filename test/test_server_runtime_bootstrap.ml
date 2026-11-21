@@ -822,16 +822,30 @@ default = %S
 |}
        endpoint default_runtime_id)
 
+(* The wait must end even when SIGTERM cannot stop the child: an unbounded
+   waitpid turned one stalled shutdown into a suite-wide hang that also
+   swallowed the failure message that names the child's own log (task-3902).
+   SIGTERM first, then SIGKILL after a short grace; the descriptor close that
+   every exit performs, forced or not, is what releases the lease byte. *)
 let stop_process pid =
+  let rec wait_until deadline =
+    match Unix.waitpid [ Unix.WNOHANG ] pid with
+    | 0, _ ->
+      if Unix.gettimeofday () >= deadline
+      then false
+      else (Unix.sleepf 0.1; wait_until deadline)
+    | _, _ -> true
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_until deadline
+    | exception Unix.Unix_error (Unix.ECHILD, _, _) -> true
+  in
   (try Unix.kill pid Sys.sigterm with _ -> ());
-  ignore
-    (let rec wait () =
-       try Unix.waitpid [] pid
-       with
-       | Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
-       | Unix.Unix_error (Unix.ECHILD, _, _) -> (0, Unix.WEXITED 0)
-     in
-     wait ())
+  if not (wait_until (Unix.gettimeofday () +. 5.0)) then begin
+    (try Unix.kill pid Sys.sigkill with _ -> ());
+    if not (wait_until (Unix.gettimeofday () +. 10.0))
+    then
+      Alcotest.failf "child %d survived SIGTERM and SIGKILL; inspect it before retrying"
+        pid
+  end
 
 let json_assoc = function
   | `Assoc fields -> fields

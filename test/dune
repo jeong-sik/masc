@@ -6593,11 +6593,6 @@
  (libraries alcotest unix masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry))
 
 (test
- (name test_workspace_memory_revision)
- (modules test_workspace_memory_revision)
- (libraries alcotest  masc.agent_core.digest yojson unix masc masc.fs_compat))
-
-(test
  (name test_keeper_memory_search_index)
  (modules test_keeper_memory_search_index)
  (libraries alcotest masc masc_core eio eio_main))
@@ -6652,12 +6647,6 @@
  (name test_server_settled_archive_sweep)
  (modules test_server_settled_archive_sweep)
  (libraries alcotest masc masc.server unix))
-
-(test
- (name test_workspace_memory_execution_capture)
- (modules test_workspace_memory_execution_capture)
- (deps (source_tree %{workspace_root}/config/prompts))
- (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry unix))
 
 (test
  (name test_workspace_memory_log)

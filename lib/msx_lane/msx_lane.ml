@@ -1137,7 +1137,7 @@ let change_disk ~path ~backup_path =
    _build/default/lib/identity/msx_core_identity.ml. The digest covers only
    lib/ top-level (dune plus *.ml/*.mli, by base name), so an additive-only
    core change in a subdirectory keeps the value. *)
-let pinned_core_source_digest = "78f5ad93c70d726594517af5e0f4c57b"
+let pinned_core_source_digest = "e01ef0dc768c1ff252b8c78d3ea57038"
 
 (* The Git commit [scripts/opam-pin-external-deps.sh] pins as OCAML_MSX_SHA.
    This is the build-time identity of the core a pinned build links, recorded
@@ -1145,7 +1145,7 @@ let pinned_core_source_digest = "78f5ad93c70d726594517af5e0f4c57b"
    still names the exact commit. Bump together with the script and with
    [pinned_core_source_digest]; a SHA bumped alone turns the provenance test
    red naming the new digest. *)
-let pinned_core_commit = "cec423387a7335f7d095e3a3489ec3e7272581fa"
+let pinned_core_commit = "581da9079377968474da3cf10310b5a65b66b505"
 
 (* The exact commit of the linked core, when this build can establish it:
    the pinned commit when the running core's digest matches the pin, else

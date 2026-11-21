@@ -411,7 +411,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
         | Some value -> frontier value
         | None ->
             if cycle.mcc_saved_unreadable then text "읽기 실패" "unreadable"
-            else text "없음" "absent" in
+            else Masc_tui_theme.Glyph.no_value in
       (* Where the Librarian has read to belongs beside the cut, not on a line
          of its own: a request starts at the cut and carries the atoms up to
          the position, so the two apart is what the turn pays (#37793). *)
@@ -515,7 +515,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   let vision_line =
     let reasons =
       match k.mkh_vision_ingest_error_reasons with
-      | [] -> text "없음" "none"
+      | [] -> Masc_tui_theme.Glyph.no_value
       | reasons ->
         String.concat ", "
           (List.map

@@ -592,7 +592,7 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                   field (ui_text state ~ko:"분류" ~en:"Category") row.pr_category;
                   field (ui_text state ~ko:"설명" ~en:"Description") row.pr_description;
                   field (ui_text state ~ko:"변수" ~en:"Variables") (match row.pr_template_variables with
-                    | [] -> ui_text state ~ko:"없음" ~en:"None" | variables -> String.concat " | " variables);
+                    | [] -> Masc_tui_theme.Glyph.no_value | variables -> String.concat " | " variables);
                   field (ui_text state ~ko:"유형" ~en:"Kind") (match row.pr_operator_surface with
                     | Tui_decode.Prompt_primary -> ui_text state ~ko:"주 프롬프트" ~en:"Primary"
                     | Tui_decode.Prompt_fragment -> ui_text state ~ko:"내부 조각" ~en:"Fragment")]

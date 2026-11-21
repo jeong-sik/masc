@@ -296,7 +296,7 @@ let runtime_routes_detail_lines state ~width =
       let resolved = snapshot.Tui_decode.rss_resolved in
       let route label values =
         match values with
-        | [] -> fact label (text "없음" "none")
+        | [] -> fact label Masc_tui_theme.Glyph.no_value
         | values -> runtime_items label values
       in
       let dropped =
@@ -305,8 +305,8 @@ let runtime_routes_detail_lines state ~width =
           resolved.rrs_media_failover_declared
       in
       let routes =
-        fact (text "기본 라우트" "Default route") (Option.value resolved.rrs_default_route ~default:(text "없음" "none"))
-        @ fact (text "시작 런타임" "Entry runtime") (Option.value resolved.rrs_default_runtime_id ~default:(text "없음" "none"))
+        fact (text "기본 라우트" "Default route") (Option.value resolved.rrs_default_route ~default:Masc_tui_theme.Glyph.no_value)
+        @ fact (text "시작 런타임" "Entry runtime") (Option.value resolved.rrs_default_runtime_id ~default:Masc_tui_theme.Glyph.no_value)
         @ fact (text "설정 원본" "Source") (Option.value resolved.rrs_config_path ~default:(text "보고 안 됨" "not reported"))
         @ fact (text "생성 시각" "Recorded") resolved.rrs_generated_at_iso
         @ (match runtime_fleet_summary state with
@@ -512,7 +512,7 @@ let runtime_detail_lines state target ~width =
         in
         match target_keepers with
         | [] ->
-            fact ~tone:Page_line.Quiet (say "배정 키퍼" "Bound keepers") (say "없음" "none")
+            fact ~tone:Page_line.Quiet (say "배정 키퍼" "Bound keepers") Masc_tui_theme.Glyph.no_value
         | ks ->
             let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) ks) in
             let activity_str = match aggregate_keeper_stats ks with

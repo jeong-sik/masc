@@ -247,8 +247,26 @@ let world_memory_resources : mcp_resource list =
       ~name:"World Memory Claims"
       ~title:"World Memory Claims"
       ~description:
-        "Current workspace memory ledger claims, conflicts, corroboration \
-         stages, and synthesized briefing snapshot"
+        "Lock-free MVCC World Memory shared facts, typed relational edges, \
+         provenance, and compiled digest snapshot"
+      ~mime_type:"application/json"
+      ()
+  ; make_resource
+      ~uri:"masc://world-memory/digest"
+      ~name:"World Memory Digest"
+      ~title:"World Memory Digest"
+      ~description:
+        "Immutable compiled World Memory digest revision covering shared \
+         world facts, Wiki pages, Artifacts, and MCP Resources"
+      ~mime_type:"application/json"
+      ()
+  ; make_resource
+      ~uri:"masc://world-memory/index"
+      ~name:"World Memory Unified Index"
+      ~title:"World Memory Unified Index"
+      ~description:
+        "Unified lock-free index of MASC Wiki pages, durable Artifacts, and \
+         MCP Resources"
       ~mime_type:"application/json"
       ()
   ; make_resource
@@ -256,7 +274,7 @@ let world_memory_resources : mcp_resource list =
       ~name:"World Memory Log"
       ~title:"World Memory Log"
       ~description:
-        "Committed shared workspace memory two-phase log entries"
+        "Committed shared World Memory mutation audit log"
       ~mime_type:"application/json"
       ()
   ]
@@ -271,6 +289,13 @@ let resource_template_of_entry (entry : Mcp_surface_toml.template_entry) =
 
 let living_memory_resource_templates : mcp_resource_template list =
   [ make_resource_template
+      ~uri_template:"masc://world-memory/facts/{fact_id}"
+      ~name:"World Memory Fact Detail"
+      ~title:"World Memory Fact Detail"
+      ~description:"Individual World Memory fact with provenance and relational edges"
+      ~mime_type:"application/json"
+      ()
+  ; make_resource_template
       ~uri_template:"masc://keepers/{keeper}/memory"
       ~name:"Keeper Living Memory"
       ~title:"Keeper Living Memory"

@@ -98,7 +98,8 @@ type shows =
     unchanged. [from] is the commit line reading starts from; the question's
     [basis] is the snapshot it names. *)
 val make
-  :  lane:Librarian_memory_lane.question_side
+  :  ?world_index:string
+  -> lane:Librarian_memory_lane.question_side
   -> from:Librarian_log.line
   -> shows:shows
   -> reach:Librarian_read_result.reach

@@ -7786,3 +7786,5 @@
 (include stanzas/test_keeper_compaction.inc)
 
 (include stanzas/test_living_librarian.inc)
+
+(include stanzas/test_stack_c_living_memory_circulation.inc)

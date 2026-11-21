@@ -39,6 +39,9 @@ type resource_target =
   | Wiki_page_markdown of string
   | Wiki_page_json of string
   | World_memory_claims
+  | World_memory_digest
+  | World_memory_index
+  | World_memory_fact of string
   | World_memory_log
   | Keeper_memory of string
   | Keeper_memory_health of string
@@ -50,6 +53,12 @@ val parse_resource_target : string -> resource_target
 
 val world_memory_claims_uri : string
 (** Canonical URI for {!World_memory_claims} ([masc://world-memory/claims]). *)
+
+val world_memory_digest_uri : string
+(** Canonical URI for {!World_memory_digest} ([masc://world-memory/digest]). *)
+
+val world_memory_index_uri : string
+(** Canonical URI for {!World_memory_index} ([masc://world-memory/index]). *)
 
 val world_memory_log_uri : string
 (** Canonical URI for {!World_memory_log} ([masc://world-memory/log]).

@@ -1430,6 +1430,14 @@ let claim_and_start_keeper_persistence
      reads [none_in_process]. *)
   let start_memory_writers () =
     let workspace_config = Mcp_server.workspace_config state in
+    let world_curator =
+      World_memory.start_workspace_curator
+        ~sw
+        ~base_path:workspace_config.base_path
+        ~now:Time_compat.now
+        ~on_updated:Mcp_server_eio_resource.notify_world_memory_updated
+    in
+    World_memory.Curator.enqueue_index_sync world_curator;
     let ask_env : Librarian_ask.env = { net; clock; base_dir = workspace_config.base_path } in
     let memory_writers =
       Keeper_memory_writers.start

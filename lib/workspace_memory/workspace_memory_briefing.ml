@@ -290,9 +290,11 @@ let load_unlocked ~directory =
     let* json = try Ok (Yojson.Safe.from_string text) with
       | Yojson.Json_error detail -> Error detail in
     of_json json
+(* Lock-free atomic snapshot read: [save] writes via staged atomic rename, so
+   readers never acquire a workspace-global flock. *)
 let load ~directory = io (fun () ->
   if Sys.file_exists directory then
-    File_lock_eio.with_lock (path ~directory) (fun () -> load_unlocked ~directory)
+    load_unlocked ~directory
   else
     Ok empty)
 let save_unlocked ~directory t =

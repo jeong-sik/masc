@@ -450,11 +450,13 @@ let load_unlocked ~base_path =
     in
     of_json json |> Result.map_error (fun detail -> path ^ ": " ^ detail)
 
+(* Lock-free atomic snapshot read: [save] writes via staged atomic rename, so
+   readers never acquire a workspace-global flock and never block sibling Keepers. *)
 let load ~base_path =
   io (fun () ->
     let* () = require_base ~base_path in
     if Sys.file_exists (directory ~base_path) then
-      File_lock_eio.with_lock (path ~base_path) (fun () -> load_unlocked ~base_path)
+      load_unlocked ~base_path
     else
       Ok empty)
 
@@ -546,8 +548,51 @@ let check_readable ~base_path =
   | Unix.Unix_error (error, fn, arg) ->
     Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
 
+let observe_world_memory ~base_path =
+  match io (fun () -> require_base ~base_path) with
+  | Error detail -> Unavailable detail
+  | Ok () ->
+    (* Single lock-free BEGIN DEFERRED read transaction guarantees
+       [ledger_sha256], [claim_count], [source_ids], and [briefing.text]
+       always originate from the exact same MVCC snapshot. *)
+    (match World_memory_store.read_snapshot ~include_inactive:false ~base_path () with
+     | Ok { facts; digest = digest_opt; _ } ->
+       let claim_count = List.length facts in
+       let ledger_sha256, briefing =
+         match digest_opt with
+         | Some d ->
+           ( d.digest_sha256
+           , Ok
+               (Workspace_memory_briefing.Current
+                  { source_ids = List.map (fun (f : World_memory_types.world_fact) -> f.fact_id) facts
+                  ; text = d.rendered
+                  }) )
+         | None ->
+           ( Agent_core_sha256.(digest_string "world_memory_empty" |> to_hex)
+           , Ok Workspace_memory_briefing.Missing )
+       in
+       Available
+         { ledger_sha256
+         ; claim_count
+         ; conflict_count = 0
+         ; classified_count = claim_count
+         ; excluded_count = 0
+         ; briefing
+         ; building = Ok None
+         }
+     | Error err -> Unavailable (World_memory_store.error_to_string err))
+;;
+
 let observe_with_template ~resolve_template ~base_path =
-  try
+  (* Prefer lock-free SQLite WAL World Memory whenever world_memory.db exists
+     so prompt observation, keeper_workspace_memory_read, and MCP resources
+     always agree on a single source of truth (no split-brain with legacy
+     ledger.json). Fall back to legacy ledger.json only when world_memory.db
+     is absent. *)
+  if World_memory_store.exists ~base_path
+  then observe_world_memory ~base_path
+  else
+    try
       match read_current ~base_path with
        | Error detail -> Unavailable detail
        | Ok ledger ->
@@ -572,13 +617,13 @@ let observe_with_template ~resolve_template ~base_path =
                      excluded_count;
                      briefing;
                      building }
-  with
-  | Unix.Unix_error (Unix.ENOENT, _, _) ->
-    (match io (fun () -> require_base ~base_path) with
-     | Ok () -> Missing
-     | Error detail -> Unavailable detail)
-  | Unix.Unix_error (error, fn, arg) ->
-    Unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) ->
+      (match io (fun () -> require_base ~base_path) with
+       | Ok () -> Missing
+       | Error detail -> Unavailable detail)
+    | Unix.Unix_error (error, fn, arg) ->
+      Unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
 
 let observe_with_briefing_template ~briefing_template ~base_path =
   observe_with_template ~resolve_template:(fun () -> briefing_template) ~base_path

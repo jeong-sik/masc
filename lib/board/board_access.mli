@@ -5,6 +5,12 @@ type reader =
   | Anonymous
   | Named of { name : string; addressed_by : Board_types.Agent_id.t -> bool }
   | Operator
+  | Workspace_member of { actor_id : string; owned_keeper_ids : string list }
+(** A signed-in workspace member (or service) in multi-account mode.
+    [actor_id] is the caller's canonical Board id; [owned_keeper_ids] are the
+    Keepers whose deliveries this caller may read. No [Direct] post opens to
+    a workspace Admin unless that Admin authored it, was addressed by it, or
+    owns a Keeper it was delivered to. *)
 
 val named : string -> reader
 (** An authenticated exact-name reader, without Keeper aliases. *)

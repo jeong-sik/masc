@@ -882,7 +882,12 @@ let skip_item place ~stores t ~at ~by ~target =
    names. The commit ends where the line ends and is covered to where the
    units before the line ended, so the line moves no mark. A replaced file
    and a lost position come before any line in the reader's order: a
-   restart passes those, not this act. *)
+   restart passes those, not this act.
+
+   The line is not read a second time before the commit. The turn log's
+   writer appends and rewrites no line, so an append in between changes
+   neither the line nor where it ends, and the hole holds the hash of the
+   bytes that were judged. *)
 let line_to_pass place store ~offset =
   match
     Librarian_unread.read ~turns_path:(turns_path place) ~until:(First_with_items 1)

@@ -2450,54 +2450,6 @@ let test_durable_enqueue_waiting_event_is_workspace_scoped () =
             Alcotest.(check int) "idempotent replay sends no new event" 1 !matching_events))))
 ;;
 
-let test_durable_enqueue_replays_write_and_signal_nothing () =
-  with_temp_dir "keeper-durable-enqueue-replay" (fun base_path ->
-    let keeper_name = "durable-replay" in
-    let source = stimulus "durable-replay-source" 1.0 in
-    let writes = ref 0 in
-    let signals = ref 0 in
-    let enqueue () =
-      Registry_event_queue.enqueue_stimulus_once_durable_result ~base_path keeper_name source
-    in
-    Masc.Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> incr signals);
-    Fun.protect
-      ~finally:(fun () ->
-        Masc.Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ()))
-      (fun () ->
-        with_state_change_observer (fun () -> incr writes) (fun () ->
-          (match enqueue () with
-           | Registry_event_queue.Stimulus_enqueued -> ()
-           | Registry_event_queue.Stimulus_already_present ->
-             Alcotest.fail "first delivery was already present"
-           | Registry_event_queue.Stimulus_shutdown_reserved operation_id ->
-             Alcotest.fail (Registry_event_queue.shutdown_reserved_detail operation_id)
-           | Registry_event_queue.Stimulus_storage_error detail -> Alcotest.fail detail);
-          Alcotest.(check (pair int int)) "first delivery writes and signals once" (1, 1)
-            (!writes, !signals);
-          let primary = Filename.concat
-            (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-            Persistence.snapshot_filename in
-          let delivered = Unix.lstat primary in
-          List.iter (fun replay ->
-            match enqueue () with
-            | Registry_event_queue.Stimulus_already_present -> ()
-            | Registry_event_queue.Stimulus_enqueued ->
-              Alcotest.failf "replay %d enqueued the source again" replay
-            | Registry_event_queue.Stimulus_shutdown_reserved operation_id ->
-              Alcotest.fail (Registry_event_queue.shutdown_reserved_detail operation_id)
-            | Registry_event_queue.Stimulus_storage_error detail -> Alcotest.fail detail)
-            [ 1; 2; 3 ];
-          Alcotest.(check (pair int int)) "replays write and signal nothing" (1, 1)
-            (!writes, !signals);
-          Alcotest.(check bool) "replays leave the snapshot in place" true
-            (same_file_identity delivered (Unix.lstat primary));
-          Alcotest.(check int) "one source stays pending" 1
-            (List.length
-               (Queue.to_list
-                  (State.pending
-                     (Persistence.load_state_result ~base_path ~keeper_name
-                      |> require_ok "read")))))))
-
 (* #43494. Registration reads the durable queue into the Keeper's queue
    cell, then takes the lifecycle key lock to install the entry. The test
    holds that lock, waits until registration has read its queue (the snapshot
@@ -2632,8 +2584,6 @@ let () =
             test_once_replay_crosses_the_barrier_again_after_a_transition
         ; Alcotest.test_case "a raising publication is published by the replay" `Quick
             test_once_replay_publishes_what_a_raising_publication_did_not
-        ; Alcotest.test_case "durable enqueue replays write and signal nothing" `Quick
-            test_durable_enqueue_replays_write_and_signal_nothing
         ; Alcotest.test_case "durable enqueue event stays in its workspace" `Quick
             test_durable_enqueue_waiting_event_is_workspace_scoped ] )
     ; ( "state"

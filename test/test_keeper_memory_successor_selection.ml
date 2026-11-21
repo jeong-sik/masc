@@ -111,47 +111,6 @@ let roundtrip_candidate : Current.successor_recall_candidate =
     program_steps=[step 0 original intermediate Current.Program_absorption;
       step 1 intermediate original Current.Program_revision]}
 
-let test_roundtrip_program_evidence_reaches_semantic_judgment () =
-  let original = roundtrip_candidate.original_target and intermediate = candidate.target in
-  let endpoint fact = Memory.fact_to_json fact in
-  let expected_steps = `List
-    [`Assoc ["snapshot_revision",`Int 2;"transaction_id",`String "successor-roundtrip";
-       "stage_index",`Int 0;"from_fact",endpoint original;"into_fact",endpoint intermediate;
-       "relation",`String "absorption"];
-     `Assoc ["snapshot_revision",`Int 2;"transaction_id",`String "successor-roundtrip";
-       "stage_index",`Int 1;"from_fact",endpoint intermediate;"into_fact",endpoint original;
-       "relation",`String "revision"]] in
-  List.iter (fun (choice,applies) ->
-    let calls = ref 0 in
-    let evaluate ~state ~questions:_ =
-      incr calls;
-      let member = Yojson.Safe.Util.member in
-      let evidence = member "evidence" state in
-      check bool "the actual scope request retains the original historical observation" true
-        (member "historical_source" evidence=endpoint candidate.binding.source_fact);
-      check bool "the current endpoint is the restored A, not the historical intermediate B" true
-        (member "original_target" evidence=endpoint original
-         && member "current_target" evidence=endpoint original);
-      check bool "the actual request preserves both ordered A-to-B-to-A edge witnesses" true
-        (member "ordered_program_steps" evidence=expected_steps);
-      check bool "two local stages retain only one actual durable revision" true
-        (member "committed_revision_path" evidence=
-         `List (List.map Current.revision_evidence_to_json roundtrip_candidate.path));
-      Ok (response choice) in
-    let result = Selection.select_with_evaluate ~evaluate ~query:"R-015"
-      [roundtrip_candidate] in
-    check int "one scope judgment is requested for the entire path" 1 !calls;
-    if applies then
-      check bool "an applicable roundtrip selects only the current target with its full witness" true
-        (result.selected=[roundtrip_candidate] && result.unresolved=[])
-    else
-      match result.selected,result.unresolved with
-      | [],[observed,Selection.Judgment_uncertain] ->
-        check bool "uncertainty retains the entire historical path without selecting it" true
-          (observed=roundtrip_candidate)
-      | _ -> fail "an uncertain roundtrip became current knowledge or conclusive absence")
-    ["applies_to_query",true;"uncertain",false]
-
 let test_negative_judgment_revalidates_changed_program_steps () =
   let snapshot : Current.t =
     {revision=2;updated_at=200.;source={kind=Current.Librarian;trace_id="ordered-roundtrip"};
@@ -259,6 +218,5 @@ let () = run "successor scope selection"
     test_case "one failed assessment does not erase another" `Quick test_one_provider_failure_preserves_other_judgments;
     test_case "extra answers cannot publish" `Quick test_extra_answers_never_publish;
     test_case "negative decision becomes unresolved when successor changes" `Quick test_negative_judgment_cannot_survive_changed_successor;
-    test_case "ordered roundtrip endpoints reach semantic judgment and preserve uncertainty" `Quick test_roundtrip_program_evidence_reaches_semantic_judgment;
     test_case "negative decision cannot survive changed program steps on the same snapshot" `Quick test_negative_judgment_revalidates_changed_program_steps;
     test_case "a stalled endpoint ends at the turn clock" `Quick test_a_stalled_endpoint_ends_at_the_turn_clock]]

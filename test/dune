@@ -267,6 +267,8 @@
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main mtime.clock.os))
 
+(include stanzas/test_typesafeai_client_redaction.inc)
+
 (test
  (name test_keeper_librarian_cancellation)
  (modules test_keeper_librarian_cancellation)
@@ -436,6 +438,7 @@
 (include stanzas/test_keeper_waiting_observer_scope.inc)
 
 (include stanzas/test_server_dashboard_http_keeper_get_route.inc)
+(include stanzas/test_server_dashboard_http_keeper_memory_health_librarian_sections.inc)
 
 (include stanzas/test_sse_queue_inventory.inc)
 
@@ -1376,6 +1379,8 @@
  (modules test_keeper_event_queue_state_v2)
  (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc_test_deps))
+
+(include stanzas/test_keeper_event_queue_state_v2_librarian_queue_signal.inc)
 
 (test
  (name test_keeper_event_queue_codec_pool)
@@ -3431,6 +3436,7 @@
 
 (include stanzas/test_keeper_memory_admission_judgment.inc)
 (include stanzas/test_keeper_memory_successor_selection.inc)
+(include stanzas/test_keeper_memory_successor_selection_revision_evidence.inc)
 
 (include stanzas/test_keeper_memory_resolved_selection_capture.inc)
 
@@ -3611,6 +3617,7 @@
 (include stanzas/test_official_client_result_time.inc)
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
+(include stanzas/test_runtime_codex_app_server_turn_boundaries.inc)
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)
 (include stanzas/test_keeper_agent_core_result_outbox.inc)
 (include stanzas/test_keeper_agent_core_retained_carrier.inc)
@@ -5498,6 +5505,7 @@
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_memory_age_bins.inc)
 (include stanzas/test_tui_decode_workspace_memory.inc)
+(include stanzas/test_tui_decode_workspace_memory_journal.inc)
 (include stanzas/test_keeper_turn_pulse.inc)
 (include stanzas/test_keeper_turn_log_turn_task_context.inc)
 (include stanzas/test_keeper_decoded_rows.inc)
@@ -5592,6 +5600,7 @@
 (include stanzas/test_keeper_memory_journal_projection.inc)
 
 (include stanzas/test_keeper_memory_left.inc)
+(include stanzas/test_keeper_memory_os_current_cut_parts.inc)
 
 (test
  (name test_keeper_memory_journal_serialization)
@@ -7180,8 +7189,10 @@
   librarian_run_tui_reading eio_main))
 
 (include stanzas/test_keeper_continuity_request_view.inc)
+(include stanzas/test_keeper_continuity_request_view_turn_boundaries.inc)
 
 (include stanzas/test_keeper_librarian_continuity.inc)
+(include stanzas/test_keeper_librarian_context_queue_signal.inc)
 
 (include stanzas/test_keeper_continuity_cancel_recovery.inc)
 

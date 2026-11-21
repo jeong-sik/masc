@@ -5,7 +5,6 @@ val read : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
 val scene : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
 val capture : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
 val interact : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
-val goto : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
 val connection_inventory : config:Workspace.config -> access:Lane_addon_sources.access ->
   Tool_result.result
 (** All visible browser workers, with individual failures and duplicate IDs

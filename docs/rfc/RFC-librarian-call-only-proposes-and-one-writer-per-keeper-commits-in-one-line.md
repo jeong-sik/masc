@@ -1656,7 +1656,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | `Resume` | `Stopped` | 저장소 시작을 다시 한다. 턴 기록 파일을 확인한 뒤 boot 한다(§8.6) |
 | | `Resting`, `Refused_at_bottom` | 바닥에서 받은 크기 사실을 지우고 바로 다시 묻는다 |
 | `Skip_item i` | i 가 지금 읽는 쪽의 맨 앞이다 | `Skip (Operator_skipped)` 줄을 쓰고 맨 앞을 지나간다 |
-| `Skip_line { offset }` | 읽는 쪽을 지금 다시 돌리면 그 offset 의 줄을 해석하지 못한다고 답한다 | `Skip (Line_unreadable)` 줄을 쓰고 그 줄을 지나간다 |
+| `Skip_line { offset }` | 읽는 쪽을 지금 다시 돌리면 그 offset 의 줄에서 멈춘다고 답한다. 해석되지 않거나 줄 순서에 맞지 않는 줄이다 | `Skip (Line_unreadable)` 줄을 쓰고 그 줄을 지나간다 |
 | `Restart_reading { observed }` | 디스크의 턴 기록 id 가 `observed` 다. 그 id 가 마지막 반영 줄의 것과 다르거나, 같은데 저장한 offset 이 파일 끝을 넘거나 줄 시작이 아니다 | `Skip (Turn_log_replaced)` 나 `Skip (Position_lost)` 줄을 쓰고 그 파일을 처음부터 읽는다 |
 | `Adopt { observed }` | `Stopped (Log_diverged _)` 나 `Stopped Log_unreadable` 이고, 스냅샷 파일의 sha 가 `observed` 이며 codec 으로 해석된다 | §8.7 |
 
@@ -1664,7 +1664,14 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 - 조건은 행동을 반영하는 순간에 디스크에서 다시 읽는다. 상태나 마지막 묻기의 결과를 믿지 않는다. 그래서 재시작 뒤에도, 묻기가 실패한 뒤에도 쓸 수 있다.
 - 읽는 쪽은 잘못을 정해진 순서로 본다. 턴 기록의 id, 저장한 offset, 줄 해석이다. 그래서 바뀌었거나 잘린 파일의 줄 토막을 `Skip_line` 으로 지나칠 수 없다. 그때 받는 행동은 `Restart_reading` 이다.
 - `Skip_line` 은 읽을 수 있는 단위를 지나치지 못한다. 읽는 쪽은 해석 못 하는 줄 앞의 항목 든 단위를 먼저 묻고 반영한다. 그 줄 앞에 항목 든 단위가 없을 때만 받는다. 앞에 놓인 항목 없는 단위는 같이 지나간다.
-- `Skip_line` 은 읽기만 지나가게 한다. 줄 쓰는 쪽이 꼬리에서 그 줄을 만나 멈춰 있으면, 파일을 고쳐야 턴 기록이 다시 늘어난다(§5.4).
+- offset 이 지금 지나갈 줄이 아니면 `Not_the_faulted_line` 으로 거절한다. 안 읽은 것이 없을 때, 그 줄 앞에 항목 든 단위나 알리지 않은 reset 이 있을 때, 읽는 쪽이 다른 줄에서 멈출 때다. 파일이 바뀌었거나 저장한 offset 을 잃었을 때도 이 답이다. 그 둘은 `Restart_reading` 으로 지나간다.
+- 받아들인 `Skip_line` 의 줄은 `covers_through` 를 그 줄에, `turn_log_offset` 을 그 줄 바로 뒤에 둔다. `covered` 는 그 앞 단위가 끝난 끝자리에 머문다(§5.4). 폭 기억은 그대로 둔다(§9.2).
+- `covers_through` 가 지나간 줄에 있는 동안, 그 줄이 단위를 끝내는 줄로 해석되지 않으면 Keeper 요청의 시작점은 `Front_unresolved` 다(§11.2). 요청은 하던 일을 싣지 않는다. 그 뒤 단위를 읽은 반영이 `covers_through` 를 옮기면 풀린다.
+- `Skip_line` 은 읽기만 지나가게 한다. 줄 쓰는 쪽이 꼬리에서 그 줄을 만나 멈춰 있으면, 파일을 고쳐야 턴 기록이 다시 늘어난다(§5.4). 그동안은 다음과 같다.
+  - 턴은 돈다. 그 턴의 줄은 쓰이지 않는다. 턴마다 오류 로그를 남기고 `masc_keeper_turn_log_append_failed_total` 로 센다.
+  - 턴 기록에 새 턴이 없으므로 쓰는 쪽은 그 턴을 읽지 않는다. 줄을 지나간 뒤에는 안 읽은 것이 없어 E3 이 꺼진다. 줄 쓰는 쪽이 멈춘 것을 보이는 경보나 행의 칸은 없다.
+  - 이력 지우기와 checkpoint purge 는 거절한다. session 을 지우는 정지는 session 을 남기고 그 단계에서 선다. 셋 다 턴 기록의 꼬리를 먼저 읽는다(§5.2, §5.6).
+  - Keeper 요청은 턴 경계를 모른다(`Turn_boundary_unknown`, §11.2). 읽은 곳의 끝도 풀리지 않는다. seed 가 없으면 가장 새 atom 하나만 싣는다.
 - 받아들인 건너뛰기는 가던 묻기를 취소한다. 거절한 행동은 아무것도 바꾸지 않는다. 가던 묻기도 그대로 간다.
 - `Skip_item` 의 i 는 둘 가운데 하나다. 둘 다 읽는 쪽이 서 있는 턴 기록의 id 를 싣는다. 그래서 다른 파일에서 읽은 이름은 받지 않는다.
 

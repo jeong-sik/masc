@@ -1223,12 +1223,6 @@ let add_routes ~sw ~clock router =
               Http.Response.json_value
                 (`Assoc [("error", `String "post_id is required")])
                 ~status:`Bad_request reqd
-          | Some "curation" ->
-              respond_board_json reqd (board_curation_json ~reader ())
-          | Some "sub-boards" ->
-              respond_board_sub_boards reqd ~reader
-          | Some "karma/ledger" ->
-              respond_board_json reqd (board_karma_ledger_json ~reader req)
           | Some post_id ->
               let config = Mcp_server.workspace_config state in
               let reaction_actor = board_reader_actor in

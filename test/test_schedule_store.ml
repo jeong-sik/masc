@@ -694,14 +694,14 @@ let test_refresh_due_expires_scheduled_and_due () =
   with_workspace
   @@ fun config ->
   let scheduled =
-    make_request ~schedule_id:"expire-scheduled" ~expires_at:150.0 ()
+    make_request ~schedule_id:"expire-scheduled" ~expires_at:220.0 ()
   in
   let due =
     make_request ~schedule_id:"expire-due" ~expires_at:250.0 ()
   in
   ignore (insert_ok config scheduled);
   ignore (insert_ok config due);
-  (match refresh_due config ~now:201.0 with
+  (match refresh_due config ~now:221.0 with
    | Ok (_, changed) -> check int "scheduled expired and due marked" 2 changed
    | Error err -> fail (store_error_to_string err));
   (match refresh_due config ~now:251.0 with
@@ -717,6 +717,55 @@ let test_refresh_due_expires_scheduled_and_due () =
      check int "expired schedules are not due candidates" 0
        (List.length (due_wake_candidates (read_state config)))
    | _ -> fail "expired schedules missing")
+;;
+
+let test_insert_and_update_reject_expiry_before_reachable_due () =
+  with_workspace
+  @@ fun config ->
+  let tick = 15.0 in
+  let check_expiry_error label result =
+    match result with
+    | Error (Expiry_before_reachable_due { schedule_id; _ }) ->
+      check bool (label ^ ": non-empty schedule_id") true (schedule_id <> "")
+    | Error err ->
+      failf "%s: expected Expiry_before_reachable_due, got %s" label
+        (store_error_to_string err)
+    | Ok _ -> failf "%s: expected refusal" label
+  in
+  List.iter
+    (fun bad_expiry ->
+       check_expiry_error
+         (Printf.sprintf "insert expiry=%g" bad_expiry)
+         (insert_request config ~runner_tick_sec:tick
+            (make_request ~schedule_id:"bad-exp" ~expires_at:bad_expiry ())))
+    [ 150.0; 200.0; 210.0; 215.0 ];
+  let inserted =
+    match
+      insert_request config ~runner_tick_sec:tick
+        (make_request ~schedule_id:"good-exp" ~expires_at:250.0 ())
+    with
+    | Ok r -> r
+    | Error err -> fail (store_error_to_string err)
+  in
+  check_expiry_error "update shortening expiry to <= due + tick"
+    (update_request config ~authority:Operator_authority ~now:100.0
+       ~runner_tick_sec:tick
+       { inserted with expires_at = Some 215.0 });
+  check_expiry_error "update with Keep_timing rejects shortening expiry to <= due + tick"
+    (update_request config ~authority:Operator_authority ~now:100.0
+       ~runner_tick_sec:tick ~timing_update:Keep_timing
+       { inserted with due_at = 999.0; expires_at = Some 215.0 });
+  check_expiry_error "update pushing due_at beyond explicit expires_at"
+    (update_request config ~authority:Operator_authority ~now:100.0
+       ~runner_tick_sec:tick
+       { inserted with due_at = 240.0; expires_at = Some 250.0 });
+  (match
+     update_request config ~authority:Operator_authority ~now:100.0
+       ~runner_tick_sec:tick
+       { inserted with due_at = 220.0; expires_at = Some 250.0 }
+   with
+   | Ok updated -> check (float 0.0) "valid due_at update keeps expiry" 220.0 updated.due_at
+   | Error err -> fail (store_error_to_string err))
 ;;
 
 let test_reschedule_due_recurring_advances_only_matching_recurring_rows () =
@@ -2731,6 +2780,8 @@ let () =
             test_due_candidate_starts_without_authorization_state;
           test_case "refresh_due expires scheduled and due" `Quick
             test_refresh_due_expires_scheduled_and_due;
+          test_case "insert and update reject expiry before reachable due" `Quick
+            test_insert_and_update_reject_expiry_before_reachable_due;
           test_case "reschedule due recurring rows" `Quick
             test_reschedule_due_recurring_advances_only_matching_recurring_rows;
           test_case "reschedule due cron rows" `Quick

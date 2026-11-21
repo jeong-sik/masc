@@ -2125,6 +2125,65 @@ let test_create_refuses_an_interval_below_the_runner_tick () =
     (List.length (Schedule_store.read_state config).schedules)
 ;;
 
+let test_create_and_update_refuse_expiry_before_reachable_due () =
+  with_config
+  @@ fun config ->
+  let tick = Env_config_runtime_services.ScheduleRunner.interval_sec in
+  let create_with expires_at =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (wake_args
+         ~extra:
+           [ "due_at_unix", `Float future_due_at
+           ; "expires_at_unix", `Float expires_at
+           ]
+         ())
+  in
+  let check_expiry_refusal label result =
+    check_refusal label Schedule_contract_values.Refusal_argument_out_of_range result;
+    let open Yojson.Safe.Util in
+    let data = Tool_result.data result in
+    check string (label ^ ": field") "expires_at_unix" (data |> member "field" |> to_string);
+    check (float 0.0) (label ^ ": runner_tick_sec") tick
+      (data |> member "runner_tick_sec" |> to_number)
+  in
+  check_expiry_refusal "create with expires_at before due_at"
+    (create_with (future_due_at -. 60.0));
+  check_expiry_refusal "create with expires_at equal to due_at"
+    (create_with future_due_at);
+  check_expiry_refusal "create with expires_at at due_at + tick"
+    (create_with (future_due_at +. tick));
+  check int "refused creates stored nothing" 0
+    (List.length (Schedule_store.read_state config).schedules);
+  let valid = create_with (future_due_at +. tick +. 1.0) in
+  check bool "create with expires_at past due_at + tick succeeds" true
+    (Tool_result.is_success valid);
+  let open Yojson.Safe.Util in
+  let schedule_id = Tool_result.data valid |> member "schedule_id" |> to_string in
+  let updated_bad =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (wake_args
+         ~extra:
+           [ "schedule_id", `String schedule_id
+           ; "due_at_unix", `Float future_due_at
+           ; "expires_at_unix", `Float (future_due_at +. tick)
+           ]
+         ())
+  in
+  check_expiry_refusal "update with expires_at at due_at + tick" updated_bad;
+  let updated_good =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (wake_args
+         ~extra:
+           [ "schedule_id", `String schedule_id
+           ; "due_at_unix", `Float future_due_at
+           ; "expires_at_unix", `Float (future_due_at +. tick +. 5.0)
+           ]
+         ())
+  in
+  check bool "update with expires_at past due_at + tick succeeds" true
+    (Tool_result.is_success updated_good)
+;;
+
 (* A Keeper has the current time on its turn's first request only. A delay
    counts from the server's dispatch clock, so it needs none. *)
 let test_due_in_sec_counts_from_the_dispatch_clock () =
@@ -3227,6 +3286,8 @@ let () =
             test_a_call_gives_exactly_one_due_input
         ; test_case "create refuses an interval below the runner tick" `Quick
             test_create_refuses_an_interval_below_the_runner_tick
+        ; test_case "create and update refuse expiry before reachable due" `Quick
+            test_create_and_update_refuse_expiry_before_reachable_due
         ; test_case "due_in_sec counts from the dispatch clock" `Quick
             test_due_in_sec_counts_from_the_dispatch_clock
         ; test_case "a calendar first due counts from dispatch, not requested_at" `Quick

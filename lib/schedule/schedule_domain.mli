@@ -200,6 +200,25 @@ val interval_fires_as_declared :
     fires [recurrence] as often as it declares. Refuses an [Interval] shorter
     than the tick. Create and modify ask it; [validate_recurrence] does not,
     so loading accepts any positive interval. *)
+
+type expiry_before_reachable_due =
+  { due_at : float
+  ; expires_at : float
+  ; runner_tick_sec : float
+  ; minimum_expires_at : float
+  }
+
+val expiry_reaches_first_due :
+  runner_tick_sec:float ->
+  due_at:float ->
+  expires_at:float option ->
+  (unit, expiry_before_reachable_due) result
+(** Whether [expires_at] leaves at least one full [runner_tick_sec] after
+    [due_at] so the schedule runner can observe the first due occurrence before
+    {!mark_due} expires it ([expires_at > due_at + max 0 runner_tick_sec]).
+    Create and modify ask it; {!create_request} and
+    {!schedule_request_of_yojson} do not, so legacy stored rows still load and
+    expire cleanly. *)
 val first_due_after : now:float -> recurrence -> float option
 (** Compute the first due time for calendar recurrences that do not need an
     explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)

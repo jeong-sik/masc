@@ -610,6 +610,40 @@ let test_mark_due_preserves_other_fields () =
   check (float 0.0001) "due_at" before.due_at after.due_at
 ;;
 
+let test_expiry_reaches_first_due () =
+  check bool "no expiry always reaches first due" true
+    (Result.is_ok
+       (expiry_reaches_first_due ~runner_tick_sec:15.0 ~due_at:200.0 ~expires_at:None));
+  let check_rejected label ~runner_tick_sec ~due_at ~expires_at =
+    match expiry_reaches_first_due ~runner_tick_sec ~due_at ~expires_at:(Some expires_at) with
+    | Error { due_at = got_due; expires_at = got_exp; runner_tick_sec = got_tick; minimum_expires_at } ->
+      check (float 0.0) (label ^ ": due_at") due_at got_due;
+      check (float 0.0) (label ^ ": expires_at") expires_at got_exp;
+      let expected_tick = if runner_tick_sec > 0.0 then runner_tick_sec else 0.0 in
+      check (float 0.0) (label ^ ": tick") expected_tick got_tick;
+      check (float 0.0) (label ^ ": minimum") (due_at +. expected_tick) minimum_expires_at
+    | Ok () -> failf "%s: expected Error expiry_before_reachable_due" label
+  in
+  check_rejected "before due_at" ~runner_tick_sec:15.0 ~due_at:200.0 ~expires_at:150.0;
+  check_rejected "equal to due_at" ~runner_tick_sec:15.0 ~due_at:200.0 ~expires_at:200.0;
+  check_rejected "inside first runner tick" ~runner_tick_sec:15.0 ~due_at:200.0 ~expires_at:210.0;
+  check_rejected "equal to due_at + runner_tick" ~runner_tick_sec:15.0 ~due_at:200.0 ~expires_at:215.0;
+  check_rejected "zero tick still rejects equal expiry" ~runner_tick_sec:0.0 ~due_at:200.0 ~expires_at:200.0;
+  check bool "zero tick accepts expiry strictly after due_at" true
+    (Result.is_ok
+       (expiry_reaches_first_due ~runner_tick_sec:0.0 ~due_at:200.0 ~expires_at:(Some 200.5)));
+  check bool "strictly after due_at + runner_tick is accepted" true
+    (Result.is_ok
+       (expiry_reaches_first_due ~runner_tick_sec:15.0 ~due_at:200.0 ~expires_at:(Some 215.5)));
+  (* Legacy rows already stored on disk with expires_at < due_at must still load
+     so refresh_due can transition them cleanly to Expired. *)
+  let legacy_json =
+    schedule_request_to_yojson (request ~expires_at:150.0 ())
+  in
+  check bool "legacy stored row with early expiry still decodes" true
+    (Result.is_ok (schedule_request_of_yojson legacy_json))
+;;
+
 let () =
   run "Schedule_domain"
     [
@@ -649,6 +683,8 @@ let () =
             test_cron_recurrence_finds_occurrence_beyond_five_years;
           test_case "cron recurrence rejects impossible calendar date" `Quick
             test_cron_recurrence_rejects_impossible_calendar_date;
+          test_case "expiry_reaches_first_due enforces reachable window" `Quick
+            test_expiry_reaches_first_due;
         ] );
       ( "mark_due",
         [

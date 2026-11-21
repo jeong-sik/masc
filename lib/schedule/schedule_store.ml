@@ -48,6 +48,10 @@ type store_error =
       { schedule_id : string
       ; below : Schedule_domain.interval_below_runner_tick
       }
+  | Expiry_before_reachable_due of
+      { schedule_id : string
+      ; expiry : Schedule_domain.expiry_before_reachable_due
+      }
   | Running_wake_absent of { schedule_id : string }
   | Running_wake_settled of
       { schedule_id : string
@@ -206,6 +210,18 @@ let store_error_to_string = function
       interval_sec
       runner_tick_sec
       interval_sec
+  | Expiry_before_reachable_due
+      { schedule_id
+      ; expiry = { due_at; expires_at; runner_tick_sec; minimum_expires_at }
+      } ->
+    Printf.sprintf
+      "schedule %s: expires_at %s does not leave one schedule runner tick \
+       (%gs) after due_at %s; expires_at must be after %s"
+      schedule_id
+      (Time_codec.rfc3339_of_unix expires_at)
+      runner_tick_sec
+      (Time_codec.rfc3339_of_unix due_at)
+      (Time_codec.rfc3339_of_unix minimum_expires_at)
   | Running_wake_absent { schedule_id } ->
     Printf.sprintf "running schedule %s has no wake record" schedule_id
   | Running_wake_settled { schedule_id; wake } ->
@@ -1137,6 +1153,15 @@ let interval_fires_as_declared ~runner_tick_sec (request : schedule_request) =
     Interval_below_runner_tick { schedule_id = request.schedule_id; below })
 ;;
 
+let expiry_reaches_first_due ~runner_tick_sec (request : schedule_request) =
+  Schedule_domain.expiry_reaches_first_due
+    ~runner_tick_sec
+    ~due_at:request.due_at
+    ~expires_at:request.expires_at
+  |> Result.map_error (fun expiry ->
+    Expiry_before_reachable_due { schedule_id = request.schedule_id; expiry })
+;;
+
 let insert_request config ~runner_tick_sec (request : Schedule_domain.schedule_request) =
   with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
@@ -1145,6 +1170,7 @@ let insert_request config ~runner_tick_sec (request : Schedule_domain.schedule_r
     | None ->
       let* () = validate_initial_request request in
       let* () = interval_fires_as_declared ~runner_tick_sec request in
+      let* () = expiry_reaches_first_due ~runner_tick_sec request in
       let schedules = request :: state.schedules in
       let next_state =
         bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
@@ -1247,6 +1273,7 @@ let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Rep
         let* () = validate_initial_request request in
         let* () = changed_due_not_past ~now ~current request in
         let* () = interval_fires_as_declared ~runner_tick_sec request in
+        let* () = expiry_reaches_first_due ~runner_tick_sec request in
         let schedules = replace_schedule state.schedules request in
         let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
         let* () = write_state config next_state in

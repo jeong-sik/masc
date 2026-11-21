@@ -28,6 +28,7 @@ type keeper_route =
   | Provider_input_continuity
   | Provider_input_part
   | Provider_input
+  | Cache_outcome
   | Raw_traces
   | Raw_trace
   | Turn_records
@@ -73,6 +74,7 @@ let suffix = function
   | Provider_input_continuity -> Types.keeper_suffix_provider_input_continuity
   | Provider_input_part -> Types.keeper_suffix_provider_input_part
   | Provider_input -> Types.keeper_suffix_provider_input
+  | Cache_outcome -> Types.keeper_suffix_cache_outcome
   | Raw_traces -> "/raw-traces"
   | Raw_trace -> "/raw-trace"
   | Turn_records -> "/turn-records"
@@ -123,6 +125,10 @@ let permission ?(include_thinking = false) = function
     (match route with
      | Trajectory -> if include_thinking then Some Masc_domain.CanAdmin else None
      | Turn_records | Metrics -> Some Masc_domain.CanReadState
+     (* Counts, runtimes, times and byte sizes of two requests, the kind the
+        turn records already serve, and no request content: the snapshot
+        comparison returns where the two inputs differ, never what they hold. *)
+     | Cache_outcome -> Some Masc_domain.CanReadState
      | Checkpoints
      | Paused_work
      | Github_identity

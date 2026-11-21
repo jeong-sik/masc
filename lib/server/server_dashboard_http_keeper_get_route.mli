@@ -31,6 +31,7 @@ type keeper_route =
   | Provider_input_continuity
   | Provider_input_part
   | Provider_input
+  | Cache_outcome
   | Raw_traces
   | Raw_trace
   | Turn_records

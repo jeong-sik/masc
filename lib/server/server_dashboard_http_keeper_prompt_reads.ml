@@ -3,11 +3,10 @@
 module Http = Http_server_eio
 module Types = Server_dashboard_http_keeper_api_types
 
-(* The two provider-input doors: the parts of one turn's request, and one of
-   those parts. Both name one Keeper and one exact turn, and both run their
-   read on the pool: finding the row decodes snapshot rows newest first, and
-   a live store holds 79-231 MB of them. *)
-let handle_provider_input_get state req reqd ~name ~surface ~read =
+(* The doors onto one exact turn of one Keeper. Each runs its read on the
+   pool: finding a turn decodes store rows newest first, and a live
+   provider-input store holds 79-231 MB of them. *)
+let handle_turn_get state req reqd ~name ~surface ~read ~error_status ~error_to_string =
   let bad_request detail =
     Http.Response.json_value
       ~status:`Bad_request
@@ -40,27 +39,36 @@ let handle_provider_input_get state req reqd ~name ~surface ~read =
              | Ok json ->
                Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd
              | Error error ->
-               let status =
-                 match error with
-                 | Keeper_provider_input_snapshot.Snapshot_not_found _
-                 | Keeper_provider_input_snapshot.Part_not_found _ -> `Not_found
-                 | Keeper_provider_input_snapshot.Unknown_keeper _
-                 | Keeper_provider_input_snapshot.Store_read_failed _
-                 | Keeper_provider_input_snapshot.Malformed_snapshot _
-                 | Keeper_provider_input_snapshot.Invalid_artifact_reference _
-                 | Keeper_provider_input_snapshot.Artifact_read_failed _
-                 | Keeper_provider_input_snapshot.Artifact_missing _
-                 | Keeper_provider_input_snapshot.Artifact_length_mismatch _ ->
-                   `Service_unavailable
-               in
                Http.Response.json_value
-                 ~status
-                 (`Assoc
-                    [ ( "error"
-                      , `String
-                          (Keeper_provider_input_snapshot.read_error_to_string error) )
-                    ])
+                 ~status:(error_status error)
+                 (`Assoc [ "error", `String (error_to_string error) ])
                  reqd)))
+;;
+
+let snapshot_error_status = function
+  | Keeper_provider_input_snapshot.Snapshot_not_found _
+  | Keeper_provider_input_snapshot.Part_not_found _ -> `Not_found
+  | Keeper_provider_input_snapshot.Unknown_keeper _
+  | Keeper_provider_input_snapshot.Store_read_failed _
+  | Keeper_provider_input_snapshot.Malformed_snapshot _
+  | Keeper_provider_input_snapshot.Invalid_artifact_reference _
+  | Keeper_provider_input_snapshot.Artifact_read_failed _
+  | Keeper_provider_input_snapshot.Artifact_missing _
+  | Keeper_provider_input_snapshot.Artifact_length_mismatch _ -> `Service_unavailable
+;;
+
+(* The provider-input doors: the parts of one turn's request, one of those
+   parts, and the turn's continuity record. *)
+let handle_provider_input_get state req reqd ~name ~surface ~read =
+  handle_turn_get
+    state
+    req
+    reqd
+    ~name
+    ~surface
+    ~read
+    ~error_status:snapshot_error_status
+    ~error_to_string:Keeper_provider_input_snapshot.read_error_to_string
 ;;
 
 let handle_last_prompt_get state req reqd name =
@@ -142,4 +150,61 @@ let handle_provider_input_manifest_get state req reqd name =
             ~keeper
             ~turn_ref
           |> Result.map Keeper_provider_input_snapshot.manifest_to_json))
+;;
+
+(* No cost row of a Keeper is older than the Keeper, so the ledger walk opens
+   no day file before its creation. *)
+let keeper_born_at ~config ~keeper =
+  match Keeper_meta_store.read_meta_presence config keeper with
+  | Error detail -> Error detail
+  | Ok Keeper_meta_store.Meta_absent -> Error (Printf.sprintf "unknown keeper: %s" keeper)
+  | Ok (Keeper_meta_store.Meta_not_current detail) -> Error detail
+  | Ok (Keeper_meta_store.Meta_present meta) ->
+    let created_at = meta.Keeper_meta_contract.created_at in
+    (match Workspace_resilience.Time.parse_iso8601_opt created_at with
+     | Some born_at -> Ok born_at
+     | None ->
+       Error
+         (Printf.sprintf
+            "keeper %s: created_at %S is not an ISO 8601 time"
+            keeper
+            created_at))
+;;
+
+(* The default lifetime of the provider that answers [runtime_id] in the
+   running configuration. A runtime the configuration no longer holds names no
+   provider, which is not the same as a provider that declares nothing. *)
+let provider_default_cache_ttl_s runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Error Keeper_cache_outcome.Runtime_inactive
+  | Some runtime ->
+    (match
+       Llm_provider.Catalog_snapshot.default_cache_ttl_s
+         (Llm_provider.Catalog_snapshot.current ())
+         ~provider_id:(Runtime_schema.catalog_provider_id runtime.Runtime_instance.provider)
+     with
+     | Some lifetime_s -> Ok lifetime_s
+     | None -> Error Keeper_cache_outcome.Default_undeclared)
+;;
+
+let handle_cache_outcome_get state req reqd name =
+  handle_turn_get
+    state
+    req
+    reqd
+    ~name
+    ~surface:("/api/v1/keepers/:name" ^ Types.keeper_suffix_cache_outcome)
+    ~read:(fun ~config ~keeper ~turn_ref ->
+      Result.map
+        (fun born_at () ->
+           Keeper_cache_outcome.read
+             ~config
+             ~keeper
+             ~turn_ref
+             ~born_at
+             ~provider_default_s:provider_default_cache_ttl_s
+           |> Result.map Keeper_cache_outcome.to_json)
+        (keeper_born_at ~config ~keeper))
+    ~error_status:(fun (Keeper_cache_outcome.Ledger_unreadable _) -> `Service_unavailable)
+    ~error_to_string:Keeper_cache_outcome.read_error_to_string
 ;;

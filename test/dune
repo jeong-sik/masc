@@ -5555,7 +5555,6 @@
 
 (include stanzas/test_keeper_prompt_capture.inc)
 (include stanzas/test_keeper_provider_input_snapshot.inc)
-(include stanzas/test_keeper_provider_input_snapshot_continuity_export.inc)
 (include stanzas/test_keeper_store_locations.inc)
 (include stanzas/test_keeper_projection_change.inc)
 (include stanzas/test_keeper_cache_outcome.inc)

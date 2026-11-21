@@ -128,11 +128,16 @@ let classify_tally = function
 (* Partition Braille shapes 100% disjointly by turn outcome while keeping
    1-row keeper strips light and ECG-readable (max 2 dot rows high instead of
    solid 8-dot blocks):
-   - quiet = ·, unread = ─
+   - quiet = ·, unread = blank (RFC tui-one-screen-grammar 5.6)
    - pure ok: low bottom-aligned 1..2 dots ⣀..⣤ (dots 1,4 clear; dot 8 set)
    - rested only: single bottom-left dot ⡀ (dots 1,4,8 clear)
    - mixed: asymmetric left 1..2 + right 4 ⣸..⣼ (dot 1 clear, dot 4 set)
    - pure fail: top-hanging 1..2 dots ⠉..⠛ (dot 1 set, dot 4 set) *)
+(* A half hour whose tally was not read, or failed to read, is left blank
+   (RFC tui-one-screen-grammar 5.6 and 6.4); a quiet one is the dot. A mark
+   there drew a reading that does not exist. *)
+let unread_slot = " "
+
 let tally_marks slot_tallies =
   let arr = Array.of_list slot_tallies in
   let n = Array.length arr in
@@ -147,7 +152,7 @@ let tally_marks slot_tallies =
     for i = 0 to n - 1 do
       match arr.(i) with
       | Pulse.Slot_tally_unknown ->
-          emit recede Masc_tui_keeper_mark.grid_unknown_range_mark
+          emit recede unread_slot
       | Pulse.Slot_tally_measured _ -> (
           match classes.(i) with
           | Class_quiet_or_unknown ->
@@ -220,7 +225,6 @@ let legend_row ~ko ~cols =
   let raw =
     "  "
     ^ sample (Theme.recede ()) Masc_tui_keeper_mark.grid_dot_mark (say "무활동" "quiet")
-    ^ "  " ^ sample (Theme.recede ()) Masc_tui_keeper_mark.grid_unknown_range_mark (say "미기록" "unread")
     ^ "  " ^ sample (ok_tint 0.85) (Braille.braille_pair ~left:2 ~right:2) (say "정상(↑)" "ok(up)")
     ^ "  " ^ sample (warm_tint 0.90) (Braille.braille_pair_down ~left:2 ~right:2) (say "실패(↓)" "fail(down)")
     ^ "  " ^ sample (thermal_tint 0.62) (Braille.braille_pair ~left:2 ~right:4) (say "혼재" "mixed")
@@ -293,7 +297,7 @@ let build_baseline_ok_row ~count ~up_arr ~dn_arr ~ok_base_tone ~unknown_at =
       let dl, dr = dn_arr.(i) in
       if l = 0 && r = 0 && dl = 0 && dr = 0 then
         let mark =
-          if unknown_at i then Masc_tui_keeper_mark.grid_unknown_range_mark
+          if unknown_at i then unread_slot
           else Masc_tui_keeper_mark.grid_dot_mark
         in
         emit recede mark

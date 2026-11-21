@@ -401,8 +401,8 @@ let check_reads_back label state entry =
 
 let every_change_reads_back () =
   Alcotest.(check int)
-    "eight authorization events with eleven subjects each, and three mode events"
-    91
+    "eight authorization events with twelve subjects each, and three mode events"
+    99
     (List.length all_changes);
   with_path (fun path ->
     let store, _, _ = open_ok ~path in

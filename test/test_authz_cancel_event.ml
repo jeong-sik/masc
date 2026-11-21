@@ -138,6 +138,7 @@ let a_cancel_reads_back () =
     ; "service_credential:cred-1"
     ; "invite:invite-1"
     ; "registration:registration-1"
+    ; "policy:policy-1"
     ; "keeper_conversation:alice/conversation-1"
     ]
     (List.map Subject.to_string subjects);

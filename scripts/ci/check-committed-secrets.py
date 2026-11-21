@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pyright: strict
 """Refuse credential-shaped strings in tracked files.
 
 Three commits in this repo say "security: remove tracked <secret>" -- #636
@@ -36,8 +37,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 
@@ -52,6 +55,8 @@ MAX_BYTES = 4_000_000
 # naming any of them: they carry `ABCD` or nothing where a key carries
 # ~1600 base64 characters over ~50 lines.
 PEM_BODY_CHARS = 128
+
+Finding = tuple[str, int, str, str]
 
 RULES: list[tuple[str, re.Pattern[bytes]]] = [
     (
@@ -89,16 +94,20 @@ def digest(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def load_allowlist(path: pathlib.Path) -> set[str]:
-    if not path.exists():
-        return set()
-    pinned = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
+def parse_allowlist(text: str) -> set[str]:
+    pinned: set[str] = set()
+    for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         pinned.add(line.split()[0])
     return pinned
+
+
+def load_allowlist(path: pathlib.Path) -> set[str]:
+    if not path.exists():
+        return set()
+    return parse_allowlist(path.read_text(encoding="utf-8"))
 
 
 def tracked_files(root: pathlib.Path) -> list[pathlib.Path]:
@@ -115,11 +124,25 @@ def line_of(body: bytes, offset: int) -> int:
     return body.count(b"\n", 0, offset) + 1
 
 
-def scan(root: pathlib.Path, pinned: set[str]) -> list[tuple[str, int, str, str]]:
-    findings = []
+def scan_bytes(relative: str, body: bytes, pinned: set[str]) -> list[Finding]:
+    if len(body) > MAX_BYTES:
+        return []
+    findings: list[Finding] = []
+    for rule, pattern in RULES:
+        for match in pattern.finditer(body):
+            sha = digest(match.group(0))
+            if sha in pinned:
+                continue
+            findings.append((relative, line_of(body, match.start()), rule, sha))
+    return findings
+
+
+def scan(root: pathlib.Path, pinned: set[str]) -> list[Finding]:
+    findings: list[Finding] = []
     for path in tracked_files(root):
         try:
-            if path.stat().st_size > MAX_BYTES:
+            st = path.lstat()
+            if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_BYTES:
                 continue
             body = path.read_bytes()
         except (OSError, ValueError):
@@ -128,20 +151,57 @@ def scan(root: pathlib.Path, pinned: set[str]) -> list[tuple[str, int, str, str]
             # scan. Skipping is not a silent pass: git ls-files named it,
             # and there is nothing to read.
             continue
-        for rule, pattern in RULES:
-            for match in pattern.finditer(body):
-                sha = digest(match.group(0))
-                if sha in pinned:
-                    continue
-                findings.append(
-                    (
-                        str(path.relative_to(root)),
-                        line_of(body, match.start()),
-                        rule,
-                        sha,
-                    )
-                )
+        findings.extend(scan_bytes(str(path.relative_to(root)), body, pinned))
     return sorted(findings)
+
+
+def _escape_annotation_property(text: str) -> str:
+    return (
+        text.replace("%", "%25")
+        .replace("\r", "%0D")
+        .replace("\n", "%0A")
+        .replace(":", "%3A")
+        .replace(",", "%2C")
+    )
+
+
+def _escape_annotation_data(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _sanitize_human_path(text: str) -> str:
+    return text.replace("\r", "\\r").replace("\n", "\\n")
+
+
+def report_findings(findings: list[Finding], *, allowlist_display: str) -> int:
+    if not findings:
+        print("check-committed-secrets: no unpinned credential shapes")
+        return 0
+
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        for relative, line, rule, sha in findings:
+            escaped_file = _escape_annotation_property(relative)
+            msg = _escape_annotation_data(
+                f"unpinned credential shape [{rule}] (sha256={sha[:16]})"
+            )
+            print(f"::error file={escaped_file},line={line}::{msg}")
+
+    print(f"check-committed-secrets: {len(findings)} unpinned match(es)\n")
+    for relative, line, rule, sha in findings:
+        print(f"  {_sanitize_human_path(relative)}:{line}  [{rule}]  sha256={sha[:16]}")
+    print(
+        "\nA real credential: revoke it at the provider first -- removing the\n"
+        "file leaves the blob served, and this repo has three commits that\n"
+        "learned that. Then take the value out of the file.\n"
+        "\n"
+        "A fixture or an already-redacted capture: pin it by appending the\n"
+        "full sha256 and a reason to\n"
+        f"  {allowlist_display}\n"
+        "Print the sha with:\n"
+        "  python3 -c 'import hashlib,sys;"
+        "print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' '<value>'"
+    )
+    return 1
 
 
 def main() -> int:
@@ -151,27 +211,10 @@ def main() -> int:
 
     root = pathlib.Path(args.root).resolve()
     findings = scan(root, load_allowlist(ALLOWLIST))
-
-    if not findings:
-        print("check-committed-secrets: no unpinned credential shapes")
-        return 0
-
-    print(f"check-committed-secrets: {len(findings)} unpinned match(es)\n")
-    for relative, line, rule, sha in findings:
-        print(f"  {relative}:{line}  [{rule}]  sha256={sha[:16]}")
-    print(
-        "\nA real credential: revoke it at the provider first -- removing the\n"
-        "file leaves the blob served, and this repo has three commits that\n"
-        "learned that. Then take the value out of the file.\n"
-        "\n"
-        "A fixture or an already-redacted capture: pin it by appending the\n"
-        "full sha256 and a reason to\n"
-        f"  {ALLOWLIST.relative_to(root) if ALLOWLIST.is_relative_to(root) else ALLOWLIST}\n"
-        "Print the sha with:\n"
-        "  python3 -c 'import hashlib,sys;"
-        "print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' '<value>'"
+    allowlist_display = (
+        str(ALLOWLIST.relative_to(root)) if ALLOWLIST.is_relative_to(root) else str(ALLOWLIST)
     )
-    return 1
+    return report_findings(findings, allowlist_display=allowlist_display)
 
 
 if __name__ == "__main__":

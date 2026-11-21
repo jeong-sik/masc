@@ -39,6 +39,12 @@ val covers : entry list -> path:string -> method_:Httpun.Method.t -> bool
 val covering : entry list -> path:string -> method_:Httpun.Method.t -> entry option
 (** {!covers} as the route it matched, for a caller that wants the access. *)
 
+val methods_at : entry list -> path:string -> Httpun.Method.t list
+(** [methods_at entries ~path] is every method some entry answers at [path], in
+    registration order and without a duplicate. It is what an [OPTIONS]
+    preflight names when no handler runs, so it says what the table would
+    answer rather than repeating a registration. *)
+
 val keeper_prefix_present : entry list -> bool
 (** Whether the keeper prefix is in the inventory as a [Prefix] entry. *)
 

@@ -19,21 +19,36 @@ let method_listed entry method_ =
   List.exists (fun listed -> listed = method_) entry.methods
 ;;
 
+let path_matched entry path =
+  match entry.kind with
+  | Http_server_eio.Router.Exact -> String.equal entry.path path
+  | Http_server_eio.Router.Prefix ->
+    String.length path >= String.length entry.path
+    && String.equal (String.sub path 0 (String.length entry.path)) entry.path
+;;
+
 let covering entries ~path ~method_ =
-  List.find_opt
-    (fun entry ->
-      method_listed entry method_
-      &&
-      match entry.kind with
-      | Http_server_eio.Router.Exact -> String.equal entry.path path
-      | Http_server_eio.Router.Prefix ->
-        String.length path >= String.length entry.path
-        && String.equal (String.sub path 0 (String.length entry.path)) entry.path)
-    entries
+  List.find_opt (fun entry -> method_listed entry method_ && path_matched entry path) entries
 ;;
 
 let covers entries ~path ~method_ =
   Option.is_some (covering entries ~path ~method_)
+;;
+
+(* The methods some entry answers at [path], in registration order and without
+   a duplicate: an OPTIONS preflight names these without running a handler. *)
+let methods_at entries ~path =
+  List.fold_left
+    (fun acc entry ->
+      if path_matched entry path
+      then
+        List.fold_left
+          (fun acc method_ -> if List.mem method_ acc then acc else acc @ [ method_ ])
+          acc
+          entry.methods
+      else acc)
+    []
+    entries
 ;;
 
 let keeper_prefix_present entries =

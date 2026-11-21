@@ -37,6 +37,8 @@ class TargetedStanzaIsolation(unittest.TestCase):
         (self.root / "test/stanzas").mkdir(parents=True)
         self.reader = self.root / "scripts/ci/alias_prebuild_deps.py"
         shutil.copyfile(SCRIPTS / "ci/alias_prebuild_deps.py", self.reader)
+        self.suite_tool = self.root / "scripts/ci/targeted_suites.py"
+        shutil.copyfile(SCRIPTS / "ci/targeted_suites.py", self.suite_tool)
         self.dune = self.root / "test/dune"
         self.dune.write_text("(include stanzas/test_browser_activity.inc)\n")
         self.inc = self.root / "test/stanzas/test_browser_activity.inc"
@@ -363,6 +365,297 @@ raise SystemExit(0 if is_alias else int(os.environ['FAKE_PREPARE_EXIT']))
         self.assertIn(f"no (rule (alias runtest-{alias_name})", result.stdout)
         self.assertNotIn("(prepare alias dependencies)", result.stdout)
         self.assertIn(f"@runtest-{alias_name}: OK", result.stdout)
+
+    def _populate_shard_fixture(self):
+        self.inc.write_text("""
+(test (name test_real) (modules test_real test_helper_fixture))
+(test (name test_custom_alias) (alias custom-bench))
+(rule
+ (alias runtest-test_bundled_py)
+ (action (run python3 test_bundled_py.py)))
+(rule
+ (alias runtest-test_alias_only)
+ (action (run echo alias-only)))
+(rule
+ (alias runtest-test_unbundled_alias_only)
+ (action (run echo unbundled-alias-only)))
+(rule
+ (alias runtest-test_optin_bench)
+ (action (run python3 test_optin_bench.py)))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_bundled_py) (alias runtest-test_alias_only)))
+""")
+        (self.root / "test/test_real.ml").touch()
+        (self.root / "test/test_custom_alias.ml").touch()
+        (self.root / "test/test_helper_fixture.ml").touch()
+        (self.root / "test/helper.py").touch()
+        (self.root / "test/test_bundled_py.py").touch()
+        (self.root / "test/test_optin_bench.py").touch()
+
+        sub = self.root / "test/sub_suite"
+        sub.mkdir()
+        (sub / "dune").write_text("(test (name test_nested))\n")
+        (sub / "test_nested.ml").touch()
+
+        multi = self.root / "test/multi_suite"
+        multi.mkdir()
+        (multi / "dune").write_text("(tests (names test_a test_b))\n")
+        (multi / "test_a.ml").touch()
+        (multi / "test_b.ml").touch()
+
+        hidden = self.root / "test/.venv"
+        hidden.mkdir()
+        (hidden / "dune").write_text("(test (name test_hidden_dotdir))\n")
+
+        ext = self.root / "packages/agent_core/test"
+        ext.mkdir(parents=True)
+        (ext / "dune").write_text("(test (name test_ext))\n")
+        (ext / "test_ext.ml").touch()
+
+    def test_shard_enumeration_excludes_helpers_and_preserves_subdir_paths(self):
+        self._populate_shard_fixture()
+        result = subprocess.run(
+            [sys.executable, str(self.suite_tool), "enumerate",
+             "--repo-root", str(self.root), "--system", "linux"],
+            text=True, capture_output=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "packages/agent_core/test/test_ext",
+                "test/multi_suite/test_a",
+                "test/multi_suite/test_b",
+                "test/sub_suite/test_nested",
+                "test_alias_only",
+                "test_bundled_py",
+                "test_real",
+            ],
+        )
+
+    def test_shard_enumeration_respects_enabled_if(self):
+        self.inc.write_text("""
+(test (name test_mac_only) (enabled_if (= %{system} macosx)))
+(test (name test_linux_only) (enabled_if (= %{system} linux)))
+(test (name test_non_win) (enabled_if (and (<> %{system} win32) (not (= %{system} macosx)))))
+(test (name test_or_pred) (enabled_if (or (= %{system} win32) (= %{env:MASC_E2E_TESTS=false} true))))
+(test (name test_unknown_var) (enabled_if (= %{os_type} Unix)))
+(rule
+ (alias runtest-test_linux_rule)
+ (enabled_if (= %{system} linux))
+ (action (run true)))
+(rule
+ (alias runtest-test_gated_bundle_rule)
+ (action (run true)))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_linux_rule)))
+(alias
+ (name runtest)
+ (enabled_if (= %{env:MASC_E2E_TESTS=false} true))
+ (deps (alias runtest-test_gated_bundle_rule)))
+""")
+        env_off = dict(os.environ)
+        env_off.pop("MASC_E2E_TESTS", None)
+        linux_off = subprocess.run(
+            [sys.executable, str(self.suite_tool), "enumerate",
+             "--repo-root", str(self.root), "--system", "linux"],
+            env=env_off, text=True, capture_output=True, timeout=10,
+        )
+        self.assertEqual(linux_off.returncode, 0, linux_off.stderr)
+        self.assertEqual(
+            linux_off.stdout.splitlines(),
+            ["test_linux_only", "test_linux_rule", "test_non_win", "test_unknown_var"],
+        )
+
+        mac_on = subprocess.run(
+            [sys.executable, str(self.suite_tool), "enumerate",
+             "--repo-root", str(self.root), "--system", "macosx"],
+            env=dict(env_off, MASC_E2E_TESTS="true"),
+            text=True, capture_output=True, timeout=10,
+        )
+        self.assertEqual(mac_on.returncode, 0, mac_on.stderr)
+        self.assertEqual(
+            mac_on.stdout.splitlines(),
+            [
+                "test_gated_bundle_rule",
+                "test_mac_only",
+                "test_or_pred",
+                "test_unknown_var",
+            ],
+        )
+
+    def test_parser_handles_quoted_parens_and_fails_closed_on_malformed_stanzas(self):
+        self.inc.write_text("""
+(rule (target x) (action (echo ")")))
+(rule (target y) (action (echo "(")))
+(test (name test_after_quoted_parens))
+""")
+        ok = subprocess.run(
+            [sys.executable, str(self.suite_tool), "enumerate",
+             "--repo-root", str(self.root), "--system", "linux"],
+            text=True, capture_output=True, timeout=10,
+        )
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertEqual(ok.stdout.splitlines(), ["test_after_quoted_parens"])
+
+        for label, bad_text, expected_err in (
+            ("stray_rparen", "(test (name a)) ) (test (name b))\n", "unexpected ')'"),
+            ("unclosed_lparen", "(test (name a)\n", "unclosed '('"),
+            ("missing_include", "(include missing.inc)\n", "cannot read"),
+        ):
+            with self.subTest(case=label):
+                self.inc.write_text(bad_text)
+                bad = subprocess.run(
+                    [sys.executable, str(self.suite_tool), "enumerate",
+                     "--repo-root", str(self.root), "--system", "linux"],
+                    text=True, capture_output=True, timeout=10,
+                )
+                self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
+                self.assertIn(expected_err, bad.stderr)
+
+        # The runner itself must fail closed when stanza parsing fails.
+        self.inc.write_text("(test (name a)\n")
+        runner = self.root / "scripts/ci-run-targeted-tests.sh"
+        shutil.copyfile(SCRIPTS / runner.name, runner)
+        env = dict(os.environ, SHARD_COUNT="2", SHARD_INDEX="0",
+                   CI_TEST_LOG_FILE=str(self.root / "runner-malformed.log"))
+        env.pop("TARGET_SUITES", None)
+        runner_res = subprocess.run(
+            ["bash", str(runner)], cwd=self.root, env=env,
+            text=True, capture_output=True, timeout=15,
+        )
+        self.assertNotEqual(runner_res.returncode, 0)
+        self.assertIn("unclosed '('", runner_res.stderr)
+
+    def _prepare_stub_runner(self):
+        runner = self.root / "scripts/ci-run-targeted-tests.sh"
+        shutil.copyfile(SCRIPTS / runner.name, runner)
+        commands = self.root / "commands"
+        commands.mkdir(exist_ok=True)
+        self.executable(commands / "timeout", "import os,sys\nos.execvp(sys.argv[6], sys.argv[6:])\n")
+        self.executable(commands / "opam", """
+import json,sys
+from pathlib import Path
+with Path('opam-calls.jsonl').open('a') as handle:
+    handle.write(json.dumps(sys.argv[1:]) + "\\n")
+""")
+        return runner, commands
+
+    def test_explicit_helper_ml_is_rejected_without_blocking_valid_suites(self):
+        self._populate_shard_fixture()
+        runner, commands = self._prepare_stub_runner()
+        env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                   TARGET_SUITES="test_helper_fixture,test_real", DUNE_JOBS="2",
+                   CI_TEST_LOG_FILE=str(self.root / "runner.log"))
+        result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
+                                text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("no (test)/(tests) stanza declares test_helper_fixture in test/dune",
+                      result.stdout)
+        calls = [json.loads(line) for line in
+                 (self.root / "opam-calls.jsonl").read_text().splitlines()]
+        self.assertEqual(
+            calls,
+            [
+                ["exec", "--", "dune", "build", "--root", ".", "-j", "2", "test/test_real.exe"],
+                ["exec", "--", "dune", "build", "--root", ".", "--force", "--no-buffer",
+                 "--verbose", "-j", "1", "@@test/runtest-test_real"],
+            ],
+        )
+
+    def test_explicit_standalone_helper_exits_2_without_calling_opam(self):
+        self._populate_shard_fixture()
+        runner, commands = self._prepare_stub_runner()
+        env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                   TARGET_SUITES="test_helper_fixture", DUNE_JOBS="2",
+                   CI_TEST_LOG_FILE=str(self.root / "runner-only-helper.log"))
+        result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
+                                text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("no (test)/(tests) stanza declares test_helper_fixture in test/dune",
+                      result.stdout)
+        self.assertFalse((self.root / "opam-calls.jsonl").exists())
+
+    def test_explicit_fileless_alias_and_subdir_spellings(self):
+        self._populate_shard_fixture()
+        runner, commands = self._prepare_stub_runner()
+        env = dict(
+            os.environ,
+            PATH=str(commands) + os.pathsep + os.environ["PATH"],
+            TARGET_SUITES=(
+                "test_unbundled_alias_only,sub_suite/test_nested,"
+                "test/multi_suite/test_a,packages/foo/test_unbundled_alias_only"
+            ),
+            DUNE_JOBS="2",
+            CI_TEST_LOG_FILE=str(self.root / "runner-explicit.log"),
+        )
+        result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
+                                text=True, capture_output=True, timeout=15)
+        # Path-qualified alias must not fall back to test/ runtest-* aliases.
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL - packages/foo/test_unbundled_alias_only names no suite",
+                      result.stdout)
+        self.assertNotIn("could not read the alias deps", result.stdout)
+        calls = [json.loads(line) for line in
+                 (self.root / "opam-calls.jsonl").read_text().splitlines()]
+        self.assertEqual(
+            calls,
+            [
+                [
+                    "exec", "--", "dune", "build", "--root", ".", "-j", "2",
+                    "test/sub_suite/test_nested.exe", "test/multi_suite/test_a.exe",
+                ],
+                [
+                    "exec", "--", "dune", "build", "--root", ".", "--force", "--no-buffer",
+                    "--verbose", "-j", "1", "@runtest-test_unbundled_alias_only",
+                ],
+                [
+                    "exec", "--", "dune", "build", "--root", ".", "--force", "--no-buffer",
+                    "--verbose", "-j", "1", "@@test/sub_suite/runtest-test_nested",
+                ],
+                [
+                    "exec", "--", "dune", "build", "--root", ".", "--force", "--no-buffer",
+                    "--verbose", "-j", "1", "@@test/multi_suite/runtest-test_a",
+                ],
+            ],
+        )
+
+    def test_shard_mode_end_to_end_covers_every_suite_with_zero_unresolved(self):
+        self._populate_shard_fixture()
+        runner, commands = self._prepare_stub_runner()
+        executed_aliases = []
+        for idx in range(3):
+            log_file = self.root / f"shard-{idx}.log"
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                       SHARD_COUNT="3", SHARD_INDEX=str(idx), DUNE_JOBS="2",
+                       CI_TEST_LOG_FILE=str(log_file))
+            env.pop("TARGET_SUITES", None)
+            result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
+                                    text=True, capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn("FAIL", result.stdout)
+            self.assertNotIn("could not read the alias deps", result.stdout)
+        calls = [json.loads(line) for line in
+                 (self.root / "opam-calls.jsonl").read_text().splitlines()]
+        for argv in calls:
+            if "--force" in argv:
+                executed_aliases.append(argv[-1])
+        self.assertEqual(
+            sorted(executed_aliases),
+            sorted(
+                [
+                    "@@packages/agent_core/test/runtest-test_ext",
+                    "@@test/multi_suite/runtest-test_a",
+                    "@@test/multi_suite/runtest-test_b",
+                    "@@test/sub_suite/runtest-test_nested",
+                    "@@test/runtest-test_real",
+                    "@runtest-test_alias_only",
+                    "@runtest-test_bundled_py",
+                ]
+            ),
+        )
 
 
 if __name__ == "__main__":

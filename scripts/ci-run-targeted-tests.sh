@@ -17,17 +17,20 @@ export DUNE_SOURCEROOT
 if [ -n "${TARGET_EIO_BACKEND:-}" ]; then
   export EIO_BACKEND="${TARGET_EIO_BACKEND:-}"
 fi
+suite_tool="${repo_root}/scripts/ci/targeted_suites.py"
 # Shard support: SHARD_COUNT + SHARD_INDEX split the full behavioural
 # suite across workflow matrix jobs. The nightly measured one job growing
 # _build/<hash>/default/test by ~24G to 97% disk (run 43858983604), and
 # between-suite cleanup cannot help inside a single sequential job, so
 # the split itself is the fix. With both vars set and no explicit
-# TARGET_SUITES, suites are enumerated as the root @runtest alias runs
-# them — every (test (name X)) stanza in test/dune, the stanza files it
-# (include)s and test/<dir>/dune, plus the runtest-<name> lanes that the
-# root (alias (name runtest)) bundles reference — then filtered by a
-# stable checksum so every runner assigns every suite identically. Explicit TARGET_SUITES always wins, so the pull-request
-# gate and targeted dispatches are untouched.
+# TARGET_SUITES, suites are enumerated via scripts/ci/targeted_suites.py from
+# Dune's declared `(test)`/`(tests)` stanzas (preserving subdirectory paths and
+# evaluating `(enabled_if ...)` predicates) plus the `runtest-<name>` rules
+# referenced by `test/dune`'s `(alias (name runtest))` bundles — never raw
+# helper `.ml`/`.py` files or bare directory names — then filtered by a stable
+# checksum so every runner assigns every suite identically. Explicit
+# TARGET_SUITES always wins, so the pull-request gate and targeted dispatches
+# are untouched.
 if [ -n "${SHARD_COUNT:-}" ] && [ -n "${SHARD_INDEX:-}" ] && [ -z "${TARGET_SUITES}" ]; then
   case "${SHARD_COUNT}" in *[!0-9]*|"") log "[targeted] FAIL - shard: SHARD_COUNT is not a number"; exit 2;; esac
   case "${SHARD_INDEX}" in *[!0-9]*|"") log "[targeted] FAIL - shard: SHARD_INDEX is not a number"; exit 2;; esac
@@ -35,6 +38,7 @@ if [ -n "${SHARD_COUNT:-}" ] && [ -n "${SHARD_INDEX:-}" ] && [ -z "${TARGET_SUIT
     log "[targeted] FAIL - shard: need SHARD_COUNT >= 1 and SHARD_INDEX in [0,SHARD_COUNT)"
     exit 2
   fi
+  shard_enum_output="$(python3 "${suite_tool}" enumerate --repo-root "${repo_root}")"
   shard_list=""
   shard_n=0
   while IFS= read -r name; do
@@ -43,41 +47,7 @@ if [ -n "${SHARD_COUNT:-}" ] && [ -n "${SHARD_INDEX:-}" ] && [ -z "${TARGET_SUIT
       shard_list="${shard_list:+${shard_list},}${name}"
       shard_n=$((shard_n + 1))
     fi
-  done < <(
-    {
-      python3 - <<'PY_ENUM'
-import re, glob
-names = set()
-files = ['test/dune'] + sorted(glob.glob('test/stanzas/*.inc')) + sorted(glob.glob('test/*/dune'))
-stanza = re.compile(r'\(test\b')
-name = re.compile(r'\(name\s+([A-Za-z0-9_.-]+)\)')
-bundle = re.compile(r'\(alias\s*\(\s*name\s+runtest\s*\)\s*\(deps\s*(.*?)\)\s*\)', re.S)
-ref = re.compile(r'\(alias\s+runtest-([A-Za-z0-9_.-]+)\)')
-for f in files:
-    try:
-        s = open(f, encoding='utf-8', errors='replace').read()
-    except OSError:
-        continue
-    for m in stanza.finditer(s):
-        nm = name.search(s[m.end():m.end() + 600])
-        if nm:
-            names.add(nm.group(1))
-    for bm in bundle.finditer(s):
-        for am in ref.finditer(bm.group(1)):
-            names.add(am.group(1))
-for n in sorted(names):
-    print(n)
-PY_ENUM
-      find test -maxdepth 1 -name 'test_*.ml' -printf '%f\n' 2>/dev/null | sed -e 's|\.ml$||'
-      find test -maxdepth 1 -name '*.py' -printf '%f\n' 2>/dev/null | sed -e 's|\.py$||'
-      grep -Eho '^[[:space:]]*\(alias runtest-[A-Za-z0-9_-]+\)[[:space:]]*$' \
-        test/dune test/stanzas/* 2>/dev/null | sed -e 's|.*(alias runtest-||' -e 's|)||'
-      for d in test/*/; do
-        [ -f "${d}dune" ] && grep -Eq '^\(test' "${d}dune" 2>/dev/null \
-          && basename "${d}"
-      done
-    } | LC_ALL=C sort -u
-  )
+  done <<< "${shard_enum_output}"
   if [ "${shard_n}" -eq 0 ]; then
     log "[targeted] FAIL - shard ${SHARD_INDEX}/${SHARD_COUNT}: enumeration matched nothing"
     exit 2
@@ -95,7 +65,12 @@ alias_names=()
 alias_exes=()
 alias_deps=()
 unresolved=()
+undeclared_suites=()
+undeclared_paths=()
+candidate_ocaml_suites=()
+candidate_ocaml_paths=()
 prebuild_reader="${repo_root}/scripts/ci/alias_prebuild_deps.py"
+runtest_aliases="$(python3 "${suite_tool}" list-runtest-aliases --repo-root "${repo_root}")"
 IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
 for suite in ${requested[@]+"${requested[@]}"}; do
   suite="${suite// /}"
@@ -125,8 +100,7 @@ for suite in ${requested[@]+"${requested[@]}"}; do
     alias_dirs+=("test")
     alias_names+=("${suite##*/}")
   elif [ "${suite}" = "${suite##*/}" ] \
-    && grep -Eqr "^[[:space:]]*\(alias runtest-${suite}\)[[:space:]]*$" \
-         test/dune test/stanzas 2>/dev/null; then
+    && [[ $'\n'"${runtest_aliases}"$'\n' == *$'\n'"${suite}"$'\n'* ]]; then
     aliases+=("@runtest-${suite}")
     alias_dirs+=("test")
     alias_names+=("${suite}")
@@ -147,20 +121,57 @@ for suite in ${requested[@]+"${requested[@]}"}; do
       unresolved+=("${suite}")
       continue
     fi
-    # Dune runs the suite through the per-test alias it generates for every
-    # named test (Dune 3.20+, below this repository's 3.22 minimum). The
-    # stanza's (setenv ...), the directory's (env ...), its deps and the
-    # working directory are then the ones the root @runtest uses. Running
-    # the executable from the shell instead meant re-implementing each of
-    # those here, and every one that was missed produced a verdict the
-    # nightly lane did not agree with. The double @ keeps the alias to this
-    # directory.
-    aliases+=("@@$(dirname "${suite_path}")/runtest-$(basename "${suite_path}")")
-    alias_dirs+=("$(dirname "${suite_path}")")
-    alias_names+=("$(basename "${suite_path}")")
-    alias_exes+=("${suite_path}.exe")
+    candidate_ocaml_suites+=("${suite}")
+    candidate_ocaml_paths+=("${suite_path}")
   fi
 done
+# Batch-verify every OCaml .ml candidate against its directory's Dune
+# `(test)`/`(tests)` stanzas so helper modules (which have `.ml` files on disk
+# but no executable stanza) are reported cleanly as unresolved instead of
+# failing the whole batch's `dune build` with "Don't know how to build".
+if [ "${#candidate_ocaml_paths[@]}" -gt 0 ]; then
+  verified_output="$(printf '%s\n' "${candidate_ocaml_paths[@]}" | python3 "${suite_tool}" verify-ocaml-suites --repo-root "${repo_root}")"
+  idx=0
+  while IFS=$'\t' read -r checked_path checked_status; do
+    [ -n "${checked_path}" ] || continue
+    if [ "${idx}" -ge "${#candidate_ocaml_paths[@]}" ] \
+      || [ "${checked_path}" != "${candidate_ocaml_paths[$idx]}" ]; then
+      log "[targeted] FAIL - verify-ocaml-suites alignment mismatch at index ${idx}: got '${checked_path}'"
+      exit 2
+    fi
+    orig_suite="${candidate_ocaml_suites[$idx]}"
+    suite_path="${candidate_ocaml_paths[$idx]}"
+    idx=$((idx + 1))
+    case "${checked_status}" in
+      OK)
+        # Dune runs the suite through the per-test alias it generates for every
+        # named test (Dune 3.20+, below this repository's 3.22 minimum). The
+        # stanza's (setenv ...), the directory's (env ...), its deps and the
+        # working directory are then the ones the root @runtest uses. Running
+        # the executable from the shell instead meant re-reading each of those
+        # here, and every one that was missed produced a verdict the nightly
+        # lane did not agree with. The double @ keeps the alias to this
+        # directory.
+        aliases+=("@@$(dirname "${suite_path}")/runtest-$(basename "${suite_path}")")
+        alias_dirs+=("$(dirname "${suite_path}")")
+        alias_names+=("$(basename "${suite_path}")")
+        alias_exes+=("${suite_path}.exe")
+        ;;
+      UNDECLARED)
+        undeclared_suites+=("${orig_suite}")
+        undeclared_paths+=("${suite_path}")
+        ;;
+      *)
+        log "[targeted] FAIL - verify-ocaml-suites returned unexpected status '${checked_status}' for '${checked_path}'"
+        exit 2
+        ;;
+    esac
+  done <<< "${verified_output}"
+  if [ "${idx}" -ne "${#candidate_ocaml_paths[@]}" ]; then
+    log "[targeted] FAIL - verify-ocaml-suites returned ${idx}/${#candidate_ocaml_paths[@]} entries"
+    exit 2
+  fi
+fi
 # A name that resolves to nothing used to end the dispatch right
 # here, before a single suite was built, and it named only the first
 # one it reached: a ten-suite batch with one misspelling returned no
@@ -172,6 +183,14 @@ resolution_status=0
 if [ "${#unresolved[@]}" -ne 0 ]; then
   for suite in ${unresolved[@]+"${unresolved[@]}"}; do
     log "[targeted] FAIL - ${suite} names no suite: no test/${suite}.ml, ${suite}.ml, test/${suite}.py or ${suite}.py, and no (alias runtest-${suite##*/})"
+  done
+  resolution_status=1
+fi
+if [ "${#undeclared_suites[@]}" -ne 0 ]; then
+  for i in "${!undeclared_suites[@]}"; do
+    suite="${undeclared_suites[$i]}"
+    suite_path="${undeclared_paths[$i]}"
+    log "[targeted] FAIL - ${suite} has ${suite_path}.ml but no (test)/(tests) stanza declares $(basename "${suite_path}") in $(dirname "${suite_path}")/dune"
   done
   resolution_status=1
 fi

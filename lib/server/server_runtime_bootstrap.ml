@@ -2329,10 +2329,19 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
         with
         | Ok () -> ()
         | Error rejection ->
-          raise
-            (Env_config_core.Config_error
-               ("the HTTP port of this server is not announced to the host: "
-                ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection))));
+          (* A refused announcement is a fatal boot error: the boot must stop
+             before [on_ready] runs and before the port is recorded, and the
+             process must exit promptly. Raising here unwinds through the
+             session-switch teardown, which waits for the owner-initialization
+             fiber's non-cancellable stretches and can outlive the error by
+             minutes (run 44946173785: the child kept booting with its port
+             held until SIGKILL). Exit directly with the regulated fatal code
+             instead; the log line keeps the exact refusal wording so the
+             port-cannot-be-announced tests can match it. *)
+          Log.Server.error
+            "[FATAL] the HTTP port of this server is not announced to the host: %s"
+            (Server_startup_takeover.base_path_lock_rejection_to_string rejection);
+          exit 1));
     Eio.Promise.resolve publish_listener_bound ();
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with

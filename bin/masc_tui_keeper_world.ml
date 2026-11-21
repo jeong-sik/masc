@@ -27,8 +27,10 @@ let briefing_word ~ko = function
       marked (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution)
         (if ko then "오래됨" else "stale")
   | Wire.Unavailable ->
+      (* The Memory world names this status "조회 불가"; one status, one
+         word. "없음" read as an absent briefing beside the failed mark. *)
       marked (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
-        (if ko then "없음" else "unavailable")
+        (if ko then "조회 불가" else "unavailable")
 
 let now_word ~ko = function
   | World.Not_read ->

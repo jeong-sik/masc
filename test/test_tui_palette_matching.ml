@@ -619,7 +619,7 @@ let test_retained_history_is_available_without_current_configuration () =
     check_bool "the query offers the original observation target" true
       (List.exists (fun (_,action) -> action=Palette_lane_history lane)
         (palette_matches state)))
-    [Lane_run_identity.Workspace_curator; Lane_run_identity.Verifier]
+    [Lane_run_identity.Candle_appraiser; Lane_run_identity.Verifier]
 ;;
 
 let test_korean_aliases_and_ui_language_entries () =

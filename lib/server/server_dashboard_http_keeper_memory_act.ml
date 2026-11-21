@@ -266,6 +266,15 @@ let refusal_fields : Librarian_machine.act_refusal -> (string * Yojson.Safe.t) l
         | None -> `Null )
     ]
   | Not_the_faulted_line -> [ "code", `String "not_the_faulted_line" ]
+  | Turn_log_stopped_on_line ->
+    [ "code", `String "turn_log_stopped_on_line"
+    ; ( "operator_action"
+      , `String
+          "The Keeper's turn log grows no more while this line is in its tail, so no \
+           later turn reaches Memory. Stop the server, delete the Keeper's turn log \
+           file, start the server, then send restart_reading (RFC \
+           librarian-call-only-proposes §18.5)." )
+    ]
   | Content_unread -> [ "code", `String "content_unread" ]
   | Act_unavailable (Store_stopped stop) -> ("code", `String "store_stopped") :: stop_fields stop
   | Act_unavailable Keeper_retired -> [ "code", `String "keeper_not_registered" ]

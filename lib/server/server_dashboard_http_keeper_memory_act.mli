@@ -38,9 +38,11 @@
       because the line does not decode or is out of order, when no unit
       before it holds an item. [offset] is the one the input fault names. An
       offset that is not the line reading stops on now is refused as
-      [not_the_faulted_line]. Reading goes on past the line; the turn log's
-      writer still appends nothing after a line it cannot decode in the
-      file's tail, until the file is mended.
+      [not_the_faulted_line]. A line the turn log itself stops on, because
+      the read of the file's tail that every append starts with fails on
+      it, is refused as [turn_log_stopped_on_line]: passing it would leave
+      nothing unread while no later turn reaches Memory. That refusal's
+      [operator_action] names the way out, which is the file's (§18.5).
 
     The writer decides whether it takes the action. A refusal changes
     nothing. *)

@@ -401,6 +401,15 @@ type act_refusal =
       unread, a unit that holds an item or an unannounced reset comes
       first, reading stops on another line, or the file is another turn
       log or the stored offset is lost, which [Restart_reading] passes. *)
+  | Turn_log_stopped_on_line
+  (** The offset is the line reading stops on, and the turn log stops on it
+      too: the read of the file's tail that every append of the turn log
+      starts with fails on this line, so the file grows no more
+      ({!Keeper_turn_log_store.read_error}). A skip would leave nothing
+      unread while no later turn reaches Memory, so the line is not passed
+      and how the last ask ended is kept. The way out is the file's: it is
+      deleted with the server stopped, and reading is restarted in the new
+      file (RFC §18.5). *)
   | Content_unread
   (** A byte file or the external store could not be read now, so the
       act's condition was not read. Nothing changed. *)
@@ -524,9 +533,13 @@ val skip_item
     [Not_done (Act_unavailable (Store_stopped s))], and so is a commit that
     appends no line, which stops the store with [s] (§9.2).
 
-    The act passes the line for reading only. The turn log's writer still
-    appends nothing after a line it cannot decode in the file's tail
-    ({!Keeper_turn_log_store.read_error}). *)
+    A line the turn log itself stops on is not passed. Every append of the
+    turn log starts with {!Keeper_turn_log_store.read_tail}; when that read
+    fails on the line at [offset] as [Row_undecodable], the answer is
+    [Not_done Turn_log_stopped_on_line]. The read does not reach a line when
+    the lines after it say where the next unit starts and whether a turn is
+    open, and that line is passed. A tail that cannot be read now is
+    [Not_done Turn_log_unread]. *)
 val skip_line : place -> t -> at:float -> offset:int -> t * act_answer
 
 (** What the writer's fiber does to the ask's fiber after one step. *)

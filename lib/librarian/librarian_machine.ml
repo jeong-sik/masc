@@ -691,6 +691,7 @@ type act_refusal =
   | Turn_log_unread
   | Not_the_head of { now : skip_target option }
   | Not_the_faulted_line
+  | Turn_log_stopped_on_line
   | Content_unread
   | Act_unavailable of unavailable
 
@@ -875,6 +876,29 @@ let skip_item place ~stores t ~at ~by ~target =
           { t with state = Stopped stop }, Not_done (Act_unavailable (Store_stopped stop))))
 ;;
 
+(* Whether the turn log still grows with the line at [offset] left where it
+   is (§5.2). Every append of the turn log starts with a read of the file's
+   tail, and when that read fails on a line the log grows no more. A skip of
+   that line would leave nothing unread and nothing wrong to show while no
+   later turn reaches Memory, so the line is not passed. The tail read does
+   not reach a line when the lines after it say where the next unit starts
+   and whether a turn is open: that line is passed.
+
+   The reader has just read the file from its first line to the line at
+   [offset]. A tail with no line, or with no line that starts the log, is
+   then another file than the one the reader read. *)
+let turn_log_goes_on_past turns_path ~offset =
+  match Keeper_turn_log_store.read_tail turns_path with
+  | Ok (Keeper_turn_log_store.Written _) -> Ok ()
+  | Error
+      (Row_undecodable { offset = stopped; reason = (_ : Keeper_turn_log_store.undecodable) }) ->
+    if Int.equal stopped offset then Error Turn_log_stopped_on_line else Ok ()
+  | Error (Read_failed { path = (_ : string); detail = (_ : string) } | Moved_while_reading) ->
+    Error Turn_log_unread
+  | Ok Keeper_turn_log_store.Nothing_written | Error Log_start_missing ->
+    Error Not_the_faulted_line
+;;
+
 (* What a skip of a line passes, read from the disk when it is taken. The
    reader, run again from the tail, stops at a line it does not read only
    when no unit before that line holds an item, and never at a line before
@@ -889,10 +913,8 @@ let skip_item place ~stores t ~at ~by ~target =
    neither the line nor where it ends, and the hole holds the hash of the
    bytes that were judged. *)
 let line_to_pass place store ~offset =
-  match
-    Librarian_unread.read ~turns_path:(turns_path place) ~until:(First_with_items 1)
-      (Store.tail store)
-  with
+  let turns_path = turns_path place in
+  match Librarian_unread.read ~turns_path ~until:(First_with_items 1) (Store.tail store) with
   | Error (Unread { detail = (_ : string) }) -> Error Turn_log_unread
   | Error (Fault (Turn_log_replaced _ | Position_lost _ | Line_unreadable _ | Content_unreadable _))
   | Ok
@@ -908,11 +930,14 @@ let line_to_pass place store ~offset =
       ; bytes = (_ : int)
       } ->
     if Int.equal at offset
-    then (
-      let reach : Read_result.reach =
-        { line = offset; within = Whole; covered = from; turn_log_offset = past_line }
-      in
-      Ok (Librarian_log.Line_unreadable { offset; sha }, reach))
+    then
+      Result.map
+        (fun () ->
+           let reach : Read_result.reach =
+             { line = offset; within = Whole; covered = from; turn_log_offset = past_line }
+           in
+           Librarian_log.Line_unreadable { offset; sha }, reach)
+        (turn_log_goes_on_past turns_path ~offset)
     else Error Not_the_faulted_line
 ;;
 

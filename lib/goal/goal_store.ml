@@ -951,8 +951,7 @@ let upsert_goal_with_events config ~actor ?id ?title ?measure ?procedure ?due_da
                 | None, _ | Some _, (None | Some _) ->
                   Error (Rejected
                     "measure and a non-blank procedure are required for a new goal \
-                     (RFC-0387 B1: a goal must declare a measurable \
-                     success condition)")
+                     (a goal must declare a measurable success condition)")
           in
           let revision = state.version + 1 in
           let goals = match action with

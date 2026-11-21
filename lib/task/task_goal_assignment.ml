@@ -49,7 +49,7 @@ let set_task_goal_error_to_string = function
   | Already_assigned { task_id; existing_goal_ids } ->
     Printf.sprintf
       "task '%s' is already assigned to goal(s) [%s]; reassignment is out of \
-       scope (RFC-0267 Phase 2 only links goalless tasks)"
+       scope (only goalless tasks can be linked)"
       task_id
       (String.concat ", " existing_goal_ids)
   | Link_write_failed msg -> Printf.sprintf "failed to persist task goal link: %s" msg

@@ -60,7 +60,7 @@ type failure =
 let failure_to_string = function
   | Pool_unavailable ->
     "masc_http_client: Eio_context.set_env not called — \
-     RFC-0107 Phase D pool cannot be initialized.  This indicates a \
+     the HTTP connection pool cannot be initialized.  This indicates a \
      bootstrap-order bug (Pool.request from before \
      Server_runtime_bootstrap.create_server_state)."
   | Request_failed error -> Pool.request_error_to_string error

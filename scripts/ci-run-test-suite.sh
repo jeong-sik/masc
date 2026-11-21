@@ -258,7 +258,11 @@ run_suite_under_deadline() {
   # The deadline below and the "finished in" line after the call measure the
   # suite, not this baseline: take the start time after the baseline read.
   started=$(date +%s)
-  opam exec -- dune build --root . --trace-file "$trace" "$alias_target" >> "$log" 2>&1 &
+  # $alias_target holds one target, or a shard's targets separated by spaces.
+  # Dune parses the whole workspace before it builds anything, so one process per
+  # shard keeps that cost to one per shard; a process per suite multiplied it by
+  # 1843 (a sharded run measured about three minutes per invocation here).
+  opam exec -- dune build --root . --trace-file "$trace" $alias_target >> "$log" 2>&1 &
   local dune_pid=$!
   local exited disk_watcher_pid disk_watcher_exited
   local disk_watcher_stopped=false
@@ -439,10 +443,14 @@ shard_aliases() {
     | awk -v c="$count" -v i="$index" 'NR % c == i'
 }
 
-run_one_target() {
+run_targets() {
+  # $1 is one target, or a shard's targets separated by spaces; dune takes them
+  # all in one process. Building one suite per process cost about three minutes
+  # of workspace parsing per suite, which no shard count survives.
   alias_target="$1"
-  echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
-  printf '\n[test-suite] ===== %s =====\n' "$alias_target" >> "$active_log"
+  label="$2"
+  echo "[test-suite] dune build ${label} (deadline ${deadline}s)"
+  printf '\n[test-suite] ===== %s =====\n' "$label" >> "$active_log"
   run_suite_under_deadline
   if [ "$rc" != 0 ] && [ "$overall_rc" = 0 ]; then
     overall_rc="$rc"
@@ -491,9 +499,11 @@ if [ "$shard_count" -gt 1 ]; then
       continue
     fi
     : > "$active_log"
-    for target in $targets; do
-      run_one_target "$target"
-    done
+    # One dune process for the whole shard: it parses the workspace once and
+    # links this slice only, so the peak is the slice and the parse cost is per
+    # shard rather than per suite.
+    shard_target_words="$(printf '%s\n' "$targets" | tr '\n' ' ' | sed 's/ *$//')"
+    run_targets "$shard_target_words" "shard ${idx}/${shard_count} (${shard_size} target(s))"
     # Append this shard's log to the uploaded one in shard order, so the final
     # file reads in the order the suites ran.
     {
@@ -522,7 +532,7 @@ if [ "$shard_count" -gt 1 ]; then
 else
   active_log="$log"
   : > "$active_log"
-  run_one_target "$alias_target"
+  run_targets "$alias_target" "$alias_target"
 fi
 rc="$overall_rc"
 echo "[test-suite] finished in $(( $(date +%s) - run_started ))s with exit ${rc}"

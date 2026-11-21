@@ -1,6 +1,7 @@
 name = "masc_keeper_sandbox_stop"
 description = "Stop the managed sandbox container(s) for a keeper or fleet."
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "name"

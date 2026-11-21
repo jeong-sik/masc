@@ -64,6 +64,7 @@ type cache_session_wire = Capability_vocab.cache_session_wire =
 type prompt_cache_wire = Capability_vocab.prompt_cache_wire =
   | No_prompt_cache_wire
   | Openrouter_top_level_cache_control
+  | Kimi_prompt_cache_options
 
 type reasoning_replay_override = Capability_vocab.reasoning_replay_override =
   | Default_reasoning_replay

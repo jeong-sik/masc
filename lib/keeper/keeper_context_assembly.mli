@@ -140,6 +140,13 @@ val dynamic_context_sections : t -> Keeper_context_layers.section list option
     no section, or when two sections share a source, so a caller that cannot
     name every section apart keeps the block whole. *)
 
+val split_outside_context : t -> string option * string option
+(** Split assembled turn context into [(host_system_context, outside_context)]
+    using {!Keeper_context_layers.author_of_layer} and an exhaustive
+    classification of {!Prompt_block_id.t}. Untrusted outside/keeper-authored
+    text is separated onto the [Outside_context] wire channel while host-owned
+    state stays on [System_context]. *)
+
 val receipt_to_json : receipt -> Yojson.Safe.t
 (** V2 adds a renderer-issued dynamic subpartition only when the exact block
     bytes match. Missing or stale renderer evidence is explicitly unavailable.

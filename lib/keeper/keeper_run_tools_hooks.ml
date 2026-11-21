@@ -1498,9 +1498,14 @@ let assemble_hooks
                   ();
                 Eio.Fiber.yield ();
                 emit_request_prompt_metrics ();
+                let extra_system_context, extra_outside_context =
+                  Keeper_context_assembly.split_outside_context
+                    extra_system_context_assembly
+                in
                 Agent_core.Hooks.AdjustParams
                   { current_params with
-                    extra_system_context = ctx
+                    extra_system_context
+                  ; extra_outside_context
                   ; system_prompt_override = Keeper_context_assembly.system_prompt_override
                       ~previous:current_params.system_prompt_override extra_system_context_assembly
                   ; tool_choice

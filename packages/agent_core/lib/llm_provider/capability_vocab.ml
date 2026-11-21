@@ -94,6 +94,7 @@ type cache_session_wire =
 type prompt_cache_wire =
   | No_prompt_cache_wire
   | Openrouter_top_level_cache_control
+  | Kimi_prompt_cache_options
 
 type json_schema_dialect =
   | Openai_json_schema
@@ -820,6 +821,7 @@ let%test "cache_session_wire round-trips through to_string and of_string" =
 let prompt_cache_wire_table =
   [ "none", No_prompt_cache_wire
   ; "openrouter_top_level_cache_control", Openrouter_top_level_cache_control
+  ; "kimi_prompt_cache_options", Kimi_prompt_cache_options
   ]
 ;;
 
@@ -834,6 +836,7 @@ let prompt_cache_wire_of_string raw =
 let prompt_cache_wire_to_string = function
   | No_prompt_cache_wire -> "none"
   | Openrouter_top_level_cache_control -> "openrouter_top_level_cache_control"
+  | Kimi_prompt_cache_options -> "kimi_prompt_cache_options"
 ;;
 
 let%test "prompt_cache_wire round-trips through to_string and of_string" =

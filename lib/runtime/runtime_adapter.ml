@@ -837,7 +837,9 @@ let validate_cache_retention (provider : Runtime_schema.provider)
             provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.id))
   | Some retention, Runtime_schema.Chat_completions_api ->
     (match supports_extended_cache_ttl, prompt_cache_wire with
-     | true, Llm_provider.Capabilities.Openrouter_top_level_cache_control ->
+     | ( true
+       , ( Llm_provider.Capabilities.Openrouter_top_level_cache_control
+         | Llm_provider.Capabilities.Kimi_prompt_cache_options ) ) ->
        Ok
          (match retention with
           | Runtime_schema.One_hour -> true
@@ -849,7 +851,8 @@ let validate_cache_retention (provider : Runtime_schema.provider)
             provider.id model_id (Runtime_schema.cache_retention_to_string retention) model_id)
      | false,
        ( Llm_provider.Capabilities.No_prompt_cache_wire
-       | Llm_provider.Capabilities.Openrouter_top_level_cache_control ) ->
+       | Llm_provider.Capabilities.Openrouter_top_level_cache_control
+       | Llm_provider.Capabilities.Kimi_prompt_cache_options ) ->
        Error
          (Printf.sprintf
             "binding %s.%s declares cache-retention = %S, but protocol %s cannot carry that request policy"

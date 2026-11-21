@@ -210,7 +210,8 @@ let test_capability_overrides_are_applied () =
        "developer_message", (fun c -> c.Capabilities.responses_system_prompt_carrier = Capabilities.Responses_developer_message)]
     ; "prompt_cache_wire",
       ["none", (fun c -> c.Capabilities.prompt_cache_wire = Capabilities.No_prompt_cache_wire);
-       "openrouter_top_level_cache_control", (fun c -> c.Capabilities.prompt_cache_wire = Capabilities.Openrouter_top_level_cache_control)]
+       "openrouter_top_level_cache_control", (fun c -> c.Capabilities.prompt_cache_wire = Capabilities.Openrouter_top_level_cache_control);
+       "kimi_prompt_cache_options", (fun c -> c.Capabilities.prompt_cache_wire = Capabilities.Kimi_prompt_cache_options)]
     ; "tool_schema_conformance",
       ["rich", (fun c -> c.Capabilities.tool_schema_conformance = Capabilities.Rich_json_schema);
        "conformant", (fun c -> c.Capabilities.tool_schema_conformance = Capabilities.Conformant_subset_required)]

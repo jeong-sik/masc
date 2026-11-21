@@ -228,9 +228,69 @@ let test_pending_mentions_and_fleet_messages_resend_on_resume () =
   check bool "Board_activity remains Sent_every_resume" true
     (L.resend_on_resume (L.Layer L.Board_activity) = L.Sent_every_resume)
 
+let test_partition_by_author_and_volatile_tail () =
+  let rendered =
+    L.assemble ~content_of:(function
+      | L.Active_goals -> Some "[Goal] ship stack A\n"
+      | L.Goals_awaiting_proof -> Some "[Proof] goal-1\n"
+      | L.Namespace_state -> Some "[Namespace] open=2\n"
+      | L.Board_activity -> Some "[Board] untrusted post\n"
+      | L.Direct_input_source | L.Goal_observations | L.Current_task
+      | L.Approval_authority | L.Connected_surfaces | L.Workspace_memory
+      | L.Wiki | L.Lane_updates | L.Autonomous_trigger | L.Scheduled_automation
+      | L.Completion_authority | L.Task_cancellations | L.Pending_mentions
+      | L.Own_board_posts | L.Own_recent_actions | L.Recent_work
+      | L.Fleet_messages -> None)
+  in
+  let host, outside = L.partition_by_author rendered in
+  check string "Host_state keeps only host layers"
+    "[Proof] goal-1\n[Namespace] open=2\n"
+    (L.text host);
+  check string "Outside_text keeps only untrusted external layers"
+    "[Goal] ship stack A\n[Board] untrusted post\n"
+    (L.text outside);
+  let system =
+    Masc.Keeper_turn_system.resend
+      ~held:None ~runtime_id:"test" ~current:[] ~articles_at:(fun _ -> Ok None)
+      "Base system prompt"
+    |> Result.get_ok |> fst
+  in
+  let assembly =
+    Masc.Keeper_run_prompt.assemble_request_context
+      ~checkpoint_owner:Runtime_execution.Masc_agent_core
+      ~system
+      ~post_tool_round:false
+      ~previous_assembly:None
+      ~dynamic_context_partition:(Some rendered)
+      ~existing_extra_system_context:None
+      ~blocks:[ Prompt_block_id.Dynamic_context, L.text rendered ]
+  in
+  check (option string) "Agent Core keeps Active_goals and Goals_awaiting_proof out of system_prompt_override"
+    None
+    (Masc.Keeper_context_assembly.system_prompt_override ~previous:None assembly);
+  let host_ctx, outside_ctx = Masc.Keeper_context_assembly.split_outside_context assembly in
+  check bool "host_ctx carries host-owned state" true
+    (match host_ctx with
+     | Some s -> Astring.String.is_infix ~affix:"[Namespace] open=2" s
+                 && Astring.String.is_infix ~affix:"[Proof] goal-1" s
+                 && not (Astring.String.is_infix ~affix:"[Board] untrusted post" s)
+     | None -> false);
+  check bool "outside_ctx carries outside-authored text" true
+    (match outside_ctx with
+     | Some s -> Astring.String.is_infix ~affix:"[Board] untrusted post" s
+                 && Astring.String.is_infix ~affix:"[Goal] ship stack A" s
+                 && not (Astring.String.is_infix ~affix:"[Namespace] open=2" s)
+     | None -> false)
+;;
+
 let () =
   run "keeper_context_layers"
     [
+      ( "L5/L6 privilege separation and volatile tail",
+        [
+          test_case "partition_by_author and split_outside_context keep goals/proofs out of system_prompt_override" `Quick
+            test_partition_by_author_and_volatile_tail;
+        ] );
       ( "ordering",
         [
           test_case "ordered is a complete permutation" `Quick

@@ -3,6 +3,7 @@ description = """
 One-step onboarding: sets the active project root, joins as agent, and \
 optionally creates+claims a task."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "path"

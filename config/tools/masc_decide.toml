@@ -11,6 +11,7 @@ descriptions. Backends: local Ollama (default model nimble) or cloud (default \
 clef:cloud, charged per input token). Confidence is distribution \
 concentration, not calibrated correctness: use it to rank and screen, not to \
 justify a verdict."""
+defer_loading = true
 
 [[params]]
 name = "state"

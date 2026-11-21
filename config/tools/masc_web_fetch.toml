@@ -7,6 +7,7 @@ Returns text, title, final_url, http_status, truncated. Use after WebSearch \
 when you need a citation or full article text. Do not use snake_case names \
 like web_fetch."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "url"

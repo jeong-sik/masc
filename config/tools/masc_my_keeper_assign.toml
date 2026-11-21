@@ -6,6 +6,7 @@ answer is JSON with record "assigned", or "existing" when the Keeper \
 already has that Runtime. A Keeper or a Runtime that is not yours is \
 answered as one that is not there."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "keeper_id"

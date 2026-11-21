@@ -7,6 +7,7 @@ arguments. Completion requires the assignee to submit evidence, then wait \
 for an authenticated human-operator or typed auto-judge verdict outside this \
 tool. Approve/reject are deliberately unavailable here. \
 Supports expected_version CAS."""
+defer_loading = true
 
 [[params]]
 name = "task_id"

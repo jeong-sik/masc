@@ -5,6 +5,7 @@ Assert task preconditions on your agent state (task claimed, current task \
 set, etc). Call when you want to confirm prerequisites before starting work; \
 returns pass/fail with fix hints."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "assertions"

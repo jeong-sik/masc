@@ -92,26 +92,32 @@ let tool_summary_fields ctx =
     Some (tool_count, last_tool, outcome)
   | _ -> None
 
+let iso8601_minute_of_float ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf
+    "%04d-%02d-%02dT%02d:%02dZ"
+    (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1)
+    tm.Unix.tm_mday
+    tm.Unix.tm_hour
+    tm.Unix.tm_min
+;;
+
 let render_temporal_summary ?now (ctx : Agent_core.Context.t) : string =
   (* The clock is unconditional: before this became total, a turn with no
      tool execution yet rendered no block at all, so the model had no idea
      what time it was and hand-typed prose timestamps drifted by whole
-     hours (#32199). [key_wall_time] presence still means "at least one
-     tool has executed" — it now gates only the corruption diagnostics
-     below, never the clock. Its stored value is never displayed: it is
-     the last tool-call timestamp and goes stale across idle turns. *)
+     hours (#32199). Minute-level granularity avoids per-second prefix-cache
+     churn across multi-round turns while keeping accurate wall time. *)
   let tool_context_exists = Agent_core.Context.get ctx key_wall_time <> None in
   let now = match now with Some n -> n | None -> Time_compat.now () in
-  (* [time=] is recomputed at render (= turn start), so a keeper waking
-     after an idle gap sees the current wall clock, not a past tool time. *)
-  let wall_time = iso8601_of_float now in
+  let wall_time = iso8601_minute_of_float now in
   let elapsed_part =
     match get_float ctx key_session_start with
-    | Some session_start -> Printf.sprintf " elapsed=%.0fs" (now -. session_start)
+    | Some session_start ->
+      let elapsed_min = max 0 (int_of_float ((now -. session_start) /. 60.0)) in
+      Printf.sprintf " elapsed=%dm" elapsed_min
     | None ->
-      (* A retired-shape context (tools ran, no session anchor) is not
-         repaired: elapsed is omitted rather than recomputed from any
-         legacy key. A fresh context omits it silently. *)
       if tool_context_exists
       then Log.Keeper.warn "Temporal summary omits elapsed: missing %s" key_session_start;
       ""

@@ -6,6 +6,7 @@ idempotent. Returns loaded models from /api/ps, per-run \
 load/prompt-eval/generation timings, tok/sec estimates, and a timing-based \
 repeated-prefix reuse inference. This does not expose direct KV occupancy or \
 hit-rate."""
+defer_loading = true
 
 [[params]]
 name = "server_url"

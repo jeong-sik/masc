@@ -2072,6 +2072,7 @@ check
   [ "board_attention_exact"
   ; "hitl_auto_judge"
   ; "librarian_exact"
+  ; "librarian_memory"
   ; "verifier_exact"
   ]
   (List.map fst lane_signatures);

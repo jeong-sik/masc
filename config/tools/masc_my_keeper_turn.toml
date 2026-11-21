@@ -13,6 +13,7 @@ the same subscription runs, and a Keeper whose conversation began on \
 another subscription are refused. masc_my_keeper_conversation_new starts \
 a new conversation."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "keeper_id"

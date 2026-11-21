@@ -6,6 +6,7 @@ the caller's agent identity. Members restrict posting when access is \
 members_only."""
 
 identity_fields = ["owner"]
+defer_loading = true
 
 [[params]]
 name = "slug"

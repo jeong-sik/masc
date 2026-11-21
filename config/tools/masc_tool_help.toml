@@ -3,6 +3,7 @@ description = """
 Return canonical help text, parameters, and metadata for a specific MASC \
 tool by name."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "tool_name"

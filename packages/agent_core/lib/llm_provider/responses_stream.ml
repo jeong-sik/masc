@@ -67,6 +67,7 @@ let responses_delta_usage_of_response response : Types.delta_usage option =
       ; cache_read_input_tokens
       ; cost_usd = None
       ; reasoning_tokens
+      ; cache_write_lifetime = None
       }
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;

@@ -134,6 +134,9 @@ val singleton : layer_id -> string -> rendered
 val partition_layer : layer_id -> rendered -> rendered * rendered
 (** Split one typed layer from the other spans, preserving each side's source
     order, bytes and row divisions. Both partitions get fresh offsets. *)
+val partition_by_author : rendered -> rendered * rendered
+(** Split a rendered world state into [(host_state, outside_text)] using
+    {!author_of_layer}, preserving source order and exact bytes on each side. *)
 val append_unattributed : rendered -> unattributed -> string -> rendered
 val prepend_unattributed : unattributed -> string -> rendered -> rendered
 val prepend_prepared_unattributed : unattributed -> prepared_content -> rendered -> rendered

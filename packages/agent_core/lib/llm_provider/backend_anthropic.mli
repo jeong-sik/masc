@@ -60,6 +60,17 @@ val observe_input_transformations : Yojson.Safe.t -> unit
     (sync response, SSE [message_start]) must build through it; bypassing it
     reintroduces the exclusive/inclusive mix that under-prices regular input
     and under-reports context occupancy. *)
+(** Breakdown of Anthropic [usage.cache_creation] sub-fields when reported by
+    the wire ([ephemeral_5m_input_tokens], [ephemeral_1h_input_tokens]). *)
+type cache_creation_breakdown =
+  { total_input_tokens : int option
+  ; ephemeral_5m_input_tokens : int option
+  ; ephemeral_1h_input_tokens : int option
+  ; inferred_write_lifetime : Types.cache_write_lifetime option
+  }
+
+val parse_cache_creation_usage : Yojson.Safe.t -> cache_creation_breakdown
+
 val usage_of_wire_counts
   :  input_tokens:int
   -> output_tokens:int

@@ -12,6 +12,7 @@ type turn_params =
   ; preserve_thinking : bool option
   ; tool_choice : Types.tool_choice option
   ; extra_system_context : string option
+  ; extra_outside_context : string option
   ; system_prompt_override : string option
   }
 

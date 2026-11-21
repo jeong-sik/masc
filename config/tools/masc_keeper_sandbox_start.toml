@@ -1,6 +1,7 @@
 name = "masc_keeper_sandbox_start"
 description = "Start the managed sandbox container for a keeper."
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "name"

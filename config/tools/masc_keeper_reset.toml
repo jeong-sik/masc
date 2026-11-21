@@ -8,6 +8,7 @@ Transcript_corruption_reset_required unchanged, so resume alone cannot free \
 it. Does not touch usage counters, token stats, configuration, goals, or \
 Keeper instructions."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "name"

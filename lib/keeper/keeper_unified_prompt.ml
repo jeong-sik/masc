@@ -1138,13 +1138,6 @@ let autonomous_trigger_lines
              (render_fragment
                 Prompt_names.keeper_world_autonomous_trigger_reasons
                 [ "reasons", String.concat ", " reasons ]))
-      ; (match decision.since_last_scheduled_autonomous with
-         | Some since_last ->
-           Some
-             (render_fragment
-                Prompt_names.keeper_world_autonomous_trigger_since_last
-                [ "seconds", string_of_int since_last ])
-         | None -> None)
       ]
     in
     List.filter_map Fun.id lines
@@ -1406,10 +1399,10 @@ let format_workspace_memory_observation ?access = function
         "briefing_status", briefing_status;
         "retrieval_route", render_fragment route [] ] ^ "\n\n")
 
-(* The wiki table of contents.
-   Keepers did not read the wiki because nothing in a turn said it existed:
-   on 2026-10-13 a Keeper answered "I do not know" to a question whose answer
-   sat in a wiki page. The whole list rides every turn. *)
+(* Workspace wiki availability and retrieval route only.
+   Keepers learn that the wiki exists and how to retrieve pages on demand via
+   [keeper_wiki_search] / [keeper_wiki_read], without injecting a volatile
+   per-page TOC into [Dynamic_context] on every turn. *)
 let format_wiki_observation ?access = function
   | Keeper_wiki_contents.Off | Keeper_wiki_contents.Listed [] -> None
   | Keeper_wiki_contents.Unlisted _ ->
@@ -1422,9 +1415,9 @@ let format_wiki_observation ?access = function
         | Direct -> Prompt_names.keeper_context_wiki_retrieval_direct
         | Discoverable -> Prompt_names.keeper_context_wiki_retrieval_discoverable
         | Unavailable -> Prompt_names.keeper_context_wiki_retrieval_unavailable in
+    let total = List.length entries in
     Some (render_fragment Prompt_names.keeper_context_wiki_available
-      [ "page_count", string_of_int (List.length entries);
-        "index", String.concat "\n" (List.map Wiki_journal.render_entry entries);
+      [ "page_count", string_of_int total;
         "retrieval_route", render_fragment route [] ] ^ "\n\n")
 
 let format_recent_work = function
@@ -1870,12 +1863,9 @@ let prepare_prompt_internal
                 Prompt_names.keeper_world_namespace_state_failed
                 [ "count", string_of_int observation.failed_task_count ]
               ^ "\n");
-         Buffer.add_string
-           ubuf
-           (render_fragment
-              Prompt_names.keeper_world_namespace_state_running_fibers
-              [ "count", string_of_int observation.running_keeper_fiber_count ]
-            ^ "\n");
+         (* Omit volatile fleet-wide [running_keeper_fiber_count] from
+            [Namespace_state]: it churned whenever any sibling Keeper started
+            or finished a turn, busting the shared prompt prefix. *)
          Buffer.add_char ubuf '\n';
          Buffer.contents ubuf)
     | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates

@@ -235,10 +235,12 @@ let canonical_success_replay_checkpoint
        let checkpoint =
          if replay_omits_response
          then
+           (* Preserve [checkpoint.working_context] across replay instead of
+              wiping it to [None]: clearing working_context on omitted/blank
+              responses caused anterograde amnesia across subsequent turns. *)
            { checkpoint with
              Agent_core.Checkpoint.session_id
            ; messages = history_messages @ current_suffix
-           ; working_context = None
            }
          else
            (* [split] already proved that [checkpoint.messages] is exactly the

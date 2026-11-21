@@ -4,6 +4,7 @@ List known keepers from persisted keeper metadata. The response carries \
 total (keepers known before limit), limit (the value applied) and truncated, \
 so a short answer is distinguishable from a complete one."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "limit"

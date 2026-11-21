@@ -103,6 +103,7 @@ type cache_session_wire =
 type prompt_cache_wire =
   | No_prompt_cache_wire
   | Openrouter_top_level_cache_control
+  | Kimi_prompt_cache_options
 
 type json_schema_dialect =
   | Openai_json_schema

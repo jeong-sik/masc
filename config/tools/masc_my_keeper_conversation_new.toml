@@ -10,6 +10,7 @@ and conversation_id. A Keeper without a Runtime is refused, and so is a \
 start while a turn runs on the subscription of the current \
 conversation."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "keeper_id"

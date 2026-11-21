@@ -9,6 +9,7 @@ Retry the same call — it re-snapshots the current manifest and runtime \
 assignment and applies only the fields you pass, so a retry cannot revert \
 another writer's change."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "name"

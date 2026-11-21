@@ -3,6 +3,7 @@ description = """
 List queued Keeper chat operations owned by the caller for one exact Keeper \
 target."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "target"

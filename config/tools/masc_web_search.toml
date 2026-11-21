@@ -9,6 +9,7 @@ carries grounded=true, context_text (pre-extracted chunks) and sources \
 metadata, with no results rows — includeContent is then a no-op since the \
 content already rides inline. Do not use snake_case names like web_search."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "query"

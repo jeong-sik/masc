@@ -5,6 +5,7 @@ messages, and pending confirmations before acting."""
 operator_remote_description = """
 Read unified operator state. Use this when you need current workspace, \
 keeper, message, and pending-confirm data before taking action."""
+defer_loading = true
 
 [[params]]
 name = "actor"

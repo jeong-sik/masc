@@ -9,6 +9,7 @@ current turn before retrying. The clear does not change lifecycle conditions. \
 Use only when the conversation must be reset and \
 the keeper cannot recover otherwise. Requires a reason for the audit trail."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "name"

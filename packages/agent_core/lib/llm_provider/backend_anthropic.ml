@@ -111,6 +111,55 @@ let observe_input_transformations json =
    2026-08-17). {!Types.api_usage.input_tokens} is the canonical inclusive
    prompt total, so every parse of this wire shape must build through this
    constructor. *)
+type cache_creation_breakdown =
+  { total_input_tokens : int option
+  ; ephemeral_5m_input_tokens : int option
+  ; ephemeral_1h_input_tokens : int option
+  ; inferred_write_lifetime : Types.cache_write_lifetime option
+  }
+
+let parse_cache_creation_usage (u : Yojson.Safe.t) : cache_creation_breakdown =
+  let open Yojson.Safe.Util in
+  if u = `Null
+  then
+    { total_input_tokens = None
+    ; ephemeral_5m_input_tokens = None
+    ; ephemeral_1h_input_tokens = None
+    ; inferred_write_lifetime = None
+    }
+  else (
+    let flat_total = u |> member "cache_creation_input_tokens" |> to_int_option in
+    let nested = u |> member "cache_creation" in
+    let ephemeral_5m_input_tokens, ephemeral_1h_input_tokens =
+      match nested with
+      | `Assoc _ ->
+        ( nested |> member "ephemeral_5m_input_tokens" |> to_int_option
+        , nested |> member "ephemeral_1h_input_tokens" |> to_int_option )
+      | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+        None, None
+    in
+    let total_input_tokens =
+      match flat_total with
+      | Some _ as v -> v
+      | None ->
+        (match ephemeral_5m_input_tokens, ephemeral_1h_input_tokens with
+         | None, None -> None
+         | m5, h1 ->
+           Some (Option.value m5 ~default:0 + Option.value h1 ~default:0))
+    in
+    let inferred_write_lifetime =
+      match ephemeral_1h_input_tokens, ephemeral_5m_input_tokens with
+      | Some h1, _ when h1 > 0 -> Some Types.One_hour
+      | _, Some m5 when m5 > 0 -> Some Types.Provider_default
+      | (Some _ | None), (Some _ | None) -> None
+    in
+    { total_input_tokens
+    ; ephemeral_5m_input_tokens
+    ; ephemeral_1h_input_tokens
+    ; inferred_write_lifetime
+    })
+;;
+
 let usage_of_wire_counts
       ~input_tokens
       ~output_tokens
@@ -148,11 +197,12 @@ let parse_response json =
     loop [] content_list
   in
   let u = json |> member "usage" in
+  let cache_breakdown = parse_cache_creation_usage u in
   let raw_cache_creation, raw_cache_read =
     if u = `Null
     then None, None
     else
-      ( u |> member "cache_creation_input_tokens" |> to_int_option
+      ( cache_breakdown.total_input_tokens
       , u |> member "cache_read_input_tokens" |> to_int_option )
   in
   let usage =
@@ -192,18 +242,24 @@ let parse_response json =
   let stop_reason =
     stop_reason_of_string stop_reason_str |> Stop_reason_wire.reconcile ~has_tool_blocks
   in
+  let telemetry =
+    let base =
+      Types.with_reported_cache_usage
+        ~cache_creation_input_tokens:raw_cache_creation
+        ~cache_read_input_tokens:raw_cache_read
+        (Some (Types.with_reported_model ~model None))
+    in
+    { base with
+      Types.cache_write_lifetime = cache_breakdown.inferred_write_lifetime
+    }
+  in
   { id
   ; model
   ; unreadable_tool_uses = []
   ; stop_reason
   ; content
   ; usage
-  ; telemetry =
-      Some
-        (Types.with_reported_cache_usage
-           ~cache_creation_input_tokens:raw_cache_creation
-           ~cache_read_input_tokens:raw_cache_read
-           (Some (Types.with_reported_model ~model None)))
+  ; telemetry = Some telemetry
   }
 ;;
 

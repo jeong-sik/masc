@@ -7,6 +7,7 @@ operator_remote_description = """
 Preview or run a structured operator action. Use this when you need to \
 broadcast, inject work, or message, probe or recover a keeper on \
 the remote operator surface."""
+defer_loading = true
 
 [[params]]
 name = "action_type"

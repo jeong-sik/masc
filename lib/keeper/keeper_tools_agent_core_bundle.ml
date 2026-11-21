@@ -500,15 +500,10 @@ let make_tool_bundle_for_descriptors_with_policy
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
-             let make_h ?prepared_edit
+             let make_h ?prepared_file
                  ?(call_source_context = source_context)
                  ?(call_gate_context = gate_context_provider)
                  ?(call_record_gate_result = record_gate_result) () =
-               let prepared_file =
-                 Option.map
-                   (fun edit -> Keeper_prepared_inline_files.Edit edit)
-                   prepared_edit
-               in
                match capability_surface with
                | Some capability_surface ->
                  Keeper_tools_agent_core_handler.make_keeper_tool_handler
@@ -587,8 +582,15 @@ let make_tool_bundle_for_descriptors_with_policy
              in
              let ordinary = bridge (make_h ()) in
              let agent_core_descriptor =
-               if Option.is_some capability_surface
-                  && descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file then
+               let scoped_file_kind =
+                 if descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+                 then Some `Edit
+                 else if descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file
+                 then Some `Write
+                 else None
+               in
+               match capability_surface, scoped_file_kind with
+               | Some _, Some file_kind ->
                  let prepare ~sw input =
                    let original_source = source_context () in
                    let source_matches = match original_source with
@@ -604,11 +606,28 @@ let make_tool_bundle_for_descriptors_with_policy
                          ~tool_name:model_name descriptor ~input with
                      | Error _ -> Ok None
                      | Ok args ->
-                       (match Keeper_tool_filesystem_runtime.prepare_edit ~sw ~config ~meta ~args with
-                        (* The ordinary Serial path retains real validation/path
-                           failure telemetry and load receipt consumption. *)
-                        | Error _ | Ok None -> Ok None
-                        | Ok (Some prepared_edit) ->
+                       let prepared_with_scopes =
+                         match file_kind with
+                         | `Edit ->
+                           (match Keeper_tool_filesystem_runtime.prepare_edit ~sw ~config ~meta ~args with
+                            | Error _ | Ok None -> None
+                            | Ok (Some edit) ->
+                              Some
+                                ( Keeper_prepared_inline_files.Edit edit
+                                , Keeper_tool_filesystem_runtime.prepared_edit_scopes edit ))
+                         | `Write ->
+                           (match Keeper_tool_filesystem_runtime.prepare_write ~sw ~config ~meta ~args with
+                            | Error _ | Ok None -> None
+                            | Ok (Some write) ->
+                              Some
+                                ( Keeper_prepared_inline_files.Write write
+                                , Keeper_tool_filesystem_runtime.prepared_write_scopes write ))
+                       in
+                       (* The ordinary Serial path retains real validation/path
+                          failure telemetry and load receipt consumption. *)
+                       (match prepared_with_scopes with
+                        | None -> Ok None
+                        | Some (prepared_file, scopes) ->
                           let handler execution input =
                             let causal = Option.map Keeper_gate_causal_context.fork gate_context in
                             let call_gate_context = Option.map
@@ -616,20 +635,20 @@ let make_tool_bundle_for_descriptors_with_policy
                             let call_record_gate_result = Option.map (fun context ~operation ~input result ->
                               Keeper_gate_causal_context.record_tool_result context ~operation ~input result;
                               Option.iter (fun record -> record ~operation ~input result) record_gate_result) causal in
-                            let h = make_h ~prepared_edit
+                            let h = make_h ~prepared_file
                                 ~call_source_context:(fun () -> original_source)
                                 ~call_gate_context ~call_record_gate_result () in
                             let adapted = bridge h in
                             adapted.Agent_core.Tool.handler execution input
                           in
-                          match Keeper_tool_filesystem_runtime.prepared_edit_scopes prepared_edit with
+                          match scopes with
                           | scope :: additional_scopes ->
                             Ok (Some (Agent_core.Tool.scoped_call ~scope ~additional_scopes handler))
-                          | [] -> invalid_arg "prepared Edit producer returned no file footprint")
+                          | [] -> invalid_arg "prepared file producer returned no file footprint")
                  in
                  Some (Agent_core.Tool.ordinary_descriptor_scoped
                    ~call_effect:(Agent_core.Tool.call_effect ordinary) ~prepare)
-               else agent_core_descriptor
+               | None, _ | Some _, None -> agent_core_descriptor
              in
              ( Agent_core.Tool.of_schema ?descriptor:agent_core_descriptor
                  ordinary.schema ordinary.handler

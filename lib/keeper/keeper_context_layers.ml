@@ -161,6 +161,32 @@ let partition_layer layer rendered =
       {span with offset}) spans in
     {text = Buffer.contents buffer; spans} in
   project selected, project remaining
+let author_of_source = function
+  | Layer layer -> author_of_layer layer
+  | Unattributed (World_frame | Host_workspace_recall) -> Host_state
+  | Unattributed (Direct_turn | Unprojected_input) -> Outside_text
+let partition_by_author rendered =
+  let host_spans, outside_spans =
+    List.partition
+      (fun span ->
+         match author_of_source span.source with
+         | Host_state -> true
+         | Outside_text -> false)
+      rendered.spans
+  in
+  let project spans =
+    let buffer = Buffer.create (String.length rendered.text) in
+    let spans =
+      List.map
+        (fun span ->
+           let offset = Buffer.length buffer in
+           Buffer.add_substring buffer rendered.text span.offset span.bytes;
+           { span with offset })
+        spans
+    in
+    { text = Buffer.contents buffer; spans }
+  in
+  project host_spans, project outside_spans
 let append_unattributed rendered reason suffix =
   { text = rendered.text ^ suffix;
     spans = rendered.spans @ [make_span (Unattributed reason) (String.length rendered.text) suffix] }

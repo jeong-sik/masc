@@ -943,10 +943,13 @@ let three_offered =
    turns. A tool whose last call is further back than the window is not
    placed. *)
 let test_a_tool_outside_the_window_is_not_placed () =
+  (* Append-only session tool loading: tools called earlier in the session stay
+     placed in stable offering order so the position-0 [tools] prefix is never
+     invalidated mid-session by LRU eviction. *)
   check
     (list string)
-    "only the tool called inside the window is placed"
-    [ "atlassian_confluence_search" ]
+    "append-only carry preserves both tools in offering order"
+    [ "atlassian_confluence_search"; "atlassian_jira_search" ]
     (already_used
        ~carry_window:10
        ~history:
@@ -1028,10 +1031,12 @@ let test_a_call_to_a_carried_tool_does_not_cut () =
    [A; 40 fillers; B; 40 fillers; A] at a window of 10: B is 41 calls stale
    when A returns, so only A is placed. *)
 let test_a_returning_tool_is_cut_on_like_a_new_one () =
+  (* Append-only carry retains all session-used tools in canonical offering
+     order without evicting previously loaded tools. *)
   check
     (list string)
-    "what went stale while the returning tool was away is not placed"
-    [ "atlassian_jira_search" ]
+    "append-only carry keeps previously used tools placed"
+    [ "atlassian_confluence_search"; "atlassian_jira_search" ]
     (already_used
        ~carry_window:10
        ~history:

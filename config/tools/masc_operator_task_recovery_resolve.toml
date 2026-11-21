@@ -5,6 +5,7 @@ Recover exactly one claimed or in-progress Task to todo. The observed \
 task_id, persisted assignee, and backlog version must all match; this tool \
 performs no liveness or elapsed-time inference."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "task_id"

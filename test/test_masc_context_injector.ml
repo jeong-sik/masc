@@ -131,11 +131,17 @@ let test_context_updates_overwrite_bounded_keys () =
 (* #32199: a turn before any tool execution still gets the clock — and
    nothing else, since neither the session anchor nor tool metadata
    exists yet. *)
+let minute_iso_of_float ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min
+
 let test_render_temporal_summary_empty () =
   let ctx = Agent_core.Context.create_sync () in
   let now = 1_800_000_000.0 in
-  check string "a fresh context renders the clock alone"
-    ("[Temporal] time=" ^ MCI.iso8601_of_float now)
+  check string "a fresh context renders the minute-coarse clock alone"
+    ("[Temporal] time=" ^ minute_iso_of_float now)
     (MCI.render_temporal_summary ~now ctx)
 
 let test_render_temporal_summary_populated () =
@@ -144,7 +150,7 @@ let test_render_temporal_summary_populated () =
   Agent_core.Context.set ctx
     MCI.key_wall_time (`String "2026-04-06T12:00:00Z");
   Agent_core.Context.set ctx
-    MCI.key_session_start (`Float (now -. 42.5));
+    MCI.key_session_start (`Float (now -. 125.0));
   Agent_core.Context.set ctx
     MCI.key_tool_call_count (`Int 3);
   Agent_core.Context.set ctx
@@ -156,8 +162,8 @@ let test_render_temporal_summary_populated () =
     (Astring.String.is_prefix ~affix:"[Temporal]" summary);
   check bool "contains tool name" true
     (Astring.String.is_infix ~affix:"tool_execute" summary);
-  check bool "contains elapsed" true
-    (Astring.String.is_infix ~affix:"elapsed=42s" summary)
+  check bool "contains minute-coarse elapsed" true
+    (Astring.String.is_infix ~affix:"elapsed=2m" summary)
 
 (* Regression: turn N+1 must render the *fresh* current time, not the
    last tool call's timestamp frozen in [key_wall_time] from turn N
@@ -179,17 +185,17 @@ let test_render_uses_fresh_now_not_stale () =
   Agent_core.Context.set ctx
     MCI.key_last_tool_outcome (`String "ok");
   let fresh_now = 1_800_000_000.0 in
-  (* 2027-01-15T08:00:00Z — 100_000_000s after the stale snapshot *)
+  (* 2027-01-15T08:00Z — 100_000_000s after the stale snapshot *)
   let summary = MCI.render_temporal_summary ~now:fresh_now ctx in
-  let fresh_iso = MCI.iso8601_of_float fresh_now in
-  let stale_iso = MCI.iso8601_of_float stale_now in
+  let fresh_iso = minute_iso_of_float fresh_now in
+  let stale_iso = minute_iso_of_float stale_now in
   check bool "time= is the fresh render-time clock" true
     (Astring.String.is_infix ~affix:("time=" ^ fresh_iso) summary);
   check bool "time= is NOT the stale stored wall_time" false
     (Astring.String.is_infix ~affix:stale_iso summary);
-  (* elapsed = fresh_now - session_start = 100_000_000 + 100 *)
+  (* elapsed = (100_000_000 + 100) / 60 = 1666668m *)
   check bool "elapsed recomputed against session_start at render time" true
-    (Astring.String.is_infix ~affix:"elapsed=100000100s" summary)
+    (Astring.String.is_infix ~affix:"elapsed=1666668m" summary)
 
 let test_render_rejects_retired_elapsed_without_session_start () =
   let ctx = Agent_core.Context.create_sync () in
@@ -218,7 +224,7 @@ let test_render_omits_malformed_elapsed_context () =
     MCI.key_wall_time (`String "2023-11-14T22:13:20Z");
   let now = 1_800_000_000.0 in
   check string "a context with only the sentinel renders the clock alone"
-    ("[Temporal] time=" ^ MCI.iso8601_of_float now)
+    ("[Temporal] time=" ^ minute_iso_of_float now)
     (MCI.render_temporal_summary ~now ctx)
 
 (* ── ISO 8601 formatting ────────────────────────────── *)

@@ -255,10 +255,9 @@ type pre_ext_breakpoint_mode =
   | Anthropic_cache_control of Yojson.Safe.t
   | Openai_explicit_breakpoint
 
-let is_system_context_origin = function
-  | System_context -> true
+let is_trailing_volatile_origin = function
+  | System_context | Outside_context -> true
   | Conversation
-  | Outside_context
   | Historical_system_context
   | Recovery_instruction
   | Tool_result_followup
@@ -266,11 +265,12 @@ let is_system_context_origin = function
 ;;
 
 (* Split [messages] into [(prefix, trailing)] iff [messages] ends with a
-   non-empty contiguous suffix of [System_context] messages AND no
-   [System_context] message appears anywhere in [prefix]. *)
+   non-empty contiguous suffix of trailing volatile context messages
+   ([System_context] | [Outside_context]) AND neither origin appears anywhere
+   in [prefix]. *)
 let split_strictly_trailing_system_context (messages : message list) =
   let rec peel_trailing acc = function
-    | msg :: rest when is_system_context_origin msg.origin ->
+    | msg :: rest when is_trailing_volatile_origin msg.origin ->
       peel_trailing (msg :: acc) rest
     | rev_prefix -> List.rev rev_prefix, acc
   in
@@ -278,7 +278,7 @@ let split_strictly_trailing_system_context (messages : message list) =
   match trailing with
   | [] -> None
   | _ :: _ ->
-    if List.exists (fun msg -> is_system_context_origin msg.origin) prefix
+    if List.exists (fun msg -> is_trailing_volatile_origin msg.origin) prefix
     then None
     else Some (prefix, trailing)
 ;;
@@ -536,6 +536,15 @@ let build_request_assoc_artifact
           (* No strictly trailing System_context or no eligible non-blank prefix
              text block: fall back cleanly to top-level cache_control. *)
           provider_messages, [ "cache_control", cc ])
+    | Capabilities.Kimi_prompt_cache_options, _ ->
+      if not config.cache_system_prompt
+      then provider_messages, []
+      else (
+        let ttl = if config.cache_extended_ttl then "1h" else "5m" in
+        ( provider_messages
+        , [ ( "prompt_cache_options"
+            , `Assoc [ "mode", `String "implicit"; "ttl", `String ttl ] )
+          ] ))
     | Capabilities.No_prompt_cache_wire, true ->
       if not config.cache_system_prompt
       then

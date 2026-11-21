@@ -3,6 +3,7 @@ title = "Operator Confirm"
 description = """
 Confirm and execute a previously previewed operator action. Use this only \
 after masc_operator_action returns confirm_required=true."""
+defer_loading = true
 
 [[params]]
 name = "confirm_token"

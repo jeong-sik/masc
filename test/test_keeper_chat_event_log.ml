@@ -29,6 +29,7 @@ let delta_usage_partial : Agent_core.Types.delta_usage =
   ; cache_read_input_tokens = None
   ; cost_usd = None
   ; reasoning_tokens = Some 42
+  ; cache_write_lifetime = None
   }
 
 let protocol_error_full : E.stream_protocol_error =

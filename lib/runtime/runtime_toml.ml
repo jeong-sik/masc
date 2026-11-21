@@ -658,7 +658,6 @@ let typesafeai_keys =
   ; "absorb_gate"
   ; "context_review"
   ; "skill_applicability"
-  ; "librarian_preflight"
   ; "workspace_memory_selection_enabled"
   ; "memory_recall"
   ; "memory_recall_scope"
@@ -931,10 +930,6 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
     in
     let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
-    let librarian_preflight =
-      typed_find_or "a boolean" path tbl "librarian_preflight" Otoml.get_boolean
-        ~default:d.librarian_preflight
-    in
     let workspace_memory_selection_enabled =
       typed_find_or "a boolean" path tbl "workspace_memory_selection_enabled" Otoml.get_boolean
         ~default:d.workspace_memory_selection_enabled
@@ -949,7 +944,6 @@ let parse_typesafeai (toml : Otoml.t)
        , absorb_gate
        , context_review
        , skill_applicability
-       , librarian_preflight
        , workspace_memory_selection_enabled
        , memory_recall
        , excluded_keepers )
@@ -962,7 +956,6 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok absorb_gate
        , Ok context_review
        , Ok skill_applicability
-       , Ok librarian_preflight
        , Ok workspace_memory_selection_enabled
        , Ok memory_recall
        , Ok excluded_keepers ) ->
@@ -974,13 +967,11 @@ let parse_typesafeai (toml : Otoml.t)
          ; absorb_gate
          ; context_review
          ; skill_applicability
-         ; librarian_preflight
          ; workspace_memory_selection_enabled
          ; memory_recall
          ; excluded_keepers
          }
      | ( ([] | _ :: _)
-       , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
@@ -1000,7 +991,6 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors absorb_gate
           @ result_errors context_review
           @ result_errors skill_applicability
-          @ result_errors librarian_preflight
           @ result_errors workspace_memory_selection_enabled
           @ result_errors memory_recall
           @ result_errors excluded_keepers))

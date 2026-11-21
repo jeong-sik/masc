@@ -242,6 +242,14 @@ watch_disk() {
 # while the sandboxes exist, and the whole tree gets TERM, then KILL after a
 # grace period; rc is 124 as before.
 run_suite_under_deadline() {
+  # Same-runner baseline for the "after the suite" lines below: read before dune
+  # starts, held until the seam check has run so it is not mistaken for a
+  # previous invocation's bytes in the evidence log.
+  local before_suite
+  before_suite="$(
+    df -h / | sed 's/^/[test-suite] disk before the suite: /'
+    timeout 90 du -xsh "$repo_root/_build" 2>&1 | sed 's/^/[test-suite] _build before the suite: /' || true
+  )"
   opam exec -- dune build --root . --trace-file "$trace" "$alias_target" > "$log" 2>&1 &
   local dune_pid=$!
   local exited disk_watcher_pid disk_watcher_exited
@@ -265,6 +273,7 @@ run_suite_under_deadline() {
   if [ -s "$disk_evidence_log" ]; then
     echo "[test-suite] --- another invocation of this wrapper appends below ($(date -u +%FT%TZ)); the lines above came from the run before it ---" >> "$disk_evidence_log"
   fi
+  printf '%s\n' "$before_suite" | tee -a "$disk_evidence_log"
   (
     exec > >(tee -a "$disk_evidence_log") 2>&1
     while kill -0 "$dune_pid" 2>/dev/null; do
@@ -308,7 +317,8 @@ echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
 started=$(date +%s)
 run_suite_under_deadline
 echo "[test-suite] finished in $(( $(date +%s) - started ))s with exit ${rc}"
-df -h / | sed 's/^/[test-suite] disk after the suite: /'
+df -h / | sed 's/^/[test-suite] disk after the suite: /' | tee -a "$disk_evidence_log"
+timeout 120 du -xsh "$repo_root/_build" 2>&1 | sed 's/^/[test-suite] _build after the suite: /' | tee -a "$disk_evidence_log"
 summarise_trace
 
 if [ "$rc" = 124 ]; then

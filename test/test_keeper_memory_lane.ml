@@ -803,7 +803,20 @@ let test_durable_drain_publishes_scoped_health () =
       run ();
       (match (observed ()).last_pass, (observed ()).unread with
        | Queue_refresh.Stopped Masc.Keeper_librarian_durable_consumer.Keeper_meta_absent, None -> ()
-       | _ -> Alcotest.fail "missing metadata must replace the old observation");
+       | pass, unread ->
+         let describe = function
+           | Queue_refresh.Off -> "Off"
+           | Queue_refresh.Lane_unconfigured -> "Lane_unconfigured"
+           | Queue_refresh.Drained -> "Drained"
+           | Queue_refresh.Yielded_to_waiting_unit -> "Yielded_to_waiting_unit"
+           | Queue_refresh.Not_committed -> "Not_committed"
+           | Queue_refresh.Pending _ -> "Pending"
+           | Queue_refresh.Stopped e ->
+             "Stopped:" ^ Masc.Keeper_librarian_durable_consumer.error_to_string e
+           | Queue_refresh.Raised s -> "Raised:" ^ s
+         in
+         Alcotest.failf "PROBE3892 pass=%s unread=%s"
+           (describe pass) (if unread = None then "None" else "Some"));
       Alcotest.(check (list string))
         "missing metadata logs drain stop once without redundant unread warning"
         [ "durable Librarian range not consumed: keeper metadata is absent" ]

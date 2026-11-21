@@ -974,23 +974,23 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
           ^ missing_reading (text "메모리 관측 대기" "waiting for memory snapshots") ]
     | Some snapshot ->
        labelled (text "전체" "Total")
-         ([ (if ko then Printf.sprintf "기억 %s개" (Masc_tui_value.Count.grouped (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts))
-             else Masc_tui_message_layout.count_noun
-               (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
-          ; Printf.sprintf (if ko then "일반 %s + 원본 %s" else "%s ordinary + %s source")
-              (Masc_tui_value.Count.grouped snapshot.mhs_total_facts) (Masc_tui_value.Count.grouped snapshot.mhs_total_source_facts)
-          ; Printf.sprintf (if ko then "저장 %s" else "stored %s")
-              (stored_amount state.memory_unit
-                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
-          ; Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Keeper
-              (List.length snapshot.mhs_keepers)
-          ; (match state.memory_unit with
-             | Memory_usage.Tokens -> text "저장 추정량, 턴 입력 아님" "stored estimate, not turn input"
-             | Memory_usage.Bytes -> text "저장된 지식, 턴 입력 아님" "stored knowledge, not turn input")
-          ]
-          @ (if state.memory_health_inflight && Option.is_none state.memory_health_error then
-               [ under_way ^ " " ^ text "새로고침 중" "refreshing" ]
-             else []))
+         (* A read in flight over a held snapshot is reported by the zone-2
+            reading slot rather than adding a refreshing clause here (RFC
+            tui-one-screen-grammar section 8). *)
+         [ (if ko then Printf.sprintf "기억 %s개" (Masc_tui_value.Count.grouped (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts))
+            else Masc_tui_message_layout.count_noun
+              (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
+         ; Printf.sprintf (if ko then "일반 %s + 원본 %s" else "%s ordinary + %s source")
+             (Masc_tui_value.Count.grouped snapshot.mhs_total_facts) (Masc_tui_value.Count.grouped snapshot.mhs_total_source_facts)
+         ; Printf.sprintf (if ko then "저장 %s" else "stored %s")
+             (stored_amount state.memory_unit
+                (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
+         ; Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Keeper
+             (List.length snapshot.mhs_keepers)
+         ; (match state.memory_unit with
+            | Memory_usage.Tokens -> text "저장 추정량, 턴 입력 아님" "stored estimate, not turn input"
+            | Memory_usage.Bytes -> text "저장된 지식, 턴 입력 아님" "stored knowledge, not turn input")
+         ]
   in
   (* The ordinary facts counted by time since first seen, summed over the
      Keepers whose row carries the server's ladder (RFC-0515 §2.4.5). A Keeper

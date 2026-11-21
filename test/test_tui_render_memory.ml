@@ -1180,6 +1180,24 @@ let test_memory_facts_docked_preview_and_tree_tint () =
     tree_rows
 ;;
 
+let test_memory_fleet_header_stable_while_refreshing () =
+  let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
+  let snapshot = make_fleet_health keeper in
+  List.iter
+    (fun language ->
+      let state = make_state () in
+      state.ui_language <- language;
+      state.memory_health <- Some snapshot;
+      state.memory_health_inflight <- false;
+      let idle_rows = Render_memory.memory_fleet_header_rows ~cols:100 state in
+      state.memory_health_inflight <- true;
+      let refreshing_rows = Render_memory.memory_fleet_header_rows ~cols:100 state in
+      check (list string)
+        "refresh over held memory snapshot keeps fleet header rows identical"
+        idle_rows refreshing_rows)
+    [ Types.Lang_ko; Types.Lang_en ]
+;;
+
 let () =
   run "tui_render_memory"
     [ "input statistics",
@@ -1222,7 +1240,9 @@ let () =
       ; test_case "the fact list reports the rows it drew" `Quick
           test_facts_list_reports_the_rows_it_drew
       ; test_case "failed facts refresh retains facts and unread scope" `Quick
-          test_a_failed_facts_refresh_keeps_facts_and_unread_scope ]
+          test_a_failed_facts_refresh_keeps_facts_and_unread_scope
+      ; test_case "refresh over held snapshot keeps fleet header stable" `Quick
+          test_memory_fleet_header_stable_while_refreshing ]
     ; "one place per fact",
       [ test_case "search count and cursor share Memory filter text and query" `Quick
           test_memory_search_uses_the_filter_text_and_query

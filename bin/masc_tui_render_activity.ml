@@ -464,19 +464,13 @@ let render_keeper_calls (state : state) =
   in
     let ko = state.ui_language = Lang_ko in
     let now = Unix.gettimeofday () in
+    let first_calls_read = Option.is_none state.keeper_calls && state.keeper_calls_loading in
     let calls_started =
       Masc_tui_types.progress_clock_option state ~slot:"keeper-calls" ~now
-        (if state.keeper_calls_loading then Some keeper_name else None)
+        (if first_calls_read then Some keeper_name else None)
     in
     let header =
       match state.keeper_calls with
-      | Some snapshot when state.keeper_calls_loading ->
-          heading
-            ~readings:
-              [ count_reading state Masc_tui_value.Count.Call
-                  (List.length snapshot.Masc.Tui_decode.kcs_entries)
-              ; progress_inline ~ko ~now ?started_at:calls_started
-                  (ui_text state ~ko:"다시 읽는 중" ~en:"refreshing") ]
       | None when state.keeper_calls_loading ->
           heading
             ~readings:

@@ -811,7 +811,7 @@ let render_runtime_reading (state : state) =
                 ~ko:"각 런타임 연결 상태를 새로 점검하고 있습니다"
                 ~en:"Checking each runtime connection live")
             , false )
-        else if Option.is_some state.runtime_surface_inflight then
+        else if Option.is_none state.runtime_surface && Option.is_some state.runtime_surface_inflight then
           Some
             ( "surface-read"
             , ui_text state ~ko:"런타임 상태 읽는 중" ~en:"Reading runtime state"
@@ -1929,7 +1929,7 @@ let render_metrics (state : state) =
             drawn_metrics_card_rows := Some card_rows)
           ~hand_position:c.position
           ~push:c.push ~push_styled:c.push_styled
-          ~push_selected:c.push_selected ~push_divider:c.push_divider
+          ~push_selected:c.push_selected_styled ~push_divider:c.push_divider
           ~push_empty:c.push_empty
       else begin
         (* The four sections go through the strip every other screen draws: a
@@ -2082,8 +2082,9 @@ let render_runtime_pick (state : state) =
   in
   let catalog_loading =
     match state.runtime_catalog_reading with
-    | Runtime_catalog_loading | Runtime_catalog_refreshing _ -> true
-    | Runtime_catalog_read | Runtime_catalog_unread | Runtime_catalog_stale _
+    | Runtime_catalog_loading -> true
+    | Runtime_catalog_refreshing _ | Runtime_catalog_read
+    | Runtime_catalog_unread | Runtime_catalog_stale _
     | Runtime_catalog_failed _ -> false
   in
   let catalog_started =
@@ -2150,10 +2151,10 @@ let render_runtime_pick (state : state) =
               state.runtime_catalog_reading);
       (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note ~ko ~reading:state.runtime_catalog_reading view with
        | Runtime_catalog_failed err, _ -> c.push (data_unreliable_row ~cols err)
-       | (Runtime_catalog_loading | Runtime_catalog_refreshing _), Some note ->
+       | Runtime_catalog_loading, Some note ->
            c.push
              ("  " ^ progress_inline ~ko ~now ?started_at:catalog_started (String.trim note))
-       | (Runtime_catalog_unread | Runtime_catalog_read | Runtime_catalog_stale _), Some note ->
+       | (Runtime_catalog_refreshing _ | Runtime_catalog_unread | Runtime_catalog_read | Runtime_catalog_stale _), Some note ->
            c.push (Theme.recede () ^ note ^ Ansi.reset)
        | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read
           | Runtime_catalog_refreshing _ | Runtime_catalog_stale _), None ->

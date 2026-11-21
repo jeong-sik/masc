@@ -139,20 +139,18 @@ let verification_progress_sheet ~now (state : state) =
     spec
 ;;
 
-let reading_notice_lines state ~width ~inflight ~error =
-  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-  let notice = match error, inflight with
-    | None, false -> None
-    | None, true -> Some (Theme.info (),
-        under_way ^ " " ^ ui_text state ~ko:"재조회 중 · 이전 조회 자료" ~en:"Refreshing · previous reading")
-    | Some (Read_kept_back notice), (false | true) -> Some (Theme.warn (), notice)
-    | Some (Last_error detail), refreshing ->
-        let prefix = if refreshing then
-            under_way ^ " " ^ ui_text state ~ko:"재조회 중 · 이전 자료 · 마지막 오류: "
-              ~en:"Refreshing · previous reading · last error: "
-          else ui_text state ~ko:"이전 관측 · 조회 실패: "
-              ~en:"Previous reading · read failed: " in
-        Some (Theme.warn (), prefix ^ detail) in
+(* A read in flight over a held Verification/Harness reading says nothing in
+   the body: the reading slot at the end of zone 2 does (RFC
+   tui-one-screen-grammar section 8). A retry over a failure keeps the
+   failure line stable instead of swapping its wording while the read runs. *)
+let reading_notice_lines state ~width ~inflight:_ ~error =
+  let notice = match error with
+    | None -> None
+    | Some (Read_kept_back notice) -> Some (Theme.warn (), notice)
+    | Some (Last_error detail) ->
+        Some (Theme.warn (),
+          ui_text state ~ko:"이전 관측 · 조회 실패: "
+            ~en:"Previous reading · read failed: " ^ detail) in
   match notice with
   | None -> []
   | Some (style, text) ->

@@ -99,9 +99,9 @@ let replay filename ~enabled () =
   let results=List.concat_map (fun query -> List.map (fun source ->
     observed:=[];
     let query_text=jstring "query" query in
-    let output=Masc.Keeper_tool_memory_runtime.keeper_memory_search_json ~config ~meta
+    let output=(Masc.Keeper_tool_memory_runtime.keeper_memory_search_with_outcome ~clock ~config ~meta
       ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
-      ~args:(`Assoc ["query",`String query_text;"source",`String source]) |> Yojson.Safe.from_string in
+      ~args:(`Assoc ["query",`String query_text;"source",`String source]) ()).raw_output |> Yojson.Safe.from_string in
     check (list string) "HTTP fixture had no unmatched request" [] (List.rev !errors);
     let expected_hashes=if enabled then List.map (jstring "request_body_sha256") (rows "requests" query) else [] in
     if expected_hashes <> List.rev !observed then

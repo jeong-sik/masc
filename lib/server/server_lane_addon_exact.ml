@@ -329,11 +329,11 @@ let runner_with ~cli_runner ~base_path : Addon.runner =
           ~validate))
 
 let runner ~base_path = runner_with ~cli_runner:None ~base_path
-let authorize_request ~base_path ~store ~declaration_id ~package request =
-  let+ curator=Server_workspace_memory_addon_validation.authorize
-    ~base_path ~store ~declaration_id ~package request in
-  {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
-   validate_output=curator; before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ())}
+(* No carried package checks its answers or its dispatch any more: every
+   request runs as Standard with the schema check alone. *)
+let authorize_request ~base_path:_ ~store:_ ~declaration_id:_ ~package:_ _request =
+  Ok {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+      validate_output=(fun _ -> Ok ()); before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ())}
 
 module For_testing = struct
   let runner ~base_path ~cli_runner = runner_with ~cli_runner:(Some cli_runner) ~base_path

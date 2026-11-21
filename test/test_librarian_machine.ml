@@ -1463,6 +1463,24 @@ let test_e4_stands_while_the_pulse_asks_the_item_again () =
   check (list string) "a write since" [ "W1" ] (alarms_of written)
 ;;
 
+(* A declared slot the registry did not admit said nothing (§7.2). With one,
+   the end at one item is a silent lane end whatever the walked slots said,
+   and E4 stays off: the operator's row names the slot that is missing, not
+   an item the lane refused. *)
+let test_a_slot_not_admitted_is_a_silent_slot () =
+  let place = started_place () in
+  close_turn place ~from:0 ~until:64;
+  let value = booted ~lane:(declared ~unadmitted:[ "openrouter.down" ] [ fast ]) place ~at:100.0 in
+  let rested =
+    step "the walked slot refused without a size" place value
+      (ended value 1
+         (No_answer { question = question place value; slots = [ fast, Refused Unsized ] }))
+      ~state:"resting, holding: " ~fiber:"cancel"
+  in
+  check string "the end is a silent one" "lane, one item, a slot silent" (last_read_text rested);
+  check (list string) "and E4 is off" [ "W1" ] (alarms_of rested)
+;;
+
 (* The item read alone marks the read, and the room ask after it that every
    slot refused for its input says so with the Memory and the lane value it
    was asked with. A range read after it is one with Memory again and
@@ -1718,6 +1736,8 @@ let () =
             test_an_item_every_slot_sized_is_not_the_refusal_e4_reads
         ; test_case "E4 stands while the pulse asks the item again" `Quick
             test_e4_stands_while_the_pulse_asks_the_item_again
+        ; test_case "a slot not admitted is a silent slot" `Quick
+            test_a_slot_not_admitted_is_a_silent_slot
         ; test_case "an item read alone and a room that fits no slot" `Quick
             test_an_item_read_alone_and_a_room_that_fits_no_slot
         ; test_case "each room end is kept" `Quick test_each_room_end_is_kept

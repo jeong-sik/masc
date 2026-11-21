@@ -252,8 +252,13 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
     | Some declared -> not (Lane.equal declared.value asking.lane.value)
   in
   (* What the result was, for the row (§12.2): whether a slot declared now
-     said nothing is read against the slots declared now, as the verdict is. *)
-  let silent = Last.silent ~declared:declared_now slots in
+     said nothing is read against the lane value declared now, as the
+     verdict is. A declared slot the registry did not admit said nothing. *)
+  let silent =
+    match t.lane with
+    | None -> false
+    | Some declared -> Last.silent declared.value slots
+  in
   let lane_result ~one_item = Last.Lane { one_item; silent; basis = question.basis; slots } in
   let ended ~one_item t = { t with last_read = Some (lane_result ~one_item) } in
   (* With no slot declared now in the result, the ask said nothing about the
@@ -263,9 +268,9 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
     then next_ask place t ~at store
     else { t with state = Resting store; last_read = Some last }
   in
-  (* [Not_all] at one item. With no slot silent, every slot the lane walks
-     now refused the question and not every slot it declares gave a size:
-     the end E4 reads (§12.2). It keeps the lane value the verdict was
+  (* [Not_all] at one item. With no slot silent, every slot the lane
+     declares now refused the question and not every one gave a size: the
+     end E4 reads (§12.2). It keeps the lane value the verdict was
      folded over, the one declared now, which is not the one the ask started
      with after a declaration that changed only slots. *)
   let not_all (t : t) =

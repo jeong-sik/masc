@@ -26,17 +26,19 @@ type read =
       (** Every slot of the walk, as in {!Lane}. *)
       }
   (** No slot answered a question that offered one item, every slot [lane]
-      walks refused it, and {!Librarian_bottom.fold} over [lane] was
-      [Not_all]: a slot it walks gave no size, or it declares one the
-      registry did not admit. The writer rests with no step below one item
-      ([m.last = "notall_r"]). This end is kept here and not as a {!Lane};
-      E4 reads it and no other end (§12.2). *)
+      declares refused it or held a size fact for it, and
+      {!Librarian_bottom.fold} over [lane] was [Not_all]: one of them
+      refused without a size. No slot was silent ({!silent}). The writer
+      rests with no step below one item ([m.last = "notall_r"]). This end
+      is kept here and not as a {!Lane}; E4 reads it and no other end
+      (§12.2). *)
   | Lane of
       { one_item : bool
       (** The question offered one item, with Memory or alone ([m.lastOne]). *)
       ; silent : bool
-      (** A slot the lane declared when the ask ended said nothing, or was
-          not in the walk ([m.lastSil]). A refusal without a size is not
+      (** A slot the lane declared when the ask ended said nothing: it was
+          silent in the walk, was not in it, or was not admitted
+          ([m.lastSil], {!silent}). A refusal without a size is not
           silence. *)
       ; basis : Digest.digest
       (** The snapshot the question was made against ([m.lastBasis]). *)
@@ -68,9 +70,11 @@ type room =
   (** Every slot declared now refused it for its input: Memory alone fits no
       slot's window (E5). *)
 
-(** [silent ~declared slots]: one of [declared] is not in [slots] or said
-    nothing there. *)
+(** [silent lane slots]: a slot [lane] declares said nothing to the
+    question. A slot it walks is not in [slots] or said nothing there, or it
+    declares one the registry did not admit: nothing walks that one, so it
+    said nothing (§7.2). *)
 val silent
-  :  declared:Librarian_memory_lane.slot_key list
+  :  Librarian_memory_lane.t
   -> (Librarian_memory_lane.slot_key * Librarian_slot_outcome.unanswered) list
   -> bool

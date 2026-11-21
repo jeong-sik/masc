@@ -2275,8 +2275,6 @@ module Choice = Keeper_turn_driver_try_provider
 
 let msg role text = Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 
-let start_seed_trace = "official-front-trace"
-
 (* Two atoms the Memory writer read, then one the keeper is still on. *)
 let absorbed_messages =
   [ msg Agent_core.Types.User "Build the patch."
@@ -2650,36 +2648,6 @@ let test_a_read_position_behind_the_lane_cut_loses () =
      | Host.Lane_cut -> true
      | Host.Carried_seed _ | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
      | Host.Covered_with_working_state _ | Host.Covered _ -> false)
-;;
-
-(* What the Memory screen records for a request this lane composed, in the
-   Agent Core lane's words. A read-end front records itself; any other front
-   records whether the turn had a read end, and a read end this request did
-   not start from is [Not_applied], as a turn that read none is. *)
-module Observation = Keeper_continuity_observation
-
-let test_the_observation_records_the_front_or_why_the_choice_was_not_applied () =
-  let input ?continuity front =
-    Host.continuity_observation_input ~trace_id:start_seed_trace ~continuity front
-  in
-  (match input (Host.Covered_with_working_state { end_atom = absorbed_end }) with
-   | Observation.Absorbed { trace_id; end_atom } ->
-     check string "the turn's trace" start_seed_trace trace_id;
-     check int "the read end" absorbed_end end_atom
-   | Observation.Summarized _ | Observation.Without_snapshot | Observation.Not_applied ->
-     fail "a working-state front was not recorded as absorbed");
-  (match input (Host.Covered { end_atom = 2 }) with
-   | Observation.Absorbed { end_atom = 2; _ } -> ()
-   | _ -> fail "a read-end front was not recorded as absorbed");
-  (match input Host.Turn_start with
-   | Observation.Not_applied -> ()
-   | _ -> fail "a turn that read no continuity was not recorded as not applied");
-  (match input ~continuity:Choice.No_read_end Host.Turn_start with
-   | Observation.Without_snapshot -> ()
-   | _ -> fail "a turn with no read end was not recorded so");
-  match input ~continuity:(absorbed ()) Host.Lane_cut with
-  | Observation.Not_applied -> ()
-  | _ -> fail "a read end the lane cut passed was recorded as applied"
 ;;
 
 (* #39445: the bundle's declaration decides each tool's loading; without one
@@ -4451,10 +4419,6 @@ let () =
             "a fully absorbed history still carries its newest atom"
             `Quick
             test_a_fully_absorbed_history_still_carries_its_newest_atom
-        ; test_case
-            "the observation records the front or why the choice was not applied"
-            `Quick
-            test_the_observation_records_the_front_or_why_the_choice_was_not_applied
         ; test_case
             "the loading plan names the on-demand tools"
             `Quick

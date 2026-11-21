@@ -483,7 +483,7 @@
  ; pushes is the wire's business, and this decoder used to keep a copy that had
  ; drifted by two.
  ; masc.sse_event for the agent lifecycle payloads, read with the generated
- ; readers of the contract the bridge writes them with (RFC-0004).
+ ; readers of the contract the bridge writes them with.
  (libraries masc masc.sse_event masc.masc_types atdgen-runtime agent_core
   masc_tui_keeper_chat_projection masc_tui_sse_lines yojson))
 

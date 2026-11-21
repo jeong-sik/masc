@@ -102,8 +102,7 @@ let host =
 let run_base_path =
   Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH"
     ~doc:"Workspace root; runtime state lives under its .masc directory.")
-(* In-process readers still find the workspace through MASC_BASE_PATH until
-   RFC workspace-root-resolution stage 4 passes the root as an argument. Without
+(* In-process readers find the workspace through MASC_BASE_PATH. Without
    this, a workspace found from the cwd would reach the command and then be lost
    to every reader below it. *)
 let publish_workspace_root (workspace : Workspace_root.t) =
@@ -707,8 +706,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
                There is no room after the Board flush: the switch cancel that
                follows takes seconds more before the process deadline is
                disarmed. A detach the timeout cuts short leaves its binding
-               for the next server, as before
-               (RFC lane-addon-shutdown-detaches-native-instances §3). *)
+               for the next server. *)
             let t_phase = Unix.gettimeofday () in
             Log.Server.info "[Shutdown] Phase 2/4 HOOKS: starting (timeout=%.1fs)"
               shutdown_cfg.cleanup_timeout_s;

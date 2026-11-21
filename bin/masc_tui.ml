@@ -1308,7 +1308,7 @@ let owe_tool_modes_read state =
 
 (* The turns are owed when the server says a Keeper's turns changed, when a
    preview changed that a surface on screen draws, on a revalidation or a
-   resumed authority, and after any failed turns read (RFC-0481 §3.4, §3.5).
+   resumed authority, and after any failed turns read.
    The debt is read only while something uses the answer
    ({!keeper_turns_in_use}); until then it stays owed. *)
 let owe_keeper_turns_read state =
@@ -1350,8 +1350,7 @@ let owe_keeper_waiting_read ?change state =
 
 (* Where a Keeper's running-turn preview is drawn: its own chat pane's
    activity line, the Keepers list's last activity, and the answering
-   overlay. A preview change is read only while one of them is on screen
-   (RFC-0481 §3.5). *)
+   overlay. A preview change is read only while one of them is on screen. *)
 let preview_on_screen state ~keeper_name =
   state.answering_open
   ||
@@ -1564,7 +1563,7 @@ let owe_machine_live_read state machine =
         state.dos_live_owed <- Masc_tui_owed_read.changed state.dos_live_owed
 
 (* The fleet memory health reads on arrival, on a revalidation, when a row
-   read cannot be merged, and again after a failed read (RFC-0487). *)
+   read cannot be merged, and again after a failed read. *)
 let owe_memory_health_read state =
   state.memory_facts_owed <- Masc_tui_owed_read.changed state.memory_facts_owed;
   state.memory_activity_owed <- Masc_tui_owed_read.changed state.memory_activity_owed;
@@ -1580,7 +1579,7 @@ let owe_memory_input_read state =
 
 (* A memory health push names the Keeper whose input was written. That
    Keeper's row is read on its own and merged into the fleet answer, so a
-   Keeper that writes often costs one row per push (RFC-0487). *)
+   Keeper that writes often costs one row per push. *)
 let owe_memory_health_row state keeper =
   if Masc_tui_fetched.current_key state.memory_facts = Some keeper then
     state.memory_facts_owed <- Masc_tui_owed_read.changed state.memory_facts_owed;
@@ -3038,9 +3037,9 @@ let launch_owed_tools_async_task state ~mailbox =
    any pane but Async is on screen, the skills catalog and each roster
    Keeper's Usage answer while the Usage pane is, the selected Keeper's
    activations while the Activations pane is, each when a push, an arrival
-   or a failed read owes it (RFC-0483 §4.3). A part in flight is let
-   finish first; one that will not deliver is owed again. What is owed off
-   screen waits for its pane. *)
+   or a failed read owes it. A part in flight is let finish first; one that
+   will not deliver is owed again. What is owed off screen waits for its
+   pane. *)
 let launch_owed_tools state ~mailbox =
   let async_open =
     Option.is_some state.tools_async_task_source
@@ -3640,12 +3639,12 @@ let write_terminal_text payload =
   Masc_tui_terminal_out.write payload;
   Masc_tui_terminal_out.flush ()
 
-(* RFC-msx-surface-focus-mode stage 1: the spectator's pixels ride the
-   InteractiveSurface contract. The poll owns [msx_surface_frame]; the
-   surface's [current] reads it and the renderer asks the surface, so
-   [Masc_tui_msx] never touches the pixel fields of
-   [Masc_tui_types.msx_frame] again. [press] has no consumer yet — stage 2
-   routes driving keys through [handle_input]. *)
+(* The spectator's pixels ride the InteractiveSurface contract. The poll
+   owns [msx_surface_frame]; the surface's [current] reads it and the
+   renderer asks the surface, so [Masc_tui_msx] never touches the pixel
+   fields of [Masc_tui_types.msx_frame] again. [press] has no consumer:
+   game keys reach the server from the key handler in [main], not through
+   [handle_input]. *)
 let msx_surface_frame : Masc_tui_types.msx_frame option ref = ref None
 
 let msx_surface =
@@ -3755,8 +3754,8 @@ let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
              state.msx_notice <- Some "Restore completed; showing workspace state observed afterwards.")
 ;;
 
-(* The MSX door opens on the load menu (RFC-0439 3.7): the human picks a game
-   before watching one. Fetch the frame so the menu can offer "watch" when a
+(* The MSX door opens on the load menu: the human picks a game before
+   watching one. Fetch the frame so the menu can offer "watch" when a
    game is already loaded, and the inventory so there is something to pick.
    Both are bounded loopback calls; the overlay then owns the terminal until a
    game is chosen or [esc].
@@ -6690,7 +6689,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      and its input request before another workspace can reuse the same name:
      Enter must select a newly read B health row, never A's retained row. The
      next workspace's fleet is owed, so a Memory or Metrics screen left empty
-     reads it once that workspace can be read (RFC-0487). *)
+     reads it once that workspace can be read. *)
   state.memory_input <- Masc_tui_fetched.clear state.memory_input;
   state.memory_input_owed <- Masc_tui_owed_read.settled;
   state.keeper_story_turns <- Masc_tui_fetched.clear state.keeper_story_turns;
@@ -8164,7 +8163,7 @@ let enter_tools_pane state pane =
   (* From the top, unless the selection a list kept is further down. *)
   follow_tools_selection state;
   (* Opening the Usage pane reads the catalog and every Keeper's usage once,
-     and the Activations pane the selected Keeper's ledger (RFC-0483 §4.3).
+     and the Activations pane the selected Keeper's ledger.
      The inventory is read on its pushes on every pane but Async, so opening
      Surface or Catalog owes it nothing; a push that came during Async is
      still owed. *)
@@ -8575,7 +8574,7 @@ let resolve_opening_chat state ~base_path ~mailbox =
   end
 
 (* The Keeper roster reads again when the server says a row or every row
-   changed, on a resumed authority, and after a failed read (RFC-0481 §3.3).
+   changed, on a resumed authority, and after a failed read.
    A named row is read alone; every row, or two or more rows due at once, is
    read whole. A revalidation reads it whole in its refresh. *)
 let owe_whole_keeper_roster_read state =
@@ -11169,8 +11168,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                    open_chat_memory_grew := true
                | Some _ | None -> ());
               (* The chat history carries the exact Skill evidence of its
-                 turns, read from the Keeper's activation ledger
-                 (RFC-0483 L5). *)
+                 turns, read from the Keeper's activation ledger. *)
               (match Masc_tui_observer.skill_activations_keeper event with
                | Some keeper when state.msg_target_keeper_name = Some keeper ->
                    open_chat_skill_ledger_changed := true
@@ -11444,12 +11442,12 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       end;
       if !pane_keeper_acted then refresh_acting_pane_changes state ~mailbox;
       (* Schedules and confirmations are items of the waiting list that
-         announce through their own events and name no Keeper (RFC-0481
-         §3.4). They owe the list a read without marking every Keeper
-         unverified, which would blank the whole waiting column for a read
-         on each of them; a held schedule announces every runner tick. A
-         read already in flight is still not taken as current, so its
-         Keepers read as unverified until the read that follows. *)
+         announce through their own events and name no Keeper. They owe the
+         list a read without marking every Keeper unverified, which would
+         blank the whole waiting column for a read on each of them; a held
+         schedule announces every runner tick. A read already in flight is
+         still not taken as current, so its Keepers read as unverified until
+         the read that follows. *)
       let waiting_keepers = List.sort_uniq String.compare !waiting_inventory_changed in
       let waiting_unattributed = !pending_confirms_changed || !schedules_changed in
       if waiting_keepers <> [] then
@@ -15221,9 +15219,9 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                  state.msg_loaded_error <- None;
                  state.msg_loaded_dropped <- dropped;
                  (* The turns this page names that the session does not hold as
-                    logs are rebuilt from their journals, reasoning included
-                    (RFC-0412 §3.3): the v1 rows carry trace reasoning
-                    content-withheld by design. *)
+                    logs are rebuilt from their journals, reasoning included:
+                    the v1 rows carry trace reasoning content-withheld by
+                    design. *)
                  if not state.msg_journal_reads_refused then
                    journal_targets :=
                      journal_source_fetch_targets ~keeper_name
@@ -16047,9 +16045,9 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply (String.concat " · "
              ([keeper; pass; lag; measured; reading_age] @ Option.to_list cause @ Option.to_list admission)));
       (* The row replaces the Keeper's row in the fleet answer, or removes it
-         when the Keeper has none, and the totals are counted again
-         (RFC-0487). A row that cannot be merged -- no fleet answer yet, a
-         refused row, or a failed read -- owes the fleet. *)
+         when the Keeper has none, and the totals are counted again. A row
+         that cannot be merged -- no fleet answer yet, a refused row, or a
+         failed read -- owes the fleet. *)
       let merged =
         match state.memory_health, result with
         | Some snapshot,
@@ -17078,7 +17076,7 @@ let main
   let server_contact = Masc_tui_transport.Server_contact.create () in
   let frame_presenter = Masc_tui_shell.Terminal_session.presenter terminal_session in
   let exit_signals = Masc_tui_shell.Terminal_session.exit_signals terminal_session in
-  (* Off unless MASC_TUI_NAV_TRACE names a file (RFC-0485). *)
+  (* Off unless MASC_TUI_NAV_TRACE names a file. *)
   let nav_trace = Masc_tui_nav_trace_log.from_environment ~clock:Unix.gettimeofday in
   (* All interaction evidence is committed together after terminal output. *)
   let presented = ref (Presented.initial ~approval:None
@@ -19207,12 +19205,12 @@ let main
           (* Local size controls are handled before mapped game keys. The
              observation/control and room-focus branches above have already
              filtered input: + and - resize only this terminal's cached frame
-             and never reach the shared machine (RFC-0439 3.3). *)
+             and never reach the shared machine. *)
           Masc_tui_msx.adjust_size
             (if String.equal size_key "-" || String.equal size_key "_" then -1.0 else 1.0);
           render_spectator state)
       | Some name -> (
-          (* A game key: send it to the shared server machine (RFC-0439 §3.3),
+          (* A game key: send it to the shared server machine,
              then re-fetch so the human sees the result of their own press
              without waiting for the next poll. A key with no server mapping
              (e.g. deliberate non-key input) just repaints the cache. *)
@@ -28339,8 +28337,8 @@ let main
             | Keepers (Keeper_list | Keeper_detail) ->
                 (match state.connection_status with
                  | Disconnected ->
-                     (* RFC tui-server-lifecycle: with no server up there is
-                        no keeper to shut down, so "s" starts one here. *)
+                     (* With no server up there is no keeper to shut down, so
+                        "s" starts one here. *)
                      Masc_tui_transport.Server_contact.start_here_then_read server_contact state ~base_path ~host:Masc_tui_transport.Workspace_admission.server_peer_host
                        ~port:state.port
                  | Connecting | Booting | Account_server _ | Degraded | Connected ->

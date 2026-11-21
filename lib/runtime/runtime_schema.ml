@@ -606,7 +606,6 @@ type typesafeai =
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
-  ; librarian_preflight : bool
   ; workspace_memory_selection_enabled : bool
       (** Independent opt-in to send current input/task context and shared-memory
           interpretations/source details for host retrieval. Defaults to false. *)
@@ -647,7 +646,6 @@ let default_typesafeai =
   ; absorb_gate = false
   ; context_review = false
   ; skill_applicability = false
-  ; librarian_preflight = false
   ; workspace_memory_selection_enabled = false
   ; memory_recall = Memory_recall_off
   ; excluded_keepers = []

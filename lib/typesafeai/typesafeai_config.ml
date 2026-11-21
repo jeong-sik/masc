@@ -14,7 +14,6 @@ type unavailable_reason =
   | Board_attention_disabled
   | Context_review_disabled
   | Skill_applicability_disabled
-  | Librarian_preflight_disabled
   | Workspace_memory_selection_disabled
   | Memory_recall_disabled
   | Keeper_excluded
@@ -28,7 +27,6 @@ let unavailable_reason_to_string = function
   | Board_attention_disabled -> "board_attention_disabled"
   | Context_review_disabled -> "context_review_disabled"
   | Skill_applicability_disabled -> "skill_applicability_disabled"
-  | Librarian_preflight_disabled -> "librarian_preflight_disabled"
   | Workspace_memory_selection_disabled -> "workspace_memory_selection_disabled"
   | Memory_recall_disabled -> "memory_recall_disabled"
   | Keeper_excluded -> "keeper_excluded"
@@ -144,12 +142,6 @@ let skill_applicability_destinations ~keeper_id =
 ;;
 
 let is_board_attention_enabled () = is_enabled () && (policy ()).Runtime_schema.board_attention
-let librarian_preflight_destinations ~keeper_id =
-  gate_destinations ~keeper_id
-    ~switched_on:(policy ()).Runtime_schema.librarian_preflight
-    ~off:Librarian_preflight_disabled
-;;
-
 let workspace_memory_selection_destinations ~keeper_id =
   gate_destinations ~keeper_id
     ~switched_on:(policy ()).Runtime_schema.workspace_memory_selection_enabled
@@ -210,8 +202,8 @@ let readiness () =
       Off
     | Error
         ( Absorb_gate_disabled | Board_attention_disabled | Context_review_disabled
-        | Skill_applicability_disabled | Librarian_preflight_disabled
-        | Workspace_memory_selection_disabled | Memory_recall_disabled | Keeper_excluded ) ->
+        | Skill_applicability_disabled | Workspace_memory_selection_disabled
+        | Memory_recall_disabled | Keeper_excluded ) ->
       (* [lane_destinations] answers only about the lane and its keys. *)
       Off
     | Ok (first, rest) ->

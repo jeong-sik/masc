@@ -4,7 +4,11 @@
     The server writes the member from what the writer holds
     ({!Keeper_memory_writer_health.keeper_rows}). Every token is closed: a
     token this build does not know fails the decode, and the row that carries
-    it is drawn as refused. Nothing is given a default. *)
+    it is drawn as refused. Nothing is given a default.
+
+    The row's [request] says where the Keeper's latest request started
+    against the read end (§11.3). The screen draws W2 and nothing else of
+    it, so it is read to check W2 against and is not kept. *)
 
 (** What one declared slot said to the last reading ask no slot answered. *)
 type slot_outcome =
@@ -165,5 +169,7 @@ type t =
 val decode : Yojson.Safe.t -> (t, string) result
 (** The [writer] member of a row. [Error] names the first field that is
     missing, unknown, of the wrong shape, or at odds with another: a level
-    that is not {!Librarian_level.level} of the alarms, an ask on a state
-    that is not asking, a state without the fields it carries. *)
+    that is not {!Librarian_level.level} of the alarms, W2 on without a
+    [behind] request or off with one, a [behind] whose [sends_from] is not
+    past its [read_end], an ask on a state that is not asking, a state
+    without the fields it carries. *)

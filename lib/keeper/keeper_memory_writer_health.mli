@@ -13,7 +13,16 @@
 (** A row for every writer the table holds and for every Keeper the
     registry holds, by Keeper name, with how many are at [error] and at
     [warn]. A row carries the writer's state, the alarms on and their level,
-    what is unread, how far reading stands, the last asks, and Memory.
+    where the Keeper's latest request started against the read end, what is
+    unread, how far reading stands, the last asks, and Memory.
+
+    ["request"] is {!Keeper_request_start.standing} against the view the row
+    shows, one ["kind"] for each constructor: [behind] and [not_behind] with
+    ["sends_from"] and ["read_end"], [not_comparable] with a ["cause"] that
+    is one kind for each {!Keeper_request_start.unresolved}. W2 is on
+    exactly when it is [behind]. It reads the turn log from the earlier of
+    the read unit and the request's log end, to the end or the first
+    [Reset].
 
     A registered Keeper whose writer is not made yet has the [booting] row:
     its first turn or the first pulse makes the writer (§8.6), and until

@@ -174,8 +174,8 @@ let test_new_generation_empties_memory () =
 (* §4.3: a pass that started before the generation changed writes nothing
    of what it hears and ends (bug late_write). *)
 let test_older_pass_writes_nothing () =
-  let _, pass = start (fresh ()) [ 1 ] in
-  let restarted = N.empty { N.lane = "lane-1"; requests = 1 } ~slots:[ "a" ] in
+  let memory, pass = start (fresh ()) [ 1 ] in
+  let restarted = N.restart memory ~requests:1 in
   match N.unanswered restarted pass ~sent:(facts [ 1 ]) ~heard:[ "a", N.Unsized ] with
   | Error error -> Alcotest.fail (N.error_to_string error)
   | Ok (memory, pass) ->

@@ -66,6 +66,11 @@ type memory
 val empty : generation -> slots:slot list -> memory
 (** Nothing remembered. [slots] are the lane's slots in walk order. *)
 
+val restart : memory -> requests:int -> memory
+(** An ask to start over (model [Reset]): nothing remembered, in the
+    generation of the same lane and slots with [requests]. A pass that
+    started before it writes nothing, and {!next} ends it. *)
+
 val size : memory -> Workspace_memory_request.size
 (** The kept size (model [size]): [Up_to n] after a batch of [n] facts was
     answered that came down by size refusals only, [Fill_frame] otherwise. *)

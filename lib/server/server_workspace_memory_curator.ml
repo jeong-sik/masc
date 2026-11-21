@@ -8,6 +8,9 @@ module Exact = Agent_core.Exact_output
 module Registry = Runtime_exact_output_registry
 module Slots = Exact_lane_slots
 module Failure_evidence = Keeper_exact_walk_failure
+module Narrowing = Workspace_memory_narrowing
+module Outcome = Exact_lane_slot_outcome
+module Visit = Exact_lane_slot_visit
 open Result.Syntax
 
 let io work = Systhread_host.run ~label:"workspace-curator-io" work
@@ -26,10 +29,20 @@ type resolved_lane_execution =
   ; resolved : Registry.resolved_lane
   }
 
+type lane_standing =
+  | Not_published of Registry.publication_error
+  | Not_resolved of Registry.lane_resolution_error
+  | Replacement_in_progress
+
+let lane_standing_to_string = function
+  | Not_published err -> Registry.publication_error_to_string err
+  | Not_resolved err -> Registry.lane_resolution_error_to_string err
+  | Replacement_in_progress -> "exact-output registry replacement in progress"
+;;
+
 type lane_resolve_outcome =
   | Lane_ready of resolved_lane_execution
-  | Lane_disabled of string
-  | Lane_busy of string
+  | Lane_unready of lane_standing
 
 (* The curator's own table. The Librarian's Memory lane starts no curator
    call: the two share no declaration, slot order or limit evidence. *)
@@ -37,8 +50,7 @@ let lane_id = Standalone_lane.to_id Standalone_lane.Workspace_memory_curator
 
 let resolve_lane_execution () =
   match Registry.current () with
-  | Error Registry.Publication_busy ->
-    Lane_busy "exact-output registry replacement in progress"
+  | Error Registry.Publication_busy -> Lane_unready Replacement_in_progress
   | Error
       (( Registry.Registry_not_published
        | Replacement_base_changed
@@ -51,14 +63,13 @@ let resolve_lane_execution () =
        | Required_lane_unavailable _
        | Required_lane_disabled _
        | Resolver_snapshot_rejected _
-       | Targets_refused _ ) as err) ->
-    Lane_disabled (Registry.publication_error_to_string err)
+       | Targets_refused _ ) as err) -> Lane_unready (Not_published err)
   | Ok registry ->
     (match Registry.resolve_lane registry ~lane_id with
      | Ok resolved ->
        let generation = Registry.catalog_generation_fingerprint registry in
        Lane_ready { generation; resolved }
-     | Error err -> Lane_disabled (Registry.lane_resolution_error_to_string err))
+     | Error err -> Lane_unready (Not_resolved err))
 ;;
 
 type lane_call_failure =
@@ -74,52 +85,6 @@ let flow_detail cause =
     ~callback_error_to_string:no_callback_error_to_string
     ~raw_response_to_string:raw_excerpt
     cause
-;;
-
-(* The answer was cut at the slot's output budget, so a smaller batch, which
-   asks for a shorter answer, can fit it. *)
-let is_output_limit_cause = function
-  | Exact.Output_limit_reached -> true
-  | Completion_failed _
-  | Response_body_deadline_exceeded
-  | Provider_response_refused _
-  | Provider_context_overflow _
-  | Window_reached _
-  | Incomplete_output _
-  | Missing_output
-  | Ambiguous_output _
-  | Unexpected_output_content
-  | Invalid_json_output -> false
-;;
-
-let flow_ran_out_of_output : no_callback_error Exact.flow_execution_error -> bool = function
-  | Flow_exact_execution_failed { cause = error; candidate = _; evidence = _ } ->
-    is_output_limit_cause error.cause
-  | Flow_candidates_exhausted _
-  | Flow_attempt_already_started _
-  | Flow_attempt_start_failed _
-  | Flow_measurement_start_failed _
-  | Flow_before_measurement_dispatch_callback_failed _
-  | Flow_measurement_terminal_callback_failed _
-  | Flow_before_dispatch_callback_failed _
-  | Flow_before_advance_callback_failed _ -> false
-;;
-
-let ran_out_of_output : (Slots.t, slot_failure) Exact_lane_walk.passed -> bool = function
-  | Failed
-      { slot = _
-      ; failure =
-          Http_failed { slot_id = _; error = Flow_execution_terminal { cause; prior_rejections = _ } }
-      } -> flow_ran_out_of_output cause
-  | Failed
-      { slot = _; failure = Http_failed { slot_id = _; error = Flow_semantic_candidates_exhausted _ } }
-  | Failed
-      { slot = _
-      ; failure =
-          (Http_unfit _ | Cli_failed _ | Cli_rejected _ | Cli_unfit _ | Cli_seats_unpublished _)
-      }
-  | Held { slot = _; until = _ }
-  | Seats_full _ -> false
 ;;
 
 let failure_detail : slot_failure -> string = function
@@ -144,7 +109,7 @@ let pass_detail : (Slots.t, slot_failure) Exact_lane_walk.passed -> string = fun
   | Failed { slot = _; failure } -> failure_detail failure
 ;;
 
-let stop_detail : (string, no_callback_error) Slots.stop -> string = function
+let stop_detail : ('rejection, no_callback_error) Slots.stop -> string = function
   | Http_unstartable { slot_id; reason } -> slot_id ^ ": " ^ reason
   | Http_stopped { slot_id = _; error = Flow_execution_terminal { cause; prior_rejections = _ } } ->
     flow_detail cause
@@ -153,36 +118,27 @@ let stop_detail : (string, no_callback_error) Slots.stop -> string = function
   | Record_failed _ -> .
 ;;
 
-(* The batch is narrowed when a slot refused the input's size and no slot
-   answered invalid output, or, where the caller allows it, when a slot's
-   answer was cut at its output budget. *)
-let lane_failure ~allow_output_limit_split ~transient ~detail passed =
-  { capacity_refused =
-      Failure_evidence.refuses_input_capacity (Slots.failure_evidence passed)
-      || (allow_output_limit_split && List.exists ran_out_of_output passed)
+(* The briefing chunk is narrowed when a slot refused the input's size and no
+   slot answered invalid output. *)
+let lane_failure ~transient ~detail passed =
+  { capacity_refused = Failure_evidence.refuses_input_capacity (Slots.failure_evidence passed)
   ; transient
   ; detail = String.concat "; " (List.map pass_detail passed @ detail)
   }
 ;;
 
-(* One walk over the lane's slots, HTTP and CLI alike
+(* One walk over [slots], HTTP and CLI alike
    (RFC exact-lane-walks-one-slot-list). *)
-let execute_exact_prompt ~base_path ~(lane : resolved_lane_execution) ~schema ~rendered_prompt
-    ~allow_output_limit_split ~validate =
+let walk_slots ~base_path ~schema ~rendered_prompt ~validate slots =
   match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
-  | None, _ | _, None ->
-    Error
-      { capacity_refused = false
-      ; transient = true
-      ; detail = "server Eio net/clock context unavailable"
-      }
+  | None, _ | _, None -> Error "server Eio net/clock context unavailable"
   | Some net, Some clock ->
     let proceed _ : (unit, no_callback_error) result =
       Eio.Fiber.check ();
       Ok ()
     in
-    (match
-       Slots.walk
+    Ok
+      (Slots.walk
          ~net
          ~clock
          ~base_dir:base_path
@@ -204,26 +160,70 @@ let execute_exact_prompt ~base_path ~(lane : resolved_lane_execution) ~schema ~r
          ~validate_cli:validate
          ~before_cli_visit:(fun ~runtime_id:_ -> proceed ())
          ~on_advance:(fun ~failed:_ ~next:_ -> proceed ())
-         (Slots.of_resolved_lane lane.resolved)
-     with
-     | Answered { slot = _; value = Http_answered { slot_id = _; success }; passed = _ } ->
-       Ok success.accepted
-     | Answered { slot = _; value = Cli_answered { runtime_id = _; accepted }; passed = _ } ->
-       Ok accepted
-     | Exhausted { passed; standing } ->
-       let transient =
-         match standing with
-         | Every_slot_resting -> true
-         | Not_every_slot_resting -> false
-       in
-       Error (lane_failure ~allow_output_limit_split ~transient ~detail:[] passed)
-     | Stopped { slot = _; stop; passed } ->
-       Error
-         (lane_failure
-            ~allow_output_limit_split
-            ~transient:false
-            ~detail:[ stop_detail stop ]
-            passed))
+         slots)
+;;
+
+(* The briefing's walk over every slot of the lane. *)
+let execute_exact_prompt ~base_path ~(lane : resolved_lane_execution) ~schema ~rendered_prompt
+    ~validate =
+  match
+    walk_slots ~base_path ~schema ~rendered_prompt ~validate (Slots.of_resolved_lane lane.resolved)
+  with
+  | Error detail -> Error { capacity_refused = false; transient = true; detail }
+  | Ok (Answered { slot = _; value = Http_answered { slot_id = _; success }; passed = _ }) ->
+    Ok success.accepted
+  | Ok (Answered { slot = _; value = Cli_answered { runtime_id = _; accepted }; passed = _ }) ->
+    Ok accepted
+  | Ok (Exhausted { passed; standing }) ->
+    let transient =
+      match standing with
+      | Every_slot_resting -> true
+      | Not_every_slot_resting -> false
+    in
+    Error (lane_failure ~transient ~detail:[] passed)
+  | Ok (Stopped { slot = _; stop; passed }) ->
+    Error (lane_failure ~transient:false ~detail:[ stop_detail stop ] passed)
+;;
+
+(* Why the curator could not use the body a slot sent for a classification
+   request. The decoder's reason is shown only. *)
+type rejection =
+  | Decision_refused of string
+  | Empty_or_partial
+  | Not_json
+
+let bodies : rejection Visit.bodies =
+  { Visit.empty_or_partial = Empty_or_partial; not_json = Not_json }
+;;
+
+(* What one slot said to a classification request, as the curator reads the
+   slot outcome table (RFC curator-narrows-a-refused-batch-and-sets-a-refused-
+   fact-aside §4.1). *)
+let word : rejection Outcome.unanswered -> Narrowing.word = function
+  | Outcome.Refused
+      (Outcome.Sized (Outcome.Input_too_large | Outcome.Output_over_reserve | Outcome.Window_reached))
+    -> Narrowing.Sized
+  | Outcome.Refused Outcome.Unsized -> Narrowing.Unsized
+  | Outcome.Silent (Outcome.Unusable (_ : rejection)) -> Narrowing.Unusable
+  | Outcome.Silent Outcome.Overdue -> Narrowing.Overdue
+  | Outcome.Silent (Outcome.Not_called | Outcome.Unavailable | Outcome.Busy | Outcome.Lost) ->
+    Narrowing.Quiet
+;;
+
+(* What each slot a walk passed said, by the id the lane declares it by.
+   [Error] is a flow that ended on masc's own failure ({!Visit.of_passed}). *)
+let heard passed =
+  let rec read said = function
+    | [] -> Ok (List.rev said)
+    | one :: rest ->
+      (match Visit.of_passed one with
+       | Error stopped -> Error stopped
+       | Ok (Visit.Http_visit (slot, http)) ->
+         read ((slot, word (Visit.classify_unanswered bodies (Visit.Http http))) :: said) rest
+       | Ok (Visit.Cli_visit (slot, cli)) ->
+         read ((slot, word (Visit.classify_unanswered bodies (Visit.Cli cli))) :: said) rest)
+  in
+  read [] passed
 ;;
 
 let commit_two_phase_log_dynamic ~base_path ~author ~expected_changes ~apply_and_entries =
@@ -434,18 +434,54 @@ let log_entries_of_assignments ~ledger (assignments : Ledger.assignment list) =
 type idle_checkpoint = unit ref
 type idle_result = Owner_idle of idle_checkpoint | Owner_stopped | Owner_missing
 
+(* The step of a classification pass at which masc itself failed. *)
+type host_step =
+  | Reading
+  | Preparing
+  | Walking
+  | Recording
+  | Deciding
+
+let host_step_to_string = function
+  | Reading -> "reading the Keepers' stores and the ledger"
+  | Preparing -> "preparing the request"
+  | Walking -> "walking the lane"
+  | Recording -> "recording the answer"
+  | Deciding -> "deciding the next request"
+;;
+
+(* How a classification pass ended (RFC curator §4.6). *)
+type step_end =
+  | Nothing_pending
+  | Not_asked of lane_standing
+  | Drained
+  | Lane_silent
+  | Host_failed of host_step * string
+
+(* Whether the maintenance tick wakes the owner after the pass (RFC curator
+   §4.4). A lane with no table, or one turned off, waits for its lane
+   change. *)
+let awaits_tick = function
+  | Nothing_pending | Drained | Not_asked (Not_published _ | Not_resolved _) -> false
+  | Lane_silent | Not_asked Replacement_in_progress | Host_failed _ -> true
+;;
+
+(* [pending] is why the next pass runs; two wakes before one pass combine.
+   [memory] is the classification's narrowing memory: what it narrowed, which
+   slots refused a fact alone, which facts wait for the tick, and the kept
+   size. [requests] counts the asks to start over the owner took. *)
 type owner =
   { mutex : Stdlib.Mutex.t
-  ; mutable pending : bool
+  ; mutable pending : Narrowing.wake option
   ; mutable in_flight : bool
   ; mutable stopped : bool
   ; mutable observation_retry : bool
   ; mutable wake : unit Eio.Promise.u option
   ; mutable idle_checkpoint : idle_checkpoint
   ; mutable idle_waiters : idle_result Eio.Promise.u list
-  ; mutable indivisible_generation : string
-  ; mutable indivisible_facts : Ledger.fact_ref list
-  ; mutable classification_size : Request.size
+  ; mutable memory : Narrowing.memory
+  ; mutable requests : int
+  ; mutable classification : step_end option
   ; in_flight_revisions : (string * Keeper_memory_commit_notifications.store, int) Hashtbl.t
   }
 
@@ -465,7 +501,7 @@ let run_reconciliation ~base_path =
   let keepers = Context.keepers context in
   let initial_detailed = Ledger.reconcile_detailed initial_ledger keepers in
   if initial_detailed.reconciliation.vanished = [] then
-    Ok (context, initial_detailed.reconciliation, false)
+    Ok (context, initial_detailed.reconciliation)
   else
     let latest_detailed = ref initial_detailed in
     let* updated_ledger =
@@ -490,123 +526,145 @@ let run_reconciliation ~base_path =
         Ok updated)
     in
     let detailed = !latest_detailed in
-    let ledger_changed = detailed.reconciliation.vanished <> [] in
-    if ledger_changed then Mcp_server_eio_resource.notify_world_memory_updated ();
-    Ok (context, { detailed.reconciliation with ledger = updated_ledger }, ledger_changed)
+    if detailed.reconciliation.vanished <> [] then
+      Mcp_server_eio_resource.notify_world_memory_updated ();
+    Ok (context, { detailed.reconciliation with ledger = updated_ledger })
 ;;
 
-let run_classification ~base_path ~(owner : owner) =
-  match run_reconciliation ~base_path with
-  | Error detail -> Failed detail
-  | Ok (context, reconciliation, reconciled_changed) ->
-    let blocked_indivisible =
-      Stdlib.Mutex.protect owner.mutex (fun () -> owner.indivisible_facts)
-    in
-    let pending =
-      List.filter
-        (fun (f : Ledger.pending_fact) -> not (List.mem f.fact blocked_indivisible))
-        reconciliation.new_facts
-    in
-    if pending = [] then
-      if reconciled_changed then Progressed else Idle
-    else
-      match resolve_lane_execution () with
-      | Lane_busy detail ->
-        Log.Server.debug "workspace curator classification deferred: %s" detail;
-        Transient_retry
-      | Lane_disabled detail ->
-        Log.Server.debug "workspace curator classification lane unavailable: %s" detail;
-        Idle
-      | Lane_ready lane ->
-        Stdlib.Mutex.protect owner.mutex (fun () ->
-          if not (String.equal owner.indivisible_generation lane.generation) then (
-            owner.indivisible_generation <- lane.generation;
-            owner.indivisible_facts <- [];
-            owner.classification_size <- Request.Fill_frame));
-        let size = Stdlib.Mutex.protect owner.mutex (fun () -> owner.classification_size) in
-        let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
-        let render input =
-          Prompt_registry.render_resolved_prompt_template
-            Prompt_names.workspace_memory_curator
-            resolution
-            [ "workspace_memory_changes", Yojson.Safe.to_string input ]
+(* Write a classification answer into the ledger and its log. Gives the
+   ledger the answer went into, which the pass's next request is made from. *)
+let record_answer ~base_path ~(batch : Request.batch) assignments =
+  io (fun () ->
+    commit_two_phase_log_dynamic
+      ~base_path
+      ~author:"workspace-memory-curator"
+      ~expected_changes:(List.length assignments)
+      ~apply_and_entries:(fun () ->
+        let* applied_ledger =
+          Ledger.update ~base_path (fun latest ->
+            Ledger.apply latest ~selected:batch.selected assignments
+            |> Result.map_error Ledger.apply_error_to_string)
         in
-        let neighbor_limit = max 0 (List.length (Context.keepers context) - 1) in
-        (match
-           Request.prepare
-             ~neighbor_limit
-             ~render
-             ~ledger:reconciliation.ledger
-             ~current:reconciliation.current_facts
-             ~pending
-             ~size
-             ~frame:max_int
-             ~measure:(fun batch -> Ok (String.length batch.rendered_prompt))
-         with
-         | Error err -> Failed (Request.error_to_string err)
-         | Ok None -> if reconciled_changed then Progressed else Idle
-         | Ok (Some initial_batch) ->
-           let rec attempt_batch batch ~narrowed =
-             let validate json = Decision.decode ~batch json in
-             match
-               execute_exact_prompt
-                 ~base_path
-                 ~lane
-                 ~schema:Decision.output_schema
-                 ~rendered_prompt:batch.rendered_prompt
-                 ~allow_output_limit_split:true
-                 ~validate
-             with
-             | Ok assignments ->
-               if narrowed then
-                 Stdlib.Mutex.protect owner.mutex (fun () ->
-                   owner.classification_size <- Request.Up_to (List.length batch.selected));
-               let commit_res =
-                 io (fun () ->
-                   commit_two_phase_log_dynamic
-                     ~base_path
-                     ~author:"workspace-memory-curator"
-                     ~expected_changes:(List.length assignments)
-                     ~apply_and_entries:(fun () ->
-                       let* applied_ledger =
-                         Ledger.update ~base_path (fun latest ->
-                           Ledger.apply latest ~selected:batch.selected assignments
-                           |> Result.map_error Ledger.apply_error_to_string)
-                       in
-                       let entries =
-                         log_entries_of_assignments ~ledger:applied_ledger assignments
-                       in
-                       Ok ((), entries)))
+        Ok (applied_ledger, log_entries_of_assignments ~ledger:applied_ledger assignments)))
+;;
+
+(* One classification pass (RFC curator §4.1 to §4.4). The owner's memory
+   names each request and reads what the slots said; the pass asks until the
+   memory names none. A failure of masc's own ends the pass: what the memory
+   took so far stays, and the requests the pass had not asked are made again
+   by the next pass. *)
+let classify ~base_path ~(owner : owner) ~woken_by ~context
+    ~(reconciliation : Ledger.reconciliation) (lane : resolved_lane_execution) =
+  let slots = Slots.of_resolved_lane lane.resolved in
+  let pending_of =
+    List.fold_left
+      (fun map (fact : Ledger.pending_fact) -> Ledger.Fact_map.add fact.fact fact map)
+      Ledger.Fact_map.empty
+      reconciliation.new_facts
+  in
+  let pass =
+    Stdlib.Mutex.protect owner.mutex (fun () ->
+      let memory, pass =
+        Narrowing.start
+          owner.memory
+          ~generation:{ Narrowing.lane = lane.generation; requests = owner.requests }
+          ~slots:(List.map Slots.id slots)
+          ~wake:woken_by
+          ~pending:
+            (List.map (fun (fact : Ledger.pending_fact) -> fact.fact) reconciliation.new_facts)
+      in
+      owner.memory <- memory;
+      pass)
+  in
+  let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
+  let render input =
+    Prompt_registry.render_resolved_prompt_template
+      Prompt_names.workspace_memory_curator
+      resolution
+      [ "workspace_memory_changes", Yojson.Safe.to_string input ]
+  in
+  let neighbor_limit = max 0 (List.length (Context.keepers context) - 1) in
+  let decide step =
+    Stdlib.Mutex.protect owner.mutex (fun () ->
+      match step owner.memory with
+      | Ok (memory, pass) ->
+        owner.memory <- memory;
+        Ok pass
+      | Error err -> Error (Deciding, Narrowing.error_to_string err))
+  in
+  let rec ask ledger pass =
+    match Stdlib.Mutex.protect owner.mutex (fun () -> Narrowing.next owner.memory pass) with
+    | None -> Ok ()
+    | Some (request : Narrowing.request) ->
+      let pending =
+        List.filter_map (fun fact -> Ledger.Fact_map.find_opt fact pending_of) request.facts
+      in
+      (match
+         Request.prepare
+           ~neighbor_limit
+           ~render
+           ~ledger
+           ~current:reconciliation.current_facts
+           ~pending
+           ~size:request.size
+           ~frame:max_int
+           ~measure:(fun batch -> Ok (String.length batch.rendered_prompt))
+       with
+       | Error err -> Error (Preparing, Request.error_to_string err)
+       | Ok None -> Error (Preparing, "the request named no pending fact")
+       | Ok (Some batch) ->
+         let sent = List.map (fun (fact : Ledger.pending_fact) -> fact.fact) batch.selected in
+         (match
+            walk_slots
+              ~base_path
+              ~schema:Decision.output_schema
+              ~rendered_prompt:batch.rendered_prompt
+              ~validate:(fun json ->
+                Decision.decode ~batch json
+                |> Result.map_error (fun reason -> Decision_refused reason))
+              (List.filter (fun slot -> List.mem (Slots.id slot) request.slots) slots)
+          with
+          | Error detail -> Error (Walking, detail)
+          | Ok (Answered { slot = _; value; passed = _ }) ->
+            let assignments =
+              match value with
+              | Http_answered { slot_id = _; success } -> success.accepted
+              | Cli_answered { runtime_id = _; accepted } -> accepted
+            in
+            (match record_answer ~base_path ~batch assignments with
+             | Error detail -> Error (Recording, detail)
+             | Ok ledger ->
+               Mcp_server_eio_resource.notify_world_memory_updated ();
+               let* pass = decide (fun memory -> Narrowing.answered memory pass ~sent) in
+               ask ledger pass)
+          | Ok (Exhausted { passed; standing = _ }) ->
+            (match heard passed with
+             | Error stopped -> Error (Walking, flow_detail stopped)
+             | Ok said ->
+               let* pass =
+                 decide (fun memory -> Narrowing.unanswered memory pass ~sent ~heard:said)
                in
-               (match commit_res with
-                | Ok () ->
-                  Mcp_server_eio_resource.notify_world_memory_updated ();
-                  Progressed
-                | Error detail -> Failed detail)
-             | Error failure when failure.capacity_refused ->
-               (match Request.narrow ~ledger:reconciliation.ledger ~render batch with
-                | Error err -> Failed (Request.error_to_string err)
-                | Ok (Some smaller) -> attempt_batch smaller ~narrowed:true
-                | Ok None ->
-                  (match batch.selected with
-                   | single :: _ ->
-                     Stdlib.Mutex.protect owner.mutex (fun () ->
-                       if not (List.mem single.fact owner.indivisible_facts) then
-                         owner.indivisible_facts <- single.fact :: owner.indivisible_facts);
-                     Log.Server.error
-                       "workspace curator indivisible fact refused for capacity: %s"
-                       failure.detail
-                   | [] -> ());
-                  if reconciled_changed then Progressed else Idle)
-             | Error failure ->
-               if failure.transient then (
-                 Log.Server.warn
-                   "workspace curator classification transient refusal: %s"
-                   failure.detail;
-                 Transient_retry)
-               else Failed failure.detail
-           in
-           attempt_batch initial_batch ~narrowed:false)
+               ask ledger pass)
+          | Ok (Stopped { slot = _; stop; passed = _ }) -> Error (Walking, stop_detail stop)))
+  in
+  match ask reconciliation.ledger pass with
+  | Error (step, detail) -> Host_failed (step, detail)
+  | Ok () ->
+    if Stdlib.Mutex.protect owner.mutex (fun () -> Narrowing.waiting owner.memory)
+    then Lane_silent
+    else Drained
+;;
+
+let run_classification ~base_path ~(owner : owner) ~woken_by =
+  match run_reconciliation ~base_path with
+  | Error detail -> Host_failed (Reading, detail)
+  | Ok (context, reconciliation) ->
+    (match reconciliation.new_facts with
+     | [] -> Nothing_pending
+     | _ :: _ ->
+       (match resolve_lane_execution () with
+        | Lane_unready standing -> Not_asked standing
+        | Lane_ready lane -> classify ~base_path ~owner ~woken_by ~context ~reconciliation lane))
 ;;
 
 let run_briefing ~base_path =
@@ -652,11 +710,13 @@ let run_briefing ~base_path =
             Progressed
           | Some (Briefing.Prepared initial_batch) ->
             (match resolve_lane_execution () with
-          | Lane_busy detail ->
-            Log.Server.debug "workspace curator briefing deferred: %s" detail;
+          | Lane_unready (Replacement_in_progress as standing) ->
+            Log.Server.debug "workspace curator briefing deferred: %s"
+              (lane_standing_to_string standing);
             Transient_retry
-          | Lane_disabled detail ->
-            Log.Server.debug "workspace curator briefing lane unavailable: %s" detail;
+          | Lane_unready ((Not_published _ | Not_resolved _) as standing) ->
+            Log.Server.debug "workspace curator briefing lane unavailable: %s"
+              (lane_standing_to_string standing);
             Idle
           | Lane_ready lane ->
             let rec attempt_batch batch =
@@ -668,7 +728,6 @@ let run_briefing ~base_path =
                   ~lane
                   ~schema:Briefing.output_schema
                   ~rendered_prompt:prompt
-                  ~allow_output_limit_split:false
                   ~validate
               with
               | Ok text ->
@@ -718,29 +777,40 @@ let run_briefing ~base_path =
             attempt_batch initial_batch)))
 ;;
 
-let run_pass ~base_path ~(owner : owner) ~on_observation_failure =
-  let c = run_classification ~base_path ~owner in
-  let b = run_briefing ~base_path in
-  let interpret label = function
-    | Progressed -> true
-    | Idle -> false
-    | Transient_retry ->
-      on_observation_failure ();
-      false
+(* One pass: classification, then the briefing. Gives whether the briefing
+   moved, so the owner runs again for its next chunk, and whether the
+   maintenance tick is to wake the owner. A classification pass asks every
+   request it has, so it does not run the owner again. *)
+let run_pass ~base_path ~(owner : owner) ~woken_by =
+  let classified = run_classification ~base_path ~owner ~woken_by in
+  (match classified with
+   | Host_failed (step, detail) ->
+     Log.Server.error
+       "workspace curator classification failed %s: %s"
+       (host_step_to_string step)
+       detail
+   | Not_asked standing ->
+     Log.Server.debug
+       "workspace curator classification not asked: %s"
+       (lane_standing_to_string standing)
+   | Nothing_pending | Drained | Lane_silent -> ());
+  Stdlib.Mutex.protect owner.mutex (fun () -> owner.classification <- Some classified);
+  let briefed, briefing_retry =
+    match run_briefing ~base_path with
+    | Progressed -> true, false
+    | Idle -> false, false
+    | Transient_retry -> false, true
     | Failed detail ->
-      on_observation_failure ();
-      Log.Server.error "workspace curator %s: %s" label detail;
-      false
+      Log.Server.error "workspace curator briefing: %s" detail;
+      false, true
   in
-  let cp = interpret "classification" c in
-  let bp = interpret "briefing" b in
-  cp || bp
+  briefed, awaits_tick classified || briefing_retry
 ;;
 
 (* The caller holds [owner.mutex]. Resolving promises happens after releasing
    it: an idle observation is not a lease against a subsequent wake. *)
 let take_idle_waiters owner =
-  if owner.stopped || (not owner.pending && not owner.in_flight) then (
+  if owner.stopped || (Option.is_none owner.pending && not owner.in_flight) then (
     let result = if owner.stopped then Owner_stopped else Owner_idle owner.idle_checkpoint in
     let waiters = owner.idle_waiters in
     owner.idle_waiters <- [];
@@ -757,12 +827,25 @@ let owners : (string, owner) Hashtbl.t = Hashtbl.create 4
 
 type refresh = Queued | No_owner | Unavailable of string
 
-let wake owner =
+(* The caller holds [owner.mutex]. A wake queued before the pass runs combines
+   with this one (RFC curator §4.4). *)
+let queue owner (reason : Narrowing.wake) =
+  owner.pending
+  <- Some
+       (match owner.pending with
+        | None -> reason
+        | Some queued -> Narrowing.combine_wake queued reason)
+;;
+
+(* Five paths wake the owner: a Keeper Memory commit, a change of its lane, an
+   ask to start over, the maintenance tick, and a briefing that moved. Only the
+   tick is [Tick]. *)
+let wake owner reason =
   let queued, resolver =
     Stdlib.Mutex.protect owner.mutex (fun () ->
       if owner.stopped then false, None
       else (
-        owner.pending <- true;
+        queue owner reason;
         let resolver = owner.wake in
         owner.wake <- None;
         true, resolver))
@@ -786,7 +869,7 @@ let wake_for_commit owner (event : Keeper_memory_commit_notifications.event) =
       then false, None
       else (
         Hashtbl.replace owner.in_flight_revisions key event.revision;
-        owner.pending <- true;
+        queue owner Narrowing.Commit;
         let resolver = owner.wake in
         owner.wake <- None;
         true, resolver))
@@ -806,10 +889,12 @@ let request ~base_path =
     (match owner with
      | None -> No_owner
      | Some owner ->
+       (* A new generation (RFC curator §4.3): the memory starts empty, and a
+          pass in flight writes nothing more. *)
        Stdlib.Mutex.protect owner.mutex (fun () ->
-         owner.indivisible_facts <- [];
-         owner.classification_size <- Request.Fill_frame);
-       wake owner)
+         owner.requests <- owner.requests + 1;
+         owner.memory <- Narrowing.restart owner.memory ~requests:owner.requests);
+       wake owner Narrowing.Commit)
   | exception Unix.Unix_error (error, operation, _) ->
     Unavailable (operation ^ ": " ^ Unix.error_message error)
 ;;
@@ -827,7 +912,7 @@ let retry_pending_observations ~base_path =
          Stdlib.Mutex.protect owner.mutex (fun () ->
            owner.observation_retry && not owner.stopped)
        in
-       if pending then ignore (wake owner))
+       if pending then ignore (wake owner Narrowing.Tick))
   | exception Unix.Unix_error (error, operation, _) ->
     Log.Server.warn
       "workspace curator retry identity %s: %s: %s"
@@ -879,16 +964,18 @@ let start ~sw ~config =
   in
   let owner =
     { mutex = Stdlib.Mutex.create ()
-    ; pending = true
+    ; pending = Some Narrowing.Commit
     ; in_flight = false
     ; stopped = false
     ; observation_retry = false
     ; wake = None
     ; idle_checkpoint = ref ()
     ; idle_waiters = []
-    ; indivisible_generation = ""
-    ; indivisible_facts = []
-    ; classification_size = Request.Fill_frame
+      (* No lane is read yet: the first pass's lane generation differs and
+         starts the memory over. *)
+    ; memory = Narrowing.empty { Narrowing.lane = ""; requests = 0 } ~slots:[]
+    ; requests = 0
+    ; classification = None
     ; in_flight_revisions = Hashtbl.create 8
     }
   in
@@ -906,7 +993,7 @@ let start ~sw ~config =
     in
     let unsubscribe_lane =
       Registry.subscribe_lane_changes ~lane_id (fun () ->
-        ignore (wake owner))
+        ignore (wake owner Narrowing.Commit))
     in
     Eio.Switch.on_release sw (fun () ->
       let waiters =
@@ -924,28 +1011,27 @@ let start ~sw ~config =
         let next =
           Stdlib.Mutex.protect owner.mutex (fun () ->
             if owner.stopped then `Stop
-            else if owner.pending then (
-              owner.pending <- false;
-              owner.in_flight <- true;
-              `Run)
             else
-              let promise, resolver = Eio.Promise.create () in
-              owner.wake <- Some resolver;
-              `Wait promise)
+              match owner.pending with
+              | Some woken_by ->
+                owner.pending <- None;
+                owner.in_flight <- true;
+                `Run woken_by
+              | None ->
+                let promise, resolver = Eio.Promise.create () in
+                owner.wake <- Some resolver;
+                `Wait promise)
         in
         match next with
         | `Stop -> ()
         | `Wait promise ->
           Eio.Promise.await promise;
           drain ()
-        | `Run ->
+        | `Run woken_by ->
           (try
-             let retry = ref false in
-             let progressed =
-               run_pass ~base_path ~owner ~on_observation_failure:(fun () -> retry := true)
-             in
-             Stdlib.Mutex.protect owner.mutex (fun () -> owner.observation_retry <- !retry);
-             if progressed then ignore (wake owner)
+             let progressed, retry = run_pass ~base_path ~owner ~woken_by in
+             Stdlib.Mutex.protect owner.mutex (fun () -> owner.observation_retry <- retry);
+             if progressed then ignore (wake owner Narrowing.Commit)
            with
            | Eio.Cancel.Cancelled _ as error -> raise error
            | exn ->
@@ -955,7 +1041,7 @@ let start ~sw ~config =
             Stdlib.Mutex.protect owner.mutex (fun () ->
               owner.in_flight <- false;
               Hashtbl.clear owner.in_flight_revisions;
-              if not owner.pending then owner.idle_checkpoint <- ref ();
+              if Option.is_none owner.pending then owner.idle_checkpoint <- ref ();
               take_idle_waiters owner)
           in
           resolve_idle_waiters waiters;
@@ -977,6 +1063,8 @@ module For_testing = struct
     ; observation_retry : bool
     ; stopped : bool
     ; idle_waiters : int
+    ; classification : step_end option
+    ; set_aside : Ledger.fact_ref list
     }
 
   let find ~base_path =
@@ -987,19 +1075,22 @@ module For_testing = struct
   let is_idle ~base_path =
     match find ~base_path with
     | None -> true
-    | Some owner ->
-      Stdlib.Mutex.protect owner.mutex (fun () -> not owner.pending && not owner.in_flight)
+    | Some (owner : owner) ->
+      Stdlib.Mutex.protect owner.mutex (fun () ->
+        Option.is_none owner.pending && not owner.in_flight)
   ;;
 
   let snapshot ~base_path =
     Option.map
       (fun (owner : owner) ->
          Stdlib.Mutex.protect owner.mutex (fun () ->
-           { pending = owner.pending
+           { pending = Option.is_some owner.pending
            ; in_flight = owner.in_flight
            ; observation_retry = owner.observation_retry
            ; stopped = owner.stopped
            ; idle_waiters = List.length owner.idle_waiters
+           ; classification = owner.classification
+           ; set_aside = Narrowing.set_aside owner.memory
            }))
       (find ~base_path)
   ;;
@@ -1008,13 +1099,13 @@ module For_testing = struct
     Eio.Fiber.check ();
     match find ~base_path with
     | None -> Owner_missing
-    | Some owner ->
+    | Some (owner : owner) ->
       let promise, resolver = Eio.Promise.create () in
       let ready =
         Stdlib.Mutex.protect owner.mutex (fun () ->
           if owner.stopped then Some Owner_stopped
           else if
-            not owner.pending
+            Option.is_none owner.pending
             && not owner.in_flight
             && match after with None -> true | Some previous -> previous != owner.idle_checkpoint
           then Some (Owner_idle owner.idle_checkpoint)

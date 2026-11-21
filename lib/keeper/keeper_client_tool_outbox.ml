@@ -775,7 +775,7 @@ let place_carrier carrier messages =
     | Llm_provider.Types.User, Llm_provider.Types.Conversation -> true
     | (System | Assistant | Tool), _
     | User, (System_context | Historical_system_context | Recovery_instruction
-            | Tool_result_followup | Agent_instruction) -> false
+            | Tool_result_followup | Agent_instruction | Outside_context) -> false
   in
   let rec split later = function
     | [] -> carrier :: later

@@ -136,13 +136,14 @@ let none_since_start ~ko = text ~ko "시작 뒤 끝난 것 없음" "none ended s
 let memory_changed_since ~ko = text ~ko "그 뒤 Memory 가 바뀜" "Memory changed since"
 let lane_changed_since ~ko = text ~ko "그 뒤 lane 값이 바뀜" "the lane value changed since"
 
-(* The ending alone, for a clause beside the state. The refusal E4 reads says
-   what the alarm says of it, so the two are read as one thing. *)
+(* The ending alone, for a clause beside the state. The refusal E4 reads has
+   its own words, apart from the lane end's: every slot refused the item and
+   none was silent. *)
 let last_read_short ~ko = function
   | None -> none_since_start ~ko
   | Some Read_committed -> text ~ko "반영됨" "committed"
   | Some (Read_refused_not_all_sized _) ->
-    text ~ko "한 항목을 slot 이 모두 거절함" "every slot refused the one item"
+    text ~ko "항목 하나를 모든 slot 이 거절함" "every slot refused the one item"
   | Some (Read_lane _) -> text ~ko "답한 slot 없음" "no slot answered"
   | Some (Read_input_fault _) -> text ~ko "입력 결함" "input fault"
   | Some (Read_ask_failed _) -> text ~ko "묻기 실패" "ask failed"

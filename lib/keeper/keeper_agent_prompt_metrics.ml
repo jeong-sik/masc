@@ -164,7 +164,7 @@ let remove_prompt_context ~prompt_context_present messages =
        with
        | Agent_core.Types.Conversation
        | Agent_core.Types.Historical_system_context
-       | Recovery_instruction | Tool_result_followup | Agent_instruction ->
+       | Recovery_instruction | Tool_result_followup | Agent_instruction | Outside_context ->
          walk seen (message :: rev_retained) rest
        | Agent_core.Types.System_context
          when prompt_context_present && not seen -> walk true rev_retained rest
@@ -348,9 +348,9 @@ let metric_of_block
   in
   { bytes; fingerprint = None }
 
-(* Turn context text counts in the system bucket by its origin. A historical
-   context row is counted there whatever role it was stored with and whatever
-   role its lane sends it as. *)
+(* Turn context and outside text count in the system bucket by their origin.
+   A historical context row is counted there whatever role it was stored with
+   and whatever role its lane sends it as. *)
 let input_component_of_block
     ~(role : Agent_core.Types.role)
     ~(origin : Agent_core.Types.message_origin)
@@ -360,7 +360,8 @@ let input_component_of_block
   | Agent_core.Types.ToolResult _ -> Turn_record.Message_tool_result
   | Agent_core.Types.Text _ -> (
       match origin, role with
-      | (Agent_core.Types.System_context | Agent_core.Types.Historical_system_context),
+      | ( Agent_core.Types.System_context | Agent_core.Types.Historical_system_context
+        | Agent_core.Types.Outside_context ),
         (Agent_core.Types.User | Agent_core.Types.System | Agent_core.Types.Assistant
         | Agent_core.Types.Tool) -> Turn_record.Message_system
       | ( Agent_core.Types.Conversation | Agent_core.Types.Recovery_instruction

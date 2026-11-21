@@ -153,7 +153,7 @@ let source assembly selected_blocks ~omitted_sections ~omitted_rows
   in
   match message.origin with
   | Conversation | Historical_system_context | Recovery_instruction
-  | Tool_result_followup | Agent_instruction -> Not_applicable
+  | Tool_result_followup | Agent_instruction | Outside_context -> Not_applicable
   | System_context ->
     (match message.role, message.content, assembly with
      | System, [Text _], None -> Unavailable Missing_issuer

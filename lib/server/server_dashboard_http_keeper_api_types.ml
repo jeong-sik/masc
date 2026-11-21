@@ -228,13 +228,14 @@ let truncate_text ~max_chars text =
     String_util.utf8_safe ~max_bytes:max_chars ~suffix:"…" text
     |> String_util.to_string
 
-(* A turn context carrier keeps the User role it was created with, so its
-   origin, not its role, says it is not conversation. *)
+(* A turn context carrier and outside text keep the User role they were
+   created with, so the origin, not the role, says they are not conversation. *)
 let preview_of_message (message : Agent_core.Types.message) =
   match message.role, message.origin with
   | Agent_core.Types.System, _
   | (User | Assistant | Tool),
-    (Agent_core.Types.System_context | Agent_core.Types.Historical_system_context) -> None
+    ( Agent_core.Types.System_context | Agent_core.Types.Historical_system_context
+    | Agent_core.Types.Outside_context ) -> None
   | (User | Assistant | Tool),
     ( Agent_core.Types.Conversation | Agent_core.Types.Recovery_instruction
     | Agent_core.Types.Tool_result_followup | Agent_core.Types.Agent_instruction ) ->

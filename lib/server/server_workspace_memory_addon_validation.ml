@@ -24,21 +24,6 @@ let request capture =
   exact_request ~request_id:(Capture.request_id capture) ~output
     ~rendered_prompt:(Capture.rendered_prompt capture) ~schema:(Capture.output_schema capture)
 
-let submit request = `Assoc ["kind", `String "submit"; "request", Exact.request_to_json request]
-
-let classification_submit_bytes ~request_id (batch : Workspace_memory_request.batch) =
-  let* request = exact_request ~request_id ~output:classification_output
-      ~rendered_prompt:batch.rendered_prompt ~schema:Workspace_memory_decision.output_schema in
-  Ok (Lane_addon_host_delivery.arguments_bytes (submit request))
-
-let check_frame ~max_reply_bytes capture =
-  let* request = request capture in
-  let bytes = Lane_addon_host_delivery.arguments_bytes (submit request) in
-  if bytes <= max_reply_bytes then Ok ()
-  else Error (Printf.sprintf
-    "Curator request arguments measure %d bytes; the receiving Add-on declares a %d-byte frame"
-    bytes max_reply_bytes)
-
 let original_required (package : Lane_addon_types.package) = String.equal package.id package_id
 
 let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.package)

@@ -99,6 +99,6 @@ val act_text : act -> string
 (** The act and the value it names, in the wire's words. *)
 
 val answer_text : ko:bool -> keeper:string -> act -> answer -> string
-(** One line for the notice: the Keeper, the act and the server's answer in
+(** One line for the notice: the act, the verdict and the server's answer in
     its own words -- the store after an accepted act, the refusal's code and
-    what it carries. *)
+    what it carries -- and the Keeper last. *)

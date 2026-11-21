@@ -9276,15 +9276,15 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
        | Ok (Masc_tui_http.Memory_act_refused detail) ->
            report_action state "error"
              (ui_text state
-                ~ko:(keeper_text ^ " 기억 쓰는 쪽: " ^ act_text ^ " 거절 · " ^ said detail)
-                ~en:(keeper_text ^ " Memory writer: " ^ act_text ^ " refused · " ^ said detail))
+                ~ko:(act_text ^ " 거절: " ^ said detail ^ " · " ^ keeper_text ^ " 기억 쓰는 쪽")
+                ~en:(act_text ^ " refused: " ^ said detail ^ " · " ^ keeper_text ^ " Memory writer"))
        | Ok (Masc_tui_http.Memory_act_unanswered detail) ->
            report_action state "error"
              (ui_text state
-                ~ko:(keeper_text ^ " 기억 쓰는 쪽: " ^ act_text
-                     ^ " 반영됐는지 알 수 없음 · " ^ said detail)
-                ~en:(keeper_text ^ " Memory writer: " ^ act_text
-                     ^ " may or may not have landed · " ^ said detail))
+                ~ko:(act_text ^ " 반영됐는지 알 수 없음: " ^ said detail
+                     ^ " · " ^ keeper_text ^ " 기억 쓰는 쪽")
+                ~en:(act_text ^ " may or may not have landed: " ^ said detail
+                     ^ " · " ^ keeper_text ^ " Memory writer"))
        | Error refusal ->
            (* Not sent: the kept-back notice, with the Keeper after it. *)
            report_action state "error"

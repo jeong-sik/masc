@@ -351,13 +351,16 @@ let refusal_text = function
   | Keeper_not_registered -> "code=keeper_not_registered"
 ;;
 
+(* The verdict and the server's words lead and the Keeper closes the line:
+   the footer cuts a long notice from its end, and the row on screen already
+   names the Keeper. *)
 let answer_text ~ko ~keeper act answer =
   let said accepted words =
     match ko, accepted with
-    | true, true -> Printf.sprintf "%s 기억 쓰는 쪽: %s 받음 · %s" keeper (act_token act) words
-    | true, false -> Printf.sprintf "%s 기억 쓰는 쪽: %s 거절 · %s" keeper (act_token act) words
-    | false, true -> Printf.sprintf "%s Memory writer: %s accepted · %s" keeper (act_token act) words
-    | false, false -> Printf.sprintf "%s Memory writer: %s refused · %s" keeper (act_token act) words
+    | true, true -> Printf.sprintf "%s 받음: %s · %s 기억 쓰는 쪽" (act_token act) words keeper
+    | true, false -> Printf.sprintf "%s 거절: %s · %s 기억 쓰는 쪽" (act_token act) words keeper
+    | false, true -> Printf.sprintf "%s accepted: %s · %s Memory writer" (act_token act) words keeper
+    | false, false -> Printf.sprintf "%s refused: %s · %s Memory writer" (act_token act) words keeper
   in
   match answer with
   | Done store -> said true (store_text store)

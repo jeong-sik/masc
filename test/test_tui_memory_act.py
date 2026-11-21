@@ -13,6 +13,7 @@ import pathlib
 import re
 import sys
 import tempfile
+import time
 import unittest
 import urllib.parse
 from typing import Callable, TypeAlias, cast
@@ -29,6 +30,10 @@ SNAPSHOT_SHA = "ab" * 32
 # A colour change can sit inside a drawn line; the words between the changes
 # are what the operator reads.
 SGR = re.compile(rb"\x1b\[[0-9;:]*m")
+# Any other control sequence moves the cursor or erases; the text between two
+# of them is one written run.
+CURSOR = re.compile(rb"\x1b\[[0-9;:?]*[A-Za-z]")
+ROWS_SHOWN = 6
 
 # The fixture's server class, kept before [run_act] points the fixture at the
 # class of one test.
@@ -129,6 +134,13 @@ def drawn_since(transcript: pathlib.Path, start: int) -> bytes:
         return SGR.sub(b"", handle.read())
 
 
+def last_rows(drawn: bytes) -> list[bytes]:
+    """The last rows written, one per cursor move, for a failure to show what
+    the screen said instead."""
+    written = [row.strip() for row in CURSOR.split(drawn)]
+    return [row for row in written if row][-ROWS_SHOWN:]
+
+
 class MemoryActTest(unittest.TestCase):
     binary = ""
 
@@ -179,10 +191,12 @@ class MemoryActTest(unittest.TestCase):
                 )
                 with acting.condition:
                     self.assertEqual(acting.acts, [request])
-                step(
-                    "wait",
-                    lambda: drawn in drawn_since(transcript, start),
-                    f"the answer {drawn!r} was not drawn",
+                deadline = time.monotonic() + owed.WAIT_SECONDS
+                while drawn not in drawn_since(transcript, start) and time.monotonic() < deadline:
+                    step("drain", 0.1)
+                seen = drawn_since(transcript, start)
+                self.assertIn(
+                    drawn, seen, f"the answer {drawn!r} was not drawn; last rows: {last_rows(seen)!r}"
                 )
 
             try:

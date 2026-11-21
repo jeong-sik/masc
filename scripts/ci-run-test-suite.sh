@@ -255,6 +255,9 @@ run_suite_under_deadline() {
     df -h / | sed 's/^/[test-suite] disk before the suite: /'
     timeout 90 du -xsh "$repo_root/_build" 2>&1 | sed 's/^/[test-suite] _build before the suite: /' || true
   )"
+  # The deadline below and the "finished in" line after the call measure the
+  # suite, not this baseline: take the start time after the baseline read.
+  started=$(date +%s)
   opam exec -- dune build --root . --trace-file "$trace" "$alias_target" > "$log" 2>&1 &
   local dune_pid=$!
   local exited disk_watcher_pid disk_watcher_exited
@@ -319,11 +322,11 @@ run_suite_under_deadline() {
 }
 
 echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
-started=$(date +%s)
 run_suite_under_deadline
 echo "[test-suite] finished in $(( $(date +%s) - started ))s with exit ${rc}"
 df -h / | sed 's/^/[test-suite] disk after the suite: /' | tee -a "$disk_evidence_log"
-timeout 120 du -xsh "$repo_root/_build" 2>&1 | sed 's/^/[test-suite] _build after the suite: /' | tee -a "$disk_evidence_log"
+timeout 120 du -xsh "$repo_root/_build" 2>&1 | sed 's/^/[test-suite] _build after the suite: /' | tee -a "$disk_evidence_log" ||
+  echo "[test-suite] _build after the suite: du did not finish inside 120s; the size is unknown, not zero" | tee -a "$disk_evidence_log"
 summarise_trace
 
 if [ "$rc" = 124 ]; then

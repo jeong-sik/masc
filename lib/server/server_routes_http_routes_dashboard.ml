@@ -221,14 +221,8 @@ exception Tool_quality_log_unavailable of string
 
 let add_routes ~sw ~clock router =
   router
-  (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
+  (* POST /api/v1/broadcast - HTTP API for external tools *)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanBroadcast) "/api/v1/broadcast" (fun state agent_name _req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           handle_broadcast state agent_name reqd body_str
-         )
-       )
-  (* POST /broadcast - Alias for autocov compatibility *)
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanBroadcast) "/broadcast" (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            handle_broadcast state agent_name reqd body_str
          )

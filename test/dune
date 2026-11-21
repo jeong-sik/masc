@@ -7651,6 +7651,8 @@
  (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest astring masc_test_deps masc agent_core))
 
+(include stanzas/test_keeper_librarian_durable_preparation_question_admission.inc)
+
 (test
  (name test_keeper_librarian_durable_capture)
  (modules test_keeper_librarian_durable_capture)

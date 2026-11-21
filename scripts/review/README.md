@@ -101,8 +101,18 @@ still requires current reviews and scope checks. Missing Git objects are fetched
 from the named repository. On a failed candidate publication, its incomplete
 receipt and only a candidate ref still pointing to its own commit are removed.
 
-Offline focused checks include `python3 -m unittest -v scripts/review/test_github_reviews.py`
-and `test_review_worklist.py`.
+Offline unit tests cover `approval-auto-merge.py`, `approval-merge-sweep.py`,
+`linked-issues.py`, `github-reviews.py`, and `review-worklist.py` with fake
+GitHub boundaries (no API calls):
+
+```sh
+python3 -I -m unittest discover -s scripts/review -p 'test_*.py' -v
+```
+
+The `Review & merge script tests` workflow (`.github/workflows/review-script-tests.yml`)
+runs all `scripts/review/test_*.py` suites automatically on pull requests
+touching `scripts/review/**`, `scripts/ci/pr_source_changes.py`, or the
+approval-merge workflows, and on demand via `workflow_dispatch`.
 
 ## The `merge` check on main
 

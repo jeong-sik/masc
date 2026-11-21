@@ -146,9 +146,10 @@ let test_methods_at_names_what_the_path_answers () =
     ; prefix ~methods:[ get ] "/k/" Route_access.Read_auth
     ]
   in
-  check (list string) "both methods at one path, in registration order" [ "GET"; "POST" ]
+  check (list string) "both methods at one path, in registration order"
+    [ "GET"; "HEAD"; "POST" ]
     (method_names (Server_account_route.methods_at entries ~path:"/x"));
-  check (list string) "a prefix answers its methods for a sub-path" [ "GET" ]
+  check (list string) "a prefix answers its methods for a sub-path" [ "GET"; "HEAD" ]
     (method_names (Server_account_route.methods_at entries ~path:"/k/one"));
   check (list string) "a path nothing answers has no method" []
     (method_names (Server_account_route.methods_at entries ~path:"/nowhere"))

@@ -1139,7 +1139,6 @@ let assemble_hooks
                     Keeper_workspace_memory_host_recall.render_prepared prepared in
                 let recall_permitted =
                   Keeper_meta_contract.effective_masc_tools_enabled meta
-                  && not (Runtime_account_access.is_multi_account ())
                 in
                 let dynamic_context, emit_request_prompt_metrics =
                   prepare_request_dynamic_context

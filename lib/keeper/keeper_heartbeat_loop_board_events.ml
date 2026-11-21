@@ -129,11 +129,10 @@ let collect_keepalive_board_events
       ~(meta_current : keeper_meta)
       ~(proactive_warmup_elapsed : bool)
   =
-  if Runtime_account_access.is_multi_account ()
-     || not
-          (should_collect_board_events
-             ~proactive_warmup_elapsed
-             ~paused:meta_current.paused)
+  if not
+       (should_collect_board_events
+          ~proactive_warmup_elapsed
+          ~paused:meta_current.paused)
   then [], meta_current
   else (
     let pending_board_events =

@@ -1398,8 +1398,8 @@ let start_owner_lazy_tasks ~sw state =
 
 let runs_memory_lanes access =
   match Runtime_account_access.published_access access with
-  | Runtime_account_access.Single_user (_ : Authz_boot_mode_read.single_user) -> true
-  | Runtime_account_access.Multi_account { zone = _; base_path = _; now = _ } -> false
+  | Runtime_account_access.Single_user (_ : Authz_boot_mode_read.single_user)
+  | Runtime_account_access.Multi_account { zone = _; base_path = _; now = _ } -> true
 ;;
 
 let claim_and_start_keeper_persistence
@@ -1595,13 +1595,11 @@ let start_post_ready_owner_lanes
       Server_workspace_memory_curator.start ~sw
         ~config:(Mcp_server.workspace_config state)
   in
-  if not (Runtime_account_access.is_multi_account ()) then begin
-    if Runtime_startup_state.requires_setup () then
-      Eio.Fiber.fork ~sw (fun () ->
-        Runtime_startup_state.await_available ();
-        start_authority ())
-    else start_authority ()
-  end;
+  if Runtime_startup_state.requires_setup () then
+    Eio.Fiber.fork ~sw (fun () ->
+      Runtime_startup_state.await_available ();
+      start_authority ())
+  else start_authority ();
 
   start_maintenance ~sw ~task:Jsonl_retention
     ~run:(fun () -> startup_prune_jsonl state);

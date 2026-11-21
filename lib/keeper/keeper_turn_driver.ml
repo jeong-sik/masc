@@ -1024,8 +1024,7 @@ type untried_progress =
    is logged where it is read; the walk reads only the quota window it may
    have written. *)
 let read_runtime_usage_after_account_refusal runtime =
-  if Runtime_account_access.is_multi_account ()
-     || Runtime_execution.is_person_execution runtime.Runtime_instance.execution
+  if Runtime_execution.is_person_execution runtime.Runtime_instance.execution
   then ()
   else
     match Runtime_provider_usage_read.http_read_of_runtime runtime with
@@ -2613,8 +2612,7 @@ let run_named
     &&
     match walk_owner with
     | Person_keeper_turn _ -> false
-    | Fleet_keeper_turn _ | One_shot_walk ->
-      not (Runtime_account_access.is_multi_account ())
+    | Fleet_keeper_turn _ | One_shot_walk -> true
   in
   let tools = if masc_tools_enabled then tools else [] in
   let agent_core_tools = if masc_tools_enabled then agent_core_tools else [] in
@@ -2686,21 +2684,21 @@ let run_named
         match input_source with
         | Keeper_request_source.Completion_review -> Keeper_turn_driver_try_provider.Completion_review
         | Keeper_request_source.Keeper_history { trace_id } ->
-          if Runtime_account_access.is_multi_account ()
-          then
-            Keeper_turn_driver_try_provider.Keeper_history
-              { trace_id; continuity = No_read_end }
-          else
-          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-            let continuity, note =
-              Keeper_turn_driver_try_provider.read_keeper_continuity
-                ~config:(Workspace.default_config base_path)
-                ~keeper_name ~trace_id ~messages:initial_messages
-            in
-            Option.iter
-              (Keeper_turn_driver_try_provider.log_continuity_note ~keeper_name)
-              note;
-            Keeper_turn_driver_try_provider.Keeper_history { trace_id; continuity }))
+          (match walk_owner with
+           | Person_keeper_turn _ ->
+             Keeper_turn_driver_try_provider.Keeper_history
+               { trace_id; continuity = No_read_end }
+           | Fleet_keeper_turn _ | One_shot_walk ->
+             Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+               let continuity, note =
+                 Keeper_turn_driver_try_provider.read_keeper_continuity
+                   ~config:(Workspace.default_config base_path)
+                   ~keeper_name ~trace_id ~messages:initial_messages
+               in
+               Option.iter
+                 (Keeper_turn_driver_try_provider.log_continuity_note ~keeper_name)
+                 note;
+               Keeper_turn_driver_try_provider.Keeper_history { trace_id; continuity })))
       in
 	  let refused_carried_front = ref None in
 	  (* The same front the Agent Core branch reads, for the official-client

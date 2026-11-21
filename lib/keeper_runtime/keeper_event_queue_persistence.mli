@@ -505,12 +505,24 @@ val project_transition_outbox_result :
   base_path:string ->
   keeper_name:string ->
   (unit, string) result
-(** Read the single pending transition under the canonical lane identity,
-    invoke the supplied ledger append with the preceding durable state, and retire only after that append
-    succeeds. [retain_previous] decides, once at this retirement, whether the
-    prior receipt enters the projected-dispositions list or is dropped
-    (#38527). Raw outbox entries and the retirement primitive are not
-    exported independently. *)
+(** Read the FIFO head pending transition under the canonical lane identity,
+    invoke the supplied ledger append with the preceding durable state, and
+    retire only after that append succeeds, keeping any remaining FIFO outbox
+    entries intact in the checkpoint. [retain_previous] decides, once at this
+    retirement, whether the prior receipt enters the projected-dispositions
+    list or is dropped (#38527). Raw outbox entries and the retirement
+    primitive are not exported independently. *)
+
+val project_transition_outbox_entry_result :
+  transition_id:string ->
+  append_before_retire:(Keeper_event_queue_state.t -> outbox_entry -> (unit, string) result) ->
+  retain_previous:(transition_receipt -> bool) ->
+  base_path:string ->
+  keeper_name:string ->
+  (unit, string) result
+(** Like {!project_transition_outbox_result}, targeting the specific outbox
+    entry matching [transition_id] so concurrent transitions project without
+    head-of-line blocking while preserving all other FIFO outbox entries. *)
 
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit

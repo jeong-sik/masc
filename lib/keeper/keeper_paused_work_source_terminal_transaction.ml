@@ -130,20 +130,18 @@ let validate_source_queue config ~keeper_name request =
       ~keeper_name
     |> Result.map_error (fun detail -> Source_queue_validation_failed detail)
   in
-  if Keeper_event_queue_state.transition_outbox state <> []
-  then Error (Source_queue_validation_failed "source lane has a pending transition outbox")
-  else
-    (* Identity and admission revision, not full structural equality: a
-       live entry can carry checkpoint retentions the receipt cannot know,
-       so the exact-selection comparison would fail against a retained
-       entry. *)
-    Keeper_event_queue_state.resolve_pending_selection
-      ~source_ref:
-        (Keeper_event_queue_state.source_snapshot_ref request.source)
-      ~source_incarnation:request.source_incarnation
-      state
-    |> Result.map (fun _ -> ())
-    |> Result.map_error (fun detail -> Source_queue_validation_failed detail)
+  (* Identity and admission revision, not full structural equality: a
+     live entry can carry checkpoint retentions the receipt cannot know,
+     so the exact-selection comparison would fail against a retained
+     entry. Concurrent transitions append to the FIFO outbox without
+     head-of-line blocking. *)
+  Keeper_event_queue_state.resolve_pending_selection
+    ~source_ref:
+      (Keeper_event_queue_state.source_snapshot_ref request.source)
+    ~source_incarnation:request.source_incarnation
+    state
+  |> Result.map (fun _ -> ())
+  |> Result.map_error (fun detail -> Source_queue_validation_failed detail)
 ;;
 
 let operation_of_receipt receipt =

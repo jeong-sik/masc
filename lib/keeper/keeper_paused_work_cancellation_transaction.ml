@@ -76,13 +76,15 @@ let replay_committed ~base_path ~keeper_name replay =
      | Error detail -> Error (Queue_replay_failed detail)
      | Ok None -> Ok `Absent
      | Ok (Some (receipt : Keeper_event_queue_state.transition_receipt)) ->
-       (match Keeper_event_queue_state.transition_outbox state with
-        | [ entry ]
-          when String.equal
-                 entry.receipt.transition_id
-                 receipt.transition_id ->
-          Ok (`Unprojected receipt)
-        | [] | [ _ ] | _ :: _ :: _ -> Ok (`Projected receipt)))
+       if
+         List.exists
+           (fun (entry : Keeper_event_queue_state.outbox_entry) ->
+              String.equal
+                entry.receipt.transition_id
+                receipt.transition_id)
+           (Keeper_event_queue_state.transition_outbox state)
+       then Ok (`Unprojected receipt)
+       else Ok (`Projected receipt))
 ;;
 
 let project_transition_outbox_if_pending ~base_path ~keeper_name result =
@@ -109,17 +111,13 @@ let project_transition_outbox_if_pending ~base_path ~keeper_name result =
        Keeper_registry_event_queue.Transition_committed_followup_failed
          { receipt; stage = `Projection; detail }
      | Ok state ->
-       (match Keeper_event_queue_state.transition_outbox state with
-        | [ entry ]
-          when String.equal entry.receipt.transition_id receipt.transition_id ->
-          project receipt
-        | [] | [ _ ] -> result
-        | _ :: _ :: _ ->
-          Keeper_registry_event_queue.Transition_committed_followup_failed
-            { receipt
-            ; stage = `Projection
-            ; detail = "event queue transition outbox cardinality invalid"
-            }))
+       if
+         List.exists
+           (fun (entry : Keeper_event_queue_state.outbox_entry) ->
+              String.equal entry.receipt.transition_id receipt.transition_id)
+           (Keeper_event_queue_state.transition_outbox state)
+       then project receipt
+       else result)
 ;;
 
 let validate_durable_owner config ~keeper_name =

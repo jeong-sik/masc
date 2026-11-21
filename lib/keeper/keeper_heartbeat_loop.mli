@@ -466,6 +466,19 @@ module For_testing : sig
       boundary before it is due, so the next periodic turn comes one
       interval after that turn. *)
 
+  val adaptive_idle_after_cycle :
+    cycle_status:keepalive_cycle_status ->
+    periodic_due:bool ->
+    stimuli_acked:bool ->
+    due_schedule:due_schedule_service ->
+    base_interval_sec:float ->
+    now:float ->
+    Keeper_keepalive_signal.adaptive_idle_state ->
+    Keeper_keepalive_signal.adaptive_idle_state
+  (** Single-SSOT spontaneous cadence transition used by the heartbeat loop:
+      integrates [due_schedule], adaptive idle backoff ([Idle_30m -> Idle_1h ->
+      Idle_2h]), and reactive pull-in without splitting deadline authority. *)
+
   (** The loop's deferred hint together with its durable file
       ({!Keeper_deferred_runtime_lane_store}). The production loop builds one
       with {!restore_deferred_lane_slot} at start and writes the hint only

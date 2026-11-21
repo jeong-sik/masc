@@ -2567,6 +2567,112 @@ let test_restart_registration_sees_a_commit_before_its_install () =
     register_restart
 ;;
 
+let test_multi_entry_fifo_transition_outbox_has_no_hol_deadlock () =
+  with_temp_dir "keeper-fifo-outbox" (fun base_path ->
+    let keeper_name = "fifo-outbox-keeper" in
+    let src1 = stimulus "fifo-src-1" 10.0 in
+    let src2 = stimulus "fifo-src-2" 20.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun _ -> queue [ src1; src2 ])
+    |> require_ok "seed two pending sources";
+    let selections =
+      Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require_ok "load selections"
+    in
+    let sel1, sel2 =
+      match selections with
+      | [ a; b ] -> a, b
+      | other -> Alcotest.failf "expected 2 selections, got %d" (List.length other)
+    in
+    let r1 =
+      match
+        Persistence.terminalize_pending_turn_completed_result
+          ~base_path ~keeper_name ~applied_at:100.0 ~selection:sel1 ()
+        |> require_ok "commit first terminal ACK"
+      with
+      | Persistence.Turn_terminal_committed
+          (Persistence.Transition_applied r | Persistence.Transition_already_applied r) -> r
+      | _ -> Alcotest.fail "expected first transition receipt"
+    in
+    (* Without projecting r1 first, commit a second transition concurrently:
+       previously blocked by the 1-slot HoL transition outbox deadlock. *)
+    let cancellation : State.accepted_cancellation =
+      { source = sel2.source
+      ; source_incarnation = sel2.admitted_revision
+      ; operator_operation_id = "cancel-fifo-src-2"
+      ; reason = "concurrent cancellation while first transition awaits projection"
+      }
+    in
+    let r2 =
+      match
+        Persistence.cancel_pending_accepted_result
+          ~base_path ~keeper_name ~applied_at:101.0 ~cancellation ()
+        |> require_ok "commit second transition without HoL deadlock"
+      with
+      | Persistence.Transition_applied r | Persistence.Transition_already_applied r -> r
+      | Persistence.Transition_committed_followup_failed { detail; _ } ->
+        Alcotest.fail detail
+    in
+    let reloaded =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload state with two unprojected transitions"
+    in
+    Alcotest.(check int) "both unprojected transitions retained in FIFO outbox"
+      2 (List.length (State.transition_outbox reloaded));
+    let outbox_ids =
+      List.map (fun (e : State.outbox_entry) -> e.receipt.transition_id)
+        (State.transition_outbox reloaded)
+    in
+    Alcotest.(check (list string)) "FIFO order preserved across WAL replay"
+      [ r1.transition_id; r2.transition_id ] outbox_ids;
+    (* Projecting entry #2 by transition_id retires only #2 and preserves #1. *)
+    Persistence.project_transition_outbox_entry_result
+      ~transition_id:r2.transition_id
+      ~append_before_retire:(fun _ entry ->
+        Alcotest.(check string) "projects exact target #2" r2.transition_id
+          entry.receipt.transition_id;
+        Ok ())
+      ~retain_previous:(fun _ -> true)
+      ~base_path ~keeper_name
+    |> require_ok "project second transition directly";
+    let after_second =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload after projecting #2"
+    in
+    Alcotest.(check (list string)) "first transition still awaits projection"
+      [ r1.transition_id ]
+      (List.map (fun (e : State.outbox_entry) -> e.receipt.transition_id)
+         (State.transition_outbox after_second));
+    (* Projecting an already-retired transition_id while another entry (#1)
+       remains queued must return Ok () idempotently without passing #1 to
+       append_before_retire. *)
+    let retired_callback_calls = ref 0 in
+    Persistence.project_transition_outbox_entry_result
+      ~transition_id:r2.transition_id
+      ~append_before_retire:(fun _ entry ->
+        incr retired_callback_calls;
+        Alcotest.failf "must not project unrelated entry %s" entry.receipt.transition_id)
+      ~retain_previous:(fun _ -> true)
+      ~base_path ~keeper_name
+    |> require_ok "idempotent replay of already-retired transition_id";
+    Alcotest.(check int) "append_before_retire not invoked for retired transition_id"
+      0 !retired_callback_calls;
+    (* Projecting FIFO head drains remaining entry #1. *)
+    Persistence.project_transition_outbox_result
+      ~append_before_retire:(fun _ entry ->
+        Alcotest.(check string) "projects remaining head #1" r1.transition_id
+          entry.receipt.transition_id;
+        Ok ())
+      ~retain_previous:(fun _ -> true)
+      ~base_path ~keeper_name
+    |> require_ok "project remaining head transition";
+    let settled =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload settled state"
+    in
+    Alcotest.(check int) "outbox drained cleanly" 0
+      (List.length (State.transition_outbox settled)))
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
@@ -2721,6 +2827,10 @@ let () =
             "projected dispositions keep receipts with an asker"
             `Quick
             test_projected_dispositions_keep_receipts_with_an_asker
+        ; Alcotest.test_case
+            "multi-entry FIFO transition outbox has no HoL deadlock"
+            `Quick
+            test_multi_entry_fifo_transition_outbox_has_no_hol_deadlock
         ] )
       ]
 ;;

@@ -156,8 +156,13 @@ type wake_reason =
     attention boundary, not through board-publish keyword matching. *)
 
 val board_signal_stimulus :
-  arrived_at:float -> reason:wake_reason -> Board_dispatch.addressed_board_signal -> Keeper_event_queue.stimulus
-(** Shared live/catchup stimulus construction; identity and urgency remain identical. *)
+  ?urgency:Keeper_event_queue.urgency ->
+  arrived_at:float ->
+  reason:wake_reason ->
+  Board_dispatch.addressed_board_signal ->
+  Keeper_event_queue.stimulus
+(** Shared live/catchup stimulus construction; identity remains identical and
+    callers that compute a producer-selected wake policy supply [~urgency]. *)
 
 val wake_reason_label : wake_reason -> string
 (** Stable string label for logs/metrics. *)

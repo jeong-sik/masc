@@ -169,3 +169,106 @@ type periodic_cadence = Initial_due of float | After_periodic of float
 val periodic_remaining : now:float -> interval:float -> periodic_cadence -> float
 val periodic_is_due : now:float -> interval:float -> periodic_cadence -> bool
 val consume_periodic : now:float -> periodic_cadence
+
+(** {1 Unified Reactive/Proactive Wake Policy & Queue Circulation} *)
+
+(** Typed sender authority driving producer-selected wake timing. *)
+type sender_kind =
+  | Human_sender
+  | Connector_sender
+  | Keeper_sender
+  | Own_async_sender
+  | System_sender
+
+(** Closed classification of Keeper inbound stimuli. *)
+type input_kind =
+  | Direct_message
+  | Board_mention_or_reply
+  | Board_broadcast
+  | Board_reaction_or_vote
+  | Board_attention_ambient
+  | Delegate_completion
+  | Own_async_completion
+  | Task_cancelled_or_rejected
+  | Task_outcome_approved
+  | Scheduled_wake
+  | Workspace_broadcast
+
+(** Producer-selected wake policy (#54342):
+    - [Now]: wake immediately (or steer if a turn is already active).
+    - [At_tick]: coalesce onto the Keeper's deterministic staggered tick grid.
+    - [Carry]: durably queue to ride the next reactive or spontaneous turn
+      without forcing an extra wakeup. *)
+type stimulus_wake_policy =
+  | Now
+  | At_tick
+  | Carry
+
+type inbound_queue_mode = Keeper_arrived_stimuli.inbound_queue_mode =
+  | Steer
+  | FollowUp
+  | Coalesce
+
+(** Adaptive spontaneous idle backoff ladder (30m -> 1h -> 2h). *)
+type idle_backoff_stage =
+  | Idle_30m
+  | Idle_1h
+  | Idle_2h
+
+type adaptive_idle_state =
+  { stage : idle_backoff_stage
+  ; next_spontaneous_at : float
+  }
+
+val default_stagger_tick_sec : float
+val adaptive_idle_30m_sec : float
+val adaptive_idle_1h_sec : float
+val adaptive_idle_2h_sec : float
+
+val stimulus_wake_policy_of :
+  input_kind:input_kind -> sender_kind:sender_kind -> stimulus_wake_policy
+
+val urgency_of_stimulus_wake_policy :
+  stimulus_wake_policy -> Keeper_event_queue.urgency
+
+val inbound_queue_mode_of :
+  turn_running:bool ->
+  wake_policy:stimulus_wake_policy ->
+  sender_kind:sender_kind ->
+  inbound_queue_mode
+
+val stagger_offset_sec : keeper_name:string -> tick_interval_sec:float -> float
+val next_staggered_tick :
+  now:float -> keeper_name:string -> tick_interval_sec:float -> float
+
+val notify_at_tick_pending :
+  base_path:string ->
+  keeper_name:string ->
+  ?tick_interval_sec:float ->
+  now:float ->
+  unit ->
+  unit
+(** Record an in-memory staggered-tick deadline for a Keeper when an [At_tick]
+    stimulus arrives so a long adaptive-idle sleep wakes at [next_staggered_tick]
+    without disk polling or an immediate wake storm. *)
+
+val at_tick_deadline_opt : base_path:string -> keeper_name:string -> float option
+val at_tick_due : base_path:string -> keeper_name:string -> now:float -> bool
+val clear_at_tick_pending : base_path:string -> keeper_name:string -> unit
+
+val idle_backoff_duration : idle_backoff_stage -> float
+val adaptive_idle_interval :
+  base_interval_sec:float -> idle_backoff_stage -> float
+
+val adaptive_idle_init : now:float -> warmup_sec:float -> adaptive_idle_state
+val adaptive_idle_after_spontaneous_idle :
+  ?base_interval_sec:float -> now:float -> adaptive_idle_state -> adaptive_idle_state
+val adaptive_idle_after_spontaneous_active :
+  ?base_interval_sec:float -> now:float -> unit -> adaptive_idle_state
+val adaptive_idle_pull_in_on_reactive :
+  ?base_interval_sec:float -> now:float -> adaptive_idle_state -> adaptive_idle_state
+val adaptive_idle_remaining : now:float -> adaptive_idle_state -> float
+val adaptive_idle_is_due : now:float -> adaptive_idle_state -> bool
+
+val input_kind_of_stimulus_payload :
+  Keeper_event_queue.stimulus_payload -> input_kind

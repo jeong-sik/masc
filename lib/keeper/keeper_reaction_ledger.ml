@@ -525,7 +525,8 @@ let project_event_queue_transition_outbox_result
       ~expected_transition_id
   =
   let open Result.Syntax in
-  Keeper_event_queue_persistence.project_transition_outbox_result
+  Keeper_event_queue_persistence.project_transition_outbox_entry_result
+    ~transition_id:expected_transition_id
     ~retain_previous:(transition_prior_receipt_has_standing_asker
                        ~base_path
                        ~keeper_name)

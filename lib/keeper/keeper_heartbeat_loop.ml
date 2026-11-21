@@ -946,16 +946,20 @@ let refresh_failure_reason_after_turn ~registry_entry ~turn_fail_count =
     ())
 ;;
 
-(* Whether the event queue still holds any pending entry. Read errors are
-   logged and answered [false]: the cycle then sleeps the cadence and the
-   next intake reports the same error through its own path. *)
+(* Whether the event queue still holds a pending entry that warrants an
+   immediate follow-up turn ([Steer] or [FollowUp]). [Coalesce] entries
+   wait cleanly for the staggered tick or periodic boundary instead of
+   spinning back-to-back turns. *)
 let pending_stimulus_remains ~ctx ~keeper_name =
   match
     Keeper_registry_event_queue.peek_when_result
       ~base_path:ctx.config.base_path
       keeper_name
       ~now:(Time_compat.now ())
-      ~ready:(fun (_ : Keeper_event_queue.stimulus) -> true)
+      ~ready:(fun (stimulus : Keeper_event_queue.stimulus) ->
+        match Keeper_arrived_stimuli.inbound_mode_of_stimulus stimulus with
+        | Keeper_arrived_stimuli.Steer | Keeper_arrived_stimuli.FollowUp -> true
+        | Keeper_arrived_stimuli.Coalesce -> false)
   with
   | Ok (Some _) -> true
   | Ok None -> false
@@ -965,6 +969,25 @@ let pending_stimulus_remains ~ctx ~keeper_name =
       "event queue peek after acked cycle failed; sleeping the cadence: %s"
       detail;
     false
+;;
+
+(* Whether the event queue holds an [At_tick] coalesced entry (non-Low
+   urgency) that should wake on this Keeper's deterministic staggered tick
+   grid rather than sleeping the full adaptive idle interval. *)
+let pending_at_tick_stimulus_remains ~ctx ~keeper_name =
+  match
+    Keeper_registry_event_queue.peek_when_result
+      ~base_path:ctx.config.base_path
+      keeper_name
+      ~now:(Time_compat.now ())
+      ~ready:(fun (stimulus : Keeper_event_queue.stimulus) ->
+        match stimulus.urgency with
+        | Keeper_event_queue.Immediate | Keeper_event_queue.Normal -> true
+        | Keeper_event_queue.Low -> false)
+  with
+  | Ok (Some _) -> true
+  | Ok None -> false
+  | Error _ -> false
 ;;
 
 (* A serving deferred suffix is the failed turn's unfinished input, so it
@@ -1002,6 +1025,70 @@ let periodic_cadence_after_cycle ~periodic_due ~due_schedule ~now cadence =
   | true, (Due_schedule_served | No_due_schedule_served)
   | false, Due_schedule_served -> Keeper_keepalive_signal.consume_periodic ~now
   | false, No_due_schedule_served -> cadence
+;;
+
+(* Single-SSOT spontaneous cadence transition: integrates [due_schedule],
+   adaptive idle backoff ([Idle_30m -> Idle_1h -> Idle_2h]), and reactive
+   pull-in without splitting deadline authority across two timers. *)
+let adaptive_idle_after_cycle
+      ~cycle_status
+      ~periodic_due
+      ~stimuli_acked
+      ~due_schedule
+      ~base_interval_sec
+      ~now
+      (state : Keeper_keepalive_signal.adaptive_idle_state)
+  =
+  match due_schedule with
+  | Due_schedule_served ->
+    Keeper_keepalive_signal.adaptive_idle_after_spontaneous_active
+      ~base_interval_sec
+      ~now
+      ()
+  | No_due_schedule_served ->
+    (match cycle_status, periodic_due, stimuli_acked with
+     | Turn_cycle_turn_succeeded, false, _
+     | Turn_cycle_turn_succeeded, true, true ->
+       Keeper_keepalive_signal.adaptive_idle_pull_in_on_reactive
+         ~base_interval_sec
+         ~now
+         state
+     | Turn_cycle_turn_succeeded, true, false ->
+       Keeper_keepalive_signal.adaptive_idle_after_spontaneous_active
+         ~base_interval_sec
+         ~now
+         ()
+     | Turn_cycle_without_turn, true, _ ->
+       Keeper_keepalive_signal.adaptive_idle_after_spontaneous_idle
+         ~base_interval_sec
+         ~now
+         state
+     | ( Turn_cycle_turn_failed
+       | Turn_cycle_lifecycle_blocked
+       | Turn_cycle_owner_rejected
+       | Turn_cycle_interrupted
+       | Turn_cycle_crashed
+       | Turn_cycle_busy _
+       | Turn_cycle_rested ),
+       true,
+       _ ->
+       { state with
+         next_spontaneous_at =
+           now
+           +. Keeper_keepalive_signal.adaptive_idle_interval
+                ~base_interval_sec
+                state.stage
+       }
+     | ( Turn_cycle_without_turn
+       | Turn_cycle_turn_failed
+       | Turn_cycle_lifecycle_blocked
+       | Turn_cycle_owner_rejected
+       | Turn_cycle_interrupted
+       | Turn_cycle_crashed
+       | Turn_cycle_busy _
+       | Turn_cycle_rested ),
+       false,
+       _ -> state)
 ;;
 
 (* A cycle that raises leaves no outcome to settle the deferred lane from.
@@ -1670,8 +1757,12 @@ let run_heartbeat_loop
   let last_wake_source = ref Keeper_keepalive_signal.Timeout in
   let cadence_clock = Monotonic_deadline.start () in
   let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
-  let periodic_cadence = ref (Keeper_keepalive_signal.Initial_due
-      (float_of_int (max 0 proactive_warmup_sec))) in
+  let adaptive_idle =
+    ref
+      (Keeper_keepalive_signal.adaptive_idle_init
+         ~now:(cadence_now ())
+         ~warmup_sec:(float_of_int (max 0 proactive_warmup_sec)))
+  in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -1680,6 +1771,9 @@ let run_heartbeat_loop
                from monopolizing the Eio scheduler during CPU-bound phases
                (tool filtering, snapshot construction, prompt building). *)
       Eio_guard.fair_yield ();
+      Keeper_keepalive_signal.clear_at_tick_pending
+        ~base_path:ctx.config.base_path
+        ~keeper_name:m.name;
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
       let owner_meta =
@@ -1802,10 +1896,11 @@ let run_heartbeat_loop
         in
         let t_board_end = Time_compat.now () in
         let t_turn_start = t_board_end in
-        let periodic_due = Keeper_keepalive_signal.periodic_is_due
+        let periodic_due =
+          Keeper_keepalive_signal.adaptive_idle_is_due
             ~now:(cadence_now ())
-            ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
-            !periodic_cadence in
+            !adaptive_idle
+        in
         let deferred_runtime_lane =
           Deferred_lane_slot.for_assignment
             deferred_runtime_lane_slot
@@ -1972,12 +2067,19 @@ let run_heartbeat_loop
            that cut it short re-ran the same refused call (183 failed turns in
            41 minutes, 2026-09-09, #34653). The queue keeps the stimulus; the
            wakeup is consumed when the wait ends. *)
-        periodic_cadence :=
-          periodic_cadence_after_cycle
+        let cycle_now = cadence_now () in
+        let base_interval_sec =
+          float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
+        in
+        adaptive_idle :=
+          adaptive_idle_after_cycle
+            ~cycle_status:turn_outcome.cycle_status
             ~periodic_due
+            ~stimuli_acked:turn_outcome.stimuli_acked
             ~due_schedule:turn_outcome.due_schedule
-            ~now:(cadence_now ())
-            !periodic_cadence;
+            ~base_interval_sec
+            ~now:cycle_now
+            !adaptive_idle;
         (match turn_outcome.after_failure with
          | Some (Continue_on_deferred_lane { next_runtime_id }) ->
            Log.Keeper.info
@@ -2015,7 +2117,12 @@ let run_heartbeat_loop
                 ~assignment_id ~deferred_runtime_lane ~basis
             in
             (fun () -> invalidated ~now:(Time_compat.now ()))
-          | Some (Continue_on_deferred_lane _) | None -> (fun () -> false)
+          | Some (Continue_on_deferred_lane _) | None ->
+            (fun () ->
+              Keeper_keepalive_signal.at_tick_due
+                ~base_path:ctx.config.base_path
+                ~keeper_name:m.name
+                ~now:(Time_compat.now ()))
         in
         (* The cadence handshake stays offered while a path rests: it is also
            how [Keeper_status_runtime.keeper_metric_producer_active] knows a
@@ -2029,10 +2136,22 @@ let run_heartbeat_loop
           | Some (Wait_for_path_release { release_at; waiting_on = _; basis = _ }) ->
             Float.max 0.0 (release_at -. Time_compat.now ())
           | Some (Continue_on_deferred_lane _) | None ->
-            Keeper_keepalive_signal.periodic_remaining
-              ~now:(cadence_now ())
-              ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
-              !periodic_cadence
+            let periodic_wait =
+              Keeper_keepalive_signal.adaptive_idle_remaining
+                ~now:(cadence_now ())
+                !adaptive_idle
+            in
+            if pending_at_tick_stimulus_remains ~ctx ~keeper_name:m.name
+            then
+              let wall_now = Time_compat.now () in
+              let next_tick =
+                Keeper_keepalive_signal.next_staggered_tick
+                  ~now:wall_now
+                  ~keeper_name:m.name
+                  ~tick_interval_sec:Keeper_keepalive_signal.default_stagger_tick_sec
+              in
+              Float.min periodic_wait (Float.max 0.0 (next_tick -. wall_now))
+            else periodic_wait
         in
         let next_cycle_now =
           next_cycle_starts_now
@@ -2062,7 +2181,12 @@ let run_heartbeat_loop
         then Deferred_lane_slot.invalidate deferred_runtime_lane_slot;
       if Atomic.get stop then () else loop ())
   in
-  loop ()
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive_signal.clear_at_tick_pending
+        ~base_path:ctx.config.base_path
+        ~keeper_name:m.name)
+    loop
 ;;
 
 module For_testing = struct
@@ -2097,4 +2221,5 @@ module For_testing = struct
   let next_cycle_starts_now = next_cycle_starts_now
   let cycle_wake = cycle_wake
   let periodic_cadence_after_cycle = periodic_cadence_after_cycle
+  let adaptive_idle_after_cycle = adaptive_idle_after_cycle
 end

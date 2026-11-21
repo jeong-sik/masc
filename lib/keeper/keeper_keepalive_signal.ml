@@ -172,6 +172,259 @@ let periodic_is_due ~now ~interval cadence =
 
 let consume_periodic ~now = After_periodic now
 
+type sender_kind =
+  | Human_sender
+  | Connector_sender
+  | Keeper_sender
+  | Own_async_sender
+  | System_sender
+
+type input_kind =
+  | Direct_message
+  | Board_mention_or_reply
+  | Board_broadcast
+  | Board_reaction_or_vote
+  | Board_attention_ambient
+  | Delegate_completion
+  | Own_async_completion
+  | Task_cancelled_or_rejected
+  | Task_outcome_approved
+  | Scheduled_wake
+  | Workspace_broadcast
+
+type stimulus_wake_policy =
+  | Now
+  | At_tick
+  | Carry
+
+type inbound_queue_mode = Keeper_arrived_stimuli.inbound_queue_mode =
+  | Steer
+  | FollowUp
+  | Coalesce
+
+type idle_backoff_stage =
+  | Idle_30m
+  | Idle_1h
+  | Idle_2h
+
+type adaptive_idle_state =
+  { stage : idle_backoff_stage
+  ; next_spontaneous_at : float
+  }
+
+let default_stagger_tick_sec = 300.0
+let adaptive_idle_30m_sec = 1800.0
+let adaptive_idle_1h_sec = 3600.0
+let adaptive_idle_2h_sec = 7200.0
+
+(* Total exhaustive wake policy over (input_kind, sender_kind) (#54342):
+   human/connector direct attention and own-async completions wake Now;
+   keeper-authored peer communication coalesces At_tick on a staggered grid;
+   ambient reactions, votes, discoverable attention, and approved outcomes Carry. *)
+let stimulus_wake_policy_of ~input_kind ~sender_kind =
+  match input_kind, sender_kind with
+  | (Own_async_completion | Scheduled_wake),
+    (Human_sender | Connector_sender | Keeper_sender | Own_async_sender | System_sender) ->
+    Now
+  | Direct_message, (Human_sender | Connector_sender | Own_async_sender | System_sender) ->
+    Now
+  | Direct_message, Keeper_sender -> At_tick
+  | Board_mention_or_reply, (Human_sender | Connector_sender) -> Now
+  | Board_mention_or_reply, (Keeper_sender | Own_async_sender | System_sender) -> At_tick
+  | Board_broadcast, (Human_sender | Connector_sender) -> Now
+  | Board_broadcast, (Keeper_sender | Own_async_sender | System_sender) -> At_tick
+  | Workspace_broadcast, (Human_sender | Connector_sender) -> Now
+  | Workspace_broadcast, (Keeper_sender | Own_async_sender | System_sender) -> At_tick
+  | Delegate_completion, (Human_sender | Connector_sender | Own_async_sender) -> Now
+  | Delegate_completion, (Keeper_sender | System_sender) -> At_tick
+  | Task_cancelled_or_rejected, (Human_sender | Connector_sender) -> Now
+  | Task_cancelled_or_rejected, (Keeper_sender | Own_async_sender | System_sender) -> At_tick
+  | (Board_reaction_or_vote | Board_attention_ambient | Task_outcome_approved),
+    (Human_sender | Connector_sender | Keeper_sender | Own_async_sender | System_sender) ->
+    Carry
+;;
+
+let urgency_of_stimulus_wake_policy = function
+  | Now -> Keeper_event_queue.Immediate
+  | At_tick -> Keeper_event_queue.Normal
+  | Carry -> Keeper_event_queue.Low
+;;
+
+let inbound_queue_mode_of ~turn_running ~wake_policy ~sender_kind =
+  match turn_running, wake_policy, sender_kind with
+  | true, Now, (Human_sender | Connector_sender) -> Steer
+  | true, Now, (Own_async_sender | System_sender | Keeper_sender) -> FollowUp
+  | false, Now, (Human_sender | Connector_sender | Own_async_sender | System_sender | Keeper_sender) ->
+    FollowUp
+  | (true | false), (At_tick | Carry),
+    (Human_sender | Connector_sender | Own_async_sender | System_sender | Keeper_sender) ->
+    Coalesce
+;;
+
+let stagger_offset_sec ~keeper_name ~tick_interval_sec =
+  if not (Float.is_finite tick_interval_sec) || tick_interval_sec <= 0.0
+  then 0.0
+  else
+    let hash = Hashtbl.seeded_hash 0 keeper_name land 0x3fffffff in
+    let bucket_count = max 1 (int_of_float (Float.floor tick_interval_sec)) in
+    float_of_int (hash mod bucket_count)
+;;
+
+let next_staggered_tick ~now ~keeper_name ~tick_interval_sec =
+  if not (Float.is_finite tick_interval_sec) || tick_interval_sec <= 0.0
+  then now
+  else
+    let offset = stagger_offset_sec ~keeper_name ~tick_interval_sec in
+    let cycle = Float.floor ((now -. offset) /. tick_interval_sec) in
+    let candidate = offset +. ((cycle +. 1.0) *. tick_interval_sec) in
+    if candidate <= now then candidate +. tick_interval_sec else candidate
+;;
+
+(* In-memory per-Keeper earliest pending [At_tick] deadline (Unix epoch sec).
+   Populated by [At_tick] producers so a Keeper sleeping on a 1h–2h adaptive
+   idle interval wakes promptly at [next_staggered_tick] via the existing
+   chunked [interruptible_sleep] [interrupt_when] hook — zero disk polling in
+   the sleep loop, zero immediate wake storm. *)
+let pending_at_tick_mu = Stdlib.Mutex.create ()
+let pending_at_tick_deadlines : (string * string, float) Hashtbl.t = Hashtbl.create 32
+
+let with_at_tick_lock f =
+  Stdlib.Mutex.lock pending_at_tick_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock pending_at_tick_mu) f
+;;
+
+let notify_at_tick_pending
+      ~base_path
+      ~keeper_name
+      ?(tick_interval_sec = default_stagger_tick_sec)
+      ~now
+      ()
+  =
+  let deadline = next_staggered_tick ~now ~keeper_name ~tick_interval_sec in
+  let key = base_path, keeper_name in
+  with_at_tick_lock (fun () ->
+    let merged =
+      match Hashtbl.find_opt pending_at_tick_deadlines key with
+      | Some existing -> Float.min existing deadline
+      | None -> deadline
+    in
+    Hashtbl.replace pending_at_tick_deadlines key merged)
+;;
+
+let at_tick_deadline_opt ~base_path ~keeper_name =
+  let key = base_path, keeper_name in
+  with_at_tick_lock (fun () -> Hashtbl.find_opt pending_at_tick_deadlines key)
+;;
+
+let at_tick_due ~base_path ~keeper_name ~now =
+  match at_tick_deadline_opt ~base_path ~keeper_name with
+  | Some deadline -> now >= deadline
+  | None -> false
+;;
+
+let clear_at_tick_pending ~base_path ~keeper_name =
+  let key = base_path, keeper_name in
+  with_at_tick_lock (fun () -> Hashtbl.remove pending_at_tick_deadlines key)
+;;
+
+let idle_backoff_duration = function
+  | Idle_30m -> adaptive_idle_30m_sec
+  | Idle_1h -> adaptive_idle_1h_sec
+  | Idle_2h -> adaptive_idle_2h_sec
+;;
+
+let adaptive_idle_interval ~base_interval_sec stage =
+  let base = Float.max 1.0 base_interval_sec in
+  match stage with
+  | Idle_30m -> base
+  | Idle_1h -> base *. 2.0
+  | Idle_2h -> base *. 4.0
+;;
+
+let adaptive_idle_init ~now ~warmup_sec =
+  { stage = Idle_30m; next_spontaneous_at = now +. Float.max 0.0 warmup_sec }
+;;
+
+let adaptive_idle_after_spontaneous_idle
+      ?(base_interval_sec = adaptive_idle_30m_sec)
+      ~now
+      state
+  =
+  let next_stage =
+    match state.stage with
+    | Idle_30m -> Idle_1h
+    | Idle_1h -> Idle_2h
+    | Idle_2h -> Idle_2h
+  in
+  { stage = next_stage
+  ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec next_stage
+  }
+;;
+
+let adaptive_idle_after_spontaneous_active
+      ?(base_interval_sec = adaptive_idle_30m_sec)
+      ~now
+      ()
+  =
+  { stage = Idle_30m
+  ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec Idle_30m
+  }
+;;
+
+(* Pull in to one base interval after reactive activity without pushing out an
+   earlier future spontaneous deadline; if the prior deadline was already due,
+   advance it one base interval from [now] so the served cycle does not fire an
+   immediate back-to-back spontaneous turn. *)
+let adaptive_idle_pull_in_on_reactive
+      ?(base_interval_sec = adaptive_idle_30m_sec)
+      ~now
+      state
+  =
+  let pulled_deadline = now +. adaptive_idle_interval ~base_interval_sec Idle_30m in
+  let next_spontaneous_at =
+    if state.next_spontaneous_at <= now
+    then pulled_deadline
+    else Float.min state.next_spontaneous_at pulled_deadline
+  in
+  { stage = Idle_30m; next_spontaneous_at }
+;;
+
+let adaptive_idle_remaining ~now state =
+  Float.max 0.0 (state.next_spontaneous_at -. now)
+;;
+
+let adaptive_idle_is_due ~now state = now >= state.next_spontaneous_at
+
+let input_kind_of_stimulus_payload = function
+  | Keeper_event_queue.Workspace_message _ -> Direct_message
+  | Keeper_event_queue.Connector_attention _ -> Direct_message
+  | Keeper_event_queue.Board_signal bs ->
+    (match bs.kind with
+     | Keeper_event_queue.Reaction_changed _ | Keeper_event_queue.Vote_cast _ ->
+       Board_reaction_or_vote
+     | Keeper_event_queue.Post_created | Keeper_event_queue.Post_updated _
+     | Keeper_event_queue.Comment_added _ ->
+       (match bs.audience with
+        | Keeper_event_queue.Audience_broadcast -> Board_broadcast
+        | Keeper_event_queue.Audience_targets _
+        | Keeper_event_queue.Audience_thread_participants -> Board_mention_or_reply
+        | Keeper_event_queue.Audience_discoverable -> Board_attention_ambient))
+  | Keeper_event_queue.Board_routing_pending _
+  | Keeper_event_queue.Board_attention _ -> Board_attention_ambient
+  | Keeper_event_queue.Delegate_completed _ -> Delegate_completion
+  | Keeper_event_queue.Tool_result_ready _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Owned_job_completed _
+  | Keeper_event_queue.Bootstrap -> Own_async_completion
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Completion_authority_rejected _ -> Task_cancelled_or_rejected
+  | Keeper_event_queue.Task_outcome _ -> Task_outcome_approved
+  | Keeper_event_queue.Schedule_due _ -> Scheduled_wake
+;;
+
 type sleep_outcome =
   | Stopped
   | Woken
@@ -341,8 +594,16 @@ let wakeup_keeper ?base_path ?stimulus name =
    here it only picks urgency (explicit targets and broadcasts are [Immediate]). It is not
    carried in the payload — the next prompt re-derives board context from the
    typed [Board_signal] payload, not from a wake-reason string. *)
-let board_signal_stimulus ~reason (addressed : Board_dispatch.addressed_board_signal) =
-  Board_wake.board_signal_stimulus ~arrived_at:(Time_compat.now ()) ~reason addressed
+let board_signal_stimulus
+      ?urgency
+      ~reason
+      (addressed : Board_dispatch.addressed_board_signal)
+  =
+  Board_wake.board_signal_stimulus
+    ?urgency
+    ~arrived_at:(Time_compat.now ())
+    ~reason
+    addressed
 ;;
 
 let board_signal_entry_accepts_delivery (entry : Keeper_registry.registry_entry) =
@@ -397,10 +658,11 @@ let record_board_attention_candidate
 let deliver_addressed_board_signal
       ~(config : Workspace.config)
       ~(reason : Board_wake.wake_reason)
+      ~urgency
       ~(addressed : Board_dispatch.addressed_board_signal)
       (meta : keeper_meta)
   =
-  let stimulus = board_signal_stimulus ~reason addressed in
+  let stimulus = board_signal_stimulus ~urgency ~reason addressed in
   match
     Keeper_registry_event_queue.enqueue_stimulus_durable_result
       ~base_path:config.base_path
@@ -450,9 +712,6 @@ let wakeup_relevant_keeper_for_board_signal
       ~(config : Workspace.config)
       (addressed : Board_dispatch.addressed_board_signal)
   =
-  if Runtime_account_access.is_multi_account ()
-  then ()
-  else
   let candidates = ref [] in
   let record_board_attention_candidate ~config ~signal_kind_label ~audience_label ~meta addressed =
     match dispatch_attention with
@@ -647,6 +906,20 @@ let wakeup_relevant_keeper_for_board_signal
            registry_entries
          @ List.map (fun name -> name, None) unregistered_persisted_names
        in
+       let sender_kind =
+         let author_norm = String.lowercase_ascii (String.trim signal.author) in
+         let sender_is_keeper =
+           List.exists
+             (fun (entry : Keeper_registry.registry_entry) ->
+                String.equal (String.lowercase_ascii entry.name) author_norm
+                || String.equal (String.lowercase_ascii entry.meta.name) author_norm)
+             all_registry_entries
+           || List.exists
+                (fun name -> String.equal (String.lowercase_ascii name) author_norm)
+                unregistered_persisted_names
+         in
+         if sender_is_keeper then Keeper_sender else Human_sender
+       in
        (* Every addressed lane is independent: persist and signal it without
           a fleet-wide cap, ordering dependency, or content debounce. *)
        let board_ym = Eio_guard.create_yield_meter () in
@@ -729,7 +1002,23 @@ let wakeup_relevant_keeper_for_board_signal
                    signal.post_id)
            | Keeper_world_observation_board_signal.Available
                (Keeper_board_audience.Deliver reason) ->
-             (match deliver_addressed_board_signal ~config ~reason ~addressed meta with
+             let input_kind =
+               match reason with
+               | Board_wake.Broadcast -> Board_broadcast
+               | Board_wake.Explicit_mention
+               | Board_wake.Comment_on_self_post
+               | Board_wake.Reply_to_self_comment ->
+                 Board_mention_or_reply
+               | Board_wake.Reaction_after_self_activity
+               | Board_wake.Vote_on_self_post
+               | Board_wake.Vote_on_self_comment ->
+                 Board_reaction_or_vote
+             in
+             let wake_policy = stimulus_wake_policy_of ~input_kind ~sender_kind in
+             let urgency = urgency_of_stimulus_wake_policy wake_policy in
+             (match
+                deliver_addressed_board_signal ~config ~reason ~urgency ~addressed meta
+              with
               | Error detail ->
                 Otel_metric_store.inc_counter
                   Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -767,38 +1056,57 @@ let wakeup_relevant_keeper_for_board_signal
                        (Board_wake.wake_reason_label reason)
                        signal.post_id
                    else (
-                     let outcome =
-                       let intent =
-                         match reason with
-                         | Board_wake.Broadcast -> Keeper_registry.Broadcast_signal
-                         | Board_wake.Explicit_mention
-                         | Board_wake.Comment_on_self_post
-                         | Board_wake.Reply_to_self_comment
-                         | Board_wake.Reaction_after_self_activity
-                         | Board_wake.Vote_on_self_post
-                         | Board_wake.Vote_on_self_comment ->
-                           Keeper_registry.Reactive_signal
-                       in
-                       Keeper_registry.wakeup_running
-                         ~intent
-                         ~base_path:config.base_path
-                         meta.name
-                     in
-                     match outcome with
-                     | Keeper_registry.Signaled ->
-                       Log.Keeper.info
-                         "board signal wakeup: keeper=%s reason=%s post=%s"
+                     match wake_policy with
+                     | Carry ->
+                       Log.Keeper.debug
+                         "board signal queued with Carry policy (no immediate wakeup): keeper=%s reason=%s post=%s"
                          meta.name
                          (Board_wake.wake_reason_label reason)
                          signal.post_id
-                     | Keeper_registry.Deferred_unregistered
-                     | Keeper_registry.Deferred_not_running _
-                     | Keeper_registry.Deferred_lifecycle _ ->
+                     | At_tick ->
+                       notify_at_tick_pending
+                         ~base_path:config.base_path
+                         ~keeper_name:meta.name
+                         ~now:(Time_compat.now ())
+                         ();
                        Log.Keeper.info
-                         "board signal durably queued; live wake deferred: keeper=%s reason=%s post=%s"
+                         "board signal queued with At_tick policy for staggered coalescing: keeper=%s reason=%s post=%s"
                          meta.name
                          (Board_wake.wake_reason_label reason)
-                         signal.post_id))))
+                         signal.post_id
+                     | Now ->
+                       let outcome =
+                         let intent =
+                           match reason with
+                           | Board_wake.Broadcast -> Keeper_registry.Broadcast_signal
+                           | Board_wake.Explicit_mention
+                           | Board_wake.Comment_on_self_post
+                           | Board_wake.Reply_to_self_comment
+                           | Board_wake.Reaction_after_self_activity
+                           | Board_wake.Vote_on_self_post
+                           | Board_wake.Vote_on_self_comment ->
+                             Keeper_registry.Reactive_signal
+                         in
+                         Keeper_registry.wakeup_running
+                           ~intent
+                           ~base_path:config.base_path
+                           meta.name
+                       in
+                       match outcome with
+                       | Keeper_registry.Signaled ->
+                         Log.Keeper.info
+                           "board signal wakeup: keeper=%s reason=%s post=%s"
+                           meta.name
+                           (Board_wake.wake_reason_label reason)
+                           signal.post_id
+                       | Keeper_registry.Deferred_unregistered
+                       | Keeper_registry.Deferred_not_running _
+                       | Keeper_registry.Deferred_lifecycle _ ->
+                         Log.Keeper.info
+                           "board signal durably queued; live wake deferred: keeper=%s reason=%s post=%s"
+                           meta.name
+                           (Board_wake.wake_reason_label reason)
+                           signal.post_id))))
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->

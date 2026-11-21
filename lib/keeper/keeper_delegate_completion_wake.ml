@@ -21,13 +21,18 @@ let deliver ?not_before ~base_path ~asked_by ~operation_id ~delegate ~terminal (
     | Keeper_event_queue.Delegate_no_reply -> "no_reply"
     | Keeper_event_queue.Delegate_failed _ -> "failed"
   in
+  let wake_policy =
+    Keeper_keepalive_signal.stimulus_wake_policy_of
+      ~input_kind:Keeper_keepalive_signal.Delegate_completion
+      ~sender_kind:Keeper_keepalive_signal.Own_async_sender
+  in
   let stimulus : Keeper_event_queue.stimulus =
     { Keeper_event_queue.post_id =
         Keeper_event_queue.delegate_completion_post_id completion
     (* This answers work the recipient submitted. Like composition/job
        completion, it must reach intake before unrelated ambient Board rows;
        stable urgency ordering still preserves earlier Immediate sources. *)
-    ; urgency = Keeper_event_queue.Immediate
+    ; urgency = Keeper_keepalive_signal.urgency_of_stimulus_wake_policy wake_policy
     ; arrived_at = Time_compat.now ()
     ; payload = Keeper_event_queue.Delegate_completed completion
     }
@@ -72,39 +77,48 @@ let deliver ?not_before ~base_path ~asked_by ~operation_id ~delegate ~terminal (
       operation_id
       delegate
       outcome_label;
-    (try
-       match
-         Keeper_registry.wakeup_running
-           ~intent:Keeper_registry.Reactive_signal
-           ~base_path
-           asked_by
-       with
-       | Keeper_registry.Signaled -> ()
-       | Keeper_registry.Deferred_unregistered ->
-         Log.Keeper.info
-           ~keeper_name:asked_by
-           "delegation answer wake deferred: asker is no longer registered \
-            operation_id=%s"
-           operation_id
-       | Keeper_registry.Deferred_not_running phase ->
-         Log.Keeper.info
-           ~keeper_name:asked_by
-           "delegation answer wake deferred: phase=%s operation_id=%s"
-           (Keeper_state_machine.phase_to_string phase)
-           operation_id
-       | Keeper_registry.Deferred_lifecycle denial ->
-         Log.Keeper.info
-           ~keeper_name:asked_by
-           "delegation answer wake deferred by lifecycle: reason=%s operation_id=%s"
-           (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
-           operation_id
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Keeper.warn
+    (match wake_policy with
+     | Keeper_keepalive_signal.Carry -> ()
+     | Keeper_keepalive_signal.At_tick ->
+       Keeper_keepalive_signal.notify_at_tick_pending
+         ~base_path
          ~keeper_name:asked_by
-         "delegation answer wake hint failed after commit operation_id=%s: %s"
-         operation_id
-         (Printexc.to_string exn));
+         ~now:(Time_compat.now ())
+         ()
+     | Keeper_keepalive_signal.Now ->
+       try
+         match
+           Keeper_registry.wakeup_running
+             ~intent:Keeper_registry.Reactive_signal
+             ~base_path
+             asked_by
+         with
+         | Keeper_registry.Signaled -> ()
+         | Keeper_registry.Deferred_unregistered ->
+           Log.Keeper.info
+             ~keeper_name:asked_by
+             "delegation answer wake deferred: asker is no longer registered \
+              operation_id=%s"
+             operation_id
+         | Keeper_registry.Deferred_not_running phase ->
+           Log.Keeper.info
+             ~keeper_name:asked_by
+             "delegation answer wake deferred: phase=%s operation_id=%s"
+             (Keeper_state_machine.phase_to_string phase)
+             operation_id
+         | Keeper_registry.Deferred_lifecycle denial ->
+           Log.Keeper.info
+             ~keeper_name:asked_by
+             "delegation answer wake deferred by lifecycle: reason=%s operation_id=%s"
+             (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+             operation_id
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           ~keeper_name:asked_by
+           "delegation answer wake hint failed after commit operation_id=%s: %s"
+           operation_id
+           (Printexc.to_string exn));
     Ok ()
 ;;

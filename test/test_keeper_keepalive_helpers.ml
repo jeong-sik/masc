@@ -1231,7 +1231,9 @@ let test_vote_on_own_post_wakes_the_author_once () =
         | votes -> failf "expected one vote stimulus, got %d" (List.length votes));
        (match Keeper_registry.get ~base_path:config.base_path meta.name with
         | Some entry ->
-          check bool "author woken by the vote" true (Atomic.get entry.fiber_wakeup)
+          (* #54342: votes use Carry wake policy — durably queued for the
+             Keeper's next turn without triggering an immediate wakeup storm. *)
+          check bool "vote carries without immediate wakeup" false (Atomic.get entry.fiber_wakeup)
         | None -> fail "voterlane registry entry missing");
        (* Same voter, same direction: Already_voted, nothing new to act on. *)
        (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"external-voter" ~post_id ~direction:Board.Up with
@@ -1803,10 +1805,349 @@ let test_committed_board_action_retains_unavailable_routing action () =
    | _ -> fail "retained action did not project after recovery")
 ;;
 
+let test_typed_wake_policy_and_inbound_queue_modes () =
+  let check_policy label expected ~input_kind ~sender_kind =
+    check bool label true
+      (KKS.stimulus_wake_policy_of ~input_kind ~sender_kind = expected)
+  in
+  check_policy "human direct message wakes Now" KKS.Now
+    ~input_kind:KKS.Direct_message ~sender_kind:KKS.Human_sender;
+  check_policy "connector direct message wakes Now" KKS.Now
+    ~input_kind:KKS.Direct_message ~sender_kind:KKS.Connector_sender;
+  check_policy "keeper direct message coalesces At_tick" KKS.At_tick
+    ~input_kind:KKS.Direct_message ~sender_kind:KKS.Keeper_sender;
+  check_policy "human board mention wakes Now" KKS.Now
+    ~input_kind:KKS.Board_mention_or_reply ~sender_kind:KKS.Human_sender;
+  check_policy "keeper board mention coalesces At_tick" KKS.At_tick
+    ~input_kind:KKS.Board_mention_or_reply ~sender_kind:KKS.Keeper_sender;
+  check_policy "own async completion wakes Now" KKS.Now
+    ~input_kind:KKS.Own_async_completion ~sender_kind:KKS.Own_async_sender;
+  check_policy "reactions and votes Carry" KKS.Carry
+    ~input_kind:KKS.Board_reaction_or_vote ~sender_kind:KKS.Human_sender;
+  check_policy "ambient board attention Carries" KKS.Carry
+    ~input_kind:KKS.Board_attention_ambient ~sender_kind:KKS.System_sender;
+  check_policy "approved task outcome Carries" KKS.Carry
+    ~input_kind:KKS.Task_outcome_approved ~sender_kind:KKS.System_sender;
+  (* Inbound queue modes: Steer | FollowUp | Coalesce *)
+  check bool "human Now during active turn steers" true
+    (KKS.inbound_queue_mode_of ~turn_running:true ~wake_policy:KKS.Now
+       ~sender_kind:KKS.Human_sender = KKS.Steer);
+  check bool "connector Now during active turn steers" true
+    (KKS.inbound_queue_mode_of ~turn_running:true ~wake_policy:KKS.Now
+       ~sender_kind:KKS.Connector_sender = KKS.Steer);
+  check bool "own-async Now during active turn follows up" true
+    (KKS.inbound_queue_mode_of ~turn_running:true ~wake_policy:KKS.Now
+       ~sender_kind:KKS.Own_async_sender = KKS.FollowUp);
+  check bool "At_tick coalesces during active turn" true
+    (KKS.inbound_queue_mode_of ~turn_running:true ~wake_policy:KKS.At_tick
+       ~sender_kind:KKS.Keeper_sender = KKS.Coalesce);
+  check bool "Carry coalesces while idle" true
+    (KKS.inbound_queue_mode_of ~turn_running:false ~wake_policy:KKS.Carry
+       ~sender_kind:KKS.Human_sender = KKS.Coalesce);
+  (* Arrived stimuli mid-turn ordering prioritizes Steer > FollowUp > Coalesce *)
+  let make_sel ~arrival ~arrived_at ~urgency payload
+    : Keeper_event_queue_state.pending_selection =
+    { source =
+        { Keeper_event_queue.post_id = Printf.sprintf "arr-%Ld" arrival
+        ; urgency
+        ; arrived_at
+        ; payload
+        }
+    ; admitted_revision = 1L
+    ; arrival
+    ; checkpoint_retentions = 0
+    ; first_admitted_at = None
+    }
+  in
+  let round =
+    Keeper_arrived_stimuli.next_round
+      ~run_started_at:100.0
+      ~shown:[]
+      [ make_sel ~arrival:1L ~arrived_at:101.0 ~urgency:Keeper_event_queue.Low
+          (Keeper_event_queue.Workspace_message { wmsg_request_id = "r1"; wmsg_from = "k1" })
+      ; make_sel ~arrival:2L ~arrived_at:102.0 ~urgency:Keeper_event_queue.Normal
+          (Keeper_event_queue.Tool_result_ready "rcpt-1")
+      ; make_sel ~arrival:3L ~arrived_at:103.0 ~urgency:Keeper_event_queue.Immediate
+          (Keeper_event_queue.Workspace_message { wmsg_request_id = "r2"; wmsg_from = "human" })
+      ]
+  in
+  let order = List.map (fun (r : Keeper_arrived_stimuli.row) -> r.arrival, r.mode) round.listed in
+  check bool "Steer precedes FollowUp precedes Coalesce" true
+    (order = [ 3L, KKS.Steer; 2L, KKS.FollowUp; 1L, KKS.Coalesce ])
+;;
+
+let test_staggered_tick_and_adaptive_pull_in_backoff () =
+  let tick_a =
+    KKS.next_staggered_tick ~now:1000.0 ~keeper_name:"alpha"
+      ~tick_interval_sec:KKS.default_stagger_tick_sec
+  in
+  let tick_b =
+    KKS.next_staggered_tick ~now:1000.0 ~keeper_name:"beta"
+      ~tick_interval_sec:KKS.default_stagger_tick_sec
+  in
+  check bool "alpha next tick strictly after now" true (tick_a > 1000.0);
+  check bool "alpha next tick within interval" true
+    (tick_a <= 1000.0 +. KKS.default_stagger_tick_sec);
+  check bool "beta next tick strictly after now" true (tick_b > 1000.0);
+  check bool "distinct keepers stagger phases" true (not (Float.equal tick_a tick_b));
+  (* Adaptive idle ladder: 30m -> 1h -> 2h (cap) *)
+  let s0 = KKS.adaptive_idle_init ~now:0.0 ~warmup_sec:0.0 in
+  check bool "starts at Idle_30m" true (s0.stage = KKS.Idle_30m);
+  let s1 = KKS.adaptive_idle_after_spontaneous_idle ~now:100.0 s0 in
+  check bool "1st idle advances to Idle_1h" true (s1.stage = KKS.Idle_1h);
+  check (float 0.01) "1st idle schedules +3600s" 3700.0 s1.next_spontaneous_at;
+  let s2 = KKS.adaptive_idle_after_spontaneous_idle ~now:3700.0 s1 in
+  check bool "2nd idle advances to Idle_2h" true (s2.stage = KKS.Idle_2h);
+  check (float 0.01) "2nd idle schedules +7200s" 10900.0 s2.next_spontaneous_at;
+  let s3 = KKS.adaptive_idle_after_spontaneous_idle ~now:10900.0 s2 in
+  check bool "3rd idle caps at Idle_2h" true (s3.stage = KKS.Idle_2h);
+  check (float 0.01) "3rd idle caps at +7200s" 18100.0 s3.next_spontaneous_at;
+  (* Reactive pull-in resets to Idle_30m and pulls in without pushing out *)
+  let pulled = KKS.adaptive_idle_pull_in_on_reactive ~now:11000.0 s3 in
+  check bool "reactive pull-in resets stage to Idle_30m" true (pulled.stage = KKS.Idle_30m);
+  check (float 0.01) "reactive pull-in shortens 2h deadline to now+30m"
+    12800.0 pulled.next_spontaneous_at;
+  let kept = KKS.adaptive_idle_pull_in_on_reactive ~now:12500.0 pulled in
+  check (float 0.01) "reactive pull-in never pushes out earlier deadline"
+    12800.0 kept.next_spontaneous_at;
+  (* Continuous scaling with custom base_interval_sec (no 60s discontinuity) *)
+  check (float 0.01) "base=60s Idle_30m" 60.0
+    (KKS.adaptive_idle_interval ~base_interval_sec:60.0 KKS.Idle_30m);
+  check (float 0.01) "base=60s Idle_1h" 120.0
+    (KKS.adaptive_idle_interval ~base_interval_sec:60.0 KKS.Idle_1h);
+  check (float 0.01) "base=60s Idle_2h" 240.0
+    (KKS.adaptive_idle_interval ~base_interval_sec:60.0 KKS.Idle_2h);
+  (* Single-SSOT loop transition: reactive turn at Idle_2h (70m elapsed since
+     t=0, next_spontaneous_at=7200) pulls deadline to now+30m instead of
+     computing 0.0s remaining and firing a spurious spontaneous turn. *)
+  let idle_2h_state : KKS.adaptive_idle_state =
+    { stage = KKS.Idle_2h; next_spontaneous_at = 7200.0 }
+  in
+  let after_reactive =
+    Keeper_heartbeat_loop.For_testing.adaptive_idle_after_cycle
+      ~cycle_status:Keeper_heartbeat_loop.Turn_cycle_turn_succeeded
+      ~periodic_due:false
+      ~stimuli_acked:true
+      ~due_schedule:Keeper_heartbeat_loop.No_due_schedule_served
+      ~base_interval_sec:1800.0
+      ~now:4200.0
+      idle_2h_state
+  in
+  check bool "SSOT reactive pull-in resets stage to Idle_30m" true
+    (after_reactive.stage = KKS.Idle_30m);
+  check bool "SSOT reactive pull-in is NOT immediately due" false
+    (KKS.adaptive_idle_is_due ~now:4200.0 after_reactive);
+  check (float 0.01) "SSOT reactive pull-in leaves 1800s remaining" 1800.0
+    (KKS.adaptive_idle_remaining ~now:4200.0 after_reactive);
+  let after_schedule =
+    Keeper_heartbeat_loop.For_testing.adaptive_idle_after_cycle
+      ~cycle_status:Keeper_heartbeat_loop.Turn_cycle_turn_succeeded
+      ~periodic_due:false
+      ~stimuli_acked:true
+      ~due_schedule:Keeper_heartbeat_loop.Due_schedule_served
+      ~base_interval_sec:1800.0
+      ~now:5000.0
+      idle_2h_state
+  in
+  check (float 0.01) "SSOT served due schedule moves deadline to now+base" 6800.0
+    after_schedule.next_spontaneous_at
+;;
+
+let test_at_tick_pending_interrupts_long_sleep_at_staggered_tick () =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let base_path = "/tmp/test-at-tick-sleep" in
+    let keeper_name = "at-tick-sleeper" in
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make false in
+    let cadence_sleeping = Atomic.make false in
+    let now_ref = ref 1000.0 in
+    let outcome = ref None in
+    Fun.protect
+      ~finally:(fun () -> KKS.clear_at_tick_pending ~base_path ~keeper_name)
+      (fun () ->
+         Eio.Fiber.both
+           (fun () ->
+              outcome :=
+                Some
+                  (KKS.interruptible_sleep
+                     ~cadence_sleeping
+                     ~interrupt_when:(fun () ->
+                       KKS.at_tick_due ~base_path ~keeper_name ~now:!now_ref)
+                     ~clock
+                     ~stop
+                     ~wakeup
+                     (fun () -> 7200.0)))
+           (fun () ->
+              while not (Atomic.get cadence_sleeping) do
+                Eio.Time.sleep clock 0.001
+              done;
+              KKS.notify_at_tick_pending
+                ~base_path
+                ~keeper_name
+                ~tick_interval_sec:KKS.default_stagger_tick_sec
+                ~now:!now_ref
+                ();
+              let deadline =
+                match KKS.at_tick_deadline_opt ~base_path ~keeper_name with
+                | Some d -> d
+                | None -> fail "expected pending at-tick deadline"
+              in
+              check bool "deadline is after arrival" true (deadline > 1000.0);
+              check bool "deadline within stagger window" true
+                (deadline <= 1000.0 +. KKS.default_stagger_tick_sec);
+              now_ref := deadline -. 1.0;
+              check bool "does not wake early before staggered tick" false
+                (KKS.at_tick_due ~base_path ~keeper_name ~now:!now_ref);
+              now_ref := deadline);
+         check bool "At_tick arrival interrupts 2h sleep at staggered tick" true
+           (match !outcome with
+            | Some KKS.Woken -> true
+            | Some (KKS.Stopped | KKS.Timeout) | None -> false)))
+;;
+
+let test_board_signal_enqueues_policy_urgency_before_wake () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  let target = make_board_resume_meta "alpha" in
+  let peer_keeper = make_board_resume_meta "beta" in
+  let persisted_keeper = make_board_resume_meta "persisted-peer" in
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.set_board_signal_hook (fun _ -> ());
+      KKS.clear_at_tick_pending ~base_path:config.base_path ~keeper_name:target.name;
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       persist_and_register_board_lane config target;
+       persist_and_register_board_lane config peer_keeper;
+       (* Persist without registering to ensure unregistered persisted Keepers
+          are still recognized as Keeper_sender, not Human_sender. *)
+       write_board_lane_config config persisted_keeper;
+       (match Keeper_meta_store.replace_snapshot config persisted_keeper with
+        | Ok () -> ()
+        | Error detail -> fail ("write_meta failed: " ^ detail));
+       let urgency_for_post post_id =
+         match
+           Keeper_event_queue_persistence.pending_selections_result
+             ~base_path:config.base_path
+             ~keeper_name:target.name
+         with
+         | Error detail -> fail ("pending_selections failed: " ^ detail)
+         | Ok selections ->
+           (match
+              List.find_opt
+                (fun (sel : Keeper_event_queue_state.pending_selection) ->
+                   String.equal sel.source.post_id post_id)
+                selections
+            with
+            | Some sel -> sel.source.urgency
+            | None -> failf "expected queued stimulus for %s" post_id)
+       in
+       let reset_wake_state () =
+         KKS.clear_at_tick_pending ~base_path:config.base_path ~keeper_name:target.name;
+         match Keeper_registry.get ~base_path:config.base_path target.name with
+         | Some entry -> Atomic.set entry.fiber_wakeup false
+         | None -> fail "alpha registry entry missing"
+       in
+       (* 1. Keeper-authored @alpha mention -> At_tick -> Normal urgency, no immediate wake, pending at-tick deadline set *)
+       reset_wake_state ();
+       let keeper_mention =
+         { Board_dispatch.kind = Board_dispatch.Board_post_created
+         ; post_id = "post-keeper-mention"
+         ; author = peer_keeper.name
+         ; title = "peer ping"
+         ; content = "@alpha sync at tick"
+         ; hearth = None
+         ; updated_at = Some 200.0
+         }
+         |> persist_board_signal
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config keeper_mention;
+       check bool "keeper mention enqueues Normal urgency (not Immediate)" true
+         (urgency_for_post keeper_mention.signal.post_id = Keeper_event_queue.Normal);
+       check bool "keeper mention does not set immediate wakeup" false
+         (Atomic.get (Option.get (Keeper_registry.get ~base_path:config.base_path target.name)).fiber_wakeup);
+       check bool "keeper mention registers staggered at-tick deadline" true
+         (Option.is_some
+            (KKS.at_tick_deadline_opt ~base_path:config.base_path ~keeper_name:target.name));
+       (* 2. Unregistered persisted Keeper mention -> still Keeper_sender -> Normal urgency *)
+       reset_wake_state ();
+       let persisted_mention =
+         { Board_dispatch.kind = Board_dispatch.Board_post_created
+         ; post_id = "post-persisted-keeper-mention"
+         ; author = persisted_keeper.name
+         ; title = "persisted peer ping"
+         ; content = "@alpha sync from unregistered persisted keeper"
+         ; hearth = None
+         ; updated_at = Some 201.0
+         }
+         |> persist_board_signal
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config persisted_mention;
+       check bool "persisted keeper mention enqueues Normal urgency" true
+         (urgency_for_post persisted_mention.signal.post_id = Keeper_event_queue.Normal);
+       check bool "persisted keeper mention does not set immediate wakeup" false
+         (Atomic.get (Option.get (Keeper_registry.get ~base_path:config.base_path target.name)).fiber_wakeup);
+       (* 3. Human-authored @alpha mention -> Now -> Immediate urgency + immediate wakeup *)
+       reset_wake_state ();
+       let human_mention =
+         { Board_dispatch.kind = Board_dispatch.Board_post_created
+         ; post_id = "post-human-mention"
+         ; author = "external-human"
+         ; title = "operator ping"
+         ; content = "@alpha urgent check"
+         ; hearth = None
+         ; updated_at = Some 202.0
+         }
+         |> persist_board_signal
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config human_mention;
+       check bool "human mention enqueues Immediate urgency" true
+         (urgency_for_post human_mention.signal.post_id = Keeper_event_queue.Immediate);
+       check bool "human mention triggers immediate wakeup" true
+         (Atomic.get (Option.get (Keeper_registry.get ~base_path:config.base_path target.name)).fiber_wakeup);
+       (* 4. Vote on alpha's own post -> Carry -> Low urgency, no immediate wake, no at-tick deadline *)
+       reset_wake_state ();
+       let own_post_id =
+         create_post_exn
+           ~author:target.name
+           ~title:"alpha status"
+           ~content:"status update"
+       in
+       Board_dispatch.set_board_signal_hook (fun signal ->
+         KKS.wakeup_relevant_keeper_for_board_signal ~config signal);
+       (match
+          Board_dispatch.vote
+            ~reader:Masc_board_handlers.Board_access.Operator
+            ~voter:"external-voter"
+            ~post_id:own_post_id
+            ~direction:Board.Up
+        with
+        | Ok _ -> ()
+        | Error err -> fail (Board.show_board_error err));
+       check bool "vote enqueues Low urgency (Carry, not Normal)" true
+         (urgency_for_post own_post_id = Keeper_event_queue.Low);
+       check bool "vote does not trigger immediate wakeup" false
+         (Atomic.get (Option.get (Keeper_registry.get ~base_path:config.base_path target.name)).fiber_wakeup);
+       check bool "vote does not register an at-tick deadline" true
+         (Option.is_none
+            (KKS.at_tick_deadline_opt ~base_path:config.base_path ~keeper_name:target.name)))
+;;
+
 let () =
   run
     "keeper keepalive helpers"
-    [ ( "current_task_reconciliation"
+    [ ( "wake_policy_circulation"
+      , [ test_case "typed wake policy and Steer/FollowUp/Coalesce modes" `Quick
+            test_typed_wake_policy_and_inbound_queue_modes
+        ; test_case "staggered tick grid and adaptive pull-in idle backoff" `Quick
+            test_staggered_tick_and_adaptive_pull_in_backoff
+        ; test_case "At_tick pending interrupts long sleep at staggered tick" `Quick
+            test_at_tick_pending_interrupts_long_sleep_at_staggered_tick
+        ; test_case "board signal enqueues policy urgency before wake" `Quick
+            test_board_signal_enqueues_policy_urgency_before_wake
+        ] )
+    ; ( "current_task_reconciliation"
       , [ test_case
             "heartbeat reconciles empty current_task_id from active backlog"
             `Quick

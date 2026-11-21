@@ -1456,13 +1456,11 @@ let rec start_keepalive
            Atomic.set reg.grpc_close grpc_close
          | None -> ());
         let board_stop, resolve_board_stop = Eio.Promise.create () in
-        if not (Runtime_account_access.is_multi_account ())
-        then
-          fork_board_attention_worker
-            ~sw:lane_sw
-            ~ctx
-            ~keeper_name:live_meta.name
-            ~stop:board_stop;
+        fork_board_attention_worker
+          ~sw:lane_sw
+          ~ctx
+          ~keeper_name:live_meta.name
+          ~stop:board_stop;
         fork_egress_proxy
           ~sw:lane_sw
           ~ctx

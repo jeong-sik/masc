@@ -484,8 +484,14 @@ let project_accepted_transfer ?admitted_at (transfer : accepted_transfer) state 
 (* schema-compat: projected_dispositions rows keep the same constructors and
    JSON fields; only which prior receipts enter the list changed. *)
 let mark_transition_projected ~transition_id ~retain_previous state =
-  match state.transition_outbox with
-  | [ entry ] when String.equal entry.receipt.transition_id transition_id ->
+  let matching, remaining =
+    List.partition
+      (fun (entry : outbox_entry) ->
+         String.equal entry.receipt.transition_id transition_id)
+      state.transition_outbox
+  in
+  match matching with
+  | [ entry ] ->
     (* #38527: the retiring projection is the only moment the prior receipt
        can be judged. A standing asker -- today, a durable paused-work
        disposition receipt keyed by the same operation id, which re-asks by
@@ -505,8 +511,13 @@ let mark_transition_projected ~transition_id ~retain_previous state =
       { state with
         last_transition = Some entry.receipt
       ; projected_dispositions
-      ; transition_outbox = []
+      ; transition_outbox = remaining
       }
+  | _ :: _ :: _ ->
+    Error
+      (Printf.sprintf
+         "duplicate event queue transition id in outbox: %s"
+         transition_id)
   | [] ->
     (match
        List.find_opt
@@ -517,9 +528,6 @@ let mark_transition_projected ~transition_id ~retain_previous state =
      | Some _ -> Ok state
      | None ->
        Error (Printf.sprintf "event queue transition not found: %s" transition_id))
-  | [ _ ] ->
-    Error (Printf.sprintf "event queue transition not found: %s" transition_id)
-  | _ :: _ :: _ -> Error "event queue state has multiple unprojected transitions"
 ;;
 let reconcile_pending ~first_admitted_at pending state =
   let available_by_identity =
@@ -598,8 +606,6 @@ let with_pending_at ~admitted_at pending state =
 ;;
 
 let with_revision revision state = { state with revision }
-
-let transition_outbox_blocked state = state.transition_outbox <> []
 
 (* For this single-entry selection, rank [Immediate] first and use
    [last_non_immediate_served] to prefer a [Normal] or [Low] lane without
@@ -926,7 +932,8 @@ let apply_pending_transition ~applied_at ~transition ~source ~pending state =
     in
     Ok
       ( { state with
-          transition_outbox = [ { receipt; stimuli = [ source ] } ]
+          transition_outbox =
+            state.transition_outbox @ [ { receipt; stimuli = [ source ] } ]
         ; last_non_immediate_served
         }
       , Transition_applied receipt )
@@ -936,15 +943,16 @@ let prior_disposition_by_operation_id operation_id state =
   let is_same_operation disposition =
     String.equal (durable_operation_id disposition) operation_id
   in
-  match state.transition_outbox with
-  | [ entry ]
-    when String.equal
+  match
+    List.find_opt
+      (fun (entry : outbox_entry) ->
+         String.equal
            (disposition_operation_id entry.receipt.transition)
-           operation_id ->
-    Some (Current_receipt entry.receipt)
-  | [] | [ _ ] ->
-    List.find_opt is_same_operation (projected_dispositions state)
-  | _ :: _ :: _ -> None
+           operation_id)
+      state.transition_outbox
+  with
+  | Some entry -> Some (Current_receipt entry.receipt)
+  | None -> List.find_opt is_same_operation (projected_dispositions state)
 ;;
 
 let accepted_pending_cancellation_replay cancellation state =
@@ -992,11 +1000,6 @@ let cancel_pending_accepted
         ~source_incarnation:cancellation.source_incarnation
         state
       |> Result.map (fun _ -> ())
-    in
-    let* () =
-      if transition_outbox_blocked state
-      then Error "event queue cannot cancel pending work while an outbox transition exists"
-      else Ok ()
     in
     let matching, retained =
       Keeper_event_queue.to_list (pending state)
@@ -1065,11 +1068,6 @@ let transfer_pending_accepted
         ~source_incarnation:transfer.source_incarnation
         state
       |> Result.map (fun _ -> ())
-    in
-    let* () =
-      if transition_outbox_blocked state
-      then Error "event queue cannot transfer pending work while an outbox transition exists"
-      else Ok ()
     in
     let matching, retained =
       Keeper_event_queue.to_list (pending state)
@@ -1178,11 +1176,6 @@ let ack_pending_source_terminal
         ~source_incarnation:source_terminal.source_incarnation
         state
       |> Result.map (fun _ -> ())
-    in
-    let* () =
-      if transition_outbox_blocked state
-      then Error "event queue cannot ACK pending source while an outbox transition exists"
-      else Ok ()
     in
     let matching, retained =
       Keeper_event_queue.to_list (pending state)
@@ -1333,12 +1326,17 @@ let restore_pending_transition entry state apply =
     match result with
     | Transition_applied receipt | Transition_already_applied receipt -> receipt
   in
-  match replayed.transition_outbox with
-  | [ actual ]
+  match
+    List.find_opt
+      (fun (actual : outbox_entry) ->
+         transition_receipt_equal entry.receipt actual.receipt)
+      replayed.transition_outbox
+  with
+  | Some actual
     when transition_receipt_equal entry.receipt actual_receipt
          && actual.stimuli = entry.stimuli ->
     Ok replayed
-  | [] | [ _ ] | _ :: _ :: _ ->
+  | Some _ | None ->
     Error
       (Printf.sprintf
          "pending transition WAL replay conflict: %s"
@@ -1346,15 +1344,19 @@ let restore_pending_transition entry state apply =
 ;;
 
 let replay_transition_outbox_entry entry state =
-  match state.transition_outbox with
-  | [ current ] when current = entry -> Ok state
-  | [ current ] ->
+  match
+    List.find_opt
+      (fun (current : outbox_entry) ->
+         String.equal current.receipt.transition_id entry.receipt.transition_id)
+      state.transition_outbox
+  with
+  | Some current when current = entry -> Ok state
+  | Some current ->
     Error
       (Printf.sprintf
          "event queue WAL conflicts with checkpointed outbox: %s"
          current.receipt.transition_id)
-  | _ :: _ :: _ -> Error "event queue checkpoint contains multiple outbox entries"
-  | [] ->
+  | None ->
     (match
        List.find_opt
          (fun disposition -> durable_matches_receipt disposition entry.receipt)

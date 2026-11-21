@@ -5026,6 +5026,8 @@
   masc_tui_types  unix
 ))
 
+(include stanzas/test_tui_render_memory_librarian_pending.inc)
+
 (test
  (name test_tui_memory_lineage)
  (modules test_tui_memory_lineage)

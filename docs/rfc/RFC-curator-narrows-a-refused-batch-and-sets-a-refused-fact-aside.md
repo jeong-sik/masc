@@ -312,7 +312,7 @@ type 'rejection unanswered = Refused of refusal | Silent of 'rejection silence
 type 'rejection t = Slot_answered | Unanswered of 'rejection unanswered
 ```
 
-- **타입.** `Librarian_slot_outcome`(mli 47줄)에서 Librarian 의 것은 37행의 `Unusable of Librarian_answer.rejection` 한 곳이다. 나머지 생성자는 lane 을 가리지 않는다.
+- **타입.** `librarian_slot_outcome.mli` 에서 Librarian 의 것은 37행의 `Unusable of Librarian_answer.rejection` 한 곳이다. 나머지 생성자는 lane 을 가리지 않는다.
 - **분류.** `Librarian_slot_visit` 의 방문 타입과 `classify` 가 같이 간다(`librarian_slot_visit.ml` 1~202행). provider 거절(48~55행), stop reason(57~69행), 실행 오류(93~107행), client 별 오류(109~188행)를 읽는 함수가 모두 여기 있다. 방문 타입에서 Librarian 의 것은 `Answer_rejected`(8행)와 `Cli_answer_rejected`(12행)가 싣는 거절이다. 같은 인자로 바뀐다.
 - **걷기 결과를 방문으로 옮기는 함수.** `librarian_ask.ml` 207~258행의 `slot_visit` 이다. 큐레이터도 같은 걷기(`Exact_lane_slots.walk`)를 쓴다. lane 마다 이 함수를 따로 쓰면 표의 앞 절반이 둘이 된다. 같이 옮긴다.
 - **lane 이 건네는 값 둘.** `classify` 는 비었거나 잘린 본문을 `Unusable Empty_or_partial` 로(61·69·83·101·175행), JSON 이 아닌 본문을 `Unusable Not_json` 으로(82·106·185행) 낸다. 둘은 `Librarian_answer.rejection` 의 생성자다(`librarian_answer.mli` 57~61행). 중립 함수는 lane 의 거절 값을 만들 수 없다. 후보는 lane 이 그 두 값을 건네는 것이다. Librarian 의 타입과 표의 행이 그대로 남는다. 중립 타입이 두 갈래를 자기 이름으로 갖는 길도 있다. 그러면 Librarian 의 타입과 표의 행이 바뀐다. L1 에서 정한다.
@@ -355,11 +355,13 @@ type 'rejection t = Slot_answered | Unanswered of 'rejection unanswered
 | 묶음, 못 쓰는 답을 낸 slot 이 있다 | `Failed`. 60초 뒤 같은 묶음 | 위와 같다 |
 | 묶음, 보낸 뒤 기한을 넘긴 slot 이 있다 | `Failed`. 60초 뒤 같은 묶음 | 위와 같다 |
 | 묶음, 모든 slot 이 말 없음 | 모두 쉬면 `Transient_retry`, 아니면 `Failed`. 60초 뒤 같은 묶음 | 좁히지 않는다. 60초 깨우기에 같은 묶음. 아무것도 세우지 않는다 |
-| 한 건, 선언한 slot 이 모두 거절했다 | 입력 용량 거절이나 출력 한도가 하나라도 있으면 선다. 없으면 `Failed`, 60초 뒤 같은 한 건 | 선다. 나머지를 계속 분류한다 |
+| 한 건, 선언한 slot 이 모두 거절했다 | 출력 한도가 있거나, 입력 용량 거절이 있고 못 쓰는 답이 없으면 선다. 아니면 `Failed`, 60초 뒤 같은 한 건 | 선다. 나머지를 계속 분류한다 |
 | 한 건, 말하지 않은 slot 이 있다(못 쓰는 답, 기한 초과, 말 없음) | 출력 한도가 있거나, 입력 용량 거절이 있고 못 쓰는 답이 없으면 선다. 아니면 `Failed` 나 `Transient_retry`, 60초 뒤 모든 slot 에 다시 | 서지 않는다. 60초 깨우기에 말하지 않은 slot 에만 한 건으로 다시 묻는다 |
 | lane 표 없음·꺼짐 | debug 로그, `Idle` | `Not_asked` 를 타입으로 낸다. lane 변경이 깨운다 |
 | registry 교체 중 | debug 로그, `Transient_retry` | `Not_asked Replacement_in_progress`. 60초 깨우기 |
 | 저장소·원장·log 실패 | `Failed`, error 로그, 60초 | `Host_failed`. 60초 깨우기 그대로 |
+
+「못 쓰는 답이 없으면」은 slot 이 모두 거절한 행에서도 빈 조건이 아니다. 거절로 끝난 slot 이 그 전에 낸 답이 검증에서 떨어졌으면(`prior_rejections`) 지금 코드는 못 쓰는 답이 있었다고 적는다(`Exact_lane_slots.evidence_of_failure`). 출력 한도 쪽에는 이 조건이 없다.
 
 briefing 단계에서 다른 행이다.
 
@@ -471,6 +473,8 @@ Lambda 가 나눈 두 묶음을 어떤 순서로 다시 부르는지는 확인�
 | D4 | briefing 이 선 항목을 빼고 완성해도 되는지 | 안 한다. briefing 의 계약이 바뀐다 | 운영자 |
 | D5 | 재시작마다 선 fact 를 한 번씩 다시 묻는 값을 받아들일지 | 받아들인다. lane 을 켠 뒤 재 보고, 크면 §4.2 의 c 를 다시 본다 | 운영자 |
 | D6 | 한 건 요청의 못 쓰는 답도 그 slot 의 판정으로 쳐서 fact 를 세울지 | 세우지 않는다. 세우면 호출은 늘지 않는다. 대신 운 나쁜 표본 하나가 그 fact 를 재시작이나 lane 변경까지 묶는다 | 운영자 |
+
+D3~D6 은 2026-11-21 에 운영자에게 권고를 알렸다. 다른 지시가 없어 권고대로 구현한다.
 
 ## 11. 확인하지 못한 것
 

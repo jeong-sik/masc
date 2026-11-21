@@ -3,8 +3,6 @@ open Masc
 
 module Host = Keeper_official_client_host
 
-let text value = Agent_core.Types.Text value
-
 let () = Random.self_init ()
 
 (* {1 Where a start seed begins (창 RFC §7 (라), §10.4)} *)

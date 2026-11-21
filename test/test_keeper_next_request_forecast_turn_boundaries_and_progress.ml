@@ -24,8 +24,6 @@ let seed ~messages first_atom : Keeper_carried_front.seed =
   | Some front_digest -> { first_atom; front = Model_input_front.At_atom front_digest; source = Keeper_carried_front.Ledger }
   | None -> Alcotest.fail "the seed's own history has the atom"
 
-let carried (c : Keeper_next_request_forecast.carried) = c
-
 (* RFC librarian-lifecycle §4.10: the Librarian_stalled gap, from the files a
    server that just started holds -- the keeper's meta, checkpoint, turn
    boundaries, Librarian position and turn records -- through the driver's

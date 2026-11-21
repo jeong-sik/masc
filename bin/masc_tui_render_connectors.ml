@@ -665,6 +665,12 @@ let render_connectors (state : state) =
     | Connector_read.Reading _ -> true
     | Quiet | Waiting_after_write | Failed_to_start -> false
   in
+  let read_needs_sheet =
+    match read_view with
+    | Connector_read.Reading (Refresh, No_follow_up) -> Option.is_none state.connectors
+    | Connector_read.Reading ((After_write, _) | (Refresh, Read_after_write)) -> true
+    | Quiet | Waiting_after_write | Failed_to_start -> false
+  in
   let unbind_active = state.connector_unbind_all_inflight in
   let connectors_progress_spec =
     if unbind_active then
@@ -673,7 +679,7 @@ let render_connectors (state : state) =
         , ui_text state ~ko:"커넥터 전체 연결 해제 중" ~en:"Unbinding all connectors"
         , Some (ui_text state ~ko:"서버에서 모든 채널 연결을 해제하고 있습니다" ~en:"Removing all connector bindings on server")
         , true )
-    else if read_in_flight then
+    else if read_needs_sheet then
       match read_notice with
       | Some notice ->
           Some

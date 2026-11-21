@@ -758,12 +758,12 @@ let render_exact_lane_provider_editor (state : state) editor =
        | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
      (match state.runtime_catalog_reading with
       | Runtime_catalog_read -> ()
-      | Runtime_catalog_refreshing _ ->
-          let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-          box_line_styled buf cols ~style:(Theme.info ())
-            ("  " ^ mark ^ " " ^ Terminal_text.single_line
+      | Runtime_catalog_refreshing None -> ()
+      | Runtime_catalog_refreshing (Some detail) ->
+          box_line_styled buf cols ~style:(Theme.warn ())
+            ("  " ^ Terminal_text.single_line
                       (Masc_tui_types.runtime_catalog_reading_suffix ~ko
-                         state.runtime_catalog_reading))
+                         (Runtime_catalog_stale detail)))
       | Runtime_catalog_stale _ ->
           box_line_styled buf cols ~style:(Theme.warn ())
             ("  " ^ Terminal_text.single_line
@@ -922,7 +922,7 @@ let render_lanes_overview (state : state) =
           , Some (ui_text state ~ko:"저장 후 최신 레인 상태를 확인하고 있습니다" ~en:"Verifying latest lane state after save")
           , false )
     | Masc_tui_types.Lane_write_idle ->
-        if state.standalone_lanes_inflight then
+        if Option.is_none state.lane_inventory && state.standalone_lanes_inflight then
           Some
             ( "lanes-read"
             , ui_text state ~ko:"기능 목록 읽는 중" ~en:"Reading feature inventory"
@@ -2968,7 +2968,7 @@ let render_lane_inventory_detail (state : state) target =
           , Some (t "저장 후 최신 레인 상태를 확인하고 있습니다" "Verifying latest lane state after save")
           , false )
     | Masc_tui_types.Lane_write_idle ->
-        if state.standalone_lanes_inflight then
+        if Option.is_none state.lane_inventory && state.standalone_lanes_inflight then
           Some
             ( "lanes-read"
             , t "Lane 목록 읽는 중" "Reading lane inventory"

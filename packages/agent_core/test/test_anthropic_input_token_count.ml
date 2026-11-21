@@ -413,7 +413,7 @@ let rec as_kimi_wire_block block =
   | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
     ToolResult { result with content_blocks = Some (List.map as_kimi_wire_block blocks) }
   | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
-    | Image _ | Audio _) as other -> other
+    | ToolReference _ | Image _ | Audio _) as other -> other
 ;;
 
 let test_kimi_tool_result_content_unchanged () =

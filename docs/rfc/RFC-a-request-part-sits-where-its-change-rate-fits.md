@@ -161,28 +161,28 @@ binding 에 두는 까닭:
 운영자가 §3.1 을 고르려면 Keeper 마다 무엇을 잃는지 보여야 한다.
 
 투영(projection) 하나를 둔다. 새 저장 상태는 없다.
-- 입력: 앞 턴과 이번 턴의 provider 입력 스냅샷, 이번 턴 첫 요청의 비용 행, 앞 요청이 끝난 시각, 선언된 유지 시간.
+- 입력: 앞 요청의 턴과 이번 턴의 provider 입력 스냅샷, 두 요청의 비용 행, 선언된 유지 시간.
 - 출력: 읽은 토큰, 다시 쓴 토큰, 처음 달라진 곳, 쉰 시간.
 
-처음 달라진 곳은 닫힌 variant 다.
+처음 달라진 곳은 두 깃발과 메시지 분류 하나로 적는다.
 
-| 갈래 | 뜻 |
+| 칸 | 뜻 |
 |---|---|
-| `Appended` | 앞 요청 뒤에 덧붙이기만 했다 |
-| `System_changed` | system 바이트가 다르다 |
-| `Tools_changed` | 도구 배열이 다르다 |
-| `History_changed of int` | 그 번호의 메시지부터 다르다(창 이동 포함) |
+| `system_changed` | system 바이트가 다르다 |
+| `tools_changed` | 도구 배열이 다르다 |
+| `messages` | 턴 안 요청을 견주던 `Keeper_projection_change.message_change` 그대로다. `Appended`(덧붙이기만), `Tail_removed`, `Block_dropped`(창 이동), `Rewritten_in_place`(투영·강등), `Diverged_at` |
 
-- `Appended` 인데 쉰 시간이 선언된 유지 시간보다 길면 「유지 시간 넘김」으로 적는다.
+- 메시지 분류를 새로 만들지 않는다. 같은 질문(어디서부터 달라졌나)에 답이 둘이 되기 때문이다. snapshot part 의 sha256 은 턴 안 digest 와 같은 값이라 그대로 견준다.
+- 두 깃발이 꺼져 있고 `Appended` 인데 쉰 시간이 선언된 유지 시간보다 길면 「유지 시간 넘김」으로 적는다.
 - 비율이나 문턱으로 까닭을 고르지 않는다. 바이트 비교와 선언된 값만 쓴다.
-- TUI Inspector 는 턴마다 한 줄로 적는다. 예: 「앞부분 13.9만 다시 씀 · 9분 쉼(유지 5분)」.
+- TUI Inspector 는 턴마다 한 줄로 적는다. 예: 「First request on claude.sonnet · cache read 0 · cache created 139.0k · idle 6m55s, past its 5m lifetime · 12 messages kept, 2 added」.
 - Keeper 목록은 오늘 「유지 시간 넘김으로 다시 쓴 토큰」과 「1시간이었다면 든 값」을 보인다. 둘 다 기록에서 계산한다.
 
 기록에서 읽는 것(2026-11-20 코드 기준):
 
 | 사실 | 있는 곳 |
 |---|---|
-| 요청마다 읽은·쓴 토큰, 끝난 시각, 걸린 시간, runtime | 비용 원장 요청 행: `agent`·`keeper_turn_id`·`agent_core_turn_ordinal`·`ts_unix`·`request_latency_ms`·`cache_read_tokens`·`cache_creation_tokens`·`runtime_id` |
+| 요청마다 읽은·쓴 토큰, 끝난 시각, 걸린 시간, runtime | 비용 원장 요청 행: `agent`·`keeper_turn_id`·`agent_core_turn_ordinal`·`timestamp`(초 단위)·`request_latency_ms`·`cache_read_tokens`·`cache_creation_tokens`·`runtime_id` |
 | 턴 마지막 요청의 system·도구·메시지 sha | `Keeper_provider_input_snapshot`(Keeper 마다 턴 한 행) |
 | 그 요청이 고른 유지 시간 | 없다. 스냅샷의 wire 관측도 본문 크기와 sha 만 적는다 |
 | provider 기본 유지 시간의 길이 | 없다 |
@@ -196,24 +196,44 @@ binding 에 두는 까닭:
 - provider 기본 유지 시간.
   - catalog provider 행이 초로 선언한다. claude 는 300 이다(공식 문서).
   - 선언이 없는 provider 는 「유지 시간 넘김」을 판정하지 않고 쉰 시간만 보인다. 지금 GLM 이 그렇다(§9).
+  - 지금 설정에서 빠진 runtime 도 판정하지 않는다. 어느 provider 가 답했는지 알 수 없어서다. 이 경우는 「선언 없음」과 따로 적는다. 운영자가 고칠 곳이 다르다(catalog 와 runtime 설정).
   - `One_hour` 는 등급 자체가 3600초라 따로 선언하지 않는다.
 - provider 응답의 등급별 쓰기 토큰(`cache_creation.ephemeral_1h_input_tokens`)은 읽지 않는다.
   - 청구의 진실은 그 값이다. 다만 두 응답 파서(stream·non-stream)를 고쳐야 하고, Anthropic 호환 endpoint 가 그 값을 주는지는 모른다.
-  - 1시간은 catalog 계약이 있는 공식 API 만 받는다(L2). 그래서 요청이 고른 값과 쓴 등급이 갈리는 길이 없다.
+  - 1시간은 catalog 계약을 선언한 provider 만 받는다(L2). claude(공식 API)가 선언하고, #53970 뒤로 openrouter 도 선언한다.
+  - claude 는 요청이 고른 등급으로 쓴다. 고른 값과 쓴 등급이 갈리는 길이 없다.
+  - openrouter 는 요청을 뒤의 여러 provider 로 보낼 수 있다. masc 는 그 응답에서 쓰기 토큰의 합(`cache_write_tokens`)만 읽는다. 1시간 요청이 1시간 등급으로 쓰였는지는 모른다(§9). 투영은 요청이 고른 값으로 판정한다.
 
 셈:
-- 턴 N 의 첫 요청을 본다.
-- 쉰 시간은 턴 N-1 마지막 요청의 시작부터 턴 N 첫 요청의 시작까지다. 시작은 `ts_unix - request_latency_ms` 다.
-- 처음 달라진 곳은 턴 N-1 과 턴 N 의 스냅샷을 견준다.
+- 턴 N 의 첫 요청을 본다. 그 턴의 요청 행 가운데 가장 오래된 행이다.
+- 앞 요청은 첫 요청과 같은 runtime 의 가장 최근 요청이다. Keeper 의 바로 앞 요청이 아니다.
+  - 캐시는 runtime(계정 × 모델)마다 따로다. 레인이 한 턴을 대체 runtime 으로 답하고 다음 턴에 원래 runtime 으로 돌아오면, 그 요청은 두 턴 전 캐시를 읽는다.
+  - 이틀치(11-19~20) 턴 첫 요청 3,196개 가운데 209개는 바로 앞 요청의 runtime 이 달랐다. 그중 24개는 같은 runtime 앞 요청이 5분 안에 있었고 1만 토큰 넘게 읽었다. 「바로 앞 요청」으로 고르면 이 24개를 runtime 탓으로 잘못 적는다.
+  - 사이에 다른 runtime 이 쓰였으면 그중 가장 최근 것을 같이 적는다(`other_runtime_since`).
+- 쉰 시간은 앞 요청의 시작부터 첫 요청의 시작까지다. 시작은 행의 시각에서 `request_latency_ms` 를 뺀 값이다.
+  - 비용 행의 `timestamp` 는 초 단위다(소수점 없는 RFC 3339). 그래서 시작마다 1초 폭이 있다.
+  - 「넘김」은 쉰 시간 − 1초가 유지 시간 이상일 때만, 「안」은 쉰 시간 + 1초가 유지 시간 이하일 때만 적는다. 그 사이는 「경계」(`Undecided`)다.
+- 원장은 newest-first 로 읽고 두 사실로 일찍 멈춘다.
+  - Keeper 는 한 번에 한 턴만 돈다. 이틀치 4,035개 턴에서 두 턴의 요청 행이 섞인 적이 0번이다.
+  - 확정 행도 제 턴의 요청 행 바로 뒤에만 온다. 나흘치(11-17~20) Keeper 행 161,815개에서 확정 행 80,969개가 다른 턴의 요청 행 뒤나 사이에 온 적이 0번이다. 그래서 다른 턴의 행을 처음 만난 곳이 턴의 경계다.
+  - 턴 번호는 늘기만 한다(같은 이틀, 줄어든 적 0번). 그래서 더 작은 턴 번호의 행을 만나면 그 턴의 행은 없다.
+  - 앞 요청은 첫 요청 시작에서 `max(1시간, provider 기본 유지 시간)` 전까지만 찾는다. 그보다 오래된 요청의 캐시는 어떤 선언으로도 살아 있지 않다.
+- 처음 달라진 곳은 앞 요청의 턴과 턴 N 의 스냅샷을 견준다.
   - 스냅샷은 턴의 마지막 요청만 담는다. 두 스냅샷이 `Appended` 면 턴 N 첫 요청도 덧붙이기만 했다.
   - 턴 안에서 덧붙이기가 아닌 변화는 wire 캡처 창(§1.1)에서 2,776쌍 중 22쌍이었다.
   - 그래서 `Appended` 로 센 유지 시간 넘김은 하한이다.
-- 갈래에 `Runtime_changed` 를 더한다. 두 요청의 `runtime_id` 가 다르면 모델이나 계정이 달라 앞 캐시를 못 읽는다.
-- 유지 시간 넘김: `Appended` 이고, 쉰 시간이 턴 N-1 마지막 요청이 고른 유지 시간보다 길다.
+  - 스냅샷이 그 요청을 담는다고 말할 수 있을 때만 견준다. 앞 요청의 턴에 확정 행(`resolved_delta`)이 있어야 한다. 실패한 턴의 스냅샷은 응답 없이 끝난 나중 요청일 수 있다. 또 두 스냅샷의 runtime 이 두 요청의 runtime 과 같아야 한다. 아니면 까닭을 적고 견주지 않는다.
+- 유지 시간 넘김: 두 깃발이 꺼진 `Appended` 이고, 쉰 시간이 앞 요청이 고른 유지 시간을 넘었다.
+  - 앞 요청 행에 고른 유지 시간이 없으면(그 칸을 적기 전 행) 넘김을 판정하지 않는다. 지금 선언을 옛 행에 덮어씌우지 않는다.
 - 「1시간이었다면 든 값」: 그 Keeper 의 오늘 요청을 다시 매긴다.
   - 모든 쓰기는 `cache_write_1h_multiplier`(#53779)로 매긴다.
   - 5분을 고른 요청 가운데, 유지 시간 넘김 턴이면서 쉰 시간이 3600초 이하인 첫 요청은 다시 쓴 토큰을 읽기 값으로 매긴다.
-- 투영을 어디서 부를지(서버 대시보드 또는 TUI)와 TUI 자리는 TUI 일관성 작업과 맞춘다.
+- 서버가 계산하고 TUI 는 그리기만 한다(TUI 일관성 작업과 맞춤, 2026-11-20).
+  - 계산은 `Keeper_cache_outcome` 이 한다. 원장 걷기는 순수한 상태 기계고, 읽기는 그 위에 얹는다.
+  - TUI Inspector 는 응답 사용량 줄 바로 아래에 한 줄을 둔다. 같은 탭의 다른 줄처럼 운영자 언어(`ui_language`)로 적는다. 위 예시는 영어 화면이다.
+  - 응답은 서버와 같은 `Keeper_cache_outcome_reading.of_json` 으로 읽는다. Inspector 는 `masc` 를 링크하지 않아서, 응답 타입을 `masc_types` 에 둔다(운영자 결정, 2026-11-21).
+  - 유지 시간과 찾는 범위는 설정이라 `Masc_tui_value.Interval` 로 적는다(5m, 1h). 쉰 시간은 끝난 길이라 `elapsed_text` 로 적는다(6m55s).
+  - 메시지 변화는 두 요청이 같이 가진 메시지 수로 시작한다. 앞에서부터 달라지면 「0 messages kept」다.
 
 ### 3.3 Anthropic 레인은 도구를 불러올 때 배열을 바꾸지 않는다
 
@@ -446,3 +466,4 @@ L5 에서 정하는 것:
 - `tool_result` 하나에 글 블록과 `tool_reference` 블록을 섞을 수 있는지. L4 에서 실제 호출로 본다.
 - 지연 도구 정의를 더하거나 빼도 캐시가 남는지. 문서는 지연 도구를 앞부분에서 뺀다고만 적는다.
 - `tool_reference` 가 이력 창 밖으로 나간 뒤, 남은 과거 `tool_use` 를 API 가 어떻게 다루는지.
+- openrouter 로 보낸 1시간 요청이 뒤 provider 에서 1시간 등급으로 쓰였는지. 다르게 쓰였다면 그 턴의 「유지 시간 넘김」 판정이 틀린다.

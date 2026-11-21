@@ -2383,6 +2383,45 @@ let test_projection_profile_snapshot_rechecks_held_readability () =
   check_same_file_metadata path ~mtime:1_000_000.0 ~size;
   ignore (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "readable")
 
+(* The declaration of a person's Keeper is reviewed as bytes here, through the
+   loader the engine itself uses, so a value the loader refuses cannot reach a
+   person's [keepers/<engine_name>.toml] from a hand-written fixture that
+   happened to agree with the renderer. *)
+let test_person_keeper_declaration_loads () =
+  let path = "kp-person-declaration.toml" in
+  let content = Masc.Person_keeper_declaration.content () in
+  match Masc.Keeper_types_profile_toml.inspect_keeper_toml_content ~path content with
+  | Error error ->
+    fail
+      ("the declaration of a person's Keeper does not load: "
+       ^ Masc.Keeper_types_profile_toml.keeper_toml_load_error_to_string error)
+  | Ok (name, (defaults : KTP.keeper_profile_defaults)) ->
+    check string "the loader takes the name from the file name" "kp-person-declaration" name;
+    check
+      (option string)
+      "the person's Keeper runs when the person writes to it"
+      (Some "on_demand")
+      (Option.map Masc.Keeper_activation_mode.to_string defaults.activation_mode);
+    check (option bool) "the person's Keeper has no MASC tool" (Some false) defaults.masc_tools_enabled;
+    check
+      (option string)
+      "the sandbox profile is the shipped default"
+      (Some "docker")
+      (Option.map Masc.Keeper_types_profile.sandbox_profile_to_string defaults.sandbox_profile);
+    check
+      (option string)
+      "the network mode is the shipped default"
+      (Some "inherit")
+      (Option.map Masc.Keeper_types_profile.network_mode_to_string defaults.network_mode);
+    check
+      bool
+      "the instructions are not blank"
+      true
+      (match defaults.instructions with
+       | Some text -> String.trim text <> ""
+       | None -> false)
+;;
+
 let () =
   run "Keeper TOML Loader"
     [
@@ -2535,6 +2574,8 @@ let () =
             test_unknown_deny_tool_refuses_load;
           test_case "config directory probe is typed" `Quick
             test_keeper_config_directory_probe_is_typed;
+          test_case "a person's Keeper declaration loads" `Quick
+            test_person_keeper_declaration_loads;
         ] );
       ( "discovery",
         [

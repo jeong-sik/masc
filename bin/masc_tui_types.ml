@@ -25863,51 +25863,62 @@ let runtime_picker_rows (state : state) pick =
   in
   (already, providers, lanes @ runtime_choices)
 
-(* The one row the picker draws when it has no rows: the catalogue is unread,
-   or it is read and the filter keeps none of it. The two need different
-   actions, so they read differently. *)
+(* What a screen says about the runtime catalogue it holds. A read in flight is
+   the reading slot's to say, so [Runtime_catalog_refreshing] stands as the
+   settled state that holds the same observation: only the failure it retains
+   tells the two apart. Every sentence about the catalogue reads this value, so
+   no screen reads the in-flight state its own way. *)
+type runtime_catalog_standing =
+  | Catalog_unread
+  | Catalog_first_read
+  | Catalog_first_read_failed of string
+  | Catalog_current
+  | Catalog_retained of string
+
+let runtime_catalog_standing = function
+  | Runtime_catalog_unread -> Catalog_unread
+  | Runtime_catalog_loading -> Catalog_first_read
+  | Runtime_catalog_failed detail -> Catalog_first_read_failed detail
+  | Runtime_catalog_read | Runtime_catalog_refreshing None -> Catalog_current
+  | Runtime_catalog_stale detail | Runtime_catalog_refreshing (Some detail) ->
+      Catalog_retained detail
+
+(* The sentence a screen adds after what it says about the catalogue. *)
 let runtime_catalog_reading_suffix ~ko reading =
   let say korean english = if ko then korean else english in
-  match reading with
-  | Runtime_catalog_read -> ""
-  | Runtime_catalog_unread -> say " · 목록 미조회" " · catalogue not read"
-  | Runtime_catalog_loading -> say " · 목록 조회 중" " · reading catalogue"
-  | Runtime_catalog_refreshing None ->
-      say " · 다시 조회 중 · 이전 관측 목록" " · refreshing; last observed catalogue"
-  | Runtime_catalog_refreshing (Some detail) ->
-      say " · 다시 시도 중 · 지난 조회 실패: " " · retrying; last refresh failed: "
-      ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
-  | Runtime_catalog_stale detail ->
+  match runtime_catalog_standing reading with
+  | Catalog_current -> ""
+  | Catalog_unread -> say " · 목록 미조회" " · catalogue not read"
+  | Catalog_first_read -> say " · 목록 조회 중" " · reading catalogue"
+  | Catalog_retained detail ->
       say " · 이전 관측 목록: " " · last observed catalogue: "
       ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
-  | Runtime_catalog_failed detail ->
+  | Catalog_first_read_failed detail ->
       say " · 목록 조회 실패: " " · catalogue read failed: "
       ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
 
+(* The one row the picker draws when it has no rows: the catalogue is unread,
+   or it is read and the filter keeps none of it. The two need different
+   actions, so they read differently. *)
 let runtime_picker_empty_note ~ko picker =
   let noun = match picker.rlp_pick with
     | Pick_route_default -> if ko then "경로" else "route"
     | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_exact_lane_replacement _
     | Pick_new_lane _ | Pick_media_failover -> if ko then "런타임" else "runtime" in
-  match picker.rlp_catalog_reading with
-  | Runtime_catalog_unread ->
+  match runtime_catalog_standing picker.rlp_catalog_reading with
+  | Catalog_unread ->
       Printf.sprintf (if ko then "  (%s 목록 미조회)" else "  (%s catalogue unread)") noun
-  | Runtime_catalog_loading ->
+  | Catalog_first_read ->
       Printf.sprintf (if ko then "  (%s 목록 조회 중)" else "  (%s catalogue loading)") noun
-  | Runtime_catalog_refreshing _ ->
-      Printf.sprintf
-        (if ko then "  (%s 목록 다시 조회 중 · 이전 관측 유지)"
-         else "  (%s catalogue refreshing; last observation retained)")
-        noun
-  | Runtime_catalog_stale detail ->
+  | Catalog_retained detail ->
       "  (" ^ noun
       ^ (if ko then " 목록 다시 조회 필요: " else " catalogue needs refresh: ")
       ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
-  | Runtime_catalog_failed detail ->
+  | Catalog_first_read_failed detail ->
       "  (" ^ noun
       ^ (if ko then " 목록 조회 실패: " else " catalogue read failed: ")
       ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
-  | Runtime_catalog_read ->
+  | Catalog_current ->
       if picker.rlp_total = 0 then
         match picker.rlp_pick with
         | Pick_exact_lane_replacement _ ->
@@ -25944,12 +25955,11 @@ let runtime_picker_choice_height = function
 (* The picker and the existing routes reader retain the same catalogue
    observation, including an error after the last good catalogue. *)
 let runtime_picker_catalogue_notices (state : state) =
-  match state.runtime_catalog_reading with
-  | Runtime_catalog_read -> []
-  | (Runtime_catalog_unread | Runtime_catalog_loading
-    | Runtime_catalog_refreshing _ | Runtime_catalog_stale _
-    | Runtime_catalog_failed _) as reading ->
-      [ runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko) reading ]
+  match runtime_catalog_standing state.runtime_catalog_reading with
+  | Catalog_current -> []
+  | Catalog_unread | Catalog_first_read | Catalog_first_read_failed _ | Catalog_retained _ ->
+      [ runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+          state.runtime_catalog_reading ]
 
 (* Count source notices before wrapping: a long first notice must not make
    the following refusal or read error disappear from the title's count. *)
@@ -27212,14 +27222,11 @@ let keeper_runtime_picker_summary ~ko view =
 let keeper_runtime_picker_empty_note ~ko ~reading view =
   let say korean english = if ko then korean else english in
   if view.Masc_tui_pick_list.total = 0 then
-    Some (match reading with
-      | Runtime_catalog_read -> say "  (런타임 목록이 비어 있음)" "  (runtime catalogue is empty)"
-      | Runtime_catalog_unread -> say "  (런타임 목록 미조회)" "  (runtime catalogue not read yet)"
-      | Runtime_catalog_loading -> say "  (런타임 목록 조회 중)" "  (reading runtime catalogue)"
-      | Runtime_catalog_refreshing _ ->
-          say "  (비어 있던 이전 런타임 목록을 다시 조회 중)"
-            "  (refreshing the last empty runtime catalogue)"
-      | Runtime_catalog_stale detail | Runtime_catalog_failed detail ->
+    Some (match runtime_catalog_standing reading with
+      | Catalog_current -> say "  (런타임 목록이 비어 있음)" "  (runtime catalogue is empty)"
+      | Catalog_unread -> say "  (런타임 목록 미조회)" "  (runtime catalogue not read yet)"
+      | Catalog_first_read -> say "  (런타임 목록 조회 중)" "  (reading runtime catalogue)"
+      | Catalog_retained detail | Catalog_first_read_failed detail ->
           say "  (런타임 목록 다시 조회 필요: " "  (runtime catalogue needs refresh: "
           ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")")
   else if view.Masc_tui_pick_list.shown = 0 then

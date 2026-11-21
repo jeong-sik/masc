@@ -749,24 +749,23 @@ let render_exact_lane_provider_editor (state : state) editor =
      let catalog = match state.runtime_catalog_reading with
        | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ -> state.runtime_catalog
        | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
-     (match state.runtime_catalog_reading with
-      | Runtime_catalog_read -> ()
-      | Runtime_catalog_refreshing None -> ()
-      | Runtime_catalog_refreshing (Some _) | Runtime_catalog_stale _ ->
+     (match runtime_catalog_standing state.runtime_catalog_reading with
+      | Catalog_current -> ()
+      | Catalog_retained _ ->
           box_line_styled buf cols ~style:(Theme.warn ())
             ("  " ^ Terminal_text.single_line
                       (Masc_tui_types.runtime_catalog_reading_suffix ~ko
                          state.runtime_catalog_reading))
-      | Runtime_catalog_unread ->
+      | Catalog_unread ->
           box_line_styled buf cols ~style:(Theme.recede ())
             (ui_text state ~ko:"  런타임 목록 미조회 · 슬롯 ID 로 표시"
                ~en:"  runtime catalogue unread · showing slot IDs")
-      | Runtime_catalog_loading ->
+      | Catalog_first_read ->
           let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
           box_line_styled buf cols ~style:(Theme.info ())
             ("  " ^ mark ^ " " ^ ui_text state ~ko:"런타임 목록 조회 중 · 슬롯 ID 로 표시"
                ~en:"runtime catalogue loading · showing slot IDs")
-      | Runtime_catalog_failed detail ->
+      | Catalog_first_read_failed detail ->
           box_line_styled buf cols ~style:(Theme.warn ())
             (ui_text state ~ko:"  런타임 목록 조회 실패: " ~en:"  runtime catalogue read failed: "
              ^ Terminal_text.single_line detail

@@ -1232,6 +1232,43 @@ let keeper_drawn ?(terminal_rows = keeper_picker_rows) state =
       Option.map runtime_pick_item_id (List.nth_opt view.Masc_tui_pick_list.rows row)),
     view )
 
+(* A read in flight is the reading slot's to say. The catalogue it re-reads
+   stands as the settled state that holds the same observation, so the
+   sentences a screen adds are the same with or without the read. *)
+let test_a_read_in_flight_adds_no_sentence_of_its_own () =
+  let in_flight_twins =
+    [ Runtime_catalog_read, Runtime_catalog_refreshing None
+    ; Runtime_catalog_stale "offline", Runtime_catalog_refreshing (Some "offline") ] in
+  let lane_picker_empty_note reading =
+    let filtered = catalogue_state () in
+    press filtered [ "/"; "x"; "y" ];
+    filtered.runtime_catalog_reading <- reading;
+    let _, _, picker = drawn filtered in
+    runtime_picker_empty_note ~ko:false picker in
+  let lane_picker_notices reading =
+    let state = catalogue_state () in
+    state.runtime_catalog_reading <- reading;
+    runtime_picker_catalogue_notices state in
+  let keeper_picker_empty_note reading =
+    let state = keeper_picker_state () in
+    state.runtime_lanes <- [];
+    state.runtime_catalog <- [];
+    let _, _, view = keeper_drawn state in
+    keeper_runtime_picker_empty_note ~ko:false ~reading view in
+  List.iter (fun (settled, in_flight) ->
+    List.iter (fun ko ->
+      Alcotest.(check string) "the sentence a screen appends"
+        (runtime_catalog_reading_suffix ~ko settled)
+        (runtime_catalog_reading_suffix ~ko in_flight))
+      [ true; false ];
+    Alcotest.(check string) "the lane picker's row without choices"
+      (lane_picker_empty_note settled) (lane_picker_empty_note in_flight);
+    Alcotest.(check (list string)) "the notices above the lane picker"
+      (lane_picker_notices settled) (lane_picker_notices in_flight);
+    Alcotest.(check (option string)) "the Keeper picker's row without choices"
+      (keeper_picker_empty_note settled) (keeper_picker_empty_note in_flight))
+    in_flight_twins
+
 let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
   let state = keeper_picker_state () in
   let rows, selected, view = keeper_drawn state in
@@ -1485,4 +1522,6 @@ let () = Alcotest.run "runtime list geometry"
           test_default_lane_route_counts_unassigned_keepers
         ;Alcotest.test_case "a last runtime id joins the catalog by equality" `Quick
           test_a_last_runtime_id_joins_the_catalog_by_equality
+        ;Alcotest.test_case "a read in flight adds no sentence of its own" `Quick
+          test_a_read_in_flight_adds_no_sentence_of_its_own
         ;]]

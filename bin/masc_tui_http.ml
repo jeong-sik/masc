@@ -4221,6 +4221,40 @@ let post_board_quarantine_requeue ~(host : string) ~(port : int)
       (Yojson.Safe.to_string
          (Masc.Keeper_board_attention_quarantine_command.request_to_json request))
 
+(* What came back from an act on a Keeper's Memory writer. The route's own
+   answers are read whole, a refusal's code with them. Another 4xx is about
+   the request before the route -- the credential, a route this server lacks
+   -- and nothing landed. No answer, a 5xx the route does not write, or an
+   answer that does not read leaves the effect unknown. *)
+type memory_act_outcome =
+  | Memory_act_answered of Masc.Tui_decode_memory_act.answer
+  | Memory_act_refused of string
+  | Memory_act_unanswered of string
+
+(** POST /api/v1/keepers/:name/memory/act — one operator act on the Keeper's
+    Memory writer (RFC librarian-call-only-proposes §12.4). *)
+let post_keeper_memory_act ~(host : string) ~(port : int) ~(keeper : string)
+    (act : Masc.Tui_decode_memory_act.act) : memory_act_outcome =
+  let path =
+    "/api/v1/keepers/" ^ percent_encode_path_segment keeper ^ "/memory/act"
+  in
+  let body = Yojson.Safe.to_string (Masc.Tui_decode_memory_act.request act) in
+  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+  | Error detail -> Memory_act_unanswered detail
+  | Ok (status_code, response) ->
+    (match
+       Masc.Tui_decode_memory_act.read_answer ~keeper ~act ~status_code
+         ~body:response
+     with
+     | Some (Ok answer) -> Memory_act_answered answer
+     | Some (Error detail) ->
+       Memory_act_unanswered
+         (Printf.sprintf "HTTP %d: %s" status_code
+            (Masc.Tui_terminal_text.sanitize_terminal_text detail))
+     | None when status_code >= 400 && status_code < 500 ->
+       Memory_act_refused (refusal ~status_code ~body:response)
+     | None -> Memory_act_unanswered (refusal ~status_code ~body:response))
+
 (** GET /api/v1/keepers/oauth/attached-tools — every declared service and
     what it currently offers this Keeper. *)
 let fetch_attached_tools ~(host : string) ~(port : int) ~(keeper_name : string) :

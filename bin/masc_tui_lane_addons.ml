@@ -1015,7 +1015,9 @@ let desired_text (declaration : declaration) =
 let applied_text (declaration : declaration) =
   match declaration.origin, declaration.applied with
   | (Parsed_declaration | Issue_only), Some revision -> revision
-  | Parsed_declaration, None -> "none"
+  (* A parsed declaration that names no applied revision has none applied
+     (RFC tui-one-screen-grammar 6.4). *)
+  | Parsed_declaration, None -> Masc_tui_theme.Glyph.no_value
   | Issue_only, None -> unreported
 
 let configuration_lines view snapshot = match snapshot.configuration with

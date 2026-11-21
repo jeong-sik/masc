@@ -580,7 +580,9 @@ let search_marker (state : state) =
       | None -> ""
       | Some _ when not has_query -> ""
       | Some reached ->
-          if reached = 0 then " (none)" else Printf.sprintf " (%d)" reached
+          (* A count, on the count ladder (RFC tui-one-screen-grammar 6.3):
+             no hit reads 0 in either language. *)
+          Printf.sprintf " (%s)" (Masc_tui_value.Count.grouped reached)
     in
     let tail =
       if not settled then "\xe2\x96\x8c"

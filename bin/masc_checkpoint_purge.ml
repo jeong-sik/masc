@@ -403,15 +403,7 @@ let () =
        in, with every message it keeps closed. A purge that drops nothing
        rewrote only what the log has named and writes no line. *)
     let line (computed : computed) : Masc.Keeper_turn_log_reset.line =
-      if computed.report.Purge.messages_dropped_at_structural_break > 0
-      then
-        Announce
-          { cause = Recovered
-          ; after =
-              (fun mark ->
-                 { mark with closed_messages = List.length computed.purged.messages })
-          }
-      else No_line
+      Purge.turn_log_line computed.report
     in
     (* A purge that changes nothing installs nothing. Its save would close
        the head's open messages; on a head replaced since the turn log's last

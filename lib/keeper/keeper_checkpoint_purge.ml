@@ -177,6 +177,13 @@ let strip_reasoning_keeping_the_message message =
   | _ :: _ -> stripped, count
 ;;
 
+(* A purge that dropped messages at a structural break shrinks the head. Two
+   things hang on that one answer and have to agree: [purge_messages] lifts
+   the turn-log rule, and [turn_log_line] asks for the [Reset] line that names
+   all the head holds before the change. *)
+let shrinks_the_head ~dropped_at_break = dropped_at_break > 0
+;;
+
 let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named messages =
   if config.keep_recent_messages < 0
   then
@@ -292,13 +299,14 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named messages
              done)
           fitting_continuity;
         (* A message the turn log has not named is read from this head by the
-           next unit, so it goes out as it is. The callers write the [Reset]
-           line that names all the head holds, before the change
-           ([Keeper_turn_log_reset.run]), when the report counts messages
-           dropped at a break. The rule is lifted on that same count, so a
-           purge with no such line never rewrites what no line has named. *)
+           next unit, so it goes out as it is. A purge that shrinks the head
+           gets the [Reset] line that names all the head holds, before the
+           change ([turn_log_line], [Keeper_turn_log_reset.run]). The rule is
+           lifted on that same answer, so a purge with no such line never
+           rewrites what no line has named. *)
         (match named with
-         | Keeper_turn_log_writer.Named_below below when dropped_at_break = 0 ->
+         | Keeper_turn_log_writer.Named_below below
+           when not (shrinks_the_head ~dropped_at_break) ->
            for index = below to List.length retained - 1 do
              kept_message.(index) <- true
            done
@@ -434,4 +442,20 @@ let purge
         (Keeper_repetition_judged.reset_history ckpt.context)
       |> Result.map (fun context ->
            { ckpt with Agent_core.Checkpoint.messages; context }, report)
+;;
+
+(* The other half of [shrinks_the_head]: the line [Keeper_turn_log_reset.run]
+   writes before the purged head goes in. Every message the purge kept is
+   closed in the head it installs, so the mark after the change ends at
+   [messages_after]. *)
+let turn_log_line (report : report) : Keeper_turn_log_reset.line =
+  if shrinks_the_head ~dropped_at_break:report.messages_dropped_at_structural_break
+  then
+    Keeper_turn_log_reset.Announce
+      { cause = Keeper_turn_log.Recovered
+      ; after =
+          (fun (mark : Keeper_turn_log.mark) ->
+             { mark with Keeper_turn_log.closed_messages = report.messages_after })
+      }
+  else Keeper_turn_log_reset.No_line
 ;;

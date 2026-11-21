@@ -79,9 +79,9 @@
     break, so its end moves by design; atoms are then counted on the history
     it returns. Its [Reset] line names everything the head holds before the
     tail goes ({!Keeper_turn_log_reset}), so on a recovery the turn log holds
-    nothing back either. The callers write that line when the report's
+    nothing back either. {!turn_log_line} asks for that line when the report's
     [messages_dropped_at_structural_break] is above 0, and the rule above is
-    lifted on that same count. A working state that covers the dropped tail no longer
+    lifted on that same answer. A working state that covers the dropped tail no longer
     fits, and the recovery is refused; with the server stopped, removing that
     working state (the keeper's [librarian-continuity.json]) lets it through,
     and the Librarian writes it again from atom 0. The Librarian position is
@@ -194,3 +194,11 @@ val purge
   -> (Agent_core.Checkpoint.t * report, purge_error) result
 (** Apply {!purge_messages} to [ckpt.messages], resetting the repetition history generation in a copied context when
     recovery drops messages. Other fields and the input checkpoint are unchanged. *)
+
+val turn_log_line : report -> Keeper_turn_log_reset.line
+(** The turn log line the install of a purge needs, from the report {!purge}
+    returned with it, for {!Keeper_turn_log_reset.run}: an [Announce] of a
+    [Recovered] head that ends at [messages_after] closed messages when the
+    purge dropped messages at a structural break, and [No_line] otherwise.
+    {!purge_messages} lifts the turn-log rule on the same answer, so a purge
+    whose line is [No_line] rewrote nothing above the mark. *)

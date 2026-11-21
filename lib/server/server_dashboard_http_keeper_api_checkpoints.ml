@@ -571,16 +571,8 @@ let purge_current_unlocked config ~keeper_name ~apply =
            installs nothing. *)
         let line : purge_plan -> Keeper_turn_log_reset.line = function
           | Purge_unchanged (_ : purge_computed) -> No_line
-          | Purge_install { raw_report; purged; _ } ->
-            if raw_report.messages_dropped_at_structural_break > 0
-            then
-              Announce
-                { cause = Recovered
-                ; after =
-                    (fun mark ->
-                       { mark with closed_messages = List.length purged.Agent_core.Checkpoint.messages })
-                }
-            else No_line
+          | Purge_install { raw_report; _ } ->
+            Keeper_checkpoint_purge.turn_log_line raw_report
         in
         let change = function
           | Purge_unchanged computed ->

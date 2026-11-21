@@ -410,7 +410,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       let cut = match cycle.mcc_saved with
         | Some value -> frontier value
         | None ->
-            if cycle.mcc_saved_unreadable then text "읽기 실패" "unreadable"
+            if cycle.mcc_saved_unreadable then Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
             else Masc_tui_theme.Glyph.no_value in
       (* Where the Librarian has read to belongs beside the cut, not on a line
          of its own: a request starts at the cut and carries the atoms up to

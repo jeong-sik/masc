@@ -85,16 +85,18 @@ let with_lane run =
     (fun () -> run directory)
 ;;
 
-let load directory image =
+let load ?(files = []) directory image =
   Dos_lane.load ~who ~ledger_dir:directory ~saves_dir:(Filename.concat directory "saves")
     ~checkpoint_dir:(Filename.concat directory "checkpoints")
-    ~previous_autosave:Dos_lane.Discard_previous_autosave ~program_name:"game.exe" ~program_bytes:image ~files:[]
+    ~previous_autosave:Dos_lane.Discard_previous_autosave ~program_name:"game.exe" ~program_bytes:image ~files
     ~announce:ignore
 ;;
 
+(* Prints HI, then polls the keyboard until a key comes. *)
+let hello = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
+
 let test_a_refused_image_leaves_the_running_machine () =
   with_lane (fun directory ->
-    let hello = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$" in
     (match load directory hello with
      | Ok _ -> ()
      | Error error -> fail (Dos_lane.error_to_string error));
@@ -133,6 +135,39 @@ let test_the_boundary_images_load () =
         | exception exn -> failf "%s raised %s" name (Printexc.to_string exn))
       [ "the largest COM", String.make Dos_lane.max_com_bytes '\xeb'
       ; "the largest EXE payload", mz (32 + Dos_lane.max_exe_payload_bytes)
+      ])
+;;
+
+(* The kept table is keyed by the name the machine reports, which is the name
+   after DOS has cut it to 8.3. Keyed by the name the caller passed, it would
+   differ from what [keep_writes] reads back, and a file the guest never
+   touched would be written to the saves directory as a change. *)
+let test_a_file_cut_to_8_3_is_not_saved_as_a_change () =
+  with_lane (fun directory ->
+    (match load ~files:[ "LONGFILENAME.TXT", "kept" ] directory hello with
+     | Ok _ -> ()
+     | Error error -> fail (Dos_lane.error_to_string error));
+    (match Dos_lane.step ~who ~steps:1000 ~until_ready:false with
+     | Ok _ -> ()
+     | Error error -> fail (Dos_lane.error_to_string error));
+    let saves = Filename.concat directory "saves" in
+    let written = if Sys.file_exists saves then Array.to_list (Sys.readdir saves) else [] in
+    check (list string) "an unchanged file is not written to the saves directory" [] written)
+;;
+
+(* The core reads a name the way DOS does, so two names can reach one file, and
+   a name DOS cannot hold is an error. Each is refused as the caller's mistake
+   before any machine is installed. *)
+let test_file_names_the_core_cannot_mount_are_refused () =
+  with_lane (fun directory ->
+    List.iter
+      (fun (name, files) ->
+        match load ~files directory hello with
+        | Error (Dos_lane.Invalid_request _) -> ()
+        | Error error -> failf "%s: unexpected %s" name (Dos_lane.error_to_string error)
+        | Ok _ -> failf "%s: the load went through" name)
+      [ "two names cut to one 8.3 name", [ "LONGFILENAME.TXT", "a"; "LONGFILE.TXT", "b" ]
+      ; "a character DOS does not allow in a name", [ "A+B.TXT", "a" ]
       ])
 ;;
 
@@ -275,6 +310,10 @@ let () =
         ; test_case "a refused image leaves the running machine" `Quick
             test_a_refused_image_leaves_the_running_machine
         ; test_case "the boundary images load" `Quick test_the_boundary_images_load
+        ; test_case "a file cut to 8.3 is not saved as a change" `Quick
+            test_a_file_cut_to_8_3_is_not_saved_as_a_change
+        ; test_case "file names the core cannot mount are refused" `Quick
+            test_file_names_the_core_cannot_mount_are_refused
         ; test_case "the check agrees with the loader on EXE" `Quick
             test_the_check_agrees_with_the_loader_on_exe
         ; test_case "the COM bound is where the loader starts overwriting the image" `Quick

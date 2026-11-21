@@ -14,8 +14,9 @@ let get = function
 
 let invite = get (Invite_id.of_string "invite-1")
 let alice = get (User_id.of_string "alice")
-let keeper_a = get (Keeper_id.of_string "keeper-a")
-let keeper_b = get (Keeper_id.of_string "keeper-b")
+let engine_a = get (Engine_name.of_string "keeper-a")
+let engine_b = get (Engine_name.of_string "keeper-b")
+let keeper_id = get (Keeper_id.of_string "keeper-1")
 let runtime = get (Runtime_id.of_string "runtime-1")
 let policy = get (Policy_id.of_string "policy-1")
 let manifest_hex = String.make 64 'a'
@@ -29,7 +30,7 @@ let inventory ?keepers ?tasks () =
   L.Inventory_frozen
     { bootstrap_invite_id = invite
     ; cutover_at_ms = 1_800_000_000_000
-    ; legacy_keepers = Option.value keepers ~default:[ keeper_a; keeper_b ]
+    ; legacy_keepers = Option.value keepers ~default:[ engine_a; engine_b ]
     ; legacy_task_ids = Option.value tasks ~default:[ "task-1"; "task-2" ]
     ; legacy_manifest_sha256 = manifest
     }
@@ -39,16 +40,16 @@ let candidate = L.Candidate_bound { user_id = alice; invite_id = invite }
 
 let claimed =
   L.Keeper_claimed
-    { engine_name = keeper_a
+    { engine_name = engine_a
     ; claimant = alice
-    ; keeper_id = keeper_b
+    ; keeper_id = keeper_id
     ; runtime_id = runtime
     ; policy_id = policy
     ; turn_scope = Authorization_scope.all
     }
 ;;
 
-let retired = L.Keeper_retired { engine_name = keeper_a; actor = alice }
+let retired = L.Keeper_retired { engine_name = engine_a; actor = alice }
 let events = [ inventory (); candidate; claimed; retired ]
 
 let body_of_json json =
@@ -103,7 +104,7 @@ let bytes_of_the_inventory () =
   Alcotest.(check string)
     "an unsorted inventory writes the same bytes"
     expected
-    (text_of (inventory ~keepers:[ keeper_b; keeper_a ] ~tasks:[ "task-2"; "task-1" ] ()))
+    (text_of (inventory ~keepers:[ engine_b; engine_a ] ~tasks:[ "task-2"; "task-1" ] ()))
 ;;
 
 let bytes_of_a_claim () =
@@ -113,7 +114,7 @@ let bytes_of_a_claim () =
     true
     (contains
        ~sub:
-         {|"event":"keeper_claimed","engine_name":"keeper-a","claimant":"alice","keeper_id":"keeper-b","runtime_id":"runtime-1","policy_id":"policy-1","turn_scope":|}
+         {|"event":"keeper_claimed","engine_name":"keeper-a","claimant":"alice","keeper_id":"keeper-1","runtime_id":"runtime-1","policy_id":"policy-1","turn_scope":|}
        text)
 ;;
 
@@ -236,6 +237,15 @@ let a_body_that_is_not_a_legacy_attribution_is_refused () =
           ; ( "runtime_id", `String "runtime-1" )
           ; ( "policy_id", `String "policy-1" )
           ; ( "turn_scope", `String "all" )
+          ] )
+    ; ( "a claim whose engine name is not one"
+      , member "keeper_claimed"
+          [ ( "engine_name", `String "keeper a" )
+          ; ( "claimant", `String "alice" )
+          ; ( "keeper_id", `String "keeper-1" )
+          ; ( "runtime_id", `String "runtime-1" )
+          ; ( "policy_id", `String "policy-1" )
+          ; ( "turn_scope", `Assoc [ "runtimes", `String "all"; "channels", `String "all"; "allowed_effects", `String "all" ] )
           ] )
     ; ( "a retirement with another member name"
       , member "keeper_retired"

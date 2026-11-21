@@ -8,7 +8,7 @@ type t =
   | Inventory_frozen of
       { bootstrap_invite_id : Invite_id.t
       ; cutover_at_ms : int
-      ; legacy_keepers : Keeper_id.t list
+      ; legacy_keepers : Engine_name.t list
       ; legacy_task_ids : string list
       ; legacy_manifest_sha256 : Authz_record.Hash.t
       }
@@ -17,7 +17,7 @@ type t =
       ; invite_id : Invite_id.t
       }
   | Keeper_claimed of
-      { engine_name : Keeper_id.t
+      { engine_name : Engine_name.t
       ; claimant : User_id.t
       ; keeper_id : Keeper_id.t
       ; runtime_id : Runtime_id.t
@@ -25,7 +25,7 @@ type t =
       ; turn_scope : Authorization_scope.t
       }
   | Keeper_retired of
-      { engine_name : Keeper_id.t
+      { engine_name : Engine_name.t
       ; actor : User_id.t
       }
 
@@ -98,6 +98,7 @@ type error =
   | Not_ascending of string
   | Invalid_invite_id of Authz_id.error
   | Invalid_user_id of Authz_id.error
+  | Invalid_engine_name of Authz_id.error
   | Invalid_keeper_id of Authz_id.error
   | Invalid_runtime_id of Authz_id.error
   | Invalid_policy_id of Authz_id.error
@@ -117,6 +118,8 @@ let error_to_string = function
     Printf.sprintf "the invite id is not valid: %s" (Authz_id.error_to_string error)
   | Invalid_user_id error ->
     Printf.sprintf "the user id is not valid: %s" (Authz_id.error_to_string error)
+  | Invalid_engine_name error ->
+    Printf.sprintf "the engine name is not valid: %s" (Authz_id.error_to_string error)
   | Invalid_keeper_id error ->
     Printf.sprintf "the keeper id is not valid: %s" (Authz_id.error_to_string error)
   | Invalid_runtime_id error ->
@@ -130,6 +133,7 @@ let error_to_string = function
 
 let invite_id_of text = Result.map_error (fun error -> Invalid_invite_id error) (Invite_id.of_string text)
 let user_id_of text = Result.map_error (fun error -> Invalid_user_id error) (User_id.of_string text)
+let engine_name_of text = Result.map_error (fun error -> Invalid_engine_name error) (Engine_name.of_string text)
 let keeper_id_of text = Result.map_error (fun error -> Invalid_keeper_id error) (Keeper_id.of_string text)
 let runtime_id_of text = Result.map_error (fun error -> Invalid_runtime_id error) (Runtime_id.of_string text)
 let policy_id_of text = Result.map_error (fun error -> Invalid_policy_id error) (Policy_id.of_string text)
@@ -145,7 +149,7 @@ let to_body = function
     let* event = Authz_body.string inventory_label in
     let* bootstrap_invite_id = Authz_body.string (Invite_id.to_string bootstrap_invite_id) in
     let* cutover_at_ms = Authz_body.int cutover_at_ms in
-    let* legacy_keepers = string_list (canonical (List.map Keeper_id.to_string legacy_keepers)) in
+    let* legacy_keepers = string_list (canonical (List.map Engine_name.to_string legacy_keepers)) in
     let* legacy_task_ids = string_list (canonical legacy_task_ids) in
     let* legacy_manifest_sha256 =
       Authz_body.string (Authz_record.Hash.to_hex legacy_manifest_sha256)
@@ -166,7 +170,7 @@ let to_body = function
   | Keeper_claimed
       { engine_name; claimant; keeper_id; runtime_id; policy_id; turn_scope } ->
     let* event = Authz_body.string claimed_label in
-    let* engine_name = Authz_body.string (Keeper_id.to_string engine_name) in
+    let* engine_name = Authz_body.string (Engine_name.to_string engine_name) in
     let* claimant = Authz_body.string (User_id.to_string claimant) in
     let* keeper_id = Authz_body.string (Keeper_id.to_string keeper_id) in
     let* runtime_id = Authz_body.string (Runtime_id.to_string runtime_id) in
@@ -183,7 +187,7 @@ let to_body = function
       ]
   | Keeper_retired { engine_name; actor } ->
     let* event = Authz_body.string retired_label in
-    let* engine_name = Authz_body.string (Keeper_id.to_string engine_name) in
+    let* engine_name = Authz_body.string (Engine_name.to_string engine_name) in
     let* actor = Authz_body.string (User_id.to_string actor) in
     Authz_body.object_ [ "event", event; "engine_name", engine_name; "actor", actor ]
 ;;
@@ -220,7 +224,7 @@ let inventory_of = function
         | Error error -> Error error
         | Ok (keeper_names, legacy_task_ids) ->
           let* bootstrap_invite_id = invite_id_of bootstrap_invite_id in
-          let* legacy_keepers = all_ok keeper_id_of keeper_names in
+          let* legacy_keepers = all_ok engine_name_of keeper_names in
           (match Authz_record.Hash.of_hex legacy_manifest_sha256 with
            | Some legacy_manifest_sha256 ->
              Ok
@@ -267,7 +271,7 @@ let claimed_of = function
        , Some keeper_id
        , Some runtime_id
        , Some policy_id ) ->
-       let* engine_name = keeper_id_of engine_name in
+       let* engine_name = engine_name_of engine_name in
        let* claimant = user_id_of claimant in
        let* keeper_id = keeper_id_of keeper_id in
        let* runtime_id = runtime_id_of runtime_id in
@@ -289,7 +293,7 @@ let retired_of = function
   | [ ("engine_name", engine_name); ("actor", actor) ] ->
     (match Authz_body.string_value engine_name, Authz_body.string_value actor with
      | Some engine_name, Some actor ->
-       let* engine_name = keeper_id_of engine_name in
+       let* engine_name = engine_name_of engine_name in
        let* actor = user_id_of actor in
        Ok (Keeper_retired { engine_name; actor })
      | (None | Some _), (None | Some _) -> Error Wrong_members)

@@ -29,7 +29,10 @@
     strictly ascending byte order, without a repeat: {!to_body} sorts and
     deduplicates what it is given, so the same inventory always writes the same
     bytes and the same hash, and {!of_body} refuses a list that is not already
-    in that order. A keeper name is the name of {!Authz_types.Keeper_id}, and
+    in that order. A legacy keeper is named by its
+    {!Authz_types.Engine_name}, the installation-wide name, and the claim's
+    [keeper_id] is the owner-scoped {!Authz_types.Keeper_id} the claim makes;
+    the two are different names and one is never read as the other.
     [legacy_manifest_sha256] is 64 lowercase hex characters. [turn_scope] is
     the body of {!Authz_types.Authorization_scope.t} that
     {!Authz_scope_body} writes.
@@ -44,8 +47,8 @@ type t =
   | Inventory_frozen of
       { bootstrap_invite_id : Authz_types.Invite_id.t
       ; cutover_at_ms : int  (** Wall clock in milliseconds. *)
-      ; legacy_keepers : Authz_types.Keeper_id.t list
-            (** The keepers the workspace held at the cutover. *)
+      ; legacy_keepers : Authz_types.Engine_name.t list
+            (** The engine names the installation held at the cutover. *)
       ; legacy_task_ids : string list  (** The tasks no keeper claimed. *)
       ; legacy_manifest_sha256 : Authz_record.Hash.t
       }
@@ -55,9 +58,8 @@ type t =
             (** The bootstrap invitation whose admission bound this candidate. *)
       }
   | Keeper_claimed of
-      { engine_name : Authz_types.Keeper_id.t
-            (** The legacy keeper's name, which is no [Authz_types.Keeper_id]
-                of a multi-account workspace. *)
+      { engine_name : Authz_types.Engine_name.t
+            (** The installation-wide engine name of the legacy keeper. *)
       ; claimant : Authz_types.User_id.t
       ; keeper_id : Authz_types.Keeper_id.t  (** The keeper made by the claim. *)
       ; runtime_id : Authz_types.Runtime_id.t
@@ -66,7 +68,7 @@ type t =
             (** The limits the claim's PAT puts on the keeper's turns. *)
       }
   | Keeper_retired of
-      { engine_name : Authz_types.Keeper_id.t
+      { engine_name : Authz_types.Engine_name.t
       ; actor : Authz_types.User_id.t
       }
 
@@ -94,6 +96,7 @@ type error =
           a repeat, or another order. *)
   | Invalid_invite_id of Authz_id.error
   | Invalid_user_id of Authz_id.error
+  | Invalid_engine_name of Authz_id.error
   | Invalid_keeper_id of Authz_id.error
   | Invalid_runtime_id of Authz_id.error
   | Invalid_policy_id of Authz_id.error

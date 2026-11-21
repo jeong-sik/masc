@@ -256,6 +256,7 @@ let masc_tools_disabled_error ~requested_tool =
   let data =
     `Assoc
       [ "ok", `Bool false
+      ; "error", `String "masc_tools_disabled"
       ; "error_kind", `String "masc_tools_disabled"
       ; "tool", `String requested_tool
       ; "detail", `String "MASC tools are disabled for this keeper (tools.masc_enabled = false)"
@@ -263,6 +264,7 @@ let masc_tools_disabled_error ~requested_tool =
   in
   Keeper_tool_execution.failure_data
     ~class_:Tool_result.Policy_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
     ~message:(Yojson.Safe.to_string data)
     data
 ;;

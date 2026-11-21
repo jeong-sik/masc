@@ -831,22 +831,22 @@ let carried_packages_are_complete_manifests () = with_directory (fun _root packa
     Lane_addon_carried.all)
 
 let a_declaration_names_a_carried_package () = with_directory (fun _root packages directory ->
-  let path = Filename.concat directory "librarian.toml" in
-  let declare keys = write path (Printf.sprintf "id = \"librarian\"\nrun_id = \"memory\"\n%s[binding]\nsources = []\n" keys) in
+  let path = Filename.concat directory "judge.toml" in
+  let declare keys = write path (Printf.sprintf "id = \"judge\"\nrun_id = \"memory\"\n%s[binding]\nsources = []\n" keys) in
   let refused label words =
     match load_declaration ~path with
     | Ok _ -> failf "%s was accepted" label
     | Error message ->
         List.iter (fun word -> check bool (label ^ " is refused naming " ^ word) true (contains message word)) words in
-  let carried = Lane_addon_carried.Keeper_librarian in
+  let carried = Lane_addon_carried.Hitl_auto_judge in
   let folder = unwrap (Lane_addon_carried.folder ~packages carried) in
-  declare "package = \"keeper-librarian\"\n";
+  declare "package = \"hitl-auto-judge\"\n";
   refused "a carried package that is not installed" ["is not installed"; folder; "masc exact-addon-setup"];
   ignore (place_carried packages carried);
   let declaration = unwrap (load_declaration ~path) in
   check string "the declaration resolves to the installed folder"
     (Unix.realpath (Filename.concat folder "lane.toml")) declaration.manifest_path;
-  check string "and attaches the carried package" "keeper-librarian" declaration.package.id;
+  check string "and attaches the carried package" "hitl-auto-judge" declaration.package.id;
   check bool "the declaration records that it names the carried package" true
     (declaration.package_source = Config.Carried carried);
   declare (Printf.sprintf "manifest_path = %S\n" (Filename.concat folder "lane.toml"));
@@ -869,7 +869,7 @@ let a_declaration_names_a_carried_package () = with_directory (fun _root package
   check bool "a package without it keeps the revision it had" false (names_image_label by_path);
   check bool "so the two declarations have different revisions" false
     (String.equal declaration.revision by_path.revision);
-  declare "package = \"keeper-librarian\"\n";
+  declare "package = \"hitl-auto-judge\"\n";
   let server = Filename.concat folder "server.py" in
   write server "# another worker\n";
   refused "a folder whose worker has other bytes" ["server.py has other bytes"; folder];
@@ -877,21 +877,21 @@ let a_declaration_names_a_carried_package () = with_directory (fun _root package
   write (Filename.concat folder "notes.txt") "operator notes";
   refused "a folder with a file the package does not carry" ["unexpected notes.txt"];
   Sys.remove (Filename.concat folder "notes.txt");
-  Sys.remove (Filename.concat folder "schemas/durable.json");
-  refused "a folder missing a carried file" ["missing schemas/durable.json"];
+  Sys.remove (Filename.concat folder "schemas/judgment.json");
+  refused "a folder missing a carried file" ["missing schemas/judgment.json"];
   ignore (place_carried packages carried);
   Sys.remove server;
-  Unix.symlink (Filename.concat directory "librarian.toml") server;
+  Unix.symlink (Filename.concat directory "judge.toml") server;
   refused "a folder holding a symbolic link" ["server.py is not a regular file or directory"];
   Sys.remove server;
   ignore (place_carried packages carried);
   check bool "the restored folder is accepted again" true (Result.is_ok (load_declaration ~path));
   List.iter (fun (label, keys, words) -> declare keys; refused label words)
     [ "both package and manifest_path",
-      "package = \"keeper-librarian\"\nmanifest_path = \"../packages/lane.toml\"\n", ["both package and manifest_path"]
+      "package = \"hitl-auto-judge\"\nmanifest_path = \"../packages/lane.toml\"\n", ["both package and manifest_path"]
     ; "neither package nor manifest_path", "", ["requires package or manifest_path"]
     ; "a package this server does not carry", "package = \"browser-ego\"\n",
-      ["\"browser-ego\" is not one this server carries"; "keeper-librarian"]
+      ["\"browser-ego\" is not one this server carries"; "hitl-auto-judge"]
     ; "a package that is not a name", "package = 1\n", ["package requires"] ])
 
 let exact_outputs_are_package_schemas () = with_directory (fun root packages directory ->

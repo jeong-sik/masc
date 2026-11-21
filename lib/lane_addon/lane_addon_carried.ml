@@ -1,11 +1,10 @@
 open Result.Syntax
 
-type id = Keeper_librarian | Workspace_curator | Candle_appraiser | Hitl_auto_judge
+type id = Workspace_curator | Candle_appraiser | Hitl_auto_judge
 
-let all = [Keeper_librarian; Workspace_curator; Candle_appraiser; Hitl_auto_judge]
+let all = [Workspace_curator; Candle_appraiser; Hitl_auto_judge]
 
 let name = function
-  | Keeper_librarian -> "keeper-librarian"
   | Workspace_curator -> "workspace-curator"
   | Candle_appraiser -> "candle-appraiser"
   | Hitl_auto_judge -> "hitl-auto-judge"
@@ -22,7 +21,6 @@ let files_of file_list read =
   |> List.sort by_path
 
 let package_files = function
-  | Keeper_librarian -> files_of Embedded_keeper_librarian.file_list Embedded_keeper_librarian.read
   | Workspace_curator -> files_of Embedded_workspace_curator.file_list Embedded_workspace_curator.read
   | Candle_appraiser -> files_of Embedded_candle_appraiser.file_list Embedded_candle_appraiser.read
   | Hitl_auto_judge -> files_of Embedded_hitl_auto_judge.file_list Embedded_hitl_auto_judge.read

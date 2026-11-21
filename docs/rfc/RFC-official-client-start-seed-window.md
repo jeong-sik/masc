@@ -80,7 +80,7 @@ Claude Code 구독 Keeper 가 토큰을 많이 썼다. 원인은 둘이었다.
 1. **상한.** `input_limit_of_runtime` 이 공식 클라이언트에도 해결된 창(`Runtime_instance.max_context_of_runtime`)을 준다. #54320 이 `--autocompact` 에 넘기는 값과 같다.
 2. **비교 대상.** 새 세션을 열 때는 보낼 첫 메시지의 크기와 창을 견준다. 원장의 마지막 관측과 견주지 않는다. 11-21 새 세션 18건에서 첫 요청 ÷ 직전 세션 마지막 요청은 0.25~3.79 로 흩어졌다. 6건 중 1건(Keeper C, 직전 117K → 첫 요청 445K)은 직전 값이 창 아래였다. 이어 쓰는 세션이 400K 에서 압축되면 직전 값은 대개 창 아래가 되고, 놓치는 경우가 늘어난다.
 3. **자르는 자리.** 공식 클라이언트의 새 세션은 `Librarian_point_at_max_context` 일 때만 자른다. Librarian 이 읽은 끝이 창 시작보다 앞이면 자르지 않고 보낸다.
-   - 이 상태는 Librarian RFC 의 W2(요청이 읽은 곳의 끝보다 뒤에서 시작)와 같다. 새 관측을 만들지 않고 W2 를 따른다.
+   - 자르지 않고 보내는 상태는 W2 경보가 이미 본다. W2 는 「Keeper 의 가장 최근 요청이 읽은 곳의 끝보다 뒤에서 시작했다」이다(`RFC-librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line.md` §12.2 경보 표, 요청 시작점의 원리는 같은 파일 §11.2). 새 관측을 만들지 않고 W2 를 따른다.
    - 공식 클라이언트의 읽은 곳의 끝은 fragment offset 이다. 자를 atom 은 `first_atom_at_or_after` 로 정한다.
 4. **원장 쓰는 곳은 하나.** 공식 클라이언트의 관측을 원장에 넣어야 한다면, Agent Core 가 부르는 `Table.observe` 를 같이 부른다. 두 번째 쓰는 함수를 만들지 않는다. 두 곳이 서로 다르게 셀 수 있기 때문이다.
 5. **켜는 때.** Librarian 컷(native stack #54329)을 설치하고 W2 를 켠 뒤다. 컷 설치 안내에 이 RFC 를 켜는 순서를 한 줄 넣는다.
@@ -110,4 +110,4 @@ Claude Code 구독 Keeper 가 토큰을 많이 썼다. 원인은 둘이었다.
 ## 8. 범위 밖
 
 - Agent Core 경로는 바꾸지 않는다. 이미 `past_max_context` 로 움직인다.
-- 깨우는 쪽의 겹침(시계 중복, Board 스레드 참여자 깨움, 같은 일정 중복)은 따로 다룬다.
+- 깨우는 쪽의 겹침은 따로 다룬다. 주기 시계와 예약 시계를 하나로 묶는 일은 #54338 이 맡는다.

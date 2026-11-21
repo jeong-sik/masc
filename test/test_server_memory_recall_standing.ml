@@ -254,7 +254,6 @@ let test_the_reason_of_another_gate_is_named_as_such () =
     ; Typesafeai_config.Board_attention_disabled
     ; Typesafeai_config.Context_review_disabled
     ; Typesafeai_config.Skill_applicability_disabled
-    ; Typesafeai_config.Librarian_preflight_disabled
     ; Typesafeai_config.Workspace_memory_selection_disabled
     ]
   in

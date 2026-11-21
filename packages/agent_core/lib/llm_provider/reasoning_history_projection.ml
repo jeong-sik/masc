@@ -345,7 +345,7 @@ let is_caller_query (message : _ Types.message_with) =
   | User, Conversation -> true
   | (System | Assistant | Tool), _
   | User, (System_context | Historical_system_context | Recovery_instruction
-          | Tool_result_followup | Agent_instruction) -> false
+          | Tool_result_followup | Agent_instruction | Outside_context) -> false
 ;;
 
 let find_latest_user_message_index classified_messages =

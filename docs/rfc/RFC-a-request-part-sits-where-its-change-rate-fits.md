@@ -249,7 +249,7 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 - 턴 문맥은 턴 첫 요청 끝에 한 번 실린다(`Agent_turn.context_message`, origin `System_context`).
 - 도구 라운드 뒤 요청은 대개 턴 문맥 없이 도구 결과로 끝난다. glm-5-3 Keeper 하나의 턴 마지막 요청 snapshot 127개 중 102개가 그랬다(2026-11-20~21).
 - 그 메시지는 다음 요청의 입력에 남지 않는다.
-  - Anthropic 레인은 응답에 서명된 thinking 이 있을 때만 그 메시지를 이력에 둔다(`Historical_system_context`, `pipeline.ml`). 그래도 `clear_at` 이라 다음 요청 입력에서 빠진다.
+  - Anthropic 레인은 응답에 서명된 thinking 이 있을 때만 그 메시지를 이력에 둔다(`Historical_system_context`, `pipeline.ml`). `clear_at` 계약 모델(`reasoning_replay = "turn_scoped_system_context_preserve_always"`)에서는 API 가 다음 요청 입력에서 그 글을 뺀다. 계약이 없는 모델은 이력 제자리에 그대로 다시 보내 쌓인다(`Preserve_positions`, `message_origin_lowering.ml`).
   - 다른 레인은 이력에 두지 않는다(`Omit_historical_system_context`, `message_origin_lowering.ml`).
   - 그래서 Agent Core 레인의 모델은 첫 도구 라운드 뒤로 턴 문맥을 못 본다. 다음 턴에는 바뀌지 않은 층도 처음부터 다시 쓴다.
 

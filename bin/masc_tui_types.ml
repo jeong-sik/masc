@@ -6524,7 +6524,6 @@ type tools_catalog_view =
 type tools_pane =
   | Tools_surface
   | Tools_async
-  | Tools_activations
   | Tools_usage
   | Tools_catalog of tools_catalog_view
   | Tools_storage
@@ -6532,22 +6531,21 @@ type tools_pane =
           reads the same envelope as the inventory. *)
 
 (* The panes [p] walks, in its order, so the strip and the key sheet name the
-   same six. The catalog stands for both of its views. *)
+   same five. The catalog stands for both of its views. *)
 let tools_panes =
-  [ Tools_surface; Tools_async; Tools_activations; Tools_usage
+  [ Tools_surface; Tools_async; Tools_usage
   ; Tools_catalog Tools_catalog_list; Tools_storage ]
 
 let tools_pane_label ~ko = function
   | Tools_surface -> if ko then "호출 범위" else "Callable"
   | Tools_async -> if ko then "비동기 작업" else "Async work"
-  | Tools_activations -> if ko then "Skill 기록" else "Skill log"
-  | Tools_usage -> if ko then "Skill 사용 집계" else "Skill usage"
+  | Tools_usage -> if ko then "Skill 목록" else "Skills"
   | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> if ko then "전체 도구" else "All tools"
   | Tools_storage -> if ko then "저장 공간" else "Storage"
 
 let tools_volume_gc_parent_scroll = function
   | Tools_catalog (Tools_catalog_volumes {catalog_scroll}) -> Some catalog_scroll
-  | Tools_surface | Tools_async | Tools_activations | Tools_usage | Tools_storage
+  | Tools_surface | Tools_async | Tools_usage | Tools_storage
   | Tools_catalog Tools_catalog_list -> None
 
 (* What the six move keys act on in the Available pane. The pane draws the
@@ -6563,32 +6561,7 @@ type tools_skill_focus =
 type tools_read_part =
   | Tools_inventory_read
   | Tools_catalog_read
-  | Tools_activations_read
-  | Tools_usage_read of string  (** One Keeper's usage, named. *)
   | Tools_async_read
-
-(* What the Activations pane has for the Keeper the Tools screen follows.
-   With no Keeper there is nothing to read, which the pane says instead of
-   "not loaded". *)
-type tools_activations =
-  | Activations_no_keeper
-  | Activations_read of Masc.Tui_decode_tools.skill_activation_projection
-
-(* A failed Activations read, held for the Keeper it was made for. *)
-type activations_failure = { taf_keeper : string; taf_detail : request_failure }
-
-(* Whether the Activations reading, or the failure held without one, belongs
-   to a Keeper other than [selected], or to one while none is selected. *)
-let activations_held_for_another ~selected reading failure =
-  match selected, reading, failure with
-  | Some keeper, Some (Activations_read projection), (Some _ | None) ->
-      not (String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper)
-  | Some keeper, None, Some failure -> not (String.equal failure.taf_keeper keeper)
-  | Some _, Some Activations_no_keeper, (Some _ | None)
-  | None, Some (Activations_read _), (Some _ | None)
-  | None, (Some Activations_no_keeper | None), Some _ -> true
-  | Some _, None, None
-  | None, (Some Activations_no_keeper | None), None -> false
 
 (* A read for another Keeper than the one its held reading or failure is for
    starts with no failures behind it: that Keeper's backoff is not this
@@ -6604,19 +6577,6 @@ let held_tools_error ~selected ~held_keeper error =
   match error with
   | Some _ when Option.equal String.equal held_keeper selected -> error
   | Some _ | None -> None
-
-(* One Keeper's Usage reading. A failed read keeps the Keeper's last answer
-   beside the failure. *)
-type keeper_skill_usage_reading =
-  | Skill_usage_read of Masc.Tui_decode_tools.keeper_skill_usage
-  | Skill_usage_read_failed of
-      { last : Masc.Tui_decode_tools.keeper_skill_usage option
-      ; detail : request_failure
-      }
-
-let skill_usage_answer = function
-  | Skill_usage_read usage -> Some usage
-  | Skill_usage_read_failed { last; detail = _ } -> last
 
 type tools_async_detail_request =
   { tad_ticket : Masc.Tui_decode_async_request.target Masc_tui_fetched.request
@@ -10712,7 +10672,6 @@ type state = {
      [\[typesafeai\]]. It holds the text it was opened on and takes every key
      while it is open. Unlike the two forms above it has no save of its own:
      Enter hands its text to the pane's raw-edit save, the one [e] ends in. *)
-  mutable memory_recall_form: Masc_tui_memory_recall_form.t option;
   (* The [x] form on the runtime.toml pane, which sets [\[typesafeai\]
      excluded_keepers]. Like the recall form it holds the text it was opened
      on, takes every key while it is open, and hands its text to the pane's
@@ -10721,7 +10680,6 @@ type state = {
   (* Which open of that form the server's reading of the recall gate was asked
      for. An answer that carries another number belongs to a form the operator
      already left. *)
-  mutable memory_recall_standing_generation: int;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -11543,24 +11501,11 @@ type state = {
   mutable tools_skill_pending: tools_read_part list;
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: request_failure option;
-  mutable tools_activations: tools_activations option;
-  mutable tools_activations_error: activations_failure option;
-  (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
-     Keeper that left the roster leaves this list at the next read. *)
-  mutable tools_keeper_usage: (string * keeper_skill_usage_reading) list;
-  (* What each part of the Tools read owes after a push: the selected
-     Keeper's surface ([/dashboard/tools?keeper=]) and the Skill catalog with
-     its usage counts ([/api/v1/skills]). *)
-  (* What each Tools part read on a push owes: the skills catalog, the
-     selected Keeper's activations, and each roster Keeper's usage. A roster
-     Keeper with no entry has never been read. *)
   mutable tools_catalog_owed: Masc_tui_owed_read.t;
   (* The selected Keeper's tool inventory and effective surface, and the
      Keeper the reading on screen was read for. *)
   mutable tools_inventory_owed: Masc_tui_owed_read.t;
   mutable tools_inventory_keeper: string option;
-  mutable tools_activations_owed: Masc_tui_owed_read.t;
-  mutable tools_usage_owed: (string * Masc_tui_owed_read.t) list;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: request_failure option;
   mutable tools_scroll: int;
@@ -14455,14 +14400,10 @@ let equal_tools_read_part a b =
   match a, b with
   | Tools_inventory_read, Tools_inventory_read
   | Tools_catalog_read, Tools_catalog_read
-  | Tools_activations_read, Tools_activations_read
   | Tools_async_read, Tools_async_read -> true
-  | Tools_usage_read a, Tools_usage_read b -> String.equal a b
-  | Tools_inventory_read, (Tools_catalog_read | Tools_activations_read | Tools_usage_read _ | Tools_async_read)
-  | Tools_catalog_read, (Tools_inventory_read | Tools_activations_read | Tools_usage_read _ | Tools_async_read)
-  | Tools_activations_read, (Tools_inventory_read | Tools_catalog_read | Tools_usage_read _ | Tools_async_read)
-  | Tools_usage_read _, (Tools_inventory_read | Tools_catalog_read | Tools_activations_read | Tools_async_read)
-  | Tools_async_read, (Tools_inventory_read | Tools_catalog_read | Tools_activations_read | Tools_usage_read _) ->
+  | Tools_inventory_read, (Tools_catalog_read | Tools_async_read)
+  | Tools_catalog_read, (Tools_inventory_read | Tools_async_read)
+  | Tools_async_read, (Tools_inventory_read | Tools_catalog_read) ->
       false
 
 let[@warning "+9"] equal_tools_read_inflight
@@ -16096,85 +16037,17 @@ let move_tools_async_selection state (move : Masc_tui_scroll.Cursor_move.t) =
     state.tools_async_selection <- Some target)
     (List.nth_opt targets index)
 
-(* Records one Keeper's Usage read in Keeper name order. A failed read keeps
-   the Keeper's last answer beside the failure. *)
-let record_keeper_skill_usage state ~keeper result =
-  let reading =
-    match result with
-    | Ok usage -> Skill_usage_read usage
-    | Error detail ->
-        Skill_usage_read_failed
-          { last = Option.bind (List.assoc_opt keeper state.tools_keeper_usage) skill_usage_answer
-          ; detail
-          }
-  in
-  state.tools_keeper_usage <-
-    List.sort
-      (fun (left, _) (right, _) -> String.compare left right)
-      ((keeper, reading) :: List.remove_assoc keeper state.tools_keeper_usage)
-
-(* Whether [state.keepers] is the whole roster: read from this workspace,
-   with no error beside it. *)
-let roster_complete state =
-  match state.keepers_error, state.local_keepers with
-  | None, Local_workspace_read -> true
-  | Some _, (Local_workspace_unread | Local_workspace_read | Local_workspace_failed _)
-  | None, (Local_workspace_unread | Local_workspace_failed _) ->
-      false
-
-(* Keeps the Usage readings of the Keepers on the roster. Only a whole roster
-   drops a reading: one not read yet, or read with an error, may lack Keepers
-   that still exist. *)
-let keep_roster_skill_usage state =
-  if roster_complete state then begin
-    let roster = List.map (fun (row : keeper) -> row.k_name) state.keepers in
-    state.tools_keeper_usage <-
-      List.filter (fun (name, _) -> List.mem name roster) state.tools_keeper_usage;
-    state.tools_usage_owed <-
-      List.filter (fun (name, _) -> List.mem name roster) state.tools_usage_owed
-  end
-
-(* What a roster Keeper's Usage answer owes; one never read owes a read. *)
-let keeper_skill_usage_owed state keeper =
-  match List.assoc_opt keeper state.tools_usage_owed with
-  | Some owed -> owed
-  | None -> Masc_tui_owed_read.changed Masc_tui_owed_read.settled
-
-let set_keeper_skill_usage_owed state keeper owed =
-  state.tools_usage_owed <- (keeper, owed) :: List.remove_assoc keeper state.tools_usage_owed
-
-let owe_keeper_skill_usage_read state keeper =
-  set_keeper_skill_usage_owed state keeper
-    (Masc_tui_owed_read.changed (keeper_skill_usage_owed state keeper))
-
-let owe_every_skill_usage_read state =
-  List.iter (fun (row : keeper) -> owe_keeper_skill_usage_read state row.k_name) state.keepers
-
 let owe_tools_catalog_read state =
   state.tools_catalog_owed <- Masc_tui_owed_read.changed state.tools_catalog_owed
 
 let owe_tools_inventory_read state =
   state.tools_inventory_owed <- Masc_tui_owed_read.changed state.tools_inventory_owed
 
-let owe_tools_activations_read state =
-  state.tools_activations_owed <- Masc_tui_owed_read.changed state.tools_activations_owed
-
 (* The Tools parts, owed together: arriving on Tools, a refresh, a
    revalidation and a resumed authority read them all. *)
 let owe_tools_reads state =
   owe_tools_inventory_read state;
-  owe_tools_catalog_read state;
-  owe_tools_activations_read state;
-  owe_every_skill_usage_read state
-
-(* A Keeper's activation ledger changed: its Usage answer owes a read when it
-   is on the roster, and the Activations pane when it is the selected
-   Keeper. *)
-let owe_skill_activations_read state keeper =
-  if List.exists (fun (row : keeper) -> String.equal row.k_name keeper) state.keepers then
-    owe_keeper_skill_usage_read state keeper;
-  if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state) then
-    owe_tools_activations_read state
+  owe_tools_catalog_read state
 
 let begin_tools_async_detail state ~force =
   match state.tools_async_selection with
@@ -16200,24 +16073,6 @@ let tools_async_detail_current state request =
 let complete_tools_async_detail state request result =
   if tools_async_detail_current state request then begin
     state.tools_async_detail_request <- None;
-    let result = Result.bind result (fun reading ->
-      let module Detail = Masc.Tui_decode_async_request in
-      let prior = Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail
-          ~key:(Masc_tui_fetched.request_key request.tad_ticket) |> Masc_tui_fetched.value in
-      let module Nested = Masc.Keeper_composition_observation in
-      match reading with
-      | Detail.Absent -> Ok reading
-      | Detail.Observed snapshot ->
-        match snapshot.nested with
-        | Nested.Absent | Observed _ | Stored _ -> Ok reading
-        | Invalid detail ->
-          match prior with
-          | None | Some Detail.Absent -> Ok reading
-          | Some (Detail.Observed previous) ->
-            match previous.nested with
-            | Nested.Absent | Stored _ | Invalid _ -> Ok reading
-            | Observed _ ->
-              if Detail.equal_source snapshot.source previous.source then Error (Request_failed detail) else Ok reading) in
     (match result with
      | Error _ -> ()
      | Ok Masc.Tui_decode_async_request.Absent -> state.tools_async_last_logical <- None
@@ -16279,26 +16134,6 @@ let fleet_stream_view state =
    ([GET /api/v1/runtime/config/memory-recall]). Each open of the form takes a
    number here; the answer carries it back, and an answer that carries another
    number belongs to a form the operator already left. *)
-let begin_memory_recall_standing_read (state : state) =
-  state.memory_recall_standing_generation <- state.memory_recall_standing_generation + 1;
-  state.memory_recall_standing_generation
-
-let finish_memory_recall_standing_read (state : state) ~generation answer =
-  if generation = state.memory_recall_standing_generation
-  then
-    state.memory_recall_form <-
-      Option.map
-        (fun form -> Masc_tui_memory_recall_form.with_server form answer)
-        state.memory_recall_form
-
-(* A reading that will not be answered must not leave the form saying it is
-   still reading: the workspace identity is not confirmed, so the reply would
-   be retired, and the form would wait for it for good. *)
-let stop_waiting_for_memory_recall_standing (state : state) reason =
-  state.memory_recall_form <-
-    Option.map
-      (fun form -> Masc_tui_memory_recall_form.stop_waiting form reason)
-      state.memory_recall_form
 
 let suspend_workspace_readings state =
   state.resource_diagrams <- None;
@@ -16347,9 +16182,6 @@ let suspend_workspace_readings state =
       keeper_name, Masc_tui_owed_read.abandoned read)
       state.identity_login_reads;
   retire_keeper_message_search state;
-  stop_waiting_for_memory_recall_standing state
-    (if state.ui_language = Lang_ko then "서버 신원 확인이 끊겨서 읽지 못했어요"
-     else "Could not read: server identity check was interrupted");
   state.workspace_read_authority <- ref ();
   state.queue_panel <- Option.map (fun panel ->
     {panel with qp_reading=Queue_unavailable; qp_observation=None;
@@ -17053,30 +16885,6 @@ let tools_skill_reference_for_refresh state ~keeper_name =
   | Some _ | None -> Option.map (fun profile -> profile.Masc.Tui_decode_tools.esp_reference)
       (selected_tools_skill_profile state)
 
-let adjacent_skill_evidence_run (state : state) ~reference ~selection ~runs ~delta =
-  let selection = match state.tools_evidence_request, state.tools_evidence_reference with
-    | Some _, Some pending when Skill_reference.equal reference pending ->
-      (match state.tools_evidence_run_id with
-       | None -> Masc.Tui_decode_skill_evidence.Latest_retained
-       | Some run_id -> Exact_run run_id)
-    | _ -> selection in
-  match runs with
-  | None -> None
-  | Some runs ->
-    let selected = match selection with
-      | Latest_retained -> Option.map
-          (fun (run : Masc.Keeper_skill_composition_evidence.run_summary) -> run.run_id)
-          (List.nth_opt runs 0)
-      | Exact_run run_id -> Some run_id in
-    Option.bind selected (fun run_id ->
-      let index = List.find_index (fun (run : Masc.Keeper_skill_composition_evidence.run_summary) ->
-        Masc.Keeper_tool_plan.Composition_run_id.equal run_id run.run_id) runs in
-      Option.bind index (fun index ->
-          let next = index + delta in
-          if next < 0 then None
-          else List.nth_opt runs next
-            |> Option.map (fun (run : Masc.Keeper_skill_composition_evidence.run_summary) -> run.run_id)))
-
 (* Which field a typed character lands in.
 
    Seven fields take letters. Paste named four of them and typing named all
@@ -17444,7 +17252,6 @@ type text_input_target =
   | Text_runtime_param
   | Text_runtime_model_form
   | Text_runtime_account_form
-  | Text_memory_recall_form
   | Text_typesafeai_exclusion_form
   | Text_voice_wizard
   | Text_palette
@@ -17543,13 +17350,6 @@ let text_input_target (state : state) ~compact_viewport =
     state.view = Config && state.config_pane = Config_runtime
     && Option.is_some state.runtime_account_form && not compact_viewport
   then Some Text_runtime_account_form
-  (* The recall form draws on the same pane and takes the same keys; it is
-     not text, but a letter reaching a global shortcut under it would leave
-     the pane with the form still open. *)
-  else if
-    state.view = Config && state.config_pane = Config_runtime
-    && Option.is_some state.memory_recall_form && not compact_viewport
-  then Some Text_memory_recall_form
   else if
     state.view = Config && state.config_pane = Config_runtime
     && Option.is_some state.typesafeai_exclusion_form && not compact_viewport
@@ -17624,7 +17424,7 @@ let quit_key_allowed_for = function
   | Some
       ( Text_collab_form | Text_account_login | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_resource_save | Text_runtime_lane_name | Text_runtime_param
-      | Text_runtime_account_form | Text_memory_recall_form | Text_typesafeai_exclusion_form
+      | Text_runtime_account_form | Text_typesafeai_exclusion_form
       | Text_runtime_model_form
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter | Text_skill_source_filter
@@ -21946,9 +21746,7 @@ let create_state
   runtime_config_status_open = true;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
-  memory_recall_form = None;
   typesafeai_exclusion_form = None;
-  memory_recall_standing_generation = 0;
   runtime_model_form = None;
   runtime_form_saves = Runtime_form_saves.empty;
   runtime_form_save_focus = None;
@@ -22375,13 +22173,8 @@ let create_state
   tools_read_inflight = None;
   tools_catalog_owed = Masc_tui_owed_read.settled;
   tools_error = None;
-  tools_activations = None;
-  tools_activations_error = None;
-  tools_keeper_usage = [];
   tools_inventory_owed = Masc_tui_owed_read.settled;
   tools_inventory_keeper = None;
-  tools_activations_owed = Masc_tui_owed_read.settled;
-  tools_usage_owed = [];
   skills_catalog = None;
   skills_catalog_error = None;
   tools_scroll = 0;

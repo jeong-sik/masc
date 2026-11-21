@@ -538,17 +538,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   ignore
     (recover_keeper_msg_requests_on_startup ~base_path:config.base_path
       : Keeper_msg_async.recovery_report);
-  let recovery_ctx : _ Keeper_types_profile.context =
-    { config
-    ; agent_name = "keeper-maintenance-recovery"
-    ; sw
-    ; clock
-    ; proc_mgr = Some env#process_mgr
-    ; net = state.net
-    ; publication_recovery_provider =
-        Mcp_server.publication_recovery_availability_provider state
-    }
-  in
   (* Dated-JSONL count cache: restore, keep, and hand back the per-file
      (path, boundary, count) table that makes [count_entries] incremental.
 
@@ -857,22 +846,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Server_maintenance_delivery_recovery.pulse ~sw
         ~config:(Mcp_server.workspace_config state) delivery_recovery Goal_effects
     in
-    let composition_completions =
-      Keeper_composition_completion_wake.create ~base_path:config.base_path () in
-    let reconcile_composition_completions () =
-      Keeper_composition_completion_wake.pulse ~sw composition_completions
-    in
-    let prepared_continuations = Keeper_composition_continuation_wake.create ~context:recovery_ctx () in
-    let reconcile_prepared_continuations () =
-      Keeper_composition_continuation_wake.pulse ~sw prepared_continuations
-    in
-    Keeper_composition_completion_wake.observe_results ~sw ~base_path:config.base_path
-      ~on_result_ready:(Keeper_composition_continuation_wake.notify_result_ready ~sw prepared_continuations);
-    let owned_job_completions = Keeper_owned_job_completion_wake.create ~config
-        ~on_result_ready:(fun record ->
-          Keeper_composition_continuation_wake.notify_result_ready ~sw prepared_continuations
-            {base_path=record.base_path;keeper_name=record.keeper_name;
-             dependency=Keeper_composition_dependency.Owned_job record.job_id}) () in
+    let owned_job_completions = Keeper_owned_job_completion_wake.create ~config () in
     let reconcile_owned_job_completions () =
       Keeper_owned_job_completion_wake.pulse ~sw owned_job_completions
     in
@@ -911,10 +885,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     in
     run_steps
       [ "goal_events", reconcile_goal_events
-      ; "composition_completions", reconcile_composition_completions
       ; "owned_job_completions", reconcile_owned_job_completions
       ; "unread_tool_results", reconcile_unread_tool_results
-      ; "prepared_continuations", reconcile_prepared_continuations
       ; "ask_answers", reconcile_ask_answers
       ; ( "transition_outboxes"
         , fun () -> project_transition_outboxes Server_transition_outbox_recovery.Startup )
@@ -933,10 +905,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           , fun () -> project_transition_outboxes Server_transition_outbox_recovery.Maintenance )
         ; "broadcast_mentions", reconcile_broadcast_mentions
         ; "goal_events", reconcile_goal_events
-        ; "composition_completions", reconcile_composition_completions
         ; "owned_job_completions", reconcile_owned_job_completions
         ; "unread_tool_results", reconcile_unread_tool_results
-        ; "prepared_continuations", reconcile_prepared_continuations
         ; "ask_answers", reconcile_ask_answers
         ; "memory_writers", pulse_memory_writers
         ];

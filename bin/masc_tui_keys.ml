@@ -576,7 +576,7 @@ let keeper_navigation_hints ~lang =
 let tools_bracket_binding ~pane =
   let ko, label = match pane with
     | Tools_surface -> "실행", "run"
-    | Tools_async | Tools_activations | Tools_usage | Tools_storage
+    | Tools_async | Tools_usage | Tools_storage
     | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> "키퍼", "Keeper"
   in
   b ~role:Moves ~ko Navigate "[ / ]" label
@@ -1695,7 +1695,7 @@ let footer_hints_tools ~lang ~pane ~keys =
       hints_in_order ~lang (reading @ [ tools_refresh; listing_next; listing_quit ])
   | Tools_surface ->
       hints_of_bindings ~lang (bindings @ tools_diagnostics_bindings)
-  | Tools_async | Tools_activations | Tools_usage ->
+  | Tools_async | Tools_usage ->
       hints_of_bindings ~lang bindings
 
 type approvals_footer =
@@ -1971,28 +1971,7 @@ let runtime_account_form_bindings =
 let footer_hints_runtime_account_form ~lang =
   hints_of_bindings ~lang runtime_account_form_bindings
 
-(* The recall form takes every key while it is open, so the pane's row --
-   [e], [r], [Tab], [q] -- would name keys the form reads as its own. The row
-   names only what the form reads. *)
-let memory_recall_form_bindings =
-  [ b ~role:Acts ~ko:"행" Navigate "\xe2\x86\x91/\xe2\x86\x93" "row"
-      ~help:"between the range row and the keeper rows"
-  ; b ~role:Acts ~ko:"범위" Navigate "\xe2\x86\x90/\xe2\x86\x92" "range"
-      ~help:"on the range row: off, picked keepers only, or every keeper"
-  ; b ~role:Acts ~ko:"고르기" Act "Space" "pick"
-      ~help:"on a keeper row, pick or drop that keeper; on the range row, the next range"
-  ; b ~role:Acts ~ko:"전체 선택/해제" Act "a" "all/none"
-      ~help:"in listed mode, toggle all keepers on or off"
-  ; b ~role:Acts ~ko:"저장" Act "Enter" "save"
-      ~help:"write the choice into runtime.toml through the preview and save [e] uses"
-  ; b ~role:Acts ~ko:"취소" Act "Esc" "cancel" ~help:"close the form; nothing is written"
-  ]
-
-let footer_hints_memory_recall_form ~lang =
-  hints_of_bindings ~lang memory_recall_form_bindings
-
-(* The exclusion form takes every key while it is open, as the recall form
-   does, so its row names only what the form reads. *)
+(* The exclusion form takes every key while it is open, so its row names only what the form reads. *)
 let typesafeai_exclusion_form_bindings =
   [ b ~role:Acts ~ko:"행" Navigate "\xe2\x86\x91/\xe2\x86\x93" "row" ~help:"between the keeper rows"
   ; b ~role:Acts ~ko:"고르기" Act "Space" "pick"

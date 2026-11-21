@@ -306,10 +306,8 @@ type event =
           server push: the reader re-fetches [/api/v1/async-requests] and an
           open request detail of that Keeper. *)
   | Keeper_skill_activations_changed of { keeper : string }
-      (** [keeper_skill_activations_changed]: the Keeper's skill activation
-          ledger changed ({!Masc.Keeper_skill_activations_changed_event}). A
-          reader re-fetches that Keeper's
-          [/api/v1/keepers/skill-activations] and [/api/v1/keepers/skill-usage]. *)
+      (** [keeper_skill_activations_changed]: legacy wire event name retained
+          for SSE parser compatibility ({!Masc.Keeper_skill_activations_changed_event}). *)
   | Keeper_roster_change of roster_change
       (** Named by {!Masc.Keeper_row_broadcast}. A server push: the roster
           reads the named row, or the whole roster, again. *)

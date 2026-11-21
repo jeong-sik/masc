@@ -349,11 +349,6 @@ val footer_hints_runtime_account_form : lang:Masc_tui_types.ui_language -> strin
     save and the way out. The form takes every other key as typing, so the
     pane's row would name keys that no longer do what it says. *)
 
-val footer_hints_memory_recall_form : lang:Masc_tui_types.ui_language -> string
-(** The runtime.toml recall form's row: the rows, the range, the pick, the
-    save and the way out. The form takes every key, so the pane's row would
-    name keys that no longer do what it says. *)
-
 val footer_hints_typesafeai_exclusion_form : lang:Masc_tui_types.ui_language -> string
 (** The runtime.toml exclusion form's row: the rows, the pick, the save and
     the way out. The form takes every key, so the pane's row would name keys

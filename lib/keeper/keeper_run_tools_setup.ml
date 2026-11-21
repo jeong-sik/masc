@@ -125,20 +125,14 @@ let base_model_tool_names
       ~model_visible_descriptors
       ()
   =
+  ignore transient_drafts;
   let descriptor_names =
     List.concat_map Keeper_tool_descriptor.keeper_model_names model_visible_descriptors in
-  let composition_names =
-    Keeper_skill_catalog.composition_entries skill_catalog
-    |> List.map (fun entry -> entry, ())
-    |> fun skill_compositions ->
-    Keeper_tool_composition_surface.schema_tool_name_rows
-      ~include_drafts:transient_drafts ~skill_compositions ()
-    |> List.map snd in
   let instruction_names =
     if Keeper_skill_catalog.instruction_entries skill_catalog <> []
-    then [Keeper_tool_composition_catalog.skill_tool_name]
+    then [ Keeper_instruction_skill.skill_tool_name ]
     else [] in
-  descriptor_names @ composition_names @ instruction_names
+  descriptor_names @ instruction_names
 ;;
 
 let project_model_tool_names ?(deferred_names = []) ~base_names ~identity_names () =
@@ -272,7 +266,6 @@ let prepare_agent_setup
       ?(tool_result_commit_policy = Keeper_hooks_agent_core.Require_commit)
       ?hitl_resolutions
       ?on_gate_deferred
-      ?composition_plan_index
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_core.Error.t) result
   =
@@ -450,24 +443,10 @@ let prepare_agent_setup
          snapshot_rev
          (Keeper_skill_catalog.turn_unavailable_to_string unavailable))
     turn_skill_projection.unavailable;
-  let executable_task_skill_selection =
+  let _executable_task_skill_selection =
     Keeper_task_skill_turn.executable_selection
       ~projection:turn_skill_projection
       task_skill_selection
-  in
-  let composition_result_delivery = Keeper_composition_result_delivery.create
-    ~base_path:config.base_path ~physical_turn_ref:skill_turn_ref in
-  let* skill_activation_context =
-    Keeper_skill_activation_recorder.make
-      ~keeper_name:meta.name
-      ~trace_id:meta.runtime.trace_id
-      ~runtime_id:(fun () -> Atomic.get active_runtime_id)
-      ~turn_ref:skill_turn_ref
-      ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision skill_snapshot)
-      ~task_selection:executable_task_skill_selection
-    |> Result.map_error (fun error ->
-         Agent_core.Error.Internal
-           (Keeper_skill_activation_recorder.error_to_string error))
   in
   let* load_receipts =
     Keeper_tool_load_receipts.restore
@@ -582,9 +561,6 @@ let prepare_agent_setup
         ; load_receipts
         ; keeper_turn_id
         }
-      ?composition_plan_index
-      ~skill_activation_context
-      ~composition_result_delivery
       ~on_inline_receipt_committed:
         (Keeper_run_tools_hook_accumulator.record_inline_receipt_committed
            acc ~keeper_turn_id)
@@ -944,8 +920,6 @@ let prepare_agent_setup
     ; on_runtime_attempt
     ; tool_result_commit_required
     ; on_tool_stream_observation
-    ; skill_activation_context
-    ; composition_result_delivery
     ; on_tool_result_ready
     ; tools
     ; agent_core_tools

@@ -554,7 +554,11 @@ let handle_in_process ctx descriptor args =
       ~source_context:ctx.source_context ~tool_use_id:ctx.tool_use_id
       ~turn_ref:ctx.turn_ref ~trace_id:ctx.trace_id ~name ~args)
   | Tool_keeper_composition_result_dispatch ->
-    Some (Keeper_composition_dependency_result.handle ~config:ctx.config ~meta:ctx.meta ~args)
+    Some
+      (Keeper_tool_execution.failure
+         ~class_:Tool_result.Policy_rejection
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         "Composition result dispatch has been retired")
   | Tool_keeper_code_query_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_keeper_code_query_with_outcome

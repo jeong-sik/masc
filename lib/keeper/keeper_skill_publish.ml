@@ -6,13 +6,9 @@ type request_error =
   | Malformed of string
   | Invalid_package_id of Skill_reference.package_id_error
   | Invalid_evidence of Publish.evidence_error
-  | Invalid_draft of Keeper_composition_draft.error
-  | Frozen_surface_required
 
 let request_error_code = function
   | Malformed _ -> "invalid_skill_publish_request"
-  | Invalid_draft _ -> "composition_draft_rejected"
-  | Frozen_surface_required -> "frozen_surface_required"
   (* Same code the Skill editor answers for the same parse failure. *)
   | Invalid_package_id _ -> "invalid_package_id"
   | Invalid_evidence _ -> "invalid_evidence"
@@ -20,14 +16,12 @@ let request_error_code = function
 
 let request_error_message = function
   | Malformed message -> message
-  | Invalid_draft error -> Yojson.Safe.to_string (Keeper_composition_draft.error_to_json error)
-  | Frozen_surface_required -> "Prepared Skill publication requires the caller's frozen surface"
   | Invalid_package_id error ->
     "package_id " ^ Skill_reference.package_id_error_to_string error
   | Invalid_evidence error -> Publish.evidence_error_to_string error
 ;;
 
-let field_names = [ "package_id"; "source_text"; "draft_sha256"; "evidence" ]
+let field_names = [ "package_id"; "source_text"; "evidence" ]
 
 let evidence_strings items =
   let rec loop acc = function
@@ -38,7 +32,9 @@ let evidence_strings items =
   loop [] items
 ;;
 
-let request ~config ~capability_surface ~keeper_name = function
+let request ~config ~capability_surface ~keeper_name =
+  ignore (config, capability_surface);
+  function
   | `Assoc fields
     when List.length fields = 3
          && List.length (List.sort_uniq String.compare (List.map fst fields)) = 3
@@ -57,22 +53,16 @@ let request ~config ~capability_surface ~keeper_name = function
          Publish.evidence_of_list strings
          |> Result.map_error (fun error -> Invalid_evidence error)
        in
-       let* source_text = match List.assoc_opt "source_text" fields, List.assoc_opt "draft_sha256" fields with
-         | Some (`String text), None -> Ok text
-         | None, Some (`String sha256) ->
-           (match capability_surface with
-            | None -> Error Frozen_surface_required
-            | Some capability_surface ->
-              Keeper_composition_draft.load_authored ~base_path:config.Workspace.base_path
-                ~capability_surface ~keeper_name ~package_id ~sha256
-              |> Result.map (fun source -> source.Keeper_composition_draft.source_text)
-              |> Result.map_error (fun error -> Invalid_draft error))
-         | _ -> Error (Malformed "exactly one of source_text or draft_sha256 is required") in
+       let* source_text =
+         match List.assoc_opt "source_text" fields with
+         | Some (`String text) -> Ok text
+         | _ -> Error (Malformed "source_text is required")
+       in
        Ok { Publish.actor = keeper_name; package_id; source_text; evidence }
      | _ ->
        Error
-         (Malformed "string package_id, source_text or draft_sha256, and an evidence list are required"))
-  | _ -> Error (Malformed "Expected package_id, evidence and exactly one of source_text or draft_sha256")
+         (Malformed "string package_id, source_text, and an evidence list are required"))
+  | _ -> Error (Malformed "Expected package_id, evidence and source_text")
 ;;
 
 let failure ~class_ ~effect_disposition ~code ~message fields =
@@ -98,17 +88,12 @@ let audit_fields = function
 let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
   match request ~config ~capability_surface ~keeper_name args with
   | Error error ->
-    let class_ = match error with
-      | Invalid_draft error -> Keeper_composition_draft.failure_class error
-      | Frozen_surface_required | Malformed _ | Invalid_package_id _ | Invalid_evidence _ -> Tool_result.Policy_rejection in
     failure
-      ~class_
+      ~class_:Tool_result.Policy_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect
       ~code:(request_error_code error)
       ~message:(request_error_message error)
-      (match error with
-       | Invalid_draft error -> [ "draft_error", Keeper_composition_draft.error_to_json error ]
-       | Malformed _ | Invalid_package_id _ | Invalid_evidence _ | Frozen_surface_required -> [])
+      []
   | Ok request ->
     let identity =
       [ "source_sha256", `String Agent_core_sha256.(digest_string request.source_text |> to_hex)

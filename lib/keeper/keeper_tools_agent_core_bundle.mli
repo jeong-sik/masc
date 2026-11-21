@@ -16,9 +16,6 @@ val make_tool_bundle_for_capability_surface
   -> ?hitl_resolutions:Keeper_hitl_resolution_batch.t
   -> ?on_gate_deferred:(string -> unit)
   -> ?identity_surface:Keeper_tools_agent_core.attached_surface
-  -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
-  -> ?skill_activation_context:Keeper_skill_activation_recorder.t
-  -> ?composition_result_delivery:Keeper_composition_result_delivery.t
   -> ?on_inline_receipt_committed:
        (keeper_name:string ->
         turn_context:Keeper_tool_call_log_context.turn_context ->

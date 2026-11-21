@@ -856,8 +856,6 @@
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
   test_keeper_tool_descriptor_registry_integrity
-  test_keeper_tool_plan
-  test_keeper_tool_composition_catalog
   test_keeper_skill_catalog
   test_keeper_tool_kind
   test_voice_command_descriptor_parity
@@ -1216,8 +1214,6 @@
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
   test_keeper_tool_descriptor_registry_integrity
-  test_keeper_tool_plan
-  test_keeper_tool_composition_catalog
   test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -2030,7 +2026,6 @@
   test_task_transition_broadcast
   test_keeper_task_cancellation_wake
   test_keeper_delegate_completion_wake
-  test_keeper_composition_completion_wake
   test_dashboard_recent_terminal_tasks
   test_sandbox_inspect_trim_10488
   test_dashboard_k2_feeds
@@ -2094,7 +2089,6 @@
   test_tool_metrics_persist
   test_model_inference_metrics
   test_keeper_tool_call_log
-  test_keeper_skill_composition_evidence
   test_keeper_tool_call_file_change
   test_tool_unified
   test_build_identity
@@ -2171,7 +2165,6 @@
   test_task_transition_broadcast
   test_keeper_task_cancellation_wake
   test_keeper_delegate_completion_wake
-  test_keeper_composition_completion_wake
   test_dashboard_recent_terminal_tasks
   test_sandbox_inspect_trim_10488
   test_dashboard_k2_feeds
@@ -2236,7 +2229,6 @@
   test_model_inference_metrics
   test_tool_unified
   test_keeper_tool_call_log
-  test_keeper_skill_composition_evidence
   test_keeper_tool_call_file_change
   test_build_identity
   test_lifecycle
@@ -3098,7 +3090,6 @@
 (include stanzas/test_masc_test_workspace_names.inc)
 (include stanzas/test_keeper_turn_tool_audit_kept.inc)
 (include stanzas/test_keeper_metrics_lines_kept.inc)
-(include stanzas/test_keeper_tail_read.inc)
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
@@ -3218,7 +3209,6 @@
 (include stanzas/test_tui_asks_signal.inc)
 (include stanzas/test_tui_async_requests_signal.inc)
 (include stanzas/test_tui_async_detail_signal.inc)
-(include stanzas/test_tui_tools_skill_signal.inc)
 (include stanzas/test_tui_chat_skill_signal.inc)
 (include stanzas/test_tui_pending_confirms_signal.inc)
 (include stanzas/test_tui_workspace_dataset_signal.inc)
@@ -3326,8 +3316,6 @@
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 (include stanzas/test_keeper_surface_post_turn_ref.inc)
 
-(include stanzas/test_keeper_tool_plan_executor.inc)
-(include stanzas/test_keeper_composition_nested.inc)
 (include stanzas/test_keeper_tool_progress_identity.inc)
 
 (include stanzas/test_keeper_fs.inc)
@@ -3457,17 +3445,11 @@
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
 (include stanzas/test_keeper_memory_change_metrics.inc)
 (include stanzas/test_keeper_librarian_absorb_gate_metrics.inc)
-(include stanzas/test_keeper_memory_recall_parts.inc)
 
-(include stanzas/test_keeper_memory_recall_flow.inc)
 
-(include stanzas/test_keeper_memory_recall_evaluation.inc)
 
-(include stanzas/test_keeper_memory_recall_turn.inc)
 
-(include stanzas/test_keeper_memory_recall_render.inc)
 
-(include stanzas/test_keeper_memory_recall_blocks.inc)
 
 (include stanzas/test_keeper_memory_write_supersedes.inc)
 
@@ -3510,8 +3492,6 @@
 (include stanzas/test_skill_catalog_announce.inc)
 (include stanzas/test_lane_addon_exports_announce.inc)
 (include stanzas/test_goal_projection_announce.inc)
-(include stanzas/test_skill_activations_broadcast.inc)
-(include stanzas/test_keeper_skill_activations_read.inc)
 (include stanzas/test_gate_connector_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
 (include stanzas/test_backlog_announce.inc)
@@ -4110,7 +4090,6 @@
   masc_tui_fusion_launch
   masc_tui_ask_projection
   masc_tui_runtime_account_form
-  masc_tui_memory_recall_form
   masc_tui_typesafeai_exclusion_form
   masc_tui_runtime_config_view
   masc_tui_model_form
@@ -5163,7 +5142,6 @@
  (name runtest)
  (deps (alias runtest-test_tui_build_identity)))
 
-(include stanzas/test_acceptance_composition_fixtures.inc)
 
 (rule
  (alias runtest-test_run_local_executable_binding)
@@ -5640,7 +5618,6 @@
 (include stanzas/test_tui_attachment_action.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_runtime_account_form.inc)
-(include stanzas/test_tui_memory_recall_form.inc)
 (include stanzas/test_tui_typesafeai_exclusion_form.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
@@ -5758,11 +5735,6 @@
   yojson))
 
 (test
- (name test_composition_control_tool_toml)
- (modules test_composition_control_tool_toml)
- (libraries alcotest masc masc.tool_schemas yojson))
-
-(test
  (name test_skill_source_config)
  (modules test_skill_source_config)
  (libraries alcotest masc.skill_config masc.keeper_toml masc.masc_core))
@@ -5861,94 +5833,6 @@
   yojson))
 
 (test
- (name test_keeper_skill_activation_ledger)
- (modules test_keeper_skill_activation_ledger)
- (deps fixtures/skill-ledger-revision.json fixtures/skill-ledger-async-delivery.json fixtures/skill-ledger-async-actions.json)
- (libraries
-  alcotest
-   masc.agent_core.digest
-  masc.fs_compat
-  masc
-  masc_server
-  masc.keeper_registry
-  masc.masc_types
-  masc.skill_reference
-  masc.skill_snapshot
-  masc.skill_config
-  unix
-  yojson))
-
-(test
- (name test_keeper_skill_activation_recorder)
- (modules test_keeper_skill_activation_recorder)
- (libraries
-  alcotest
-   masc.agent_core.digest
-  masc
-  masc.agent_core
-  masc.keeper_registry
-  masc.masc_types
-  masc.runtime
-  masc.skill_config
-  masc.skill_reference
-  masc.skill_snapshot
-  unix))
-
-(test
- (name test_tui_skill_async_evidence)
- (modules test_tui_skill_async_evidence)
- (deps fixtures/skill-ledger-async-actions.json)
- (libraries alcotest masc yojson))
-
-(test
- (name test_keeper_skill_activation_discovery)
- (modules test_keeper_skill_activation_discovery)
- (deps fixtures/skill-ledger-async-actions.json)
- (libraries
-  alcotest
-   masc.agent_core.digest
-  yojson
-  fs_compat
-  masc
-  masc.keeper_registry
-  masc.masc_types
-  masc.skill_config
-  masc.skill_reference
-  masc.skill_snapshot
-  unix))
-
-(test
- (name test_keeper_skill_activation_owner)
- (modules test_keeper_skill_activation_owner)
- (libraries
-  alcotest
-  fs_compat
-  masc
-  masc.keeper_registry
-  masc.runtime
-  masc_test_deps
-  unix))
-
-(test
- (name test_keeper_skill_activation_projection)
- (modules test_keeper_skill_activation_projection)
- (deps fixtures/skill-ledger-async-actions.json)
- (libraries
-  alcotest
-  eio_main
-  fs_compat
-  masc
-  masc.keeper_registry
-  masc.masc_types
-  masc.server
-  masc.skill_config
-  masc.skill_reference
-  masc.skill_snapshot
-  masc_test_deps
-  unix
-  yojson))
-
-(test
  (name test_asset_sync_report)
  (modules test_asset_sync_report)
  (libraries alcotest masc))
@@ -6029,11 +5913,6 @@
  (modules test_tui_loading_notice)
  (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc.sse_wire masc_tui_agenda masc_tui_owed_read masc_tui_types masc_tui_keeper_sandbox
   masc_tui_value unix))
-
-(test
- (name test_keeper_composition_async_broker)
- (modules test_keeper_composition_async_broker)
- (libraries masc_test_deps masc.embedded_config))
 
 (test
  (name test_keeper_remote_ssh_profile)
@@ -6424,7 +6303,6 @@
   (run python3 %{dep:test_docker_observe_transport.py}
    %{exe:test_docker_observe_transport.exe})))
 
-(include stanzas/test_browser_composition.inc)
 
 (include stanzas/test_shipped_skills.inc)
 
@@ -7009,7 +6887,6 @@
   masc.skill_snapshot masc.skill_snapshot_service))
 
 (include stanzas/test_browser_observation.inc)
-(include stanzas/test_browser_observation_composition.inc)
 (include stanzas/test_browser_backend_routes.inc)
 
 (test
@@ -7383,22 +7260,6 @@
  (modules test_redaction_source_spans)
  (libraries alcotest masc masc.secret_patterns re unix))
 
-; H2 crash-resume harness: scenario subcommands need orchestrated env
-; (H2_ROOT, H2_ASYNC_*), so it is an executable, not a (test) — a (test)
-; stanza would run it with no args under the default runtest alias and exit 2.
-; Run: ./test_h2_composition_resume.exe <scenario> with H2_ROOT set.
-(executable
- (name test_h2_composition_resume)
- (modules test_h2_composition_resume)
- (libraries masc_test_deps))
-
-; H2 execution journal harness: no-args runs all scenarios (deterministic,
-; temp dirs only), so it is safe under the default runtest alias.
-(test
- (name test_h2_journal)
- (modules test_h2_journal)
- (libraries masc_test_deps masc.operator masc.skill_config masc_tui_types masc_tui_task_document masc_tui_task_document_observation masc_tui_workspace_job masc_tui_fetched masc_tui_overview_tasks masc_tui_loader masc_tui_agenda))
-
 (test
  (name test_keeper_owned_jobs)
  (modules test_keeper_owned_jobs)
@@ -7536,32 +7397,6 @@
  (name keeper_owned_job_fixture_transport)
  (wrapped false)
  (modules keeper_owned_job_fixture_transport))
-
-; Opt-in harness executable. It never runs under runtest or calls a paid model.
-(executable
- (name keeper_preparation_trial_driver)
- (modules keeper_preparation_trial_driver keeper_preparation_http_observation)
- (libraries masc_test_deps keeper_owned_job_fixture_transport
-  masc.skill_config masc.skill_reference masc.skill_snapshot_service masc.masc_random_id mtime.clock.os))
-
-; Explicit synthetic functional case. The coordinator invokes the real driver.
-(rule
- (alias runtest-test_keeper_preparation_trial)
- (deps
-  test_keeper_preparation_trial.py
-  keeper_preparation_trial_driver.exe
-  ../scripts/benchmarks/keeper-composition/preparation_trial.py
-  (source_tree ../config/prompts))
- (action
-  (run python3 %{dep:test_keeper_preparation_trial.py}
-   --driver %{exe:keeper_preparation_trial_driver.exe}
-   --coordinator %{dep:../scripts/benchmarks/keeper-composition/preparation_trial.py}
-   --prompts %{workspace_root}/config/prompts
-   --repository-root %{workspace_root}
-   --model-id preparation-synthetic-streaming-fixture
-   --max-context-tokens 1048576
-   --max-output-tokens 4096)))
-
 
 (test
  (name test_keeper_turn_transcript_http)
@@ -7868,7 +7703,6 @@
 
 (include stanzas/test_authz_high_water.inc)
 
-(include stanzas/test_server_memory_recall_standing.inc)
 
 (include stanzas/test_tui_machine_pty_3a.inc)
 
@@ -7899,7 +7733,6 @@
 
 (include stanzas/test_keeper_chat_run_signal.inc)
 
-(include stanzas/test_server_skill_missing_on_disk.inc)
 
 (include stanzas/test_telemetry_source_writes.inc)
 
@@ -7949,3 +7782,5 @@
 (include stanzas/test_exact_lane_walk.inc)
 
 (include stanzas/test_exact_lane_slots.inc)
+
+(include stanzas/test_keeper_compaction.inc)

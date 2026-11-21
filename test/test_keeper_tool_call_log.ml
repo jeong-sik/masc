@@ -793,7 +793,6 @@ let test_composition_action_context_persisted () =
       ~skill_reference
       ~composition_run_id:"run-42"
       ~composition_node_id:"fetch_sources"
-      ~composition_execution:Keeper_tool_composition_catalog.Async
       ~parent_tool_use_id:"outer-7"
       ();
     match read_recent ~n:1 () with
@@ -808,7 +807,6 @@ let test_composition_action_context_persisted () =
         ; "composition tool", "composition_tool", "keeper_research_pipeline"
         ; "composition run", "composition_run_id", "run-42"
         ; "composition node", "composition_node_id", "fetch_sources"
-        ; "composition execution", "composition_execution", "async"
         ; "outer provider call", "parent_tool_use_id", "outer-7"
         ]
       ; Alcotest.(check string)
@@ -864,7 +862,6 @@ let test_composition_rows_separate_submitted_from_autonomous_turn () =
              ~composition_tool:"keeper_compose_work-intake"
              ~composition_run_id:run_id
              ~composition_node_id:node_id
-             ~composition_execution:Keeper_tool_composition_catalog.Inline
              ~parent_tool_use_id:("call-" ^ run_id)
              ())
         node_ids

@@ -119,8 +119,6 @@ type ctx =
       (tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) option
   ; on_tool_stream_observation :
       (Keeper_hooks_agent_core.tool_stream_observation -> unit) option
-  ; skill_activation_context : Keeper_skill_activation_recorder.t
-  ; composition_result_delivery : Keeper_composition_result_delivery.t
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; identity_tool_index : Keeper_identity_tool_index.t
@@ -136,136 +134,6 @@ let relax_strict_tool_choice_for_keeper = function
 let project_model_input ~base_path ~gate_replay_evidence messages =
   Keeper_gate_replay.project_model_inputs ~base_path gate_replay_evidence messages
 ;;
-
-(* One tool result's identity as the skill ledger matches it. The wire content
-   the model reads is not always the served body: RFC-0363 externalizes a large
-   body to a blob and leaves a [\[masc:blob sha256=… bytes=…\]] marker in its
-   place. The marker carries the served body's own sha256 and byte count, so a
-   receipt taken from the marker still equals what the skill served, and a body
-   the model reached only by dereferencing the blob is credited as delivered.
-   A non-marker content is hashed as-is; a marker-shaped content that fails to
-   parse is hashed as-is too, so a corrupt marker is never read as a delivery
-   of some other body. *)
-let receipt_of_tool_result ~tool_use_id ~content =
-  let content_bytes, content_sha256 =
-    match Tool_output.decode_from_agent_core content with
-    | Tool_output.Decoded reference ->
-      reference.Tool_output.bytes, reference.Tool_output.sha256
-    | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-      String.length content, Agent_core_sha256.(digest_string content |> to_hex)
-  in
-  Keeper_skill_activation_ledger.{ tool_use_id; content_bytes; content_sha256 }
-;;
-
-(* The tool results the model response boundary answers. A turn's tool results
-   are the last messages before the model's reply, but not always the single
-   final one: a keeper that runs several tools in a batch, or appends a
-   dynamic-context message after the results, leaves the skill's result one or
-   more messages back. Take every trailing Tool message, stopping at the first
-   non-Tool, rather than only the very last message -- the previous rule
-   dropped the receipt whenever anything followed the results, and the skill
-   ledger then never matched. Non-trailing history is not scanned: a result
-   older than this turn was already offered at its own boundary. Prepending
-   each message's forward [results] onto [acc] while walking [List.rev messages]
-   restores chronological message and content order without a second reverse. *)
-let trailing_tool_result_contents messages =
-  let rec take acc = function
-    | {Agent_core.Types.role=Tool;content;_}::rest ->
-      let results = List.filter_map (function
-        | Agent_core.Types.ToolResult {tool_use_id;content;_} -> Some (tool_use_id,content)
-        | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolReference _ | Image _ | Document _ | Audio _ -> None) content in
-      take (results @ acc) rest
-    | {role=(User | System | Assistant);_}::_ | [] -> acc
-  in take [] (List.rev messages)
-;;
-
-let trailing_tool_result_receipts messages =
-  trailing_tool_result_contents messages
-  |> List.map (fun (tool_use_id,content) -> receipt_of_tool_result ~tool_use_id ~content)
-;;
-
-let composition_result_lifecycle_hook delivery = function
-  | Agent_core.Hooks.PreToolUse {invocation;tool_name;_} ->
-    (* Compare the canonical tool identity. A different tool that reuses a
-       provider ID cannot carry that ID's previous status-result authority. *)
-    if not (String.equal tool_name Keeper_tool_composition_catalog.status_tool_name)
-    then Keeper_composition_result_delivery.discard_status delivery ~invocation;
-    Agent_core.Hooks.Continue
-  | Agent_core.Hooks.PostToolUseFailure {invocation;_} ->
-    (* SDK schema rejection happens before the MASC handler is entered. *)
-    Keeper_composition_result_delivery.discard_status delivery ~invocation;
-    Agent_core.Hooks.Continue
-  | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | AfterRestoredTurn _ | PostToolUse _
-  | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue
-;;
-
-module Skill_delivery_state = struct
-  type staged =
-    { runtime_id : string
-    ; agent_core_turn : int
-    ; tool_results : Keeper_skill_activation_ledger.tool_result_receipt list
-    }
-
-  type t =
-    { mutable pending : staged option
-    ; mutable active_skill_tool_use_ids : string list
-      (* The delivery boundary's MASC agent-core turn. Native actions reported
-         by official clients carry only a per-CLI-session counter, so the
-         ledger comparison against [delivery.agent_core_turn] must reuse this
-         value — the two counters share no axis (#31081 review P1). *)
-    ; mutable active_agent_core_turn : int option
-    }
-
-  let create () =
-    { pending = None
-    ; active_skill_tool_use_ids = []
-    ; active_agent_core_turn = None
-    }
-  ;;
-
-  let clear state =
-    state.pending <- None;
-    state.active_skill_tool_use_ids <- [];
-    state.active_agent_core_turn <- None
-  ;;
-
-  let begin_turn = clear
-  let begin_runtime_attempt = clear
-
-  let stage state ~runtime_id ~agent_core_turn tool_results =
-    state.pending <- Some { runtime_id; agent_core_turn; tool_results }
-  ;;
-
-  let set_active state ~agent_core_turn ids =
-    state.active_skill_tool_use_ids <- ids;
-    state.active_agent_core_turn
-    <- (match ids with
-        | [] -> None
-        | _ :: _ -> Some agent_core_turn)
-  ;;
-
-  let clear_active state =
-    state.active_skill_tool_use_ids <- [];
-    state.active_agent_core_turn <- None
-  ;;
-
-  let commit_model_response state ~agent_core_turn ~observe =
-    match state.pending with
-    | Some staged when staged.agent_core_turn = agent_core_turn ->
-      state.pending <- None;
-      set_active state ~agent_core_turn (observe staged)
-    | Some _ | None -> ()
-  ;;
-
-  let active state = state.active_skill_tool_use_ids
-
-  let active_delivery state =
-    match state.active_skill_tool_use_ids, state.active_agent_core_turn with
-    | (_ :: _ as ids), Some agent_core_turn -> Some (ids, agent_core_turn)
-    | _, _ -> None
-  ;;
-end
 
 let relative_path_has_segment_prefix prefix raw =
   String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
@@ -533,127 +401,13 @@ let assemble_hooks
        mutex gives those effects one order without introducing a process-global
        gate or serializing tool execution itself. *)
     let serialize_tool_observer = create_tool_observer_serialization () in
-    let skill_delivery_state = Skill_delivery_state.create () in
-    let async_actions = Keeper_skill_async_action_observer.create ~config ~context:ctx.skill_activation_context in
-    let async_action_error error =
-      Log.Keeper.warn "Async child action evidence refused keeper=%s detail=%s"
-        meta.name (Keeper_skill_async_action_observer.error_to_string error)
-    in
-    let observe_composition_result observation =
-      Log.Keeper.info
-        "Prepared composition result handoff keeper=%s evidence=%s"
-        meta.name
-        (Keeper_composition_result_delivery.observation_to_json observation |> Yojson.Safe.to_string);
-      match Keeper_skill_async_action_observer.record_delivery async_actions observation with
-      | Ok None -> ()
-      | Ok (Some delivery) -> Log.Keeper.info "Prepared child handoff recorded keeper=%s evidence=%s"
-          meta.name (Keeper_skill_async_delivery.to_json delivery |> Yojson.Safe.to_string)
-      | Error error -> Log.Keeper.warn "Prepared child handoff ledger refused keeper=%s detail=%s"
-          meta.name (Keeper_skill_async_action_observer.error_to_string error)
-    in
-    let composition_delivery_error error =
-      Log.Keeper.warn "Prepared composition result handoff refused keeper=%s detail=%s"
-        meta.name (Keeper_composition_result_delivery.error_to_string error)
-    in
-    let observe_skill_delivery ~runtime_id ~boundary tool_results =
-      (* Every handoff is a new causal boundary. A failed ledger observation
-         cannot leave ids from an older successful handoff active. *)
-      Skill_delivery_state.clear_active skill_delivery_state;
-      let boundary_agent_core_turn =
-        match boundary with
-        | Keeper_skill_activation_ledger.Model_response { agent_core_turn }
-        | Keeper_skill_activation_ledger.Official_client_result_handoff
-            { agent_core_turn } -> agent_core_turn
-      in
-      match
-        Keeper_skill_activation_recorder.observe_delivery
-          ~config
-          ctx.skill_activation_context
-          ~tool_results
-          ~boundary
-          ~runtime_id
-      with
-      | Ok delivered ->
-        Skill_delivery_state.set_active
-          skill_delivery_state
-          ~agent_core_turn:boundary_agent_core_turn
-          (List.sort_uniq String.compare delivered)
-      | Error error ->
-        Log.Keeper.warn
-          "Skill delivery observation failed for keeper=%s error=%s"
-          meta.name
-          (Keeper_skill_activation_recorder.error_to_string error)
-    in
-    let stage_skill_delivery_on_wire ~runtime_id ~agent_core_turn messages =
-      Keeper_composition_result_delivery.stage_provider ctx.composition_result_delivery
-        ~runtime_id ~agent_core_turn ~tool_results:(trailing_tool_result_contents messages);
-      Skill_delivery_state.stage
-        skill_delivery_state
-        ~runtime_id
-        ~agent_core_turn
-        (trailing_tool_result_receipts messages)
-    in
-    let observe_official_client_result_handoff ~runtime_id ~invocation ~content =
-      (* Official clients can receive sibling MCP results before their next
-         native step. Keep all inline receipts in this physical attempt;
-         actual turn/attempt resets below revoke their authority. *)
-      Keeper_composition_result_delivery.observe_official_result ctx.composition_result_delivery
-        ~runtime_id ~invocation ~content ~observe:observe_composition_result
-        ~on_error:composition_delivery_error;
-      let tool_use_id =
-        Agent_core.Tool_contract.Invocation.tool_use_id invocation
-      in
-      let agent_core_turn = Agent_core.Tool_contract.Invocation.turn invocation in
-      let tool_results = [ receipt_of_tool_result ~tool_use_id ~content ] in
-      observe_skill_delivery
-        ~runtime_id
-        ~boundary:
-          (Keeper_skill_activation_ledger.Official_client_result_handoff
-             { agent_core_turn })
-        tool_results
-    in
+    let stage_skill_delivery_on_wire ~runtime_id:_ ~agent_core_turn:_ _messages = () in
+    let observe_official_client_result_handoff ~runtime_id:_ ~invocation:_ ~content:_ = () in
     let observe_official_client_native_action
-          ~runtime_id ~official_turn ~identity ~tool_name =
-      (match Keeper_skill_async_action_observer.native_started async_actions
-          ~runtime_id ~official_turn ~identity ~tool_name with
-       | Ok _ -> () | Error error -> async_action_error error);
-      (* [official_turn] is the CLI's own per-session counter and shares no
-         axis with the ledger's agent-core turns; it stays in log lines as
-         provenance only. The ledger receives the delivery boundary's
-         agent-core turn, which the delivery state carries alongside the
-         active ids (#31081 review P1). *)
-      match Skill_delivery_state.active_delivery skill_delivery_state with
-      | None -> ()
-      | Some (active_skill_tool_use_ids, agent_core_turn) ->
-        (try
-           match
-             Keeper_skill_activation_recorder.observe_native_action
-               ~config ctx.skill_activation_context ~active_skill_tool_use_ids
-               ~runtime_id ~agent_core_turn ~identity ~tool_name
-           with
-           | Ok _ -> ()
-           | Error error ->
-             Log.Keeper.warn "Official native Skill action observation failed keeper=%s runtime=%s official_turn=%d tool=%s error=%s"
-               meta.name runtime_id official_turn tool_name
-               (Keeper_skill_activation_recorder.error_to_string error)
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Log.Keeper.warn "Official native Skill action observer raised keeper=%s runtime=%s official_turn=%d tool=%s error=%s"
-             meta.name runtime_id official_turn tool_name (Printexc.to_string exn))
-    in
+          ~runtime_id:_ ~official_turn:_ ~identity:_ ~tool_name:_ = () in
     let active_tool_surface_enabled = ref false in
     let active_checkpoint_owner = ref None in
     let host_memory = ref None in
-    let recall_delivery = Keeper_memory_recall_blocks.create_delivery () in
-    (* The recall judgment of this run of the turn is made once, before its
-       first request, and every later call gets the same judgment back, unless
-       it came to unavailable, which is asked again. A runtime attempt that
-       fails over re-assembles the context but must not judge again, so unlike
-       [host_memory] this is not reset in [on_runtime_attempt]. A run that
-       starts again for the same turn, from a checkpoint, builds a new memo and
-       may judge again. *)
-    let recall_memo = Keeper_memory_recall_turn.create_memo () in
     (* The queue is read when a turn starts, so a row that arrives while this
        run goes on waits for it to end. A round that follows tool results lists
        the rows that arrived since the run began, once each
@@ -661,8 +415,8 @@ let assemble_hooks
        in the owner's operation queue, which no round reads, so the same round
        also says how many are queued when that count rises
        ([Keeper_waiting_operations]); they start after this run. Both are built
-       with the run, like [recall_memo]: a run that starts again for the same
-       turn tells what it sees since it started. *)
+       with the run: a run that starts again for the same turn tells what it
+       sees since it started. *)
     let arrived_tracker =
       Keeper_arrived_stimuli.create_tracker ~run_started_at:(Time_compat.now ())
     in
@@ -710,13 +464,9 @@ let assemble_hooks
       | blocks -> Some (String.concat "\n\n" blocks)
     in
     let on_memory_capacity_refusal ~refusal =
-      let shared = match !host_memory with
-        | None -> Ok Keeper_memory_delivery_reprojection.Unchanged
-        | Some prepared -> Keeper_workspace_memory_host_recall.defer_for_capacity prepared ~refusal in
-      match shared with
-      | Error _ as error -> error
-      | Ok Keeper_memory_delivery_reprojection.Reprojected as reduced -> reduced
-      | Ok Unchanged -> Keeper_memory_recall_blocks.defer_for_capacity recall_delivery
+      match !host_memory with
+      | None -> Ok Keeper_memory_delivery_reprojection.Unchanged
+      | Some prepared -> Keeper_workspace_memory_host_recall.defer_for_capacity prepared ~refusal
     in
     let usage_attempt = ref None in
     let usage_report_of_attempt = ref None in
@@ -737,7 +487,6 @@ let assemble_hooks
     let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
       host_memory := None;
       Keeper_run_tools_hook_accumulator.set_delivered_source_invalidations acc [];
-      Keeper_memory_recall_blocks.begin_runtime_attempt recall_delivery;
       active_tool_surface_enabled := attempt.tool_surface_enabled;
       active_checkpoint_owner := Some attempt.checkpoint_owner;
       usage_attempt := Some (attempt.routing_run_id, attempt.runtime_id, attempt.lane_attempt_index);
@@ -749,12 +498,6 @@ let assemble_hooks
           ~routing_run_id:attempt.routing_run_id
           ~runtime_id:attempt.runtime_id
           ~lane_attempt_index:attempt.lane_attempt_index;
-      (* An official-client handoff belongs only to the runtime that produced
-         it. A failover candidate must receive the Skill result itself before
-         one of its actions can complete that activation's evidence. *)
-      Keeper_skill_async_action_observer.clear async_actions;
-      Skill_delivery_state.begin_runtime_attempt skill_delivery_state;
-      Keeper_composition_result_delivery.clear_pending ctx.composition_result_delivery;
       ctx.on_runtime_attempt attempt
     in
     (* [client_reported_in_attempt] says the attempt's client reported on its
@@ -894,24 +637,9 @@ let assemble_hooks
           Some
             (fun event ->
               match event with
-              | Agent_core.Hooks.AfterTurn { turn; _ } ->
+              | Agent_core.Hooks.AfterTurn _ ->
                 Keeper_arrived_stimuli.confirm arrived_tracker;
                 Keeper_waiting_operations.confirm waiting_tracker;
-                Keeper_skill_async_action_observer.begin_handoff async_actions;
-                Keeper_composition_result_delivery.commit_provider_response ctx.composition_result_delivery
-                  ~agent_core_turn:turn ~observe:observe_composition_result
-                  ~on_error:composition_delivery_error;
-                Skill_delivery_state.commit_model_response
-                  skill_delivery_state
-                  ~agent_core_turn:turn
-                  ~observe:(fun staged ->
-                    observe_skill_delivery
-                      ~runtime_id:staged.runtime_id
-                      ~boundary:
-                        (Keeper_skill_activation_ledger.Model_response
-                           { agent_core_turn = turn })
-                      staged.tool_results;
-                    Skill_delivery_state.active skill_delivery_state);
                 Agent_core.Hooks.Continue
               | Agent_core.Hooks.BeforeTurn _
               | AfterRestoredTurn _
@@ -927,33 +655,9 @@ let assemble_hooks
           Some
             (fun event ->
               match event with
-              | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
-                ignore (Keeper_skill_async_action_observer.sdk_hook async_actions ~on_error:async_action_error event);
-                ignore (composition_result_lifecycle_hook ctx.composition_result_delivery event);
-                (* A pre-hook observes a request, before validation/approval.
-                   Include Skill without claiming the handler has started. *)
+              | Agent_core.Hooks.PreToolUse { tool_name; _ } ->
                 Keeper_turn_preview.note_tool ~writer:preview
                   ~now:(Time_compat.now ()) tool_name;
-                if not (String.equal tool_name
-                          Keeper_tool_composition_catalog.skill_tool_name)
-                   && Skill_delivery_state.active skill_delivery_state <> []
-                then
-                  (match
-                     Keeper_skill_activation_recorder.observe_action
-                       ~config
-                       ctx.skill_activation_context
-                       ~active_skill_tool_use_ids:
-                         (Skill_delivery_state.active skill_delivery_state)
-                       ~invocation
-                       ~tool_name
-                   with
-                   | Ok _ -> ()
-                   | Error error ->
-                     Log.Keeper.warn
-                       "Skill action observation failed for keeper=%s tool=%s error=%s"
-                       meta.name
-                       tool_name
-                       (Keeper_skill_activation_recorder.error_to_string error));
                 Agent_core.Hooks.Continue
               | BeforeTurn _
               | BeforeTurnParams _
@@ -964,11 +668,6 @@ let assemble_hooks
               | OnError _
               | OnToolError _ ->
                 Agent_core.Hooks.Continue)
-      ;
-        post_tool_use = Some (Keeper_skill_async_action_observer.sdk_hook async_actions ~on_error:async_action_error)
-      ; post_tool_use_failure = Some (fun event ->
-          ignore (Keeper_skill_async_action_observer.sdk_hook async_actions ~on_error:async_action_error event);
-          composition_result_lifecycle_hook ctx.composition_result_delivery event)
       ; before_turn_params =
           Some
             (guard_repetition_before_turn_params repetition_execution (fun event ->
@@ -981,14 +680,7 @@ let assemble_hooks
                      ; detail = "context assembly has no resolved runtime attempt owner" }
                  | Some checkpoint_owner ->
                 let hook_t0 = Time_compat.now () in
-                Keeper_memory_recall_blocks.begin_request recall_delivery;
                 acc.current_turn <- turn;
-                (* A delivered Skill can only inform tool choices made from this
-                   exact provider request. Do not carry causal candidates into a
-                   later Agent Core turn. *)
-                Keeper_skill_async_action_observer.clear async_actions;
-                Skill_delivery_state.begin_turn skill_delivery_state;
-                Keeper_composition_result_delivery.clear_pending ctx.composition_result_delivery;
                 (* Reset the in-turn FSM before this hook writes the next agent-core
                    turn's runtime, policy, and prompt phases. *)
                 Keeper_registry.mark_agent_core_turn_started
@@ -1074,7 +766,7 @@ let assemble_hooks
                 (* Deferred compositions follow the current execution owner.
                    A prior Agent Core cell can survive official-client
                    failover; it cannot describe that client's tools or loader. *)
-                let built_tools, all_tool_names, deferred_tool_names =
+                let built_tools, _all_tool_names, deferred_tool_names =
                   match ctx.current_model_surface () with
                   | None -> built_tools, all_tool_names, deferred_tool_names
                   | Some view ->
@@ -1088,21 +780,6 @@ let assemble_hooks
                 let attempt_surface = Keeper_agent_tool_surface.for_attempt
                     ~checkpoint_owner:!active_checkpoint_owner
                     ~agent_cell:turn_agent_cell ~built:built_tools in
-                Option.iter
-                  (record_block Prompt_block_id.Skill_compositions)
-                  (skill_compositions_block
-                     ~compositions:
-                       (List.filter
-                          (fun tool_name ->
-                            Option.is_some
-                              (Keeper_tool_composition_catalog
-                               .skill_source_of_tool_name
-                                 tool_name))
-                          all_tool_names)
-                     ~deferred:deferred_tool_names
-                     ~on_the_wire:
-                       (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
-                          attempt_surface.tools));
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn
@@ -1202,36 +879,6 @@ let assemble_hooks
                        acc
                        rendered.Keeper_memory_os_recall.delivered_invalidations;
                      record_block Prompt_block_id.Memory_os_recall rendered.text);
-                (* The recall judgment (RFC keeper-recall-reaches-the-turn, section
-                   4.4). A Keeper that is not judged gets nothing here and reads
-                   nothing, and MASC_KEEPER_MEMORY_OS_RECALL=0 turns it off with
-                   the block above. Like that block, it is made on the first
-                   round only. *)
-                (if not post_tool_round && recall_permitted
-                 then
-                   let turn_ref =
-                     Ids.Turn_ref.make
-                       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                       ~absolute_turn:keeper_turn_id
-                   in
-                   Option.iter
-                     (fun recalled ->
-                        let recalled = Keeper_memory_recall_blocks.for_request recall_delivery recalled in
-                        List.iter
-                          (fun (block, text) -> record_block block text)
-                          (Keeper_memory_recall_blocks.prompt_blocks recalled))
-                     (Keeper_memory_recall_blocks.prepare
-                        ~memo:recall_memo
-                        ~config
-                        ~keepers_dir:memory_os_keepers_dir
-                        ~keeper_id:meta.name
-                        ~turn_ref
-                        ~purpose:
-                          (Keeper_memory_recall_blocks.purpose
-                             ~current_input:user_message
-                             ~keeper_instructions:meta.instructions
-                             ~turn_ref)
-                        ~memory_search_available:(recall_tool_available "keeper_memory_search")));
                 (* The Librarian index changes independently of ordinary facts.
                    Keeping separate identities avoids replaying every fact when
                    only the working-context revision or artifact changed. *)
@@ -1288,11 +935,6 @@ let assemble_hooks
                 let recorded_blocks_for_receipt =
                   Keeper_context_assembly.logical_blocks extra_system_context_assembly
                 in
-                Keeper_memory_recall_blocks.observe_request recall_delivery
-                  ~turn_ref:(Ids.Turn_ref.make
-                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                    ~absolute_turn:keeper_turn_id)
-                  ~blocks:extra_system_context_assembly.blocks;
                 (* The assembled text exists only here. The turn record keeps
                    each block's bytes and digest, which answers "how much" but
                    never "what", so an operator asking what this keeper is being

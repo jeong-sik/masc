@@ -865,9 +865,7 @@ let decode_keeper_tool_call fields =
    tool and the node. The ids are read with the plan's own parsers, so an id
    the server could not have minted fails the frame instead of drawing. *)
 let decode_keeper_tool_call_evidence fields =
-  let event =
-    Masc.Keeper_tool_composition_surface_observation.evidence_committed_event_type
-  in
+  let event = "keeper_tool_call_evidence_committed" in
   let* ce_keeper = required string_field fields "name" ~event in
   let* ce_tool = required string_field fields "tool_name" ~event in
   let* ce_composition_tool = required string_field fields "composition_tool" ~event in
@@ -963,9 +961,7 @@ let reading_of_type type_name =
           | None -> decode_agent_core ~type_name fields)
   | "keeper_heartbeat" -> From_fields decode_keeper_heartbeat
   | "keeper_tool_call" -> From_fields decode_keeper_tool_call
-  | type_name
-    when String.equal type_name
-           Masc.Keeper_tool_composition_surface_observation.evidence_committed_event_type ->
+  | "keeper_tool_call_evidence_committed" ->
       From_fields decode_keeper_tool_call_evidence
   | "keeper_turn_complete" -> From_fields decode_keeper_turn_complete
   | "keeper_turn_observation" -> From_fields decode_keeper_turn_observation
@@ -1073,7 +1069,7 @@ let reading_of_type type_name =
           match string_field fields "name" with
           | Some keeper -> Ok (Keeper_async_requests_changed { keeper })
           | None -> Error (event ^ " carries no name"))
-  | event when String.equal event Masc.Keeper_skill_activations_changed_event.event_type ->
+  | "keeper_skill_activations_changed" as event ->
       From_fields
         (fun fields ->
           match string_field fields "name" with

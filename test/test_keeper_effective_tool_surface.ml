@@ -134,7 +134,7 @@ let instruction_entries snapshot references =
     let partition = Keeper_task_skill_turn.partition selection in
     List.map
       (fun (selected : Keeper_task_skill_turn.selected) ->
-         Keeper_tool_composition_surface.instruction_skill
+         Keeper_instruction_skill.instruction_skill
            ~reference:selected.reference
            ~description:selected.skill.description
            ~body:selected.skill.body
@@ -291,13 +291,6 @@ let test_projection_names_equal_turn_surface_authority () =
             String.equal tool.name "keeper_skill"
             && tool.origin = Keeper_effective_tool_surface.Instruction_skill)
          surface.tools);
-    check bool "composition provenance exists" true
-      (List.exists
-         (fun (tool : Keeper_effective_tool_surface.tool) ->
-            match tool.origin with
-            | Keeper_effective_tool_surface.Composition_skill _ -> true
-            | _ -> false)
-         surface.tools);
     check bool "official client digest exists" true
       (Option.is_some surface.tool_surface_sha256);
     check bool "whole tool surface bytes are measured" true
@@ -319,24 +312,15 @@ let test_projection_names_equal_turn_surface_authority () =
     in
     check (list (list string))
       "exact load reasons distinguish Task and catalog default"
-      [ [ "task"; "catalog_default" ]; [ "catalog_default" ] ]
+      [ [ "task"; "catalog_default" ] ]
       profile_reasons;
     (match surface.skill_profiles with
-     | [ instruction; composition ] ->
+     | [ instruction ] ->
        check string "instruction activation" "on_demand"
          (Keeper_skill_observability.execution_label instruction.surface);
        check (option int) "shared instruction schema is not double-counted" None
-         instruction.tool_schema_bytes;
-       check string "composition execution" "async"
-         (Keeper_skill_observability.execution_label composition.surface);
-       check int "composition nodes" 2 composition.node_count;
-       check int "one concurrent batch" 1 composition.batch_count;
-       check int "actual parallel width" 2 composition.max_parallelism;
-       check (option bool) "async plan is statically read-only" (Some true)
-         composition.statically_read_only;
-       check bool "composition schema bytes are exact and positive" true
-         (Option.value ~default:0 composition.tool_schema_bytes > 0)
-     | profiles -> failf "expected two Skill profiles, got %d" (List.length profiles));
+         instruction.tool_schema_bytes
+     | profiles -> failf "expected one instruction Skill profile, got %d" (List.length profiles));
     check (option int) "resource bound follows frozen snapshot" (Some 16384)
       surface.skill_resource_read_max_bytes;
     check string
@@ -347,12 +331,12 @@ let test_projection_names_equal_turn_surface_authority () =
          surface.skill_snapshot_revision);
     let instruction_entries = instruction_entries snapshot [ task_reference ] in
     let tool =
-      Keeper_tool_composition_surface.instruction_skill_schema_tool
+      Keeper_instruction_skill.instruction_skill_schema_tool
         ~instruction_skills:instruction_entries |> Result.get_ok
     in
     (
        check string "projection carries the exact Available list"
-         (Keeper_tool_composition_surface.For_testing.instruction_skill_description
+         (Keeper_instruction_skill.instruction_skill_description
             instruction_entries)
          tool.schema.description;
        (* The line carries what a call needs and stops there. The revision is
@@ -413,69 +397,6 @@ let test_projection_names_equal_turn_surface_authority () =
 ;;
 
 
-let test_external_composition_preserves_snapshot_provenance () =
-  ignore (Masc_test_deps.init_unified_tool_registry ());
-  match
-    Keeper_effective_tool_surface.For_testing.project
-      ~keeper_name:"fixture"
-      ~runtime_id:"fixture.runtime"
-      ~official_client_kind:"codex"
-      ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
-            ~tool_deny:[]
-            ~sandbox_profile:Masc.Keeper_types_profile.Docker
-~native_posture:None
-      ~skill_names:None
-      ~current_task_id:None
-      ~skills_left_out:[]
-      ~task_skill_references:[]
-      ~task_selection:None
-      ~skill_snapshot:(configured_external_skill_snapshot ())
-  with
-  | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
-  | Ok surface ->
-    let provenance =
-      List.find_map
-        (fun (tool : Keeper_effective_tool_surface.tool) ->
-           match tool.origin with
-           | Keeper_effective_tool_surface.Composition_skill
-               { provenance = Some provenance } -> Some provenance
-           | Composition_skill { provenance = None }
-           | Descriptor
-           | Instruction_skill
-           | Composition_control -> None)
-        surface.tools
-    in
-    (match provenance with
-     | None -> fail "external composition lost snapshot provenance"
-     | Some provenance ->
-       check string "exact configured source id" "shared-catalog"
-         (Skill_source_config.source_id_to_string provenance.source.id);
-       check string "exact configured source path" "/srv/shared-agent-skills"
-         provenance.source.configured_path;
-       check string "exact package directory" "snapshot" provenance.directory;
-       check string "exact identity source" "shared-catalog"
-         (Skill_source_config.source_id_to_string provenance.identity.source_id));
-    let open Yojson.Safe.Util in
-    let composition_origin =
-      Keeper_effective_tool_surface.to_yojson (Available surface)
-      |> member "tools"
-      |> to_list
-      |> List.find_map (fun tool ->
-        let origin = member "origin" tool in
-        match member "kind" origin with
-        | `String "composition_skill" -> Some origin
-        | _ -> None)
-    in
-    (match composition_origin with
-     | None -> fail "effective-surface JSON omitted composition provenance"
-     | Some origin ->
-       check string "wire source path is exact" "/srv/shared-agent-skills"
-         (origin |> member "skill_provenance" |> member "source" |> member "path"
-          |> to_string);
-       check string "wire identity source is exact" "shared-catalog"
-         (origin |> member "skill_provenance" |> member "identity"
-          |> member "source_id" |> to_string))
-;;
 
 
 (* The TUI reads this surface through Masc.Tui_decode_tools.decode_tool_snapshot. The
@@ -523,18 +444,8 @@ let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
            | Composition_control -> Masc.Tui_decode_tools.Composition_control_origin ))
       surface.tools
   in
-  check bool "the fixture carries a descriptor and a sourced composition skill" true
-    (List.exists (fun (_, origin) -> origin = Masc.Tui_decode_tools.Descriptor_origin) expected
-     && List.exists
-          (fun (_, origin) ->
-             match origin with
-             | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = Some _ } -> true
-             | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None }
-             | Masc.Tui_decode_tools.Descriptor_origin
-             | Masc.Tui_decode_tools.Instruction_skill_origin
-             | Masc.Tui_decode_tools.Composition_control_origin
-             | Masc.Tui_decode_tools.Unrecognised_origin _ -> false)
-          expected);
+  check bool "the fixture carries a descriptor" true
+    (List.exists (fun (_, origin) -> origin = Masc.Tui_decode_tools.Descriptor_origin) expected);
   let dashboard_tools =
     `Assoc
       [ "generated_at", `String "2026-09-24T00:00:00Z"
@@ -804,7 +715,6 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
                     (fun (row : Keeper_skill_catalog.exact_surface) ->
                        match row.availability with
                        | Keeper_skill_catalog.Instruction_tool -> Some row.reference
-                       | Keeper_skill_catalog.Composition_tool _
                        | Keeper_skill_catalog.Exact_unavailable _ -> None)
              in
              check string "frozen prompt surface equals executable bundle"
@@ -1315,10 +1225,6 @@ let () =
             test_skill_name_selection_is_structured_and_filters_task
         ; test_case "unprojectable Task Skill is a typed row" `Quick
             test_unprojectable_task_skill_is_a_typed_row
-        ; test_case
-            "external composition preserves snapshot provenance"
-            `Quick
-            test_external_composition_preserves_snapshot_provenance
         ; test_case "the TUI reads the origin of every tool this surface writes" `Quick
             test_the_tui_reads_the_origin_of_every_tool_this_surface_writes
         ; test_case "instruction skill does not require Read" `Quick
@@ -1339,6 +1245,7 @@ let () =
             test_frozen_selection_carries_the_shadowed_exact_reference
         ; test_case "masc_enabled false withholds all descriptors, skills, and composition controls" `Quick
             test_masc_disabled_withholds_all_tools_skills_and_composition_controls
-        ] )
+        
+] )
     ]
 ;;

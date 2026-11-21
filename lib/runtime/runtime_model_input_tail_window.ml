@@ -41,6 +41,14 @@ let is_working_state (message : Agent_core.Types.message) =
   && List.mem_assoc working_state_marker_key message.metadata
 ;;
 
+let compaction_anchor_marker_key = "masc.compaction_anchor.v1"
+let compaction_anchor_metadata = [ (compaction_anchor_marker_key, `Bool true) ]
+
+let is_compaction_anchor (message : Agent_core.Types.message) =
+  message.origin = Agent_core.Types.Agent_instruction
+  && List.mem_assoc compaction_anchor_marker_key message.metadata
+;;
+
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int
@@ -125,7 +133,9 @@ let is_extra_context (msg : Agent_core.Types.message) =
   | Tool_result_followup | Agent_instruction | Outside_context -> false
 ;;
 
-let is_pinned msg = is_extra_context msg || is_working_state msg
+let is_pinned msg =
+  is_extra_context msg || is_working_state msg || is_compaction_anchor msg
+;;
 
 type label =
   | Pinned
@@ -397,13 +407,17 @@ let assemble_with_preamble ?(history_already_announced = false) ~allow_empty_his
         kept_labelled
     in
     let kept = List.map fst kept_labelled in
+    let has_compaction_anchor = List.exists is_compaction_anchor kept in
     match first_kept_atom_role with
     | None when allow_empty_history && drop >= atom_count
-                && not history_already_announced -> preamble_message :: kept, true
+                && not history_already_announced
+                && not has_compaction_anchor -> preamble_message :: kept, true
     | Some Agent_core.Types.User | None -> kept, false
     | Some Agent_core.Types.Assistant
     | Some Agent_core.Types.Tool
-    | Some Agent_core.Types.System -> preamble_message :: kept, true)
+    | Some Agent_core.Types.System ->
+      if has_compaction_anchor then kept, false
+      else preamble_message :: kept, true)
 ;;
 
 let assemble ~allow_empty_history ~atom_count ~drop ~messages labelled =

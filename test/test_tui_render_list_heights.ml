@@ -841,11 +841,7 @@ let skill index : Tools.effective_skill_profile =
   in
   let name = Printf.sprintf "sk-%02d" index in
   { esp_reference = skill_reference index name; esp_name = name
-  ; esp_surface =
-      (if composition then
-         Masc.Keeper_skill_observability.Composition_skill
-           Masc.Keeper_tool_composition_catalog.Inline
-       else Masc.Keeper_skill_observability.Instruction_skill)
+  ; esp_surface = Masc.Keeper_skill_observability.Instruction_skill
   ; esp_body_bytes = 0; esp_discovery_bytes = 0
   ; esp_load_reasons = reasons; esp_node_count = 0; esp_batch_count = 0
   ; esp_max_parallelism = 0; esp_flow = None

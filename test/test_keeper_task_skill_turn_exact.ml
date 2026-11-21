@@ -109,7 +109,7 @@ let resolve_one snapshot reference =
 ;;
 
 let instruction_skill reference (skill : Masc.Keeper_skill_catalog.skill) =
-  Masc.Keeper_tool_composition_surface.instruction_skill
+  Masc.Keeper_instruction_skill.instruction_skill
     ~reference
     ~description:skill.description
     ~body:skill.body
@@ -286,25 +286,11 @@ let test_denied_node_tool_withholds_task_composition_from_prompt () =
   (match surfaces ~tool_deny:[] with
    | [ ( "task-001"
        , [ { Masc.Keeper_skill_catalog.availability =
-               Masc.Keeper_skill_catalog.Composition_tool { tool_name }
+               Masc.Keeper_skill_catalog.Instruction_tool
            ; _
            }
-         ] ) ] ->
-     check string "an admitted Task composition is advertised as its tool"
-       "keeper_compose_lane-read" tool_name
-   | _ -> fail "an admitted Task composition was not advertised as a composition");
-  match surfaces ~tool_deny:[ "keeper_lane_status" ] with
-  | [ ( "task-001"
-      , [ { Masc.Keeper_skill_catalog.availability =
-              Masc.Keeper_skill_catalog.Exact_unavailable { diagnostic }
-          ; _
-          }
-        ] ) ] ->
-    check string "the prompt row names the node tool the surface does not admit"
-      "composition tool \"keeper_compose_lane-read\" runs node tools this turn's \
-       surface does not admit: keeper_lane_status"
-      diagnostic
-  | _ -> fail "a withheld Task composition was still advertised as callable"
+         ] ) ] -> ()
+   | _ -> fail "an admitted Task instruction skill was not advertised")
 ;;
 
 (* An instruction body over the inline read boundary projects as
@@ -439,174 +425,7 @@ let test_shadow_reference_selects_shadow_not_effective_winner () =
   check bool "exact reference preserved" true (Reference.equal reference selected.reference)
 ;;
 
-let test_held_shadow_composition_wins_with_exact_collision_evidence () =
-  let config =
-    config
-      (source_row ~id:"first" ~path:"first"
-       ^ source_row ~id:"second" ~path:"second")
-  in
-  let skill_snapshot =
-    snapshot
-      config
-      [ [ "review", composition_document ~name:"review" ~node_id:"global" ]
-      ; [ "review", composition_document ~name:"review" ~node_id:"task" ]
-      ]
-  in
-  let task_source_id =
-    match config.sources with
-    | [ _; task_source ] -> task_source.id
-    | _ -> fail "expected two sources"
-  in
-  let task_reference =
-    exact_reference
-      skill_snapshot
-      ~source_id:task_source_id
-      ~package_id:"review"
-      ~name:"review"
-  in
-  let task_selection =
-    match
-      Selection.resolve_for_task
-        ~snapshot:skill_snapshot
-        ~task_id:"task-held"
-        [ task_reference ]
-    with
-    | Ok selection -> selection
-    | Error error -> fail (Selection.error_to_string error)
-  in
-  let task_partition = Selection.partition task_selection in
-  check (list string) "held Task provenance retained" [ "task-held" ]
-    (one_selected task_selection).task_ids;
-  check int "not exposed through keeper_skill" 0
-    (List.length task_partition.instructions);
-  check int "one exact Task composition" 1
-    (List.length task_partition.compositions);
-  let global, _ = Masc.Keeper_skill_catalog.of_snapshot skill_snapshot in
-  let projected =
-    Masc.Keeper_skill_catalog.project_turn
-      ~names:None
-      ~global
-      ~task:(Selection.skills task_selection)
-  in
-  let composition_references =
-    Masc.Keeper_skill_catalog.skills projected.catalog
-    |> List.filter_map (fun (skill : Masc.Keeper_skill_catalog.skill) ->
-         match skill.reference, skill.surface with
-         | Some reference, Masc.Keeper_skill_catalog.Composition _ -> Some reference
-         | None, _ | Some _, Masc.Keeper_skill_catalog.Instruction -> None)
-  in
-  check int "one executable composition tool" 1 (List.length composition_references);
-  check bool "Task exact identity has priority" true
-    (match composition_references with
-     | [ reference ] -> Reference.equal task_reference reference
-     | _ -> false);
-  check int "global collision is typed unavailable" 1
-    (List.length projected.unavailable);
-  let prompt_surfaces =
-    Masc.Keeper_skill_catalog.exact_surfaces
-      projected
-      ~task:(Selection.skills task_selection)
-  in
-  check bool "prompt names the exact composition tool" true
-    (match prompt_surfaces with
-     | [ surface ] ->
-       let json = Masc.Keeper_skill_catalog.exact_surface_to_yojson surface in
-       Yojson.Safe.Util.(member "kind" json |> to_string) = "composition"
-       && Yojson.Safe.Util.(member "tool_name" json |> to_string)
-          = "keeper_compose_review"
-     | _ -> false);
-  check bool "collision names both exact identities" true
-    (match projected.unavailable with
-     | [ Masc.Keeper_skill_catalog.Composition_tool_name_collision
-           { selected; unavailable; _ } ] ->
-       Reference.equal selected task_reference
-       && not (Reference.equal unavailable task_reference)
-     | _ -> false)
-  ;
-  let current_source_id =
-    match config.sources with
-    | current_source :: _ -> current_source.id
-    | [] -> fail "expected a current source"
-  in
-  let current_reference =
-    exact_reference
-      skill_snapshot
-      ~source_id:current_source_id
-      ~package_id:"review"
-      ~name:"review"
-  in
-  let resolve_task task_id reference =
-    match
-      Selection.resolve_for_task
-        ~snapshot:skill_snapshot
-        ~task_id
-        [ reference ]
-    with
-    | Ok selection -> selection
-    | Error error -> fail (Selection.error_to_string error)
-  in
-  let current = resolve_task "task-current" current_reference in
-  let held = resolve_task "task-held" task_reference in
-  let merged = Selection.merge [ current; held ] in
-  let collision_projection =
-    Masc.Keeper_skill_catalog.project_turn
-      ~names:None
-      ~global
-      ~task:(Selection.skills merged)
-  in
-  let held_prompt =
-    Masc.Keeper_skill_catalog.exact_surfaces
-      collision_projection
-      ~task:(Selection.skills held)
-  in
-  check bool "held collision is explicit prompt unavailability" true
-    (match held_prompt with
-     | [ surface ] ->
-       let json = Masc.Keeper_skill_catalog.exact_surface_to_yojson surface in
-       Yojson.Safe.Util.(member "kind" json |> to_string) = "unavailable"
-       && not (Yojson.Safe.Util.member "diagnostic" json = `Null)
-     | _ -> false)
-;;
 
-let test_malformed_exact_composition_is_frozen_instruction () =
-  let config = config (source_row ~id:"only" ~path:"skills") in
-  let malformed =
-    document
-      ~name:"broken"
-      ~description:"malformed exact composition"
-      "```toml composition\n[[compositions]]\nname =\n```"
-  in
-  let skill_snapshot = snapshot config [ [ "broken", malformed ] ] in
-  let source_id =
-    match config.sources with
-    | [ source ] -> source.id
-    | _ -> fail "expected one source"
-  in
-  let reference =
-    exact_reference
-      skill_snapshot
-      ~source_id
-      ~package_id:"broken"
-      ~name:"broken"
-  in
-  let selection =
-    match Selection.resolve ~snapshot:skill_snapshot [ reference ] with
-    | Ok selection -> selection
-    | Error error -> fail (Selection.error_to_string error)
-  in
-  let selected = one_selected selection in
-  check bool "frozen body retained" true
-    (String_util.contains_substring selected.skill.body "name =");
-  check bool "typed composition diagnostic retained" true
-    (match selected.diagnostic with
-     | Some (Masc.Keeper_skill_catalog.Composition_rejected _) -> true
-     | Some _ | None -> false);
-  let partition = Selection.partition selection in
-  check int "fallback admitted to keeper_skill" 1
-    (List.length partition.instructions);
-  check int "malformed composition is not executable" 0
-    (List.length partition.compositions)
-;;
 
 let test_shared_exact_reference_retains_every_task_id () =
   let config = config (source_row ~id:"only" ~path:"skills") in
@@ -699,8 +518,7 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
     (List.length (Selection.partition changed_tools).compositions);
   check bool "changed Tool authority retains its actual projection diagnostic" true
     (Option.is_some (one_selected changed_tools).diagnostic);
-  check int "paired preparation cannot advertise the composition withheld by new Tool authority" 0
-    (List.length (Masc.Keeper_skill_catalog.composition_entries changed_preparation.catalog));
+  ignore changed_preparation;
   let mixed_binding = Selection.merge [selection;changed_tools] in
   check bool "bound and unbound projections cannot share a reuse proof" true
     (Option.is_none mixed_binding.preparation);
@@ -772,7 +590,7 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
     (match Selection.bind_surface ~snapshot:unreadable ~descriptors Selection.empty with
      | Ok (unrelated,preparation) -> unrelated.selected=[] && unrelated.unprojectable=[]
          && Masc.Keeper_skill_catalog.prepared_snapshot preparation.projection==unreadable
-         && Masc.Keeper_skill_catalog.composition_entries preparation.catalog=[]
+         && Masc.Keeper_skill_catalog.skills preparation.catalog=[]
      | Error _ -> false)
 ;;
 
@@ -813,13 +631,13 @@ let test_exact_reference_consumer_rejects_name_fallback () =
   let reference = exact_reference snapshot ~source_id ~package_id:"guide" ~name:"guide" in
   let selected = resolve_one snapshot reference in
   let tool =
-    Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+    Masc.Keeper_instruction_skill.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~instruction_skills:[ instruction_skill reference selected.skill ]
       () |> Result.get_ok
   in
   let schema_tool =
-    Masc.Keeper_tool_composition_surface.instruction_skill_schema_tool
+    Masc.Keeper_instruction_skill.instruction_skill_schema_tool
       ~instruction_skills:[ instruction_skill reference selected.skill ] |> Result.get_ok
   in
   check string
@@ -835,23 +653,6 @@ let test_exact_reference_consumer_rejects_name_fallback () =
   let exact_output = run_skill_tool tool (Reference.to_yojson reference) in
   check bool "exact input reads body" true
     (String_util.contains_substring exact_output "EXACT_BODY");
-  let activation_attempts = ref 0 in
-  let failing_tool =
-    Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
-      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
-      ~record_activation:(fun ~invocation:_ ~content:_ observed ->
-        incr activation_attempts;
-        ignore observed;
-        Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
-      ~instruction_skills:[ instruction_skill reference selected.skill ]
-      () |> Result.get_ok
-  in
-  let failed_output =
-    run_skill_tool failing_tool (Reference.to_yojson reference)
-  in
-  check int "activation attempted once" 1 !activation_attempts;
-  check bool "body withheld when activation recording fails" false
-    (String_util.contains_substring failed_output "EXACT_BODY");
   let legacy_output = run_skill_tool tool (`Assoc [ "name", `String "guide" ]) in
   check bool "name fallback rejected" false
     (String_util.contains_substring legacy_output "EXACT_BODY")
@@ -921,9 +722,9 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
        in
        let selected = resolve_one skill_snapshot reference in
        let instruction =
-         Masc.Keeper_tool_composition_surface.instruction_skill
+         Masc.Keeper_instruction_skill.instruction_skill
            ~resource_location:
-             Masc.Keeper_tool_composition_surface.
+             Masc.Keeper_instruction_skill.
                { source_root; directory = "guide"; resource_read_max_bytes }
            ~reference
            ~description:selected.skill.description
@@ -931,7 +732,7 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
            ()
        in
        let tool =
-         Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+         Masc.Keeper_instruction_skill.make_instruction_skill_tool
            ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
            ~instruction_skills:[ instruction ]
            () |> Result.get_ok
@@ -954,13 +755,9 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
          "parent traversal never reaches the resource reader"
          false
          (String_util.contains_substring escaped_output "12345678");
-       let activation_attempts = ref 0 in
        let bounded_tool =
-         Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+         Masc.Keeper_instruction_skill.make_instruction_skill_tool
            ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
-           ~record_activation:(fun ~invocation:_ ~content:_ _ ->
-             incr activation_attempts;
-             Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
            ~instruction_skills:[ instruction ]
            () |> Result.get_ok
        in
@@ -971,7 +768,6 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
          | _ -> assert false
        in
        let oversized_output = run_skill_tool bounded_tool oversized in
-       check int "oversized resource records no activation" 0 !activation_attempts;
        check bool "oversized resource reports typed bound" true
          (String_util.contains_substring oversized_output "too_large"
           && String_util.contains_substring oversized_output "max_bytes");
@@ -1015,9 +811,9 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
          | None -> fail "boundary resource read bound fixture is missing"
        in
        let boundary_instruction =
-         Masc.Keeper_tool_composition_surface.instruction_skill
+         Masc.Keeper_instruction_skill.instruction_skill
            ~resource_location:
-             Masc.Keeper_tool_composition_surface.
+             Masc.Keeper_instruction_skill.
                { source_root
                ; directory = "guide"
                ; resource_read_max_bytes = boundary_read_max_bytes
@@ -1028,7 +824,7 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
            ()
        in
        let boundary_tool =
-         Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+         Masc.Keeper_instruction_skill.make_instruction_skill_tool
            ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
            ~instruction_skills:[ boundary_instruction ]
            () |> Result.get_ok
@@ -1491,7 +1287,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       ~tool_use_id:call_id ()
   in
   let received_assessment = ref None in
-  let tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
+  let tool = Masc.Keeper_instruction_skill.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~assess_applicability:(fun ~reference ~body ->
         let assessment = Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
@@ -1527,21 +1323,9 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     (String_util.contains_substring judged_output "confidence");
   let retained_assessment = Option.get !received_assessment in
   let activation_config = Workspace.default_config log_root in
-  let activation_trace = Keeper_id.Trace_id.of_string "skill-body-projection" |> Result.get_ok in
-  Fs_compat.mkdir_p (Keeper_fs.keeper_session_dir activation_config (Keeper_id.Trace_id.to_string activation_trace));
-  let recorder = Keeper_skill_activation_recorder.make ~keeper_name:"skill-keeper-fixture" ~trace_id:activation_trace
-      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string activation_trace) ~absolute_turn:1)
-      ~runtime_id:(fun () -> Some "fixture-runtime")
-      ~snapshot_revision:(Snapshot.snapshot_revision captured_snapshot) ~task_selection:Selection.empty
-      |> Result.get_ok in
-  let projection_tool = Keeper_tool_composition_surface.make_instruction_skill_tool
+  let projection_tool = Keeper_instruction_skill.make_instruction_skill_tool
       ~config:activation_config
       ~assess_applicability:(fun ~reference:_ ~body:_ -> retained_assessment)
-      ~record_activation:(fun ~invocation ~content reference ->
-        (match content with Keeper_skill_activation_recorder.Body body ->
-          check string "activation records the exact original body" frozen_body body
-         | Keeper_skill_activation_recorder.Resource _ -> fail "expected the original Skill body");
-        Keeper_skill_activation_recorder.record_instruction ~config:activation_config recorder ~invocation ~content reference)
       ~on_result:(fun ~input:_ result -> captured := Some result)
       ~instruction_skills:[instruction_skill reference selected.skill] () |> Result.get_ok in
   Fun.protect ~finally:install_overrides (fun () ->
@@ -1557,14 +1341,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       (metadata |> member "bytes" |> to_int);
     let actual_sha = Agent_core_sha256.(digest_string actual_body |> to_hex) in
     check string "metadata describes the actual returned body digest" actual_sha
-      (metadata |> member "sha256" |> to_string);
-    let ledger = Keeper_skill_activation_ledger.load ~config:activation_config ~trace_id:activation_trace |> Result.get_ok in
-    match Keeper_skill_activation_ledger.activations ledger with
-    | [{Keeper_skill_activation_ledger.invocation=Keeper_skill_activation_ledger.Instruction_invocation
-          {served_content=Keeper_skill_activation_ledger.Skill_body {bytes;sha256};_};_}] ->
-      check int "durable activation records the returned body bytes" (String.length actual_body) bytes;
-      check string "durable activation records the returned body digest" actual_sha sha256
-    | _ -> fail "expected one exact body activation");
+      (metadata |> member "sha256" |> to_string));
   ignore (invoke "applicable");
   ignore (invoke "insufficient_context");
   let _, invalid = invoke "advice unavailable" in
@@ -1576,39 +1353,8 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     (surplus |> member "returned_answers" |> to_assoc |> List.length);
   let _, failed = invoke "advice unavailable" in
   check string "service decode failure remains explicit" "failed" (failed |> member "status" |> to_string);
-  let activation_failed_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
-      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
-      ~assess_applicability:(fun ~reference ~body ->
-        Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
-          ~context:(Some (`Assoc [ "request", `String "inspect the current task" ]))
-          ~reference ~body ())
-      ~record_activation:(fun ~invocation:_ ~content:_ _ ->
-        Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
-      ~on_result:(fun ~input:_ result -> captured := Some result)
-      ~instruction_skills:[ instruction_skill reference selected.skill ] () |> Result.get_ok in
-  let refused = run_skill_tool activation_failed_tool (Reference.to_yojson reference) in
-  check bool "activation failure still withholds the Skill body" false
-    (String_util.contains_substring refused "FROZEN_SKILL_BODY");
-  check bool "received assessment also crosses the actual failed Agent-Core wire" true
-    (String_util.contains_substring refused "fixture-jev");
-  check bool "failed wire names advice withholding" true
-    (String_util.contains_substring refused "withheld_activation_failure");
-  persist ~case:"activation-failed" ~wire_outcome:Tool_result.Error ~output:refused;
-  let result = Option.get !captured in
-  check bool "a received JEV answer is not successful activation" false (Tool_result.is_success result);
-  let metadata = Tool_result.metadata result |> Option.get in
-  check string "received assessment survives activation failure" "judged"
-    (metadata |> member "skill_applicability" |> member "status" |> to_string);
-  check string "received model provenance survives activation failure" "fixture-jev"
-    (metadata |> member "skill_applicability" |> member "model" |> to_string);
-  check bool "activation failure does not claim advice delivery" false
-    (metadata |> member "applicability_advice_in_model_content" |> to_bool);
-  check string "failed delivery names its boundary" "withheld_activation_failure"
-    (metadata |> member "applicability_projection" |> to_string);
-  check bool "existing activation failure evidence remains" true
-    (Tool_result.data result |> member "skill_activation_error" <> `Null);
   let sent = Exact_output_fixture.post_count server in
-  let no_context_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
+  let no_context_tool = Masc.Keeper_instruction_skill.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~assess_applicability:(fun ~reference ~body ->
         Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
@@ -1656,7 +1402,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let rows = match Keeper_tool_call_log.read_recent ~keeper_name:"skill-fixture" ~n:10 () with
     | Ok rows -> rows
     | Error (Keeper_tool_call_log.Index_unavailable detail) -> fail detail in
-  check int "every actual projected result reached the durable log" 7 (List.length rows);
+  check int "every actual projected result reached the durable log" 6 (List.length rows);
   List.iter (fun row ->
     let output = member "output" row |> Yojson.Safe.to_string in
     check bool "durable output retains applicability despite a long body" true
@@ -1673,7 +1419,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       destinations = ({ Runtime_schema.typesafe_destination with endpoint = near_server.base_url }, []) }
     (fun () ->
       let received_assessment = ref None in
-      let near_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
+      let near_tool = Masc.Keeper_instruction_skill.make_instruction_skill_tool
           ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
           ~assess_applicability:(fun ~reference ~body ->
             let assessment = Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
@@ -1696,7 +1442,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
         install_overrides ()) (fun () ->
         let retained_assessment = Option.get !received_assessment in
         Prompt_registry.clear (); Prompt_registry.set_markdown_dir empty_prompts;
-        let cached_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
+        let cached_tool = Masc.Keeper_instruction_skill.make_instruction_skill_tool
           ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
           ~assess_applicability:(fun ~reference:_ ~body:_ -> retained_assessment)
           ~on_result:(fun ~input:_ result -> captured := Some result)
@@ -1997,10 +1743,6 @@ let () =
             test_denied_node_tool_withholds_task_composition_from_prompt
         ; test_case "oversized Task Skill is unavailable, not a failed turn" `Quick
             test_oversized_task_skill_is_unavailable_not_a_failed_turn
-        ; test_case "held shadow composition collision is exact" `Quick
-            test_held_shadow_composition_wins_with_exact_collision_evidence
-        ; test_case "malformed exact composition falls back" `Quick
-            test_malformed_exact_composition_is_frozen_instruction
         ; test_case "shared exact ref retains all Task ids" `Quick
             test_shared_exact_reference_retains_every_task_id
         ; test_case "Task binding reuses only exact frozen source and Tool authority" `Quick
@@ -2043,6 +1785,7 @@ let () =
             test_unreadable_candidate_stops_resolution_unlike_a_stale_pin
         ; test_case "pin into an unconfigured source reads as deleted" `Quick
             test_pin_into_unconfigured_source_reads_as_deleted
-        ] )
+        
+] )
     ]
 ;;

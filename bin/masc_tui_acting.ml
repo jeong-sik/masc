@@ -1649,7 +1649,7 @@ let evidence_fields ~ko (entry : entry) =
       ] @ schedule_fields
   | Observer.Keeper_tool_call_evidence_committed e ->
       [ some (say "출처" "Source")
-          (Masc.Keeper_tool_composition_surface_observation.evidence_committed_event_type
+          ("keeper_tool_call_evidence_committed"
            ^ say " 관찰 이벤트" " observer event")
       ; some (say "키퍼" "Keeper") e.ce_keeper
       ; some (say "도구 이름" "Tool name") e.ce_tool

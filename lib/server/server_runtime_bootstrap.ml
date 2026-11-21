@@ -482,7 +482,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       Server_routes_http_runtime.invalidate_full_health_snapshot
     ();
   Server_dashboard_http.install_goal_projection_observer ();
-  Server_skill_activations_broadcast.install ~sw;
   Server_gate_connector_broadcast.install ~sw ~base_path;
   Keeper_registry.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_registry_change;
@@ -520,7 +519,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Server_turn_preview_broadcast.install ~sw ~clock;
   Workspace_dataset_event.install_store_observers ();
   Server_lane_inventory.install ();
-  Server_skill_usage_runtime.install ();
   Server_memory_health_broadcast.install ~sw ~mono_clock ~config;
   Server_dashboard_http_keeper_memory_health.install ();
   Server_tla_source_events.start ~sw ~mono_clock ~report:(fun _ ->

@@ -196,12 +196,27 @@ val is_marker : string -> bool
 
 val encode_for_agent_core : t -> string
 
+val encode_structured_handle : t -> string
+(** Encode a typed JSON structured blob handle ([{"_blob": {...}}]) with zero
+    text-sentinel parsing ambiguity. Preferred by compaction and microcompaction
+    callers. *)
+
 (** Exact decode outcome. [Invalid_marker] means the input starts with
-    {!marker_prefix} but the payload is malformed or fails validation — the
-    caller must decide visibly (keep the raw text, log, or fail). *)
+    {!marker_prefix} (or is a malformed structured [_blob] handle) and fails
+    validation — the caller must decide visibly (keep the raw text, log, or
+    fail). *)
 type decode_result =
   | Not_marker
   | Invalid_marker of { detail : string }
   | Decoded of artifact_ref
 
 val decode_from_agent_core : string -> decode_result
+(** Pure deterministic parser for AGENT_CORE blob markers (no [Scanf]). *)
+
+val decode_structured_handle : string -> decode_result
+(** Strictly decode a JSON structured blob handle produced by
+    {!encode_structured_handle}. *)
+
+val decode_any_handle : string -> decode_result
+(** Decode either a typed JSON structured handle ({!decode_structured_handle})
+    or an AGENT_CORE blob marker ({!decode_from_agent_core}). *)

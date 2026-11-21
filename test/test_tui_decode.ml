@@ -3368,120 +3368,6 @@ let skills_catalog_json ?(flow = true) () =
               ] ] )
     ]
 
-let keeper_skill_usage_json ?(keeper = "bravo") usage =
-  `Assoc
-    [ ("schema", `String "masc.keeper-skill-usage/v1")
-    ; ("keeper", `String keeper)
-    ; ("usage", usage)
-    ]
-
-(* One Keeper's usage answer: each closed state, read for the
-   Keeper asked about. *)
-let test_decode_keeper_skill_usage_reads_each_state () =
-  let decode usage =
-    match
-      Masc.Tui_decode_tools.decode_keeper_skill_usage ~keeper:"bravo"
-        (keeper_skill_usage_json usage)
-    with
-    | Ok usage -> usage
-    | Error error -> Alcotest.fail error
-  in
-  (match
-     decode
-       (`Assoc
-          [ ("state", `String "ready")
-          ; ( "rows",
-              `List
-                [ `Assoc
-                    [ ("reference", skill_reference_json ())
-                    ; ("invocations", `Int 12)
-                    ; ("deliveries", `Int 12)
-                    ; ("actions", `Int 9)
-                    ; ("last_used_at", `String "2026-08-28T03:04:05Z")
-                    ] ] )
-          ])
-   with
-   | Masc.Tui_decode_tools.Keeper_usage_ready [ row ] ->
-       Alcotest.(check string) "reference name" "work-intake"
-         Skill_reference.(row.Masc.Tui_decode_tools.ksu_reference.identity.name);
-       Alcotest.(check int) "invocations" 12 row.Masc.Tui_decode_tools.ksu_invocations;
-       Alcotest.(check int) "actions" 9 row.Masc.Tui_decode_tools.ksu_actions
-   | _ -> Alcotest.fail "expected one ready row");
-  Alcotest.(check bool) "no session" true
-    (decode (`Assoc [ ("state", `String "no_session") ])
-     = Masc.Tui_decode_tools.Keeper_usage_no_session);
-  Alcotest.(check bool) "no catalog" true
-    (decode (`Assoc [ ("state", `String "no_catalog") ])
-     = Masc.Tui_decode_tools.Keeper_usage_no_catalog);
-  match
-    decode
-      (`Assoc
-         [ ("state", `String "unavailable")
-         ; ("reason", `String "activation_ledger_unreadable")
-         ; ("detail", `String "decode failed")
-         ])
-  with
-  | Masc.Tui_decode_tools.Keeper_usage_unavailable { kua_reason; kua_detail } ->
-      Alcotest.(check string) "reason" "activation_ledger_unreadable" kua_reason;
-      Alcotest.(check string) "detail" "decode failed" kua_detail
-  | _ -> Alcotest.fail "expected unavailable"
-
-let test_decode_keeper_skill_usage_refuses_another_keeper_schema_or_state () =
-  let refused label json =
-    match Masc.Tui_decode_tools.decode_keeper_skill_usage ~keeper:"bravo" json with
-    | Error _ -> ()
-    | Ok _ -> Alcotest.failf "%s was accepted" label
-  in
-  let no_session = `Assoc [ ("state", `String "no_session") ] in
-  refused "another Keeper's answer" (keeper_skill_usage_json ~keeper:"charlie" no_session);
-  refused "another schema"
-    (`Assoc
-       [ ("schema", `String "masc.keeper-skill-activations/v1")
-       ; ("keeper", `String "bravo")
-       ; ("usage", no_session)
-       ]);
-  refused "an unknown state" (keeper_skill_usage_json (`Assoc [ ("state", `String "no_ledger") ]));
-  refused "a negative count"
-    (keeper_skill_usage_json
-       (`Assoc
-          [ ("state", `String "ready")
-          ; ( "rows",
-              `List
-                [ `Assoc
-                    [ ("reference", skill_reference_json ())
-                    ; ("invocations", `Int (-1))
-                    ; ("deliveries", `Int 0)
-                    ; ("actions", `Int 0)
-                    ; ("last_used_at", `String "2026-08-28T03:04:05Z")
-                    ] ] )
-          ]));
-  (* Every object in the answer is closed to the fields its schema names. *)
-  refused "a field outside the answer"
-    (`Assoc
-       [ ("schema", `String "masc.keeper-skill-usage/v1")
-       ; ("keeper", `String "bravo")
-       ; ("usage", no_session)
-       ; ("extra", `Null)
-       ]);
-  refused "a field outside its state"
-    (keeper_skill_usage_json
-       (`Assoc [ ("state", `String "no_session"); ("rows", `List []) ]));
-  refused "a field outside the row"
-    (keeper_skill_usage_json
-       (`Assoc
-          [ ("state", `String "ready")
-          ; ( "rows",
-              `List
-                [ `Assoc
-                    [ ("reference", skill_reference_json ())
-                    ; ("invocations", `Int 1)
-                    ; ("deliveries", `Int 1)
-                    ; ("actions", `Int 0)
-                    ; ("last_used_at", `String "2026-08-28T03:04:05Z")
-                    ; ("keeper", `String "bravo")
-                    ] ] )
-          ]))
-
 (* The async read boundary adds "skills catalog load failed: "; the decoder
    gives only the cause, so the source is named once on screen. *)
 let test_decode_skills_catalog_errors_carry_only_the_cause () =
@@ -4091,8 +3977,8 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         , `List
             [ `Assoc
                 [ "reference", exact_reference "work-intake" 'b'
-                ; "kind", `String "composition"
-                ; "execution", `String "async"
+                ; "kind", `String "instruction"
+                ; "execution", `String "on_demand"
                 ; ( "load_reasons"
                   , `List
                       [ `Assoc [ "kind", `String "task"; "task_id", `String "task-001" ]
@@ -4109,7 +3995,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                       ; "batch_count", `Int 2
                       ; "max_parallelism", `Int 3
                       ] )
-                ; "io", `Assoc ["kind", `String "composition"; "input_schema", `Assoc []; "exports", `List []]
+                ; "io", `Assoc ["kind", `String "model_orchestrated"]
                 ; ( "flow"
                   , `Assoc
                       [ ( "nodes"
@@ -4199,64 +4085,14 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check string) "Keeper" "codex-mcp-client" ets_keeper_name;
       Alcotest.(check string) "native posture" "read" native;
       Alcotest.(check int) "resource read bound" 65536 resource_bound;
-      (* The Tools screen draws "composition_skill:<source_id>" from this, so
-         a skill tool says which configured source it came from. *)
-      Alcotest.(check bool)
-        "composition tool names its configured skill source" true
-        (tool.et_origin
-         = Masc.Tui_decode_tools.Composition_skill_origin
-             { skill_source_id = Some "shared-catalog" });
+      ignore (tool, profile);
       Alcotest.(check bool)
         "a tool with no skill behind it is a descriptor" true
         (bare_tool.et_origin = Masc.Tui_decode_tools.Descriptor_origin);
-      Alcotest.(check string) "profile name" "work-intake" profile.esp_name;
-      Alcotest.(check string)
-        "profile keeps the exact editable reference"
-        (Yojson.Safe.to_string (exact_reference "work-intake" 'b'))
-        (Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string);
-      Alcotest.(check bool)
-        "profile is an async Composition" true
-        (match profile.esp_surface with
-         | Masc.Keeper_skill_observability.Composition_skill
-             Masc.Keeper_tool_composition_catalog.Async -> true
-         | Masc.Keeper_skill_observability.Instruction_skill
-         | Masc.Keeper_skill_observability.Composition_skill
-             Masc.Keeper_tool_composition_catalog.Inline -> false);
-      Alcotest.(check int) "profile nodes" 4 profile.esp_node_count;
-      Alcotest.(check int) "profile parallel width" 3 profile.esp_max_parallelism;
-      Alcotest.(check bool)
-        "profile load reasons"
-        true
-        (match profile.esp_load_reasons with
-         | [ Masc.Tui_decode_tools.Skill_task "task-001"; Masc.Tui_decode_tools.Skill_keeper_profile ] -> true
-         | _ -> false);
-      (match profile.esp_flow with
-       | None -> Alcotest.fail "missing declared graph"
-       | Some flow ->
-           Alcotest.(check bool) "declared graph is renderable" true
-             (Result.is_ok (Tui_decode_tools.skill_flow_mermaid flow));
-           (match flow.sf_nodes with
-            | [] -> Alcotest.fail "missing nodes"
-            | node :: _ ->
-                Alcotest.(check bool) "duplicate identity is refused" true
-                  (Result.is_error (Tui_decode_tools.skill_flow_mermaid {flow with sf_nodes = node :: flow.sf_nodes}));
-                let missing = {Tui_decode_tools.sfd_node_id = "absent"; sfd_kind = "data"} in
-                let changed = {node with sfn_dependencies = [missing]} in
-                Alcotest.(check bool) "dangling data dependency is refused" true
-                  (Result.is_error (Tui_decode_tools.skill_flow_mermaid {flow with sf_nodes = [changed]}))));
-      (match profile.esp_flow with
-       | Some { sf_nodes = [ node ]; sf_batches = [ batch ] } ->
-         Alcotest.(check string) "flow node tool" "keeper_lane_status" node.sfn_tool_name;
-         Alcotest.(check string) "flow batch mode" "concurrent" batch.sfb_execution_mode
-       | _ -> Alcotest.fail "expected one decoded flow node and batch");
       Alcotest.(check (option int)) "whole surface bytes" (Some 79984) ets_tool_surface_bytes;
       Alcotest.(check (option int)) "Skill surface bytes" (Some 2360) ets_skill_tool_surface_bytes;
       Alcotest.(check int) "Skill discovery bytes" 369 ets_skill_discovery_bytes;
       Alcotest.(check (option int)) "reported zero body bytes" (Some 0) ets_skill_body_bytes;
-      (* The skill source is asserted above, against the shape the producer
-         emits. This used to pin a SKILL.md path that no producer has sent
-         since the surface moved to skill_provenance -- the fixture was the
-         only thing still producing it. *)
       Alcotest.(check int) "digest length" 64 (String.length digest)
   | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
 
@@ -4299,76 +4135,23 @@ let decode_surface_tools surface =
    composition tool missing any of them is refused rather than drawn as a
    bare "composition_skill". *)
 let test_decode_effective_tool_reads_provenance_by_kind () =
-  let tool origin = `Assoc [ "name", `String "keeper_compose_x"; "origin", `Assoc origin ] in
-  let composition provenance =
-    tool
-      ([ "kind", `String "composition_skill" ]
-       @ match provenance with
-         | Some value -> [ "skill_provenance", value ]
-         | None -> [])
-  in
+  let tool origin = `Assoc [ "name", `String "keeper_skill"; "origin", `Assoc origin ] in
   let origins tools =
     match decode_surface_tools (minimal_available_surface tools) with
     | Ok decoded -> List.map (fun (t : Masc.Tui_decode_tools.effective_tool) -> t.et_origin) decoded
     | Error err -> Alcotest.failf "decode failed: %s" err
   in
-  let refused what tools =
-    match decode_surface_tools (minimal_available_surface tools) with
-    | Ok _ -> Alcotest.failf "%s decoded" what
-    | Error _ -> ()
-  in
-  Alcotest.(check bool) "an unresolved provenance is null, and reads as no source" true
-    (origins [ composition (Some `Null) ]
-     = [ Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None } ]);
-  Alcotest.(check bool) "the other kinds carry no provenance" true
+  Alcotest.(check bool) "descriptor and instruction kinds carry no provenance" true
     (origins
        [ tool [ "kind", `String "descriptor" ]
        ; tool [ "kind", `String "instruction_skill" ]
-       ; tool [ "kind", `String "composition_control" ]
        ]
      = [ Masc.Tui_decode_tools.Descriptor_origin
        ; Masc.Tui_decode_tools.Instruction_skill_origin
-       ; Masc.Tui_decode_tools.Composition_control_origin
        ]);
-  refused "a composition tool without skill_provenance" [ composition None ];
-  refused "a provenance without identity"
-    [ composition (Some (`Assoc [ "directory", `String "/srv/skills/x" ])) ];
-  refused "an identity without source_id"
-    [ composition
-        (Some (`Assoc [ "identity", `Assoc [ "name", `String "x" ] ]))
-    ];
   Alcotest.(check bool) "a kind this build does not know is kept as its word" true
     (origins [ tool [ "kind", `String "plugin" ] ]
-     = [ Masc.Tui_decode_tools.Unrecognised_origin "plugin" ]);
-  (* effective_tool_origin_kind is the word the Tools column draws. Encoding
-     each constructor with it and decoding the result must give the same
-     constructor back, so the two spellings of each kind cannot drift. *)
-  let encode origin =
-    tool
-      (("kind", `String (Masc.Tui_decode_tools.effective_tool_origin_kind origin))
-       :: (match origin with
-           | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = Some source_id } ->
-             [ ( "skill_provenance"
-               , `Assoc [ "identity", `Assoc [ "source_id", `String source_id ] ] )
-             ]
-           | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None } ->
-             [ "skill_provenance", `Null ]
-           | Masc.Tui_decode_tools.Descriptor_origin
-           | Masc.Tui_decode_tools.Instruction_skill_origin
-           | Masc.Tui_decode_tools.Composition_control_origin
-           | Masc.Tui_decode_tools.Unrecognised_origin _ -> []))
-  in
-  let every_origin =
-    [ Masc.Tui_decode_tools.Descriptor_origin
-    ; Masc.Tui_decode_tools.Instruction_skill_origin
-    ; Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = Some "shared-catalog" }
-    ; Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None }
-    ; Masc.Tui_decode_tools.Composition_control_origin
-    ; Masc.Tui_decode_tools.Unrecognised_origin "plugin"
-    ]
-  in
-  Alcotest.(check bool) "every origin survives its own word" true
-    (origins (List.map encode every_origin) = every_origin)
+     = [ Masc.Tui_decode_tools.Unrecognised_origin "plugin" ])
 
 (* The server writes kind and execution from one surface, so a profile whose
    pair it never writes is refused rather than drawn with whatever execution
@@ -4410,7 +4193,7 @@ let test_decode_skill_profile_refuses_a_kind_and_execution_pair_it_never_writes 
   in
   Alcotest.(check bool) "instruction, on demand" true
     (decodes (profile ~kind:"instruction" ~execution:"on_demand" ~io:instruction_io));
-  Alcotest.(check bool) "composition, inline" true
+  Alcotest.(check bool) "purged composition, inline is refused" false
     (decodes (profile ~kind:"composition" ~execution:"inline" ~io:composition_io));
   Alcotest.(check bool) "an instruction that claims async" false
     (decodes (profile ~kind:"instruction" ~execution:"async" ~io:instruction_io));
@@ -4499,258 +4282,6 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
   | Ok _ -> Alcotest.fail "runtime tool suppression was not kept distinct"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
-let skill_activation_reference_json name revision =
-  `Assoc
-    [ ( "identity"
-      , `Assoc
-          [ "source_id", `String "project-masc"
-          ; "package_id", `String name
-          ; "name", `String name
-          ] )
-    ; "content_revision", `String (String.make 64 revision)
-    ]
-
-let skill_activation_json
-    ?(invocation =
-      `Assoc
-        [ "kind", `String "instruction"
-        ; "origin", `Assoc [ "kind", `String "session_instruction" ]
-        ; ( "served_content"
-          , `Assoc
-              [ "kind", `String "skill_body"
-              ; "bytes", `Int 12
-              ; "sha256", `String (String.make 64 'c')
-              ] )
-        ])
-    ?(delivery = `Null)
-    ?(actions = `List [])
-    ?(revision = 'a') () =
-  match skill_activation_reference_json "ocaml-coding" revision with
-  | `Assoc reference_fields ->
-      `Assoc
-        (reference_fields
-         @ [ "snapshot_revision", `String (String.make 64 'f')
-           ; "turn_ref", `String "trace-activation#7"
-           ; "runtime_id", `String "test.runtime"
-           ; "skill_tool_use_id", `String (Printf.sprintf "call-%c" revision)
-           ; "agent_core_turn", `Int 0
-           ; "invocation", invocation
-           ; "delivery", delivery
-           ; "actions", actions
-           ; "activated_at", `String "2026-08-26T10:30:00Z"
-           ])
-  | _ -> assert false
-
-let skill_activation_projection_json activations =
-  let workspace_key = String.make 64 '1' in
-  let session_id = "trace-activation" in
-  let revision =
-    `Assoc
-      [ "workspace_key", `String workspace_key
-      ; "session_id", `String session_id
-      ; "activations", `List activations
-      ; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List []
-      ]
-    |> Yojson.Safe.to_string
-    |> Agent_core_sha256.digest_string
-    |> Agent_core_sha256.to_hex
-  in
-  `Assoc
-    [ "status", `String "available"
-    ; "keeper_name", `String "codex-mcp-client"
-    ; ( "ledger"
-      , `Assoc
-          [ "schema", `String "masc.skill-activations/v8"
-          ; "workspace_key", `String workspace_key
-          ; "session_id", `String session_id
-          ; "revision", `String revision
-          ; "activations", `List activations
-          ; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List []
-          ] )
-    ]
-
-(* The [GET /api/v1/keepers/skill-activations?keeper=] answer around one
-   projection, decoded for the Keeper it names. *)
-let decode_keeper_activations ~keeper projection =
-  Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper
-    (`Assoc
-       [ "schema", `String "masc.keeper-skill-activations/v1"
-       ; "keeper", `String keeper
-       ; "skill_activations", projection
-       ])
-
-let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
-  let task_invocation =
-    `Assoc
-      [ "kind", `String "composition"
-      ; ( "origin"
-        , `Assoc
-            [ "kind", `String "task_composition"
-            ; "task_ids", `List [ `String "task-470"; `String "task-held" ]
-            ] )
-      ; "execution_id", `String "exec-run-checks"
-      ; "tool_name", `String "run-checks"
-      ]
-  in
-  let activations =
-    skill_activation_projection_json
-      [ skill_activation_json
-          ~invocation:task_invocation
-          ~delivery:
-            (`Assoc
-               [ ( "boundary"
-                 , `Assoc
-                     [ "kind", `String "official_client_result_handoff"
-                     ; "agent_core_turn", `Int 0
-                     ] )
-               ; "runtime_id", `String "codex.runtime"
-               ; "delivered_at", `String "2026-08-26T10:30:01Z"
-               ; "content_bytes", `Int 12
-               ; "content_sha256", `String (String.make 64 'c')
-               ])
-          ~actions:
-            (`List
-               [ `Assoc
-                   [ ( "identity"
-                     , `Assoc
-                         [ "kind", `String "provider_step"
-                         ; "conversation_id", `String "conversation-antigravity"
-                         ; "step_index", `Int 7
-                         ] )
-                   ; "tool_name", `String "keeper_lane_status"
-                   ; "runtime_id", `String "claude.runtime"
-                   ; "agent_core_turn", `Int 0
-                   ; "observed_at", `String "2026-08-26T10:30:02Z"
-                   ]
-               ])
-          ()
-      ; skill_activation_json ~revision:'b'
-          ~invocation:
-            (`Assoc
-               [ "kind", `String "composition"
-               ; "origin", `Assoc [ "kind", `String "session_composition" ]
-               ; "execution_id", `String "exec-summarize"
-               ; "tool_name", `String "summarize"
-               ])
-          ()
-      ]
-  in
-  match decode_keeper_activations ~keeper:"codex-mcp-client" activations with
-  | Error err -> Alcotest.failf "decode failed: %s" err
-  | Ok
-      (Masc.Tui_decode_tools.Skill_activations_available
-         { sap_keeper_name
-         ; sap_ledger
-         ; _
-         }) ->
-      let activations =
-        Keeper_skill_activation_ledger.activations sap_ledger
-      in
-      let first, second =
-        match activations with
-        | [ first; second ] -> first, second
-        | _ -> Alcotest.fail "expected two canonical activation rows"
-      in
-      let sao_task_ids, sao_tool_name =
-        match first.invocation with
-        | Keeper_skill_activation_ledger.Composition_invocation
-            { origin = Task_composition { task_ids }; tool_name; _ } ->
-          ( Keeper_skill_activation_ledger.task_id_set_to_list task_ids
-          , tool_name )
-        | _ -> Alcotest.fail "expected task composition origin"
-      in
-      let session_tool =
-        match second.invocation with
-        | Keeper_skill_activation_ledger.Composition_invocation
-            { origin = Session_composition; tool_name; _ } ->
-          tool_name
-        | _ -> Alcotest.fail "expected session composition origin"
-      in
-      let sa_reference =
-        Skill_reference.make
-          ~identity:first.identity
-          ~content_revision:first.content_revision
-      in
-      Alcotest.(check string) "Keeper" "codex-mcp-client" sap_keeper_name;
-      Alcotest.(check string) "session" "trace-activation"
-        (Keeper_skill_activation_ledger.session_id sap_ledger
-         |> Keeper_id.Trace_id.to_string);
-      Alcotest.(check string) "exact reference"
-        (Yojson.Safe.to_string (skill_activation_reference_json "ocaml-coding" 'a'))
-        (Skill_reference.to_yojson sa_reference |> Yojson.Safe.to_string);
-      Alcotest.(check string) "snapshot revision" (String.make 64 'f')
-        (Skill_catalog_snapshot.snapshot_revision_to_string
-           first.snapshot_revision);
-      Alcotest.(check string) "turn" "trace-activation#7"
-        (Ids.Turn_ref.to_string first.turn_ref);
-      Alcotest.(check (list string)) "tasks" [ "task-470"; "task-held" ]
-        (List.map Keeper_id.Task_id.to_string sao_task_ids);
-      Alcotest.(check string) "task tool" "run-checks" sao_tool_name;
-      Alcotest.(check string) "session tool" "summarize" session_tool;
-      (match first.delivery, first.actions with
-       | ( Some
-             { boundary = Official_client_result_handoff { agent_core_turn }
-             ; runtime_id
-             ; content_bytes
-             ; _
-             }
-         , [ action ] ) ->
-         Alcotest.(check int) "handoff turn" 0 agent_core_turn;
-         Alcotest.(check string) "delivery runtime" "codex.runtime" runtime_id;
-         Alcotest.(check int) "delivery bytes" 12 content_bytes;
-         Alcotest.(check string) "action runtime" "claude.runtime"
-           action.runtime_id;
-         Alcotest.(check bool) "action provider step" true
-           (action.identity
-            = Runtime_native_tools.Provider_step
-                { conversation_id = "conversation-antigravity"; step_index = 7 })
-       | _ -> Alcotest.fail "v5 delivery/action provenance was not decoded")
-  | Ok _ -> Alcotest.fail "expected two typed Skill activation receipts"
-
-let test_decode_skill_activations_keeps_no_session_distinct () =
-  let activations =
-    `Assoc
-      [ "status", `String "no_session"
-      ; "keeper_name", `String "idle-keeper"
-      ]
-  in
-  match decode_keeper_activations ~keeper:"idle-keeper" activations with
-  | Ok (Masc.Tui_decode_tools.Skill_activations_no_session { sap_keeper_name }) ->
-      Alcotest.(check string) "Keeper" "idle-keeper" sap_keeper_name
-  | Ok _ -> Alcotest.fail "no_session was not kept distinct"
-  | Error err -> Alcotest.failf "decode failed: %s" err
-
-let test_decode_skill_activations_does_not_hide_unavailable () =
-  let activations =
-    `Assoc
-      [ "status", `String "unavailable"
-      ; "keeper_name", `String "broken-keeper"
-      ; "reason", `String "activation_ledger_unreadable"
-      ; "detail", `String "decode failed"
-      ]
-  in
-  match decode_keeper_activations ~keeper:"broken-keeper" activations with
-  | Ok
-      (Masc.Tui_decode_tools.Skill_activations_unavailable
-         { sap_reason; sap_detail; _ }) ->
-      Alcotest.(check string) "reason" "activation_ledger_unreadable" sap_reason;
-      Alcotest.(check string) "detail" "decode failed" sap_detail
-  | Ok _ -> Alcotest.fail "unavailable activation ledger was hidden"
-  | Error err -> Alcotest.failf "decode failed: %s" err
-
-let test_decode_skill_activations_rejects_cross_session_turn () =
-  let activation =
-    match skill_activation_json () with
-    | `Assoc fields ->
-        `Assoc
-          (("turn_ref", `String "different-trace#7")
-           :: List.remove_assoc "turn_ref" fields)
-    | other -> other
-  in
-  let activations = skill_activation_projection_json [ activation ] in
-  match decode_keeper_activations ~keeper:"codex-mcp-client" activations with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "cross-session activation turn_ref was accepted"
 
 let test_decode_tool_snapshot_requires_the_keeper_surface_field () =
   let missing_surface =
@@ -4762,99 +4293,6 @@ let test_decode_tool_snapshot_requires_the_keeper_surface_field () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "missing effective_keeper_surface field was accepted"
 
-(* An answer is for the Keeper the pane asked about, under its own schema. *)
-let test_decode_keeper_activations_refuses_another_keeper_or_schema () =
-  let projection = `Assoc [ "status", `String "no_session"; "keeper_name", `String "imp" ] in
-  (match
-     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
-       (`Assoc
-          [ "schema", `String "masc.keeper-skill-activations/v1"
-          ; "keeper", `String "other"
-          ; "skill_activations", projection
-          ])
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "an answer for another Keeper was accepted");
-  (match
-     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
-       (`Assoc
-          [ "schema", `String "masc.keeper-skill-usage/v1"
-          ; "keeper", `String "imp"
-          ; "skill_activations", projection
-          ])
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "an answer under another schema was accepted");
-  (match
-     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
-       (`Assoc
-          [ "schema", `String "masc.keeper-skill-activations/v1"
-          ; "keeper", `String "imp"
-          ; "skill_activations", projection
-          ; "extra", `Null
-          ])
-   with
-   | Error detail ->
-       Alcotest.(check string) "the extra field is named"
-         "skill activations has unexpected field \"extra\"" detail
-   | Ok _ -> Alcotest.fail "an answer with a field outside its schema was accepted");
-  match
-    Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
-      (`Assoc
-         [ "schema", `String "masc.keeper-skill-activations/v1"
-         ; "keeper", `String "imp"
-         ; "skill_activations", `Assoc [ "status", `String "no_session"; "keeper_name", `String "other" ]
-         ])
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "a projection naming another Keeper was accepted"
-
-let test_decode_async_actions_keeps_original_scope () =
-  let ledger = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in
-  let activations = `Assoc ["status",`String "available";"keeper_name",`String "fixture";"ledger",ledger] in
-  match decode_keeper_activations ~keeper:"fixture" activations with
-  | Ok (Masc.Tui_decode_tools.Skill_activations_available {sap_ledger;_}) ->
-    Alcotest.(check int) "typed action facts survive the TUI data boundary" 3
-      (List.length (Keeper_skill_activation_ledger.async_actions sap_ledger));
-    Alcotest.(check int) "the original child activation remains distinct" 1
-      (List.length (Keeper_skill_activation_ledger.activations sap_ledger));
-    Alcotest.(check int) "summary counts observed facts without claiming native completion" 3
-      (Keeper_skill_activation_ledger.summarize sap_ledger).composition_actions_observed
-  | Ok _ -> Alcotest.fail "actual async action ledger unavailable at TUI boundary"
-  | Error error -> Alcotest.failf "async action data decode failed: %s" error
-
-let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
-  let activation = skill_activation_json () in
-  let invalid_time =
-    match activation with
-    | `Assoc fields ->
-      `Assoc
-        (("activated_at", `String "not-a-time")
-         :: List.remove_assoc "activated_at" fields)
-    | other -> other
-  in
-  let duplicate = skill_activation_projection_json [ activation; activation ] in
-  let invalid_time = skill_activation_projection_json [ invalid_time ] in
-  let invalid_revision =
-    match skill_activation_projection_json [ activation ] with
-    | `Assoc fields ->
-      let ledger =
-        match List.assoc "ledger" fields with
-        | `Assoc ledger_fields ->
-          `Assoc
-            (("revision", `String (String.make 64 '0'))
-             :: List.remove_assoc "revision" ledger_fields)
-        | other -> other
-      in
-      `Assoc (("ledger", ledger) :: List.remove_assoc "ledger" fields)
-    | other -> other
-  in
-  List.iter
-    (fun projection ->
-       match decode_keeper_activations ~keeper:"codex-mcp-client" projection with
-       | Error _ -> ()
-       | Ok _ -> Alcotest.fail "canonical activation invariant was bypassed")
-    [ invalid_time; duplicate; invalid_revision ]
 
 (* Connectors. Shape is each connector's own connector_json; the fields below
    are the ones every connector emits. *)
@@ -13030,7 +12468,7 @@ let test_verification_evidence_defective_bodies_are_named () =
     (defect ~format:"png" ~data:evidence_pdf (inline_preview evidence_pdf)
      = Masc.Tui_decode.Defect_not_an_image)
 
-let skill_evidence_fixture () =
+let _skill_evidence_fixture () =
   let duration = `Assoc [ "samples", `Int 0; "mean_ms", `Null; "min_ms", `Null;
     "p50_ms", `Null; "p95_ms", `Null; "max_ms", `Null ] in
   `Assoc
@@ -13070,469 +12508,6 @@ let skill_evidence_fixture () =
     ]
 ;;
 
-let test_decode_skill_evidence_reads_exact_v9_coverage () =
-  let replace field value = function
-    | `Assoc fields -> `Assoc ((field, value) :: List.remove_assoc field fields)
-    | _ -> Alcotest.fail "fixture object" in
-  let base = skill_evidence_fixture () in
-  let reference = Tui_decode_fields.member "reference" base in
-  let composition = `Assoc [
-    "schema", `String "masc.skill-composition-evidence/v1"; "reference", reference;
-    "composition_run_id", `String "019ffc2b-0a41-7ba2-bf58-598e0e7f711b";
-    "parent_tool_use_id", `String "proof-1"; "parent_turn", `Int 1; "parent_planned_index", `Int 0;
-    "request_id", `Null; "keeper", `String "proof"; "composition_tool", `String "keeper_compose_proof";
-    "composition_execution", `String "inline"; "executor_settlements", `List []; "recorded_at", `Float 1.;
-    "result", `Assoc ["disposition", `String "completed"; "duration_ms", `Float 20.;
-      "tool_name", `String "keeper_compose_proof"; "data", `Assoc []]] in
-  let summary = Keeper_skill_composition_evidence.of_yojson composition |> Result.get_ok
-    |> Keeper_skill_composition_evidence.run_summary
-    |> Keeper_skill_composition_evidence.run_summary_to_yojson in
-  let earlier_summary = summary |> replace "composition_run_id"
-    (`String "019ffc2b-0a41-7ba2-bf58-598e0e7f711a") in
-  let with_statistics value = base
-    |> replace "status" (`String "observed")
-    |> replace "composition" composition
-    |> replace "composition_runs" (`List [summary; earlier_summary])
-    |> replace "coverage" (Tui_decode_fields.member "coverage" base |> replace "composition_runs_observed" (`Int 2))
-    |> replace "composition_statistics" value in
-  let duration samples value = `Assoc (List.map (fun name -> name, value)
-    ["mean_ms"; "min_ms"; "p50_ms"; "p95_ms"; "max_ms"] @ ["samples", `Int samples]) in
-  let statistics samples mean = `Assoc [
-    "scope", `String "exact_reference_retained_runs";
-    "percentile_method", `String "nearest_rank";
-    "recorded_window", `Assoc ["first_recorded_at", `Float 1.; "last_recorded_at", `Float 1.];
-    "duration_scope", `String "stored_executor_result"; "records", `Int 2;
-    "completed", duration samples mean;
-    "failed", duration 0 `Null; "deferred", `Int 0] in
-  (match Tui_decode_skill_evidence.decode_skill_evidence (with_statistics (statistics 2 (`Float 20.))) with
-   | Ok { se_composition_statistics = Some stats; _ } ->
-       Alcotest.(check (option (float 0.00001))) "recorded duration mean" (Some 20.) stats.scst_completed.sds_mean_ms
-   | Ok _ -> Alcotest.fail "missing statistics"
-   | Error detail -> Alcotest.fail detail);
-  let before_epoch = with_statistics (statistics 2 (`Float 20.))
-    |> replace "composition_runs" (`List (List.map
-      (replace "recorded_at" (`Float (-100.5))) [summary; earlier_summary]))
-    |> replace "composition" (composition |> replace "recorded_at" (`Float (-100.5)))
-    |> replace "composition_statistics" (statistics 2 (`Float 20.)
-      |> replace "recorded_window" (`Assoc [
-        "first_recorded_at", `Float (-100.5); "last_recorded_at", `Float (-100.5)])) in
-  (match Tui_decode_skill_evidence.decode_skill_evidence before_epoch with
-   | Ok { se_composition_statistics = Some stats; _ } ->
-       Alcotest.(check (option (float 0.00001))) "finite pre-epoch record is retained"
-         (Some (-100.5)) stats.scst_first_recorded_at
-   | Ok _ -> Alcotest.fail "missing pre-epoch statistics"
-   | Error detail -> Alcotest.fail detail);
-  let observed = with_statistics (statistics 2 (`Float 20.)) in
-  let exact run_id = `Assoc ["mode", `String "exact_run"; "composition_run_id", `String run_id] in
-  let older_id = "019ffc2b-0a41-7ba2-bf58-598e0e7f711a" in
-  let older = observed
-    |> replace "composition_selection" (exact older_id)
-    |> replace "composition" (composition |> replace "composition_run_id" (`String older_id)) in
-  Alcotest.(check bool) "older selected result keeps the complete retained population" true
-    (Result.is_ok (Tui_decode_skill_evidence.decode_skill_evidence older));
-  let absent = observed
-    |> replace "composition_selection" (exact "019ffc2b-0a41-7ba2-bf58-598e0e7f711f")
-    |> replace "composition" `Null in
-  Alcotest.(check bool) "a missing exact ID can coexist with retained runs" true
-    (Result.is_ok (Tui_decode_skill_evidence.decode_skill_evidence absent));
-  List.iter (fun json -> Alcotest.(check bool) "contradictory history or selection is refused" true
-    (Result.is_error (Tui_decode_skill_evidence.decode_skill_evidence json)))
-    [ absent |> replace "composition" composition
-    ; older |> replace "composition" composition
-    ; observed |> replace "composition_runs" (`List [summary; summary])
-    ; observed |> replace "composition_runs" (`List [earlier_summary; summary])
-    ; observed |> replace "composition_runs" `Null
-    ; observed |> replace "composition_statistics" `Null
-    ; observed |> replace "composition_selection" (`Assoc ["mode", `String "latest_retained"; "composition_run_id", `String older_id])
-    ; observed |> replace "composition_runs" (`List [summary |> replace "extra" (`Bool true); earlier_summary])
-    ; observed |> replace "schema" (`String "masc.skill-evidence/v8") ];
-  let contradictory = base |> replace "composition_statistics" (statistics 2 (`Float 20.)) in
-  Alcotest.(check bool) "positive samples require retained evidence" true
-    (Result.is_error (Tui_decode_skill_evidence.decode_skill_evidence contradictory));
-  let unavailable_coverage = Tui_decode_fields.member "coverage" base
-    |> replace "composition_scope" (`String "unavailable")
-    |> replace "composition_unavailable" (`List [`String "read failed"]) in
-  let unavailable = base |> replace "coverage" unavailable_coverage
-    |> replace "composition_statistics" (statistics 0 `Null |> replace "records" (`Int 0)) in
-  Alcotest.(check bool) "unavailable partitions cannot claim empty samples" true
-    (Result.is_error (Tui_decode_skill_evidence.decode_skill_evidence unavailable));
-  List.iter (fun value -> Alcotest.(check bool) "invalid means and counts are refused" true
-    (Result.is_error (Tui_decode_skill_evidence.decode_skill_evidence (with_statistics value))))
-    [statistics 0 (`Float 0.); statistics 2 `Null; statistics 2 (`Float (-1.)); statistics 1 (`Float 20.)];
-  match Tui_decode_skill_evidence.decode_skill_evidence (skill_evidence_fixture ()) with
-  | Error detail -> Alcotest.fail detail
-  | Ok evidence ->
-    (match evidence.se_status with
-     | Tui_decode_skill_evidence.Skill_evidence_not_observed_in_retained_coverage -> ()
-     | Tui_decode_skill_evidence.Skill_evidence_observed ->
-       Alcotest.fail "bounded absence decoded as observed");
-    Alcotest.(check int)
-      "activation ledgers"
-      2
-      evidence.se_coverage.sec_activation_ledgers_loaded;
-    Alcotest.(check int)
-      "retained sessions"
-      3
-      evidence.se_coverage.sec_activation_sessions_inspected
-;;
-
-let test_decode_skill_evidence_accepts_declared_composition_scopes () =
-  let with_scope scope = function
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (name, value) ->
-              if (name = "composition_runs" || name = "composition_statistics") && String.equal scope "unavailable"
-              then name, `Null
-              else if name = "coverage"
-              then
-                ( name
-                , match value with
-                  | `Assoc coverage ->
-                    let coverage =
-                      ("composition_scope", `String scope)
-                      :: List.remove_assoc "composition_scope" coverage
-                    in
-                    if String.equal scope "unavailable"
-                    then
-                      `Assoc
-                        (("composition_unavailable", `List [ `String "index" ])
-                         :: List.remove_assoc "composition_unavailable" coverage)
-                    else `Assoc coverage
-                  | _ -> value )
-              else name, value)
-           fields)
-    | json -> json
-  in
-  List.iter
-    (fun (scope, expected) ->
-       match
-         skill_evidence_fixture ()
-         |> with_scope scope
-         |> Tui_decode_skill_evidence.decode_skill_evidence
-       with
-       | Error detail -> Alcotest.fail detail
-       | Ok evidence ->
-         Alcotest.(check bool)
-           scope
-           true
-           (evidence.se_coverage.sec_composition_scope = expected))
-    [ ( "exact_reference_retained_runs"
-      , Tui_decode_skill_evidence.Skill_evidence_exact_reference_retained_runs )
-    ; "unavailable", Tui_decode_skill_evidence.Skill_evidence_composition_unavailable
-    ]
-;;
-
-let test_decode_skill_evidence_rejects_v1_and_status_disagreement () =
-  let replace field value = function
-    | `Assoc fields ->
-      `Assoc (List.map (fun (name, old) -> name, if name = field then value else old) fields)
-    | json -> json
-  in
-  Alcotest.(check bool)
-    "v1 rejected"
-    true
-    (skill_evidence_fixture ()
-     |> replace "schema" (`String "masc.skill-evidence/v2")
-     |> Tui_decode_skill_evidence.decode_skill_evidence
-     |> Result.is_error);
-  Alcotest.(check bool)
-    "observed without evidence rejected"
-    true
-    (skill_evidence_fixture ()
-     |> replace "status" (`String "observed")
-     |> Tui_decode_skill_evidence.decode_skill_evidence
-     |> Result.is_error)
-;;
-
-let test_decode_skill_evidence_requires_observation_fields () =
-  List.iter
-    (fun omitted ->
-       let without = function
-         | `Assoc fields -> `Assoc (List.remove_assoc omitted fields)
-         | json -> json
-       in
-       Alcotest.(check bool)
-         (omitted ^ " required")
-         true
-         (skill_evidence_fixture ()
-          |> without
-          |> Tui_decode_skill_evidence.decode_skill_evidence
-          |> Result.is_error))
-    [ "activation"; "composition"; "composition_selection"; "composition_runs"; "composition_statistics" ]
-;;
-
-let test_decode_skill_evidence_requires_every_coverage_field () =
-  let required =
-    [ "composition_scope"
-    ; "composition_runs_observed"
-    ; "composition_unavailable"
-    ; "coverage_complete"
-    ; "activation_scope"
-    ; "activation_sessions_inspected"
-    ; "activation_ledgers_loaded"
-    ; "activation_gaps"
-    ; "activation_owner_gap_count"
-    ]
-  in
-  List.iter
-    (fun omitted ->
-       let without = function
-         | `Assoc fields ->
-           `Assoc
-             (List.map
-                (fun (name, value) ->
-                   if name = "coverage"
-                   then
-                     ( name
-                     , match value with
-                       | `Assoc coverage ->
-                         `Assoc (List.remove_assoc omitted coverage)
-                       | _ -> value )
-                   else name, value)
-                fields)
-         | json -> json
-       in
-       Alcotest.(check bool)
-         (omitted ^ " required")
-         true
-         (skill_evidence_fixture ()
-          |> without
-          |> Tui_decode_skill_evidence.decode_skill_evidence
-          |> Result.is_error))
-    required
-;;
-
-let skill_evidence_observed_fixture () =
-  let reference =
-    `Assoc
-      [ ( "identity"
-        , `Assoc
-            [ "source_id", `String "workspace"
-            ; "package_id", `String "proof"
-            ; "name", `String "proof"
-            ] )
-      ; "content_revision", `String (String.make 64 'a')
-      ]
-  in
-  let activation =
-    `Assoc
-      [ "selection", `String "most_recent_observed"
-      ; ( "evidence"
-        , `Assoc
-            [ "trace_id", `String "trace-proof"
-            ; ( "owner"
-              , `Assoc
-                  [ "status", `String "known"
-                  ; ( "claims"
-                    , `List
-                        [ `Assoc
-                            [ "keeper", `String "delta"
-                            ; "source", `String "runtime_manifest"
-                            ]
-                        ] )
-                  ; "gaps", `List []
-                  ] )
-            ; ( "activation"
-              , `Assoc
-                  [ "identity", Yojson.Safe.Util.member "identity" reference
-                  ; ( "content_revision"
-                    , Yojson.Safe.Util.member "content_revision" reference )
-                  ; "snapshot_revision", `String (String.make 64 'b')
-                  ; "turn_ref", `String "trace-proof#1"
-                  ; "runtime_id", `String "codex.default"
-                  ; "activated_at", `String "2026-08-29T00:00:00Z"
-                  ; "skill_tool_use_id", `String "skill-call-1"
-                  ; "agent_core_turn", `Int 1
-                  ; ( "invocation"
-                    , `Assoc
-                        [ "kind", `String "instruction"
-                        ; "origin", `Assoc [ "kind", `String "session_instruction" ]
-                        ; ( "served_content"
-                          , `Assoc
-                              [ "kind", `String "skill_body"
-                              ; "bytes", `Int 4
-                              ; "sha256", `String (String.make 64 'c')
-                              ] )
-                        ] )
-                  ; "delivery", `Null
-                  ; "actions", `List []
-                  ] )
-            ; "async_result_deliveries", `List []
-            ; "async_actions", `List []
-            ] )
-      ]
-  in
-  match skill_evidence_fixture () with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.remove_assoc "status"
-       |> List.remove_assoc "activation"
-       |> fun fields ->
-       ("status", `String "observed") :: ("activation", activation) :: fields)
-  | _ -> Alcotest.fail "Skill evidence fixture is not an object"
-;;
-
-let test_decode_skill_evidence_retains_async_results_and_actions () =
-  let open Yojson.Safe.Util in
-  let fixture = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in
-  let original = fixture |> member "activations" |> index 0 in
-  let replace field value = function
-    | `Assoc fields -> `Assoc ((field, value) :: List.remove_assoc field fields)
-    | _ -> Alcotest.fail "detail fixture must be an object" in
-  let evidence = `Assoc
-    [ "trace_id", member "session_id" fixture
-    ; "owner", `Assoc ["status", `String "not_claimed_in_retained_catalog"; "claims", `List []; "gaps", `List []]
-    ; "activation", original
-    ; "async_result_deliveries", member "async_result_deliveries" fixture
-    ; "async_actions", member "async_actions" fixture ] in
-  let envelope evidence = skill_evidence_fixture ()
-    |> replace "status" (`String "observed")
-    |> replace "reference" (`Assoc ["identity", member "identity" original; "content_revision", member "content_revision" original])
-    |> replace "activation" (`Assoc ["selection", `String "most_recent_observed"; "evidence", evidence]) in
-  let decode evidence = match Tui_decode_skill_evidence.decode_skill_evidence (envelope evidence) with
-    | Ok {se_activation = Some (Skill_evidence_most_recent_observed item); _} -> item
-    | Ok _ -> Alcotest.fail "selected original activation was dropped"
-    | Error detail -> Alcotest.fail detail in
-  let item = decode evidence in
-  Alcotest.(check bool) "immutable original frame" true (Yojson.Safe.equal original item.sea_activation);
-  Alcotest.(check int) "physical handoffs" 2 (List.length item.sea_async_evidence.result_deliveries);
-  Alcotest.(check int) "typed SDK result and native start links" 3 (List.length item.sea_async_evidence.action_observations);
-  let actions = member "async_actions" fixture |> to_list in
-  let first = List.hd actions in
-  let invalids =
-    [ replace "activation" (replace "runtime_id" (`String "changed-original") original) evidence
-    ; replace "async_actions" (`List (replace "delivery_sha256" (`String (String.make 64 '0')) first :: List.tl actions)) evidence
-    ; replace "async_actions" (`List (first :: actions)) evidence ] in
-  List.iter (fun invalid -> Alcotest.(check bool) "hostile causal evidence refused" true
-    (Tui_decode_skill_evidence.decode_skill_evidence (envelope invalid) |> Result.is_error)) invalids;
-  List.iter (fun field ->
-    let missing = match evidence with `Assoc fields -> `Assoc (List.remove_assoc field fields) | _ -> Alcotest.fail "detail fixture" in
-    Alcotest.(check bool) "missing array is not observed zero" true
-      (Tui_decode_skill_evidence.decode_skill_evidence (envelope missing) |> Result.is_error))
-    ["async_result_deliveries"; "async_actions"];
-  let delivery = fixture |> member "async_result_deliveries" |> index 0 in
-  let children = delivery |> member "child_activations" |> to_list in
-  let sibling = `Assoc ["skill_tool_use_id", `String "z-sibling"; "activation_sha256", `String (String.make 64 '1')] in
-  let shared = replace "child_activations" (`List (children @ [sibling])) delivery in
-  let selected = evidence |> replace "async_result_deliveries" (`List [shared]) |> replace "async_actions" (`List []) |> decode in
-  Alcotest.(check int) "shared sibling remains a digest reference" 2
-    (List.length (List.hd selected.sea_async_evidence.result_deliveries).child_activations)
-;;
-
-let test_decode_skill_evidence_reads_typed_activation_owner () =
-  match Tui_decode_skill_evidence.decode_skill_evidence (skill_evidence_observed_fixture ()) with
-  | Error detail -> Alcotest.fail detail
-  | Ok
-      { se_activation =
-          Some (Tui_decode_skill_evidence.Skill_evidence_most_recent_observed item)
-      ; _
-      } ->
-    Alcotest.(check string) "trace" "trace-proof" item.sea_trace_id;
-    Alcotest.(check (list string))
-      "owner claim"
-      [ "delta" ]
-      (List.map (fun claim -> claim.Tui_decode_skill_evidence.seo_keeper) item.sea_owner_claims)
-  | Ok _ -> Alcotest.fail "typed activation selection was not preserved"
-;;
-
-let map_skill_evidence_coverage f = function
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (name, value) -> name, if String.equal name "coverage" then f value else value)
-         fields)
-  | json -> json
-;;
-
-let test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation () =
-  let open_gap =
-    skill_evidence_fixture ()
-    |> map_skill_evidence_coverage (function
-         | `Assoc fields ->
-           `Assoc
-             (("activation_scope", `String "incomplete_retained_trace_snapshot")
-              :: ("activation_gaps", `List [ `Assoc [ "code", `String "ledger_unreadable" ] ])
-              :: (fields
-                  |> List.remove_assoc "activation_scope"
-                  |> List.remove_assoc "activation_gaps"))
-         | json -> json)
-  in
-  Alcotest.(check bool)
-    "known code without variant fields is rejected"
-    true
-    (Tui_decode_skill_evidence.decode_skill_evidence open_gap |> Result.is_error);
-  let without_loaded_ledger =
-    skill_evidence_observed_fixture ()
-    |> map_skill_evidence_coverage (function
-         | `Assoc fields ->
-           `Assoc
-             (List.map
-                (fun (name, value) ->
-                   if String.equal name "activation_ledgers_loaded"
-                   then name, `Int 0
-                   else name, value)
-                fields)
-         | json -> json)
-  in
-  Alcotest.(check bool)
-    "activation requires a loaded ledger"
-    true
-    (Tui_decode_skill_evidence.decode_skill_evidence without_loaded_ledger |> Result.is_error)
-;;
-
-let test_decode_skill_evidence_tie_compares_rfc3339_instants () =
-  let first = skill_evidence_observed_fixture () in
-  let first_evidence =
-    first |> Yojson.Safe.Util.member "activation" |> Yojson.Safe.Util.member "evidence"
-  in
-  let second_evidence =
-    match first_evidence with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (name, value) ->
-              match name, value with
-              | "trace_id", _ -> name, `String "trace-proof-2"
-              | "activation", `Assoc activation ->
-                ( name
-                , `Assoc
-                    (List.map
-                       (fun (field, value) ->
-                          match field with
-                          | "turn_ref" -> field, `String "trace-proof-2#1"
-                          | "activated_at" ->
-                            field, `String "2026-08-29T09:00:00+09:00"
-                          | _ -> field, value)
-                       activation) )
-              | _ -> name, value)
-           fields)
-    | _ -> Alcotest.fail "activation evidence fixture is not an object"
-  in
-  let tie =
-    match first with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (name, value) ->
-              if String.equal name "activation"
-              then
-                ( name
-                , `Assoc
-                    [ "selection", `String "most_recent_observed_timestamp_tie"
-                    ; "evidence", `List [ first_evidence; second_evidence ]
-                    ] )
-              else name, value)
-           fields)
-    | _ -> Alcotest.fail "Skill evidence fixture is not an object"
-  in
-  match Tui_decode_skill_evidence.decode_skill_evidence tie with
-  | Ok { se_activation = Some (Skill_evidence_most_recent_observed_timestamp_tie rows); _ } ->
-    Alcotest.(check int) "two equal instants" 2 (List.length rows)
-  | Ok _ -> Alcotest.fail "timestamp tie lost its typed selection"
-  | Error detail -> Alcotest.fail detail
-;;
 
 (* --- git blame: the route's bare array, and the run lookup the margin uses --- *)
 
@@ -14079,22 +13054,9 @@ let () =
           test_decode_effective_keeper_surface_does_not_hide_unavailable;
         Alcotest.test_case "effective surface keeps tool suppression" `Quick
           test_decode_effective_keeper_surface_keeps_tool_suppression;
-        Alcotest.test_case "Skill activations keep exact receipt and origin" `Quick
-          test_decode_skill_activations_keeps_exact_receipt_and_origin;
-        Alcotest.test_case "Skill activations keep no session distinct" `Quick
-          test_decode_skill_activations_keeps_no_session_distinct;
-        Alcotest.test_case "Skill activation unavailable stays explicit" `Quick
-          test_decode_skill_activations_does_not_hide_unavailable;
-        Alcotest.test_case "Skill activation rejects cross-session turn" `Quick
-          test_decode_skill_activations_rejects_cross_session_turn;
         Alcotest.test_case "tool snapshot requires the Keeper surface field" `Quick
-          test_decode_tool_snapshot_requires_the_keeper_surface_field;
-        Alcotest.test_case "Keeper activations refuse another Keeper or schema" `Quick
-          test_decode_keeper_activations_refuses_another_keeper_or_schema;
-        Alcotest.test_case "Skill activation reuses canonical ledger decoder" `Quick
-          test_decode_skill_activations_reuses_canonical_ledger_decoder;
-        Alcotest.test_case "async actions retain original scope" `Quick test_decode_async_actions_keeps_original_scope;
-      ] );
+          test_decode_tool_snapshot_requires_the_keeper_surface_field
+] );
     ( "decode_connectors",
       [
         Alcotest.test_case "reads the live shape" `Quick
@@ -14713,11 +13675,7 @@ let () =
           test_decode_gate_row_missing_id_is_an_error;
       ] );
     ( "skills_catalog",
-      [ Alcotest.test_case "a Keeper's usage reads each closed state" `Quick
-          test_decode_keeper_skill_usage_reads_each_state;
-        Alcotest.test_case "a Keeper's usage refuses another Keeper, schema or state" `Quick
-          test_decode_keeper_skill_usage_refuses_another_keeper_schema_or_state;
-        Alcotest.test_case "errors carry only the cause" `Quick
+      [ Alcotest.test_case "errors carry only the cause" `Quick
           test_decode_skills_catalog_errors_carry_only_the_cause;
         Alcotest.test_case "reads the exact reference and the execution flow" `Quick
           test_decode_skills_catalog_reads_reference_and_flow;
@@ -14747,25 +13705,7 @@ let () =
           test_blame_block_at_names_the_run_and_its_first_line
       ] );
     ( "skill_evidence",
-      [ Alcotest.test_case "reads exact v9 coverage" `Quick
-          test_decode_skill_evidence_reads_exact_v9_coverage
-      ; Alcotest.test_case "accepts declared composition scopes" `Quick
-          test_decode_skill_evidence_accepts_declared_composition_scopes
-      ; Alcotest.test_case "rejects v1 and status disagreement" `Quick
-          test_decode_skill_evidence_rejects_v1_and_status_disagreement
-      ; Alcotest.test_case "requires observation fields" `Quick
-          test_decode_skill_evidence_requires_observation_fields
-      ; Alcotest.test_case "requires every coverage field" `Quick
-          test_decode_skill_evidence_requires_every_coverage_field
-      ; Alcotest.test_case "retained async detail preserves original and causal frames" `Quick
-          test_decode_skill_evidence_retains_async_results_and_actions
-      ; Alcotest.test_case "reads typed activation owner" `Quick
-          test_decode_skill_evidence_reads_typed_activation_owner
-      ; Alcotest.test_case "rejects open gaps and unbacked activations" `Quick
-          test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation
-      ; Alcotest.test_case "timestamp ties compare parsed instants" `Quick
-          test_decode_skill_evidence_tie_compares_rfc3339_instants
-      ] );
+      [] );
     ( "decode_timestamp_display",
       [ Alcotest.test_case "renders a numeric epoch as a date, not a bare number" `Quick
           test_required_display_renders_numeric_epoch_as_date

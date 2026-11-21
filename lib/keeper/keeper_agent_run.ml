@@ -952,11 +952,6 @@ let run_turn
   in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   (* 7. Set up agent — delegated to Keeper_run_tools *)
-  let composition_plan_index =
-    Option.map
-      (fun (gate : Keeper_tool_approval_gate.t) -> gate.composition_plan_index)
-      approval_gate
-  in
     let official_client_continuation = match direct_resume with
       | Some (Gate_continuation admission) -> Keeper_direct_gate_continuation.official_client admission
       | Some (Checkpoint_continuation admission) -> Keeper_direct_checkpoint_continuation.official_client admission
@@ -1010,7 +1005,6 @@ let run_turn
       ?tool_result_commit_policy
       ?hitl_resolutions
       ?on_gate_deferred
-      ?composition_plan_index
       ~turn_ctx_cell
       ~ctx_work
       ~session

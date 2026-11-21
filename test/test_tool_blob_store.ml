@@ -162,7 +162,7 @@ let test_encoded_marker_stays_under_externalization_threshold () =
         (String.length encoded <= threshold);
       match O.decode_from_agent_core encoded with
       | O.Decoded { preview; _ } ->
-        Alcotest.(check int) "preview remains documented cap" 200 (String.length preview)
+        Alcotest.(check int) "preview remains documented cap" B.preview_max (String.length preview)
       | O.Not_marker -> Alcotest.fail "expected Decoded"
       | O.Invalid_marker { detail } ->
           Alcotest.failf "expected Decoded, got Invalid_marker: %s" detail)
@@ -1260,7 +1260,7 @@ let test_maintenance_keeps_host_receipt_blob_addresses () =
     let store = B.create ~base_path in
     let image = "\x89PNG\r\n\x1a\nreceipt image bytes" in
     let document = "receipt document bytes, not a manifest" in
-    let text = String.make 4096 'r' in
+    let text = String.make 8192 'r' in
     let producer = require (Outbox.host_producer ~base_path ~keeper_name:"reviewer"
         ~runtime_label:"host fixture" ~turn_count:1) in
     let response = require (Outbox.host_response producer
@@ -1297,7 +1297,7 @@ let test_maintenance_keeps_codex_receipt_blob_addresses () =
     let store = B.create ~base_path in
     let image = "\x89PNG\r\n\x1a\n" ^ String.make 4096 '\x07' in
     let payload = Base64.encode_string image in
-    let text = String.make 4096 'c' in
+    let text = String.make 8192 'c' in
     let url = "https://example.test/screen.png" in
     let item kind field value = `Assoc ["type",`String kind; field,`String value] in
     let frame = `Assoc ["id",`Int 7; "result",`Assoc ["success",`Bool true;

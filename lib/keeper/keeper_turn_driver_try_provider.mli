@@ -328,6 +328,7 @@ val carried_working_state : held_window:held_window option -> range_start -> str
     ({!working_state_text}), and none without one. *)
 
 val project_range_start :
+  ?compaction_anchor:Keeper_compaction.compaction_anchor ->
   working_state:string option ->
   measure_message_bytes:(Agent_core.Types.message -> int) ->
   atom_count:int ->
@@ -1007,6 +1008,7 @@ module For_testing : sig
 
   val compose_carried_model_input :
     ?continuity:continuity ->
+    ?compaction_anchor:Keeper_compaction.compaction_anchor ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?past_max_context:past_max_context ->
     ?held_window:held_window ->
@@ -1026,6 +1028,7 @@ module For_testing : sig
 
   val request_view :
     ?continuity:continuity ->
+    ?compaction_anchor:Keeper_compaction.compaction_anchor ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?past_max_context:past_max_context ->
     ?held_window:held_window ->

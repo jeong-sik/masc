@@ -84,9 +84,6 @@ let workspace =
     ; tree Keeper_chat_store.chat_dirname
     ; tree Workspace_utils_paths_backend.messages_dirname
     ; tree Workspace_init.traces_dirname
-      (* These can be the only owners of a completed composition, apart from
-         any Keeper transcript or tool-call row. *)
-    ; tree Keeper_skill_composition_evidence.store_dirname
     ; tree Keeper_owned_job_invocation.requests_dirname
       (* Published reports own every revision, whatever chat or logs keep. *)
     ; tree Published_artifact_store.dirname
@@ -304,6 +301,14 @@ let config_keepers =
   ; M.Keeper_files
       { suffix = Librarian_writer.lock_suffix
       ; reason = M.Writes_no_reference
+      }
+    (* Per-Keeper compaction WAL stores immutable compaction anchors, raw
+       verbatim archived turns, and active microcompacted blob handles. Scan
+       all three through the read-only SQLite decoder so active handles stay
+       sweep-protected and SQLite sidecars (-wal/-shm/-journal) stay classified. *)
+  ; M.Decoded_keeper_files
+      { suffix = Keeper_compaction.db_suffix
+      ; decode = Keeper_compaction.decode_live_blob_references_json
       }
   ; finder_metadata
   ; unpublished_writes

@@ -197,16 +197,9 @@ let test_the_tools_that_load_deferred_tools_are_never_deferred () =
    names. If either file went missing, [Tool_loading_declarations.required]
    would raise when the surface is built. *)
 let test_the_composition_request_controls_are_deferred () =
-  List.iter
-    (fun name ->
-       check
-         loading
-         (name ^ " is held back until named")
-         Tool_definition_toml.Deferrable
-         (Tool_loading_declarations.required name))
-    [ Keeper_tool_composition_catalog.status_tool_name
-    ; Keeper_tool_composition_catalog.cancel_tool_name
-    ]
+  check loading "keeper_skill declaration is readable"
+    Tool_definition_toml.Always_loaded
+    (Tool_loading_declarations.required Keeper_instruction_skill.skill_tool_name)
 ;;
 
 let () =

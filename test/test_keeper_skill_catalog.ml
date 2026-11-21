@@ -1,7 +1,6 @@
 open Alcotest
 
 module Skill_catalog = Masc.Keeper_skill_catalog
-module Catalog = Masc.Keeper_tool_composition_catalog
 module Snapshot = Skill_catalog_snapshot
 
 let snapshot_of_document ~directory source_text =
@@ -139,7 +138,7 @@ pointer = "/profile"
 |}
 ;;
 
-let async_composition_document =
+let _async_composition_document =
   {|---
 name: quiet-lane
 description: Read the lane status through the durable async broker.
@@ -261,7 +260,7 @@ execution = "inline"
 |}
 ;;
 
-let fenced_prose_then_composition_document =
+let _fenced_prose_then_composition_document =
   {|---
 name: status-memory-query
 description: Feed the lane profile into memory search.
@@ -309,28 +308,6 @@ let test_instruction_skill_parses () =
     (contains ~needle:"# Release checklist" skill.Skill_catalog.body)
 ;;
 
-let test_composition_skill_materializes_entry () =
-  let skill = parsed ~directory:"status-memory-query" composition_document in
-  match skill.Skill_catalog.surface with
-  | Skill_catalog.Instruction ->
-    fail "composition document parsed as an instruction skill"
-  | Skill_catalog.Composition entry ->
-    check
-      string
-      "tool name"
-      "keeper_compose_status-memory-query"
-      (Catalog.tool_name entry);
-    check
-      string
-      "execution"
-      "inline"
-      (Catalog.execution_mode_to_string entry.Catalog.execution);
-    check
-      bool
-      "body keeps the fence for keeper_skill readers"
-      true
-      (contains ~needle:"```toml composition" skill.Skill_catalog.body)
-;;
 
 let test_directory_name_mismatch_is_rejected () =
   match rejected ~directory:"another-name" instruction_document with
@@ -397,138 +374,6 @@ let test_tilde_fence_also_escapes_an_example () =
 (* The other direction: an ordinary fence before the declaration must not
    swallow it. Skipping enclosed fences is only correct if it ends at the
    closing run. *)
-let test_ordinary_fence_does_not_hide_a_declaration () =
-  let skill =
-    parsed ~directory:"status-memory-query" fenced_prose_then_composition_document
-  in
-  match skill.Skill_catalog.surface with
-  | Skill_catalog.Instruction -> fail "the declaration after a shell fence was lost"
-  | Skill_catalog.Composition entry ->
-    check
-      string
-      "tool name"
-      "keeper_compose_status-memory-query"
-      (Catalog.tool_name entry)
-;;
-
-let test_composition_ast_keeps_source_span_and_long_close () =
-  let document =
-    String.concat
-      "\n"
-      [ "---"
-      ; "name: located-lane"
-      ; "description: Keep the declaration location."
-      ; "---"
-      ; ""
-      ; "```toml composition"
-      ; "[[compositions]]"
-      ; "name = \"located-lane\""
-      ; "execution = \"inline\""
-      ; "[[compositions.nodes]]"
-      ; "id = \"lane\""
-      ; "tool = \"keeper_lane_status\""
-      ; "[compositions.nodes.input]"
-      ; "kind = \"literal\""
-      ; "value = {}"
-      ; "````"
-      ]
-  in
-  let skill = parsed ~directory:"located-lane" document in
-  match skill.composition_span with
-  | None -> fail "composition AST lost its source span"
-  | Some span ->
-    check int "body-relative opening line" 2 span.start_line;
-    check int "longer CommonMark close line" 12 span.end_line
-;;
-
-let test_unterminated_block_rejected () =
-  let document =
-    "---\nname: broken\ndescription: never closes the fence\n---\n\n```toml composition\n[[compositions]]\n"
-  in
-  match rejected ~directory:"broken" document with
-  | Skill_catalog.Unterminated_composition_block { skill } ->
-    check string "skill" "broken" skill
-  | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
-;;
-
-let test_multiple_blocks_rejected () =
-  let document =
-    "---\nname: doubled\ndescription: two fences\n---\n\n```toml composition\n```\n\n```toml composition\n```\n"
-  in
-  match rejected ~directory:"doubled" document with
-  | Skill_catalog.Multiple_composition_blocks { skill; count } ->
-    check string "skill" "doubled" skill;
-    check int "count" 2 count
-  | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
-;;
-
-let test_malformed_composition_is_diagnostic_only () =
-  let malformed =
-    "---\nname: broken\ndescription: Invalid composition fixture.\n---\n\n```toml composition\n[[compositions]]\n"
-  in
-  let snapshot = snapshot_of_document ~directory:"broken" malformed in
-  let catalog, diagnostics = Skill_catalog.of_snapshot snapshot in
-  (match Skill_catalog.skills catalog with
-   | [ skill ] ->
-     check string "instruction name survives" "broken" skill.name;
-     check string "frozen body survives" "\n```toml composition\n[[compositions]]\n" skill.body;
-     (match skill.provenance with
-      | Some provenance ->
-        check string "frozen provenance survives" "broken" provenance.directory
-      | None -> fail "frozen snapshot provenance was lost");
-     (match skill.surface with
-      | Skill_catalog.Instruction -> ()
-      | Skill_catalog.Composition _ ->
-        fail "malformed composition remained executable")
-   | skills ->
-     failf "expected one fallback instruction, got %d" (List.length skills));
-  match diagnostics with
-  | [ diagnostic ] ->
-    (match diagnostic.Skill_catalog.error with
-     | Skill_catalog.Unterminated_composition_block { skill } ->
-       check string "typed diagnostic retains skill" "broken" skill
-     | error ->
-       fail
-         ("unexpected projection diagnostic: "
-          ^ Skill_catalog.error_to_string error))
-  | diagnostics ->
-    failf "expected one projection diagnostic, got %d" (List.length diagnostics)
-;;
-
-(* The fence info string is an exact contract; before this diagnostic a typo
-   like "TOML composition" silently produced an instruction skill and the
-   author had no way to learn why no composition tool appeared. *)
-let test_fence_info_near_miss_is_advisory () =
-  let document =
-    "---\nname: nearly\ndescription: The fence info only normalizes to the contract.\n---\n\n```TOML  composition\n[[compositions]]\n```\n"
-  in
-  let snapshot = snapshot_of_document ~directory:"nearly" document in
-  let catalog, diagnostics = Skill_catalog.of_snapshot snapshot in
-  (match Skill_catalog.skills catalog with
-   | [ skill ] ->
-     (match skill.Skill_catalog.surface with
-      | Skill_catalog.Instruction -> ()
-      | Skill_catalog.Composition _ ->
-        fail "a near-miss fence must not promote the skill")
-   | skills -> failf "expected one instruction skill, got %d" (List.length skills));
-  (match diagnostics with
-   | [ diagnostic ] ->
-     (match diagnostic.Skill_catalog.error with
-      | Skill_catalog.Composition_info_near_miss { skill; info } ->
-        check string "skill" "nearly" skill;
-        check string "raw info survives for the operator" "TOML  composition" info
-      | error ->
-        fail ("unexpected diagnostic: " ^ Skill_catalog.error_to_string error))
-   | diagnostics ->
-     failf "expected one advisory diagnostic, got %d" (List.length diagnostics));
-  let plain =
-    "---\nname: plain\ndescription: An ordinary fenced example.\n---\n\n```json\n{}\n```\n"
-  in
-  let snapshot = snapshot_of_document ~directory:"plain" plain in
-  let _catalog, diagnostics = Skill_catalog.of_snapshot snapshot in
-  check int "an unrelated info string stays undiagnosed" 0
-    (List.length diagnostics)
-;;
 
 let test_operator_projection_keeps_shadowed_exact_entries () =
   let snapshot = shadowed_snapshot () in
@@ -549,36 +394,6 @@ let test_operator_projection_keeps_shadowed_exact_entries () =
   | references -> failf "expected two exact references, got %d" (List.length references)
 ;;
 
-let test_composition_name_must_match_skill () =
-  let document =
-    String.concat
-      "\n"
-      [ "---"
-      ; "name: outer-name"
-      ; "description: block declares a different composition name"
-      ; "---"
-      ; ""
-      ; "```toml composition"
-      ; "[[compositions]]"
-      ; "name = \"inner-name\""
-      ; "execution = \"inline\""
-      ; ""
-      ; "[[compositions.nodes]]"
-      ; "id = \"lane\""
-      ; "tool = \"keeper_lane_status\""
-      ; "[compositions.nodes.input]"
-      ; "kind = \"literal\""
-      ; "value = {}"
-      ; "```"
-      ; ""
-      ]
-  in
-  match rejected ~directory:"outer-name" document with
-  | Skill_catalog.Composition_name_mismatch { skill; declared } ->
-    check string "skill" "outer-name" skill;
-    check string "declared" "inner-name" declared
-  | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
-;;
 
 let test_partition_documents_sorts_and_reports_duplicates () =
   let catalog, rejected =
@@ -597,22 +412,10 @@ let test_partition_documents_sorts_and_reports_duplicates () =
    | Some skill ->
      check
        string
-       "find returns the composition skill"
-       "composition"
+       "find returns the skill"
+       "instruction"
        (Skill_catalog.surface_to_string skill.Skill_catalog.surface)
    | None -> fail "find missed an existing skill");
-  (match Skill_catalog.composition_entries catalog with
-   | [ entry ] ->
-     check
-       string
-       "composition entries surface the validated tool"
-       "keeper_compose_status-memory-query"
-       (Catalog.tool_name entry)
-   | entries ->
-     fail
-       (Printf.sprintf
-          "expected 1 composition entry, got %d"
-          (List.length entries)));
   let _catalog, rejected =
     Skill_catalog.partition_documents
       [ "release-checklist", instruction_document
@@ -855,65 +658,7 @@ let test_composition_skill_joins_projection () =
     bool
     "instruction skill joins the descriptor projection"
     true
-    (List.mem Catalog.skill_tool_name expected_instruction);
-  let expected =
-    Masc.Keeper_run_tools_setup.expected_model_tool_names
-        ~identity_names:[]
-      ~skill_catalog:
-        (skill_catalog_of [ "status-memory-query", composition_document ])
-      ~model_visible_descriptors:descriptors
-      ()
-  in
-  check
-    bool
-    "composition skill joins the descriptor projection"
-    true
-    (List.mem "keeper_compose_status-memory-query" expected);
-  (* The transient-draft tools ride along on every turn (#43156), and the
-     shared controls accompany them, so the default projection carries the
-     controls even when no async request needs addressing. An inline-only
-     surface without transient drafts needs no shared controls. *)
-  check
-    bool
-    "the default projection carries the controls with the transient-draft tools"
-    true
-    (List.mem Catalog.status_tool_name expected
-     && List.mem Catalog.cancel_tool_name expected);
-  let expected_inline =
-    Masc.Keeper_run_tools_setup.expected_model_tool_names
-        ~identity_names:[]
-      ~skill_catalog:
-        (skill_catalog_of [ "status-memory-query", composition_document ])
-      ~model_visible_descriptors:descriptors
-      ~transient_drafts:false
-      ()
-  in
-  check
-    bool
-    "an inline-only surface has no async request for the controls to address"
-    false
-    (List.mem Catalog.status_tool_name expected_inline
-     || List.mem Catalog.cancel_tool_name expected_inline);
-  let expected_async =
-    Masc.Keeper_run_tools_setup.expected_model_tool_names
-        ~identity_names:[]
-      ~skill_catalog:(skill_catalog_of [ "quiet-lane", async_composition_document ])
-      ~model_visible_descriptors:descriptors
-      ~transient_drafts:false
-      ()
-  in
-  check
-    bool
-    "async skill adds the shared status and cancel controls"
-    true
-    (List.mem "keeper_compose_quiet-lane" expected_async
-     && List.mem Catalog.status_tool_name expected_async
-     && List.mem Catalog.cancel_tool_name expected_async);
-  check
-    bool
-    "named async work retains controls without exposing transient draft tools"
-    false
-    (List.mem Catalog.run_tool_name expected_async)
+    (List.mem Masc.Keeper_instruction_skill.skill_tool_name expected_instruction)
 ;;
 
 (* The entries of one published snapshot are projected once, and every
@@ -946,7 +691,7 @@ let test_a_snapshot_is_projected_once () =
      (match Skill_catalog.project_entry_or_fallback snapshot entry with
       | Skill_catalog.Projected skill ->
         check bool "an entry resolved on its own shares it" true (same_skills first [ skill ])
-      | Skill_catalog.Frozen_instruction _ | Skill_catalog.Entry_unavailable _ ->
+      | Skill_catalog.Entry_unavailable _ ->
         fail "the fixture entry did not project")
    | _ -> fail "the fixture snapshot does not hold one entry");
   let rebuilt = snapshot_of_document ~directory:"once" (document "once") in
@@ -973,7 +718,7 @@ let test_a_snapshot_is_projected_once () =
           (match skill.reference with
            | Some reference -> Skill_reference.equal reference (Snapshot.entry_reference entry)
            | None -> false)
-      | Frozen_instruction _ | Entry_unavailable _ -> fail "changed instruction did not project")
+      | Entry_unavailable _ -> fail "changed instruction did not project")
    | _ -> fail "changed source fixture did not retain its entry");
   check bool "foreign fallback does not mutate the original retained catalog" true
     (same_skills first (skills (Skill_catalog.prepared_catalog preparation)))
@@ -992,7 +737,6 @@ let test_each_entry_gets_its_own_projection () =
            true
            (Skill_reference.equal reference (Snapshot.entry_reference entry))
        | Skill_catalog.Projected { reference = None; _ }
-       | Skill_catalog.Frozen_instruction _
        | Skill_catalog.Entry_unavailable _ -> fail "a shadowed fixture entry did not project")
     (Snapshot.entries snapshot)
 ;;
@@ -1003,10 +747,6 @@ let () =
     [ ( "skill catalog"
       , [ test_case "instruction skill parses" `Quick test_instruction_skill_parses
         ; test_case
-            "composition skill materializes a catalog entry"
-            `Quick
-            test_composition_skill_materializes_entry
-        ; test_case
             "directory name mismatch is rejected"
             `Quick
             test_directory_name_mismatch_is_rejected
@@ -1014,14 +754,6 @@ let () =
             "missing required frontmatter is rejected"
             `Quick
             test_missing_required_frontmatter_rejected
-        ; test_case
-            "unterminated composition fence is rejected"
-            `Quick
-            test_unterminated_block_rejected
-        ; test_case
-            "multiple composition fences are rejected"
-            `Quick
-            test_multiple_blocks_rejected
         ; test_case
             "an example escaped by a longer outer fence stays an instruction"
             `Quick
@@ -1031,18 +763,6 @@ let () =
             `Quick
             test_tilde_fence_also_escapes_an_example
         ; test_case
-            "an ordinary fence does not hide a later declaration"
-            `Quick
-            test_ordinary_fence_does_not_hide_a_declaration
-        ; test_case
-            "composition AST keeps source span and accepts a longer close"
-            `Quick
-            test_composition_ast_keeps_source_span_and_long_close
-        ; test_case
-            "malformed snapshot composition is diagnostic-only"
-            `Quick
-            test_malformed_composition_is_diagnostic_only
-        ; test_case
             "operator projection keeps shadowed exact entries"
             `Quick
             test_operator_projection_keeps_shadowed_exact_entries
@@ -1050,10 +770,6 @@ let () =
             test_a_snapshot_is_projected_once
         ; test_case "each entry gets its own projection" `Quick
             test_each_entry_gets_its_own_projection
-        ; test_case
-            "composition name must equal the skill name"
-            `Quick
-            test_composition_name_must_match_skill
         ; test_case
             "partition sorts by name and reports duplicates"
             `Quick
@@ -1081,13 +797,10 @@ let () =
         ; test_case "allowed-tools has no Keeper policy" `Quick
             test_tool_preapproval_hint_has_no_keeper_policy
         ; test_case
-            "fence info near-miss is an advisory diagnostic"
-            `Quick
-            test_fence_info_near_miss_is_advisory
-        ; test_case
             "composition skill joins the model projection"
             `Quick
             test_composition_skill_joins_projection
-        ] )
+        
+] )
     ]
 ;;

@@ -62,18 +62,3 @@ val catalog_tool_line :
     rather than the name being answered about: a tool on no surface is
     unreachable, and [surfaces] is the column that says so. A tool whose every
     call failed says so in the [Fail] reading and nowhere else on the row. *)
-
-val skill_usage_keeper_header : Masc_tui_say.t
-(** The column names over the keeper rows below one skill. *)
-
-val skill_usage_keeper_line :
-  keeper:string ->
-  invocations:int ->
-  deliveries:int ->
-  actions:int ->
-  last_used:string ->
-  Masc_tui_say.t
-(** One keeper's use of one skill: who, how many times it was triggered, how
-    many of those were delivered, what the model did after, and when it last
-    ran. The counts are right-aligned so one keeper and six read down the same
-    columns. *)

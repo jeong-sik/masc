@@ -14,22 +14,15 @@ type names = {
   failures : string;
   direct : string;
   surfaces : string;
-  keeper : string;
-  triggered : string;
-  delivered : string;
-  actions : string;
-  last_used : string;
 }
 
 let names = function
   | Say.Ko ->
     { tool = "도구"; origin = "출처"; calls = "호출"; failures = "실패"; direct = "직접";
-      surfaces = "노출 위치"; keeper = "키퍼"; triggered = "호출"; delivered = "전달";
-      actions = "동작"; last_used = "마지막 사용" }
+      surfaces = "노출 위치" }
   | Say.En ->
     { tool = "Tool"; origin = "Origin"; calls = "Calls"; failures = "Fail"; direct = "Direct";
-      surfaces = "Surfaces"; keeper = "Keeper"; triggered = "Triggered"; delivered = "Delivered";
-      actions = "Actions"; last_used = "Last used" }
+      surfaces = "Surfaces" }
 
 (* The percentile names itself the same way in both languages. *)
 let p95_name = "P95"
@@ -43,27 +36,6 @@ let catalog_direct_width = 8
    columns the readings below do not start in, which is what it did. *)
 let catalog_row_indent = "      "
 let effective_row_indent = "   "
-
-(* A keeper that ran a skill, in columns: who, then the three counts that
-   say what came of it, then when it last ran. The counts are narrow and
-   right-aligned so a skill with one keeper and one with six read down the
-   same columns. *)
-let skill_usage_keeper_name_width = 22
-let skill_usage_count_width = 9
-
-let skill_usage_keeper_cells names ~keeper ~(invocations : string * string)
-    ~(deliveries : string * string) ~(actions : string * string) =
-  let inv_text, inv_style = invocations in
-  let del_text, del_style = deliveries in
-  let act_text, act_style = actions in
-  [ Table.cell ~header:names.keeper ~width:skill_usage_keeper_name_width keeper
-  ; Table.cell ~align:Table.Right ~style:inv_style ~header:names.triggered
-      ~width:skill_usage_count_width inv_text
-  ; Table.cell ~align:Table.Right ~style:del_style ~header:names.delivered
-      ~width:skill_usage_count_width del_text
-  ; Table.cell ~align:Table.Right ~style:act_style ~header:names.actions
-      ~width:skill_usage_count_width act_text
-  ]
 
 let effective_tool_cells names name =
   [ Table.cell ~header:names.tool ~width:effective_tool_name_width name ]
@@ -216,26 +188,3 @@ let catalog_tool_line layout ~metadata ~name ~direct ~usage ~surfaces =
            (catalog_cells names layout ~metadata ~name
               ~direct:(Say.render language direct) ~usage))
       ~tail:styled_tail)
-
-let skill_usage_keeper_header =
-  in_each_language (fun _ names ->
-    framed ~indent:""
-      ~cells:
-        (Table.header_row
-           (skill_usage_keeper_cells names ~keeper:"" ~invocations:("", "")
-              ~deliveries:("", "") ~actions:("", "")))
-      ~tail:names.last_used)
-
-let skill_count_cell n =
-  (Masc_tui_value.Count.grouped n, if n = 0 then Theme.recede () else "")
-
-let skill_usage_keeper_line ~keeper ~invocations ~deliveries ~actions ~last_used =
-  in_each_language (fun _ names ->
-    framed ~indent:""
-      ~cells:
-        (Table.row
-           (skill_usage_keeper_cells names ~keeper
-              ~invocations:(skill_count_cell invocations)
-              ~deliveries:(skill_count_cell deliveries)
-              ~actions:(skill_count_cell actions)))
-      ~tail:last_used)

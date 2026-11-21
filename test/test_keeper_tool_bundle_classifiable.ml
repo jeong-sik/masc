@@ -293,27 +293,9 @@ let snapshot_reference snapshot name =
   | None -> failf "exact snapshot reference %s missing" name
 ;;
 
-let assert_exact_activation snapshot expected
-      (activation : Keeper_skill_activation_ledger.activation)
-  =
-  let observed =
-    Skill_reference.make
-      ~identity:activation.identity
-      ~content_revision:activation.content_revision
-  in
-  check bool "exact identity and content revision" true
-    (Skill_reference.equal expected observed);
-  check bool "exact frozen snapshot revision" true
-    (Skill_catalog_snapshot.equal_snapshot_revision
-       (Skill_catalog_snapshot.snapshot_revision snapshot)
-       activation.snapshot_revision)
-;;
-
 let with_bundle_tools
-      ?(record_activations = true)
       ?(agent_core = false)
       ?(deferred_compositions = false)
-      ?(task_skill_names = ["gate-instruction"])
       ?(current_task_id = None)
       ?(tool_deny = [])
       ?(addon_exports = [])
@@ -348,35 +330,6 @@ let with_bundle_tools
            (Keeper_id.Trace_id.to_string trace_id)
        in
        Unix.mkdir session_dir 0o700;
-       let snapshot_revision =
-         Skill_catalog_snapshot.snapshot_revision skill_snapshot
-       in
-       let skill_activation_context =
-         let task_selection =
-           match
-             Keeper_task_skill_turn.resolve_for_task
-               ~snapshot:skill_snapshot
-               ~task_id:"task-001"
-               (List.map (snapshot_reference skill_snapshot) task_skill_names)
-           with
-           | Ok selection -> selection
-           | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
-         in
-         match
-           Keeper_skill_activation_recorder.make ~keeper_name:"skill-keeper-fixture"
-             ~trace_id
-             ~runtime_id:(fun () -> Some "test.runtime")
-             ~turn_ref:
-               (Ids.Turn_ref.make
-                  ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
-                  ~absolute_turn:1)
-             ~snapshot_revision
-             ~task_selection
-         with
-         | Ok context -> context
-         | Error error ->
-           fail (Keeper_skill_activation_recorder.error_to_string error)
-       in
        let ctx_snapshot =
          Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
        in
@@ -399,9 +352,6 @@ let with_bundle_tools
          publication_recovery_turn_context
            ~registry:publication_recovery_registry
            ~keeper_name:meta.name
-       in
-       let composition_plan_index =
-         Masc.Keeper_tool_composition_plan_index.create ()
        in
        let capability_surface =
          Keeper_capability_surface.create_with_descriptors
@@ -436,9 +386,6 @@ let with_bundle_tools
              ; load_receipts
              ; keeper_turn_id = 1
              } else None)
-           ~composition_plan_index
-           ?skill_activation_context:
-             (if record_activations then Some skill_activation_context else None)
            () |> Result.get_ok
        in
        Option.iter (fun cell -> cell := Some (Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
@@ -451,49 +398,18 @@ let with_bundle_tools
            config
            meta
            skill_snapshot
-           composition_plan_index
+           ()
            capability_surface
            (if agent_core then bundle.agent_core_tools else bundle.tools)))
 ;;
 
 let with_bundle f =
   with_bundle_tools
-  @@ fun _config _meta _skill_snapshot composition_plan_index _surface tools ->
-  f composition_plan_index
+  @@ fun _config _meta _skill_snapshot () _surface tools ->
+  f ()
     (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools)
 ;;
 
-(* The bundle is the model-visible surface, whole. It used to be narrowable
-   per Keeper through declared tool groups, and this asserted that a Tool
-   outside the declared groups did not reach the bundle; #31728 removed the
-   declaration because no Keeper ever wrote one, so there is no outside left
-   for a Tool to be in. *)
-(* An async composition is on this surface, so the shared request controls are
-   built, each with its declared schema and execution contract. *)
-let test_async_composition_controls_keep_their_contracts () =
-  with_bundle_tools
-  @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
-  List.iter
-    (fun ((schema : Masc_domain.tool_schema), execution) ->
-       let tool =
-         match
-           List.find_opt
-             (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name schema.name)
-             tools
-         with
-         | Some tool -> tool
-         | None -> failf "missing composition control %s" schema.name
-       in
-       check bool (schema.name ^ " input schema") true
-         (tool.schema.input_schema = Some schema.input_schema);
-       check bool (schema.name ^ " execution contract") true
-         (Agent_core.Tool.execution_mode tool ~input:`Null = execution);
-       check bool (schema.name ^ " continues after success") true
-         (Agent_core.Tool.completion tool = Agent_core.Tool_contract.Continue_after_success))
-    [ Tool_schemas_composition_control.status_schema, Agent_core.Tool_contract.Concurrent
-    ; Tool_schemas_composition_control.cancel_schema, Agent_core.Tool_contract.Serial
-    ]
-;;
 
 let test_the_bundle_is_the_model_visible_surface () =
   with_bundle_tools
@@ -538,7 +454,7 @@ let check_stored_image_reader_is_callable_with_read_authority ~agent_core ~name 
     (Keeper_tool_descriptor_resolution.readonly_for_tool_call ~tool_name:name ~input);
   check bool "catalog requires read-state permission only" true
     ((Tool_catalog.metadata name).required_permission = Masc_domain.CanReadState);
-  match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None ~tool_name:name ~input with
+  match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~tool_name:name ~input with
   | Policy.Run -> ()
   | Policy.Ask { because } -> failf "stored-image reading asks for approval: %s" because
 ;;
@@ -1063,172 +979,32 @@ let test_tools_list_reads_the_supplied_capability_surface () =
         Yojson.Safe.Util.(row |> member "matched_name" |> to_string),
         Yojson.Safe.Util.(row |> member "invocation_name")) in
     let literal = search_names "bundle-capability-literal-skill"
-        (`Assoc ["query",`String "gate-inline"]) in
+        (`Assoc ["query",`String "gate-instruction"]) in
     check bool "a plain hyphenated Skill name returns its real callable name" true
-      (List.mem ("gate-inline",`String "keeper_compose_gate-inline") literal);
-    let expressions = search_names "bundle-capability-expression"
-        (`Assoc ["query",`String "\"gate-inline\" OR \"gate-async\"";"syntax",`String "fts5"]) in
-    check bool "explicit FTS preserves both matching Skill invocations" true
-      (List.mem ("gate-inline",`String "keeper_compose_gate-inline") expressions &&
-       List.mem ("gate-async",`String "keeper_compose_gate-async") expressions))
+      (List.mem ("gate-instruction",`String "keeper_skill") literal))
 ;;
 
-let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =
-  let invocation =
-    Agent_core.Tool_contract.Invocation.create
-      ~tool_use_id:"bundle-composition-activation"
-      ~turn:1
-      ~schedule:
-        { planned_index = 0
-        ; batch_index = 0
-        ; batch_size = 1
-        ; execution_mode = Agent_core.Tool_contract.Serial
-        }
-      ~completion:(Agent_core.Tool.completion tool)
-  in
-  match Agent_core.Tool.execute ~invocation tool (`Assoc []), expected_failure with
-  | Ok _, None -> ()
-  | Error error, Some expected ->
-    check bool "expected submission failure" true
-      (contains ~needle:expected error.Agent_core.Types.message)
-  | Ok _, Some expected -> failf "expected %s failure" expected
-  | Error error, None -> fail error.Agent_core.Types.message
-;;
-
-let test_composition_activation_is_durable ?expected_failure ~skill_name tool_name =
-  with_bundle_tools (fun config meta snapshot _composition_plan_index _surface tools ->
-    let tool =
-      match
-        List.find_opt
-          (fun (tool : Agent_core.Tool.t) ->
-             String.equal tool.schema.name tool_name)
-          tools
-      with
-      | Some tool -> tool
-      | None -> failf "%s missing from exact snapshot bundle" tool_name
-    in
-    run_composition_tool ?expected_failure tool;
-    let ledger =
-      match
-        Keeper_skill_activation_ledger.load
-          ~config
-          ~trace_id:meta.runtime.trace_id
-      with
-      | Ok ledger -> ledger
-      | Error error ->
-        fail (Keeper_skill_activation_ledger.store_error_to_string error)
-    in
-    match Keeper_skill_activation_ledger.activations ledger with
-    | [ activation ] ->
-      assert_exact_activation
-        snapshot
-        (snapshot_reference snapshot skill_name)
-        activation;
-      (match activation.invocation with
-       | Keeper_skill_activation_ledger.Composition_invocation
-           { origin = Session_composition; tool_name = observed; _ } ->
-         check string "exact composition origin" tool_name observed
-       | Keeper_skill_activation_ledger.Composition_invocation
-           { origin = Task_composition _; _ }
-       | Keeper_skill_activation_ledger.Instruction_invocation _
-       | Keeper_skill_activation_ledger.Nested_composition_invocation _ ->
-         fail "composition activation kept the wrong typed origin")
-    | activations ->
-      failf "expected one composition activation, got %d" (List.length activations))
-;;
-
-let test_task_selected_composition_is_callable_without_loading () =
-  with_bundle_tools ~agent_core:true ~deferred_compositions:true
-    ~task_skill_names:["gate-inline"; "gate-result"] ~current_task_id:(Some "task-001")
-    (fun config meta snapshot _index _surface tools ->
-      let name = "keeper_compose_gate-inline" in
-      let tool = match List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) tools with
-        | Some tool -> tool | None -> fail "exact Task composition was absent from the first callable surface" in
-      check bool "the exact Task plan's ordinary result Tool is callable without a load" true
-        (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_job_result") tools);
-      check bool "one-call upstream recipe control needs no preliminary loader" true
-        (List.exists (fun (tool : Agent_core.Tool.t) ->
-          tool.schema.name = Keeper_composition_draft.run_tool_name) tools);
-      check bool "another deferred composition remains behind the loader" false
-        (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_compose_gate-async") tools);
-      let before = match Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id with
-        | Ok None -> []
-        | Ok (Some ledger) -> Keeper_skill_activation_ledger.activations ledger
-        | Error error -> fail (Keeper_skill_activation_ledger.store_error_to_string error) in
-      check int "providing a schema records no activation" 0 (List.length before);
-      run_composition_tool tool;
-      let ledger = match Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id with
-        | Ok (Some ledger) -> ledger
-        | Ok None -> fail "actual exact composition call did not record activation"
-        | Error error -> fail (Keeper_skill_activation_ledger.store_error_to_string error) in
-      match Keeper_skill_activation_ledger.activations ledger with
-      | [activation] -> assert_exact_activation snapshot (snapshot_reference snapshot "gate-inline") activation
-      | _ -> fail "one actual exact composition call must retain one activation")
-;;
-
-let test_task_schema_readiness_keeps_other_task_and_profile_boundaries () =
-  List.iter (fun (current_task_id, tool_deny) ->
-    with_bundle_tools ~agent_core:true ~deferred_compositions:true
-      ~task_skill_names:["gate-inline"] ~current_task_id ~tool_deny
-      (fun _config _meta _snapshot _index _surface tools ->
-        check bool "other Task or denied node cannot preload a composition" false
-          (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_compose_gate-inline") tools)))
-    [Some "task-002", []; None, []; Some "task-001", ["keeper_lane_status"]]
-;;
-
-let test_inline_composition_activation_is_durable () =
-  test_composition_activation_is_durable
-    ~skill_name:"gate-inline"
-    "keeper_compose_gate-inline"
-;;
-
-let test_async_composition_activation_is_durable () =
-  test_composition_activation_is_durable
-    ~expected_failure:"background_switch_unavailable"
-    ~skill_name:"gate-async"
-    "keeper_compose_gate-async"
-;;
 
 (* Guards against an empty-list false pass: a bundle that produced nothing
    would satisfy every assertion below by vacuity. *)
 let test_the_bundle_is_not_empty () =
-  with_bundle (fun _ names ->
+  with_bundle (fun () names ->
     check bool "the keeper is handed tools at all" true (names <> []);
-    (* Without these the gate would pass by not looking at anything. Each is a
-       kind of undescribed tool the policy has an arm for. *)
-    List.iter
-      (fun expected ->
-         check bool
-           (Printf.sprintf "%s is in the bundle the gate walks" expected)
-           true (List.mem expected names))
-      [ "keeper_compose_gate-inline"
-      ; "keeper_compose_gate-async"
-      ; Keeper_tool_composition_catalog.status_tool_name
-      ; Keeper_tool_composition_catalog.cancel_tool_name
-      ; Keeper_tool_composition_catalog.skill_tool_name
-      ])
+    check bool "keeper_skill is in the bundle" true
+      (List.mem Keeper_instruction_skill.skill_tool_name names))
 ;;
 
-let test_skill_bundle_without_activation_context_is_rejected () =
-  check_raises
-    "Skill surface cannot bypass durable activation recording"
-    (Invalid_argument
-       "Skill-bearing Keeper bundle requires a frozen activation context")
-    (fun () ->
-       with_bundle_tools ~record_activations:false
-         (fun _config _meta _snapshot _composition_plan_index _surface _tools -> ()))
-;;
 
 (* The point of the tool is that a body reaches the keeper. A tool that is on
    the surface and classifiable but answers nothing would pass every other
    assertion here. *)
 let test_the_skill_tool_serves_the_body () =
-  with_bundle_tools (fun config meta snapshot _composition_plan_index _surface tools ->
+  with_bundle_tools (fun _config _meta _snapshot () _surface tools ->
     match
       List.find_opt
         (fun (tool : Agent_core.Tool.t) ->
            String.equal tool.schema.name
-             Keeper_tool_composition_catalog.skill_tool_name)
+             Keeper_instruction_skill.skill_tool_name)
         tools
     with
     | None -> fail "the instruction skill put no tool on the surface"
@@ -1247,23 +1023,6 @@ let test_the_skill_tool_serves_the_body () =
       in
       check bool "second invocation also returns the body" true
         (contains ~needle:"body" served_again);
-      let ledger =
-        match
-          Keeper_skill_activation_ledger.load
-            ~config
-            ~trace_id:meta.runtime.trace_id
-        with
-        | Ok ledger -> ledger
-        | Error error ->
-          fail (Keeper_skill_activation_ledger.store_error_to_string error)
-      in
-      (match Keeper_skill_activation_ledger.activations ledger with
-       | [ first; second ] ->
-         assert_exact_activation snapshot reference first;
-         assert_exact_activation snapshot reference second
-       | activations ->
-         failf "expected two instruction activations, got %d"
-           (List.length activations));
       let stale =
         Skill_reference.make
           ~identity:reference.identity
@@ -1277,18 +1036,13 @@ let test_the_skill_tool_serves_the_body () =
         (contains ~needle:"gate-instruction" missing))
 ;;
 
-(* task-828: keepers that know a skill by name but not by revision sent ""
-   (and copied placeholders) and were answered by a schema length error that
-   could not name the catalog. The refusal has to hand back the exact
-   references this keeper carries, revision included, so the next call can
-   be the right one. *)
 let test_a_revisionless_ask_is_taught_the_exact_reference () =
-  with_bundle_tools (fun _config _meta _snapshot _composition_plan_index _surface tools ->
+  with_bundle_tools (fun _config _meta _snapshot () _surface tools ->
     match
       List.find_opt
         (fun (tool : Agent_core.Tool.t) ->
            String.equal tool.schema.name
-             Keeper_tool_composition_catalog.skill_tool_name)
+             Keeper_instruction_skill.skill_tool_name)
         tools
     with
     | None -> fail "the instruction skill put no tool on the surface"
@@ -1320,18 +1074,14 @@ let test_a_revisionless_ask_is_taught_the_exact_reference () =
 ;;
 
 let test_every_bundle_tool_is_classifiable () =
-  with_bundle (fun composition_plan_index names ->
-    (* The bundle offers [identity_tools ()], so this turn's index is built
-       from the same list, as turn setup builds it from the tools it kept. *)
+  with_bundle (fun () names ->
     let identity_tool_index =
       Masc.Keeper_identity_tool_index.of_tools (identity_tools ())
     in
     let unclassifiable =
       List.filter
         (fun tool_name ->
-           not
-             (Policy.classifies ~identity_tool_index
-                ~composition_plan_index:(Some composition_plan_index) ~tool_name))
+           not (Policy.classifies ~identity_tool_index ~tool_name))
         names
     in
     match unclassifiable with
@@ -1339,19 +1089,13 @@ let test_every_bundle_tool_is_classifiable () =
     | names ->
       failf
         "the approval policy cannot classify %d tool(s) the bundle hands the \
-         model: %s.\n\
-         Each will ask the operator for approval with no reason they can act \
-         on. A tool with a Keeper_tool_descriptor is classified by its group; \
-         one without needs an arm in \
-         Keeper_tool_approval_policy.verdict_for_undescribed."
+         model: %s."
         (List.length names)
         (String.concat ", " names))
 ;;
 
-(* Names are unique, so a duplicate cannot hide an unclassifiable twin behind
-   a classifiable one of the same name. *)
 let test_bundle_names_are_unique () =
-  with_bundle (fun _ names ->
+  with_bundle (fun () names ->
     check
       int
       "bundle model names are unique"
@@ -1360,17 +1104,13 @@ let test_bundle_names_are_unique () =
 ;;
 
 let test_bundle_matches_expected_projection () =
-  with_bundle_tools (fun _config _meta snapshot _index _surface tools ->
+  with_bundle_tools (fun _config _meta snapshot () _surface tools ->
     let names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
     let skill_catalog =
       match Keeper_skill_catalog.of_snapshot snapshot with
       | catalog, [] -> catalog
       | _, _ :: _ -> fail "bundle Skill snapshot projection was rejected"
     in
-    (* [tools] is the official-client shape: the attached tools are in it as
-       themselves, because those lanes cannot widen a running turn and a
-       listing would name tools they can never make callable. The Agent Core
-       shape lives in [agent_core_tools] and carries the listing instead. *)
     let identity_names =
       List.map
         (fun (offered : Keeper_identity_tools.offered_tool) ->
@@ -1379,9 +1119,6 @@ let test_bundle_matches_expected_projection () =
     in
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
-        (* Named from the same fixture the bundle was handed. Passing [] here
-           while the bundle carries them is what this check exists to catch,
-           and it did. *)
         ~identity_names
         ~skill_catalog
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
@@ -1389,26 +1126,13 @@ let test_bundle_matches_expected_projection () =
     in
     check
       (list string)
-      "instruction and composition tools match the expected projection"
+      "instruction tools match the expected projection"
       expected
       (List.sort_uniq String.compare names);
-    (* Measure the executable bundle's actual schemas, built independently of
-       the schema-only profile path. Shared controls are not per-Skill bytes. *)
     Keeper_skill_observability.of_catalog skill_catalog
     |> List.iter (fun (profile : Keeper_skill_observability.profile) ->
       match profile.surface with
-      | Keeper_skill_observability.Instruction_skill -> ()
-      | Composition_skill _ ->
-        let delivered =
-          match List.find_opt (fun (tool : Agent_core.Tool.t) ->
-            String.equal tool.schema.name profile.activation_tool) tools with
-          | Some tool -> tool
-          | None -> failf "profile activation tool missing: %s" profile.activation_tool
-        in
-        check (option int)
-          (profile.activation_tool ^ " exact delivered schema-component bytes")
-          (Some (Keeper_skill_observability.tool_component_bytes delivered))
-          profile.tool_schema_bytes);
+      | Keeper_skill_observability.Instruction_skill -> ());
     let task_reference = snapshot_reference snapshot "gate-instruction" in
     let task_selection =
       match Keeper_task_skill_turn.resolve ~snapshot [ task_reference ] with
@@ -1446,7 +1170,7 @@ let test_bundle_matches_expected_projection () =
 
 let test_bundle_effect_contracts () =
   with_bundle_tools
-  @@ fun _config _meta _snapshot _index _surface tools ->
+  @@ fun _config _meta _snapshot () _surface tools ->
   let call_effect name input =
     match List.find_opt (fun (tool : Agent_core.Tool.t) ->
       String.equal tool.schema.name name) tools with
@@ -1459,26 +1183,10 @@ let test_bundle_effect_contracts () =
   check_effect "Read" (`Assoc ["file_path", `String "fixture.txt"])
     Agent_core.Tool.Read_only;
   check_effect "masc_board_list" (`Assoc []) Agent_core.Tool.Read_only;
-  check_effect "keeper_compose_gate-inline" (`Assoc []) Agent_core.Tool.Read_only;
-  check_effect "keeper_compose_gate-async" (`Assoc []) Agent_core.Tool.Effect_possible;
-  check_effect "keeper_compose_gate-mixed" (`Assoc []) Agent_core.Tool.Effect_possible;
   check_effect "Write" (`Assoc []) Agent_core.Tool.Effect_possible;
   check_effect "Execute" (`Assoc []) Agent_core.Tool.Effect_possible
 ;;
 
-(* A provider that refuses recursive JSON Schemas rejects the whole request,
-   not only a call to the tool that carries one (Muse: 400 "Recursive JSON
-   schemas are not currently supported"). The composition recipe schema was
-   advertised with a recursive [$defs] and [$ref] (#43137), and every Muse
-   keeper that loaded that schema through its own tool search then failed each
-   turn until the build with #43150 was running: one keeper made no successful
-   turn for about fourteen hours. #43150 pins that one schema. This walks the
-   bundle a keeper is handed, so the next tool that carries a reference fails
-   here and not in a keeper's turn.
-
-   It does not look for a cycle: any [$ref] or [$defs] key fails. No tool in
-   the bundle holds either today, and it is not known whether Muse also
-   refuses a reference that does not recurse. *)
 let rec has_schema_reference = function
   | `Assoc fields ->
     List.exists
@@ -1491,18 +1199,9 @@ let rec has_schema_reference = function
   | _ -> false
 ;;
 
-(* [tools] is every tool the turn can run, attached-service tools included.
-   [agent_core_tools] holds the same built-ins and, in place of the
-   attached-service schemas, one listing tool that is not in [tools]. That
-   listing tool's schema is not checked here. *)
 let test_no_tool_advertises_a_schema_reference () =
   with_bundle_tools
-  @@ fun _config _meta _snapshot _plan_index _surface tools ->
-  check bool "the run control is in the bundle the gate walks" true
-    (List.exists
-       (fun (tool : Agent_core.Tool.t) ->
-          String.equal tool.schema.name Keeper_composition_draft.run_tool_name)
-       tools);
+  @@ fun _config _meta _snapshot () _surface tools ->
   List.iter
     (fun (tool : Agent_core.Tool.t) ->
        match tool.schema.input_schema with
@@ -1527,13 +1226,9 @@ let () =
         ; test_case "no tool advertises a schema reference" `Quick
             test_no_tool_advertises_a_schema_reference
         ; test_case "is not empty" `Quick test_the_bundle_is_not_empty
-        ; test_case "requires activation context" `Quick
-            test_skill_bundle_without_activation_context_is_rejected
         ; test_case "names are unique" `Quick test_bundle_names_are_unique
         ; test_case "matches the expected projection" `Quick
             test_bundle_matches_expected_projection
-        ; test_case "async composition controls keep their contracts" `Quick
-            test_async_composition_controls_keep_their_contracts
         ; test_case "the bundle is the model-visible surface" `Quick
             test_the_bundle_is_the_model_visible_surface
         ; test_case "stored-image reader is callable with read authority" `Quick
@@ -1544,15 +1239,8 @@ let () =
             test_the_skill_tool_serves_the_body
         ; test_case "a revisionless ask is taught the exact reference" `Quick
             test_a_revisionless_ask_is_taught_the_exact_reference
-        ; test_case "current Task exact composition runs on the first callable surface" `Quick
-            test_task_selected_composition_is_callable_without_loading
-        ; test_case "Task schema readiness preserves other Task and profile boundaries" `Quick
-            test_task_schema_readiness_keeps_other_task_and_profile_boundaries
-        ; test_case "inline composition activation is durable" `Quick
-            test_inline_composition_activation_is_durable
-        ; test_case "async composition activation is durable" `Quick
-            test_async_composition_activation_is_durable
-        ] )
+        
+] )
     ; ( "the approval policy"
       , [ test_case "can classify every tool in it" `Quick
             test_every_bundle_tool_is_classifiable

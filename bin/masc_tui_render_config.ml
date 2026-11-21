@@ -2354,7 +2354,6 @@ let config_heading_rows ~cols (state : state) =
   + List.length (config_metadata_summary state) + 1
   + List.length (runtime_config_edit_lines ~cols state)
   + (if Option.is_none state.runtime_account_form
-        && Option.is_none state.memory_recall_form
         && Option.is_none state.typesafeai_exclusion_form
         && Option.is_some state.runtime_config_view_error then 1 else 0)
 
@@ -3122,14 +3121,6 @@ let render_config (state : state) =
   let now = Unix.gettimeofday () in
   let path_note = config_path_note state in
   let form_sheet = runtime_form_progress_sheet ~now state in
-  let recall_gate_loading =
-    Option.exists
-      (fun form ->
-        match Masc_tui_memory_recall_form.server form with
-        | Masc_tui_memory_recall_form.Server_unread -> true
-        | Server_unavailable _ | Server_read _ -> false)
-      state.memory_recall_form
-  in
   let config_loading =
     match state.runtime_config_read with
     | `Loading _ -> true
@@ -3141,7 +3132,6 @@ let render_config (state : state) =
   let gen = string_of_int state.runtime_config_generation in
   let config_clock_sig =
     if Option.is_some form_sheet then None
-    else if recall_gate_loading then Some ("memory-recall-gate:" ^ gen)
     else if first_config_read then Some ("loading:" ^ gen)
     else None
   in
@@ -3152,20 +3142,7 @@ let render_config (state : state) =
     match form_sheet with
     | Some _ as sheet -> sheet
     | None ->
-        if recall_gate_loading then
-          Some
-            { ps_title =
-                ui_text state ~ko:"기억 회상 게이트 확인 중" ~en:"Reading memory recall gate"
-            ; ps_detail =
-                Some
-                  (ui_text state ~ko:"서버에 적용 중인 기억 회상 상태를 조회하고 있습니다"
-                     ~en:"Reading live memory recall gate from server")
-            ; ps_started_at = config_started_at
-            ; ps_meter = None
-            ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
-            ; ps_blocking = false
-            }
-        else if first_config_read then
+        if first_config_read then
           Some
             { ps_title = ui_text state ~ko:"runtime.toml 읽는 중" ~en:"Loading runtime.toml"
             ; ps_detail =
@@ -3209,8 +3186,6 @@ let render_config (state : state) =
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ~lang:state.ui_language
-       | None when Option.is_some state.memory_recall_form ->
-         Masc_tui_keys.footer_hints_memory_recall_form ~lang:state.ui_language
        | None when Option.is_some state.typesafeai_exclusion_form ->
          Masc_tui_keys.footer_hints_typesafeai_exclusion_form ~lang:state.ui_language
        | None -> Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:state.config_pane)
@@ -3251,15 +3226,6 @@ let render_config (state : state) =
              does. *)
           if saved then
             c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language)
-      | None ->
-      match state.memory_recall_form with
-      | Some form ->
-          (* Same place and same reason as the account form: the form is
-             opened on the file, and what it saves is that file with three
-             keys of [typesafeai] set. *)
-          List.iter push_form_row
-            (Masc_tui_memory_recall_form.rows_with_selection ~ko ~width:(framed_inner_width cols)
-               ~height:content_height form)
       | None ->
       match state.typesafeai_exclusion_form with
       | Some form ->

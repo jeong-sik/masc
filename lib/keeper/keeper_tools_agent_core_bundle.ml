@@ -174,11 +174,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?on_gate_deferred
       ?(skill_catalog = Keeper_skill_catalog.empty)
       ?(identity_surface : Keeper_tools_agent_core.attached_surface option)
-      ?composition_plan_index
-      ?skill_activation_context
-      ?composition_result_delivery
       ?on_inline_receipt_committed
-      ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
       ?capability_surface
       ?execution_scope
@@ -188,6 +184,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ()
   : (tool_bundle, Tool_bridge.schema_error) result
   =
+  ignore on_inline_receipt_committed;
   (* Which lane will execute this call. The bundle is built before the turn
      resolves a runtime, so this is asked per call rather than read now.
 
@@ -250,40 +247,19 @@ let make_tool_bundle_for_descriptors_with_policy
       (descriptor, schema) :: rest
   in
   let* validated_descriptors = validate_descriptors descriptors in
-  let skill_compositions =
-    Keeper_skill_catalog.compositions skill_catalog
-    |> List.map (fun (composition : Keeper_skill_catalog.composition) ->
-      composition.entry, composition.provenance)
-  in
-  let schema_rows = Keeper_tool_composition_surface.schema_tool_rows
-      ~include_drafts:(Option.is_some capability_surface) ~skill_compositions () in
-  let rec validate_rows = function
-    | [] -> Ok ()
-    | (_, schema) :: rest ->
-      let* _ = schema in
-      validate_rows rest
-  in
-  let* () = validate_rows schema_rows in
   let instruction_skills =
-    Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog in
-  let* () = match instruction_skills with
+    Keeper_instruction_skill.instruction_skills_of_catalog skill_catalog
+  in
+  let* () =
+    match instruction_skills with
     | [] -> Ok ()
     | skills ->
-      let+ _ = Keeper_tool_composition_surface.instruction_skill_schema_tool
-          ~instruction_skills:skills in ()
+      let+ _ =
+        Keeper_instruction_skill.instruction_skill_schema_tool
+          ~instruction_skills:skills
+      in
+      ()
   in
-  Option.iter (fun index ->
-    Keeper_tool_composition_plan_index.bind_descriptors index descriptors)
-    composition_plan_index;
-  let skill_surface_present =
-    Keeper_skill_catalog.skills skill_catalog <> []
-  in
-  (match skill_surface_present, skill_activation_context with
-   | true, None when not allow_unrecorded_skill_surface ->
-     invalid_arg
-       "Skill-bearing Keeper bundle requires a frozen activation context"
-   | true, None
-   | true, Some _ | false, Some _ | false, None -> ());
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
      instances with a factory. in_playground and the runtime cache key need
      the call site's [cwd], which is unknown at turn start, so the factory
@@ -679,106 +655,24 @@ let make_tool_bundle_for_descriptors_with_policy
     if not masc_tools_enabled
     then Ok ([], [])
     else
-    let instruction_skills =
-      Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
-    in
-    let composition_skills =
-      Keeper_skill_catalog.skills skill_catalog
-      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
-           match skill.reference, skill.surface with
-           | Some reference, Keeper_skill_catalog.Composition entry ->
-             Some Keeper_tool_composition_surface.{ reference; entry }
-           | None, _ | Some _, Keeper_skill_catalog.Instruction ->
-             None)
-    in
-    let task_references = match skill_activation_context, meta.current_task_id with
-      | Some context, Some task_id ->
-        Keeper_skill_activation_recorder.task_references ~task_id context
-      | None, _ | Some _, None -> [] in
-    let task_required_tool_names = List.concat_map
-        (fun (skill : Keeper_tool_composition_surface.composition_skill) ->
-          if List.exists (Skill_reference.equal skill.reference) task_references then
-            Keeper_composition_draft.run_tool_name ::
-            Keeper_tool_composition_catalog.tool_name skill.entry ::
-              List.filter_map (fun (node : Keeper_tool_plan.node) ->
-                match Keeper_tool_plan.descriptor skill.entry.plan node.id with
-                | Some _ -> Some node.tool_name
-                | None -> None) (Keeper_tool_plan.nodes skill.entry.plan)
-          else []) composition_skills
-        |> List.sort_uniq String.compare in
-    let record_instruction_activation =
-      Option.map
-        (fun context ~invocation ~content reference ->
-           Keeper_skill_activation_recorder.record_instruction
-             ~config
-             context
-             ~invocation
-             ~content
-             reference)
-        skill_activation_context
-    in
-    let record_composition_activation =
-      Option.map
-        (fun context ~invocation ~tool_name ~reference ->
-           Keeper_skill_activation_recorder.record_composition
-             ~config
-             context
-             ~invocation
-             ~tool_name
-             reference)
-        skill_activation_context
-    in
-    let make_composition_tools =
-      let record_nested_composition_activation = Option.map
-          (fun context ~invocation ~tool_name ~scope ~reference ->
-             Keeper_skill_activation_recorder.record_nested_composition
-               ~config context ~invocation ~tool_name ~scope reference)
-          skill_activation_context in
-      match capability_surface with
-      | Some capability_surface ->
-        Keeper_tool_composition_surface.make_tools ~capability_surface ?record_nested_composition_activation
-          ?nested_activation_context:skill_activation_context
-      | None ->
-        Keeper_tool_composition_surface.Compatibility.make_tools ~descriptors ?record_nested_composition_activation
-          ?nested_activation_context:skill_activation_context
-    in
-    let+ tools = make_composition_tools
-        ?result_delivery:composition_result_delivery
-        ?on_inline_receipt_committed
-        ~instruction_skills
-        ~skill_compositions:composition_skills
-        ?composition_plan_index
-        ~config
-        ~meta
-        ~publication_recovery
-        ~ctx_snapshot
-        ?record_instruction_activation
-        ?record_composition_activation
-        ?turn_sandbox_factory
-        ?turn_ctx_cell
-        ?clock
-        ?continuation_channel
-        ?gate_context:gate_context_provider
-        ?gate_causal_context:gate_context
-        ?gate_grant
-        ?record_gate_result
-        ~on_completed:(fun ~composition_tool -> function
-          | Some receipt -> mark_terminal_effect_completed receipt
-          | None ->
-            mark_terminal_effect_failed
-              { failure_class = Tool_result.Runtime_failure
-              ; effect_disposition = Tool_result.Effect_outcome_unknown
-              ; detail =
-                  Keeper_terminal_effect_detail.Terminal_composition_receipt_missing
-                    { composition_tool }
-              })
-        ~on_deferred:mark_deferred_tool_result
-        ~on_external_effect_deferred:mark_external_effect_deferred
-        ~on_failed:mark_terminal_effect_failed
-        ~on_externalization_error:mark_completed_terminal_externalization_failed
-        ()
-    in
-    tools, task_required_tool_names
+      match instruction_skills with
+      | [] -> Ok ([], [])
+      | skills ->
+        let+ tool =
+          Keeper_instruction_skill.make_instruction_skill_tool
+            ~config
+            ~keeper_name:meta.name
+            ~instruction_skills:skills
+            ()
+        in
+        let loading =
+          Tool_loading_declarations.declared Keeper_instruction_skill.skill_tool_name
+          |> Option.value ~default:Tool_definition_toml.Always_loaded
+        in
+        let projection =
+          Tool_output.Inline_up_to { maximum_bytes = Common.max_tool_result_wire_bytes }
+        in
+        [ tool, loading, projection ], []
   in
   let composition_tools =
     List.map (fun (tool, _, _) -> tool) composition_tools_with_loading
@@ -1101,9 +995,6 @@ let make_tool_bundle_for_capability_surface
       ?hitl_resolutions
       ?on_gate_deferred
       ?identity_surface
-      ?composition_plan_index
-      ?skill_activation_context
-      ?composition_result_delivery
       ?on_inline_receipt_committed
       ?turn_ctx_cell
       ?checkpoint_owner
@@ -1121,14 +1012,10 @@ let make_tool_bundle_for_capability_surface
     ?continuation_channel
     ?gate_context
     ?hitl_resolutions
-      ?on_gate_deferred
+    ?on_gate_deferred
     ~skill_catalog:(Keeper_capability_surface.skill_catalog capability_surface)
     ?identity_surface
-    ?composition_plan_index
-    ?skill_activation_context
-    ?composition_result_delivery
     ?on_inline_receipt_committed
-    ~allow_unrecorded_skill_surface:false
     ?turn_ctx_cell
     ?checkpoint_owner
     ?tool_result_inline_ceiling_bytes
@@ -1148,7 +1035,7 @@ module For_testing = struct
         ?continuation_channel
         ?gate_context
         ?hitl_resolutions
-      ?on_gate_deferred
+        ?on_gate_deferred
         ?capability_surface
         ?skill_catalog
         ?turn_ctx_cell
@@ -1170,7 +1057,6 @@ module For_testing = struct
       ?hitl_resolutions
       ?on_gate_deferred
       ?skill_catalog
-      ~allow_unrecorded_skill_surface:true
       ?turn_ctx_cell
       ?execution_scope
       ()
@@ -1215,7 +1101,6 @@ module For_testing = struct
        ~ctx_snapshot
        ~descriptors
        ?skill_catalog
-       ~allow_unrecorded_skill_surface:true
        () |> Result.get_ok)
       .tools
   ;;

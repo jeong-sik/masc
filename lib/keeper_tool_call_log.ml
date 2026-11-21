@@ -922,7 +922,6 @@ let log_call
       ?skill_reference
       ?composition_run_id
       ?composition_node_id
-      ?composition_execution
       ?composition_tool_kind
       ?parent_tool_use_id
       ?trace_id
@@ -1204,15 +1203,6 @@ let log_call
         | Some reference -> [ "skill_reference", Skill_reference.to_yojson reference ]
         | None -> []
       in
-      let composition_execution_field =
-        match composition_execution with
-        | Some value ->
-          [ ( "composition_execution"
-            , `String
-                (Keeper_tool_composition_catalog.execution_mode_to_string value) )
-          ]
-        | None -> []
-      in
       let composition_tool_kind_field =
         match composition_tool_kind with
         | Some value ->
@@ -1350,7 +1340,6 @@ let log_call
            @ execution_evidence_field
            @ composition_fields
            @ skill_reference_field
-           @ composition_execution_field
            @ composition_tool_kind_field
            @ trace_id_field
            @ (match record_kind, List.sort_uniq String.compare answer_source_ids with

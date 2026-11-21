@@ -214,11 +214,6 @@ let resolve_requests ?descriptors ~snapshot ~finish requests =
               ({ reference; skill; diagnostic = None; task_ids } :: resolved)
               unprojectable
               rest
-          | Keeper_skill_catalog.Frozen_instruction { skill; diagnostic } ->
-            loop (Some projection)
-              ({ reference; skill; diagnostic = Some diagnostic; task_ids } :: resolved)
-              unprojectable
-              rest
           | Keeper_skill_catalog.Entry_unavailable error ->
             loop (Some projection)
               resolved
@@ -448,9 +443,7 @@ let partition selection =
     (fun partition selected ->
        match selected.skill.surface with
        | Keeper_skill_catalog.Instruction ->
-         { partition with instructions = selected :: partition.instructions }
-       | Keeper_skill_catalog.Composition _ ->
-         { partition with compositions = selected :: partition.compositions })
+         { partition with instructions = selected :: partition.instructions })
     { instructions = []; compositions = [] }
     selection.selected
   |> fun partition ->

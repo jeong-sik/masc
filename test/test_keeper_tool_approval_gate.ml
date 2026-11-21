@@ -262,34 +262,15 @@ let test_the_listing_carries_what_the_gate_published () =
               | _ -> None)))
 
 let test_a_synthetic_composition_asks_with_its_node_name () =
-  (* A composition tool has no descriptor, so the policy falls to the plan
-     index; its because is the only place the node that caused the ask is
-     named. This pins that the node name survives the gate — dropped here,
-     an operator sees a plan name and a blind yes. *)
+  (* Composition DAG engine has been retired; unclassified synthetic names still ask. *)
   with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
-      Masc.Keeper_tool_composition_plan_index.record
-        gate.Gate.composition_plan_index
-        ~composition:"keeper_compose_gate_fixture"
-        ~node_tools:[ "Read"; "unclassified_fixture_tool"; "Grep" ];
-          match gate.Gate.pre_tool_use ~identity_tool_index:gate.Gate.identity_tool_index (pre_tool_use_event
-                 ~tool_name:"keeper_compose_gate_fixture"
-                 ~input:(`Assoc [])) with
-          | Agent_core.Hooks.ElicitToolApproval { because; _ } ->
-              let has_affix affix s =
-                let n = String.length affix in
-                let m = String.length s in
-                let rec at i =
-                  i + n <= m
-                  && (String.sub s i n = affix || at (i + 1))
-                in
-                m >= n && at 0
-              in
-              check bool "a composition's because names the node that asks"
-                true
-                (has_affix "node unclassified_fixture_tool:" because)
-          | other ->
-              Alcotest.fail
-                ("composition should ask, got: " ^ decision_to_string other))
+      match gate.Gate.pre_tool_use ~identity_tool_index:gate.Gate.identity_tool_index (pre_tool_use_event
+             ~tool_name:"unclassified_fixture_tool"
+             ~input:(`Assoc [])) with
+      | Agent_core.Hooks.ElicitToolApproval _ -> ()
+      | other ->
+          Alcotest.fail
+            ("unclassified tool should ask, got: " ^ decision_to_string other))
 
 let () =
   run "keeper_tool_approval_gate"

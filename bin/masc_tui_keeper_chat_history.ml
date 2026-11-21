@@ -1073,20 +1073,6 @@ let decode_skill_activation = function
             | None -> Error "Skill activation invocation has no kind")
         | Some _ | None -> Error "Skill activation invocation is not an object"
       in
-      let* execution = match invocation with
-        | Transcript.Instruction_read -> Ok None
-        | Transcript.Composition_run _ ->
-          (match assoc_opt "execution" fields with
-           | None -> Error "Composition execution evidence is missing"
-           | Some json ->
-             let* execution = Masc.Keeper_skill_execution_projection.of_yojson json in
-             match execution with
-             | Masc.Keeper_skill_execution_projection.Recorded { execution_id = observed; _ }
-                 when execution_id <> Some observed ->
-               Error "Composition execution differs from its original invocation"
-             | Masc.Keeper_skill_execution_projection.Recorded _
-             | Masc.Keeper_skill_execution_projection.Unrecorded
-             | Masc.Keeper_skill_execution_projection.Unavailable _ -> Ok (Some execution)) in
       let state =
         match delivered, actions with
         | false, _ -> Transcript.Skill_served_only
@@ -1095,7 +1081,7 @@ let decode_skill_activation = function
       in
       Ok
         (Transcript.make_skill_activity ~invocation ~skill_tool_use_id ~turn_ref
-           ~content_revision ~runtime_id ?execution_id ?execution ~skill_name ~state ~actions ())
+           ~content_revision ~runtime_id ?execution_id ~skill_name ~state ~actions ())
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error "Skill activation is not an object"
 
@@ -1195,12 +1181,7 @@ let skill_projection_covers_tool projection (tool : Transcript.tool_activity) =
     skill_matches_tool skill tool &&
     match skill.invocation with
     | Some Transcript.Instruction_read -> tool.outcome = Transcript.Returned
-    | Some (Transcript.Composition_run _) ->
-      (match skill.execution with
-       | Some (Masc.Keeper_skill_execution_projection.Recorded _) -> true
-       | None | Some (Masc.Keeper_skill_execution_projection.Unrecorded
-                    | Masc.Keeper_skill_execution_projection.Unavailable _) -> false)
-    | None -> false) projection.activities
+    | Some (Transcript.Composition_run _) | None -> false) projection.activities
 
 let without_raw_skill_tools summary projection =
   { summary with tools = List.filter
@@ -1214,7 +1195,7 @@ let reconcile_skill_projection_with_trace summary projection =
       Transcript.make_skill_activity ?invocation:skill.invocation
         ?skill_tool_use_id:skill.skill_tool_use_id ?turn_ref:skill.turn_ref
         ?content_revision:skill.content_revision ?runtime_id:skill.runtime_id
-        ?execution_id:skill.execution_id ?execution:skill.execution ?detail:skill.detail
+        ?execution_id:skill.execution_id ?detail:skill.detail
         ~call_failed ~skill_name:skill.skill_name ~state:skill.state ~actions:skill.actions ()) projection.activities } in
   if not projection.replaces_raw_skill_tools then projection
   else if List.exists (fun tool ->

@@ -770,7 +770,7 @@ let delegate_reply_preview_max_len = 480
    Selected results and their source reach the next prompt without copying
    full intermediate node bodies into the durable queue. *)
 let pending_board_event_of_composition_completion
-      ~base_path
+      ~base_path:_
       ~(keeper_name : string)
       ~(arrived_at : float)
       (cc : Keeper_event_queue.composition_completion)
@@ -783,8 +783,11 @@ let pending_board_event_of_composition_completion
     | Keeper_event_queue.Composition_cancelled _ -> "cancelled"
   in
   let preview =
-    Keeper_composition_completion_result.read ~base_path ~keeper_name cc
-    |> Keeper_composition_completion_result.to_json
+    `Assoc
+      [ "request_id", `String cc.cc_request_id
+      ; "tool", `String cc.cc_tool
+      ; "outcome", `String outcome
+      ]
     |> Yojson.Safe.to_string
   in
   { event_kind = Composition_completed

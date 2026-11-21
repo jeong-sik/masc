@@ -2104,8 +2104,46 @@ let test_glm_http_capacity_classification () =
         ~http_status:(Some http_status) receipt
     | _ -> fail "GLM HTTP refusal lost its typed cause or evidence"
   in
+  (* A context overflow is not a refusal: the provider codec types it as
+     [Provider_context_overflow] (exact_output.mli), which keeps its type
+     whether or not the receipt carries an HTTP status and keeps the original
+     typed error, the dispatch fact and the raw envelope available. This case
+     pins that shape with the same envelope assertion the refusal cases make;
+     the codes the codec still classes as refusals stay in [run_case]. *)
+  let run_context_overflow_case ~status ~body =
+    let result, posts, _, _ =
+      with_server ~status ~response:body
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
+      let entry =
+        catalog_entry ~id:"glm-refusal" ~kind:Provider_config.Glm ~base_url
+          ~request_path:"/v1/chat/completions"
+          ~capabilities:(capabilities ~native:true ~json:true) ()
+      in
+      with_catalog [ entry ] @@ fun snapshot ->
+      execute_once ~net ~clock (attempt (flow snapshot "glm-refusal" EO.Json_syntax))
+    in
+    check int "one real HTTP dispatch" 1 posts;
+    match result with
+    | Error
+        { EO.receipt
+        ; cause = EO.Provider_context_overflow { http_status; _ }
+        ; raw_response = Some raw
+        ; _
+        } ->
+      let expected_status = Cohttp.Code.code_of_status status in
+      check bool "typed overflow keeps the HTTP status" true
+        (http_status = Some expected_status);
+      check string "original envelope retained" body raw.body;
+      check_receipt
+        "GLM context overflow"
+        ~phase:EO.Response_received
+        ~dispatch_count:1
+        ~http_status:(Some expected_status)
+        receipt
+    | _ -> fail "GLM context overflow lost its typed cause or evidence"
+  in
   let overflow={|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|} in
-  run_case ~kind:Provider_config.Glm ~status:`Bad_request ~body:overflow ~expected:EO.Context_overflow;
+  run_context_overflow_case ~status:`Bad_request ~body:overflow;
   run_case ~kind:Provider_config.Glm ~status:`Too_many_requests
     ~body:{|{"error":{"code":"1302","message":"Too many requests"}}|} ~expected:EO.Rate_limited;
   run_case ~kind:Provider_config.OpenAI_compat ~status:`Bad_request ~body:overflow ~expected:EO.Invalid_request;

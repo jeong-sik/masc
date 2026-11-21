@@ -945,7 +945,6 @@ type sent_request =
    address form. *)
 type attempt_state =
   { last_request : sent_request option ref
-  ; request_range : Keeper_continuity_request.range option ref
   ; request_start : Keeper_request_start.t option ref
         (* Where the request this composition made starts in the history,
            recorded when it goes out (RFC librarian-call-only-proposes
@@ -980,7 +979,6 @@ let ledger_session (ctx : try_provider_ctx) =
    table; its observation also replaces this candidate's working value. *)
 let new_attempt_state (ctx : try_provider_ctx) =
   { last_request = ref None
-  ; request_range = ref None
   ; request_start = ref None
   ; ledger = ref (match ctx.request_input with
       | Completion_review -> None
@@ -1963,7 +1961,6 @@ let bounded_model_input_projection
   let input_limit = lazy (input_limit_of_provider_config provider_config) in
   let to_wire = memoize_wire_message media_store in
   fun messages ->
-    state.request_range := None;
     state.request_start := None;
     (* Discovery may widen the Agent's tools between provider rounds. The
        binding head must use this request's live, ordered tool surface. *)
@@ -2348,18 +2345,8 @@ let bounded_model_input_projection
       | None -> Ok windowed
       | Some inner -> inner windowed in
     (match view.transmitted, result with
-     | Ok _, Ok projected ->
-       let changed = match ctx.model_input_projection with
-         | None -> false
-         | Some _ -> offload_model_input_cpu (fun () ->
-             not (List.equal Agent_core.Types.Message_value.equal windowed projected)) in
+     | Ok _, Ok _ ->
        let first_atom = composed.projection.Runtime_model_input_tail_window.dropped_atoms in
-       state.request_range := Some
-         { Keeper_continuity_request.origin = composed.origin
-         ; first_atom
-         ; total_atoms = history_atom_count
-         ; custom_projection_changed = changed
-         };
        (* Taken here, before the request goes out: a [Reset] the turn log
           gains later lies past [log_end], where the comparison reads it. *)
        state.request_start :=
@@ -3021,41 +3008,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; pre_dispatch_serialization_observer =
               Some
                 (fun observation ->
-                   let range = !(state.request_range) in
-                   state.request_range := None;
                    Option.iter
                      (Keeper_request_start.record
                         ~config:(Workspace.default_config ctx.base_path)
                         ~keeper_name:ctx.keeper_name)
                      !(state.request_start);
                    state.request_start := None;
-                   let turn_ref = Option.bind ctx.runtime_manifest_context
-                     (fun (context : Keeper_runtime_manifest.turn_context) ->
-                       Option.map (fun absolute_turn ->
-                         Ids.Turn_ref.make ~trace_id:context.manifest_trace_id ~absolute_turn)
-                         context.manifest_keeper_turn_id) in
-                     let selection = match ctx.request_input with
-                       | Keeper_history { trace_id; continuity = Covered { end_atom; _ } } ->
-                         Keeper_continuity_request.Absorbed { trace_id; end_atom }
-                       | Keeper_history { continuity = No_read_end; trace_id = _ } ->
-                         Keeper_continuity_request.Without_snapshot
-                       | Completion_review -> Keeper_continuity_request.Not_applied in
-                     Keeper_continuity_request.record_best_effort
-                       ~turn_ref
-                       ~config:(Workspace.default_config ctx.base_path)
-                       ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
-                       ~selection ~range ~wire:observation;
-                   let input = match ctx.request_input with
-                     | Keeper_history { trace_id; continuity = Covered { end_atom; _ } } ->
-                       Keeper_continuity_observation.Absorbed { trace_id; end_atom }
-                     | Keeper_history { continuity = No_read_end; trace_id = _ } ->
-                       Keeper_continuity_observation.Without_snapshot
-                     | Completion_review -> Keeper_continuity_observation.Not_applied in
-                   if Option.is_some (input_trace_id ctx.request_input) then
-                     Keeper_continuity_observation.record
-                     ~config:(Workspace.default_config ctx.base_path) ~keeper_name:ctx.keeper_name
-                     { prepared_at = Time_compat.now (); runtime_id = ctx.runtime_id; input;
-                       request_bytes = observation.Llm_provider.Request_wire_observer.body_bytes };
                    Option.iter
                      (fun observe ->
                         observe
@@ -3156,14 +3114,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           | Some (message, retained_bytes) ->
             retained_results_projected := true;
             (* This is mandatory per-request data, not another history
-               atom. Keep the ledger's tail and attribution honest even
-               when the caller supplied no custom projection. The bounded
-               projection resets both observations on every request. *)
+               atom. Keep the ledger's tail honest even when the caller
+               supplied no custom projection. The bounded projection resets
+               it on every request. *)
             state.last_request := Option.map (fun request ->
               {request with request={request.request with
                 tail_bytes=request.request.tail_bytes + retained_bytes}}) !(state.last_request);
-            state.request_range := Option.map (fun range ->
-              {range with Keeper_continuity_request.custom_projection_changed=true}) !(state.request_range);
             Keeper_client_tool_outbox.place_carrier message messages in
         (* The recorded input is the history this request was resolved
            from, with the retained-result carrier where the wire puts
@@ -3761,9 +3717,7 @@ let current_turn_demotion_sequence
    with whatever demotion [first] chose. A refusal of that resend for a
    reason [is_size_refusal] does not name gives back the front [held_front]
    reported before, as rule 1 does. Any other failure returns at once. The
-   atoms between the boundary and this turn's start stay in the checkpoint.
-   With a Librarian point, a later Librarian round reads them: a round reads
-   every atom from its position to its cut point ({!Keeper_librarian_range}). *)
+   atoms between the boundary and this turn's start stay in the checkpoint. *)
 let this_turn_start_resend_sequence
       ~same_run_retry_authorized
       ~refused_first_atom

@@ -317,22 +317,6 @@ let warn_if_sent_on_unknown_start ~keeper_name = function
   | Covered _ -> ()
 ;;
 
-let continuity_observation_input ~trace_id ~continuity front =
-  match front, continuity with
-  | (Covered_with_working_state { end_atom } | Covered { end_atom }), _ ->
-    Keeper_continuity_observation.Absorbed { trace_id; end_atom }
-  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _), None ->
-    Keeper_continuity_observation.Not_applied
-  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _)
-    , Some Keeper_turn_driver_try_provider.No_read_end ) ->
-    Keeper_continuity_observation.Without_snapshot
-  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _)
-    , Some (Keeper_turn_driver_try_provider.Covered _) ) ->
-    (* The turn has a read end and this request did not start there: the
-       seed or the lane's own cut sat past it. *)
-    Keeper_continuity_observation.Not_applied
-;;
-
 (* Where a start seed begins (RFC keeper-context-window-in-tokens §10.4). The
    front is a position in the keeper's checkpoint history, and an official
    client cuts from that same history: masc composes the list here and the

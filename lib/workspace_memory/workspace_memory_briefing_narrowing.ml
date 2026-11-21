@@ -31,6 +31,8 @@ let restart memory ~requests =
   }
 ;;
 
+let forget memory = { memory with hold = None }
+
 let same_generation (left : Narrowing.generation) (right : Narrowing.generation) =
   String.equal left.lane right.lane && Int.equal left.requests right.requests
 ;;

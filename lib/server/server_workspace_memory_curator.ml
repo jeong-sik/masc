@@ -767,9 +767,17 @@ let run_briefing ~base_path ~owner ~woken_by =
         resolution
         [ "workspace_memory_briefing", Yojson.Safe.to_string input ]
     in
+    (* No pass is left to read, so no request waits: one that comes back in a
+       later pass is asked again. *)
+    let no_pass () =
+      Stdlib.Mutex.protect owner.mutex (fun () ->
+        owner.briefing <- Briefing_narrowing.forget owner.briefing)
+    in
     (match Briefing.prepare ~sources ~contract ~render state with
      | Error detail -> Briefing_failed detail
-     | Ok Briefing.Unchanged -> Briefing_idle
+     | Ok Briefing.Unchanged ->
+       no_pass ();
+       Briefing_idle
      | Ok (Briefing.Cleanup _ | Briefing.Prepared _) ->
        let step = ref None in
        (match
@@ -785,8 +793,11 @@ let run_briefing ~base_path ~owner ~woken_by =
         | Error detail -> Briefing_failed detail
         | Ok _ ->
           (match !step with
-           | None | Some Briefing.Unchanged -> Briefing_idle
+           | None | Some Briefing.Unchanged ->
+             no_pass ();
+             Briefing_idle
            | Some (Briefing.Cleanup _) ->
+             no_pass ();
              Mcp_server_eio_resource.notify_world_memory_updated ();
              Briefing_moved
            | Some (Briefing.Prepared batch) ->

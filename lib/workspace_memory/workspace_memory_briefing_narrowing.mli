@@ -38,6 +38,10 @@ val restart : memory -> requests:int -> memory
     and slots with [requests]. A pass that started before it writes
     nothing. *)
 
+val forget : memory -> memory
+(** The briefing has no pass left to read: nothing is held. A request that
+    comes back in a later pass is asked again. *)
+
 (** What the briefing does with the batch it prepared. *)
 type start =
   | Ask of

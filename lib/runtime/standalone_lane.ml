@@ -43,7 +43,7 @@ let obligation = function
 (* Interactive chat turns reserve [Priority]. Standalone verdicts
    ([Verifier], [Hitl_auto_judge], [Board_attention], [Candle_appraiser]) run
    as [Standard] so judgment loops never contend at interactive chat priority,
-   while [Librarian], [Librarian_memory], and [Workspace_curator] run as
+   while [Librarian], [Librarian_memory], and [Workspace_memory_curator] run as
    [Background]. Background service remains bounded by the provider's declared
    run limit. *)
 let admission_class : t -> Llm_provider.Admission_class.t = function

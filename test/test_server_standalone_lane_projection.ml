@@ -549,17 +549,17 @@ let test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish ()
 
 let test_registry_rows_reach_tui_without_synthetic_duration () =
   let module Decode = Masc.Tui_decode in
-  let root=Filename.temp_dir "curator-retained-identity-" "" in
+  let root=Filename.temp_dir "retained-identity-" "" in
   let path=Filename.concat root Exact.storage_filename in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
   let registry=Exact.create ~path () in
-  Exact.register_running registry ~run_id:"tui-original" ~lane:Exact.Workspace_curator
-    ~actor:"curator" ~started_at:10. ~input:(Exact.Exact_input `Null);
+  Exact.register_running registry ~run_id:"tui-original" ~lane:Exact.Candle_appraiser
+    ~actor:"appraiser" ~started_at:10. ~input:(Exact.Exact_input `Null);
   (match Exact.mark_completed registry ~run_id:"tui-original" ~outcome:Exact.Succeeded
     ~elapsed_s:2. ~selected_slot:None ~output:`Null () with
    | Ok () -> () | Error e -> fail (Exact.completion_error_to_string e));
-  Exact.register_running registry ~run_id:"tui-unmeasured-original" ~lane:Exact.Workspace_curator
-    ~actor:"curator" ~started_at:20. ~input:(Exact.Exact_input `Null);
+  Exact.register_running registry ~run_id:"tui-unmeasured-original" ~lane:Exact.Candle_appraiser
+    ~actor:"appraiser" ~started_at:20. ~input:(Exact.Exact_input `Null);
   (match Exact.mark_completed_unmeasured registry ~run_id:"tui-unmeasured-original"
     ~outcome:Exact.Succeeded ~selected_slot:None ~output:`Null () with
    | Ok () -> () | Error e -> fail (Exact.completion_error_to_string e));
@@ -570,13 +570,13 @@ let test_registry_rows_reach_tui_without_synthetic_duration () =
   let unknown=Exact.get registry ~run_id:"tui-unmeasured-original" |> Option.get in
   List.iter (fun (run,expected) ->
     let listing=match Projection.For_testing.recent_run_page_json_with
-      ~limit:1 ~before:None ~lane:(Some "workspace_curator_exact") ~run_kind:None
+      ~limit:1 ~before:None ~lane:(Some "candle_appraiser") ~run_kind:None
       ~exact_runs:[run] ~verification_runs:[] ~goal_verification_runs:[] with
       | Ok page -> page | Error e -> fail e in
-    (match Decode.decode_lane_run_page ~lane:Lane_run_identity.Workspace_curator listing with
+    (match Decode.decode_lane_run_page ~lane:Lane_run_identity.Candle_appraiser listing with
      | Ok {lrpg_runs=[row];_} ->
        check bool "retained identity is independent of current configuration" true
-         (Lane_run_identity.equal row.lrs_lane Lane_run_identity.Workspace_curator);
+         (Lane_run_identity.equal row.lrs_lane Lane_run_identity.Candle_appraiser);
        check string "original observation ID reaches the TUI" run.run_id row.lrs_run_id;
        check (option (float 0.)) "original summary duration" expected row.lrs_elapsed_s
      | Ok _ -> fail "expected one original summary" | Error e -> fail e);
@@ -851,7 +851,7 @@ let check_no_keeper_skill_evidence ~label = function
 ;;
 
 let test_every_retained_run_kind_projects_skill_evidence () =
-  [ Exact.Librarian; Exact.Hitl_auto_judge; Exact.Board_attention; Exact.Workspace_curator; Exact.Candle_appraiser ]
+  [ Exact.Librarian; Exact.Hitl_auto_judge; Exact.Board_attention; Exact.Candle_appraiser ]
   |> List.iteri (fun index lane ->
     let run_id = Printf.sprintf "exact-skill-%d" index in
     let run = exact_run ~run_id ~lane ~started_at:100. ~status:Exact.Running in

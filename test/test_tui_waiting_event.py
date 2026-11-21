@@ -545,7 +545,6 @@ class WaitingEventTest(unittest.TestCase):
                         for cell in pane[pane_name_row:]:
                             if wanted in cell:
                                 return True
-                    del roster_cells
                 return False
 
             def latest_rendered_row_contains(name: bytes, value: bytes) -> bool:

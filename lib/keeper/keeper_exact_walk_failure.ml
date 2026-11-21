@@ -78,9 +78,11 @@ let input_size = execution ~historical_range_size:true ~named_input_capacity:tru
 let provider_input_size refusal = { input_size with provider_input_refusals = [refusal] }
 let of_input_refusal = provider_input_size
 
-(* The stored refusal. Not [Exact_output.provider_refusal] itself: this
-   algebra is removed at the Librarian cut, so a constructor that type gains
-   is mapped onto one stored here and the rows keep the tags they had. *)
+(* The stored refusal. Not [Exact_output.provider_refusal] itself: a stored
+   tag tells apart only what the readers of a walk receipt tell apart, so a
+   constructor that type gains is mapped onto one stored here and the rows
+   keep the tags they had. A lane that reads finer reads the slot-outcome
+   table ([Exact_lane_slot_visit]). *)
 type provider_cause =
   | Request_body_refused | Refusal_body_not_received | Rate_limited | Overloaded
   | Server_error | Auth_failed | Authorization_refused | Payment_required
@@ -174,7 +176,9 @@ let api_observation (cause : Exact_output.execution_error_cause) = match cause w
     Completion_failed {sent=(match dispatch with No_generation_dispatch -> false | Generation_dispatch_started -> true);
       cause=completion error}
   | Output_limit_reached -> Output_limit
-  (* No new stored constructor: this algebra is removed at the Librarian cut.
+  (* No new stored constructor: a stored tag tells apart only what the
+     readers of a walk receipt tell apart, and a lane that reads finer reads
+     the slot-outcome table ([Exact_lane_slot_visit]).
      An answer stopped at the window without text is stored as a sent
      completion stopped at the window. Over HTTP it used to be stored as a
      provider refusal with the answer's status (200), which no refusal had

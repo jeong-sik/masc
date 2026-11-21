@@ -306,7 +306,7 @@ owner 는 가장 최근 `step_end` 와 바닥 기억을 메모리에 든다. 저
 
 **권고: c.** a 는 하지 않는다. 뜻을 정하는 표가 둘이 된다.
 
-**옮기는 모양.** 모듈 이름과 자리는 L1 에서 정한다. 후보는 `lib/exact_lane_slot_outcome.ml` 이다. 걷기(`lib/exact_lane_slots.ml`)와 같은 자리다. 타입은 lane 이 정하는 거절 타입을 인자로 받는다.
+**옮기는 모양.** 모듈은 둘이다(L1 에서 정했다). 타입은 `lib/exact_lane_slot_outcome.ml` 에 있다. 방문 타입, `classify`, 걷기 결과를 방문으로 옮기는 함수(`of_passed`)는 `lib/exact_lane_slot_visit.ml` 에 있다. 걷기(`lib/exact_lane_slots.ml`)와 같은 자리다. 타입은 lane 이 정하는 거절 타입을 인자로 받는다.
 
 ```ocaml
 type size_fact = Input_too_large | Output_over_reserve | Window_reached
@@ -325,17 +325,18 @@ type 'rejection t = Slot_answered | Unanswered of 'rejection unanswered
 - **타입.** `librarian_slot_outcome.mli` 에서 Librarian 의 것은 37행의 `Unusable of Librarian_answer.rejection` 한 곳이다. 나머지 생성자는 lane 을 가리지 않는다.
 - **분류.** `Librarian_slot_visit` 의 방문 타입과 `classify` 가 같이 간다(`librarian_slot_visit.ml` 1~202행). provider 거절(48~55행), stop reason(57~69행), 실행 오류(93~107행), client 별 오류(109~188행)를 읽는 함수가 모두 여기 있다. 방문 타입에서 Librarian 의 것은 `Answer_rejected`(8행)와 `Cli_answer_rejected`(12행)가 싣는 거절이다. 같은 인자로 바뀐다.
 - **걷기 결과를 방문으로 옮기는 함수.** `librarian_ask.ml` 207~258행의 `slot_visit` 이다. 큐레이터도 같은 걷기(`Exact_lane_slots.walk`)를 쓴다. lane 마다 이 함수를 따로 쓰면 표의 앞 절반이 둘이 된다. 같이 옮긴다.
-- **lane 이 건네는 값 둘.** `classify` 는 비었거나 잘린 본문을 `Unusable Empty_or_partial` 로(61·69·83·101·175행), JSON 이 아닌 본문을 `Unusable Not_json` 으로(82·106·185행) 낸다. 둘은 `Librarian_answer.rejection` 의 생성자다(`librarian_answer.mli` 57~61행). 중립 함수는 lane 의 거절 값을 만들 수 없다. 후보는 lane 이 그 두 값을 건네는 것이다. Librarian 의 타입과 표의 행이 그대로 남는다. 중립 타입이 두 갈래를 자기 이름으로 갖는 길도 있다. 그러면 Librarian 의 타입과 표의 행이 바뀐다. L1 에서 정한다.
-- **Librarian 은 다시 내보낸다.** `Librarian_slot_outcome` 과 `Librarian_slot_visit` 은 `Librarian_answer.rejection` 을 넣어 같은 이름으로 다시 내보낸다. 그 타입을 읽는 Librarian 모듈 여섯(`librarian_ask`, `librarian_bottom`, `librarian_last`, `librarian_machine`, `librarian_read_result`, `librarian_room_result`)은 이름을 그대로 쓴다.
+- **lane 이 건네는 값 둘.** `classify` 는 비었거나 잘린 본문을 `Unusable Empty_or_partial` 로(61·69·83·101·175행), JSON 이 아닌 본문을 `Unusable Not_json` 으로(82·106·185행) 낸다. 둘은 `Librarian_answer.rejection` 의 생성자다(`librarian_answer.mli` 57~61행). 중립 함수는 lane 의 거절 값을 만들 수 없다. lane 이 그 두 값을 건넨다(L1 에서 정했다. `Exact_lane_slot_visit.bodies` 의 `empty_or_partial` 과 `not_json` 이다). Librarian 의 타입과 표의 행이 그대로 남는다. 중립 타입이 두 갈래를 자기 이름으로 갖는 길은 가지 않았다. 「JSON 이 아니다」를 말하는 생성자가 lane 의 것과 둘이 된다.
+- **Librarian 은 다시 내보낸다.** `Librarian_slot_outcome` 과 `Librarian_slot_visit` 은 `Librarian_answer.rejection` 을 넣어 같은 이름으로 다시 내보낸다. 그 타입을 읽는 Librarian 모듈 여섯(`librarian_ask`, `librarian_bottom`, `librarian_last`, `librarian_machine`, `librarian_read_result`, `librarian_room_result`)은 이름을 그대로 쓴다. OCaml 은 인자를 받는 variant 를 인자 없는 이름으로 다시 정의하지 못한다. 그래서 인자를 받는 타입은 `_of` 이름으로 생성자와 함께 다시 내보낸다(`silence_of`, `unanswered_of`, `t_of`, `http_of`, `cli_of`). 원래 이름(`silence`, `unanswered`, `t`, `http`, `cli`)은 그 타입에 Librarian 의 거절을 넣은 것이다.
 
-**`Lost` 를 둘로 가른다.** 지금 `Lost` 는 전송 실패, body 기한, 타입이 설명 못 하는 실패를 함께 싣는다(`librarian_slot_outcome.mli` 36행). 보낸 뒤 기한을 넘긴 것을 새 갈래로 떼어 낸다. 위 타입의 `Overdue` 다. 이름은 L1 에서 정한다.
+**`Lost` 를 둘로 가른다.** 지금 `Lost` 는 전송 실패, body 기한, 타입이 설명 못 하는 실패를 함께 싣는다(`librarian_slot_outcome.mli` 36행). 보낸 뒤 기한을 넘긴 것을 새 갈래로 떼어 낸다. 위 타입의 `Overdue` 다(L1 에서 이 이름으로 정했다. 낱말은 `overdue`).
 
 - `http_error` 는 `TimeoutError _` 를 `Silent Lost` 로 낸다(91행). phase 를 읽지 않는다. first token, wall clock, HTTP operation, 두 body 기한이 모두 이 한 줄이다.
 - phase 는 타입 있는 칸이다(`http_client.mli` 92~110행). 다섯 phase(`First_token`, `Wall_clock`, `Http_operation`, `Non_streaming_body`, `Stream_body`)를 새 갈래로 낸다. 옛 읽기가 범위 크기의 근거로 읽는 다섯이다. 나머지 여섯은 `Lost` 로 남는다. 옛 읽기도 같은 자리에서 가른다(`keeper_exact_walk_failure.ml` 196행과 199행).
+- 다섯 phase 도 보낸 뒤일 때만 새 갈래다(L1). `Completion_failed` 의 `dispatch` 가 `Generation_dispatch_started` 일 때다. 보내기 전(`No_generation_dispatch`)에 넘긴 기한은 요청의 크기를 말하지 않으니 `Lost` 로 남는다. 옛 읽기도 보냈는지를 먼저 본다(같은 파일 216~217행).
 - `execution` 의 `Response_body_deadline_exceeded` 도 새 갈래로 낸다(107행).
-- 표 fixture 의 행이 그만큼 갈린다. `TimeoutError` 한 행(56행)이 phase 로 두 행이 되고, `Response_body_deadline_exceeded` 행(17행)의 값이 바뀐다. 표에는 타입 있는 칸으로 가른 행이 이미 있다(`case` 열).
+- 표 fixture 의 행이 그만큼 갈린다. `TimeoutError` 행(56행)은 phase 타입을 가리키는 행이 되고(`> http_client.mli timeout_phase`), phase 마다 행이 생긴다. 다섯 phase 는 보냈는지로 두 행씩이다(`case` 열). `Response_body_deadline_exceeded` 행(17행)의 값이 바뀐다.
 - Librarian 은 두 갈래를 모두 말 없음으로 읽는다. 판단은 그대로다. 로그와 health 응답의 낱말이 하나 는다(`librarian_machine.ml` 388~398행의 `unanswered_token`).
-- `provider_refusal` 의 `Timeout`(55행)과 client 별 `Timeout _`(133·148·156·166행)을 어느 쪽에 둘지는 L1 에서 생성자별로 정한다(§11).
+- `provider_refusal` 의 `Timeout`(55행)과 client 별 `Timeout _`(133·148·156·166행)은 `Lost` 로 남는다(L1 에서 정했다. 근거는 §11).
 
 **`Keeper_exact_walk_failure` 는 남는다. 새 판정의 근거는 아니다.**
 
@@ -502,9 +503,10 @@ D3~D6 은 2026-11-21 에 운영자에게 권고를 알렸다. 다른 지시가 �
 - 운영에서 이 lane 을 켠 적이 없다. 거절의 종류와 횟수, 한 묶음의 크기, 비용을 모른다.
 - 못 쓰는 답이 같은 fact 에 되풀이되는 비율을 모른다. D6 을 정하려면 이 값이 필요하다.
 - 다른 Exact lane(verifier, HITL, board attention, candle)의 실패 읽기를 slot 결과 표로 옮기는 일은 이 RFC 밖이다. 그 lane 들이 지금 무엇을 읽는지 보지 않았다.
-- `provider_refusal` 의 `Timeout` 은 HTTP status 에서 온 값이고 phase 를 싣지 않는다(`exact_output.ml` 903행). client 넷의 `Timeout _` 은 payload 를 읽지 않았다. 기한 초과와 `Lost` 가운데 어디에 둘지는 L1 에서 정한다.
+- L1 에서 정했다: `provider_refusal` 의 `Timeout` 은 `Lost` 다. phase 를 싣지 않아 어느 기한인지 말하지 못한다(`exact_output.ml` 903행). 이 값을 만드는 길도 없다. `provider_refusal_of_api_error` 는 `Retry.classify_refusal` 의 결과에만 불리고(같은 파일 931~934행), `classify_error` 는 `Retry.Timeout` 을 내지 않는다(`retry.ml` 317~354행). HTTP 408 은 `Unclassified_status` 다. 시험만 이 값을 손으로 만든다.
+- L1 에서 정했다: client 넷의 `Timeout _` 도 `Lost` 다. 넷 다 stream 이 조용했던 idle 기한에서만 나온다(`runtime_codex_app_server.ml` 1915~1917·2561행, `runtime_claude_code.ml` 3292·3326·3410·3588행, `runtime_antigravity.ml` 1096~1097·1154행, `runtime_muse_serve.ml` 877~878·901~902행). HTTP 쪽에서 `Lost` 로 남는 `Stream_idle`, `Cli_stdout_idle` 과 같은 갈래다. 이 줄 번호는 main `d9c37b4231b9` 기준이다.
 - `Input_capacity` 가 큐레이터의 걷기에서 나오는지 보지 않았다. 나온다면 지금 좁히던 것을 표로 읽은 뒤에는 좁히지 않는다.
-- health 응답의 outcome 낱말을 닫힌 집합으로 읽는 쪽이 있는지 다 찾지 않았다. L1 에서 찾는다.
+- L1 에서 찾았다: health 응답의 outcome 낱말을 닫힌 집합으로 읽는 쪽은 TUI 하나다(`lib/tui_decode_memory_writer.ml` 의 `slot_outcome_of_wire`). 모르는 낱말이면 그 행의 decode 가 실패한다. L1 이 같은 PR 에서 `overdue` 를 더했다. dashboard 와 저장소 안의 다른 코드는 이 낱말을 읽지 않는다. 저장소 밖에서 이 응답을 읽는 쪽은 보지 못했다.
 - 가짜 HTTP provider 가 refusal 로 끝난 빈 답과 기한 초과를 만들 수 있는지 보지 않았다.
 - 한 건 요청이 큰 까닭이 이웃(최대 Keeper 수 − 1)인 경우를 재지 않았다. 그 경우 fact 는 크기 거절로 선다. 이웃을 줄여 묻는 것은 이 RFC 밖이다.
 - 모든 slot 이 쉬는 동안에도 깨우기마다 저장소를 읽고 묶음을 만든다. 그 값을 재지 않았다.

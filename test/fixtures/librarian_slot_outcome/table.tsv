@@ -14,7 +14,7 @@ exact_output.mli	token_capacity_rejection	Capacity_evidence_expired	-	Silent Una
 exact_output.mli	token_capacity_rejection	Capacity_boundary_unknown	-	Silent Unavailable	the count is between the accepted and the rejected mark
 exact_output.mli	token_capacity_rejection	Capacity_input_rejected	-	Refused (Sized Input_too_large)	the count is at or over a declared or probed boundary; not sent
 exact_output.mli	execution_error_cause	Completion_failed	-	> http_client.mli http_error	read the transport error
-exact_output.mli	execution_error_cause	Response_body_deadline_exceeded	-	Silent Lost	headers came and the body did not finish; a slow provider and a long answer cannot be told apart
+exact_output.mli	execution_error_cause	Response_body_deadline_exceeded	-	Silent Overdue	sent, headers came and the body did not finish before its deadline; a slow provider and a long answer cannot be told apart
 exact_output.mli	execution_error_cause	Provider_response_refused	-	> exact_output.mli provider_refusal	read the refusal
 exact_output.mli	execution_error_cause	Provider_context_overflow	-	Refused (Sized Input_too_large)	the provider codec typed an overflow of the input; it keeps that type whatever the status (Agent-Core change 1), and the error it carries is not read
 exact_output.mli	execution_error_cause	Output_limit_reached	-	Refused (Sized Output_over_reserve)	the provider typed a stop at max_tokens
@@ -39,7 +39,7 @@ exact_output.mli	provider_refusal	Context_overflow	-	Refused (Sized Input_too_la
 exact_output.mli	provider_refusal	Input_capacity	-	Silent Unavailable	masc's own serving check, with its reason dropped by the projection; no size can be read from it
 exact_output.mli	provider_refusal	Network_error	-	Silent Lost	transport
 exact_output.mli	provider_refusal	Connect_failed	-	Silent Lost	the connection did not open
-exact_output.mli	provider_refusal	Timeout	-	Silent Lost	transport
+exact_output.mli	provider_refusal	Timeout	-	Silent Lost	carries no phase, so it does not say which deadline passed; no status makes it, and HTTP 408 is Unclassified_status
 exact_output_plan.mli	incomplete_stop	End_turn	-	Silent (Unusable Empty_or_partial)	ended and the output is not a whole answer
 exact_output_plan.mli	incomplete_stop	Tool_use	-	Silent (Unusable Empty_or_partial)	a tool call where an answer was required
 exact_output_plan.mli	incomplete_stop	Stop_sequence	-	Silent (Unusable Empty_or_partial)	stopped early
@@ -53,7 +53,23 @@ exact_output_plan.mli	incomplete_stop	Unknown_stop	-	Silent (Unusable Empty_or_p
 http_client.mli	http_error	HttpError	-	Silent Lost	a status that reached here was not classified; the interface says a refusal never arrives in Completion_failed
 http_client.mli	http_error	NetworkError	-	Silent Lost	transport
 http_client.mli	http_error	Connect_failed	-	Silent Lost	the connection did not open
-http_client.mli	http_error	TimeoutError	-	Silent Lost	transport
+http_client.mli	http_error	TimeoutError	-	> http_client.mli timeout_phase	read the phase, and whether the request was sent (dispatch of Completion_failed)
+http_client.mli	timeout_phase	Queue	-	Silent Lost	waited in a queue before the request started; no deadline on its own work
+http_client.mli	timeout_phase	First_token	dispatch = Generation_dispatch_started	Silent Overdue	sent, and no first token came before the deadline
+http_client.mli	timeout_phase	First_token	dispatch = No_generation_dispatch	Silent Lost	the deadline passed before the request was sent
+http_client.mli	timeout_phase	Wall_clock	dispatch = Generation_dispatch_started	Silent Overdue	sent, and the whole operation passed its deadline
+http_client.mli	timeout_phase	Wall_clock	dispatch = No_generation_dispatch	Silent Lost	the deadline passed before the request was sent
+http_client.mli	timeout_phase	Capacity_backpressure	-	Silent Lost	capacity pressure held the request before it ran
+http_client.mli	timeout_phase	Http_operation	dispatch = Generation_dispatch_started	Silent Overdue	sent, and the HTTP operation passed its deadline
+http_client.mli	timeout_phase	Http_operation	dispatch = No_generation_dispatch	Silent Lost	the deadline passed before the request was sent
+http_client.mli	timeout_phase	Non_streaming_body	dispatch = Generation_dispatch_started	Silent Overdue	sent, and the body did not finish before its deadline
+http_client.mli	timeout_phase	Non_streaming_body	dispatch = No_generation_dispatch	Silent Lost	the deadline passed before the request was sent
+http_client.mli	timeout_phase	Stream_body	dispatch = Generation_dispatch_started	Silent Overdue	sent, and the stream body did not finish before its deadline
+http_client.mli	timeout_phase	Stream_body	dispatch = No_generation_dispatch	Silent Lost	the deadline passed before the request was sent
+http_client.mli	timeout_phase	Stream_idle	-	Silent Lost	the stream went silent
+http_client.mli	timeout_phase	Provider_step	-	Silent Lost	not one of the five deadlines the walk receipt reads as the size of the request
+http_client.mli	timeout_phase	Cli_stdout_idle	-	Silent Lost	the client went silent
+http_client.mli	timeout_phase	Unknown_timeout	-	Silent Lost	the phase is not known
 http_client.mli	http_error	AcceptRejected	-	Silent Unavailable	masc built the request wrongly
 http_client.mli	http_error	ProviderTerminal	-	> http_client.mli provider_terminal_kind	read the kind
 http_client.mli	http_error	ProviderFailure	-	> http_client.mli provider_failure_kind	read the kind

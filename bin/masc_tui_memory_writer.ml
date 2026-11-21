@@ -88,6 +88,7 @@ let slot_outcome_text ~ko = function
   | Not_called -> text ~ko "부르지 않음" "not called"
   | Unavailable -> text ~ko "쓸 수 없음" "unavailable"
   | Busy -> text ~ko "바쁨" "busy"
+  | Overdue -> text ~ko "기한을 넘김" "overdue"
   | Lost -> text ~ko "응답이 끊김" "lost"
   | Unusable -> text ~ko "답을 쓸 수 없음" "unusable answer"
 ;;

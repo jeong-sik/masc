@@ -1,5 +1,7 @@
 (* Every row of the slot-outcome table (RFC librarian-call-only-proposes §7.2)
-   through Librarian_slot_visit.classify. The table is read from
+   through Librarian_slot_visit.classify, which is the table every exact lane
+   reads (Exact_lane_slot_visit.classify) with the Librarian's rejection. The
+   table is read from
    test/fixtures/librarian_slot_outcome: table.tsv gives one outcome per
    constructor of the types a visit carries, and not-constructors.tsv the
    visit's own cases. A sample
@@ -72,6 +74,7 @@ let outcome_text : Masc.Librarian_slot_outcome.t -> string = function
   | Unanswered (Silent Not_called) -> "Silent Not_called"
   | Unanswered (Silent Unavailable) -> "Silent Unavailable"
   | Unanswered (Silent Busy) -> "Silent Busy"
+  | Unanswered (Silent Overdue) -> "Silent Overdue"
   | Unanswered (Silent Lost) -> "Silent Lost"
   | Unanswered (Silent (Unusable Not_json)) -> "Silent (Unusable Not_json)"
   | Unanswered (Silent (Unusable (Schema_violation _))) -> "Silent (Unusable Schema_violation)"
@@ -141,6 +144,18 @@ let incomplete =
 let http_error =
   below cause "Completion_failed" ~file:http ~type_:"http_error" (fun error ->
     Exact.Completion_failed { error; dispatch = Exact.No_generation_dispatch })
+
+(* A deadline is read with whether the request was sent. *)
+let http_error_sent =
+  below cause "Completion_failed" ~file:http ~type_:"http_error" (fun error ->
+    Exact.Completion_failed { error; dispatch = Exact.Generation_dispatch_started })
+
+let timeout_under http_error =
+  below http_error "TimeoutError" ~file:http ~type_:"timeout_phase" (fun phase ->
+    Http_client.TimeoutError { message = ""; phase })
+
+let timeout = timeout_under http_error
+let timeout_sent = timeout_under http_error_sent
 
 let terminal =
   below http_error "ProviderTerminal" ~file:http ~type_:"provider_terminal_kind" (fun kind ->
@@ -269,7 +284,28 @@ let samples =
       (Http_client.HttpError { code = 0; body = Http_client.Received ""; retry_after_header = None })
   ; at http_error "NetworkError" (Http_client.NetworkError { message = ""; kind = Connection_refused })
   ; at http_error "Connect_failed" (Http_client.Connect_failed { message = ""; kind = Dns_failure })
-  ; at http_error "TimeoutError" (Http_client.TimeoutError { message = ""; phase = Wall_clock })
+  ; at timeout_sent "First_token" ~case:"dispatch = Generation_dispatch_started" Http_client.First_token
+  ; at timeout "First_token" ~case:"dispatch = No_generation_dispatch" Http_client.First_token
+  ; at timeout_sent "Wall_clock" ~case:"dispatch = Generation_dispatch_started" Http_client.Wall_clock
+  ; at timeout "Wall_clock" ~case:"dispatch = No_generation_dispatch" Http_client.Wall_clock
+  ; at timeout_sent "Http_operation" ~case:"dispatch = Generation_dispatch_started" Http_client.Http_operation
+  ; at timeout "Http_operation" ~case:"dispatch = No_generation_dispatch" Http_client.Http_operation
+  ; at timeout_sent "Non_streaming_body" ~case:"dispatch = Generation_dispatch_started" Http_client.Non_streaming_body
+  ; at timeout "Non_streaming_body" ~case:"dispatch = No_generation_dispatch" Http_client.Non_streaming_body
+  ; at timeout_sent "Stream_body" ~case:"dispatch = Generation_dispatch_started" Http_client.Stream_body
+  ; at timeout "Stream_body" ~case:"dispatch = No_generation_dispatch" Http_client.Stream_body
+  ; at timeout_sent "Queue" Http_client.Queue
+  ; at timeout "Queue" Http_client.Queue
+  ; at timeout_sent "Capacity_backpressure" Http_client.Capacity_backpressure
+  ; at timeout "Capacity_backpressure" Http_client.Capacity_backpressure
+  ; at timeout_sent "Stream_idle" (Http_client.Stream_idle Http_client.Streaming_answer)
+  ; at timeout "Stream_idle" (Http_client.Stream_idle Http_client.Streaming_answer)
+  ; at timeout_sent "Provider_step" Http_client.Provider_step
+  ; at timeout "Provider_step" Http_client.Provider_step
+  ; at timeout_sent "Cli_stdout_idle" Http_client.Cli_stdout_idle
+  ; at timeout "Cli_stdout_idle" Http_client.Cli_stdout_idle
+  ; at timeout_sent "Unknown_timeout" Http_client.Unknown_timeout
+  ; at timeout "Unknown_timeout" Http_client.Unknown_timeout
   ; at http_error "AcceptRejected" (Http_client.AcceptRejected { reason = "" })
   ; at terminal "Session_conflict" Http_client.Session_conflict
   ; at terminal "Other" (Http_client.Other "")

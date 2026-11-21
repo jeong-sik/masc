@@ -50,7 +50,10 @@ let test_rgba_follows_projector_not_process_env () =
   check bool "rgba default fg reset" true (contains ~sub:"\027[39m" line);
   check bool "rgba default bg reset" true (contains ~sub:"\027[49m" line);
   check (list string) "no-colour projector refuses opaque rgba pixels" []
-    (render_rgba ~project:(fun _ -> None) ~cols:1 ~rows:2 rgba)
+    (render_rgba ~project:(fun _ -> None) ~cols:1 ~rows:2 rgba);
+  let transparent_rgba = String.make 8 '\000' in
+  check (list string) "no-colour projector refuses all-transparent rgba pixels" []
+    (render_rgba ~project:(fun _ -> None) ~cols:1 ~rows:2 transparent_rgba)
 
 let rgb_of pixels =
   String.concat "" (List.map (fun (r, g, b) ->

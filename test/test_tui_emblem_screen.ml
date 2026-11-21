@@ -207,6 +207,16 @@ let test_no_picture_keeps_the_count () =
   check int "four Keeper names remain readable without colour" 4
     plain.Screen.visible_keepers
 
+let test_about_mosaic_with_no_colour_projector_does_not_raise () =
+  let scene =
+    Screen.about_rows ~style:Screen.Painted ~cols:76 ~rows:24 ~caption
+      ~frame:Screen.final_frame
+      ~keepers:[ "fixture-alpha", Keeper_portrait_equipment.Ready Keeper_portrait_look.bare ]
+      ~display:View.Mosaic ~project:(fun _ -> None) ~origin
+  in
+  check int "visible keepers remain intact" 1 scene.Screen.visible_keepers;
+  check bool "about_rows produces non-empty output" true (scene.Screen.lines <> [])
+
 let test_about_candle_frames_are_reused_with_a_bound () =
   let mascot_image scene =
     scene.Screen.placements
@@ -269,6 +279,8 @@ let () =
             test_wide_and_mosaic_keep_the_roster
         ; test_case "no picture keeps the count" `Quick
             test_no_picture_keeps_the_count
+        ; test_case "mosaic with no-colour projector does not raise" `Quick
+            test_about_mosaic_with_no_colour_projector_does_not_raise
         ; test_case "candle frames are reused within a bound" `Quick
             test_about_candle_frames_are_reused_with_a_bound
         ; test_case "about facts localize theme and keeper counts" `Quick

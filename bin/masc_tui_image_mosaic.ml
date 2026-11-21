@@ -151,6 +151,13 @@ let render_rgba ~project ~cols ~rows (rgba : string) : string list =
   if cols <= 0 || rows <= 0 || rows land 1 = 1 then []
   else if String.length rgba < cols * rows * rgba_bytes_per_pixel then []
   else
+    (* Probe representative extremes before scanning pixels so an all-transparent
+       frame under a no-colour projector still returns [] without emitting SGR
+       39/49 escapes. *)
+    let black = Masc_tui_terminal_palette.make_rgb ~red:0 ~green:0 ~blue:0 in
+    let white = Masc_tui_terminal_palette.make_rgb ~red:255 ~green:255 ~blue:255 in
+    if Option.is_none (project black) && Option.is_none (project white) then []
+    else
     let module Sgr = Masc_tui_theme.Sgr in
     let px x y =
       let offset = ((y * cols) + x) * rgba_bytes_per_pixel in

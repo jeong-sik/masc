@@ -17,8 +17,6 @@ type error =
       { template : string
       ; runtime_id : string
       }
-  | Key_missing
-  | Key_unreadable of Runtime_api_key_file.unreadable
   | Not_materialized of string
 
 val error_to_string : error -> string

@@ -321,8 +321,61 @@ run_suite_under_deadline() {
   [ -n "$rc" ] || rc="$exited"
 }
 
-echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
-run_suite_under_deadline
+# A shard is a slice of the repository's `@test/runtest-*` aliases. Building the
+# whole `@runtest` at once leaves every test executable on disk together: the
+# full run measured 97GB under `_build/default/test` (task-3865, run
+# 44883154772), because each suite links the whole library closure and the
+# binary keeps its debug sections (about 110MiB each). A sharded run builds and
+# runs one slice at a time and removes the slice's executables before the next
+# one builds, so the peak is one slice, not the whole tree. `SUITE_SHARD_COUNT=1`
+# (the default) keeps the single `@runtest` build exactly as before.
+shard_aliases() {
+  local count="$1" index="$2"
+  local all
+  all="$(
+    grep -rhoE 'alias runtest-[A-Za-z0-9_]+' \
+      "$repo_root/test/dune" "$repo_root"/test/stanzas/*.inc 2>/dev/null \
+      | sed 's/^alias //' | sort -u
+  )"
+  local i=0 name
+  for name in $all; do
+    if [ $(( i % count )) -eq "$index" ]; then
+      printf '@test/%s ' "$name"
+    fi
+    i=$(( i + 1 ))
+  done
+}
+
+shard_count="${SUITE_SHARD_COUNT:-1}"
+shard_index="${SUITE_SHARD_INDEX:-0}"
+if [ "$shard_count" -gt 1 ]; then
+  alias_targets="$(shard_aliases "$shard_count" "$shard_index")"
+  if [ -z "$alias_targets" ]; then
+    echo "[test-suite] FAIL - shard ${shard_index}/${shard_count} selected no alias"
+    exit 2
+  fi
+  echo "[test-suite] shard ${shard_index}/${shard_count}: $(echo "$alias_targets" | wc -w) alias(es)"
+else
+  alias_targets="$alias_target"
+fi
+
+overall_rc=0
+for target in $alias_targets; do
+  alias_target="$target"
+  echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
+  run_suite_under_deadline
+  if [ "$rc" != 0 ]; then
+    overall_rc="$rc"
+  fi
+  if [ "$shard_count" -gt 1 ]; then
+    # Drop this slice's executables before the next slice links its own: the
+    # disk evidence of the band is already streamed, and the run's log and
+    # trace stay in place.
+    rm -rf "$repo_root/_build/default/test"
+  fi
+  rc=""
+done
+rc="$overall_rc"
 echo "[test-suite] finished in $(( $(date +%s) - started ))s with exit ${rc}"
 df -h / | sed 's/^/[test-suite] disk after the suite: /' | tee -a "$disk_evidence_log"
 timeout 120 du -xsh "$repo_root/_build" 2>&1 | sed 's/^/[test-suite] _build after the suite: /' | tee -a "$disk_evidence_log" ||

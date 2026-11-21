@@ -808,9 +808,6 @@ val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
     starts a language's server, the operator's where one was written for that
     language. Pass it as [~servers] to the language-server pool and spawn. *)
 
-val get_lane_by_id : string -> Runtime_lane.t option
-(** Lane with the given id, or [None] if no such lane is configured. *)
-
 val resolve_assignment :
   string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
 (** Resolve a keeper assignment to a lane. The id names a declared lane or a
@@ -835,26 +832,6 @@ val get_runtime_by_id : string -> t option
     from an unknown ID. Used by the keeper turn driver to dispatch to the requested runtime (a
     keeper's runtime assignment or the default); [None] makes the driver
     fail fast rather than silently substituting the default. *)
-
-val is_local_runtime_id : string -> bool option
-(** Locality classification for a configured runtime id, or [None] when the
-    runtime id is not currently materialized. *)
-
-val resolve_max_context_of_runtime_id : string -> (int * max_context_source) option
-(** {!Runtime_instance.resolve_max_context_of_runtime} looked up by runtime id: the effective
-    input context window together with the source that produced it, or [None]
-    when the id is not configured. Budget surfaces must carry the source —
-    dropping it rendered a runtime.toml override as ["runtime_provider_cap"]
-    in keeper status JSON, which disguised the #25463 config drift as a
-    provider fact. *)
-
-val max_context_of_runtime_id : string -> int option
-(** Effective input context window for the materialized runtime [id], or [None]
-    when the id is not configured.  Budgeting callers use this to size a
-    per-keeper routed turn against the same runtime that dispatch will use.
-    When the AGENT_CORE provider capability catalog declares a context cap, the value
-    is clamped to [min runtime.toml max-context provider cap] so MASC cannot
-    admit a prompt larger than the provider-owned window. *)
 
 val temperature_of_runtime_id : string -> float option
 (** Per-model [temperature] override ([models.<id>.temperature] in runtime.toml)

@@ -903,7 +903,6 @@ let () =
   Masc.Workspace_metric_hooks.install ();
   Masc.Keeper_task_owner_backend.install_hooks ();
   Masc_test_deps.init_unified_tool_registry ();
-  Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime");
   (* Completion review resolves only the verifier_exact lane. *)
   Atomic.set
     Workspace_hooks.get_verifier_exact_lane_slots_fn

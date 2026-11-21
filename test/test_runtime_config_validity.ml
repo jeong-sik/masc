@@ -3926,11 +3926,14 @@ let test_runtime_locality_uses_provider_schema () =
        | Error msg -> failf "runtime init_default should load: %s" msg
        | Ok () ->
          check (option bool) "loopback no-auth runtime is local" (Some true)
-           (Runtime.is_local_runtime_id "local.chat");
+           (Runtime.get_runtime_by_id "local.chat"
+            |> Option.map Runtime_instance.is_local_runtime);
          check (option bool) "remote credentialed runtime is not local" (Some false)
-           (Runtime.is_local_runtime_id "remote.remote");
+           (Runtime.get_runtime_by_id "remote.remote"
+            |> Option.map Runtime_instance.is_local_runtime);
          check (option bool) "unknown runtime locality is unknown" None
-           (Runtime.is_local_runtime_id "missing.runtime"))
+           (Runtime.get_runtime_by_id "missing.runtime"
+            |> Option.map Runtime_instance.is_local_runtime))
 
 let test_runtime_capability_gate_uses_provider_qualified_catalog () =
   let catalog =
@@ -5539,7 +5542,11 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (list string) "media failover keeps known ids only"
            [ "ollama.good" ]
            (Runtime.media_failover ());
-         (match Runtime.get_lane_by_id "safe" with
+         (match
+            List.find_opt
+              (fun (lane : Runtime_lane.t) -> String.equal lane.id "safe")
+              (Runtime.lanes ())
+          with
           | None -> fail "lane should remain with its known candidate"
           | Some lane ->
             check (list string) "lane candidates keep known ids only"

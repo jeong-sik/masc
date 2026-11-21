@@ -243,7 +243,8 @@ let successful attempt = match attempt.Keeper_codex_runtime.outcome.result with
 let test_captured_context_window_survives_catalog_reload () =
   with_fixture ~catalog_context_window:800000 @@ fun ~run ~capture ~reports:_ ->
   check (option int) "catalog was reloaded" (Some 800000)
-    (Runtime.max_context_of_runtime_id "codex.context");
+    (Runtime.get_runtime_by_id "codex.context"
+     |> Option.map Runtime_instance.max_context_of_runtime);
   successful (run ~instructions:"Follow the current context." ~world:"First turn" ());
   successful (run ~instructions:"Follow the current context." ~world:"Next turn" ());
   let invocations = In_channel.with_open_bin (capture ^ ".argv") In_channel.input_lines in

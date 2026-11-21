@@ -12,18 +12,6 @@ let workspace_surface_json (meta : keeper_meta) =
     ]
 ;;
 
-let effective_declarative_runtime_id
-      (_defaults : keeper_profile_defaults)
-      (meta : keeper_meta)
-  =
-  (* The keeper's runtime is assigned in runtime.toml,
-     not in [_defaults].  Delegate to
-     {!Keeper_meta_contract.runtime_id_of_meta} (the dispatcher), matching the
-     keeper_runtime.ml copy, so the status override view and the wire share ONE
-     source by construction (no re-sync storm, cf. #10061). *)
-  runtime_id_of_meta meta
-;;
-
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : Keeper_status_bridge_override.t list
   =
@@ -60,13 +48,6 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
     then [ Keeper_status_bridge_override.Board_interests { default; live } ]
     else []
   in
-  let runtime_id =
-    let default = effective_declarative_runtime_id defaults meta in
-    let live = runtime_id_of_meta meta in
-    if default <> live
-    then [ Keeper_status_bridge_override.Runtime_id { default; live } ]
-    else []
-  in
   let activation_mode =
     let live = meta.activation_mode in
     match defaults.activation_mode with
@@ -75,7 +56,7 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
     | Some _ | None -> []
   in
   List.concat
-    [ instructions; mention_targets; board_interests; runtime_id; activation_mode ]
+    [ instructions; mention_targets; board_interests; activation_mode ]
 ;;
 
 let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_defaults)

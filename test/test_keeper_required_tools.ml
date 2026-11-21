@@ -105,7 +105,12 @@ candidates = ["native.no_tools", "binding.sample"]
        | None -> fail (Agent_core.Error.to_string error));
       check bool "rendered prose is not a retry authority" false
         (Required.should_try_next (Agent_core.Error.Internal (Agent_core.Error.to_string error))) in
-  (match Runtime.get_lane_by_id "unsupported_tools_fixture" with
+  (match
+     List.find_opt
+       (fun (lane : Runtime_lane.t) ->
+         String.equal lane.id "unsupported_tools_fixture")
+       (Runtime.lanes ())
+   with
    | Some lane -> check (list string) "all resolved candidates are actually unsupported"
        ["native.no_tools";"binding.sample"] (Runtime_lane.ordered_candidates lane)
    | None -> fail "unsupported fixture lane disappeared");

@@ -260,10 +260,6 @@ let telemetry_observe_failure_fn
   : (string -> unit) Atomic.t
   = Atomic.make (fun _ -> ())
 
-let get_default_runtime_id_fn
-  : (unit -> string) Atomic.t
-  = Atomic.make (fun () -> failwith "Workspace_hooks: get_default_runtime_id_fn not connected")
-
 (* The completion-authority evaluator's runtime comes only from the published
    [verifier_exact] exact-output lane: admitted slot ids in
    frozen declaration order. The unconnected default is an explicit [Error] so

@@ -108,7 +108,7 @@ let run ~base_path ~keeper_name ~keeper_id =
 ;;
 
 let install () =
-  Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+  Keeper_working_context_signal.install (fun ~base_path ~keeper_name ->
     if Runtime_account_access.is_multi_account ()
     then ()
     else

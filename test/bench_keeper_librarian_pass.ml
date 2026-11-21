@@ -376,7 +376,7 @@ let with_fixture ?(history_kind=Atoms) f =
          | exception Eio.Time.Timeout ->
            let backtrace=Printexc.get_raw_backtrace () in
            Printexc.raise_with_backtrace Eio.Time.Timeout backtrace);
-        Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+        Keeper_working_context_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
         Memory_lane.For_testing.await_idle ~base_path ~keeper_name;
         set_enabled fixture false;
         Memory_lane.For_testing.reset ())))))))))))

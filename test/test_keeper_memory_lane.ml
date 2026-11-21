@@ -7,7 +7,7 @@
 module Lane = Masc.Keeper_memory_lane
 module Keeper_lane = Masc.Keeper_lane
 module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
-module Queue_signal = Masc.Keeper_librarian_queue_signal
+module Signal = Masc.Keeper_working_context_signal
 
 exception Test_boom
 exception Cancel_lane_test
@@ -57,7 +57,7 @@ let run_post_turn
     ()
 ;;
 
-let test_either_checkpoint_owner_wakes_the_durable_consumer () =
+let test_either_checkpoint_owner_signals_the_working_context_pass () =
   Lane.For_testing.reset ();
   let root = temp_dir "test-post-turn-owner-" in
   let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
@@ -67,7 +67,7 @@ let test_either_checkpoint_owner_wakes_the_durable_consumer () =
       (match previous_env with
        | Some value -> Unix.putenv env_key value
        | None -> Unix.putenv env_key "");
-      Queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+      Signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
       Config_dir_resolver.reset ();
       Lane.For_testing.reset ();
       remove_tree root)
@@ -80,7 +80,7 @@ let test_either_checkpoint_owner_wakes_the_durable_consumer () =
        Config_dir_resolver.reset ();
        Unix.putenv env_key "true";
        let wakes = ref [] in
-       Queue_signal.install (fun ~base_path ~keeper_name ->
+       Signal.install (fun ~base_path ~keeper_name ->
          wakes := (base_path, keeper_name) :: !wakes);
        let core_name = "agent-core-owner" in
        let core_meta = make_meta core_name in
@@ -90,7 +90,7 @@ let test_either_checkpoint_owner_wakes_the_durable_consumer () =
          ~meta:core_meta
          ~turn:1;
        Alcotest.(check (list (pair string string)))
-         "Agent Core emits one durable wake"
+         "an Agent Core turn signals the working-context pass once"
          [ config.base_path, core_name ]
          (List.rev !wakes);
        let official_name = "official-client-owner" in
@@ -107,7 +107,7 @@ let test_either_checkpoint_owner_wakes_the_durable_consumer () =
          ~meta:official_meta
          ~turn:1;
        Alcotest.(check (list (pair string string)))
-         "official client emits one durable wake as well"
+         "an official-client turn signals it once as well"
          [ config.base_path, core_name; config.base_path, official_name ]
          (List.rev !wakes);
        Unix.putenv env_key "false";
@@ -117,7 +117,7 @@ let test_either_checkpoint_owner_wakes_the_durable_consumer () =
          ~meta:official_meta
          ~turn:2;
        Alcotest.(check (list (pair string string)))
-         "a disabled librarian wakes nothing"
+         "a disabled Librarian signals nothing"
          [ config.base_path, core_name; config.base_path, official_name ]
          (List.rev !wakes))
 ;;
@@ -646,9 +646,9 @@ let () =
     "keeper_memory_lane"
     [ ( "lane"
       , [ Alcotest.test_case
-            "either checkpoint owner wakes the durable consumer"
+            "either checkpoint owner signals the working-context pass"
             `Quick
-            test_either_checkpoint_owner_wakes_the_durable_consumer
+            test_either_checkpoint_owner_signals_the_working_context_pass
         ; Alcotest.test_case
             "inline when uninitialized"
             `Quick

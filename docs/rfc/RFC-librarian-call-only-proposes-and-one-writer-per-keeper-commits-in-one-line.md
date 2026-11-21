@@ -2220,7 +2220,7 @@ Keeper 하나와 그 쓰는 쪽이다. Memory 는 fact 이름의 집합이고, �
 | 줄이 들어가기 전에 읽은 자리를 옮긴다 | `PositionHasLine` |
 | 받아들인 `Skip_line` 이 마지막 묻기의 결과를 남긴다 | `E3OnHeadLine` |
 | E4 가 쓰는 쪽의 상태를 읽는다 | `PulseKeepsE4` |
-| E4 가 말 없는 slot 이 없는 한 항목 끝을 모두 읽는다 | `E4OffWhileAskingAlone` |
+| E4 가 말 없는 slot 이 없는 한 항목 끝을 모두 읽는다 | `E4OffWhileAskingAlone`, `E4OnHeadLine` |
 | E4 가 lane 값을 견주지 않는다 | `E4OnlyOnBytesHeldNow` |
 | 거절한 운영자 행동이 가던 묻기를 취소한다 | `AskingHasAnAsk` |
 | 받아들인 `Skip_item` 이 가던 묻기를 남겨, 그 답이 건너뛴 뒤에 반영된다 | `PositionMoves` |

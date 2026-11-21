@@ -18,6 +18,8 @@ import threading
 import time
 import unittest
 import urllib.parse
+
+import tui_failure_frame
 from typing import Callable, cast
 
 from test_tui_fusion_recovery import FixtureHandler, FixtureServer
@@ -390,9 +392,16 @@ class WaitingEventTest(unittest.TestCase):
                     if process.poll() is not None:
                         break
                     drain_for(0.05)
+                frame_path, frame_bytes, frame_truncated = tui_failure_frame.preserve(
+                    "test_tui_waiting_event.test_changes_while_reading_coalesce_without_cadence",
+                    output,
+                    cols=200,
+                    rows=35,
+                    extra={"label": label, "exit": process.poll()},
+                )
                 self.fail(
                     f"{label}; exit={process.poll()}, requests={server.requests!r}, "
-                    f"terminal tail={bytes(output[-3000:])!r}"
+                    f"frame={frame_path} bytes={frame_bytes} truncated={frame_truncated}"
                 )
 
             def rendered_row_contains(start: int, name: bytes, value: bytes) -> bool:

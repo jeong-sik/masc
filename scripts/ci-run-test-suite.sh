@@ -258,7 +258,7 @@ run_suite_under_deadline() {
   # The deadline below and the "finished in" line after the call measure the
   # suite, not this baseline: take the start time after the baseline read.
   started=$(date +%s)
-  opam exec -- dune build --root . --trace-file "$trace" "$alias_target" > "$log" 2>&1 &
+  opam exec -- dune build --root . --trace-file "$trace" "$alias_target" >> "$log" 2>&1 &
   local dune_pid=$!
   local exited disk_watcher_pid disk_watcher_exited
   local disk_watcher_stopped=false
@@ -321,9 +321,171 @@ run_suite_under_deadline() {
   [ -n "$rc" ] || rc="$exited"
 }
 
-echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
-run_suite_under_deadline
-echo "[test-suite] finished in $(( $(date +%s) - started ))s with exit ${rc}"
+# A shard is a slice of the suites a bare `@runtest` would run. Building the
+# whole `@runtest` at once leaves every test executable on disk together: the
+# full run measured 97GB under `_build/default/test` (task-3865, run
+# 44883154772), because each suite links the whole library closure and the
+# binary keeps its debug sections (about 110MiB each). A sharded run builds and
+# runs one slice at a time and removes the slice's executables before the next
+# one builds, so the peak is one slice, not the whole tree. `SUITE_SHARD_COUNT=1`
+# (the default) keeps the single `@runtest` build exactly as before.
+# Every target the bare `@runtest` would run, one per line, so a sharded run
+# covers the same set. `dune build @runtest` is recursive, so the list has two
+# shapes:
+#   - `test/`, where the peak lives: one `@test/runtest-<name>` per suite. Both
+#     `(rule (alias runtest-<name>))` and `(test (name <name>))` spellings are
+#     collected, because dune gives a test stanza that per-test alias too and
+#     the bare `@runtest` reaches it without any `runtest-*` text in the file.
+#   - every other directory that declares a runtest alias or a test stanza:
+#     its own recursive `@<dir>/runtest`, which is small today.
+# The `(test (name X))` stanza names in the given dune files. Paren depth ends
+# the stanza, so a following stanza's `(name ...)` is not collected. A name that
+# no stanza defines would make dune refuse the alias target ("Alias ... is
+# empty"), so this has to stay exact rather than approximate.
+extract_test_names() {
+  awk '
+    { line = $0 }
+    line ~ /^[[:space:]]*\(test([[:space:]]|$)/ { intest = 1; depth = 0 }
+    intest {
+      l = line
+      sub(/;.*/, "", l)
+      depth += gsub(/\(/, "(", l) - gsub(/\)/, ")", l)
+      if (match(line, /\(name[[:space:]]+[A-Za-z0-9_]+\)/)) {
+        s = substr(line, RSTART, RLENGTH)
+        sub(/\(name[[:space:]]+/, "", s)
+        sub(/\)$/, "", s)
+        print s
+        if (depth <= 0) intest = 0
+      } else if (depth <= 0) {
+        intest = 0
+      }
+    }
+  ' "$@"
+}
+
+shard_target_list() {
+  local dune_file dir
+  # `test/`: one target per suite, because that is where the peak lives.
+  {
+    grep -rhoE 'alias runtest-[A-Za-z0-9_]+' \
+      "$repo_root/test/dune" "$repo_root"/test/stanzas/*.inc 2>/dev/null \
+      | sed 's/^alias //'
+    # A test stanza's alias is `runtest-<name>`, spelled nowhere in the file.
+    extract_test_names "$repo_root/test/dune" "$repo_root"/test/stanzas/*.inc \
+      | sed 's/^/runtest-/'
+  } | sort -u | sed 's|^|@test/|'
+  # Every other directory with a runtest alias or a test stanza: one recursive
+  # target. These trees are small enough that splitting them further buys
+  # nothing, and `@dir/runtest` reaches the same suites `@runtest` did.
+  while IFS= read -r dune_file; do
+    dir="${dune_file#"$repo_root"/}"
+    dir="$(dirname "$dir")"
+    if [ "$dir" = "test" ]; then
+      continue
+    fi
+    printf '@%s/runtest\n' "$dir"
+  done < <(
+    grep -rlE 'alias runtest-|^\(test([[:space:]]|$)|alias runtest\)' \
+      --include=dune "$repo_root" 2>/dev/null \
+      | grep -v '/_build/' | grep -v '/vendor/'
+  )
+}
+
+# One shard's targets: the round-robin slice `index` of `count` over the sorted
+# target list, so every target belongs to exactly one shard.
+shard_aliases() {
+  local count="$1" index="$2"
+  printf '%s\n' "$all_aliases" \
+    | awk -v c="$count" -v i="$index" 'NR % c == i'
+}
+
+run_one_target() {
+  alias_target="$1"
+  echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
+  printf '\n[test-suite] ===== %s =====\n' "$alias_target" >> "$active_log"
+  run_suite_under_deadline
+  if [ "$rc" != 0 ] && [ "$overall_rc" = 0 ]; then
+    overall_rc="$rc"
+  fi
+  rc=""
+}
+
+shard_count="${SUITE_SHARD_COUNT:-1}"
+shard_index="${SUITE_SHARD_INDEX:-}"
+shard_traces=""
+all_aliases=""
+overall_rc=0
+# run_suite_under_deadline restarts `started` for each build, so the total below
+# needs its own clock: a sharded run is several builds.
+run_started=$(date +%s)
+
+if [ "$shard_count" -gt 1 ]; then
+  all_aliases="$(shard_target_list)"
+  if [ -z "$all_aliases" ]; then
+    echo "[test-suite] FAIL - no suite target found to shard"
+    exit 2
+  fi
+  alias_total="$(printf '%s\n' "$all_aliases" | wc -l | tr -d ' ')"
+  if [ -n "$shard_index" ]; then
+    shard_indexes="$shard_index"
+  else
+    # With no index this invocation runs every shard in order, so the sharded
+    # path is reachable from the workflow by setting only SUITE_SHARD_COUNT.
+    shard_indexes="$(seq 0 $(( shard_count - 1 )))"
+  fi
+  if [ "$alias_total" -lt "$shard_count" ]; then
+    echo "[test-suite] WARN - ${alias_total} target(s) over ${shard_count} shards; empty shards are skipped"
+  fi
+  # Each shard writes its own log and trace. Nothing is overwritten, and the
+  # uploaded log is rebuilt at the end in shard order, so a failure in shard 2
+  # is still readable after shard 7 ran.
+  : > "$log"
+  for idx in $shard_indexes; do
+    targets="$(shard_aliases "$shard_count" "$idx")"
+    shard_size="$(printf '%s\n' "$targets" | grep -c . || true)"
+    echo "[test-suite] shard ${idx}/${shard_count}: ${shard_size} target(s)"
+    active_log="$tmp/test-suite.shard-${idx}.log"
+    trace="$tmp/test-suite-trace.shard-${idx}.csexp"
+    shard_traces="$shard_traces $trace"
+    if [ "$shard_size" -eq 0 ]; then
+      continue
+    fi
+    : > "$active_log"
+    for target in $targets; do
+      run_one_target "$target"
+    done
+    # Append this shard's log to the uploaded one in shard order, so the final
+    # file reads in the order the suites ran.
+    {
+      printf '\n[test-suite] ----- shard %s/%s (%s target(s)) -----\n' \
+        "$idx" "$shard_count" "$shard_size"
+      cat "$active_log"
+    } >> "$log"
+    # Drop this slice's executables before the next slice links its own: the
+    # disk evidence of the band is already streamed, and the run's log and
+    # trace stay in place.
+    rm -rf "$repo_root/_build/default/test"
+  done
+  # One timing summary for the whole sharded run: the summary parser reads a
+  # stream of records, so the shard traces are concatenated in shard order.
+  # The combined file has its own name: the last shard's trace path is still in
+  # `$trace` here, and reading a file into itself would truncate it.
+  combined_trace="$tmp/test-suite-trace.combined.csexp"
+  : > "$combined_trace"
+  for shard_trace in $shard_traces; do
+    if [ -s "$shard_trace" ]; then
+      cat "$shard_trace" >> "$combined_trace"
+    fi
+  done
+  rm -f "$tmp"/test-suite-trace.shard-*.csexp
+  trace="$combined_trace"
+else
+  active_log="$log"
+  : > "$active_log"
+  run_one_target "$alias_target"
+fi
+rc="$overall_rc"
+echo "[test-suite] finished in $(( $(date +%s) - run_started ))s with exit ${rc}"
 df -h / | sed 's/^/[test-suite] disk after the suite: /' | tee -a "$disk_evidence_log"
 timeout 120 du -xsh "$repo_root/_build" 2>&1 | sed 's/^/[test-suite] _build after the suite: /' | tee -a "$disk_evidence_log" ||
   echo "[test-suite] _build after the suite: du did not finish inside 120s; the size is unknown, not zero" | tee -a "$disk_evidence_log"

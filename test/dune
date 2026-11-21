@@ -2438,14 +2438,6 @@
  (modules exact_output_fixture)
  (libraries masc_test_deps unix))
 
-; The durable message floor's fixture: the configured Runtime, the Python worker
-; and the host Exact HTTP, with only the provider's HTTP server substituted.
-(library
- (name librarian_floor_fixture)
- (wrapped false)
- (modules librarian_floor_fixture)
- (libraries alcotest masc_test_deps masc.server exact_output_fixture mcp_protocol astring))
-
 ; No client-side gate stands between the composed request and the peer: a
 ; large body reaches the real HTTP peer, and only the peer's refusal moves the
 ; lane to its next candidate.
@@ -7531,13 +7523,6 @@
  (name test_keeper_librarian_durable_refusal)
  (modules test_keeper_librarian_durable_refusal)
  (libraries alcotest masc))
-
-; Not a test: prints one Librarian pass's allocation and stored bytes per
-; already-read history size. Run by hand from _build/default/test.
-(executable
- (name bench_keeper_librarian_pass)
- (modules bench_keeper_librarian_pass)
- (libraries masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
 
 (include stanzas/bench_keeper_checkpoint_store.inc)
 

@@ -125,11 +125,6 @@ let prompt_json (input : input) =
          "source_count", `Int (List.length p.sources); "next_steps", strings p.next_steps;
          "completeness", completeness_json p.completeness]) snapshot.pockets)
   in `Assoc ["sources", `List sources; "previous", previous; "unavailable", strings input.unavailable]
-(* The fields [prompt_json] shows on their own. [previous] is shown only
-   beside a source and [execution_basis] never, so a Keeper's input with
-   nothing pending is not [empty] yet the prompt reads exactly like it.
-   [render], the Keeper-facing view, still shows prior pockets. *)
-let shows_no_working_context (input : input) = input.sources = [] && input.unavailable = []
 let filename_suffix = ".working-context.json"
 let path ~keepers_dir ~keeper_id = Filename.concat keepers_dir (keeper_id ^ filename_suffix)
 let decode json =

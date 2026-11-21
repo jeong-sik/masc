@@ -143,10 +143,10 @@ the old Librarian read position
 can be left past the new end. No lane has read it since the Memory writer
 took over the Memory writes, and nothing stops on it: the keeper runs on the
 recovered checkpoint, and the Memory writer that reads the turn log goes on
-from the recovery's `Reset` line. The Memory health and next-request forecast
-screens still read the file and show its old atom number. Leave the file
-untouched; the Librarian hard cut removes it with the other old Librarian
-files (RFC librarian-call-only-proposes 19.1).
+from the recovery's `Reset` line. The Memory health response still reads the
+file for its `read_position` and `stalled` values, so both show the old
+position. Leave the file untouched; the Librarian hard cut removes it with
+the other old Librarian files (RFC librarian-call-only-proposes 19.1).
 
 ## Live resume after a purge
 

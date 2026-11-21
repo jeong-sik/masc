@@ -103,7 +103,7 @@ let keeper_health_reading : keeper_health -> keeper_health_reading = function
 
 (* The Keepers screen's own words for these states (정상, 대기 중, 실패,
    오프라인), so a health word and a state word for the same keeper agree.
-   No reading is 미조회, the word RFC-0519 §2 gives a value not read yet.
+   No reading is 미조회, the word for a value not read yet.
    English keeps the wire words it showed. *)
 let keeper_health_word ~ko = function
   | None -> if ko then "미조회" else "unread"
@@ -2967,9 +2967,7 @@ let decode_goal_source_failure json =
 (* One line for the surfaces that still end in a string: the Planning header's
    [planning_error] and the detail pane's [Goal_timeline_unavailable]. Same
    shape as [Goal_store_unavailable.to_string] minus the payloads the wire
-   does not carry. Residue: RFC-0444 PR-4 lifts the view into
-   [Planning_unavailable] and draws file, reason and reset step in the pane
-   body, and this renderer goes with it. *)
+   does not carry. *)
 let goal_store_unavailable_reason_view_to_string = function
   | Missing_after_init_view -> "missing_after_init"
   | Unreadable_view -> "unreadable"
@@ -3479,7 +3477,7 @@ type candle_reading =
   | Candle_ready of Candle_decay_basis.t
 
 (* The roster's [candle] says whether Candle is on; [candle_decay] carries
-   the fold the TUI computes every amount from (RFC-0481 §3.7). A ready
+   the fold the TUI computes every amount from. A ready
    observation needs its basis and the other two have none. *)
 let candle_reading_of_json ~candle decay =
   match candle, decay with

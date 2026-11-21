@@ -2814,7 +2814,7 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
 
    Audit F8: [Runtime_agent_core_runner.resolve_runtime_providers] used to discard
    [runtime_id] and always return the default runtime, silently substituting
-   an operator-selected runtime id.  It must resolve the requested id via the RFC-0207 catalog
+   an operator-selected runtime id.  It must resolve the requested id via the runtime catalog
    and return [Error] on an unknown id — never the default runtime. *)
 
 let provider_base_url_of_runtime_id runtime_id =

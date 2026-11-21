@@ -327,11 +327,10 @@ let render_payload ~extract_mode ~content_kind payload =
 let truncation_head_share_num = 3
 let truncation_share_den = 4
 
-(* [Env_config_core.base_path] is the guarded public accessor
-   (RFC-0085 PR-9 hides the raw option form): unset becomes the
-   canonical remedy message in the marker, and a #9903 test-isolation
-   breach surfaces loudly as the offload reason instead of writing
-   under the operator's HOME. *)
+(* [Env_config_core.base_path] is the guarded public accessor: unset
+   becomes the canonical remedy message in the marker, and a #9903
+   test-isolation breach surfaces loudly as the offload reason instead
+   of writing under the operator's HOME. *)
 let web_artifact_index_schema = "masc.web_artifact.v1"
 
 (* One append-only fact line per offload. The index is a

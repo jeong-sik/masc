@@ -1,6 +1,6 @@
 (** Benchmark: single-Domain fiber vs Executor_pool for keeper workloads.
 
-    RFC-0059 §9.4: Measures wall-clock for N concurrent simulated
+    Measures wall-clock for N concurrent simulated
     keeper turns under three workload types:
 
     1. pure_io    — simulated HTTP call (Eio.Time.sleep).
@@ -11,7 +11,7 @@
                     Closest to real keeper behavior.
 
     Standalone — no masc dependency. Inline Executor_pool weight
-    policy from Domain_pool (PR-6 of RFC-0059):
+    policy from Domain_pool:
       - IO-bound: weight 0.05 (~20 concurrent jobs/domain)
       - CPU-bound: weight 1.0 (1 job/domain)
 
@@ -30,7 +30,7 @@ let runs = 3
 let keeper_counts = [| 4; 16; 64 |]
 let domain_counts = [| 1; 2; 4; 8; 15 |]
 
-(* Inline weight policy from Domain_pool (PR-6 RFC-0059). *)
+(* Inline weight policy from Domain_pool. *)
 let weight_io = 0.05
 let weight_cpu = 1.0
 

@@ -140,9 +140,9 @@ type vision_outcome =
   | Vo_runtimes_held of { until : float }
       (** No image runtime was called because the ones left wait for a time
           their provider stated; [until] is the earliest of those times. A
-          held runtime stands where the walk would have called it last and
-          been refused for its account's rest, minus the call
-          (RFC-exact-lane-waits-for-a-stated-reset R5). *)
+          runtime that was called and failed is reported by its own failure,
+          not by this outcome: a held runtime gave no verdict to stand in
+          for it (RFC-exact-lane-waits-for-a-stated-reset R5). *)
   | Vo_timeout
   | Vo_invalid_structured_response of string
   | Vo_provider of { failure_class : Tool_result.tool_failure_class; detail : string }
@@ -199,16 +199,17 @@ val run_vision
     Omitting it preserves automatic candidate selection and failover.
     A runtime whose provider stated a time not to call it before is never
     called before that time, whichever way it is reached. When it is chosen by
-    [runtime_id], when it is all that is left after [exclude_runtime_ids], or
-    when the callable runtimes all advance past their failures while one is
-    held, the answer is [Vo_runtimes_held].
+    [runtime_id], or when it is all that is left after [exclude_runtime_ids],
+    the answer is [Vo_runtimes_held]. When callable runtimes were called and
+    all failed while another runtime is held, the answer is the last called
+    runtime's failure, not the hold.
     Non-cancellation exceptions are converted to
     [Vo_provider]; provider success whose text is malformed structured output
     is [Vo_invalid_structured_response] — unless the stop reason is a MaxTokens
     cut. A [MaxTokens] response advances to the next candidate with the same
     image and query, including when a partial JSON object cannot be parsed.
     Each candidate is attempted at most once; exhausting output-limited
-    candidates returns [Vo_truncated] unless a runtime is held, as above.
+    candidates returns [Vo_truncated].
     Other invalid structured responses and
     local transport wiring rejections do not trigger this output-limit failover.
     A provider 4xx that is neither transient (408/409/429) nor capacity (413)

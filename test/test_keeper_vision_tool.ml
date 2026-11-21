@@ -1270,10 +1270,11 @@ let test_vision_every_runtime_held_answers_held () =
         Alcotest.(check string) "a hold is a dependency wait" "dependency_unavailable"
           (assoc_string "failure_class" json))))
 
-(* RFC-exact-lane-waits-for-a-stated-reset R5: a held runtime stands where the
-   walk would have called it last and been refused, minus the call. Chosen by
-   id, or left alone after the turn's spent runtimes, it answers the same hold,
-   and a walk whose callable runtime fails ends on it. *)
+(* RFC-exact-lane-waits-for-a-stated-reset R5: a held runtime is not called by
+   any path. Chosen by id, or left alone after the turn's spent runtimes, it
+   answers the hold. A walk whose callable runtime fails ends on that runtime's
+   failure: the held runtime gave no verdict to stand in for it, and a hold
+   answered there would tell the reader to wait for days after one timeout. *)
 let test_vision_held_runtime_is_not_called_by_any_path () =
   with_vision_standing (fun ~a ~b:_ ~run ->
     let a_reset = Unix.gettimeofday () +. 3600.0 in
@@ -1293,7 +1294,11 @@ let test_vision_held_runtime_is_not_called_by_any_path () =
     held "chosen by id" (run ~runtime_id:a.id refuse);
     held "left after the spent runtime" (run ~exclude_runtime_ids:[ "p2.vision-b" ] refuse);
     Alcotest.(check (list string)) "neither path calls the held runtime" [] !calls;
-    held "a failed walk ends on the hold" (run refuse);
+    (match run refuse with
+     | Vt.Vo_provider _ -> ()
+     | Vt.Vo_runtimes_held _ ->
+       Alcotest.fail "a held runtime hid the callable runtime's failure"
+     | _ -> Alcotest.fail "a failed walk did not end on the callable runtime's failure");
     Alcotest.(check (list string)) "only the callable runtime is called" [ "vision-b" ]
       (List.rev !calls))
 

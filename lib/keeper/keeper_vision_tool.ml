@@ -686,18 +686,24 @@ let run_candidates_outcome
   let candidate_count = List.length candidates in
   let rec loop ~last_error ~attempt_index = function
     | [] ->
-      (match held_until with
-       (* A held runtime stands where the walk would have called it last and
-          been refused for its account's rest, minus the call
-          (RFC-exact-lane-waits-for-a-stated-reset R5). *)
-       | Some until -> Vo_runtimes_held { until }
-       | None ->
-      (* The walk's outcome is the last candidate's: what ended it. A verdict
-         an earlier candidate gave and the walk moved past (a 400, a capacity
-         refusal) is not the reason the image went unread, and it is already
-         on the candidate counter under that runtime's id. *)
+      (* The walk's outcome is the last candidate that was called: what ended
+         it. A verdict an earlier candidate gave and the walk moved past (a
+         400, a capacity refusal) is not the reason the image went unread, and
+         it is already on the candidate counter under that runtime's id.
+
+         A held runtime was not called and gave no verdict, so it does not
+         stand in for one. When a callable runtime failed on a timeout or a
+         5xx, answering "wait until the held runtime's reset" tells the reader
+         the image cannot be read for days, and the reader stops asking while
+         the callable runtime could answer now (2026-11-20/21, msx-retro-mania:
+         four Kimi failures each came back as a hold until 11-23). The hold is
+         the outcome only when nothing was called
+         (RFC-exact-lane-waits-for-a-stated-reset R5). *)
       (match last_error with
-       | None -> Vo_no_runtime "no image-capable runtime configured"
+       | None ->
+         (match held_until with
+          | Some until -> Vo_runtimes_held { until }
+          | None -> Vo_no_runtime "no image-capable runtime configured")
        | Some (Candidate_official_failure { runtime_id; failure }) ->
          outcome_of_official_failure ~runtime_id failure
        | Some Candidate_timeout -> Vo_timeout
@@ -710,7 +716,7 @@ let run_candidates_outcome
          Vo_provider
            { failure_class = failure_class_of_http_error err
            ; detail = Provider_http_error.to_message err
-           }))
+           })
     | (runtime_id, rt, Official_client) :: rest ->
       record_vision_candidate_start
         ?tool_use_id ?trace_id ~runtime_id ~attempt_index

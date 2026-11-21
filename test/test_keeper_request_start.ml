@@ -290,17 +290,17 @@ let test_the_latest_start_is_kept_until_the_next () =
   with_workspace
   @@ fun config ->
   check string "before any request" "unknown until the next request"
-    (standing_label (Start.standing ~config ~keeper_name));
+    (standing_label (Start.standing ~config ~keeper_name None));
   Start.record ~config ~keeper_name (start 4);
   Start.record ~config ~keeper_name (start 6);
   (match Start.latest ~config ~keeper_name with
    | Some { sends_from; _ } -> check int "the next request overwrites the start" 6 sends_from
    | None -> fail "the recorded start is gone");
-  check string "a workspace that started no writer has no view" "no view"
-    (standing_label (Start.standing ~config ~keeper_name));
+  check string "a start without the writer's view has no view" "no view"
+    (standing_label (Start.standing ~config ~keeper_name None));
   Start.forget ~config ~keeper_name;
   check string "a forgotten Keeper has no start" "unknown until the next request"
-    (standing_label (Start.standing ~config ~keeper_name))
+    (standing_label (Start.standing ~config ~keeper_name None))
 ;;
 
 let () =

@@ -778,6 +778,11 @@ let test_durable_drain_publishes_scoped_health () =
       let config = Masc.Workspace.default_config root in
       ignore (Masc.Workspace.init config ~agent_name:None);
       Config_dir_resolver.reset ();
+      (* The durable drain lists the keepers directory before it reads this
+         Keeper's metadata, so a workspace with no keepers directory stops on
+         the unreadable listing and never reaches the missing metadata this
+         test observes. The directory exists wherever a Keeper is configured. *)
+      Fs_compat.mkdir_p (Config_dir_resolver.keepers_dir_for_base_path ~base_path:root);
       let keeper_name = "health-observed" in
       let run () = ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
         ~commit:(fun _original ->

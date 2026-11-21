@@ -792,20 +792,20 @@ let commit_and_project_accepted_cancellation ~base_path name ~applied_at cancell
     | Ok
         (Keeper_event_queue_persistence.Cancellation_committed
           (Transition_already_applied receipt)) ->
-      (* A replay: the receipt is either still waiting in the outbox (the
-         earlier call died between commit and projection) or already projected.
-         The slot holds one entry and nothing commits behind an unprojected
-         one, so a different head means this receipt is already a witness. *)
+      (* A replay: the receipt is either still waiting in the FIFO outbox (the
+         earlier call died between commit and projection) or already projected. *)
       (match
          Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:name
        with
        | Error detail -> Error detail
        | Ok state ->
-         (match Keeper_event_queue_state.transition_outbox state with
-          | [ entry ]
-            when String.equal entry.receipt.transition_id receipt.transition_id ->
-            Ok (Receipt_to_project receipt)
-          | [] | [ _ ] | _ :: _ :: _ -> Ok Receipt_already_projected))
+         if
+           List.exists
+             (fun (entry : Keeper_event_queue_state.outbox_entry) ->
+                String.equal entry.receipt.transition_id receipt.transition_id)
+             (Keeper_event_queue_state.transition_outbox state)
+         then Ok (Receipt_to_project receipt)
+         else Ok Receipt_already_projected)
     | Ok
         (Keeper_event_queue_persistence.Cancellation_committed
           (Transition_committed_followup_failed { receipt; stage; detail })) ->

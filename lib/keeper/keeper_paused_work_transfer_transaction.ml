@@ -176,20 +176,18 @@ let validate_source_queue config ~from_keeper request =
       ~keeper_name:from_keeper
     |> Result.map_error (fun detail -> Source_queue_validation_failed detail)
   in
-  if Keeper_event_queue_state.transition_outbox state <> []
-  then Error (Source_queue_validation_failed "source lane has a pending transition outbox")
-  else
-    (* Identity and admission revision, not full structural equality: a
-       live entry can carry checkpoint retentions the receipt cannot know,
-       so the exact-selection comparison would fail against a retained
-       entry. *)
-    Keeper_event_queue_state.resolve_pending_selection
-      ~source_ref:
-        (Keeper_event_queue_state.source_snapshot_ref request.source)
-      ~source_incarnation:request.source_incarnation
-      state
-    |> Result.map (fun _ -> ())
-    |> Result.map_error (fun detail -> Source_queue_validation_failed detail)
+  (* Identity and admission revision, not full structural equality: a
+     live entry can carry checkpoint retentions the receipt cannot know,
+     so the exact-selection comparison would fail against a retained
+     entry. Concurrent transitions append to the FIFO outbox without
+     head-of-line blocking. *)
+  Keeper_event_queue_state.resolve_pending_selection
+    ~source_ref:
+      (Keeper_event_queue_state.source_snapshot_ref request.source)
+    ~source_incarnation:request.source_incarnation
+    state
+  |> Result.map (fun _ -> ())
+  |> Result.map_error (fun detail -> Source_queue_validation_failed detail)
 ;;
 
 let transfer_of_receipt receipt =
@@ -258,9 +256,12 @@ let project_source_outbox_if_pending ~base_path ~keeper_name
     |> Result.map_error (fun detail ->
       Committed_projection_failed { stage = Source_ack; detail })
   in
-  match Keeper_event_queue_state.transition_outbox state with
-  | [ entry ]
-    when String.equal entry.receipt.transition_id receipt.transition_id ->
+  if
+    List.exists
+      (fun (entry : Keeper_event_queue_state.outbox_entry) ->
+         String.equal entry.receipt.transition_id receipt.transition_id)
+      (Keeper_event_queue_state.transition_outbox state)
+  then
     Keeper_reaction_ledger.project_event_queue_transition_outbox_result
       ~base_path
       ~keeper_name
@@ -271,13 +272,7 @@ let project_source_outbox_if_pending ~base_path ~keeper_name
         ; detail =
             "source ACK committed but projection follow-up failed: " ^ detail
         })
-  | [] | [ _ ] -> Ok ()
-  | _ :: _ :: _ ->
-    Error
-      (Committed_projection_failed
-         { stage = Source_ack
-         ; detail = "event queue transition outbox cardinality invalid"
-         })
+  else Ok ()
 ;;
 
 let ack_source ?intake_token config

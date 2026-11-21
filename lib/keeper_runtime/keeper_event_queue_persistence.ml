@@ -584,11 +584,17 @@ let transition_wal_entry_to_line owner ~pre_state outbox_entry =
 ;;
 
 let validate_transition_wal_row pre_state outbox_entry =
-  if State.transition_outbox pre_state <> []
-  then Error "transition WAL pre-state already contains an outbox entry"
+  let prior_outbox = State.transition_outbox pre_state in
+  if
+    List.exists
+      (fun (existing : State.outbox_entry) ->
+         String.equal existing.receipt.transition_id outbox_entry.State.receipt.transition_id)
+      prior_outbox
+  then Error "transition WAL pre-state already contains this outbox entry"
   else
     match State.replay_transition_outbox_entry outbox_entry pre_state with
-    | Ok replayed when State.transition_outbox replayed = [ outbox_entry ] ->
+    | Ok replayed
+      when State.transition_outbox replayed = prior_outbox @ [ outbox_entry ] ->
       Ok { pre_state; outbox_entry }
     | Ok _ -> Error "transition WAL pre-state does not produce its exact outbox entry"
     | Error detail -> Error ("transition WAL pre-state is invalid: " ^ detail)
@@ -625,7 +631,11 @@ let transition_wal_entry_of_json owner = function
 
 let replay_transition_wal_bytes ~wal_only owner state bytes =
   let row_is_already_projected (entry : State.outbox_entry) state =
-    State.transition_outbox state = []
+    not
+      (List.exists
+         (fun (existing : State.outbox_entry) ->
+            State.transition_receipt_equal existing.receipt entry.receipt)
+         (State.transition_outbox state))
     && State.transition_receipt_is_projected entry.receipt state
   in
   let rec replay ~saw_row ~all_rows_already_projected state = function
@@ -645,7 +655,9 @@ let replay_transition_wal_bytes ~wal_only owner state bytes =
             let already_projected = row_is_already_projected entry state in
             let pre_state_matches =
               already_projected
-              || State.transition_outbox state = [ entry ]
+              || List.exists
+                   (fun (existing : State.outbox_entry) -> existing = entry)
+                   (State.transition_outbox state)
               || State.to_yojson state = State.to_yojson pre_state
             in
             if not pre_state_matches
@@ -1541,8 +1553,13 @@ let commit_transition_unlocked_with
   | Ok (state, State.Transition_already_applied receipt) ->
     Ok (Transition_already_applied receipt, State.pending state)
   | Ok (state, State.Transition_applied receipt) ->
-    (match State.transition_outbox state with
-     | [ entry ] when State.transition_receipt_equal receipt entry.receipt ->
+    (match
+       List.find_opt
+         (fun (entry : State.outbox_entry) ->
+            State.transition_receipt_equal receipt entry.receipt)
+         (State.transition_outbox state)
+     with
+     | Some entry ->
        (match bump_revision state with
      | Error _ as error -> error
      | Ok checkpoint ->
@@ -1587,12 +1604,21 @@ let commit_transition_unlocked_with
          continue_after_commit ()
        in
        before_wal_write ();
-       (match
-          Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
-            path
-            ~expected_end_offset:0
-            suffix
-        with
+       let wal_append_result =
+         match State.transition_outbox current with
+         | [] ->
+           Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+             path
+             ~expected_end_offset:0
+             suffix
+         | _ :: _ ->
+           (* Concurrent transition while an earlier entry awaits projection:
+              append durably to the live WAL rather than failing on offset 0. *)
+           Fs_compat.append_private_jsonl_durable_locked_with_end_offset_result
+             path
+             suffix
+       in
+       (match wal_append_result with
         | Private_file_failed error ->
           Error
             (Printf.sprintf
@@ -1620,7 +1646,7 @@ let commit_transition_unlocked_with
             path
             (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
           continue_after_wal_commit ()))
-     | [] | [ _ ] | _ :: _ :: _ ->
+     | None ->
        Error "transition commit did not produce its canonical outbox entry")
 ;;
 
@@ -1805,6 +1831,29 @@ let mark_transition_projected_result state ~transition_id ~retain_previous =
   State.mark_transition_projected ~transition_id ~retain_previous state
 ;;
 
+let project_selected_outbox_entry_unlocked
+      ~select_entry
+      ~append_before_retire
+      ~retain_previous
+      owner
+      state
+  =
+  let open Result.Syntax in
+  match select_entry (State.transition_outbox state) with
+  | None -> Ok ()
+  | Some (entry : State.outbox_entry) ->
+    let* () = append_before_retire state entry in
+    let* projected =
+      mark_transition_projected_result
+        state
+        ~transition_id:entry.receipt.transition_id
+        ~retain_previous
+    in
+    let* projected = bump_revision projected in
+    let* () = save_state_unlocked owner projected in
+    compact_transition_wals_unlocked owner
+;;
+
 let project_transition_outbox_result
       ~append_before_retire
       ~retain_previous
@@ -1816,25 +1865,44 @@ let project_transition_outbox_result
   try
     Owner_lock.with_durable_lock owner (fun () ->
       let* state = load_state_unlocked owner in
-      match State.transition_outbox state with
-      | [] -> Ok ()
-      | [ entry ] ->
-        let* () = append_before_retire state entry in
-        let* projected =
-          mark_transition_projected_result
-            state
-            ~transition_id:entry.receipt.transition_id
-            ~retain_previous
-        in
-        let* projected = bump_revision projected in
-        let* () = save_state_unlocked owner projected in
-        compact_transition_wals_unlocked owner
-      | entries ->
-        Error
-          (Printf.sprintf
-             "event queue transition outbox cardinality invalid keeper=%s count=%d"
-             keeper_name
-             (List.length entries)))
+      project_selected_outbox_entry_unlocked
+        ~select_entry:(function [] -> None | entry :: _ -> Some entry)
+        ~append_before_retire
+        ~retain_previous
+        owner
+        state)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "event queue transition projection raised keeper=%s: %s"
+         keeper_name
+         (Printexc.to_string exn))
+;;
+
+let project_transition_outbox_entry_result
+      ~transition_id
+      ~append_before_retire
+      ~retain_previous
+      ~base_path
+      ~keeper_name
+  =
+  let open Result.Syntax in
+  let* owner = resolve_owner ~base_path ~keeper_name in
+  try
+    Owner_lock.with_durable_lock owner (fun () ->
+      let* state = load_state_unlocked owner in
+      project_selected_outbox_entry_unlocked
+        ~select_entry:(fun entries ->
+          List.find_opt
+            (fun (entry : State.outbox_entry) ->
+               String.equal entry.receipt.transition_id transition_id)
+            entries)
+        ~append_before_retire
+        ~retain_previous
+        owner
+        state)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

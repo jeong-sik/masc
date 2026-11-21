@@ -1054,46 +1054,61 @@ let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
   match Ids.Turn_ref.of_string outcome_ref with
   | None -> unavailable "invalid_outcome_ref"
   | Some turn_ref ->
-    (match Keeper_chat_store.load_all_result ~base_dir ~keeper_name with
+    let replies_of_messages messages =
+      let transcript = Keeper_chat_store.transcript_of_messages messages ~turn_ref in
+      List.filter_map
+        (fun (message : Keeper_chat_store.chat_message) ->
+          match message.role, message.delivery_provenance with
+          | Keeper_chat_store.Role.Assistant,
+            Some { Keeper_chat_delivery_identity.transcript_slot =
+                     Keeper_chat_delivery_identity.Terminal_result; delivery_key = observed_key }
+            when Keeper_chat_delivery_identity.delivery_key_equal delivery_key observed_key ->
+            Some (`Assoc [ "message_id", `String message.id
+                         ; "text", `String message.content
+                         ; "blocks", (match message.blocks with
+                             | None -> `Null
+                             | Some blocks -> Keeper_chat_blocks.blocks_to_yojson blocks) ])
+          | ( Keeper_chat_store.Role.User
+            | Keeper_chat_store.Role.System
+            | Keeper_chat_store.Role.Request_failure
+            | Keeper_chat_store.Role.Tool ), _ -> None
+          | Keeper_chat_store.Role.Assistant,
+            ( None
+            | Some
+                { Keeper_chat_delivery_identity.transcript_slot =
+                    ( Keeper_chat_delivery_identity.Accepted_user
+                    | Keeper_chat_delivery_identity.Tool_call _
+                    | Keeper_chat_delivery_identity.Tool_delivery _
+                    | Keeper_chat_delivery_identity.Terminal_result
+                    | Keeper_chat_delivery_identity.Settled_failure
+                    | Keeper_chat_delivery_identity.Approval_request
+                    | Keeper_chat_delivery_identity.Approval_resolution
+                    | Keeper_chat_delivery_identity.Approval_replay
+                    | Keeper_chat_delivery_identity.Approval_replay_correction
+                    | Keeper_chat_delivery_identity.Approval_continuation
+                    | Keeper_chat_delivery_identity.Autonomous_input_binding _ )
+                ; _
+                } ) -> None)
+        transcript.assistant
+    in
+    (* Check the bounded recent tail window first to avoid scanning the entire
+       multi-MB chat JSONL on every delegate completion lookup; only fall back
+       to [load_all_result] when the delegate reply predates the tail window. *)
+    let replies_result =
+      match Keeper_chat_store.load_result ~base_dir ~keeper_name with
+      | Ok tail_messages ->
+        (match replies_of_messages tail_messages with
+         | _ :: _ as replies -> Ok replies
+         | [] ->
+           Keeper_chat_store.load_all_result ~base_dir ~keeper_name
+           |> Result.map replies_of_messages)
+      | Error _ ->
+        Keeper_chat_store.load_all_result ~base_dir ~keeper_name
+        |> Result.map replies_of_messages
+    in
+    (match replies_result with
      | Error _ -> unavailable "chat_store_unavailable"
-     | Ok messages ->
-       let transcript = Keeper_chat_store.transcript_of_messages messages ~turn_ref in
-       let replies =
-         List.filter_map
-           (fun (message : Keeper_chat_store.chat_message) ->
-             match message.role, message.delivery_provenance with
-             | Keeper_chat_store.Role.Assistant,
-               Some { Keeper_chat_delivery_identity.transcript_slot =
-                        Keeper_chat_delivery_identity.Terminal_result; delivery_key = observed_key }
-               when Keeper_chat_delivery_identity.delivery_key_equal delivery_key observed_key ->
-               Some (`Assoc [ "message_id", `String message.id
-                            ; "text", `String message.content
-                            ; "blocks", (match message.blocks with
-                                | None -> `Null
-                                | Some blocks -> Keeper_chat_blocks.blocks_to_yojson blocks) ])
-             | ( Keeper_chat_store.Role.User
-               | Keeper_chat_store.Role.System
-               | Keeper_chat_store.Role.Request_failure
-               | Keeper_chat_store.Role.Tool ), _ -> None
-             | Keeper_chat_store.Role.Assistant,
-               ( None
-               | Some
-                   { Keeper_chat_delivery_identity.transcript_slot =
-                       ( Keeper_chat_delivery_identity.Accepted_user
-                       | Keeper_chat_delivery_identity.Tool_call _
-                       | Keeper_chat_delivery_identity.Tool_delivery _
-                       | Keeper_chat_delivery_identity.Terminal_result
-                       | Keeper_chat_delivery_identity.Settled_failure
-                       | Keeper_chat_delivery_identity.Approval_request
-                       | Keeper_chat_delivery_identity.Approval_resolution
-                       | Keeper_chat_delivery_identity.Approval_replay
-                       | Keeper_chat_delivery_identity.Approval_replay_correction
-                       | Keeper_chat_delivery_identity.Approval_continuation
-                       | Keeper_chat_delivery_identity.Autonomous_input_binding _ )
-                   ; _
-                   } ) -> None)
-           transcript.assistant
-       in
+     | Ok replies ->
        match replies with
        | [] -> unavailable "reply_not_found"
        | _ ->

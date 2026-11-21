@@ -246,6 +246,16 @@ let deliver_broadcast_mention
             |> List.filter_map Keeper_identity.Keeper_id.of_string
             |> List.sort_uniq Keeper_identity.Keeper_id.compare
           in
+          let sender_kind =
+            if is_registered_keeper delivery.from_agent
+            then Keeper_keepalive_signal.Keeper_sender
+            else Keeper_keepalive_signal.Human_sender
+          in
+          let wake_policy =
+            Keeper_keepalive_signal.stimulus_wake_policy_of
+              ~input_kind:Keeper_keepalive_signal.Direct_message
+              ~sender_kind
+          in
           (* The message becomes an entry in the target's linear drain, so it
              is ordered against every other stimulus, deduplicated by the
              workspace request identity, and readable in the operator queue
@@ -260,7 +270,8 @@ let deliver_broadcast_mention
             let stimulus =
               { Keeper_event_queue.post_id =
                   Keeper_event_queue.workspace_message_post_id message
-              ; urgency = Keeper_event_queue.Immediate
+              ; urgency =
+                  Keeper_keepalive_signal.urgency_of_stimulus_wake_policy wake_policy
               ; arrived_at = Unix.gettimeofday ()
                 (* NDT-OK: stimulus receipt time, used only for ordering/age *)
               ; payload = Keeper_event_queue.Workspace_message message
@@ -292,16 +303,31 @@ let deliver_broadcast_mention
           in
           let request_wake () =
             commit_queue_entry ();
-            if is_running target
-            then (
-              wakeup target;
-              Log.Keeper.info
-                "broadcast mention accepted; wake requested for registered keeper=%s request_id=%s seq=%d"
-                target delivery.request_id delivery.seq)
-            else
-              Log.Keeper.info
-                "broadcast mention accepted for stopped keeper; pending chat row retained keeper=%s request_id=%s seq=%d"
+            match wake_policy with
+            | Keeper_keepalive_signal.Carry ->
+              Log.Keeper.debug
+                "broadcast mention accepted with Carry policy keeper=%s request_id=%s seq=%d"
                 target delivery.request_id delivery.seq
+            | Keeper_keepalive_signal.At_tick ->
+              Keeper_keepalive_signal.notify_at_tick_pending
+                ~base_path
+                ~keeper_name:target
+                ~now:(Time_compat.now ())
+                ();
+              Log.Keeper.info
+                "broadcast mention accepted with At_tick policy for staggered coalescing keeper=%s request_id=%s seq=%d"
+                target delivery.request_id delivery.seq
+            | Keeper_keepalive_signal.Now ->
+              if is_running target
+              then (
+                wakeup target;
+                Log.Keeper.info
+                  "broadcast mention accepted; wake requested for registered keeper=%s request_id=%s seq=%d"
+                  target delivery.request_id delivery.seq)
+              else
+                Log.Keeper.info
+                  "broadcast mention accepted for stopped keeper; pending chat row retained keeper=%s request_id=%s seq=%d"
+                  target delivery.request_id delivery.seq
           in
           (match
              Keeper_chat_store.append_user_message_once

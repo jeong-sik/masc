@@ -293,20 +293,19 @@ let project_cancellation_result ~base_path ~keeper_name result =
   | Keeper_registry_event_queue.Transition_applied receipt ->
     finish receipt (project receipt)
   | Keeper_registry_event_queue.Transition_already_applied receipt ->
-    (* A different head can only follow retirement of this receipt: the
-       canonical queue admits one transition at a time. Do not project a
-       later operation while replaying an already settled cancellation. *)
+    (* Project only if this exact receipt is still waiting in the FIFO outbox;
+       otherwise it has already been projected. *)
     let projected =
       let* state =
         Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
       in
-      match Keeper_event_queue_state.transition_outbox state with
-      | [] -> Ok ()
-      | [ entry ] ->
-        if String.equal entry.receipt.transition_id receipt.transition_id
-        then project receipt
-        else Ok ()
-      | _ :: _ :: _ -> Error "event queue transition outbox cardinality invalid"
+      if
+        List.exists
+          (fun (entry : Keeper_event_queue_state.outbox_entry) ->
+             String.equal entry.receipt.transition_id receipt.transition_id)
+          (Keeper_event_queue_state.transition_outbox state)
+      then project receipt
+      else Ok ()
     in
     finish receipt projected
 ;;

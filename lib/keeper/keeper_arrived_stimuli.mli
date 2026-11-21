@@ -8,12 +8,30 @@
     the only authority, the row stays queued, and it starts its own turn after
     this one ends as before. *)
 
+(** Inbound queue handling mode for a stimulus arriving while a turn runs.
+    - [Steer]: urgent human/connector/interrupt stimulus surfaced at the next
+      tool boundary ahead of non-steering rows so the Keeper can pivot mid-turn.
+    - [FollowUp]: own-async completion or due work queued to run immediately
+      after the active turn finishes.
+    - [Coalesce]: ambient/low-urgency stimulus batched into the next staggered
+      tick or periodic boundary without interrupting the active turn. *)
+type inbound_queue_mode =
+  | Steer
+  | FollowUp
+  | Coalesce
+
+val inbound_mode_of_stimulus : Keeper_event_queue.stimulus -> inbound_queue_mode
+val inbound_queue_mode_to_string : inbound_queue_mode -> string
+
 type row =
   { arrival : int64
     (** The entry number the queue gave the row when it admitted it
         ([Keeper_event_queue_state.pending_selection.arrival]). It names the row
         for as long as the row is queued. *)
   ; urgency : Keeper_event_queue.urgency
+  ; mode : inbound_queue_mode
+    (** Typed queue mode classifying mid-turn steer vs post-turn follow-up vs
+        coalesced batching. *)
   ; arrived_at : float
   ; preview : string
     (** The one-line description the reaction ledger writes for the row. *)

@@ -1,6 +1,63 @@
+type inbound_queue_mode =
+  | Steer
+  | FollowUp
+  | Coalesce
+
+let inbound_queue_mode_to_string = function
+  | Steer -> "steer"
+  | FollowUp -> "follow_up"
+  | Coalesce -> "coalesce"
+;;
+
+let inbound_mode_rank = function
+  | Steer -> 0
+  | FollowUp -> 1
+  | Coalesce -> 2
+;;
+
+let inbound_mode_of_stimulus (stimulus : Keeper_event_queue.stimulus)
+  : inbound_queue_mode
+  =
+  match stimulus.urgency, stimulus.payload with
+  | ( Keeper_event_queue.Immediate
+    , ( Keeper_event_queue.Workspace_message _
+      | Keeper_event_queue.Connector_attention _
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Ask_answered _
+      | Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Task_cancelled _
+      | Keeper_event_queue.Completion_authority_rejected _ ) ) -> Steer
+  | ( ( Keeper_event_queue.Immediate
+      | Keeper_event_queue.Normal
+      | Keeper_event_queue.Low )
+    , ( Keeper_event_queue.Tool_result_ready _
+      | Keeper_event_queue.Delegate_completed _
+      | Keeper_event_queue.Fusion_completed _
+      | Keeper_event_queue.Composition_completed _
+      | Keeper_event_queue.Owned_job_completed _
+      | Keeper_event_queue.Schedule_due _
+      | Keeper_event_queue.Bootstrap ) ) -> FollowUp
+  | ( Keeper_event_queue.Immediate
+    , ( Keeper_event_queue.Board_routing_pending _
+      | Keeper_event_queue.Board_attention _
+      | Keeper_event_queue.Task_outcome _ ) ) -> FollowUp
+  | ( (Keeper_event_queue.Normal | Keeper_event_queue.Low)
+    , ( Keeper_event_queue.Workspace_message _
+      | Keeper_event_queue.Connector_attention _
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Ask_answered _
+      | Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Board_routing_pending _
+      | Keeper_event_queue.Board_attention _
+      | Keeper_event_queue.Completion_authority_rejected _
+      | Keeper_event_queue.Task_cancelled _
+      | Keeper_event_queue.Task_outcome _ ) ) -> Coalesce
+;;
+
 type row =
   { arrival : int64
   ; urgency : Keeper_event_queue.urgency
+  ; mode : inbound_queue_mode
   ; arrived_at : float
   ; preview : string
   ; receipt_id : string option
@@ -36,6 +93,7 @@ let receipt_id_of_payload : Keeper_event_queue.stimulus_payload -> string option
 let row_of_selection (selection : Keeper_event_queue_state.pending_selection) =
   { arrival = selection.arrival
   ; urgency = selection.source.urgency
+  ; mode = inbound_mode_of_stimulus selection.source
   ; arrived_at = selection.source.arrived_at
   ; preview = Keeper_reaction_ledger.stimulus_payload_preview selection.source.payload
   ; receipt_id = receipt_id_of_payload selection.source.payload
@@ -43,8 +101,11 @@ let row_of_selection (selection : Keeper_event_queue_state.pending_selection) =
 ;;
 
 let compare_arrival (left : row) (right : row) =
-  match Float.compare left.arrived_at right.arrived_at with
-  | 0 -> Int64.compare left.arrival right.arrival
+  match Int.compare (inbound_mode_rank left.mode) (inbound_mode_rank right.mode) with
+  | 0 ->
+    (match Float.compare left.arrived_at right.arrived_at with
+     | 0 -> Int64.compare left.arrival right.arrival
+     | order -> order)
   | order -> order
 ;;
 
@@ -104,15 +165,24 @@ let render ~now ?(receipt = fun _ -> None) { listed; later } =
   | [] -> None
   | _ :: _ ->
     let arrived = List.length listed + later in
+    let has_steer =
+      List.exists (fun (row : row) -> row.mode = Steer) listed
+    in
     let lines =
       List.map
         (fun (row : row) ->
            Printf.sprintf
-             "- %s, %s ago: %s"
+             "- %s [%s], %s ago: %s"
              (urgency_text row.urgency)
+             (inbound_queue_mode_to_string row.mode)
              (Keeper_age_text.of_seconds (now -. row.arrived_at))
              (line_text ~receipt row))
         listed
+    in
+    let steer_cue =
+      if has_steer
+      then [ "Steer arrivals were surfaced at this tool boundary; adjust or conclude this turn promptly." ]
+      else []
     in
     let more =
       if later = 0 then [] else [ Printf.sprintf "- %d more arrived; the next round lists them" later ]
@@ -126,6 +196,7 @@ let render ~now ?(receipt = fun _ -> None) { listed; later } =
                start their own turn after this one ends."
               arrived
           ]
+          @ steer_cue
           @ lines
           @ more))
 ;;

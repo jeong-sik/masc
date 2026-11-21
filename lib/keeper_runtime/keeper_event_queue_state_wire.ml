@@ -696,18 +696,16 @@ let validate_state state =
   then Error "event queue pending arrival number is duplicated"
   else if pending_identity_is_duplicated state.pending_entries
   then Error "event queue pending source identity is duplicated"
-  else if List.length state.transition_outbox > 1
-  then Error "event queue state must contain at most one unprojected transition"
   else if
-    match state.transition_outbox with
-    | [ entry ] ->
-      List.exists
-        (fun disposition ->
-           String.equal
-             (durable_transition_id disposition)
-             entry.receipt.transition_id)
-        (projected_dispositions state)
-    | [] | _ :: _ :: _ -> false
+    List.exists
+      (fun (entry : outbox_entry) ->
+         List.exists
+           (fun disposition ->
+              String.equal
+                (durable_transition_id disposition)
+                entry.receipt.transition_id)
+           (projected_dispositions state))
+      state.transition_outbox
   then Error "event queue projected ledger duplicates the unprojected transition"
   else
     let* () =

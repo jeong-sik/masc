@@ -2,15 +2,11 @@
     This projection neither schedules Keeper work nor certifies continuity. *)
 type provenance = Live_keeper | Assessment
 type capture_status = Recording | Recorded | Incomplete
-type step_kind = Message | Restart | Await_summary
-type step_status = Started | Collecting | Captured | Restart_observed | Summary_ready_observed
+type step_kind = Message | Restart
+type step_status = Started | Collecting | Captured | Restart_observed
 type scope = Reply | Working_state | Tool_calls
 type judgment_result = Unavailable | Pending | Measured of { probability : float; model : string }
 type judgment = { criterion_id : string; scope : scope; result : judgment_result }
-type request_range = { capture_id : string; body_sha256 : string; first_atom : int; summary_end_atom : int option }
-type omission_detail = { target_end_atom : int; requests : request_range list }
-type omission = Not_requested | Omission_unavailable of string | Not_observed of string * omission_detail | Observed of omission_detail
-type summary_readiness = Readiness_not_available | Covered of { end_atom : int; last_atom_digest : string }
 type memory_readiness = Memory_unavailable | Memory_operations of (string * string) list
 type step = {
   id : string;
@@ -21,10 +17,7 @@ type step = {
   working_state_messages : int option;
   working_state : Yojson.Safe.t list option;
   reply : string list;
-  omission : omission;
-  target_end_atom : int option;
   judgments : judgment list;
-  readiness : summary_readiness option;
 }
 type t = {
   keeper : string;

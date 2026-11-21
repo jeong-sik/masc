@@ -1186,7 +1186,13 @@ approval continuations, and due schedules remain requested work in every mode;
 operator pause and shutdown still prevent execution. The global
 `autonomous.enabled` setting controls automatic startup and spontaneous work.
 The live periodic interval is `keeper.keepalive_interval_sec`; wake hints do
-not reset its pending deadline or create work by themselves.
+not reset its pending deadline or create work by themselves. A turn that
+serves a due schedule does reset it once the turn runs to its end and its
+queue entries are acknowledged: the next periodic turn comes one interval
+after that turn, so a Keeper whose own recurring schedule is shorter than the
+interval gets no periodic turn on top of it while those turns finish. A
+failed or checkpointed turn, or a batch with an entry left unacknowledged,
+leaves the deadline where it was.
 
 ## Scheduled work while a Keeper is busy
 

@@ -150,6 +150,8 @@ let moved_growth (growth : turn_growth) ~turn_context (counted : usage option) =
   { (growth_from counted) with largest }
 ;;
 
+let last_input_tokens t = t.growth.last_input
+
 let next_turn_peak t =
   match t.growth.last_input, larger t.growth.largest (finished_growth t.growth) with
   | Some input, Some growth -> Some (input + growth)

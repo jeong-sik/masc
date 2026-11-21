@@ -233,13 +233,15 @@ val past_max_context :
   turn_boundary:Keeper_carried_front.turn_start ->
   Keeper_model_input_ledger.t option ->
   past_max_context option
-(** [Some] when the ledger's next-turn peak passes [input_limit], the ledger
-    still holds its positions in this history, and a known [turn_boundary]
-    lies past the window's first atom at an atom this history has. [None]
-    for no ledger, an unknown count, no [input_limit], an unknown boundary,
-    or a boundary at or before the window: the signal moves a window early,
-    and never moves it back or by a guess. [continuity] names the Librarian
-    point the move may go to. Pure. *)
+(** [Some] when the ledger's next-turn peak — or, while turn growth has not yet
+    been measured after a ledger start or prefix change, the provider-counted
+    {!Keeper_model_input_ledger.last_input_tokens} itself — passes
+    [input_limit], the ledger still holds its positions in this history, and a
+    known [turn_boundary] lies past the window's first atom at an atom this
+    history has. [None] for no ledger, an unknown count, no [input_limit], an
+    unknown boundary, or a boundary at or before the window: the signal moves a
+    window early, and never moves it back or by a guess. [continuity] names the
+    Librarian point the move may go to. Pure. *)
 
 (** What a window that stays keeps where it last sent it. *)
 type held_window =

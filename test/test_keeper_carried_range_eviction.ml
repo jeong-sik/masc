@@ -690,6 +690,29 @@ let test_the_size_signal_reads_the_ledger_and_the_declaration () =
     (signal_over ~turn_boundary:(Front.Turn_boundary { end_atom = 4 }) ~history ledger);
   none "a window no turn has opened under yet has no growth"
     (signal_over ~history (window_ledger ~history ~first_atom:4 [ true, 1_000; false, 2_900 ]));
+  none "without turn growth, a count equal to input_limit stays"
+    (signal_over ~history (window_ledger ~history ~first_atom:4 [ true, 3_000 ]));
+  (match signal_over ~history (window_ledger ~history ~first_atom:4 [ true, 3_100 ]) with
+   | Some signal ->
+     check int "already-over-limit first window moves from 4" 4 signal.window_first_atom;
+     check int "already-over-limit moves to turn boundary" 8 signal.moved_to.Front.first_atom;
+     check int "uses provider-counted last_input_tokens as lower bound" 3_100 signal.next_turn_peak;
+     check string "turn_start_at_max_context source" "turn_start_at_max_context"
+       (Front.source_to_string signal.moved_to.Front.source)
+   | None -> fail "last_input_tokens > input_limit must fire even before turn growth is measured");
+  (match
+     signal_over
+       ~continuity:(absorbed_at ~point:6)
+       ~history
+       (window_ledger ~history ~first_atom:4 [ true, 1_000; false, 3_200 ])
+   with
+   | Some signal ->
+     check int "already-over-limit with Librarian continuity moves to point 6" 6
+       signal.moved_to.Front.first_atom;
+     check int "lower-bound peak uses latest provider count" 3_200 signal.next_turn_peak;
+     check string "librarian_point_at_max_context source" "librarian_point_at_max_context"
+       (Front.source_to_string signal.moved_to.Front.source)
+   | None -> fail "already-over-limit window with Librarian continuity must move to point 6");
   none "a ledger this history does not hold moves nothing"
     (signal_over ~history:(exchanges ~from:100 10) ledger);
   (* Issue #53504: window = 400_000, reserved output = 128_000 -> input_limit = 272_000.

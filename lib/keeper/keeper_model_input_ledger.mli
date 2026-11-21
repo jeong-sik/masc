@@ -205,6 +205,11 @@ val holds : digest_at:(int -> string option) -> t -> bool
     names an atom of this history (RFC keeper-context-window-in-tokens
     §10.3). *)
 
+val last_input_tokens : t -> int option
+(** Provider-counted [input_tokens] of the last request recorded in this ledger,
+    whether or not that request was a sample and whether or not turn growth has
+    been measured yet. [None] when the last request went uncounted. *)
+
 val next_turn_peak : t -> int option
 (** The input the next turn is expected to reach while the window stays: the
     last request's count plus the largest growth of a turn that finished

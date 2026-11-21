@@ -85,8 +85,9 @@
     fits, and the recovery is refused; with the server stopped, removing that
     working state (the keeper's [librarian-continuity.json]) lets it through,
     and the Librarian writes it again from atom 0. The Librarian position is
-    not read or moved: one left past the new end stops the next round of the
-    lane that reads atoms ([Keeper_librarian_range.Position_mismatch]).
+    not read or moved, so a recovery can leave it past the new end. No lane
+    reads it since the Memory writer took over the Memory writes; the Memory
+    health and next-request forecast screens still do.
 
     Tool protocol cycles are never split, reordered, or dropped. The last
     [keep_recent_messages] messages and the structurally protected suffix

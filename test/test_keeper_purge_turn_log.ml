@@ -214,8 +214,8 @@ let test_a_recovery_names_what_it_drops =
     check int "with nothing open" 0 installed.open_messages
 ;;
 
-(* The Librarian lane that reads atoms keeps its read position in
-   [librarian-progress.json]. A purge neither reads nor writes that file
+(* The old Librarian read position is in [librarian-progress.json]; no lane
+   reads it any more. A purge neither reads nor writes that file
    (RFC librarian-call-only-proposes §5.6): one that does not decode does
    not stop a recovery, and the recovery leaves it byte for byte. *)
 let test_a_recovery_leaves_the_librarian_position_file =

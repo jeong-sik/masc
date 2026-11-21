@@ -137,15 +137,16 @@ dashboard's checkpoint list fills again as the keeper saves.
 
 ## After a recovery
 
-A recovery ends the history at the structural break. It does not move the
-read position of the Librarian lane that reads atoms
-(`<runtime keepers dir>/<keeper>/librarian-progress.json`). When the history
-now ends ahead of that position, that lane stops on the keeper and Memory
-health shows
-`librarian position trace=… end_atom=N does not match checkpoint atoms=M`.
-The keeper runs on the recovered checkpoint, and the Memory writer that reads
-the turn log goes on from the recovery's `Reset` line. Leave the position
-file untouched and report the keeper and that error.
+A recovery ends the history at the structural break. It does not read or move
+the old Librarian read position
+(`<runtime keepers dir>/<keeper>/librarian-progress.json`), so that position
+can be left past the new end. No lane has read it since the Memory writer
+took over the Memory writes, and nothing stops on it: the keeper runs on the
+recovered checkpoint, and the Memory writer that reads the turn log goes on
+from the recovery's `Reset` line. The Memory health and next-request forecast
+screens still read the file and show its old atom number. Leave the file
+untouched; the Librarian hard cut removes it with the other old Librarian
+files (RFC librarian-call-only-proposes 19.1).
 
 ## Live resume after a purge
 

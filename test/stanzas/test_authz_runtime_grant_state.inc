@@ -5,6 +5,6 @@
 ; under the timeout.
 
 (test
- (name test_authz_grant_state)
- (modules test_authz_grant_state)
+ (name test_authz_runtime_grant_state)
+ (modules test_authz_runtime_grant_state)
  (libraries masc_test_deps))

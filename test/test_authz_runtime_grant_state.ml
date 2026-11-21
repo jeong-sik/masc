@@ -4,7 +4,7 @@
 
 open Authz_types
 open Authz_records
-module G = Authz_grant_state
+module G = Authz_runtime_grant_state
 
 let get = function
   | Ok value -> value
@@ -156,7 +156,7 @@ let test_of_grantee () =
 
 let () =
   Alcotest.run
-    "authz_grant_state"
+    "authz_runtime_grant_state"
     [ ( "grant state"
       , [ Alcotest.test_case "an empty state holds no grant" `Quick test_empty
         ; Alcotest.test_case "a grant is found as its record says" `Quick test_found_as_recorded

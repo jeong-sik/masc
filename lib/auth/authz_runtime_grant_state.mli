@@ -6,18 +6,16 @@
     (design 4.3, plan D1). {!Authz_state} keeps one of these as its field and
     hands it every Runtime grant record of a bootstrapped log.
 
-    {b Projection only, for now.} The record body of this kind is not defined
-    yet: [Authz_runtime_event] carries the Self grant of a Runtime as an id and
-    a set of effects, and no module writes a grant's own grantee, status, kind
-    and deadline. Design 4.3 is outside the repository (plan D1), so this
-    module reads a {!Authz_records.Runtime_grant.t} that the layer above
-    decoded and decides nothing beyond what that record type already says. It
-    does not say who may write a grant record, which effects a grantee may
-    exercise, or whether a deadline has passed: {!Authz_decision} holds those
-    rules, and {!Authz_state} answers [Kind_not_read] for the kind until the
-    body is defined. The wiring and those answers follow in one change with the
-    record body, so no caller reads a grant from here while a log record that
-    makes it cannot be written.
+    {b Projection only.} This module reads a {!Authz_records.Runtime_grant.t}
+    that the layer above decoded and decides nothing beyond what that record
+    type already says. It does not say who may write a grant record, which
+    effects a grantee may exercise, or whether a deadline has passed:
+    {!Authz_decision} holds those rules and {!Authz_state} decides who may
+    write. The event module that carries [Delegated_granted],
+    [Grant_revoked] and [Grant_purged] for this kind (design 4.2-1, plan D1-1)
+    writes the record this projection reads; the [Authz_state] handler that
+    passes it the records is D1's wiring change, after the N3 [C1-1] landing
+    that touches the same file.
 
     {b One id.} A grant id names one grant for good (design 4.3): no record
     makes a grant again under an id the log already used, and a Runtime keeps

@@ -34,13 +34,11 @@
     A position is an atom index and the digest of the message that opens
     that atom. Keeping the count is not enough: a completed turn usually ends
     on an assistant reply, the reasoning strip rewrites it, and the turn's
-    boundary line would stop matching. With no working state that fits and
-    no Librarian position that matches, the request front starts at the last
-    completed turn that still matches, and at the oldest atom when none does.
-    So these stay byte-exact:
+    boundary line would stop matching. With no working state that fits, the
+    request front starts at the last completed turn that still matches, and
+    at the oldest atom when none does. So these stay byte-exact:
     - the last atom, returned whole along with the tail. Every position at
-      the history's end names it, the Librarian position included: a rewrite
-      requires that position at the end ({!librarian_rebase}).
+      the history's end names it.
     - the opening message of the atom each completed turn of the trace ended
       on, which its [Turn_ended] line names. A failed turn can leave the
       checkpoint past the last such line, so the end alone does not cover
@@ -64,22 +62,27 @@
     opening message the seed no longer matches, and the request starts where
     the last completed turn ended.
 
-    Recovery from a structurally broken input drops the broken tail, so its
-    end moves by design; atoms are then counted on the history it returns.
-    When the rebase moves a Librarian position (it is in the trace and at
-    the history's end, {!librarian_rebase}), that end is where the position
-    moves, and the Librarian reads from a position only when a boundary line
-    it has counted states it ({!Keeper_turn_boundaries.witness_line}). So the
-    recovery ends the history at the last turn end such a line states, ahead
-    of the break, and is refused with [Recovery_end_unwitnessed] when there is
-    none; a position moved to an end no line states stops the Librarian for
-    good (masc #37772). What it cuts between that turn end and the break is
-    in atoms the Librarian has read. Otherwise it ends at the break, and a
-    position the rebase refuses is refused for its own reason.
-    A working state that covers the dropped tail no longer fits, and the
-    recovery is refused; with the server stopped, removing that working
-    state (the keeper's [librarian-continuity.json]) lets it through, and
-    the Librarian writes it again from atom 0.
+    {2 What the turn log has not named is kept}
+
+    A Keeper's Memory writer reads each unit from its turn log (RFC
+    librarian-call-only-proposes §5.6): a message a line names from the
+    bundle the line points at, and the messages past the last unit's mark
+    from the head. A purge that drops nothing therefore rewrites only the
+    messages below that mark ({!Keeper_turn_log_writer.named}). The ones
+    above it, closed or open, stay byte-exact for the next unit to read. A
+    head replaced since the log's last line has none below the mark, so
+    nothing in it is rewritten. With no turn log, the log a later turn
+    starts begins at the head it finds. No line will name what the head
+    holds now, so the turn log holds nothing back.
+
+    Recovery from a structurally broken input drops the broken tail at the
+    break, so its end moves by design; atoms are then counted on the history
+    it returns. Its [Reset] line names everything the head holds before the
+    tail goes ({!Keeper_turn_log_reset}), so on a recovery the turn log holds
+    nothing back either. A working state that covers the dropped tail no longer
+    fits, and the recovery is refused; with the server stopped, removing that
+    working state (the keeper's [librarian-continuity.json]) lets it through,
+    and the Librarian writes it again from atom 0.
 
     Tool protocol cycles are never split, reordered, or dropped. The last
     [keep_recent_messages] messages and the structurally protected suffix
@@ -108,74 +111,6 @@ type config =
 val default_config : config
 (** [{ keep_recent_messages = 20; strip_thinking = true; clear_tool_results = true }]. *)
 
-(** What a purge does to the Librarian's atom position (RFC
-    librarian-lifecycle §10-2). A purge of a sound transcript keeps every atom
-    and the last one byte-exact, so the position is answered back unchanged.
-    Recovery from a broken transcript drops its tail, and there the position
-    moves to the new end, which the recovery chose where a line the position
-    counted states it ({!purge_messages}). Either way it is only allowed when
-    the position has nothing left to read: the rewrite clears tool results
-    and reasoning, and in atoms the Librarian has not read yet that is
-    content it would never absorb.
-
-    [boundary_lines_seen] is left as it is. It says which lines of the
-    boundary log a round had already counted, so that a restart line beyond
-    it is taken as new; raising it to the log's current length would pass
-    over a restart no round has seen yet
-    ([specs/bug-models/LibrarianRead-purge-trim-counting-lines-buggy.cfg]).
-    The official-turn position is a line of that log and is not touched. *)
-type rebase =
-  | No_progress  (** No position: nothing to move. *)
-  | Rebased of
-      { before : Keeper_librarian_progress.t
-      ; after : Keeper_librarian_progress.t
-          (** [before] with the position's [end_atom] and [last_atom_digest]
-              taken from the rewritten history. *)
-      }
-
-type refusal =
-  | Unread_atoms_present of
-      { end_atom : int
-      ; atom_count : int
-      }
-      (** The position stops short of the history's end. The guard asks
-          about atoms: asked about turns, it lets a rewrite pass the atoms of
-          a turn that saved and died
-          ([specs/bug-models/LibrarianRead-purge-trim-by-turns-buggy.cfg]). *)
-  | Position_beyond_history of
-      { end_atom : int
-      ; atom_count : int
-      }
-      (** The position lies past the history's end: it is not a place in
-          this checkpoint, so there is nothing to move. The next round stops
-          on it; the way out is the keeper's Librarian purge. *)
-  | Position_in_other_trace of string
-      (** The position belongs to another trace than the checkpoint's. *)
-  | Position_in_other_history of
-      { held : string
-      ; history : string
-      }
-      (** The position has the checkpoint's atom count but its final digest
-          belongs to another history. *)
-  | Rewrite_leaves_no_atoms
-      (** The rewritten history has no atom to hold a position in. *)
-  | Position_unreadable of string
-      (** A position could not be computed from the messages. *)
-  | Position_invariant_violation of string
-      (** [position_of_messages] returned a turn-end-only result. This is an
-          internal contract violation rather than unreadable input. *)
-
-val refusal_to_string : refusal -> string
-
-val librarian_rebase
-  :  progress:Keeper_librarian_progress.t option
-  -> trace_id:string
-  -> before:Agent_core.Types.message list
-  -> after:Agent_core.Types.message list
-  -> (rebase, refusal) result
-(** The position to write once [after] is installed in place of [before],
-    or why the rewrite must not be installed. Pure. *)
-
 val cleared_tool_result_content : string
 (** Replacement content for cleared [ToolResult] blocks. A fixed marker,
     not a classifier: nothing reads it back. *)
@@ -187,10 +122,9 @@ type report =
   ; tool_results_cleared : int (** tool-result blocks whose content was replaced *)
   ; messages_dropped_at_structural_break : int
       (** Messages discarded because the input transcript was already broken:
-          the offending cycle and everything after it, and on a recovery that
-          moves a Librarian position also the units between the last turn end
-          a counted line states and the break. Zero for a structurally
-          sound input, which is every input that is not being recovered.
+          the offending cycle and everything after it. Zero for a
+          structurally sound input, which is every input that is not being
+          recovered.
 
           Purge refused a broken transcript until 2026-09-01, which made it
           useless for the one case an operator reaches for it -- a keeper whose
@@ -222,13 +156,6 @@ type purge_error =
           working state no longer fits the output. On a sound input this is
           a bug in the transform; on a recovery the dropped tail was part of
           what it covers. *)
-  | Recovery_end_unwitnessed of { boundary_lines_seen : int }
-      (** A recovery that moves a Librarian position found no turn end ahead
-          of the break that one of the position's first
-          [boundary_lines_seen] boundary lines states
-          ({!Keeper_turn_boundaries.witness_line}). Moved to any other end,
-          the position would stand on no line and the Librarian would stop on
-          it for good. *)
 
 val purge_error_to_string : purge_error -> string
 
@@ -241,17 +168,16 @@ val purge_messages
   -> trace_id:string
   -> boundary_lines:boundary_line list
   -> continuity:Librarian_continuity_snapshot.t option
-  -> progress:Keeper_librarian_progress.t option
+  -> named:Keeper_turn_log_writer.named
   -> Agent_core.Types.message list
   -> (Agent_core.Types.message list * report, purge_error) result
 (** Pure message-list transform behind {!purge}. [boundary_lines] is the
     keeper's turn-boundary log, [continuity] its saved Librarian working
-    state and [progress] its Librarian position, all as they are when the
-    result is installed: the first two say which messages stay byte-exact,
-    and on a recovery that moves the position the first and the last say
-    where the history may end. A hole-bearing snapshot that no longer fits
-    refuses purge instead of being treated as absent. Its unread source bytes
-    remain protected along with the covered prefix.
+    state and [named] how far its turn log has named the head, all as they
+    are when the result is installed: they say which messages stay
+    byte-exact. A hole-bearing snapshot that no longer fits refuses purge
+    instead of being treated as absent. Its unread source bytes remain
+    protected along with the covered prefix.
     Exposed for tests. *)
 
 val purge
@@ -259,7 +185,7 @@ val purge
   -> trace_id:string
   -> boundary_lines:boundary_line list
   -> continuity:Librarian_continuity_snapshot.t option
-  -> progress:Keeper_librarian_progress.t option
+  -> named:Keeper_turn_log_writer.named
   -> Agent_core.Checkpoint.t
   -> (Agent_core.Checkpoint.t * report, purge_error) result
 (** Apply {!purge_messages} to [ckpt.messages], resetting the repetition history generation in a copied context when

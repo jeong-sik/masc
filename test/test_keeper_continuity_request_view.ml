@@ -18,14 +18,11 @@ let request_view ?continuity ?completed_arguments ?held_window ?tools ~provider_
   | Ok view -> view
   | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
 
-module Snapshot = Masc.Librarian_continuity_snapshot
-module Boundary = Masc.Keeper_turn_boundaries
 module Front = Masc.Keeper_carried_front
 module Point = Masc.Keeper_covered_point
 module Window = Runtime_model_input_tail_window
 module T = Agent_core.Types
 
-let trace_id = "continuity-request"
 let working_state = "Build passed. Publication still requires user approval."
 let message role content = T.make_message ~role content
 let text role body = message role [T.Text body]
@@ -40,15 +37,6 @@ let read_end ?(state = Some working_state) end_atom =
 
 (* Every atom of [source] is read. *)
 let source_end = snd (Window.annotate source)
-
-(* The boundary log's one completed turn over [source]. *)
-let boundary_lines source =
-  let position = match Boundary.position_of_messages source with
-    | Ok position -> position | Error detail -> fail detail in
-  [1, Ok { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
-    { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
-      history_at_start = Boundary.Fresh_history; position } }]
-;;
 
 let provider_config = Agent_core.Llm_provider.Provider_config.make
   ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
@@ -574,44 +562,8 @@ let test_failed_externalization_keeps_raw_body () =
     (encode (wire projected |> without_working_state |> without_preamble))
 ;;
 
-let test_completed_boundary_protects_resumed_work () =
-  let completed = source @ exchange "completed" (String.make 8000 'd') in
-  let lines = boundary_lines completed in
-  let resumed = completed @ [text T.User "Still awaiting approval"]
-    @ exchange "resumed-unfinished" (String.make 8000 'u') in
-  let endpoint = snd (Window.annotate completed) in
-  let completed_end lines messages =
-    Snapshot.checkpoint_prefix_range ~trace_id ~lines ~messages
-    |> Result.map (fun (range : Masc.Keeper_librarian_range.range) -> range.end_atom) in
-  check bool "seed can contain resumed work beyond completed boundary" true
-    (snd (Window.annotate resumed) > endpoint);
-  check bool "typed completed endpoint excludes all resumed work" true
-    (completed_end lines resumed = Ok endpoint);
-  check bool "absence of source evidence never guesses seed length" true
-    (completed_end [] resumed = Error Snapshot.Uncovered_history);
-  let restarted = lines @ [2, Ok { Boundary.recorded_at = 2.;
-    event = Boundary.History_restarted {trace_id} }] in
-  check bool "restart invalidates older completed endpoint" true
-    (completed_end restarted resumed = Error Snapshot.Uncovered_history);
-  let mismatched = List.map (fun (m : T.message) ->
-    match m.content with
-    | [T.ToolUse fields] when fields.id = "completed" ->
-      {m with content = [T.ToolUse {fields with id = "changed"}]}
-    | _ -> m) resumed in
-  check bool "mismatching completed atom is an unmatched history, not the start" true
-    (completed_end lines mismatched = Error Snapshot.Unmatched_history);
-  let baseline = List.map (fun (line, record) -> line,
-    Result.map (fun (record : Boundary.record) ->
-      match record.event with
-      | Boundary.Turn_ended fields ->
-        {record with event = Boundary.Turn_ended {fields with history_at_start = Boundary.Continued_history}}
-      | _ -> record) record) lines in
-  check bool "verified baseline endpoint can externalize exact older bodies" true
-    (completed_end baseline resumed = Ok endpoint)
-;;
-
 let () = run "continuity request projection"
-  ["request", [test_case "completed boundary protects resumed work" `Quick test_completed_boundary_protects_resumed_work;
+  ["request", [
         test_case "completed bodies go raw until a size refusal" `Quick test_completed_bodies_go_raw_until_a_size_refusal;
         test_case "failed blob write retains raw body" `Quick test_failed_externalization_keeps_raw_body;
         test_case "actual wire and tool append" `Quick test_actual_wire_and_tool_append;

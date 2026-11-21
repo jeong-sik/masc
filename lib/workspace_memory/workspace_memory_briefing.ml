@@ -59,6 +59,9 @@ let input batch = batch.input
 let rendered_prompt batch = batch.rendered_prompt
 let selected_count batch = List.length batch.selected
 let remaining_count (batch : batch) = List.length batch.remaining
+type key = string * string
+let equal_key (id1, h1) (id2, h2) = String.equal id1 id2 && String.equal h1 h2
+let selected_keys batch = List.map source_key batch.selected
 let prepared_state batch = batch.state
 let batch_contract batch = match batch.state.building with
   | Some building -> Ok building.contract
@@ -134,16 +137,20 @@ let prepare ~sources ~contract ~render t =
     let* batch = render_batch ~render ~state ~selected:building.remaining ~remaining:[] in
     Ok (Prepared batch)
 
+let select ~render batch ~count =
+  if count < 1 || count > List.length batch.selected
+  then Error "a briefing batch selects between one and all of its entries"
+  else
+    render_batch ~render ~state:batch.state ~selected:(List.take count batch.selected)
+      ~remaining:(List.drop count batch.selected @ batch.remaining)
+
 let narrow ~render batch =
   match batch.selected with
   | [] | [_] -> Ok None
   | _ :: _ :: _ ->
-    (* Bisection after an actual size refusal, not an estimated byte/token
-       allowance. Both halves retain complete source entries. *)
-    let prefix_length = List.length batch.selected / 2 in
-    let selected = List.take prefix_length batch.selected in
-    let remaining = List.drop prefix_length batch.selected @ batch.remaining in
-    let* smaller = render_batch ~render ~state:batch.state ~selected ~remaining in
+    (* Bisection after a walk the curator narrows on, not an estimated
+       byte/token allowance. Both halves retain complete source entries. *)
+    let* smaller = select ~render batch ~count:(List.length batch.selected / 2) in
     Ok (Some smaller)
 
 let output_schema = `Assoc

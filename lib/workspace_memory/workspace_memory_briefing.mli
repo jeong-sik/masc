@@ -45,6 +45,16 @@ val input : batch -> Yojson.Safe.t
 val rendered_prompt : batch -> string
 val selected_count : batch -> int
 val remaining_count : batch -> int
+
+type key
+(** One entry: its id and the digest of its kind and text. An entry whose
+    text changed is another entry. *)
+
+val equal_key : key -> key -> bool
+
+val selected_keys : batch -> key list
+(** The entries the batch selected, in the order the pass reads them. *)
+
 val prepared_state : batch -> t
 (** Save this state before calling the model to retain the fixed pass target.
     New additions wait for the next pass; removal or modification of a target
@@ -90,12 +100,22 @@ val narrow
   : render:(Yojson.Safe.t -> (string, string) result)
   -> batch
   -> (batch option, string) result
-(** Call only after the provider rejects this batch for input size. Bisects
+(** Call after a walk the curator narrows on
+    ({!Workspace_memory_briefing_narrowing.unanswered}). Bisects
     the selected entries, retaining a whole-entry prefix and prepending its
     suffix to the existing remainder. The fixed target, prior summary, and
     unconsumed durable state remain unchanged. No prose is truncated.
     [Ok None] means one indivisible entry remains: report the refusal rather
     than dropping evidence or retrying the same batch. *)
+
+val select
+  : render:(Yojson.Safe.t -> (string, string) result)
+  -> batch
+  -> count:int
+  -> (batch, string) result
+(** The first [count] entries [batch] selected, the rest put back before its
+    remainder as {!narrow} does. [count] is between one and the entries
+    selected. *)
 
 val output_schema : Yojson.Safe.t
 val contract : template:string -> string

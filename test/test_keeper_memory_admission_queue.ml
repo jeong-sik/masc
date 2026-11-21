@@ -397,29 +397,49 @@ let test_unverifiable_memory_authority_refuses_judgment () =
       "failed authority check preserves every surviving store byte" bytes (Fs_compat.load_file_opt path)) before))
     [`Missing_snapshot;`Corrupt_snapshot;`Mismatched_snapshot;`Corrupt_receipt]
 
-let test_contiguous_pending_recovers_without_sparse_authority () =
+let contains text needle =
+  let n = String.length needle and t = String.length text in
+  let rec go i = i + n <= t && (String.sub text i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
+let test_contiguous_pending_is_refused_when_the_snapshot_does_not_decode () =
   List.iter (fun empty_receipts -> with_store (fun keepers_dir ->
     ignore (append keepers_dir "fresh" "recoverable current fact");
     let snapshot = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
-    Fs_compat.save_file snapshot "{broken snapshot";
+    let broken = "{broken snapshot" in
+    Fs_compat.save_file snapshot broken;
     if empty_receipts then Fs_compat.save_file
       (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper")
       {|{"receipts":[]}|};
     let calls = ref 0 in
+    let refusal = ref None in
     let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
       ~judge:(fun selected ->
         incr calls;
-        ignore (commit keepers_dir (Queue.candidate_ids selected)
-          [fact "recoverable current fact"]);
+        (match
+           Current.apply_disposition
+             ~pass:Masc.Keeper_memory_commit_pass.Admission
+             ~explicit_candidate_ids:(Queue.candidate_ids selected)
+             ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id:"keeper" ~now:200.
+             ~source:{kind = Current.Librarian; trace_id = "admission-judge"}
+             ~new_claims:[fact "recoverable current fact"] ()
+         with
+         | Ok _ -> fail "a normal write replaced an undecodable snapshot"
+         | Error detail -> refusal := Some detail);
         Worker.Committed) in
     check int "contiguous pending input reaches judgment once" 1 !calls;
-    check bool "recovery settles the queue" true
+    (match !refusal with
+     | None -> fail "the judge was never asked to write"
+     | Some detail ->
+       check bool "the refusal names the decode failure" true
+         (contains detail "current Memory OS snapshot decode failed"));
+    check bool "the refusal is not a settled recovery" false
       (outcome = Worker.Settled {has_more=false});
-    let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require in
-    check bool "ordinary commit replaces undecodable snapshot" true
-      (match current with Some current ->
-         List.exists (fun (f : Types.fact) -> f.claim = "recoverable current fact") current.facts
-       | None -> false))) [false;true]
+    check bool "the refused write leaves the pending input outstanding" true
+      (pending keepers_dir <> None);
+    check string "the refused write keeps the undecodable bytes" broken
+      (Fs_compat.load_file snapshot))) [false;true]
 
 (* Characterization, not a recovery guarantee: B committed but its own
    acknowledgement never ran, so losing its receipt makes B indistinguishable
@@ -962,7 +982,7 @@ let () = run "durable explicit admission queue"
     test_case "concurrent receipt loss leaves remaining input" `Quick test_concurrent_receipt_loss_leaves_remaining_input;
     test_case "concurrent acknowledgement preserves deferred input" `Quick test_concurrent_acknowledgement_preserves_deferred_input;
     test_case "a lost receipt of an unacknowledged commit is judged again" `Quick test_lost_receipt_of_unacknowledged_commit_is_judged_again;
-    test_case "contiguous pending recovers without sparse authority" `Quick test_contiguous_pending_recovers_without_sparse_authority;
+    test_case "contiguous pending is refused when the snapshot does not decode" `Quick test_contiguous_pending_is_refused_when_the_snapshot_does_not_decode;
     test_case "unverifiable Memory authority refuses judgment without retiring evidence" `Quick test_unverifiable_memory_authority_refuses_judgment;
     test_case "new input during semantic deferral is recheck, not commit" `Quick test_semantic_deferral_with_new_tail_is_not_commit;
     test_case "capacity siblings continue past semantic uncertainty" `Quick test_capacity_left_uncertainty_does_not_block_right;

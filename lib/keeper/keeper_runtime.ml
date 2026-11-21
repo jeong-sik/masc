@@ -811,6 +811,19 @@ let start_supervisor_sweep ctx =
         let should_act _beat = true
         let on_beat _beat =
           (try
+            Keeper_registry.all ~base_path ()
+            |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+              match Runtime_account_access.engine_keeper_admission entry.name with
+              | Runtime_account_access.Operator_mode
+              | Runtime_account_access.Active_person_keeper _ -> ()
+              | Runtime_account_access.Owner_disabled _
+              | Runtime_account_access.Unknown_person_keeper
+              | Runtime_account_access.Authz_uncertain ->
+                Keeper_keepalive.stop_keepalive ~base_path entry.name)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Log.Keeper.error "supervisor admission stop failed: %s"
+               (Printexc.to_string exn));
+          (try
              Keeper_supervisor.sweep_and_recover
                ~load_or_materialize_keeper_meta
                ctx

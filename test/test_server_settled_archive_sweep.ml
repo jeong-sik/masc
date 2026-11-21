@@ -9,7 +9,7 @@ let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let owned value = get (Result.map_error Owner.error_to_string value)
 let date = "2026-10-27"
 (* Any consumer's scope; the pass reads every consumer's records alike. *)
-let owned = Verifier_review_owner.scope
+let any_scope = Verifier_review_owner.scope
 
 let with_store f =
   let parent = Filename.temp_dir "settled-sweep" "" in
@@ -60,23 +60,23 @@ let check_named_stays root ~scope ~named (report : Sweep.report) =
 (* A live record names the successor its progress
    observed. *)
 let test_successor_is_named () = with_store (fun root store ->
-  let child = retain store ~scope:owned "child" in
-  let parent = retain store ~scope:owned "parent" in
+  let child = retain store ~scope:any_scope "child" in
+  let parent = retain store ~scope:any_scope "parent" in
   let parent = advance store parent Progress.Dispatch_intended in
   let parent = advance store parent (Progress.Refused {stage=Progress.Execution;evidence=`String "too large"}) in
   let digest = get (Owner.request_digest (request "child")) in
   let parent = advance store parent (Progress.Successor_intended {request_id="child";request_digest=digest}) in
   ignore (advance store parent (Progress.Successor_observed "child"));
   settle store child;
-  settle_stray store ~scope:owned;
+  settle_stray store ~scope:any_scope;
   let report = run store in
-  check_named_stays root ~scope:owned ~named:"child" report;
+  check_named_stays root ~scope:any_scope ~named:"child" report;
   Alcotest.(check int) "the live parent is the only live record" 1 report.live_records)
 
 (* A live record also names the replacement its progress observed. *)
 let test_replacement_is_named () = with_store (fun root store ->
-  let child = retain store ~scope:owned "replacement" in
-  let parent = retain store ~scope:owned "conflicted" in
+  let child = retain store ~scope:any_scope "replacement" in
+  let parent = retain store ~scope:any_scope "conflicted" in
   let parent = advance store parent Progress.Dispatch_intended in
   let parent = advance store parent (Progress.Judgment_retained (`String "judged")) in
   let parent = advance store parent
@@ -86,14 +86,14 @@ let test_replacement_is_named () = with_store (fun root store ->
       (Progress.Replacement_intended {request_id="replacement";request=request "replacement"}) in
   ignore (advance store parent (Progress.Replacement_observed "replacement"));
   settle store child;
-  settle_stray store ~scope:owned;
-  check_named_stays root ~scope:owned ~named:"replacement" (run store))
+  settle_stray store ~scope:any_scope;
+  check_named_stays root ~scope:any_scope ~named:"replacement" (run store))
 
 (* A settle archives only the record, so the pass deletes any body in the
    archive. *)
 let test_archived_body_is_deleted () = with_store (fun root store ->
-  settle_stray store ~scope:owned;
-  let bodies = Filename.concat (archive_day root ~scope:owned) "bodies" in
+  settle_stray store ~scope:any_scope;
+  let bodies = Filename.concat (archive_day root ~scope:any_scope) "bodies" in
   Unix.mkdir bodies 0o700;
   let body = Filename.concat bodies "body.json" in
   Out_channel.with_open_bin body (fun channel -> output_string channel "{}");
@@ -108,13 +108,13 @@ let test_every_consumer_lets_the_pass_run () =
   List.iter (fun consumer -> with_store (fun root store ->
     let scope = Consumer.scope consumer in
     ignore (retain store ~scope "original");
-    settle_stray store ~scope:owned;
+    settle_stray store ~scope:any_scope;
     let report = run store in
     Alcotest.(check int) (scope ^ ": its live record is read") 1 report.live_records;
     Alcotest.(check int) (scope ^ ": the record no live record names is deleted") 1
       report.removed_records;
     Alcotest.(check bool) (scope ^ ": the stray record is gone") false
-      (archived root ~scope:owned "stray")))
+      (archived root ~scope:any_scope "stray")))
     Consumer.all
 
 let consumer_name = function
@@ -145,16 +145,16 @@ let test_an_owner_scope_has_its_consumer () =
     ]
 
 let test_unclaimed_scope_refuses () = with_store (fun root store ->
-  settle_stray store ~scope:owned;
+  settle_stray store ~scope:any_scope;
   ignore (retain store ~scope:"an-owner-no-sweep-knows" "original");
   refused store;
-  Alcotest.(check bool) "a refused pass deletes nothing" true (archived root ~scope:owned "stray"))
+  Alcotest.(check bool) "a refused pass deletes nothing" true (archived root ~scope:any_scope "stray"))
 
 let test_unknown_archive_directory_refuses () = with_store (fun root store ->
-  settle_stray store ~scope:owned;
-  Unix.mkdir (Filename.concat (archive_day root ~scope:owned) "notes") 0o700;
+  settle_stray store ~scope:any_scope;
+  Unix.mkdir (Filename.concat (archive_day root ~scope:any_scope) "notes") 0o700;
   refused store;
-  Alcotest.(check bool) "a refused pass deletes nothing" true (archived root ~scope:owned "stray"))
+  Alcotest.(check bool) "a refused pass deletes nothing" true (archived root ~scope:any_scope "stray"))
 
 let () = Alcotest.run "settled archive sweep" ["sweep", [
   Alcotest.test_case "a successor keeps its settled record" `Quick test_successor_is_named;

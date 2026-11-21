@@ -136,6 +136,24 @@ let snapshot contents =
   | Error _ -> fail "snapshot should load"
 ;;
 
+let snapshot_failure contents =
+  let overlay : EO.catalog_document =
+    { source = "resolver snapshot fixture"; contents }
+  in
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
+  | Ok _ -> fail "snapshot must not load"
+  | Error error -> error
+;;
+
+let mentions text fragment =
+  let length = String.length fragment in
+  let rec from index =
+    index + length <= String.length text
+    && (String.equal (String.sub text index length) fragment || from (index + 1))
+  in
+  from 0
+;;
+
 let admit snapshot id =
   match EO.admit_target_ref snapshot id with
   | Ok admitted -> admitted
@@ -554,15 +572,29 @@ let test_pricing_and_formatting_are_nonfunctional () =
     (evidence first = evidence formatted)
 ;;
 
+(* The preset vocabulary is closed: [Capability_preset.of_string] is an exact
+   match on the canonical labels, and [Capability_manifest] rejects any other
+   [base] at parse time instead of defaulting. So a former short label is not an
+   alias that shares evidence -- it is an unknown preset and the snapshot must
+   fail closed. *)
 let test_model_preset_alias_evidence () =
-  let with_base base = snapshot (target_catalog ~model_extra:(Printf.sprintf "base = %S" base) ()) in
-  let alias = with_base "openai" and canonical = with_base "openai_chat" in
-  check string "equivalent model presets retain request generation"
-    (generation alias) (generation canonical);
-  check string "equivalent model presets retain canonical catalog evidence"
-    (evidence alias) (evidence canonical);
-  check bool "a different model preset remains auditable" true
-    (evidence canonical <> evidence (with_base "anthropic"))
+  let with_base base =
+    snapshot (target_catalog ~model_extra:(Printf.sprintf "base = %S" base) ()) in
+  let canonical = with_base "openai_chat" in
+  check bool "the canonical preset loads and is auditable" true
+    (String.length (evidence canonical) > 0);
+  check bool "the canonical preset has a request plan" true
+    (String.length (generation canonical) > 0);
+  (match snapshot_failure (target_catalog ~model_extra:"base = \"openai\"" ()) with
+   | EO.Catalog_parse_failed {detail; _} ->
+     check bool "the refusal names the unknown base value" true
+       (mentions detail "field \"base\" has unknown value \"openai\"");
+     check bool "the refusal lists the closed canonical vocabulary" true
+       (mentions detail "openai_chat")
+   | EO.Catalog_read_failed _ | EO.Target_catalog_invalid _
+   | EO.Catalog_collision _ | EO.Target_binding_missing _
+   | EO.Target_endpoint_invalid _ ->
+     fail "an unknown model preset must fail closed as a catalog parse error")
 ;;
 
 let test_supported_models_order_is_canonical () =
@@ -980,7 +1012,7 @@ let () =
             `Quick
             test_pricing_and_formatting_are_nonfunctional
         ; test_case
-            "model preset aliases share evidence"
+            "model preset vocabulary is closed"
             `Quick
             test_model_preset_alias_evidence
         ; test_case

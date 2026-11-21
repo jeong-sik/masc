@@ -2148,6 +2148,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L10a | 컷의 스위치. 서버가 옛 경로를 시작하지 않고, Lane Add-on 틀에서 Librarian 이 빠진다(§19.2 f). `runtime.toml` 의 옛 키와 표를 읽는 코드를 지운다. `keeper_librarian_queue_signal` 의 이름을 바꾼다(§19.2 a). 이 층 뒤에 부르는 곳이 없어지는 모듈 셋을 지운다 | 타입 검사. working-context pass 시험: 끝난 턴 하나가 pass 하나를 만들고 Memory 를 쓰지 않는다 |
 | L10a2 | 옛 `workspace-curator` add-on 을 지운다(§19.2 l). L10a 와 같은 단위 일곱을 고친다 | 타입 검사. 서버 안의 큐레이터 시험 |
 | L10b | 읽는 쪽. health, 화면, forecast, 요청 조립이 지우는 모듈을 읽지 않는다. 이 층 뒤에 부르는 곳이 없어지는 모듈 여섯을 지운다 | 타입 검사. L8, L9 의 기능 시험 |
+| L10b2 | purge 규칙(§5.6). L8 의 남은 층이다(#54283). purge 가 Librarian 의 읽은 자리를 보지 않고 턴 기록의 줄이 센 메시지만 고쳐 쓴다. L10c 가 같은 파일을 고치므로 그 아래에 둔다 | 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다 |
 | L10c | 옛 턴 색인, purge, 저장소 검증이 지우는 모듈을 부르지 않는다(§19.2 d). 부르는 곳만 끊는다. 지우는 일은 다음 층이다 | 타입 검사. L3~L8 의 기능 시험 |
 | L10d | 삭제. 부르는 곳이 없어진 모듈 67개를 의존 순서대로 다섯 파일 이하 커밋으로 지운다. 파일째 지우는 시험과 옛 spec 도 지운다(§19.2 h, i) | 지운 이름을 `rg` 로 찾아 0. 타입 검사 |
 | L10e | Memory 저장소 장치(§19.2 b). facade 와 타입 파일을 추리고 모듈 17개를 지운다. `keeper_librarian_input_refusal` 의 이름을 바꾼다. release 목록, 프롬프트, 안내 문서(§19.2 h, j). §21 의 모델은 이 RFC 와 같이 `specs/bug-models/` 에 들어와 있다 | 지운 이름을 `rg` 로 찾아 0. 타입 검사. golden fixture 시험의 바이트가 그대로다. L3~L9 의 기능 시험 |
@@ -2170,6 +2171,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 옛 `workspace-curator` add-on 을 지우는 층(L10a2, §19.2 l)은 L10a 바로 위다. L10a 와 같은 단위 일곱을 고치고, 같은 정지에서 디스크를 지운다. changelog 의 「Fresh state required」 문장도 하나를 같이 쓴다. 그 층에만 있는 일은 실행 기록부를 끊는 것이다(§18.2 의 3단계).
 
+purge 규칙도 이 stack 에 든다(L10b2). 컷 앞의 빌드에서는 옛 lane 이 Librarian 의 위치 파일로 이력을 읽는다. 그 위치를 보는 가드 없이 purge 가 먼저 들어가면, 옛 lane 이 아직 읽지 않은 메시지를 purge 가 고쳐 쓴다. 새 규칙이 맞는 때는 턴 기록을 읽는 쓰는 쪽이 읽기를 맡은 뒤다. 그래서 purge 규칙은 lane 전환과 같은 설치에서 바뀐다. 운영자가 그 사이에 purge 를 미룰 일이 없다.
+
 삭제가 한 층(L10d)에 몰리는 까닭은 의존이다. 지우는 `lib/` 모듈 93개 사이에 순환은 없다. 그 모듈을 부르는 바깥 단위를 네 무리(L10a, L10b, L10c, L10e 가 고치는 것)로 나눠 한 무리씩 끊어 보았다. 앞의 세 무리 가운데 마지막을 끊을 때 67~82개가 한꺼번에 풀린다. 그 앞까지는 어느 순서로 해도 많아야 16개다. L10e 의 무리를 먼저 끊어도 그 층이 지우는 17개 가운데 7개만 풀린다. `bin/` 의 실행 파일 셋은 그것이 부르는 모듈을 지우는 층보다 늦지 않게 지운다.
 
 컷 앞에 따로 들어가는 준비가 둘이다. 둘 다 동작을 바꾸지 않는다.
@@ -2179,11 +2182,10 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 넣는 순서는 이렇다.
 
-1. E4 가 마지막 묻기의 거절을 읽게 하는 수리(#54280).
-2. L9 의 화면(#54286)과 L8 의 purge(#54283). 둘 다 컷이 고치거나 지울 파일을 고친다.
-3. carried front 의 출처 `Past_librarian_point` 의 이름 바꾸기. 그 이름을 적은 파일은 `lib/` 에 여섯, `test/` 에 넷이다. 요청이 보내는 바이트는 그대로다. L10b 가 그 가운데 셋(`keeper_turn_driver_try_provider`, `keeper_continuity_request`, `keeper_next_request_forecast`)을 고치거나 지우므로 컷 앞에 온다. L9 의 화면 뒤에 넣는다.
-4. P1 과 P2.
-5. 컷 stack.
+1. L9 의 화면(#54286). 컷이 고칠 파일을 고친다.
+2. carried front 의 출처 `Past_librarian_point` 의 이름 바꾸기. 그 이름을 적은 파일은 `lib/` 에 여섯, `test/` 에 넷이다. 요청이 보내는 바이트는 그대로다. L10b 가 그 가운데 셋(`keeper_turn_driver_try_provider`, `keeper_continuity_request`, `keeper_next_request_forecast`)을 고치거나 지우므로 컷 앞에 온다. L9 의 화면 뒤에 넣는다.
+3. P1 과 P2.
+4. 컷 stack. purge 규칙(#54283)은 그 안의 층이다.
 
 ## 21. 모델 검사
 

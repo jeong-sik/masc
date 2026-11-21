@@ -1287,6 +1287,9 @@ let for_surface = function
       ; b ~role:Acts ~ko:"상세" Act "d" "detail"
           ~help:"show the selected keeper's ledger rows, or fold them back to \
                  its state, last save and actions"
+      ; b ~role:Acts ~ko:"쓰는 쪽 행동" Act "w / W" "writer act" ~rows:Needs_row
+          ~help:"arm the act the selected keeper's Memory writer row takes; w \
+                 again sends it, W steps to the row's next act"
       ; b ~role:Moves ~ko:"지우기 / 뒤로" Act "Esc" "clear / back"
           ~help:"clear the filter, or return to Dashboard"
       ; b ~role:Moves ~ko:"찾기" Search "/" "filter"

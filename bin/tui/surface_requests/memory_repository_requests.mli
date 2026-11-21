@@ -63,3 +63,10 @@ val open_all_fleet_memory
   :  Masc_tui_types.state
   -> mailbox:Masc_tui_transport.Workspace_admission.mailbox
   -> unit
+
+val launch_memory_act
+  :  Masc_tui_types.state
+  -> mailbox:Masc_tui_transport.Workspace_admission.mailbox
+  -> keeper:string
+  -> Masc.Tui_decode_memory_act.act
+  -> unit

@@ -209,6 +209,7 @@ module Kept_request = struct
     | Tool_modes_read
     | Tool_mode_change
     | Board_requeue
+    | Memory_writer_act
     | Service_switch
     | Service_app_save
     | Service_login
@@ -363,6 +364,7 @@ module Kept_request = struct
     | Tool_modes_read -> text "도구 승인 모드 읽기" "tool approval modes read"
     | Tool_mode_change -> text "도구 승인 모드 변경" "tool approval mode change"
     | Board_requeue -> text "게시판 다시 넣기" "Board requeue"
+    | Memory_writer_act -> text "기억 쓰는 쪽 행동" "Memory writer act"
     | Service_switch -> text "서비스 켜고 끄기" "service switch"
     | Service_app_save -> text "서비스 앱 저장" "service app save"
     | Service_login -> text "서비스 로그인" "service login"

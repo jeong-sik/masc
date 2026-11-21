@@ -1326,6 +1326,15 @@ the row draws as a warning.
 Below the table come the full state of the row under the cursor and the alerts
 the server attached to it. `r` reloads.
 
+`w` arms the act the selected Keeper's Memory writer row takes, and a second
+`w` sends it; `W` steps to the row's next act when it takes more than one. A
+stopped writer takes `resume`, and `adopt` when its log diverged or does not
+read and the snapshot file reads. A resting writer takes `resume`. A reading
+that stopped on a replaced turn log or a lost position takes `restart_reading`,
+and one that stopped on content that does not read takes `skip_item`. The
+action line shows the server's answer in its own words (`store=…` or
+`code=…`), and the row is read again. Any other key drops the arm.
+
 `Enter` on a row opens that Keeper's **fact browser**. The list shows a fact's
 content before its path. It separates ordinary facts by category, facts bound
 to a file, and invalidation records. The Korean setting translates only the

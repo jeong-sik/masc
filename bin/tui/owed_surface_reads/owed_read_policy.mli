@@ -56,6 +56,11 @@ val launch_owed_lane_addons
 
 val owe_machine_live_read : Masc_tui_types.state -> Masc.Machine_lane.t -> unit
 val owe_memory_health_read : Masc_tui_types.state -> unit
+
+val owe_memory_health_row : Masc_tui_types.state -> string -> unit
+(** One Keeper's row, read alone and merged: the fleet answer is cached and
+    may not carry what just changed. *)
+
 val owe_memory_world_read : Masc_tui_types.state -> unit
 val owe_memory_input_read : Masc_tui_types.state -> unit
 val owe_overview_read : Masc_tui_types.state -> unit

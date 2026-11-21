@@ -2795,6 +2795,7 @@
 
 (include stanzas/test_keeper_list_truncation.inc)
 (include stanzas/test_keeper_portrait.inc)
+(include stanzas/test_keeper_purge_turn_log_librarian_progress.inc)
 
 (include stanzas/test_keeper_census_outputs.inc)
 (include stanzas/test_keeper_shim_fleet.inc)

@@ -517,6 +517,9 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)
     ; output_schema = None
+    (* One fresh short session that ends before any compaction point: the
+       declared window changes nothing the probe measures. *)
+    ; autocompact_window = None
                }
              in
              let reasoning_effort =

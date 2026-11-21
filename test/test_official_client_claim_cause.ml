@@ -47,6 +47,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
     let config : Runtime_execution.claude_code =
       { cli_path; account_home = Masc_test_deps.claude_account (); model = None; timeout_s = 1. } in
     let outcome = Keeper_claude_code_runtime.run ~read_retained_media:None ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+        ~autocompact_window:None
         ~configured_reasoning_effort:None ~turn_timeout_s:None
         ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~accepts_image_input:false ~runtime_id ~keeper_name
         ~pre_tool_rejects:(ref []) ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~goal:"synthetic claim probe"

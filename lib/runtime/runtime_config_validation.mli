@@ -30,6 +30,10 @@ val lanes_of_decls :
   Runtime_instance.t list -> Runtime_schema.lane_decl list ->
   (Runtime_lane.t list, Runtime_config_error.load_failure) result
 val validate_runtime_max_context : Runtime_instance.t list -> (unit, Runtime_config_error.load_failure) result
+(** Refuse a runtime with no resolvable window, then a Claude Code runtime
+    whose resolved window is below
+    {!Runtime_claude_code.autocompact_window_floor_tokens}: that client would
+    compact later than the declaration says. *)
 val validate_runtime_thinking_requests :
   Runtime_instance.t list -> (unit, Runtime_config_error.load_failure) result
 (** Refuse every [Agent_core] runtime whose model row decides its own thinking

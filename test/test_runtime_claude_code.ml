@@ -4848,6 +4848,108 @@ let test_system_prompt_snapshot_is_pinned_on () =
     ]
 ;;
 
+(* The declared window reaches the client on every launch: [--autocompact]
+   holds for one launch, so a resume without it would compact near the
+   model's full window again. Below the client's floor the value is refused
+   rather than passed for the client to raise. *)
+let test_declared_window_sets_autocompact_on_every_launch () =
+  let window =
+    match Runtime_claude_code.autocompact_window 400_000 with
+    | Ok window -> window
+    | Error detail -> fail detail
+  in
+  let argv autocompact_window session_mode =
+    let config =
+      { (Runtime_claude_code.default_config ~cwd:"/tmp") with autocompact_window }
+    in
+    match
+      Runtime_claude_code.command ~system_prompt_file:None config
+        ~dynamic_tools:[] ~reasoning_effort:None ~session_mode
+        ~session_id:"11111111-1111-4111-8111-111111111111"
+    with
+    | Ok argv -> argv
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+  in
+  let rec flag = function
+    | "--autocompact" :: value :: _ -> Some value
+    | _ :: rest -> flag rest
+    | [] -> None
+  in
+  List.iter
+    (fun (label, session_mode) ->
+       check (option string) (label ^ " carries the declared window")
+         (Some "400000") (flag (argv (Some window) session_mode));
+       check (option string) (label ^ " without a declaration leaves the flag out")
+         None (flag (argv None session_mode)))
+    [ "a start", Runtime_claude_code.Start
+    ; ( "a resume"
+      , Runtime_claude_code.Resume
+          { session_id = "11111111-1111-4111-8111-111111111111" } )
+    ];
+  check bool "the floor itself is taken" true
+    (Result.is_ok
+       (Runtime_claude_code.autocompact_window
+          Runtime_claude_code.autocompact_window_floor_tokens));
+  check bool "a window below the floor is refused" true
+    (Result.is_error
+       (Runtime_claude_code.autocompact_window
+          (Runtime_claude_code.autocompact_window_floor_tokens - 1)))
+;;
+
+(* A window the client cannot take is refused when the config is read,
+   before any Keeper turn launches the client with it. The Claude Code
+   runtime is the default because an official client needs no catalog row. *)
+let test_config_refuses_a_window_below_the_autocompact_floor () =
+  let config_text binding_window =
+    Printf.sprintf
+      {|
+[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.claude_code]
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[claude_code."claude-sonnet-5"]
+max-context = %d
+|}
+      binding_window
+  in
+  let validate binding_window =
+    let path = Filename.temp_file "claude-autocompact-window" ".toml" in
+    Fun.protect
+      ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+      (fun () ->
+         Out_channel.with_open_bin path (fun channel ->
+           Out_channel.output_string channel (config_text 400_000));
+         Runtime.validate_config_text ~runtime_config_path:path
+           (config_text binding_window))
+  in
+  (match validate 400_000 with
+   | Ok () -> ()
+   | Error detail -> failf "a window at or above the floor must load: %s" detail);
+  match validate 50_000 with
+  | Ok () -> fail "a window below the autocompact floor must not load"
+  | Error detail ->
+    let names fragment =
+      let rec at i =
+        i + String.length fragment <= String.length detail
+        && (String.sub detail i (String.length fragment) = fragment || at (i + 1))
+      in
+      at 0
+    in
+    check bool "names the runtime" true (names "claude_code.claude-sonnet-5");
+    check bool "names the client floor" true
+      (names (string_of_int Runtime_claude_code.autocompact_window_floor_tokens))
+;;
+
 let test_system_prompt_flag_is_omitted_when_unset () =
   let argv system_prompt =
     let config = {(Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt} in
@@ -4996,6 +5098,10 @@ let () =
             test_command_loads_no_settings_layer
         ; test_case "system prompt snapshot is pinned on" `Quick
             test_system_prompt_snapshot_is_pinned_on
+        ; test_case "declared window sets autocompact on every launch" `Quick
+            test_declared_window_sets_autocompact_on_every_launch
+        ; test_case "config refuses a window below the autocompact floor" `Quick
+            test_config_refuses_a_window_below_the_autocompact_floor
         ; test_case "large system context uses file argv" `Quick test_system_file_keeps_large_context_off_argv
         ; test_case
             "an unset system prompt omits the flag"

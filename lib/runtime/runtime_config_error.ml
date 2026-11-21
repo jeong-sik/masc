@@ -105,6 +105,11 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Client_compact_window_below_floor of
+      { runtime_id : string
+      ; declared_window : int
+      ; client_floor : int
+      }
   | Admission_allowances_disagree of
       Llm_provider.Provider_admission.allowance_disagreement list
   | Official_client_seats_disagree of Runtime_official_client_seats.disagreement list
@@ -244,6 +249,17 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       execution_model
       declared_model
+  | Client_compact_window_below_floor { runtime_id; declared_window; client_floor } ->
+    Printf.sprintf
+      "%s: runtime %S resolves to max-context = %d, and its Claude Code client \
+       compacts at %d tokens at the earliest (--autocompact). Declare at least \
+       %d where this runtime's max-context comes from (binding, provider or \
+       model table)"
+      config_path
+      runtime_id
+      declared_window
+      client_floor
+      client_floor
   | Thinking_requests_inadmissible refusals ->
     let refusal_line (refusal : thinking_request_refusal) =
       Printf.sprintf
@@ -379,6 +395,7 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Reference_unresolved _
   | Lane_candidate_unresolved _
   | Max_context_absent _
+  | Client_compact_window_below_floor _
   | Admission_allowances_disagree _
   | Official_client_seats_disagree _
   | Thinking_requests_inadmissible _

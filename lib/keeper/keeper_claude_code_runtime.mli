@@ -91,6 +91,9 @@ val run :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
+  autocompact_window:Runtime_claude_code.autocompact_window option ->
+  (* The selected runtime's declared window, passed on start and resume
+     alike ({!Runtime_claude_code.config}). *)
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   turn_timeout_s:float option ->
   keeper_name:string ->

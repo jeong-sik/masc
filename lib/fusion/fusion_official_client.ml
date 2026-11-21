@@ -95,7 +95,7 @@ let bounded_claude_probe_config ~fallback_timeout_s
 ;;
 
 let claude_config ~base_dir ~turn_timeout_s ~system_prompt ~override_s ~output_schema
-  (execution : Runtime_execution.claude_code)
+  ~autocompact_window (execution : Runtime_execution.claude_code)
   : Runtime_claude_code.config
   =
   { cli_path = execution.cli_path
@@ -107,6 +107,7 @@ let claude_config ~base_dir ~turn_timeout_s ~system_prompt ~override_s ~output_s
   ; timeout_s =
       resolved_timeout_s ~turn_timeout_s ~override_s ~default_timeout_s:execution.timeout_s
   ; output_schema
+  ; autocompact_window
   }
 ;;
 
@@ -770,10 +771,16 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      with
      | Error refusal -> Error (Setup_failure (Runtime_account_access.refusal_to_string refusal))
      | Ok account ->
+    match
+      Runtime_claude_code.autocompact_window
+        (Runtime_instance.max_context_of_runtime runtime)
+    with
+    | Error detail -> Error (Setup_failure detail)
+    | Ok autocompact_window ->
     let config =
       claude_config ~base_dir ~turn_timeout_s:runtime.model.turn_timeout_s
         ~system_prompt ~override_s:timeout_s
-        ~output_schema execution
+        ~output_schema ~autocompact_window:(Some autocompact_window) execution
     in
     let probe_config =
       bounded_claude_probe_config

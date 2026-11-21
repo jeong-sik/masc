@@ -261,6 +261,7 @@ type answered =
 let call_claude
       ~env
       ~keeper_id
+      ~runtime
       ~(execution : Runtime_execution.claude_code)
       ~account
       ~records
@@ -272,6 +273,12 @@ let call_claude
   let now_ms () = Int.of_float (Eio.Time.now clock *. ms_per_second) in
   let draw = Auth.generate_token in
   let recorded result = Result.map_error (record_error ~keeper_id) result in
+  (* Runtime load refuses a window the client cannot take
+     ([Runtime_config_validation.validate_runtime_max_context]). *)
+  let* autocompact_window =
+    Runtime_claude_code.autocompact_window (Runtime_instance.max_context_of_runtime runtime)
+    |> Result.map_error (fun detail -> E.Account_runtime_invalid detail)
+  in
   let* conversation =
     Conversation.current_or_start records keeper_id provider_account_id ~deleted ~draw ~now_ms
     |> recorded
@@ -292,6 +299,7 @@ let call_claude
     ; model = execution.model
     ; admission_timeout_s = Float.min turn_timeout_s execution.timeout_s
     ; timeout_s = Some turn_timeout_s
+    ; autocompact_window = Some autocompact_window
     }
   in
   let* () = native_error config.native in
@@ -430,6 +438,7 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
                call_claude
                  ~env
                  ~keeper_id
+                 ~runtime:prepared.Login.runtime
                  ~execution
                  ~account
                  ~records:(Conversation.root ~base_path ~namespace:person.namespace)

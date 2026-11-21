@@ -19,6 +19,24 @@ let api_provider_to_string = function
 type account = Runtime_official_account.claude_code Runtime_official_account.selection
 type authorized_account = Runtime_official_account.claude_code Runtime_account_access.authorized
 
+(* Claude Code reads an [--autocompact] value below this as this floor
+   (code.claude.com/docs/en/model-config#set-the-auto-compact-window, read
+   2026-11-21; `claude --help` of 2.1.330: "at least 100k tokens"). *)
+let autocompact_window_floor_tokens = 100_000
+
+type autocompact_window = int
+
+let autocompact_window tokens =
+  if tokens >= autocompact_window_floor_tokens
+  then Ok tokens
+  else
+    Error
+      (Printf.sprintf
+         "a window of %d tokens is below the %d tokens Claude Code compacts at the earliest"
+         tokens
+         autocompact_window_floor_tokens)
+;;
+
 type config =
   { cli_path : string
   ; cwd : string
@@ -28,6 +46,7 @@ type config =
   ; native : Runtime_native_tools.posture
   ; timeout_s : float option
   ; output_schema : Yojson.Safe.t option
+  ; autocompact_window : autocompact_window option
   }
 
 let default_timeout_s = 300.0
@@ -49,6 +68,7 @@ let default_config ~cwd =
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   ; output_schema = None
+  ; autocompact_window = None
   }
 ;;
 
@@ -3029,6 +3049,12 @@ let command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session
     @ (match config.model with
        | None -> []
        | Some model -> [ "--model"; model ])
+    (* On every launch, start and resume alike: the flag holds for one
+       launch only, and a resumed session would otherwise compact near the
+       model's full window instead of the runtime's declared one. *)
+    @ (match config.autocompact_window with
+       | None -> []
+       | Some tokens -> [ "--autocompact"; string_of_int tokens ])
     @ [ "--permission-mode"; "dontAsk" ]
     @ (match session_mode with
        | Start -> [ "--session-id=" ^ session_id ]

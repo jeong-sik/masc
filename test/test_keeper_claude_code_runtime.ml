@@ -3316,6 +3316,7 @@ let run_direct_attempt
                     | Some timeout_s -> { config with Runtime_execution.timeout_s }
                   in
                   Keeper_claude_code_runtime.run ~read_retained_media:None ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-pre-dispatch" })
+                    ~autocompact_window:None
                     ~configured_reasoning_effort:runtime.model.reasoning_effort
                     ~turn_timeout_s:runtime.model.turn_timeout_s
                     ?terminal_effect_state

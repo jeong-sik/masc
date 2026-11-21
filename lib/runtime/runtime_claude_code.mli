@@ -25,6 +25,18 @@ type account = Runtime_official_account.claude_code Runtime_official_account.sel
 type authorized_account =
   Runtime_official_account.claude_code Runtime_account_access.authorized
 
+val autocompact_window_floor_tokens : int
+(** The smallest window [--autocompact] takes: 100,000 tokens. Claude Code
+    reads a smaller value as this floor. *)
+
+(** The point, in tokens, where the client compacts its conversation. *)
+type autocompact_window = private int
+
+val autocompact_window : int -> (autocompact_window, string) result
+(** [Error] for a value below {!autocompact_window_floor_tokens}: the client
+    would compact later than the declaration says. Runtime config load
+    refuses such a declaration through this function. *)
+
 type config =
   { cli_path : string
   ; cwd : string
@@ -64,6 +76,13 @@ type config =
         and gives up with subtype [error_max_structured_output_retries].
         [None] leaves the answer unfenced, which is what every caller did
         before this field existed. *)
+  ; autocompact_window : autocompact_window option
+    (** [--autocompact <tokens>] on start and resume. A runtime passes its
+        resolved window ({!Runtime_instance.max_context_of_runtime}), so the
+        client compacts at the window runtime.toml declares, wherever the
+        declaration sits. [None] leaves the client's own point: about 967K
+        tokens for a 1M-window model. Only a short one-off session (a probe)
+        passes [None]. *)
   }
 
 val default_timeout_s : float

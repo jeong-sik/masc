@@ -146,6 +146,31 @@ let lanes_of_decls
        lane_decls)
 ;;
 
+(* A client that counts its own window takes the resolved one as the point
+   it compacts at. A window below the least point it takes would hold only
+   on paper, and every turn would fail on it, so it is refused here. *)
+let client_compact_window_refusal (r : t) =
+  match r.execution with
+  | Runtime_execution.Claude_code _ ->
+    (match resolve_max_context_of_runtime r with
+     | None -> None
+     | Some (tokens, (_ : max_context_source)) ->
+       (match Runtime_claude_code.autocompact_window tokens with
+        | Ok (_ : Runtime_claude_code.autocompact_window) -> None
+        | Error (_ : string) ->
+          Some
+            (Client_compact_window_below_floor
+               { runtime_id = r.id
+               ; declared_window = tokens
+               ; client_floor = Runtime_claude_code.autocompact_window_floor_tokens
+               })))
+  | Runtime_execution.Agent_core _
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _
+  | Runtime_execution.Vibe_cli _ -> None
+;;
+
 (* Every materialized runtime must resolve a positive context window from the
    runtime.toml override or the AGENT_CORE capability catalog. A binding that leaves
    both unset is a config error rejected here, not a runtime defaulted to a
@@ -158,7 +183,6 @@ let validate_runtime_max_context (runtimes : t list)
       (fun (r : t) -> Option.is_none (resolve_max_context_of_runtime r))
       runtimes
   with
-  | None -> Ok ()
   | Some r ->
     Error
       (Max_context_absent
@@ -169,6 +193,10 @@ let validate_runtime_max_context (runtimes : t list)
               | None -> "<official-client-selected>")
          ; declared_model = r.model.id
          })
+  | None ->
+    (match List.find_map client_compact_window_refusal runtimes with
+     | None -> Ok ()
+     | Some failure -> Error failure)
 ;;
 
 (* A row that decides its thinking request decides it for every turn on the

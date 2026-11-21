@@ -491,6 +491,9 @@ let with_original_source ~config ~keeper_name ~prepared publish =
   | Error (C.Ref_lock_failed detail) -> Error detail
 
 let commit ~config ~keeper_name ~prepared ~new_unread_messages ~working_state =
+  if Runtime_account_access.is_multi_account ()
+  then Error "Librarian continuity is disabled in Multi_account mode"
+  else
   let* covered = memory_committed ~config ~keeper_name prepared in
   let* () = if covered then Ok () else Error "Memory has not committed this continuity source" in
   let* () = List.fold_left (fun result (hole : Keeper_librarian_unread.t) ->

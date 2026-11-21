@@ -346,6 +346,13 @@ let make_tool_bundle_for_descriptors_with_policy
   let terminal_effect_state =
     Atomic.make (initial_terminal_effect_state gate_replay_inputs)
   in
+  let masc_tools_enabled =
+    Keeper_meta_contract.effective_masc_tools_enabled meta
+    &&
+    match capability_surface with
+    | Some surface -> Keeper_capability_surface.masc_enabled surface
+    | None -> true
+  in
   let mark_deferred_tool_result () =
     ignore
       (Atomic.compare_and_set
@@ -650,6 +657,9 @@ let make_tool_bundle_for_descriptors_with_policy
   in
   let descriptor_tools = List.map fst descriptor_tools_with_loading in
   let* composition_tools_with_loading, task_required_tool_names =
+    if not masc_tools_enabled
+    then Ok ([], [])
+    else
     let instruction_skills =
       Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
     in
@@ -781,9 +791,13 @@ let make_tool_bundle_for_descriptors_with_policy
      turn are given: they pin their tool set at process spawn or thread start,
      and that set is part of a resumable session's identity, so a listing
      would name tools they can never make callable. *)
-  let identity_offered = match identity_surface with
-    | None -> []
-    | Some surface -> surface.Keeper_tools_agent_core.offered
+  let identity_offered =
+    if not masc_tools_enabled
+    then []
+    else
+      match identity_surface with
+      | None -> []
+      | Some surface -> surface.Keeper_tools_agent_core.offered
   in
   let identity_agent_tools = List.map (fun offered -> gate_wrapped offered) identity_offered
   in
@@ -838,7 +852,10 @@ let make_tool_bundle_for_descriptors_with_policy
     }
   in
   let identity_listing_data =
-    match identity_surface with
+    if not masc_tools_enabled
+    then None
+    else
+      match identity_surface with
     | None -> None
     | Some surface ->
       let receipt_surface =

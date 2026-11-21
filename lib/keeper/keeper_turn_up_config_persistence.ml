@@ -412,6 +412,18 @@ let full_fields
       :: fields
     | None -> fields
   in
+  let fields =
+    match
+      if parsed.masc_tools_enabled_present
+      then parsed.masc_tools_enabled_opt
+      else parsed.profile_defaults.masc_tools_enabled
+    with
+    | Some enabled ->
+      ( "tools.masc_enabled"
+      , Keeper_toml_loader.Toml_bool enabled )
+      :: fields
+    | None -> fields
+  in
   fields
 
 let explicit_edits (parsed : Keeper_turn_up_args.parsed_args) =
@@ -432,6 +444,8 @@ let explicit_edits (parsed : Keeper_turn_up_args.parsed_args) =
      ; skill_names = parsed.skill_names_opt
      ; native_tool_posture_present = parsed.native_tool_posture_present
      ; native_tool_posture = parsed.native_tool_posture_opt
+     ; masc_tools_enabled_present = parsed.masc_tools_enabled_present
+     ; masc_tools_enabled = parsed.masc_tools_enabled_opt
      } : Keeper_types_profile.toml_field_patch)
 
 let strict_write_result = function

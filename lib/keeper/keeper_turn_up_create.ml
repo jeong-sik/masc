@@ -158,6 +158,10 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
         always_allow = p.profile_defaults.always_allow;
         voice_always_allow = p.profile_defaults.voice_always_allow;
+        masc_tools_enabled =
+          if p.masc_tools_enabled_present
+          then p.masc_tools_enabled_opt
+          else p.profile_defaults.masc_tools_enabled;
         runtime = {
           usage = {
             total_turns = 0;
@@ -399,7 +403,8 @@ let create_keeper ~expected_config_revision (ctx : _ context)
            | Keepalive_fiber_start_rejected _
            | Keepalive_launch_callback_failed _
            | Keepalive_lane_ownership_lost
-           | Keepalive_fork_rejected _ ) as rejected ->
+           | Keepalive_fork_rejected _
+           | Keepalive_account_refused _ ) as rejected ->
            Progress.stop_tracking task_id;
            tool_result_error ~class_:Tool_result.Runtime_failure
              (Printf.sprintf

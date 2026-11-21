@@ -137,12 +137,18 @@ type keeper_meta = {
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
   voice_always_allow : bool option;
+  masc_tools_enabled : bool option;
   (* Agent runtime state *)
   runtime : agent_runtime_state;
   (* Identity & concurrency *)
   keeper_id : Keeper_id.Uid.t option;
   agent_core_env : (string * string) list;
 }
+
+val effective_masc_tools_enabled : keeper_meta -> bool
+(** Whether this Keeper exposes or may dispatch MASC host/built-in tools.
+    Operator Keepers default to [true] when [tools.masc_enabled] is unset;
+    [Multi_account] always fails closed to [false]. *)
 
 (** Sanctioned generic unpause transform. Clears the pause bit together
     with any latched reason. *)

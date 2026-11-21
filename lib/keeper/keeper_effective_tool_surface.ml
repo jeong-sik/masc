@@ -31,6 +31,7 @@ type t =
   ; official_client_kind : string
   ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
+  ; masc_enabled : bool
   ; skill_names : string list option
   ; tool_deny : string list
   ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
@@ -133,6 +134,7 @@ let composition_rows skill_catalog =
 ;;
 
 let project
+      ~masc_enabled
       ~lane_addon_conflicts
       ~lane_addon_unready
       ~lane_addon_exports
@@ -177,7 +179,8 @@ let project
     let global_skill_catalog = preparation.catalog in
     let projection_diagnostics = preparation.diagnostics in
     let capability_surface =
-      Keeper_capability_surface.create_with_descriptors
+      Keeper_capability_surface.create_with_descriptors_policy
+        ~masc_enabled
         ~tool_descriptors
         ~tool_deny
         ~sandbox_profile
@@ -209,17 +212,22 @@ let project
            | None, _ | Some _, Keeper_skill_catalog.Instruction -> None)
     in
     let instruction_rows =
-      match readable_instruction_skills with
-      | [] -> []
-      | skills ->
-        let schema_tool =
-          Keeper_tool_composition_surface.instruction_skill_schema_tool
-            ~instruction_skills:skills
-        in
-        [ Result.map (fun (tool : Agent_core.Tool.t) ->
-            { name = tool.schema.name; origin = Instruction_skill }, tool) schema_tool ]
+      if not masc_enabled
+      then []
+      else
+        match readable_instruction_skills with
+        | [] -> []
+        | skills ->
+          let schema_tool =
+            Keeper_tool_composition_surface.instruction_skill_schema_tool
+              ~instruction_skills:skills
+          in
+          [ Result.map (fun (tool : Agent_core.Tool.t) ->
+              { name = tool.schema.name; origin = Instruction_skill }, tool) schema_tool ]
     in
-    let composition_rows = composition_rows skill_catalog in
+    let composition_rows =
+      if masc_enabled then composition_rows skill_catalog else []
+    in
     let* rows =
       collect_rows (descriptor_rows descriptors @ instruction_rows @ composition_rows)
     in
@@ -310,6 +318,7 @@ let project
       ; official_client_kind
       ; tool_delivery
       ; native_posture
+      ; masc_enabled
       ; skill_names
       ; tool_deny
       ; unavailable_skill_names =
@@ -512,6 +521,7 @@ let resolve ~config ~keeper_name =
                 (let snapshot = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name in
                 (match
                    project
+                     ~masc_enabled:(Keeper_meta_contract.effective_masc_tools_enabled meta)
                      ~lane_addon_conflicts:snapshot.conflicts
                      ~lane_addon_unready:snapshot.unready
                      ~lane_addon_exports:snapshot.exports
@@ -611,6 +621,7 @@ let to_yojson = function
         , match surface.native_posture with
           | None -> `Null
           | Some posture -> `String (Runtime_native_tools.to_string posture) )
+      ; "masc_enabled", `Bool surface.masc_enabled
       ; ( "skill_selection"
         , match surface.skill_names with
           | None -> `Assoc [ "mode", `String "all" ]
@@ -682,5 +693,9 @@ let to_yojson = function
 ;;
 
 module For_testing = struct
-  let project = project ~lane_addon_conflicts:[] ~lane_addon_unready:[] ~lane_addon_exports:[]
+  let project_with_masc_enabled ~masc_enabled =
+    project ~masc_enabled ~lane_addon_conflicts:[] ~lane_addon_unready:[] ~lane_addon_exports:[]
+
+  let project =
+    project ~masc_enabled:true ~lane_addon_conflicts:[] ~lane_addon_unready:[] ~lane_addon_exports:[]
 end

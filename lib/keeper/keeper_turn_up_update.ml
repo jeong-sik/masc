@@ -429,6 +429,7 @@ let profile_update_command (meta : keeper_meta) =
     ; telemetry_feedback_window_hours = meta.telemetry_feedback_window_hours
     ; always_allow = meta.always_allow
     ; voice_always_allow = meta.voice_always_allow
+    ; masc_tools_enabled = meta.masc_tools_enabled
     ; agent_core_env = meta.agent_core_env
     ; updated_at = meta.updated_at
     }
@@ -505,7 +506,8 @@ let finish_published_update ~supersession ctx updated =
             | Keepalive_fiber_start_rejected _
             | Keepalive_launch_callback_failed _
             | Keepalive_lane_ownership_lost
-            | Keepalive_fork_rejected _ ) as rejected ->
+            | Keepalive_fork_rejected _
+            | Keepalive_account_refused _ ) as rejected ->
             refused_after_commit
               (tool_result_error ~class_:Tool_result.Runtime_failure
                  (Printf.sprintf
@@ -630,6 +632,12 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
       Dashboard_utils.first_some p.profile_defaults.always_allow old.always_allow;
     voice_always_allow =
       Dashboard_utils.first_some p.profile_defaults.voice_always_allow old.voice_always_allow;
+    masc_tools_enabled =
+      (if p.masc_tools_enabled_present
+       then p.masc_tools_enabled_opt
+       else
+         Dashboard_utils.first_some p.profile_defaults.masc_tools_enabled
+           old.masc_tools_enabled);
     max_context_override =
       (if p.max_context_override_present then p.max_context_override_opt
        else old.max_context_override);

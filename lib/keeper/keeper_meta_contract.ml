@@ -123,6 +123,7 @@ type keeper_meta =
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
   ; voice_always_allow : bool option
+  ; masc_tools_enabled : bool option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   ; (* -- Identity & concurrency -- *)
@@ -339,6 +340,9 @@ let effective_meta_of_profile_defaults
           voice_always_allow =
             apply_profile_default_opt defaults.voice_always_allow
               meta.voice_always_allow;
+          masc_tools_enabled =
+            apply_profile_default_opt defaults.masc_tools_enabled
+              meta.masc_tools_enabled;
           agent_core_env =
             (match defaults.agent_core_env with
              | [] -> meta.agent_core_env
@@ -389,6 +393,12 @@ let runtime_id_of_meta (meta : keeper_meta) =
     if Runtime.is_multi_account ()
     then ""
     else Runtime.get_default_route ()
+;;
+
+let effective_masc_tools_enabled (meta : keeper_meta) =
+  if Runtime.is_multi_account ()
+  then false
+  else Option.value ~default:true meta.masc_tools_enabled
 ;;
 
 let proactive_cycle_outcome_to_string = function

@@ -308,23 +308,23 @@ let acquire_base_path_lock ~previous_owner ~lease_root base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-(* The startup work of a single user, under the BasePath lease and before a
-   Keeper starts: three passes delete files (retained checkpoints, checkpoint
-   objects, the settled archive) and one only counts (original request
-   bodies). It takes the judgment of the boot and reads the base path out of
-   it, so it runs neither before the judgment nor on another base path. It
-   does nothing for a multi-account installation, whose engine runs no Keeper
-   and so writes none of this state: the account server stops at a Keeper
-   definition ([Server_accounts.Keeper_definitions_not_named]). A boot that
-   the judgment refuses does not reach it. *)
-let sweep_single_user_state (judged : Server_runtime_bootstrap.judged) =
-  match judged.Server_runtime_bootstrap.booted with
-  | Authz_boot_mode_read.Multi_account (_ : Authz_boot_mode_read.multi_account) -> ()
-  | Authz_boot_mode_read.Single_user single_user ->
-    let canonical_base_path = Authz_boot_mode_read.single_user_base_path single_user in
-    (* The BasePath writer lease is held and no keeper has started, so no
-       retention is between writing its file and committing the execution that
-       names it. *)
+(* Pre-Keeper boot sweeps run under the held BasePath writer lease, before any
+   engine or Keeper fiber can start, in both Single_user and Multi_account
+   installations. In Multi_account, [Server_accounts] runs its Keeper
+   definition/journal checks later, while these 4 passes (retained checkpoints,
+   checkpoint objects, original request bodies inventory, and settled archive)
+   run cleanly before any person Keeper resumes. *)
+let sweep_pre_keeper_state (judged : Server_runtime_bootstrap.judged) =
+  let canonical_base_path =
+    match judged.Server_runtime_bootstrap.booted with
+    | Authz_boot_mode_read.Multi_account multi_account ->
+      Authz_boot_mode_read.multi_account_base_path multi_account
+    | Authz_boot_mode_read.Single_user single_user ->
+      Authz_boot_mode_read.single_user_base_path single_user
+  in
+  (* The BasePath writer lease is held and no keeper has started, so no
+     retention is between writing its file and committing the execution that
+     names it. *)
     (let runtime_root =
        (Workspace.backend_config_for canonical_base_path).Backend_types.base_path
      in
@@ -602,7 +602,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      of 24 refused boots measured with the mirror already running, three
      ended before the mirror wrote the line. *)
   Console_sink.start ();
-  sweep_single_user_state judged;
+  sweep_pre_keeper_state judged;
   (* Only the server samples. Sampling starts before the [Eio_main.run] of
      the server so the executor pool, which the main domain spawns while
      sampling, shares the profile and the boot-time loads of the server loop

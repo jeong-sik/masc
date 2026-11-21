@@ -164,6 +164,9 @@ let run_passes ~clock ~first_delay_sec pass =
   tick ()
 
 let start ~sw ~clock ~config =
+  if Runtime_account_access.is_multi_account ()
+  then ()
+  else
   let running = create_running () in
   Server_bootstrap_loops_fiber.fork_logged_fiber ~sw
     ~on_error:(Server_bootstrap_loops_fiber.log_server_fiber_crash "keeper_build_cleanup")

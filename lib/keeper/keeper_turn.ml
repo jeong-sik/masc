@@ -55,7 +55,7 @@ let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 let restart_keepalive_after_message_turn ctx meta =
   match start_keepalive ctx meta with
   | Keepalive_started _ | Keepalive_already_registered _ -> ()
-  | (Keepalive_lane_ownership_lost | Keepalive_lifecycle_denied _ | Keepalive_registration_rejected _ | Keepalive_fiber_start_rejected _ | Keepalive_launch_callback_failed _ | Keepalive_fork_rejected _) as outcome -> Log.Keeper.error
+  | (Keepalive_lane_ownership_lost | Keepalive_lifecycle_denied _ | Keepalive_registration_rejected _ | Keepalive_fiber_start_rejected _ | Keepalive_launch_callback_failed _ | Keepalive_fork_rejected _ | Keepalive_account_refused _) as outcome -> Log.Keeper.error
       "keeper message turn did not restore keepalive name=%s outcome=%s"
       meta.name
       (start_keepalive_outcome_to_string outcome)

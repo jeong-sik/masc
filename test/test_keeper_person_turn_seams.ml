@@ -1220,7 +1220,127 @@ streaming = true
               Alcotest.(check (list string))
                 "both candidates attempted in order"
                 [ "cand-401"; "cand-2" ]
-                (List.rev !tried_candidates))))))
+                (List.rev !tried_candidates);
+
+              (* 7. Multi-account admission, keeper_up guards, and Librarian guards (A3-1). *)
+              (match Access.engine_keeper_admission alice.engine_name with
+               | Access.Active_person_keeper { owner; keeper_id; runtime_assigned } ->
+                 Alcotest.(check bool) "alice owner matches" true
+                   (User_id.equal owner alice.user_id);
+                 Alcotest.(check bool) "alice keeper_id matches" true
+                   (Keeper_id.equal keeper_id alice.keeper_id);
+                 Alcotest.(check bool) "alice runtime matches" true
+                   (runtime_assigned = Some alice.runtime_id)
+               | _ -> Alcotest.fail "expected Active_person_keeper for alice");
+              Alcotest.(check bool)
+                "unregistered keeper yields Unknown_person_keeper"
+                true
+                (Access.engine_keeper_admission "unregistered-keeper" = Access.Unknown_person_keeper);
+              let active_names = Access.active_authz_keeper_names () in
+              Alcotest.(check bool) "active_authz_keeper_names includes alice" true
+                (List.mem alice.engine_name active_names);
+              Alcotest.(check bool) "active_authz_keeper_names includes bob" true
+                (List.mem bob.engine_name active_names);
+              let cfg = Masc.Workspace.default_config base_path in
+              Unix.putenv "MASC_CONFIG_DIR" "";
+              let keepers_dir =
+                Filename.concat
+                  (Filename.concat (Filename.concat base_path ".masc") "config")
+                  "keepers"
+              in
+              Fs_compat.mkdir_p keepers_dir;
+              let write_keeper_toml engine_name =
+                Out_channel.with_open_bin
+                  (Filename.concat keepers_dir (engine_name ^ ".toml"))
+                  (fun ch -> Out_channel.output_string ch "[keeper]\ninstructions = \"fixture\"\n")
+              in
+              write_keeper_toml alice.engine_name;
+              write_keeper_toml bob.engine_name;
+              let ctx : _ Masc.Keeper_types_profile.context =
+                { config = cfg
+                ; agent_name = "tester"
+                ; sw
+                ; clock = env#clock
+                ; proc_mgr = None
+                ; net = None
+                ; publication_recovery_provider =
+                    Masc.Keeper_publication_recovery_availability.non_runtime_provider
+                }
+              in
+              List.iter
+                (fun (label, json) ->
+                   match Masc.Keeper_turn_up_args.parse ctx json with
+                   | Error _ -> ()
+                   | Ok _ -> Alcotest.failf "%s should be refused in Multi_account" label)
+                [ "unregistered keeper", `Assoc [ "name", `String "unregistered-keeper" ]
+                ; ( "tools.masc_enabled = true on person keeper"
+                  , `Assoc
+                      [ "name", `String alice.engine_name
+                      ; "tools", `Assoc [ "masc_enabled", `Bool true ]
+                      ] )
+                ; ( "tools.native = read on person keeper"
+                  , `Assoc
+                      [ "name", `String alice.engine_name
+                      ; "tools", `Assoc [ "native", `String "read" ]
+                      ] )
+                ];
+              Alcotest.(check bool)
+                "Librarian submit_durable returns Dropped in Multi_account"
+                true
+                (Masc.Keeper_librarian_queue_refresh.submit_durable
+                   ~base_path
+                   ~keeper_name:alice.engine_name
+                 = Masc.Keeper_memory_lane.Dropped);
+              Alcotest.(check (list string))
+                "Librarian submit_durable_for_unlaunched returns empty in Multi_account"
+                []
+                (Masc.Keeper_librarian_queue_refresh.submit_durable_for_unlaunched
+                   ~base_path
+                   ~persisted:[ alice.engine_name ]
+                   ~launched:[]);
+              Alcotest.(check bool)
+                "Keeper_memory_cleanup.run returns Disabled in Multi_account"
+                true
+                (Masc.Keeper_memory_cleanup.run ~base_path ~keeper_name:alice.engine_name
+                 = Masc.Keeper_memory_cleanup.Disabled);
+              Alcotest.(check bool)
+                "autoboot_exclusion_reason excludes unregistered keeper in Multi_account"
+                true
+                (Masc.Keeper_runtime.autoboot_exclusion_reason cfg "unregistered-keeper"
+                 = Some Masc.Keeper_runtime.Autoboot_disabled);
+              (* Disable bob and verify owner-disabled exclusion across admission/keeper_up/boot *)
+              commit
+                zone
+                ~author:(Authz_records.Author.Authenticated (Principal.Human alice.user_id))
+                ~kind:Authz_record.Kind.Principal
+                (get
+                   (Authz_principal_event.to_body
+                      (Authz_principal_event.Disabled { user_id = bob.user_id })));
+              (match Access.engine_keeper_admission bob.engine_name with
+               | Access.Owner_disabled { owner; keeper_id } ->
+                 Alcotest.(check bool) "disabled owner matches bob" true
+                   (User_id.equal owner bob.user_id);
+                 Alcotest.(check bool) "disabled keeper matches bob" true
+                   (Keeper_id.equal keeper_id bob.keeper_id)
+               | _ -> Alcotest.fail "expected Owner_disabled after disabling bob");
+              Alcotest.(check bool)
+                "active_authz_keeper_names drops disabled bob"
+                false
+                (List.mem bob.engine_name (Access.active_authz_keeper_names ()));
+              Alcotest.(check bool)
+                "autoboot_exclusion_reason excludes disabled-owner keeper"
+                true
+                (Masc.Keeper_runtime.autoboot_exclusion_reason cfg bob.engine_name
+                 = Some Masc.Keeper_runtime.Autoboot_disabled);
+              Alcotest.(check bool)
+                "keepalive_keeper_names excludes disabled-owner keeper"
+                false
+                (List.mem bob.engine_name (Masc.Keeper_meta_store.keepalive_keeper_names cfg));
+              (match
+                 Masc.Keeper_turn_up_args.parse ctx (`Assoc [ "name", `String bob.engine_name ])
+               with
+               | Error _ -> ()
+               | Ok _ -> Alcotest.fail "keeper_up should refuse disabled-owner keeper"))))))
 ;;
 
 let () =

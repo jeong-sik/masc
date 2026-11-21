@@ -453,6 +453,9 @@ let run_durable ~base_path ~keeper_name =
    claim the earlier checkpoint was summarized. Work stays in this Keeper's
    existing serial Librarian lane. *)
 let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
+  if Runtime_account_access.is_multi_account ()
+  then ()
+  else
   let module P = Keeper_librarian_continuity in
   let module Runtime = Keeper_librarian_runtime in
   let config = Workspace.default_config base_path in
@@ -984,6 +987,9 @@ let after_durable ~durable ~following =
    the unit raises, and the memory lane logs and counts it
    as a failed unit. *)
 let run_with_readers ~durable ~continuity ~cleanup ~base_path ~keeper_name =
+  if Runtime_account_access.is_multi_account ()
+  then ()
+  else
   let keeper_id =
     match Keeper_identity.Keeper_id.of_string keeper_name with
     | Some keeper_id -> keeper_id
@@ -1086,6 +1092,9 @@ let run ~base_path ~keeper_name =
 
 let install () =
   Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+    if Runtime_account_access.is_multi_account ()
+    then ()
+    else
     match Env_config.KeeperMemoryOs.librarian_config_state () with
     | Disabled | Invalid -> ()
     | Enabled ->
@@ -1098,6 +1107,9 @@ let install () =
         in ()))
 
 let submit_durable ~base_path ~keeper_name =
+  if Runtime_account_access.is_multi_account ()
+  then Keeper_memory_lane.Dropped
+  else
     Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
       run_explicit_admission ~base_path ~keeper_name;
       after_durable
@@ -1114,6 +1126,9 @@ let unlaunched_keeper_names ~persisted ~launched =
 ;;
 
 let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
+  if Runtime_account_access.is_multi_account ()
+  then []
+  else
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let queued = match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir) with

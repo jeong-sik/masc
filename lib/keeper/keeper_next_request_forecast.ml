@@ -446,8 +446,11 @@ let read_range ~config ~keeper_name ~trace_id history =
      reads it once per turn. Its note is the turn's to log; a reader here
      only looks. *)
   let continuity, (_ : Keeper_turn_driver_try_provider.continuity_note option) =
-    Keeper_turn_driver_try_provider.read_keeper_continuity
-      ~config ~keeper_name ~trace_id ~messages:history
+    if Runtime_account_access.is_multi_account ()
+    then Keeper_turn_driver_try_provider.No_read_end, None
+    else
+      Keeper_turn_driver_try_provider.read_keeper_continuity
+        ~config ~keeper_name ~trace_id ~messages:history
   in
   { messages
   ; atom_count

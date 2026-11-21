@@ -400,6 +400,31 @@ val person_keeper_of_engine_name
   :  string
   -> (Authz_types.User_id.t * Authz_types.Keeper_id.t, refusal) result
 
+type engine_keeper_admission =
+  | Operator_mode
+  | Active_person_keeper of
+      { owner : Authz_types.User_id.t
+      ; keeper_id : Authz_types.Keeper_id.t
+      ; runtime_assigned : Authz_types.Runtime_id.t option
+      }
+  | Owner_disabled of
+      { owner : Authz_types.User_id.t
+      ; keeper_id : Authz_types.Keeper_id.t
+      }
+  | Unknown_person_keeper
+  | Authz_uncertain
+
+val engine_keeper_admission : string -> engine_keeper_admission
+(** Classify whether [engine_name] may boot/run keepalive/be driven by
+    [keeper_up]. In [Single_user] (or unpublished) mode returns [Operator_mode].
+    In [Multi_account] mode checks [Authz_keeper_state] and requires an
+    active principal in [Authz_principal_state]. *)
+
+val active_authz_keeper_names : unit -> string list
+(** Engine names of Keepers registered in [Authz_keeper_state] whose owner is
+    currently active. Empty outside [Multi_account] or when the zone is
+    uncertain. *)
+
 (** Authorizes a Muse account for [request] by the access the process
     published, by the rule of {!authorize}. *)
 val authorize_muse : request -> 'where muse_account -> ('where muse_authorized, refusal) result

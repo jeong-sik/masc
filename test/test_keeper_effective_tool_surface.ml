@@ -1255,6 +1255,50 @@ value = {}
     (List.mem "keeper_compose_machine-command" (names attached))
 ;;
 
+let test_masc_disabled_withholds_all_tools_skills_and_composition_controls () =
+  let snapshot =
+    configured_snapshot ~source_id:"masc-disabled-skills" ~anchor:"absolute"
+      ~path:"/srv/masc-disabled-skills"
+      [ "guide", instruction_skill "guide"
+      ; "snap", composition_skill ~name:"snap" ~execution:"async"
+      ]
+  in
+  let descriptors = Keeper_tool_descriptor.all_descriptors () in
+  let selection =
+    match Keeper_task_skill_turn.bind_surface ~descriptors ~snapshot Keeper_task_skill_turn.empty with
+    | Ok (selection, _) -> selection
+    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  in
+  let project_with masc_enabled =
+    match
+      Keeper_effective_tool_surface.For_testing.project_with_masc_enabled
+        ~masc_enabled
+        ~keeper_name:"person-keeper" ~runtime_id:"account.claude" ~skills_left_out:[]
+        ~official_client_kind:"agent_core"
+        ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
+        ~native_posture:None ~tool_deny:[] ~sandbox_profile:Keeper_types_profile.Docker
+        ~skill_names:None ~current_task_id:None ~task_skill_references:[]
+        ~task_selection:(Some selection) ~skill_snapshot:snapshot
+    with
+    | Ok surface -> surface
+    | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
+  in
+  let enabled_surface = project_with true in
+  check bool "masc_enabled=true marks masc_enabled true" true enabled_surface.masc_enabled;
+  check bool "masc_enabled=true exposes host/composition tools" true (enabled_surface.tools <> []);
+  let disabled_surface = project_with false in
+  check bool "masc_enabled=false marks masc_enabled false" false disabled_surface.masc_enabled;
+  check (list string) "masc_enabled=false exposes zero tools (no descriptors or async controls)" []
+    (names disabled_surface);
+  check int "masc_enabled=false emits zero instruction skills" 0
+    (List.length disabled_surface.instruction_skills);
+  check int "masc_enabled=false emits zero composition skills" 0
+    (List.length disabled_surface.composition_skills);
+  check int "masc_enabled=false yields zero tool_surface_bytes" 0 disabled_surface.tool_surface_bytes;
+  check int "masc_enabled=false yields zero skill_tool_surface_bytes" 0
+    disabled_surface.skill_tool_surface_bytes
+;;
+
 let () =
   Alcotest.run
     "keeper effective tool surface"
@@ -1293,6 +1337,8 @@ let () =
             test_runtime_capability_suppression_is_explicit_and_empty
         ; test_case "frozen selection carries the shadowed exact reference" `Quick
             test_frozen_selection_carries_the_shadowed_exact_reference
+        ; test_case "masc_enabled false withholds all descriptors, skills, and composition controls" `Quick
+            test_masc_disabled_withholds_all_tools_skills_and_composition_controls
         ] )
     ]
 ;;

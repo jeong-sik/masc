@@ -2463,6 +2463,7 @@ let run_named
        argument asks nobody. Callers that mean "no system prompt" now say so
        (#33862). *)
     ~system_prompt
+    ?(masc_enabled = true)
     ?(tools = [])
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
     ~agent_core_tools
@@ -2538,6 +2539,21 @@ let run_named
     ()
   : (named_run_result, Agent_core.Error.t) result =
   Runtime_response_identity_scope.without_identity (fun () ->
+  let masc_tools_enabled =
+    masc_enabled
+    &&
+    match walk_owner with
+    | Person_keeper_turn _ -> false
+    | Fleet_keeper_turn _ | One_shot_walk ->
+      not (Runtime_account_access.is_multi_account ())
+  in
+  let tools = if masc_tools_enabled then tools else [] in
+  let agent_core_tools = if masc_tools_enabled then agent_core_tools else [] in
+  let loading_plan =
+    if masc_tools_enabled
+    then loading_plan
+    else Keeper_official_client_host.All_on_demand
+  in
   let session_id = Keeper_request_source.trace_id input_source in
   (* A run that serves no chat execution has no owner among the receipts. *)
   let outbox_viewer = match direct_scope with
@@ -2601,6 +2617,11 @@ let run_named
         match input_source with
         | Keeper_request_source.Completion_review -> Keeper_turn_driver_try_provider.Completion_review
         | Keeper_request_source.Keeper_history { trace_id } ->
+          if Runtime_account_access.is_multi_account ()
+          then
+            Keeper_turn_driver_try_provider.Keeper_history
+              { trace_id; continuity = No_read_end }
+          else
           Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             let continuity, note =
               Keeper_turn_driver_try_provider.read_keeper_continuity
@@ -3055,6 +3076,12 @@ let run_named
       | Resolved_runtime runtime ->
       let accepts_image_input, tools, agent_core_tools, loading_plan =
         match project_for_runtime with
+        | Some (_ : Keeper_tools_agent_core.model_tool_projection)
+          when not masc_tools_enabled ->
+          ( Runtime_agent.runtime_accepts_image_input ~runtime
+          , []
+          , []
+          , Keeper_official_client_host.All_on_demand )
         | Some (project : Keeper_tools_agent_core.model_tool_projection) ->
           let carried = match agent_ref with
             | None -> []

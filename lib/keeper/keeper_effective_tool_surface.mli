@@ -36,6 +36,7 @@ type t =
   ; official_client_kind : string
   ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
+  ; masc_enabled : bool
   ; skill_names : string list option
         (** [None] means all; [Some []] means the profile explicitly selects none. *)
   ; tool_deny : string list
@@ -110,4 +111,21 @@ module For_testing : sig
     skill_snapshot:Skill_catalog_snapshot.t ->
     (t, projection_error) result
   (** Pure projection seam over one frozen Task/snapshot pair. *)
+
+  val project_with_masc_enabled :
+    masc_enabled:bool ->
+    keeper_name:string ->
+    runtime_id:string ->
+    skills_left_out:string list ->
+    official_client_kind:string ->
+    tool_delivery:tool_delivery ->
+    native_posture:Runtime_native_tools.posture option ->
+    tool_deny:string list ->
+    sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
+    skill_names:string list option ->
+    current_task_id:string option ->
+    task_skill_references:Skill_reference.t list ->
+    task_selection:Keeper_task_skill_turn.t option ->
+    skill_snapshot:Skill_catalog_snapshot.t ->
+    (t, projection_error) result
 end

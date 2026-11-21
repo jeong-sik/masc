@@ -66,6 +66,16 @@ val create
   -> skill_inventory:Keeper_skill_inventory.t
   -> task_skills:Keeper_skill_catalog.skill list
   -> t
+
+val create_with_policy
+  :  masc_enabled:bool
+  -> tool_deny:string list
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
+  -> skill_names:string list option
+  -> global_skill_catalog:Keeper_skill_catalog.t
+  -> skill_inventory:Keeper_skill_inventory.t
+  -> task_skills:Keeper_skill_catalog.skill list
+  -> t
 (** [tool_deny] holds model-visible tool names (e.g.
     ["keeper_job_start"; "masc_keeper_delegate"]) the keeper's profile
     refuses; matching descriptors are neither listed to the model nor present
@@ -89,8 +99,22 @@ val create_with_descriptors
   -> skill_inventory:Keeper_skill_inventory.t
   -> task_skills:Keeper_skill_catalog.skill list
   -> t
+
+val create_with_descriptors_policy
+  :  masc_enabled:bool
+  -> tool_descriptors:Keeper_tool_descriptor.t list
+  -> tool_deny:string list
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
+  -> skill_names:string list option
+  -> global_skill_catalog:Keeper_skill_catalog.t
+  -> skill_inventory:Keeper_skill_inventory.t
+  -> task_skills:Keeper_skill_catalog.skill list
+  -> t
 (** Use the same frozen descriptor objects that projected the Skill catalog,
     inventory and Task selection. Profile denial is applied here. *)
+
+val masc_enabled : t -> bool
+(** Whether MASC host/built-in tools are permitted on this surface. *)
 
 val find_descriptor_by_id : t -> string -> Keeper_tool_descriptor.t option
 val find_descriptor_by_name : t -> string -> Keeper_tool_descriptor.t option

@@ -358,6 +358,8 @@ type toml_field_patch =
   ; skill_names : string list option
   ; native_tool_posture_present : bool
   ; native_tool_posture : Runtime_native_tools.posture option
+  ; masc_tools_enabled_present : bool
+  ; masc_tools_enabled : bool option
   }
 
 let toml_edit_set_string value =
@@ -365,6 +367,9 @@ let toml_edit_set_string value =
 
 let toml_edit_set_int value =
   Keeper_toml_loader.Set (Keeper_toml_loader.Toml_int value)
+
+let toml_edit_set_bool value =
+  Keeper_toml_loader.Set (Keeper_toml_loader.Toml_bool value)
 
 let toml_edit_set_strings values =
   Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string_array values)
@@ -436,6 +441,13 @@ let toml_edits_of_patch (patch : toml_field_patch) =
      ("tools.native", match patch.native_tool_posture with
       | Some posture ->
         toml_edit_set_string (Runtime_native_tools.to_string posture)
+      | None -> Keeper_toml_loader.Remove) :: fields)
+  |> fun fields ->
+  (if not patch.masc_tools_enabled_present
+   then fields
+   else
+     ("tools.masc_enabled", match patch.masc_tools_enabled with
+      | Some enabled -> toml_edit_set_bool enabled
       | None -> Keeper_toml_loader.Remove) :: fields)
 
 (* A configuration the current build refuses must still be repairable through

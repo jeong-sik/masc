@@ -174,6 +174,8 @@ type toml_field_patch =
   ; skill_names : string list option
   ; native_tool_posture_present : bool
   ; native_tool_posture : Runtime_native_tools.posture option
+  ; masc_tools_enabled_present : bool
+  ; masc_tools_enabled : bool option
   }
 
 (** The staged writer's edits for a patch. Single source of truth shared by

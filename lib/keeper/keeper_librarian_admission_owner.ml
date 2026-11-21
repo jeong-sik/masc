@@ -639,6 +639,7 @@ let run_enabled ~after_settle ~base_path ~keeper_name =
     Queue.read_generation ~keepers_dir ~keeper_id:keeper_name)) in
   match generation with None -> Ok Idle | Some _ -> run_queue ~after_settle ~base_path ~keeper_name
 let run_with ~after_settle ~base_path ~keeper_name =
+  if Runtime_account_access.is_multi_account () then Disabled else
   match Env_config.KeeperMemoryOs.librarian_config_state () with
   | Disabled | Invalid -> Disabled
   | Enabled -> match run_enabled ~after_settle ~base_path ~keeper_name with

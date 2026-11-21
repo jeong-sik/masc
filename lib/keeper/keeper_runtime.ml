@@ -177,6 +177,13 @@ let autoboot_exclusion_reason_of_reads
 ;;
 
 let autoboot_exclusion_reason ?profile_snapshot config name =
+  match Runtime_account_access.engine_keeper_admission name with
+  | Runtime_account_access.Owner_disabled _
+  | Runtime_account_access.Unknown_person_keeper
+  | Runtime_account_access.Authz_uncertain ->
+    Some Autoboot_disabled
+  | Runtime_account_access.Operator_mode
+  | Runtime_account_access.Active_person_keeper _ ->
   match
     read_meta_file_path
       (keeper_meta_path config name)
@@ -302,6 +309,8 @@ let keeper_meta_overlay_drift_categories
         (current.always_allow <> target.always_allow);
       drift_if "voice_always_allow"
         (current.voice_always_allow <> target.voice_always_allow);
+      drift_if "masc_tools_enabled"
+        (current.masc_tools_enabled <> target.masc_tools_enabled);
     ]
 
 let emit_keeper_meta_overlay_drift ~keeper_name categories =
@@ -397,6 +406,9 @@ let ensure_keeper_meta_and_defaults config name =
     let target_voice_always_allow =
       apply_default_opt defaults.voice_always_allow meta.voice_always_allow
     in
+    let target_masc_tools_enabled =
+      apply_default_opt defaults.masc_tools_enabled meta.masc_tools_enabled
+    in
     (* --- AGENT_CORE Env --- *)
     let target_agent_core_env =
       match defaults.agent_core_env with
@@ -416,6 +428,7 @@ let ensure_keeper_meta_and_defaults config name =
         telemetry_feedback_window_hours = target_tf_window;
         always_allow = target_always_allow;
         voice_always_allow = target_voice_always_allow;
+        masc_tools_enabled = target_masc_tools_enabled;
         agent_core_env = target_agent_core_env;
       }
     in
@@ -467,6 +480,7 @@ let ensure_keeper_meta_and_defaults config name =
                  persisted_updated.telemetry_feedback_window_hours
              ; always_allow = persisted_updated.always_allow
              ; voice_always_allow = persisted_updated.voice_always_allow
+             ; masc_tools_enabled = persisted_updated.masc_tools_enabled
              ; agent_core_env = persisted_updated.agent_core_env
              ; updated_at = persisted_updated.updated_at
              })
@@ -516,7 +530,45 @@ let ensure_keeper_meta_with_cause config name =
    no runtime on this host, a remote_ssh with no endpoint) never runs a turn;
    the supervisor's reconcile of a keeper with meta already refuses to boot
    it, and so does this. *)
+let multi_account_keeper_error ~keeper_name (defaults : keeper_profile_defaults) =
+  match Runtime_account_access.engine_keeper_admission keeper_name with
+  | Runtime_account_access.Operator_mode -> Ok ()
+  | Runtime_account_access.Owner_disabled _ ->
+    Error
+      (boot_meta_error Config_invalid
+         (Printf.sprintf "person keeper %s owner is disabled in authz.jsonl" keeper_name))
+  | Runtime_account_access.Unknown_person_keeper ->
+    Error
+      (boot_meta_error Config_invalid
+         (Printf.sprintf "keeper %s is not registered in authz.jsonl" keeper_name))
+  | Runtime_account_access.Authz_uncertain ->
+    Error
+      (boot_meta_error Config_invalid
+         (Printf.sprintf
+            "keeper %s cannot boot while multi-account authorization zone is uncertain"
+            keeper_name))
+  | Runtime_account_access.Active_person_keeper _ ->
+    if defaults.masc_tools_enabled = Some true
+    then
+      Error
+        (boot_meta_error Config_invalid
+           (Printf.sprintf
+              "person keeper %s cannot enable tools.masc_enabled"
+              keeper_name))
+    else
+      (match defaults.native_tool_posture with
+       | Some (Runtime_native_tools.Native_read | Runtime_native_tools.Native_full) ->
+         Error
+           (boot_meta_error Config_invalid
+              (Printf.sprintf
+                 "person keeper %s must keep tools.native = \"none\""
+                 keeper_name))
+       | None | Some Runtime_native_tools.Native_none -> Ok ())
+
 let admit_boot_meta config ((defaults, meta) : keeper_profile_defaults * keeper_meta) =
+  match multi_account_keeper_error ~keeper_name:meta.name defaults with
+  | Error _ as err -> err
+  | Ok () ->
   match effective_meta_of_profile_defaults defaults meta with
   | Error detail ->
     Error (boot_meta_error Config_invalid detail)
@@ -585,6 +637,9 @@ let declarative_materialization_defaults config name =
   match profile_defaults_result_for_config config name with
   | Error error -> Error (profile_defaults_boot_error ~keeper_name:name error)
   | Ok defaults -> (
+      match multi_account_keeper_error ~keeper_name:name defaults with
+      | Error _ as err -> err
+      | Ok () ->
       match defaults.sandbox_profile with
       | Some sandbox_profile -> (
           match
@@ -756,6 +811,19 @@ let start_supervisor_sweep ctx =
         let should_act _beat = true
         let on_beat _beat =
           (try
+            Keeper_registry.all ~base_path ()
+            |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+              match Runtime_account_access.engine_keeper_admission entry.name with
+              | Runtime_account_access.Operator_mode
+              | Runtime_account_access.Active_person_keeper _ -> ()
+              | Runtime_account_access.Owner_disabled _
+              | Runtime_account_access.Unknown_person_keeper
+              | Runtime_account_access.Authz_uncertain ->
+                Keeper_keepalive.stop_keepalive ~base_path entry.name)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Log.Keeper.error "supervisor admission stop failed: %s"
+               (Printexc.to_string exn));
+          (try
              Keeper_supervisor.sweep_and_recover
                ~load_or_materialize_keeper_meta
                ctx
@@ -772,6 +840,17 @@ let start_supervisor_sweep ctx =
           (try
             Keeper_registry.all ~base_path ()
             |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+              let active_admission =
+                match Runtime_account_access.engine_keeper_admission entry.name with
+                | Runtime_account_access.Operator_mode
+                | Runtime_account_access.Active_person_keeper _ -> true
+                | Runtime_account_access.Owner_disabled _
+                | Runtime_account_access.Unknown_person_keeper
+                | Runtime_account_access.Authz_uncertain -> false
+              in
+              if not active_admission
+              then Keeper_keepalive.stop_keepalive ~base_path entry.name
+              else
               (* Enumerate every phase so the compiler flags any new
                  variant added to [Keeper_state_machine.phase]. TOML
                  hot-reload only reconciles Running keepers; the other

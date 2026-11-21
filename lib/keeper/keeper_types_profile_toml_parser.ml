@@ -45,6 +45,7 @@ let keeper_toml_fields =
        [tools.nativ] and leave the runtime on its default posture without a
        word, which is what naming them here prevents. *)
   ; "tools.native", Field_string
+  ; "tools.masc_enabled", Field_bool
     (* Sits in the same [keeper.tools] table as [tools.native] and
        is declared for the same reason: an unlisted sibling fails the load
        rather than being read as no selection at all. *)
@@ -374,6 +375,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
       always_allow = bool_ "always_allow";
       voice_always_allow = bool_ "voice_always_allow";
+      masc_tools_enabled = bool_ "tools.masc_enabled";
       native_tool_posture;
       skill_names;
       attached_tool_allow;

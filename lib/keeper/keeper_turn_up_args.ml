@@ -28,6 +28,8 @@ type parsed_args = {
   skill_names_present : bool;
   native_tool_posture_opt : Runtime_native_tools.posture option;
   native_tool_posture_present : bool;
+  masc_tools_enabled_opt : bool option;
+  masc_tools_enabled_present : bool;
   instructions_arg : string option;
   profile_defaults : keeper_profile_defaults;
   declarative_manifest_snapshot : declarative_manifest_snapshot;
@@ -46,7 +48,7 @@ let parse_sandbox_image_patch args =
 
 let parse_tools_patch args =
   match Json_util.assoc_member_opt "tools" args with
-  | None -> Ok (false, None)
+  | None -> Ok ((false, None), (false, None))
   | Some (`Assoc fields) ->
       let duplicates =
         fields
@@ -67,7 +69,7 @@ let parse_tools_patch args =
         let unknown =
           List.filter_map
             (fun (key, _) ->
-               if String.equal key "native"
+               if String.equal key "native" || String.equal key "masc_enabled"
                then None
                else Some key)
             fields
@@ -93,7 +95,20 @@ let parse_tools_patch args =
                    "tools.native must be a string or null (received %s)"
                    (Json_util.kind_name other))
           in
-          native
+          let masc_enabled =
+            match List.assoc_opt "masc_enabled" fields with
+            | None -> Ok (false, None)
+            | Some `Null -> Ok (true, None)
+            | Some (`Bool b) -> Ok (true, Some b)
+            | Some other ->
+              Error
+                (Printf.sprintf
+                   "tools.masc_enabled must be a boolean or null (received %s)"
+                   (Json_util.kind_name other))
+          in
+          (match native, masc_enabled with
+           | Error e, _ | _, Error e -> Error e
+           | Ok native_pair, Ok masc_pair -> Ok (native_pair, masc_pair))
   | Some other ->
     Error
       (Printf.sprintf
@@ -362,6 +377,25 @@ let parse
   if not (validate_name name) then
     Error (tool_result_error ~class_:Tool_result.Policy_rejection (invalid_name_error name))
   else
+    match
+      match Runtime_account_access.engine_keeper_admission name with
+      | Runtime_account_access.Operator_mode
+      | Runtime_account_access.Active_person_keeper _ -> Ok ()
+      | Runtime_account_access.Owner_disabled _ ->
+        Error
+          (tool_result_error ~class_:Tool_result.Policy_rejection
+             "[person_keeper_owner_disabled] keeper owner is disabled in authz.jsonl")
+      | Runtime_account_access.Unknown_person_keeper ->
+        Error
+          (tool_result_error ~class_:Tool_result.Policy_rejection
+             "[person_keeper_not_registered] keeper is not registered in authz.jsonl")
+      | Runtime_account_access.Authz_uncertain ->
+        Error
+          (tool_result_error ~class_:Tool_result.Policy_rejection
+             "[person_keeper_authz_uncertain] multi-account authorization zone is uncertain")
+    with
+    | Error result -> Error result
+    | Ok () ->
     match validate_no_unknown_keys args with
     | Error result -> Error result
     | Ok () ->
@@ -382,7 +416,8 @@ let parse
     | Ok mention_targets_opt,
       Ok board_interests_opt,
       Ok runtime_id_opt,
-      Ok (native_tool_posture_present, native_tool_posture_opt),
+      Ok ((native_tool_posture_present, native_tool_posture_opt),
+          (masc_tools_enabled_present, masc_tools_enabled_opt)),
       Ok (skill_names_present, skill_names_opt) ->
     let activation_mode_result =
       match Json_util.assoc_member_opt "activation_mode" args with
@@ -447,6 +482,8 @@ let parse
         ; skill_names = skill_names_opt
         ; native_tool_posture_present
         ; native_tool_posture = native_tool_posture_opt
+        ; masc_tools_enabled_present
+        ; masc_tools_enabled = masc_tools_enabled_opt
         }
     in
     match
@@ -458,6 +495,44 @@ let parse
     | Error error ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
     | Ok { profile_defaults; manifest_snapshot = declarative_manifest_snapshot } ->
+    let effective_masc_tools_enabled =
+      if masc_tools_enabled_present
+      then masc_tools_enabled_opt
+      else profile_defaults.masc_tools_enabled
+    in
+    let effective_native_posture =
+      if native_tool_posture_present
+      then native_tool_posture_opt
+      else profile_defaults.native_tool_posture
+    in
+    let multi_account_tools_error =
+      if not (Runtime_account_access.is_multi_account ())
+      then None
+      else if effective_masc_tools_enabled = Some true
+      then
+        Some
+          "[person_keeper_masc_tools_forbidden] person keepers in Multi_account mode cannot enable tools.masc_enabled"
+      else
+        match effective_native_posture with
+        | Some (Runtime_native_tools.Native_read | Runtime_native_tools.Native_full) ->
+          Some
+            "[person_keeper_native_tools_forbidden] person keepers in Multi_account mode must keep tools.native = \"none\""
+        | None | Some Runtime_native_tools.Native_none -> None
+    in
+    match multi_account_tools_error with
+    | Some detail ->
+      Error (tool_result_error ~class_:Tool_result.Policy_rejection detail)
+    | None ->
+    let masc_tools_enabled_present, masc_tools_enabled_opt =
+      if Runtime_account_access.is_multi_account () && effective_masc_tools_enabled = None
+      then true, Some false
+      else masc_tools_enabled_present, masc_tools_enabled_opt
+    in
+    let native_tool_posture_present, native_tool_posture_opt =
+      if Runtime_account_access.is_multi_account () && effective_native_posture = None
+      then true, Some Runtime_native_tools.Native_none
+      else native_tool_posture_present, native_tool_posture_opt
+    in
     let profile_defaults =
       match microvm_backend_patch with
       | None -> profile_defaults
@@ -671,6 +746,8 @@ let parse
       skill_names_present;
       native_tool_posture_opt;
       native_tool_posture_present;
+      masc_tools_enabled_opt;
+      masc_tools_enabled_present;
       instructions_arg;
       profile_defaults;
       declarative_manifest_snapshot;

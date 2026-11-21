@@ -2530,6 +2530,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
+        ; masc_tools_enabled_opt = None
+        ; masc_tools_enabled_present = false
         ; instructions_arg = Some "new operator intent"
         ; profile_defaults
         ; declarative_manifest_snapshot =
@@ -2846,6 +2848,8 @@ let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
         ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
+        ; masc_tools_enabled_opt = None
+        ; masc_tools_enabled_present = false
         ; instructions_arg = Some "rejected mid-turn intent"
         ; profile_defaults
         ; declarative_manifest_snapshot =
@@ -3036,6 +3040,8 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
+        ; masc_tools_enabled_opt = None
+        ; masc_tools_enabled_present = false
         ; instructions_arg = Some "durable cancelled update"
         ; profile_defaults
         ; declarative_manifest_snapshot =
@@ -6015,6 +6021,8 @@ let test_field_only_update_honors_toml_declared_profile () =
         ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
+        ; masc_tools_enabled_opt = None
+        ; masc_tools_enabled_present = false
         ; instructions_arg = Some "field-only update"
         ; profile_defaults
         ; declarative_manifest_snapshot =

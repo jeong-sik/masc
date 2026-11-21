@@ -489,6 +489,58 @@ let person_keeper_of_engine_name engine_name =
       | Some (owner, keeper_id, (_ : Authz_keeper_state.keeper)) -> Ok (owner, keeper_id))
 ;;
 
+type engine_keeper_admission =
+  | Operator_mode
+  | Active_person_keeper of
+      { owner : Authz_types.User_id.t
+      ; keeper_id : Authz_types.Keeper_id.t
+      ; runtime_assigned : Authz_types.Runtime_id.t option
+      }
+  | Owner_disabled of
+      { owner : Authz_types.User_id.t
+      ; keeper_id : Authz_types.Keeper_id.t
+      }
+  | Unknown_person_keeper
+  | Authz_uncertain
+
+let engine_keeper_admission engine_name =
+  match Atomic.get state with
+  | Unpublished | Published (Single_user (_ : Authz_boot_mode_read.single_user)) ->
+    Operator_mode
+  | Published (Multi_account { zone; base_path = _; now = _ }) ->
+    (match Authz_zone.read zone with
+     | Error (_ : Authz_zone.uncertain) -> Authz_uncertain
+     | Ok trusted ->
+       let authz_state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+       (match Authz_keeper_state.find_by_engine_name authz_state.Authz_state.keepers engine_name with
+        | None -> Unknown_person_keeper
+        | Some (owner, keeper_id, keeper) ->
+          if Ps.is_active authz_state.Authz_state.principals owner
+          then
+            Active_person_keeper
+              { owner
+              ; keeper_id
+              ; runtime_assigned = keeper.Authz_keeper_state.runtime
+              }
+          else Owner_disabled { owner; keeper_id }))
+;;
+
+let active_authz_keeper_names () =
+  match Atomic.get state with
+  | Unpublished | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> []
+  | Published (Multi_account { zone; base_path = _; now = _ }) ->
+    (match Authz_zone.read zone with
+     | Error (_ : Authz_zone.uncertain) -> []
+     | Ok trusted ->
+       let authz_state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+       Authz_keeper_state.all authz_state.Authz_state.keepers
+       |> List.filter_map (fun (owner, (_ : Authz_types.Keeper_id.t), (keeper : Authz_keeper_state.keeper)) ->
+            if Ps.is_active authz_state.Authz_state.principals owner
+            then Some (Authz_types.Engine_name.to_string keeper.engine_name)
+            else None)
+       |> List.sort_uniq String.compare)
+;;
+
 (* The person, the turn and the home are read in the same state. *)
 let multi_account ~zone ~base_path ~now request claim =
   let on_trusted judge = on_trusted zone judge in

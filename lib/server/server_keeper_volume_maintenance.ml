@@ -226,7 +226,9 @@ let workspace_volumes ~(config : Workspace.config) () =
 ;;
 
 let sweep ~notices ~now ~inspect ~read_image ~post ~warn_uncertain ~volumes =
-  if Atomic.compare_and_set notices.busy false true
+  if Runtime_account_access.is_multi_account ()
+  then ()
+  else if Atomic.compare_and_set notices.busy false true
   then
     Fun.protect
       ~finally:(fun () -> Atomic.set notices.busy false)
@@ -269,6 +271,9 @@ let sweep ~notices ~now ~inspect ~read_image ~post ~warn_uncertain ~volumes =
 ;;
 
 let start ~sw ~clock ~config =
+  if Runtime_account_access.is_multi_account ()
+  then ()
+  else
   let notices = create_notice_ledger () in
   Server_bootstrap_loops_fiber.fork_logged_fiber
     ~sw

@@ -1643,6 +1643,7 @@ let run_turn
                         { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id })
                       ~raw_trace
                       ~system_prompt:turn_system_prompt
+                      ~masc_enabled:(Keeper_meta_contract.effective_masc_tools_enabled meta)
                       ~tools:built_tools
                       ~loading_plan
                       ~agent_core_tools

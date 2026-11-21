@@ -37,7 +37,8 @@ type candidate =
   | Skill of skill_capability
 
 type t =
-  { skill_inventory : Keeper_skill_inventory.t
+  { masc_enabled : bool
+  ; skill_inventory : Keeper_skill_inventory.t
   ; descriptors : Keeper_tool_descriptor.t list
   ; skill_projection : Keeper_skill_catalog.turn_projection
   ; tool_capabilities : tool_capability list
@@ -124,7 +125,8 @@ let descriptor_admitted descriptors descriptor =
   List.exists (fun admitted -> admitted == descriptor) descriptors
 ;;
 
-let create_with_descriptors
+let create_with_descriptors_policy
+      ~masc_enabled
       ~tool_descriptors
       ~tool_deny
       ~sandbox_profile
@@ -223,21 +225,32 @@ let create_with_descriptors
       | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image -> None
   in
   let off_turn_availability descriptor =
-    match denied descriptor, sandbox_refusal descriptor with
-    | true, _ -> Some Denied_by_profile
-    | false, Some detail -> Some (Refused_by_sandbox { detail })
-    | false, None -> None
+    if not masc_enabled
+    then Some Denied_by_profile
+    else
+      match denied descriptor, sandbox_refusal descriptor with
+      | true, _ -> Some Denied_by_profile
+      | false, Some detail -> Some (Refused_by_sandbox { detail })
+      | false, None -> None
   in
   let descriptors =
-    (List.filter (fun descriptor -> Keeper_tool_descriptor.keeper_model_names descriptor <> []) tool_descriptors)
-    |> List.filter (fun descriptor ->
-      Option.is_none (off_turn_availability descriptor))
+    if not masc_enabled
+    then []
+    else
+      (List.filter (fun descriptor -> Keeper_tool_descriptor.keeper_model_names descriptor <> []) tool_descriptors)
+      |> List.filter (fun descriptor ->
+        Option.is_none (off_turn_availability descriptor))
   in
+  let effective_skill_names = if masc_enabled then skill_names else Some [] in
+  let effective_global_catalog =
+    if masc_enabled then global_skill_catalog else Keeper_skill_catalog.empty
+  in
+  let effective_task_skills = if masc_enabled then task_skills else [] in
   let skill_projection =
     Keeper_skill_catalog.project_turn
-      ~names:skill_names
-      ~global:global_skill_catalog
-      ~task:task_skills
+      ~names:effective_skill_names
+      ~global:effective_global_catalog
+      ~task:effective_task_skills
     |> Keeper_skill_catalog.withhold_compositions_outside
          ~admits:(descriptor_admitted descriptors)
   in
@@ -258,15 +271,19 @@ let create_with_descriptors
       })
   in
   let skill_capabilities =
-    Keeper_skill_inventory.items skill_inventory
-    |> List.map (skill_capability ~skill_names ~skill_projection)
-    |> fun capabilities ->
-    capabilities
-    @ missing_skill_capabilities
-        ~skill_names
+    if not masc_enabled
+    then []
+    else
+      Keeper_skill_inventory.items skill_inventory
+      |> List.map (skill_capability ~skill_names ~skill_projection)
+      |> fun capabilities ->
+      capabilities
+      @ missing_skill_capabilities
+          ~skill_names
         ~skill_inventory
   in
-  { skill_inventory
+  { masc_enabled
+  ; skill_inventory
   ; descriptors
   ; skill_projection
   ; tool_capabilities
@@ -275,10 +292,58 @@ let create_with_descriptors
   }
 ;;
 
+let create_with_descriptors
+      ~tool_descriptors
+      ~tool_deny
+      ~sandbox_profile
+      ~skill_names
+      ~global_skill_catalog
+      ~skill_inventory
+      ~task_skills
+  =
+  create_with_descriptors_policy
+    ~masc_enabled:true
+    ~tool_descriptors
+    ~tool_deny
+    ~sandbox_profile
+    ~skill_names
+    ~global_skill_catalog
+    ~skill_inventory
+    ~task_skills
+;;
+
+let masc_enabled surface = surface.masc_enabled
+
+let create_with_policy
+      ~masc_enabled
+      ~tool_deny
+      ~sandbox_profile
+      ~skill_names
+      ~global_skill_catalog
+      ~skill_inventory
+      ~task_skills
+  =
+  create_with_descriptors_policy
+    ~masc_enabled
+    ~tool_descriptors:(Keeper_tool_descriptor.all_descriptors ())
+    ~tool_deny
+    ~sandbox_profile
+    ~skill_names
+    ~global_skill_catalog
+    ~skill_inventory
+    ~task_skills
+;;
+
 let create ~tool_deny ~sandbox_profile ~skill_names ~global_skill_catalog
     ~skill_inventory ~task_skills =
-  create_with_descriptors ~tool_descriptors:(Keeper_tool_descriptor.all_descriptors ())
-    ~tool_deny ~sandbox_profile ~skill_names ~global_skill_catalog ~skill_inventory ~task_skills
+  create_with_policy
+    ~masc_enabled:true
+    ~tool_deny
+    ~sandbox_profile
+    ~skill_names
+    ~global_skill_catalog
+    ~skill_inventory
+    ~task_skills
 
 let find_descriptor_by_id surface id =
   List.find_opt (fun (descriptor : Keeper_tool_descriptor.t) -> String.equal descriptor.id id)

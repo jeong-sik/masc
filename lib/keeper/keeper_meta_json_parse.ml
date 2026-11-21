@@ -285,6 +285,7 @@ let decode_current_meta fields =
       ; board_interests = []
       ; always_allow = None
       ; voice_always_allow = None
+      ; masc_tools_enabled = None
       ; created_at
       ; updated_at
       ; paused

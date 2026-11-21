@@ -40,6 +40,8 @@ type parsed_args =
   ; skill_names_present : bool
   ; native_tool_posture_opt : Runtime_native_tools.posture option
   ; native_tool_posture_present : bool
+  ; masc_tools_enabled_opt : bool option
+  ; masc_tools_enabled_present : bool
   ; instructions_arg : string option
   ; profile_defaults : keeper_profile_defaults
   ; declarative_manifest_snapshot : declarative_manifest_snapshot

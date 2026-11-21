@@ -12,6 +12,15 @@ type gemini_chunk =
   ; gem_finish_reason : gemini_terminal_reason option
   ; gem_usage : api_usage option
   ; gem_reasoning_tokens : int option
+  ; gem_total_token_mismatch : (int * int) option
+    (* [(expected, reported)] when [totalTokenCount] disagrees with
+       [promptTokenCount + candidatesTokenCount + thoughtsTokenCount + toolUsePromptTokenCount]. The
+       accounting above folds thoughts into [output_tokens]; that rests on
+       Gemini counting thoughts outside [candidatesTokenCount], which is a
+       convention rather than a documented guarantee. Carrying the verdict as a
+       value lets a caller record it without this parser logging or failing a
+       response over it. [None] means the response agreed or carried no
+       [totalTokenCount]. *)
   }
 
 type gemini_unsupported_part =
@@ -670,9 +679,9 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
     | None -> Ok ()
     | Some part -> Error (Gemini_payload_unsupported_part part)
   in
-  let* gem_usage, gem_reasoning_tokens =
+  let* gem_usage, gem_reasoning_tokens, gem_total_token_mismatch =
     match Json_util.assoc_member_opt "usageMetadata" json with
-    | None | Some `Null -> Ok (None, None)
+    | None | Some `Null -> Ok (None, None, None)
     | Some (`Assoc _ as usage) ->
       let* input_tokens =
         gemini_optional_int_default_zero
@@ -705,6 +714,36 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
           "cachedContentTokenCount"
           usage
       in
+      (* [totalTokenCount] is the provider's own sum. Comparing it with the sum
+         this parser assumes turns an undocumented convention into an
+         observation: a disagreement is carried to the caller instead of
+         silently folding thoughts twice or not at all. *)
+      let* reported_total =
+        malformed
+          (gemini_optional_non_negative_int
+             ~path:"gemini.usageMetadata"
+             "totalTokenCount"
+             usage)
+      in
+      let* tool_use_prompt_tokens =
+        malformed
+          (gemini_optional_non_negative_int
+             ~path:"gemini.usageMetadata"
+             "toolUsePromptTokenCount"
+             usage)
+      in
+      let expected_total =
+        input_tokens
+        + candidates_tokens
+        + Option.value thoughts_tokens ~default:0
+        + Option.value tool_use_prompt_tokens ~default:0
+      in
+      let total_token_mismatch =
+        match reported_total with
+        | Some total when not (Int.equal total expected_total) ->
+          Some (expected_total, total)
+        | Some _ | None -> None
+      in
       Ok
         ( Some
             { input_tokens
@@ -713,7 +752,8 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
             ; cache_read_input_tokens
             ; cost_usd = None
             }
-        , thoughts_tokens )
+        , thoughts_tokens
+        , total_token_mismatch )
     | Some value ->
       Error
         (Gemini_payload_malformed
@@ -727,6 +767,7 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
     ; gem_finish_reason
     ; gem_usage
     ; gem_reasoning_tokens
+    ; gem_total_token_mismatch
     }
 ;;
 

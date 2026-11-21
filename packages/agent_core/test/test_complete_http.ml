@@ -5256,6 +5256,107 @@ output_per_million = %.1f
       with Exit -> ()))
 ;;
 
+(* Gemini reports [usageMetadata.totalTokenCount] beside the counts the backend
+   folds into [output_tokens]. That fold assumes the provider counts thoughts
+   outside [candidatesTokenCount], which is a convention rather than a
+   documented guarantee, so both paths carry a disagreement as a telemetry
+   observation instead of failing the response or re-summing. These cases pin
+   the three properties the fold relies on: stream and sync land the same
+   verdict on the same field, the verdict never changes [usage], and a response
+   that disagrees on several chunks keeps the first one. *)
+let gemini_usage_response ?finish_reason ?(total = 400) () =
+  let finish =
+    match finish_reason with
+    | Some reason -> Printf.sprintf {|,"finishReason":"%s"|} reason
+    | None -> ""
+  in
+  Printf.sprintf
+    {|{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]}%s}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":40,"thoughtsTokenCount":260,"totalTokenCount":%d}}|}
+    finish total
+;;
+
+let gemini_observation_config endpoint =
+  Provider_config.make
+    ~kind:Provider_config.Gemini
+    ~model_id:"fixture-gemini"
+    ~base_url:(endpoint ^ "/v1/projects/fixture/locations/global/publishers/google")
+    ~auth_scheme:Provider_config.Bearer_token
+    ~api_key:"fixture-key"
+    ~model_capabilities_override:Capabilities.gemini_capabilities
+    ()
+;;
+
+let test_gemini_total_token_mismatch_same_on_both_paths () =
+  List.iter
+    (fun stream ->
+      List.iter
+        (fun (total, expected) ->
+          Eio_main.run (fun env ->
+            try
+              Eio.Switch.run (fun sw ->
+                let body = gemini_usage_response ~finish_reason:"STOP" ~total () in
+                let body = if stream then "data: " ^ body ^ "\n\n" else body in
+                let endpoint = start_mock_server ~sw ~net:env#net body in
+                let config = gemini_observation_config endpoint in
+                let result =
+                  if stream
+                  then
+                    (Complete.complete_stream ~sw ~net:env#net ~config ~messages
+                       ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+                  else
+                    (Complete.complete ~sw ~net:env#net ~config ~messages ())
+                      .Llm_provider.Completion_outcome.result
+                in
+                (match result with
+                 | Error _ ->
+                   fail
+                     (Printf.sprintf "%s path failed on a usage observation"
+                        (if stream then "stream" else "sync"))
+                 | Ok response ->
+                   (match response.Types.usage with
+                    | Some usage ->
+                      check int "input tokens are untouched" 100 usage.input_tokens;
+                      check int "output tokens keep the thoughts fold" 300
+                        usage.output_tokens
+                    | None -> fail "expected usage");
+                   (match response.Types.telemetry with
+                    | Some telemetry ->
+                      check bool "the same field carries the verdict" true
+                        (telemetry.Types.total_token_mismatch = expected)
+                    | None -> fail "expected telemetry");
+                   check bool "a disagreement does not change the stop reason" true
+                     (response.Types.stop_reason = Types.EndTurn));
+                Eio.Switch.fail sw Exit)
+            with Exit -> ()))
+        [ 500, Some (400, 500); 400, None ])
+    [ false; true ]
+;;
+
+let test_gemini_total_token_mismatch_keeps_the_first_verdict () =
+  Eio_main.run (fun env ->
+    try
+      Eio.Switch.run (fun sw ->
+        let first = gemini_usage_response ~total:500 () in
+        let second = gemini_usage_response ~finish_reason:"STOP" ~total:400 () in
+        let body = "data: " ^ first ^ "\n\ndata: " ^ second ^ "\n\n" in
+        let endpoint = start_mock_server ~sw ~net:env#net body in
+        let config = gemini_observation_config endpoint in
+        let result =
+          (Complete.complete_stream ~sw ~net:env#net ~config ~messages
+             ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+        in
+        (match result with
+         | Error _ -> fail "stream failed on a usage observation"
+         | Ok response ->
+           (match response.Types.telemetry with
+            | Some telemetry ->
+              check bool "one response records the first disagreement only" true
+                (telemetry.Types.total_token_mismatch = Some (400, 500))
+            | None -> fail "expected telemetry"));
+        Eio.Switch.fail sw Exit)
+    with Exit -> ())
+;;
+
 let () =
   run
     "complete_http"
@@ -5621,6 +5722,12 @@ let () =
             "clock-jump fixture fires explicit idle timeout"
             `Quick
             test_clock_jump_fixture_fires_explicit_idle_timeout
+        ] )
+    ; ( "Gemini usage total observation"
+      , [ test_case "sync and stream carry the same verdict" `Quick
+            test_gemini_total_token_mismatch_same_on_both_paths
+        ; test_case "one response keeps the first disagreement" `Quick
+            test_gemini_total_token_mismatch_keeps_the_first_verdict
         ] )
     ]
 ;;

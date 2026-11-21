@@ -637,6 +637,35 @@ let test_parse_text_response () =
   | None -> fail "expected usage"
 ;;
 
+(* The documented identity is prompt + tool-use prompt + thoughts + response
+   candidates. A response that used a built-in tool reports
+   [toolUsePromptTokenCount] outside [promptTokenCount]; leaving that term out
+   would record a disagreement on a correct response. *)
+let test_parse_total_token_fold_includes_tool_use_prompt () =
+  let response ~tool_use_prompt ~total =
+    Printf.sprintf
+      {|{"candidates":[{"content":{"parts":[{"text":"done"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"thoughtsTokenCount":30,"toolUsePromptTokenCount":%d,"totalTokenCount":%d},"modelVersion":"gemini-3.7-flash"}|}
+      tool_use_prompt total
+  in
+  let parsed ~tool_use_prompt ~total =
+    Backend_gemini.parse_response
+      (Yojson.Safe.from_string (response ~tool_use_prompt ~total))
+  in
+  let mismatch resp =
+    Option.bind resp.Types.telemetry (fun t -> t.Types.total_token_mismatch)
+  in
+  check bool "a tool-use prompt response agrees" true
+    (mismatch (parsed ~tool_use_prompt:7 ~total:52) = None);
+  check bool "a real disagreement is still reported" true
+    (mismatch (parsed ~tool_use_prompt:7 ~total:53) = Some (52, 53));
+  (* The observation is a value: it never re-sums [usage]. *)
+  match (parsed ~tool_use_prompt:7 ~total:53).Types.usage with
+  | Some u ->
+    check int "input tokens unchanged" 10 u.input_tokens;
+    check int "output tokens unchanged" 35 u.output_tokens
+  | None -> fail "expected usage"
+;;
+
 let test_parse_thinking_response () =
   let json =
     Yojson.Safe.from_string
@@ -2088,6 +2117,10 @@ let () =
         ] )
     ; ( "parse_response"
       , [ test_case "text" `Quick test_parse_text_response
+        ; test_case
+            "usage total includes tool-use prompt"
+            `Quick
+            test_parse_total_token_fold_includes_tool_use_prompt
         ; test_case "thinking parts" `Quick test_parse_thinking_response
         ; test_case "function call" `Quick test_parse_function_call
         ; test_case

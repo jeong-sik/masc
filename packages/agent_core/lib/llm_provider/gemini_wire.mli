@@ -24,6 +24,17 @@ type gemini_chunk =
         When present and non-negative, it is also folded into
         [gem_usage.output_tokens] so billed output tokens match Gemini's
         output-rate pricing ([candidatesTokenCount + thoughtsTokenCount]). *)
+  ; gem_total_token_mismatch : (int * int) option
+    (** [(expected, reported)] when the response's
+        [usageMetadata.totalTokenCount] disagrees with
+        [promptTokenCount + candidatesTokenCount + thoughtsTokenCount + toolUsePromptTokenCount].
+        [None] means the total agreed or was absent.
+
+        The fold above assumes Gemini counts thoughts outside
+        [candidatesTokenCount]. That is a convention, not a documented
+        guarantee, so this carries the observed verdict as a value: a caller
+        may record it, and this parser never logs, fails or re-sums because of
+        it. *)
   }
 
 type gemini_unsupported_part =

@@ -198,49 +198,21 @@ let eject_whoever_holds ~default =
     | Ok _ | Error _ -> default in
   ignore (Dos_lane.eject ~who:holder ~announce:ignore () : (unit, Dos_lane.error) result)
 
-(* ---------- exceptions the lane does not type ----------
+(* ---------- a fault the lane types ----------
 
-   An exception the lane does not type -- one the core raises while a call
-   runs the guest -- reaches the worker edge. On its way out a call must give
-   back the controller it took and release the machine's lock, or the caller
-   told "that failed" still holds the pad and the next player is refused. At
-   the edge the worker answers with an error result and keeps serving.
-
-   The trigger is real: a guest that EXECs a companion file which is an MZ
-   image with a header longer than the file makes the pinned core raise
-   Invalid_argument from inside the run (Dos_dos.load_exe, child path). If a
-   pin bump makes the core answer that EXEC with a DOS error instead, the
-   tests say so and need another trigger. *)
+   A guest that meets an instruction the core does not implement ends the call
+   with [Guest_fault], and the caller keeps the pad it took: the call ran.
+   The lane has a second branch for an exception it does not type. That branch
+   had a guest trigger, an EXEC of an MZ child whose header is longer than the
+   file, until the core stopped raising on it. No guest program is known to
+   raise one now, so the branch has no test here. *)
 
 let owner = "owner"
 
-(* Polls the BIOS key read until a key arrives, then EXECs BAD.EXE.
-   org 0x100: wait: mov ah,0 / int 16h / or ax,ax / jz wait
-              mov ax,cs / mov ds,ax / mov es,ax
-              mov dx,name / mov bx,epb / mov ax,4B00h / int 21h / int 20h
-   name: "BAD.EXE",0 at 0x11B; epb: 14 zero bytes at 0x123 *)
-let exec_after_a_key_com =
-  "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x8c\xc8\x8e\xd8\x8e\xc0\xba\x1b\x01\xbb\x23\x01\
-   \xb8\x00\x4b\xcd\x21\xcd\x20BAD.EXE\000"
-  ^ String.make 14 '\000'
-;;
-
-(* The same EXEC with no key wait first, so it runs during the boot.
-   org 0x100: mov ax,cs / mov ds,ax / mov es,ax / mov dx,name / mov bx,epb
-              mov ax,4B00h / int 21h / int 20h
-   name: "BAD.EXE",0 at 0x113; epb: 14 zero bytes at 0x11B *)
-let exec_at_boot_com =
-  "\x8c\xc8\x8e\xd8\x8e\xc0\xba\x13\x01\xbb\x1b\x01\xb8\x00\x4b\xcd\x21\xcd\x20BAD.EXE\000"
-  ^ String.make 14 '\000'
-;;
-
-(* "MZ", a header of 0x1000 paragraphs, and a file of 28 bytes. *)
-let malformed_child =
-  let image = Bytes.make 28 '\000' in
-  Bytes.blit_string "MZ" 0 image 0 2;
-  Bytes.set image 9 '\x10';
-  Bytes.to_string image
-;;
+(* LOADALL (0F 05) is an instruction the core does not implement: it raises
+   instead of misbehaving. When the core learns it, any other opcode it raises
+   on takes its place. *)
+let unimplemented = "\x0f\x05"
 
 let with_lane run =
   let directory = Filename.temp_dir "masc-dos-fault-" "" in
@@ -260,66 +232,6 @@ let require = function
 
 let controller () = (require (Dos_lane.screen ())).Dos_lane.controller
 
-let test_a_raising_call_gives_the_pad_back () =
-  with_lane (fun directory ->
-    ignore
-      (require
-         (Dos_lane.load ~who:owner ~ledger_dir:directory
-            ~saves_dir:(Filename.concat directory "saves")
-            ~checkpoint_dir:(Filename.concat directory "checkpoints")
-            ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"game.com"
-            ~program_bytes:exec_after_a_key_com
-            ~files:[ "BAD.EXE", malformed_child ]
-            ~announce:ignore));
-    ignore (require (Dos_lane.pass ~who:owner ~to_:None ~announce:ignore));
-    check (option string) "the pad is free before the call" None (controller ());
-    (match Dos_lane.press ~who:"alice" ~keys:[ "a" ] ~steps:100_000 ~until_ready:true with
-     | exception Invalid_argument _ -> ()
-     | Ok _ | Error _ ->
-       fail
-         "the core no longer raises on a malformed EXEC child: this test needs another \
-          trigger for an exception inside a run");
-    check (option string) "the caller told it failed does not hold the pad" None (controller ());
-    (* The lock was released and nobody holds the pad, so another player moves
-       the machine instead of being refused for alice. *)
-    match Dos_lane.step ~who:"bob" ~steps:1_000 ~until_ready:false with
-    | Ok _ -> check (option string) "bob took the free pad" (Some "bob") (controller ())
-    | Error error -> fail (Dos_lane.error_to_string error))
-;;
-
-(* The core raises while the program boots. The machine is installed and the
-   loader holds it, so the load answers Ok with a faulted boot, and the
-   machine's change is announced exactly once. It used to escape as an
-   exception with the machine installed, the pad taken and no announcement. *)
-let test_a_core_exception_while_booting_is_a_faulted_boot () =
-  with_lane (fun directory ->
-    let announced = ref 0 in
-    (match
-       Dos_lane.load ~who:owner ~ledger_dir:directory
-         ~saves_dir:(Filename.concat directory "saves")
-         ~checkpoint_dir:(Filename.concat directory "checkpoints")
-         ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"boom.com"
-         ~program_bytes:exec_at_boot_com
-         ~files:[ "BAD.EXE", malformed_child ]
-         ~announce:(fun () -> incr announced)
-     with
-     | Ok (_, Dos_lane.Boot_faulted (Dos_lane.Core_exception _)) -> ()
-     | Ok (_, Dos_lane.Boot_faulted (Dos_lane.Unimplemented_instruction _)) ->
-       fail "the core raised; it did not meet an unimplemented instruction"
-     | Ok (_, Dos_lane.Booted _) ->
-       fail
-         "the core no longer raises on a malformed EXEC child: this test needs another \
-          trigger for an exception inside a boot"
-     | Error error -> fail (Dos_lane.error_to_string error));
-    check int "announced once" 1 !announced;
-    let screen = require (Dos_lane.screen ()) in
-    check (option string) "the machine is installed" (Some "boom.com") screen.Dos_lane.program;
-    check (option string) "and the loader holds it" (Some owner) screen.Dos_lane.controller;
-    match Dos_lane.step ~who:owner ~steps:1_000 ~until_ready:false with
-    | Ok _ -> ()
-    | Error error -> fail (Dos_lane.error_to_string error))
-;;
-
 let test_a_typed_outcome_still_keeps_the_pad () =
   (* The restore applies to exceptions only. A typed fault means the call ran,
      and the existing contract keeps the caller as the holder. *)
@@ -330,13 +242,13 @@ let test_a_typed_outcome_still_keeps_the_pad () =
             ~saves_dir:(Filename.concat directory "saves")
             ~checkpoint_dir:(Filename.concat directory "checkpoints")
             ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"game.com"
-            ~program_bytes:"\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x8d\xc0" ~files:[]
+            ~program_bytes:("\xb4\x00\xcd\x16\x09\xc0\x74\xf8" ^ unimplemented) ~files:[]
             ~announce:ignore));
     ignore (require (Dos_lane.pass ~who:owner ~to_:None ~announce:ignore));
     (match Dos_lane.press ~who:"alice" ~keys:[ "a" ] ~steps:100_000 ~until_ready:true with
      | Error (Dos_lane.Guest_fault _) -> ()
      | Error error -> fail (Dos_lane.error_to_string error)
-     | Ok _ -> fail "the program should have faulted on lea ax,ax");
+     | Ok _ -> fail "the program should have faulted on the unimplemented instruction");
     check (option string) "alice ran the guest, so she holds the pad" (Some "alice") (controller ()))
 ;;
 
@@ -397,75 +309,6 @@ let test_contained_turns_an_exception_into_an_error_result () =
   check_raises "cancellation keeps unwinding" (Eio.Cancel.Cancelled Exit) (fun () ->
     ignore (Dos_addon_worker.contained ~tool_name:"masc_dos_step"
       (fun () -> raise (Eio.Cancel.Cancelled Exit))))
-
-(* Through the worker: a boot that makes the core raise is a completed load
-   whose boot says so. The machine is installed either way, so the launch
-   line and the boot fault line both ride in the call's events. *)
-let test_a_core_exception_while_booting_is_a_completed_load () =
-  let base_path = Filename.temp_dir "dos-addon-worker-boot-" "" in
-  let game = Filename.concat (Filename.concat (Filename.concat
-    (Common.masc_dir_from_base_path ~base_path) "dos") "programs") "bad-boot" in
-  mkdir_p game;
-  write_file (Filename.concat game "GAME.COM") exec_at_boot_com;
-  write_file (Filename.concat game "BAD.EXE") malformed_child;
-  with_worker ~base_path (fun client ->
-    let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
-    let admission = {C.observed_holder=None; release=None; handoff_target=None} in
-    let loaded = raw Lane_addon_call_context.tool_name
-      (Lane_addon_call_context.to_json_with_controller ~controller:(Some admission)
-         ~principal:(Lane_addon_call_context.Keeper "fixture") ~tool:"masc_dos_load"
-         ~arguments:(`Assoc ["program", `String "bad-boot"; "boot", `String "GAME.COM"])) in
-    check bool "the load completes" false (loaded.S.is_error = Some true);
-    let boot = member "boot" loaded in
-    check bool "and its boot says the core raised" true
-      (Yojson.Safe.Util.member "status" boot = `String "faulted"
-       && Yojson.Safe.Util.member "kind" boot = `String "core_exception");
-    let by_the_loader event = Yojson.Safe.Util.member "author" event = `String "fixture" in
-    check bool "the launch and the boot fault both ride in the call's events" true
-      (match loaded._meta with
-       | Some (`Assoc fields) ->
-           (match List.assoc_opt "io.github.jeong-sik/masc.machine.events" fields with
-            | Some (`List [ launched; boot_faulted ]) ->
-                by_the_loader launched && by_the_loader boot_faulted
-            | _ -> false)
-       | _ -> false);
-    check bool "the loader holds the controller" true
-      (member "holder" (raw C.snapshot_tool (`Assoc [])) = `String "fixture"))
-
-let test_a_handler_exception_does_not_end_the_worker () =
-  let base_path = Filename.temp_dir "dos-addon-worker-fault-" "" in
-  let game = Filename.concat (Filename.concat (Filename.concat
-    (Common.masc_dir_from_base_path ~base_path) "dos") "programs") "bad-child" in
-  mkdir_p game;
-  write_file (Filename.concat game "GAME.COM") exec_after_a_key_com;
-  write_file (Filename.concat game "BAD.EXE") malformed_child;
-  with_worker ~base_path (fun client ->
-    let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
-    let call ?controller name arguments =
-      raw Lane_addon_call_context.tool_name
-        (Lane_addon_call_context.to_json_with_controller ~controller
-           ~principal:(Lane_addon_call_context.Keeper "fixture") ~tool:name ~arguments) in
-    let admission observed_holder = {C.observed_holder; release=None; handoff_target=None} in
-    let snapshot () = member "holder" (raw C.snapshot_tool (`Assoc [])) in
-    let loaded = call ~controller:(admission None) "masc_dos_load"
-      (`Assoc ["program", `String "bad-child"; "boot", `String "GAME.COM"]) in
-    check bool "the game loads" false (loaded.is_error = Some true);
-    let pressed = call ~controller:(admission (Some "fixture")) "masc_dos_press"
-      (`Assoc ["keys", `List [`String "a"]]) in
-    check bool "the press that raised inside the core is an error result" true
-      (pressed.is_error = Some true);
-    check bool "typed as a runtime failure whose effect is unknown" true
-      (Lane_addon_tool_result.failure pressed =
-        (Tool_result.Runtime_failure, Tool_result.Effect_outcome_unknown));
-    check bool "the exception rides in the result" true
-      (Yojson.Safe.Util.member "exception" (data pressed) <> `Null);
-    (* The worker answers the next call: its process did not end. *)
-    check bool "the controller is where it was" true (snapshot () = `String "fixture");
-    let screen = call "masc_dos_screen" (`Assoc []) in
-    check bool "the next call works" false (screen.is_error = Some true);
-    let stepped = call ~controller:(admission (Some "fixture")) "masc_dos_step"
-      (`Assoc ["steps", `Int 10]) in
-    check bool "and so does a call that moves the machine" false (stepped.is_error = Some true))
 
 (* Prints HI, then polls the BIOS key read: a boot settles and autosaves. *)
 let hello_com = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
@@ -722,19 +565,11 @@ let () = run "DOS standalone Add-on worker"
                test_an_input_call_returns_the_screen_only_when_asked;
              test_case "the input tools list include_frame" `Quick
                test_the_input_tools_list_include_frame;
-             test_case "a handler exception does not end the worker" `Quick
-               test_a_handler_exception_does_not_end_the_worker;
-             test_case "a core exception while booting is a completed load" `Quick
-               test_a_core_exception_while_booting_is_a_completed_load;
              test_case "a worker start resumes the autosave" `Quick
                test_a_worker_start_resumes_the_autosave;
              test_case "a worker start survives an autosave that will not restore" `Quick
                test_a_worker_start_survives_an_autosave_that_will_not_restore];
    "edge", [test_case "contained turns an exception into an error result" `Quick
               test_contained_turns_an_exception_into_an_error_result];
-   "lane exceptions", [test_case "a raising call gives the pad back" `Quick
-                         test_a_raising_call_gives_the_pad_back;
-                       test_case "a core exception while booting is a faulted boot" `Quick
-                         test_a_core_exception_while_booting_is_a_faulted_boot;
-                       test_case "a typed fault still keeps the pad" `Quick
-                         test_a_typed_outcome_still_keeps_the_pad]]
+   "lane faults", [test_case "a typed fault still keeps the pad" `Quick
+                     test_a_typed_outcome_still_keeps_the_pad]]

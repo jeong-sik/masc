@@ -197,7 +197,20 @@ readonly OCAML_MSX_SHA="581da9079377968474da3cf10310b5a65b66b505"
 # it fails with the new digest in its message until the two agree. A build that
 # says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
 # than #32: re-run this script with --install, or vendor the pinned core.
-readonly OCAML_DOS_SHA="323609dd3c4d9f4f9d678290b36e88a8b9b8f488"
+# 238d2c9 = ocaml-dos main after #235. Since 323609dd (the commit #46 had
+# before its squash) the default CPU is an 80286 (Dos_machine.create ?model;
+# I80386 runs 32-bit registers and the 0F opcodes in real mode). Dos_snapshot
+# moves from format 6 to 42, which refuses every earlier format: checkpoints
+# written under 323609dd are refused on restore. Dos_machine.mount_file returns
+# (unit, string) result, and a name DOS cannot hold or a directory's name is an
+# Error; read_mounted and mounted_names use the name after DOS has read it
+# (upper-cased, cut to 8.3, DATA\X.DAT for a subdirectory). The EXE loader
+# counts a module's end from the header's page count and refuses a relocation
+# offset past the file even with no entries. Dos_machine.exe_payload_bytes
+# (#232) asks it before loading; a module longer than memory wraps onto
+# address 0. COMMAND.COM /C runs a built-in COPY (#234), so a guest's SHELL
+# "copy a b" writes new files into the mount table, and keep_writes saves them.
+readonly OCAML_DOS_SHA="238d2c9bea20c526119d70442422dec7b448237a"
 # cohttp-eio 6.2.1 carries the partial body read fix and typed response-head
 # errors. The latter lets browser-host distinguish peer EOF (retryable) from
 # malformed HTTP (answered, do not replay). Keep this pin until both changes

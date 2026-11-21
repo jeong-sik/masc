@@ -141,7 +141,7 @@ type core = {
    one, so a SHA bumped alone turns that test red with the new digest in its
    message. Read the digest of a commit from its build:
    _build/default/lib/identity/dos_core_identity.ml. *)
-let pinned_core_source_digest = "dcc7a239c2cacba739a9819be3e46b2e"
+let pinned_core_source_digest = "698f3e098d8270e32d0609bb325020ff"
 
 let core =
   { source_digest = Dos_core_identity.source_digest
@@ -1035,36 +1035,39 @@ let dos_name_collision files =
   go [] files
 ;;
 
-let is_mz image =
-  String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
+(* DOS takes both "MZ" and "ZM" as an EXE signature, and so does the core's
+   loader. The signature only chooses which loader gets the image; the core
+   decides whether it can place it. *)
+let has_exe_signature image =
+  String.length image >= 2
+  && ((Char.equal image.[0] 'M' && Char.equal image.[1] 'Z')
+      || (Char.equal image.[0] 'Z' && Char.equal image.[1] 'M'))
 ;;
 
 (* ---------- program images ---------- *)
 
-(* The core's loaders raise [Invalid_argument] on an image they cannot place:
-   a header shorter than its fixed part, a header or relocation table that
-   runs past the file, a payload past the end of memory. An exception out of
-   [prepare_load] reaches the caller as a crash, not as the caller's mistake.
-   [image_of_bytes] checks those conditions first and returns the image as a
-   value only when the loader can take it.
+(* The core's EXE loader raises [Invalid_argument] on an image it cannot
+   place: a header shorter than its fixed part, a module that ends inside its
+   header, a file a page or more short of its module, a relocation table past
+   the file. An exception out of [prepare_load] reaches the caller as a crash,
+   not as the caller's mistake. [image_of_bytes] asks the core first
+   ([Dos_machine.exe_payload_bytes]) and returns the image as a value only
+   when the loader can take it. The header rules live in the core alone.
 
-   For an MZ image the check is exactly the loader's: refused if and only if
-   [Dos_dos.load_exe] would raise. Two refusals are stricter than the loader
-   (ocaml-dos 323609dd, Dos_dos.load_com and load_exe), on purpose:
+   Two refusals are stricter than the loader, on purpose:
 
    - A COM image of more than [max_com_bytes]. [load_com] copies any size up
      to the end of memory, but it then writes the 2-byte return word at
      PSP:FFFE, which lies inside such an image, and points SP there. The
      program is placed with its tail overwritten and its stack on top of it.
      DOS itself refuses a COM that does not fit its segment.
-   - The signature "ZM", which DOS also accepts for an EXE. [load_exe] takes
-     only "MZ", so a ZM file would be loaded as a COM and run its header as
-     code.
+   - An EXE module of more than [max_exe_payload_bytes]. [load_exe] places it
+     without complaint: addresses run modulo 1MB, so the bytes past the end of
+     memory land on address 0 and overwrite the interrupt vector table.
 
-   test_dos_lane_image runs the real loader beside the check: it compares
-   them on seeded MZ images and at the memory edge, and it shows the two
-   stricter facts above with the loader itself, so a pin bump that moves any
-   of them turns it red. *)
+   test_dos_lane_image runs the real loader beside the check and shows both
+   facts with the loader itself, so a pin bump that moves either turns it
+   red. *)
 
 (* The machine's address space: 20 address lines. *)
 let memory_bytes = 0x100000
@@ -1079,50 +1082,27 @@ let image_floor = 0x10100
    bytes. *)
 let max_com_bytes = 0xFFFE - 0x100
 
-(* The fixed MZ header, through the relocation table offset at 0x18. *)
-let mz_fixed_header_bytes = 0x1C
-let mz_reloc_entry_bytes = 4
-
 let max_exe_payload_bytes = memory_bytes - image_floor
 
 type image =
   | Com of string
   | Exe of string
 
-let is_zm image =
-  String.length image >= 2 && Char.equal image.[0] 'Z' && Char.equal image.[1] 'M'
-;;
-
-let u16_at image offset = Char.code image.[offset] lor (Char.code image.[offset + 1] lsl 8)
-
 let image_of_bytes ~program_name image =
   let refuse fmt = Printf.ksprintf (fun message -> Error (Invalid_request message)) fmt in
   let size = String.length image in
   if size = 0 then refuse "%s is empty" program_name
-  else if is_zm image then
-    refuse "%s starts with ZM, a DOS executable signature this machine does not load (it takes MZ)"
-      program_name
-  else if not (is_mz image) then
+  else if not (has_exe_signature image) then
     if size > max_com_bytes then
       refuse "%s is %d bytes, more than a COM image holds (%d)" program_name size max_com_bytes
     else Ok (Com image)
-  else if size < mz_fixed_header_bytes then
-    refuse "%s is an MZ executable cut short: %d bytes, and its fixed header is %d" program_name
-      size mz_fixed_header_bytes
-  else begin
-    let header_bytes = u16_at image 0x08 * 16 in
-    let reloc_count = u16_at image 0x06 and reloc_offset = u16_at image 0x18 in
-    if header_bytes > size then
-      refuse "%s is an MZ executable cut short: its header is %d bytes and the file is %d"
-        program_name header_bytes size
-    else if reloc_count > 0 && reloc_offset + (reloc_count * mz_reloc_entry_bytes) > size then
-      refuse "%s is an MZ executable cut short: its relocation table ends at byte %d and the file is %d"
-        program_name (reloc_offset + (reloc_count * mz_reloc_entry_bytes)) size
-    else if size - header_bytes > max_exe_payload_bytes then
-      refuse "%s holds %d bytes of program, more than fit in memory (%d)" program_name
-        (size - header_bytes) max_exe_payload_bytes
-    else Ok (Exe image)
-  end
+  else
+    match Dos_machine.exe_payload_bytes image with
+    | Error reason -> refuse "%s is an MZ executable the core cannot load: %s" program_name reason
+    | Ok payload when payload > max_exe_payload_bytes ->
+      refuse "%s holds %d bytes of program, more than fit in memory (%d)" program_name payload
+        max_exe_payload_bytes
+    | Ok _ -> Ok (Exe image)
 ;;
 
 let load_image machine = function
@@ -1169,6 +1149,40 @@ let check_previous_autosave_consent ~dir = function
      | Some discard -> Error (Would_discard_previous_autosave discard))
 ;;
 
+(* Puts the program's files in the machine, one by one. The core reads each
+   name the way DOS does: upper-cased and cut to 8.3, a directory made for
+   every [\\] or [/]. Two names can reach one file that way ("LONGFILENAME.TXT"
+   and "LONGFILE.TXT"), and the second would replace the first without a word.
+   [read_mounted] reads a name through the same rule as [mount_file], so a name
+   that is already there is refused. *)
+let mount_files machine files =
+  List.fold_left
+    (fun mounted (name, contents) ->
+      let* () = mounted in
+      match Dos_machine.read_mounted machine name with
+      | Some _ ->
+          Error (Invalid_request (Printf.sprintf
+            "%s is the same file to DOS as an earlier one; the guest can only see one" name))
+      | None ->
+          (match Dos_machine.mount_file machine name contents with
+           | Ok () -> Ok ()
+           | Error reason ->
+               Error (Invalid_request (Printf.sprintf "%s cannot be a file on the DOS drive: %s" name reason))))
+    (Ok ()) files
+;;
+
+(* What the machine holds under the names it reports. [keep_writes] compares a
+   file against this by the name [Dos_machine.mounted_names] gives, which is
+   the name after DOS has read it, so the table is built from the machine and
+   not from the names the caller passed. *)
+let kept_of_mounted machine =
+  let kept = Hashtbl.create 16 in
+  List.iter
+    (fun name -> Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted machine name))
+    (Dos_machine.mounted_names machine);
+  kept
+;;
+
 let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~previous_autosave ~program_name ~program_bytes ~files =
   let* () = require_activity () in
   (* Guest writes raise this counter. A load must not install a save overlay
@@ -1183,10 +1197,9 @@ let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~previous_autosave ~prog
   | None ->
       let* () = check_previous_autosave_consent ~dir:checkpoint_dir previous_autosave in
       let m = Dos_machine.create () in
-      List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
+      let* () = mount_files m files in
       load_image m image;
-      let kept = Hashtbl.create (List.length files) in
-      List.iter (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents) files;
+      let kept = kept_of_mounted m in
       Ok {load_machine=ref (Some (m, kept)); load_program=program_name;
           load_ledger_dir=ledger_dir; load_saves_dir=saves_dir;
           load_checkpoint_dir=checkpoint_dir; load_change_count}
@@ -1647,10 +1660,7 @@ let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
   let* m = match Dos_snapshot.restore checkpoint.machine_bytes with
     | Ok m -> Ok m
     | Error e -> Error (Checkpoint_refused (snapshot_error_to_checkpoint_error e)) in
-  let kept = Hashtbl.create 16 in
-  List.iter (fun name ->
-    Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted m name))
-    (Dos_machine.mounted_names m);
+  let kept = kept_of_mounted m in
   let lines = String.concat ""
       (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") meta.saved_ledger) in
   let entries = List.rev meta.saved_ledger in

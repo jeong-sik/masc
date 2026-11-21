@@ -223,9 +223,14 @@ let press key = require (Dos_lane.press ~who ~keys:[ key ] ~steps:100_000 ~until
    org 0x100: wait: mov ah,0 / int 16h / jmp wait *)
 let keys_forever = "\xb4\x00\xcd\x16\xeb\xfa"
 
-(* Waits for a key, then runs lea ax,ax, which the core does not implement.
-   org 0x100: wait: mov ah,0 / int 16h / or ax,ax / jz wait / lea ax,ax *)
-let faults_after_a_key = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x8d\xc0"
+(* LOADALL (0F 05) is an instruction the core does not implement: it raises
+   instead of misbehaving. When the core learns it, any other opcode it raises
+   on takes its place. *)
+let unimplemented = "\x0f\x05"
+
+(* Waits for a key, then runs the unimplemented instruction.
+   org 0x100: wait: mov ah,0 / int 16h / or ax,ax / jz wait / loadall *)
+let faults_after_a_key = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8" ^ unimplemented
 
 let mentions needle haystack =
   let rec from i =
@@ -576,8 +581,8 @@ let test_a_failed_copy_keeps_the_old_autosave_and_is_retried () =
     check string "autosave-prev is still the kept file" campaign (Digest.file (prev_path fixture)))
 ;;
 
-(* lea ax,ax: the core does not implement it, so the boot faults at once. *)
-let faulting_program = "\x8d\xc0"
+(* The boot faults at once. *)
+let faulting_program = unimplemented
 
 let test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave () =
   with_fixture (fun fixture ->
@@ -792,7 +797,7 @@ let test_a_faulted_machine_is_not_brought_back () =
     (match Dos_lane.press ~who ~keys:[ "a" ] ~steps:100_000 ~until_ready:true with
      | Error (Dos_lane.Guest_fault _) -> ()
      | Error error -> fail (Dos_lane.error_to_string error)
-     | Ok _ -> fail "the program should have faulted on lea ax,ax");
+     | Ok _ -> fail "the program should have faulted on the unimplemented instruction");
     check bool "the fault removed the mark" false (marked fixture);
     stop_the_process fixture;
     nothing_to_resume ~name:"a start after a fault" fixture)

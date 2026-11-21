@@ -12,3 +12,6 @@ val selected : plaintext -> (channel * string) option
 val decode : Yojson.Safe.t -> (t, string) result
 (** Nonblank encrypted content has priority and retains the entire object.
     Unknown part types are extensions; malformed recognized full text fails. *)
+val describe : t -> string
+(** Bounded, secret-free label for a diagnostic: the item [id], the ciphertext
+    digest prefix and byte length, never the ciphertext or the reasoning text. *)

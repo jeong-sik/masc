@@ -38,3 +38,25 @@ let decode item =
   | Some (`String encrypted) when nonblank encrypted -> Ok(Opaque item)
   | Some (`String _ | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
   | None -> Result.map(fun full->Plaintext {full;summary=summary item}) (full_text item)
+
+(* A bounded, secret-free description for a wire failure record. The ciphertext
+   is never quoted: only its digest prefix and byte length, which is enough to
+   tell two deliveries apart after the fact while leaving the payload, the
+   prompt and the reasoning text out of the diagnostic. *)
+let describe = function
+  | Opaque item ->
+    let ciphertext = match field "encrypted_content" item with
+      | Some (`String value) -> Some value
+      | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+      | None -> None in
+    let id = match field "id" item with
+      | Some (`String value) when nonblank value -> Printf.sprintf "%S" value
+      | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+      | Some (`String _) | None -> "<none>" in
+    (match ciphertext with
+     | Some value ->
+       let digest = Agent_core_sha256.(to_hex (digest_string value)) in
+       Printf.sprintf "opaque id=%s encrypted_content=sha256:%s.. bytes=%d"
+         id (String.sub digest 0 16) (String.length value)
+     | None -> Printf.sprintf "opaque id=%s encrypted_content=<none>" id)
+  | Plaintext _ -> "plaintext"

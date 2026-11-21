@@ -135,11 +135,88 @@ let encrypted_reasoning_changed () =
   in
   terminal state acc [`Assoc changed];
   match Acc.finalize_stream_acc acc with
-  | Error error ->
-    Alcotest.(check bool) "changed opaque ciphertext is still refused" true
-      (error = Stream_parse_failed
-        {reason="responses_replay:conflicting_reasoning_item";raw=""})
+  | Error (Stream_parse_failed { reason; raw }) ->
+    Alcotest.(check string) "changed opaque ciphertext is still refused"
+      "responses_replay:conflicting_reasoning_item" reason;
+    Alcotest.(check bool) "the record names both deliveries" true
+      (let contains needle = match
+         let rec search i =
+           if i + String.length needle > String.length raw then false
+           else if String.sub raw i (String.length needle) = needle then true
+           else search (i + 1)
+         in search 0
+       with found -> found in
+       contains "stored{opaque id=" && contains "incoming{opaque id="
+       && contains "sha256:");
+    Alcotest.(check bool) "the record never carries the ciphertext" true
+      (not (let contains needle = match
+         let rec search i =
+           if i + String.length needle > String.length raw then false
+           else if String.sub raw i (String.length needle) = needle then true
+           else search (i + 1)
+         in search 0
+       with found -> found in
+       contains "changed-ciphertext" || contains "unchanged-opaque-ciphertext"))
+  | Error _ -> Alcotest.fail "conflict refused with an untyped failure"
   | Ok _ -> Alcotest.fail "changed opaque ciphertext was accepted"
+
+(* An echo without an id cannot be identified as the stored item. The done item
+   is the one OpenAI names as authoritative, so the echo keeps it instead of
+   failing the turn: a positional match across the two capture paths is not
+   evidence that the two deliveries are one item. *)
+let encrypted_reasoning_blank_echo_id () =
+  let state, acc = start () in
+  let original = `Assoc encrypted_reasoning_fields in
+  done_item state acc 0 original;
+  let blank_id =
+    ("encrypted_content", `String "drifted-ciphertext")
+    :: List.remove_assoc "id"
+         (List.remove_assoc "encrypted_content" encrypted_reasoning_fields)
+  in
+  terminal state acc [`Assoc blank_id];
+  match Acc.finalize_stream_acc acc with
+  | Ok response ->
+    Alcotest.(check bool) "an id-less echo keeps the stored done item" true
+      (response.content = [RedactedThinking (Yojson.Safe.to_string original)])
+  | Error _ -> Alcotest.fail "an id-less echo killed the turn"
+
+(* The terminal array only orders items. When an item is missing from the array
+   or the echo reorders it, the array position no longer matches the done
+   frame's output_index; the non-blank id both paths carry is the identity to
+   compare on. *)
+let encrypted_reasoning_terminal_index_shift () =
+  let state, acc = start () in
+  let reasoning = `Assoc encrypted_reasoning_fields in
+  let message = named "msg_0" (item ~phase:(`String "commentary") ["checking"]) in
+  done_item state acc 0 reasoning;
+  done_item state acc 1 message;
+  terminal state acc [message; reasoning];
+  match Acc.finalize_stream_acc acc with
+  | Ok response ->
+    Alcotest.(check bool) "a shifted terminal position reuses the id's own index" true
+      (response.content
+       = [ RedactedThinking (Yojson.Safe.to_string reasoning); Text "checking" ])
+  | Error _ -> Alcotest.fail "a reordered echo failed a response it only re-ordered"
+
+(* Two different non-blank ids are two different items, not one item delivered
+   twice. That stays a refusal, and it keeps its own reason so the record never
+   reports a ciphertext conflict that did not happen. *)
+let encrypted_reasoning_distinct_identities () =
+  let state, acc = start () in
+  done_item state acc 0 (`Assoc encrypted_reasoning_fields);
+  let other =
+    ("id", `String "other-reasoning-item")
+    :: ("encrypted_content", `String "other-ciphertext")
+    :: List.remove_assoc "id"
+         (List.remove_assoc "encrypted_content" encrypted_reasoning_fields)
+  in
+  terminal state acc [`Assoc other];
+  match Acc.finalize_stream_acc acc with
+  | Error (Stream_parse_failed { reason; _ }) ->
+    Alcotest.(check string) "another item's id never reads as a ciphertext conflict"
+      "responses_replay:conflicting_output_item_identity" reason
+  | Error _ -> Alcotest.fail "the identity conflict lost its reason"
+  | Ok _ -> Alcotest.fail "an output index rebound to another identified item"
 end
 
 let cache_roundtrip () =
@@ -230,4 +307,7 @@ let () = Alcotest.run "provider replay conformance" [
   Alcotest.test_case "unsupported custom terminal" `Quick Streams.unsupported_custom;
   Alcotest.test_case "incomplete malformed call" `Quick Streams.incomplete_malformed_tool;
   Alcotest.test_case "encrypted reasoning key order" `Quick Streams.encrypted_reasoning_reordered;
-  Alcotest.test_case "changed encrypted reasoning" `Quick Streams.encrypted_reasoning_changed]]
+  Alcotest.test_case "changed encrypted reasoning" `Quick Streams.encrypted_reasoning_changed;
+  Alcotest.test_case "id-less encrypted reasoning echo" `Quick Streams.encrypted_reasoning_blank_echo_id;
+  Alcotest.test_case "shifted terminal encrypted reasoning" `Quick Streams.encrypted_reasoning_terminal_index_shift;
+  Alcotest.test_case "distinct encrypted reasoning identities" `Quick Streams.encrypted_reasoning_distinct_identities]]

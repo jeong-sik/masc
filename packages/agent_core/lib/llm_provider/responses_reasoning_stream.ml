@@ -78,14 +78,44 @@ let opaque_ciphertext = function
    the whole item again. The echo can drift in envelope fields (an added
    status, a blank versus present id, omitted empty channels) while carrying
    the same ciphertext; OpenAI names the done item as the authoritative one to
-   replay, so equality is decided on the ciphertext projection and the stored
-   done item wins. A different ciphertext still fails closed. *)
+   replay, so the stored done item wins.
+
+   Two deliveries are the same item only when both carry the same non-blank
+   [id]. Then the ciphertext projection decides: equal keeps the done item, a
+   different ciphertext still fails closed. When either side has no [id] the
+   identity is unknown, and a match is not evidence: the two captures take
+   their key from different sources (the event's [output_index] versus the
+   terminal array position), so an unknown identity can put two different
+   items on one key. Keeping the stored item there costs at most one echoed
+   reasoning item; failing the turn costs the whole turn. The error therefore
+   means exactly one thing: one positively identified item whose ciphertext
+   changed between its two deliveries. *)
+let item_id = function
+  | `Assoc fields ->
+    (match List.assoc_opt "id" fields with
+     | Some (`String value) when nonblank value -> Some value
+     | _ -> None)
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let same_item left right = match item_id left,item_id right with
+  | Some first,Some second -> String.equal first second
+  | Some _,None | None,Some _ | None,None -> false
+;;
+
+let describe state = match state.opaque with
+  | None -> "none"
+  | Some item -> Responses_reasoning.describe (Responses_reasoning.Opaque item)
+;;
+
 let item state incoming = match state.opaque,incoming with
   | Some original,Responses_reasoning.Opaque raw ->
-    (match opaque_ciphertext original,opaque_ciphertext raw with
-     | Some observed,Some replayed when String.equal observed replayed ->
-       Ok(state,Unchanged)
-     | _ -> Error "responses_replay:conflicting_reasoning_item")
+    if not(same_item original raw) then Ok(state,Unchanged)
+    else
+      (match opaque_ciphertext original,opaque_ciphertext raw with
+       | Some observed,Some replayed when String.equal observed replayed ->
+         Ok(state,Unchanged)
+       | _ -> Error "responses_replay:conflicting_reasoning_item")
   | None,Responses_reasoning.Opaque raw ->
     Ok({state with opaque=Some raw},Redact(Yojson.Safe.to_string raw))
   | Some _,Responses_reasoning.Plaintext channels ->

@@ -210,14 +210,61 @@ let responses_accept_output_identity state emit output_index = function
     (match Hashtbl.find_opt state.responses_output_ids output_index with
      | None -> Hashtbl.add state.responses_output_ids output_index id;true
      | Some previous when String.equal previous id -> true
-     | Some _ -> emit(SSEParseFailed{raw="";reason="responses_replay:conflicting_output_item_identity"});false)
+     | Some previous ->
+       emit(SSEParseFailed
+         { raw=Printf.sprintf "output_index=%d stored_id=%S incoming_id=%S"
+             output_index previous id
+         ; reason="responses_replay:conflicting_output_item_identity" });
+       false)
 ;;
 
-let responses_reasoning_update state emit ~output_index apply =
+(* A done frame names its item's place with the event's [output_index]; the
+   terminal [output] array only orders the items. When the two disagree -- an
+   item absent from the array, a reordered echo -- the array position would
+   compare one item against another item's stored state. The non-blank [id] is
+   the identity both paths agree on, so it wins whenever the first capture
+   recorded it. Positions stay the fallback for id-less items. *)
+let responses_index_of_item_id state id =
+  Hashtbl.fold
+    (fun index recorded found ->
+       match found with
+       | Some _ -> found
+       | None -> if String.equal recorded id then Some index else None)
+    state.responses_output_ids None
+;;
+
+(* A failure record needs the frame's identity, not its payload: the type, the
+   id, the byte length and a digest prefix locate the item afterwards without
+   copying prompt text, reasoning text or ciphertext into the diagnostic. *)
+let responses_wire_item_digest ~output_index item =
+  let json = Yojson.Safe.to_string item in
+  let digest = Agent_core_sha256.(to_hex (digest_string json)) in
+  Printf.sprintf "output_index=%d type=%S id=%S bytes=%d sha256:%s.."
+    output_index
+    (Option.value (responses_member_string_opt "type" item) ~default:"<none>")
+    (Option.value (responses_member_string_opt "id" item) ~default:"<none>")
+    (String.length json) (String.sub digest 0 16)
+;;
+
+let responses_terminal_output_key state position item =
+  match responses_member_string_opt "id" item with
+  | Some id when not (Api_common.string_is_blank id) ->
+    (match responses_index_of_item_id state id with Some index -> index | None -> position)
+  | Some _ | None -> position
+;;
+
+(* The stored item is described, never quoted: the record keeps the two sides
+   distinguishable (id, ciphertext digest prefix, byte length) without the
+   ciphertext, the prompt or the reasoning text. *)
+let responses_reasoning_update ?(describe_incoming=(fun () -> "none")) state emit ~output_index apply =
   let previous=Hashtbl.find_opt state.responses_reasoning output_index
     |> Option.value ~default:Responses_reasoning_stream.empty in
   match apply previous with
-  | Error reason -> emit(SSEParseFailed{raw="";reason})
+  | Error reason ->
+    emit(SSEParseFailed
+      { raw=Printf.sprintf "output_index=%d stored{%s} incoming{%s}"
+          output_index (Responses_reasoning_stream.describe previous) (describe_incoming ())
+      ; reason })
   | Ok(next,update) ->
     Hashtbl.replace state.responses_reasoning output_index next;
     (match update with
@@ -279,8 +326,12 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
      | None -> ()
      | Some kind ->
     (match Responses_reasoning.decode item with
-     | Error reason -> emit(SSEParseFailed{raw="";reason})
-     | Ok incoming -> responses_reasoning_update state emit ~output_index
+     | Error reason ->
+       emit(SSEParseFailed{raw=responses_wire_item_digest ~output_index item;reason})
+     | Ok incoming ->
+       responses_reasoning_update
+         ~describe_incoming:(fun ()->Responses_reasoning.describe incoming)
+         state emit ~output_index
          (fun previous->Responses_reasoning_stream.item previous incoming));
     capture kind (Option.to_list(Hashtbl.find_opt state.responses_thinking_blocks output_index)))
   | Some "function_call" ->
@@ -335,8 +386,15 @@ let responses_capture_terminal_outputs state emit response =
   (match response |> member "output" with
    | `List items ->
      Hashtbl.clear state.responses_output_groups;
-     List.iteri (fun output_index item ->
-       responses_capture_output_item ~drop_function_call state emit ~output_index item) items
+     (* Capture in output-index order, not array order: content blocks are
+        allocated as they are captured and the replay groups name them by that
+        allocation order, so a reordered echo would otherwise put a later
+        item's block before an earlier one's. *)
+     items
+     |> List.mapi (fun position item -> responses_terminal_output_key state position item,item)
+     |> List.stable_sort (fun (left,_) (right,_) -> Int.compare left right)
+     |> List.iter (fun (output_index,item) ->
+       responses_capture_output_item ~drop_function_call state emit ~output_index item)
    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> ());
   let explicit_output=match response |> member "output" with `List _->true
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> false in

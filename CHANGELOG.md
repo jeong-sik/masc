@@ -4,8 +4,8 @@
 
 ### 요약
 
-- 이 창은 `v0.77.1`(태그 `2bbe20cd`) 뒤 main 에 들어간 일곱 PR 을 `0.78.0`(minor)으로 내보냅니다. 사용자가 보는 동작이 바뀌는 항목은 TUI 두 건(#54221·#54243)이고, 나머지는 규약·RFC 문서 세 건(#54284·#54204·#54219), 온보딩 시험 단언 한 건(#54277), 전량 회귀 샤딩 스크립트 한 건(#54281)입니다.
-- 이 릴리스는 main `1f8f8432eaa99809268c36b8b53cc4694afb4844` 위에 버전 올림 커밋 하나만 얹었습니다. changelog 조각(`changelog.d/`)은 접지 않았습니다.
+- 이 창은 `v0.77.1`(태그 `2bbe20cd`) 뒤 main 에 들어간 열네 PR 을 `0.78.0`(minor)으로 내보냅니다. 그중 셋(#54191·#54285·#54289)은 `### Exempt` 라 절에 넣지 않았고, 아래 절이 나머지 열한 PR 을 담습니다. 사용자가 보는 동작이 바뀌는 항목은 TUI 두 건(#54221·#54243), 서버 권한·엔진 두 건(#54278·#54236), Librarian 경보 수리 한 건(#54280), MSX 코어 핀 상향 한 건(#54291)이고, 나머지는 규약·RFC 문서 세 건(#54284·#54204·#54219), 온보딩 시험 단언 한 건(#54277), 전량 회귀 샤딩 스크립트 한 건(#54281)입니다.
+- 이 릴리스는 main `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 위에 버전 올림 커밋 하나만 얹었습니다. changelog 조각(`changelog.d/`)은 접지 않았습니다.
 - `#54281` 의 샤딩은 스크립트에만 들어갔고 `Test` 워크플로는 아직 `SUITE_SHARD_COUNT` 를 넘기지 않습니다(기본값 1 이면 종전과 같은 한 번의 `@runtest` 빌드). 이 릴리스 자체로 CI 디스크 피크가 낮아지지는 않습니다.
 
 ### Changed
@@ -13,10 +13,14 @@
 - Keeper 로그·Connectors·저장한 준비 기록·composer 행 화면이 이미 가진 값에 대한 읽기가 도는 동안 "refreshing"/"rechecking" 문장을 더는 그리지 않습니다. 로컬 읽기(Keeper 명부, Work task, chat live context)는 제목 줄 끝의 reading slot 에서 세고, Keepers·Work 머리는 느린 로컬 읽기에 단계 행을 그리지 않습니다. slot 은 열린 화면에서 시작한 읽기만 그리므로, 다른 화면에서 시작한 느린 로컬 읽기는 Keepers·Work 화면이 가진 목록을 보여 주는 동안 어디에도 그려지지 않습니다 (#54221).
 - RFC `a-person-reads-their-own-and-the-shared` 가 권고 대신 결정 일곱을 적습니다: scope 를 닫힌 합타입으로 둔 하나의 라우트 표, Admin 에게 연 host 라우트(원문 `runtime.toml` 은 닫아 둠), 사람의 Keeper 내용은 주인에게만 보이고 그 경계를 초대받은 사람에게 적기, 키가 되지 않고 그 사람 자신의 쓰기로만 바뀌는 파싱된 표시 이름, Board 작성자를 (사람 id, Keeper id) 로 적기, 한 주인 안의 분리는 사용자 결정으로 남김, 큐레이션과 Librarian 은 주인 계정에서만. 첫 행은 #54193 에 들어간 큐레이터 guard 와 남은 일(다계정 엔진이 Librarian 을 묻지 않는 것, 주인의 기억 폴더)을 나눕니다 (#54204).
 - RFC #53746 §3.4(L5)가 턴 컨텍스트가 오늘 사는 방식(턴 첫 요청 끝에 한 번 실리고 그 뒤 요청 입력에는 없음)과 L5 의 구현 모양(바깥 글 메시지가 `Outside_context` 기원을 지니고 호출자 메시지 바로 앞에 서며 이력에서 잘리지 않고, 각 요청의 projection 이 창이 이미 지닌 절·줄을 덜어 같은 창이 같은 바이트를 보냄)을 적고, 대가 `w·ΔO + c·O·(1+m)` 를 lane 별 측정 요청 수와 함께 둡니다. 새 §3.6 은 recall 을 창 머리 층이 아니라 사실 한 줄씩 L5 에 넣는 운영자 결정과 그 근거 측정을 적고, §8 은 L5 이전 첫 차이 기준선을 더합니다 (#54219).
+- An Admin credential no longer reads every Keeper's Direct board posts: it answers as a workspace member of that person, so it reads only the Direct posts addressed to that person's Board id and no longer sees another person's Direct hearth names or counts. The single-user path (`require_token = false`) still answers as the operator, and the `/health` route keeps its existing `Reads` semantics for the new reader (#54278).
+- Pins ocaml-msx to main `581da90`, 29 commits after the previous pin `cec4233`. The Z80 takes an M1 wait state per instruction, RAM powers on at 0xFF, a plain ROM cartridge sits where its "AB" header points, and several RTC, PPI, PSG and VDP port reads and writes change, so an MSX game can run at a different speed and boot differently than on the previous pin. The save-state format moves from v3 to v6. The new core reads formats 1-6, so a checkpoint saved on the previous pin restores, and the previous core cannot read a checkpoint the new core saves. Servers built from this version link the new core; individual games are not re-verified by this change. (#54291)
 
 ### Fixed
 
 - TUI About 화면이 Keeper 수를 명부 읽기에 실패하면 ✕, 읽기 전이면 ◌ 로 그립니다("읽기 불가"/"불러오기 전" 대신) (#54243).
+- Librarian writer alarm E4 no longer goes off while the pulse asks the refused item again. E4 now reads the refusal the last ask left (`Librarian_last.Refused_not_all_sized`, with the snapshot and the lane value it was judged against) and not the writer's state, so the level stays `error` until an ask judges other bytes. A declared slot the registry did not admit is counted as a silent slot on the row (RFC §7.2): that end leaves W1, not E4 (#54280).
+- The multi-account engine no longer starts the Librarian's Memory writers or the Librarian Addon wake. The engine RFC refuses the Librarian in multi-account, but the engine started the writers, which read no account: their CLI slots failed only because the multi-account lookup misses the operator's Runtime, and nothing stopped their HTTP slots. One predicate, `runs_memory_lanes`, now decides the writers, the Addon wake and the World Memory curator on the access kind, and the initialized owner state carries the access it was initialized on (#54236).
 
 ### Documentation
 

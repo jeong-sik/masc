@@ -663,6 +663,11 @@ type memory_msg =
   | Memory_facts_loaded of
       string Masc_tui_fetched.request
       * (Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option, request_failure) result
+  (* The answer to an operator act on a Keeper's Memory writer, with the
+     Keeper and the act it answers. *)
+  | Memory_act_answered of
+      string * Masc.Tui_decode_memory_act.act
+      * (Masc_tui_http.memory_act_outcome, workspace_refusal) result
 
 type repository_msg =
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
@@ -1290,6 +1295,7 @@ let rec workspace_message_is_read = function
   | Exact_msg (Exact_activity_saved _)
   | Machine_msg (Machine_activity_saved _)
   | Runtime_msg (Runtime_param_written _)
+  | Memory_msg (Memory_act_answered _)
   | Board_msg (Board_quarantine_requeued _
   | Board_quarantines_bulk_progress _
   | Board_quarantines_bulk_requeued _)
@@ -1401,7 +1407,8 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Keeper_sandbox_logs_loaded _) | Exact_msg (Exact_activity_read _ | Exact_activity_saved _)
   | Machine_msg (Machine_activity_read _ | Machine_activity_saved _) | Runtime_msg (Runtime_config_view_loaded _
   | Runtime_params_loaded _ | Runtime_param_written _) | Prompts_loaded _
-  | Keeper_msg (Keeper_board_quarantines_loaded _ | Keeper_efficiency_loaded _) | Board_msg (Board_quarantine_requeued _
+  | Keeper_msg (Keeper_board_quarantines_loaded _ | Keeper_efficiency_loaded _) | Memory_msg (Memory_act_answered _)
+  | Board_msg (Board_quarantine_requeued _
   | Board_quarantines_bulk_progress _ | Board_quarantines_bulk_requeued _) | Preset_msg (Presets_listed _
   | Preset_detail_loaded _ | Preset_contents_shown _ | Preset_saved _ | Preset_restored _
   | Preset_deleted _) | Play_msg (Play_room_received _ | Play_invites_listed _ | Play_invite_issued _
@@ -1567,6 +1574,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Machine_activity_saved (_, _)) | Runtime_msg (Runtime_config_view_loaded (_, _, _, _, _)
     | Runtime_params_loaded _ | Runtime_param_written (_, _))
     | Prompts_loaded (_, _) | Keeper_msg (Keeper_board_quarantines_loaded (_, _) | Keeper_efficiency_loaded (_, _))
+    | Memory_msg (Memory_act_answered (_, _, _))
     | Board_msg (Board_quarantine_requeued (_, _, _)
     | Board_quarantines_bulk_progress (_, _)
     | Board_quarantines_bulk_requeued (_, _)) | Preset_msg (Presets_listed (_, _)
@@ -1711,6 +1719,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Machine_activity_saved (_, _)) | Runtime_msg (Runtime_config_view_loaded (_, _, _, _, _)
   | Runtime_params_loaded _ | Runtime_param_written (_, _))
   | Prompts_loaded (_, _) | Keeper_msg (Keeper_board_quarantines_loaded (_, _) | Keeper_efficiency_loaded (_, _))
+  | Memory_msg (Memory_act_answered (_, _, _))
   | Board_msg (Board_quarantine_requeued (_, _, _)
   | Board_quarantines_bulk_progress (_, _)
   | Board_quarantines_bulk_requeued (_, _)) | Preset_msg (Presets_listed (_, _)

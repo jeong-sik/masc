@@ -654,6 +654,11 @@ type memory_msg =
   | Memory_facts_loaded of
       string Masc_tui_fetched.request
       * (Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option, request_failure) result
+  (* The answer to an operator act on a Keeper's Memory writer, with the
+     Keeper and the act it answers. *)
+  | Memory_act_answered of
+      string * Masc.Tui_decode_memory_act.act
+      * (Masc_tui_http.memory_act_outcome, workspace_refusal) result
 
 type repository_msg =
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result

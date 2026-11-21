@@ -281,3 +281,39 @@ let open_all_fleet_memory (state : Masc_tui_types.state) ~mailbox =
   state.memory_facts_scroll <- 0;
   state.memory_facts_category <- Masc_tui_types.Category_all;
   launch_all_memory_facts_load state ~mailbox
+
+(* The second press of the Memory writer key: one act on the Keeper's
+   writer, sent with the value the operator saw on the row. The server reads
+   the disk again and answers; whatever it says comes back as one message. *)
+let launch_memory_act (state : Masc_tui_types.state) ~mailbox ~keeper act =
+  let enqueue_async =
+    Masc_tui_transport.Workspace_admission.workspace_enqueue state
+  in
+  let authority = state.workspace_authority in
+  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
+  let port = state.port in
+  let answered outcome =
+    Masc_tui_async_protocol.Memory_msg
+      (Masc_tui_async_protocol.Memory_act_answered (keeper, act, outcome))
+  in
+  let run () =
+    let outcome =
+      try
+        (match Masc_tui_types.write_authority_refusal state authority with
+         | Some refusal -> Error refusal
+         | None ->
+             Ok (Masc_tui_http.post_keeper_memory_act ~host ~port ~keeper act))
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+          Ok (Masc_tui_http.Memory_act_unanswered (Printexc.to_string exn))
+    in
+    enqueue_async mailbox (answered outcome)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Masc_tui_transport.Workspace_admission.fork_job state ~mailbox ~sw run
+  | None ->
+      enqueue_async mailbox
+        (answered
+           (Ok (Masc_tui_http.Memory_act_unanswered "Eio switch is unavailable")))

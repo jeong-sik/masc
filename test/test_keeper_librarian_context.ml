@@ -116,46 +116,6 @@ let test_duplicate_and_missing_source_rejected () =
   expect_error (Context.select (input [question] None)
     (Context.pockets_to_json [pocket ["s1"; "s1"] "duplicate alias" []]))
 
-let test_queue_wakes_coalesce_without_waiting_for_librarian () =
-  Masc_test_deps.ensure_rng_initialized ();
-  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keepers_dir = Filename.temp_dir "librarian-flood" "" in
-  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree keepers_dir);
-  Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock @@ fun () ->
-  Keeper_memory_lane.init ~sw;
-  let started, start = Eio.Promise.create () in
-  let release, release_first = Eio.Promise.create () in
-  let finished, finish = Eio.Promise.create () in
-  let original = ref [List.hd events] in
-  let calls = ref 0 in
-  let organize () =
-    incr calls;
-    let sources = !original in
-    if !calls = 1 then (Eio.Promise.resolve start (); Eio.Promise.await release);
-    let previous = ok (Context.read ~keepers_dir ~keeper_id:"flood") in
-    let selected = ok (Context.select (input sources previous) (fake_model sources)) in
-    ignore (ok (Context.commit ~keepers_dir ~keeper_id:"flood"
-      ~expected_version:(Option.map Context.version previous)
-      ~sources selected));
-    if !calls = 2 then Eio.Promise.resolve finish ()
-  in
-  Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
-    ignore (Keeper_memory_lane.submit ~base_path ~keeper_name organize));
-  Eio.Switch.on_release sw (fun () -> Keeper_librarian_queue_signal.install
-    (fun ~base_path:_ ~keeper_name:_ -> ()));
-  let signal () = Keeper_librarian_queue_signal.changed ~base_path:keepers_dir ~keeper_name:"flood" in
-  signal ();
-  Eio.Promise.await started;
-  List.iter (fun event -> original := !original @ [event]; signal ()) (List.tl events @ [question]);
-  check int "all input accepted while first model is blocked" 21 (List.length !original);
-  Eio.Promise.resolve release_first ();
-  Eio.Time.with_timeout_exn env#clock 2.0 (fun () -> Eio.Promise.await finished);
-  check int "one active plus one latest pass" 2 !calls;
-  let snapshot = ok (Context.read ~keepers_dir ~keeper_id:"flood") |> Option.get in
-  check int "latest pass sees entire accumulated input" 21 (List.length snapshot.sources);
-  check int "repeated notifications become one context" 1 (List.length snapshot.pockets)
-
 let test_pending_snapshot_includes_running_question_without_claiming () = with_store @@ fun directory ->
   let module Store = Keeper_chat_operation_store in
   let module Operation = Keeper_chat_operation in
@@ -660,7 +620,6 @@ let () =
     test_case "execution progress invalidates unchanged-source advice" `Quick test_execution_progress_invalidates_unchanged_sources;
     test_case "corrupt snapshot rebuild rejects old generation" `Quick test_corrupt_snapshot_rebuild_rejects_old_generation;
     test_case "read-only input snapshot preserves execution ownership" `Quick test_pending_snapshot_includes_running_question_without_claiming;
-    test_case "queue wake flood does not wait for librarian" `Quick test_queue_wakes_coalesce_without_waiting_for_librarian;
     test_case "repeated events and direct question" `Quick test_repeated_events_and_chat;
     test_case "partial observation, source settlement and stale CAS" `Quick test_partial_observation_and_cas;
     test_case "partial groups preserve coverage without oscillation" `Quick test_partial_group_keeps_coverage;

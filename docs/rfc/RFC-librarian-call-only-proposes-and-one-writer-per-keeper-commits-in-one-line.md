@@ -884,7 +884,7 @@ type hole =
   | Unknown_span of { before : mark; after : mark }
   | Turn_log_replaced of { from : Turn_log_id.t; to_ : Turn_log_id.t }
   | Position_lost of { offset : int; length : int }
-  | Operator_skipped of { by : string }
+  | Operator_skipped of { by : string; missing : missing_at list }   (* 운영자가 맨 앞을 지나갔다. 그 질문이 싣지 못했을 부분 *)
 type alone_working_state =
   | Untouched                  (* 답이 하던 일을 그대로 뒀다 *)
   | Not_valid_alone            (* 답이 하던 일을 바꾸려 했다. 반영하지 않았다 (§6.2) *)
@@ -1625,7 +1625,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 |---|---|---|
 | `Resume` | `Stopped` | 저장소 시작을 다시 한다. 턴 기록 파일을 확인한 뒤 boot 한다(§8.6) |
 | | `Resting`, `Refused_at_bottom` | 바닥에서 받은 크기 사실을 지우고 바로 다시 묻는다 |
-| `Skip_item i` | i 가 지금 첫 안 읽은 항목이다 | `Skip (Operator_skipped)` 줄을 쓰고 그 항목을 지나간다 |
+| `Skip_item i` | i 가 지금 읽는 쪽의 맨 앞이다 | `Skip (Operator_skipped)` 줄을 쓰고 맨 앞을 지나간다 |
 | `Skip_line { offset }` | 읽는 쪽을 지금 다시 돌리면 그 offset 의 줄을 해석하지 못한다고 답한다 | `Skip (Line_unreadable)` 줄을 쓰고 그 줄을 지나간다 |
 | `Restart_reading { observed }` | 디스크의 턴 기록 id 가 `observed` 다. 그 id 가 마지막 반영 줄의 것과 다르거나, 같은데 저장한 offset 이 파일 끝을 넘거나 줄 시작이 아니다 | `Skip (Turn_log_replaced)` 나 `Skip (Position_lost)` 줄을 쓰고 그 파일을 처음부터 읽는다 |
 | `Adopt { observed }` | `Stopped (Log_diverged _)` 나 `Stopped Log_unreadable` 이고, 스냅샷 파일의 sha 가 `observed` 이며 codec 으로 해석된다 | §8.7 |
@@ -1634,9 +1634,20 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 - 조건은 행동을 반영하는 순간에 디스크에서 다시 읽는다. 상태나 마지막 묻기의 결과를 믿지 않는다. 그래서 재시작 뒤에도, 묻기가 실패한 뒤에도 쓸 수 있다.
 - 읽는 쪽은 잘못을 정해진 순서로 본다. 턴 기록의 id, 저장한 offset, 줄 해석이다. 그래서 바뀌었거나 잘린 파일의 줄 토막을 `Skip_line` 으로 지나칠 수 없다. 그때 받는 행동은 `Restart_reading` 이다.
 - `Skip_line` 은 읽을 수 있는 단위를 지나치지 못한다. 읽는 쪽은 해석 못 하는 줄 앞의 항목 든 단위를 먼저 묻고 반영한다. 그 줄 앞에 항목 든 단위가 없을 때만 받는다. 앞에 놓인 항목 없는 단위는 같이 지나간다.
-- 받아들인 건너뛰기는 가던 묻기를 취소한다. 거절한 행동은 아무것도 바꾸지 않는다.
-- route 는 `Done` 이나 `Refused of reason` 으로 답하고, 화면이 그 이유를 그린다. 이유는 닫힌 타입이다: `Not_the_head`, `Not_the_faulted_line`, `Not_replaced`, `Turn_log_unread`, `Not_stopped`, `Nothing_to_resume`, `Snapshot_mismatch`, `Snapshot_unreadable`, `Store_stopped s`, `Keeper_retired`.
-- 턴 기록을 그 순간 읽지 못하면 조건을 보지 못한 것이다. `Turn_log_unread` 로 거절한다. 조건이 틀렸다는 답(`Not_replaced` 등)과 섞지 않는다.
+- 받아들인 건너뛰기는 가던 묻기를 취소한다. 거절한 행동은 아무것도 바꾸지 않는다. 가던 묻기도 그대로 간다.
+- `Skip_item` 의 i 는 둘 가운데 하나다. 둘 다 읽는 쪽이 서 있는 턴 기록의 id 를 싣는다. 그래서 다른 파일에서 읽은 이름은 받지 않는다.
+
+  ```ocaml
+  type skip_target =
+    | Head_item of { turn_log : Turn_log_id.t; line : int; item : item_name }   (* 첫 안 읽은 항목 *)
+    | Unreadable_unit of { turn_log : Turn_log_id.t; line : int }               (* 내용이 지금 읽히지 않는 맨 앞 단위 *)
+  ```
+
+- `Skip_item` 은 맨 앞 항목 하나만 묻는 질문을 만들 때처럼 턴 기록과 단위 내용을 읽는다. `Head_item` 이면 그 질문이 실었을 것을 지나가고, 그 질문이 부족하다고 적었을 부분을 줄의 `missing` 에 남긴다. `Unreadable_unit` 이면 그 단위를 끝까지 지나간다. 읽히지 않은 내용이라 `missing` 은 비어 있다.
+- 받아들인 `Skip_item` 은 크기 사실을 비우고, 폭 기억에는 지나간 만큼 반영으로 센다(§7.6). 그다음 묻기가 이어진다.
+- i 가 지금의 맨 앞이 아니면 `Not_the_head { now }` 로 거절한다. `now` 는 지금의 맨 앞 이름이고, 운영자는 그 이름을 다시 보낸다. 맨 앞이 없으면 `now` 가 비어 있다. 안 읽은 것이 없을 때, 맨 앞 단위의 항목이 모두 없어 쓰는 쪽이 스스로 지나갈 때(`Content_missing`), 읽는 쪽이 다른 행동으로 지나갈 줄이나 턴 기록에서 멈출 때다.
+- route 는 `Done` 이나 `Refused of reason` 으로 답하고, 화면이 그 이유를 그린다. 이유는 닫힌 타입이다: `Not_the_head`, `Not_the_faulted_line`, `Not_replaced`, `Turn_log_unread`, `Content_unread`, `Not_stopped`, `Nothing_to_resume`, `Snapshot_mismatch`, `Snapshot_unreadable`, `Store_stopped s`, `Keeper_retired`.
+- 턴 기록을 그 순간 읽지 못하면 조건을 보지 못한 것이다. `Turn_log_unread` 로 거절한다. 조건이 틀렸다는 답(`Not_replaced` 등)과 섞지 않는다. `Skip_item` 은 단위 내용도 읽는다. 바이트 파일이나 바깥 저장소를 그 순간 읽지 못하면 `Content_unread` 로 거절한다.
 - `Restart_reading` 은 읽는 쪽이 본 파일이 `observed` 의 파일일 때만 받는다. 읽는 쪽은 첫 줄을 다시 읽으므로, 그 사이 또 바뀐 파일의 결함을 `observed` 의 것으로 적지 않는다.
 - `Done` 의 답은 그 뒤 저장소의 상태를 같이 싣는다. `Resume` 이 boot 를 다시 돌렸는데 같은 이유로 멈췄으면 그 이유가 답에 있다. `Log_diverged` 로 멈췄으면 반영 기록이 가리키는 sha 와 파일의 sha 를 싣는다. 파일의 sha 가 `Adopt` 에 넣을 값이다.
 - 옛 route 인 `memory-catch-up` 은 쓰는 쪽을 켜기 전에 지운다(§20 L5p). 쓰는 쪽은 턴 기록과 pulse 로 할 일을 찾으므로 운영자가 깨우는 길을 두지 않는다. 일괄 cleanup 의 Memory 철회는 쓰는 쪽으로 쓴다(§8.5). `memory-journal`, `memory-facts` 는 지우는 층에서 저마다 지우거나 반영 기록을 읽게 고친다(§19.2).
@@ -2201,6 +2212,7 @@ Keeper 하나와 그 쓰는 쪽이다. Memory 는 fact 이름의 집합이고, �
 | 줄이 들어가기 전에 읽은 자리를 옮긴다 | `PositionHasLine` |
 | 받아들인 `Skip_line` 이 마지막 묻기의 결과를 남긴다 | `E3OnHeadLine` |
 | 거절한 운영자 행동이 가던 묻기를 취소한다 | `AskingHasAnAsk` |
+| 받아들인 `Skip_item` 이 가던 묻기를 남겨, 그 답이 건너뛴 뒤에 반영된다 | `PositionMoves` |
 | 지금 묻기가 아닌 답을 반영한다 | `AnswerOnlyWhenCurrent` |
 | 계획이 그사이의 철회를 보지 않는다 | `NoUndoRetract` |
 

@@ -21,30 +21,117 @@ type action =
   | Resume
   | Adopt of { observed : Digest.digest }
   | Restart_reading of { observed : Keeper_turn_log.Log_id.t }
+  | Skip_item of { target : Librarian_machine.skip_target }
 
 (* The wire name of each action, from one closed list. *)
 type kind =
   | Kind_resume
   | Kind_adopt
   | Kind_restart_reading
+  | Kind_skip_item
 
 let kind_token = function
   | Kind_resume -> "resume"
   | Kind_adopt -> "adopt"
   | Kind_restart_reading -> "restart_reading"
+  | Kind_skip_item -> "skip_item"
 ;;
 
-let kinds = [ Kind_resume; Kind_adopt; Kind_restart_reading ]
+let kinds = [ Kind_resume; Kind_adopt; Kind_restart_reading; Kind_skip_item ]
 let kind_of_token token = List.find_opt (fun kind -> String.equal (kind_token kind) token) kinds
 let field_action = "action"
 let field_observed = "observed"
+let field_target = "target"
+
+(* A skip's target, as the request names it and a [Not_the_head] refusal
+   names the one now. *)
+type target_kind =
+  | Kind_head_item
+  | Kind_unreadable_unit
+
+let target_kind_token = function
+  | Kind_head_item -> "head_item"
+  | Kind_unreadable_unit -> "unreadable_unit"
+;;
+
+let target_kinds = [ Kind_head_item; Kind_unreadable_unit ]
+
+let target_kind_of_token token =
+  List.find_opt (fun kind -> String.equal (target_kind_token kind) token) target_kinds
+;;
+
+let field_kind = "kind"
+let field_turn_log = "turn_log"
+let field_line = "line"
+let field_store = "store"
+let field_at = "at"
+
+let target_json : Librarian_machine.skip_target -> Yojson.Safe.t = function
+  | Head_item { turn_log; line; item = { store; at } } ->
+    `Assoc
+      [ field_kind, `String (target_kind_token Kind_head_item)
+      ; field_turn_log, `String (Keeper_turn_log.Log_id.to_string turn_log)
+      ; field_line, `Int line
+      ; field_store, `String (Librarian_log_codec.store_token store)
+      ; field_at, `Int at
+      ]
+  | Unreadable_unit { turn_log; line } ->
+    `Assoc
+      [ field_kind, `String (target_kind_token Kind_unreadable_unit)
+      ; field_turn_log, `String (Keeper_turn_log.Log_id.to_string turn_log)
+      ; field_line, `Int line
+      ]
+;;
 
 let request_shape =
   Printf.sprintf
-    {|the request is {"%s":"%s"}, {"%s":"%s","%s":"<sha256 hex>"} or {"%s":"%s","%s":"<turn log id>"}|}
+    {|the request is {"%s":"%s"}, {"%s":"%s","%s":"<sha256 hex>"}, {"%s":"%s","%s":"<turn log id>"} or {"%s":"%s","%s":{"%s":"%s","%s":"<turn log id>","%s":<offset>,"%s":"<store>","%s":<index>}}, the last with "%s":"%s" and no %s or %s for a unit that does not read|}
     field_action (kind_token Kind_resume)
     field_action (kind_token Kind_adopt) field_observed
     field_action (kind_token Kind_restart_reading) field_observed
+    field_action (kind_token Kind_skip_item) field_target
+    field_kind (target_kind_token Kind_head_item) field_turn_log field_line field_store field_at
+    field_kind (target_kind_token Kind_unreadable_unit) field_store field_at
+;;
+
+let by_name (left, (_ : Yojson.Safe.t)) (right, (_ : Yojson.Safe.t)) = String.compare left right
+
+(* Offsets and indexes are not negative, as a log line's are. *)
+let target_of_fields fields : (Librarian_machine.skip_target, string) result =
+  let ( let* ) = Result.bind in
+  let turn_log text =
+    match Keeper_turn_log.Log_id.of_string text with
+    | Some id -> Ok id
+    | None -> Error (field_turn_log ^ ": not a turn log id")
+  in
+  let not_negative name value =
+    if value >= 0 then Ok value else Error (name ^ ": negative")
+  in
+  match List.sort by_name fields with
+  | [ (at, `Int index); (kind, `String token); (line, `Int offset); (store, `String spelled)
+    ; (log, `String id)
+    ]
+    when String.equal at field_at
+         && String.equal kind field_kind
+         && String.equal line field_line
+         && String.equal store field_store
+         && String.equal log field_turn_log
+         && Option.equal ( = ) (target_kind_of_token token) (Some Kind_head_item) ->
+    let* turn_log = turn_log id in
+    let* line = not_negative field_line offset in
+    let* at = not_negative field_at index in
+    (match Librarian_log_codec.store_of_token spelled with
+     | Some store -> Ok (Librarian_machine.Head_item { turn_log; line; item = { store; at } })
+     | None -> Error (field_store ^ ": not a store"))
+  | [ (kind, `String token); (line, `Int offset); (log, `String id) ]
+    when String.equal kind field_kind
+         && String.equal line field_line
+         && String.equal log field_turn_log
+         && Option.equal ( = ) (target_kind_of_token token) (Some Kind_unreadable_unit) ->
+    let* turn_log = turn_log id in
+    let* line = not_negative field_line offset in
+    Ok (Librarian_machine.Unreadable_unit { turn_log; line })
+  | _ -> Error request_shape
 ;;
 
 let parse body =
@@ -58,7 +145,9 @@ let parse body =
     | Some observed -> Ok (Restart_reading { observed })
     | None -> Error (field_observed ^ ": not a turn log id")
   in
-  let by_name (left, (_ : Yojson.Safe.t)) (right, (_ : Yojson.Safe.t)) = String.compare left right in
+  let skip fields =
+    Result.map (fun target -> Skip_item { target }) (target_of_fields fields)
+  in
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
   | `Assoc fields ->
@@ -66,13 +155,18 @@ let parse body =
      | [ (action, `String token) ] when String.equal action field_action ->
        (match kind_of_token token with
         | Some Kind_resume -> Ok Resume
-        | Some (Kind_adopt | Kind_restart_reading) | None -> Error request_shape)
+        | Some (Kind_adopt | Kind_restart_reading | Kind_skip_item) | None -> Error request_shape)
      | [ (action, `String token); (observed, `String value) ]
        when String.equal action field_action && String.equal observed field_observed ->
        (match kind_of_token token with
         | Some Kind_adopt -> adopt value
         | Some Kind_restart_reading -> restart value
-        | Some Kind_resume | None -> Error request_shape)
+        | Some (Kind_resume | Kind_skip_item) | None -> Error request_shape)
+     | [ (action, `String token); (target, `Assoc fields) ]
+       when String.equal action field_action && String.equal target field_target ->
+       (match kind_of_token token with
+        | Some Kind_skip_item -> skip fields
+        | Some (Kind_resume | Kind_adopt | Kind_restart_reading) | None -> Error request_shape)
      | _ -> Error request_shape)
   | _ -> Error request_shape
 ;;
@@ -97,6 +191,7 @@ let act ~base_path ~keeper ~actor action =
       | Resume -> Librarian_writers.resume writers keeper
       | Adopt { observed } -> Librarian_writers.adopt writers keeper ~by:actor ~observed
       | Restart_reading { observed } -> Librarian_writers.restart_reading writers keeper ~observed
+      | Skip_item { target } -> Librarian_writers.skip_item writers keeper ~by:actor ~target
     in
     (match answer with
      | Not_done refusal -> Refused refusal
@@ -113,6 +208,7 @@ let action_name = function
   | Resume -> kind_token Kind_resume
   | Adopt { observed = (_ : Digest.digest) } -> kind_token Kind_adopt
   | Restart_reading { observed = (_ : Keeper_turn_log.Log_id.t) } -> kind_token Kind_restart_reading
+  | Skip_item { target = (_ : Librarian_machine.skip_target) } -> kind_token Kind_skip_item
 ;;
 
 (* A stopped store says why in the words the Memory tools use. A store whose
@@ -145,6 +241,14 @@ let refusal_fields : Librarian_machine.act_refusal -> (string * Yojson.Safe.t) l
   | Snapshot_unreadable -> [ "code", `String "snapshot_unreadable" ]
   | Not_replaced -> [ "code", `String "not_replaced" ]
   | Turn_log_unread -> [ "code", `String "turn_log_unread" ]
+  | Not_the_head { now } ->
+    [ "code", `String "not_the_head"
+    ; ( "now"
+      , match now with
+        | Some target -> target_json target
+        | None -> `Null )
+    ]
+  | Content_unread -> [ "code", `String "content_unread" ]
   | Act_unavailable (Store_stopped stop) -> ("code", `String "store_stopped") :: stop_fields stop
   | Act_unavailable Keeper_retired -> [ "code", `String "keeper_not_registered" ]
 ;;

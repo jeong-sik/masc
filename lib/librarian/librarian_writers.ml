@@ -120,6 +120,10 @@ let restart_reading t keeper ~observed =
     Writer.restart_reading writer ~observed)
 ;;
 
+let skip_item t keeper ~by ~target =
+  asked t keeper ~unregistered:act_unregistered (fun writer -> Writer.skip_item writer ~by ~target)
+;;
+
 (* Only the writer that retired leaves the table: by now the Keeper may be
    registered again and have another. *)
 let rec forget t keeper writer =

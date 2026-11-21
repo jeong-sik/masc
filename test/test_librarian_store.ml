@@ -480,6 +480,8 @@ let cause_text : Log.cause -> string = function
   | Skip { hole = Turn_log_replaced _ } -> "skip: another turn log"
   | Skip { hole = Position_lost { offset; length } } ->
     Printf.sprintf "skip: offset %d of a file of %d bytes" offset length
+  | Skip { hole = Operator_skipped { by; missing } } ->
+    Printf.sprintf "skip by %s, %d units missing parts" by (List.length missing)
   | Make_room { question = id; slot; trace } ->
     Printf.sprintf "made room for %s by %s on %s"
       (if Masc.Librarian_question_id.equal id question_id then "the question" else "another")

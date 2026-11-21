@@ -12,6 +12,7 @@ type item_name =
   { store : store
   ; at : int
   }
+[@@deriving eq]
 
 type range =
   { from : int

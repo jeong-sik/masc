@@ -7,6 +7,14 @@
     { "action": "resume" }
     { "action": "adopt", "observed": "<sha256 hex of the snapshot file>" }
     { "action": "restart_reading", "observed": "<id of the turn log file>" }
+    { "action": "skip_item", "target": <target> }
+    v}
+
+    A [target] names the head of reading in the turn log reading stands in:
+
+    {v
+    { "kind": "head_item", "turn_log": "<id>", "line": <offset>, "store": "<store>", "at": <index> }
+    { "kind": "unreadable_unit", "turn_log": "<id>", "line": <offset> }
     v}
 
     - [resume] starts a stopped store again: its boot runs once more. The
@@ -20,6 +28,11 @@
       or at an offset the file does not hold. [observed] is the id the
       file's [Log_started] line names, so a file replaced again meanwhile is
       not read.
+    - [skip_item] passes the head of reading with no answer: the first
+      unread item, or the head unit when its content does not read. A
+      target that is not the head now is refused as [not_the_head], and the
+      refusal names the head now as [now], so an operator skips only what
+      they named.
 
     The writer decides whether it takes the action. A refusal changes
     nothing. *)
@@ -35,8 +48,13 @@ type action =
   | Resume
   | Adopt of { observed : Digest.digest }
   | Restart_reading of { observed : Keeper_turn_log.Log_id.t }
+  | Skip_item of { target : Librarian_machine.skip_target }
 
 val parse : string -> (action, string) result
+
+(** A target as a request names it and a [not_the_head] refusal's [now]
+    does. *)
+val target_json : Librarian_machine.skip_target -> Yojson.Safe.t
 
 (** How the Keeper's store is after the action. *)
 type store =

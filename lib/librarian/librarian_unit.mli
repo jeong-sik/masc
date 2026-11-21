@@ -41,6 +41,7 @@ type item_name =
   { store : store
   ; at : int
   }
+[@@deriving eq]
 
 (** From [from] to [until]: bytes for a file a mark measures in bytes, rows
     for the external store. [until] is the later mark's value. *)

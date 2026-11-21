@@ -653,6 +653,18 @@ let write place t ~at ~by ~trace write =
   | Stopped stop -> t, Unavailable (Store_stopped stop)
 ;;
 
+type skip_target =
+  | Head_item of
+      { turn_log : Keeper_turn_log.Log_id.t
+      ; line : int
+      ; item : Librarian_unit.item_name
+      }
+  | Unreadable_unit of
+      { turn_log : Keeper_turn_log.Log_id.t
+      ; line : int
+      }
+[@@deriving eq]
+
 type act_refusal =
   | Nothing_to_resume
   | Not_stopped
@@ -660,6 +672,8 @@ type act_refusal =
   | Snapshot_unreadable
   | Not_replaced
   | Turn_log_unread
+  | Not_the_head of { now : skip_target option }
+  | Content_unread
   | Act_unavailable of unavailable
 
 type act_answer =
@@ -762,6 +776,81 @@ let restart_reading place t ~at ~observed =
               { (moved t ~narrowing:Librarian_width.empty) with last_read = None }
               ~at store
           , Done )
+        | Error stop ->
+          (* §9.2: the line is not on disk, so the act is refused as the
+             store stops. *)
+          { t with state = Stopped stop }, Not_done (Act_unavailable (Store_stopped stop))))
+;;
+
+(* What a skip of the head passes, read from the disk when it is taken the
+   way an ask of the head item alone reads it, so the line passes what that
+   question would carry. The target is taken only when it names what the
+   read finds now, in the turn log reading stands in. *)
+let skip_from place ~stores store ~by ~target =
+  let tail = Store.tail store in
+  let turn_log = reading_log tail in
+  let width = Librarian_width.head_item in
+  let taken now = equal_skip_target target now in
+  match Librarian_question_units.units ~turns_path:(turns_path place) ~width tail with
+  | Error (Turn_log_unread { detail = (_ : string) }) -> Error Turn_log_unread
+  | Error (No_head (_ : Librarian_unread.stop) | Turn_log_fault (_ : Librarian_unit.input_fault))
+    ->
+    (* Nothing is unread, the writer passes the head itself, or another act
+       passes what reading stops on. *)
+    Error (Not_the_head { now = None })
+  | Ok range ->
+    (match Librarian_question_units.contents stores ~width range with
+     | Error (Content_unread { detail = (_ : string) }) -> Error Content_unread
+     | Error (Content_unreadable { span }) ->
+       let now = Unreadable_unit { turn_log; line = span.line } in
+       if taken now
+       then
+         Ok
+           ( Librarian_log.Operator_skipped { by; missing = [] }
+           , Librarian_unread.reach span Whole
+           , Librarian_width.Whole_units 1 )
+       else Error (Not_the_head { now = Some now })
+     | Ok { units; reach; offered; trace = (_ : string) } ->
+       let head =
+         List.find_opt
+           (fun (unit_ : Librarian_read_unit.t) -> Int.equal unit_.line range.head.line)
+           units
+       in
+       (match Option.bind head Librarian_read_unit.first_item with
+        | None ->
+          (* Every item of the head is missing: the writer passes it as
+             [Content_missing] itself. *)
+          Error (Not_the_head { now = None })
+        | Some item ->
+          let now = Head_item { turn_log; line = range.head.line; item } in
+          if taken now
+          then
+            Ok
+              ( Librarian_log.Operator_skipped
+                  { by; missing = Librarian_read_unit.missing_at units }
+              , reach
+              , Librarian_width.passed offered reach.within )
+          else Error (Not_the_head { now = Some now })))
+;;
+
+(* §12.4: a refusal leaves the value as it is, so an ask that is out goes
+   on. An accepted skip cancels it, empties the size facts and how the last
+   ask ended, and counts for the width memory as a commit of what it passed
+   (§7.6, §9.2). The last ask was about the item it passed (§12.2). *)
+let skip_item place ~stores t ~at ~by ~target =
+  match t.state with
+  | Stopped stop -> t, Not_done (Act_unavailable (Store_stopped stop))
+  | Idle { store; seen_length = (_ : int option) }
+  | Asking { store; asking = (_ : asking) }
+  | Resting store
+  | Refused_at_bottom store ->
+    (match skip_from place ~stores store ~by ~target with
+     | Error refusal -> t, Not_done refusal
+     | Ok (hole, reach, passed) ->
+       (match Store.commit_skip store ~at ~hole reach with
+        | Ok { store; line = (_ : Librarian_log.commit) } ->
+          let narrowing = Librarian_width.committed t.narrowing passed in
+          next_ask place { (moved t ~narrowing) with last_read = None } ~at store, Done
         | Error stop ->
           (* §9.2: the line is not on disk, so the act is refused as the
              store stops. *)

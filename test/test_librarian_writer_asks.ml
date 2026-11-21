@@ -388,7 +388,7 @@ let settled writers =
   | Done
   | Not_done
       ( Not_stopped | Snapshot_mismatch | Snapshot_unreadable | Not_replaced | Turn_log_unread
-      | Act_unavailable _ ) ->
+      | Not_the_head _ | Content_unread | Act_unavailable _ ) ->
     fail "the writer was not idle or asking"
 ;;
 
@@ -591,6 +591,101 @@ let test_a_restart_during_the_call_asks_once_more () =
   check (list string) "one commit: the second answer" [ "read" ] (causes fixture)
 ;;
 
+(* §12.4: an operator's skip of the head is read from the disk while a call
+   is out. A target that is not the head is refused, the refusal names the
+   head now, and the call goes on. That name passes the head: the call is
+   cancelled, and the next question carries the turn after it. With nothing
+   unread there is no head to skip. *)
+let test_a_skip_during_the_call_passes_the_head () =
+  let release, released = Eio.Promise.create () in
+  let held = Atomic.make 0 in
+  let hold () = if Atomic.fetch_and_add held 1 = 0 then Eio.Promise.await release in
+  with_fixture ~on_request:hold ~reply:echo
+  @@ fun fixture ->
+  let first = close_turn fixture 1 chat_text in
+  let ask, (_ : int Atomic.t) = counted fixture in
+  let writers = table fixture ask in
+  Writers.declaration_changed writers (Some (declared ()));
+  Writers.pulse writers [ keeper_id ];
+  Fixture.await_first_request fixture.server;
+  ignore (close_turn fixture 2 "the port moved to 8936" : int);
+  let skip target = Writers.skip_item writers keeper_id ~by:"operator-1" ~target in
+  let head =
+    match skip (Unreadable_unit { turn_log = log_id; line = first }) with
+    | Not_done (Not_the_head { now = Some (Head_item { line; _ } as head) }) when Int.equal line first ->
+      head
+    | (_ : Machine.act_answer) -> fail "the refusal does not name the first turn's item"
+  in
+  check int "the refusal leaves the call out" 1 (Fixture.post_count fixture.server);
+  check (list string) "and commits nothing" [] (causes fixture);
+  (match skip head with
+   | Done -> ()
+   | (_ : Machine.act_answer) -> fail "the head's name was refused");
+  await_commit fixture writers 2;
+  settled writers;
+  check (list string) "the skip, then the next turn's answer" [ "skip"; "read" ] (causes fixture);
+  (match commits fixture with
+   | skipped :: (_ : Log_line.commit list) ->
+     (match skipped.cause with
+      | Skip { hole = Operator_skipped { by; missing } } ->
+        check string "the line names the operator" "operator-1" by;
+        check int "and no missing part" 0 (List.length missing)
+      | Direct _ | Read _ | Make_room _ | Adopt _ | Skip _ -> fail "the first commit is not the operator's skip");
+     check string "it passes the first turn"
+       (position_text (Through { line = first; within = Whole }))
+       (position_text skipped.covers_through)
+   | [] -> fail "nothing was committed");
+  (match requests fixture with
+   | [ (_ : string); next ] -> check int "the next question shows the second turn alone" 1 (units_shown next)
+   | (_ : string list) -> fail "the skip did not end in one more call");
+  (match skip head with
+   | Not_done (Not_the_head { now = None }) -> ()
+   | (_ : Machine.act_answer) -> fail "a skip with nothing unread was not refused as no head");
+  Eio.Promise.resolve released ()
+;;
+
+(* §12.4: an accepted skip empties how the last ask ended. A lane whose one
+   slot answers the head item with a 400 leaves the writer resting at the
+   bottom, with that refusal as its last read (§12.2). The operator's skip
+   passes the item, and the value no longer holds a refusal of it. *)
+let test_a_skip_at_the_bottom_forgets_the_last_read () =
+  let refusal = `Bad_request, {|{"error":{"message":"fixture refusal","type":"invalid_request_error"}}|} in
+  with_fixture ~reply:(fun (_ : int) (_ : string) -> refusal)
+  @@ fun fixture ->
+  let first = close_turn fixture 1 chat_text in
+  let ask, (_ : int Atomic.t) = counted fixture in
+  let writers = table fixture ask in
+  Writers.declaration_changed writers (Some (declared ()));
+  Writers.pulse writers [ keeper_id ];
+  let machine () =
+    match List.assoc_opt keeper_id (Writers.held writers) with
+    | Some (Writer.Held value) -> Some value
+    | Some (Writer.Held_booting | Writer.Held_retired) | None -> None
+  in
+  let resting =
+    until fixture "resting at the bottom" (fun () ->
+      match machine () with
+      | Some ({ Machine.state = Resting (_ : Librarian_store.t); _ } as value) -> Some value
+      | Some (_ : Machine.t) | None -> None)
+  in
+  check bool "the refusal is how the last ask ended" true (Option.is_some resting.last_read);
+  let skip target = Writers.skip_item writers keeper_id ~by:"operator-1" ~target in
+  let head =
+    match skip (Unreadable_unit { turn_log = log_id; line = first }) with
+    | Not_done (Not_the_head { now = Some (Head_item { line; _ } as head) }) when Int.equal line first ->
+      head
+    | (_ : Machine.act_answer) -> fail "the refusal does not name the first turn's item"
+  in
+  (match skip head with
+   | Done -> ()
+   | (_ : Machine.act_answer) -> fail "the head's name was refused");
+  await_commit fixture writers 1;
+  check (list string) "the skip is the one commit" [ "skip" ] (causes fixture);
+  match machine () with
+  | Some value -> check bool "and the last read is forgotten" true (Option.is_none value.last_read)
+  | None -> fail "the writer holds no value"
+;;
+
 (* §7.1: an ask reads the tail only while the writer waits for its next
    event. A commit appends its line and then replaces the snapshot file,
    and the writer names the new line after both, so a tail read in between
@@ -786,6 +881,10 @@ let () =
             test_a_write_does_not_wait_for_a_ten_minute_call
         ; test_case "a restart during the call asks once more" `Quick
             test_a_restart_during_the_call_asks_once_more
+        ; test_case "a skip during the call passes the head" `Quick
+            test_a_skip_during_the_call_passes_the_head
+        ; test_case "a skip at the bottom forgets the last read" `Quick
+            test_a_skip_at_the_bottom_forgets_the_last_read
         ; test_case "an ask reads the tail between events" `Quick
             test_an_ask_reads_the_tail_between_events
         ] )

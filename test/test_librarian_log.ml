@@ -191,6 +191,7 @@ let other_log =
 
 let turn_log_replaced = Log.Skip { hole = Turn_log_replaced { from = turn_log; to_ = other_log } }
 let position_lost = Log.Skip { hole = Position_lost { offset = 4096; length = 512 } }
+let operator_skipped = Log.Skip { hole = Operator_skipped { by = "operator-1"; missing } }
 
 let every_line =
   [ started
@@ -227,6 +228,7 @@ let every_line =
   ; committed ~cause:item_exceeds_window ()
   ; committed ~cause:turn_log_replaced ~covers_through:Log.Before_first ()
   ; committed ~cause:position_lost ~covers_through:Log.Before_first ()
+  ; committed ~cause:operator_skipped ()
   ]
 ;;
 
@@ -398,7 +400,20 @@ let test_pinned_text () =
     (part_text [ "cause" ] (committed ~cause:turn_log_replaced ()));
   check string "an operator's restart at an offset the file does not hold"
     {|{"kind":"skip","hole":{"kind":"position_lost","offset":4096,"length":512}}|}
-    (part_text [ "cause" ] (committed ~cause:position_lost ()))
+    (part_text [ "cause" ] (committed ~cause:position_lost ()));
+  check string "an operator's skip of the head item"
+    {|{"kind":"skip","hole":{"kind":"operator_skipped","by":"operator-1","missing":[{"line":120,"parts":[{"kind":"chat_bytes","from":0,"until":64}]}]}}|}
+    (part_text [ "cause" ]
+       (committed
+          ~cause:
+            (Log.Skip
+               { hole =
+                   Operator_skipped
+                     { by = "operator-1"
+                     ; missing = [ { line = 120; parts = [ Chat_bytes { from = 0; until = 64 } ] } ]
+                     }
+               })
+          ()))
 ;;
 
 let replace_once ~old ~by source =

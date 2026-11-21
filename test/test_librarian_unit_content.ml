@@ -239,8 +239,7 @@ let missing_text : Unit.missing_part -> string = function
 
 let read_text stores span =
   match Content.read stores span ~take:Rest_of_unit with
-  | Error (Fault (Content_unreadable { line })) -> [ Printf.sprintf "content of %d unreadable" line ]
-  | Error (Fault (Line_unreadable _ | Turn_log_replaced _ | Position_lost _)) -> [ "another fault" ]
+  | Error (Unreadable { line }) -> [ Printf.sprintf "content of %d unreadable" line ]
   | Error (Unread { detail }) -> [ "unread: " ^ detail ]
   | Ok { unit = unit_; ends = (_ : Masc.Librarian_log.within) } ->
     let item segment ({ index; body; name = (_ : Unit.item_name) } : Read_unit.item) =

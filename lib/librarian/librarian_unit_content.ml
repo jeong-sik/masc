@@ -25,7 +25,7 @@ type stores =
   }
 
 type read_error =
-  | Fault of Unit.input_fault
+  | Unreadable of { line : int }
   | Unread of { detail : string }
 
 type take =
@@ -213,7 +213,7 @@ let external_rows path (range : Unit.range) start ~budget =
    not stored is the part of its slice the read had not passed. *)
 let messages ~line ~session_dir ~first (slices : Keeper_turn_log.slice list) start ~budget =
   let read_object = Keeper_checkpoint_object_store.read ~session_dir in
-  let unreadable = Error (Fault (Content_unreadable { line })) in
+  let unreadable = Error (Unreadable { line }) in
   let after =
     match start with
     | Passed | From_first -> None

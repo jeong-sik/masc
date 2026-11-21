@@ -81,6 +81,13 @@ val restart_reading
   -> observed:Keeper_turn_log.Log_id.t
   -> Librarian_machine.act_answer
 
+val skip_item
+  :  t
+  -> string
+  -> by:string
+  -> target:Librarian_machine.skip_target
+  -> Librarian_machine.act_answer
+
 (** For the path that removes a Keeper: call it after the Keeper is out of
     the registry and before its files are removed. [Retired_now] says no
     writer holds them. [Still_registered] says the Keeper is registered

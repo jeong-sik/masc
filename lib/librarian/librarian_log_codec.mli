@@ -55,6 +55,13 @@
 
 val to_json : Librarian_log.line -> Yojson.Safe.t
 
+(** A store as a line spells it in an item's name: [chat], [external],
+    [agent_core], [history], [internal]. *)
+val store_token : Librarian_unit.store -> string
+
+(** The store a line's spelling names, [None] for another word. *)
+val store_of_token : string -> Librarian_unit.store option
+
 (** Every object has exactly its fields. Counts and offsets are not negative,
     a line's [at] is finite, a Memory id has the shape of one, and each half
     of a question id is {!Librarian_question_id.half_length} lowercase

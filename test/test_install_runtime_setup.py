@@ -30,7 +30,13 @@ MODULE.loader.exec_module(SETUP)
 
 
 def spec(choice='vllm'):
-    result = dict(choice=choice, model='operator/model-exact', max_context=8192, tools=True, streaming=False)
+    # Claude Code rejects a declared window under its autocompact floor
+    # (runtime_claude_code.ml: autocompact_window_floor_tokens = 100_000), so
+    # the fixture declares at least the floor for that choice. The floor is
+    # restated here on purpose: when the OCaml constant moves, change this
+    # 100000 and RuntimeSpecWindowFloor's assertion in the same commit.
+    max_context = 100000 if choice == 'claude_code' else 8192
+    result = dict(choice=choice, model='operator/model-exact', max_context=max_context, tools=True, streaming=False)
     if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
         result['endpoint'] = 'http://127.0.0.1:9/v1'
         if choice == 'messages':
@@ -57,6 +63,22 @@ def presentation_readiness(base='/tmp/workspace', parser='started', renderer='mi
                 status='tools_available' if parser == renderer == 'started' else 'unavailable',
                 checks=[dict(component='python_pptx', command=base + '/.masc/runtime-tools/presentation/bin/python3', status=parser),
                         dict(component='libreoffice', command='soffice', status=renderer)])
+
+
+class RuntimeSpecWindowFloor(unittest.TestCase):
+    def test_claude_code_fixture_declares_the_window_floor(self):
+        # Client_compact_window_below_floor rejects the whole runtime file when
+        # Claude Code declares a window under its autocompact floor
+        # (runtime_claude_code.ml: autocompact_window_floor_tokens = 100_000).
+        # This check runs where CI has no native binary, so a fixture that
+        # regresses under the floor cannot hide behind the --binary skip.
+        # Keep this 100000 in sync with the OCaml floor (see spec()).
+        self.assertGreaterEqual(spec('claude_code')['max_context'], 100000)
+
+    def test_other_fixture_choices_keep_the_compact_window(self):
+        self.assertEqual(spec()['max_context'], 8192)
+        self.assertEqual(spec('openai_compatible')['max_context'], 8192)
+        self.assertEqual(spec('antigravity')['max_context'], 8192)
 
 
 class PresentationPrerequisites(unittest.TestCase):

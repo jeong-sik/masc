@@ -36,20 +36,41 @@ let duplicate_exact_path entries =
   loop [] entries
 ;;
 
+(* A prefix route is matched by [String.sub], so a prefix that does not end in
+   [/] also covers a path beside it: [/api/v1/board] would cover
+   [/api/v1/board-secret]. The table is judged before it serves anything, so
+   the shapes that would widen a route are refused here rather than read. *)
+let prefix_without_slash entries =
+  List.find_map
+    (fun (entry : Server_account_route.entry) ->
+       match entry.kind with
+       | Http_server_eio.Router.Exact -> None
+       | Http_server_eio.Router.Prefix ->
+         if String.ends_with ~suffix:"/" entry.path then None else Some entry.path)
+    entries
+;;
+
 let reconcile entries =
-  if entries = []
-  then Error "the inventory is empty"
-  else if not (Server_account_route.keeper_prefix_present entries)
-  then
+  match prefix_without_slash entries with
+  | Some path ->
     Error
       (Printf.sprintf
-         "the inventory has no %s prefix, so keeper sub-routes are unnameable"
-         Server_account_route.keeper_prefix)
-  else (
-    match duplicate_exact_path entries with
-    | Some path ->
-      Error (Printf.sprintf "%s is in the inventory twice with different accesses" path)
-    | None -> Ok ())
+         "the prefix route %s does not end in /, so it also covers the paths beside it"
+         path)
+  | None ->
+    if entries = []
+    then Error "the inventory is empty"
+    else if not (Server_account_route.keeper_prefix_present entries)
+    then
+      Error
+        (Printf.sprintf
+           "the inventory has no %s prefix, so keeper sub-routes are unnameable"
+           Server_account_route.keeper_prefix)
+    else (
+      match duplicate_exact_path entries with
+      | Some path ->
+        Error (Printf.sprintf "%s is in the inventory twice with different accesses" path)
+      | None -> Ok ())
 ;;
 
 let refusal_text = function

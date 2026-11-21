@@ -166,6 +166,38 @@ let test_of_router_sees_every_registration () =
     (Server_account_route.covers entries ~path:"/a" ~method_:get)
 ;;
 
+(* The gate is only useful if it is closed on the paths that look almost like a
+   route: a different case, a trailing slash, an encoded segment, an empty path,
+   or a prefix without its slash. Each is read as "not this route". *)
+let test_refuses_paths_beside_a_route () =
+  let entries = inventory () in
+  let refused path =
+    is_refused_uninventoried (Server_account_gate.decide entries ~path ~method_:get)
+  in
+  check bool "a different case is a different path" true (refused "/API/v1/dashboard/board");
+  check bool "a trailing slash is a different path" true
+    (refused "/api/v1/dashboard/board/");
+  check bool "a percent-encoded segment is not decoded" true
+    (refused "/api/v1/dashboard/%62oard");
+  check bool "the empty path is not a route" true (refused "");
+  check bool "a prefix is not itself a route" true (refused "/api/v1/keepers");
+  check bool "a sub-route of the prefix is named" false
+    (refused "/api/v1/keepers/alice/metrics")
+;;
+
+let test_reconcile_refuses_a_prefix_without_a_slash () =
+  let entries =
+    [ exact "/api/v1/dashboard/board" Route_access.Always_public
+    ; prefix Server_account_route.keeper_prefix Route_access.Read_auth
+    ; prefix "/api/v1/board" Route_access.Always_public
+    ]
+  in
+  check bool "a prefix that reaches beside itself is refused" true
+    (match Server_account_gate.reconcile entries with
+     | Error _ -> true
+     | Ok () -> false)
+;;
+
 let () =
   Alcotest.run
     "server_account_gate"
@@ -177,6 +209,8 @@ let () =
         ; test_case "allows a named path" `Quick test_allows_a_named_path
         ; test_case "refuses a method the route does not list" `Quick
             test_refuses_a_method_the_route_does_not_list
+        ; test_case "refuses the paths beside a route" `Quick
+            test_refuses_paths_beside_a_route
         ; test_case "a prefix covers its sub-routes" `Quick test_a_prefix_covers_its_sub_routes
         ; test_case "an exact route does not cover a child path" `Quick
             test_an_exact_route_does_not_cover_a_child_path
@@ -188,6 +222,8 @@ let () =
             test_reconcile_refuses_a_missing_keeper_prefix
         ; test_case "refuses one path with two accesses" `Quick
             test_reconcile_refuses_one_path_with_two_accesses
+        ; test_case "refuses a prefix without its slash" `Quick
+            test_reconcile_refuses_a_prefix_without_a_slash
         ; test_case "accepts the inventory" `Quick test_reconcile_accepts_the_inventory
         ] )
     ; ( "table"

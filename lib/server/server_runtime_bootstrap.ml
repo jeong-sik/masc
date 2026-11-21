@@ -2332,10 +2332,12 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
           (* A refused announcement is a fatal boot error: the boot must stop
              before [on_ready] runs and before the port is recorded, and the
              process must exit promptly. Raising here unwinds through the
-             session-switch teardown, which waits for the owner-initialization
-             fiber's non-cancellable stretches and can outlive the error by
-             minutes (run 44946173785: the child kept booting with its port
-             held until SIGKILL). Exit directly with the regulated fatal code
+             session-switch teardown, and its fiber cleanup can outlive the
+             error by minutes: on 2-core CI runners the unwind stalled 3 of 6
+             times (run 44946173785: the child kept booting with its port
+             held until SIGKILL), while a 61-run local reproduction never
+             stalled — the holder fiber is unidentified (bootstrap ledger
+             p-8012d5c7). Exit directly with the regulated fatal code
              instead; the log line keeps the exact refusal wording so the
              port-cannot-be-announced tests can match it. *)
           Log.Server.error

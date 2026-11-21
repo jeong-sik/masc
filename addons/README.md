@@ -35,8 +35,8 @@ retains committed output and host-owned evidence after either kind of removal.
 The package's `lane.toml` declares its image, command, contributions, resource
 envelope and optional `world` connections. A separate workspace declaration
 selects the package with `id`, `run_id`, `manifest_path` and `[binding]`.
-The masc server carries three Exact worker packages (`workspace-curator`,
-`candle-appraiser`, `hitl-auto-judge`). A declaration
+The masc server carries two Exact worker packages (`candle-appraiser`,
+`hitl-auto-judge`). A declaration
 selects one of them with `package = "<name>"` instead of `manifest_path`, and
 `masc exact-addon-setup` writes its folder and builds its image
 ([TOML installation](../docs/guides/lane-addon-toml.md)).

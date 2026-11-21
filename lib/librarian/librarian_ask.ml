@@ -116,8 +116,13 @@ let nothing_before : Librarian_unread.stop -> Read_result.t = function
   | Unannounced_reset { line; past_line; before; after } ->
     Span_unknown
       { before; reach = { line; within = Whole; covered = after; turn_log_offset = past_line } }
-  | Unreadable_line { offset; reason = (_ : Librarian_unread.unreadable) } ->
-    Input_fault (Line_unreadable { offset })
+  | Unreadable_line
+      { offset
+      ; past_line = (_ : int)
+      ; from = (_ : Keeper_turn_log.mark)
+      ; sha = (_ : Digest.digest)
+      ; reason = (_ : Librarian_unread.unreadable)
+      } -> Input_fault (Line_unreadable { offset })
 ;;
 
 (* The units from the tail, when one holds an item (§7.6). *)

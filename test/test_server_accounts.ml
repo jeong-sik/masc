@@ -1081,6 +1081,9 @@ let test_serves_its_table_alone () =
          routes do not wait for it. This case starts none: the engine it
          hands back is a promise the case resolves. *)
       let engine_started_on = ref [] in
+      (* The layer that holds the engine adds the routes whose subject is a
+         Keeper of it; this case supplies one and records what it was given. *)
+      let person_keeper_routes_on = ref [] in
       let engine, engine_is_ready = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
         match
@@ -1091,6 +1094,9 @@ let test_serves_its_table_alone () =
             ~port
             ~lease
             ~on_ready:(Eio.Promise.resolve set_ready)
+            ~person_keeper_routes:(fun ~base_path router ->
+              person_keeper_routes_on := base_path :: !person_keeper_routes_on;
+              router)
             ~start_engine:(fun access ->
               engine_started_on
               := Runtime_account_access.published_access access :: !engine_started_on;
@@ -1110,6 +1116,15 @@ let test_serves_its_table_alone () =
          Alcotest.fail "the engine started on the access of a single user"
        | [] -> Alcotest.fail "the engine was not started before the server was ready"
        | _ :: _ :: _ -> Alcotest.fail "the engine was started more than once");
+      (match !person_keeper_routes_on with
+       | [ base_path ] ->
+         Alcotest.(check string)
+           "the person Keeper routes are added once, for the installation's base path"
+           (Read.multi_account_base_path multi_account)
+           base_path
+       | [] -> Alcotest.fail "the person Keeper routes were not added"
+       | _ :: _ :: _ ->
+         Alcotest.fail "the person Keeper routes were added more than once");
       let status, body = request ~net ~port ~meth:"GET" Server_health_paths.health in
       Alcotest.(check int) "GET /health" 200 status;
       (match json_of "GET /health" body with

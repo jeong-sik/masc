@@ -23,47 +23,6 @@ let with_program_reset ~keepers_dir ~keeper_id remove =
       let* _ = rotate_epoch ~keepers_dir ~keeper_id in
       remove ()))
 
-let read_with_content ~keepers_dir ~keeper_id =
-  let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  try
-    let* () = recover_publication ~keepers_dir ~keeper_id in
-    let* () = publication_read_guard ~keepers_dir ~keeper_id in
-    let observed = match Fs_compat.load_file_opt snapshot_path with
-    | None -> Ok None
-    | Some content ->
-      let+ snapshot = parse snapshot_path content in
-      Some (snapshot, content) in
-    let* () = publication_read_guard ~keepers_dir ~keeper_id in
-    observed
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Sys_error message ->
-    Error
-      (Printf.sprintf
-         "current Memory OS read failed path=%s: %s"
-         snapshot_path
-         message)
-;;
-
-let read_locked_for_keepers_dir ~keepers_dir ~keeper_id =
-  let* () = publication_read_guard ~keepers_dir ~keeper_id in
-  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  match Fs_compat.load_file_opt path with
-  | None -> Ok None
-  | Some text -> Result.map Option.some (parse path text)
-;;
-
-let read_for_keepers_dir ~keepers_dir ~keeper_id =
-  read_with_content ~keepers_dir ~keeper_id
-  |> Result.map (Option.map fst)
-;;
-
-let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
-  read_with_content ~keepers_dir ~keeper_id
-  |> Result.map
-       (Option.map (fun (snapshot, content) -> snapshot, sha256 content))
-;;
-
 (* The journal only grows (10-13 MB on live keepers) and a reader asks for its
    last 20-500 lines. Reading the whole file and splitting every line on each
    dashboard or TUI request put that copy and split on the scheduler domain;

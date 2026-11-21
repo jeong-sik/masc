@@ -237,8 +237,8 @@ let test_announced_reset () =
        ~now:(mark ~trace:"b" 2) cleared)
 ;;
 
-let named_text ~tail now =
-  match Writer.named ~tail ~now with
+let named_text ?(trace = "a") ~tail closed_messages =
+  match Writer.named ~tail ~trace ~closed_messages with
   | Ok No_log -> "no log"
   | Ok (Named_below below) -> Printf.sprintf "named below %d" below
   | Error () -> "the head was not read"
@@ -249,17 +249,17 @@ let named_text ~tail now =
    it. A replaced head has none below it: the next line is the reset [plan]
    writes, which puts the mark at the new head's empty start. *)
 let test_named () =
-  let now ?trace closed () = Ok (mark ?trace closed) in
+  let holds closed () = Ok closed in
   check string "nothing written: the head is not read" "no log"
     (named_text ~tail:Nothing_written (fun () -> fail "the head was read"));
   check string "the head grew past the last unit: what that unit counts" "named below 3"
-    (named_text ~tail:(written ~open_turn:(open_at 40 (mark 5)) (mark 3)) (now 9));
+    (named_text ~tail:(written ~open_turn:(open_at 40 (mark 5)) (mark 3)) (holds 9));
   check string "another trace: none" "named below 0"
-    (named_text ~tail:(written (mark 9)) (now ~trace:"b" 2));
+    (named_text ~trace:"b" ~tail:(written (mark 9)) (holds 2));
   check string "fewer closed messages on the same trace: none" "named below 0"
-    (named_text ~tail:(written (mark 9)) (now 2));
+    (named_text ~tail:(written (mark 9)) (holds 2));
   check string "after that reset the same head is not replaced again" "named below 0"
-    (named_text ~tail:(written (mark ~trace:"b" 0)) (now ~trace:"b" 2));
+    (named_text ~trace:"b" ~tail:(written (mark ~trace:"b" 0)) (holds 2));
   check string "a head that is not read: the error" "the head was not read"
     (named_text ~tail:(written (mark 9)) (fun () -> Error ()))
 ;;

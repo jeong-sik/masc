@@ -151,9 +151,13 @@ let record_drop ~at ~new_log_id place ~after =
 
 let named place =
   let* tail = Result.map_error (fun error -> Tail_unread error) (Store.read_tail (log_path place)) in
-  Writer.named ~tail ~now:(fun () ->
-    let* mark, (_ : Keeper_turn_log_marks.covered) = now place in
-    Ok mark)
+  Writer.named ~tail ~trace:place.session_id ~closed_messages:(fun () ->
+    let* head =
+      Result.map_error
+        (fun error -> Head_unread error)
+        (Head.read ~session_dir:place.session_dir ~session_id:place.session_id)
+    in
+    Ok head.closed_messages)
 ;;
 
 let record_start ~at ~new_log_id place =

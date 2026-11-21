@@ -133,10 +133,13 @@ type named =
       was replaced since: the next line is then a reset that puts the mark
       at the new head's empty start. *)
 
-(** [now] is called only when the log has lines. *)
+(** [trace] is the head's trace and [closed_messages] reads how many closed
+    messages it holds. It is called only when the log has lines. Only the
+    history decides, so the other stores of a mark are not read. *)
 val named
   :  tail:Keeper_turn_log_store.tail
-  -> now:(unit -> (Keeper_turn_log.mark, 'error) result)
+  -> trace:string
+  -> closed_messages:(unit -> (int, 'error) result)
   -> (named, 'error) result
 
 (** The first step of a Keeper's store start (§8.6): a log with no complete

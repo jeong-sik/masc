@@ -78,8 +78,9 @@ val record_drop
 
 (** Which of the head's messages the Keeper's Memory writer will still read
     from the head ({!Keeper_turn_log_writer.named}), from the tail as it is
-    now. The head is read only when the log has lines. A purge asks before
-    it rewrites. *)
+    now. The head is read only when the log has lines, and the Keeper's
+    other stores are not read: the answer is [Tail_unread], [Head_unread] or
+    a value. A purge asks before it rewrites. *)
 val named : place -> (Keeper_turn_log_writer.named, not_recorded) result
 
 (** Appends {!Keeper_turn_log_writer.start}'s line, the same way as

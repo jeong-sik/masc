@@ -1995,7 +1995,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 ## 19. 지우는 것
 
 지우는 것은 둘로 나뉜다. 설치 때 운영자가 디스크에서 지우는 파일과, 구현 스택의 마지막 층들이 저장소에서 지우는 코드다.
-개수와 줄 수는 main `e2dd6daf575ce` 에서 센 값이다. 줄 수는 `.ml` 만 센다. 지우는 층에서 다시 센다.
+개수와 줄 수는 main `e2dd6daf575ce` 에서 센 값이다. 줄 수는 `.ml` 만 센다. 지우는 층에서 다시 센다. 그 뒤 P2(#54294)가 읽기 넷을 옮겨 값 셋이 달라졌다. main `c51a7ae050046` 에서 b 는 5,161줄이고, k 의 facade 수는 `lib/` 47, `test/` 38 이다.
 
 ### 19.1 디스크: 파일마다 지운다, 남긴다
 
@@ -2097,7 +2097,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 - `keeper_turn_task_context`. 턴 기록의 `task_evidence` 가 대신한다(§5.1).
 - `keeper_carried_front` 의 Librarian 출처 다섯(§11.2).
 - `turn-boundaries.jsonl` 을 읽던 곳 가운데 컷 뒤에도 남는 곳은 지우지 않고 턴 기록으로 옮긴다. 한 층(L3d)에서 옮긴다. 목록은 아래 k 의 표에 있다.
-- 옛 파일 쓰기는 컷(L10)에서 멈춘다. 옛 durable consumer 가 읽은 자리를 그 줄에서 얻기 때문이다(`Keeper_librarian_durable_consumer` 의 `Keeper_turn_boundaries.read`). 쓰기를 먼저 멈추면 컷 앞의 빌드에서 옛 경로가 나아가지 못한다.
+- 옛 파일 쓰기는 컷(L10)에서 멈춘다. 컷 앞의 빌드에 그 줄을 읽는 곳이 남아 있기 때문이다. `keeper_carried_front`, `keeper_turn_bridge`, purge(`server_dashboard_http_keeper_api_checkpoints`, `bin/masc_checkpoint_purge`), `Keeper_durable_store` 의 검증이다. 옛 durable consumer 도 그 줄을 읽지만 서버가 그 lane 을 시작하지 않는다(#53463).
 - 컷에서 같이 지우는 것은 넷이다. 줄을 쓰는 곳(`keeper_agent_run_finalize_response`, `keeper_history_clear`, `keeper_agent_run_turn_helpers` 의 턴 시작 줄), `keeper_shutdown_types` 의 `Keeper_turn_boundaries_artifact` 생성자와 삭제 계획, `Keeper_durable_store` 의 `Turn_boundaries` 검증, blob 분류의 `.turn-boundaries.jsonl` 행이다.
 - L3d 가 옮기지 않은 독자는 컷까지 옛 파일을 그대로 읽는다. 쓰기가 컷까지 이어지므로 그 사이의 빌드에서도 읽는 값이 맞다.
 
@@ -2153,7 +2153,9 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 - `lib/librarian_working_state_evaluation.ml`, `lib/librarian_production_evaluation.ml` 은 지운다. 부르는 곳이 `bin/masc_librarian_continuity.ml` 과 자기 시험뿐이고, 그 실행 파일도 지운다. 새 평가 틀(§20 의 L1)이 대신한다.
 - `keeper_memory_os_disposition_core` 는 고쳐 쓴다. 부르던 곳은 셋이고(`keeper_memory_os_current_program_apply`, `keeper_memory_os_program`, `keeper_librarian_memory_plan`) 모두 지운다. 지금 내보내는 `plan` 은 옛 답의 목록을 받고 op 번호를 돌려주지 않아서 쓰는 쪽이 그대로 부를 수 없다(§8.2).
-- `keeper_checkpoint_purge.ml` 은 턴 기록으로 옮기는 곳이지만 옮기지 않고 지우는 것이 있다. Librarian 의 읽은 자리를 보던 거절(`Unread_atoms_present`)과 복구 울타리(`recovered_units`, `position_at_end`, `Recovery_end_unwitnessed`)다. purge 는 Librarian 의 자리를 읽지 않는다(§5.6). atom 을 여는 메시지의 digest 를 지키던 규칙도 같이 없어진다. 자리를 수로 적기 때문이다.
+- `keeper_checkpoint_purge.ml` 은 턴 기록으로 옮기는 곳이지만 옮기지 않고 지우는 것이 있다. Librarian 의 읽은 자리를 보던 거절(`Unread_atoms_present`)과 복구 울타리(`recovered_units`, `position_at_end`, `Recovery_end_unwitnessed`)는 purge 규칙의 PR(#54283)이 지웠다. purge 는 Librarian 의 자리를 읽지 않는다(§5.6). 컷에 남은 것은 atom 을 여는 메시지의 digest 를 지키던 규칙이다(`Kept_atom_rewritten`). 자리를 수로 적으므로 그 규칙이 없어진다.
+- Librarian 의 위치 파일(`librarian-progress.json`)에서 나온 값 넷은 L10b 가 지운다. Memory health 응답의 `read_position`(읽기 오류 칸 `read_position_read_error` 도 같이)과 `stalled`, `Keeper_next_request_forecast.librarian_gap`, `Keeper_carried_front.librarian_gap` 이다. `stalled` 는 forecast 의 `librarian_gap` 이 내고, forecast 의 것이 `Keeper_carried_front` 의 것을 부른다. 그 파일을 읽고 쓰는 모듈 `Keeper_librarian_progress` 는 L10d 가 지운다. 그 밖에 그 파일을 읽는 곳은 둘이고 둘 다 지우는 집합에 있다. `Keeper_durable_store` 의 검증은 파일이 읽히는지만 본다. 저장된 옛 add-on 단계 요청을 다시 보낼 때의 가드(`server_librarian_addon_validation` 에서 `Keeper_librarian_durable_source_lock` 의 `positions_unchanged` 로 간다)는 요청을 잡을 때 적은 위치와 파일이 같은지만 본다.
+- purge 규칙의 PR(#54283)이 그 파일을 두고 적은 것 셋도 L10b 가 지운다. `docs/CHECKPOINT-PURGE-RUNBOOK.md` 의 「After a recovery」 절, `keeper_checkpoint_purge.mli` 에서 Librarian 위치를 말하는 문장, 시험 `test_a_recovery_leaves_the_librarian_position_file`(`test_keeper_purge_turn_log`)이다. 절과 문장은 health 가 그 파일을 아직 읽는다고 적고, 시험은 `Keeper_librarian_progress` 의 경로를 쓴다. changelog 의 문장은 그대로 둔다.
 - `history_at_start` 타입을 읽던 곳은 `Opened.baseline` 을 읽는다(§11).
 - 환경 변수 `MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES` 를 읽는 코드를 `check_facts_budget` 와 같이 지운다. 그 검사는 평범한 fact 와 파일에 묶인 저장소의 줄을 함께 셌다.
 - `keeper_librarian_continuity.ml:345` 와 `librarian_continuity_snapshot.ml:185` 가 `turn-boundaries.jsonl` 을 읽는다. 둘 다 지우는 목록에 있는 모듈이다. 지우는 층에서 부르는 곳을 다시 확인한다.
@@ -2223,10 +2225,9 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |
 | L9 | 화면과 경보: health 절, `keeper-memory-health` 행, TUI 해석, 수준 함수 | 생성자마다 해석 시험. health JSON 에 자유 글이 없다 |
-| L10a | 컷의 스위치. 서버가 옛 경로를 시작하지 않고, Lane Add-on 틀에서 Librarian 이 빠진다(§19.2 f). `runtime.toml` 의 옛 키와 표를 읽는 코드를 지운다. `keeper_librarian_queue_signal` 의 이름을 바꾼다(§19.2 a). 이 층 뒤에 부르는 곳이 없어지는 모듈 셋을 지운다 | 타입 검사. working-context pass 시험: 끝난 턴 하나가 pass 하나를 만들고 Memory 를 쓰지 않는다 |
+| L10a | 컷의 스위치. 서버가 Librarian add-on 의 wake 를 설치하지 않고, Lane Add-on 틀에서 Librarian 이 빠진다(§19.2 f). `runtime.toml` 의 옛 키와 표를 읽는 코드를 지운다. `keeper_librarian_queue_signal` 의 이름을 바꾼다(§19.2 a). 이 층 뒤에 부르는 곳이 없어지는 모듈 셋을 지운다 | 타입 검사. working-context pass 시험: 끝난 턴 하나가 pass 하나를 만들고 Memory 를 쓰지 않는다 |
 | L10a2 | 옛 `workspace-curator` add-on 을 지운다(§19.2 l). L10a 와 같은 단위 일곱을 고친다 | 타입 검사. 서버 안의 큐레이터 시험 |
-| L10b | 읽는 쪽. health, 화면, forecast, 요청 조립이 지우는 모듈을 읽지 않는다. 이 층 뒤에 부르는 곳이 없어지는 모듈 여섯을 지운다 | 타입 검사. L8, L9 의 기능 시험 |
-| L10b2 | purge 규칙(§5.6). L8 의 남은 층이다(#54283). purge 가 Librarian 의 읽은 자리를 보지 않고 턴 기록의 줄이 센 메시지만 고쳐 쓴다. L10c 가 같은 파일을 고치므로 그 아래에 둔다 | 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다 |
+| L10b | 읽는 쪽. health, 화면, forecast, 요청 조립이 지우는 모듈을 읽지 않는다. Librarian 의 위치 파일에서 나온 값도 여기서 지운다(§19.3). 이 층 뒤에 부르는 곳이 없어지는 모듈 여섯을 지운다 | 타입 검사. L8, L9 의 기능 시험 |
 | L10c | 옛 턴 색인, purge, 저장소 검증이 지우는 모듈을 부르지 않는다(§19.2 d). 부르는 곳만 끊는다. 지우는 일은 다음 층이다 | 타입 검사. L3~L8 의 기능 시험 |
 | L10d | 삭제. 부르는 곳이 없어진 모듈 67개를 의존 순서대로 다섯 파일 이하 커밋으로 지운다. 파일째 지우는 시험과 옛 spec 도 지운다(§19.2 h, i) | 지운 이름을 `rg` 로 찾아 0. 타입 검사 |
 | L10e | Memory 저장소 장치(§19.2 b). facade 와 타입 파일을 추리고 모듈 17개를 지운다. `keeper_librarian_input_refusal` 의 이름을 바꾼다. release 목록, 프롬프트, 안내 문서(§19.2 h, j). §21 의 모델은 이 RFC 와 같이 `specs/bug-models/` 에 들어와 있다 | 지운 이름을 `rg` 로 찾아 0. 타입 검사. golden fixture 시험의 바이트가 그대로다. L3~L9 의 기능 시험 |
@@ -2249,20 +2250,20 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 옛 `workspace-curator` add-on 을 지우는 층(L10a2, §19.2 l)은 L10a 바로 위다. L10a 와 같은 단위 일곱을 고치고, 같은 정지에서 디스크를 지운다. changelog 의 「Fresh state required」 문장도 하나를 같이 쓴다. 그 층에만 있는 일은 실행 기록부를 끊는 것이다(§18.2 의 3단계).
 
-purge 규칙도 이 stack 에 든다(L10b2). 컷 앞의 빌드에서는 옛 lane 이 Librarian 의 위치 파일로 이력을 읽는다. 그 위치를 보는 가드 없이 purge 가 먼저 들어가면, 옛 lane 이 아직 읽지 않은 메시지를 purge 가 고쳐 쓴다. 새 규칙이 맞는 때는 턴 기록을 읽는 쓰는 쪽이 읽기를 맡은 뒤다. 그래서 purge 규칙은 lane 전환과 같은 설치에서 바뀐다. 운영자가 그 사이에 purge 를 미룰 일이 없다.
+purge 규칙(§5.6, #54283)은 이 stack 에 들지 않는다. 컷 앞에 따로 main 에 들어갔다. 서버는 Librarian 의 위치 파일로 이력을 읽는 lane 을 시작하지 않는다(#53463). 그래서 purge 규칙이 lane 전환과 같은 설치에서 바뀔 까닭이 없다. 그 PR 앞의 빌드는 위치 파일이 있는 Keeper 의 purge 를, 이력이 그 위치를 지난 뒤로는 거절한다. 위치 파일은 컷이 지운다(§19.1).
 
 삭제가 한 층(L10d)에 몰리는 까닭은 의존이다. 이 문단의 수는 빌드로 확인한 값이 아니다. 소스에서 모듈 이름을 글자로 찾아 만든 의존 그래프에서 센 값이고, 층 표(§20)의 모듈 수도 그렇다(§23.1). 층마다의 타입 검사가 확인한다. 그 그래프에서 지우는 `lib/` 모듈 93개 사이에 순환은 없다. 그 모듈을 부르는 바깥 단위를 네 무리(L10a, L10b, L10c, L10e 가 고치는 것)로 나눠 한 무리씩 끊어 보았다. 앞의 세 무리 가운데 마지막을 끊을 때 67~82개가 한꺼번에 풀린다. 그 앞까지는 어느 순서로 해도 많아야 16개다. L10e 의 무리를 먼저 끊어도 그 층이 지우는 17개 가운데 7개만 풀린다. `bin/` 의 실행 파일 셋은 그것이 부르는 모듈을 지우는 층보다 늦지 않게 지운다.
 
-컷 앞에 따로 들어가는 준비가 둘이다. 둘 다 동작을 바꾸지 않는다.
+컷 앞에 따로 들어가는 준비가 둘이다. 둘 다 동작을 바꾸지 않는다. P2 는 main 에 있다(#54294).
 
 - **P1 시험 가르기.** case 마다 갈라야 하는 시험 파일 57개(§19.2 h)에서, 남는 모듈을 시험하는 case 와 지울 case 를 다른 파일로 나눈다. 컷 stack 은 시험을 파일째 지운다.
 - **P2 스냅샷 읽기 옮기기.** 지우는 `include` 모듈 아홉(§19.2 b)에 정의된 값 가운데 컷 뒤에도 남는 코드가 쓰는 스냅샷 읽기를 남는 모듈로 옮긴다. facade `keeper_memory_os_current` 의 `.mli` 는 그대로다.
 
-넣는 순서는 이렇다. E4 가 마지막 묻기의 거절을 읽게 하는 수리와 L9 의 화면(#54286)은 main 에 있다. PR 번호는 2026-11-21 에 본 값이다.
+넣는 순서는 이렇다. E4 가 마지막 묻기의 거절을 읽게 하는 수리, L9 의 화면(#54286), purge 규칙(#54283), P2(#54294)는 main 에 있다. PR 번호는 2026-11-21 에 본 값이다.
 
 1. carried front 의 출처 `Past_librarian_point` 의 이름 바꾸기. 그 이름을 적은 파일은 `lib/` 에 여섯, `test/` 에 넷이다. 요청이 보내는 바이트는 그대로다. L10b 가 그 가운데 셋(`keeper_turn_driver_try_provider`, `keeper_continuity_request`, `keeper_next_request_forecast`)을 고치거나 지우므로 컷 앞에 온다.
-2. P1 과 P2.
-3. 컷 stack. purge 규칙(L10b2, Draft #54283)은 그 안의 층이다.
+2. P1. purge 규칙이 고친 시험 파일 둘(`test_keeper_checkpoint_purge`, `test_server_dashboard_http_keeper_api_trace`)은 고친 뒤의 모양에서 가른다.
+3. 컷 stack.
 
 ## 21. 모델 검사
 

@@ -125,9 +125,9 @@ type load_failure =
       ; declared_window : int
       ; client_floor : int
       }
-      (** A Claude Code runtime declares a window below the least point its
-          client compacts at ([--autocompact] floor), so the client would run
-          a larger window than declared. *)
+      (** A Claude Code runtime resolves to a window below the least one its
+          client's [--autocompact] takes, so the declared window cannot reach
+          the client. *)
   | Admission_allowances_disagree of
       Llm_provider.Provider_admission.allowance_disagreement list
       (** Runtimes on one provider account that declare different

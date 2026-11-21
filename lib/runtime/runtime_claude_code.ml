@@ -19,9 +19,10 @@ let api_provider_to_string = function
 type account = Runtime_official_account.claude_code Runtime_official_account.selection
 type authorized_account = Runtime_official_account.claude_code Runtime_account_access.authorized
 
-(* Claude Code reads an [--autocompact] value below this as this floor
+(* The flag takes a window of 100,000 tokens or more
    (code.claude.com/docs/en/model-config#set-the-auto-compact-window, read
-   2026-11-21; `claude --help` of 2.1.330: "at least 100k tokens"). *)
+   2026-11-21; `claude --help` of 2.1.330: "at least 100k tokens"). The docs
+   do not say what the flag does with less. *)
 let autocompact_window_floor_tokens = 100_000
 
 type autocompact_window = int
@@ -32,7 +33,7 @@ let autocompact_window tokens =
   else
     Error
       (Printf.sprintf
-         "a window of %d tokens is below the %d tokens Claude Code compacts at the earliest"
+         "a window of %d tokens is below the %d tokens Claude Code's --autocompact takes"
          tokens
          autocompact_window_floor_tokens)
 ;;

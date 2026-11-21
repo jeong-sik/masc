@@ -26,16 +26,16 @@ type authorized_account =
   Runtime_official_account.claude_code Runtime_account_access.authorized
 
 val autocompact_window_floor_tokens : int
-(** The smallest window [--autocompact] takes: 100,000 tokens. Claude Code
-    reads a smaller value as this floor. *)
+(** The smallest window [--autocompact] takes: 100,000 tokens. The client
+    documents no meaning for a smaller value. *)
 
 (** The point, in tokens, where the client compacts its conversation. *)
 type autocompact_window = private int
 
 val autocompact_window : int -> (autocompact_window, string) result
 (** [Error] for a value below {!autocompact_window_floor_tokens}: the client
-    would compact later than the declaration says. Runtime config load
-    refuses such a declaration through this function. *)
+    takes no such window. Runtime config load refuses such a declaration
+    through this function. *)
 
 type config =
   { cli_path : string

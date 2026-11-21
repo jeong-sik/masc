@@ -252,7 +252,7 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
   | Client_compact_window_below_floor { runtime_id; declared_window; client_floor } ->
     Printf.sprintf
       "%s: runtime %S resolves to max-context = %d, and its Claude Code client \
-       compacts at %d tokens at the earliest (--autocompact). Declare at least \
+       takes no --autocompact window below %d tokens. Declare at least \
        %d where this runtime's max-context comes from (binding, provider or \
        model table)"
       config_path

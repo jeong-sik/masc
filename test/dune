@@ -6987,20 +6987,6 @@
  (libraries goal_measure_fixture masc.goal_measure masc_test_deps masc.server masc_candle masc_candle_runtime masc_process mcp_protocol eio_main yojson unix))
 
 (test
- (name test_workspace_curator_addon_contract)
- (modules test_workspace_curator_addon_contract)
- (deps (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py)
- (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol))
-
-(test
- (name test_workspace_curator_addon_commit)
- (modules test_workspace_curator_addon_commit)
- (deps ../addons/workspace-curator/lane.toml
-       ../addons/workspace-curator/schemas/classification.json
-       ../addons/workspace-curator/schemas/briefing.json (source_tree %{workspace_root}/config/prompts))
- (libraries masc_test_deps masc.server mcp_protocol))
-
-(test
  (name test_lane_addon_host_cycle)
  (modules test_lane_addon_host_cycle)
  (deps ../config/prompts/workspace_memory_curator.md ../config/prompts/workspace_memory_briefing.md)

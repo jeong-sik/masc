@@ -64,8 +64,8 @@ let check_named_stays root ~scope ~named (report : Sweep.report) =
   Alcotest.(check bool) "the named record is still archived" true (archived root ~scope named);
   Alcotest.(check bool) "the stray record is gone" false (archived root ~scope "stray")
 
-(* Server_workspace_memory_addon.finish_settling asks for a Subdivided
-   successor. *)
+(* A live record in the Curator scope names the successor its progress
+   observed. *)
 let test_curator_successor_is_named () = with_store (fun root store ->
   let child = retain store ~scope:curator "child" in
   let parent = retain store ~scope:curator "parent" in

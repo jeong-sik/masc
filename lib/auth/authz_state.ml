@@ -816,7 +816,8 @@ let read state (record : R.t) =
       | K.Provider_account
       | K.Runtime
       | K.Keeper
-      | K.Purge ) as kind )
+      | K.Purge
+      | K.Legacy_attribution ) as kind )
     , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
@@ -824,7 +825,8 @@ let read state (record : R.t) =
       | K.Trigger_evidence
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
-      | K.Local_recovery ) as kind )
+      | K.Local_recovery
+      | K.Legacy_attribution ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
 
@@ -921,5 +923,6 @@ let closed_by (record : R.t) =
   | K.Provider_account
   | K.Runtime
   | K.Keeper
-  | K.Purge -> record.R.closes
+  | K.Purge
+  | K.Legacy_attribution -> record.R.closes
 ;;

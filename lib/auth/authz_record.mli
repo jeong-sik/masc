@@ -102,6 +102,15 @@ module Kind : sig
       (** A person starts the purge of what they own, and the system
           maintenance ends it once it has deleted that, or failed to (design
           8.5, plan S1b-3c). The body is that of {!Authz_purge_event}. *)
+    | Legacy_attribution
+      (** The switchover's legacy inventory and the attribution of each legacy
+          keeper: the freeze taken once at bootstrap, the bootstrap candidate
+          bound by that admission, a legacy keeper claimed by the candidate, or
+          retired without a claim (design 10.3 and 10.5, plan C1-1). The body
+          is that of {!Authz_legacy_event}. Who may write which of its events
+          is a question of the state: the local operator freezes the inventory
+          and binds the candidate, and a claim or a retirement is written by
+          the candidate holding an Admin assignment. *)
 
   val all : t list
   val to_string : t -> string
@@ -129,7 +138,10 @@ end
     the host starts (user decision 2026-11-07). A [Purge] record is written by
     an authenticated principal, who starts the purge of what they own, and by
     the system maintenance, which ends it. Which of the two writes which event
-    is a question of the state. *)
+    is a question of the state. A [Legacy_attribution] record is written by the
+    local operator, which freezes the inventory and binds the candidate, and by
+    an authenticated principal, whose claim or retirement the state checks
+    against that candidate and its Admin assignment. *)
 val admits : Kind.t -> Author.t -> bool
 
 (** Where the next record goes: its position and the hash it must carry. *)

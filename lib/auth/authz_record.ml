@@ -49,6 +49,7 @@ module Kind = struct
     | Runtime
     | Keeper
     | Purge
+    | Legacy_attribution
 
   let all =
     [ Runtime_grant
@@ -72,6 +73,7 @@ module Kind = struct
     ; Runtime
     ; Keeper
     ; Purge
+    ; Legacy_attribution
     ]
   ;;
 
@@ -97,6 +99,7 @@ module Kind = struct
     | Runtime -> "runtime"
     | Keeper -> "keeper"
     | Purge -> "purge"
+    | Legacy_attribution -> "legacy_attribution"
   ;;
 
   let of_string label = List.find_opt (fun kind -> String.equal (to_string kind) label) all
@@ -144,6 +147,7 @@ let writers : Kind.t -> writer list = function
   | Kind.Local_recovery | Kind.Mode_event | Kind.Internal_service_credential -> [ Host_operator ]
   | Kind.Invite -> [ Host_operator; Authenticated_principal ]
   | Kind.Purge -> [ Authenticated_principal; Maintenance ]
+  | Kind.Legacy_attribution -> [ Host_operator; Authenticated_principal ]
 ;;
 
 let admits kind author = List.mem (writer_of author) (writers kind)

@@ -2105,7 +2105,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 - L3d 가 옮긴 독자는 `keeper_carried_front` 의 세대 경계 하나다(§11.2). 턴 경계와 이 턴이 시작한 곳은 그 앞 층에서 이미 턴 기록으로 옮겼다(`Keeper_turn_driver_try_provider.turn_starts`).
 - L3d 가 옮기지 않은 독자는 넷이다.
   - `keeper_turn_bridge`. official-client 턴이 checkpoint 없이 끝났는지(`No_atom_history`)와 옛 파일의 줄 번호를 읽는다. 그 줄 번호는 cursor 파일(`last_boundary_line`)에 적혀 디스크에 남는다. 턴 기록에서 같은 것을 읽는 규칙은 이 RFC 에 아직 없다. 컷(L10c)이 이 독자의 옛 파일 읽기를 끊기 전에 그 규칙을 정한다.
-  - purge(`keeper_checkpoint_purge`, `server_dashboard_http_keeper_api_checkpoints`, `bin/masc_checkpoint_purge`). 옛 파일은 `Kept_atom_rewritten` 규칙이 지키는 atom 을 찾는 데만 읽는다. 컷이 그 규칙과 함께 지운다(§19.3).
+  - purge(`keeper_checkpoint_purge`, `server_dashboard_http_keeper_api_checkpoints`, `bin/masc_checkpoint_purge`). 옛 파일은 두 곳에서 읽는다. `Kept_atom_rewritten` 규칙이 지키는 atom 을 찾을 때와 continuity 스냅샷이 이력에 맞는지 볼 때(`Librarian_continuity_snapshot.restore`)다. 컷이 그 규칙과 그 모듈을 지운다(§19.3, 위).
   - `Keeper_durable_store` 의 검증. 컷이 지운다(위).
   - `keeper_agent_run` 의 `history_at_start`. 옛 파일에 재시작 줄을 쓸지 정할 때만 읽는다. 쓰는 쪽이라 컷이 지운다. 이 턴이 시작한 곳은 `Opened.baseline` 에서 읽는다(§19.3).
 

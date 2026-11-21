@@ -53,14 +53,6 @@ val prepared_state : batch -> t
 val batch_contract : batch -> (string, string) result
 (** Original prepared pass contract. An inconsistent batch with no active pass
     is an error; the current prompt registry is not consulted. *)
-val batch_is_current : sources:source list -> contract:string -> batch -> (bool, string) result
-(** Same pass-preservation rule as [prepare]: additions can wait, but a removed
-    or changed target or a changed contract invalidates this original batch.
-    Does not render, prepare, accept or publish another request. *)
-val state_is_current : sources:source list -> contract:string -> t -> (bool, string) result
-(** {!batch_is_current} for the pass a state is building: a batch is current
-    exactly when the state it prepared is. A state with no active pass is an
-    error. *)
 
 val batch_to_json : batch -> Yojson.Safe.t
 val batch_of_json :

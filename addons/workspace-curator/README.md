@@ -85,24 +85,3 @@ Focused actual stdio/restart checks:
 ```sh
 python3 -m unittest discover -s addons/tests -p test_workspace_curator.py
 ```
-
-`test_workspace_curator_addon_contract` additionally joins host capture, real
-worker process restarts, advertised schemas and Hooks, the production semantic
-authority and common Exact HTTP flow against loopback providers, and retained
-terminal reads. Only the providers are fixtures in that flow. The production
-Curator scheduler is not started by this check.
-
-The public production owner now uses the original Addon execution and recovery
-path, including actual
-configuration/result wakes and fresh configured admission for new work. The
-replacement `test_workspace_memory_curator_lane` fixture starts that owner with a
-real persistent Python/MCP worker and common Exact loopback providers; resource
-launch/cleanup is substituted. Its execution evidence is separate from the
-contract-only check above. Original registry publication and Owner ACK recovery
-are now connected, including Off maintenance and concurrent strict-store reads.
-The selected execution passed 226 cases across ten suites on the exact candidate. It includes
-production13 with this Python/MCP/loopback setup; it does not prove actual
-provider/container lifecycle or either UI. The candidate's whole tree was merged
-into the Candle branch; main integration, current runtime settings/UI cleanup
-and installed-runtime evidence remain unfinished E02 work. Extraction completion
-is not claimed.

@@ -203,12 +203,67 @@ let record_failed_operation_rows pool ~keeper_name operations =
 let record_failed_operations pool ~keeper_name owner =
   record_failed_operation_rows pool ~keeper_name (Keeper_owner.failed_operations_at_start owner)
 
+let refresh_owner_handles pool =
+  let owner_handles =
+    Hashtbl.to_seq_values pool.owners
+    |> List.of_seq
+    |> List.sort (fun left right ->
+      let name owner =
+        match (Keeper_owner.projection owner).Keeper_owner_reducer.meta with
+        | Some meta -> meta.name
+        | None -> ""
+      in
+      String.compare (name left) (name right))
+  in
+  Atomic.set pool.owner_handles owner_handles
+;;
+
+let quarantine_faulted_owner pool ~keeper_name faulted_owner exn =
+  (* Yield onto a fresh daemon fiber so we never re-enter [pool.owners_mu]
+     synchronously if a fault ever occurs during [ensure_in_pool] startup. *)
+  if not (Atomic.get pool.stopping)
+  then
+    Eio.Fiber.fork_daemon ~sw:pool.sw (fun () ->
+      (try
+         Eio.Fiber.yield ();
+         let detail =
+           Printf.sprintf "keeper bulkhead fault: %s" (Printexc.to_string exn)
+         in
+         let quarantined =
+           Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+             match Hashtbl.find_opt pool.owners keeper_name with
+             | Some current when current == faulted_owner ->
+               Hashtbl.remove pool.owners keeper_name;
+               Hashtbl.replace pool.unavailable keeper_name detail;
+               Keeper_owner_projection.remove
+                 ~base_path:pool.config.base_path
+                 ~keeper_name
+                 faulted_owner;
+               refresh_owner_handles pool;
+               true
+             | Some _ | None -> false)
+         in
+         if quarantined
+         then
+           Keeper_turn_broadcast.changed
+             ~base_path:pool.config.base_path
+             ~keeper_name
+       with
+       | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+       | cleanup_exn ->
+         Log.Keeper.error ~keeper_name
+           "keeper_owner_registry: failed to quarantine faulted keeper: %s"
+           (Printexc.to_string cleanup_exn));
+      `Stop_daemon)
+;;
+
 let start_owner pool ~keeper_name ~initial_meta =
   match prepare_operation_store_path pool keeper_name with
   | Error _ as error -> error
   | Ok operation_store_path ->
     (match
-       Keeper_owner.start
+       Keeper_owner.start_supervised
+         ~on_bulkhead_fault:(quarantine_faulted_owner pool ~keeper_name)
          ~sw:pool.sw
          ~base_path:pool.config.base_path
          ~store:(store_for pool keeper_name)
@@ -226,21 +281,6 @@ let start_owner pool ~keeper_name ~initial_meta =
      | Ok owner ->
        record_failed_operations pool ~keeper_name owner;
        Ok owner)
-;;
-
-let refresh_owner_handles pool =
-  let owner_handles =
-    Hashtbl.to_seq_values pool.owners
-    |> List.of_seq
-    |> List.sort (fun left right ->
-      let name owner =
-        match (Keeper_owner.projection owner).Keeper_owner_reducer.meta with
-        | Some meta -> meta.name
-        | None -> ""
-      in
-      String.compare (name left) (name right))
-  in
-  Atomic.set pool.owner_handles owner_handles
 ;;
 
 let install_owner_projection pool keeper_name owner =
@@ -315,20 +355,23 @@ let ensure_in_pool pool meta =
       match Hashtbl.find_opt pool.owners meta.Keeper_meta_contract.name with
       | Some owner -> Ok owner
       | None ->
-        (match
-          start_owner
-            pool
-            ~keeper_name:meta.name
-            ~initial_meta:(Some meta)
-         with
-         | Error error -> Error (Owner_initialization_failed error)
-         | Ok owner ->
-           Hashtbl.add pool.owners meta.name owner;
-           install_owner_projection pool meta.name owner;
-           refresh_owner_handles pool;
-           Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
-             ~keeper_name:meta.name;
-           Ok owner)) in
+        (match Hashtbl.find_opt pool.unavailable meta.Keeper_meta_contract.name with
+         | Some _ -> Error (Owner_unavailable meta.Keeper_meta_contract.name)
+         | None ->
+           (match
+             start_owner
+               pool
+               ~keeper_name:meta.name
+               ~initial_meta:(Some meta)
+            with
+            | Error error -> Error (Owner_initialization_failed error)
+            | Ok owner ->
+              Hashtbl.add pool.owners meta.name owner;
+              install_owner_projection pool meta.name owner;
+              refresh_owner_handles pool;
+              Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
+                ~keeper_name:meta.name;
+              Ok owner))) in
     match installed with
     | Error _ as error -> error
     | Ok owner -> complete_registered_restart pool ~keeper_name:meta.name owner
@@ -1133,6 +1176,18 @@ module For_testing = struct
     match find_pool ~purpose:Admission base_path with
     | Error _ -> 0
     | Ok pool -> Eio.Mutex.use_ro pool.owners_mu (fun () -> Hashtbl.length pool.owners)
+  ;;
+
+  let quarantine_faulted_owner ~base_path ~keeper_name faulted_owner exn =
+    match find_pool ~purpose:Admission base_path with
+    | Error _ -> ()
+    | Ok pool -> quarantine_faulted_owner pool ~keeper_name faulted_owner exn
+  ;;
+
+  let ensure_in_pool ~base_path meta =
+    match find_pool ~purpose:Admission base_path with
+    | Error _ as error -> error
+    | Ok pool -> ensure_in_pool pool meta
   ;;
 end
 

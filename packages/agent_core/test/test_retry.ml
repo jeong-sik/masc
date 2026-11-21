@@ -435,12 +435,122 @@ let test_error_message_all_variants () =
     cases
 ;;
 
+let test_structured_refusal_classification () =
+  (* Structured HTTP 400/422 ContextOverflow across OpenAI, llama.cpp, GLM,
+     and OpenRouter nested error.metadata.raw — zero prose matching. *)
+  (match
+     Retry.classify_error
+       ~retry_after_header:None
+       ~status:400
+       ~body:{|{"error":{"code":"context_length_exceeded","message":"prompt too long"}}|}
+   with
+   | Retry.ContextOverflow _ -> ()
+   | other -> failf "expected ContextOverflow for openai code, got %s" (Retry.error_message other));
+  (match
+     Retry.classify_error
+       ~retry_after_header:None
+       ~status:400
+       ~body:{|{"error":{"type":"exceed_context_size_error","n_ctx":32768,"message":"overflow"}}|}
+   with
+   | Retry.ContextOverflow { limit = Some 32768; _ } -> ()
+   | other -> failf "expected ContextOverflow(32768) for llama.cpp, got %s" (Retry.error_message other));
+  (match
+     Retry.classify_error
+       ~retry_after_header:None
+       ~status:400
+       ~body:{|{"error":{"code":400,"message":"Provider returned error","metadata":{"raw":"{\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"too big\"}}"}}}|}
+   with
+   | Retry.ContextOverflow _ -> ()
+   | other -> failf "expected ContextOverflow for openrouter nested raw, got %s" (Retry.error_message other));
+  (* Plain 400 prose mentioning context length without a structured code must
+     NOT match ContextOverflow (zero prose heuristics). *)
+  (match
+     Retry.classify_error
+       ~retry_after_header:None
+       ~status:400
+       ~body:{|{"error":{"message":"your context length is too long"}}|}
+   with
+   | Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; _ } -> ()
+   | other -> failf "expected Unknown_invalid_request for prose-only 400, got %s" (Retry.error_message other));
+  (* Structured HTTP 403/429 quota/billing exhaustion (OpenRouter key_limit_exceeded,
+     OpenCode Go GoUsageLimitError, 403 with Retry-After). *)
+  (match
+     Retry.classify_structured_refusal
+       ~retry_after_header:(Some 1092006.0)
+       ~status:429
+       ~body:{|{"type":"error","error":{"type":"GoUsageLimitError","message":"Monthly usage limit reached"}}|}
+   with
+   | Some (Retry.Structured_account_quota { retry_after = Some 1092006.0; _ }) -> ()
+   | _ -> fail "expected Structured_account_quota with retry_after for GoUsageLimitError");
+  (match
+     Retry.classify_error
+       ~retry_after_header:None
+       ~status:403
+       ~body:{|{"error":{"code":"key_limit_exceeded","message":"Key limit exceeded"}}|}
+   with
+   | Retry.PaymentRequired _ -> ()
+   | other -> failf "expected PaymentRequired for 403 key_limit_exceeded, got %s" (Retry.error_message other));
+  (* A 403 carrying Retry-After with NO structured quota/billing signal (e.g. WAF/CDN)
+     must stay AuthorizationError, never stamped as PaymentRequired/Structured_account_quota. *)
+  (match
+     Retry.classify_structured_refusal
+       ~retry_after_header:(Some 60.0)
+       ~status:403
+       ~body:{|{"error":{"message":"Forbidden by edge WAF"}}|}
+   with
+   | None -> ()
+   | Some _ -> fail "403 with Retry-After only must not classify as Structured_account_quota");
+  (match
+     Retry.classify_error
+       ~retry_after_header:(Some 60.0)
+       ~status:403
+       ~body:{|{"error":{"message":"Forbidden by edge WAF"}}|}
+   with
+   | Retry.AuthorizationError _ -> ()
+   | other -> failf "expected AuthorizationError for 403+Retry-After without quota signal, got %s" (Retry.error_message other));
+  (* Ordinary transient Gemini RPM/TPM HTTP 429 carries gRPC status
+     RESOURCE_EXHAUSTED without billing/quota details[].reason and must stay
+     RateLimited rather than Hard_quota. *)
+  let gemini_transient_429 =
+    {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Resource has been exhausted (e.g. check quota)."}}|}
+  in
+  (match
+     Retry.classify_structured_refusal
+       ~retry_after_header:None
+       ~status:429
+       ~body:gemini_transient_429
+   with
+   | None -> ()
+   | Some _ -> fail "transient Gemini RESOURCE_EXHAUSTED 429 must not classify as Structured_account_quota");
+  (match
+     Retry.classify_error
+       ~retry_after_header:None
+       ~status:429
+       ~body:gemini_transient_429
+   with
+   | Retry.RateLimited _ -> ()
+   | other -> failf "expected RateLimited for transient Gemini 429, got %s" (Retry.error_message other));
+  (* Explicit Gemini quota/billing detail reason still classifies as account quota. *)
+  (match
+     Retry.classify_structured_refusal
+       ~retry_after_header:None
+       ~status:429
+       ~body:{|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"reason":"BILLING_DISABLED"}]}}|}
+   with
+   | Some (Retry.Structured_account_quota _) -> ()
+   | _ -> fail "expected Structured_account_quota for explicit BILLING_DISABLED detail reason")
+;;
+
 let () =
   run
     "Retry"
     [ ( "classify"
       , [ test_case "http status mapping" `Quick test_classify_error
         ; test_case "edge cases" `Quick test_classify_error_edge_cases
+        ; test_case
+            "structured 400/422 overflow and 403/429 quota"
+            `Quick
+            test_structured_refusal_classification
         ; test_case
             "server refusal status boundaries"
             `Quick

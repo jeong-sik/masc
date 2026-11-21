@@ -367,6 +367,14 @@ val command_error_to_string : command_error -> string
 
 module For_testing : sig
   val installed_owner_count : base_path:string -> int
+
+  val quarantine_faulted_owner :
+    base_path:string -> keeper_name:string -> Keeper_owner.t -> exn -> unit
+
+  val ensure_in_pool :
+    base_path:string ->
+    Keeper_meta_contract.keeper_meta ->
+    (Keeper_owner.t, lookup_error) result
 end
 
 val heap_root : (Obj.t -> 'a) -> 'a

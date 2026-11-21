@@ -513,9 +513,49 @@ let distinct_windows ~path (report : report) =
 (* OpenRouter, GET /api/v1/key (openrouter.ai/docs/api_reference/limits).
    Credits are denominated in USD (openrouter.ai/support/). A null [limit]
    states no key cap; [usage] is the all-time spend, not an empty meter.
-   The response states no reset time. [limit_reset] is not read:
-   the label is part of the row key in {!record}, so a label carrying the
-   reset period would leave the old row behind when the period changes. *)
+   [limit_remaining] can go slightly negative when an in-flight request settles
+   past the cap; clamp remaining to 0.0 so spent keys decode cleanly instead of
+   failing validation. When [effective_budget.resets_at] (or a key_limit entry
+   in [budgets]) states an RFC 3339 reset time, preserve it so quota windows
+   rest until the provider's exact reset. *)
+let openrouter_budget_resets_at ~path fields =
+  let resets_at_of_budget ~path budget_fields =
+    match List.assoc_opt "resets_at" budget_fields with
+    | None | Some `Null -> Ok None
+    | Some json ->
+      let p = member_path path "resets_at" in
+      let* raw = string_at ~path:p json in
+      (match Time_codec.parse_rfc3339_whole_seconds raw with
+       | Ok seconds -> Ok (Some (Float.to_int seconds))
+       | Error Time_codec.Invalid_rfc3339 ->
+         Error (Wrong_type { path = p; expected = "an RFC 3339 timestamp" }))
+  in
+  let* from_effective =
+    match List.assoc_opt "effective_budget" fields with
+    | None | Some `Null -> Ok None
+    | Some (`Assoc budget_fields) ->
+      resets_at_of_budget ~path:(member_path path "effective_budget") budget_fields
+    | Some _ -> Ok None
+  in
+  match from_effective with
+  | Some _ as resets_at -> Ok resets_at
+  | None ->
+    (match List.assoc_opt "budgets" fields with
+     | Some (`List budgets) ->
+       let rec find_key_limit idx = function
+         | [] -> Ok None
+         | `Assoc bf :: rest ->
+           (match List.assoc_opt "scope" bf with
+            | Some (`String "key_limit") ->
+              let bpath = Printf.sprintf "%s.budgets[%d]" path idx in
+              resets_at_of_budget ~path:bpath bf
+            | _ -> find_key_limit (idx + 1) rest)
+         | _ :: rest -> find_key_limit (idx + 1) rest
+       in
+       find_key_limit 0 budgets
+     | Some _ | None -> Ok None)
+;;
+
 let openrouter_credit_window ~path fields =
   match List.assoc_opt "limit" fields with
   | None | Some `Null ->
@@ -536,22 +576,26 @@ let openrouter_credit_window ~path fields =
     let limit_path = member_path path "limit" in
     let* limit = number_at ~path:limit_path limit_json in
     let* limit = positive_number ~path:limit_path limit in
+    let remaining_path = member_path path "limit_remaining" in
     let* remaining = required_as number_at ~path "limit_remaining" fields in
     let* remaining =
-      within
-        ~path:(member_path path "limit_remaining")
-        ~expected:(Printf.sprintf "within 0..%g" limit)
-        ~low:0.0
-        ~high:limit
-        remaining
+      if Float.is_finite remaining && Float.compare remaining limit <= 0
+      then Ok (Float.max 0.0 remaining)
+      else
+        Error
+          (Unexpected_value
+             { path = remaining_path
+             ; expected = Printf.sprintf "a finite number <= %g" limit
+             })
     in
+    let* resets_at = openrouter_budget_resets_at ~path fields in
     Ok
       (Some
          { limit_id = None
          ; kind = Provider_label "API key credit limit"
          ; role = Gates_model_calls
          ; utilization = Usd { used = limit -. remaining; limit = Some limit }
-         ; resets_at = None
+         ; resets_at
          })
 ;;
 

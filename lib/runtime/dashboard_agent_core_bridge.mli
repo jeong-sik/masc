@@ -10,12 +10,10 @@
     untouched until I7 (string elimination) and I2 (provider_error variant)
     converge into a Type Triad SSOT.
 
-    In-process, mutex-protected ring buffer keyed by the neutral runtime
-    lane. Provider/model identifiers accepted at the boundary are discarded
-    before storage so MASC-side dashboard state does not retain concrete AGENT_CORE
-    runtime identities. The buffer caps itself at a small bounded window so
-    recording is O(1) amortized and memory stays bounded regardless of emit
-    volume.
+    In-process, mutex-protected ring buffer keyed by concrete [provider_id].
+    Each provider keeps its own bounded FIFO window so recording is O(1)
+    amortized, memory stays bounded regardless of emit volume, and per-provider
+    snapshot/clear queries stay isolated.
 
     AGENT_CORE workers call {!record} after each LLM turn (tool path or chat path).
     Each recorded sample is emitted to Observer SSE sessions as an additive
@@ -44,11 +42,9 @@ type status =
     a later cycle. *)
 type sample = {
   provider_id : string;
-      (** Compatibility field normalized to the neutral ["runtime"] lane by
-          constructors and [record] before MASC stores the sample. *)
+      (** Concrete provider identifier retained per sample. *)
   model_id : string;
-      (** Compatibility field normalized to the neutral ["runtime"] lane by
-          constructors and [record] before MASC stores the sample. *)
+      (** Concrete model identifier retained per sample. *)
   ttfb_ms : float;
       (** Time-to-first-byte (or first token) in milliseconds. *)
   total_duration_ms : float;  (** Full call duration in milliseconds. *)

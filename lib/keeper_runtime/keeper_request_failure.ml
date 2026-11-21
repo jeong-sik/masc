@@ -186,6 +186,12 @@ let unnamed_core_cause error =
        Provider_key_refused { provider; detail }
      | Some (Keeper_provider_refusal.Spawn_refused { provider; detail }) ->
        Provider_spawn_refused { provider; detail }
+     | Some (Keeper_provider_refusal.Account_busy { provider; _ } as refusal) ->
+       Provider_timeout
+         { provider = Some provider
+         ; phase = Some "account_busy"
+         ; detail = Keeper_provider_refusal.to_string refusal
+         }
      | None ->
        (match Keeper_internal_error.classify_masc_internal_error error with
         | Some masc_error -> Masc masc_error

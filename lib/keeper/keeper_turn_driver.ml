@@ -391,11 +391,23 @@ let provider_account_id_of_attempt ~(runtime : Runtime_instance.t) =
   | Runtime_execution.Vibe_cli _ -> None
 ;;
 
-let with_account_call_slot ~(runtime : Runtime_instance.t) f =
+let with_account_call_slot ~(runtime : Runtime_instance.t) ~on_busy f =
   match provider_account_id_of_attempt ~runtime with
   | None -> f ()
   | Some account_id ->
-    Runtime_account_call.call_in_turn_of account_id (fun (_call : Runtime_account_call.t) -> f ())
+    (match
+       Runtime_account_call.try_acquire account_id (fun (_call : Runtime_account_call.t) -> f ())
+     with
+     | Runtime_account_call.Acquired value -> value
+     | Runtime_account_call.Account_busy busy_id ->
+       let err =
+         Keeper_provider_refusal.core_error
+           (Keeper_provider_refusal.Account_busy
+              { provider = runtime.Runtime_instance.provider.id
+              ; account_id = Authz_types.Provider_account_id.to_string busy_id
+              })
+       in
+       on_busy err)
 ;;
 
 let authorize_host_account client =
@@ -1305,15 +1317,13 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Provider_capacity; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Provider_capacity
-        (* A 403 refused the account and does not say why. A provider may
-           answer a spent usage window this way and answer a client its plan
-           does not admit with the same body (2026-09-25: 17 of 17 cycles
-           after a restart walked such a candidate first, the one on its
-           lanes with no mark). The status rests nothing. A provider that declares
-           [usage-read] is asked once, here, before the walk moves on: a
-           spent window rests the scope until its stated reset, so this walk
-           and every later one sees it; a window with headroom, a failed
-           read, or no [usage-read] leaves no evidence, as for a 401. *)
+        (* A 403 refused the account (e.g. OpenRouter daily key limit, Kimi
+           5-hour window, or a missing entitlement). Structured quota/billing
+           403s already arrived as [Hard_quota] via [Retry.classify_structured_refusal].
+           For an unstructured 403, ask [usage-read] when declared so a spent
+           window rests the scope with the provider's stated reset and is
+           promoted to [HardQuota] below; a 403 with confirmed headroom or no
+           [usage-read] rotates without fabricating a quota rest. *)
         | Keeper_runtime_failure_route.Rotate_now
             { rotate = Keeper_runtime_failure_route.Authorization_refused } ->
           read_usage_after_account_refusal candidate
@@ -1358,12 +1368,66 @@ let attempt_runtime_candidates
            do better, so this is no evidence about this one. *)
         | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ()
        in
-       let report_attempt_error () =
+       (* When an HTTP 403 refusal was confirmed as a spent quota window by
+          [usage-read], promote the error to typed [HardQuota] (carrying the
+          provider's reset wait when stated) and recompute [route] BEFORE
+          reporting the attempt error or evaluating same-path deferral. *)
+       let promote_usage_confirmed_403 () =
+         match route with
+         | Keeper_runtime_failure_route.Rotate_now { rotate } ->
+           (match rotate, attempt_quota_scope with
+            | Keeper_runtime_failure_route.Authorization_refused, Some scope ->
+              let now = Unix.gettimeofday () in
+              (match Runtime_quota_window.answered_rest ~scope ~now with
+               | Some
+                   ( Runtime_quota_window.Stated_reset_ahead
+                   | Runtime_quota_window.Read_found_no_reset ) ->
+                 let retry_after =
+                   Option.map
+                     (fun resets_at -> Float.max 1.0 (resets_at -. now))
+                     (Runtime_quota_window.active_until ~scope ~now)
+                 in
+                 let promoted =
+                   Agent_core.Error.Provider
+                     (Llm_provider.Error.HardQuota
+                        { provider = attempt_runtime_id
+                        ; retry_after
+                        ; detail = Agent_core.Error.to_string error
+                        })
+                 in
+                 let promoted_route =
+                   Keeper_runtime_failure_route.route_of_error
+                     ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+                     promoted
+                 in
+                 promoted, promoted_route
+               | None -> error, route)
+            | Keeper_runtime_failure_route.Authorization_refused, None
+            | ( ( Keeper_runtime_failure_route.Auth_failed
+                | Keeper_runtime_failure_route.Model_unavailable
+                | Keeper_runtime_failure_route.Resumable_cli_session
+                | Keeper_runtime_failure_route.Candidates_filtered
+                | Keeper_runtime_failure_route.Runtime_exhausted
+                | Keeper_runtime_failure_route.No_progress_empty
+                | Keeper_runtime_failure_route.No_progress_thinking_only
+                | Keeper_runtime_failure_route.No_progress_truncated
+                | Keeper_runtime_failure_route.Refusal_body_not_received
+                | Keeper_runtime_failure_route.Admission
+                | Keeper_runtime_failure_route.Provider_reported_failure
+                | Keeper_runtime_failure_route.Request_refused
+                | Keeper_runtime_failure_route.Provider_wire_defect
+                | Keeper_runtime_failure_route.Server_error_not_transient
+                | Keeper_runtime_failure_route.Context_window_exceeded )
+              , (Some _ | None) ) -> error, route)
+         | Keeper_runtime_failure_route.Retry_after_observed _
+         | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> error, route
+       in
+       let report_attempt_error reported_error () =
          on_attempt_error
            ~runtime_id:attempt_runtime_id
            ~attempt:idx
            ~dispatch
-           error
+           reported_error
        in
        (* Let observers retain this failure's stated rest before a later
           candidate outlives it. The quota/usage read above owns that evidence;
@@ -1372,14 +1436,19 @@ let attempt_runtime_candidates
           the rest recorded before the read, and then ends as cancelled. In
           a fiber the report runs shielded from that cancellation, so a report
           that suspends cannot raise a new [Cancelled] over the original. *)
-       (match record_route_evidence () with
-        | () -> report_attempt_error ()
-        | exception (Eio.Cancel.Cancelled _ as cancelled) ->
-          let backtrace = Printexc.get_raw_backtrace () in
-          (match Fs_compat.execution_context () with
-           | Fs_compat.Eio_fiber -> Eio.Cancel.protect report_attempt_error
-           | Fs_compat.Non_eio -> report_attempt_error ());
-          Printexc.raise_with_backtrace cancelled backtrace);
+       let error, route =
+         match record_route_evidence () with
+         | () ->
+           let error, route = promote_usage_confirmed_403 () in
+           report_attempt_error error ();
+           error, route
+         | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+           let backtrace = Printexc.get_raw_backtrace () in
+           (match Fs_compat.execution_context () with
+            | Fs_compat.Eio_fiber -> Eio.Cancel.protect (report_attempt_error error)
+            | Fs_compat.Non_eio -> report_attempt_error error ());
+           Printexc.raise_with_backtrace cancelled backtrace
+       in
        (* Stable demotion retains every declared candidate, including when
           all are observed unavailable. Neither hint causes a wait or gate. *)
        let rest = demote_rest rest in
@@ -3438,7 +3507,15 @@ let run_named
           official_model_input_observation hooks
         in
         let run_codex ~initial_messages () =
-          with_account_call_slot ~runtime (fun () ->
+          with_account_call_slot
+            ~runtime
+            ~on_busy:(fun error ->
+              { Keeper_codex_runtime.outcome =
+                  Keeper_official_client_attempt.refused_before_dispatch error
+              ; successful_tool_completion =
+                  Keeper_codex_runtime.No_successful_tool_completion
+              })
+            (fun () ->
           match
             authorize_account walk_owner ~runtime_id:attempt_runtime_id config.account_home
           with
@@ -3738,7 +3815,10 @@ let run_named
           official_model_input_observation hooks
         in
         let run_muse ~initial_messages () =
-          with_account_call_slot ~runtime (fun () ->
+          with_account_call_slot
+            ~runtime
+            ~on_busy:Keeper_official_client_attempt.refused_before_dispatch
+            (fun () ->
           match
             authorize_muse_account walk_owner ~runtime_id:attempt_runtime_id
               execution.account_home
@@ -3879,7 +3959,10 @@ let run_named
           official_model_input_observation hooks
         in
         let run_claude ~initial_messages () =
-          with_account_call_slot ~runtime (fun () ->
+          with_account_call_slot
+            ~runtime
+            ~on_busy:Keeper_official_client_attempt.refused_before_dispatch
+            (fun () ->
           (* Runtime load refuses a declaration the client cannot take
              ([Runtime_config_validation.validate_runtime_max_context]), so an
              [Error] here is a runtime that skipped that load. *)
@@ -4031,7 +4114,15 @@ let run_named
         , official_client_dispatch ~provider_config_transform claude_result )
       | Runtime_execution.Agent_core sealed ->
        let request_input = Eio.Lazy.force continuity in
-       with_account_call_slot ~runtime (fun () ->
+       with_account_call_slot
+         ~runtime
+         ~on_busy:(fun err ->
+           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+           ( Error err
+           , None
+           , Keeper_provider_attempt_effect.No_effect_observed
+           , Keeper_attempt_dispatch.Rejected_before_dispatch ))
+         (fun () ->
        (match
           match authorize_api_provider walk_owner ~runtime_id:attempt_runtime_id sealed with
           | Error _ as refused -> refused

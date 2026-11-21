@@ -1479,7 +1479,8 @@ let shutdown_reservation t operation_id =
   { operation_id; in_flight = Atomic.get t.turn_in_flight }
 ;;
 
-let start
+let start_impl
+      ~on_bulkhead_fault
       ~sw
       ~base_path
       ~store
@@ -1594,6 +1595,16 @@ let start
     if not (Atomic.exchange t.closed true)
     then Eio.Promise.resolve resolve_closed ()
   in
+  (* Per-Keeper [Eio.Switch] bulkhead (#53995): every turn fiber, retry timer,
+     and drain loop for this Keeper runs strictly inside [keeper_sw], NEVER on
+     the parent server switch [sw] ([pool.sw]). An unexpected fault inside this
+     Keeper tears down only [keeper_sw], closes only this Keeper's operation
+     store, marks only this Keeper closed, and notifies [on_bulkhead_fault],
+     leaving the MASC server and all sibling Keepers unaffected. Only parent
+     cancellation (server shutdown) propagates out of the supervisor daemon. *)
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let run_keeper_bulkhead () =
+      Eio.Switch.run (fun keeper_sw ->
   (* Live witnesses are owned by this actor and tied to the exact durable
      retry. Restart loses the witness, never treating lost provider evidence
      as recovery; the persisted deadline still schedules its wake. *)
@@ -1656,7 +1667,7 @@ let start
           | None -> ()
           | Some previous -> Eio.Promise.resolve previous.supersede ());
          (try
-            Eio.Fiber.fork_daemon ~sw (fun () ->
+            Eio.Fiber.fork_daemon ~sw:keeper_sw (fun () ->
               (try
                  match Eio.Fiber.first
                    (fun () -> Eio.Time.sleep_until clock wake.at; `Due)
@@ -1733,7 +1744,7 @@ let start
         keeper_name
     | Some clock ->
       (try
-         Eio.Fiber.fork_daemon ~sw (fun () ->
+         Eio.Fiber.fork_daemon ~sw:keeper_sw (fun () ->
            (try
               Eio.Time.sleep clock transient_retry_wake_sec;
               (* fire-and-forget: the sleeper exists only to deliver the wake; if the owner has closed by then there is nothing to wake. *)
@@ -1754,7 +1765,7 @@ let start
            keeper_name
            (Printexc.to_string exn))
   in
-  Eio.Switch.on_release sw (fun () ->
+  Eio.Switch.on_release keeper_sw (fun () ->
     mark_no_longer_answering ();
     let projection = Atomic.get t.projection in
     Atomic.set t.projection { projection with stopping = true };
@@ -1765,7 +1776,6 @@ let start
         "keeper_owner: operation store close failed keeper=%s error=%s"
         keeper_name
         (Chat_operation_store.error_to_string error));
-  Eio.Fiber.fork_daemon ~sw (fun () ->
     (* Only an exact child request carrying the positive preparation marker
        can retry a failed wait write during that child's settlement. *)
     let unpersisted_preparation_wait : preparation_wait_intent option ref = ref None in
@@ -1973,7 +1983,7 @@ let start
             t
             (Some { lane = Chat_operation; started_at = t.now ()
                   ; interrupt_token });
-          Eio.Fiber.fork ~sw (fun () ->
+          Eio.Fiber.fork ~sw:keeper_sw (fun () ->
             Keeper_turn_preview_owner.with_owner ~interrupt_token ~observation @@ fun () ->
             let claimed_operation_id = ref None in
             let claim () =
@@ -3158,7 +3168,7 @@ let start
                        t
                        (Some { lane; started_at = t.now ()
                              ; interrupt_token });
-                     Eio.Fiber.fork ~sw (fun () ->
+                     Eio.Fiber.fork ~sw:keeper_sw (fun () ->
                        Keeper_turn_preview_owner.with_owner ~interrupt_token ~observation @@ fun () ->
                        let outcome =
                          try
@@ -3306,6 +3316,9 @@ let start
        [start], and it never waits for a session lock. *)
     release_committed_checkpoints ~keeper_name ~session_root t.operation_store;
     start_child_if_needed initial_state None;
+    (* The defer-time wake died with the previous process; re-arm it inside
+       this Keeper's bulkhead switch. *)
+    rearm_cooling_retry_wake ();
     (* Cancellation reaches the drain at its [Stream.take]. Whatever the
        reason, the loop is the owner's only reader, so leaving it means no
        queued or future command will be answered. *)
@@ -3315,10 +3328,111 @@ let start
       value
     | exception exn ->
       mark_no_longer_answering ();
-      raise exn);
-  (* The defer-time wake died with the previous process; re-arm it. *)
-  rearm_cooling_retry_wake ();
+      raise exn)
+    in
+    (try ignore (run_keeper_bulkhead ()) with
+     | Eio.Cancel.Cancelled _ as exn ->
+       (* Re-raise parent/server shutdown cancellation; contain only
+          keeper-local cancellations so sibling Keepers stay alive. *)
+       (match Eio.Fiber.check () with
+        | () ->
+          mark_no_longer_answering ();
+          Log.Keeper.error ~keeper_name
+            "keeper_owner bulkhead contained local cancellation: %s"
+            (Printexc.to_string exn);
+          Option.iter
+            (fun f ->
+               try f t exn with
+               | Eio.Cancel.Cancelled _ as cancelled ->
+                 (match Eio.Fiber.check () with
+                  | () ->
+                    Log.Keeper.error ~keeper_name
+                      "keeper_owner bulkhead fault observer cancelled locally: %s"
+                      (Printexc.to_string cancelled)
+                  | exception (Eio.Cancel.Cancelled _) -> raise cancelled)
+               | cb_exn ->
+                 Log.Keeper.error ~keeper_name
+                   "keeper_owner bulkhead fault observer failed: %s"
+                   (Printexc.to_string cb_exn))
+            on_bulkhead_fault
+        | exception (Eio.Cancel.Cancelled _) ->
+          mark_no_longer_answering ();
+          raise exn)
+     | exn ->
+       mark_no_longer_answering ();
+       Log.Keeper.error ~keeper_name
+         "keeper_owner bulkhead isolated fault (server and sibling keepers unaffected): %s"
+         (Printexc.to_string exn);
+       Option.iter
+         (fun f ->
+            try f t exn with
+            | Eio.Cancel.Cancelled _ as cancelled ->
+              (match Eio.Fiber.check () with
+               | () ->
+                 Log.Keeper.error ~keeper_name
+                   "keeper_owner bulkhead fault observer cancelled locally: %s"
+                   (Printexc.to_string cancelled)
+               | exception (Eio.Cancel.Cancelled _) -> raise cancelled)
+            | cb_exn ->
+              Log.Keeper.error ~keeper_name
+                "keeper_owner bulkhead fault observer failed: %s"
+                (Printexc.to_string cb_exn))
+         on_bulkhead_fault);
+    `Stop_daemon);
   Ok t))
+;;
+
+let start
+      ~sw
+      ~base_path
+      ~store
+      ~operation_store_path
+      ~session_root
+      ~now
+      ~operation_runner
+      ~on_turn_slot_released
+      ~keeper_name
+      ~initial_meta
+  =
+  start_impl
+    ~on_bulkhead_fault:None
+    ~sw
+    ~base_path
+    ~store
+    ~operation_store_path
+    ~session_root
+    ~now
+    ~operation_runner
+    ~on_turn_slot_released
+    ~keeper_name
+    ~initial_meta
+;;
+
+let start_supervised
+      ~on_bulkhead_fault
+      ~sw
+      ~base_path
+      ~store
+      ~operation_store_path
+      ~session_root
+      ~now
+      ~operation_runner
+      ~on_turn_slot_released
+      ~keeper_name
+      ~initial_meta
+  =
+  start_impl
+    ~on_bulkhead_fault:(Some on_bulkhead_fault)
+    ~sw
+    ~base_path
+    ~store
+    ~operation_store_path
+    ~session_root
+    ~now
+    ~operation_runner
+    ~on_turn_slot_released
+    ~keeper_name
+    ~initial_meta
 ;;
 
 let exact_projection t = request t Exact_projection

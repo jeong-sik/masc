@@ -772,11 +772,12 @@ let test_openrouter_key () =
     (refused Usage.decode_openrouter_key
        {|{"data":{"limit":100,"limit_remaining":"0"}}|});
   check string "limit_remaining above limit is refused"
-    "openrouter-key.data.limit_remaining must be within 0..100"
+    "openrouter-key.data.limit_remaining must be a finite number <= 100"
     (refused Usage.decode_openrouter_key {|{"data":{"limit":100,"limit_remaining":150}}|});
-  check string "a negative limit_remaining is refused"
-    "openrouter-key.data.limit_remaining must be within 0..100"
-    (refused Usage.decode_openrouter_key {|{"data":{"limit":100,"limit_remaining":-1}}|});
+  check (list string) "a negative limit_remaining (daily overspend) clamps remaining to 0 and preserves effective_budget.resets_at"
+    [ "limit=- label \"API key credit limit\" usd 100 limit=100 resets=1795305600 role=gates" ]
+    (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
+       {|{"data":{"limit":100,"limit_remaining":-0.04,"effective_budget":{"resets_at":"2026-11-22T00:00:00.000Z"}}}|});
   check string "free requests used above limit is refused"
     "openrouter-key.data.free_model_daily_requests.used must be within 0..1000"
     (refused Usage.decode_openrouter_key

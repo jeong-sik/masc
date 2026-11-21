@@ -7,6 +7,10 @@ type t =
       { provider : string
       ; detail : string
       }
+  | Account_busy of
+      { provider : string
+      ; account_id : string
+      }
 
 type Agent_core.Error.carrier += Provider_refusal of t
 
@@ -17,6 +21,11 @@ let to_string = function
     Printf.sprintf "Provider '%s' refused the API key for this account." provider
   | Spawn_refused { provider; _ } ->
     Printf.sprintf "Client '%s' could not start before sending the turn." provider
+  | Account_busy { provider; account_id } ->
+    Printf.sprintf
+      "Account '%s' on provider '%s' is currently busy with another keeper call."
+      account_id
+      provider
 ;;
 
 let core_error refusal =

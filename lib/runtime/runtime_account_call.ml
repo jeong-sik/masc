@@ -52,11 +52,21 @@ let holding entry provider_account_id f =
     ~finally:(fun () -> Eio.Mutex.unlock entry.lock)
 ;;
 
-let one_call_of provider_account_id ~busy f =
+type 'a acquire_result =
+  | Acquired of 'a
+  | Account_busy of Authz_types.Provider_account_id.t
+
+let try_acquire provider_account_id f =
   with_entry provider_account_id (fun entry ->
     if Eio.Mutex.try_lock entry.lock
-    then holding entry provider_account_id f
-    else Error busy)
+    then Acquired (holding entry provider_account_id f)
+    else Account_busy provider_account_id)
+;;
+
+let one_call_of provider_account_id ~busy f =
+  match try_acquire provider_account_id f with
+  | Acquired res -> res
+  | Account_busy _ -> Error busy
 ;;
 
 let call_in_turn_of provider_account_id f =

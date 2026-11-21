@@ -1100,6 +1100,30 @@ let http_error_diagnostic_body
       (sanitize_url_for_log url)
 ;;
 
+let structured_provider_refusal (refusal : Http_client.http_error) =
+  match refusal with
+  | Http_client.HttpError { code; body = Http_client.Received body; retry_after_header } ->
+    (match Retry.classify_structured_refusal ~retry_after_header ~status:code ~body with
+     | Some (Retry.Structured_context_overflow { message; limit }) ->
+       Http_client.ProviderFailure
+         { kind = Http_client.Context_overflow { limit }; message }
+     | Some (Retry.Structured_account_quota { message; retry_after })
+       when code <> 402 ->
+       (* Preserve HTTP 402 on the HttpError status path so [PaymentRequired]
+          retains its Payment_refused distinction; promote structured 400/403/429
+          account-quota envelopes (e.g. OpenCode Go GoUsageLimitError, OpenAI
+          insufficient_quota) to typed Hard_quota carrying retry_after. *)
+       Http_client.ProviderFailure
+         { kind = Http_client.Hard_quota { retry_after }; message }
+     | Some (Retry.Structured_account_quota _) | None -> refusal)
+  | Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
+  | Http_client.NetworkError _ | Http_client.Connect_failed _
+  | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _
+  | Http_client.ProviderTerminal _
+  | Http_client.ProviderFailure _ -> refusal
+;;
+
 let provider_refusal ~(http_codec : Provider_http_codec.t) (refusal : Http_client.http_error) =
   match http_codec with
   | Provider_http_codec.Glm_chat ->
@@ -1117,7 +1141,7 @@ let provider_refusal ~(http_codec : Provider_http_codec.t) (refusal : Http_clien
        let retry_after = Retry.resolve_retry_after ~body ~header:retry_after_header in
        (match Option.bind envelope (Backend_glm.provider_failure_of_glm_error ~retry_after) with
         | Some failure -> failure
-        | None -> refusal)
+        | None -> structured_provider_refusal refusal)
      (* Only a body that arrived carries the envelope's code; a refusal whose
         body the caller's window cut has none to read and keeps the class the
         status alone supports. *)
@@ -1131,7 +1155,7 @@ let provider_refusal ~(http_codec : Provider_http_codec.t) (refusal : Http_clien
   | Provider_http_codec.Openai_chat
   | Provider_http_codec.Openai_responses
   | Provider_http_codec.Ollama_chat
-  | Provider_http_codec.Gemini_generate_content -> refusal
+  | Provider_http_codec.Gemini_generate_content -> structured_provider_refusal refusal
 ;;
 
 let%test "http_error_diagnostic_body preserves non-empty provider body" =

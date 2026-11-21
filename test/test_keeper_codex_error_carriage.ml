@@ -50,6 +50,7 @@ let class_of (err : Agent_core.Error.t) =
        (match Keeper_provider_refusal.of_core_error carried with
         | Some (Keeper_provider_refusal.Spawn_refused _) -> "provider_refusal:spawn_refused"
         | Some (Keeper_provider_refusal.Key_refused _) -> "provider_refusal:key_refused"
+        | Some (Keeper_provider_refusal.Account_busy _) -> "provider_refusal:account_busy"
         | None -> "internal"))
   | other -> "unexpected:" ^ Agent_core.Error.to_string other
 

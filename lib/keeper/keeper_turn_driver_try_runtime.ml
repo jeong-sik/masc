@@ -92,7 +92,8 @@ let candidate_access_should_try_next error =
      | Agent_core.Error.Internal _
      | Agent_core.Error.Internal_carried _ ->
        (match Keeper_provider_refusal.of_core_error error with
-        | Some (Keeper_provider_refusal.Key_refused _) -> true
+        | Some (Keeper_provider_refusal.Key_refused _ | Keeper_provider_refusal.Account_busy _) ->
+          true
         | Some (Keeper_provider_refusal.Spawn_refused _) | None -> false)
      | Agent_core.Error.Agent _
      | Agent_core.Error.Mcp _

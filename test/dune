@@ -1296,6 +1296,7 @@
  masc.agent_core))
 
 (include stanzas/test_keeper_librarian_goal_context_input_sources.inc)
+(include stanzas/test_keeper_librarian_retry_apply_disposition.inc)
 
 (test
  (name test_keeper_tool_execute_stream_close)

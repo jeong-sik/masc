@@ -1109,8 +1109,28 @@ let test_binding_source_change_uses_effective_request_tools () = with_net (fun n
             | Error _ -> Alcotest.fail "native request serialization failed" in
           let json=Yojson.Safe.from_string artifact.body in
           let open Yojson.Safe.Util in
-          Alcotest.(check bool) "unselected tools absent from actual native wire" true
-            (match member "tools" json with `Null | `List [] -> true | _ -> false);
+          (* The tools assertion follows [tools_on_wire]: a row that keeps tools
+             on the effective request must carry them on the native wire, and a
+             row whose effective request dropped them must not. Both directions
+             are asserted, so a wrong [effective_tools] fails here either way. *)
+          (if tools_on_wire then
+             Alcotest.(check bool)
+               (Printf.sprintf "row %d: effective tools reach the native wire" row) true
+               (match member "tools" json with
+                | `List tools ->
+                  List.exists
+                    (fun tool -> member "name" (member "function" tool) = `String "inspect")
+                    tools
+                | `Null | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ ->
+                  false)
+           else
+             Alcotest.(check bool)
+               (Printf.sprintf "row %d: dropped tools stay absent from the native wire" row)
+               true
+               (match member "tools" json with
+                | `Null | `List [] -> true
+                | `List (_ :: _) | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _
+                | `String _ -> false));
           let messages=member "messages" json |> to_list in
           Alcotest.(check bool) "unselected foreign reasoning never sent" true
             (List.for_all (fun message -> member "reasoning_content" message=`Null) messages);
@@ -1126,19 +1146,25 @@ let test_binding_source_change_uses_effective_request_tools () = with_net (fun n
         let agent=Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp ~config ~options
             ~tools:(if has_tools then [tool] else []) () |> binding_resume_ok in
         (
+          (* Every row here is a closed prior turn: the foreign message sits at
+             history index 1, strictly before the caller query this run appends,
+             so [Exclude_unselected] strips its reasoning and admits the request.
+             Only the effective tool presence varies across the rows. An open
+             exchange is covered separately, where the continuation owns the
+             boundary and the request must be refused before transport. *)
           let outcome=if stream then Agent.run_stream ~sw ~on_event:ignore agent "new query"
             else Agent.run ~sw agent "new query" in
-          (match tools_on_wire,outcome with
-           | true,Error (Error.Api (Llm_provider.Retry.InvalidRequest
-               {reason=Llm_provider.Retry.Attempt_rejected;_})) -> ()
-           | false,Ok _ -> ()
-           | _,Error error -> Alcotest.fail (Error.to_string error)
-           | true,Ok _ ->
+          (match outcome with
+           | Ok _ -> ()
+           | Error error ->
              Alcotest.fail
-               (Printf.sprintf
-                  "row %d: foreign mandatory replay reached a tool-bearing request" row));
-          Alcotest.(check int) "only admitted requests reach transport"
-            (if tools_on_wire then 0 else 1) !requests;
+               (Printf.sprintf "row %d: a closed prior turn must be admitted: %s"
+                  row (Error.to_string error)));
+          Alcotest.(check int)
+            (Printf.sprintf "row %d: the admitted closed turn reaches transport once" row)
+            1 !requests;
+          Alcotest.(check int) "the closed turn completes one query and one answer"
+            (List.length cp.messages + 2) (List.length (Agent.state agent).messages);
           Alcotest.(check bool) "canonical foreign reasoning remains" true
             (List.mem foreign (Agent.state agent).messages);
           Alcotest.(check bool) "source checkpoint remains unchanged" true (before=Checkpoint.to_json cp))
@@ -1353,6 +1379,52 @@ let test_binding_anthropic_refuses_open_foreign_exchange () = with_net (fun net 
       [false;true]))
 ;;
 
+(* The gate is the exchange boundary, not tool presence. The foreign message
+   that the previous test strips as a closed prior turn is refused here, where
+   the continuation owns the open exchange, even though the request carries
+   tools: [Exclude_unselected] never buys admission for reasoning an open
+   exchange still requires. *)
+let test_binding_open_exchange_refuses_tool_bearing_request () = with_net (fun net ->
+  Eio.Switch.run (fun sw ->
+    let original = binding_provider ~kind:Binding_provider.Glm ~model:"glm-5.3-flash"
+        "https://original.example" in
+    let foreign = { (binding_message (binding_source original)) with
+      content=[Types.Thinking {content="foreign-private-reasoning";signature=None};
+        Types.ToolUse {id="settled";name="inspect";input=`Assoc []}] } in
+    let cp = binding_checkpoint original
+        [ Types.user_msg "inspect"; foreign
+        ; Types.tool_result_msg ~tool_use_id:"settled" ~content:"settled-result" () ] in
+    let target = binding_provider ~model:"deepseek-v4.1-flash"
+        ~replay:Llm_provider.Capabilities.Force_preserve_with_request_tools
+        "https://target.example" in
+    let requests = ref 0 in
+    let tool = Tool.create ~name:"inspect" ~description:"Inspect" ~parameters:[] (fun _ ->
+      Ok {Types.content="unexpected re-execution";content_blocks=None;_meta=None}) in
+    let response = Provider_mock.text_response "unexpected" [] in
+    let transport = Llm_provider.Llm_transport.custom {
+      complete_sync=(fun _ -> incr requests;{response=Ok response;latency_ms=Some 0});
+      complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr requests;Ok response)} in
+    let config = { (Types.default_config ~model:target.model_id) with
+      max_tokens=Some 64; tool_choice=Some Types.Auto } in
+    let options = { (binding_options target) with transport=Some transport;
+      reasoning_source_change=Binding_projection.Exclude_unselected } in
+    let agent = Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net
+        ~checkpoint:cp ~config ~options ~tools:[tool] () |> binding_resume_ok in
+    let api_strategy = Agent.Stream {on_event=ignore;on_telemetry=None} in
+    (* The request really carries tools: the previous test's rows with
+       [tools_on_wire = true] run the same target, tool and config and observe
+       that tool on the native wire. *)
+    (match Agent.Advanced.continue ~sw ~api_strategy
+        ~on_tool_boundary:(fun _ -> Agent.Advanced.Continue) agent with
+     | Error (Error.Api (Llm_provider.Retry.InvalidRequest
+         {reason=Llm_provider.Retry.Attempt_rejected;_})) -> ()
+     | Error error -> Alcotest.fail (Error.to_string error)
+     | Ok _ -> Alcotest.fail "an open exchange with tools must be refused before transport");
+    Alcotest.(check int) "the tool-bearing open exchange never reaches transport" 0 !requests;
+    Alcotest.(check bool) "the open exchange stays canonical" true
+      ((Agent.state agent).messages = cp.messages)))
+;;
+
 (* ── Test runner ─────────────────────────────────────────────── *)
 
 let () =
@@ -1368,6 +1440,7 @@ let () =
         test_case "Anthropic sends finished turns other providers produced" `Quick test_binding_anthropic_sends_finished_foreign_turns;
         test_case "Anthropic sends an answered tool call before a new query" `Quick test_binding_anthropic_sends_answered_foreign_tool_call;
         test_case "Anthropic refuses an open exchange another provider produced" `Quick test_binding_anthropic_refuses_open_foreign_exchange;
+        test_case "open exchange refuses a tool-bearing request" `Quick test_binding_open_exchange_refuses_tool_bearing_request;
         test_case "same exact binding retains canonical history" `Quick test_binding_exact_resume;
         test_case "provider model and replay contract mismatch" `Quick test_binding_provider_model_and_contract_mismatch;
         test_case "restore reads no media" `Quick test_restore_reads_no_media;

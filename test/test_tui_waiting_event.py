@@ -507,19 +507,22 @@ class WaitingEventTest(unittest.TestCase):
                 label = name.decode("utf-8", "replace")
                 wanted = value.decode("utf-8", "replace")
                 roster.feed(bytes(output))
+                # With no saved density preference the Keeper list draws
+                # `Two_lines`: the name and status on one row, the waiting
+                # sentence (`keeper_plain_help`) on the row under it. Rows are
+                # repainted one at a time and in no fixed order, so the two are
+                # not always on the screen in the same draw. Remember where the
+                # name last stood and look for the sentence under that row.
+                name_row = None
                 for cells in roster.cells_since(start):
                     for index, cell in enumerate(cells):
-                        if label not in cell:
-                            continue
-                        if wanted in cell:
-                            return True
-                        # The density decides whether a Keeper's row takes one
-                        # line or two (`keeper_plain_projection`), and with no
-                        # saved preference it is `Two_lines`: the name and status
-                        # sit on the row, the waiting sentence
-                        # (`keeper_plain_help`) on the line under it. Accept
-                        # either so the check does not depend on the density.
-                        if index + 1 < len(cells) and wanted in cells[index + 1]:
+                        if label in cell:
+                            name_row = index
+                            break
+                    if name_row is None:
+                        continue
+                    for candidate in (name_row, name_row + 1):
+                        if 0 <= candidate < len(cells) and wanted in cells[candidate]:
                             return True
                 return False
 

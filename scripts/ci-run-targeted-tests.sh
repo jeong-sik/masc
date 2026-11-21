@@ -72,9 +72,11 @@ candidate_ocaml_paths=()
 prebuild_reader="${repo_root}/scripts/ci/alias_prebuild_deps.py"
 runtest_aliases="$(python3 "${suite_tool}" list-runtest-aliases --repo-root "${repo_root}")"
 IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
+requested_count=0
 for suite in ${requested[@]+"${requested[@]}"}; do
   suite="${suite// /}"
   [ -n "${suite}" ] || continue
+  requested_count=$((requested_count + 1))
   # A suite that is a script under a dune alias rather than an
   # executable. Three spellings reach the same place: test/<suite>.py
   # for a script named after its file, the same written as a path
@@ -125,6 +127,14 @@ for suite in ${requested[@]+"${requested[@]}"}; do
     candidate_ocaml_paths+=("${suite_path}")
   fi
 done
+# A reader of the job log has to be able to tell a targeted dispatch from a
+# full regression and to see how much of the input survived resolution: the
+# workflow passes the list as an environment variable, and a step's env is not
+# printed. Without this line the log named the suites that ran but never the
+# input they came from, so a run whose names were all dropped looked the same
+# as a full run to anything reading the log (measured 2026-11-21: run
+# 44883968729 could not be classified as targeted or full from its log).
+log "[targeted] suite input names ${requested_count} name(s)"
 # Batch-verify every OCaml .ml candidate against its directory's Dune
 # `(test)`/`(tests)` stanzas so helper modules (which have `.ml` files on disk
 # but no executable stanza) are reported cleanly as unresolved instead of
@@ -194,6 +204,10 @@ if [ "${#undeclared_suites[@]}" -ne 0 ]; then
   done
   resolution_status=1
 fi
+# Say how many names survived and how many were dropped, so a partly filtered
+# list cannot read as a clean one. The per-name reasons are above; this line is
+# the count a reader can compare against the input line.
+log "[targeted] resolved ${#aliases[@]} suite(s) and dropped $(( ${#unresolved[@]} + ${#undeclared_suites[@]} )) of ${requested_count} name(s)"
 # dune build with no target builds everything; a suite input of
 # separators only must not turn into the full build.
 if [ "${#aliases[@]}" -eq 0 ]; then

@@ -16,6 +16,7 @@ import tempfile
 import termios
 import threading
 import time
+import unicodedata
 import unittest
 import urllib.parse
 
@@ -27,6 +28,102 @@ from test_tui_fusion_recovery import FixtureHandler, FixtureServer
 
 TURNS_PATH = "/api/v1/keepers/turns"
 SCHEDULE_PATH = "/api/v1/dashboard/scheduled-automation"
+
+SCREEN_ROWS = 35
+SCREEN_COLS = 200
+_ESCAPE = re.compile(
+    rb"\x1b\][^\x1b\x07]*(?:\x07|\x1b\\)|\x1b\[([0-9;?]*)([ -/]*)([@-~])"
+)
+
+
+def _cell_width(character: str) -> int:
+    return 2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
+
+
+class RosterColumn:
+    """The Keeper-list column as the TUI actually drew it, over time.
+
+    The transcript holds only the cells the TUI *repainted*. At the default
+    two-line density a Keeper's row is the name and status on one line and the
+    waiting sentence under it, and the two lines are repainted by different
+    draws: the confirm refresh rewrites the sentence alone, so no line of the
+    byte stream carries both. Replaying the cursor addresses into a grid
+    recovers the screen the assertions are about, and taking the column left of
+    the first ``│`` keeps a Keeper's name from being paired with another
+    surface's cell on the same screen row.
+    """
+
+    def __init__(self) -> None:
+        self.grid = [[" "] * SCREEN_COLS for _ in range(SCREEN_ROWS)]
+        self.row = 0
+        self.column = 0
+        self.position = 0
+        self.pending = bytearray()
+        # (byte offset the write ended at, roster cells after it)
+        self.frames: list[tuple[int, list[str]]] = []
+
+    def _snapshot(self) -> list[str]:
+        return [
+            "".join(line).split("\u2502", 1)[0].rstrip() for line in self.grid
+        ]
+
+    def _flush(self) -> None:
+        if not self.pending:
+            return
+        chunk = self.pending.decode("utf-8", "replace")
+        self.pending.clear()
+        for character in chunk:
+            if character == "\r":
+                self.column = 0
+                continue
+            if character == "\n":
+                self.row = min(SCREEN_ROWS - 1, self.row + 1)
+                self.column = 0
+                continue
+            width = _cell_width(character)
+            if 0 <= self.row < SCREEN_ROWS and 0 <= self.column < SCREEN_COLS:
+                self.grid[self.row][self.column] = character
+                for extra in range(1, width):
+                    if self.column + extra < SCREEN_COLS:
+                        self.grid[self.row][self.column + extra] = ""
+            self.column = min(SCREEN_COLS, self.column + width)
+
+    def feed(self, raw: bytes) -> None:
+        """Consume the bytes drawn after the last call."""
+        while self.position < len(raw):
+            match = _ESCAPE.match(raw, self.position)
+            if match is None:
+                self.pending.append(raw[self.position])
+                self.position += 1
+                continue
+            self._flush()
+            sequence = match.group(0)
+            self.position = match.end()
+            if sequence.startswith(b"\x1b]"):
+                continue
+            params = match.group(1).decode()
+            final = match.group(3)
+            if final == b"H":
+                fields = params.split(";")
+                self.row = int(fields[0] or 1) - 1
+                self.column = int(fields[1] or 1) - 1 if len(fields) > 1 else 0
+            elif final == b"K":
+                for cell in range(self.column, SCREEN_COLS):
+                    self.grid[self.row][cell] = " "
+                # Every row write ends with an erase-to-end-of-line, so the row
+                # is complete here.
+                self.frames.append((self.position, self._snapshot()))
+            elif final == b"J":
+                for index in range(SCREEN_ROWS):
+                    self.grid[index] = [" "] * SCREEN_COLS
+        self._flush()
+
+    def cells_since(self, start: int) -> list[list[str]]:
+        """The roster column after each row write that ended after ``start``."""
+        frames = [cells for position, cells in self.frames if position > start]
+        frames.append(self._snapshot())
+        return frames
+
 
 
 class WaitingServer(FixtureServer):
@@ -404,11 +501,27 @@ class WaitingEventTest(unittest.TestCase):
                     f"frame={frame_path} bytes={frame_bytes} truncated={frame_truncated}"
                 )
 
+            roster = RosterColumn()
+
             def rendered_row_contains(start: int, name: bytes, value: bytes) -> bool:
-                raw = bytes(output[start:])
-                raw = re.sub(rb"\x1b\[[0-9;]*H", b"\n", raw)
-                raw = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", raw)
-                return any(name in line and value in line for line in raw.splitlines())
+                label = name.decode("utf-8", "replace")
+                wanted = value.decode("utf-8", "replace")
+                roster.feed(bytes(output))
+                for cells in roster.cells_since(start):
+                    for index, cell in enumerate(cells):
+                        if label not in cell:
+                            continue
+                        if wanted in cell:
+                            return True
+                        # The density decides whether a Keeper's row takes one
+                        # line or two (`keeper_plain_projection`), and with no
+                        # saved preference it is `Two_lines`: the name and status
+                        # sit on the row, the waiting sentence
+                        # (`keeper_plain_help`) on the line under it. Accept
+                        # either so the check does not depend on the density.
+                        if index + 1 < len(cells) and wanted in cells[index + 1]:
+                            return True
+                return False
 
             def latest_rendered_row_contains(name: bytes, value: bytes) -> bool:
                 raw = re.sub(rb"\x1b\[[0-9;]*H", b"\n", bytes(output))

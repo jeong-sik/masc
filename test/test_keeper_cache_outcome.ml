@@ -216,22 +216,16 @@ let test_a_turn_without_rows_ends_at_a_lower_turn () =
     [ "outcome"; "kind" ] (reading walked)
 ;;
 
-(* Turn numbers are ordered within one trace only. A newer row of another
-   trace can carry a lower number than the turn sought; only a lower number of
-   the same trace ends the walk. *)
-let test_a_lower_turn_of_another_trace_does_not_end_the_walk () =
+(* The turn count runs on across a trace rotation, so a lower number of an
+   earlier trace ends the walk too, and the reader opens no older day. *)
+let test_a_lower_turn_of_an_earlier_trace_ends_the_walk () =
   let walked =
-    walk
-      ~turn:105
-      (parsed
-         [ row ~turn:105 ~at:10 request_row
-         ; row ~trace_id:"fresh-trace" ~turn:1 ~at:20 request_row
-         ])
+    walk ~turn:105 (parsed [ row ~trace_id:"earlier-trace" ~turn:104 ~at:10 request_row ])
   in
-  check_json "the turn's row behind the other trace is its first request"
-    (`Float (t0 +. 10.))
-    [ "outcome"; "request"; "ended_at" ]
-    (reading walked)
+  check bool "an earlier trace's lower number ends the walk" true
+    (Outcome.finished walked);
+  check_json "the turn is not in the ledger" (`String "turn_not_in_ledger")
+    [ "outcome"; "kind" ] (reading walked)
 ;;
 
 let test_an_unsettled_earlier_turn_is_not_compared () =
@@ -384,8 +378,8 @@ let () =
             test_the_search_stops_before_the_horizon
         ; test_case "a turn without rows ends at a lower turn" `Quick
             test_a_turn_without_rows_ends_at_a_lower_turn
-        ; test_case "a lower turn of another trace does not end the walk" `Quick
-            test_a_lower_turn_of_another_trace_does_not_end_the_walk
+        ; test_case "a lower turn of an earlier trace ends the walk" `Quick
+            test_a_lower_turn_of_an_earlier_trace_ends_the_walk
         ; test_case "an unsettled earlier turn is not compared" `Quick
             test_an_unsettled_earlier_turn_is_not_compared
         ; test_case "rows that cannot be read" `Quick test_rows_that_cannot_be_read

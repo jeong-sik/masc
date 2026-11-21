@@ -206,11 +206,9 @@ let seeking_turn ~turn_ref ~row_turn kind =
     | Raw (Ok request) -> In_turn request
     | Raw (Error detail) -> Walked (Row_unreadable detail)
     | Settled | Attempt_settled -> Seeking_turn)
-  else if
-    (* Turn numbers are ordered within one trace only. A row of another trace
-       says nothing about where this turn would be, so the walk goes on. *)
-    String.equal (Ids.Turn_ref.trace_id row_turn) (Ids.Turn_ref.trace_id turn_ref)
-    && Ids.Turn_ref.absolute_turn row_turn < Ids.Turn_ref.absolute_turn turn_ref
+  (* The count runs on across a trace rotation, so two traces' numbers
+     compare. *)
+  else if Ids.Turn_ref.absolute_turn row_turn < Ids.Turn_ref.absolute_turn turn_ref
   then Walked Turn_absent
   else Seeking_turn
 ;;

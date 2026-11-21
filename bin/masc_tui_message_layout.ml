@@ -2197,9 +2197,8 @@ let origin_gutter ~origin ~previous entry =
       else Some (filled, rail_cells, label_at, clock_cells)
 
 (* A line someone else wrote steps in from the conversation, and the renderer
-   draws a bar in its sender's colour down its left edge (RFC
-   chat-turn-rail-and-side-lanes §4.6). Two cells set it apart without making
-   a long arrival wrap narrower than the rows around it. *)
+   draws a bar in its sender's colour down its left edge. Two cells set it
+   apart without making a long arrival wrap narrower than the rows around it. *)
 let inbound_indent_cells = 2
 
 let inbound_indent (entry : entry) =

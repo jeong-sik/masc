@@ -17,7 +17,8 @@ import unittest
 import urllib.parse
 from typing import Callable, cast
 
-from test_tui_waiting_event import TURNS_PATH, WaitingHandler, WaitingServer
+import tui_failure_frame
+from test_tui_waiting_event import SCHEDULE_PATH, TURNS_PATH, WaitingHandler, WaitingServer
 
 
 class EpochServer(WaitingServer):
@@ -139,18 +140,35 @@ class ObserverEpochTest(unittest.TestCase):
                     if process.poll() is not None:
                         break
                     drain()
+                frame_path, frame_bytes, frame_truncated = tui_failure_frame.preserve(
+                    "test_tui_observer_epoch.test_same_path_epoch_change_retires_old_reads_and_revalidates",
+                    output,
+                    cols=200,
+                    rows=35,
+                    extra={"label": label, "exit": process.poll()},
+                )
                 self.fail(
-                    f"{label}; exit={process.poll()}, requests={server.requests!r}, terminal={bytes(output[-2500:])!r}"
+                    f"{label}; exit={process.poll()}, requests={server.requests!r}, "
+                    f"frame={frame_path} bytes={frame_bytes} truncated={frame_truncated}"
                 )
 
             try:
+                # The screen is Overview, and Overview does not read the waiting
+                # inventory: `surface_needs_of_surface` gives it operator
+                # approvals, asks and the Keeper roster, and
+                # `owed_runtime_tools_reads.ml` launches a turns read only when
+                # `keeper_turns_in_use` holds (Keepers list/message, Metrics).
+                # Wait for the reads this screen does make instead, and keep the
+                # absence of a turns read as an assertion.
                 wait_until(
                     lambda: (
                         server.observer_ready.is_set()
-                        and server.response_count("setup", TURNS_PATH) >= 1
+                        and server.response_count("setup", "/health") >= 2
+                        and server.response_count("setup", SCHEDULE_PATH) >= 1
                     ),
-                    "initial observer and inventory were not ready",
+                    "initial observer and the Overview reads were not ready",
                 )
+                self.assertEqual(server.count("setup", TURNS_PATH), 0)
                 # The peer can answer before the TUI is ready to read input.
                 deadline = time.monotonic() + 1.0
                 while time.monotonic() < deadline:

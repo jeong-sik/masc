@@ -16,6 +16,7 @@ import tempfile
 import termios
 import threading
 import time
+import unicodedata
 import unittest
 import urllib.parse
 
@@ -27,6 +28,103 @@ from test_tui_fusion_recovery import FixtureHandler, FixtureServer
 
 TURNS_PATH = "/api/v1/keepers/turns"
 SCHEDULE_PATH = "/api/v1/dashboard/scheduled-automation"
+
+SCREEN_ROWS = 35
+SCREEN_COLS = 200
+_ESCAPE = re.compile(
+    rb"\x1b\][^\x1b\x07]*(?:\x07|\x1b\\)|\x1b\[([0-9;?]*)([ -/]*)([@-~])"
+)
+
+
+def _cell_width(character: str) -> int:
+    return 2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
+
+
+class RosterColumn:
+    """The Keeper-list column as the TUI actually drew it, over time.
+
+    The transcript holds only the cells the TUI *repainted*. At the default
+    two-line density a Keeper's row is the name and status on one line and the
+    waiting sentence under it, and the two lines are repainted by different
+    draws: the confirm refresh rewrites the sentence alone, so no line of the
+    byte stream carries both. Replaying the cursor addresses into a grid
+    recovers the screen the assertions are about, and taking the column left of
+    the first ``│`` keeps a Keeper's name from being paired with another
+    surface's cell on the same screen row.
+    """
+
+    def __init__(self) -> None:
+        self.grid = [[" "] * SCREEN_COLS for _ in range(SCREEN_ROWS)]
+        self.row = 0
+        self.column = 0
+        self.position = 0
+        self.pending = bytearray()
+        # (byte offset the write ended at, roster cells after it)
+        self.frames: list[tuple[int, list[str]]] = []
+
+    def _snapshot(self) -> list[list[str]]:
+        return [
+            [cell.rstrip() for cell in "".join(line).split("\u2502")]
+            for line in self.grid
+        ]
+
+    def _flush(self) -> None:
+        if not self.pending:
+            return
+        chunk = self.pending.decode("utf-8", "replace")
+        self.pending.clear()
+        for character in chunk:
+            if character == "\r":
+                self.column = 0
+                continue
+            if character == "\n":
+                self.row = min(SCREEN_ROWS - 1, self.row + 1)
+                self.column = 0
+                continue
+            width = _cell_width(character)
+            if 0 <= self.row < SCREEN_ROWS and 0 <= self.column < SCREEN_COLS:
+                self.grid[self.row][self.column] = character
+                for extra in range(1, width):
+                    if self.column + extra < SCREEN_COLS:
+                        self.grid[self.row][self.column + extra] = ""
+            self.column = min(SCREEN_COLS, self.column + width)
+
+    def feed(self, raw: bytes) -> None:
+        """Consume the bytes drawn after the last call."""
+        while self.position < len(raw):
+            match = _ESCAPE.match(raw, self.position)
+            if match is None:
+                self.pending.append(raw[self.position])
+                self.position += 1
+                continue
+            self._flush()
+            sequence = match.group(0)
+            self.position = match.end()
+            if sequence.startswith(b"\x1b]"):
+                continue
+            params = match.group(1).decode()
+            final = match.group(3)
+            if final == b"H":
+                fields = params.split(";")
+                self.row = int(fields[0] or 1) - 1
+                self.column = int(fields[1] or 1) - 1 if len(fields) > 1 else 0
+            elif final == b"K":
+                for cell in range(self.column, SCREEN_COLS):
+                    self.grid[self.row][cell] = " "
+                # Every row write ends with an erase-to-end-of-line, so the row
+                # is complete here.
+                self.frames.append((self.position, self._snapshot()))
+            elif final == b"J":
+                for index in range(SCREEN_ROWS):
+                    self.grid[index] = [" "] * SCREEN_COLS
+        self._flush()
+
+    def cells_since(self, start: int) -> list[list[str]]:
+        """The roster column after each row write that ended after ``start``."""
+        frames = [cells for position, cells in self.frames if position > start]
+        frames.append(self._snapshot())
+        return frames
+
 
 
 class WaitingServer(FixtureServer):
@@ -404,11 +502,50 @@ class WaitingEventTest(unittest.TestCase):
                     f"frame={frame_path} bytes={frame_bytes} truncated={frame_truncated}"
                 )
 
+            roster = RosterColumn()
+
             def rendered_row_contains(start: int, name: bytes, value: bytes) -> bool:
-                raw = bytes(output[start:])
-                raw = re.sub(rb"\x1b\[[0-9;]*H", b"\n", raw)
-                raw = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", raw)
-                return any(name in line and value in line for line in raw.splitlines())
+                label = name.decode("utf-8", "replace")
+                wanted = value.decode("utf-8", "replace")
+                roster.feed(bytes(output))
+                # Two places can carry a Keeper's waiting sentence, and the
+                # transcript alone cannot tell them apart from another surface.
+                #
+                # The list column (left of the first `│`) draws a Keeper's row as
+                # the name and status on one line and the sentence under it at
+                # the default two-line density. Rows are repainted one at a time
+                # and in no fixed order, so remember where the name last stood and
+                # look under that row from then on.
+                #
+                # The detail pane (the second cell) belongs to the selected
+                # Keeper alone: its header names that Keeper and the lines under
+                # it are that Keeper's sentences, in order, with section headers
+                # between them. The list can scroll the selected Keeper's name row
+                # off or blank it while the pane still holds its sentences
+                # (frame 208068: row10 empty, row11 `schedule-refreshed`), so the
+                # pane pairing is checked as well.
+                name_row = None
+                pane_name_row = None
+                for cells in roster.cells_since(start):
+                    list_column = [row[0] if row else "" for row in cells]
+                    pane = [row[1] if len(row) > 1 else "" for row in cells]
+                    for index, cell in enumerate(list_column):
+                        if label in cell:
+                            name_row = index
+                            break
+                    for index, cell in enumerate(pane):
+                        if label in cell:
+                            pane_name_row = index
+                            break
+                    if name_row is not None:
+                        for candidate in (name_row, name_row + 1):
+                            if 0 <= candidate < len(list_column) and wanted in list_column[candidate]:
+                                return True
+                    if pane_name_row is not None:
+                        for cell in pane[pane_name_row:]:
+                            if wanted in cell:
+                                return True
+                return False
 
             def latest_rendered_row_contains(name: bytes, value: bytes) -> bool:
                 raw = re.sub(rb"\x1b\[[0-9;]*H", b"\n", bytes(output))
@@ -810,8 +947,13 @@ class WaitingEventTest(unittest.TestCase):
                 os.write(master, b":")
                 drain_for(0.3)
                 os.write(master, b"schedules\r")
+                # The schedule list draws a row as its wake moment and its
+                # `payload_summary · payload_keeper_name`, not the store's
+                # `schedule_id`, so the fixture's row reads `fixture detail ·
+                # analyst` (frames 204166 and 207417, final screen row 34). Look
+                # for the text the row actually carries.
                 wait_until(
-                    lambda: b"fixture-schedule" in output,
+                    lambda: b"fixture detail" in output,
                     "schedule fixture row was not displayed",
                 )
                 os.write(master, b"\r")

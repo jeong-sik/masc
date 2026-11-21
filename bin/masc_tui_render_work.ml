@@ -215,7 +215,6 @@ let work_tasks_context_lines (state : state) ~cols =
     |> List.filter_map Fun.id in
   [work_hub_navigation state ~cols]
   @ (if warning then [" " ^ Theme.warn () ^ scope ^ Ansi.reset] else [])
-  @ Option.to_list (local_source_pending_note state Local_work)
   @ (if reasons = [] then [] else
        [" " ^ Theme.warn () ^ text "조회 범위: " "Coverage: " ^ String.concat " · " reasons ^ Ansi.reset])
 

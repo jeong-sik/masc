@@ -15207,11 +15207,25 @@ let complete_connectors_read state request result =
 let clear_connectors_read state =
   state.connectors_read <- Connector_read.empty
 
+(* A plain refresh over a held snapshot draws nothing: the reading slot says a
+   read is under way (RFC tui-one-screen-grammar §8). A read owed after a
+   binding write keeps its words, because the held snapshot may predate the
+   write. Every pair is listed, so a new cause or follow-up fails to compile
+   here instead of falling into one of the two answers. *)
+let connectors_refresh_is_silent (state : state) (cause : Connector_read.cause)
+    (follow_up : Connector_read.follow_up) =
+  Option.is_some state.connectors
+  && (match cause, follow_up with
+      | Connector_read.Refresh, No_follow_up -> true
+      | Refresh, Read_after_write
+      | After_write, (No_follow_up | Read_after_write) -> false)
+
 let connectors_read_notice state =
   let ko = state.ui_language = Lang_ko in
   let recheck_queued = if ko then " · 재확인 예약됨" else " · recheck queued" in
   match Connector_read.view state.connectors_read with
   | Connector_read.Quiet -> None
+  | Reading (cause, follow_up) when connectors_refresh_is_silent state cause follow_up -> None
   | Reading (cause, follow_up) ->
       (match Connector_read.stage state.connectors_read with
        | Some Connector_read.Names_pending ->
@@ -24671,10 +24685,8 @@ let keeper_log_diagnostics state =
         | Storage_error _ -> Keeper_log_failure
         | Remote_workspace | Workspace_unconfirmed -> Keeper_log_notice in
       [tone, Metrics_tail.error_to_string error] in
-  let reading = Option.exists (fun request ->
-    request.klr_reading == state.workspace_read_authority
-    && Masc_tui_fetched.is_current ~equal:keeper_log_equal_key state.keeper_logs request.klr_request)
-    state.keeper_log_read in
+  (* Only a first read has words here. A read over a held snapshot is the
+     reading slot's to say (RFC tui-one-screen-grammar section 8). *)
   match keeper_logs_view state with
   | Masc_tui_fetched.Absent ->
       [Keeper_log_notice, say "키퍼 메트릭을 아직 조회하지 않았습니다." "Keeper metrics have not been read."]
@@ -24684,14 +24696,9 @@ let keeper_log_diagnostics state =
         | Workspace_identity_unread | Workspace_identity_mismatch _ -> Keeper_log_notice
         | Workspace_identity_match | Workspace_identity_match_unconfirmed _ -> Keeper_log_failure in
       [tone, detail]
-  | Ready snapshot ->
-      (if reading then
-         [Keeper_log_notice, say "메트릭 새로고침 중 · 마지막 관측 표시 중" "Refreshing metrics; showing the last observation."]
-       else [])
-      @ snapshot_diagnostics snapshot
+  | Ready snapshot -> snapshot_diagnostics snapshot
   | Stale (snapshot, detail) ->
       [Keeper_log_failure, say "마지막 관측 메트릭 · " "Last observed metrics · " ^ detail]
-      @ (if reading then [Keeper_log_notice, say "새로고침 진행 중" "Refresh in progress."] else [])
       @ snapshot_diagnostics snapshot
 
 (* Count after wrapping; drawing and paging share rows and source diagnostics. *)
@@ -24706,9 +24713,7 @@ let keeper_log_rows (state : state) ~cols =
       |> List.map (fun line -> tone, "  " ^ line) in
     let render_reading reading read_at =
       let stamp = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) read_at in
-      let refresh = if Masc_tui_fetched.in_flight state.keeper_execute_output
-        then say " · 새로고침 중" " · refreshing" else "" in
-      let observed = text_rows Keeper_log_notice (say "Execute 출력 · 관측 " "Execute output · observed " ^ stamp ^ refresh) in
+      let observed = text_rows Keeper_log_notice (say "Execute 출력 · 관측 " "Execute output · observed " ^ stamp) in
       match reading with
       | Keeper_execute_none -> observed @ text_rows Keeper_log_notice
           (say "이 서버 프로세스에서 관측된 Execute 출력이 없습니다." "No Execute output observed in this server process.")
@@ -28157,12 +28162,14 @@ let keeper_message_saved_preparation_rows state live =
        | Loaded snapshot -> snapshot_rows snapshot
        | Retained {snapshot;recheck} ->
          let kept = saved ^ say "이전 관측 유지 · " "keeping the last observation · " in
+         (* A recheck under way over a held snapshot draws no row: the reading
+            slot says it (RFC tui-one-screen-grammar section 8). *)
          let note = match recheck with
-           | Details.Recheck_pending -> kept ^ say "재조회 대기" "recheck pending"
-           | Recheck_loading -> kept ^ say "재조회 중" "rechecking"
-           | Recheck_failed detail -> kept ^ say "재조회 실패 · " "recheck failed · " ^ detail
-           | Recheck_kept_back notice -> kept ^ notice in
-         row note :: snapshot_rows snapshot)
+           | Details.Recheck_pending -> Some (kept ^ say "재조회 대기" "recheck pending")
+           | Recheck_loading -> None
+           | Recheck_failed detail -> Some (kept ^ say "재조회 실패 · " "recheck failed · " ^ detail)
+           | Recheck_kept_back notice -> Some (kept ^ notice) in
+         Option.fold ~none:[] ~some:(fun note -> [row note]) note @ snapshot_rows snapshot)
   | Some _ | None -> []
 ;;
 

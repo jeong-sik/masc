@@ -22,12 +22,6 @@ module Retained_view = Masc_tui_retained_view
 module Span = Masc_tui_span
 module Status = Masc.Keeper_status_runtime
 
-val local_source_pending_note : state -> local_read_source -> string option
-(** One recessed header row for a local read that has been in flight past the
-    display bar in [Masc_tui_types.pending_display_bar_ns], naming its stage
-    and elapsed seconds. A read inside the bar, or none at all, is [None]; the
-    stage words for younger reads live in the tui_local_read structured log. *)
-
 val runtime_assignment_label : runtime_assignment -> string
 (** The assignment shown in the runtime picker and Runtime Stats value. *)
 

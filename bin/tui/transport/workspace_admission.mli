@@ -109,6 +109,19 @@ val fork_job
   -> (unit -> unit)
   -> unit
 
+(** The reading slot counts a read of the open screen from its launch to its
+    end (RFC tui-one-screen-grammar section 8). The three functions returned
+    end that one read: the first for a job that never ran, the second for the
+    result, the third for the job's release (feed it to [fork_job ~observe]).
+    Whichever comes first ends the read; later ones change nothing. A launcher
+    that does not go through [launch_result] calls this once, so every launcher
+    ends a counted read the same way. *)
+val track_reading
+  :  Masc_tui_types.state
+  -> on_not_run:(unit -> 'a)
+  -> deliver:(('b, 'c) result -> 'd)
+  -> (unit -> 'a) * (('b, 'c) result -> 'd) * (Masc_tui_workspace_job.event -> unit)
+
 val launch_result
   :  ?key:unit ref
   -> ?operation:bool

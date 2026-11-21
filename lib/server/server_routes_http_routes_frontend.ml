@@ -192,11 +192,6 @@ let add_routes ?clock router =
           { when_strict = Route_access.Open_when_strict })
        "/dashboard"
        (fun _state req reqd -> serve_dashboard_index req reqd)
-  |> Server_route.get
-       (Server_route.Public_read_on_canonical_host
-          { when_strict = Route_access.Open_when_strict })
-       "/dashboard/"
-       (fun _state req reqd -> serve_dashboard_index req reqd)
   |> Server_route.prefix_get
        (Server_route.Public_read_on_canonical_host
           { when_strict = Route_access.Open_when_strict })

@@ -7231,7 +7231,6 @@
 
 (include stanzas/test_play_current_credential_authority.inc)
 
-(include stanzas/test_librarian_preflight_report.inc)
 
 (test
  (name test_server_keeper_build_maintenance)

@@ -29,6 +29,30 @@ SETUP = importlib.util.module_from_spec(MODULE)
 MODULE.loader.exec_module(SETUP)
 
 
+from setup_cli_fixtures import (
+    CLAUDE_CODE_WINDOW_FLOOR,
+    PROBE_FALLBACK_WINDOW,
+    official_fixture_toml,
+    probe_fixture_toml,
+)
+
+
+class SetupFixtureWindowFloor(unittest.TestCase):
+    """RC3 run `44937662942` step 17 이 `32768` 에서 실패한 좌표를 바이너리 없이 고정한다."""
+
+    def test_probe_fixture_claude_code_declares_the_window_floor(self):
+        toml = probe_fixture_toml('claude-code', '/fixture/client', '/fixture/home')
+        self.assertIn(f'max-context = {CLAUDE_CODE_WINDOW_FLOOR}\n', toml)
+
+    def test_probe_fixture_codex_keeps_its_own_window(self):
+        toml = probe_fixture_toml('codex-app-server', '/fixture/client', '/fixture/home')
+        self.assertIn(f'max-context = {PROBE_FALLBACK_WINDOW}\n', toml)
+
+    def test_official_fixture_declares_the_window_floor(self):
+        toml = official_fixture_toml('/fixture/client', '/fixture/home')
+        self.assertIn(f'max-context = {CLAUDE_CODE_WINDOW_FLOOR}\n', toml)
+
+
 def spec(choice='vllm'):
     # Claude Code rejects a declared window under its autocompact floor
     # (runtime_claude_code.ml: autocompact_window_floor_tokens = 100_000), so

@@ -252,12 +252,10 @@ type purge_error =
   | Purge_keeper_active of string
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
-  | Purge_librarian_position_unreadable of string
   | Purge_boundaries_unreadable of string
   | Purge_continuity_unreadable of string
-  | Purge_librarian_rebase_refused of Keeper_checkpoint_purge.refusal
+  | Purge_turn_log_unreadable of string
   | Purge_librarian_cancel_failed of string
-  | Purge_librarian_position_not_written of string
   | Purge_backup_failed of string
   | Purge_source_changed
   | Purge_install_failed of string
@@ -276,20 +274,14 @@ let purge_error_to_string = function
     "checkpoint unavailable: " ^ detail
   | Purge_checkpoint_invalid detail ->
     "checkpoint purge refused: " ^ detail
-  | Purge_librarian_position_unreadable detail ->
-    "checkpoint purge refused: Librarian position unreadable: " ^ detail
   | Purge_boundaries_unreadable detail ->
     "checkpoint purge refused: turn-boundary log unreadable: " ^ detail
   | Purge_continuity_unreadable detail ->
     "checkpoint purge refused: Librarian working state unreadable: " ^ detail
-  | Purge_librarian_rebase_refused refusal ->
-    "checkpoint purge refused: " ^ Keeper_checkpoint_purge.refusal_to_string refusal
+  | Purge_turn_log_unreadable detail ->
+    "checkpoint purge refused: turn log unreadable: " ^ detail
   | Purge_librarian_cancel_failed detail ->
     "checkpoint purge refused: Librarian lane could not be stopped: " ^ detail
-  | Purge_librarian_position_not_written detail ->
-    "checkpoint installed but the Librarian position was not moved with it; the \
-     Librarian stops on the mismatch until the keeper's Librarian files are purged: "
-    ^ detail
   | Purge_backup_failed detail ->
     "checkpoint backup failed: " ^ detail
   | Purge_source_changed ->
@@ -349,36 +341,43 @@ type purge_computed =
   ; purged_bytes : string
   ; raw_report : Keeper_checkpoint_purge.report
   ; report : purge_report
-  ; rebase : (Keeper_checkpoint_purge.rebase, Keeper_checkpoint_purge.refusal) result
   }
+
+let turn_log_place config ~keeper_name ~trace_id ~session_dir : Keeper_turn_log_recorder.place =
+  { keepers_dir = Workspace.keepers_runtime_dir config
+  ; base_path = config.Workspace.base_path
+  ; keeper_name
+  ; session_dir
+  ; session_id = trace_id
+  }
+;;
 
 (* Reads what the purge reads and computes the purged checkpoint. Nothing is
    written. *)
 let purge_compute config ~keeper_name ~trace_id ~session_dir =
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   (match
-     ( Keeper_librarian_progress.read
-         ~keepers_dir:runtime_keepers_dir
-         ~keeper_id:keeper_name
-     , Keeper_turn_boundaries.read
+     ( Keeper_turn_boundaries.read
          ~keepers_dir:runtime_keepers_dir
          ~keeper_id:keeper_name
      , Keeper_librarian_continuity.read ~config ~keeper_name
      , Keeper_checkpoint_store.load_agent_core_exact_snapshot
          ~session_dir
-         ~session_id:trace_id )
+         ~session_id:trace_id
+     , Keeper_turn_log_recorder.named
+         (turn_log_place config ~keeper_name ~trace_id ~session_dir) )
    with
-   | Error error, _, _, _ ->
-     Error
-       (Purge_librarian_position_unreadable
-          (Keeper_librarian_progress.read_error_to_string error))
-   | Ok _, Error detail, _, _ -> Error (Purge_boundaries_unreadable detail)
-   | Ok _, Ok _, Error detail, _ -> Error (Purge_continuity_unreadable detail)
-   | Ok _, Ok _, Ok _, Error error ->
+   | Error detail, _, _, _ -> Error (Purge_boundaries_unreadable detail)
+   | Ok _, Error detail, _, _ -> Error (Purge_continuity_unreadable detail)
+   | Ok _, Ok _, Error error, _ ->
      Error
        (Purge_checkpoint_unavailable
           (checkpoint_ref_load_error_to_string error))
-   | Ok progress, Ok boundary_lines, Ok continuity, Ok snapshot ->
+   | Ok _, Ok _, Ok _, Error not_read ->
+     Error
+       (Purge_turn_log_unreadable
+          (Keeper_turn_log_recorder.not_recorded_to_string not_read))
+   | Ok boundary_lines, Ok continuity, Ok snapshot, Ok named ->
      let source_ref = Keeper_checkpoint_store.exact_snapshot_reference snapshot in
      let source = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
      (* The report measures the whole checkpoint in the value codec's
@@ -401,7 +400,7 @@ let purge_compute config ~keeper_name ~trace_id ~session_dir =
                 ~trace_id
                 ~boundary_lines
                 ~continuity
-                ~progress
+                ~named
                 checkpoint
             with
             | Error error ->
@@ -410,18 +409,11 @@ let purge_compute config ~keeper_name ~trace_id ~session_dir =
                    (Keeper_checkpoint_purge.purge_error_to_string error))
             | Ok (purged, purge_report) ->
               let purged_bytes = Agent_core.Checkpoint.to_string purged in
-              let rebase =
-                Keeper_checkpoint_purge.librarian_rebase
-                  ~progress
-                  ~trace_id
-                  ~before:checkpoint.messages
-                  ~after:purged.messages
-              in
-              Ok (purged, source_bytes, purged_bytes, purge_report, rebase)))
+              Ok (purged, source_bytes, purged_bytes, purge_report)))
      in
      (match purge_result with
       | Error _ as error -> error
-      | Ok (purged, source_bytes, purged_bytes, raw_report, rebase) ->
+      | Ok (purged, source_bytes, purged_bytes, raw_report) ->
         let report =
           { messages_before = raw_report.messages_before
           ; messages_after = raw_report.messages_after
@@ -433,13 +425,12 @@ let purge_compute config ~keeper_name ~trace_id ~session_dir =
               raw_report.messages_dropped_at_structural_break
           }
         in
-        Ok { source_ref; purged; source_bytes; purged_bytes; raw_report; report; rebase }))
+        Ok { source_ref; purged; source_bytes; purged_bytes; raw_report; report }))
 ;;
 
 let purge_install config ~keeper_name ~trace_id ~session_dir
-      { source_ref; purged; report; raw_report; _ } rebase
+      { source_ref; purged; report; raw_report; _ }
   =
-  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let backup_dir = backup_dir_for_source ~config ~trace_id source_ref in
   (match
      Keeper_checkpoint_store.back_up_canonical
@@ -498,63 +489,40 @@ let purge_install config ~keeper_name ~trace_id ~session_dir
           | Ok { removed = _; left } ->
             List.map (fun entry -> "history archive entry kept: " ^ entry) left
         in
-        (* The checkpoint is on disk; the position follows it
-           (RFC librarian-lifecycle §10-2). A sound purge keeps
-           the history's end, so this writes back the position
-           it had. A recovery drops the broken tail and the
-           position moves to the new end; a crash between the
-           two writes leaves it past that end, which the next
-           round stops on, and the error text says how that is
-           resolved. *)
-        let position_written =
-          match rebase with
-          | Keeper_checkpoint_purge.No_progress -> Ok ()
-          | Rebased { after; _ } ->
-            Keeper_librarian_progress.write
-              ~keepers_dir:runtime_keepers_dir
-              ~keeper_id:keeper_name
-              after
-        in
-        (match position_written with
-         | Error error ->
-           Error
-             (Purge_librarian_position_not_written
-                (Keeper_librarian_progress.write_error_to_string error))
-         | Ok () ->
-           Log.Keeper.info
-             ~keeper_name
-             "checkpoint purge applied trace=%s messages=%d->%d \
-              bytes=%d->%d reasoning_blocks_stripped=%d \
-              tool_results_cleared=%d \
-              messages_dropped_at_structural_break=%d backup=%s"
-             trace_id
-             report.messages_before
-             report.messages_after
-             report.bytes_before
-             report.bytes_after
-             report.reasoning_blocks_stripped
-             report.tool_results_cleared
-             raw_report.messages_dropped_at_structural_break
-             backup_path;
-           Ok
-             { keeper = keeper_name
-             ; trace_id
-             ; apply_allowed = true
-             ; applied = true
-             ; backup_path = Some backup_path
-             ; report
-             ; warnings =
-                 List.map
-                   Keeper_checkpoint_store
-                   .checkpoint_installation_auxiliary_to_string
-                   installed.auxiliary
-                 @ history_warnings
-             })))
+        Log.Keeper.info
+          ~keeper_name
+          "checkpoint purge applied trace=%s messages=%d->%d \
+           bytes=%d->%d reasoning_blocks_stripped=%d \
+           tool_results_cleared=%d \
+           messages_dropped_at_structural_break=%d backup=%s"
+          trace_id
+          report.messages_before
+          report.messages_after
+          report.bytes_before
+          report.bytes_after
+          report.reasoning_blocks_stripped
+          report.tool_results_cleared
+          raw_report.messages_dropped_at_structural_break
+          backup_path;
+        Ok
+          { keeper = keeper_name
+          ; trace_id
+          ; apply_allowed = true
+          ; applied = true
+          ; backup_path = Some backup_path
+          ; report
+          ; warnings =
+              List.map
+                Keeper_checkpoint_store
+                .checkpoint_installation_auxiliary_to_string
+                installed.auxiliary
+              @ history_warnings
+          }))
 ;;
 
 type purge_plan =
   | Purge_unchanged of purge_computed
-  | Purge_install of purge_computed * Keeper_checkpoint_purge.rebase
+  | Purge_install of purge_computed
 
 let purge_current_unlocked config ~keeper_name ~apply =
   match Keeper_meta_store.read_meta_resolved config keeper_name with
@@ -576,19 +544,14 @@ let purge_current_unlocked config ~keeper_name ~apply =
              { keeper = keeper_name
              ; trace_id
              ; apply_allowed =
-                 (not
-                    (Keeper_registry.is_registered
-                       ~base_path:config.Workspace.base_path
-                       keeper_name))
-                 && Result.is_ok computed.rebase
+                 not
+                   (Keeper_registry.is_registered
+                      ~base_path:config.Workspace.base_path
+                      keeper_name)
              ; applied = false
              ; backup_path = None
              ; report = computed.report
-             ; warnings =
-                 (match computed.rebase with
-                  | Error refusal ->
-                    [ "apply refused: " ^ Keeper_checkpoint_purge.refusal_to_string refusal ]
-                  | Ok (_ : Keeper_checkpoint_purge.rebase) -> [])
+             ; warnings = []
              })
           (purge_compute config ~keeper_name ~trace_id ~session_dir)
       else (
@@ -596,21 +559,19 @@ let purge_current_unlocked config ~keeper_name ~apply =
           match purge_compute config ~keeper_name ~trace_id ~session_dir with
           | Error _ as error -> error
           | Ok computed ->
-            (match computed.rebase with
-             | Error refusal -> Error (Purge_librarian_rebase_refused refusal)
-             | Ok rebase ->
-               if String.equal computed.source_bytes computed.purged_bytes
-               then Ok (Purge_unchanged computed)
-               else Ok (Purge_install (computed, rebase)))
+            if String.equal computed.source_bytes computed.purged_bytes
+            then Ok (Purge_unchanged computed)
+            else Ok (Purge_install computed)
         in
         (* RFC librarian-call-only-proposes §5.2, §5.6: a purge that drops what
            follows a break shrinks the head, so the turn log line goes first
            and names what is dropped. The purged history is saved with every
-           message closed. A purge that only rewrites drops nothing and writes
-           no line. *)
+           message closed. A purge that drops nothing rewrote only what the
+           log has named and writes no line, and one that changes nothing
+           installs nothing. *)
         let line : purge_plan -> Keeper_turn_log_reset.line = function
           | Purge_unchanged (_ : purge_computed) -> No_line
-          | Purge_install ({ raw_report; purged; _ }, (_ : Keeper_checkpoint_purge.rebase)) ->
+          | Purge_install { raw_report; purged; _ } ->
             if raw_report.messages_dropped_at_structural_break > 0
             then
               Announce
@@ -632,20 +593,14 @@ let purge_current_unlocked config ~keeper_name ~apply =
               ; report = computed.report
               ; warnings = []
               }
-          | Purge_install (computed, rebase) ->
-            purge_install config ~keeper_name ~trace_id ~session_dir computed rebase
-        in
-        let place : Keeper_turn_log_recorder.place =
-          { keepers_dir = Workspace.keepers_runtime_dir config
-          ; base_path = config.Workspace.base_path
-          ; keeper_name
-          ; session_dir
-          ; session_id = trace_id
-          }
+          | Purge_install computed ->
+            purge_install config ~keeper_name ~trace_id ~session_dir computed
         in
         match
           Keeper_turn_log_reset.run ~at:(Time_compat.now ())
-            ~new_log_id:(Keeper_turn_log.Log_id.fresh ()) place ~prepare ~line ~change
+            ~new_log_id:(Keeper_turn_log.Log_id.fresh ())
+            (turn_log_place config ~keeper_name ~trace_id ~session_dir)
+            ~prepare ~line ~change
         with
         | Ok result -> result
         | Error (Path_refused error) -> Error error

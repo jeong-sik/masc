@@ -1502,20 +1502,17 @@ let test_input_wait_inventory_refuses_trace_drift () =
    The records are immutable, so each edge rebinds its entry; two edges in the
    same turn must still land in one group with the count advanced and the
    observed-at window spanning both. *)
-(* RFC librarian-lifecycle §10-2 through the dashboard action. The preview
-   says why an apply would be refused; the apply refuses while an atom is
-   unread and writes nothing; an apply at the end installs the checkpoint,
-   keeps every message and the position where it was (the purge keeps the
-   history's end), and leaves [boundary_lines_seen] alone. The server-owned
-   Librarian lane is closed to new units and cancelled for the apply; here it
-   has no unit, so cancellation returns at once. *)
-let test_purge_keeps_the_librarian_position_and_every_message () =
+(* The dashboard action. The preview allows an apply for a Keeper that is
+   not running; the apply installs the checkpoint and keeps every message
+   and every atom. The server-owned Librarian lane is closed to new units and
+   cancelled for the apply; here it has no unit, so cancellation returns at
+   once. *)
+let test_purge_keeps_every_message () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   with_temp_dir @@ fun dir ->
   Eio_main.run @@ fun _env ->
   let module Store = Keeper_checkpoint_store in
-  let module Progress = Keeper_librarian_progress in
   let module Purge = Keeper_checkpoint_purge in
   let state = Mcp_server.For_testing.create_state ~base_path:dir in
   let config = Mcp_server.workspace_config state in
@@ -1561,41 +1558,15 @@ let test_purge_keeps_the_librarian_position_and_every_message () =
    | Ok (Store.Saved _) -> ()
    | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was stale"
    | Error detail -> fail detail);
-  let keepers_dir = Workspace.keepers_runtime_dir config in
   let atoms messages = snd (Runtime_model_input_tail_window.annotate messages) in
-  let boundary_lines_seen = 7 in
-  let write_position ~end_atom =
-    let last_atom_digest =
-      match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
-      | Some digest -> digest
-      | None -> failf "fixture history has no atom %d" (end_atom - 1)
-    in
-    match
-      Progress.write ~keepers_dir ~keeper_id:keeper_name
-        { position = { trace_id; end_atom; last_atom_digest }; boundary_lines_seen }
-    with
-    | Ok () -> ()
-    | Error error -> fail (Progress.write_error_to_string error)
-  in
   let canonical = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
   let count = atoms messages in
-  write_position ~end_atom:(count - 1);
   let original = Fs_compat.load_file canonical in
   (match Checkpoints.purge_current config ~keeper_name ~apply:false with
    | Ok preview ->
-     check bool "preview: apply is not allowed" false preview.apply_allowed;
-     check int "preview: the refusal is the one warning" 1 (List.length preview.warnings)
+     check bool "preview: apply is allowed" true preview.apply_allowed;
+     check (list string) "preview: no warning" [] preview.warnings
    | Error error -> fail (Checkpoints.purge_error_to_string error));
-  (match Checkpoints.purge_current config ~keeper_name ~apply:true with
-   | Error
-       (Checkpoints.Purge_librarian_rebase_refused
-          (Purge.Unread_atoms_present { end_atom; atom_count })) ->
-     check int "refused at the position" (count - 1) end_atom;
-     check int "against the history's atoms" count atom_count
-   | Error error -> fail (Checkpoints.purge_error_to_string error)
-   | Ok _ -> fail "an apply over an unread atom was allowed");
-  check string "a refused apply leaves the checkpoint" original (Fs_compat.load_file canonical);
-  write_position ~end_atom:count;
   (* The fixture's save archived the source head; it names the content the
      purge removes, so the apply deletes it. *)
   check (list string) "the source head is archived"
@@ -1635,17 +1606,7 @@ let test_purge_keeps_the_librarian_position_and_every_message () =
   in
   check int "every message is kept" (List.length messages)
     (List.length purged.messages);
-  check int "and every atom" count (atoms purged.messages);
-  match Progress.read ~keepers_dir ~keeper_id:keeper_name with
-  | Ok (Some progress) ->
-    check int "the position stays at the end" count progress.position.end_atom;
-    check (option string) "with the digest it had"
-      (Runtime_model_input_tail_window.atom_opening_digest messages (count - 1))
-      (Some progress.position.last_atom_digest);
-    check int "boundary_lines_seen is untouched" boundary_lines_seen
-      progress.boundary_lines_seen
-  | Ok None -> fail "the position is gone"
-  | Error error -> fail (Progress.read_error_to_string error)
+  check int "and every atom" count (atoms purged.messages)
 ;;
 
 let test_clock_groups_accumulate_edges_per_turn () =
@@ -1905,9 +1866,9 @@ let () =
         ] )
     ; ( "checkpoint_purge"
       , [ test_case
-            "purge keeps the Librarian position and every message"
+            "purge keeps every message"
             `Quick
-            test_purge_keeps_the_librarian_position_and_every_message
+            test_purge_keeps_every_message
         ; test_case
             "the report carries the count dropped at a structural break"
             `Quick

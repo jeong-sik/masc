@@ -13,22 +13,23 @@
     live keeper holds the conversation in memory and its next save overwrites
     the purge. Before it reads the head, [--apply] takes the workspace writer
     lease that the server holds while it runs, so it is refused while a server
-    owns the workspace: that server's Librarian lane would read the position
-    and the checkpoint while they are replaced. On the server, the dashboard purge action cancels and
+    owns the workspace: that server's Librarian lane would read the checkpoint
+    while it is replaced. On the server, the dashboard purge action cancels and
     awaits that lane instead.
 
-    A purge that drops what follows a break shrinks the head, so it goes
-    through {!Masc.Keeper_turn_log_reset.run} (RFC
-    librarian-call-only-proposes §5.2, §5.6): the open messages are closed and
-    the Keeper's turn log line names what is dropped before the purged head is
-    installed. A line that is not written leaves everything as it was.
+    An apply goes through {!Masc.Keeper_turn_log_reset.run} (RFC
+    librarian-call-only-proposes §5.2, §5.6), and its turn log line goes in
+    before the purged head. A purge that drops what follows a break shrinks
+    the head: the open messages are closed and the line names what is
+    dropped. A purge that drops nothing rewrites only the messages the
+    Keeper's turn log has named ({!Masc.Keeper_turn_log_recorder.named}); the
+    rest stay as they are for its Memory writer. A purge that changes nothing
+    installs nothing. A line that is not written leaves everything as it
+    was.
 
-    The Librarian's atom position moves with the checkpoint (RFC
-    librarian-lifecycle §10-2, {!Masc.Keeper_checkpoint_purge.librarian_rebase}):
-    the rewrite is refused while the Librarian has atoms left to read, and
-    otherwise the position is written after the checkpoint. The turn-boundary
-    log and the saved Librarian working state are read first: the messages
-    they name stay byte-exact, so both still match the purged checkpoint. *)
+    The turn-boundary log and the saved Librarian working state are read
+    first: the messages they name stay byte-exact, so both still match the
+    purged checkpoint. *)
 
 let usage =
   {|Usage: masc_checkpoint_purge --keeper NAME [OPTIONS]
@@ -37,7 +38,7 @@ Deterministic offline checkpoint purge. Dry-run by default.
 
 Options:
   --keeper NAME            the keeper whose checkpoint is purged; its meta names
-                           the trace, and its Librarian files are read and moved
+                           the trace, and its turn log and Librarian files are read
   --trace ID               optional: refuse unless the keeper's meta names this trace
   --base DIR               workspace root (default: MASC_BASE_PATH or cwd)
   --apply                  back up, install the purged checkpoint over the head
@@ -53,11 +54,11 @@ The runtime root is {workspace}/.masc. Backups are stored in it.
 --apply requires the keeper to be stopped (masc_keeper_down); a live keeper
 overwrites the purge on its next save. It also requires that no server owns
 the workspace (the writer lease); on a running server use the dashboard purge
-action. A rewrite is refused while the Librarian has atoms of this checkpoint
-left to read; otherwise the Librarian position is moved to the rewritten end
-and written after the checkpoint. A purge that drops what follows a break
-first writes the keeper's turn log line; when that line cannot be written
-nothing is purged.
+action. A purge that drops nothing rewrites only the messages the keeper's
+turn log has named; the messages after its last line stay as they are. A
+purge that drops what follows a break first writes the keeper's turn log
+line; when that line cannot be written nothing is purged. A purge that
+changes nothing installs nothing.
 
 Exit codes:
   0  report printed (dry-run) or purge applied
@@ -66,7 +67,7 @@ Exit codes:
 
 module Purge = Masc.Keeper_checkpoint_purge
 module Store = Masc.Keeper_checkpoint_store
-module Progress = Masc.Keeper_librarian_progress
+module Writer = Masc.Keeper_turn_log_writer
 
 let error msg =
   prerr_endline msg;
@@ -95,8 +96,7 @@ let purge_error_text = function
   | ( Purge.Repetition_boundary_invalid _
     | Purge.Atom_count_changed _
     | Purge.Kept_atom_rewritten _
-    | Purge.Continuity_no_longer_fits _
-    | Purge.Recovery_end_unwitnessed _ ) as purge_error ->
+    | Purge.Continuity_no_longer_fits _ ) as purge_error ->
     Purge.purge_error_to_string purge_error
 
 let timestamp_utc () =
@@ -111,7 +111,7 @@ type computed =
   ; checkpoint : Agent_core.Checkpoint.t
   ; purged : Agent_core.Checkpoint.t
   ; report : Purge.report
-  ; rebase : (Purge.rebase, Purge.refusal) result
+  ; named : Writer.named
   }
 
 (* Every check before the turn log line ends the process instead. *)
@@ -165,17 +165,11 @@ let print_report ~keeper_name ~trace ~checkpoint_path computed =
   Printf.printf
     "messages dropped at structural break: %d\n"
     report.Purge.messages_dropped_at_structural_break;
-  match computed.rebase with
-  | Ok Purge.No_progress -> print_endline "librarian position: none"
-  | Ok (Purge.Rebased { before; after }) ->
-    Printf.printf
-      "librarian position: end_atom %d -> %d\n"
-      before.Progress.position.end_atom
-      after.Progress.position.end_atom
-  | Error refusal ->
-    Printf.printf "librarian position: apply refused: %s\n" (Purge.refusal_to_string refusal)
+  match computed.named with
+  | Writer.No_log -> print_endline "turn log: none"
+  | Writer.Named_below below -> Printf.printf "turn log: names the messages below %d\n" below
 
-let install ~session_dir ~trace ~runtime_root ~runtime_keepers_dir ~keeper_name computed rebase =
+let install ~session_dir ~trace ~runtime_root computed =
   let backup_dir =
     Filename.concat
       runtime_root
@@ -237,24 +231,7 @@ let install ~session_dir ~trace ~runtime_root ~runtime_keepers_dir ~keeper_name 
      | Error detail -> Printf.printf "warning: the history archive was not removed: %s\n" detail
      | Ok { removed; left } ->
        Printf.printf "applied: removed %d history archive entries\n" removed;
-       List.iter (Printf.printf "warning: history archive entry kept: %s\n") left);
-    (* The position follows the checkpoint. A failure here leaves the old
-       position against the new numbering; the next Librarian round stops on
-       the mismatch until the keeper's Librarian files are purged, and the
-       message says so. *)
-    (match rebase with
-     | Purge.No_progress -> ()
-     | Purge.Rebased { after; _ } ->
-       (match Progress.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name after with
-        | Ok () ->
-          Printf.printf
-            "applied: librarian position moved to end_atom %d\n"
-            after.Progress.position.end_atom
-        | Error write_error ->
-          error
-            ("checkpoint installed but the Librarian position was not moved with it; the \
-              Librarian stops on the mismatch until the keeper's Librarian files are purged: "
-             ^ Progress.write_error_to_string write_error)))
+       List.iter (Printf.printf "warning: history archive entry kept: %s\n") left)
 
 let () =
   let keeper = ref None in
@@ -345,6 +322,14 @@ let () =
   in
   let session_dir = Filename.concat session_store trace in
   let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
+  let place : Masc.Keeper_turn_log_recorder.place =
+    { keepers_dir = runtime_keepers_dir
+    ; base_path
+    ; keeper_name
+    ; session_dir
+    ; session_id = trace
+    }
+  in
   (* An apply holds the workspace writer lease from before it reads the head
      until it has installed (RFC librarian-call-only-proposes §5.6). *)
   with_apply_lease ~apply:!apply ~base_path
@@ -379,13 +364,13 @@ let () =
         | Ok continuity -> continuity
         | Error detail -> error ("Librarian working state unreadable: " ^ detail)
       in
-      (* One read of the position serves both: a recovery ends the history
-         where a line it counted states it, and the rebase moves it there. *)
-      let progress =
-        match Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name with
-        | Ok progress -> progress
-        | Error read_error ->
-          error ("Librarian position unreadable: " ^ Progress.read_error_to_string read_error)
+      let named =
+        match Masc.Keeper_turn_log_recorder.named place with
+        | Ok named -> named
+        | Error not_read ->
+          error
+            ("turn log unreadable: "
+             ^ Masc.Keeper_turn_log_recorder.not_recorded_to_string not_read)
       in
       (match
          Purge.purge
@@ -393,7 +378,7 @@ let () =
            ~trace_id:trace
            ~boundary_lines
            ~continuity
-           ~progress
+           ~named
            checkpoint
        with
        | Error purge_error -> error (purge_error_text purge_error)
@@ -402,12 +387,7 @@ let () =
          ; checkpoint
          ; purged
          ; report
-         ; rebase =
-             Purge.librarian_rebase
-               ~progress
-               ~trace_id:trace
-               ~before:checkpoint.messages
-               ~after:purged.messages
+         ; named
          })
   in
   let print_report = print_report ~keeper_name ~trace ~checkpoint_path in
@@ -416,20 +396,13 @@ let () =
     print_report (compute ());
     print_endline "dry-run: nothing written (pass --apply to persist)")
   else (
-    let prepare () : (computed * Purge.rebase, no_refusal) result =
-      let computed = compute () in
-      match computed.rebase with
-      | Ok rebase -> Ok (computed, rebase)
-      | Error refusal ->
-        print_report computed;
-        error ("--apply refused: " ^ Purge.refusal_to_string refusal)
-    in
+    let prepare () : (computed, no_refusal) result = Ok (compute ()) in
     (* RFC librarian-call-only-proposes §5.2, §5.6: a purge that drops what
        follows a break shrinks the head, so the open messages are closed and
        the turn log line names what is dropped before the purged head goes
-       in, with every message it keeps closed. A purge that only rewrites
-       drops nothing and writes no line. *)
-    let line ((computed : computed), (_ : Purge.rebase)) : Masc.Keeper_turn_log_reset.line =
+       in, with every message it keeps closed. A purge that drops nothing
+       rewrote only what the log has named and writes no line. *)
+    let line (computed : computed) : Masc.Keeper_turn_log_reset.line =
       if computed.report.Purge.messages_dropped_at_structural_break > 0
       then
         Announce
@@ -440,17 +413,18 @@ let () =
           }
       else No_line
     in
-    let change (computed, rebase) =
+    (* A purge that changes nothing installs nothing. Its save would close
+       the head's open messages; on a head replaced since the turn log's last
+       line, which has nothing named and so nothing rewritten, the count that
+       save leaves can make the head look whole to the next line. *)
+    let change computed =
       print_report computed;
-      install ~session_dir ~trace ~runtime_root ~runtime_keepers_dir ~keeper_name computed rebase
-    in
-    let place : Masc.Keeper_turn_log_recorder.place =
-      { keepers_dir = runtime_keepers_dir
-      ; base_path
-      ; keeper_name
-      ; session_dir
-      ; session_id = trace
-      }
+      if
+        String.equal
+          (Agent_core.Checkpoint.to_string computed.checkpoint)
+          (Agent_core.Checkpoint.to_string computed.purged)
+      then print_endline "nothing to purge: the checkpoint is left as it is"
+      else install ~session_dir ~trace ~runtime_root computed
     in
     match
       Masc.Keeper_turn_log_reset.run

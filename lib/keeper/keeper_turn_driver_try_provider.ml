@@ -1285,12 +1285,8 @@ let choose_range_start ~past_max_context ~held_window ~continuity ~front ~accept
 
 let range_start_origin = function
   | From_covered { end_atom; working_state = _ } -> Keeper_carried_front.Covered { end_atom }
-  | Past_librarian_point { point; accepted } ->
-    Keeper_carried_front.Past_librarian_point
-      { librarian_end_atom = point.end_atom
-      ; source = accepted.Keeper_carried_front.source
-      }
-  | From_seed seed -> Keeper_carried_front.Carried seed.Keeper_carried_front.source
+  | Past_librarian_point { accepted = seed; point = _ } | From_seed seed ->
+    Keeper_carried_front.Carried seed.Keeper_carried_front.source
   | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
     Keeper_carried_front.Turn_start { end_atom }
   | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown { reason }) ->
@@ -2535,9 +2531,7 @@ let turn_boundary_step
   =
   match refused_range () with
   | Some
-      ( ( Keeper_carried_front.Carried _
-        | Keeper_carried_front.Covered _
-        | Keeper_carried_front.Past_librarian_point _ )
+      ( (Keeper_carried_front.Carried _ | Keeper_carried_front.Covered _)
       , refused_first_atom )
     when boundary_resend_on error && authorized () ->
     (match turn_start_front () with
@@ -2550,7 +2544,6 @@ let turn_boundary_step
   | Some
       ( ( Keeper_carried_front.Carried _
         | Keeper_carried_front.Covered _
-        | Keeper_carried_front.Past_librarian_point _
         | Keeper_carried_front.Turn_start _
         | Keeper_carried_front.Turn_start_unknown _ )
       , _ )

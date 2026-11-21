@@ -313,6 +313,11 @@ val choose_range_start :
     start the request will have. *)
 
 val range_start_origin : range_start -> Keeper_carried_front.origin
+(** The origin a request that opens at this start reports. A seed and a
+    start past the Librarian point both report
+    {!Keeper_carried_front.Carried} with the source of the seed the range
+    opens at: the origin names where the start came from, and whether a read
+    end stands with it is the start's own constructor. *)
 
 val carried_working_state : held_window:held_window option -> range_start -> string option
 (** The working state a range opened at [start] carries ahead of its atoms.

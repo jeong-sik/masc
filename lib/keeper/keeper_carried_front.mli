@@ -7,7 +7,8 @@
     Keeper's Memory writer has read to in this history ({!Covered}), else a
     seed this history still holds, else where the last completed turn on
     this history ended ({!Turn_start}). The read end yields to a later start
-    the provider accepted ({!Past_librarian_point}). The turn's
+    the provider accepted, and the request then reports where that start
+    came from ({!Carried}). The turn's
     composition and the next-request forecast both ask it. This module holds
     the vocabulary of that choice -- the seed, the turn start, and the
     {!origin} a request reports -- and the reads that produce a seed.
@@ -100,24 +101,20 @@ val turn_start_to_string : turn_start -> string
 (** [boundary:<end_atom>] or [unknown:<reason>], for log lines. *)
 
 type origin =
-  | Carried of source  (** The front came from a seed. *)
+  | Carried of source
+      (** The front came from a seed, and [source] is where the seed came
+          from. With no read end it is a seed this history still opens with
+          the same message. With one, it is the start the provider accepted
+          on this history, when the range opens there and not at the read
+          end (RFC librarian-lifecycle §4.10, rule 2): the newest
+          response-observed turn record, or a front this turn held after a
+          size refusal or the size signal. Which of the two a request took
+          is its {!Keeper_turn_driver_try_provider.range_start}. *)
   | Covered of { end_atom : int }
       (** Where the Keeper's Memory writer has read to in this history
           (RFC librarian-call-only-proposes §11.1): the atoms before
           [end_atom] are in Memory and are not sent again. The working state
           the writer committed rides in their place when there is one. *)
-  | Past_librarian_point of { librarian_end_atom : int; source : source }
-      (** A Librarian point at [librarian_end_atom], and a start the provider
-          accepted on this history ([source]: the newest response-observed
-          turn record, or a front this turn held after a size refusal or the
-          size signal). The range opens at that start (RFC
-          librarian-lifecycle §4.10, rule 2). A start past the point leaves
-          the atoms from the point up to it unsent; which of them are also
-          not in memory is {!librarian_gap}'s answer, which weighs the read
-          position too. A window that stays holds its start behind the point
-          as well:
-          the atoms from it up to the point are then in memory and in the
-          request both. *)
   | Turn_start of { end_atom : int }
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own
@@ -322,8 +319,7 @@ val origin_to_json : origin -> Yojson.Safe.t
     [turn_record] with [turn]; [turn_start_after_refusal];
     [this_turn_start_after_refusal]; [turn_start_at_max_context];
     [librarian_point_at_max_context];
-    [covered] with [end_atom]; [past_librarian_point] with
-    [librarian_end_atom] and [front], the {!Carried} object of its source;
+    [covered] with [end_atom];
     [turn_start] with [end_atom]; or
     [turn_start_unknown] with [reason]. *)
 

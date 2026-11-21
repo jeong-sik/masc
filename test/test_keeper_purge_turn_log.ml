@@ -344,6 +344,22 @@ let slices_of_the_last_turn config =
   | Error error -> fail (Keeper_turn_log_store.read_error_to_string error)
 ;;
 
+(* The object sweep reads the operation store of every registered Keeper for
+   the heads its Gate preparations hold, and removes nothing while one is
+   missing. A Keeper that has run has its store. *)
+let create_operation_store config =
+  let store_ok = function
+    | Ok value -> value
+    | Error error -> fail (Keeper_chat_operation_store.error_to_string error)
+  in
+  let path =
+    Keeper_chat_operation_store.path_for_keeper
+      ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  store_ok (Keeper_chat_operation_store.close (store_ok (Keeper_chat_operation_store.open_or_create ~path)))
+;;
+
 let object_sweep config =
   match
     Keeper_checkpoint_object_sweep.run ~runtime_root:(Workspace.masc_dir config)
@@ -393,6 +409,7 @@ let test_a_purged_turn_reads_as_its_line_named_it =
    | Ok purged ->
      check bool "the head no longer holds the turn as it was written" false
        (List.equal String.equal as_written (List.map Types.show_message purged.messages)));
+  create_operation_store config;
   let swept = object_sweep config in
   check bool "the sweep read the session's objects" true (swept.sessions > 0);
   check (list string) "the sweep removed what it meant to" [] swept.failures;

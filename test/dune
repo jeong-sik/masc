@@ -7796,6 +7796,7 @@
 (include stanzas/test_server_preview_keeper_turn.inc)
 (include stanzas/test_server_accounts.inc)
 (include stanzas/test_server_accounts_engine.inc)
+(include stanzas/test_server_account_gate.inc)
 (include stanzas/test_authz_state.inc)
 (include stanzas/test_authz_zone.inc)
 

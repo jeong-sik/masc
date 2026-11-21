@@ -62,9 +62,10 @@ class RosterColumn:
         # (byte offset the write ended at, roster cells after it)
         self.frames: list[tuple[int, list[str]]] = []
 
-    def _snapshot(self) -> list[str]:
+    def _snapshot(self) -> list[list[str]]:
         return [
-            "".join(line).split("\u2502", 1)[0].rstrip() for line in self.grid
+            [cell.rstrip() for cell in "".join(line).split("\u2502")]
+            for line in self.grid
         ]
 
     def _flush(self) -> None:
@@ -507,23 +508,44 @@ class WaitingEventTest(unittest.TestCase):
                 label = name.decode("utf-8", "replace")
                 wanted = value.decode("utf-8", "replace")
                 roster.feed(bytes(output))
-                # With no saved density preference the Keeper list draws
-                # `Two_lines`: the name and status on one row, the waiting
-                # sentence (`keeper_plain_help`) on the row under it. Rows are
-                # repainted one at a time and in no fixed order, so the two are
-                # not always on the screen in the same draw. Remember where the
-                # name last stood and look for the sentence under that row.
+                # Two places can carry a Keeper's waiting sentence, and the
+                # transcript alone cannot tell them apart from another surface.
+                #
+                # The list column (left of the first `│`) draws a Keeper's row as
+                # the name and status on one line and the sentence under it at
+                # the default two-line density. Rows are repainted one at a time
+                # and in no fixed order, so remember where the name last stood and
+                # look under that row from then on.
+                #
+                # The detail pane (the second cell) belongs to the selected
+                # Keeper alone: its header names that Keeper and the lines under
+                # it are that Keeper's sentences, in order, with section headers
+                # between them. The list can scroll the selected Keeper's name row
+                # off or blank it while the pane still holds its sentences
+                # (frame 208068: row10 empty, row11 `schedule-refreshed`), so the
+                # pane pairing is checked as well.
                 name_row = None
+                pane_name_row = None
                 for cells in roster.cells_since(start):
-                    for index, cell in enumerate(cells):
+                    list_column = [row[0] if row else "" for row in cells]
+                    pane = [row[1] if len(row) > 1 else "" for row in cells]
+                    for index, cell in enumerate(list_column):
                         if label in cell:
                             name_row = index
                             break
-                    if name_row is None:
-                        continue
-                    for candidate in (name_row, name_row + 1):
-                        if 0 <= candidate < len(cells) and wanted in cells[candidate]:
-                            return True
+                    for index, cell in enumerate(pane):
+                        if label in cell:
+                            pane_name_row = index
+                            break
+                    if name_row is not None:
+                        for candidate in (name_row, name_row + 1):
+                            if 0 <= candidate < len(list_column) and wanted in list_column[candidate]:
+                                return True
+                    if pane_name_row is not None:
+                        for cell in pane[pane_name_row:]:
+                            if wanted in cell:
+                                return True
+                    del roster_cells
                 return False
 
             def latest_rendered_row_contains(name: bytes, value: bytes) -> bool:

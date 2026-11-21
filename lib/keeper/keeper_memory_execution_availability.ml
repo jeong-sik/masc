@@ -102,7 +102,12 @@ let snapshot ~config ~mode =
     | `Preflight -> Preflight
     | `Live -> Live (Runtime.tool_execution_snapshot ~config
         ~access:Lane_addon_sources.Operator_configuration ~reserved:(Contract.reserved ())) in
-  observe ~setting:(Env_config_keeper.KeeperMemoryOs.librarian_config_state ())
+  let setting =
+    if Runtime_account_access.is_multi_account ()
+    then Env_config_keeper.KeeperMemoryOs.Disabled
+    else Env_config_keeper.KeeperMemoryOs.librarian_config_state ()
+  in
+  observe ~setting
     ~declarations ~route ~mode
 
 let string_list values = `List (List.map (fun value -> `String value) values)

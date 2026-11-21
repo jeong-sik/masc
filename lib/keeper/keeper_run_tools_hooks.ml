@@ -1137,12 +1137,18 @@ let assemble_hooks
                         host_memory := Some prepared;
                         prepared in
                     Keeper_workspace_memory_host_recall.render_prepared prepared in
+                let recall_permitted =
+                  Keeper_meta_contract.effective_masc_tools_enabled meta
+                  && not (Runtime_account_access.is_multi_account ())
+                in
                 let dynamic_context, emit_request_prompt_metrics =
                   prepare_request_dynamic_context
                     ~meta ~turn_kind ~system_prompt:turn_system.Keeper_turn_system.text ~user_message
                     ~post_tool_round ~dynamic_context ~dynamic_context_for_tools
                     ~deferred_names:deferred_tool_names
-                    ~loader_alive:attempt_surface.loader_alive ~host_recall offered_tools in
+                    ~loader_alive:attempt_surface.loader_alive
+                    ?host_recall:(if recall_permitted then Some host_recall else None)
+                    offered_tools in
                 let dynamic_context_partition = dynamic_context in
                 let dynamic_context = Keeper_context_layers.text dynamic_context in
                 (if String.trim dynamic_context <> ""
@@ -1152,7 +1158,7 @@ let assemble_hooks
                    damaged derived artifacts are repaired on this IO worker
                    from authoritative context. Only offer a reference when
                    its in-process reader is on this surface. *)
-                let working_context_recall = if not post_tool_round
+                let working_context_recall = if not post_tool_round && recall_permitted
                  then
                    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                      Keeper_librarian_context_recall.render ~base_path:config.base_path
@@ -1160,7 +1166,7 @@ let assemble_hooks
                          (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)
                        ~keepers_dir:memory_os_keepers_dir ~keeper_name:meta.name ())
                  else Ok None in
-                (if not post_tool_round
+                (if not post_tool_round && recall_permitted
                  then
                    let ordinary_recall =
                      (* Search-capable recall injects store availability and
@@ -1202,7 +1208,7 @@ let assemble_hooks
                    nothing, and MASC_KEEPER_MEMORY_OS_RECALL=0 turns it off with
                    the block above. Like that block, it is made on the first
                    round only. *)
-                (if not post_tool_round
+                (if not post_tool_round && recall_permitted
                  then
                    let turn_ref =
                      Ids.Turn_ref.make

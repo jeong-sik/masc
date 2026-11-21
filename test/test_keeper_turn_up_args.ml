@@ -598,7 +598,44 @@ let test_tools_patch_round_trips_and_rejects_invalid_values () =
     [ "invalid native", `Assoc [ "native", `String "yolo" ]
     ; "unknown group", `Assoc [ "groups", `List [ `String "filesystem" ] ]
     ; "unknown tools field", `Assoc [ "posture", `String "read" ]
-    ]
+    ];
+  (* tools.masc_enabled tri-state persistence and validation *)
+  let disable =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "instructions", `String "fixture instructions"
+         ; "tools", `Assoc [ "masc_enabled", `Bool false ]
+         ])
+  in
+  check bool "masc_tools_enabled present false" true disable.masc_tools_enabled_present;
+  check (option bool) "masc_tools_enabled parsed false" (Some false) disable.masc_tools_enabled_opt;
+  persist disable base_meta;
+  let disabled_defaults = read_back () in
+  check (option bool) "masc_enabled false round-trip" (Some false) disabled_defaults.masc_tools_enabled;
+  let enable =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "tools", `Assoc [ "masc_enabled", `Bool true ]
+         ])
+  in
+  persist enable base_meta;
+  let enabled_defaults = read_back () in
+  check (option bool) "masc_enabled true round-trip" (Some true) enabled_defaults.masc_tools_enabled;
+  let clear_masc =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "tools", `Assoc [ "masc_enabled", `Null ]
+         ])
+  in
+  persist clear_masc base_meta;
+  let cleared_masc = read_back () in
+  check (option bool) "masc_enabled null clears" None cleared_masc.masc_tools_enabled;
+  (match parse (`Assoc [ "name", `String name; "tools", `Assoc [ "masc_enabled", `String "no" ] ]) with
+   | Error _ -> ()
+   | Ok _ -> failf "non-bool masc_enabled was accepted")
 ;;
 
 let test_skills_names_patch_round_trips_three_states () =

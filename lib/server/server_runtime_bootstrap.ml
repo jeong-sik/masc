@@ -1417,33 +1417,35 @@ let claim_and_start_keeper_persistence
   (* The Memory writers of this workspace, on the server's switch: after the
      persisted Keeper stores were reconciled, and before a Keeper's turn can
      write. A writer's ask calls the Librarian lane with the server's network
-     and clock. *)
-  let workspace_config = Mcp_server.workspace_config state in
-  let ask_env : Librarian_ask.env = { net; clock; base_dir = workspace_config.base_path } in
-  let memory_writers =
-    Keeper_memory_writers.start
-      ~sw
-      ~ask:(Librarian_ask.run ask_env)
-      ~ask_room:(Librarian_ask.run_room ask_env)
-      ~start_turn_log:(Keeper_turn_log_store_start.run workspace_config)
-      ~config:workspace_config
-  in
-  (* The writers ask only once they hold a lane value, and the value carries
-     the question's prompt. The prompt is read here once: an edit to the file
-     is seen at the next start (§9.5). Without it no value is sent, the
-     writers stay Idle, and the reason is logged. *)
-  (match Prompt_registry.render_prompt_template Prompt_names.librarian_ask [] with
-   | Ok prompt ->
-     Keeper_memory_writers.follow_declaration
-       ~sw
-       ~prompt
-       ~answer_schemas:Librarian_answer.schemas
-       memory_writers
-   | Error reason ->
-     Log.Server.warn
-       "Librarian ask prompt %s unavailable: %s. Memory writers hold no lane value and do not ask."
-       Prompt_names.librarian_ask
-       reason);
+     and clock. Multi-account mode runs no shared Librarian memory writers. *)
+  if not (Runtime_account_access.is_multi_account ()) then begin
+    let workspace_config = Mcp_server.workspace_config state in
+    let ask_env : Librarian_ask.env = { net; clock; base_dir = workspace_config.base_path } in
+    let memory_writers =
+      Keeper_memory_writers.start
+        ~sw
+        ~ask:(Librarian_ask.run ask_env)
+        ~ask_room:(Librarian_ask.run_room ask_env)
+        ~start_turn_log:(Keeper_turn_log_store_start.run workspace_config)
+        ~config:workspace_config
+    in
+    (* The writers ask only once they hold a lane value, and the value carries
+       the question's prompt. The prompt is read here once: an edit to the file
+       is seen at the next start (§9.5). Without it no value is sent, the
+       writers stay Idle, and the reason is logged. *)
+    (match Prompt_registry.render_prompt_template Prompt_names.librarian_ask [] with
+     | Ok prompt ->
+       Keeper_memory_writers.follow_declaration
+         ~sw
+         ~prompt
+         ~answer_schemas:Librarian_answer.schemas
+         memory_writers
+     | Error reason ->
+       Log.Server.warn
+         "Librarian ask prompt %s unavailable: %s. Memory writers hold no lane value and do not ask."
+         Prompt_names.librarian_ask
+         reason)
+  end;
   try
     Server_bootstrap_loops.start_keeper_loops
       ~claimed_persistence
@@ -1574,22 +1576,24 @@ let start_post_ready_owner_lanes
     ~resume:resume_model_configuration;
   Candle_status.install_appraiser_check (Server_candle_appraiser.available ~config:(Mcp_server.workspace_config state));
   Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
-  Server_librarian_addon_wake.install ~sw ~config:(Mcp_server.workspace_config state);
-  let start_authority () =
-    start_completion_authority ~sw ~clock state;
-    start_goal_verifier ~sw ~clock state;
-    Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
-      ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ~config:(Mcp_server.workspace_config state) ())
-      ~appraise:(Server_candle_appraiser.run ~config:(Mcp_server.workspace_config state)) ();
-    if curates_workspace_memory access then
-      Server_workspace_memory_curator.start ~sw
-        ~config:(Mcp_server.workspace_config state)
-  in
-  if Runtime_startup_state.requires_setup () then
-    Eio.Fiber.fork ~sw (fun () ->
-      Runtime_startup_state.await_available ();
-      start_authority ())
-  else start_authority ();
+  if not (Runtime_account_access.is_multi_account ()) then begin
+    Server_librarian_addon_wake.install ~sw ~config:(Mcp_server.workspace_config state);
+    let start_authority () =
+      start_completion_authority ~sw ~clock state;
+      start_goal_verifier ~sw ~clock state;
+      Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
+        ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ~config:(Mcp_server.workspace_config state) ())
+        ~appraise:(Server_candle_appraiser.run ~config:(Mcp_server.workspace_config state)) ();
+      if curates_workspace_memory access then
+        Server_workspace_memory_curator.start ~sw
+          ~config:(Mcp_server.workspace_config state)
+    in
+    if Runtime_startup_state.requires_setup () then
+      Eio.Fiber.fork ~sw (fun () ->
+        Runtime_startup_state.await_available ();
+        start_authority ())
+    else start_authority ()
+  end;
 
   start_maintenance ~sw ~task:Jsonl_retention
     ~run:(fun () -> startup_prune_jsonl state);

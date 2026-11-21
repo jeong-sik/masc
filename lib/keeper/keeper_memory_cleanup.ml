@@ -25,6 +25,9 @@ let forget ~base_path ~keeper_name =
 ;;
 
 let run_with ~execute ~base_path ~keeper_name =
+  if Runtime_account_access.is_multi_account ()
+  then Disabled
+  else
   match Env_config.KeeperMemoryOs.librarian_config_state () with
   | Disabled | Invalid -> Disabled
   | Enabled ->

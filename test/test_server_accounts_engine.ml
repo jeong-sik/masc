@@ -334,6 +334,12 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     "Runtime.source_config retains parsed configuration after boot"
     true
     (Option.is_some (Runtime.source_config ()));
+  Alcotest.(check bool)
+    "Runtime_account_access.engine_keeper_admission rejects unknown keeper in multi-account"
+    true
+    (match Runtime_account_access.engine_keeper_admission "unknown-keeper" with
+     | Runtime_account_access.Unknown_person_keeper -> true
+     | _ -> false);
   within_the_watchdog ~clock "the listener of the account server" listening;
   let net = Eio.Stdenv.net env in
   (* The probe of the account server waits for this engine, which is ready

@@ -36,6 +36,7 @@ type t =
   ; official_client_kind : string
   ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
+  ; masc_enabled : bool
   ; skill_names : string list option
         (** [None] means all; [Some []] means the profile explicitly selects none. *)
   ; tool_deny : string list
@@ -95,6 +96,7 @@ val to_yojson : outcome -> Yojson.Safe.t
 
 module For_testing : sig
   val project :
+    ?masc_enabled:bool ->
     keeper_name:string ->
     runtime_id:string ->
     skills_left_out:string list ->

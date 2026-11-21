@@ -71,7 +71,10 @@ let counterpart_observations_before_offloaded ~base_dir ~keeper_name ~before =
 ;;
 
 let completed_history_changed ~config ~keeper_name =
-  match Env_config.KeeperMemoryOs.librarian_config_state () with
+  if Runtime_account_access.is_multi_account ()
+  then ()
+  else
+    match Env_config.KeeperMemoryOs.librarian_config_state () with
   | Disabled | Invalid -> ()
   | Enabled ->
     Keeper_librarian_queue_signal.changed

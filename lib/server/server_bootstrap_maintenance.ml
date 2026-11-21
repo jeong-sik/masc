@@ -468,9 +468,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         ~state ~scope ~light:false shell;
       Server_dashboard_http_execution_surfaces.publish_shell_cache_success
         ~state ~scope ~light:true shell_light);
-  Server_keeper_build_maintenance.start ~sw ~clock ~config;
-  Server_keeper_volume_maintenance.start ~sw ~clock ~config;
-  Server_sandbox_volume_gc_report.start ~sw ~clock ~config;
+  if not (Runtime_account_access.is_multi_account ()) then begin
+    Server_keeper_build_maintenance.start ~sw ~clock ~config;
+    Server_keeper_volume_maintenance.start ~sw ~clock ~config;
+    Server_sandbox_volume_gc_report.start ~sw ~clock ~config;
+  end;
   Server_tool_blob_sweep.start ~sw ~clock ~config;
   (* A restart empties the usage table; the reports are still on disk. A
      store that cannot be read leaves the table empty and does not stop the
@@ -872,12 +874,15 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        Keeper that left the registry is retired (RFC
        librarian-call-only-proposes §9.5). *)
     let pulse_memory_writers () =
-      Option.iter
-        (fun writers ->
-           Librarian_writers.pulse
-             writers
-             (Keeper_memory_writers.registered ~base_path:config.base_path))
-        (Keeper_memory_writers.find ~base_path:config.base_path)
+      if Runtime_account_access.is_multi_account ()
+      then ()
+      else
+        Option.iter
+          (fun writers ->
+             Librarian_writers.pulse
+               writers
+               (Keeper_memory_writers.registered ~base_path:config.base_path))
+          (Keeper_memory_writers.find ~base_path:config.base_path)
     in
     (* Each step of a pass has its own boundary. The steps do not depend on
        one another, so a step that raises is logged as that step's failure

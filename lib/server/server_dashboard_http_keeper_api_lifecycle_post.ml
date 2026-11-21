@@ -702,7 +702,8 @@ let complete_resume_missing_registry_lane
           | Keeper_keepalive.Keepalive_registration_rejected _
           | Keeper_keepalive.Keepalive_fiber_start_rejected _
           | Keeper_keepalive.Keepalive_launch_callback_failed _
-          | Keeper_keepalive.Keepalive_fork_rejected _ ) as outcome ->
+          | Keeper_keepalive.Keepalive_fork_rejected _
+          | Keeper_keepalive.Keepalive_account_refused _ ) as outcome ->
           Log.Keeper.warn
             "resume_owner keepalive launch failed for %s: %s"
             name

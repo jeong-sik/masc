@@ -252,6 +252,30 @@ let runtime_context
     }
 ;;
 
+let masc_tools_disabled_error ~requested_tool =
+  let data =
+    `Assoc
+      [ "ok", `Bool false
+      ; "error_kind", `String "masc_tools_disabled"
+      ; "tool", `String requested_tool
+      ; "detail", `String "MASC tools are disabled for this keeper (tools.masc_enabled = false)"
+      ]
+  in
+  Keeper_tool_execution.failure_data
+    ~class_:Tool_result.Policy_rejection
+    ~message:(Yojson.Safe.to_string data)
+    data
+;;
+
+let masc_tools_enabled_for_authority ~capability_authority ~meta =
+  Keeper_meta_contract.effective_masc_tools_enabled meta
+  &&
+  match capability_authority with
+  | Keeper_tool_runtime.Frozen_surface surface ->
+    Keeper_capability_surface.masc_enabled surface
+  | Keeper_tool_runtime.Compatibility_meta -> true
+;;
+
 let execute_keeper_tool_descriptor_with_authority
       ~capability_authority
       ~(config : Workspace.config)
@@ -283,6 +307,9 @@ let execute_keeper_tool_descriptor_with_authority
       ~(input : Yojson.Safe.t)
       ()
   =
+  if not (masc_tools_enabled_for_authority ~capability_authority ~meta)
+  then masc_tools_disabled_error ~requested_tool:descriptor.internal_name
+  else
   match
     admit_descriptor
       capability_authority
@@ -386,6 +413,9 @@ let execute_keeper_tool_call_with_authority
       ()
   : executed_tool_result
   =
+  if not (masc_tools_enabled_for_authority ~capability_authority ~meta)
+  then masc_tools_disabled_error ~requested_tool:name
+  else
   let args = input in
   let surface_admission = admit_tool_name capability_authority name in
   match surface_admission with

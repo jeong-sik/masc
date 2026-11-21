@@ -878,6 +878,7 @@ type start_keepalive_outcome =
   | Keepalive_launch_callback_failed of string
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
+  | Keepalive_account_refused of string
 
 let start_keepalive_outcome_to_string = function
   | Keepalive_started entry ->
@@ -919,6 +920,7 @@ let start_keepalive_outcome_to_string = function
   | Keepalive_launch_callback_failed detail -> detail
   | Keepalive_lane_ownership_lost -> "lane ownership lost before fiber fork"
   | Keepalive_fork_rejected error -> Keeper_lane.start_error_to_string error
+  | Keepalive_account_refused reason -> reason
 
 let wake_queued_owner_operations ~base_path keeper_name =
   match Keeper_owner_registry.wake_operation_drain ~base_path ~keeper_name with
@@ -986,6 +988,20 @@ let rec start_keepalive
     Eio_context.run_on_owner_domain (fun () ->
       start_keepalive ~proactive_warmup_sec ?lifecycle_token ?intake_token ctx m)
   else
+  let account_admission =
+    match Runtime_account_access.engine_keeper_admission m.name with
+    | Runtime_account_access.Operator_mode
+    | Runtime_account_access.Active_person_keeper _ -> Ok ()
+    | Runtime_account_access.Owner_disabled _ ->
+      Error "keepalive refused: person keeper owner is disabled in authz.jsonl"
+    | Runtime_account_access.Unknown_person_keeper ->
+      Error "keepalive refused: keeper is not registered in authz.jsonl"
+    | Runtime_account_access.Authz_uncertain ->
+      Error "keepalive refused: multi-account authorization zone is uncertain"
+  in
+  match account_admission with
+  | Error reason -> Keepalive_account_refused reason
+  | Ok () ->
   let lifecycle_state =
     Keeper_lifecycle_admission.state
       ~paused:m.paused
@@ -1440,11 +1456,13 @@ let rec start_keepalive
            Atomic.set reg.grpc_close grpc_close
          | None -> ());
         let board_stop, resolve_board_stop = Eio.Promise.create () in
-        fork_board_attention_worker
-          ~sw:lane_sw
-          ~ctx
-          ~keeper_name:live_meta.name
-          ~stop:board_stop;
+        if not (Runtime_account_access.is_multi_account ())
+        then
+          fork_board_attention_worker
+            ~sw:lane_sw
+            ~ctx
+            ~keeper_name:live_meta.name
+            ~stop:board_stop;
         fork_egress_proxy
           ~sw:lane_sw
           ~ctx

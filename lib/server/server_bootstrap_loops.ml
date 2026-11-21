@@ -2001,6 +2001,34 @@ let start_keeper_loops_owned
         masc_root
         keeper_dir
         all_count;
+      (if Runtime_account_access.is_multi_account () then
+         let configured = Keeper_meta_store.configured_keeper_names config in
+         let active_authz = Runtime_account_access.active_authz_keeper_names () in
+         List.iter
+           (fun name ->
+              if not (List.mem name configured)
+              then
+                Log.Keeper.info
+                  "boot_reconcile: active authz keeper %s has no TOML definition yet; skipping boot until configured"
+                  name)
+           active_authz;
+         List.iter
+           (fun name ->
+              match Runtime_account_access.engine_keeper_admission name with
+              | Runtime_account_access.Owner_disabled _ ->
+                Log.Keeper.info
+                  "boot_reconcile: skipping keeper %s because its authz owner is disabled"
+                  name;
+                Keeper_runtime.stop_keepalive ~base_path:config.base_path name
+              | Runtime_account_access.Unknown_person_keeper
+              | Runtime_account_access.Authz_uncertain ->
+                Log.Keeper.warn
+                  "boot_reconcile: skipping keeper %s (not actively admitted by authz)"
+                  name;
+                Keeper_runtime.stop_keepalive ~base_path:config.base_path name
+              | Runtime_account_access.Operator_mode
+              | Runtime_account_access.Active_person_keeper _ -> ())
+           configured);
       let bootable_names = Keeper_runtime.bootable_keeper_names config in
       (* A keeper filtered out here is config-bootable but its admission is
          still owned by a durable shutdown operation from the boot scan.
@@ -2104,7 +2132,7 @@ let start_keeper_loops_owned
               (match launch_outcome with
                | Keeper_keepalive.Keepalive_started _
                | Keeper_keepalive.Keepalive_already_registered _ -> ()
-               | (Keeper_keepalive.Keepalive_lane_ownership_lost | Keeper_keepalive.Keepalive_lifecycle_denied _ | Keeper_keepalive.Keepalive_registration_rejected _ | Keeper_keepalive.Keepalive_fiber_start_rejected _ | Keeper_keepalive.Keepalive_launch_callback_failed _ | Keeper_keepalive.Keepalive_fork_rejected _) as outcome -> Log.Keeper.warn
+               | (Keeper_keepalive.Keepalive_lane_ownership_lost | Keeper_keepalive.Keepalive_lifecycle_denied _ | Keeper_keepalive.Keepalive_registration_rejected _ | Keeper_keepalive.Keepalive_fiber_start_rejected _ | Keeper_keepalive.Keepalive_launch_callback_failed _ | Keeper_keepalive.Keepalive_fork_rejected _ | Keeper_keepalive.Keepalive_account_refused _) as outcome -> Log.Keeper.warn
                    "%s: start_keepalive rejected %s: %s"
                    log_prefix
                    m.name

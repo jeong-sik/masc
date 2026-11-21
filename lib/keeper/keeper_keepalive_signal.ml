@@ -450,6 +450,9 @@ let wakeup_relevant_keeper_for_board_signal
       ~(config : Workspace.config)
       (addressed : Board_dispatch.addressed_board_signal)
   =
+  if Runtime_account_access.is_multi_account ()
+  then ()
+  else
   let candidates = ref [] in
   let record_board_attention_candidate ~config ~signal_kind_label ~audience_label ~meta addressed =
     match dispatch_attention with

@@ -187,23 +187,41 @@ let judged_again zone =
   match Authz_zone.read zone with
   | Error uncertain -> Error (Zone_not_trusted uncertain)
   | Ok trusted ->
-    (match (trusted :> Authz_zone.snapshot).Authz_zone.state.Authz_state.mode with
-     | Authz_mode_state.Multi_account (_ : Authz_types.Workspace_id.t) -> Ok ()
+    let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+    (match state.Authz_state.mode with
+     | Authz_mode_state.Multi_account (_ : Authz_types.Workspace_id.t) -> Ok state
      | (Authz_mode_state.Not_bootstrapped | Authz_mode_state.Off (_ : Authz_types.Workspace_id.t))
        as mode -> Error (Zone_not_multi_account mode))
 ;;
 
 (* A multi-account installation runs only the Keepers its authorization log
-   names, and the log names none by the name of a definition yet: the engine
-   name of a Keeper comes in S2 (RFC a-persons-keeper-runs-on-the-engine). So
-   a definition in the folder the engine reads is one the log does not name.
+   names (RFC a-persons-keeper-runs-on-the-engine). Every <.toml> definition in
+   the folder the engine reads must be named as an <engine_name> in
+   [Authz_keeper_state]; any unnamed definition stops the boot.
    The listing is the engine's own ([Keeper_types_profile_toml_io]). It reads
    a path that is absent or not a folder as holding none, as the engine reads
    it, and a path it cannot stat too: so the stat comes first, and a path in
    an unknown state stops the boot. *)
-let no_keeper_definition ~base_path =
+let allowed_engine_names_of_authz (state : Authz_state.t) =
+  Authz_keeper_state.all state.Authz_state.keepers
+  |> List.map
+       (fun
+         ( (_owner : Authz_types.User_id.t)
+         , (_keeper_id : Authz_types.Keeper_id.t)
+         , (keeper : Authz_keeper_state.keeper) ) ->
+         Authz_types.Engine_name.to_string keeper.engine_name)
+;;
+
+let is_named_keeper_definition ~allowed_engine_names path =
+  match Filename.chop_suffix_opt ~suffix:".toml" (Filename.basename path) with
+  | None -> false
+  | Some name -> List.mem name allowed_engine_names
+;;
+
+let no_keeper_definition ~base_path ~authz_state =
   let folder = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let not_read detail = Error (Keeper_definitions_not_read { folder; detail }) in
+  let allowed_engine_names = allowed_engine_names_of_authz authz_state in
   match Unix.stat folder with
   | exception Unix.Unix_error (Unix.ENOENT, (_ : string), (_ : string)) -> Ok ()
   | exception Unix.Unix_error (error, (_ : string), (_ : string)) ->
@@ -212,10 +230,13 @@ let no_keeper_definition ~base_path =
     (match Keeper_types_profile_toml_io.keeper_toml_files folder with
      | exception Sys_error detail -> not_read detail
      | None | Some [] -> Ok ()
-     | Some (first :: rest) ->
-       Error
-         (Keeper_definitions_not_named
-            { folder; files = Filename.basename first, List.map Filename.basename rest }))
+     | Some files ->
+       (match List.filter (fun path -> not (is_named_keeper_definition ~allowed_engine_names path)) files with
+        | [] -> Ok ()
+        | first :: rest ->
+          Error
+            (Keeper_definitions_not_named
+               { folder; files = Filename.basename first, List.map Filename.basename rest })))
 ;;
 
 (* The journal of a change of a Keeper configuration that did not finish.
@@ -302,8 +323,8 @@ let run
          ~log_path:(Authz_log.path_of_base_path ~base_path)
          ~store_path:(M.multi_account_external_store multi_account))
   in
-  let* () = judged_again zone in
-  let* () = no_keeper_definition ~base_path in
+  let* authz_state = judged_again zone in
+  let* () = no_keeper_definition ~base_path ~authz_state in
   let* () = no_keeper_configuration_change ~base_path in
   let* login_clients =
     Result.map_error

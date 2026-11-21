@@ -576,6 +576,13 @@ let effective_autoboot_enabled config name meta =
 
 let keepalive_keeper_names config =
   configured_keeper_names config
+  |> List.filter (fun name ->
+       match Runtime_account_access.engine_keeper_admission name with
+       | Runtime_account_access.Operator_mode
+       | Runtime_account_access.Active_person_keeper _ -> true
+       | Runtime_account_access.Owner_disabled _
+       | Runtime_account_access.Unknown_person_keeper
+       | Runtime_account_access.Authz_uncertain -> false)
   |> List.filter_map (fun name ->
     let path = keeper_meta_path config name in
     match

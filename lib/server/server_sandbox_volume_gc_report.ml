@@ -39,6 +39,9 @@ let pass ~base_path =
 ;;
 
 let start ~sw ~clock ~(config : Workspace.config) =
+  if Runtime_account_access.is_multi_account ()
+  then ()
+  else
   let base_path = config.base_path in
   Server_bootstrap_loops_fiber.fork_logged_fiber
     ~sw

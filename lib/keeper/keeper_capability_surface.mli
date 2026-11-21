@@ -59,7 +59,8 @@ type candidate =
   | Skill of skill_capability
 
 val create
-  :  tool_deny:string list
+  :  ?masc_enabled:bool
+  -> tool_deny:string list
   -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
   -> skill_names:string list option
   -> global_skill_catalog:Keeper_skill_catalog.t
@@ -81,7 +82,8 @@ val create
     dispatch them, and a composition that runs one is withheld. *)
 
 val create_with_descriptors
-  :  tool_descriptors:Keeper_tool_descriptor.t list
+  :  ?masc_enabled:bool
+  -> tool_descriptors:Keeper_tool_descriptor.t list
   -> tool_deny:string list
   -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
   -> skill_names:string list option
@@ -91,6 +93,9 @@ val create_with_descriptors
   -> t
 (** Use the same frozen descriptor objects that projected the Skill catalog,
     inventory and Task selection. Profile denial is applied here. *)
+
+val masc_enabled : t -> bool
+(** Whether MASC host/built-in tools are permitted on this surface. *)
 
 val find_descriptor_by_id : t -> string -> Keeper_tool_descriptor.t option
 val find_descriptor_by_name : t -> string -> Keeper_tool_descriptor.t option

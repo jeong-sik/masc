@@ -429,6 +429,7 @@ val run_named :
   ?goal_metadata:Agent_core.Types.metadata ->
   input_source:Keeper_request_source.t ->
   system_prompt:string ->
+  ?masc_enabled:bool ->
   ?tools:Agent_core.Tool.t list ->
   ?loading_plan:Keeper_official_client_host.loading_plan ->
   agent_core_tools:Agent_core.Tool.t list ->

@@ -405,8 +405,10 @@ let prepare_agent_setup
          (Keeper_task_skill_turn.unavailable_reason_code row.reason)
          (Keeper_task_skill_turn.unavailable_reason_to_string row.reason))
     task_skill_selection.unprojectable;
+  let masc_enabled = Keeper_meta_contract.effective_masc_tools_enabled meta in
   let capability_surface =
     Keeper_capability_surface.create_with_descriptors
+      ~masc_enabled
       ~tool_descriptors
       ~tool_deny:profile_defaults.Keeper_types_profile.tool_deny
       ~sandbox_profile:meta.sandbox_profile
@@ -502,9 +504,12 @@ let prepare_agent_setup
      Atlassian before it could start would fail whenever Atlassian was slow,
      for a question whose answer changes about never. *)
   let identity_offering =
-    Keeper_identity_tools.for_turn
-      ~base_path:config.Workspace.base_path
-      ~keeper_name:meta.name
+    if masc_enabled
+    then
+      Keeper_identity_tools.for_turn
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:meta.name
+    else { Keeper_identity_tools.offered = []; unusable = [] }
   in
   List.iter
     (fun (name, problem) ->

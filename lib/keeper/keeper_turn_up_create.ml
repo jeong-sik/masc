@@ -403,7 +403,8 @@ let create_keeper ~expected_config_revision (ctx : _ context)
            | Keepalive_fiber_start_rejected _
            | Keepalive_launch_callback_failed _
            | Keepalive_lane_ownership_lost
-           | Keepalive_fork_rejected _ ) as rejected ->
+           | Keepalive_fork_rejected _
+           | Keepalive_account_refused _ ) as rejected ->
            Progress.stop_tracking task_id;
            tool_result_error ~class_:Tool_result.Runtime_failure
              (Printf.sprintf

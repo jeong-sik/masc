@@ -89,6 +89,7 @@ type start_keepalive_outcome =
   | Keepalive_launch_callback_failed of string
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
+  | Keepalive_account_refused of string
 
 val start_keepalive_outcome_to_string : start_keepalive_outcome -> string
 

@@ -687,6 +687,27 @@ let test_profile_parses_voice_always_allow () =
      | Ok d ->
        check bool "voice_always_allow parses" true (d.voice_always_allow = Some true))
 
+let test_profile_parses_tools_masc_enabled () =
+  List.iter
+    (fun (label, input, expected) ->
+       match TL.parse_toml input with
+       | Error error -> failf "%s: parse_toml: %s" label error
+       | Ok doc ->
+         (match KTP.profile_defaults_of_toml doc with
+          | Error e -> failf "%s: profile_defaults_of_toml: %s" label e
+          | Ok d ->
+            check (option bool) label expected d.masc_tools_enabled))
+    [ "tools.masc_enabled = false", "[keeper.tools]\nmasc_enabled = false\n", Some false
+    ; "tools.masc_enabled = true", "[keeper.tools]\nmasc_enabled = true\n", Some true
+    ; "absent tools.masc_enabled", "[keeper]\n", None
+    ];
+  match TL.parse_toml "[keeper.tools]\nmasc_enabled = \"false\"\n" with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "non-bool tools.masc_enabled should fail"
+     | Error _ -> ())
+
 
 let test_profile_rejects_invalid_tools_native () =
   let input = "[keeper.tools]\nnative = \"yolo\"\n" in
@@ -2443,6 +2464,8 @@ let () =
             test_profile_absent_tools_native_is_none;
           test_case "parses voice_always_allow" `Quick
             test_profile_parses_voice_always_allow;
+          test_case "parses tools.masc_enabled" `Quick
+            test_profile_parses_tools_masc_enabled;
           test_case "rejects invalid tools.native" `Quick
             test_profile_rejects_invalid_tools_native;
           test_case "rejects unknown [keeper.tools] sibling" `Quick

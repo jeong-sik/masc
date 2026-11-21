@@ -79,7 +79,9 @@ exception Blank_keeper_name
 
 let run ~base_path ~keeper_name ~keeper_id =
   match
-    ( Env_config.KeeperMemoryOs.librarian_config_state ()
+    ( (if Runtime_account_access.is_multi_account ()
+       then Env_config.KeeperMemoryOs.Disabled
+       else Env_config.KeeperMemoryOs.librarian_config_state ())
     , Keeper_owner_projection.lookup ~base_path ~keeper_name )
   with
   | Enabled, Owner_projection { meta = Some meta; stopping = false } ->
@@ -107,6 +109,9 @@ let run ~base_path ~keeper_name ~keeper_id =
 
 let install () =
   Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+    if Runtime_account_access.is_multi_account ()
+    then ()
+    else
     match Env_config.KeeperMemoryOs.librarian_config_state () with
     | Disabled | Invalid -> ()
     | Enabled ->

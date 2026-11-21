@@ -5835,6 +5835,71 @@ let test_frozen_surface_direct_dispatch_rejects_registered_only_tool () =
       |> to_string)
 ;;
 
+(* When masc_tools_enabled is false (e.g. person Keepers), both frozen
+   capability-surface dispatch and Compatibility dispatch fail closed with
+   masc_tools_disabled Policy_rejection before any execution effect. *)
+let test_masc_tools_disabled_rejects_dispatch () =
+  with_exec_fixture "masc-tools-disabled"
+  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
+  let disabled_surface =
+    Masc.Keeper_capability_surface.create
+      ~masc_enabled:false
+      ~tool_deny:[]
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker
+      ~skill_names:None
+      ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
+      ~skill_inventory:
+        (Masc.Keeper_skill_inventory.of_snapshot
+           (Skill_catalog_snapshot.config_unreadable
+              ~detail:"masc_enabled=false test snapshot"))
+      ~task_skills:[]
+  in
+  check bool "disabled surface reports masc_enabled = false" false
+    (Masc.Keeper_capability_surface.masc_enabled disabled_surface);
+  check int "disabled surface exposes zero descriptors" 0
+    (List.length (Masc.Keeper_capability_surface.descriptors disabled_surface));
+  let check_disabled label (result : KET.executed_tool_result) =
+    check string (label ^ " outcome") "failure" (outcome_label result.disposition);
+    check bool (label ^ " is policy rejection") true
+      (result.disposition = Tool_result.Failed Tool_result.Policy_rejection);
+    check bool (label ^ " is proven pre-effect") true
+      (result.failure_effect_disposition = Tool_result.Proven_pre_effect);
+    let data = execution_data_exn label result in
+    check string (label ^ " error") "masc_tools_disabled"
+      Yojson.Safe.Util.(data |> member "error" |> to_string)
+  in
+  check_disabled "frozen call"
+    (KET.execute_keeper_tool_call_for_capability_surface_with_outcome
+       ~capability_surface:disabled_surface
+       ~config
+       ~meta
+       ~publication_recovery
+       ~ctx_work
+       ~name:"keeper_lane_status"
+       ~input:(`Assoc [])
+       ());
+  check_disabled "frozen descriptor"
+    (KET.execute_keeper_tool_descriptor_for_capability_surface_with_outcome
+       ~capability_surface:disabled_surface
+       ~config
+       ~meta
+       ~publication_recovery
+       ~ctx_work
+       ~descriptor:(composition_descriptor "keeper_lane_status")
+       ~input:(`Assoc [])
+       ());
+  let disabled_meta = { meta with masc_tools_enabled = Some false } in
+  check_disabled "compat call"
+    (KET.Compatibility.execute_keeper_tool_call_with_outcome
+       ~config
+       ~meta:disabled_meta
+       ~publication_recovery
+       ~ctx_work
+       ~name:"keeper_lane_status"
+       ~input:(`Assoc [])
+       ())
+;;
+
 (* A Tool the profile denies or the sandbox refuses keeps an inventory row, and
    calling it by name answers with that row's reason, the same words
    [keeper_tools_list] shows for it. *)
@@ -11265,6 +11330,8 @@ let () =
         test_tools_search_error_reaches_agent_core_as_typed_payload;
       test_case "descriptor route miss is typed runtime failure" `Quick
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
+      test_case "masc_tools_enabled false fails closed across frozen and compat dispatch" `Quick
+        test_masc_tools_disabled_rejects_dispatch;
     ]);
     ("composable_output_contract", [
       test_case "lane observations remain composable without a guest" `Quick

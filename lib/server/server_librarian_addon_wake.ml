@@ -135,6 +135,7 @@ let discover ~fold_records ~on_original ~config ~store =
       then Ok {keepers=[keeper];refusals=[];original_keepers=[keeper]}
       else Error "Librarian result hint belongs to a different original installation"
 let install ~sw ~config =
+  if Runtime_account_access.is_multi_account () then () else
   let base_path=config.Workspace.base_path in
   let store=Lane_addon_store.of_config config in
   let stopped=Atomic.make false in

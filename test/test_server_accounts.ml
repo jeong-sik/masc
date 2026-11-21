@@ -525,6 +525,82 @@ let test_stops_when_the_folder_holds_a_keeper_definition () =
       (boot_outcome env ~port:(free_port ()) multi_account))
 ;;
 
+(* Definitions explicitly named by Authz_keeper_state in authz.jsonl are allowed
+   while any unnamed definition in keepers_dir still stops the boot. *)
+let test_allows_authz_named_keeper_definition_and_stops_on_unnamed () =
+  with_installation (fun env { base; config = _; store; multi_account } ->
+    let ok_exn = function
+      | Ok v -> v
+      | Error _ -> Alcotest.fail "fixture authz value refused"
+    in
+    let zone =
+      match
+        Authz_zone.open_at_start
+          ~now_ms:(fun () -> at_ms + 1)
+          ~log_path:(Authz_log.path_of_base_path ~base_path:base)
+          ~store_path:store
+      with
+      | Ok z -> z
+      | Error e -> Alcotest.fail (Authz_zone.open_error_to_string e)
+    in
+    let user_id = ok_exn (Authz_types.User_id.of_string (String.make 32 'a')) in
+    let invite_id = ok_exn (Authz_types.Invite_id.of_string "invite-alice") in
+    let namespace = ok_exn (Authz_types.Account_home_namespace.of_string "ns-alice") in
+    let commit ~author ~kind body =
+      match Authz_zone.commit zone { Authz_zone.author; kind; body } with
+      | Ok (_ : Authz_zone.committed) -> ()
+      | Error e -> Alcotest.fail (Authz_zone.error_detail e)
+    in
+    commit
+      ~author:Authz_records.Author.Local_operator
+      ~kind:Authz_record.Kind.Invite
+      (ok_exn
+         (Authz_invite_event.to_body
+            (Authz_invite_event.Issued
+               { invite_id
+               ; token_digest = Authz_invite_event.Token_digest.of_token "token-alice"
+               ; expires_at_ms = at_ms + 3_600_000
+               ; role = Authz_invite_event.Admin
+               })));
+    commit
+      ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Human user_id))
+      ~kind:Authz_record.Kind.Admission
+      (ok_exn
+         (Authz_admission_event.to_body
+            { Authz_admission_event.user_id
+            ; identity = ok_exn (Authz_external_identity.google ~sub:"alice")
+            ; through = Authz_admission_event.Invite invite_id
+            ; membership = { workspace_id = workspace; account_home_namespace = namespace }
+            }));
+    let keeper_id = ok_exn (Authz_types.Keeper_id.of_string "keeper-alice") in
+    let turn_scope =
+      { Authz_types.Authorization_scope.runtimes = Authz_types.Runtime_scope.all
+      ; channels =
+          Authz_types.Channel_scope.only
+            (Authz_types.Channel.Set.of_list Authz_types.Channel.[ Autonomous; Direct ])
+      ; allowed_effects = Authz_types.Effect_scope.all
+      }
+    in
+    (match
+       Authz_keeper.make
+         zone
+         ~user_id
+         ~keeper_id
+         ~turn_scope
+         ~draw:(fun () -> "policy-alice")
+         ~draw_engine_name:(fun () -> "kp-alice")
+     with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail (Authz_keeper.error_detail e));
+    let folder = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+    write_file (Filename.concat folder "kp-alice.toml") "[keeper]\n";
+    write_file (Filename.concat folder "stray.toml") "[keeper]\n";
+    Alcotest.(check string)
+      "named authz keeper TOML allowed while unnamed stray.toml stops boot"
+      "Keeper definitions not named: stray.toml"
+      (boot_outcome env ~port:(free_port ()) multi_account))
+;;
+
 (* A folder of definitions in a state the boot cannot read stops it, where
    the listing alone reads it as absent. The folder is a symbolic link to
    itself, which cannot be stat-ed (ELOOP) whoever runs the case. *)
@@ -1446,6 +1522,10 @@ let () =
             "the boot stops when the folder holds a Keeper definition"
             `Quick
             test_stops_when_the_folder_holds_a_keeper_definition
+        ; Alcotest.test_case
+            "the boot allows an authz-named Keeper definition and still stops on unnamed ones"
+            `Quick
+            test_allows_authz_named_keeper_definition_and_stops_on_unnamed
         ; Alcotest.test_case
             "the boot stops when the folder of definitions cannot be read"
             `Quick

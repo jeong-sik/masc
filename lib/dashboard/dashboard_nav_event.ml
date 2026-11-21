@@ -86,7 +86,7 @@ let counter_section = "dashboard_section_open_total"
 let () =
   Otel_metric_store.register_counter
     ~name:counter_surface
-    ~help:"Top-level dashboard surface opens (RFC-0049). Aggregate, no PII."
+    ~help:"Top-level dashboard surface opens. Aggregate, no PII."
     ()
 ;;
 

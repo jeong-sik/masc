@@ -85,7 +85,7 @@ let keeper_hitl_observation_stderr_bytes_rp =
         ~default:4096 ~min_v:0 ~max_v:65536)
     ~min_v:0 ~max_v:65536
     ~description:
-      "Bytes of a refused observe run's stderr tail kept on the approval row for the judge (RFC-0422)"
+      "Bytes of a refused observe run's stderr tail kept on the approval row for the judge"
     ()
 let keeper_hitl_observation_stderr_bytes () : int =
   Runtime_params.get keeper_hitl_observation_stderr_bytes_rp

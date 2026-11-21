@@ -149,8 +149,8 @@ let transport_entries =
       "When true (default), slice-scoped events skip the raw-SSE-forward to \
        authenticated WS sessions whose route does not subscribe to the event's \
        slice. Catch-all events (no slice mapping) still reach every session. \
-       masc_ws_slice_fanout_skipped_total advances per skip. RFC #10119 \
-       Phase 2. Set to false for emergency rollback only.";
+       masc_ws_slice_fanout_skipped_total advances per skip. Set to false for \
+       emergency rollback only.";
     Env_config_runtime.Transport.h2_snapshot_entry;
     entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC"
       "Startup watchdog timeout (seconds)";

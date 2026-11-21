@@ -50,10 +50,6 @@ module For_testing : sig
         { runtime_id : string
         ; provider_id : string
         }
-    | Muse_account_home_missing of
-        { runtime_id : string
-        ; provider_id : string
-        }
 
   val official_client_purge_warning_to_string :
     official_client_purge_warning -> string

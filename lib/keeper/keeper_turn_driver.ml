@@ -369,26 +369,17 @@ let authorize_account walk_owner ~runtime_id account =
   |> Result.map_error account_refused
 ;;
 
-let authorize_muse_account walk_owner ~runtime_id home =
-  Runtime_account_access.authorize_muse
-    (account_request walk_owner ~runtime_id)
-    (Runtime_account_access.Declared_home home)
-  |> Result.map_error account_refused
-;;
-
 let provider_account_id_of_attempt ~(runtime : Runtime_instance.t) =
   match runtime.Runtime_instance.execution with
   | Runtime_execution.Claude_code config ->
     Runtime_account_access.person_provider_account_id config.account_home
   | Runtime_execution.Codex_app_server config ->
     Runtime_account_access.person_provider_account_id config.account_home
-  | Runtime_execution.Muse_serve _
   | Runtime_execution.Agent_core _ ->
     if Runtime_execution.is_person_execution runtime.execution
     then Authz_types.Provider_account_id.of_string runtime.provider.id |> Result.to_option
     else None
-  | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Vibe_cli _ -> None
+  | Runtime_execution.Antigravity_cli _ -> None
 ;;
 
 let with_account_call_slot ~(runtime : Runtime_instance.t) ~on_busy f =
@@ -2073,10 +2064,10 @@ let admit_input_for_attempt ~input_source ?project_media ~media_store
     ; attempt_replay_prefix_projection = Keeper_replay_prefix.unchanged }
   | Keeper_request_source.Completion_review,
       (Runtime_execution.Agent_core _ | Codex_app_server _ | Claude_code _
-       | Antigravity_cli _ | Muse_serve _ | Vibe_cli _)
+       | Antigravity_cli _)
   | Keeper_request_source.Keeper_history _,
       (Runtime_execution.Codex_app_server _ | Claude_code _
-       | Antigravity_cli _ | Muse_serve _ | Vibe_cli _) ->
+       | Antigravity_cli _) ->
     project_input_for_attempt ?project_media ~media_store ~project_images
       ~keeper_name ~emit_runtime_manifest ~goal_blocks ~goal_metadata
       ~initial_messages ~agent_core_checkpoint ~runtime_id runtime
@@ -2231,82 +2222,6 @@ let attempt_inference_policy
     | None -> fallback_enable_thinking
   in
   { attempt_enable_thinking; attempt_preserve_thinking = runtime_seed.preserve_thinking }
-
-let muse_native_workspace ~base_path ~keeper_name ~required_native_posture ~account_home =
-  let config_error detail = Keeper_official_client_host.config_error
-      ~field:"muse.native_workspace" detail in
-  let* profile = match required_native_posture with
-    | Some _ -> Ok None
-    | None ->
-      let* defaults = Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
-          ~base_path keeper_name
-        |> Result.map_error (fun error -> config_error
-          (Keeper_types_profile.keeper_toml_load_error_to_string error)) in
-      (match defaults.sandbox_profile with
-       | Some profile -> Ok (Some profile)
-       | None -> Error (config_error "Muse requires an explicit Keeper sandbox profile")) in
-  let private_workspace () =
-    let* root = Runtime_muse_home.prepare_native_workspace
-        ~runtime_root:(Common.masc_dir_from_base_path ~base_path) ~keeper_name ~account_home
-      |> Result.map_error (fun error -> config_error (Runtime_muse_home.error_to_string error)) in
-    (* The Keeper's session claim admits one turn at a time, so no other
-       session of this Keeper writes the directory between this read and the
-       host's start. *)
-    let* origin =
-      Eio_guard.run_in_systhread ~label:"muse-native-workspace-read" (fun () ->
-        Runtime_muse_serve.origin_of_masc_directory root)
-      |> Result.map_error config_error in
-    (match origin with
-     | Runtime_muse_serve.Masc_private -> ()
-     | Runtime_muse_serve.Other_tree ->
-       Log.Keeper.warn ~keeper_name
-         "Muse private workspace %s holds files, so the host starts without \
-          workspace trust and does not connect the MASC tools"
-         root);
-    Ok (root, origin,
-      "Muse native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned tree. Use MASC tools for that tree; native commands run in the official client's host sandbox.") in
-  let shared_workspace profile =
-    try
-      (* See the SSOT root resolution below; only directory creation is needed here. *)
-      ignore (Keeper_alerting_path.ensure_sandbox_bundle_for_profile
-        ~config:(Workspace.default_config base_path) ~name:keeper_name
-        ~sandbox_profile:profile : string list);
-      let selected = Filename.concat base_path
-          (Keeper_sandbox.host_root_rel_of_profile profile keeper_name)
-        |> Env_config_core.strip_trailing_slashes in
-      let canonical = Unix.realpath selected in
-      if not (String.equal selected canonical)
-      then Error (config_error "native workspace must not traverse symbolic links")
-      else Ok (canonical, Runtime_muse_serve.other_tree, Printf.sprintf
-        "Muse native tools use host workspace %s, sharing files with MASC tools at %s. Native commands run in the official client's host sandbox, not the Keeper container."
-        canonical (Keeper_sandbox.container_root keeper_name))
-    with
-    | Sys_error detail -> Error (config_error detail)
-    | Unix.Unix_error (error, _, _) -> Error (config_error (Unix.error_message error)) in
-  match profile with
-  | None -> private_workspace ()
-  | Some profile ->
-    (match Keeper_types_profile_sandbox.tree_location_of_profile profile with
-     | Shared_mount -> shared_workspace profile
-     | Endpoint_owned -> private_workspace ())
-;;
-
-(* The client and its bounds as the runtime declares them. Keeper_muse_runtime
-   replaces [native] with the keeper's resolved posture, [timeout_s] with a
-   per-model [turn-timeout-s] on every turn, and passes the model's reasoning effort to the turn
-   itself, so the values set here are the ones a turn keeps when nothing is
-   declared. *)
-let muse_serve_client_config (execution : Runtime_execution.muse_serve)
-  : Runtime_muse_serve.config
-  =
-  { (Runtime_muse_serve.default_config ()) with
-    cli_path = execution.cli_path
-  ; model = Some execution.model
-  ; native = Runtime_native_tools.muse_default
-  ; admission_timeout_s = execution.timeout_s
-  ; timeout_s = Some execution.timeout_s
-  }
-;;
 
 (* Whether an official client's attempt error says the binding sent nothing.
    [Attempt_rejected] is itself that witness: the binding refused the
@@ -3175,7 +3090,7 @@ let run_named
               Keeper_agent_tool_surface.on_the_wire ~agent_cell ~built:agent_core_tools
             | (Runtime_execution.Agent_core _, None)
             | ((Runtime_execution.Codex_app_server _ | Antigravity_cli _
-                | Claude_code _ | Muse_serve _ | Vibe_cli _), _) -> agent_core_tools in
+                | Claude_code _), _) -> agent_core_tools in
           Runtime_agent.runtime_accepts_image_input ~runtime, tools, tools_on_wire, loading_plan, false
       in
       (* Freeze admission with this selected candidate, including tools loaded
@@ -3195,7 +3110,7 @@ let run_named
           | None, _ -> true
           | Some saved, Runtime_execution.Agent_core _ -> String.equal saved attempt_runtime_id
           | Some _, (Runtime_execution.Codex_app_server _ | Antigravity_cli _
-                    | Muse_serve _ | Claude_code _ | Vibe_cli _) -> false in
+                    | Claude_code _) -> false in
         let execution_owner_ready = match on_request_execution_ready,native_binding with
           | Some _, Some _ -> false
           | None, _ | Some _, None -> true in
@@ -3220,10 +3135,8 @@ let run_named
       let has_tools, surface_enabled = match runtime.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Muse_serve _ -> tools <> [], true
-        | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support
-        | Runtime_execution.Vibe_cli _ -> tools <> [], false in
+        | Runtime_execution.Antigravity_cli _ -> tools <> [], true
+        | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
       let complete_media () =
         match Runtime_agent.decide_modality_reroute_for_runtime_candidates
           ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
@@ -3245,26 +3158,19 @@ let run_named
       let bind_official_owner () =
         match runtime.Runtime_instance.execution,on_request_execution_ready with
         | Runtime_execution.Agent_core _, _
-        | Vibe_cli _, _
-        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _), None -> Ok ()
-        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _), Some ready ->
+        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _), None -> Ok ()
+        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _), Some ready ->
           ready ~runtime_id:attempt_runtime_id ~execution:Types_core.Official_session
           |> Result.map_error (fun detail -> Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig {field="review.execution_owner";detail}))
       in
-      let execution_ready =
-        match runtime.Runtime_instance.execution with
-        | Runtime_execution.Vibe_cli _ -> Error Runtime_execution.vibe_keeper_turn_refused
-        | Runtime_execution.Agent_core _
-        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ -> Ok ()
-      in
-      let admission = Result.bind execution_ready (fun () ->
+      let admission =
         Result.bind verifier_ready (fun () ->
         Result.bind source_reader_ready (fun () ->
           let tools_ready = Keeper_required_tools.check_surface tool_requirement
             ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
             |> Result.map_error Keeper_required_tools.to_core_error in
-          Result.bind tools_ready bind_official_owner))) in
+          Result.bind tools_ready bind_official_owner)) in
       (match admission with
        | Error failure ->
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
@@ -3277,7 +3183,7 @@ let run_named
       let goal_blocks =
         match continue_from_checkpoint, runtime.Runtime_instance.execution with
         | true, Runtime_execution.Agent_core _ -> None
-        | (true, (Runtime_execution.Codex_app_server _ | (Runtime_execution.Antigravity_cli _ | (Runtime_execution.Claude_code _ | (Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _)))))
+        | (true, (Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ | Runtime_execution.Claude_code _))
         | (false, _) -> goal_blocks
       in
       (* Current-goal image identities remain eligible for an eager reading
@@ -3466,16 +3372,16 @@ let run_named
       in
       let official_argument_source =
         match runtime.Runtime_instance.execution with
-        | Runtime_execution.Agent_core _ | Vibe_cli _ -> None
-        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+        | Runtime_execution.Agent_core _ -> None
+        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ ->
           Keeper_official_client_host.create_argument_source
             ~base_path ~keeper_name ~seed:argument_demotion_seed
             ~replay_prefix:replay_prefix_projection
             ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
       in
       (match runtime.Runtime_instance.execution with
-       | Runtime_execution.Agent_core _ | Vibe_cli _ -> ()
-       | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+       | Runtime_execution.Agent_core _ -> ()
+       | Codex_app_server _ | Claude_code _ | Antigravity_cli _ ->
          Log.Keeper.info ~keeper_name
            "model input references runtime=%s context_owner=official_client argument_source_available=%b"
            attempt_runtime_id
@@ -3490,12 +3396,6 @@ let run_named
         if !guidance_entry then Result.map_error Keeper_internal_error.without_guidance_preparation_authority result
         else result in
       match runtime.Runtime_instance.execution with
-      | Runtime_execution.Vibe_cli _ ->
-        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-        ( Error Runtime_execution.vibe_keeper_turn_refused
-        , None
-        , Keeper_provider_attempt_effect.No_effect_observed
-        , Keeper_attempt_dispatch.Rejected_before_dispatch )
       | Runtime_execution.Codex_app_server config ->
         let ( reset_model_input_observation
             , on_model_input_window_observation
@@ -3804,150 +3704,6 @@ let run_named
         , None
         , antigravity_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform antigravity_result )
-      | Runtime_execution.Muse_serve execution ->
-        let ( reset_model_input_observation
-            , on_model_input_window_observation
-            , record_transmitted_model_input
-            , record_refused_model_input
-            , hooks ) =
-          official_model_input_observation hooks
-        in
-        let run_muse ~initial_messages () =
-          with_account_call_slot
-            ~runtime
-            ~on_busy:Keeper_official_client_attempt.refused_before_dispatch
-            (fun () ->
-          match
-            authorize_muse_account walk_owner ~runtime_id:attempt_runtime_id
-              execution.account_home
-          with
-          | Error error ->
-            Keeper_official_client_attempt.refused_before_dispatch error
-          | Ok account ->
-          reset_model_input_observation ();
-          let on_transmitted_model_input transmitted =
-            record_transmitted_model_input transmitted;
-            Option.iter
-              (fun observe ->
-                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
-              on_request_attribution
-          in
-          let workspace = muse_native_workspace ~base_path ~keeper_name
-              ~required_native_posture
-              ~account_home:(Runtime_account_access.declared_muse_home account) in
-          match workspace with
-          | Error error ->
-            Keeper_official_client_attempt.refused_before_dispatch error
-          | Ok (workspace_root, workspace_origin, native_context) ->
-          Keeper_muse_runtime.run ~on_guidance_prepared ~input_source ~media_store
-            ~on_model_input_refused:record_refused_model_input
-            ?on_native_tool_completion
-            ?argument_source:official_argument_source
-            ?on_tool_execution
-            ?composed_context:official_client_composed_context
-            ~configured_reasoning_effort:runtime.model.reasoning_effort
-            ~turn_timeout_s:runtime.model.turn_timeout_s
-            ~quota_scope:runtime.quota_scope
-            ~workspace_root
-            ~workspace_origin
-            ~accepts_image_input
-            ?required_native_posture
-            ~runtime_id:attempt_runtime_id
-            ~keeper_name
-            ~carried_front_seed:official_client_carried_front_seed
-            ~librarian_front:(official_client_continuity ())
-            ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
-            ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
-            (* [muse serve] assembles the wire from one rendered prompt, so the
-               shape masc can report is the list it handed over. *)
-            ?on_model_input_window_observation:
-              on_model_input_window_observation
-            ~pre_tool_rejects
-            ~base_path
-            ~outbox_viewer ~read_retained_media
-            ~goal
-            ~goal_blocks
-            ~native_workspace_context:native_context
-            ~system_prompt
-            ~tools
-            ~loading_plan
-            ~initial_messages
-            ~model_input_projection
-            ~on_transmitted_model_input
-            ~hooks
-            ~context_injector
-            ~context
-            ~terminal_effect_state
-            ?official_client_continuation
-            ?official_task_reference
-            ?on_official_client_tool_boundary
-            ~on_official_client_result_handoff:
-              (fun ~invocation ~content ->
-                 Option.iter
-                   (fun observe ->
-                      observe ~runtime_id:attempt_runtime_id ~invocation ~content)
-                   on_official_client_result_handoff)
-            ~on_native_action:
-              (fun ~official_turn ~identity ~tool_name ->
-                 Option.iter
-                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
-                   on_official_client_native_action)
-            ?on_usage_report:on_official_client_usage_report
-            ~event_bus
-            ~raw_trace
-            ~on_event
-            ~account
-            ~config:(muse_serve_client_config execution)
-            ())
-        in
-        let muse_attempt =
-          match provider_config_transform, agent_core_checkpoint with
-          | Some _, _ ->
-            Keeper_official_client_attempt.refused_before_dispatch
-              (Agent_core.Error.Config
-                 (Agent_core.Error.InvalidConfig
-                    { field = "provider_config_transform"
-                    ; detail =
-                        "provider config transforms cannot target a muse-serve runtime"
-                    }))
-          | None, Some _ ->
-            Log.Keeper.info
-              "%s: official-client runtime %s resolves start-or-resume from \
-               its durable session store; the Agent Core checkpoint payload is not \
-               replayed"
-              keeper_name
-              attempt_runtime_id;
-            emit_runtime_manifest
-              ~status:"checkpoint_not_replayed"
-              ~decision:
-                (`Assoc
-                  [ ( "routing_action"
-                    , `String "official_client_checkpoint_not_replayed" )
-                  ; ( "routing_reason"
-                    , `String "official_client_session_store_owns_resume" )
-                  ])
-              Keeper_runtime_manifest.Runtime_routed;
-            run_muse ~initial_messages ()
-          | None, None -> run_muse ~initial_messages ()
-        in
-        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-        let muse_result =
-          Result.bind muse_attempt.result (fun run_result ->
-            apply_official_client_accept
-              ~runtime_id:attempt_runtime_id
-              ~accept
-              ~terminal_effect_state
-              run_result)
-        in
-        let muse_result = settle_accepted_official_client_results
-          ~pending_result_receipts:muse_attempt.pending_result_receipts muse_result in
-        let muse_result = observe_official_result
-          ~execution_result:muse_attempt.result muse_result in
-        let muse_result = guidance_result muse_result in
-        ( selected_runtime_result ?official_client_settlement:muse_attempt.settled_session runtime ~lane_attempt_index:idx muse_result
-        , None
-        , muse_attempt.effect_disposition
-        , official_client_dispatch ~provider_config_transform muse_result )
       | Runtime_execution.Claude_code config ->
         let ( reset_model_input_observation
             , on_model_input_window_observation

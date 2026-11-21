@@ -323,7 +323,7 @@ let test_retention_failure_preserves_authoritative_failure () = with_workspace (
 
 let test_producer_identity_and_vendor_coexistence () = with_workspace (fun base_path ->
   let first = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"Claude" ~turn_count:1)
-  and replacement = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"Muse" ~turn_count:1) in
+  and replacement = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"Antigravity" ~turn_count:1) in
   let retain ?(invocation_index=0) producer = get (Outbox.retain_host_result producer ~invocation_index
     ~call_id:"same-client-local-call-id" ~tool_name:"Execute" ~arguments:(Outbox.Known (`Assoc [])) ~response:(`String marker)) in
   retain first; retain first;

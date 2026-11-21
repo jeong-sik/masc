@@ -372,42 +372,6 @@ let test_an_empty_walk_is_an_empty_error () =
     | Ok _ | Error _ -> fail "no declared slots means an empty exhaustion")
 ;;
 
-let test_muse_binding_rest_requires_typed_quota () =
-  let failed cause =
-    Cli_oneshot.Execution_failed
-      { runtime_id = "muse_code.muse-code-spark-1-3"
-      ; cause = Masc.Fusion_official_client.Muse_failure cause
-      }
-  in
-  check bool "typed quota is an account rest" true
-    (Cli_oneshot.refused_for_binding_rest (failed
-       (Runtime_muse_serve.Turn_failed
-          {Runtime_muse_msp.kind=Runtime_muse_msp.Model_error;
-           message="fixture failure"; retryable=false;
-           quota=Some {limit_kind="tierLimit"; resets_at_ms=500000}})));
-  List.iter
-    (fun (label, cause) ->
-       check bool label false (Cli_oneshot.refused_for_binding_rest (failed cause)))
-    [ ( "retryable model error"
-      , Runtime_muse_serve.Turn_failed
-          { Runtime_muse_msp.kind = Runtime_muse_msp.Model_error
-          ; message = "overloaded"
-          ; retryable = true
-          ; quota = None
-          } )
-    ; "auth required", Runtime_muse_serve.Auth_required "login expired"
-    ; ( "workspace mismatch"
-      , Runtime_muse_serve.Session_workspace_mismatch
-          { requested = "/selected/workspace"; reported = Some "/different/workspace" } )
-    ; ( "approval mode mismatch"
-      , Runtime_muse_serve.Session_approval_mode_mismatch
-          { requested = Runtime_muse_msp.Prompt_unmatched
-          ; reported = Some Runtime_muse_msp.Allow_all } )
-    ; ( "turn timeout"
-      , Runtime_muse_serve.Timeout { seconds = 30.0; turn_accepted = true } )
-    ]
-;;
-
 let test_antigravity_noncompletion_is_not_quota_or_input_refusal () =
   List.iter (fun status ->
     let cause = Masc.Fusion_official_client.Antigravity_failure
@@ -1243,14 +1207,6 @@ let test_partition_cli_slots_preserves_refused_slots_and_muse_output_schema () =
    | _ -> fail "expected muse.local in refused_cli_slots");
   check
     (option string)
-    "Muse_serve_runtime omits ?output_schema channel"
-    None
-    (Cli_oneshot.output_schema_for_api_format
-       Runtime_schema.Muse_serve_runtime
-       sample_schema
-     |> Option.map Yojson.Safe.to_string);
-  check
-    (option string)
     "Claude_code_runtime passes ?output_schema channel"
     (Some (Yojson.Safe.to_string sample_schema))
     (Cli_oneshot.output_schema_for_api_format
@@ -1396,10 +1352,6 @@ let () =
             "an empty walk is an empty error"
             `Quick
             test_an_empty_walk_is_an_empty_error
-        ; test_case
-            "Muse Code account rest requires typed quota"
-            `Quick
-            test_muse_binding_rest_requires_typed_quota
         ; test_case "Antigravity noncompletion is not quota or input refusal" `Quick
             test_antigravity_noncompletion_is_not_quota_or_input_refusal
         ] )

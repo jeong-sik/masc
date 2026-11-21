@@ -14,7 +14,7 @@ let inventory = `Assoc ["setup_revision",`String "revision";"default_runtime_sel
   "account_emails",`List [];
   "runtimes",`List [`Assoc ["id",`String "unrelated"];`Assoc ["id",`String "fallback"];`Assoc ["id",`String "primary"]];
   "integrations",`List (List.map (fun (id,protocol) -> `Assoc ["id",`String id;"display_name",`String id;"protocol",`String protocol;"origin",`String "runtime_config"])
-    ["codex","codex-app-server";"claude-code","claude-code";"muse-code","muse-serve";"antigravity","antigravity-cli"])]
+    ["codex","codex-app-server";"claude-code","claude-code";"antigravity","antigravity-cli"])]
 let decoder_fragments () =
   let events=ref [] in
   let feed, finished = Login.decoder ~integration_id:"codex" (fun event -> events:=event :: !events) in
@@ -46,7 +46,7 @@ let account_and_default () =
   List.iter (fun (requested,client) ->
     let t=Login.create requested in ok (Login.inventory t inventory);
     check bool "requested client selected" true (Login.focused_client t=Some client))
-    ["codex",Login.Codex;"claude",Login.Claude;"muse",Login.Muse;"antigravity",Login.Antigravity];
+    ["codex",Login.Codex;"claude",Login.Claude;"antigravity",Login.Antigravity];
   let unknown=Login.create "not-a-client" in
   check bool "unknown client refused" true (Result.is_error (Login.inventory unknown inventory));
   let t=Login.create "codex" in ok (Login.inventory t inventory);t.provider<-Some provider;t.account_ref<-Some account;
@@ -501,9 +501,6 @@ let missing_model_context () =
     let action=Login.key t " " in
     match client with
     | Login.Antigravity -> check bool "native observation available" true (action=Login.Prepare unknown)
-    | Login.Muse ->
-      check bool "unreported Muse context is not invented" true (action=Login.Nothing && t.phase=Login.Models);
-      check bool "Muse can refresh native metadata" true (Login.key t "r"=Login.Refresh_models)
     | Login.Codex | Login.Claude ->
       check bool "explicit documented limit requested" true (action=Login.Nothing && t.phase=Login.Documented_context unknown);
       check bool "empty context cannot save" true (Login.key t "\r"=Login.Nothing);
@@ -513,7 +510,7 @@ let missing_model_context () =
       (match Login.key t "\r" with
        | Login.Save [selected] -> check (option int) "operator documented value still goes through save verification" (Some 32768) selected.context
        | _ -> fail "documented context did not reach verification"))
-    [Login.Codex;Login.Claude;Login.Antigravity;Login.Muse]
+    [Login.Codex;Login.Claude;Login.Antigravity]
 let named_default_identity () =
   let fields=match inventory with `Assoc fields -> List.remove_assoc "default_runtime_id" fields | _ -> [] in
   let t=Login.create "codex" in
@@ -864,21 +861,19 @@ let account_emails_beside_providers () =
         let text = String.sub row prefix_len (String.length row - prefix_len) in
         if String.equal text "+ 새 계정" then None else Some text)
         (List.map Login.row_text (List.tl (Login.lines t))))
-      ["codex"; "claude"; "muse"; "antigravity"] in
+      ["codex"; "claude"; "antigravity"] in
   check (list (list string)) "each account row leads with its email or why not"
     [ ["operator@example.com  (codex)"]; ["이메일 모름: 로그인 파일을 못 읽음  (claude-code)"];
-      ["이메일 모름: 로그인 파일 형식을 모름  (muse-code)"]; ["이메일 모름: 표시할 수 없는 값  (antigravity)"] ]
+      ["이메일 모름: 표시할 수 없는 값  (antigravity)"] ]
     (account_rows (with_emails [
       row "codex" "read" ["email", `String "operator@example.com"];
       row "claude-code" "not_read" ["cause", `String "source_unavailable"];
-      row "muse-code" "not_read" ["cause", `String "source_unrecognized"];
       row "antigravity" "not_read" ["cause", `String "invalid_email"] ]));
   check (list (list string)) "an account with no email row draws its name alone"
     [ ["codex"]; ["이메일 없음: 환경 변수의 인증 정보로 실행  (claude-code)"];
-      ["이메일 모름: 클라이언트가 알려 주지 않음  (muse-code)"]; ["antigravity"] ]
+      ["antigravity"] ]
     (account_rows (with_emails [
-      row "claude-code" "not_read" ["cause", `String "environment_credential"];
-      row "muse-code" "not_read" ["cause", `String "not_reported"] ]));
+      row "claude-code" "not_read" ["cause", `String "environment_credential"] ]));
   (* The email is display data: a row this TUI cannot read is shown as that
      row's own unreadable state, and the account list is never refused. *)
   let codex_row rows = List.hd (account_rows (with_emails rows)) in
@@ -894,21 +889,21 @@ let account_emails_beside_providers () =
       [ row "codex" "read" ["email", `String "x@example.com"];
         row "codex" "not_read" ["cause", `String "not_reported"] ] ];
   check (list (list string)) "a bad row leaves the other rows readable"
-    [ ["이메일 정보를 알아볼 수 없음  (codex)"]; ["operator@example.com  (claude-code)"]; ["muse-code"]; ["antigravity"] ]
+    [ ["이메일 정보를 알아볼 수 없음  (codex)"]; ["operator@example.com  (claude-code)"]; ["antigravity"] ]
     (account_rows (with_emails [ row "codex" "verified" []; row "claude-code" "read" ["email", `String "operator@example.com"] ]));
   let t = Login.create "" in
   ok (Login.inventory t (with_emails [ row "missing" "not_read" ["cause", `String "not_reported"]; `String "not a row" ]));
   check bool "rows for no listed integration are counted, not shown" true
     (String.ends_with ~suffix:" 어느 공급자 것인지 모르는 계정 이메일 2개는 보여 주지 않습니다." t.notice);
   check (list string) "the clients list each client once with its account count"
-    [ "› Codex · 계정 1"; "  Claude Code · 계정 1"; "  Antigravity · 계정 1"; "  Muse · 계정 1" ]
+    [ "› Codex · 계정 1"; "  Claude Code · 계정 1"; "  Antigravity · 계정 1" ]
     (List.map Login.row_text (List.tl (Login.lines t)));
   let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
   let t = Login.create "" in
   ok (Login.inventory t (`Assoc fields));
   check bool "an inventory without a readable email list still lists the clients" true
     (String.ends_with ~suffix:" 계정 이메일 목록은 읽지 못했습니다." t.notice
-     && List.length (Login.lines t) = 5)
+     && List.length (Login.lines t) = 4)
 
 (* The Overview draws only the emails that were read, by integration id, and
    counts the rows it cannot read; a document with no readable list is an
@@ -1413,7 +1408,7 @@ let select_all_non_antigravity_and_progress_clock () =
     t.selected_models <- [];
     check bool "all-unknown non-Antigravity select-all sends no request" true
       (Login.key t "a" = Login.Nothing))
-    [ Login.Codex; Login.Claude; Login.Muse ];
+    [ Login.Codex; Login.Claude ];
   let t = Login.create "antigravity" in
   check bool "initial loading is in progress" true (Login.in_progress t);
   check bool "loading does not claim text input" false (Login.text_input_active t);

@@ -7335,10 +7335,10 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
   let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
       (Keeper_repetition_snapshot.Fresh scope) |> Result.get_ok in
   let checkpoint = Keeper_semantic_execution.Official_client
-      {client_kind=Muse;runtime_id="muse.owner";session_id="owned-session";turn_id="owned-turn";
+      {client_kind=Codex;runtime_id="codex.owner";session_id="owned-session";turn_id="owned-turn";
        tool_surface_sha256=Keeper_checkpoint_ref.sha256_of_canonical_bytes "owned tools";frame} in
   let failure = Keeper_internal_error.guidance_preparation_unavailable
-      ~field:Prompt_names.keeper_muse_native_read "missing managed asset" in
+      ~field:"keeper.test_guidance" "missing managed asset" in
   let check_original owner =
     let current = Owner.exact_operation owner id |> owner_ok |> Option.get in
     check bool "Owner retains exact original input" true (current.input=Some input);
@@ -7525,7 +7525,7 @@ let test_owner_receipt_wait_holds_the_claim_until_the_receipt_arrives () =
   let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
       (Keeper_repetition_snapshot.Fresh scope) |> Result.get_ok in
   let checkpoint = Keeper_semantic_execution.Official_client
-      {client_kind=Muse;runtime_id="muse.owner";session_id="receipt-session";turn_id="receipt-turn";
+      {client_kind=Codex;runtime_id="codex.owner";session_id="receipt-session";turn_id="receipt-turn";
        tool_surface_sha256=Keeper_checkpoint_ref.sha256_of_canonical_bytes "receipt tools";frame} in
   let wait = Keeper_semantic_execution.receipt_obligation ~request_id
       ~state:Keeper_semantic_execution.Pending |> Result.get_ok in

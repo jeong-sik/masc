@@ -26,7 +26,6 @@ type integration =
 let call_posture : Client.client -> Runtime_native_tools.posture = function
   | Client.Claude -> Runtime_native_tools.claude_code_default
   | Client.Codex -> Runtime_native_tools.codex_default
-  | Client.Muse -> Runtime_native_tools.muse_default
   | Client.Antigravity -> Runtime_native_tools.antigravity_default
 ;;
 

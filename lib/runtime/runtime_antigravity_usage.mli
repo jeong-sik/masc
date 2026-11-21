@@ -3,8 +3,7 @@
 
     agy 1.1.11 and later answer [agy -p "/usage" --output-format json] in print
     mode without starting an agent turn or spending quota. The read runs in a
-    disposable HOME seeded from the account's OAuth file, the way the context
-    observation does ({!Runtime_antigravity_context}), so it never shares a
+    disposable HOME seeded from the account's OAuth file, so it never shares a
     HOME, token refresh or conversation with a Keeper's turn. The HOME is
     removed when the read ends. *)
 

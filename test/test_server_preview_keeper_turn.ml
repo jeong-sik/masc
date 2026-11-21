@@ -237,12 +237,6 @@ command = "/nonexistent/agy"
 is-non-interactive = true
 timeout-s = 180.0
 
-[providers.muse]
-display-name = "Muse Code"
-protocol = "muse-serve"
-command = "/nonexistent/muse"
-is-non-interactive = true
-
 [models."claude-sonnet-5"]
 api-name = "claude-sonnet-5"
 max-context = 1000000
@@ -266,12 +260,6 @@ max-context = 400000
 tools-support = true
 streaming = true
 
-[models.muse-fixture]
-api-name = "muse-fixture-1"
-max-context = 200000
-tools-support = true
-streaming = true
-
 [models.local-model]
 api-name = "local-model"
 max-context = 32000
@@ -287,8 +275,6 @@ streaming = true
 [local.local-model]
 
 [codex."gpt-5.5"]
-
-[muse.muse-fixture]
 |}
 ;;
 
@@ -714,7 +700,6 @@ let test_turn () =
           "the providers a person may connect, in declared order, with their models"
           [ "claude_code", [ "claude-sonnet-5"; "claude-opus-5" ]
           ; "codex", [ "gpt-5.5" ]
-          ; "muse", [ "muse-fixture" ]
           ]
           (List.map
              (fun (offer : Server_person_integrations.integration) ->
@@ -755,7 +740,7 @@ let test_turn () =
          Alcotest.(check (pair int string))
            "the models a person is offered and the one left out, with why"
            ( 200
-           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5","claude-opus-5"],"withheld":[{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","connect":["login"],"models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"},{"integration_id":"muse","display_name":"Muse Code","connect":["login"],"models":["muse-fixture"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5","claude-opus-5"],"withheld":[{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","connect":["login"],"models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
            )
            (let { R.status; headers = _; body } =
               Server_person_integrations.answer ~base_path:every_kind_base

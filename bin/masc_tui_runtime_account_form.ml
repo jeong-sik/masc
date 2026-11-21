@@ -139,7 +139,6 @@ let inherited_home = function
   | D.Codex ->
     Runtime_official_account.resolve_home ~client:Codex ~declaration:None
     |> Result.to_option
-  | D.Muse -> Sys.getenv_opt "HOME"
   | D.Antigravity -> None
 ;;
 
@@ -151,28 +150,17 @@ let inherited_home = function
    break anywhere else -- between the home and the client -- would leave the
    client to run, and sign in, on the default login. Antigravity has none;
    its OAuth file exists before it can be typed here. *)
-let muse_executable command =
-  let command = match command with Some configured -> configured | None -> "muse" in
-  Runtime_official_cli_install.spawn_path Muse ~command
-;;
-
 let command_halves (base : D.base) home =
   match base.client with
   | D.Codex -> Some (Printf.sprintf "(export CODEX_HOME=%s &&" home, "codex login)")
   | D.Claude_code -> Some (Printf.sprintf "(export CLAUDE_CONFIG_DIR=%s &&" home, "claude)")
-  | D.Muse ->
-    Some
-      ( Printf.sprintf
-          "(unset META_API_KEY && export MUSE_NO_AUTO_UPDATE=1 %s HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run &&"
-          Runtime_muse_serve.credential_backend_entry home home home home home home
-      , Filename.quote (muse_executable base.command) ^ " login)" )
   | D.Antigravity -> None
 ;;
 
 (* What to type inside the client once it runs; Codex logs in by itself. *)
 let typed_after = function
   | D.Claude_code -> Some "/login"
-  | D.Codex | D.Muse | D.Antigravity -> None
+  | D.Codex | D.Antigravity -> None
 ;;
 
 let one_line (setup, run) = setup ^ " " ^ run
@@ -212,20 +200,11 @@ let hints_for ~ko client halves =
               (if ko then "그다음 claude 안에서 " ^ typed ^ " 을 입력합니다"
                else "then type " ^ typed ^ " inside claude"))
          (Option.to_list (typed_after client))
-  | D.Muse, Some halves ->
-    [ Run halves
-    ; Say
-        (if ko then "이 HOME의 .config/muse/auth.json 파일이 필요합니다."
-         else "Requires .config/muse/auth.json inside this HOME.")
-    ; Say
-        (if ko then "이 명령은 Keychain 대신 선택한 HOME의 파일에 로그인 정보를 저장합니다."
-         else "This command saves credentials to a file under the chosen HOME instead of Keychain.")
-    ]
   | D.Antigravity, _ ->
     [ Say
         (if ko then "OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file"
          else "OAuth file: credential_file printed by masc runtime-antigravity-account --sign-in") ]
-  | (D.Codex | D.Claude_code | D.Muse), None -> []
+  | (D.Codex | D.Claude_code), None -> []
 ;;
 
 (* The hints under the fields, for the location typed so far. *)

@@ -27,7 +27,6 @@ let requests =
 
 let hosts =
   [ "Antigravity", Access.Antigravity
-  ; "Vibe", Access.Vibe
   ; "An API provider of the runtime table", Access.Api_provider
   ; "A model-list request", Access.Model_list
   ; "The Files API", Access.Files_api
@@ -225,26 +224,6 @@ let test_published_once () =
         native "a runtime root of a person" `Homes_remain;
         (* The other decisions of a single user do not change with it. *)
         allowed_but_native ();
-        (* Vibe takes no posture from its caller and passes the same decision
-           before it starts anything. *)
-        (match Access.authorize_host Access.Vibe with
-         | Error refusal -> Alcotest.fail (Access.refusal_to_string refusal)
-         | Ok host ->
-           let config : Runtime_vibe_cli.config =
-             { cli_path = Filename.concat root "no-vibe"
-             ; workdir = root
-             ; trust_workdir = false
-             ; model = None
-             ; time_limit_s = None
-             }
-           in
-           (match Runtime_vibe_cli.run ~host config ~prompt:"unused" with
-            | Error
-                (Runtime_vibe_cli.Native_tools_refused
-                   (Access.Native_tools_reach_person_homes Runtime_native_tools.Native_full)) -> ()
-            | Error error ->
-              Alcotest.failf "Vibe ended otherwise: %s" (Runtime_vibe_cli.error_to_string error)
-            | Ok (_ : Runtime_vibe_cli.run) -> Alcotest.fail "Vibe ran beside a person root"));
         Unix.rmdir person_root;
         native "the root removed and the directory left" `Homes_remain;
         Unix.rmdir persons;

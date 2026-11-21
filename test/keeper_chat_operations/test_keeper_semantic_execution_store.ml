@@ -846,7 +846,7 @@ let test_uncertain_preparation_retry_reopens_by_original_identity () =
     let scope = Scope.direct_operation operation_id in
     let frame = Frame.admit Frame.empty (Frame.Fresh scope) |> frame_ok in
     let checkpoint = Execution.Official_client
-      {client_kind=Muse;runtime_id="official.uncertain";session_id="original-session";
+      {client_kind=Codex;runtime_id="official.uncertain";session_id="original-session";
        turn_id="original-turn";tool_surface_sha256=hash "original tools";frame} in
     let original, waiting = with_open path (fun store ->
       submit store ~now:1. "uncertain-preparation-retry" fixture_input;
@@ -907,20 +907,18 @@ let () =
           (test_preparation_wait_preserves_official_checkpoint ~agent_core:true Execution.Codex (Some Store.For_testing.Fail_after_commit));
         test_case "fresh claim without semantic checkpoint refuses dispatch admission" `Quick
           test_dispatch_admission_requires_semantic_checkpoint;
-        test_case "Muse after consume retains original authority" `Quick
-          (test_preparation_wait_preserves_official_checkpoint Execution.Muse None);
         test_case "Codex after consume retains original authority" `Quick
           (test_preparation_wait_preserves_official_checkpoint Execution.Codex None);
         test_case "Antigravity after consume retains original authority" `Quick
           (test_preparation_wait_preserves_official_checkpoint Execution.Antigravity None);
         test_case "rolled-back wait survives restart with original authority" `Quick
-          (test_preparation_wait_preserves_official_checkpoint Execution.Muse (Some Store.For_testing.Fail_before_commit));
+          (test_preparation_wait_preserves_official_checkpoint Execution.Codex (Some Store.For_testing.Fail_before_commit));
         test_case "committed uncertain wait is confirmed exactly" `Quick
-          (test_preparation_wait_preserves_official_checkpoint Execution.Muse (Some Store.For_testing.Fail_after_commit));
+          (test_preparation_wait_preserves_official_checkpoint Execution.Codex (Some Store.For_testing.Fail_after_commit));
         test_case "retry rollback keeps the exact wait blocked" `Quick
-          (test_preparation_wait_preserves_official_checkpoint ~retry_fault:Store.For_testing.Fail_before_commit Execution.Muse None);
+          (test_preparation_wait_preserves_official_checkpoint ~retry_fault:Store.For_testing.Fail_before_commit Execution.Codex None);
         test_case "retry acknowledgement loss confirms exact committed transition" `Quick
-          (test_preparation_wait_preserves_official_checkpoint ~retry_fault:Store.For_testing.Fail_after_commit Execution.Muse None);
+          (test_preparation_wait_preserves_official_checkpoint ~retry_fault:Store.For_testing.Fail_after_commit Execution.Codex None);
         test_case "lost retry acknowledgement and confirmation reopen the same authorization" `Quick
           test_uncertain_preparation_retry_reopens_by_original_identity ];
       "admitted input", [

@@ -17,18 +17,13 @@ type api_format =
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime
-  | Muse_serve_runtime
-  | Vibe_cli_runtime
 [@@deriving show, eq]
 
 (* Whether a runtime of this format can be handed a JSON Schema to hold its
    answer to. Every exact-output call hands one over: an HTTP slot sends it in
    the request, and a cli_slots id gets it through
-   [Keeper_lane_cli_oneshot.run]. Muse Code's [turn/start] has no field for
-   one, so [Fusion_official_client] refuses each such call, and a Muse Code
-   runtime can stand in no exact-output list. A Vibe headless call takes no
-   schema argument either. Every arm is listed so a new
-   format has to be decided here. *)
+   [Keeper_lane_cli_oneshot.run]. Every arm is listed so a new format has to be
+   decided here. *)
 type output_schema_channel =
   | Holds_output_schema
   | No_output_schema_channel
@@ -42,7 +37,6 @@ let api_format_output_schema_channel = function
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime -> Holds_output_schema
-  | Muse_serve_runtime | Vibe_cli_runtime -> No_output_schema_channel
 ;;
 
 (** Which vendor dialect an endpoint speaks. [protocol] names the request

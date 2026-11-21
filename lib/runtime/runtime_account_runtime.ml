@@ -187,17 +187,13 @@ let of_template
        Ok { runtime with provider = { runtime.provider with credentials } })
   | ( ( Runtime_schema.Codex_app_server_runtime
       | Runtime_schema.Claude_code_runtime
-      | Runtime_schema.Antigravity_cli_runtime
-      | Runtime_schema.Muse_serve_runtime
-      | Runtime_schema.Vibe_cli_runtime )
+      | Runtime_schema.Antigravity_cli_runtime )
     , None
     , (Login | Key _) ) ->
     Error (Not_materialized "official client account requires an account home")
   | ( ( Runtime_schema.Codex_app_server_runtime
       | Runtime_schema.Claude_code_runtime
-      | Runtime_schema.Antigravity_cli_runtime
-      | Runtime_schema.Muse_serve_runtime
-      | Runtime_schema.Vibe_cli_runtime )
+      | Runtime_schema.Antigravity_cli_runtime )
     , Some home
     , (Login | Key _) ) ->
     materialize_single_runtime

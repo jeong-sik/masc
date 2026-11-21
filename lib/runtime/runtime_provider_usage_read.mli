@@ -6,10 +6,7 @@
     and admission do not read that observation table. An HTTP account read
     after a 403, a 429 that states no wait, or a hard quota that states no
     reset ({!read_after_account_refusal}), can also rest a spent scope on
-    {!Runtime_quota_window}. A Muse [usage/read] records the
-    account's rolling and weekly windows in [Runtime_provider_usage_window]
-    ({!Runtime_muse_usage.observe}), and a provider-stated exhausted window
-    with a future reset also rests [scope] on {!Runtime_quota_window}.
+    {!Runtime_quota_window}.
 
     Codex answers [account/rateLimits/read] after account admission, with no
     thread or turn. The Antigravity CLI answers a print-mode [/usage] in a
@@ -39,20 +36,6 @@ val read_codex :
     rests nothing: this is the start read ({!watch_declared}). The read is a
     call of the operator ({!Runtime_account_access.Operator_call}): a refused
     read starts no CLI and answers the refusal as its error. *)
-
-val read_muse :
-  mgr:_ Eio.Process.mgr ->
-  clock:_ Eio.Time.clock ->
-  cwd:Eio.Fs.dir_ty Eio.Path.t ->
-  scope:Runtime_quota_window.scope ->
-  account:_ Runtime_account_access.muse_authorized ->
-  (* The account the failed turn was authorized on. *)
-  Runtime_muse_serve.config ->
-  (unit, string) result
-(** Read [usage/read] without a model turn and record its windows under
-    [scope] ({!Runtime_muse_usage.observe}). Only a provider-stated exhausted
-    window with a future reset rests [scope]; an absent or unspent report
-    changes no routing state, and an absent report records nothing. *)
 
 type http_error
 (** Why one HTTP read recorded nothing. *)
@@ -153,17 +136,6 @@ val read_codex_after_spent_usage_refusal :
     rejected call. Preserve the turn's existing observation, including when
     only one bucket is reported; no reset is inferred. Runs on the server's
     root switch, with at most one read per scope. Read failures are logged. *)
-
-val read_muse_in_background :
-  clock:_ Eio.Time.clock ->
-  cwd:Eio.Fs.dir_ty Eio.Path.t ->
-  scope:Runtime_quota_window.scope ->
-  account:_ Runtime_account_access.muse_authorized ->
-  Runtime_muse_serve.config ->
-  background
-(** {!read_muse} after a Muse model-error terminal. The read outlives the
-    failed turn and never resubmits its input. At most one read per account
-    scope is active. *)
 
 module For_testing : sig
   val start_background :

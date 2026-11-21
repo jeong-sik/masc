@@ -228,38 +228,6 @@ let not_admitted label request expected =
       Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
 ;;
 
-(* The Muse home of the person's account, as the layout spells it. *)
-let muse_path (who : person) =
-  get_text
-    (Layout.home
-       ~runtime_root:who.runtime_root
-       Layout.Muse_home
-       ~account_id:(Provider_account_id.to_string who.account))
-;;
-
-let muse (who : person) =
-  Access.Declared_home (get_text (Access.declare_muse_home (muse_path who)))
-;;
-
-let muse_allowed label request (who : person) =
-  match Access.authorize_muse request (muse who) with
-  | Ok authorized ->
-    Alcotest.(check string)
-      (label ^ ": the authorized home is the one declared")
-      (muse_path who)
-      (Access.declared_muse_home authorized)
-  | Error refusal -> Alcotest.failf "%s: refused: %s" label (Access.refusal_to_string refusal)
-;;
-
-let muse_refused (type where) label request (account : where Access.muse_account) expected =
-  match Access.authorize_muse request account with
-  | Ok (_ : where Access.muse_authorized) -> Alcotest.failf "%s: authorized" label
-  | Error refusal ->
-    if not (expected refusal)
-    then
-      Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
-;;
-
 let turn
       (who : person)
       ?(channel = Channel.Autonomous)
@@ -686,30 +654,6 @@ let test_multi_account () =
         refused "another spelling of her home" (own alice ()) (captured link) (function
           | Access.Not_the_account_home _ -> true
           | _ -> false);
-        (* A Muse home is judged by the same rule (plan D3): the Muse home of
-           the person's account under their namespace, and no other. *)
-        muse_allowed "the Muse home of the person's account" (own alice ()) alice;
-        muse_allowed "a turn of the person's Keeper" (turn alice ()) alice;
-        muse_refused "the Muse home of another person" (own alice ()) (muse bob) (function
-          | Access.Not_the_account_home _ -> true
-          | _ -> false);
-        muse_refused "a turn of another person's Keeper" (turn bob ()) (muse alice) (function
-          | Access.Not_the_account_home _ -> true
-          | _ -> false);
-        muse_refused
-          "the Claude Code home of her account"
-          (own alice ())
-          (Access.Declared_home (get_text (Access.declare_muse_home alice.home)))
-          (function
-            | Access.Not_the_account_home _ -> true
-            | _ -> false);
-        muse_refused "the environment of the process" (own alice ()) Access.Process_environment
-          (function
-          | Access.Not_a_declared_home -> true
-          | _ -> false);
-        muse_refused "an operator call on her Muse home" Access.Operator_call (muse alice) (function
-          | Access.No_operator -> true
-          | _ -> false);
         (* A host client starts on an account of the host, which a
            multi-account process shares with no person (plan D3b). An API
            provider of the runtime table sends with the credential its
@@ -719,7 +663,6 @@ let test_multi_account () =
           (fun client ->
             match client, Access.authorize_host client with
             | ( ( Access.Antigravity
-                | Access.Vibe
                 | Access.Api_provider
                 | Access.Model_list
                 | Access.Files_api
@@ -729,7 +672,6 @@ let test_multi_account () =
                 | Access.Voice_endpoint )
               , Ok (_ : Access.host_account) ) -> Alcotest.fail "a host client was allowed"
             | Access.Antigravity, Error (Access.Host_account Access.Antigravity)
-            | Access.Vibe, Error (Access.Host_account Access.Vibe)
             | Access.Api_provider, Error (Access.Host_account Access.Api_provider)
             | Access.Model_list, Error (Access.Host_account Access.Model_list)
             | Access.Files_api, Error (Access.Host_account Access.Files_api)
@@ -739,7 +681,6 @@ let test_multi_account () =
             | Access.Voice_endpoint, Error (Access.Host_account Access.Voice_endpoint)
               -> ()
             | ( ( Access.Antigravity
-                | Access.Vibe
                 | Access.Api_provider
                 | Access.Model_list
                 | Access.Files_api
@@ -753,7 +694,6 @@ let test_multi_account () =
                 (Access.refusal_to_string refusal))
           Access.
             [ Antigravity
-            ; Vibe
             ; Api_provider
             ; Model_list
             ; Files_api
@@ -796,9 +736,7 @@ let test_multi_account () =
             | Runtime_execution.Agent_core sealed -> sealed
             | Runtime_execution.Codex_app_server _
             | Runtime_execution.Claude_code _
-            | Runtime_execution.Antigravity_cli _
-            | Runtime_execution.Muse_serve _
-            | Runtime_execution.Vibe_cli _ -> Alcotest.fail "the API runtime fixture is not Agent Core"
+            | Runtime_execution.Antigravity_cli _ -> Alcotest.fail "the API runtime fixture is not Agent Core"
           in
           (match Access.authorize_api sealed with
            | Error (Access.Host_account Access.Api_provider) -> ()
@@ -1379,12 +1317,6 @@ protocol = "codex-app-server"
 command = "/bin/echo"
 is-non-interactive = true
 
-[providers.muse]
-display-name = "Muse"
-protocol = "muse-serve"
-command = "/bin/echo"
-is-non-interactive = true
-
 [providers.local]
 display-name = "Local HTTP"
 protocol = "openai-compatible-http"
@@ -1397,18 +1329,10 @@ command = "/bin/echo"
 is-non-interactive = true
 timeout-s = 180.0
 
-[providers.vibe]
-display-name = "Vibe"
-protocol = "vibe-cli"
-command = "/bin/echo"
-is-non-interactive = true
-
 [claude_code.sonnet]
 [codex.codex]
-[muse.muse]
 [local.sonnet]
 [agy.sonnet]
-[vibe.sonnet]
 
 [runtime]
 default = "claude_code.sonnet"
@@ -1450,9 +1374,7 @@ default = "claude_code.sonnet"
           | Runtime_execution.Claude_code exec -> exec.account_home
           | Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Antigravity_cli _
-          | Runtime_execution.Muse_serve _
-          | Runtime_execution.Vibe_cli _ ->
+          | Runtime_execution.Antigravity_cli _ ->
             Alcotest.fail "expected Claude_code execution from of_person_template"
         in
         Alcotest.(check string)
@@ -1467,31 +1389,6 @@ default = "claude_code.sonnet"
           "of_person_template seals passed account_home rather than operator account-home"
           grace_key.home
           (Access.home sealed_grace_from_runtime);
-        let muse_integration = get (Integration_id.of_string "muse") in
-        let expected_muse_home = muse_path grace_key in
-        (match
-           Runtime_account_runtime.of_person_template
-             template_cfg
-             ~template:"muse"
-             ~provider_account_id:grace_key.account
-             ~integration_id:muse_integration
-             ~account_home:(Some expected_muse_home)
-             ~binding:(Runtime_account_runtime.Model "muse")
-         with
-         | Error error -> Alcotest.fail (Runtime_account_runtime.error_to_string error)
-         | Ok muse_runtime ->
-           (match muse_runtime.Runtime_instance.execution with
-            | Runtime_execution.Muse_serve exec ->
-              Alcotest.(check string)
-                "of_person_template declares Muse account_home"
-                expected_muse_home
-                (Access.muse_home_path exec.account_home)
-            | Runtime_execution.Agent_core _
-            | Runtime_execution.Codex_app_server _
-            | Runtime_execution.Claude_code _
-            | Runtime_execution.Antigravity_cli _
-            | Runtime_execution.Vibe_cli _ ->
-              Alcotest.fail "expected Muse_serve execution from muse of_person_template"));
         (match
            List.find_opt
              (fun (b : Runtime_schema.binding) -> String.equal b.provider_id "local")
@@ -1736,9 +1633,7 @@ default = "claude_code.sonnet"
              | Runtime_execution.Codex_app_server exec -> exec.account_home
              | Runtime_execution.Agent_core _
              | Runtime_execution.Claude_code _
-             | Runtime_execution.Antigravity_cli _
-             | Runtime_execution.Muse_serve _
-             | Runtime_execution.Vibe_cli _ ->
+             | Runtime_execution.Antigravity_cli _ ->
                Alcotest.fail "expected Codex_app_server execution")
           | Error error -> Alcotest.fail (Runtime_account_runtime.error_to_string error)
         in

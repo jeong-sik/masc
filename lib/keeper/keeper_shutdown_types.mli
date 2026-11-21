@@ -73,11 +73,6 @@ type dashboard_purge_artifact =
   | Keeper_antigravity_prepare_lock_artifact of string
       (** Sibling [antigravity-<leaf>.prepare.lock] of the owner HOME. Same
           derivation and omission limit as the home entry. *)
-  | Keeper_muse_home_artifact of string
-      (** Purged path of the Keeper's managed Muse workspace below
-          [official-clients/muse/<identity>], where the identity hashes the
-          Keeper name and the configured account home. Omitted when the
-          runtime configuration no longer names the account home. *)
 
 type completion_receipt =
   | Completion_not_requested

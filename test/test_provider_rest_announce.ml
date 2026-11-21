@@ -50,7 +50,7 @@ let test_the_seven_writers_report_a_record () =
       ~failure:Runtime_candidate_backpressure.Server_error
       ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"alpha");
     Runtime_candidate_backpressure.note_candidate_success ~candidate;
-    let scope = Runtime_quota_window.scope_of_muse_home "provider-rest-announce" in
+    let scope = Runtime_quota_window.scope_of_claude_code_home (Some "provider-rest-announce") in
     Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
     Runtime_quota_window.note_read_without_reset ~scope;
     Runtime_quota_window.note_succeeded ~scope;

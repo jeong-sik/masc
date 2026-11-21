@@ -1,4 +1,4 @@
-type choice = Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity | Muse
+type choice = Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity
 type http_kind = Openai_compat | Anthropic | Kimi | Glm | Ollama_kind
 type credential = Env_reference of string | File_reference of string
 type transport =
@@ -18,14 +18,13 @@ open Result.Syntax
 let invalid field = Error (Invalid_spec field)
 let choice_name = function Ollama -> "ollama" | Llama_cpp -> "llama_cpp" | Vllm -> "vllm"
   | Openai_compatible -> "openai_compatible" | Messages -> "messages" | Claude_code -> "claude_code"
-  | Codex -> "codex" | Antigravity -> "antigravity" | Muse -> "muse"
+  | Codex -> "codex" | Antigravity -> "antigravity"
 let protocol = function Ollama -> "ollama-http" | Messages -> "messages-http"
   | Claude_code -> "claude-code" | Codex -> "codex-app-server" | Antigravity -> "antigravity-cli"
-  | Muse -> "muse-serve"
   | Llama_cpp | Vllm | Openai_compatible -> "openai-compatible-http"
 let http = function
   | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> true
-  | Claude_code | Codex | Antigravity | Muse -> false
+  | Claude_code | Codex | Antigravity -> false
 let safe_text value = value <> "" && String.trim value = value
   && not (String.exists (function '\000'..'\031' | '\127' -> true | _ -> false) value)
 let required fields key = match List.assoc_opt key fields with
@@ -129,7 +128,6 @@ let of_json ?home_dir = function
       | "ollama" -> Ok Ollama | "llama_cpp" -> Ok Llama_cpp | "vllm" -> Ok Vllm
       | "openai_compatible" -> Ok Openai_compatible | "messages" -> Ok Messages
       | "claude_code" -> Ok Claude_code | "codex" -> Ok Codex | "antigravity" -> Ok Antigravity
-      | "muse" -> Ok Muse
       | _ -> invalid "choice" in
     let named = List.mem_assoc "provider_id" fields in
     let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input";"existing_provider_id"]
@@ -137,7 +135,7 @@ let of_json ?home_dir = function
           "provider_declared";"reasoning_effort";"wizard_default"] else [])
       @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind";"request_path"] else ["command"])
       @ (match choice with
-        | Claude_code | Codex | Muse -> ["account_home"]
+        | Claude_code | Codex -> ["account_home"]
         | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity -> [])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
@@ -196,7 +194,7 @@ let of_json ?home_dir = function
         | (Llama_cpp | Vllm | Openai_compatible),(None | Some "openai_compat") -> Ok Openai_compat
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
         | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex
-          | Antigravity | Muse), _ -> invalid "provider_kind" in
+          | Antigravity), _ -> invalid "provider_kind" in
       let* request_path = match List.assoc_opt "request_path" fields with
         | None -> Ok None
         | Some (`String value) when safe_text value ->
@@ -217,7 +215,6 @@ let of_json ?home_dir = function
         else (match choice with
           | Claude_code -> Ok "claude"
           | Codex -> Ok "codex"
-          | Muse -> Ok "muse"
           | Antigravity -> Ok "agy"
           (* The five http-guarded choices return above, so this arm is
              unreachable; it stays to keep the match exhaustive over future
@@ -228,10 +225,9 @@ let of_json ?home_dir = function
         then required fields "account_home" |> Result.map Option.some
         else Ok None in
       let* account_home = match account_home,choice with
-        | None,Muse -> invalid "account_home"
         | (None, Ollama) | (None, Llama_cpp) | (None, Vllm) | (None, Openai_compatible)
         | (None, Messages) | (None, Claude_code) | (None, Codex) | (None, Antigravity) -> Ok None
-        | Some raw_home, (Claude_code | Codex | Muse) ->
+        | Some raw_home, (Claude_code | Codex) ->
           (match Runtime_account_home.of_string_under ~home:home_dir raw_home with
            | Ok expanded -> Ok (Some expanded)
            | Error _ -> invalid "account_home")
@@ -259,7 +255,7 @@ let of_json ?home_dir = function
 let protocol_fixes_dialect = function
   | Ollama -> true
   | Llama_cpp | Vllm | Openai_compatible | Messages -> false
-  | Claude_code | Codex | Antigravity | Muse -> true
+  | Claude_code | Codex | Antigravity -> true
 
 let quoted value = Yojson.Safe.to_string (`String value)
 let table ?(array=false) path fields =
@@ -300,7 +296,7 @@ let account_home_matches choice left right =
     | Codex -> (fun declaration ->
       Runtime_official_account.resolve_home ~client:Codex ~declaration
       |> Result.to_option)
-    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Muse -> Fun.id in
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity -> Fun.id in
   effective left = effective right
 let same_connection left right =
   protocol left.choice=protocol right.choice && left.existing_inline=right.existing_inline

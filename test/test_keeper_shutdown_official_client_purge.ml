@@ -12,7 +12,7 @@ module Shutdown = Masc.Keeper_shutdown_types
 
 let keeper_name = "official-purge-keeper"
 
-let runtime_toml ~oauth_source ~account_home ~assignment =
+let runtime_toml ~oauth_source ~account_home:_ ~assignment =
   Printf.sprintf
     {|
 [runtime]
@@ -31,22 +31,9 @@ max-context = 128000
 
 [agy.gemini]
 
-[providers.muse]
-protocol = "muse-serve"
-command = "/fixture/muse"
-account-home = "%s"
-is-non-interactive = true
-
-[models.muse-spark]
-api-name = "muse-spark-1.3"
-max-context = 100000
-
-[muse.muse-spark]
-
 [runtime.assignments]%s
 |}
     oauth_source
-    account_home
     assignment
 ;;
 
@@ -122,25 +109,6 @@ let test_purge_removes_antigravity_home_and_lock () =
   check bool "purge removes the sibling prepare lock" false (Sys.file_exists lock)
 ;;
 
-let test_purge_removes_muse_identity_directory () =
-  with_base_path @@ fun config base_path ->
-  let oauth_source = Filename.concat base_path "operator-oauth.json" in
-  let account_home = Filename.concat base_path "muse-account" in
-  write_runtime_toml
-    base_path
-    (runtime_toml ~oauth_source ~account_home
-       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "muse.muse-spark"));
-  let runtime_root = Common.masc_dir_from_base_path ~base_path in
-  let identity_dir =
-    Runtime_muse_home.keeper_identity_dir ~runtime_root ~keeper_name ~account_home
-  in
-  plant_file (Filename.concat identity_dir "workspace/native-state") "fixture";
-  check bool "fixture identity directory exists" true (Sys.file_exists identity_dir);
-  purge config;
-  check bool "purge removes the Muse identity directory" false
-    (Sys.file_exists identity_dir)
-;;
-
 (* The purged Keeper's newest TurnRecord is also held in memory, by its store
    ([Dated_jsonl.read_fact]). The purge removes the store's files itself, so
    it tells the stores, and a same-name successor reads its own files: here
@@ -148,11 +116,11 @@ let test_purge_removes_muse_identity_directory () =
 let test_purge_forgets_the_kept_turn_record () =
   with_base_path @@ fun config base_path ->
   let oauth_source = Filename.concat base_path "operator-oauth.json" in
-  let account_home = Filename.concat base_path "muse-account" in
+  let account_home = Filename.concat base_path "unused-account" in
   write_runtime_toml
     base_path
     (runtime_toml ~oauth_source ~account_home
-       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "muse.muse-spark"));
+       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "agy.gemini"));
   let store = Masc.Keeper_types_support.keeper_turn_record_store config keeper_name in
   let row = `Assoc [ "row", `Int 1 ] in
   Dated_jsonl.append store row;
@@ -189,7 +157,7 @@ let test_purge_forgets_the_kept_tool_audit () =
   write_runtime_toml
     base_path
     (runtime_toml ~oauth_source ~account_home
-       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "muse.muse-spark"));
+       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "agy.gemini"));
   let turn =
     `Assoc
       (Masc.Keeper_metrics_record.fields Masc.Keeper_metrics_record.Turn
@@ -236,7 +204,7 @@ let test_a_same_name_successor_writes_after_the_purge () =
   write_runtime_toml
     base_path
     (runtime_toml ~oauth_source ~account_home
-       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "muse.muse-spark"));
+       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "agy.gemini"));
   let store = Masc.Keeper_types_support.keeper_turn_record_store config keeper_name in
   Dated_jsonl.append store (`Assoc [ "row", `Int 1 ]);
   purge config;
@@ -261,7 +229,7 @@ let test_purge_forgets_the_kept_decision_row () =
   write_runtime_toml
     base_path
     (runtime_toml ~oauth_source ~account_home
-       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "muse.muse-spark"));
+       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "agy.gemini"));
   let row = `Assoc [ "turn_id", `Int 1 ] in
   Masc.Keeper_types_support.append_decision_record config keeper_name row;
   let newest () =
@@ -317,7 +285,6 @@ let test_purge_removes_non_first_lane_candidate_homes () =
   with_base_path @@ fun config base_path ->
   let oauth_source = Filename.concat base_path "operator-oauth.json" in
   plant_file oauth_source {|{"access_token":"fixture"}|};
-  let account_home = Filename.concat base_path "muse-account" in
   let toml =
     Printf.sprintf
       {|
@@ -348,26 +315,13 @@ max-context = 128000
 
 [agy.gemini]
 
-[providers.muse]
-protocol = "muse-serve"
-command = "/fixture/muse"
-account-home = "%s"
-is-non-interactive = true
-
-[models.muse-spark]
-api-name = "muse-spark-1.3"
-max-context = 100000
-
-[muse.muse-spark]
-
 [runtime.lanes.fallback_lane]
-candidates = ["codex.gpt5", "agy.gemini", "muse.muse-spark"]
+candidates = ["codex.gpt5", "agy.gemini"]
 
 [runtime.assignments]
 %s = "fallback_lane"
 |}
       oauth_source
-      account_home
       keeper_name
   in
   write_runtime_toml base_path toml;
@@ -376,27 +330,20 @@ candidates = ["codex.gpt5", "agy.gemini", "muse.muse-spark"]
     (Filename.concat home ".gemini/antigravity-cli/antigravity-oauth-token")
     "managed token copy";
   plant_file lock "";
-  let runtime_root = Common.masc_dir_from_base_path ~base_path in
-  let identity_dir =
-    Runtime_muse_home.keeper_identity_dir ~runtime_root ~keeper_name ~account_home
-  in
-  plant_file (Filename.concat identity_dir "workspace/native-state") "fixture";
   let artifacts, warnings =
     Server_dashboard_http_delete_actions.For_testing
     .resolve_official_client_purge_artifacts
       config
       ~keeper_name
   in
-  check int "three official-client artifacts derived from non-first candidates" 3
+  check int "two official-client artifacts derived from non-first candidates" 2
     (List.length artifacts);
   check int "no warnings on valid multi-candidate lane" 0 (List.length warnings);
   purge config;
   check bool "purge removes non-first Antigravity owner HOME" false
     (Sys.file_exists home);
   check bool "purge removes non-first Antigravity prepare lock" false
-    (Sys.file_exists lock);
-  check bool "purge removes non-first Muse identity directory" false
-    (Sys.file_exists identity_dir)
+    (Sys.file_exists lock)
 ;;
 
 (* The purge runs in the server, the process that writes the stores and
@@ -407,8 +354,6 @@ let () =
     [ ( "official-client homes"
       , [ test_case "purge removes the Antigravity HOME and prepare lock" `Quick
             test_purge_removes_antigravity_home_and_lock
-        ; test_case "purge removes the Muse identity directory" `Quick
-            test_purge_removes_muse_identity_directory
         ; test_case "purge forgets the kept TurnRecord" `Quick
             test_purge_forgets_the_kept_turn_record
         ; test_case "a same-name successor writes after the purge" `Quick

@@ -30,7 +30,6 @@ let dependency ~base_path = function
   | "codex" -> Some Prerequisites.Codex_cli
   | "claude-code" -> Some Prerequisites.Claude_cli
   | "antigravity" -> Some Prerequisites.Antigravity_cli
-  | "muse-code" -> Some Prerequisites.Muse_cli
   | "pdf-tools" -> Some Prerequisites.Pdf_tools
   | "presentation-tools" ->
     Some (Prerequisites.Presentation_tools
@@ -74,7 +73,7 @@ let apple_builder host dependency =
   | ( Sandbox.Macos {architecture=(Arm64 | X64); _} | Sandbox.Linux _ | Sandbox.Unsupported ),
     ( Prerequisites.Sandbox (Docker | Apple_container | Nerdctl_kata | Microsandbox | Remote_ssh)
     | Prerequisites.Codex_cli | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli
-    | Prerequisites.Muse_cli | Prerequisites.Pdf_tools | Prerequisites.Presentation_tools _
+    | Prerequisites.Pdf_tools | Prerequisites.Presentation_tools _
     | Prerequisites.Whisper_cli
     | Prerequisites.Ego_browser | Prerequisites.Searxng _ )
     -> Prerequisites.Builder_unchecked
@@ -119,7 +118,7 @@ let actions ?searxng_container host dependency =
     | Prerequisites.Searxng _, Some container -> container
     | Prerequisites.Searxng _, None -> Masc.Searxng_runtime_dependency.container ()
     | (Prerequisites.Sandbox _ | Prerequisites.Codex_cli | Prerequisites.Claude_cli
-      | Prerequisites.Antigravity_cli | Prerequisites.Muse_cli | Prerequisites.Pdf_tools
+      | Prerequisites.Antigravity_cli | Prerequisites.Pdf_tools
       | Prerequisites.Presentation_tools _ | Prerequisites.Whisper_cli
       | Prerequisites.Ego_browser), _ -> Prerequisites.Searxng_absent in
   let standard =
@@ -134,9 +133,9 @@ let actions ?searxng_container host dependency =
   | Sandbox.Macos _, Prerequisites.Sandbox Docker ->
     Verified_docker_install :: Verified_docker_launch :: standard
   | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, Prerequisites.Sandbox (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh)))
-  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Ego_browser)))))))
+  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Ego_browser))))))
   | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, Prerequisites.Sandbox (Sandbox.Apple_container | (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh))))
-  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Ego_browser)))))))
+  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Ego_browser))))))
   | ((Sandbox.Unsupported | Sandbox.Linux _), _)
   | (Sandbox.Macos _, Prerequisites.Searxng _)
   | (Macos {architecture=Arm64; _ }, Sandbox Apple_container) -> standard
@@ -250,7 +249,7 @@ let run ~base_path ~dependency:name ~action =
     let searxng_check = match dependency, action with
       | Prerequisites.Searxng _, None -> Some (Masc.Searxng_runtime_dependency.observe ())
       | (Prerequisites.Searxng _ | Prerequisites.Sandbox _ | Prerequisites.Codex_cli
-        | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli | Prerequisites.Muse_cli
+        | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli
         | Prerequisites.Pdf_tools | Prerequisites.Presentation_tools _ | Prerequisites.Whisper_cli
         | Prerequisites.Ego_browser), _ -> None in
     let actions =
@@ -272,7 +271,7 @@ let run ~base_path ~dependency:name ~action =
             | Some check -> check
             | None -> Masc.Searxng_runtime_dependency.observe () in
           `Assoc (("dependency_readiness", Masc.Searxng_runtime_dependency.to_json check) :: fields)
-        | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Muse_cli | Whisper_cli), _ -> catalog
+        | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Whisper_cli), _ -> catalog
         | (Pdf_tools | Presentation_tools _ | Ego_browser | Searxng _), _ ->
           invalid_arg "prerequisite catalog encoder must return an object" in
       print_endline (Yojson.Safe.to_string catalog); 0
@@ -332,7 +331,6 @@ let run ~base_path ~dependency:name ~action =
            | (Prerequisites.Codex_cli, Prerequisites.Failed _)
            | (Prerequisites.Claude_cli, Prerequisites.Failed _)
            | (Prerequisites.Antigravity_cli, Prerequisites.Failed _)
-           | (Prerequisites.Muse_cli, Prerequisites.Failed _)
            | (Prerequisites.Pdf_tools, Prerequisites.Failed _)
            | (Prerequisites.Whisper_cli, Prerequisites.Failed _)
            | (Prerequisites.Ego_browser, Prerequisites.Failed _)
@@ -341,7 +339,6 @@ let run ~base_path ~dependency:name ~action =
            | (Prerequisites.Codex_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Claude_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Antigravity_cli, (External_step_pending | Commands_completed_recheck_required))
-           | (Prerequisites.Muse_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Pdf_tools, External_step_pending)
            | (Prerequisites.Whisper_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Ego_browser, External_step_pending)

@@ -52,8 +52,7 @@ let how_of_runtime (rt : Runtime_instance.t) =
      | Some (_ : Runtime_schema.usage_read), Error (_ : Runtime_account_access.refusal) -> None)
   | Runtime_execution.Codex_app_server codex -> Some (Codex codex)
   | Runtime_execution.Antigravity_cli antigravity -> Some (Antigravity antigravity)
-  | Runtime_execution.Claude_code _ | Runtime_execution.Muse_serve _
-  | Runtime_execution.Vibe_cli _ -> None
+  | Runtime_execution.Claude_code _ -> None
 ;;
 
 (* One runtime per account: every runtime of a quota scope shares the
@@ -100,21 +99,6 @@ let read_codex ~mgr ~clock ~cwd ~scope (codex : Runtime_execution.codex_app_serv
     Result.map
       (fun ((_ : float), (_ : Runtime_provider_usage_window.report)) -> ())
       (read_codex_report ~mgr ~clock ~cwd ~scope ~account codex)
-;;
-
-let read_muse ~mgr ~clock ~cwd ~scope ~account (config : Runtime_muse_serve.config) =
-  let config =
-    { config with
-      Runtime_muse_serve.admission_timeout_s =
-        Float.min read_timeout_s config.admission_timeout_s
-    ; timeout_s = Some read_timeout_s
-    }
-  in
-  match Runtime_muse_serve.read_usage ~mgr ~clock ~cwd ~account config with
-  | Ok usage ->
-    Option.iter (Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_read) usage;
-    Ok ()
-  | Error error -> Error (Runtime_muse_serve.error_to_string error)
 ;;
 
 (* HIGH-RISK-UNREVIEWED: the read starts the client on a credential of the
@@ -525,11 +509,6 @@ let read_client_in_background ~clock ~cwd ~scope read =
       (Runtime_quota_window.scope_to_string scope)
       (Printexc.exn_slot_name exn);
     Scheduling_failed
-;;
-
-let read_muse_in_background ~clock ~cwd ~scope ~account config =
-  read_client_in_background ~clock ~cwd ~scope
-    (fun ~mgr ~clock ~cwd ~scope -> read_muse ~mgr ~clock ~cwd ~scope ~account config)
 ;;
 
 module For_testing = struct

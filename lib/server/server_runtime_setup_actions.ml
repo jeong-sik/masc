@@ -73,9 +73,7 @@ let choice_of_api_format : Runtime_schema.api_format -> (Runtime_setup_spec.choi
   | Runtime_schema.Codex_app_server_runtime -> Ok Runtime_setup_spec.Codex
   | Runtime_schema.Claude_code_runtime -> Ok Runtime_setup_spec.Claude_code
   | Runtime_schema.Antigravity_cli_runtime -> Ok Runtime_setup_spec.Antigravity
-  | Runtime_schema.Muse_serve_runtime -> Ok Runtime_setup_spec.Muse
-  | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
-  | Runtime_schema.Vibe_cli_runtime -> Error Unsupported_connection
+  | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api -> Error Unsupported_connection
 let choice config ~id ~protocol =
   match declared_provider config id with
   | Some provider ->
@@ -192,7 +190,7 @@ let source_template_of_source ?(use=Observe_source) ~sw ~pending ~workspace conf
          (match value "api_key_env" selected with
           | `String name when name<>"" -> Ok ["api_key_env",`String name] | _ -> Ok [])) in
   let* timeout = match choice with
-    | Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Muse -> Ok []
+    | Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex -> Ok []
     | Antigravity ->
       (match account with
        | Some (Runtime_setup_accounts.Antigravity_account account) -> Ok ["timeout_s",`Float account.timeout_s]
@@ -203,14 +201,13 @@ let source_template_of_source ?(use=Observe_source) ~sw ~pending ~workspace conf
             | Some options -> Ok ["timeout_s",`Float options.timeout_s] | None -> Error Unsupported_connection)
           | None -> Error Unsupported_connection)) in
   let* account_home = match choice,account with
-    | (Runtime_setup_spec.Claude_code | Codex | Muse),Some (Runtime_setup_accounts.Native_home account) ->
+    | (Runtime_setup_spec.Claude_code | Codex),Some (Runtime_setup_accounts.Native_home account) ->
       Ok ["account_home", `String account.account_home]
-    | (Runtime_setup_spec.Claude_code | Codex | Muse),None ->
+    | (Runtime_setup_spec.Claude_code | Codex),None ->
       (match Option.bind (declared_provider config id) (fun provider -> provider.Runtime_schema.account_home) with
        | Some home -> Ok ["account_home", `String home]
-       | None when choice=Runtime_setup_spec.Muse -> Error Credential_unavailable
        | None -> Ok [])
-    | (Runtime_setup_spec.Claude_code | Codex | Muse),Some (Runtime_setup_accounts.Antigravity_account _) ->
+    | (Runtime_setup_spec.Claude_code | Codex),Some (Runtime_setup_accounts.Antigravity_account _) ->
       Error Invalid_request
     | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity),_ -> Ok [] in
   Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout @ account_home,id,choice,existing_inline)
@@ -339,10 +336,6 @@ let select_account ~base_path request =
       (match (Runtime_official_account.resolve_home ~client:Codex ~declaration:configured
         |> Result.to_option) with
        | Some home -> Ok home | None -> Error Credential_unavailable)
-    | Muse ->
-      (match configured with Some home -> Ok home | None ->
-        (match Env_config_core.raw_value_opt "HOME" with Some home -> Ok home
-         | None -> Error Credential_unavailable))
     | Antigravity | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> Error Unsupported_connection in
   let* cli_path=text (value "command" selected) in
   let* reference=Runtime_setup_accounts.register_home ~workspace:base_path
@@ -372,14 +365,12 @@ let login_target_of_config config ~integration_id =
     | Runtime_setup_spec.Codex -> Ok Runtime_setup_login_client.Codex
     | Claude_code -> Ok Runtime_setup_login_client.Claude
     | Antigravity -> Ok Runtime_setup_login_client.Antigravity
-    | Muse -> Ok Runtime_setup_login_client.Muse
     | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> Error Unsupported_connection in
   let* command = text (value "command" selected) in
   let install_client = match client with
     | Runtime_setup_login_client.Codex -> Runtime_official_cli_install.Codex
     | Runtime_setup_login_client.Claude -> Runtime_official_cli_install.Claude
-    | Runtime_setup_login_client.Antigravity -> Runtime_official_cli_install.Antigravity
-    | Runtime_setup_login_client.Muse -> Runtime_official_cli_install.Muse in
+    | Runtime_setup_login_client.Antigravity -> Runtime_official_cli_install.Antigravity in
   let spawn_path = Runtime_official_cli_install.spawn_path install_client ~command in
   Ok {client; cli_path = command; spawn_path}
 
@@ -391,20 +382,6 @@ let selected_home_args template = match value "account_home" template with
   | `String home -> ["--account-home"; home]
   | _ -> []
 
-let muse_catalog ~binary ~base_path template =
-  let* command=text (value "command" template) in
-  let* json=native_json ~binary (["runtime-muse-models";"--base-path";base_path;"--cli-path";command] @ selected_home_args template) in
-  let* fields = match json with
-    | `Assoc fields when value "schema" fields=`String "masc.muse_models.v1"
-        && value "invocation_verified" fields=`Bool false
-        && value "account_availability_verified" fields=`Bool false -> Ok fields
-    | _ -> Error Unsupported_connection in
-  let* source = match value "source" fields with
-    | `String (("providerCatalog" | "bundledCatalog" | "configCatalog") as source) -> Ok source
-    | _ -> Error Unsupported_connection in
-  let* models=client_models ~catalog:false json in
-  Ok ("muse_" ^ source,models)
-
 let bound_model_names (config : Runtime_schema.config) template id choice =
   (* Resolve both sides with the same native-home rules used by inventory
      grouping; an omitted home can name the same account as an explicit one. *)
@@ -415,14 +392,13 @@ let bound_model_names (config : Runtime_schema.config) template id choice =
     | Claude_code ->
       Runtime_official_account.resolve_home ~client:Claude_code ~declaration:home
       |> Result.to_option
-    | Muse -> home
     | Antigravity | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> None in
   let selected_home = effective_home
       (match value "account_home" template with `String home -> Some home | _ -> None) in
   let selected_credential = match choice, value "credential_file" template with
     | Runtime_setup_spec.Antigravity, `String path -> Some path
     | ( Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
-      | Claude_code | Codex | Antigravity | Muse ), _ -> None in
+      | Claude_code | Codex | Antigravity ), _ -> None in
   let same_account (provider : Runtime_schema.provider) =
     provider.enabled
     && (match choice_of_api_format provider.api_format with
@@ -486,9 +462,6 @@ let discover ~binary ~sw:_ ~net ~base_path request =
       let* catalog = native_client_catalog ~binary "codex" in
       Ok (client_models_json ~source:"codex_isolated_account_model_list"
         (with_catalog_image_capabilities models catalog))
-    | Muse ->
-      let* source,models=muse_catalog ~binary ~base_path template in
-      Ok (client_models_json ~source models)
     | Claude_code ->
       let* json=native_json ~binary ["runtime-model-list";"claude-code"] in
       project_client_models ~source:"installed_claude_catalog_not_account_verification" ~catalog:true json
@@ -502,7 +475,7 @@ let discover ~binary ~sw:_ ~net ~base_path request =
         |> Result.map_error (fun _ -> Unsupported_connection) in
       Runtime_model_discovery.discover ~sw ~net connection |> Result.map_error (fun error -> Discovery_failed error) in
     Ok (mark_bound_models config template id choice json))
-let context ~binary ~net ~base_path request =
+let context ~binary:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* request=fields ["source";"model";"load"] ["source";"model";"load"] request in
     let* model=text (value "model" request) in
@@ -514,11 +487,7 @@ let context ~binary ~net ~base_path request =
        catalog, which would answer in place of the refusal. *)
     let* () = http_account choice in
     let observed = match choice with
-      | Runtime_setup_spec.Antigravity ->
-        let* command=text (value "command" template) in
-        let* credential=text (value "credential_file" template) in
-        native_json ~binary ["runtime-antigravity-context";"--base-path";base_path;"--cli-path";command;"--credential-file";credential;"--model";model]
-      | Codex | Claude_code | Muse -> Error Unsupported_connection
+      | Runtime_setup_spec.Antigravity | Codex | Claude_code -> Error Unsupported_connection
       | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages ->
         let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
           |> Result.map_error (fun _ -> Unsupported_connection) in
@@ -538,7 +507,7 @@ let context ~binary ~net ~base_path request =
               | Error _ -> None
               | Ok catalog -> Runtime_model_context_metadata.find ~provider_id:id ~model
                   (Llm_provider.Model_catalog.model_entries catalog))
-           | Ollama | Llama_cpp | Vllm | Claude_code | Codex | Antigravity | Muse -> None in
+           | Ollama | Llama_cpp | Vllm | Claude_code | Codex | Antigravity -> None in
          match declared with
          | Some context -> Ok (`Assoc ["model",`String model;"context",`Int context;
              "context_source",`String "installed_provider_catalog";"tools",`Null])
@@ -602,9 +571,7 @@ let save ~binary ~base_path request =
           let* selected = client_models ~catalog:false (`Assoc ["models",`List models]) in
           Ok (Some (with_catalog_image_capabilities selected catalog)) in
         let* reported_models=match choice with
-          | Runtime_setup_spec.Muse ->
-            let* _,models=muse_catalog ~binary ~base_path template in Ok (Some models)
-          | Claude_code -> native_client_models "claude-code"
+          | Runtime_setup_spec.Claude_code -> native_client_models "claude-code"
           | Codex -> native_client_models "codex"
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
           | Antigravity -> Ok None in

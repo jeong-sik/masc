@@ -87,10 +87,6 @@ let of_claude_account bytes =
   let* json = parse bytes in
   email_at [ "oauthAccount"; "emailAddress" ] json
 
-let of_muse_auth bytes =
-  let* json = parse bytes in
-  email_at [ "providers"; "meta"; "user_email" ] json
-
 (* The reader that names the account generation reads the email too, so the
    email shown and the account selected come from one parse. *)
 let of_google_oauth bytes =
@@ -126,13 +122,11 @@ let read_login_file path parse =
 type login_source =
   | Codex_auth of string
   | Claude_account of string
-  | Muse_auth of string
   | Google_oauth of string
 
 let read_source = function
   | Codex_auth path -> read_login_file path of_codex_auth
   | Claude_account path -> read_login_file path of_claude_account
-  | Muse_auth path -> read_login_file path of_muse_auth
   | Google_oauth path -> read_login_file path of_google_oauth
 
 let resolve_provider (provider : Runtime_schema.provider) =
@@ -160,11 +154,9 @@ let resolve_provider (provider : Runtime_schema.provider) =
   | Claude_code_runtime, _ ->
     native (Runtime_claude_code.account_file (Runtime_official_account.Current provider.account_home))
       (fun path -> Claude_account path)
-  | Muse_serve_runtime, _ -> native (Runtime_muse_home.auth_path provider.account_home) (fun path -> Muse_auth path)
   | Antigravity_cli_runtime, Some (Runtime_schema.File path) ->
     Some (Ok (Google_oauth path))
   | Antigravity_cli_runtime, (Some (Runtime_schema.Env _ | Inline _) | None) -> None
-  | Vibe_cli_runtime, _ -> None
   | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _ ->
     None
 
@@ -176,16 +168,14 @@ module Source_map = Map.Make (struct
   let source_rank = function
     | Codex_auth _ -> 0
     | Claude_account _ -> 1
-    | Muse_auth _ -> 2
-    | Google_oauth _ -> 3
+    | Google_oauth _ -> 2
   let compare a b =
     match a, b with
     | Codex_auth x, Codex_auth y
     | Claude_account x, Claude_account y
-    | Muse_auth x, Muse_auth y
     | Google_oauth x, Google_oauth y -> String.compare x y
-    | (Codex_auth _ | Claude_account _ | Muse_auth _ | Google_oauth _),
-      (Codex_auth _ | Claude_account _ | Muse_auth _ | Google_oauth _) ->
+    | (Codex_auth _ | Claude_account _ | Google_oauth _),
+      (Codex_auth _ | Claude_account _ | Google_oauth _) ->
       Int.compare (source_rank a) (source_rank b)
 end)
 

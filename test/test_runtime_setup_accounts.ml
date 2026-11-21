@@ -74,16 +74,16 @@ let failed_import_cleanup () = fixture (fun directory workspace ->
 let native_home_scope () = fixture (fun directory workspace ->
   let account_home = Filename.concat directory "selected-home" in
   Unix.mkdir account_home 0o700;
-  let reference = Accounts.register_home ~workspace ~integration_id:"muse-code"
-    ~cli_path:"muse" ~account_home |> get in
-  let retried = Accounts.register_home ~workspace ~integration_id:"muse-code"
-    ~cli_path:"muse" ~account_home |> get in
+  let reference = Accounts.register_home ~workspace ~integration_id:"claude-code"
+    ~cli_path:"claude" ~account_home |> get in
+  let retried = Accounts.register_home ~workspace ~integration_id:"claude-code"
+    ~cli_path:"claude" ~account_home |> get in
   check string "refresh and abandoned retry reuse one reference"
     (Accounts.reference_to_string reference) (Accounts.reference_to_string retried);
-  (match Accounts.resolve ~workspace ~integration_id:"muse-code" ~cli_path:"muse" reference |> get with
+  (match Accounts.resolve ~workspace ~integration_id:"claude-code" ~cli_path:"claude" reference |> get with
    | Native_home selected -> check string "explicit selected home retained" account_home selected.account_home
    | Antigravity_account _ -> fail "native account changed transport");
-  (match Accounts.resolve ~workspace ~integration_id:"codex" ~cli_path:"muse" reference with
+  (match Accounts.resolve ~workspace ~integration_id:"codex" ~cli_path:"claude" reference with
    | Error Scope_mismatch -> () | _ -> fail "cross-client home reference accepted");
   check (list string) "reference does not write authentication or settings" []
     (Sys.readdir account_home |> Array.to_list);
@@ -92,16 +92,16 @@ let native_home_scope () = fixture (fun directory workspace ->
   check bool "different scopes retain independent references" false
     (Accounts.reference_to_string reference = Accounts.reference_to_string other);
   check bool "another selection leaves the original usable" true
-    (Result.is_ok (Accounts.resolve ~workspace ~integration_id:"muse-code" ~cli_path:"muse" reference));
+    (Result.is_ok (Accounts.resolve ~workspace ~integration_id:"claude-code" ~cli_path:"claude" reference));
   check bool "registration preserves the selected account" true (Sys.is_directory account_home))
 
 let native_home_revalidated () = fixture (fun directory workspace ->
   let account_home = Filename.concat directory "selected-home" in
   Unix.mkdir account_home 0o700;
-  let reference = Accounts.register_home ~workspace ~integration_id:"muse-code"
-    ~cli_path:"muse" ~account_home |> get in
-  let resolve () = Accounts.resolve ~workspace ~integration_id:"muse-code"
-    ~cli_path:"muse" reference in
+  let reference = Accounts.register_home ~workspace ~integration_id:"claude-code"
+    ~cli_path:"claude" ~account_home |> get in
+  let resolve () = Accounts.resolve ~workspace ~integration_id:"claude-code"
+    ~cli_path:"claude" reference in
   Unix.rmdir account_home;
   check bool "deleted account cannot resolve" true (Result.is_error (resolve ()));
   write account_home "replacement file";
@@ -138,8 +138,6 @@ let client_login_files () =
     (email_of (Email.of_claude_account {|{"userID":"u","oauthAccount":{"accountUuid":"a","emailAddress":"claude@example.com"}}|}));
   check bool "Claude Code without an OAuth account reports no email" true
     (missing (Email.of_claude_account {|{"userID":"u"}|}) = Email.Not_reported);
-  check string "Muse auth document email" "muse@example.com"
-    (email_of (Email.of_muse_auth {|{"schema_version":1,"providers":{"meta":{"mechanism":"oauth","user_email":"muse@example.com"}}}|}));
   check string "Antigravity OAuth OpenID email" "google@example.com"
     (email_of (Email.of_google_oauth (Printf.sprintf {|{"token":{"access_token":"a"},"auth_method":"oauth","id_token":%S}|}
        (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"google@example.com"}|}))));
@@ -190,7 +188,7 @@ let client_login_files () =
     (missing (Email.of_claude_account "{\"oauthAccount\":{\"emailAddress\":\"a@example.com\\u001b[2J\"}}") = Email.Invalid_email);
   check bool "a token that is not three segments is unrecognized" true
     (missing (Email.of_google_oauth {|{"id_token":"not-a-token"}|}) = Email.Source_unrecognized);
-  check bool "unparseable bytes are unrecognized" true (missing (Email.of_muse_auth "{") = Email.Source_unrecognized)
+  check bool "unparseable bytes are unrecognized" true (missing (Email.of_claude_account "{") = Email.Source_unrecognized)
 
 let inventory_config ~account_home ~oauth_file =
   match Runtime_toml.parse_string (Printf.sprintf {|
@@ -277,8 +275,7 @@ let live_login_emails () = fixture (fun directory _ ->
     | Some provider -> { provider with Runtime_schema.id; api_format }
     | None -> fail "claude-inherited is declared" in
   let config = { config with Runtime_schema.providers = config.providers @
-    [ inherited "codex-inherited" Runtime_schema.Codex_app_server_runtime;
-      inherited "muse-inherited" Runtime_schema.Muse_serve_runtime ] } in
+    [ inherited "codex-inherited" Runtime_schema.Codex_app_server_runtime ] } in
   let write_in parent relative contents =
     let path = List.fold_left Filename.concat parent relative in
     Fs_compat.mkdir_p (Filename.dirname path);
@@ -286,7 +283,6 @@ let live_login_emails () = fixture (fun directory _ ->
   let claude address = Printf.sprintf {|{"oauthAccount":{"emailAddress":%S}}|} address in
   let codex address = Printf.sprintf {|{"auth_mode":"chatgpt","tokens":{"id_token":%S}}|}
       (id_token (Printf.sprintf {|{"sub":"s","email":%S}|} address)) in
-  let muse address = Printf.sprintf {|{"schema_version":1,"providers":{"meta":{"user_email":%S}}}|} address in
   let row id state = id, Printf.sprintf {|{"integration_id":%S,%s}|} id state in
   let read id address = row id (Printf.sprintf {|"state":"read","email":%S|} address) in
   let unavailable id = row id {|"state":"not_read","cause":"source_unavailable"|} in
@@ -301,7 +297,7 @@ let live_login_emails () = fixture (fun directory _ ->
   let inherited_env = ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", None] in
   check (list (pair string string)) "a missing login file says so for every account, HTTP providers have none"
     [ unavailable "agy"; unavailable "claude-inherited"; unavailable "claude-selected";
-      unavailable "codex-inherited"; unavailable "muse-inherited" ]
+      unavailable "codex-inherited" ]
     (rows_under inherited_env);
   write oauth_file (Printf.sprintf {|{"token":{"access_token":"a"},"id_token":%S}|}
     (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"google@example.com"}|}));
@@ -312,12 +308,9 @@ let live_login_emails () = fixture (fun directory _ ->
   write_in home [".claude.json"] (claude "inherited@example.com");
   write_in home [".claude"; ".claude.json"] (claude "config-dir@example.com");
   write_in home [".codex"; "auth.json"] (codex "codex-default@example.com");
-  (* The fixture's XDG_CONFIG_HOME is [directory]. *)
-  write_in directory ["muse"; "auth.json"] (muse "muse@example.com");
   check (list (pair string string)) "each account's own login file names it"
     [ read "agy" "google@example.com"; read "claude-inherited" "inherited@example.com";
-      read "claude-selected" "selected@example.com"; read "codex-inherited" "codex-default@example.com";
-      read "muse-inherited" "muse@example.com" ]
+      read "claude-selected" "selected@example.com"; read "codex-inherited" "codex-default@example.com" ]
     (rows_under inherited_env);
   write_in account_home [".claude.json"] (claude "relogin@example.com");
   check (option string) "a sign-in made outside setup shows at once"
@@ -358,13 +351,11 @@ let live_login_emails () = fixture (fun directory _ ->
     (Some (snd (read "claude-inherited" "legacy@example.com")))
     (List.assoc_opt "claude-inherited"
        (rows_under ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", Some elsewhere]));
-  write_in home [".config"; "muse"; "auth.json"] (muse "home-muse@example.com");
   let rows = rows_under ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", Some "";
                          "XDG_CONFIG_HOME", None] in
-  check (list (option string)) "an empty CLAUDE_CONFIG_DIR is unset, and Muse falls back to HOME/.config"
-    [ Some (snd (read "claude-inherited" "inherited@example.com"));
-      Some (snd (read "muse-inherited" "home-muse@example.com")) ]
-    [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "muse-inherited" rows ])
+  check (list (option string)) "an empty CLAUDE_CONFIG_DIR is unset"
+    [ Some (snd (read "claude-inherited" "inherited@example.com")) ]
+    [ List.assoc_opt "claude-inherited" rows ])
 
 let email_batch_provider ~home id =
   let config = inventory_config ~account_home:home ~oauth_file:(Filename.concat home "oauth.json") in

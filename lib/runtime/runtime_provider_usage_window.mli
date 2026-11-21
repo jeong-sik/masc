@@ -6,8 +6,7 @@
     Codex app-server also answers [account/rateLimits/read] without a turn,
     four HTTP providers answer a usage endpoint without a model call, and
     the Antigravity CLI answers a print-mode [/usage] without a turn
-    ({!Runtime_provider_usage_read}).  Muse Code pushes [usage/changed]
-    during a session and answers [usage/read] ({!Runtime_muse_usage}).  This module decodes those reports at
+    ({!Runtime_provider_usage_read}).  This module decodes those reports at
     the wire and keeps the latest one per quota scope and window, with the
     time MASC heard it.
 
@@ -70,11 +69,6 @@ type source = Runtime_provider_usage_types.source =
   | Ollama_balance_read  (** Ollama [GET https://ollama.com/api/balance]. *)
   | Antigravity_usage_read
       (** Antigravity [agy -p "/usage" --output-format json], no turn. *)
-  | Muse_subscription_usage
-      (** Muse Code's subscription windows, from [usage/changed] during a
-          session or a [usage/read] answer ({!Runtime_muse_usage}). Both
-          state the same two windows, so they are one source: a complete
-          report from either replaces the other's rows. *)
 
 (** What a window limits, set by each decoder from the provider's own
     shape, never from a label. *)

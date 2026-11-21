@@ -210,8 +210,6 @@ val keeper_context_librarian_empty : string
 val keeper_context_librarian_unavailable : string
 val keeper_context_librarian_recall : string
 val keeper_context_librarian_preview : string
-val keeper_muse_native_read : string
-(** Managed explanation of Muse's native read posture and attached MASC tools. *)
 val keeper_codex_native_read : string
 val keeper_official_client_resume : string
 val eval_calibration_few_shot : string

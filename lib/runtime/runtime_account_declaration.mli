@@ -18,7 +18,6 @@ type client =
   | Claude_code
   | Codex
   | Antigravity
-  | Muse
 [@@deriving enumerate]
 
 type base =

@@ -46,11 +46,10 @@ let isolated_native_login () = fixture (fun root _ ->
     check (option string) "ambient Meta key omitted" None (value env "META_API_KEY");
     check (option string) "host environment unchanged" (Some "ambient-fixture") (Sys.getenv_opt "META_API_KEY"))
     [ Login.Codex, "codex-login", "CODEX_HOME", ["fixture-cli"; "login"; "--device-auth"];
-      Login.Claude, "claude-login", "CLAUDE_CONFIG_DIR", ["fixture-cli"; "auth"; "login"];
-      Login.Muse, "muse-login", "HOME", ["fixture-cli"; "login"] ];
+      Login.Claude, "claude-login", "CLAUDE_CONFIG_DIR", ["fixture-cli"; "auth"; "login"] ];
   check bool "path traversal rejected before allocation" true
     (Result.is_error (at_this_machine ~runtime_root:root ~account_id:"../escape"
-      ~client:Login.Muse ~existing:None)))
+      ~client:Login.Claude ~existing:None)))
 
 (* Someone at another machine signs in. The server's own environment names a
    browser command here ([fixture]); the child is still handed one command,
@@ -77,7 +76,7 @@ let a_remote_sign_in_is_handed_no_browser_of_this_machine () = fixture (fun root
       |> ok in
     check bool "a sign-in at this machine is not handed that command" false
       (List.mem command (values (Login.environment local |> ok) "BROWSER")))
-    [ Login.Codex, "codex"; Login.Claude, "claude"; Login.Muse, "muse" ])
+    [ Login.Codex, "codex"; Login.Claude, "claude" ])
 
 (* The command is the [true] an absolute directory of PATH holds. A machine
    that has none has nothing to hand over, and the answer needs no login: a
@@ -152,47 +151,7 @@ let login_email_reaches_the_saved_provider () = fixture (fun root _ ->
       Printf.sprintf {|{"auth_mode":"chatgpt","tokens":{"id_token":%S}}|}
         (id_token {|{"email":"codex@example.com"}|}), "codex@example.com";
       Login.Claude, "claude-email", Runtime_schema.Claude_code_runtime, ".claude.json",
-      {|{"oauthAccount":{"emailAddress":"claude@example.com"}}|}, "claude@example.com";
-      Login.Muse, "muse-email", Runtime_schema.Muse_serve_runtime, ".config/muse/auth.json",
-      {|{"schema_version":1,"providers":{"meta":{"user_email":"muse@example.com"}}}|}, "muse@example.com" ])
-
-let muse_capture_and_reference () = fixture (fun root env ->
-  let login = at_this_machine ~runtime_root:root ~account_id:"muse-login"
-    ~client:Login.Muse ~existing:None |> ok in
-  let home = Login.home_dir login in
-  let child_env = Login.environment login |> ok in
-  check (option string) "login cannot fork a detached launcher update" (Some "1")
-    (value child_env "MUSE_NO_AUTO_UPDATE");
-  check (option string) "login keeps the sign-in in auth.json, not the Keychain" (Some "file")
-    (value child_env "TBH_CREDENTIAL_BACKEND");
-  List.iter (fun (name, suffix) ->
-    check (option string) "Muse owns every XDG root" (Some (Filename.concat home suffix))
-      (value child_env name))
-    ["XDG_CONFIG_HOME", ".config"; "XDG_DATA_HOME", ".local/share";
-     "XDG_CACHE_HOME", ".cache"; "XDG_STATE_HOME", ".local/state";
-     "XDG_RUNTIME_DIR", ".local/run"];
-  check (option string) "no invented Muse auth override" None (value child_env "MUSE_AUTH_PATH");
-  let observe () = Login.observe ~mgr:(Eio.Stdenv.process_mgr env)
-    ~clock:(Eio.Stdenv.clock env) ~cwd:(Eio.Stdenv.fs env) ~cli_path:"unused"
-    ~account_request:Runtime_account_access.Operator_call login in
-  check bool "missing captured login is rejected" true (Result.is_error (observe ()));
-  Fs_compat.mkdir_p (Filename.concat home ".config/muse");
-  let auth = Filename.concat home ".config/muse/auth.json" in
-  Auth.save_private_text_file auth {|{"schema_version":1,"providers":{"meta":{}}}|};
-  check bool "mere credential file is not login capture" true (Result.is_error (observe ()));
-  Auth.save_private_text_file auth
-    {|{"schema_version":1,"providers":{"meta":{"mechanism":"oauth","storage":"keychain"}}}|};
-  check bool "a sign-in left in the Keychain is not login capture" true (Result.is_error (observe ()));
-  Auth.save_private_text_file auth
-    {|{"schema_version":1,"providers":{"meta":{"api_key":"synthetic-selected-account"}}}|};
-  (match observe () |> ok with
-   | Login.Login_completed -> ()
-   | Login.Authenticated | Login.Credential_captured -> fail "Muse capture claimed authentication");
-  let reference = Login.publish ~workspace:root ~integration_id:"muse-code" ~cli_path:"muse" login |> ok in
-  let binding = Accounts.resolve ~workspace:root ~integration_id:"muse-code" ~cli_path:"muse" reference |> account_ok in
-  let again = at_this_machine ~runtime_root:root ~account_id:"retry"
-    ~client:Login.Muse ~existing:(Some binding) |> ok in
-  check string "explicit reauthentication selects exact same account" home (Login.home_dir again))
+      {|{"oauthAccount":{"emailAddress":"claude@example.com"}}|}, "claude@example.com" ])
 
 let claude_reference_spelling () = fixture (fun root _ ->
   let home = Filename.concat root "claude-home" in Unix.mkdir home 0o700;
@@ -307,6 +266,5 @@ let () = run "official login adapters" ["selected accounts", [
     the_browser_command_comes_from_path_or_the_sign_in_is_refused;
   test_case "a login's email reaches the provider saved from it" `Quick login_email_reaches_the_saved_provider;
   test_case "native authentication without model calls" `Quick native_authentication_observation;
-  test_case "Muse capture and durable account selection" `Quick muse_capture_and_reference;
   test_case "Claude reauthentication identity" `Quick claude_reference_spelling;
   test_case "a new login's home is found again" `Quick a_new_logins_home_is_found_again]]

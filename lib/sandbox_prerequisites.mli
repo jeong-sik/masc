@@ -18,7 +18,7 @@ type searxng_container =
 (** What Docker reports for the container [searxng_container_name]
     ([{{.State.Status}}]), as far as an action can tell. *)
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
-  | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
+  | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
   | Ego_browser
   (** The program the browser lane starts: [\[browser.live.ego\]] names
       ego lite's [ego-browser]. It is not installed with MASC, and no action

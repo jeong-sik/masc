@@ -320,7 +320,6 @@ let test_mixed_route_changes_can_consume_the_original_receipt () =
     let path = Filename.concat config.Workspace.base_path "runtime.toml" in
     let original_config = Fs_compat.load_file path in
     let oauth_path = Filename.concat config.base_path "synthetic-antigravity-oauth" in
-    let muse_account_home = Filename.concat config.base_path "muse-account-home" in
     Fs_compat.save_file oauth_path (Masc_test_deps.antigravity_oauth_fixture "outbox-route-fixture");
     let additional =
       Printf.sprintf {|[providers.http]
@@ -338,20 +337,14 @@ is-non-interactive = true
 [providers.antigravity.credentials]
 type = "file"
 path = %S
-[providers.muse]
-protocol = "muse-serve"
-command = "/bin/false"
-account-home = %S
-is-non-interactive = true
 [http.codex]
 [claude.codex]
 [antigravity.codex]
-[muse.codex]
 [runtime.lanes.recovery]
-candidates = ["codex.codex", "http.codex", "claude.codex", "antigravity.codex", "muse.codex"]
+candidates = ["codex.codex", "http.codex", "claude.codex", "antigravity.codex"]
 [runtime.assignments]
 result-owner = "recovery"
-|} oauth_path muse_account_home in
+|} oauth_path in
     Fs_compat.save_file path (original_config ^ additional);
     get (Runtime.init_default ~config_path:path);
     check bool "every declared runtime candidate has original result delivery" true

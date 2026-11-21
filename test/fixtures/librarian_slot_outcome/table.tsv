@@ -112,8 +112,6 @@ fusion_official_client.mli	failure	Codex_failure	-	> runtime_codex_app_server.ml
 fusion_official_client.mli	failure	Claude_failure	-	> runtime_claude_code.mli error	read the error
 fusion_official_client.mli	failure	Claude_admission_failure	-	> runtime_claude_code.mli error	the login-only preflight; same type
 fusion_official_client.mli	failure	Antigravity_failure	-	> runtime_antigravity.mli error	read the error
-fusion_official_client.mli	failure	Muse_failure	-	> runtime_muse_serve.mli error	read the error
-fusion_official_client.mli	failure	Vibe_failure	-	Silent Unavailable	the load check refuses a Vibe runtime in slots and cli_slots, so no walk reaches it
 runtime_codex_app_server.mli	error	Invalid_config	-	Silent Unavailable	setup
 runtime_codex_app_server.mli	error	Spawn_refused	-	Silent Unavailable	the process did not start
 runtime_codex_app_server.mli	error	Reasoning_effort_admission_failed	-	Silent Unavailable	the account refused the declared effort before any turn input
@@ -178,21 +176,3 @@ runtime_antigravity.mli	error	Process_exited	-	Silent Lost	the client died
 runtime_antigravity.mli	error	Unhandled_exception	-	Silent Lost	a host-side exception
 runtime_antigravity.mli	error	Child_fd_ceiling_exceeded	-	Silent Unavailable	masc failed the child for file-table safety; the workspace needs an operator
 runtime_antigravity.mli	error	Timeout	-	Silent Lost	the client went silent
-runtime_muse_serve.mli	error	Invalid_config	-	Silent Unavailable	setup
-runtime_muse_serve.mli	error	Spawn_refused	-	Silent Unavailable	the process did not start
-runtime_muse_serve.mli	error	Turn_input_write_failed	-	Silent Lost	whether the host received the turn is unknown
-runtime_muse_serve.mli	error	Protocol_error	-	Silent Lost	the client broke its protocol
-runtime_muse_serve.mli	error	Rpc_error	-	Silent Lost	a code and a message; neither is read
-runtime_muse_serve.mli	error	Capability_not_granted	-	Silent Unavailable	the host did not grant a needed capability; before any turn
-runtime_muse_serve.mli	error	Session_not_durable	-	Silent Unavailable	refused at initialization
-runtime_muse_serve.mli	error	Session_model_mismatch	-	Silent Unavailable	refused before dispatch
-runtime_muse_serve.mli	error	Session_workspace_mismatch	-	Silent Unavailable	refused before dispatch
-runtime_muse_serve.mli	error	Session_approval_mode_mismatch	-	Silent Unavailable	refused before dispatch
-runtime_muse_serve.mli	error	Auth_required	-	Silent Unavailable	the host has no usable login
-runtime_muse_serve.mli	error	Turn_failed	quota = Some _	Silent Busy	the account's quota, typed by the presence of the quota record
-runtime_muse_serve.mli	error	Turn_failed	quota = None	Silent Lost	an open error kind and a message; neither is read
-runtime_muse_serve.mli	error	Turn_cancelled	-	Silent Lost	cancelled
-runtime_muse_serve.mli	error	Unsupported_server_request	-	Silent Lost	the client asked for something this host does not do
-runtime_muse_serve.mli	error	Runtime_shutting_down	-	Silent Lost	masc is shutting down
-runtime_muse_serve.mli	error	Process_exited	-	Silent Lost	the client died
-runtime_muse_serve.mli	error	Timeout	-	Silent Lost	the client went silent

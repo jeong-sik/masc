@@ -94,10 +94,9 @@ val of_template
   -> (Runtime_instance.t, error) result
 
 (** Build a person's runtime from [template] using the explicit [~account_home]:
-    - Official clients ([Claude_code], [Codex_app_server], [Muse_serve]) take
+    - Official clients ([Claude_code], [Codex_app_server]) take
       [Some home] and carry credential-free person seals
-      ({!Runtime_account_access.seal_person}) or declared homes
-      ({!Runtime_account_access.declare_muse_home}).
+      ({!Runtime_account_access.seal_person}).
     - HTTP [Agent_core] providers ([Messages_api], [Chat_completions_api],
       [Ollama_api], [Gemini_api]) have no CLI account home, take
       [account_home = None], drop operator credentials and custom headers,

@@ -119,25 +119,6 @@ let test_empty_selected_account_never_becomes_ambient () =
       (Result.is_error (Runtime_setup_spec.of_json (`Assoc fields))))
     ["claude_code"; "codex"]
 
-let test_muse_requires_explicit_account () =
-  let fields = ["choice", `String "muse"; "model", `String "fixture-model";
-    "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true;
-    "account_home", `String "/synthetic/muse-account"] in
-  Alcotest.(check bool) "account_home is required" true
-    (Result.is_error (Runtime_setup_spec.of_json (`Assoc (List.remove_assoc "account_home" fields))));
-  let spec = match Runtime_setup_spec.of_json (`Assoc fields) with
-    | Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
-  let rendered = Runtime_setup_spec.render spec in
-  let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.runtime_id)
-      ^ "\n" ^ rendered.runtime_toml in
-  match Runtime_toml.parse_string whole with
-  | Error _ -> Alcotest.fail "Muse setup rendering must parse"
-  | Ok config ->
-    let provider = List.hd config.Runtime_schema.providers in
-    Alcotest.(check bool) "Muse protocol" true
-      (provider.api_format = Runtime_schema.Muse_serve_runtime);
-    Alcotest.(check (option string)) "selected account" (Some "/synthetic/muse-account") provider.account_home
-
 (* Discovery lists Codex models from the declared provider's account home;
    the saved provider must keep that home or it renders the ambient
    account instead. *)
@@ -738,5 +719,4 @@ let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "the id names the client and the model" `Quick test_id_names_the_client_and_the_model;
   Alcotest.test_case "selected official accounts remain distinct" `Quick test_official_client_account_selection_is_identity;
   Alcotest.test_case "empty selected account does not inherit" `Quick test_empty_selected_account_never_becomes_ambient;
-  Alcotest.test_case "Muse account is explicit and asks no byte budget" `Quick test_muse_requires_explicit_account;
   Alcotest.test_case "codex account home survives save" `Quick test_codex_account_home_preserved]]

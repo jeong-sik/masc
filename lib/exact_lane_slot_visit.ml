@@ -201,17 +201,6 @@ let antigravity (error : Runtime_antigravity.error) : 'rejection Outcome.unanswe
   | Protocol_error _ | State_callback_failed _ | Turn_failed _ | Result_not_completed _
   | Actions_denied _ | Process_exited _ | Unhandled_exception _ | Timeout _ -> Silent Lost
 
-let muse (error : Runtime_muse_serve.error) : 'rejection Outcome.unanswered =
-  match error with
-  | Turn_failed { quota = Some _; _ } -> Silent Busy
-  | Turn_failed { quota = None; _ } -> Silent Lost
-  | Invalid_config _ | Spawn_refused _ | Capability_not_granted _ | Session_not_durable
-  | Session_model_mismatch _ | Session_workspace_mismatch _ | Session_approval_mode_mismatch _
-  | Auth_required _ -> Silent Unavailable
-  | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Turn_cancelled
-  | Unsupported_server_request _ | Runtime_shutting_down | Process_exited _ | Timeout _ ->
-    Silent Lost
-
 let client (bodies : 'rejection bodies) (failure : Fusion_official_client.failure)
   : 'rejection Outcome.unanswered
   =
@@ -219,11 +208,8 @@ let client (bodies : 'rejection bodies) (failure : Fusion_official_client.failur
   | Codex_failure error -> codex error
   | Claude_failure error | Claude_admission_failure error -> claude error
   | Antigravity_failure error -> antigravity error
-  | Muse_failure error -> muse error
   | Missing_reply -> Silent (Unusable bodies.empty_or_partial)
   | Setup_failure _ -> Silent Unavailable
-  (* The load check refuses a Vibe runtime as a lane slot, so no walk runs one. *)
-  | Vibe_failure _ -> Silent Unavailable
 
 let cli_failure (bodies : 'rejection bodies) (failure : Keeper_lane_cli_oneshot.failure)
   : 'rejection Outcome.unanswered

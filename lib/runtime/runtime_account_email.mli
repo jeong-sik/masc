@@ -37,7 +37,6 @@ val missing_to_wire : missing -> string
 
 val of_codex_auth : string -> (t, missing) result
 val of_claude_account : string -> (t, missing) result
-val of_muse_auth : string -> (t, missing) result
 val of_google_oauth : string -> (t, missing) result
 (** Each reads the bytes of one client's login file. A key that appears twice
     in one object is [Source_unrecognized]; [null] reads as absent. *)

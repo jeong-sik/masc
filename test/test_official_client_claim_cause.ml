@@ -72,29 +72,6 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
         ~context_injector:None ~context:None ~event_bus:None
         ~raw_trace:None ~on_event:None ~config () in
     outcome.result, outcome.settled_session, outcome.effect_disposition
-  | S.Muse ->
-    let account =
-      Masc_test_deps.authorized_muse
-        (Runtime_account_access.Declared_home
-           (Masc_test_deps.muse_home (Filename.concat base_path "absent-synthetic-account"))) in
-    let config : Runtime_muse_serve.config =
-      { (Runtime_muse_serve.default_config ()) with cli_path
-      ; model = Some "synthetic-model"
-      ; admission_timeout_s = 1.; timeout_s = Some 1. } in
-    let outcome = Keeper_muse_runtime.run ~read_retained_media:None ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
-        ~configured_reasoning_effort:None ~turn_timeout_s:None
-        ~quota_scope:(Runtime_quota_window.scope_of_muse_home
-          (Filename.concat base_path "absent-synthetic-account"))
-        ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
-        ~accepts_image_input:false ~runtime_id ~keeper_name
-        ~pre_tool_rejects:(ref []) ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~workspace_root:base_path
-        ~goal:"synthetic claim probe" ~goal_blocks:None
-        ~system_prompt:"Synthetic claim probe."
-        ~tools:[] ~initial_messages:[] ~model_input_projection:None
-        ~on_transmitted_model_input:transmitted ~hooks:None
-        ~context_injector:None ~context:None ~event_bus:None
-        ~raw_trace:None ~on_event:None ~account ~config () in
-    outcome.result, outcome.settled_session, outcome.effect_disposition
 
 let read_recovery ~base_path ~keeper_name =
   match S.load ~base_path ~keeper_name |> Result.map_error S.read_error_to_string with
@@ -414,4 +391,4 @@ let () =
             (check_case client_kind label reason))
           [ S.Effect_fenced, "effect-fenced"
           ; S.Bootstrap_floor_exceeded, "bootstrap-floor" ])
-        [ S.Codex, "codex"; S.Claude_code, "claude"; S.Antigravity, "antigravity"; S.Muse, "muse" ] ]
+        [ S.Codex, "codex"; S.Claude_code, "claude"; S.Antigravity, "antigravity" ] ]

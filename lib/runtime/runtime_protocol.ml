@@ -53,12 +53,6 @@ let official_client_editor protocol =
     }
 ;;
 
-let muse_serve_protocol = "muse-serve"
-let muse_serve_editor =
-  Option.map (fun (editor : editor_protocol) ->
-    { editor with required_provider_fields = ["account-home"] })
-    (official_client_editor muse_serve_protocol)
-
 let antigravity_editor =
   Some
     { protocol = "antigravity-cli"
@@ -101,11 +95,6 @@ let protocol_declarations =
     ; api_format = Runtime_schema.Antigravity_cli_runtime
     ; editor = antigravity_editor
     }
-  ; { protocol = muse_serve_protocol
-    ; api_format = Runtime_schema.Muse_serve_runtime
-    ; editor = muse_serve_editor
-    }
-  ; hidden_protocol "vibe-cli" Runtime_schema.Vibe_cli_runtime
   ]
 ;;
 

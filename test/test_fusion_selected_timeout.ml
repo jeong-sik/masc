@@ -1,19 +1,19 @@
 open Alcotest
 
-type client = Claude | Codex | Antigravity | Muse
+type client = Claude | Codex | Antigravity
 type reload = Replace of float option | Remove
 
 let client_name = function
   | Claude -> "Claude" | Codex -> "Codex"
-  | Antigravity -> "Antigravity" | Muse -> "Muse"
+  | Antigravity -> "Antigravity"
 
 let client_mode = function
   | Claude -> "claude" | Codex -> "codex"
-  | Antigravity -> "agy" | Muse -> "muse"
+  | Antigravity -> "agy"
 
 let client_protocol = function
   | Claude -> "claude-code" | Codex -> "codex-app-server"
-  | Antigravity -> "antigravity-cli" | Muse -> "muse-serve"
+  | Antigravity -> "antigravity-cli"
 
 let write_file ~path ~perm contents =
   let channel = open_out_gen [Open_creat; Open_trunc; Open_wronly] perm path in
@@ -104,55 +104,6 @@ elif MODE == "agy":
     send({"event": "result", "result": {"conversation_id": "timeout-agy", "status": "SUCCESS",
         "response": ANSWER, "num_turns": 1, "usage": {
             "input_tokens": 1, "output_tokens": 1, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}}})
-elif MODE == "muse":
-    initialized = read()
-    assert initialized["method"] == "initialize"
-    send({"jsonrpc": "2.0", "id": initialized["id"], "result": {
-        "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
-        "userAgent": "muse/1.3.0", "museHome": os.path.join(os.environ["XDG_DATA_HOME"], "muse"),
-        "platformFamily": "unix", "platformOs": "linux", "schema": {"version": 1, "fingerprint": "sha256:fixture"},
-        "grantedCapabilities": [], "experimentalApi": False, "sessionDurability": "durable"}})
-    assert read()["method"] == "initialized"
-    opened = read()
-    assert opened["method"] == "session/start"
-    send({"jsonrpc": "2.0", "id": opened["id"], "result": {
-        "session": {"sessionId": "timeout-session", "status": "idle", "turnCount": 0,
-            "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
-            "modelId": opened["params"]["modelId"], "workspaceRoot": opened["params"]["workspaceRoot"]},
-        "viewCursor": "v:1"}})
-    turn = read()
-    assert turn["method"] == "turn/start"
-    record("turn_received")
-    turn_id = turn["params"]["commandId"]
-    # The host certifies a completed turn from its durable history, so it asks
-    # the controlled host for a backward view page once the terminal arrives.
-    # The host retains the events it sent, as a real session does.
-    retained = []
-    def notify(method, params):
-        event = {"method": method, "params": params}
-        if method in ("turn/started", "item/completed"):
-            position = {"id": "timeout-record-%d" % (len(retained) + 1), "sequence": len(retained) + 1}
-            params["sourceRange"] = {"stream": {"kind": "run", "id": "timeout-run"},
-                                     "first": position, "last": position}
-            retained.append(event)
-        send({"jsonrpc": "2.0", **event})
-    send({"jsonrpc": "2.0", "id": turn["id"], "result": {"commandId": turn_id,
-        "status": "accepted", "turnId": turn_id, "startedNewTurn": True, "disposition": "started"}})
-    notify("turn/started", {
-        "sessionId": "timeout-session", "turnId": turn_id, "commandId": turn_id, "viewCursor": "v:2"})
-    pause_after_input()
-    notify("item/completed", {
-        "sessionId": "timeout-session", "viewCursor": "v:3", "item": {"itemId": "m-1", "kind": "agentMessage",
-            "turnId": turn_id, "revision": 1, "status": "completed", "text": ANSWER}})
-    notify("turn/completed", {
-        "sessionId": "timeout-session", "turnId": turn_id, "terminal": "completed", "viewCursor": "v:4", "error": None,
-        "usage": {"inputTokens": 1, "outputTokens": 1, "cachedTokens": 0, "reasoningTokens": 0}})
-    for line in sys.stdin:
-        request = json.loads(line)
-        if request.get("method") == "view/page":
-            assert request["params"]["sessionId"] == "timeout-session"
-            assert request["params"]["cursor"] == "v:4" and request["params"]["direction"] == "backward"
-            send({"jsonrpc": "2.0", "id": request["id"], "result": {"events": retained, "nextCursor": None}})
 else:
     raise AssertionError(MODE)
 for line in sys.stdin:
@@ -163,7 +114,7 @@ for line in sys.stdin:
 let runtime_fixture ~client ~cli_path ~account_home ~oauth_source ~model_key ~declared =
   let credential = match client with
     | Antigravity -> Printf.sprintf "timeout-s = 3.0\ncredentials = { type = \"file\", path = %S }" oauth_source
-    | Claude | Codex | Muse -> Printf.sprintf "account-home = %S" account_home in
+    | Claude | Codex -> Printf.sprintf "account-home = %S" account_home in
   let timeout = match declared with
     | None -> "" | Some seconds -> Printf.sprintf "turn-timeout-s = %.17g" seconds in
   Printf.sprintf {|
@@ -206,9 +157,7 @@ let test_selected_timeout ~client ~selected_timeout ~reload ~override_s ~expect_
   let account_home = Filename.concat root "selected-account" in
   let oauth_source = Filename.concat root "oauth.json" in
   let config_path = Filename.concat root "runtime.toml" in
-  Fs_compat.mkdir_p (Filename.concat account_home ".config/muse");
-  write_file ~path:(Filename.concat account_home ".config/muse/auth.json") ~perm:0o600
-    {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-LOCAL-ONLY"}}}|};
+  Fs_compat.mkdir_p account_home;
   write_file ~path:oauth_source ~perm:0o600 (Masc_test_deps.antigravity_oauth_fixture "timeout-fixture");
   write_file ~path:host ~perm:0o600 host_script;
   write_file ~path:cli_path ~perm:0o700 (Printf.sprintf
@@ -267,5 +216,5 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   Masc.Prompt_defaults.init ();
   run "Fusion selected model idle"
-    ["selected timeout", List.concat_map cases [Claude; Codex; Antigravity; Muse]]
+    ["selected timeout", List.concat_map cases [Claude; Codex; Antigravity]]
 ;;

@@ -1,7 +1,6 @@
 let state_dirname = "official-client-runtime"
 let outbox_dirname = "undelivered-tools"
 let consumed_results_dirname = "consumed-tool-results"
-let muse_storage_dirname = "muse-storage"
 
 let state_dir ~base_path ~keeper_name =
   if not (Safe_identifier.is_portable_name keeper_name)
@@ -20,10 +19,6 @@ let outbox_dir ~base_path ~keeper_name =
 
 let consumed_results_dir ~base_path ~keeper_name =
   Result.map (fun directory -> Filename.concat directory consumed_results_dirname)
-    (state_dir ~base_path ~keeper_name)
-
-let muse_storage_dir ~base_path ~keeper_name =
-  Result.map (fun directory -> Filename.concat directory muse_storage_dirname)
     (state_dir ~base_path ~keeper_name)
 
 type tool_result_source = Tool_result_source of string

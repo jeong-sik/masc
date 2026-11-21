@@ -166,9 +166,7 @@ let client_compact_window_refusal (r : t) =
                })))
   | Runtime_execution.Agent_core _
   | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _
-  | Runtime_execution.Vibe_cli _ -> None
+  | Runtime_execution.Antigravity_cli _ -> None
 ;;
 
 (* Every materialized runtime must resolve a positive context window from the
@@ -227,9 +225,7 @@ let validate_runtime_thinking_requests (runtimes : t list)
     | Runtime_execution.Agent_core _, None
     | ( ( Runtime_execution.Codex_app_server _
         | Runtime_execution.Claude_code _
-        | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Muse_serve _
-        | Runtime_execution.Vibe_cli _ )
+        | Runtime_execution.Antigravity_cli _ )
       , (Some _ | None) ) -> None
   in
   match List.filter_map refusal runtimes with

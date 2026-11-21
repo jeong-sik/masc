@@ -1,4 +1,4 @@
-type client = Codex | Claude | Antigravity | Muse
+type client = Codex | Claude | Antigravity
 type origin = Configured | Catalog
 (** [Configured]: an account the runtime configuration declares.
     [Catalog]: the client's own entry for adding a new account. *)

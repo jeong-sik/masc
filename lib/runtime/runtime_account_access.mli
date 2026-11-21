@@ -66,52 +66,11 @@ type 'client authorized
 (** The account, for the client that starts the CLI. *)
 val account : 'client authorized -> 'client Runtime_official_account.t
 
-(** {1 Muse}
-
-    Muse keeps its login in a home of its own, as Codex and Claude Code do,
-    and its client builds the environment of the process from that home when
-    the process starts. So a Muse account is its home alone, and
-    {!authorize_muse} judges it as {!authorize} judges a captured account. *)
-
-(** A declared Muse home. No Muse process starts on it: the runtime table
-    holds this. *)
-type muse_home
-
-(** Parses a declared home as {!Runtime_account_home.of_string} does. *)
-val declare_muse_home : string -> (muse_home, string) result
-
-(** The path of a declared home. It names the account, as its quota window
-    does, and carries no credential. *)
-val muse_home_path : muse_home -> string
-
-(** Where a Muse account is: a declared home, or the environment of the
-    process. *)
-type declared
-type process_environment
-
-(** What a Muse process starts on. *)
-type _ muse_account =
-  | Declared_home : muse_home -> declared muse_account
-  | Process_environment : process_environment muse_account
-      (** The home the environment of the process names, which protocol
-          fixtures use. A multi-account process refuses it, as it refuses an
-          inherited home of Codex and Claude Code. *)
-
-(** A Muse account a process may start on. Only {!authorize_muse} makes one. *)
-type 'where muse_authorized
-
-(** The home the Muse process starts on, for its client: the declared path,
-    or [None] for {!Process_environment}. *)
-val muse_account_home : _ muse_authorized -> string option
-
-(** The declared home, for a caller that prepares it before the call. *)
-val declared_muse_home : declared muse_authorized -> string
-
 (** {1 Host accounts}
 
-    Antigravity and Vibe start on accounts of the host, not of a person. The
+    Antigravity starts on an account of the host, not of a person. The
     credential of Antigravity is a copy in the setup registry, which has no
-    owner, and Vibe reads the configuration of the host user. An API provider
+    owner. An API provider
     of the runtime table sends with the credential its operator declared, and
     so do the requests outside the table that {!host_client} names. A
     multi-account process shares no account of its host (plans D3b and D4),
@@ -120,7 +79,6 @@ val declared_muse_home : declared muse_authorized -> string
 (** A client that starts on an account of the host. *)
 type host_client =
   | Antigravity
-  | Vibe
   | Api_provider
       (** An Agent_core Runtime of the runtime table: see {!api_sealed}. *)
   | Model_list
@@ -424,10 +382,6 @@ val active_authz_keeper_names : unit -> string list
 (** Engine names of Keepers registered in [Authz_keeper_state] whose owner is
     currently active. Empty outside [Multi_account] or when the zone is
     uncertain. *)
-
-(** Authorizes a Muse account for [request] by the access the process
-    published, by the rule of {!authorize}. *)
-val authorize_muse : request -> 'where muse_account -> ('where muse_authorized, refusal) result
 
 (** Why the accounts of the host are not allowed. *)
 type host_refusal =

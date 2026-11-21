@@ -95,11 +95,6 @@ let test_codex () =
     | Error error -> Alcotest.failf "no environment: %s" (Runtime_codex_app_server.error_to_string error))
 ;;
 
-let test_muse_code () =
-  on_a_person_home (fun account_home ->
-    no_operator_token "Muse Code" (Runtime_muse_serve.login_environment ~account_home))
-;;
-
 let () =
   Alcotest.run
     "person_child_environment"
@@ -110,7 +105,6 @@ let () =
             `Quick
             test_claude_code_on_a_key
         ; Alcotest.test_case "Codex gets no token of the operator" `Quick test_codex
-        ; Alcotest.test_case "Muse Code gets no token of the operator" `Quick test_muse_code
         ] )
     ]
 ;;

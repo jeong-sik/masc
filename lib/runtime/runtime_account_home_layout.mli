@@ -22,7 +22,6 @@
 type client =
   | Codex_home
   | Claude_home
-  | Muse_home
 
 val clients_dir : string
 val client_dir : client -> string

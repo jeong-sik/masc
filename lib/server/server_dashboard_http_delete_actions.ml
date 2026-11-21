@@ -501,7 +501,6 @@ let keeper_artifact_path config keeper_name artifact =
          ~keeper_name)
   | Keeper_antigravity_home_artifact path -> Some path
   | Keeper_antigravity_prepare_lock_artifact path -> Some path
-  | Keeper_muse_home_artifact path -> Some path
   | Agent_artifact_bundle _ -> None
 ;;
 
@@ -518,10 +517,6 @@ type official_client_purge_warning =
       ; provider_id : string
       }
   | Antigravity_credentials_not_file of
-      { runtime_id : string
-      ; provider_id : string
-      }
-  | Muse_account_home_missing of
       { runtime_id : string
       ; provider_id : string
       }
@@ -542,11 +537,6 @@ let official_client_purge_warning_to_string = function
   | Antigravity_credentials_not_file { runtime_id; provider_id } ->
     Printf.sprintf
       "antigravity provider %s for runtime binding %s has no file credentials"
-      provider_id
-      runtime_id
-  | Muse_account_home_missing { runtime_id; provider_id } ->
-    Printf.sprintf
-      "muse provider %s for runtime binding %s has no account_home"
       provider_id
       runtime_id
 ;;
@@ -621,21 +611,8 @@ let resolve_official_client_purge_artifacts config ~keeper_name =
                  , [ Antigravity_credentials_not_file
                        { runtime_id; provider_id = binding.provider_id }
                    ] ))
-            | Runtime_schema.Muse_serve_runtime ->
-              (match provider.account_home with
-               | None ->
-                 ( []
-                 , [ Muse_account_home_missing
-                       { runtime_id; provider_id = binding.provider_id }
-                   ] )
-               | Some account_home ->
-                 ( [ Keeper_muse_home_artifact
-                       (Runtime_muse_home.keeper_identity_dir ~runtime_root ~keeper_name ~account_home)
-                   ]
-                 , [] ))
             | Runtime_schema.Codex_app_server_runtime
             | Runtime_schema.Claude_code_runtime
-            | Runtime_schema.Vibe_cli_runtime
             | Runtime_schema.Messages_api
             | Runtime_schema.Chat_completions_api
             | Runtime_schema.Ollama_api
@@ -819,8 +796,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
          | Keeper_configuration_artifact
          | Keeper_chat_store_artifact
          | Keeper_antigravity_home_artifact _
-         | Keeper_antigravity_prepare_lock_artifact _
-         | Keeper_muse_home_artifact _ ) as artifact) :: rest ->
+         | Keeper_antigravity_prepare_lock_artifact _ ) as artifact) :: rest ->
         (match keeper_artifact_path config keeper_name artifact with
          | None ->
            Error "dashboard Keeper purge artifact plan lost its typed projection"
@@ -862,7 +838,6 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_board_attention_partitions_artifact
             | Keeper_antigravity_home_artifact _
             | Keeper_antigravity_prepare_lock_artifact _
-            | Keeper_muse_home_artifact _
             | Agent_artifact_bundle _ -> ());
            (match (match artifact with
              | Keeper_configuration_artifact ->
@@ -890,8 +865,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
              | Keeper_runtime_configuration_artifact
              | Keeper_board_attention_candidates_artifact
              | Keeper_board_attention_partitions_artifact | Agent_artifact_bundle _
-             | Keeper_antigravity_home_artifact _ | Keeper_antigravity_prepare_lock_artifact _
-             | Keeper_muse_home_artifact _ -> remove_path_strict path) with
+             | Keeper_antigravity_home_artifact _ | Keeper_antigravity_prepare_lock_artifact _ -> remove_path_strict path) with
             | Error _ as error -> error
             | Ok outcome ->
               (match artifact with
@@ -928,7 +902,6 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_board_attention_partitions_artifact
                | Keeper_antigravity_home_artifact _
                | Keeper_antigravity_prepare_lock_artifact _
-               | Keeper_muse_home_artifact _
                | Agent_artifact_bundle _ -> ());
               Log.Keeper.debug
                 "dashboard Keeper purge artifact: keeper=%s path=%s outcome=%s"
@@ -1046,10 +1019,6 @@ module For_testing = struct
         ; provider_id : string
         }
     | Antigravity_credentials_not_file of
-        { runtime_id : string
-        ; provider_id : string
-        }
-    | Muse_account_home_missing of
         { runtime_id : string
         ; provider_id : string
         }

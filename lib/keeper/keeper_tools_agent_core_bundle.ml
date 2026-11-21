@@ -1015,8 +1015,7 @@ let make_tool_bundle_for_descriptors_with_policy
         (Runtime_agent.provider_caps_of_config
            (Runtime_account_access.api_declaration sealed)).supports_image_input
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
-      | Runtime_execution.Muse_serve _ | Runtime_execution.Antigravity_cli _
-      | Runtime_execution.Vibe_cli _ -> true
+      | Runtime_execution.Antigravity_cli _ -> true
     in
     let image_admission =
       if accepts_image_input
@@ -1045,8 +1044,7 @@ let make_tool_bundle_for_descriptors_with_policy
         then Keeper_identity_tool_search.Tool_references
         else Keeper_identity_tool_search.History_carry
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
-      | Runtime_execution.Muse_serve _ | Runtime_execution.Antigravity_cli _
-      | Runtime_execution.Vibe_cli _ -> Keeper_identity_tool_search.History_carry
+      | Runtime_execution.Antigravity_cli _ -> Keeper_identity_tool_search.History_carry
     in
     let listing = make_identity_listing ~placement_policy ~held_schemas ~identity_tools ~admitted ~carried () in
     let names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in

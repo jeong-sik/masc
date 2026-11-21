@@ -3,7 +3,7 @@ serve it. A test changes only the fields it reads, so a field the server adds
 to a row is written here once. The TUI refuses a row whose fields are not
 exactly these."""
 
-SCHEMA = "keeper.memory_os.current_health.v16"
+SCHEMA = "keeper.memory_os.current_health.v17"
 
 # Every pass and change the server counts, none moved since it started.
 NO_MEMORY_CHANGES: dict[str, dict[str, int]] = {

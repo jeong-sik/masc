@@ -109,7 +109,7 @@ let ask_room t ~at store ~(declared : declared) ~trace =
             ; since = at
             ; lane = declared
             ; removed_since = []
-            ; asked = Room { trace }
+            ; asked = Room { trace; molt_trigger = None }
             ; bottom = t.bottom
             }
         }
@@ -167,6 +167,7 @@ type event =
       ; result : ended
       }
   | Declaration_changed of declared option
+  | Compaction_epoch_advanced of { epoch_id : int }
 
 (* The answer of an ask that is not the current one is dropped; only one
    that carried an answer is counted. *)
@@ -540,9 +541,90 @@ let ended_room place t ~at store (asking : asking) : Room_result.t -> t = functi
     next_ask place { t with last_room = Some Last.Not_judged } ~at store
 ;;
 
+let ended_molt place t ~at store (asking : asking) ~trigger : Room_result.t -> t = function
+  | Room_answered { question; answer; slot } ->
+    (match asking.removed_since with
+     | _ :: _ as removed ->
+       room_not_committed place Stale
+         (Printf.sprintf "a direct write removed %d fact(s) while molt was asked"
+            (List.length removed));
+       next_ask place { t with last_room = Some Last.Stale } ~at store
+     | [] ->
+       let plan =
+         Librarian_plan.of_answer ~shown:(Molt { memory = question.memory; trigger })
+           ~facts:(Store.memory store).facts ~removed_since:[] ~at ~trace_id:question.trace
+           answer
+       in
+       if Store.changes store plan
+       then (
+         let committed = Store.commit_molt store ~at ~question ~slot ~trigger plan in
+         (match committed with
+          | Committed { store = (_ : Store.t); line = (_ : Librarian_log.commit) }
+          | Committed_without_snapshot (_ : Librarian_log.commit) -> count_room place Made
+          | Stopped (_ : Store.stop) -> count_room place Store_stopped
+          | Not_a_snapshot refusal ->
+            room_not_committed place Snapshot_refused
+              (Printf.sprintf "the molt answer of %s: %s" slot (envelope_refusal_text refusal)));
+         settled t store committed ~after:(fun store ->
+           let store =
+             match Store.compact_log store ~at with
+             | Ok (compacted_store, compacted_lines) ->
+               Log.Keeper.info ~keeper_name:place.keeper_id
+                 "librarian log compacted after molt: %d lines -> 1 checkpoint" compacted_lines;
+               compacted_store
+             | Error (_ : Store.stop) ->
+               Log.Keeper.warn ~keeper_name:place.keeper_id
+                 "librarian post-molt log compaction skipped; retaining committed store";
+               store
+           in
+           next_ask place { t with last_room = Some Last.Made } ~at store))
+       else (
+         (match plan.effects.not_applied with
+          | [] -> room_not_committed place Proposed_nothing ("the molt answer of " ^ slot)
+          | _ :: _ as left_out ->
+            room_not_committed place Left_out
+              (Printf.sprintf "the molt answer of %s: [%s]" slot
+                 (String.concat ", "
+                    (List.map
+                       (fun (number, why, (_ : Librarian_answer.new_fact option)) ->
+                          Printf.sprintf "%d:%s" number (Librarian_effects.why_not_kind why))
+                       left_out))));
+         next_ask place { t with last_room = Some Last.Unchanged } ~at store))
+  | Room_not_answered { question; slots } ->
+    room_not_committed place Unanswered
+      (String.concat ", "
+         (List.map
+            (fun ((key : Lane.slot_key), outcome) ->
+               Printf.sprintf "%s:%s" key.id (unanswered_token outcome))
+            slots));
+    let room =
+      match t.lane with
+      | Some declared ->
+        (match Librarian_bottom.fold declared.value slots with
+         | Input -> Last.Fits_none { memory = question.basis; lane = asking.lane.value }
+         | All_not_input | Not_all -> Last.Not_judged)
+      | None -> Last.Not_judged
+    in
+    next_ask place { t with last_room = Some room } ~at store
+  | Room_memory_diverged { expected; observed } ->
+    count_room place Store_stopped;
+    { t with state = Stopped (Log_diverged { expected; observed }) }
+  | Room_snapshot_fault fault ->
+    count_room place Store_stopped;
+    { t with state = Stopped (Store.stop_of_snapshot_fault fault) }
+  | Room_failed (_ : Read_result.failed) ->
+    count_room place Failed;
+    next_ask place { t with last_room = Some Last.Not_judged } ~at store
+;;
+
 let ended place t ~at store (asking : asking) = function
   | Read_ended { asked; result } -> ended_read place t ~at store asking ~asked result
-  | Room_ended result -> ended_room place t ~at store asking result
+  | Room_ended result ->
+    (match asking.asked with
+     | Room { molt_trigger = Some trigger; trace = (_ : string) } ->
+       ended_molt place t ~at store asking ~trigger result
+     | Room { molt_trigger = None; trace = (_ : string) } | Read (_ : Read_result.asked) ->
+       ended_room place t ~at store asking result)
 ;;
 
 let same_lane (held : declared option) (next : declared option) =
@@ -599,6 +681,30 @@ let table place t ~at event =
      | (Some _ | None), (Some _ | None) -> next_ask place { t with lane } ~at store)
   (* Stopped, Declaration_changed: held for the boot that opens the store. *)
   | Stopped (_ : Store.stop), Declaration_changed lane -> { t with lane }
+  (* Structural boundary (compaction epoch advance): proactively schedule a
+     declarative consolidation / synthesis / molting ask when open and not
+     already asking. Never driven by wall-clock TTL or numeric score weights. *)
+  | ( (Idle { store; seen_length = (_ : int option) } | Resting store | Refused_at_bottom store)
+    , Compaction_epoch_advanced { epoch_id } ) ->
+    (match t.lane with
+     | None -> t
+     | Some lane ->
+       let ask = t.last_ask + 1 in
+       let asking : asking =
+         { ask
+         ; since = at
+         ; lane
+         ; removed_since = []
+         ; asked =
+             Room
+               { trace = Printf.sprintf "compaction-epoch-%d" epoch_id
+               ; molt_trigger = Some (Compaction_epoch_advanced { epoch_id })
+               }
+         ; bottom = t.bottom
+         }
+       in
+       { t with state = Asking { store; asking }; last_ask = ask })
+  | (Asking _ | Stopped _), Compaction_epoch_advanced _ -> t
 ;;
 
 (* The same value changes no state, but its resolution is the one the
@@ -611,7 +717,7 @@ let decide place t ~at event =
   | Declaration_changed lane when same_lane t.lane lane -> { t with lane }
   | Declaration_changed (_ : declared option) ->
     table place { t with narrowing = Librarian_width.empty } ~at event
-  | Turn_closed | Pulse | Ask_ended _ -> table place t ~at event
+  | Turn_closed | Pulse | Ask_ended _ | Compaction_epoch_advanced _ -> table place t ~at event
 ;;
 
 type unavailable =

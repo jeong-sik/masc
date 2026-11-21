@@ -25,10 +25,12 @@ type t =
   ; tail : Log.line
   ; memory : Current.t
   ; digest : Digest.digest
+  ; last_promotions : (int * Librarian_lifecycle.world_promotion list) option
   }
 
 let memory t = t.memory
 let tail t = t.tail
+let last_promotions t = t.last_promotions
 let same (a : Digest.digest) (b : Digest.digest) = String.equal (a :> string) (b :> string)
 
 (* The snapshot a line says is on disk after it. *)
@@ -126,9 +128,22 @@ let first_boot ~log_path ~snapshot_path ~turn_log_path ~at =
   let line = started ~at ~start ~memory ~digest in
   match Log_store.append ~path:log_path ~at_end:0 line with
   | Ok { new_end; at = (_ : int) } ->
-    Ok { log_path; snapshot_path; log_end = new_end; tail = line; memory; digest }
+    Ok
+      { log_path
+      ; snapshot_path
+      ; log_end = new_end
+      ; tail = line
+      ; memory
+      ; digest
+      ; last_promotions = None
+      }
   | Error (Log_store.End_moved _ | Directory_unavailable _ | Write_failed _) ->
     Error Store_unwritable
+;;
+
+let promotions_of_tail = function
+  | Log.Committed { seq; effects = { promotions = _ :: _ as promos; _ }; _ } -> Some (seq, promos)
+  | Log.Started _ | Log.Committed { effects = { promotions = []; _ }; _ } -> None
 ;;
 
 let recover ~log_path ~snapshot_path ~log_end ~(tail : Log.line) =
@@ -137,8 +152,18 @@ let recover ~log_path ~snapshot_path ~log_end ~(tail : Log.line) =
   | Ok (memory, observed) ->
     let expected = named tail in
     let diverged = Error (Log_diverged { expected; observed }) in
+    let last_promotions = promotions_of_tail tail in
     if same observed expected
-    then Ok { log_path; snapshot_path; log_end; tail; memory; digest = observed }
+    then
+      Ok
+        { log_path
+        ; snapshot_path
+        ; log_end
+        ; tail
+        ; memory
+        ; digest = observed
+        ; last_promotions
+        }
     else (
       match tail with
       | Started _ -> diverged
@@ -154,7 +179,16 @@ let recover ~log_path ~snapshot_path ~log_end ~(tail : Log.line) =
            then diverged
            else (
              match write_snapshot snapshot_path bytes with
-             | Ok () -> Ok { log_path; snapshot_path; log_end; tail; memory = next; digest }
+             | Ok () ->
+               Ok
+                 { log_path
+                 ; snapshot_path
+                 ; log_end
+                 ; tail
+                 ; memory = next
+                 ; digest
+                 ; last_promotions
+                 }
              | Error () -> Error Store_unwritable)))
 ;;
 
@@ -307,7 +341,12 @@ let commit t ~at ~cause ~effects ~reading =
        (match append t line with
         | Error stop -> Stopped stop
         | Ok log_end ->
-          let store = { t with log_end; tail = Committed line } in
+          let last_promotions =
+            match line.effects.promotions with
+            | _ :: _ as promos -> Some (line.seq, promos)
+            | [] -> t.last_promotions
+          in
+          let store = { t with log_end; tail = Committed line; last_promotions } in
           (match next with
            | Unchanged -> Committed { store; line }
            | Rewritten { snapshot; bytes } ->
@@ -349,6 +388,53 @@ let commit_room t ~at ~(question : Librarian_room_result.question) ~slot (plan :
     ~effects:plan.effects ~reading:(Stays_with plan.working_state)
 ;;
 
+let commit_molt
+      t
+      ~at
+      ~(question : Librarian_room_result.question)
+      ~slot
+      ~trigger
+      (plan : Librarian_plan.t)
+  =
+  commit t ~at
+    ~cause:(Log.Molt_and_synthesize { question = question.id; slot; trace = question.trace; trigger })
+    ~effects:plan.effects ~reading:(Stays_with plan.working_state)
+;;
+
+let compact_log t ~at =
+  match snapshot_held t with
+  | Error stop -> Error stop
+  | Ok () ->
+    let line_count =
+      match Log_store.fold t.log_path ~init:0 ~f:(fun n (_ : Log_store.scanned) -> n + 1) with
+      | Ok n -> Ok n
+      | Error (_ : Private_jsonl_scan.error) -> Error Store_unwritable
+    in
+    (match line_count with
+     | Error stop -> Error stop
+     | Ok compacted_lines ->
+       (match Librarian_archive.read t.log_path ~current:t.memory.facts with
+        | Error (_ : Private_jsonl_scan.error) -> Error Store_unwritable
+        | Ok archived ->
+          let archive_path = Log_store.archive_path_of_log_path t.log_path in
+          (match Librarian_archive.write_cold_archive ~archive_path archived.left with
+           | Error (_ : string) -> Error Store_unwritable
+           | Ok () ->
+             let baseline =
+               line_after t.tail ~at ~basis:t.digest ~after:t.digest ~revision:t.memory.revision
+                 ~cause:
+                   (Log.Checkpoint
+                      { compacted_lines; archived_entries = List.length archived.left })
+                 ~effects:Librarian_effects.empty ~reading:Stays
+             in
+             let tail = Log.Committed baseline in
+             (match Log_store.rewrite_compacted ~path:t.log_path tail with
+              | Ok { new_end; at = (_ : int) } ->
+                Ok ({ t with log_end = new_end; tail }, compacted_lines)
+              | Error (Log_store.End_moved _ | Directory_unavailable _ | Write_failed _) ->
+                Error Store_unwritable))))
+;;
+
 (* The working state of the tail, as a reading question shows it. *)
 let tail_working_state t =
   match t.tail with
@@ -366,6 +452,7 @@ let stated : string option -> string option = function
 
 let changes t (plan : Librarian_plan.t) =
   Envelope.changes_facts plan.effects
+  || not (List.is_empty plan.effects.promotions)
   ||
   let before = tail_working_state t in
   not
@@ -448,7 +535,15 @@ let adopt ~memory_dir ~turns_dir ~keeper_id ~at ~by ~observed =
   in
   match Log_store.append ~path:log_path ~at_end:log_end line with
   | Ok { new_end; at = (_ : int) } ->
-    Ok { log_path; snapshot_path; log_end = new_end; tail = line; memory; digest = observed }
+    Ok
+      { log_path
+      ; snapshot_path
+      ; log_end = new_end
+      ; tail = line
+      ; memory
+      ; digest = observed
+      ; last_promotions = None
+      }
   | Error (Log_store.End_moved _ | Directory_unavailable _ | Write_failed _) ->
     Error (Not_adopted Store_unwritable)
 ;;

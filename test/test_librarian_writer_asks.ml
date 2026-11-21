@@ -429,6 +429,8 @@ let cause_text : Log_line.cause -> string = function
   | Read _ -> "read"
   | Make_room _ -> "make_room"
   | Skip _ -> "skip"
+  | Molt_and_synthesize _ -> "molt_and_synthesize"
+  | Checkpoint _ -> "checkpoint"
 ;;
 
 let causes fixture = List.map (fun (commit : Log_line.commit) -> cause_text commit.cause) (commits fixture)
@@ -491,7 +493,7 @@ let test_three_closed_turns_are_one_question_and_one_commit () =
    as [Unknown_ref]. *)
 let test_one_unknown_name_leaves_one_op_out () =
   let observed claim : Librarian_answer.new_fact =
-    { claim; category = Types.Fact; observation = Types.Transcript; from_units = [ "u1" ] }
+    { claim; category = Types.Fact; basis = Types.Observed Types.Transcript; from_units = [ "u1" ] }
   in
   let ops : Librarian_answer.op list =
     [ Add (observed "the release train leaves on Friday")
@@ -631,7 +633,7 @@ let test_a_skip_during_the_call_passes_the_head () =
       | Skip { hole = Operator_skipped { by; missing } } ->
         check string "the line names the operator" "operator-1" by;
         check int "and no missing part" 0 (List.length missing)
-      | Direct _ | Read _ | Make_room _ | Adopt _ | Skip _ -> fail "the first commit is not the operator's skip");
+      | Direct _ | Read _ | Make_room _ | Adopt _ | Skip _ | Molt_and_synthesize _ | Checkpoint _ -> fail "the first commit is not the operator's skip");
      check string "it passes the first turn"
        (position_text (Through { line = first; within = Whole }))
        (position_text skipped.covers_through)

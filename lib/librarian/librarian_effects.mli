@@ -29,6 +29,9 @@ type removal =
       }
   | Support_lost of { missing : string list }
   (** A derived fact whose premises are no longer in Memory. *)
+  | Molted of { reason : string }
+  (** Proactively shed into compacted cold archive at a structural lifecycle
+      boundary (Ship-of-Theseus molting). *)
 
 (** Why one op of an answer was left out. The other ops still apply. *)
 type why_not =
@@ -59,6 +62,9 @@ type t =
   ; sources : (string * int list) list
   (** For a fact an op stated or saw again: the turn log offsets of the units
       it named. *)
+  ; promotions : Librarian_lifecycle.world_promotion list
+  (** Verified local-to-world memory promotion proposals emitted by
+      [Promote_to_world] ops in this commit. *)
   }
 
 val empty : t

@@ -31,12 +31,22 @@ let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
       ~start_turn_log
   in
   update (By_workspace.add key table);
+  Keeper_compaction.set_on_epoch_committed
+    (Some
+       (fun ~keeper_id (anchor : Keeper_compaction.compaction_anchor) ->
+          By_workspace.iter
+            (fun (_ : string) writers ->
+               Librarian_writers.compaction_epoch_advanced writers keeper_id
+                 ~epoch_id:anchor.epoch_id)
+            (Atomic.get tables)));
   (* A later start may have replaced this table; only its own entry goes. *)
   Eio.Switch.on_release sw (fun () ->
     update (fun tables ->
       match By_workspace.find_opt key tables with
       | Some current when current == table -> By_workspace.remove key tables
-      | Some _ | None -> tables));
+      | Some _ | None -> tables);
+    if By_workspace.is_empty (Atomic.get tables)
+    then Keeper_compaction.set_on_epoch_committed None);
   table
 ;;
 

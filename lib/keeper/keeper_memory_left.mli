@@ -34,6 +34,9 @@ type why =
       }
   | Support_lost of { missing : string list }
   (** A derived fact whose premises left. [missing] names them. *)
+  | Molted of { reason : string }
+  (** Proactively shed into compacted cold archive at a structural lifecycle
+      boundary. *)
 
 (** A fact that left with nothing in its place ([source=dropped]). *)
 type dropped =

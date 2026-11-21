@@ -587,7 +587,8 @@ let removed_by (commit : Masc.Librarian_log.commit) =
          | Superseded_by successor -> "superseded by " ^ successor
          | Dropped { reason } -> "dropped: " ^ reason
          | Merged_into successor -> "merged into " ^ successor
-         | Revised_into successor -> "revised into " ^ successor ))
+         | Revised_into successor -> "revised into " ^ successor
+         | Molted { reason } -> "molted: " ^ reason ))
     commit.effects.removed
 ;;
 

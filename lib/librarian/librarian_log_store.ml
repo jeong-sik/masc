@@ -2,9 +2,22 @@ module Log = Librarian_log
 module Codec = Librarian_log_codec
 
 let suffix = ".memory-log.jsonl"
+let archive_suffix = ".memory-archive.jsonl"
 
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
+;;
+
+let archive_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ archive_suffix)
+;;
+
+let archive_path_of_log_path log_path =
+  let slen = String.length suffix in
+  let plen = String.length log_path in
+  if plen >= slen && String.equal (String.sub log_path (plen - slen) slen) suffix
+  then String.sub log_path 0 (plen - slen) ^ archive_suffix
+  else log_path ^ ".archive.jsonl"
 ;;
 
 type tail =
@@ -150,4 +163,16 @@ let append ~path ~at_end line =
          ; _
          } ->
        Error (Write_failed { path; detail = Fs_compat.private_jsonl_append_error_to_string error }))
+;;
+
+let rewrite_compacted ~path line =
+  let row = Yojson.Safe.to_string (Codec.to_json line) ^ "\n" in
+  let dir = Filename.dirname path in
+  match Fs_compat.mkdir_p dir with
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn -> Error (Directory_unavailable { path = dir; detail = Printexc.to_string exn })
+  | () ->
+    (match Fs_compat.save_file_atomic_strict path row with
+     | Ok () -> Ok { new_end = String.length row; at = 0 }
+     | Error detail -> Error (Write_failed { path; detail }))
 ;;

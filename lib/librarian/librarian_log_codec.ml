@@ -63,6 +63,10 @@ let f_sha = "sha"
 let f_to = "to"
 let f_length = "length"
 let f_row = "row"
+let f_trigger = "trigger"
+let f_compacted_lines = "compacted_lines"
+let f_archived_entries = "archived_entries"
+let f_promotions = "promotions"
 
 type line_kind =
   | Kind_started
@@ -81,6 +85,8 @@ type cause_kind =
   | Kind_read
   | Kind_make_room
   | Kind_skip
+  | Kind_molt_and_synthesize
+  | Kind_checkpoint
 
 let cause_kind_token = function
   | Kind_direct -> "direct"
@@ -88,9 +94,20 @@ let cause_kind_token = function
   | Kind_read -> "read"
   | Kind_make_room -> "make_room"
   | Kind_skip -> "skip"
+  | Kind_molt_and_synthesize -> "molt_and_synthesize"
+  | Kind_checkpoint -> "checkpoint"
 ;;
 
-let cause_kinds = [ Kind_direct; Kind_adopt; Kind_read; Kind_make_room; Kind_skip ]
+let cause_kinds =
+  [ Kind_direct
+  ; Kind_adopt
+  ; Kind_read
+  ; Kind_make_room
+  ; Kind_skip
+  ; Kind_molt_and_synthesize
+  ; Kind_checkpoint
+  ]
+;;
 
 type shown_kind =
   | Kind_shown_memory
@@ -238,6 +255,7 @@ type removal_kind =
   | Kind_superseded_by
   | Kind_retracted
   | Kind_support_lost
+  | Kind_molted
 
 let removal_kind_token = function
   | Kind_dropped -> "dropped"
@@ -246,6 +264,7 @@ let removal_kind_token = function
   | Kind_superseded_by -> "superseded_by"
   | Kind_retracted -> "retracted"
   | Kind_support_lost -> "support_lost"
+  | Kind_molted -> "molted"
 ;;
 
 let removal_kinds =
@@ -255,6 +274,7 @@ let removal_kinds =
   ; Kind_superseded_by
   ; Kind_retracted
   ; Kind_support_lost
+  ; Kind_molted
   ]
 ;;
 
@@ -427,6 +447,20 @@ let cause_to_json = function
       ; f_trace, `String trace
       ]
   | Skip { hole } -> `Assoc [ kind (cause_kind_token Kind_skip); f_hole, hole_to_json hole ]
+  | Molt_and_synthesize { question; slot; trace; trigger } ->
+    `Assoc
+      [ kind (cause_kind_token Kind_molt_and_synthesize)
+      ; f_question, question_to_json question
+      ; f_slot, `String slot
+      ; f_trace, `String trace
+      ; f_trigger, Librarian_lifecycle.molt_trigger_to_json trigger
+      ]
+  | Checkpoint { compacted_lines; archived_entries } ->
+    `Assoc
+      [ kind (cause_kind_token Kind_checkpoint)
+      ; f_compacted_lines, `Int compacted_lines
+      ; f_archived_entries, `Int archived_entries
+      ]
 ;;
 
 let within_to_json = function
@@ -463,6 +497,8 @@ let removal_to_json : Effects.removal -> Yojson.Safe.t = function
       ]
   | Support_lost { missing } ->
     `Assoc [ kind (removal_kind_token Kind_support_lost); f_missing, ids_json missing ]
+  | Molted { reason } ->
+    `Assoc [ kind (removal_kind_token Kind_molted); f_reason, `String reason ]
 ;;
 
 let why_to_json (why : Effects.why_not) =
@@ -475,7 +511,7 @@ let why_to_json (why : Effects.why_not) =
 
 let effects_to_json (effects : Effects.t) =
   `Assoc
-    [ f_added, `List (List.map fact_to_json effects.added)
+    ([ f_added, `List (List.map fact_to_json effects.added)
     ; f_touched, ids_json effects.touched
     ; ( f_removed
       , `List
@@ -506,6 +542,11 @@ let effects_to_json (effects : Effects.t) =
                   ])
              effects.sources) )
     ]
+    @
+    match effects.promotions with
+    | [] -> []
+    | promos ->
+      [ f_promotions, `List (List.map Librarian_lifecycle.world_promotion_to_json promos) ])
 ;;
 
 let to_json = function
@@ -771,6 +812,18 @@ let cause_of_json json =
     let* () = exact_field_names_result [ f_kind; f_hole ] fields in
     let* hole = object_field f_hole fields hole_of_json in
     Ok (Skip { hole })
+  | Kind_molt_and_synthesize ->
+    let* () = exact_field_names_result [ f_kind; f_question; f_slot; f_trace; f_trigger ] fields in
+    let* question = object_field f_question fields question_of_json in
+    let* slot = wire_string_field f_slot fields in
+    let* trace = wire_string_field f_trace fields in
+    let* trigger = object_field f_trigger fields Librarian_lifecycle.molt_trigger_of_json in
+    Ok (Molt_and_synthesize { question; slot; trace; trigger })
+  | Kind_checkpoint ->
+    let* () = exact_field_names_result [ f_kind; f_compacted_lines; f_archived_entries ] fields in
+    let* compacted_lines = count_field f_compacted_lines fields in
+    let* archived_entries = count_field f_archived_entries fields in
+    Ok (Checkpoint { compacted_lines; archived_entries })
 ;;
 
 let within_of_json json =
@@ -830,6 +883,10 @@ let removal_of_json json : (Effects.removal, wire_error) result =
     let* () = exact_field_names_result [ f_kind; f_missing ] fields in
     let* missing = list_field f_missing fields memory_id_of_json in
     Ok (Effects.Support_lost { missing })
+  | Kind_molted ->
+    let* () = exact_field_names_result [ f_kind; f_reason ] fields in
+    let* reason = wire_string_field f_reason fields in
+    Ok (Effects.Molted { reason })
 ;;
 
 let why_of_json json : (Effects.why_not, wire_error) result =
@@ -886,15 +943,24 @@ let source_of_json json =
 
 let effects_of_json json : (Effects.t, wire_error) result =
   let* fields = object_fields json in
-  let* () =
-    exact_field_names_result [ f_added; f_touched; f_removed; f_not_applied; f_sources ] fields
+  let has_promotions = List.mem_assoc f_promotions fields in
+  let expected_fields =
+    if has_promotions
+    then [ f_added; f_touched; f_removed; f_not_applied; f_sources; f_promotions ]
+    else [ f_added; f_touched; f_removed; f_not_applied; f_sources ]
   in
+  let* () = exact_field_names_result expected_fields fields in
   let* added = list_field f_added fields fact_of_json in
   let* touched = list_field f_touched fields memory_id_of_json in
   let* removed = list_field f_removed fields removed_of_json in
   let* not_applied = list_field f_not_applied fields not_applied_of_json in
   let* sources = list_field f_sources fields source_of_json in
-  Ok { Effects.added; touched; removed; not_applied; sources }
+  let* promotions =
+    if has_promotions
+    then list_field f_promotions fields Librarian_lifecycle.world_promotion_of_json
+    else Ok []
+  in
+  Ok { Effects.added; touched; removed; not_applied; sources; promotions }
 ;;
 
 let working_state_field fields =

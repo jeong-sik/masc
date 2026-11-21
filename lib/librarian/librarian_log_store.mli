@@ -12,10 +12,18 @@
     between calls. *)
 
 val suffix : string
+val archive_suffix : string
 
 (** [keepers_dir] is the configuration's Keepers directory, where the
     snapshot is. *)
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
+
+(** Cold compacted archive sidecar path ([<keeper_id>.memory-archive.jsonl])
+    storing historical removals flushed by log checkpoint compaction. *)
+val archive_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
+
+(** Derive the cold archive sidecar path from a commit log path. *)
+val archive_path_of_log_path : string -> string
 
 type tail =
   | Nothing_written (** No file, or no complete line. *)
@@ -91,5 +99,12 @@ type appended =
 val append
   :  path:string
   -> at_end:int
+  -> Librarian_log.line
+  -> (appended, append_error) result
+
+(** Atomically replace the commit log with a single compacted checkpoint
+    baseline line so future scans read only post-checkpoint commits. *)
+val rewrite_compacted
+  :  path:string
   -> Librarian_log.line
   -> (appended, append_error) result

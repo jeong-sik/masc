@@ -1,12 +1,11 @@
-(** The facts that left a Keeper's Memory, read from its commit log
-    (RFC librarian-call-only-proposes §10, §11.5).
+(** The facts that left a Keeper's Memory, read from its cold compacted
+    archive sidecar (if present) plus the post-checkpoint tail of its commit
+    log ([<keeper>.memory-log.jsonl]).
 
-    This is what a search for dropped or absorbed facts reads, and where a
-    fact's successor is found: a removal says what the fact was merged into,
-    revised into or superseded by. Nothing here writes, and no index is
-    kept: every reading scans the log.
-
-    The log starts at the cut. A fact removed before it is not here. *)
+    After {!Librarian_store.compact_log} checkpoints the commit log, reading
+    the archive avoids O(all-history) byte-0 scans of the live log: cold
+    removals are served from [<keeper>.memory-archive.jsonl] and only commits
+    after the latest [Checkpoint] baseline are folded from the live log. *)
 
 open Keeper_memory_os_types
 
@@ -14,19 +13,18 @@ type left =
   { fact : fact (** As Memory held it when it left. *)
   ; removal : Librarian_effects.removal
   ; at : float (** When the line that removed it was committed. *)
-  ; line_at : int (** Byte offset of that line in the commit log. *)
+  ; line_at : int (** Byte offset of that line in the commit log (or 0 in cold archive). *)
   }
 
 type t =
   { left : left list
-  (** One entry for every fact whose last line in the log removed it, in the
-      order of those lines. A fact that was added again after it left has no
-      entry, and neither has a fact [current] holds. *)
   ; unreadable : int
-  (** Lines that do not decode. What they removed or added is not known, so
-      an absence here is not proof when this is not 0. *)
   }
 
-(** [current] is the Memory the snapshot holds now. A snapshot an operator
-    adopted can hold a fact the log last saw leaving. *)
+(** [current] is the Memory the snapshot holds now. Reads cold compacted
+    entries (if [<archive_path>] exists) followed by the live commit log. *)
 val read : string -> current:fact list -> (t, Private_jsonl_scan.error) result
+
+(** Atomically persist compacted cold archive entries to [archive_path]
+    (one JSON object per line). *)
+val write_cold_archive : archive_path:string -> left list -> (unit, string) result

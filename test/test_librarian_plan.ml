@@ -55,7 +55,7 @@ let shown_of facts : Plan.shown =
 ;;
 
 let stated ?(from_units = []) claim : Answer.new_fact =
-  { claim; category = Types.Fact; observation = Types.Transcript; from_units }
+  { claim; category = Types.Fact; basis = Types.Observed Types.Transcript; from_units }
 ;;
 
 let claims facts = List.map (fun (fact : Types.fact) -> fact.claim) facts
@@ -68,6 +68,7 @@ let removal_text : Effects.removal -> string = function
   | Retracted { by = Keeper; reason } -> "retracted by the keeper: " ^ reason
   | Retracted { by = Operator operator; reason } -> "retracted by " ^ operator ^ ": " ^ reason
   | Support_lost { missing } -> "support lost: " ^ String.concat "," missing
+  | Molted { reason } -> "molted: " ^ reason
 ;;
 
 let why_text : Effects.why_not -> string = function

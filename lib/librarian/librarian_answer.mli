@@ -1,5 +1,5 @@
 (** What one Librarian model call answers
-    (RFC librarian-call-only-proposes §6.2).
+    (RFC librarian-call-only-proposes §6.2 + Living Evolutionary Memory).
 
     An answer names only what changes: a fact no op names stays as it is. The
     answer points at a fact by the short name the question gave it ([m3]) and
@@ -8,15 +8,18 @@
     resolves it and records an op with an unknown name as not applied, without
     throwing the other ops away.
 
-    A new fact of an answer is always observed. Derived facts are written only
-    by a Keeper's direct write. *)
+    Both [Observed] and [Derived] provenance are accepted. Dedicated
+    evolutionary ops ([Synthesize], [Molt], [Promote_to_world]) enable
+    cross-category synthesis over named premises, proactive declarative
+    molting into compacted cold archive, and verified promotions to shared
+    MASC World Memory. *)
 
 open Keeper_memory_os_types
 
 type new_fact =
   { claim : string
   ; category : category
-  ; observation : observation
+  ; basis : basis
   ; from_units : string list (** Names of the units the claim was read from. *)
   }
 
@@ -42,6 +45,30 @@ type op =
   (** The units said again what a fact in Memory says. The answer names the
       fact instead of copying its claim, so a reconfirmation cannot fork a
       near copy of the fact it means. *)
+  | Synthesize of
+      { refs : string list
+      (** At least one premise fact name (e.g. ["m1"; "m3"]), none repeated.
+          Premise facts remain in Memory while the synthesized [Derived] fact
+          records their canonical memory IDs as proof premises. *)
+      ; claim : string
+      ; category : category
+      ; rule_id : string
+      ; from_units : string list
+      }
+  | Molt of
+      { refs : string list
+      (** At least one fact name, none repeated, shed proactively into cold
+          archive without waiting for overflow panic. *)
+      ; reason : string
+      }
+  | Promote_to_world of
+      { refs : string list
+      (** At least one supporting local fact name, none repeated. *)
+      ; scope : string
+      ; claim : string
+      ; category : category
+      ; facets : string list
+      }
 
 type working_state =
   | Keep
@@ -65,42 +92,17 @@ type rejection =
 (** Stable token for a metric label or a log field. *)
 val rejection_kind : rejection -> string
 
-(** The wire shape. [working_state] is [null] for {!Keep}.
-
-    {v
-    { "question": "<front half>", "question_end": "<back half>",
-      "working_state": null,
-      "ops": [
-        { "op": "add", "claim": "…", "category": "fact",
-          "basis": { "kind": "observed" }, "from": ["u1"] },
-        { "op": "drop", "ref": "m2", "reason": "…" },
-        { "op": "merge", "refs": ["m1", "m3"], "claim": "…", "category": "fact",
-          "basis": { "kind": "observed" }, "from": [] },
-        { "op": "revise", "ref": "m4", "claim": "…", "category": "fact",
-          "basis": { "kind": "observed" }, "from": ["u2"] },
-        { "op": "seen", "ref": "m5", "from": ["u1"] } ] }
-    v}
-
-    [basis] has the shape a fact's basis has in Memory, so the model writes
-    what it reads. *)
+(** The wire shape. [working_state] is [null] for {!Keep}. *)
 val to_json : t -> Yojson.Safe.t
 
 (** The JSON schemas an answer is asked to match, one for each kind of
-    question: the lane value's [answer_schemas]. They are built from the
-    field lists the decoder takes, so they name the same fields of every
-    object.
+    question: the lane value's [answer_schemas].
 
-    - [range]: every op, and a working state that is a string or [null].
-    - [item_alone]: [add] only, and a [null] working state. The question
-      showed no fact to name and no working state to replace.
-    - [room]: [drop], [merge] and [revise], and either working state. The
-      question showed no unit, so nothing is new and nothing is seen again.
-
-    The decoder reads every answer the same way, whichever schema it was
-    asked to match: what a schema leaves out, the plan leaves out op by op
-    ({!Librarian_plan}). The decoder still refuses what no schema states: a
-    blank claim, reason or name, an empty or repeated [refs], an unknown
-    category. *)
+    - [range]: every op (including [synthesize], [molt], [promote_to_world]),
+      and a working state that is a string or [null].
+    - [item_alone]: [add] only, and a [null] working state.
+    - [room]: [drop], [merge], [revise], [synthesize], [molt],
+      [promote_to_world], and either working state. *)
 val schemas : Librarian_memory_lane.answer_schemas
 
 (** A new fact alone, with the fields it has inside an op: [claim],
@@ -110,15 +112,8 @@ val new_fact_to_json : new_fact -> Yojson.Safe.t
 
 val new_fact_of_json : Yojson.Safe.t -> (new_fact, wire_error) result
 
-(** Decode an answer to the question [asked]. Every object is field-exact.
-    Checks run in this order, and the first failure is the rejection: the
-    document's field set, the two echoed halves being strings
-    ({!Schema_violation}), the halves being those of [asked]
-    ({!Echo_mismatch}), then [working_state] and each op
-    ({!Schema_violation}). *)
+(** Decode an answer to the question [asked]. Every object is field-exact. *)
 val of_json : asked:Librarian_question_id.t -> Yojson.Safe.t -> (t, rejection) result
 
-(** {!of_json} on text that is one JSON document. The JSON reader skips
-    whitespace and JSON comments ([// …], [/* … */]) around the document.
-    Any other text around it, a code fence included, is {!Not_json}. *)
+(** {!of_json} on text that is one JSON document. *)
 val of_string : asked:Librarian_question_id.t -> string -> (t, rejection) result

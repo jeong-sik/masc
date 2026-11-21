@@ -54,6 +54,12 @@ val memory : t -> Current.t
 (** The last line. What was read, and what the Keeper was doing, are in it. *)
 val tail : t -> Librarian_log.line
 
+(** The most recent non-empty [Promote_to_world] batch committed in this store
+    together with its originating commit [seq]. Preserved across {!compact_log}
+    so post-molt log compaction never hides pending world promotions from the
+    writer's announcer. *)
+val last_promotions : t -> (int * Librarian_lifecycle.world_promotion list) option
+
 (** [memory_dir] holds the snapshot and the commit log, [turns_dir] the turn
     log.
 
@@ -159,11 +165,31 @@ val commit_room
   -> Librarian_plan.t
   -> committed
 
+(** Commits a proactive declarative [Molt_and_synthesize] pass triggered at a
+    structural lifecycle boundary (compaction epoch advance or completed
+    synthesis cycle). Does not move turn-log reading position. *)
+val commit_molt
+  :  t
+  -> at:float
+  -> question:Librarian_room_result.question
+  -> slot:string
+  -> trigger:Librarian_lifecycle.molt_trigger
+  -> Librarian_plan.t
+  -> committed
+
+(** Finite-storage log checkpoint compaction: flushes historical removals from
+    the live [.memory-log.jsonl] into the cold archive sidecar
+    ([.memory-archive.jsonl]) and atomically rewrites the live log to a single
+    [Checkpoint] baseline line preserving the exact current snapshot, revision,
+    reading position, and working state. Returns the updated store and the
+    number of historical lines compacted. *)
+val compact_log : t -> at:float -> (t * int, stop) result
+
 (** Whether committing [plan] without moving reading changes anything: its
-    effects add, see or remove a fact, or its working state is not the one
-    the last line holds. [""] and no working state are the same: both hold
-    none. An op that was not applied is no change: only an answer with an
-    op that takes effect is committed (§7.4). *)
+    effects add, see or remove a fact, emit world promotions, or its working
+    state is not the one the last line holds. [""] and no working state are
+    the same: both hold none. An op that was not applied is no change: only
+    an answer with an op that takes effect is committed (§7.4). *)
 val changes : t -> Librarian_plan.t -> bool
 
 (** A [Skip] line on disk. A skip has no effects, so it leaves Memory and

@@ -46,7 +46,8 @@ let rewritten ~(previous : Current.t) ~at ~(effects : Effects.t) ~source =
       (fun (fact, (removal : Effects.removal)) ->
          match removal with
          | Support_lost { missing } -> Some { Current.fact; missing_premise_ids = missing }
-         | Dropped _ | Merged_into _ | Revised_into _ | Superseded_by _ | Retracted _ -> None)
+         | Dropped _ | Merged_into _ | Revised_into _ | Superseded_by _ | Retracted _ | Molted _ ->
+           None)
       effects.removed
   in
   match
@@ -77,6 +78,7 @@ let next ~previous ~at (cause : Log.cause) effects =
   match cause with
   | Adopt { by = (_ : string); observed = (_ : Digest.digest) } -> Ok Unchanged
   | Skip { hole = (_ : Log.hole) } -> Ok Unchanged
+  | Checkpoint { compacted_lines = (_ : int); archived_entries = (_ : int) } -> Ok Unchanged
   | Direct { by = (_ : Effects.actor); trace; write } ->
     rewritten ~previous ~at ~effects ~source:(source_of_direct ~trace write)
   | Read
@@ -86,7 +88,13 @@ let next ~previous ~at (cause : Log.cause) effects =
       ; slot = (_ : string)
       ; missing = (_ : Librarian_unit.missing_at list)
       }
-  | Make_room { trace; question = (_ : Librarian_question_id.t); slot = (_ : string) } ->
+  | Make_room { trace; question = (_ : Librarian_question_id.t); slot = (_ : string) }
+  | Molt_and_synthesize
+      { trace
+      ; question = (_ : Librarian_question_id.t)
+      ; slot = (_ : string)
+      ; trigger = (_ : Librarian_lifecycle.molt_trigger)
+      } ->
     if changes_facts effects
     then
       rewritten ~previous ~at ~effects

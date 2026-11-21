@@ -66,6 +66,16 @@ type cause =
       ; trace : string
       }
   | Skip of { hole : hole }
+  | Molt_and_synthesize of
+      { question : Librarian_question_id.t
+      ; slot : string
+      ; trace : string
+      ; trigger : Librarian_lifecycle.molt_trigger
+      }
+  | Checkpoint of
+      { compacted_lines : int
+      ; archived_entries : int
+      }
 
 type commit =
   { seq : int

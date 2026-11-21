@@ -1,6 +1,7 @@
 open Keeper_memory_os_types
 module Answer = Librarian_answer
 module Effects = Librarian_effects
+module Lifecycle = Librarian_lifecycle
 module Ids = Set_util.StringSet
 module By_id = Set_util.StringMap
 module Op_numbers = Set.Make (Int)
@@ -15,10 +16,14 @@ type read =
 type shown =
   | Read of read
   | Room of { memory : (string * string) list }
+  | Molt of
+      { memory : (string * string) list
+      ; trigger : Lifecycle.molt_trigger
+      }
 
 let units_of = function
   | Read (Range { units; _ } | Item_alone { units }) -> units
-  | Room _ -> []
+  | Room _ | Molt _ -> []
 ;;
 
 type working_state =
@@ -32,24 +37,19 @@ type t =
   ; working_state : working_state
   }
 
-(* What a screened op says of one fact, in Memory ids. *)
 type stating =
   | New_claim of string * Answer.new_fact * int list
-  (** Id of the claim, the claim, and the offsets of the units it names. *)
   | Seen_again of string * int list
-  (** Id of a fact Memory holds, and the offsets of the units that said it
-      again. *)
 
-(* The fact a stating op leaves in Memory, and the offsets of its units. *)
 let kept_and_units = function
   | New_claim (id, (_ : Answer.new_fact), offsets) | Seen_again (id, offsets) -> id, offsets
 ;;
 
-(* An op that passed screening, in Memory ids. *)
 type screened =
   { number : int
   ; removes : (string * Effects.removal) list
   ; states : stating option
+  ; promotion : Lifecycle.world_promotion option
   }
 
 let ( let* ) = Result.bind
@@ -73,16 +73,24 @@ let resolve_all table names ~missing =
 
 let stated_fact = function
   | Answer.Add fact | Merge { into = fact; _ } | Revise { into = fact; _ } -> Some fact
-  | Drop _ | Seen _ -> None
+  | Drop _ | Seen _ | Synthesize _ | Molt _ | Promote_to_world _ -> None
 ;;
 
-let named_facts = function
-  | Answer.Add _ -> []
+(* Refs whose facts are mutated/removed or confirmed — cannot be targeted twice
+   by mutating ops in the same answer. Read-only premise citations in
+   [Synthesize] and [Promote_to_world] are validated against [current] and
+   [removed_since] without blocking sibling read-only synthesis/promotion. *)
+let mutating_named_facts = function
+  | Answer.Add _ | Synthesize _ | Promote_to_world _ -> []
   | Drop { ref_; _ } | Revise { ref_; _ } | Seen { ref_; _ } -> [ ref_ ]
-  | Merge { refs; _ } -> refs
+  | Merge { refs; _ } | Molt { refs; _ } -> refs
 ;;
 
-(* A named fact whose claim is the new claim is the fact that stays. *)
+let read_only_named_facts = function
+  | Answer.Synthesize { refs; _ } | Promote_to_world { refs; _ } -> refs
+  | Add _ | Drop _ | Merge _ | Revise _ | Seen _ | Molt _ -> []
+;;
+
 let replaced ids ~by removal =
   List.filter_map (fun id -> if String.equal id by then None else Some (id, removal)) ids
 ;;
@@ -90,87 +98,107 @@ let replaced ids ~by removal =
 let screen ~shown ~current ~removed_since ~named_before number op =
   let* table =
     match shown, op with
-    | Read (Item_alone _), (Answer.Drop _ | Merge _ | Revise _ | Seen _) ->
-      Error Effects.Not_valid_alone
+    | ( Read (Item_alone _)
+      , (Answer.Drop _ | Merge _ | Revise _ | Seen _ | Synthesize _ | Molt _ | Promote_to_world _) )
+      -> Error Effects.Not_valid_alone
     | Read (Item_alone _), Add _ -> Ok []
-    | Room _, (Add _ | Seen _) -> Error Effects.Not_valid_in_room
-    | Room { memory }, (Drop _ | Merge _ | Revise _)
-    | Read (Range { memory; _ }), (Add _ | Drop _ | Merge _ | Revise _ | Seen _) -> Ok memory
+    | (Room _ | Molt _), (Add _ | Seen _) -> Error Effects.Not_valid_in_room
+    | ( (Room { memory } | Molt { memory; _ })
+      , (Drop _ | Merge _ | Revise _ | Synthesize _ | Molt _ | Promote_to_world _) )
+    | ( Read (Range { memory; _ })
+      , (Add _ | Drop _ | Merge _ | Revise _ | Seen _ | Synthesize _ | Molt _ | Promote_to_world _) )
+      -> Ok memory
   in
-  let* named = resolve_all table (named_facts op) ~missing:Effects.Unknown_ref in
-  let stated =
-    Option.map
-      (fun (fact : Answer.new_fact) -> memory_id_of_claim fact.claim, fact)
-      (stated_fact op)
+  let* mutating_named = resolve_all table (mutating_named_facts op) ~missing:Effects.Unknown_ref in
+  let* readonly_named = resolve_all table (read_only_named_facts op) ~missing:Effects.Unknown_ref in
+  let all_named = mutating_named @ readonly_named in
+  let stated_claim_id =
+    match op with
+    | Answer.Add fact | Merge { into = fact; _ } | Revise { into = fact; _ } ->
+      Some (memory_id_of_claim fact.claim)
+    | Synthesize { claim; _ } -> Some (memory_id_of_claim claim)
+    | Drop _ | Seen _ | Molt _ | Promote_to_world _ -> None
   in
   let* () =
     match
       List.find_map
         (fun id -> By_id.find_opt id removed_since)
-        (named @ Option.to_list (Option.map fst stated))
+        (all_named @ Option.to_list stated_claim_id)
     with
     | Some seq -> Error (Effects.Removed_during_flight { seq })
     | None -> Ok ()
   in
   let* () =
-    if List.for_all (fun id -> Ids.mem id current) named
+    if List.for_all (fun id -> Ids.mem id current) all_named
     then Ok ()
     else Error Effects.Unknown_ref
   in
   let* () =
-    if List.exists (fun id -> Ids.mem id named_before) named
+    if List.exists (fun id -> Ids.mem id named_before) mutating_named
     then Error Effects.Ref_used_twice
     else Ok ()
   in
   let units names =
     resolve_all (units_of shown) names ~missing:Effects.Source_outside_question
   in
-  let* states =
-    match op, stated with
-    | Answer.Seen { ref_; from_units }, (_ : (string * Answer.new_fact) option) ->
+  let* states, promotion =
+    match op with
+    | Answer.Seen { ref_; from_units } ->
       let* seen = resolve_one table ref_ ~missing:Effects.Unknown_ref in
       let* offsets = units from_units in
-      Ok (Some (Seen_again (seen, offsets)))
-    | (Add _ | Drop _ | Merge _ | Revise _), None -> Ok None
-    | (Add _ | Drop _ | Merge _ | Revise _), Some (id, fact) ->
+      Ok (Some (Seen_again (seen, offsets)), None)
+    | Add fact | Merge { into = fact; _ } | Revise { into = fact; _ } ->
       let* offsets = units fact.from_units in
-      Ok (Some (New_claim (id, fact, offsets)))
+      Ok (Some (New_claim (memory_id_of_claim fact.claim, fact, offsets)), None)
+    | Synthesize { claim; category; rule_id; from_units; _ } ->
+      let* offsets = units from_units in
+      let derivation = normalize_derivation { rule_id; premise_ids = readonly_named } in
+      let synth_fact : Answer.new_fact =
+        { claim; category; basis = Derived [ derivation ]; from_units }
+      in
+      Ok (Some (New_claim (memory_id_of_claim claim, synth_fact, offsets)), None)
+    | Promote_to_world { scope; claim; category; facets; _ } ->
+      let promo : Lifecycle.world_promotion =
+        { source_fact_ids = readonly_named; claim; category; facets; scope }
+      in
+      Ok (None, Some promo)
+    | Drop _ | Molt _ -> Ok (None, None)
   in
   let removes =
     match op with
-    | Answer.Add _ | Seen _ -> []
-    | Drop { reason; _ } -> List.map (fun id -> id, Effects.Dropped { reason }) named
+    | Answer.Add _ | Seen _ | Synthesize _ | Promote_to_world _ -> []
+    | Drop { reason; _ } -> List.map (fun id -> id, Effects.Dropped { reason }) mutating_named
+    | Molt { reason; _ } -> List.map (fun id -> id, Effects.Molted { reason }) mutating_named
     | Merge { into; _ } ->
       let successor = memory_id_of_claim into.claim in
-      replaced named ~by:successor (Effects.Merged_into successor)
+      replaced mutating_named ~by:successor (Effects.Merged_into successor)
     | Revise { into; _ } ->
       let successor = memory_id_of_claim into.claim in
-      replaced named ~by:successor (Effects.Revised_into successor)
+      replaced mutating_named ~by:successor (Effects.Revised_into successor)
   in
-  Ok ({ number; removes; states }, named)
+  Ok ({ number; removes; states; promotion }, mutating_named)
 ;;
 
-let observed_fact ~first_seen ~last_seen ~trace_id (fact : Answer.new_fact) : fact =
+let normalize_basis = function
+  | Observed _ as basis -> basis
+  | Derived derivations -> Derived (List.map normalize_derivation derivations)
+;;
+
+let materialized_fact ~first_seen ~last_seen ~trace_id (fact : Answer.new_fact) : fact =
   { claim = fact.claim
   ; category = fact.category
   ; first_seen
   ; last_seen
   ; origin = { kind = Injected; trace_id }
-  ; basis = Observed fact.observation
+  ; basis = normalize_basis fact.basis
   }
 ;;
 
-(* What the facts a claim replaces say about time. A merge or a revision
-   says what those facts said, so Memory has known it since the oldest of
-   them was first seen, and has no newer evidence for it than the newest of
-   them was last seen unless an op names a unit for it. *)
 type replaced_span =
   { earliest_first_seen : float
   ; latest_last_seen : float
   }
 
-(* For each claim a live op states, the span of the facts the ops stating it
-   replace. A claim that replaces nothing has no entry. *)
 let replaced_spans ~by_id live =
   List.fold_left
     (fun spans op ->
@@ -200,10 +228,6 @@ let replaced_spans ~by_id live =
     live
 ;;
 
-(* The claims a live op states or sees again while naming at least one unit.
-   Only those have new evidence: a held claim written again without a unit is
-   the question's own Memory read back, and a merge or a revision that names
-   no unit only says again what Memory held. *)
 let evidenced live =
   List.fold_left
     (fun ids op ->
@@ -217,7 +241,6 @@ let evidenced live =
     live
 ;;
 
-(* Offsets of one fact from every op that stated it: ascending, none twice. *)
 let sources_of stated =
   List.fold_left
     (fun sources (id, offsets) ->
@@ -238,7 +261,9 @@ let sources_of stated =
 
 let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
   let current = ids_of facts in
-  let by_id = List.fold_left (fun by_id fact -> By_id.add (memory_id fact) fact by_id) By_id.empty facts in
+  let by_id =
+    List.fold_left (fun by_id fact -> By_id.add (memory_id fact) fact by_id) By_id.empty facts
+  in
   let removed_since =
     List.fold_left
       (fun by_id (id, seq) -> By_id.add id seq by_id)
@@ -256,7 +281,6 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
       (List.mapi (fun number op -> number, op) answer.ops)
   in
   let screened = List.rev screened in
-  (* Withdrawn ops only grow, so this ends after at most one round per op. *)
   let rec settle withdrawn =
     let live = List.filter (fun op -> not (Op_numbers.mem op.number withdrawn)) screened in
     let removal_of =
@@ -284,17 +308,11 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
                else touched, added, added_ids
              else (
                match stating with
-               | Seen_again ((_ : string), (_ : int list)) ->
-                 (* Only a live op of this answer removes a fact here, and that
-                    op names it, so screening refused a seen of the same fact
-                    as [Ref_used_twice]. A fact removed outside since the
-                    question was refused there as [Removed_during_flight]. *)
-                 touched, added, added_ids
+               | Seen_again ((_ : string), (_ : int list)) -> touched, added, added_ids
                | New_claim ((_ : string), fact, (_ : int list)) ->
                  if Ids.mem id added_ids
                  then touched, added, added_ids
                  else (
-                   (* Neither time is later than the commit. *)
                    let first_seen, last_seen =
                      match By_id.find_opt id spans, Ids.mem id evidenced with
                      | None, (true | false) -> at, at
@@ -304,7 +322,7 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
                        , Float.min span.latest_last_seen at )
                    in
                    ( touched
-                   , observed_fact ~first_seen ~last_seen ~trace_id fact :: added
+                   , materialized_fact ~first_seen ~last_seen ~trace_id fact :: added
                    , Ids.add id added_ids ))))
         (Ids.empty, [], Ids.empty)
         live
@@ -317,9 +335,18 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
     let lost_successor =
       List.filter
         (fun op ->
-           match op.states with
-           | Some stating -> not (Ids.mem (fst (kept_and_units stating)) supported_ids)
-           | None -> false)
+           let state_lost =
+             match op.states with
+             | Some stating -> not (Ids.mem (fst (kept_and_units stating)) supported_ids)
+             | None -> false
+           in
+           let promo_lost =
+             match op.promotion with
+             | Some promo ->
+               not (List.for_all (fun id -> Ids.mem id supported_ids) promo.source_fact_ids)
+             | None -> false
+           in
+           state_lost || promo_lost)
         live
     in
     match lost_successor with
@@ -358,6 +385,7 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
              else None)
           screened
       in
+      let promotions = List.filter_map (fun op -> op.promotion) live in
       let effects : Effects.t =
         { added
         ; touched =
@@ -383,6 +411,7 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
                       if Ids.mem id supported_ids then Some (id, offsets) else None
                     | None -> None)
                  live)
+        ; promotions
         }
       in
       effects
@@ -392,8 +421,8 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
   ; effects
   ; working_state =
       (match shown, answer.working_state with
-       | (Read (Range _) | Room _), Keep -> Kept
-       | (Read (Range _) | Room _), Set text -> Replaced text
+       | (Read (Range _) | Room _ | Molt _), Keep -> Kept
+       | (Read (Range _) | Room _ | Molt _), Set text -> Replaced text
        | Read (Item_alone _), Keep -> Alone Untouched
        | Read (Item_alone _), Set (_ : string) -> Alone Not_valid_alone)
   }

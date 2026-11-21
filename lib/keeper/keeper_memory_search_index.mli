@@ -62,3 +62,47 @@ val with_excluding_owners
     that build and every query any [rank] ran. Each build and each [rank] is
     one job on the process domain pool when the caller is an Eio fiber, and
     the jobs never overlap; [f] itself runs in the caller's thread. *)
+
+(** {1 Persistent Per-Keeper SQLite WAL FTS5 Index}
+
+    Each Keeper owns [<keepers_dir>/<keeper_id>.memory_fts.db] in SQLite WAL
+    mode, accessed strictly off the main Eio domain via
+    {!Domain_pool_ref.submit_io_or_inline}. Concurrent readers never block
+    writers or sibling Keepers, and unchanged snapshots skip rebuilding. *)
+
+type persistent_hit =
+  { memory_id : string
+  ; claim : string
+  ; category : string
+  ; score : float
+  }
+
+val db_suffix : string
+val db_path : keepers_dir:string -> keeper_id:string -> string
+
+(** Synchronize the persistent per-Keeper SQLite WAL FTS5 index with [snapshot].
+    Skips rebuild when the stored [(revision, content_sha256)] already matches.
+    Returns the number of indexed facts. *)
+val sync_snapshot
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> Keeper_memory_os_current_types.t
+  -> (int, error) result
+
+(** Query the persistent per-Keeper SQLite WAL FTS5 index directly off-domain.
+    Returns matching facts ordered by BM25 score (best first). *)
+val search_persistent
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> query:string
+  -> limit:int
+  -> (persistent_hit list, error) result
+
+(** Sync-if-needed and rank [facts] against the persistent per-Keeper SQLite
+    WAL FTS5 index, returning [(ordinal, score)] pairs aligned to [facts]. *)
+val rank_persistent_for_facts
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> query:string
+  -> Keeper_memory_os_types.fact list
+  -> ((int * float) list, error) result

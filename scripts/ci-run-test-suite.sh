@@ -367,7 +367,11 @@ shard_target_list() {
   local dune_file dir
   # `test/`: one target per suite, because that is where the peak lives.
   {
-    grep -rhoE 'alias runtest-[A-Za-z0-9_]+' \
+    # The name may hold `-`: this repo has runtest-browser-native-screenshot and
+    # runtest-ego-takeover-js, and a pattern that stopped at the first dash left
+    # the prefixes runtest-browser and runtest-ego in the list as aliases dune
+    # does not define.
+    grep -rhoE 'alias runtest-[A-Za-z0-9_-]+' \
       "$repo_root/test/dune" "$repo_root"/test/stanzas/*.inc 2>/dev/null \
       | sed 's/^alias //'
     # A test stanza's alias is `runtest-<name>`, spelled nowhere in the file.
@@ -389,6 +393,42 @@ shard_target_list() {
       --include=dune "$repo_root" 2>/dev/null \
       | grep -v '/_build/' | grep -v '/vendor/'
   )
+}
+
+# Keep only the targets dune actually defines. The scan above is a candidate
+# list, and a candidate can have no alias: a `(test (name x))` carrying
+# `(enabled_if (= %{env:MASC_E2E_TESTS=false} "true"))` has none until that
+# variable is true, and dune refuses a target no rule defines ("Alias ...
+# specified on the command line is empty"). Which condition is on is dune's
+# answer, not a text prediction, so this asks dune: `dune rules TARGET...`
+# validates targets without building anything, and names the alias it rejects.
+# Each round drops the reported name and asks again; a clean round ends it.
+drop_undefined_targets() {
+  local candidates="$1" max_rounds="${2:-32}" round=1 rejected name kept
+  while [ "$round" -le "$max_rounds" ]; do
+    rejected="$(opam exec -- dune rules --root "$repo_root" $candidates 2>&1 >/dev/null \
+      | grep -oE 'Alias "[^"]+"' | head -1 | sed 's/^Alias "//; s/"$//' || true)"
+    if [ -z "$rejected" ]; then
+      for candidate in $candidates; do
+        printf '%s\n' "$candidate"
+      done
+      return 0
+    fi
+    echo "[test-suite] dune does not define the alias ${rejected}; dropping that target" >&2
+    kept=""
+    for candidate in $candidates; do
+      case "$candidate" in
+        "@test/$rejected"|"@*/$rejected") continue ;;
+      esac
+      kept="$kept $candidate"
+    done
+    candidates="$kept"
+    round=$(( round + 1 ))
+  done
+  echo "[test-suite] WARN - dune still rejected a target after ${max_rounds} rounds; keeping the list as it stands" >&2
+  for candidate in $candidates; do
+    printf '%s\n' "$candidate"
+  done
 }
 
 # One shard's targets: the round-robin slice `index` of `count` over the sorted
@@ -420,7 +460,7 @@ overall_rc=0
 run_started=$(date +%s)
 
 if [ "$shard_count" -gt 1 ]; then
-  all_aliases="$(shard_target_list)"
+  all_aliases="$(drop_undefined_targets "$(shard_target_list | tr '\n' ' ')")"
   if [ -z "$all_aliases" ]; then
     echo "[test-suite] FAIL - no suite target found to shard"
     exit 2

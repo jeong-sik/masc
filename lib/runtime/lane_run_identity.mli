@@ -6,13 +6,11 @@ type t =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
-  | Workspace_curator
   | Verifier
   | Candle_appraiser
   | Librarian_memory
   | Workspace_memory_curator
-      (** The in-process World Memory curator's lane. [Workspace_curator] names
-          the runs its Add-on predecessor recorded and is no model route. *)
+      (** The in-process World Memory curator's lane. *)
 [@@deriving enumerate]
 
 val to_id : t -> string

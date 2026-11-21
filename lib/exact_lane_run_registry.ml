@@ -2,14 +2,12 @@ type lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
-  | Workspace_curator
   | Candle_appraiser
 
 let run_lane = function
   | Librarian -> Lane_run_identity.Librarian
   | Hitl_auto_judge -> Lane_run_identity.Hitl_auto_judge
   | Board_attention -> Lane_run_identity.Board_attention
-  | Workspace_curator -> Lane_run_identity.Workspace_curator
   | Candle_appraiser -> Lane_run_identity.Candle_appraiser
 ;;
 
@@ -17,7 +15,6 @@ let lane_of_run_lane = function
   | Lane_run_identity.Librarian -> Some Librarian
   | Lane_run_identity.Hitl_auto_judge -> Some Hitl_auto_judge
   | Lane_run_identity.Board_attention -> Some Board_attention
-  | Lane_run_identity.Workspace_curator -> Some Workspace_curator
   | Lane_run_identity.Candle_appraiser -> Some Candle_appraiser
   (* The Librarian's Memory asks keep no per-ask record (RFC
      librarian-call-only-proposes: nothing grows per pass), and the in-process

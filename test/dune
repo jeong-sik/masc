@@ -5561,6 +5561,7 @@
 (include stanzas/test_keeper_memory_journal_projection.inc)
 
 (include stanzas/test_keeper_memory_left.inc)
+(include stanzas/test_keeper_memory_os_current_cut_parts.inc)
 
 (test
  (name test_keeper_memory_journal_serialization)

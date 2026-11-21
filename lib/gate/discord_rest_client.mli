@@ -9,8 +9,7 @@
     (the repo-wide piaf-backed pool). Must be called inside an Eio
     context (the pool's transport relies on Eio fibers).
 
-    See: docs/rfc/RFC-0203-discord-builtin-gateway.md §Modules,
-         lib/masc_http_client/masc_http_client.mli *)
+    See: lib/masc_http_client/masc_http_client.mli *)
 
 val message_content_limit : int
 (** Discord text-message content limit, in Unicode scalar units.

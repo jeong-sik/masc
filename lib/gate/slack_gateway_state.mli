@@ -13,8 +13,8 @@
     [Send_ack of {envelope_id}] or Slack will retransmit and eventually drop the
     connection.
 
-    See: docs/rfc/RFC-0317-slack-builtin-gateway.md (and RFC-0203 for the
-    Discord original this is modeled on). *)
+    See: lib/gate/discord_gateway_state.mli, the Discord state machine
+    this module is modeled on. *)
 
 (** {1 Envelope — what comes off the wire} *)
 
@@ -164,7 +164,7 @@ type gateway_effect =
       (** Ack an envelope — Slack retransmits + eventually drops without it. *)
   | Emit_event of delivery      (** Obtain host acceptance before ACK. *)
   | Emit_ambient of delivery
-      (** Record-only delivery (RFC-0226 parity with the Discord FSM): a
+      (** Record-only delivery (parity with the Discord FSM): a
           [Message_create] from a human author that failed [trigger_policy],
           or a [Reaction_added] from someone other than the bot itself. The
           I/O layer routes it to the caller's [on_ambient]; it must not start

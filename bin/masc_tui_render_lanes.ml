@@ -35,9 +35,6 @@ let runtime_lane_notice_tone = function
 let runtime_lane_notice_style notice =
   Page_reading.tone_style (runtime_lane_notice_tone notice)
 
-(* What a list of candidates reads when it has none. *)
-let no_candidates ~ko = if ko then "(없음)" else "(none)"
-
 (* The summary and the full reading name a missing purpose with one sentence. *)
 let standalone_lane_purpose ~ko (lane : Tui_decode.standalone_lane) =
   match lane.sl_purpose with
@@ -364,9 +361,10 @@ let standalone_lane_without_slot_rows ~ko (lane : Tui_decode.standalone_lane) =
   @ counted (t "슬롯 기록 없음" "no slot recorded") without.slws_no_slot
   @ gap
 
-(* A candidate list is a numbered list; none is the word for none, receded. *)
-let candidate_items ~ko ?(tone = Page_line.Plain) label = function
-  | [] -> Page_line.fact ~tone:Page_line.Quiet label (no_candidates ~ko)
+(* A candidate list is a numbered list; an empty one reads the no-value
+   mark, receded (RFC tui-one-screen-grammar 6.4). *)
+let candidate_items ?(tone = Page_line.Plain) label = function
+  | [] -> Page_line.fact ~tone:Page_line.Quiet label Masc_tui_theme.Glyph.no_value
   | values -> Page_line.items ~tone label values
 
 let standalone_lane_detail_lines ~ko ~now ~width (lane : Tui_decode.standalone_lane) =
@@ -484,13 +482,13 @@ let standalone_lane_detail_lines ~ko ~now ~width (lane : Tui_decode.standalone_l
     [ fact ~tone:Page_line.Quiet (t "TOML 섹션" "TOML table")
         (Printf.sprintf "[runtime.exact_output_lanes.%s]"
            (Standalone_lane.to_id lane.sl_lane))
-    ; candidate_items ~ko
+    ; candidate_items
         (t "1차 HTTP 후보 (순서대로 시도)" "HTTP candidates (tried in order)")
         lane.sl_admitted_slots
-    ; candidate_items ~ko
+    ; candidate_items
         (t "2차 CLI 후보 (HTTP 모두 실패 시)" "CLI candidates (after every HTTP one fails)")
         lane.sl_cli_slots
-    ; candidate_items ~ko ~tone:Page_line.Attention
+    ; candidate_items ~tone:Page_line.Attention
         (t "탈락 후보" "Dropped candidates")
         lane.sl_dropped_slots
     ]

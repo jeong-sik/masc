@@ -4054,7 +4054,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Tui_decode.Ready equipment ->
         let slots = List.map (fun slot ->
           let name = match Keeper_portrait_item.in_slot equipment slot with
-            | None -> item_say "없음" "none"
+            | None -> Masc_tui_theme.Glyph.no_value
             | Some item -> Item_account.item_name item in
           Keeper_portrait_item.slot_id slot ^ ": " ^ name) Keeper_portrait_item.slots in
         Message_layout.wrap_styled_words ~max_cells:(max 1 (inner - 4))
@@ -4665,7 +4665,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          add_row (t "마지막 턴:" "Last Turn:")
            (match activity.k_last_turn_at with
             | Some at -> Terminal_text.short_timestamp_of_unix at
-            | None -> t "(없음)" "(never)"));
+            | None -> Masc_tui_theme.Glyph.no_value));
       (match k.k_identity with
        | Ok identity ->
          add_row (t "생성:" "Created:") (Terminal_text.short_timestamp identity.k_created_at);

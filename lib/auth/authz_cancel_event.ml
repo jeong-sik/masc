@@ -40,6 +40,7 @@ let subject_body = function
     id_object "service_credential" (Service_credential_id.to_string id)
   | Subject.Invite id -> id_object "invite" (Invite_id.to_string id)
   | Subject.Registration id -> id_object "registration" (Registration_id.to_string id)
+  | Subject.Policy id -> id_object "policy" (Policy_id.to_string id)
   | Subject.Keeper_conversation { owner; conversation_id } ->
     let* label = Authz_body.string "keeper_conversation" in
     let* owner = Authz_body.string (User_id.to_string owner) in
@@ -122,6 +123,7 @@ let subject_of_body body =
   | Some ("invite", members) -> id_of Invite_id.of_string (fun id -> Subject.Invite id) members
   | Some ("registration", members) ->
     id_of Registration_id.of_string (fun id -> Subject.Registration id) members
+  | Some ("policy", members) -> id_of Policy_id.of_string (fun id -> Subject.Policy id) members
   | Some ("keeper_conversation", members) -> keeper_conversation_of members
   | Some _ | None -> None
 ;;

@@ -83,6 +83,7 @@ module Subject = struct
     | Service_credential of Service_credential_id.t
     | Invite of Invite_id.t
     | Registration of Registration_id.t
+    | Policy of Policy_id.t
     | Keeper_conversation of
         { owner : User_id.t
         ; conversation_id : Conversation_id.t
@@ -99,6 +100,7 @@ module Subject = struct
     | Service_credential x, Service_credential y -> Service_credential_id.equal x y
     | Invite x, Invite y -> Invite_id.equal x y
     | Registration x, Registration y -> Registration_id.equal x y
+    | Policy x, Policy y -> Policy_id.equal x y
     | Keeper_conversation x, Keeper_conversation y ->
       User_id.equal x.owner y.owner && Conversation_id.equal x.conversation_id y.conversation_id
     | ( ( Grant _
@@ -110,6 +112,7 @@ module Subject = struct
         | Service_credential _
         | Invite _
         | Registration _
+        | Policy _
         | Keeper_conversation _ )
       , ( Grant _
         | Credential _
@@ -120,6 +123,7 @@ module Subject = struct
         | Service_credential _
         | Invite _
         | Registration _
+        | Policy _
         | Keeper_conversation _ ) ) -> false
   ;;
 
@@ -133,6 +137,7 @@ module Subject = struct
     | Service_credential id -> "service_credential:" ^ Service_credential_id.to_string id
     | Invite id -> "invite:" ^ Invite_id.to_string id
     | Registration id -> "registration:" ^ Registration_id.to_string id
+    | Policy id -> "policy:" ^ Policy_id.to_string id
     | Keeper_conversation { owner; conversation_id } ->
       "keeper_conversation:" ^ User_id.to_string owner ^ "/" ^ Conversation_id.to_string conversation_id
   ;;

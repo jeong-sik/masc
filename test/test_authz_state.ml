@@ -1366,6 +1366,21 @@ let test_a_blocked_session () =
   Alcotest.(check string) "and ends the session" "replaced by session-2" (session_status again first_session)
 ;;
 
+(* A delegate policy is a subject a revocation can name (design 4.2-2), but
+   nothing in this state owns one yet: an Admin cannot cancel its block, and the
+   owner rule arrives with [Authz_delegate_policy_state] in D2. *)
+let test_a_policy_subject_has_no_owner_behind_it () =
+  let policy = id_of_string Authz_types.Policy_id.of_string "policy-1" in
+  let subject = Authz_records.Subject.Policy policy in
+  let blocked = held subject in
+  let state = S.hold_revocations (two_admins ()) [ blocked ] in
+  Alcotest.(check string) "blocked" "pending" (revocation_word state subject);
+  Alcotest.(check string)
+    "an Admin does not cancel it"
+    (S.refusal_to_string (S.Cancel_owner_unknown subject))
+    (cancel_word state (cancel_record blocked))
+;;
+
 (* ---- PATs and Service credentials ---- *)
 
 module Pa = Authz_pat_event
@@ -2666,6 +2681,8 @@ let () =
         ; Alcotest.test_case "refused" `Quick test_a_session_record_that_is_refused
         ; Alcotest.test_case "by mode" `Quick test_a_session_record_by_mode
         ; Alcotest.test_case "blocked" `Quick test_a_blocked_session
+        ; Alcotest.test_case "a policy has no owner behind it" `Quick
+            test_a_policy_subject_has_no_owner_behind_it
         ] )
     ; ( "credentials"
       , [ Alcotest.test_case "PATs and their intents" `Quick test_pats_and_their_intents

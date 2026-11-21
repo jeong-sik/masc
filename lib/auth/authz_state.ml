@@ -541,6 +541,7 @@ let owner_behind state = function
   | Authz_records.Subject.Credential _
   | Authz_records.Subject.Runtime _
   | Authz_records.Subject.Keeper_conversation _ -> None
+  | Authz_records.Subject.Policy _ -> None
 ;;
 
 (* An eligible Admin lifts one block (design 8.3). The canceller is never the

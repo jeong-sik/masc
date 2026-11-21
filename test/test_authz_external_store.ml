@@ -35,6 +35,7 @@ let workspace = get (Workspace_id.of_string "workspace-1")
 let other_workspace = get (Workspace_id.of_string "workspace-2")
 let invite = Subject.Invite (get (Invite_id.of_string "invite-1"))
 let registration = Subject.Registration (get (Registration_id.of_string "registration-1"))
+let policy = Subject.Policy (get (Policy_id.of_string "policy-1"))
 let session = Subject.Session (get (Session_id.of_string "session-1"))
 let pat = Subject.Pat (get (Pat_id.of_string "pat-1"))
 let service_credential = Subject.Service_credential (get (Service_credential_id.of_string "cred-1"))
@@ -57,6 +58,7 @@ let subjects =
   ; service
   ; invite
   ; registration
+  ; policy
   ; keeper_conversation
   ]
 ;;
@@ -399,8 +401,8 @@ let check_reads_back label state entry =
 
 let every_change_reads_back () =
   Alcotest.(check int)
-    "eight authorization events with eleven subjects each, and three mode events"
-    91
+    "eight authorization events with twelve subjects each, and three mode events"
+    99
     (List.length all_changes);
   with_path (fun path ->
     let store, _, _ = open_ok ~path in

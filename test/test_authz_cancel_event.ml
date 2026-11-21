@@ -35,6 +35,7 @@ let subjects =
   ; Subject.Service_credential (get (Service_credential_id.of_string "cred-1"))
   ; invite
   ; Subject.Registration (get (Registration_id.of_string "registration-1"))
+  ; Subject.Policy (get (Policy_id.of_string "policy-1"))
   ; Subject.Keeper_conversation
       { owner = get (User_id.of_string "alice")
       ; conversation_id = get (Conversation_id.of_string "conversation-1")
@@ -137,6 +138,7 @@ let a_cancel_reads_back () =
     ; "service_credential:cred-1"
     ; "invite:invite-1"
     ; "registration:registration-1"
+    ; "policy:policy-1"
     ; "keeper_conversation:alice/conversation-1"
     ]
     (List.map Subject.to_string subjects);

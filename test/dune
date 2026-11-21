@@ -1295,6 +1295,8 @@
  masc.secret_patterns
  masc.agent_core))
 
+(include stanzas/test_keeper_librarian_goal_context_input_sources.inc)
+
 (test
  (name test_keeper_tool_execute_stream_close)
  (modules test_keeper_tool_execute_stream_close)

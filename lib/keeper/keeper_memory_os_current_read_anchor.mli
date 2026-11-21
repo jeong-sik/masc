@@ -1,10 +1,8 @@
-(** The snapshot and journal reads, the program anchor and the lookups of
-    dropped facts: the program reset, the content and digest reads and the
-    locked read of a Keeper's snapshot, the journal tail reads, the removal
-    lookup, the program anchor with its capture and verification, the journal
-    mention and the drop reason of a fact, the search for a removal, the read
-    of dropped facts, and the retirement context with the facts that a
-    retirement targets.
+(** The journal reads, the program anchor and the lookups of dropped facts:
+    the program reset, the journal tail reads, the removal lookup, the program
+    anchor with its capture and verification, the journal mention and the drop
+    reason of a fact, the search for a removal, the read of dropped facts, and
+    the retirement context with the facts that a retirement targets.
 
     [Keeper_memory_os_current] includes this module. *)
 
@@ -13,14 +11,6 @@ open Keeper_memory_os_current_types
 
 val with_program_reset :
   keepers_dir:string -> keeper_id:string -> (unit -> ('a, string) result) -> ('a, string) result
-
-val read_locked_for_keepers_dir : keepers_dir:string -> keeper_id:string -> (t option, string) result
-
-val read_for_keepers_dir :
-  keepers_dir:string -> keeper_id:string -> (t option, string) result
-
-val read_with_snapshot_sha256 :
-  keepers_dir:string -> keeper_id:string -> ((t * string) option, string) result
 
 val read_journal_tail_indexed :
   keepers_dir:string ->

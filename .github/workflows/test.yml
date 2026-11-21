@@ -322,7 +322,11 @@ jobs:
           name: test-suite-disk-evidence
           overwrite: ${{ inputs.candidate_verification == true }}
           path: ${{ runner.temp }}/test-suite-disk-evidence.log
-          if-no-files-found: ignore
+          # warn, not ignore: a missing file is a fact about the run, and the
+          # step runs on every outcome. ignore would leave "the watcher never
+          # wrote anything" indistinguishable from "there was nothing to
+          # upload" in the run summary.
+          if-no-files-found: warn
           retention-days: 14
 
       # Where the same run's time went: seconds per kind of dune process

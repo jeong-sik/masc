@@ -243,7 +243,7 @@ export type KeeperMemoryWriterState =
   | 'refused_at_bottom'
   | 'stopped'
 export type KeeperMemoryWriterLevel = 'ok' | 'warn' | 'error'
-export type KeeperMemoryWriterAlarm = 'E1' | 'E2' | 'E3' | 'E4' | 'E5' | 'W1' | 'W3'
+export type KeeperMemoryWriterAlarm = 'E1' | 'E2' | 'E3' | 'E4' | 'E5' | 'W1' | 'W2' | 'W3'
 
 /** The Keeper's Memory writer as its row carries it under `writer`: the one
  *  that commits to the Keeper's Memory. `librarian` is the Librarian that ran
@@ -297,7 +297,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v17'
+  schema: 'keeper.memory_os.current_health.v18'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -780,6 +780,7 @@ const KEEPER_MEMORY_WRITER_ALARMS: readonly KeeperMemoryWriterAlarm[] = [
   'E4',
   'E5',
   'W1',
+  'W2',
   'W3',
 ]
 
@@ -961,7 +962,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     ? ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary', 'execution']
     : ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary']
   if (!exactKeys(raw, expectedKeys)) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v17') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v18') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

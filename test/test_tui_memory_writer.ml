@@ -19,10 +19,22 @@ let kept_wire ?(lane = true) ?(last_read = `Null) ?(last_room = `Null) ?(read_al
 
 let last_line_at = 1_700_000_000.
 
+(* Where the Keeper's latest request started against the read end (§11.3). *)
+let request_kind kind = obj [ "kind", str kind ]
+let unknown_request = request_kind "unknown_until_next_request"
+
+let positions kind ~sends_from ~read_end =
+  obj [ "kind", str kind; "sends_from", `Int sends_from; "read_end", `Int read_end ]
+;;
+
+let behind = positions "behind" ~sends_from:6 ~read_end:2
+let not_comparable cause = obj [ "kind", str "not_comparable"; "cause", cause ]
+
 let open_wire
       ?(state = "idle")
       ?(level = "ok")
       ?(alarms = [])
+      ?(request = unknown_request)
       ?(unread = false)
       ?(asking = `Null)
       ?(last_line = [ "last_line", str "started" ])
@@ -34,6 +46,7 @@ let open_wire
     ([ "state", str state
      ; "level", str level
      ; "alarms", strs alarms
+     ; "request", request
      ; "unread", `Bool unread
      ; "asking", asking
      ]
@@ -51,6 +64,7 @@ let stopped_wire ?(stop = "store_stopped_log_diverged") ?(unread = `Null) snapsh
     ([ "state", str "stopped"
      ; "level", str "error"
      ; "alarms", strs [ "E1" ]
+     ; "request", request_kind "view_unavailable"
      ; "unread", unread
      ; "asking", `Null
      ]
@@ -111,14 +125,14 @@ let test_kinds () =
 
 let test_booting_and_retired () =
   reads "a writer that has not read its tail"
-    (member (obj [ "state", str "booting"; "level", str "warn"; "alarms", strs [ "W1" ]; "unread", `Null ]))
+    (member (obj [ "state", str "booting"; "level", str "warn"; "alarms", strs [ "W1" ]; "request", unknown_request; "unread", `Null ]))
     (shown ~level:Level.Warn ~alarms:[ Level.W1 ] Booting);
   reads "a retired writer"
-    (member (obj [ "state", str "retired"; "level", str "ok"; "alarms", strs [] ]))
+    (member (obj [ "state", str "retired"; "level", str "ok"; "alarms", strs []; "request", unknown_request ]))
     (shown Retired);
   refuses "a booting writer that says what is unread"
     (member
-       (obj [ "state", str "booting"; "level", str "warn"; "alarms", strs [ "W1" ]; "unread", `Bool true ]));
+       (obj [ "state", str "booting"; "level", str "warn"; "alarms", strs [ "W1" ]; "request", unknown_request; "unread", `Bool true ]));
   refuses "a state this build does not know" (member (open_wire ~state:"paused" ()))
 ;;
 
@@ -318,23 +332,24 @@ let alarm_token : Level.alarm -> string = function
   | Level.E4 -> "E4"
   | Level.E5 -> "E5"
   | Level.W1 -> "W1"
+  | Level.W2 -> "W2"
   | Level.W3 -> "W3"
 ;;
 
 let alarm_tokens =
   List.map
     (fun alarm -> alarm_token alarm, alarm)
-    [ Level.E1; Level.E2; Level.E3; Level.E4; Level.E5; Level.W1; Level.W3 ]
+    [ Level.E1; Level.E2; Level.E3; Level.E4; Level.E5; Level.W1; Level.W2; Level.W3 ]
 ;;
 
 let test_alarms_and_level () =
   reads "every alarm"
-    (member (open_wire ~level:"error" ~alarms:(List.map fst alarm_tokens) ()))
+    (member (open_wire ~level:"error" ~alarms:(List.map fst alarm_tokens) ~request:behind ()))
     (shown ~level:Level.Error ~alarms:(List.map snd alarm_tokens) (open_row ()));
   reads "warnings alone are a warning"
     (member (open_wire ~level:"warn" ~alarms:[ "W1"; "W3" ] ()))
     (shown ~level:Level.Warn ~alarms:[ Level.W1; Level.W3 ] (open_row ()));
-  refuses "an alarm this build does not know" (member (open_wire ~level:"warn" ~alarms:[ "W2" ] ()));
+  refuses "an alarm this build does not know" (member (open_wire ~level:"warn" ~alarms:[ "W9" ] ()));
   refuses "a level this build does not know" (member (open_wire ~level:"fine" ()));
   refuses "a level that is not the level of its alarms"
     (member (open_wire ~level:"ok" ~alarms:[ "E3" ] ()));
@@ -465,6 +480,42 @@ let test_attention_rows () =
               (String.starts_with ~prefix:(Text.heading ~ko) row))
          (Text.attention_rows ~ko (shown ~level:Level.Error ~alarms:(List.map snd alarm_tokens) (open_row ()))))
     [ true; false ]
+;;
+
+(* Where the Keeper's latest request started (§11.3): the screen draws W2,
+   which the alarms carry, and nothing else of the request. *)
+let test_a_request_past_the_read_end_shows_w2 () =
+  let row = shown ~level:Level.Warn ~alarms:[ Level.W2 ] (open_row ()) in
+  reads "a request past the read end"
+    (member (open_wire ~level:"warn" ~alarms:[ "W2" ] ~request:behind ()))
+    row;
+  check (list (pair string string)) "W2 asks for a look"
+    [ "warn", "기억 쓰는 쪽 · W2 Memory 에도 요청에도 없는 메시지가 있음" ]
+    (List.combine (tones (Text.attention_rows ~ko:true row)) (List.map snd (Text.attention_rows ~ko:true row)));
+  refuses "W2 without a request past the read end"
+    (member (open_wire ~level:"warn" ~alarms:[ "W2" ] ()));
+  refuses "a request past the read end without W2" (member (open_wire ~request:behind ()));
+  refuses "behind, with the request not past the read end"
+    (member (open_wire ~level:"warn" ~alarms:[ "W2" ] ~request:(positions "behind" ~sends_from:2 ~read_end:2) ()))
+;;
+
+(* Every other kind reads as the row with no alarm reads, so the screen
+   draws nothing more for it: no word for an unknown start, and no column. *)
+let test_any_other_request_draws_nothing () =
+  List.iter
+    (fun (name, request) -> reads name (member (open_wire ~request ())) (shown (open_row ())))
+    [ "unknown until the next request", unknown_request
+    ; "no view", request_kind "view_unavailable"
+    ; "no read end", request_kind "no_read_end"
+    ; "not behind", positions "not_behind" ~sends_from:2 ~read_end:2
+    ; "another trace", not_comparable (request_kind "other_trace")
+    ; "a reset between", not_comparable (obj [ "kind", str "reset_between"; "offset", `Int 40 ])
+    ; "the log end unread", not_comparable (request_kind "log_end_unread")
+    ; "the lines unread", not_comparable (request_kind "lines_unread")
+    ];
+  refuses "a request kind this build does not know" (member (open_wire ~request:(request_kind "ahead") ()));
+  refuses "not behind, with the request past the read end"
+    (member (open_wire ~request:(positions "not_behind" ~sends_from:6 ~read_end:2) ()))
 ;;
 
 (* The Memory reading draws an attention row two cells in from the frame's
@@ -657,6 +708,9 @@ let () =
         ; test_case "no writer in the process is not a starting writer" `Quick
             test_no_writer_in_the_process_is_not_a_starting_writer
         ; test_case "rows that ask for a look" `Quick test_attention_rows
+        ; test_case "a request past the read end shows W2" `Quick
+            test_a_request_past_the_read_end_shows_w2
+        ; test_case "any other request draws nothing" `Quick test_any_other_request_draws_nothing
         ; test_case "rows that ask for a look fit a narrow terminal" `Quick
             test_attention_rows_fit_a_narrow_terminal
         ; test_case "every reading in the detail" `Quick test_detail_rows

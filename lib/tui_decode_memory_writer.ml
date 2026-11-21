@@ -147,6 +147,7 @@ let alarm_of_wire : string -> (Librarian_level.alarm, string) result = function
   | "E4" -> Ok E4
   | "E5" -> Ok E5
   | "W1" -> Ok W1
+  | "W2" -> Ok W2
   | "W3" -> Ok W3
   | other -> unknown "alarm" other
 ;;
@@ -366,7 +367,48 @@ let decode_kept json =
   Ok { lane; last_read; last_room; read_alone }
 ;;
 
-let shown_fields = [ "state"; "level"; "alarms" ]
+let shown_fields = [ "state"; "level"; "alarms"; "request" ]
+
+let decode_cause json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "other_trace" | "log_end_unread" | "lines_unread" ->
+    require_exact_object_fields "writer request cause" [ "kind" ] json
+  | "reset_between" ->
+    let* () = require_exact_object_fields "writer request cause" [ "kind"; "offset" ] json in
+    let* (_ : int) = Result.bind (required_int_field json "offset") (non_negative "offset") in
+    Ok ()
+  | other -> unknown "request cause" other
+;;
+
+let decode_positions json ~behind =
+  let* () =
+    require_exact_object_fields "writer request" [ "kind"; "sends_from"; "read_end" ] json
+  in
+  let* sends_from = Result.bind (required_int_field json "sends_from") (non_negative "sends_from") in
+  let* read_end = Result.bind (required_int_field json "read_end") (non_negative "read_end") in
+  if Bool.equal behind (sends_from > read_end)
+  then Ok behind
+  else Error "writer request disagrees with its positions"
+;;
+
+(* Where the Keeper's latest request started against the read end (§11.3).
+   The screen draws W2 and nothing else of it, so the decode keeps only
+   whether the request starts past the read end, to check W2 against. *)
+let decode_request_behind json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "unknown_until_next_request" | "view_unavailable" | "no_read_end" ->
+    let* () = require_exact_object_fields "writer request" [ "kind" ] json in
+    Ok false
+  | "not_behind" -> decode_positions json ~behind:false
+  | "behind" -> decode_positions json ~behind:true
+  | "not_comparable" ->
+    let* () = require_exact_object_fields "writer request" [ "kind"; "cause" ] json in
+    let* () = Result.bind (required_object_field json "cause") decode_cause in
+    Ok false
+  | other -> unknown "request" other
+;;
 
 let decode_open ~state json =
   let* last_line = required_string_field json "last_line" in
@@ -449,6 +491,14 @@ let decode_row json =
     if level = Librarian_level.level alarms
     then Ok ()
     else Error "writer level disagrees with its alarms"
+  in
+  let* request_behind =
+    Result.bind (required_object_field json "request") decode_request_behind
+  in
+  let* () =
+    if Bool.equal request_behind (List.mem Librarian_level.W2 alarms)
+    then Ok ()
+    else Error "writer alarm W2 disagrees with its request"
   in
   let* row =
     match state with

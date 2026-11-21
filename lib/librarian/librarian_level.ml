@@ -10,6 +10,7 @@ type alarm =
   | E4
   | E5
   | W1
+  | W2
   | W3
 
 type writer =
@@ -17,6 +18,7 @@ type writer =
   | Running of
       { machine : Machine.t
       ; unread : bool
+      ; request_behind : bool
       }
   | Retired
 
@@ -48,7 +50,7 @@ let lane_value_held_now (t : Machine.t) (value : Memory_lane.t) =
   | None -> false
 ;;
 
-let running (t : Machine.t) ~unread =
+let running (t : Machine.t) ~unread ~request_behind =
   let e1 =
     match t.state with
     | Stopped (_ : Store.stop) -> true
@@ -95,19 +97,19 @@ let running (t : Machine.t) ~unread =
   in
   List.filter_map
     (fun (on, alarm) -> if on then Some alarm else None)
-    [ e1, E1; e2, E2; e3, E3; e4, E4; e5, E5; w1, W1; t.read_alone, W3 ]
+    [ e1, E1; e2, E2; e3, E3; e4, E4; e5, E5; w1, W1; request_behind, W2; t.read_alone, W3 ]
 ;;
 
 let alarms = function
   | Booting -> [ W1 ]
-  | Running { machine; unread } -> running machine ~unread
+  | Running { machine; unread; request_behind } -> running machine ~unread ~request_behind
   | Retired -> []
 ;;
 
 let level alarms =
   let error = function
     | E1 | E2 | E3 | E4 | E5 -> true
-    | W1 | W3 -> false
+    | W1 | W2 | W3 -> false
   in
   match alarms with
   | [] -> Ok

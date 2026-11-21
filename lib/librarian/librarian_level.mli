@@ -6,8 +6,9 @@
 
     The names are [specs/bug-models/LibrarianWriter.tla]'s [E1] to [E5],
     [W1] and [W3], under [E4Rule = "held_now"] and [E5Rule = "held_now"]. W2
-    reads where the Keeper's latest request started (§11), which the writer
-    does not hold. An alarm stops nothing: it is read, not a gate. *)
+    reads where the Keeper's latest request started (§11.3), which the writer
+    does not hold and the model does not have: the caller reads it and
+    passes it in {!Running}. An alarm stops nothing: it is read, not a gate. *)
 
 module Digest := Agent_core.Checkpoint_objects
 
@@ -33,6 +34,9 @@ type alarm =
   (** The writer is booting, or something is unread and there is no lane
       value, no reading ask ended since the boot, or the last one ended on
       the lane. *)
+  | W2
+  (** The Keeper's latest request starts past the writer's read end: a
+      message between the two is in neither Memory nor the request. *)
   | W3 (** The last committed read was of an item alone, without Memory. *)
 
 (** What the level is read from. *)
@@ -43,6 +47,10 @@ type writer =
       ; unread : bool
       (** {!Librarian_unread.has_unread} from the store's tail. [false] for
           a stopped store, which has no tail to read from. *)
+      ; request_behind : bool
+      (** The Keeper's latest request starts past the read end of this
+          store's tail (§11.3). [false] for a stopped store, which has no
+          read end. *)
       }
   | Retired (** The writer takes nothing more, and has no alarm. *)
 

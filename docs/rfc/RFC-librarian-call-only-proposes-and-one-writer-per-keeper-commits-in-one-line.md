@@ -1589,7 +1589,7 @@ builder 는 요청을 만들 때 자기 시작점을 메모리에 적어 둔다.
 | 자리 내기 | 마지막 자리 내기의 결과, 그리고 Memory 가 그 뒤에 바뀌었는지 |
 | Memory | 스냅샷 파일의 sha 와 바이트 수, 파일에 묶인 저장소의 바이트 수와 행 수 |
 | 묻는 중 | `Waiting_for_seat` 나 `Calling { slot }`, 그리고 그것이 시작한 시각 |
-| Keeper 요청 | 가장 최근 요청이 읽은 곳의 끝보다 뒤에서 시작했는지. 재시작 뒤 첫 요청 전에는 「모름」 |
+| Keeper 요청 | 가장 최근 요청이 시작한 자리를 읽은 곳의 끝과 견준 결과. 재시작 뒤 첫 요청 전에는 견줄 요청이 없다. 화면은 이 칸에서 W2 만 그린다 |
 
 - 입력 결함에 실린 값은 운영자가 보낼 값이다(§12.4). `Skip_line` 은 줄 offset 을, `Restart_reading` 은 `observed` 를 받는다. 파일이 바뀌었으면 `observed` 는 결함에 있고, 같은 파일에서 자리를 잃었으면 읽은 자리 칸의 턴 기록 id 다.
 
@@ -1612,11 +1612,11 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | E4 | 안 읽은 것이 있고, 마지막으로 끝난 묻기가 한 항목을 실었고 `Refused_by_lane` 으로 끝났다. 그 묻기가 끝날 때 선언돼 있던 slot 이 저마다 그 질문을 거절했거나 크기 사실을 갖고 있었다. 말 없는 slot 은 없었다. 그 가운데 크기 사실 없이 거절한 slot 이 하나는 있었다. 그 묻기가 본 스냅샷과 그때의 lane 값이 지금 것이다 | error |
 | E5 | 마지막 자리 내기를 선언한 slot 이 모두 입력 크기로 거절했고, 그때의 Memory sha 와 lane 값이 지금 것이다. Memory 가 어느 slot 에도 들어가지 않는다 | error |
 | W1 | `Booting` 이다. 또는 안 읽은 것이 있고 다음 가운데 하나다: lane 이 꺼져 있거나 선언이 없다, 마지막 묻기의 결과가 아직 없다, 마지막 묻기가 `Refused_by_lane _` 나 `Silent_lane _` 로 끝났다 | warn |
-| W2 | Keeper 의 가장 최근 요청이 읽은 곳의 끝보다 뒤에서 시작했다. 재시작 뒤 첫 요청 전과 view 가 `Error` 인 동안에는 「모름」으로 보인다 | warn |
+| W2 | Keeper 의 가장 최근 요청이 읽은 곳의 끝보다 뒤에서 시작했다. 견줄 수 없는 동안에는 꺼져 있다. 그 까닭은 행의 `request` 칸이 싣는다(§12.3) | warn |
 | W3 | 마지막 읽기 반영이 Memory 없이 됐다. 재시작하면 다음 읽기 반영까지 꺼져 있다 | warn |
 
 - 경보는 아무것도 막지 않는다. 읽는 것이지 문이 아니다.
-- 경보는 저장하지 않는다. 재시작하면 상태에서 다시 계산한다. `Stopped` 는 boot 표가 다시 낸다. E3 은 첫 묻기가 끝나면 다시 켜진다. E4 는 폭 줄이기가 한 항목에 다시 닿은 뒤에 켜진다. 그사이에는 W1 이 켜져 있다. E2 는 slot 마다 한 번씩 다시 물은 뒤에 켜진다. E5 와 W3 은 다음에 항목만 읽은 반영이 있을 때까지 꺼져 있다. 안 읽은 것이 없으면 W1 도 꺼져 있다.
+- 경보는 저장하지 않는다. 재시작하면 상태에서 다시 계산한다. `Stopped` 는 boot 표가 다시 낸다. E3 은 첫 묻기가 끝나면 다시 켜진다. E4 는 폭 줄이기가 한 항목에 다시 닿은 뒤에 켜진다. 그사이에는 W1 이 켜져 있다. E2 는 slot 마다 한 번씩 다시 물은 뒤에 켜진다. E5 와 W3 은 다음에 항목만 읽은 반영이 있을 때까지 꺼져 있다. W2 는 다음 요청이 시작할 때까지 꺼져 있다. 안 읽은 것이 없으면 W1 도 꺼져 있다.
 - 그래서 재시작 직후에는 안 읽은 것이 있는 Keeper 가 모두 warn 이다. 첫 묻기가 끝날 때까지다.
 - 한 항목에서 말이 없는 slot 때문에 쉬는 Keeper 는 W1 이다. error 가 아니다. 꽉 찬 자리, 타입 있는 quota, 끊긴 네트워크는 말 없음이고 스스로 끝난다.
 - 스스로 끝나지 않는 말 없음이 하나 있다. 판정을 타입으로 알리지 않는 client 가 큰 항목에 매번 실패하는 경우다. 그 Keeper 는 W1 에 서 있고 pulse 마다 그 client 를 한 번 부른다. 운영자가 slot 별 결과를 보고 그 slot 을 뺀다.
@@ -1641,9 +1641,16 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
   - `no_writer`: 등록되지 않은 Keeper 다. 쓰는 쪽이 만들어지지 않는다(§11.1).
   - `none_in_process`: 답한 프로세스가 쓰는 쪽을 띄우지 않았다.
 - `writer` 칸은 캐시된 Keeper 행에 두지 않는다. 응답을 쓸 때 쓰는 쪽이 가진 것에서 읽는다. `totals` 와 `alert_summary` 에는 들지 않는다.
-- 이 칸을 싣는 응답의 schema 이름은 `keeper.memory_os.current_health.v17` 이다.
+- 이 칸을 싣는 응답의 schema 이름은 `keeper.memory_os.current_health.v18` 이다.
+- 행의 `request` 는 가장 최근 요청의 시작을 읽은 곳의 끝과 견준 결과다. 생성자마다 `kind` 가 하나다. `unknown_until_next_request`, `view_unavailable`, `no_read_end`, `not_behind`, `behind`, `not_comparable` 이다.
+  - `not_behind` 와 `behind` 는 `sends_from` 과 `read_end` 를 싣는다.
+  - `not_comparable` 은 `cause` 를 싣는다. 그 `kind` 는 `other_trace`, `reset_between`(`offset`), `log_end_unread`, `lines_unread` 가운데 하나다.
+  - W2 는 `behind` 일 때만 켜진다.
+- 행은 이 값을 자기가 보이는 view 로 계산한다. 그래서 행을 읽어도 쓰는 쪽이 생기지 않고, W2 가 행의 읽은 자리와 어긋나지 않는다.
+- 계산할 때 턴 기록을 읽는다. 읽은 단위와 요청의 log end 가운데 앞선 자리부터 끝까지다. 첫 `Reset` 이나 해석 안 되는 줄에서 멈춘다. 요청이 시작할 때마다 화면이 그 Keeper 의 행을 다시 읽는다.
+- TUI 는 이 칸에서 W2 경보만 그린다. 다른 kind 에는 아무것도 그리지 않는다. 웹 대시보드는 쓰는 쪽을 그리지 않고 경보 token 만 읽는다.
 - 행의 `last_read` 는 E4 가 읽는 거절을 `ended` 가 `refused_not_all_sized` 인 끝으로 싣는다. 그 끝의 `about_memory_now` 와 `about_lane_now` 는 판정이 실은 Memory 와 lane 값이 지금 것인지 말한다. 답한 slot 이 없는 다른 끝은 `lane` 이다.
-- TUI 는 이 칸을 닫힌 타입으로 읽는다. 모르는 낱말이나 칸이 있으면 그 Keeper 의 행만 거절한다. 수준이 경보에서 나온 수준과 다를 때도 그렇다.
+- TUI 는 이 칸을 닫힌 타입으로 읽는다. 모르는 낱말이나 칸이 있으면 그 Keeper 의 행만 거절한다. 수준이 경보에서 나온 수준과 다를 때도 그렇다. W2 와 `request` 가 어긋날 때도 그렇다.
 - 반영 없는 상태 변화는 다음 갱신까지 늦게 보인다. Keeper 를 모두 싣는 응답은 캐시되고, 그런 변화는 캐시를 비우지 않는다.
 - Home 의 Health 줄에는 수 둘만 더한다. error 인 쓰는 쪽의 수와 warn 인 쓰는 쪽의 수다. 그 줄은 지금처럼 120초마다 다시 계산한다. workspace health 낱말은 바꾸지 않는다. 그 낱말은 운영자 digest 가 attention 항목에서 계산한다.
 - 호출 시간, 자리를 기다린 시간, 버린 답의 수, slot 별 `Output_over_reserve`·`Window_reached`·보낸 뒤의 `Lost` 수는 metric 이다.
@@ -2271,7 +2278,8 @@ purge 규칙(§5.6, #54283)은 이 stack 에 들지 않는다. 컷 앞에 따로
 
 1. carried front 의 출처 `Past_librarian_point` 의 이름 바꾸기. 그 이름을 적은 파일은 `lib/` 에 여섯, `test/` 에 넷이다. 요청이 보내는 바이트는 그대로다. L10b 가 그 가운데 셋(`keeper_turn_driver_try_provider`, `keeper_continuity_request`, `keeper_next_request_forecast`)을 고치거나 지우므로 컷 앞에 온다.
 2. P1. purge 규칙이 고친 시험 파일 둘(`test_keeper_checkpoint_purge`, `test_server_dashboard_http_keeper_api_trace`)은 고친 뒤의 모양에서 가른다.
-3. 컷 stack.
+3. W2 를 health 행과 화면에 잇는다(#54344). 컷 stack 의 L10b 는 이 위에서 옛 칸을 지운다.
+4. 컷 stack.
 
 ## 21. 모델 검사
 

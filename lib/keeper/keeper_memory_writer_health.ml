@@ -4,6 +4,7 @@ module Level = Librarian_level
 module Last = Librarian_last
 module Log_line = Librarian_log
 module Digest = Agent_core.Checkpoint_objects
+module Request_start = Keeper_request_start
 
 let digest_json (digest : Digest.digest) = `String (digest :> string)
 
@@ -22,6 +23,7 @@ let alarm_token : Level.alarm -> string = function
   | E4 -> "E4"
   | E5 -> "E5"
   | W1 -> "W1"
+  | W2 -> "W2"
   | W3 -> "W3"
 ;;
 
@@ -197,20 +199,59 @@ let stopped_fields ~config ~keeper (stop : Store.stop) =
   ]
 ;;
 
-let shown ~state ~alarms fields =
+let positions_json kind ~sends_from ~read_end =
+  `Assoc [ "kind", `String kind; "sends_from", `Int sends_from; "read_end", `Int read_end ]
+;;
+
+(* Where the Keeper's latest request started against the read end (§11.3).
+   Each kind is its constructor's name. *)
+let request_json : Request_start.standing -> Yojson.Safe.t = function
+  | Unknown_until_next_request -> `Assoc [ "kind", `String "unknown_until_next_request" ]
+  | View_unavailable -> `Assoc [ "kind", `String "view_unavailable" ]
+  | No_read_end -> `Assoc [ "kind", `String "no_read_end" ]
+  | Not_behind { sends_from; read_end } -> positions_json "not_behind" ~sends_from ~read_end
+  | Behind { sends_from; read_end } -> positions_json "behind" ~sends_from ~read_end
+  | Not_comparable unresolved ->
+    `Assoc
+      [ "kind", `String "not_comparable"
+      ; ( "cause"
+        , match (unresolved : Request_start.unresolved) with
+          | Other_trace -> `Assoc [ "kind", `String "other_trace" ]
+          | Reset_between { offset } ->
+            `Assoc [ "kind", `String "reset_between"; "offset", `Int offset ]
+          | Log_end_unread -> `Assoc [ "kind", `String "log_end_unread" ]
+          | Lines_unread -> `Assoc [ "kind", `String "lines_unread" ] )
+      ]
+;;
+
+let shown ~state ~alarms ~request fields =
   let level = Level.level alarms in
   ( level
   , `Assoc
       ([ "state", `String state
        ; "level", `String (level_token level)
        ; "alarms", `List (List.map (fun alarm -> `String (alarm_token alarm)) alarms)
+       ; "request", request_json request
        ]
        @ fields) )
 ;;
 
+(* The row passes the view it shows to the standing, so the standing is
+   about the read end the row names and reading the row makes no writer. A
+   writer without an open store has no view. *)
 let row_with_level ~config ~keeper : Librarian_writer.held -> Level.level * Yojson.Safe.t = function
-  | Held_booting -> shown ~state:"booting" ~alarms:(Level.alarms Booting) [ "unread", `Null ]
-  | Held_retired -> shown ~state:"retired" ~alarms:(Level.alarms Retired) []
+  | Held_booting ->
+    shown
+      ~state:"booting"
+      ~alarms:(Level.alarms Booting)
+      ~request:(Request_start.standing ~config ~keeper_name:keeper None)
+      [ "unread", `Null ]
+  | Held_retired ->
+    shown
+      ~state:"retired"
+      ~alarms:(Level.alarms Retired)
+      ~request:(Request_start.standing ~config ~keeper_name:keeper None)
+      []
   | Held machine ->
     (* An open store shows where reading stands and Memory; a stopped one
        shows why it stopped. *)
@@ -231,9 +272,22 @@ let row_with_level ~config ~keeper : Librarian_writer.held -> Level.level * Yojs
             ] )
     in
     let unread = Option.fold ~none:false ~some:(unread ~config ~keeper) store in
+    let request =
+      Request_start.standing
+        ~config
+        ~keeper_name:keeper
+        (Option.map (fun store -> Librarian_writer.view (Store.tail store)) store)
+    in
+    let request_behind =
+      match (request : Request_start.standing) with
+      | Behind _ -> true
+      | Unknown_until_next_request | View_unavailable | No_read_end | Not_behind _ | Not_comparable _ ->
+        false
+    in
     shown
       ~state:(state_token machine.state)
-      ~alarms:(Level.alarms (Running { machine; unread }))
+      ~alarms:(Level.alarms (Running { machine; unread; request_behind }))
+      ~request
       ([ "unread", (match store with Some _ -> `Bool unread | None -> `Null)
        ; "lane", `Bool (Option.is_some machine.lane)
        ; "asking", asking_json machine.state

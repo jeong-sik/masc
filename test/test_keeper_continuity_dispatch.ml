@@ -138,17 +138,17 @@ let latest_observation ~config =
   | Some observed -> observed | None -> fail "serialized request observation missing"
 
 (* Where the latest request started against the writer's read end, as the
-   screen reads it (RFC librarian-call-only-proposes §11.3, §12.2 W2). *)
+   Keeper's memory-health row carries it under [writer] (RFC
+   librarian-call-only-proposes §11.3, §12.2 W2): the row's [request] and
+   whether W2 is on, or the member itself when the process makes no row. *)
 let request_start ~config =
-  match Keeper_request_start.standing ~config ~keeper_name with
-  | Keeper_request_start.Not_behind { sends_from; read_end } ->
-    Printf.sprintf "not behind: sends from %d, read to %d" sends_from read_end
-  | Keeper_request_start.Behind { sends_from; read_end } ->
-    Printf.sprintf "behind: sends from %d, read to %d" sends_from read_end
-  | Keeper_request_start.Unknown_until_next_request -> "unknown until the next request"
-  | Keeper_request_start.View_unavailable -> "no view"
-  | Keeper_request_start.No_read_end -> "no read end"
-  | Keeper_request_start.Not_comparable (_ : Keeper_request_start.unresolved) -> "not comparable"
+  let writer = Keeper_memory_writer_health.keeper_rows ~config keeper_name in
+  match U.member "row" writer with
+  | `Null -> Yojson.Safe.to_string writer
+  | row ->
+    Printf.sprintf "%s, W2 %s"
+      (Yojson.Safe.to_string (U.member "request" row))
+      (if List.mem (`String "W2") (U.to_list (U.member "alarms" row)) then "on" else "off")
 
 (* The driver's own read of the Keeper's Memory writer
    (RFC librarian-call-only-proposes §11.1): the writer read the completed
@@ -203,7 +203,7 @@ let test_real_dispatch_preserves_pair_across_refusal () =
       (selection |> U.member "working_state" = `Null))
     [ "refused.sample", refused; "accepted.sample", accepted ];
   check string "the request starts at the writer's read end"
-    "not behind: sends from 2, read to 2" (request_start ~config);
+    {|{"kind":"not_behind","sends_from":2,"read_end":2}, W2 off|} (request_start ~config);
   check string "observation names the fallback runtime" "accepted.sample" observed.runtime_id;
   check int "observation counts actual serialized body bytes"
     (String.length (List.hd (Fixture.request_bodies accepted))) observed.request_bytes;
@@ -239,12 +239,10 @@ let check_dispatched_from_the_turn_start ~config ~accepted =
 let test_without_a_memory_writer_the_turn_starts_at_the_turn_start () =
   with_dispatch_fixture @@ fun ~sw ~net ~config ~base_path ~refused:_ ~accepted ->
   let (_ : B.record) = record_completed_turn ~config in
-  check string "before any request the start is not known" "unknown until the next request"
-    (request_start ~config);
   let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path () in
   check_dispatched_from_the_turn_start ~config ~accepted;
-  check string "with no writer there is no view to compare the start with" "no view"
-    (request_start ~config)
+  check string "with no writer in the process no row says where the request started"
+    {|{"kind":"none_in_process"}|} (request_start ~config)
 ;;
 
 (* A writer whose store holds no read has a view that names no place, and
@@ -255,10 +253,12 @@ let test_a_writer_that_read_nothing_starts_at_the_turn_start () =
   (match (start_writer ~sw ~config).Librarian_writer.covers_through with
    | Librarian_log.Before_first -> ()
    | Librarian_log.Through _ -> fail "the fixture's writer read a unit");
+  check string "before the first request since the process started the start is not known"
+    {|{"kind":"unknown_until_next_request"}, W2 off|} (request_start ~config);
   let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path () in
   check_dispatched_from_the_turn_start ~config ~accepted;
-  check string "a writer that read nothing has no read end to be behind" "no read end"
-    (request_start ~config)
+  check string "a writer that read nothing has no read end to be behind"
+    {|{"kind":"no_read_end"}, W2 off|} (request_start ~config)
 ;;
 
 (* RFC librarian-lifecycle §4.10, rule 1, through the driver's own attempt
@@ -316,7 +316,7 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
   (* G11: the writer read two messages, and the resend leaves out six. The
      four between are in neither the request nor the Memory. *)
   check string "the resend's start is past the writer's read end"
-    "behind: sends from 6, read to 2" (request_start ~config)
+    {|{"kind":"behind","sends_from":6,"read_end":2}, W2 on|} (request_start ~config)
 ;;
 
 (* RFC librarian-lifecycle §4.10, rule 8, through the driver's own attempt

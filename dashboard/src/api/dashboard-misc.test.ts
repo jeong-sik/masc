@@ -30,7 +30,7 @@ function noMemoryChanges(): KeeperMemoryChangesByPass {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v17',
+    schema: 'keeper.memory_os.current_health.v18',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -171,7 +171,7 @@ function addLibrarianAttention(payload: KeeperMemoryHealthResponse) {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v17',
+    schema: 'keeper.memory_os.current_health.v18',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -552,6 +552,7 @@ describe('fetchKeeperMemoryHealth', () => {
     'keeper.memory_os.current_health.v14',
     'keeper.memory_os.current_health.v15',
     'keeper.memory_os.current_health.v16',
+    'keeper.memory_os.current_health.v17',
   ])('rejects an older memory-health envelope: %s', async schema => {
     getMock.mockResolvedValue({ ...keeperMemoryHealthPayload(), schema })
 
@@ -586,7 +587,7 @@ describe('fetchKeeperMemoryHealth', () => {
     { kind: 'writer' },
     { kind: 'writer', row: { state: 'paused', level: 'ok', alarms: [] } },
     { kind: 'writer', row: { state: 'idle', level: 'fine', alarms: [] } },
-    { kind: 'writer', row: { state: 'idle', level: 'warn', alarms: ['W2'] } },
+    { kind: 'writer', row: { state: 'idle', level: 'warn', alarms: ['W9'] } },
   ])('rejects a row writer this build does not know: %j', async writer => {
     const payload = keeperMemoryHealthPayload()
     Object.assign(payload.keepers[0]!, { writer })
@@ -602,7 +603,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v17')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v18')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,

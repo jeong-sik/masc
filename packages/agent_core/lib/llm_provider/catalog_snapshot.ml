@@ -101,7 +101,7 @@ let of_catalogs ~models ~providers =
       ; cache_session_wire=Capability_vocab.No_cache_session_wire
       ; cache_session_header=None
       ; supports_provider_routing_filter=false
-      ; serves_bare_models=[] } in
+      ; default_cache_ttl_s=None; serves_bare_models=[] } in
     Ids.add (normalize entry.id) provider index) policy_providers overlay in
   let rec project acc = function
     | [] -> admit ~models ~source_providers:providers ~policy_providers (List.rev acc @ overlay)
@@ -155,6 +155,11 @@ let supports_provider_routing_filter t ~provider_id =
   match policy_provider t provider_id with
   | Some (_, provider) -> provider.Model_catalog.supports_provider_routing_filter
   | None -> false
+
+let default_cache_ttl_s t ~provider_id =
+  match policy_provider t provider_id with
+  | Some (_, provider) -> provider.Model_catalog.default_cache_ttl_s
+  | None -> None
 
 type default_error =
   | Invalid_model_catalog of string

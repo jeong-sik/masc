@@ -2741,6 +2741,10 @@ supports_parallel_tool_suppression = true
 # https://platform.claude.com/docs/en/build-with-claude/prompt-caching
 # Another provider on this wire declares it only once its own docs do.
 supports_extended_cache_ttl = true
+# 2026-11-20: documented five-minute default lifetime, measured from the start
+# of the request that writes or reads the entry.
+# https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+default_cache_ttl_s = 300.0
 # Anthropic's own API: the claude-* bare rows above describe exactly the models
 # it serves, so this provider enumerates their exact identities. No row is
 # scoped to "claude", and before this every such config fell to the Anthropic

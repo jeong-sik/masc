@@ -483,6 +483,45 @@ let test_anthropic_rows_price_cache_tokens () =
     anthropic_cache_pricing_rows
 ;;
 
+(* The cache outcome projection judges an expiry only against a declared
+   lifetime. The claude provider declares the documented five minutes
+   (checked 2026-11-20). The field takes only a positive number of seconds. *)
+let test_provider_default_cache_lifetime () =
+  let repo =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"default cache lifetime"
+  in
+  let lifetime_of id catalog =
+    Model_catalog.provider_entries catalog
+    |> List.filter_map (fun (entry : Model_catalog.provider_entry) ->
+      if String.equal entry.id id then Some entry.default_cache_ttl_s else None)
+  in
+  check bool "claude keeps a write that names no lifetime for five minutes" true
+    (lifetime_of "claude" repo = [ Some 300.0 ]);
+  let declared value =
+    Model_catalog.of_toml_string ~source:"default cache lifetime fixture"
+      (Printf.sprintf {|[[providers]]
+id = "fixture-provider"
+kind = "anthropic"
+capabilities_base = "anthropic"
+base_url = "https://fixture.invalid"
+request_path = "/v1/messages"
+auth = "none"
+%s
+|} value)
+    |> Result.map (lifetime_of "fixture-provider")
+  in
+  check bool "an undeclared lifetime stays undeclared" true (declared "" = Ok [ None ]);
+  check bool "a declared lifetime reads as seconds" true
+    (declared "default_cache_ttl_s = 300.0" = Ok [ Some 300.0 ]);
+  check bool "a zero lifetime is refused" true
+    (declared "default_cache_ttl_s = 0.0"
+     = Error
+         "provider entry \"fixture-provider\" field \"default_cache_ttl_s\" must be finite and greater than zero");
+  check bool "a string lifetime is refused" true
+    (declared "default_cache_ttl_s = \"300\""
+     = Error "provider entry \"fixture-provider\" field \"default_cache_ttl_s\" expected float")
+;;
+
 (* What the Messages API answered for each model on 2026-10-08, except
    claude-fable-5-2: no call was made for it, so its row follows its model page
    and thinking guide (checked 2026-11-13). A sampling parameter with a
@@ -1621,6 +1660,10 @@ let () =
             "anthropic rows price cache tokens"
             `Quick
             test_anthropic_rows_price_cache_tokens
+        ; test_case
+            "providers declare a positive default cache lifetime"
+            `Quick
+            test_provider_default_cache_lifetime
         ; test_case
             "Claude rows keep sampling parameters off the wire"
             `Quick

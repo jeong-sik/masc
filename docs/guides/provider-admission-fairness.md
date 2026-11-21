@@ -11,15 +11,24 @@ three request classes (`Slot_scheduler`):
 
 | Class | MASC callers | Service without `admission-priority-run-limit` (default) | Service with `admission-priority-run-limit = N` |
 | --- | --- | --- | --- |
-| Priority | Verifier, HITL auto judge, Board attention | First, in arrival-order FIFO | Before Standard, up to `N` consecutive grants while Standard waits |
-| Standard | Keeper provider calls and other ordinary requests | After Priority is empty, in arrival-order FIFO | After Priority yields or empties, while foreground grants remain within `N` |
-| Background | Librarian memory and continuity processing | Only when both Priority and Standard queues are empty (may use up to all `max-concurrent` slots when foreground queues are empty) | Receives the next available permit once `N` consecutive Priority/Standard grants have passed it |
+| Priority | Reserved for interactive Keeper chat turns (`Interactive_chat` in `Standalone_lane.admission_class_of_caller`; not yet wired by live Keeper HTTP bindings, and never used by standalone judgment lanes) | First, in arrival-order FIFO | Before Standard, up to `N` consecutive grants while Standard waits |
+| Standard | Standalone judgment lanes (`Verifier`, `Hitl_auto_judge`, `Board_attention`, `Candle_appraiser`), other non-Librarian lane addons, and ordinary provider requests (including current Keeper HTTP bindings via `Provider_config.make`'s default) | After Priority is empty, in arrival-order FIFO | After Priority yields or empties, while foreground grants remain within `N` |
+| Background | `Librarian`, `Librarian_memory`, `Workspace_memory_curator`, and Librarian-authorized lane addons | Only when both Priority and Standard queues are empty (may use up to all `max-concurrent` slots when foreground queues are empty) | Receives the next available permit once `N` consecutive Priority/Standard grants have passed it |
 
 Strict **`Priority` → `Standard` → `Background`** ordering therefore holds by
-default even when `admission-priority-run-limit` is omitted. FIFO arrival order
-is preserved within each class, and no class is ever inferred from a model
-name, prompt, or request duration. Requests that cancel or exhaust their
-declared wait leave their queue without consuming another request's permit.
+default even when `admission-priority-run-limit` is omitted. In
+`lib/runtime/standalone_lane.ml`, `Standalone_lane.admission_class` assigns
+`Verifier`, `Hitl_auto_judge`, `Board_attention`, and `Candle_appraiser` to
+`Standard` so judgment loops never contend at `Priority`, and assigns
+`Librarian`, `Librarian_memory`, and `Workspace_memory_curator` to
+`Background`. `Priority` is reserved by
+`Standalone_lane.admission_class_of_caller` for `Interactive_chat` only (live
+Keeper HTTP bindings currently inherit `Provider_config.make`'s `Standard`
+default until call sites pass `Interactive_chat`, and still drain strictly
+ahead of `Background`). FIFO arrival order is preserved within each class, and
+no class is ever inferred from a model name, prompt, or request duration.
+Requests that cancel or exhaust their declared wait leave their queue without
+consuming another request's permit.
 
 A permit covers execution cleanly without preemption: admission neither
 increases provider concurrency nor interrupts an active request. If all permits
@@ -65,13 +74,17 @@ Only set `admission-priority-run-limit` when you intentionally share an account
 between Keepers and `Background` work AND want `Background` (or `Standard`) to
 receive a bounded turn under continuous foreground traffic. Because granting a
 slot to a long-running `Background` call prevents Keepers from reusing that
-permit until completion, setting a small limit such as `1` or `4` increases
-long Keeper wait times compared to leaving `admission-priority-run-limit`
-unset (strict `Priority` → `Standard` → `Background`) or separating seats.
+permit until completion, setting a tight limit such as `1` or `4` yields slots
+to `Background` frequently and increases long Keeper wait times compared to
+leaving `admission-priority-run-limit` unset (strict `Priority` → `Standard` →
+`Background`) or separating seats.
 
-Use the existing provider table and its actual account capacity. For example,
-an operator sharing a concurrency pool of four who intentionally permits one
-waiting `Background` request after every `16` foreground grants can configure:
+When you still want an explicit starvation backstop on a shared pool rather
+than frequent yields, pick a much larger bound so `Background` only takes an
+occasional turn. Use the existing provider table and its actual account
+capacity. For example, an operator sharing a concurrency pool of four who
+intentionally permits one waiting `Background` request only after every `16`
+foreground grants (rather than every `1` or `4`) can configure:
 
 ```toml
 [providers.ollama_cloud]
@@ -109,7 +122,7 @@ Read `/api/v1/providers` to verify the enforced slot count. Inspect
 `admission_class`; the payload states the wait duration and whether a permit
 was granted or the wait expired. Immediately admitted calls do not emit a wait
 record. Background grants and completed Librarian runs must continue alongside
-Standard Keeper responses and tool continuations.
+foreground Keeper responses, tool continuations, and Standard judgment lanes.
 
 Use `Streaming_first_chunk.requested_at` and `Streaming_summary.total_ms` to
 separate queue delay from the upstream request. A lower queue count can include

@@ -1,5 +1,89 @@
 ## [Unreleased]
 
+## [0.77.0] - 2026-11-20
+
+### 요약
+
+- 이번 창은 TUI 읽기·그리기 경로를 손본 것이 가장 큽니다. 읽는 중인 슬롯을 화면 제목 줄 오른쪽 끝에 세우고(#54025·#54078·#54092·#54102·#54114), 스트리밍 답은 끝난 줄만 한 번 바꾸고(#54172), 긴 답은 화면에 닿는 끝 블록부터 그립니다(#54145·#54169). 링크 미리보기는 페이지당 한 번·한 번에 네 개까지만 불러요(#53935).
+- main P0 복구를 이 릴리스에 함께 넣었습니다. `#54054` 가 되돌린 코드·시험 파일과 changelog 조각 다섯 개를 `#54083` 이 복원합니다.
+- Keeper 사람(person) 런타임 1급화가 이어졌습니다. 사람별 side-table, `Person_keeper_turn`, `source.v3` 큐 페이로드, 타입 붙은 거절 사유 enum 이 함께 들어갑니다(#53911·#53912·#53913).
+- exact lane 은 하나의 slot 목록으로 걷는 규칙(RFC)을 확정했습니다(#53968). 런타임 바인딩 쪽은 tinker Inkling-2-Small 의 sampling 창 값을 바로잡았습니다(#54063).
+- 이번 창에는 문서 주석에서 지운 RFC 인용을 걷어낸 정리 커밋과 계획 문서가 여럿 들어갑니다(#54087·#54098·#54170).
+
+### Fresh state required
+
+- Queued Keeper chat operations now require `source.v3` payloads (`source.v2` envelopes are rejected; start with a fresh queued operation store) (#53912).
+
+### Added
+
+- Add the runtime person side-table keyed by `(provider_account_id, source_config snapshot)`, preserve `candidate_backpressure` per `(provider_account_id, runtime_id)` across reloads, ensure person account home directories exist on resolution, isolate person runtimes from operator usage writes and quota lists, and add `test_runtime_person_side_table` (#53911).
+- Add `Person_keeper_turn` to `Keeper_turn_driver.walk_owner`, carry optional `person_caller` (`user_id`, `stored_scope`) in `Keeper_chat_operation_payload` `source.v3`, enforce closed exhaustive channel gating in `Keeper_agent_run`, and add `test_keeper_person_turn_seams` (#53912).
+- Add typed `Keeper_account_refusal`, `Keeper_provider_refusal`, and `Keeper_request_failure.Failure_kind` enums preserving `Not_signed_in`, `Key_refused`, `Key_unusable`, `No_quota`, `Silent`, `Not_started`, `Configuration_refused`, `Turn_refused`, `Runtime_reassigned`, `Server_unavailable`, `Cancelled`, `No_visible_reply`, and `No_answer` across runtime, driver, stream, and chat persistence (#53913).
+- The TUI shows a reading slot at the right-hand end of a screen's title row: a still mark and how long the oldest slow read has run, such as `◌ 6s`. The title row keeps seven cells for it, blank while no read is slow (#54102).
+- OpenRouter `anthropic/claude-*` pre-`System_context` block `cache_control` breakpoint placement (omitting top-level `cache_control` so ephemeral trailing `System_context` bills at 1.0x plain input) and OpenRouter `openai/gpt-5.6-{sol,terra,luna}` / `openai/gpt-6-astra` 1-shot explicit cache opt-out and pre-`System_context` `prompt_cache_breakpoint` (`#54108`, relates `#53917`).
+- Direct xAI provider `cache_session_header = "x-grok-conv-id"` declaration in `packages/agent_core/models.toml` for per-conversation prompt-cache routing affinity (`#54122`, relates `#53917`).
+
+### Changed
+
+- Route `runtime_id_for_keeper`, `get_runtime_by_id`, `resolve_assignment_in`, and `keeper_dispatch_snapshot` through `Authz_keeper_state.find_by_engine_name` and `Runtime_account_runtime.of_person_template`, and disable default/fallback route resolution when `Runtime_account_access` is `Multi_account _` (#53911).
+- Check PAT validity at operation admission and re-verify owner/Active/assignment/`stored_scope` per attempt, prevent `Keeper_chat_operation_batch` from coalescing across different callers or `stored_scope`s, and acquire `Runtime_account_call.call_in_turn_of` before `authorize_account` while propagating `Eio.Cancel.Cancelled` (#53912).
+- Preserve typed `failure_kind` and `turn_ref` on `Keeper_turn.Turn_failed`, `Server_keeper_operation_transcript`, `Server_routes_http_keeper_stream`, `Keeper_chat_failure_projection`, and persisted `Request_failure` rows (legacy rows without `failure_kind` remain readable as `None`), and scrub server filesystem paths and credentials from failure summaries and rows via `Keeper_request_failure.sanitize_person_text` (#53913).
+- RFC #53746 §3.4 (L5): what the window already holds is read from the turn-context messages' own `metadata` (section and line digests) each time the projection picks the window start, not kept in a separate store or in `Keeper_model_input_ledger`; `metadata` is not sent to providers, so it does not change cached bytes. Lines that carry an event (a mention, a Fleet broadcast) render the source message id, so a new message with the same speaker and text is not taken for a line the window already holds. The section cites the post-deploy measurement from #53938 (Goal section first differs in 4.3% of turns, 40.2% first-request cache hit) and §8 reruns that script before and after L5 (#54039).
+- Eight TUI screens (Board, Config, Repositories, Keepers, Tools, goal timelines, task history, chat schedules) no longer draw a "refreshing" or "retrying" sentence while a read runs over a value they already hold. The reading slot at the end of the title row reports the read. First reads keep their words (#54114).
+- A long reply that is still streaming no longer copies its closed rows on every frame: a 1 MB reply goes from about 13 ms to about 8.4 ms per frame. A finished reply's blocks are checked before the render cache keeps them, as a growing reply's already were (#54169).
+
+### Fixed
+
+- When a reply in the chat shows more than 256 distinct links, the TUI no longer asks every link's site again on each frame; link previews fetch each page once, at most four at a time (#53935).
+- Narrow key-value lists (Verification, Memory, Tools, lane add-ons) stack a label above its value instead of cutting it, including widths 26 to 31 where two columns fit but the label column was cut (#53950).
+- The first frame of a very long reply stalls less: the table that maps each byte to its row is built only when a scroll position is restored (#53977).
+- A streaming long reply no longer draws the whole reply again on every frame: one frame of a 300 KB reply goes from about 400 ms to about 6 ms (#54005).
+- `/find` no longer freezes the screen on a conversation with a long reply: candidates are drawn on a worker domain, so a 1 MB reply holds the UI for about 20 ms instead of about 450 ms (#54043).
+- The catalog row for `thinkingmachines/Inkling-2-Small` on Tinker declares a 1,048,576-token window, the sampling limit the endpoint states and serves. It declared 65,536, the limit measured on 2026-11-07, so a rule that compares a request with the row refused requests the endpoint takes. The guide and the example config say which number is the training limit and which the sampling limit (#54063, #53709).
+- Pending mention, scope and Fleet rows in the turn context name their source message id, so a resumed session no longer leaves out a new message whose speaker and text match a row it already holds (#54070).
+- Opening a long reply draws its first screen without drawing the whole reply again (about 1.4 s to about 0.15 s for a 1 MB reply), and the first scroll back through it no longer stalls (about 1.5 s to about 0.12 s). A streaming reply paused between paragraphs no longer draws the whole reply again (#54080).
+- Preserve right-aligned trailing column headers when `Masc_tui_table.header_row_with_dropped` drops columns by placing the dropped-columns badge inside left-aligned column slack whenever `used_width <= inner_width` (falling back to header trimming when overflowing), and add directional sort indicators (`↓`/`↑`) to the Planning Goals and Memory Overview compact table headers (#54094).
+- Replace stateless cursor-derived list scroll offsets with sticky viewport scrolling (`List_window_scroll`) across Schedules, Approvals, Fusion, Config Themes, Workspace Activity, and the Code file tree, preserving mouse-wheel cursor stepping and resetting scroll cleanly on page, scope, directory, and workspace transitions (#54095).
+- A frame where nothing changed no longer lays out a long reply again (about 55 ms to about 0.1 ms per frame for a 1 MB reply), and a streaming reply lays out only the rows its new text adds (#54096).
+- TUI writes a play invite with no expiry as the no-value mark instead of "expiry not recorded", since a credential without an expiry never expires (#54115)
+- Wire usage, cache-hit, and cost accounting across `llama-server` (`timings.cache_n` sync & split-chunk SSE backfill bounded by `prompt_tokens`), OpenRouter BYOK (`is_byok` + `cost_details.upstream_inference_cost`), and Gemini (`usageMetadata.thoughtsTokenCount` folded into inclusive `output_tokens` and `reasoning_tokens` telemetry across sync & SSE) (`#54117`, relates `#53917`).
+- TUI writes the server's commit age on the shared duration ladder, so it no longer rounds up to "60m" or "24h" and keeps the minutes of an hour and a half (#54119)
+- TUI writes a failed Fusion judge's run time, the Librarian preflight's JEV time and the repository activity window on the shared duration ladders, so they no longer read "(125s)", "1.234s" or "Last 24h" (#54124)
+- TUI writes a provider probe's latency and a skill result's duration on the finished-length ladder, so a slow probe reads "2.3s" instead of "2345ms" (#54128)
+- Drawing a long reply checks each Markdown line for a table without copying the line or raising an exception (about 55 ms to about 51 ms of Markdown work for a 1 MB reply) (#54140).
+- Drawing a long reply finds bare URLs by jumping between candidate bytes, and a row without a URL is no longer copied (about 9 ms to about 3.5 ms for a 1 MB reply) (#54143).
+- Goal screens print a quantity target as the value the ledger holds: 1048576 bytes no longer reads as 1.04858e+06 bytes on the confirmation screen (#54155).
+- A frame where nothing changed no longer builds the link cards of a long finished reply again: with #53935, a 1 MB reply with about 13,000 links goes from about 93 ms to about 0.1 ms per frame (#54164).
+- The Schedules list keeps the scroll position it was holding when a frame draws
+  no rows (a snapshot not read yet, or a read that failed), instead of resetting
+  it to the top of the list (#54171).
+
+### Documentation
+
+- RFC `exact-lane-walks-one-slot-list` is revised to the current code and the
+  operator's 2026-11-21 decisions. An exact lane lists HTTP and official-client
+  slots in one `slots` list and walks them in the written order. A slot with no
+  free seat is passed whatever its kind, and when every slot is full the
+  request waits for the first seat to free. Official-client slots count seats
+  by the binding's `max-concurrent`. Every standard and Add-on exact lane moves
+  to one list in a hard cut. RFC `exact-request-waits-only-for-a-seat` and RFC
+  `librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line`
+  now state the same walking rule (#53968).
+- RFC `tui-one-screen-grammar` puts the reading mark in one fixed slot at the right end of zone 2, keeps reading sentences out of zone 4, records why a still glyph with a growing length was chosen over a rotating glyph, and lists the measurements that close the work (#54025).
+
+### Internal
+
+- `scripts/tla-check.sh` runs every spec in each `specs/` directory with
+  `<Spec>.cfg` and every `<Spec>-*.cfg`: a name ending in `-buggy.cfg` must
+  be violated and any other must pass, and a cfg that names no spec in its
+  directory stops the check. Twenty cfgs that no line of the old
+  hand-written list named now run, among them every named LibrarianWriter,
+  LibrarianTurnLog and LibrarianWidth cfg. Six bug models named
+  `<Spec>-buggy-<name>.cfg` are renamed to `<Spec>-<name>-buggy.cfg`
+  (#54046).
+- Add `masc_tui_reading`, the pure value that decides when the reading slot at the right end of zone 2 turns on and off. Nothing calls it yet (#54078).
+- Count each read in flight where the request is sent, and step the reading slot decision once per main loop pass so a slot that changed asks for a frame. Nothing draws the slot yet (#54092).
+
 ## [0.76.0] - 2026-11-20
 
 ### 요약

@@ -102,6 +102,24 @@ provider 별로 openrouter 19, Claude Code 계정 runtime 26, Ollama Cloud 7, Ki
 | `config/runtime.toml` 주석 | 같은 문장. |
 | 시험 | 4장. |
 
+### 3.5 이 꼬리를 한 번 없앤 결정(#35179)
+
+`media_candidates_of` 는 예전에 `media_failover` 뒤에 선언된 나머지 runtime 을 모두 이어 붙였다.
+#35179(2026-09, 이슈 #34823)가 그 꼬리를 없앴다.
+
+- 이유: 부팅 검사가 배정, `media_failover`, verifier slot 의 runtime 만 검사했다. 꼬리의 runtime 은 검사를 받지 않았고, 걸음 중간에 로컬 요청 본문 상한 검사가 `Config` 오류를 냈다. `Config` 는 다음 후보로 넘어가지 않아서 뒤에 살아 있는 후보까지 막혔다.
+- 그 결정은 "걸음이 닿는 범위는 부팅이 검사한 목록까지"였다.
+
+이 RFC 는 그 이유가 지금은 성립하지 않는다고 본다.
+
+- #36828(2026-09-16)이 요청 본문 상한 선언과 로컬 거절(`Request_body_too_large`)을 끝까지 없앴다. 클라이언트가 본문 크기를 재서 거절하는 곳이 없다. 크기는 provider 의 거절(413)이 판정한다.
+- 남은 로컬 거절은 `AcceptRejected` 다. 호출자 쪽 transport 배선을 보내기 전에 거절한 것이라 모든 후보가 같은 배선을 거절한다(`keeper_vision_tool.ml` 의 `wiring_rejected`). 후보가 늘어도 걸음이 끝나는 조건은 같다.
+- 계정이 거절한 runtime 은 걸음이 `Candidate_refused` 로 적고 다음 후보로 넘어간다.
+
+꼬리가 지킬 조건은 하나다. 꼬리의 runtime 도 앞부분과 같은 함수(`caps_admit_required_modalities` 에 `["image"]`)로 이미지 입력을 받는지 본다. 이 함수는 dispatch 의 capability gate 와 같은 판정이라서, 꼬리가 gate 가 거절할 runtime 에 닿지 않는다.
+
+확인 필요: 위 근거는 #36828 의 변경 설명과 `request_body_bytes` 검색 결과(진단 용도만 남음)다. 구현 PR 이 꼬리 runtime 의 시도 시점 거절 경로(`authorize_api` 거절, 공급자 오류)를 시험으로 확인한다.
+
 ## 4. 시험
 
 기능 단위로 본다(헌법 `testing`).

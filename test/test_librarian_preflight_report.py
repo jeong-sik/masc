@@ -992,6 +992,8 @@ class ReportCliTest(unittest.TestCase):
             "criterion": {
                 "revision": "rev-1",
                 "title": "Keep constraints",
+                "measure": {"kind": "count", "noun": "constraint kept", "total": 1},
+                "procedure": "board:p-0123456789abcdef0123456789abcdef",
                 "metric": None,
                 "target_value": None,
             },

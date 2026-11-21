@@ -59,7 +59,7 @@ def spec(choice='vllm'):
     # the fixture declares at least the floor for that choice. The floor is
     # restated here on purpose: when the OCaml constant moves, change this
     # 100000 and RuntimeSpecWindowFloor's assertion in the same commit.
-    max_context = 32768 if choice == 'claude_code' else 8192
+    max_context = 100000 if choice == 'claude_code' else 8192
     result = dict(choice=choice, model='operator/model-exact', max_context=max_context, tools=True, streaming=False)
     if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
         result['endpoint'] = 'http://127.0.0.1:9/v1'

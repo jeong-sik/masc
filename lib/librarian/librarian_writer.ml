@@ -65,6 +65,10 @@ type event =
       ; target : Machine.skip_target
       ; reply : Machine.act_answer Eio.Promise.u
       }
+  | Skip_line of
+      { offset : int
+      ; reply : Machine.act_answer Eio.Promise.u
+      }
   | Retire of retirement Eio.Promise.u
 
 type t =
@@ -222,8 +226,11 @@ let answer_stopped event (stop : Store.stop) =
   match event with
   | Turn_closed | Pulse | Declaration_changed | Ask_ended _ -> ()
   | Write { reply; _ } -> tell reply (Machine.Unavailable (Store_stopped stop))
-  | Resume reply | Adopt { reply; _ } | Restart_reading { reply; _ } | Skip_item { reply; _ } ->
-    tell reply (Machine.Not_done (Act_unavailable (Store_stopped stop)))
+  | Resume reply
+  | Adopt { reply; _ }
+  | Restart_reading { reply; _ }
+  | Skip_item { reply; _ }
+  | Skip_line { reply; _ } -> tell reply (Machine.Not_done (Act_unavailable (Store_stopped stop)))
   | Retire reply -> tell reply Still_registered
 ;;
 
@@ -375,6 +382,11 @@ let live t ~sw =
           Machine.skip_item t.place ~stores:t.stores state ~at:(t.now ()) ~by ~target)
       in
       settle next reply answer
+    | Skip_line { offset; reply } ->
+      let next, answer =
+        Eio.Cancel.protect (fun () -> Machine.skip_line t.place state ~at:(t.now ()) ~offset)
+      in
+      settle next reply answer
     | Retire reply ->
       if t.registered ()
       then (
@@ -491,6 +503,7 @@ let resume t = ask t (fun reply -> Resume reply)
 let adopt t ~by ~observed = ask t (fun reply -> Adopt { by; observed; reply })
 let restart_reading t ~observed = ask t (fun reply -> Restart_reading { observed; reply })
 let skip_item t ~by ~target = ask t (fun reply -> Skip_item { by; target; reply })
+let skip_line t ~offset = ask t (fun reply -> Skip_line { offset; reply })
 
 let retire t =
   match ask t (fun reply -> Retire reply) with

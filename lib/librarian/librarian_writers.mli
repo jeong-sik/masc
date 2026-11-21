@@ -88,6 +88,8 @@ val skip_item
   -> target:Librarian_machine.skip_target
   -> Librarian_machine.act_answer
 
+val skip_line : t -> string -> offset:int -> Librarian_machine.act_answer
+
 (** For the path that removes a Keeper: call it after the Keeper is out of
     the registry and before its files are removed. [Retired_now] says no
     writer holds them. [Still_registered] says the Keeper is registered

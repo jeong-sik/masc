@@ -59,6 +59,7 @@ let f_slice = "slice"
 let f_from = "from"
 let f_until = "until"
 let f_offset = "offset"
+let f_sha = "sha"
 let f_to = "to"
 let f_length = "length"
 let f_row = "row"
@@ -115,6 +116,7 @@ type hole_kind =
   | Kind_item_exceeds_window
   | Kind_turn_log_replaced
   | Kind_position_lost
+  | Kind_line_unreadable
   | Kind_operator_skipped
 
 let hole_kind_token = function
@@ -123,6 +125,7 @@ let hole_kind_token = function
   | Kind_item_exceeds_window -> "item_exceeds_window"
   | Kind_turn_log_replaced -> "turn_log_replaced"
   | Kind_position_lost -> "position_lost"
+  | Kind_line_unreadable -> "line_unreadable"
   | Kind_operator_skipped -> "operator_skipped"
 ;;
 
@@ -132,6 +135,7 @@ let hole_kinds =
   ; Kind_item_exceeds_window
   ; Kind_turn_log_replaced
   ; Kind_position_lost
+  ; Kind_line_unreadable
   ; Kind_operator_skipped
   ]
 ;;
@@ -375,6 +379,9 @@ let hole_to_json = function
   | Position_lost { offset; length } ->
     `Assoc
       [ kind (hole_kind_token Kind_position_lost); f_offset, `Int offset; f_length, `Int length ]
+  | Line_unreadable { offset; sha } ->
+    `Assoc
+      [ kind (hole_kind_token Kind_line_unreadable); f_offset, `Int offset; f_sha, digest_json sha ]
   | Operator_skipped { by; missing } ->
     `Assoc
       [ kind (hole_kind_token Kind_operator_skipped)
@@ -702,6 +709,11 @@ let hole_of_json json =
     let* offset = count_field f_offset fields in
     let* length = count_field f_length fields in
     Ok (Position_lost { offset; length })
+  | Kind_line_unreadable ->
+    let* () = exact_field_names_result [ f_kind; f_offset; f_sha ] fields in
+    let* offset = count_field f_offset fields in
+    let* sha = digest_field f_sha fields in
+    Ok (Line_unreadable { offset; sha })
   | Kind_operator_skipped ->
     let* () = exact_field_names_result [ f_kind; f_by; f_missing ] fields in
     let* by = wire_string_field f_by fields in

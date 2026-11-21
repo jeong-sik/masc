@@ -32,6 +32,7 @@
                                 { "kind": "undecodable_external_row", "row": 3 } ] } ] }
     { "kind": "skip", "hole": { "kind": "content_missing", "missing": [ … ] } }
     { "kind": "skip", "hole": { "kind": "unknown_span", "before": { … }, "after": { … } } }
+    { "kind": "skip", "hole": { "kind": "line_unreadable", "offset": 240, "sha": "<sha256 hex>" } }
     v}
 
     A position is [{ "kind": "before_first" }] or

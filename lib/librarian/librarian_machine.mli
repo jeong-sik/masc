@@ -35,6 +35,7 @@
     Resume                            resume
     Adopt                             adopt
     RestartReading                    restart_reading
+    SkipLine                          skip_line
     BootFinish                        booted
     FreshMem(m.lane)                  booted from the lane and the last number only
     Start(m, c, fb)                   the next ask, inside these functions
@@ -395,6 +396,20 @@ type act_refusal =
       name, to send again. [None]: reading has no head item to skip.
       Nothing is unread, the writer passes the head itself, or reading
       stops on a line or a turn log another act passes. *)
+  | Not_the_faulted_line
+  (** The offset is not the line a [Skip_line] would pass now. Nothing is
+      unread, a unit that holds an item or an unannounced reset comes
+      first, reading stops on another line, or the file is another turn
+      log or the stored offset is lost, which [Restart_reading] passes. *)
+  | Turn_log_stopped_on_line
+  (** The offset is the line reading stops on, and the turn log stops on it
+      too: the read of the file's tail that every append of the turn log
+      starts with fails on this line, so the file grows no more
+      ({!Keeper_turn_log_store.read_error}). A skip would leave nothing
+      unread while no later turn reaches Memory, so the line is not passed
+      and how the last ask ended is kept. The way out is the file's: it is
+      deleted with the server stopped, and reading is restarted in the new
+      file (RFC §18.5). *)
   | Content_unread
   (** A byte file or the external store could not be read now, so the
       act's condition was not read. Nothing changed. *)
@@ -494,6 +509,38 @@ val skip_item
   -> by:string
   -> target:skip_target
   -> t * act_answer
+
+(** An operator passes a line of the turn log that reading stops on
+    (§12.4). The condition is read from the disk when the act is taken: the
+    reader, run again from the tail, stops at the line at [offset] because
+    the line does not decode or is out of order, and no unit before it
+    holds an item ({!Librarian_unread.stop}).
+
+    The [Skip (Line_unreadable { offset; sha })] line passes that line and
+    the item-less units before it. Reading goes on just past the line, and
+    stays covered to where the units before it ended: the line moves no
+    mark. [sha] is of the line's bytes without its line break.
+
+    The working state and the snapshot are kept, and so is the width
+    memory: no unit with items was passed. The size facts and how the last
+    ask ended are emptied, an ask that is out is cancelled, and the next
+    ask follows.
+
+    In [Idle], [Asking], [Resting] and [Refused_at_bottom]. Any other answer
+    of the reader is [Not_done Not_the_faulted_line]; a file that cannot be
+    read now is [Not_done Turn_log_unread]. A refusal leaves the value as it
+    was, an ask that is out included. [Stopped s] is
+    [Not_done (Act_unavailable (Store_stopped s))], and so is a commit that
+    appends no line, which stops the store with [s] (§9.2).
+
+    A line the turn log itself stops on is not passed. Every append of the
+    turn log starts with {!Keeper_turn_log_store.read_tail}; when that read
+    fails on the line at [offset] as [Row_undecodable], the answer is
+    [Not_done Turn_log_stopped_on_line]. The read does not reach a line when
+    the lines after it say where the next unit starts and whether a turn is
+    open, and that line is passed. A tail that cannot be read now is
+    [Not_done Turn_log_unread]. *)
+val skip_line : place -> t -> at:float -> offset:int -> t * act_answer
 
 (** What the writer's fiber does to the ask's fiber after one step. *)
 type fiber_change =

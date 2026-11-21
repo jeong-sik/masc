@@ -26,6 +26,10 @@ type hole =
       { offset : int
       ; length : int
       }
+  | Line_unreadable of
+      { offset : int
+      ; sha : Digest.digest
+      }
   | Operator_skipped of
       { by : string
       ; missing : Librarian_unit.missing_at list

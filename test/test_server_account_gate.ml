@@ -128,6 +128,44 @@ let test_reconcile_accepts_the_inventory () =
        false)
 ;;
 
+let method_names methods =
+  List.map (fun method_ -> Httpun.Method.to_string method_) methods
+;;
+
+let test_methods_at_names_what_the_path_answers () =
+  let entries =
+    [ exact ~methods:[ get ] "/x" Route_access.Always_public
+    ; exact ~methods:[ post ] "/x" Route_access.Always_public
+    ; prefix ~methods:[ get ] "/k/" Route_access.Read_auth
+    ]
+  in
+  check (list string) "both methods at one path, in registration order" [ "GET"; "POST" ]
+    (method_names (Server_account_route.methods_at entries ~path:"/x"));
+  check (list string) "a prefix answers its methods for a sub-path" [ "GET" ]
+    (method_names (Server_account_route.methods_at entries ~path:"/k/one"));
+  check (list string) "a path nothing answers has no method" []
+    (method_names (Server_account_route.methods_at entries ~path:"/nowhere"))
+;;
+
+(* The inventory is the router's own table, so a registration that the router
+   accepted cannot be missing from it: this is the property the boot check
+   leans on, not a copy of a list written by hand. *)
+let test_of_router_sees_every_registration () =
+  let plain : Http_server_eio.request_handler = fun _request _reqd -> () in
+  let state : Server_route.state_handler = fun _state _request _reqd -> () in
+  let router =
+    Http_server_eio.Router.create ()
+    |> Server_route.get Server_route.Always_public "/a" plain
+    |> Server_route.get Server_route.Read_auth "/b" state
+  in
+  let entries = Server_account_route.of_router router in
+  check int "the inventory holds every registration" 2 (List.length entries);
+  check (list string) "in registration order" [ "/a"; "/b" ]
+    (List.map (fun (entry : Server_account_route.entry) -> entry.path) entries);
+  check bool "a registered path is covered" true
+    (Server_account_route.covers entries ~path:"/a" ~method_:get)
+;;
+
 let () =
   Alcotest.run
     "server_account_gate"
@@ -151,6 +189,11 @@ let () =
         ; test_case "refuses one path with two accesses" `Quick
             test_reconcile_refuses_one_path_with_two_accesses
         ; test_case "accepts the inventory" `Quick test_reconcile_accepts_the_inventory
+        ] )
+    ; ( "table"
+      , [ test_case "names what a path answers" `Quick
+            test_methods_at_names_what_the_path_answers
+        ; test_case "sees every registration" `Quick test_of_router_sees_every_registration
         ] )
     ]
 ;;

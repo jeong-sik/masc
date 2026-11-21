@@ -200,9 +200,9 @@ let block_json : Agent_core.Types.content_block -> Yojson.Safe.t option = functi
   | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> None
 ;;
 
-(* What the runtime puts before the model again (recalled Memory,
-   instructions, recovery cues) was not seen in this unit. Its content is
-   left out, so Memory is not read back as an observation. *)
+(* What the runtime puts before the model (recalled Memory, outside text,
+   instructions, recovery cues) is not an observation of this unit. Its
+   content is left out, so Memory is not read back as an observation. *)
 let message_fields (message : Agent_core.Types.message) =
   let role = f_role, `String (Agent_core.Types.role_to_string message.role) in
   match message.origin with
@@ -217,7 +217,8 @@ let message_fields (message : Agent_core.Types.message) =
   | Historical_system_context
   | Recovery_instruction
   | Tool_result_followup
-  | Agent_instruction ->
+  | Agent_instruction
+  | Outside_context ->
     [ role
     ; f_runtime_context, `String (Agent_core.Types.message_origin_to_string message.origin)
     ]

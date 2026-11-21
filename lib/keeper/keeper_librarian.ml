@@ -154,7 +154,7 @@ let message_to_text ~position_label ~position (m : Agent_core.Types.message) : s
   let attribution, body =
     match m.origin with
     | System_context | Historical_system_context | Recovery_instruction
-    | Tool_result_followup | Agent_instruction ->
+    | Tool_result_followup | Agent_instruction | Outside_context ->
       " source=runtime_context", "[runtime context omitted]"
     | Conversation ->
       let parts = List.filter_map text_of_content m.content in

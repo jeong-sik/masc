@@ -150,7 +150,7 @@ let user_message_text (message : Agent_core.Types.message) =
     if content = "" then None else Some content
   | (Agent_core.Types.System | Assistant | Tool), _
   | User, (System_context | Historical_system_context | Recovery_instruction
-          | Tool_result_followup | Agent_instruction) -> None
+          | Tool_result_followup | Agent_instruction | Outside_context) -> None
 ;;
 
 let user_messages_newest_first (msgs : Agent_core.Types.message list) : string list =

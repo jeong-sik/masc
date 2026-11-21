@@ -338,7 +338,8 @@ let is_conversation_user (message : Agent_core.Types.message) =
   | Historical_system_context
   | Recovery_instruction
   | Tool_result_followup
-  | Agent_instruction -> false
+  | Agent_instruction
+  | Outside_context -> false
 ;;
 
 let is_conversation_assistant (message : Agent_core.Types.message) =
@@ -351,7 +352,8 @@ let is_conversation_assistant (message : Agent_core.Types.message) =
   | Historical_system_context
   | Recovery_instruction
   | Tool_result_followup
-  | Agent_instruction -> false
+  | Agent_instruction
+  | Outside_context -> false
 ;;
 
 let add_message_tool_call_ids acc (message : Agent_core.Types.message) =

@@ -402,16 +402,7 @@ shard_aliases() {
 run_one_target() {
   alias_target="$1"
   echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
-  # A sharded run builds many targets into the one uploaded log, so each target
-  # appends under its own header instead of overwriting the previous one's
-  # output. The single-target path keeps truncating as before.
-  if [ "$shard_count" -gt 1 ]; then
-    printf '\n[test-suite] ===== %s =====\n' "$alias_target" >> "$log"
-  else
-    # One target: start from an empty log, as the single `@runtest` path always
-    # did. A sharded run truncates once before its first shard instead.
-    : > "$log"
-  fi
+  printf '\n[test-suite] ===== %s =====\n' "$alias_target" >> "$active_log"
   run_suite_under_deadline
   if [ "$rc" != 0 ] && [ "$overall_rc" = 0 ]; then
     overall_rc="$rc"
@@ -421,6 +412,7 @@ run_one_target() {
 
 shard_count="${SUITE_SHARD_COUNT:-1}"
 shard_index="${SUITE_SHARD_INDEX:-}"
+shard_traces=""
 all_aliases=""
 overall_rc=0
 # run_suite_under_deadline restarts `started` for each build, so the total below
@@ -444,23 +436,52 @@ if [ "$shard_count" -gt 1 ]; then
   if [ "$alias_total" -lt "$shard_count" ]; then
     echo "[test-suite] WARN - ${alias_total} target(s) over ${shard_count} shards; empty shards are skipped"
   fi
+  # Each shard writes its own log and trace. Nothing is overwritten, and the
+  # uploaded log is rebuilt at the end in shard order, so a failure in shard 2
+  # is still readable after shard 7 ran.
   : > "$log"
   for idx in $shard_indexes; do
     targets="$(shard_aliases "$shard_count" "$idx")"
     shard_size="$(printf '%s\n' "$targets" | grep -c . || true)"
     echo "[test-suite] shard ${idx}/${shard_count}: ${shard_size} target(s)"
+    active_log="$tmp/test-suite.shard-${idx}.log"
+    trace="$tmp/test-suite-trace.shard-${idx}.csexp"
+    shard_traces="$shard_traces $trace"
     if [ "$shard_size" -eq 0 ]; then
       continue
     fi
+    : > "$active_log"
     for target in $targets; do
       run_one_target "$target"
     done
+    # Append this shard's log to the uploaded one in shard order, so the final
+    # file reads in the order the suites ran.
+    {
+      printf '\n[test-suite] ----- shard %s/%s (%s target(s)) -----\n' \
+        "$idx" "$shard_count" "$shard_size"
+      cat "$active_log"
+    } >> "$log"
     # Drop this slice's executables before the next slice links its own: the
     # disk evidence of the band is already streamed, and the run's log and
     # trace stay in place.
     rm -rf "$repo_root/_build/default/test"
   done
+  # One timing summary for the whole sharded run: the summary parser reads a
+  # stream of records, so the shard traces are concatenated in shard order.
+  # The combined file has its own name: the last shard's trace path is still in
+  # `$trace` here, and reading a file into itself would truncate it.
+  combined_trace="$tmp/test-suite-trace.combined.csexp"
+  : > "$combined_trace"
+  for shard_trace in $shard_traces; do
+    if [ -s "$shard_trace" ]; then
+      cat "$shard_trace" >> "$combined_trace"
+    fi
+  done
+  rm -f "$tmp"/test-suite-trace.shard-*.csexp
+  trace="$combined_trace"
 else
+  active_log="$log"
+  : > "$active_log"
   run_one_target "$alias_target"
 fi
 rc="$overall_rc"

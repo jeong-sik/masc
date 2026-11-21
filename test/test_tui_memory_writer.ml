@@ -473,7 +473,7 @@ let test_detail_rows () =
              ~covers_through:(Through { line = 40; within_item = false })
              ())));
   check (list (list string)) "a resting writer without a lane value names every slot's outcome"
-    [ [ "기억 쓰는 쪽"; "오류"; "쉼 · 다음 pulse 에 다시 물음"; "안 읽은 것 있음"; "lane 값 없음" ]
+    [ [ "기억 쓰는 쪽"; "오류"; "쉼 · 마지막 묻기가 반영 없이 끝남"; "안 읽은 것 있음"; "lane 값 없음" ]
     ; [ "기억 쓰는 쪽 경보"; Text.alarm_text ~ko:true Level.E4 ]
     ; [ "기억 쓰는 쪽 마지막 읽기"
       ; "답한 slot 없음"

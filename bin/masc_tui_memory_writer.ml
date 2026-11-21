@@ -68,7 +68,7 @@ let state_text ~ko = function
   | Open { activity = Asking asking; _ } ->
     text ~ko "묻는 중 · " "asking · " ^ asked_text ~ko asking.asked
   | Open { activity = Resting; _ } ->
-    text ~ko "쉼 · 다음 pulse 에 다시 물음" "resting until the next pulse"
+    text ~ko "쉼 · 마지막 묻기가 반영 없이 끝남" "resting: the last ask ended without a commit"
   | Open { activity = Refused_at_bottom; _ } ->
     text ~ko "맨 앞 항목이 거절됨" "the head item is refused"
   | Stopped { stop; _ } -> text ~ko "멈춤 · " "stopped · " ^ stop_text ~ko stop

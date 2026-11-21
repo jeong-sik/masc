@@ -131,25 +131,40 @@ let ask_failure_text ~ko = function
 
 let none_since_start ~ko = text ~ko "시작 뒤 끝난 것 없음" "none ended since the start"
 
-(* The ending alone, for a clause beside the state. *)
+(* An end is about the Memory and the lane value of its ask. Once either is
+   another, the alarm that reads the end is off, and the end says which. *)
+let memory_changed_since ~ko = text ~ko "그 뒤 Memory 가 바뀜" "Memory changed since"
+let lane_changed_since ~ko = text ~ko "그 뒤 lane 값이 바뀜" "the lane value changed since"
+
+(* The ending alone, for a clause beside the state. The refusal E4 reads says
+   what the alarm says of it, so the two are read as one thing. *)
 let last_read_short ~ko = function
   | None -> none_since_start ~ko
   | Some Read_committed -> text ~ko "반영됨" "committed"
+  | Some (Read_refused_not_all_sized _) ->
+    text ~ko "한 항목을 slot 이 모두 거절함" "every slot refused the one item"
   | Some (Read_lane _) -> text ~ko "답한 slot 없음" "no slot answered"
   | Some (Read_input_fault _) -> text ~ko "입력 결함" "input fault"
   | Some (Read_ask_failed _) -> text ~ko "묻기 실패" "ask failed"
 ;;
 
-let last_read_clauses ~ko = function
+let last_read_clauses ~ko =
+  let slot_clauses slots =
+    List.map (fun (slot, outcome) -> slot ^ " " ^ slot_outcome_text ~ko outcome) slots
+  in
+  function
   | (None | Some Read_committed) as last -> [ last_read_short ~ko last ]
+  | Some (Read_refused_not_all_sized { about_memory_now; about_lane_now; slots }) as last ->
+    [ last_read_short ~ko last ]
+    @ (if about_memory_now then [] else [ memory_changed_since ~ko ])
+    @ (if about_lane_now then [] else [ lane_changed_since ~ko ])
+    @ slot_clauses slots
   | Some (Read_lane { one_item; silent; about_memory_now; slots }) as last ->
     [ last_read_short ~ko last ]
     @ (if one_item then [ text ~ko "항목 하나를 물음" "asked one item" ] else [])
     @ (if silent then [ text ~ko "말 없는 slot 있음" "a slot was silent" ] else [])
-    @ (if about_memory_now
-       then []
-       else [ text ~ko "그 뒤 Memory 가 바뀜" "Memory changed since" ])
-    @ List.map (fun (slot, outcome) -> slot ^ " " ^ slot_outcome_text ~ko outcome) slots
+    @ (if about_memory_now then [] else [ memory_changed_since ~ko ])
+    @ slot_clauses slots
   | Some (Read_input_fault fault) as last ->
     [ last_read_short ~ko last; input_fault_text ~ko fault ]
   | Some (Read_ask_failed failure) as last ->
@@ -167,8 +182,8 @@ let last_room_text ~ko = function
   | Some Room_not_judged -> text ~ko "판정하지 못함" "not judged"
   | Some (Room_fits_none { about_memory_now; about_lane_now }) ->
     text ~ko "어느 slot 에도 들어가지 않음" "fits no slot"
-    ^ (if about_memory_now then "" else text ~ko " · 그 뒤 Memory 가 바뀜" " · Memory changed since")
-    ^ if about_lane_now then "" else text ~ko " · 그 뒤 lane 값이 바뀜" " · the lane value changed since"
+    ^ (if about_memory_now then "" else " · " ^ memory_changed_since ~ko)
+    ^ if about_lane_now then "" else " · " ^ lane_changed_since ~ko
 ;;
 
 let position_text ~ko = function

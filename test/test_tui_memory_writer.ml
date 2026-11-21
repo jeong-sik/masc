@@ -155,14 +155,17 @@ let slot_outcomes =
   ]
 ;;
 
+let slots_wire slots : Yojson.Safe.t =
+  `List (List.map (fun (slot, outcome) -> obj [ "slot", str slot; "outcome", str outcome ]) slots)
+;;
+
 let lane_wire slots =
   obj
     [ "ended", str "lane"
     ; "one_item", `Bool true
     ; "silent", `Bool false
     ; "about_memory_now", `Bool true
-    ; ( "slots"
-      , `List (List.map (fun (slot, outcome) -> obj [ "slot", str slot; "outcome", str outcome ]) slots) )
+    ; "slots", slots_wire slots
     ]
 ;;
 
@@ -189,6 +192,18 @@ let reads_last_read name wire expected =
 let test_last_read () =
   reads "no reading ask ended since the boot" (member (open_wire ())) (shown (open_row ()));
   reads_last_read "committed" (obj [ "ended", str "committed" ]) Read_committed;
+  reads_last_read "every slot refused one item, not every one with a size"
+    (obj
+       [ "ended", str "refused_not_all_sized"
+       ; "about_memory_now", `Bool true
+       ; "about_lane_now", `Bool false
+       ; "slots", slots_wire [ "slot.a", "refused"; "slot.b", "input_too_large" ]
+       ])
+    (Read_refused_not_all_sized
+       { about_memory_now = true
+       ; about_lane_now = false
+       ; slots = [ "slot.a", Refused; "slot.b", Input_too_large ]
+       });
   reads_last_read "no slot answered"
     (lane_wire (List.map (fun (token, (_ : slot_outcome)) -> "slot." ^ token, token) slot_outcomes))
     (Read_lane
@@ -368,6 +383,9 @@ let test_every_constructor_has_its_words () =
          (List.map (Text.last_read_text ~ko)
             [ None
             ; Some Read_committed
+            ; Some
+                (Read_refused_not_all_sized
+                   { about_memory_now = true; about_lane_now = true; slots = [] })
             ; Some (Read_lane { one_item = false; silent = false; about_memory_now = true; slots = [] })
             ; Some (Read_input_fault (Line_unreadable { offset = 1 }))
             ; Some (Read_ask_failed Raised)
@@ -458,9 +476,29 @@ let attention_row_room =
   Masc_tui_frame.inner_width ~cols:narrow_terminal_cols - reading_indent_cells
 ;;
 
+let moment at = Printf.sprintf "t%.0f" at
+
+(* A writer whose last read every slot refused, about another Memory and
+   another lane value than those held now, so its last read carries every
+   clause that end has. With either changed, E4 is off. *)
+let refused_about_another_memory_and_lane =
+  shown ~level:Level.Warn ~alarms:[ Level.W1 ]
+    (open_row ~activity:Resting ~unread:true
+       ~kept:
+         (kept
+            ~last_read:
+              (Read_refused_not_all_sized
+                 { about_memory_now = false; about_lane_now = false; slots = [ "slot.a", Refused ] })
+            ())
+       ())
+;;
+
 (* Every row [attention_rows] draws fits that room, in both languages: the one
    for a process without writers and the one for each alarm. The width is the
-   one the TUI lays text out by. *)
+   one the TUI lays text out by. The detail packs a reading's clauses into
+   rows of the same room and cuts inside a clause only when the clause alone
+   is wider: each clause of the detail of a writer every slot refused fits
+   that room too. *)
 let test_attention_rows_fit_a_narrow_terminal () =
   List.iter
     (fun (lang, ko) ->
@@ -480,11 +518,18 @@ let test_attention_rows_fit_a_narrow_terminal () =
             fits token
               (Text.attention_rows ~ko
                  (shown ~level:(Level.level [ alarm ]) ~alarms:[ alarm ] (open_row ()))))
-         alarm_tokens)
+         alarm_tokens;
+       List.iter
+         (List.iter (fun clause ->
+            let cells = Masc_tui_message_layout.display_width clause in
+            check bool
+              (Printf.sprintf "%s detail clause [%s]: %d of %d cells" lang clause cells
+                 attention_row_room)
+              true
+              (cells <= attention_row_room)))
+         (Text.detail_rows ~ko ~moment refused_about_another_memory_and_lane))
     [ "ko", true; "en", false ]
 ;;
-
-let moment at = Printf.sprintf "t%.0f" at
 
 let test_detail_rows () =
   check (list (list string)) "a process without writers" [ [ "Memory writer"; "not started by the server" ] ]
@@ -517,8 +562,8 @@ let test_detail_rows () =
              ~covers_through:(Through { line = 40; within_item = false })
              ())));
   check (list (list string)) "a resting writer without a lane value names every slot's outcome"
-    [ [ "기억 쓰는 쪽"; "오류"; "쉼 · 마지막 묻기가 반영 없이 끝남"; "안 읽은 것 있음"; "lane 값 없음" ]
-    ; [ "기억 쓰는 쪽 경보"; Text.alarm_text ~ko:true Level.E4 ]
+    [ [ "기억 쓰는 쪽"; "경고"; "쉼 · 마지막 묻기가 반영 없이 끝남"; "안 읽은 것 있음"; "lane 값 없음" ]
+    ; [ "기억 쓰는 쪽 경보"; Text.alarm_text ~ko:true Level.W1 ]
     ; [ "기억 쓰는 쪽 마지막 읽기"
       ; "답한 slot 없음"
       ; "항목 하나를 물음"
@@ -536,7 +581,7 @@ let test_detail_rows () =
       ]
     ]
     (Text.detail_rows ~ko:true ~moment
-       (shown ~level:Level.Error ~alarms:[ Level.E4 ]
+       (shown ~level:Level.Warn ~alarms:[ Level.W1 ]
           (open_row ~activity:Resting ~unread:true
              ~kept:
                (kept ~lane:false

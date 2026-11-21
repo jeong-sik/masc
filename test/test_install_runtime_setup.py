@@ -32,7 +32,9 @@ MODULE.loader.exec_module(SETUP)
 def spec(choice='vllm'):
     # Claude Code rejects a declared window under its autocompact floor
     # (runtime_claude_code.ml: autocompact_window_floor_tokens = 100_000), so
-    # the fixture declares at least the floor for that choice.
+    # the fixture declares at least the floor for that choice. The floor is
+    # restated here on purpose: when the OCaml constant moves, change this
+    # 100000 and RuntimeSpecWindowFloor's assertion in the same commit.
     max_context = 100000 if choice == 'claude_code' else 8192
     result = dict(choice=choice, model='operator/model-exact', max_context=max_context, tools=True, streaming=False)
     if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
@@ -70,6 +72,7 @@ class RuntimeSpecWindowFloor(unittest.TestCase):
         # (runtime_claude_code.ml: autocompact_window_floor_tokens = 100_000).
         # This check runs where CI has no native binary, so a fixture that
         # regresses under the floor cannot hide behind the --binary skip.
+        # Keep this 100000 in sync with the OCaml floor (see spec()).
         self.assertGreaterEqual(spec('claude_code')['max_context'], 100000)
 
     def test_other_fixture_choices_keep_the_compact_window(self):

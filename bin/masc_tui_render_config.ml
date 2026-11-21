@@ -727,15 +727,24 @@ let render_prompt_registry (state : state) =
   let total = List.length prompt_rows in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt prompt_rows cursor in
+  (* Only a first read without a held snapshot opens the progress sheet;
+     re-reads over held prompts or held librarian input are reported by the
+     zone-2 reading slot (RFC tui-one-screen-grammar section 8). *)
   let catalog_loading =
-    Masc_tui_fetched.in_flight state.prompts
-    || (match prompts with Masc_tui_fetched.Loading -> true
-        | Absent | Ready _ | Stale _ | Failed _ -> false)
+    Option.is_none (Masc_tui_fetched.value prompts)
+    && (Masc_tui_fetched.in_flight state.prompts
+        || match prompts with Masc_tui_fetched.Loading -> true
+           | Absent | Ready _ | Stale _ | Failed _ -> false)
   in
   let librarian_loading =
     state.prompts_librarian_input_loading
     && Option.exists
-         (fun (row : Tui_decode.prompt_row) -> String.equal row.pr_category "librarian")
+         (fun (row : Tui_decode.prompt_row) ->
+           String.equal row.pr_category "librarian"
+           && not
+                (Option.exists
+                   (fun (key, _) -> String.equal key row.pr_key)
+                   state.prompts_librarian_input))
          selected
   in
   let prompt_sig =
@@ -899,10 +908,13 @@ let render_runtime_prompt_assets (state : state) =
   let total = List.length assets in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt assets cursor in
+  (* Only a first read without a held snapshot opens the progress sheet;
+     re-reads over held assets are reported by the zone-2 reading slot. *)
   let catalog_loading =
-    Masc_tui_fetched.in_flight state.prompts
-    || (match prompts with Masc_tui_fetched.Loading -> true
-        | Absent | Ready _ | Stale _ | Failed _ -> false)
+    Option.is_none (Masc_tui_fetched.value prompts)
+    && (Masc_tui_fetched.in_flight state.prompts
+        || match prompts with Masc_tui_fetched.Loading -> true
+           | Absent | Ready _ | Stale _ | Failed _ -> false)
   in
   let assets_started_at =
     Masc_tui_types.progress_clock_option state ~slot:"prompts-assets" ~now

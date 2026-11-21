@@ -1650,7 +1650,7 @@ let unpublish_exact_output_registry () =
   |> Result.map (fun () -> Atomic.set exact_output_registry_stale_ref None)
 ;;
 
-(* Fail-closed startup entry point: [load_list] (RFC-0206 routing validation)
+(* Fail-closed startup entry point: [load_list] (routing validation)
    PLUS the AGENT_CORE capability-catalog gate. Strict callers use this so an operator
    runtime.toml whose model is absent from the catalog is rejected before boot —
    the gate that load_list intentionally no longer applies, kept out of load_list
@@ -2149,8 +2149,8 @@ let get_lane_by_id (id : string) : Runtime_lane.t option =
 (* Resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the requested runtime assignment (or the
    default) instead of unconditionally the default; an
-   unknown id returns [None] so the driver fails fast (no silent substitution —
-   RFC-0206 §2.1).  In multi-account mode, reads the person side-table rather
+   unknown id returns [None] so the driver fails fast (no silent substitution).
+   In multi-account mode, reads the person side-table rather
    than operator runtime tables. *)
 let get_runtime_by_id (id : string) : t option =
   let state = runtime_state () in

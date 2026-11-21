@@ -368,7 +368,7 @@ val runtimes_of_config : config -> (t list, load_failure) result
     {!get_default_runtime_id} instead. *)
 
 val init_default : config_path:string -> (unit, string) result
-(** Parse + RFC-0206 routing validation + populate the singletons. Does NOT apply
+(** Parse + routing validation + populate the singletons. Does NOT apply
     the AGENT_CORE capability-catalog gate (use {!init_default_strict} for fail-closed
     callers or {!init_default_degraded_report} for server boot). Safe for tests
     with arbitrary-model runtime fixtures. *)

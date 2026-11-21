@@ -118,8 +118,7 @@ type load_failure =
    here — at load, over the whole binding list — is what makes the absence
    visible without a reference to hang the message on (masc#28403).
    [Binding_disabled], [Provider_disabled] and [Execution_unbuildable] stay
-   non-fatal: they keep the RFC-0206 §2.1 contract that a binding MASC cannot
-   run is excluded rather than fatal. *)
+   non-fatal: a binding MASC cannot run is excluded rather than fatal. *)
 let dangling_reference_reason = function
   | Provider_not_declared id ->
     Some (Printf.sprintf "names provider %S, which has no [providers.%s] row" id id)

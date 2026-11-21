@@ -1,6 +1,6 @@
 (** Pure helpers extracted from [Keeper_turn_driver].
 
-    See [.ml] for rationale. No behavior change from pre-RFC-0048 inline
+    See [.ml] for rationale. No behavior change from the inline
     definitions. *)
 
 val checkpoint_after_attempt :

@@ -633,15 +633,21 @@ status: reference
 : 소비자가 `max_concurrent_requests`를 선언한 제공자 계정의 동시 완료 요청 수를
   제한하는 Agent Core의 진입 절차. 같은 `kind`·`base_url`·API 키 식별자를 쓰는
   Keeper turn과 Exact-output route의 발송이 프로세스 전체에서 허용량을 공유한다.
-  자리가 차면 도착 순서로 허가를 기다리고, 선언이 없으면 이 절차를 적용하지 않는다.
-  계정이 `admission_priority_run_limit`도 선언하면 `Priority` 요청이 `Standard` 요청보다
-  먼저 허가를 받되, `Standard`가 기다리는 동안에는 그 수만큼만 연달아 받는다.
-  `Background`가 기다리면 `Priority`·`Standard`를 합쳐 그 수만큼 허가한 뒤
-  `Background`에도 차례를 준다. 이는 허가 횟수의 보장이며 실행 중 요청을 선점하지 않는다.
-  masc에서는 runtime.toml provider 표의 `admission-priority-run-limit`이 이 값이고,
-  verifier·HITL auto judge·board attention은 `Priority`, Keeper 호출은 `Standard`,
-  Librarian 메모리 처리는 `Background`다
-  (`Standalone_lane.admission_class`). 이 값은 그 provider에서 `max-concurrent`를
+  자리가 차면 선언한 계급의 엄격 순서(`Priority` → `Standard` → `Background`,
+  같은 계급 안에서는 도착 순서 FIFO)로 허가를 기다리고, 선언이 없으면 이 절차를
+  적용하지 않는다. 계정이 `admission_priority_run_limit`을 선택적으로 선언하면
+  하위 계급 기아 방지 한도가 켜져, `Standard`가 기다리는 동안 `Priority`는
+  그 수만큼만 연달아 허가를 받고, `Background`가 기다리면 `Priority`·`Standard`를
+  합쳐 그 수만큼 허가한 뒤 `Background`에도 차례를 준다. 이는 허가 횟수의 보장이며
+  실행 중 요청을 선점하지 않는다.
+  masc에서는 runtime.toml provider 표의 `admission-priority-run-limit`이 이 값이다.
+  계급 배정은 `Standalone_lane`이 단일 출처이며(`Standalone_lane.admission_class`·
+  `admission_class_of_caller`), `Priority`는 대화형 Keeper 턴(`Interactive_chat`)
+  전용으로 예약돼 있고(현재 Keeper HTTP binding은 `Provider_config.make` 기본값인
+  `Standard`를 상속하며, 단독 판정 레인은 `Priority`를 쓰지 않는다),
+  `Verifier`·`Hitl_auto_judge`·`Board_attention`·`Candle_appraiser`와 비배경 lane
+  addon·일반 요청은 `Standard`, `Librarian`·`Librarian_memory`·`Workspace_memory_curator`와
+  Librarian 인가 lane addon은 `Background`다. `admission-priority-run-limit`은 그 provider에서 `max-concurrent`를
   선언한 binding에만 붙는다. 그런 binding이 없거나 공식 클라이언트 provider이면
   설정을 읽을 때 거절한다. 한 계정의 binding은 칸 수와 연속 한도를 같게 선언해야
   하고, 다르면 설정 저장과 로드에서 거절한다. 설정 저장이나 `masc runtime-resume`으로

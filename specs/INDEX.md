@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-11-21T09:00:00Z (HEAD: 526555c931191)
+Generated: 2026-11-21T12:29:14Z (HEAD: 5f49fc9b5b264)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 44 |
-| Manual specs | 44 |
+| Total .tla files | 45 |
+| Manual specs | 45 |
 | TTrace (auto-generated) | 0 |
 | Directories | 9 |
-| Total .cfg files | 236 |
-| Buggy .cfg (bug-model pair) | 169 |
+| Total .cfg files | 255 |
+| Buggy .cfg (bug-model pair) | 184 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -41,12 +41,13 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} buggy={inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} | 89ec537d1237 |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:AgentCoreBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | ae0c4b3f330f |
 
-### specs/bug-models (21 specs)
+### specs/bug-models (22 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
 | AtomicFileWrite.tla | AtomicFileWrite | manual | 2 | 1 | clean={inv:ReaderNeverSeesEmpty} buggy={inv:ReaderNeverSeesEmpty} | 95f772ef7488 |
 | CooperativeDrainYield.tla | CooperativeDrainYield | manual | 2 | 1 | clean={inv:TypeOK, inv:NoStarvation} buggy={inv:TypeOK, inv:NoStarvation} | 4368604304db |
+| CuratorNarrow.tla | CuratorNarrow | manual | 19 | 15 | clean={inv:TypeOK, inv:Shape, inv:NoResendOfRefused, inv:SetAsideOnlyWhenAllRefused, inv:MemoryIsOfThisGeneration, inv:ReaskOnlyOnTick, inv:RefusalsWithinTwoNMinusOne} aside-on-unusable-buggy={inv:SetAsideOnlyWhenAllRefused} four={inv:TypeOK, inv:Shape, inv:NoResendOfRefused, inv:SetAsideOnlyWhenAllRefused, inv:MemoryIsOfThisGeneration, inv:ReaskOnlyOnTick, inv:RefusalsWithinTwoNMinusOne} late-write-buggy={inv:MemoryIsOfThisGeneration} mute={inv:TypeOK, inv:Shape, inv:NoResendOfRefused, inv:SetAsideOnlyWhenAllRefused, inv:MemoryIsOfThisGeneration, inv:ReaskOnlyOnTick, inv:RefusalsWithinTwoNMinusOne} no-quiet-memory-buggy={inv:ReaskOnlyOnTick} poison-fact-reachable-buggy={inv:NeverPassesAPoisonFact} quiet-half-reachable-buggy={inv:NeverKeepsAQuietHalf} rebuild-from-all-buggy={inv:RefusalsWithinTwoNMinusOne} resend-buggy={inv:NoResendOfRefused} set-aside-reachable-buggy={inv:NeverSetAside} settles={inv:TypeOK, inv:Shape, inv:NoResendOfRefused, inv:SetAsideOnlyWhenAllRefused, inv:MemoryIsOfThisGeneration, inv:ReaskOnlyOnTick, inv:RefusalsWithinTwoNMinusOne} size-reachable-buggy={inv:NeverKeepsASize} waits-on-one-slot-reachable-buggy={inv:NeverWaitsOnOneSlot} | a0bd36e7724a |
 | DashboardCacheClaim.tla | DashboardCacheClaim | manual | 6 | 4 | clean={inv:TypeOK, inv:NoInversion, inv:AtMostOneRunner, inv:ClaimHasRunner, inv:ClaimantKeepsSlot} buggy={inv:TypeOK, inv:NoInversion} ignore-claim-buggy={inv:TypeOK, inv:AtMostOneRunner} one-worker={inv:TypeOK, inv:NoInversion, inv:AtMostOneRunner, inv:ClaimHasRunner, inv:ClaimantKeepsSlot} orphan-buggy={inv:TypeOK, inv:ClaimHasRunner} owner-clears-buggy={inv:TypeOK, inv:ClaimantKeepsSlot} | cf37a117ffc4 |
 | DashboardCacheStampede.tla | DashboardCacheStampede | manual | 2 | 1 | clean={inv:TypeOK, inv:NoZombieSlot} buggy={inv:TypeOK, inv:NoZombieSlot} | 0419ec627911 |
 | DispatchHookChain.tla | DispatchHookChain | manual | 2 | 1 | clean={inv:ShortCircuitSkipsHandler, inv:ObserversAfterHandler, inv:HandlerRequiresNoReject} buggy={inv:ShortCircuitSkipsHandler} | a56f7e91e5c2 |

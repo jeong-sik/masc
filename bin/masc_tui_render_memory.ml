@@ -699,7 +699,9 @@ let memory_fact_row_line ~ko ?(is_fleet = false) ?(sort = Sort_recency) ~cols (r
     | Memory_row_fact fact, (Sort_retrieved_count | Sort_last_retrieved) ->
       (match fact.mf_events.mfe_retrieval with
        | Retrieved {count; last_at; distinct_days = _} ->
-           (Theme.info () ^ Printf.sprintf "%d× " count ^ Ansi.reset, last_at)
+           (* How many times, on the count ladder (RFC tui-one-screen-grammar
+              6.3): [×12], [×1,234]. *)
+           (Theme.info () ^ Masc_tui_value.Count.times count ^ " " ^ Ansi.reset, last_at)
        | Never_retrieved ->
            (Theme.recede () ^ (if ko then "미조회 " else "unretrieved ") ^ Ansi.reset, fact.mf_last_seen))
     | Memory_row_fact fact, (Sort_recency | Sort_category | Sort_claim) -> ("", fact.mf_last_seen)
@@ -1087,8 +1089,8 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
               && snapshot.mhs_total_vision_ingest_errors = 0 then []
           else
             let alert_text =
-              Printf.sprintf (if ko then "보고된 경고 %d / 오류 %d (이력 포함 가능)" else "reported warnings %d / errors %d (may include history)")
-                snapshot.mhs_warn_alerts snapshot.mhs_error_alerts
+              Printf.sprintf (if ko then "보고된 경고 %s / 오류 %s (이력 포함 가능)" else "reported warnings %s / errors %s (may include history)")
+                (Masc_tui_value.Count.grouped snapshot.mhs_warn_alerts) (Masc_tui_value.Count.grouped snapshot.mhs_error_alerts)
             in
             let alert_clause =
               if snapshot.mhs_error_alerts > 0 then Theme.bad () ^ alert_text ^ Ansi.reset
@@ -1130,8 +1132,8 @@ let fold_memory_rows ~ko ~subject ~max_rows rows =
     let trailing = max_rows - 1 - leading in
     let hidden = count - leading - trailing in
     let note =
-      if ko then Printf.sprintf "  … %s %d행 생략됨 · 창을 늘려 주세요" subject hidden
-      else Printf.sprintf "  … %d %s rows hidden; enlarge terminal" hidden subject
+      if ko then Printf.sprintf "  … %s %s행 생략됨 · 창을 늘려 주세요" subject (Masc_tui_value.Count.grouped hidden)
+      else Printf.sprintf "  … %s %s rows hidden; enlarge terminal" (Masc_tui_value.Count.grouped hidden) subject
     in
     List.filteri (fun index _ -> index < leading) rows
     @ [ note ]
@@ -1160,8 +1162,8 @@ let fold_memory_context_rows ~ko ~max_rows context =
     let hidden = count - leading - stalled_count - List.length tail in
     List.take leading rows
     @ [Printf.sprintf
-         (if ko then "  … 상세 %d행 숨김 · v:전체" else "  … %d Keeper detail rows hidden · v:full reading")
-         hidden]
+         (if ko then "  … 상세 %s행 숨김 · v:전체" else "  … %s Keeper detail rows hidden · v:full reading")
+         (Masc_tui_value.Count.grouped hidden)]
     @ (match stalled with Some (_, row) -> [row] | None -> [])
     @ tail
 

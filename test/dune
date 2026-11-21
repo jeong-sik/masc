@@ -5468,6 +5468,7 @@
 (include stanzas/test_keeper_memory_age_bins.inc)
 (include stanzas/test_tui_decode_workspace_memory.inc)
 (include stanzas/test_keeper_turn_pulse.inc)
+(include stanzas/test_keeper_turn_log_turn_task_context.inc)
 (include stanzas/test_keeper_decoded_rows.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)

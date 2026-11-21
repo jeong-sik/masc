@@ -680,6 +680,7 @@ type message_origin =
   | Recovery_instruction
   | Tool_result_followup
   | Agent_instruction
+  | Outside_context
 [@@deriving show]
 
 let message_origin_to_string = function
@@ -689,6 +690,7 @@ let message_origin_to_string = function
   | Recovery_instruction -> "recovery_instruction"
   | Tool_result_followup -> "tool_result_followup"
   | Agent_instruction -> "agent_instruction"
+  | Outside_context -> "outside_context"
 
 let message_origin_of_string = function
   | "conversation" -> Some Conversation
@@ -697,6 +699,7 @@ let message_origin_of_string = function
   | "recovery_instruction" -> Some Recovery_instruction
   | "tool_result_followup" -> Some Tool_result_followup
   | "agent_instruction" -> Some Agent_instruction
+  | "outside_context" -> Some Outside_context
   | _ -> None
 
 (** A message over a media source; see {!content_block_with}. *)

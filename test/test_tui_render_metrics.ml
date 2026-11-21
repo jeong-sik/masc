@@ -403,8 +403,8 @@ let test_assignee_work_and_daily_flow () =
          average the middle pair rather than pick a side. *)
       task "r1" "2026-09-10T00:00:00Z" (done_by "matrix-reader" "2026-09-10T02:00:00Z");
       task "r2" "2026-09-10T00:00:00Z" (done_by "matrix-reader" "2026-09-10T04:00:00Z");
-      (* The agent spelling of the same keeper. RFC-0393 removed the suffix
-         strip, so this must stay its own row. *)
+      (* The agent spelling of the same keeper. Rows key on the assignee as
+         written, so this must stay its own row. *)
       task "a1" "2026-09-11T00:00:00Z" (done_by "keeper-matrix-reader-agent" "2026-09-11T06:00:00Z");
       task "o1" "2026-09-11T00:00:00Z"
         (Claimed { assignee = "matrix-reader"; claimed_at = "2026-09-11T01:00:00Z" });

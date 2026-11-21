@@ -35,16 +35,6 @@ let lookup name =
        Config.raw_all_tool_schemas; the manual help override \
        cannot reach it" name
 
-(* The six target tools listed in RFC-0195 P0 cover two
-   reachability classes:
-   - Four are registered in Config.raw_all_tool_schemas and
-     therefore round-trip through find_entry. Those are the
-     ones this test pins.
-   - One (masc_plan_set_task) is a workspace-side tool whose schema lives on
-     a different surface that this PR does not modify. Its manual_help
-     entry is written here as future-proofing — it takes
-     effect the moment those schemas join the keeper-side
-     registry. See PR body §"Reachable surface" for the split. *)
 let test_alternatives_never_dangling () =
   let unresolved =
     List.concat_map

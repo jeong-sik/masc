@@ -1887,7 +1887,7 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
     ]
 
 (* The bodies come from the producer the server uses
-   ([Goal_unavailable_envelope.to_yojson], RFC-0444 PR-2), so these fixtures
+   ([Goal_unavailable_envelope.to_yojson]), so these fixtures
    cannot drift from the wire the way a hand-built object can. *)
 let goal_store_unavailable_body reason mirror reset_step =
   Goal_unavailable_envelope.to_yojson
@@ -3375,7 +3375,7 @@ let keeper_skill_usage_json ?(keeper = "bravo") usage =
     ; ("usage", usage)
     ]
 
-(* One Keeper's usage answer (RFC-0483): each closed state, read for the
+(* One Keeper's usage answer: each closed state, read for the
    Keeper asked about. *)
 let test_decode_keeper_skill_usage_reads_each_state () =
   let decode usage =
@@ -5611,7 +5611,7 @@ let memory_fact_events_json ?(retrieved = 0) ?(days = 0) ?(last = `Null) ?(retra
     ; "revised_from", `List (List.map (fun id -> `String id) revised_from)
     ]
 
-(* RFC-0418: the row carries the server's projection of the fact's use. It is
+(* The row carries the server's projection of the fact's use. It is
    required: a row without it is a server this decoder does not know. *)
 let test_decode_memory_fact_reads_the_use_record () =
   let mentions needle text =
@@ -6934,7 +6934,7 @@ let fusion_recorded_detail_json ?(source = "fusion")
     | None, Some routes -> [ "seat_routes", `List routes ]
     | None, None -> []
   in
-  (* The sink writes the RFC-0284 array on every post, so the fixture always
+  (* The sink writes the [judges] array on every post, so the fixture always
      carries the key; a post without it is the shape the decoder rejects. *)
   let judges_fields = [ ("judges", `List judges) ] in
   `Assoc
@@ -7206,7 +7206,7 @@ let rec without_key key = function
   | `List items -> `List (List.map (without_key key) items)
   | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _) as leaf -> leaf
 
-(* RFC-0284 judge nodes: the sink writes the array on every post, so a post
+(* Judge nodes: the sink writes the [judges] array on every post, so a post
    without it is a decode error rather than an empty panel; JoJ nodes keep
    role/identity/outcome, and an untaught role fails its node instead of
    passing as something it is not. *)

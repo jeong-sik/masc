@@ -21,5 +21,5 @@ val toggle_selected_ask_origin : Masc_tui_types.state -> unit
 val present_identity_notice
   :  Masc_tui_types.state
   -> keeper_name:string option
-  -> Masc_tui_types.identity_notice_kind * string
+  -> Masc_tui_identity_model.identity_notice_kind * string
   -> unit

@@ -102,7 +102,7 @@ let apply_confirmed_server_identity_reading ~hooks (state : T.state) ~mailbox re
     | (T.Workspace_identity_match | T.Workspace_identity_match_unconfirmed _)
     , T.Workspace_identity_match -> true
     | T.Workspace_identity_mismatch prior, T.Workspace_identity_mismatch current ->
-      String.equal prior.T.server_base_path current.T.server_base_path
+      String.equal prior.server_base_path current.server_base_path
     | (T.Workspace_identity_match | T.Workspace_identity_match_unconfirmed _)
     , (T.Workspace_identity_unread | T.Workspace_identity_match_unconfirmed _
       | T.Workspace_identity_mismatch _)

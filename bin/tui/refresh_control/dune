@@ -10,6 +10,7 @@
   unix
   yojson
   masc_tui_types
+  masc_tui_identity_model
   masc_tui_loader
   masc_tui_async_protocol
   masc_tui_transport

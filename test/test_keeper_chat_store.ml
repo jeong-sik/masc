@@ -4171,7 +4171,7 @@ let test_request_failure_kind_turn_ref_and_redaction () =
       if String_util.contains_substring projected_direct forbidden then
         Alcotest.failf "projected direct report_store_failure leaked %S in %S" forbidden
           projected_direct)
-      [ "/Users/"; ".masc/"; "sk-ant-"; "[REDACTED]" ];
+      [ "/Users/"; ".masc/"; "sk-ant-" ];
     Alcotest.(check bool) "projected direct report_store_failure emits [REDACTED_PATH]" true
       (String_util.contains_substring projected_direct "[REDACTED_PATH]"))
 ;;

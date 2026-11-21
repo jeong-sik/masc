@@ -476,6 +476,8 @@ Lambda 가 나눈 두 묶음을 어떤 순서로 다시 부르는지는 확인�
 - L1 은 Librarian 모듈 넷을 고친다. `librarian_slot_outcome`, `librarian_slot_visit`, `librarian_ask`(함수 하나가 나간다), `librarian_machine`(`unanswered_token` 에 갈래 하나)이다. Librarian 을 맡은 쪽의 리뷰를 받는다.
 - Librarian 의 남은 층(경보 E4, L7 의 남은 조각)은 앞의 두 모듈을 고치지 않는다. 2026-11-21 에 열린 PR 가운데 두 모듈을 고치는 것도 없다. `librarian_machine` 은 그 층들도 고치니 순서를 맞춘다.
 - L3 과 L4 는 같은 파일을 고치니 순서대로 올린다.
+- L3 은 둘로 올렸다. L3a 는 결정 모듈이다(`lib/workspace_memory/workspace_memory_narrowing.ml`). 저장소도 lane 도 읽지 않고, 함수마다 모델의 action 이름을 적는다. L3b 는 큐레이터가 그 모듈로 분류 단계를 돌게 한다.
+- L3b 의 장면은 §8.2 의 분류 장면 가운데 여덟이다. body 기한 장면은 없다(§11).
 - 로컬 빌드는 하지 않는다. PR 의 type-check 와, 가지에 dispatch 한 대상 시험으로 확인한다.
 
 **L1 의 주석 두 줄.** 82행은 저장 태그(`provider_cause`)가 `Exact_output.provider_refusal` 과 다른 까닭을, 177행은 창에서 멈춘 빈 답에 저장 생성자를 더하지 않는 까닭을 「이 algebra 는 컷에서 없어진다」로 든다. 그 까닭은 이제 틀렸다. 바꿀 말의 후보는 둘이다.
@@ -512,3 +514,12 @@ D3~D6 은 2026-11-21 에 운영자에게 권고를 알렸다. 다른 지시가 �
 - 모든 slot 이 쉬는 동안에도 깨우기마다 저장소를 읽고 묶음을 만든다. 그 값을 재지 않았다.
 - inventory 응답을 TUI 말고 누가 읽는지 다 찾지 않았다. L5 에서 찾는다.
 - 「작은 묶음일수록 decode 가 통과한다」는 재지 않았다. §4.1 은 그 말에 기대지 않는다.
+- L3 에서 정했다: pass 는 메모리가 다음 요청을 내지 않을 때까지 묻는다. 그래서 분류가 진전해도 owner 를 다시 깨우지 않는다. 진전한 pass 가 스스로 깨우는 것은 briefing 이 진전했을 때뿐이다.
+- L3 에서 정했다: 요청은 모두 `Request.prepare` 로 만든다. 원장은 앞 답이 들어간 원장이다(§4.1 「새 원장으로 만든다」). 그대로 묻는 절반은 제 크기를 `Up_to` 로 준다. 큐레이터는 `Request.narrow` 를 부르지 않는다. execution capture 는 아직 부른다.
+- L3 에서 정했다: `request` 는 세대의 수를 올리고 메모리를 바로 비운다(모델의 `Reset`). 돌던 pass 는 더 적지 않고 끝난다. lane 변경은 깨우기만 하고, 다음 pass 가 시작하며 비운다(§4.3).
+- L3 에서 정했다: 깨운 까닭은 commit 알림, lane 변경, `request`, 진전한 briefing 이 `Commit` 이고 60초 깨우기만 `Tick` 이다. 60초 깨우기는 앞 pass 가 `Lane_silent`, `Not_asked Replacement_in_progress`, `Host_failed` 로 끝났거나 briefing 이 실패했을 때만 깨운다.
+- L3 에서 정했다: `step_end` 의 이름은 `Nothing_pending`, `Not_asked`, `Drained`, `Lane_silent`, `Host_failed` 이고 `host_step` 은 `Reading`, `Preparing`, `Walking`, `Recording`, `Deciding` 이다.
+- L3 에서 정했다: 큐레이터의 거절 타입은 `Decision_refused of string | Empty_or_partial | Not_json` 이다. 뒤의 둘이 `bodies` 로 간다. 글은 보여 주기만 한다.
+- L3 에서 정했다: masc 자기 실패로 pass 가 끊기면 그 pass 의 할 일 목록은 버린다. 저장소·원장·log, 요청 만들기, 걷기의 stop, 답 기록이 그 실패다. 메모리가 이미 적은 것은 남고, 좁힌 절반 가운데 아직 묻지 않은 것은 다음 pass 에서 새 fact 로 다시 묶인다. 모델에는 이 실패가 없다.
+- L3 에서 확인하지 못했다: §8.2 의 body 기한 장면. 가짜 provider 의 `Reply_with` 는 다 쓴 본문만 내서, 요청마다 본문을 멈출 수 없다. 표가 기한을 `Overdue` 로 읽는 것은 L1 의 표 시험이, `Overdue` 에서 좁히는 것은 L3a 의 결정 시험이 본다.
+- L3 에서 하지 않았다: 말하지 않은 slot 의 마지막 결과(§4.2)는 메모리에 아직 없다. 판정에 쓰지 않으니 L5 의 projection 과 같이 넣는다.

@@ -4,9 +4,9 @@
 
 ### 요약
 
-- 이 릴리스는 `v0.77.1`(태그 `2bbe20cd`) 뒤 `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 까지 main 에 들어간 열다섯 PR 과, 동결 뒤 main 에 착지해 이 브랜치로 가져온 네 PR(`#54288`·`#54286`·`#54287`·`#54290`)을 `0.78.0`(minor)으로 내보냅니다. 그중 넷(#54191·#54285·#54289·#54290)은 `### Exempt` 라 절에 넣지 않았고, 아래 절이 나머지 열다섯 PR 을 담습니다. 사용자가 보는 동작이 바뀌는 항목은 TUI 두 건(#54221·#54243), 서버 권한·엔진 두 건(#54278·#54236), Librarian 경보 수리 한 건(#54280), MSX 코어 핀 상향 한 건(#54291), Keeper 프롬프트 접두 보존 한 건(#53895)이고, 나머지는 규약·RFC 문서 세 건(#54284·#54204·#54219), 온보딩 시험 단언 한 건(#54277), 전량 회귀 샤딩 스크립트 한 건(#54281), 동결 뒤 가져온 TUI 두 건(#54288·#54286)과 CI 샤딩 후속 한 건(#54287)입니다.
-- 이 릴리스 브랜치는 동결 기준 main `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 위에 버전 올림 커밋을 얹은 뒤, 동결 뒤 main 에 착지한 네 PR(`#54288`·`#54286`·`#54287`·`#54290`, tip `315495a2319cfdfba14f2250d06c7dd902708a77`)을 이 브랜치로 가져왔습니다. 앞의 셋은 그 조각을 `0.78.0` 절에 접어 넣었고, `#54290` 은 문서 전용(`### Exempt`)이라 절에 넣지 않았습니다.
-- 접은 조각은 `changelog.d/54286.md`·`changelog.d/54288.md`·`changelog.d/54287.md` 세 개이며, `#54290` 과 다른 Exempt 조각은 종전대로 남겼습니다.
+- 이 릴리스는 `v0.77.1`(태그 `2bbe20cd`) 뒤 `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 까지 main 에 들어간 열다섯 PR 과, 동결 뒤 main 에 착지해 이 브랜치로 가져온 일곱 PR(`#54288`·`#54286`·`#54287`·`#54290`·`#54283`·`#54294`·`#54295`)을 `0.78.0`(minor)으로 내보냅니다. 그중 다섯(#54191·#54285·#54289·#54290·#54294)은 `### Exempt` 라 절에 넣지 않았고, 아래 절이 나머지 열일곱 PR 을 담습니다. 사용자가 보는 동작이 바뀌는 항목은 TUI 두 건(#54221·#54243), 서버 권한·엔진 두 건(#54278·#54236), Librarian 경보 수리 한 건(#54280), MSX 코어 핀 상향 한 건(#54291), Keeper 프롬프트 접두 보존 한 건(#53895)이고, 나머지는 규약·RFC 문서 세 건(#54284·#54204·#54219), 온보딩 시험 단언 한 건(#54277), 전량 회귀 샤딩 스크립트 한 건(#54281), 동결 뒤 가져온 TUI 두 건(#54288·#54286), CI 샤딩 후속 한 건(#54287), Keeper checkpoint purge 한 건(#54283), Librarian 읽기 한 건(#54295)입니다.
+- 이 릴리스 브랜치는 동결 기준 main `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 위에 버전 올림 커밋을 얹은 뒤, 일곱 PR(`#54288`·`#54286`·`#54287`·`#54290`·`#54283`·`#54294`·`#54295`, tip `c51a7ae0500465ee795ea92ee275794baa327250`)을 이 브랜치로 가져왔습니다. 앞의 셋과 `#54283`·`#54295` 는 그 조각을 `0.78.0` 절에 접어 넣었고, `#54290` 과 `#54294` 는 문서 전용·내부 리팩터(`### Exempt`)라 절에 넣지 않았습니다.
+- 접은 조각은 `changelog.d/54286.md`·`changelog.d/54288.md`·`changelog.d/54287.md`·`changelog.d/54283.md`·`changelog.d/54295.md` 다섯 개이며, `#54290` 과 다른 Exempt 조각은 종전대로 남겼습니다.
 - `#54281` 의 샤딩은 스크립트에만 들어갔고 `Test` 워크플로는 아직 `SUITE_SHARD_COUNT` 를 넘기지 않습니다(기본값 1 이면 종전과 같은 한 번의 `@runtest` 빌드). 이 릴리스 자체로 CI 디스크 피크가 낮아지지는 않습니다.
 
 ### Added
@@ -31,6 +31,42 @@
   dashboard refuse a v15 answer, and a build before this one refuses v16
   (#54286).
 - The runtime catalogue read now counts in the reading slot, so a slow one is drawn by the slot on the screen that started it. A read started on another screen is not counted (#54288).
+- A checkpoint purge no longer waits for the Librarian. It does not read,
+  move or write the Librarian position (`librarian-progress.json`): the
+  refusal while atoms are unread is gone, and the preview's `apply_allowed`
+  depends only on the Keeper being stopped. A purge that drops nothing
+  rewrites only the messages the Keeper's turn log has named. Every message
+  past the last unit line's mark stays byte-exact, closed or open, because
+  the Memory writer reads those from the head. A head replaced since that
+  line is not rewritten or installed, and a turn log or head that cannot be
+  read refuses the purge instead of counting as no turn log. A Keeper
+  without a turn log has no message held back by it: the log a later turn
+  starts begins at the head it finds (RFC librarian-call-only-proposes 5.6)
+  (#54283).
+- A recovering purge ends the history at the structural break. It no longer
+  goes back to the last turn end a counted boundary line states, and it
+  leaves the Librarian position file as it is. The server no longer starts
+  the lane that read atoms from that position, so nothing stops on one left
+  past the new end; the Memory health response still reads the file for its
+  `read_position` and `stalled` values
+  (docs/CHECKPOINT-PURGE-RUNBOOK.md, "After a recovery") (#54283).
+- `masc-checkpoint-purge` prints a `turn log:` line in place of
+  `librarian position:`. An `--apply` that changes nothing installs nothing
+  and writes no backup (#54283).
+- The Librarian reader no longer stops at a turn log line that is before
+  the stored reading offset. When it reads a turn again from its `Opened`,
+  a line before that offset that does not decode or is out of order is
+  passed, and the turn's `Closed` is read without what the line said: with
+  no Task when the `Opened` itself was passed, and not split at the
+  baseline either way. A stop at an unreadable line now also carries where
+  the line ends, the mark the units before it ended at and the SHA-256 of
+  the line's bytes without its line break. A question shows a turn whose
+  `Opened` was passed with `"opened": "unreadable"` in place of `runtime`,
+  `task` and `stimuli`; a turn whose `Opened` was read keeps the same
+  bytes. The `librarian.ask` prompt gains two sentences, one for that shape
+  and one that says not to fill in such a turn's `runtime`, `task` and
+  `stimuli` by guessing, so the front half of every question id changes
+  once (#54295).
 
 ### Fixed
 

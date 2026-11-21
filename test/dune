@@ -2992,7 +2992,6 @@
 
 (include stanzas/test_lane_addon_lifecycle.inc)
 (include stanzas/test_lane_addon_submit_once.inc)
-(include stanzas/test_keeper_librarian_worker_request.inc)
 
 (include stanzas/test_discord_gateway_client.inc)
 
@@ -5527,7 +5526,6 @@
 (include stanzas/test_keeper_librarian_range.inc)
 (include stanzas/test_keeper_librarian_durable_consumer.inc)
 (include stanzas/test_keeper_librarian_floor_step_request.inc)
-(include stanzas/test_keeper_librarian_floor_chain.inc)
 (include stanzas/test_librarian_replay_cli.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)
@@ -7730,7 +7728,6 @@
  (modules test_completion_review_immutable_input)
  (libraries alcotest masc_test_deps eio_main unix))
 (include stanzas/test_keeper_memory_execution_availability.inc)
-(include stanzas/test_keeper_memory_execution_availability_librarian_addon.inc)
 
 (include stanzas/test_browser_native_workflow.inc)
 

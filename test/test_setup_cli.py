@@ -34,6 +34,33 @@ def _swap_fixture(text, old, new, *, what):
     return text.replace(old, new)
 
 
+from setup_cli_fixtures import (
+    CLAUDE_CODE_WINDOW_FLOOR,
+    PROBE_FALLBACK_WINDOW,
+    official_fixture_toml,
+    probe_fixture_toml,
+)
+
+
+class FixtureWindowFloor(unittest.TestCase):
+    """Bin-free: the runtime.toml the binary fixtures replay must keep the
+    claude-code window at or above the client's floor. RC3 run 44937662942
+    failed both binary cases at exactly this gap (max-context = 32768), which
+    no PR-stage check caught because every other case here needs --binary."""
+
+    def test_probe_fixture_claude_code_declares_the_window_floor(self):
+        toml = probe_fixture_toml('claude-code', '/fixture/client', '/fixture/home')
+        self.assertIn(f'max-context = {CLAUDE_CODE_WINDOW_FLOOR}\n', toml)
+
+    def test_probe_fixture_codex_keeps_its_own_window(self):
+        toml = probe_fixture_toml('codex-app-server', '/fixture/client', '/fixture/home')
+        self.assertIn(f'max-context = {PROBE_FALLBACK_WINDOW}\n', toml)
+
+    def test_official_fixture_declares_the_window_floor(self):
+        toml = official_fixture_toml('/fixture/client', '/fixture/home')
+        self.assertIn(f'max-context = {CLAUDE_CODE_WINDOW_FLOOR}\n', toml)
+
+
 BINARY = None
 ANNOUNCER = None
 
@@ -319,16 +346,7 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                     '  print(json.dumps({"id":request["id"], "result":result}), flush=True)\n')
                 client.chmod(0o755)
                 (config / 'runtime.toml').write_text(
-                    '[runtime]\ndefault = "probe_fixture.probe_fixture"\n'
-                    '[providers.probe_fixture]\n'
-                    'display-name = "Probe fixture"\n'
-                    f'protocol = {json.dumps(protocol)}\n'
-                    f'command = {json.dumps(str(client))}\n'
-                    f'account-home = {json.dumps(str(selected))}\n'
-                    'is-non-interactive = true\n'
-                    '[models.probe_fixture]\napi-name = "fixture-model"\n'
-                    'max-context = 32768\ntools-support = true\nstreaming = true\n'
-                    '[probe_fixture.probe_fixture]\n')
+                    probe_fixture_toml(protocol, client, selected))
                 env = {'PATH': os.environ['PATH'], 'HOME': str(ambient),
                        'XDG_CONFIG_HOME': str(base / 'xdg'), home_key: str(ambient)}
                 result = subprocess.run(
@@ -368,16 +386,7 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             home = base / 'claude-home'
             home.mkdir(mode=0o700)
             (base / '.masc/config/runtime.toml').write_text(
-                '[runtime]\ndefault = "official_fixture.official_fixture"\n'
-                '[providers.official_fixture]\n'
-                'display-name = "Official fixture"\n'
-                'protocol = "claude-code"\n'
-                f'command = {json.dumps(str(client))}\n'
-                f'account-home = {json.dumps(str(home))}\n'
-                'is-non-interactive = true\n'
-                '[models.official_fixture]\napi-name = "fixture-model"\n'
-                'max-context = 32768\ntools-support = true\nstreaming = true\n'
-                '[official_fixture.official_fixture]\n')
+                official_fixture_toml(client, home))
             result = run('setup', '--no-tui', '--port', '1')
             self.assertIn('Model connection: Official fixture / fixture-model', result.stdout,
                           result.stderr)
@@ -1186,10 +1195,24 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--binary', required=True)
-    parser.add_argument('--announcer', required=True)
+    parser.add_argument('--binary')
+    parser.add_argument('--announcer')
+    parser.add_argument(
+        '--bin-free', action='store_true',
+        help='run only the binary-free cases; the --binary Setup class is skipped')
     args, remaining = parser.parse_known_args()
-    BINARY = str(Path(args.binary).resolve())
-    ANNOUNCER = str(Path(args.announcer).resolve())
-    Setup.__unittest_skip__ = False
+    if args.binary is None and not args.bin_free:
+        parser.error(
+            'pass --binary <path> --announcer <path> for the full class, '
+            'or --bin-free to run only the binary-free cases')
+    if args.bin_free and args.binary is not None:
+        parser.error('--bin-free and --binary are mutually exclusive')
+    if args.binary is not None:
+        assert args.announcer is not None, '--announcer goes with --binary'
+        BINARY = str(Path(args.binary).resolve())
+        ANNOUNCER = str(Path(args.announcer).resolve())
+        Setup.__unittest_skip__ = False
+    else:
+        print('[bin-free] --binary not given: the Setup class is skipped, '
+              'binary-free cases only')
     unittest.main(argv=[__file__, *remaining])

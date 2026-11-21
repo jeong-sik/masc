@@ -161,6 +161,19 @@ type after_failure =
       ; basis : Keeper_turn_driver.wait_basis
       }
 
+(** Whether the cycle admitted a turn that runs because a schedule is due:
+    its verdict is [Run] with {!Keeper_world_observation.Scheduled_automation_due}
+    among the reasons. A schedule that coincides with a reactive trigger runs
+    on the reactive channel without that reason, so it is not counted. *)
+type due_schedule_turn =
+  | Due_schedule_turn_admitted
+  | No_due_schedule_turn
+
+val due_schedule_turn_of_decision :
+  should_run_turn:bool ->
+  Keeper_world_observation.keeper_cycle_decision ->
+  due_schedule_turn
+
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
@@ -172,6 +185,9 @@ type keepalive_turn_outcome = {
       (** What the cycle's turn failure or provider rest leaves the next
           cycle; [None] keeps the plain cadence. A rested cycle carries the
           [Wait_for_path_release] its rest names. *)
+  due_schedule_turn : due_schedule_turn;
+      (** The loop reads it to serve the periodic boundary
+          ({!For_testing.periodic_cadence_after_cycle}). *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -431,12 +447,15 @@ module For_testing : sig
 
   val periodic_cadence_after_cycle :
     periodic_due:bool ->
+    due_schedule_turn:due_schedule_turn ->
     now:float ->
     Keeper_keepalive_signal.periodic_cadence ->
     Keeper_keepalive_signal.periodic_cadence
   (** Advance a due cadence boundary after the cycle even when another wake
       label, including {!Keeper_world_observation.Deferred_runtime_lane},
-      authorized the turn. *)
+      authorized the turn. A turn admitted for a due schedule advances the
+      boundary before it is due, so the next periodic turn comes one
+      interval after that turn. *)
 
   (** The loop's deferred hint together with its durable file
       ({!Keeper_deferred_runtime_lane_store}). The production loop builds one

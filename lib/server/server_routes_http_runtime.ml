@@ -1923,7 +1923,8 @@ let health_requester request =
     (match Server_auth.board_access_for_request ~base_path request with
      | Ok
          ( ( Masc_board_handlers.Board_access.Operator
-           | Masc_board_handlers.Board_access.Named _ )
+           | Masc_board_handlers.Board_access.Named _
+           | Masc_board_handlers.Board_access.Workspace_member _ )
          , (_ : string option) ) -> Reads
      | Ok (Masc_board_handlers.Board_access.Anonymous, (_ : string option)) -> Reads_nothing
      | Error error -> Refused error)

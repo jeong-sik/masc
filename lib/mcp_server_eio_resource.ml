@@ -439,6 +439,7 @@ let read_keeper_memory_inputs_blocking ~config ~caller ~keeper =
              | Masc_board_handlers.Board_access.Anonymous ->
                Ok Masc_board_handlers.Board_access.Anonymous
              | Masc_board_handlers.Board_access.Named _
+             | Masc_board_handlers.Board_access.Workspace_member _
              | Masc_board_handlers.Board_access.Operator ->
                Ok (Keeper_board_audience.reader_for_keeper meta))
           | Ok (Keeper_meta_store.Meta_absent | Keeper_meta_store.Meta_not_current _) | Error _ ->

@@ -134,7 +134,7 @@ let composition_rows skill_catalog =
 ;;
 
 let project
-      ?(masc_enabled = true)
+      ~masc_enabled
       ~lane_addon_conflicts
       ~lane_addon_unready
       ~lane_addon_exports
@@ -693,6 +693,9 @@ let to_yojson = function
 ;;
 
 module For_testing = struct
-  let project ?masc_enabled =
-    project ?masc_enabled ~lane_addon_conflicts:[] ~lane_addon_unready:[] ~lane_addon_exports:[]
+  let project_with_masc_enabled ~masc_enabled =
+    project ~masc_enabled ~lane_addon_conflicts:[] ~lane_addon_unready:[] ~lane_addon_exports:[]
+
+  let project =
+    project ~masc_enabled:true ~lane_addon_conflicts:[] ~lane_addon_unready:[] ~lane_addon_exports:[]
 end

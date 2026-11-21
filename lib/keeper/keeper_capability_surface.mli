@@ -59,7 +59,16 @@ type candidate =
   | Skill of skill_capability
 
 val create
-  :  ?masc_enabled:bool
+  :  tool_deny:string list
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
+  -> skill_names:string list option
+  -> global_skill_catalog:Keeper_skill_catalog.t
+  -> skill_inventory:Keeper_skill_inventory.t
+  -> task_skills:Keeper_skill_catalog.skill list
+  -> t
+
+val create_with_policy
+  :  masc_enabled:bool
   -> tool_deny:string list
   -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
   -> skill_names:string list option
@@ -82,7 +91,17 @@ val create
     dispatch them, and a composition that runs one is withheld. *)
 
 val create_with_descriptors
-  :  ?masc_enabled:bool
+  :  tool_descriptors:Keeper_tool_descriptor.t list
+  -> tool_deny:string list
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
+  -> skill_names:string list option
+  -> global_skill_catalog:Keeper_skill_catalog.t
+  -> skill_inventory:Keeper_skill_inventory.t
+  -> task_skills:Keeper_skill_catalog.skill list
+  -> t
+
+val create_with_descriptors_policy
+  :  masc_enabled:bool
   -> tool_descriptors:Keeper_tool_descriptor.t list
   -> tool_deny:string list
   -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile

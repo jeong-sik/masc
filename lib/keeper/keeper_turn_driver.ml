@@ -2552,7 +2552,7 @@ let run_named
   let loading_plan =
     if masc_tools_enabled
     then loading_plan
-    else Keeper_official_client_host.No_listing
+    else Keeper_official_client_host.All_on_demand
   in
   let session_id = Keeper_request_source.trace_id input_source in
   (* A run that serves no chat execution has no owner among the receipts. *)

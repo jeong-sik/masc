@@ -125,8 +125,8 @@ let descriptor_admitted descriptors descriptor =
   List.exists (fun admitted -> admitted == descriptor) descriptors
 ;;
 
-let create_with_descriptors
-      ?(masc_enabled = true)
+let create_with_descriptors_policy
+      ~masc_enabled
       ~tool_descriptors
       ~tool_deny
       ~sandbox_profile
@@ -292,12 +292,58 @@ let create_with_descriptors
   }
 ;;
 
+let create_with_descriptors
+      ~tool_descriptors
+      ~tool_deny
+      ~sandbox_profile
+      ~skill_names
+      ~global_skill_catalog
+      ~skill_inventory
+      ~task_skills
+  =
+  create_with_descriptors_policy
+    ~masc_enabled:true
+    ~tool_descriptors
+    ~tool_deny
+    ~sandbox_profile
+    ~skill_names
+    ~global_skill_catalog
+    ~skill_inventory
+    ~task_skills
+;;
+
 let masc_enabled surface = surface.masc_enabled
 
-let create ?masc_enabled ~tool_deny ~sandbox_profile ~skill_names ~global_skill_catalog
+let create_with_policy
+      ~masc_enabled
+      ~tool_deny
+      ~sandbox_profile
+      ~skill_names
+      ~global_skill_catalog
+      ~skill_inventory
+      ~task_skills
+  =
+  create_with_descriptors_policy
+    ~masc_enabled
+    ~tool_descriptors:(Keeper_tool_descriptor.all_descriptors ())
+    ~tool_deny
+    ~sandbox_profile
+    ~skill_names
+    ~global_skill_catalog
+    ~skill_inventory
+    ~task_skills
+;;
+
+let create ~tool_deny ~sandbox_profile ~skill_names ~global_skill_catalog
     ~skill_inventory ~task_skills =
-  create_with_descriptors ?masc_enabled ~tool_descriptors:(Keeper_tool_descriptor.all_descriptors ())
-    ~tool_deny ~sandbox_profile ~skill_names ~global_skill_catalog ~skill_inventory ~task_skills
+  create_with_policy
+    ~masc_enabled:true
+    ~tool_deny
+    ~sandbox_profile
+    ~skill_names
+    ~global_skill_catalog
+    ~skill_inventory
+    ~task_skills
 
 let find_descriptor_by_id surface id =
   List.find_opt (fun (descriptor : Keeper_tool_descriptor.t) -> String.equal descriptor.id id)

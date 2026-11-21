@@ -836,7 +836,7 @@ let start_supervisor_sweep ctx =
                 | Runtime_account_access.Authz_uncertain -> false
               in
               if not active_admission
-              then stop_keepalive ~base_path entry.name
+              then Keeper_keepalive.stop_keepalive ~base_path entry.name
               else
               (* Enumerate every phase so the compiler flags any new
                  variant added to [Keeper_state_machine.phase]. TOML

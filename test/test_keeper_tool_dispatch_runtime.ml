@@ -5842,7 +5842,7 @@ let test_masc_tools_disabled_rejects_dispatch () =
   with_exec_fixture "masc-tools-disabled"
   @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
   let disabled_surface =
-    Masc.Keeper_capability_surface.create
+    Masc.Keeper_capability_surface.create_with_policy
       ~masc_enabled:false
       ~tool_deny:[]
       ~sandbox_profile:Masc.Keeper_types_profile.Docker

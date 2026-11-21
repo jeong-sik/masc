@@ -1271,7 +1271,7 @@ let test_masc_disabled_withholds_all_tools_skills_and_composition_controls () =
   in
   let project_with masc_enabled =
     match
-      Keeper_effective_tool_surface.For_testing.project
+      Keeper_effective_tool_surface.For_testing.project_with_masc_enabled
         ~masc_enabled
         ~keeper_name:"person-keeper" ~runtime_id:"account.claude" ~skills_left_out:[]
         ~official_client_kind:"agent_core"

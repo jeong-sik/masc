@@ -1242,7 +1242,12 @@ streaming = true
               Alcotest.(check bool) "active_authz_keeper_names includes bob" true
                 (List.mem bob.engine_name active_names);
               let cfg = Masc.Workspace.default_config base_path in
-              let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+              Unix.putenv "MASC_CONFIG_DIR" "";
+              let keepers_dir =
+                Filename.concat
+                  (Filename.concat (Filename.concat base_path ".masc") "config")
+                  "keepers"
+              in
               Fs_compat.mkdir_p keepers_dir;
               let write_keeper_toml engine_name =
                 Out_channel.with_open_bin

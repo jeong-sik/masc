@@ -407,7 +407,7 @@ let prepare_agent_setup
     task_skill_selection.unprojectable;
   let masc_enabled = Keeper_meta_contract.effective_masc_tools_enabled meta in
   let capability_surface =
-    Keeper_capability_surface.create_with_descriptors
+    Keeper_capability_surface.create_with_descriptors_policy
       ~masc_enabled
       ~tool_descriptors
       ~tool_deny:profile_defaults.Keeper_types_profile.tool_deny

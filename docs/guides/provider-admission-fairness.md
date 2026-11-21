@@ -6,36 +6,78 @@ Different models on the same account can therefore wait in the same queue.
 waiting call runs next. A permit covers one provider request, not the whole
 Keeper conversation, and returns before tool execution.
 
-An account with `admission-priority-run-limit` uses three request classes:
+An account whose bindings declare `max-concurrent` queues waiting requests in
+three request classes (`Slot_scheduler`):
 
-| Class | MASC callers | Service |
-| --- | --- | --- |
-| Priority | Verifier, HITL auto judge, Board attention | Before Standard, within the declared consecutive-grant limit |
-| Standard | Keeper provider calls and other ordinary requests | Before the Librarian backlog, while still yielding to judgments |
-| Background | Librarian memory and continuity processing | Receives the next available permit once the declared number of combined Priority/Standard grants has passed it |
+| Class | MASC callers | Service without `admission-priority-run-limit` (default) | Service with `admission-priority-run-limit = N` |
+| --- | --- | --- | --- |
+| Priority | Verifier, HITL auto judge, Board attention | First, in arrival-order FIFO | Before Standard, up to `N` consecutive grants while Standard waits |
+| Standard | Keeper provider calls and other ordinary requests | After Priority is empty, in arrival-order FIFO | After Priority yields or empties, while foreground grants remain within `N` |
+| Background | Librarian memory and continuity processing | Only when both Priority and Standard queues are empty (may use up to all `max-concurrent` slots when foreground queues are empty) | Receives the next available permit once `N` consecutive Priority/Standard grants have passed it |
 
-The limit is a service rule measured in granted permits. It neither increases
-provider concurrency nor interrupts an active request. It cannot guarantee a
-response time while all permits are held by long requests. FIFO is preserved
-within each class; requests that cancel or exhaust their declared wait leave
-their queue without consuming another request's permit.
+Strict **`Priority` → `Standard` → `Background`** ordering therefore holds by
+default even when `admission-priority-run-limit` is omitted. FIFO arrival order
+is preserved within each class, and no class is ever inferred from a model
+name, prompt, or request duration. Requests that cancel or exhaust their
+declared wait leave their queue without consuming another request's permit.
 
-If no run limit is declared, all classes join one arrival-order FIFO. No class
-is inferred from a model name, prompt, or request duration. When an operator
-removes a live run limit, already queued Priority and Background requests keep
-their original queues and drain before the Standard queue. That finite
-transition is not a global FIFO; subsequent arrivals join the Standard FIFO.
+A permit covers execution cleanly without preemption: admission neither
+increases provider concurrency nor interrupts an active request. If all permits
+are already held by running `Background` (or other long-running) calls, an
+arriving Keeper or judgment call still waits until one active request finishes
+and returns its permit.
 
-## Enable the policy for an existing account
+`admission-priority-run-limit` is an opt-in starvation-prevention bound for
+`Background` (and `Standard`) on an intentionally shared account — **not** a
+setting to protect Keepers. When an operator removes a live run limit, waiters
+already in the `Priority`, `Standard`, and `Background` queues stay in the
+class queues they joined, the consecutive-grant counters reset to `0`, and strict
+`Priority` → `Standard` → `Background` ordering takes effect immediately for
+both existing waiters and subsequent arrivals.
+
+## Prefer dedicated accounts for Librarian lanes
+
+Separate the accounts or endpoints backing Keepers from those backing Librarian
+background synthesis whenever possible (see
+[RFC-librarian-seat-separation-and-keeper-first-admission](../rfc/RFC-librarian-seat-separation-and-keeper-first-admission.md)):
+
+- Because running `Background` calls are non-preemptive and Librarian
+  consolidations hold permits much longer than interactive Keeper turns (around
+  14×–57× occupancy asymmetry in live fleet measurements), sharing a single
+  account still blocks arriving Keepers whenever active `Background` calls fill
+  the pool.
+- Allocate a dedicated HTTP account or local runtime (see
+  [Several accounts of one catalog provider](#several-accounts-of-one-catalog-provider)
+  below) to `[runtime.exact_output_lanes.librarian_exact]` and
+  `[runtime.exact_output_lanes.librarian_memory]`, removing shared Keeper seats
+  from their `slots` and `cli_slots`. With dedicated seats and
+  `admission-priority-run-limit` unset, Librarian uses the full slot capacity
+  when idle and never delays Keepers.
+- On single-key or single-subscription hosts without a separate runtime, set
+  `enabled = false` on optional `[runtime.exact_output_lanes.librarian_memory]`.
+- At config load, MASC checks enabled `librarian_exact` and `librarian_memory`
+  HTTP `slots` and CLI `cli_slots` against Keeper-reachable runtimes and logs
+  overlap warnings if both share the same account or credential identity.
+
+## Bound Background starvation on an intentionally shared account
+
+Only set `admission-priority-run-limit` when you intentionally share an account
+between Keepers and `Background` work AND want `Background` (or `Standard`) to
+receive a bounded turn under continuous foreground traffic. Because granting a
+slot to a long-running `Background` call prevents Keepers from reusing that
+permit until completion, setting a small limit such as `1` or `4` increases
+long Keeper wait times compared to leaving `admission-priority-run-limit`
+unset (strict `Priority` → `Standard` → `Background`) or separating seats.
 
 Use the existing provider table and its actual account capacity. For example,
-an operator who has chosen a shared concurrency of four and alternating
-foreground/background service can add:
+an operator sharing a concurrency pool of four who intentionally permits one
+waiting `Background` request after every `16` foreground grants can configure:
 
 ```toml
 [providers.ollama_cloud]
 # Keep the endpoint and credentials already configured here.
-admission-priority-run-limit = 1
+# Omit this key on dedicated accounts or when Keepers should always drain ahead of Background.
+admission-priority-run-limit = 16
 
 [ollama_cloud.chat_model]
 max-concurrent = 4
@@ -44,10 +86,11 @@ max-concurrent = 4
 max-concurrent = 4
 ```
 
-The binding names are examples. Every admitted binding sharing that endpoint
-and credential must agree on the account allowance. A run limit on an account
-without any `max-concurrent` binding is rejected. A binding with no permit
-declaration bypasses admission and cannot benefit from this policy.
+The binding names are examples. Leave `admission-priority-run-limit` unset when
+strict Keeper-first ordering is desired. Every admitted binding sharing that
+endpoint and credential must agree on the account allowance. A run limit on an
+account without any `max-concurrent` binding is rejected. A binding with no
+permit declaration bypasses admission and cannot benefit from queue ordering.
 
 Read the current source with the authenticated
 `GET /api/v1/runtime/config/raw`, preview the edited source with

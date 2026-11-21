@@ -111,6 +111,10 @@ let empty generation ~slots =
   }
 ;;
 
+let restart memory ~requests =
+  empty { memory.generation with requests } ~slots:memory.lane_slots
+;;
+
 let size memory = memory.kept_size
 
 let refused_by memory fact slot =

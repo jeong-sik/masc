@@ -105,7 +105,7 @@ let a_changed_folder_is_left_as_it_is () = with_workspace (fun ~base_path ~docke
       | Carried.Hitl_auto_judge, Error (Setup.Folder (Carried.Folder_differs { detail; _ })) ->
           check string "the difference is named" "server.py has other bytes" detail
       | Carried.Hitl_auto_judge, (Ok _ | Error _) -> fail (Setup.report_line report)
-      | (Carried.Workspace_curator | Carried.Candle_appraiser), _ ->
+      | Carried.Candle_appraiser, _ ->
           ignore (installed report))
     (reports ~base_path ~docker);
   check string "the folder is not rewritten" changed (read server))

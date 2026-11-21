@@ -30,15 +30,6 @@ val observe : base_path:string -> (Yojson.Safe.t, error) result
 
     Credential variable NAMES are included; no value of one is read. *)
 
-val preview
-  :  check_command_voices:(Voice_config.endpoint -> voices:string list -> (unit, string) result)
-  -> base_path:string
-  -> Yojson.Safe.t
-  -> (Yojson.Safe.t, error) result
-(** The runtime.toml text these changes would commit, without committing it, so
-    an operator can see what is about to change before agreeing to it.
-    [check_command_voices] is {!Voice_setup.preview}'s. *)
-
 val apply
   :  check_command_voices:(Voice_config.endpoint -> voices:string list -> (unit, string) result)
   -> base_path:string

@@ -107,7 +107,7 @@ def main():
                 status, raw = mcp(4)
                 assert status == 429 and json.loads(raw)['message'] == 'Per-agent rate limit exceeded', (status, raw)
                 # A mutation endpoint remains metered, before it can perform work.
-                status, raw = http('/api/v1/dashboard/browser-lane/goto', {})
+                status, raw = http('/api/v1/dashboard/browser-lane/interact', {})
                 assert status == 429 and json.loads(raw)['message'] == 'Per-agent rate limit exceeded', (status, raw)
                 # Permission-guarded GETs are observations on the two other
                 # wrappers: with_permission_auth and with_token_permission_auth.

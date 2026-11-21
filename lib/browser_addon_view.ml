@@ -54,21 +54,6 @@ let interact host json=run (fun () ->
   let* receipt=Host.issue host ~preference:request.route
     (B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action}) in
   Ok (Browser_binding.annotate receipt.binding receipt.data))
-let request_fields allowed = function
-  | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields -> Ok fields
-  | _ -> Error "unknown browser request argument"
-let route fields = Browser_surface.parse_request (`Assoc
-  (List.filter (fun (key,_) -> List.mem key ["lane";"clientId";"tabId"]) fields))
-let goto host json=run (fun () ->
-  let* fields=parse (request_fields ["lane";"clientId";"tabId";"url"]) json in
-  let* request=input (route fields) in
-  let* url=input (match List.assoc_opt "url" fields with
-    | Some (`String url) -> let uri=Uri.of_string url in
-        (match Uri.scheme uri,Uri.host uri with Some ("http"|"https"),Some host when host<>"" -> Ok url
-          | (None|Some _),(None|Some _) -> Error "url must be an absolute HTTP(S) URL")
-    | None|Some _ -> Error "url is required") in
-  let* receipt=Host.issue host ~preference:request.route (B.Page_goto {url;tab_id=request.tab_id}) in
-  Ok (Browser_binding.annotate receipt.binding receipt.data))
 let connection_inventory ~config ~access=run (fun () ->
   let* inventory=Host.connection_inventory ~config ~access |> Result.map_error (function
     | Host.Snapshot_unavailable detail ->

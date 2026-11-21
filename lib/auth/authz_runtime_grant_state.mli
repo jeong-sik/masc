@@ -43,6 +43,19 @@ val of_grantee
   -> Authz_types.Principal.t
   -> (Authz_types.Grant_id.t * Authz_records.Runtime_grant.t) list
 
+(** The grant one principal holds on one Runtime — the design's
+    [(Principal.t * Runtime_id.t)] lookup (design 4.2-1). The state keeps the
+    grants of a Runtime under that Runtime, so this answers without a scan over
+    the log. A log that names two grants for the pair reads as the lower id
+    first and the higher id last; the last one, the grant the log named most
+    recently, is answered. Deciding whether more than one may live at a time is
+    admission's ([Authz_state]), not this projection's. *)
+val find_for
+  :  t
+  -> grantee:Authz_types.Principal.t
+  -> runtime_id:Authz_types.Runtime_id.t
+  -> Authz_records.Runtime_grant.t option
+
 type refusal = Already_named of Authz_types.Grant_id.t
   (** The id was named before: a grant id names one grant for good. *)
 

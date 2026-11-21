@@ -154,6 +154,31 @@ let test_of_grantee () =
     [ "grant-3" ]
 ;;
 
+let test_find_for_pair () =
+  let t =
+    G.empty
+    |> fun t -> add_ok t (grant ~id:"grant-1" ())
+    |> fun t -> add_ok t (grant ~id:"grant-2" ~grantee:bob ())
+    |> fun t -> add_ok t (grant ~id:"grant-3" ~runtime:"runtime-2" ())
+  in
+  let found t ~grantee ~runtime =
+    G.find_for t ~grantee ~runtime_id:(runtime_id runtime)
+    |> Option.map (fun grant -> Grant_id.to_string grant.Runtime_grant.id)
+  in
+  Alcotest.(check (option string)) "alice on runtime-1" (Some "grant-1")
+    (found t ~grantee:alice ~runtime:"runtime-1");
+  Alcotest.(check (option string)) "bob on runtime-1" (Some "grant-2")
+    (found t ~grantee:bob ~runtime:"runtime-1");
+  Alcotest.(check (option string)) "alice on runtime-2" (Some "grant-3")
+    (found t ~grantee:alice ~runtime:"runtime-2");
+  Alcotest.(check (option string)) "bob on runtime-2 is absent" None
+    (found t ~grantee:bob ~runtime:"runtime-2");
+  (* A pair the log named twice reads as the id it named last. *)
+  let twice = add_ok t (grant ~id:"grant-4" ()) in
+  Alcotest.(check (option string)) "the last id the log named wins" (Some "grant-4")
+    (found twice ~grantee:alice ~runtime:"runtime-1")
+;;
+
 let () =
   Alcotest.run
     "authz_runtime_grant_state"
@@ -163,6 +188,8 @@ let () =
         ; Alcotest.test_case "an id names one grant for good" `Quick test_one_id_one_grant
         ; Alcotest.test_case "the grants of a runtime follow their ids" `Quick test_of_runtime_in_id_order
         ; Alcotest.test_case "the grants of a principal" `Quick test_of_grantee
+        ; Alcotest.test_case "the grant of one principal on one runtime" `Quick
+            test_find_for_pair
         ] )
     ]
 ;;

@@ -1910,8 +1910,9 @@ let test_direct_board_http_readership_and_cache () =
   in
   Dashboard_cache.invalidate_all ();
   let _, operator_page = get token "/api/v1/board?sort_by=recent" in
-  check (list string) "operator primes a page with both posts"
-    ["private latest post"; "public older post"] (page_titles operator_page);
+  check (list string)
+    "an Admin credential no longer reads another person's Direct post"
+    ["public older post"] (page_titles operator_page);
   let _, outsider_page = get outsider "/api/v1/board?sort_by=recent&limit=1&voter=direct-reader" in
   check (list string) "filter before the page limit and ignore forged voter"
     ["public older post"] (page_titles outsider_page);
@@ -1923,7 +1924,8 @@ let test_direct_board_http_readership_and_cache () =
   let status, _ = get recipient ("/api/v1/board/" ^ post_id) in
   check int "recipient detail exists" 200 status;
   let _, operator_dashboard = get token "/api/v1/dashboard/board?sort_by=recent" in
-  check int "operator dashboard includes Direct" 2 (List.length (page_titles operator_dashboard));
+  check int "Admin dashboard excludes a Direct post addressed to someone else" 1
+    (List.length (page_titles operator_dashboard));
   let _, outsider_dashboard = get outsider "/api/v1/dashboard/board?sort_by=recent" in
   check (list string) "dashboard cache is separated by reader"
     ["public older post"] (page_titles outsider_dashboard);
@@ -1932,8 +1934,19 @@ let test_direct_board_http_readership_and_cache () =
       |> List.map (fun row -> row |> member "name" |> to_string)
       |> List.sort String.compare in
   let _, operator_hearths = get token "/api/v1/board/hearths" in
-  check (list string) "operator primes hearths including the Direct-only name"
-    ["private latest post"; "public older post"] (hearth_names operator_hearths);
+  check (list string)
+    "an Admin credential seeds hearths without another person's Direct name"
+    ["public older post"] (hearth_names operator_hearths);
+  (* The narrowing must not close the Admin's own deliveries: a Direct post
+     addressed to the Admin's own Board id stays readable to it. *)
+  let _own_direct =
+    create ~title:"operator own private post"
+      ~body:"@direct-operator own private body" ~visibility:Board.Direct
+  in
+  Dashboard_cache.invalidate_all ();
+  let _, own_page = get token "/api/v1/board?sort_by=recent" in
+  check (list string) "an Admin credential keeps reading its own Direct post"
+    ["operator own private post"; "public older post"] (page_titles own_page);
   let _, outsider_hearths = get outsider "/api/v1/board/hearths" in
   check (list string) "hearth cache does not expose another reader's private name"
     ["public older post"] (hearth_names outsider_hearths);

@@ -3,7 +3,6 @@ module Addon = Lane_addon_exact
 module Failure = Exact_lane_failure
 module Registry = Runtime_exact_output_registry
 module Receipt = Keeper_exact_walk_receipt
-open Result.Syntax
 
 (* What one tried slot said. Every slot the call reached leaves one. *)
 type slot_failure =

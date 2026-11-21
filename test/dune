@@ -1329,6 +1329,8 @@
   masc_test_deps
   masc.embedded_config masc.config))
 
+(include stanzas/test_keeper_supervisor_turn_boundaries.inc)
+
 (test
  (name test_channel_gate_connector_routes)
  (modules test_channel_gate_connector_routes)
@@ -2452,6 +2454,8 @@
  (name test_keeper_no_request_body_gate)
  (modules test_keeper_no_request_body_gate)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
+
+(include stanzas/test_keeper_no_request_body_gate_turn_boundaries.inc)
 
 ; A run_named turn queued behind a held admission permit ends as Queue at the
 ; keeper's deadline: the admission bound ends the wait and the watchdog stands
@@ -3643,6 +3647,7 @@
 (include stanzas/test_keeper_claude_code_runtime.inc)
 (include stanzas/test_server_dashboard_official_client_probe.inc)
 (include stanzas/test_official_client_session_store.inc)
+(include stanzas/test_official_client_session_store_turn_boundaries.inc)
 
 (include stanzas/test_openapi_api_e2e.inc)
 
@@ -5492,6 +5497,7 @@
 (include stanzas/test_keeper_memory_age_bins.inc)
 (include stanzas/test_tui_decode_workspace_memory.inc)
 (include stanzas/test_keeper_turn_pulse.inc)
+(include stanzas/test_keeper_turn_log_turn_task_context.inc)
 (include stanzas/test_keeper_decoded_rows.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
@@ -5503,6 +5509,7 @@
 (include stanzas/test_keeper_unsettled_spend.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
+(include stanzas/test_keeper_clear_admission_turn_boundaries.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
 (include stanzas/test_keeper_librarian_store_scope.inc)
 (include stanzas/test_keeper_librarian_store_scope_progress_and_queue.inc)
@@ -5574,6 +5581,7 @@
 (include stanzas/test_keeper_store_locations.inc)
 (include stanzas/test_keeper_projection_change.inc)
 (include stanzas/test_keeper_cache_outcome.inc)
+(include stanzas/test_keeper_carried_front_turn_boundaries.inc)
 
 (include stanzas/test_keeper_operator_note.inc)
 (include stanzas/test_keeper_arrived_stimuli.inc)

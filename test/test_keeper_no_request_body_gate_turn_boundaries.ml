@@ -1,0 +1,389 @@
+open Alcotest
+open Masc
+
+let write path content =
+  let channel = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out channel)
+    (fun () -> output_string channel content)
+
+let rec remove path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Unix.unlink path
+
+(* Every condition under which a completed turn's tool results leave as
+   markers holds here: a recorded turn boundary, a Librarian behind on that
+   turn, the canonical reader, and a completed raw seed. The result of the
+   turn that ended goes as a marker the reader opens, and as the same marker
+   on both requests. Its call keeps the arguments it was made with, and this
+   turn's result stays in the prompt (with the exception of
+   RFC-tool-results-age-out-of-context). *)
+let test_historical_tool_results_go_as_markers () =
+  let module Observation = Agent_core.Base.Schema_observation in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let previous_pool = Domain_pool_ref.get () in
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Eio.Switch.on_release sw (fun () ->
+    match previous_pool with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some previous -> Domain_pool_ref.set previous);
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
+  let base_path = Filename.temp_file "keeper-no-body-gate-demote-" "" in
+  Unix.unlink base_path;
+  Unix.mkdir base_path 0o700;
+  Eio.Switch.on_release sw (fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
+    remove base_path);
+  let historical_input = `Assoc ["command", `String (String.make 4000 'h')] in
+  let active_input = `Assoc ["command", `String (String.make 4000 'a')] in
+  let tool_call_reply =
+    Printf.sprintf
+      {|{"id":"tool-call-1","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"active-call-1","type":"function","function":{"name":"fixture_tool","arguments":%s}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+      (Yojson.Safe.to_string (`String (Yojson.Safe.to_string active_input)))
+  in
+  let final_reply =
+    Exact_output_fixture.openai_response (`Assoc ["answer", `String "accepted"])
+  in
+  let server = Exact_output_fixture.start_server
+    ~sw ~net:env#net ~clock:env#clock
+    (Exact_output_fixture.Replies [tool_call_reply; final_reply]) in
+  let model_id = "no-body-gate-demote" in
+  let catalog_path = Filename.concat base_path "models.toml" in
+  let catalog_row provider = Printf.sprintf
+    "[[models]]\nmodel_id = %S\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
+    model_id provider in
+  write catalog_path (catalog_row "fixture");
+  (match Llm_provider.Model_catalog.load_file catalog_path with
+   | Error detail -> fail detail
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
+  let config_path = Filename.concat base_path "runtime.toml" in
+  let config_text = Printf.sprintf {|[runtime]
+default = "fixture.sample"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = %S
+[models.sample]
+api-name = %S
+max-context = 1048576
+streaming = false
+[fixture.sample]
+|} server.base_url model_id in
+  write config_path config_text;
+  (match Runtime.init_default_degraded_report ~config_path with
+   | Ok Runtime.Initialized -> ()
+   | Ok (Runtime.Initialized_degraded _) -> fail "fixture catalog unexpectedly unavailable"
+   | Error error -> fail (Runtime.strict_init_error_to_string error));
+  let active_payload = String.make 4000 'w' in
+  let executed_inputs = ref [] in
+  let command_param : Agent_core.Types.tool_param =
+    { name = "command"; description = "Command supplied by this fixture."
+    ; param_type = Agent_core.Types.String; required = true } in
+  let active_tool =
+    Agent_core.Tool.create
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+      ~name:"fixture_tool"
+      ~description:"Callable tool for current turn."
+      ~parameters:[command_param]
+      (fun input ->
+         executed_inputs := input :: !executed_inputs;
+         Ok
+           { Agent_core.Types.content = active_payload
+           ; content_blocks = None
+           ; _meta = None
+           })
+  in
+  let historical_payload = String.make 4000 'z' in
+  (* Atom 0 is the turn the Memory writer has read; the completed tool
+     exchange that follows is the one it has not. Only a completed turn the
+     writer is behind on reaches the wire at all: with no read end the
+     request starts at the completed boundary (RFC keeper-context-window
+     §13.4), and with one it starts there (§13.6). *)
+  let initial_messages : Agent_core.Types.message list =
+    [ { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.User
+      ; content = [ Agent_core.Types.Text "earlier ask, already read by the Librarian" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.Assistant
+      ; content = [ Agent_core.Types.ToolUse
+          { id = "call-demote-1"; name = "fixture_tool"; input = historical_input } ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.Tool
+      ; content =
+          [ Agent_core.Types.ToolResult
+              { tool_use_id = "call-demote-1"
+              ; content = historical_payload
+              ; outcome = Agent_core.Types.Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = Some "call-demote-1"
+      ; metadata = []
+      }
+    ]
+  in
+  let argument_demotion_seed = Some initial_messages in
+  let trace_id = "demote-proof-trace-" ^ Filename.basename base_path in
+  (
+    let position = match Keeper_turn_boundaries.position_of_messages initial_messages with
+      | Ok position -> position | Error detail -> fail detail in
+    let record : Keeper_turn_boundaries.record =
+      { recorded_at = 1.; event = Keeper_turn_boundaries.Turn_ended
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+          ; history_at_start = Keeper_turn_boundaries.Fresh_history
+          ; position } } in
+    let keepers_dir = Workspace.keepers_runtime_dir (Workspace.default_config base_path) in
+    (match Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"demote-proof" record with
+     | Ok () -> ()
+     | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
+    (* The turn start is read from the turn log: two completed turns, the
+       ask and then the tool exchange. The Memory writer read the first, so
+       its read end is atom 1. The Librarian still reads the boundary line
+       above. *)
+    match
+      Masc_test_deps.write_closed_turn_log ~keepers_dir ~keeper_name:"demote-proof" ~trace_id
+        [ 1; List.length initial_messages ]
+    with
+    | read_turn :: (_ : Masc_test_deps.turn_log_closing list) ->
+      Masc_test_deps.commit_memory_read ~config:(Workspace.default_config base_path)
+        ~keeper_name:"demote-proof" ~trace_id ~working_state:Librarian_answer.Keep read_turn
+    | [] -> fail "the fixture's turn log has no completed turn");
+  let (_ : Librarian_writer.view) =
+    Masc_test_deps.booted_memory_writer_view ~sw ~config:(Workspace.default_config base_path)
+      "demote-proof"
+  in
+  let reader =
+    let schema = Keeper_runtime_schemas_toml.artifact_read in
+    Tool_bridge.agent_core_tool_of_masc_with_execution_env
+        ~base_path
+        ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+        ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+        ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+        (fun _ args ->
+          let execution = Keeper_artifact_read.handle ~base_path ~args in
+          match execution.disposition with
+          | Tool_result.Completed () ->
+            Tool_result.make_ok ~tool_name:schema.name ~start_time:(Tool_timing.start ())
+              ?data:execution.data ()
+          | Tool_result.Failed class_ ->
+            Tool_result.make_err ~tool_name:schema.name ~class_
+              ~start_time:(Tool_timing.start ()) execution.raw_output
+          | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred")
+    |> Result.get_ok
+  in
+  let tools = [active_tool; reader] in
+  check bool "the canonical offered reader grants retrieval" true
+    (Result.is_ok (Keeper_recovery_transmission.require_reader tools));
+  let system_prompt = "Demotion fixture: \"quoted\"\nUTF-8 관측\\suffix." in
+  let manifest_config = Workspace.default_config base_path in
+  let manifest_context : Keeper_runtime_manifest.turn_context =
+    { manifest_keeper_name = "demote-proof"
+    ; manifest_trace_id = trace_id
+    ; manifest_keeper_turn_id = Some 2
+    }
+  in
+  check bool "the fresh trace has no earlier ledger" true
+    (Keeper_model_input_ledger.Table.lookup
+       ~keeper_name:"demote-proof" ~runtime_id:"fixture.sample" ~session_id:trace_id = None);
+  let observer = Observation.create ~mode:Timed in
+  let result =
+    Observation.within observer (fun () ->
+    Observation.with_wake ~keeper:"demote-proof" ~trace_id ~absolute_turn:2
+      ~execution_scope:None ~cause:None (fun () ->
+    Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      ?argument_demotion_seed
+
+      ~system_prompt
+      ~runtime_id:"fixture.sample"
+      ~keeper_name:"demote-proof"
+      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+      ~tools
+      ~agent_core_tools:tools
+      ~goal:"execute tool"
+      ~initial_messages
+      ~runtime_manifest_context:manifest_context
+      ~runtime_manifest_append:(fun row ->
+        Keeper_runtime_manifest.append_best_effort manifest_config row)
+      ~sw ~net:env#net ()))
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  check int "the Keeper completed 2 requests" 2
+    (Exact_output_fixture.post_count server);
+  check bool "the active tool executes once with the exact long original input" true
+    (!executed_inputs = [active_input]);
+  let request_bodies = Exact_output_fixture.request_bodies server in
+  let expected_names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
+  List.iter (fun body ->
+    let request = Yojson.Safe.from_string body in
+    let names = Yojson.Safe.Util.(member "tools" request |> to_list)
+      |> List.map (fun tool -> Yojson.Safe.Util.(member "function" tool |> member "name" |> to_string)) in
+    check (list string) "the actual provider requests retain nonempty declared tool order"
+      expected_names names;
+    let first_message = Yojson.Safe.Util.(member "messages" request |> to_list) |> List.hd in
+    check string "the actual first system message preserves escaped UTF-8 input"
+      system_prompt Yojson.Safe.Util.(member "content" first_message |> to_string)) request_bodies;
+  (* Compute expected byte and prefix values only after the real run, so
+     their encoding cannot prime the worker's cold SDK count lookup. *)
+  let expected_reserved_bytes =
+    List.fold_left (fun bytes tool ->
+      bytes + String.length (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
+      (String.length (Yojson.Safe.to_string (`String system_prompt))) tools
+  in
+  let manifest_path = Keeper_runtime_manifest.path_for_trace manifest_config
+    ~keeper_name:"demote-proof" ~trace_id in
+  let manifest_rows = In_channel.with_open_bin manifest_path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> line <> "")
+    |> List.map (fun line ->
+      match Keeper_runtime_manifest.decode_persisted_row (Yojson.Safe.from_string line) with
+      | Ok (Keeper_runtime_manifest.Active_row row) -> row
+      | Ok (Keeper_runtime_manifest.Unsupported_row _) -> fail "fixture retained an unsupported manifest event"
+      | Error detail -> fail detail)
+  in
+  (match List.filter (fun (row : Keeper_runtime_manifest.t) ->
+     row.event = Keeper_runtime_manifest.History_projection_observed) manifest_rows with
+   | [row] ->
+     check string "reserve manifest belongs to this Keeper" "demote-proof" row.keeper_name;
+     check string "reserve manifest belongs to this fresh trace" trace_id row.trace_id;
+     check (option int) "reserve manifest belongs to this original turn" (Some 2) row.keeper_turn_id;
+     check string "the actual projection prepared its request" "history_projection_prepared" row.status;
+     check int "the retained decision charges exact declared schema and escaped prompt bytes"
+       expected_reserved_bytes Yojson.Safe.Util.(member "reserved_bytes" row.decision |> to_int)
+   | _ -> fail "expected the real attempt's one retained history projection decision");
+  (match Keeper_model_input_ledger.Table.lookup
+     ~keeper_name:"demote-proof" ~runtime_id:"fixture.sample" ~session_id:trace_id with
+   | Some ledger ->
+     check string "the accepted request ledger consumes the exact declared prefix"
+       (Keeper_model_input_ledger.prefix_digest ~system_prompt ~tools) ledger.prefix_digest
+   | None -> fail "the completed real requests did not populate their ledger");
+  let report = Observation.report_to_json (Observation.snapshot observer) in
+  (match Observation.report_of_json report with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  let events = Yojson.Safe.Util.(member "events" report |> to_list) in
+  let payload event = Yojson.Safe.Util.member "payload" event in
+  let is_span kind site event =
+    Yojson.Safe.Util.member "kind" (payload event) = `String kind
+    && Yojson.Safe.Util.member "site" (payload event) = `String site in
+  let sequence event = Yojson.Safe.Util.(member "sequence" event |> to_int) in
+  let in_reserve event =
+    Yojson.Safe.Util.(member "scope" event |> member "parent_site") = `String "reserve_encode" in
+  let reserve = List.find (fun event ->
+    is_span "span_started" "sdk_byte_count_lookup" event && in_reserve event) events in
+  let prefixes = List.filter (is_span "span_started" "prefix_digest_encode") events in
+  check int "the real prefix encodes every declared tool occurrence once"
+    (List.length tools) (List.length prefixes);
+  List.iter (fun event ->
+    check bool "prefix encoding is outside the reserve dynamic scope" false
+      (in_reserve event)) prefixes;
+  let last_prefix = List.hd (List.rev prefixes) in
+  let enclosing_workers = List.filter (fun start ->
+    if not (is_span "span_started" "worker_work" start) then false
+    else
+      let span_id = Yojson.Safe.Util.member "span_id" (payload start) in
+      let finish = List.find (fun event ->
+        is_span "span_finished" "worker_work" event
+        && Yojson.Safe.Util.member "span_id" (payload event) = span_id) events in
+      sequence start < sequence reserve && sequence finish > sequence last_prefix) events in
+  check int "one real worker invocation encloses reserve and the complete prefix" 1
+    (List.length enclosing_workers);
+  check bool "the real reserve retains cold SDK encoding" true
+    (List.exists (fun event ->
+       is_span "span_finished" "sdk_byte_count_encode" event && in_reserve event) events);
+  check bool "the real reserve retains SDK count publication" true
+    (List.exists (fun event ->
+       is_span "span_finished" "sdk_byte_count_publication" event && in_reserve event) events);
+  let second_body = List.nth (Exact_output_fixture.request_bodies server) 1 in
+  check bool "the historical body leaves the second HTTP request" false
+    (String_util.contains_substring second_body historical_payload);
+  check bool "current-turn tool body remained verbatim inline" true
+    (String_util.contains_substring second_body active_payload);
+  let messages = Yojson.Safe.Util.(Yojson.Safe.from_string second_body |> member "messages" |> to_list) in
+  let wire_arguments messages id =
+    let calls = List.concat_map (fun message ->
+      match Yojson.Safe.Util.member "tool_calls" message with
+      | `List calls -> calls
+      | `Null -> []
+      | _ -> fail "tool_calls must be an array") messages in
+    let call = List.find (fun call -> Yojson.Safe.Util.member "id" call = `String id) calls in
+    Yojson.Safe.Util.(member "function" call |> member "arguments" |> to_string)
+    |> Yojson.Safe.from_string in
+  check bool "current-turn arguments remain exact on the second HTTP request" true
+    (wire_arguments messages "active-call-1" = active_input);
+  (* The call ended in an earlier turn, so its arguments go as a reference,
+     as its result does. The
+     first request has no ledger and demotes them; the second keeps what
+     the first sent. *)
+  (match Tool_output.normalized_artifact_ref_of_json (wire_arguments messages "call-demote-1") with
+   | Tool_output.Decoded_normalized_artifact_ref reference ->
+     (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+              ~sha256:reference.Tool_output.sha256 with
+      | Ok (Some bytes) ->
+        check bool "the historical arguments' reference reads back the original JSON" true
+          (Yojson.Safe.from_string bytes = historical_input)
+      | Ok None | Error _ -> fail "the historical arguments' blob is not stored")
+   | Tool_output.Not_normalized_artifact_ref | Tool_output.Invalid_normalized_artifact_ref _ ->
+     fail "the historical arguments are not a reference");
+  let first_messages = Yojson.Safe.Util.(
+    List.hd (Exact_output_fixture.request_bodies server)
+    |> Yojson.Safe.from_string |> member "messages" |> to_list) in
+  let tool_message messages id =
+    List.find
+      (fun msg ->
+         Yojson.Safe.Util.member "role" msg = `String "tool"
+         && Yojson.Safe.Util.member "tool_call_id" msg = `String id)
+      messages
+  in
+  check bool "the historical tool message is the same on both HTTP requests" true
+    (tool_message first_messages "call-demote-1" = tool_message messages "call-demote-1");
+  check bool "the historical tool call is the same on both HTTP requests" true
+    (wire_arguments first_messages "call-demote-1" = wire_arguments messages "call-demote-1");
+  let tool_messages =
+    List.filter
+      (fun msg -> Yojson.Safe.Util.member "role" msg = `String "tool")
+      messages
+  in
+  check int "exactly 2 tool messages on the wire" 2 (List.length tool_messages);
+  let historical_content =
+    Yojson.Safe.Util.(member "content" (tool_message messages "call-demote-1") |> to_string) in
+  check bool "the historical tool result is a marker" true
+    (Tool_output.is_marker historical_content);
+  (match Tool_output.decode_from_agent_core historical_content with
+   | Tool_output.Decoded reference ->
+     (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+              ~sha256:reference.Tool_output.sha256 with
+      | Ok (Some bytes) ->
+        check string "the marker reads back the exact historical result" historical_payload bytes
+      | Ok None | Error _ -> fail "the marker's blob is not stored")
+   | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+     fail "the historical result is not a decodable marker");
+  let active_content =
+    Yojson.Safe.Util.(member "content" (tool_message messages "active-call-1") |> to_string) in
+  check bool "current turn tool message is not a marker" false
+    (Tool_output.is_marker active_content);
+  check string "current turn tool result is verbatim"
+    active_payload
+    active_content
+
+let () =
+  Alcotest.run "keeper_no_request_body_gate_turn_boundaries"
+    [ "actual-dispatch",
+      [ test_case "historical tool results and arguments go as references, as first sent" `Quick
+          test_historical_tool_results_go_as_markers
+      ]
+    ]

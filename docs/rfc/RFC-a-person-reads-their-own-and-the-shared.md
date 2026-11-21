@@ -418,7 +418,7 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 6. **공유 원장을 한 주인 안에서 더 나누나.** 예: 회사 일 Keeper 와 개인 일 Keeper.
    결정: N2 는 주인 단위로만 나눈다. 한 주인 안에서 더 나눌지는 N2 범위 밖이고, 사용자 결정을 기다린다.
    - 단일 사용자에서도 같은 질문이다. 지금도 Keeper 들이 원장 하나를 같이 쓴다. 그래서 N2 와 묶지 않는다.
-   - 한 주인 안에서 섞이는 것은 남의 글이 새는 일이 아니다.
+   - 한 주인 안에서 섞여도 다른 사람의 글이 새지는 않는다. 다만 한 사람의 회사 일 기록과 개인 일 기록이 한 원장에 섞인다.
    - 지금 Keeper 정의에는 묶음을 적는 칸이 없다.
    - 더 나누기로 정하면 원장 폴더 함수가 받는 주인 값의 타입에서 나눈다(L6).
    N2 안에서 고르지 않은 안: Keeper 정의에 묶음을 적고, 묶음마다 원장을 나눈다. 단일 사용자에서도 원장이 나뉜다.
@@ -429,7 +429,9 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
    - Librarian 도 같다. 사람의 Keeper 턴 글은 주인의 계정으로만 Librarian 에 간다. 이 규칙은 엔진 RFC 가 Librarian 거절을 풀 때 든다.
    - 그 전까지 다계정 엔진은 Librarian 을 묻지 않는다(「먼저」). 엔진 RFC §3.7 이 다계정에서 Librarian 을 거절했지만, 그 거절을 하는 코드는 아직 없다.
    - 다계정 엔진도 기억 쓰기를 띄운다(`start_engine` → `activate_owner_state` → `Keeper_memory_writers.start`). Librarian 코드(`lib/librarian`, `Keeper_memory_writers`)는 계정이나 접근 값을 보지 않는다.
-   - 지금은 slot 을 푸는 Runtime 조회가 다계정에서 운영자의 Runtime 을 보지 못해서 막힌다. CLI slot 은 `Librarian_memory_lane.cli_key` 가 `Window_unknown` 으로 끝낸다. 틀린 까닭으로 막히는 것이다.
+   - CLI slot 은 틀린 까닭으로 막힌다. `Librarian_memory_lane.cli_key` 는 `Runtime.get_runtime_by_id` 로 찾는다. 다계정에서는 그 조회가 사람의 표만 봐서 `Window_unknown` 으로 끝난다.
+   - HTTP slot 이 막힌다는 근거는 없다. `http_key` 는 그 조회를 부르지 않고, lane 표가 slot 을 고를 때 얼려 둔 관측(`runtime_observation`)에서 창을 읽는다.
+   - 그래서 지금 사람의 턴 글이 설치의 slot 으로 가지 않는 까닭은 하나다. 엔진이 아직 사람의 Keeper 를 돌리지 않는다. 「먼저」의 Librarian 줄은 그 길보다 먼저 들어가야 한다.
    고르지 않은 안: 설치의 slot 으로 한다. 운영자가 비용을 내고, 운영자의 provider 가 사람의 사실을 받는다.
 
 ## 7. 층

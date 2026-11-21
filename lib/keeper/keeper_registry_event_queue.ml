@@ -12,7 +12,7 @@ let notify_pending ~base_path name =
     ~base_path
     ~keeper_name:name
     ~source:Event_queue;
-  Keeper_librarian_queue_signal.changed ~base_path ~keeper_name:name
+  Keeper_working_context_signal.changed ~base_path ~keeper_name:name
 ;;
 
 let publish_pending ~base_path name pending =

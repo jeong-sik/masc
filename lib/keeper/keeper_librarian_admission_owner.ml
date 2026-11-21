@@ -327,7 +327,7 @@ let evaluate ~store ~config ~reserved ~owner ~inventory part =
       Capture.declaration_ended ~store original.capture record)) in
     if not confirmed then Ok None else (
       if not (Yojson.Safe.equal (Progress.to_json original.record.progress) (Progress.to_json record.Owner.progress))
-      then Keeper_librarian_queue_signal.changed ~base_path:(Capture.base_path owner)
+      then Keeper_working_context_signal.changed ~base_path:(Capture.base_path owner)
         ~keeper_name:(Capture.keeper_id owner);
       Ok (Some (Terminal (source {original with record} part,false)))) in
   match state with
@@ -600,7 +600,7 @@ let run_queue ~after_settle ~base_path ~keeper_name =
       let closing=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
         let* current=discover ~store ~owner in completed_forest ~store ~owner current)) in
       (match closing with
-       | Ok (Some _) -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
+       | Ok (Some _) -> Keeper_working_context_signal.changed ~base_path ~keeper_name
        | Ok None -> ()
        | Error detail -> Log.Keeper.warn ~keeper_name "Librarian admission closure postponed: %s" detail);
       Ok (Settled {has_more}))

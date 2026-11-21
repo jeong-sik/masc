@@ -184,6 +184,11 @@ sandbox_root="_build/.sandbox"
 # been recorded. Each band costs two du passes, and only when it is crossed.
 disk_bands="50 30 20 10 5"
 disk_bands_seen=" "
+# Which slice the band lines belong to. A sharded run resets disk_bands_seen per
+# shard and names the shard in every band line: a band crossed in one shard is a
+# different observation from the same band crossed later, and without the reset
+# the first crossing hid every later one.
+shard_tag="single"
 disk_evidence_log="$tmp/test-suite-disk-evidence.log"
 disk_usage() {
   local budget="$1" depth="$2" rows="$3" result
@@ -199,8 +204,8 @@ disk_usage() {
 disk_evidence() {
   # An annotation line is collected by the runner as it streams, so it survives
   # even when the job dies before the evidence file can be uploaded.
-  echo "::warning::disk band ${1}G crossed: $(df -BG --output=avail / | tail -1) available"
-  echo "[test-suite] free space fell below ${1}G; what holds the bytes:"
+  echo "::warning::disk band ${1}G crossed (${shard_tag}): $(df -BG --output=avail / | tail -1) available"
+  echo "[test-suite] free space fell below ${1}G in ${shard_tag}; what holds the bytes:"
   df -h /
   echo "[test-suite] largest _build entries (two levels: subtree then its biggest children):"
   disk_usage 90 1 8
@@ -409,6 +414,7 @@ shard_target_list() {
 # Each round drops the reported name and asks again; a clean round ends it.
 drop_undefined_targets() {
   local candidates="$1" max_rounds="${2:-32}" round=1 rejected name kept
+  dropped_names=""
   while [ "$round" -le "$max_rounds" ]; do
     rejected="$(opam exec -- dune rules --root "$repo_root" $candidates 2>&1 >/dev/null \
       | grep -oE 'Alias "[^"]+"' | head -1 | sed 's/^Alias "//; s/"$//' || true)"
@@ -419,6 +425,7 @@ drop_undefined_targets() {
       return 0
     fi
     echo "[test-suite] dune does not define the alias ${rejected}; dropping that target" >&2
+    dropped_names="$dropped_names $rejected"
     kept=""
     for candidate in $candidates; do
       case "$candidate" in
@@ -433,6 +440,17 @@ drop_undefined_targets() {
   for candidate in $candidates; do
     printf '%s\n' "$candidate"
   done
+}
+# One line that says what the filter did, whether or not it rejected anything.
+# Per-name lines alone cannot tell "the filter ran and dropped nothing" from
+# "the filter never ran", which is the difference a reviewer has to see.
+report_target_filter() {
+  local total="$1" kept_count="$2" dropped="$3"
+  if [ "$dropped" -eq 0 ]; then
+    echo "[test-suite] target list: ${total} candidate(s), ${kept_count} kept, 0 dropped (dune accepted every candidate)"
+  else
+    echo "[test-suite] target list: ${total} candidate(s), ${kept_count} kept, ${dropped} dropped:${dropped_names:-}"
+  fi
 }
 
 # One shard's targets: the round-robin slice `index` of `count` over the sorted
@@ -468,7 +486,14 @@ overall_rc=0
 run_started=$(date +%s)
 
 if [ "$shard_count" -gt 1 ]; then
-  all_aliases="$(drop_undefined_targets "$(shard_target_list | tr '\n' ' ')")"
+  candidate_words="$(shard_target_list | tr '\n' ' ')"
+  candidate_total=0
+  for candidate_word in $candidate_words; do
+    candidate_total=$(( candidate_total + 1 ))
+  done
+  all_aliases="$(drop_undefined_targets "$candidate_words")"
+  kept_total="$(printf '%s\n' "$all_aliases" | grep -c . || true)"
+  report_target_filter "$candidate_total" "$kept_total" "$(printf '%s\n' "${dropped_names:-}" | wc -w | tr -d ' ')"
   if [ -z "$all_aliases" ]; then
     echo "[test-suite] FAIL - no suite target found to shard"
     exit 2
@@ -493,6 +518,10 @@ if [ "$shard_count" -gt 1 ]; then
     shard_size="$(printf '%s\n' "$targets" | grep -c . || true)"
     echo "[test-suite] shard ${idx}/${shard_count}: ${shard_size} target(s)"
     active_log="$tmp/test-suite.shard-${idx}.log"
+    shard_tag="shard ${idx}/${shard_count}"
+    # Each shard starts its band state over: the previous shard's crossings were
+    # observed against a tree this shard has since deleted.
+    disk_bands_seen=" "
     trace="$tmp/test-suite-trace.shard-${idx}.csexp"
     shard_traces="$shard_traces $trace"
     if [ "$shard_size" -eq 0 ]; then

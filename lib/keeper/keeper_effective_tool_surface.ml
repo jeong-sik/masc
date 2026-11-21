@@ -179,7 +179,7 @@ let project
     let global_skill_catalog = preparation.catalog in
     let projection_diagnostics = preparation.diagnostics in
     let capability_surface =
-      Keeper_capability_surface.create_with_descriptors
+      Keeper_capability_surface.create_with_descriptors_policy
         ~masc_enabled
         ~tool_descriptors
         ~tool_deny

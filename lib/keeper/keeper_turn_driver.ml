@@ -3081,7 +3081,7 @@ let run_named
           ( Runtime_agent.runtime_accepts_image_input ~runtime
           , []
           , []
-          , Keeper_official_client_host.No_listing )
+          , Keeper_official_client_host.All_on_demand )
         | Some (project : Keeper_tools_agent_core.model_tool_projection) ->
           let carried = match agent_ref with
             | None -> []

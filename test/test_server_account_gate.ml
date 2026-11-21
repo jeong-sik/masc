@@ -4,6 +4,7 @@
 
 (* [masc] is wrapped, so the router and [Route_access] are reached through it;
    the server modules are not wrapped and are used by their own names. *)
+open Alcotest
 open Masc
 
 let get = `GET

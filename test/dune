@@ -1713,6 +1713,8 @@
   agent_core
   eio_main))
 
+(include stanzas/test_keeper_librarian_cli_lane_admission_and_plan.inc)
+
 (test
  (name test_keeper_librarian_message_floor)
  (modules test_keeper_librarian_message_floor)

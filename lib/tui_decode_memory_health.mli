@@ -182,6 +182,11 @@ type memory_keeper_health = {
           dropped since the server started, by the pass that committed. *)
   mkh_context_cycle : memory_context_cycle;
   mkh_librarian : memory_librarian_health;
+  mkh_writer : Tui_decode_memory_writer.t;
+      (** The Keeper's Memory writer: its state, the alarms on and their
+          level, read from what the writer holds when the answer is written
+          (RFC librarian-call-only-proposes §12). [mkh_librarian] is the
+          Librarian that ran before it and says nothing of this writer. *)
   mkh_librarian_failures : int;
   mkh_vision_ingest_errors : int;
   mkh_vision_ingest_error_reasons : (string * int) list;

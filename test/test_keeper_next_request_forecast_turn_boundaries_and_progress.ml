@@ -26,7 +26,7 @@ let seed ~messages first_atom : Keeper_carried_front.seed =
 
 (* RFC librarian-lifecycle §4.10: the Librarian_stalled gap, from the files a
    server that just started holds -- the keeper's meta, checkpoint, turn
-   boundaries, Librarian position and turn records -- through the driver's
+   log, Librarian position and turn records -- through the driver's
    own choice of where the next request starts. *)
 let test_the_librarian_gap_is_read_from_small_files () =
   Eio_main.run @@ fun env ->
@@ -174,10 +174,12 @@ let test_the_librarian_gap_is_read_from_small_files () =
   accepted_at ~turn:4 8;
   Alcotest.(check (option (pair int int))) "a newer record that decodes answers again"
     (Some (2, 8)) (gap ());
+  (* The history generation is read from the turn log (RFC
+     librarian-call-only-proposes §11.2). *)
   write_raw
-    (Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+    (Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
     "{not-json\n";
-  Alcotest.(check string) "a refused turn-boundary read is not no gap" "turn_boundary_refused"
+  Alcotest.(check string) "a turn log that does not read is not no gap" "turn_boundary_refused"
     (cause ());
   (* A meta file this binary does not decode is not "no Keeper, no gap":
      [read_meta] folds it into [Ok None], so the gap reads presence. *)

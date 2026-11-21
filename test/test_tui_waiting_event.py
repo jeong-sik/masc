@@ -947,8 +947,13 @@ class WaitingEventTest(unittest.TestCase):
                 os.write(master, b":")
                 drain_for(0.3)
                 os.write(master, b"schedules\r")
+                # The schedule list draws a row as its wake moment and its
+                # `payload_summary · payload_keeper_name`, not the store's
+                # `schedule_id`, so the fixture's row reads `fixture detail ·
+                # analyst` (frames 204166 and 207417, final screen row 34). Look
+                # for the text the row actually carries.
                 wait_until(
-                    lambda: b"fixture-schedule" in output,
+                    lambda: b"fixture detail" in output,
                     "schedule fixture row was not displayed",
                 )
                 os.write(master, b"\r")

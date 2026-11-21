@@ -3,8 +3,7 @@
 (** Startup pass over the settled archive. It deletes
     the archived records no live record names and every archived body.
 
-    A live record names the request IDs its progress events hold and, for a
-    gate record, its parent execution. The callers that ask whether an
+    A live record names the request IDs its progress events hold. The callers that ask whether an
     original is settled pass only those IDs, and a parent records a child's ID
     before the child exists, so no caller asks about an archived record no
     live record names. No code reads an archived body. The pass reads every
@@ -37,8 +36,7 @@ val error_to_string : error -> string
 val run : store:Lane_addon_store.t -> (report, error) result
 (** Call while the workspace process lease excludes original writers and
     settles. A live record in a scope no owner claims, one that does not
-    decode, a gate whose parent cannot be read, or an archive entry of an
-    unknown shape refuses the pass. Bodies are deleted before records. An
+    decode, or an archive entry of an unknown shape refuses the pass. Bodies are deleted before records. An
     error names the class of failure, never record or body content. Byte
     counts are logical file sizes. *)
 

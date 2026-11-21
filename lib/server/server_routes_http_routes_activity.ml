@@ -1442,20 +1442,6 @@ let add_routes ~sw ~clock router =
          )
        )
 
-  |> Server_route.get Server_route.Public_read "/api/v1/karma" (fun state req reqd ->
-         Server_auth.with_board_access
-           ~base_path:(Mcp_server.workspace_config state).base_path
-           req reqd (fun reader _board_reader_actor ->
-         let karma_list = Board_dispatch.get_all_karma ~reader () in
-         let sorted = List.sort (fun (_, a) (_, b) -> Int.compare b a) karma_list in
-         let json = `Assoc [
-           ("karma", `List (List.map (fun (agent, k) ->
-             `Assoc [("agent", `String agent); ("karma", `Int k)]
-           ) sorted));
-         ] in
-         Http.Response.json_value json reqd
-       ))
-
   |> Server_route.get Server_route.Public_read "/api/v1/board/karma/ledger" (fun state req reqd ->
          Server_auth.with_board_access
            ~base_path:(Mcp_server.workspace_config state).base_path

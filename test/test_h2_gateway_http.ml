@@ -1063,7 +1063,6 @@ let test_strict_auth_opens_a_path_by_its_kind () =
     ; "/api/v1/board/sub-boards", false
     ; "/api/v1/board/sub-boards/some-board", false
     ; "/api/v1/board/karma/ledger", false
-    ; "/api/v1/karma", false
     ]
 
 let () =

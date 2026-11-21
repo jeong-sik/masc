@@ -9,3 +9,4 @@ cwd to keeper tools without prefix. Use when checking checkpoint/session \
 continuity or resolving a path without string-interpolating your own keeper \
 name."""
 additional_properties = false
+defer_loading = true

@@ -10,6 +10,14 @@ open Types
 (** {1 Anthropic SSE} *)
 
 val parse_sse_event : string option -> string -> sse_event option
+
+val parse_sse_events : string option -> string -> sse_event list
+(** Like {!parse_sse_event}, returning all events carried by a single Anthropic
+    SSE payload. When [message_start] includes a wire-reported
+    [usage.cache_creation] TTL breakdown ([ephemeral_5m_input_tokens] /
+    [ephemeral_1h_input_tokens]), a follow-up [MessageDelta] carrying only
+    [cache_write_lifetime] accompanies [MessageStart] so stream telemetry
+    retains the wire-reported TTL. *)
 val emit_synthetic_events : api_response -> (sse_event -> unit) -> unit
 (** Preserves exact inline Chat content replay through the synthetic stream.
     Native Chat inline streams emit a terminal InlineContentReplay witness;

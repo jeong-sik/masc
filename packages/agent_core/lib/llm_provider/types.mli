@@ -659,6 +659,23 @@ val stop_reason_to_string : stop_reason -> string
     {!stop_reason_to_string} except [Unknown _] collapses to ["unknown"]. *)
 val stop_reason_to_metric_label : stop_reason -> string
 
+(** The lifetime a request asked its cache writes to keep. *)
+type cache_write_lifetime =
+  | Provider_default
+      (** The request named no lifetime, so the provider's default applies
+          (five minutes on Anthropic). *)
+  | One_hour
+      (** The request asked for one hour (Anthropic [cache_control] with
+          [ttl = "1h"]). *)
+[@@deriving show, yojson]
+
+val cache_write_lifetime_to_string : cache_write_lifetime -> string
+(** The label a cost row writes: ["provider_default"] or ["one_hour"]. *)
+
+val cache_write_lifetime_of_string : string -> cache_write_lifetime option
+(** Reads a {!cache_write_lifetime_to_string} label back. Any other text is
+    [None]. *)
+
 (** Usage counts carried by a mid-stream event ([MessageDelta]). The wire
     contract is cumulative — a reported value is the latest running total
     for the whole message, never an increment — so accumulators replace the
@@ -676,6 +693,10 @@ type delta_usage =
     (** Optional provider-reported cumulative charge; zero is authoritative. *)
   ; reasoning_tokens : int option [@default None]
     (** Optional provider-reported reasoning/thinking output tokens. *)
+  ; cache_write_lifetime : cache_write_lifetime option [@default None]
+    (** Optional provider-reported cache write TTL inferred from wire fields
+        (e.g. Anthropic [cache_creation.ephemeral_5m_input_tokens] /
+        [ephemeral_1h_input_tokens]). *)
   }
 [@@deriving show, yojson]
 
@@ -764,23 +785,6 @@ type reported_cache_usage =
   ; cache_read_input_tokens : int option
   }
 [@@deriving show, yojson]
-
-(** The lifetime a request asked its cache writes to keep. *)
-type cache_write_lifetime =
-  | Provider_default
-      (** The request named no lifetime, so the provider's default applies
-          (five minutes on Anthropic). *)
-  | One_hour
-      (** The request asked for one hour (Anthropic [cache_control] with
-          [ttl = "1h"]). *)
-[@@deriving show, yojson]
-
-val cache_write_lifetime_to_string : cache_write_lifetime -> string
-(** The label a cost row writes: ["provider_default"] or ["one_hour"]. *)
-
-val cache_write_lifetime_of_string : string -> cache_write_lifetime option
-(** Reads a {!cache_write_lifetime_to_string} label back. Any other text is
-    [None]. *)
 
 type inference_telemetry =
   { system_fingerprint : string option

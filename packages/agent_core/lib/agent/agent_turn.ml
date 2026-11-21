@@ -127,14 +127,38 @@ let context_message turn_params =
     Some system_msg
 ;;
 
-let append_context_message ~messages ~context_message =
-  match context_message with
+let outside_context_message turn_params =
+  match turn_params.Hooks.extra_outside_context with
+  | None -> None
+  | Some ctx when String.trim ctx = "" -> None
+  | Some ctx ->
+    Some
+      { origin = Outside_context
+      ; role = User
+      ; content = [ Text ctx ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+;;
+
+let append_context_message ~messages ~context_message ?outside_context_message () =
+  let messages =
+    match context_message with
+    | None -> messages
+    | Some message -> Util.snoc messages message
+  in
+  match outside_context_message with
   | None -> messages
   | Some message -> Util.snoc messages message
 ;;
 
 let prepare_messages ~messages ~turn_params () =
-  append_context_message ~messages ~context_message:(context_message turn_params)
+  append_context_message
+    ~messages
+    ~context_message:(context_message turn_params)
+    ?outside_context_message:(outside_context_message turn_params)
+    ()
 ;;
 
 (* The caller's projection and its narrower requests run caller code; an
@@ -158,7 +182,10 @@ let prepare_turn
       ()
   =
   let context_message = context_message turn_params in
-  let prepared = append_context_message ~messages ~context_message in
+  let outside_context_message = outside_context_message turn_params in
+  let prepared =
+    append_context_message ~messages ~context_message ?outside_context_message ()
+  in
   let request_of effective_messages =
     let tools =
       request_tools ~tools ~eager_tools ~deferred_tools ~defer_loading effective_messages

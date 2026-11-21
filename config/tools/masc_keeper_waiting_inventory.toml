@@ -4,3 +4,4 @@ Return the canonical keeper waiting inventory read model: what each keeper \
 is waiting on, source counts, global waiting rows, and supported state \
 labels."""
 additional_properties = false
+defer_loading = true

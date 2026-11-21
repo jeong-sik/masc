@@ -11,6 +11,7 @@ the original Task. A committed resolution with marker_retired=false leaves \
 retirement unconfirmed and reports its error; repeat the same decision to retry \
 exact marker retirement."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "command"

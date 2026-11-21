@@ -12,6 +12,7 @@ newest one you read) or comment_tail (the newest N). If no post_id is visible, c
 never call this tool with empty arguments."""
 
 identity_fields = []
+defer_loading = true
 
 [[params]]
 name = "post_id"

@@ -5,6 +5,7 @@ the default workspace when raw snapshot data is too low-level."""
 operator_remote_description = """
 Read an intervention-oriented operator digest with workspace health, \
 attention items, worker summaries, and recommended next actions."""
+defer_loading = true
 
 [[params]]
 name = "actor"

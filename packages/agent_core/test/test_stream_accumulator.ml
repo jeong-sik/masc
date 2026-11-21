@@ -386,6 +386,7 @@ let test_accumulate_message_delta () =
              ; cache_read_input_tokens = None
              ; cost_usd = None
              ; reasoning_tokens = None
+             ; cache_write_lifetime = None
              }
        });
   match Streaming.finalize_stream_acc acc with
@@ -419,6 +420,7 @@ let test_accumulate_message_delta_cache_update () =
              ; cache_read_input_tokens = Some 10
              ; cost_usd = None
              ; reasoning_tokens = None
+             ; cache_write_lifetime = None
              }
        });
   match Streaming.finalize_stream_acc acc with
@@ -501,6 +503,7 @@ let test_finalize_text_response () =
               ; cache_read_input_tokens = None
               ; cost_usd = None
               ; reasoning_tokens = None
+              ; cache_write_lifetime = None
               }
         }
     ];
@@ -1462,6 +1465,7 @@ let empty_delta_usage : delta_usage =
   ; cache_read_input_tokens = None
   ; cost_usd = None
   ; reasoning_tokens = None
+  ; cache_write_lifetime = None
   }
 ;;
 
@@ -1482,6 +1486,7 @@ let test_usage_explicit_zero_is_reported () =
     ; cache_read_input_tokens = Some 0
     ; cost_usd = Some 0.0
     ; reasoning_tokens = None
+    ; cache_write_lifetime = None
     }
   in
   match terminal_usage_of_events
@@ -1532,6 +1537,7 @@ let test_usage_replayed_prelude_keeps_newer_cumulative_fields () =
     ; cache_read_input_tokens = Some 5
     ; cost_usd = Some 0.0
     ; reasoning_tokens = None
+    ; cache_write_lifetime = None
     }
   in
   let last : delta_usage = { empty_delta_usage with output_tokens = Some 9 } in

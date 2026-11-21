@@ -7,6 +7,7 @@ include_done/include_cancelled or status to filter. awaiting_verification \
 tasks are pending a completion-authority verdict and are not claimable agent \
 work. Output includes task ID, title, priority, assignee, timestamps. Tip: \
 Look for status='todo' tasks to claim."""
+defer_loading = true
 
 [[params]]
 name = "status"

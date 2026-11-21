@@ -8,6 +8,7 @@ endpoint fails closed. Returns reachability, chat-completions contract \
 status, model match, slots, ctx, configured capacity, active slots, and \
 local blocker codes. Missing local discovery does not assess or block \
 official-client, CLI, or remote Keeper provider lanes."""
+defer_loading = true
 
 [[params]]
 name = "runtime_pool"

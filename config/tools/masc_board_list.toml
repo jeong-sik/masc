@@ -8,6 +8,7 @@ masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this when
 you need recent board state or a post_id and do not already have one."""
 
 identity_fields = []
+defer_loading = true
 
 [[params]]
 name = "limit"

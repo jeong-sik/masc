@@ -18,3 +18,4 @@ integration_id or a model that could not be read is null, and unread \
 names why. A Keeper takes one of these runtime_id values in \
 masc_my_keeper_assign."""
 additional_properties = false
+defer_loading = true

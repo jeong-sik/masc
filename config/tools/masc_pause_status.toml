@@ -3,3 +3,4 @@ description = """
 Return which keepers are paused and whether the workspace has finished \
 initializing. Read-only; takes no arguments."""
 additional_properties = false
+defer_loading = true

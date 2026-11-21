@@ -3,6 +3,7 @@ description = """
 Navigate a managed tab to an absolute HTTP(S) URL.
 Returns the landing URL and title, and on a failed load where the tab is now. Needs the tab's clientId and tabId. A tab the operator opened (egoPage.label null) is refused before any effect: adopt it with BrowserAct/masc_browser_act adopt_tab first."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "url"

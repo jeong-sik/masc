@@ -15,6 +15,7 @@ work, create a new task with predecessor_task_id instead of touching the \
 done one. Priority 1=urgent, 5=low (default 3). Returns task-XXX ID for \
 tracking. Example: masc_add_task({title: 'Fix login bug', priority: 1, \
 description: 'Users cannot login with SSO'})"""
+defer_loading = true
 
 [[params]]
 name = "title"

@@ -7,6 +7,7 @@ to the first task assigned to that agent, or clears it when none is. A \
 value set here lasts until then. masc_status reports a marker on a task \
 that is not assigned to you as drift."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "task_id"

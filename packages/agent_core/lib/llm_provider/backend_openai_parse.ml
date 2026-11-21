@@ -330,6 +330,7 @@ let delta_usage_of_openai_json json : Types.delta_usage option =
       ; cache_read_input_tokens = cached_tokens
       ; cost_usd
       ; reasoning_tokens
+      ; cache_write_lifetime = None
       }
 ;;
 

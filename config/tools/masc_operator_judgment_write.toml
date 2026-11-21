@@ -3,6 +3,7 @@ description = """
 Internal operator-judge write path. Use this to store a durable operator \
 judgment for namespace supervision. Hidden from the default catalog and \
 intended for keeper/automation experiments."""
+defer_loading = true
 
 [[params]]
 name = "surface"

@@ -10,6 +10,7 @@ measurement is not verification or completion. Goal completion requires
 separate verifier proof and final human confirmation; Task approval does
 not substitute for either."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "goal_id"

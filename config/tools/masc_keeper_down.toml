@@ -4,6 +4,7 @@ Submit a durable, non-blocking Keeper shutdown. Returns an operation_id \
 immediately after admission is fenced and the ownership snapshot is \
 persisted. Repeating the call returns the existing operation state."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "name"

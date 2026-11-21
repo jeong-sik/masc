@@ -14,6 +14,7 @@ is refused. When the server cannot remove all of its files, the deletion \
 is refused, masc_my_keeper_conversation lists it with deletion "failed", \
 and asking again finishes it."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "conversation_id"

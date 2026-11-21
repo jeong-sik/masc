@@ -548,28 +548,29 @@ let attach_breakpoint_to_last_eligible_item (items : Yojson.Safe.t list) =
   loop [] (List.rev items)
 ;;
 
-(* Split [messages] into [(prefix, trailing_system_context)] ONLY when
-   [messages] ends with a non-empty contiguous suffix of [System_context]
-   messages AND zero [System_context] messages appear earlier in [prefix]. *)
+(* Split [messages] into [(prefix, trailing_volatile)] ONLY when [messages]
+   ends with a non-empty contiguous suffix of trailing volatile context
+   messages ([System_context] | [Outside_context]) AND zero such messages
+   appear earlier in [prefix]. *)
 let split_trailing_system_context (messages : message list) =
-  let is_system_context (m : message) =
+  let is_trailing_volatile (m : message) =
     match m.origin with
-    | System_context -> true
+    | System_context | Outside_context -> true
     | Conversation
-    | Outside_context
     | Historical_system_context
     | Recovery_instruction
     | Tool_result_followup
     | Agent_instruction -> false
   in
   let rec take_rev suffix = function
-    | m :: rest when is_system_context m -> take_rev (m :: suffix) rest
+    | m :: rest when is_trailing_volatile m -> take_rev (m :: suffix) rest
     | rest -> List.rev rest, suffix
   in
   let prefix, trailing = take_rev [] (List.rev messages) in
   match trailing with
   | [] -> None
-  | _ :: _ -> if List.exists is_system_context prefix then None else Some (prefix, trailing)
+  | _ :: _ ->
+    if List.exists is_trailing_volatile prefix then None else Some (prefix, trailing)
 ;;
 
 (* Output-token budget (clamp WARN included) and sampling-drop policy

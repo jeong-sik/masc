@@ -16,6 +16,7 @@ whole conversation comes in one answer. When the server stopped in the \
 middle of writing a row, the read is refused until the Keeper's next \
 turn or a new conversation cuts that row; reading again does not."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "keeper_id"

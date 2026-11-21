@@ -7,3 +7,4 @@ entries. Rows carry names and reasons, not descriptions or schemas: \
 keeper_capability_search returns those for a name or phrase. This is \
 capability introspection, not connector content lookup."""
 additional_properties = false
+defer_loading = true

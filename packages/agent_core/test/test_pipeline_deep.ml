@@ -228,6 +228,7 @@ let test_resolve_params_adjust () =
     ; preserve_thinking = None
     ; tool_choice = None
     ; extra_system_context = Some "Debug mode"
+    ; extra_outside_context = None
     ; system_prompt_override = None
     }
   in

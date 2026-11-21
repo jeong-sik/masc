@@ -6,6 +6,7 @@ broadcasts. Use when you need a snapshot of who is online and what \
 tasks are available. Call after masc_start to orient yourself. Pair with \
 masc_tasks for detailed backlog."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "if_revision"

@@ -884,6 +884,23 @@ let stop_reason_to_metric_label = function
     | UnmatchedToolCalls ) as r -> stop_reason_to_string r
 ;;
 
+type cache_write_lifetime =
+  | Provider_default
+  | One_hour
+[@@deriving show, yojson]
+
+let cache_write_lifetime_to_string (lifetime : cache_write_lifetime) =
+  match lifetime with
+  | Provider_default -> "provider_default"
+  | One_hour -> "one_hour"
+;;
+
+let cache_write_lifetime_of_string : string -> cache_write_lifetime option = function
+  | "provider_default" -> Some Provider_default
+  | "one_hour" -> Some One_hour
+  | _ -> None
+;;
+
 (** API usage from a single response *)
 (* delta_usage is declared before api_usage and inference_telemetry on purpose:
    the records share field labels, and OCaml resolves an unqualified label to
@@ -900,6 +917,8 @@ type delta_usage =
     (** Optional provider-reported cumulative charge; zero is authoritative. *)
   ; reasoning_tokens : int option [@default None]
     (** Optional provider-reported reasoning/thinking output tokens. *)
+  ; cache_write_lifetime : cache_write_lifetime option [@default None]
+    (** Optional provider-reported cache write TTL inferred from wire fields. *)
   }
 [@@deriving show, yojson]
 
@@ -919,6 +938,7 @@ let delta_usage_of_api_usage (u : api_usage) : delta_usage =
   ; cache_read_input_tokens = Some u.cache_read_input_tokens
   ; cost_usd = u.cost_usd
   ; reasoning_tokens = None
+  ; cache_write_lifetime = None
   }
 ;;
 
@@ -1229,23 +1249,6 @@ type reported_cache_usage =
   ; cache_read_input_tokens : int option
   }
 [@@deriving show, yojson]
-
-type cache_write_lifetime =
-  | Provider_default
-  | One_hour
-[@@deriving show, yojson]
-
-let cache_write_lifetime_to_string (lifetime : cache_write_lifetime) =
-  match lifetime with
-  | Provider_default -> "provider_default"
-  | One_hour -> "one_hour"
-;;
-
-let cache_write_lifetime_of_string : string -> cache_write_lifetime option = function
-  | "provider_default" -> Some Provider_default
-  | "one_hour" -> Some One_hour
-  | _ -> None
-;;
 
 type inference_telemetry =
   { system_fingerprint : string option

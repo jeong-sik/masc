@@ -438,14 +438,14 @@ let carry_from_history ~carry_window ~entries history =
          grows the array, and it is true again for a name the window dropped
          earlier -- which is what keeps a re-used name from re-entering the
          carry without the rest of it being measured. *)
-      let grows = List.compare_lengths others carried = 0 in
       let grown = (name, ordinal) :: others in
-      let carried =
-        if grows && carry_window > 0
-        then List.filter (fun (_, seen) -> ordinal - seen <= carry_window) grown
-        else grown
-      in
-      carried, ever_set, ever_rev, ordinal)
+      (* Append-only session tool loading: never evict previously loaded tools
+         mid-session. Evicting tools from the position-0 [tools] array
+         invalidated the entire prompt cache (system prompt + full conversation
+         history) on every LRU boundary. Tool sets reset cleanly on session
+         rollover / compaction. *)
+      let _ = carry_window in
+      grown, ever_set, ever_rev, ordinal)
   in
   let carried, _ever_set, ever_rev, _ordinal =
     List.fold_left

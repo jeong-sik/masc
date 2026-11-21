@@ -7,6 +7,7 @@ tasks. A task carries a completion contract only if you write one; none is \
 derived from the title. Each task gets unique ID (task-XXX). Atomic: all \
 succeed or all fail. Example: masc_batch_add_tasks({tasks: [{title: 'Task \
 A', priority: 2}, {title: 'Task B', goal_id: 'g-124'}]})"""
+defer_loading = true
 
 [[params]]
 name = "tasks"

@@ -1,5 +1,6 @@
 name = "masc_agent_timeline"
 description = "Unified timeline of an agent's activity in the currently selected workspace across tasks, messages, and joins."
+defer_loading = true
 
 [[params]]
 name = "agent_name"

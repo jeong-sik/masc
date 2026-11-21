@@ -6,6 +6,7 @@ masc_board_comment, or masc_board_vote calls. Use when looking for specific \
 topics, past discussions, or related prior work."""
 
 identity_fields = []
+defer_loading = true
 
 [[params]]
 name = "query"

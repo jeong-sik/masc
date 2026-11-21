@@ -246,6 +246,70 @@ let blocks_for_carrier assembly text =
   | Some _, Some _ | Some _, None | None, _ -> None
 ;;
 
+let block_author = function
+  | Prompt_block_id.Keeper_instructions
+  | Prompt_block_id.Goals_awaiting_proof
+  | Prompt_block_id.Constitution_amendments
+  | Prompt_block_id.Temporal_summary
+  | Prompt_block_id.Recalled_memory_status
+  | Prompt_block_id.Skill_compositions -> Keeper_context_layers.Host_state
+  | Prompt_block_id.Active_goals
+  | Prompt_block_id.Direct_input_source
+  | Prompt_block_id.Completion_authority
+  | Prompt_block_id.Memory_os_recall
+  | Prompt_block_id.Librarian_working_context
+  | Prompt_block_id.Recalled_memory
+  | Prompt_block_id.Operator_note
+  | Prompt_block_id.Arrived_stimuli
+  | Prompt_block_id.Dynamic_context -> Keeper_context_layers.Outside_text
+;;
+
+let split_outside_context assembly =
+  let existing_prefix =
+    match assembly.extra_system_context, assembly.receipt with
+    | Some carrier, Some receipt ->
+      (match receipt.spans with
+       | { kind = Unattributed Existing_prefix; offset; bytes; _ } :: _ ->
+         Some (String.sub carrier offset bytes)
+       | ({ kind = Block _ | Unattributed Separator; _ } :: _) | [] -> None)
+    | Some _, None | None, (Some _ | None) -> None
+  in
+  let host_parts = ref (Option.to_list existing_prefix) in
+  let outside_parts = ref [] in
+  let add_non_empty target text =
+    if String.trim text <> "" then target := text :: !target
+  in
+  List.iter
+    (fun (block, text) ->
+       let handled_dynamic =
+         if Prompt_block_id.equal block Prompt_block_id.Dynamic_context
+         then
+           (match assembly.dynamic_context_partition with
+            | Some rendered
+              when String.equal text (Keeper_context_layers.text rendered) ->
+              let host_rendered, outside_rendered =
+                Keeper_context_layers.partition_by_author rendered
+              in
+              add_non_empty host_parts (Keeper_context_layers.text host_rendered);
+              add_non_empty outside_parts (Keeper_context_layers.text outside_rendered);
+              true
+            | Some _ | None -> false)
+         else false
+       in
+       if not handled_dynamic
+       then
+         match block_author block with
+         | Keeper_context_layers.Host_state -> add_non_empty host_parts text
+         | Keeper_context_layers.Outside_text -> add_non_empty outside_parts text)
+    assembly.blocks;
+  let join parts =
+    match List.rev !parts with
+    | [] -> None
+    | xs -> Some (String.concat "\n\n" xs)
+  in
+  join host_parts, join outside_parts
+;;
+
 let receipt_to_json (receipt : receipt) =
   let span_to_json (span : span) =
     let kind =

@@ -39,11 +39,9 @@ let parse_sse_event event_type data_str =
            then None
            else (
              let input_tokens = u |> member "input_tokens" |> to_int in
+             let cache_breakdown = Backend_anthropic.parse_cache_creation_usage u in
              let cache_creation_input_tokens =
-               u
-               |> member "cache_creation_input_tokens"
-               |> to_int_option
-               |> Option.value ~default:0
+               Option.value cache_breakdown.total_input_tokens ~default:0
              in
              let cache_read_input_tokens =
                u
@@ -138,9 +136,8 @@ let parse_sse_event event_type data_str =
                 (an unreported cache field in that report reads as 0, the
                 api_usage convention). *)
              let output_tokens = u |> member "output_tokens" |> to_int in
-             let cache_creation_input_tokens =
-               u |> member "cache_creation_input_tokens" |> to_int_option
-             in
+             let cache_breakdown = Backend_anthropic.parse_cache_creation_usage u in
+             let cache_creation_input_tokens = cache_breakdown.total_input_tokens in
              let cache_read_input_tokens =
                u |> member "cache_read_input_tokens" |> to_int_option
              in
@@ -162,6 +159,7 @@ let parse_sse_event event_type data_str =
                ; cache_read_input_tokens
                ; cost_usd = None
                ; reasoning_tokens = None
+               ; cache_write_lifetime = cache_breakdown.inferred_write_lifetime
                })
          in
          Some (MessageDelta { stop_reason; usage })
@@ -189,6 +187,60 @@ let parse_sse_event event_type data_str =
     Some (SSEParseFailed { raw = data_str; reason = "type_error: " ^ msg })
   | Yojson.Json_error msg ->
     Some (SSEParseFailed { raw = data_str; reason = "json_error: " ^ msg })
+;;
+
+let message_start_cache_write_lifetime data_str : Types.cache_write_lifetime option =
+  try
+    let open Yojson.Safe.Util in
+    let u = Yojson.Safe.from_string data_str |> member "message" |> member "usage" in
+    if u = `Null
+    then None
+    else (Backend_anthropic.parse_cache_creation_usage u).inferred_write_lifetime
+  with
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+;;
+
+let parse_sse_events event_type data_str =
+  match parse_sse_event event_type data_str with
+  | None -> []
+  | Some (MessageStart _ as evt) ->
+    (match message_start_cache_write_lifetime data_str with
+     | None -> [ evt ]
+     | Some lifetime ->
+       [ evt
+       ; MessageDelta
+           { stop_reason = None
+           ; usage =
+               Some
+                 { Types.input_tokens = None
+                 ; output_tokens = None
+                 ; cache_creation_input_tokens = None
+                 ; cache_read_input_tokens = None
+                 ; cost_usd = None
+                 ; reasoning_tokens = None
+                 ; cache_write_lifetime = Some lifetime
+                 }
+           }
+       ])
+  | Some
+      (( ContentBlockStart _
+       | ContentBlockDelta _
+       | ContentBlockStop _
+       | MessageDelta _
+       | MessageStop
+       | Ping
+       | SSEError _
+       | NDJSONError _
+       | SSEParseFailed _
+       | NDJSONParseFailed _
+       | SSEUnknownEventType _
+       | SSEUnsupportedPart _
+       | SSEUnsupportedResponse _
+       | InlineContentReplay _
+       | ResponsesOutputItems _
+       | Connected
+       | Timeout _
+       | StreamIncomplete _ ) as evt) -> [ evt ]
 ;;
 
 (* Agent Core contract: TTFT classification — distinguishes prelude events

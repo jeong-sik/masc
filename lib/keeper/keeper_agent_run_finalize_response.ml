@@ -187,13 +187,13 @@ let finalize
     | Keeper_turn_outcome.Awaiting_gate_approval
     | Keeper_turn_outcome.No_visible_reply -> false
   in
-  (* An internal turn's wake cue and final text are not conversation.
-     The history source label is what the turn already carries, so the decision
-     comes from it and not from the text. Direct turns keep [direct_assistant]
-     and are unaffected. *)
-  let exclude_thought_from_replay =
-    Keeper_types_support.is_internal_history_source history_assistant_source
-  in
+  (* Retain internal autonomous turn conclusions, plans, and working context
+     across turns N..N+M to prevent anterograde amnesia: previously stripping
+     [Internal_assistant] turns erased every tool-less reasoning turn and every
+     trailing conclusion after tool calls, causing Keepers to repeat 10-turn-old
+     speech. Settled terminal effects still suppress duplicate visible responses
+     via [suppress_visible_response]. *)
+  let exclude_thought_from_replay = false in
   let suppression_reasons =
     Keeper_replay_checkpoint.wire_capture_response_suppression_reasons
       ~control_checkpoint

@@ -5,6 +5,7 @@ Acknowledge and requeue exactly one Board-attention quarantine. The observed \
 keeper, partition, candidate, and opaque quarantine id must all match; this \
 tool never auto-retries."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "keeper_name"

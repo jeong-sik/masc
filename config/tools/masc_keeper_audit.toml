@@ -3,6 +3,7 @@ description = """
 Audit keeper config, prompt, live runtime metadata, registry presence, \
 autoboot, and keepalive state."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "name"

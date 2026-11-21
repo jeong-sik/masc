@@ -1142,10 +1142,9 @@ let test_wiki_contents_come_from_the_pages_not_index_md () =
     let paragraph =
       Prompt.format_wiki_observation ~access:(direct_wiki_reader ()) wiki_contents |> Option.get in
     check bool "direct reply uses the same wiki renderer" true (contains ~needle:paragraph direct);
-    List.iter (fun entry ->
-      check bool "every file has its line" true
-        (contains ~needle:(Masc.Wiki_journal.render_entry entry) direct)) entries;
-    check bool "a page index.md lost still reaches the turn" true
+    check bool "page count is reported" true
+      (contains ~needle:(Printf.sprintf "Wiki files: %d." (List.length entries)) direct);
+    check bool "volatile wiki titles stay out of prompt prefix" false
       (contains ~needle:"pm-setlist.md" direct);
     check bool "page bodies stay out" false (contains ~needle:"PAGE_BODY_STAYS_OUT" direct))
 

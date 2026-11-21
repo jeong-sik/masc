@@ -963,31 +963,31 @@ let complete_stream_http
                            let events =
                              match http_codec with
                              | Provider_http_codec.Anthropic_messages ->
-                               (match Streaming.parse_sse_event event_type data with
-                                | Some (Types.MessageStart _ as evt) ->
+                               (match Streaming.parse_sse_events event_type data with
+                                | (Types.MessageStart _ :: _) as parsed ->
                                   Backend_anthropic.observe_input_transformations
                                     (Yojson.Safe.from_string data);
-                                  [ evt ], None
-                                | Some
-                                    (( Types.ContentBlockStart _
-                                     | Types.ContentBlockDelta _
-                                     | Types.ContentBlockStop _
-                                     | Types.MessageDelta _
-                                     | Types.MessageStop
-                                     | Types.Ping
-                                     | Types.SSEError _
-                                     | Types.NDJSONError _
-                                     | Types.SSEParseFailed _
-                                     | Types.NDJSONParseFailed _
-                                     | Types.SSEUnknownEventType _
-                                     | Types.SSEUnsupportedPart _
-                                     | Types.SSEUnsupportedResponse _
-                                     | Types.InlineContentReplay _ | Types.ResponsesOutputItems _
-                                     | Types.Connected
-                                     | Types.Timeout _
-                                     | Types.StreamIncomplete _) as evt) ->
-                                  [ evt ], None
-                                | None ->
+                                  parsed, None
+                                | ( ( Types.ContentBlockStart _
+                                    | Types.ContentBlockDelta _
+                                    | Types.ContentBlockStop _
+                                    | Types.MessageDelta _
+                                    | Types.MessageStop
+                                    | Types.Ping
+                                    | Types.SSEError _
+                                    | Types.NDJSONError _
+                                    | Types.SSEParseFailed _
+                                    | Types.NDJSONParseFailed _
+                                    | Types.SSEUnknownEventType _
+                                    | Types.SSEUnsupportedPart _
+                                    | Types.SSEUnsupportedResponse _
+                                    | Types.InlineContentReplay _
+                                    | Types.ResponsesOutputItems _
+                                    | Types.Connected
+                                    | Types.Timeout _
+                                    | Types.StreamIncomplete _ )
+                                    :: _ ) as parsed -> parsed, None
+                                | [] ->
                                   ( [ Types.SSEParseFailed
                                         { raw = data
                                         ; reason =

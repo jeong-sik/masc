@@ -77,6 +77,7 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
             | Keeper_context_assembly.Active_goals _ -> true) observations in
         let carried = List.filter (fun (id, _) ->
             Prompt_block_id.equal id Prompt_block_id.Completion_authority
+            || Prompt_block_id.equal id Prompt_block_id.Active_goals
             || (Option.is_none previous.proof_state
                 && Prompt_block_id.equal id Prompt_block_id.Goals_awaiting_proof)) previous.blocks in
         ( observations, carried @ blocks, dynamic_context_partition, previous.proof_state
@@ -104,12 +105,21 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
             | Runtime_execution.Masc_agent_core -> remaining in
           let awaiting, remaining = Keeper_context_layers.partition_layer Goals_awaiting_proof remaining in
           let authority, remaining = Keeper_context_layers.partition_layer Completion_authority remaining in
-          let observations =
-            observation (fun text -> Keeper_context_assembly.Active_goals text) goals in
           let block id layer = match Keeper_context_layers.text layer with
             | "" -> [] | text -> [id, Inference_utils.sanitize_text_utf8 text] in
+          (* Keep [Active_goals] OUT of [system_prompt_override] on Agent Core:
+             hoisting dynamic goals into the System prefix wasted 1 Anthropic
+             cache breakpoint and invalidated 100% of history cache whenever a
+             Goal mutated. Official clients retain their System-suffix delivery. *)
+          let observations, goal_blocks =
+            match checkpoint_owner with
+            | Runtime_execution.Masc_agent_core ->
+              [], block Prompt_block_id.Active_goals goals
+            | Runtime_execution.Official_client ->
+              observation (fun text -> Keeper_context_assembly.Active_goals text) goals, []
+          in
           let proof_state = Keeper_context_assembly.issue_proof_state awaiting in
-          let split = block Prompt_block_id.Completion_authority authority in
+          let split = goal_blocks @ block Prompt_block_id.Completion_authority authority in
           observations, split @ List.map (fun (id, text) ->
             if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
             then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining, proof_state
@@ -132,16 +142,14 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
     | Runtime_execution.Masc_agent_core, (Some _ | None) -> observations
   in
   (* Only a matching renderer partition or the prior issued assembly supplies
-     [proof_state]. A raw caller block must not acquire System authority. *)
+     [proof_state]. Keep [Goals_awaiting_proof] in the volatile end-of-request
+     blocks on both owners so proof-phase transitions never mutate the System
+     prompt or invalidate the history prefix cache. *)
   let observations, blocks =
     match proof_state with
     | Some (proof : Keeper_context_assembly.proof_state) ->
       let text = proof.proof_text in
-      (match checkpoint_owner with
-       | Runtime_execution.Masc_agent_core ->
-         observations @ [Keeper_context_assembly.Goals_awaiting_proof text], blocks
-       | Runtime_execution.Official_client ->
-         observations, (Prompt_block_id.Goals_awaiting_proof, text) :: blocks)
+      observations, (Prompt_block_id.Goals_awaiting_proof, text) :: blocks
     | None -> observations, blocks
   in
   (* The complete current norms are the same text on every request of the

@@ -3,6 +3,7 @@ description = """
 Read one wiki page by topic name or partial match. Use when \
 you need the full content of a known page. After \
 masc_wiki_list or masc_wiki_search to find the topic name."""
+defer_loading = true
 
 [[params]]
 name = "topic"

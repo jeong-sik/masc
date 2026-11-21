@@ -5,6 +5,7 @@ monitoring sections). Use fast=true for a lightweight status read; request \
 include_repository_checkouts=true only when checkout identity or freshness \
 inspection is needed."""
 additional_properties = false
+defer_loading = true
 
 [[params]]
 name = "name"

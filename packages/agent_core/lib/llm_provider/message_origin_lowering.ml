@@ -249,16 +249,16 @@ let lower policy messages =
            in
            Ok {messages = List.map snd labelled; source_indices = List.map fst labelled}
          | (message : _ Types.message_with) :: rest ->
-           let control =
-             match message.origin, message.role with
-             | Conversation, System -> Some true
-             | Conversation, (User | Assistant | Tool) | (Tool_result_followup | Outside_context), _ -> None
-             | (System_context | Agent_instruction), _ -> Some true
-             | Historical_system_context, _ -> Some false
-             | Recovery_instruction, _ -> Some (index > recovery_frontier)
-           in
-           (match control with
-            | None ->
+           (* Keep per-turn [System_context] in its trailing [User] slot and
+              drop expired [Historical_system_context] instead of hoisting
+              either into [messages[0]]: hoisting per-turn timestamps or world
+              state into [messages[0]] mutates token 0 every turn and forces
+              0% KV prefix cache hit on Qwen/vLLM endpoints. *)
+           (match message.origin, message.role with
+            | Historical_system_context, _ ->
+              collect (index + 1) retained active historical first_control rest
+            | ( (Conversation, (User | Assistant | Tool))
+              | ((System_context | Tool_result_followup | Outside_context), _) ) ->
               let native_followup =
                 policy = Initial_system_native_tools && message.origin = Tool_result_followup
               in
@@ -270,7 +270,16 @@ let lower policy messages =
               Result.bind admission (fun () ->
                 collect (index + 1) ((index, message) :: retained) active historical
                   first_control rest)
-            | Some is_active ->
+            | ( (Conversation, System)
+              | (Agent_instruction, _)
+              | (Recovery_instruction, _) ) ->
+              let is_active =
+                match message.origin with
+                | Recovery_instruction -> index > recovery_frontier
+                | Conversation | Agent_instruction
+                | System_context | Historical_system_context
+                | Tool_result_followup | Outside_context -> true
+              in
               (match message.role with
                | Assistant | Tool ->
                  Error (Invalid_control_role {message_index=index; role=message.role})

@@ -577,6 +577,7 @@ let golden : E.keeper_chat_event list =
             ; cache_read_input_tokens = Some 900
             ; cost_usd = None
             ; reasoning_tokens = None
+            ; cache_write_lifetime = None
             }
       }
   ; E.Agent_core_stream_message_stop None
@@ -1106,6 +1107,7 @@ let test_a_blank_reason_is_not_a_reason () =
          ; cache_read_input_tokens = None
          ; cost_usd = None
          ; reasoning_tokens = None
+         ; cache_write_lifetime = None
          })
   with
   | Some (Live.Stream_details { usage = Some usage; stop_reason = None; _ }) ->
@@ -1128,7 +1130,7 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
     let sparse output = Agent_core.Types.MessageDelta
         {stop_reason=None;usage=Some {input_tokens=None;output_tokens=Some output;
           cache_read_input_tokens=None;cache_creation_input_tokens=None;
-          cost_usd=None;reasoning_tokens=None}} in
+          cost_usd=None;reasoning_tokens=None;cache_write_lifetime=None}} in
     let bridge = ref (Bridge.empty_state ()) in
     let accum = Accum.create () in
     let reversed = ref [] in

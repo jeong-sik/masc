@@ -270,7 +270,10 @@ let patch_telemetry
         ; reasoning_source
         ; reasoning_prefix
         ; effective_context_window = ctx_window
-        ; cache_write_lifetime
+        ; cache_write_lifetime =
+            (match t.cache_write_lifetime with
+             | Some _ as reported -> reported
+             | None -> cache_write_lifetime)
         ; ttfrc_ms =
             (match ttfrc_ms with
              | Some _ as v -> v

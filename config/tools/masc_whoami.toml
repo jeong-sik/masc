@@ -5,3 +5,4 @@ Read who this server takes the presented credential for: the person or \
 the service, the role, and whether a personal access token or a browser \
 session presented them. The answer is JSON."""
 additional_properties = false
+defer_loading = true

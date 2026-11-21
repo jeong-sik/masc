@@ -634,8 +634,8 @@ let test_empty_success_preserves_recorded_user_turn () =
   in
   Alcotest.(check int) "recorded user input survives blank completion" 3
     (List.length patched.messages);
-  Alcotest.(check bool) "working context cleared on canonical success" true
-    (patched.working_context = None);
+  Alcotest.(check bool) "working context preserved on canonical success" true
+    (Option.is_some patched.working_context);
   Alcotest.(check (option string)) "nothing was pruned"
     None
     (prune_reason_to_string reason)
@@ -678,8 +678,8 @@ let test_empty_success_preserves_tool_execution_suffix () =
     "effectful replay survives without the trailing blank assistant"
     true
     (patched.messages = history @ List.rev (List.tl (List.rev current_turn)));
-  Alcotest.(check bool) "working context cleared on canonical success" true
-    (patched.working_context = None);
+  Alcotest.(check bool) "working context preserved on canonical success" true
+    (Option.is_some patched.working_context);
   Alcotest.(check (option string)) "blank assistant pruning is observable"
     (Some "canonical_success_replay")
     (prune_reason_to_string reason)

@@ -5,6 +5,7 @@ additional_properties = false
 # The enum mirrors Tool_agent.valid_agent_card_action_strings; the mirror is
 # checked by test_agent_card_action_mirror, which reads this file rather than
 # an OCaml literal.
+defer_loading = true
 [[params]]
 name = "action"
 type = "string"

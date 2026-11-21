@@ -302,8 +302,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # scripts/ci-run-test-suite.sh writes $RUNNER_TEMP/test-suite.log, and
+      # that script runs only on the full-suite path: the targeted path
+      # (scripts/ci-run-targeted-tests.sh) appends to CI_TEST_LOG_FILE and
+      # never creates this file. Uploading the full-suite path
+      # unconditionally made every targeted run print "No files were found
+      # with the provided path: …/test-suite.log", which reads as a lost log
+      # even when the targeted run's log is in `suite-runner-log`. The
+      # condition below keeps the annotation out of runs that never write the
+      # file, and the targeted run's log still lands as `suite-runner-log`.
       - name: Upload the full Dune suite log
-        if: always()
+        if: always() && inputs.suite == ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-suite-log
@@ -315,8 +324,10 @@ jobs:
       # The disk-band evidence ci-run-test-suite.sh streams while the suite
       # runs. It is uploaded because a runner that dies mid-suite still leaves
       # this file behind, and that run is exactly when the numbers are read.
+      # The writer is the full-suite script, so a targeted run has nothing to
+      # upload and says so with an annotation that reads like a failure.
       - name: Upload the disk evidence
-        if: always()
+        if: always() && inputs.suite == ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-suite-disk-evidence
@@ -332,9 +343,11 @@ jobs:
       # Where the same run's time went: seconds per kind of dune process
       # (compile, link, test run) and the slowest of each, summarised by
       # scripts/ci-run-test-suite.sh from dune's trace. The trace itself
-      # records the environment and is not uploaded.
+      # records the environment and is not uploaded. Same writer as the two
+      # steps above, so the same condition keeps a targeted run from
+      # annotating a missing file.
       - name: Upload the Dune suite timing
-        if: always()
+        if: always() && inputs.suite == ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-suite-timing

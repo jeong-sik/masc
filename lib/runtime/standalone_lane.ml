@@ -34,7 +34,7 @@ type obligation =
 (* Board attention candidates persist before any model call and never expire,
    so without this lane no Board post between Keepers is ever judged. HITL auto
    judge was required before this list moved here; the reason is not recorded
-   in the code (RFC every-lane-is-one-row-in-one-registry, decision d3). *)
+   in the code. *)
 let obligation = function
   | Board_attention | Hitl_auto_judge -> Required
   | Librarian | Verifier | Candle_appraiser | Librarian_memory | Workspace_memory_curator -> Optional

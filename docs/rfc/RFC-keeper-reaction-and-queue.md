@@ -226,9 +226,19 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
   - `At_tick`: 적고, 그 Keeper 의 다음 틱 경계에 깨운다(§4.3).
   - `Carry`: 적기만 한다. 다음에 열리는 턴에 실린다. 어느 까닭으로 열린 턴이든 된다.
 - 보낸 사람 종류는 만드는 쪽에서 타입으로 읽는다(§3.4). 이름의 모양이나 접두어로 가르지 않는다.
-- 큐 입력에 보낸 사람 필드를 더하지 않는다. 깨우기는 넣는 순간에만 쓰인다. 재시작 뒤에는 `Bootstrap` 이 큐를 다시 읽는다.
+- 만드는 쪽이 고른 깨우기 종류를 큐 행에 typed 필드로 적는다. 보낸 사람이 아니라 만드는 쪽의 결정을 적는 것이다.
+  - 까닭: 턴을 열지 정하는 판정도 그 행이 깨우기를 올렸는지 알아야 한다. 같은 Board 댓글이라도 사람이 쓰면 `Now`, Keeper 가 쓰면 `At_tick` 이라, payload 만으로는 가를 수 없다.
+  - 필드가 없으면 판정이 보낸 사람을 다시 추론해야 한다. 그러면 이름으로 가르는 문자열 분류가 된다. 프로세스 메모리에 두면 재시작과 깨우기 신호가 늦게 남는 경우(§5.1 `LateWake`)에 맞지 않는다.
+- 「깨우기를 올렸나」는 한 함수가 계산한다. `Now` 는 늘 참, `At_tick` 은 `arrived_at` 뒤 첫 틱 경계가 지났으면 참, `Carry` 는 늘 거짓이다. 틱이 `Off` 면 `At_tick` 도 늘 참이다.
+- 이 함수를 세 곳이 같이 부른다. 세 곳을 손으로 따로 맞추지 않는다.
+  - `keeper_cycle_decision` 의 `Board_event_pending`. 지금 `has_pending_board_activity` 는 반응·투표를 포함해 모든 pending 이벤트를 센다.
+  - `event_queue_trigger_of_stimulus`. `Task_outcome` 은 trigger 와 observation 주입 두 길로 들어온다.
+  - `pending_stimulus_remains`. `peek_when_result` 가 이미 `~ready` 를 받으니, 이 함수를 넘기면 된다.
 - `Carry` 행은 주기 경계가 된 사이클에서만 턴을 연다. 그 밖의 사이클에서 `Carry` 행만으로 턴을 열지 않는다(§5.5-3, `TurnHasCause`).
-- 주기 경계가 된 사이클은 `Carry` 가 기다리면 gate 와 상관없이 턴을 연다(§5.5-5). 지금은 gate 가 꺼진 Keeper 가 그 사이클을 Skip 하고 경계만 쓴다(§3.3). 그대로 켜면 그 Keeper 의 `Carry` 는 실리지 않는다.
+- 주기 경계가 된 사이클은 `Carry` 가 기다리면 gate 와 상관없이 턴을 연다(§5.5-5).
+  - 지금은 큐 행이 있으면 판정이 그 행을 반응형 트리거로 세어 턴을 연다. 그래서 지금은 문제가 없다.
+  - gate 가 꺼진 Keeper 가 주기 사이클을 Skip 하는 것은 큐 행이 없을 때뿐이다(§3.3).
+  - 문제는 `Carry` 를 반응형 트리거에서 빼는 순간(§5.5-3) 생긴다. 그래서 §5.5-5 는 §5.5-3 보다 먼저, 늦어도 같은 PR 에 들어가야 한다.
 - 그래서 `Carry` 가 기다리는 시간의 상한은 주기 하나와 턴 하나다(§5.2 `CarryAgeBound`). 쉬는 간격이 늘어나면(§4.4) 주기 하나는 그 Keeper 의 상한(기본 2시간)이다.
 - 입력의 뜻과 보낸 사람을 타입으로 가르는 일이라 시간 장치가 아니다.
 
@@ -289,7 +299,7 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
   - 틱 경계(설정과 Keeper 이름)
   - 쉬는 간격의 시작값과 상한(전체 기본값과 Keeper 마다의 덮어쓰기)
 - Keeper 가 정한다(비결정론): 받은 묶음에서 무엇이 낡았는지, 무엇부터 할지, 답을 어떻게 쓸지.
-- 새 durable 상태는 없다. 경계는 시계와 설정에서 계산한다. 쉬는 간격이 지금 몇 단계인지는 프로세스 메모리에만 둔다. 재시작하면 시작값부터 다시 센다. Keeper 마다의 덮어쓰기는 운영자가 선언한 값이라 `activation_mode` 처럼 저장한다.
+- 새 durable 필드는 큐 행의 깨우기 종류 하나다. 쓸 때 정하고, 읽을 때 다시 추론하지 않는다. 경계는 시계와 설정에서 계산한다. 쉬는 간격이 지금 몇 단계인지는 프로세스 메모리에만 둔다. 재시작하면 시작값부터 다시 센다. Keeper 마다의 덮어쓰기는 운영자가 선언한 값이라 `activation_mode` 처럼 저장한다.
 
 ## 5. 불변식과 TLA+
 
@@ -376,6 +386,7 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 - 예약 전달의 답할 곳 갈래(§3.2). 예약은 제 시각에 깨고, 이 RFC 는 예약의 묶음 규칙을 바꾸지 않는다.
 - Keeper 여럿과 고정 시차(`offset(k)`). Keeper 하나의 모델에서는 보이지 않는다. 같은 초에 몰리는지는 §8 에서 잰다.
 - provider 쉼(`Serve_wakeup_after_duration`). 쉬는 동안은 사람 입력도 쉼이 끝날 때까지 기다린다. 사람 입력의 상한은 쉼이 없을 때의 값이다.
+- 실패한 턴을 이어 받는 사이클(`cycle_wake = Deferred_runtime_lane`, 판정의 `deferred_runtime_lane_pending`). 입력도 주기도 아닌 세 번째 원인이다. 구현은 `TurnHasCause` 를 옮길 때 이 사이클을 막지 않는다.
 
 ## 6. Librarian 제약
 
@@ -404,7 +415,7 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 ## 8. 켜는 순서와 판정 기준
 
 **순서.**
-1. 깨우기 표를 `match` 로 바꾸고 `Now | At_tick | Carry` 를 넣는다. 기본은 모두 `Now` 다(동작 변화 없음). 같은 단계에서 §5.5 의 다섯 가지를 코드에 넣는다. `pending_stimulus_remains` 는 깨우기를 올린 행만 세고, 주기 경계가 된 사이클은 `Carry` 가 있으면 gate 와 상관없이 턴을 연다. `KeeperEventQueue.tla` 는 `KeeperReactionQueue.tla` 로 바꾼다(hard cut, §5).
+1. 깨우기 표를 `match` 로 바꾸고 `Now | At_tick | Carry` 를 넣는다. 그 값을 큐 행에 적는다(저장 형식 hard cut, 배포 안내에 Fresh state 항목을 둔다). 기본은 모두 `Now` 다(동작 변화 없음). 같은 단계에서 §5.5 의 다섯 가지를 코드에 넣는다. `pending_stimulus_remains` 는 깨우기를 올린 행만 세고, 주기 경계가 된 사이클은 `Carry` 가 있으면 gate 와 상관없이 턴을 연다. `KeeperEventQueue.tla` 는 `KeeperReactionQueue.tla` 로 바꾼다(hard cut, §5).
 2. Board 글·댓글과 작업 취소의 보낸 사람 종류를 만드는 쪽에서 등록부 일치로 읽는다(§3.4).
 3. 묶음 RFC §4.2·§4.3(봉투 묶음)을 구현한다.
 4. Librarian 컷을 설치하고 `librarian_memory` lane 을 켠다.
@@ -429,7 +440,10 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 2. `offset(k)` 를 이름에서 정하면, Keeper 이름을 바꿀 때 경계가 옮겨진다. 문제가 되는지 본다.
 3. 여러 계정 배포(`is_multi_account`)에서 틱을 어디서 세는지 정해야 한다.
 4. 큐 입력 없이 열린 턴 20번이 어디서 왔는지 아직 나누지 못했다(§2.1).
-5. Board 가 내려간 동안 다시 남긴 routing 행 때문에 `next_cycle_starts_now` 가 사이클을 바로바로 다시 여는지는 보지 않았다. 그 행이 ack 되고 다시 들어가는지에 달렸다.
+5. Board 가 내려간 동안 다시 남긴 routing 행이 사이클을 이어 여는가. 코드를 읽은 답은 「한 번은 더 열 수 있지만 이어 열지는 않는다」다(시험은 돌리지 않았다).
+   - `next_cycle_starts_now` 는 `stimuli_acked` 일 때만 큐를 본다.
+   - `stimuli_acked` 는 사이클 시작에 거짓이고, 턴이 묶음을 모두 ack 하고 남긴 선택이 없을 때만 참이 된다. 턴이 없던 사이클은 거짓을 돌려준다.
+   - §5.5-4 가 들어가면 `Carry` 인 routing 행은 아예 세지 않는다.
 
 ## 10. 하지 않는 것
 

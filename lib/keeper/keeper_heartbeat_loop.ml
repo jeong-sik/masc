@@ -192,6 +192,39 @@ type after_failure =
       ; basis : Keeper_turn_driver.wait_basis
       }
 
+(* Whether the cycle's turn served a due schedule: the turn ran to its end,
+   the cycle acked every queue entry it admitted, and one of them was a due
+   schedule. [periodic_cadence_after_cycle] reads it. The channel does not
+   matter, so a schedule that shared a reactive turn counts too. A failed,
+   checkpointed, skipped or busy cycle does not count: the periodic boundary
+   is also how soon a turn that made no progress is tried again. *)
+type due_schedule_service =
+  | Due_schedule_served
+  | No_due_schedule_served
+
+let batch_has_due_schedule (selections : Keeper_event_queue_state.pending_selection list) =
+  List.exists
+    (fun (selection : Keeper_event_queue_state.pending_selection) ->
+       Option.is_some (Keeper_event_queue.scheduled_wake selection.source))
+    selections
+;;
+
+let due_schedule_service_of_cycle ~cycle_status ~stimuli_acked ~batch_has_due_schedule =
+  match cycle_status with
+  | Turn_cycle_turn_succeeded ->
+    if stimuli_acked && batch_has_due_schedule
+    then Due_schedule_served
+    else No_due_schedule_served
+  | Turn_cycle_turn_failed
+  | Turn_cycle_without_turn
+  | Turn_cycle_lifecycle_blocked
+  | Turn_cycle_owner_rejected
+  | Turn_cycle_interrupted
+  | Turn_cycle_crashed
+  | Turn_cycle_busy _
+  | Turn_cycle_rested -> No_due_schedule_served
+;;
+
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
@@ -201,6 +234,8 @@ type keepalive_turn_outcome = {
   after_failure : after_failure option;
       (** What the cycle's turn failure or provider rest leaves the next
           cycle; [None] keeps the plain cadence. *)
+  due_schedule : due_schedule_service;
+      (** Whether the cycle's turn served a due schedule. *)
 }
 
 (* The loop-local hint is the in-process view of
@@ -578,6 +613,7 @@ let interrupted_cycle_outcome ~(meta : keeper_meta) =
   ; cycle_status = Turn_cycle_interrupted
   ; stimuli_acked = false
   ; after_failure = None
+  ; due_schedule = No_due_schedule_served
   }
 ;;
 
@@ -592,6 +628,7 @@ let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) exn =
     ; cycle_status = Turn_cycle_crashed
     ; stimuli_acked = false
     ; after_failure = None
+    ; due_schedule = No_due_schedule_served
     })
 ;;
 
@@ -952,12 +989,19 @@ let cycle_wake ~periodic_due ~deferred_runtime_lane =
 ;;
 
 (* Wake labels choose why this turn runs; cadence accounting answers whether
-   the already-due boundary was served. A deferred suffix wins the label but
-   must not leave the same periodic boundary due for the next cycle. *)
-let periodic_cadence_after_cycle ~periodic_due ~now cadence =
-  if periodic_due
-  then Keeper_keepalive_signal.consume_periodic ~now
-  else cadence
+   the periodic boundary was served. A deferred suffix wins the label but
+   must not leave the same periodic boundary due for the next cycle.
+
+   A turn that served a due schedule also serves the boundary, before it
+   falls due. That turn is work the Keeper asked for, so the next periodic
+   turn comes one interval after it, and a Keeper with a recurring
+   self-schedule runs on one clock instead of two. A wake hint serves
+   nothing, so it still cannot starve the due tick. *)
+let periodic_cadence_after_cycle ~periodic_due ~due_schedule ~now cadence =
+  match periodic_due, due_schedule with
+  | true, (Due_schedule_served | No_due_schedule_served)
+  | false, Due_schedule_served -> Keeper_keepalive_signal.consume_periodic ~now
+  | false, No_due_schedule_served -> cadence
 ;;
 
 (* A cycle that raises leaves no outcome to settle the deferred lane from.
@@ -1002,6 +1046,7 @@ let run_keepalive_unified_turn
     ; cycle_status = Turn_cycle_without_turn
     ; stimuli_acked = false
     ; after_failure = None
+    ; due_schedule = No_due_schedule_served
     })
   else
     match
@@ -1434,26 +1479,35 @@ let run_keepalive_unified_turn
                  checkpoint_source_may_ack
                    selection.Keeper_event_queue_state.source.payload)
            | Batch_no_action -> ());
+      let cycle_status =
+        if !event_queue_failed
+        then Turn_cycle_crashed
+        else
+          match !cycle_outcome_ref with
+          | Some (Cycle.Rested _) -> Turn_cycle_rested
+          | Some
+              ( Cycle.Completed _
+              | Cycle.Checkpointed _
+              | Cycle.Input_required _ ) -> Turn_cycle_turn_succeeded
+          | Some (Cycle.Failed _) -> Turn_cycle_turn_failed
+          (* The phase gate ended the cycle before a turn ran. *)
+          | Some (Cycle.Cancelled _ | Cycle.Skipped _)
+          | None -> Turn_cycle_without_turn
+      in
       { meta = meta_after_cycle
-      ; cycle_status =
-          (if !event_queue_failed
-           then Turn_cycle_crashed
-           else
-             match !cycle_outcome_ref with
-             | Some (Cycle.Rested _) -> Turn_cycle_rested
-             | Some
-                 ( Cycle.Completed _
-                 | Cycle.Checkpointed _
-                 | Cycle.Input_required _ ) -> Turn_cycle_turn_succeeded
-             | Some (Cycle.Failed _) -> Turn_cycle_turn_failed
-             (* The phase gate ended the cycle before a turn ran. *)
-             | Some (Cycle.Cancelled _ | Cycle.Skipped _)
-             | None -> Turn_cycle_without_turn)
+      ; cycle_status
       ; stimuli_acked = !stimuli_acked
       ; after_failure =
           after_failure_of_cycle_outcome
             ~now:(Time_compat.now ())
             !cycle_outcome_ref
+      ; due_schedule =
+          due_schedule_service_of_cycle
+            ~cycle_status
+            ~stimuli_acked:!stimuli_acked
+            ~batch_has_due_schedule:
+              (batch_has_due_schedule
+                 (Keeper_heartbeat_source_batch.selections !source_batch))
       }
     with
     | exn when Keeper_registry_types.is_operator_interrupt exn ->
@@ -1490,6 +1544,7 @@ let run_keepalive_unified_turn
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
     ; after_failure = None
+    ; due_schedule = No_due_schedule_served
     }
   | Ok
       (`Busy
@@ -1500,6 +1555,7 @@ let run_keepalive_unified_turn
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
     ; after_failure = None
+    ; due_schedule = No_due_schedule_served
     }
   | Error error ->
     let cycle_status = owner_turn_rejection_cycle_status error in
@@ -1517,6 +1573,7 @@ let run_keepalive_unified_turn
     ; cycle_status
     ; stimuli_acked = false
     ; after_failure = None
+    ; due_schedule = No_due_schedule_served
     }
 ;;
 
@@ -1765,6 +1822,7 @@ let run_heartbeat_loop
             ; cycle_status = Turn_cycle_lifecycle_blocked
             ; stimuli_acked = false
             ; after_failure = None
+            ; due_schedule = No_due_schedule_served
             })
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
@@ -1917,6 +1975,7 @@ let run_heartbeat_loop
         periodic_cadence :=
           periodic_cadence_after_cycle
             ~periodic_due
+            ~due_schedule:turn_outcome.due_schedule
             ~now:(cadence_now ())
             !periodic_cadence;
         (match turn_outcome.after_failure with

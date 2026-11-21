@@ -17,6 +17,7 @@ let make_routes_with_transport ~port:_ ~host:_ ~sw ~transport_sw ~clock =
   |> Server_oauth_http.add_routes
   |> Server_keeper_oauth_http.add_routes ~clock
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
+  |> Server_routes_http_browser_surface.add_routes
   |> Server_routes_http_routes_provider_runs.add_routes ~sw
   |> Server_routes_http_routes_verification.add_routes
   |> Server_routes_http_routes_attribution.add_routes

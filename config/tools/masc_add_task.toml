@@ -44,7 +44,7 @@ unscoped (goalless); pass goal_id explicitly to link it to a goal."""
 name = "predecessor_task_id"
 type = "string"
 description = """
-Optional re-run provenance link (RFC-0323): the terminal (done/cancelled) \
+Optional re-run provenance link: the terminal (done/cancelled) \
 task this one re-runs. Rejected if the id is unknown or the predecessor is \
 not terminal. To re-run completed work, create a new task with this link \
 instead of re-claiming the old one."""

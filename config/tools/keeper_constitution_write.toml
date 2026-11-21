@@ -28,7 +28,7 @@ unique_items = true
 description = """
 Article ids this norm supersedes, each named once. Absent or empty writes a
 plain norm; naming held articles retires them and records this norm as their
-replacement (RFC-0504).
+replacement.
 """
 
 [[params]]

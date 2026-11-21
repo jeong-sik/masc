@@ -1378,7 +1378,7 @@
  (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc_test_deps))
 
-(include stanzas/test_keeper_event_queue_state_v2_librarian_queue_signal.inc)
+(include stanzas/test_keeper_event_queue_state_v2_working_context_signal.inc)
 
 (test
  (name test_keeper_event_queue_codec_pool)
@@ -7049,7 +7049,7 @@
 (include stanzas/test_keeper_continuity_request_view_turn_boundaries.inc)
 
 (include stanzas/test_keeper_librarian_continuity.inc)
-(include stanzas/test_keeper_librarian_context_queue_signal.inc)
+(include stanzas/test_keeper_working_context_signal_flood.inc)
 
 (include stanzas/test_keeper_continuity_cancel_recovery.inc)
 

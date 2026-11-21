@@ -30,7 +30,7 @@ val handle_provider_input_manifest_get :
 val handle_cache_outcome_get :
   Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Answer [GET /api/v1/keepers/<name>/cache-outcome?turn_ref=...] with
-    {!Keeper_cache_outcome.to_json}: why the turn's first request read or
+    {!Keeper_cache_outcome_reading.to_json}: why the turn's first request read or
     rewrote the prompt cache. The name and [turn_ref] are checked as for the
     provider-input doors, and a Keeper without a readable creation time
     answers 400. A cost ledger that cannot be read answers 503.

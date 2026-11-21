@@ -13,24 +13,6 @@
     the next on its first runtime again: that request can still read what the
     first runtime cached a turn earlier. *)
 
-val schema : string
-(** [masc.keeper-cache-outcome.v1]. *)
-
-(** One request as its raw cost row records it. *)
-type request =
-  { turn_ref : Ids.Turn_ref.t
-  ; runtime_id : string
-  ; scope : Runtime_usage_scope.t
-  ; ended_at : float
-      (** The row's [timestamp]. The ledger writes whole seconds, so the
-          request ended within the second that follows. *)
-  ; latency_ms : int option
-  ; cache_read_tokens : int option
-  ; cache_creation_tokens : int option
-  ; lifetime : Agent_core.Types.cache_write_lifetime option
-      (** [None] for a row written before rows recorded the lifetime. *)
-  }
-
 (** {1 Finding the two requests} *)
 
 type walk
@@ -65,98 +47,10 @@ val reads_before : walk -> float -> bool
     change what the walk finds. A reader stops opening older day files when
     it is [false]. *)
 
-(** {1 The outcome} *)
+(** {1 The outcome}
 
-type lifetime_check =
-  | Outlived
-      (** The later request started more than the lifetime after the
-          earlier one, at every start time the two rows allow. *)
-  | Within
-      (** It started no later than the lifetime after it, at every start time
-          the two rows allow. *)
-  | Undecided
-      (** The rows give each start to the second, and the lifetime falls
-          inside that uncertainty. *)
-
-(** Why the length of a provider's default lifetime is not known. *)
-type default_unknown =
-  | Default_undeclared
-      (** The catalog row of the runtime's provider declares no length. *)
-  | Runtime_inactive
-      (** The runtime is not active in the running configuration, so which
-          provider answered it is not known. *)
-
-type lifetime =
-  | Lifetime_unrecorded
-      (** The earlier row names no lifetime: rows did not record one yet. *)
-  | Provider_default_unknown of default_unknown
-      (** The earlier request used its provider's default lifetime, whose
-          length is not known. *)
-  | Lifetime_declared of
-      { lifetime_s : float
-      ; check : lifetime_check
-      }
-
-type idle =
-  | Start_unrecorded
-      (** One of the two rows has no latency, so its start is unknown. *)
-  | Idle of
-      { idle_s : float
-          (** From the earlier request's start to this one's, each taken as
-              the row's whole-second end minus its latency. *)
-      ; lifetime : lifetime
-      }
-
-type not_compared =
-  | Earlier_turn_not_settled
-      (** The earlier request's turn settled no spend, so its snapshot may
-          hold a later request that failed rather than this one. *)
-  | Snapshot_unread of
-      { turn_ref : Ids.Turn_ref.t
-      ; detail : string
-      }
-  | Snapshot_of_other_runtime of
-      { turn_ref : Ids.Turn_ref.t
-      ; runtime_profile : string
-      }
-      (** The turn's snapshot holds its last request, which another runtime
-          answered. *)
-
-type prefix =
-  | Compared of
-      { system_changed : bool
-      ; tools_changed : bool
-      ; messages : Keeper_projection_change.message_change
-      }
-      (** The two turns' snapshots compared. A snapshot holds its turn's last
-          request, so a change inside this turn shows here as well. Only an
-          [Appended] pair with neither flag set says the prefix stayed. *)
-  | Not_compared of not_compared
-
-type earlier =
-  | No_earlier_request of { horizon_s : float }
-      (** The runtime started no request in that many seconds before this
-          one. *)
-  | Earlier of
-      { request : request
-      ; idle : idle
-      ; prefix : prefix
-      }
-
-type t =
-  | Turn_not_in_ledger
-      (** The ledger holds no raw row of the turn. *)
-  | Ledger_row_unreadable of string
-  | Not_per_request of request
-      (** The turn's first row counts an official-client turn or
-          conversation, not one provider request. *)
-  | First_request of
-      { request : request
-      ; other_runtime_since : string option
-          (** The newest other runtime the Keeper used between the earlier
-              request and this one. *)
-      ; earlier : earlier
-      }
+    The answer's types and JSON are {!Keeper_cache_outcome_reading}, which
+    the TUI links too. *)
 
 (** The parts of a snapshot the comparison reads. *)
 type snapshot_view =
@@ -166,41 +60,31 @@ type snapshot_view =
 
 val snapshot_view : Keeper_provider_input_snapshot.manifest -> snapshot_view
 
-val lifetime_check : idle_s:float -> lifetime_s:float -> lifetime_check
+val lifetime_check : idle_s:float -> lifetime_s:float -> Keeper_cache_outcome_reading.lifetime_check
 
 val idle :
-  provider_default_s:(string -> (float, default_unknown) result) ->
-  earlier:request ->
-  current:request ->
-  idle
+  provider_default_s:(string -> (float, Keeper_cache_outcome_reading.default_unknown) result) ->
+  earlier:Keeper_cache_outcome_reading.request ->
+  current:Keeper_cache_outcome_reading.request ->
+  Keeper_cache_outcome_reading.idle
 (** [provider_default_s runtime_id] is the default lifetime the catalog
     declares for the provider that answers [runtime_id]. *)
 
 val compare_prefix :
-  earlier:request ->
+  earlier:Keeper_cache_outcome_reading.request ->
   earlier_snapshot:(snapshot_view, string) result ->
-  current:request ->
+  current:Keeper_cache_outcome_reading.request ->
   current_snapshot:(snapshot_view, string) result ->
-  prefix
-
-type reading =
-  { keeper : string
-  ; turn_ref : Ids.Turn_ref.t
-  ; unattributed_rows : int
-      (** Rows the walk passed over without knowing whose they were. *)
-  ; outcome : t
-  }
+  Keeper_cache_outcome_reading.prefix
 
 val reading_of_walk :
   walk ->
-  provider_default_s:(string -> (float, default_unknown) result) ->
+  provider_default_s:(string -> (float, Keeper_cache_outcome_reading.default_unknown) result) ->
   current_snapshot:(snapshot_view, string) result ->
   earlier_snapshot:(Ids.Turn_ref.t -> (snapshot_view, string) result) ->
-  reading
+  Keeper_cache_outcome_reading.reading
 (** Ends the walk where it stands and builds the outcome. [earlier_snapshot]
     is read only when an earlier request was found in a settled turn. *)
-
-val to_json : reading -> Yojson.Safe.t
 
 (** {1 Reading} *)
 
@@ -213,8 +97,8 @@ val read :
   keeper:string ->
   turn_ref:Ids.Turn_ref.t ->
   born_at:float ->
-  provider_default_s:(string -> (float, default_unknown) result) ->
-  (reading, read_error) result
+  provider_default_s:(string -> (float, Keeper_cache_outcome_reading.default_unknown) result) ->
+  (Keeper_cache_outcome_reading.reading, read_error) result
 (** Walks the cost ledger from the day the turn's snapshot was written, or
     from today when it has none, back at most to the day the Keeper was
     created ([born_at]). *)

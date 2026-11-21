@@ -176,7 +176,7 @@ let keeper_born_at ~config ~keeper =
    provider, which is not the same as a provider that declares nothing. *)
 let provider_default_cache_ttl_s runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | None -> Error Keeper_cache_outcome.Runtime_inactive
+  | None -> Error Keeper_cache_outcome_reading.Runtime_inactive
   | Some runtime ->
     (match
        Llm_provider.Catalog_snapshot.default_cache_ttl_s
@@ -184,7 +184,7 @@ let provider_default_cache_ttl_s runtime_id =
          ~provider_id:(Runtime_schema.catalog_provider_id runtime.Runtime_instance.provider)
      with
      | Some lifetime_s -> Ok lifetime_s
-     | None -> Error Keeper_cache_outcome.Default_undeclared)
+     | None -> Error Keeper_cache_outcome_reading.Default_undeclared)
 ;;
 
 let handle_cache_outcome_get state req reqd name =
@@ -203,7 +203,7 @@ let handle_cache_outcome_get state req reqd name =
              ~turn_ref
              ~born_at
              ~provider_default_s:provider_default_cache_ttl_s
-           |> Result.map Keeper_cache_outcome.to_json)
+           |> Result.map Keeper_cache_outcome_reading.to_json)
         (keeper_born_at ~config ~keeper))
     ~error_status:(fun (Keeper_cache_outcome.Ledger_unreadable _) -> `Service_unavailable)
     ~error_to_string:Keeper_cache_outcome.read_error_to_string

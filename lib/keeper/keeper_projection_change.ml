@@ -234,46 +234,11 @@ type previous_request =
   | Request_not_digested
   | Request_digested of request_digests
 
-type message_change =
-  | Appended of
-      { kept : int
-      ; added : int
-      }
-  | Tail_removed of
-      { kept : int
-      ; removed : int
-      }
-  | Block_dropped of
-      { at : int
-      ; dropped : int
-      ; kept_after : int
-      ; added : int
-      }
-  | Rewritten_in_place of
-      { first_index : int
-      ; last_index : int
-      ; rewritten : int
-      ; previous_bytes : int
-      ; current_bytes : int
-      ; first_previous_role : Agent_core.Types.role
-      ; first_current_role : Agent_core.Types.role
-      ; added : int
-      }
-  | Diverged_at of
-      { index : int
-      ; previous_role : Agent_core.Types.role
-      ; previous_bytes : int
-      ; current_role : Agent_core.Types.role
-      ; current_bytes : int
-      ; previous_count : int
-      ; current_count : int
-      }
-
 type change =
   | First_request_of_turn
   | Previous_request_not_digested
   | Follows_previous_request of
-      { messages : message_change
+      { messages : Message_list_change.t
       ; tools_changed : bool
       }
 
@@ -345,7 +310,7 @@ let rewritten_in_place ~previous ~current ~from =
     if last_index < previous_count - 1
     then
       Some
-        (Rewritten_in_place
+        (Message_list_change.Rewritten_in_place
            { first_index = from
            ; last_index
            ; rewritten
@@ -363,9 +328,13 @@ let classify_messages ~previous ~current =
   let current_count = Array.length current in
   let common = common_prefix_length ~previous ~current in
   if common = previous_count
-  then Appended { kept = previous_count; added = current_count - previous_count }
+  then
+    Message_list_change.Appended
+      { kept = previous_count; added = current_count - previous_count }
   else if common = current_count
-  then Tail_removed { kept = current_count; removed = previous_count - current_count }
+  then
+    Message_list_change.Tail_removed
+      { kept = current_count; removed = previous_count - current_count }
   else (
     (* Both lists hold a message at [common] and the two differ. A block was
        dropped at [common] when a suffix of what followed it in the previous
@@ -378,7 +347,7 @@ let classify_messages ~previous ~current =
     in
     if kept_after > 0
     then
-      Block_dropped
+      Message_list_change.Block_dropped
         { at = common
         ; dropped = Array.length previous_rest - kept_after
         ; kept_after
@@ -388,7 +357,7 @@ let classify_messages ~previous ~current =
       match rewritten_in_place ~previous ~current ~from:common with
       | Some change -> change
       | None ->
-        Diverged_at
+        Message_list_change.Diverged_at
           { index = common
           ; previous_role = previous.(common).role
           ; previous_bytes = previous.(common).bytes
@@ -450,61 +419,6 @@ let digests_of_parts (parts : Keeper_provider_input_snapshot.part list) =
   collect [] [] parts
 ;;
 
-let message_change_to_json = function
-  | Appended { kept; added } ->
-    `Assoc [ "kind", `String "appended"; "kept", `Int kept; "added", `Int added ]
-  | Tail_removed { kept; removed } ->
-    `Assoc [ "kind", `String "tail_removed"; "kept", `Int kept; "removed", `Int removed ]
-  | Block_dropped { at; dropped; kept_after; added } ->
-    `Assoc
-      [ "kind", `String "block_dropped"
-      ; "at", `Int at
-      ; "dropped", `Int dropped
-      ; "kept_after", `Int kept_after
-      ; "added", `Int added
-      ]
-  | Rewritten_in_place
-      { first_index
-      ; last_index
-      ; rewritten
-      ; previous_bytes
-      ; current_bytes
-      ; first_previous_role
-      ; first_current_role
-      ; added
-      } ->
-    `Assoc
-      [ "kind", `String "rewritten_in_place"
-      ; "first_index", `Int first_index
-      ; "last_index", `Int last_index
-      ; "rewritten", `Int rewritten
-      ; "previous_bytes", `Int previous_bytes
-      ; "current_bytes", `Int current_bytes
-      ; "first_previous_role", `String (Agent_core.Types.role_to_string first_previous_role)
-      ; "first_current_role", `String (Agent_core.Types.role_to_string first_current_role)
-      ; "added", `Int added
-      ]
-  | Diverged_at
-      { index
-      ; previous_role
-      ; previous_bytes
-      ; current_role
-      ; current_bytes
-      ; previous_count
-      ; current_count
-      } ->
-    `Assoc
-      [ "kind", `String "diverged_at"
-      ; "index", `Int index
-      ; "previous_role", `String (Agent_core.Types.role_to_string previous_role)
-      ; "previous_bytes", `Int previous_bytes
-      ; "current_role", `String (Agent_core.Types.role_to_string current_role)
-      ; "current_bytes", `Int current_bytes
-      ; "previous_count", `Int previous_count
-      ; "current_count", `Int current_count
-      ]
-;;
-
 let change_to_json = function
   | First_request_of_turn -> `Assoc [ "kind", `String "first_request_of_turn" ]
   | Previous_request_not_digested ->
@@ -512,7 +426,7 @@ let change_to_json = function
   | Follows_previous_request { messages; tools_changed } ->
     `Assoc
       [ "kind", `String "follows_previous_request"
-      ; "messages", message_change_to_json messages
+      ; "messages", Message_list_change.to_json messages
       ; "tools_changed", `Bool tools_changed
       ]
 ;;

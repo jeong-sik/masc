@@ -6613,8 +6613,8 @@
  (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry unix))
 
 (test
- (name test_workspace_memory_log_reader)
- (modules test_workspace_memory_log_reader)
+ (name test_workspace_memory_log)
+ (modules test_workspace_memory_log)
  (libraries alcotest masc masc.fs_compat unix))
 
 (test

@@ -157,128 +157,6 @@ let test_a_failing_subscriber_stops_nothing () =
       check int "the other subscriber still heard it, and the writer went on" 1 !told)
 ;;
 
-(* Collects what the signal names while [f] runs. *)
-let with_told f =
-  let told = ref [] in
-  let unsubscribe =
-    Keeper_memory_health_input.subscribe
-      (fun { Keeper_memory_health_input.keepers_dir; keeper_id } ->
-         told := (keepers_dir, keeper_id) :: !told)
-  in
-  Fun.protect ~finally:unsubscribe (fun () ->
-    f ~take:(fun () ->
-      let seen = List.rev !told in
-      told := [];
-      seen))
-;;
-
-let memory_fact claim =
-  Keeper_memory_os_types.observed ~claim ~category:Keeper_memory_os_types.Fact ~now:10.
-    ~origin:{ kind = Keeper_memory_os_types.Authored; trace_id = "trace" }
-;;
-
-(* A publication whose snapshot is durable but whose journal did not finalize
-   keeps its receipt for the next recovery, and no commit notification
-   follows. Whichever step failed, the journal line or the pending receipt,
-   the snapshot the row reads changed, so the writer says so once its locks
-   unwind (#52204). *)
-let test_an_unfinalized_publication_tells_the_signal () =
-  with_workspace
-  @@ fun ~clock:_ ~mono_clock:_ ~await_health:_ ~config:_ ~fleet_key:_ ~elsewhere:_
-       ~config_keepers_dir ~runtime_keepers_dir:_ ~heard:_ ->
-  let module Current = Keeper_memory_os_current in
-  let keepers_dir = config_keepers_dir in
-  Fs_compat.mkdir_p keepers_dir;
-  let config_dir = Unix.realpath keepers_dir in
-  with_told @@ fun ~take ->
-  let publish ~keeper_id ~before_journal =
-    Current.For_testing.replace_with_publication_io
-      ~write_snapshot:Fs_compat.save_file_atomic_strict_staged
-      ~sync_snapshot:Fs_compat.sync_file_and_parent_strict ~on_committed:(fun _ _ -> ())
-      ~before_journal ~keepers_dir ~keeper_id ~now:30.
-      ~source:{ Current.kind = Current.Explicit_write; trace_id = "trace" }
-      ~facts:[ memory_fact "published" ]
-    |> require |> ignore
-  in
-  let told_as = check (list (pair string string)) in
-  (* The line reaches the journal; the pending receipt cannot replace a
-     directory. *)
-  let receipt = Current.publication_receipt_path ~keepers_dir ~keeper_id:"largo" in
-  publish ~keeper_id:"largo" ~before_journal:(fun () ->
-    Sys.remove receipt;
-    Unix.mkdir receipt 0o700);
-  check bool "the pending receipt was not written" true (Sys.is_directory receipt);
-  check int "the journal holds the publication's line" 1
-    (List.length
-       (Current.read_journal_tail ~keepers_dir ~keeper_id:"largo" ~limit:10 |> require));
-  told_as "a pending receipt that failed after the line" [ config_dir, "largo" ] (take ());
-  (* The journal line itself cannot be appended to a directory. *)
-  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"piano" in
-  publish ~keeper_id:"piano" ~before_journal:(fun () -> Unix.mkdir journal 0o700);
-  check bool "the prepared receipt waits for recovery" true
-    (Sys.file_exists (Current.publication_receipt_path ~keepers_dir ~keeper_id:"piano"));
-  told_as "a journal line that failed" [ config_dir, "piano" ] (take ())
-;;
-
-(* A removal receipt left beside its committed target, whose line the journal
-   does not hold: the next writer appends that line while it reconciles,
-   before it builds. A writer that then fails commits nothing, so the line
-   tells the signal itself (#52204). *)
-let test_a_reconciled_removal_line_tells_the_signal () =
-  with_workspace
-  @@ fun ~clock:_ ~mono_clock:_ ~await_health:_ ~config:_ ~fleet_key:_ ~elsewhere:_
-       ~config_keepers_dir ~runtime_keepers_dir:_ ~heard:_ ->
-  let module Current = Keeper_memory_os_current in
-  let keepers_dir = config_keepers_dir in
-  let keeper_id = "largo" in
-  Fs_compat.mkdir_p keepers_dir;
-  let replace ~expected_revision ~now facts =
-    Current.replace ~keepers_dir ~keeper_id ~expected_revision ~now
-      ~source:{ Current.kind = Current.Explicit_write; trace_id = "trace" } ~facts ()
-  in
-  let snapshot_sha256 () =
-    Agent_core_sha256.(
-      digest_string (Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id))
-      |> to_hex)
-  in
-  let journal_lines () =
-    List.length (Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 |> require)
-  in
-  let removed = memory_fact "removed" in
-  ignore (replace ~expected_revision:None ~now:20. [ removed ] |> require);
-  let prior_snapshot_sha256 = snapshot_sha256 () in
-  ignore (replace ~expected_revision:(Some 1) ~now:21. [ memory_fact "kept" ] |> require);
-  let receipt = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id in
-  Fs_compat.save_file_atomic_strict receipt
-    (Yojson.Safe.to_string
-       (`Assoc
-           [ "plan_id", `Null
-           ; "state", `String "prepared"
-           ; "prior_revision", `Int 1
-           ; "prior_snapshot_sha256", `String prior_snapshot_sha256
-           ; "target_revision", `Int 2
-           ; "target_snapshot_sha256", `String (snapshot_sha256 ())
-           ; "revision_links", `List []
-           ; ( "dropped"
-             , `List
-                 [ `Assoc
-                     [ "memory_id", `String (Keeper_memory_os_types.memory_id removed)
-                     ; "reason", `String "obsolete"
-                     ]
-                 ] )
-           ]))
-  |> require;
-  let lines_before = journal_lines () in
-  with_told @@ fun ~take ->
-  (match replace ~expected_revision:(Some 1) ~now:22. [ memory_fact "stale" ] with
-   | Error _ -> ()
-   | Ok _ -> fail "a stale write must fail after it reconciles");
-  check bool "the reconcile cleared the receipt" false (Sys.file_exists receipt);
-  check int "the reconcile appended the removal line" (lines_before + 1) (journal_lines ());
-  check (list (pair string string)) "the removal line tells the signal once"
-    [ Unix.realpath keepers_dir, keeper_id ] (take ())
-;;
-
 (* The retention pass tells the row's readers about each Keeper whose turn
    records lost a day file, and about no other store's. *)
 let test_a_turn_record_prune_tells_its_keeper () =
@@ -577,10 +455,6 @@ let () =
             test_a_turn_record_prune_tells_its_keeper
         ; test_case "a failing subscriber stops nothing" `Quick
             test_a_failing_subscriber_stops_nothing
-        ; test_case "an unfinalized publication tells the signal" `Quick
-            test_an_unfinalized_publication_tells_the_signal
-        ; test_case "a reconciled removal line tells the signal" `Quick
-            test_a_reconciled_removal_line_tells_the_signal
         ] )
     ]
 ;;

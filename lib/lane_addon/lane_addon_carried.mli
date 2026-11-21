@@ -7,12 +7,12 @@
     and the packages it carries come from one commit, so they speak the same
     Exact protocol. *)
 
-type id = Keeper_librarian | Workspace_curator | Candle_appraiser | Hitl_auto_judge
+type id = Workspace_curator | Candle_appraiser | Hitl_auto_judge
 
 val all : id list
 
 val name : id -> string
-(** The package id its manifest declares, such as [keeper-librarian]. *)
+(** The package id its manifest declares, such as [hitl-auto-judge]. *)
 
 val of_name : string -> id option
 

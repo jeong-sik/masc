@@ -386,10 +386,7 @@ let redact_server_paths text =
     else if is_token_boundary text i && (text.[i] = '/' || text.[i] = '.')
     then (
       let stop = scan_path_end text i in
-      (* Only an absolute token is a server path. `has_masc_segment` alone also
-         matched workspace-relative `.masc/keeper_chat/...` coordinates, which
-         an operator needs in order to find the file that failed. *)
-      if text.[i] = '/' && has_masc_segment text i stop
+      if has_masc_segment text i stop
       then (
         Buffer.add_string buf "[REDACTED_PATH]";
         loop stop)

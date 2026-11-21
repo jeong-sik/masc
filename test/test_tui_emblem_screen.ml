@@ -234,11 +234,11 @@ let test_about_facts_localized () =
   check string "korean read count"
     "테마: nord  \xc2\xb7  키퍼: 3명"
     (Screen.about_facts ~ko:true ~theme:"nord" (Screen.Keepers_read 3));
-  check string "korean unreadable"
-    "테마: 기본  \xc2\xb7  키퍼: 읽기 불가"
+  check string "korean unreadable is the failed mark"
+    "테마: 기본  \xc2\xb7  키퍼: \xe2\x9c\x95"
     (Screen.about_facts ~ko:true ~theme:"기본" Screen.Keepers_unreadable);
-  check string "korean unread"
-    "테마: 기본  \xc2\xb7  키퍼: 불러오기 전"
+  check string "korean unread is the unread mark"
+    "테마: 기본  \xc2\xb7  키퍼: \xe2\x97\x8c"
     (Screen.about_facts ~ko:true ~theme:"기본" Screen.Keepers_unread)
 
 let () =

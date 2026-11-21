@@ -1540,10 +1540,12 @@ let test_restart_forgets_widths_and_size_facts () =
       (ended value 1 (No_answer { question = wider; slots = sized Input_too_large }))
   in
   check string "a refusal of four units narrows" "2 units" (asked_text narrowed);
+  check string "and is how the last ask ended" "lane, wider, none silent" (last_read_text narrowed);
   replace_turn_log place ~id:other_log ~until:32;
   let restarted, answer = restart place narrowed ~observed:other_log in
   check string "the restart" "done" (act_text answer);
   check string "reads every unit again" "all" (asked_text restarted);
+  check string "and forgets how the last ask ended" "none" (last_read_text restarted);
   let place, value = asking_place () in
   let alone =
     Machine.decide place value ~at:300.0

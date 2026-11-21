@@ -212,13 +212,6 @@ let settled t store ~after (committed : Store.committed) =
    item already passed (§7.4 「읽은 자리가 움직였다」). *)
 let moved t ~narrowing = { t with narrowing; bottom = Librarian_bottom.empty }
 
-(* [last] is what the commit sets once it is on disk: [Committed], or the
-   lane's result an item skipped alone ended in. *)
-let after_commit place t ~at store ~narrowing ?(last = Last.Committed) committed =
-  settled t store committed ~after:(fun store ->
-    next_ask place { (moved t ~narrowing) with last_read = Some last } ~at store)
-;;
-
 (* A skip changes no snapshot, so it ends with its line on disk or with no
    line, and no line stops the store (§9.2 「건너뛰기 규칙」). [last] is what
    the line sets once it is on disk, as for a commit. *)
@@ -751,7 +744,9 @@ let restart_from place store ~observed =
 
 (* §12.4: a refusal leaves the value as it is, so an ask that is out goes
    on. An accepted restart cancels it, and the next ask reads the file from
-   its first line with no width or size fact kept (§7.6). *)
+   its first line with no width or size fact kept (§7.6) and without how the
+   last ask ended, which was about where reading stood before (§9.2, §12.2
+   E3). *)
 let restart_reading place t ~at ~observed =
   match t.state with
   | Stopped stop -> t, Not_done (Act_unavailable (Store_stopped stop))
@@ -764,7 +759,10 @@ let restart_reading place t ~at ~observed =
      | Ok (hole, start) ->
        (match Store.commit_restart store ~at ~hole ~start with
         | Ok { store; line = (_ : Librarian_log.commit) } ->
-          next_ask place (moved t ~narrowing:Librarian_width.empty) ~at store, Done
+          ( next_ask place
+              { (moved t ~narrowing:Librarian_width.empty) with last_read = None }
+              ~at store
+          , Done )
         | Error stop ->
           (* §9.2: the line is not on disk, so the act is refused as the
              store stops. *)

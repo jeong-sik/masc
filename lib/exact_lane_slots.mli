@@ -27,7 +27,8 @@ val candidate_backpressure_of : t -> Runtime_candidate_backpressure.candidate op
 val seats : admission_class:Llm_provider.Admission_class.t -> t -> Exact_lane_walk.seats
 (** An HTTP slot takes a seat of its endpoint
     ({!Agent_core.Exact_output.target_seats}). A target whose credential
-    failed is [Seatless]: its flow is refused before any request. A CLI
+    failed is [Seatless]: its flow rejects the candidate with that
+    credential outcome before any request, so the failure names it. A CLI
     slot takes a seat of its account ({!Runtime_official_client_seats}). A
     CLI slot with no runtime, a runtime that is not an official client, or
     an account that published no seats is [Seatless], and its visit fails
@@ -107,7 +108,13 @@ val rests : ('rejection, 'record_error) failure -> bool
 (** [true] when the failure is a refusal of the account's standing, which
     says nothing about the request: every HTTP candidate the flow visited
     refused so ({!Agent_core.Exact_output.flow_execution_binding_standing}),
-    or the client refused so ({!Keeper_lane_cli_oneshot.refused_for_binding_rest}). *)
+    or the client refused so ({!Keeper_lane_cli_oneshot.refused_for_binding_rest}).
+
+    A slot the walk could not send to does not rest, because nothing was
+    asked of its account: [Http_unfit], [Cli_unfit], [Cli_seats_unpublished],
+    and a CLI slot with no runtime or one that is not an official client. A
+    walk that passed one never ends [Every_slot_resting], so such a lane
+    reads as failing, not as waiting for its accounts. *)
 
 val failure_evidence
   :  (t, ('rejection, 'record_error) failure) Exact_lane_walk.passed list

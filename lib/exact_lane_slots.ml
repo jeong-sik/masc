@@ -36,6 +36,11 @@ let quota_scope_of = function
     Option.map Runtime_instance.quota_scope_of_runtime runtime
 ;;
 
+(* Both kinds keep their rest on this cell, and the next order reads it
+   (RFC section 3.5). An HTTP visit writes it through
+   [Runtime_exact_lane_backpressure.observe]; a CLI visit writes it through
+   [note_rate_limit] and [note_candidate_success]. A change to one writer
+   changes when a slot of the other kind rests, so the two change together. *)
 let candidate_backpressure_of = function
   | Http_slot (slot : Registry.selected_slot) ->
     Option.map
@@ -244,10 +249,15 @@ let visit_http
           ~before_measurement_dispatch
           ~on_measurement_terminal
           ~before_dispatch
+          (* The flow has no next candidate to move to, so it never calls
+             this. The walk records the move to the next slot with its own
+             [on_advance]. *)
           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
           ~validate
           attempt)
     in
+    (* Every rejection of a one-candidate flow names this slot, so this
+       one-slot lane finds the observation of each. *)
     Runtime_exact_lane_backpressure.observe
       ~resolved:{ Registry.selected_slots = [ slot ]; cli_slots = [] }
       result;
@@ -290,6 +300,10 @@ let visit_cli
       seat
   =
   match seat, runtime with
+  (* No seat: [seats] found no runtime, a runtime that is not an official
+     client, or an account that published no seats. A seat with no runtime
+     does not occur, because [seats] gives a slot without a runtime no seat
+     source; it is matched so that every pair is written. *)
   | None, (Some (_ : Runtime_instance.t) | None) | Some (_ : Provider_admission.seat), None ->
     Exact_lane_walk.Advance (unservable ~runtime_id runtime)
   | Some (_ : Provider_admission.seat), Some (runtime : Runtime_instance.t) ->

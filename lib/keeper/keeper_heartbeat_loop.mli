@@ -161,18 +161,22 @@ type after_failure =
       ; basis : Keeper_turn_driver.wait_basis
       }
 
-(** Whether the cycle admitted a turn that runs because a schedule is due:
-    its verdict is [Run] with {!Keeper_world_observation.Scheduled_automation_due}
-    among the reasons. A schedule that coincides with a reactive trigger runs
-    on the reactive channel without that reason, so it is not counted. *)
-type due_schedule_turn =
-  | Due_schedule_turn_admitted
-  | No_due_schedule_turn
+(** Whether the cycle's turn served a due schedule. *)
+type due_schedule_service =
+  | Due_schedule_served
+  | No_due_schedule_served
 
-val due_schedule_turn_of_decision :
-  should_run_turn:bool ->
-  Keeper_world_observation.keeper_cycle_decision ->
-  due_schedule_turn
+val due_schedule_service_of_cycle :
+  cycle_status:keepalive_cycle_status ->
+  stimuli_acked:bool ->
+  batch_has_due_schedule:bool ->
+  due_schedule_service
+(** [Due_schedule_served] only when the turn ran to its end
+    ([Turn_cycle_turn_succeeded]), the cycle acked every queue entry it
+    admitted, and one of them was a due schedule. The channel does not
+    matter. Every other cycle status, and a batch the cycle did not finish,
+    answers [No_due_schedule_served]: the periodic boundary is also how soon
+    a turn that made no progress is tried again. *)
 
 type keepalive_turn_outcome = {
   meta : keeper_meta;
@@ -185,7 +189,7 @@ type keepalive_turn_outcome = {
       (** What the cycle's turn failure or provider rest leaves the next
           cycle; [None] keeps the plain cadence. A rested cycle carries the
           [Wait_for_path_release] its rest names. *)
-  due_schedule_turn : due_schedule_turn;
+  due_schedule : due_schedule_service;
       (** The loop reads it to serve the periodic boundary
           ({!For_testing.periodic_cadence_after_cycle}). *)
 }
@@ -447,13 +451,13 @@ module For_testing : sig
 
   val periodic_cadence_after_cycle :
     periodic_due:bool ->
-    due_schedule_turn:due_schedule_turn ->
+    due_schedule:due_schedule_service ->
     now:float ->
     Keeper_keepalive_signal.periodic_cadence ->
     Keeper_keepalive_signal.periodic_cadence
   (** Advance a due cadence boundary after the cycle even when another wake
       label, including {!Keeper_world_observation.Deferred_runtime_lane},
-      authorized the turn. A turn admitted for a due schedule advances the
+      authorized the turn. A cycle that served a due schedule advances the
       boundary before it is due, so the next periodic turn comes one
       interval after that turn. *)
 

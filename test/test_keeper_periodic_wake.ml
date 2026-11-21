@@ -116,7 +116,7 @@ let test_deferred_lane_consumes_a_simultaneously_due_cadence () =
   let cadence =
     Keeper_heartbeat_loop.For_testing.periodic_cadence_after_cycle
       ~periodic_due
-      ~due_schedule_turn:Keeper_heartbeat_loop.No_due_schedule_turn
+      ~due_schedule:Keeper_heartbeat_loop.No_due_schedule_served
       ~now
       cadence
   in
@@ -126,23 +126,15 @@ let test_deferred_lane_consumes_a_simultaneously_due_cadence () =
     (Signal.periodic_remaining ~now ~interval cadence)
 ;;
 
-let due_schedule_turn_of triggers =
-  let scheduling = decide WO.Attention_wake triggers in
-  Keeper_heartbeat_loop.due_schedule_turn_of_decision
-    ~should_run_turn:scheduling.should_run_turn
-    scheduling.turn_decision
-;;
+module L = Keeper_heartbeat_loop
 
-let test_due_schedule_turn_serves_the_periodic_boundary () =
+let test_a_served_due_schedule_moves_the_periodic_boundary () =
   let interval = 1800. and schedule_turn_end = 300. in
   let cadence = Signal.consume_periodic ~now:0. in
-  let due_schedule_turn = due_schedule_turn_of [ WO.Scheduled_automation_stimulus ] in
-  check bool "a turn for a due schedule is admitted" true
-    (due_schedule_turn = Keeper_heartbeat_loop.Due_schedule_turn_admitted);
   let cadence =
-    Keeper_heartbeat_loop.For_testing.periodic_cadence_after_cycle
+    L.For_testing.periodic_cadence_after_cycle
       ~periodic_due:false
-      ~due_schedule_turn
+      ~due_schedule:L.Due_schedule_served
       ~now:schedule_turn_end
       cadence
   in
@@ -150,32 +142,52 @@ let test_due_schedule_turn_serves_the_periodic_boundary () =
     (Signal.periodic_is_due ~now:interval ~interval cadence);
   check (float 0.) "the next periodic turn is one interval after the schedule turn"
     interval
-    (Signal.periodic_remaining ~now:schedule_turn_end ~interval cadence)
+    (Signal.periodic_remaining ~now:schedule_turn_end ~interval cadence);
+  let unchanged =
+    L.For_testing.periodic_cadence_after_cycle
+      ~periodic_due:false
+      ~due_schedule:L.No_due_schedule_served
+      ~now:schedule_turn_end
+      (Signal.consume_periodic ~now:0.)
+  in
+  check (float 0.) "a cycle that served no due schedule keeps the boundary"
+    (interval -. schedule_turn_end)
+    (Signal.periodic_remaining ~now:schedule_turn_end ~interval unchanged)
 ;;
 
-let test_other_wakes_keep_the_periodic_boundary () =
-  let interval = 1800. and turn_end = 300. in
-  let cadence = Signal.consume_periodic ~now:0. in
-  List.iter
-    (fun (label, triggers) ->
-       let due_schedule_turn = due_schedule_turn_of triggers in
-       check bool (label ^ " is not a due schedule turn") true
-         (due_schedule_turn = Keeper_heartbeat_loop.No_due_schedule_turn);
-       let after =
-         Keeper_heartbeat_loop.For_testing.periodic_cadence_after_cycle
-           ~periodic_due:false
-           ~due_schedule_turn
-           ~now:turn_end
-           cadence
-       in
-       check (float 0.) (label ^ " keeps the original boundary")
-         (interval -. turn_end)
-         (Signal.periodic_remaining ~now:turn_end ~interval after))
-    [ "an empty hint", []
-    ; "a reactive message", [ WO.Workspace_message_stimulus ]
-    ; ( "a schedule that coincides with a reactive message"
-      , [ WO.Scheduled_automation_stimulus; WO.Workspace_message_stimulus ] )
+let test_only_a_finished_schedule_turn_serves () =
+  (* The third column says whether that status may serve at all; it serves
+     only with an acked batch that held a due schedule. *)
+  let statuses =
+    [ "succeeded", L.Turn_cycle_turn_succeeded, true
+    ; "failed", L.Turn_cycle_turn_failed, false
+    ; "without turn", L.Turn_cycle_without_turn, false
+    ; "lifecycle blocked", L.Turn_cycle_lifecycle_blocked, false
+    ; "owner rejected", L.Turn_cycle_owner_rejected, false
+    ; "interrupted", L.Turn_cycle_interrupted, false
+    ; "crashed", L.Turn_cycle_crashed, false
+    ; "busy", L.Turn_cycle_busy (Keeper_owner.Turn_busy None), false
+    ; "rested", L.Turn_cycle_rested, false
     ]
+  in
+  List.iter
+    (fun (label, cycle_status, may_serve) ->
+       List.iter
+         (fun (stimuli_acked, batch_has_due_schedule) ->
+            let expected =
+              if may_serve && stimuli_acked && batch_has_due_schedule
+              then L.Due_schedule_served
+              else L.No_due_schedule_served
+            in
+            check bool
+              (Printf.sprintf "%s acked=%b due_schedule=%b" label stimuli_acked
+                 batch_has_due_schedule)
+              true
+              (L.due_schedule_service_of_cycle ~cycle_status ~stimuli_acked
+                 ~batch_has_due_schedule
+               = expected))
+         [ true, true; true, false; false, true; false, false ])
+    statuses
 ;;
 
 let test_cadence_change_and_initial_warmup () =
@@ -195,8 +207,8 @@ let () =
     ; test_case "deferred lane remains visible with reactive input" `Quick test_deferred_lane_remains_visible_with_reactive_input
     ; test_case "deferred lane consumes a simultaneously due cadence" `Quick
         test_deferred_lane_consumes_a_simultaneously_due_cadence
-    ; test_case "a due schedule turn serves the periodic boundary" `Quick
-        test_due_schedule_turn_serves_the_periodic_boundary
-    ; test_case "hints and reactive turns keep the periodic boundary" `Quick
-        test_other_wakes_keep_the_periodic_boundary
+    ; test_case "a served due schedule moves the periodic boundary" `Quick
+        test_a_served_due_schedule_moves_the_periodic_boundary
+    ; test_case "only a finished schedule turn serves the boundary" `Quick
+        test_only_a_finished_schedule_turn_serves
     ; test_case "cadence updates and warmup" `Quick test_cadence_change_and_initial_warmup ] ]

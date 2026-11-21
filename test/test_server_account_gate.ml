@@ -2,6 +2,10 @@
    the guard it names: a gate that refuses nothing would pass a test that only
    checks the allowed path, so the refusal cases are the point. *)
 
+(* [masc] is wrapped, so the router and [Route_access] are reached through it;
+   the server modules are not wrapped and are used by their own names. *)
+open Masc
+
 let get = `GET
 let post = `POST
 

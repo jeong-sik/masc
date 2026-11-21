@@ -221,7 +221,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v15"
+    "keeper.memory_os.current_health.v16"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -1008,7 +1008,10 @@ let test_unread_evidence_is_observed_without_publication () =
     let json = Health.keeper_memory_health_http_json ~base_path:base in
     let decoded = D.decode_memory_health_snapshot json |> require_ok in
     match List.find_opt (fun (row : D.memory_keeper_health) -> row.mkh_keeper_id=keeper_name) decoded.mhs_keepers with
-    | Some row -> row.mkh_context_cycle
+    | Some row ->
+      Alcotest.(check bool) "this process runs no Memory writer, and the row says so" true
+        (row.mkh_writer = Masc.Tui_decode_memory_writer.None_in_process);
+      row.mkh_context_cycle
     | None -> Alcotest.fail "production health projection lost the Keeper row" in
   let observed = reading () in
   Alcotest.(check bool) "HTTP projection reaches TUI with exact snapshot evidence" true
@@ -1459,7 +1462,7 @@ let test_one_keepers_row_is_its_fleet_row () =
   let fleet = Health.keeper_memory_health_http_json ~base_path:base in
   let answer = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" in
   Alcotest.(check string) "the row answer names the fleet schema"
-    "keeper.memory_os.current_health.v15" (string_field "schema" answer);
+    "keeper.memory_os.current_health.v16" (string_field "schema" answer);
   Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
     (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer));
   let row_of keeper =

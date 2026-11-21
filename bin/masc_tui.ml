@@ -21142,14 +21142,6 @@ let main
          when state.view = Memory && state.memory_page = Memory_facts && Option.is_some state.memory_facts_keeper ->
            toggle_memory_facts_categories ~cols:terminal_columns state
        | Some ("d" | "D")
-         when state.view = Lanes && (match state.lanes_mode, state.lane_run_detail with
-           | Lanes_run_detail (_, _), Some {Tui_decode.lrd_librarian_preflight=Some _;_} -> true
-           | (Lanes_run_detail (_, _), Some { lrd_librarian_preflight = None;_})
-           | (Lanes_run_detail (_, _), None)
-           | ((Lanes_overview | (Lanes_run_list _ | (Lanes_measurement_detail _ | Lanes_inventory_detail _))), _) -> false) ->
-           state.lane_run_preflight_details <- not state.lane_run_preflight_details;
-           state.lane_run_detail_scroll <- 0
-       | Some ("d" | "D")
          when state.view = Memory
               && Option.is_none state.memory_facts_keeper ->
            state.memory_overview_detail <- not state.memory_overview_detail

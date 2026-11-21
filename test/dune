@@ -7155,8 +7155,6 @@
 
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
 (include stanzas/test_keeper_librarian_capacity_callback_continuity_and_durable.inc)
-(include stanzas/test_keeper_librarian_preflight.inc)
-(include stanzas/test_keeper_librarian_preflight_real_dispatch.inc)
 (include stanzas/test_keeper_librarian_walk_failure_algebra.inc)
 
 (include stanzas/test_deployment_store_directories.inc)
@@ -7233,7 +7231,6 @@
 
 (include stanzas/test_play_current_credential_authority.inc)
 
-(include stanzas/test_librarian_preflight_report.inc)
 
 (test
  (name test_server_keeper_build_maintenance)

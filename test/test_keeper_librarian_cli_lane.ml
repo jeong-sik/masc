@@ -722,15 +722,12 @@ let test_memory_inference_failure_keeps_pending_publication failure () =
     | [run] -> (match Registry.get registry ~run_id:run.run_id with
         | Some loaded -> loaded | None -> fail "failure run payload missing")
     | _ -> fail "expected one failed inference run" in
-  let decoded = Masc.Tui_decode.decode_lane_run_detail
-      (Fixture.lane_run_detail run) in
-  let reading = match decoded with
-    | Ok {lrd_librarian_preflight=Some reading;_} -> reading
-    | Ok {lrd_librarian_preflight=None;_} -> fail "failed inference scope missing"
-    | Error detail -> fail detail in
+  let output =
+    Yojson.Safe.Util.(member "output" (member "run" (Fixture.lane_run_detail run))) in
   check bool "failure and cancellation retain the inference scope" true
-    (reading.lp_memory_scope = Masc.Tui_decode.Memory_inference_scope
-      && reading.lp_memory_result=None)
+    (Yojson.Safe.Util.member "memory_inference" output = `Bool true
+      && Yojson.Safe.Util.member "memory_write" output = `String "not_attempted"
+      && Yojson.Safe.Util.member "after" output = `Null)
 ;;
 
 type memory_exhaustion_case =

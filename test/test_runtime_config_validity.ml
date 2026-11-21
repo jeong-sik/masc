@@ -6848,7 +6848,7 @@ let typesafeai_table =
    \  { endpoint = \"http://127.0.0.1:9/reserve\", model = \"~typesafe/jev-latest\", api_key_env = \"OPENROUTER_API_KEY\" },\n\
    ]\n\
    board_attention = false\nboard_attention_confidence_floor = 0.45\n\
-   absorb_gate = true\ncontext_review = true\nskill_applicability = true\nlibrarian_preflight = true\nworkspace_memory_selection_enabled = true\n\
+   absorb_gate = true\ncontext_review = true\nskill_applicability = true\nworkspace_memory_selection_enabled = true\n\
    memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"won-chik\", \"goo-yang-bong\"]\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
@@ -6868,7 +6868,6 @@ let test_typesafeai_absent_is_the_default () =
     check bool "the absorb gate is off" false t.Runtime_schema.absorb_gate;
     check bool "Context review is off" false t.Runtime_schema.context_review;
     check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
-    check bool "Librarian preflight is off" false t.Runtime_schema.librarian_preflight;
     check bool "Shared memory selection is off" false t.Runtime_schema.workspace_memory_selection_enabled;
     check bool "Memory recall is off" true
       (Runtime_schema.equal_memory_recall Runtime_schema.Memory_recall_off t.Runtime_schema.memory_recall);
@@ -6897,7 +6896,6 @@ let test_typesafeai_reads_the_whole_table () =
     check bool "absorb gate enabled" true t.Runtime_schema.absorb_gate;
     check bool "Context review enabled" true t.Runtime_schema.context_review;
     check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
-    check bool "Librarian preflight enabled" true t.Runtime_schema.librarian_preflight;
     check bool "Shared memory selection enabled" true t.Runtime_schema.workspace_memory_selection_enabled;
     check bool "Memory recall listed, in order" true
       (Runtime_schema.equal_memory_recall

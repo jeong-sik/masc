@@ -133,7 +133,7 @@ let test_the_same_keepers_in_another_order_is_no_change () =
 let test_only_the_list_changes () =
   let text =
     probe
-    ^ "\n[typesafeai]\n# the lane's own note\nabsorb_gate = true  # kept\nexcluded_keepers = [\"c\"]\nlibrarian_preflight = true\n\n[models.other]\napi-name = \"other\"\n"
+    ^ "\n[typesafeai]\n# the lane's own note\nabsorb_gate = true  # kept\nexcluded_keepers = [\"c\"]\ncontext_review = true\n\n[models.other]\napi-name = \"other\"\n"
   in
   let written = text_of (edited (opened text) [ " " ]) in
   let without_list text =

@@ -99,8 +99,6 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # binding for it.
 
 # TypeSafe AI (System One Jev) Opt-in Integration
-# librarian_preflight = true enables no-change judgment for Memory-only passes;
-# continuity and working-context generation still use the Librarian lane.
 # Calibrated probabilistic decisions for the board_attention_exact lane and
 # the librarian absorb gate.
 # Keys stay in the environment; each destination names the variable holding
@@ -148,7 +146,6 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # absorb_gate = false
 # context_review = false       # source Context + proposed summary preservation review
 # skill_applicability = false  # current request + authorized Skill body advice
-# librarian_preflight = false # Memory-only no-change judgment; generates no text
 # workspace_memory_selection_enabled = false
 # Set true separately for host-side shared-memory selection and the explicit
 # keeper_memory_select tool. Selection may send current input/task context,

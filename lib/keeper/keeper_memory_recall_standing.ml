@@ -25,7 +25,6 @@ let lane_reason_of_unavailable = function
   | Typesafeai_config.Board_attention_disabled
   | Typesafeai_config.Context_review_disabled
   | Typesafeai_config.Skill_applicability_disabled
-  | Typesafeai_config.Librarian_preflight_disabled
   | Typesafeai_config.Workspace_memory_selection_disabled
   | Typesafeai_config.Memory_recall_disabled
   | Typesafeai_config.Keeper_excluded -> Refused_by_another_gate
@@ -44,7 +43,6 @@ let reason_of_unavailable = function
     | Typesafeai_config.Board_attention_disabled
     | Typesafeai_config.Context_review_disabled
     | Typesafeai_config.Skill_applicability_disabled
-    | Typesafeai_config.Librarian_preflight_disabled
     | Typesafeai_config.Workspace_memory_selection_disabled ) as other ->
     lane_reason_of_unavailable other
 ;;

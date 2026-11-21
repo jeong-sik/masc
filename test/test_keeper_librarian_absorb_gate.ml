@@ -3058,7 +3058,7 @@ let test_replay_authority_round_trips_every_unavailable_reason () =
     | Config.Lane_disabled | Config.Access_unpublished | Config.Host_account_not_shared
     | Config.No_armed_destination | Config.Absorb_gate_disabled
     | Config.Board_attention_disabled | Config.Context_review_disabled
-    | Config.Skill_applicability_disabled | Config.Librarian_preflight_disabled
+    | Config.Skill_applicability_disabled
     | Config.Workspace_memory_selection_disabled | Config.Memory_recall_disabled
     | Config.Keeper_excluded -> () in
   List.iter (fun reason ->
@@ -3072,7 +3072,7 @@ let test_replay_authority_round_trips_every_unavailable_reason () =
     [ Config.Lane_disabled; Config.Access_unpublished; Config.Host_account_not_shared
     ; Config.No_armed_destination; Config.Absorb_gate_disabled
     ; Config.Board_attention_disabled; Config.Context_review_disabled
-    ; Config.Skill_applicability_disabled; Config.Librarian_preflight_disabled
+    ; Config.Skill_applicability_disabled
     ; Config.Workspace_memory_selection_disabled; Config.Memory_recall_disabled
     ; Config.Keeper_excluded ]
 ;;

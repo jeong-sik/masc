@@ -1662,16 +1662,6 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
     record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
 ;;
 
-(* The budget the prompt showed: the captured maximum over the facts this pass
-   saw and the source lines captured with it, measured as the commit measures.
-   A memory over the budget commits only by shrinking, so a pass that proposes
-   no change cannot commit it. *)
-let durable_facts_fit (prepared : durable_preparation) =
-  Keeper_memory_os_render.facts_budget_fits
-    (Keeper_librarian.facts_budget ~facts_max_bytes:prepared.policy.facts_max_bytes
-       ~source_lines:prepared.policy.facts_source_lines prepared.source_input)
-;;
-
 let current_selection_registry_summary = function
   | None -> `Assoc [ "present", `Bool false; "fact_count", `Int 0 ]
   | Some (current : Keeper_librarian.current_selection) ->
@@ -2069,10 +2059,6 @@ let run_pass
                   ; "current_fact_count", `Int current_fact_count
                   ]));
         let observed_context_review = ref None in
-        let observed_preflight = ref None in
-        let full_llm_skipped = ref false in
-        let full_lane_entered = ref false in
-        let preflight_domain_rejection = ref None in
         let context_write = ref Not_attempted in
         let continuity_write = ref (`Assoc ["status", `String "not_attempted"]) in
         (* Only an API attempt's own success reports usage; a CLI tail never
@@ -2080,8 +2066,6 @@ let run_pass
         let observed_usage = ref None in
         let slot_capture = Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Librarian) () in
         let complete ?selected_slot ?usage outcome output =
-          let selected_slot = if !full_llm_skipped then None else selected_slot in
-          let usage = if !full_llm_skipped then None else usage in
           let output = match inference, output with
             | Some (Infer_memory _), `Assoc fields ->
               let fields = List.fold_left (fun fields key -> List.remove_assoc key fields)
@@ -2092,16 +2076,6 @@ let run_pass
                        "continuity_write", `Assoc ["status", `String "not_attempted"]] @ fields)
             | (None | Some (Infer_state _)), _
             | Some (Infer_memory _), _ -> output in
-          let output = match !observed_preflight, output with
-            | Some observation, `Assoc fields ->
-              `Assoc (("jev_preflight", Typesafeai_librarian_preflight.to_yojson observation)
-                :: ("full_llm_skipped", `Bool !full_llm_skipped)
-                :: ("generation_path", `String
-                    (if !full_llm_skipped then "jev_no_change"
-                     else if !full_lane_entered then "full_lane" else "not_entered"))
-                :: ("preflight_domain_rejection", match !preflight_domain_rejection with
-                    | None -> `Null | Some detail -> `String detail) :: fields)
-            | (None | Some _), _ -> output in
           let output = match continuity, output with
             | Some _, `Assoc fields -> `Assoc (("continuity_write", !continuity_write) :: fields)
             | _ -> output in
@@ -2251,56 +2225,17 @@ let run_pass
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
              let* (answer, exact_output), served_slot =
-               (* Judged by what the prompt shows. Once a Keeper has any
-                  working-context snapshot, [previous] is [Some] on every
-                  capture, and a running Keeper usually carries an execution
-                  basis too; neither reaches the prompt without a source, yet
-                  comparing the record with [empty] refused every live pass. *)
-               (* Maintenance is already a request to review excess memory.
-                  A no-change shortcut must not stand in for that review:
-                  cleanup remembers a committed input as reviewed. *)
-               let eligible () = match pass with
-                 | Memory_pass (None, Commit_with_contexts _) ->
-                   Keeper_librarian_context.shows_no_working_context
-                     prompt_input.working_context
-                   && (match durable_preparation with
-                       | Some (_, Ok prepared) -> durable_facts_fit prepared
-                       | None | Some (_, Error _) -> false)
-                 | Memory_pass (None, Commit_maintenance _) | Memory_pass (Some _, _)
-                 | Working_context_pass | Continuity_state_pass _ | Volatile_state_pass _
-                 | Volatile_memory_pass _ -> false in
-               let observation = Typesafeai_librarian_preflight.assess
-                 ~observe:(fun observation -> observed_preflight := Some observation)
-                 ~clock ~keeper_id ~eligible ~prompt () in
-               observed_preflight := Some observation;
-               let execute_full () =
-                 full_lane_entered := true;
-                 Exact_lane_slot_capture.with_capture slot_capture (fun () ->
-                   execute_answer ~selected_slots ~held_http ~cli_slots
-                   ~requirement
-                   ~validate
-                   ?cli_runner ~clock ~net ~base_path ~keeper_id
-                   ~messages:[ message Agent_core.Types.User prompt ]
-                   ~usage_observer:(fun usage ->
-                      observed_usage := usage)
-                   ())
-                 |> Result.map (fun (accepted, source) -> (accepted, Some source)) in
-               if Typesafeai_librarian_preflight.keeps_current observation then (
-                 let output = `Assoc
-                   [ "new_claims", `List []; "dropped", `List []
-                   ; "working_contexts", `List []; "working_state", `Null ] in
-                 match validate output with
-                 | Ok answer ->
-                   full_llm_skipped := true;
-                   Ok ((answer, output), None)
-                 | Error error ->
-                   preflight_domain_rejection := Some (Keeper_librarian.parse_error_to_string error);
-                   execute_full ())
-               else execute_full ()
+               Exact_lane_slot_capture.with_capture slot_capture (fun () ->
+                 execute_answer ~selected_slots ~held_http ~cli_slots
+                 ~requirement
+                 ~validate
+                 ?cli_runner ~clock ~net ~base_path ~keeper_id
+                 ~messages:[ message Agent_core.Types.User prompt ]
+                 ~usage_observer:(fun usage ->
+                    observed_usage := usage)
+                 ())
              in
-             let selected_slot = match served_slot with
-               | Some slot -> served_slot_id slot
-               | None -> "JEV memory preflight" in
+             let selected_slot = served_slot_id served_slot in
 
              (* Working context is advisory and has its own revision. A stale
                 or failed context write cannot roll back memory or block the
@@ -2364,11 +2299,6 @@ let run_pass
                   "working context commit failed independently of memory: %s" (Printexc.to_string exn)))
              in
              let publish_continuity prepared working_state =
-                match served_slot with
-                | None ->
-                  Continuity_not_committed
-                    "a no-change judgment cannot generate a continuity snapshot"
-                | Some served_slot ->
                 continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
                 commit_continuity
                   ~commit:(fun () ->
@@ -2499,23 +2429,20 @@ let run_pass
              let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in
              match memory_target with
              | Infer_memory_state working_state ->
-               (match served_slot with
-                | None -> Error (Domain_output_invalid "Memory inference has no served slot")
-                | Some served_by ->
-                  let step =
-                    { run_id
-                    ; source_input = prompt_input
-                    ; prompt_variables
-                    ; rendered_prompt = prompt
-                    ; absorb_gate
-                    ; new_claims = Keeper_librarian_absorb_gate.without_copies
-                        absorb_gate selection.new_claims
-                    ; dropped = selection.dropped
-                    ; absorbed = applied_absorbed
-                    ; revisions = selection.revisions
-                    ; working_state
-                    } in
-                  Ok (`Memory_inferred (step, served_by, exact_output, selected_slot)))
+               let step =
+                 { run_id
+                 ; source_input = prompt_input
+                 ; prompt_variables
+                 ; rendered_prompt = prompt
+                 ; absorb_gate
+                 ; new_claims = Keeper_librarian_absorb_gate.without_copies
+                     absorb_gate selection.new_claims
+                 ; dropped = selection.dropped
+                 ; absorbed = applied_absorbed
+                 ; revisions = selection.revisions
+                 ; working_state
+                 } in
+               Ok (`Memory_inferred (step, served_slot, exact_output, selected_slot))
              | Commit_memory commit ->
              let+ disposition =
                Keeper_memory_os_current.apply_disposition
@@ -2575,15 +2502,15 @@ let run_pass
               | Some (Infer_state _) | None -> ());
              Eio.Fiber.check ()
            | Ok (`Volatile_state (working_state, exact_output, served_slot)) ->
-             complete ?selected_slot:(Option.map served_slot_id served_slot)
+             complete ~selected_slot:(served_slot_id served_slot)
                ?usage:!observed_usage Exact_lane_run_registry.Succeeded
                (`Assoc ["memory_write", `String "skipped_context_only";
                         "continuity_write", `Assoc ["status", `String "not_attempted"];
                         "volatile_inference", `Bool true;
                         "exact_output", exact_output]);
-             (match inference, served_slot with
-              | Some (Infer_state {observe;_}), Some served_by -> observe ~served_by working_state
-              | Some (Infer_state _), None | Some (Infer_memory _), _ | None, _ -> ());
+             (match inference with
+              | Some (Infer_state {observe;_}) -> observe ~served_by:served_slot working_state
+              | Some (Infer_memory _) | None -> ());
              Eio.Fiber.check ()
            | Ok (`Context_organized (exact_output, selected_slot)) ->
              complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded

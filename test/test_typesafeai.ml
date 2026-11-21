@@ -410,7 +410,6 @@ let policy
       ?(absorb_gate = false)
       ?(context_review = false)
       ?(skill_applicability = false)
-      ?(librarian_preflight = false)
       ?(workspace_memory_selection_enabled = false)
       ?(memory_recall = Runtime_schema.Memory_recall_off)
       ?(excluded_keepers = [])
@@ -424,7 +423,6 @@ let policy
   ; absorb_gate
   ; context_review
   ; skill_applicability
-  ; librarian_preflight
   ; workspace_memory_selection_enabled
   ; memory_recall
   ; excluded_keepers
@@ -645,8 +643,8 @@ let test_workspace_memory_selection_requires_its_own_opt_in () =
     | Ok _ -> "enabled"
     | Error reason -> C.unavailable_reason_to_string reason in
   with_key (Some "synthetic-jev-key") (fun () ->
-    with_policy (policy ~absorb_gate:true ~context_review:true ~skill_applicability:true
-        ~librarian_preflight:true ()) (fun () ->
+    with_policy (policy ~absorb_gate:true ~context_review:true ~skill_applicability:true ())
+      (fun () ->
       Alcotest.(check string) "other gates cannot authorize shared-memory selection"
         "workspace_memory_selection_disabled" (state ()));
     with_policy (policy ~workspace_memory_selection_enabled:true ~board_attention:false ()) (fun () ->
@@ -671,7 +669,7 @@ let test_memory_recall_requires_its_own_opt_in_and_scope () =
   let listed first rest = Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) in
   with_key (Some "synthetic-jev-key") (fun () ->
     with_policy (policy ~absorb_gate:true ~context_review:true ~skill_applicability:true
-        ~librarian_preflight:true ~workspace_memory_selection_enabled:true ()) (fun () ->
+        ~workspace_memory_selection_enabled:true ()) (fun () ->
       Alcotest.(check string) "other gates cannot authorize recall"
         "memory_recall_disabled" (state ()));
     with_policy (policy ~memory_recall:all ~board_attention:false ()) (fun () ->

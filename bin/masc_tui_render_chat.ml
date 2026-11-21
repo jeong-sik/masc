@@ -5854,7 +5854,7 @@ let render_keeper_message (state : state) =
          let marker = if selected then "› " else "  " in
          let content = "  " ^ marker ^ label ^ "  "
            ^ Terminal_text.single_line item.description in
-         if selected then box_line_selected chat_buf chat_cols content
+         if selected then box_line_selected_styled chat_buf chat_cols content
          else box_line_styled chat_buf chat_cols ~style:(Theme.recede ()) content) entries;
        box_divider chat_buf chat_cols);
     let input = Masc_tui_message_input.contents state.msg_input in

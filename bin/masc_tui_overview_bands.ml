@@ -60,7 +60,7 @@ type keeper_entry = {
 }
 
 let card_style () =
-  { Card.border = Theme.recede ()
+  { Card.border = Theme.border_muted ()
   ; focused_border = Theme.border_focus ()
   ; title_style = Ansi.bold
   ; reset = Ansi.reset

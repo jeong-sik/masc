@@ -55,7 +55,7 @@ Goal 완료 요청은 원시 증거를 보존한 뒤 verifier에 제출한다. �
 ## G1 — 요청부터 검증 결과까지 측정이 끊기지 않는다
 
 Runtime Goal ID: `goal-reliable-change-g1-20260909`. 첫 구현 Task: `task-1478` (등록 시 todo, 2026-09-12 현재도 todo).
-정의 정본: [G1 acceptance contract](roadmaps/reliable-change-g1.json), 현재 `criterion_revision` 2.
+기존 정의 정본: G1 acceptance contract JSON(`criterion_revision` 2 기준; #53433에서 일회성 G1 checker와 함께 제거되었으며 원문은 git 이력 `9e727d89d^`에 남아 있음).
 revision 1 등록은 2026-09-09 운영자 초기화로 런타임에서 사라졌다. 자세한 경위와 재등록 절차는 아래 revision 2 항목에 있다.
 
 범위는 기존 coding harness와 run/turn/request/cost ledger의 연결이다. 새로운 실행 엔진을 만들지 않는다.
@@ -92,7 +92,7 @@ revision 1 등록은 2026-09-09 운영자 초기화로 런타임에서 사라졌
 같은 비용의 중복 합산 0. 관측되지 않은 비율·금액은 null이다.
 `retry-success`의 통제 fixture는 실패 request, 성공 request의 누적 snapshot 두 개,
 verifier request를 제공한다. 합계는 input 40 / output 8 / cache-read 8 tokens / USD 0.07이다.
-정확한 원시 값은 JSON contract에 있고 합계 불일치도 0이어야 한다.
+정확한 원시 값은 #53433 이전 JSON contract(`9e727d89d^`)에 기록돼 있으며 합계 불일치도 0이어야 한다.
 모두 null을 반환하는 구현은 통과하지 않는다. 이 수치는 실제 provider 청구액이 아니다.
 
 첫 Task: 여섯 사례 manifest 및 observation checker를 고정하고 기존 harness의
@@ -130,14 +130,15 @@ input 40 / output 8 / cache-read 8 / USD 0.07. Goal ID도 그대로 둔다.
 | live-runtime-identity-pinned | endpoint·process id·binary·config 해시를 고정한 live 실행 중 선언 없는 재시작 | process_instance_id 변경을 runtime-identity-mismatch로 판정; live_passed로 세지 않음 |
 | goal-store-unavailable-during-run | 실행 중 goals.json이 읽히지 않음 | 모든 consumer가 파일명과 초기화 절차를 담은 unavailable 상태를 봄; 빈 store를 만들지 않음; 원본 바이트 불변 |
 
-각 사례의 정확한 조건·기대 결과·출처 finding은 JSON contract의 `boundary_suite.cases`가 정본이다.
+각 사례의 정확한 조건·기대 결과·출처 finding은 #53433 이전 JSON contract(`9e727d89d^`)의 `boundary_suite.cases`에 기록돼 있었다.
 
-**이미 구현된 것은 다시 요구하지 않는다.** `e763050689` 기준으로
-[bin/masc_reliable_change_g1_check.ml](../bin/masc_reliable_change_g1_check.ml)은 `check_observations`를 호출하고,
-[lib/goal/reliable_change_g1.ml](../lib/goal/reliable_change_g1.ml)은 manifest의 사례별 필수 엔티티와 phase 경계를 소비하며,
-[scripts/harness_coding_eval.sh](../scripts/harness_coding_eval.sh)는 `--execution-mode matrix`와 `--manifest`로 checker를 부른다.
-남은 구현은 경계 manifest, canonical identity 필드, live manifest 필드, 그리고 JSON의
-`checker_status_at_head.rule_ids_required_by_revision_2`에 적은 규칙 7개다. 소스의 helper 테스트 통과는
+**기존 G1 checker 제거 현황.** `e763050689` 기준 당시 구현돼 있던 일회성 G1 checker
+실행 파일·모듈과 JSON contract는 #53433(`9e727d89d`)에서 제거되었고,
+[scripts/harness_coding_eval.sh](../scripts/harness_coding_eval.sh)의 해당 checker 호출도 함께 걷혔다.
+따라서 G1 검증을 재도입할 때는 `e763050689` 구현이 남아 있다고 가정하지 않고,
+기본 observation checker와 harness 연결뿐 아니라 경계 manifest, canonical identity 필드,
+live manifest 필드, 그리고 제거된 JSON contract(`9e727d89d^`)에 적혀 있던 revision 2
+검증 규칙 7개까지 함께 구현해야 한다. 소스의 helper 테스트 통과는
 배포된 checker가 조작된 증거를 잡는다는 증명이 아니다.
 
 **선행 조건은 단계 하나씩만 막는다.** 선행 조건이 없는 단계는 지금 시작한다.
@@ -162,7 +163,7 @@ input 40 / output 8 / cache-read 8 / USD 0.07. Goal ID도 그대로 둔다.
 **revision 1 등록의 대체.** 손실 경위: #34459가 `criterion_revision`을
 필수 필드로 만들었고 `read_state`가 `Undecodable`을 빈 상태로 접어 goals.json이 7시간 29분 동안 비어 보였다.
 #34485가 오류를 드러낸 뒤 운영자가 goals.json을 손으로 초기화했다(97 → 41 → 0). revision 1에서는
-측정이 한 번도 돌지 않았다. JSON contract의 `supersedes` 블록이 이 관계를 기계가 읽는 형태로 담는다.
+측정이 한 번도 돌지 않았다. #53433 이전 JSON contract(`9e727d89d^`)의 `supersedes` 블록이 이 관계를 기계가 읽는 형태로 담고 있었다.
 
 **재등록 절차.** 이 PR은 런타임에 아무것도 등록하지 않는다. 병합 뒤 `masc_goal_upsert`를 이 파일의 sha256과
 함께 호출하고, readback으로 revision 2 activation snapshot을 새로 쓴다. 런타임이 만드는
@@ -171,7 +172,7 @@ input 40 / output 8 / cache-read 8 / USD 0.07. Goal ID도 그대로 둔다.
 
 ### 검증된 결과의 revision 비교
 
-`Reliable_change_g1.check_observations`는 외부 검증 성공이나 통과 판정을 주장하는
+G1 observation checker(#53433에서 일회성 구현 제거; 재도입 시 동일 계약 적용)는 외부 검증 성공이나 통과 판정을 주장하는
 모든 관측 행에서 `requested_revision`과 `target_revision`이 명시되어 있고,
 공백뿐인 값이 아니며, 정확히 일치하는지 검사한다. 다른 revision은
 `foreign_revision`으로 기록하고 해당 matrix/live 실행을 성공 집계에서 제외한다.

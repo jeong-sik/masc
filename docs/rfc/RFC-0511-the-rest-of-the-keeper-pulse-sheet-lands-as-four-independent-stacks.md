@@ -129,7 +129,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 3. TUI 디코더는 `lib/tui_decode.ml(i)` 이고, `keeper_runtime` 리터럴이 있는 시험 픽스처 셋도 고친다(`test/test_tui_keeper_control.ml`, `test/test_tui_keeper_trail.ml`, `test/test_tui_keeper_list_model.ml`).
 4. 웹 대시보드 스키마 `dashboard/src/api/schemas/gate-keepers.ts` 는 모르는 키를 거부한다(`onExcessProperty: 'error'`, `:269`). 같은 PR 에서 `Schema.optional` 로 더하고 `schemas/gate-keepers.test.ts` 와 `api/gate-keepers.test.ts` 를 고친다. 이 스키마에는 `runtime_path_rest` 도 없다(`:36`). 실제로 거부하는지는 확인하지 못했다. 거부가 확인되면 이슈로 남기고 이 층에서 고치지 않는다.
 5. 시험은 서버 → 디코더 왕복(`test/test_keeper_list_truncation.ml:679` 방식)과 디코더 단독(`test/test_tui_keeper_control.ml:1328` 방식)이다.
-6. 층마다 roster 응답 크기를 `bin/masc_http_probe.ml` 로 재서 PR 본문에 적는다. 지금은 40행에 약 9 KB 다(RFC-0481 §1.1).
+6. 층마다 roster 응답 크기를 HTTP 요청(예: `curl -sS` 응답 바이트 수)으로 재서 PR 본문에 적는다(당초 적었던 일회성 HTTP 프로브 CLI는 #53433에서 제거됨). 지금은 40행에 약 9 KB 다(RFC-0481 §1.1).
 
 세 항목은 같은 줄(`keeper_list_row_json` 의 목록, `keeper_runtime` 레코드, 픽스처 셋)을 만진다. 한 에이전트가 S3 → S3d → S2 → S1a → S1b 순서로 쌓는다.
 

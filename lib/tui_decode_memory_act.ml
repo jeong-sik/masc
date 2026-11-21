@@ -31,7 +31,11 @@ let reading_acts ~turn_log (kept : Writer.kept) =
       (Writer.Read_input_fault
         (Writer.Turn_log_replaced { expected = (_ : string); observed = None }))
   | Some (Writer.Read_input_fault (Writer.Line_unreadable { offset = (_ : int) }))
-  | Some (Writer.Read_committed | Writer.Read_lane _ | Writer.Read_ask_failed _)
+  | Some
+      ( Writer.Read_committed
+      | Writer.Read_lane _
+      | Writer.Read_ask_failed _
+      | Writer.Read_refused_not_all_sized _ )
   | None -> []
 ;;
 

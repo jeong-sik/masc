@@ -61,6 +61,9 @@ type mosaic_refusal =
       (** The downloaded file could not be read back. *)
   | Decode_failed of { detail : string }
       (** The body reached the decoder and no frame came out. *)
+  | No_color
+      (** Colour output is disabled or the terminal cannot draw 256/truecolour
+          mosaics. *)
 
 type mosaic_entry =
   | Mosaic of string list

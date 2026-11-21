@@ -63,6 +63,25 @@ let set_graphics_protocol p =
 let cell_pixels = ref None
 let set_cell_pixels px = cell_pixels := px
 
+let render_mosaic : (cols:int -> rows:int -> string -> string list) ref =
+  ref Frame.render_for_terminal
+
+module For_testing = struct
+  type color_capability = Frame.For_testing.color_capability =
+    | Terminal
+    | True_color
+    | Ansi256
+    | Disabled
+
+  let set_color_capability capability =
+    invalidate ();
+    render_mosaic :=
+      match capability with
+      | Terminal -> Frame.render_for_terminal
+      | (True_color | Ansi256 | Disabled) as cap ->
+          Frame.For_testing.render_with_capability ~capability:cap
+end
+
 (* Rows for an image placement that keeps the frame inside the screen.
 
    Kitty derives the width from the row count, so a row count that fills the
@@ -399,21 +418,28 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
            ~max_rows:(2 * picture_rows)
        in
        let lines =
-         Frame.render ~cols:pcols ~rows:prows
+         !render_mosaic ~cols:pcols ~rows:prows
            (Frame.downscale ~src_w:width ~src_h:height ~cols:pcols
               ~rows:prows rgb)
        in
-       let drawn = List.length lines in
+       let rendered =
+         if lines <> [] then
+           let left = String.make ((picture_cols - pcols) / 2) ' ' in
+           List.map (fun line -> left ^ line) lines
+         else if pcols > 0 && prows > 0 then
+           reason_rows ~cols:picture_cols ~room:screen_rows
+             "this terminal cannot draw the colour mosaic without colour (unset NO_COLOR or use a 256-colour/truecolour terminal)"
+         else []
+       in
+       let drawn = List.length rendered in
        let above = (screen_rows - drawn) / 2 in
-       let left = String.make ((picture_cols - pcols) / 2) ' ' in
        for _ = 1 to above do blank_row () done;
        List.iter
          (fun line ->
            Buffer.add_string buf "\027[0K";
-           Buffer.add_string buf left;
            Buffer.add_string buf line;
            Buffer.add_string buf "\r\n")
-         lines;
+         rendered;
        for _ = 1 to screen_rows - drawn - above do blank_row () done
    | Some _ | None ->
        (* Nothing to draw: clear the body so a stale frame does not linger. *)

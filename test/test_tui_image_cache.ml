@@ -769,7 +769,11 @@ let test_explicit_retry_recovers_without_background_loop () =
             (function
               | Error failure ->
                 Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
-              | Ok frame -> Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 frame))))
+              | Ok frame ->
+                Preview.Mosaic
+                  (Masc_tui_image_mosaic.For_testing.render_with_capability
+                     ~capability:Masc_tui_image_mosaic.For_testing.True_color
+                     ~cols:1 ~rows:2 frame))))
     in
     executable cache_dir "curl" "exit 28";
     Preview.load_mosaic url ~compute:(fun () -> compute ());
@@ -817,7 +821,11 @@ let test_a_direct_image_retry_drops_the_body_its_first_view_cached () =
         (function
           | Error failure ->
             Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
-          | Ok frame -> Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 frame))))
+          | Ok frame ->
+            Preview.Mosaic
+              (Masc_tui_image_mosaic.For_testing.render_with_capability
+                 ~capability:Masc_tui_image_mosaic.For_testing.True_color
+                 ~cols:1 ~rows:2 frame))))
     in
     Preview.retry_mosaic ~retry url;
     check int "the explicit retry ran" 1 !attempts;

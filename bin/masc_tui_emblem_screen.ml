@@ -286,8 +286,13 @@ let about_rows ~style ~cols ~rows ~caption ~frame ~keepers
         | [] -> ""
         | piece :: rest ->
             let left = max column piece.left in
+            let row_line =
+              match List.nth_opt piece.lines row with
+              | Some line -> line
+              | None -> String.make piece.box.View.cols ' '
+            in
             String.make (left - column) ' '
-            ^ List.nth piece.lines row
+            ^ row_line
             ^ gather (left + piece.box.View.cols) rest
       in
       gather 0 pieces)

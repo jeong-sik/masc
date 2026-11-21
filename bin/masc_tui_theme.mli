@@ -142,6 +142,15 @@ module Sgr : sig
       program chose -- an official client's login screen -- projected for
       what this process's stdout can draw. *)
 
+  val pixel_foreground : Masc_tui_terminal_palette.projected_color -> string
+  val pixel_background : Masc_tui_terminal_palette.projected_color -> string
+  val pixel_default_fg : string
+  val pixel_default_bg : string
+  (** Unconditional pixel SGR serializers for callers whose projector already
+      decided colour capability (such as {!Masc_tui_image_mosaic}). Unlike
+      {!foreground}, {!background}, {!default_fg}, and {!default_bg}, these do
+      not re-read process-global [NO_COLOR]. *)
+
   val bg_removed : string
   val bg_added : string
   (** Diff-row backgrounds; 256-colour cube entries. *)

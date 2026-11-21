@@ -160,6 +160,7 @@ let test_a_refused_image_url_is_remembered_and_said () =
     ; (Empty_body, "answered with an empty body")
     ; (Cache_unreadable { detail = "EACCES" }, "could not be read: EACCES")
     ; (Decode_failed { detail = "ffmpeg rejected the body (exit 1)" }, "could not be decoded: ffmpeg rejected the body (exit 1)")
+    ; (No_color, "NO_COLOR or fewer than 256 colours")
     ]
   in
   List.iter
@@ -170,7 +171,12 @@ let test_a_refused_image_url_is_remembered_and_said () =
        | Some (Refused kept) ->
            check string "refusal kept" (mosaic_refusal_text refusal) (mosaic_refusal_text kept)
        | Some (Mosaic _) | None -> fail "the refusal was not kept");
-      check bool ("the card says: " ^ said) true (card_says ~url said))
+      check bool ("the card says: " ^ said) true (card_says ~url said);
+      let shows_retry = card_says ~url "fetch the preview again" in
+      match refusal with
+      | No_color -> check bool "no retry prompt for No_color" false shows_retry
+      | Fetch_failed _ | Empty_body | Cache_unreadable _ | Decode_failed _ ->
+          check bool "retry prompt shown for transient refusal" true shows_retry)
     cases;
   clear_cache ()
 

@@ -54,10 +54,18 @@ let mentions ~needle haystack =
   n = 0 || at 0
 ;;
 
+let with_capability capability f =
+  Msx.For_testing.set_color_capability capability;
+  Fun.protect ~finally:(fun () ->
+    Msx.For_testing.set_color_capability Msx.For_testing.Terminal) f
+;;
+
 let with_protocol p f =
   Msx.set_graphics_protocol p;
   Msx.set_cell_pixels (Some (8, 16));
+  Msx.For_testing.set_color_capability Msx.For_testing.True_color;
   Fun.protect ~finally:(fun () ->
+    Msx.For_testing.set_color_capability Msx.For_testing.Terminal;
     Msx.set_cell_pixels None;
     Msx.set_graphics_protocol Graphics.Unsupported_protocol) f
 ;;
@@ -280,6 +288,32 @@ let test_failed_menu_output_cannot_authorize_a_choice () =
        | _ -> false))
     [Types.Boot_game; Types.Change_disk]
 
+let test_no_colour_terminal_draws_reason_instead_of_stripes () =
+  with_protocol Graphics.Unsupported_protocol (fun () ->
+    with_capability Msx.For_testing.Disabled (fun () ->
+      let out = drawn () in
+      check bool "no half-block stripes emitted" false
+        (mentions ~needle:"\xe2\x96\x80" out);
+      check bool "no truecolour escape emitted" false
+        (mentions ~needle:"\027[38;2;" out);
+      check bool "no 256-colour escape emitted" false
+        (mentions ~needle:"\027[38;5;" out);
+      check bool "reason explains missing colour" true
+        (mentions ~needle:"without colour" out)))
+;;
+
+let test_256_colour_terminal_draws_indexed_mosaic () =
+  with_protocol Graphics.Unsupported_protocol (fun () ->
+    with_capability Msx.For_testing.Ansi256 (fun () ->
+      let out = drawn () in
+      check bool "256-colour escape emitted" true
+        (mentions ~needle:"\027[38;5;" out);
+      check bool "half-block mosaic drawn" true
+        (mentions ~needle:"\xe2\x96\x80" out);
+      check bool "no truecolour escape on 256-colour terminal" false
+        (mentions ~needle:"\027[38;2;" out)))
+;;
+
 let () =
   run "masc_tui_msx graphics"
     [ ( "retained"
@@ -299,6 +333,10 @@ let () =
             test_the_mosaic_takes_a_512_wide_frame
         ; test_case "meta pixels do not draw" `Quick
             test_meta_pixels_do_not_draw
+        ; test_case "no colour terminal draws reason instead of stripes" `Quick
+            test_no_colour_terminal_draws_reason_instead_of_stripes
+        ; test_case "256-colour terminal draws indexed mosaic" `Quick
+            test_256_colour_terminal_draws_indexed_mosaic
         ;] )
     ; ( "fit"
       , [ test_case "no cell size uses bounded mosaic" `Quick

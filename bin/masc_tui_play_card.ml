@@ -11,9 +11,7 @@ let light_pixel = "\255\255\255\255"
 let dark = Palette.make_rgb ~red:0 ~green:0 ~blue:0
 let light = Palette.make_rgb ~red:255 ~green:255 ~blue:255
 
-let project_for_terminal rgb =
-  if Masc_tui_theme.colors_enabled then Palette.best_color rgb else None
-;;
+let project_for_terminal = Masc_tui_image_mosaic.project_for_terminal
 
 type undrawable_reason =
   | Terminal_no_bw

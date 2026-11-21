@@ -42,6 +42,15 @@ let head_was_replaced ~(point : Log.mark) ~(now : Log.mark) =
   (not (String.equal now.trace point.trace)) || now.closed_messages < point.closed_messages
 ;;
 
+(* Where the next unit starts once a replaced head's reset is in: the empty
+   mark of the new head. Only the history's part of the mark moves: the
+   other stores are read on from where the last line left them. From the
+   empty mark the head cannot be lower again, so the reset is not written
+   twice. *)
+let replaced_start ~(point : Log.mark) ~(now : Log.mark) =
+  { point with trace = now.trace; closed_messages = 0 }
+;;
+
 let ( let* ) = Result.bind
 
 let closed ~at ~covered ~(point : Log.mark) ~(now : Log.mark) ~(open_turn : Store.open_turn)
@@ -85,14 +94,11 @@ let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
        -> Ok [])
   | Written { point; open_turn; rows_end = (_ : int); last = (_ : Log.line) } ->
     let replaced = head_was_replaced ~point ~now in
-    (* The reset goes in front of this event's own line, in the same append.
-       Only the history's part of the mark moves: the other stores are read
-       on from where the last line left them. From the empty mark the head
-       cannot be lower again, so the reset is not written twice. *)
+    (* The reset goes in front of this event's own line, in the same append. *)
     let reset, point =
       if replaced
       then (
-        let after = { point with trace = now.trace; closed_messages = 0 } in
+        let after = replaced_start ~point ~now in
         ( [ Log.Reset { at; cause = Unannounced; before = point; after; closed_before = [] } ]
         , after ))
       else [], point
@@ -126,6 +132,20 @@ let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
          Marks.slices covered ~from:point.closed_messages ~through:now.closed_messages
        in
        Ok (reset @ [ announced ~cause ~after closed_before ]))
+;;
+
+type named =
+  | No_log
+  | Named_below of int
+
+let named ~(tail : Store.tail) ~now =
+  match tail with
+  | Nothing_written -> Ok No_log
+  | Written { point; open_turn = (_ : Store.open_turn option); rows_end = (_ : int); last = (_ : Log.line) }
+    ->
+    let* now = now () in
+    let next = if head_was_replaced ~point ~now then replaced_start ~point ~now else point in
+    Ok (Named_below next.closed_messages)
 ;;
 
 let drop ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~after =

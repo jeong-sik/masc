@@ -116,6 +116,29 @@ val drop
   -> after:(Keeper_turn_log.mark -> Keeper_turn_log.mark)
   -> Keeper_turn_log.line
 
+(** Which of the head's messages the Keeper's Memory writer will still read
+    from the head (§5.6). A unit reads a message a line names from the
+    bundle the line points at, and the messages past the last unit's mark
+    from the head. A rewrite of the head may change the first and must
+    leave the others as they are. *)
+type named =
+  | No_log
+  (** Nothing is written. The log a turn or a process start writes later
+      starts at the head it finds, so no unit will read what the head holds
+      now. *)
+  | Named_below of int
+  (** The messages below this count are not read from the head: a line
+      names them, or the log started past them. It is the closed messages
+      the last unit's mark counts, the tail's [point], or [0] when the head
+      was replaced since: the next line is then a reset that puts the mark
+      at the new head's empty start. *)
+
+(** [now] is called only when the log has lines. *)
+val named
+  :  tail:Keeper_turn_log_store.tail
+  -> now:(unit -> (Keeper_turn_log.mark, 'error) result)
+  -> (named, 'error) result
+
 (** The first step of a Keeper's store start (§8.6): a log with no complete
     line gets its [Log_started], at the mark [now] gives. A log that has a
     line gets nothing and [now] is not called, so the stores are read for a

@@ -22,23 +22,19 @@ let alarm_text ~ko : Level.alarm -> string = function
   | Level.E3 ->
     text
       ~ko
-      "E3 안 읽은 것이 있는데 마지막 읽기가 입력 결함이나 실패로 끝남"
-      "E3 unread, and the last read ended in an input fault or a failure"
+      "E3 안 읽은 것이 있고 마지막 읽기가 입력 결함이나 실패로 끝남"
+      "E3 unread; the last read ended in an input fault or failure"
   | Level.E4 ->
     text
       ~ko
-      "E4 한 항목 질문을 크기 사실 없이 거절한 slot 이 있고 말 없는 slot 은 없음"
-      "E4 a slot refused the one-item question without a size fact, and none was silent"
+      "E4 한 항목을 slot 이 모두 거절함, 크기 사실 없는 거절 있음"
+      "E4 every slot refused the one item, one without a size fact"
   | Level.E5 ->
     text
       ~ko
       "E5 Memory 가 선언한 어느 slot 에도 들어가지 않음"
       "E5 Memory fits no declared slot"
-  | Level.W1 ->
-    text
-      ~ko
-      "W1 안 읽은 것을 아직 읽지 못함: 시작 중이거나 lane 값, 끝난 읽기, 답한 slot 이 없음"
-      "W1 unread is not read yet: starting, or no lane value, no ended read, or no slot answered"
+  | Level.W1 -> text ~ko "W1 안 읽은 것을 아직 읽지 못함" "W1 unread is not read yet"
   | Level.W3 ->
     text
       ~ko

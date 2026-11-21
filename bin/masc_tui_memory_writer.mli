@@ -13,7 +13,8 @@ val heading : ko:bool -> string
 
 val level_text : ko:bool -> Masc.Librarian_level.level -> string
 val alarm_text : ko:bool -> Masc.Librarian_level.alarm -> string
-(** The alarm's code and when it is on, as one sentence ([E1 ...]). *)
+(** The alarm's code and what it says, as one sentence ([E1 ...]). Which of
+    an alarm's conditions holds is in the detail's readings, not here. *)
 
 val state_text : ko:bool -> Writer.row -> string
 (** What the writer is doing. A stopped store says why it stopped. *)
@@ -46,7 +47,8 @@ type tone =
 val attention_rows : ko:bool -> Writer.t -> (tone * string) list
 (** The rows that ask for a look, each led by {!heading}: one for every
     alarm on, and one when the answering process runs no writer. Empty for
-    a writer with no alarm and for a Keeper that has no writer. *)
+    a writer with no alarm and for a Keeper that has no writer. A row fits
+    the room the Memory reading gives it on a terminal eighty columns wide. *)
 
 val detail_rows : ko:bool -> moment:(float -> string) -> Writer.t -> string list list
 (** Every reading of the writer, a row of clauses each, the first clause

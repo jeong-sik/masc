@@ -292,15 +292,23 @@ let test_stopped () =
     (member (stopped_wire ~unread:(`Bool true) (obj [ "fault", str "absent" ])))
 ;;
 
+(* The token the row carries for an alarm. The match has no wildcard: an alarm
+   [Librarian_level] gains stops this file compiling until it has a token, and
+   [alarm_tokens] under it is where the alarm goes next. *)
+let alarm_token : Level.alarm -> string = function
+  | Level.E1 -> "E1"
+  | Level.E2 -> "E2"
+  | Level.E3 -> "E3"
+  | Level.E4 -> "E4"
+  | Level.E5 -> "E5"
+  | Level.W1 -> "W1"
+  | Level.W3 -> "W3"
+;;
+
 let alarm_tokens =
-  [ "E1", Level.E1
-  ; "E2", Level.E2
-  ; "E3", Level.E3
-  ; "E4", Level.E4
-  ; "E5", Level.E5
-  ; "W1", Level.W1
-  ; "W3", Level.W3
-  ]
+  List.map
+    (fun alarm -> alarm_token alarm, alarm)
+    [ Level.E1; Level.E2; Level.E3; Level.E4; Level.E5; Level.W1; Level.W3 ]
 ;;
 
 let test_alarms_and_level () =
@@ -440,6 +448,42 @@ let test_attention_rows () =
     [ true; false ]
 ;;
 
+(* The Memory reading draws an attention row two cells in from the frame's
+   inner edge. This is the room the row has on a terminal eighty columns wide
+   before the frame cuts it. *)
+let narrow_terminal_cols = 80
+let reading_indent_cells = 2
+
+let attention_row_room =
+  Masc_tui_frame.inner_width ~cols:narrow_terminal_cols - reading_indent_cells
+;;
+
+(* Every row [attention_rows] draws fits that room, in both languages: the one
+   for a process without writers and the one for each alarm. The width is the
+   one the TUI lays text out by. *)
+let test_attention_rows_fit_a_narrow_terminal () =
+  List.iter
+    (fun (lang, ko) ->
+       let fits name rows =
+         match rows with
+         | [ ((_ : Text.tone), row) ] ->
+           let cells = Masc_tui_message_layout.display_width row in
+           check bool
+             (Printf.sprintf "%s %s: %d of %d cells" lang name cells attention_row_room)
+             true
+             (cells <= attention_row_room)
+         | rows -> failf "%s %s: %d rows, not one" lang name (List.length rows)
+       in
+       fits "no writer in the process" (Text.attention_rows ~ko None_in_process);
+       List.iter
+         (fun (token, alarm) ->
+            fits token
+              (Text.attention_rows ~ko
+                 (shown ~level:(Level.level [ alarm ]) ~alarms:[ alarm ] (open_row ()))))
+         alarm_tokens)
+    [ "ko", true; "en", false ]
+;;
+
 let moment at = Printf.sprintf "t%.0f" at
 
 let test_detail_rows () =
@@ -567,6 +611,8 @@ let () =
         ; test_case "no writer in the process is not a starting writer" `Quick
             test_no_writer_in_the_process_is_not_a_starting_writer
         ; test_case "rows that ask for a look" `Quick test_attention_rows
+        ; test_case "rows that ask for a look fit a narrow terminal" `Quick
+            test_attention_rows_fit_a_narrow_terminal
         ; test_case "every reading in the detail" `Quick test_detail_rows
         ] )
     ]

@@ -2,4 +2,5 @@
 (test
  (name test_tui_memory_writer)
  (modules test_tui_memory_writer)
- (libraries alcotest masc masc_tui_memory_writer masc_tui_value yojson))
+ (libraries alcotest masc masc_tui_frame masc_tui_memory_writer masc_tui_message_layout
+  masc_tui_value yojson))

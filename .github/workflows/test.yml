@@ -340,6 +340,21 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # The whole frame a TUI E2E suite failed on, kept by
+      # test/tui_failure_frame.py (task-3866). The suite's own dump prints the
+      # last 3,000 bytes, which can cut the row an assertion was about; this
+      # directory holds the unclipped frame, so the line that vanished can
+      # still be read after the run. A passing run writes nothing, hence
+      # ignore rather than warn.
+      - name: Upload the TUI E2E failure frames
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tui-e2e-frames
+          path: ${{ runner.temp }}/tui-e2e-frames
+          if-no-files-found: ignore
+          retention-days: 14
+
       # Where the same run's time went: seconds per kind of dune process
       # (compile, link, test run) and the slowest of each, summarised by
       # scripts/ci-run-test-suite.sh from dune's trace. The trace itself

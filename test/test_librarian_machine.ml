@@ -265,6 +265,7 @@ let act_text : Machine.act_answer -> string = function
   | Not_done Turn_log_unread -> "turn log unread"
   | Not_done (Not_the_head { now }) -> "not the head, now " ^ target_text now
   | Not_done Not_the_faulted_line -> "not the faulted line"
+  | Not_done Turn_log_stopped_on_line -> "the turn log is stopped on the line"
   | Not_done Content_unread -> "content unread"
   | Not_done (Act_unavailable why) -> unavailable_text why
 ;;
@@ -1729,6 +1730,52 @@ let test_skip_line_passes_the_line_reading_stops_on () =
     (fiber_text (Machine.fiber_change ~before:passed ~after:same))
 ;;
 
+(* The line is the last one, so the read of the tail that every append of
+   the turn log starts with fails on it and the log grows no more. The act
+   does not pass it: the writer keeps how the last ask ended, and E3 stays
+   on. An [Opened] after the line does not tell that read where the next
+   unit starts, so the read still meets the line. Once the turn's [Closed]
+   is there the read ends before the line, and the line is passed. *)
+let test_skip_line_does_not_pass_the_line_the_turn_log_stops_on () =
+  let place = started_place () in
+  let bad = write_bad_line place in
+  let asking = booted ~lane:(declared [ fast ]) place ~at:100.0 in
+  let resting =
+    step "the ask that met the line" place asking
+      (ended asking 1 (Input_fault (Line_unreadable { offset = bad })))
+      ~state:"resting, holding: " ~fiber:"cancel"
+  in
+  let same, answer = skip_line place resting ~offset:bad in
+  check string "the last line" "the turn log is stopped on the line" (act_text answer);
+  check string "leaves the writer resting" "resting, holding: " (state_text same);
+  check string "with how the last ask ended"
+    (Printf.sprintf "input fault: line at %d" bad)
+    (last_read_text same);
+  check (list string) "and its alarm on" [ "E3" ] (alarms_of same);
+  let turn =
+    append place ~at_end:(length place)
+      (Turn_log.Opened
+         { at = 101.0
+         ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:7
+         ; runtime = "glm-main"
+         ; task = No_task
+         ; stimuli = []
+         ; baseline = mark 0
+         })
+  in
+  let (_ : Machine.t), answer = skip_line place same ~offset:bad in
+  check string "with a turn opened after it" "the turn log is stopped on the line"
+    (act_text answer);
+  let (_ : int) =
+    append place ~at_end:(length place)
+      (Turn_log.Closed
+         { turn; at = 102.0; outcome = Completed; after = mark 64; unattributed = []; own = [] })
+  in
+  let passed, answer = skip_line place same ~offset:bad in
+  check string "with that turn closed after it" "done" (act_text answer);
+  check string "the fault is forgotten" "none" (last_read_text passed)
+;;
+
 (* The act passes nothing but the line reading stops on now: not a line
    behind a unit with items, not a line of another turn log, and nothing of
    a file that cannot be read or under a store that is stopped. *)
@@ -1844,6 +1891,8 @@ let () =
         ; test_case "a restart on an unread turn log" `Quick test_restart_on_an_unread_turn_log
         ; test_case "a skip of the line reading stops on" `Quick
             test_skip_line_passes_the_line_reading_stops_on
+        ; test_case "a skip of the line the turn log stops on" `Quick
+            test_skip_line_does_not_pass_the_line_the_turn_log_stops_on
         ; test_case "a skip of any other line" `Quick test_skip_line_passes_no_other_line
         ] )
     ]

@@ -410,6 +410,7 @@ let act_text : Act.answer -> string = function
        | Some target -> Yojson.Safe.to_string (Act.target_json target)
        | None -> "none")
   | Refused Not_the_faulted_line -> "refused: not the faulted line"
+  | Refused Turn_log_stopped_on_line -> "refused: the turn log is stopped on the line"
   | Refused Content_unread -> "refused: content unread"
   | Refused (Act_unavailable (Store_stopped stop)) -> "refused: stopped: " ^ stop_text stop
   | Refused (Act_unavailable Keeper_retired) -> "refused: keeper not registered"
@@ -539,27 +540,56 @@ let test_operator_restarts_reading () =
 ;;
 
 (* A line that does not decode stands where the Keeper's turn log ends, and
-   reading stops on it. The operator passes it by its offset. *)
+   reading stops on it. While it is the last line the turn log stops on it
+   too, and the act is refused with nothing committed. With a line after it
+   that closes a turn, the operator passes it by its offset. *)
 let test_operator_skips_a_line () =
   with_workspace @@ fun a ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.ensure_memory_writer ~sw ~config:a keeper_name;
   let act action = Act.act ~base_path:a.base_path ~keeper:keeper_name ~actor:"operator-1" action in
+  let keepers_dir = Workspace.keepers_runtime_dir a in
   let turns_path =
-    Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir:(Workspace.keepers_runtime_dir a)
-      ~keeper_id:keeper_name
+    Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
   in
-  let row = "not json" in
-  let offset =
+  let length () =
     match Fs_compat.file_size turns_path with
     | Some length -> length
     | None -> fail "the Keeper has no turn log"
   in
+  let row = "not json" in
+  let offset = length () in
   Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 turns_path
     (fun channel -> Out_channel.output_string channel (row ^ "\n"));
   check string "an offset that is not the line's" "refused: not the faulted line"
     (act_text (act (Skip_line { offset = offset + 1 })));
   let before = List.length (commits a) in
+  check string "the last line" "refused: the turn log is stopped on the line"
+    (act_text (act (Skip_line { offset })));
+  check int "is not passed" before (List.length (commits a));
+  (* The mark the fixture's turn log starts at: the turn leaves nothing to
+     read. *)
+  let unmoved : Masc.Keeper_turn_log.mark =
+    { trace = "trace-" ^ keeper_name
+    ; closed_messages = 0
+    ; session = ""
+    ; history_bytes = 0
+    ; internal_bytes = 0
+    ; chat_bytes = 0
+    ; external_rows = 0
+    }
+  in
+  Masc_test_deps.append_turn_log_lines ~who:"the turn after the line" ~keepers_dir ~keeper_name
+    ~at_end:(length ())
+    ( Masc.Keeper_turn_log.Closed
+        { turn = offset
+        ; at = 2.0
+        ; outcome = Completed
+        ; after = unmoved
+        ; unattributed = []
+        ; own = []
+        }
+    , [] );
   check string "the line's offset" "open" (act_text (act (Skip_line { offset })));
   (match List.rev (commits a) with
    | last_line :: _ ->

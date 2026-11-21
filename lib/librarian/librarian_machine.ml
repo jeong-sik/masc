@@ -263,12 +263,12 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
     then next_ask place t ~at store
     else { t with state = Resting store; last_read = Some last }
   in
-  (* [Not_all] at one item. With no slot silent, every slot declared now
-     refused the question and one gave no size: the end E4 reads (§12.2). It
-     keeps the lane value the verdict was folded over, the one declared now,
-     which is not the one the ask started with after a declaration that
-     changed only slots. *)
-  let not_all t =
+  (* [Not_all] at one item. With no slot silent, every slot the lane walks
+     now refused the question and not every slot it declares gave a size:
+     the end E4 reads (§12.2). It keeps the lane value the verdict was
+     folded over, the one declared now, which is not the one the ask started
+     with after a declaration that changed only slots. *)
+  let not_all (t : t) =
     match t.lane with
     | Some declared when not silent ->
       rest t

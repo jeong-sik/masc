@@ -27,9 +27,10 @@ type read =
       }
   (** No slot answered a question that offered one item, every slot [lane]
       walks refused it, and {!Librarian_bottom.fold} over [lane] was
-      [Not_all]: one of its slots gave no size, so the writer rests with no
-      step below one item ([m.last = "notall_r"]). This end is kept here and
-      not as a {!Lane}; E4 reads it and no other end (§12.2). *)
+      [Not_all]: a slot it walks gave no size, or it declares one the
+      registry did not admit. The writer rests with no step below one item
+      ([m.last = "notall_r"]). This end is kept here and not as a {!Lane};
+      E4 reads it and no other end (§12.2). *)
   | Lane of
       { one_item : bool
       (** The question offered one item, with Memory or alone ([m.lastOne]). *)

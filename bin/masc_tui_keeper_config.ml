@@ -741,22 +741,24 @@ let editable_row label value = marked_row editable_glyph Masc_tui_theme.Sgr.cyan
 let read_only_row label value = marked_row read_only_glyph Masc_tui_theme.Sgr.dim label value
 
 (* The marks of RFC tui-one-screen-grammar 6.4: a field the document holds
-   empty is absent (Masc_tui_theme.Glyph.no_value), and a field the read document does not carry
-   was not reported (the unreported mark). [null] is not absent: the
-   server falls back to its default, so it says so. *)
-let string_value = function
+   empty is absent (the no-value mark), and a field the read document does
+   not carry was not reported (the unreported mark). [null] is not absent:
+   the server falls back to its default, so it says so. The words the screen
+   writes itself are in the screen's language (7); the values the server
+   sent are drawn as sent. *)
+let string_value ~ko = function
   | Some (`String value) when String.trim value <> "" -> value
   | Some (`String _) -> Masc_tui_theme.Glyph.no_value
-  | Some `Null -> "default"
+  | Some `Null -> if ko then "기본값" else "default"
   | Some value -> Yojson.Safe.to_string value
   | None -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
-let bool_value = function
-  | Some (`Bool true) -> "on"
-  | Some (`Bool false) -> "off"
-  | value -> string_value value
+let bool_value ~ko = function
+  | Some (`Bool true) -> if ko then "켜짐" else "on"
+  | Some (`Bool false) -> if ko then "꺼짐" else "off"
+  | value -> string_value ~ko value
 
-let string_list_value = function
+let string_list_value ~ko = function
   | Some (`List []) -> Masc_tui_theme.Glyph.no_value
   | Some (`List values) ->
       values
@@ -764,18 +766,19 @@ let string_list_value = function
            | `String value -> value
            | value -> Yojson.Safe.to_string value)
       |> String.concat ", "
-  | value -> string_value value
+  | value -> string_value ~ko value
 
-let int_override_value = function
-  | Some `Null -> "default runtime window"
-  | Some (`Int value) -> Masc_tui_value.Count.grouped value ^ " tokens"
-  | value -> string_value value
+let int_override_value ~ko = function
+  | Some `Null -> if ko then "런타임 기본값" else "default runtime window"
+  | Some (`Int value) ->
+      Masc_tui_value.Count.grouped value ^ (if ko then " 토큰" else " tokens")
+  | value -> string_value ~ko value
 
-let skill_selection_value = function
-  | Some `Null -> "all published Skills"
+let skill_selection_value ~ko = function
+  | Some `Null -> if ko then "게시된 Skill 전부" else "all published Skills"
   | Some (`List []) -> Masc_tui_theme.Glyph.no_value
-  | Some (`List names) -> string_list_value (Some (`List names))
-  | value -> string_value value
+  | Some (`List names) -> string_list_value ~ko (Some (`List names))
+  | value -> string_value ~ko value
 
 (* A stored field usually ends with a newline, which splits into a trailing
    empty line. Left in, it doubles the gap before the next heading and makes
@@ -1020,6 +1023,11 @@ let config_revision_value = function
    rows would be a different number than the one [e] shows. *)
 let view_lines ?(ko = true) ~sanitize json =
   let say korean english = if ko then korean else english in
+  let string_value = string_value ~ko
+  and bool_value = bool_value ~ko
+  and string_list_value = string_list_value ~ko
+  and int_override_value = int_override_value ~ko
+  and skill_selection_value = skill_selection_value ~ko in
   let at path = member_path path json in
   let text value = sanitize (value ()) in
   let editable_value_row label value = editable_row label (text value) in

@@ -3539,6 +3539,8 @@
 
 (include stanzas/test_workspace_init_state_parity.inc)
 
+(include stanzas/test_workspace_memory_narrowing.inc)
+
 (include stanzas/test_http_auth_strict_flag.inc)
 
 (include stanzas/test_serving_domain_isolation_flag.inc)

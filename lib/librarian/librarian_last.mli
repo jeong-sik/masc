@@ -4,8 +4,8 @@
     next ask ends (§12.2).
 
     [specs/bug-models/LibrarianWriter.tla] names these [m.last], [m.lastOne],
-    [m.lastSil], [m.lastBasis] ({!read}), [m.room], [m.roomMem],
-    [m.roomLane] ({!room}) and [m.alone]. *)
+    [m.lastSil], [m.lastBasis], [m.lastLane] ({!read}), [m.room],
+    [m.roomMem], [m.roomLane] ({!room}) and [m.alone]. *)
 
 module Digest := Agent_core.Checkpoint_objects
 
@@ -16,6 +16,20 @@ type read =
   | Committed
   (** A read or a skip was committed ([m.last = "answered"]). A commit that
       failed sets nothing. *)
+  | Refused_not_all_sized of
+      { basis : Digest.digest
+      (** The snapshot the question was made against ([m.lastBasis]). *)
+      ; lane : Librarian_memory_lane.t
+      (** The lane value declared when the ask ended: the one whose slots
+          the verdict was folded over ([m.lastLane]). *)
+      ; slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.unanswered) list
+      (** Every slot of the walk, as in {!Lane}. *)
+      }
+  (** No slot answered a question that offered one item, every slot [lane]
+      walks refused it, and {!Librarian_bottom.fold} over [lane] was
+      [Not_all]: one of its slots gave no size, so the writer rests with no
+      step below one item ([m.last = "notall_r"]). This end is kept here and
+      not as a {!Lane}; E4 reads it and no other end (§12.2). *)
   | Lane of
       { one_item : bool
       (** The question offered one item, with Memory or alone ([m.lastOne]). *)

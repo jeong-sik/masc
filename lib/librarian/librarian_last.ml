@@ -3,6 +3,11 @@ module Digest = Agent_core.Checkpoint_objects
 
 type read =
   | Committed
+  | Refused_not_all_sized of
+      { basis : Digest.digest
+      ; lane : Lane.t
+      ; slots : (Lane.slot_key * Librarian_slot_outcome.unanswered) list
+      }
   | Lane of
       { one_item : bool
       ; silent : bool

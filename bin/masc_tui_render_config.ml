@@ -12,11 +12,6 @@ module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Theme_choice = Masc_tui_theme_choice
 
-let wrap_style style text =
-  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
-  then text
-  else style ^ text ^ Ansi.reset
-
 (* How long ago the running binary's commit landed. Coarse on purpose: the
    question is "is this the build I think it is", and minutes answer it while
    seconds only look precise. Past a minute the age is the shared ladder
@@ -289,8 +284,8 @@ let render_runtime_params (state : state) =
            let label = if String.equal id "" then ui_text state ~ko:"(그룹 없음)" ~en:"(unfiled)" else id in
            box_line buf cols
              (Printf.sprintf "  %s %s"
-                (wrap_style (Theme.accent ()) (Terminal_text.single_line label))
-                (wrap_style (Theme.recede ()) (Terminal_text.single_line description)))
+                (Ansi.wrap_style (Theme.accent ()) (Terminal_text.single_line label))
+                (Ansi.wrap_style (Theme.recede ()) (Terminal_text.single_line description)))
          | Some (`Row (row_index, row)) ->
            let open Tui_decode in
            let value_width = max 4 (min 16 ((framed_inner_width cols - 7) / 3)) in
@@ -314,9 +309,9 @@ let render_runtime_params (state : state) =
            let line =
              Printf.sprintf "%s  %s %s %s"
                (if row_index = cursor then "\xe2\x80\xba " else "  ")
-               (wrap_style key_style glyph)
-               (wrap_style key_style key_text)
-               (wrap_style val_style val_text)
+               (Ansi.wrap_style key_style glyph)
+               (Ansi.wrap_style key_style key_text)
+               (Ansi.wrap_style val_style val_text)
            in
            if row_index = cursor then box_line_selected_styled buf cols line
            else box_line buf cols line
@@ -805,9 +800,9 @@ let render_prompt_registry (state : state) =
         progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
         ^ held_back_note
     | None ->
-        wrap_style (Theme.recede ()) count_text
+        Ansi.wrap_style (Theme.recede ()) count_text
         ^ held_back_note
-        ^ wrap_style (Theme.recede ())
+        ^ Ansi.wrap_style (Theme.recede ())
             (" · "
              ^ if state.prompts_show_fragments then ui_text state ~ko:"내부 조각 포함" ~en:"including fragments"
                else ui_text state ~ko:"주 프롬프트" ~en:"primary prompts")
@@ -937,7 +932,7 @@ let render_runtime_prompt_assets (state : state) =
     | Some sheet ->
         progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
     | None ->
-        wrap_style (Theme.recede ())
+        Ansi.wrap_style (Theme.recede ())
           (Printf.sprintf "%s · %s" count_text
              (ui_text state ~ko:"읽기 전용" ~en:"read only"))
   in
@@ -1375,7 +1370,7 @@ let render_presets (state : state) =
             (if ko then "%d개"
              else if total = 1 then "%d preset" else "%d presets") total
         in
-        wrap_style (Theme.recede ()) count_text ^ "  "
+        Ansi.wrap_style (Theme.recede ()) count_text ^ "  "
         ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
     | Some sheet, None, Some _ ->
         progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
@@ -1385,11 +1380,11 @@ let render_presets (state : state) =
             (if ko then "%d개"
              else if total = 1 then "%d preset" else "%d presets") total
         in
-        wrap_style (Theme.recede ()) count_text
+        Ansi.wrap_style (Theme.recede ()) count_text
     | None, None, None ->
-        wrap_style (Theme.recede ()) (ui_text state ~ko:"미조회" ~en:"unread")
+        Ansi.wrap_style (Theme.recede ()) (ui_text state ~ko:"미조회" ~en:"unread")
     | None, None, Some _ ->
-        wrap_style (Theme.recede ()) (ui_text state ~ko:"읽기 실패" ~en:"read failed")
+        Ansi.wrap_style (Theme.recede ()) (ui_text state ~ko:"읽기 실패" ~en:"read failed")
   in
   box_line buf cols
     (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
@@ -1587,7 +1582,7 @@ let render_themes (state : state) =
        ~title:
          (config_pane_title
             ~reading:
-              (wrap_style (Theme.recede ())
+              (Ansi.wrap_style (Theme.recede ())
                  (Printf.sprintf
                     (if state.ui_language = Lang_ko then "테마 %d개 · 원래 대비 통과 %d개"
                      else "%d themes · %d native-pass")
@@ -1611,7 +1606,7 @@ let render_themes (state : state) =
     let chip label filter count =
       (label ^ " " ^ string_of_int count, state.theme_filter = filter, filter)
     in
-    wrap_style (Theme.recede ()) (ui_text state ~ko:"f:필터  " ~en:"f:filter  ")
+    Ansi.wrap_style (Theme.recede ()) (ui_text state ~ko:"f:필터  " ~en:"f:filter  ")
     ^ tab_strip
         ~width:
           (tab_strip_width ~cols ~before:(ui_text state ~ko:"  f:필터  " ~en:"  f:filter  ") ~after:explanation)
@@ -1621,7 +1616,7 @@ let render_themes (state : state) =
         ; chip (ui_text state ~ko:"밝게" ~en:"Light") `Light light_count
         ]
   in
-  box_line buf cols ("  " ^ filter_tag ^ wrap_style (Theme.recede ()) explanation);
+  box_line buf cols ("  " ^ filter_tag ^ Ansi.wrap_style (Theme.recede ()) explanation);
   box_line_styled buf cols ~style:(Theme.recede ())
     ("    " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") name_width ^ " "
      ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
@@ -1664,7 +1659,7 @@ let render_themes (state : state) =
           if entry.lifted = 0 then Theme.ok () else Theme.warn ()
         in
         let suffix_styled =
-          polarity_text ^ wrap_style contrast_style contrast_text
+          polarity_text ^ Ansi.wrap_style contrast_style contrast_text
         in
         if is_selected then begin
           if String.equal (Theme.ok ()) "" then
@@ -1710,23 +1705,23 @@ let render_themes (state : state) =
     box_line buf cols
       (Printf.sprintf "  %s %s  %s  %s  %s  %s  %s"
          (if ko then "예시:" else "Sample:")
-         (wrap_style (Theme.ok ()) (if ko then "\xe2\x97\x8f 정상" else "\xe2\x97\x8f Ok"))
-         (wrap_style (Theme.warn ()) (if ko then "\xe2\x96\xb2 주의" else "\xe2\x96\xb2 Warn"))
-         (wrap_style (Theme.bad ()) (if ko then "\xe2\x9c\x95 오류" else "\xe2\x9c\x95 Bad"))
-         (wrap_style (Theme.info ()) (if ko then "\xe2\x97\x90 진행" else "\xe2\x97\x90 Active"))
-         (wrap_style (Theme.keeper_origin ()) "@keeper")
-         (wrap_style (Theme.tool_origin ()) (if ko then "도구" else "tool")));
+         (Ansi.wrap_style (Theme.ok ()) (if ko then "\xe2\x97\x8f 정상" else "\xe2\x97\x8f Ok"))
+         (Ansi.wrap_style (Theme.warn ()) (if ko then "\xe2\x96\xb2 주의" else "\xe2\x96\xb2 Warn"))
+         (Ansi.wrap_style (Theme.bad ()) (if ko then "\xe2\x9c\x95 오류" else "\xe2\x9c\x95 Bad"))
+         (Ansi.wrap_style (Theme.info ()) (if ko then "\xe2\x97\x90 진행" else "\xe2\x97\x90 Active"))
+         (Ansi.wrap_style (Theme.keeper_origin ()) "@keeper")
+         (Ansi.wrap_style (Theme.tool_origin ()) (if ko then "도구" else "tool")));
     box_line buf cols
       (Printf.sprintf
          (if ko then
             "  구문: %s x = %s in %s  %s  %s"
           else
             "  Syntax: %s x = %s in %s  %s  %s")
-         (wrap_style (Theme.Syntax.keyword ()) "let")
-         (wrap_style (Theme.Syntax.string ()) "\"val\"")
-         (wrap_style (Theme.Syntax.code_number ()) "123")
-         (wrap_style (Theme.Syntax.diff_added ()) (if ko then "(+증가)" else "(+gain)"))
-         (wrap_style (Theme.Syntax.diff_removed ()) (if ko then "(\xe2\x88\x92감소)" else "(\xe2\x88\x92loss)")));
+         (Ansi.wrap_style (Theme.Syntax.keyword ()) "let")
+         (Ansi.wrap_style (Theme.Syntax.string ()) "\"val\"")
+         (Ansi.wrap_style (Theme.Syntax.code_number ()) "123")
+         (Ansi.wrap_style (Theme.Syntax.diff_added ()) (if ko then "(+증가)" else "(+gain)"))
+         (Ansi.wrap_style (Theme.Syntax.diff_removed ()) (if ko then "(\xe2\x88\x92감소)" else "(\xe2\x88\x92loss)")));
   end;
   let lang_toggle =
     pressable Press_ui_language
@@ -1767,10 +1762,10 @@ let config_path_note (state : state) =
             path_from_root ~root:(Canonical_path.to_string identity.Tui_decode.sid_masc_root) path
         | None -> path
       in
-      wrap_style (Theme.recede ()) shown
+      Ansi.wrap_style (Theme.recede ()) shown
   | None, Some _ -> ""
   | None, None ->
-      wrap_style (Theme.recede ()) (here_missing_reading state ~error:None)
+      Ansi.wrap_style (Theme.recede ()) (here_missing_reading state ~error:None)
 
 (* A provider id such as [codex_727e6d05] does not say which account it is,
    and one account can sit under several ids. The Models pane names the
@@ -2503,7 +2498,7 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
   let buf = Buffer.create 2048 in
   let field name value =
     voice_body_line buf cols
-      (Printf.sprintf "  %s %s" (wrap_style (Theme.recede ()) (fit_width name 12)) (Terminal_text.single_line value))
+      (Printf.sprintf "  %s %s" (Ansi.wrap_style (Theme.recede ()) (fit_width name 12)) (Terminal_text.single_line value))
   in
   let save_signature =
     match session.vws_save with
@@ -2610,7 +2605,7 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
   voice_body_line buf cols "";
   voice_body_line buf cols
     (Printf.sprintf "  %s  %s"
-       (wrap_style (Theme.recede ()) (ui_text state ~ko:"단계" ~en:"step" ^ " " ^ position))
+       (Ansi.wrap_style (Theme.recede ()) (ui_text state ~ko:"단계" ~en:"step" ^ " " ^ position))
        step_prompt);
   voice_body_line buf cols "";
   (* The answer being given. A closed set shows its current value and the keys
@@ -2619,13 +2614,13 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
   (match session.vws_step with
    | Voice_wizard.Section ->
      box_line head cols
-       (Printf.sprintf "    %s   %s" (wrap_style Ansi.bold side)
-          (wrap_style (Theme.recede ()) (ui_text state ~ko:"←/→ 또는 Space로 전환" ~en:"←/→ or space to switch")))
+       (Printf.sprintf "    %s   %s" (Ansi.wrap_style Ansi.bold side)
+          (Ansi.wrap_style (Theme.recede ()) (ui_text state ~ko:"←/→ 또는 Space로 전환" ~en:"←/→ or space to switch")))
    | Voice_wizard.Provider ->
      box_line head cols
        (Printf.sprintf "    %s   %s"
-          (wrap_style Ansi.bold (Voice_wizard.provider_label draft.Voice_wizard.provider))
-          (wrap_style (Theme.recede ()) (ui_text state ~ko:"←/→ 또는 Space로 전환" ~en:"←/→ or space to switch")))
+          (Ansi.wrap_style Ansi.bold (Voice_wizard.provider_label draft.Voice_wizard.provider))
+          (Ansi.wrap_style (Theme.recede ()) (ui_text state ~ko:"←/→ 또는 Space로 전환" ~en:"←/→ or space to switch")))
    | Voice_wizard.Review ->
      (match Voice_wizard.gaps draft with
       | [] ->
@@ -2683,13 +2678,13 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
   (match session.vws_step with
    | Voice_wizard.Credential when String.trim session.vws_input = "" ->
      voice_body_line buf cols
-       ("    " ^ wrap_style (Theme.recede ())
+       ("    " ^ Ansi.wrap_style (Theme.recede ())
           (ui_text state ~ko:"비워 두면 Authorization 헤더를 보내지 않습니다" ~en:"blank sends no Authorization header"))
    | Voice_wizard.Address when String.trim session.vws_input = "" ->
      List.iter
        (fun (what, address) ->
          voice_body_line buf cols
-           ("    " ^ wrap_style (Theme.recede ())
+           ("    " ^ Ansi.wrap_style (Theme.recede ())
               (Printf.sprintf "%s %s: %s" (ui_text state ~ko:"예시" ~en:"try") what address)))
        (Voice_wizard.suggested_addresses draft.Voice_wizard.section)
    | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Name | Voice_wizard.Model
@@ -2809,7 +2804,7 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   (* Two selectors move at once, each under its own keys, so neither is the
      screen's one position; each names the choice it holds. *)
   let selector label items cursor draw =
-    let prefix = Printf.sprintf "  %s %s: " (wrap_style (Theme.accent ()) "\xe2\x80\xba") label in
+    let prefix = Printf.sprintf "  %s %s: " (Ansi.wrap_style (Theme.accent ()) "\xe2\x80\xba") label in
     let prefix_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr prefix) in
     let value =
       match List.nth_opt items cursor with
@@ -2818,7 +2813,7 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
     in
     let room = max 1 (framed_inner_width cols - prefix_cells) in
     box_line head cols
-      (prefix ^ wrap_style Ansi.bold (Message_layout.fit_middle room value))
+      (prefix ^ Ansi.wrap_style Ansi.bold (Message_layout.fit_middle room value))
   in
   box_line head cols
     (config_pane_title ~cols ?reading:title_reading
@@ -2910,7 +2905,7 @@ let render_voice (state : state) =
   in
   let field name value =
     voice_body_line buf cols
-      (Printf.sprintf "  %s %s" (wrap_style (Theme.recede ()) (fit_width name 18)) (Terminal_text.single_line value))
+      (Printf.sprintf "  %s %s" (Ansi.wrap_style (Theme.recede ()) (fit_width name 18)) (Terminal_text.single_line value))
   in
   let member path json =
     List.fold_left
@@ -2953,16 +2948,16 @@ let render_voice (state : state) =
                       match member [ "enabled" ] item with
                       | Some (`Bool false) ->
                           false,
-                          wrap_style (Theme.recede ())
+                          Ansi.wrap_style (Theme.recede ())
                             (ui_text state ~ko:"  (사용 안 함)" ~en:"  (disabled)")
                       | Some _ | None -> true, ""
                     in
                     let dot =
                       if enabled then
-                        wrap_style (Theme.ok ())
+                        Ansi.wrap_style (Theme.ok ())
                           (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled)
                       else
-                        wrap_style (Theme.recede ())
+                        Ansi.wrap_style (Theme.recede ())
                           (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting)
                     in
                     (* runtime.toml is an operator's file, not this pane's
@@ -2974,7 +2969,7 @@ let render_voice (state : state) =
                       (Printf.sprintf "    %s %s %s %s%s"
                          dot
                          (fit_width (Terminal_text.single_line id) 20)
-                         (wrap_style (Theme.recede ()) (fit_width (Terminal_text.single_line kind) 18))
+                         (Ansi.wrap_style (Theme.recede ()) (fit_width (Terminal_text.single_line kind) 18))
                          (Terminal_text.single_line address) off))
               items
         | Some _ | None -> [])
@@ -3010,7 +3005,7 @@ let render_voice (state : state) =
        (* The distinction the pane exists for, said in words rather than drawn
           as an empty section. *)
        voice_body_line_styled buf cols ~style:(Theme.warn ()) (ui_text state ~ko:"  음성 설정을 읽지 못했습니다" ~en:"  Voice settings did not load");
-       voice_body_line buf cols ("  " ^ wrap_style (Theme.recede ()) (Terminal_text.single_line message))
+       voice_body_line buf cols ("  " ^ Ansi.wrap_style (Theme.recede ()) (Terminal_text.single_line message))
    | None, None ->
        if server_authority_ready state then
          voice_body_line_styled buf cols ~style:(Theme.info ())
@@ -3052,7 +3047,7 @@ let render_voice (state : state) =
        voice_body_line buf cols "";
        voice_body_line_styled buf cols ~style:(Theme.warn ())
          (ui_text state ~ko:"  엔드포인트 목록을 읽지 못했습니다" ~en:"  The endpoint list could not be read");
-       voice_body_line buf cols ("  " ^ wrap_style (Theme.recede ()) (Terminal_text.single_line message)));
+       voice_body_line buf cols ("  " ^ Ansi.wrap_style (Theme.recede ()) (Terminal_text.single_line message)));
   voice_section
     (ui_text state ~ko:"입력 장치와 설정 출처" ~en:"Input device and config source");
   let device_missing =
@@ -3093,7 +3088,7 @@ let render_voice (state : state) =
     | `Unreported -> ui_text state ~ko:"보고 안 됨" ~en:"Not reported"
   in
   voice_body_line buf cols
-    ("  " ^ wrap_style (Theme.recede ())
+    ("  " ^ Ansi.wrap_style (Theme.recede ())
        (Printf.sprintf "%s: %s" (ui_text state ~ko:"설정 출처" ~en:"Config source") source_line));
   (* The keys are the table's, as on every other Config pane. The row was
      written here and left out Esc and q, which the fitter keeps only when
@@ -3298,7 +3293,7 @@ let render_config (state : state) =
                 let line =
                   Printf.sprintf "%s%s  %s"
                     (if is_selected then "\xe2\x80\xba " else "  ")
-                    (wrap_style (Theme.recede ()) (Printf.sprintf "%4d" (scroll + i + 1)))
+                    (Ansi.wrap_style (Theme.recede ()) (Printf.sprintf "%4d" (scroll + i + 1)))
                     line
                 in
                 if is_selected then

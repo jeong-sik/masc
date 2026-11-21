@@ -110,8 +110,8 @@ let memory_of facts : Current.t =
   }
 ;;
 
-let opened ?(runtime = "glm") () : Read_unit.opened =
-  { runtime; task = Turn_log.No_task; stimuli = [] }
+let opened ?(runtime = "glm") () : Read_unit.opened_line =
+  Opened_read { runtime; task = Turn_log.No_task; stimuli = [] }
 ;;
 
 let offered_of (units : Read_unit.t list) : Masc.Librarian_width.offered =
@@ -630,6 +630,7 @@ let test_prompt_contract () =
     ; "u1"
     ; "closed_at"
     ; "closed_after_admission"
+    ; {|"unreadable"|}
     ; "unattributed"
     ; "runtime_context"
     ; "missing"

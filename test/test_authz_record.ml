@@ -419,6 +419,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "runtime"
     ; "keeper"
     ; "purge"
+    ; "legacy_attribution"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

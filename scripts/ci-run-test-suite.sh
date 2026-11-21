@@ -259,6 +259,12 @@ run_suite_under_deadline() {
   # on device", both after the Test step had started: neither reached the
   # read that used to happen after the wait, so a file-only copy loses
   # exactly the observation the next run needs to name its eater.
+  # The watcher appends, so a job that runs this wrapper twice would pair two
+  # runs' bands without a seam. Mark the seam so a reader cannot mistake the
+  # second run's first band for the first run's later observation.
+  if [ -s "$disk_evidence_log" ]; then
+    echo "[test-suite] --- another invocation of this wrapper appends below ($(date -u +%FT%TZ)); the lines above came from the run before it ---" >> "$disk_evidence_log"
+  fi
   (
     exec > >(tee -a "$disk_evidence_log") 2>&1
     while kill -0 "$dune_pid" 2>/dev/null; do

@@ -1155,7 +1155,16 @@ let past_max_context
   let ( let* ) = Option.bind in
   let* ledger = ledger in
   let* input_limit = input_limit in
-  let* next_turn_peak = Keeper_model_input_ledger.next_turn_peak ledger in
+  (* When turn growth has not been measured yet (right after a ledger start or
+     prefix change), a provider-counted [last_input_tokens] that already exceeds
+     [input_limit] is an exact lower bound (zero-growth) proving the window is
+     already past budget. Keep {!Keeper_model_input_ledger.next_turn_peak}
+     unchanged so [held_window] still requires a measured turn growth. *)
+  let* next_turn_peak =
+    match Keeper_model_input_ledger.next_turn_peak ledger with
+    | Some _ as peak -> peak
+    | None -> Keeper_model_input_ledger.last_input_tokens ledger
+  in
   let* end_atom =
     match turn_boundary with
     | Keeper_carried_front.Turn_boundary { end_atom } -> Some end_atom

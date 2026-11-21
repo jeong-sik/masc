@@ -632,7 +632,12 @@ let test_a_turn_that_calls_no_tool_counts_its_first_request () =
 let test_no_growth_before_a_turn_opened_under_the_window () =
   let _, ledger = observe_all [ true, 0, 10, Some 1_000; false, 0, 12, Some 2_900 ] in
   check (option int) "the turn the window opened in has no count before it" None
-    (Ledger.next_turn_peak ledger)
+    (Ledger.next_turn_peak ledger);
+  check (option int) "last_input_tokens still exposes the provider count" (Some 2_900)
+    (Ledger.last_input_tokens ledger);
+  let _, uncounted = observe_all [ true, 0, 10, Some 1_000; false, 0, 12, None ] in
+  check (option int) "uncounted last request leaves last_input_tokens None" None
+    (Ledger.last_input_tokens uncounted)
 ;;
 
 (* A front that moves opens another window: its counts start over, and how

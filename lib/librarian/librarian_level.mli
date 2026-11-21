@@ -5,7 +5,7 @@
     last asks stay off until the next one ends.
 
     The names are [specs/bug-models/LibrarianWriter.tla]'s [E1] to [E5],
-    [W1] and [W3], under [E4Rule = "narrow"] and [E5Rule = "held_now"]. W2
+    [W1] and [W3], under [E4Rule = "held_now"] and [E5Rule = "held_now"]. W2
     reads where the Keeper's latest request started (§11), which the writer
     does not hold. An alarm stops nothing: it is read, not a gate. *)
 
@@ -18,8 +18,12 @@ type alarm =
   (** Something is unread and the last reading ask ended in an input fault
       or failed. *)
   | E4
-  (** The writer rests on a one-item question that every slot declared
-      then refused or held a size fact for, about the snapshot now. *)
+  (** Something is unread, and the last reading ask that set an end offered
+      one item that every slot declared then refused or held a size fact
+      for, not every one with a size
+      ({!Librarian_last.Refused_not_all_sized}), about the snapshot and the
+      lane value held now. The writer's state is not read: the ask a pulse
+      starts from the rest leaves it on. *)
   | E5
   (** The last room ask fit no slot, about the Memory and the lane value
       held now. *)

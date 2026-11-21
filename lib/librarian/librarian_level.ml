@@ -59,18 +59,22 @@ let running (t : Machine.t) ~unread =
     match t.last_read with
     | Some (Input_fault (_ : Librarian_unit.input_fault) | Ask_failed (_ : Librarian_read_result.failed)) ->
       true
-    | Some (Committed | Lane _) | None -> false
+    | Some (Committed | Refused_not_all_sized _ | Lane _) | None -> false
   in
-  (* The model's OneItemRefusal with no silent slot, about the snapshot now:
-     a write since then is another question, so the old verdict is off. *)
+  (* The model's E4 under [E4Rule = "held_now"]: the verdict the last ask
+     left, about the snapshot and the lane value held now. The writer's
+     state is not read, so the ask a pulse starts from the rest leaves it
+     on. A write since then, or another lane value, is another question, so
+     the old verdict is off. *)
   let e4 =
-    match t.state with
-    | Resting (_ : Store.t) ->
-      (match t.last_read with
-       | Some (Lane { one_item; silent; basis; slots = _ }) ->
-         one_item && (not silent) && held_now ~now basis
-       | Some (Committed | Input_fault _ | Ask_failed _) | None -> false)
-    | Idle _ | Asking _ | Refused_at_bottom _ | Stopped _ -> false
+    unread
+    &&
+    match t.last_read, t.lane with
+    | Some (Refused_not_all_sized { basis; lane; slots = _ }), Some (declared : Machine.declared) ->
+      held_now ~now basis && Memory_lane.equal lane declared.value
+    | Some (Refused_not_all_sized _), None -> false
+    | Some (Committed | Lane _ | Input_fault _ | Ask_failed _), (Some _ | None)
+    | None, (Some _ | None) -> false
   in
   let e5 =
     match t.last_room, t.lane with
@@ -84,7 +88,7 @@ let running (t : Machine.t) ~unread =
     &&
     match t.lane, t.last_read with
     | None, (Some _ | None) -> true
-    | Some (_ : Machine.declared), (None | Some (Lane _)) -> true
+    | Some (_ : Machine.declared), (None | Some (Refused_not_all_sized _ | Lane _)) -> true
     | Some _, Some (Committed | Input_fault _ | Ask_failed _) -> false
   in
   List.filter_map

@@ -40,8 +40,10 @@ type walk
     whose spend was settled and the newest other runtime the Keeper used.
 
     Two facts bound the walk. One Keeper runs one turn at a time, so its rows
-    of two turns never interleave. Its turn numbers only grow, so a row of a
-    lower turn number means the turn has no row. *)
+    of two turns never interleave. Its turn numbers only grow within one
+    trace, so a row of the same trace with a lower turn number means the turn
+    has no row. A row of another trace says nothing about where the turn
+    would be, and the walk goes on. *)
 
 val start : keeper:string -> turn_ref:Ids.Turn_ref.t -> horizon_s:(string -> float) -> walk
 (** [horizon_s runtime_id] is how far before the first request's start the

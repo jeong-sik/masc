@@ -20,7 +20,16 @@ let request_row = Cost_ledger.Raw_observation Runtime_usage_scope.Per_request
 let provider_default : T.cache_write_lifetime = T.Provider_default
 
 (* One cost row as the writer writes it, stamped [at] seconds after [t0]. *)
-let row ?(agent = keeper) ?(runtime = runtime_a) ?latency_ms ?lifetime ~turn ~at projection =
+let row
+      ?(agent = keeper)
+      ?(trace_id = trace)
+      ?(runtime = runtime_a)
+      ?latency_ms
+      ?lifetime
+      ~turn
+      ~at
+      projection
+  =
   let telemetry =
     { T.default_inference_telemetry with
       T.request_latency_ms = latency_ms
@@ -31,7 +40,7 @@ let row ?(agent = keeper) ?(runtime = runtime_a) ?latency_ms ?lifetime ~turn ~at
     H.cost_event_payload
       ~agent_name:agent
       ~task_id:None
-      ~trace_id:trace
+      ~trace_id
       ~keeper_turn_id:turn
       ~agent_core_turn_ordinal:0
       ~model:"model"
@@ -207,6 +216,24 @@ let test_a_turn_without_rows_ends_at_a_lower_turn () =
     [ "outcome"; "kind" ] (reading walked)
 ;;
 
+(* Turn numbers are ordered within one trace only. A newer row of another
+   trace can carry a lower number than the turn sought; only a lower number of
+   the same trace ends the walk. *)
+let test_a_lower_turn_of_another_trace_does_not_end_the_walk () =
+  let walked =
+    walk
+      ~turn:105
+      (parsed
+         [ row ~turn:105 ~at:10 request_row
+         ; row ~trace_id:"fresh-trace" ~turn:1 ~at:20 request_row
+         ])
+  in
+  check_json "the turn's row behind the other trace is its first request"
+    (`Float (t0 +. 10.))
+    [ "outcome"; "request"; "ended_at" ]
+    (reading walked)
+;;
+
 let test_an_unsettled_earlier_turn_is_not_compared () =
   let rows =
     [ row ~turn:300 ~at:100 ~latency_ms:1_000 request_row
@@ -357,6 +384,8 @@ let () =
             test_the_search_stops_before_the_horizon
         ; test_case "a turn without rows ends at a lower turn" `Quick
             test_a_turn_without_rows_ends_at_a_lower_turn
+        ; test_case "a lower turn of another trace does not end the walk" `Quick
+            test_a_lower_turn_of_another_trace_does_not_end_the_walk
         ; test_case "an unsettled earlier turn is not compared" `Quick
             test_an_unsettled_earlier_turn_is_not_compared
         ; test_case "rows that cannot be read" `Quick test_rows_that_cannot_be_read

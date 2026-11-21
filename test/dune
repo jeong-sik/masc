@@ -4552,6 +4552,8 @@
  masc_tui_types
  unix))
 
+(include stanzas/test_tui_agenda_librarian_pending.inc)
+
 (test
  (name test_tui_message_input)
  (modules test_tui_message_input)

@@ -792,36 +792,6 @@ let test_home_approval_list_preserves_its_caller () =
   check string "navigation retains the operator's draft" "draft kept while reading requests"
     (Masc_tui_message_input.contents state.msg_input)
 
-let test_home_operator_target_keeps_original_request () =
-  let module A = Masc.Operator_action_reason in
-  let module P = Masc.Keeper_librarian_pending in
-  let state = agenda_state () in
-  let action request = A.memory_attention ~keeper:"keeper-a" ~durable:(Some (P.Worker
-      {installation_id="original";request_id=request;wait=P.Missing_after_dispatch}))
-      ~admission:None ~measured_at:(Some 123.) in
-  let install item =
-    match Masc.Tui_decode.decode_server_identity (`Assoc
-      ["operator_action_required",`Bool true;
-       "operator_action_reasons",`List [`String (A.diagnostic item)];
-       "operator_actions",`List [A.to_json item]]) with
-    | Ok identity -> state.server_identity <- Some identity
-    | Error error -> Alcotest.fail error in
-  let original = action "request-one" in
-  install original;
-  let target = match Masc_tui_home.home_operator_rows (Masc_tui_home.prepare state) with
-    | [(target,_)] -> target
-    | _ -> Alcotest.fail "one original observation is required" in
-  state.home_selected <- Some target;
-  check bool "the selected target retains the original request and scope" true
-    (match target with
-     | Masc_tui_types.Home_operator_action (authority,_,item) ->
-         authority=state.workspace_authority && A.equal original item
-     | Home_request _ | Home_approvals | Home_agenda | Home_resume _
-     | Home_read_last _ | Home_choose_keeper | Home_create_keeper -> false);
-  install (action "request-two");
-  check bool "the same array index cannot retarget to another original" true
-    (Option.is_none (Masc_tui_home.home_selected_action (Masc_tui_home.prepare state)))
-
 let () =
   run
     "tui agenda"
@@ -835,7 +805,7 @@ let () =
         ] )
     ; ( "what reaches it"
       , [ test_case "wire status parsing" `Quick test_wire_status_parsing
-        ;] )
+        ] )
     ; ( "the frame and the bound"
       , [
 
@@ -849,7 +819,7 @@ let () =
             test_failed_reads_are_safe_before_the_panel_fits_them
         ; test_case "failed schedule snapshots share the display boundary" `Quick
             test_failed_schedule_snapshot_uses_the_same_display_boundary
-        ;] )
+        ] )
     ; ( "task owner routes"
       , [ test_case "a task route is not an operator request" `Quick
             test_a_task_route_is_not_an_operator_request
@@ -865,11 +835,9 @@ let () =
     ; ( "goals waiting for confirmation"
       , [ test_case "a goal to confirm is waiting on the operator" `Quick
             test_a_goal_to_confirm_is_waiting_on_the_operator
-        ;] )
+        ] )
     ; ( "questions waiting on the operator"
-      , [ test_case "operator target keeps the original request" `Quick
-            test_home_operator_target_keeps_original_request
-        ; test_case "an ask waits once however many questions it holds" `Quick
+      , [ test_case "an ask waits once however many questions it holds" `Quick
             test_an_ask_waits_once_however_many_questions_it_holds
         ; test_case "the total adds the questions" `Quick
             test_the_strip_count_adds_the_questions

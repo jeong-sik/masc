@@ -5477,6 +5477,7 @@
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
+(include stanzas/test_keeper_turn_fragments_librarian_range.inc)
 (include stanzas/test_keeper_turn_spend.inc)
 (include stanzas/test_keeper_cost_coverage.inc)
 (include stanzas/test_keeper_cost_observation.inc)

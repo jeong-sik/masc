@@ -245,6 +245,10 @@ let launch_runtime_catalog_load ?(intent = T.Snapshot_read.Join) (state : T.stat
           id request.T.rcr_started_ns (Mtime_clock.elapsed_ns ())
           (match result with Ok _ -> "received" | Error _ -> "failed");
         enqueue_async mailbox (P.Runtime_msg (P.Runtime_catalog_loaded (request,result))) in
+      let on_not_run, deliver, released =
+        Admission.track_reading state
+          ~on_not_run:(fun () -> publish (Error "Runtime catalogue workspace withdrew before worker entry"))
+          ~deliver:publish in
       let run () =
         let result = try
           if T.runtime_catalog_request_current state request then Masc_tui_loader.load_runtime_resolved ~host ~port
@@ -254,18 +258,17 @@ let launch_runtime_catalog_load ?(intent = T.Snapshot_read.Join) (state : T.stat
             Log.Transport.info "tui_runtime_catalog request=%d started_ns=%Ld observed_ns=%Ld phase=interrupted"
               id request.T.rcr_started_ns (Mtime_clock.elapsed_ns ()); raise exn
         | exn -> Error (Printexc.to_string exn) in
-        publish result in
+        deliver result in
       Log.Transport.info "tui_runtime_catalog request=%d started_ns=%Ld revision=%s phase=started"
         id request.T.rcr_started_ns (T.Local_read_order.revision_to_string (T.Local_read_order.request_revision request.T.rcr_request));
       (match Eio_context.get_switch_opt () with
-       | None -> publish (Error "Eio switch is unavailable")
+       | None -> deliver (Error "Eio switch is unavailable")
        | Some sw ->
-           (match Admission.fork_job ~observation:true
-             ~on_withdrawn:(fun () -> publish (Error "Runtime catalogue workspace withdrew before worker entry"))
+           (match Admission.fork_job ~observation:true ~observe:released ~on_withdrawn:on_not_run
              state ~mailbox ~sw run with
             | () -> ()
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-            | exception exn -> publish (Error (Printexc.to_string exn))))
+            | exception exn -> deliver (Error (Printexc.to_string exn))))
 
 let launch_context_inspector_load ?forecast ?(reuse = false) (state : T.state) ~mailbox ~keeper_name =
   if T.server_authority_ready state then begin

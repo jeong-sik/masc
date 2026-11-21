@@ -1,5 +1,110 @@
 ## [Unreleased]
 
+## [0.77.1] - 2026-11-21
+
+### 요약
+
+- 가장 급한 수정은 컨텍스트 상한 계열입니다: `last_input_tokens` 가 `input_limit` 을 넘으면 측정된 증가가 없어도 `past_max_context` 가 발화합니다(#54245). 아래 목록은 `v0.77.0` 태그가 만들어진 뒤 main 에 들어간 PR 제목을 그대로 옮긴 것이고, 각 항목의 동작은 해당 PR 에서 확인하세요.
+- 이 릴리스는 `457b684b00c9aee13b7d98e21c84d5562049c155` 위에 버전 올림 커밋 하나만 얹었습니다. changelog 조각(`changelog.d/`)은 접지 않았습니다.
+
+### Added
+
+- 쓰는 쪽의 경보와 수준을 health 응답에 실어요 (Librarian L9a~c) (#54125)
+- 시작 sweep 이 턴 기록의 안 읽은 줄이 가리키는 bundle 을 남겨요 (#54018)
+- 요청이 이력의 어디서 시작했는지 메모리에 적고 Memory 가 읽은 끝과 견줘요 (Librarian L8b ④a) (#53956)
+- take seats from endpoints and caller-owned schedulers alike (#53980)
+- give every official client account one seat scheduler (#53984)
+- walk an exact lane's slots one per step, choosing seats across kinds (#54007)
+- visit HTTP and CLI exact lane slots under the walker's seats (#54016)
+- record the walked slots in the run's slot capture (#54045)
+- carry the usage-total disagreement as a telemetry observation (#54178)
+- upgrade Chat command menu to tinted selection, align Overview card borders, and strip SGR in queue_selection_visible (#54198)
+- scan changed files for committed secrets in required PR changes job (task-3834) (#54201)
+- 턴 기록이 바뀌거나 잘리면 운영자가 처음부터 다시 읽게 해요 (L7d1) (#53933)
+- 뒤에만 붙는 행 배열을 길이로 읽어요 (스트리밍 꼬리 RFC 1단계) (#54205)
+- enforce tools.masc_enabled and multi-account lifecycle guards (N1-S2 A3-1) (#54200)
+- Runtime grant state projection (D1-1 first slice) (#54252)
+- 운영자가 읽는 쪽의 맨 앞을 지나간다(Skip_item) (#54006)
+- account gate decides against the router route inventory (N2-A) (#54253)
+- provider 행이 이름 없는 캐시 쓰기의 유지 시간을 초로 선언해요 (#53939)
+- 비용 행의 캐시 칸과 snapshot part 를 다시 읽어요 (#53940)
+- 턴 첫 요청의 캐시 결과와 까닭을 원장에서 계산해요 (#53952)
+- Keeper 턴의 캐시 결과를 /cache-outcome 으로 내줘요 (#53957)
+- Inspector 가 턴 첫 요청의 캐시 이유를 한 줄로 보여 줘요 (#54017)
+
+### Fixed
+
+- fire past_max_context when last_input_tokens exceeds input_limit without measured growth (#54245)
+- World Memory 큐레이터가 자기 lane 표로만 물어요 (#54088)
+- slot 의 창을 그 slot 의 요청이 견주는 창에서 읽어요 (L7e1) (#53947)
+- 스위트가 도는 동안 디스크 밴드 증거를 즉시 흘려보내요 (#54177)
+- 디스크 증거 아티팩트가 없는 경우를 숨기지 않아요 (#54179)
+- 값이 없다고 확인된 자리는 「없음」 대신 — 로 적어요 (1차) (#54192)
+- Keeper 설정 값의 not observed·(empty)·none 을 ? 와 — 로 적어요 (#54196)
+- 빈 후보·빈 장비 칸·마지막 턴 없음도 — 로 적어요 (2차) (#54194)
+- Keepers 에서도 서버가 못 준 브리핑을 「조회 불가」로 적어요 (#54199)
+- eliminate refresh layout jitter over held values in Memory, Activity, Verification, Lanes, Runtime, and Connectors (#54197)
+- 다계정 엔진이 World Memory 큐레이터를 띄우지 않아요 (#54193)
+- 지운 기억의 id 와 까닭을 — 대신 · 로 이어요 (#54202)
+- Keeper 설정 값 낱말도 화면 언어로 적어요 (#54211)
+- Keepers 벽 그래프에서 못 읽은 30분 칸은 비워 둬요 (#54218)
+- eliminate refresh layout jitter in Verification, Harness, and Evidence (#54230)
+- eliminate refresh layout jitter in Keeper Story, Prompts, Lane Runs, and Clients (#54231)
+- Memory 화면에 남은 개수도 1,000 부터 쉼표를 넣어요 (#54227)
+- 못 읽은 값·실패한 값·보고 안 된 값을 ◌ ✕ ? 로 적어요 (1차) (#54235)
+- use single colour-capability path for half-block mosaics (#54208)
+- validate file identity (st_dev, st_ino) in incremental count cache (#54248)
+- reject expires_at before the first reachable due tick (#54250)
+- enumerate targeted test suites from Dune stanzas preserving paths (#54251)
+- 도구 설명에서 지운 RFC 인용을 걷어요 (묶음 81) (#54232)
+- 로그와 도움말에서 지운 RFC 인용을 걷어요 (묶음 85) (#54234)
+- 행이 읽기를 멈춘 입력 결함을 보여 줘요 (#54247)
+- 오류 메시지에서 지운 RFC 인용을 걷어요 (묶음 82) (#54233)
+
+### Performance
+
+- 스트리밍 중인 답은 frame 마다 끝나지 않은 줄만 읽어요 (RFC #54170 2·3단계) (#54174)
+- 맨 아래 창이 새 답의 행을 한 번만 훑어요 (#54181)
+- 스트리밍 답은 frame 마다 꼬리만 넘겨요 (스트리밍 꼬리 RFC 2단계) (#54214)
+
+### Internal
+
+- ask librarian_memory slots in one walk, HTTP and CLI alike (#54024)
+- 채팅에서 Esc 와 Ctrl-C 가 하는 일을 시험이 직접 눌러 확인해요 (#54175)
+- 같은 자리에 온 다른 스트리밍 토막은 자기 key 로 그려요 (RFC #54170 마무리) (#54176)
+- Kimi wire oracle follows the document-omission projection (#54180)
+- execution codec 픽스처가 admission 래퍼를 함께 담아요 (#54185)
+- GLM 1261 문맥 초과는 typed cause 로 고정해요 (#54186)
+- 닫힌 지난 턴은 거절이 아니라 제거이고, tools_on_wire 는 유도한 값으로 봐요 (#54187)
+- drop pointers to deleted RFC docs in lib/gate (#54023)
+- drop remaining deleted RFC pointers in lib/gate (#54028)
+- 닫힌 지난 턴은 송신되고 열린 교환은 도구가 실려도 거절돼요 (#54188)
+- unify final 5 wrap_style renderers to Ansi.wrap_style (Round 8 L2c) (#54195)
+- walk the lane's HTTP and CLI slots in one walk (#54189)
+- preset 어휘가 닫혀 있음을 resolver 스냅샷 시험이 적어요 (#54190)
+- remove dead Key_missing/Key_unreadable variants from Runtime_person_template (task-3830) (#54207)
+- delete the per-Keeper delta feed that no code calls (#54210)
+- remove unused runtime lookups, hook, and unreachable Runtime_id override (#54220)
+- delete the Add-on Curator consumer that no code calls (#54206)
+- run scripts/review offline unit tests in GitHub Actions (task-3650) (#54226)
+- delete the curator pass counter that only counted zero (#54237)
+- cache outcome 응답 타입을 masc_types 로 옮기고 되읽어요 (#53963)
+
+### Documentation
+
+- 초대받은 사람이 자기 Keeper 의 것과 같이 쓰는 것을 보는 길을 정해요 (#54076)
+- 스트리밍 답은 frame 마다 꼬리만 넘겨요 (#54182)
+- point README and TUI guide links at live sections (#53953)
+- drop removed executables from LOGGING and spec tables (#53959)
+- update provider admission fairness ordering and seat separation (#54209)
+- remove stale removed-executable refs in RELIABLE-CHANGE-ROADMAP and RFC-0511 (task-3837) (#54217)
+- align provider admission class tables with Standalone_lane (#54249)
+- 주석에서 지운 RFC 인용을 걷어요 (묶음 75) (#54224)
+- 주석에서 지운 RFC 인용을 걷어요 (묶음 77) (#54246)
+- 주석에서 지운 RFC 인용을 걷어요 (묶음 74) (#54225)
+- answer the one-slot-list review notes left after merge (#54229)
+
+
 ## [0.77.0] - 2026-11-20
 
 ### 요약

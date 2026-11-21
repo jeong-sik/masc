@@ -283,6 +283,10 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
      Alcotest.(check string) "the engine starts on the access of the installation" base base_path
    | Runtime_account_access.Single_user (_ : Read.single_user) ->
      Alcotest.fail "the engine started on the access of a single user");
+  Alcotest.(check bool)
+    "the engine starts no World Memory curator on its access"
+    false
+    (Server_runtime_bootstrap.curates_workspace_memory access);
   (* A failure before readiness ends the process. The promise is resolved at
      readiness, before the lanes start, so a lane that failed by the time the
      case reads the phase shows as degraded below. *)

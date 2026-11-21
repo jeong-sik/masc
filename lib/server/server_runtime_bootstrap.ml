@@ -1553,10 +1553,17 @@ let resume_model_configuration () =
       (fun detail -> Server_model_setup_resume.Configuration_unavailable { detail })
       resumed
 
+let curates_workspace_memory access =
+  match Runtime_account_access.published_access access with
+  | Runtime_account_access.Single_user (_ : Authz_boot_mode_read.single_user) -> true
+  | Runtime_account_access.Multi_account { zone = _; base_path = _; now = _ } -> false
+;;
+
 let start_post_ready_owner_lanes
       ~sw
       ~clock
       ~env
+      ~access
       (state : Mcp_server.server_state)
   =
   (* Keep the transport-neutral post-readiness order in one place. Both HTTP
@@ -1574,8 +1581,9 @@ let start_post_ready_owner_lanes
     Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
       ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ~config:(Mcp_server.workspace_config state) ())
       ~appraise:(Server_candle_appraiser.run ~config:(Mcp_server.workspace_config state)) ();
-    Server_workspace_memory_curator.start ~sw
-      ~config:(Mcp_server.workspace_config state)
+    if curates_workspace_memory access then
+      Server_workspace_memory_curator.start ~sw
+        ~config:(Mcp_server.workspace_config state)
   in
   if Runtime_startup_state.requires_setup () then
     Eio.Fiber.fork ~sw (fun () ->
@@ -1833,7 +1841,7 @@ let start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine 
          single-user server goes on serving degraded. *)
       Eio.Promise.resolve set_engine activated.state;
       boot_stage "post_ready_lanes.begin";
-      ignore (start_post_ready_owner_lanes ~sw ~clock ~env activated.state : string * string);
+      ignore (start_post_ready_owner_lanes ~sw ~clock ~env ~access activated.state : string * string);
       boot_stage "post_ready_lanes.end");
   start_startup_watchdog ~sw ~clock;
   engine
@@ -2152,7 +2160,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
               ])
         ; owner_lanes = (fun () ->
             boot_stage "post_ready_lanes.begin";
-            ignore (start_post_ready_owner_lanes ~sw ~clock ~env state : string * string);
+            ignore (start_post_ready_owner_lanes ~sw ~clock ~env ~access state : string * string);
             boot_stage "post_ready_lanes.end")
         ; discord_gateway = (fun () ->
             boot_stage "discord_gateway.begin";

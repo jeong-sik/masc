@@ -104,6 +104,7 @@ let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
         ; activation_mode = Keeper_activation_mode.default; current_task_id = None
         ; telemetry_feedback_enabled = None; telemetry_feedback_window_hours = None
         ; always_allow = None; voice_always_allow = None
+        ; masc_tools_enabled = None
         ; runtime =
             { usage =
                 { total_turns = 0; total_input_tokens = 0; total_output_tokens = 0

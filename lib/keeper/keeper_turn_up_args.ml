@@ -28,6 +28,8 @@ type parsed_args = {
   skill_names_present : bool;
   native_tool_posture_opt : Runtime_native_tools.posture option;
   native_tool_posture_present : bool;
+  masc_tools_enabled_opt : bool option;
+  masc_tools_enabled_present : bool;
   instructions_arg : string option;
   profile_defaults : keeper_profile_defaults;
   declarative_manifest_snapshot : declarative_manifest_snapshot;
@@ -46,7 +48,7 @@ let parse_sandbox_image_patch args =
 
 let parse_tools_patch args =
   match Json_util.assoc_member_opt "tools" args with
-  | None -> Ok (false, None)
+  | None -> Ok ((false, None), (false, None))
   | Some (`Assoc fields) ->
       let duplicates =
         fields
@@ -67,7 +69,7 @@ let parse_tools_patch args =
         let unknown =
           List.filter_map
             (fun (key, _) ->
-               if String.equal key "native"
+               if String.equal key "native" || String.equal key "masc_enabled"
                then None
                else Some key)
             fields
@@ -93,7 +95,20 @@ let parse_tools_patch args =
                    "tools.native must be a string or null (received %s)"
                    (Json_util.kind_name other))
           in
-          native
+          let masc_enabled =
+            match List.assoc_opt "masc_enabled" fields with
+            | None -> Ok (false, None)
+            | Some `Null -> Ok (true, None)
+            | Some (`Bool b) -> Ok (true, Some b)
+            | Some other ->
+              Error
+                (Printf.sprintf
+                   "tools.masc_enabled must be a boolean or null (received %s)"
+                   (Json_util.kind_name other))
+          in
+          (match native, masc_enabled with
+           | Error e, _ | _, Error e -> Error e
+           | Ok native_pair, Ok masc_pair -> Ok (native_pair, masc_pair))
   | Some other ->
     Error
       (Printf.sprintf
@@ -382,7 +397,8 @@ let parse
     | Ok mention_targets_opt,
       Ok board_interests_opt,
       Ok runtime_id_opt,
-      Ok (native_tool_posture_present, native_tool_posture_opt),
+      Ok ((native_tool_posture_present, native_tool_posture_opt),
+          (masc_tools_enabled_present, masc_tools_enabled_opt)),
       Ok (skill_names_present, skill_names_opt) ->
     let activation_mode_result =
       match Json_util.assoc_member_opt "activation_mode" args with
@@ -447,6 +463,8 @@ let parse
         ; skill_names = skill_names_opt
         ; native_tool_posture_present
         ; native_tool_posture = native_tool_posture_opt
+        ; masc_tools_enabled_present
+        ; masc_tools_enabled = masc_tools_enabled_opt
         }
     in
     match
@@ -671,6 +689,8 @@ let parse
       skill_names_present;
       native_tool_posture_opt;
       native_tool_posture_present;
+      masc_tools_enabled_opt;
+      masc_tools_enabled_present;
       instructions_arg;
       profile_defaults;
       declarative_manifest_snapshot;

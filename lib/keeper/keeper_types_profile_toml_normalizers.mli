@@ -67,6 +67,7 @@ type keeper_profile_defaults =
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
   voice_always_allow : bool option;
+  masc_tools_enabled : bool option;
   native_tool_posture : Runtime_native_tools.posture option;
   skill_names : string list option;
   attached_tool_allow : string list option;

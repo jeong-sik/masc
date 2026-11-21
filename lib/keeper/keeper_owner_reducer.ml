@@ -53,6 +53,7 @@ type profile_update =
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
   ; voice_always_allow : bool option
+  ; masc_tools_enabled : bool option
   ; agent_core_env : (string * string) list
   ; updated_at : string
   }
@@ -422,6 +423,7 @@ let apply_existing (state : state) meta command =
          ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours
          ; always_allow = update.always_allow
          ; voice_always_allow = update.voice_always_allow
+         ; masc_tools_enabled = update.masc_tools_enabled
          ; agent_core_env = update.agent_core_env
          ; updated_at = update.updated_at
          })

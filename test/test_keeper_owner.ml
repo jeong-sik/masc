@@ -449,6 +449,7 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; telemetry_feedback_window_hours = Some 24
     ; always_allow = Some false
     ; voice_always_allow = Some false
+    ; masc_tools_enabled = Some false
     ; agent_core_env = [ "PROFILE_TEST", "1" ]
     ; updated_at = "profile-updated"
     }
@@ -1433,6 +1434,7 @@ let test_health_observer_tracks_committed_metadata () =
       ; telemetry_feedback_window_hours = current.telemetry_feedback_window_hours
       ; always_allow = current.always_allow
       ; voice_always_allow = current.voice_always_allow
+      ; masc_tools_enabled = current.masc_tools_enabled
       ; agent_core_env = current.agent_core_env
       ; updated_at = "profile-update"
       }

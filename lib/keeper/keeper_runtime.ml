@@ -302,6 +302,8 @@ let keeper_meta_overlay_drift_categories
         (current.always_allow <> target.always_allow);
       drift_if "voice_always_allow"
         (current.voice_always_allow <> target.voice_always_allow);
+      drift_if "masc_tools_enabled"
+        (current.masc_tools_enabled <> target.masc_tools_enabled);
     ]
 
 let emit_keeper_meta_overlay_drift ~keeper_name categories =
@@ -397,6 +399,9 @@ let ensure_keeper_meta_and_defaults config name =
     let target_voice_always_allow =
       apply_default_opt defaults.voice_always_allow meta.voice_always_allow
     in
+    let target_masc_tools_enabled =
+      apply_default_opt defaults.masc_tools_enabled meta.masc_tools_enabled
+    in
     (* --- AGENT_CORE Env --- *)
     let target_agent_core_env =
       match defaults.agent_core_env with
@@ -416,6 +421,7 @@ let ensure_keeper_meta_and_defaults config name =
         telemetry_feedback_window_hours = target_tf_window;
         always_allow = target_always_allow;
         voice_always_allow = target_voice_always_allow;
+        masc_tools_enabled = target_masc_tools_enabled;
         agent_core_env = target_agent_core_env;
       }
     in
@@ -467,6 +473,7 @@ let ensure_keeper_meta_and_defaults config name =
                  persisted_updated.telemetry_feedback_window_hours
              ; always_allow = persisted_updated.always_allow
              ; voice_always_allow = persisted_updated.voice_always_allow
+             ; masc_tools_enabled = persisted_updated.masc_tools_enabled
              ; agent_core_env = persisted_updated.agent_core_env
              ; updated_at = persisted_updated.updated_at
              })

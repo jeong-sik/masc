@@ -36,6 +36,7 @@ let test_config_writes_are_dropped () =
     ; board_interests = [ "MASC runtime" ]
     ; always_allow = Some true
     ; voice_always_allow = Some true
+    ; masc_tools_enabled = Some false
     ; max_context_override = Some 4242
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 7
@@ -48,6 +49,7 @@ let test_config_writes_are_dropped () =
   Alcotest.(check (list string)) "board_interests is not durable" [] decoded.board_interests;
   Alcotest.(check bool) "always_allow is not durable" true (decoded.always_allow = None);
   Alcotest.(check bool) "voice_always_allow is not durable" true (decoded.voice_always_allow = None);
+  Alcotest.(check bool) "masc_tools_enabled is not durable" true (decoded.masc_tools_enabled = None);
   Alcotest.(check bool)
     "max_context_override is not durable" true (decoded.max_context_override = None);
   Alcotest.(check bool)

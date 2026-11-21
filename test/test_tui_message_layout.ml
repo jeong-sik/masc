@@ -762,7 +762,7 @@ let test_origin_bare_separates_tool_block_from_following_speech () =
   let entries =
     [ entry Layout.Tool "tool" "" "first call"
     ; entry Layout.Tool "tool" "" "second call"
-    ; entry Layout.Keeper "sangsu" "" "answer after tools"
+    ; entry Layout.Keeper "layoutprobe" "" "answer after tools"
     ; entry Layout.Tool "tool" "" "follow-up call"
     ]
   in

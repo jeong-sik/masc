@@ -47,8 +47,8 @@ val selected_count : batch -> int
 val remaining_count : batch -> int
 
 type key
-(** One entry: its id and the digest of its kind and text. An entry whose
-    text changed is another entry. *)
+(** One entry: its id and the digest of its id, kind and text. An entry
+    whose text changed is another entry. *)
 
 val equal_key : key -> key -> bool
 

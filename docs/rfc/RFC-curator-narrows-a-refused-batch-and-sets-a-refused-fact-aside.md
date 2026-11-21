@@ -528,6 +528,7 @@ D3~D6 은 2026-11-21 에 운영자에게 권고를 알렸다. 다른 지시가 �
 - L4 에서 정했다: briefing 에서 출력 한도는 표의 `Refused (Sized Output_over_reserve)` 하나다. `Window_reached` 는 입력과 출력이 창을 채운 것이다. 입력을 줄이면 출력 자리가 생기니 좁힌다.
 - L4 에서 정했다: 출력 한도도 그 slot 의 거절로 센다. 그 slot 에는 같은 요청을 다시 묻지 않는다. 모든 slot 이 거절했으면 요청이 선다. 그래서 §4.5 의 「바닥」과 「출력 한도」가 한 규칙이 된다. 두 항목 이상인 요청이 서는 것은 모든 slot 이 출력 한도였을 때뿐이다.
 - L4 에서 정했다: 기다리는 요청은 그 요청이 고른 항목으로 적는다. 항목은 id 와 글의 digest 다. 다음 pass 의 묶음이 그 항목들로 시작하면 같은 요청으로 본다. 앞 요약(`previous_summary`)이 달라도 같다(§4.3 「같은 요청은 같은 fact 들을 묻는 요청」).
+- L4 에서 정했다: briefing 이 읽을 pass 가 없으면(`Unchanged`, `Cleanup`) 기다리는 요청을 놓는다. 빠졌다가 같은 id 와 글로 돌아온 항목도 다시 묻는다(§4.3 「fact 변경」).
 - L4 에서 정했다: 좁힌 요청이 말 없음만 만나면 그 요청이 기다린다. 60초 깨우기는 그 요청을 그대로 묻는다. 남은 항목 전부로 되돌려 합치지 않는다(§4.1 「좁힌 자리를 기억하는 규칙」).
 - L4 에서 정했다: briefing 은 좁힌 크기를 기억하지 않는다. 한 묶음에 답이 오면 다음 묶음은 남은 항목 전부로 다시 시작한다. 지금 코드와 같다.
 - L4 에서 정했다: briefing pass 가 끝난 모양은 `Briefing_moved`, `Briefing_idle`, `Briefing_stands`, `Briefing_waits`, `Briefing_failed` 다. 60초 깨우기는 `Briefing_waits` 와 `Briefing_failed` 뒤에만 깨운다. 선 요청은 `request` 나 lane 세대 변경, 항목이 바뀐 pass 에서 다시 묻는다.

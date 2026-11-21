@@ -56,7 +56,7 @@ let pulse_memory_writers () =
 
 | 빈 자리 | 채우는 단계 | 내용 |
 |---|---|---|
-| (가) | **A3-2b** (하드 삭제·정리 층) | `Server_keeper_volume_maintenance`·`Server_sandbox_volume_gc_report` 를 **workspace/process 범위 전용 진입점**으로 분리해 시작한다. per-person 홈은 순회하지 않는다. `Server_keeper_build_maintenance` 는 per-Keeper 빌드 산출물을 다루므로 다계정에서는 계속 스킵하고 사유를 적는다. |
+| (가) | **A3-2b** (하드 삭제·정리 층) | `Server_keeper_volume_maintenance`·`Server_sandbox_volume_gc_report` 를 **workspace/process 범위 전용 진입점**으로 분리해 시작한다. per-person 홈은 순회하지 않는다. `Server_keeper_build_maintenance` 는 per-Keeper 빌드 산출물을 다루므로 다계정에서는 계속 스킵하고 사유를 적는다. 구현: `task-3870` (#54270). 두 루프는 모든 호스트 형태에서 시작하고, `Server_keeper_build_maintenance` 만 단일 계정 전용으로 남긴다. |
 | (나) | **A3-3** (autonomous 배선 층) | 다계정에서 `Librarian_writers.pulse` 를 스킵하는 근거를 문서에 적는다. 살릴 경우에도 계정 경계를 넘지 않는 범위만 맡긴다. |
 
 두 단계는 `task-3846` 의 기록에 한 줄씩 들어가야 닫힌다(§4).
@@ -69,7 +69,7 @@ let pulse_memory_writers () =
 
 넣을 문장 초안(그대로 써도 된다):
 
-> **A3-2b**: `lib/server/server_bootstrap_maintenance.ml:471-474` 의 다계정 가드에서 `Server_keeper_volume_maintenance`·`Server_sandbox_volume_gc_report` 를 workspace/process 범위 전용 진입점으로 분리해 시작한다. per-person 홈은 순회하지 않는다. `Server_keeper_build_maintenance` 는 per-Keeper 빌드 산출물을 다루므로 다계정에서는 계속 스킵하고 사유를 적는다.
+> **A3-2b**: `lib/server/server_bootstrap_maintenance.ml:471-474` 의 다계정 가드에서 `Server_keeper_volume_maintenance`·`Server_sandbox_volume_gc_report` 를 workspace/process 범위 전용 진입점으로 분리해 시작한다. per-person 홈은 순회하지 않는다. `Server_keeper_build_maintenance` 는 per-Keeper 빌드 산출물을 다루므로 다계정에서는 계속 스킵하고 사유를 적는다. 구현은 `task-3870` (#54270) 이다.
 
 `task-3846` 을 수행 중인 Keeper 쪽에 이 한 줄을 요청했고, 이 문서에는 요청 사실만 남긴다. 이 문서는 `task-3846` 을 편집하지 않는다.
 

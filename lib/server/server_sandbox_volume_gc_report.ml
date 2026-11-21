@@ -39,9 +39,8 @@ let pass ~base_path =
 ;;
 
 let start ~sw ~clock ~(config : Workspace.config) =
-  if Runtime_account_access.is_multi_account ()
-  then ()
-  else
+  (* A3-2b: the report only measures the workspace base_path; a per-person home
+     is never walked, so it starts on a multi-account host as well. *)
   let base_path = config.base_path in
   Server_bootstrap_loops_fiber.fork_logged_fiber
     ~sw

@@ -153,10 +153,10 @@ let tool fixture =
   | None -> fail "no published Skill snapshot"
   | Some snapshot ->
       let catalog, _diagnostics = Catalog.of_snapshot snapshot in
-      (match Keeper_tool_composition_surface.instruction_skills_of_catalog catalog with
+      (match Keeper_instruction_skill.instruction_skills_of_catalog catalog with
        | [] -> fail "expected the existing keeper_skill tool"
        | instruction_skills ->
-           Keeper_tool_composition_surface.make_instruction_skill_tool
+           Keeper_instruction_skill.make_instruction_skill_tool
              ~config:fixture.config ~instruction_skills () |> Result.get_ok)
 let invoke tool id input =
   let invocation = Agent_core.Tool_contract.Invocation.create
@@ -425,10 +425,9 @@ let test_machine_package_skills_follow_attachment () =
       check int "package instructions parse without diagnostics" 0 (List.length diagnostics);
       List.iter (fun name ->
         let entry = List.find (fun (entry : Catalog.skill) -> entry.name=name) (Catalog.skills catalog) in
-        check bool "image instructions do not require a static composition" true
+        check bool "package skill is instruction" true
           (match entry.surface with
-           | Catalog.Instruction -> not (List.mem name ["sangokushi-2-end-command"; "sangokushi-3-end-month"])
-           | Catalog.Composition _ -> List.mem name ["sangokushi-2-end-command"; "sangokushi-3-end-month"])) names;
+           | Catalog.Instruction -> true)) names;
       detach clock fixture;
       List.iter (fun name -> check bool "detachment withdraws machine instructions" true
         (absent (snapshot fixture) name)) names;

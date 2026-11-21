@@ -8,7 +8,6 @@ module Snapshot = Skill_catalog_snapshot
 let is_instruction (profile : Masc.Keeper_skill_observability.profile) =
   match profile.surface with
   | Masc.Keeper_skill_observability.Instruction_skill -> true
-  | Composition_skill _ -> false
 ;;
 
 let rec remove_tree path =
@@ -245,39 +244,6 @@ let test_invalid_new_skill_is_never_created () =
     (Sys.file_exists (Filename.concat base_path ("skills/" ^ whitespace_package)))
 ;;
 
-let test_composition_preview_exposes_validated_flow () =
-  with_workspace @@ fun base_path ->
-  let _, _, reference, _ = setup base_path ~access:"read-write" in
-  let source_text =
-    {|---
-name: sample
-description: Read the exact lane status through a validated composition.
----
-
-```toml composition
-[[compositions]]
-name = "sample"
-description = "Read the exact lane status through a validated composition."
-execution = "inline"
-
-[[compositions.nodes]]
-id = "lane"
-tool = "keeper_lane_status"
-[compositions.nodes.input]
-kind = "literal"
-value = {}
-```
-|}
-  in
-  match Editor.preview ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) ~base_path reference ~source_text with
-  | Error error -> fail (Editor.error_to_string error)
-  | Ok preview ->
-    (match preview.profile.flow with
-     | Some { nodes = [ node ]; batches = [ batch ] } ->
-       check string "flow node" "keeper_lane_status" node.tool_name;
-       check string "flow batch" "concurrent" batch.execution_mode
-     | _ -> fail "composition preview did not expose its validated flow")
-;;
 
 let test_new_preview_uses_public_plan_without_writing () =
   with_workspace @@ fun base_path ->
@@ -1488,8 +1454,6 @@ let () =
         ; test_case "invalid candidate is never written" `Quick test_invalid_candidate_is_never_written
         ; test_case "invalid new Skill is never created" `Quick
             test_invalid_new_skill_is_never_created
-        ; test_case "composition preview exposes validated flow" `Quick
-            test_composition_preview_exposes_validated_flow
         ; test_case "new preview compiles without writing and create revalidates" `Quick
             test_new_preview_uses_public_plan_without_writing
         ; test_case "authoring tool discovery preserves canonical contracts" `Quick
@@ -1555,6 +1519,7 @@ let () =
             test_server_skill_snapshot_runtime_refresh
         ; test_case "client read contract rejects unknown authority" `Quick
             test_client_read_contract
-        ] )
+        
+] )
     ]
 ;;

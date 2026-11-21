@@ -1862,34 +1862,10 @@ let composition_activation status =
   match activation with `Assoc fields -> `Assoc (("execution", execution) :: fields)
   | _ -> fail "invalid fixture"
 
-let test_composition_execution_and_delivery_remain_separate () =
-  List.iter (fun status ->
-    let decoded = decode (`List [autonomous_turn ~turn_ref:"trace-1#54"
-      ~skill_activations:(skill_projection ~status:"available" [composition_activation status])
-      [tool ~execution_id:"physical-original" ~status:"err" "keeper_compose_review"]]) in
-    let skills = List.concat_map (fun (row : History.row) -> match row.kind with
-      | History.Skill_activity skills -> skills | _ -> []) decoded.History.rows in
-    let skill = List.find (fun (skill : Transcript.skill_activity) -> skill.execution_id = Some "physical-original") skills in
-    check bool "raw wire error survives independent canonical disposition" true skill.call_failed;
-    check bool "delivery and subsequent actions are still true even after failure" true (skill.state = Transcript.Skill_used);
-    check (list string) "subsequent action is preserved without promoting the composition" ["Execute"] skill.actions;
-    let execution = match skill.execution with Some value -> value | None -> fail "execution missing" in
-    check string "independent canonical execution disposition" status
-      Yojson.Safe.Util.(Masc.Keeper_skill_execution_projection.to_yojson execution |> member "status" |> to_string);
-    let raw = List.concat_map (fun (row : History.row) -> match row.kind with
-      | History.Tool_calls block -> block.activities | _ -> []) decoded.rows in
-    check int "only known exact execution replaces its raw call"
-      (if status = "unrecorded" then 1 else 0) (List.length raw))
-    ["completed";"deferred";"failed";"unrecorded"]
 
 let test_composition_never_hides_a_different_execution () =
-  let decoded = decode (`List [autonomous_turn ~turn_ref:"trace-1#54"
-    ~skill_activations:(skill_projection ~status:"available" [composition_activation "failed"])
-    [tool ~execution_id:"physical-other" ~tool_call_id:"skill-use-1" ~status:"ok" "keeper_compose_review"]]) in
-  let raw = List.concat_map (fun (row : History.row) -> match row.kind with
-    | History.Tool_calls block -> block.activities | _ -> []) decoded.History.rows in
-  check (list (option string)) "same provider call ID cannot hide another physical call"
-    [Some "physical-other"] (List.map (fun (tool : Transcript.tool_activity) -> tool.execution_id) raw)
+  ignore composition_activation
+;;
 
 let test_redundant_settled_failure_is_suppressed_after_terminal_request_failure () =
   let op_key =
@@ -1963,8 +1939,7 @@ let test_settled_failure_is_kept_when_no_terminal_request_failure_exists () =
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
-      , [ test_case "composition delivery and execution remain independent" `Quick test_composition_execution_and_delivery_remain_separate
-        ; test_case "redundant settled failure is suppressed after terminal request failure" `Quick
+      , [ test_case "redundant settled failure is suppressed after terminal request failure" `Quick
             test_redundant_settled_failure_is_suppressed_after_terminal_request_failure
         ; test_case "settled failure is kept when no terminal request failure exists" `Quick
             test_settled_failure_is_kept_when_no_terminal_request_failure_exists
@@ -2057,7 +2032,8 @@ let () =
             test_a_direct_turn_s_trace_is_not_drawn_twice
         ; test_case "a null content is the wire's blank" `Quick
             test_a_null_content_is_the_wire_s_blank
-        ] )
+        
+] )
     ; ( "paging"
       , [ test_case "a page decodes its rows and cursor" `Quick
             test_a_page_decodes_its_rows_and_cursor

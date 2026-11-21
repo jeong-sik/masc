@@ -253,13 +253,6 @@ sources = []
              | Ok _ -> fail "loader accepted a denied Addon export");
             check bool "denied actual export is never installed" false
               (Agent_core.Tool_set.mem tool_name (Agent_core.Agent.tools denied_agent));
-            let recovery = Keeper_tool_composition_catalog.cancel_tool_name in
-            ignore (successful "load-admitted-recovery-control" loader
-              (`Assoc ["names",`List [`String recovery;`String tool_name]]));
-            check bool "unrelated admitted recovery control remains loadable" true
-              (Agent_core.Tool_set.mem recovery (Agent_core.Agent.tools denied_agent));
-            check bool "mixed load cannot install the denied export" false
-              (Agent_core.Tool_set.mem tool_name (Agent_core.Agent.tools denied_agent));
             check int "deny causes no actual worker RPC" count (List.length !calls));
         with_bundle ~config ~meta ~net:(Eio.Stdenv.net env) ~export:replacement ~deny:[]
           (fun _ fresh_agent ->

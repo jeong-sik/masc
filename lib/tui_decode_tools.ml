@@ -129,18 +129,6 @@ type effective_tool_surface =
       ets_detail : string;
     }
 
-type skill_activation_projection =
-  | Skill_activations_available of
-      { sap_keeper_name : string
-      ; sap_ledger : Keeper_skill_activation_ledger.t
-      }
-  | Skill_activations_no_session of { sap_keeper_name : string }
-  | Skill_activations_unavailable of
-      { sap_keeper_name : string
-      ; sap_reason : string
-      ; sap_detail : string
-      }
-
 type tool_usage_row = {
   tu_name : string;
   tu_public_names : string list;
@@ -322,17 +310,7 @@ let decode_skill_io ~surface json =
   let* io_kind = required_string_field io "kind" in
   match surface, io_kind with
   | Keeper_skill_observability.Instruction_skill, "model_orchestrated" -> Ok Model_orchestrated
-  | Keeper_skill_observability.Composition_skill _, "composition" ->
-      let* input_schema = required_object_field io "input_schema" in
-      let* routes = required_list_field io "exports" in
-      let* exports = decode_list "Skill output routes" (fun route ->
-        let* sor_name = required_string_field route "name" in
-        let* sor_node_id = required_string_field route "node_id" in
-        let* sor_pointer = required_string_field route "pointer" in
-        Ok { sor_name; sor_node_id; sor_pointer }) routes in
-      Ok (Composition_io { input_schema; exports })
-  | ( Keeper_skill_observability.Instruction_skill
-    | Keeper_skill_observability.Composition_skill _ ), _ ->
+  | Keeper_skill_observability.Instruction_skill, _ ->
     Error "Skill kind and I/O contract disagree"
 ;;
 
@@ -469,58 +447,13 @@ let decode_effective_tool_surface json =
         (Printf.sprintf
            "effective_keeper_surface.status has unknown value %S" unknown)
 
-let decode_skill_activation_ledger ~keeper_name json =
-  Keeper_skill_activation_ledger.of_projection_yojson json
-  |> Result.map (fun sap_ledger ->
-    Skill_activations_available
-      { sap_keeper_name = keeper_name; sap_ledger })
-  |> Result.map_error (fun error ->
-    "skill activation ledger is invalid: "
-    ^ Keeper_skill_activation_ledger.decode_error_code error)
-
-let decode_skill_activation_projection json =
-  let* status = required_string_field json "status" in
-  let* sap_keeper_name = required_string_field json "keeper_name" in
-  match status with
-  | "available" ->
-      let* ledger = required_object_field json "ledger" in
-      decode_skill_activation_ledger ~keeper_name:sap_keeper_name ledger
-  | "no_session" -> Ok (Skill_activations_no_session { sap_keeper_name })
-  | "unavailable" ->
-      let* sap_reason = required_string_field json "reason" in
-      let* sap_detail = required_string_field json "detail" in
-      Ok
-        (Skill_activations_unavailable
-           { sap_keeper_name; sap_reason; sap_detail })
-  | unknown ->
-      Error (Printf.sprintf "skill_activations.status has unknown value %S" unknown)
-
-(* ── Workspace skills catalog (/api/v1/skills) ─────────────────────
-   The dashboard renders the full surface set; the TUI Tools screen reads
-   per-skill usage rows (cross-keeper tracking) and reuses the skill_flow
-   decoder the effective-surface profiles already share. Usage may be absent
-   while the ledger side is warming. A valid instruction/composition surface
-   always carries its profile; only an unavailable surface has none. *)
+(* ── Workspace skills catalog (/api/v1/skills) ───────────────────── *)
 
 type skills_catalog_surface =
   { scs_reference : Skill_reference.t
   ; scs_kind : string
   ; scs_flow : skill_flow option
   }
-
-type keeper_skill_usage_row =
-  { ksu_reference : Skill_reference.t
-  ; ksu_invocations : int
-  ; ksu_deliveries : int
-  ; ksu_actions : int
-  ; ksu_last_used_at : string
-  }
-
-type keeper_skill_usage =
-  | Keeper_usage_ready of keeper_skill_usage_row list
-  | Keeper_usage_no_session
-  | Keeper_usage_unavailable of { kua_reason : string; kua_detail : string }
-  | Keeper_usage_no_catalog
 
 module Skill_document = Agent_core.Skill_document
 
@@ -1268,86 +1201,6 @@ let decode_tool_snapshot json =
         ; st_keeper_cleanup = decode_keeper_cleanup json
         }
     }
-
-let skill_activation_keeper = function
-  | Skill_activations_available { sap_keeper_name; sap_ledger = _ }
-  | Skill_activations_no_session { sap_keeper_name }
-  | Skill_activations_unavailable { sap_keeper_name; sap_reason = _; sap_detail = _ } ->
-      sap_keeper_name
-
-let keeper_skill_activations_schema = "masc.keeper-skill-activations/v1"
-
-let decode_keeper_skill_activations ~keeper json =
-  let* () =
-    validate_closed_object ~label:"skill activations"
-      ~allowed:[ "schema"; "keeper"; "skill_activations" ] json
-  in
-  let* schema = required_string_field json "schema" in
-  let* answered = required_string_field json "keeper" in
-  if not (String.equal schema keeper_skill_activations_schema) then
-    Error (Printf.sprintf "skill activations schema %S is not %S" schema
-             keeper_skill_activations_schema)
-  else if not (String.equal answered keeper) then
-    Error (Printf.sprintf "skill activations answered for %S, not %S" answered keeper)
-  else
-    let* projection = required_object_field json "skill_activations" in
-    let* projection = decode_skill_activation_projection projection in
-    let named = skill_activation_keeper projection in
-    if String.equal named keeper then Ok projection
-    else Error (Printf.sprintf "skill activations projection names %S, not %S" named keeper)
-
-let keeper_skill_usage_schema = "masc.keeper-skill-usage/v1"
-
-let decode_keeper_skill_usage_row json =
-  let* () =
-    validate_closed_object ~label:"skill usage row"
-      ~allowed:[ "reference"; "invocations"; "deliveries"; "actions"; "last_used_at" ] json
-  in
-  let* reference = required_object_field json "reference" in
-  let* ksu_reference =
-    Skill_reference.of_yojson reference
-    |> Result.map_error (fun _ -> "skill usage row reference is invalid")
-  in
-  let* ksu_invocations = required_nonnegative_int_field json "invocations" in
-  let* ksu_deliveries = required_nonnegative_int_field json "deliveries" in
-  let* ksu_actions = required_nonnegative_int_field json "actions" in
-  let* ksu_last_used_at = required_nonempty_string_field json "last_used_at" in
-  Ok { ksu_reference; ksu_invocations; ksu_deliveries; ksu_actions; ksu_last_used_at }
-
-let decode_keeper_skill_usage ~keeper json =
-  let* () =
-    validate_closed_object ~label:"skill usage" ~allowed:[ "schema"; "keeper"; "usage" ] json
-  in
-  let* schema = required_string_field json "schema" in
-  let* answered = required_string_field json "keeper" in
-  if not (String.equal schema keeper_skill_usage_schema) then
-    Error (Printf.sprintf "skill usage schema %S is not %S" schema keeper_skill_usage_schema)
-  else if not (String.equal answered keeper) then
-    Error (Printf.sprintf "skill usage answered for %S, not %S" answered keeper)
-  else
-    let* usage = required_object_field json "usage" in
-    let* state = required_string_field usage "state" in
-    let closed allowed =
-      validate_closed_object ~label:"skill usage.usage" ~allowed:("state" :: allowed) usage
-    in
-    match state with
-    | "ready" ->
-        let* () = closed [ "rows" ] in
-        let* rows = required_list_field usage "rows" in
-        let* rows = decode_list "usage.rows" decode_keeper_skill_usage_row rows in
-        Ok (Keeper_usage_ready rows)
-    | "no_session" ->
-        let* () = closed [] in
-        Ok Keeper_usage_no_session
-    | "unavailable" ->
-        let* () = closed [ "reason"; "detail" ] in
-        let* kua_reason = required_string_field usage "reason" in
-        let* kua_detail = required_string_field usage "detail" in
-        Ok (Keeper_usage_unavailable { kua_reason; kua_detail })
-    | "no_catalog" ->
-        let* () = closed [] in
-        Ok Keeper_usage_no_catalog
-    | unknown -> Error (Printf.sprintf "skill usage state has unknown value %S" unknown)
 
 let skill_flow_mermaid flow =
   let module Nodes = Map.Make (String) in

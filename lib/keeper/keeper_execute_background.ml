@@ -73,20 +73,10 @@ let receipt ~request_id ~arguments ending : Outbox.receipt =
   }
 ;;
 
-(* The request controls of the composition surface take any [Keeper_msg_async]
-   request id and the caller that submitted it: [poll] and [cancel] do not look
-   at what produced the request. A background run is such a request, so the
-   start result names them. They are held back like the other deferred tools
-   and need the loader first. *)
 let delivery_text =
-  Printf.sprintf
-    "async: the command runs on the server until it exits or reaches \
-     timeout_sec. Its result arrives as a tool-result receipt that wakes you, \
-     and the receipt carries this request_id. With this request_id, %s reads \
-     the run and %s asks to stop it; %s loads either."
-    Keeper_tool_composition_catalog.status_tool_name
-    Keeper_tool_composition_catalog.cancel_tool_name
-    Keeper_identity_tool_search.tool_name
+  "async: the command runs on the server until it exits or reaches \
+   timeout_sec. Its result arrives as a tool-result receipt that wakes you, \
+   and the receipt carries this request_id."
 ;;
 
 (* An Execute payload, so that a composition plan node which sets

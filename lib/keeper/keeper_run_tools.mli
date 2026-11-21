@@ -143,6 +143,5 @@ val prepare_agent_setup
   -> ?tool_result_commit_policy:Keeper_hooks_agent_core.tool_result_commit_policy
   -> ?hitl_resolutions:Keeper_hitl_resolution_batch.t
   -> ?on_gate_deferred:(string -> unit)
-  -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
   -> unit
   -> (agent_setup, Agent_core.Error.t) result

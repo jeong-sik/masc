@@ -67,61 +67,55 @@ let remove_validated_snapshot path =
   loop ()
 ;;
 
-module Written_address_set = Set.Make (String)
+(* Bounded O(1)-amortized accelerator of recently written blob paths in this
+   process. Eviction is purely an optimization boundary: evicting an old path
+   never loses data and only causes a future [put] of that digest to re-publish
+   atomically. Using a Mutex-protected Hashtbl + FIFO queue avoids O(N) folds
+   inside CAS retry loops once capacity is reached. *)
+let written_address_cache_capacity = 4_096
+let written_addresses_mu = Mutex.create ()
+let written_addresses_seq = ref 0
+let written_addresses_tbl : (string, int) Hashtbl.t = Hashtbl.create 512
+let written_addresses_order : (string * int) Queue.t = Queue.create ()
 
-(* Blob paths this process wrote with [put] and has not since failed to read
-   back. Maintenance deletes blobs only from the offline deployment helper
-   while it holds the BasePath process lease, which a running server holds, so
-   a path written here stays on disk for the life of the process unless
-   something outside the store removes or replaces it. [fetch] and
-   [fetch_range] forget a path on every read that does not return validated
-   bytes (missing, digest mismatch, or a read error such as a symlink, a
-   non-regular file or EACCES), [delete] forgets the path it removes, and the
-   next [put] of those bytes writes it again.
-
-   The set has no bound. On 2026-09-15 the base path held 52,077 blob files
-   written in the last 24 hours, about 160 bytes per entry here, so about
-   8 MB per process-day. *)
-let written_addresses : Written_address_set.t Atomic.t =
-  Atomic.make Written_address_set.empty
+let with_mutex mu f =
+  Mutex.lock mu;
+  Fun.protect ~finally:(fun () -> Mutex.unlock mu) f
 ;;
 
-let was_written path = Written_address_set.mem path (Atomic.get written_addresses)
+let was_written path =
+  with_mutex written_addresses_mu (fun () -> Hashtbl.mem written_addresses_tbl path)
+;;
 
 let record_written path =
-  let rec loop () =
-    let current = Atomic.get written_addresses in
-    let updated = Written_address_set.add path current in
-    if updated == current
-    then ()
-    else if not (Atomic.compare_and_set written_addresses current updated)
-    then loop ()
-  in
-  loop ()
+  with_mutex written_addresses_mu (fun () ->
+    if not (Hashtbl.mem written_addresses_tbl path)
+    then (
+      incr written_addresses_seq;
+      let seq = !written_addresses_seq in
+      Hashtbl.add written_addresses_tbl path seq;
+      Queue.push (path, seq) written_addresses_order;
+      while Hashtbl.length written_addresses_tbl > written_address_cache_capacity do
+        match Queue.take_opt written_addresses_order with
+        | None -> ()
+        | Some (evicted, ev_seq) ->
+          (match Hashtbl.find_opt written_addresses_tbl evicted with
+           | Some cur_seq when Int.equal cur_seq ev_seq ->
+             Hashtbl.remove written_addresses_tbl evicted
+           | Some _ | None -> ())
+      done))
 ;;
 
 let forget_written path =
-  let rec loop () =
-    let current = Atomic.get written_addresses in
-    let updated = Written_address_set.remove path current in
-    if updated == current
-    then ()
-    else if not (Atomic.compare_and_set written_addresses current updated)
-    then loop ()
-  in
-  loop ()
+  with_mutex written_addresses_mu (fun () -> Hashtbl.remove written_addresses_tbl path)
 ;;
 
-(* The addresses this process wrote or read since the sweep
-   recorded the scan before its last one. Both generations sit in one value
-   so a sweep rotates them with a single compare-and-set; two separate cells would lose
-   a mark recorded between moving one and clearing the other. Every reader and
-   writer below marks the address before it looks at the file, so a sweep that
-   sees no mark can rely on no read or write of this process having started.
-   A mark keeps both kinds: a read after a write stays a write.
+(* Bounded two-generation touch ledger for offline sweep safety.
+   Hot-path [record_touch] and [rotate_touches] run in O(1) amortized time
+   under a Mutex-protected Hashtbl + FIFO queue; [observe_touches] builds an
+   immutable snapshot only when an offline sweep inspects the ledger. *)
+let touch_generation_capacity = 8_192
 
-   Like [written_addresses] the ledger has no bound of its own; each scan
-   that writes its record drops the older generation. *)
 type touch =
   { put : bool
   ; read : bool
@@ -134,29 +128,38 @@ type touches =
   ; previous : touch Touch_map.t
   }
 
-let touch_ledger : touches Atomic.t =
-  Atomic.make { current = Touch_map.empty; previous = Touch_map.empty }
+type touch_ledger_state =
+  { mutable current : (string, touch) Hashtbl.t
+  ; mutable current_order : string Queue.t
+  ; mutable previous : (string, touch) Hashtbl.t
+  }
+
+let touch_ledger_mu = Mutex.create ()
+
+let touch_ledger_state : touch_ledger_state =
+  { current = Hashtbl.create 256
+  ; current_order = Queue.create ()
+  ; previous = Hashtbl.create 16
+  }
 ;;
 
 let record_touch sha256 (mark : touch) =
-  let rec loop () =
-    let observed = Atomic.get touch_ledger in
-    let merged =
-      match Touch_map.find_opt sha256 observed.current with
-      | None -> Some mark
-      | Some existing ->
-        let merged = { put = existing.put || mark.put; read = existing.read || mark.read } in
-        if Bool.equal merged.put existing.put && Bool.equal merged.read existing.read
-        then None
-        else Some merged
-    in
-    match merged with
-    | None -> ()
-    | Some merged ->
-      let updated = { observed with current = Touch_map.add sha256 merged observed.current } in
-      if not (Atomic.compare_and_set touch_ledger observed updated) then loop ()
-  in
-  loop ()
+  with_mutex touch_ledger_mu (fun () ->
+    match Hashtbl.find_opt touch_ledger_state.current sha256 with
+    | None ->
+      Hashtbl.add touch_ledger_state.current sha256 mark;
+      Queue.push sha256 touch_ledger_state.current_order;
+      while Hashtbl.length touch_ledger_state.current > touch_generation_capacity do
+        match Queue.take_opt touch_ledger_state.current_order with
+        | None -> ()
+        | Some evicted -> Hashtbl.remove touch_ledger_state.current evicted
+      done
+    | Some existing ->
+      let next_mark =
+        { put = existing.put || mark.put; read = existing.read || mark.read }
+      in
+      if not (Bool.equal next_mark.put existing.put && Bool.equal next_mark.read existing.read)
+      then Hashtbl.replace touch_ledger_state.current sha256 next_mark)
 ;;
 
 let mark_put sha256 = record_touch sha256 { put = true; read = false }
@@ -197,31 +200,72 @@ let fetch_error_to_string = function
         expected
         actual
 
-(* Shared preview byte ceiling. Planning and storage both call [make_preview]
-   so reference size estimates use the same sanitized prefix. *)
-let preview_max = 200
+(* Shared smart 4 KiB head+tail preview byte ceiling. Planning and storage both
+   call [make_preview] so reference size estimates use the exact sanitized
+   head+tail bytes, eliminating multi-turn artifact-read loops for typical
+   command/build outputs while preserving both beginning context and trailing
+   errors/summaries. *)
+let preview_max = 4096
 
-(* Preview metadata travels inside JSON strings, even when the stored bytes
-   are binary. Decode the bounded prefix before copying Unicode sequences;
-   replacing malformed sequences with one ASCII byte cannot exceed the
-   exported byte ceiling. File and string ingestion use the same prefix. *)
-let make_preview bytes =
-  let len = min (String.length bytes) preview_max in
-  let prefix = String.sub bytes 0 len in
+let sanitize_utf8_slice slice =
+  let len = String.length slice in
   let buf = Buffer.create len in
   let i = ref 0 in
   while !i < len do
-    let decoded = String.get_utf_8_uchar prefix !i in
+    let decoded = String.get_utf_8_uchar slice !i in
     let width = Uchar.utf_decode_length decoded in
     if Uchar.utf_decode_is_valid decoded then (
-      let c = String.unsafe_get prefix !i in
+      let c = String.unsafe_get slice !i in
       if c = '\n' || c = '\r' || c = '\t' then Buffer.add_char buf ' '
       else if Char.code c < 0x20 then Buffer.add_char buf '?'
-      else Buffer.add_substring buf prefix !i width)
+      else Buffer.add_substring buf slice !i width)
     else Buffer.add_char buf '?';
     i := !i + width
   done;
   Buffer.contents buf
+
+let make_head_tail_preview ~total_bytes ~head ~tail =
+  if total_bytes <= preview_max then sanitize_utf8_slice head
+  else
+    let head_len = String.length head in
+    let tail_len = String.length tail in
+    let omitted = max 0 (total_bytes - head_len - tail_len) in
+    let separator = Printf.sprintf " ... [%d bytes omitted] ... " omitted in
+    let budget = max 0 (preview_max - String.length separator) in
+    let head_budget = budget / 2 in
+    let tail_budget = budget - head_budget in
+    let head_part =
+      if head_len <= head_budget then head else String.sub head 0 head_budget
+    in
+    let tail_part =
+      if tail_len <= tail_budget then tail
+      else String.sub tail (tail_len - tail_budget) tail_budget
+    in
+    let actual_omitted = max 0 (total_bytes - String.length head_part - String.length tail_part) in
+    let final_sep = Printf.sprintf " ... [%d bytes omitted] ... " actual_omitted in
+    let final_head_budget = max 0 ((preview_max - String.length final_sep) / 2) in
+    let final_tail_budget = max 0 (preview_max - String.length final_sep - final_head_budget) in
+    let h =
+      if String.length head_part <= final_head_budget then head_part
+      else String.sub head_part 0 final_head_budget
+    in
+    let t =
+      if String.length tail_part <= final_tail_budget then tail_part
+      else String.sub tail_part (String.length tail_part - final_tail_budget) final_tail_budget
+    in
+    sanitize_utf8_slice h ^ final_sep ^ sanitize_utf8_slice t
+
+(* Preview metadata travels inside JSON strings, even when the stored bytes
+   are binary. Decode bounded head+tail slices before copying Unicode sequences;
+   replacing malformed sequences with one ASCII byte cannot exceed [preview_max]. *)
+let make_preview bytes =
+  let total_bytes = String.length bytes in
+  if total_bytes <= preview_max then sanitize_utf8_slice bytes
+  else
+    let half = preview_max / 2 in
+    let head = String.sub bytes 0 half in
+    let tail = String.sub bytes (total_bytes - half) half in
+    make_head_tail_preview ~total_bytes ~head ~tail
 
 let dirname = "tool_blobs"
 
@@ -652,14 +696,49 @@ let put_prepared_durable_reuse t ~payload ~mime =
   store_durable_reuse ~operation addressed
 
 let scan_file_for_ingest ~buffer ~copy_to channel =
-  let preview = Buffer.create preview_max in
+  let head_buf = Buffer.create preview_max in
+  let tail_cap = preview_max / 2 in
+  let tail_ring = Bytes.create tail_cap in
+  let tail_pos = ref 0 in
+  let tail_filled = ref 0 in
+  let push_tail src count =
+    if count >= tail_cap then (
+      Bytes.blit src (count - tail_cap) tail_ring 0 tail_cap;
+      tail_pos := 0;
+      tail_filled := tail_cap)
+    else
+      let first = min count (tail_cap - !tail_pos) in
+      Bytes.blit src 0 tail_ring !tail_pos first;
+      let rem = count - first in
+      if rem > 0 then Bytes.blit src first tail_ring 0 rem;
+      tail_pos := (!tail_pos + count) mod tail_cap;
+      tail_filled := min tail_cap (!tail_filled + count)
+  in
+  let extract_tail () =
+    if !tail_filled < tail_cap then Bytes.sub_string tail_ring 0 !tail_filled
+    else
+      let out = Bytes.create tail_cap in
+      let first = tail_cap - !tail_pos in
+      Bytes.blit tail_ring !tail_pos out 0 first;
+      Bytes.blit tail_ring 0 out first !tail_pos;
+      Bytes.unsafe_to_string out
+  in
   let rec loop digest total =
     match input channel buffer 0 (Bytes.length buffer) with
-    | 0 -> Agent_core_sha256.get digest, total, make_preview (Buffer.contents preview)
+    | 0 ->
+      let preview =
+        if total <= preview_max then sanitize_utf8_slice (Buffer.contents head_buf)
+        else
+          make_head_tail_preview ~total_bytes:total
+            ~head:(Buffer.contents head_buf) ~tail:(extract_tail ())
+      in
+      Agent_core_sha256.get digest, total, preview
     | count ->
       Option.iter (fun output_channel -> output output_channel buffer 0 count) copy_to;
-      let preview_count = min count (preview_max - Buffer.length preview) in
-      Buffer.add_subbytes preview buffer 0 preview_count;
+      let head_remaining = preview_max - Buffer.length head_buf in
+      if head_remaining > 0 then
+        Buffer.add_subbytes head_buf buffer 0 (min count head_remaining);
+      push_tail buffer count;
       loop
         (Agent_core_sha256.feed_bytes digest ~off:0 ~len:count buffer)
         (total + count)
@@ -989,17 +1068,24 @@ let delete t ~sha256 =
         | Sys_error reason -> Error { sha256; path; reason }))
 
 (* Once a scan has written its record, the sweep drops the
-   older generation and starts a new one in one compare-and-set. *)
+   older generation and starts a new one in O(1). *)
 let rotate_touches () =
-  let rec loop () =
-    let observed = Atomic.get touch_ledger in
-    let rotated = { current = Touch_map.empty; previous = observed.current } in
-    if not (Atomic.compare_and_set touch_ledger observed rotated) then loop ()
-  in
-  loop ()
+  with_mutex touch_ledger_mu (fun () ->
+    touch_ledger_state.previous <- touch_ledger_state.current;
+    touch_ledger_state.current <- Hashtbl.create 256;
+    touch_ledger_state.current_order <- Queue.create ())
 ;;
 
-let observe_touches () = Atomic.get touch_ledger
+let snapshot_touch_tbl tbl =
+  Hashtbl.fold (fun sha mark acc -> Touch_map.add sha mark acc) tbl Touch_map.empty
+;;
+
+let observe_touches () =
+  with_mutex touch_ledger_mu (fun () ->
+    { current = snapshot_touch_tbl touch_ledger_state.current
+    ; previous = snapshot_touch_tbl touch_ledger_state.previous
+    })
+;;
 
 let touch_of (observed : touches) ~sha256 =
   match Touch_map.find_opt sha256 observed.current, Touch_map.find_opt sha256 observed.previous with

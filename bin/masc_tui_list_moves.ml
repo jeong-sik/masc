@@ -62,14 +62,14 @@ let tools_list (state : state) =
         match tools_async_targets state with
         | _ :: _ -> Some Tools_async_requests
         | [] -> None)
-    | Tools_activations | Tools_usage | Tools_storage
+    | Tools_usage | Tools_storage
     | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> None
 
 let read_skill_page (state : state) =
   match state.tools_pane, selected_tools_skill_profile state with
   | Tools_surface, Some _ -> state.tools_skill_focus <- Reading_page
   | Tools_surface, None
-  | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ -> ()
+  | (Tools_async | Tools_usage | Tools_storage | Tools_catalog _), _ -> ()
 
 let choose_skill_again (state : state) =
   match state.tools_pane, state.tools_skill_focus with
@@ -77,7 +77,7 @@ let choose_skill_again (state : state) =
       state.tools_skill_focus <- Choosing_skill;
       true
   | Tools_surface, Choosing_skill
-  | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ -> false
+  | (Tools_async | Tools_usage | Tools_storage | Tools_catalog _), _ -> false
 
 (* What the footer says j/k and Esc do: read from [tools_list], the focus,
    the original Task and the open request, the facts the move keys and Esc's
@@ -94,7 +94,7 @@ let tools_keys (state : state) : Masc_tui_keys.tools_keys =
       | Tools_async, _ when state.tools_async_detail_open ->
           Masc_tui_keys.Tools_reads_request
       | Tools_surface, Choosing_skill
-      | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ ->
+      | (Tools_async | Tools_usage | Tools_storage | Tools_catalog _), _ ->
           Masc_tui_keys.Tools_reads_page)
 
 let show_tools_pane (state : state) pane =

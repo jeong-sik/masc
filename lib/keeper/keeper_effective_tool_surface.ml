@@ -113,25 +113,6 @@ let descriptor_rows descriptors =
     descriptors
 ;;
 
-let composition_rows skill_catalog =
-  let skill_compositions =
-    Keeper_skill_catalog.compositions skill_catalog
-    |> List.map (fun (composition : Keeper_skill_catalog.composition) ->
-      composition.entry, composition.provenance)
-  in
-  Keeper_tool_composition_surface.schema_tool_rows ~skill_compositions ()
-  |> List.map (fun (origin, schema_tool) ->
-       let origin =
-         match origin with
-         | Keeper_tool_composition_surface.Declared_composition provenance ->
-           Composition_skill { provenance }
-         | Keeper_tool_composition_surface.Async_status
-         | Keeper_tool_composition_surface.Async_cancel
-         | Keeper_tool_composition_surface.Transient_run -> Composition_control
-       in
-       Result.map (fun (tool : Agent_core.Tool.t) -> { name = tool.schema.name; origin }, tool) schema_tool)
-;;
-
 let project
       ~masc_enabled
       ~lane_addon_conflicts
@@ -194,22 +175,15 @@ let project
     in
     let skill_catalog = Keeper_capability_surface.skill_catalog capability_surface in
     let readable_instruction_skills =
-      Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
+      Keeper_instruction_skill.instruction_skills_of_catalog skill_catalog
     in
     let instruction_skills =
       List.map
-        (fun (skill : Keeper_tool_composition_surface.instruction_skill) ->
+        (fun (skill : Keeper_instruction_skill.instruction_skill) ->
            skill.reference)
         readable_instruction_skills
     in
-    let composition_skills =
-      Keeper_skill_catalog.skills skill_catalog
-      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
-           match skill.reference, skill.surface with
-           | Some reference, Keeper_skill_catalog.Composition _ ->
-             Some reference
-           | None, _ | Some _, Keeper_skill_catalog.Instruction -> None)
-    in
+    let composition_skills = [] in
     let instruction_rows =
       if not masc_enabled
       then []
@@ -218,17 +192,14 @@ let project
         | [] -> []
         | skills ->
           let schema_tool =
-            Keeper_tool_composition_surface.instruction_skill_schema_tool
+            Keeper_instruction_skill.instruction_skill_schema_tool
               ~instruction_skills:skills
           in
           [ Result.map (fun (tool : Agent_core.Tool.t) ->
               { name = tool.schema.name; origin = Instruction_skill }, tool) schema_tool ]
     in
-    let composition_rows =
-      if masc_enabled then composition_rows skill_catalog else []
-    in
     let* rows =
-      collect_rows (descriptor_rows descriptors @ instruction_rows @ composition_rows)
+      collect_rows (descriptor_rows descriptors @ instruction_rows)
     in
     let instruction_skills, composition_skills, tools, schema_tools =
       match tool_delivery with

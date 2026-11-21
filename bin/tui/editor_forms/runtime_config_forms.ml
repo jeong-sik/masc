@@ -4,28 +4,6 @@ module Addons = Masc_tui_lane_addons
 module Edit = Masc_tui_runtime_config_edit
 module Config_view = Masc_tui_runtime_config_view
 
-(* Load memory-recall standing keyed by the form's read
-   generation, so the answer for a form the operator already left is dropped
-   ([Masc_tui_types.finish_memory_recall_standing_read]). *)
-let launch_memory_recall_standing_load (state : T.state) ~mailbox =
-  let generation = T.begin_memory_recall_standing_read state in
-  if T.server_authority_ready state then begin
-    let enqueue_async =
-      Masc_tui_transport.Workspace_admission.workspace_enqueue state
-    in
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.T.port in
-    Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-      ~deliver:(fun result ->
-        enqueue_async mailbox
-          (P.Memory_msg (P.Memory_recall_standing_loaded (generation, result))))
-      (fun () -> Masc_tui_loader.load_memory_recall_standing ~host ~port)
-  end
-  else
-    T.stop_waiting_for_memory_recall_standing state
-      (T.ui_text state ~ko:"서버 신원을 아직 확인하지 못했어요"
-         ~en:"Server identity not verified yet")
-
 let handle_lane_document_editor (state : T.state) ~terminal_session =
   match state.T.lane_addons with
   | None -> ()
@@ -277,88 +255,6 @@ let handle_runtime_account_open (state : T.state) =
             state.T.runtime_account_form <- Some form
         | Error reason -> Masc_tui_loader.report_action state "error" reason)
 
-(* [m] on the runtime.toml pane opens the recall form on the document an
-   edit would start from, so a hand edit that is not saved yet is neither
-   dropped nor written over. A save that is still out is not checked here:
-   [begin_runtime_form_save] refuses a second one with its own reason when
-   Enter reaches it, and the choice stays as a retained draft. *)
-let handle_memory_recall_form_open (state : T.state) ~mailbox =
-  match T.runtime_config_workspace state, state.T.runtime_config_view with
-  | None, (Some _ | None) | Some _, None ->
-      Masc_tui_loader.report_action state "error"
-        (T.ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
-           ~en:"config identity not loaded yet; r to reload")
-  | Some _, Some reading -> (
-      let session = runtime_config_working_session state reading in
-      let module Form = Masc_tui_memory_recall_form in
-      (* A paused Keeper, or one no fiber runs, is marked in the list. The
-         reading is the Keepers surface's own, so the two say the same. A
-         roster that could not be read says nothing: [Unknown] is not drawn. *)
-      let roster_entry (keeper : Masc.Tui_decode.keeper) =
-        let reading = T.keeper_reading state keeper in
-        { Form.name = keeper.Masc.Tui_decode.k_name
-        ; presence =
-            (if reading.Masc_tui_keeper_control.paused then Form.Stopped
-             else
-               match Masc_tui_keeper_control.runs reading with
-               | Some true -> Form.Running
-               | Some false -> Form.Stopped
-               | None -> Form.Unknown)
-        }
-      in
-      match
-        Form.open_on ~ko:(state.T.ui_language = T.Lang_ko)
-          ~source_revision:session.Edit.base.Edit.source_revision
-          ~keepers:(List.map roster_entry state.T.keepers)
-          session.Edit.text
-      with
-      | Ok form ->
-          state.T.memory_recall_form <- Some form;
-          launch_memory_recall_standing_load state ~mailbox
-      | Error reason -> Masc_tui_loader.report_action state "error" reason)
-
-(* Enter on the recall form. Its text is the document it was opened on, so
-   it goes to the save only while the pane's document is still that one;
-   laid over another revision it would carry a choice made against a file
-   it is not. The save is the raw edit's: the same preview, revision check
-   and conflict handling as [e]. *)
-let submit_memory_recall_form (state : T.state) ~mailbox form =
-  let ko = state.T.ui_language = T.Lang_ko in
-  let refuse reason =
-    state.T.memory_recall_form <-
-      Some (Masc_tui_memory_recall_form.refused form reason)
-  in
-  match T.runtime_config_workspace state, state.T.runtime_config_view with
-  | None, (Some _ | None) | Some _, None ->
-      refuse
-        (T.ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
-           ~en:"config identity not loaded yet; r to reload")
-  | Some workspace, Some reading ->
-      let session = runtime_config_working_session state reading in
-      if
-        not
-          (Option.equal String.equal
-             (Masc_tui_memory_recall_form.source_revision form)
-             (Some session.Edit.base.Edit.source_revision))
-      then
-        refuse
-          (T.ui_text state
-             ~ko:
-               "runtime.toml 이 폼을 연 뒤에 바뀌었어요. Esc 로 닫고 m 으로 다시 열어 주세요"
-             ~en:
-               "runtime.toml changed after this form opened. Press Esc to close and m to reopen.")
-      else (
-        match Masc_tui_memory_recall_form.text_on ~ko form with
-        | Error form -> state.T.memory_recall_form <- Some form
-        | Ok text ->
-            state.T.memory_recall_form <- None;
-            if String.equal text session.Edit.text then
-              Masc_tui_loader.report_action state "system"
-                (T.ui_text state ~ko:"바뀐 게 없어요. 파일에 쓰지 않았어요"
-                   ~en:"No changes made; file was not written.")
-            else
-              save_runtime_config_edit_session state ~mailbox ~workspace
-                (Edit.edit text session))
 
 (* [x] on the runtime.toml pane: the exclusion form, opened on the file the
    pane shows, with a stopped Keeper marked the way the recall form marks it. *)

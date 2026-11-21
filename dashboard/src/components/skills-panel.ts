@@ -14,7 +14,6 @@ import type { AsyncRequestIdentity } from '../api/composition-observation'
 import {
   classifySkillEditorError,
   fetchAsyncRequestObservation,
-  fetchKeeperSkillUsage,
   fetchSkills,
   fetchSkillEvidence,
   previewSkillSource,
@@ -26,7 +25,6 @@ import {
   type SkillEditorPreview,
   type SkillEditorSaveReceipt,
   type AsyncRequestObservation,
-  type KeeperSkillUsage,
   type SkillIdentity,
   type SkillReference,
   type SkillSnapshotConfig,
@@ -34,7 +32,6 @@ import {
   type SkillSnapshotRejection,
   type SkillSurface,
   type SkillSurfaceProfile,
-  type SkillUsage,
   type SkillsResponse,
 } from '../api/dashboard-skills'
 import { SurfaceCard } from './common/card'
@@ -43,11 +40,7 @@ import { storedTokenRevision } from '../api/token-revision'
 import { dashboardActorRevision, managedDashboardActorRevision } from '../lib/dashboard-session-actor'
 import { captureDashboardObservationOwner, dashboardObservationOwnerHasWorkspace,
   dashboardObservationOwnerIsCurrent, type DashboardObservationOwner } from '../lib/observation-read-owner'
-import {
-  executionLoaded,
-  executionWorkspaceAuthority,
-  keepers,
-} from '../store'
+import { executionWorkspaceAuthority } from '../store'
 
 
 export function isAbortError(e: unknown): boolean {
@@ -164,76 +157,6 @@ export function contextLabel(surface: SkillSurface | null, bodyBytes: number): s
     : null
   if (!context) return `${formatBytes(bodyBytes)} body`
   return `${formatBytes(context.discovery_bytes)} discovery · ${formatBytes(context.body_bytes)} body`
-}
-
-export function usageLabel(usage: readonly SkillUsage[] | null): string {
-  if (usage === null) return 'Usage observation unavailable'
-  if (usage.length === 0) return 'No invocation observed in retained sessions'
-  return usage
-    .map(row => `${row.keeper} ${row.invocations} invoked / ${row.deliveries} received / ${row.actions} observed actions · last activation ${row.last_used_at}`)
-    .join(' · ')
-}
-
-/** Every Keeper's usage, joined to the catalog by exact Skill reference. */
-export interface KeeperUsageReading {
-  byReference: ReadonlyMap<string, readonly SkillUsage[]>
-  ledgersRead: number
-  unavailable: readonly string[]
-}
-
-/** The Keepers' usage rows for one exact Skill reference. */
-export function usageFor(reading: KeeperUsageReading, reference: SkillReference): readonly SkillUsage[] {
-  return reading.byReference.get(referenceKey(reference.identity, reference.content_revision)) ?? []
-}
-
-/** Joins each Keeper's `skill-usage` answer, in Keeper name order. A Keeper
-    with no session has nothing to count; one whose ledger or answer could
-    not be read is listed as unavailable. */
-export function keeperUsageReading(
-  readings: readonly { keeper: string; result: PromiseSettledResult<KeeperSkillUsage> }[],
-): KeeperUsageReading {
-  const byReference = new Map<string, SkillUsage[]>()
-  let ledgersRead = 0
-  const unavailable: string[] = []
-  const ordered = [...readings].sort((left, right) => left.keeper.localeCompare(right.keeper))
-  for (const { keeper, result } of ordered) {
-    if (result.status === 'rejected') {
-      const reason: unknown = result.reason
-      unavailable.push(`${keeper}: ${reason instanceof Error ? reason.message : String(reason)}`)
-      continue
-    }
-    const usage = result.value
-    switch (usage.state) {
-      case 'ready':
-        ledgersRead += 1
-        for (const row of usage.rows) {
-          const key = referenceKey(row.reference.identity, row.reference.content_revision)
-          const rows = byReference.get(key) ?? []
-          rows.push({
-            keeper,
-            invocations: row.invocations,
-            deliveries: row.deliveries,
-            actions: row.actions,
-            last_used_at: row.last_used_at,
-          })
-          byReference.set(key, rows)
-        }
-        break
-      case 'no_catalog':
-        ledgersRead += 1
-        break
-      case 'no_session':
-        break
-      case 'unavailable':
-        unavailable.push(`${keeper}: ${usage.reason} (${usage.detail})`)
-        break
-      default: {
-        const unread: never = usage
-        return unread
-      }
-    }
-  }
-  return { byReference, ledgersRead, unavailable }
 }
 
 export function formatBytes(bytes: number): string {
@@ -851,8 +774,6 @@ function SkillsObservationPanel({ owner, onMutation }: {
   onMutation: (result: SkillMutationResult) => void
 }) {
   const response = useSignal<SkillsResponse | null>(null)
-  const keeperUsage = useSignal<KeeperUsageReading | null>(null)
-  const usageController = useRef<AbortController | null>(null)
   const loading = useSignal(true)
   const error = useSignal<string | null>(null)
   const asyncObservation = useSignal<AsyncRequestObservation | null>(null)
@@ -887,35 +808,6 @@ function SkillsObservationPanel({ owner, onMutation }: {
       request_id: identity.request_id, keeper_name: identity.keeper_name }, visit: ++asyncVisits.current }
   }
 
-  // Each Keeper's usage is its own read, so reading every Keeper
-  // does not carry every ledger. The catalog read does not wait for them, and
-  // a newer round cancels the older one.
-  const usageReadError = useRef<unknown | null>(null)
-  const loadUsage = async (signal?: AbortSignal) => {
-    usageReadError.current = null
-    if (!current() || signal?.aborted) return
-    usageController.current?.abort()
-    usageController.current = null
-    if (!executionLoaded.peek()) {
-      // The roster is not read yet: an empty answer would read as "no Keeper
-      // used it" when no Keeper was asked.
-      keeperUsage.value = null
-      return
-    }
-    const controller = new AbortController()
-    usageController.current = controller
-    const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
-    const names = keepers.peek().map(keeper => keeper.name)
-    const settled = await Promise.allSettled(
-      names.map(name => fetchKeeperSkillUsage(name, { signal: readSignal })),
-    )
-    if (!current() || readSignal.aborted) return
-    usageReadError.current = selectObservationReadFailure(settled.map(result => result.status === 'rejected' ? result.reason : null))
-    keeperUsage.value = keeperUsageReading(
-      names.map((keeper, index) => ({ keeper, result: settled[index]! })),
-    )
-  }
-
   const load = async (signal?: AbortSignal) => {
     if (!current() || signal?.aborted) return
     catalogReadError.current = null
@@ -925,7 +817,6 @@ function SkillsObservationPanel({ owner, onMutation }: {
       if (!current() || signal?.aborted || generation !== catalogGeneration.current) return
       response.value = res
       error.value = null
-      if (res.state === 'ready') await loadUsage(signal)
     } catch (cause) {
       if (!current() || signal?.aborted || generation !== catalogGeneration.current || isAbortError(cause)) return
       catalogReadError.current = cause
@@ -953,15 +844,12 @@ function SkillsObservationPanel({ owner, onMutation }: {
     }
     const dispose = setupObservationRefresh(signal => Promise.all([
       load(signal), loadAsyncObservation(signal),
-    ]), { topics: ['skills', 'async_requests', 'skill_usage'], readError: () => selectObservationReadFailure([
-      catalogReadError.current, asyncReadError.current, usageReadError.current,
+    ]), { topics: ['skills', 'async_requests'], readError: () => selectObservationReadFailure([
+      catalogReadError.current, asyncReadError.current,
     ]), resetRead: () => {
-      usageController.current?.abort()
       catalogReadError.current = null
       asyncReadError.current = null
-      usageReadError.current = null
       response.value = null
-      keeperUsage.value = null
       asyncObservation.value = null
       error.value = null
       asyncObservationError.value = null
@@ -969,16 +857,9 @@ function SkillsObservationPanel({ owner, onMutation }: {
     } })
     return () => {
       active.current = false
-      usageController.current?.abort()
       dispose()
     }
   }, [])
-
-  // The roster can arrive after the catalog; its arrival reads the usage.
-  const rosterLoaded = executionLoaded.value
-  useEffect(() => {
-    if (rosterLoaded && response.peek()?.state === 'ready') void loadUsage()
-  }, [rosterLoaded])
 
   if (loading.value && !response.value) {
     return html`<${LoadingState}>Loading skills...<//>`
@@ -1049,16 +930,6 @@ function SkillsObservationPanel({ owner, onMutation }: {
           ? html` · ${res.snapshot.rejections.length} rejected`
           : null}
       </div>
-      <div class="ss-muted my-2" data-testid="skill-usage-coverage">
-        Usage scope: exact revision · retained current Keeper sessions.
-        ${keeperUsage.value ? html`
-          ${keeperUsage.value.ledgersRead} ledgers read · ${keeperUsage.value.unavailable.length} unavailable.
-          ${keeperUsage.value.unavailable.length > 0 ? html`<details class="text-[var(--color-status-warn)]"><summary>Incomplete session coverage</summary>
-            ${keeperUsage.value.unavailable.map(detail => html`<div key=${detail}>${detail}</div>`)}
-          </details>` : null}
-        ` : html`Coverage unavailable; displayed users cannot establish fleet-wide usage.`}
-        Received counts invocations handed to a provider/client, including asynchronous results. Actions are counted per Skill invocation; one tool call may contribute to several invocations. An observed action does not imply completion.
-      </div>
       ${rows.length > 0 ? html`<div class="my-3 flex flex-wrap items-end gap-2" aria-label="Skill filters">
         <label>Find Skill<input class="ss-input" type="search" value=${search.value}
           placeholder="Name, purpose or source" onInput=${(event: Event) => { search.value = (event.currentTarget as HTMLInputElement).value }} /></label>
@@ -1084,7 +955,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
       ${rows.length > 0 ? html`<table hidden=${visibleRows.length === 0} class="ss-table" data-testid="skills-table">
         <thead>
           <tr>
-            <th>skill</th><th>capability</th><th>context</th><th>Session usage</th><th>source</th>
+            <th>skill</th><th>capability</th><th>context</th><th>source</th>
           </tr>
         </thead>
         <tbody>
@@ -1108,13 +979,10 @@ function SkillsObservationPanel({ owner, onMutation }: {
                   <div class="ss-muted mono">${row.surface && row.surface.kind !== 'unavailable' ? row.surface.profile.activation_tool : 'unavailable'}</div>
                 </td>
                 <td>${contextLabel(row.surface, row.body_bytes)}</td>
-                <td>${usageLabel(row.surface && keeperUsage.value
-                  ? usageFor(keeperUsage.value, row.surface.reference)
-                  : null)}</td>
                 <td class="mono">${row.source}</td>
               </tr>
               ${isExpanded ? html`
-                <tr hidden=${filtered} key=${`${rowKey}-detail`}><td colspan="5">
+                <tr hidden=${filtered} key=${`${rowKey}-detail`}><td colspan="4">
                   ${row.surface ? html`<${SkillSourceInspector} reference=${row.surface.reference} />`
                     : html`<p role="status">Exact source unavailable: this Skill has no published source reference.</p>`}
                   <div class="grid min-w-0 gap-3 p-2">

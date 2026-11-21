@@ -157,7 +157,24 @@ let candidate_snapshot_path ~base_path =
 
 let add_references ~path ~line references text =
   match Tool_output.decode_from_agent_core text with
-  | Tool_output.Not_marker -> Ok references
+  | Tool_output.Not_marker ->
+    (match Tool_output.decode_structured_handle text with
+     | Tool_output.Not_marker -> Ok references
+     | Tool_output.Invalid_marker { detail } ->
+       Error (Malformed_structured_artifact_reference { path; line; detail })
+     | Tool_output.Decoded reference ->
+       let canonical =
+         Tool_output.encode_structured_handle (Tool_output.Stored reference)
+       in
+       if String.equal text canonical
+       then Ok (Live_reference_set.add (Artifact reference) references)
+       else
+         Error
+           (Malformed_structured_artifact_reference
+              { path
+              ; line
+              ; detail = "structured artifact handle is not in canonical JSON form"
+              }))
   | Tool_output.Invalid_marker { detail } ->
     Error
       (Malformed_artifact_reference

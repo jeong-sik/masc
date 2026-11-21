@@ -881,14 +881,14 @@ let test_the_policy_can_place_an_attached_tool () =
   let offering = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
   let identity_tool_index = Index.of_tools offering.offered in
   check Alcotest.bool "classifiable" true
-    (Policy.classifies ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_getJiraIssue")
+    (Policy.classifies ~identity_tool_index ~tool_name:"atlassian_getJiraIssue")
 
 let test_a_read_only_hint_still_reaches_the_gate () =
   let base_path = temp_base () in
   let offering = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
   let identity_tool_index = Index.of_tools offering.offered in
   match
-    Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc [])
+    Policy.verdict_for ~identity_tool_index ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc [])
   with
   | Policy.Run -> ()
   | Policy.Ask { because } ->
@@ -904,7 +904,7 @@ let test_a_writing_tool_belongs_to_the_durable_gate () =
   let offering = offer ~base_path [ tool ~read_only:false "editJiraIssue" ] in
   let identity_tool_index = Index.of_tools offering.offered in
   match
-    Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc [])
+    Policy.verdict_for ~identity_tool_index ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc [])
   with
   | Policy.Run -> ()
   | Policy.Ask { because } ->
@@ -919,7 +919,7 @@ let test_silence_is_not_permission () =
   let offering = offer ~base_path [ tool "somethingUnannotated" ] in
   let identity_tool_index = Index.of_tools offering.offered in
   match
-    Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_somethingUnannotated"
+    Policy.verdict_for ~identity_tool_index ~tool_name:"atlassian_somethingUnannotated"
       ~input:(`Assoc [])
   with
   | Policy.Run -> ()
@@ -933,7 +933,7 @@ let test_a_name_from_no_service_stays_unknown () =
      name masc has never heard of is still the unclassifiable case, and
      folding the two would let this arm swallow every unknown tool. *)
   check Alcotest.bool "not classifiable" false
-    (Policy.classifies ~identity_tool_index:Index.empty ~composition_plan_index:None ~tool_name:"atlassian_neverOffered")
+    (Policy.classifies ~identity_tool_index:Index.empty ~tool_name:"atlassian_neverOffered")
 
 let test_turn_declarations_are_isolated () =
   let base_path = temp_base () in
@@ -948,9 +948,9 @@ let test_turn_declarations_are_isolated () =
     (Index.mem second_index ~tool_name);
   check Alcotest.bool "catalog projection cannot register a tool in another turn" false
     (Policy.classifies ~identity_tool_index:Index.empty
-       ~composition_plan_index:None ~tool_name);
+       ~tool_name);
   let verdict identity_tool_index =
-    Policy.verdict_for ~identity_tool_index ~composition_plan_index:None
+    Policy.verdict_for ~identity_tool_index
       ~tool_name ~input:(`Assoc []) in
   List.iter
     (fun index ->

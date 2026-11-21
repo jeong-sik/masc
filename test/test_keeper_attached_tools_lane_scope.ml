@@ -115,7 +115,7 @@ let with_bundle
      shapes is the one under test. A Skill-bearing bundle is refused without a
      frozen activation context, so a case with skills gets one, built from the
      same snapshot the catalog came from. *)
-  let snapshot, skill_catalog, skill_activation_context =
+  let snapshot, skill_catalog =
     match skills with
     | None ->
       let snapshot =
@@ -126,25 +126,8 @@ let with_bundle
            | Ok snapshot -> snapshot
            | Error _ -> failf "an empty skill snapshot must build")
       in
-      snapshot, Keeper_skill_catalog.empty, None
-    | Some (snapshot, catalog) ->
-      let trace_id = meta.Keeper_meta_contract.runtime.trace_id in
-      let context =
-        match
-          Keeper_skill_activation_recorder.make ~keeper_name:"skill-keeper-fixture"
-            ~trace_id
-            ~runtime_id:(fun () -> Some "test.runtime")
-            ~turn_ref:
-              (Ids.Turn_ref.make
-                 ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
-                 ~absolute_turn:1)
-            ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision snapshot)
-            ~task_selection:Keeper_task_skill_turn.empty
-        with
-        | Ok context -> context
-        | Error error -> fail (Keeper_skill_activation_recorder.error_to_string error)
-      in
-      snapshot, catalog, Some context
+      snapshot, Keeper_skill_catalog.empty
+    | Some (snapshot, catalog) -> snapshot, catalog
   in
   let capability_surface =
     Keeper_capability_surface.create
@@ -185,7 +168,6 @@ let with_bundle
           }
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"test")
       ?identity_surface
-      ?skill_activation_context
       ~capability_surface
       () |> Result.get_ok
   in
@@ -374,7 +356,7 @@ let test_a_builtin_that_declares_deferral_leaves_the_request () =
    in a [config/tools] file. Two compositions over the same node tool, one
    declaring deferral and one not, so the declaration is the only thing that
    separates them. *)
-let composition_skill_document ~name ~defer_line =
+let _composition_skill_document ~name ~defer_line =
   Printf.sprintf
     "---\nname: %s\ndescription: Read the Keeper lane status.\n---\n\nComposition fixture.\n\n```toml composition\n[[compositions]]\nname = \"%s\"\nexecution = \"inline\"\n%s\n[[compositions.nodes]]\nid = \"lane\"\ntool = \"keeper_lane_status\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```\n"
     name
@@ -382,7 +364,7 @@ let composition_skill_document ~name ~defer_line =
     defer_line
 ;;
 
-let composition_skill_snapshot documents =
+let _composition_skill_snapshot documents =
   let config_text =
     {|[skills]
 resource-read-max-bytes = 16384
@@ -429,252 +411,7 @@ access = "read-write"
       (Keeper_skill_catalog.error_to_string diagnostic.error)
 ;;
 
-let composition_tool_name catalog name =
-  match
-    List.find_map
-      (fun (skill : Keeper_skill_catalog.skill) ->
-         match skill.surface with
-         | Keeper_skill_catalog.Composition entry
-           when String.equal entry.Keeper_tool_composition_catalog.name name ->
-           Some (Keeper_tool_composition_catalog.tool_name entry)
-         | Keeper_skill_catalog.Composition _ | Keeper_skill_catalog.Instruction -> None)
-      (Keeper_skill_catalog.skills catalog)
-  with
-  | Some tool_name -> tool_name
-  | None -> failf "composition %S is not in the fixture catalog" name
-;;
 
-let test_a_composition_that_declares_deferral_leaves_the_request () =
-  let ((_, skill_catalog) as skills) =
-    composition_skill_snapshot
-      [ ( "lane-deferred"
-        , composition_skill_document ~name:"lane-deferred" ~defer_line:"defer_loading = true" )
-      ; "lane-loaded", composition_skill_document ~name:"lane-loaded" ~defer_line:""
-      ]
-  in
-  let deferred = composition_tool_name skill_catalog "lane-deferred" in
-  let loaded = composition_tool_name skill_catalog "lane-loaded" in
-  with_bundle ~skills (fun bundle ->
-    let sent = tool_names bundle.Keeper_tools_agent_core.tools in
-    let listed = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
-    let held = listing_deferred_names bundle in
-    check
-      bool
-      "both compositions reach the bundle, or this proves nothing"
-      true
-      (List.mem deferred sent && List.mem loaded sent);
-    check
-      bool
-      "the composition that declared deferral is not sent as a schema"
-      false
-      (List.mem deferred listed);
-    check bool "and the listing names it" true (List.mem deferred held);
-    check
-      bool
-      "the composition that declared nothing is sent as a schema"
-      true
-      (List.mem loaded listed);
-    check bool "and the listing does not name it" false (List.mem loaded held);
-    let bounds = bundle.Keeper_tools_agent_core.result_bounds in
-    check
-      (option int)
-      "the deferred composition carries its actual projection ceiling"
-      (Some Common.max_tool_result_wire_bytes)
-      (List.assoc_opt deferred bounds);
-    check
-      (option int)
-      "the loaded composition carries its actual projection ceiling"
-      (Some Common.max_tool_result_wire_bytes)
-      (List.assoc_opt loaded bounds))
-;;
-
-(* Deterministic production-handler sequence, not a model-selection test.
-   Discovery, loading and the generated composition all use the same bundle
-   and retained Agent. The leaf reads use an isolated real Board store. *)
-let test_deferred_composition_discovery_load_and_execution () =
-  let document = {|---
-name: deferred-board-read
-description: Read board posts for the current lane profile.
----
-```toml composition
-[[compositions]]
-name = "deferred-board-read"
-execution = "inline"
-defer_loading = true
-[[compositions.params]]
-name = "query"
-type = "string"
-description = "FTS5 query used by the first real capability-search node."
-[[compositions.nodes]]
-id = "probe"
-tool = "keeper_capability_search"
-[compositions.nodes.input]
-kind = "object"
-[[compositions.nodes.input.fields]]
-name = "syntax"
-[compositions.nodes.input.fields.value]
-kind = "literal"
-value = "fts5"
-[[compositions.nodes.input.fields]]
-name = "query"
-[compositions.nodes.input.fields.value]
-kind = "param"
-name = "query"
-[[compositions.nodes]]
-id = "lane"
-tool = "keeper_lane_status"
-after = ["probe"]
-input = { kind = "literal", value = {} }
-[[compositions.nodes]]
-id = "search"
-tool = "masc_board_search"
-after = ["lane"]
-[compositions.nodes.input]
-kind = "object"
-[[compositions.nodes.input.fields]]
-name = "query"
-[compositions.nodes.input.fields.value]
-kind = "output"
-node = "lane"
-pointer = "/profile"
-```
-|} in
-  let ((_, catalog) as skills) =
-    composition_skill_snapshot ["deferred-board-read", document] in
-  let name = composition_tool_name catalog "deferred-board-read" in
-  let reference = match (List.hd (Keeper_skill_catalog.skills catalog)).reference with
-    | Some reference -> reference | None -> fail "missing exact Skill reference" in
-  let cell = ref None in
-  let workspace = ref None in
-  let seeded_id = ref "" in
-  let previous_base = Sys.getenv_opt "MASC_BASE_PATH" in
-  Fun.protect ~finally:(fun () ->
-    Keeper_tool_call_log.reset_for_testing ();
-    Board_dispatch.reset_for_test ();
-    Board.reset_global_for_test ();
-    (match previous_base with
-     | Some value -> Unix.putenv "MASC_BASE_PATH" value
-     | None -> Unix.unsetenv "MASC_BASE_PATH")) @@ fun () ->
-  with_bundle ~attached:false ~skills ~retained_agent:cell
-    ~prepare:(fun dir ->
-      workspace := Some (Workspace.default_config dir);
-      Unix.putenv "MASC_BASE_PATH" dir;
-      Keeper_tool_call_log.reset_for_testing ();
-      Keeper_tool_call_log.init ~base_path:dir ();
-      Board.reset_global_for_test ();
-      Board_dispatch.reset_for_test ();
-      Result.get_ok (Board_dispatch.init_jsonl
-        ~base_path:(Env_config_core.base_path ())
-        ~recipient_lookup:Recipient_lookup.none_declared ());
-      match Board_dispatch.create_post ~author:"fixture" ~content:(Keeper_types_profile_sandbox.sandbox_profile_to_string (make_meta ()).sandbox_profile ^ " joined evidence")
-        ~post_kind:Board.Human_post () with
-      | Ok post -> seeded_id := Board.Post_id.to_string post.Board.id
-      | Error _ -> fail "isolated Board seed failed")
-    (fun _bundle ->
-      let agent = match !cell with Some agent -> agent | None -> fail "Agent missing" in
-      let config = match !workspace with Some config -> config | None -> fail "workspace missing" in
-      let decode_json content =
-        match Tool_output.decode_from_agent_core content with
-        | Tool_output.Not_marker -> Yojson.Safe.from_string content
-        | Tool_output.Invalid_marker { detail } -> fail detail
-        | Tool_output.Decoded reference ->
-          let stored =
-            match Tool_blob_store.fetch
-              (Tool_blob_store.create ~base_path:config.base_path)
-              ~sha256:reference.sha256 with
-            | Ok (Some payload) ->
-              check int "stored output matches its declared byte count"
-                reference.bytes (String.length payload);
-              Yojson.Safe.from_string payload
-            | Ok None -> fail "composition output blob is absent"
-            | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
-          if String.equal reference.mime Tool_output.artifact_manifest_mime then
-            (match Tool_output.artifact_manifest_of_json stored with
-             | Tool_output.Decoded_artifact_manifest { structured_content; _ } ->
-               structured_content
-             | Tool_output.Not_artifact_manifest ->
-               fail "composition output is not a typed result manifest"
-             | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
-          else stored in
-      let find name = match Agent_core.Tool_set.find name (Agent_core.Agent.tools agent) with
-        | Some tool -> tool | None -> failf "tool %s is not callable" name in
-      let execute_raw id tool input =
-        let invocation = Agent_core.Tool_contract.Invocation.create
-          ~tool_use_id:id ~turn:1
-          ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1;
-                      execution_mode = Agent_core.Tool_contract.Concurrent }
-          ~completion:Agent_core.Tool_contract.Continue_after_success in
-        Agent_core.Tool.execute ~invocation tool input in
-      let execute id tool input =
-        match execute_raw id tool input with
-        | Ok output -> decode_json output.content
-        | Error error -> failf "real handler failed: %s" error.Agent_core.Types.message in
-      check bool "generated schema absent before discovery" false
-        (Agent_core.Tool_set.mem name (Agent_core.Agent.tools agent));
-      let discovery = execute "discover" (find "keeper_capability_search")
-        (`Assoc ["query", `String "\"deferred-board-read\""]) in
-      let open Yojson.Safe.Util in
-      let matches = discovery |> member "matches" |> to_list in
-      check bool "discovery names the exact generated invocation" true
-        (List.exists (fun row -> member "invocation_name" row = `String name
-          && (row |> member "candidate" |> member "capability" |> member "reference")
-             = Skill_reference.to_yojson reference) matches);
-      check bool "discovery does not load schema" false
-        (Agent_core.Tool_set.mem name (Agent_core.Agent.tools agent));
-      (* Loading returns human-readable schema text, not JSON. Its typed
-         success must precede the same Agent's callable-schema assertion. *)
-      (match execute_raw "load" (find Keeper_identity_tool_search.tool_name)
-        (`Assoc ["names", `List [`String name]]) with
-       | Ok _ -> ()
-       | Error error ->
-           failf "real load handler failed: %s" error.Agent_core.Types.message);
-      let loaded = find name in
-      let before = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator () in
-      let result = execute "run-composition" loaded (`Assoc ["query", `String "board"]) in
-      let actions = result |> member "actions" |> to_list in
-      check (list string) "real executor settles producer then consumer" ["probe"; "lane"; "search"]
-        (List.map (fun row -> member "node_id" row |> to_string) actions);
-      let lane = List.nth actions 1 in
-      let search = List.nth actions 2 in
-      List.iter (fun row -> check string "nested action completed" "completed"
-        (row |> member "result" |> member "disposition" |> to_string)) actions;
-      check string "consumer binds the actual producer profile"
-        (lane |> member "result" |> member "data" |> member "profile" |> to_string)
-        (search |> member "input" |> member "query" |> to_string);
-      let search_text = search |> member "result" |> member "data" |> to_string in
-      check bool "real Board search returns the seeded post" true
-        (List.exists (fun line ->
-          match String.split_on_char ' ' line with
-          | id :: _ -> String.equal id !seeded_id
-          | [] -> false) (String.split_on_char '\n' search_text));
-      let evidence () = match Keeper_skill_composition_evidence.load_latest config reference with
-        | Ok (Some evidence) -> Keeper_skill_composition_evidence.to_yojson evidence
-        | Ok None -> fail "no exact-reference composition evidence"
-        | Error error -> fail (Keeper_skill_composition_evidence.error_to_string error) in
-      let success_evidence = evidence () in
-      check string "durable success belongs to this exact invocation" "run-composition"
-        (success_evidence |> member "parent_tool_use_id" |> to_string);
-      check string "durable outer success completed" "completed"
-        (success_evidence |> member "result" |> member "disposition" |> to_string);
-      check string "durable settlements equal the actual returned actions"
-        (Yojson.Safe.sort (`List actions) |> Yojson.Safe.to_string)
-        (success_evidence |> member "executor_settlements" |> Yojson.Safe.sort |> Yojson.Safe.to_string);
-      (match execute_raw "run-invalid-query" loaded (`Assoc ["query", `String "\""]) with
-       | Error _ -> ()
-       | Ok _ -> fail "malformed FTS producer unexpectedly completed");
-      let failure_evidence = evidence () in
-      check string "durable failure belongs to this exact invocation" "run-invalid-query"
-        (failure_evidence |> member "parent_tool_use_id" |> to_string);
-      check string "durable outer failure is failed" "failed"
-        (failure_evidence |> member "result" |> member "disposition" |> to_string);
-      let failed = failure_evidence |> member "executor_settlements" |> to_list in
-      List.iter (fun row -> check string "real invalid FTS producer failed" "failed"
-        (row |> member "result" |> member "disposition" |> to_string)) failed;
-      check (list string) "failed real producer prevents both dependent dispatches" ["probe"]
-        (List.map (fun row -> member "node_id" row |> to_string) failed);
-      check int "read composition leaves Board post count unchanged"
-        (List.length before) (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ())))
-;;
 
 (* [Keeper_run_tools_setup] compares the bundle against what the descriptor
    projection says the surface should hold, and logs [Log.Error] every turn
@@ -923,12 +660,6 @@ let () =
             `Quick
             test_a_builtin_that_declares_deferral_leaves_the_request
         ; test_case
-            "holds back a Skill composition that declares deferral"
-            `Quick
-            test_a_composition_that_declares_deferral_leaves_the_request
-        ; test_case "deferred composition discovery loads and executes real dependencies" `Quick
-            test_deferred_composition_discovery_load_and_execution
-        ; test_case
             "does not report a declared tool this conversation ran as held"
             `Quick
             test_a_declared_tool_this_conversation_ran_is_not_reported_as_held
@@ -958,6 +689,7 @@ let () =
             "does not explain an unknown actual tool"
             `Quick
             test_an_unknown_actual_tool_stays_out_of_the_identity_expectation
-        ] )
+        
+] )
     ]
 ;;

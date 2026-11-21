@@ -402,8 +402,8 @@ let launch_owed_tools (state : T.state) ~mailbox =
        Keeper's read. *)
     let pending part =
       match part with
-      | T.Tools_catalog_read | T.Tools_usage_read _ -> List.mem part state.T.tools_skill_pending
-      | T.Tools_inventory_read | T.Tools_activations_read | T.Tools_async_read ->
+      | T.Tools_catalog_read -> List.mem part state.T.tools_skill_pending
+      | T.Tools_inventory_read | T.Tools_async_read ->
           (match state.T.tools_read_inflight with
            | Some request when Option.equal String.equal request.T.tri_keeper selected ->
                List.mem part request.T.tri_pending
@@ -436,37 +436,10 @@ let launch_owed_tools (state : T.state) ~mailbox =
     let parts =
       match state.T.tools_pane with
       | T.Tools_usage ->
-          (* A Keeper that left the roster leaves its readings with it. *)
-          T.keep_roster_skill_usage state;
           inventory_parts ()
           @ (if due T.Tools_catalog_read state.T.tools_catalog_owed
                   (fun owed -> state.T.tools_catalog_owed <- owed)
              then [ T.Tools_catalog_read ]
-             else [])
-          @ List.filter_map
-              (fun (row : T.keeper) ->
-                 let part = T.Tools_usage_read row.Tui_decode.k_name in
-                 if due part (T.keeper_skill_usage_owed state row.Tui_decode.k_name)
-                      (T.set_keeper_skill_usage_owed state row.Tui_decode.k_name)
-                 then Some part
-                 else None)
-              state.T.keepers
-      | T.Tools_activations ->
-          (* The pane follows the selected Keeper however the selection
-             moved: the roster loading, a Keeper leaving it, or a key. *)
-          (* A wait after the other Keeper's failed read is not this
-             Keeper's: the read is owed now, with no failures behind it. *)
-          (match state.T.tools_activations_owed with
-           | Owed_read.(Settled | Waiting _)
-             when T.activations_held_for_another ~selected state.T.tools_activations
-                    state.T.tools_activations_error ->
-               state.T.tools_activations_owed <-
-                 Owed_read.changed Owed_read.settled
-           | Owed_read.(Settled | Owed _ | Reading _ | Waiting _) -> ());
-          inventory_parts ()
-          @ (if due T.Tools_activations_read state.T.tools_activations_owed
-                  (fun owed -> state.T.tools_activations_owed <- owed)
-             then [ T.Tools_activations_read ]
              else [])
       | T.Tools_surface | T.Tools_storage
       | T.Tools_catalog (T.Tools_catalog_list | T.Tools_catalog_volumes _) -> inventory_parts ()

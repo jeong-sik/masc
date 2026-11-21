@@ -393,11 +393,9 @@ let test_materialize_of_an_absent_blob_is_a_workflow_rejection () =
   Alcotest.(check bool) "an absent blob is refused before any effect" true
     (result.disposition = Tool_result.Failed Tool_result.Workflow_rejection
      && result.failure_effect_disposition = Tool_result.Proven_pre_effect);
-  Alcotest.(check bool) "shared absent-blob classifier agrees across peer artifact and composition draft" true
+  Alcotest.(check bool) "shared absent-blob classifier agrees with peer artifact" true
     (Masc.Keeper_blob_lookup_failure.failure_class Absent = Tool_result.Workflow_rejection
      && Keeper_peer_artifact.fetch_error_class (Keeper_peer_artifact.Absent absent)
-        = Masc.Keeper_blob_lookup_failure.failure_class Absent
-     && Masc.Keeper_composition_draft.failure_class Masc.Keeper_composition_draft.Draft_not_found
         = Masc.Keeper_blob_lookup_failure.failure_class Absent)
 ;;
 

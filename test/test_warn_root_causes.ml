@@ -182,13 +182,6 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           check int "bundle contains no duplicate model names" (List.length actual_names)
             (List.length bundle.tools);
           List.iter
-            (fun name ->
-               check bool (name ^ " is not built without an async composition") false
-                 (List.mem name actual_names))
-            [ Keeper_tool_composition_catalog.status_tool_name
-            ; Keeper_tool_composition_catalog.cancel_tool_name
-            ];
-          List.iter
             (fun (tool : Agent_core.Tool.t) ->
                let name = tool.schema.name in
                let descriptor =

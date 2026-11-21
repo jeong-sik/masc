@@ -667,7 +667,7 @@ let test_tools_readings_answer_no_list_move () =
       state.tools_pane <- pane;
       Alcotest.(check bool) "a reading pane answers no list move" true
         (Option.is_none (Moves.moves state ~on_screen:nothing_on_screen ~follow:no_follow)))
-    [ Tools_activations; Tools_usage; Tools_storage; Tools_catalog Tools_catalog_list
+    [ Tools_usage; Tools_storage; Tools_catalog Tools_catalog_list
     ; Tools_catalog (Tools_catalog_volumes { catalog_scroll = 0 }) ];
   (* The source picker walks its own list while it is open. *)
   state.tools_pane <- Tools_surface;
@@ -709,7 +709,7 @@ let test_tools_keys_say_what_the_keys_do () =
     (fun pane ->
       state.tools_pane <- pane;
       Alcotest.check keys "a pane with no list scrolls" Keys.Tools_reads_page (Moves.tools_keys state))
-    [ Tools_activations; Tools_usage; Tools_storage; Tools_catalog Tools_catalog_list ];
+    [ Tools_usage; Tools_storage; Tools_catalog Tools_catalog_list ];
   let async = tools_async [ "a"; "b" ] in
   Alcotest.check keys "the request list" Keys.Tools_walks_list (Moves.tools_keys async);
   (* Esc steps out one layer at a time -- original Task, request, list -- and

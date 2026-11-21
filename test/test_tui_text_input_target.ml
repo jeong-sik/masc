@@ -21,7 +21,6 @@ let target =
       | Some Tui_types.Text_runtime_param -> "runtime-param"
       | Some Tui_types.Text_runtime_model_form -> "runtime-model-form"
       | Some Tui_types.Text_runtime_account_form -> "runtime-account-form"
-      | Some Tui_types.Text_memory_recall_form -> "memory-recall-form"
       | Some Tui_types.Text_typesafeai_exclusion_form -> "typesafeai-exclusion-form"
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"
@@ -461,40 +460,6 @@ let test_skill_source_paging_chooses_the_windowed_item () =
   | _ -> fail "source was not chosen"
 ;;
 
-let test_skill_run_navigation_follows_the_pending_request () =
-  let module Run = Masc.Keeper_tool_plan.Composition_run_id in
-  let module Evidence = Masc.Keeper_skill_composition_evidence in
-  let state = fresh_state () in
-  let reference = Skill_reference.of_yojson (`Assoc [
-    "identity", `Assoc ["source_id", `String "workspace"; "package_id", `String "proof"; "name", `String "proof"];
-    "content_revision", `String (String.make 64 'a')]) |> Result.get_ok in
-  let newest = "019ffc2b-0a41-7ba2-bf58-598e0e7f711c" in
-  let middle = "019ffc2b-0a41-7ba2-bf58-598e0e7f711b" in
-  let oldest = "019ffc2b-0a41-7ba2-bf58-598e0e7f711a" in
-  let runs = List.mapi (fun index id -> Evidence.run_summary_of_yojson (`Assoc [
-    "composition_run_id", `String id; "keeper", `String "proof";
-    "composition_execution", `String "inline"; "request_id", `Null;
-    "disposition", `String "completed"; "duration_ms", `Float 1.;
-    "recorded_at", `Float (float_of_int (3 - index))]) |> Result.get_ok) [newest; middle; oldest] in
-  let next delta = Tui_types.adjacent_skill_evidence_run state ~reference
-    ~selection:Masc.Tui_decode_skill_evidence.Latest_retained ~runs:(Some runs) ~delta
-    |> Option.map Run.to_string in
-  check (option string) "older from displayed newest" (Some middle) (next 1);
-  state.tools_evidence_request <- Some (ref ());
-  state.tools_evidence_reference <- Some reference;
-  state.tools_evidence_run_id <- Some (Run.of_string middle |> Result.get_ok);
-  check (option string) "a second older input follows pending middle" (Some oldest) (next 1);
-  check (option string) "newer reverses pending middle before it answers" (Some newest) (next (-1));
-  state.tools_evidence_run_id <- None;
-  check (option string) "pending latest is its own cursor" (Some middle) (next 1);
-  state.tools_evidence_run_id <- Some (Run.of_string oldest |> Result.get_ok);
-  state.tools_evidence_reference <- Some (Skill_reference.make ~identity:reference.identity
-    ~content_revision:(Skill_reference.content_revision_of_string (String.make 64 'b') |> Result.get_ok));
-  check (option string) "another revision's pending cursor cannot redirect input" (Some middle) (next 1);
-  state.tools_evidence_reference <- Some reference;
-  state.tools_evidence_request <- None;
-  check (option string) "retired request fields are not a cursor owner" (Some middle) (next 1)
-;;
 
 let test_skill_drafts_are_suspended_by_original_workspace () =
   let state = fresh_state () in
@@ -708,33 +673,6 @@ let test_the_account_form_claims_only_on_the_runtime_pane () =
   check target "another pane keeps its keys" None (resolved state)
 ;;
 
-(* The recall form stands on the runtime.toml pane too. It takes every key
-   there, so left open behind another pane it must not take that pane's keys,
-   and on a frame too small to draw the pane it lets go. *)
-let test_the_recall_form_claims_only_on_the_runtime_pane () =
-  let state = fresh_state () in
-  let form =
-    match
-      Masc_tui_memory_recall_form.open_on
-        ~keepers:
-          [ { Masc_tui_memory_recall_form.name = "alpha"
-            ; presence = Masc_tui_memory_recall_form.Unknown
-            }
-          ]
-        "[models.probe]\napi-name = \"probe\"\n"
-    with
-    | Ok form -> form
-    | Error reason -> Alcotest.fail reason
-  in
-  state.Tui_types.view <- Tui_types.Config;
-  state.Tui_types.config_pane <- Tui_types.Config_runtime;
-  state.Tui_types.memory_recall_form <- Some form;
-  check target "the recall form owns the keys"
-    (Some Tui_types.Text_memory_recall_form) (resolved state);
-  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
-  state.Tui_types.config_pane <- Tui_types.Config_prompts;
-  check target "another pane keeps its keys" None (resolved state)
-;;
 
 (* The exclusion form stands on the same pane under the same rules. *)
 let test_the_exclusion_form_claims_only_on_the_runtime_pane () =
@@ -762,77 +700,6 @@ let test_the_exclusion_form_claims_only_on_the_runtime_pane () =
   check target "another pane keeps its keys" None (resolved state)
 ;;
 
-(* The server's reading for the recall form is numbered per open. An answer
-   that carries the number of a form the operator already left is dropped, and
-   one that arrives with no form open lands nowhere. *)
-let test_the_recall_form_hears_only_the_answer_of_its_own_open () =
-  let module Form = Masc_tui_memory_recall_form in
-  let state = fresh_state () in
-  let open_form () =
-    match
-      Form.open_on
-        ~keepers:[ { Form.name = "alpha"; presence = Form.Unknown } ]
-        "[models.probe]\napi-name = \"probe\"\n"
-    with
-    | Ok form -> form
-    | Error reason -> Alcotest.fail reason
-  in
-  let server () =
-    match state.Tui_types.memory_recall_form with
-    | Some form -> Some (Form.server form)
-    | None -> None
-  in
-  let answer detail = Form.Server_unavailable detail in
-  state.Tui_types.memory_recall_form <- Some (open_form ());
-  let first = Tui_types.begin_memory_recall_standing_read state in
-  check bool "a form waits" true (server () = Some Form.Server_unread);
-  Tui_types.finish_memory_recall_standing_read state ~generation:first (answer "first");
-  check bool "its own answer lands" true (server () = Some (answer "first"));
-  (* The operator leaves it and opens another. *)
-  state.Tui_types.memory_recall_form <- Some (open_form ());
-  let second = Tui_types.begin_memory_recall_standing_read state in
-  check bool "every open takes a number of its own" true (second <> first);
-  Tui_types.finish_memory_recall_standing_read state ~generation:first (answer "late");
-  check bool "the answer of the form left is dropped" true (server () = Some Form.Server_unread);
-  Tui_types.finish_memory_recall_standing_read state ~generation:second (answer "second");
-  check bool "the answer of this open lands" true (server () = Some (answer "second"));
-  state.Tui_types.memory_recall_form <- None;
-  Tui_types.finish_memory_recall_standing_read state ~generation:second (answer "after");
-  check bool "no form open: the answer lands nowhere" true (server () = None)
-;;
-
-(* When the workspace identity is lost the reply to a reading in flight is
-   retired. The form must say it stopped waiting, and an answer it already has
-   stays. *)
-let test_a_retired_reading_does_not_leave_the_recall_form_waiting () =
-  let module Form = Masc_tui_memory_recall_form in
-  let state = fresh_state () in
-  let form =
-    match
-      Form.open_on
-        ~keepers:[ { Form.name = "alpha"; presence = Form.Unknown } ]
-        "[models.probe]\napi-name = \"probe\"\n"
-    with
-    | Ok form -> form
-    | Error reason -> Alcotest.fail reason
-  in
-  let server () =
-    match state.Tui_types.memory_recall_form with
-    | Some form -> Some (Form.server form)
-    | None -> None
-  in
-  state.Tui_types.memory_recall_form <- Some form;
-  let (_ : int) = Tui_types.begin_memory_recall_standing_read state in
-  check bool "a form waits" true (server () = Some Form.Server_unread);
-  Tui_types.suspend_workspace_readings state;
-  check bool "the form stops waiting for the reply it will not get" true
-    (match server () with Some (Form.Server_unavailable _) -> true | _ -> false);
-  (* An answer the form already has is kept. *)
-  let answered = Form.Server_unavailable "answered" in
-  state.Tui_types.memory_recall_form <- Some (Form.with_server form answered);
-  Tui_types.suspend_workspace_readings state;
-  check bool "an answer is kept" true (server () = Some answered)
-;;
 
 (* The form outlives nothing. The loop asks this every iteration rather than
    the places that move the surface: the Activity pane's mouse handler and
@@ -1019,8 +886,6 @@ let () =
             test_skill_source_paging_chooses_the_windowed_item;
           test_case "authored Skill drafts stay owned through workspace uncertainty" `Quick
             test_skill_drafts_are_suspended_by_original_workspace;
-          test_case "run navigation follows the pending exact request" `Quick
-            test_skill_run_navigation_follows_the_pending_request;
           test_case "a drop reason claims typing on its Goal detail" `Quick
             test_a_drop_reason_claims_typing_on_its_goal_detail;
           test_case "the Fusion launch form claims while open" `Quick
@@ -1029,16 +894,11 @@ let () =
             test_the_loop_drops_a_launch_form_left_on_another_surface;
           test_case "the account form claims only on the runtime pane" `Quick
             test_the_account_form_claims_only_on_the_runtime_pane;
-          test_case "the recall form claims only on the runtime pane" `Quick
-            test_the_recall_form_claims_only_on_the_runtime_pane;
           test_case "the exclusion form claims only on the runtime pane" `Quick
             test_the_exclusion_form_claims_only_on_the_runtime_pane;
-        test_case "the recall form hears only the answer of its own open" `Quick
-            test_the_recall_form_hears_only_the_answer_of_its_own_open;
-        test_case "a retired reading does not leave the recall form waiting" `Quick
-            test_a_retired_reading_does_not_leave_the_recall_form_waiting;
         test_case "progress clocks track, reset, and clear by slot and signature" `Quick
             test_progress_clock_lifecycle
-        ] )
+        
+] )
     ]
 ;;

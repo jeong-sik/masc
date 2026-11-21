@@ -7,12 +7,10 @@ type t =
   { pre_tool_use : identity_tool_index:Keeper_identity_tool_index.t -> Agent_core.Hooks.hook
   ; tool_approval : Agent_core.Hooks.tool_approval_callback
   ; identity_tool_index : Keeper_identity_tool_index.t
-  ; composition_plan_index : Keeper_tool_composition_plan_index.t
   }
 
 let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
     ~keeper_name ~timeout_sec =
-  let composition_plan_index = Keeper_tool_composition_plan_index.create () in
   let pre_tool_use ~identity_tool_index (event : Agent_core.Hooks.hook_event) =
     match event with
     | Agent_core.Hooks.PreToolUse { tool_name; input; _ } -> (
@@ -25,7 +23,6 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
             match
               Policy.verdict_for
                 ~identity_tool_index
-                ~composition_plan_index:(Some composition_plan_index)
                 ~tool_name ~input
             with
             | Policy.Run -> Agent_core.Hooks.Continue
@@ -133,5 +130,5 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
          { tool_call_id; approval_id; outcome = label });
     decision
   in
-  { pre_tool_use; tool_approval; composition_plan_index;
+  { pre_tool_use; tool_approval;
     identity_tool_index = Keeper_identity_tool_index.empty }

@@ -4728,7 +4728,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_config_status_open <- true;
   state.runtime_config_status_scroll <- 0;
   state.runtime_account_form <- None;
-  state.memory_recall_form <- None;
   state.typesafeai_exclusion_form <- None;
   state.runtime_model_jump <- None;
 
@@ -4847,14 +4846,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_skill_pending <- [];
   state.tools_inventory <- None;
   state.tools_error <- None;
-  state.tools_activations <- None;
-  state.tools_activations_error <- None;
-  state.tools_keeper_usage <- [];
   state.tools_catalog_owed <- Masc_tui_owed_read.settled;
   state.tools_inventory_owed <- Masc_tui_owed_read.settled;
   state.tools_inventory_keeper <- None;
-  state.tools_activations_owed <- Masc_tui_owed_read.settled;
-  state.tools_usage_owed <- [];
   state.skills_catalog <- None;
   state.skills_catalog_error <- None;
   state.tools_skill_source_picker <- None;
@@ -5410,9 +5404,7 @@ let enter_tools_pane state pane =
      still owed. *)
   match pane with
   | Tools_usage ->
-      owe_tools_catalog_read state;
-      owe_every_skill_usage_read state
-  | Tools_activations -> owe_tools_activations_read state
+      owe_tools_catalog_read state
   (* The cleanup results change with the server's passes, which push
      nothing, so opening the pane reads the envelope again. *)
   | Tools_storage -> owe_tools_inventory_read state
@@ -6530,7 +6522,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         | Verification_msg (Verification_loaded _) | Harness_msg (Harness_loaded _) | Overview_loaded _ | Engine_sample_read _ | Fusion_msg (Fusion_runs_loaded (_, _)
         | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
         | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
-        | Memory_msg (Memory_recall_standing_loaded (_, _)) | Repository_msg (Repositories_loaded _)
+        | Repository_msg (Repositories_loaded _)
         | Workspace_msg (Workspace_activity_loaded (_, _)) | Memory_msg (Memory_loaded _ | Memory_input_loaded (_, _)
         | Memory_world_loaded (_, _) | Memory_facts_loaded (_, _)) | Repository_msg (Repository_changes_loaded (_, _)
         | Repository_changes_diff_loaded (_, _)) | File_changes_loaded (_, _)
@@ -7578,7 +7570,6 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       let asks_changed = ref false in
       let async_requests_changed = ref false in
       let async_request_keepers = ref [] in
-      let skill_activation_keepers = ref [] in
       let skill_catalog_published = ref false in
       let tools_inventory_changed = ref false in
       let lane_addon_exports_changed = ref false in
@@ -7698,8 +7689,6 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
               Option.iter (fun keeper -> async_request_keepers := keeper :: !async_request_keepers)
                 (Masc_tui_observer.async_requests_keeper event);
-              Option.iter (fun keeper -> skill_activation_keepers := keeper :: !skill_activation_keepers)
-                (Masc_tui_observer.skill_activations_keeper event);
               if Masc_tui_observer.skill_catalog_published event then skill_catalog_published := true;
               if Masc_tui_observer.lane_addon_exports_changed event then lane_addon_exports_changed := true;
               if Masc_tui_observer.transport_health_measured event then
@@ -8017,15 +8006,8 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
          Masc_tui_owed_surface_reads.Owed_read_policy.owe_async_requests_read state);
       (if not !observer_source_loss_seen then
          List.iter (Masc_tui_owed_surface_reads.Owed_runtime_tools_reads.owe_tools_async_detail_read state) !async_request_keepers);
-      (* A Keeper's ledger write owes its Usage answer and, for the selected
-         Keeper, its activations. A published catalog owes the catalog and
-         every Usage answer, which the server counts against it. *)
-      (if not !observer_source_loss_seen then
-         List.iter (owe_skill_activations_read state) !skill_activation_keepers);
-      (if !skill_catalog_published && not !observer_source_loss_seen then begin
-         owe_tools_catalog_read state;
-         owe_every_skill_usage_read state
-       end);
+      (if !skill_catalog_published && not !observer_source_loss_seen then
+         owe_tools_catalog_read state);
       (* The selected Keeper's effective tool surface reads its metadata and
          configuration, its approval mode, the skill catalog, the backlog's
          task skills, the runtime catalogue and the Lane Add-on exports. *)
@@ -12145,30 +12127,6 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Skill_evidence refusal
         | Ok json -> state.tools_skill_evidence <- Some (key, json));
       Drawn_changed
-  | Tools_msg (Tools_read_loaded (Tools_activations_loaded { generation; keeper; result })) ->
-      let (_ : bool) = Masc_tui_work_requests.Tools_task_requests.settle_tools_read state ~generation Tools_activations_read in
-      let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
-      if generation = state.tools_request_generation
-         && Option.equal String.equal (Some keeper) selected_name then (
-      match result with
-      | Ok projection ->
-          state.tools_activations <- Some (Activations_read projection);
-          state.tools_activations_error <- None;
-          state.tools_activations_owed <- Masc_tui_owed_read.succeeded state.tools_activations_owed
-      | Error detail ->
-          state.tools_activations_error <- Some { taf_keeper = keeper; taf_detail = detail };
-          state.tools_activations_owed <- Masc_tui_owed_surface_reads.Owed_read_policy.failed_read state.tools_activations_owed);
-      Drawn_changed
-  | Tools_msg (Tools_read_loaded (Tools_usage_loaded { generation; keeper; result })) ->
-      Masc_tui_work_requests.Tools_task_requests.settle_tools_skill_read state ~generation (Tools_usage_read keeper);
-      if generation = state.tools_skill_generation then begin
-        record_keeper_skill_usage state ~keeper result;
-        set_keeper_skill_usage_owed state keeper
-          (match result with
-           | Ok _ -> Masc_tui_owed_read.succeeded (keeper_skill_usage_owed state keeper)
-           | Error _ -> Masc_tui_owed_surface_reads.Owed_read_policy.failed_read (keeper_skill_usage_owed state keeper))
-      end;
-      Drawn_changed
   | Tools_msg (Tools_read_loaded (Tools_catalog_loaded { generation; result })) ->
       Masc_tui_work_requests.Tools_task_requests.settle_tools_skill_read state ~generation Tools_catalog_read;
       if generation = state.tools_skill_generation then (
@@ -12189,18 +12147,8 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       if current then
         state.tools_async_detail_owed <-
           (match result with
-           | Ok Masc.Tui_decode_async_request.Absent
-           | Ok
-               (Masc.Tui_decode_async_request.Observed
-                 { Masc.Tui_decode_async_request.nested =
-                     ( Masc.Keeper_composition_observation.Absent
-                     | Masc.Keeper_composition_observation.Observed _
-                     | Masc.Keeper_composition_observation.Stored _ )
-                 ; _ }) ->
+           | Ok (Masc.Tui_decode_async_request.Absent | Masc.Tui_decode_async_request.Observed _) ->
                Masc_tui_owed_read.succeeded state.tools_async_detail_owed
-           | Ok
-               (Masc.Tui_decode_async_request.Observed
-                 { Masc.Tui_decode_async_request.nested = Masc.Keeper_composition_observation.Invalid _; _ })
            | Error _ -> Masc_tui_owed_surface_reads.Owed_read_policy.failed_read state.tools_async_detail_owed);
       Drawn_changed
   | Task_msg (Task_document_prepared (request,result)) ->
@@ -13071,12 +13019,6 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         ~report:(report_action state "system")
         ~refresh:(fun () -> Masc_tui_ops_requests.Fusion_requests.launch_fusion_runs_load
           ~demand:Masc_tui_fusion_updates.After_change state ~mailbox) result;
-      Drawn_changed
-  | Memory_msg (Memory_recall_standing_loaded (generation, result)) ->
-      Masc_tui_types.finish_memory_recall_standing_read state ~generation
-        (match result with
-         | Ok reading -> Masc_tui_memory_recall_form.Server_read reading
-         | Error detail -> Masc_tui_memory_recall_form.Server_unavailable detail);
       Drawn_changed
   | Verification_msg (Verification_loaded result) ->
       state.verification_inflight <- false;
@@ -14343,19 +14285,8 @@ let main
     | Some profile ->
         launch_skill_evidence_read state ~mailbox:async_messages profile.esp_reference
   in
-  let handle_skill_run delta =
-    match selected_tools_skill_profile state, state.tools_skill_evidence with
-    | Some profile, Some (key, json)
-      when String.equal key (Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string) ->
-      (match Masc.Tui_decode_skill_evidence.decode_skill_evidence json with
-       | Error detail -> report_action state "error" detail
-       | Ok evidence ->
-         (match adjacent_skill_evidence_run state ~reference:profile.esp_reference
-            ~selection:evidence.se_composition_selection ~runs:evidence.se_composition_runs ~delta with
-          | None -> report_action state "system" "No adjacent original run in retained coverage"
-          | Some composition_run_id -> launch_skill_evidence_read ~composition_run_id
-              state ~mailbox:async_messages profile.esp_reference))
-    | _ -> report_action state "system" "Load this Skill revision's retained evidence first"
+  let handle_skill_run _delta =
+    report_action state "system" "Skill composition run history has been retired"
   in
   let reconcile_chat_focus () =
     if state.view <> Overview && state.view <> Keepers Keeper_message then
@@ -16226,7 +16157,7 @@ let main
                 end
             (* The recall and exclusion forms have no text field: a paste is
                dropped, not read as keys. *)
-            | Some (Text_memory_recall_form | Text_typesafeai_exclusion_form) -> ()
+            | Some Text_typesafeai_exclusion_form -> ()
             | Some Text_voice_wizard ->
                 Option.iter
                   (fun session ->
@@ -18278,14 +18209,6 @@ let main
                       ~started_ns:(Mtime_clock.elapsed_ns ()) with
                    | Ok request -> Masc_tui_surface_requests.Runtime_config_requests.launch_runtime_form_save state ~mailbox:async_messages request
                    | Error detail -> state.runtime_model_form <- Some (Masc_tui_model_form.refused form detail)))
-       | Some k
-         when text_input_target state ~compact_viewport = Some Text_memory_recall_form ->
-           (match state.memory_recall_form with
-            | None -> ()
-            | Some form -> match Masc_tui_memory_recall_form.key form k with
-              | Masc_tui_memory_recall_form.Editing form -> state.memory_recall_form <- Some form
-              | Masc_tui_memory_recall_form.Cancelled -> state.memory_recall_form <- None
-              | Masc_tui_memory_recall_form.Submitted form -> Masc_tui_editor_forms.Runtime_config_forms.submit_memory_recall_form state ~mailbox:async_messages form)
        | Some k
          when text_input_target state ~compact_viewport = Some Text_typesafeai_exclusion_form ->
            (match state.typesafeai_exclusion_form with
@@ -21646,7 +21569,7 @@ let main
                    (Text_collab_form | Text_account_login
                    | Text_ask_answer | Text_fusion_launch | Text_preset_name | Text_resource_save
                    | Text_runtime_lane_name | Text_runtime_param
-                   | Text_runtime_model_form | Text_runtime_account_form | Text_memory_recall_form
+                   | Text_runtime_model_form | Text_runtime_account_form
                    | Text_typesafeai_exclusion_form
                    | Text_voice_wizard | Text_palette | Text_row_search
                    | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter | Text_skill_source_filter
@@ -24742,13 +24665,9 @@ let main
        (* [m] on the runtime.toml pane: memory recall. Above the chat arm below,
           which takes [m] on every surface that names a Keeper. The status
           reading hides the source, so it does not open there. *)
-       | Some ("m" | "M")
-         when state.view = Config && state.config_pane = Config_runtime
-              && not state.runtime_config_status_open ->
-           Masc_tui_editor_forms.Runtime_config_forms.handle_memory_recall_form_open state ~mailbox:async_messages
-       (* [x] on the runtime.toml pane: the [typesafeai] exclusion list, under
-          the same condition as [m]. Lower case only: [X] on this pane is the
-          draft's discard, read by the draft keys above. *)
+       (* [x] on the runtime.toml pane: the [typesafeai] exclusion list.
+          Lower case only: [X] on this pane is the draft's discard, read by
+          the draft keys above. *)
        | Some "x"
          when state.view = Config && state.config_pane = Config_runtime
               && not state.runtime_config_status_open ->
@@ -24855,7 +24774,7 @@ let main
        | Some "p" | Some "P"
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            goto_surface state ~mailbox:async_messages Runtime
-       | Some ("1" | "2" | "3" | "4" | "5" | "6" as digit)
+       | Some ("1" | "2" | "3" | "4" | "5" as digit)
          when state.view = Tools
               && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
@@ -24865,20 +24784,15 @@ let main
              (match digit with
               | "1" -> Tools_surface
               | "2" -> Tools_async
-              | "3" -> Tools_activations
-              | "4" -> Tools_usage
-              | "5" -> Tools_catalog Tools_catalog_list
-              | "6" | _ -> Tools_storage)
+              | "3" -> Tools_usage
+              | "4" -> Tools_catalog Tools_catalog_list
+              | "5" | _ -> Tools_storage)
        | Some "p" | Some "P" when state.view = Tools ->
-           (* Six sections, one at a time. Concatenated the first five ran to 326 rows
-              on this workspace and the terminal draws twenty, so four of
-              them sat behind a per-tool list that never ends. [p] is the
-              same key that moves between the Config surface's panes. *)
+           (* Five sections, one at a time. *)
            enter_tools_pane state
              (match state.tools_pane with
               | Tools_surface -> Tools_async
-              | Tools_async -> Tools_activations
-              | Tools_activations -> Tools_usage
+              | Tools_async -> Tools_usage
               | Tools_usage -> Tools_catalog Tools_catalog_list
               | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> Tools_storage
               | Tools_storage -> Tools_surface)

@@ -79,6 +79,19 @@ val is_working_state : Agent_core.Types.message -> bool
 (** Whether the message carries {!working_state_marker_key} under any value.
     Such a message is {!Pinned}. *)
 
+val compaction_anchor_marker_key : string
+(** Metadata key tagging an immutable anchored compaction summary message
+    ({!Keeper_compaction}). Treated as {!Pinned} so it survives every provider
+    tail cut and supersedes the static omission preamble. *)
+
+val compaction_anchor_metadata : Agent_core.Types.metadata
+(** The metadata a compaction-anchor message carries:
+    {!compaction_anchor_marker_key} alone. *)
+
+val is_compaction_anchor : Agent_core.Types.message -> bool
+(** Whether the message carries {!compaction_anchor_marker_key}. Such a message
+    is {!Pinned}. *)
+
 type label =
   | Pinned
       (** Survives every cut: [System] entries other than historical

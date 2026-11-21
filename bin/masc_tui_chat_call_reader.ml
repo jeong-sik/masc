@@ -77,8 +77,7 @@ let original_failure ~ko = function
       Some (say ~ko "해당 턴의 원본 추적이 아직 게시되지 않았습니다"
               "The enclosing turn's original trace is not published yet")
   | Original_unavailable reason -> Some reason
-  | Original_body {nested=Invalid detail;_} -> Some detail
-  | Original_not_read | Original_body {nested=(Absent | Observed _ | Stored _);_} -> None
+  | Original_not_read | Original_body _ -> None
 let output_sections ~ko (call:Masc.Tui_decode.keeper_call) =
   let preview () = [section (say ~ko "기록된 출력 미리보기" "Recorded output preview")
     (match call.kc_output with
@@ -96,8 +95,7 @@ let output_sections ~ko (call:Masc.Tui_decode.keeper_call) =
                    [section (say ~ko "출력 내용" "Printed output") text]
                | Some (Stored reference) ->
                    [section (say ~ko "저장된 출력" "Stored output") (Masc_tui_execute_result.stored_text reference)]) in
-      List.map (fun (heading,body) -> section heading body) (Masc_tui_nested_result.sections body.nested)
-      @ printed @ [section (say ~ko "보존된 원본 결과" "Retained original result") body.content;
+      printed @ [section (say ~ko "보존된 원본 결과" "Retained original result") body.content;
         section (say ~ko "원본 출처" "Original source")
           (Printf.sprintf
              (if ko then "투영 %s바이트 · 기록 %s바이트 · sha256 %s"

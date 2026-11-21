@@ -262,16 +262,6 @@ type tools_read =
       { generation : int
       ; result : (Masc.Tui_decode_tools.skills_catalog, request_failure) result
       }
-  | Tools_activations_loaded of
-      { generation : int
-      ; keeper : string
-      ; result : (Masc.Tui_decode_tools.skill_activation_projection, request_failure) result
-      }
-  | Tools_usage_loaded of
-      { generation : int
-      ; keeper : string
-      ; result : (Masc.Tui_decode_tools.keeper_skill_usage, request_failure) result
-      }
 
 (** What a memory health read answered: the fleet, or one Keeper's row. *)
 type memory_health_read =
@@ -634,10 +624,6 @@ type fusion_msg =
   | Fusion_launched of int * (string, request_failure) result
 
 type memory_msg =
-  (* Carries the generation of the form that asked: the answer to a read the
-     operator already left must not land on another form. *)
-  | Memory_recall_standing_loaded of
-      int * (Masc.Tui_decode_memory_recall.memory_recall_reading, string) result
   | Memory_loaded of memory_health_read
   | Memory_input_loaded of string Masc_tui_fetched.request
       * (Masc_tui_memory_usage.t, request_failure) result

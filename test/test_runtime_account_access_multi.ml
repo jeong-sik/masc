@@ -849,7 +849,7 @@ let test_multi_account () =
              sees name the reason. *)
           let jev_key_variable = "MASC_TEST_D4C_JEV_KEY" in
           let found_policy = Runtime_typesafeai_policy.current () in
-          let lane, gates, health, standing =
+          let lane, gates, health =
             with_env jev_key_variable "jev-key" (fun () ->
               Runtime_typesafeai_policy.publish
                 { Runtime_schema.default_typesafeai with
@@ -873,9 +873,7 @@ let test_multi_account () =
                     ; ( "memory recall"
                       , Masc.Typesafeai_config.memory_recall_destinations ~keeper_id:"reader" )
                     ]
-                  , Server_typesafeai_health.health_json ()
-                  , Server_memory_recall_standing.read
-                      ~keepers_dir:(Filename.temp_dir ~temp_dir:root "keepers-" "") )))
+                  , Server_typesafeai_health.health_json () )))
           in
           List.iter
             (fun (label, destinations) ->
@@ -898,18 +896,6 @@ let test_multi_account () =
                 | Some (`String reason) -> Some reason
                 | Some _ | None -> None)
              | _ -> None);
-          (match standing with
-           | Ok { Server_memory_recall_standing.lane =
-                    Error Masc.Keeper_memory_recall_standing.Host_account_not_shared
-                ; keepers = _
-                } -> ()
-           | Ok { Server_memory_recall_standing.lane = Error reason; keepers = _ } ->
-             Alcotest.failf
-               "the recall reading names another reason: %s"
-               (Masc.Keeper_memory_recall_standing.reason_to_string reason)
-           | Ok { Server_memory_recall_standing.lane = Ok (); keepers = _ } ->
-             Alcotest.fail "the recall reading says the lane has a key"
-           | Error detail -> Alcotest.failf "the recall reading failed: %s" detail);
           (* MASC tools that send with a key of the host (plan D4d). Web
              search is given only a provider with a key, so it ends refused
              before a provider is asked. The cloud backend of SystemOne and a

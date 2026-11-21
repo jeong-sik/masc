@@ -37,16 +37,16 @@ val root_dir : t -> string
 (** Absolute path of the store root. Mainly for diagnostics/testing. *)
 
 val preview_max : int
-(** Hard ceiling on the preview length {!put} produces, in bytes.
+(** Hard ceiling on the smart head+tail preview length {!put} produces (4 KiB).
 
     Callers measuring a string body's marker use {!make_preview} so planning
-    and addressing share the exact sanitized bytes. Nothing outside this
-    module should restate the ceiling; {!Tool_output.make_artifact_ref}
+    and addressing share the exact sanitized head+tail bytes. Nothing outside
+    this module should restate the ceiling; {!Tool_output.make_artifact_ref}
     does not enforce it, so it is a property of {!put}, not of
     {!Tool_output.artifact_ref}. *)
 
 val make_preview : string -> string
-(** Exact sanitized leading preview used by string blob addressing. Pure;
+(** Exact sanitized 4 KiB head+tail preview used by blob addressing. Pure;
     callers may use it to measure a marker before storing its original bytes. *)
 
 val put : t -> bytes:string -> mime:string -> Tool_output.t

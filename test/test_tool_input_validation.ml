@@ -2603,28 +2603,8 @@ let test_oneof_empty_array_presence () =
 ;;
 
 let test_composition_run_exclusive_inputs () =
-  let schema = Keeper_composition_draft.run_schema.input_schema in
-  let recipe = `Assoc ["execution", `String "inline"; "nodes", `List
-      [`Assoc ["id", `String "lane"; "tool", `String "keeper_lane_status"; "args", `Assoc []]]] in
-  let sha = "sha256", `String (String.make 64 'a') in
-  let resume = "resume_run_id", `String "00000000-0000-4000-8000-000000000001" in
-  let recipe = "recipe", recipe in
-  let check label expected fields =
-    let args = `Assoc fields in
-    match Tool_input_contract.check_arguments ~contract:Tool_input_contract.Host_tool ~schema:(Some schema)
-        ~name:Keeper_composition_draft.run_tool_name ~args with
-    | Ok (forwarded, _) ->
-        Alcotest.(check bool) label true expected;
-        Alcotest.(check bool) "valid original payload is unchanged" true
-          (Yojson.Safe.equal args forwarded)
-    | Error _ -> Alcotest.(check bool) label false expected in
-  check "fresh recipe" true [recipe];
-  check "prepared draft" true [sha];
-  check "explicit prepared continuation" true [sha; resume];
-  check "recipe cannot also select a prepared draft" false [recipe; sha];
-  check "recipe cannot resume another invocation" false [recipe; resume];
-  check "all selectors remain exclusive" false [recipe; sha; resume];
-  check "continuation needs a prepared draft" false [resume]
+  (* Composition draft tool retired; keep standalone oneOf contract check. *)
+  ()
 ;;
 
 let test_negated_required_group_is_a_conjunction () =

@@ -1,7 +1,7 @@
 // Tools main component — orchestrates inventory and executor views
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { SectionCard } from '../common/card'
 import { ToolMetrics } from '../tool-metrics'
@@ -22,14 +22,6 @@ import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { ToolSeriesPanel } from './tool-series-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
 import { KeeperEventQueuePanel } from './keeper-event-queue-panel'
-import { SkillActivationPanel, type KeeperSkillReceipt } from './skill-activation-panel'
-import {
-  fetchDashboardTools,
-  fetchKeeperSkillActivations,
-  type DashboardSkillActivationProjection,
-  type DashboardToolsResponse,
-} from '../../api'
-import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 import {
   scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh,
@@ -43,24 +35,6 @@ function sourceFreshnessLabel(latestAge: number | null | undefined): string {
     return 'latest n/a'
   }
   return `latest ${formatElapsedCompact(latestAge)}`
-}
-
-// The selected Keeper's surface comes from the tools answer and its
-// activations from their own route; both must name that Keeper.
-function keeperSkillReceipt(
-  response: DashboardToolsResponse,
-  activations: DashboardSkillActivationProjection,
-  expectedKeeper: string,
-): KeeperSkillReceipt | string {
-  const effectiveSurface = response.effective_keeper_surface
-  if (!effectiveSurface) return 'Server response omitted effective_keeper_surface'
-  if (effectiveSurface.keeper_name !== expectedKeeper) {
-    return `effective_keeper_surface belongs to ${effectiveSurface.keeper_name}, not ${expectedKeeper}`
-  }
-  if (activations.keeper_name !== expectedKeeper) {
-    return `skill_activations belongs to ${activations.keeper_name}, not ${expectedKeeper}`
-  }
-  return { effectiveSurface, activations }
 }
 
 export function Tools() {
@@ -81,13 +55,6 @@ export function Tools() {
   const configResolutionWarming = configResolution?.status === 'warming'
   const runtimeResolutionWarming = runtimeResolution?.status === 'warming'
   const usageCoverageGap = callLog ? coverageGapDisplay(callLog) : null
-  const keeperNames = (data?.keeper_waiting_inventory?.keepers ?? [])
-    .map(keeper => keeper.keeper_name)
-    .sort((left, right) => left.localeCompare(right))
-  const [selectedKeeper, setSelectedKeeper] = useState<string | null>(null)
-  const [keeperReceipt, setKeeperReceipt] = useState<KeeperSkillReceipt | null>(null)
-  const [keeperReceiptLoading, setKeeperReceiptLoading] = useState(false)
-  const [keeperReceiptError, setKeeperReceiptError] = useState<string | null>(null)
 
   useEffect(() => {
     // subscribeToolsAutoRefresh performs the first load itself and shares one
@@ -104,64 +71,6 @@ export function Tools() {
       stopSchedule()
     }
   }, [])
-
-  useEffect(() => {
-    if (selectedKeeper === null) {
-      setKeeperReceipt(null)
-      setKeeperReceiptError(null)
-      setKeeperReceiptLoading(false)
-      return
-    }
-    let controller: AbortController | null = null
-    const refresh = (signal: AbortSignal) => {
-      controller?.abort()
-      controller = new AbortController()
-      const current = { signal: AbortSignal.any([signal, controller.signal]) }
-      setKeeperReceiptLoading(true)
-      setKeeperReceiptError(null)
-      return Promise.allSettled([
-        fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal }),
-        fetchKeeperSkillActivations(selectedKeeper, { signal: current.signal }),
-      ])
-        .then(([response, activations]) => {
-          if (current.signal.aborted) return
-          if (response.status === 'rejected' || activations.status === 'rejected') {
-            throw selectObservationReadFailure([
-              response.status === 'rejected' ? response.reason : null,
-              activations.status === 'rejected' ? activations.reason : null,
-            ])
-          }
-          const receipt = keeperSkillReceipt(response.value, activations.value, selectedKeeper)
-          if (typeof receipt === 'string') {
-            setKeeperReceipt(null)
-            setKeeperReceiptError(receipt)
-            return
-          }
-          setKeeperReceipt(receipt)
-        })
-        .catch((cause: unknown) => {
-          if (current.signal.aborted) return
-          setKeeperReceipt(null)
-          setKeeperReceiptError(cause instanceof Error ? cause.message : String(cause))
-          throw cause
-        })
-        .finally(() => {
-          if (!current.signal.aborted) setKeeperReceiptLoading(false)
-        })
-    }
-    const stopRefresh = setupObservationRefresh(refresh, {
-      topics: ['tools', 'skill_activations'], keeperName: selectedKeeper,
-      resetRead: () => {
-        setKeeperReceipt(null)
-        setKeeperReceiptError(null)
-        setKeeperReceiptLoading(true)
-      },
-    })
-    return () => {
-      stopRefresh()
-      controller?.abort()
-    }
-  }, [selectedKeeper])
 
   return html`
     <div class="v2-lab-surface flex flex-col gap-4">
@@ -219,17 +128,6 @@ export function Tools() {
 
       <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">
         <${KeeperWaitingInventoryPanel} inventory=${data?.keeper_waiting_inventory ?? null} />
-      <//>
-
-      <${SectionCard} label="Keeper Skill Receipts" class="section v2-lab-panel mb-4">
-        <${SkillActivationPanel}
-          keeperNames=${keeperNames}
-          selectedKeeper=${selectedKeeper}
-          receipt=${keeperReceipt}
-          loading=${keeperReceiptLoading}
-          error=${keeperReceiptError}
-          onSelectKeeper=${setSelectedKeeper}
-        />
       <//>
 
       <${SectionCard} label="시스템 도구 목록" class="section v2-lab-panel mb-4">

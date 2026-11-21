@@ -74,26 +74,6 @@ type skills_catalog_surface = {
   scs_flow : skill_flow option;
 }
 
-(** One catalog surface one Keeper used, from
-    [GET /api/v1/keepers/skill-usage?keeper=]. *)
-type keeper_skill_usage_row = {
-  ksu_reference : Skill_reference.t;
-  ksu_invocations : int;
-  ksu_deliveries : int;
-  ksu_actions : int;
-  ksu_last_used_at : string;
-}
-
-(** One Keeper's usage of the catalog, read from its current ledger. *)
-type keeper_skill_usage =
-  | Keeper_usage_ready of keeper_skill_usage_row list
-  | Keeper_usage_no_session  (** No current session, so nothing recorded. *)
-  | Keeper_usage_unavailable of { kua_reason : string; kua_detail : string }
-      (** Its metadata or its ledger could not be read. *)
-  | Keeper_usage_no_catalog
-      (** The ledger was read but there is no ready catalog to count it
-          against. *)
-
 type skill_rejection_diagnostic = {
   srd_diagnostic : Agent_core.Skill_document.diagnostic;
   srd_message : string;
@@ -256,18 +236,6 @@ type effective_tool_surface =
       ets_detail : string;
     }
 
-type skill_activation_projection =
-  | Skill_activations_available of {
-      sap_keeper_name : string;
-      sap_ledger : Keeper_skill_activation_ledger.t;
-    }
-  | Skill_activations_no_session of { sap_keeper_name : string }
-  | Skill_activations_unavailable of {
-      sap_keeper_name : string;
-      sap_reason : string;
-      sap_detail : string;
-    }
-
 (** What the server counted about one tool's calls, from
     [tool_usage.by_tool]. The counts cover the retained snapshot and the
     current process. *)
@@ -350,23 +318,8 @@ val tool_usage_for : tool_usage_row list -> name:string -> tool_usage_row option
     the internal tool's row both fit [Execute], and the entry [Execute] reports
     the calls made as [Execute]. *)
 
-val skill_activation_keeper : skill_activation_projection -> string
-(** The Keeper a projection is for. *)
-
-val decode_keeper_skill_activations :
-  keeper:string -> Yojson.Safe.t -> (skill_activation_projection, string) result
-(** Reads the [GET /api/v1/keepers/skill-activations?keeper=] answer for
-    [keeper]: schema [masc.keeper-skill-activations/v1], the Keeper it
-    answers for, and its projection. An answer for another Keeper is an
-    error. *)
-
 val decode_skills_catalog : Yojson.Safe.t -> (skills_catalog, string) result
 (** Reads the /api/v1/skills snapshot: its surfaces and their flows. *)
-
-val decode_keeper_skill_usage :
-  keeper:string -> Yojson.Safe.t -> (keeper_skill_usage, string) result
-(** Reads the [GET /api/v1/keepers/skill-usage?keeper=] answer for
-    [keeper]. An answer for another Keeper is an error. *)
 
 val skill_flow_mermaid : skill_flow -> (string, string) result
 (** Pure declared topology for Pele. Diagram-local identifiers are generated;

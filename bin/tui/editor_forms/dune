@@ -34,7 +34,6 @@
   masc_tui_runtime_account_form
   masc_tui_runtime_config_edit
   masc_tui_runtime_config_view
-  masc_tui_memory_recall_form
   masc_tui_typesafeai_exclusion_form
   masc_tui_surface_requests
   masc_tui_work_requests

@@ -307,10 +307,9 @@ let owe_dataset_read (state : T.state) (dataset : Dataset_ev.dataset) =
   | Dataset_ev.Connectors -> owe_connectors_read state
   | Dataset_ev.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
-  | Dataset_ev.Skill_activations { keeper } -> T.owe_skill_activations_read state keeper
+  | Dataset_ev.Skill_activations { keeper = _ } -> ()
   | Dataset_ev.Skill_catalog ->
-      T.owe_tools_catalog_read state;
-      T.owe_every_skill_usage_read state
+      T.owe_tools_catalog_read state
   | Dataset_ev.Clients -> T.owe_clients_read state
   | Dataset_ev.Account_emails ->
       owe_pushed_read state T.Surface_read_source.Account_emails

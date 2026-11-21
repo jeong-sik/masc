@@ -964,7 +964,87 @@ type attempt_state =
            carries that snapshot in the form the capacity-refusal hook left
            it, and acknowledges that snapshot (RFC
            retained-results-carrier-shrinks-to-an-address §5.1, §6.1). *)
+  ; compaction_anchor : Keeper_compaction.compaction_anchor option ref
+        (* Latest committed immutable compaction anchor loaded from per-Keeper
+           SQLite WAL and refreshed whenever hard-limit / ContextOverflow
+           eviction commits a new epoch. *)
+  ; last_history_messages : Agent_core.Types.message list option ref
+  ; last_input_limit : int option ref
   }
+
+let keepers_dir_for_base_path base_path =
+  if String.equal (String.trim base_path) ""
+  then None
+  else Some (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+;;
+
+let load_persisted_compaction_anchor ~base_path ~keeper_name =
+  match keepers_dir_for_base_path base_path with
+  | None -> None
+  | Some keepers_dir ->
+    (match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+     | Ok anchor -> anchor
+     | Error err ->
+       Log.Keeper.warn ~keeper_name "compaction anchor load failed: %s"
+         (Keeper_compaction.store_error_to_string err);
+       None)
+;;
+
+let evicted_prefix_before_atom ~first_atom messages =
+  if first_atom <= 0
+  then []
+  else
+    let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+    List.filter_map
+      (fun (msg, label) ->
+         match label with
+         | Runtime_model_input_tail_window.Atom idx when idx < first_atom -> Some msg
+         | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned ->
+           None)
+      labelled
+;;
+
+let commit_compaction_for_evicted
+      ~base_path
+      ~keeper_name
+      ~reader_available
+      ~trigger
+      ~first_atom
+      ~(state : attempt_state)
+      messages
+  =
+  match keepers_dir_for_base_path base_path with
+  | None -> false
+  | Some keepers_dir ->
+    let evicted_messages = evicted_prefix_before_atom ~first_atom messages in
+    (match evicted_messages with
+     | [] -> false
+     | _ :: _ ->
+       let blob_store =
+         if reader_available then Some (Tool_blob_store.create ~base_path) else None
+       in
+       (match
+          Keeper_compaction.compact_evicted_messages
+            ?blob_store
+            ~keepers_dir
+            ~keeper_id:keeper_name
+            ~trigger
+            ~evicted_messages
+            ()
+        with
+        | Ok (Some anchor) ->
+          state.compaction_anchor := Some anchor;
+          Log.Keeper.info ~keeper_name
+            "anchored compaction committed epoch=%d covers_through=%s"
+            anchor.epoch_id
+            (Ids.Turn_id.to_string anchor.covers_through_turn);
+          true
+        | Ok None -> false
+        | Error err ->
+          Log.Keeper.warn ~keeper_name "anchored compaction commit failed: %s"
+            (Keeper_compaction.store_error_to_string err);
+          false))
+;;
 
 (* The ledger's session: the history the carried positions belong to. The
    turn's trace id on the keeper's own turns; an attempt without one has no
@@ -1000,6 +1080,15 @@ let new_attempt_state (ctx : try_provider_ctx) =
         ~artifact_reader_available:
           (Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
         ~viewer:ctx.outbox_viewer ~read_media:ctx.read_retained_media
+  ; compaction_anchor =
+      ref
+        (match ctx.request_input with
+         | Completion_review -> None
+         | Keeper_history _ ->
+           load_persisted_compaction_anchor
+             ~base_path:ctx.base_path ~keeper_name:ctx.keeper_name)
+  ; last_history_messages = ref None
+  ; last_input_limit = ref None
   }
 ;;
 
@@ -1330,7 +1419,14 @@ let working_state_message text : Agent_core.Types.message =
    or a turn boundary always carries the newest atom
    ({!Keeper_carried_front.clamp}); an unknown boundary carries that atom
    alone. *)
-let project_range_start ~working_state ~measure_message_bytes ~atom_count start messages =
+let project_range_start
+      ?compaction_anchor
+      ~working_state
+      ~measure_message_bytes
+      ~atom_count
+      start
+      messages
+  =
   let first_atom, allow_empty_history =
     match start with
     | From_covered { end_atom; working_state = _ } -> end_atom, true
@@ -1342,12 +1438,16 @@ let project_range_start ~working_state ~measure_message_bytes ~atom_count start 
     | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown _) ->
       Keeper_carried_front.newest_atom ~atom_count, false
   in
-  match working_state with
-  | Some text ->
+  match working_state, compaction_anchor with
+  | Some text, _ ->
     Runtime_model_input_tail_window.project_from_atom
       ~allow_empty_history ~history_already_announced:true ~measure_message_bytes ~first_atom
       (working_state_message text :: messages)
-  | None ->
+  | None, Some anchor when first_atom > 0 ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~allow_empty_history ~history_already_announced:true ~measure_message_bytes ~first_atom
+      (Keeper_compaction.anchor_to_message anchor :: messages)
+  | None, (Some _ | None) ->
     Runtime_model_input_tail_window.project_from_atom
       ~allow_empty_history ~measure_message_bytes ~first_atom messages
 ;;
@@ -1370,6 +1470,7 @@ let finished_boundary ~held_window ~start ~atom_count ~turn_boundary completed_a
 
 let compose_carried_model_input
       ?continuity
+      ?compaction_anchor
       ?completed_arguments
       ?past_max_context
       ?held_window
@@ -1448,6 +1549,7 @@ let compose_carried_model_input
   let working_state = carried_working_state ~held_window start in
   let projection, transmitted_bytes =
     project_range_start
+      ?compaction_anchor
       ~working_state
       ~measure_message_bytes
       ~atom_count:history_atom_count
@@ -1524,6 +1626,7 @@ let resolve_carried ~to_wire carried =
 
 let materialize_request_history
       ?continuity
+      ?compaction_anchor
       ?completed_arguments
       ?past_max_context
       ?held_window
@@ -1544,7 +1647,7 @@ let materialize_request_history
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
-        ?continuity ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
+        ?continuity ?compaction_anchor ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
         ?this_turn_start ?same_turn_result_as_pointer
         ~measure_message_bytes
         ~measure_wire_bytes
@@ -1616,14 +1719,14 @@ let carried_source_indices ~messages (view : request_view) =
 ;;
 
 let request_view
-      ?continuity ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
+      ?continuity ?compaction_anchor ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
       ?this_turn_start ?same_turn_result_as_pointer
       ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
       ~accepted ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~prepare_request_media ~to_wire messages =
   let open Result.Syntax in
   let materialized ?(materialize = materialize) completed_arguments =
-    materialize_request_history ?continuity ?completed_arguments ?past_max_context
+    materialize_request_history ?continuity ?compaction_anchor ?completed_arguments ?past_max_context
       ?held_window ?finished_turn_results ?this_turn_start ?same_turn_result_as_pointer
       ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
       ~history_digest_at
@@ -2060,9 +2163,13 @@ let bounded_model_input_projection
         !(state.ledger)
     in
     let current_turn_results = !(state.current_turn_results) in
-    let* view =
+    state.last_history_messages := Some messages;
+    state.last_input_limit := Option.map Llm_provider.Input_budget.to_int (Lazy.force input_limit);
+    let build_view () =
       request_view
-        ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+        ?continuity:(input_continuity ctx.request_input)
+        ?compaction_anchor:!(state.compaction_anchor)
+        ?completed_arguments
         ?past_max_context
         ?held_window
         ~finished_turn_results
@@ -2107,6 +2214,44 @@ let bounded_model_input_projection
         ~to_wire
         messages
     in
+    let* view = build_view () in
+    (* The rest of the turn opens at the front the signal moved: a Librarian
+       point reads the accepted start from the held front, and a candidate
+       whose ledger has not seen this request reads it too. When an
+       Explicit_hard_limit eviction commits a newer compaction anchor and no
+       Librarian working_state overrides it, re-project once so this request
+       transmits the freshly committed anchor instead of the pre-commit one. *)
+    let* view =
+      match past_max_context, view.composed.moved_at_max_context with
+      | Some signal, Some moved ->
+        ctx.hold_carried_front moved;
+        let anchor_updated =
+          commit_compaction_for_evicted
+            ~base_path:ctx.base_path
+            ~keeper_name:ctx.keeper_name
+            ~reader_available
+            ~trigger:
+              (Keeper_compaction.Explicit_hard_limit
+                 { capacity_bytes = Llm_provider.Input_budget.to_int signal.input_limit
+                 ; observed_bytes = signal.next_turn_peak
+                 })
+            ~first_atom:moved.first_atom
+            ~state
+            messages
+        in
+        Log.Keeper.info
+          ~keeper_name:ctx.keeper_name
+          "model input window moved before the provider counted past input limit \
+           runtime=%s next_turn_peak=%d input_limit=%d window_first_atom=%d front=%s"
+          ctx.runtime_id signal.next_turn_peak
+          (Llm_provider.Input_budget.to_int signal.input_limit)
+          signal.window_first_atom
+          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json moved));
+        if anchor_updated && Option.is_none view.composed.working_state
+        then build_view ()
+        else Ok view
+      | Some _, None | None, (Some _ | None) -> Ok view
+    in
     (* A failed store can change the actual prefix a newly produced reasoning
        block binds to. Recheck each demoting request and only narrow the frozen
        set, including the first ordinary request after a turn ends. *)
@@ -2119,21 +2264,6 @@ let bounded_model_input_projection
     let composed = view.composed in
     Keeper_carried_front.warn_if_origin_is_unknown_start
       ~keeper_name:ctx.keeper_name composed.origin;
-    (* The rest of the turn opens at the front the signal moved: a Librarian
-       point reads the accepted start from the held front, and a candidate
-       whose ledger has not seen this request reads it too. *)
-    (match past_max_context, composed.moved_at_max_context with
-     | Some signal, Some moved ->
-       ctx.hold_carried_front moved;
-       Log.Keeper.info
-         ~keeper_name:ctx.keeper_name
-         "model input window moved before the provider counted past input limit \
-          runtime=%s next_turn_peak=%d input_limit=%d window_first_atom=%d front=%s"
-         ctx.runtime_id signal.next_turn_peak
-         (Llm_provider.Input_budget.to_int signal.input_limit)
-         signal.window_first_atom
-         (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json moved))
-     | Some _, None | None, (Some _ | None) -> ());
     let history_atom_count = composed.history_atom_count in
     (* Asked only after a refusal ([current_turn_demotion_sequence]). *)
     state.current_turn_demotion :=
@@ -2142,7 +2272,9 @@ let bounded_model_input_projection
            offload_model_input_cpu (fun () ->
              let demoted =
                compose_carried_model_input
-                 ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+                 ?continuity:(input_continuity ctx.request_input)
+                 ?compaction_anchor:!(state.compaction_anchor)
+                 ?completed_arguments
                  ?past_max_context
                  ?held_window
                  ?this_turn_start:ctx.this_turn_start
@@ -2645,6 +2777,21 @@ let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity
   ; on_turn_start =
       (fun error front ->
         on_boundary_front front;
+        Option.iter
+          (fun msgs ->
+             ignore
+               (commit_compaction_for_evicted
+                  ~base_path:ctx.base_path
+                  ~keeper_name:ctx.keeper_name
+                  ~reader_available:(Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
+                  ~trigger:
+                    (Keeper_compaction.Provider_context_overflow
+                       { provider_limit_tokens = !(state.last_input_limit) })
+                  ~first_atom:front.first_atom
+                  ~state
+                  msgs
+                : bool))
+          !(state.last_history_messages);
         Log.Keeper.info
           ~keeper_name:ctx.keeper_name
           "model input carried range refused runtime=%s: the turn's front moves to \
@@ -2693,6 +2840,21 @@ let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity
               (sent.digest_at first_atom))))
   ; on_this_turn_start =
       (fun error front ->
+        Option.iter
+          (fun msgs ->
+             ignore
+               (commit_compaction_for_evicted
+                  ~base_path:ctx.base_path
+                  ~keeper_name:ctx.keeper_name
+                  ~reader_available:(Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
+                  ~trigger:
+                    (Keeper_compaction.Provider_context_overflow
+                       { provider_limit_tokens = !(state.last_input_limit) })
+                  ~first_atom:front.first_atom
+                  ~state
+                  msgs
+                : bool))
+          !(state.last_history_messages);
         Log.Keeper.info
           ~keeper_name:ctx.keeper_name
           "model input carried range refused runtime=%s: the turn's front moves to \

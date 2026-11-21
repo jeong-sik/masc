@@ -245,23 +245,11 @@ let launch_tools_parts (state : T.state) ~mailbox parts =
         (fun (row : Masc.Tui_decode.keeper) -> row.Masc.Tui_decode.k_name)
         (T.selected_keeper state)
     in
-    (* The Activations pane draws no ledger without a selected Keeper. *)
-    let parts =
-      match keeper with
-      | Some _ -> parts
-      | None ->
-          if List.mem T.Tools_activations_read parts then begin
-            state.tools_activations <- Some T.Activations_no_keeper;
-            state.tools_activations_error <- None;
-            state.tools_activations_owed <- Masc_tui_owed_read.settled
-          end;
-          List.filter (fun part -> part <> T.Tools_activations_read) parts
-    in
     let keeper_parts, skill_parts =
       List.partition
         (function
-          | T.Tools_inventory_read | T.Tools_activations_read -> true
-          | T.Tools_catalog_read | T.Tools_usage_read _ | T.Tools_async_read ->
+          | T.Tools_inventory_read -> true
+          | T.Tools_catalog_read | T.Tools_async_read ->
               false)
         parts
     in
@@ -302,9 +290,8 @@ let launch_tools_parts (state : T.state) ~mailbox parts =
       @ List.filter
           (fun part ->
             (match part with
-             | T.Tools_catalog_read | T.Tools_usage_read _ -> true
-             | T.Tools_inventory_read | T.Tools_activations_read
-             | T.Tools_async_read ->
+             | T.Tools_catalog_read -> true
+             | T.Tools_inventory_read | T.Tools_async_read ->
                  false)
             && not (List.mem part state.tools_skill_pending))
           skill_parts;
@@ -355,78 +342,18 @@ let launch_tools_parts (state : T.state) ~mailbox parts =
               (fun () ->
                 Masc_tui_loader.load_skills_catalog ~host ~port
                 |> Result.map_error (fun detail -> T.Request_failed detail))
-        | T.Tools_activations_read ->
-            (* The Activations pane draws the selected Keeper's ledger, which its
-               own route answers. *)
-            Option.iter
-              (fun keeper ->
-                (* A reading or a failure held for no Keeper or for another one
-                   is not this Keeper's, so it is not kept on screen while this
-                   read runs. *)
-                let for_another =
-                  T.activations_held_for_another ~selected:(Some keeper)
-                    state.tools_activations state.tools_activations_error
-                in
-                (match state.tools_activations with
-                 | Some (T.Activations_read projection)
-                   when String.equal
-                          (Masc.Tui_decode_tools.skill_activation_keeper
-                             projection)
-                          keeper ->
-                     ()
-                 | Some (T.Activations_read _ | T.Activations_no_keeper) ->
-                     state.tools_activations <- None
-                 | None -> ());
-                (match state.tools_activations_error with
-                 | Some failure
-                   when not (String.equal failure.T.taf_keeper keeper) ->
-                     state.tools_activations_error <- None
-                 | Some _ | None -> ());
-                state.tools_activations_owed <-
-                  T.start_owed_read ~for_another state.tools_activations_owed;
-                WA.launch_json_read state ~mailbox
-                  ~boundary_error:(fun detail -> T.Request_failed detail)
-                  ~withdrawn:(fun refusal -> T.Request_withdrawn refusal)
-                  ~deliver:(fun result ->
-                    P.Tools_msg
-                      (P.Tools_read_loaded
-                         (P.Tools_activations_loaded
-                            { generation; keeper; result })))
-                  (fun () ->
-                    Masc_tui_loader.load_keeper_skill_activations ~host ~port
-                      ~keeper
-                    |> Result.map_error (fun detail -> T.Request_failed detail)))
-              keeper
-        | T.Tools_usage_read keeper ->
-            (* The Usage pane counts every Keeper's use of the catalog, one
-               Keeper's ledger per read. *)
-            T.set_keeper_skill_usage_owed state keeper
-              (Masc_tui_owed_read.started (T.keeper_skill_usage_owed state keeper));
-            WA.launch_json_read state ~mailbox
-              ~boundary_error:(fun detail -> T.Request_failed detail)
-              ~withdrawn:(fun refusal -> T.Request_withdrawn refusal)
-              ~deliver:(fun result ->
-                P.Tools_msg
-                  (P.Tools_read_loaded
-                     (P.Tools_usage_loaded
-                        { generation = skill_generation; keeper; result })))
-              (fun () ->
-                Masc_tui_loader.load_keeper_skill_usage ~host ~port ~keeper
-                |> Result.map_error (fun detail -> T.Request_failed detail))
         | T.Tools_async_read -> launch_tools_async_observation_load state ~mailbox)
       parts
   end
 
 (* Reads what depends on the selected Keeper: its tool inventory and
-   effective surface, and its activations. A new generation drops the
-   answers still in flight. The skills catalog and the Usage answers read on
-   their pushes ([launch_owed_tools]). *)
+   effective surface. A new generation drops the answers still in flight.
+   The skills catalog reads on its pushes ([launch_owed_tools]). *)
 let launch_tools_load (state : T.state) ~mailbox =
   if T.server_authority_ready state then begin
     state.tools_request_generation <- state.tools_request_generation + 1;
     state.tools_read_inflight <- None;
-    launch_tools_parts state ~mailbox
-      [ T.Tools_inventory_read; T.Tools_activations_read ]
+    launch_tools_parts state ~mailbox [ T.Tools_inventory_read ]
   end
 
 let settle_tools_skill_read (state : T.state) ~generation part =
@@ -463,13 +390,9 @@ let cycle_tools_keeper (state : T.state) ~mailbox ~delta =
     state.keeper_cursor <- next;
     state.tools_inventory <- None;
     state.tools_error <- None;
-    state.tools_activations <- None;
-    state.tools_activations_error <- None;
     (* The cleared readings no longer say whose failures the owed reads
        carry, so the next Keeper's reads start with none behind them. *)
     state.tools_inventory_owed <-
-      Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
-    state.tools_activations_owed <-
       Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
     T.tools_task_user_scroll state 0;
     state.tools_skill_cursor <- 0;

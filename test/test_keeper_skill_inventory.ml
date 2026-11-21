@@ -207,8 +207,7 @@ let test_valid_instruction_and_exact_reference () =
   let inventory = Inventory.of_snapshot frozen in
   let valid = valid_named "release-checklist" inventory in
   (match valid.kind with
-   | Inventory.Instruction -> ()
-   | Composition _ -> fail "instruction Skill was classified as a composition");
+   | Inventory.Instruction -> ());
   (match valid.catalog_status with
    | Inventory.Effective -> ()
    | Shadowed -> fail "effective instruction Skill was marked shadowed");
@@ -242,13 +241,7 @@ let test_valid_composition () =
   in
   let valid = valid_named "lane-plan" inventory in
   match valid.kind with
-  | Inventory.Instruction -> fail "composition Skill was classified as instruction"
-  | Composition entry ->
-    check
-      string
-      "named composition tool"
-      "keeper_compose_lane-plan"
-      (Masc.Keeper_tool_composition_catalog.tool_name entry)
+  | Inventory.Instruction -> ()
 ;;
 
 let test_invalid_sibling_isolated_with_digest () =
@@ -459,117 +452,6 @@ let test_lane_addon_surface_binds_incarnation_and_deny () =
     (Surface.find_descriptor_by_name (capability_surface frozen) "machine_screen" = None)
 ;;
 
-let test_composition_tracks_frozen_addon_authority () =
-  let module Catalog = Masc.Keeper_skill_catalog in
-  let module Surface = Masc.Keeper_capability_surface in
-  let module Selection = Masc.Keeper_task_skill_turn in
-  let module Plan = Masc.Keeper_tool_plan in
-  ignore (Masc_test_deps.init_unified_tool_registry ());
-  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
-  let document = {|---
-name: machine-plan
-description: Read the attached machine.
----
-```toml composition
-[[compositions]]
-name = "machine-plan"
-execution = "inline"
-[[compositions.nodes]]
-id = "screen"
-tool = "machine_screen"
-[compositions.nodes.input]
-kind = "literal"
-value = {}
-```
-|} in
-  let frozen = snapshot config [[candidate ~directory:"machine-plan" document]] in
-  let entry = List.hd (Snapshot.entries frozen) in
-  let reference = Snapshot.entry_reference entry in
-  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
-    "name",`String "machine_screen"; "inputSchema",`Assoc ["type",`String "object"]]) with
-    | Ok tool -> tool | Error detail -> fail detail in
-  let descriptors instance = Tool_descriptor.all_descriptors () @
-    List.map (fun instance_id -> Masc.Keeper_lane_addon_descriptor.create
-      (Masc.Lane_addon_tool_export.create
-        ~owner:(Masc.Lane_addon_tool_export.create_owner ~instance_id) ~tool)) instance in
-  let unwrap = function Ok value -> value | Error error -> fail (Selection.error_to_string error) in
-  let selected = unwrap (Selection.resolve_for_task ~snapshot:frozen ~task_id:"task-1" [reference]) in
-  let project tool_descriptors tool_deny =
-    let selection,preparation = unwrap (Selection.bind_surface ~descriptors:tool_descriptors ~snapshot:frozen selected) in
-    let surface = Surface.create_with_descriptors ~tool_descriptors ~tool_deny
-      ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names:None
-      ~global_skill_catalog:preparation.catalog ~skill_inventory:preparation.inventory
-      ~task_skills:(Selection.skills selection) in
-    selection,surface in
-  let composition surface = match Catalog.composition_entries (Surface.skill_catalog surface) with
-    | [entry] -> entry | _ -> fail "attached composition missing" in
-  let no_tools = descriptors [] in
-  let _,absent = project no_tools [] in
-  check int "unattached composition is not executable" 0
-    (List.length (Catalog.composition_entries (Surface.skill_catalog absent)));
-  let first_descriptors = descriptors ["first"] in
-  let selection,first = project first_descriptors [] in
-  let first_plan = (composition first).plan in
-  let node = List.hd (Plan.nodes first_plan) in
-  let first_descriptor = match Plan.descriptor first_plan node.id with
-    | Some value -> value | None -> fail "plan lost its descriptor" in
-  check bool "composition uses admitted descriptor object" true (Surface.admits first first_descriptor);
-  check (list string) "exact Task provenance survives reprojection" ["task-1"]
-    (Selection.task_ids_for_reference selection reference);
-  let cached,_ = Catalog.of_snapshot ~descriptors:first_descriptors frozen in
-  let repeated = List.hd (Catalog.composition_entries cached) in
-  check bool "same frozen authority reuses its cached plan" true (repeated.plan == first_plan);
-  let module Export = Masc.Lane_addon_tool_export in
-  let module Observation = Masc.Keeper_skill_preparation_observation in
-  let owner = Export.create_owner ~instance_id:"first" in
-  let owned_descriptors () = Tool_descriptor.all_descriptors () @
-      [Masc.Keeper_lane_addon_descriptor.create (Export.create ~owner ~tool)] in
-  Eio_main.run (fun _ ->
-  let reports = ref [] in
-  let prepare task_id = Observation.capture_result
-      ~on_report:(fun report -> reports := report :: !reports) (fun () ->
-    let tool_descriptors = owned_descriptors () in
-    let selection = unwrap (Selection.resolve_for_task ~snapshot:frozen ~descriptors:tool_descriptors
-      ~task_id [reference]) in
-    Selection.bind_surface ~snapshot:frozen ~descriptors:tool_descriptors selection) in
-  let before,prepared = match prepare "owned-a" with Ok value -> value | Error _ -> fail "owned preparation failed" in
-  ignore (project (descriptors ["interleaved"]) []);
-  let after,reused = match prepare "owned-b" with Ok value -> value | Error _ -> fail "owned preparation reuse failed" in
-  check bool "owned dynamic export keeps the full preparation across observations" true (prepared == reused);
-  check (list string) "first Task keeps its original provenance" ["owned-a"]
-    (Selection.task_ids_for_reference before reference);
-  check (list string) "new Task does not borrow earlier Task provenance" ["owned-b"]
-    (Selection.task_ids_for_reference after reference);
-  check bool "same public id cannot retain a different worker generation's descriptor" false
-    (List.hd (List.rev (owned_descriptors ())) == first_descriptor);
-  (match !reports with
-   | [warm;cold] ->
-     let has decision report = List.exists (fun (sample : Observation.sample) ->
-       sample.component = Observation.Projection && sample.decision = Some decision) report.Observation.samples in
-     check bool "first owned generation actually constructs its projection" true (has Observation.Constructed cold);
-     check bool "second observation actually reuses its projection" true (has Observation.Reused warm);
-     List.iter (fun report ->
-       match List.filter (fun (sample : Observation.sample) ->
-         sample.component=Observation.Retained_turn_surface) report.Observation.samples with
-       | [sample] -> check bool "paired successful binding preserves one completed retained-surface observation" true
-           (sample.decision=Some Observation.Reused && sample.outcome=Observation.Returned)
-       | _ -> fail "successful paired binding lost or duplicated its retained-surface observation") [cold;warm]
-   | _ -> fail "expected cold and warm preparation observations"));
-  let _,denied = project first_descriptors ["addon:machine_screen"] in
-  check int "denied node withholds composition" 0
-    (List.length (Catalog.composition_entries (Surface.skill_catalog denied)));
-  let _,detached = project no_tools [] in
-  check int "same skill snapshot cannot retain detached composition" 0
-    (List.length (Catalog.composition_entries (Surface.skill_catalog detached)));
-  let _,replacement = project (descriptors ["replacement"]) [] in
-  let replacement_plan = (composition replacement).plan in
-  check bool "replacement plan cannot retain old descriptor" false
-    (Surface.admits replacement first_descriptor);
-  check bool "replacement has a new plan" false (replacement_plan == first_plan);
-  let _,first_again = project first_descriptors [] in
-  check bool "older frozen turn retains its original authority" true
-    (Surface.admits first_again first_descriptor)
-;;
 
 let test_operator_only_tool_is_in_inventory_and_search () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
@@ -983,51 +865,6 @@ let test_tool_deny_removes_descriptors_from_surface () =
     (Masc.Keeper_capability_surface.digest noop)
 ;;
 
-let test_composition_follows_node_tool_admission () =
-  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
-  let frozen =
-    snapshot config [ [ candidate ~directory:"lane-plan" composition_document ] ]
-  in
-  let valid = valid_named "lane-plan" (Inventory.of_snapshot frozen) in
-  let composition_tools surface =
-    Masc.Keeper_capability_surface.skill_catalog surface
-    |> Masc.Keeper_skill_catalog.composition_entries
-    |> List.map Masc.Keeper_tool_composition_catalog.tool_name
-  in
-  let admitted = capability_surface frozen in
-  check (list string) "composition is offered while its node tool is admitted"
-    [ "keeper_compose_lane-plan" ] (composition_tools admitted);
-  check bool "admitted composition is active" true
-    ((exact_capability_by_reference admitted valid.reference).availability
-     = Masc.Keeper_capability_surface.Active);
-  let withheld = capability_surface ~tool_deny:[ "keeper_lane_status" ] frozen in
-  check (list string) "composition leaves the executable catalog with its node tool"
-    [] (composition_tools withheld);
-  let capability = exact_capability_by_reference withheld valid.reference in
-  check bool "withheld composition names the node tool outside the surface" true
-    (capability.availability
-     = Masc.Keeper_capability_surface.Node_tools_outside_surface
-         { tools = [ "keeper_lane_status" ] });
-  check bool "withheld composition is operator only" true
-    (capability.exposure = Masc.Keeper_capability_surface.Operator_only);
-  check (option string) "withheld composition names no invocation" None
-    (Masc.Keeper_capability_surface.candidate_invocation_name
-       (Masc.Keeper_capability_surface.Skill capability));
-  let projection = Masc.Keeper_capability_surface.skill_projection withheld in
-  check int "withholding is configured state, not a turn projection error" 0
-    (List.length projection.Masc.Keeper_skill_catalog.unavailable);
-  let row = Masc.Keeper_capability_surface.skill_capability_to_yojson capability in
-  check (list string) "operator row carries the node tools"
-    [ "keeper_lane_status" ]
-    Yojson.Safe.Util.(row |> member "outside_node_tools" |> to_list |> filter_string);
-  check (list string) "the inventory row of the withheld composition carries the node tools"
-    [ "keeper_lane_status" ]
-    Yojson.Safe.Util.(
-      Masc.Keeper_capability_surface.inventory_to_yojson withheld
-      |> member "skills" |> member "node_tools_outside_surface" |> to_list
-      |> List.concat_map (fun skill ->
-        skill |> member "outside_node_tools" |> to_list |> filter_string))
-;;
 
 let test_surface_digest_binds_exact_tool_reference () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
@@ -1265,12 +1102,8 @@ let () =
             test_surface_digest_binds_exact_tool_reference
         ; test_case "Lane Add-on surface binds installation and deny" `Quick
             test_lane_addon_surface_binds_incarnation_and_deny
-        ; test_case "composition follows frozen Add-on authority" `Quick
-            test_composition_tracks_frozen_addon_authority
         ; test_case "tool deny removes descriptors from surface" `Quick
             test_tool_deny_removes_descriptors_from_surface
-        ; test_case "composition follows node tool admission" `Quick
-            test_composition_follows_node_tool_admission
         ; test_case "surface digest is path independent" `Quick
             test_surface_digest_is_path_independent
         ; test_case "unreadable diagnostics stay public only" `Quick
@@ -1279,6 +1112,7 @@ let () =
             test_duplicate_public_diagnostic_retains_first_directory
         ; test_case "Skill content revision changes surface digest" `Quick
             test_surface_digest_changes_with_skill_content_revision
-        ] )
+        
+] )
     ]
 ;;

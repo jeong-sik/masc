@@ -61,7 +61,6 @@ type skill_activity =
   ; content_revision : string option
   ; runtime_id : string option
   ; execution_id : string option
-  ; execution : Masc.Keeper_skill_execution_projection.t option
   ; call_failed : bool
   ; state : skill_state
   ; actions : string list
@@ -714,10 +713,7 @@ let keeper_tool_activity_kind = function
 
 let activity_kind (activity : tool_activity) =
   let name = activity.tool_name in
-  if
-    String.equal name Masc.Keeper_tool_composition_catalog.skill_tool_name
-    || Option.is_some
-         (Masc.Keeper_tool_composition_catalog.skill_source_of_tool_name name)
+  if String.equal name Masc.Keeper_instruction_skill.skill_tool_name
   then Skill_activity
   else
     match Keeper_tool_name.of_string name with
@@ -728,7 +724,7 @@ let activity_kind (activity : tool_activity) =
         | Some descriptor -> handler_activity_kind descriptor.runtime_handler)
 
 let make_skill_activity ?invocation ?skill_tool_use_id ?turn_ref
-    ?content_revision ?runtime_id ?execution_id ?execution ?(call_failed = false) ?detail ~skill_name ~state ~actions () =
+    ?content_revision ?runtime_id ?execution_id ?(call_failed = false) ?detail ~skill_name ~state ~actions () =
   { skill_name = safe_line skill_name
   ; invocation =
       Option.map
@@ -742,7 +738,6 @@ let make_skill_activity ?invocation ?skill_tool_use_id ?turn_ref
   ; content_revision = Option.map safe_line (nonblank content_revision)
   ; runtime_id = Option.map safe_line (nonblank runtime_id)
   ; execution_id = nonblank execution_id
-  ; execution
   ; call_failed
   ; state
   ; actions = List.map safe_line actions
@@ -762,22 +757,11 @@ let skill_activity_of_tool (activity : tool_activity) =
         | Native_ended | Native_failed | Never_returned | Outcome_unrecorded ->
             Skill_evidence_missing
       in
-      (* [activity_kind] admitted the call as a skill on one of two names:
-         the read tool, or a composition's own tool. A composition tool is
-         named after its skill, so the name says which skill ran even when
-         the arguments have not arrived. *)
-      let invocation, named_by_tool =
-        match
-          Masc.Keeper_tool_composition_catalog.skill_name_of_tool_name
-            activity.tool_name
-        with
-        | Some skill -> Composition_run { tool_name = activity.tool_name }, skill
-        | None -> Instruction_read, display_tool_name activity.tool_name
-      in
+      let invocation = Instruction_read in
+      let named_by_tool = display_tool_name activity.tool_name in
       let skill_name = Option.value activity.subject ~default:named_by_tool in
       Some
         (make_skill_activity ~invocation ?skill_tool_use_id:activity.call_id
-           ?execution_id:(match invocation with Composition_run _ -> activity.execution_id | Instruction_read -> None)
            ~call_failed:(activity.outcome = Failed)
            ~skill_name ~state ~actions:[] ())
 
@@ -976,35 +960,11 @@ let short_proof value =
    skill, then what came of it -- the Gate row's order, because the pane
    should not read left to right one way on one kind of row and the other
    way on the next. *)
-let skill_execution_label ~ko (activity : skill_activity) =
-  let module Execution = Masc.Keeper_skill_execution_projection in
-  match activity.execution with
-  | None -> None
-  | Some (Execution.Recorded { disposition; _ }) ->
-    Some (match disposition with
-      | Tool_result.Completed () -> if ko then "실행 완료" else "executed"
-      | Tool_result.Deferred () -> if ko then "실행 보류" else "deferred"
-      | Tool_result.Failed () -> if ko then "실행 실패" else "execution failed")
-  | Some Execution.Unrecorded ->
-    Some (if ko then "실행 결과 기록 없음" else "execution unrecorded")
-  | Some (Execution.Unavailable _) ->
-    Some (if ko then "실행 결과 확인 불가" else "execution unavailable")
-
-let skill_execution_problem (activity : skill_activity) =
-  let module Execution = Masc.Keeper_skill_execution_projection in
-  match activity.execution with
-  | None | Some (Execution.Recorded { disposition = Tool_result.Completed (); _ }) -> false
-  | Some (Execution.Recorded { disposition = (Tool_result.Deferred () | Tool_result.Failed ()); _ })
-  | Some Execution.Unrecorded | Some (Execution.Unavailable _) -> true
-
 let skill_activity_label ?(ko = true) activity =
   let delivery = skill_state_label ~ko ?invocation:activity.invocation activity.state in
-  let lifecycle = match skill_execution_label ~ko activity with
-    | None -> delivery
-    | Some execution -> execution ^ ", " ^ delivery in
   if activity.call_failed then
-    (if ko then "호출 실패, " else "call failed, ") ^ lifecycle
-  else lifecycle
+    (if ko then "호출 실패, " else "call failed, ") ^ delivery
+  else delivery
 
 let skill_full_rows ?(ko = true) (activity : skill_activity) =
   let action_count = List.length activity.actions in
@@ -1054,7 +1014,7 @@ let skill_full_rows ?(ko = true) (activity : skill_activity) =
    thing about a trigger that is not "it happened", so it is the one thing
    said beside the count. *)
 let skill_trigger_problem (activity : skill_activity) =
-  activity.call_failed || skill_execution_problem activity || match activity.state with
+  activity.call_failed || match activity.state with
   | Skill_failed | Skill_evidence_missing | Skill_evidence_unavailable -> true
   | Skill_calling | Skill_served_pending | Skill_served_only | Skill_delivered
   | Skill_used -> false
@@ -1117,13 +1077,7 @@ let skill_block_state (activities : skill_activity list) =
   in
   List.fold_left
     (fun worst activity ->
-      let state = if skill_execution_problem activity then Skill_evidence_missing else activity.state in
-      let state = if activity.call_failed then Skill_failed else state in
-      let state = match activity.execution with
-        | Some (Masc.Keeper_skill_execution_projection.Recorded { disposition = Tool_result.Failed (); _ }) -> Skill_failed
-        | None | Some (Masc.Keeper_skill_execution_projection.Recorded { disposition = (Tool_result.Completed () | Tool_result.Deferred ()); _ }
-                    | Masc.Keeper_skill_execution_projection.Unrecorded
-                    | Masc.Keeper_skill_execution_projection.Unavailable _) -> state in
+      let state = if activity.call_failed then Skill_failed else activity.state in
       if rank state < rank worst then state else worst)
     Skill_used activities
 

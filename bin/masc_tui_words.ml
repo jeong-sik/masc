@@ -180,8 +180,6 @@ module Kept_request = struct
     | Turn_observation_read
     | Tool_inventory_read
     | Skill_catalog_read
-    | Skill_activations_read
-    | Skill_usage_read
     | Async_requests_read
     | Async_request_read
     | Original_task_read
@@ -335,8 +333,6 @@ module Kept_request = struct
     | Turn_observation_read -> text "턴 관측 읽기" "turn observation read"
     | Tool_inventory_read -> text "도구 목록 읽기" "tool inventory read"
     | Skill_catalog_read -> text "스킬 목록 읽기" "Skill catalog read"
-    | Skill_activations_read -> text "스킬 활성화 기록 읽기" "Skill activations read"
-    | Skill_usage_read -> text "스킬 사용량 읽기" "Skill usage read"
     | Async_requests_read -> text "별도 실행 목록 읽기" "async request list read"
     | Async_request_read -> text "별도 실행 읽기" "async request read"
     | Original_task_read -> text "원본 작업 읽기" "original Task read"

@@ -2056,134 +2056,6 @@ let test_first_round_survives_a_replayed_tool_tail () =
        [ user ])
 
 
-let test_trailing_tool_results_keep_exact_receipts () =
-  let tool_message : Agent_core.Types.message =
-    { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.Tool
-    ; content =
-        [ Agent_core.Types.ToolResult
-            { tool_use_id = "call-skill"
-            ; content = "body"
-            ; outcome = Agent_core.Llm_provider.Types.Tool_succeeded
-            ; json = None
-            ; content_blocks = None
-            }
-        ; Agent_core.Types.ToolResult
-            { tool_use_id = "call-other"
-            ; content = "other"
-            ; outcome = Agent_core.Llm_provider.Types.Tool_succeeded
-            ; json = None
-            ; content_blocks = None
-            }
-        ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = []
-    }
-  in
-  let receipts =
-    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts [ tool_message ]
-  in
-  check
-    (list (pair string int))
-    "exact trailing ids and bytes"
-    [ "call-skill", 4; "call-other", 5 ]
-    (List.map
-       (fun (receipt : Masc.Keeper_skill_activation_ledger.tool_result_receipt) ->
-          receipt.tool_use_id, receipt.content_bytes)
-       receipts);
-  check
-    (list string)
-    "a later non-tool message means no provider-bound tool result"
-    []
-    (List.map
-       (fun (receipt : Masc.Keeper_skill_activation_ledger.tool_result_receipt) ->
-          receipt.tool_use_id)
-       (Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
-       [ tool_message; Agent_core.Types.user_msg "later" ])
-    )
-;;
-
-let wire_receipt tool_use_id =
-  Masc.Keeper_skill_activation_ledger.
-    { tool_use_id
-    ; content_bytes = 4
-    ; content_sha256 = Agent_core_sha256.(digest_string "body" |> to_hex)
-    }
-;;
-
-let test_skill_delivery_requires_serialization_and_success_response () =
-  let module State = Masc.Keeper_run_tools_hooks.Skill_delivery_state in
-  let state = State.create () in
-  let observations = ref [] in
-  let observe (staged : State.staged) =
-    observations := staged.runtime_id :: !observations;
-    List.map
-      (fun (receipt : Masc.Keeper_skill_activation_ledger.tool_result_receipt) ->
-         receipt.tool_use_id)
-      staged.tool_results
-  in
-  State.begin_turn state;
-  State.commit_model_response state ~agent_core_turn:1 ~observe;
-  check (list string) "serialization failure has no delivery" [] !observations;
-  State.stage state ~runtime_id:"runtime-failed" ~agent_core_turn:1
-    [ wire_receipt "call-skill" ];
-  State.begin_turn state;
-  State.commit_model_response state ~agent_core_turn:1 ~observe;
-  check (list string) "failed response clears staged delivery" [] !observations;
-  State.stage state ~runtime_id:"runtime-success" ~agent_core_turn:2
-    [ wire_receipt "call-skill" ];
-  State.commit_model_response state ~agent_core_turn:2 ~observe;
-  check (list string) "successful response commits staged runtime"
-    [ "runtime-success" ] !observations;
-  check (list string) "successful response activates exact id"
-    [ "call-skill" ] (State.active state);
-  State.stage state ~runtime_id:"runtime-error" ~agent_core_turn:3
-    [ wire_receipt "call-skill" ];
-  State.commit_model_response state ~agent_core_turn:3 ~observe:(fun _ -> []);
-  check (list string) "failed observer leaves no stale active id"
-    [] (State.active state)
-;;
-
-let test_first_round_cross_turn_replay_stays_inactive () =
-  let module State = Masc.Keeper_run_tools_hooks.Skill_delivery_state in
-  let state = State.create () in
-  let observer_calls = ref 0 in
-  State.begin_turn state;
-  State.stage state ~runtime_id:"runtime-next-turn" ~agent_core_turn:1
-    [ wire_receipt "call-from-previous-turn" ];
-  State.commit_model_response state ~agent_core_turn:1
-    ~observe:(fun _staged ->
-      incr observer_calls;
-      (* The durable ledger observer filters this exact id because its
-         activation Turn_ref belongs to the preceding outer turn. *)
-      []);
-  check int "first response reaches the delivery observer" 1 !observer_calls;
-  check (list string) "replayed result activates no Skill id" []
-    (State.active state)
-;;
-
-let test_runtime_attempt_clears_previous_runtime_delivery () =
-  let module State = Masc.Keeper_run_tools_hooks.Skill_delivery_state in
-  let state = State.create () in
-  State.stage state ~runtime_id:"runtime-a" ~agent_core_turn:1
-    [ wire_receipt "call-skill" ];
-  State.commit_model_response state ~agent_core_turn:1
-    ~observe:(fun staged ->
-      List.map
-        (fun (receipt : Masc.Keeper_skill_activation_ledger.tool_result_receipt) ->
-           receipt.tool_use_id)
-        staged.tool_results);
-  check (list string) "runtime A activates its delivered Skill"
-    [ "call-skill" ] (State.active state);
-  State.stage state ~runtime_id:"runtime-a" ~agent_core_turn:2
-    [ wire_receipt "pending-a" ];
-  State.begin_runtime_attempt state;
-  check (list string) "runtime B inherits no active Skill" [] (State.active state);
-  let observed = ref false in
-  State.commit_model_response state ~agent_core_turn:2
-    ~observe:(fun _ -> observed := true; [ "pending-a" ]);
-  check bool "runtime B inherits no pending delivery" false !observed
-;;
 
 (* ── adopt_projection_meta: projection adoption keeps the TOML profile ──
 
@@ -2306,157 +2178,6 @@ let test_projection_adoption_preserves_durable_projection_fields () =
     adopted.runtime.usage.last_total_tokens
 ;;
 
-(* A skill serves its body as a tool result. When the body is large enough to
-   externalize, the model reads a [masc:blob] marker whose sha256 and
-   bytes are the served body's own, so a receipt taken from the marker still
-   equals what the skill served -- which is what lets the ledger record the
-   delivery instead of leaving it SERVED ONLY forever. *)
-let served_body = String.concat "\n" (List.init 400 (fun i -> Printf.sprintf "line %d of the skill body" i))
-let served_sha = Agent_core_sha256.(digest_string served_body |> to_hex)
-
-let blob_marker_for body =
-  match
-    Tool_output.make_artifact_ref
-      ~sha256:Agent_core_sha256.(digest_string body |> to_hex)
-      ~bytes:(String.length body)
-      ~preview:"preview"
-      ~mime:"text/plain"
-  with
-  | Ok reference -> Tool_output.encode_for_agent_core (Tool_output.Stored reference)
-  | Error error -> failf "could not build a marker: %s" (Tool_output.make_error_to_string error)
-;;
-
-let tool_message results =
-  { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Tool
-  ; content =
-      List.map
-        (fun (tool_use_id, content) ->
-          Agent_core.Types.ToolResult
-            { tool_use_id; content; outcome = Agent_core.Types.Tool_succeeded
-            ; json = None; content_blocks = None })
-        results
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-;;
-
-let assistant text =
-  { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Assistant
-  ; content = [ Agent_core.Types.Text text ]
-  ; name = None; tool_call_id = None; metadata = []
-  }
-;;
-
-let receipt_bytes_sha (r : Masc.Keeper_skill_activation_ledger.tool_result_receipt) =
-  r.content_bytes, r.content_sha256
-;;
-
-let test_receipt_reads_blob_marker_identity () =
-  let marker = blob_marker_for served_body in
-  check bool "the wire content really is a marker, not the body" true
-    (Tool_output.is_marker marker && String.length marker < String.length served_body);
-  let receipts =
-    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
-      [ tool_message [ "call_skill", marker ] ]
-  in
-  match receipts with
-  | [ receipt ] ->
-    let bytes, sha = receipt_bytes_sha receipt in
-    check int "bytes are the served body's, not the marker's" (String.length served_body) bytes;
-    check string "sha is the served body's" served_sha sha
-  | _ -> fail "expected exactly one receipt"
-;;
-
-let test_receipt_reads_plain_content () =
-  let receipts =
-    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
-      [ tool_message [ "call_x", "a short inline result" ] ]
-  in
-  match receipts with
-  | [ receipt ] ->
-    let bytes, sha = receipt_bytes_sha receipt in
-    check int "bytes are the content's own" (String.length "a short inline result") bytes;
-    check string "sha is the content's own"
-      Agent_core_sha256.(digest_string "a short inline result" |> to_hex) sha
-  | _ -> fail "expected exactly one receipt"
-;;
-
-(* The skill result is not always the very last message: a dynamic-context
-   message, or a second batched tool message, can follow it. The previous rule
-   took receipts only when the final message was Tool, so anything appended
-   dropped the skill's receipt and the ledger never matched. *)
-let test_receipts_survive_a_trailing_non_tool_message () =
-  let marker = blob_marker_for served_body in
-  let receipts =
-    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
-      [ assistant "earlier reply"
-      ; tool_message [ "call_a", "first" ]
-      ; tool_message [ "call_skill", marker ]
-      ]
-  in
-  let ids = List.map (fun r -> r.Masc.Keeper_skill_activation_ledger.tool_use_id) receipts in
-  check bool "the skill result is present" true (List.mem "call_skill" ids);
-  check bool "the batch sibling is present too" true (List.mem "call_a" ids);
-  check int "only the trailing tool run is taken, not the assistant line" 2 (List.length receipts)
-;;
-
-let test_no_trailing_tool_message_yields_no_receipt () =
-  let receipts =
-    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
-      [ tool_message [ "call_a", "first" ]; assistant "model replied" ]
-  in
-  check int "a result behind the model's reply is offered at its own boundary, not here"
-    0 (List.length receipts)
-;;
-
-let prior_art = "keeper_compose_prior-art"
-let follow = "keeper_compose_browser-live-follow-read"
-let github = "keeper_compose_github-pr-read"
-
-let test_skills_block_names_a_deferred_composition_for_search () =
-  check
-    (option string)
-    "a deferred composition not yet loaded is named for keeper_tool_search"
-    (Some
-       ("[Skills] 1 composition tools on this turn — each is one call whose reads \
-         run in parallel: " ^ github
-        ^ "\n[Skills] 2 more composition tools load by name through \
-           keeper_tool_search: " ^ prior_art ^ ", " ^ follow))
-    (Masc.Keeper_run_tools_hooks.skill_compositions_block
-       ~compositions:[ prior_art; follow; github ]
-       ~deferred:[ prior_art; follow ]
-       ~on_the_wire:[ github ])
-;;
-
-(* [keeper_tool_search] extends the running agent's tool set, and the deferred
-   list is fixed for the run. Splitting on the deferred list alone kept the
-   loaded composition on the "load by name" line every round after the load. *)
-let test_skills_block_counts_a_loaded_composition_on_this_turn () =
-  check
-    (option string)
-    "a deferred composition already on the wire is on this turn"
-    (Some
-       ("[Skills] 2 composition tools on this turn — each is one call whose reads \
-         run in parallel: " ^ prior_art ^ ", " ^ github
-        ^ "\n[Skills] 1 more composition tools load by name through \
-           keeper_tool_search: " ^ follow))
-    (Masc.Keeper_run_tools_hooks.skill_compositions_block
-       ~compositions:[ prior_art; follow; github ]
-       ~deferred:[ prior_art; follow ]
-       ~on_the_wire:[ prior_art; github ])
-;;
-
-let test_skills_block_is_absent_without_compositions () =
-  check
-    (option string)
-    "no composition tools, no block"
-    None
-    (Masc.Keeper_run_tools_hooks.skill_compositions_block
-       ~compositions:[]
-       ~deferred:[ prior_art ]
-       ~on_the_wire:[])
-;;
 
 let () =
   run
@@ -2633,23 +2354,7 @@ let () =
             test_an_unreadable_index_is_an_error_not_an_empty_read
         ] )
     ; ( "Skill delivery observation"
-      , [ test_case
-            "keeps exact trailing ToolResult ids"
-            `Quick
-            test_trailing_tool_results_keep_exact_receipts
-        ; test_case
-            "requires serialization and successful response"
-            `Quick
-            test_skill_delivery_requires_serialization_and_success_response
-        ; test_case
-            "first-round cross-turn replay stays inactive"
-            `Quick
-            test_first_round_cross_turn_replay_stays_inactive
-        ; test_case
-            "runtime failover clears previous delivery"
-            `Quick
-            test_runtime_attempt_clears_previous_runtime_delivery
-        ] )
+      , [] )
     ; ( "projection adoption"
       , [ test_case
             "keeps the admitted TOML profile over the decoder placeholder"
@@ -2669,15 +2374,7 @@ let () =
             test_projection_adoption_preserves_durable_projection_fields
         ] )
     ; ( "skill delivery receipts"
-      , [ test_case "a blob marker carries the served body's sha and bytes" `Quick
-            test_receipt_reads_blob_marker_identity
-        ; test_case "a plain result is hashed as its own bytes" `Quick
-            test_receipt_reads_plain_content
-        ; test_case "a receipt is taken even when a message follows the results"
-            `Quick test_receipts_survive_a_trailing_non_tool_message
-        ; test_case "no trailing tool message yields no receipt" `Quick
-            test_no_trailing_tool_message_yields_no_receipt
-        ] )
+      , [] )
     ; ( "Codex result delivery"
       , [ test_case "committed tools reach live and cancelled history" `Quick
             test_codex_receipts_reach_live_and_cancelled_history
@@ -2686,12 +2383,6 @@ let () =
         ; test_case "interrupted hooks report only committed rows" `Quick
             test_codex_cancelled_hooks_only_report_committed_rows ] )
     ; ( "Skills block"
-      , [ test_case "a deferred composition is named for search" `Quick
-            test_skills_block_names_a_deferred_composition_for_search
-        ; test_case "a loaded composition is on this turn" `Quick
-            test_skills_block_counts_a_loaded_composition_on_this_turn
-        ; test_case "no compositions, no block" `Quick
-            test_skills_block_is_absent_without_compositions
-        ] )
+      , [] )
     ]
 ;;

@@ -6,10 +6,7 @@
 open Alcotest
 
 module Descriptor = Masc.Keeper_tool_descriptor
-module Catalog = Masc.Keeper_tool_composition_catalog
-module Surface = Masc.Keeper_tool_composition_surface
 module Call_log = Masc.Keeper_tool_call_log
-module Workspace = Masc.Workspace
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -142,97 +139,6 @@ let test_discovery_fields_carry_tool_kind () =
          failf "discovery fields for %s omit tool_kind" d.Descriptor.id)
 ;;
 
-let inline_and_async_catalog =
-  {|[[compositions]]
-name = "lane-inline"
-execution = "inline"
-[[compositions.nodes]]
-id = "lane"
-tool = "keeper_lane_status"
-[compositions.nodes.input]
-kind = "literal"
-value = {}
-
-[[compositions]]
-name = "lane-background"
-execution = "async"
-[[compositions.nodes]]
-id = "lane"
-tool = "keeper_lane_status"
-[compositions.nodes.input]
-kind = "literal"
-value = {}
-|}
-;;
-
-let test_catalog_entries_declare_tool_kind () =
-  let catalog =
-    match Catalog.parse inline_and_async_catalog with
-    | Ok catalog -> catalog
-    | Error error -> fail (Catalog.error_to_string error)
-  in
-  let entry name =
-    match Catalog.find catalog name with
-    | Some entry -> entry
-    | None -> failf "composition lookup missed exact name: %s" name
-  in
-  check
-    tool_kind_testable
-    "inline composition is a composition tool"
-    Descriptor.Composition_tool
-    (Catalog.tool_kind (entry "lane-inline"));
-  check
-    tool_kind_testable
-    "async composition is an async composition tool"
-    Descriptor.Async_composition_tool
-    (Catalog.tool_kind (entry "lane-background"))
-;;
-
-let test_async_controls_declare_kinds () =
-  check
-    tool_kind_testable
-    "status control is an async composition tool"
-    Descriptor.Async_composition_tool
-    Catalog.status_tool_kind;
-  check
-    tool_kind_testable
-    "cancel control is an async composition tool"
-    Descriptor.Async_composition_tool
-    Catalog.cancel_tool_kind
-;;
-
-(* Composition surface tools are materialized Agent_core tools outside the
-   descriptor registry, so their kind must be observable on their own result
-   payloads and route evidence — not on descriptor evidence. *)
-let test_status_result_payload_carries_tool_kind () =
-  let dir = temp_dir "tool-kind-status" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-       let config = Workspace.default_config dir in
-       let meta = make_meta () in
-       let result =
-         Surface.For_testing.status_result ~config ~meta ~request_id:"no-such-request"
-       in
-       expect_tool_kind_field "async_composition" (Tool_result.data result))
-;;
-
-let test_cancel_result_payload_carries_tool_kind () =
-  let dir = temp_dir "tool-kind-cancel" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-       (* cancel goes through the async run registry, whose lock is an
-          Eio.Mutex — it needs an Eio runtime context. *)
-       Eio_main.run @@ fun _env ->
-       let config = Workspace.default_config dir in
-       let meta = make_meta () in
-       let result =
-         Surface.For_testing.cancel_result ~config ~meta ~request_id:"no-such-request"
-       in
-       expect_tool_kind_field "async_composition" (Tool_result.data result))
-;;
-
 let test_route_evidence_picks_composition_tool_kind () =
   let output_text =
     `Assoc
@@ -254,6 +160,7 @@ let test_route_evidence_picks_composition_tool_kind () =
 ;;
 
 let () =
+  ignore (temp_dir, cleanup_dir, make_meta);
   run
     "keeper_tool_kind"
     [ ( "tool_kind"
@@ -281,22 +188,6 @@ let () =
             "discovery fields carry tool kind"
             `Quick
             test_discovery_fields_carry_tool_kind
-        ; test_case
-            "catalog entries declare tool kind"
-            `Quick
-            test_catalog_entries_declare_tool_kind
-        ; test_case
-            "async controls declare kinds"
-            `Quick
-            test_async_controls_declare_kinds
-        ; test_case
-            "status result payload carries tool kind"
-            `Quick
-            test_status_result_payload_carries_tool_kind
-        ; test_case
-            "cancel result payload carries tool kind"
-            `Quick
-            test_cancel_result_payload_carries_tool_kind
         ; test_case
             "route evidence picks composition tool kind"
             `Quick

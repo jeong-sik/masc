@@ -212,24 +212,13 @@ let task_recovery_result ~tool_name ~start_time (ctx : _ context) args =
 
 let judgment_write_schema = Operator_tool_toml.judgment_write
 
-let composition_resolution_result ~tool_name ~start_time (ctx : _ context) args =
-  let module Command = Operator_composition_resolution_command in
-  match Command.parse_tool_command args with
-  | Error detail -> Tool_result.make_err ~tool_name ~start_time
-      ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail
-  | Ok command ->
-    match Command.execute ~base_path:ctx.config.Workspace.base_path ~actor:ctx.agent_name
-        ~now:(Time_compat.now ()) command with
-    | Error error -> Tool_result.make_err ~tool_name ~start_time
-        ~class_:(Keeper_tool_execution_journal.failure_class error)
-        ~data:(Keeper_tool_execution_journal.error_to_json error)
-        (Keeper_tool_execution_journal.error_to_string error)
-    | Ok (Command.Resolved {retirement_error=Some error;_} as outcome) ->
-      Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
-        ~data:(Command.outcome_to_json outcome)
-        ("resolution committed; marker retirement unconfirmed: " ^ Keeper_tool_execution_journal.error_to_string error)
-    | Ok ((Command.Observed _ | Command.Resolved {retirement_error=None;_}) as outcome) ->
-      Tool_result.make_ok ~tool_name ~start_time ~data:(Command.outcome_to_json outcome) ()
+let composition_resolution_result ~tool_name ~start_time (_ctx : _ context) _args =
+  Tool_result.make_err
+    ~tool_name
+    ~start_time
+    ~class_:Tool_result.Workflow_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    "Composition execution journal has been retired"
 
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   let start = Tool_timing.start () in

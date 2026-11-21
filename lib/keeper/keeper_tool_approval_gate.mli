@@ -24,7 +24,6 @@ type t =
   ; identity_tool_index : Keeper_identity_tool_index.t
       (** Empty at stream creation; agent setup copies the gate with the exact
           admitted offering before dispatch. Retained gates are unaffected. *)
-  ; composition_plan_index : Keeper_tool_composition_plan_index.t
   }
 
 val create :

@@ -347,7 +347,6 @@ val log_call :
   ?skill_reference:Skill_reference.t ->
   ?composition_run_id:string ->
   ?composition_node_id:string ->
-  ?composition_execution:Keeper_tool_composition_catalog.execution_mode ->
   ?composition_tool_kind:Keeper_tool_descriptor.tool_kind ->
   ?parent_tool_use_id:string ->
   ?trace_id:string ->

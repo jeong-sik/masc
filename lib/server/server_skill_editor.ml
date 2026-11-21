@@ -501,18 +501,7 @@ let validate_source ~descriptors ~directory source_text =
       Validation_failed (Keeper_skill_catalog.error_to_string error))
 ;;
 
-(* A fence info string that only normalizes to the composition contract parses
-   as an ordinary code block, so the candidate is an instruction with no
-   composition tool while the author meant a composition. The snapshot path
-   reports that as an advisory diagnostic; the preview says it too, so the
-   demotion is visible before anything is written. *)
-let near_miss_diagnostics skill =
-  List.map
-    (fun info ->
-      Keeper_skill_catalog.error_to_string
-        (Keeper_skill_catalog.Composition_info_near_miss { skill = skill.Keeper_skill_catalog.name; info }))
-    (Keeper_skill_catalog.composition_info_near_misses skill.Keeper_skill_catalog.body)
-;;
+let near_miss_diagnostics _skill = [] ;;
 
 let validate_candidate ~descriptors target reference source_text =
   let* skill = validate_source ~descriptors ~directory:target.entry.directory source_text in
@@ -678,12 +667,9 @@ let preview_new ~expected_kind ~descriptors ~source_id ~package_id source_text =
   in
   let* skill = validate_source ~descriptors ~directory:package_id source_text in
   let* () = match expected_kind, skill.surface with
-    | None, _ | Some Instruction_kind, Keeper_skill_catalog.Instruction
-    | Some Composition_kind, Keeper_skill_catalog.Composition _ -> Ok ()
-    | Some Instruction_kind, Keeper_skill_catalog.Composition _ ->
-      Error (Validation_failed "Instruction selected, but the document declares an executable composition. Escape examples in an outer code fence or select Composition.")
+    | None, _ | Some Instruction_kind, Keeper_skill_catalog.Instruction -> Ok ()
     | Some Composition_kind, Keeper_skill_catalog.Instruction ->
-      Error (Validation_failed "Composition selected, but the document has no executable composition declaration.") in
+      Error (Validation_failed "Composition skills have been retired; use instruction skills instead.") in
   let identity =
     Skill_reference.make_identity
       ~source_id

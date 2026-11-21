@@ -85,7 +85,6 @@ type skill_activity = Masc_tui_keeper_chat_activity_projection.skill_activity =
   ; content_revision : string option
   ; runtime_id : string option
   ; execution_id : string option
-  ; execution : Masc.Keeper_skill_execution_projection.t option
   ; call_failed : bool
   ; state : skill_state
   ; actions : string list

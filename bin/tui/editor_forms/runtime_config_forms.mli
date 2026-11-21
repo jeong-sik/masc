@@ -31,17 +31,6 @@ val handle_model_form_open
 
 val handle_runtime_account_open : Masc_tui_types.state -> unit
 
-val handle_memory_recall_form_open
-  :  Masc_tui_types.state
-  -> mailbox:Masc_tui_transport.Workspace_admission.mailbox
-  -> unit
-
-val submit_memory_recall_form
-  :  Masc_tui_types.state
-  -> mailbox:Masc_tui_transport.Workspace_admission.mailbox
-  -> Masc_tui_memory_recall_form.t
-  -> unit
-
 val handle_typesafeai_exclusion_form_open : Masc_tui_types.state -> unit
 
 val submit_typesafeai_exclusion_form

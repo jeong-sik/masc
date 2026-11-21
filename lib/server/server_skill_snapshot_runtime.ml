@@ -50,30 +50,14 @@ let observation_input (observation : Runtime.config_observation)
   { path = observation.path; source_text = observation.source_text }
 ;;
 
-(* Every catalog publication re-checks recently activated Skill
-   names against the sources the snapshot just scanned. Observation only —
-   detection never raises into the publication path. *)
-let observe_missing_on_disk ~base_path = function
-  | Skill_catalog_snapshot_service.Published snapshot
-  | Unchanged snapshot ->
-    ignore (Server_skill_missing_on_disk.detect_and_record ~base_path ~snapshot)
-  | Workspace_retired -> ()
-;;
-
 let refresh_from_observation ~base_path observation =
-  match
-    Result.map
-      (fun workspace ->
-         Skill_catalog_snapshot_service.refresh
-           ~workspace
-           ~user_home:Config_dir_resolver.initial_env_home
-           ~read_config:(fun () -> observation_input observation))
-      (workspace base_path)
-  with
-  | Ok publication ->
-    observe_missing_on_disk ~base_path publication;
-    Ok publication
-  | Error error -> Error error
+  Result.map
+    (fun workspace ->
+       Skill_catalog_snapshot_service.refresh
+         ~workspace
+         ~user_home:Config_dir_resolver.initial_env_home
+         ~read_config:(fun () -> observation_input observation))
+    (workspace base_path)
 ;;
 
 let apply_commit ~base_path (receipt : Runtime.config_commit_receipt) =
@@ -102,7 +86,6 @@ let apply_commit ~base_path (receipt : Runtime.config_commit_receipt) =
                ; publication
                }
            in
-           observe_missing_on_disk ~base_path publication;
            applied))
     (workspace base_path)
 ;;

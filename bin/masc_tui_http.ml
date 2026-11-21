@@ -74,7 +74,6 @@ let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 let fusion_config_path = "/api/v1/runtime/config/fusion"
-let memory_recall_standing_path = "/api/v1/runtime/config/memory-recall"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
 let msx_press_path = "/api/v1/msx/press"
 let msx_carts_path = "/api/v1/msx/carts"
@@ -1358,13 +1357,6 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
     |> Result.map_error (fun detail -> "tool calls: " ^ detail) in
   Masc.Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:keeper_name json
 
-let read_nested_manifest ~host ~port = function
-  | Masc.Keeper_composition_observation.Stored reference ->
-      (match get_json ~host ~port ~path:("/api/v1/artifacts/" ^ reference.sha256) with
-       | Error detail -> Masc.Keeper_composition_observation.Invalid detail
-       | Ok json -> Masc.Keeper_composition_observation.of_blob_response reference json)
-  | (Absent | Observed _ | Invalid _) as reading -> reading
-
 let fetch_keeper_call ~host ~port ~keeper_name ~execution_id =
   let ( let* ) = Result.bind in
   let* json = get_json ~host ~port
@@ -1396,10 +1388,8 @@ let fetch_keeper_call ~host ~port ~keeper_name ~execution_id =
         let content=Buffer.contents bytes in
         let* () = Masc_tui_response_decode.run ~name:"keeper.original_body.verify_wait"
             (fun () -> Page.verify_body identity page content) in
-        let nested = Masc.Keeper_composition_observation.of_content content
-            |> read_nested_manifest ~host ~port in
         Ok (Masc.Tui_decode.Original_body {source_id=identity.source_id;
-          sha256=identity.sha256;recorded_bytes=identity.recorded_bytes;content;nested}) in
+          sha256=identity.sha256;recorded_bytes=identity.recorded_bytes;content}) in
   let result = read None 0 in
   let kc_original = match result with
     | Ok original -> original | Error detail -> Masc.Tui_decode.Original_failed detail in
@@ -3965,18 +3955,6 @@ let fetch_dashboard_tools ~(host : string) ~(port : int) ?keeper () :
   in
   get_json ~host ~port ~path
 
-(** Fetch one Keeper's skill activations (RFC-0483). *)
-let fetch_keeper_skill_activations ~(host : string) ~(port : int) ~(keeper : string) :
-    (Yojson.Safe.t, string) result =
-  get_json ~host ~port
-    ~path:("/api/v1/keepers/skill-activations?keeper=" ^ percent_encode_query_value keeper)
-
-(** Fetch one Keeper's usage of the skill catalog (RFC-0483). *)
-let fetch_keeper_skill_usage ~(host : string) ~(port : int) ~(keeper : string) :
-    (Yojson.Safe.t, string) result =
-  get_json ~host ~port
-    ~path:("/api/v1/keepers/skill-usage?keeper=" ^ percent_encode_query_value keeper)
-
 (** Fetch /api/v1/gate/connectors. *)
 let fetch_connectors ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
@@ -4112,9 +4090,6 @@ let fetch_fusion_config ~(host : string) ~(port : int) :
 
 (** GET /api/v1/runtime/config/memory-recall -- which Keepers the memory
     recall judgment reaches now, as the server reads its gate. *)
-let fetch_memory_recall_standing ~(host : string) ~(port : int) :
-    (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:memory_recall_standing_path
 
 (** POST /api/v1/keepers/<keeper>/fusion -- start a Fusion run the Keeper
     owns. Answered through [post_json_outcome]: the server's refusal (a 4xx,
@@ -4454,19 +4429,8 @@ let post_skill_editor_create ~host ~port ~composition ~source_id ~package_id ~so
     |> Result.map_error (fun detail -> Skill_write_unconfirmed detail)
 ;;
 
-let post_skill_evidence ?composition_run_id ~host ~port reference =
-  let open Result.Syntax in
-  let body = `Assoc ([ "reference", Skill_reference.to_yojson reference ]
-    @ Option.fold ~none:[] ~some:(fun run_id ->
-      [ "composition_run_id", `String (Masc.Keeper_tool_plan.Composition_run_id.to_string run_id) ]) composition_run_id) in
-  let* json = post_json ~host ~port ~path:"/api/v1/skills/evidence" ~body:(Yojson.Safe.to_string body) in
-  let* evidence = Masc.Tui_decode_skill_evidence.decode_skill_evidence json in
-  let matches = match composition_run_id, evidence.se_composition_selection with
-    | None, Latest_retained -> true
-    | Some expected, Exact_run actual -> Masc.Keeper_tool_plan.Composition_run_id.equal expected actual
-    | None, Exact_run _ | Some _, Latest_retained -> false in
-  if Skill_reference.equal reference evidence.se_reference && matches then Ok json
-  else Error "evidence response disagrees with requested reference or selection"
+let post_skill_evidence ?composition_run_id:_ ~host:_ ~port:_ _reference =
+  Error "Skill composition evidence has been retired"
 ;;
 
 let fetch_async_request_observation ~host ~port =
@@ -4480,13 +4444,8 @@ let fetch_async_request_detail ~host ~port ~(target : Masc.Tui_decode_async_requ
       ~query:["submitted_by",[target.submitted_by];"request_id",[target.request_id]] () |> Uri.to_string in
   let ( let* ) = Result.bind in
   let* json = get_json ~host ~port ~path in
-  let* reading = Masc_tui_response_decode.run ~name:"tools.async_request.decode_wait"
-      (fun () -> Masc.Tui_decode_async_request.decode ~target json) in
-  match reading with
-  | Masc.Tui_decode_async_request.Absent -> Ok reading
-  | Observed snapshot ->
-      let nested=read_nested_manifest ~host ~port snapshot.nested in
-      Ok (Masc.Tui_decode_async_request.Observed {snapshot with nested})
+  Masc_tui_response_decode.run ~name:"tools.async_request.decode_wait"
+    (fun () -> Masc.Tui_decode_async_request.decode ~target json)
 ;;
 
 (** GET /api/v1/prompts — every prompt the registry serves, with the file

@@ -54,17 +54,11 @@ let valid_skill_availability
   if Keeper_skill_catalog.exact_is_executable skill_projection valid.reference
   then Active
   else
-    match
-      Keeper_skill_catalog.withheld_composition skill_projection valid.reference
-    with
-    | Some withheld ->
-      Node_tools_outside_surface { tools = withheld.outside_node_tools }
-    | None ->
-      (match skill_names with
-       | Some names
-         when not (List.exists (String.equal valid.reference.identity.name) names) ->
-         Outside_skill_surface
-       | None | Some _ -> Not_model_invocable)
+    match skill_names with
+    | Some names
+      when not (List.exists (String.equal valid.reference.identity.name) names) ->
+      Outside_skill_surface
+    | None | Some _ -> Not_model_invocable
 ;;
 
 let skill_capability ~skill_names ~skill_projection = function
@@ -251,8 +245,6 @@ let create_with_descriptors_policy
       ~names:effective_skill_names
       ~global:effective_global_catalog
       ~task:effective_task_skills
-    |> Keeper_skill_catalog.withhold_compositions_outside
-         ~admits:(descriptor_admitted descriptors)
   in
   let tool_capabilities =
     tool_descriptors
@@ -412,11 +404,6 @@ let capability_availability_to_string = function
 
 let skill_kind_to_fields = function
   | Keeper_skill_inventory.Instruction -> [ "kind", `String "instruction" ]
-  | Keeper_skill_inventory.Composition entry ->
-    [ "kind", `String "composition"
-    ; ( "tool_name"
-      , `String (Keeper_tool_composition_catalog.tool_name entry) )
-    ]
 ;;
 
 let skill_exposure_to_string = function
@@ -569,9 +556,7 @@ let candidate_invocation_name = function
       ; _
       } ->
     (match valid.kind with
-     | Keeper_skill_inventory.Instruction -> Some "keeper_skill"
-     | Keeper_skill_inventory.Composition entry ->
-       Some (Keeper_tool_composition_catalog.tool_name entry))
+     | Keeper_skill_inventory.Instruction -> Some "keeper_skill")
   | Skill
       { identity = (Exact_skill (Keeper_skill_inventory.Invalid _)
                    | Missing_configured_skill_name _)
@@ -712,8 +697,7 @@ let digest_candidate = function
          ; availability = capability.availability
          ; kind =
              (match valid.kind with
-              | Keeper_skill_inventory.Instruction -> Digest_instruction
-              | Composition _ -> Digest_composition)
+              | Keeper_skill_inventory.Instruction -> Digest_instruction)
          ; catalog_status = Some valid.catalog_status
          ; error_kind = None
          }

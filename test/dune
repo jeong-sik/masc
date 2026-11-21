@@ -184,6 +184,7 @@
 (include stanzas/test_librarian_working_state_evaluation.inc)
 (include stanzas/test_librarian_production_evaluation.inc)
 (include stanzas/test_librarian_level.inc)
+(include stanzas/test_librarian_cycle_one_round.inc)
 (include stanzas/test_keeper_memory_writer_health.inc)
 (include stanzas/test_tui_memory_writer.inc)
 (include stanzas/test_local_runtime_systemone.inc)

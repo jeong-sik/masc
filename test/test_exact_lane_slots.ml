@@ -70,57 +70,6 @@ let test_the_registry_lists_http_slots_then_cli_slots () =
        slots)
 ;;
 
-let test_the_failure_evidence_reads_each_pass_as_the_receipt_did () =
-  let evidence = Slots.failure_evidence in
-  let held = Walk.Held { slot = unknown_runtime "cli.held"; until = 0. } in
-  let held_one_shot =
-    Walk.Failed
-      { slot = unknown_runtime "cli.held"
-      ; failure =
-          Slots.Cli_failed
-            { runtime_id = "cli.held"
-            ; failure = Keeper_lane_cli_oneshot.Held { runtime_id = "cli.held"; until = 0. }
-            }
-      }
-  in
-  let http =
-    Slots.Http_slot
-      { slot_id = "http.a"; admitted_target = admitted_target (); runtime_observation = None }
-  in
-  let held_http = Walk.Held { slot = http; until = 0. } in
-  let unfit =
-    Walk.Failed
-      { slot = http; failure = Slots.Http_unfit { slot_id = "http.a"; reason = "blank id" } }
-  in
-  let full = Walk.Seats_full (unknown_runtime "cli.full") in
-  let rejected =
-    Walk.Failed
-      { slot = unknown_runtime "cli.rejected"
-      ; failure = Slots.Cli_rejected { runtime_id = "cli.rejected"; rejection = "not a verdict" }
-      }
-  in
-  check bool "a walk that passed nothing says nothing" true
-    (evidence [] = Keeper_exact_walk_failure.empty);
-  check bool "a held slot reads as its account's rest refusal without the call" true
-    (evidence [ held ] = Keeper_exact_walk_failure.held);
-  check bool "a held slot reads as the one-shot's held refusal" true
-    (evidence [ held ] = evidence [ held_one_shot ]);
-  check bool "a held HTTP slot reads as a held CLI slot" true
-    (evidence [ held_http ] = evidence [ held ]);
-  check bool "an HTTP slot that could not become a candidate says nothing" true
-    (evidence [ unfit ] = Keeper_exact_walk_failure.empty);
-  check bool "a held slot does not say the input is too large" false
-    (Keeper_exact_walk_failure.refuses_input_capacity (evidence [ held ]));
-  check bool "a full slot says nothing" true (evidence [ full ] = Keeper_exact_walk_failure.empty);
-  check bool "a rejected answer is invalid output" true
-    (evidence [ rejected ]).Keeper_exact_walk_failure.invalid_output;
-  check bool "the evidence of a walk joins its passes" true
-    (evidence [ held; full; rejected ]
-     = Keeper_exact_walk_failure.combine
-         Keeper_exact_walk_failure.held
-         Keeper_exact_walk_failure.invalid_output)
-;;
-
 let failure_names passed =
   List.map
     (function
@@ -277,10 +226,6 @@ let () =
             "the registry lists http slots then cli slots"
             `Quick
             test_the_registry_lists_http_slots_then_cli_slots
-        ; test_case
-            "the failure evidence reads each pass as the receipt did"
-            `Quick
-            test_the_failure_evidence_reads_each_pass_as_the_receipt_did
         ; test_case
             "a cli slot with no runtime fails without running a client"
             `Quick

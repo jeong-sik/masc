@@ -478,6 +478,8 @@ Lambda 가 나눈 두 묶음을 어떤 순서로 다시 부르는지는 확인�
 - L3 과 L4 는 같은 파일을 고치니 순서대로 올린다.
 - L3 은 둘로 올렸다. L3a 는 결정 모듈이다(`lib/workspace_memory/workspace_memory_narrowing.ml`). 저장소도 lane 도 읽지 않고, 함수마다 모델의 action 이름을 적는다. L3b 는 큐레이터가 그 모듈로 분류 단계를 돌게 한다.
 - L3b 의 장면은 §8.2 의 분류 장면 가운데 여덟이다. body 기한 장면은 없다(§11).
+- L4 의 결정 모듈은 `lib/workspace_memory/workspace_memory_briefing_narrowing.ml` 이다. briefing 은 pass 의 항목을 차례로 읽는다. 그래서 기억은 기다리는 요청 하나와 그 요청을 거절한 slot 이다. 세대와 깨운 까닭은 분류의 결정 모듈 것을 같이 쓴다.
+- L4 의 장면은 셋이다. §8.2 의 briefing 장면, 출력 한도에서 서는 pass, 거절하지 않은 slot 을 기다리는 항목이다.
 - 로컬 빌드는 하지 않는다. PR 의 type-check 와, 가지에 dispatch 한 대상 시험으로 확인한다.
 
 **L1 의 주석 두 줄.** 82행은 저장 태그(`provider_cause`)가 `Exact_output.provider_refusal` 과 다른 까닭을, 177행은 창에서 멈춘 빈 답에 저장 생성자를 더하지 않는 까닭을 「이 algebra 는 컷에서 없어진다」로 든다. 그 까닭은 이제 틀렸다. 바꿀 말의 후보는 둘이다.
@@ -523,3 +525,12 @@ D3~D6 은 2026-11-21 에 운영자에게 권고를 알렸다. 다른 지시가 �
 - L3 에서 정했다: masc 자기 실패로 pass 가 끊기면 그 pass 의 할 일 목록은 버린다. 저장소·원장·log, 요청 만들기, 걷기의 stop, 답 기록이 그 실패다. 메모리가 이미 적은 것은 남고, 좁힌 절반 가운데 아직 묻지 않은 것은 다음 pass 에서 새 fact 로 다시 묶인다. 모델에는 이 실패가 없다.
 - L3 에서 확인하지 못했다: §8.2 의 body 기한 장면. 가짜 provider 의 `Reply_with` 는 다 쓴 본문만 내서, 요청마다 본문을 멈출 수 없다. 표가 기한을 `Overdue` 로 읽는 것은 L1 의 표 시험이, `Overdue` 에서 좁히는 것은 L3a 의 결정 시험이 본다.
 - L3 에서 하지 않았다: 말하지 않은 slot 의 마지막 결과(§4.2)는 메모리에 아직 없다. 판정에 쓰지 않으니 L5 의 projection 과 같이 넣는다.
+- L4 에서 정했다: briefing 에서 출력 한도는 표의 `Refused (Sized Output_over_reserve)` 하나다. `Window_reached` 는 입력과 출력이 창을 채운 것이다. 입력을 줄이면 출력 자리가 생기니 좁힌다.
+- L4 에서 정했다: 출력 한도도 그 slot 의 거절로 센다. 그 slot 에는 같은 요청을 다시 묻지 않는다. 모든 slot 이 거절했으면 요청이 선다. 그래서 §4.5 의 「바닥」과 「출력 한도」가 한 규칙이 된다. 두 항목 이상인 요청이 서는 것은 모든 slot 이 출력 한도였을 때뿐이다.
+- L4 에서 정했다: 기다리는 요청은 그 요청이 고른 항목으로 적는다. 항목은 id 와 글의 digest 다. 다음 pass 의 묶음이 그 항목들로 시작하면 같은 요청으로 본다. 앞 요약(`previous_summary`)이 달라도 같다(§4.3 「같은 요청은 같은 fact 들을 묻는 요청」).
+- L4 에서 정했다: briefing 이 읽을 pass 가 없으면(`Unchanged`, `Cleanup`) 기다리는 요청을 놓는다. 빠졌다가 같은 id 와 글로 돌아온 항목도 다시 묻는다(§4.3 「fact 변경」).
+- L4 에서 정했다: 좁힌 요청이 말 없음만 만나면 그 요청이 기다린다. 60초 깨우기는 그 요청을 그대로 묻는다. 남은 항목 전부로 되돌려 합치지 않는다(§4.1 「좁힌 자리를 기억하는 규칙」).
+- L4 에서 정했다: briefing 은 좁힌 크기를 기억하지 않는다. 한 묶음에 답이 오면 다음 묶음은 남은 항목 전부로 다시 시작한다. 지금 코드와 같다.
+- L4 에서 정했다: briefing pass 가 끝난 모양은 `Briefing_moved`, `Briefing_idle`, `Briefing_stands`, `Briefing_waits`, `Briefing_failed` 다. 60초 깨우기는 `Briefing_waits` 와 `Briefing_failed` 뒤에만 깨운다. 선 요청은 `request` 나 lane 세대 변경, 항목이 바뀐 pass 에서 다시 묻는다.
+- L4 에서 정했다: 큐레이터의 거절 타입에 `Briefing_refused of string` 을 더했다. 두 단계가 표의 `bodies` 를 같이 쓴다.
+- L4 에서 지웠다: `Exact_lane_slots.failure_evidence` 와 그 시험, 큐레이터의 `lane_call_failure`·`lane_failure`·`execute_exact_prompt`. 큐레이터는 이제 `Keeper_exact_walk_failure` 를 읽지 않는다.

@@ -21,17 +21,20 @@ val retry_pending_observations : base_path:string -> unit
 (** The maintenance tick. Wake an existing owner, as a tick, only when its
     prior pass left something for the tick: a classification that waits for a
     slot that said nothing ([Lane_silent]), a registry replacement in
-    progress, a failure of masc's own, or a briefing that failed. A tick pass
-    asks the waiting facts again with the new ones. Shutdown owners stay
-    stopped. *)
+    progress, a failure of masc's own, or a briefing that waits for a slot
+    that has not refused its request or that failed. A tick pass asks the
+    waiting facts again with the new ones, and the briefing's request of the
+    slots that have not refused it. A briefing request every slot refused
+    does not wait for the tick. Shutdown owners stay stopped. *)
 
 type refresh = Queued | No_owner | Unavailable of string
 
 val request : base_path:string -> refresh
 (** Resolve the physical workspace off-domain and queue one drain cycle on its
     existing owner without running model or storage work in the caller. The
-    classification memory starts over in a new generation: the facts it set
-    aside are asked again, and a pass in flight writes nothing more. *)
+    classification and briefing memories start over in a new generation: the
+    facts set aside and the briefing request every slot refused are asked
+    again, and a pass in flight writes nothing more. *)
 
 (** Why a classification pass asked no slot. *)
 type lane_standing =

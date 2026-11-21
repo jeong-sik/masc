@@ -1,5 +1,32 @@
 ## [Unreleased]
 
+## [0.78.0] - 2026-11-21
+
+### 요약
+
+- 이 창은 `v0.77.1`(태그 `2bbe20cd`) 뒤 main 에 들어간 일곱 PR 을 `0.78.0`(minor)으로 내보냅니다. 사용자가 보는 동작이 바뀌는 항목은 TUI 두 건(#54221·#54243)이고, 나머지는 규약·RFC 문서 세 건(#54284·#54204·#54219), 온보딩 시험 단언 한 건(#54277), 전량 회귀 샤딩 스크립트 한 건(#54281)입니다.
+- 이 릴리스는 main `1f8f8432eaa99809268c36b8b53cc4694afb4844` 위에 버전 올림 커밋 하나만 얹었습니다. changelog 조각(`changelog.d/`)은 접지 않았습니다.
+- `#54281` 의 샤딩은 스크립트에만 들어갔고 `Test` 워크플로는 아직 `SUITE_SHARD_COUNT` 를 넘기지 않습니다(기본값 1 이면 종전과 같은 한 번의 `@runtest` 빌드). 이 릴리스 자체로 CI 디스크 피크가 낮아지지는 않습니다.
+
+### Changed
+
+- Keeper 로그·Connectors·저장한 준비 기록·composer 행 화면이 이미 가진 값에 대한 읽기가 도는 동안 "refreshing"/"rechecking" 문장을 더는 그리지 않습니다. 로컬 읽기(Keeper 명부, Work task, chat live context)는 제목 줄 끝의 reading slot 에서 세고, Keepers·Work 머리는 느린 로컬 읽기에 단계 행을 그리지 않습니다. slot 은 열린 화면에서 시작한 읽기만 그리므로, 다른 화면에서 시작한 느린 로컬 읽기는 Keepers·Work 화면이 가진 목록을 보여 주는 동안 어디에도 그려지지 않습니다 (#54221).
+- RFC `a-person-reads-their-own-and-the-shared` 가 권고 대신 결정 일곱을 적습니다: scope 를 닫힌 합타입으로 둔 하나의 라우트 표, Admin 에게 연 host 라우트(원문 `runtime.toml` 은 닫아 둠), 사람의 Keeper 내용은 주인에게만 보이고 그 경계를 초대받은 사람에게 적기, 키가 되지 않고 그 사람 자신의 쓰기로만 바뀌는 파싱된 표시 이름, Board 작성자를 (사람 id, Keeper id) 로 적기, 한 주인 안의 분리는 사용자 결정으로 남김, 큐레이션과 Librarian 은 주인 계정에서만. 첫 행은 #54193 에 들어간 큐레이터 guard 와 남은 일(다계정 엔진이 Librarian 을 묻지 않는 것, 주인의 기억 폴더)을 나눕니다 (#54204).
+- RFC #53746 §3.4(L5)가 턴 컨텍스트가 오늘 사는 방식(턴 첫 요청 끝에 한 번 실리고 그 뒤 요청 입력에는 없음)과 L5 의 구현 모양(바깥 글 메시지가 `Outside_context` 기원을 지니고 호출자 메시지 바로 앞에 서며 이력에서 잘리지 않고, 각 요청의 projection 이 창이 이미 지닌 절·줄을 덜어 같은 창이 같은 바이트를 보냄)을 적고, 대가 `w·ΔO + c·O·(1+m)` 를 lane 별 측정 요청 수와 함께 둡니다. 새 §3.6 은 recall 을 창 머리 층이 아니라 사실 한 줄씩 L5 에 넣는 운영자 결정과 그 근거 측정을 적고, §8 은 L5 이전 첫 차이 기준선을 더합니다 (#54219).
+
+### Fixed
+
+- TUI About 화면이 Keeper 수를 명부 읽기에 실패하면 ✕, 읽기 전이면 ◌ 로 그립니다("읽기 불가"/"불러오기 전" 대신) (#54243).
+
+### Documentation
+
+- `docs/constitution.xml` 의 `<execution_protocol>` 에 `<pull_request_events>` 를 더해, 내부 규약 제안 #39 채택 문구 가운데 외부 세션·자동화도 따라야 하는 실행 규칙만 옮겼습니다: PR 에 이벤트(ready 전환·리뷰 제출·push·base 변경)를 내기 전에 scope 멤버를 확정하고 멤버별 `open`·`draft=false`·현 head 승인·변경 요청 없음·필수 체크를 읽어야 하며, scope 가 이미 준비됐으면 그 이벤트 하나가 scope 전체 병합을 제출합니다. 제안·검토·채택 절차 문장은 Keeper 헌법에만 둡니다 (#54284).
+
+### Internal
+
+- 전량 회귀 wrapper(`scripts/ci-run-test-suite.sh`)가 bare `@runtest` 가 돌릴 suite 를 `SUITE_SHARD_COUNT` 조각으로 나누고 조각 사이에 `_build/default/test` 를 지울 수 있습니다. 조각마다 자기 로그와 dune trace 를 쓰고, 업로드하는 `test-suite.log` 는 조각 순서로 다시 만들며 trace 요약은 끝에 한 번 합니다. 기본값 1 이면 종전과 같습니다. 워크플로 배선은 아직 없습니다 (#54281).
+- CI 시험만: `test_onboarding_journey` 가 `catalog.models` 를 인덱싱하기 전에 `catalog_error is None` 을 단언해, 실패한 Antigravity catalog 읽기가 맨 `IndexError` 대신 자기 까닭을 보고합니다. 제품 동작 변화는 없습니다 (#54277).
+
 ## [0.77.1] - 2026-11-21
 
 ### 요약

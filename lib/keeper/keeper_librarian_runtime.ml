@@ -2299,11 +2299,6 @@ let run_pass
                   "working context commit failed independently of memory: %s" (Printexc.to_string exn)))
              in
              let publish_continuity prepared working_state =
-                match served_slot with
-                | None ->
-                  Continuity_not_committed
-                    "a no-change judgment cannot generate a continuity snapshot"
-                | Some served_slot ->
                 continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
                 commit_continuity
                   ~commit:(fun () ->
@@ -2434,23 +2429,20 @@ let run_pass
              let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in
              match memory_target with
              | Infer_memory_state working_state ->
-               (match served_slot with
-                | None -> Error (Domain_output_invalid "Memory inference has no served slot")
-                | Some served_by ->
-                  let step =
-                    { run_id
-                    ; source_input = prompt_input
-                    ; prompt_variables
-                    ; rendered_prompt = prompt
-                    ; absorb_gate
-                    ; new_claims = Keeper_librarian_absorb_gate.without_copies
-                        absorb_gate selection.new_claims
-                    ; dropped = selection.dropped
-                    ; absorbed = applied_absorbed
-                    ; revisions = selection.revisions
-                    ; working_state
-                    } in
-                  Ok (`Memory_inferred (step, served_by, exact_output, selected_slot)))
+               let step =
+                 { run_id
+                 ; source_input = prompt_input
+                 ; prompt_variables
+                 ; rendered_prompt = prompt
+                 ; absorb_gate
+                 ; new_claims = Keeper_librarian_absorb_gate.without_copies
+                     absorb_gate selection.new_claims
+                 ; dropped = selection.dropped
+                 ; absorbed = applied_absorbed
+                 ; revisions = selection.revisions
+                 ; working_state
+                 } in
+               Ok (`Memory_inferred (step, served_slot, exact_output, selected_slot))
              | Commit_memory commit ->
              let+ disposition =
                Keeper_memory_os_current.apply_disposition
@@ -2510,15 +2502,15 @@ let run_pass
               | Some (Infer_state _) | None -> ());
              Eio.Fiber.check ()
            | Ok (`Volatile_state (working_state, exact_output, served_slot)) ->
-             complete ?selected_slot:(Option.map served_slot_id served_slot)
+             complete ~selected_slot:(served_slot_id served_slot)
                ?usage:!observed_usage Exact_lane_run_registry.Succeeded
                (`Assoc ["memory_write", `String "skipped_context_only";
                         "continuity_write", `Assoc ["status", `String "not_attempted"];
                         "volatile_inference", `Bool true;
                         "exact_output", exact_output]);
-             (match inference, served_slot with
-              | Some (Infer_state {observe;_}), Some served_by -> observe ~served_by working_state
-              | Some (Infer_state _), None | Some (Infer_memory _), _ | None, _ -> ());
+             (match inference with
+              | Some (Infer_state {observe;_}) -> observe ~served_by:served_slot working_state
+              | Some (Infer_memory _) | None -> ());
              Eio.Fiber.check ()
            | Ok (`Context_organized (exact_output, selected_slot)) ->
              complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded

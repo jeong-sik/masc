@@ -609,9 +609,9 @@ let test_history_replaces_the_editor_without_replacing_its_work () =
     let original_configuration = state.standalone_lanes in
     let original_drafts = state.runtime_config_edits in
     let original_generation = state.lane_runs_generation in
-    begin_lane_run_list state Lane_run_identity.Workspace_curator;
+    begin_lane_run_list state Lane_run_identity.Candle_appraiser;
     Alcotest.(check bool) "the requested original observation owns history" true
-      (state.lanes_mode = Lanes_run_list Lane_run_identity.Workspace_curator);
+      (state.lanes_mode = Lanes_run_list Lane_run_identity.Candle_appraiser);
     Alcotest.(check bool) "no hidden editor or picker can intercept history keys" true
       (Option.is_none state.slot_editor && Option.is_none state.runtime_lane_pick);
     (match plan_slot_edit state Drop_slot with

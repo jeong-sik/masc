@@ -102,14 +102,6 @@ let handle_last_prompt_get state req reqd name =
        reqd)
 ;;
 
-let handle_provider_input_continuity_get state req reqd name =
-  handle_provider_input_get state req reqd
-    ~name
-    ~surface:("/api/v1/keepers/:name" ^ Types.keeper_suffix_provider_input_continuity)
-    ~read:(fun ~config ~keeper ~turn_ref ->
-      Ok (fun () -> Keeper_continuity_evidence.read ~config ~keeper ~turn_ref))
-;;
-
 let handle_provider_input_part_get state req reqd name =
   handle_provider_input_get
     state

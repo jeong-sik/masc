@@ -6319,7 +6319,6 @@ let decode_librarian_run_page json =
          | Lane_run_identity.Librarian -> Some run_id
          | Lane_run_identity.Hitl_auto_judge
          | Lane_run_identity.Board_attention
-         | Lane_run_identity.Workspace_curator
          | Lane_run_identity.Candle_appraiser
          | Lane_run_identity.Verifier
          | Lane_run_identity.Librarian_memory
@@ -6566,7 +6565,6 @@ let decode_lane_run_gate_judgment ~(lane : Lane_run_identity.t) ~status ~output 
   match lane with
   | Lane_run_identity.Librarian
   | Lane_run_identity.Board_attention
-  | Lane_run_identity.Workspace_curator
   | Lane_run_identity.Candle_appraiser
   | Lane_run_identity.Verifier
   | Lane_run_identity.Librarian_memory
@@ -7098,7 +7096,6 @@ let decode_lane_run_detail json =
       | Lane_run_identity.Board_attention -> true
       | Lane_run_identity.Librarian
       | Lane_run_identity.Hitl_auto_judge
-      | Lane_run_identity.Workspace_curator
       | Lane_run_identity.Candle_appraiser
       | Lane_run_identity.Verifier
       | Lane_run_identity.Librarian_memory
@@ -7139,7 +7136,7 @@ let decode_lane_run_detail json =
   let* lrd_librarian_preflight = match summary.lrs_lane, lrd_output with
     | Lane_run_identity.Librarian, Some output -> decode_librarian_preflight output
     | (Lane_run_identity.Librarian, _) | (Lane_run_identity.Hitl_auto_judge, _)
-    | (Lane_run_identity.Board_attention, _) | (Lane_run_identity.Workspace_curator, _)
+    | (Lane_run_identity.Board_attention, _)
     | (Lane_run_identity.Verifier, _)
     | (Lane_run_identity.Candle_appraiser, _)
     | (Lane_run_identity.Librarian_memory, _)
@@ -7250,7 +7247,6 @@ let decode_lane_run_detail json =
        | Some Exact_lane_run_registry.Available | None -> decode_judgment ())
     | Lane_run_identity.Librarian
     | Lane_run_identity.Board_attention
-    | Lane_run_identity.Workspace_curator
     | Lane_run_identity.Candle_appraiser
     | Lane_run_identity.Verifier
     | Lane_run_identity.Librarian_memory

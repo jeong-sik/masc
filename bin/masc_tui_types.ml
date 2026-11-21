@@ -4031,24 +4031,7 @@ type lanes_mode =
       (** [Some id] reads one Lane; [None] reads inventory-wide diagnostics. *)
 
 module Measurement = struct
-  module R = Masc.Librarian_continuity_report
-
-  type snapshot = { report : R.t; context_hashes : (string * string) list }
-  type t = Snapshot of snapshot | Temporal of Masc.Tui_decode_temporal_continuity.t
-
-  type counts = { scored : int; failed : int; incomplete : int }
-
-  let counts (report : R.t) =
-    List.fold_left
-      (fun counts (sample : R.sample) ->
-        match sample.progress with
-        | R.Scored _ -> { counts with scored = counts.scored + 1 }
-        | R.Question_failed _ | R.Answer_failed _ | R.Judge_failed _ ->
-          { counts with failed = counts.failed + 1 }
-        | R.Not_started | R.Question_ready _ | R.Answer_ready _ ->
-          { counts with incomplete = counts.incomplete + 1 })
-      { scored = 0; failed = 0; incomplete = 0 }
-      report.samples
+  type t = Masc.Tui_decode_temporal_continuity.t
 
   let decode_artifact ~sha256 json =
     match Tool_blob_store.validate_sha256 sha256 with
@@ -4071,19 +4054,7 @@ module Measurement = struct
                     ^ ", expected " ^ sha256)
            else
              (match Yojson.Safe.from_string content with
-              | json ->
-                let schema = match json with
-                  | `Assoc fields -> List.assoc_opt "schema" fields | _ -> None in
-                if schema = Some (`String Masc.Tui_decode_temporal_continuity.schema) then
-                  Result.map (fun report -> Temporal report)
-                    (Masc.Tui_decode_temporal_continuity.of_yojson json)
-                else Result.map (fun (report : R.t) ->
-                  let context_hashes = List.map (fun (sample : R.sample) ->
-                    sample.case.id,
-                    Agent_core_sha256.(to_hex (digest_string
-                      (Yojson.Safe.to_string (R.answer_context_to_yojson sample.case.context)))))
-                    report.samples in
-                  Snapshot { report; context_hashes }) (R.of_yojson json)
+              | json -> Masc.Tui_decode_temporal_continuity.of_yojson json
               | exception Yojson.Json_error detail ->
                 Error ("Measurement artifact is not JSON: " ^ detail))
        | _ -> Error "Measurement artifact response requires sha256, bytes and content fields")

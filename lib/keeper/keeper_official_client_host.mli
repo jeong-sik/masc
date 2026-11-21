@@ -550,19 +550,6 @@ val warn_if_sent_on_unknown_start : keeper_name:string -> carried_start_front ->
     the front it sent, so a Claude Code resume, which sends no range, says
     nothing; composing a range logs nothing. *)
 
-val continuity_observation_input
-  :  trace_id:string
-  -> continuity:Keeper_turn_driver_try_provider.continuity option
-  -> carried_start_front
-  -> Keeper_continuity_observation.input
-(** What the Memory screen records for a request this lane composed
-    ({!Keeper_continuity_observation}), in the words the Agent Core lane
-    records: [Absorbed] when the writer's read end named the front, with or
-    without its working state, [Without_snapshot] when the turn has no read
-    end, and [Not_applied] when the turn read none (no trace, or a recovery
-    view) or its read end sat behind the seed or the lane's own cut and so
-    was not applied to this request. *)
-
 val carried_start_range
   :  keeper_name:string
   -> runtime_id:string

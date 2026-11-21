@@ -858,7 +858,7 @@ let test_a_busy_lane_cannot_evict_a_quiet_lanes_history () =
 
 (* The lanes this registry records, written out apart from the registry.
    Verifier reviews have their own stores. *)
-let recorded_lanes = [ R.Librarian; R.Hitl_auto_judge; R.Board_attention; R.Workspace_curator; R.Candle_appraiser ]
+let recorded_lanes = [ R.Librarian; R.Hitl_auto_judge; R.Board_attention; R.Candle_appraiser ]
 
 let test_exact_history_is_not_pruned_across_lanes () =
   let path = fresh_log_path "exact-lane-runs-all-" in

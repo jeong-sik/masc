@@ -18,13 +18,6 @@ Use the configured runtime's exact ID and an image promoted in Docker's own
 catalog. This first runner supports Docker; it does not provision Apple guests.
 The server may be an isolated campaign server, using the ports in
 [the benchmark runbook](../BENCHMARK-RUNBOOK.md#isolated-server-ports).
-Prepare the optional [Keeper Librarian Add-on](keeper-memory-execution.md) in
-that workspace before a retirement scenario. A fresh server does not inherit
-the installed workspace's declaration or state. For an `await_summary` scenario,
-the runner records health's configuration observation and refuses a known
-`addon_unattached` before creating a Keeper. It does not require `serving` as a
-global turn gate or treat an earlier provider failure as a reason to suppress
-a new ordinary attempt. Readiness never proves a successful provider call.
 
 ```bash
 python3 scripts/harness/workload/keeper_temporal_continuity.py run \
@@ -75,60 +68,6 @@ python3 scripts/harness/workload/keeper_temporal_continuity.py capture \
 `--operation-id` may be repeated. This mode initializes an MCP session, reads
 operation status and reads owner API exports. It does not create a Keeper or
 send a new chat message.
-
-## Observe continuation after the raw prefix leaves prepared input
-
-Use `scripts/fixtures/keeper-temporal-continuity/retired-history.json` against
-the exact candidate binary in a separate workspace. It retains the twelve
-messages, adds an `await_summary` observation after the latest correction and
-own-context read, then restarts the Keeper lane before a tool-free late probe.
-It does not delete a checkpoint, alter the input cap, fabricate a summary or
-force a Librarian invocation. A wait expiring leaves the report incomplete;
-the probe is not submitted. This is an experiment's observation step, not a
-runtime readiness gate or a compulsory per-turn trigger.
-
-The owner export `/provider-input/continuity?turn_ref=...` rejoins the exact
-canonical manifest with all retained `masc.continuity-request.v3` rows for that
-turn and its typed completed atom boundary. Each serialization carries its
-Keeper/turn identity; one with no paired projection has an explicitly absent
-range. A current saved snapshot is exposed separately for readiness only.
-Cached fleet health and nearby timestamps cannot certify the probe's input.
-
-`prefix_omission.status=observed` requires the target's actual exclusive atom
-end in the same history generation, W covering that end without unread holes,
-every attributed prepared range beginning at or beyond it, no custom projection
-change, exact body-hash/byte-count multiset equality with every serialized
-request in the turn record, and an attributed last canonical request containing
-structurally tagged W. A larger covering boundary alone is insufficient. The
-report distinguishes `not_observed` from unavailable evidence and never uses
-that result as an overall semantic pass.
-
-The durable original remains available as evidence. Memory, pinned context,
-Recall and any actual tool re-read may still contribute information; this
-experiment observes omission from organic request history, not W-only causal
-attribution or remote provider receipt. The scenario adds propositions for the
-latest correction in W and the late answer, assessed separately.
-
-```mermaid
-flowchart TD
-  A[Target turn completed: owner atom boundary] --> B[Read saved W readiness]
-  B --> C{Same generation, covers target, no unread holes?}
-  C -->|Not yet| B
-  B -->|Observer wait expires| X[Incomplete capture; no probe submitted]
-  C -->|Yes| D[Restart only the dedicated Keeper lane]
-  D --> E[Submit late probe without restating corrections]
-  E --> F[Record every serialization: turn, projection, body identity]
-  E --> G[Observe terminal operation and original reply]
-  F --> H[Join all SDK request bodies and last canonical input]
-  G --> H
-  H --> I[Omission observed, not observed, or unavailable]
-  G --> J[Separate scoped semantic assessment]
-  I --> K[Immutable TUI view and authoritative report digest]
-  J --> K
-```
-
-The wait observes an ordinary Librarian outcome. It does not create a runtime
-hook, choose a summary, or run Librarian on every turn.
 
 ## Measure meaning separately
 
@@ -184,10 +123,7 @@ missing evidence is explicit; `continuity_pass` remains null.
 | Transcript | Exact `/turn-transcript?turn_ref=...`, `found=true` | The owner retained that turn's transcript |
 
 Canonical provider-input snapshots contain the last prepared request of a turn.
-The additional attributed range log covers serializations across tool loops
-and failover only when it completely joins the exact turn's request evidence;
-missing observations remain unavailable. Typed response range evidence does not contain a
-wire body hash. The report therefore leaves body-level input/response binding
+Typed response range evidence does not contain a wire body hash. The report therefore leaves body-level input/response binding
 `not_established`; it does not promote preparation to remote receipt.
 
 A correct late answer may still use raw history or Recall. W's presence and a
@@ -200,8 +136,7 @@ additional experiments.
 
 Each save also writes a compact `view.json`, identifying the authoritative
 `report.json` by path and SHA-256. It carries the binary and harness identity,
-timeline, W counts, readiness observations, omission ranges, replies and raw
-semantic probabilities with the actual judge model. Missing W remains unknown;
+timeline, W counts, Memory readiness, replies and raw semantic probabilities with the actual judge model. Missing W remains unknown;
 recorded capture, successful operation and semantic judgment are distinct.
 
 Publish that selected view through the existing Admin artifact API and open
@@ -209,13 +144,11 @@ Publish that selected view through the existing Admin artifact API and open
 using an authenticated HTTP client, POST the raw UTF-8 `view.json` bytes to
 `/api/v1/artifacts`; use the returned content SHA rather than the full report's
 SHA. The reader verifies the envelope's bytes and digest, then decodes the
-temporal view schema. The older synthetic measurement schema still uses the
-same command. Selecting another artifact or leaving the view rejects late
+temporal view schema. Selecting another artifact or leaving the view rejects late
 responses through the existing ownership/generation checks.
 
-The left pane identifies source and limits; the right pane shows each message,
-lane restart, summary-readiness wait, and probe's target/W/request cuts. A
-readiness observation is labelled separately from actual request omission.
+The left pane identifies source and limits; the right pane shows each message
+and lane restart with its turn, operation, W, original reply and judgments.
 `report.md` remains a readable file view. None of these views become scheduling
 or history-retirement authority. The blob is a selected immutable copy; retain
 the original private report and raw directory independently.
@@ -236,9 +169,7 @@ select private-data-free evidence intentionally before publication.
 
 [Letta's context architecture](https://www.letta.com/constitution/#context-architecture)
 separates the active window from persisted, retrievable message history and
-describes recursive summaries replacing evicted messages. This experiment
-similarly retains durable originals while observing what leaves prepared input.
-That design correspondence is an inference, not a cross-product benchmark.
+describes recursive summaries replacing evicted messages.
 
 [LangGraph checkpointers](https://docs.langchain.com/oss/python/langgraph/checkpointers)
 identify historical graph states by thread/checkpoint and distinguish inspecting

@@ -28,7 +28,6 @@ type keeper_route =
   | Operator_note
   | Next_request
   | Last_prompt
-  | Provider_input_continuity
   | Provider_input_part
   | Provider_input
   | Cache_outcome

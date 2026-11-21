@@ -2078,18 +2078,6 @@ let test_preflight_binds_a_link_written_between_its_reads () =
     check (list (pair string (list string))) "the link is bound to the record read after it" []
       (refused report))
 
-(* The startup sweep over the declaration, as a package that needs an
-   original: the sweep lists only such declarations. *)
-module Sweep = Server_unowned_exact_sweep
-let sweep store =
-  let declaration : Masc.Lane_addon_config.declaration =
-    { id = declaration_id; enabled = true; run_id = "sweep"
-    ; package_source = Masc.Lane_addon_config.Manifest_path; manifest_path = "/nonexistent/lane.toml"
-    ; package = { package with id = Server_workspace_memory_addon_validation.package_id }
-    ; binding = `Null; revision = "1"; source_revision = "1"; source_path = "/nonexistent/quiz.toml"
-    ; max_exact_in_flight = Masc.Lane_addon_config.one_exact_at_a_time } in
-  Sweep.run ~store ~declarations:[declaration]
-
 (* The slot observation file of the request's first attempt. *)
 let observed store original =
   let proof = match Yojson.Safe.Util.member "executions" (Yojson.Safe.from_file (link_file store original)) with
@@ -2115,54 +2103,41 @@ let symlinked ~base path =
   Unix.symlink target path;
   path
 
-(* The path below the store root the sweep names. *)
-let below_root store path =
-  let root = Store.root store ^ Filename.dir_sep in
-  if String.starts_with ~prefix:root path
-  then String.sub path (String.length root) (String.length path - String.length root)
-  else fail (path ^ " is not below the store root")
-
-(* The startup sweep stops at an Exact directory that is not a directory, or
-   at an entry of one that is not a regular <name>.json file or a staged
-   write, and deletes nothing (#51820). The preflight judges the path the
-   same way, refuses it and deletes it. A proof link the record is read with
+(* The preflight refuses an Exact directory that is not a directory, or an
+   entry of one that is not a regular <name>.json file or a staged write, and
+   fresh state deletes it (#51820). A proof link the record is read with
    goes with the record, as a link [run] cannot read does. *)
-let test_preflight_refuses_an_entry_the_sweep_stops_at () =
-  let entry store stray = "an Exact directory entry is not a JSON file: " ^ below_root store stray in
+let test_preflight_refuses_a_stray_exact_entry () =
   List.iter (fun (label, place) -> with_workspace (fun ~base store ->
     let original = answered store "preflight-stray" in
     let record = record_file store original and link = link_file store original in
     let observation = observed store original in
-    let stray, deletes, stop = place ~base ~store ~record ~link ~observation in
+    let stray, deletes = place ~base ~store ~record ~link ~observation in
     let report = preflight base in
     check (list (pair string (list string))) (label ^ ": what fresh state deletes")
       [stray, deletes] (refused report);
-    check (list string) (label ^ ": the sweep's listing refuses it")
+    check (list string) (label ^ ": the Exact directory listing refuses it")
       [Preflight.decoder_name Preflight.Exact_directory_entry] (readers report);
-    (match sweep store with
-     | Error (Sweep.Sweep_refused detail) -> check string (label ^ ": the sweep stops there") stop detail
-     | Error (Sweep.Removal_stopped _ as error) -> fail (Sweep.error_to_string error)
-     | Ok _ -> fail (label ^ ": the sweep must stop"));
-    check (list bool) (label ^ ": the stopped sweep deletes nothing") [true; true; true]
+    check (list bool) (label ^ ": the read-only preflight deletes nothing") [true; true; true]
       (List.map Sys.file_exists [record; link; observation])))
     [ "a text file beside the records", (fun ~base:_ ~store ~record ~link:_ ~observation:_ ->
-        let stray = beside record "notes.txt" in stray, [stray], entry store stray)
+        let stray = beside record "notes.txt" in stray, [stray])
     ; "a record that is a symbolic link", (fun ~base ~store ~record ~link:_ ~observation:_ ->
-        let stray = symlinked ~base record in stray, [stray], entry store stray)
+        let stray = symlinked ~base record in stray, [stray])
     ; "a declaration directory that is a symbolic link", (fun ~base ~store ~record ~link:_ ~observation:_ ->
         let directory = symlinked ~base (Filename.dirname record) in
-        directory, [directory], "an Exact directory is not a directory: " ^ below_root store directory)
+        directory, [directory])
     ; "a text file beside the proof links", (fun ~base:_ ~store ~record:_ ~link ~observation:_ ->
-        let stray = beside link "notes.txt" in stray, [stray], entry store stray)
+        let stray = beside link "notes.txt" in stray, [stray])
     ; "a proof link that is a symbolic link", (fun ~base ~store ~record ~link ~observation ->
-        let stray = symlinked ~base link in stray, [record; stray; observation], entry store stray)
+        let stray = symlinked ~base link in stray, [record; stray; observation])
     ; "a text file beside the slot observations", (fun ~base:_ ~store ~record:_ ~link:_ ~observation ->
-        let stray = beside observation "notes.txt" in stray, [stray], entry store stray)
+        let stray = beside observation "notes.txt" in stray, [stray])
     ; "a slot observation that is a symbolic link", (fun ~base ~store ~record:_ ~link:_ ~observation ->
-        let stray = symlinked ~base observation in stray, [stray], entry store stray) ]
+        let stray = symlinked ~base observation in stray, [stray]) ]
 
-(* A staged write an interrupted publication left is skipped by both. *)
-let test_preflight_and_the_sweep_skip_a_staged_write () =
+(* A staged write an interrupted publication left is skipped. *)
+let test_preflight_skips_a_staged_write () =
   with_workspace (fun ~base store ->
     let original = answered store "preflight-staged" in
     let observation = observed store original in
@@ -2172,12 +2147,7 @@ let test_preflight_and_the_sweep_skip_a_staged_write () =
     let report = preflight base in
     check int "the record and the slot observation are read" 2 report.Preflight.rows;
     check (list (pair string (list string))) "nothing is refused" [] (refused report);
-    match sweep store with
-    | Error error -> fail (Sweep.error_to_string error)
-    | Ok swept ->
-      check (list int) "the sweep deletes the unowned record, link and observation" [1; 1; 1]
-        [swept.Sweep.removed_exact_records; swept.removed_proofs; swept.removed_observations];
-      check (list bool) "the staged writes stay" [true; true; true] (List.map Sys.file_exists staged))
+    check (list bool) "the staged writes stay" [true; true; true] (List.map Sys.file_exists staged))
 
 let cut_original store original =
   let cancelled ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
@@ -2407,7 +2377,7 @@ let () =
             test_preflight_stops_on_an_observation_of_another_store_root
         ; test_case "a link written between the reads is bound to the second read" `Quick
             test_preflight_binds_a_link_written_between_its_reads
-        ; test_case "an entry the startup sweep stops at is refused" `Quick
-            test_preflight_refuses_an_entry_the_sweep_stops_at
-        ; test_case "a staged write is skipped by the preflight and the sweep" `Quick
-            test_preflight_and_the_sweep_skip_a_staged_write ] ) ]
+        ; test_case "a stray Exact entry is refused" `Quick
+            test_preflight_refuses_a_stray_exact_entry
+        ; test_case "a staged write is skipped by the preflight" `Quick
+            test_preflight_skips_a_staged_write ] ) ]

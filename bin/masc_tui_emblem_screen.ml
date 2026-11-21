@@ -341,9 +341,13 @@ let about_facts ?(ko = false) ~theme keepers =
   let count =
     match keepers with
     | Keepers_read count ->
-        if ko then Printf.sprintf "%d명" count else string_of_int count
-    | Keepers_unreadable -> if ko then "읽기 불가" else "unavailable"
-    | Keepers_unread -> if ko then "불러오기 전" else "not loaded"
+        let count = Masc_tui_value.Count.grouped count in
+        if ko then count ^ "명" else count
+    (* The value slot's marks of RFC tui-one-screen-grammar 6.4: a list that
+       failed to read is ✕, one not read yet is ◌. *)
+    | Keepers_unreadable ->
+        Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
+    | Keepers_unread -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread
   in
   if ko then Printf.sprintf "테마: %s  \xc2\xb7  키퍼: %s" theme count
   else Printf.sprintf "Theme: %s  \xc2\xb7  Keepers: %s" theme count

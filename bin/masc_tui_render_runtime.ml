@@ -529,8 +529,13 @@ let runtime_detail_lines state target ~width =
       let usage_lines =
         match state.runtime_surface with
         | None ->
+            (* Not read yet, or the read failed (RFC tui-one-screen-grammar
+               6.4); the failure's words are the runtime read warning's. *)
             fact ~tone:Page_line.Quiet (say "계정 사용량" "Account usage")
-              (say "조회 불가" "unavailable")
+              (Masc_tui_value.Unknown.glyph
+                 (match state.runtime_surface_error with
+                  | Some _ -> Masc_tui_value.Unknown.Read_failed
+                  | None -> Masc_tui_value.Unknown.Unread))
         | Some snapshot ->
           match runtime_spent_usage snapshot.rss_resolved runtime with
           | Error detail -> fact ~tone:Page_line.Quiet (say "계정 사용량" "Account usage")

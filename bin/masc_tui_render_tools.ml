@@ -1052,11 +1052,11 @@ let skill_settlement_lines_uncached ~cols composition =
         let field name = match json_assoc_member_opt name node with
           | Some (`String value) -> Say.as_received (Terminal_text.single_line value)
           | Some value -> Say.as_received (Terminal_text.single_line (Yojson.Safe.to_string value))
-          | None -> Say.both ~ko:"알 수 없음" ~en:"unavailable" in
+          | None -> Say.code (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported) in
         let content label name = (Ansi.bold, Say.code "       " ++ label) ::
           (match json_assoc_member_opt name node with
            | Some value -> json_rows (skill_json_lines ~cols ~indent:9 value)
-           | None -> [(Theme.recede ()), Say.both ~ko:"         없음" ~en:"         unavailable"]) in
+           | None -> [(Theme.recede ()), Say.code ("         " ^ Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported)]) in
         [Ansi.bold,
          Say.both ~ko:"     관측한 노드 " ~en:"     Observed node " ++ field "node_id"
          ++ say_dot ++ field "tool_name" ++ Say.code " · origin=" ++ field "execution_origin";
@@ -1726,7 +1726,9 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
             let key =
               Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
             in
-            let unavailable = Say.both ~ko:"알 수 없음" ~en:"unavailable" in
+            (* A field the read evidence does not carry was not reported
+               (RFC tui-one-screen-grammar 6.4). *)
+            let unreported = Say.code (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported) in
             (match state.tools_skill_evidence with
              | Some (observed_key, json) when String.equal key observed_key ->
               (match Masc.Tui_decode_skill_evidence.decode_skill_evidence json with
@@ -1816,14 +1818,14 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                            | Some value -> Say.as_received value
                            | None -> Say.code Masc_tui_theme.Glyph.no_value
                          in
-                         let or_unavailable = function
+                         let or_unreported = function
                            | Some value -> Say.as_received value
-                           | None -> unavailable
+                           | None -> unreported
                          in
-                         let json_or_unavailable name =
+                         let json_or_unreported name =
                            match json_assoc_member_opt name composition with
                            | Some value -> Say.as_received (Yojson.Safe.to_string value)
-                           | None -> unavailable
+                           | None -> unreported
                          in
                          let duration =
                            match json_assoc_member_opt "duration_ms" result with
@@ -1875,8 +1877,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                                     Say.per_language (function
                                       | Say.Ko -> Printf.sprintf "Unix 초 %.3f" value
                                       | Say.En -> Printf.sprintf "%.3f Unix seconds" value))
-                               | _ -> unavailable)
-                           ++ say_dot ++ or_unavailable (string_field "composition_execution")
+                               | _ -> unreported)
+                           ++ say_dot ++ or_unreported (string_field "composition_execution")
                            ++ Say.code " · request="
                            (* Inline evidence carries no request: the server
                               refuses one, and the execution kind is the cell
@@ -1887,14 +1889,14 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                          ; (Theme.recede ()),
                            Say.code "       parent tool use="
                            ++ Say.as_received (Option.value ~default:"" (string_field "parent_tool_use_id"))
-                           ++ Say.code " · turn=" ++ json_or_unavailable "parent_turn"
-                           ++ Say.code " · planned index=" ++ json_or_unavailable "parent_planned_index"
+                           ++ Say.code " · turn=" ++ json_or_unreported "parent_turn"
+                           ++ Say.code " · planned index=" ++ json_or_unreported "parent_planned_index"
                          ]
                          @ (match json_assoc_member_opt "disposition" result with
                             | Some (`String "failed") ->
                               let field name = match json_assoc_member_opt name result with
                                 | Some (`String value) -> Say.as_received (Terminal_text.single_line value)
-                                | _ -> unavailable in
+                                | _ -> unreported in
                               [ Theme.bad (), Say.code "       " ++ field "message"
                               ; Theme.recede (), Say.both ~ko:"       실패 유형=" ~en:"       failure class=" ++ field "failure_class"
                                 ++ Say.both ~ko:" · 효과 근거=" ~en:" · effect evidence=" ++ field "effect_disposition" ]
@@ -2908,7 +2910,9 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                     let revision =
                       match rejection.scr_content_revision with
                       | Some revision -> Say.as_received (Terminal_text.single_line revision)
-                      | None -> Say.both ~ko:"알 수 없음" ~en:"unavailable"
+                      (* The field is required and nullable: null is the
+                         catalog saying the rejection has no revision. *)
+                      | None -> Say.code Masc_tui_theme.Glyph.no_value
                     in
                     (* The catalog's own diagnostic codes, which the reader
                        matches against the catalog's log. *)

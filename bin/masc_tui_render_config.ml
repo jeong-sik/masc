@@ -3052,9 +3052,11 @@ let render_voice (state : state) =
     (ui_text state ~ko:"입력 장치와 설정 출처" ~en:"Input device and config source");
   let device_missing =
     match state.voice_setup_error, state.voice_setup with
-    | Some _, (Some _ | None) -> ui_text state ~ko:"조회 실패" ~en:"read failed"
-    | None, None -> ui_text state ~ko:"미조회" ~en:"not read"
-    | None, Some _ -> ui_text state ~ko:"보고 안 됨" ~en:"not reported"
+    (* RFC tui-one-screen-grammar 6.4; the failure's words are the endpoint
+       list notice above. *)
+    | Some _, (Some _ | None) -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
+    | None, None -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread
+    | None, Some _ -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
   in
   field (ui_text state ~ko:"장치" ~en:"device")
     (Option.value state.voice_input_device ~default:device_missing);
@@ -3083,9 +3085,9 @@ let render_voice (state : state) =
     | `Standalone_json path -> path
     | `Absent -> ui_text state ~ko:"서버에 적용된 음성 설정 없음"
         ~en:"No active voice configuration on the server"
-    | `Read_failed -> ui_text state ~ko:"조회 실패" ~en:"Read failed"
-    | `Unread -> ui_text state ~ko:"미조회" ~en:"Not read"
-    | `Unreported -> ui_text state ~ko:"보고 안 됨" ~en:"Not reported"
+    | `Read_failed -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
+    | `Unread -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread
+    | `Unreported -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
   in
   voice_body_line buf cols
     ("  " ^ Ansi.wrap_style (Theme.recede ())

@@ -8,6 +8,8 @@
 - 이 릴리스 브랜치는 동결 기준 main `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 위에 버전 올림 커밋을 얹은 뒤, 일곱 PR(`#54288`·`#54286`·`#54287`·`#54290`·`#54283`·`#54294`·`#54295`, tip `c51a7ae0500465ee795ea92ee275794baa327250`)을 이 브랜치로 가져왔습니다. 앞의 셋과 `#54283`·`#54295` 는 그 조각을 `0.78.0` 절에 접어 넣었고, `#54290` 과 `#54294` 는 문서 전용·내부 리팩터(`### Exempt`)라 절에 넣지 않았습니다.
 - 이 브랜치에서 접은 조각은 `changelog.d/54286.md`·`changelog.d/54288.md`·`changelog.d/54287.md` 세 개이고, 동결 뒤 가져온 `#54283`·`#54295` 는 main 에만 있던 조각이라 이 브랜치에 조각 파일을 만들지 않고 절 본문에 직접 적었습니다. `#54290` 과 `#54294` 는 문서 전용·내부 리팩터(`### Exempt`)라 절에 넣지 않았습니다.
 - `#54281` 의 샤딩은 스크립트에만 들어갔고 `Test` 워크플로는 아직 `SUITE_SHARD_COUNT` 를 넘기지 않습니다(기본값 1 이면 종전과 같은 한 번의 `@runtest` 빌드). 이 릴리스 자체로 CI 디스크 피크가 낮아지지는 않습니다.
+- 이 절은 RC6 절차에서 손으로 접었습니다. 기준은 `3b90e7a`(v0.78.0 bump) 뒤 main tip `343baf4b1a5724b59e84a90475a09c63b741a982`(2026-11-21T21:52:03Z) 까지 `--first-parent` 로 확인한 **13 PR** 입니다: `#54348`·`#54353`·`#54354`·`#54355`·`#54360`(이상 bump 직후)·`#54349`·`#54350`·`#54351`·`#54356`·`#54357`·`#54358`·`#54365`·`#54367`. 그중 시험 전용 넷(`#54348`·`#54353`·`#54355`·`#54360`, 조각 표기 `### Exempt`)은 종전 창과 같이 절에 넣지 않았고, 나머지 아홉을 Added 세 건·Changed 두 건·Removed 한 건·Fixed 세 건으로 접었습니다. 다섯 PR 만 접으라는 지시보다 넓게 접은 이유는, 나머지 여덟의 조각이 이 절 어디에도 없음을 `grep` 으로 확인했기 때문입니다(빼면 노트와 실제 릴리스가 어긋납니다).
+- `scripts/bump-version.sh` 와 `changelog-fragments.py assemble` 은 실행하지 않았습니다. 이 트리에는 이미 릴리스된 조각이 180개 넘게 남아 있어(`changelog.d/53895.md` 가 남은 채 `CHANGELOG.md` 「요약」이 `#53895` 를 인용합니다) `assemble` 이 그것들을 `[Unreleased]` 로 다시 쏟습니다(`task-3920`). 위 13 조각만 이 브랜치에서 지웠고 나머지는 손대지 않았습니다.
 
 ### Added
 
@@ -17,6 +19,10 @@
   the detail every reading (level, alarms, each slot's outcome, the last room
   ask, where reading stands or why the store stopped). A server that runs no
   writer and a writer that has not started read differently (#54286).
+
+- Add a unified persistent ACP v1 multi-runtime (`protocol = "acp"`) supporting Antigravity (`agy acp`), Kimi Code (`kimi acp`), and Mistral Vibe (`vibe-acp`, stripping `MISTRAL_API_KEY` for keyring subscriptions) with per-Keeper `Eio.Switch` process isolation, loopback HTTP MCP tools, and MASC skill discovery (#54357).
+- Add `masc-acp-probe` executable for live multi-turn ACP v1 end-to-end verification across Antigravity, Kimi Code, and Mistral Vibe with MASC MCP tools and skill discovery (#54358).
+- Run the eight binary-free python suites on every pull request in a new `pr-python-bin-free` job, so a fixture drift that only a release candidate used to catch (`test_install_runtime_setup.py` at release candidate 3, run 44937662942 step 17) is judged at the pull-request stage (#54365).
 
 ### Changed
 
@@ -68,11 +74,22 @@
   `stimuli` by guessing, so the front half of every question id changes
   once (#54295).
 
+- Lift the 1-slot transition outbox cap to a FIFO multi-entry outbox with targeted `transition_id` projection, add typed producer-selected wake policies (`Now | At_tick | Carry`), `Steer | FollowUp | Coalesce` mid-turn queue modes, staggered tick grid, and `30m -> 1h -> 2h` adaptive pull-in idle backoff, lift silent `Multi_account` Board/Memory/Authority blackouts for fleet Keepers, and bound delegate reply chat scans (#54351).
+- Preserve `Internal_assistant` turns and `working_context` across Keeper replay checkpoints, move dynamic goals into the volatile L5/L6 tail with trailing `System_context | Outside_context` cache-breakpoint splitting, stop `Initial_system_*` from hoisting per-turn context on Qwen/vLLM, strip volatile prefix counters and inline wiki TOC, preserve Anthropic SSE `cache_write_lifetime` telemetry, wire Kimi 1h/Anthropic prompt caching and `librarian_memory` lane config, switch tool loading to append-only with deferred non-core schemas, slim `keeper.md`, and parallelize `Tool_write_file` in `Scoped_batch` (#54350).
+
+### Removed
+
+- Remove the retired Muse runtime stack, the blocked one-shot Vibe CLI stub, and the legacy Antigravity Python PTY context scraper (#54356).
+
 ### Fixed
 
 - TUI About 화면이 Keeper 수를 명부 읽기에 실패하면 ✕, 읽기 전이면 ◌ 로 그립니다("읽기 불가"/"불러오기 전" 대신) (#54243).
 - Librarian writer alarm E4 no longer goes off while the pulse asks the refused item again. E4 now reads the refusal the last ask left (`Librarian_last.Refused_not_all_sized`, with the snapshot and the lane value it was judged against) and not the writer's state, so the level stays `error` until an ask judges other bytes. A declared slot the registry did not admit is counted as a silent slot on the row (RFC §7.2): that end leaves W1, not E4 (#54280).
 - The multi-account engine no longer starts the Librarian's Memory writers or the Librarian Addon wake. The engine RFC refuses the Librarian in multi-account, but the engine started the writers, which read no account: their CLI slots failed only because the multi-account lookup misses the operator's Runtime, and nothing stopped their HTTP slots. One predicate, `runs_memory_lanes`, now decides the writers, the Addon wake and the World Memory curator on the access kind, and the initialized owner state carries the access it was initialized on (#54236).
+
+- Isolate Keeper turn/child fibers under per-Keeper `Eio.Switch` bulkheads with symmetric registry quarantine, make account-seat acquisition non-blocking (`Account_busy`), classify structured HTTP 400/402/403/429 quota/billing and `ContextOverflow` refusals, keep observed zero-tool drops rotatable (`No_effect_observed`) while fencing `Effect_attempted` and `Observation_unavailable`, and preserve real `provider_id`/`model_id` telemetry (#54349).
+- The `openai-responses` SSE parser no longer fails a whole turn when the terminal `response.completed` echo of an encrypted reasoning item differs from the `response.output_item.done` frame only in envelope fields — an added `status`, a blank versus present `id`, omitted empty channels. The replay guard now compares the `encrypted_content` projection and keeps the stored done item, the one OpenAI names as authoritative for replay, while a genuinely different ciphertext still fails closed with `responses_replay:conflicting_reasoning_item`. Observed as a recurring `provider_error_wire:sse:malformed_payload` failure of an `openai-responses.gpt-6-2-sol-*` keeper turn. (#54354)
+- Keep the release lifecycle evidence gate green after #54351 lifted the transition outbox to a FIFO: the stale-worker case in `test_keeper_event_queue` now asserts the idempotent `Ok ()` report for an already-retired `transition_id`, that `append_before_retire` is never invoked for the newer transfer, and that the newer `transition_id` still owns the outbox, instead of expecting the old one-slot `Error` (#54367).
 
 ### Documentation
 

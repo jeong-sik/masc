@@ -44,7 +44,8 @@ let librarian_drained : Health.memory_librarian_health =
 ;;
 
 (* Ten facts, two of them derived, in a snapshot of 1024 bytes, and a source
-   snapshot of five facts. No change since the start, no error, no alert. *)
+   snapshot of five facts. No change since the start, no error, no alert,
+   and no Memory writer: the Keeper is outside the registry. *)
 let keeper ~keeper_id : Health.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
@@ -62,6 +63,7 @@ let keeper ~keeper_id : Health.memory_keeper_health =
   ; mkh_changes_since_start = []
   ; mkh_context_cycle = context_cycle
   ; mkh_librarian = librarian_unreported
+  ; mkh_writer = Masc.Tui_decode_memory_writer.No_writer
   ; mkh_librarian_failures = 0
   ; mkh_vision_ingest_errors = 0
   ; mkh_vision_ingest_error_reasons = []

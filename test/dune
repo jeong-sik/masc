@@ -185,6 +185,7 @@
 (include stanzas/test_librarian_production_evaluation.inc)
 (include stanzas/test_librarian_level.inc)
 (include stanzas/test_keeper_memory_writer_health.inc)
+(include stanzas/test_tui_memory_writer.inc)
 (include stanzas/test_local_runtime_systemone.inc)
 
 (test
@@ -4992,7 +4993,7 @@
  (modules test_tui_render_memory)
  (libraries
   memory_keeper_health_fixture masc_tui_memory_usage masc_tui_surface_search masc_tui_value
-  masc_tui_pick_list
+  masc_tui_pick_list masc_tui_memory_writer
   alcotest
   masc
   masc_tui_acting_pane

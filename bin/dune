@@ -1557,6 +1557,13 @@
  (libraries masc_tui_types masc_tui_memory_world masc_tui_value))
 
 (library
+ (name masc_tui_memory_writer)
+ (wrapped false)
+ (modules masc_tui_memory_writer)
+ ; masc decodes the writer's row; masc_tui_value draws its counts and digests.
+ (libraries masc masc_tui_value))
+
+(library
  (name masc_tui_config_mark)
  (wrapped false)
  (modules masc_tui_config_mark)
@@ -2636,6 +2643,7 @@
   masc_tui_detail_reading
   masc_tui_fetched
   masc_tui_memory_mark
+  masc_tui_memory_writer
   masc_tui_memory_tree
   masc_tui_memory_world
   masc_tui_context_inspector

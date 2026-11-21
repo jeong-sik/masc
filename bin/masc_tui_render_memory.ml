@@ -400,6 +400,15 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
     | Some cause -> [ text "  Librarian 사유 · " "  Librarian cause · " ^ Terminal_text.preview_line cause ]
     | None -> []
   in
+  (* The Keeper's Memory writer (RFC librarian-call-only-proposes §12.3): the
+     one that commits to Memory now. Every row is named for the writer, so
+     none reads as part of the Librarian rows above, which are of the
+     Librarian that ran before it. *)
+  let writer_rows =
+    List.concat_map
+      (clause_rows ~full ~cols)
+      (Masc_tui_memory_writer.detail_rows ~ko ~moment:memory_date k.mkh_writer)
+  in
   let context_lines =
     let cycle = k.mkh_context_cycle in
     let frontier value =
@@ -573,7 +582,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
             "  Recall block detail: open Keeper chat /context." ]
       @ clause_rows ~full ~cols librarian_clauses
       @ librarian_stalled_lines
-      @ librarian_cause_lines @ context_lines
+      @ librarian_cause_lines @ writer_rows @ context_lines
       @ (vision_line :: read_error_lines)
       @ alert_rows
     else begin
@@ -1248,6 +1257,7 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
     ; text ~ko:"Librarian" ~en:"Librarian",
         [unread; continuity; pass;
          text ~ko:"현재 모델 실행 여부와 별개" ~en:"not current model execution"]
+    ; Masc_tui_memory_writer.heading ~ko, Masc_tui_memory_writer.card_clauses ~ko keeper.mkh_writer
     ; memory_world_axis state ~room:width
     ]
   in
@@ -1295,8 +1305,20 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
             (if ko then "보고된 알림 %s건 (이력 포함) · v:근거" else "%s reported alerts (including history) · v:evidence")
             (Masc_tui_value.Count.grouped (List.length keeper.mkh_alerts))
         ^ Ansi.reset ] in
+  (* One row for each alarm the Keeper's Memory writer has on, after the rows
+     above so the stalled row keeps its place. *)
+  let writer_attention =
+    List.map
+      (fun (tone, row) ->
+         (match tone with
+          | Masc_tui_memory_writer.Tone_error -> Theme.bad ()
+          | Masc_tui_memory_writer.Tone_warn -> Theme.warn ())
+         ^ row
+         ^ Ansi.reset)
+      (Masc_tui_memory_writer.attention_rows ~ko keeper.mkh_writer)
+  in
   let warnings = List.map (fun row -> "  " ^ row) errors @ stalled
-      @ List.map (fun row -> "  " ^ row) alerts in
+      @ List.map (fun row -> "  " ^ row) (alerts @ writer_attention) in
   let observed = match state.memory_health with
     | None -> ""
     | Some snapshot ->

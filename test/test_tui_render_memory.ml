@@ -1180,6 +1180,83 @@ let test_memory_facts_docked_preview_and_tree_tint () =
     tree_rows
 ;;
 
+(* RFC librarian-call-only-proposes §12.3: the selected Keeper's reading
+   draws its Memory writer under its own name, beside the Librarian readings.
+   A server that runs no writer and a writer that has not started are two
+   readings, and each alarm that is on has its row. *)
+let test_memory_reading_draws_the_writer () =
+  let module W = Masc.Tui_decode_memory_writer in
+  let module Level = Masc.Librarian_level in
+  let render ?(detail = false) ~language writer =
+    let state = make_state () in
+    state.view <- Types.Memory;
+    state.ui_language <- language;
+    state.memory_overview_detail <- detail;
+    let keeper =
+      { (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) with
+        Masc.Tui_decode_memory_health.mkh_writer = writer
+      }
+    in
+    state.memory_health <- Some (make_fleet_health keeper);
+    let lines = ref [] in
+    Render_memory.render_memory_body ~cols:120 ~budget:120 state
+      ~report_drawn_list:(fun _ ~height:_ -> ()) ~hand_position:ignore
+      ~push:(fun line -> lines := line :: !lines)
+      ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
+      ~push_selected:(fun line -> lines := line :: !lines)
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !lines)
+  in
+  let booting = W.Writer { W.level = Level.Warn; alarms = [ Level.W1 ]; row = W.Booting } in
+  let resting =
+    W.Writer
+      { W.level = Level.Error
+      ; alarms = [ Level.E3; Level.W3 ]
+      ; row =
+          W.Open
+            { activity = W.Resting
+            ; unread = true
+            ; kept =
+                { W.lane = true
+                ; last_read = Some (W.Read_input_fault (W.Line_unreadable { offset = 120 }))
+                ; last_room = None
+                ; read_alone = true
+                }
+            ; last_line = W.Line_started
+            ; last_line_at = 1000.0
+            ; turn_log = "log-1"
+            ; covers_through = W.Before_first
+            ; snapshot = "sha-memory"
+            ; facts = 10
+            }
+      }
+  in
+  let shows name wanted screen = check bool name true (contains wanted screen) in
+  let hides name unwanted screen = check bool name false (contains unwanted screen) in
+  let ko = render ~language:Types.Lang_ko in
+  let en = render ~language:Types.Lang_en in
+  shows "a process without writers says so" "서버가 띄우지 않음" (ko W.None_in_process);
+  hides "and is not drawn as a starting writer" "시작 중" (ko W.None_in_process);
+  shows "a starting writer says so" "시작 중" (ko booting);
+  hides "and is not drawn as a process without writers" "서버가 띄우지 않음" (ko booting);
+  shows "its alarm has a row" (Masc_tui_memory_writer.alarm_text ~ko:true Level.W1) (ko booting);
+  shows "the card is named for the writer" "기억 쓰는 쪽" (ko booting);
+  shows "the Librarian card keeps its name" "Librarian" (ko booting);
+  shows "in English too" "Memory writer" (en booting);
+  shows "a starting writer, in English" "starting" (en booting);
+  shows "a Keeper without a writer" "none: the Keeper is not registered" (en W.No_writer);
+  hides "a Keeper without a writer has no alarm row" "W1" (en W.No_writer);
+  shows "the card says what the writer is doing" "resting: the last ask ended without a commit" (en resting);
+  shows "and how the last read ended" "last read input fault" (en resting);
+  shows "the error alarm has a row" "E3" (en resting);
+  shows "the warning alarm has a row" "W3" (en resting);
+  let detail = render ~detail:true ~language:Types.Lang_en resting in
+  shows "the detail names the level" "Memory writer · error" detail;
+  shows "the detail names the fault" "a turn log line does not parse (offset 120)" detail;
+  shows "the detail says where reading stands" "Memory writer reading stands" detail
+;;
+
 let test_memory_fleet_header_stable_while_refreshing () =
   let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
   let snapshot = make_fleet_health keeper in
@@ -1242,7 +1319,9 @@ let () =
       ; test_case "failed facts refresh retains facts and unread scope" `Quick
           test_a_failed_facts_refresh_keeps_facts_and_unread_scope
       ; test_case "refresh over held snapshot keeps fleet header stable" `Quick
-          test_memory_fleet_header_stable_while_refreshing ]
+          test_memory_fleet_header_stable_while_refreshing
+      ; test_case "the selected Keeper's reading draws its Memory writer" `Quick
+          test_memory_reading_draws_the_writer ]
     ; "one place per fact",
       [ test_case "search count and cursor share Memory filter text and query" `Quick
           test_memory_search_uses_the_filter_text_and_query

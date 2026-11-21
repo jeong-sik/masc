@@ -49,6 +49,7 @@ module Kind = struct
     | Runtime
     | Keeper
     | Purge
+    | Legacy_attribution
 
   let all =
     [ Runtime_grant
@@ -72,6 +73,7 @@ module Kind = struct
     ; Runtime
     ; Keeper
     ; Purge
+    ; Legacy_attribution
     ]
   ;;
 
@@ -97,6 +99,7 @@ module Kind = struct
     | Runtime -> "runtime"
     | Keeper -> "keeper"
     | Purge -> "purge"
+    | Legacy_attribution -> "legacy_attribution"
   ;;
 
   let of_string label = List.find_opt (fun kind -> String.equal (to_string kind) label) all
@@ -144,9 +147,27 @@ let writers : Kind.t -> writer list = function
   | Kind.Local_recovery | Kind.Mode_event | Kind.Internal_service_credential -> [ Host_operator ]
   | Kind.Invite -> [ Host_operator; Authenticated_principal ]
   | Kind.Purge -> [ Authenticated_principal; Maintenance ]
+  | Kind.Legacy_attribution -> [ Host_operator; Authenticated_principal ]
 ;;
 
-let admits kind author = List.mem (writer_of author) (writers kind)
+(* A Service principal never writes a legacy attribution record: only the
+   person the bootstrap admission bound claims or retires a Keeper (design
+   10.3). [writers] names kinds of author and cannot tell a Human from a
+   Service, so the one exclusion is a list here. *)
+let service_author = function
+  | Author.Authenticated (Principal.Human _) -> false
+  | Author.Authenticated (Principal.Service _) -> true
+  | Author.Local_operator -> false
+  | Author.System_cron -> false
+  | Author.System_maintenance -> false
+;;
+
+let human_only_kinds = [ Kind.Legacy_attribution ]
+
+let admits kind author =
+  List.mem (writer_of author) (writers kind)
+  && not (service_author author && List.mem kind human_only_kinds)
+;;
 
 (* The text of an author. Every string goes through [Authz_body.string_literal],
    the one escape function of the log, even though an identifier has no

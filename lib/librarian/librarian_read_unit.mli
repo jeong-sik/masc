@@ -13,6 +13,14 @@ type opened =
   ; stimuli : Keeper_turn_log.stimulus list
   }
 
+(** A turn's [Opened] line as reading has it (§5.4). *)
+type opened_line =
+  | Opened_read of opened
+  | Opened_passed
+  (** The line does not decode and reading went past it. The turn's runtime,
+      Task, stimuli and baseline are not known, so the turn claims no item
+      as its own. *)
+
 (** One row as its store holds it. *)
 type body =
   | Chat_row of Keeper_chat_store_line_decode.parsed_line
@@ -40,9 +48,10 @@ type kind =
       ; outcome : Keeper_turn_log.outcome
       (** [Close_missing] and [Process_exited] say the turn's own items
           were closed after it was admitted, not that the turn closed them. *)
-      ; opened : opened
+      ; opened : opened_line
       ; unattributed : item list (** Shown without the Task. *)
-      ; own : item list (** Shown with the Task. *)
+      ; own : item list
+      (** Shown with the Task. Empty when [opened] is {!Opened_passed}. *)
       }
   | Reset of
       { cause : Keeper_turn_log.announced

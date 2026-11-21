@@ -58,11 +58,12 @@ let decode row =
 type scanned =
   { at : int
   ; past : int
+  ; row : string
   ; line : (Log.line, undecodable) result
   }
 
 (* A row comes without its line break. *)
-let scanned ~at row = { at; past = at + String.length row + 1; line = decode row }
+let scanned ~at row = { at; past = at + String.length row + 1; row; line = decode row }
 
 (* How many lines one locked read takes. An append waits for one such read
    at most. *)

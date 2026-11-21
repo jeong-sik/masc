@@ -1223,7 +1223,7 @@ unit` 로 줄을 낸다. 옮긴 화면은 새 수집기로 줄을 낸다. 그 �
     제목과 나머지 호출처는 아직 다 보지 않았다. 호출처 몇 곳만 `zone_two_title` 로 감싸면 M곳 중 N곳을
     고치는 패치다. 근본 해결은 이슈 #53287 이 적은 `surface_chrome ~title:(cols:int -> string)` 이고,
     그때 크롬이 오른쪽 끝(위치와 칸)을 한 곳에서 그린다. Usage 제목은 거기에 더해 정상 상태의 읽기에도
-    `connection_badge` 가 `◔ 조회 중: 제공자 한도` 같은 조각을 붙이므로 `reading_connection_notice` 로
+    `connection_badge` 가 `◐ 조회 중: 제공자 한도` 같은 조각을 붙이므로 `reading_connection_notice` 로
     바꿔야 하고, 좁은 폭에서 연결 상세를 `연결 상태` 줄(`connection_rows`)로 넘기는 갈래도 같이 본다.
     제목 폭이 달라지므로 화면을 찍어 보고 정한다.
 - 가로로 긴 코드의 좌우 이동 키. 지금은 `h` `l` 인데 §3.1 에서 나오기·들어가기가 됐다.

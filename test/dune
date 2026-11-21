@@ -3426,7 +3426,9 @@
 (include stanzas/test_keeper_memory_admission_export.inc)
 (include stanzas/test_keeper_memory_admission_replay.inc)
 (include stanzas/test_keeper_memory_admission_queue.inc)
+(include stanzas/test_keeper_memory_lane_librarian_durable.inc)
 (include stanzas/test_keeper_memory_write.inc)
+(include stanzas/test_keeper_memory_write_absorbed.inc)
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
 (include stanzas/test_keeper_memory_change_metrics.inc)
 (include stanzas/test_keeper_librarian_absorb_gate_metrics.inc)
@@ -3490,6 +3492,7 @@
 (include stanzas/test_keeper_metrics_announce.inc)
 (include stanzas/test_keeper_oauth_attempts_announce.inc)
 (include stanzas/test_memory_health_input_announce.inc)
+(include stanzas/test_memory_health_input_announce_librarian_stores.inc)
 (include stanzas/test_harness_verdicts_announce.inc)
 (include stanzas/test_runtime_config_commit_announce.inc)
 (include stanzas/test_gate_change_notify.inc)
@@ -7687,6 +7690,7 @@
  (modules test_completion_review_immutable_input)
  (libraries alcotest masc_test_deps eio_main unix))
 (include stanzas/test_keeper_memory_execution_availability.inc)
+(include stanzas/test_keeper_memory_execution_availability_librarian_addon.inc)
 
 (include stanzas/test_browser_native_workflow.inc)
 

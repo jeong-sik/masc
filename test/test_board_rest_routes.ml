@@ -1970,8 +1970,11 @@ let test_direct_board_http_readership_and_cache () =
   check (list string) "hearth cache does not expose another reader's private name"
     ["public older post"] (hearth_names outsider_hearths);
   let _, recipient_hearths = get recipient "/api/v1/board/hearths" in
+  (* The recipient authored the Admin's own Direct post above, so its hearth is
+     one of the names the recipient may read. *)
   check (list string) "recipient's hearth cache retains the Direct hearth"
-    ["private latest post"; "public older post"] (hearth_names recipient_hearths);
+    ["operator own private post"; "private latest post"; "public older post"]
+    (hearth_names recipient_hearths);
   check int "dashboard total excludes unreadable posts" 1
     (outsider_dashboard |> member "total" |> to_int);
   let status, _ = dispatch_json ~router ~token:outsider

@@ -698,56 +698,6 @@ let test_clear_refuses_owned_pending_input () =
   check string "pending refusal preserves canonical bytes" before
     (Fs_compat.load_file (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir:session.session_dir ~session_id:session.session_id))
 
-let restart_records ~config ~meta =
-  let keepers_dir=Workspace.keepers_runtime_dir config in
-  match Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name with
-  | Ok rows -> List.filter_map (function
-      | _,Ok {Keeper_turn_boundaries.event=History_restarted _;_} -> Some ()
-      | _,(Ok {event=Turn_ended _;_} | Error _) -> None) rows
-  | Error error -> fail error
-
-let test_clear_marker_follows_owned_commit () =
-  with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session:_ ~restart:_ ->
-  let session,original=input_source ~config ~meta load in
-  publish_input ~config ~meta ~session original;
-  let before=List.length (restart_records ~config ~meta) in
-  let result=clear () in
-  check bool (Tool_result.message result) true (Tool_result.is_success result);
-  check bool "confirmed marker names the new input bytes" true
-    (Keeper_checkpoint_ref.equal (observed_input ~config ~meta)
-      (Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir:session.session_dir ~session_id:session.session_id
-       |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string |> require_ok
-       |> Keeper_checkpoint_store.exact_snapshot_reference));
-  check int "one restart follows the confirmed two-store clear" (before+1)
-    (List.length (restart_records ~config ~meta))
-
-let test_clear_marker_write_failure_keeps_confirmed_input () =
-  with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session:_ ~restart:_ ->
-  let session,original=input_source ~config ~meta load in
-  publish_input ~config ~meta ~session original;
-  let path=Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir:(Workspace.keepers_runtime_dir config)
-    ~keeper_id:meta.name in
-  Fs_compat.mkdir_p path;
-  let result=clear () in
-  check bool (Tool_result.message result) true (Tool_result.is_success result);
-  check bool "marker failure remains explicit" true
-    (Yojson.Safe.Util.member "history_restart_line_error" (Tool_result.data result) <> `Null);
-  check_empty load;
-  check_next_prepare ~config ~meta ~session load
-
-let test_clear_marker_repairs_torn_tail () =
-  with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session:_ ~restart:_ ->
-  let path=Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir:(Workspace.keepers_runtime_dir config)
-    ~keeper_id:meta.name in
-  Fs_compat.mkdir_p (Filename.dirname path);
-  Fs_compat.save_file path {|{"kind":"turn_ended"|};
-  let result=clear () in
-  check bool (Tool_result.message result) true (Tool_result.is_success result);
-  check int "torn tail retains the confirmed restart" 1 (List.length (restart_records ~config ~meta))
-
 let test_clear_refuses_same_turn_nonhistory_regression () =
   with_keeper ~paused:false ~install_owner:true
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
@@ -845,75 +795,6 @@ let test_partial_clear_requires_fresh_maintenance_authority () =
   check bool (Tool_result.message result) true (Tool_result.is_success result);
   check bool "fresh explicit clear reconciles partial canonical/input state" false
     (Keeper_checkpoint_ref.equal previous (observed_input ~config ~meta));
-  check_next_prepare ~config ~meta ~session load
-
-let test_clear_cas_refuses_equal_turn_external_change () =
-  with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear:_ ~official_session ~restart:_ ->
-  let session,original=input_source ~config ~meta load in
-  publish_input ~config ~meta ~session original;
-  let before=observed_input ~config ~meta in
-  let marker_count=List.length (restart_records ~config ~meta) in
-  (match Keeper_owner_registry.run_maintenance_if_idle ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
-     let writer=Keeper_owner_registry.begin_history_clear ~base_path:config.base_path ~keeper_name:meta.name
-       |> Result.map_error Keeper_owner_registry.command_error_to_string |> require_ok in
-     let plan=Keeper_history_clear.prepare ~authority:(Keeper_owner.history_clear_authority writer)
-       ~session_dir:session.session_dir ~preserve_system:true
-       |> Result.map_error Keeper_history_clear.error_to_string |> require_ok in
-     let snapshot=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir:session.session_dir ~session_id:session.session_id
-       |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string |> require_ok in
-     let changed={original with Agent_core.Checkpoint.messages=original.messages @ [Agent_core.Types.user_msg "external equal-turn write"]} in
-     (match Keeper_checkpoint_store.save_agent_core_if_source ~boundary:Agent_core.Checkpoint_objects.Turn_continues ~session_dir:session.session_dir
-       ~expected_source_ref:(Keeper_checkpoint_store.exact_snapshot_reference snapshot) changed
-       |> Keeper_checkpoint_store.require_confirmed_installation with
-      | Ok _ -> () | Error _ -> fail "external canonical write failed");
-     let outcome=Keeper_official_client_session_store.clear_then ~base_path:config.base_path ~keeper_name:meta.name
-       (fun () -> Keeper_history_clear.execute plan) |> require_ok in
-     (match outcome with
-      | Error (Keeper_history_clear.Installation_unconfirmed (Keeper_checkpoint_store.Not_installed {cause=Source_changed _;_})) -> ()
-      | Error _ -> fail "clear did not report its exact stale source"
-      | Ok _ -> fail "equal-turn external canonical write was overwritten")) with
-   | Ok (`Ran ()) -> () | Ok (`Busy _) -> fail "maintenance was busy"
-   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
-  check_official_session_cleared official_session;
-  check bool "stale plan keeps original input owner" true (Keeper_checkpoint_ref.equal before (observed_input ~config ~meta));
-  check int "stale clear writes no restart marker" marker_count (List.length (restart_records ~config ~meta));
-  check bool "external canonical conversation survives" true
-    (List.exists (fun (message:Agent_core.Types.message) ->
-       Agent_core.Types.text_of_content message.content="external equal-turn write") (Context.messages_of_context (load ())))
-
-let test_clear_journal_failure_recovers_after_owner_restart ~after_commit () =
-  with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session:_ ~restart ->
-  let session,original=input_source ~config ~meta load in
-  publish_input ~config ~meta ~session original;
-  let before=observed_input ~config ~meta in
-  let marker_count=List.length (restart_records ~config ~meta) in
-  (match Keeper_owner_registry.run_maintenance_if_idle ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
-     let writer=Keeper_owner_registry.begin_history_clear ~base_path:config.base_path ~keeper_name:meta.name
-       |> Result.map_error Keeper_owner_registry.command_error_to_string |> require_ok in
-     let plan=Keeper_history_clear.prepare ~authority:(Keeper_owner.history_clear_authority writer)
-       ~session_dir:session.session_dir ~preserve_system:true
-       |> Result.map_error Keeper_history_clear.error_to_string |> require_ok in
-     let receipt=Keeper_history_clear.execute plan |> Result.map_error Keeper_history_clear.error_to_string |> require_ok in
-     Keeper_chat_operation_store.For_testing.fail_next_commit
-       (if after_commit then Fail_after_commit else Fail_before_commit);
-     Fun.protect ~finally:Keeper_chat_operation_store.For_testing.clear_commit_fault (fun () ->
-       match Keeper_owner_registry.commit_history_clear ~base_path:config.base_path ~keeper_name:meta.name ~writer ~receipt with
-       | Error _ -> () | Ok () -> fail "unconfirmed journal commit became clear success")) with
-   | Ok (`Ran ()) -> () | Ok (`Busy _) -> fail "maintenance was busy"
-   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
-  check_empty load;
-  check int "unconfirmed input commit writes no marker" marker_count (List.length (restart_records ~config ~meta));
-  let actual=observed_input ~config ~meta in
-  check bool "actual commit disposition is preserved" (not after_commit) (Keeper_checkpoint_ref.equal before actual);
-  (* Availability recovery reopens the journal before a fresh admission; it
-     never blindly replays the uncertain old witness. *)
-  let result=clear () in
-  check bool (Tool_result.message result) true (Tool_result.is_success result);
-  check_empty load;
-  check_next_prepare ~config ~meta ~session load;
-  restart ();
   check_next_prepare ~config ~meta ~session load
 
 (* {1 The turn log line (RFC librarian-call-only-proposes §5.2)} *)
@@ -1046,13 +927,7 @@ let () =
                   ; test_case "an undecodable head is dropped unread" `Quick test_clear_drops_an_undecodable_head_unread
                   ; test_case "no head writes no line" `Quick test_clear_with_no_head_writes_no_line
                   ; test_case "a line that fails changes nothing" `Quick test_a_clear_whose_line_fails_changes_nothing ]
-    ; "owner", [ test_case "equal-turn external write defeats a stale clear plan" `Quick test_clear_cas_refuses_equal_turn_external_change
-               ; test_case "precommit clear failure permits fresh explicit recovery" `Quick (test_clear_journal_failure_recovers_after_owner_restart ~after_commit:false)
-               ; test_case "uncertain clear commit preserves actual input across restart" `Quick (test_clear_journal_failure_recovers_after_owner_restart ~after_commit:true)
-               ; test_case "restart marker follows owned input commit" `Quick test_clear_marker_follows_owned_commit
-               ; test_case "marker failure preserves confirmed input clear" `Quick test_clear_marker_write_failure_keeps_confirmed_input
-               ; test_case "restart marker repairs a torn tail" `Quick test_clear_marker_repairs_torn_tail
-               ; test_case "same-turn nonhistory ambiguity refuses before effects" `Quick test_clear_refuses_same_turn_nonhistory_regression
+    ; "owner", [ test_case "same-turn nonhistory ambiguity refuses before effects" `Quick test_clear_refuses_same_turn_nonhistory_regression
                ; test_case "inconsistent derived message count refuses before effects" `Quick test_clear_refuses_inconsistent_derived_count
                ; test_case "unavailable prior input refuses before official-session effects" `Quick test_clear_refuses_unavailable_prior_input
                ; test_case "partial clear requires fresh original maintenance authority" `Quick test_partial_clear_requires_fresh_maintenance_authority

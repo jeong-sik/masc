@@ -57,6 +57,15 @@ type hole =
   (** An operator's [Restart_reading]: the same turn log, and the stored
       offset is past its end or not at the start of a line. It is read from
       its first line, so what was read before is read again. *)
+  | Line_unreadable of
+      { offset : int (** Byte offset of the line in the turn log. *)
+      ; sha : Digest.digest
+      (** Of the line's bytes without its line break. *)
+      }
+  (** An operator's [Skip_line] (§12.4): a line of the turn log that does
+      not decode or is out of order, with no unit holding an item before
+      it. Reading goes on past the line, and what the line said is not
+      read. *)
   | Operator_skipped of
       { by : string (** Who asked for the skip. *)
       ; missing : Librarian_unit.missing_at list

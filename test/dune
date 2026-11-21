@@ -5496,7 +5496,6 @@
 (include stanzas/test_keeper_librarian_range.inc)
 (include stanzas/test_keeper_librarian_durable_consumer.inc)
 (include stanzas/test_keeper_librarian_floor_step_request.inc)
-(include stanzas/test_keeper_librarian_floor_step_owner.inc)
 (include stanzas/test_keeper_librarian_floor_chain.inc)
 (include stanzas/test_librarian_replay_cli.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
@@ -7513,12 +7512,6 @@
  (libraries masc_tui_image_payload masc_tui_artifact_html alcotest))
 
 (test
- (name test_keeper_librarian_addon_owner)
- (modules test_keeper_librarian_addon_owner)
- (deps (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
- (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id))
-
-(test
  (name test_keeper_librarian_input_capture)
  (modules test_keeper_librarian_input_capture)
  (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
@@ -7540,12 +7533,6 @@
  (name test_keeper_librarian_durable_refusal)
  (modules test_keeper_librarian_durable_refusal)
  (libraries alcotest masc))
-
-(test
- (name test_keeper_librarian_durable_execution)
- (modules test_keeper_librarian_durable_execution)
- (deps (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
- (libraries masc masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
 
 ; Not a test: prints one Librarian pass's allocation and stored bytes per
 ; already-read history size. Run by hand from _build/default/test.

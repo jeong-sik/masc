@@ -759,12 +759,7 @@ let render_exact_lane_provider_editor (state : state) editor =
      (match state.runtime_catalog_reading with
       | Runtime_catalog_read -> ()
       | Runtime_catalog_refreshing None -> ()
-      | Runtime_catalog_refreshing (Some detail) ->
-          box_line_styled buf cols ~style:(Theme.warn ())
-            ("  " ^ Terminal_text.single_line
-                      (Masc_tui_types.runtime_catalog_reading_suffix ~ko
-                         (Runtime_catalog_stale detail)))
-      | Runtime_catalog_stale _ ->
+      | Runtime_catalog_refreshing (Some _) | Runtime_catalog_stale _ ->
           box_line_styled buf cols ~style:(Theme.warn ())
             ("  " ^ Terminal_text.single_line
                       (Masc_tui_types.runtime_catalog_reading_suffix ~ko

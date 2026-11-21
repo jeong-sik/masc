@@ -668,7 +668,8 @@ let render_connectors (state : state) =
   let read_needs_sheet =
     match read_view with
     | Connector_read.Reading (Refresh, No_follow_up) -> Option.is_none state.connectors
-    | Connector_read.Reading ((After_write, _) | (Refresh, Read_after_write)) -> true
+    | Connector_read.Reading (After_write, _)
+    | Connector_read.Reading (Refresh, Read_after_write) -> true
     | Quiet | Waiting_after_write | Failed_to_start -> false
   in
   let unbind_active = state.connector_unbind_all_inflight in

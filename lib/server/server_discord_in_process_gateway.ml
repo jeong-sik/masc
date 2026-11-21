@@ -1067,7 +1067,7 @@ let start ~sw ~env ~clock ~state =
   | Error error ->
     (* Reject malformed policy even when transport credentials are absent. *)
     Log.Server.error
-      "RFC-0203: Discord trigger-policy configuration rejected; gateway \
+      "Discord trigger-policy configuration rejected; gateway \
        not started (%s)"
       (trigger_policy_load_error_to_string error)
   | Ok configured ->
@@ -1077,7 +1077,7 @@ let start ~sw ~env ~clock ~state =
     match bot_token_opt () with
     | None ->
       Log.Server.warn
-        "RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started"
+        "DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started"
     | Some token ->
     (* An override left on the params surface outlives a restart, so what this
        gateway judges by is the param, not [configured] alone. *)
@@ -1098,7 +1098,7 @@ let start ~sw ~env ~clock ~state =
     in
     let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
     Log.Server.info
-      "RFC-0203: starting in-process Discord gateway (policy=%s, intents=%d)"
+      "starting in-process Discord gateway (policy=%s, intents=%d)"
       policy_label
       (Gw.intents_bitmask default_intents);
     Eio.Fiber.fork ~sw (fun () ->
@@ -1132,5 +1132,5 @@ let start ~sw ~env ~clock ~state =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Log.Server.error
-          "RFC-0203: in-process Discord gateway crashed: %s"
+          "in-process Discord gateway crashed: %s"
           (Printexc.to_string exn))

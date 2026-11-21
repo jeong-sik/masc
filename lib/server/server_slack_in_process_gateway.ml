@@ -795,7 +795,7 @@ let start ~sw ~env ~state =
     let detail = trigger_policy_load_error_to_string error in
     State.record_startup_error detail;
     Log.Server.error
-      "RFC-0317: Slack trigger-policy configuration rejected; gateway not \
+      "Slack trigger-policy configuration rejected; gateway not \
        started (%s)"
       detail
   | Ok configured ->
@@ -813,7 +813,7 @@ let start ~sw ~env ~state =
          Log.Server.info "Slack connector disabled by [slack] enabled=false"
        | Enabled ->
          Log.Server.warn
-           "RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not \
+           "SLACK_APP_TOKEN is unset; in-process Slack gateway not \
             started")
     | Some app_token ->
        (* An override left on the params surface outlives a restart, so what
@@ -832,7 +832,7 @@ let start ~sw ~env ~state =
          match Env_config_slack.bot_token_opt () with
          | None ->
            Log.Server.warn
-             "RFC-0317: SLACK_BOT_TOKEN unset; Slack plain-message mention \
+             "SLACK_BOT_TOKEN unset; Slack plain-message mention \
               detection disabled (app_mention still triggers)";
            None, None, None
          | Some bot_token ->
@@ -853,12 +853,12 @@ let start ~sw ~env ~state =
             | Ok { user_id; team_id } ->
               State.record_ready ~bot_user_id:user_id;
               Option.iter State.record_workspace_id team_id;
-              Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
+              Log.Server.info "Slack auth.test ok (bot_user_id=%s)"
                 user_id;
               Some user_id, team_id, user_directory
             | Error e ->
               Log.Server.warn
-                "RFC-0317: Slack auth.test failed (%s); proceeding without \
+                "Slack auth.test failed (%s); proceeding without \
                  bot_user_id"
                 (Format.asprintf "%a" Slack_rest_client.pp_error e);
               None, None, user_directory)
@@ -880,7 +880,7 @@ let start ~sw ~env ~state =
        in
        let policy_label = Gw.trigger_policy_to_string policy in
        Log.Server.info
-         "RFC-0317: starting in-process Slack gateway (policy=%s)"
+         "starting in-process Slack gateway (policy=%s)"
          policy_label;
        Eio.Fiber.fork ~sw (fun () ->
          try
@@ -912,5 +912,5 @@ let start ~sw ~env ~state =
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           Log.Server.error "RFC-0317: in-process Slack gateway crashed: %s"
+           Log.Server.error "in-process Slack gateway crashed: %s"
              (Printexc.to_string exn))

@@ -202,6 +202,7 @@ let run_cmd cli_base_path =
        ~sw
        ~clock
        ~env
+       ~access
        state);
   Fun.protect
     ~finally:(fun () ->

@@ -270,15 +270,27 @@ val mark_owner_state_ready
 (** Publish and verify readiness after the transport has installed every
     surface required by its own serving contract. *)
 
+(** Whether the post-readiness lanes start the World Memory curator on
+    [access]: on the access of a single user, whose curator keeps the
+    operator's ledger, and not on the access of the multi-account engine.
+    The engine's Keepers belong to people, and the one ledger of the
+    installation would put each person's facts into the turns of every
+    other person's Keepers (RFC a-person-reads-their-own-and-the-shared,
+    §3.8). *)
+val curates_workspace_memory : Runtime_account_access.published -> bool
+
 val start_post_ready_owner_lanes :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Time.clock ->
   env:Eio_unix.Stdenv.base ->
+  access:Runtime_account_access.published ->
   Mcp_server.server_state ->
   string * string
 (** Start the transport-neutral post-readiness lanes in their required order:
     the application-owned system-LLM completion authority, then background
-    maintenance. Both HTTP and stdio use this sequence. *)
+    maintenance. Both HTTP and stdio use this sequence. The World Memory
+    curator starts only where {!curates_workspace_memory} holds for
+    [access]. *)
 
 (** Starts the engine on [access], which the caller published: the four
     steps the stdio server starts ({!initialize_owner_state_blocking},

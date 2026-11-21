@@ -1773,14 +1773,41 @@ let () =
         | [ entry ] -> entry.receipt.transition_id
         | _ -> Alcotest.fail "second transfer did not stage one outbox entry"
       in
+      (* #54351 lifted the transition outbox to a FIFO and made projecting an
+         already-retired transition_id a typed idempotent success. That contract
+         is pinned in test_keeper_event_queue_state_v2.ml ("Projecting an
+         already-retired transition_id while another entry (#1) remains queued
+         must return Ok () idempotently without passing #1 to
+         append_before_retire"). This stale worker therefore reports Ok (); what
+         must not change is that it neither retired nor projected the newer
+         transfer, which is asserted on the outbox itself below. *)
       (match
          Masc.Keeper_reaction_ledger.project_event_queue_transition_outbox_result
            ~base_path
            ~keeper_name:from_keeper
            ~expected_transition_id:first_transition_id
        with
-       | Error _ -> ()
-       | Ok () -> Alcotest.fail "stale recovery retired the newer transfer");
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      (* The stale id must not reach append_before_retire either: an already
+         retired transition has no entry left to project, so a stale worker
+         cannot consume the newer transfer's projection. *)
+      let stale_appends = ref 0 in
+      (match
+         Keeper_event_queue_persistence.project_transition_outbox_entry_result
+           ~transition_id:first_transition_id
+           ~append_before_retire:(fun _ (entry : Keeper_event_queue_state.outbox_entry) ->
+             incr stale_appends;
+             Alcotest.failf
+               "stale recovery projected the newer transfer %s"
+               entry.receipt.transition_id)
+           ~retain_previous:(fun _ -> true)
+           ~base_path
+           ~keeper_name:from_keeper
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      Alcotest.(check int) "stale recovery appended no projection" 0 !stale_appends;
       let retained_transition_id =
         match
           load_queue_state ~base_path ~keeper_name:from_keeper

@@ -645,14 +645,12 @@ let handle_keeper_checkpoints_post state req reqd body_str =
              | Checkpoints.Purge_keeper_not_found _ -> `Not_found
              | Purge_keeper_active _
              | Purge_checkpoint_invalid _
-             | Purge_librarian_rebase_refused _
              | Purge_source_changed -> `Conflict
              | Purge_checkpoint_unavailable _
-             | Purge_librarian_position_unreadable _
              | Purge_boundaries_unreadable _
              | Purge_continuity_unreadable _
+             | Purge_turn_log_unreadable _
              | Purge_librarian_cancel_failed _
-             | Purge_librarian_position_not_written _
              | Purge_backup_failed _
              | Purge_install_failed _
              | Purge_turn_log_not_written _ -> `Internal_server_error

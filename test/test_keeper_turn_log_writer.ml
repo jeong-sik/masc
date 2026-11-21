@@ -237,6 +237,33 @@ let test_announced_reset () =
        ~now:(mark ~trace:"b" 2) cleared)
 ;;
 
+let named_text ?(trace = "a") ~tail closed_messages =
+  match Writer.named ~tail ~trace ~closed_messages with
+  | Ok No_log -> "no log"
+  | Ok (Named_below below) -> Printf.sprintf "named below %d" below
+  | Error () -> "the head was not read"
+;;
+
+(* Which of the head's messages a unit will still read from the head: the
+   ones past the last unit's mark, so a purge may rewrite only the ones below
+   it. A replaced head has none below it: the next line is the reset [plan]
+   writes, which puts the mark at the new head's empty start. *)
+let test_named () =
+  let holds closed () = Ok closed in
+  check string "nothing written: the head is not read" "no log"
+    (named_text ~tail:Nothing_written (fun () -> fail "the head was read"));
+  check string "the head grew past the last unit: what that unit counts" "named below 3"
+    (named_text ~tail:(written ~open_turn:(open_at 40 (mark 5)) (mark 3)) (holds 9));
+  check string "another trace: none" "named below 0"
+    (named_text ~trace:"b" ~tail:(written (mark 9)) (holds 2));
+  check string "fewer closed messages on the same trace: none" "named below 0"
+    (named_text ~tail:(written (mark 9)) (holds 2));
+  check string "after that reset the same head is not replaced again" "named below 0"
+    (named_text ~trace:"b" ~tail:(written (mark ~trace:"b" 0)) (holds 2));
+  check string "a head that is not read: the error" "the head was not read"
+    (named_text ~tail:(written (mark 9)) (fun () -> Error ()))
+;;
+
 (* A path about to drop a head the log does not read: the last mark, then
    no closed message on the trace the path leaves. *)
 let test_drop () =
@@ -843,6 +870,7 @@ let () =
         ; test_case "a replaced head" `Quick test_replaced_head
         ; test_case "a reset inside the turn" `Quick test_reset_inside_the_turn
         ; test_case "an announced reset" `Quick test_announced_reset
+        ; test_case "what the log has named" `Quick test_named
         ; test_case "a drop" `Quick test_drop
         ; test_case "ranges" `Quick test_ranges
         ] )

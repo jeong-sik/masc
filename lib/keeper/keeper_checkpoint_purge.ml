@@ -13,124 +13,6 @@ let default_config =
   { keep_recent_messages = 20; strip_thinking = true; clear_tool_results = true }
 ;;
 
-type rebase =
-  | No_progress
-  | Rebased of
-      { before : Keeper_librarian_progress.t
-      ; after : Keeper_librarian_progress.t
-      }
-
-type refusal =
-  | Unread_atoms_present of
-      { end_atom : int
-      ; atom_count : int
-      }
-  | Position_beyond_history of
-      { end_atom : int
-      ; atom_count : int
-      }
-  | Position_in_other_trace of string
-  | Position_in_other_history of
-      { held : string
-      ; history : string
-      }
-  | Rewrite_leaves_no_atoms
-  | Position_unreadable of string
-  | Position_invariant_violation of string
-
-let refusal_to_string = function
-  | Unread_atoms_present { end_atom; atom_count } ->
-    Printf.sprintf
-      "the Librarian has read %d of %d atoms; the rewrite would clear tool output \
-       and reasoning in atoms it has not read yet"
-      end_atom
-      atom_count
-  | Position_beyond_history { end_atom; atom_count } ->
-    Printf.sprintf
-      "the Librarian position (%d) lies past the history's %d atoms; it is not a \
-       place in this checkpoint, and the keeper's Librarian files need a purge"
-      end_atom
-      atom_count
-  | Position_in_other_trace trace_id ->
-    Printf.sprintf "the Librarian position belongs to trace %s" trace_id
-  | Position_in_other_history { held; history } ->
-    Printf.sprintf
-      "the Librarian position belongs to another history (position digest %s, history \
-       digest %s)"
-      held
-      history
-  | Rewrite_leaves_no_atoms -> "the rewritten history has no atom to hold a position in"
-  | Position_unreadable detail -> "checkpoint position unavailable: " ^ detail
-  | Position_invariant_violation detail ->
-    "checkpoint position invariant violated: " ^ detail
-;;
-
-(* The position a rewrite of [before] moves, or why it must not move one:
-   none without a position, and otherwise the position only when it is in
-   this trace and at [before]'s end, digest and all. The rebase and a
-   recovery's cut ask this one question. *)
-let position_at_end ~(progress : Keeper_librarian_progress.t option) ~trace_id ~before =
-  match progress with
-  | None -> Ok None
-  | Some progress ->
-    if not (String.equal progress.position.trace_id trace_id)
-    then Error (Position_in_other_trace progress.position.trace_id)
-    else (
-      match Keeper_turn_boundaries.position_of_messages before with
-      | Error detail -> Error (Position_unreadable detail)
-      | Ok
-          (Keeper_turn_boundaries.Atom_history
-            { end_atom = atom_count; last_atom_digest = history_digest }) ->
-        let end_atom = progress.position.end_atom in
-        if end_atom < atom_count
-        then Error (Unread_atoms_present { end_atom; atom_count })
-        else if end_atom > atom_count
-        then Error (Position_beyond_history { end_atom; atom_count })
-        else if not (String.equal progress.position.last_atom_digest history_digest)
-        then
-          Error
-            (Position_in_other_history
-               { held = progress.position.last_atom_digest; history = history_digest })
-        else Ok (Some progress)
-      | Ok Keeper_turn_boundaries.Empty_atom_history ->
-        Error (Unread_atoms_present { end_atom = progress.position.end_atom; atom_count = 0 })
-      | Ok Keeper_turn_boundaries.No_atom_history ->
-        Error
-          (Position_invariant_violation
-             "position_of_messages(before) answered no_atom_history")
-      | Ok Keeper_turn_boundaries.Stale_noop ->
-        Error
-          (Position_invariant_violation
-             "position_of_messages(before) answered stale_noop"))
-;;
-
-let librarian_rebase ~progress ~trace_id ~before ~after =
-  match position_at_end ~progress ~trace_id ~before with
-  | Error refusal -> Error refusal
-  | Ok None -> Ok No_progress
-  | Ok (Some (progress : Keeper_librarian_progress.t)) ->
-    (match Keeper_turn_boundaries.position_of_messages after with
-     | Error detail -> Error (Position_unreadable detail)
-     | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
-       Ok
-         (Rebased
-            { before = progress
-            ; after =
-                { progress with
-                  position = { progress.position with end_atom; last_atom_digest }
-                }
-            })
-     | Ok Keeper_turn_boundaries.Empty_atom_history -> Error Rewrite_leaves_no_atoms
-     | Ok Keeper_turn_boundaries.No_atom_history ->
-       Error
-         (Position_invariant_violation
-            "position_of_messages(after) answered no_atom_history")
-     | Ok Keeper_turn_boundaries.Stale_noop ->
-       Error
-         (Position_invariant_violation
-            "position_of_messages(after) answered stale_noop"))
-;;
-
 let cleared_tool_result_content =
   "[old tool result content cleared by keeper checkpoint purge]"
 ;;
@@ -154,7 +36,6 @@ type purge_error =
       }
   | Kept_atom_rewritten of { atom : int }
   | Continuity_no_longer_fits of Librarian_continuity_snapshot.error
-  | Recovery_end_unwitnessed of { boundary_lines_seen : int }
 
 let purge_error_to_string = function
   | Repetition_boundary_invalid detail -> "repetition boundary invalid: " ^ detail
@@ -174,13 +55,6 @@ let purge_error_to_string = function
   | Continuity_no_longer_fits error ->
     "the Librarian working state fits the history before the purge and not after it: "
     ^ Librarian_continuity_snapshot.error_to_string error
-  | Recovery_end_unwitnessed { boundary_lines_seen } ->
-    Printf.sprintf
-      "recovery drops the history from its structural break on, and none of the %d \
-       turn-boundary lines the Librarian position has counted names an end ahead \
-       of the break; the position would stand on no line and the Librarian would \
-       stop there, so the keeper's Librarian files need a purge"
-      boundary_lines_seen
 ;;
 
 (* One purge work item: an ordinary message or a whole closed tool cycle.
@@ -303,92 +177,14 @@ let strip_reasoning_keeping_the_message message =
   | _ :: _ -> stripped, count
 ;;
 
-(* The closed units a recovery keeps. The break and everything after it go,
-   so the history's end moves, and a position the rebase moves
-   ({!position_at_end}: in this trace and at the history's end) moves with
-   it. The Librarian reads from a position only when a line it has counted
-   states it ({!Keeper_turn_boundaries.witness_line}), so the recovered
-   history ends at the last unit where such a line does: a turn end the
-   position has taken in. The position is at the history's end, so what is
-   cut between that turn end and the break is in atoms the Librarian has
-   read. A position the rebase refuses is not moved, and the history ends at
-   the break so that the rebase's refusal is the one reported; without a
-   position it ends there too.
-
-   [annotate] numbers atoms in one pass from the front, so a prefix holds the
-   atoms and openers the whole history gives it; one labelling prices every
-   unit boundary, and the one kept is checked again on its own messages. *)
-let recovered_units ~trace_id ~boundary_lines ~progress ~messages closed_prefix =
-  match position_at_end ~progress ~trace_id ~before:messages with
-  | Ok None | Error (_ : refusal) -> Ok closed_prefix
-  | Ok (Some { Keeper_librarian_progress.position = _; boundary_lines_seen }) ->
-    let stated ~end_atom ~last_atom_digest =
-      Option.is_some
-        (Keeper_turn_boundaries.witness_line
-           ~through:boundary_lines_seen
-           ~trace_id
-           ~end_atom
-           ~last_atom_digest
-           boundary_lines)
-    in
-    let messages_of units =
-      List.concat_map Keeper_transcript_unit.messages_of_closed_unit units
-    in
-    let units = Array.of_list closed_prefix in
-    let ahead_of_break = messages_of closed_prefix in
-    let labelled, _atom_count = Runtime_model_input_tail_window.annotate ahead_of_break in
-    let opening_digest =
-      Runtime_model_input_tail_window.atom_opening_digest ahead_of_break
-    in
-    (* [atoms_through.(m)]: the atoms the first [m] messages hold. *)
-    let atoms_through = Array.make (List.length ahead_of_break + 1) 0 in
-    List.iteri
-      (fun index (_message, label) ->
-         atoms_through.(index + 1)
-         <- (match label with
-             | Runtime_model_input_tail_window.Atom atom ->
-               max atoms_through.(index) (atom + 1)
-             | Runtime_model_input_tail_window.Pinned -> atoms_through.(index)))
-      labelled;
-    (* [messages_through.(u)]: the messages the first [u] units hold. *)
-    let messages_through = Array.make (Array.length units + 1) 0 in
-    Array.iteri
-      (fun index unit_ ->
-         messages_through.(index + 1)
-         <- messages_through.(index)
-            + List.length (Keeper_transcript_unit.messages_of_closed_unit unit_))
-      units;
-    let stated_at unit_count =
-      let end_atom = atoms_through.(messages_through.(unit_count)) in
-      end_atom >= 1
-      && (match opening_digest (end_atom - 1) with
-          | Some last_atom_digest -> stated ~end_atom ~last_atom_digest
-          | None -> false)
-    in
-    let rec last_stated unit_count =
-      if unit_count = 0
-      then None
-      else if stated_at unit_count
-      then Some unit_count
-      else last_stated (unit_count - 1)
-    in
-    let unwitnessed = Error (Recovery_end_unwitnessed { boundary_lines_seen }) in
-    match last_stated (Array.length units) with
-    | None -> unwitnessed
-    | Some unit_count ->
-      let kept = Array.to_list (Array.sub units 0 unit_count) in
-      (match Keeper_turn_boundaries.position_of_messages (messages_of kept) with
-       | Ok (Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest })
-         when stated ~end_atom ~last_atom_digest -> Ok kept
-       | Ok
-           ( Keeper_turn_boundaries.Atom_history _
-           | Keeper_turn_boundaries.Empty_atom_history
-           | Keeper_turn_boundaries.No_atom_history
-           | Keeper_turn_boundaries.Stale_noop )
-       | Error (_ : string) -> unwitnessed)
+(* A purge that dropped messages at a structural break shrinks the head. Two
+   things hang on that one answer and have to agree: [purge_messages] lifts
+   the turn-log rule, and [turn_log_line] asks for the [Reset] line that names
+   all the head holds before the change. *)
+let shrinks_the_head ~dropped_at_break = dropped_at_break > 0
 ;;
 
-let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messages =
+let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named messages =
   if config.keep_recent_messages < 0
   then
     Error
@@ -417,20 +213,13 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messa
     match Keeper_transcript_unit.partition ~quarantine:recovering messages with
     | Error structural -> Error (Invalid_input_structure structural)
     | Ok { closed_prefix; protected_suffix } ->
-      (match
-         if recovering
-         then recovered_units ~trace_id ~boundary_lines ~progress ~messages closed_prefix
-         else Ok closed_prefix
-       with
-       | Error error -> Error error
-       | Ok closed_prefix ->
         (* On a sound input the suffix is the open tail crash recovery needs,
            and it is kept. On a broken one it starts at the break. *)
         let protected_suffix = if recovering then [] else protected_suffix in
         let messages_before = List.length messages in
         (* The history the output keeps: all of it, or on a recovery the closed
-           units {!recovered_units} keeps. Atoms are counted on this history,
-           so a recovery keeps the last atom it returns, not one it drops. *)
+           units ahead of the break. Atoms are counted on this history, so a
+           recovery keeps the last atom it returns, not one it drops. *)
         let retained =
           if recovering
           then List.concat_map Keeper_transcript_unit.messages_of_closed_unit closed_prefix
@@ -509,6 +298,19 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messa
                kept_message.(index) <- true
              done)
           fitting_continuity;
+        (* A message the turn log has not named is read from this head by the
+           next unit, so it goes out as it is. A purge that shrinks the head
+           gets the [Reset] line that names all the head holds, before the
+           change ([turn_log_line], [Keeper_turn_log_reset.run]). The rule is
+           lifted on that same answer, so a purge with no such line never
+           rewrites what no line has named. *)
+        (match named with
+         | Keeper_turn_log_writer.Named_below below
+           when not (shrinks_the_head ~dropped_at_break) ->
+           for index = below to List.length retained - 1 do
+             kept_message.(index) <- true
+           done
+         | Keeper_turn_log_writer.Named_below _ | Keeper_turn_log_writer.No_log -> ());
         let items =
           let flat_index = ref (-1) in
           List.map
@@ -616,7 +418,7 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress messa
                   ; reasoning_blocks_stripped = !reasoning_blocks_stripped
                   ; tool_results_cleared = !tool_results_cleared
                   ; messages_dropped_at_structural_break = dropped_at_break
-                  } )))))
+                  } ))))
 ;;
 
 let purge
@@ -624,11 +426,11 @@ let purge
       ~trace_id
       ~boundary_lines
       ~continuity
-      ~progress
+      ~named
       (ckpt : Agent_core.Checkpoint.t)
   =
   match
-    purge_messages ~config ~trace_id ~boundary_lines ~continuity ~progress ckpt.messages
+    purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named ckpt.messages
   with
   | Error error -> Error error
   | Ok (messages, report) ->
@@ -640,4 +442,20 @@ let purge
         (Keeper_repetition_judged.reset_history ckpt.context)
       |> Result.map (fun context ->
            { ckpt with Agent_core.Checkpoint.messages; context }, report)
+;;
+
+(* The other half of [shrinks_the_head]: the line [Keeper_turn_log_reset.run]
+   writes before the purged head goes in. Every message the purge kept is
+   closed in the head it installs, so the mark after the change ends at
+   [messages_after]. *)
+let turn_log_line (report : report) : Keeper_turn_log_reset.line =
+  if shrinks_the_head ~dropped_at_break:report.messages_dropped_at_structural_break
+  then
+    Keeper_turn_log_reset.Announce
+      { cause = Keeper_turn_log.Recovered
+      ; after =
+          (fun (mark : Keeper_turn_log.mark) ->
+             { mark with Keeper_turn_log.closed_messages = report.messages_after })
+      }
+  else Keeper_turn_log_reset.No_line
 ;;

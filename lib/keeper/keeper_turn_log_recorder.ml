@@ -101,12 +101,14 @@ let tell_writer place lines =
       (Keeper_memory_writers.find ~base_path:place.base_path)
 ;;
 
+let log_path place =
+  Store.path_for_keepers_dir ~keepers_dir:place.keepers_dir ~keeper_id:place.keeper_name
+;;
+
 (* Reads the tail, plans against it, and appends at the end it read.
    [moved_at] is the end the attempt before read and could not append at. *)
 let append_planned place plan =
-  let path =
-    Store.path_for_keepers_dir ~keepers_dir:place.keepers_dir ~keeper_id:place.keeper_name
-  in
+  let path = log_path place in
   let rec attempt ~moved_at =
     let* tail = Result.map_error (fun error -> Tail_unread error) (Store.read_tail path) in
     let at_end =
@@ -145,6 +147,17 @@ let record_drop ~at ~new_log_id place ~after =
   append_planned place (fun tail ->
     let* now = mark_at place ~closed_messages:0 in
     Ok [ Writer.drop ~at ~new_log_id ~tail ~now ~after ])
+;;
+
+let named place =
+  let* tail = Result.map_error (fun error -> Tail_unread error) (Store.read_tail (log_path place)) in
+  Writer.named ~tail ~trace:place.session_id ~closed_messages:(fun () ->
+    let* head =
+      Result.map_error
+        (fun error -> Head_unread error)
+        (Head.read ~session_dir:place.session_dir ~session_id:place.session_id)
+    in
+    Ok head.closed_messages)
 ;;
 
 let record_start ~at ~new_log_id place =

@@ -25,15 +25,31 @@ that atom, so these pass through byte-exact:
   history. The request sends the working state in place of those atoms, so
   leaving them costs disk only.
 
+The tool reads the turn-boundary log and the working state for this. It does
+not read the Librarian position: a position names the last atom or the atom
+a completed turn ended on, and the first two rules keep both.
+
 After the rewrite the tool checks the atom count, each kept opening message
 and the working state, and installs nothing if any of them moved. A
 structurally broken checkpoint is recovered: the offending cycle and
 everything after it are dropped, and the report says how many messages that
-cost. With a Librarian position in the trace the recovery goes back further,
-to the last turn end that a boundary line the position has counted states,
-and the position moves there: the Librarian reads from a position only with
-such a line (#37772). `session_id`/`turn_count` are unchanged, so the save lands as an
+cost. `session_id`/`turn_count` are unchanged, so the save lands as an
 equal-watermark re-save through the locked validated store.
+
+The keeper's Memory writer reads from the head what its turn log has not
+named yet (RFC librarian-call-only-proposes §5.6). A purge that drops
+nothing rewrites only the messages the turn log's last unit counts, and
+every message after them passes through byte-exact; the CLI report's
+`turn log:` line says where that starts. A recovery first writes the turn
+log line that names everything the head holds, then installs. A purge that
+changes nothing installs nothing and backs nothing up.
+
+When the head was replaced since the turn log's last line (it is on another
+trace, or holds fewer closed messages than that line counts), no message is
+below the mark: the report shows `turn log: names the messages below 0`, and
+a purge that drops nothing changes nothing. The keeper's next turn writes the
+lines that name the head's messages; stop the keeper after that turn and
+purge again.
 
 ## Procedure
 
@@ -114,11 +130,23 @@ dashboard's checkpoint list fills again as the keeper saves.
 | Refusal | Why | What to do |
 |---|---|---|
 | Keeper still registered | a live keeper's next save overwrites the purge | stop it completely, preview again |
-| the Librarian has read N of M atoms | the rewrite would clear tool output and reasoning the Librarian has not absorbed | let the Librarian catch up, then purge |
 | turn-boundary log or Librarian working state unreadable | which messages must stay byte-exact is unknown | repair or remove the unreadable file first |
+| the keeper's turn log, or the head it is compared with, does not read | which messages the Memory writer still reads from the head is unknown; it is never taken as "no turn log" | leave both files untouched and report the keeper and the error |
 | the Librarian working state fits the history before the purge and not after it | a recovery dropped a tail the working state covers | with the server stopped, remove `<runtime keepers dir>/<keeper>/librarian-continuity.json`, then purge; the Librarian writes it again from atom 0 |
-| recovery drops the history from its structural break on, and none of the N turn-boundary lines the Librarian position has counted names an end ahead of the break | moved to an end no line states, the position would stop the Librarian for good (#37772) | leave the file untouched and record the keeper, the trace and the error in #37772 |
 | structural validation fails even with its break set aside | the write boundary admitted a history recovery cannot cut back to a sound prefix (#25443) | leave the file untouched and record the trace and error in #25443 |
+
+## After a recovery
+
+A recovery ends the history at the structural break. It does not read or move
+the old Librarian read position
+(`<runtime keepers dir>/<keeper>/librarian-progress.json`), so that position
+can be left past the new end. The server no longer starts the lane that read
+atoms from that position, so nothing stops on it: the keeper runs on the
+recovered checkpoint, and the Memory writer that reads the turn log goes on
+from the recovery's `Reset` line. The Memory health response still reads the
+file for its `read_position` and `stalled` values, so both show the old
+position. Leave the file untouched; the Librarian hard cut removes it with
+the other old Librarian files (RFC librarian-call-only-proposes 19.1).
 
 ## Live resume after a purge
 

@@ -3940,13 +3940,16 @@ status: reference
   이력을 돌려주지 않고 오류를 낸다. carried-front 시작 위치 근거는 남기지 않는다 — purge가 그
   atom의 여는 message를 다시 썼으면 시작 위치 근거가 안 맞아 요청은 마지막 완료 turn이 끝난 자리에서
   시작한다. 구조적으로 깨진 입력의 복구는 깨진 꼬리를 버리므로 끝이 옮겨지는 것이
-  설계다. 복구가 Librarian 위치를 옮길 때는 `witness_line`이 확인한 마지막 turn
-  끝에서 이력을 끝내고, 그런 줄이 없으면 `Recovery_end_unwitnessed`로 거절한다.
-  위치가 없거나 rebase가 위치를 거절하면 깨진 곳에서 끝낸다.
+  설계다. 복구는 깨진 곳에서 이력을 끝낸다.
 
-  Librarian의 atom 위치(`librarian_rebase`)는 sound transcript면 그대로 돌려받고, 깨진
-  transcript 복구에서만 새 끝으로 옮긴다. 어느 쪽이든 Librarian이 아직 읽을 atom을
-  남겼으면 재작성을 거부한다. continuity 스냅숏(`librarian-continuity.json`)은 지우지
+  Keeper의 Memory writer는 턴 기록(turn log)이 아직 이름 붙이지 않은 message를 head에서
+  읽는다(RFC librarian-call-only-proposes §5.6). 그래서 아무것도 버리지 않는 purge는
+  마지막 단위가 센 message만 다시 쓴다(`Keeper_turn_log_writer.named`). 그 뒤
+  message는 닫혔든 열렸든 바이트 그대로 둔다. 턴 기록의 마지막 줄 뒤에 head가
+  바뀌었으면 다시 쓰는 message가 없다. 턴 기록이 없는 Keeper는 이 규칙에 걸리지
+  않는다. 턴 기록을 못 읽으면 purge를 거절한다. 복구는 버리기 전에 head가 가진
+  message를 모두 이름 붙이는 `Reset` 줄을 먼저 쓴다. 바뀐 것이 없는 purge는 아무것도
+  설치하지 않는다. continuity 스냅숏(`librarian-continuity.json`)은 지우지
   않는다 — 스냅숏이 덮는 앞부분을 바이트 그대로 남겨 purge 뒤에도 맞는다. 복구가 그
   부분을 버리면 `Continuity_no_longer_fits`로 거절되고, 서버를 멈춘 채
   `librarian-continuity.json`을 지우면 통과한다. 서버의 dashboard 청소 동작은 그 전에

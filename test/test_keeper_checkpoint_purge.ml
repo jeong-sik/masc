@@ -7,6 +7,7 @@
 module Purge = Masc.Keeper_checkpoint_purge
 module Types = Agent_core.Types
 module Keeper_transcript_unit = Masc.Keeper_transcript_unit
+module Writer = Masc.Keeper_turn_log_writer
 
 let text_message role text : Types.message =
   { origin = Llm_provider.Types.Conversation;  role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
@@ -60,15 +61,15 @@ let filler n =
 
 let no_tail_config = { Purge.default_config with keep_recent_messages = 0 }
 
-(* A purge with no boundary log, no Librarian working state and no Librarian
-   position: only the history's own end names a message. *)
+(* A purge with no boundary log, no Librarian working state and no turn log:
+   only the history's own end names a message. *)
 let purge_plain ~config messages =
   Purge.purge_messages
     ~config
     ~trace_id:"trace-purge-plain"
     ~boundary_lines:[]
     ~continuity:None
-    ~progress:None
+    ~named:Writer.No_log
     messages
 
 let purge_checkpoint ~config (checkpoint : Agent_core.Checkpoint.t) =
@@ -77,7 +78,7 @@ let purge_checkpoint ~config (checkpoint : Agent_core.Checkpoint.t) =
     ~trace_id:checkpoint.session_id
     ~boundary_lines:[]
     ~continuity:None
-    ~progress:None
+    ~named:Writer.No_log
     checkpoint
 
 let run ?(config = no_tail_config) messages =
@@ -496,210 +497,11 @@ let test_checkpoint_fields_pass_through () =
       checkpoint.turn_count
       purged.Agent_core.Checkpoint.turn_count
 
-(* RFC librarian-lifecycle §10-2. Each case is the code counterpart of one
-   model in [specs/bug-models/LibrarianRead-purge-trim*.cfg]: the model says
-   what a purge that ignores the rule loses, the case says the rule here
-   refuses or moves the position the way the surviving model does. *)
-module Progress = Masc.Keeper_librarian_progress
 module Boundaries = Masc.Keeper_turn_boundaries
 module Range = Masc.Keeper_librarian_range
 module Window = Runtime_model_input_tail_window
 
 let fixture_trace = (checkpoint_fixture ()).Agent_core.Checkpoint.session_id
-let fixture_boundary_lines_seen = 7
-
-let rewritten_fixture () =
-  let checkpoint = checkpoint_fixture () in
-  match purge_checkpoint ~config:no_tail_config checkpoint with
-  | Error _ -> Alcotest.fail "checkpoint purge failed"
-  | Ok (purged, _) -> checkpoint.messages, purged.Agent_core.Checkpoint.messages
-;;
-
-let atom_position messages =
-  match Boundaries.position_of_messages messages with
-  | Ok (Boundaries.Atom_history { end_atom; last_atom_digest }) -> end_atom, last_atom_digest
-  | Ok _ -> Alcotest.fail "fixture history has no atoms"
-  | Error detail -> Alcotest.fail detail
-;;
-
-(* A position [end_atom] atoms into [messages], as a round would have written
-   it: the digest is the opening of atom [end_atom - 1]. *)
-let progress_at ?(trace_id = fixture_trace) messages ~end_atom : Progress.t =
-  let last_atom_digest =
-    match Window.atom_opening_digest messages (end_atom - 1) with
-    | Some digest -> digest
-    | None -> Alcotest.failf "fixture history has no atom %d" (end_atom - 1)
-  in
-  { position = { trace_id; end_atom; last_atom_digest }
-  ; boundary_lines_seen = fixture_boundary_lines_seen
-  }
-;;
-
-let rebase ?(trace_id = fixture_trace) ~progress ~before ~after () =
-  Purge.librarian_rebase ~progress ~trace_id ~before ~after
-;;
-
-(* The fixture rewritten with its position at the end: the messages before
-   and after, the position given, and the pair the rebase answered. *)
-let rebased_at_end () =
-  let before, after = rewritten_fixture () in
-  let progress = progress_at before ~end_atom:(atom_count before) in
-  match rebase ~progress:(Some progress) ~before ~after () with
-  | Ok (Purge.Rebased { before = moved_from; after = moved_to }) ->
-    before, after, progress, moved_from, moved_to
-  | Ok Purge.No_progress -> Alcotest.fail "a position was given and none came back"
-  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
-;;
-
-(* [LibrarianRead-purge-trim-buggy.cfg] loses an atom because the purge
-   keeps the position; [-by-turns-buggy.cfg] loses one because it asks
-   whether every turn ended, while a turn that saved and died leaves an atom
-   no line names. The rule asks about atoms and never reads the log: an
-   atom short of the end refuses, whatever the log says. *)
-let test_librarian_rebase_refuses_unread_atoms () =
-  let before, after = rewritten_fixture () in
-  let count = atom_count before in
-  let progress = progress_at before ~end_atom:(count - 1) in
-  match rebase ~progress:(Some progress) ~before ~after () with
-  | Error (Purge.Unread_atoms_present { end_atom; atom_count }) ->
-    Alcotest.(check int) "the position that refused" (count - 1) end_atom;
-    Alcotest.(check int) "against the history's atoms" count atom_count
-  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
-  | Ok _ -> Alcotest.fail "a rewrite over an unread atom was allowed"
-;;
-
-(* A purge keeps the history's end, so the position at the end comes back as
-   it was: the same atom count, the same digest. *)
-let test_librarian_rebase_keeps_the_position_at_the_end () =
-  let before, after, progress, moved_from, moved_to = rebased_at_end () in
-  let end_atom, last_atom_digest = atom_position before in
-  Alcotest.(check (pair int string)) "the rewritten end is the old end"
-    (end_atom, last_atom_digest) (atom_position after);
-  Alcotest.(check bool) "the rebase hands back the position it was given" true
-    (moved_from == progress);
-  Alcotest.(check int) "end_atom is unchanged" end_atom moved_to.position.end_atom;
-  Alcotest.(check string) "the digest is unchanged" last_atom_digest
-    moved_to.position.last_atom_digest;
-  Alcotest.(check string) "the trace is unchanged" fixture_trace
-    moved_to.position.trace_id
-;;
-
-(* [LibrarianRead-purge-trim-counting-lines-buggy.cfg] loses an atom because
-   the purge raises the counted lines to the log's length and swallows a
-   restart line no round has seen. The count is not the purge's to set. *)
-let test_librarian_rebase_keeps_boundary_lines_seen () =
-  let _before, _after, _progress, _moved_from, moved_to = rebased_at_end () in
-  Alcotest.(check int) "boundary_lines_seen is untouched" fixture_boundary_lines_seen
-    moved_to.boundary_lines_seen
-;;
-
-(* The end line the last turn wrote stays in the log after the purge, and it
-   still names the rewritten history's end: its end_atom and digest are the
-   position's. So the next round has nothing to read and does not stop, and
-   the durable consumer finds that line as the position's witness rather than
-   stopping on [Progress_boundary_missing]. *)
-let test_librarian_rebase_leaves_nothing_to_read () =
-  let before, after, old_progress, _moved_from, moved_to = rebased_at_end () in
-  let old_end_line =
-    match Boundaries.position_of_messages before with
-    | Ok position ->
-      { Boundaries.recorded_at = 100.0
-      ; event =
-          Boundaries.Turn_ended
-            { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn:1
-            ; history_at_start = Boundaries.Continued_history
-            ; position
-            }
-      }
-    | Error detail -> Alcotest.fail detail
-  in
-  let select progress =
-    Range.select
-      ~trace_id:fixture_trace
-      ~lines:[ 1, Ok old_end_line ]
-      ~progress:(Some progress)
-      ~messages:after
-      Range.All_unread
-  in
-  let old_end = atom_position before in
-  (match old_end_line.event with
-   | Boundaries.Turn_ended
-       { position = Boundaries.Atom_history { end_atom; last_atom_digest }; _ } ->
-     Alcotest.(check (pair int string)) "the old end line names the rewritten end"
-       (atom_position after) (end_atom, last_atom_digest);
-     Alcotest.(check (pair int string)) "and the position it witnesses"
-       (moved_to.position.end_atom, moved_to.position.last_atom_digest)
-       (end_atom, last_atom_digest)
-   | _ -> Alcotest.fail "the fixture end line is not an atom position");
-  Alcotest.(check (pair int string)) "the old position is the rebased one" old_end
-    (old_progress.position.end_atom, old_progress.position.last_atom_digest);
-  match select moved_to with
-  | Range.Nothing_to_read -> ()
-  | Range.Read _ | Range.Baseline _ | Range.Position_in_other_trace _ ->
-    Alcotest.fail "the position found something to read in a fully read history"
-  | Range.Stop _ -> Alcotest.fail "the position stopped the round on the rewritten history"
-;;
-
-let test_librarian_rebase_without_a_position () =
-  let before, after = rewritten_fixture () in
-  match rebase ~progress:None ~before ~after () with
-  | Ok Purge.No_progress -> ()
-  | Ok (Purge.Rebased _) -> Alcotest.fail "no position was given and one came back"
-  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
-;;
-
-let test_librarian_rebase_refuses_another_trace () =
-  let before, after = rewritten_fixture () in
-  let progress = progress_at ~trace_id:"trace-other" before ~end_atom:(atom_count before) in
-  match rebase ~progress:(Some progress) ~before ~after () with
-  | Error (Purge.Position_in_other_trace trace_id) ->
-    Alcotest.(check string) "names the position's trace" "trace-other" trace_id
-  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
-  | Ok _ -> Alcotest.fail "a position of another trace was moved"
-;;
-
-let test_librarian_rebase_refuses_a_position_beyond_the_history () =
-  let before, after = rewritten_fixture () in
-  let count = atom_count before in
-  (* A position one past the end, with the digest a round would have left at
-     the real end: the digest is not what refuses here. *)
-  let at_end = progress_at before ~end_atom:count in
-  let progress = { at_end with position = { at_end.position with end_atom = count + 1 } } in
-  match rebase ~progress:(Some progress) ~before ~after () with
-  | Error (Purge.Position_beyond_history { end_atom; atom_count }) ->
-    Alcotest.(check int) "the position that refused" (count + 1) end_atom;
-    Alcotest.(check int) "against the history's atoms" count atom_count
-  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
-  | Ok _ -> Alcotest.fail "a position past the history was moved"
-;;
-
-let test_librarian_rebase_refuses_another_history_at_the_same_end () =
-  let before, after = rewritten_fixture () in
-  let count = atom_count before in
-  let at_end = progress_at before ~end_atom:count in
-  let held = "another-history-digest" in
-  let progress =
-    { at_end with
-      position = { at_end.position with last_atom_digest = held }
-    }
-  in
-  let _, history = atom_position before in
-  match rebase ~progress:(Some progress) ~before ~after () with
-  | Error (Purge.Position_in_other_history digests) ->
-    Alcotest.(check string) "names the held digest" held digests.held;
-    Alcotest.(check string) "names the checkpoint digest" history digests.history
-  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
-  | Ok _ -> Alcotest.fail "a position from another same-length history was moved"
-;;
-
-let test_librarian_rebase_refuses_a_rewrite_with_no_atoms () =
-  let before, _after = rewritten_fixture () in
-  let progress = progress_at before ~end_atom:(atom_count before) in
-  match rebase ~progress:(Some progress) ~before ~after:[] () with
-  | Error Purge.Rewrite_leaves_no_atoms -> ()
-  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
-  | Ok _ -> Alcotest.fail "a position was moved into a history with no atom"
-;;
 
 let rec workspace_contents dir =
   Sys.readdir dir
@@ -768,25 +570,6 @@ let test_cli_workspace ?(linked_worktree = false) () =
        | Ok () -> ()
        | Error detail -> Alcotest.failf "keeper meta: %s" detail);
       let before = workspace_contents owner_root in
-      let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
-      let write_progress ~end_atom =
-        match
-          Progress.write
-            ~keepers_dir:runtime_keepers_dir
-            ~keeper_id:keeper_name
-            (progress_at checkpoint.messages ~end_atom)
-        with
-        | Ok () -> ()
-        | Error error -> Alcotest.fail (Progress.write_error_to_string error)
-      in
-      let read_progress () =
-        match
-          Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
-        with
-        | Ok (Some progress) -> progress
-        | Ok None -> Alcotest.fail "the Librarian position is gone"
-        | Error error -> Alcotest.fail (Progress.read_error_to_string error)
-      in
       let run_cli
             ?(from_cwd = false) ?(exit_code = 0) ?(reports_checkpoint = true)
             ?(identity = [ "--keeper"; keeper_name ]) args =
@@ -847,17 +630,6 @@ let test_cli_workspace ?(linked_worktree = false) () =
       Alcotest.(check (list (pair string (option string))))
         "no base or recorded default uses current workspace without writes"
         before (workspace_contents owner_root);
-      (* RFC librarian-lifecycle §10-2 at the CLI: a position short of the
-         end refuses the apply and writes nothing; a position at the end stays
-         where it was, because the purge keeps the history's end. *)
-      let atoms = atom_count checkpoint.messages in
-      write_progress ~end_atom:(atoms - 1);
-      let before_refused = workspace_contents owner_root in
-      run_cli ~exit_code:1 [ "--base"; base_path; "--apply" ];
-      Alcotest.(check (list (pair string (option string))))
-        "a refused apply writes nothing"
-        before_refused (workspace_contents owner_root);
-      write_progress ~end_atom:atoms;
       (* An archive entry of the checkpoint before the purge names the
          content the purge removes; the apply deletes it. *)
       let archived =
@@ -896,14 +668,12 @@ let test_cli_workspace ?(linked_worktree = false) () =
            Alcotest.(check int) "apply preserves turn watermark" checkpoint.turn_count
              purged.turn_count;
            Alcotest.(check string) "apply preserves session identity" checkpoint.session_id
-             purged.session_id;
-           let moved = read_progress () in
-           Alcotest.(check int) "apply leaves the Librarian position at the end"
-             atoms moved.position.end_atom;
-           Alcotest.(check int) "which is still the history's end"
-             (atom_count purged.messages) moved.position.end_atom;
-           Alcotest.(check int) "apply leaves boundary_lines_seen alone"
-             fixture_boundary_lines_seen moved.boundary_lines_seen))
+             purged.session_id);
+      Alcotest.(check bool) "a keeper with no turn log is purged without starting one" false
+        (Sys.file_exists
+           (Masc.Keeper_turn_log_store.path_for_keepers_dir
+              ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+              ~keeper_id:keeper_name)))
 
 (* RFC librarian-call-only-proposes §5.2, §5.6 at the CLI: a recovery closes
    the open messages, writes the Keeper's turn log line, then installs. A line
@@ -1016,8 +786,9 @@ let test_cli_recovery_writes_the_turn_log_line () =
   let started = Fs_compat.load_file log_path in
   Fs_compat.save_file log_path (started ^ "not a line\n");
   apply ~exit_code:1;
-  Alcotest.(check int) "a line that fails leaves every message"
-    (List.length messages) (head ()).closed_messages;
+  Alcotest.(check int) "a turn log it cannot read leaves every message"
+    (List.length messages)
+    ((head ()).closed_messages + (head ()).open_messages);
   Alcotest.(check (list string)) "and backs nothing up" [] (backups ());
   Fs_compat.save_file log_path started;
   apply ~exit_code:0;
@@ -1051,14 +822,14 @@ let turn_ended_line ~line ~absolute_turn messages ~end_atom : Purge.boundary_lin
       } )
 ;;
 
-let purge_with ?progress ~boundary_lines ~continuity messages =
+let purge_with ?(named = Writer.No_log) ~boundary_lines ~continuity messages =
   match
     Purge.purge_messages
       ~config:no_tail_config
       ~trace_id:fixture_trace
       ~boundary_lines
       ~continuity
-      ~progress
+      ~named
       messages
   with
   | Ok result -> result
@@ -1172,7 +943,7 @@ let test_a_fitting_working_state_keeps_its_prefix ~with_unread () =
       {message with Types.content=[tool_result ~content:"changed unread original" "a"]}
       else message) messages in
     match Purge.purge_messages ~config:no_tail_config ~trace_id:fixture_trace
-      ~boundary_lines:lines ~continuity:(Some snapshot) ~progress:None changed with
+      ~boundary_lines:lines ~continuity:(Some snapshot) ~named:Writer.No_log changed with
     | Error (Purge.Continuity_no_longer_fits _) -> ()
     | Error error -> Alcotest.fail (Purge.purge_error_to_string error)
     | Ok _ -> Alcotest.fail "a nonfitting unread source was destructively purged")
@@ -1217,223 +988,56 @@ let overlapping_cycles () =
   ]
 ;;
 
-(* masc #37772. Two turns: the first ends after two atoms and its line says
-   so; the second asks, answers, and then breaks on an overlapping tool cycle.
-   The broken turn still ended, and the Librarian read to its end. *)
-let broken_second_turn () =
-  let first_turn =
-    [ text_message Types.User "q1"; block_message Types.Assistant [ Types.Text "a1" ] ]
-  in
-  let before_the_break =
-    [ text_message Types.User "q2"
-    ; block_message Types.Assistant [ unsigned_thinking "t2"; Types.Text "a2" ]
+(* RFC librarian-call-only-proposes §5.6. A Keeper's Memory writer reads the
+   messages past the last unit's mark from the head, so a purge that drops
+   nothing leaves them byte-exact and rewrites only the ones below it. *)
+let test_a_purge_rewrites_only_what_the_turn_log_named () =
+  let turn reasoning tool_id reply =
+    [ text_message Types.User "(autonomous wake)"
+    ; block_message Types.Assistant [ unsigned_thinking reasoning; tool_use tool_id ]
+    ; { (block_message Types.Tool [ tool_result tool_id ]) with tool_call_id = Some tool_id }
+    ; block_message Types.Assistant [ Types.Text reply ]
     ]
   in
-  let messages = first_turn @ before_the_break @ overlapping_cycles () in
-  let lines =
-    [ turn_ended_line ~line:1 ~absolute_turn:1 messages ~end_atom:2
-    ; turn_ended_line ~line:2 ~absolute_turn:2 messages ~end_atom:(atom_count messages)
-    ]
-  in
-  let progress =
-    { (progress_at messages ~end_atom:(atom_count messages)) with boundary_lines_seen = 2 }
-  in
-  first_turn, before_the_break, messages, lines, progress
+  let named_turn = turn "read" "a" "one" in
+  let unread_turn = turn "not read yet" "b" "two" in
+  let messages = named_turn @ unread_turn in
+  let purge named = purge_with ~named ~boundary_lines:[] ~continuity:None messages in
+  let shown messages = List.map Types.show_message messages in
+  let purged, report = purge (Writer.Named_below (List.length named_turn)) in
+  Alcotest.(check (list string)) "the turn past the mark goes out as it is"
+    (shown unread_turn)
+    (shown (List.filteri (fun index _ -> index >= List.length named_turn) purged));
+  Alcotest.(check (pair int int)) "and the named turn is purged" (1, 1)
+    (report.reasoning_blocks_stripped, report.tool_results_cleared);
+  let at_the_start, _ = purge (Writer.Named_below 0) in
+  Alcotest.(check (list string)) "a mark at the head's start keeps every message"
+    (shown messages) (shown at_the_start);
+  let _, without_a_log = purge Writer.No_log in
+  Alcotest.(check (pair int int)) "with no turn log both turns are purged" (2, 2)
+    (without_a_log.reasoning_blocks_stripped, without_a_log.tool_results_cleared)
 ;;
 
-let stated_by ~(progress : Progress.t) lines messages =
-  let end_atom, last_atom_digest = atom_position messages in
-  Option.map
-    (fun (line, _recorded_at, _turn_ref) -> line)
-    (Boundaries.witness_line
-       ~through:progress.boundary_lines_seen
-       ~trace_id:fixture_trace
-       ~end_atom
-       ~last_atom_digest
-       lines)
-;;
-
-(* Without a position nothing needs a line, and the recovery keeps every
-   closed unit ahead of the break -- half of the second turn, an end no line
-   states. With one, it goes back to the first turn's end, which a line the
-   position counted states, and the rebase moves the position there: the
-   Librarian finds its line through the same lookup it reads by. Moved to
-   the break instead, the position would stop every round
-   ([specs/bug-models/LibrarianRead-purge-trim-anywhere-live-buggy.cfg]). *)
-let test_recovery_ends_where_a_counted_line_states_the_end () =
-  let first_turn, before_the_break, messages, lines, progress = broken_second_turn () in
-  let at_break, _ = purge_with ~boundary_lines:lines ~continuity:None messages in
-  Alcotest.(check int) "without a position it ends at the break"
-    (List.length (first_turn @ before_the_break)) (List.length at_break);
-  Alcotest.(check (option int)) "an end no counted line states" None
-    (stated_by ~progress lines at_break);
-  let recovered, report =
-    purge_with ~progress ~boundary_lines:lines ~continuity:None messages
-  in
-  Alcotest.(check (list string)) "with one it ends at the first turn's end, byte-exact"
-    (List.map Types.show_message first_turn) (List.map Types.show_message recovered);
-  Alcotest.(check int) "and counts what it cut as dropped"
-    (List.length messages - List.length first_turn)
-    report.messages_dropped_at_structural_break;
-  match rebase ~progress:(Some progress) ~before:messages ~after:recovered () with
-  | Ok (Purge.Rebased { before = _; after }) ->
-    Alcotest.(check int) "the position moves to that end" 2 after.position.end_atom;
-    Alcotest.(check (option int)) "and stands on the line that states it" (Some 1)
-      (stated_by ~progress:after lines recovered)
-  | Ok Purge.No_progress -> Alcotest.fail "a position was given and none came back"
-  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
-;;
-
-(* A line past [boundary_lines_seen] is not one the position took in, so it
-   is no place to move it: the Librarian would not find it there either. *)
-let test_recovery_passes_over_a_line_the_position_has_not_counted () =
-  let first_turn, before_the_break, messages, lines, progress = broken_second_turn () in
-  let uncounted =
-    turn_ended_line ~line:3 ~absolute_turn:3 messages
-      ~end_atom:(atom_count (first_turn @ before_the_break))
-  in
-  let recovered, _ =
-    purge_with
-      ~progress
-      ~boundary_lines:(lines @ [ uncounted ])
-      ~continuity:None
-      messages
-  in
-  Alcotest.(check int) "it goes back to the counted turn end"
-    (List.length first_turn) (List.length recovered)
-;;
-
-(* No counted line states an end ahead of the break: every end the recovery
-   could leave would strand the position, so it is refused. *)
-let test_recovery_without_a_counted_end_is_refused () =
-  let _first_turn, _before_the_break, messages, lines, progress = broken_second_turn () in
-  let only_the_broken_turn = List.filter (fun (line, _) -> line = 2) lines in
-  match
-    Purge.purge_messages
-      ~config:no_tail_config
-      ~trace_id:fixture_trace
-      ~boundary_lines:only_the_broken_turn
-      ~continuity:None
-      ~progress:(Some progress)
-      messages
-  with
-  | Error (Purge.Recovery_end_unwitnessed { boundary_lines_seen }) ->
-    Alcotest.(check int) "it names the lines it looked through" 2 boundary_lines_seen
-  | Error error -> Alcotest.fail (Purge.purge_error_to_string error)
-  | Ok _ -> Alcotest.fail "a recovery was allowed to strand the position"
-;;
-
-(* A position in another trace is not moved into this history (the rebase
-   refuses it), so it asks for no line here and the recovery ends at the
-   break. *)
-let test_recovery_ignores_a_position_of_another_trace () =
-  let first_turn, before_the_break, messages, lines, progress = broken_second_turn () in
-  let elsewhere =
-    { progress with position = { progress.position with trace_id = "trace-elsewhere" } }
-  in
-  let recovered, _ =
-    purge_with ~progress:elsewhere ~boundary_lines:lines ~continuity:None messages
-  in
-  Alcotest.(check int) "it ends at the break"
-    (List.length (first_turn @ before_the_break)) (List.length recovered)
-;;
-
-(* A sound history is not cut, position or not: its end does not move. *)
-let test_a_sound_history_is_not_cut_for_a_position () =
-  let first_turn, before_the_break, _messages, lines, progress = broken_second_turn () in
-  let sound = first_turn @ before_the_break in
-  let purged, report =
-    purge_with ~progress ~boundary_lines:lines ~continuity:None sound
-  in
-  Alcotest.(check int) "every message stays" (List.length sound) (List.length purged);
-  Alcotest.(check int) "nothing dropped" 0 report.messages_dropped_at_structural_break
-;;
-
-(* Two turns ended ahead of the break, and a line the position counted
-   states each end. The recovery keeps the later: the longest history the
-   position can stand on. *)
-let two_ended_turns_then_a_break () =
-  let first_turn =
-    [ text_message Types.User "q1"; block_message Types.Assistant [ Types.Text "a1" ] ]
-  in
-  let second_turn =
-    [ text_message Types.User "q2"; block_message Types.Assistant [ Types.Text "a2" ] ]
-  in
+(* A recovery's [Reset] line names everything the head holds before the tail
+   goes, so the mark holds nothing back: the history a recovery keeps is
+   purged as a history with no turn log is. *)
+let test_a_recovery_rewrites_past_the_mark () =
   let messages =
-    first_turn @ second_turn @ [ text_message Types.User "q3" ] @ overlapping_cycles ()
-  in
-  let progress =
-    { (progress_at messages ~end_atom:(atom_count messages)) with boundary_lines_seen = 3 }
-  in
-  first_turn, second_turn, messages, progress
-;;
-
-let test_recovery_keeps_the_latest_counted_turn_end () =
-  let first_turn, second_turn, messages, progress = two_ended_turns_then_a_break () in
-  let lines =
-    [ turn_ended_line ~line:1 ~absolute_turn:1 messages ~end_atom:2
-    ; turn_ended_line ~line:2 ~absolute_turn:2 messages ~end_atom:4
-    ; turn_ended_line ~line:3 ~absolute_turn:3 messages ~end_atom:(atom_count messages)
+    [ text_message Types.User "q1"
+    ; block_message Types.Assistant [ unsigned_thinking "t1"; Types.Text "a1" ]
+    ; text_message Types.User "q2"
+    ; block_message Types.Assistant [ Types.Text "a2" ]
     ]
+    @ overlapping_cycles ()
   in
-  let recovered, _ = purge_with ~progress ~boundary_lines:lines ~continuity:None messages in
-  Alcotest.(check (list string)) "it keeps both ended turns"
-    (List.map Types.show_message (first_turn @ second_turn))
-    (List.map Types.show_message recovered)
-;;
-
-(* A line with the end count of the second turn but another history's digest
-   is not the second turn's end: the Librarian would not find the position on
-   it, so the recovery does not stop there. *)
-let test_recovery_needs_the_digest_as_well_as_the_count () =
-  let first_turn, _second_turn, messages, progress = two_ended_turns_then_a_break () in
-  let of_another_history : Purge.boundary_line =
-    ( 2
-    , Ok
-        { Boundaries.recorded_at = 100.0
-        ; event =
-            Boundaries.Turn_ended
-              { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn:2
-              ; history_at_start = Boundaries.Continued_history
-              ; position =
-                  Boundaries.Atom_history
-                    { end_atom = 4; last_atom_digest = "a digest of another history" }
-              }
-        } )
+  let recovered, report =
+    purge_with ~named:(Writer.Named_below 0) ~boundary_lines:[] ~continuity:None messages
   in
-  let lines =
-    [ turn_ended_line ~line:1 ~absolute_turn:1 messages ~end_atom:2
-    ; of_another_history
-    ; turn_ended_line ~line:3 ~absolute_turn:3 messages ~end_atom:(atom_count messages)
-    ]
-  in
-  let recovered, _ = purge_with ~progress ~boundary_lines:lines ~continuity:None messages in
-  Alcotest.(check (list string)) "it goes back to the first turn's end"
-    (List.map Types.show_message first_turn)
-    (List.map Types.show_message recovered)
-;;
-
-(* A position short of the history's end is not moved: the rebase refuses it
-   for its unread atoms. The recovery then ends at the break and asks no line
-   of it, so that refusal, not a missing turn end, is what the operator
-   reads. *)
-let test_recovery_leaves_an_unread_position_to_the_rebase () =
-  let first_turn, before_the_break, messages, lines, _progress = broken_second_turn () in
-  let short =
-    { (progress_at messages ~end_atom:(atom_count messages - 1)) with
-      boundary_lines_seen = 2
-    }
-  in
-  let only_the_broken_turn = List.filter (fun (line, _) -> line = 2) lines in
-  let recovered, _ =
-    purge_with ~progress:short ~boundary_lines:only_the_broken_turn ~continuity:None messages
-  in
-  Alcotest.(check int) "it ends at the break"
-    (List.length (first_turn @ before_the_break)) (List.length recovered);
-  match rebase ~progress:(Some short) ~before:messages ~after:recovered () with
-  | Error (Purge.Unread_atoms_present _) -> ()
-  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
-  | Ok _ -> Alcotest.fail "a position with unread atoms was moved"
+  Alcotest.(check int) "the break is dropped" (List.length (overlapping_cycles ()))
+    report.messages_dropped_at_structural_break;
+  Alcotest.(check int) "what it keeps ends where the break began" 4 (List.length recovered);
+  Alcotest.(check int) "and the reply below the mark is stripped" 1
+    report.reasoning_blocks_stripped
 ;;
 
 (* The protected tail is the last [keep_recent_messages] messages of the
@@ -1532,38 +1136,6 @@ let () =
             `Quick
             test_recovery_keeps_the_last_atom_it_returns
         ; Alcotest.test_case
-            "recovery ends where a counted line states the end"
-            `Quick
-            test_recovery_ends_where_a_counted_line_states_the_end
-        ; Alcotest.test_case
-            "recovery passes over a line the position has not counted"
-            `Quick
-            test_recovery_passes_over_a_line_the_position_has_not_counted
-        ; Alcotest.test_case
-            "recovery without a counted end is refused"
-            `Quick
-            test_recovery_without_a_counted_end_is_refused
-        ; Alcotest.test_case
-            "recovery ignores a position of another trace"
-            `Quick
-            test_recovery_ignores_a_position_of_another_trace
-        ; Alcotest.test_case
-            "a sound history is not cut for a position"
-            `Quick
-            test_a_sound_history_is_not_cut_for_a_position
-        ; Alcotest.test_case
-            "recovery keeps the latest counted turn end"
-            `Quick
-            test_recovery_keeps_the_latest_counted_turn_end
-        ; Alcotest.test_case
-            "recovery needs the digest as well as the count"
-            `Quick
-            test_recovery_needs_the_digest_as_well_as_the_count
-        ; Alcotest.test_case
-            "recovery leaves an unread position to the rebase"
-            `Quick
-            test_recovery_leaves_an_unread_position_to_the_rebase
-        ; Alcotest.test_case
             "recovery protects the tail of what it returns"
             `Quick
             test_recovery_protects_the_tail_of_what_it_returns
@@ -1622,43 +1194,15 @@ let () =
             `Quick
             test_checkpoint_fields_pass_through
         ] )
-    ; ( "librarian rebase (RFC librarian-lifecycle §10-2)"
+    ; ( "turn log (RFC librarian-call-only-proposes §5.6)"
       , [ Alcotest.test_case
-            "librarian_rebase_refuses_unread_atoms"
+            "a purge rewrites only what the turn log named"
             `Quick
-            test_librarian_rebase_refuses_unread_atoms
+            test_a_purge_rewrites_only_what_the_turn_log_named
         ; Alcotest.test_case
-            "librarian_rebase_keeps_the_position_at_the_end"
+            "a recovery rewrites past the mark"
             `Quick
-            test_librarian_rebase_keeps_the_position_at_the_end
-        ; Alcotest.test_case
-            "librarian_rebase_keeps_boundary_lines_seen"
-            `Quick
-            test_librarian_rebase_keeps_boundary_lines_seen
-        ; Alcotest.test_case
-            "librarian_rebase_leaves_nothing_to_read"
-            `Quick
-            test_librarian_rebase_leaves_nothing_to_read
-        ; Alcotest.test_case
-            "librarian_rebase_without_a_position"
-            `Quick
-            test_librarian_rebase_without_a_position
-        ; Alcotest.test_case
-            "librarian_rebase_refuses_another_trace"
-            `Quick
-            test_librarian_rebase_refuses_another_trace
-        ; Alcotest.test_case
-            "librarian_rebase_refuses_a_position_beyond_the_history"
-            `Quick
-            test_librarian_rebase_refuses_a_position_beyond_the_history
-        ; Alcotest.test_case
-            "librarian_rebase_refuses_another_history_at_the_same_end"
-            `Quick
-            test_librarian_rebase_refuses_another_history_at_the_same_end
-        ; Alcotest.test_case
-            "librarian_rebase_refuses_a_rewrite_with_no_atoms"
-            `Quick
-            test_librarian_rebase_refuses_a_rewrite_with_no_atoms
+            test_a_recovery_rewrites_past_the_mark
         ] )
     ; ( "cli"
       , [ Alcotest.test_case "workspace dry-run and apply" `Quick

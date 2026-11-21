@@ -40,9 +40,8 @@ type purge_report =
         (** Messages the purge removes because the transcript's tool cycles
             are broken. [messages_before] minus [messages_after] equals this
             count: the other counters count blocks inside messages that stay.
-            The cut starts at the first broken tool cycle, or earlier, at a
-            turn end the Librarian position already counts, when a position
-            moves ({!Keeper_checkpoint_purge.report}). *)
+            The cut starts at the first broken tool cycle
+            ({!Keeper_checkpoint_purge.report}). *)
   }
 
 type purge_result =
@@ -61,23 +60,20 @@ type purge_error =
   | Purge_keeper_active of string
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
-  | Purge_librarian_position_unreadable of string
-      (** The Librarian progress file exists and cannot be read. Never taken
-          as "no position": that would let a rewrite pass over what it
-          holds. *)
   | Purge_boundaries_unreadable of string
       (** The turn-boundary log cannot be read, so which messages its lines
           name, and so must stay byte-exact, is unknown. *)
   | Purge_continuity_unreadable of string
       (** The saved Librarian working state cannot be read, so whether it
           fits the history and which prefix it holds is unknown. *)
-  | Purge_librarian_rebase_refused of Keeper_checkpoint_purge.refusal
+  | Purge_turn_log_unreadable of string
+      (** The Keeper's turn log, or the head it is compared with, cannot be
+          read, so which messages its Memory writer reads from the head is
+          unknown. Never taken as "no log": that would let a rewrite reach
+          messages no line has named. *)
   | Purge_librarian_cancel_failed of string
       (** The server-owned lane could not be closed to new units and
-          cancelled before either file was replaced. *)
-  | Purge_librarian_position_not_written of string
-      (** The checkpoint was installed and the position write after it
-          failed. *)
+          cancelled before the checkpoint was replaced. *)
   | Purge_backup_failed of string
   | Purge_source_changed
   | Purge_install_failed of string
@@ -91,15 +87,14 @@ val purge_error_to_string : purge_error -> string
 (** Deterministically preview or apply the fixed checkpoint purge policy.
     Preview is read-only and reports whether apply is currently allowed.
     Apply requires the Keeper to be fully absent from the runtime registry and
-    serializes that check with same-Keeper boot registration. A rewrite is
-    refused while the Librarian has atoms left to read
-    ({!Keeper_checkpoint_purge.librarian_rebase}). Otherwise apply keeps the
+    serializes that check with same-Keeper boot registration. Apply keeps the
     server-owned Librarian lane closed to new units and cancels and awaits
-    running ones for the whole apply, reads the turn-boundary log and the
-    saved working state that say which messages stay byte-exact, backs the
-    checkpoint up, installs it, writes the rebased position after it, and
-    logs what it did. The canonical checkpoint is installed only if its exact
-    source reference is unchanged. *)
+    running ones for the whole apply, reads the turn-boundary log, the saved
+    working state and the turn log that say which messages stay byte-exact,
+    writes the turn log line a recovery needs ({!Keeper_turn_log_reset}),
+    backs the checkpoint up, installs it, and logs what it did. The canonical
+    checkpoint is installed only if its exact source reference is
+    unchanged. *)
 val purge_current :
   Workspace.config ->
   keeper_name:string ->

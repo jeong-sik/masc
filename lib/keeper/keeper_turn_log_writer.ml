@@ -38,8 +38,18 @@ let outcome_of_ending : ending -> Log.outcome = function
   | Stale_save -> Stale_save
 ;;
 
-let head_was_replaced ~(point : Log.mark) ~(now : Log.mark) =
-  (not (String.equal now.trace point.trace)) || now.closed_messages < point.closed_messages
+(* Only the history decides: the head's trace and how many closed messages
+   it holds. *)
+let head_was_replaced ~(point : Log.mark) ~trace ~closed_messages =
+  (not (String.equal trace point.trace)) || closed_messages < point.closed_messages
+;;
+
+(* Where the next unit starts once a replaced head's reset is in: the empty
+   mark of the new head. Only the history's part of the mark moves: the
+   other stores are read on from where the last line left them. From the
+   empty mark the head cannot be lower again, so the reset is not written
+   twice. *)
+let replaced_start ~(point : Log.mark) ~trace = { point with trace; closed_messages = 0 }
 ;;
 
 let ( let* ) = Result.bind
@@ -84,15 +94,14 @@ let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
      | Finish { admitted = Recorded { opened = (_ : int) } | Not_recorded; ending = (_ : ending) }
        -> Ok [])
   | Written { point; open_turn; rows_end = (_ : int); last = (_ : Log.line) } ->
-    let replaced = head_was_replaced ~point ~now in
-    (* The reset goes in front of this event's own line, in the same append.
-       Only the history's part of the mark moves: the other stores are read
-       on from where the last line left them. From the empty mark the head
-       cannot be lower again, so the reset is not written twice. *)
+    let replaced =
+      head_was_replaced ~point ~trace:now.trace ~closed_messages:now.closed_messages
+    in
+    (* The reset goes in front of this event's own line, in the same append. *)
     let reset, point =
       if replaced
       then (
-        let after = { point with trace = now.trace; closed_messages = 0 } in
+        let after = replaced_start ~point ~trace:now.trace in
         ( [ Log.Reset { at; cause = Unannounced; before = point; after; closed_before = [] } ]
         , after ))
       else [], point
@@ -126,6 +135,24 @@ let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
          Marks.slices covered ~from:point.closed_messages ~through:now.closed_messages
        in
        Ok (reset @ [ announced ~cause ~after closed_before ]))
+;;
+
+type named =
+  | No_log
+  | Named_below of int
+
+let named ~(tail : Store.tail) ~trace ~closed_messages =
+  match tail with
+  | Nothing_written -> Ok No_log
+  | Written { point; open_turn = (_ : Store.open_turn option); rows_end = (_ : int); last = (_ : Log.line) }
+    ->
+    let* closed_messages = closed_messages () in
+    let next =
+      if head_was_replaced ~point ~trace ~closed_messages
+      then replaced_start ~point ~trace
+      else point
+    in
+    Ok (Named_below next.closed_messages)
 ;;
 
 let drop ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~after =

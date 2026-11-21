@@ -124,6 +124,10 @@ let skip_item t keeper ~by ~target =
   asked t keeper ~unregistered:act_unregistered (fun writer -> Writer.skip_item writer ~by ~target)
 ;;
 
+let skip_line t keeper ~offset =
+  asked t keeper ~unregistered:act_unregistered (fun writer -> Writer.skip_line writer ~offset)
+;;
+
 (* Only the writer that retired leaves the table: by now the Keeper may be
    registered again and have another. *)
 let rec forget t keeper writer =

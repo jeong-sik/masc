@@ -8,6 +8,7 @@
     { "action": "adopt", "observed": "<sha256 hex of the snapshot file>" }
     { "action": "restart_reading", "observed": "<id of the turn log file>" }
     { "action": "skip_item", "target": <target> }
+    { "action": "skip_line", "offset": <byte offset of the line in the turn log> }
     v}
 
     A [target] names the head of reading in the turn log reading stands in:
@@ -33,6 +34,13 @@
       target that is not the head now is refused as [not_the_head], and the
       refusal names the head now as [now], so an operator skips only what
       they named.
+    - [skip_line] passes a line of the turn log that reading stops on
+      because the line does not decode or is out of order, when no unit
+      before it holds an item. [offset] is the one the input fault names. An
+      offset that is not the line reading stops on now is refused as
+      [not_the_faulted_line]. Reading goes on past the line; the turn log's
+      writer still appends nothing after a line it cannot decode in the
+      file's tail, until the file is mended.
 
     The writer decides whether it takes the action. A refusal changes
     nothing. *)
@@ -49,6 +57,7 @@ type action =
   | Adopt of { observed : Digest.digest }
   | Restart_reading of { observed : Keeper_turn_log.Log_id.t }
   | Skip_item of { target : Librarian_machine.skip_target }
+  | Skip_line of { offset : int }
 
 val parse : string -> (action, string) result
 

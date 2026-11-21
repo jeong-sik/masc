@@ -22,6 +22,7 @@ type action =
   | Adopt of { observed : Digest.digest }
   | Restart_reading of { observed : Keeper_turn_log.Log_id.t }
   | Skip_item of { target : Librarian_machine.skip_target }
+  | Skip_line of { offset : int }
 
 (* The wire name of each action, from one closed list. *)
 type kind =
@@ -29,19 +30,22 @@ type kind =
   | Kind_adopt
   | Kind_restart_reading
   | Kind_skip_item
+  | Kind_skip_line
 
 let kind_token = function
   | Kind_resume -> "resume"
   | Kind_adopt -> "adopt"
   | Kind_restart_reading -> "restart_reading"
   | Kind_skip_item -> "skip_item"
+  | Kind_skip_line -> "skip_line"
 ;;
 
-let kinds = [ Kind_resume; Kind_adopt; Kind_restart_reading; Kind_skip_item ]
+let kinds = [ Kind_resume; Kind_adopt; Kind_restart_reading; Kind_skip_item; Kind_skip_line ]
 let kind_of_token token = List.find_opt (fun kind -> String.equal (kind_token kind) token) kinds
 let field_action = "action"
 let field_observed = "observed"
 let field_target = "target"
+let field_offset = "offset"
 
 (* A skip's target, as the request names it and a [Not_the_head] refusal
    names the one now. *)
@@ -85,10 +89,11 @@ let target_json : Librarian_machine.skip_target -> Yojson.Safe.t = function
 
 let request_shape =
   Printf.sprintf
-    {|the request is {"%s":"%s"}, {"%s":"%s","%s":"<sha256 hex>"}, {"%s":"%s","%s":"<turn log id>"} or {"%s":"%s","%s":{"%s":"%s","%s":"<turn log id>","%s":<offset>,"%s":"<store>","%s":<index>}}, the last with "%s":"%s" and no %s or %s for a unit that does not read|}
+    {|the request is {"%s":"%s"}, {"%s":"%s","%s":"<sha256 hex>"}, {"%s":"%s","%s":"<turn log id>"}, {"%s":"%s","%s":<offset>} or {"%s":"%s","%s":{"%s":"%s","%s":"<turn log id>","%s":<offset>,"%s":"<store>","%s":<index>}}, the last with "%s":"%s" and no %s or %s for a unit that does not read|}
     field_action (kind_token Kind_resume)
     field_action (kind_token Kind_adopt) field_observed
     field_action (kind_token Kind_restart_reading) field_observed
+    field_action (kind_token Kind_skip_line) field_offset
     field_action (kind_token Kind_skip_item) field_target
     field_kind (target_kind_token Kind_head_item) field_turn_log field_line field_store field_at
     field_kind (target_kind_token Kind_unreadable_unit) field_store field_at
@@ -97,15 +102,14 @@ let request_shape =
 let by_name (left, (_ : Yojson.Safe.t)) (right, (_ : Yojson.Safe.t)) = String.compare left right
 
 (* Offsets and indexes are not negative, as a log line's are. *)
+let not_negative name value = if value >= 0 then Ok value else Error (name ^ ": negative")
+
 let target_of_fields fields : (Librarian_machine.skip_target, string) result =
   let ( let* ) = Result.bind in
   let turn_log text =
     match Keeper_turn_log.Log_id.of_string text with
     | Some id -> Ok id
     | None -> Error (field_turn_log ^ ": not a turn log id")
-  in
-  let not_negative name value =
-    if value >= 0 then Ok value else Error (name ^ ": negative")
   in
   match List.sort by_name fields with
   | [ (at, `Int index); (kind, `String token); (line, `Int offset); (store, `String spelled)
@@ -148,6 +152,9 @@ let parse body =
   let skip fields =
     Result.map (fun target -> Skip_item { target }) (target_of_fields fields)
   in
+  let skip_line value =
+    Result.map (fun offset -> Skip_line { offset }) (not_negative field_offset value)
+  in
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
   | `Assoc fields ->
@@ -155,18 +162,26 @@ let parse body =
      | [ (action, `String token) ] when String.equal action field_action ->
        (match kind_of_token token with
         | Some Kind_resume -> Ok Resume
-        | Some (Kind_adopt | Kind_restart_reading | Kind_skip_item) | None -> Error request_shape)
+        | Some (Kind_adopt | Kind_restart_reading | Kind_skip_item | Kind_skip_line) | None ->
+          Error request_shape)
      | [ (action, `String token); (observed, `String value) ]
        when String.equal action field_action && String.equal observed field_observed ->
        (match kind_of_token token with
         | Some Kind_adopt -> adopt value
         | Some Kind_restart_reading -> restart value
-        | Some (Kind_resume | Kind_skip_item) | None -> Error request_shape)
+        | Some (Kind_resume | Kind_skip_item | Kind_skip_line) | None -> Error request_shape)
+     | [ (action, `String token); (offset, `Int value) ]
+       when String.equal action field_action && String.equal offset field_offset ->
+       (match kind_of_token token with
+        | Some Kind_skip_line -> skip_line value
+        | Some (Kind_resume | Kind_adopt | Kind_restart_reading | Kind_skip_item) | None ->
+          Error request_shape)
      | [ (action, `String token); (target, `Assoc fields) ]
        when String.equal action field_action && String.equal target field_target ->
        (match kind_of_token token with
         | Some Kind_skip_item -> skip fields
-        | Some (Kind_resume | Kind_adopt | Kind_restart_reading) | None -> Error request_shape)
+        | Some (Kind_resume | Kind_adopt | Kind_restart_reading | Kind_skip_line) | None ->
+          Error request_shape)
      | _ -> Error request_shape)
   | _ -> Error request_shape
 ;;
@@ -192,6 +207,7 @@ let act ~base_path ~keeper ~actor action =
       | Adopt { observed } -> Librarian_writers.adopt writers keeper ~by:actor ~observed
       | Restart_reading { observed } -> Librarian_writers.restart_reading writers keeper ~observed
       | Skip_item { target } -> Librarian_writers.skip_item writers keeper ~by:actor ~target
+      | Skip_line { offset } -> Librarian_writers.skip_line writers keeper ~offset
     in
     (match answer with
      | Not_done refusal -> Refused refusal
@@ -209,6 +225,7 @@ let action_name = function
   | Adopt { observed = (_ : Digest.digest) } -> kind_token Kind_adopt
   | Restart_reading { observed = (_ : Keeper_turn_log.Log_id.t) } -> kind_token Kind_restart_reading
   | Skip_item { target = (_ : Librarian_machine.skip_target) } -> kind_token Kind_skip_item
+  | Skip_line { offset = (_ : int) } -> kind_token Kind_skip_line
 ;;
 
 (* A stopped store says why in the words the Memory tools use. A store whose
@@ -248,6 +265,7 @@ let refusal_fields : Librarian_machine.act_refusal -> (string * Yojson.Safe.t) l
         | Some target -> target_json target
         | None -> `Null )
     ]
+  | Not_the_faulted_line -> [ "code", `String "not_the_faulted_line" ]
   | Content_unread -> [ "code", `String "content_unread" ]
   | Act_unavailable (Store_stopped stop) -> ("code", `String "store_stopped") :: stop_fields stop
   | Act_unavailable Keeper_retired -> [ "code", `String "keeper_not_registered" ]

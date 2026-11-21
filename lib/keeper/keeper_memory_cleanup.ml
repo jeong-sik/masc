@@ -103,7 +103,7 @@ let run_with ~execute ~base_path ~keeper_name =
                   (* A sleeping Keeper may have no other wake. Continue only
                      saved count progress on the existing serialized lane;
                      rewrites and retained excess cannot create a spin. *)
-                  Keeper_librarian_queue_signal.changed ~base_path ~keeper_name;
+                  Keeper_working_context_signal.changed ~base_path ~keeper_name;
                   Reviewed Progress_with_excess)
                 else Reviewed Excess_retained)
 ;;

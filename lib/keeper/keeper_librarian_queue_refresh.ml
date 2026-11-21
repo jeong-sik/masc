@@ -75,7 +75,7 @@ let note_recovery_wait ~config ~keeper_name ~site ~before ~pending =
     if pending then Hashtbl.replace recovery_waiters (root, keeper_name, site) ()
     else Hashtbl.remove recovery_waiters (root, keeper_name, site));
   if pending && not (Atomic.get recovery_mark == before)
-  then Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name
+  then Keeper_working_context_signal.changed ~base_path:config.Workspace.base_path ~keeper_name
 
 let destination_recovered ~config =
   let root = Workspace.keepers_runtime_dir config in
@@ -85,7 +85,7 @@ let destination_recovered ~config =
       if String.equal directory root then keeper :: names else names) recovery_waiters []
     |> List.sort_uniq String.compare) in
   List.iter (fun keeper_name ->
-    Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name) keepers
+    Keeper_working_context_signal.changed ~base_path:config.Workspace.base_path ~keeper_name) keepers
 
 let measurement_key ~config ~keeper_name =
   Workspace.keepers_runtime_dir config, keeper_name
@@ -446,7 +446,7 @@ let run_durable ~base_path ~keeper_name =
   let config = Workspace.default_config base_path in
   run_durable_with_consumer ~config ~keeper_name ~consume:(fun () ->
     Keeper_librarian_durable_execution.consume_one ~config ~keeper_name
-      ~wake:(fun () -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name))
+      ~wake:(fun () -> Keeper_working_context_signal.changed ~base_path ~keeper_name))
 ;;
 
 (* Continuity has its own exact source position. A Memory baseline does not
@@ -766,7 +766,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
                 (cause_detail ()));
            (* This named refusal selected a smaller source. Queue its next
               serial unit even when a held Keeper ends no further turn. *)
-           Keeper_librarian_queue_signal.changed ~base_path ~keeper_name))
+           Keeper_working_context_signal.changed ~base_path ~keeper_name))
       | Some observed ->
         remember_input_capacity ~config ~keeper_name observed;
         capacity := Some observed;
@@ -1051,11 +1051,11 @@ let run_explicit_admission_with ~base_path ~keeper_name ~run =
   | Recheck_new_input ->
     clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
     Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending; new input arrived during judgment";
-    Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
+    Keeper_working_context_signal.changed ~base_path ~keeper_name
   | Settled {has_more} ->
     clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
     Log.Keeper.info ~keeper_name "Librarian explicit admission committed and acknowledged";
-    if has_more then Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
+    if has_more then Keeper_working_context_signal.changed ~base_path ~keeper_name
   | Pending detail ->
     clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
     Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending: %s" detail
@@ -1091,7 +1091,7 @@ let run ~base_path ~keeper_name =
 ;;
 
 let install () =
-  Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+  Keeper_working_context_signal.install (fun ~base_path ~keeper_name ->
     if Runtime_account_access.is_multi_account ()
     then ()
     else

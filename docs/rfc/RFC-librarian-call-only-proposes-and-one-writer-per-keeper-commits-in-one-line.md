@@ -1495,7 +1495,7 @@ seed 의 세대 경계도 턴 기록에서 읽는다(L3d).
 - 이 trace 에서 센 마지막 `Reset` 을 찾는다. `Reset` 의 trace 는 `after.trace` 다.
 - 그 줄 앞에서 닫힌 이 trace 의 턴 가운데 번호가 가장 큰 턴이 경계다. 턴이 어떻게 끝났는지(`outcome`)는 가리지 않는다. 턴 번호는 그 턴 `Opened` 줄의 `turn_ref` 에서 읽는다.
 - 그 번호 이하의 턴 기록(turn record)은 seed 가 되지 않는다.
-- `Reset` 뒤에 닫힌 턴은 경계 밖이다. 도구로 이력을 지운 턴 자신이 그렇다. 지금의 경계도 그 턴을 포함하지 않는다.
+- `Reset` 뒤에 닫힌 턴은 경계 밖이다. 도구로 이력을 지운 턴 자신이 그렇다. 옛 턴 색인의 경계도 그 턴을 포함하지 않았다.
 - 세는 `Reset` 은 cause 가 `Announced Cleared` 이거나 `Unannounced` 인 것이다.
 - `Announced Recovered` 는 세지 않는다. purge 는 번호를 바꾸지 않는다. purge 가 고쳐 쓴 atom 의 seed 는 위의 digest 가 버린다.
 - 센 `Reset` 이 없거나 그 앞에 닫힌 턴이 없으면 경계가 없다.
@@ -2099,7 +2099,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 - `keeper_turn_task_context`. 턴 기록의 `task_evidence` 가 대신한다(§5.1).
 - `keeper_carried_front` 의 Librarian 출처 다섯(§11.2).
 - `turn-boundaries.jsonl` 을 읽던 곳 가운데 컷 뒤에도 남는 곳은 지우지 않고 턴 기록으로 옮긴다. 한 층(L3d)에서 옮긴다. 목록은 아래 k 의 표에 있다.
-- 옛 파일 쓰기는 컷(L10)에서 멈춘다. 컷 앞의 빌드에 그 줄을 읽는 곳이 남아 있기 때문이다. `keeper_carried_front`, `keeper_turn_bridge`, purge(`server_dashboard_http_keeper_api_checkpoints`, `bin/masc_checkpoint_purge`), `Keeper_durable_store` 의 검증이다. 옛 durable consumer 도 그 줄을 읽지만 서버가 그 lane 을 시작하지 않는다(#53463).
+- 옛 파일 쓰기는 컷(L10)에서 멈춘다. 컷 앞의 빌드에 그 줄을 읽는 곳이 남아 있기 때문이다. `keeper_turn_bridge`, purge(`server_dashboard_http_keeper_api_checkpoints`, `bin/masc_checkpoint_purge`), `Keeper_durable_store` 의 검증이다. 옛 durable consumer 도 그 줄을 읽지만 서버가 그 lane 을 시작하지 않는다(#53463).
 - 컷에서 같이 지우는 것은 넷이다. 줄을 쓰는 곳(`keeper_agent_run_finalize_response`, `keeper_history_clear`, `keeper_agent_run_turn_helpers` 의 턴 시작 줄), `keeper_shutdown_types` 의 `Keeper_turn_boundaries_artifact` 생성자와 삭제 계획, `Keeper_durable_store` 의 `Turn_boundaries` 검증, blob 분류의 `.turn-boundaries.jsonl` 행이다.
 - L3d 가 옮기지 않은 독자는 컷까지 옛 파일을 그대로 읽는다. 쓰기가 컷까지 이어지므로 그 사이의 빌드에서도 읽는 값이 맞다.
 - L3d 가 옮긴 독자는 `keeper_carried_front` 의 세대 경계 하나다(§11.2). 턴 경계와 이 턴이 시작한 곳은 그 앞 층에서 이미 턴 기록으로 옮겼다(`Keeper_turn_driver_try_provider.turn_starts`).

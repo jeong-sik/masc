@@ -3390,6 +3390,7 @@
   masc_tui_repo_changes
   masc_tui_media_surface_actions
   masc_tui_owed_surface_reads
+  masc_tui_keeper_journal_reads
   masc_tui_keys
   masc_tui_key_ime
   masc_tui_file_icon

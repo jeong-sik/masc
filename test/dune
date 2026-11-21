@@ -5545,6 +5545,7 @@
 (include stanzas/test_keeper_store_locations.inc)
 (include stanzas/test_keeper_projection_change.inc)
 (include stanzas/test_keeper_cache_outcome.inc)
+(include stanzas/test_keeper_carried_front_turn_boundaries.inc)
 
 (include stanzas/test_keeper_operator_note.inc)
 (include stanzas/test_keeper_arrived_stimuli.inc)

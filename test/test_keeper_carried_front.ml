@@ -808,109 +808,6 @@ let test_read_seed_counts_only_unreadable_rows_visited_before_the_response () =
   | _ -> fail "the two invalid records must be counted"
 ;;
 
-let test_read_seed_stops_at_history_restart () =
-  with_turn_record_store @@ fun config store ->
-  Dated_jsonl.append store
-    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
-  Masc.Keeper_turn_boundaries.append
-    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
-    ~keeper_id:"alpha"
-    { recorded_at = 1.
-    ; event =
-        Masc.Keeper_turn_boundaries.Turn_ended
-          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
-          ; history_at_start = Masc.Keeper_turn_boundaries.Continued_history
-          ; position = Masc.Keeper_turn_boundaries.Stale_noop
-          }
-    }
-  |> Result.get_ok;
-  Masc.Keeper_turn_boundaries.append
-    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
-    ~keeper_id:"alpha"
-    { recorded_at = 2.
-    ; event = Masc.Keeper_turn_boundaries.History_restarted { trace_id = "trace-1" }
-    }
-  |> Result.get_ok;
-  Dated_jsonl.append store
-    (Turn_record.to_json
-       (record ~turn:2 ~finish:None ~response_observed:false None));
-  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
-  check bool "the pre-clear response is not a seed" true (Option.is_none read.Front.seed)
-;;
-
-(* The floor is kept with the boundary store's identity, so a read after an
-   append sees the boundary the append wrote, and a read with no append in
-   between answers the same. *)
-let test_read_seed_sees_a_boundary_appended_after_a_read () =
-  with_turn_record_store @@ fun config store ->
-  let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
-  Dated_jsonl.append store
-    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
-  Masc.Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"alpha"
-    { recorded_at = 1.
-    ; event =
-        Masc.Keeper_turn_boundaries.Turn_ended
-          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
-          ; history_at_start = Masc.Keeper_turn_boundaries.Continued_history
-          ; position = Masc.Keeper_turn_boundaries.Stale_noop
-          }
-    }
-  |> Result.get_ok;
-  let seeded () =
-    Option.is_some (Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1").Front.seed in
-  check bool "the response before any restart is a seed" true (seeded ());
-  check bool "an unchanged store answers the same" true (seeded ());
-  Masc.Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"alpha"
-    { recorded_at = 2.
-    ; event = Masc.Keeper_turn_boundaries.History_restarted { trace_id = "trace-1" }
-    }
-  |> Result.get_ok;
-  Dated_jsonl.append store
-    (Turn_record.to_json
-       (record ~turn:2 ~finish:None ~response_observed:false None));
-  check bool "a restart appended after the read fences the old response" false (seeded ())
-;;
-
-(* The marker a fresh turn owed failed to be written and only its empty end
-   line records the restart. The line still has to fence the old generation:
-   without it the seed scan walks back into the pre-restart responses and
-   reintroduces a carried range of a history that is gone. *)
-let test_read_seed_stops_at_a_fresh_history_end_line () =
-  with_turn_record_store @@ fun config store ->
-  Dated_jsonl.append store
-    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
-  Masc.Keeper_turn_boundaries.append
-    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
-    ~keeper_id:"alpha"
-    { recorded_at = 1.
-    ; event =
-        Masc.Keeper_turn_boundaries.Turn_ended
-          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
-          ; history_at_start = Masc.Keeper_turn_boundaries.Continued_history
-          ; position = Masc.Keeper_turn_boundaries.Stale_noop
-          }
-    }
-  |> Result.get_ok;
-  Masc.Keeper_turn_boundaries.append
-    ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
-    ~keeper_id:"alpha"
-    { recorded_at = 2.
-    ; event =
-        Masc.Keeper_turn_boundaries.Turn_ended
-          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:2
-          ; history_at_start = Masc.Keeper_turn_boundaries.Fresh_history
-          ; position = Masc.Keeper_turn_boundaries.No_atom_history
-          }
-    }
-  |> Result.get_ok;
-  Dated_jsonl.append store
-    (Turn_record.to_json
-       (record ~turn:2 ~finish:None ~response_observed:false None));
-  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
-  check bool "the pre-restart response is not a seed without a restart marker" true
-    (Option.is_none read.Front.seed)
-;;
-
 let test_read_seed_stops_at_previous_trace () =
   with_turn_record_store @@ fun config store ->
   Dated_jsonl.append store `Null;
@@ -1029,28 +926,6 @@ let test_history_after_a_floor_is_at_least_the_floor_total_plus_one () =
   check kept_or_dropped "and the position itself is why it drops, not the messages"
     (Error Front.Front_atom_missing)
     (Front.for_history ~digest_at:(Window.atom_opening_digest history) front)
-;;
-
-let test_read_seed_keeps_boundary_errors_out_of_the_record_count () =
-  with_turn_record_store @@ fun config store ->
-  Dated_jsonl.append store
-    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
-  let path =
-    Masc.Keeper_turn_boundaries.path_for_keepers_dir
-      ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
-      ~keeper_id:"alpha"
-  in
-  Fs_compat.mkdir_p (Filename.dirname path);
-  let output = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr output)
-    (fun () -> output_string output "{not-json\n");
-  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
-  check bool "an unknown boundary admits no seed" true (Option.is_none read.Front.seed);
-  check bool "no TurnRecord was counted unreadable" true
-    (Option.is_none read.Front.unreadable);
-  check bool "the boundary failure has its own channel" true
-    (Option.is_some read.Front.boundary_error)
 ;;
 
 (* [since_seq] is exclusive and the ring's first entry carries seq 0. *)
@@ -1208,18 +1083,10 @@ let () =
             test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn
         ; test_case "only visited unreadable rows are counted" `Quick
             test_read_seed_counts_only_unreadable_rows_visited_before_the_response
-        ; test_case "history restart fences older responses" `Quick
-            test_read_seed_stops_at_history_restart
-        ; test_case "read seed sees a boundary appended after a read" `Quick
-            test_read_seed_sees_a_boundary_appended_after_a_read
-        ; test_case "a fresh-history end line fences older responses" `Quick
-            test_read_seed_stops_at_a_fresh_history_end_line
         ; test_case "previous trace fences older retained rows" `Quick
             test_read_seed_stops_at_previous_trace
         ; test_case "a floor response is itself the seed" `Quick
             test_read_seed_stops_at_a_floor_response
-        ; test_case "boundary errors are not TurnRecord errors" `Quick
-            test_read_seed_keeps_boundary_errors_out_of_the_record_count
         ; test_case "a seed read reports each failure once" `Quick
             test_a_seed_read_reports_each_failure_once
         ; test_case "a floor seed drops as atom missing on its own history" `Quick

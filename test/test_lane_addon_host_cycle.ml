@@ -102,7 +102,12 @@ let port ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ 
   list_requests = (fun ~after ->
     let requests= !(worker.listing) in
     before_listing requests;
-    Ok (page ~after requests));
+    let answer = page ~after requests in
+    (* The production port waits for the worker's answer over a pipe, so a
+       listing is a point where other fibers run. Without it, a walk that
+       never ends also never lets the case's timeout fire. *)
+    Eio.Fiber.yield ();
+    Ok answer);
   deliver = (fun ~arguments ->
     during_delivery true;
     Fun.protect ~finally:(fun () -> during_delivery false) (fun () ->

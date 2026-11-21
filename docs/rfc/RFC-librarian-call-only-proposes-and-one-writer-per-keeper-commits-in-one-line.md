@@ -467,14 +467,20 @@ type input_fault =
 - 그 끝자리 위의 닫힌 메시지와 열린 메시지는 모두 바이트 그대로 둔다. 다음 단위가 그것을 실은 뒤의 purge 가 고친다.
 - 지금 purge 는 메시지 목록 전체를 닫힘과 열림의 구분 없이 고치고, 저장할 때 열린 메시지를 닫는다(`Turn_closes`). 지금은 `Unread_atoms_present` 가 「저장하고 죽은 턴」을 막는다. 그 거절을 지우는 대신 이 규칙이 같은 것을 지킨다.
 - purge 의 저장이 열린 메시지를 닫으면 닫힌 메시지의 수가 그만큼 는다. 그 메시지의 바이트는 같으므로 다음 단위가 같은 내용을 싣는다. 수가 줄지는 않는다.
-- head 가 다른 trace 에 있거나, 그 끝자리보다 아래이거나, 해석되지 않으면 purge 도 줄 쓰는 쪽이다. `Reset {Unannounced}` 를 먼저 쓴다(§5.2). 그 덧붙임이 실패하면 아무것도 고쳐 쓰지 않는다.
+- head 가 다른 trace 에 있거나 닫힌 메시지가 그 끝자리보다 적으면 head 가 바뀐 것이다. 다음 줄은 끝자리를 새 head 의 빈 시작에 두는 `Reset {Unannounced}` 다(§5.2). purge 는 그 줄을 쓰지 않고 끝자리를 0 으로 읽는다. 0 아래에는 메시지가 없으므로 아무것도 고쳐 쓰지 않는다. 줄은 다음 턴이나 다음 프로세스 시작이 쓴다.
+- 바뀐 것이 없는 purge 는 head 를 저장하지 않는다. 저장하면 열린 메시지가 닫힌다. head 가 바뀐 뒤라면 닫힌 수가 옛 끝자리에 닿을 수 있고, 그러면 다음 줄이 head 가 바뀐 것을 보지 못한다.
+- 턴 기록이나 그것과 견줄 head 를 읽지 못하면 purge 를 거절한다. 「턴 기록이 없다」로 읽지 않는다. 그렇게 읽으면 어느 줄도 가리키지 않는 메시지를 고쳐 쓴다.
 - 어느 메시지가 atom 을 여는지는 지금처럼 그대로 둔다. Keeper 요청의 시작점은 수로 찾는다(§11.2).
 - CLI purge 는 head 를 읽기 전에 workspace lease 를 잡는다. 지금은 읽고 계산한 뒤에 잡는다.
 - purge 는 반영 기록을 읽지 않고, 쓰는 쪽에 묻지 않는다. 쓰는 쪽이 `Stopped` 이거나 없어도 돈다.
 - 턴 기록이 없는 Keeper(사람 Keeper)의 purge 는 지금과 같다.
 
 ```ocaml
-type purge_refused = Turn_log_unwritable of io_error
+(* Keeper_turn_log_writer: 줄이 없으면 No_log, 있으면 끝자리. 바뀐 head 는 0. *)
+type named = No_log | Named_below of int
+
+(* dashboard purge 의 거절. CLI 는 같은 까닭을 적고 끝난다. *)
+type purge_error = … | Purge_turn_log_unreadable of string
 ```
 
 - 끊긴 곳 뒤를 버리는 purge 는 head 를 줄이는 쪽이다(§5.2). 열린 메시지를 닫고 줄을 쓴 뒤에 버린다. 버린 메시지는 닫혀 있던 것이든 열려 있던 것이든 안 읽은 줄이 가리키는 bundle 로 계속 읽힌다. 깨진 head 를 가진 Keeper 가 Librarian 을 기다리는 일이 없다.

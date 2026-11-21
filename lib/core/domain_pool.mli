@@ -16,10 +16,6 @@
        ones, so callers don't have to remember which Eio entry point
        to use for each shape.}}
 
-    PR-6 of RFC-0059 introduces this module as a primitive.  PR-7
-    (keeper actor migration) and PR-8 (repo sync async) consume it for
-    parallel actor dispatch and parallel git command execution.
-
     [Domain_pool_ref] installs the process-wide instance for runtime
     call sites that need a shared pool with inline fallback. *)
 

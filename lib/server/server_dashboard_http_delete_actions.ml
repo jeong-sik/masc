@@ -963,7 +963,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
   | Ok () ->
   (* The files go one by one, so a purge that stopped part way, by an error or
      an exception, has still changed the Keeper's memory health row
-     (RFC-0487) and removed files of its dated JSONL stores and its decision
+     and removed files of its dated JSONL stores and its decision
      record, whose newest rows are kept in memory ([Dated_jsonl.read_fact],
      [Keeper_row_facts.newest_decision]). None of the signals raises. *)
   match

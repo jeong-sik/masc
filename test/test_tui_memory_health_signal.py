@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A Keeper's memory health push reads that Keeper's row, not the fleet, while
-the Memory surface is on screen (RFC-0487).
+the Memory surface is on screen.
 
 The TUI has no refresh cadence (#48677), so every read after the surface opens
 comes from a push or from arriving on the surface; one test waits through a

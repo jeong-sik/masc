@@ -1804,10 +1804,7 @@ module For_testing = struct
     (* The wakeup stream is deliberately left alone. It carries "re-check the
        flag" and nothing else, its capacity is 1, and this reset has already
        cleared the flag it points at -- so a token left behind can only make a
-       running consumer look once and find its work already done. Clearing it
-       needed a non-blocking take, which RFC-0063 6.1 bars from a file with no
-       cooperative yield: the rule that caught the unbounded drain loop this
-       reset used to run. *)
+       running consumer look once and find its work already done. *)
 
   let refresh_full_health_snapshot_now ?(listener = default_listener)
       ~request_authority request =

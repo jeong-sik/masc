@@ -1,15 +1,9 @@
-(** RFC-0085 PR-1 — Typed host configuration for keeper-tool dispatch
-    portability.
+(** Typed host configuration for keeper-tool dispatch portability.
 
-    Canonical accessor is [host ()].  RFC-0085 PR-1 removed the
-    previous misnomer [legacy_macos_default ()] (the function was the
-    *current* default accessor used by 62 callers, not a regression
-    fixture).
+    Canonical accessor is [host ()].
 
     Fields cover the host-bound paths that keeper / dispatch / shell
-    layers consume.  PR-1 introduces [log_dir], [run_dir], [policy_dir]
-    so RFC-0085 PR-2 / PR-3 can drop host-local runtime path hardcodes at
-    the call-sites.
+    layers consume.
 
     All record / variant types derive [show] and [eq] so callers can
     use the auto-generated [pp_t], [show_t], [equal] without writing
@@ -66,23 +60,19 @@ type t =
   ; base_path : string option
         (** Resolved [MASC_BASE_PATH] in *normalised* form (path
             normalisation applied).  [None] when unset or empty after
-            normalisation.  RFC-0085 PR-9 replaces
-            [Env_config_core.base_path_opt]. *)
+            normalisation. *)
   ; base_path_raw : string option
         (** Raw base-path value as read from [MASC_BASE_PATH], or the recorded
             default, with whitespace trimmed but no path normalisation. In a
             server this is the canonical owner it published; the operator's own
-            spelling is {!Server_startup_state.input_base_path}.  RFC-0085
-            PR-9 replaces [Env_config_core.base_path_raw_opt]. *)
+            spelling is {!Server_startup_state.input_base_path}. *)
   ; config_dir : string option
         (** Resolved [MASC_CONFIG_DIR].  [None] when unset. *)
   ; home : string option
         (** Operator [$HOME] directory, trimmed.  [None] when unset or
-            empty.  RFC-0085 PR-10 replaces
-            [Env_config_core.home_dir_opt]. *)
+            empty. *)
   ; assets_dir : string option
-        (** Resolved [MASC_ASSETS_DIR].  [None] when unset or empty.
-            RFC-0085 PR-10 replaces [Env_config_core.assets_dir_opt]. *)
+        (** Resolved [MASC_ASSETS_DIR].  [None] when unset or empty. *)
   }
 [@@deriving show, eq]
 
@@ -99,10 +89,9 @@ val host : unit -> t
 (** [from_env ()] is an alias for [host ()] emphasising that the
     [base_path]/[config_dir] fields are
     populated by reading the corresponding [MASC_*] environment
-    variables.  RFC-0085 PR-6 introduces this surface so callers (today
-    in [Config_dir_resolver]) can route env-derived path decisions
-    through [Host_config] instead of importing [Env_config_core]
-    primitives. *)
+    variables.  This surface lets callers (such as [Config_dir_resolver])
+    route env-derived path decisions through [Host_config] instead of
+    importing [Env_config_core] primitives. *)
 val from_env : unit -> t
 
 (** [is_test_mode token] returns [true] for [Test], [false] for

@@ -30,7 +30,7 @@ type help_entry = {
           "no curated example yet"; entries are short, copy-able
           invocation snippets. *)
   alternatives : string list;
-      (** RFC-0195 P0 — typed list of sibling tool names the LLM
+      (** Typed list of sibling tool names the LLM
           may try when this one rejects or is unavailable. Empty
           list means "terminal — this is the only path". The
           alternatives are named here, in descriptor metadata, not

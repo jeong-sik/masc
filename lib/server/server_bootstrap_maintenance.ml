@@ -635,7 +635,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       ~sw
       ~clock
       ~base_path:(Mcp_server.workspace_config state).base_path;
-  (* RFC-0465: open pull requests of the registered GitHub repositories, read
+  (* Open pull requests of the registered GitHub repositories, read
      with the declared pr_reader Keeper's token and held in memory only. *)
   Server_repository_pulls.start
     ~sw
@@ -680,7 +680,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         ?caller:(Dispatch_caller.current_keeper ())
         r
     | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ());
-  (* RFC-0234 scheduled automation runner.  Public schedule tools and the
+  (* Scheduled automation runner.  Public schedule tools and the
      dashboard-only approval route only mutate the durable ledger; this loop is
      the production caller that observes due rows and emits at-most-once generic wake signals.  It
      catches per-tick failures so a corrupt schedule row or transient write
@@ -766,7 +766,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ();
   start_otel_exporter_background ~sw (fun () -> Otel_spans.setup_exporter ~sw env);
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
-  (* RFC-0217 S4-2: wire AGENT_CORE OTLP exporter so AGENT_CORE spans/metrics reach the
+  (* Wire AGENT_CORE OTLP exporter so AGENT_CORE spans/metrics reach the
      same collector as MASC-native telemetry.  The endpoint is read from
      the same env-var that MASC's own OTLP client uses. *)
   (match Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT" with
@@ -1043,12 +1043,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             | exn ->
               Log.Server.error "daily retention failed: %s" (Printexc.to_string exn))
          end;
-         (* RFC-0412 stage 2: dual-write consistency audit of the chat event
+         (* Dual-write consistency audit of the chat event
             journal against keeper_chat_store. Runs hourly — far more often
             than the 30d journal retention prune, so the audit window is never
             silently clipped. Mismatches are metrics + logs; nothing here
-            raises. The stage-2 read-path cutover is gated on this reporting a
-            clean soak. *)
+            raises. *)
          if now -. !last_chat_journal_audit >= Masc_time_constants.hour
          then begin
            last_chat_journal_audit := now;

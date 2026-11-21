@@ -977,7 +977,7 @@ val admit_native_posture :
   none_supported:bool ->
   client_label:string ->
   (unit, string) result
-(** Pure admission rule for RFC-0390. [Native_none] is refused when the
+(** Pure native-posture admission rule. [Native_none] is refused when the
     client cannot disable its built-in tools. [Native_full] is refused
     unless the keeper's approval stance is [Yolo]: built-in calls run inside
     the vendor process and never reach [ElicitToolApproval], so full native

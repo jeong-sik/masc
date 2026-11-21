@@ -11,16 +11,13 @@ operator. The full Goal and Task lists are under Work; provider quota scopes,
 Keeper costs and tokens, and daily provider reports are under Usage
 (Operations `m`). Board is under Work with an explicit `: go Work / Board`
 palette destination. Activity and server logs are under System (`A` / `L`).
-The [operator information architecture](design/tui/OPERATOR-INFORMATION-ARCHITECTURE.md)
-defines the reading order and observation boundaries.
-The [screen inventory](design/tui/SCREENS.md) lists all surfaces, subviews and overlays.
 
 Header clocks and ordinary row times use the terminal's timezone. Usage trends
 and Task completion days are explicitly labeled UTC.
 
-New here? The [first 30 minutes](../docs-site/src/content/docs/getting-started/first-30-minutes.md)
-chapter walks from install to your first Task and Board post, one signal at a
-time.
+New here? The [install guide](INSTALL.md) and its
+[first-conversation section](INSTALL.md#first-conversation-with-imp) walk from
+install to your first Task and Board post.
 
 ## What can I do here
 
@@ -515,9 +512,10 @@ footer for twelve seconds and stays in the event log.
 Every keeper under `.masc/keepers/`. The default order is priority; `o` cycles
 the others.
 
-Column meanings and marks are in [TUI-KEYS](guides/TUI-KEYS.md) (Keeper columns,
-Keeper marks). A Keeper whose tool gate is YOLO draws its name in red. Names,
-last-turn times and tasks stay readable while the runtime is down.
+Column meanings and marks are in the key reference that `masc_tui_keys_doc_cli`
+prints (Keeper columns, Keeper marks). A Keeper whose tool gate is YOLO draws its
+name in red. Names, last-turn times and tasks stay readable while the runtime
+is down.
 
 `Enter` opens the Story window under the list for the Keeper the cursor is on.
 The window takes rows from the list, so the list keeps scrolling to the cursor

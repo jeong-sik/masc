@@ -8,8 +8,9 @@
 - 이 릴리스 브랜치는 동결 기준 main `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 위에 버전 올림 커밋을 얹은 뒤, 일곱 PR(`#54288`·`#54286`·`#54287`·`#54290`·`#54283`·`#54294`·`#54295`, tip `c51a7ae0500465ee795ea92ee275794baa327250`)을 이 브랜치로 가져왔습니다. 앞의 셋과 `#54283`·`#54295` 는 그 조각을 `0.78.0` 절에 접어 넣었고, `#54290` 과 `#54294` 는 문서 전용·내부 리팩터(`### Exempt`)라 절에 넣지 않았습니다.
 - 이 브랜치에서 접은 조각은 `changelog.d/54286.md`·`changelog.d/54288.md`·`changelog.d/54287.md` 세 개이고, 동결 뒤 가져온 `#54283`·`#54295` 는 main 에만 있던 조각이라 이 브랜치에 조각 파일을 만들지 않고 절 본문에 직접 적었습니다. `#54290` 과 `#54294` 는 문서 전용·내부 리팩터(`### Exempt`)라 절에 넣지 않았습니다.
 - `#54281` 의 샤딩은 스크립트에만 들어갔고 `Test` 워크플로는 아직 `SUITE_SHARD_COUNT` 를 넘기지 않습니다(기본값 1 이면 종전과 같은 한 번의 `@runtest` 빌드). 이 릴리스 자체로 CI 디스크 피크가 낮아지지는 않습니다.
-- 이 절은 RC6 절차에서 손으로 접었습니다. 기준은 `3b90e7a`(v0.78.0 bump) 뒤 main tip `343baf4b1a5724b59e84a90475a09c63b741a982`(2026-11-21T21:52:03Z) 까지 `--first-parent` 로 확인한 **13 PR** 입니다: `#54348`·`#54353`·`#54354`·`#54355`·`#54360`(이상 bump 직후)·`#54349`·`#54350`·`#54351`·`#54356`·`#54357`·`#54358`·`#54365`·`#54367`. 그중 시험 전용 넷(`#54348`·`#54353`·`#54355`·`#54360`, 조각 표기 `### Exempt`)은 종전 창과 같이 절에 넣지 않았고, 나머지 아홉을 Added 세 건·Changed 두 건·Removed 한 건·Fixed 세 건으로 접었습니다. 그래서 이 절은 앞선 열일곱 PR 항목과 이번 아홉 항목, 모두 **스물여섯** PR 을 담습니다. 다섯 PR 만 접으라는 지시보다 넓게 접은 이유는, 나머지 여덟의 조각이 이 절 어디에도 없음을 `grep` 으로 확인했기 때문입니다(빼면 노트와 실제 릴리스가 어긋납니다).
-- `scripts/bump-version.sh` 와 `changelog-fragments.py assemble` 은 실행하지 않았습니다. 이 트리에는 이미 릴리스된 조각이 180개 넘게 남아 있어(`changelog.d/53895.md` 가 남은 채 `CHANGELOG.md` 「요약」이 `#53895` 를 인용합니다) `assemble` 이 그것들을 `[Unreleased]` 로 다시 쏟습니다(`task-3920`). 위 13 조각만 이 브랜치에서 지웠고 나머지는 손대지 않았습니다.
+- 이 절은 RC6 절차에서 손으로 접었습니다. 기준은 `3b90e7a`(v0.78.0 bump) 뒤 main tip `343baf4b1a5724b59e84a90475a09c63b741a982`(2026-11-21T21:52:03Z) 까지 `--first-parent` 로 확인한 **13 PR** 입니다: `#54348`·`#54353`·`#54354`·`#54355`·`#54360`(이상 bump 직후)·`#54349`·`#54350`·`#54351`·`#54356`·`#54357`·`#54358`·`#54365`·`#54367`. 그중 시험 전용 넷(`#54348`·`#54353`·`#54355`·`#54360`, 조각 표기 `### Exempt`)은 종전 창과 같이 절에 넣지 않았고, 나머지 아홉을 Added 세 건·Changed 두 건·Removed 한 건·Fixed 세 건으로 접었습니다. 그래서 이 절은 앞선 열일곱 PR 항목과 이번 아홉 항목, 모두 **스물여섯** PR 을 담았습니다(RC7 접기로 늘어난 수는 아래 항목이 적습니다). 다섯 PR 만 접으라는 지시보다 넓게 접은 이유는, 나머지 여덟의 조각이 이 절 어디에도 없음을 `grep` 으로 확인했기 때문입니다(빼면 노트와 실제 릴리스가 어긋납니다).
+- 이 절은 RC7 에서 `python3 scripts/changelog-fragments.py assemble --into 0.78.0` 한 번으로 창 전체를 접었습니다(RC6 손접기 뒤 남아 있던 74 조각). 결과는 사용자 항목 38 조각이 절에 더해지고 `### Exempt` 36 조각은 항목 없이 파일만 지워진 것이며, `changelog.d` 조각 잔여 0(`folded --strict` exit 0, `check` exit 0)입니다. 접힌 조각은 모두 `v0.77.1` 태그(`2bbe20cd`, 2026-11-21T05:54:32Z) 뒤 main 에 병합된 PR 의 것이고, 접기 전 `folded` 가 0 을 보고했으므로 이미 접힌 조각을 다시 쏟지 않았습니다. 그래서 이 절은 앞의 스물여섯 항목에 서른여덟 항목이 더해져 PR 인용 65개를 담습니다.
+- `scripts/bump-version.sh` 와 `changelog-fragments.py assemble` 은 RC6 절차에서 실행하지 않았습니다. 이 트리에는 이미 릴리스된 조각이 180개 넘게 남아 있어(`changelog.d/53895.md` 가 남은 채 `CHANGELOG.md` 「요약」이 `#53895` 를 인용합니다) `assemble` 이 그것들을 `[Unreleased]` 로 다시 쏟습니다(`task-3920`). 위 13 조각만 이 브랜치에서 지웠고 나머지는 손대지 않았습니다.
 
 ### Added
 
@@ -19,10 +20,28 @@
   the detail every reading (level, alarms, each slot's outcome, the last room
   ask, where reading stands or why the store stopped). A server that runs no
   writer and a writer that has not started read differently (#54286).
-
 - Add a unified persistent ACP v1 multi-runtime (`protocol = "acp"`) supporting Antigravity (`agy acp`), Kimi Code (`kimi acp`), and Mistral Vibe (`vibe-acp`, stripping `MISTRAL_API_KEY` for keyring subscriptions) with per-Keeper `Eio.Switch` process isolation, loopback HTTP MCP tools, and MASC skill discovery (#54357).
 - Add `masc-acp-probe` executable for live multi-turn ACP v1 end-to-end verification across Antigravity, Kimi Code, and Mistral Vibe with MASC MCP tools and skill discovery (#54358).
 - Run the eight binary-free python suites on every pull request in a new `pr-python-bin-free` job, so a fixture drift that only a release candidate used to catch (`test_install_runtime_setup.py` at release candidate 3, run 44937662942 step 17) is judged at the pull-request stage (#54365).
+- Agent Core has a message origin for text written outside the conversation — messages, posts, recalled facts — that a host keeps in the history as a User message (`Outside_context`). Every request policy sends it in place as user text, initial-system templates quote it like caller text, and it never opens a caller-query boundary or merges into a tool result. The Librarian, recall queries and the dashboard preview do not read it as conversation. Nothing produces it yet (#54238).
+- The authorization log's closed kind set gains `legacy_attribution`, the switchover's frozen legacy inventory and per-keeper attribution (design 10.3 and 10.5, plan C1-1). This change only names the kind: `Authz_state.read` still answers `Kind_not_read` for it, and the record's fold and handler arrive with `authz_legacy_event` in a later change (#54254).
+- A revocation can name one delegate policy. The authorization log's subject gains `Policy of Policy_id.t`, written as `{"type":"policy","id":…}` on disk and read back by the same reader, so a policy can be closed without revoking the principal behind it (design 4.2-2, plan D2 prerequisite). Nothing in `Authz_state` owns a policy yet: a blocked policy still answers `Cancel_owner_unknown`, and the owner rule arrives with `Authz_delegate_policy_state` (#54256).
+- The declaration a person's Keeper is created with is one reviewed value now (`Person_keeper_declaration`): `activation_mode = "on_demand"`, `tools.masc_enabled = false`, and the shipped default sandbox profile, image and network mode. It writes no file and changes no route; a test hands the rendered bytes to the loader the engine uses, so the values cannot drift from what the engine accepts (RFC a-persons-keeper-runs-on-the-engine, S2 / stack A3-2 slice 1) (#54257).
+- A person's Keeper declaration can be written from a `base_path` alone (`Person_keeper_declaration.commit`), because the multi-account server holds no workspace state and cannot call the `Workspace.config` writer. The bytes are validated with the engine's loader before anything is written, the file is replaced atomically and read back, a retry of the same creation request answers `Already_present` instead of rewriting, a different declaration already on disk is refused unless the caller asks to replace it, and an engine name that is not a single path component is refused before the path is built. No route calls it yet (slice 2 of A3-2) (#54258).
+- A design record that says who runs the host maintenance a multi-account install skips today: the layers are `task-3846`'s A3 family (A3-2b for the build and volume reclamation plus the sandbox volume GC report, A3-3 for the Librarian writer pulse) rather than a separate maintenance lane, and a process-wide reclamation sweep stays forbidden until that owner exists because it would cross account volumes. The two empty coordinates, `lib/server/server_bootstrap_maintenance.ml:471-474` and `:876-877`, and the residual requirement on `task-3846` are written down in `docs/design/multi-account-host-maintenance.md`. No code changed, and reclamation itself was not measured (#54261).
+- An operator can pass a turn log line the Librarian reader stops on. `POST /api/v1/keepers/<k>/memory/act` takes `{"action":"skip_line","offset":<offset>}`, with the offset the writer row's input fault shows. It is accepted only when reading, run again from the stored position, stops on the line at that offset with no unit holding an item before it: a line that does not decode or is out of order. The commit log then gains a `Skip` line whose hole is `{"kind":"line_unreadable","offset":<offset>,"sha":"<sha256 hex>"}`, the ask that is out is cancelled, the size facts and the last ask's result are emptied, and the next ask starts. Any other offset, nothing unread, a unit with items in front, and a replaced file or a lost position (which `restart_reading` passes) are refused with the code `not_the_faulted_line`; a turn log that does not read is `turn_log_unread`. The act does not change the file: `validate-stores` refuses the passed line until `turns.jsonl` is deleted with the server stopped, and `restart_reading` then lets reading go on in the new file (#54303).
+- `skip_line` does not pass a line the turn log itself stops on. Every append of the turn log first reads the file's tail; when that read fails on the line at the given offset, the log grows no more, and passing the line would leave nothing unread while no later turn reaches Memory. The act is refused with the code `turn_log_stopped_on_line`, the row's alarm stays on, and the answer's `operator_action` names the way out: stop the server, delete `turns.jsonl`, start it and send `restart_reading`. A line with a `Closed` line after it is not met by that read and is passed (#54303).
+- The TUI Memory screen sends the operator acts a Keeper's Memory writer row takes: `w` arms the row's first act and a second `w` posts it to `POST /api/v1/keepers/<k>/memory/act`, `W` steps to the row's next act. A stopped writer takes `resume`, and `adopt` with the snapshot file's sha when its log diverged or does not read; a resting or bottomed writer takes `resume`; a reading that stopped on a replaced turn log or a lost position takes `restart_reading`, and one that stopped on content that does not read takes `skip_item` of that unit. The answer is drawn in the server's words (`store=…`, `code=…`) and the Keeper's row is read again (#54322).
+- A Keeper's Memory writer row turns on W2 (warn) when the Keeper's latest
+  request starts past the writer's read end: a message between the two is in
+  neither Memory nor the request. The row carries `request`, one `kind` for
+  each standing, and the TUI Memory screen draws W2 alone and nothing for the
+  other kinds (#54344).
+- Add provider-neutral anchored iterative compaction and deterministic microcompaction in `Keeper_compaction`, storing immutable `compaction_anchor` epochs with lossless `Ids.Turn_id.t` pointers, structural budget-bounded roll-off (`bound_anchor_to_budget` / `archived_epochs_through`), durable microcompacted blob handles (`Tool_blob_store.put_durable` registered in `Server_tool_blob_scope` for `Tool_blob_maintenance` sweep protection), and self-contained raw pre-microcompaction verbatim archived turns in per-Keeper SQLite WAL databases (`<keepers_dir>/<keeper_id>.compaction.db`) accessed strictly off-domain via `Domain_pool_ref` (#54361).
+- Add closed-sum declarative memory lifecycle transitions (`Librarian_lifecycle`), cross-category `Synthesize` with `Derived` provenance, proactive structural `Molt` (shedding superseded/ephemeral noise into `<keeper_id>.memory-archive.jsonl`), `Promote_to_world` emissions, and `.memory-log.jsonl` checkpoint compaction in `Librarian_store` / `Librarian_archive` (#54362).
+- Add frozen-per-memory-epoch Per-Keeper Memory Digest (`Keeper_memory_digest`) and persistent per-Keeper SQLite WAL FTS5 indexing (`Keeper_memory_search_index`) accessed off-domain via `Domain_pool_ref` (#54362).
+- Add lock-free MVCC MASC World Memory (`lib/world_memory/`) backed by SQLite WAL (`.masc/world_memory.db`) off-domain via `Domain_pool_ref`, with typed facts/edges (`Supersedes | Refines | Contradicts | Synthesizes_from`), unified Wiki/Artifact/MCP resource indexing, trigram FTS5 search, and a single async off-domain `World_memory_curator` fiber performing declarative cross-Keeper synthesis and immutable digest commits (#54363).
+- Expose `masc://world-memory/digest`, `masc://world-memory/index`, and `masc://world-memory/facts/{fact_id}` via MCP `resources/list` and `resources/read`, and feed a read-only World Memory Index snapshot back into per-Keeper `Librarian_question` context (#54363).
 
 ### Changed
 
@@ -73,23 +92,114 @@
   and one that says not to fill in such a turn's `runtime`, `task` and
   `stimuli` by guessing, so the front half of every question id changes
   once (#54295).
-
 - Lift the 1-slot transition outbox cap to a FIFO multi-entry outbox with targeted `transition_id` projection, add typed producer-selected wake policies (`Now | At_tick | Carry`), `Steer | FollowUp | Coalesce` mid-turn queue modes, staggered tick grid, and `30m -> 1h -> 2h` adaptive pull-in idle backoff, lift silent `Multi_account` Board/Memory/Authority blackouts for fleet Keepers, and bound delegate reply chat scans (#54351).
 - Preserve `Internal_assistant` turns and `working_context` across Keeper replay checkpoints, move dynamic goals into the volatile L5/L6 tail with trailing `System_context | Outside_context` cache-breakpoint splitting, stop `Initial_system_*` from hoisting per-turn context on Qwen/vLLM, strip volatile prefix counters and inline wiki TOC, preserve Anthropic SSE `cache_write_lifetime` telemetry, wire Kimi 1h/Anthropic prompt caching and `librarian_memory` lane config, switch tool loading to append-only with deferred non-core schemas, slim `keeper.md`, and parallelize `Tool_write_file` in `Scoped_batch` (#54350).
+- Extract wrapped `masc_tui_owed_surface_reads` library (`Owed_read_policy`, `Owed_board_approvals_reads`, `Owed_runtime_tools_reads`) from `bin/masc_tui.ml` (`-1,236` lines, `75` strict `.mli` exports) (#54239).
+- Extract wrapped `masc_tui_keeper_journal_reads` library (`Keeper_chat_reads`, `Keeper_schedule_memory_reads`, `Keeper_logs_roster_reads`) from `bin/masc_tui.ml` (`-1,085` lines, `37` strict `.mli` exports) (#54240).
+- Extract wrapped `masc_tui_refresh_control` library (`Approval_decisions`, `Server_identity_settlement`, `Http_refresh_orchestration`) from `bin/masc_tui.ml` (`-1,184` lines, `27` strict `.mli` exports) (#54241).
+- The DOS core moves to ocaml-dos 238d2c9. The default CPU is an 80286. (#54293)
+- `masc_dos_load` asks the core whether it can load an EXE instead of copying the loader's header rules. An EXE whose header page count ends inside the header, or whose relocation table offset lies past the file (even with no entries), is refused as `Invalid_request`. A `ZM` signature is now loaded as an EXE. (#54293)
+- `masc_dos_load` refuses a second file name that DOS reads as the same file as an earlier one (8.3 cutting, for example `LONGFILENAME.TXT` and `LONGFILE.TXT`), and a file name DOS cannot hold, as `Invalid_request` naming the file. (#54293)
+- A Keeper's Memory writer row names the refusal E4 reads by its own end,
+  `"ended": "refused_not_all_sized"`, and carries `about_lane_now` with it:
+  whether the lane value the refusals were read against is the one declared
+  now. It was sent as a `lane` end without that value. The TUI Memory screen
+  says it as "every slot refused the one item", and says when Memory or the
+  lane value changed since (#54299).
+- `GET /api/v1/dashboard/keeper-memory-health` is
+  `keeper.memory_os.current_health.v17`. The TUI and the dashboard refuse a
+  v16 answer, and a build before this one refuses v17 (#54299).
+- `/dashboard/` answers a method other than GET, HEAD or OPTIONS with 404 instead of 405; GET, HEAD and OPTIONS answer as before (#54301).
+- A Keeper request that opens at a start the provider accepted, while the
+  Memory writer's read end stands elsewhere, names its origin by where that
+  start came from (`turn_record`, `turn_start_after_refusal`,
+  `this_turn_start_after_refusal`, `turn_start_at_max_context` or
+  `librarian_point_at_max_context`) in the next-request forecast, the
+  continuity request record and the carried-range log. It no longer wraps
+  that origin in `past_librarian_point` with the read end's atom. The
+  request sends the same bytes (#54314).
+- The TUI next-request band says where such a range's start came from and
+  no longer names the Librarian point's atom. Install the TUI with the
+  server of the same build (#54314).
+- The Librarian's log and its writer row in `keeper-memory-health` name a slot `overdue` when the request was sent and a deadline on its own work passed: the first token, the wall clock, the HTTP operation, or a response body. Such a slot was `lost` before. The Librarian still reads it as a slot that said nothing, so no decision changes. A deadline that passed before the request was sent, an idle stream and an official client's idle timeout stay `lost`. The TUI reads the new word (#54318).
+- While the TUI re-reads the runtime catalogue, it says what it says between reads: a catalogue that was read shows no sentence, and one kept after a failed read shows `last observed catalogue: <reason>`. The "refreshing" and "retrying" sentences are gone from the Runtime screen summary, the Lanes warning line, the context pane and both runtime pickers (#54319).
+- The workspace memory curator narrows a classification batch on a refusal
+  with no size (such as HTTP 400), an answer it cannot use or a missed
+  deadline, not only on a size refusal, and asks every pending fact in one
+  pass. A fact asked alone is set aside only when every slot of the lane
+  refused it, and is not asked of a slot that refused it again until the
+  lane changes, the curator prompt changes or the server restarts. The
+  maintenance tick wakes the curator only when a slot it waits on said
+  nothing, the registry was being replaced, or a read or write of its own
+  failed (#54330).
+- A request's seed is bounded by the history generation the Keeper's turn log states, not the old turn index: the last `Reset` of the trace that cleared or replaced the head (`Announced Cleared`, `Unannounced`) fences every turn closed before it, and a recovering purge's reset fences nothing. An official-client turn that starts from an empty working context no longer raises the boundary, which the old index did at every such turn's end line. A turn log line that does not decode or breaks the line order refuses the seed with `boundary_error` instead of reading as no boundary. A turn log that grew is read from where the last read stopped (#54336).
+- The workspace memory curator's briefing narrows a request of two entries or
+  more on a refusal with or without a size, an answer it cannot use or a
+  missed deadline, and no longer narrows at the output limit. A briefing
+  request every slot of the lane refused, at the output limit or short of it,
+  stands: Keepers keep reading the last complete briefing, the classification
+  goes on, and the request is asked again only after an ask to start over, a
+  lane change, or when the briefing's entries change. A request a slot has
+  not refused waits for the maintenance tick, which asks only that slot
+  (#54337).
+- A turn that serves a due schedule, runs to its end and acknowledges its
+  queue entries now serves the Keeper's periodic boundary: the next periodic
+  turn comes one `keeper.keepalive_interval_sec` after that turn. A Keeper
+  whose own recurring schedule is shorter than the interval no longer gets
+  periodic turns on top of it. Wake hints, and failed or checkpointed turns,
+  leave the boundary in place (#54338).
+- `GET /api/v1/dashboard/keeper-memory-health` is
+  `keeper.memory_os.current_health.v18`. The TUI and the dashboard refuse a
+  v17 answer, and a build before this one refuses v18 (#54344).
+- Upgrade `Tool_blob_store` and `Tool_output` to replace unbounded process-lifetime RAM address sets and `Scanf` sentinel parsing with bounded sets, strict structured JSON handles, and smart 4 KiB head+tail previews, and pin compaction anchors in `Runtime_model_input_tail_window` so provider switches project seamlessly without cliff-dropping history (#54361).
+- Replace the legacy `"bodies omitted"` default recall notice in `Keeper_memory_os_recall` with the cache-stable frozen-epoch Per-Keeper Memory Digest (#54362).
+- Isolate synchronous disk I/O in `Librarian_writer` onto `Domain_pool_ref`, guard `Unix.realpath`, and make `Librarian_writers.pulse` retirement asynchronous so a retiring writer never stalls the maintenance loop (#54362).
+- Cut over `keeper_workspace_memory_read` and World Memory MCP reads to lock-free `World_memory_store`, and remove obsolete global `File_lock_eio` read locks from `Workspace_memory_ledger` and `Workspace_memory_briefing` (#54363).
 
 ### Removed
 
 - Remove the retired Muse runtime stack, the blocked one-shot Vibe CLI stub, and the legacy Antigravity Python PTY context scraper (#54356).
+- The shipped config no longer carries the local Ollama `Qwen3.8-27B` runtime: the `[models.qwen3-8-27b]` row, its `[models.qwen3-8-27b.capabilities]` table and the `[ollama.qwen3-8-27b]` binding are gone from `config/runtime.toml`, and the `hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL` row is gone from `packages/agent_core/models.toml`, because the weights are no longer resident on the machine. A lane that names `qwen3-8-27b` no longer resolves it, instead of starting a runtime whose weights are absent. (#54300)
+- `POST /broadcast`, the alias of `POST /api/v1/broadcast` (#54302).
+- `GET /api/v1/karma`, which answered `{"karma": [...]}`; `GET /api/v1/board/karma/ledger` returns the same `{agent, karma}` entries in the same order under `totals` (#54302).
+- `POST /api/v1/voice/setup/preview`; `GET` and `POST /api/v1/voice/setup` stay (#54302).
+- `POST /api/v1/dashboard/browser-lane/goto`; the TUI Browser Lane calls `clients`, `read`, `scene`, `screenshot` and `interact` (#54302).
+- `GET /api/v1/runtime/params/audit`; each runtime parameter change is still appended to `.masc/param_audit.jsonl` (#54302).
+- The TUI no longer decodes a `past_librarian_point` forecast origin
+  (#54314).
+- Delete `GET /graphiql/graphiql.min.css`, `/graphiql/graphiql.min.js`, `/graphiql/react.production.min.js` and `/graphiql/react-dom.production.min.js`, and the four vendored files under `assets/graphiql/` behind them (1.13 MB). No page, script or test of the repository loaded them: `GET /graphql` renders the Playground and requests only `/static/css/middleware.css` and `/static/js/middleware.js`. The four paths no longer exist on the router (#54327).
+- Purge dead/over-engineered skill activation ledgers (`keeper_skill_activation*`), their removed `/api/v1/keepers/skill-activations`, `/api/v1/keepers/skill-usage`, and `/api/v1/dashboard/skill-activations/physical-turn` TUI/Dashboard/test consumers, TOML tool composition DAG engines (`keeper_tool_composition*`, `keeper_tool_execution_journal*`), and the off-by-default JEV recall pipeline (`keeper_memory_recall_*`), replacing skill instruction lookup with lightweight `Keeper_instruction_skill` telemetry (#54361).
 
 ### Fixed
 
 - TUI About 화면이 Keeper 수를 명부 읽기에 실패하면 ✕, 읽기 전이면 ◌ 로 그립니다("읽기 불가"/"불러오기 전" 대신) (#54243).
 - Librarian writer alarm E4 no longer goes off while the pulse asks the refused item again. E4 now reads the refusal the last ask left (`Librarian_last.Refused_not_all_sized`, with the snapshot and the lane value it was judged against) and not the writer's state, so the level stays `error` until an ask judges other bytes. A declared slot the registry did not admit is counted as a silent slot on the row (RFC §7.2): that end leaves W1, not E4 (#54280).
 - The multi-account engine no longer starts the Librarian's Memory writers or the Librarian Addon wake. The engine RFC refuses the Librarian in multi-account, but the engine started the writers, which read no account: their CLI slots failed only because the multi-account lookup misses the operator's Runtime, and nothing stopped their HTTP slots. One predicate, `runs_memory_lanes`, now decides the writers, the Addon wake and the World Memory curator on the access kind, and the initialized owner state carries the access it was initialized on (#54236).
-
 - Isolate Keeper turn/child fibers under per-Keeper `Eio.Switch` bulkheads with symmetric registry quarantine, make account-seat acquisition non-blocking (`Account_busy`), classify structured HTTP 400/402/403/429 quota/billing and `ContextOverflow` refusals, keep observed zero-tool drops rotatable (`No_effect_observed`) while fencing `Effect_attempted` and `Observation_unavailable`, and preserve real `provider_id`/`model_id` telemetry (#54349).
 - The `openai-responses` SSE parser no longer fails a whole turn when the terminal `response.completed` echo of an encrypted reasoning item differs from the `response.output_item.done` frame only in envelope fields — an added `status`, a blank versus present `id`, omitted empty channels. The replay guard now compares the `encrypted_content` projection and keeps the stored done item, the one OpenAI names as authoritative for replay, while a genuinely different ciphertext still fails closed with `responses_replay:conflicting_reasoning_item`. Observed as a recurring `provider_error_wire:sse:malformed_payload` failure of an `openai-responses.gpt-6-2-sol-*` keeper turn. (#54354)
 - Keep the release lifecycle evidence gate green after #54351 lifted the transition outbox to a FIFO: the stale-worker case in `test_keeper_event_queue` now asserts the idempotent `Ok ()` report for an already-retired `transition_id`, that `append_before_retire` is never invoked for the newer transfer, and that the newer `transition_id` still owns the outbox, instead of expecting the old one-slot `Error` (#54367).
+- A librarian lane add-on listing walk re-lists once from a fresh first page when a later page yields a request the first page could not have listed, so the arrival starts beside the originals the first page carried (#54009).
+- Claude Code now compacts at the runtime's declared window. Keeper turns,
+  Fusion panelists and person-Keeper previews launch the CLI with
+  `--autocompact <max-context>` on start and resume; before, the CLI ran its
+  default for 1M-window models (about 967K tokens) whatever `max-context`
+  declared. (#54320)
+- A classification batch refused with a 400, or answered with output the
+  curator could not decode, is no longer sent again unchanged on every
+  maintenance tick, and one such fact no longer holds back the other facts
+  of its batch (#54330).
+- A size is kept for the next batches only when the batch came down by size
+  refusals alone (#54330).
+- A failed image read reports the failure of the runtime that was called instead
+  of a wait for another runtime. `runtimes_held` now means no image runtime could
+  be called; a timeout or a 5xx from the one callable runtime comes back as that
+  failure, which the Keeper can retry, not as "wait until the other provider
+  resets" (#54332).
+- The Memory screen's operator act list handles the writer row's `refused_not_all_sized` read, which offers no reading act, so the library compiles again after #54299 and #54322 landed in turn (#54334).
+- A briefing request refused with a 400, or cut at the output limit, is no
+  longer sent again unchanged on every maintenance tick (#54337).
+- A lane add-on host cycle no longer restarts its listing walk whenever a later page is non-empty. The re-listing that #54009 added never ended when the first page's requests stayed undelivered, so the add-on instance stopped serving. A listing larger than one frame always has a non-empty later page, and the worker's answer cannot tell that apart from a late arrival (#54345).
+- Exit promptly when the port announcement is refused at boot: the refusal used to raise through the session-switch teardown, which waits on the owner-initialization fiber's non-cancellable boot stretches, so a child that could not announce its port kept booting with its port held for minutes and needed SIGKILL (run 44946173785). The boot now logs the same refusal wording as a `[FATAL]` line and exits with the regulated fatal code before `on_ready` runs and before the port is recorded (#54371).
 
 ### Documentation
 
@@ -100,6 +210,31 @@
 - 전량 회귀 wrapper(`scripts/ci-run-test-suite.sh`)가 bare `@runtest` 가 돌릴 suite 를 `SUITE_SHARD_COUNT` 조각으로 나누고 조각 사이에 `_build/default/test` 를 지울 수 있습니다. 조각마다 자기 로그와 dune trace 를 쓰고, 업로드하는 `test-suite.log` 는 조각 순서로 다시 만들며 trace 요약은 끝에 한 번 합니다. 기본값 1 이면 종전과 같습니다. 워크플로 배선은 아직 없습니다 (#54281).
 - The sharded full-regression path now keeps only the aliases `dune` actually defines: an alias name that holds `-` is no longer truncated to a prefix, and a `(test …)` stanza disabled by `(enabled_if …)` is no longer addressed as a target. The list is filtered by asking `dune rules` (which builds nothing), and a shard's targets go to one `dune build` so the workspace is parsed once per shard. `SUITE_SHARD_COUNT=1` (the default) still builds the bare `@runtest` once and does not run the filter (#54287).
 - CI 시험만: `test_onboarding_journey` 가 `catalog.models` 를 인덱싱하기 전에 `catalog_error is None` 을 단언해, 실패한 Antigravity catalog 읽기가 맨 `IndexError` 대신 자기 까닭을 보고합니다. 제품 동작 변화는 없습니다 (#54277).
+- A failed keeper chat-store write names the file that failed again: the internal
+  operator detail keeps the store path, and the redaction that guards what leaves
+  the workspace stays unchanged at the outbound projection (#54306).
+- `test_keeper_memory_admission_queue`'s storage-boundary case now asserts what the write path does: a normal admission commit **refuses** a snapshot whose bytes do not decode, keeps the bytes, and leaves the pending input outstanding. `#53582` (`ca0ce754`) moved the recovery to explicit operator/boot reconciliation (`keeper_memory_os_current_update.ml`, "Never silently drop or auto-quarantine"), so the old expectation that an ordinary commit replaces the snapshot no longer held. Test-only change: no product behaviour changes. Closes the main-red coordinate `test/test_keeper_memory_admission_queue.ml:412-413` from runs `44895408543` / `44894209082` (task-3890). (#54309)
+- The slot outcome table (what one slot of an exact lane did with one request) moves from the Librarian to the lane-neutral `Exact_lane_slot_outcome` and `Exact_lane_slot_visit`, with the lane's own rejection as a type parameter, so the workspace memory curator can read the same table (#54318).
+- `scripts/changelog-fragments.py assemble --into <version>` folds the fragments — and whatever `[Unreleased]` still holds — straight into the release section, and the new `folded` mode reports (with `--delete`, removes) fragments whose entry CHANGELOG.md already carries, so `bump-version.sh` refuses a fold that would duplicate released entries (#54369).
+- `changelog-fragments.py assemble` now replaces `CHANGELOG.md` atomically (sibling temp file + `os.replace`) instead of writing it in place, and refuses an `--into` target that does not sit after `[Unreleased]`, closing the two hardening notes from the #54369 review (#54372).
+
+### Upgrade notes
+
+- Older builds do not decode a `line_unreadable` skip line. As the last line of a commit log, such a line stops an older build's store at boot as `Log_unreadable`. An older build's `validate-stores` refuses it unless a `started` line follows it, which that build's Adopt writes (#54303).
+- A Claude Code runtime's `max-context` is now the point where its CLI
+  compacts the conversation. A runtime declaring 400,000 on a 1M-window model
+  compacts at 400K tokens instead of about 967K, so compaction runs more
+  often; one declaring the model's full window compacts at that limit, later
+  than the CLI's own default. (#54320)
+- A Claude Code runtime whose `max-context` resolves below 100,000 tokens now
+  makes `runtime.toml` fail to load (`Client_compact_window_below_floor`),
+  because Claude Code's `--autocompact` takes no window below 100,000 tokens.
+  Raise the value where it is declared: the binding, provider or model table.
+  (#54320)
+
+### Fresh state required
+
+- DOS checkpoints saved by an earlier build are no longer restorable: the snapshot format rises from 6 to 42 with the new core, and the restore refuses an older one typed and untouched. Save in the game before the new worker replaces a running one; a game's own save files are unaffected, and the program starts fresh from them. (#54293)
 
 ## [0.77.1] - 2026-11-21
 

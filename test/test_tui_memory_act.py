@@ -15,7 +15,7 @@ import sys
 import tempfile
 import unittest
 import urllib.parse
-from typing import Callable, cast
+from typing import Callable, TypeAlias, cast
 
 import test_tui_chat_owed_history as owed
 import tui_memory_health_rows as rows
@@ -32,7 +32,7 @@ SGR = re.compile(rb"\x1b\[[0-9;:]*m")
 
 # The fixture's server class, kept before [run_act] points the fixture at the
 # class of one test.
-BaseChatServer = owed.ChatServer
+BaseChatServer: TypeAlias = owed.ChatServer
 
 Json = dict[str, object]
 
@@ -150,7 +150,7 @@ class MemoryActTest(unittest.TestCase):
             transcript = pathlib.Path(scratch, "transcript")
             os.environ["MASC_TUI_TEST_TRANSCRIPT"] = str(transcript)
 
-            def opened(server: owed.ChatServer, step: Callable[..., None]) -> None:
+            def opened(server: BaseChatServer, step: Callable[..., None]) -> None:
                 acting = cast(ActServer, server)
                 acting.set_phase("open")
                 step("keys", ":")

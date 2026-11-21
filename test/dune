@@ -266,6 +266,8 @@
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main mtime.clock.os))
 
+(include stanzas/test_typesafeai_client_redaction.inc)
+
 (test
  (name test_keeper_librarian_cancellation)
  (modules test_keeper_librarian_cancellation)

@@ -3880,6 +3880,17 @@ let run_named
         in
         let run_claude ~initial_messages () =
           with_account_call_slot ~runtime (fun () ->
+          (* Runtime load refuses a declaration the client cannot take
+             ([Runtime_config_validation.validate_runtime_max_context]), so an
+             [Error] here is a runtime that skipped that load. *)
+          match
+            Runtime_claude_code.autocompact_window
+              (Runtime_instance.max_context_of_runtime runtime)
+          with
+          | Error detail ->
+            Keeper_official_client_attempt.refused_before_dispatch
+              (Keeper_official_client_host.internal_error detail)
+          | Ok autocompact_window ->
           match
             authorize_account walk_owner ~runtime_id:attempt_runtime_id config.account_home
           with
@@ -3897,6 +3908,7 @@ let run_named
           let native_attempt : Runtime_native_tasks.attempt =
             { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
           Keeper_claude_code_runtime.run ~on_guidance_prepared ~input_source ~media_store ?on_native_tool_progress ?on_native_tool_completion
+            ~autocompact_window:(Some autocompact_window)
             ~configured_reasoning_effort:runtime.model.reasoning_effort
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ?argument_source:official_argument_source

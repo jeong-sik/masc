@@ -120,6 +120,14 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Client_compact_window_below_floor of
+      { runtime_id : string
+      ; declared_window : int
+      ; client_floor : int
+      }
+      (** A Claude Code runtime resolves to a window below the least one its
+          client's [--autocompact] takes, so the declared window cannot reach
+          the client. *)
   | Admission_allowances_disagree of
       Llm_provider.Provider_admission.allowance_disagreement list
       (** Runtimes on one provider account that declare different

@@ -26,10 +26,10 @@ let manifest =
   | None -> Alcotest.fail "fixture hash rejected by Authz_record.Hash"
 ;;
 
-let inventory ?keepers ?tasks () =
+let inventory ?keepers ?tasks ?(cutover = 1_800_000_000_000) () =
   L.Inventory_frozen
     { bootstrap_invite_id = invite
-    ; cutover_at_ms = 1_800_000_000_000
+    ; cutover_at_ms = cutover
     ; legacy_keepers = Option.value keepers ~default:[ engine_a; engine_b ]
     ; legacy_task_ids = Option.value tasks ~default:[ "task-1"; "task-2" ]
     ; legacy_manifest_sha256 = manifest
@@ -280,6 +280,39 @@ let errors_are_told_apart () =
        (L.error_to_string (L.Not_ascending "legacy_task_ids")))
 ;;
 
+(* The two errors a value of the codec's own type can produce: a task id this
+   module does not validate, and a cutover outside the wire range. Both must
+   still be reflexive values: a comparison of two inventories cannot depend on
+   whether their bytes can be written. *)
+let a_value_whose_bytes_cannot_be_written_still_equals_itself () =
+  let unwritable_text = inventory ~tasks:[ "task-\xff" ] () in
+  Alcotest.(check bool) "invalid UTF-8: equal v v" true (L.equal unwritable_text unwritable_text);
+  (match L.to_body unwritable_text with
+   | Error Authz_body.Invalid_utf8 -> ()
+   | Error error ->
+     Alcotest.failf "another error: %s" (Authz_body.error_to_string error)
+   | Ok _ -> Alcotest.fail "an invalid UTF-8 task id was written");
+  let beyond_the_wire = inventory ~cutover:9_007_199_254_740_992 () in
+  Alcotest.(check bool)
+    "out of range: equal v v"
+    true
+    (L.equal beyond_the_wire beyond_the_wire);
+  match L.to_body beyond_the_wire with
+  | Error Authz_body.Integer_out_of_range -> ()
+  | Error error -> Alcotest.failf "another error: %s" (Authz_body.error_to_string error)
+  | Ok _ -> Alcotest.fail "a cutover outside the wire range was written"
+;;
+
+(* The bytes absorb a repeat of a name the walk gave twice, while the reader
+   refuses a body that carries one. The absorption is pinned here so the
+   asymmetry is a decision rather than an accident. *)
+let a_repeated_name_is_written_once () =
+  let once = inventory ~tasks:[ "task-1" ] () in
+  let twice = inventory ~tasks:[ "task-1"; "task-1" ] () in
+  Alcotest.(check string) "the same bytes" (text_of once) (text_of twice);
+  Alcotest.(check bool) "the values differ" false (L.equal once twice)
+;;
+
 let () =
   Alcotest.run
     "authz_legacy_event"
@@ -296,6 +329,11 @@ let () =
             `Quick
             a_body_that_is_not_a_legacy_attribution_is_refused
         ; Alcotest.test_case "texts" `Quick errors_are_told_apart
+        ; Alcotest.test_case
+            "an unwritable value still equals itself"
+            `Quick
+            a_value_whose_bytes_cannot_be_written_still_equals_itself
+        ; Alcotest.test_case "a repeated name is written once" `Quick a_repeated_name_is_written_once
         ] )
     ]
 ;;

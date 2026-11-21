@@ -3,16 +3,22 @@
    legacy keeper to a person. A body read as another keeper's claim would hand
    a keeper's turns to the wrong person. *)
 
-(** The body of the legacy attribution record at the switchover (design 10.3
-    and 10.5): the legacy inventory frozen once, the bootstrap candidate the
-    admin admission binds, a legacy keeper claimed by that candidate, or one
-    retired without a claim.
+(** The body of the legacy attribution record at the switchover (design 10.3,
+    which keeps an owner-scoped [Keeper_id] apart from the installation-wide
+    engine name, and plan D1-5 in {!Authz_types}): the legacy inventory frozen
+    once, the bootstrap candidate the admin admission binds, a legacy keeper
+    claimed by that candidate, or one retired without a claim.
 
     {b Where it goes.} The kind that carries this body lands with the reducer
     that reads it, and the two land together: a kind the log admits but no
     reducer reads would make every replay of the log fail, and a kind no author
     writes has no place in the log's vocabulary yet. This module is the codec
     alone, so the bytes are pinned and reviewed before anything writes them.
+
+    {b Shape is fixed, so extend by label.} [of_body] matches the members of an
+    event exactly, in their order. A member added later would make every body
+    already on disk unreadable, so a later shape is a new event label
+    ([inventory_frozen_v2]) and never a new member of a label written here.
 
     {b Body.} An object whose first member is [event], then the members of that
     event in the order written below:
@@ -35,7 +41,9 @@
     the two are different names and one is never read as the other.
     [legacy_manifest_sha256] is 64 lowercase hex characters. [turn_scope] is
     the body of {!Authz_types.Authorization_scope.t} that
-    {!Authz_scope_body} writes.
+    {!Authz_scope_body} writes. [cutover_at_ms] is the wall clock of the freeze
+    and nothing more: the order of the log is the record's [seq] and [at_ms]
+    ({!Authz_record}), so a host whose clock went back reorders no replay.
 
     A body with other members, the same members in another order, or a member
     of another type is refused. This module does not know who may write the
@@ -78,10 +86,18 @@ type t =
 val label : t -> string
 
 val equal : t -> t -> bool
+(** Structural equality: it answers [true] for a value compared with itself,
+    whatever {!to_body} would say about that value, so a comparison of two
+    inventories does not depend on whether their bytes can be written. Two
+    inventories that hold the same keepers in another order are not equal; the
+    canonical order is the writer's business ({!to_body}). *)
 
-(** The body of the record. The error cannot come from a value of {!t}: the
-    labels, the ids, and the hash text are ASCII. It is returned because
-    {!Authz_body.t} can only be made through functions that check. *)
+(** The body of the record. [Invalid_utf8] and [Integer_out_of_range] are the
+    two errors a value of {!t} can produce: [legacy_task_ids] holds text this
+    module does not validate, and [cutover_at_ms] is an [int] that
+    {!Authz_body.int} refuses outside ±(2^53 - 1). The labels, the ids, and the
+    hash text are ASCII, so they cannot fail. The rest of the result type exists
+    because {!Authz_body.t} can only be made through functions that check. *)
 val to_body : t -> (Authz_body.t, Authz_body.error) result
 
 (** Why a body is not the body of a legacy attribution record. *)

@@ -192,10 +192,32 @@ let to_body = function
     Authz_body.object_ [ "event", event; "engine_name", engine_name; "actor", actor ]
 ;;
 
+(* Structural, so a value equals itself even when its bytes cannot be written
+   (an unvalidated task id, a cutover outside the wire range). Comparing bodies
+   instead made [equal v v] false for those values. *)
 let equal left right =
-  match to_body left, to_body right with
-  | Ok left, Ok right -> String.equal (Authz_body.to_string left) (Authz_body.to_string right)
-  | Ok _, Error _ | Error _, Ok _ | Error _, Error _ -> false
+  match left, right with
+  | Inventory_frozen left, Inventory_frozen right ->
+    Invite_id.equal left.bootstrap_invite_id right.bootstrap_invite_id
+    && Int.equal left.cutover_at_ms right.cutover_at_ms
+    && List.equal Engine_name.equal left.legacy_keepers right.legacy_keepers
+    && List.equal String.equal left.legacy_task_ids right.legacy_task_ids
+    && Authz_record.Hash.equal left.legacy_manifest_sha256 right.legacy_manifest_sha256
+  | Candidate_bound left, Candidate_bound right ->
+    User_id.equal left.user_id right.user_id && Invite_id.equal left.invite_id right.invite_id
+  | Keeper_claimed left, Keeper_claimed right ->
+    Engine_name.equal left.engine_name right.engine_name
+    && User_id.equal left.claimant right.claimant
+    && Keeper_id.equal left.keeper_id right.keeper_id
+    && Runtime_id.equal left.runtime_id right.runtime_id
+    && Policy_id.equal left.policy_id right.policy_id
+    && Authorization_scope.equal left.turn_scope right.turn_scope
+  | Keeper_retired left, Keeper_retired right ->
+    Engine_name.equal left.engine_name right.engine_name && User_id.equal left.actor right.actor
+  | Inventory_frozen _, _
+  | Candidate_bound _, _
+  | Keeper_claimed _, _
+  | Keeper_retired _, _ -> false
 ;;
 
 let lists = function

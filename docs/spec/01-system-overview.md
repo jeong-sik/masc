@@ -73,7 +73,7 @@ MASC가 명시적으로 **하지 않는 것**:
 |------|------|------|
 | Runtime | OCaml 5.x + Eio | Effect-based cooperative concurrency. Stdlib.Mutex 사용 금지 (EDEADLK). |
 | HTTP/1.1 | httpun-eio | 기본 transport. Cloudflare Tunnel 호환. |
-| HTTP/2 | h2-eio (h2c, TLS ALPN) | cleartext 8935 는 `MASC_USE_H2=auto`(H1/H2 자동 감지; `h2_only`는 H2 전용, `0`/`h1_only`는 H1 전용), TLS 8938 은 ALPN. 경로 표는 HTTP/1.1 과 하나다(RFC-0512). |
+| HTTP/2 | h2-eio (h2c, TLS ALPN) | cleartext 8935 는 `MASC_USE_H2=auto`(H1/H2 자동 감지; `h2_only`는 H2 전용, `0`/`h1_only`는 H1 전용), TLS 8938 은 ALPN. 경로 표는 HTTP/1.1 과 하나다. |
 | TLS | mirage-crypto + tls-eio + x509 | 리스너 인증서: `transport.tls_cert_file`/`tls_key_file`, 없으면 `.masc/tls/` 자체 서명. 바깥으로 나가는 연결의 CA: `SSL_CERT_FILE` 환경변수. |
 | JSON | yojson | JSON 파싱/생성. `Yojson.Safe.t` 표준 사용. |
 | SQLite | sqlite3 | 로컬 경량 저장 (일부 모듈). |
@@ -198,6 +198,6 @@ MASC의 현재 canonical front door는 3가지다.
 | ID | 질문 | 관련 코드 | 상태 |
 |----|------|----------|------|
 | OQ-SYS-001 | Sub-library 경계를 어디까지 세분화할 것인가? | `lib/keeper/`, `lib/server/` | Open |
-| OQ-SYS-002 | HTTP/2 h2c를 기본 transport로 전환할 시점은? | `lib/server/server_bootstrap_http.ml` | Closed (RFC-0512): 경로 표가 하나라 전환할 것이 없다. 브라우저와 cloudflared 는 TLS 리스너 8938 의 ALPN 으로 HTTP/2 를 고르고, h2c 는 prior-knowledge 클라이언트용으로 8935 에 남는다. |
+| OQ-SYS-002 | HTTP/2 h2c를 기본 transport로 전환할 시점은? | `lib/server/server_bootstrap_http.ml` | Closed: 경로 표가 하나라 전환할 것이 없다. 브라우저와 cloudflared 는 TLS 리스너 8938 의 ALPN 으로 HTTP/2 를 고르고, h2c 는 prior-knowledge 클라이언트용으로 8935 에 남는다. |
 | OQ-SYS-003 | MASC와 `packages/agent_core` 사이의 장기 경계는 어떻게 유지할 것인가? | `packages/agent_core/`, `lib/keeper/` | Open |
 | OQ-SYS-004 | Multi-protocol transport(SSE/gRPC/WebSocket) 중 어디를 canonical으로 수렴할 것인가? | `lib/server/masc_grpc_server.ml`, `lib/config/masc_grpc_transport.ml` | Open |

@@ -64,16 +64,40 @@ let position_json : Log_line.position -> Yojson.Safe.t = function
       ]
 ;;
 
+let log_id_json id = `String (Keeper_turn_log.Log_id.to_string id)
+
+(* The turn log the tail names is the [observed] a [Restart_reading] sends
+   when the position in that same file is lost (§12.4). *)
 let tail_fields (tail : Log_line.line) =
   match tail with
-  | Started { at; _ } ->
-    [ "last_line", `String "started"; "last_line_at", `Float at; "covers_through", `String "before_first" ]
-  | Committed { seq; at; covers_through; _ } ->
+  | Started { at; turn_log; _ } ->
+    [ "last_line", `String "started"
+    ; "last_line_at", `Float at
+    ; "turn_log", log_id_json turn_log
+    ; "covers_through", `String "before_first"
+    ]
+  | Committed { seq; at; turn_log; covers_through; _ } ->
     [ "last_line", `String "commit"
     ; "last_seq", `Int seq
     ; "last_line_at", `Float at
+    ; "turn_log", log_id_json turn_log
     ; "covers_through", position_json covers_through
     ]
+;;
+
+(* Each kind is its constructor's name. A Skip line of the commit log names
+   [turn_log_replaced] and [position_lost] the same way. *)
+let input_fault_json : Librarian_unit.input_fault -> Yojson.Safe.t = function
+  | Line_unreadable { offset } -> `Assoc [ "kind", `String "line_unreadable"; "offset", `Int offset ]
+  | Turn_log_replaced { expected; observed } ->
+    `Assoc
+      [ "kind", `String "turn_log_replaced"
+      ; "expected", log_id_json expected
+      ; "observed", Option.fold ~none:`Null ~some:log_id_json observed
+      ]
+  | Position_lost { offset; length } ->
+    `Assoc [ "kind", `String "position_lost"; "offset", `Int offset; "length", `Int length ]
+  | Content_unreadable { line } -> `Assoc [ "kind", `String "content_unreadable"; "line", `Int line ]
 ;;
 
 let read_json ~now : Last.read -> Yojson.Safe.t = function
@@ -94,7 +118,7 @@ let read_json ~now : Last.read -> Yojson.Safe.t = function
                     ])
                slots) )
       ]
-  | Input_fault -> `Assoc [ "ended", `String "input_fault" ]
+  | Input_fault fault -> `Assoc [ "ended", `String "input_fault"; "fault", input_fault_json fault ]
   | Ask_failed failed -> `Assoc [ "ended", `String "ask_failed"; "failed", `String (failed_token failed) ]
 ;;
 

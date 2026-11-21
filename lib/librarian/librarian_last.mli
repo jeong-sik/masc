@@ -31,7 +31,10 @@ type read =
       }
   (** No slot answered ([m.last = "lane"]): the RFC's [Refused_by_lane] and
       [Silent_lane]. *)
-  | Input_fault (** [m.last = "fault"]. *)
+  | Input_fault of Librarian_unit.input_fault
+  (** [m.last = "fault"]. The fault names what the operator sends to pass
+      it (§12.4): the line's offset for [Skip_line], the id the file names
+      now for [Restart_reading]. *)
   | Ask_failed of Librarian_read_result.failed (** [m.last = "failed"]. *)
 
 (** How the last room ask ended ([m.room]). *)

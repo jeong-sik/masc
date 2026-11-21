@@ -9,7 +9,7 @@ type read =
       ; basis : Digest.digest
       ; slots : (Lane.slot_key * Librarian_slot_outcome.unanswered) list
       }
-  | Input_fault
+  | Input_fault of Librarian_unit.input_fault
   | Ask_failed of Librarian_read_result.failed
 
 type room =

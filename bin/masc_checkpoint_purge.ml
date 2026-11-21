@@ -33,7 +33,7 @@
 let usage =
   {|Usage: masc_checkpoint_purge --keeper NAME [OPTIONS]
 
-Deterministic offline checkpoint purge (RFC-0351 S1). Dry-run by default.
+Deterministic offline checkpoint purge. Dry-run by default.
 
 Options:
   --keeper NAME            the keeper whose checkpoint is purged; its meta names

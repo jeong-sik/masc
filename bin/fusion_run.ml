@@ -275,7 +275,7 @@ let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
   let incomplete = ref [] in
   let mark_incomplete msg = incomplete := msg :: !incomplete in
   Printf.printf
-    "%s\nFUSION HARNESS (RFC-0252) — single vs self-consistency vs Self-MoA vs fusion\n%s\n"
+    "%s\nFUSION HARNESS — single vs self-consistency vs Self-MoA vs fusion\n%s\n"
     bar bar;
   Printf.printf
     "config: %s\npreset: %s\npanel:  %s\njudge:  %s\nprompt: %s\n\n"

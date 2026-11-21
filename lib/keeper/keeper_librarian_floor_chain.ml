@@ -187,7 +187,7 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
        | Error detail -> Ok (Pending (Keeper_librarian_pending.Message_floor {request_id=range.request_id;detail}))
        | Ok () ->
          let* child_id=Replacement.resume ~store ~config ~reserved ~original:record ~step in
-         Keeper_librarian_queue_signal.changed ~base_path:(Durable.base_path owner) ~keeper_name;
+         Keeper_working_context_signal.changed ~base_path:(Durable.base_path owner) ~keeper_name;
          Ok (Pending (Keeper_librarian_pending.Message_floor
            {request_id=child_id;detail="The retained question replacement is durable; the next Memory unit resumes that ID"}))) in
   let rec go machine ~previous =

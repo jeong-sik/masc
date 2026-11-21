@@ -2448,7 +2448,7 @@ let test_person_keeper_declaration_write_creates_and_reads_back () =
     | Ok path -> path
     | Error error -> fail (Masc.Person_keeper_declaration.error_message error)
   in
-  check string "the bytes on disk are the bytes asked for" content (Masc.Fs_compat.load_file path);
+  check string "the bytes on disk are the bytes asked for" content (Fs_compat.load_file path);
   (match Masc.Keeper_types_profile_toml.inspect_keeper_toml path with
    | Error error ->
      fail
@@ -2476,12 +2476,12 @@ let test_person_keeper_declaration_write_retry_is_the_same_answer () =
     | Ok path -> path
     | Error error -> fail (Masc.Person_keeper_declaration.error_message error)
   in
-  let before = Masc.Fs_compat.load_file path in
+  let before = Fs_compat.load_file path in
   (match commit () with
    | Ok Masc.Person_keeper_declaration.Already_present -> ()
    | Ok _ -> fail "a retry of the same creation request has to answer Already_present"
    | Error error -> fail (Masc.Person_keeper_declaration.error_message error));
-  check string "a retry does not rewrite the file" before (Masc.Fs_compat.load_file path)
+  check string "a retry does not rewrite the file" before (Fs_compat.load_file path)
 ;;
 
 let test_person_keeper_declaration_write_refuses_a_different_declaration () =
@@ -2513,7 +2513,7 @@ let test_person_keeper_declaration_write_refuses_a_different_declaration () =
     | Ok path -> path
     | Error error -> fail (Masc.Person_keeper_declaration.error_message error)
   in
-  check string "the refused write left the bytes alone" content (Masc.Fs_compat.load_file path);
+  check string "the refused write left the bytes alone" content (Fs_compat.load_file path);
   (match
      Masc.Person_keeper_declaration.commit
        ~base_path
@@ -2524,7 +2524,7 @@ let test_person_keeper_declaration_write_refuses_a_different_declaration () =
    | Ok Masc.Person_keeper_declaration.Replaced -> ()
    | Ok _ -> fail "an explicit replace has to report Replaced"
    | Error error -> fail (Masc.Person_keeper_declaration.error_message error));
-  check string "an explicit replace writes the new bytes" edited (Masc.Fs_compat.load_file path)
+  check string "an explicit replace writes the new bytes" edited (Fs_compat.load_file path)
 ;;
 
 let test_person_keeper_declaration_write_refuses_a_name_that_is_not_a_component () =

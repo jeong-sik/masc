@@ -139,7 +139,8 @@ let commit ~base_path ~engine_name ~content ~replace =
               | Keeper_turn_up_config_persistence.Sha256 held when not replace
                 ->
                 Error (Different_declaration_present { path; sha256 = held })
-              | _ ->
+              | Keeper_turn_up_config_persistence.Sha256 _
+              | Keeper_turn_up_config_persistence.Missing ->
                 (match
                    Keeper_turn_up_config_persistence
                    .commit_declaration_at_base_path
@@ -174,7 +175,7 @@ let commit ~base_path ~engine_name ~content ~replace =
                       Ok
                         (match observed.manifest with
                          | Keeper_turn_up_config_persistence.Missing -> Created
-                         | _ -> Replaced)
+                         | Keeper_turn_up_config_persistence.Sha256 _ -> Replaced)
                     | Some written ->
                       Error
                         (Read_back_mismatch

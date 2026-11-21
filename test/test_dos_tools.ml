@@ -1001,6 +1001,19 @@ let directory_saver_com =
   ^ "SUB\\OUT.DAT\000" ^ "NEW$" ^ "SUB\000"
 ;;
 
+(* A game that asks DOS to create [fname] and does not look at the answer,
+   then waits for a key.
+
+   100 mov ah,3Ch / xor cx,cx / mov dx,fname / int 21h
+   109 wait: mov ah,0 / int 16h / or ax,ax / jz wait / int 20h
+   113 fname,0 *)
+let creator_com fname =
+  let word n = String.init 2 (fun i -> Char.chr ((n lsr (8 * i)) land 0xff)) in
+  "\xb4\x3c\x31\xc9\xba" ^ word 0x113 ^ "\xcd\x21"
+  ^ "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20"
+  ^ fname ^ "\000"
+;;
+
 let saves_of ~base_path name =
   Filename.concat
     (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "saves")
@@ -1091,6 +1104,26 @@ let test_a_file_in_a_directory_stays_in_the_machine () =
       (Sys.file_exists saves && Array.length (Sys.readdir saves) > 0);
     let again = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1000) ] in
     check (list string) "reported once, not on every call" [] (unsaved again))
+;;
+
+(* A name that climbs out of the DOS root or names another drive is the core's
+   to refuse. Whatever the core does with it, nothing lands in the saves
+   directory or beside it. *)
+let test_a_name_that_climbs_out_never_reaches_the_host () =
+  List.iter
+    (fun fname ->
+      with_workspace (fun base_path ->
+        install_game ~base_path "quest" [ ("QUEST.COM", creator_com fname) ];
+        let loaded = load ~base_path "quest" in
+        check bool (fname ^ ": the call returns") true (is_completed loaded);
+        let saves = saves_of ~base_path "quest" in
+        let beside = Filename.dirname saves in
+        check bool (fname ^ ": nothing beside the saves directory") false
+          (Sys.file_exists (Filename.concat beside "OUT.DAT")
+           || Sys.file_exists (Filename.concat beside ".HIDDEN"));
+        check bool (fname ^ ": nothing in it either") false
+          (Sys.file_exists saves && Array.length (Sys.readdir saves) > 0)))
+    [ "../OUT.DAT"; "..\\OUT.DAT"; "A:OUT.DAT"; ".HIDDEN" ]
 ;;
 
 let controller result =
@@ -2848,6 +2881,7 @@ let () =
             test_a_save_is_mounted_over_the_inventory_copy
         ; test_case "save not written" `Quick test_a_save_that_cannot_be_written_is_reported
         ; test_case "file in a directory" `Quick test_a_file_in_a_directory_stays_in_the_machine
+        ; test_case "name that climbs out" `Quick test_a_name_that_climbs_out_never_reaches_the_host
         ; test_case "holder only" `Quick test_only_the_holder_moves_the_machine
         ; test_case "pass" `Quick test_pass_hands_the_machine_on
         ; test_case "free controller" `Quick

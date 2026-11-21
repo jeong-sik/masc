@@ -284,9 +284,9 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
    | Runtime_account_access.Single_user (_ : Read.single_user) ->
      Alcotest.fail "the engine started on the access of a single user");
   Alcotest.(check bool)
-    "the engine starts no World Memory curator on its access"
+    "the engine runs no memory lanes on its access"
     false
-    (Server_runtime_bootstrap.curates_workspace_memory access);
+    (Server_runtime_bootstrap.runs_memory_lanes access);
   (* A failure before readiness ends the process. The promise is resolved at
      readiness, before the lanes start, so a lane that failed by the time the
      case reads the phase shows as degraded below. *)
@@ -304,6 +304,10 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     "the state of the engine is of the base path of the installation"
     base
     (Mcp_server.workspace_config state).Workspace.base_path;
+  Alcotest.(check bool)
+    "the ready engine holds no Memory writers for the installation"
+    true
+    (Option.is_none (Keeper_memory_writers.find ~base_path:base));
   Alcotest.(check (option (list string)))
     "the folder of Keeper definitions holds none after the engine made the config root"
     (Some [])

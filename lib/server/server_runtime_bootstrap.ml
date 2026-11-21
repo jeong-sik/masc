@@ -639,6 +639,9 @@ type initialized_owner_state =
   ; path_diagnostics : Server_base_path_diagnostics.t
   ; prepared_keeper_persistence : Server_bootstrap_loops.prepared_keeper_persistence
   ; domain_pool : Domain_pool.t
+  ; access : Runtime_account_access.published
+    (* The access the state was initialized on. Activation reads it here, so
+       its lanes start on that access and on no other. *)
   }
 
 type activated_owner_state =
@@ -1200,7 +1203,7 @@ let initialize_owner_state_blocking
     budget.Domain_budget.execution_codec
     budget.Domain_budget.fixed (Domain_budget.total budget) budget.Domain_budget.limit
     (Domain.recommended_domain_count ());
-  { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
+  { state; path_diagnostics; prepared_keeper_persistence; domain_pool; access }
 
 (* Copies and deletions are two events, so they get two lines with two
    sample budgets. One line held both and cut the shared sample at ten: a
@@ -1393,8 +1396,15 @@ let start_owner_lazy_tasks ~sw state =
     Eio.Switch.run ~name:"lazy-startup-tasks" @@ fun _ ->
     List.iter run_lazy_task_group task_groups)
 
+let runs_memory_lanes access =
+  match Runtime_account_access.published_access access with
+  | Runtime_account_access.Single_user (_ : Authz_boot_mode_read.single_user) -> true
+  | Runtime_account_access.Multi_account { zone = _; base_path = _; now = _ } -> false
+;;
+
 let claim_and_start_keeper_persistence
       ~prepared_persistence
+      ~access
       ~sw
       ~clock
       ~mono_clock
@@ -1417,8 +1427,10 @@ let claim_and_start_keeper_persistence
   (* The Memory writers of this workspace, on the server's switch: after the
      persisted Keeper stores were reconciled, and before a Keeper's turn can
      write. A writer's ask calls the Librarian lane with the server's network
-     and clock. Multi-account mode runs no shared Librarian memory writers. *)
-  if not (Runtime_account_access.is_multi_account ()) then begin
+     and clock. A process that does not run the memory lanes starts no table:
+     [Keeper_memory_writers.find] answers [None] there, and the health section
+     reads [none_in_process]. *)
+  let start_memory_writers () =
     let workspace_config = Mcp_server.workspace_config state in
     let ask_env : Librarian_ask.env = { net; clock; base_dir = workspace_config.base_path } in
     let memory_writers =
@@ -1433,19 +1445,20 @@ let claim_and_start_keeper_persistence
        the question's prompt. The prompt is read here once: an edit to the file
        is seen at the next start (§9.5). Without it no value is sent, the
        writers stay Idle, and the reason is logged. *)
-    (match Prompt_registry.render_prompt_template Prompt_names.librarian_ask [] with
-     | Ok prompt ->
-       Keeper_memory_writers.follow_declaration
-         ~sw
-         ~prompt
-         ~answer_schemas:Librarian_answer.schemas
-         memory_writers
-     | Error reason ->
-       Log.Server.warn
-         "Librarian ask prompt %s unavailable: %s. Memory writers hold no lane value and do not ask."
-         Prompt_names.librarian_ask
-         reason)
-  end;
+    match Prompt_registry.render_prompt_template Prompt_names.librarian_ask [] with
+    | Ok prompt ->
+      Keeper_memory_writers.follow_declaration
+        ~sw
+        ~prompt
+        ~answer_schemas:Librarian_answer.schemas
+        memory_writers
+    | Error reason ->
+      Log.Server.warn
+        "Librarian ask prompt %s unavailable: %s. Memory writers hold no lane value and do not ask."
+        Prompt_names.librarian_ask
+        reason
+  in
+  if runs_memory_lanes access then start_memory_writers ();
   try
     Server_bootstrap_loops.start_keeper_loops
       ~claimed_persistence
@@ -1555,12 +1568,6 @@ let resume_model_configuration () =
       (fun detail -> Server_model_setup_resume.Configuration_unavailable { detail })
       resumed
 
-let curates_workspace_memory access =
-  match Runtime_account_access.published_access access with
-  | Runtime_account_access.Single_user (_ : Authz_boot_mode_read.single_user) -> true
-  | Runtime_account_access.Multi_account { zone = _; base_path = _; now = _ } -> false
-;;
-
 let start_post_ready_owner_lanes
       ~sw
       ~clock
@@ -1576,18 +1583,19 @@ let start_post_ready_owner_lanes
     ~resume:resume_model_configuration;
   Candle_status.install_appraiser_check (Server_candle_appraiser.available ~config:(Mcp_server.workspace_config state));
   Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
-  if not (Runtime_account_access.is_multi_account ()) then begin
+  if runs_memory_lanes access then
     Server_librarian_addon_wake.install ~sw ~config:(Mcp_server.workspace_config state);
-    let start_authority () =
-      start_completion_authority ~sw ~clock state;
-      start_goal_verifier ~sw ~clock state;
-      Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
-        ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ~config:(Mcp_server.workspace_config state) ())
-        ~appraise:(Server_candle_appraiser.run ~config:(Mcp_server.workspace_config state)) ();
-      if curates_workspace_memory access then
-        Server_workspace_memory_curator.start ~sw
-          ~config:(Mcp_server.workspace_config state)
-    in
+  let start_authority () =
+    start_completion_authority ~sw ~clock state;
+    start_goal_verifier ~sw ~clock state;
+    Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
+      ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ~config:(Mcp_server.workspace_config state) ())
+      ~appraise:(Server_candle_appraiser.run ~config:(Mcp_server.workspace_config state)) ();
+    if runs_memory_lanes access then
+      Server_workspace_memory_curator.start ~sw
+        ~config:(Mcp_server.workspace_config state)
+  in
+  if not (Runtime_account_access.is_multi_account ()) then begin
     if Runtime_startup_state.requires_setup () then
       Eio.Fiber.fork ~sw (fun () ->
         Runtime_startup_state.await_available ();
@@ -1717,6 +1725,7 @@ let activate_owner_state
   boot_stage "keeper_persistence.begin";
   claim_and_start_keeper_persistence
     ~prepared_persistence:initialized.prepared_keeper_persistence
+    ~access:initialized.access
     ~sw
     ~clock
     ~mono_clock

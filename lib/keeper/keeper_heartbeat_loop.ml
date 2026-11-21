@@ -981,11 +981,9 @@ let cycle_wake ~periodic_due ~deferred_runtime_lane =
 
    A turn run for a due schedule also serves the boundary, before it falls
    due. That turn is a scheduled-autonomous turn the Keeper asked for, so the
-   next periodic turn comes one interval after it. Without this, a Keeper
-   with a recurring self-schedule ran on two clocks: on 2026-11-21 11:00-24:00
-   KST, 146 of the fleet's 234 periodic turns came less than one interval
-   (1800 s) after a schedule turn of the same Keeper. A wake hint serves
-   nothing, so it still cannot starve the due tick. *)
+   next periodic turn comes one interval after it, and a Keeper with a
+   recurring self-schedule runs on one clock instead of two. A wake hint
+   serves nothing, so it still cannot starve the due tick. *)
 let periodic_cadence_after_cycle ~periodic_due ~due_schedule_turn ~now cadence =
   match periodic_due, due_schedule_turn with
   | true, (Due_schedule_turn_admitted | No_due_schedule_turn)

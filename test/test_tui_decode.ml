@@ -5366,7 +5366,7 @@ let disabled_memory_execution =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v17")
+    [ ("schema", `String "keeper.memory_os.current_health.v18")
     ; ("execution", disabled_memory_execution)
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
@@ -5592,6 +5592,7 @@ let test_decode_memory_health_rejects_stale_schema () =
     ; "keeper.memory_os.current_health.v12"
     ; "keeper.memory_os.current_health.v15"
     ; "keeper.memory_os.current_health.v16"
+    ; "keeper.memory_os.current_health.v17"
     ]
 
 let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound () =

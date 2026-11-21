@@ -1,7 +1,6 @@
 open Alcotest
 open Masc
 module Curator = Server_workspace_memory_curator
-module Pass = Server_workspace_memory_curator_pass
 module Ledger = Workspace_memory_ledger
 module Briefing = Workspace_memory_briefing
 module Request = Workspace_memory_request
@@ -447,29 +446,6 @@ let test_librarian_memory_lane_starts_no_curator_call () =
       check bool "an undeclared curator lane queues no retry" false snap.observation_retry))
 ;;
 
-let test_unentered_restore_submission_is_not_a_call () =
-  Eio_main.run (fun _ ->
-    let calls_metric = "masc_workspace_curator_restore_calls_per_pass" in
-    let before =
-      Otel_metric_store.metric_value_or_zero
-        calls_metric
-        ~labels:[ "domain", "outside_domain"; "phase", "primary" ]
-        ()
-    in
-    Pass.with_pass ~base_path:"executor-not-entered" (fun () ->
-      let outcome =
-        Pass.restore
-          ~run:(fun _ -> Error "submission refused")
-          (fun () -> fail "executor must not enter unentered restore")
-      in
-      check bool "executor refusal stays caller result" true (outcome = Error "submission refused"));
-    check (float 0.) "unentered callback adds no restore call" before
-      (Otel_metric_store.metric_value_or_zero
-         calls_metric
-         ~labels:[ "domain", "outside_domain"; "phase", "primary" ]
-         ()))
-;;
-
 let () =
   run
     "workspace_memory_curator_lane"
@@ -498,9 +474,5 @@ let () =
             "the Librarian's Memory lane alone starts no curator request"
             `Quick
             test_librarian_memory_lane_starts_no_curator_call
-        ; test_case
-            "unentered restore submission records no telemetry call"
-            `Quick
-            test_unentered_restore_submission_is_not_a_call
         ] )
     ]

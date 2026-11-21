@@ -6,7 +6,7 @@ type account =
   | Login
   | Key of { key_file : string }
 
-type error = Runtime_person_template.error =
+type error =
   | Template_not_declared of string
   | Model_not_bound of
       { template : string
@@ -20,14 +20,58 @@ type error = Runtime_person_template.error =
   | Key_unreadable of Runtime_api_key_file.unreadable
   | Not_materialized of string
 
-let error_to_string = Runtime_person_template.error_to_string
+let of_template_error : Runtime_person_template.error -> error = function
+  | Runtime_person_template.Template_not_declared template -> Template_not_declared template
+  | Runtime_person_template.Model_not_bound { template; model } ->
+    Model_not_bound { template; model }
+  | Runtime_person_template.Runtime_not_bound { template; runtime_id } ->
+    Runtime_not_bound { template; runtime_id }
+  | Runtime_person_template.Not_materialized diagnostic -> Not_materialized diagnostic
+;;
+
+let error_to_string = function
+  | Template_not_declared template ->
+    Runtime_person_template.error_to_string
+      (Runtime_person_template.Template_not_declared template)
+  | Model_not_bound { template; model } ->
+    Runtime_person_template.error_to_string
+      (Runtime_person_template.Model_not_bound { template; model })
+  | Runtime_not_bound { template; runtime_id } ->
+    Runtime_person_template.error_to_string
+      (Runtime_person_template.Runtime_not_bound { template; runtime_id })
+  | Key_missing -> Runtime_api_key_file.read_error_to_string Runtime_api_key_file.Key_missing
+  | Key_unreadable why ->
+    Runtime_api_key_file.read_error_to_string (Runtime_api_key_file.Key_unreadable why)
+  | Not_materialized diagnostic ->
+    Runtime_person_template.error_to_string
+      (Runtime_person_template.Not_materialized diagnostic)
+;;
 
 (* The label a load diagnostic names the configuration by: it is no file. *)
 let config_label = "the runtime of one account"
 
-let error_code = Runtime_person_template.error_code
+let error_code = function
+  | Template_not_declared template ->
+    Runtime_person_template.error_code
+      (Runtime_person_template.Template_not_declared template)
+  | Model_not_bound { template; model } ->
+    Runtime_person_template.error_code
+      (Runtime_person_template.Model_not_bound { template; model })
+  | Runtime_not_bound { template; runtime_id } ->
+    Runtime_person_template.error_code
+      (Runtime_person_template.Runtime_not_bound { template; runtime_id })
+  | Key_missing -> Runtime_api_key_file.read_error_code Runtime_api_key_file.Key_missing
+  | Key_unreadable why ->
+    Runtime_api_key_file.read_error_code (Runtime_api_key_file.Key_unreadable why)
+  | Not_materialized diagnostic ->
+    Runtime_person_template.error_code
+      (Runtime_person_template.Not_materialized diagnostic)
+;;
 
-let binding_of = Runtime_person_template.binding_of
+let binding_of config ~template ~provider_id ~binding =
+  Runtime_person_template.binding_of config ~template ~provider_id ~binding
+  |> Result.map_error of_template_error
+;;
 
 let http_provider_takes_key = Runtime_person_template.http_provider_takes_key
 
@@ -89,6 +133,7 @@ let of_template
   let ( let* ) = Result.bind in
   let* provider, binding =
     Runtime_person_template.template_binding config ~template ~provider_id choice
+    |> Result.map_error of_template_error
   in
   let* credentials = credentials_of account in
   match provider.api_format, account_home, account with
@@ -134,6 +179,7 @@ let of_template
            ~provider_account_id
            ~integration_id
            ~account_home:None
+         |> Result.map_error of_template_error
        in
        (* Execution stays strictly [seal_person_api] without credentials; preserve
           the verified key-file path on the metadata provider field for callers
@@ -163,4 +209,20 @@ let of_template
       ~credentials
 ;;
 
-let of_person_template = Runtime_person_template.of_person_template
+let of_person_template
+      config
+      ~template
+      ~provider_account_id
+      ~integration_id
+      ~account_home
+      ~binding
+  =
+  Runtime_person_template.of_person_template
+    config
+    ~template
+    ~provider_account_id
+    ~integration_id
+    ~account_home
+    ~binding
+  |> Result.map_error of_template_error
+;;

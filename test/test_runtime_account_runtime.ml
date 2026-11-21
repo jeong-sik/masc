@@ -328,6 +328,80 @@ streaming = true
               None)))
 ;;
 
+(* task-3830: [Runtime_person_template.error] carries only template/binding/materialization
+   failures (never key-file errors); [Runtime_account_runtime] owns [Key_missing] and
+   [Key_unreadable] and maps template errors without changing codes or messages. *)
+let person_template_error_surface () =
+  let module T = Runtime_person_template in
+  let classify = function
+    | T.Template_not_declared _ -> "template_not_declared"
+    | T.Model_not_bound _ -> "model_not_bound"
+    | T.Runtime_not_bound _ -> "runtime_not_bound"
+    | T.Not_materialized _ -> "not_materialized"
+  in
+  let pairs : (T.error * A.error) list =
+    [ ( T.Template_not_declared "codex"
+      , A.Template_not_declared "codex" )
+    ; ( T.Model_not_bound { template = "claude_code"; model = "gpt-5.5" }
+      , A.Model_not_bound { template = "claude_code"; model = "gpt-5.5" } )
+    ; ( T.Runtime_not_bound { template = "claude_code"; runtime_id = "acct-2.claude-sonnet-5" }
+      , A.Runtime_not_bound { template = "claude_code"; runtime_id = "acct-2.claude-sonnet-5" } )
+    ; ( T.Not_materialized "bad config"
+      , A.Not_materialized "bad config" )
+    ]
+  in
+  List.iter
+    (fun (t_err, a_err) ->
+       let expected_code = classify t_err in
+       check string "template error_code" expected_code (T.error_code t_err);
+       check string "account error_code parity" (T.error_code t_err) (A.error_code a_err);
+       check
+         string
+         "account error_to_string parity"
+         (T.error_to_string t_err)
+         (A.error_to_string a_err))
+    pairs;
+  (match T.binding_of config ~template:"missing" ~provider_id:"acct-1" ~binding:(T.Model "m") with
+   | Ok _ -> fail "expected Template_not_declared"
+   | Error err -> check string "binding_of error_code" "template_not_declared" (T.error_code err));
+  (match A.binding_of config ~template:"missing" ~provider_id:"acct-1" ~binding:(A.Model "m") with
+   | Ok _ -> fail "expected mapped Template_not_declared"
+   | Error err -> check string "account binding_of error_code" "template_not_declared" (A.error_code err));
+  check
+    string
+    "key_missing error_to_string"
+    (Runtime_api_key_file.read_error_to_string Runtime_api_key_file.Key_missing)
+    (A.error_to_string A.Key_missing);
+  check
+    string
+    "key_unreadable error_to_string"
+    (Runtime_api_key_file.read_error_to_string
+       (Runtime_api_key_file.Key_unreadable Runtime_api_key_file.Open_to_others))
+    (A.error_to_string (A.Key_unreadable Runtime_api_key_file.Open_to_others));
+  let provider_account_id =
+    match Authz_types.Provider_account_id.of_string "acct-1" with
+    | Ok id -> id
+    | Error _ -> fail "fixture account id refused"
+  in
+  let integration_id =
+    match Authz_types.Integration_id.of_string "claude_code" with
+    | Ok id -> id
+    | Error _ -> fail "fixture integration id refused"
+  in
+  (match
+     A.of_person_template
+       config
+       ~template:"missing"
+       ~provider_account_id
+       ~integration_id
+       ~account_home:None
+       ~binding:(A.Model "m")
+   with
+   | Ok _ -> fail "expected mapped of_person_template Template_not_declared"
+   | Error err ->
+     check string "account of_person_template error_code" "template_not_declared" (A.error_code err))
+;;
+
 let () =
   run
     "runtime_account_runtime"
@@ -336,6 +410,7 @@ let () =
         ; test_case "the binding of a Runtime id" `Quick the_binding_of_a_runtime_id
         ; test_case "the credential is of the account" `Quick the_credential_is_of_the_account
         ; test_case "HTTP provider template" `Quick http_provider_template
+        ; test_case "person template error surface" `Quick person_template_error_surface
         ] )
     ]
 ;;

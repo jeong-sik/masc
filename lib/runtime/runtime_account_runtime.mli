@@ -23,7 +23,7 @@ type account =
       (** The API key in this file
           ({!Runtime_account_home_layout.key_file}). *)
 
-type error = Runtime_person_template.error =
+type error =
   | Template_not_declared of string  (** No provider of the configuration has this id. *)
   | Model_not_bound of
       { template : string

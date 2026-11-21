@@ -12,8 +12,6 @@ type error =
       { template : string
       ; runtime_id : string
       }
-  | Key_missing
-  | Key_unreadable of Runtime_api_key_file.unreadable
   | Not_materialized of string
 
 let error_to_string = function
@@ -25,9 +23,6 @@ let error_to_string = function
       "no binding of the provider %s makes the Runtime %s on this account"
       template
       runtime_id
-  | Key_missing -> Runtime_api_key_file.read_error_to_string Runtime_api_key_file.Key_missing
-  | Key_unreadable why ->
-    Runtime_api_key_file.read_error_to_string (Runtime_api_key_file.Key_unreadable why)
   | Not_materialized diagnostic -> "the runtime of the account does not load: " ^ diagnostic
 ;;
 
@@ -52,8 +47,6 @@ let error_code = function
   | Template_not_declared _ -> "template_not_declared"
   | Model_not_bound _ -> "model_not_bound"
   | Runtime_not_bound _ -> "runtime_not_bound"
-  | Key_missing -> Runtime_api_key_file.(read_error_code Key_missing)
-  | Key_unreadable why -> Runtime_api_key_file.(read_error_code (Key_unreadable why))
   | Not_materialized _ -> "not_materialized"
 ;;
 

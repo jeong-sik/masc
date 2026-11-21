@@ -1,7 +1,8 @@
 (** Logical identities of retained lane observations. An identity names the
     original work, not a current model route, installed Addon or permission to
-    execute. Removing a builtin route must not remove its original records.
-    Verifier records live in the Task/Goal registries. *)
+    execute. An identity a hard cut removes takes its records with it: the
+    install that ships the cut deletes them. Verifier records live in the
+    Task/Goal registries. *)
 type t =
   | Librarian
   | Hitl_auto_judge

@@ -19,6 +19,12 @@
 \* starts its cycle before the next boundary. The fixed phase that keeps
 \* Keepers off the same instant is not visible in one Keeper's model.
 \*
+\* Period is the longest periodic interval. Whenever a cycle ends, the
+\* interval may change to any value from 1 to Period, and a sleeping Keeper
+\* keeps the interval it went to sleep with. That covers the backoff of the
+\* RFC (the interval doubles while nothing reacts and returns to its start
+\* after a raised turn) and a per-Keeper override below the cap.
+\*
 \* Runtime correspondence the RFC steps write:
 \*   - Keeper_keepalive_signal.wakeup_keeper raises the wake for now input
 \*     at enqueue. The tick boundary raises it for at_tick input. Carry input
@@ -43,13 +49,14 @@
 \*   PeriodicSkipsCarry     a due periodic cycle opens no turn while only
 \*                          carry input waits, and consumes the boundary.
 \*   TurnForUnraisedInput   a cycle opens a turn for input nothing raised.
+\*   IntervalPastCap        a turn ends with the interval past its cap.
 
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS
     MaxStimuli,  \* finite TLC environment, not a runtime queue limit
     MaxTime,     \* the last tick boundary TLC explores
-    Period,      \* periodic interval, in tick boundaries
+    Period,      \* longest periodic interval, in tick boundaries
     TurnBound,   \* longest turn, in tick boundaries
     LastArrival, \* the last tick boundary an input may arrive at
     Sources
@@ -77,8 +84,8 @@ NowDelay == TurnBound
 \* running when it came.
 AtTickDelay == Max(1, TurnBound)
 
-\* The longest a carry input waits: one periodic interval, counted from the
-\* end of the turn that served the last periodic boundary.
+\* The longest a carry input waits: the longest periodic interval, counted
+\* from the end of the turn that served the last periodic boundary.
 CarryDelay == Period + TurnBound
 
 VARIABLES
@@ -91,11 +98,14 @@ VARIABLES
     turn_started,
     turn_periodic,
     turn_cause,
-    last_periodic
+    last_periodic,
+    interval
 
 vars ==
     << now, waiting, enqueued_total, claimed_total, wake, cycle,
-       turn_started, turn_periodic, turn_cause, last_periodic >>
+       turn_started, turn_periodic, turn_cause, last_periodic, interval >>
+
+Intervals == 1..Period
 
 TypeOK ==
     /\ now \in 0..MaxTime
@@ -108,6 +118,7 @@ TypeOK ==
     /\ turn_periodic \in BOOLEAN
     /\ turn_cause \in {"idle", "raised", "periodic", "none"}
     /\ last_periodic \in 0..MaxTime
+    /\ interval \in Intervals
 
 Init ==
     /\ now = 0
@@ -120,8 +131,9 @@ Init ==
     /\ turn_periodic = FALSE
     /\ turn_cause = "idle"
     /\ last_periodic = 0
+    /\ interval \in Intervals
 
-PeriodicDue == now - last_periodic >= Period
+PeriodicDue == now - last_periodic >= interval
 
 Entry(kind, source) ==
     [ id |-> enqueued_total + 1, kind |-> kind, source |-> source,
@@ -135,7 +147,7 @@ Enqueue ==
          /\ wake' = (wake \/ kind = "now")
     /\ enqueued_total' = enqueued_total + 1
     /\ UNCHANGED << now, claimed_total, cycle, turn_started, turn_periodic,
-                    turn_cause, last_periodic >>
+                    turn_cause, last_periodic, interval >>
 
 \* The next tick boundary. A Keeper whose wake is raised or whose periodic
 \* boundary is due has started its cycle before it, and a running turn ends
@@ -150,7 +162,7 @@ Boundary ==
          { [ e EXCEPT !.raised = (e.raised \/ e.kind = "at_tick") ] : e \in waiting }
     /\ wake' = (wake \/ \E e \in waiting : e.kind = "at_tick" /\ ~e.raised)
     /\ UNCHANGED << enqueued_total, claimed_total, cycle, turn_started,
-                    turn_periodic, turn_cause, last_periodic >>
+                    turn_periodic, turn_cause, last_periodic, interval >>
 
 TurnCause ==
     IF \E e \in waiting : e.raised THEN "raised"
@@ -160,15 +172,17 @@ TurnCause ==
 \* The Keeper consumes its wake or its due periodic boundary. It opens a turn
 \* when an input raised the wake or the periodic boundary is due, and the
 \* turn takes every waiting input. A wake whose input an earlier turn already
-\* took opens no turn.
+\* took opens no turn, and the Keeper sleeps again with a new interval.
 CycleStart ==
     /\ cycle = "sleeping"
     /\ wake \/ PeriodicDue
     /\ wake' = FALSE
     /\ IF TurnCause = "none"
-         THEN UNCHANGED << waiting, claimed_total, cycle, turn_started,
-                           turn_periodic, turn_cause >>
-         ELSE /\ cycle' = "running"
+         THEN /\ interval' \in Intervals
+              /\ UNCHANGED << waiting, claimed_total, cycle, turn_started,
+                              turn_periodic, turn_cause >>
+         ELSE /\ UNCHANGED interval
+              /\ cycle' = "running"
               /\ turn_started' = now
               /\ turn_periodic' = PeriodicDue
               /\ turn_cause' = TurnCause
@@ -183,12 +197,15 @@ LateWake ==
     /\ ~wake
     /\ wake' = TRUE
     /\ UNCHANGED << now, waiting, enqueued_total, claimed_total, cycle,
-                    turn_started, turn_periodic, turn_cause, last_periodic >>
+                    turn_started, turn_periodic, turn_cause, last_periodic,
+                    interval >>
 
+\* The Keeper sleeps again with a new interval.
 TurnEnd ==
     /\ cycle = "running"
     /\ cycle' = "sleeping"
     /\ last_periodic' = IF turn_periodic THEN now ELSE last_periodic
+    /\ interval' \in Intervals
     /\ UNCHANGED << now, waiting, enqueued_total, claimed_total, wake,
                     turn_started, turn_periodic, turn_cause >>
 
@@ -214,7 +231,8 @@ MissedDirectedWake ==
     /\ \E e \in waiting : e.raised
     /\ wake' = FALSE
     /\ UNCHANGED << now, waiting, enqueued_total, claimed_total, cycle,
-                    turn_started, turn_periodic, turn_cause, last_periodic >>
+                    turn_started, turn_periodic, turn_cause, last_periodic,
+                    interval >>
 
 NowWaitsForBoundary ==
     /\ enqueued_total < MaxStimuli
@@ -224,7 +242,7 @@ NowWaitsForBoundary ==
            { [ Entry("now", source) EXCEPT !.raised = FALSE ] }
     /\ enqueued_total' = enqueued_total + 1
     /\ UNCHANGED << now, claimed_total, wake, cycle, turn_started,
-                    turn_periodic, turn_cause, last_periodic >>
+                    turn_periodic, turn_cause, last_periodic, interval >>
 
 Oldest == CHOOSE e \in waiting : \A f \in waiting : e.id <= f.id
 
@@ -242,7 +260,7 @@ StartTakingOneSource(keep_wake) ==
     /\ claimed_total' = claimed_total + Cardinality(Taken)
     /\ waiting' = waiting \ Taken
     /\ wake' = (keep_wake /\ \E e \in waiting \ Taken : e.raised)
-    /\ UNCHANGED << now, enqueued_total, last_periodic >>
+    /\ UNCHANGED << now, enqueued_total, last_periodic, interval >>
 
 ClaimOneSource == StartTakingOneSource(TRUE)
 
@@ -255,7 +273,7 @@ PeriodicSkipsCarry ==
     /\ wake' = FALSE
     /\ last_periodic' = now
     /\ UNCHANGED << now, waiting, enqueued_total, claimed_total, cycle,
-                    turn_started, turn_periodic, turn_cause >>
+                    turn_started, turn_periodic, turn_cause, interval >>
 
 TurnForUnraisedInput ==
     /\ cycle = "sleeping"
@@ -269,15 +287,25 @@ TurnForUnraisedInput ==
     /\ turn_cause' = "none"
     /\ claimed_total' = claimed_total + Cardinality(waiting)
     /\ waiting' = {}
-    /\ UNCHANGED << now, enqueued_total, last_periodic >>
+    /\ UNCHANGED << now, enqueued_total, last_periodic, interval >>
+
+\* The interval grows past its cap when a turn ends.
+IntervalPastCap ==
+    /\ cycle = "running"
+    /\ cycle' = "sleeping"
+    /\ last_periodic' = IF turn_periodic THEN now ELSE last_periodic
+    /\ interval' = Period + 1
+    /\ UNCHANGED << now, waiting, enqueued_total, claimed_total, wake,
+                    turn_started, turn_periodic, turn_cause >>
 
 Spec                        == Init /\ [][Next]_vars
 SpecMissedDirectedWake      == Init /\ [][Next \/ MissedDirectedWake]_vars
-SpecNowWaitsForBoundary   == Init /\ [][Next \/ NowWaitsForBoundary]_vars
+SpecNowWaitsForBoundary     == Init /\ [][Next \/ NowWaitsForBoundary]_vars
 SpecClaimOneSource          == Init /\ [][Next \/ ClaimOneSource]_vars
 SpecOneTurnPerTick          == Init /\ [][Next \/ OneTurnPerTick]_vars
 SpecPeriodicSkipsCarry      == Init /\ [][Next \/ PeriodicSkipsCarry]_vars
 SpecTurnForUnraisedInput    == Init /\ [][Next \/ TurnForUnraisedInput]_vars
+SpecIntervalPastCap         == Init /\ [][Next \/ IntervalPastCap]_vars
 
 \* A woken Keeper starts its cycle, a running turn ends, and the clock keeps
 \* moving while it can.

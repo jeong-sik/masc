@@ -313,7 +313,7 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
 
 ## 5. 불변식과 TLA+
 
-spec 은 `specs/keeper-state-machine/KeeperReactionQueue.tla` 와 cfg 열 개다. 구현 1단계에서 `KeeperEventQueue.tla` 를 이것으로 바꾼다(§8).
+spec 은 `specs/keeper-state-machine/KeeperReactionQueue.tla` 와 cfg 열한 개다. 구현 1단계에서 `KeeperEventQueue.tla` 를 이것으로 바꾼다(§8).
 
 ### 5.1 모델
 
@@ -323,7 +323,10 @@ spec 은 `specs/keeper-state-machine/KeeperReactionQueue.tla` 와 cfg 열 개다
   - `Carry`: 깨우지 않는다.
 - 입력마다 출처(`source`)가 있다. 출처는 지금 `select` 가 묶음을 가르는 기준이다(묶음 RFC §2.2). 보낸 사람 종류(§3.4)와 다르다. 버그 cfg 둘만 출처를 쓴다.
 - 어느 까닭으로 열린 턴이든 기다리던 입력을 모두 가져간다.
-- 시간은 틱 경계로 센다. 주기는 `Period` 경계마다 온다. 턴 하나는 `TurnBound` 경계 안에 끝난다.
+- 시간은 틱 경계로 센다. 턴 하나는 `TurnBound` 경계 안에 끝난다.
+- 쉬는 간격은 `Period` 경계를 넘지 않는다. `Period` 는 그 Keeper 의 상한(기본 2시간)이다.
+  - 간격은 사이클이 끝날 때마다 1 부터 `Period` 사이의 아무 값으로 바뀔 수 있다. 자는 동안에는 잠들 때 정한 간격을 쓴다.
+  - §4.4 의 두 배 늘리기, 시작값으로 되돌리기, Keeper 마다의 덮어쓰기가 모두 이 안에 든다. 그래서 늘어나는 모양을 따로 모델링하지 않는다.
 - 깨운 Keeper 는 다음 경계 전에 사이클을 연다.
 - 주기 경계는 그 경계에서 연 턴이 끝날 때 채운다(`periodic_cadence_after_cycle`).
 - 지금 코드는 깨우기 신호를 먼저 소비하고, 큐는 턴이 나중에 가져간다.
@@ -338,12 +341,13 @@ spec 은 `specs/keeper-state-machine/KeeperReactionQueue.tla` 와 cfg 열 개다
 | `RaisedRoutable` | 깨우기를 올린 입력에는 깨우기 신호나 도는 턴이 있다 |
 | `NowAgeBound` | `Now` 입력은 도는 턴 하나(`TurnBound`)보다 오래 기다리지 않는다 |
 | `AtTickAgeBound` | `At_tick` 입력은 `max(1, TurnBound)` 보다 오래 기다리지 않는다. 입력 수와 출처 수에 상관없다 |
-| `CarryAgeBound` | `Carry` 입력은 `Period + TurnBound` 보다 오래 기다리지 않는다 |
+| `CarryAgeBound` | `Carry` 입력은 간격의 상한과 턴 하나(`Period + TurnBound`)보다 오래 기다리지 않는다 |
 | `TurnHasCause` | 턴은 깨우기를 올린 입력이 있거나 주기 경계가 될 때만 열린다 |
 | `EveryInputReachesATurn` | 공정성 아래에서 기다리는 입력은 모두 턴에 실린다(활성) |
 
 - 나이 상한 셋은 하나씩 낮추면 정상 모델에서도 깨진다. 상한이 실제로 닿는 값이라는 뜻이다.
-- Carry 의 상한이 「주기 하나와 턴 하나」인 까닭: 주기 경계는 그 경계에서 연 턴이 끝날 때 채워진다. 그 턴이 입력을 가져간 직후 온 Carry 는 턴이 끝난 뒤 주기 하나를 더 기다린다.
+- `Carry` 의 상한이 「간격의 상한과 턴 하나」인 까닭: 주기 경계는 그 경계에서 연 턴이 끝날 때 채워진다. 그 턴이 입력을 가져간 직후 온 `Carry` 는 턴이 끝난 뒤 간격 하나를 더 기다린다.
+- 간격이 상한 아래에서 어떻게 바뀌든 이 식이 선다. TLC 는 사이클이 끝날 때마다 간격을 아무 값으로 바꿔 보며 확인했다.
 
 ### 5.3 일부러 심은 버그
 
@@ -358,12 +362,17 @@ cfg 마다 버그 하나를 더한다. 버그 cfg 는 반드시 위반해야 한
 | `-periodic-skips-carry-buggy` | 주기 사이클이 Carry 를 두고 턴 없이 경계를 쓴다 | `CarryAgeBound` |
 | `-turn-for-unraised-input-buggy` | 판정이 깨우기를 올리지 않은 입력에 턴을 연다 | `TurnHasCause` |
 | `-fair-periodic-skips-carry-buggy` | 주기 사이클이 매번 Carry 를 두고 Skip 한다 | `EveryInputReachesATurn` |
+| `-interval-past-cap-buggy` | 턴이 끝날 때 간격이 상한을 넘는다 | `CarryAgeBound` |
 
 - `-claim-one-source-buggy` 는 §4.3 선행 조건의 근거다.
   - 반례: `Carry` 입력(출처 1)과 `At_tick` 입력(출처 2)이 같이 기다린다.
   - 경계 뒤의 턴이 출처 1 의 것만 가져간다.
   - 다음 경계에서 `At_tick` 입력의 나이가 2 가 된다. 출처가 하나 늘 때마다 턴 하나씩 더 기다린다.
 - `-one-turn-per-tick-buggy` 는 「틱 하나에 턴 하나」를 같은 출처만 묶는 select 와 같이 둔 모양이다. 한 턴에 못 실은 입력을 다음 경계까지 아무도 맡지 않는다.
+- `-interval-past-cap-buggy` 는 §4.4 의 「상한에서 멈춘다」가 `Carry` 의 상한을 받친다는 근거다.
+  - 반례: 간격 1 로 연 주기 턴이 도는 동안 `Carry` 입력이 온다.
+  - 턴이 끝날 때 간격이 상한 3 을 넘어 4 가 된다. 다음 주기는 4 경계 뒤다.
+  - `Carry` 입력은 5 를 기다려 상한 4 를 넘는다.
 
 ### 5.4 돌린 결과
 
@@ -371,12 +380,12 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 
 | cfg | 결과 | 상태 수 |
 |---|---|---|
-| 기본 | 통과 | 28,738 |
-| `-long-turn`(`TurnBound = 2`) | 통과 | 51,999 |
-| `-fair`(`LastArrival = 3`, 활성) | 통과 | 7,326 |
-| 버그 cfg 일곱 | 모두 위반. 안전 여섯은 exit 12, 활성 하나는 exit 13 | |
+| 기본 | 통과 | 177,801 |
+| `-long-turn`(`TurnBound = 2`) | 통과 | 345,487 |
+| `-fair`(`LastArrival = 3`, 활성) | 통과 | 55,784 |
+| 버그 cfg 여덟 | 모두 위반. 안전 일곱은 exit 12, 활성 하나는 exit 13 | |
 
-- 모델의 `Period = 3` 은 틱 3개다. 운영 비율과 다르다. 쉬는 간격의 시작값으로는 1,800초 ÷ 300초 = 6, 상한으로는 7,200초 ÷ 300초 = 24 다. 상한은 `Period`·`TurnBound` 로 적은 식이라, 비율이 달라도 같은 모양이다.
+- 모델의 `Period = 3` 은 간격의 상한이 틱 3개라는 뜻이다. 운영 비율과 다르다. 기본 상한은 7,200초 ÷ 300초 = 24 틱이다. 나이 상한은 `Period`·`TurnBound` 로 적은 식이라, 비율이 달라도 같은 모양이다.
 - `-fair` 는 입력이 `LastArrival = 3` 까지만 온다. 가장 긴 기다림(`Period + TurnBound = 4`)이 마지막 경계 전에 끝나게 하려는 것이다.
 
 ### 5.5 구현이 지킬 것
@@ -391,14 +400,19 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
    - 지금 판정은 scheduled-autonomous gate 가 꺼진 Keeper 의 주기 사이클을 `Scheduled_autonomous_disabled` 로 Skip 한다.
    - 그래도 `periodic_cadence_after_cycle` 은 주기 경계를 쓴다.
    - 이대로 Carry 를 켜면, 그 Keeper 의 Carry 는 깨우기를 올린 입력이 올 때까지 실리지 않는다. `-periodic-skips-carry` 두 cfg 가 이 모양이다.
+6. 쉬는 간격은 상한을 넘지 않는다. 자는 Keeper 는 잠들 때 정한 간격보다 늦게 깨지 않는다(`CarryAgeBound`, `-interval-past-cap-buggy`).
+   - 덮어쓰기로 상한을 낮추면, 그때 자던 잠은 옛 간격으로 끝날 수 있다. 그 잠 하나에서는 옛 상한이 `Period` 다.
 
 ### 5.6 모델 밖
 
 - 예약 전달의 답할 곳 갈래(§3.2). 예약은 제 시각에 깨고, 이 RFC 는 예약의 묶음 규칙을 바꾸지 않는다.
 - Keeper 여럿과 고정 시차(`offset(k)`). Keeper 하나의 모델에서는 보이지 않는다. 같은 초에 몰리는지는 §8 에서 잰다.
 - provider 쉼(`Serve_wakeup_after_duration`). 쉬는 동안은 `Now` 입력도 쉼이 끝날 때까지 기다린다. `NowAgeBound` 는 쉼이 없을 때의 값이다.
-- 실패하거나 체크포인트에서 멈춘 턴. 모델의 `CycleStart` 는 기다리던 입력을 한 번에 가져가 모두 처리한다. 그래서 §5.2 의 나이 상한은 턴이 끝까지 돌 때만 선다. 그런 턴이 남긴 행은 시작값 간격(§4.4)으로 다시 시도한다.
+- 실패하거나 체크포인트에서 멈춘 턴. 모델의 `CycleStart` 는 기다리던 입력을 한 번에 가져가 모두 처리한다. 그래서 §5.2 의 나이 상한은 턴이 끝까지 돌 때만 선다.
+  - 실패한 사이클은 받은 행을 ack 하지 않는다(`stimuli_acked = false`). 그 행은 큐에 남는다. 그래서 나이 상한 셋에는 실패 한 번마다 턴 하나가 더해진다.
+  - 그런 턴이 남긴 행은 시작값 간격(§4.4)으로 다시 시도한다.
 - 실패한 턴을 이어 받는 사이클(`cycle_wake = Deferred_runtime_lane`, 판정의 `deferred_runtime_lane_pending`). 입력도 주기도 아닌 세 번째 원인이다. 구현은 `TurnHasCause` 를 옮길 때 이 사이클을 막지 않는다.
+  - 이어 받기는 남은 후보가 줄어드는 만큼만 이어진다(`after_failure` 주석). 후보가 떨어지면 provider 쉼과 같다.
 
 ## 6. Librarian 제약
 
@@ -428,13 +442,13 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 ## 8. 켜는 순서와 판정 기준
 
 **순서.**
-1. 깨우기 표를 `match` 로 바꾸고 `Now | At_tick | Carry` 를 넣는다. 그 값을 큐 행에 적는다(저장 형식 hard cut, 배포 안내에 Fresh state 항목을 둔다). 기본은 모두 `Now` 다(동작 변화 없음). 같은 단계에서 §5.5 의 다섯 가지를 코드에 넣는다. `pending_stimulus_remains` 는 깨우기를 올린 행만 세고, 주기 경계가 된 사이클은 `Carry` 가 있으면 gate 와 상관없이 턴을 연다. `KeeperEventQueue.tla` 는 `KeeperReactionQueue.tla` 로 바꾼다(hard cut, §5).
+1. 깨우기 표를 `match` 로 바꾸고 `Now | At_tick | Carry` 를 넣는다. 그 값을 큐 행에 적는다(저장 형식 hard cut, 배포 안내에 Fresh state 항목을 둔다). 기본은 모두 `Now` 다(동작 변화 없음). 같은 단계에서 §5.5 의 1~5 를 코드에 넣는다. `pending_stimulus_remains` 는 깨우기를 올린 행만 세고, 주기 경계가 된 사이클은 `Carry` 가 있으면 gate 와 상관없이 턴을 연다. `KeeperEventQueue.tla` 는 `KeeperReactionQueue.tla` 로 바꾼다(hard cut, §5).
 2. Board 글·댓글과 작업 취소의 보낸 사람 종류를 만드는 쪽에서 등록부 일치로 읽는다(§3.4).
 3. 묶음 RFC §4.2·§4.3(봉투 묶음)을 구현한다.
 4. Librarian 컷을 설치하고 `librarian_memory` lane 을 켠다.
 5. §1.1-2 의 `Carry` 를 켠다.
 6. `keeper.turn_tick_sec` 를 300초로 켠다.
-7. 쉬는 간격을 켠다. 전체 기본값은 30분 → 2시간이다. Keeper 마다의 덮어쓰기는 이 단계에서 같이 넣는다.
+7. 쉬는 간격을 켠다. 전체 기본값은 30분 → 2시간이다. Keeper 마다의 덮어쓰기는 이 단계에서 같이 넣는다. 이 단계는 §5.5-6 을 지킨다.
 
 **판정.** 켜기 전과 켠 뒤를 같은 길이 구간으로 잰다.
 - Keeper 마다 연 턴 수, 입력 종류별 턴 수(§2.1 의 셈)

@@ -7,8 +7,8 @@ module Log_store = Workspace_memory_log
 module Exact = Agent_core.Exact_output
 module Registry = Runtime_exact_output_registry
 module Slots = Exact_lane_slots
-module Failure_evidence = Keeper_exact_walk_failure
 module Narrowing = Workspace_memory_narrowing
+module Briefing_narrowing = Workspace_memory_briefing_narrowing
 module Outcome = Exact_lane_slot_outcome
 module Visit = Exact_lane_slot_visit
 open Result.Syntax
@@ -72,41 +72,11 @@ let resolve_lane_execution () =
      | Error err -> Lane_unready (Not_resolved err))
 ;;
 
-type lane_call_failure =
-  { capacity_refused : bool
-  ; transient : bool
-  ; detail : string
-  }
-
-type slot_failure = (string, no_callback_error) Slots.failure
-
 let flow_detail cause =
   Exact.flow_execution_error_to_string
     ~callback_error_to_string:no_callback_error_to_string
     ~raw_response_to_string:raw_excerpt
     cause
-;;
-
-let failure_detail : slot_failure -> string = function
-  | Http_failed { slot_id; error = Flow_semantic_candidates_exhausted { rejections; evidence = _ } }
-    ->
-    let last = List.fold_left (fun _ rejection -> rejection) rejections.first rejections.rest in
-    slot_id ^ ": invalid domain output: " ^ last.rejection
-  | Http_failed { slot_id = _; error = Flow_execution_terminal { cause; prior_rejections = _ } } ->
-    flow_detail cause
-  | Http_unfit { slot_id; reason } -> slot_id ^ ": " ^ reason
-  | Cli_failed { runtime_id = _; failure } -> Keeper_lane_cli_oneshot.failure_to_string failure
-  | Cli_rejected { runtime_id; rejection } -> runtime_id ^ ": invalid domain output: " ^ rejection
-  | Cli_unfit { runtime_id } -> runtime_id ^ ": the request is not one prompt"
-  | Cli_seats_unpublished { runtime_id; provider_id } ->
-    runtime_id ^ ": account " ^ provider_id ^ " published no seats"
-;;
-
-let pass_detail : (Slots.t, slot_failure) Exact_lane_walk.passed -> string = function
-  | Held { slot; until } ->
-    Slots.id slot ^ ": waits for its provider until " ^ Masc_domain.iso8601_of_unix_seconds until
-  | Seats_full slot -> Slots.id slot ^ ": every seat taken"
-  | Failed { slot = _; failure } -> failure_detail failure
 ;;
 
 let stop_detail : ('rejection, no_callback_error) Slots.stop -> string = function
@@ -116,15 +86,6 @@ let stop_detail : ('rejection, no_callback_error) Slots.stop -> string = functio
   | Http_stopped { slot_id; error = Flow_semantic_candidates_exhausted _ } ->
     slot_id ^ ": every answer was rejected"
   | Record_failed _ -> .
-;;
-
-(* The briefing chunk is narrowed when a slot refused the input's size and no
-   slot answered invalid output. *)
-let lane_failure ~transient ~detail passed =
-  { capacity_refused = Failure_evidence.refuses_input_capacity (Slots.failure_evidence passed)
-  ; transient
-  ; detail = String.concat "; " (List.map pass_detail passed @ detail)
-  }
 ;;
 
 (* One walk over [slots], HTTP and CLI alike
@@ -163,32 +124,11 @@ let walk_slots ~base_path ~schema ~rendered_prompt ~validate slots =
          slots)
 ;;
 
-(* The briefing's walk over every slot of the lane. *)
-let execute_exact_prompt ~base_path ~(lane : resolved_lane_execution) ~schema ~rendered_prompt
-    ~validate =
-  match
-    walk_slots ~base_path ~schema ~rendered_prompt ~validate (Slots.of_resolved_lane lane.resolved)
-  with
-  | Error detail -> Error { capacity_refused = false; transient = true; detail }
-  | Ok (Answered { slot = _; value = Http_answered { slot_id = _; success }; passed = _ }) ->
-    Ok success.accepted
-  | Ok (Answered { slot = _; value = Cli_answered { runtime_id = _; accepted }; passed = _ }) ->
-    Ok accepted
-  | Ok (Exhausted { passed; standing }) ->
-    let transient =
-      match standing with
-      | Every_slot_resting -> true
-      | Not_every_slot_resting -> false
-    in
-    Error (lane_failure ~transient ~detail:[] passed)
-  | Ok (Stopped { slot = _; stop; passed }) ->
-    Error (lane_failure ~transient:false ~detail:[ stop_detail stop ] passed)
-;;
-
-(* Why the curator could not use the body a slot sent for a classification
-   request. The decoder's reason is shown only. *)
+(* Why the curator could not use the body a slot sent. The decoder's reason
+   is shown only. *)
 type rejection =
-  | Decision_refused of string
+  | Decision_refused of string  (* the classification's decoder *)
+  | Briefing_refused of string  (* the briefing's decoder *)
   | Empty_or_partial
   | Not_json
 
@@ -210,9 +150,25 @@ let word : rejection Outcome.unanswered -> Narrowing.word = function
     Narrowing.Quiet
 ;;
 
-(* What each slot a walk passed said, by the id the lane declares it by.
-   [Error] is a flow that ended on masc's own failure ({!Visit.of_passed}). *)
-let heard passed =
+(* What one slot said to a briefing request (RFC curator §4.5). The table is
+   read as for a classification request, except that the output limit does
+   not narrow: a request of fewer entries is not known to give a shorter
+   briefing. *)
+let briefing_word : rejection Outcome.unanswered -> Briefing_narrowing.word = function
+  | Outcome.Refused (Outcome.Sized Outcome.Output_over_reserve) -> Briefing_narrowing.Output_limit
+  | Outcome.Refused
+      (Outcome.Sized (Outcome.Input_too_large | Outcome.Window_reached) | Outcome.Unsized) ->
+    Briefing_narrowing.Refused
+  | Outcome.Silent (Outcome.Unusable (_ : rejection)) -> Briefing_narrowing.Unusable
+  | Outcome.Silent Outcome.Overdue -> Briefing_narrowing.Overdue
+  | Outcome.Silent (Outcome.Not_called | Outcome.Unavailable | Outcome.Busy | Outcome.Lost) ->
+    Briefing_narrowing.Quiet
+;;
+
+(* What each slot a walk passed said, by the id the lane declares it by, in
+   the stage's [word]. [Error] is a flow that ended on masc's own failure
+   ({!Visit.of_passed}). *)
+let heard ~word passed =
   let rec read said = function
     | [] -> Ok (List.rev said)
     | one :: rest ->
@@ -469,7 +425,8 @@ let awaits_tick = function
 (* [pending] is why the next pass runs; two wakes before one pass combine.
    [memory] is the classification's narrowing memory: what it narrowed, which
    slots refused a fact alone, which facts wait for the tick, and the kept
-   size. [requests] counts the asks to start over the owner took. *)
+   size. [briefing] is the request the briefing waits at and the slots that
+   refused it. [requests] counts the asks to start over the owner took. *)
 type owner =
   { mutex : Stdlib.Mutex.t
   ; mutable pending : Narrowing.wake option
@@ -480,16 +437,25 @@ type owner =
   ; mutable idle_checkpoint : idle_checkpoint
   ; mutable idle_waiters : idle_result Eio.Promise.u list
   ; mutable memory : Narrowing.memory
+  ; mutable briefing : Briefing_narrowing.memory
   ; mutable requests : int
   ; mutable classification : step_end option
   ; in_flight_revisions : (string * Keeper_memory_commit_notifications.store, int) Hashtbl.t
   }
 
-type domain_step_outcome =
-  | Progressed
-  | Idle
-  | Transient_retry
-  | Failed of string
+(* How a briefing pass ended (RFC curator §4.5). *)
+type briefing_end =
+  | Briefing_moved
+  (* A chunk was published or the state cleaned up: the owner runs again for
+     the next chunk. *)
+  | Briefing_idle
+  (* Nothing to brief, no table for the lane or the lane off, or a new
+     generation started during the pass. *)
+  | Briefing_stands  (* Every slot refused the request the briefing waits at. *)
+  | Briefing_waits
+  (* A slot that has not refused the request is asked on the tick, or the
+     registry is being replaced. *)
+  | Briefing_failed of string  (* masc's own failure. The text is shown only. *)
 
 let run_reconciliation ~base_path =
   let* context, initial_ledger =
@@ -638,7 +604,7 @@ let classify ~base_path ~(owner : owner) ~woken_by ~context
                let* pass = decide (fun memory -> Narrowing.answered memory pass ~sent) in
                ask ledger pass)
           | Ok (Exhausted { passed; standing = _ }) ->
-            (match heard passed with
+            (match heard ~word passed with
              | Error stopped -> Error (Walking, flow_detail stopped)
              | Ok said ->
                let* pass =
@@ -667,7 +633,122 @@ let run_classification ~base_path ~(owner : owner) ~woken_by =
         | Lane_ready lane -> classify ~base_path ~owner ~woken_by ~context ~reconciliation lane))
 ;;
 
-let run_briefing ~base_path =
+(* Accept a slot's briefing for [batch] and write it with its log entry. *)
+let publish ~base_path ~directory batch ~text =
+  match Briefing.accept batch ~text with
+  | Error detail -> Briefing_failed detail
+  | Ok next_state ->
+    let remaining = Briefing.remaining_count batch in
+    let entries =
+      [ ( "briefing"
+        , Printf.sprintf
+            "Workspace briefing updated (selected=%d, remaining=%d)"
+            (Briefing.selected_count batch)
+            remaining
+        , `Assoc
+            [ "kind", `String "briefing_updated"
+            ; "selected_count", `Int (Briefing.selected_count batch)
+            ; "remaining_count", `Int remaining
+            ; "complete", `Bool (remaining = 0)
+            ] )
+      ]
+    in
+    (match
+       io (fun () ->
+         commit_two_phase_log
+           ~base_path
+           ~author:"workspace-memory-curator"
+           ~entries
+           ~apply_state:(fun () -> Briefing.save ~directory next_state))
+     with
+     | Ok () ->
+       Mcp_server_eio_resource.notify_world_memory_updated ();
+       Briefing_moved
+     | Error detail -> Briefing_failed detail)
+;;
+
+(* Ask the request the briefing memory names for the prepared batch, and
+   narrow it as the slots say, until a slot answers or the briefing waits
+   (RFC curator §4.5). A failure of masc's own ends the pass and writes
+   nothing into the memory. *)
+let brief ~base_path ~(owner : owner) ~woken_by ~directory ~render
+    (lane : resolved_lane_execution) prepared =
+  let slots = Slots.of_resolved_lane lane.resolved in
+  let ids = List.map Slots.id slots in
+  let generation, first =
+    Stdlib.Mutex.protect owner.mutex (fun () ->
+      let generation = { Narrowing.lane = lane.generation; requests = owner.requests } in
+      let memory, first =
+        Briefing_narrowing.start
+          owner.briefing
+          ~generation
+          ~slots:ids
+          ~wake:woken_by
+          ~keys:(Briefing.selected_keys prepared)
+      in
+      owner.briefing <- memory;
+      generation, first)
+  in
+  let validate json =
+    Briefing.decode_output json |> Result.map_error (fun reason -> Briefing_refused reason)
+  in
+  let decide sent said =
+    Stdlib.Mutex.protect owner.mutex (fun () ->
+      match Briefing_narrowing.unanswered owner.briefing ~generation ~sent ~heard:said with
+      | Error err -> Error err
+      | Ok (memory, decided) ->
+        owner.briefing <- memory;
+        Ok decided)
+  in
+  let rec ask batch asked =
+    match
+      walk_slots
+        ~base_path
+        ~schema:Briefing.output_schema
+        ~rendered_prompt:(Briefing.rendered_prompt batch)
+        ~validate
+        (List.filter (fun slot -> List.mem (Slots.id slot) asked) slots)
+    with
+    | Error detail -> Briefing_failed detail
+    | Ok (Answered { slot = _; value; passed = _ }) ->
+      let text =
+        match value with
+        | Http_answered { slot_id = _; success } -> success.accepted
+        | Cli_answered { runtime_id = _; accepted } -> accepted
+      in
+      Stdlib.Mutex.protect owner.mutex (fun () ->
+        owner.briefing <- Briefing_narrowing.answered owner.briefing ~generation);
+      publish ~base_path ~directory batch ~text
+    | Ok (Exhausted { passed; standing = _ }) ->
+      (match heard ~word:briefing_word passed with
+       | Error stopped -> Briefing_failed (flow_detail stopped)
+       | Ok said ->
+         (match decide (Briefing.selected_keys batch) said with
+          | Error err -> Briefing_failed (Briefing_narrowing.error_to_string err)
+          | Ok Briefing_narrowing.Narrow ->
+            (match Briefing.narrow ~render batch with
+             | Error detail -> Briefing_failed detail
+             | Ok (Some half) -> ask half ids
+             | Ok None -> Briefing_failed "the briefing narrowed a request of one entry")
+          | Ok Briefing_narrowing.Waits -> Briefing_waits
+          | Ok Briefing_narrowing.Stands ->
+            Log.Server.warn
+              "workspace curator briefing waits at %d entries every slot refused"
+              (Briefing.selected_count batch);
+            Briefing_stands
+          | Ok Briefing_narrowing.Moved -> Briefing_idle))
+    | Ok (Stopped { slot = _; stop; passed = _ }) -> Briefing_failed (stop_detail stop)
+  in
+  match first with
+  | Briefing_narrowing.Stand -> Briefing_stands
+  | Briefing_narrowing.Wait -> Briefing_waits
+  | Briefing_narrowing.Ask { count; slots = asked } ->
+    (match Briefing.select ~render prepared ~count with
+     | Error detail -> Briefing_failed detail
+     | Ok batch -> ask batch asked)
+;;
+
+let run_briefing ~base_path ~owner ~woken_by =
   let directory = Ledger.directory ~base_path in
   match
     io (fun () ->
@@ -675,7 +756,7 @@ let run_briefing ~base_path =
       let* state = Briefing.load ~directory in
       Ok (ledger, state))
   with
-  | Error detail -> Failed detail
+  | Error detail -> Briefing_failed detail
   | Ok (ledger, state) ->
     let sources = Ledger.briefing_sources ledger in
     let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
@@ -686,101 +767,49 @@ let run_briefing ~base_path =
         resolution
         [ "workspace_memory_briefing", Yojson.Safe.to_string input ]
     in
-    match Briefing.prepare ~sources ~contract ~render state with
-    | Error detail -> Failed detail
-    | Ok Briefing.Unchanged -> Idle
-    | Ok (Briefing.Cleanup _ | Briefing.Prepared _) ->
-      let step = ref None in
-      (match
-         io (fun () ->
-           Briefing.update ~directory (fun current ->
-             let* prep = Briefing.prepare ~sources ~contract ~render current in
-             step := Some prep;
-             match prep with
-             | Briefing.Unchanged -> Ok current
-             | Briefing.Cleanup cleaned -> Ok cleaned
-             | Briefing.Prepared batch -> Ok (Briefing.prepared_state batch)))
-       with
-       | Error detail -> Failed detail
-       | Ok _ ->
-         (match !step with
-          | None | Some Briefing.Unchanged -> Idle
-          | Some (Briefing.Cleanup _) ->
-            Mcp_server_eio_resource.notify_world_memory_updated ();
-            Progressed
-          | Some (Briefing.Prepared initial_batch) ->
-            (match resolve_lane_execution () with
-          | Lane_unready (Replacement_in_progress as standing) ->
-            Log.Server.debug "workspace curator briefing deferred: %s"
-              (lane_standing_to_string standing);
-            Transient_retry
-          | Lane_unready ((Not_published _ | Not_resolved _) as standing) ->
-            Log.Server.debug "workspace curator briefing lane unavailable: %s"
-              (lane_standing_to_string standing);
-            Idle
-          | Lane_ready lane ->
-            let rec attempt_batch batch =
-              let prompt = Briefing.rendered_prompt batch in
-              let validate json = Briefing.decode_output json in
-              match
-                execute_exact_prompt
-                  ~base_path
-                  ~lane
-                  ~schema:Briefing.output_schema
-                  ~rendered_prompt:prompt
-                  ~validate
-              with
-              | Ok text ->
-                (match Briefing.accept batch ~text with
-                 | Error detail -> Failed detail
-                 | Ok next_state ->
-                   let remaining = Briefing.remaining_count batch in
-                   let entries =
-                     [ ( "briefing"
-                       , Printf.sprintf
-                           "Workspace briefing updated (selected=%d, remaining=%d)"
-                           (Briefing.selected_count batch)
-                           remaining
-                       , `Assoc
-                           [ "kind", `String "briefing_updated"
-                           ; "selected_count", `Int (Briefing.selected_count batch)
-                           ; "remaining_count", `Int remaining
-                           ; "complete", `Bool (remaining = 0)
-                           ] )
-                     ]
-                   in
-                   (match
-                      io (fun () ->
-                        commit_two_phase_log
-                          ~base_path
-                          ~author:"workspace-memory-curator"
-                          ~entries
-                          ~apply_state:(fun () -> Briefing.save ~directory next_state))
-                    with
-                    | Ok () ->
-                      Mcp_server_eio_resource.notify_world_memory_updated ();
-                      Progressed
-                    | Error detail -> Failed detail))
-              | Error failure when failure.capacity_refused ->
-                (match Briefing.narrow ~render batch with
-                 | Error detail -> Failed detail
-                 | Ok (Some smaller) -> attempt_batch smaller
-                 | Ok None -> Failed ("indivisible briefing chunk refused: " ^ failure.detail))
-              | Error failure ->
-                if failure.transient then (
-                  Log.Server.warn
-                    "workspace curator briefing transient refusal: %s"
-                    failure.detail;
-                  Transient_retry)
-                else Failed failure.detail
-            in
-            attempt_batch initial_batch)))
+    (match Briefing.prepare ~sources ~contract ~render state with
+     | Error detail -> Briefing_failed detail
+     | Ok Briefing.Unchanged -> Briefing_idle
+     | Ok (Briefing.Cleanup _ | Briefing.Prepared _) ->
+       let step = ref None in
+       (match
+          io (fun () ->
+            Briefing.update ~directory (fun current ->
+              let* prep = Briefing.prepare ~sources ~contract ~render current in
+              step := Some prep;
+              match prep with
+              | Briefing.Unchanged -> Ok current
+              | Briefing.Cleanup cleaned -> Ok cleaned
+              | Briefing.Prepared batch -> Ok (Briefing.prepared_state batch)))
+        with
+        | Error detail -> Briefing_failed detail
+        | Ok _ ->
+          (match !step with
+           | None | Some Briefing.Unchanged -> Briefing_idle
+           | Some (Briefing.Cleanup _) ->
+             Mcp_server_eio_resource.notify_world_memory_updated ();
+             Briefing_moved
+           | Some (Briefing.Prepared batch) ->
+             (match resolve_lane_execution () with
+              | Lane_unready (Replacement_in_progress as standing) ->
+                Log.Server.debug
+                  "workspace curator briefing deferred: %s"
+                  (lane_standing_to_string standing);
+                Briefing_waits
+              | Lane_unready ((Not_published _ | Not_resolved _) as standing) ->
+                Log.Server.debug
+                  "workspace curator briefing lane unavailable: %s"
+                  (lane_standing_to_string standing);
+                Briefing_idle
+              | Lane_ready lane -> brief ~base_path ~owner ~woken_by ~directory ~render lane batch))))
 ;;
 
 (* One pass: classification, then the briefing. Gives whether the briefing
    moved, so the owner runs again for its next chunk, and whether the
    maintenance tick is to wake the owner. A classification pass asks every
-   request it has, so it does not run the owner again. *)
+   request it has, so it does not run the owner again. A briefing that every
+   slot refused waits for a new generation or a change of its entries, not
+   for the tick. *)
 let run_pass ~base_path ~(owner : owner) ~woken_by =
   let classified = run_classification ~base_path ~owner ~woken_by in
   (match classified with
@@ -796,11 +825,11 @@ let run_pass ~base_path ~(owner : owner) ~woken_by =
    | Nothing_pending | Drained | Lane_silent -> ());
   Stdlib.Mutex.protect owner.mutex (fun () -> owner.classification <- Some classified);
   let briefed, briefing_retry =
-    match run_briefing ~base_path with
-    | Progressed -> true, false
-    | Idle -> false, false
-    | Transient_retry -> false, true
-    | Failed detail ->
+    match run_briefing ~base_path ~owner ~woken_by with
+    | Briefing_moved -> true, false
+    | Briefing_idle | Briefing_stands -> false, false
+    | Briefing_waits -> false, true
+    | Briefing_failed detail ->
       Log.Server.error "workspace curator briefing: %s" detail;
       false, true
   in
@@ -889,11 +918,12 @@ let request ~base_path =
     (match owner with
      | None -> No_owner
      | Some owner ->
-       (* A new generation (RFC curator §4.3): the memory starts empty, and a
-          pass in flight writes nothing more. *)
+       (* A new generation (RFC curator §4.3): both memories start empty, and
+          a pass in flight writes nothing more. *)
        Stdlib.Mutex.protect owner.mutex (fun () ->
          owner.requests <- owner.requests + 1;
-         owner.memory <- Narrowing.restart owner.memory ~requests:owner.requests);
+         owner.memory <- Narrowing.restart owner.memory ~requests:owner.requests;
+         owner.briefing <- Briefing_narrowing.restart owner.briefing ~requests:owner.requests);
        wake owner Narrowing.Commit)
   | exception Unix.Unix_error (error, operation, _) ->
     Unavailable (operation ^ ": " ^ Unix.error_message error)
@@ -974,6 +1004,7 @@ let start ~sw ~config =
       (* No lane is read yet: the first pass's lane generation differs and
          starts the memory over. *)
     ; memory = Narrowing.empty { Narrowing.lane = ""; requests = 0 } ~slots:[]
+    ; briefing = Briefing_narrowing.empty { Narrowing.lane = ""; requests = 0 } ~slots:[]
     ; requests = 0
     ; classification = None
     ; in_flight_revisions = Hashtbl.create 8

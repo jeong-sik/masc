@@ -51,12 +51,16 @@ let await_owner clock base_path condition =
     loop ())
 ;;
 
-let ready_summary base_path =
+let briefing_observation base_path =
   let directory = Ledger.directory ~base_path in
   let ledger = get (Ledger.load ~base_path) in
   let state = get (Briefing.load ~directory) in
   let template = (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective in
-  match Briefing.observe ~sources:(Ledger.briefing_sources ledger) ~contract:(Briefing.contract ~template) state with
+  Briefing.observe ~sources:(Ledger.briefing_sources ledger) ~contract:(Briefing.contract ~template) state
+;;
+
+let ready_summary base_path =
+  match briefing_observation base_path with
   | Briefing.Current _ -> true
   | Missing | Stale _ -> false
 ;;
@@ -589,6 +593,100 @@ let test_output_limit_narrows_classification_batch () =
         (List.length (Ledger.claims (get (Ledger.load ~base_path))))))
 ;;
 
+(* --- Briefing scenes (RFC curator §4.5, §8.2). --- *)
+
+(* How many entries the briefing Keepers read covers. *)
+let published_entries base_path =
+  match briefing_observation base_path with
+  | Briefing.Missing -> 0
+  | Briefing.Current summary | Briefing.Stale summary -> List.length summary.source_ids
+;;
+
+(* A provider that answers every classification request. [briefing] answers
+   each briefing request by its prompt; the second value counts them. *)
+let briefing_server ~sw ~net ~clock briefing =
+  let asked = Atomic.make 0 in
+  let server =
+    F.start_server ~sw ~net ~clock
+      (F.Reply_with (fun _ body ->
+         let content = user_content body in
+         if is_briefing_request content then (
+           Atomic.incr asked;
+           briefing content body)
+         else answered body))
+  in
+  server, fun () -> Atomic.get asked
+;;
+
+(* A 400 on every briefing request that holds one Keeper's claim. The
+   briefing stands at that claim: the briefing Keepers read stays the last
+   complete one, the classification goes on, and a commit asks the briefing
+   nothing. An ask to start over asks it once more. *)
+let test_refused_briefing_entry_stands () =
+  with_fixture (fun ~sw ~net ~clock ~base_path ~config ->
+    let server, briefings =
+      briefing_server ~sw ~net ~clock (fun content body ->
+        if String_util.contains_substring content "Poison fact" then bad_request
+        else answered body)
+    in
+    publish_lane base_path [ server.base_url ];
+    commit_facts ~base_path ~keeper_id:"first" [ "Fact one" ];
+    run_scene ~sw ~clock ~base_path ~config (fun () ->
+      check int "the first briefing covers the first claim" 1 (published_entries base_path);
+      after_pass ~clock base_path (fun () ->
+        commit_facts ~base_path ~keeper_id:"second" [ "Poison fact" ]);
+      check int "the refused claim is asked alone once" 2 (briefings ());
+      after_pass ~clock base_path (fun () ->
+        commit_facts ~base_path ~keeper_id:"third" [ "Fact three" ]);
+      check int "the classification goes on" 3 (claim_count base_path);
+      check int "a commit asks the briefing nothing" 2 (briefings ());
+      check int "the briefing read is the last complete one" 1 (published_entries base_path);
+      check bool "the tick has nothing to wake for" false (snapshot base_path).observation_retry;
+      after_pass ~clock base_path (fun () -> ignore (Curator.request ~base_path));
+      check int "starting over asks the refused claim once more" 3 (briefings ());
+      check int "the briefing read stays" 1 (published_entries base_path)))
+;;
+
+(* Every briefing request is cut at the output budget. The briefing does not
+   narrow, the pass stands, and nothing waits for the tick. *)
+let test_output_limit_briefing_stands_without_narrowing () =
+  with_fixture (fun ~sw ~net ~clock ~base_path ~config ->
+    let server, briefings =
+      briefing_server ~sw ~net ~clock (fun _ _ -> `OK, length_cut_response)
+    in
+    publish_lane base_path [ server.base_url ];
+    commit_facts ~base_path ~keeper_id:"writer" [ "Fact one"; "Fact two"; "Fact three" ];
+    run_scene ~sw ~clock ~base_path ~config (fun () ->
+      check int "every fact is classified" 3 (claim_count base_path);
+      check int "the briefing is asked once, not narrowed" 1 (briefings ());
+      check int "no briefing is published" 0 (published_entries base_path);
+      check bool "the tick has nothing to wake for" false (snapshot base_path).observation_retry))
+;;
+
+(* Two slots: the first refuses the briefing of one claim with a 400, the
+   second meets a 503 and later answers. The briefing does not stand; the
+   tick asks only the second slot, and its answer publishes the briefing. *)
+let test_briefing_waits_for_the_slot_that_did_not_refuse () =
+  with_fixture (fun ~sw ~net ~clock ~base_path ~config ->
+    let busy = Atomic.make true in
+    let refusing, refused = briefing_server ~sw ~net ~clock (fun _ _ -> bad_request) in
+    let waiting, waited =
+      briefing_server ~sw ~net ~clock (fun _ body ->
+        if Atomic.get busy then overloaded else answered body)
+    in
+    publish_lane base_path [ refusing.base_url; waiting.base_url ];
+    commit_facts ~base_path ~keeper_id:"writer" [ "Fact one" ];
+    run_scene ~sw ~clock ~base_path ~config (fun () ->
+      check bool "the tick wakes the owner" true (snapshot base_path).observation_retry;
+      tick ~clock base_path;
+      check int "the refusing slot is asked once" 1 (refused ());
+      check int "the other slot is asked again" 2 (waited ());
+      Atomic.set busy false;
+      tick ~clock base_path;
+      check int "the refusing slot is still asked once" 1 (refused ());
+      check int "the answer publishes the briefing" 1 (published_entries base_path)))
+;;
+
 let test_startup_recovery_and_partial_member_survival () =
   with_fixture (fun ~sw ~net ~clock ~base_path ~config ->
     let log_path = Log_store.log_path ~base_path in
@@ -754,6 +852,18 @@ let () =
             "an answer cut at the output budget narrows the classification batch"
             `Quick
             test_output_limit_narrows_classification_batch
+        ; test_case
+            "a briefing entry every slot refused stands and the last briefing stays"
+            `Quick
+            test_refused_briefing_entry_stands
+        ; test_case
+            "a briefing cut at the output budget stands without narrowing"
+            `Quick
+            test_output_limit_briefing_stands_without_narrowing
+        ; test_case
+            "a briefing waits for the slot that did not refuse it"
+            `Quick
+            test_briefing_waits_for_the_slot_that_did_not_refuse
         ; test_case
             "startup log recovery aborts incomplete batches and preserves partial-member survival"
             `Quick

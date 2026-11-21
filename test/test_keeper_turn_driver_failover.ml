@@ -3706,8 +3706,49 @@ let test_attempt_loop_stops_after_effect_attempt () =
 
 let test_attempt_loop_fails_closed_without_effect_observation () =
   check_effect_disposition_blocks_same_turn_retry
-    "effect observation unavailable"
+    "observation unavailable"
     Masc.Keeper_provider_attempt_effect.Observation_unavailable
+
+let test_no_effect_observed_and_account_busy_rotate_to_backup () =
+  (* Observed stream drop with zero tool calls ([No_effect_observed]) and
+     non-blocking seat contention ([Account_busy]) both rotate cleanly to
+     candidate #2 without fencing. *)
+  let attempts = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~walk_owner:(Driver.Fleet_keeper_turn test_fleet_turn)
+      ~runtime_id:"resilient"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "primary.test_model" ->
+          attempt_without_effect
+            (Error
+               (Keeper_provider_refusal.core_error
+                  (Keeper_provider_refusal.Account_busy
+                     { provider = "primary"; account_id = "acct-1" })))
+            None
+        | "secondary.test_model" ->
+          attempt_without_effect
+            (Error (retryable_network_error "observed stream dropped before any tool call"))
+            None
+        | "backup.test_model" ->
+          attempt_without_effect (Ok "backup-answered") None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "primary.test_model"; "secondary.test_model"; "backup.test_model" ]
+  in
+  Alcotest.(check (list string))
+    "Account_busy and No_effect_observed rotate cleanly to backup"
+    [ "primary.test_model"; "secondary.test_model"; "backup.test_model" ]
+    !attempts;
+  match result with
+  | Ok "backup-answered" -> ()
+  | Ok other -> Alcotest.failf "unexpected ok %s" other
+  | Error err ->
+    Alcotest.failf "expected backup success after Account_busy + No_effect_observed, got %s"
+      (Agent_core.Error.to_string err)
 
 let test_effect_fence_outranks_an_earlier_overflow () =
   let result =
@@ -4468,6 +4509,54 @@ let test_a_403_with_a_spent_window_rests_until_its_reset () =
         (Runtime_quota_window.active_until ~scope:refused_scope ~now:(Unix.gettimeofday ()));
       Alcotest.(check (list string)) "the refused account rests with the heads in declared order"
         lane order)
+;;
+
+let test_a_403_with_spent_window_promotes_before_report_and_deferral () =
+  let resets_at = Float.round (Unix.gettimeofday () +. 3600.0) in
+  with_refusal_lane ~toml:runtime_toml_quota_lane_with_usage_read (fun () ->
+    let refused = "other.test_model" in
+    let usages_body =
+      kimi_usages_body ~five_hour_used:100 ~five_hour_reset:(rfc3339_of_epoch resets_at)
+    in
+    let fetch ~api_key:_ _url = Ok usages_body in
+    let reported = ref None in
+    let deferred = ref false in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~walk_owner:(Driver.Fleet_keeper_turn test_fleet_turn)
+        ~runtime_id:"quota_lane"
+        ~runtime_id_of:Fun.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~quota_scope_of:Runtime.quota_scope_of_runtime_id
+        ~read_usage_after_account_refusal:(read_usage_with ~fetch)
+        ~on_attempt_error:(fun ~runtime_id:_ ~attempt:_ ~dispatch:_ err ->
+          reported := Some err)
+        ~tool_results_saved:(fun () -> true)
+        ~retry_deferral:
+          { Driver.continuation = resume_chat_operation
+          ; on_deferred = (fun _ -> deferred := true)
+          }
+        ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
+          attempt_without_effect (Error (kimi_account_refusal ())) None)
+        [ refused ]
+    in
+    (match !reported with
+     | Some (Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after = Some wait; _ }))
+       when wait > 0.0 -> ()
+     | Some other ->
+       Alcotest.failf "expected on_attempt_error to observe promoted HardQuota, got %s"
+         (Agent_core.Error.to_string other)
+     | None -> Alcotest.fail "on_attempt_error was not invoked");
+    Alcotest.(check bool)
+      "promoted HardQuota route admits same-path deferral after saved tool results"
+      true !deferred;
+    (match result with
+     | Error (Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after = Some _; _ })) ->
+       ()
+     | Error other ->
+       Alcotest.failf "expected promoted HardQuota terminal error, got %s"
+         (Agent_core.Error.to_string other)
+     | Ok () -> Alcotest.fail "unexpected Ok"))
 ;;
 
 let test_a_403_with_headroom_rests_nothing () =
@@ -8574,6 +8663,10 @@ let () =
             `Quick
             test_attempt_loop_fails_closed_without_effect_observation;
           Alcotest.test_case
+            "No_effect_observed and Account_busy rotate cleanly to backup"
+            `Quick
+            test_no_effect_observed_and_account_busy_rotate_to_backup;
+          Alcotest.test_case
             "effect fence outranks an earlier overflow"
             `Quick
             test_effect_fence_outranks_an_earlier_overflow;
@@ -8613,6 +8706,10 @@ let () =
             test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head;
           Alcotest.test_case "a 403 with a spent window rests until its reset" `Quick
             test_a_403_with_a_spent_window_rests_until_its_reset;
+          Alcotest.test_case
+            "a 403 with spent window promotes to HardQuota before report and same-path deferral"
+            `Quick
+            test_a_403_with_spent_window_promotes_before_report_and_deferral;
           Alcotest.test_case "a 403 with headroom rests nothing" `Quick
             test_a_403_with_headroom_rests_nothing;
           Alcotest.test_case "a 403 without usage-read rests nothing" `Quick

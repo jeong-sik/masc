@@ -788,37 +788,25 @@ let recording_effect_attempt ~effect_cell =
     ~observe_effect_attempted:(fun () -> Effect_cell.attempted effect_cell)
 ;;
 
-(* Under [none] and [read] the CLI may run only the built-ins its
-   [--tools] list grants, and none of them changes the work, so every effect
-   of the turn passes through a MASC handler that [recording_effect_attempt]
-   sees. A sent prompt, a write whose delivery is unknown, or a client that
-   exits or goes silent afterwards therefore leaves no effect MASC could have
-   missed. Under [full] the client's own built-ins act out of MASC's sight
-   from the moment the prompt is sent. *)
-let note_uncertainty_beyond_masc_tools ~built_ins effect_cell =
-  match built_ins with
-  | Runtime_native_tools.Granted _ -> ()
-  | Runtime_native_tools.Client_default -> Effect_cell.unobserved effect_cell
-;;
-
-(* What the stream itself shows. Response text has already reached the
-   operator, so another candidate would answer a second time. A built-in the
-   grant does not name means the client did not run under the posture MASC
-   asked for. A tool call wrapping a MASC tool is judged by its handler. *)
+(* Same-turn failover is fenced ONLY when an actual side-effecting tool call
+   began executing ([Effect_attempted]). Sending a prompt or streaming text
+   deltas with zero tool calls never fences same-turn rotation on transport
+   drops or timeouts. An ungranted built-in tool call actually starting under
+   [Client_default] (or outside [Granted names]) records [Effect_attempted]. *)
 let observe_stream_effect ~built_ins ~effect_cell
     (event : Runtime_claude_code.stream_event) =
   match event with
-  | Runtime_claude_code.Text_delta _ -> Effect_cell.unobserved effect_cell
   | Runtime_claude_code.Native_tool_started
       { Runtime_native_tools.origin = Runtime_native_tools.Mcp_wrapper; _ } -> ()
   | Runtime_claude_code.Native_tool_started
       { Runtime_native_tools.origin = Runtime_native_tools.Built_in; tool_name; _ } ->
     (match built_ins, tool_name with
      | Runtime_native_tools.Granted names, Some name ->
-       if not (List.mem name names) then Effect_cell.unobserved effect_cell
+       if not (List.mem name names) then Effect_cell.attempted effect_cell
      | Runtime_native_tools.Granted _, None
      | Runtime_native_tools.Client_default, (Some _ | None) ->
-       Effect_cell.unobserved effect_cell)
+       Effect_cell.attempted effect_cell)
+  | Runtime_claude_code.Text_delta _
   | Runtime_claude_code.Turn_started _
   | Runtime_claude_code.Thinking_delta _
   | Runtime_claude_code.Child_content_observed _
@@ -1449,17 +1437,9 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
       let built_ins = Runtime_native_tools.claude_code_built_ins native_posture in
       let on_input_observation
           (observation : Runtime_claude_input_attribution.observation) =
-        (* An interrupted user-message write has unknown delivery even when
-           its timeout escapes before [on_prompt_sent]. Under a posture whose
-           effects can bypass MASC that delivery is safety evidence, needed
-           even when no native task/child observer is installed. *)
-        (match observation.phase with
-         | Runtime_claude_input_attribution.Write_unknown ->
-           note_uncertainty_beyond_masc_tools ~built_ins effect_cell
-         | Runtime_claude_input_attribution.Prepared
-         | Runtime_claude_input_attribution.Written
-         | Runtime_claude_input_attribution.Consumed
-         | Runtime_claude_input_attribution.Settled _ -> ());
+        (* An interrupted user-message write before any tool starts does not
+           fence same-turn failover: only an observed side-effecting tool call
+           sets [Effect_attempted]. *)
         Option.iter
           (fun binding -> Keeper_claude_task_binding.observe_input binding observation)
           task_binding
@@ -1513,9 +1493,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
                    ~expected
                    ~session_id
                    ~updated_at:(Time_compat.now ())))
-             ~on_prompt_sent:(fun () ->
-               note_uncertainty_beyond_masc_tools ~built_ins effect_cell;
-               report_transmitted_input ())
+             ~on_prompt_sent:(fun () -> report_transmitted_input ())
              ~on_context_submission:(fun submission ->
                Host.record_context_submission ~keeper_name ~raw_trace_run
                  ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
@@ -1612,7 +1590,9 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
               Effect_cell.quiet effect_cell
             | Runtime_claude_code.Turn_transport_interrupted _
             | Runtime_claude_code.Process_exited { turn_admitted = true; _ } ->
-              note_uncertainty_beyond_masc_tools ~built_ins effect_cell
+              (* Transport interruption or process exit with zero tool calls
+                 never fences same-turn failover. *)
+              ()
             | Runtime_claude_code.Turn_failed_with_observation _
             | Runtime_claude_code.Quota_blocked _
             | Runtime_claude_code.Context_window_exceeded _

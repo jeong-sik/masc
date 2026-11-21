@@ -468,6 +468,8 @@ let route_of_error_family (err : Agent_core.Error.t) : route =
               | Some (Keeper_provider_refusal.Key_refused _) -> rotate Auth_failed
               | Some (Keeper_provider_refusal.Spawn_refused _) ->
                 observe_retry Server_error
+              | Some (Keeper_provider_refusal.Account_busy _) ->
+                observe_retry Local_admission_timeout
               | None -> exhaust Internal_opaque))))
 ;;
 

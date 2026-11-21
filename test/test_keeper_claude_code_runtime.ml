@@ -5824,8 +5824,8 @@ let test_incomplete_user_write_timeout_is_fenced_only_when_built_ins_can_act () 
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" (fun () ->
       run ~required_native_posture:Runtime_native_tools.Native_full base_path
-      |> check_disposition "full: unknown delivery is recorded"
-           Keeper_provider_attempt_effect.Observation_unavailable));
+      |> check_disposition "full: incomplete write before any tool stays rotatable"
+           Keeper_provider_attempt_effect.No_effect_observed));
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     run base_path
@@ -5888,11 +5888,11 @@ let test_a_closed_transport_is_judged_by_what_the_stream_showed () =
   |> check_disposition "none: the granted schema lookup" Keeper_provider_attempt_effect.No_effect_observed;
   attempt ~tools:[]
     [ Emit (native_tool_call_block ~turn_id:"write" ~call_id:"write-call" ~tool_name:"Write") ]
-  |> check_disposition "none: a built-in outside the grant" Keeper_provider_attempt_effect.Observation_unavailable;
+  |> check_disposition "none: a built-in outside the grant fences" Keeper_provider_attempt_effect.Effect_attempted;
   attempt ~tools:[] [ Emit (assistant ~turn_id:"partial" "PARTIAL_ANSWER") ]
-  |> check_disposition "none: response text already delivered" Keeper_provider_attempt_effect.Observation_unavailable;
+  |> check_disposition "none: partial response text without tools stays rotatable" Keeper_provider_attempt_effect.No_effect_observed;
   attempt ~required_native_posture:Runtime_native_tools.Native_full ~tools:[] []
-  |> check_disposition "full: the closed transport alone" Keeper_provider_attempt_effect.Observation_unavailable
+  |> check_disposition "full: closed transport without tool call stays rotatable" Keeper_provider_attempt_effect.No_effect_observed
 ;;
 
 (* A one-shot walk over a two-candidate Claude Code lane: the first CLI, then

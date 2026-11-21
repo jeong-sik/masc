@@ -101,36 +101,36 @@ let test_record_then_recent () =
   DOB.record (make_sample ());
   match DOB.recent () with
   | [ (sample, _) ] ->
-    Alcotest.(check string) "provider normalized" "runtime" sample.provider_id;
-    Alcotest.(check string) "model normalized" "runtime" sample.model_id
+    Alcotest.(check string) "provider preserved" "anthropic" sample.provider_id;
+    Alcotest.(check string) "model preserved" "claude-opus" sample.model_id
   | xs -> Alcotest.failf "expected one sample, got %d" (List.length xs)
 ;;
 
-let test_legacy_provider_filter_selects_runtime_lane () =
+let test_unknown_provider_filter_returns_empty () =
   setup ();
   DOB.record (make_sample ~provider:"anthropic" ());
   Alcotest.(check int)
-    "legacy provider filter maps to runtime"
-    1
+    "unknown provider returns empty"
+    0
     (List.length (DOB.recent ~provider:"nope" ()))
 ;;
 
-(* --- runtime-lane compatibility filters --- *)
+(* --- per-provider isolation --- *)
 
-let test_provider_filter_is_runtime_lane_alias () =
+let test_provider_filter_isolates_providers () =
   setup ();
   DOB.record (make_sample ~provider:"anthropic" ());
   DOB.record (make_sample ~provider:"anthropic" ());
   DOB.record (make_sample ~provider:"ollama" ());
   Alcotest.(check int)
-    "anthropic aliases runtime"
-    3
+    "anthropic isolated"
+    2
     (List.length (DOB.recent ~provider:"anthropic" ()));
   Alcotest.(check int)
-    "ollama aliases runtime"
-    3
+    "ollama isolated"
+    1
     (List.length (DOB.recent ~provider:"ollama" ()));
-  Alcotest.(check int) "all merged" 3 (List.length (DOB.recent ()))
+  Alcotest.(check int) "all combined" 3 (List.length (DOB.recent ()))
 ;;
 
 (* --- summary on empty / non-empty --- *)
@@ -198,12 +198,12 @@ let test_sample_json_preserves_signal_fields () =
          ())
   in
   Alcotest.(check string)
-    "provider redacted"
-    "runtime"
+    "provider preserved"
+    "ollama"
     (json |> Json.member "provider_id" |> Json.to_string);
   Alcotest.(check string)
-    "model redacted"
-    "runtime"
+    "model preserved"
+    "qwen3"
     (json |> Json.member "model_id" |> Json.to_string);
   Alcotest.(check (float 1e-9))
     "ttfb"
@@ -251,11 +251,11 @@ let test_clear_provider () =
   DOB.record (make_sample ~provider:"ollama" ());
   DOB.clear ~provider:"anthropic" ();
   Alcotest.(check int)
-    "legacy provider clears runtime lane"
+    "cleared provider is empty"
     0
     (List.length (DOB.recent ~provider:"anthropic" ()));
-  Alcotest.(check int) "other legacy alias also cleared" 0 (List.length (DOB.recent ~provider:"ollama" ()));
-  Alcotest.(check int) "all cleared" 0 (List.length (DOB.recent ()))
+  Alcotest.(check int) "other provider preserved" 1 (List.length (DOB.recent ~provider:"ollama" ()));
+  Alcotest.(check int) "total reflects surviving provider" 1 (List.length (DOB.recent ()))
 ;;
 
 (* --- AGENT_CORE response projection --- *)
@@ -281,8 +281,8 @@ let test_sample_of_response_uses_usage_and_native_telemetry () =
       ~status:DOB.Success
       response
   in
-  Alcotest.(check string) "provider normalized" "runtime" sample.provider_id;
-  Alcotest.(check string) "model normalized" "runtime" sample.model_id;
+  Alcotest.(check string) "provider preserved" "openai_compat" sample.provider_id;
+  Alcotest.(check string) "model preserved" "gpt-4" sample.model_id;
   Alcotest.(check bool) "usage reported" true sample.usage_reported;
   Alcotest.(check bool) "input tokens" true (sample.input_tokens = Some 11);
   Alcotest.(check bool) "output tokens" true (sample.output_tokens = Some 5);
@@ -434,8 +434,8 @@ let test_record_response_records_missing_usage_as_unknown_sample () =
     response;
   match DOB.recent ~provider:"kimi_cli" () with
   | [ (sample, _) ] ->
-    Alcotest.(check string) "provider normalized" "runtime" sample.provider_id;
-    Alcotest.(check string) "model normalized" "runtime" sample.model_id;
+    Alcotest.(check string) "provider preserved" "kimi_cli" sample.provider_id;
+    Alcotest.(check string) "model preserved" "kimi-for-coding" sample.model_id;
     Alcotest.(check bool) "usage reported" false sample.usage_reported;
     Alcotest.(check bool) "input tokens unknown" true (sample.input_tokens = None);
     Alcotest.(check bool) "output tokens unknown" true (sample.output_tokens = None);
@@ -540,15 +540,15 @@ let () =
     [ ( "record_recent"
       , [ Alcotest.test_case "record + recent" `Quick test_record_then_recent
         ; Alcotest.test_case
-            "legacy provider filter"
+            "unknown provider filter"
             `Quick
-            test_legacy_provider_filter_selects_runtime_lane
+            test_unknown_provider_filter_returns_empty
         ] )
     ; ( "provider_filter"
       , [ Alcotest.test_case
-            "runtime lane alias"
+            "per-provider isolation"
             `Quick
-            test_provider_filter_is_runtime_lane_alias
+            test_provider_filter_isolates_providers
         ] )
     ; ( "summary"
       , [ Alcotest.test_case "empty" `Quick test_summary_empty

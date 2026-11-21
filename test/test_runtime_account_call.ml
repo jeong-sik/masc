@@ -196,11 +196,43 @@ let test_a_call_outside_a_fiber_leaves_a_busy_account_usable () =
   check bool "the account is free afterwards" true (free one)
 ;;
 
+let test_try_acquire_returns_account_busy_without_blocking () =
+  Eio_main.run
+  @@ fun _env ->
+  let held, release = Eio.Promise.create () in
+  let started, mark_started = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      ignore
+        (Call.try_acquire one (fun _ ->
+           Eio.Promise.resolve mark_started ();
+           Eio.Promise.await held;
+           "holder")));
+    Eio.Promise.await started;
+    (match Call.try_acquire one (fun _ -> "unexpected") with
+     | Call.Account_busy acct ->
+       check bool "busy reports the contended account id" true (Id.equal one acct)
+     | Call.Acquired _ -> fail "contended account was acquired concurrently");
+    (match Call.try_acquire other (fun _ -> "sibling-ok") with
+     | Call.Acquired "sibling-ok" -> ()
+     | Call.Acquired _ | Call.Account_busy _ ->
+       fail "sibling account was blocked by contended account");
+    Eio.Promise.resolve release ());
+  match Call.try_acquire one (fun _ -> "free-again") with
+  | Call.Acquired "free-again" -> ()
+  | Call.Acquired _ | Call.Account_busy _ ->
+    fail "account was not released after holder completed"
+;;
+
 let () =
   run
     "runtime_account_call"
     [ ( "one call of an account at a time"
       , [ test_case "refused while a call runs" `Quick test_refused_while_a_call_runs
+        ; test_case
+            "try_acquire returns typed Account_busy without blocking"
+            `Quick
+            test_try_acquire_returns_account_busy_without_blocking
         ; test_case "another account is not held" `Quick test_another_account_is_not_held
         ; test_case "free after the work raises" `Quick test_free_after_the_work_raises
         ; test_case

@@ -197,6 +197,8 @@ let code_of_core_error = function
        "provider_error_key_refused"
      | Provider_refused (Keeper_provider_refusal.Spawn_refused _) ->
        "provider_error_spawn_refused"
+     | Provider_refused (Keeper_provider_refusal.Account_busy _) ->
+       "provider_error_account_busy"
      | Masc error -> Keeper_internal_error.kind_of_masc_internal_error error
      | Opaque_internal -> "internal_error")
 ;;
@@ -363,6 +365,8 @@ let failure_class = function
      | Provider_refused (Keeper_provider_refusal.Key_refused _) -> Authorization_refused
      | Provider_refused (Keeper_provider_refusal.Spawn_refused _) ->
        Provider_runtime_failure Persistent
+     | Provider_refused (Keeper_provider_refusal.Account_busy _) ->
+       Provider_runtime_failure Transient
      | Masc error -> failure_class_of_masc_internal_error error
      | Opaque_internal -> Internal_error)
 ;;

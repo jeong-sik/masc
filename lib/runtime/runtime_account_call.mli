@@ -16,6 +16,20 @@ type t
 (** The account the call is of. *)
 val account : t -> Authz_types.Provider_account_id.t
 
+(** Outcome of a non-blocking account-slot acquisition. *)
+type 'a acquire_result =
+  | Acquired of 'a
+  | Account_busy of Authz_types.Provider_account_id.t
+
+(** Non-blocking acquisition of the account's call slot. Runs [f] and returns
+    [Acquired v] when no other call of the account is running; returns
+    [Account_busy account_id] immediately without blocking when the slot is
+    held by another fiber so failover can rotate to the next candidate. *)
+val try_acquire
+  :  Authz_types.Provider_account_id.t
+  -> (t -> 'a)
+  -> 'a acquire_result
+
 (** Runs [f] when no other call of the account runs, and gives [busy]
     otherwise. It does not wait, so it never runs ahead of a call that
     waits its turn. [f] gets the call it runs in. *)

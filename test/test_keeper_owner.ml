@@ -7593,10 +7593,158 @@ let test_owner_receipt_wait_holds_the_claim_until_the_receipt_arrives () =
   Owner.begin_stopping owner |> owner_ok |> ignore
 ;;
 
+(* #53995: An uncaught exception inside one Keeper's owner or turn child fiber
+   must be contained inside that Keeper's own [Eio.Switch.t] bulkhead. It must
+   notify [on_bulkhead_fault] and close only that Keeper, never failing the
+   shared pool switch or disrupting sibling Keepers. *)
+let test_per_keeper_bulkhead_isolates_uncaught_fault () =
+  Eio_main.run @@ fun _env ->
+  let temp_dir = Filename.temp_dir "keeper-bulkhead-" "" in
+  let faulty_faulted, mark_faulted = Eio.Promise.create () in
+  let exception Simulated_keeper_crash in
+  Eio.Switch.run (fun pool_sw ->
+    let faulty =
+      owner_ok
+        (Owner.start_supervised
+           ~on_bulkhead_fault:(fun owner exn ->
+             Eio.Promise.resolve mark_faulted (owner, exn))
+           ~sw:pool_sw
+           ~base_path:temp_dir
+           ~store:
+             { replace = (fun _ -> raise Simulated_keeper_crash)
+             ; remove = (fun _ -> Ok ())
+             }
+           ~operation_store_path:(Filename.concat temp_dir "faulty.sqlite3")
+           ~session_root:(Filename.concat temp_dir "traces")
+           ~now:(fun () -> 42.0)
+           ~operation_runner:None
+           ~on_turn_slot_released:None
+           ~keeper_name:"faulty-keeper"
+           ~initial_meta:(Some (make_meta "faulty-keeper")))
+    in
+    let sibling =
+      owner_ok
+        (Owner.start_supervised
+           ~on_bulkhead_fault:(fun _owner exn ->
+             failf "sibling bulkhead unexpectedly faulted: %s" (Printexc.to_string exn))
+           ~sw:pool_sw
+           ~base_path:temp_dir
+           ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+           ~operation_store_path:(Filename.concat temp_dir "sibling.sqlite3")
+           ~session_root:(Filename.concat temp_dir "traces")
+           ~now:(fun () -> 42.0)
+           ~operation_runner:None
+           ~on_turn_slot_released:None
+           ~keeper_name:"sibling-keeper"
+           ~initial_meta:(Some (make_meta "sibling-keeper")))
+    in
+    (match Owner.apply_meta faulty (assign_task "trigger-crash") with
+     | Error Owner.Owner_closed -> ()
+     | Error other -> failf "expected Owner_closed after bulkhead fault, got %s" (Owner.error_to_string other)
+     | Ok _ -> fail "faulty keeper unexpectedly succeeded");
+    let faulted_owner, caught = Eio.Promise.await faulty_faulted in
+    check bool "bulkhead observer received the exact faulted owner" true
+      (faulted_owner == faulty);
+    check bool "bulkhead observer saw the exact uncaught exception" true
+      (caught = Simulated_keeper_crash);
+    let sibling_meta =
+      owner_ok (Owner.apply_meta sibling (assign_task "sibling-survives"))
+    in
+    check bool "sibling keeper remains healthy on the same pool switch" true
+      (holds_fixture_task (Option.get sibling_meta));
+    Owner.begin_stopping sibling |> owner_ok |> ignore)
+;;
+
+(* Registry-level bulkhead quarantine: quarantining a faulted owner removes only
+   that exact owner, leaves sibling Keepers alive, and symmetrically blocks
+   re-entry through both [ensure_in_pool] and [create_meta] with
+   [Owner_unavailable] instead of looping restart<->quarantine. A stale owner
+   handle cannot quarantine a healthy replacement owner. *)
+let test_registry_quarantine_fences_faulted_owner_and_blocks_reentry () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some "registry-quarantine-test"));
+  let faulty_meta = make_meta "registry-faulty" in
+  let sibling_meta = make_meta "registry-sibling" in
+  Keeper_meta_store.replace_snapshot config faulty_meta |> Result.get_ok;
+  Keeper_meta_store.replace_snapshot config sibling_meta |> Result.get_ok;
+  Eio.Switch.run (fun sw ->
+    (match
+       Owner_registry.install_from_store
+         ~sw
+         ~operation_runner:None
+         ~on_turn_slot_released:None
+         config
+     with
+     | Ok count -> check int "both owners installed" 2 count
+     | Error err -> fail (Owner_registry.install_error_to_string err));
+    let faulty_owner =
+      match Owner_registry.get ~base_path ~keeper_name:faulty_meta.name with
+      | Ok owner -> owner
+      | Error err -> fail (Owner_registry.lookup_error_to_string err)
+    in
+    let sibling_owner =
+      match Owner_registry.get ~base_path ~keeper_name:sibling_meta.name with
+      | Ok owner -> owner
+      | Error err -> fail (Owner_registry.lookup_error_to_string err)
+    in
+    let exception Simulated_registry_fault in
+    (* Wrong handle identity must NOT quarantine the sibling. *)
+    Owner_registry.For_testing.quarantine_faulted_owner
+      ~base_path
+      ~keeper_name:sibling_meta.name
+      faulty_owner
+      Simulated_registry_fault;
+    Eio.Fiber.yield ();
+    Eio.Fiber.yield ();
+    (match Owner_registry.get ~base_path ~keeper_name:sibling_meta.name with
+     | Ok current -> check bool "mismatched handle left sibling untouched" true (current == sibling_owner)
+     | Error err -> fail (Owner_registry.lookup_error_to_string err));
+    (* Exact handle identity quarantines ONLY faulty_owner. *)
+    Owner_registry.For_testing.quarantine_faulted_owner
+      ~base_path
+      ~keeper_name:faulty_meta.name
+      faulty_owner
+      Simulated_registry_fault;
+    Eio.Fiber.yield ();
+    Eio.Fiber.yield ();
+    (match Owner_registry.get ~base_path ~keeper_name:faulty_meta.name with
+     | Error (Owner_registry.Owner_unavailable name) ->
+       check string "faulted keeper is unavailable" faulty_meta.name name
+     | Error err -> fail (Owner_registry.lookup_error_to_string err)
+     | Ok _ -> fail "faulted keeper remained live in registry");
+    (match Owner_registry.For_testing.ensure_in_pool ~base_path faulty_meta with
+     | Error (Owner_registry.Owner_unavailable name) ->
+       check string "ensure_in_pool refuses quarantined keeper symmetrically" faulty_meta.name name
+     | Error err -> fail (Owner_registry.lookup_error_to_string err)
+     | Ok _ -> fail "ensure_in_pool restarted a quarantined keeper");
+    (match Owner_registry.create_meta ~base_path faulty_meta with
+     | Error
+         (Owner_registry.Command_lookup_failed
+            (Owner_registry.Owner_unavailable name)) ->
+       check string "create_meta refuses quarantined keeper symmetrically" faulty_meta.name name
+     | Error err -> fail (Owner_registry.command_error_to_string err)
+     | Ok _ -> fail "create_meta overwrote a quarantined keeper");
+    (match Owner_registry.get ~base_path ~keeper_name:sibling_meta.name with
+     | Ok current -> check bool "sibling remains live after faulty quarantine" true (current == sibling_owner)
+     | Error err -> fail (Owner_registry.lookup_error_to_string err));
+    ignore (Owner_registry.begin_stopping_all ~base_path)))
+;;
+
 let () =
   run
     "keeper owner"
-    [ ( "receipt wait", [
+    [ ( "bulkhead isolation", [
+        test_case "uncaught keeper fault stays inside its own switch and spares siblings" `Quick
+          test_per_keeper_bulkhead_isolates_uncaught_fault;
+        test_case "registry quarantine fences only exact faulted owner and blocks re-entry" `Quick
+          test_registry_quarantine_fences_faulted_owner_and_blocks_reentry ] )
+    ; ( "receipt wait", [
         test_case "a task waiting for a receipt is claimed only after it arrives" `Quick
           test_owner_receipt_wait_holds_the_claim_until_the_receipt_arrives ] )
     ; ( "preparation wait", [

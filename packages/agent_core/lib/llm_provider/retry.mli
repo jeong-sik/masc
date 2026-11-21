@@ -139,6 +139,30 @@ val verdict_of_empty_completion
     neither is present or parseable. *)
 val resolve_retry_after : body:string -> header:float option -> float option
 
+(** Structured machine-readable classification extracted strictly from provider
+    JSON error fields ([error.code], [error.type], [error.status],
+    [error.metadata.error_type], [error.details[].reason], and nested JSON
+    [error.metadata.raw]), never from free-form prose messages. *)
+type structured_refusal =
+  | Structured_context_overflow of
+      { message : string
+      ; limit : int option
+      }
+  | Structured_account_quota of
+      { message : string
+      ; retry_after : float option
+      }
+
+(** Extract a typed {!structured_refusal} from an HTTP refusal status and JSON
+    body when the provider emitted a recognized machine-readable error code or
+    type (or a retry hint on HTTP 403). Returns [None] for unstructured prose or
+    ordinary request/permission errors. *)
+val classify_structured_refusal
+  :  retry_after_header:float option
+  -> status:int
+  -> body:string
+  -> structured_refusal option
+
 (** [retry_after_header] carries the transport's parsed [Retry-After]
     response header, if any ({!Http_client.HttpError.retry_after_header}).
     Required (not optional-with-default) so every call site states

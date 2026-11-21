@@ -272,6 +272,20 @@ val start
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
+
+val start_supervised
+  :  on_bulkhead_fault:(t -> exn -> unit)
+  -> sw:Eio.Switch.t
+  -> base_path:string
+  -> store:store
+  -> operation_store_path:string
+  -> session_root:string
+  -> now:(unit -> float)
+  -> operation_runner:operation_runner option
+  -> on_turn_slot_released:(unit -> unit) option
+  -> keeper_name:string
+  -> initial_meta:Keeper_meta_contract.keeper_meta option
+  -> (t, error) result
 (** [base_path] identifies the workspace for waiting-inventory events.
     [session_root] is the workspace's session root
     ({!Keeper_fs.session_store_path}). After each store commit the Owner

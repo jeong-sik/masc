@@ -313,6 +313,242 @@ let resolve_retry_after ~body ~header : float option =
   | None -> header
 ;;
 
+type structured_refusal =
+  | Structured_context_overflow of
+      { message : string
+      ; limit : int option
+      }
+  | Structured_account_quota of
+      { message : string
+      ; retry_after : float option
+      }
+
+(* Machine-readable structured provider error signals parsed strictly from
+   JSON error fields (code, type, status, metadata.error_type, details[].reason,
+   and nested OpenRouter metadata.raw JSON). Free-form error.message prose is
+   never inspected here. *)
+type error_signals =
+  { codes : string list
+  ; types : string list
+  ; statuses : string list
+  ; detail_reasons : string list
+  ; n_ctx : int option
+  }
+
+let empty_signals =
+  { codes = []; types = []; statuses = []; detail_reasons = []; n_ctx = None }
+;;
+
+let merge_signals a b =
+  { codes = a.codes @ b.codes
+  ; types = a.types @ b.types
+  ; statuses = a.statuses @ b.statuses
+  ; detail_reasons = a.detail_reasons @ b.detail_reasons
+  ; n_ctx = (match a.n_ctx with Some _ as v -> v | None -> b.n_ctx)
+  }
+;;
+
+let json_string_opt = function
+  | `String s ->
+    let trimmed = String.trim s in
+    if String.length trimmed > 0 then Some trimmed else None
+  | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let json_code_string_opt = function
+  | `String s ->
+    let trimmed = String.trim s in
+    if String.length trimmed > 0 then Some trimmed else None
+  | `Int n -> Some (string_of_int n)
+  | `Intlit s -> Some s
+  | `Assoc _ | `List _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let json_positive_int_opt = function
+  | `Int n when n > 0 -> Some n
+  | `Int _ | `Assoc _ | `List _ | `String _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+    None
+;;
+
+let rec extract_signals_from_json ~depth (json : Yojson.Safe.t) : error_signals =
+  if depth > 2
+  then empty_signals
+  else
+    match json with
+    | `Assoc fields ->
+      let err_obj =
+        match List.assoc_opt "error" fields with
+        | Some (`Assoc err_fields) -> err_fields
+        | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+        | None -> fields
+      in
+      let codes =
+        match Option.bind (List.assoc_opt "code" err_obj) json_code_string_opt with
+        | Some c -> [ c ]
+        | None -> []
+      in
+      let top_type =
+        Option.bind (List.assoc_opt "type" err_obj) json_string_opt
+      in
+      let metadata_fields =
+        match List.assoc_opt "metadata" err_obj with
+        | Some (`Assoc mf) -> Some mf
+        | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+        | None -> None
+      in
+      let meta_type =
+        Option.bind metadata_fields (fun mf ->
+          Option.bind (List.assoc_opt "error_type" mf) json_string_opt)
+      in
+      let types = List.filter_map Fun.id [ top_type; meta_type ] in
+      let statuses =
+        match Option.bind (List.assoc_opt "status" err_obj) json_string_opt with
+        | Some s -> [ s ]
+        | None -> []
+      in
+      let detail_reasons =
+        match List.assoc_opt "details" err_obj with
+        | Some (`List items) ->
+          List.filter_map
+            (function
+              | `Assoc df -> Option.bind (List.assoc_opt "reason" df) json_string_opt
+              | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+                None)
+            items
+        | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+        | None -> []
+      in
+      let n_ctx =
+        Option.bind (List.assoc_opt "n_ctx" err_obj) json_positive_int_opt
+      in
+      let base = { codes; types; statuses; detail_reasons; n_ctx } in
+      (* OpenRouter embeds the upstream provider's structured JSON error object
+         as a string inside [error.metadata.raw]. Parse it as JSON with the same
+         structured extractor so upstream error codes/types survive proxying. *)
+      let nested =
+        match
+          Option.bind metadata_fields (fun mf ->
+            Option.bind (List.assoc_opt "raw" mf) json_string_opt)
+        with
+        | None -> empty_signals
+        | Some raw ->
+          (match Yojson.Safe.from_string raw with
+           | raw_json -> extract_signals_from_json ~depth:(depth + 1) raw_json
+           | exception Yojson.Json_error _ -> empty_signals)
+      in
+      merge_signals base nested
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+      empty_signals
+;;
+
+let signals_of_body (body : string) : error_signals =
+  match Yojson.Safe.from_string body with
+  | json -> extract_signals_from_json ~depth:0 json
+  | exception Yojson.Json_error _ -> empty_signals
+;;
+
+let is_structured_context_overflow_code = function
+  | "context_length_exceeded"
+  | "string_above_max_length"
+  | "model_context_window_exceeded"
+  | "1261"
+  | "3200" -> true
+  | _ -> false
+;;
+
+let is_structured_context_overflow_type = function
+  | "context_length_exceeded"
+  | "exceed_context_size_error"
+  | "request_too_large" -> true
+  | _ -> false
+;;
+
+let is_structured_context_overflow_reason = function
+  | "CONTEXT_LENGTH_EXCEEDED" | "PROMPT_TOO_LONG" -> true
+  | _ -> false
+;;
+
+let is_structured_quota_code = function
+  | "insufficient_quota"
+  | "billing_hard_limit_reached"
+  | "credit_balance_too_low"
+  | "key_limit_exceeded"
+  | "quota_exceeded"
+  | "usage_limit_exceeded"
+  (* Mistral API: billing_api_budget_exhausted (code 2303). *)
+  | "2303"
+  (* ZhipuAI / GLM (backend_glm.ml, docs.z.ai / docs.bigmodel.cn):
+     1113 = account arrears; 1308-1311, 1313, 1314, 1316-1321 = exhausted
+     resource package, expired plan, or spent usage window. *)
+  | "1113"
+  | "1308"
+  | "1309"
+  | "1310"
+  | "1311"
+  | "1313"
+  | "1314"
+  | "1316"
+  | "1317"
+  | "1318"
+  | "1319"
+  | "1320"
+  | "1321" -> true
+  | _ -> false
+;;
+
+let is_structured_quota_type = function
+  | "insufficient_quota"
+  | "billing_error"
+  | "quota_exceeded"
+  | "key_limit_exceeded"
+  | "usage_limit_exceeded"
+  | "GoUsageLimitError" -> true
+  | _ -> false
+;;
+
+let is_structured_quota_reason = function
+  | "QUOTA_EXCEEDED" | "BILLING_DISABLED" -> true
+  | _ -> false
+;;
+
+let signals_indicate_context_overflow (s : error_signals) =
+  List.exists is_structured_context_overflow_code s.codes
+  || List.exists is_structured_context_overflow_type s.types
+  || List.exists is_structured_context_overflow_reason s.detail_reasons
+;;
+
+let signals_indicate_account_quota (s : error_signals) =
+  List.exists is_structured_quota_code s.codes
+  || List.exists is_structured_quota_type s.types
+  || List.exists is_structured_quota_reason s.detail_reasons
+;;
+
+let classify_structured_refusal ~retry_after_header ~status ~body : structured_refusal option =
+  let message = extract_error_message body in
+  let signals = signals_of_body body in
+  let retry_after = resolve_retry_after ~body ~header:retry_after_header in
+  match status with
+  | 400 | 422 ->
+    if signals_indicate_context_overflow signals
+    then Some (Structured_context_overflow { message; limit = signals.n_ctx })
+    else if signals_indicate_account_quota signals
+    then Some (Structured_account_quota { message; retry_after })
+    else None
+  | 402 -> Some (Structured_account_quota { message; retry_after })
+  | 403 ->
+    (* Require an explicit structured quota/billing signal on 403; a WAF/CDN
+       403 carrying only Retry-After stays AuthorizationError until a provider
+       usage-window read confirms the account budget is spent. *)
+    if signals_indicate_account_quota signals
+    then Some (Structured_account_quota { message; retry_after })
+    else None
+  | 429 ->
+    if signals_indicate_account_quota signals
+    then Some (Structured_account_quota { message; retry_after })
+    else None
+  | _ -> None
+;;
+
 (** Classify HTTP status + body into structured api_error *)
 let classify_error ~retry_after_header ~status ~body : api_error =
   let message = extract_error_message body in
@@ -320,15 +556,17 @@ let classify_error ~retry_after_header ~status ~body : api_error =
   | 401 -> AuthError { message }
   | 402 -> PaymentRequired { message }
   | 403 ->
-    (* HTTP 403 is an authorization refusal, distinct from HTTP 401
-       authentication failure. Providers may use it for a disabled account, a
-       missing entitlement, or an exhausted subscription allowance. The status
-       alone does not distinguish those causes, but it does establish that
-       replaying the same request is not a transport retry. Preserve that exact
-       boundary without inspecting provider prose. *)
-    AuthorizationError { message }
-  | 400 -> InvalidRequest { message; reason = Unknown_invalid_request }
-  | 422 -> InvalidRequest { message; reason = Unknown_invalid_request }
+    (match classify_structured_refusal ~retry_after_header ~status ~body with
+     | Some (Structured_account_quota { message; _ }) -> PaymentRequired { message }
+     | Some (Structured_context_overflow { message; limit }) ->
+       ContextOverflow { message; limit }
+     | None -> AuthorizationError { message })
+  | 400 | 422 ->
+    (match classify_structured_refusal ~retry_after_header ~status ~body with
+     | Some (Structured_context_overflow { message; limit }) ->
+       ContextOverflow { message; limit }
+     | Some (Structured_account_quota { message; _ }) -> PaymentRequired { message }
+     | None -> InvalidRequest { message; reason = Unknown_invalid_request })
   | 413 ->
     (* HTTP 413 states the refusal cause in the status line: the payload was too
        large. Leaving it in the catch-all below would report a status without

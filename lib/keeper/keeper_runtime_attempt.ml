@@ -208,4 +208,11 @@ let core_error_to_runtime_outcome err =
             (Runtime_attempt_fsm.Call_err
                (Llm_provider.Http_client.NetworkError
                   { message = detail; kind = Llm_provider.Http_client.Unknown }))
+        | Some (Keeper_provider_refusal.Account_busy _ as refusal) ->
+          Some
+            (Runtime_attempt_fsm.Call_err
+               (Llm_provider.Http_client.TimeoutError
+                  { message = Keeper_provider_refusal.to_string refusal
+                  ; phase = Llm_provider.Http_client.Capacity_backpressure
+                  }))
         | None -> None))

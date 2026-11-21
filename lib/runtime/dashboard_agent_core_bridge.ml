@@ -55,30 +55,11 @@ let status_to_yojson = function
           ("reason", `String reason);
         ]
 
-let public_runtime_provider_label =
-  Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
-;;
-
-let public_runtime_model_label =
-  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
-;;
-
-let normalize_sample (s : sample) =
-  {
-    s with
-    provider_id = public_runtime_provider_label;
-    model_id = public_runtime_model_label;
-  }
-
-let normalize_provider_filter = function
-  | Some _ -> Some public_runtime_provider_label
-  | None -> None
-
 let sample_to_yojson (s : sample) =
   `Assoc
     [
-      ("provider_id", `String public_runtime_provider_label);
-      ("model_id", `String public_runtime_model_label);
+      ("provider_id", `String s.provider_id);
+      ("model_id", `String s.model_id);
       ("ttfb_ms", `Float s.ttfb_ms);
       ("total_duration_ms", `Float s.total_duration_ms);
       ("serialization_ms", `Float s.serialization_ms);
@@ -107,8 +88,8 @@ let broadcast_sample_entry entry =
       [
         ("type", `String "agent_core_telemetry_sample");
         ("payload", sample_entry_to_yojson entry);
-        ("provider_id", `String public_runtime_provider_label);
-        ("model_id", `String public_runtime_model_label);
+        ("provider_id", `String sample.provider_id);
+        ("model_id", `String sample.model_id);
         ("ts_unix", `Float recorded_at);
       ]
   in
@@ -120,7 +101,6 @@ let broadcast_sample_entry entry =
         (Printexc.to_string exn)
 
 let record_with_time ~now (s : sample) =
-  let s = normalize_sample s in
   let entry = (s, now) in
   with_lock (fun () ->
       let q =
@@ -214,7 +194,7 @@ let throughput_from_response ~(usage : Agent_core.Types.api_usage option)
             Float.of_int usage.output_tokens /. (decode_ms /. 1000.0))
         usage
 
-let sample_of_response ~provider_id:_ ~model_id:_ ?total_duration_ms
+let sample_of_response ~provider_id ~model_id ?total_duration_ms
     ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
     (response : Agent_core.Types.api_response) =
   let usage = response.usage in
@@ -223,8 +203,8 @@ let sample_of_response ~provider_id:_ ~model_id:_ ?total_duration_ms
   in
   let ttfb_ms = ttfb_from_response response in
   {
-    provider_id = public_runtime_provider_label;
-    model_id = public_runtime_model_label;
+    provider_id;
+    model_id;
     ttfb_ms;
     total_duration_ms;
     serialization_ms;
@@ -253,8 +233,7 @@ let record_response ~provider_id ~model_id ?total_duration_ms ?serialization_ms
     (sample_of_response ~provider_id ~model_id ?total_duration_ms
        ?serialization_ms ?retry_count ~status response)
 
-let snapshot_provider _provider =
-  let provider = public_runtime_provider_label in
+let snapshot_provider provider =
   with_lock (fun () ->
       match Hashtbl.find_opt table provider with
       | None -> []
@@ -377,7 +356,7 @@ let summary ?provider ?limit () =
 
 let clear ?provider () =
   with_lock (fun () ->
-      match normalize_provider_filter provider with
+      match provider with
       | Some p ->
           Hashtbl.remove table p
       | None ->

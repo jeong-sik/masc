@@ -99,11 +99,12 @@ val close : t -> unit
     directory remains on disk. *)
 
 val prepare_for_directory_removal : t -> unit
-(** Close the current append writer and forget the row count of its day file
-    before application-owned code removes [base_dir t]. A later append makes
-    the directory again whether or not this was called; what it adds is the
-    descriptor closed before the removal and a row count that is not the
-    removed file's. The removal is followed by {!directories_removed}. *)
+(** Close the current append writer and forget every cached day-file row count
+    under [base_dir t] before application-owned code removes [base_dir t]. A
+    later append makes the directory again whether or not this was called; what
+    it adds is the descriptor closed before the removal and cached row counts
+    cleared across all retained days. The removal is followed by
+    {!directories_removed}. *)
 
 val directories_removed : unit -> unit
 (** Tell this module that store directories, or files inside them, were
@@ -619,12 +620,14 @@ val count_entries : t -> int
 [@@@warning "+32"]
 (* [count_entries t] returns the total number of non-empty,
    newline-terminated lines across all day-files. Scans bytes without
-   JSON parsing, backed by a per-file (boundary, count) cache: closed
-   files with unchanged sizes avoid content reads; growing files read only
-   appended bytes. Every call still lists retained files and stats each one,
-   with no TTL staleness window. A trailing line
-   not yet terminated by '\n' is not counted until its newline lands;
-   audit callers that must include it use [count_entries_uncached]. *)
+   JSON parsing, backed by a per-file (dev, ino, boundary, count) cache:
+   closed files with matching identity and unchanged size avoid content reads;
+   growing files with matching identity read only appended bytes; replaced
+   files (different device or inode) or shrunk files rescan from byte 0. Every
+   call still lists retained files and stats each one, with no TTL staleness
+   window. A trailing line not yet terminated by '\n' is not counted until its
+   newline lands; audit callers that must include it use
+   [count_entries_uncached]. *)
 
 val count_entries_uncached : t -> int
 (** Like [count_entries] but bypasses the per-file cache and counts a
@@ -635,17 +638,18 @@ val count_cache_filename : string
 (** The count cache's file name below [<base>/.masc]. *)
 
 val save_count_cache : path:string -> (unit, string) result
-(** Writes the per-file (path, boundary, count) cache to [path] via a
-    temp-file rename. The cache is never an authority: every entry is still
-    validated against the file's current size when it is used, so a stale or
-    absent file only costs the full count it costs today. An empty cache
-    writes nothing. *)
+(** Writes the per-file (path, dev, ino, boundary, count) cache to [path] via a
+    temp-file rename. The cache is never an authority: every entry is validated
+    against the file's current device, inode, and size when used, so a stale
+    or absent file only costs a full count. An empty cache writes nothing. *)
 
 val load_count_cache : path:string -> (int, string) result
 (** Loads a cache written by {!save_count_cache}, returning how many rows were
-    read. Rows merge into the in-memory table and never overwrite an entry
-    this process has already advanced further. A missing file is [Ok 0]:
-    counting from scratch is correct, just slower. *)
+    read. Legacy rows without [dev]/[ino] are ignored so stale pre-upgrade
+    entries cannot match replaced files. Rows merge into the in-memory table
+    and never overwrite an entry this process has measured for another file
+    identity or advanced further. A missing file is [Ok 0]: counting from
+    scratch is correct, just slower. *)
 
 val reset_count_cache_for_testing : unit -> unit
 (** Reset the per-file incremental count cache. Test-only. *)

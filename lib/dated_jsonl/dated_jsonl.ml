@@ -1710,7 +1710,9 @@ let iter_range t ~since ~until f =
    Audit callers that must count an unterminated trailing line use
    [count_entries_uncached]. *)
 type file_count_entry =
-  { fc_boundary : int
+  { fc_dev : int
+  ; fc_ino : int
+  ; fc_boundary : int
   ; fc_count : int
   }
 
@@ -1722,53 +1724,84 @@ let close t =
   Fs_compat.invalidate_cached_writer dated.path
 ;;
 
-let prepare_for_directory_removal t =
-  let dated = Store.dated_path_now t.location in
-  close t;
+let evict_count_cache_under ~base_dir =
+  let prefix =
+    if String.ends_with ~suffix:Filename.dir_sep base_dir
+    then base_dir
+    else base_dir ^ Filename.dir_sep
+  in
   Stdlib.Mutex.protect file_count_cache_mu (fun () ->
-    Hashtbl.remove file_count_cache dated.path)
+    let to_remove =
+      Hashtbl.fold
+        (fun path _ acc ->
+           if String.starts_with ~prefix path || String.equal path base_dir
+           then path :: acc
+           else acc)
+        file_count_cache
+        []
+    in
+    List.iter (Hashtbl.remove file_count_cache) to_remove)
+;;
+
+let prepare_for_directory_removal t =
+  close t;
+  evict_count_cache_under ~base_dir:t.base_dir
+;;
+
+let stat_file_identity path =
+  try
+    let st = Unix.stat path in
+    Some (st.Unix.st_dev, st.Unix.st_ino, st.Unix.st_size)
+  with Unix.Unix_error _ -> None
 ;;
 
 let count_non_empty_lines_cached path =
-  let size = try (Unix.stat path).Unix.st_size with Unix.Unix_error _ -> -1 in
-  if size < 0
-  then count_non_empty_lines path
-  else begin
-    let cached =
-      Stdlib.Mutex.protect file_count_cache_mu (fun () ->
-        Hashtbl.find_opt file_count_cache path)
-    in
-    match cached with
-    | Some e when e.fc_boundary = size -> e.fc_count
-    | cached ->
-      let store_label = Filename.basename (Filename.dirname path) in
-      let from, base =
-        match cached with
-        | Some e when e.fc_boundary < size -> e.fc_boundary, e.fc_count
-        | Some _ ->
-          (* boundary past the file size: shrink/rotation — full re-parse *)
-          Otel_metric_store_core.inc_counter
-            Otel_builtin_metric_names.metric_telemetry_cache_rescans
-            ~labels:[ ("store", store_label) ]
-            ();
-          0, 0
-        | None -> 0, 0
+  match stat_file_identity path with
+  | None -> count_non_empty_lines path
+  | Some (dev, ino, size) ->
+    if size < 0
+    then count_non_empty_lines path
+    else begin
+      let cached =
+        Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+          Hashtbl.find_opt file_count_cache path)
       in
-      let delta, boundary =
-        Fs_compat.fold_appended_lines ~path ~from ~init:0
-          ~f:(fun acc _line -> acc + 1)
-      in
-      Otel_metric_store_core.inc_counter
-        Otel_builtin_metric_names.metric_telemetry_scanned_bytes
-        ~labels:[ ("store", store_label) ]
-        ~delta:(Float.of_int (max 0 (boundary - from)))
-        ();
-      let count = base + delta in
-      Stdlib.Mutex.protect file_count_cache_mu (fun () ->
-        Hashtbl.replace file_count_cache path
-          { fc_boundary = boundary; fc_count = count });
-      count
-  end
+      match cached with
+      | Some e when e.fc_dev = dev && e.fc_ino = ino && e.fc_boundary = size -> e.fc_count
+      | cached ->
+        let store_label = Filename.basename (Filename.dirname path) in
+        let from, base =
+          match cached with
+          | Some e when e.fc_dev = dev && e.fc_ino = ino && e.fc_boundary < size ->
+            e.fc_boundary, e.fc_count
+          | Some _ ->
+            (* File identity changed or boundary past file size: full re-parse. *)
+            Otel_metric_store_core.inc_counter
+              Otel_builtin_metric_names.metric_telemetry_cache_rescans
+              ~labels:[ ("store", store_label) ]
+              ();
+            0, 0
+          | None -> 0, 0
+        in
+        let delta, boundary =
+          Fs_compat.fold_appended_lines ~path ~from ~init:0
+            ~f:(fun acc _line -> acc + 1)
+        in
+        Otel_metric_store_core.inc_counter
+          Otel_builtin_metric_names.metric_telemetry_scanned_bytes
+          ~labels:[ ("store", store_label) ]
+          ~delta:(Float.of_int (max 0 (boundary - from)))
+          ();
+        let count = base + delta in
+        Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+          Hashtbl.replace file_count_cache path
+            { fc_dev = dev
+            ; fc_ino = ino
+            ; fc_boundary = boundary
+            ; fc_count = count
+            });
+        count
+    end
 
 let fold_day_file_counts t ~counter =
   let months = list_month_dirs t.base_dir in
@@ -1819,47 +1852,59 @@ let reset_count_cache_for_testing () =
    worst at 225.70s and 5,704MB against tool_calls 1.1GB +
    agent-core-events 935MB + trajectories 654MB.
 
-   Persisting (path, boundary, count) turns that back into the incremental
-   read it already is in steady state. The file is a cache and never an
-   authority: each entry is still checked against the file's current size on
-   use, so a boundary that no longer matches re-reads the delta, and a
-   boundary past the size falls back to the full rescan. A missing,
-   truncated, or unreadable cache file costs exactly what today costs. *)
+   Persisting (path, dev, ino, boundary, count) turns that back into the
+   incremental read it already is in steady state. The file is a cache and
+   never an authority: each entry is checked against the file's current device,
+   inode, and size on use, so an identical path backed by a replaced file or
+   smaller size falls back to a full rescan, while a matching file whose
+   boundary grew reads only the delta. Legacy cache entries without dev/ino are
+   dropped on load. A missing, truncated, or unreadable cache file costs
+   exactly what cold start costs. *)
 
 let count_cache_rows () =
   Stdlib.Mutex.protect file_count_cache_mu (fun () ->
     Hashtbl.fold
-      (fun path entry acc -> (path, entry.fc_boundary, entry.fc_count) :: acc)
+      (fun path entry acc ->
+         (path, entry.fc_dev, entry.fc_ino, entry.fc_boundary, entry.fc_count) :: acc)
       file_count_cache
       [])
 ;;
 
 (* Entries are merged rather than replacing the table: a load races nothing at
    startup, but a caller that reloads later must not drop counts this process
-   has already measured. A row whose in-memory entry is at least as advanced
-   wins, since that one was measured against a size this process observed. *)
+   has already measured. A live entry measured for a different file identity
+   or at least as advanced a boundary wins. *)
 let install_count_cache_rows rows =
   Stdlib.Mutex.protect file_count_cache_mu (fun () ->
     List.iter
-      (fun (path, boundary, count) ->
+      (fun (path, dev, ino, boundary, count) ->
          if String.length path > 0 && boundary >= 0 && count >= 0
          then (
            match Hashtbl.find_opt file_count_cache path with
-           | Some existing when existing.fc_boundary >= boundary -> ()
+           | Some existing
+             when existing.fc_dev <> dev
+                  || existing.fc_ino <> ino
+                  || existing.fc_boundary >= boundary -> ()
            | Some _ | None ->
              Hashtbl.replace
                file_count_cache
                path
-               { fc_boundary = boundary; fc_count = count }))
+               { fc_dev = dev
+               ; fc_ino = ino
+               ; fc_boundary = boundary
+               ; fc_count = count
+               }))
       rows)
 ;;
 
 let count_cache_to_json rows =
   `List
     (List.map
-       (fun (path, boundary, count) ->
+       (fun (path, dev, ino, boundary, count) ->
           `Assoc
             [ "path", `String path
+            ; "dev", `Int dev
+            ; "ino", `Int ino
             ; "boundary", `Int boundary
             ; "count", `Int count
             ])
@@ -1874,11 +1919,16 @@ let count_cache_of_json = function
          | `Assoc fields ->
            (match
               ( List.assoc_opt "path" fields
+              , List.assoc_opt "dev" fields
+              , List.assoc_opt "ino" fields
               , List.assoc_opt "boundary" fields
               , List.assoc_opt "count" fields )
             with
-            | Some (`String path), Some (`Int boundary), Some (`Int count) ->
-              Some (path, boundary, count)
+            | ( Some (`String path)
+              , Some (`Int dev)
+              , Some (`Int ino)
+              , Some (`Int boundary)
+              , Some (`Int count) ) -> Some (path, dev, ino, boundary, count)
             | _ -> None)
          | _ -> None)
       entries

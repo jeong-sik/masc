@@ -359,6 +359,104 @@ let test_a_restored_entry_is_actually_used () =
     (Dated_jsonl.count_entries t)
 ;;
 
+(* Replace [path] via atomic rename so the replacement always carries a distinct
+   inode even on filesystems that eagerly reuse unlinked inodes. *)
+let replace_via_rename path content =
+  let dir = Filename.dirname path in
+  if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
+  let tmp = path ^ ".replace-tmp" in
+  let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o644 tmp in
+  output_string oc content;
+  close_out oc;
+  Sys.rename tmp path
+;;
+
+let test_replaced_file_same_or_larger_size_rescans () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let location = temp_store "count_cache_replace_identity" in
+  let base = Dated_jsonl.Store.dir location in
+  let path = today_day_path base in
+  let three_rows_24b = "{\"s\":1}\n{\"s\":2}\n{\"s\":3}\n" in
+  check int "fixture is 24 bytes" 24 (String.length three_rows_24b);
+  replace_via_rename path three_rows_24b;
+  let t = Dated_jsonl.open_store location in
+  check int "initial three rows" 3 (Dated_jsonl.count_entries t);
+  let one_row_24b = "{\"aaaaaaaaaaaaaaaaa\":1}\n" in
+  check int "replacement is also 24 bytes" 24 (String.length one_row_24b);
+  replace_via_rename path one_row_24b;
+  check int "same-size replaced file rescans to 1" 1 (Dated_jsonl.count_entries t);
+  check int "matches uncached after same-size replace"
+    (Dated_jsonl.count_entries_uncached t) (Dated_jsonl.count_entries t);
+  let two_rows_42b = "{\"aaaaaaaaaaaaa\":1}\n{\"aaaaaaaaaaaaa\":2}\n" in
+  check bool "larger replacement exceeds 24 bytes" true (String.length two_rows_42b > 24);
+  replace_via_rename path two_rows_42b;
+  check int "larger replaced file rescans to 2 (not 5)" 2 (Dated_jsonl.count_entries t);
+  check int "matches uncached after larger replace"
+    (Dated_jsonl.count_entries_uncached t) (Dated_jsonl.count_entries t)
+;;
+
+let test_restored_cache_rescans_replaced_file_identity () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let location = temp_store "count_cache_restored_identity" in
+  let base = Dated_jsonl.Store.dir location in
+  let path = today_day_path base in
+  replace_via_rename path "{\"s\":1}\n{\"s\":2}\n{\"s\":3}\n";
+  let t = Dated_jsonl.open_store location in
+  check int "warm count" 3 (Dated_jsonl.count_entries t);
+  let cache_file = Filename.concat (tmpdir "count_cache_file7") "counts.json" in
+  (match Dated_jsonl.save_count_cache ~path:cache_file with
+   | Ok () -> () | Error detail -> failf "save failed: %s" detail);
+  Dated_jsonl.reset_count_cache_for_testing ();
+  replace_via_rename path "{\"aaaaaaaaaaaaaaaaa\":1}\n";
+  (match Dated_jsonl.load_count_cache ~path:cache_file with
+   | Ok _ -> () | Error detail -> failf "load failed: %s" detail);
+  check int "restored cache rejects replaced same-size file" 1 (Dated_jsonl.count_entries t);
+  replace_via_rename path "{\"aaaaaaaaaaaaa\":1}\n{\"aaaaaaaaaaaaa\":2}\n";
+  Dated_jsonl.reset_count_cache_for_testing ();
+  (match Dated_jsonl.load_count_cache ~path:cache_file with
+   | Ok _ -> () | Error detail -> failf "load failed: %s" detail);
+  check int "restored cache rejects replaced larger file" 2 (Dated_jsonl.count_entries t)
+;;
+
+let test_legacy_cache_rows_without_identity_are_ignored () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let location = temp_store "count_cache_legacy" in
+  let base = Dated_jsonl.Store.dir location in
+  let path = today_day_path base in
+  replace_via_rename path "{\"s\":1}\n";
+  let cache_file = Filename.concat (tmpdir "count_cache_file8") "counts.json" in
+  let legacy_json =
+    Printf.sprintf {|[{"path":%S,"boundary":8,"count":99}]|} path
+  in
+  let oc = open_out cache_file in
+  output_string oc legacy_json;
+  close_out oc;
+  (match Dated_jsonl.load_count_cache ~path:cache_file with
+   | Ok loaded -> check int "legacy rows without dev/ino are ignored" 0 loaded
+   | Error detail -> failf "load failed: %s" detail);
+  let t = Dated_jsonl.open_store location in
+  check int "count matches actual file" 1 (Dated_jsonl.count_entries t)
+;;
+
+let test_prepare_for_directory_removal_evicts_older_day_files () =
+  Dated_jsonl.reset_count_cache_for_testing ();
+  let location = temp_store "count_cache_evict_all_days" in
+  let base = Dated_jsonl.Store.dir location in
+  let older_path = Filename.concat (Filename.concat base "2026-05") "01.jsonl" in
+  replace_via_rename older_path "{\"s\":1}\n{\"s\":2}\n{\"s\":3}\n";
+  seed_store base 2;
+  let t = Dated_jsonl.open_store location in
+  check int "warm count across older + today" 5 (Dated_jsonl.count_entries t);
+  Dated_jsonl.prepare_for_directory_removal t;
+  (* Truncate and overwrite the older day file in-place to the exact same byte
+     length so its (dev, ino, size) remain unchanged; only cache eviction can
+     force a rescan of the older day file. *)
+  let oc = open_out_gen [ Open_wronly; Open_trunc ] 0o644 older_path in
+  output_string oc "{\"aaaaaaaaaaaaaaaaa\":1}\n";
+  close_out oc;
+  check int "eviction covers older day files too" 3 (Dated_jsonl.count_entries t)
+;;
+
 let () =
   Alcotest.run
     "dated_jsonl_count_cache"
@@ -382,6 +480,14 @@ let () =
             test_missing_and_corrupt_cache_files_are_survivable
         ; test_case "a restored entry is actually used" `Quick
             test_a_restored_entry_is_actually_used
+        ; test_case "replaced file at same or larger size rescans" `Quick
+            test_replaced_file_same_or_larger_size_rescans
+        ; test_case "restored cache rescans replaced file identity" `Quick
+            test_restored_cache_rescans_replaced_file_identity
+        ; test_case "legacy cache rows without identity are ignored" `Quick
+            test_legacy_cache_rows_without_identity_are_ignored
+        ; test_case "prepare_for_directory_removal evicts older day files" `Quick
+            test_prepare_for_directory_removal_evicts_older_day_files
         ; test_case
             "directory recreation forgets old file identity"
             `Quick

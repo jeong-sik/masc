@@ -2451,9 +2451,6 @@ let lane_run_list_bindings ~has_runs ~has_older =
      else [])
   @ [ b ~role:Moves ~ko:"뒤로" Act "Left / Esc" "back" ~help:"back to the lane overview" ]
 
-let preflight_detail_binding =
-  b ~role:Acts ~ko:"JEV 근거" Act "d" "JEV evidence" ~help:"in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence"
-
 let lane_run_detail_bindings =
   [ b ~role:Moves ~ko:"스크롤" Navigate "j/k" "compare" ~help:"scroll Input and Output together"
   ; b ~role:Moves ~ko:"페이지" Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
@@ -2463,12 +2460,9 @@ let lane_run_detail_bindings =
   ]
 
 (* The position travels as [Masc_tui_footer.line]'s [?position], for the
-   reason spelled over [footer_hints_fusion_detail]. The preflight key goes
-   first, ahead of the group order, so a narrow footer gives it up last. *)
-let footer_hints_lanes_run_detail_for ~lang ~preflight =
-  let detail = hints_of_bindings ~lang (lane_run_detail_bindings @ listing_meta) in
-  if preflight then hints_of_bindings ~lang [preflight_detail_binding] ^ "  " ^ detail
-  else detail
+   reason spelled over [footer_hints_fusion_detail]. *)
+let footer_hints_lanes_run_detail_for ~lang =
+  hints_of_bindings ~lang (lane_run_detail_bindings @ listing_meta)
 
 (* The recorded activity of one repository: its list, and the context of
    the selected change. *)
@@ -3088,7 +3082,6 @@ let located_sections ~lang ?current () =
                @ List.map
                    (fun (key, help) -> (key, say "실행 상세: " "in a run's detail: " ^ help))
                    (entries ~lang lane_run_detail_bindings)
-               @ entries ~lang [preflight_detail_binding]
            | Planning -> entries ~lang work_task_detail_bindings
            | Tools -> entries ~lang (tools_diagnostics_bindings @ tools_detail_bindings)
            | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
@@ -3371,7 +3364,7 @@ let help_sections_for_state ~cols (state : state) =
                  ~has_older:(Option.is_some state.lane_runs_next)
                @ listing_meta )
        | Lanes_run_detail (_, _) ->
-           Some (say "레인 실행" "Lane run", lane_run_detail_bindings @ [preflight_detail_binding])
+           Some (say "레인 실행" "Lane run", lane_run_detail_bindings)
        | Lanes_overview | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None)
     else None
   in

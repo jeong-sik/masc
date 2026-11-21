@@ -11496,7 +11496,6 @@ type state = {
   mutable lane_run_detail_generation: int;
   mutable lane_run_detail_error: string option;
   mutable lane_run_detail_scroll: int;
-  mutable lane_run_preflight_details: bool;
   (* A projection of the last rendered payload, not another layout formula. *)
   mutable lane_run_detail_content_height: int;
   (* The Keeper whose read failed, and why. *)
@@ -22334,7 +22333,6 @@ let create_state
   lane_run_detail_generation = 0;
   lane_run_detail_error = None;
   lane_run_detail_scroll = 0;
-  lane_run_preflight_details = false;
   lane_run_detail_content_height = 0;
   keeper_composite_error = None;
   lanes_action_error = None;

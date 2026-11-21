@@ -304,6 +304,8 @@ type exact_reading =
   ; record : exact_turn_record observation
   ; provider_input : provider_input observation
   ; response : response_turn observation
+  ; cache_outcome : Keeper_cache_outcome_reading.reading observation
+        (** Why the turn's first request read or rewrote the prompt cache. *)
   }
 
 type reading =
@@ -320,6 +322,8 @@ type reading =
       ; provider_input : provider_input observation
       ; response : response_turn observation
       ; forecast : forecast observation
+      ; cache_outcome : Keeper_cache_outcome_reading.reading observation
+            (** About the same viewed turn as [provider_input]. *)
       }
       (** The recent page arrives before tab detail. Each detail is requested
           only by a tab that consumes it and can fail independently. *)
@@ -433,6 +437,14 @@ val decode_provider_input :
 (** Strict decode of the parts list. Parts must be numbered from [0] without
     a gap. *)
 
+val decode_cache_outcome :
+  expected_keeper:string ->
+  expected_turn_ref:Ids.Turn_ref.t ->
+  Yojson.Safe.t ->
+  (Keeper_cache_outcome_reading.reading, string) result
+(** Reads [/cache-outcome] with the server's own reader, and refuses an
+    answer about another Keeper or turn. *)
+
 val decode_part : part_key -> Yojson.Safe.t -> (string, string) result
 (** Strict decode of one part. The answer must name the same Keeper, turn and
     listed part, and its text must have the listed byte count and SHA-256;
@@ -487,6 +499,15 @@ val provider_usage_summary : ?ko:bool -> Turn_record.usage -> string
     estimates and unknown provenance instead name their non-measurement.
     Measured usage distinguishes unreported cache reads ([None]) from an
     explicitly reported zero ([Some 0]), including its cache-read ratio. *)
+
+val cache_outcome_summary : ?ko:bool -> Keeper_cache_outcome_reading.reading -> string
+(** One line under that usage: the turn's first request's cache counts, how
+    long its runtime was idle against the lifetime the earlier request asked
+    for, and where the two turns' inputs first differ, with each unknown
+    named. A message change opens with the messages the two requests share
+    ([0 messages kept] when they share none). It states the server's facts
+    and picks no cause among them. [ko] writes it in Korean, as the request
+    tab's other lines are when the operator's language is Korean. *)
 
 val client_context_tokens :
   scope:Runtime_usage_scope.t -> provenance:Turn_input_provenance.t option ->

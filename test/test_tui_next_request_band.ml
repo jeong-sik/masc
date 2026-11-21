@@ -553,6 +553,7 @@ let test_retained_forecast_reuses_recent_reading_only () =
       ; provider_input = Inspector.Observed (Error "absent")
       ; response = Inspector.Observed (Error "absent")
       ; forecast = Inspector.Observed (Ok measured)
+      ; cache_outcome = Inspector.Observed (Error "absent")
       }
   in
   Alcotest.(check bool) "Turn_read retains its forecast" true
@@ -567,7 +568,8 @@ let test_retained_forecast_reuses_recent_reading_only () =
   in
   let with_record = Inspector.Turn_read
       { selection = { selection with attributed }
-      ; provider_input = Inspector.Observed (Error "absent"); response = Inspector.Observed (Error "absent"); forecast = Inspector.Observed (Ok measured) } in
+      ; provider_input = Inspector.Observed (Error "absent"); response = Inspector.Observed (Error "absent"); forecast = Inspector.Observed (Ok measured)
+      ; cache_outcome = Inspector.Observed (Error "absent") } in
   Alcotest.(check bool) "proof with an attributed record keeps selection" false
     (Inspector.scroll_plain_body ~tab:Inspector.Input_map ~target:(Inspector.Recent 0) with_record);
   Alcotest.(check bool) "proof resets when attribution disappears" true
@@ -593,6 +595,7 @@ let test_retained_forecast_reuses_recent_reading_only () =
     ; record = Inspector.Pending
     ; provider_input = Inspector.Pending
     ; response = Inspector.Pending
+    ; cache_outcome = Inspector.Pending
     }
   in
   Alcotest.(check bool) "Exact_read carries no forecast" true

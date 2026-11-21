@@ -288,7 +288,8 @@ let test_page_failure_is_distinct_from_partial_failures () =
     | Error detail -> fail detail in
   let partial = Inspector.Turn_read
       { selection; provider_input = Inspector.Observed (Error "unavailable")
-      ; response = Inspector.Observed (Error "unavailable"); forecast = Inspector.Observed (Error "unavailable") } in
+      ; response = Inspector.Observed (Error "unavailable"); forecast = Inspector.Observed (Error "unavailable")
+      ; cache_outcome = Inspector.Observed (Error "unavailable") } in
   check bool "partial errors still have a page" false
     (Inspector.page_read_failed partial);
   check bool "a recovered page starts at the beginning" true
@@ -641,6 +642,7 @@ let test_a_pane_reads_the_part_it_shows () =
       ; provider_input = Inspector.Observed (Ok input)
       ; response = Inspector.Not_requested
       ; forecast = Inspector.Not_requested
+      ; cache_outcome = Inspector.Not_requested
       }
   in
   let shown ~tab ~opened ~cursor =
@@ -670,7 +672,8 @@ let test_pinned_input_survives_record_failure () =
       { turn_ref = input.turn_ref
       ; record = Observed (Error "canonical history unavailable")
       ; provider_input = Observed (Ok input)
-      ; response = Pending } in
+      ; response = Pending
+      ; cache_outcome = Not_requested } in
   let target = Inspector.Pinned input.turn_ref in
   check bool "response remains pending" true (Inspector.is_loading reading);
   check bool "input survives record failure" true (Option.is_some (Inspector.observed_input reading));
@@ -695,7 +698,8 @@ let test_pinned_unattributed_record_stays_exact () =
       { turn_ref = input.turn_ref
       ; record = Observed (Ok { record = original; skipped_rows = 2 })
       ; provider_input = Observed (Ok input)
-      ; response = Observed (Error "history page unavailable") } in
+      ; response = Observed (Error "history page unavailable")
+      ; cache_outcome = Not_requested } in
   check bool "settled failure is not an endless loading state" false (Inspector.is_loading reading);
   (match Inspector.inspected_record ~target:(Inspector.Pinned input.turn_ref) reading with
    | None -> fail "an unattributed original became an absent source"
@@ -713,16 +717,19 @@ let test_late_pending_snapshot_cannot_erase_progress () =
       { turn_ref = input.turn_ref
       ; record = Observed (Error "unreadable record")
       ; provider_input = Observed (Ok input)
-      ; response = Pending } in
+      ; response = Pending
+      ; cache_outcome = Not_requested } in
   let incoming : Inspector.reading = Exact_read
       { turn_ref = input.turn_ref; record = Pending; provider_input = Pending
-      ; response = Observed (Ok { parts = []; source = Inspector.Newest_history_page }) } in
+      ; response = Observed (Ok { parts = []; source = Inspector.Newest_history_page })
+      ; cache_outcome = Not_requested } in
   let combined = Inspector.merge_progress ~previous:(Some held) incoming in
   check bool "all observations have now settled" false (Inspector.is_loading combined);
   check bool "input remains usable after out-of-order pending fields" true
     (Option.is_some (Inspector.observed_input combined));
   let foreign : Inspector.reading = Exact_read
-      { turn_ref = turn_ref "new-source" 9; record = Pending; provider_input = Pending; response = Pending } in
+      { turn_ref = turn_ref "new-source" 9; record = Pending; provider_input = Pending; response = Pending
+      ; cache_outcome = Pending } in
   let changed = Inspector.merge_progress ~previous:(Some combined) foreign in
   check bool "another source starts pending" true (Inspector.is_loading changed);
   check bool "another source does not inherit original input" true
@@ -735,14 +742,16 @@ let test_recent_tabs_request_only_their_sources () =
     | Ok selection -> selection | Error detail -> fail detail in
   let unread = Inspector.Turn_read
       { selection; provider_input = Not_requested
-      ; response = Not_requested; forecast = Not_requested } in
+      ; response = Not_requested; forecast = Not_requested; cache_outcome = Not_requested } in
   let stack = Inspector.prepare_tab_read ~tab:Inspector.Composition unread in
   (match stack with
    | Inspector.Turn_read recent ->
        check bool "the page is available while forecast runs" true (recent.selection == selection);
        check bool "composition leaves input unread" true (recent.provider_input = Not_requested);
        check bool "composition leaves response unread" true (recent.response = Not_requested);
-       check bool "composition requests forecast" true (recent.forecast = Pending)
+       check bool "composition requests forecast" true (recent.forecast = Pending);
+       check bool "composition leaves the cache outcome unread" true
+         (recent.cache_outcome = Not_requested)
    | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Exact_read _ ->
        fail "composition lost the recent page");
   check bool "changing to proof supersedes the unused forecast" true
@@ -752,18 +761,29 @@ let test_recent_tabs_request_only_their_sources () =
    | Inspector.Turn_read recent ->
        check bool "proof requests input" true (recent.provider_input = Pending);
        check bool "proof leaves response unread" true (recent.response = Not_requested);
-       check bool "proof withdraws forecast" true (recent.forecast = Not_requested)
+       check bool "proof withdraws forecast" true (recent.forecast = Not_requested);
+       check bool "proof leaves the cache outcome unread" true
+         (recent.cache_outcome = Not_requested)
    | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Exact_read _ ->
        fail "proof lost the recent page");
   check bool "the active proof request is shared" false
     (Inspector.needs_tab_read ~tab:Inspector.Input_map proof);
   let received = Inspector.Turn_read
       { selection; provider_input = Observed (Ok input)
-      ; response = Not_requested; forecast = Not_requested } in
+      ; response = Not_requested; forecast = Not_requested; cache_outcome = Not_requested } in
   check bool "unopened tabs do not leave the inspector loading" false
     (Inspector.is_loading received);
-  check bool "request tab reuses proof's immutable manifest" false
+  check bool "request tab still reads the cache outcome" true
     (Inspector.needs_tab_read ~tab:Inspector.Exact_input received);
+  let request = Inspector.prepare_tab_read ~tab:Inspector.Exact_input received in
+  (match request with
+   | Inspector.Turn_read recent ->
+       check bool "request tab reuses proof's immutable manifest" true
+         (Option.exists (fun held -> held == input) (Inspector.observed_input request));
+       check bool "request tab requests the cache outcome" true
+         (recent.cache_outcome = Pending)
+   | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Exact_read _ ->
+       fail "request tab lost the recent page");
   let response = Inspector.prepare_tab_read ~tab:Inspector.Response received in
   (match response with
    | Inspector.Turn_read recent ->
@@ -775,7 +795,8 @@ let test_recent_tabs_request_only_their_sources () =
        fail "response lost the recent page");
   let failed = Inspector.Turn_read
       { selection; provider_input = Observed (Ok input)
-      ; response = Observed (Error "history unavailable"); forecast = Not_requested } in
+      ; response = Observed (Error "history unavailable"); forecast = Not_requested
+      ; cache_outcome = Not_requested } in
   check bool "a failed tab waits for an explicit refresh" false
     (Inspector.needs_tab_read ~tab:Inspector.Response failed)
 
@@ -787,10 +808,10 @@ let test_recent_progress_is_bound_to_the_read_page () =
   let selection = page () in
   let held = Inspector.Turn_read
       { selection; provider_input = Observed (Ok input)
-      ; response = Not_requested; forecast = Not_requested } in
+      ; response = Not_requested; forecast = Not_requested; cache_outcome = Not_requested } in
   let next selection = Inspector.Turn_read
       { selection; provider_input = Pending; response = Not_requested
-      ; forecast = Not_requested } in
+      ; forecast = Not_requested; cache_outcome = Not_requested } in
   let combined = Inspector.merge_progress ~previous:(Some held) (next selection) in
   check bool "late pending snapshot cannot erase a completed input" true
     (Option.is_some (Inspector.observed_input combined));
@@ -803,13 +824,15 @@ let test_pinned_transcript_is_read_only_on_response () =
   let input = decoded_input () in
   let unread = Inspector.Exact_read
       { turn_ref = input.turn_ref; record = Not_requested
-      ; provider_input = Not_requested; response = Not_requested } in
+      ; provider_input = Not_requested; response = Not_requested
+      ; cache_outcome = Not_requested } in
   let request = Inspector.prepare_tab_read ~tab:Inspector.Exact_input unread in
   (match request with
    | Inspector.Exact_read exact ->
        check bool "pinned input requests record" true (exact.record = Pending);
        check bool "pinned input requests manifest" true (exact.provider_input = Pending);
-       check bool "pinned input leaves transcript unread" true (exact.response = Not_requested)
+       check bool "pinned input leaves transcript unread" true (exact.response = Not_requested);
+       check bool "pinned input requests the cache outcome" true (exact.cache_outcome = Pending)
    | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Turn_read _ ->
        fail "opening a pinned input changed its source");
   let response = Inspector.prepare_tab_read ~tab:Inspector.Response request in
@@ -817,9 +840,136 @@ let test_pinned_transcript_is_read_only_on_response () =
    | Inspector.Exact_read exact ->
        check bool "pinned response keeps record request" true (exact.record = Pending);
        check bool "pinned response withdraws input request" true (exact.provider_input = Not_requested);
-       check bool "pinned response requests transcript" true (exact.response = Pending)
+       check bool "pinned response requests transcript" true (exact.response = Pending);
+       check bool "pinned response withdraws the cache outcome request" true
+         (exact.cache_outcome = Not_requested)
    | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Turn_read _ ->
        fail "switching to response changed its source")
+
+let cache_reading ?(unattributed_rows = 0) outcome : Keeper_cache_outcome_reading.reading =
+  { Keeper_cache_outcome_reading.keeper = "omega"
+  ; turn_ref = turn_ref "trace-cache" 9
+  ; unattributed_rows
+  ; outcome
+  }
+
+let test_cache_outcome_is_bound_to_its_turn () =
+  let json = Keeper_cache_outcome_reading.to_json
+      (cache_reading Keeper_cache_outcome_reading.Turn_not_in_ledger) in
+  let decode ~keeper ~turn =
+    Inspector.decode_cache_outcome ~expected_keeper:keeper
+      ~expected_turn_ref:(turn_ref "trace-cache" turn) json in
+  check bool "the asked turn reads" true (Result.is_ok (decode ~keeper:"omega" ~turn:9));
+  check bool "another keeper is refused" true (Result.is_error (decode ~keeper:"sigma" ~turn:9));
+  check bool "another turn is refused" true (Result.is_error (decode ~keeper:"omega" ~turn:10));
+  check bool "another schema is refused" true
+    (Result.is_error
+       (Inspector.decode_cache_outcome ~expected_keeper:"omega"
+          ~expected_turn_ref:(turn_ref "trace-cache" 9)
+          (match json with
+           | `Assoc fields -> `Assoc (("schema", `String "masc.other.v1") :: List.remove_assoc "schema" fields)
+           | other -> other)))
+
+(* Durations follow the TUI's own ladders: a lifetime is a setting (5m, 1h)
+   and an idle gap is a finished length (6m55s). *)
+let test_cache_outcome_line_states_the_server_facts () =
+  let module R = Keeper_cache_outcome_reading in
+  let request ~read ~created turn : R.request =
+    { R.turn_ref = turn_ref "trace-cache" turn
+    ; runtime_id = "claude.sonnet"
+    ; scope = Runtime_usage_scope.Per_request
+    ; ended_at = 1_795_000_000.0
+    ; latency_ms = Some 900
+    ; cache_read_tokens = read
+    ; cache_creation_tokens = created
+    ; lifetime = None
+    }
+  in
+  let counts = Printf.sprintf "First request on claude.sonnet · cache read %s · cache created %s"
+      (Inspector.format_tokens 0) (Inspector.format_tokens 139_000) in
+  let first ?ko ?other_runtime_since ?unattributed_rows earlier =
+    Inspector.cache_outcome_summary ?ko
+      (cache_reading ?unattributed_rows
+         (R.First_request
+            { request = request ~read:(Some 0) ~created:(Some 139_000) 9
+            ; other_runtime_since
+            ; earlier }))
+  in
+  let earlier ~idle prefix =
+    R.Earlier { request = request ~read:(Some 1) ~created:(Some 2) 8; idle; prefix }
+  in
+  let idle lifetime_s check =
+    R.Idle { idle_s = 415.; lifetime = R.Lifetime_declared { lifetime_s; check } }
+  in
+  check string "an outlived lifetime, a kept prefix, a runtime between"
+    (counts ^ " · idle 6m55s, past its 5m lifetime · 12 messages kept, 2 added · glm.air ran in between")
+    (first ~other_runtime_since:"glm.air"
+       (earlier ~idle:(idle 300. R.Outlived)
+          (R.Compared
+             { system_changed = false; tools_changed = false
+             ; messages = Message_list_change.Appended { kept = 12; added = 2 } })));
+  check string "the operator's language is Korean"
+    (Printf.sprintf "첫 요청 claude.sonnet · 캐시 읽기 %s · 캐시 생성 %s"
+       (Inspector.format_tokens 0) (Inspector.format_tokens 139_000)
+     ^ " · 쉰 시간 6m55s, 유지 시간 5m 넘김 · 메시지 12개 그대로, 2개 추가 · 사이에 glm.air 실행")
+    (first ~ko:true ~other_runtime_since:"glm.air"
+       (earlier ~idle:(idle 300. R.Outlived)
+          (R.Compared
+             { system_changed = false; tools_changed = false
+             ; messages = Message_list_change.Appended { kept = 12; added = 2 } })));
+  check string "a lifetime still running and a changed prefix"
+    (counts ^ " · idle 6m55s, within its 1h lifetime · system prompt changed, 5 messages kept, then 2 rewritten, 0 added")
+    (first
+       (earlier ~idle:(idle 3600. R.Within)
+          (R.Compared
+             { system_changed = true; tools_changed = false
+             ; messages =
+                 Message_list_change.Rewritten_in_place
+                   { first_index = 5; last_index = 6; rewritten = 2; previous_bytes = 10
+                   ; current_bytes = 12; first_previous_role = Llm_provider.Types.Tool
+                   ; first_current_role = Llm_provider.Types.User; added = 0 } })));
+  check string "inputs another runtime answered are not compared"
+    (counts ^ " · idle time unknown, a request has no latency · inputs not compared, trace-cache#8 last ran on glm.air · 3 entries unattributed in the cost ledger")
+    (first ~unattributed_rows:3
+       (earlier ~idle:R.Start_unrecorded
+          (R.Not_compared
+             (R.Snapshot_of_other_runtime
+                { turn_ref = turn_ref "trace-cache" 8; runtime_profile = "glm.air" }))));
+  (* A shape opens with the messages both requests share, so a change at the
+     very front reads as none kept, not as a position. *)
+  let shape change =
+    first
+      (earlier ~idle:(idle 3600. R.Within)
+         (R.Compared { system_changed = false; tools_changed = false; messages = change }))
+  in
+  let within = counts ^ " · idle 6m55s, within its 1h lifetime · " in
+  check string "a list that differs from its first message"
+    (within ^ "0 messages kept, then 4 replaced by 6")
+    (shape
+       (Message_list_change.Diverged_at
+          { index = 0; previous_role = Llm_provider.Types.User; previous_bytes = 10
+          ; current_role = Llm_provider.Types.User; current_bytes = 12
+          ; previous_count = 4; current_count = 6 }));
+  check string "a block dropped at the front"
+    (within ^ "0 messages kept, then 3 dropped, 4 moved up, 1 added")
+    (shape (Message_list_change.Block_dropped { at = 0; dropped = 3; kept_after = 4; added = 1 }));
+  check string "one shared message is singular"
+    (within ^ "1 message kept, 2 removed from the end")
+    (shape (Message_list_change.Tail_removed { kept = 1; removed = 2 }));
+  check string "a long shared list is grouped"
+    (within ^ "1,250 messages kept, 0 added")
+    (shape (Message_list_change.Appended { kept = 1_250; added = 0 }));
+  check string "no earlier request within the horizon"
+    (counts ^ " · no earlier request on this runtime in 1h")
+    (first (R.No_earlier_request { horizon_s = 3600. }));
+  check string "a row that counts more than one request"
+    (Printf.sprintf "First request · claude.sonnet reports %s usage, not one request"
+       (Runtime_usage_scope.to_string Runtime_usage_scope.Conversation_cumulative))
+    (Inspector.cache_outcome_summary
+       (cache_reading
+          (R.Not_per_request
+             { (request ~read:None ~created:None 9) with
+               R.scope = Runtime_usage_scope.Conversation_cumulative })))
 
 let test_exact_bytes_preserves_distinct_sizes_and_digit_order () =
   check string "zero bytes" "0 B" (Inspector.exact_bytes 0);
@@ -1113,6 +1263,10 @@ let () =
             test_recent_progress_is_bound_to_the_read_page
         ; test_case "pinned response is demand driven" `Quick
             test_pinned_transcript_is_read_only_on_response
+        ; test_case "a cache outcome is bound to its turn" `Quick
+            test_cache_outcome_is_bound_to_its_turn
+        ; test_case "the cache outcome line states the server facts" `Quick
+            test_cache_outcome_line_states_the_server_facts
         ; test_case "exact_bytes preserves distinct sizes and digit order" `Quick
             test_exact_bytes_preserves_distinct_sizes_and_digit_order
         ; test_case "provider usage summary keeps decoded provenance" `Quick

@@ -6987,7 +6987,7 @@ let context_response_summary ~ko observation =
 
 
 let context_exact_input_lines ~cols ~scale state ~response ~response_parts
-    (input : Masc_tui_context_inspector.provider_input) =
+    ~cache_outcome (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
@@ -7090,8 +7090,33 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
               (Inspector.provider_usage_summary ~ko record.usage)
             |> List.map (fun line -> "  " ^ line)
       in
+      (* Why the turn's first request read or rewrote the cache, as the
+         server found it from the cost ledger and the two turns' snapshots.
+         The usage above is the turn's last request; this is its first. *)
+      let first_request_lines =
+        let styled style text =
+          Context_bars.wrap ~width text
+          |> List.map (fun line -> "  " ^ style ^ line ^ Ansi.reset)
+        in
+        match cache_outcome with
+        | Inspector.Not_requested ->
+            styled recede (say "첫 요청 캐시 이유 안 읽음" "First request cache reason not read")
+        | Inspector.Pending ->
+            styled recede
+              (say "첫 요청 캐시 이유 불러오는 중" "First request cache reason is still loading")
+        | Inspector.Observed (Error detail) ->
+            (* The same colour as the unavailable response line below. *)
+            styled (Theme.bad ())
+              (say "첫 요청 캐시 이유 조회 불가: " "First request cache reason unavailable: "
+               ^ Keeper_chat.terminal_safe_text detail)
+        | Inspector.Observed (Ok reading) ->
+            Context_bars.wrap ~width
+              (Keeper_chat.terminal_safe_text (Inspector.cache_outcome_summary ~ko reading))
+            |> List.map (fun line -> "  " ^ line)
+      in
       let common =
-        [ identity; wire ] @ response_line @ cache_lines @ [ "" ] @ summary @ against_wire
+        [ identity; wire ] @ response_line @ cache_lines @ first_request_lines @ [ "" ]
+        @ summary @ against_wire
         @ [ context_response_summary ~ko response_parts; "" ]
       in
       let last_message_index =
@@ -7662,7 +7687,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
              | Inspector.Observed (Error detail) -> unavailable label detail
              | Inspector.Observed (Ok input) ->
                  context_exact_input_lines ~cols ~scale state ~response:record
-                   ~response_parts:reading.response input)
+                   ~response_parts:reading.response ~cache_outcome:reading.cache_outcome input)
         | Inspector.Input_map ->
             (match record with
              | None -> Plain ([], None)
@@ -7673,7 +7698,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
   | Some
       ( _
       , Masc_tui_context_inspector.Turn_read
-          { selection; provider_input; response; forecast } ) ->
+          { selection; provider_input; response; forecast; cache_outcome } ) ->
       (match state.context_inspector_target with
        | Masc_tui_context_inspector.Pinned _ ->
            Plain
@@ -7708,7 +7733,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                     ~some:(Masc_tui_token_scale.of_turn ~rows:selection.Masc_tui_context_inspector.rows) record in
                 context_exact_input_lines ~cols ~scale state
                   ~response:record
-                  ~response_parts:response input
+                  ~response_parts:response ~cache_outcome input
             | Masc_tui_context_inspector.Observed (Error detail) ->
                 Plain
                   ( context_error_lines ~cols

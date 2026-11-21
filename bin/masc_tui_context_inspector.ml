@@ -204,6 +204,7 @@ type exact_reading =
   ; record : exact_turn_record observation
   ; provider_input : provider_input observation
   ; response : response_turn observation
+  ; cache_outcome : Keeper_cache_outcome_reading.reading observation
   }
 
 type reading =
@@ -217,6 +218,7 @@ type reading =
       ; provider_input : provider_input observation
       ; response : response_turn observation
       ; forecast : forecast observation
+      ; cache_outcome : Keeper_cache_outcome_reading.reading observation
       }
   | Exact_read of exact_reading
 
@@ -238,10 +240,12 @@ let pending = function Pending -> true | Not_requested | Observed _ -> false
 let is_loading = function
   | Request_failed _ -> false
   | Turn_read_failed { forecast; _ } -> pending forecast
-  | Turn_read { provider_input; response; forecast; _ } ->
+  | Turn_read { provider_input; response; forecast; cache_outcome; _ } ->
       pending provider_input || pending response || pending forecast
-  | Exact_read { record; provider_input; response; _ } ->
+      || pending cache_outcome
+  | Exact_read { record; provider_input; response; cache_outcome; _ } ->
       pending record || pending provider_input || pending response
+      || pending cache_outcome
 
 let merge_progress ~previous incoming =
   let merge held next = match held, next with
@@ -255,7 +259,8 @@ let merge_progress ~previous incoming =
            Turn_read { next with
              provider_input = merge held.provider_input next.provider_input
            ; response = merge held.response next.response
-           ; forecast = merge held.forecast next.forecast }
+           ; forecast = merge held.forecast next.forecast
+           ; cache_outcome = merge held.cache_outcome next.cache_outcome }
        | Some (Turn_read _ | Exact_read _ | Request_failed _ | Turn_read_failed _) | None -> incoming)
   | Exact_read next ->
       (match previous with
@@ -264,7 +269,8 @@ let merge_progress ~previous incoming =
              { next with
                record = merge held.record next.record
              ; provider_input = merge held.provider_input next.provider_input
-             ; response = merge held.response next.response }
+             ; response = merge held.response next.response
+             ; cache_outcome = merge held.cache_outcome next.cache_outcome }
        | Some (Exact_read _ | Request_failed _ | Turn_read_failed _ | Turn_read _) | None -> incoming)
 
 let observed_input = function
@@ -294,13 +300,16 @@ type tab =
   | Input_map
   | Response
 
+(* What each tab reads: the provider input, the response, the next-request
+   forecast, and why the turn's first request read or rewrote the cache. *)
 let tab_sources = function
-  | Composition -> false, false, true
-  | Exact_input | Input_map -> true, false, false
-  | Response -> false, true, false
+  | Composition -> false, false, true, false
+  | Exact_input -> true, false, false, true
+  | Input_map -> true, false, false, false
+  | Response -> false, true, false, false
 
 let prepare_tab_read ~tab reading =
-  let input, response, forecast = tab_sources tab in
+  let input, response, forecast, cache_outcome = tab_sources tab in
   let prepare wanted = function
     | Observed _ as held -> held
     | Not_requested | Pending -> if wanted then Pending else Not_requested in
@@ -312,15 +321,17 @@ let prepare_tab_read ~tab reading =
       Turn_read { recent with
         provider_input = prepare input recent.provider_input
       ; response = prepare response recent.response
-      ; forecast = prepare forecast recent.forecast }
+      ; forecast = prepare forecast recent.forecast
+      ; cache_outcome = prepare cache_outcome recent.cache_outcome }
   | Exact_read exact ->
       Exact_read { exact with
         record = prepare true exact.record
       ; provider_input = prepare input exact.provider_input
-      ; response = prepare response exact.response }
+      ; response = prepare response exact.response
+      ; cache_outcome = prepare cache_outcome exact.cache_outcome }
 
 let needs_tab_read ~tab reading =
-  let input, response, forecast = tab_sources tab in
+  let input, response, forecast, cache_outcome = tab_sources tab in
   let needs wanted = function
     | Not_requested -> wanted
     | Pending -> not wanted
@@ -330,10 +341,10 @@ let needs_tab_read ~tab reading =
   | Turn_read_failed failed -> needs forecast failed.forecast
   | Turn_read recent ->
       needs input recent.provider_input || needs response recent.response
-      || needs forecast recent.forecast
+      || needs forecast recent.forecast || needs cache_outcome recent.cache_outcome
   | Exact_read exact ->
       needs true exact.record || needs input exact.provider_input
-      || needs response exact.response
+      || needs response exact.response || needs cache_outcome exact.cache_outcome
 
 type input_source =
   | Turn_prompt_assembly
@@ -691,6 +702,19 @@ let decode_provider_input ~expected_keeper ~expected_turn_ref = function
       }
   | `Assoc _ -> Error "provider-input response fields are not exact"
   | _ -> Error "provider-input response is not an object"
+
+(* The server writes the answer with the same module, so the reader is the
+   server's own; this checks only that the answer is about the asked turn. *)
+let decode_cache_outcome ~expected_keeper ~expected_turn_ref json =
+  match Keeper_cache_outcome_reading.of_json json with
+  | Error detail -> Error ("cache outcome: " ^ detail)
+  | Ok reading ->
+      if not (String.equal reading.Keeper_cache_outcome_reading.keeper expected_keeper)
+      then Error "cache outcome names another keeper"
+      else if
+        not (Ids.Turn_ref.equal reading.Keeper_cache_outcome_reading.turn_ref expected_turn_ref)
+      then Error "cache outcome names another turn"
+      else Ok reading
 
 (* The answer must be the part the list named, and its bytes must be the
    ones the list counted and hashed; anything else is another part. A message
@@ -1379,6 +1403,143 @@ let provider_usage_summary ?(ko = false) (usage : Turn_record.usage) =
   Printf.sprintf
     (if ko then "공급자 사용량 (%s) · %s" else "Provider usage (%s) · %s")
     scope (String.concat " · " parts)
+;;
+
+(* Why the turn's first request read or rewrote the cache, as the server
+   found it: the two requests' counts, how long the runtime was idle against
+   the lifetime the earlier request asked for, and where the two turns'
+   inputs first differ. Each unknown says what is missing; none reads as
+   zero, and no cause is picked from the facts. *)
+let cache_outcome_summary ?(ko = false) (reading : Keeper_cache_outcome_reading.reading) =
+  let module R = Keeper_cache_outcome_reading in
+  let module M = Message_list_change in
+  let module Count = Masc_tui_value.Count in
+  let say korean english = if ko then korean else english in
+  let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
+  let tokens = Option.fold ~none:unreported ~some:format_tokens in
+  let setting = Masc_tui_value.Interval.of_seconds in
+  let first (request : R.request) =
+    Printf.sprintf
+      (if ko then "첫 요청 %s · 캐시 읽기 %s · 캐시 생성 %s"
+       else "First request on %s · cache read %s · cache created %s")
+      request.R.runtime_id
+      (tokens request.R.cache_read_tokens)
+      (tokens request.R.cache_creation_tokens)
+  in
+  let lifetime = function
+    | R.Lifetime_unrecorded -> say "유지 시간 기록 없음" "lifetime unrecorded"
+    | R.Provider_default_unknown R.Default_undeclared ->
+        say "공급자 기본 유지 시간 선언 없음" "provider default lifetime undeclared"
+    | R.Provider_default_unknown R.Runtime_inactive ->
+        say "실행 설정에 없는 runtime, 기본 유지 시간 모름"
+          "runtime not in the running configuration, default lifetime unknown"
+    | R.Lifetime_declared { lifetime_s; check = R.Outlived } ->
+        Printf.sprintf (if ko then "유지 시간 %s 넘김" else "past its %s lifetime")
+          (setting lifetime_s)
+    | R.Lifetime_declared { lifetime_s; check = R.Within } ->
+        Printf.sprintf (if ko then "유지 시간 %s 안" else "within its %s lifetime")
+          (setting lifetime_s)
+    | R.Lifetime_declared { lifetime_s; check = R.Undecided } ->
+        Printf.sprintf
+          (if ko then "유지 시간 %s 경계, 원장 시각이 초 단위라 넘었는지 모름"
+           else "at its %s lifetime, within the ledger's second")
+          (setting lifetime_s)
+  in
+  let idle = function
+    | R.Start_unrecorded ->
+        say "쉰 시간 모름, 지연 시간이 안 적힌 요청이 있음"
+          "idle time unknown, a request has no latency"
+    | R.Idle { idle_s; lifetime = held } ->
+        Printf.sprintf (if ko then "쉰 시간 %s, %s" else "idle %s, %s")
+          (Option.value (Masc_tui_message_layout.elapsed_text idle_s) ~default:unreported)
+          (lifetime held)
+  in
+  (* Every shape opens with the messages the two requests share, so the
+     cache could read no further than that count; the rest says what came
+     after it. *)
+  let messages change =
+    let figure n = Count.grouped n ^ say "개" "" in
+    let kept shared = Count.reading ~ko Count.Message shared ^ say " 그대로" " kept" in
+    match change with
+    | M.Appended { kept = shared; added } ->
+        Printf.sprintf (if ko then "%s, %s 추가" else "%s, %s added")
+          (kept shared) (figure added)
+    | M.Tail_removed { kept = shared; removed } ->
+        Printf.sprintf (if ko then "%s, 끝에서 %s 빠짐" else "%s, %s removed from the end")
+          (kept shared) (figure removed)
+    | M.Block_dropped { at; dropped; kept_after; added } ->
+        Printf.sprintf
+          (if ko then "%s, 이어서 %s 빠짐, %s 당겨짐, %s 추가"
+           else "%s, then %s dropped, %s moved up, %s added")
+          (kept at) (figure dropped) (figure kept_after) (figure added)
+    | M.Rewritten_in_place { first_index; rewritten; added; _ } ->
+        Printf.sprintf
+          (if ko then "%s, 이어서 %s 다시 씀, %s 추가" else "%s, then %s rewritten, %s added")
+          (kept first_index) (figure rewritten) (figure added)
+    | M.Diverged_at { index; previous_count; current_count; _ } ->
+        Printf.sprintf
+          (if ko then "%s, 이어서 %s가 %s로 바뀜" else "%s, then %s replaced by %s")
+          (kept index) (figure (previous_count - index)) (figure (current_count - index))
+  in
+  let prefix = function
+    | R.Compared { system_changed; tools_changed; messages = change } ->
+        String.concat ", "
+          (List.filter_map Fun.id
+             [ (if system_changed then Some (say "system prompt 바뀜" "system prompt changed")
+                else None)
+             ; (if tools_changed then Some (say "도구 바뀜" "tools changed") else None)
+             ; Some (messages change) ])
+    | R.Not_compared R.Earlier_turn_not_settled ->
+        say "입력 비교 안 함, 앞 턴이 비용을 정산하지 않음"
+          "inputs not compared, the earlier turn settled no spend"
+    | R.Not_compared (R.Snapshot_unread { turn_ref; _ }) ->
+        Printf.sprintf
+          (if ko then "입력 비교 안 함, %s snapshot 을 못 읽음"
+           else "inputs not compared, no readable snapshot of %s")
+          (Ids.Turn_ref.to_string turn_ref)
+    | R.Not_compared (R.Snapshot_of_other_runtime { turn_ref; runtime_profile }) ->
+        Printf.sprintf
+          (if ko then "입력 비교 안 함, %s 의 마지막 요청은 %s"
+           else "inputs not compared, %s last ran on %s")
+          (Ids.Turn_ref.to_string turn_ref) runtime_profile
+  in
+  let earlier = function
+    | R.No_earlier_request { horizon_s } ->
+        Printf.sprintf
+          (if ko then "이 runtime 의 앞 요청이 %s 안에 없음"
+           else "no earlier request on this runtime in %s")
+          (setting horizon_s)
+    | R.Earlier { idle = gap; prefix = inputs; _ } ->
+        idle gap ^ " · " ^ prefix inputs
+  in
+  let outcome =
+    match reading.R.outcome with
+    | R.Turn_not_in_ledger ->
+        say "첫 요청 · 비용 원장에 이 턴의 행 없음"
+          "First request · the cost ledger has no row of this turn"
+    | R.Ledger_row_unreadable detail ->
+        say "첫 요청 · 비용 원장 행을 못 읽음: " "First request · a cost ledger row did not read: "
+        ^ detail
+    | R.Not_per_request request ->
+        Printf.sprintf
+          (if ko then "첫 요청 · %s 사용량이 %s 단위, 요청 하나가 아님"
+           else "First request · %s reports %s usage, not one request")
+          request.R.runtime_id (Runtime_usage_scope.to_string request.R.scope)
+    | R.First_request { request; other_runtime_since; earlier = found } ->
+        String.concat " · "
+          ([ first request; earlier found ]
+           @ Option.to_list
+               (Option.map
+                  (fun runtime ->
+                     Printf.sprintf (if ko then "사이에 %s 실행" else "%s ran in between") runtime)
+                  other_runtime_since))
+  in
+  match reading.R.unattributed_rows with
+  | 0 -> outcome
+  | rows ->
+      Printf.sprintf
+        (if ko then "%s · 비용 원장의 %s 출처 모름" else "%s · %s unattributed in the cost ledger")
+        outcome (Count.reading ~ko Count.Entry rows)
 ;;
 
 (* The part a pane shows. On the request tab: the opened item, or with none

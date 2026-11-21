@@ -428,6 +428,7 @@ module Count = struct
     | Open_task
     | Claim
     | Conflict
+    | Message
 
   (* Singular, plural. *)
   let english = function
@@ -444,6 +445,7 @@ module Count = struct
     | Open_task -> "open task", "open tasks"
     | Claim -> "claim", "claims"
     | Conflict -> "conflict", "conflicts"
+    | Message -> "message", "messages"
 
   (* The thing, then the figure with its counter. A row is counted by the
      word that names it. *)
@@ -462,6 +464,7 @@ module Count = struct
     | Open_task -> "열린 작업 " ^ figure ^ "개"
     | Claim -> "공유 주장 " ^ figure ^ "건"
     | Conflict -> "충돌 " ^ figure ^ "건"
+    | Message -> "메시지 " ^ figure ^ "개"
 
   let written ~ko noun count figure =
     if ko then korean noun figure

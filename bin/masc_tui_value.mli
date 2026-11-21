@@ -333,6 +333,7 @@ module Count : sig
     | Open_task  (** A Task not yet done or cancelled. *)
     | Claim  (** One claim in the workspace memory ledger. *)
     | Conflict  (** Two claims in that ledger that disagree. *)
+    | Message  (** One message of a provider request. *)
 
   val reading : ko:bool -> noun -> int -> string
   (** The count and what it counts, in the screen's language: [3 keepers],

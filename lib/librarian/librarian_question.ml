@@ -315,8 +315,8 @@ let missing_part_json : Librarian_unit.missing_part -> Yojson.Safe.t = function
 let unit_json index ({ line = _; at; kind; missing } : Read_unit.t) =
   let shown =
     match kind with
-    (* A turn whose [Opened] was read carries no [opened] field, so its bytes
-       are the ones it had before that field existed. *)
+    (* A turn whose [Opened] was read has no [opened] field: its [runtime],
+       [task] and [stimuli] are what that line said. *)
     | Turn { turn; outcome; opened = Opened_read opened; unattributed; own } ->
       [ f_kind, `String "turn"
       ; f_closed_at, time at

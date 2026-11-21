@@ -458,7 +458,7 @@ type input_fault =
 - tool 호출은 id 와 이름만 남긴 표시로 싣는다. tool 결과는 id 와 결과 종류만, tool 관찰은 `{index, tool_name, outcome}` 만 싣는다. 지금 재는 줄임과 같다.
 - 상대가 보낸 행은 저마다 자기 보낸 이를 타입으로 싣는다. 턴을 깨운 것(stimulus)은 갈래와 id, 그리고 queue 항목이 실은 이름을 싣는다(§5.1).
 - 단위마다 턴 id, 닫힌 시각, runtime, outcome, 그리고 자기 `Opened` 의 Task 를 싣는다. Goal 은 `shown` 의 글 그대로다.
-- `Opened` 를 읽지 못하고 지나간 턴(§5.4)은 runtime, Task, stimulus 대신 `opened` 칸에 `"unreadable"` 을 싣는다. 항목은 모두 `unattributed` 에 든다. `Opened` 를 읽은 턴의 글은 이 칸이 없던 때와 바이트가 같다.
+- `Opened` 를 읽지 못하고 지나간 턴(§5.4)은 runtime, Task, stimulus 대신 `opened` 칸에 `"unreadable"` 을 싣는다. 항목은 모두 `unattributed` 에 든다. `Opened` 를 읽은 턴에는 이 칸이 없다.
 
 ### 5.6 purge 는 Librarian 을 기다리지 않는다
 

@@ -1257,7 +1257,12 @@ let board_access_for_request ~base_path request =
       if Masc_domain.has_permission credential.role Masc_domain.CanReadState then
         let reader =
           match credential.role with
-          | Masc_domain.Admin -> Masc_board_handlers.Board_access.Operator
+          | Masc_domain.Admin ->
+            (* An Admin credential used to read every Keeper's Direct posts as
+               [Operator]. It is one person's credential, so it reads what is
+               addressed to that person and nothing else (design D1). *)
+            Masc_board_handlers.Board_access.Workspace_member
+              { actor_id = credential.agent_name; owned_keeper_ids = [] }
           | Masc_domain.Worker | Masc_domain.Player -> named credential.agent_name
         in
         Ok (reader, Some credential.agent_name)

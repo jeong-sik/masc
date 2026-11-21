@@ -72,7 +72,12 @@ let board_reader_for_caller ~config (caller : Mcp_server_eio_caller_identity.t) 
   else match bearer_credential ~config caller with
     | Some (Ok credential) ->
       (match credential.Masc_domain.role with
-       | Masc_domain.Admin -> Masc_board_handlers.Board_access.Operator
+       (* An Admin credential reads what is addressed to that person, not every
+          Keeper's Direct posts (design D1); the branch used to answer
+          [Operator]. *)
+       | Masc_domain.Admin ->
+         Masc_board_handlers.Board_access.Workspace_member
+           { actor_id = credential.agent_name; owned_keeper_ids = [] }
        | Masc_domain.Worker | Masc_domain.Player ->
          (match caller.owner_keeper_identity with
           | Some (name, _) -> keeper_reader name

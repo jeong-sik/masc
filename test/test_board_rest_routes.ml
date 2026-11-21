@@ -1051,8 +1051,16 @@ let test_board_list_route_and_projection_share_the_kept_page () =
     check int ("post accepted: " ^ title) 201 status
   in
   let path = "/api/v1/board?sort_by=recent" in
+  (* The route reads as the token's own reader. An Admin credential is one
+     person's, so since D1 that reader is [Workspace_member] of the credential's
+     agent, not [Operator]; the projection has to ask as the same reader or it
+     lands on a different cache entry. *)
+  let reader =
+    Masc_board_handlers.Board_access.Workspace_member
+      { actor_id = "list-reader"; owned_keeper_ids = [] }
+  in
   let page ?(reaction_actor = Some "list-reader") ?(target = path) () =
-    Server_board_list_http.payload ~reader:Masc_board_handlers.Board_access.Operator ~config ~reaction_actor
+    Server_board_list_http.payload ~reader ~config ~reaction_actor
       (Httpun.Request.create `GET target)
   in
   let route_titles () =
@@ -1104,8 +1112,11 @@ let test_board_list_timeout_cannot_be_not_modified () =
      exact route entry includes both the workspace and authenticated actor;
      a key mismatch returns a normal Board page and fails the wire checks. *)
   let actor = "timeout-reader" in
+  (* An Admin credential is a workspace member since D1, so the cache key names
+     that member and its (empty) Keeper list instead of [operator]. *)
   let key = Printf.sprintf
-    "board:list:operator:%d:%s:-:recent:false:false:-:50:0:%d:%s:%d:%s"
+    "board:list:member:%d:%s|keepers:0::%d:%s:-:recent:false:false:-:50:0:%d:%s:%d:%s"
+    (String.length actor) actor
     (String.length config.Masc.Workspace.base_path) config.base_path
     (String.length actor) actor
     (String.length actor) actor in
@@ -1130,7 +1141,11 @@ let test_board_list_timeout_cannot_be_not_modified () =
     check string "matching timeout still carries its evidence" payload.raw_json body)
     ["builder timeout"; String.make 9000 'x'];
   Dashboard_cache.invalidate_all ();
-  let payload = Server_board_list_http.payload ~reader:Masc_board_handlers.Board_access.Operator ~config ~reaction_actor:(Some actor)
+  let payload = Server_board_list_http.payload
+    ~reader:
+      (Masc_board_handlers.Board_access.Workspace_member
+         { actor_id = actor; owned_keeper_ids = [] })
+    ~config ~reaction_actor:(Some actor)
     (Httpun.Request.create `GET "/api/v1/board?sort_by=recent") in
   let status, body = read ~etag:payload.etag () in
   check int "a successful unchanged Board page is still 304" 304 status;
@@ -1896,7 +1911,11 @@ let test_direct_board_http_readership_and_cache () =
   let recipient = worker "direct-reader" in
   let outsider = worker "outside-reader" in
   let create ~title ~body ~visibility =
-    match Board_dispatch.create_post ~author:"direct-operator" ~content:body
+    (* The Direct post is authored by the recipient, not by the Admin whose token
+       reads the list. An author always reads their own Direct post, so an
+       Admin-authored one would still be returned and the assertion below would
+       be asking for something the design never promised. *)
+    match Board_dispatch.create_post ~author:"direct-reader" ~content:body
         ~title ~body ~visibility ~hearth:title ~post_kind:Board.Human_post () with
     | Ok post -> post
     | Error error -> fail (Board.Post_publication_failure.to_string error)
@@ -1910,8 +1929,9 @@ let test_direct_board_http_readership_and_cache () =
   in
   Dashboard_cache.invalidate_all ();
   let _, operator_page = get token "/api/v1/board?sort_by=recent" in
-  check (list string) "operator primes a page with both posts"
-    ["private latest post"; "public older post"] (page_titles operator_page);
+  check (list string)
+    "an Admin credential no longer reads another person's Direct post"
+    ["public older post"] (page_titles operator_page);
   let _, outsider_page = get outsider "/api/v1/board?sort_by=recent&limit=1&voter=direct-reader" in
   check (list string) "filter before the page limit and ignore forged voter"
     ["public older post"] (page_titles outsider_page);
@@ -1923,7 +1943,8 @@ let test_direct_board_http_readership_and_cache () =
   let status, _ = get recipient ("/api/v1/board/" ^ post_id) in
   check int "recipient detail exists" 200 status;
   let _, operator_dashboard = get token "/api/v1/dashboard/board?sort_by=recent" in
-  check int "operator dashboard includes Direct" 2 (List.length (page_titles operator_dashboard));
+  check int "Admin dashboard excludes a Direct post addressed to someone else" 1
+    (List.length (page_titles operator_dashboard));
   let _, outsider_dashboard = get outsider "/api/v1/dashboard/board?sort_by=recent" in
   check (list string) "dashboard cache is separated by reader"
     ["public older post"] (page_titles outsider_dashboard);
@@ -1932,8 +1953,19 @@ let test_direct_board_http_readership_and_cache () =
       |> List.map (fun row -> row |> member "name" |> to_string)
       |> List.sort String.compare in
   let _, operator_hearths = get token "/api/v1/board/hearths" in
-  check (list string) "operator primes hearths including the Direct-only name"
-    ["private latest post"; "public older post"] (hearth_names operator_hearths);
+  check (list string)
+    "an Admin credential seeds hearths without another person's Direct name"
+    ["public older post"] (hearth_names operator_hearths);
+  (* The narrowing must not close the Admin's own deliveries: a Direct post
+     addressed to the Admin's own Board id stays readable to it. *)
+  let _own_direct =
+    create ~title:"operator own private post"
+      ~body:"@direct-operator own private body" ~visibility:Board.Direct
+  in
+  Dashboard_cache.invalidate_all ();
+  let _, own_page = get token "/api/v1/board?sort_by=recent" in
+  check (list string) "an Admin credential keeps reading its own Direct post"
+    ["operator own private post"; "public older post"] (page_titles own_page);
   let _, outsider_hearths = get outsider "/api/v1/board/hearths" in
   check (list string) "hearth cache does not expose another reader's private name"
     ["public older post"] (hearth_names outsider_hearths);

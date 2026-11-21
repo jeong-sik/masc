@@ -113,6 +113,6 @@ Schema changes are explicitly deferred to stack cleanly on top of L6 (`feat/libr
 
 ## 5. Clockwork World Memory, Wiki & MCP 2026-07-28 Resources
 
-- **`Workspace_memory_ledger` & `Workspace_memory_delta`**: Locked atomic updates via `File_lock_eio`; partial Keeper fact updates trigger corroboration recalculation rather than dropping shared multi-Keeper claims; direct Curator fiber publishes `Committed` batches into `log.jsonl` for O(delta) per-Keeper consumption (`Context_overflow` bisecting `Half -> Reference_only`).
+- **`Workspace_memory_ledger` & `Workspace_memory_log`**: Locked atomic updates via `File_lock_eio`; partial Keeper fact updates trigger corroboration recalculation rather than dropping shared multi-Keeper claims; direct Curator fiber publishes `Committed` batches into `log.jsonl`.
 - **`Tool_wiki` Header Memoization**: 8 KiB frontmatter reads + `(path, mtime, size)` cache eliminate whole-body disk scans per turn.
 - **MCP Resources & Live Notifications**: Exposes `masc://world-memory/claims`, `masc://world-memory/log`, `masc://keepers/{keeper}/memory`, and `masc://keepers/{keeper}/memory/health`, emitting `notifications/resources/updated` through `Mcp_subscriptions.deliver` on every memory or curator commit.

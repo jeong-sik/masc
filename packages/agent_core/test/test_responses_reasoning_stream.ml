@@ -114,6 +114,23 @@ let opaque_transition () = let s=start()in delta s `Summary "summary";delta s `F
   | _->Alcotest.fail "opaque lost priority"
 let opaque_changed () = let s=start()in done_item s 0(reasoning ~encrypted:"first""r");
   terminal s[reasoning ~encrypted:"other""r"];fails s
+let opaque_envelope_drift () = let s=start()in
+  let streamed=reasoning ~encrypted:"token""r" in done_item s 0 streamed;
+  terminal s[(match streamed with `Assoc fields->
+    `Assoc(("status",`String "completed")::fields)|other->other)];
+  match(result s).content with [RedactedThinking raw]->
+    Alcotest.(check bool)"done item wins over drifted echo"true
+      (Yojson.Safe.equal streamed(Yojson.Safe.from_string raw))
+  | _->Alcotest.fail "opaque lost priority"
+let opaque_identity_asymmetry () = let s=start()in
+  let streamed=`Assoc["type",`String "reasoning";"id",`String ""
+    ;"encrypted_content",`String "token"] in
+  done_item s 0 streamed;
+  terminal s[reasoning ~encrypted:"token""rs_replayed"];
+  match(result s).content with [RedactedThinking raw]->
+    Alcotest.(check bool)"streamed item wins over id-bearing echo"true
+      (Yojson.Safe.equal streamed(Yojson.Safe.from_string raw))
+  | _->Alcotest.fail "opaque lost priority"
 let late_plaintext () = let s=start()in done_item s 0(reasoning ~encrypted:"token""r");
   delta s `Full "late";omitted s;fails s
 let wrong_identity () = let s=start()in delta ~id:"first" s `Full "text";
@@ -136,6 +153,7 @@ let () = Alcotest.run "responses_reasoning_stream"
    ;"conflict",contradictory;"truncation",truncated;"explicit empty",explicit_empty;"missing item",missing_item
    ;"omitted channel",omitted_channel;"whitespace then full",whitespace_first;"Unicode chunks",unicode_fragments
    ;"multiple native items",multiple_items;"opaque transition",opaque_transition;"opaque conflict",opaque_changed
+   ;"opaque envelope drift",opaque_envelope_drift;"opaque identity asymmetry",opaque_identity_asymmetry
    ;"late plaintext",late_plaintext;"item identity",wrong_identity
    ;"signed thinking guard",(fun()->invalid_snapshot_target true)
    ;"wrong block guard",(fun()->invalid_snapshot_target false)]]

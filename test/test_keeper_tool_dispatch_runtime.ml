@@ -5434,7 +5434,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  "an absolute server path token is still redacted"
                  true
                  (String_util.contains_substring
-                    (Masc.Keeper_request_failure.sanitize_person_text
+                    (Keeper_request_failure.sanitize_person_text
                        ("durable append failed argument=\"" ^ chat_path ^ "\""))
                     "[REDACTED_PATH]")
              | Ok _ -> fail "durable dashboard append failure became Completed");

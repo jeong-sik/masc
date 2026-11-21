@@ -983,6 +983,24 @@ let saver_com_named fname =
 
 let saver_com = saver_com_named "SAVE.DAT"
 
+(* A game that makes a directory first: mkdir "SUB", create "SUB\OUT.DAT" in
+   it, write "NEW$", then wait for a key. The core keeps that file under the
+   name "SUB\OUT.DAT", a name with a path in it.
+
+   100 mov ah,39h / mov dx,dir / int 21h
+   107 mov ah,3Ch / xor cx,cx / mov dx,fname / int 21h / mov bx,ax
+   112 mov ah,40h / mov cx,4 / mov dx,msg / int 21h / mov ah,3Eh / int 21h
+   120 wait: mov ah,0 / int 16h / or ax,ax / jz wait / int 20h
+   12A fname "SUB\OUT.DAT",0   136 msg "NEW$"   13A dir "SUB",0 *)
+let directory_saver_com =
+  let word n = String.init 2 (fun i -> Char.chr ((n lsr (8 * i)) land 0xff)) in
+  "\xb4\x39\xba" ^ word 0x13A ^ "\xcd\x21"
+  ^ "\xb4\x3c\x31\xc9\xba" ^ word 0x12A ^ "\xcd\x21\x89\xc3"
+  ^ "\xb4\x40\xb9\x04\x00\xba" ^ word 0x136 ^ "\xcd\x21\xb4\x3e\xcd\x21"
+  ^ "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20"
+  ^ "SUB\\OUT.DAT\000" ^ "NEW$" ^ "SUB\000"
+;;
+
 let saves_of ~base_path name =
   Filename.concat
     (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "saves")
@@ -1054,12 +1072,14 @@ let test_a_save_that_cannot_be_written_is_reported () =
     check bool "the machine is still there" true (is_completed next))
 ;;
 
-(* DOS takes "/" as a separator, so a guest asked for a save name can create
-   "../OUT.DAT". That name never reaches the host: it stays in the machine,
-   is reported once, and nothing lands beside the saves directory. *)
-let test_a_guest_path_never_reaches_the_host () =
+(* A file a guest makes in a directory is kept under a name with a path in it.
+   That name never reaches the host: it stays in the machine, is reported
+   once, and nothing lands in the saves directory or beside it. A name that
+   climbs out ("../OUT.DAT", "A:OUT.DAT") is refused by the core before the
+   lane sees it, so this is the case that is left. *)
+let test_a_file_in_a_directory_stays_in_the_machine () =
   with_workspace (fun base_path ->
-    install_game ~base_path "quest" [ ("QUEST.COM", saver_com_named "../OUT.DAT") ];
+    install_game ~base_path "quest" [ ("QUEST.COM", directory_saver_com) ];
     let loaded = load ~base_path "quest" in
     check bool "the call returns" true (is_completed loaded);
     check bool "the path is reported" true
@@ -1486,8 +1506,12 @@ let test_only_an_absent_recipient_frees_the_controller () =
     check (option string) "and nobody holds it" None (controller freed))
 ;;
 
-(* lea ax, ax: an instruction the emulator does not implement. The core
-   raises instead of misbehaving. A fault while the program boots is still a
+(* LOADALL (0F 05) is an instruction the emulator does not implement: the core
+   raises instead of misbehaving. When the core learns it, any other opcode it
+   raises on takes its place. *)
+let unimplemented = "\x0f\x05"
+
+(* A fault while the program boots is still a
    load: the machine is installed and the loader holds the controller, so the
    answer is a result whose [boot] says it faulted, not an error that reads as
    "nothing was loaded". *)
@@ -1499,7 +1523,7 @@ let boot_status result =
 
 let test_a_fault_while_booting_is_a_load () =
   with_workspace (fun base_path ->
-    install_program ~base_path "fault.com" "\x8d\xc0";
+    install_program ~base_path "fault.com" unimplemented;
     let loaded = load ~base_path "fault.com" in
     check bool "the load completes" true (is_completed loaded);
     check bool "and its boot says it faulted" true
@@ -1528,11 +1552,11 @@ let test_a_clean_boot_says_so () =
 (* The instructions before a fault still ran and may have repainted the
    screen. The step count in tool responses and ledger positions must include
    them. Three instructions complete here (mov ax,0xb800; mov es,ax;
-   mov byte es:[0],'X') before lea ax,ax faults. *)
+   mov byte es:[0],'X') before the unimplemented instruction faults. *)
 let test_a_fault_keeps_the_steps_that_ran () =
   with_workspace (fun base_path ->
     install_program ~base_path "paint-then-fault.com"
-      "\xb8\x00\xb8\x8e\xc0\x26\xc6\x06\x00\x00\x58\x8d\xc0";
+      ("\xb8\x00\xb8\x8e\xc0\x26\xc6\x06\x00\x00\x58" ^ unimplemented);
     let loaded = load ~base_path "paint-then-fault.com" in
     check bool "the load completes" true (is_completed loaded);
     check int "the answer counts the completed instructions" 3 (int_field "steps" loaded);
@@ -2280,13 +2304,14 @@ let test_a_refused_call_writes_no_autosave () =
     writes_nothing "a step with no machine" (dispatch ~base_path "masc_dos_step" []))
 ;;
 
-(* wait: mov ah,0 / int 16h / or ax,ax / jz wait / lea ax,ax: polls for a key
+(* wait: mov ah,0 / int 16h / or ax,ax / jz wait / loadall: polls for a key
    the way [echo_com] does (INT 16h does not block), then faults. The machine a
    fault leaves faults again on its next step, so it must not replace the
    autosave a Keeper can still resume. *)
 let test_a_fault_leaves_the_last_good_autosave () =
   with_workspace (fun base_path ->
-    install_program ~base_path "key-then-fault.com" "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x8d\xc0";
+    install_program ~base_path "key-then-fault.com"
+      ("\xb4\x00\xcd\x16\x09\xc0\x74\xf8" ^ unimplemented);
     let booted = load ~base_path "key-then-fault.com" in
     check bool "the load settles on the key wait" true (is_completed booted);
     let steps_at_boot = int_field "steps" booted in
@@ -2822,7 +2847,7 @@ let () =
         ; test_case "save over inventory" `Quick
             test_a_save_is_mounted_over_the_inventory_copy
         ; test_case "save not written" `Quick test_a_save_that_cannot_be_written_is_reported
-        ; test_case "guest path" `Quick test_a_guest_path_never_reaches_the_host
+        ; test_case "file in a directory" `Quick test_a_file_in_a_directory_stays_in_the_machine
         ; test_case "holder only" `Quick test_only_the_holder_moves_the_machine
         ; test_case "pass" `Quick test_pass_hands_the_machine_on
         ; test_case "free controller" `Quick

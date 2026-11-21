@@ -181,6 +181,12 @@ let codex_usage = function
 let antigravity_usage (usage : Runtime_antigravity.usage) : Fusion_types.usage =
   { input_tokens = usage.input_tokens + usage.cache_read_tokens; output_tokens = usage.output_tokens }
 
+let acp_usage ~driver (usage : Runtime_acp_client.usage) : Fusion_types.usage =
+  let normalized = Runtime_acp_client.normalize_usage driver usage in
+  { input_tokens = normalized.input_tokens
+  ; output_tokens = normalized.output_tokens
+  }
+
 let optional_usage convert = function
   | Some usage -> convert usage
   | None -> Fusion_types.zero_usage
@@ -197,6 +203,7 @@ type failure =
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
+  | Acp_failure of Runtime_acp_client.error
 
 let failure_detail ~runtime_id = function
   | Missing_reply -> Printf.sprintf "%s: completed turn has no assistant reply" runtime_id
@@ -207,6 +214,8 @@ let failure_detail ~runtime_id = function
     Printf.sprintf "%s: %s" runtime_id (Runtime_claude_code.error_to_string error)
   | Antigravity_failure error ->
     Printf.sprintf "%s: %s" runtime_id (Runtime_antigravity.error_to_string error)
+  | Acp_failure error ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_acp_client.error_to_string error)
 ;;
 
 (* 어댑터마다 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
@@ -279,6 +288,15 @@ let panel_failure ~runtime_id = function
        | Runtime_antigravity.Child_fd_ceiling_exceeded _
        | Runtime_antigravity.Unhandled_exception _ ) as error) ->
     provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
+  | Acp_failure (Runtime_acp_client.Timeout _) -> Fusion_types.Timeout
+  | Acp_failure
+      (( Runtime_acp_client.Invalid_config _
+       | Runtime_acp_client.Spawn_refused _
+       | Runtime_acp_client.Protocol_error _
+       | Runtime_acp_client.Rpc_error _
+       | Runtime_acp_client.Process_exited _
+       | Runtime_acp_client.Client_closed ) as error) ->
+    provider_error ~runtime_id (Runtime_acp_client.error_to_string error)
 
 
 (* An Antigravity one-shot call runs in a HOME of its own that is removed with
@@ -710,6 +728,86 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model; usage = antigravity_usage result.usage }
      | Error error ->
        Error (Antigravity_failure error))
+  | Runtime_execution.Acp execution ->
+    let* (_host : Runtime_account_access.host_account) =
+      Runtime_account_access.authorize_host (Runtime_account_access.Acp_client execution.driver)
+      |> Result.map_error (fun refusal ->
+        Setup_failure (Runtime_account_access.refusal_to_string refusal))
+    in
+    let effective_timeout_s =
+      resolved_timeout_s
+        ~turn_timeout_s:runtime.model.turn_timeout_s
+        ~override_s:timeout_s
+        ~default_timeout_s:execution.timeout_s
+    in
+    let profile = Runtime_acp_client.profile_of_driver execution.driver in
+    let* prompt_text, system_prompt_append =
+      match profile.system_prompt_channel, system_prompt with
+      | Runtime_acp_client.Meta_antigravity_append, Some sp -> Ok (prompt, Some sp)
+      | Runtime_acp_client.Meta_antigravity_append, None -> Ok (prompt, None)
+      | Runtime_acp_client.Framed_in_first_prompt, sp ->
+        framed_prompt ~system_prompt:sp ~prompt
+        |> Result.map (fun framed -> framed, None)
+        |> Result.map_error (fun detail -> Setup_failure detail)
+    in
+    let blocks =
+      Runtime_acp_client.Text_block prompt_text
+      :: List.map
+           (fun (img : image_input) ->
+              Runtime_acp_client.Image_block
+                { mime_type = img.media_type; base64_data = img.base64_data })
+           images
+    in
+    let acp_config : Runtime_acp_client.config =
+      { driver = execution.driver
+      ; cli_path = execution.cli_path
+      ; args = execution.args
+      ; strip_env = execution.strip_env
+      ; skills_dirs = execution.skills_dirs
+      ; cwd = base_dir
+      ; oauth_source = execution.oauth_source
+      ; dangerously_skip_permissions = false
+      ; admission_timeout_s = Runtime_acp_client.init_timeout_s
+      }
+    in
+    Eio.Switch.run
+    @@ fun sw ->
+    (match Runtime_acp_client.start ~sw ~proc_mgr:mgr ~clock ~config:acp_config () with
+     | Error err -> Error (Acp_failure err)
+     | Ok client ->
+       let mode =
+         Option.value execution.mode
+           ~default:
+             (Runtime_acp_client.mode_of_posture
+                execution.driver
+                Runtime_native_tools.Native_none)
+       in
+       (match
+          Runtime_acp_client.new_session
+            client
+            ~cwd:base_dir
+            ?system_prompt_append
+            ~mode
+            ~model:execution.model
+            ?effort:execution.effort
+            ()
+        with
+        | Error err -> Error (Acp_failure err)
+        | Ok session ->
+          (match
+             Runtime_acp_client.prompt
+               client
+               ~session_id:session.session_id
+               ~blocks
+               ~timeout_s:effective_timeout_s
+               ~permission_policy:Runtime_acp_client.Deny_all
+               ()
+           with
+           | Error err -> Error (Acp_failure err)
+           | Ok res ->
+             let usage = acp_usage ~driver:execution.driver res.usage in
+             on_usage usage;
+             succeeded { text = res.text; model = execution.model; usage })))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =

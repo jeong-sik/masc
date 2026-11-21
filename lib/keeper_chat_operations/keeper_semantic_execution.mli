@@ -49,7 +49,7 @@ val receipt_obligation : request_id:string -> state:receipt_state ->
   (receipt_obligation, string) result
 type runtime_suffix = private { assignment_id:string; failed_runtime_id:string; next_runtime_id:string; later_runtime_ids:string list }
 val runtime_suffix : assignment_id:string -> failed_runtime_id:string -> next_runtime_id:string -> later_runtime_ids:string list -> (runtime_suffix, string) result
-type official_client_kind = Codex | Claude_code | Antigravity
+type official_client_kind = Codex | Claude_code | Antigravity | Acp
 val official_client_kind_to_string : official_client_kind -> string
 (** The wire spelling every store and projection writes for a kind. *)
 val official_client_kind_of_string : string -> official_client_kind option

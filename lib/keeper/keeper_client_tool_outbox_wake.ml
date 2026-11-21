@@ -8,7 +8,7 @@ let route_can_consume (meta : Keeper_meta_contract.keeper_meta) =
     | Some runtime ->
       match runtime.Runtime_instance.execution with
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
-      | Runtime_execution.Antigravity_cli _ -> true
+      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Acp _ -> true
       | Runtime_execution.Agent_core _ -> true
   in
   match Runtime.resolve_assignment route with

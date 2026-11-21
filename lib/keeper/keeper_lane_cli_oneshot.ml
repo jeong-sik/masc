@@ -131,6 +131,7 @@ let refused_for_binding_rest = function
     antigravity_error_is_binding_rest error
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
+  | Execution_failed { cause = Fusion_official_client.Acp_failure _; runtime_id = _ }
   | Unknown_runtime _
   | Not_an_official_client _
   | Invalid_json_output _
@@ -200,6 +201,7 @@ let refused_for_input_size = function
     antigravity_error_is_input_size error
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
+  | Execution_failed { cause = Fusion_official_client.Acp_failure _; runtime_id = _ }
   | Unknown_runtime _
   | Not_an_official_client _
   | Invalid_json_output _
@@ -317,6 +319,7 @@ let prompt_for_execution ~(execution : Runtime_execution.t) ~requirement ~prompt
         ~schema:(Exact_output.domain_schema requirement)
   | Runtime_execution.Claude_code _
   | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Acp _
   | Runtime_execution.Agent_core _ -> prompt_with_schema ~requirement ~prompt
 ;;
 
@@ -475,7 +478,8 @@ let input_capacity = function
           | Fusion_official_client.Setup_failure _
           | Fusion_official_client.Claude_failure _
           | Fusion_official_client.Claude_admission_failure _
-          | Fusion_official_client.Antigravity_failure _ )
+          | Fusion_official_client.Antigravity_failure _
+          | Fusion_official_client.Acp_failure _ )
       ; _
       }
   | Unknown_runtime _ | Not_an_official_client _ | Invalid_json_output _

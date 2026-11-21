@@ -7837,6 +7837,7 @@
 (include stanzas/test_keeper_person_turn_seams.inc)
 (include stanzas/test_runtime_account_access_off.inc)
 (include stanzas/test_runtime_account_call.inc)
+(include stanzas/test_runtime_acp_client.inc)
 (include stanzas/test_runtime_api_key_file.inc)
 (include stanzas/test_runtime_key_account_files.inc)
 (include stanzas/test_server_key_account_purge.inc)

@@ -17,6 +17,7 @@ type api_format =
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime
+  | Acp_runtime
 [@@deriving show, eq]
 
 (* Whether a runtime of this format can be handed a JSON Schema to hold its
@@ -37,6 +38,7 @@ let api_format_output_schema_channel = function
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime -> Holds_output_schema
+  | Acp_runtime -> No_output_schema_channel
 ;;
 
 (** Which vendor dialect an endpoint speaks. [protocol] names the request
@@ -105,6 +107,23 @@ type antigravity_cli_options =
         (** [add-dirs] — extra absolute directories the CLI may read beside
             the keeper base path, each passed as its own [--add-dir]. Empty
             means the base path stays the only workspace root. *)
+  }
+[@@deriving show, eq]
+
+type acp_driver = Runtime_acp_client.driver =
+  | Antigravity
+  | Kimi_code
+  | Mistral_vibe
+[@@deriving show, eq]
+
+type acp_options =
+  { driver : acp_driver
+  ; args : string list
+  ; strip_env : string list
+  ; skills_dirs : string list
+  ; effort : string option
+  ; mode : string option
+  ; timeout_s : float
   }
 [@@deriving show, eq]
 
@@ -199,6 +218,9 @@ type provider =
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)
+  ; acp : acp_options option
+    (** Typed [acp] persistent client options. Present exactly for providers
+        using [protocol = "acp"]; absent for every other transport. *)
   ; usage_read : usage_read option
   }
 [@@deriving show, eq]

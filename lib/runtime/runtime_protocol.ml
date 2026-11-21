@@ -65,6 +65,19 @@ let antigravity_editor =
     }
 ;;
 
+let acp_editor =
+  Some
+    { protocol = "acp"
+    ; transport = Command
+    ; semantics = Official_client
+    ; credential_policy = Credentials_optional
+    ; requires_non_interactive = true
+    ; provider_fields =
+        [ "driver"; "args"; "strip-env"; "skills-dirs"; "effort"; "mode"; "timeout-s" ]
+    ; required_provider_fields = [ "driver" ]
+    }
+;;
+
 let hidden_protocol protocol api_format =
   { protocol; api_format; editor = None }
 ;;
@@ -94,6 +107,10 @@ let protocol_declarations =
   ; { protocol = "antigravity-cli"
     ; api_format = Runtime_schema.Antigravity_cli_runtime
     ; editor = antigravity_editor
+    }
+  ; { protocol = "acp"
+    ; api_format = Runtime_schema.Acp_runtime
+    ; editor = acp_editor
     }
   ]
 ;;

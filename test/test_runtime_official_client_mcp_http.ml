@@ -1009,6 +1009,66 @@ let test_turn_images_are_judged_by_the_shared_rules () =
     (refusal [ image "image/png" ""; valid "image/tiff" ])
 ;;
 
+let test_reinitialize_without_protocol_header_from_ready () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let calls = ref 0 in
+  let tool_specs () =
+    [ `Assoc
+        [ "name", `String "masc_probe"
+        ; "description", `String "Probe"
+        ; "inputSchema", `Assoc [ "type", `String "object" ]
+        ]
+    ]
+  in
+  let call_tool ~name ~call_id:_ ~arguments:_ =
+    if String.equal name "masc_probe"
+    then (
+      incr calls;
+      Some
+        { Runtime_official_client_mcp_http.outcome =
+            { Runtime_official_client_mcp.success = true
+            ; content = "REINIT_OK"
+            ; content_blocks = None
+            }
+        ; stop = None
+        ; after_response_sent = ignore
+        })
+    else None
+  in
+  let bridge =
+    Runtime_official_client_mcp_http.start
+      ~sw
+      ~net:env#net
+      ~secure_random:env#secure_random
+      ~server_name:"masc"
+      ~tool_specs
+      ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Concurrent)
+      ~call_tool
+      ()
+  in
+  let endpoint, authorization = config_fields bridge in
+  (* First stateless client session: initialize -> initialized -> tools/list *)
+  let pv1 = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+  let listed =
+    request ~protocol_version:pv1 ~sw ~net:env#net ~endpoint ~authorization
+      (json_request 2 "tools/list" (`Assoc []))
+  in
+  check int "first tools/list" 200 listed.status;
+  (* Second stateless client session (like vibe-acp tools/call): initialize
+     WITHOUT MCP-Protocol-Version header while bridge phase is Ready. *)
+  let pv2 = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+  let called =
+    request ~protocol_version:pv2 ~sw ~net:env#net ~endpoint ~authorization
+      (json_request 3 "tools/call"
+         (`Assoc [ "name", `String "masc_probe"; "arguments", `Assoc [] ]))
+  in
+  check int "tools/call after re-initialize" 200 called.status;
+  check int "tool executed once" 1 !calls
+;;
+
 let () =
   run
     "runtime_official_client_mcp_http"
@@ -1017,6 +1077,10 @@ let () =
             "capability, protocol, phase, and tool callback"
             `Quick
             test_turn_scoped_capability_and_protocol
+        ; test_case
+            "re-initialize without protocol header succeeds from Ready"
+            `Quick
+            test_reinitialize_without_protocol_header_from_ready
         ; test_case "unsupported media is an explicit delivery error" `Quick
             test_unsupported_media_is_a_delivery_error
         ; test_case "image media type outside the shared set is refused" `Quick

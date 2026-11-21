@@ -87,7 +87,8 @@ let validate_dispatch_credential
   match runtime.execution with
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Acp _ ->
     Ok ()
   | Runtime_execution.Agent_core _ ->
     (match runtime.credential_admission with
@@ -137,7 +138,8 @@ let quota_scope_of_materialized
     (match credential_admission with
      | Some admission -> Ok (Runtime_credential_selection.quota_scope admission)
      | None -> Error "HTTP materialization has no credential selection")
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Acp _ ->
     Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
 ;;
 
@@ -190,7 +192,8 @@ let materialize_binding_with
                       | Error reason -> Runtime_candidate_backpressure.Http_binding_unavailable reason)
                  | Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
-                 | Runtime_execution.Antigravity_cli _ -> Runtime_candidate_backpressure.Official_client_binding
+                 | Runtime_execution.Antigravity_cli _
+                 | Runtime_execution.Acp _ -> Runtime_candidate_backpressure.Official_client_binding
                in
                Runtime_candidate_backpressure.create_candidate ~binding)
            ; quota_scope
@@ -265,7 +268,8 @@ let capabilities_for_runtime (rt : t) =
       (Runtime_account_access.api_declaration sealed)
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ -> None
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Acp _ -> None
 ;;
 
 type max_context_source =

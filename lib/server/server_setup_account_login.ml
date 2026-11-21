@@ -488,7 +488,8 @@ let key_account_home_kind (config : Runtime_schema.config) ~integration_id =
           Runtime_schema.(
             Codex_app_server_runtime
             | Claude_code_runtime
-            | Antigravity_cli_runtime)
+            | Antigravity_cli_runtime
+            | Acp_runtime)
       ; _
       }
   | None -> Runtime_key_account_files.Claude_home
@@ -579,7 +580,8 @@ let person_runtime in_call person ~base_path ~binding =
               setup (Error Server_runtime_setup_actions.Unsupported_connection)
           | Runtime_schema.Codex_app_server_runtime
           | Runtime_schema.Claude_code_runtime
-          | Runtime_schema.Antigravity_cli_runtime -> official_key ~generation)) in
+          | Runtime_schema.Antigravity_cli_runtime
+          | Runtime_schema.Acp_runtime -> official_key ~generation)) in
   (* Checked before the call, so a model that makes no Runtime id is not
      called for two minutes first. A [Runtime] binding makes the id it was
      chosen by, which is one. *)

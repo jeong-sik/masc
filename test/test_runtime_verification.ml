@@ -553,6 +553,7 @@ let test_a_queued_readiness_run_ends_at_the_declared_timeout () =
     match runtime.Runtime_instance.execution with
     | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
     | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Acp _
     | Runtime_execution.Claude_code _
     | Runtime_execution.Codex_app_server _ -> fail "the fixture binding is an HTTP runtime"
   in

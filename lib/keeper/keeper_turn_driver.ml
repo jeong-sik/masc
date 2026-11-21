@@ -379,7 +379,7 @@ let provider_account_id_of_attempt ~(runtime : Runtime_instance.t) =
     if Runtime_execution.is_person_execution runtime.execution
     then Authz_types.Provider_account_id.of_string runtime.provider.id |> Result.to_option
     else None
-  | Runtime_execution.Antigravity_cli _ -> None
+  | Runtime_execution.Antigravity_cli _ | Runtime_execution.Acp _ -> None
 ;;
 
 let with_account_call_slot ~(runtime : Runtime_instance.t) ~on_busy f =
@@ -2064,10 +2064,10 @@ let admit_input_for_attempt ~input_source ?project_media ~media_store
     ; attempt_replay_prefix_projection = Keeper_replay_prefix.unchanged }
   | Keeper_request_source.Completion_review,
       (Runtime_execution.Agent_core _ | Codex_app_server _ | Claude_code _
-       | Antigravity_cli _)
+       | Antigravity_cli _ | Acp _)
   | Keeper_request_source.Keeper_history _,
       (Runtime_execution.Codex_app_server _ | Claude_code _
-       | Antigravity_cli _) ->
+       | Antigravity_cli _ | Acp _) ->
     project_input_for_attempt ?project_media ~media_store ~project_images
       ~keeper_name ~emit_runtime_manifest ~goal_blocks ~goal_metadata
       ~initial_messages ~agent_core_checkpoint ~runtime_id runtime
@@ -3090,7 +3090,7 @@ let run_named
               Keeper_agent_tool_surface.on_the_wire ~agent_cell ~built:agent_core_tools
             | (Runtime_execution.Agent_core _, None)
             | ((Runtime_execution.Codex_app_server _ | Antigravity_cli _
-                | Claude_code _), _) -> agent_core_tools in
+                | Claude_code _ | Acp _), _) -> agent_core_tools in
           Runtime_agent.runtime_accepts_image_input ~runtime, tools, tools_on_wire, loading_plan, false
       in
       (* Freeze admission with this selected candidate, including tools loaded
@@ -3110,7 +3110,7 @@ let run_named
           | None, _ -> true
           | Some saved, Runtime_execution.Agent_core _ -> String.equal saved attempt_runtime_id
           | Some _, (Runtime_execution.Codex_app_server _ | Antigravity_cli _
-                    | Claude_code _) -> false in
+                    | Claude_code _ | Acp _) -> false in
         let execution_owner_ready = match on_request_execution_ready,native_binding with
           | Some _, Some _ -> false
           | None, _ | Some _, None -> true in
@@ -3135,7 +3135,8 @@ let run_named
       let has_tools, surface_enabled = match runtime.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _ -> tools <> [], true
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Acp _ -> tools <> [], true
         | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
       let complete_media () =
         match Runtime_agent.decide_modality_reroute_for_runtime_candidates
@@ -3158,8 +3159,8 @@ let run_named
       let bind_official_owner () =
         match runtime.Runtime_instance.execution,on_request_execution_ready with
         | Runtime_execution.Agent_core _, _
-        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _), None -> Ok ()
-        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _), Some ready ->
+        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Acp _), None -> Ok ()
+        | (Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Acp _), Some ready ->
           ready ~runtime_id:attempt_runtime_id ~execution:Types_core.Official_session
           |> Result.map_error (fun detail -> Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig {field="review.execution_owner";detail}))
@@ -3183,7 +3184,7 @@ let run_named
       let goal_blocks =
         match continue_from_checkpoint, runtime.Runtime_instance.execution with
         | true, Runtime_execution.Agent_core _ -> None
-        | (true, (Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ | Runtime_execution.Claude_code _))
+        | (true, (Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ | Runtime_execution.Claude_code _ | Runtime_execution.Acp _))
         | (false, _) -> goal_blocks
       in
       (* Current-goal image identities remain eligible for an eager reading
@@ -3373,7 +3374,7 @@ let run_named
       let official_argument_source =
         match runtime.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ -> None
-        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ ->
+        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Acp _ ->
           Keeper_official_client_host.create_argument_source
             ~base_path ~keeper_name ~seed:argument_demotion_seed
             ~replay_prefix:replay_prefix_projection
@@ -3381,7 +3382,7 @@ let run_named
       in
       (match runtime.Runtime_instance.execution with
        | Runtime_execution.Agent_core _ -> ()
-       | Codex_app_server _ | Claude_code _ | Antigravity_cli _ ->
+       | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Acp _ ->
          Log.Keeper.info ~keeper_name
            "model input references runtime=%s context_owner=official_client argument_source_available=%b"
            attempt_runtime_id
@@ -3704,6 +3705,109 @@ let run_named
         , None
         , antigravity_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform antigravity_result )
+      | Runtime_execution.Acp config ->
+        let ( reset_model_input_observation
+            , on_model_input_window_observation
+            , record_transmitted_model_input
+            , _record_refused_model_input
+            , hooks ) =
+          official_model_input_observation hooks
+        in
+        let run_acp () =
+          match authorize_host_account (Runtime_account_access.Acp_client config.driver) with
+          | Error error ->
+            Keeper_official_client_attempt.refused_before_dispatch error
+          | Ok host ->
+            reset_model_input_observation ();
+            let on_transmitted_model_input transmitted =
+              record_transmitted_model_input transmitted;
+              Option.iter
+                (fun observe ->
+                   observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
+                on_request_attribution
+            in
+            Keeper_acp_runtime.run ~on_guidance_prepared ~input_source ~media_store
+              ?on_native_tool_completion
+              ~host
+              ~configured_reasoning_effort:runtime.model.reasoning_effort
+              ~turn_timeout_s:runtime.model.turn_timeout_s
+              ?argument_source:official_argument_source
+              ?on_tool_execution
+              ?composed_context:official_client_composed_context
+              ~accepts_image_input
+              ?required_native_posture
+              ~runtime_id:attempt_runtime_id
+              ~keeper_name
+              ~carried_front_seed:official_client_carried_front_seed
+              ~librarian_front:(official_client_continuity ())
+              ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
+              ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
+              ?on_model_input_window_observation
+              ~pre_tool_rejects
+              ~base_path
+              ~outbox_viewer ~read_retained_media
+              ~goal
+              ~goal_blocks
+              ~system_prompt
+              ~tools
+              ~loading_plan
+              ~initial_messages
+              ~model_input_projection
+              ~on_transmitted_model_input
+              ~hooks
+              ~context_injector
+              ~context
+              ~terminal_effect_state
+              ?official_client_continuation
+              ?official_task_reference
+              ?on_official_client_tool_boundary
+              ~on_official_client_result_handoff:
+                (fun ~invocation ~content ->
+                   Option.iter
+                     (fun observe ->
+                        observe ~runtime_id:attempt_runtime_id ~invocation ~content)
+                     on_official_client_result_handoff)
+              ~on_native_action:
+                (fun ~official_turn ~identity ~tool_name ->
+                   Option.iter
+                     (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
+                     on_official_client_native_action)
+              ?on_usage_report:on_official_client_usage_report
+              ~event_bus
+              ~raw_trace
+              ~on_event
+              ~config
+              ()
+        in
+        let acp_attempt =
+          match provider_config_transform with
+          | Some _ ->
+            Keeper_official_client_attempt.refused_before_dispatch
+              (Agent_core.Error.Config
+                 (Agent_core.Error.InvalidConfig
+                    { field = "provider_config_transform"
+                    ; detail = "provider config transforms cannot target an ACP runtime"
+                    }))
+          | None -> run_acp ()
+        in
+        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+        let acp_result =
+          Result.bind acp_attempt.result (fun run_result ->
+            apply_official_client_accept
+              ~runtime_id:attempt_runtime_id
+              ~accept
+              ~terminal_effect_state
+              run_result)
+        in
+        let acp_result = settle_accepted_official_client_results
+          ~pending_result_receipts:acp_attempt.pending_result_receipts acp_result in
+        let acp_result = observe_official_result
+          ~execution_result:acp_attempt.result acp_result in
+        let acp_result = guidance_result acp_result in
+        ( selected_runtime_result ?official_client_settlement:acp_attempt.settled_session runtime ~lane_attempt_index:idx acp_result
+        , None
+        , acp_attempt.effect_disposition
+        , official_client_dispatch ~provider_config_transform acp_result )
       | Runtime_execution.Claude_code config ->
         let ( reset_model_input_observation
             , on_model_input_window_observation

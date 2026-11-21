@@ -215,7 +215,8 @@ let exact_slot_lacks_body_deadline ~(target_source : exact_output_target_source)
      | Runtime_execution.Agent_core _, Some (_ : float) -> false
      | ( Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _ ), (Some _ | None) -> false)
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Acp _ ), (Some _ | None) -> false)
 ;;
 
 (* An HTTP slot of an exact-output lane is
@@ -320,7 +321,8 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
          match r.execution, capabilities_for_runtime r with
          | ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ ), _ -> None
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Acp _ ), _ -> None
          | Runtime_execution.Agent_core _, Some _ -> None
          | Runtime_execution.Agent_core sealed, None ->
            let provider_config = Runtime_account_access.api_declaration sealed in
@@ -675,7 +677,8 @@ let materialize_config
             | Runtime_execution.Agent_core sealed -> Some (runtime.id, sealed)
             | Runtime_execution.Codex_app_server _
             | Runtime_execution.Claude_code _
-            | Runtime_execution.Antigravity_cli _ -> None)
+            | Runtime_execution.Antigravity_cli _
+            | Runtime_execution.Acp _ -> None)
          runtimes)
     |> Result.map_error (fun disagreements ->
       Admission_allowances_disagree disagreements)
@@ -918,6 +921,7 @@ let layout_client_of_provider (provider : Runtime_schema.provider) =
   | Runtime_schema.Codex_app_server_runtime -> Some Runtime_account_home_layout.Codex_home
   | Runtime_schema.Claude_code_runtime -> Some Runtime_account_home_layout.Claude_home
   | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Acp_runtime
   | Runtime_schema.Messages_api
   | Runtime_schema.Chat_completions_api
   | Runtime_schema.Ollama_api
@@ -1179,10 +1183,15 @@ let same_cli_account (left : t) (right : t) =
   | Runtime_execution.Antigravity_cli l, Runtime_execution.Antigravity_cli r ->
     String.equal (String.trim l.oauth_source) (String.trim r.oauth_source)
     || quota_scope_of_runtime left = quota_scope_of_runtime right
+  | Runtime_execution.Acp l, Runtime_execution.Acp r ->
+    Runtime_acp_client.equal_driver l.driver r.driver
+    && (Option.equal String.equal l.oauth_source r.oauth_source
+        || quota_scope_of_runtime left = quota_scope_of_runtime right)
   | ( ( Runtime_execution.Agent_core _
       | Runtime_execution.Claude_code _
       | Runtime_execution.Codex_app_server _
-      | Runtime_execution.Antigravity_cli _ )
+      | Runtime_execution.Antigravity_cli _
+      | Runtime_execution.Acp _ )
     , _ ) -> false
 ;;
 
@@ -1236,7 +1245,8 @@ let http_overlap_mechanism (librarian_rt : t) (keeper_rt : t) =
   | ( ( Runtime_execution.Agent_core _
       | Runtime_execution.Claude_code _
       | Runtime_execution.Codex_app_server _
-      | Runtime_execution.Antigravity_cli _ )
+      | Runtime_execution.Antigravity_cli _
+      | Runtime_execution.Acp _ )
     , _ ) -> None
 ;;
 
@@ -1249,10 +1259,12 @@ let runtime_overlap_mechanism (librarian_rt : t) (keeper_rt : t) =
       http_overlap_mechanism librarian_rt keeper_rt
     | ( ( Runtime_execution.Claude_code _
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _ )
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Acp _ )
       , ( Runtime_execution.Claude_code _
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _ ) ) ->
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Acp _ ) ) ->
       if same_cli_account librarian_rt keeper_rt
       then
         Some
@@ -1262,7 +1274,8 @@ let runtime_overlap_mechanism (librarian_rt : t) (keeper_rt : t) =
     | ( ( Runtime_execution.Agent_core _
         | Runtime_execution.Claude_code _
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _ )
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Acp _ )
       , _ ) -> None)
 ;;
 
@@ -1504,7 +1517,8 @@ let exact_output_targets runtimes =
        | ( Ok (_ : Agent_core.Exact_output.declared_target list)
          , ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ ) ) -> targets)
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Acp _ ) ) -> targets)
     runtimes
     (Ok [])
 ;;
@@ -1596,7 +1610,7 @@ let exact_output_runtime_observations ~origin runtimes =
           candidate = runtime.candidate_backpressure; quota_scope = runtime.quota_scope
         ; window })
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
-      | Runtime_execution.Antigravity_cli _ -> None) runtimes
+      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Acp _ -> None) runtimes
 ;;
 
 let publish_exact_output_registry ?runtime_observations ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
@@ -1865,8 +1879,8 @@ let verifier_runtime_admission (runtime : t) =
              .Llm_provider.Capabilities.supports_system_prompt ->
     Error (runtime.id ^ ": completion verifier requires a model that takes a system prompt")
   | Runtime_execution.Agent_core _ -> Ok ()
-  | Runtime_execution.Claude_code _ when runtime.model.tools_support -> Ok ()
-  | Runtime_execution.Claude_code _ ->
+  | (Runtime_execution.Claude_code _ | Runtime_execution.Acp _) when runtime.model.tools_support -> Ok ()
+  | Runtime_execution.Claude_code _ | Runtime_execution.Acp _ ->
     Error (runtime.id ^ ": completion verifier requires model tools-support")
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Antigravity_cli _ ->
@@ -1890,7 +1904,7 @@ let verifier_cli_slot_admission_in ~runtimes ~lane_ids ~runtime_id =
      | Runtime_execution.Agent_core _ ->
        Error (runtime_id ^ ": verifier CLI slot must name an official client")
      | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Antigravity_cli _ ->
+     | Runtime_execution.Antigravity_cli _ | Runtime_execution.Acp _ ->
        verifier_runtime_admission runtime)
 ;;
 
@@ -4067,7 +4081,8 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
       | Runtime_execution.Agent_core _, None, Replacement_catalog_targets _
       | ( Runtime_execution.Codex_app_server _
         | Runtime_execution.Claude_code _
-        | Runtime_execution.Antigravity_cli _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Acp _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
     in
     let next =
       Toml_line_editor.edit_table_multiline_array next
@@ -4513,7 +4528,8 @@ let capability_of_runtime (rt : t) : runtime_capability =
     | Runtime_execution.Claude_code _
     | Runtime_execution.Codex_app_server _ ->
       Rejects_oversize_input
-    | Runtime_execution.Antigravity_cli _ ->
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Acp _ ->
       Truncates_silently
     | Runtime_execution.Agent_core _ ->
       (match context_window with
@@ -4526,6 +4542,7 @@ let capability_of_runtime (rt : t) : runtime_capability =
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Antigravity_cli _ ->
       Flag_json_schema
+    | Runtime_execution.Acp _ -> Prompted_json
     | Runtime_execution.Agent_core sealed ->
       (match
          Llm_provider.Provider_config.capabilities_for_config_model
@@ -4539,7 +4556,7 @@ let capability_of_runtime (rt : t) : runtime_capability =
   in
   let supports_tool_free =
     match rt.execution with
-    | Runtime_execution.Claude_code _ -> rt.model.tools_support
+    | Runtime_execution.Claude_code _ | Runtime_execution.Acp _ -> rt.model.tools_support
     | Runtime_execution.Agent_core sealed ->
       let provider = Runtime_account_access.api_declaration sealed in
       Provider_tool_support.provider_supports_inline_tools provider
@@ -4554,6 +4571,7 @@ let capability_of_runtime (rt : t) : runtime_capability =
     | Runtime_execution.Claude_code _
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Acp _
     | Runtime_execution.Agent_core _ ->
       true
   in

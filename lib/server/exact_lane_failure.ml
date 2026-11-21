@@ -208,4 +208,14 @@ let cli_failure = function
      | Fusion_official_client.Codex_failure error -> codex_error error
      | Fusion_official_client.Claude_failure error
      | Fusion_official_client.Claude_admission_failure error -> claude_error error
-     | Fusion_official_client.Antigravity_failure error -> antigravity_error error)
+     | Fusion_official_client.Antigravity_failure error -> antigravity_error error
+     | Fusion_official_client.Acp_failure (Runtime_acp_client.Invalid_config _) ->
+       Configuration_refused
+     | Fusion_official_client.Acp_failure (Runtime_acp_client.Spawn_refused refusal) ->
+       spawn_refusal refusal
+     | Fusion_official_client.Acp_failure
+         ( Runtime_acp_client.Timeout _
+         | Runtime_acp_client.Protocol_error _
+         | Runtime_acp_client.Rpc_error _
+         | Runtime_acp_client.Process_exited _
+         | Runtime_acp_client.Client_closed ) -> Transient)

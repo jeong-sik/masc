@@ -640,7 +640,8 @@ let test_provider_for_vision_uses_runtime_temperature () =
          (match runtime.Runtime_instance.execution with
           | Runtime_execution.Codex_app_server _
           | Runtime_execution.Claude_code _
-          | Runtime_execution.Antigravity_cli _ ->
+          | Runtime_execution.Antigravity_cli _
+          | Runtime_execution.Acp _ ->
             failwith "selected vision runtime should be agent_core"
           | Runtime_execution.Agent_core sealed ->
             let configured = Vt.provider_for_vision (Masc_test_deps.api_config sealed) in

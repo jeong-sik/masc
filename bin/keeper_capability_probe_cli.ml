@@ -115,7 +115,8 @@ let is_agent_core runtime_id =
      | Runtime_execution.Agent_core _ -> true
      | Runtime_execution.Codex_app_server _
      | Runtime_execution.Antigravity_cli _
-     | Runtime_execution.Claude_code _ -> false)
+     | Runtime_execution.Claude_code _
+     | Runtime_execution.Acp _ -> false)
 ;;
 
 let verdict_json (verdict : Probe.verdict) =
@@ -219,7 +220,8 @@ let is_antigravity runtime_id =
       { execution =
           ( Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Claude_code _ )
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Acp _ )
       ; _
       }
   | None -> false

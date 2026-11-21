@@ -9,6 +9,7 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
+  | Acp
 
 (** How the host ended a turn, as far as a Muse resume depends on it: a
     completed turn ran its work; a failed, cancelled or host-died one did

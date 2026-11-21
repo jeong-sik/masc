@@ -10141,7 +10141,7 @@ default = "official.primary"
         | None -> fail "native Gate fixture runtime missing" in
       let native_config = match native_runtime.Runtime_instance.execution with
         | Runtime_execution.Codex_app_server config -> config
-        | Agent_core _ | Claude_code _ | Antigravity_cli _ ->
+        | Agent_core _ | Claude_code _ | Antigravity_cli _ | Acp _ ->
           fail "native Gate fixture runtime missing" in
       Masc.Keeper_codex_runtime.run ~read_retained_media:None ~outbox_viewer:Masc.Keeper_client_tool_outbox.Unowned_only ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id })
         ~context_window:(Some (Runtime_instance.max_context_of_runtime native_runtime))

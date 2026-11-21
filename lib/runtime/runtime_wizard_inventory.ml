@@ -79,7 +79,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
     List.map (fun (provider : Runtime_schema.provider) ->
       let supported =
         match provider.api_format with
-        | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
+        | Runtime_schema.Antigravity_cli_runtime | Acp_runtime | Messages_api | Chat_completions_api | Ollama_api
         | Codex_app_server_runtime | Claude_code_runtime
         | Gemini_api | Vertex_gemini_api -> true
       in
@@ -158,7 +158,7 @@ let account_scope (provider : Runtime_schema.provider) =
       native (Runtime_official_account.resolve_home ~client:Claude_code ~declaration:provider.account_home
         |> Result.to_option)
         (fun home -> Runtime_quota_window.scope_of_claude_code_home (Some home))
-  | Antigravity_cli_runtime ->
+  | Antigravity_cli_runtime | Acp_runtime ->
       (match provider.credentials with
        | Some (Runtime_schema.File _) ->
            Some (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)

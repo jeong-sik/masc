@@ -2,6 +2,7 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
+  | Acp
 
 type host_turn_ending =
   | Host_completed
@@ -428,7 +429,7 @@ let validate_phase = function
 
 (* Whether the client reports its own last ended turn to this store. *)
 let reports_host_last_turn = function
-  | Codex | Claude_code | Antigravity -> false
+  | Codex | Claude_code | Antigravity | Acp -> false
 ;;
 
 let validate_host_ended_turn = function

@@ -73,7 +73,8 @@ let vision_runtime_candidates ~now =
        else match rt.Runtime_instance.execution with
        | Runtime_execution.Agent_core sealed -> Some (rt.id, rt, Api sealed)
        | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Claude_code _ -> Some (rt.id, rt, Official_client)
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Acp _ -> Some (rt.id, rt, Official_client)
        | Runtime_execution.Antigravity_cli _ -> None)
   |> Runtime_candidate_standing.order_exact ~now
        ~quota_scope_of:(fun (_, (rt : Runtime_instance.t), _) ->
@@ -555,6 +556,13 @@ type candidate_failure =
    not evidence that another candidate may safely replace the turn. *)
 let official_failure_can_advance : Fusion_official_client.failure -> bool = function
   | Missing_reply | Setup_failure _ | Antigravity_failure _ -> false
+  | Acp_failure (Runtime_acp_client.Spawn_refused _ | Runtime_acp_client.Invalid_config _) -> true
+  | Acp_failure
+      ( Runtime_acp_client.Protocol_error _
+      | Runtime_acp_client.Rpc_error _
+      | Runtime_acp_client.Timeout _
+      | Runtime_acp_client.Process_exited _
+      | Runtime_acp_client.Client_closed ) -> false
   | Claude_admission_failure (Invalid_config _) -> false
   | Claude_admission_failure (Runtime_claude_code.Spawn_refused _)
   | Claude_admission_failure (Runtime_claude_code.Protocol_error _)
@@ -633,7 +641,15 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
       | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
       | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
+  | Acp_failure (Runtime_acp_client.Invalid_config _ | Runtime_acp_client.Spawn_refused _) ->
+    Proven_pre_effect
   | Missing_reply | Antigravity_failure _
+  | Acp_failure
+      ( Runtime_acp_client.Protocol_error _
+      | Runtime_acp_client.Rpc_error _
+      | Runtime_acp_client.Timeout _
+      | Runtime_acp_client.Process_exited _
+      | Runtime_acp_client.Client_closed )
   | Codex_failure
       ( Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
       | Unsupported_server_request _ | Turn_failed _ | Stopped_by_host _
@@ -1056,7 +1072,8 @@ let execution_of_vision_outcome = function
     let detail = Fusion_official_client.failure_detail ~runtime_id failure in
     let failure_class, code = match failure with
       | Codex_failure (Timeout _)
-      | Claude_failure (Timeout _) | Claude_admission_failure (Timeout _) ->
+      | Claude_failure (Timeout _) | Claude_admission_failure (Timeout _)
+      | Acp_failure (Runtime_acp_client.Timeout _) ->
         Tool_result.Dependency_unavailable, "timeout"
       | Codex_failure (Subscription_required _)
       | Claude_failure (Subscription_required _)
@@ -1065,6 +1082,10 @@ let execution_of_vision_outcome = function
       | _ when official_failure_can_advance failure ->
         Tool_result.Dependency_unavailable, "provider_error"
       | Missing_reply | Setup_failure _ | Antigravity_failure _
+      | Acp_failure
+          ( Runtime_acp_client.Invalid_config _ | Runtime_acp_client.Spawn_refused _
+          | Runtime_acp_client.Protocol_error _ | Runtime_acp_client.Rpc_error _
+          | Runtime_acp_client.Process_exited _ | Runtime_acp_client.Client_closed )
       | Codex_failure
           ( Invalid_config _ | Spawn_refused _ | Reasoning_effort_admission_failed _
           | Account_read_failed _

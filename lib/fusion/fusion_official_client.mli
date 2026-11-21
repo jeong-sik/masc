@@ -169,6 +169,7 @@ type failure =
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
+  | Acp_failure of Runtime_acp_client.error
 
 val failure_detail : runtime_id:string -> failure -> string
 (** The adapter's own failure text, naming [runtime_id] once. A

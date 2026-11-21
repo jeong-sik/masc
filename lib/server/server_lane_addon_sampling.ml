@@ -167,7 +167,7 @@ let attempt ~sw ~net ~runtime_id ~runtime params =
            Error (Runtime_unavailable (Runtime_account_access.refusal_to_string refusal))
          | Ok provider -> native_attempt ~sw ~net ~runtime ~provider params)
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
-      | Runtime_execution.Antigravity_cli _ ->
+      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Acp _ ->
           let temperature = match params.S.temperature with None -> [] | Some _ -> [Temperature] in
           Error (Unsupported_controls (Output_limit :: (unsupported_common params @ temperature)))
 

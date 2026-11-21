@@ -36,7 +36,8 @@ let agent_core_provider_config (runtime : Runtime_instance.t) =
   | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Acp _ ->
     failf "runtime %s is not an agent_core provider" runtime.id
 ;;
 
@@ -695,7 +696,8 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
            | Runtime_execution.Agent_core _ -> true
            | Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ -> false)
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Acp _ -> false)
         runtimes
     in
     List.iter
@@ -1925,7 +1927,8 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
        | Runtime_execution.Agent_core _, None
        | ( ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ )
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Acp _ )
          , _ ) -> ()
        | Runtime_execution.Agent_core sealed, Some declared ->
          let config = Masc_test_deps.api_config sealed in
@@ -2034,7 +2037,7 @@ let test_seed_codex_profiles_preserve_advertised_efforts () =
            | Runtime_execution.Codex_app_server cfg ->
              check (option string) (runtime_id ^ " selects the model") (Some api_name) cfg.model
            | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ ->
+           | Runtime_execution.Antigravity_cli _ | Runtime_execution.Acp _ ->
              failf "seed profile %s is not a Codex app-server runtime" runtime_id)
       cases
 ;;
@@ -3037,7 +3040,8 @@ let test_repo_glm_coding_runtimes_carry_the_priority_run_limit () =
            | Runtime_execution.Agent_core _
            | Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ -> None)
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Acp _ -> None)
         runtimes
     in
     check bool "the seed has glm-coding runtimes" true (glm_configs <> []);
@@ -3319,7 +3323,7 @@ let test_runtime_config_validation_admits_official_client_runtime () =
        \n\
        [models.seeded]\n\
        api-name = \"seeded\"\n\
-       max-context = 1024\n\
+       max-context = 200000\n\
        \n\
        [local.sample]\n\
        \n\
@@ -4580,7 +4584,7 @@ let exact_deadline_runtime_toml ~body_timeout ~lane =
      \n\
      [models.seeded]\n\
      api-name = \"seeded\"\n\
-     max-context = 1024\n\
+     max-context = 200000\n\
      \n\
      [local.sample]\n\
      \n\
@@ -5747,7 +5751,7 @@ let test_load_allows_a_lane_that_mixes_checkpoint_owners () =
      \n\
      [models.sonnet]\n\
      api-name = \"sonnet\"\n\
-     max-context = 1024\n\
+     max-context = 200000\n\
      \n\
      [local.chat]\n\
      \n\
@@ -6567,7 +6571,7 @@ let test_codex_app_server_materializes_as_turn_runtime () =
          check string "cli path, as configured when no client is installed" "codex"
            config.cli_path;
          check (option string) "model" (Some "gpt-5.6-sol") config.model
-       | Runtime_execution.Antigravity_cli _ ->
+       | Runtime_execution.Antigravity_cli _ | Runtime_execution.Acp _ ->
          fail "codex-app-server was incorrectly materialized as antigravity-cli"))
 ;;
 
@@ -6629,7 +6633,8 @@ let test_file_credential_path_expands_home () =
               config.oauth_source
           | Runtime_execution.Agent_core _
           | Runtime_execution.Claude_code _
-          | Runtime_execution.Codex_app_server _ ->
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Acp _ ->
             fail "antigravity-cli runtime expected"))
 ;;
 
@@ -6668,7 +6673,8 @@ let test_antigravity_cli_materializes_typed_process_options () =
             check (float 0.0) "timeout" 45.0 config.timeout_s
           | Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Claude_code _ ->
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Acp _ ->
             fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 
@@ -6691,7 +6697,8 @@ let test_antigravity_cli_add_dirs_reach_the_execution_config () =
               [ "/srv/repos"; "/srv/shared" ] config.add_dirs
           | Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Claude_code _ ->
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Acp _ ->
             fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 

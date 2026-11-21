@@ -114,7 +114,8 @@ let execution_of in_call (person : Login.person) ~base_path provider_account_id 
         | Runtime_execution.Claude_code execution -> Ok execution
         | Runtime_execution.Agent_core _
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _ ->
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Acp _ ->
           (* Only a turn of Claude Code records a conversation. *)
           Error "the Runtime of the account is not a Claude Code Runtime"))
 ;;

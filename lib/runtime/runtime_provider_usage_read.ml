@@ -52,7 +52,7 @@ let how_of_runtime (rt : Runtime_instance.t) =
      | Some (_ : Runtime_schema.usage_read), Error (_ : Runtime_account_access.refusal) -> None)
   | Runtime_execution.Codex_app_server codex -> Some (Codex codex)
   | Runtime_execution.Antigravity_cli antigravity -> Some (Antigravity antigravity)
-  | Runtime_execution.Claude_code _ -> None
+  | Runtime_execution.Claude_code _ | Runtime_execution.Acp _ -> None
 ;;
 
 (* One runtime per account: every runtime of a quota scope shares the

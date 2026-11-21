@@ -322,7 +322,8 @@ let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
        (match rt.Runtime_instance.execution with
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Claude_code _ ->
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Acp _ ->
           Error (Not_agent_core_lane (Runtime_execution.label rt.Runtime_instance.execution))
         | Runtime_execution.Agent_core _ ->
     (* [_for_turn], not the bare resolver: the bare one yields the provider
@@ -465,7 +466,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
              Error
                (Not_official_client_lane
                   (Runtime_execution.label rt.Runtime_instance.execution))
-           | Runtime_execution.Antigravity_cli _ ->
+           | Runtime_execution.Antigravity_cli _ | Runtime_execution.Acp _ ->
              Error
                (Tools_only_via_mcp_bridge
                   (Runtime_execution.label rt.Runtime_instance.execution))
@@ -630,7 +631,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
      | Some rt ->
        (match rt.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _
-        | Runtime_execution.Codex_app_server _ ->
+        | Runtime_execution.Codex_app_server _ | Runtime_execution.Acp _ ->
           Error (Not_antigravity_lane (Runtime_execution.label rt.Runtime_instance.execution))
         | Runtime_execution.Antigravity_cli exec ->
           let schemas =

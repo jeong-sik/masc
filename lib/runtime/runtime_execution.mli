@@ -33,6 +33,19 @@ type claude_code =
   ; timeout_s : float
   }
 
+type acp_client =
+  { driver : Runtime_acp_client.driver
+  ; cli_path : string
+  ; args : string list
+  ; strip_env : string list
+  ; skills_dirs : string list
+  ; model : string
+  ; effort : string option
+  ; mode : string option
+  ; oauth_source : string option
+  ; timeout_s : float
+  }
+
 type t =
   | Agent_core of Runtime_account_access.api_sealed
       (** The provider configuration, credential included. A sender takes it
@@ -41,6 +54,7 @@ type t =
   | Codex_app_server of codex_app_server
   | Antigravity_cli of antigravity_cli
   | Claude_code of claude_code
+  | Acp of acp_client
 
 val same_account_selection : t -> t -> bool
 (** Compare captured official-client contexts without exposing credentials.

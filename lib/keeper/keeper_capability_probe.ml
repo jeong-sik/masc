@@ -186,8 +186,6 @@ type invocation_error =
   | Not_official_client_lane of string
   | Tools_only_via_mcp_bridge of string
   | No_tool_channel of string
-  | Not_muse_lane of string
-  | Muse_home_unavailable of string
   | Account_not_authorized of string
   | Not_antigravity_lane of string
   | Antigravity_home_unavailable of string
@@ -204,13 +202,10 @@ let invocation_error_to_string = function
     Printf.sprintf "%s is an Agent Core lane; use probe_invocation" label
   | Tools_only_via_mcp_bridge label ->
     Printf.sprintf
-      "%s requires an MCP bridge; use probe_muse_invocation for Muse or \
-       probe_antigravity_invocation for Antigravity"
+      "%s requires an MCP bridge; use probe_antigravity_invocation for Antigravity"
       label
   | No_tool_channel label ->
     Printf.sprintf "%s has no channel for MASC tools, so no probe can observe a call" label
-  | Not_muse_lane label -> Printf.sprintf "%s is not the Muse lane" label
-  | Muse_home_unavailable detail -> Printf.sprintf "Muse probe home unavailable: %s" detail
   | Account_not_authorized detail ->
     Printf.sprintf "the probe may not start the client on the account of this runtime: %s" detail
   | Not_antigravity_lane label ->
@@ -327,9 +322,7 @@ let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
        (match rt.Runtime_instance.execution with
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Claude_code _
-        | Runtime_execution.Muse_serve _
-        | Runtime_execution.Vibe_cli _ ->
+        | Runtime_execution.Claude_code _ ->
           Error (Not_agent_core_lane (Runtime_execution.label rt.Runtime_instance.execution))
         | Runtime_execution.Agent_core _ ->
     (* [_for_turn], not the bare resolver: the bare one yields the provider
@@ -472,12 +465,10 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
              Error
                (Not_official_client_lane
                   (Runtime_execution.label rt.Runtime_instance.execution))
-           | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ ->
+           | Runtime_execution.Antigravity_cli _ ->
              Error
                (Tools_only_via_mcp_bridge
                   (Runtime_execution.label rt.Runtime_instance.execution))
-           | Runtime_execution.Vibe_cli _ ->
-             Error (No_tool_channel (Runtime_execution.label rt.Runtime_instance.execution))
            | Runtime_execution.Claude_code exec ->
              (* Built from the same fields the keeper path builds it from, and
                 the deadline resolved by the same function, so the probe
@@ -639,8 +630,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
      | Some rt ->
        (match rt.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _
-        | Runtime_execution.Codex_app_server _ | Runtime_execution.Muse_serve _
-        | Runtime_execution.Vibe_cli _ ->
+        | Runtime_execution.Codex_app_server _ ->
           Error (Not_antigravity_lane (Runtime_execution.label rt.Runtime_instance.execution))
         | Runtime_execution.Antigravity_cli exec ->
           let schemas =
@@ -780,65 +770,4 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                            ~elapsed_s:(now () -. started)
                            ~text:(Some turn.text)
                            ~dynamic_tool_calls:(List.length !seen))))))))))
-;;
-
-(* The same isolated, selected-account MCP runner used by setup verification.
-   A transcript mentioning the tool is not invocation evidence: only the real
-   recording callback below can produce [Tool_invoked]. *)
-let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
-    ~runtime_id ~tool ~prompt () =
-  match probe_surface ~tool with
-  | (Not_a_descriptor | Operator_only | Aliased _ | Withheld_by_schema_error _) as verdict ->
-    Error (Not_on_surface verdict)
-  | Projected {model_facing_name} ->
-    (match Runtime.get_runtime_by_id runtime_id with
-     | None -> Error (Unresolvable_runtime (runtime_id ^ " is not a configured runtime"))
-     | Some ({Runtime_instance.execution=Runtime_execution.Muse_serve exec; _} as runtime) ->
-       (match List.find_opt (fun (schema : Masc_domain.tool_schema) ->
-          String.equal schema.name model_facing_name) (Keeper_tool_descriptor.model_visible_schemas ()) with
-        | None -> Error (Tool_schema_rejected (model_facing_name ^ " is absent from model_visible_schemas"))
-        | Some schema ->
-          (* HIGH-RISK-UNREVIEWED: a probe is a call of the operator, so Muse
-             starts only where the access allows one (plan D3). *)
-          (match
-             Runtime_account_access.authorize_muse Runtime_account_access.Operator_call
-               (Runtime_account_access.Declared_home exec.account_home)
-           with
-           | Error refusal ->
-             Error (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))
-           | Ok account ->
-          let seen = ref [] in
-          let tool = recording_dynamic_tool ~schema ~seen in
-          let config = { (Runtime_muse_serve.default_config ()) with
-            cli_path=exec.cli_path;
-            model=Some exec.model; admission_timeout_s=exec.timeout_s;
-            timeout_s=(match runtime.model.turn_timeout_s with
-              | None -> Some exec.timeout_s | Some 0. -> None | Some seconds -> Some seconds) } in
-          let reasoning_effort =
-            Option.map Runtime_muse_msp.reasoning_effort_of_requested
-              runtime.model.reasoning_effort in
-          let quota_scope = Runtime_instance.quota_scope_of_runtime runtime in
-          let started = now () in
-          (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock
-              ~cwd:Eio.Path.(fs / base_path) ~directory:base_path ~account ~quota_scope
-              ~config ~reasoning_effort ~tool ~prompt with
-           | Error (Runtime_verification_muse.Home_error error) ->
-             Error (Muse_home_unavailable (Runtime_muse_home.error_to_string error))
-           | Error Runtime_verification_muse.Private_workspace_unavailable ->
-             Error (Muse_home_unavailable "private probe workspace could not be created")
-           | Error (Runtime_verification_muse.Client_error error) ->
-             Ok (Provider_rejected {detail=Runtime_muse_serve.error_to_string error})
-           | Ok turn -> Ok (classify_official_client_turn ~model_facing_name ~seen
-               ~elapsed_s:(now () -. started) ~text:turn.text
-               ~dynamic_tool_calls:(List.length !seen)))))
-     | Some
-         ({ Runtime_instance.execution =
-              ( Runtime_execution.Agent_core _
-              | Runtime_execution.Codex_app_server _
-              | Runtime_execution.Antigravity_cli _
-              | Runtime_execution.Claude_code _
-              | Runtime_execution.Vibe_cli _ )
-          ; _
-          } as runtime) ->
-       Error (Not_muse_lane (Runtime_execution.label runtime.execution)))
 ;;

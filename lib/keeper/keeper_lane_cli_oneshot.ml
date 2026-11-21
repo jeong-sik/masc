@@ -116,29 +116,6 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
   | Runtime_antigravity.Timeout _ -> false
 ;;
 
-(* Quota presence, rather than the open error kind or its prose, says that
-   the selected account is resting. *)
-let muse_error_is_binding_rest : Runtime_muse_serve.error -> bool = function
-  | Runtime_muse_serve.Turn_failed { quota = Some _; _ } -> true
-  | Runtime_muse_serve.Invalid_config _
-  | Runtime_muse_serve.Spawn_refused _
-  | Runtime_muse_serve.Turn_input_write_failed _
-  | Runtime_muse_serve.Protocol_error _
-  | Runtime_muse_serve.Rpc_error _
-  | Runtime_muse_serve.Capability_not_granted _
-  | Runtime_muse_serve.Session_not_durable
-  | Runtime_muse_serve.Session_model_mismatch _
-  | Runtime_muse_serve.Session_workspace_mismatch _
-  | Runtime_muse_serve.Session_approval_mode_mismatch _
-  | Runtime_muse_serve.Auth_required _
-  | Runtime_muse_serve.Turn_failed { quota = None; _ }
-  | Runtime_muse_serve.Turn_cancelled
-  | Runtime_muse_serve.Unsupported_server_request _
-  | Runtime_muse_serve.Runtime_shutting_down
-  | Runtime_muse_serve.Process_exited _
-  | Runtime_muse_serve.Timeout _ -> false
-;;
-
 let refused_for_binding_rest = function
   (* A held slot is the refusal its account would answer, without the call
      (RFC-exact-lane-waits-for-a-stated-reset R5). *)
@@ -152,13 +129,6 @@ let refused_for_binding_rest = function
   | Execution_failed
       { cause = Fusion_official_client.Antigravity_failure error; runtime_id = _ } ->
     antigravity_error_is_binding_rest error
-  | Execution_failed { cause = Fusion_official_client.Muse_failure error; runtime_id = _ } ->
-    muse_error_is_binding_rest error
-  (* No exact-output walk reaches a Vibe runtime: the load check refuses it in
-     [slots] and [cli_slots] (Client_without_output_schema). Vibe 3.1.0 has
-     no typed quota outcome either; how a spent subscription ends a headless
-     run is not measured. *)
-  | Execution_failed { cause = Fusion_official_client.Vibe_failure _; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
   | Unknown_runtime _
@@ -218,26 +188,6 @@ let antigravity_error_is_input_size : Runtime_antigravity.error -> bool = functi
   | Runtime_antigravity.Timeout _ -> false
 ;;
 
-let muse_error_is_input_size : Runtime_muse_serve.error -> bool = function
-  | Runtime_muse_serve.Invalid_config _
-  | Runtime_muse_serve.Spawn_refused _
-  | Runtime_muse_serve.Turn_input_write_failed _
-  | Runtime_muse_serve.Protocol_error _
-  | Runtime_muse_serve.Rpc_error _
-  | Runtime_muse_serve.Capability_not_granted _
-  | Runtime_muse_serve.Session_not_durable
-  | Runtime_muse_serve.Session_model_mismatch _
-  | Runtime_muse_serve.Session_workspace_mismatch _
-  | Runtime_muse_serve.Session_approval_mode_mismatch _
-  | Runtime_muse_serve.Auth_required _
-  | Runtime_muse_serve.Turn_failed _
-  | Runtime_muse_serve.Turn_cancelled
-  | Runtime_muse_serve.Unsupported_server_request _
-  | Runtime_muse_serve.Runtime_shutting_down
-  | Runtime_muse_serve.Process_exited _
-  | Runtime_muse_serve.Timeout _ -> false
-;;
-
 let refused_for_input_size = function
   | Execution_failed { cause = Fusion_official_client.Claude_failure error; runtime_id = _ }
   | Execution_failed
@@ -248,11 +198,6 @@ let refused_for_input_size = function
   | Execution_failed
       { cause = Fusion_official_client.Antigravity_failure error; runtime_id = _ } ->
     antigravity_error_is_input_size error
-  | Execution_failed { cause = Fusion_official_client.Muse_failure error; runtime_id = _ } ->
-    muse_error_is_input_size error
-  (* No exact-output walk reaches a Vibe runtime (see above), and no Vibe
-     outcome names an oversized input; [length] is the output's. *)
-  | Execution_failed { cause = Fusion_official_client.Vibe_failure _; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
   | Unknown_runtime _
@@ -372,8 +317,6 @@ let prompt_for_execution ~(execution : Runtime_execution.t) ~requirement ~prompt
         ~schema:(Exact_output.domain_schema requirement)
   | Runtime_execution.Claude_code _
   | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Muse_serve _
-  | Runtime_execution.Vibe_cli _
   | Runtime_execution.Agent_core _ -> prompt_with_schema ~requirement ~prompt
 ;;
 
@@ -532,9 +475,7 @@ let input_capacity = function
           | Fusion_official_client.Setup_failure _
           | Fusion_official_client.Claude_failure _
           | Fusion_official_client.Claude_admission_failure _
-          | Fusion_official_client.Antigravity_failure _
-          | Fusion_official_client.Muse_failure _
-          | Fusion_official_client.Vibe_failure _ )
+          | Fusion_official_client.Antigravity_failure _ )
       ; _
       }
   | Unknown_runtime _ | Not_an_official_client _ | Invalid_json_output _

@@ -106,19 +106,6 @@ let authorized_account account =
   | Ok authorized -> authorized
   | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
 
-(** A declared Muse home, as the runtime table holds one. *)
-let muse_home home =
-  match Runtime_account_access.declare_muse_home home with
-  | Ok declared -> declared
-  | Error detail -> failwith detail
-
-(** A Muse account authorized for an operator call, by the single-user access
-    the executable published when it started. *)
-let authorized_muse account =
-  match Runtime_account_access.authorize_muse Runtime_account_access.Operator_call account with
-  | Ok authorized -> authorized
-  | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
-
 (** A start of a host client, by the single-user access the executable
     published when it started. *)
 let host_account client =

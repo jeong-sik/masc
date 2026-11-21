@@ -397,20 +397,6 @@ class Journey(StepByStep):
             self.assertNotIn('Welcome', result.stdout + result.stderr)
             self.assertFalse(Path(home, '.masc').exists())
 
-
-    def test_antigravity_context_observation_avoids_numeric_input(self):
-        source = dict(choice='antigravity', command='/owned/agy', endpoint='', api_key_env='',
-                      credential_kind='file', credential_file='/private/account', provider_timeout_s=300.)
-        result = subprocess.CompletedProcess([], 0, json.dumps(dict(
-            source='antigravity_statusline', model='selected-model', context=1048576, invocation_verified=False)), '')
-        with patch.object(SETUP.subprocess, 'run', return_value=result) as run, \
-                patch.object(SETUP, 'pick') as picker, contextlib.redirect_stderr(io.StringIO()):
-            _, spec = SETUP.resolve_model_spec(source, dict(id='selected-model', context=None), 10, binary='/owned/masc')
-        self.assertEqual(spec['max_context'], 1048576)
-        self.assertTrue(spec['streaming'])
-        self.assertEqual(run.call_args.args[0][-2:], ['--model', 'selected-model'])
-        picker.assert_not_called()
-
     def test_antigravity_account_models_are_selectable_without_model_id_entry(self):
         catalog = dict(source='antigravity_cli_models', account_availability_verified=False,
                        models=[dict(id='exact-model-high', label='Exact model (High)', effective_context=None)])
@@ -3804,24 +3790,23 @@ class OfficialClientLookup(unittest.TestCase):
         inventory = dict(runtimes=[], integrations=[
             dict(id='claude-code', display_name='Claude Code', protocol='claude-code', command='claude',
                  origin='runtime_config', setup_support='new_connection')])
-        for muse_path in (None, '/home/u/.local/bin/muse'):
-            with self.subTest(muse_path=muse_path):
+        for codex_path in (None, '/home/u/.local/bin/codex'):
+            with self.subTest(codex_path=codex_path):
                 located = {('claude_code', 'claude'): '/home/u/.local/bin/claude',
-                           ('codex', 'codex'): None, ('muse', 'muse'): muse_path}
+                           ('codex', 'codex'): codex_path}
                 with patch.object(SETUP, 'official_client_path',
                                   side_effect=lambda binary, choice, command: located[(choice, command)]):
                     sources = SETUP.connection_sources('/owned/masc', inventory)
                 claude = next(source for source in sources if source['choice'] == 'claude_code')
                 self.assertEqual(claude['command_path'], '/home/u/.local/bin/claude')
                 self.assertIn('CLI found', SETUP.source_label(claude))
-                self.assertFalse(any(source['choice'] == 'codex' for source in sources))
-                muse = [source for source in sources if source['choice'] == 'muse']
-                if muse_path is None:
-                    self.assertEqual(muse, [])
+                codex = [source for source in sources if source['choice'] == 'codex']
+                if codex_path is None:
+                    self.assertEqual(codex, [])
                 else:
-                    self.assertEqual(len(muse), 1)
-                    self.assertEqual(muse[0]['command_path'], muse_path)
-                    self.assertIn('CLI found', SETUP.source_label(muse[0]))
+                    self.assertEqual(len(codex), 1)
+                    self.assertEqual(codex[0]['command_path'], codex_path)
+                    self.assertIn('CLI found', SETUP.source_label(codex[0]))
                 claude['command_path'] = None
                 self.assertIn('CLI needs installation', SETUP.source_label(claude))
 

@@ -568,9 +568,7 @@ let validate_ollama_only_binding_fields
             | Runtime_schema.Vertex_gemini_api
             | Runtime_schema.Codex_app_server_runtime
             | Runtime_schema.Antigravity_cli_runtime
-            | Runtime_schema.Claude_code_runtime
-            | Runtime_schema.Muse_serve_runtime
-            | Runtime_schema.Vibe_cli_runtime ) as api_format) ->
+            | Runtime_schema.Claude_code_runtime ) as api_format) ->
          let path = binding.provider_id ^ "." ^ binding.model_id in
          let refuse key =
            error
@@ -625,9 +623,7 @@ let validate_priority_run_limit_providers
          (match provider.api_format with
           | Runtime_schema.Codex_app_server_runtime
           | Runtime_schema.Antigravity_cli_runtime
-          | Runtime_schema.Claude_code_runtime
-          | Runtime_schema.Muse_serve_runtime
-          | Runtime_schema.Vibe_cli_runtime ->
+          | Runtime_schema.Claude_code_runtime ->
             refuse
               (Printf.sprintf
                  "%s runs as an official client outside account admission"

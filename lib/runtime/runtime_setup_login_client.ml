@@ -1,5 +1,5 @@
-type client = Codex | Claude | Antigravity | Muse
-type native = Runtime_account_home_layout.client = Codex_home | Claude_home | Muse_home
+type client = Codex | Claude | Antigravity
+type native = Runtime_account_home_layout.client = Codex_home | Claude_home
 type browser = Host_browser | Idle_command of string
 type login =
   | Native of { client : native; account_home : string }
@@ -27,7 +27,7 @@ let new_home ~runtime_root ~account_id ~client =
 
 let account_home_path ~runtime_root ~account_id ~client =
   let* native = match client with
-    | Codex -> Ok Codex_home | Claude -> Ok Claude_home | Muse -> Ok Muse_home
+    | Codex -> Ok Codex_home | Claude -> Ok Claude_home
     | Antigravity -> Error "An Antigravity login keeps no account home." in
   filesystem (fun () -> Runtime_account_home_layout.home ~runtime_root native ~account_id)
 
@@ -61,7 +61,6 @@ let login_of ~runtime_root ~account_id ~client ~existing =
   match client with
   | Codex -> native_home ~runtime_root ~account_id ~client:Codex_home existing
   | Claude -> native_home ~runtime_root ~account_id ~client:Claude_home existing
-  | Muse -> native_home ~runtime_root ~account_id ~client:Muse_home existing
   | Antigravity ->
     (* HIGH-RISK-UNREVIEWED: the login home holds a copy of a credential of the
        host, and a multi-account process shares no account of its host (plan D3b). *)
@@ -96,7 +95,6 @@ let home_dir t = match t.login with
 let argv ~cli_path t = match t.login with
   | Native {client=Codex_home; _} -> [cli_path; "login"; "--device-auth"]
   | Native {client=Claude_home; _} -> [cli_path; "auth"; "login"]
-  | Native {client=Muse_home; _} -> Runtime_muse_serve.login_argv ~cli_path
   | Antigravity_home _ -> [cli_path]
 
 let client_environment = function
@@ -106,8 +104,6 @@ let client_environment = function
   | Native {client=Claude_home; account_home} ->
     Runtime_claude_code.login_environment ~account_home
     |> Result.map_error Runtime_claude_code.error_to_string
-  | Native {client=Muse_home; account_home} ->
-    Ok (Runtime_muse_serve.login_environment ~account_home)
   | Antigravity_home {home; _} -> Ok (Runtime_antigravity_setup.environment home)
 
 (* The variable that names the command an official client runs to open a
@@ -203,10 +199,6 @@ let observe ~mgr ~clock ~cwd ~cli_path ~account_request t = match t.login with
     (match result.authentication with
      | Runtime_claude_code.Claude_ai | Api_key | OAuth_token -> Ok Authenticated
      | Third_party -> Error "Claude did not report authentication for this selected login account.")
-  | Native {client=Muse_home; account_home} ->
-    Runtime_muse_home.prepare ~account_home
-    |> Result.map (fun _ -> Login_completed)
-    |> Result.map_error Runtime_muse_home.error_to_string
   | Antigravity_home {home; _} ->
     Runtime_antigravity_setup.capture_login home
     |> Result.map (fun () -> Credential_captured)

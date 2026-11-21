@@ -558,12 +558,14 @@ class RuntimeSetupAdapter(unittest.TestCase):
                     if argv[1] == 'runtime-antigravity-account':
                         account_calls.append(argv)
                         return subprocess.CompletedProcess(argv, 0, json.dumps(receipt), '')
+                    if argv[1] == 'runtime-model-info':
+                        return subprocess.CompletedProcess(argv, 1, '', '')
                     return self.native(argv, **kwargs)
                 replaced = action != 'saved' or previously_replaced
                 selected_file = str(original) if action == 'saved' else returned
                 with SETUP.PendingCredentials('/fixture/masc', self.base) as credentials, \
-                     patch.object(SETUP, 'pick', return_value=[{'saved': 0, 'current': 1, 'signin': 2}[action]]), \
-                     patch.object(SETUP, 'antigravity_context', return_value=8192), \
+                     patch.object(SETUP, 'pick', side_effect=[[{'saved': 0, 'current': 1, 'signin': 2}[action]], [1]]), \
+                     patch.object(SETUP, 'ask_text', return_value='8192'), \
                      patch.object(SETUP.subprocess, 'run', side_effect=native):
                     prepared = SETUP.prepare_antigravity_account(source, credentials)
                     self.assertEqual(bool(prepared.get('credential_replaced')), replaced)
@@ -1020,14 +1022,8 @@ for line in sys.stdin:
 
 
 class SelectedNativeAccounts(unittest.TestCase):
-    def test_muse_client_selection_uses_registered_name(self):
-        receipt = json.dumps(dict(schema='masc.runtime_client_path.v1', path='/owned/muse'))
-        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, receipt, '')) as run:
-            self.assertEqual(SETUP.official_client_path('/masc', 'muse', 'muse'), '/owned/muse')
-        self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-client-path', '--client', 'muse-code', '--command', 'muse'])
-
     def test_configured_home_remains_default_and_can_be_changed(self):
-        for choice in ['claude_code', 'codex', 'muse']:
+        for choice in ['claude_code', 'codex']:
             with self.subTest(choice=choice), tempfile.TemporaryDirectory() as home:
                 configured = Path(home) / 'configured'
                 alternate = Path(home) / 'alternate'
@@ -1045,22 +1041,21 @@ class SelectedNativeAccounts(unittest.TestCase):
 
     def test_new_account_requires_explicit_selection(self):
         with tempfile.TemporaryDirectory() as home:
-            with patch.dict(os.environ, {'HOME': home}), patch.object(SETUP, 'pick', return_value=[0]) as pick:
-                selected = SETUP.select_native_account(dict(choice='muse', label='Muse'))
+            with patch.dict(os.environ, {'HOME': home, 'CODEX_HOME': ''}), patch.object(SETUP, 'pick', return_value=[0]) as pick:
+                selected = SETUP.select_native_account(dict(choice='codex', label='Codex'))
             pick.assert_called_once()
-            self.assertEqual(selected['account_home'], home)
+            self.assertEqual(selected['account_home'], str(Path(home) / '.codex'))
             self.assertNotIn('credential_replaced', selected)
 
     def test_effective_default_account_reuses_existing_model_settings(self):
         for choice, variable, leaf in [('claude_code', 'CLAUDE_CONFIG_DIR', '.claude'),
-                                       ('codex', 'CODEX_HOME', '.codex'),
-                                       ('muse', None, '')]:
-            for override in [False, True] if variable else [False]:
+                                       ('codex', 'CODEX_HOME', '.codex')]:
+            for override in [False, True]:
                 for alternate in [False, True]:
                     with self.subTest(choice=choice, override=override, alternate=alternate), tempfile.TemporaryDirectory() as home:
                         effective = str(Path(home) / ('override' if override else leaf))
                         env = {'HOME': home, 'CLAUDE_CONFIG_DIR': '', 'CODEX_HOME': ''}
-                        if variable and override:
+                        if override:
                             env[variable] = effective
                         existing = dict(id='kept.binding', model='reported', max_context=8192, tools=True)
                         source = dict(choice=choice, label=choice, rows=[existing])
@@ -1068,8 +1063,7 @@ class SelectedNativeAccounts(unittest.TestCase):
                         with patch.dict(os.environ, env), patch.object(SETUP, 'pick', return_value=[int(alternate)]), \
                              patch.object(SETUP, 'ask_text', return_value=str(Path(home) / 'another')):
                             selected = SETUP.select_native_account(source)
-                        with patch.object(SETUP, 'catalog_models', return_value=observed), \
-                             patch.object(SETUP, 'muse_models', return_value=(observed, 'native')):
+                        with patch.object(SETUP, 'catalog_models', return_value=observed):
                             models, _ = SETUP.source_models('/masc', selected, 10)
                         self.assertEqual(len(models), 1)
                         if alternate:
@@ -1103,30 +1097,13 @@ class SelectedNativeAccounts(unittest.TestCase):
                     SETUP.select_native_account(dict(choice='codex', label='Codex'))
             self.assertEqual(path.read_text(), 'keep this file')
 
-    def test_muse_catalog_source_is_not_account_verification(self):
-        source = dict(choice='muse', command='/owned/muse', account_home='/selected', rows=[])
-        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
-                       invocation_verified=False, account_availability_verified=False,
-                       models=[dict(id='reported', label='Reported', context=8192),
-                               dict(id='unknown', label='Unknown', context=None)])
-        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run:
-            rows, origin = SETUP.muse_models('/owned/masc', source, 7.5)
-        self.assertEqual(rows[1]['context'], None)
-        self.assertIn('not yet verified', origin)
-        self.assertEqual(run.call_args.args[0][-4:], ['--account-home', '/selected', '--timeout-s', '7.5'])
-        for catalog_source in ['fakeCatalog', 'unresolvedCatalog', 'futureCatalog']:
-            with self.subTest(source=catalog_source), patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(dict(receipt, source=catalog_source)), '')):
-                with self.assertRaises(SETUP.SetupError):
-                    SETUP.muse_models('/owned/masc', source, 7.5)
-
     def test_non_object_native_catalogs_report_retryable_setup_errors(self):
         source = dict(command='/owned/client', account_home='/selected')
         for payload in [None, [], True, 3, 'invalid']:
-            for discover in [SETUP.muse_models, SETUP.refresh_codex_models]:
-                with self.subTest(payload=payload, discover=discover.__name__), patch.object(
-                        SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(payload), '')):
-                    with self.assertRaises(SETUP.SetupError):
-                        discover('/masc', source, *([10] if discover is SETUP.muse_models else []))
+            with self.subTest(payload=payload), patch.object(
+                    SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(payload), '')):
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.refresh_codex_models('/masc', source)
 
     def test_reselected_account_does_not_inherit_prior_membership_or_context(self):
         source = dict(choice='codex', command='codex', account_home='/selected', credential_replaced=True,
@@ -1138,177 +1115,24 @@ class SelectedNativeAccounts(unittest.TestCase):
         self.assertIsNone(rows[0]['context'])
         self.assertIsNone(rows[0]['existing'])
 
-    def test_muse_selection_only_offers_admissible_catalog_models(self):
-        source = dict(choice='muse', command='muse', account_home='/selected', label='Muse', rows=[])
-        model = dict(id='reported', label='Reported', context=8192)
-        with patch.object(SETUP, 'connection_sources', return_value=[source]), \
-             patch.object(SETUP, 'pick_connection_sources', return_value=([source], [0])), \
-             patch.object(SETUP, 'prepare_connection', return_value=source), \
-             patch.object(SETUP, 'source_models', return_value=([model], 'providerCatalog')), \
-             patch.object(SETUP, 'pick', return_value=[0]) as pick, \
-             patch.object(SETUP, 'resolve_model_spec', return_value=('muse.reported', dict(model='reported'))) as resolve:
-            selected, specs, _ = SETUP.select_connections('/masc', {}, 10)
-        labels = pick.call_args.args[1]
-        self.assertNotIn('Advanced: enter an exact model ID', labels)
-        self.assertEqual(labels[-2:], ['Refresh model list', 'Back to connection selection'])
-        self.assertEqual(selected, ['muse.reported'])
-        self.assertEqual(specs, [dict(model='reported')])
-        self.assertEqual(resolve.call_args.args[1]['context'], 8192)
-
-    def test_muse_discovery_offers_selected_signin_before_catalog(self):
-        source = dict(choice='muse', command='/selected/muse', account_home='/selected/account')
-        catalog = dict(schema='masc.muse_models.v1', source='providerCatalog',
-                       invocation_verified=False, account_availability_verified=False,
-                       models=[dict(id='reported', label='Reported', context=8192)])
-        replies = [subprocess.CompletedProcess([], 3, '', 'opaque diagnostic'),
-                   subprocess.CompletedProcess([], 0),
-                   subprocess.CompletedProcess([], 0, json.dumps(catalog), '')]
-        with patch.dict(os.environ, {'HOME': '/ambient', 'XDG_CONFIG_HOME': '/ambient/config'}), \
-             patch.object(SETUP, 'pick', return_value=[0]) as pick, \
-             patch.object(SETUP.subprocess, 'run', side_effect=replies) as run:
-            rows, origin = SETUP.muse_models('/masc', source, 7.5)
-        pick.assert_called_once()
-        self.assertEqual(rows[0]['id'], 'reported')
-        self.assertIn('not yet verified', origin)
-        # masc runs the sign-in so the child gets the Muse login environment;
-        # the masc process itself keeps the caller's HOME.
-        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
-                                                         '--cli-path', '/selected/muse', '--account-home', '/selected/account'])
-        self.assertNotIn('env', run.call_args_list[1].kwargs)
-        self.assertEqual(run.call_args_list[0].args, run.call_args_list[2].args)
-
-    def test_muse_discovery_cancel_and_failed_signin_do_not_continue(self):
-        source = dict(choice='muse', command='/selected/muse', account_home='/selected/account')
-        for action, login_status, calls in [(1, 0, 1), (0, 1, 2)]:
-            replies = [subprocess.CompletedProcess([], 3, '', ''), subprocess.CompletedProcess([], login_status)]
-            with self.subTest(action=action), patch.object(SETUP, 'pick', return_value=[action]), \
-                 patch.object(SETUP.subprocess, 'run', side_effect=replies) as run:
-                with self.assertRaises(SETUP.SetupError):
-                    SETUP.muse_models('/masc', source, 10)
-                self.assertEqual(run.call_count, calls)
-
-    def test_muse_general_discovery_failure_does_not_request_signin(self):
-        source = dict(choice='muse', account_home='/selected/account')
-        with patch.object(SETUP, 'pick', side_effect=AssertionError('not an authentication failure')), \
-             patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'login required')):
-            with self.assertRaises(SETUP.SetupError):
-                SETUP.muse_models('/masc', source, 10)
-
-    def test_select_model_muse_uses_selected_native_account(self):
-        source = dict(choice='muse', command='muse', label='Muse Code', account_home='/selected')
-        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
-                       invocation_verified=False, account_availability_verified=False,
-                       models=[dict(id='reported', label='Reported', context=8192)])
-        output = io.StringIO()
-        with patch.object(SETUP, 'select_native_account', return_value=source) as select_account, \
-             patch.object(SETUP, 'official_client_path', return_value='/owned/muse') as resolve, \
-             patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run, \
-             patch.object(SETUP, 'native_discover_models', side_effect=AssertionError('Muse is not HTTP discovery')), \
-             patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(output):
-            self.assertEqual(SETUP.select_model('/masc', 'muse', timeout=7.5),
-                             dict(model='reported', max_context=8192, account_home='/selected', command='/owned/muse'))
-        select_account.assert_called_once()
-        resolve.assert_called_once_with('/masc', 'muse', 'muse')
-        self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-muse-models', '--cli-path', '/owned/muse',
-                                                '--account-home', '/selected', '--timeout-s', '7.5'])
-        self.assertIn('providerCatalog', output.getvalue())
-        self.assertIn('not yet verified', output.getvalue())
-
-    def test_standalone_muse_rejects_unlisted_id_and_requires_reported_context(self):
-        source = dict(choice='muse', command='muse', account_home='/selected')
-        for answer in ['1', 'reported']:
-            with self.subTest(answer=answer), \
-                 patch.object(SETUP, 'select_native_account', return_value=source), \
-                 patch.object(SETUP, 'official_client_path', return_value='/owned/muse'), \
-                 patch.object(SETUP, 'muse_models', return_value=([dict(id='reported', label='Reported', context=8192)], 'providerCatalog')), \
-                 patch.object(SETUP.sys, 'stdin', io.StringIO('unlisted\n' + answer + '\n')), \
-                 contextlib.redirect_stderr(io.StringIO()) as output:
-                self.assertEqual(SETUP.select_model('/masc', 'muse'),
-                                 dict(model='reported', max_context=8192, account_home='/selected', command='/owned/muse'))
-                self.assertIn('Choose a model reported', output.getvalue())
-        for context in [None, 0, True, -1]:
-            with self.subTest(context=context), \
-                 patch.object(SETUP, 'select_native_account', return_value=source), \
-                 patch.object(SETUP, 'official_client_path', return_value='/owned/muse'), \
-                 patch.object(SETUP, 'muse_models', return_value=([dict(id='reported', label='Reported', context=context)], 'providerCatalog')), \
-                 patch.object(SETUP.sys, 'stdin', io.StringIO('reported\n999999\n')), \
-                 contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
-                SETUP.select_model('/masc', 'muse')
-        with patch.object(SETUP, 'select_native_account', return_value=source), \
-             patch.object(SETUP, 'official_client_path', return_value='/owned/muse'), \
-             patch.object(SETUP, 'muse_models', return_value=([], 'providerCatalog')), \
-             contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
-            SETUP.select_model('/masc', 'muse')
-
-    def test_standalone_muse_login_uses_resolved_cli_and_returns_selected_account(self):
-        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
-                       invocation_verified=False, account_availability_verified=False,
-                       models=[dict(id='reported', label='Reported', context=8192)])
-        with tempfile.TemporaryDirectory() as root:
-            home = str(Path(root) / 'alternate-account')
-            completed = [subprocess.CompletedProcess([], 3, '', 'auth required'),
-                         subprocess.CompletedProcess([], 0, '', ''),
-                         subprocess.CompletedProcess([], 0, json.dumps(receipt), '')]
-            with patch.object(SETUP, 'pick', side_effect=[[1], [0]]), \
-                 patch.object(SETUP, 'ask_text', return_value=home), \
-                 patch.object(SETUP, 'official_client_path', return_value='/vendor/bin/muse') as locate, \
-                 patch.object(SETUP.subprocess, 'run', side_effect=completed) as run, \
-                 patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
-                selected = SETUP.select_model('/masc', 'muse')
-            locate.assert_called_once_with('/masc', 'muse', 'muse')
-            self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
-                                                             '--cli-path', '/vendor/bin/muse', '--account-home', home])
-            self.assertEqual(selected, dict(model='reported', max_context=8192,
-                                           account_home=home, command='/vendor/bin/muse'))
-
-    def test_standalone_muse_signin_uses_resolved_client(self):
-        source = dict(choice='muse', command='muse', label='Muse Code', account_home='/selected')
-        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
-                       invocation_verified=False, account_availability_verified=False,
-                       models=[dict(id='reported', label='Reported', context=8192)])
-        replies = [subprocess.CompletedProcess([], 3, '', ''),
-                   subprocess.CompletedProcess([], 0),
-                   subprocess.CompletedProcess([], 0, json.dumps(receipt), '')]
-        with patch.object(SETUP, 'select_native_account', return_value=dict(source)), \
-             patch.object(SETUP, 'official_client_path', return_value='/owned/muse'), \
-             patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
-             patch.object(SETUP, 'pick', return_value=[0]), \
-             patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(SETUP.select_model('/masc', 'muse')['account_home'], '/selected')
-        self.assertEqual(run.call_args_list[0].args[0][3], '/owned/muse')
-        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
-                                                         '--cli-path', '/owned/muse', '--account-home', '/selected'])
-        with patch.object(SETUP, 'select_native_account', return_value=dict(source)), \
-             patch.object(SETUP, 'official_client_path', return_value=None), \
-             patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SETUP.SetupError):
-                SETUP.select_model('/masc', 'muse')
-
     def test_native_catalog_rows_must_carry_a_context_member(self):
-        muse = dict(schema='masc.muse_models.v1', source='providerCatalog',
-                    invocation_verified=False, account_availability_verified=False,
-                    models=[dict(id='reported', label='Reported')])
         codex = dict(schema='masc.codex_model_refresh.v1', source='isolated_cli_cache',
                      models=[dict(id='reported', label='Reported')])
-        for discover, payload in [(SETUP.muse_models, muse), (SETUP.refresh_codex_models, codex)]:
-            with self.subTest(discover=discover.__name__), patch.object(
-                    SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(payload), '')):
-                with self.assertRaises(SETUP.SetupError):
-                    discover('/masc', dict(command='/owned/client', account_home='/selected'),
-                             *([10] if discover is SETUP.muse_models else []))
+        with patch.object(
+                SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(codex), '')):
+            with self.assertRaises(SETUP.SetupError):
+                SETUP.refresh_codex_models('/masc', dict(command='/owned/client', account_home='/selected'))
         present = dict(id='reported', label='Reported', context=None)
         with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess(
-                [], 0, json.dumps(dict(muse, models=[present])), '')):
-            rows, _ = SETUP.muse_models('/masc', dict(command='/owned/client', account_home='/selected'), 10)
+                [], 0, json.dumps(dict(codex, models=[present])), '')):
+            rows, _ = SETUP.refresh_codex_models('/masc', dict(command='/owned/client', account_home='/selected'))
         self.assertIn('context', rows[0])
 
     def test_account_default_is_unavailable_without_home(self):
-        for choice, variable in [('claude_code', 'CLAUDE_CONFIG_DIR'), ('codex', 'CODEX_HOME'), ('muse', '')]:
+        for choice, variable in [('claude_code', 'CLAUDE_CONFIG_DIR'), ('codex', 'CODEX_HOME')]:
             with self.subTest(choice=choice), tempfile.TemporaryDirectory() as home:
                 alternative = Path(home) / 'explicit'
-                environment = {'HOME': '/unused'}
-                if variable:
-                    environment[variable] = ''
+                environment = {'HOME': '/unused', variable: ''}
                 with patch.dict(os.environ, environment):
                     del os.environ['HOME']
                     with patch.object(SETUP, 'pick', side_effect=AssertionError('no default to offer')) as pick, \
@@ -1330,52 +1154,11 @@ class SelectedNativeAccounts(unittest.TestCase):
             self.assertEqual(selected['account_home'], str(configured))
             self.assertNotIn('credential_replaced', selected)
 
-    def test_new_muse_binding_uses_observed_context_not_declared_context(self):
-        for tools in [False, True]:
-            for observed in [[], [dict(id='reported', label='Reported', context=None)],
-                             [dict(id='reported', label='Reported', context=8192)]]:
-                with self.subTest(tools=tools, observed=observed):
-                    existing = dict(id='muse.existing', model='reported', tools=tools, max_context=999999)
-                    source = dict(choice='muse', command='muse', account_home='/selected', rows=[existing])
-                    with patch.object(SETUP, 'muse_models', return_value=(observed, 'providerCatalog')):
-                        rows, _ = SETUP.source_models('/masc', source, 10)
-                    self.assertEqual(len(rows), 1)
-                    context = observed[0]['context'] if observed else None
-                    self.assertEqual(rows[0]['context'], context)
-                    with patch.object(SETUP, 'render', return_value=('muse.new', 'toml')) as render, \
-                         patch.object(SETUP, 'ask_text', return_value='32768'):
-                        if tools:
-                            self.assertEqual(SETUP.resolve_model_spec(source, rows[0], 10), ('muse.existing', None))
-                            render.assert_not_called()
-                        elif context is None:
-                            with self.assertRaises(SETUP.SetupError):
-                                SETUP.resolve_model_spec(source, rows[0], 10)
-                            render.assert_not_called()
-                        else:
-                            _, spec = SETUP.resolve_model_spec(source, rows[0], 10)
-                            self.assertEqual(spec['max_context'], 8192)
-
-    def test_existing_muse_binding_is_reused_without_a_byte_capacity(self):
-        source = dict(choice='muse')
-        existing = dict(id='muse.selected', tools=True)
-        with patch.object(SETUP, 'render', side_effect=AssertionError('preserve existing configuration')):
-            self.assertEqual(SETUP.resolve_model_spec(source, dict(existing=existing), 10), ('muse.selected', None))
-
-    def test_muse_asks_no_byte_budget_and_unknown_context_refused(self):
-        source = dict(choice='muse', command='muse', account_home='/selected', rows=[])
-        with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no operator byte budget')), patch.object(SETUP, 'render', return_value=('runtime', 'toml')):
-            _, spec = SETUP.resolve_model_spec(source, dict(id='selected', context=8192), 10)
-        self.assertEqual(spec['account_home'], '/selected')
-        with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no invented context')):
-            with self.assertRaises(SETUP.SetupError):
-                SETUP.resolve_model_spec(source, dict(id='unknown', context=None), 10)
-
     def test_declared_account_sign_in_is_run_by_masc(self):
         # runtime-account-login builds the child's environment (test_setup_cli
         # checks it); the wizard passes no environment of its own.
         for protocol, client, command in [('codex-app-server', 'codex', 'codex'),
-                                          ('claude-code', 'claude', 'claude'),
-                                          ('muse-serve', 'muse', 'muse')]:
+                                          ('claude-code', 'claude', 'claude')]:
             with self.subTest(protocol=protocol):
                 inventory = dict(runtimes=[dict(id='selected', protocol=protocol,
                     command=command, account_home='/selected/account')])
@@ -1389,8 +1172,6 @@ class SelectedNativeAccounts(unittest.TestCase):
             with self.subTest(protocol=protocol):
                 inventory = dict(runtimes=[dict(id='selected', protocol=protocol, command=command[0])])
                 self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory), command)
-        without_home = dict(runtimes=[dict(id='selected', protocol='muse-serve', command='muse')])
-        self.assertIsNone(SETUP.login_command('/masc', 'selected', [], without_home))
 
 
 class ModelReleaseSelection(unittest.TestCase):
@@ -2156,8 +1937,8 @@ class CompiledRuntimeSetup(unittest.TestCase):
             env = {key: value for key, value in os.environ.items() if not key.startswith(('MASC_', 'AGENT_CORE_'))}
             with patch.dict(os.environ, env, clear=True), SETUP.PendingCredentials(BINARY, base) as credentials, \
                  patch.object(SETUP.subprocess, 'run', side_effect=record_native), \
-                 patch.object(SETUP, 'pick', return_value=[0]), \
-                 patch.object(SETUP, 'antigravity_context', return_value=8192):
+                 patch.object(SETUP, 'pick', side_effect=[[0], [1]]), \
+                 patch.object(SETUP, 'ask_text', return_value='8192'):
                 inventory = SETUP.configured_inventory(BINARY, base)
                 source = next(row for row in SETUP.connection_sources(BINARY, inventory) if row['provider_id'] == 'selected')
                 prepared = SETUP.prepare_connection(BINARY, source, credentials)
@@ -2248,10 +2029,6 @@ class CompiledRuntimeSetup(unittest.TestCase):
                     token = base / 'credential-file'
                     token.write_text('fixture-only-token')
                     selected['credential_file'] = str(token)
-                elif choice == 'muse':
-                    account = base / 'selected-muse-account'
-                    account.mkdir(mode=0o700)
-                    selected.update(account_home=str(account))
                 env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
                 with patch.dict(os.environ, env, clear=True):
                     result = SETUP.configure(BINARY, base, selected)

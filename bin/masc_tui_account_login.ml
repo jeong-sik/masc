@@ -1,4 +1,4 @@
-type client = Codex | Claude | Antigravity | Muse
+type client = Codex | Claude | Antigravity
 (* Whether a row of the server's list is an account: the runtime
    configuration declares one per account, and a catalog entry is the client's
    own way to add one. *)
@@ -120,14 +120,14 @@ let reference json = match string json with
   | Some _ | None -> None
 let client_of_protocol = function
   | "codex-app-server" -> Some Codex | "claude-code" -> Some Claude
-  | "antigravity-cli" -> Some Antigravity | "muse-serve" -> Some Muse | _ -> None
+  | "antigravity-cli" -> Some Antigravity | _ -> None
 let origin_of_json = function
   | `String "runtime_config" -> Some Configured
   | `String "masc_integration" -> Some Catalog
   | _ -> None
 let client_label = function
-  | Codex -> "Codex" | Claude -> "Claude Code" | Antigravity -> "Antigravity" | Muse -> "Muse"
-let client_order = [Codex; Claude; Antigravity; Muse]
+  | Codex -> "Codex" | Claude -> "Claude Code" | Antigravity -> "Antigravity"
+let client_order = [Codex; Claude; Antigravity]
 let clients t = List.filter (fun client -> List.exists (fun (p:provider) -> p.client = client) t.providers) client_order
 type account_row = New_account of provider | Account of provider
 let account_group t (provider:provider) =
@@ -272,7 +272,7 @@ let focused_client t = match t.phase with
     Option.map (fun (p:provider) -> p.client) t.provider
 let requested_client = function
   | "codex" -> Some Codex | "claude" -> Some Claude
-  | "antigravity" -> Some Antigravity | "muse" -> Some Muse | _ -> None
+  | "antigravity" -> Some Antigravity | _ -> None
 (* Whether a pending login for [p] belongs to what [/login] asked for: any
    row for a bare [/login], that row for [/login <id>], and the client's rows
    for [/login <client>]. *)
@@ -861,9 +861,6 @@ let toggle_model t (model:model) =
       t.phase <- Documented_context model; t.draft <- "";
       t.notice <- model.label ^ say t " · 공식 문서나 CLI 설정에서 확인한 context 한도(tokens)를 입력하세요." " · enter the documented context limit (tokens) from docs or CLI settings.";
       Nothing
-    | None, Some {client=Muse;_} ->
-      t.notice <- model.label ^ say t " · context 확인 필요. CLI 설정을 확인하고 r로 목록을 새로 읽으세요." " · context limit required. Check CLI settings and press r to reload.";
-      Nothing
     | None, None -> Nothing
 let unavailable_account t (provider:provider) =
   t.notice <- (if not provider.setup_supported then
@@ -937,7 +934,7 @@ let key t key =
       List.filter (fun (model:model) -> selectable model && Option.is_none model.context) t.models in
     let antigravity = match t.provider with
       | Some { client = Antigravity; _ } -> true
-      | Some { client = (Codex | Claude | Muse); _ } | None -> false in
+      | Some { client = (Codex | Claude); _ } | None -> false in
     let preparable =
       if antigravity then
         List.filter (fun (model:model) -> not (List.mem model.id t.failed_context_models)) missing_context
@@ -984,7 +981,7 @@ let key t key =
                 else
                   Printf.sprintf "%s needing a context limit cannot be auto-selected. Press Space to enter each limit."
                     (Masc_tui_message_layout.count_noun missing_count "model")
-              | Some { client = Muse; _ } | None ->
+              | None ->
                 if t.ko then
                   Printf.sprintf "context가 확인된 모델이 없습니다(%d개 확인 필요). CLI 설정을 확인하고 r로 목록을 새로 읽으세요."
                     missing_count
@@ -1028,7 +1025,7 @@ let key t key =
                else
                  Printf.sprintf "Selected %s. Press Space to enter context limits for the remaining %d."
                    (Masc_tui_message_layout.count_noun ready_count "model") missing_count
-             | Some { client = Muse; _ } | None ->
+             | None ->
                if t.ko then
                  Printf.sprintf "모델 %d개를 선택했습니다. 나머지 %d개는 context 확인이 필요합니다(r:새로고침)."
                    ready_count missing_count

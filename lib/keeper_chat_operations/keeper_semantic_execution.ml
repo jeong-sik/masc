@@ -67,12 +67,12 @@ type runtime_suffix = { assignment_id:string; failed_runtime_id:string; next_run
 let runtime_suffix ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids =
   if List.exists (fun value -> String.trim value = "") (assignment_id :: failed_runtime_id :: next_runtime_id :: later_runtime_ids)
   then Error "runtime suffix identities are blank" else Ok {assignment_id; failed_runtime_id; next_runtime_id; later_runtime_ids}
-type official_client_kind = Codex | Claude_code | Antigravity | Muse
+type official_client_kind = Codex | Claude_code | Antigravity
 let official_client_kind_to_string = function
-  | Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity" | Muse -> "muse"
+  | Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity"
 let official_client_kind_of_string = function
   | "codex" -> Some Codex | "claude_code" -> Some Claude_code | "antigravity" -> Some Antigravity
-  | "muse" -> Some Muse | _ -> None
+  | _ -> None
 type official_client_checkpoint =
   { client_kind : official_client_kind; runtime_id : string; session_id : string;
     turn_id : string; tool_surface_sha256 : string; frame : Keeper_repetition_snapshot.t }

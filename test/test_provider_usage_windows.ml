@@ -1506,119 +1506,6 @@ let test_runtime_publication_is_visible_before_wait () =
       (Runtime.await_catalogue_change ~after:before))
 ;;
 
-(* The [usage] object of a Muse Code [usage/changed] or [usage/read] answer,
-   in the MSP field names. *)
-let muse_usage_at ~observed_at_ms ~window_mins ~window_percent =
-  let json =
-    Printf.sprintf
-      {|{"usage":{"observedAtMs":%d,"tier":"power","window":{"usedPercent":%d,"resetsAtMs":1791262200000,"windowDurationMins":%d},"weekly":{"usedPercent":12,"resetsAtMs":1791730800000}}}|}
-      observed_at_ms window_percent window_mins
-  in
-  match Runtime_muse_msp.parse_usage_read_result (Yojson.Safe.from_string json) with
-  | Ok (Some usage) -> usage
-  | Ok None -> fail "usage fixture parsed as absent"
-  | Error error -> fail (Runtime_muse_msp.error_to_string error)
-;;
-
-let muse_usage ~window_mins ~window_percent =
-  muse_usage_at ~observed_at_ms:1791250000000 ~window_mins ~window_percent
-;;
-
-let muse_window_rows (windows : Usage.window list) =
-  List.map
-    (fun (window : Usage.window) ->
-       ( Option.value window.limit_id ~default:"-"
-       , (match window.kind with
-          | Usage.Five_hour -> "5h"
-          | Usage.Seven_day -> "7d"
-          | Usage.Duration_minutes minutes -> Printf.sprintf "%dmin" (Usage.Positive_minutes.to_int minutes)
-          | Usage.Provider_label label -> label)
-       , (match window.utilization with
-          | Usage.Percent percent -> percent
-          | Usage.Fraction _ | Usage.Usd _ | Usage.Credit_unlimited
-          | Usage.Credit_retracted | Usage.Credit_balance _ -> fail "Muse states percentages")
-       , Option.value window.resets_at ~default:0
-       , Usage.window_role_to_string window.role ))
-    windows
-;;
-
-let muse_row = Alcotest.(list (pair (pair string string) (pair int (pair int string))))
-
-let nest rows = List.map (fun (limit, kind, percent, resets, role) -> (limit, kind), (percent, (resets, role))) rows
-
-let test_muse_report_names_both_windows () =
-  let usage = muse_usage ~window_mins:300 ~window_percent:37 in
-  let changed = decode_ok (Runtime_muse_usage.report Runtime_muse_usage.Usage_changed usage) in
-  check string "pushed usage source" "muse.subscription_usage" (Usage.source_to_string changed.source);
-  check muse_row "rolling and weekly windows"
-    (nest
-       [ "-", "5h", 37, 1791262200, "gates_model_calls"
-       ; "-", "7d", 12, 1791730800, "gates_model_calls" ])
-    (nest (muse_window_rows changed.windows));
-  let read = decode_ok (Runtime_muse_usage.report Runtime_muse_usage.Usage_read usage) in
-  check bool "a read answer is the same source" true (read.source = changed.source);
-  check bool "it is a complete snapshot" true
-    (Usage.report_shape changed.source = Usage.Complete_snapshot);
-  let other_length = decode_ok
-    (Runtime_muse_usage.report Runtime_muse_usage.Usage_changed
-       (muse_usage ~window_mins:5 ~window_percent:1)) in
-  check (list string) "an unnamed rolling length keeps its minutes"
-    [ "5min"; "7d" ]
-    (List.map (fun (_, kind, _, _, _) -> kind) (muse_window_rows other_length.windows));
-  match Runtime_muse_usage.report Runtime_muse_usage.Usage_changed
-          (muse_usage ~window_mins:10080 ~window_percent:1) with
-  | Error (Usage.Duplicate_window { kind = Usage.Seven_day; limit_id = None; _ }) -> ()
-  | Error error -> fail (Usage.decode_error_to_string error)
-  | Ok _ -> fail "a seven-day rolling window shared the weekly row"
-;;
-
-let test_muse_observe_records_and_rests_by_one_rule () =
-  Runtime_quota_window.reset_for_testing ();
-  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
-    let scope = Runtime_quota_window.scope_of_muse_home "/fixture/muse-observe-account" in
-    let now = Time_compat.now () in
-    Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_changed
-      (muse_usage ~window_mins:300 ~window_percent:37);
-    (match Usage.state ~scope with
-     | Usage.Reported (first, rest) ->
-       check muse_row "recorded as stated"
-         (nest
-            [ "-", "5h", 37, 1791262200, "gates_model_calls"
-            ; "-", "7d", 12, 1791730800, "gates_model_calls" ])
-         (nest (muse_window_rows (List.map (fun (r : Usage.recorded) -> r.window) (first :: rest))))
-     | Usage.Not_reported_since_start | Usage.Reported_no_windows _ ->
-       fail "observed Muse usage was not recorded");
-    check bool "an unspent window rests nothing" false
-      (Runtime_quota_window.is_exhausted ~scope ~now);
-    Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_read
-      (muse_usage ~window_mins:300 ~window_percent:100);
-    check bool "a spent window rests the account until its reset" true
-      (Runtime_quota_window.is_exhausted ~scope ~now:1791262199.);
-    check bool "the rest ends at the stated reset" false
-      (Runtime_quota_window.is_exhausted ~scope ~now:1791262200.);
-    let relength = Runtime_quota_window.scope_of_muse_home "/fixture/muse-relength-account" in
-    Runtime_muse_usage.observe ~scope:relength Runtime_muse_usage.Usage_changed
-      (muse_usage ~window_mins:300 ~window_percent:37);
-    Runtime_muse_usage.observe ~scope:relength Runtime_muse_usage.Usage_read
-      (muse_usage_at ~observed_at_ms:1791250060000 ~window_mins:180 ~window_percent:40);
-    (match Usage.state ~scope:relength with
-     | Usage.Reported (first, rest) ->
-       check (list string) "a read with a new rolling length replaces the pushed row"
-         [ "180min"; "7d" ]
-         (List.map (fun (_, kind, _, _, _) -> kind)
-            (muse_window_rows (List.map (fun (r : Usage.recorded) -> r.window) (first :: rest)))
-          |> List.sort String.compare)
-     | Usage.Not_reported_since_start | Usage.Reported_no_windows _ ->
-       fail "relength usage was not recorded");
-    let refused = Runtime_quota_window.scope_of_muse_home "/fixture/muse-refused-account" in
-    Runtime_muse_usage.observe ~scope:refused Runtime_muse_usage.Usage_changed
-      (muse_usage ~window_mins:10080 ~window_percent:100);
-    check bool "a refused report records nothing" true
-      (Usage.state ~scope:refused = Usage.Not_reported_since_start);
-    check bool "a refused report still rests a spent account" true
-      (Runtime_quota_window.is_exhausted ~scope:refused ~now:1791262199.))
-;;
-
 let test_nonpositive_window_durations_rejected () =
   Runtime_quota_window.reset_for_testing ();
   Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
@@ -1644,44 +1531,11 @@ let test_nonpositive_window_durations_rejected () =
              {|{"rateLimits":{"limitId":"codex","secondary":{"usedPercent":25,"windowDurationMins":%d,"resetsAt":1790200000}},"rateLimitsByLimitId":null}|}
              bad_mins
          in
-         (match Usage.decode_codex_rate_limits_read (Yojson.Safe.from_string read_json) with
-          | Error (Usage.Unexpected_value _) -> ()
-          | Error err -> failf "expected Unexpected_value for read %d, got %s" bad_mins (Usage.decode_error_to_string err)
-          | Ok _ -> failf "expected Codex read with windowDurationMins=%d to be rejected" bad_mins);
-         let bad_muse =
-           { Runtime_muse_msp.observed_at_ms = 1791250060000
-           ; tier = "power"
-           ; window = { used_percent = 100; resets_at_ms = 1791262200000; window_duration_mins = bad_mins }
-           ; weekly = { weekly_used_percent = 12; weekly_resets_at_ms = 1791730800000 }
-           }
-         in
-         match Runtime_muse_usage.report Runtime_muse_usage.Usage_read bad_muse with
+         match Usage.decode_codex_rate_limits_read (Yojson.Safe.from_string read_json) with
          | Error (Usage.Unexpected_value _) -> ()
-         | Error err -> failf "expected Unexpected_value for Muse %d, got %s" bad_mins (Usage.decode_error_to_string err)
-         | Ok _ -> failf "expected Muse report with window_duration_mins=%d to be rejected" bad_mins)
-      [ 0; -15 ];
-    let scope = Runtime_quota_window.scope_of_muse_home "/fixture/muse-preserve-valid" in
-    Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_changed
-      (muse_usage ~window_mins:300 ~window_percent:37);
-    let bad_spent_muse =
-      { Runtime_muse_msp.observed_at_ms = 1791250060000
-      ; tier = "power"
-      ; window = { used_percent = 100; resets_at_ms = 1791262200000; window_duration_mins = 0 }
-      ; weekly = { weekly_used_percent = 12; weekly_resets_at_ms = 1791730800000 }
-      }
-    in
-    Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_read bad_spent_muse;
-    check bool "rejected Muse update rests an exhausted scope" true
-      (Runtime_quota_window.is_exhausted ~scope ~now:1791262199.);
-    (match Usage.state ~scope with
-     | Usage.Reported (first, rest) ->
-       check muse_row "prior valid windows survive a rejected update"
-         (nest
-            [ "-", "5h", 37, 1791262200, "gates_model_calls"
-            ; "-", "7d", 12, 1791730800, "gates_model_calls" ])
-         (nest (muse_window_rows (List.map (fun (r : Usage.recorded) -> r.window) (first :: rest))))
-     | Usage.Not_reported_since_start | Usage.Reported_no_windows _ ->
-       fail "rejected Muse update erased valid prior windows"))
+         | Error err -> failf "expected Unexpected_value for read %d, got %s" bad_mins (Usage.decode_error_to_string err)
+         | Ok _ -> failf "expected Codex read with windowDurationMins=%d to be rejected" bad_mins)
+      [ 0; -15 ])
 ;;
 
 (* A complete usage read can say a scope refuses calls, and the quota table
@@ -1747,7 +1601,6 @@ let test_gate_coverage_by_source () =
     ; Usage.Zai_quota_limit_read, Some Usage.One_spent_window_refuses
     ; Usage.Kimi_coding_usages_read, Some Usage.One_spent_window_refuses
     ; Usage.Ollama_balance_read, Some Usage.One_spent_window_refuses
-    ; Usage.Muse_subscription_usage, Some Usage.One_spent_window_refuses
     ; Usage.Claude_code_rate_limit_event, None
     ; Usage.Codex_account_rate_limits_updated, None
     ; Usage.Codex_account_rate_limits_read, None
@@ -1968,12 +1821,8 @@ let () =
         ; test_case "only gating windows explain a refusal" `Quick
             test_only_gating_windows_explain_a_refusal
         ] )
-    ; ( "muse usage"
-      , [ test_case "a report names the rolling and weekly windows" `Quick
-            test_muse_report_names_both_windows
-        ; test_case "observe records and rests by one rule" `Quick
-            test_muse_observe_records_and_rests_by_one_rule
-        ; test_case "nonpositive window durations are rejected" `Quick
+    ; ( "window durations"
+      , [ test_case "nonpositive window durations are rejected" `Quick
             test_nonpositive_window_durations_rejected
         ] )
     ; ( "scope room"

@@ -81,7 +81,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         match provider.api_format with
         | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
         | Codex_app_server_runtime | Claude_code_runtime
-        | Gemini_api | Vertex_gemini_api | Muse_serve_runtime | Vibe_cli_runtime -> true
+        | Gemini_api | Vertex_gemini_api -> true
       in
       let fields =
         match provider.transport with
@@ -126,7 +126,6 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
   let clients =
     [ "codex", "Codex", "codex-app-server", Some "codex", true
     ; "claude-code", "Claude Code", "claude-code", Some "claude", true
-    ; "muse-code", "Muse Code", "muse-serve", Some "muse", true
     ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", true
     ; "vllm", "vLLM", "openai-compatible-http", None, true
     ; "rapid-mlx", "RapidMLX", "openai-compatible-http", None, true
@@ -159,13 +158,11 @@ let account_scope (provider : Runtime_schema.provider) =
       native (Runtime_official_account.resolve_home ~client:Claude_code ~declaration:provider.account_home
         |> Result.to_option)
         (fun home -> Runtime_quota_window.scope_of_claude_code_home (Some home))
-  | Muse_serve_runtime -> native provider.account_home Runtime_quota_window.scope_of_muse_home
   | Antigravity_cli_runtime ->
       (match provider.credentials with
        | Some (Runtime_schema.File _) ->
            Some (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
        | Some (Env _ | Inline _) | None -> None)
-  | Vibe_cli_runtime -> None
   | Chat_completions_api | Messages_api | Ollama_api | Gemini_api | Vertex_gemini_api -> None
 ;;
 

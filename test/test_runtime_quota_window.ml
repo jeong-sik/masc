@@ -409,9 +409,9 @@ let test_explicit_claude_path_spelling_remains_login_identity () =
 ;;
 
 let test_public_scope_id_preserves_history_and_location () =
-  let first = Q.scope_of_muse_home "/fixture/first" in
-  let same_location = Q.scope_of_muse_home "/fixture/first" in
-  let different_location = Q.scope_of_muse_home "/fixture/second" in
+  let first = Q.scope_of_claude_code_home (Some "/fixture/first") in
+  let same_location = Q.scope_of_claude_code_home (Some "/fixture/first") in
+  let different_location = Q.scope_of_claude_code_home (Some "/fixture/second") in
   Alcotest.(check string) "existing history IDs stay byte-identical"
     (Digest.to_hex (Digest.string (Q.scope_to_string first))) (Q.scope_id first);
   Alcotest.(check string) "same credential location shares scope"

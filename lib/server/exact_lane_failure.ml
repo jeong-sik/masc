@@ -192,30 +192,6 @@ let antigravity_error = function
   | Runtime_antigravity.Spawn_capacity_busy _ -> Transient
   | Runtime_antigravity.Spawn_refused refusal -> spawn_refusal refusal
 
-let muse_error = function
-  | Runtime_muse_serve.Invalid_config _
-  | Runtime_muse_serve.Capability_not_granted _
-  | Runtime_muse_serve.Session_not_durable
-  | Runtime_muse_serve.Session_model_mismatch _
-  | Runtime_muse_serve.Session_workspace_mismatch _
-  | Runtime_muse_serve.Session_approval_mode_mismatch _
-  | Runtime_muse_serve.Unsupported_server_request _ -> Configuration_refused
-  | Runtime_muse_serve.Auth_required _ -> Auth_refused
-  | Runtime_muse_serve.Turn_failed { quota = Some quota; _ } ->
-    if float_of_int quota.resets_at_ms /. 1000. > Time_compat.now ()
-    then Transient
-    else Configuration_refused
-  | Runtime_muse_serve.Turn_failed error ->
-    if error.Runtime_muse_msp.retryable then Transient else Configuration_refused
-  | Runtime_muse_serve.Turn_input_write_failed _
-  | Runtime_muse_serve.Protocol_error _
-  | Runtime_muse_serve.Rpc_error _
-  | Runtime_muse_serve.Turn_cancelled
-  | Runtime_muse_serve.Runtime_shutting_down
-  | Runtime_muse_serve.Process_exited _
-  | Runtime_muse_serve.Timeout _ -> Transient
-  | Runtime_muse_serve.Spawn_refused refusal -> spawn_refusal refusal
-
 let cli_failure = function
   (* Not called before the time its provider stated. The same request may
      pass after it with nothing changed: the class the account's own rest
@@ -232,9 +208,4 @@ let cli_failure = function
      | Fusion_official_client.Codex_failure error -> codex_error error
      | Fusion_official_client.Claude_failure error
      | Fusion_official_client.Claude_admission_failure error -> claude_error error
-     | Fusion_official_client.Antigravity_failure error -> antigravity_error error
-     | Fusion_official_client.Muse_failure error -> muse_error error
-     (* The load check refuses a Vibe runtime in [slots] and [cli_slots]
-        (Client_without_output_schema), so a Vibe failure here means that
-        check no longer holds. *)
-     | Fusion_official_client.Vibe_failure _ -> Configuration_refused)
+     | Fusion_official_client.Antigravity_failure error -> antigravity_error error)

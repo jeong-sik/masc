@@ -152,10 +152,8 @@ val materialize_execution
     {!Runtime_execution.Agent_core}. The exact [codex-app-server] protocol over
     a credential-free CLI transport becomes
     {!Runtime_execution.Codex_app_server}; [claude-code] becomes
-    {!Runtime_execution.Claude_code}; [antigravity-cli] becomes
-    {!Runtime_execution.Antigravity_cli}; [muse-serve] becomes
-    {!Runtime_execution.Muse_serve}; and [vibe-cli] becomes
-    {!Runtime_execution.Vibe_cli}. These clients have no supported
+    {!Runtime_execution.Claude_code}; and [antigravity-cli] becomes
+    {!Runtime_execution.Antigravity_cli}. These clients have no supported
     [disable_parallel_tool_use] or [cache_retention] control here, so bindings
     declaring either are refused. Other CLI protocols remain rejected.
 
@@ -163,9 +161,7 @@ val materialize_execution
     The command is spawned from where {!Runtime_official_cli_install.locate}
     finds it at this call: PATH first, then the vendor installer's directory
     for the client's own name. A command found nowhere is kept as configured;
-    its absence surfaces when the client is spawned, not here. A [vibe-cli]
-    command is kept exactly as configured, and its binding is refused when it
-    declares [reasoning-effort] or [turn-timeout-s]. *)
+    its absence surfaces when the client is spawned, not here. *)
 
 val materialize_person_execution
   :  construction:construction
@@ -178,13 +174,12 @@ val materialize_person_execution
 (** Materialize an execution for a person's account using the explicit
     [~account_home] (never the provider declaration's [account_home]), without
     reading key files, home configuration, or process environment at build time.
-    - Official clients ([Claude_code], [Codex_app_server], [Muse_serve]) require
-      [Some home]; [Claude_code] and [Codex_app_server] hold credential-free
-      person seals ({!Runtime_account_access.seal_person}), and [Muse_serve]
-      declares its home via {!Runtime_account_access.declare_muse_home}.
+    - Official clients ([Claude_code], [Codex_app_server]) require
+      [Some home] and hold credential-free person seals
+      ({!Runtime_account_access.seal_person}).
     - HTTP [Agent_core] providers ([Messages_api], [Chat_completions_api],
       [Ollama_api], [Gemini_api]) require [account_home = None], drop any
       custom headers, and carry a credential-free person API seal
       ({!Runtime_account_access.seal_person_api}).
-    - Providers declaring [credentials], [Vertex_gemini_api], [Antigravity_cli],
-      and [Vibe_cli] are refused. *)
+    - Providers declaring [credentials], [Vertex_gemini_api], and
+      [Antigravity_cli] are refused. *)

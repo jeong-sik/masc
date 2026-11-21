@@ -128,7 +128,7 @@ let person_target config ~integration_id =
         | Ok target ->
           (match target.Server_runtime_setup_actions.client with
            | Client.Antigravity -> Error Copy_without_owner
-           | Client.Codex | Client.Claude | Client.Muse -> Ok target)))
+           | Client.Codex | Client.Claude -> Ok target)))
 
 (* What a confirmed login leaves behind. An operator's account is published to
    the setup registry, from which setup selects it. A person's account is
@@ -191,7 +191,7 @@ let start ~owner ~base_path ~body request reqd =
           ~account_id:(Session.id session) ~client ~existing in
         let* () = match client, existing with
           | Client.Antigravity, Some _ -> Ok ()
-          | (Codex | Claude | Muse | Antigravity), _ ->
+          | (Codex | Claude | Antigravity), _ ->
             let* account_key = canonical_account_key (Client.home_dir home) in
             Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
@@ -199,10 +199,10 @@ let start ~owner ~base_path ~body request reqd =
         let* account = match owner, client, reference with
           | Operator _, Client.Antigravity, Some reference -> Ok (Receipt.Published reference)
           | Operator _, Client.Antigravity, None -> Ok Receipt.Unselected
-          | Operator _, (Codex | Claude | Muse), (None | Some _) ->
+          | Operator _, (Codex | Claude), (None | Some _) ->
             Client.publish ~workspace:base_path ~integration_id ~cli_path home
             |> Result.map (fun reference -> Receipt.Published reference)
-          | Person _, (Client.Antigravity | Codex | Claude | Muse), (None | Some _) -> Ok Receipt.Unselected in
+          | Person _, (Client.Antigravity | Codex | Claude), (None | Some _) -> Ok Receipt.Unselected in
         let receipt = { Receipt.login_id = Session.id session; integration_id;
           account; status = Receipt.Running } in
         let* () = Receipt.save ~workspace:base_path ~actor receipt
@@ -256,7 +256,7 @@ let start ~owner ~base_path ~body request reqd =
              Antigravity needs capture: native homes were published before spawn.
              Capturing here makes no successful-login or invocation claim. *)
           let account = match client with
-            | Client.Codex | Claude | Muse -> !receipt.account
+            | Client.Codex | Claude -> !receipt.account
             | Antigravity ->
               (match observe () with
                | Error _ -> !receipt.account
@@ -488,9 +488,7 @@ let key_account_home_kind (config : Runtime_schema.config) ~integration_id =
           Runtime_schema.(
             Codex_app_server_runtime
             | Claude_code_runtime
-            | Antigravity_cli_runtime
-            | Muse_serve_runtime
-            | Vibe_cli_runtime)
+            | Antigravity_cli_runtime)
       ; _
       }
   | None -> Runtime_key_account_files.Claude_home
@@ -581,9 +579,7 @@ let person_runtime in_call person ~base_path ~binding =
               setup (Error Server_runtime_setup_actions.Unsupported_connection)
           | Runtime_schema.Codex_app_server_runtime
           | Runtime_schema.Claude_code_runtime
-          | Runtime_schema.Antigravity_cli_runtime
-          | Runtime_schema.Muse_serve_runtime
-          | Runtime_schema.Vibe_cli_runtime -> official_key ~generation)) in
+          | Runtime_schema.Antigravity_cli_runtime -> official_key ~generation)) in
   (* Checked before the call, so a model that makes no Runtime id is not
      called for two minutes first. A [Runtime] binding makes the id it was
      chosen by, which is one. *)

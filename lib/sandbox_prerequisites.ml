@@ -7,7 +7,7 @@ type searxng_container =
   | Searxng_restarting
   | Searxng_unusable of string
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
-  | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
+  | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
   | Ego_browser | Searxng of { config_dir : string }
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
@@ -265,11 +265,6 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked)
         ~detail:"Follow the vendor instructions, then return to sign in and verify the selected model."
         ~source_url:(Runtime_official_cli_install.source_url Antigravity)
         (Runtime_official_cli_install.source_url Antigravity)]
-  | Muse_cli, _ -> [install_cli Muse;
-      open_ ~id:"muse_official_install" ~label:"Open official Muse Code installation"
-        ~detail:"Follow the vendor instructions. Muse Code asks for its own sign-in the first time it runs."
-        ~source_url:(Runtime_official_cli_install.source_url Muse)
-        (Runtime_official_cli_install.source_url Muse)]
   | (Presentation_tools { base_path }, (Macos _ | Linux (Sandbox_readiness.Arm64)))
   | (Presentation_tools { base_path }, Linux (Sandbox_readiness.X64)) ->
     let parser = commands ~id:"presentation_parser_install" ~label:"Install the presentation parser for this workspace"

@@ -249,9 +249,7 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
   | Gemini_api
   | Vertex_gemini_api
   | Codex_app_server_runtime
-  | Claude_code_runtime
-  | Muse_serve_runtime
-  | Vibe_cli_runtime ->
+  | Claude_code_runtime ->
     (match
        List.find_opt
          (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
@@ -402,9 +400,7 @@ let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   | Runtime_schema.Vertex_gemini_api -> []
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Claude_code_runtime
-  | Runtime_schema.Muse_serve_runtime
-  | Runtime_schema.Vibe_cli_runtime ->
+  | Runtime_schema.Claude_code_runtime ->
     error
       path
       "usage-read is only for an API-key HTTP provider; this protocol runs an \
@@ -600,15 +596,14 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
       | Ok None -> Ok None
       | Ok (Some raw_home) ->
         (match api_format with
-         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime ->
+         | Codex_app_server_runtime | Claude_code_runtime ->
            (match Runtime_account_home.of_string_under ~home raw_home with
             | Ok expanded -> Ok (Some expanded)
             | Error _ ->
               Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace"))
          | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api
          | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
-         | Runtime_schema.Antigravity_cli_runtime
-         | Runtime_schema.Vibe_cli_runtime -> Error (error (path ^ ".account-home") "account-home is valid only for Claude Code, Codex and Muse Code official clients"))
+         | Runtime_schema.Antigravity_cli_runtime -> Error (error (path ^ ".account-home") "account-home is valid only for Claude Code and Codex official clients"))
     in
     let is_non_interactive_result =
       typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false

@@ -161,21 +161,6 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
       ; "execution_mode", `String "masc_mcp_only"
       ; "verified", `Bool false
       ]
-  | Runtime_execution.Muse_serve config ->
-    `Assoc
-      [ "source", `String "official-client-runtime"
-      ; "execution", `String (Runtime_execution.label rt.execution)
-      ; "model", `String config.model
-      ; "timeout_s", `Float config.timeout_s
-      ; "verified", `Bool false
-      ]
-  | Runtime_execution.Vibe_cli config ->
-    `Assoc
-      [ "source", `String "official-client-runtime"
-      ; "execution", `String (Runtime_execution.label rt.execution)
-      ; "model", `String config.model
-      ; "verified", `Bool false
-      ]
   | Runtime_execution.Agent_core sealed ->
     let cfg = Runtime_account_access.api_declaration sealed in
     `Assoc
@@ -224,8 +209,6 @@ let runtime_api_format_wire : Runtime_schema.api_format -> string = function
   | Runtime_schema.Codex_app_server_runtime -> "codex-app-server"
   | Runtime_schema.Antigravity_cli_runtime -> "antigravity-cli"
   | Runtime_schema.Claude_code_runtime -> "claude-code"
-  | Runtime_schema.Muse_serve_runtime -> "muse-serve"
-  | Runtime_schema.Vibe_cli_runtime -> "vibe-cli"
 ;;
 
 let runtime_provider_behavior_capabilities_json

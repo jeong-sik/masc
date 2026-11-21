@@ -3028,16 +3028,6 @@ let runtime_probe_cmd_exit base_path runtime_id =
               Printf.eprintf "runtime %S (antigravity) exposes no login probe\n"
                 runtime_id;
               3
-          | Runtime_execution.Muse_serve _ ->
-              print_string "unsupported\n";
-              Printf.eprintf "runtime %S (muse code) exposes no login probe\n"
-                runtime_id;
-              3
-          | Runtime_execution.Vibe_cli _ ->
-              print_string "unsupported\n";
-              Printf.eprintf "runtime %S (mistral vibe) exposes no login probe\n"
-                runtime_id;
-              3
           | Runtime_execution.Claude_code exec ->
               (match runtime_probe_account ~base_path exec.account_home with
                | Error reasons -> runtime_probe_refused reasons
@@ -4465,29 +4455,10 @@ let runtime_codex_models_cmd =
   Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn. The workspace decides whether the operator may start Codex on the account.")
     Term.(const run $ base_path $ cli $ account_home)
 
-let runtime_muse_models_cmd =
-  let cli = Arg.(value & opt string "muse" & info ["cli-path"] ~docv:"EXECUTABLE") in
-  let account_home = Arg.(required & opt (some string) None & info ["account-home"]
-    ~docv:"DIRECTORY" ~doc:"Explicit Muse account HOME; never inherited from the caller.") in
-  let timeout = Arg.(value & opt float runtime_probe_subscription_timeout_s
-    & info ["timeout-s"] ~docv:"SECONDS"
-      ~doc:"Finite positive deadline for the metadata exchange, including protocol notifications; blocking account preparation can delay it.") in
-  let run base_path cli_path account_home timeout_s =
-    if not (Float.is_finite timeout_s) || timeout_s <= 0. then (
-      prerr_endline "Muse discovery timeout must be finite and positive.";
-      1)
-    else Masc_cli_muse_models.run ~base_path
-      ~cli_path:(Runtime_official_cli_install.spawn_path Muse ~command:cli_path)
-      ~account_home ~timeout_s in
-  Cmd.v (Cmd.info "runtime-muse-models"
-    ~doc:"List source-labelled Muse model metadata without a session or model turn; account availability is not verified. The workspace decides whether the operator may start Muse on the account.")
-    Term.(const run $ base_path $ cli $ account_home $ timeout)
-
 let runtime_account_login_cmd =
   let client = Arg.(required & opt (some (enum
-      [ "codex", Runtime_setup_login_client.Codex_home; "claude", Runtime_setup_login_client.Claude_home;
-        "muse", Runtime_setup_login_client.Muse_home ])) None
-    & info ["client"] ~docv:"CLIENT" ~doc:"The official client to sign in: codex, claude or muse.") in
+      [ "codex", Runtime_setup_login_client.Codex_home; "claude", Runtime_setup_login_client.Claude_home ])) None
+    & info ["client"] ~docv:"CLIENT" ~doc:"The official client to sign in: codex or claude.") in
   let cli = Arg.(value & opt (some string) None & info ["cli-path"] ~docv:"EXECUTABLE"
     ~doc:"The client's executable; its usual command name when omitted.") in
   let account_home = Arg.(required & opt (some string) None & info ["account-home"]
@@ -4495,8 +4466,7 @@ let runtime_account_login_cmd =
   let run client cli_path account_home =
     let install_client = match client with
       | Runtime_setup_login_client.Codex_home -> Runtime_official_cli_install.Codex
-      | Claude_home -> Runtime_official_cli_install.Claude
-      | Muse_home -> Runtime_official_cli_install.Muse in
+      | Claude_home -> Runtime_official_cli_install.Claude in
     let command = match cli_path with
       | Some command -> command
       | None -> Runtime_official_cli_install.name install_client in
@@ -4504,7 +4474,7 @@ let runtime_account_login_cmd =
       ~cli_path:(Runtime_official_cli_install.spawn_path install_client ~command)
       ~account_home in
   Cmd.v (Cmd.info "runtime-account-login"
-    ~doc:"Run the official sign-in for a declared Codex, Claude Code or Muse Code account home with the environment /login gives that client.")
+    ~doc:"Run the official sign-in for a declared Codex or Claude Code account home with the environment /login gives that client.")
     Term.(const run $ client $ cli $ account_home)
 
 let runtime_setup_render_cmd =
@@ -4753,21 +4723,6 @@ let antigravity_models_cmd =
   Cmd.v (Cmd.info "runtime-antigravity-models" ~doc:"Refresh the selected Antigravity account's models without a model turn. The workspace decides whether the host account may start.")
     Term.(const run $ base_path $ cli_path $ credential)
 
-let antigravity_context_cmd =
-  let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
-  let credential = Arg.(required & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
-  let model = Arg.(required & opt (some string) None & info ["model"] ~docv:"MODEL_ID") in
-  let run base_path cli_path oauth_source model_id =
-    match Masc_cli_onboarding.python (Unix.realpath Sys.executable_name) with
-    | None -> prerr_endline "The installed Python helper is missing. Reinstall the complete MASC release."; 1
-    | Some python_path ->
-      Masc_cli_antigravity.context ~base_path ~python_path
-        ~cli_path:(Runtime_official_cli_install.spawn_path Antigravity ~command:cli_path)
-        ~oauth_source ~model_id
-        ~timeout_s:runtime_probe_subscription_timeout_s in
-  Cmd.v (Cmd.info "runtime-antigravity-context" ~doc:"Read the selected account model's actual CLI context without a model prompt. The workspace decides whether the host account may start.")
-    Term.(const run $ base_path $ cli_path $ credential $ model)
-
 let setup_server_cmd =
   let inspect base_path port = Masc_cli_owner_upgrade.inspect ~base_path ~port in
   Cmd.v (Cmd.info "setup-server" ~doc:"Inspect this setup port and offer an unused port without changing any server.")
@@ -4797,7 +4752,7 @@ let restart_cmd =
 
 let runtime_client_path_cmd =
   let client = Arg.(required & opt (some Masc_cli_client_path.client_arg) None & info ["client"]
-    ~docv:"CLIENT" ~doc:"claude-code, codex, antigravity or muse-code.") in
+    ~docv:"CLIENT" ~doc:"claude-code, codex or antigravity.") in
   let command = Arg.(value & opt (some string) None & info ["command"]
     ~docv:"COMMAND" ~doc:"The configured command; defaults to the client's own name.") in
   Cmd.v (Cmd.info "runtime-client-path"
@@ -5061,7 +5016,6 @@ let cmd =
     ; config_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
-    ; runtime_muse_models_cmd
     ; runtime_account_login_cmd
     ; runtime_setup_render_cmd
     ; runtime_setup_inventory_cmd
@@ -5085,7 +5039,6 @@ let cmd =
     ; runtime_resume_cmd
     ; antigravity_account_cmd
     ; antigravity_models_cmd
-    ; antigravity_context_cmd
     ; setup_server_cmd
     ; setup_stop_owner_cmd
     ; restart_cmd

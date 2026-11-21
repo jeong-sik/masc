@@ -87,28 +87,3 @@ let models ~base_path ~cli_path ~timeout_s ~oauth_source =
   | Ok host ->
   with_catalog_home ~host ~oauth_source (fun home ->
     Setup.discover_models ~cli_path ~timeout_s home |> Result.map Setup.models_json) |> report
-
-let context ~base_path ~python_path ~cli_path ~timeout_s ~oauth_source ~model_id =
-  match host ~base_path with
-  | Error message -> refused message
-  | Ok host ->
-  let selected = with_catalog_home ~host ~oauth_source (fun home ->
-    let* models = Setup.discover_models ~cli_path ~timeout_s home in
-    match List.find_opt (fun (model : Setup.model) -> model.id = model_id) models with
-    | None -> Error Setup.Invalid_catalog
-    | Some model ->
-      (* Some CLI versions report the label as model.id. Require its unique
-         association with the selected account model before accepting it. *)
-      if List.length (List.filter (fun (row : Setup.model) -> row.label = model.label) models) <> 1 then
-        Error Setup.Invalid_catalog else Ok model)
-    |> Result.map_error Setup.error_message in
-  let result =
-    let* model = selected in
-    Runtime_antigravity_context.observe ~host ~python_path ~cli_path ~timeout_s ~oauth_source ~model
-    |> Result.map_error Runtime_antigravity_context.error_message in
-  match result with
-  | Error message -> refused message
-  | Ok observed ->
-    let context = match observed with Setup.Unknown_context -> `Null | Observed_context tokens -> `Int tokens in
-    print_endline (Yojson.Safe.to_string (`Assoc ["source", `String "antigravity_statusline";
-      "model", `String model_id; "context", context; "invocation_verified", `Bool false])); 0

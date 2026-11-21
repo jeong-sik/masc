@@ -18,7 +18,6 @@ module Codex = Runtime_codex_app_server
 module Info = Runtime_codex_app_server.Codex_error_info
 module Claude = Runtime_claude_code
 module Antigravity = Runtime_antigravity
-module Muse = Runtime_muse_serve
 module Visit = Masc.Librarian_slot_visit
 
 let folder = "test/fixtures/librarian_slot_outcome"
@@ -194,14 +193,10 @@ let antigravity =
   below client "Antigravity_failure" ~file:"runtime_antigravity.mli" ~type_:"error" (fun e ->
     Client.Antigravity_failure e)
 
-let muse = below client "Muse_failure" ~file:"runtime_muse_serve.mli" ~type_:"error" (fun e -> Client.Muse_failure e)
 let host_stop = Codex.Terminal_tool_boundary { tool_name = ""; outcome = Terminal_completed }
 
 let antigravity_usage : Antigravity.usage =
   { input_tokens = 0; output_tokens = 0; thinking_tokens = 0; cache_read_tokens = 0; total_tokens = 0 }
-
-let muse_turn_error quota : Runtime_muse_msp.turn_error =
-  { kind = Model_error; message = ""; retryable = false; quota }
 
 let claude_overflow ~tool_effect_attempted ~response_emitted =
   Claude.Context_window_exceeded { message = ""; tool_effect_attempted; response_emitted }
@@ -343,7 +338,6 @@ let samples =
   ; at cli "Held" (Oneshot.Held { runtime_id = ""; until = 0. })
   ; at client "Missing_reply" Client.Missing_reply
   ; at client "Setup_failure" (Client.Setup_failure "")
-  ; at client "Vibe_failure" (Client.Vibe_failure (Vibe_run_failed (Runtime_vibe_cli.Invalid_config "")))
   ; at codex "Invalid_config" (Codex.Invalid_config "")
   ; at codex "Spawn_refused" (Codex.Spawn_refused Process_eio.Empty_argv)
   ; at codex "Reasoning_effort_admission_failed"
@@ -443,26 +437,6 @@ let samples =
   ; at antigravity "Unhandled_exception" (Antigravity.Unhandled_exception "")
   ; at antigravity "Child_fd_ceiling_exceeded" (Antigravity.Child_fd_ceiling_exceeded { count = None; ceiling = 0 })
   ; at antigravity "Timeout" (Antigravity.Timeout 0.)
-  ; at muse "Invalid_config" (Muse.Invalid_config "")
-  ; at muse "Spawn_refused" (Muse.Spawn_refused Process_eio.Empty_argv)
-  ; at muse "Turn_input_write_failed" (Muse.Turn_input_write_failed "")
-  ; at muse "Protocol_error" (Muse.Protocol_error { stage = ""; detail = "" })
-  ; at muse "Rpc_error" (Muse.Rpc_error { method_ = ""; code = 0; message = "" })
-  ; at muse "Capability_not_granted" (Muse.Capability_not_granted Session_mcp)
-  ; at muse "Session_not_durable" Muse.Session_not_durable
-  ; at muse "Session_model_mismatch" (Muse.Session_model_mismatch { requested = ""; resumed = None })
-  ; at muse "Session_workspace_mismatch" (Muse.Session_workspace_mismatch { requested = ""; reported = None })
-  ; at muse "Session_approval_mode_mismatch"
-      (Muse.Session_approval_mode_mismatch { requested = Allow_all; reported = None })
-  ; at muse "Auth_required" (Muse.Auth_required "")
-  ; at muse "Turn_failed" ~case:"quota = Some _"
-      (Muse.Turn_failed (muse_turn_error (Some { limit_kind = ""; resets_at_ms = 0 })))
-  ; at muse "Turn_failed" ~case:"quota = None" (Muse.Turn_failed (muse_turn_error None))
-  ; at muse "Turn_cancelled" Muse.Turn_cancelled
-  ; at muse "Unsupported_server_request" (Muse.Unsupported_server_request "")
-  ; at muse "Runtime_shutting_down" Muse.Runtime_shutting_down
-  ; at muse "Process_exited" (Muse.Process_exited { status = None; detail = ""; turn_accepted = false })
-  ; at muse "Timeout" (Muse.Timeout { seconds = 0.; turn_accepted = false })
   ; plain "the ask's own fold" "a declared slot with no visit" (Visit.Unanswered Not_visited)
   ; plain "Exact_lane_walk.walk" "an HTTP slot passed as Held" (Visit.Unanswered (Http Held))
   ; plain "Exact_lane_walk.walk" "a CLI slot passed as Seats_full" (Visit.Unanswered (Cli Cli_seats_full))

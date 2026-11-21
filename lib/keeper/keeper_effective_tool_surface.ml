@@ -91,8 +91,6 @@ let client_kind (runtime : Runtime_instance.t) =
   | Runtime_execution.Codex_app_server _ -> "codex"
   | Runtime_execution.Claude_code _ -> "claude_code"
   | Runtime_execution.Antigravity_cli _ -> "antigravity"
-  | Runtime_execution.Muse_serve _ -> "muse"
-  | Runtime_execution.Vibe_cli _ -> "vibe"
 ;;
 
 let descriptor_schema_tool (descriptor : Keeper_tool_descriptor.t) name =
@@ -427,21 +425,12 @@ let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime_instance.t
       ~default:Runtime_native_tools.antigravity_default
       ~none_supported:false
     |> Result.map Option.some
-  | Runtime_execution.Muse_serve _ ->
-    Keeper_muse_runtime.resolve_native_posture ~base_path ~keeper_name
-      ~required_native_posture:None
-    |> Result.map Option.some
-  | Runtime_execution.Vibe_cli _ -> Error Runtime_execution.vibe_keeper_turn_refused
 ;;
 
 let runtime_tool_delivery (runtime : Runtime_instance.t) =
   match runtime.execution with
-  (* Muse Code reaches MASC's tools through the loopback MCP bridge
-     ([Keeper_muse_runtime]), as Antigravity does. *)
   | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _ -> Tools_delivered
-  | Runtime_execution.Vibe_cli _ -> Tools_suppressed_runtime_unsupported
+  | Runtime_execution.Antigravity_cli _ -> Tools_delivered
   | Runtime_execution.Claude_code _ | Runtime_execution.Agent_core _ ->
     if Runtime_tool_support.declares_tools runtime
     then Tools_delivered

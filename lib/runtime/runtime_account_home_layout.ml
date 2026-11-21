@@ -3,14 +3,12 @@
 type client =
   | Codex_home
   | Claude_home
-  | Muse_home
 
 let clients_dir = "official-clients"
 
 let client_dir = function
   | Codex_home -> "codex"
   | Claude_home -> "claude"
-  | Muse_home -> "muse"
 ;;
 
 let accounts_dir = "accounts"

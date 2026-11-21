@@ -152,27 +152,11 @@ let antigravity_config ~base_dir ~turn_timeout_s ~override_s ~output_schema
   }
 ;;
 
-let muse_config ~turn_timeout_s ~override_s (execution : Runtime_execution.muse_serve)
-  : Runtime_muse_serve.config
-  =
-  { (Runtime_muse_serve.default_config ()) with
-    cli_path = execution.cli_path
-  ; model = Some execution.model
-  ; (* Read posture uses the managed policy overlay and host write/shell
-       suppression. A panelist receives no mutable operator workspace. *)
-    native = Runtime_native_tools.muse_default
-  ; admission_timeout_s = execution.timeout_s
-  ; timeout_s =
-      resolved_timeout_s ~turn_timeout_s ~override_s ~default_timeout_s:execution.timeout_s
-  }
-;;
-
-(* Antigravity and Vibe have no system-prompt channel. Muse Code has a native
-   Developer override, but a successful RPC does not confirm its application.
+(* Antigravity has no system-prompt channel.
    These one-shot turns keep instructions at the head of the input in the
-   frame a keeper turn uses ({!Antigravity_input_frame}; the Muse Code keeper
-   start uses the same labels). Without this frame the panel or judge system
-   prompt — for a judge-of-judges first judge, its whole lens — can be lost. *)
+   frame a keeper turn uses ({!Antigravity_input_frame}). Without this frame
+   the panel or judge system prompt — for a judge-of-judges first judge, its
+   whole lens — can be lost. *)
 let framed_prompt ~system_prompt ~prompt =
   match system_prompt with
   | None -> Ok prompt
@@ -197,15 +181,6 @@ let codex_usage = function
 let antigravity_usage (usage : Runtime_antigravity.usage) : Fusion_types.usage =
   { input_tokens = usage.input_tokens + usage.cache_read_tokens; output_tokens = usage.output_tokens }
 
-let muse_usage (usage : Runtime_muse_msp.token_usage) : Fusion_types.usage =
-  { input_tokens = usage.input_tokens; output_tokens = usage.output_tokens }
-
-(* [total_tokens] is [input_tokens + output_tokens] in every retained export
-   (m0, m10-m14), so [cached_input_tokens] is a part of [input_tokens] and is
-   not added to it. *)
-let vibe_usage (usage : Runtime_vibe_headless.usage) : Fusion_types.usage =
-  { input_tokens = usage.input_tokens; output_tokens = usage.output_tokens }
-
 let optional_usage convert = function
   | Some usage -> convert usage
   | None -> Fusion_types.zero_usage
@@ -222,11 +197,6 @@ type failure =
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
-  | Muse_failure of Runtime_muse_serve.error
-  | Vibe_failure of vibe_failure
-and vibe_failure =
-  | Vibe_run_failed of Runtime_vibe_cli.error
-  | Vibe_not_answered of Runtime_vibe_answer.error
 
 let failure_detail ~runtime_id = function
   | Missing_reply -> Printf.sprintf "%s: completed turn has no assistant reply" runtime_id
@@ -237,12 +207,6 @@ let failure_detail ~runtime_id = function
     Printf.sprintf "%s: %s" runtime_id (Runtime_claude_code.error_to_string error)
   | Antigravity_failure error ->
     Printf.sprintf "%s: %s" runtime_id (Runtime_antigravity.error_to_string error)
-  | Muse_failure error ->
-    Printf.sprintf "%s: %s" runtime_id (Runtime_muse_serve.error_to_string error)
-  | Vibe_failure (Vibe_run_failed error) ->
-    Printf.sprintf "%s: %s" runtime_id (Runtime_vibe_cli.error_to_string error)
-  | Vibe_failure (Vibe_not_answered error) ->
-    Printf.sprintf "%s: %s" runtime_id (Runtime_vibe_answer.error_to_string error)
 ;;
 
 (* 어댑터마다 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
@@ -315,122 +279,7 @@ let panel_failure ~runtime_id = function
        | Runtime_antigravity.Child_fd_ceiling_exceeded _
        | Runtime_antigravity.Unhandled_exception _ ) as error) ->
     provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
-  | Muse_failure (Runtime_muse_serve.Timeout _) -> Fusion_types.Timeout
-  | Muse_failure
-      (( Runtime_muse_serve.Invalid_config _
-       | Runtime_muse_serve.Spawn_refused _
-       | Runtime_muse_serve.Turn_input_write_failed _
-       | Runtime_muse_serve.Protocol_error _
-       | Runtime_muse_serve.Rpc_error _
-       | Runtime_muse_serve.Capability_not_granted _
-       | Runtime_muse_serve.Session_not_durable
-       | Runtime_muse_serve.Session_model_mismatch _
-       | Runtime_muse_serve.Session_workspace_mismatch _
-       | Runtime_muse_serve.Session_approval_mode_mismatch _
-       | Runtime_muse_serve.Auth_required _
-       | Runtime_muse_serve.Turn_failed _
-       | Runtime_muse_serve.Turn_cancelled
-       | Runtime_muse_serve.Unsupported_server_request _
-       | Runtime_muse_serve.Runtime_shutting_down
-       | Runtime_muse_serve.Process_exited _ ) as error) ->
-    provider_error ~runtime_id (Runtime_muse_serve.error_to_string error)
-  (* MASC sets no Vibe deadline, so [after_s = Some _] does not occur today;
-     [None] is an exit 124 Vibe chose itself. [deadline] is Vibe's own limit,
-     which can come only from the user's Vibe config. *)
-  | Vibe_failure (Vibe_run_failed (Runtime_vibe_cli.Timed_out { after_s = Some _; _ }))
-  | Vibe_failure
-      (Vibe_not_answered
-         (Runtime_vibe_answer.Not_finished { stop = Runtime_vibe_answer.Deadline; _ })) ->
-    Fusion_types.Timeout
-  | Vibe_failure
-      (Vibe_run_failed
-         (( Runtime_vibe_cli.Invalid_config _
-          | Runtime_vibe_cli.Native_tools_refused _
-          | Runtime_vibe_cli.Process_runtime_unavailable
-          | Runtime_vibe_cli.Call_dir_failed _
-          | Runtime_vibe_cli.Spawn_refused _
-          | Runtime_vibe_cli.Timed_out { after_s = None; _ }
-          | Runtime_vibe_cli.Signaled _
-          | Runtime_vibe_cli.Stopped _
-          | Runtime_vibe_cli.No_export _
-          | Runtime_vibe_cli.Export_unreadable _
-          | Runtime_vibe_cli.Transcript_unreadable _
-          | Runtime_vibe_cli.Exit_code_mismatch _
-          | Runtime_vibe_cli.Outcome_exit_mismatch _ ) as error)) ->
-    provider_error ~runtime_id (Runtime_vibe_cli.error_to_string error)
-  | Vibe_failure
-      (Vibe_not_answered
-         (( Runtime_vibe_answer.Not_finished
-              { stop =
-                  ( Runtime_vibe_answer.Usage_error
-                  | Runtime_vibe_answer.Config_error
-                  | Runtime_vibe_answer.Infrastructure_failure
-                  | Runtime_vibe_answer.Turn_limit
-                  | Runtime_vibe_answer.Token_limit
-                  | Runtime_vibe_answer.Price_limit
-                  | Runtime_vibe_answer.Terminated
-                  | Runtime_vibe_answer.Length
-                  | Runtime_vibe_answer.Refusal
-                  | Runtime_vibe_answer.Aborted
-                  | Runtime_vibe_answer.Unrecognized_outcome _ )
-              ; _
-              }
-          | Runtime_vibe_answer.No_output
-          | Runtime_vibe_answer.No_assistant_reply
-          | Runtime_vibe_answer.Unrecognized_last_role _
-          | Runtime_vibe_answer.Unrecognized_last_entry _
-          | Runtime_vibe_answer.Unrecognized_reply_part _ ) as error)) ->
-    provider_error ~runtime_id (Runtime_vibe_answer.error_to_string error)
 
-
-(* A Muse Code panelist starts in an empty temporary directory rather than
-   the operator's runtime state directory. This selects its working directory;
-   it does not confine native reads. The managed Muse policy is enforced by
-   Runtime_muse_serve independently of this coordinate. *)
-let create_muse_panel_root () =
-  match Filename.temp_dir ~perms:0o700 "masc-muse-panelist-" "" |> Unix.realpath with
-  | root -> Ok root
-  | exception (Sys_error detail) ->
-    Error (Setup_failure ("cannot create the Muse Code panelist workspace: " ^ detail))
-  | exception Unix.Unix_error (error, _, path) ->
-    Error
-      (Setup_failure
-         (Printf.sprintf
-            "cannot resolve the Muse Code panelist workspace %s: %s"
-            path
-            (Unix.error_message error)))
-;;
-
-let remove_muse_panel_root root =
-  try Fs_compat.remove_tree root with
-  | (Sys_error _ | Unix.Unix_error _) as exn ->
-    Log.Runtime_agent.warn
-      "Muse Code panelist left its workspace %s behind: %s"
-      root
-      (Printexc.to_string exn)
-;;
-
-(* A Vibe panelist starts in an empty private directory, passed as its
-   [--workdir] without [--trust], so the [ask] agent finds no operator files
-   and Vibe loads no project [.vibe] from it. The path is kept as
-   [Filename.temp_dir] gives it: without [--trust] nothing compares it with
-   a resolved form, and resolving it after creation could fail with the
-   directory already made and no cleanup registered yet. *)
-let create_vibe_panel_root () =
-  match Filename.temp_dir ~perms:0o700 "masc-vibe-panelist-" "" with
-  | root -> Ok root
-  | exception Sys_error detail ->
-    Error (Setup_failure ("cannot create the Mistral Vibe panelist workdir: " ^ detail))
-;;
-
-let remove_vibe_panel_root root =
-  try Fs_compat.remove_tree root with
-  | (Sys_error _ | Unix.Unix_error _) as exn ->
-    Log.Runtime_agent.warn
-      "Mistral Vibe panelist left its workdir %s behind: %s"
-      root
-      (Printexc.to_string exn)
-;;
 
 (* An Antigravity one-shot call runs in a HOME of its own that is removed with
    the call. A HOME kept per account also kept the project each call creates
@@ -705,61 +554,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        which is a bug in this module's callers rather than a provider failure. *)
     Error (Setup_failure
       "runtime is Agent_core-owned; it belongs on the Async_agent path")
-  (* A Vibe headless call takes one prompt file: no schema, no image, and no
-     MASC deadline. The owner left Vibe calls without a time limit, so a
-     declared one is refused here rather than dropped. *)
-  | Runtime_execution.Vibe_cli _ when Option.is_some output_schema ->
-    Error
-      (Setup_failure
-         "Mistral Vibe's headless call has no output-schema channel, so a \
-          schema-held answer cannot be asked of it")
-  | Runtime_execution.Vibe_cli _ when not (List.is_empty images) ->
-    Error (Setup_failure "Mistral Vibe's headless call takes text only, so it cannot carry an image")
-  | Runtime_execution.Vibe_cli _ when Option.is_some timeout_s ->
-    Error
-      (Setup_failure
-         "a Mistral Vibe call has no MASC time limit, so a declared timeout_s \
-          cannot be held")
-  | Runtime_execution.Vibe_cli execution ->
-    (* HIGH-RISK-UNREVIEWED: a panelist starts Vibe on the configuration of the
-       host user, which a multi-account process shares with no person (plan
-       D3b). A refusal starts no process. *)
-    let* host = authorize_host Runtime_account_access.Vibe in
-    let* prompt =
-      framed_prompt ~system_prompt ~prompt
-      |> Result.map_error (fun detail -> Setup_failure detail)
-    in
-    Eio.Switch.run
-    @@ fun sw ->
-    (* Enter the cancellation scope before acquiring the directory, then
-       register its cleanup before cancellation can discard the acquisition. *)
-    let* workdir = Eio.Cancel.protect (fun () ->
-      let* root = create_vibe_panel_root () in
-      Eio.Switch.on_release sw (fun () -> remove_vibe_panel_root root);
-      Ok root) in
-    let config : Runtime_vibe_cli.config =
-      { cli_path = execution.cli_path
-      ; workdir
-      ; trust_workdir = false
-      ; model = Some execution.model
-      ; time_limit_s = None
-      }
-    in
-    (match Runtime_vibe_cli.run ~host config ~prompt with
-     | Error error ->
-       Option.iter
-         (fun usage -> on_usage (vibe_usage usage))
-         (Runtime_vibe_cli.reported_usage error);
-       Error (Vibe_failure (Vibe_run_failed error))
-     | Ok run ->
-       let usage = optional_usage vibe_usage run.export.usage in
-       (* [export.json] names no model, so the panel records the [--model]
-          MASC passed: the one Vibe did not contradict, not one it confirmed. *)
-       (match Runtime_vibe_answer.of_run run with
-        | Ok text -> succeeded { text; model = execution.model; usage }
-        | Error error ->
-          on_usage usage;
-          Error (Vibe_failure (Vibe_not_answered error))))
   | Runtime_execution.Claude_code execution ->
     (* HIGH-RISK-UNREVIEWED: a panelist is a call of the operator, not a
        Keeper turn, so its CLI starts only where the access allows one (plan
@@ -916,94 +710,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model; usage = antigravity_usage result.usage }
      | Error error ->
        Error (Antigravity_failure error))
-  (* MSP's [turn/start] has no output-schema field, so a caller that needs
-     the client to hold its answer to a schema is refused before a process
-     starts instead of receiving an answer nothing held. *)
-  | Runtime_execution.Muse_serve _ when Option.is_some output_schema ->
-    Error
-      (Setup_failure
-         "Muse Code's session protocol has no output-schema channel, so a \
-          schema-held answer cannot be asked of it")
-  | Runtime_execution.Muse_serve execution ->
-    (* HIGH-RISK-UNREVIEWED: a panelist is a call of the operator, so Muse
-       starts only where the access allows one (plan D3). A refusal starts no
-       process. *)
-    (match
-       Runtime_account_access.authorize_muse Runtime_account_access.Operator_call
-         (Runtime_account_access.Declared_home execution.account_home)
-     with
-     | Error refusal -> Error (Setup_failure (Runtime_account_access.refusal_to_string refusal))
-     | Ok account ->
-    let config = muse_config ~turn_timeout_s:runtime.model.turn_timeout_s ~override_s:timeout_s execution in
-    let* prompt =
-      framed_prompt ~system_prompt ~prompt
-      |> Result.map_error (fun detail -> Setup_failure detail)
-    in
-    Eio.Switch.run
-    @@ fun sw ->
-    (* Enter the cancellation scope before acquiring the directory, then
-       register its cleanup before cancellation can discard the acquisition. *)
-    let* panel_root = Eio.Cancel.protect (fun () ->
-      let* root = create_muse_panel_root () in
-      Eio.Switch.on_release sw (fun () -> remove_muse_panel_root root);
-      Ok root) in
-    let* workspace_root, storage_root =
-      (* Wait for filesystem preparation before cancellation can run the
-         already registered cleanup; the worker must not outlive that tree. *)
-      Eio.Cancel.protect (fun () ->
-        Eio_guard.run_in_systhread ~label:"muse fusion native storage" (fun () ->
-          try
-            let workspace_root = Filename.concat panel_root "workspace" in
-            let storage_root = Filename.concat panel_root "native" in
-            Unix.mkdir workspace_root 0o700;
-            Runtime_muse_serve.ensure_storage_dirs storage_root;
-            Ok (workspace_root, storage_root)
-          with Unix.Unix_error (error, _, _) ->
-            Error (Setup_failure ("cannot prepare Muse Code stateless storage: " ^ Unix.error_message error))))
-    in
-    (match
-       Runtime_muse_serve.run_turn
-         ~storage:(Runtime_muse_serve.Stateless storage_root)
-         ?reasoning_effort:(Option.map Runtime_muse_msp.reasoning_effort_of_requested
-           runtime.model.reasoning_effort)
-         ~on_stream_event:(function
-           | Runtime_muse_serve.Usage_reported {usage; _} -> on_usage (muse_usage usage)
-           | Runtime_muse_serve.Subscription_usage_observed usage ->
-             Runtime_muse_usage.observe ~scope:quota_scope Runtime_muse_usage.Usage_changed usage
-           | Runtime_muse_serve.Turn_terminal_received terminal ->
-             Runtime_muse_usage.observe_terminal ~scope:quota_scope terminal
-           | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
-           | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
-           | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
-           | Runtime_muse_serve.Compaction_observed _ | Runtime_muse_serve.View_gap_observed
-           | Runtime_muse_serve.Turn_items_read _ | Runtime_muse_serve.Model_call_reported _
-           | Runtime_muse_serve.Turn_finished _ -> ())
-         ~mgr
-         ~clock
-         ~cwd:Eio.Path.(Eio.Stdenv.fs env / workspace_root)
-         ~account
-         config
-         ~workspace_root
-         ~prompt
-         ~images
-     with
-     | Ok (result : Runtime_muse_serve.turn_result) ->
-       (* The panel records the model the turn's last call ran on, as the
-          host named it. With no call reported it records the session's model:
-          the session starts with [modelId] set to the configured model, and
-          the serve client refuses a start the host names another model for.
-          A host that names neither left the model its record omits, so the
-          panel records the model MASC asked for: the one the host did not
-          contradict, not one it confirmed. *)
-       let model =
-         match Runtime_muse_serve.reported_model result with
-         | Some reported -> reported
-         | None -> execution.model
-       in
-       (match result.text with
-        | Some text -> succeeded { text; model; usage = optional_usage muse_usage result.usage }
-        | None -> Error Missing_reply)
-     | Error error -> Error (Muse_failure error)))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =

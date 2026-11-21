@@ -65,7 +65,6 @@ let source_to_string = function
   | Kimi_coding_usages_read -> "kimi_coding.usages"
   | Ollama_balance_read -> "ollama.balance"
   | Antigravity_usage_read -> "antigravity.usage"
-  | Muse_subscription_usage -> "muse.subscription_usage"
 ;;
 
 (* The inverses of the two word functions above, for a reader of rows those
@@ -87,7 +86,6 @@ let source_of_string = function
   | "kimi_coding.usages" -> Some Kimi_coding_usages_read
   | "ollama.balance" -> Some Ollama_balance_read
   | "antigravity.usage" -> Some Antigravity_usage_read
-  | "muse.subscription_usage" -> Some Muse_subscription_usage
   | _ -> None
 ;;
 
@@ -1279,7 +1277,7 @@ type gate_coverage =
 let gate_coverage = function
   | Antigravity_usage_read -> Some Every_window_must_be_spent
   | Openrouter_key_read | Zai_quota_limit_read | Kimi_coding_usages_read
-  | Ollama_balance_read | Muse_subscription_usage -> Some One_spent_window_refuses
+  | Ollama_balance_read -> Some One_spent_window_refuses
   | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read | Openrouter_credits_read -> None
 

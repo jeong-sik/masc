@@ -47,12 +47,6 @@ timeout-s = 180.0
 type = "file"
 path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 
-[providers.muse]
-display-name = "Muse"
-protocol = "muse-serve"
-command = "muse"
-is-non-interactive = true
-
 [providers.ollama]
 display-name = "Local Ollama"
 protocol = "ollama-http"
@@ -94,8 +88,6 @@ price-input = 0.075
 
 [antigravity_subscription.flash]
 
-[muse.muse_fixture]
-
 [ollama.local-model]
 
 [fusion]
@@ -107,7 +99,6 @@ let home_dir = "/home/op"
 let inherited_home = function
   | D.Codex -> Some "/home/op/.codex"
   | D.Claude_code -> Some "/home/op/.claude"
-  | D.Muse -> Some "/home/op/.muse"
   | D.Antigravity -> None
 
 let parsed text =
@@ -147,7 +138,7 @@ let test_bases_are_the_signed_in_clients () =
   let t = parsed fixture in
   Alcotest.(check (list string)) "supported account-copy clients in file order, HTTP left out"
     [ "claude_code"; "claude_bare"; "codex_subscription"; "codex_acct1"
-    ; "antigravity_subscription"; "muse" ]
+    ; "antigravity_subscription" ]
     (List.map (fun (b : D.base) -> b.id) (D.bases t));
   Alcotest.(check string) "a provider without a name shows its id" "claude_bare"
     (base_named t "claude_bare").display_name;
@@ -198,30 +189,6 @@ let test_claude_copy_keeps_the_command () =
        Alcotest.(check string) "the turn runs in the declared new home"
          "/home/op/.claude-account2" (Runtime_account_access.home execution.account_home)
      | Ok _ -> Alcotest.fail "the copy is no longer a Claude Code runtime"
-     | Error detail -> Alcotest.failf "copy does not materialize: %s" detail)
-  | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings)
-
-let test_muse_copy_signs_in_at_the_new_home () =
-  let t = parsed fixture in
-  let text =
-    declared t ~base:"muse" ~id:"muse_2"
-      ~location:"/home/op/.muse-account2"
-  in
-  Alcotest.(check bool) "every line the operator wrote is still there" true
-    (String.starts_with ~prefix:fixture text);
-  Alcotest.(check (option string)) "the new home is written as account-home"
-    (Some "/home/op/.muse-account2")
-    (toml_string text [ "providers"; "muse_2"; "account-home" ]);
-  let config = config_of text in
-  match bindings_of config "muse_2" with
-  | [ binding ] ->
-    Alcotest.(check string) "the base's model is bound" "muse_fixture" binding.model_id;
-    (match execution_for_binding config binding with
-     | Ok (Runtime_execution.Muse_serve execution) ->
-       Alcotest.(check string) "the turn runs in the new home"
-         "/home/op/.muse-account2"
-           (Runtime_account_access.muse_home_path execution.account_home)
-     | Ok _ -> Alcotest.fail "the copy is no longer a Muse runtime"
      | Error detail -> Alcotest.failf "copy does not materialize: %s" detail)
   | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings)
 
@@ -647,8 +614,6 @@ let () =
             test_codex_copy_signs_in_at_the_new_home
         ; Alcotest.test_case "claude copy keeps the command" `Quick
             test_claude_copy_keeps_the_command
-        ; Alcotest.test_case "muse copy signs in at the new home" `Quick
-            test_muse_copy_signs_in_at_the_new_home
         ; Alcotest.test_case "antigravity copy reads the new oauth file" `Quick
             test_antigravity_copy_reads_the_new_oauth_file
         ; Alcotest.test_case "refusals" `Quick test_refusals

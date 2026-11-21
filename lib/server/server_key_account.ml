@@ -156,7 +156,7 @@ let takes_no_key =
 
 let takes_key : Client.client -> bool = function
   | Client.Claude -> true
-  | Client.Codex | Client.Muse | Client.Antigravity -> false
+  | Client.Codex | Client.Antigravity -> false
 ;;
 
 let http_takes_key = Runtime_account_runtime.http_provider_takes_key

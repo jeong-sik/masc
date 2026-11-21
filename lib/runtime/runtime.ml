@@ -215,9 +215,7 @@ let exact_slot_lacks_body_deadline ~(target_source : exact_output_target_source)
      | Runtime_execution.Agent_core _, Some (_ : float) -> false
      | ( Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _
-       | Runtime_execution.Muse_serve _
-       | Runtime_execution.Vibe_cli _ ), (Some _ | None) -> false)
+       | Runtime_execution.Antigravity_cli _ ), (Some _ | None) -> false)
 ;;
 
 (* An HTTP slot of an exact-output lane is
@@ -322,9 +320,7 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
          match r.execution, capabilities_for_runtime r with
          | ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _
-           | Runtime_execution.Muse_serve _
-           | Runtime_execution.Vibe_cli _ ), _ -> None
+           | Runtime_execution.Antigravity_cli _ ), _ -> None
          | Runtime_execution.Agent_core _, Some _ -> None
          | Runtime_execution.Agent_core sealed, None ->
            let provider_config = Runtime_account_access.api_declaration sealed in
@@ -679,9 +675,7 @@ let materialize_config
             | Runtime_execution.Agent_core sealed -> Some (runtime.id, sealed)
             | Runtime_execution.Codex_app_server _
             | Runtime_execution.Claude_code _
-            | Runtime_execution.Antigravity_cli _
-            | Runtime_execution.Muse_serve _
-            | Runtime_execution.Vibe_cli _ -> None)
+            | Runtime_execution.Antigravity_cli _ -> None)
          runtimes)
     |> Result.map_error (fun disagreements ->
       Admission_allowances_disagree disagreements)
@@ -923,9 +917,7 @@ let layout_client_of_provider (provider : Runtime_schema.provider) =
   match provider.api_format with
   | Runtime_schema.Codex_app_server_runtime -> Some Runtime_account_home_layout.Codex_home
   | Runtime_schema.Claude_code_runtime -> Some Runtime_account_home_layout.Claude_home
-  | Runtime_schema.Muse_serve_runtime -> Some Runtime_account_home_layout.Muse_home
   | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Vibe_cli_runtime
   | Runtime_schema.Messages_api
   | Runtime_schema.Chat_completions_api
   | Runtime_schema.Ollama_api
@@ -1184,21 +1176,13 @@ let same_cli_account (left : t) (right : t) =
   | Runtime_execution.Codex_app_server l, Runtime_execution.Codex_app_server r ->
     Runtime_account_access.same l.account_home r.account_home
     || quota_scope_of_runtime left = quota_scope_of_runtime right
-  | Runtime_execution.Muse_serve l, Runtime_execution.Muse_serve r ->
-    String.equal
-      (Runtime_account_access.muse_home_path l.account_home)
-      (Runtime_account_access.muse_home_path r.account_home)
-    || quota_scope_of_runtime left = quota_scope_of_runtime right
   | Runtime_execution.Antigravity_cli l, Runtime_execution.Antigravity_cli r ->
     String.equal (String.trim l.oauth_source) (String.trim r.oauth_source)
     || quota_scope_of_runtime left = quota_scope_of_runtime right
-  | Runtime_execution.Vibe_cli _, Runtime_execution.Vibe_cli _ -> true
   | ( ( Runtime_execution.Agent_core _
       | Runtime_execution.Claude_code _
       | Runtime_execution.Codex_app_server _
-      | Runtime_execution.Antigravity_cli _
-      | Runtime_execution.Muse_serve _
-      | Runtime_execution.Vibe_cli _ )
+      | Runtime_execution.Antigravity_cli _ )
     , _ ) -> false
 ;;
 
@@ -1252,9 +1236,7 @@ let http_overlap_mechanism (librarian_rt : t) (keeper_rt : t) =
   | ( ( Runtime_execution.Agent_core _
       | Runtime_execution.Claude_code _
       | Runtime_execution.Codex_app_server _
-      | Runtime_execution.Antigravity_cli _
-      | Runtime_execution.Muse_serve _
-      | Runtime_execution.Vibe_cli _ )
+      | Runtime_execution.Antigravity_cli _ )
     , _ ) -> None
 ;;
 
@@ -1267,14 +1249,10 @@ let runtime_overlap_mechanism (librarian_rt : t) (keeper_rt : t) =
       http_overlap_mechanism librarian_rt keeper_rt
     | ( ( Runtime_execution.Claude_code _
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Muse_serve _
-        | Runtime_execution.Vibe_cli _ )
+        | Runtime_execution.Antigravity_cli _ )
       , ( Runtime_execution.Claude_code _
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Muse_serve _
-        | Runtime_execution.Vibe_cli _ ) ) ->
+        | Runtime_execution.Antigravity_cli _ ) ) ->
       if same_cli_account librarian_rt keeper_rt
       then
         Some
@@ -1284,9 +1262,7 @@ let runtime_overlap_mechanism (librarian_rt : t) (keeper_rt : t) =
     | ( ( Runtime_execution.Agent_core _
         | Runtime_execution.Claude_code _
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Muse_serve _
-        | Runtime_execution.Vibe_cli _ )
+        | Runtime_execution.Antigravity_cli _ )
       , _ ) -> None)
 ;;
 
@@ -1528,9 +1504,7 @@ let exact_output_targets runtimes =
        | ( Ok (_ : Agent_core.Exact_output.declared_target list)
          , ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _
-           | Runtime_execution.Muse_serve _
-           | Runtime_execution.Vibe_cli _ ) ) -> targets)
+           | Runtime_execution.Antigravity_cli _ ) ) -> targets)
     runtimes
     (Ok [])
 ;;
@@ -1622,8 +1596,7 @@ let exact_output_runtime_observations ~origin runtimes =
           candidate = runtime.candidate_backpressure; quota_scope = runtime.quota_scope
         ; window })
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
-      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _
-      | Runtime_execution.Vibe_cli _ -> None) runtimes
+      | Runtime_execution.Antigravity_cli _ -> None) runtimes
 ;;
 
 let publish_exact_output_registry ?runtime_observations ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
@@ -1896,9 +1869,7 @@ let verifier_runtime_admission (runtime : t) =
   | Runtime_execution.Claude_code _ ->
     Error (runtime.id ^ ": completion verifier requires model tools-support")
   | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _
-  | Runtime_execution.Vibe_cli _ ->
+  | Runtime_execution.Antigravity_cli _ ->
     Error (runtime.id ^ ": completion verifier requires native-tool suppression, which this client does not support")
 ;;
 
@@ -1919,8 +1890,7 @@ let verifier_cli_slot_admission_in ~runtimes ~lane_ids ~runtime_id =
      | Runtime_execution.Agent_core _ ->
        Error (runtime_id ^ ": verifier CLI slot must name an official client")
      | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _
-     | Runtime_execution.Vibe_cli _ ->
+     | Runtime_execution.Antigravity_cli _ ->
        verifier_runtime_admission runtime)
 ;;
 
@@ -4097,9 +4067,7 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
       | Runtime_execution.Agent_core _, None, Replacement_catalog_targets _
       | ( Runtime_execution.Codex_app_server _
         | Runtime_execution.Claude_code _
-        | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Muse_serve _
-        | Runtime_execution.Vibe_cli _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
+        | Runtime_execution.Antigravity_cli _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
     in
     let next =
       Toml_line_editor.edit_table_multiline_array next
@@ -4545,9 +4513,7 @@ let capability_of_runtime (rt : t) : runtime_capability =
     | Runtime_execution.Claude_code _
     | Runtime_execution.Codex_app_server _ ->
       Rejects_oversize_input
-    | Runtime_execution.Antigravity_cli _
-    | Runtime_execution.Muse_serve _
-    | Runtime_execution.Vibe_cli _ ->
+    | Runtime_execution.Antigravity_cli _ ->
       Truncates_silently
     | Runtime_execution.Agent_core _ ->
       (match context_window with
@@ -4560,9 +4526,6 @@ let capability_of_runtime (rt : t) : runtime_capability =
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Antigravity_cli _ ->
       Flag_json_schema
-    | Runtime_execution.Muse_serve _
-    | Runtime_execution.Vibe_cli _ ->
-      Prompted_json
     | Runtime_execution.Agent_core sealed ->
       (match
          Llm_provider.Provider_config.capabilities_for_config_model
@@ -4583,19 +4546,14 @@ let capability_of_runtime (rt : t) : runtime_capability =
       && (Provider_tool_support.agent_core_capabilities_of_config provider)
            .Llm_provider.Capabilities.supports_system_prompt
     | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Antigravity_cli _
-    | Runtime_execution.Vibe_cli _ ->
+    | Runtime_execution.Antigravity_cli _ ->
       false
-    | Runtime_execution.Muse_serve _ ->
-      Runtime_native_tools.muse_none_supported
   in
   let supports_fresh_invocation =
     match rt.execution with
     | Runtime_execution.Claude_code _
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Antigravity_cli _
-    | Runtime_execution.Muse_serve _
-    | Runtime_execution.Vibe_cli _
     | Runtime_execution.Agent_core _ ->
       true
   in

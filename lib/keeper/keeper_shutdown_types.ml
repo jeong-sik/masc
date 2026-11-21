@@ -80,7 +80,6 @@ type dashboard_purge_artifact =
   | Agent_artifact_bundle of string list
   | Keeper_antigravity_home_artifact of string
   | Keeper_antigravity_prepare_lock_artifact of string
-  | Keeper_muse_home_artifact of string
 
 type completion_receipt =
   | Completion_not_requested

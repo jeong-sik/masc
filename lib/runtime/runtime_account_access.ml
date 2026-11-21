@@ -52,36 +52,8 @@ let same left right =
 
 let account authorized = authorized
 
-type muse_home = string
-
-let declare_muse_home home = Runtime_account_home.of_string home
-let muse_home_path home = home
-
-(* A constructor for each kind: with these, OCaml 5.5.1 refutes the other kind
-   in a match on a declared account, and with empty types it did not. *)
-type declared = Declared_kind
-type process_environment = Process_environment_kind
-
-type _ muse_account =
-  | Declared_home : muse_home -> declared muse_account
-  | Process_environment : process_environment muse_account
-
-type 'where muse_authorized = 'where muse_account
-
-let muse_account_home (type where) (authorized : where muse_authorized) =
-  match authorized with
-  | Declared_home home -> Some home
-  | Process_environment -> None
-;;
-
-let declared_muse_home (authorized : declared muse_authorized) =
-  match authorized with
-  | Declared_home home -> home
-;;
-
 type host_client =
   | Antigravity
-  | Vibe
   | Api_provider
   | Model_list
   | Files_api
@@ -96,7 +68,6 @@ type host_account = Shared_by_single_user
 
 let host_client_name = function
   | Antigravity -> "Antigravity"
-  | Vibe -> "Vibe"
   | Api_provider -> "An API provider of the runtime table"
   | Model_list -> "A model-list or serving-window request of a setup connection"
   | Files_api -> "The Files API of masc_file_*"
@@ -303,7 +274,7 @@ let refusal_to_string = function
       "%s sends with the credential its operator declared, which is an account of the \
        host, and a multi-account process shares no account of its host"
       (host_client_name client)
-  | Host_account ((Antigravity | Vibe) as client) ->
+  | Host_account (Antigravity as client) ->
     Printf.sprintf
       "%s starts on an account of the host, and a multi-account process shares no \
        account of its host"
@@ -845,17 +816,6 @@ let authorize_person request (person : _ person_sealed) =
 let authorize request = function
   | Captured sealed -> judge request (official_claim sealed) |> Result.map (fun () -> sealed)
   | Person_account person -> authorize_person request person
-;;
-
-let authorize_muse request account =
-  judge
-    request
-    { client = Layout.Muse_home
-    ; declared_home = muse_account_home account
-    ; key_file = None
-    ; asked_names = []
-    }
-  |> Result.map (fun () -> account)
 ;;
 
 type host_refusal =

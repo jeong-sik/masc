@@ -33,7 +33,6 @@ type source =
   | Kimi_coding_usages_read
   | Ollama_balance_read
   | Antigravity_usage_read
-  | Muse_subscription_usage
 
 type window_role =
   | Gates_model_calls

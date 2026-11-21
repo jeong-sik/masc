@@ -639,27 +639,12 @@ let failure_of_codex_turn detail (info : Runtime_codex_app_server.Codex_error_in
   | None -> Provider_rejected detail
 ;;
 
-(* True only when a typed window is spent: one already observed during the
-   turn, or one a fresh [usage/read] reports. A failed read records nothing,
-   so the caller keeps the original failure. *)
-let muse_account_spent ~mgr ~clock ~cwd ~scope ~account config =
-  let exhausted () = Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ()) in
-  exhausted ()
-  || (match Runtime_provider_usage_read.read_muse ~mgr ~clock ~cwd ~scope ~account config with
-      | Ok () -> exhausted ()
-      | Error _ -> false)
-
 let not_authorized refusal =
   Unavailable (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))
 ;;
 
 let authorize ~account_request account =
   Runtime_account_access.authorize account_request account |> Result.map_error not_authorized
-;;
-
-let authorize_muse ~account_request home =
-  Runtime_account_access.authorize_muse account_request (Runtime_account_access.Declared_home home)
-  |> Result.map_error not_authorized
 ;;
 
 (* The host client starts on a credential of the host, whoever asks for the
@@ -698,119 +683,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
     | Some unavailable -> Error (Unavailable unavailable)
     | None -> (
       match runtime.execution with
-      | Runtime_execution.Muse_serve execution ->
-        (match authorize_muse ~account_request execution.account_home with
-         | Error failure -> Error failure
-         | Ok account ->
-        let config = { (Runtime_muse_serve.default_config ()) with
-          cli_path = execution.cli_path;
-          model = Some execution.model;
-          admission_timeout_s = Float.min timeout_s execution.timeout_s;
-          timeout_s = Some timeout_s } in
-        let reasoning_effort =
-          Option.map Runtime_muse_msp.reasoning_effort_of_requested
-            runtime.model.reasoning_effort in
-        (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
-           ~directory:cwd_path ~account
-           ~quota_scope:(Runtime_instance.quota_scope_of_runtime runtime) ~config
-           ~reasoning_effort ~tool ~prompt with
-         | Ok result ->
-           (* Every call the host reported for the verification turn must have
-              run on the configured model. One on another model fails, and so
-              does one whose model the host did not name. With no call
-              reported, the model the start reported is checked. *)
-           let ran = match result.call_models with
-             | [] -> List.map (fun model -> Runtime_muse_serve.Named model)
-                       (Option.to_list result.model)
-             | _ :: _ as calls -> calls in
-           let other = List.find_map (function
-             | Runtime_muse_serve.Named model when not (String.equal model execution.model) ->
-               Some model
-             | Runtime_muse_serve.Named _ | Runtime_muse_serve.Unnamed -> None) ran in
-           let unnamed = List.exists (function
-             | Runtime_muse_serve.Unnamed -> true
-             | Runtime_muse_serve.Named _ -> false) ran in
-           (match other, unnamed, ran with
-            | Some other, _, _ ->
-              Error (Provider_rejected (Printf.sprintf
-                "Muse Code ran the verification turn on %s, but the configured model is %s"
-                other execution.model))
-            | None, true, _ | None, false, [] -> Error Model_unreported
-            | None, false, _ :: _ ->
-              (match result.text with
-               | None -> Error Empty_response
-               | Some text -> Ok {model=execution.model; text}))
-         | Error (Runtime_verification_muse.Home_error (Runtime_muse_home.Sign_in_required _ as error)) ->
-           Error (Unavailable (Client_not_authenticated (Runtime_muse_home.error_to_string error)))
-         | Error (Home_error (Runtime_muse_home.Invalid_account_home detail)) ->
-           Error (Unavailable (Invalid_configuration detail))
-         | Error (Home_error (Runtime_muse_home.State_unavailable _)) ->
-           Error (Unavailable (Invalid_configuration "Muse managed account state could not be prepared"))
-         | Error Private_workspace_unavailable ->
-           Error (Unavailable (Invalid_configuration "Muse private readiness workspace could not be prepared"))
-         | Error (Client_error (Runtime_muse_serve.Spawn_refused _)) ->
-           Error (Unavailable (Client_not_started "The Muse executable could not be started"))
-         | Error (Client_error (Runtime_muse_serve.Invalid_config detail)) ->
-           Error (Unavailable (Invalid_configuration detail))
-         | Error (Client_error (Runtime_muse_serve.Turn_failed {quota=Some _; _} as error)) ->
-           Error (Quota_exhausted (Runtime_muse_serve.error_to_string error))
-         | Error (Client_error (Runtime_muse_serve.Auth_required _
-             | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _})) ->
-           Error (Unavailable (Client_not_authenticated "The selected Muse account requires sign-in"))
-         | Error (Client_error (Runtime_muse_serve.Process_exited
-             {status=Some (Runtime_muse_serve.Exit_usage
-                          | Runtime_muse_serve.Exit_sdk_surface_disabled); _} as error)) ->
-           Error (Unavailable (Invalid_configuration (Runtime_muse_serve.error_to_string error)))
-         | Error (Client_error (Runtime_muse_serve.Timeout _)) -> Error Timed_out
-         | Error (Client_error (Runtime_muse_serve.Turn_failed {retryable=true; _} as error)) ->
-           Error (Provider_overloaded (Runtime_muse_serve.error_to_string error))
-         | Error (Client_error (Runtime_muse_serve.Turn_failed
-             {kind=Runtime_muse_msp.Model_error; retryable=false; _} as error)) ->
-           (* Without a quota detail, modelError carries free text. The account's typed
-              usage/read says whether a subscription window is spent. *)
-           let detail = Runtime_muse_serve.error_to_string error in
-           if muse_account_spent ~mgr ~clock ~cwd
-                ~scope:(Runtime_instance.quota_scope_of_runtime runtime) ~account config
-           then Error (Quota_exhausted detail)
-           else Error (Provider_rejected detail)
-         | Error (Client_error
-             (( Runtime_muse_serve.Turn_input_write_failed _
-              | Runtime_muse_serve.Protocol_error _
-              | Runtime_muse_serve.Rpc_error _
-              | Runtime_muse_serve.Capability_not_granted _
-              | Runtime_muse_serve.Session_not_durable
-              | Runtime_muse_serve.Session_model_mismatch _
-              | Runtime_muse_serve.Session_workspace_mismatch _
-              | Runtime_muse_serve.Session_approval_mode_mismatch _
-              | Runtime_muse_serve.Turn_failed
-                  { kind =
-                      ( Runtime_muse_msp.Step_limit
-                      | Runtime_muse_msp.Config_error
-                      | Runtime_muse_msp.Projection_error
-                      | Runtime_muse_msp.Log_error
-                      | Runtime_muse_msp.Workflow_launch_error
-                      | Runtime_muse_msp.Environment_error
-                      | Runtime_muse_msp.Launch_error
-                      | Runtime_muse_msp.Unrecognized_error_kind _ )
-                  ; retryable = false
-                  ; _
-                  }
-              | Runtime_muse_serve.Turn_cancelled
-              | Runtime_muse_serve.Unsupported_server_request _
-              | Runtime_muse_serve.Runtime_shutting_down
-              | Runtime_muse_serve.Process_exited
-                  { status =
-                      ( None
-                      | Some
-                          ( Runtime_muse_serve.Exit_clean
-                          | Runtime_muse_serve.Exit_unhandled
-                          | Runtime_muse_serve.Exit_config_or_credential
-                          | Runtime_muse_serve.Exit_session_lease_held
-                          | Runtime_muse_serve.Exit_code _
-                          | Runtime_muse_serve.Exit_signal _ ) )
-                  ; _
-                  } ) as error)) ->
-           Error (Provider_rejected (Runtime_muse_serve.error_to_string error))))
       | Runtime_execution.Antigravity_cli execution ->
         (match authorize_host Runtime_account_access.Antigravity with
          | Error failure -> Error failure
@@ -842,7 +714,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
               | Runtime_antigravity.Child_fd_ceiling_exceeded _
               | Runtime_antigravity.Unhandled_exception _ ) as err)) ->
            Error (Provider_rejected (Runtime_antigravity.error_to_string err))))
-      | Runtime_execution.Vibe_cli _ -> Error (Unavailable Unsupported_runtime)
       | Runtime_execution.Agent_core sealed ->
         (match authorize_api ~account_request sealed with
          | Error failure -> Error failure

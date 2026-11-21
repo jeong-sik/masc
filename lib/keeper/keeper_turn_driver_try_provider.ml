@@ -1141,9 +1141,7 @@ let input_limit_of_runtime (runtime : Runtime_instance.t option) =
           Runtime_execution.(
             Codex_app_server _
             | Antigravity_cli _
-            | Claude_code _
-            | Muse_serve _
-            | Vibe_cli _)
+            | Claude_code _)
       ; _
       }
   | None -> None
@@ -4094,7 +4092,7 @@ let run_try_provider_with_truncation_recovery
         ~reconnect:(fun () -> Provider_connection_cache_ref.with_fresh_connections attempt)
         ~attempt ()
     | Some { Runtime_instance.execution =
-        (Codex_app_server _ | Antigravity_cli _ | Claude_code _ | Muse_serve _ | Vibe_cli _); _ }
+        (Codex_app_server _ | Antigravity_cli _ | Claude_code _); _ }
     | None -> attempt ()
   in
   let thinking_can_be_disabled = retry_without_thinking_admitted candidate in

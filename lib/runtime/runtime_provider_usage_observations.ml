@@ -38,7 +38,6 @@ module Source_map = Map.Make (struct
       | Kimi_coding_usages_read -> 6
       | Ollama_balance_read -> 7
       | Antigravity_usage_read -> 8
-      | Muse_subscription_usage -> 9
     let compare a b = Int.compare (source_rank a) (source_rank b)
   end)
 
@@ -51,8 +50,7 @@ let empty = { windows = Window_map.empty; snapshots = Source_map.empty }
 
 let report_shape = function
   | Openrouter_key_read | Openrouter_credits_read | Zai_quota_limit_read | Kimi_coding_usages_read
-  | Ollama_balance_read | Antigravity_usage_read
-  | Muse_subscription_usage -> Complete_snapshot
+  | Ollama_balance_read | Antigravity_usage_read -> Complete_snapshot
   | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read -> Sparse_update
 ;;
@@ -69,7 +67,7 @@ let is_codex_source = function
   | Codex_account_rate_limits_updated | Codex_account_rate_limits_read -> true
   | Claude_code_rate_limit_event | Openrouter_key_read | Openrouter_credits_read
   | Zai_quota_limit_read | Kimi_coding_usages_read | Ollama_balance_read
-  | Antigravity_usage_read | Muse_subscription_usage -> false
+  | Antigravity_usage_read -> false
 ;;
 
 let same_retraction_scope source held_source =

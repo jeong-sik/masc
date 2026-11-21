@@ -120,8 +120,8 @@ let start_waiting_task ?hold_resume ~sw ~clock (config : Workspace.config) ~requ
   in
   let checkpoint =
     Keeper_semantic_execution.Official_client
-      { client_kind = Muse
-      ; runtime_id = "muse.resume"
+      { client_kind = Codex
+      ; runtime_id = "codex.resume"
       ; session_id = "resume-session"
       ; turn_id = "resume-turn"
       ; tool_surface_sha256 = Keeper_checkpoint_ref.sha256_of_canonical_bytes "resume tools"

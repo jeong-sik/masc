@@ -1,0 +1,58 @@
+name: PR python assertions (binary-free)
+
+# Why this exists (task-3908): the pull-request stage ran `changes` and
+# `type-check` (plus a skipped `request`) and no python at all, so a python
+# assertion that only depends on the repository's own fixtures was first
+# judged at release time. Release candidate 3 (run 44937662942) failed at
+# step 17 on `test/test_install_runtime_setup.py` after the fixture window
+# had drifted (#54348): every pull request in that window was green and the
+# regression surfaced only in the release candidate.
+#
+# The suites below need no built binary and no network; measured locally at
+# 2026-11-21 on main 21a49d25c841 they finish in about twelve seconds in
+# total. `test/test_setup_cli.py` is deliberately not here: it requires
+# `--binary` and `--announcer`, so it cannot run before a build.
+#
+# No path filter: a filtered workflow produces no check context for pull
+# requests outside the filter, and that absence has already kept a check from
+# becoming required once (see the header of pr-type-check.yml). The whole run
+# costs about as much as one checkout, so it runs on every pull request and
+# always reports a real conclusion.
+on:
+  workflow_dispatch: {}
+  pull_request: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-python-bin-free-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  binary-free:
+    name: python assertions without a built binary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the binary-free python suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in \
+            test/test_release_dashboard_bundle.py \
+            test/test_package_macos_runtime.py \
+            test/test_installer_dependencies.py \
+            test/test_installer_wizard.py \
+            test/test_installer_upgrade.py \
+            test/test_installer_uninstall.py \
+            test/test_install_runtime_setup.py \
+            test/test_onboarding_journey.py
+          do
+            echo "::group::${suite}"
+            python3 "${suite}" -v
+            echo "::endgroup::"
+          done

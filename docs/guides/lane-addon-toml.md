@@ -43,8 +43,8 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 
 ### 서버가 가진 Exact 패키지
 
-`package = "keeper-librarian"`처럼 이름을 적으면 서버 빌드가 함께 가진 Exact worker 패키지를 쓴다.
-이름은 `keeper-librarian`, `workspace-curator`, `candle-appraiser`, `hitl-auto-judge` 넷이다.
+`package = "candle-appraiser"`처럼 이름을 적으면 서버 빌드가 함께 가진 Exact worker 패키지를 쓴다.
+이름은 `candle-appraiser`, `hitl-auto-judge` 둘이다.
 서버는 이름을 `<base-path>/.masc/packages/<이름>-<revision>/lane.toml`로 바꿔 읽는다.
 `<revision>`은 그 서버 빌드가 가진 manifest의 값이다. 그래서 서버를 새 빌드로 바꾸면
 같은 선언이 새 revision의 폴더를 가리킨다.

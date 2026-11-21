@@ -9,10 +9,11 @@
     in that order: the log first, the declaration second.
 
     {b What this module decides, and what it does not.} It renders the bytes of
-    that declaration and nothing else. Writing them, deciding who writes them
-    and repairing a Keeper whose declaration is missing belong to the caller.
-    Keeping the shape here means the values are reviewed once, and a test can
-    hand the rendered bytes to the real loader
+    that declaration and writes them when a caller asks
+    ({!commit}). Who asks, in which order the log and the declaration are
+    written, and how a Keeper whose declaration is missing is repaired belong to
+    the caller. Keeping the shape here means the values are reviewed once, and a
+    test can hand the rendered bytes to the real loader
     ({!Keeper_types_profile_toml.inspect_keeper_toml_content}) instead of
     trusting a hand-copied fixture.
 
@@ -84,6 +85,9 @@ type error =
   (** The bytes are not a declaration the engine would load, or they name
       another Keeper. Nothing is written: a file the loader refuses would stop
       the next boot. *)
+  | Read_failed of { path : string; reason : string }
+  (** The declaration that is there now could not be read, so whether this is a
+      retry or a different declaration is unknown. *)
   | Different_declaration_present of { path : string; sha256 : string }
   (** A different declaration is already there and [~replace] was not given.
       Overwriting a Keeper's instructions is a decision, not a retry. *)
@@ -99,7 +103,15 @@ val path_for : base_path:string -> engine_name:string -> (string, error) result
 (** Write the declaration of [engine_name].
 
     The content is validated with the loader the engine uses before anything is
-    written, the file is replaced atomically, and the bytes are read back. *)
+    written, then committed through
+    [Keeper_turn_up_config_persistence.commit_declaration_at_base_path]: the
+    same manifest-then-Runtime locks, the same before-image journal and the
+    same atomic replacement a Keeper configuration write already has, and the
+    bytes are read back afterwards.
+
+    The revision is read first and handed to the commit as its expected
+    revision, so a write that lost a race with another writer is refused rather
+    than merged. *)
 val commit :
   base_path:string ->
   engine_name:string ->

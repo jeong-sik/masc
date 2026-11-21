@@ -249,9 +249,9 @@ let restore_snapshot_unlocked path = function
                  "cannot durably roll back created keeper manifest: %s"
                  (Printexc.to_string exn))))
 
-let manifest_path ~(config : Workspace.config) ~keeper_name =
+let manifest_path ~base_path ~keeper_name =
   let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
   in
   Filename.concat keepers_dir (keeper_name ^ ".toml")
 
@@ -285,17 +285,19 @@ let runtime_lock_warning = function
     Runtime_config_lock_release_unconfirmed detail
 ;;
 
-let with_current_config_revision ~config ~keeper_name project =
+(* The body reads only [base_path]: a caller that has no [Workspace.config]
+   (the multi-account account server) must be able to ask the same questions
+   without dressing a base path up as a workspace. *)
+let with_current_config_revision_at_base_path ~base_path ~keeper_name project =
   let open Result.Syntax in
   let* () = validate_keeper_name keeper_name in
-  let path = manifest_path ~config ~keeper_name in
+  let path = manifest_path ~base_path ~keeper_name in
   match
     with_manifest_lock path (fun () ->
       let open Result.Syntax in
       let* manifest = revision_of_path_unlocked path in
       let runtime_config_path =
-        Config_dir_resolver.runtime_toml_path_for_base_path
-          ~base_path:config.base_path
+        Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
       in
       let* runtime =
         Runtime.observe_keeper_assignment ~runtime_config_path ~keeper_name ()
@@ -310,8 +312,18 @@ let with_current_config_revision ~config ~keeper_name project =
   | Ok { value = Ok (value, runtime_warnings); warnings } ->
     Ok { value; warnings = warnings @ runtime_warnings }
 
+let with_current_config_revision ~config ~keeper_name project =
+  with_current_config_revision_at_base_path
+    ~base_path:config.base_path
+    ~keeper_name
+    project
+
 let current_config_revision ~config ~keeper_name =
   with_current_config_revision ~config ~keeper_name Fun.id
+  |> Result.map (fun receipt -> receipt.value)
+
+let current_config_revision_at_base_path ~base_path ~keeper_name =
+  with_current_config_revision_at_base_path ~base_path ~keeper_name Fun.id
   |> Result.map (fun receipt -> receipt.value)
 
 let full_fields
@@ -461,16 +473,15 @@ let strict_write_result = function
 
 let persist_manifest_with_publication_using ~write_manifest ~with_lock ~restore_snapshot ~restore_runtime
     ~read_revision
-    ~expected_revision ~(config : Workspace.config)
+    ~expected_revision ~base_path
     ~keeper_name ~instructions_result ~publish () =
-  let path = manifest_path ~config ~keeper_name in
+  let path = manifest_path ~base_path ~keeper_name in
   let transaction () =
     match with_lock path (fun () ->
     match
       Runtime.with_keeper_assignment_transaction
         ~runtime_config_path:
-          (Config_dir_resolver.runtime_toml_path_for_base_path
-             ~base_path:config.base_path)
+          (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
         ~keeper_name
         (fun runtime_transaction ->
       let open Result.Syntax in
@@ -497,7 +508,6 @@ let persist_manifest_with_publication_using ~write_manifest ~with_lock ~restore_
          disk and startup recovery rolls both files back to the
          pre-request state. The journal's mere presence is the recovery
          trigger — intermediate phases are bookkeeping, not authority. *)
-      let base_path = config.base_path in
       let journal_path =
         Keeper_config_journal.journal_path_for_base_path ~base_path
       in
@@ -734,7 +744,8 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot
     else Ok ()
   in
   persist_manifest_with_publication_using ~write_manifest ~with_lock
-    ~restore_snapshot ~restore_runtime ~read_revision ~expected_revision ~config
+    ~restore_snapshot ~restore_runtime ~read_revision ~expected_revision
+    ~base_path:config.base_path
     ~keeper_name:meta.name ~instructions_result ~publish ()
 
 let persist_with_publication ~expected_revision ~config ~parsed ~meta ~publish () =
@@ -779,11 +790,18 @@ let commit_configuration ~expected_revision ~config
   | Ok { value = Ok value; warnings } -> Ok { value; warnings }
 ;;
 
-let commit_declaration ~expected_revision ~config ~keeper_name ~content ~publish () =
+let commit_declaration_at_base_path
+      ~expected_revision
+      ~base_path
+      ~keeper_name
+      ~content
+      ~publish
+      ()
+  =
   match validate_keeper_name keeper_name with
   | Error detail -> Error (Invalid_keeper_name detail)
   | Ok () ->
-    let path = manifest_path ~config ~keeper_name in
+    let path = manifest_path ~base_path ~keeper_name in
     match materialization_defaults_of_content ~path content with
     | Error error -> Error (Invalid_declaration error)
     | Ok _ ->
@@ -794,7 +812,7 @@ let commit_declaration ~expected_revision ~config ~keeper_name ~content ~publish
         ~restore_snapshot:restore_snapshot_unlocked
         ~restore_runtime:Runtime.restore_keeper_assignment_transaction
         ~read_revision:revision_of_path_unlocked
-        ~expected_revision ~config ~keeper_name ~instructions_result:(Ok ())
+        ~expected_revision ~base_path ~keeper_name ~instructions_result:(Ok ())
         ~publish:(fun transaction outcome ->
           let revision : config_revision =
             { manifest = outcome.revision
@@ -803,6 +821,16 @@ let commit_declaration ~expected_revision ~config ~keeper_name ~content ~publish
           in
           Commit_then_publish ([], fun () -> publish outcome revision)) ()
       |> Result.map_error (fun error -> Configuration_error error)
+;;
+
+let commit_declaration ~expected_revision ~config ~keeper_name ~content ~publish () =
+  commit_declaration_at_base_path
+    ~expected_revision
+    ~base_path:config.base_path
+    ~keeper_name
+    ~content
+    ~publish
+    ()
 ;;
 
 let persist ~expected_revision ~config ~parsed ~meta () =

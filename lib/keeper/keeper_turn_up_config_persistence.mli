@@ -99,6 +99,12 @@ val with_current_config_revision :
   (config_revision -> 'a) ->
   ('a receipt, string) result
 
+val current_config_revision_at_base_path :
+  base_path:string -> keeper_name:string -> (config_revision, string) result
+(** The same read as {!current_config_revision} for a caller that has a base
+    path and no workspace state: it takes the manifest lock, reads the
+    declaration revision and observes the Runtime assignment. *)
+
 val persist_with_publication :
   expected_revision:config_revision ->
   config:Workspace.config ->
@@ -149,6 +155,21 @@ val commit_declaration :
     restart a lane, or settle an admitted request. Callers retain those owners
     and distinguish durable configuration from runtime application. This is
     one Keeper declaration commit, not an atomic fleet import. *)
+
+val commit_declaration_at_base_path :
+  expected_revision:config_revision ->
+  base_path:string ->
+  keeper_name:string ->
+  content:string ->
+  publish:(outcome -> config_revision -> 'a) ->
+  unit ->
+  ('a receipt, declaration_error) result
+(** {!commit_declaration} for a caller that has a base path and no workspace
+    state. Same body, same manifest-then-Runtime locks and same before-image
+    journal: only the value the path is resolved from differs, because the
+    multi-account account server builds no [Workspace.config] and must not
+    dress one up. The [Workspace.config] entry point stays for callers that
+    already hold a workspace. *)
 
 val persist :
   expected_revision:config_revision ->

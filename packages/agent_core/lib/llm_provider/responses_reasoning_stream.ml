@@ -67,10 +67,25 @@ let merge_channel current = function
         | [] -> Ok {parts;has_nonblank=Parts.exists(fun _ part->part.nonblank)parts}
         | (index,snapshot)::rest -> Result.bind(merge_part parts index snapshot)(fun parts->merge parts rest)
       in merge current.parts snapshots
+let opaque_ciphertext = function
+  | `Assoc fields ->
+    (match List.assoc_opt "encrypted_content" fields with
+     | Some (`String value) when nonblank value -> Some value
+     | _ -> None)
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+(* One response delivers an opaque reasoning item twice: the
+   [output_item.done] frame stores it first, then [response.completed] echoes
+   the whole item again. The echo can drift in envelope fields (an added
+   status, a blank versus present id, omitted empty channels) while carrying
+   the same ciphertext; OpenAI names the done item as the authoritative one to
+   replay, so equality is decided on the ciphertext projection and the stored
+   done item wins. A different ciphertext still fails closed. *)
 let item state incoming = match state.opaque,incoming with
   | Some original,Responses_reasoning.Opaque raw ->
-    if Yojson.Safe.equal original raw then Ok(state,Unchanged)
-    else Error "responses_replay:conflicting_reasoning_item"
+    (match opaque_ciphertext original,opaque_ciphertext raw with
+     | Some observed,Some replayed when String.equal observed replayed ->
+       Ok(state,Unchanged)
+     | _ -> Error "responses_replay:conflicting_reasoning_item")
   | None,Responses_reasoning.Opaque raw ->
     Ok({state with opaque=Some raw},Redact(Yojson.Safe.to_string raw))
   | Some _,Responses_reasoning.Plaintext channels ->

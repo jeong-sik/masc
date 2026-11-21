@@ -124,6 +124,7 @@ let act_text : Machine.act_answer -> string = function
   | Not_done Not_replaced -> "not replaced"
   | Not_done Turn_log_unread -> "turn log unread"
   | Not_done (Not_the_head _) -> "not the head"
+  | Not_done Not_the_faulted_line -> "not the faulted line"
   | Not_done Content_unread -> "content unread"
   | Not_done (Act_unavailable why) -> unavailable_text why
 ;;

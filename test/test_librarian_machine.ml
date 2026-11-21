@@ -264,6 +264,7 @@ let act_text : Machine.act_answer -> string = function
   | Not_done Not_replaced -> "not replaced"
   | Not_done Turn_log_unread -> "turn log unread"
   | Not_done (Not_the_head { now }) -> "not the head, now " ^ target_text now
+  | Not_done Not_the_faulted_line -> "not the faulted line"
   | Not_done Content_unread -> "content unread"
   | Not_done (Act_unavailable why) -> unavailable_text why
 ;;
@@ -282,6 +283,8 @@ let cause_text : Log.cause -> string = function
       (Turn_log.Log_id.to_string from).[0] (Turn_log.Log_id.to_string to_).[0]
   | Skip { hole = Position_lost { offset; length } } ->
     Printf.sprintf "skip: offset %d of a file of %d bytes" offset length
+  | Skip { hole = Line_unreadable { offset; sha } } ->
+    Printf.sprintf "skip: the line at %d, %s" offset (hex sha)
   | Skip { hole = Operator_skipped { by; missing } } ->
     Printf.sprintf "skip by %s, %d units missing parts" by (List.length missing)
 ;;
@@ -1674,6 +1677,84 @@ let test_restart_on_an_unread_turn_log () =
     (fiber_text (Machine.fiber_change ~before:asking ~after:same))
 ;;
 
+(* {1 Passing a line (§12.4)} *)
+
+(* A line no reader decodes, written where the turn log ends. Gives the
+   offset it starts at. *)
+let bad_row = "not json"
+
+let write_bad_line place =
+  let offset = length place in
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 (turns_path place)
+    (fun channel -> Out_channel.output_string channel (bad_row ^ "\n"));
+  offset
+;;
+
+let skip_line place value ~offset = Machine.skip_line place value ~at:400.0 ~offset
+
+(* The line stands where a turn's [Opened] would be, and the turn's [Closed]
+   names it. Reading stops on the line. The act passes it by its offset, and
+   the turn is asked about without what the line said. *)
+let test_skip_line_passes_the_line_reading_stops_on () =
+  let place = started_place () in
+  let bad = write_bad_line place in
+  let (_ : int) =
+    append place ~at_end:(length place)
+      (Turn_log.Closed
+         { turn = bad; at = 102.0; outcome = Completed; after = mark 64; unattributed = []; own = [] })
+  in
+  let asking = booted ~lane:(declared [ fast ]) place ~at:100.0 in
+  let resting =
+    step "the ask that met the line" place asking
+      (ended asking 1 (Input_fault (Line_unreadable { offset = bad })))
+      ~state:"resting, holding: " ~fiber:"cancel"
+  in
+  let same, answer = skip_line place resting ~offset:(bad + 1) in
+  check string "an offset that is not the line's" "not the faulted line" (act_text answer);
+  check string "leaves how the last ask ended"
+    (Printf.sprintf "input fault: line at %d" bad)
+    (last_read_text same);
+  let passed, answer = skip_line place resting ~offset:bad in
+  check string "the line's offset" "done" (act_text answer);
+  check string "asks about the turn the line opened" "asking #2, holding: " (state_text passed);
+  check string "and forgets how the last ask ended" "none" (last_read_text passed);
+  let line = last_commit passed in
+  check string "the line says which line was passed"
+    (Printf.sprintf "skip: the line at %d, %s" bad (hex (Digest.digest_of_bytes bad_row)))
+    (cause_text line.cause);
+  check int "reading goes on just past it" (bad + String.length bad_row + 1) line.turn_log_offset;
+  let same, answer = skip_line place passed ~offset:bad in
+  check string "a line reading stands past" "not the faulted line" (act_text answer);
+  check string "leaves the ask out" "keep"
+    (fiber_text (Machine.fiber_change ~before:passed ~after:same))
+;;
+
+(* The act passes nothing but the line reading stops on now: not a line
+   behind a unit with items, not a line of another turn log, and nothing of
+   a file that cannot be read or under a store that is stopped. *)
+let test_skip_line_passes_no_other_line () =
+  let place, asking = asking_place () in
+  let bad = write_bad_line place in
+  let same, answer = skip_line place asking ~offset:bad in
+  check string "a unit with items comes first" "not the faulted line" (act_text answer);
+  check string "leaves the ask out" "keep"
+    (fiber_text (Machine.fiber_change ~before:asking ~after:same));
+  replace_turn_log place ~id:other_log;
+  let bad = write_bad_line place in
+  let (_ : Machine.t), answer = skip_line place asking ~offset:bad in
+  check string "another turn log is restarted, not passed" "not the faulted line"
+    (act_text answer);
+  Sys.remove (turns_path place);
+  Unix.mkdir (turns_path place) 0o700;
+  let (_ : Machine.t), answer = skip_line place asking ~offset:bad in
+  check string "a file that cannot be read now" "turn log unread" (act_text answer);
+  let stopped_place = new_place () in
+  let (_ : Machine.t), answer =
+    skip_line stopped_place (booted stopped_place ~at:100.0) ~offset:0
+  in
+  check string "a stopped store" "the store is stopped: store unwritable" (act_text answer)
+;;
+
 let () =
   run "librarian_machine"
     [ "boot", [ test_case "opens or stops, and asks" `Quick test_boot ]
@@ -1761,6 +1842,9 @@ let () =
         ; test_case "a restart forgets widths and size facts" `Quick
             test_restart_forgets_widths_and_size_facts
         ; test_case "a restart on an unread turn log" `Quick test_restart_on_an_unread_turn_log
+        ; test_case "a skip of the line reading stops on" `Quick
+            test_skip_line_passes_the_line_reading_stops_on
+        ; test_case "a skip of any other line" `Quick test_skip_line_passes_no_other_line
         ] )
     ]
 ;;

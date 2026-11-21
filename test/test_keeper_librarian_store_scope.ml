@@ -409,6 +409,7 @@ let act_text : Act.answer -> string = function
     ^ (match now with
        | Some target -> Yojson.Safe.to_string (Act.target_json target)
        | None -> "none")
+  | Refused Not_the_faulted_line -> "refused: not the faulted line"
   | Refused Content_unread -> "refused: content unread"
   | Refused (Act_unavailable (Store_stopped stop)) -> "refused: stopped: " ^ stop_text stop
   | Refused (Act_unavailable Keeper_retired) -> "refused: keeper not registered"
@@ -429,6 +430,7 @@ let test_act_route_and_requests () =
     | Ok (Restart_reading { observed }) ->
       "restart " ^ Masc.Keeper_turn_log.Log_id.to_string observed
     | Ok (Skip_item { target }) -> "skip " ^ Yojson.Safe.to_string (Act.target_json target)
+    | Ok (Skip_line { offset }) -> Printf.sprintf "skip the line at %d" offset
     | Error (_ : string) -> "refused"
   in
   let log_id = String.make 32 'e' in
@@ -476,7 +478,14 @@ let test_act_route_and_requests () =
           {|{"action":"skip_item","target":{"kind":"unreadable_unit","turn_log":"%s","line":1,"store":"chat","at":0}}|}
           log_id));
   check string "a skip with a turn log id instead" "refused"
-    (parsed (Printf.sprintf {|{"action":"skip_item","observed":"%s"}|} log_id))
+    (parsed (Printf.sprintf {|{"action":"skip_item","observed":"%s"}|} log_id));
+  check string "a skip of a line names its offset, in any order" "skip the line at 4096"
+    (parsed {|{"offset":4096,"action":"skip_line"}|});
+  check string "a line skip without its offset" "refused" (parsed {|{"action":"skip_line"}|});
+  check string "a negative line offset" "refused" (parsed {|{"action":"skip_line","offset":-1}|});
+  check string "an offset that is not a number" "refused"
+    (parsed {|{"action":"skip_line","offset":"4096"}|});
+  check string "an offset on another action" "refused" (parsed {|{"action":"resume","offset":0}|})
 ;;
 
 (* The Keeper's turn log is replaced from outside. Reading stands in the old
@@ -527,6 +536,45 @@ let test_operator_restarts_reading () =
   check int "one line was appended" (before + 1) (List.length (commits a));
   check string "the file it now reads" "refused: not replaced"
     (act_text (act (Restart_reading { observed = replaced })))
+;;
+
+(* A line that does not decode stands where the Keeper's turn log ends, and
+   reading stops on it. The operator passes it by its offset. *)
+let test_operator_skips_a_line () =
+  with_workspace @@ fun a ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.ensure_memory_writer ~sw ~config:a keeper_name;
+  let act action = Act.act ~base_path:a.base_path ~keeper:keeper_name ~actor:"operator-1" action in
+  let turns_path =
+    Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir:(Workspace.keepers_runtime_dir a)
+      ~keeper_id:keeper_name
+  in
+  let row = "not json" in
+  let offset =
+    match Fs_compat.file_size turns_path with
+    | Some length -> length
+    | None -> fail "the Keeper has no turn log"
+  in
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 turns_path
+    (fun channel -> Out_channel.output_string channel (row ^ "\n"));
+  check string "an offset that is not the line's" "refused: not the faulted line"
+    (act_text (act (Skip_line { offset = offset + 1 })));
+  let before = List.length (commits a) in
+  check string "the line's offset" "open" (act_text (act (Skip_line { offset })));
+  (match List.rev (commits a) with
+   | last_line :: _ ->
+     (match last_line.cause with
+      | Skip { hole = Line_unreadable { offset = passed; sha } } ->
+        check (pair int string) "the line names the line and its bytes"
+          (offset, hex (Digest.digest_of_bytes row))
+          (passed, hex sha);
+        check int "and reading goes on just past it" (offset + String.length row + 1)
+          last_line.turn_log_offset
+      | Direct _ | Read _ | Make_room _ | Adopt _ | Skip _ -> fail "the last commit line is not the skip")
+   | [] -> fail "nothing was committed");
+  check int "one line was appended" (before + 1) (List.length (commits a));
+  check string "the same offset again" "refused: not the faulted line"
+    (act_text (act (Skip_line { offset })))
 ;;
 
 (* The snapshot is replaced from outside by one the commit log does not
@@ -626,6 +674,7 @@ let () =
         ; test_case "the operator's act route and its requests" `Quick test_act_route_and_requests
         ; test_case "an operator restarts reading on a replaced turn log" `Quick
             test_operator_restarts_reading
+        ; test_case "an operator skips a line reading stops on" `Quick test_operator_skips_a_line
         ; test_case "an operator resumes and adopts a stopped store" `Quick
             test_operator_resumes_and_adopts
         ; test_case "an operator's action in a process without writers" `Quick

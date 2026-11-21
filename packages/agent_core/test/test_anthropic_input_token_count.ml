@@ -390,18 +390,88 @@ let test_anthropic_tool_result_content_projection () =
     tool_result_projection_cases
 ;;
 
+(* Kimi declares no document input: [kimi_capabilities] inherits
+   [default_capabilities.supports_document_input = false], so the projection that
+   runs before either request builder serializes anything replaces an
+   unrepresentable document with a named text note — inside a tool result's
+   content blocks too. That is the canonical Kimi wire for this history, and both
+   [build_request] and [build_count_tokens_request] produce it identically
+   (they share [project_history]).
+
+   The oracle spells the replacement out literally rather than trailing
+   [Api_common.degrade_document_messages], so a change to the note text or to
+   where the omission happens fails this test instead of moving with it. *)
+let kimi_document_omitted_note media_type =
+  Printf.sprintf
+    "[document omitted: this model does not accept document input (media_type %s)]"
+    media_type
+;;
+
+let rec as_kimi_wire_block block =
+  match block with
+  | Document { media_type; _ } -> Text (kimi_document_omitted_note media_type)
+  | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
+    ToolResult { result with content_blocks = Some (List.map as_kimi_wire_block blocks) }
+  | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+    | Image _ | Audio _) as other -> other
+;;
+
 let test_kimi_tool_result_content_unchanged () =
   let open Yojson.Safe.Util in
   let cfg = kimi_config "https://api.kimi.com/coding" in
   List.iter (fun (label, block) ->
     let messages = messages_with_tool_result_data block in
-    let expected = `List (List.map Api_common.kimi_message_to_json messages) in
-    List.iter (fun body ->
-      check bool (label ^ " keeps the existing Kimi message wire") true
-        (Yojson.Safe.from_string body |> member "messages" = expected))
+    let expected =
+      `List
+        (List.map
+           (fun (message : message) ->
+              Api_common.kimi_message_to_json
+                { message with content = List.map as_kimi_wire_block message.content })
+           messages)
+    in
+    let bodies =
       [ Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] ()
       ; Backend_anthropic.build_count_tokens_request ~config:cfg ~messages ~tools:[ tool ] ()
-      ]) tool_result_projection_cases
+      ]
+    in
+    let wires =
+      List.map (fun body -> Yojson.Safe.from_string body |> member "messages") bodies
+    in
+    (* Both request builders share [project_history] and the same Kimi message
+       serializer, so a divergence between them would mean one path skipped the
+       projection. Pin that agreement here rather than inferring it from the
+       oracle. *)
+    (match wires with
+     | [ completion_wire; count_wire ] ->
+       check bool (label ^ " both Kimi request builders agree") true
+         (Yojson.Safe.equal completion_wire count_wire)
+     | _ -> fail "expected exactly two request bodies");
+    List.iter
+      (fun actual ->
+        check bool (label ^ " keeps the existing Kimi message wire") true
+          (Yojson.Safe.equal actual expected);
+        (* The omission is named, not silently relabelled into another modality:
+           the same slot is a text block carrying the note. *)
+        let tool_content =
+          actual |> to_list |> List.rev |> List.hd |> member "content" |> to_list
+          |> List.hd |> member "content" |> to_list
+        in
+        let notes =
+          List.filter_map
+            (fun item ->
+               match item |> member "type" |> to_string with
+               | "text" ->
+                 let text = item |> member "text" |> to_string in
+                 if String.length text >= 18 && String.sub text 0 18 = "[document omitted:"
+                 then Some text
+                 else None
+               | _ -> None)
+            tool_content
+        in
+        check (list string) (label ^ " names the dropped document literally")
+          [ kimi_document_omitted_note "application/pdf" ] notes)
+      wires)
+    tool_result_projection_cases
 ;;
 
 let combinator_tool =

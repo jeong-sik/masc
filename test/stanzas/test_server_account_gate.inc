@@ -8,4 +8,4 @@
 (test
  (name test_server_account_gate)
  (modules test_server_account_gate)
- (libraries alcotest httpun masc.masc_types masc.server yojson))
+ (libraries alcotest httpun masc masc.masc_types masc.server yojson))

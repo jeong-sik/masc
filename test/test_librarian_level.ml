@@ -133,6 +133,7 @@ let alarm_text : Level.alarm -> string = function
   | E4 -> "E4"
   | E5 -> "E5"
   | W1 -> "W1"
+  | W2 -> "W2"
   | W3 -> "W3"
 ;;
 
@@ -146,7 +147,9 @@ let check_alarms label expected writer =
   check (list string) label expected (List.map alarm_text (Level.alarms writer))
 ;;
 
-let running ?(unread = true) value = Level.Running { machine = value; unread }
+let running ?(unread = true) ?(request_behind = false) value =
+  Level.Running { machine = value; unread; request_behind }
+;;
 
 let test_e1_a_stopped_store () =
   check_alarms "a stopped store" [ "E1" ] (running ~unread:false (machine (Stopped Store_unwritable)))
@@ -223,6 +226,14 @@ let test_w1_booting_and_an_unread_turn_not_judged () =
   check_alarms "a read committed" [] (running (machine ~last_read:Committed (idle ())))
 ;;
 
+(* W2 is the caller's to read (§11.3): on exactly when it says the latest
+   request starts past the read end, and before W3 in the order of the alarms. *)
+let test_w2_a_request_past_the_read_end () =
+  check_alarms "a request past the read end" [ "W2"; "W3" ]
+    (running ~unread:false ~request_behind:true
+       (machine ~last_read:Committed ~read_alone:true (idle ())))
+;;
+
 let test_w3_an_item_read_alone () =
   check_alarms "read alone" [ "W3" ]
     (running ~unread:false (machine ~last_read:Committed ~read_alone:true (idle ())))
@@ -233,7 +244,7 @@ let test_a_retired_writer_has_no_alarm () = check_alarms "retired" [] Retired
 let test_the_level () =
   let level alarms = level_text (Level.level alarms) in
   check string "no alarm" "ok" (level []);
-  check string "only warnings" "warn" (level [ W1; W3 ]);
+  check string "only warnings" "warn" (level [ W1; W2; W3 ]);
   List.iter
     (fun alarm ->
        check string (alarm_text alarm ^ " beside a warning") "error" (level [ alarm; W1 ]))
@@ -252,6 +263,7 @@ let () =
         ; test_case "E5, a room that fits no slot now" `Quick test_e5_a_room_that_fits_no_slot_now
         ; test_case "W1, booting and an unread turn not judged" `Quick
             test_w1_booting_and_an_unread_turn_not_judged
+        ; test_case "W2, a request past the read end" `Quick test_w2_a_request_past_the_read_end
         ; test_case "W3, an item read alone" `Quick test_w3_an_item_read_alone
         ; test_case "a retired writer has none" `Quick test_a_retired_writer_has_no_alarm
         ] )

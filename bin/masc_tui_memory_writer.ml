@@ -40,6 +40,11 @@ let alarm_text ~ko : Level.alarm -> string = function
       "E5 Memory 가 선언한 어느 slot 에도 들어가지 않음"
       "E5 Memory fits no declared slot"
   | Level.W1 -> text ~ko "W1 안 읽은 것을 아직 읽지 못함" "W1 unread is not read yet"
+  | Level.W2 ->
+    text
+      ~ko
+      "W2 Memory 에도 요청에도 없는 메시지가 있음"
+      "W2 some messages are in neither Memory nor the request"
   | Level.W3 ->
     text
       ~ko

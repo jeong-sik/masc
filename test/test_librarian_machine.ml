@@ -1433,12 +1433,13 @@ let alarm_text : Level.alarm -> string = function
   | E4 -> "E4"
   | E5 -> "E5"
   | W1 -> "W1"
+  | W2 -> "W2"
   | W3 -> "W3"
 ;;
 
 (* The alarms of a writer with something unread. *)
 let alarms_of (value : Machine.t) =
-  List.map alarm_text (Level.alarms (Level.Running { machine = value; unread = true }))
+  List.map alarm_text (Level.alarms (Level.Running { machine = value; unread = true; request_behind = false }))
 ;;
 
 (* E4 reads the refusal the last ask left, not the writer's state: it stays

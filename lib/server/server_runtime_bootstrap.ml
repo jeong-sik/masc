@@ -1605,8 +1605,6 @@ let start_post_ready_owner_lanes
     ~run:(fun () -> startup_prune_jsonl state);
   start_maintenance ~sw ~task:Microvm_guest_sweep
     ~run:(fun () -> startup_sweep_microvm_guests state);
-  start_maintenance ~sw ~task:Unowned_exact_sweep
-    ~run:(fun () -> startup_sweep_unowned_exact state);
   start_maintenance ~sw ~task:Superseded_lane_census
     ~run:(fun () -> startup_count_superseded_lanes state);
   Server_runtime_startup_maintenance.report_unknown_typesafeai_exclusions

@@ -70,12 +70,17 @@ type resource_target =
   | Wiki_page_markdown of string
   | Wiki_page_json of string
   | World_memory_claims
+  | World_memory_digest
+  | World_memory_index
+  | World_memory_fact of string
   | World_memory_log
   | Keeper_memory of string
   | Keeper_memory_health of string
   | Unknown of string
 
 let world_memory_claims_uri = "masc://world-memory/claims"
+let world_memory_digest_uri = "masc://world-memory/digest"
+let world_memory_index_uri = "masc://world-memory/index"
 let world_memory_log_uri = "masc://world-memory/log"
 
 let parse_resource_target resource_id =
@@ -106,9 +111,13 @@ let parse_resource_target resource_id =
     else
       Wiki_page_markdown rest
   | "world-memory/claims" -> World_memory_claims
+  | "world-memory/digest" -> World_memory_digest
+  | "world-memory/index" -> World_memory_index
   | "world-memory/log" -> World_memory_log
   | s ->
     (match String.split_on_char '/' s with
+     | [ "world-memory"; "facts"; raw_id ] when raw_id <> "" ->
+       World_memory_fact (Uri.pct_decode raw_id)
      | [ "keepers"; raw_keeper; "memory" ] when raw_keeper <> "" ->
        Keeper_memory (Uri.pct_decode raw_keeper)
      | [ "keepers"; raw_keeper; "memory"; "health" ] when raw_keeper <> "" ->
@@ -138,7 +147,12 @@ let notify_resource_updated uris =
 ;;
 
 let notify_world_memory_updated () =
-  notify_resource_updated [ world_memory_claims_uri; world_memory_log_uri ]
+  notify_resource_updated
+    [ world_memory_claims_uri
+    ; world_memory_digest_uri
+    ; world_memory_index_uri
+    ; world_memory_log_uri
+    ]
 ;;
 
 let validate_keeper_name keeper =
@@ -172,6 +186,103 @@ let briefing_to_json = function
 (* Storage read/decode errors have no narrower variant in [Mcp_error_code.t]
    than [Internal_error] (unlike malformed URIs or unknown keepers, which use
    [Invalid_params]). *)
+let read_world_memory_mvcc_claims_json ~base_path =
+  match World_memory_store.read_snapshot ~include_inactive:false ~base_path () with
+  | Ok { facts; edges; digest = digest_opt; _ } ->
+    let digest_json =
+      match digest_opt with
+      | None -> `Assoc [ "status", `String "pending" ]
+      | Some d ->
+        `Assoc
+          [ "status", `String "current"
+          ; "digest_revision", `Int d.digest_revision
+          ; "digest_sha256", `String d.digest_sha256
+          ; "text", `String d.rendered
+          ]
+    in
+    Ok
+      (`Assoc
+         [ "status", `String "available"
+         ; "backend", `String "sqlite_wal_mvcc"
+         ; "fact_count", `Int (List.length facts)
+         ; "claims", `List (List.map World_memory_types.world_fact_to_json facts)
+         ; "edges", `List (List.map World_memory_types.world_edge_to_json edges)
+         ; "briefing", digest_json
+         ])
+  | Error err ->
+    Error (Mcp_error_code.Internal_error, World_memory_store.error_to_string err)
+;;
+
+let read_world_memory_digest_json ~base_path =
+  match World_memory_store.latest_digest ~base_path with
+  | Error err -> Error (Mcp_error_code.Internal_error, World_memory_store.error_to_string err)
+  | Ok None ->
+    Ok
+      (`Assoc
+         [ "status", `String "missing"
+         ; "backend", `String "sqlite_wal_mvcc"
+         ; "digest", `Null
+         ])
+  | Ok (Some digest) ->
+    Ok
+      (`Assoc
+         [ "status", `String "available"
+         ; "backend", `String "sqlite_wal_mvcc"
+         ; "digest", World_memory_types.world_digest_to_json digest
+         ])
+;;
+
+let read_world_memory_index_json ~base_path =
+  match World_memory_store.list_index ~base_path () with
+  | Error err -> Error (Mcp_error_code.Internal_error, World_memory_store.error_to_string err)
+  | Ok entries ->
+    Ok
+      (`Assoc
+         [ "status", `String (if entries = [] then "empty" else "available")
+         ; "backend", `String "sqlite_wal_mvcc"
+         ; "count", `Int (List.length entries)
+         ; "entries", `List (List.map World_memory_types.index_entry_to_json entries)
+         ])
+;;
+
+let read_world_memory_fact_json ~base_path ~fact_id =
+  match World_memory_store.read_fact_with_edges ~base_path ~fact_id with
+  | Error err ->
+    Error (Mcp_error_code.Internal_error, World_memory_store.error_to_string err)
+  | Ok None -> Ok None
+  | Ok (Some (fact, edges)) ->
+    Ok
+      (Some
+         (`Assoc
+            [ "status", `String "available"
+            ; "backend", `String "sqlite_wal_mvcc"
+            ; "fact", World_memory_types.world_fact_to_json fact
+            ; "edges", `List (List.map World_memory_types.world_edge_to_json edges)
+            ]))
+;;
+
+let read_world_memory_mvcc_log_json ~since_seq ~limit ~base_path =
+  match World_memory_store.read_change_log ~base_path ~since_seq ~limit with
+  | Error err -> Error (Mcp_error_code.Internal_error, World_memory_store.error_to_string err)
+  | Ok (events, last_seq) ->
+    let next_since_seq =
+      match List.rev events with
+      | last :: _ -> last.seq
+      | [] -> since_seq
+    in
+    Ok
+      (`Assoc
+         [ "schema", `String "world.memory.log.v2"
+         ; "backend", `String "sqlite_wal_mvcc"
+         ; "last_committed_seq", `Int last_seq
+         ; "since_seq", `Int since_seq
+         ; "limit", `Int limit
+         ; "has_more", `Bool (next_since_seq < last_seq)
+         ; "next_since_seq", `Int next_since_seq
+         ; "committed_changes", `List (List.map World_memory_types.change_event_to_json events)
+         ])
+;;
+
 let rec read_world_memory_claims_json ?(attempt = 1) ~briefing_template ~base_path () =
   match Workspace_memory_ledger.observe_with_briefing_template ~briefing_template ~base_path with
   | Workspace_memory_ledger.Missing ->
@@ -1095,14 +1206,33 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
           | Wiki_page_markdown topic -> read_wiki_resource ~is_json:false ~topic
           | Wiki_page_json topic -> read_wiki_resource ~is_json:true ~topic
           | World_memory_claims ->
-              let briefing_template =
-                (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective
-              in
-              (match
-                 run_blocking_resource_result (fun () ->
-                   read_world_memory_claims_json ~briefing_template ~base_path:config.base_path ())
-               with
+              if World_memory_store.exists ~base_path:config.base_path then
+                (match read_world_memory_mvcc_claims_json ~base_path:config.base_path with
+                 | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                 | Error err -> Error err)
+              else
+                let briefing_template =
+                  (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective
+                in
+                (match
+                   run_blocking_resource_result (fun () ->
+                     read_world_memory_claims_json ~briefing_template ~base_path:config.base_path ())
+                 with
+                 | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                 | Error err -> Error err)
+          | World_memory_digest ->
+              (match read_world_memory_digest_json ~base_path:config.base_path with
                | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+               | Error err -> Error err)
+          | World_memory_index ->
+              (match read_world_memory_index_json ~base_path:config.base_path with
+               | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+               | Error err -> Error err)
+          | World_memory_fact fact_id ->
+              (match read_world_memory_fact_json ~base_path:config.base_path ~fact_id with
+               | Ok None -> Ok None
+               | Ok (Some json) ->
+                 Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
                | Error err -> Error err)
           | World_memory_log ->
               let since_seq = max 0 (Mcp_server.int_query_param uri "since_seq" ~default:0) in
@@ -1110,12 +1240,17 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                 min max_world_memory_log_limit
                   (max 1 (Mcp_server.int_query_param uri "limit" ~default:default_world_memory_log_limit))
               in
-              (match
-                 run_blocking_resource_result (fun () ->
-                   read_world_memory_log_json ~since_seq ~limit ~base_path:config.base_path)
-               with
-               | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
-               | Error err -> Error err)
+              if World_memory_store.exists ~base_path:config.base_path then
+                (match read_world_memory_mvcc_log_json ~since_seq ~limit ~base_path:config.base_path with
+                 | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                 | Error err -> Error err)
+              else
+                (match
+                   run_blocking_resource_result (fun () ->
+                     read_world_memory_log_json ~since_seq ~limit ~base_path:config.base_path)
+                 with
+                 | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                 | Error err -> Error err)
           | Keeper_memory keeper ->
               (match read_keeper_memory_json ~config ~caller ~keeper with
                | Ok None -> Ok None

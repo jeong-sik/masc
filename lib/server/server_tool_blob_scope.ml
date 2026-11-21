@@ -200,6 +200,7 @@ let workspace =
     ; no_reference Published_artifact_check_store.dirname
     ; no_reference Run_eio.runs_dirname
     ; no_reference Tool_metrics_store.database_filename
+    ; no_reference World_memory_store.database_filename
     ; no_reference Workspace_memory_ledger.dirname
     ; no_reference Presentation_runtime_dependencies.runtime_tools_dirname
     ]

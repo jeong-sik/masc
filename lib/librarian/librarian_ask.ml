@@ -329,8 +329,15 @@ let ask env (input : input) =
   let* ({ units; reach; trace; offered } : Librarian_question_units.contents) =
     read_range input ~width range
   in
+  let world_index =
+    match shows with
+    | Librarian_question.With_memory _ ->
+      World_memory.read_index_snapshot_for_librarian ~base_path:input.stores.base_path
+    | Librarian_question.Item_alone -> None
+  in
   match
-    Librarian_question.make ~lane:input.lane.question ~from:tail ~shows ~reach ~trace ~offered units
+    Librarian_question.make ?world_index ~lane:input.lane.question ~from:tail ~shows ~reach ~trace
+      ~offered units
   with
   | Nothing_readable { reach; missing } ->
     Ok (Read_result.Nothing_readable { reach; missing; offered })

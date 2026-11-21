@@ -30,6 +30,10 @@ let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
       ~ask_room
       ~start_turn_log
   in
+  Librarian_writers.set_world_promotions_callback table
+    (Some
+       (fun ~keeper_id promotions ->
+          World_memory.promote_from_librarian ~base_path ~keeper_id promotions));
   update (By_workspace.add key table);
   Keeper_compaction.set_on_epoch_committed
     (Some

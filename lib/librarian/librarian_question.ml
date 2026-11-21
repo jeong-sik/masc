@@ -21,6 +21,7 @@ type made =
 let label_question = "question: "
 let label_memory = "memory: "
 let label_working_state = "working_state: "
+let label_world_index = "world_index: "
 let label_units = "units: "
 let label_make_room = "make_room: "
 let label_question_end = "question-end: "
@@ -408,7 +409,7 @@ type shows =
   | With_memory of Current.t
   | Item_alone
 
-let make ~(lane : Librarian_memory_lane.question_side) ~from ~shows ~reach ~trace ~offered units =
+let make ?world_index ~(lane : Librarian_memory_lane.question_side) ~from ~shows ~reach ~trace ~offered units =
   let missing = Read_unit.missing_at units in
   if not (List.exists has_item units)
   then Nothing_readable { reach; missing }
@@ -417,13 +418,21 @@ let make ~(lane : Librarian_memory_lane.question_side) ~from ~shows ~reach ~trac
     let names = List.mapi (fun index (read : Read_unit.t) -> unit_name index, read.line) units in
     (* A question of the item alone has neither Memory line, so its front
        half is the question side's alone and Memory changing leaves its id
-       as it was (§7.4). *)
+       as it was (§7.4). When a read-only World Memory Index snapshot is
+       provided for a [With_memory] question, it rides beside working_state
+       so Keepers avoid duplicate world assertions. *)
+    let world_lines =
+      match world_index with
+      | Some snapshot when String.trim snapshot <> "" ->
+        [ json_line label_world_index (`String snapshot) ]
+      | Some _ | None -> []
+    in
     let schema, memory_lines, (shown : Librarian_plan.read) =
       match shows with
       | Item_alone -> lane.answer_schemas.item_alone, [], Item_alone { units = names }
       | With_memory memory ->
         let table, lines = memory_and_working_state ~from memory in
-        lane.answer_schemas.range, lines, Range { memory = table; units = names }
+        lane.answer_schemas.range, lines @ world_lines, Range { memory = table; units = names }
     in
     let id =
       Librarian_question_id.of_digests

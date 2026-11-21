@@ -475,6 +475,31 @@ class AssembleIntoTests(unittest.TestCase):
         self.assertTrue(fragment.exists())
         self.assertEqual(self.changelog.read_bytes(), before)
 
+    def test_into_unreleased_refused_and_nothing_is_touched(self) -> None:
+        # The gap slice assumes the target section comes after [Unreleased];
+        # --into Unreleased would silently reorder sections, so it must be
+        # refused with fragments and changelog both intact.
+        fragment = self.frag_dir / "21.md"
+        fragment.write_text("### Fixed\n\n- Repair (#21).\n", encoding="utf-8")
+        before = self.changelog.read_bytes()
+        res = self.assemble_into("Unreleased")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("must come after '## [Unreleased]'", res.stderr)
+        self.assertTrue(fragment.exists())
+        self.assertEqual(self.changelog.read_bytes(), before)
+
+    def test_assemble_replaces_changelog_atomically_and_leaves_no_temp(self) -> None:
+        (self.frag_dir / "22.md").write_text(
+            "### Added\n\n- Atomic fold (#22).\n", encoding="utf-8"
+        )
+        res = self.assemble_into("0.2.0")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("- Atomic fold (#22).", self.section_body("0.2.0"))
+        # The fold went through a sibling temp file and os.replace: no
+        # *.tmp litter may survive a successful run.
+        self.assertFalse((self.root / "CHANGELOG.md.tmp").exists())
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
+
     def test_exempt_only_deletes_and_leaves_changelog_unchanged(self) -> None:
         (self.frag_dir / "4.md").write_text(
             "### Exempt\n\n- Docs only (#4).\n", encoding="utf-8"

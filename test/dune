@@ -3333,6 +3333,7 @@
 (include stanzas/test_keeper_latched_reason.inc)
 
 (include stanzas/test_keeper_execution_join.inc)
+(include stanzas/test_keeper_external_attention_librarian_sources.inc)
 (include stanzas/test_full_health_wakeup.inc)
 (include stanzas/test_proactive_refresh_changes.inc)
 (include stanzas/test_server_observation_input.inc)

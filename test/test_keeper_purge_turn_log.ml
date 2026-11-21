@@ -214,6 +214,31 @@ let test_a_recovery_names_what_it_drops =
     check int "with nothing open" 0 installed.open_messages
 ;;
 
+(* The Librarian lane that reads atoms keeps its read position in
+   [librarian-progress.json]. A purge neither reads nor writes that file
+   (RFC librarian-call-only-proposes §5.6): one that does not decode does
+   not stop a recovery, and the recovery leaves it byte for byte. *)
+let test_a_recovery_leaves_the_librarian_position_file =
+  with_keeper
+  @@ fun ~config ~trace_id ->
+  write_head ~boundary:Agent_core.Checkpoint_objects.Turn_continues config trace_id broken;
+  start_log config trace_id;
+  let position_path =
+    Keeper_librarian_progress.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+  in
+  let undecodable = "not a position\n" in
+  Fs_compat.mkdir_p (Filename.dirname position_path);
+  Fs_compat.save_file position_path undecodable;
+  (match Checkpoints.purge_current config ~keeper_name ~apply:true with
+   | Error error -> fail (Checkpoints.purge_error_to_string error)
+   | Ok result ->
+     check bool "applied" true result.applied;
+     check bool "the recovery dropped messages" true
+       (result.report.messages_after < result.report.messages_before));
+  check string "the position file is as it was" undecodable (Fs_compat.load_file position_path)
+;;
+
 let test_a_purge_against_an_unreadable_turn_log_replaces_nothing =
   with_keeper
   @@ fun ~config ~trace_id ->
@@ -479,6 +504,8 @@ let () =
   run "keeper_purge_turn_log"
     [ ( "dashboard purge"
       , [ test_case "a recovery names what it drops" `Quick test_a_recovery_names_what_it_drops
+        ; test_case "a recovery leaves the Librarian position file" `Quick
+            test_a_recovery_leaves_the_librarian_position_file
         ; test_case "a purge against a turn log it cannot read replaces nothing" `Quick
             test_a_purge_against_an_unreadable_turn_log_replaces_nothing
         ; test_case "a rewrite writes no line" `Quick test_a_rewrite_writes_no_line

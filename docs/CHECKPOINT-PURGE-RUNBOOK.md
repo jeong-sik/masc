@@ -25,6 +25,10 @@ that atom, so these pass through byte-exact:
   history. The request sends the working state in place of those atoms, so
   leaving them costs disk only.
 
+The tool reads the turn-boundary log and the working state for this. It does
+not read the Librarian position: a position names the last atom or the atom
+a completed turn ended on, and the first two rules keep both.
+
 After the rewrite the tool checks the atom count, each kept opening message
 and the working state, and installs nothing if any of them moved. A
 structurally broken checkpoint is recovered: the offending cycle and
@@ -130,6 +134,18 @@ dashboard's checkpoint list fills again as the keeper saves.
 | the keeper's turn log, or the head it is compared with, does not read | which messages the Memory writer still reads from the head is unknown; it is never taken as "no turn log" | leave both files untouched and report the keeper and the error |
 | the Librarian working state fits the history before the purge and not after it | a recovery dropped a tail the working state covers | with the server stopped, remove `<runtime keepers dir>/<keeper>/librarian-continuity.json`, then purge; the Librarian writes it again from atom 0 |
 | structural validation fails even with its break set aside | the write boundary admitted a history recovery cannot cut back to a sound prefix (#25443) | leave the file untouched and record the trace and error in #25443 |
+
+## After a recovery
+
+A recovery ends the history at the structural break. It does not move the
+read position of the Librarian lane that reads atoms
+(`<runtime keepers dir>/<keeper>/librarian-progress.json`). When the history
+now ends ahead of that position, that lane stops on the keeper and Memory
+health shows
+`librarian position trace=… end_atom=N does not match checkpoint atoms=M`.
+The keeper runs on the recovered checkpoint, and the Memory writer that reads
+the turn log goes on from the recovery's `Reset` line. Leave the position
+file untouched and report the keeper and that error.
 
 ## Live resume after a purge
 

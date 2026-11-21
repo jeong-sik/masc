@@ -82,7 +82,9 @@
     nothing back either. A working state that covers the dropped tail no longer
     fits, and the recovery is refused; with the server stopped, removing that
     working state (the keeper's [librarian-continuity.json]) lets it through,
-    and the Librarian writes it again from atom 0.
+    and the Librarian writes it again from atom 0. The Librarian position is
+    not read or moved: one left past the new end stops the next round of the
+    lane that reads atoms ([Keeper_librarian_range.Position_mismatch]).
 
     Tool protocol cycles are never split, reordered, or dropped. The last
     [keep_recent_messages] messages and the structurally protected suffix

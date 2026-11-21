@@ -1864,6 +1864,12 @@ tinker 없는 lane, 모두 GLM 속도인 재생에서 run limit L 을 바꿨다.
 하드컷이다. 새 빌드는 옛 Librarian 파일을 읽지 않는다. 옮기는 단계도, 치워 두는 단계도 없다.
 절차는 [DURABLE-STORE-HARD-CUT](../guides/DURABLE-STORE-HARD-CUT.md) 의 네 단계를 따른다. 서버를 세우고 띄우는 명령은 운영자가 친다.
 
+컷은 stack 하나로 한 번에 병합된다(§20.1). 운영자는 서버를 한 번 세운다. 옛 `workspace-curator` add-on 을 지우는 층이 같은 stack 에 있다. 아래 단계는 그 add-on 의 것까지 같은 정지에서 한다.
+
+`librarian_memory` lane 의 표는 컷 전에 미리 적지 않는다. 2단계에서 처음 적는다. 표가 없는 설정에서 그 lane 은 `Lane_unconfigured` 로 풀리고 새 Librarian 은 묻지 않는다. 그래서 새 Librarian 이 운영에서 처음 묻는 때는 이 설치 직후다.
+
+새 두 파일(턴 기록과 반영 기록)은 컷에서 처음 생기지 않는다. 앞 층이 먼저 설치돼 운영에는 턴 기록이 2026-11-19 부터, 반영 기록이 2026-11-20 부터 있다. 쓰는 쪽도 그때부터 boot 해 있고, lane 표가 없어서 묻지 않았다. 이 설치가 lane 표를 처음 적으면 그 쓰는 쪽이 밀린 턴을 읽기 시작한다. 두 파일은 지우지 않는다(§19.1). 2026-11-21 에 운영에서 센 값으로 턴 기록은 32개이고, 닫힌 턴은 Keeper 17개에 8,539개다. 가장 많은 Keeper 가 1,744개다.
+
 ### 18.1 이 컷 전에 끝내는 것
 
 이 컷의 단계가 아니다. 먼저 따로 끝낸다.
@@ -1881,17 +1887,32 @@ tinker 없는 lane, 모두 GLM 속도인 재생에서 run limit L 을 바꿨다.
 1. **서버와 다른 쓰는 프로세스를 모두 멈춘다.**
 2. **`runtime.toml` 을 고친다.** 새 parser 는 모르는 키를 거절하고 옛 parser 는 새 표를 거절한다. 그래서 멈춘 동안 고친다.
    - `[runtime.addon_exact_lanes.keeper-librarian.admission]` 과 `.durable` 을 지운다.
-   - `.durable` 의 `slots` 와 `cli_slots` 를 새 표 `[runtime.exact_output_lanes.librarian_memory]` 로 옮겨 적는다. 표 이름은 제안이다.
-   - `[runtime.exact_output_lanes.librarian_exact]` 는 건드리지 않는다. working-context pass 의 표다.
+   - `.durable` 의 `slots` 와 `cli_slots` 를 새 표 `[runtime.exact_output_lanes.librarian_memory]` 로 옮겨 적는다.
+   - `[runtime.exact_output_lanes.librarian_exact]` 는 남긴다. working-context pass 의 표다.
+   - 옛 Librarian 전용으로 만든 모델 표를 지운다. 그 표를 가리키는 항목을 남는 lane 의 `cli_slots` 에서 먼저 뺀다. 새 표로 옮겨 적는 목록에도 싣지 않는다. 켜진 lane 의 `cli_slots` 항목이 선언 없는 runtime 을 가리키면 설정 읽기가 거절한다.
+   - `[runtime.addon_exact_lanes.workspace-curator.classification]` 과 `.briefing` 을 지운다. 옛 `workspace-curator` add-on 의 표다.
    - `[typesafeai]` 아래 `absorb_gate` 와 `librarian_preflight` 를 지운다. `context_review` 는 남긴다.
    - 서버 환경에서 `facts_max_bytes` 와 admission 바이트 상한 키를 지운다.
    - 새 lane 표에 `max_output_tokens` 를 넣는다. §6.4 의 두 한도를 보고 정한 값이다.
 3. **지운다.** 목록은 §19.1 에 파일마다 있다. 디스크의 모든 Librarian 파일은 그 목록에서 「지운다」나 「남긴다」 가운데 하나다.
+   - 옛 `workspace-curator` add-on 의 lane(`workspace_curator_exact`)이 실행 기록부에 남긴 행이 있으면 새 빌드는 그 행을 읽지 못한다. 새 빌드의 `cut-run-registries` 로 끊는다([DURABLE-STORE-HARD-CUT](../guides/DURABLE-STORE-HARD-CUT.md) 의 Run registries 절). Librarian 쪽은 끊을 행이 없다. `librarian_exact` lane 은 남는다.
 4. **새 빌드의 `validate-stores` 를 돌린다.** 읽기 전용이다. 모든 저장소가 통과하고 분류 안 된 파일이 0개여야 한다. blob sweep 의 dry run 도 0개여야 한다. 배포 preflight 는 `keeper-librarian` add-on 이 남아 있으면 거절한다.
-5. **설치하고 서버를 띄운다.** 프로세스가 시작할 때 턴 경로가 Keeper 마다 `Log_started` 를 쓴다. 쓰는 쪽은 첫 pulse 안에 생겨 `Started` 를 쓴다. 프로세스가 뜬 뒤 만든 Keeper 는 쓰는 쪽의 저장소 시작이 `Log_started` 를 쓴다.
+5. **설치하고 서버를 띄운다.** 프로세스가 시작할 때 턴 경로가 Keeper 마다 턴 기록의 꼬리를 읽는다(§5.2).
+   - 턴 기록이 없는 Keeper 에는 `Log_started` 를 쓴다.
+   - 턴 기록이 있는 Keeper 에서는 마지막 `Opened` 가 열려 있을 때만 쓴다. 그 턴이 남긴 열린 메시지를 저장 한 번으로 닫고, `Process_exited` 의 `Closed` 를 쓴다. 열린 턴이 없으면 줄을 쓰지 않는다.
+   - 쓰는 쪽은 첫 pulse 안에 생긴다. 반영 기록이 없는 Keeper 는 첫 boot 라서 `Started` 를 쓴다. 반영 기록이 있는 Keeper 는 스냅샷 sha 가 꼬리 줄의 `after` 와 같으면 §8.6 표의 「복구됐다」 행이고, 줄을 쓰지 않는다.
+   - 프로세스가 뜬 뒤 만든 Keeper 는 쓰는 쪽의 저장소 시작이 `Log_started` 를 쓴다.
 6. **health 를 본다.** 등록된 Keeper 는 모두 `Idle` 이나 `Asking` 이고 `Stopped` 는 없다. 쓰는 쪽은 첫 pulse 안에 생긴다(§8.6).
+7. **첫 묻기를 본다.** 새 Librarian 은 이 설치에서 운영에 처음 묻는다. 운영에서 미리 켜서 본 값이 없으므로 셋을 본다. 사본에서 잰 값은 §18.3 에 있다.
+   - 쓰는 쪽이 `Stopped` 없이 boot 했다(6단계).
+   - 턴이 닫힌 Keeper 의 `<k>.memory-log.jsonl` 에 `Read` 줄이 붙는다(§18.3).
+   - `/health?full=1` 의 Librarian 절에서 Keeper 별 행의 수준과 경보를 본다(§12.2, §12.3). 경보가 선 행은 마지막 묻기 칸의 slot 별 결과를 읽는다(§12.1).
 
 ### 18.3 첫 한 시간
+
+Keeper 는 둘로 갈린다. 턴 기록이 이 설치에서 처음 생기는 Keeper 와, 컷 앞의 층이 쓴 턴 기록에 밀린 턴이 있는 Keeper 다. 2026-11-21 에 운영에는 뒤쪽이 17개다(§18).
+
+**턴 기록이 처음 생기는 Keeper.**
 
 - 턴이 닫힌 Keeper 는 pulse 한 번 안에 `Asking` 이 된다.
 - 첫 질문은 그 Keeper 가 지금 창에 들고 있는 것 전부를 단위 하나로 싣는다(§5.7).
@@ -1899,10 +1920,30 @@ tinker 없는 lane, 모두 GLM 속도인 재생에서 run limit L 을 바꿨다.
 - 첫 질문이 거절된 Keeper 는 항목 단위로 폭을 줄인다. 그 Keeper 의 줄에 slot 별 결과가 보인다.
 - 하던 일은 첫 반영 전까지 비어 있다.
 
+**밀린 턴이 있는 Keeper.**
+
+- 쓰는 쪽은 남은 범위 전부를 먼저 묻는다. 그 질문이 slot 의 창을 넘으면 slot 이 400 으로 거절한다. 그 거절은 크기 사실이 아니다(§7.4). 쓰는 쪽은 폭을 절반으로 줄여 다시 묻는다(§7.6).
+- 거절된 범위를 다 읽으면 다음 질문은 그 바깥 범위에 남은 것 전부다. 그것이 창을 넘으면 다시 거절되고 다시 절반이 된다. 그래서 따라잡는 동안에는 창 초과 거절이 되풀이된다. 다 따라잡으면 생기지 않는다.
+- 2026-11-21 에 운영 설치본의 사본에서 Keeper 하나의 기록으로 잰 값이다. 그 턴 기록은 2,200줄이다.
+
+  | 잰 것 | 값 |
+  |---|---|
+  | 첫 질문 | 2,751,726 token 에 출력 몫 48,000. slot 의 창은 1,048,576 이다. 3.3초 만에 400 이 왔다 |
+  | Librarian 호출 | 7번. 4번이 창 초과 400 이고 1.6~3.3초에 왔다 |
+  | 답 | 3개. 모두 받아들여져 반영됐다 |
+  | 가장 긴 호출 | 74.7초 |
+  | 읽은 양 | 3분 30초에 그 턴 기록의 60% |
+
+- 잰 것은 Keeper 하나다. Keeper 여럿이 같은 slot 으로 한꺼번에 따라잡는 것은 재지 않았다. 창 초과 400 에 요금이 붙는지도 확인하지 못했다(§23.1).
+- 따라잡는 동안에도 Keeper 의 턴은 쓰는 쪽을 기다리지 않는다(§8.6). Keeper 의 턴 경로는 `<k>.memory.lock` 을 잡지 않는다. 질문은 쓰는 쪽의 mailbox 밖 fiber 에서 돌고, 직접 쓰기는 반영 하나만 기다린다.
+- 대신 Keeper 의 요청 경로는 쓰는 쪽이 읽은 자리를 이력에서 찾은 뒤, 턴 기록에서 그 자리 뒤의 줄을 끝까지 읽는다. `Reset` 줄이 있는지 보는 읽기다(`Keeper_covered_point.read_unread_lines`). 밀린 줄이 많을수록 그 읽기가 길다. 얼마나 걸리는지는 재지 않았다(§23.1).
+- 턴 기록은 256줄씩 읽는다. 읽기는 그동안 그 파일의 경로별 mutex 와 공유 잠금을 쥔다. 턴의 덧붙임은 같은 mutex 와 배타 잠금을 잡는다(`with_append_path_mutex`). 그래서 쓰는 쪽이나 요청 경로가 밀린 줄을 읽는 동안 그 Keeper 의 턴 줄 쓰기는 읽기 한 번을 기다릴 수 있다. 그 시간은 재지 않았다(§23.1).
+
 ### 18.4 없어지는 것, 되돌릴 수 없는 곳
 
 - 3단계 뒤에는 되돌릴 수 없다. 2단계까지는 아무것도 잃지 않고 멈출 수 있다.
 - 옛 admission 큐에서 기다리던 명시적 쓰기는 없어진다(11-17 에 24개, 11-18 에 45개였다). 같은 claim 은 쓰기 도구로 다시 쓸 수 있다.
+- 밀린 턴은 없어지지 않는다. 턴 기록에 남아 있고 쓰는 쪽이 읽는다(§18.3). 앞선 sweep 이 지운 bundle 을 가리키는 줄만 `Skip (Content_missing _)` 으로 지나간다(§8.6). 2026-11-21 에 운영에서 센 값으로 그런 bundle 은 0개였다.
 - 컷 이전에 지운 claim 은 찾을 수 없다(§22).
 - Keeper 에게는 무엇이 없어졌는지 알리는 메시지를 보내지 않는다. 프롬프트는 지금 일어나는 일을 평서문으로 다시 쓴다.
 
@@ -1920,7 +1961,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 ## 19. 지우는 것
 
 지우는 것은 둘로 나뉜다. 설치 때 운영자가 디스크에서 지우는 파일과, 구현 스택의 마지막 층들이 저장소에서 지우는 코드다.
-줄 수는 main `3c4499eceb891` 에서 `.ml` 만 센 값이다. 지우는 층에서 다시 센다.
+개수와 줄 수는 main `e2dd6daf575ce` 에서 센 값이다. 줄 수는 `.ml` 만 센다. 지우는 층에서 다시 센다.
 
 ### 19.1 디스크: 파일마다 지운다, 남긴다
 
@@ -1933,6 +1974,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | | `working-context*.json` 과 그 잠금 | 남긴다 |
 | | `memory-events.jsonl` | 남긴다. 검색 기록이고, 쓰는 곳과 읽는 곳이 그대로다 |
 | | 평가 journal | 남긴다 |
+| | `memory-log.jsonl` 과 잠금 `memory.lock` | 남긴다. 컷 앞의 층이 쓰기 시작한 반영 기록이다 |
 | | `memory-journal.jsonl`, `memory-absorbed.jsonl` | 지운다(§22.1) |
 | | `memory-admission.json`, `memory-publication.json`, `memory-retraction-plan.json`, `memory-epoch.json` | 지운다 |
 | | `librarian-range-commit.json`, `librarian-unread.json` | 지운다 |
@@ -1943,12 +1985,16 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | | `librarian-progress.json`, `librarian-official-progress.json`, `librarian-external-read.json` | 지운다 |
 | | `librarian-continuity.json` 과 그 잠금 | 지운다 |
 | | working-context recall pin | 남긴다 |
+| | `turns.jsonl` | 남긴다. 밀린 턴이 여기 있다(§18.3) |
 | add-on | `keeper-librarian` 의 writer container, worker volume, 선언, package | 지운다. container 가 먼저다 |
+| | `workspace-curator` 의 선언과 package | 지운다. 그 add-on 을 지우는 층이 같은 stack 에 있다(§20.1) |
 | lane-addon 저장소 | Librarian scope 접두어 아홉 아래의 기록 | 지운다. 경로 목록은 마지막 층이 scope 정의에서 만든다 |
-| | 같은 디렉터리의 curator, verifier, Candle, Goal 기록 | 건드리지 않는다 |
-| run 기록부 | – | 손으로 고치지 않는다. 자기 보존 규칙이 옛 행을 지운다 |
+| | `workspace-curator` scope 의 기록 | 지운다. 소비자가 없어져 주인 없는 scope 가 된다. 경로는 같은 목록에 싣는다 |
+| | 같은 디렉터리의 verifier, Candle, Goal 기록 | 건드리지 않는다 |
+| run 기록부 | Librarian 의 행 | 손으로 고치지 않는다. 자기 보존 규칙이 옛 행을 지운다 |
+| | `workspace_curator_exact` lane 의 행 | `cut-run-registries` 로 끊는다(§18.2 의 3단계) |
 
-- 새로 생기는 파일은 둘이다. `<keepers_dir>/<k>/turns.jsonl` 과 `<config keepers>/<k>.memory-log.jsonl` 이다. 잠금 `<k>.memory.lock` 이 하나 더 있다. 두 파일은 잠금 파일을 따로 두지 않는다. 쓰는 쪽은 그 파일 자체를 잠근다.
+- 새 설계의 파일은 둘이다. `<keepers_dir>/<k>/turns.jsonl` 과 `<config keepers>/<k>.memory-log.jsonl` 이다. 잠금 `<k>.memory.lock` 이 하나 더 있다. 두 파일은 잠금 파일을 따로 두지 않는다. 쓰는 쪽은 그 파일 자체를 잠근다. 셋 다 컷에서 처음 생기지 않는다. 컷 앞의 층이 운영에 먼저 설치돼 이미 있고, 컷은 지우지 않는다.
 - `validate-stores` 는 두 파일을 첫 줄부터 읽는다. 해석되지 않는 줄은 거절로 세고, 그 줄이 시작하는 offset 을 알린다. 줄바꿈 없이 끝난 꼬리는 줄이 아니다.
 - 반영 기록에서 해석되지 않는 줄 바로 뒤에 `Started` 줄이 있으면 거절이 아니다. 운영자가 읽지 못한 꼬리를 두고 맡긴 자리다(§8.7). 그 줄은 파일에 계속 남으므로, 거절로 세면 그 Keeper 는 검증을 다시 통과하지 못한다.
 - 해석되지 않는 줄 뒤에 반영 줄이 오거나 아무 줄도 없으면 거절이다. 마지막 줄이면 저장소가 boot 에서 멈춘다.
@@ -1956,15 +2002,41 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 - blob sweep 은 `memory-log.jsonl` 과 `memory.lock` 을 blob 을 가리키지 않는 파일로 분류한다. 반영 줄에는 blob key 가 없다. 턴 기록이 있는 `keepers` 트리는 이미 분류돼 있다.
 - 지금 설정에 없는 Keeper 의 `memory-current.json` 은 그대로 둔다. 쓰는 쪽은 등록된 Keeper 에게만 있다.
 
+운영 디스크에서 2026-11-21 18:28 KST 에 잰 값이다. 파일 이름의 모양으로 세었고 내용은 읽지 않았다. 서버가 돌고 있어서 `turn-boundaries.jsonl` 은 재는 동안에도 자랐다.
+
+| 곳 | 「지운다」 행의 파일 | 개수 | 바이트 |
+|---|---|---|---|
+| `<config keepers>/` | `memory-journal.jsonl` | 32 | 138,343,829 |
+| | `memory-absorbed.jsonl` | 29 | 25,164,399 |
+| | `librarian-range-commit.json` | 17 | 624,923 |
+| | `*.rejected-*` | 22 | 466,339 |
+| | `turn-boundaries.jsonl` (옛 자리에 남은 것) | 13 | 392,070 |
+| | `memory-admission.json` | 28 | 4,545 |
+| | `memory-epoch.json` | 31 | 2,077 |
+| | 잠금 | 209 | 32 |
+| | `memory-publication.json`, `memory-retraction-plan.json`, `librarian-unread.json` | 0 | 0 |
+| `<keepers_dir>/<k>/` | `turn-boundaries.jsonl` | 25 | 7,050,247 |
+| | `librarian-continuity.json` | 12 | 35,974 |
+| | 그 잠금 | 30 | 0 |
+| | `librarian-progress.json` | 17 | 2,827 |
+| | `librarian-external-read.json` | 13 | 339 |
+| | `librarian-official-progress.json` | 11 | 230 |
+| 합 | | 489 | 172,087,831 |
+
+- lane-addon 저장소의 `workspace-curator` scope 에는 기록이 18개(9,299,635 바이트) 있다. 이름이 고정된 scope 다섯에 들지 않는 scope 폴더는 198개이고, 그 안의 기록은 2개(1,038 바이트)다. scope 폴더 이름은 hash 라서 그 가운데 어느 것이 Librarian 의 것인지는 이름으로 알 수 없다.
+- `keeper-librarian-history-fences/` 와 `keeper-librarian-history-resolutions/` 에는 파일이 없다. package 폴더는 `keeper-librarian-*` 가 다섯, `workspace-curator-*` 가 넷이다.
+- 새 파일은 이미 있다. `turns.jsonl` 이 32개(11,744,426 바이트), `memory-log.jsonl` 이 17개(720,922 바이트)다. 컷 앞의 층이 운영에 먼저 설치됐기 때문이다(§20). 둘 다 남긴다. 턴 기록을 지우면 거기 쌓인 밀린 턴이 Memory 에 들어가지 못한다(§18.3).
+
 ### 19.2 코드
 
-**a. 옛 Librarian 경로.** `lib/keeper/keeper_librarian_*.ml` 69개 가운데 63개를 지우고 하나는 이름을 바꾼다. 64개가 20,334줄이다.
+**a. 옛 Librarian 경로.** `lib/keeper/keeper_librarian_*.ml` 69개 가운데 61개를 지우고 둘은 이름을 바꾼다. 지우는 61개가 20,311줄이다.
 
-- 지운다: `durable_*`, `admission_*`, `floor_*`, `history_resolution`, `history_resolution_*`, `original_*` 전부. 그리고 `absorb_gate`, `queue_refresh`, `store_preflight`, `range`, `continuity`, `message_floor`, `refusal_frontier`, `retained_step_replacement`, `declaration_replacement`, `pending`, `progress*`, `official_progress`, `unread*`, `input_capture`, `input_sources`, `task_context`, `worker_request`, `request_*`, `queue_signal`, `addon`, `memory_plan`, `memory_program`, `history_program_settlement`.
-- 남긴다: `keeper_librarian_context`, `_context_io`, `_context_recall`, `_context_review`. `keeper_librarian_runtime` 과 `keeper_librarian` 은 working-context pass 가 쓰는 만큼만 남는다. `keeper_memory_lane` 도 남고, working-context pass 한 가지만 싣는다. pass 하나는 `keeper_working_context_pass` 에 있다. 이 모듈이 모델을 부를지 정하고, 질문을 만들고, 실행한다. 큐 신호를 받아 Keeper 의 memory lane 에 pass 하나를 싣는 등록도 이 모듈에 있다. `submit_durable`(`keeper_librarian_queue_refresh`)과 그것을 부르는 곳 다섯은 지운다. 예약된 pass 가 durable 만 하는 단위로 바뀌던 일(#53000)이 같이 없어진다.
+- 지운다: `durable_*`, `admission_*`, `floor_*`, `history_resolution`, `history_resolution_*`, `original_*` 전부. 그리고 `absorb_gate`, `queue_refresh`, `store_preflight`, `range`, `continuity`, `message_floor`, `refusal_frontier`, `retained_step_replacement`, `declaration_replacement`, `pending`, `progress*`, `official_progress`, `unread*`, `input_capture`, `input_sources`, `task_context`, `worker_request`, `request_*`, `addon`, `memory_plan`, `memory_program`, `history_program_settlement`.
+- 남긴다: `keeper_librarian_context`, `_context_io`, `_context_recall`, `_context_review`, `_context_readership`. `_context_readership` 은 남는 `_context_recall` 과 `_context_io` 가 부른다. `keeper_librarian_runtime` 과 `keeper_librarian` 은 working-context pass 가 쓰는 만큼만 남는다. `keeper_memory_lane` 도 남고, working-context pass 한 가지만 싣는다. pass 하나는 `keeper_working_context_pass` 에 있다. 이 모듈이 모델을 부를지 정하고, 질문을 만들고, 실행한다. 큐 신호를 받아 Keeper 의 memory lane 에 pass 하나를 싣는 등록도 이 모듈에 있다. `submit_durable`(`keeper_librarian_queue_refresh`)은 그 모듈과 같이 없어진다. `lib/` 에서 부르는 곳은 그 모듈 안의 한 곳이고, 시험 파일 둘이 부른다. 예약된 pass 가 durable 만 하는 단위로 바뀌던 일(#53000)이 같이 없어진다.
 - 이름을 바꾼다: `keeper_librarian_input_refusal` → `keeper_exact_input_refusal`. 생성자 셋짜리 타입이고 Librarian 것이 아니다. Exact 걷기가 쓴다(`keeper_exact_walk_failure`, `keeper_exact_walk_receipt`, `exact_lane_failure`). 그 걷기와 그것을 쓰는 HITL 요약은 이 RFC 가 고치지 않는다. 새 Librarian 은 이 타입을 쓰지 않고 §7.2 의 slot 결과를 쓴다.
+- 이름을 바꾼다: `keeper_librarian_queue_signal` → `keeper_working_context_signal`. 큐가 바뀌었거나 턴이 끝났다는 것을 pass 에 알리는 신호다. 값은 둘이다(`install`, `changed`). 옛 큐는 없어져도 이 신호는 그대로 쓰인다. 받는 쪽은 남는 `keeper_working_context_pass` 가 등록하고, 남는 넷(`keeper_agent_run_post_turn_memory`, `keeper_owner_registry`, `keeper_registry_event_queue`, `keeper_librarian_runtime`)이 알린다. 지우는 `keeper_librarian_queue_refresh` 도 이 신호를 쓴다. 받는 쪽을 등록하는 `install` 이 있고 `changed` 를 여섯 곳에서 부른다. 받는 쪽 자리는 하나라서 나중에 등록한 쪽이 받는다. `lib/` 와 `bin/` 에서 `queue_refresh` 의 `install` 을 부르는 곳은 없다. 서버는 `keeper_working_context_pass` 의 것만 등록한다. 이름은 L10a 가 바꾼다.
 
-**b. Memory 저장소 장치.** 5,138줄이다.
+**b. Memory 저장소 장치.** 5,202줄이다.
 
 - 지운다: `keeper_memory_os_current_{update, read_anchor, range_codec, receipt_store, publication, revision_evidence, journal, program_apply, retraction_plan}`, `keeper_memory_os_program{,_publication,_types}`, `keeper_memory_os_journal_codec`, `keeper_memory_os_receipt_selection`, `keeper_memory_absorbed`, `check_facts_budget`, `facts_max_bytes`.
 - 남긴다: fact 타입, 스냅샷 codec, 파일에 묶인 저장소, `Keeper_memory_os_events`.
@@ -1982,12 +2054,13 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
   golden fixture 시험(`test_keeper_memory_snapshot_golden`)이 envelope 타입의 첫 소비자다. 타입 파일을 추릴 때 그 시험의 바이트가 그대로여야 한다.
 
-**c. admission 과 cleanup.** 682줄이다. `keeper_memory_admission_{queue, judgment, worker}`, `keeper_memory_cleanup`, admission 바이트 상한이다.
+**c. admission 과 cleanup.** 685줄이다. `keeper_memory_admission_{queue, judgment, worker}`, `keeper_memory_cleanup`, admission 바이트 상한이다.
 
-**d. continuity, cursor, 옛 턴 색인.** 1,906줄이다.
+**d. continuity, cursor, 옛 턴 색인.** 모듈 여덟이 2,054줄이다. 여덟의 이름은 아래 첫 세 줄에 있다.
 
 - `librarian_continuity_snapshot`, `librarian_continuity_report`, `keeper_continuity_{request, evidence, observation}`, `keeper_external_read_cursor`.
-- `keeper_turn_boundaries` 와 그 줄을 만들고 읽는 코드 전부. `Keeper_turn_task_context` 는 턴 기록의 `task_evidence` 로 바뀐다(§5.1).
+- `keeper_turn_boundaries` 와 그 줄을 만들고 읽는 코드 전부.
+- `keeper_turn_task_context`. 턴 기록의 `task_evidence` 가 대신한다(§5.1).
 - `keeper_carried_front` 의 Librarian 출처 다섯(§11.2).
 - `turn-boundaries.jsonl` 을 읽던 곳 가운데 컷 뒤에도 남는 곳은 지우지 않고 턴 기록으로 옮긴다. 한 층(L3d)에서 옮긴다. 목록은 아래 k 의 표에 있다.
 - 옛 파일 쓰기는 컷(L10)에서 멈춘다. 옛 durable consumer 가 읽은 자리를 그 줄에서 얻기 때문이다(`Keeper_librarian_durable_consumer` 의 `Keeper_turn_boundaries.read`). 쓰기를 먼저 멈추면 컷 앞의 빌드에서 옛 경로가 나아가지 못한다.
@@ -2002,38 +2075,45 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 **h. 시험과 release 목록.**
 
-- 지우는 모듈 이름을 부르는 시험 파일은 98개다(`Keeper_librarian` 이름을 모두 세면 106개). 시험 case 마다 가른다. 남는 모듈(스냅샷 codec, fact 타입, 파일에 묶인 저장소, working-context pass)을 시험하는 case 는 남긴다. 나머지는 지운다. 되살리지 않는다.
+- 지우는 모듈 이름을 부르는 시험 파일은 85개다(주석까지 세면 86개). 28개는 파일 이름이 지우는 모듈을 따른 것이라 파일째 지우는 후보다. 나머지 57개는 시험 case 마다 가른다. 남는 모듈(스냅샷 codec, fact 타입, 파일에 묶인 저장소, working-context pass)을 시험하는 case 는 남긴다. 나머지는 지운다. 되살리지 않는다. 가르는 일은 컷 앞에 따로 넣는다(§20.1 의 P1).
 - `config/release-behavior.json` 에서 `test_keeper_librarian_continuity` 를 새 기능 시험으로 바꾼다. 반영하고, 재시작하고, view 가 같은 읽은 자리와 Memory 를 보이고, 요청이 읽은 곳의 끝에서 시작하는지를 본다. `test_workspace_memory_ledger` 는 view 위에서 다시 써서 목록에 남긴다.
 
 **i. spec.** `specs/bug-models/LibrarianRead.tla`, `LibrarianContinuityWidth.tla` 와 cfg 24개. §21 의 모델이 대신한다.
 
 **j. 문서와 프롬프트.**
 
-- 다시 쓴다: Memory 안내 넷(`keeper-memory-execution.md`, `keeper-memory-limits.md`, `keeper-memory-recall.md`, `KEEPER-MEMORY-RECOVERY.md`)과 다른 일곱 문서의 Librarian 절.
-- 지우는 경로만 말하는 RFC 는 이 RFC 로 superseded 표시한다. 후보는 `docs/rfc/RFC-librarian-*.md` 열 개와 Librarian 절이 있는 번호 RFC 다. 컷 층이 하나씩 읽고 정한다. working-context pass 를 말하는 RFC 는 남는다.
+- 다시 쓴다: Memory 안내 셋(`keeper-memory-execution.md`, `keeper-memory-limits.md`, `KEEPER-MEMORY-RECOVERY.md`)과 다른 문서의 Librarian 절. `docs/guides` 에서 Librarian 을 말하는 파일은 이 셋을 넣어 10개다.
+- 지우는 경로만 말하는 RFC 는 이 RFC 로 superseded 표시한다. 후보는 이 RFC 를 뺀 `docs/rfc/RFC-librarian-*.md` 여덟 개와 Librarian 절이 있는 번호 RFC 다. 컷 층이 하나씩 읽고 정한다. working-context pass 를 말하는 RFC 는 남는다.
 - `config/prompts/librarian.md` 는 답 schema 하나에 맞춰 다시 쓴다. `librarian.preflight.md` 는 지운다. `librarian.context_review.md` 는 남긴다.
-- `keeper.md` 와 `keeper_memory_write.toml` 의 Librarian 줄은 지금 일어나는 일을 평서문으로 다시 쓴다. 쓰기는 바로 저장된다는 것이다. 무엇이 없어졌는지는 적지 않는다.
+- `config/prompts/keeper.md` 와 `config/tools/keeper_memory_write.toml` 은 지금 일어나는 일을 평서문으로 다시 쓴다. 쓰기는 바로 저장된다는 것이다. 무엇이 없어졌는지는 적지 않는다. Librarian 을 말하는 줄은 `keeper.md` 에만 있다.
 
 층마다 확인하는 것은 같다. 지운 이름을 부르는 곳이 `lib/`, `bin/`, `test/` 에 없고, 타입 검사가 통과하고, 새 기능 시험이 통과한다.
 
-**k. 지우는 모듈을 부르는 바깥 코드.** 지우거나 이름을 바꾸는 모듈은 99개다. 위 a~e 의 93개와, 하는 일이 전부 옛 경로라 같이 지우는 단위 여섯이다. 그것을 직접 부르는 바깥 단위는 59개다(`lib/`, `bin/`). 목록은 근거 폴더의 `cut-callers/callers.tsv` 이고, 같은 폴더의 스크립트가 다시 만든다.
+**k. 지우는 모듈을 부르는 바깥 코드.** 지우는 모듈은 `lib/` 의 93개와 `bin/` 의 실행 파일 셋이고, 이름을 바꾸는 모듈은 둘이다. 93개는 위 a~e 의 89개, 하는 일이 전부 옛 경로라 같이 지우는 `lib/` 단위 둘, §19.3 의 평가 모듈 둘이다. 그 93개의 이름을 적은 바깥 단위는 51개다(`lib/` 43, `bin/` 8). 그 가운데 셋은 주석에서만 적는다. 목록은 컷 층이 지울 집합에서 다시 만들어 PR 본문에 싣는다.
 
 | 처분 | 단위 |
 |---|---|
-| 같이 지운다. 하는 일이 전부 옛 경로다. 지우는 집합에 넣었다 | `bin/masc_librarian_continuity`, `bin/masc_librarian_replay`, `bin/masc_librarian_preflight_eval`, `server_librarian_addon_validation`, `server_librarian_addon_wake`, `server_dashboard_http_keeper_memory_history_resolution` |
-| 이름만 따라 바꾼다 | `keeper_exact_walk_failure`, `keeper_exact_walk_receipt`, `exact_lane_failure` (위 a) |
+| 같이 지운다. 하는 일이 전부 옛 경로다. 지우는 집합에 넣었다 | `bin/masc_librarian_continuity`, `bin/masc_librarian_replay`, `bin/masc_librarian_preflight_eval`, `server_librarian_addon_validation`, `server_librarian_addon_wake` |
+| 이름만 따라 바꾼다 | `input_refusal` 을 부르는 `keeper_exact_walk_failure`, `keeper_exact_walk_receipt`, `exact_lane_failure` 와 `queue_signal` 을 부르는 `keeper_agent_run_post_turn_memory`, `keeper_owner_registry`, `keeper_registry_event_queue` (위 a). 이 여섯은 지우는 모듈을 부르지 않아서 51개에 들지 않는다 |
 | Librarian 을 가르던 곳만 지운다. 나머지는 다른 add-on 이 쓴다 | `server_lane_addon_exact`(`authorize_request` 가 Librarian 요청이면 `Background` 와 Librarian 의 출력 검사를 골랐다), `server_unowned_exact_sweep`(`original_required` 의 Librarian 항), `server_settled_archive_sweep`(Librarian 의 gate 모듈로 기록을 가르던 갈래) |
-| 고쳐 쓴다. 부르는 코드를 지우거나 새 모듈로 바꾼다 | 나머지 53개. 턴 기록으로 옮기는 것(위 d), Memory 저장소(위 b), Keeper 와 만나는 곳(§11), 화면과 route(§12, 위 g), purge(§5.6), boot 의 등록(`server_runtime_bootstrap` 은 `queue_refresh` 설치 대신 `keeper_working_context_pass` 의 설치를 부르고, add-on wake 설치를 지운다) |
+| 고쳐 쓴다. 부르는 코드를 지우거나 새 모듈로 바꾼다 | 나머지 48개. 턴 기록으로 옮기는 것(위 d), Memory 저장소(위 b), Keeper 와 만나는 곳(§11), 화면과 route(§12, 위 g), purge(§5.6), boot 의 등록(`server_runtime_bootstrap` 은 add-on wake 설치를 지운다. `keeper_working_context_pass` 의 설치는 이미 부른다) |
 
-- 같이 지우는 단위를 집합에 넣으면 그 단위를 부르는 곳이 다음 출력에 나온다. 그렇게 다시 돌려 새로 나온 단위가 셋이다(`server_lane_addon_exact`, `server_unowned_exact_sweep`, `server_routes_http_routes_keepers`). 셋 다 통째로 지우는 단위가 아니어서 거기서 멈춘다.
-- Librarian 이 Lane Add-on 틀에서 나가면(§4) 틀의 Exact 요청은 모두 `Standard` 로 받는다. 틀 안에서 `Background` 를 고르던 곳은 Librarian 갈래 하나였다(`server_lane_addon_exact.ml:351`).
+- 같이 지우는 단위를 집합에 넣으면 그 단위를 부르는 곳이 다음 출력에 나온다. 그렇게 다시 돌려 새로 나온 단위가 셋이다(`server_lane_addon_exact`, `server_unowned_exact_sweep`, `server_runtime_bootstrap`). 셋 다 통째로 지우는 단위가 아니어서 거기서 멈춘다.
+- Librarian 이 Lane Add-on 틀에서 나가면(§4) 틀의 Exact 요청은 모두 `Standard` 로 받는다. 틀 안에서 `Background` 를 고르던 곳은 Librarian 갈래 하나였다(`server_lane_addon_exact` 의 `authorize_request`).
 - **이 목록은 하한이다.** 모듈 이름을 직접 적은 `.ml`, `.mli` 만 잡는다. 다음은 잡지 못한다.
-  - 지우지 않는 facade 를 거쳐 부르는 곳. `keeper_memory_os_current` 를 거쳐 `recover_publication` 을 부르는 `keeper_store_boot_reconcile` 이 그렇다. facade 를 추릴 때 드러난다.
+  - 지우지 않는 facade 를 거쳐 부르는 곳. `keeper_memory_os_current` 를 거쳐 `recover_publication` 을 부르는 `keeper_store_boot_reconcile` 이 그렇다. facade 를 추릴 때 드러난다. 지우는 `include` 모듈 아홉에 정의된 값을 facade 로 쓰는 파일은 `lib/` 에 51개, `test/` 에 46개다. 이름을 맞춰 센 값이다(§23.1).
   - dune 파일. `lib/dune` 의 `private_modules` 에 오른 지우는 모듈과 `bin/dune` 의 실행 파일 정의 셋이다.
   - 모듈이 아니라 함수나 값을 지우는 곳. `check_facts_budget`, `facts_max_bytes`, `MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES` 를 정의하거나 읽는 단위다(§11.6, §19.3).
   - 생성자 이름으로만 닿는 곳. `keeper_shutdown_types` 의 `Keeper_turn_boundaries_artifact` 가 그렇다(위 d).
 - 컷이 끝났다는 기준은 이 목록이 아니다. 지운 이름이 `lib/`, `bin/`, `test/` 와 dune 파일에 없고 타입 검사가 통과하는 것이다.
 - 처분은 단위의 머리말과 부르는 이름을 읽고 정했다. 컷 층이 단위를 열어 보고 바꾸면 이 표를 같이 고친다.
+
+**l. 옛 `workspace-curator` add-on.** 같은 stack 의 한 층이 지운다(§20.1). Workspace Memory 큐레이터는 서버 안의 주인(`server_workspace_memory_curator`, lane `workspace_memory_curator`)으로 main 에 들어와 있다. 옛 add-on 의 코드는 그 주인이 부르지 않는다.
+
+- 지운다: `addons/workspace-curator/` 와 `addons/tests/test_workspace_curator.py`, `workspace_memory_execution_capture`, `workspace_memory_revision`, `server_workspace_memory_addon_validation`, 그리고 세 곳의 `Workspace_curator` 갈래(`Server_tool_request_consumer`, `Lane_addon_carried`, `Lane_run_identity`).
+- `exact_lane_run_registry` 의 `reconcile_original` 도 이 층에서 지운다. `lib/` 와 `bin/` 에 부르는 곳이 없고 시험 하나가 부른다.
+- L10a 와 같은 단위 일곱을 고친다. `lane_addon_carried`, `lib/embedded_exact_addons/dune`, `server_tool_request_consumer`, `server_lane_addon_exact`, `server_unowned_exact_sweep`, `bin/deployment_preflight_helper`, `bin/main_eio` 다. 그래서 L10a 바로 위에 둔다.
+- Librarian 쪽과 다른 것은 실행 기록부다. `Lane_run_identity` 의 `Workspace_curator` 는 실행 기록을 남기는 lane 이다. 그 생성자를 지우면 기록부가 그 lane 의 행을 모르는 lane 으로 읽는다(§18.2 의 3단계). Librarian 의 `librarian_exact` 는 남는다.
 
 ### 19.3 지우는 층에서 다시 확인할 것
 
@@ -2046,7 +2126,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 ## 20. 구현 스택
 
-이 RFC 가 먼저 자기 PR 로 병합된다. 코드는 그 뒤에 native stack(`gh stack`) 하나로 올린다. 스택은 맨 위 PR 로 한꺼번에 병합하고 운영에는 한 번에 들어간다.
+이 RFC 가 먼저 자기 PR 로 병합된다. L9 까지의 층은 저마다 자기 PR 로 main 에 들어간다. 컷(L10a~L11)은 native stack(`gh stack`) 하나로 올려 맨 위 PR 로 한꺼번에 병합하고, 운영에는 한 번에 들어간다(§20.1).
 
 지키는 것은 넷이다.
 
@@ -2109,13 +2189,46 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |
 | L9 | 화면과 경보: health 절, `keeper-memory-health` 행, TUI 해석, 수준 함수 | 생성자마다 해석 시험. health JSON 에 자유 글이 없다 |
-| L10a~e | 컷. §19.2 의 삭제를 다섯 파일 이하 커밋으로. 시험을 가른다. release 목록, 프롬프트, 안내 문서. 옛 spec 을 지운다(§19.2). §21 의 모델은 이 RFC 와 같이 `specs/bug-models/` 에 들어와 있다 | 지운 이름을 `rg` 로 찾아 0. 타입 검사. L3~L9 의 기능 시험. working-context pass 시험: 끝난 턴 하나가 pass 하나를 만들고 Memory 를 쓰지 않는다 |
-| L11 | 남은 등록: 배포 preflight 가 `keeper-librarian` add-on 을 거절한다. 설치 안내(§18)와 scope 경로 목록. changelog 의 「Fresh state required」 항목 하나. 밖에서 읽는 곳 확인 | fixture base path 에 시험 설치를 하면 쓰는 쪽이 모두 `Started` 로 boot 한다. Keeper 삭제가 새 파일만 지운다 |
+| L10a | 컷의 스위치. 서버가 옛 경로를 시작하지 않고, Lane Add-on 틀에서 Librarian 이 빠진다(§19.2 f). `runtime.toml` 의 옛 키와 표를 읽는 코드를 지운다. `keeper_librarian_queue_signal` 의 이름을 바꾼다(§19.2 a). 이 층 뒤에 부르는 곳이 없어지는 모듈 셋을 지운다 | 타입 검사. working-context pass 시험: 끝난 턴 하나가 pass 하나를 만들고 Memory 를 쓰지 않는다 |
+| L10a2 | 옛 `workspace-curator` add-on 을 지운다(§19.2 l). L10a 와 같은 단위 일곱을 고친다 | 타입 검사. 서버 안의 큐레이터 시험 |
+| L10b | 읽는 쪽. health, 화면, forecast, 요청 조립이 지우는 모듈을 읽지 않는다. 이 층 뒤에 부르는 곳이 없어지는 모듈 여섯을 지운다 | 타입 검사. L8, L9 의 기능 시험 |
+| L10b2 | purge 규칙(§5.6). L8 의 남은 층이다(#54283). purge 가 Librarian 의 읽은 자리를 보지 않고 턴 기록의 줄이 센 메시지만 고쳐 쓴다. L10c 가 같은 파일을 고치므로 그 아래에 둔다 | 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다 |
+| L10c | 옛 턴 색인, purge, 저장소 검증이 지우는 모듈을 부르지 않는다(§19.2 d). 부르는 곳만 끊는다. 지우는 일은 다음 층이다 | 타입 검사. L3~L8 의 기능 시험 |
+| L10d | 삭제. 부르는 곳이 없어진 모듈 67개를 의존 순서대로 다섯 파일 이하 커밋으로 지운다. 파일째 지우는 시험과 옛 spec 도 지운다(§19.2 h, i) | 지운 이름을 `rg` 로 찾아 0. 타입 검사 |
+| L10e | Memory 저장소 장치(§19.2 b). facade 와 타입 파일을 추리고 모듈 17개를 지운다. `keeper_librarian_input_refusal` 의 이름을 바꾼다. release 목록, 프롬프트, 안내 문서(§19.2 h, j). §21 의 모델은 이 RFC 와 같이 `specs/bug-models/` 에 들어와 있다 | 지운 이름을 `rg` 로 찾아 0. 타입 검사. golden fixture 시험의 바이트가 그대로다. L3~L9 의 기능 시험 |
+| L11 | 남은 등록: 배포 preflight 가 `keeper-librarian` add-on 을 거절한다. 설치 안내(§18)와 scope 경로 목록. changelog 의 「Fresh state required」 항목 하나. Librarian 의 것과 옛 `workspace-curator` add-on 의 것을 한 문장에 적는다. 밖에서 읽는 곳 확인 | fixture base path 에 시험 설치를 하면 쓰는 쪽이 모두 `Started` 로 boot 한다. Keeper 삭제가 새 파일만 지운다 |
 
 - 층 하나는 PR 하나이고 출력 약 20k token 이하다. 맨 아래 PR 은 Core 빌드만 확인한다. CI 를 지켜보며 기다리지 않는다.
-- L5 앞의 빌드에서는 옛 경로가 그대로 돈다. L5 부터 L6 앞까지의 빌드에서는 Librarian 이 읽지 않고 직접 쓰기만 Memory 를 바꾼다. 운영에는 스택 전체가 한 번에 들어가므로 이 중간 빌드는 운영에서 돌지 않는다.
+- L5 앞의 빌드에서는 옛 경로가 그대로 돈다. L5 부터 L6 앞까지의 빌드에서는 Librarian 이 읽지 않고 직접 쓰기만 Memory 를 바꾼다. L6 부터의 빌드도 `librarian_memory` 표가 없으면 묻지 않는다(§18). 운영에 설치된 빌드는 컷 앞의 main 커밋이다. 2026-11-21 의 운영 실행 파일은 main `f4323bb53ecb7` 에서 만든 것이다.
 - 평가 corpus 는 합성 자료다. Keeper 의 대화나 Memory 글은 공개 저장소에 넣지 않는다.
 - 모델 검사는 dispatch 로 돌린다. PR 마다 도는 CI 를 더하지 않는다.
+
+### 20.1 컷은 stack 하나다
+
+컷(L10a~L11)은 층마다 따로 병합하지 않는다. 까닭은 셋이다. 셋 다 그 층이 든 빌드를 설치하려면 운영자가 서버를 세우고 설정이나 디스크를 고쳐야 한다는 뜻이다. 따로 병합하면 그 일을 층마다 한다.
+
+1. **모르는 키.** `runtime.toml` 읽기는 모르는 키를 거절한다. `absorb_gate` 와 `librarian_preflight` 를 읽는 코드를 지운 빌드는 그 키가 남은 파일을 읽지 못한다(§18.2 의 2단계).
+2. **주인 없는 scope.** 소비자 목록에서 Librarian 을 빼면 Librarian scope 의 기록에 주인이 없다. 시작할 때 도는 sweep 은 주인 없는 scope 에 산 기록이 있으면 거절한다(`server_settled_archive_sweep`).
+3. **분류 없는 파일.** 옛 파일의 검증과 blob 분류 행을 지운 빌드에서 그 파일은 분류 안 된 파일이다. `validate-stores` 와 blob sweep 의 dry run 이 0개를 알리지 못한다(§18.2 의 4단계).
+
+그래서 stack 을 맨 위 PR 로 한 번에 병합하고, 운영자는 서버를 한 번 세운다.
+
+옛 `workspace-curator` add-on 을 지우는 층(L10a2, §19.2 l)은 L10a 바로 위다. L10a 와 같은 단위 일곱을 고치고, 같은 정지에서 디스크를 지운다. changelog 의 「Fresh state required」 문장도 하나를 같이 쓴다. 그 층에만 있는 일은 실행 기록부를 끊는 것이다(§18.2 의 3단계).
+
+purge 규칙도 이 stack 에 든다(L10b2). 컷 앞의 빌드에서는 옛 lane 이 Librarian 의 위치 파일로 이력을 읽는다. 그 위치를 보는 가드 없이 purge 가 먼저 들어가면, 옛 lane 이 아직 읽지 않은 메시지를 purge 가 고쳐 쓴다. 새 규칙이 맞는 때는 턴 기록을 읽는 쓰는 쪽이 읽기를 맡은 뒤다. 그래서 purge 규칙은 lane 전환과 같은 설치에서 바뀐다. 운영자가 그 사이에 purge 를 미룰 일이 없다.
+
+삭제가 한 층(L10d)에 몰리는 까닭은 의존이다. 이 문단의 수는 빌드로 확인한 값이 아니다. 소스에서 모듈 이름을 글자로 찾아 만든 의존 그래프에서 센 값이고, 층 표(§20)의 모듈 수도 그렇다(§23.1). 층마다의 타입 검사가 확인한다. 그 그래프에서 지우는 `lib/` 모듈 93개 사이에 순환은 없다. 그 모듈을 부르는 바깥 단위를 네 무리(L10a, L10b, L10c, L10e 가 고치는 것)로 나눠 한 무리씩 끊어 보았다. 앞의 세 무리 가운데 마지막을 끊을 때 67~82개가 한꺼번에 풀린다. 그 앞까지는 어느 순서로 해도 많아야 16개다. L10e 의 무리를 먼저 끊어도 그 층이 지우는 17개 가운데 7개만 풀린다. `bin/` 의 실행 파일 셋은 그것이 부르는 모듈을 지우는 층보다 늦지 않게 지운다.
+
+컷 앞에 따로 들어가는 준비가 둘이다. 둘 다 동작을 바꾸지 않는다.
+
+- **P1 시험 가르기.** case 마다 갈라야 하는 시험 파일 57개(§19.2 h)에서, 남는 모듈을 시험하는 case 와 지울 case 를 다른 파일로 나눈다. 컷 stack 은 시험을 파일째 지운다.
+- **P2 스냅샷 읽기 옮기기.** 지우는 `include` 모듈 아홉(§19.2 b)에 정의된 값 가운데 컷 뒤에도 남는 코드가 쓰는 스냅샷 읽기를 남는 모듈로 옮긴다. facade `keeper_memory_os_current` 의 `.mli` 는 그대로다.
+
+넣는 순서는 이렇다. E4 가 마지막 묻기의 거절을 읽게 하는 수리와 L9 의 화면(#54286)은 main 에 있다. PR 번호는 2026-11-21 에 본 값이다.
+
+1. carried front 의 출처 `Past_librarian_point` 의 이름 바꾸기. 그 이름을 적은 파일은 `lib/` 에 여섯, `test/` 에 넷이다. 요청이 보내는 바이트는 그대로다. L10b 가 그 가운데 셋(`keeper_turn_driver_try_provider`, `keeper_continuity_request`, `keeper_next_request_forecast`)을 고치거나 지우므로 컷 앞에 온다.
+2. P1 과 P2.
+3. 컷 stack. purge 규칙(L10b2, Draft #54283)은 그 안의 층이다.
 
 ## 21. 모델 검사
 
@@ -2377,6 +2490,13 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | 턴 기록이 하루 약 1.4 MB, 반영 기록이 하루 약 27 MB 자란다는 추정 | 줄 크기 표본과 재생에서 나온 값이다. 실제 줄은 재지 않았다. 하루 2,960줄은 생성 수(1,450~1,850)보다 많다. 차이는 직접 쓰기와 건너뛰기의 줄이라고 보지만 그 비중을 따로 재지 않았다. 가장 바쁜 Keeper 의 1.15 GB 는 턴마다 한 줄을 쓴다고 본 상한이다 | 배포 뒤 파일 크기 |
 | 새 프롬프트에서 slot 별로 답이 얼마나 유효하고 얼마나 바꾸는지 | 「아무것도 바꾸지 않는다」가 다시 안전한 답이 되는지는 프롬프트를 써 봐야 안다 | 평가 틀(L1)의 채점 결과를 묻기 층 PR 에 붙인다 |
 | 운영 lane 의 slot 가운데 선언이나 probe 로 정한 입력 경계(`rejected_from`)가 있는 것이 있는지 | 있으면 그 slot 은 보내기 전에 `Input_too_large` 를 낸다. 없으면 provider 의 거절을 기다린다. 설계는 둘 다 다룬다 | 컷 전에 runtime 파일에서 읽는다 |
+| §19.2 k 의 facade 수(`lib/` 51, `test/` 46). 값이 어느 `include` 모듈에 정의됐는지를 이름의 첫 정의로 맞췄다. 타입 검사로 확인하지 않았다 | 빠진 곳이 있으면 수가 달라진다. 컷의 경계는 그대로다 | L10e 의 타입 검사 |
+| §20.1 의 층별 모듈 수(3, 6, 67, 17)와 「67~82개」. 모듈 이름을 글자로 찾아 만든 의존 그래프에서 나왔고, 바깥 단위를 네 무리로 나눈 것은 파일 이름으로 했다. 빌드로 확인하지 않았다 | 풀리는 순서가 다르면 L10d 의 커밋 순서와 층별 수가 바뀐다 | 컷 stack 의 층마다 타입 검사 |
+| 턴 기록에서 256줄을 읽는 동안 잠금을 쥐는 시간. 읽기와 턴의 덧붙임이 같은 경로별 mutex 를 쓴다(§18.3) | 길면 밀린 줄을 읽는 동안 그 Keeper 의 턴 줄 쓰기가 그만큼 늦는다 | L11 의 fixture 설치 |
+| 파일째 지우는 시험 후보 28개. 파일 이름으로 골랐다 | 그 안에 남는 모듈을 시험하는 case 가 있으면 그 파일도 가른다 | P1 |
+| 밀린 턴이 있는 Keeper 여럿이 같은 slot 으로 한꺼번에 따라잡을 때의 시간과 거절 수. 잰 것은 운영 설치본의 사본에서 Keeper 하나다(§18.3). 2026-11-21 에 운영에는 닫힌 턴이 있는 Keeper 가 17개다 | slot 의 자리가 모자라면 따라잡는 시간이 Keeper 수만큼 늘고, 그동안 새로 닫힌 턴도 그 뒤에 선다 | 컷 설치 뒤 slot 별 호출 시간과 Keeper 별 행(§12) |
+| 창을 넘어 400 으로 거절된 질문에 요금이 붙는지. 사본에서 Librarian 호출 7번 가운데 4번이 그 거절이었다(§18.3) | 붙으면 따라잡는 값이 읽은 양보다 크다. 그 거절은 따라잡는 동안만 되풀이된다 | 컷 전에 운영자가 provider 의 청구 기록과 견준다 |
+| 밀린 줄이 많은 Keeper 에서 요청 경로가 턴 기록의 안 읽은 줄을 읽는 데 걸리는 시간(§18.3). 2026-11-21 에 가장 큰 턴 기록은 5,570,090 바이트다 | 길면 따라잡는 동안 그 Keeper 의 요청이 그만큼 늦게 나간다. 쓰는 쪽을 기다리는 것은 아니다 | L11 의 fixture 설치. 컷 설치 뒤 요청 준비 시간 |
 
 ### 23.2 읽지 못한 코드
 
@@ -2391,6 +2511,12 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | 운영 lane 의 slot 가운데 Agent-Core 가 보내기 전에 세는 것이 어느 것인지, 창 넘침 code 를 문서로 정한 provider 가 어느 것인지. opencode 와 tinker slot 이 어느 wire codec 을 쓰는지도 읽지 않았다. 코드에서 provider 쪽 넘침을 타입으로 만드는 codec 이 GLM 하나라는 것만 확인했다 | 크기를 타입으로 말하지 않는 slot 이 운영 lane 에 남으면 그 lane 은 한 항목 아래의 단계에 닿지 않고 E4 나 W1 에서 선다 | Agent-Core 층(L2)의 slot 별 측정 표 |
 | slot 결과 표의 생성자 176개 가운데 실제로 Exact 경로에 닿는 것이 어느 것인지. 표는 타입에서 만들었고 호출 경로를 따라가지 않았다 | 닿지 않는 생성자의 행은 쓰이지 않을 뿐이다. 닿는데 갈래가 틀린 행은 폭을 잘못 줄이거나 줄이지 않는다 | 끝맺음 타입 층(L2)과 묻기 층(L6). 생성자마다 분류 시험 |
 | 계정별 Claude API provider 는 catalog 행이 없어 Exact slot 이 되지 못한다는 것. 다른 작업이 찾은 사실이고 여기서 확인하지 않았다(#53022) | Librarian lane 에 그런 provider 를 선언할 수 없다 | 그 작업의 RFC |
+| 지운 add-on 의 lane 표(`[runtime.addon_exact_lanes.<add-on>.<lane>]`)가 `runtime.toml` 에 남았을 때 설정 읽기가 거절하는지 | 거절하지 않으면 §18.2 의 그 줄은 청소일 뿐이다. 지우는 순서는 같다 | L10a |
+| 남는 코드가 `*.rejected-*` 파일을 새로 쓰는지. 그 이름을 만드는 곳이 `keeper_runtime` 과 `keeper_store_boot_reconcile` 에 있다 | 쓰면 컷 뒤에도 그 파일이 생긴다. §19.1 의 그 행을 「남긴다」로 바꾸고 분류 행을 남겨야 한다 | L10c |
+| `dashboard/src` 와 `scripts/` 에서 지우는 route 나 파일을 읽는 곳 | 남으면 컷 뒤에 그 화면이나 스크립트가 값을 얻지 못한다 | L11 의 「밖에서 읽는 곳 확인」 |
+| 운영에 `workspace-curator` add-on 의 container 와 volume 이 있는지 | 있으면 §19.1 의 그 행에 container 를 먼저 지우는 순서가 붙는다 | 컷 전에 운영자가 본다 |
+| §19.2 j 의 「다른 문서」가 어느 것인지. `docs/guides` 의 파일 수만 셌다 | 빠진 문서는 지운 경로를 계속 말한다 | L10e |
+| 쓰는 쪽이 큰 질문을 조립하는 일이 어느 domain 에서 도는지. 사본의 첫 질문은 2,751,726 token 이었다(§18.3) | scheduler domain 에서 돌면 그 질문을 조립하는 동안 다른 Keeper 의 fiber 가 선다 | L11 의 fixture 설치 |
 
 본문이 줄 번호로 인용한 코드는 읽은 것이다. 그 가운데 그 코드가 바뀌면 설계가 깨지는 전제는 셋이다. 턴은 등록된 Keeper 에게만 돈다(`keeper_turn.ml:227-236`, §8.6). object sweep 은 프로세스가 시작할 때 쓰는 쪽이 생기기 전에 한 번 돈다(`bin/main_eio.ml:350`, §5.6). 주기 작업으로 바뀌면 깨진다. 지금은 autoboot 가 띄우지 않은 Keeper 의 것도 따라잡는다(`server_bootstrap_loops.ml:2197-2206`, §9.3).
 

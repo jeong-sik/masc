@@ -4,9 +4,9 @@
 
 ### 요약
 
-- 이 릴리스는 `v0.77.1`(태그 `2bbe20cd`) 뒤 `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 까지 main 에 들어간 열다섯 PR 과, 동결 뒤 main 에 착지해 이 브랜치로 가져온 두 PR(`#54288`·`#54286`)을 `0.78.0`(minor)으로 내보냅니다. 그중 셋(#54191·#54285·#54289)은 `### Exempt` 라 절에 넣지 않았고, 아래 절이 나머지 열네 PR 을 담습니다. 사용자가 보는 동작이 바뀌는 항목은 TUI 두 건(#54221·#54243), 서버 권한·엔진 두 건(#54278·#54236), Librarian 경보 수리 한 건(#54280), MSX 코어 핀 상향 한 건(#54291), Keeper 프롬프트 접두 보존 한 건(#53895)이고, 나머지는 규약·RFC 문서 세 건(#54284·#54204·#54219), 온보딩 시험 단언 한 건(#54277), 전량 회귀 샤딩 스크립트 한 건(#54281), 그리고 동결 뒤 가져온 TUI 두 건(#54288·#54286)입니다.
-- 이 릴리스 브랜치는 동결 기준 main `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 위에 버전 올림 커밋을 얹은 뒤, 동결 뒤 main 에 착지한 두 PR(`#54288`·`#54286`, tip `7ac7d0e71e3477f821026034f7d358c7b2702ea0`)을 이 브랜치로 가져와 그 조각을 이 절에 접어 넣었습니다.
-- 접은 조각은 `changelog.d/54286.md`·`changelog.d/54288.md` 두 개이며, 나머지 changelog 조각은 종전대로 남겼습니다.
+- 이 릴리스는 `v0.77.1`(태그 `2bbe20cd`) 뒤 `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 까지 main 에 들어간 열다섯 PR 과, 동결 뒤 main 에 착지해 이 브랜치로 가져온 네 PR(`#54288`·`#54286`·`#54287`·`#54290`)을 `0.78.0`(minor)으로 내보냅니다. 그중 넷(#54191·#54285·#54289·#54290)은 `### Exempt` 라 절에 넣지 않았고, 아래 절이 나머지 열다섯 PR 을 담습니다. 사용자가 보는 동작이 바뀌는 항목은 TUI 두 건(#54221·#54243), 서버 권한·엔진 두 건(#54278·#54236), Librarian 경보 수리 한 건(#54280), MSX 코어 핀 상향 한 건(#54291), Keeper 프롬프트 접두 보존 한 건(#53895)이고, 나머지는 규약·RFC 문서 세 건(#54284·#54204·#54219), 온보딩 시험 단언 한 건(#54277), 전량 회귀 샤딩 스크립트 한 건(#54281), 동결 뒤 가져온 TUI 두 건(#54288·#54286)과 CI 샤딩 후속 한 건(#54287)입니다.
+- 이 릴리스 브랜치는 동결 기준 main `7e271d86c3821da72857bc3c084bc98c6a1b1a16` 위에 버전 올림 커밋을 얹은 뒤, 동결 뒤 main 에 착지한 네 PR(`#54288`·`#54286`·`#54287`·`#54290`, tip `315495a2319cfdfba14f2250d06c7dd902708a77`)을 이 브랜치로 가져왔습니다. 앞의 셋은 그 조각을 `0.78.0` 절에 접어 넣었고, `#54290` 은 문서 전용(`### Exempt`)이라 절에 넣지 않았습니다.
+- 접은 조각은 `changelog.d/54286.md`·`changelog.d/54288.md`·`changelog.d/54287.md` 세 개이며, `#54290` 과 다른 Exempt 조각은 종전대로 남겼습니다.
 - `#54281` 의 샤딩은 스크립트에만 들어갔고 `Test` 워크플로는 아직 `SUITE_SHARD_COUNT` 를 넘기지 않습니다(기본값 1 이면 종전과 같은 한 번의 `@runtest` 빌드). 이 릴리스 자체로 CI 디스크 피크가 낮아지지는 않습니다.
 
 ### Added
@@ -45,6 +45,7 @@
 ### Internal
 
 - 전량 회귀 wrapper(`scripts/ci-run-test-suite.sh`)가 bare `@runtest` 가 돌릴 suite 를 `SUITE_SHARD_COUNT` 조각으로 나누고 조각 사이에 `_build/default/test` 를 지울 수 있습니다. 조각마다 자기 로그와 dune trace 를 쓰고, 업로드하는 `test-suite.log` 는 조각 순서로 다시 만들며 trace 요약은 끝에 한 번 합니다. 기본값 1 이면 종전과 같습니다. 워크플로 배선은 아직 없습니다 (#54281).
+- The sharded full-regression path now keeps only the aliases `dune` actually defines: an alias name that holds `-` is no longer truncated to a prefix, and a `(test …)` stanza disabled by `(enabled_if …)` is no longer addressed as a target. The list is filtered by asking `dune rules` (which builds nothing), and a shard's targets go to one `dune build` so the workspace is parsed once per shard. `SUITE_SHARD_COUNT=1` (the default) still builds the bare `@runtest` once and does not run the filter (#54287).
 - CI 시험만: `test_onboarding_journey` 가 `catalog.models` 를 인덱싱하기 전에 `catalog_error is None` 을 단언해, 실패한 Antigravity catalog 읽기가 맨 `IndexError` 대신 자기 까닭을 보고합니다. 제품 동작 변화는 없습니다 (#54277).
 
 ## [0.77.1] - 2026-11-21

@@ -184,6 +184,11 @@ sandbox_root="_build/.sandbox"
 # been recorded. Each band costs two du passes, and only when it is crossed.
 disk_bands="50 30 20 10 5"
 disk_bands_seen=" "
+# Which slice the band lines belong to. A sharded run resets disk_bands_seen per
+# shard and names the shard in every band line: a band crossed in one shard is a
+# different observation from the same band crossed later, and without the reset
+# the first crossing hid every later one.
+shard_tag="single"
 disk_evidence_log="$tmp/test-suite-disk-evidence.log"
 disk_usage() {
   local budget="$1" depth="$2" rows="$3" result
@@ -199,8 +204,8 @@ disk_usage() {
 disk_evidence() {
   # An annotation line is collected by the runner as it streams, so it survives
   # even when the job dies before the evidence file can be uploaded.
-  echo "::warning::disk band ${1}G crossed: $(df -BG --output=avail / | tail -1) available"
-  echo "[test-suite] free space fell below ${1}G; what holds the bytes:"
+  echo "::warning::disk band ${1}G crossed (${shard_tag}): $(df -BG --output=avail / | tail -1) available"
+  echo "[test-suite] free space fell below ${1}G in ${shard_tag}; what holds the bytes:"
   df -h /
   echo "[test-suite] largest _build entries (two levels: subtree then its biggest children):"
   disk_usage 90 1 8
@@ -258,7 +263,11 @@ run_suite_under_deadline() {
   # The deadline below and the "finished in" line after the call measure the
   # suite, not this baseline: take the start time after the baseline read.
   started=$(date +%s)
-  opam exec -- dune build --root . --trace-file "$trace" "$alias_target" >> "$log" 2>&1 &
+  # $alias_target holds one target, or a shard's targets separated by spaces.
+  # Dune parses the whole workspace before it builds anything, so one process per
+  # shard keeps that cost to one per shard; a process per suite multiplied it by
+  # 1843 (a sharded run measured about three minutes per invocation here).
+  opam exec -- dune build --root . --trace-file "$trace" $alias_target >> "$log" 2>&1 &
   local dune_pid=$!
   local exited disk_watcher_pid disk_watcher_exited
   local disk_watcher_stopped=false
@@ -367,7 +376,11 @@ shard_target_list() {
   local dune_file dir
   # `test/`: one target per suite, because that is where the peak lives.
   {
-    grep -rhoE 'alias runtest-[A-Za-z0-9_]+' \
+    # The name may hold `-`: this repo has runtest-browser-native-screenshot and
+    # runtest-ego-takeover-js, and a pattern that stopped at the first dash left
+    # the prefixes runtest-browser and runtest-ego in the list as aliases dune
+    # does not define.
+    grep -rhoE 'alias runtest-[A-Za-z0-9_-]+' \
       "$repo_root/test/dune" "$repo_root"/test/stanzas/*.inc 2>/dev/null \
       | sed 's/^alias //'
     # A test stanza's alias is `runtest-<name>`, spelled nowhere in the file.
@@ -391,6 +404,55 @@ shard_target_list() {
   )
 }
 
+# Keep only the targets dune actually defines. The scan above is a candidate
+# list, and a candidate can have no alias: a `(test (name x))` carrying
+# `(enabled_if (= %{env:MASC_E2E_TESTS=false} "true"))` has none until that
+# variable is true, and dune refuses a target no rule defines ("Alias ...
+# specified on the command line is empty"). Which condition is on is dune's
+# answer, not a text prediction, so this asks dune: `dune rules TARGET...`
+# validates targets without building anything, and names the alias it rejects.
+# Each round drops the reported name and asks again; a clean round ends it.
+drop_undefined_targets() {
+  local candidates="$1" max_rounds="${2:-32}" round=1 rejected name kept
+  dropped_names=""
+  while [ "$round" -le "$max_rounds" ]; do
+    rejected="$(opam exec -- dune rules --root "$repo_root" $candidates 2>&1 >/dev/null \
+      | grep -oE 'Alias "[^"]+"' | head -1 | sed 's/^Alias "//; s/"$//' || true)"
+    if [ -z "$rejected" ]; then
+      for candidate in $candidates; do
+        printf '%s\n' "$candidate"
+      done
+      return 0
+    fi
+    echo "[test-suite] dune does not define the alias ${rejected}; dropping that target" >&2
+    dropped_names="$dropped_names $rejected"
+    kept=""
+    for candidate in $candidates; do
+      case "$candidate" in
+        "@test/$rejected"|"@*/$rejected") continue ;;
+      esac
+      kept="$kept $candidate"
+    done
+    candidates="$kept"
+    round=$(( round + 1 ))
+  done
+  echo "[test-suite] WARN - dune still rejected a target after ${max_rounds} rounds; keeping the list as it stands" >&2
+  for candidate in $candidates; do
+    printf '%s\n' "$candidate"
+  done
+}
+# One line that says what the filter did, whether or not it rejected anything.
+# Per-name lines alone cannot tell "the filter ran and dropped nothing" from
+# "the filter never ran", which is the difference a reviewer has to see.
+report_target_filter() {
+  local total="$1" kept_count="$2" dropped="$3"
+  if [ "$dropped" -eq 0 ]; then
+    echo "[test-suite] target list: ${total} candidate(s), ${kept_count} kept, 0 dropped (dune accepted every candidate)"
+  else
+    echo "[test-suite] target list: ${total} candidate(s), ${kept_count} kept, ${dropped} dropped:${dropped_names:-}"
+  fi
+}
+
 # One shard's targets: the round-robin slice `index` of `count` over the sorted
 # target list, so every target belongs to exactly one shard.
 shard_aliases() {
@@ -399,10 +461,14 @@ shard_aliases() {
     | awk -v c="$count" -v i="$index" 'NR % c == i'
 }
 
-run_one_target() {
+run_targets() {
+  # $1 is one target, or a shard's targets separated by spaces; dune takes them
+  # all in one process. Building one suite per process cost about three minutes
+  # of workspace parsing per suite, which no shard count survives.
   alias_target="$1"
-  echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
-  printf '\n[test-suite] ===== %s =====\n' "$alias_target" >> "$active_log"
+  label="$2"
+  echo "[test-suite] dune build ${label} (deadline ${deadline}s)"
+  printf '\n[test-suite] ===== %s =====\n' "$label" >> "$active_log"
   run_suite_under_deadline
   if [ "$rc" != 0 ] && [ "$overall_rc" = 0 ]; then
     overall_rc="$rc"
@@ -420,7 +486,14 @@ overall_rc=0
 run_started=$(date +%s)
 
 if [ "$shard_count" -gt 1 ]; then
-  all_aliases="$(shard_target_list)"
+  candidate_words="$(shard_target_list | tr '\n' ' ')"
+  candidate_total=0
+  for candidate_word in $candidate_words; do
+    candidate_total=$(( candidate_total + 1 ))
+  done
+  all_aliases="$(drop_undefined_targets "$candidate_words")"
+  kept_total="$(printf '%s\n' "$all_aliases" | grep -c . || true)"
+  report_target_filter "$candidate_total" "$kept_total" "$(printf '%s\n' "${dropped_names:-}" | wc -w | tr -d ' ')"
   if [ -z "$all_aliases" ]; then
     echo "[test-suite] FAIL - no suite target found to shard"
     exit 2
@@ -445,15 +518,21 @@ if [ "$shard_count" -gt 1 ]; then
     shard_size="$(printf '%s\n' "$targets" | grep -c . || true)"
     echo "[test-suite] shard ${idx}/${shard_count}: ${shard_size} target(s)"
     active_log="$tmp/test-suite.shard-${idx}.log"
+    shard_tag="shard ${idx}/${shard_count}"
+    # Each shard starts its band state over: the previous shard's crossings were
+    # observed against a tree this shard has since deleted.
+    disk_bands_seen=" "
     trace="$tmp/test-suite-trace.shard-${idx}.csexp"
     shard_traces="$shard_traces $trace"
     if [ "$shard_size" -eq 0 ]; then
       continue
     fi
     : > "$active_log"
-    for target in $targets; do
-      run_one_target "$target"
-    done
+    # One dune process for the whole shard: it parses the workspace once and
+    # links this slice only, so the peak is the slice and the parse cost is per
+    # shard rather than per suite.
+    shard_target_words="$(printf '%s\n' "$targets" | tr '\n' ' ' | sed 's/ *$//')"
+    run_targets "$shard_target_words" "shard ${idx}/${shard_count} (${shard_size} target(s))"
     # Append this shard's log to the uploaded one in shard order, so the final
     # file reads in the order the suites ran.
     {
@@ -482,7 +561,7 @@ if [ "$shard_count" -gt 1 ]; then
 else
   active_log="$log"
   : > "$active_log"
-  run_one_target "$alias_target"
+  run_targets "$alias_target" "$alias_target"
 fi
 rc="$overall_rc"
 echo "[test-suite] finished in $(( $(date +%s) - run_started ))s with exit ${rc}"

@@ -11749,6 +11749,9 @@ type state = {
   (* #39831: [d] on the Memory table shows the selected keeper's ledger rows;
      off, the block draws its state, last save and any action. *)
   mutable memory_overview_detail: bool;
+  (* The act [w] armed on a Keeper's Memory writer row, and that Keeper. The
+     next [w] sends it; any other input ends it. *)
+  mutable memory_act_armed: (string * Masc.Tui_decode_memory_act.act) option;
   mutable repository_changes_open: bool;
   mutable repository_changes_scope: Tui_decode.repository_change_scope option;
   mutable repository_changes: Tui_decode.repository_change_snapshot option;
@@ -22494,6 +22497,7 @@ let create_state
   memory_facts_sort = Sort_recency;
   memory_overview_sort = Mem_overview_facts;
   memory_overview_detail = false;
+  memory_act_armed = None;
   repository_changes_open = false;
   repository_changes_scope = None;
   repository_changes = None;

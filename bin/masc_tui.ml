@@ -6564,7 +6564,8 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         | Machine_msg (Machine_activity_read (_, _) | Machine_activity_saved (_, _))
         | Runtime_msg (Runtime_config_view_loaded (_, _, _, _, _) | Runtime_params_loaded _
         | Runtime_param_written (_, _)) | Prompts_loaded (_, _)
-        | Keeper_msg (Keeper_board_quarantines_loaded (_, _) | Keeper_efficiency_loaded (_, _)) | Board_msg (Board_quarantine_requeued (_, _, _)
+        | Keeper_msg (Keeper_board_quarantines_loaded (_, _) | Keeper_efficiency_loaded (_, _)) | Memory_msg (Memory_act_answered (_, _, _))
+        | Board_msg (Board_quarantine_requeued (_, _, _)
         | Board_quarantines_bulk_progress (_, _)
         | Board_quarantines_bulk_requeued (_, _)) | Preset_msg (Presets_listed (_, _)
         | Preset_detail_loaded (_, _) | Preset_contents_shown (_, _) | Preset_saved (_, _)
@@ -9257,6 +9258,42 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
        | Some keeper when String.equal keeper.k_name keeper_name ->
            Masc_tui_surface_requests.Keeper_surface_requests.launch_keeper_board_quarantines state ~mailbox keeper_name
        | Some _ | None -> ());
+      Drawn_changed
+  | Memory_msg (Memory_act_answered (keeper, act, outcome)) ->
+      let ko = state.ui_language = Lang_ko in
+      let said = Terminal_text.single_line in
+      let keeper_text = said keeper in
+      let act_text = said (Masc.Tui_decode_memory_act.act_text act) in
+      (match outcome with
+       | Ok (Masc_tui_http.Memory_act_answered answer) ->
+           report_action state
+             (match answer with
+              | Masc.Tui_decode_memory_act.Done _ -> "system"
+              | Masc.Tui_decode_memory_act.Refused _
+              | Masc.Tui_decode_memory_act.Invalid_request _
+              | Masc.Tui_decode_memory_act.No_writer_in_process -> "error")
+             (said (Masc.Tui_decode_memory_act.answer_text ~ko ~keeper act answer))
+       | Ok (Masc_tui_http.Memory_act_refused detail) ->
+           report_action state "error"
+             (ui_text state
+                ~ko:(keeper_text ^ " 기억 쓰는 쪽: " ^ act_text ^ " 거절 · " ^ said detail)
+                ~en:(keeper_text ^ " Memory writer: " ^ act_text ^ " refused · " ^ said detail))
+       | Ok (Masc_tui_http.Memory_act_unanswered detail) ->
+           report_action state "error"
+             (ui_text state
+                ~ko:(keeper_text ^ " 기억 쓰는 쪽: " ^ act_text
+                     ^ " 반영됐는지 알 수 없음 · " ^ said detail)
+                ~en:(keeper_text ^ " Memory writer: " ^ act_text
+                     ^ " may or may not have landed · " ^ said detail))
+       | Error refusal ->
+           (* Not sent: the kept-back notice, with the Keeper after it. *)
+           report_action state "error"
+             (workspace_refusal_text ~ko ~request:Kept_request.Memory_writer_act refusal
+              ^ " · " ^ keeper_text));
+      (* Read the row again whatever the answer: an accepted act moved it, a
+         refusal usually means it moved first, and an unanswered act may have
+         landed. *)
+      Masc_tui_owed_surface_reads.Owed_read_policy.owe_memory_health_row state keeper;
       Drawn_changed
   | Board_msg (Board_quarantines_bulk_progress
       (keeper_name, { attempted; total; accepted; refused; uncertain = unanswered; kept_back })) ->
@@ -16559,6 +16596,7 @@ let main
          Config arm below. A delete cannot be put back, so the first input
          seen anywhere else ends the arm. *)
       if state.view <> Config && input_seen then state.preset_armed <- None;
+      if state.view <> Memory && input_seen then state.memory_act_armed <- None;
       (* Same rule for the Skills list: a surface change with no key, such as
          a dispatched task opening its view, must not keep a delete armed. *)
       if state.view <> Tools && input_seen then begin
@@ -16638,7 +16676,9 @@ let main
            if cancelled [ "d"; "D" ] then state.tools_skill_delete_armed <- None;
            if cancelled [ Masc_tui_volume_gc.key ] then
              state.volume_gc <- Masc_tui_volume_gc.disarm state.volume_gc
-       | Overview | Acting | Metrics | Lanes | Clients | Harness | Memory | Fusion
+       | Memory ->
+           if cancelled [ "w"; "W" ] then state.memory_act_armed <- None
+       | Overview | Acting | Metrics | Lanes | Clients | Harness | Fusion
        | Repositories
        | Changes | Connectors | Resources
        | System_logs | Code -> ());
@@ -21113,6 +21153,57 @@ let main
          when state.view = Memory
               && Option.is_none state.memory_facts_keeper ->
            state.memory_overview_detail <- not state.memory_overview_detail
+       | Some (("w" | "W") as key)
+         when state.view = Memory && Option.is_none state.memory_facts_keeper ->
+           (* [w] arms the act the selected Keeper's writer row takes and sends
+              it on the next [w]; [W] steps the arm to the row's next act. The
+              row decides what is offered, the server whether it still holds
+              when it lands (RFC librarian-call-only-proposes §12.4). *)
+           (match selected_memory_keeper state with
+            | None -> state.memory_act_armed <- None
+            | Some row ->
+                let keeper = row.Masc.Tui_decode_memory_health.mkh_keeper_id in
+                let keeper_text = Terminal_text.single_line keeper in
+                let offered =
+                  match row.Masc.Tui_decode_memory_health.mkh_writer with
+                  | Masc.Tui_decode_memory_writer.Writer shown ->
+                      Masc.Tui_decode_memory_act.offered
+                        shown.Masc.Tui_decode_memory_writer.row
+                  | Masc.Tui_decode_memory_writer.None_in_process
+                  | Masc.Tui_decode_memory_writer.No_writer -> []
+                in
+                let armed =
+                  match state.memory_act_armed with
+                  | Some (armed_keeper, act) when String.equal armed_keeper keeper -> Some act
+                  | Some _ | None -> None
+                in
+                (match armed, key with
+                 | Some act, "w" ->
+                     state.memory_act_armed <- None;
+                     Masc_tui_surface_requests.Memory_repository_requests.launch_memory_act state
+                       ~mailbox:async_messages ~keeper act
+                 | (Some _ | None), _ ->
+                     (match Masc.Tui_decode_memory_act.step offered ~armed with
+                      | None ->
+                          state.memory_act_armed <- None;
+                          report_action state "system"
+                            (ui_text state
+                               ~ko:(keeper_text ^ " 기억 쓰는 쪽: 이 행이 받는 행동이 없음")
+                               ~en:(keeper_text ^ " Memory writer: this row takes no act"))
+                      | Some act ->
+                          state.memory_act_armed <- Some (keeper, act);
+                          let act_text =
+                            Terminal_text.single_line (Masc.Tui_decode_memory_act.act_text act)
+                          in
+                          let more = List.length offered > 1 in
+                          report_action state "system"
+                            (ui_text state
+                               ~ko:("준비됨: " ^ act_text ^ " · " ^ keeper_text
+                                    ^ " · w 를 한 번 더 누르면 보냄"
+                                    ^ if more then " · W 다음 행동" else "")
+                               ~en:("Armed: " ^ act_text ^ " · " ^ keeper_text
+                                    ^ " · press w again to send"
+                                    ^ if more then " · W next act" else "")))))
        | Some ("a" | "A") when state.view = Memory ->
            Masc_tui_surface_requests.Memory_repository_requests.open_all_fleet_memory state ~mailbox:async_messages
        (* Resources and Tools hang off Config the way Connectors hangs off

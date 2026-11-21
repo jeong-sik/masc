@@ -133,6 +133,59 @@ let rests = function
   | Http_unfit _ -> false
 ;;
 
+(* What a failed slot says about the request, read as the walk receipt reads
+   the same failure of a flow or a one-shot. *)
+let evidence_of_failure = function
+  | Http_failed { slot_id = _; error = Exact.Flow_semantic_candidates_exhausted _ } ->
+    Keeper_exact_walk_failure.invalid_output
+  | Http_failed
+      { slot_id = _; error = Exact.Flow_execution_terminal { cause; prior_rejections } } ->
+    let evidence =
+      match cause with
+      | Exact.Flow_exact_execution_failed { cause = error; candidate = _; evidence = _ } ->
+        Keeper_exact_walk_failure.of_cause error.cause
+      | Exact.Flow_candidates_exhausted { rejection; evidence = _ } ->
+        Keeper_exact_walk_failure.of_disposition
+          (Exact.candidate_rejection_disposition rejection)
+      (* masc's own failures stop the walk ([visit_http]). Like the walk
+         receipt's local stops, they say nothing about the request. *)
+      | Exact.Flow_attempt_already_started _
+      | Exact.Flow_attempt_start_failed _
+      | Exact.Flow_measurement_start_failed _
+      | Exact.Flow_before_measurement_dispatch_callback_failed _
+      | Exact.Flow_measurement_terminal_callback_failed _
+      | Exact.Flow_before_dispatch_callback_failed _
+      | Exact.Flow_before_advance_callback_failed _ -> Keeper_exact_walk_failure.empty
+    in
+    (match prior_rejections with
+     | [] -> evidence
+     | _ :: _ -> Keeper_exact_walk_failure.with_invalid_output evidence)
+  | Cli_failed { runtime_id = _; failure } -> Keeper_exact_walk_failure.of_cli_failure failure
+  | Cli_rejected { runtime_id; rejection = _ } ->
+    Keeper_exact_walk_failure.of_cli_observation
+      (Keeper_exact_walk_failure.cli_invalid_domain_answer ~runtime_id)
+  | Cli_unfit { runtime_id = _ } ->
+    Keeper_exact_walk_failure.of_local_rejection Keeper_exact_walk_failure.Input_contract
+  | Cli_seats_unpublished { runtime_id = _; provider_id = _ } ->
+    Keeper_exact_walk_failure.of_local_rejection Keeper_exact_walk_failure.Runtime_unavailable
+  | Http_unfit { slot_id = _; reason = _ } ->
+    Keeper_exact_walk_failure.of_local_rejection Keeper_exact_walk_failure.Runtime_contract
+;;
+
+let failure_evidence passed =
+  List.fold_left
+    (fun evidence pass ->
+       Keeper_exact_walk_failure.combine
+         evidence
+         (match pass with
+          | Exact_lane_walk.Held { slot = (_ : t); until = _ } -> Keeper_exact_walk_failure.held
+          | Exact_lane_walk.Seats_full (_ : t) ->
+            Keeper_exact_walk_failure.of_local_rejection Keeper_exact_walk_failure.Seats_full
+          | Exact_lane_walk.Failed { slot = (_ : t); failure } -> evidence_of_failure failure))
+    Keeper_exact_walk_failure.empty
+    passed
+;;
+
 type ('accepted, 'rejection, 'record_error) walk_result =
   ( t
     , ('accepted, 'rejection) answer

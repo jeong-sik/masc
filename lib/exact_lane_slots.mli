@@ -109,6 +109,18 @@ val rests : ('rejection, 'record_error) failure -> bool
     refused so ({!Agent_core.Exact_output.flow_execution_binding_standing}),
     or the client refused so ({!Keeper_lane_cli_oneshot.refused_for_binding_rest}). *)
 
+val failure_evidence
+  :  (t, ('rejection, 'record_error) failure) Exact_lane_walk.passed list
+  -> Keeper_exact_walk_failure.t
+(** What the slots a walk passed say about its request, for a lane that
+    sizes its input by them. Each failure reads as the walk receipt reads the
+    same failure of a flow or a one-shot. A held slot of either kind reads as
+    its account's rest refusal without the call, as a held one-shot does. A
+    full slot says nothing. Neither does a slot the walk could not send to:
+    an HTTP slot whose declaration could not become a flow candidate, or a
+    CLI slot with no runtime, not an official client, no seats published, or
+    a request that is not one prompt. *)
+
 type ('accepted, 'rejection, 'record_error) walk_result =
   ( t
     , ('accepted, 'rejection) answer

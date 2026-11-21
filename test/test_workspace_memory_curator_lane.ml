@@ -297,6 +297,35 @@ let test_capacity_refusal_bisects_batch () =
         (List.length (Ledger.claims (get (Ledger.load ~base_path))))))
 ;;
 
+(* An answer cut at the slot's output budget. *)
+let length_cut_response =
+  {|{"id":"curator-output-limit","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":"{}"},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+;;
+
+let test_output_limit_narrows_classification_batch () =
+  with_fixture (fun ~sw ~net ~clock ~base_path ~config ->
+    let server =
+      F.start_server ~sw ~net ~clock
+        (F.Reply_with (fun _ body ->
+           let payload = classify_or_briefing_response body in
+           let decision_count =
+             match member "decisions" payload with `List xs -> List.length xs | _ -> 0
+           in
+           if decision_count > 1 then `OK, length_cut_response
+           else `OK, F.openai_response payload))
+    in
+    publish_lane base_path [ server.base_url ];
+    commit_facts ~base_path ~keeper_id:"writer" [ "Fact one"; "Fact two"; "Fact three" ];
+    Curator.start ~sw ~config;
+    Fun.protect ~finally:(fun () -> Curator.For_testing.stop ~base_path) (fun () ->
+      await_owner clock base_path (fun () ->
+        Curator.For_testing.is_idle ~base_path
+        && List.length (Ledger.claims (get (Ledger.load ~base_path))) = 3
+        && ready_summary base_path);
+      check int "all 3 facts survived output-limit narrowing" 3
+        (List.length (Ledger.claims (get (Ledger.load ~base_path))))))
+;;
+
 let test_startup_recovery_and_partial_member_survival () =
   with_fixture (fun ~sw ~net ~clock ~base_path ~config ->
     let log_path = Log_store.log_path ~base_path in
@@ -453,6 +482,10 @@ let () =
             "capacity refusal bisects classification batch and commits all facts"
             `Quick
             test_capacity_refusal_bisects_batch
+        ; test_case
+            "an answer cut at the output budget narrows the classification batch"
+            `Quick
+            test_output_limit_narrows_classification_batch
         ; test_case
             "startup log recovery aborts incomplete batches and preserves partial-member survival"
             `Quick

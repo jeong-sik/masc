@@ -27,7 +27,7 @@ type gemini_chunk =
   ; gem_total_token_mismatch : (int * int) option
     (** [(expected, reported)] when the response's
         [usageMetadata.totalTokenCount] disagrees with
-        [promptTokenCount + candidatesTokenCount + thoughtsTokenCount].
+        [promptTokenCount + candidatesTokenCount + thoughtsTokenCount + toolUsePromptTokenCount].
         [None] means the total agreed or was absent.
 
         The fold above assumes Gemini counts thoughts outside

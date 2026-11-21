@@ -1126,10 +1126,16 @@ let parse_response json =
       else
         match um |> member "totalTokenCount" |> to_int_option with
         | Some total ->
+          let non_negative name =
+            match um |> member name |> to_int_option with
+            | Some n when n >= 0 -> n
+            | Some _ | None -> 0
+          in
           let expected =
             Cli_common_json.member_int "promptTokenCount" um
             + Cli_common_json.member_int "candidatesTokenCount" um
             + Option.value raw_thoughts ~default:0
+            + non_negative "toolUsePromptTokenCount"
           in
           if Int.equal total expected then None else Some (expected, total)
         | None -> None

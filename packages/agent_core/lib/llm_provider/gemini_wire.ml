@@ -14,7 +14,7 @@ type gemini_chunk =
   ; gem_reasoning_tokens : int option
   ; gem_total_token_mismatch : (int * int) option
     (* [(expected, reported)] when [totalTokenCount] disagrees with
-       [promptTokenCount + candidatesTokenCount + thoughtsTokenCount]. The
+       [promptTokenCount + candidatesTokenCount + thoughtsTokenCount + toolUsePromptTokenCount]. The
        accounting above folds thoughts into [output_tokens]; that rests on
        Gemini counting thoughts outside [candidatesTokenCount], which is a
        convention rather than a documented guarantee. Carrying the verdict as a
@@ -725,8 +725,18 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
              "totalTokenCount"
              usage)
       in
+      let* tool_use_prompt_tokens =
+        malformed
+          (gemini_optional_non_negative_int
+             ~path:"gemini.usageMetadata"
+             "toolUsePromptTokenCount"
+             usage)
+      in
       let expected_total =
-        input_tokens + candidates_tokens + Option.value thoughts_tokens ~default:0
+        input_tokens
+        + candidates_tokens
+        + Option.value thoughts_tokens ~default:0
+        + Option.value tool_use_prompt_tokens ~default:0
       in
       let total_token_mismatch =
         match reported_total with

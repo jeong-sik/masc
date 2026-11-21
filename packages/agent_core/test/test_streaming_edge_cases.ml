@@ -1093,10 +1093,15 @@ let test_gemini_model_identity_is_single_and_fail_closed () =
   | Ok _ -> fail "changed modelVersion must not be silently accepted"
 ;;
 
-let gemini_usage_payload ~prompt ~candidates ?thoughts ?total () =
+let gemini_usage_payload ~prompt ~candidates ?thoughts ?tool_use ?total () =
   let thoughts_field =
     match thoughts with
     | Some n -> Printf.sprintf ",\"thoughtsTokenCount\":%d" n
+    | None -> ""
+  in
+  let tool_use_field =
+    match tool_use with
+    | Some n -> Printf.sprintf ",\"toolUsePromptTokenCount\":%d" n
     | None -> ""
   in
   let total_field =
@@ -1105,8 +1110,8 @@ let gemini_usage_payload ~prompt ~candidates ?thoughts ?total () =
     | None -> ""
   in
   Printf.sprintf
-    {|{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":%d,"candidatesTokenCount":%d%s%s}}|}
-    prompt candidates thoughts_field total_field
+    {|{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":%d,"candidatesTokenCount":%d%s%s%s}}|}
+    prompt candidates thoughts_field tool_use_field total_field
 ;;
 
 (* Gemini reports [totalTokenCount] beside the counts the backend folds. The
@@ -1130,7 +1135,16 @@ let test_gemini_total_token_invariant () =
   verdict "absent thoughts add nothing" ~expect:None
     (gemini_usage_payload ~prompt:1 ~candidates:1 ~total:2 ());
   verdict "absent thoughts still report a larger total" ~expect:(Some (2, 3))
-    (gemini_usage_payload ~prompt:1 ~candidates:1 ~total:3 ())
+    (gemini_usage_payload ~prompt:1 ~candidates:1 ~total:3 ());
+  (* Gemini counts tokens that built-in tool use spent in its own field, outside
+     [promptTokenCount] and [candidatesTokenCount]. Leaving it out of the
+     expected sum would report a false disagreement on every response that used
+     a built-in tool. *)
+  verdict "tool-use prompt tokens join the expected total" ~expect:None
+    (gemini_usage_payload ~prompt:1 ~candidates:1 ~tool_use:3 ~total:5 ());
+  verdict "a total short of the tool-use field is a disagreement"
+    ~expect:(Some (5, 4))
+    (gemini_usage_payload ~prompt:1 ~candidates:1 ~tool_use:3 ~total:4 ())
 ;;
 
 let test_gemini_event_edge_branches () =

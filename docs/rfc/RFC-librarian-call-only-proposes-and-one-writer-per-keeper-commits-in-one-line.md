@@ -2213,12 +2213,11 @@ purge 규칙도 이 stack 에 든다(L10b2). 컷 앞의 빌드에서는 옛 lane
 - **P1 시험 가르기.** case 마다 갈라야 하는 시험 파일 57개(§19.2 h)에서, 남는 모듈을 시험하는 case 와 지울 case 를 다른 파일로 나눈다. 컷 stack 은 시험을 파일째 지운다.
 - **P2 스냅샷 읽기 옮기기.** 지우는 `include` 모듈 아홉(§19.2 b)에 정의된 값 가운데 컷 뒤에도 남는 코드가 쓰는 스냅샷 읽기를 남는 모듈로 옮긴다. facade `keeper_memory_os_current` 의 `.mli` 는 그대로다.
 
-넣는 순서는 이렇다. E4 가 마지막 묻기의 거절을 읽게 하는 수리는 main 에 있다. PR 번호는 2026-11-21 에 본 값이다.
+넣는 순서는 이렇다. E4 가 마지막 묻기의 거절을 읽게 하는 수리와 L9 의 화면(#54286)은 main 에 있다. PR 번호는 2026-11-21 에 본 값이다.
 
-1. L9 의 화면(Draft #54286). 컷이 고칠 파일을 고친다.
-2. carried front 의 출처 `Past_librarian_point` 의 이름 바꾸기. 그 이름을 적은 파일은 `lib/` 에 여섯, `test/` 에 넷이다. 요청이 보내는 바이트는 그대로다. L10b 가 그 가운데 셋(`keeper_turn_driver_try_provider`, `keeper_continuity_request`, `keeper_next_request_forecast`)을 고치거나 지우므로 컷 앞에 온다. L9 의 화면 뒤에 넣는다.
-3. P1 과 P2.
-4. 컷 stack. purge 규칙(L10b2, Draft #54283)은 그 안의 층이다.
+1. carried front 의 출처 `Past_librarian_point` 의 이름 바꾸기. 그 이름을 적은 파일은 `lib/` 에 여섯, `test/` 에 넷이다. 요청이 보내는 바이트는 그대로다. L10b 가 그 가운데 셋(`keeper_turn_driver_try_provider`, `keeper_continuity_request`, `keeper_next_request_forecast`)을 고치거나 지우므로 컷 앞에 온다.
+2. P1 과 P2.
+3. 컷 stack. purge 규칙(L10b2, Draft #54283)은 그 안의 층이다.
 
 ## 21. 모델 검사
 

@@ -4137,12 +4137,22 @@ let test_request_failure_kind_turn_ref_and_redaction () =
         ~content:"ignored" () with
      | Ok _ -> Alcotest.fail "blocked base_dir must fail append"
      | Error persist_err ->
+       (* #54306: the diagnostic that stays inside the workspace keeps the
+          store path that failed, so an operator can find the file. The
+          redaction guards the same text where it leaves the workspace, so
+          its assertions move to the outbound projection below. *)
+       Alcotest.(check bool) "report_store_failure keeps the failed store path" true
+         (String_util.contains_substring persist_err "not-a-dir");
+       Alcotest.(check bool) "report_store_failure keeps the .masc segment" true
+         (String_util.contains_substring persist_err ".masc/");
+       let projected_err = Keeper_request_failure.sanitize_person_text persist_err in
        List.iter (fun forbidden ->
-         if String_util.contains_substring persist_err forbidden then
-           Alcotest.failf "report_store_failure leaked %S in %S" forbidden persist_err)
+         if String_util.contains_substring projected_err forbidden then
+           Alcotest.failf "projected report_store_failure leaked %S in %S" forbidden
+             projected_err)
          [ "/Users/"; "/tmp/"; "/var/"; ".masc/"; "not-a-dir" ];
-       Alcotest.(check bool) "report_store_failure redacts server paths" true
-         (String_util.contains_substring persist_err "[REDACTED_PATH]"));
+       Alcotest.(check bool) "projected report_store_failure redacts server paths" true
+         (String_util.contains_substring projected_err "[REDACTED_PATH]"));
     let direct_store_err =
       Masc.Keeper_chat_store_paths.report_store_failure
         ~operation:Keeper_chat_store_operation.Append
@@ -4150,12 +4160,20 @@ let test_request_failure_kind_turn_ref_and_redaction () =
         ~what:"append"
         (Sys_error "/Users/alice/repo/.masc/keeper_chat/k.jsonl: Permission denied (sk-ant-api03-secret123456)")
     in
+    (* Same contract on the direct diagnostic: the raw detail keeps the exact
+       store path for the operator, and the workspace-boundary projection
+       replaces the path token and any secret the exception carried. *)
+    Alcotest.(check bool) "direct report_store_failure keeps the store path" true
+      (String_util.contains_substring direct_store_err
+         "/Users/alice/repo/.masc/keeper_chat/k.jsonl");
+    let projected_direct = Keeper_request_failure.sanitize_person_text direct_store_err in
     List.iter (fun forbidden ->
-      if String_util.contains_substring direct_store_err forbidden then
-        Alcotest.failf "direct report_store_failure leaked %S in %S" forbidden direct_store_err)
-      [ "/Users/"; ".masc/"; "sk-ant-" ];
-    Alcotest.(check bool) "direct report_store_failure emits [REDACTED_PATH]" true
-      (String_util.contains_substring direct_store_err "[REDACTED_PATH]"))
+      if String_util.contains_substring projected_direct forbidden then
+        Alcotest.failf "projected direct report_store_failure leaked %S in %S" forbidden
+          projected_direct)
+      [ "/Users/"; ".masc/"; "sk-ant-"; "[REDACTED]" ];
+    Alcotest.(check bool) "projected direct report_store_failure emits [REDACTED_PATH]" true
+      (String_util.contains_substring projected_direct "[REDACTED_PATH]"))
 ;;
 
 let test_failure_kind_tolerant_decode_and_read_drops () =

@@ -45,6 +45,7 @@ related: ["tui-a-streaming-reply-only-grows-at-its-end", "tui-a-long-reply-opens
 - `last_content`(2419행)가 내용 있는 마지막 줄을 찾는다.
 - `shared_lines`(2290행)가 지난 줄 배열과 줄마다 비교한다.
 - 맨 아래 창(2705행)이 행을 세고 끝을 고른다. #54181 이 다섯 번을 두 번으로 줄였다.
+- `body_rows_of_chosen`(2799행)이 고른 행의 body row 를 찾으려고 entry 의 행을 처음부터 훑는다.
 
 측정(macOS M3 Max, `test_tui_chat_search_projection` 안 stream bench: 1MB 답, 1500 frame, frame 마다 delta 하나, 2026-11-21):
 
@@ -82,7 +83,9 @@ val extends : 'a prefix -> kept:'a prefix -> bool
 val to_list : 'a prefix -> 'a list
 ```
 
-- 배열이 차면 두 배 크기로 새로 만든다. 지난 prefix 는 옛 배열을 계속 가리킨다. 길이 안의 칸은 옛 배열과 새 배열에서 같다.
+- 배열이 차면 두 배 크기로 새로 만든다. 길이 안의 칸을 먼저 새 배열에 옮긴 뒤 바꾼다.
+- prefix 는 쓰는 쪽과 길이를 갖고, 쓰는 쪽의 지금 배열을 읽는다. 옛 배열을 따로 들지 않는다.
+  - 그래서 prefix 는 쓰는 domain 에서만 읽는다. 다른 domain 이 읽으면 늘리는 중인 배열의 빈 칸을 볼 수 있다.
 - `append` 는 UI domain 만 부른다.
   - 렌더 캐시(`chat_markdown_cache`, `render_chat.ml:80`)와 배치 기억(`Domain.DLS`)은 UI domain 만 쓴다.
   - /find 는 CPU domain 에서 따로 그린다(`search_chat_markdown`, `render_chat.ml:5164`).
@@ -93,13 +96,14 @@ val to_list : 'a prefix -> 'a list
 
 - `Streaming.growing` 이 `stable_rows_newest_first` 대신 `stable_rows : string Masc_tui_closed_rows.t` 를 갖는다.
 - 블록 표도 `(int * int) Masc_tui_closed_rows.t` 로 쌓는다. `growing_blocks` 는 prefix 와 꼬리 블록을 돌려준다.
-- markdown 콜백이 돌려주는 값은 합타입이다. `Masc_tui_message_layout` 이 정한다.
+- 렌더 캐시는 배치 모듈을 모른다. 그래서 `render_growing` 은 자기 record `grown = { closed; tail }` 를 돌려주고, `render_chat` 이 배치의 합타입으로 감싼다.
+- markdown 콜백이 돌려주는 값은 합타입이다. `Masc_tui_message_layout` 이 정한다. `Whole` 은 이미 다른 타입의 생성자 이름이라(`message_layout.ml:448`) 새 이름을 쓴다.
 
 ```ocaml
 type body_lines =
-  | Whole of string list
+  | Body_whole of string list
       (* 끝난 답과 스트리밍이 아닌 글. 지금과 같다 *)
-  | Grown of { closed : string Masc_tui_closed_rows.prefix; tail : string list }
+  | Body_grown of { closed : string Masc_tui_closed_rows.prefix; tail : string list }
       (* 스트리밍 답. 닫힌 행과, 이 frame 이 다시 그린 꼬리 *)
 ```
 
@@ -118,14 +122,14 @@ type entry_rows = {
 }
 ```
 
-- `Whole` 은 처음 배치할 때 행 전부를 `closed` 에 넣고 `tail` 을 비운다. 끝난 답의 창도 index 로 고른다.
-- `Grown` 은 지난 frame 의 줄 prefix 를 `extends` 로 확인한다. 새로 닫힌 줄만 행으로 그려 붙인다.
-- `find_kept_rows` 의 `List.equal` 은 `Grown` 에서 `extends` 와 꼬리 비교가 된다. 꼬리는 몇 줄이다.
+- `Body_whole` 은 처음 배치할 때 행 전부를 `closed` 에 넣고 `tail` 을 비운다. 끝난 답의 창도 index 로 고른다.
+- `Body_grown` 은 지난 frame 의 줄 prefix 를 `extends` 로 확인한다. 새로 닫힌 줄만 행으로 그려 붙인다.
+- `find_kept_rows` 의 `List.equal` 은 `Body_grown` 에서 `extends` 와 꼬리 비교가 된다. 꼬리는 몇 줄이다.
 - 내용 있는 마지막 줄(`last_content`)은 닫힌 배열에 붙일 때 같이 기억한다.
 - 맨 아래 창(`newest_entry_window`)은 `entry_rows` 를 받는다.
   - 행 수는 `List.length head + length closed + List.length tail` 이다.
   - 끝 행은 `tail` 과 `closed` 끝에서 index 로 꺼낸다.
-  - 진단 행은 `tail` 끝에만 있다.
+  - 진단 행은 `tail` 끝에만 있다. 배치가 진단 행을 body 뒤에 붙이니(`body_rows @ diagnostic_rows`) 지금도 그렇다. 지금 창은 `partition` 으로 어디에 있어도 받았다.
 - `body_rows_of_chosen` 은 고른 행의 index 로 body row 를 바로 계산한다.
 - 공개 `rows_of_entry` 는 `head @ to_list closed @ tail` 을 돌려준다. 행 값이 같은 값(physical)이라 시험의 identity 비교가 그대로 맞는다.
 
@@ -154,7 +158,7 @@ type entry_rows = {
 - **시간.** 같은 bench 에서 frame 중앙값이 3.0ms 이하다. load average 가 20 아래일 때 잰다.
   - 근거: 할당이 4분의 1 아래로 주면 GC 몫(74%)도 그만큼 준다고 본다. 5.7ms × (0.26 + 0.74 × 0.25) ≈ 2.5ms 다.
 - **같은 화면.**
-  - `Grown` 으로 그린 행 목록(`rows_of_entry`)이 같은 글을 `Whole` 로 그린 것과 같다. 무작위 글을 무작위 delta 로 나눠 frame 마다 확인한다.
+  - `Body_grown` 으로 그린 행 목록(`rows_of_entry`)이 같은 글을 `Body_whole` 로 그린 것과 같다. 무작위 글을 무작위 delta 로 나눠 frame 마다 확인한다.
   - #54181 의 창 시험, `test_tui_message_layout`, `test_tui_chat_search_projection`, 렌더 캐시 시험이 그대로 통과한다.
   - prefix 하나를 들고 1000번 `append` 해도 그 prefix 의 칸이 그대로다. 배열이 몇 번 새로 만들어져도 같다.
 - **변이.** 아래가 각각 시험에서 실패해야 한다.
@@ -170,18 +174,38 @@ type entry_rows = {
 
 ## 7. 단계
 
-단계마다 새 가지, 새 PR 이다.
+단계마다 새 가지, 새 PR 이다. 시제품(§9)은 렌더 캐시와 배치를 한 번에 바꿨다. 중간에 `Body_grown` 을 목록으로 펴는 단계는 따로 쓸모가 없어 두 단계로 나눈다.
 
-1. `Masc_tui_closed_rows` 와 시험(§5 의 prefix 시험, 셋째 변이). 새 파일 셋과 stanza 하나다.
+1. `Masc_tui_closed_rows` 와 시험(§5 의 prefix 시험, 셋째 변이). 새 파일 셋과 stanza 둘이다.
    → 확인: 새 시험 통과, 변이 실패.
-2. 렌더 캐시가 `body_lines` 를 돌려준다(§3.2). 배치는 우선 `Grown` 을 목록으로 펴서 받는다. 약 7파일이다.
-   → 확인: 렌더 캐시 시험, `test_tui_message_layout`, `test_tui_chat_search_projection` 통과. 할당 표에서 1·2번이 빠진다.
-3. 배치가 `entry_rows` 를 쓴다(§3.3). 약 4파일이다.
-   → 확인: §5 의 할당·크기·시간 목표, 같은 화면 시험, 변이 넷.
+2. 렌더 캐시가 `grown` 과 블록 표를 길이로 넘기고(§3.2), 배치가 `entry_rows` 를 쓴다(§3.3). 약 9파일이다.
+   → 확인: §5 의 할당·시간 목표, 같은 화면 시험, 변이, 렌더 캐시·배치·검색 시험.
 
 ## 8. 정할 것
 
 - 이 RFC 로 구현을 시작할지 정한다.
-  - 1MB 답은 이미 frame 예산(16ms) 안이다.
-  - 얻는 것: 더 긴 답에서 frame 이 크기에 매이지 않는다. 가장 느린 frame(12.8~18.8ms)이 GC 와 같이 준다.
-  - 잃는 것: 배치에 행 표현이 둘(`Whole`·`Grown`) 생긴다. 새 모듈 하나를 지켜야 한다.
+  - 얻는 것(§9): 1MB 답 스트리밍 frame 중앙값이 약 6ms 에서 0.15ms 로, 가장 느린 frame 이 13~18ms 에서 2~3ms 로 준다. frame 비용이 답 크기에 거의 매이지 않는다.
+  - 잃는 것: 배치에 행 표현이 둘(`Body_whole`·`Body_grown`) 생기고 `message_layout.ml` 이 약 600줄 바뀐다. 새 모듈 하나를 지켜야 한다. prefix 는 UI domain 에서만 읽어야 한다.
+- §5 의 「크기에 매이지 않음」 셈을 무엇으로 다시 정할지 정한다(§9).
+
+## 9. 시제품 결과
+
+§7 의 1~3단계를 로컬 가지 `trial/closed-rows-proto` 에 한 번에 만들어 쟀다(2026-11-21, #54181 head `9d39225c` 위, 12파일 +739/−323). push 하지 않았다.
+
+- **시간.** 같은 stream bench(1MB, 1500 frame), `9d39225c` 와 번갈아 실행했다. load average 는 80~112 였다. §5 는 20 아래에서 재라고 했지만 그런 때가 없었다.
+
+  | | min | 중앙값 | max |
+  |---|---|---|---|
+  | 기준 `9d39225c` | 2.85~3.01ms | 5.61~6.83ms | 13.0~18.3ms |
+  | 시제품 | 0.10~0.11ms | 0.15~0.16ms | 1.9~3.2ms |
+
+- **크기.** 중앙값이 30KB·300KB·1MB 에서 기준은 0.29·1.79·7.09ms, 시제품은 0.10·0.11·0.15ms 다.
+- **할당.** frame 당 865k → 184k words 다. 남은 것의 76% 가 snapshot 복사(§4)다.
+- **§5 목표.** 할당(200k 이하)과 시간(3.0ms 이하)은 닿았다. 「크기에 매이지 않음」에 적은 `body_rows_built` 는 기준과 시제품 모두 frame 당 1.8행이라 둘을 가르지 못한다. 기준도 행을 다시 그리지 않았고, 비용은 훑기와 복사에 있었다. 이 항목은 다른 셈(복사한 칸 수 같은 것)으로 다시 정해야 한다.
+- **시험.** `test_tui_closed_rows`(4), `test_tui_message_layout`(39, 새 「같은 화면」 시험: 모양 셋 × 무작위 도착 200번, 행·높이 2/3/5/8 창·body 위치 비교), `test_tui_chat_search_projection`(59), `test_tui_markdown_render_cache`(15), `test_tui_acting_pane`(25), `test_tui_chat_queue_wiring`(153) 이 통과했다.
+- **변이.** 여섯이 모두 시험에서 실패했다. 마지막 행을 닫힌 배열에 넣기, `extends` 가 길이만 보기, 두 배로 늘릴 때 옛 칸을 안 옮기기, 창 꼬리 index 밀기, body 위치에 보낸 이 행 세기, 블록 표 경계 `<` → `<=` 다.
+- **설계에서 바뀐 것.** §3.1(prefix 는 쓰는 쪽을 읽음, domain 하나), §3.2(렌더 캐시의 `grown` record, 생성자 이름)를 시제품대로 고쳤다.
+- **남은 것.**
+  - 배치에서 다음 frame 의 닫을 수 있는 줄이 줄면 쓰는 쪽을 새로 만들고 닫힌 행을 한 번 다시 그린다(`grown_rows_writer`). 그런 경우를 보지 못했고 재지 않았다.
+  - 스크롤해 올라간 frame(`scrolled_rows`·`entry_rows_at`)은 스트리밍 중에 행 전체를 목록으로 편다. 지금과 같은 O(n) 이고 재지 않았다.
+  - 메모리는 재지 않았다. 배치 기억과 렌더 캐시가 각자 쓰는 쪽을 갖는다.

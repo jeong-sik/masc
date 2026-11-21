@@ -3611,10 +3611,49 @@ let test_direct_reads_and_aggregates () =
    | Ok _ | Error _ -> Alcotest.fail "Direct edit transferred readership through authorship")
 ;;
 
+let test_workspace_member_direct_readership () =
+  let author = Result.get_ok (Board.Agent_id.of_string "human:owner") in
+  let addressed = Result.get_ok (Board.Agent_id.of_string "human:other") in
+  let keeper = Result.get_ok (Board.Agent_id.of_string "kp-7f3a") in
+  let member ~actor ~keepers =
+    Masc_board_handlers.Board_access.Workspace_member { actor_id = actor; owned_keeper_ids = keepers }
+  in
+  let reads ~reader ~audience =
+    Masc_board_handlers.Board_access.can_read_fields ~reader ~author
+      ~visibility:Board.Direct ~audience
+  in
+  let to_member = Some (Board_types.Targets [ addressed ]) in
+  let to_keeper = Some (Board_types.Targets [ keeper ]) in
+  Alcotest.(check bool) "the author reads their own Direct post" true
+    (reads ~reader:(member ~actor:"human:owner" ~keepers:[]) ~audience:to_member);
+  Alcotest.(check bool) "an addressed member reads it" true
+    (reads ~reader:(member ~actor:"human:other" ~keepers:[]) ~audience:to_member);
+  Alcotest.(check bool) "an owner reads what was delivered to their Keeper" true
+    (reads ~reader:(member ~actor:"human:third" ~keepers:[ "kp-7f3a" ]) ~audience:to_keeper);
+  Alcotest.(check bool) "a workspace Admin gets no extra reach" false
+    (reads ~reader:(member ~actor:"human:admin" ~keepers:[ "kp-other" ]) ~audience:to_keeper);
+  Alcotest.(check bool) "an unaddressed member reads nothing" false
+    (reads ~reader:(member ~actor:"human:other" ~keepers:[]) ~audience:to_keeper);
+  Alcotest.(check bool) "a member is not the operator" false
+    (Masc_board_handlers.Board_access.is_operator (member ~actor:"human:owner" ~keepers:[]));
+  Alcotest.(check bool) "the keeper set is order independent" true
+    (String.equal
+       (Masc_board_handlers.Board_access.cache_key (member ~actor:"human:a" ~keepers:[ "k1"; "k2" ]))
+       (Masc_board_handlers.Board_access.cache_key (member ~actor:"human:a" ~keepers:[ "k2"; "k1" ])));
+  Alcotest.(check bool) "two members never share a cache entry" false
+    (String.equal
+       (Masc_board_handlers.Board_access.cache_key (member ~actor:"human:a" ~keepers:[]))
+       (Masc_board_handlers.Board_access.cache_key (member ~actor:"human:b" ~keepers:[])))
+;;
+
 let () =
   Alcotest.run "Board_dispatch" [
-    "Direct access", [Alcotest.test_case "reads, pages and aggregates share readership" `Quick
-      (with_eio test_direct_reads_and_aggregates)];
+    "Direct access",
+    [ Alcotest.test_case "reads, pages and aggregates share readership" `Quick
+        (with_eio test_direct_reads_and_aggregates)
+    ; Alcotest.test_case "a workspace member reads by authorship, address or owned Keeper" `Quick
+        test_workspace_member_direct_readership
+    ];
     "backend", [
       Alcotest.test_case "initialization opens the requested workspace, not the environment's" `Quick
         (with_eio test_initialization_opens_requested_workspace_not_environment);

@@ -442,7 +442,7 @@ type input_fault =
 - 읽을 항목이 하나도 없는 범위는 `Skip (Content_missing _)` 으로 지나간다.
 - 읽는 쪽은 결함을 정해진 순서로 본다. 턴 기록의 id, 저장한 offset, 줄 해석이다.
 - `Line_unreadable` 은 운영자의 `Skip_line` 으로 지나간다. 그 줄이 든 턴은 위의 규칙대로 읽는다.
-- `Skip_line` 은 읽는 쪽만 그 줄을 지나가게 한다. 줄 쓰는 쪽은 덧붙이기 전에 파일 끝에서 꼬리를 읽는다. 거기서 해석되지 않는 줄을 만나면 아무 줄도 덧붙이지 않는다. 그런 줄이 꼬리에 있으면 파일을 고칠 때까지 그 Keeper 의 턴 기록이 늘지 않는다.
+- `Skip_line` 은 읽는 쪽만 그 줄을 지나가게 한다. 줄 쓰는 쪽은 덧붙이기 전에 파일 끝에서 꼬리를 읽는다. 거기서 해석되지 않는 줄을 만나면 아무 줄도 덧붙이지 않는다. 그런 줄이 꼬리에 있으면 파일을 고칠 때까지 그 Keeper 의 턴 기록이 늘지 않는다. `Skip_line` 은 그 줄을 지나가지 않는다(§12.4).
 - `Turn_log_replaced` 와 `Position_lost` 는 운영자의 `Restart_reading` 으로 나간다. 그 파일을 처음부터 읽는다. 복원한 파일이면 전에 읽은 것을 한 번 더 읽는다.
 - 턴 기록의 결함은 Memory 쓰기를 멈추지 않는다. 읽기만 쉰다(§9).
 
@@ -1400,7 +1400,7 @@ fiber 는 잠금을 잡고, boot 하고, mailbox 에서 사건을 하나씩 꺼�
 |---|---|---|
 | `Stopped s` | 파일을 되돌리고 `Resume`, 또는 `Adopt` | E1 |
 | `Refused_at_bottom` | 직접 쓰기, 선언 변경, `Resume`, `Skip_item` | E2 |
-| 되풀이되는 입력 결함 | `Skip_line`, `Restart_reading`. 읽히지 않는 내용이면 `Skip_item` | E3 |
+| 되풀이되는 입력 결함 | `Skip_line`, `Restart_reading`. 읽히지 않는 내용이면 `Skip_item`. 턴 기록이 멈춘 줄이면 `turns.jsonl` 을 지우고 `Restart_reading`(§12.4) | E3 |
 | 되풀이되는 `Ask_failed` | 맨 앞 항목 때문이면 `Skip_item`. 아니면 코드를 고친다 | E3 |
 | 한 항목 질문을 선언한 slot 이 모두 거절했는데 크기 사실이 다 모이지 않았다(400 으로 답하는 slot) | 운영자가 그 slot 을 빼거나 고친다, `Skip_item`, Memory 를 바꾸는 쓰기 | E4 와 slot 별 결과 |
 | 한 항목 질문에 말이 없는 slot 이 있다 | 그 slot 이 답하거나 거절한다, 운영자가 그 slot 을 뺀다, `Skip_item` | W1 과 slot 별 결과 |
@@ -1656,7 +1656,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | `Resume` | `Stopped` | 저장소 시작을 다시 한다. 턴 기록 파일을 확인한 뒤 boot 한다(§8.6) |
 | | `Resting`, `Refused_at_bottom` | 바닥에서 받은 크기 사실을 지우고 바로 다시 묻는다 |
 | `Skip_item i` | i 가 지금 읽는 쪽의 맨 앞이다 | `Skip (Operator_skipped)` 줄을 쓰고 맨 앞을 지나간다 |
-| `Skip_line { offset }` | 읽는 쪽을 지금 다시 돌리면 그 offset 의 줄에서 멈춘다고 답한다. 해석되지 않거나 줄 순서에 맞지 않는 줄이다 | `Skip (Line_unreadable)` 줄을 쓰고 그 줄을 지나간다 |
+| `Skip_line { offset }` | 읽는 쪽을 지금 다시 돌리면 그 offset 의 줄에서 멈춘다고 답한다. 해석되지 않거나 줄 순서에 맞지 않는 줄이다. 턴 기록이 그 줄에서 멈춰 있지 않다 | `Skip (Line_unreadable)` 줄을 쓰고 그 줄을 지나간다 |
 | `Restart_reading { observed }` | 디스크의 턴 기록 id 가 `observed` 다. 그 id 가 마지막 반영 줄의 것과 다르거나, 같은데 저장한 offset 이 파일 끝을 넘거나 줄 시작이 아니다 | `Skip (Turn_log_replaced)` 나 `Skip (Position_lost)` 줄을 쓰고 그 파일을 처음부터 읽는다 |
 | `Adopt { observed }` | `Stopped (Log_diverged _)` 나 `Stopped Log_unreadable` 이고, 스냅샷 파일의 sha 가 `observed` 이며 codec 으로 해석된다 | §8.7 |
 
@@ -1667,10 +1667,15 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 - offset 이 지금 지나갈 줄이 아니면 `Not_the_faulted_line` 으로 거절한다. 안 읽은 것이 없을 때, 그 줄 앞에 항목 든 단위나 알리지 않은 reset 이 있을 때, 읽는 쪽이 다른 줄에서 멈출 때다. 파일이 바뀌었거나 저장한 offset 을 잃었을 때도 이 답이다. 그 둘은 `Restart_reading` 으로 지나간다.
 - 받아들인 `Skip_line` 의 줄은 `covers_through` 를 그 줄에, `turn_log_offset` 을 그 줄 바로 뒤에 둔다. `covered` 는 그 앞 단위가 끝난 끝자리에 머문다(§5.4). 폭 기억은 그대로 둔다(§9.2).
 - `covers_through` 가 지나간 줄에 있는 동안, 그 줄이 단위를 끝내는 줄로 해석되지 않으면 Keeper 요청의 시작점은 `Front_unresolved` 다(§11.2). 요청은 읽은 곳의 끝 없이 seed 에서 시작한다. 그 뒤 단위를 읽은 반영이 `covers_through` 를 옮기면 풀린다.
-- `Skip_line` 은 파일을 고치지 않는다. 지나간 줄은 턴 기록에 그대로 있고, 배포 전 검사(`validate-stores`)는 그 줄을 계속 거절로 센다. 검사에 예외는 없다. 그 줄을 없애려면 서버를 멈추고 `turns.jsonl` 을 지운 뒤 `Restart_reading` 을 한다(§18.5).
-- `Skip_line` 은 읽기만 지나가게 한다. 줄 쓰는 쪽이 꼬리에서 그 줄을 만나 멈춰 있으면, 파일을 고쳐야 턴 기록이 다시 늘어난다(§5.4). 그동안은 다음과 같다.
+- `Skip_line` 은 파일을 고치지 않는다. 지나간 줄은 턴 기록에 그대로 있고, 배포 전 검사(`validate-stores`)는 그 줄을 계속 거절로 센다. 검사에 예외는 없다. 서버를 멈추고 `turns.jsonl` 을 지우면 그 거절이 끝난다. 그 뒤 새 파일을 읽게 하는 행동이 `Restart_reading` 이다(§18.5).
+- 턴 기록이 멈춘 줄은 지나가지 않는다. 줄 쓰는 쪽의 꼬리 읽기(§5.2)가 `Row_undecodable { offset }` 으로 실패하고 그 offset 이 지나갈 줄이면 `Turn_log_stopped_on_line` 으로 거절한다. 판정은 그 offset 으로만 한다.
+  - 그 줄을 지나가면 안 읽은 것이 없어 E3 이 꺼진다. 턴 기록은 늘지 않으므로 그 뒤 턴은 Memory 에 닿지 않는다. 거절하면 E3 이 남는다.
+  - 꼬리 읽기가 그 줄에 닿지 않으면 지나간다. 그 뒤의 줄들이 다음 단위의 시작점과 턴이 열려 있는지를 알려 줄 때다. 그 줄 뒤에 `Closed` 줄이 있으면 그렇다.
+  - 꼬리를 그 순간 읽지 못하면 `Turn_log_unread` 로 거절한다.
+  - 나가는 길은 파일에 있다. 서버를 멈추고 `turns.jsonl` 을 지운 뒤 `Restart_reading` 을 한다(§18.5). route 의 답은 `operator_action` 에 그 길을 적는다.
+- 턴 기록이 그 줄에서 멈춰 있는 동안은 다음과 같다.
   - 턴은 돈다. 그 턴의 줄은 쓰이지 않는다. 턴마다 오류 로그를 남기고 `masc_keeper_turn_log_append_failed_total` 로 센다.
-  - 턴 기록에 새 턴이 없으므로 쓰는 쪽은 그 턴을 읽지 않는다. 줄을 지나간 뒤에는 안 읽은 것이 없어 E3 이 꺼진다. 줄 쓰는 쪽이 멈춘 것을 보이는 경보나 행의 칸은 없다.
+  - 줄 쓰는 쪽이 멈춘 것을 따로 보이는 경보나 행의 칸은 없다. 읽는 쪽이 그 줄에 닿으면 E3 이 켜진다.
   - 이력 지우기와 checkpoint purge 는 거절한다. session 을 지우는 정지는 session 을 남기고 그 단계에서 선다. 셋 다 턴 기록의 꼬리를 먼저 읽는다(§5.2, §5.6).
   - Keeper 요청은 턴 경계를 모른다(`Turn_boundary_unknown`, §11.2). 읽은 곳의 끝도 풀리지 않는다. seed 가 없으면 가장 새 atom 하나만 싣는다.
 - 받아들인 건너뛰기는 가던 묻기를 취소한다. 거절한 행동은 아무것도 바꾸지 않는다. 가던 묻기도 그대로 간다.
@@ -1685,7 +1690,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 - `Skip_item` 은 맨 앞 항목 하나만 묻는 질문을 만들 때처럼 턴 기록과 단위 내용을 읽는다. `Head_item` 이면 그 질문이 실었을 것을 지나가고, 그 질문이 부족하다고 적었을 부분을 줄의 `missing` 에 남긴다. `Unreadable_unit` 이면 그 단위를 끝까지 지나간다. 읽히지 않은 내용이라 `missing` 은 비어 있다.
 - 받아들인 `Skip_item` 은 크기 사실을 비우고, 폭 기억에는 지나간 만큼 반영으로 센다(§7.6). 그다음 묻기가 이어진다.
 - i 가 지금의 맨 앞이 아니면 `Not_the_head { now }` 로 거절한다. `now` 는 지금의 맨 앞 이름이고, 운영자는 그 이름을 다시 보낸다. 맨 앞이 없으면 `now` 가 비어 있다. 안 읽은 것이 없을 때, 맨 앞 단위의 항목이 모두 없어 쓰는 쪽이 스스로 지나갈 때(`Content_missing`), 읽는 쪽이 다른 행동으로 지나갈 줄이나 턴 기록에서 멈출 때다.
-- route 는 `Done` 이나 `Refused of reason` 으로 답하고, 화면이 그 이유를 그린다. 이유는 닫힌 타입이다: `Not_the_head`, `Not_the_faulted_line`, `Not_replaced`, `Turn_log_unread`, `Content_unread`, `Not_stopped`, `Nothing_to_resume`, `Snapshot_mismatch`, `Snapshot_unreadable`, `Store_stopped s`, `Keeper_retired`.
+- route 는 `Done` 이나 `Refused of reason` 으로 답하고, 화면이 그 이유를 그린다. 이유는 닫힌 타입이다: `Not_the_head`, `Not_the_faulted_line`, `Turn_log_stopped_on_line`, `Not_replaced`, `Turn_log_unread`, `Content_unread`, `Not_stopped`, `Nothing_to_resume`, `Snapshot_mismatch`, `Snapshot_unreadable`, `Store_stopped s`, `Keeper_retired`.
 - 턴 기록을 그 순간 읽지 못하면 조건을 보지 못한 것이다. `Turn_log_unread` 로 거절한다. 조건이 틀렸다는 답(`Not_replaced` 등)과 섞지 않는다. `Skip_item` 은 단위 내용도 읽는다. 바이트 파일이나 바깥 저장소를 그 순간 읽지 못하면 `Content_unread` 로 거절한다.
 - `Restart_reading` 은 읽는 쪽이 본 파일이 `observed` 의 파일일 때만 받는다. 읽는 쪽은 첫 줄을 다시 읽으므로, 그 사이 또 바뀐 파일의 결함을 `observed` 의 것으로 적지 않는다.
 - `Done` 의 답은 그 뒤 저장소의 상태를 같이 싣는다. `Resume` 이 boot 를 다시 돌렸는데 같은 이유로 멈췄으면 그 이유가 답에 있다. `Log_diverged` 로 멈췄으면 반영 기록이 가리키는 sha 와 파일의 sha 를 싣는다. 파일의 sha 가 `Adopt` 에 넣을 값이다.

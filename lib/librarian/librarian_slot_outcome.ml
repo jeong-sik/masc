@@ -1,23 +1,30 @@
-type size_fact =
+type size_fact = Exact_lane_slot_outcome.size_fact =
   | Input_too_large
   | Output_over_reserve
   | Window_reached
 
-type refusal =
+type refusal = Exact_lane_slot_outcome.refusal =
   | Sized of size_fact
   | Unsized
 
-type silence =
+type 'rejection silence_of = 'rejection Exact_lane_slot_outcome.silence =
   | Not_called
   | Unavailable
   | Busy
+  | Overdue
   | Lost
-  | Unusable of Librarian_answer.rejection
+  | Unusable of 'rejection
 
-type unanswered =
+type silence = Librarian_answer.rejection silence_of
+
+type 'rejection unanswered_of = 'rejection Exact_lane_slot_outcome.unanswered =
   | Refused of refusal
-  | Silent of silence
+  | Silent of 'rejection silence_of
 
-type t =
+type unanswered = Librarian_answer.rejection unanswered_of
+
+type 'rejection t_of = 'rejection Exact_lane_slot_outcome.t =
   | Slot_answered
-  | Unanswered of unanswered
+  | Unanswered of 'rejection unanswered_of
+
+type t = Librarian_answer.rejection t_of

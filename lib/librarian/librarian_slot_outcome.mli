@@ -6,42 +6,47 @@
     refused for the input's size, refused otherwise, or said nothing. The
     rest names the case on the operator's row.
 
+    The types are {!Exact_lane_slot_outcome}'s, the table every exact lane
+    reads, with {!Librarian_answer.rejection} as the lane's rejection. Each
+    constructor is documented there and is given again here under the same
+    name: a type that takes the rejection is given again as its [_of] type,
+    and the name without it is that type of the Librarian's rejection.
+
     This module holds types only. Classifying a slot's visit is done by the
     layer that makes it. How a whole ask ended is
     {!Librarian_read_result}. *)
 
 (** A refusal that says the question did not fit this slot. *)
-type size_fact =
+type size_fact = Exact_lane_slot_outcome.size_fact =
   | Input_too_large
-  (** Counted before sending, typed by the provider as an input overflow, or
-      HTTP 413. Nothing was generated. *)
   | Output_over_reserve
-  (** Typed as stopped at the output limit: the lane's reserve when one is
-      declared, the provider's default otherwise. One generation spent. *)
   | Window_reached
-  (** Input and output reached the window, with content or without. One
-      generation spent. *)
 
-type refusal =
+type refusal = Exact_lane_slot_outcome.refusal =
   | Sized of size_fact
-  | Unsized (** The provider refused this request and gave no size. *)
+  | Unsized
+
+type 'rejection silence_of = 'rejection Exact_lane_slot_outcome.silence =
+  | Not_called
+  | Unavailable
+  | Busy
+  | Overdue
+  | Lost
+  | Unusable of 'rejection
 
 (** No answer and no refusal: nothing about the question is learnt. *)
-type silence =
-  | Not_called
-  (** Not sent: its provider holds it until a stated time, another slot gave
-      a seat first, or the walk ended before it. *)
-  | Unavailable (** The slot or its runtime cannot be used as declared. *)
-  | Busy (** Rate limit, overload, server error, quota. *)
-  | Lost (** Transport, body deadline, or a failure no type explains. *)
-  | Unusable of Librarian_answer.rejection (** A body came and cannot be used. *)
+type silence = Librarian_answer.rejection silence_of
+
+type 'rejection unanswered_of = 'rejection Exact_lane_slot_outcome.unanswered =
+  | Refused of refusal
+  | Silent of 'rejection silence_of
 
 (** A slot that gave no answer. An ask that ends with no answer carries one
     of these for every slot, so its slots cannot hold an answer. *)
-type unanswered =
-  | Refused of refusal
-  | Silent of silence
+type unanswered = Librarian_answer.rejection unanswered_of
 
-type t =
+type 'rejection t_of = 'rejection Exact_lane_slot_outcome.t =
   | Slot_answered
-  | Unanswered of unanswered
+  | Unanswered of 'rejection unanswered_of
+
+type t = Librarian_answer.rejection t_of

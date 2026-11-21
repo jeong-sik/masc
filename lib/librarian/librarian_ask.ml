@@ -1,6 +1,5 @@
 module Digest = Agent_core.Checkpoint_objects
 module Exact = Agent_core.Exact_output
-module Oneshot = Keeper_lane_cli_oneshot
 module Read_result = Librarian_read_result
 module Room_result = Librarian_room_result
 module Visit = Librarian_slot_visit
@@ -156,45 +155,6 @@ type no_callback_error = |
 let proceed (_ : 'a) : (unit, no_callback_error) result = Ok ()
 let no_callback_error_text : no_callback_error -> string = function _ -> .
 
-let candidate_id (visit : Exact.flow_candidate_visit) = visit.identity.candidate_id
-
-let passed rejection : string * Visit.http =
-  ( (Exact.candidate_rejection_identity rejection).candidate_id
-  , Rejected_before_dispatch (Exact.candidate_rejection_disposition rejection) )
-;;
-
-let answer_rejected (receipt : Librarian_answer.rejection Exact.semantic_rejection_receipt)
-  : string * Visit.http
-  =
-  ( candidate_id (Exact.flow_success_candidate receipt.transport_success).visit
-  , Answer_rejected receipt.rejection )
-;;
-
-(* The slot a flow ended on when it ran out of slots, or why it stopped on
-   masc's side: the cases {!Exact.flow_execution_terminal_kind} calls
-   [Non_advanceable_terminal]. *)
-let last_visit
-  : no_callback_error Exact.flow_execution_error
-  -> ((string * Visit.http) * Exact.flow_evidence, 'result ended) result
-  = function
-  | Flow_candidates_exhausted { rejection; evidence } -> Ok (passed rejection, evidence)
-  | Flow_exact_execution_failed { candidate; cause; evidence } ->
-    Ok ((candidate_id candidate.visit, Execution_failed cause.cause), evidence)
-  | (Flow_attempt_already_started _ | Flow_attempt_start_failed _ | Flow_measurement_start_failed _)
-    as stopped ->
-    Error
-      (Failed
-         ( Flow_stopped
-         , Exact.flow_execution_error_to_string
-             ~callback_error_to_string:no_callback_error_text
-             ~raw_response_to_string:Exact.raw_response_sha256_to_string
-             stopped ))
-  | Flow_before_measurement_dispatch_callback_failed { cause = _; _ }
-  | Flow_measurement_terminal_callback_failed { cause = _; _ }
-  | Flow_before_dispatch_callback_failed { cause = _; _ }
-  | Flow_before_advance_callback_failed { cause = _; _ } -> .
-;;
-
 let validate_http ~asked success
   : (Librarian_answer.t, Librarian_answer.rejection) Exact.semantic_verdict
   =
@@ -203,63 +163,27 @@ let validate_http ~asked success
   | Error rejection -> Reject_and_advance rejection
 ;;
 
-type slot_visit =
-  | Http_visit of (string * Visit.http)
-  | Cli_visit of (string * Visit.cli)
-
-(* What the walk left at one slot it passed. Each HTTP slot is a flow of
-   one candidate, so its failure names that slot. *)
+(* What the walk left at one slot it passed, read as every exact lane reads
+   it ({!Exact_lane_slot_visit.of_passed}). A flow that ended on masc's own
+   failure is no visit: the cases {!Exact.flow_execution_terminal_kind} calls
+   [Non_advanceable_terminal] end the ask as a stopped walk does. *)
 let slot_visit
-  : ( Exact_lane_slots.t
+  (passed :
+    ( Exact_lane_slots.t
       , (Librarian_answer.rejection, no_callback_error) Exact_lane_slots.failure )
-      Exact_lane_walk.passed
-  -> (slot_visit, 'result ended) result
-  = function
-  | Exact_lane_walk.Held { slot = Exact_lane_slots.Http_slot http; until = (_ : float) } ->
-    Ok (Http_visit (http.slot_id, Visit.Held))
-  | Exact_lane_walk.Held { slot = Exact_lane_slots.Cli_slot { runtime_id; runtime = _ }; until } ->
-    Ok (Cli_visit (runtime_id, Visit.Cli_failed (Oneshot.Held { runtime_id; until })))
-  | Exact_lane_walk.Seats_full (Exact_lane_slots.Http_slot http) ->
-    Ok (Http_visit (http.slot_id, Visit.Rejected_before_dispatch Exact.Seats_full))
-  | Exact_lane_walk.Seats_full (Exact_lane_slots.Cli_slot { runtime_id; runtime = _ }) ->
-    Ok (Cli_visit (runtime_id, Visit.Cli_seats_full))
-  | Exact_lane_walk.Failed
-      { slot = _
-      ; failure = Exact_lane_slots.Http_unfit { slot_id; reason = (_ : string) }
-      } ->
-    (* The slot's own declaration could not become a flow candidate, so no
-       request left for it. That is a contract refusal of that one slot, not a
-       rejection any provider made. *)
-    Ok (Http_visit (slot_id, Visit.Rejected_before_dispatch Exact.Runtime_contract_rejected))
-  | Exact_lane_walk.Failed
-      { slot = _
-      ; failure =
-          Exact_lane_slots.Http_failed
-            { slot_id = _
-            ; error =
-                Exact.Flow_semantic_candidates_exhausted
-                  { rejections = { first; rest = _ }; evidence = _ }
-            }
-      } -> Ok (Http_visit (answer_rejected first))
-  | Exact_lane_walk.Failed
-      { slot = _
-      ; failure =
-          Exact_lane_slots.Http_failed
-            { slot_id = _; error = Exact.Flow_execution_terminal { cause; prior_rejections = _ } }
-      } ->
-    let* last, (_ : Exact.flow_evidence) = last_visit cause in
-    Ok (Http_visit last)
-  | Exact_lane_walk.Failed { slot = _; failure = Exact_lane_slots.Cli_failed { runtime_id; failure } }
-    -> Ok (Cli_visit (runtime_id, Visit.Cli_failed failure))
-  | Exact_lane_walk.Failed
-      { slot = _; failure = Exact_lane_slots.Cli_rejected { runtime_id; rejection } } ->
-    Ok (Cli_visit (runtime_id, Visit.Cli_answer_rejected rejection))
-  | Exact_lane_walk.Failed
-      { slot = _
-      ; failure =
-          ( Exact_lane_slots.Cli_unfit { runtime_id }
-          | Exact_lane_slots.Cli_seats_unpublished { runtime_id; provider_id = _ } )
-      } -> Ok (Cli_visit (runtime_id, Visit.Cli_unservable))
+      Exact_lane_walk.passed)
+  : (Librarian_answer.rejection Exact_lane_slot_visit.slot_visit, 'result ended) result
+  =
+  match Exact_lane_slot_visit.of_passed passed with
+  | Ok visit -> Ok visit
+  | Error stopped ->
+    Error
+      (Failed
+         ( Flow_stopped
+         , Exact.flow_execution_error_to_string
+             ~callback_error_to_string:no_callback_error_text
+             ~raw_response_to_string:Exact.raw_response_sha256_to_string
+             stopped ))
 ;;
 
 let rec slot_visits ~http ~cli = function
@@ -267,8 +191,8 @@ let rec slot_visits ~http ~cli = function
   | passed :: rest ->
     let* visit = slot_visit passed in
     (match visit with
-     | Http_visit seen -> slot_visits ~http:(seen :: http) ~cli rest
-     | Cli_visit seen -> slot_visits ~http ~cli:(seen :: cli) rest)
+     | Exact_lane_slot_visit.Http_visit seen -> slot_visits ~http:(seen :: http) ~cli rest
+     | Exact_lane_slot_visit.Cli_visit seen -> slot_visits ~http ~cli:(seen :: cli) rest)
 ;;
 
 let stop_detail : (Librarian_answer.rejection, no_callback_error) Exact_lane_slots.stop -> string =

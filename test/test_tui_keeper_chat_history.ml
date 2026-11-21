@@ -1433,7 +1433,7 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
         [ "Librarian \xc2\xb7 revision 7 \xc2\xb7 +1 \xe2\x88\x921 \xc2\xb7 3 retained"
         ; "+ [fact] the probe uses HTTP/2"
         ; "\xe2\x88\x92 [constraint] use the old endpoint"
-        ; "drop memory-old \xe2\x80\x94 superseded by live evidence"
+        ; "drop memory-old \xc2\xb7 superseded by live evidence"
         ]
         (String.split_on_char '\n' row.text)
   | Ok decoded ->

@@ -1732,6 +1732,10 @@ let journal_column_gap = 2
 (* A drop has no category; this stands in the category column. *)
 let journal_drop_label = "drop"
 
+(* A dropped memory's id and its reason are two facts of one rank, joined
+   with the middle dot (RFC tui-one-screen-grammar 6.5), not a dash. *)
+let journal_drop_separator = " \xc2\xb7 "
+
 let journal_sign_text = function
   | Journal_added -> "+"
   | Journal_removed -> "\xe2\x88\x92"
@@ -1783,7 +1787,7 @@ let journal_rows_internal ?on_field ~width lines =
       | Journal_drop { memory_id; reason } ->
           ( (String.make sign_cells ' ', Journal_piece_space)
           , Journal_piece_drop
-          , memory_id ^ " \xe2\x80\x94 " ^ reason
+          , memory_id ^ journal_drop_separator ^ reason
           , Journal_piece_drop )
     in
     let label_text = label line in
@@ -1799,7 +1803,7 @@ let journal_rows_internal ?on_field ~width lines =
           [Journal_claim_field,claim,0],
           [Journal_sign_field,journal_sign_text sign; Journal_category_field,category]
       | Journal_drop {memory_id; reason} ->
-          [Journal_memory_id_field,memory_id,0; Journal_reason_field,reason,String.length memory_id+String.length " \xe2\x80\x94 "],
+          [Journal_memory_id_field,memory_id,0; Journal_reason_field,reason,String.length memory_id+String.length journal_drop_separator],
           [Journal_drop_label_field,journal_drop_label] in
     Option.iter (fun emit -> List.iter (fun (field,value) ->
       emit {line_index;field;value;row= !first_row;source_ranges=[0,String.length value]}) lead_fields) on_field;

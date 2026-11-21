@@ -251,6 +251,10 @@ type entry = {
     removed one. *)
 val journal_sign_text : journal_sign -> string
 
+(** What joins a dropped memory's id and its reason, [" · "]: two facts of
+    one rank (RFC tui-one-screen-grammar 6.5). *)
+val journal_drop_separator : string
+
 (** What a piece of a {!journal_rows} row is, for the renderer to colour.
     A category carries its tone, which is what its colour follows. *)
 type journal_piece =

@@ -1174,11 +1174,6 @@ let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   terminal_cols >= chat_min_terminal_cols
   && message_history_height ~terminal_rows ~status_rows >= chat_min_history_rows
 
-(* The last [count] of [values], which has [length] elements: the suffix
-   itself, not a copy. *)
-let take_last_of ~length count values = List.drop (length - Int.max 0 count) values
-
-let take_last count values = take_last_of ~length:(List.length values) count values
 
 (* The prefix follows [split_at_cells]. A cut inside an ASCII run retains the
    rest of that run, so the following split starts at the exact source byte. *)
@@ -2330,7 +2325,89 @@ let body_rows_reusing ~shape lines draw =
   held :=
     { body_shape = shape; body_lines = lines; body_drawn = drawn }
     :: List.filteri (fun index _ -> index < kept_bodies_capacity - 1) !held;
-  Array.to_list drawn
+  drawn
+
+(* A body's lines as the caller hands them: all of them, or a streamed body's
+   closed lines, held by length, and the lines after them. *)
+type body_lines =
+  | Body_whole of string list
+  | Body_grown of { closed : string Masc_tui_closed_rows.prefix; tail : string list }
+
+(* The rows a streamed body's closed lines drew, per domain: the writer holds
+   a row for each line index that was closed and not the last, which a later
+   arrival of the same shape, sender and closed lines draws the same way. *)
+(* The rows a layout drew after its closed rows, from index [tail_from],
+   with the line each was drawn from. *)
+type kept_tail = { tail_from : int; tail_lines : string array; tail_rows : row array }
+
+let no_tail = { tail_from = 0; tail_lines = [||]; tail_rows = [||] }
+
+type kept_grown = {
+  grown_shape : body_shape;
+  grown_senders : string list;
+  grown_lines : string Masc_tui_closed_rows.prefix;
+  grown_rows : row Masc_tui_closed_rows.t;
+  mutable grown_tail : kept_tail;
+  (* What the last layout with this writer drew after its closed rows. An open
+     block's rows are drawn there on every frame; an unclosed code fence of
+     5,000 lines drew 5,000 rows each frame without it. *)
+}
+
+let kept_grown_capacity = 4
+
+let kept_grown_key : kept_grown list ref Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> ref [])
+
+(* The writer for a streamed body, how many rows it already holds, and the
+   record that keeps them, whose [grown_tail] the caller sets. A writer
+   holding more rows than [closable] is not used again: an append-only writer
+   cannot give rows back. *)
+let grown_rows_writer ~shape ~senders ~lines ~closable =
+  let held = Domain.DLS.get kept_grown_key in
+  let usable kept =
+    same_shape kept.grown_shape shape
+    && List.equal String.equal kept.grown_senders senders
+    && Masc_tui_closed_rows.extends lines ~kept:kept.grown_lines
+    && Masc_tui_closed_rows.length (Masc_tui_closed_rows.prefix kept.grown_rows) <= closable
+  in
+  let writer, tail =
+    match List.find_opt usable !held with
+    | Some kept -> kept.grown_rows, kept.grown_tail
+    | None -> Masc_tui_closed_rows.create (), no_tail
+  in
+  let record =
+    { grown_shape = shape; grown_senders = senders; grown_lines = lines; grown_rows = writer;
+      grown_tail = tail }
+  in
+  held :=
+    record
+    :: List.filteri (fun index _ -> index < kept_grown_capacity - 1)
+         (List.filter (fun other -> other.grown_rows != writer) !held);
+  writer, Masc_tui_closed_rows.length (Masc_tui_closed_rows.prefix writer), record
+
+(* An entry's rows in three parts: the rows before its body (an hour heading,
+   a separator, an origin row), its body rows held by length, and the rows
+   drawn after them on this layout (the last body rows and the notes). *)
+type entry_rows = {
+  er_head : row list;
+  er_closed : row Masc_tui_closed_rows.prefix;
+  er_closed_senders : int;
+  (* How many of [er_closed]'s first rows are sender rows; the rest of
+     [er_closed] are body rows. *)
+  er_tail : row list;
+  er_length : int;
+  er_diagnostics : int;
+  (* How many of [er_tail]'s last rows are the entry's notes. *)
+  mutable er_list : row list option;
+}
+
+let entry_rows_list rows =
+  match rows.er_list with
+  | Some list -> list
+  | None ->
+      let list = rows.er_head @ Masc_tui_closed_rows.to_list rows.er_closed @ rows.er_tail in
+      rows.er_list <- Some list;
+      list
 
 (* The rows of the entries recent frames drew, per domain. An entry's rows
    follow from the entry, its predecessor, the pane width, the origin shape
@@ -2343,8 +2420,8 @@ type kept_rows = {
   kept_previous : entry option;
   kept_inner_width : int;
   kept_origin : origin_display;
-  kept_chunks : string list;
-  kept_rows : row list;
+  kept_chunks : body_lines;
+  kept_rows : entry_rows;
 }
 
 let kept_rows_capacity = 32
@@ -2360,6 +2437,14 @@ let same_previous left right =
   | Some left, Some right -> left == right
   | None, Some _ | Some _, None -> false
 
+let same_body_lines left right =
+  match left, right with
+  | Body_whole left, Body_whole right -> left == right || List.equal String.equal left right
+  | Body_grown left, Body_grown right ->
+      Masc_tui_closed_rows.same left.closed right.closed
+      && (left.tail == right.tail || List.equal String.equal left.tail right.tail)
+  | Body_whole _, Body_grown _ | Body_grown _, Body_whole _ -> false
+
 let find_kept_rows ~entry ~previous ~inner_width ~origin chunks =
   let held = Domain.DLS.get kept_rows_key in
   let matches kept =
@@ -2367,8 +2452,7 @@ let find_kept_rows ~entry ~previous ~inner_width ~origin chunks =
     && same_previous kept.kept_previous previous
     && kept.kept_inner_width = inner_width
     && kept.kept_origin = origin
-    && (kept.kept_chunks == chunks
-        || List.equal String.equal kept.kept_chunks chunks)
+    && same_body_lines kept.kept_chunks chunks
   in
   match !held with
   | kept :: _ when matches kept -> Some kept.kept_rows
@@ -2387,7 +2471,7 @@ let keep_rows kept =
          (fun index _ -> index < kept_rows_capacity - 1)
          (List.filter (fun other -> other.kept_entry != kept.kept_entry) !held)
 
-let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
+let entry_rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   let configured_origin = origin in
   let origin = entry_origin ~origin ~inner_width entry in
   (* Everything after the indent is laid out in the column that is left, so
@@ -2413,22 +2497,13 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
                 (fun pieces -> String.concat "" (List.map fst pieces))
                 (journal_rows ~width:body_width lines)
         in
-        (entry.body |> String.split_on_char '\n'
-         |> List.concat_map (split_cells ~max_cells:body_width))
-        @ journal
+        Body_whole
+          ((entry.body |> String.split_on_char '\n'
+            |> List.concat_map (split_cells ~max_cells:body_width))
+           @ journal)
   in
   (* The rows themselves, once the body lines are known. *)
   let lay_out body_chunks =
-    (* The chunks up to the last one with content; a body with none draws one
-       blank row. *)
-    let content_count =
-      let rec last_content index last = function
-        | [] -> last
-        | chunk :: rest ->
-            last_content (index + 1) (if String_util.is_blank chunk then last else index + 1) rest
-      in
-      last_content 0 0 body_chunks
-    in
     let sender_chunks = match origin, entry.style with
       | Origin_bare, (Inbound | Thinking Thinking_arrived) when not (continues_previous ~previous entry) ->
           wrap_words ~max_cells:body_width entry.speaker
@@ -2437,24 +2512,11 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       | ((Origin_row | Origin_inline), _) | (Origin_bare, Thinking Thinking_arrived)
       | (Origin_bare, Inbound) -> [] in
     let sender_rows = List.length sender_chunks in
-    (* The lines go straight into the array the rows are drawn from. A 1MB
-       reply has some 60k of them, and each list copy on the way was another
-       60k cells on every frame of a streaming reply. *)
-    let lines = Array.make (sender_rows + Int.max 1 content_count) "" in
-    List.iteri (fun index chunk -> lines.(index) <- chunk) sender_chunks;
-    let rec fill index = function
-      | chunk :: rest when index < content_count ->
-          lines.(sender_rows + index) <- chunk;
-          fill (index + 1) rest
-      | _ :: _ | [] -> ()
-    in
-    fill 0 body_chunks;
-    let body_rows =
+    let body_closed, closed_senders, body_tail =
       let margin, rail_cells, label_at, clock_cells =
         Option.value gutter ~default:("", 0, 0, 0)
       in
       let blank = fit_width "" (display_width margin) in
-      let last = Array.length lines - 1 in
       (* The bracket runs the height of the entry, so a wrapped body keeps the
          line its first row started. Broken at every wrap it would read as one
          turn per screen line, which is the opposite of what it is for.
@@ -2463,7 +2525,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
          entry starts, the closing one on the row it ends. A [Rail_closes] entry
          whose reply wraps ten rows would otherwise end the turn at the top of
          its own last paragraph. *)
-      let rail_at index =
+      let rail_at ~last index =
         if rail_cells = 0 then ""
         else
           let piece =
@@ -2496,7 +2558,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
           shape_rail_cells = rail_cells; shape_label_at = label_at;
           shape_clock_cells = clock_cells; shape_indent = indent }
       in
-      body_rows_reusing ~shape lines (fun index chunk ->
+      let draw ~last index chunk =
         { style = entry.style
         ; kind = (if index < sender_rows then Metadata Sender else Body)
         ; shade = shade_of_style entry.style
@@ -2510,13 +2572,97 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
         ; gutter_clock_cells = (if index = 0 then clock_cells else 0)
         ; gutter_label_at = (if index = 0 then label_at else rail_cells) + indent
         ; gutter =
-            rail_at index ^ String.make indent ' '
+            rail_at ~last index ^ String.make indent ' '
             ^ (if index = 0 then margin else blank)
         (* The fold marker sits at the end of the first row, so that is the
            row a press lands on. A continuation carries the same text and none
            of the affordance. *)
         ; action = (if index = 0 then entry.action else Action_none)
-        })
+        }
+      in
+      match body_chunks with
+      | Body_whole chunks ->
+          (* The chunks up to the last one with content; a body with none
+             draws one blank row. *)
+          let content_count =
+            let rec last_content index last = function
+              | [] -> last
+              | chunk :: rest ->
+                  last_content (index + 1) (if String_util.is_blank chunk then last else index + 1) rest
+            in
+            last_content 0 0 chunks
+          in
+          (* The lines go straight into the array the rows are drawn from. *)
+          let lines = Array.make (sender_rows + Int.max 1 content_count) "" in
+          List.iteri (fun index chunk -> lines.(index) <- chunk) sender_chunks;
+          let rec fill index = function
+            | chunk :: rest when index < content_count ->
+                lines.(sender_rows + index) <- chunk;
+                fill (index + 1) rest
+            | _ :: _ | [] -> ()
+          in
+          fill 0 chunks;
+          let drawn = body_rows_reusing ~shape lines (draw ~last:(Array.length lines - 1)) in
+          Masc_tui_closed_rows.of_array drawn, Int.min sender_rows (Array.length drawn), []
+      | Body_grown { closed; tail } ->
+          (* A streamed body draws the rows of its closed lines once: a row
+             is kept for a closed line that is not the last, since the last
+             row is where a closing rail turns. The rest are drawn here. *)
+          let tail = Array.of_list tail in
+          let closed_count = Masc_tui_closed_rows.length closed in
+          let content_count =
+            let rec last_in_tail index found =
+              if index >= Array.length tail then found
+              else last_in_tail (index + 1)
+                  (if String_util.is_blank tail.(index) then found else Some index)
+            in
+            match last_in_tail 0 None with
+            | Some index -> closed_count + index + 1
+            | None ->
+                let rec back index =
+                  if index < 0 then 0
+                  else if String_util.is_blank (Masc_tui_closed_rows.get closed index) then back (index - 1)
+                  else index + 1
+                in
+                back (closed_count - 1)
+          in
+          let senders = Array.of_list sender_chunks in
+          let count = sender_rows + Int.max 1 content_count in
+          let line_at index =
+            if index < sender_rows then senders.(index)
+            else
+              let line = index - sender_rows in
+              if line >= content_count then ""
+              else if line < closed_count then Masc_tui_closed_rows.get closed line
+              else tail.(line - closed_count)
+          in
+          let last = count - 1 in
+          let closable = Int.min (sender_rows + closed_count) last in
+          let writer, kept, record =
+            grown_rows_writer ~shape ~senders:sender_chunks ~lines:closed ~closable in
+          (* A row the last layout drew after its closed rows is the same row
+             for the same line at the same index, unless it is the last of
+             either layout: the last row is where a closing rail turns. *)
+          let previous = record.grown_tail in
+          let row_at index line =
+            let held = index - previous.tail_from in
+            if index <> last && held >= 0 && held < Array.length previous.tail_lines - 1
+               && String.equal previous.tail_lines.(held) line
+            then previous.tail_rows.(held)
+            else begin
+              Atomic.incr body_rows_built;
+              draw ~last index line
+            end
+          in
+          for index = kept to closable - 1 do
+            Masc_tui_closed_rows.append writer (row_at index (line_at index))
+          done;
+          let drawn = Masc_tui_closed_rows.prefix writer in
+          let from = Masc_tui_closed_rows.length drawn in
+          let tail_lines = Array.init (count - from) (fun offset -> line_at (from + offset)) in
+          let tail_rows = Array.mapi (fun offset line -> row_at (from + offset) line) tail_lines in
+          record.grown_tail <- { tail_from = from; tail_lines; tail_rows };
+          drawn, Int.min sender_rows from, Array.to_list tail_rows
     in
     let diagnostic_rows =
       let wrap_diagnostic_line line =
@@ -2557,12 +2703,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     in
     (* After the whole body: a row of metadata between two rows of one message
        reads as the message ending there. *)
-    let body_with_diagnostics =
-      match diagnostic_rows with [] -> body_rows | _ :: _ -> body_rows @ diagnostic_rows
-    in
-    let message_rows = (
+    let metadata_rows =
       match origin with
-      | Origin_inline | Origin_bare -> body_with_diagnostics
+      | Origin_inline | Origin_bare -> []
       | Origin_row -> (
           (* An inline predecessor did not open a separate heading. Do not
              inherit one merely because both entries belong to the same turn. *)
@@ -2573,32 +2716,38 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
               then Some previous else None)
           in
           match metadata_row ~previous ~inner_width ~indent entry with
-          | None -> body_with_diagnostics
-          | Some metadata -> metadata :: body_with_diagnostics))
+          | None -> []
+          | Some metadata -> [ metadata ])
     in
-    match origin with
-    | Origin_bare ->
-        (* A separator belongs between entries, never after the transcript.
-           Counting and scrolling therefore see exactly the same final row.
-           Consecutive technical rows (Tool/Thinking/Status) stay tightly grouped,
-           while returning to conversational speech gets a breathing line. *)
-        let is_speech_style = function
-          | User | Inbound | Keeper | Local -> true
-          | Status | Journal | Error | Tool | Skill _ | Thinking _ -> false
-        in
-        (match previous, message_rows with
-         | Some prev, _ :: _
-           when is_speech_style prev.style || is_speech_style entry.style ->
-             { kind = Spacing; text = ""; gutter = ""; shade = Shade_none;
-               style = Status; gutter_rail_cells = 0; gutter_clock_cells = 0;
-               gutter_label_at = 0; action = Action_none } :: message_rows
-         | Some _, _ :: _
-         | Some _, []
-         | None, ([] | _ :: _) -> message_rows)
-    | Origin_inline | Origin_row ->
-        (match timeline_break_row ~previous ~inner_width:pane_width entry with
-         | None -> message_rows
-         | Some timeline_break -> timeline_break :: message_rows)
+    let head =
+      match origin with
+      | Origin_bare ->
+          (* A separator belongs between entries, never after the transcript.
+             Counting and scrolling therefore see exactly the same final row.
+             Consecutive technical rows (Tool/Thinking/Status) stay tightly grouped,
+             while returning to conversational speech gets a breathing line. A
+             body draws at least one row, so the entry is never empty. *)
+          let is_speech_style = function
+            | User | Inbound | Keeper | Local -> true
+            | Status | Journal | Error | Tool | Skill _ | Thinking _ -> false
+          in
+          (match previous with
+           | Some prev when is_speech_style prev.style || is_speech_style entry.style ->
+               { kind = Spacing; text = ""; gutter = ""; shade = Shade_none;
+                 style = Status; gutter_rail_cells = 0; gutter_clock_cells = 0;
+                 gutter_label_at = 0; action = Action_none } :: metadata_rows
+           | Some _ | None -> metadata_rows)
+      | Origin_inline | Origin_row ->
+          (match timeline_break_row ~previous ~inner_width:pane_width entry with
+           | None -> metadata_rows
+           | Some timeline_break -> timeline_break :: metadata_rows)
+    in
+    (* After the whole body: a row of metadata between two rows of one message
+       reads as the message ending there. *)
+    let tail = match diagnostic_rows with [] -> body_tail | _ :: _ -> body_tail @ diagnostic_rows in
+    { er_head = head; er_closed = body_closed; er_closed_senders = closed_senders; er_tail = tail;
+      er_length = List.length head + Masc_tui_closed_rows.length body_closed + List.length tail;
+      er_diagnostics = List.length diagnostic_rows; er_list = None }
   in
   match
     find_kept_rows ~entry ~previous ~inner_width:pane_width
@@ -2613,6 +2762,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
           kept_inner_width = pane_width; kept_origin = configured_origin;
           kept_chunks = body_chunks; kept_rows = rows };
       rows
+
+let rows_of_entry ?markdown ?origin ~inner_width ~previous entry =
+  entry_rows_list (entry_rows_of_entry ?markdown ?origin ~inner_width ~previous entry)
 
 let viewport_gap_text ~inner_width hidden_rows =
   let candidates =
@@ -2693,114 +2845,179 @@ let collapse_repeated_body_rows ~inner_width rows =
   loop [] None 0 rows
 ;;
 
-(* The rows before an entry's first [Body] row, and that row with the rest. *)
-let split_before_first_body rows =
-  let rec loop prefix = function
-    | ({ kind = Body; _ } as opening) :: rest -> List.rev prefix, Some (opening, rest)
-    | ({ kind = Metadata _ | Spacing | Viewport_gap _; _ } as row) :: rest ->
-      loop (row :: prefix) rest
-    | [] -> List.rev prefix, None
+let is_body_row row =
+  match row.kind with
+  | Body -> true
+  | Metadata _ | Spacing | Viewport_gap _ -> false
+
+(* An entry's rows read by index: the head and the tail as arrays, the
+   closed rows from the prefix that holds them. *)
+type row_view = {
+  view_head : row array;
+  view_closed : row Masc_tui_closed_rows.prefix;
+  view_closed_senders : int;
+  view_tail : row array;
+  view_tail_body_before : int array;
+  (* For each position of [view_tail] and one past its end, how many body rows
+     come before it in [view_tail]. *)
+  view_diagnostics : int;
+  (* How many of [view_tail]'s last rows are the entry's notes. *)
+}
+
+let view_of_entry_rows rows =
+  let tail = Array.of_list rows.er_tail in
+  let body_before = Array.make (Array.length tail + 1) 0 in
+  Array.iteri (fun index row ->
+    body_before.(index + 1) <- body_before.(index) + (if is_body_row row then 1 else 0)) tail;
+  { view_head = Array.of_list rows.er_head; view_closed = rows.er_closed;
+    view_closed_senders = rows.er_closed_senders; view_tail = tail;
+    view_tail_body_before = body_before; view_diagnostics = rows.er_diagnostics }
+
+let view_length view =
+  Array.length view.view_head + Masc_tui_closed_rows.length view.view_closed
+  + Array.length view.view_tail
+
+let view_get view index =
+  let head = Array.length view.view_head in
+  if index < head then view.view_head.(index)
+  else
+    let index = index - head in
+    let closed = Masc_tui_closed_rows.length view.view_closed in
+    if index < closed then Masc_tui_closed_rows.get view.view_closed index
+    else view.view_tail.(index - closed)
+
+(* The rows [start] to [stop - 1]. *)
+let view_rows view ~start ~stop =
+  let rec collect index rows = if index < start then rows else collect (index - 1) (view_get view index :: rows) in
+  collect (stop - 1) []
+
+(* The body rows before [index]: the closed rows after their sender rows
+   are all body rows, so only the head and the tail are walked. *)
+let body_rows_before view index =
+  let count_in rows stop =
+    let rec count at found = if at >= stop then found else count (at + 1) (if is_body_row rows.(at) then found + 1 else found) in
+    count 0 0
   in
-  loop [] rows
-;;
+  let head = Array.length view.view_head in
+  let in_head = count_in view.view_head (Int.min index head) in
+  if index <= head then in_head
+  else
+    let closed = Masc_tui_closed_rows.length view.view_closed in
+    let into_closed = Int.min (index - head) closed in
+    let in_closed = Int.max 0 (into_closed - view.view_closed_senders) in
+    if index - head <= closed then in_head + in_closed
+    else in_head + in_closed + view.view_tail_body_before.(index - head - closed)
+
+let viewport_gap_row ~inner_width hidden_rows =
+  { style = Status
+  ; kind = Viewport_gap { hidden_rows }
+  ; shade = Shade_none
+  ; text = viewport_gap_text ~inner_width hidden_rows
+  ; gutter_rail_cells = 0
+  ; gutter_clock_cells = 0
+  ; gutter_label_at = 0
+  ; gutter = ""
+  ; action = Action_none
+  }
 
 (* At the live edge, keep enough of an oversized newest entry to identify it,
    see its opening when space permits, and see its latest output. The typed gap
    makes the missing middle explicit; without it, inline mode looked like one
-   continuous message even though rows had disappeared. *)
-let newest_entry_window ~inner_width ~height rows =
+   continuous message even though rows had disappeared.
+
+   The rows are read by index: a 1MB reply at the live edge has some 50k rows,
+   and the window takes a screenful from their ends. Each chosen row comes
+   with its index in the entry's rows, or [None] for a row the window adds. *)
+let newest_entry_window ~inner_width ~height view =
+  let length = view_length view in
+  let indexed start stop = List.init (Int.max 0 (stop - start)) (fun offset -> view_get view (start + offset), Some (start + offset)) in
   (* The separator above an oversized entry must not replace its opening.
      It remains an ordinary physical row when scrolling through the history. *)
-  let rows = List.drop_while (fun row -> row.kind = Spacing) rows in
-  let is_diagnostic row =
-    match row.kind with
-    | Metadata Diagnostic -> true
-    | Metadata (Timeline_break _ | Origin _ | Continued_at _ | Sender) | Body | Spacing | Viewport_gap _ -> false
+  let first_content =
+    let rec skip index = if index < length && (view_get view index).kind = Spacing then skip (index + 1) else index in
+    skip 0
   in
-  (* One walk counts the rows and finds whether any is a diagnostic: a 1MB
-     reply at the live edge has some 50k rows, and the window read their
-     number four times and walked them once more for a diagnostic. *)
-  let total, has_diagnostic =
-    let rec walk count seen = function
-      | [] -> count, seen
-      | row :: rest -> walk (count + 1) (seen || is_diagnostic row) rest
-    in
-    walk 0 false rows
-  in
-  if total <= height then rows
+  let total = length - first_content in
+  if total <= height then indexed first_content length
   else
   (* A civil-hour rail is context, while the origin and latest body are the
      message. If all of them do not fit at the live edge, lay out the message
      first and count the rail among the explicitly hidden physical rows. The
      transcript itself is unchanged, so ordinary scrollback reaches the rail. *)
-  let hidden_timeline_rows, rows, total =
-    match rows with
-    | { kind = Metadata (Timeline_break _); _ } :: rest -> 1, rest, total - 1
-    | { kind = Metadata (Diagnostic | (Sender | (Origin _ | Continued_at _)));_}::_
-    | { kind = (Body | (Spacing | Viewport_gap _));_}::_ | [] -> 0, rows, total
+  let hidden_timeline_rows, first, total =
+    match (view_get view first_content).kind with
+    | Metadata (Timeline_break _) -> 1, first_content + 1, total - 1
+    | Metadata (Diagnostic | (Sender | (Origin _ | Continued_at _))) | Body | Spacing | Viewport_gap _ ->
+        0, first_content, total
   in
   (* Diagnostics trail the body, and scrolling back slices physical rows from
      the bottom up, so a diagnostic dropped at the live edge could never be
      reached. They stay, below the latest output, and take their rows from
-     the opening and from older output. *)
-  match height, rows with
-  | 0, _ | _, [] -> []
-  | 1, first :: _ -> [ first ]
-  | 2, first :: rest -> (
-      match List.rev (List.filter (fun row -> not (is_diagnostic row)) rest) with
-      | [] -> [ first ]
-      | latest :: _ -> [ first; latest ])
-  | _, first :: rest ->
-      (* Most entries carry no diagnostic; partitioning one would copy every
-         row of it to find none. *)
-      let diagnostics, output, output_length =
-        if has_diagnostic then
-          let diagnostics, output = List.partition is_diagnostic rest in
-          diagnostics, output, total - 1 - List.length diagnostics
-        else [], rest, total - 1
+     the opening and from older output. The layout counts them as it puts
+     them last. *)
+  let diagnostic_count = Int.min view.view_diagnostics (length - 1 - first) in
+  let output_stop = length - diagnostic_count in
+  if height = 0 || total = 0 then []
+  else if height = 1 then indexed first (first + 1)
+  else if height = 2 then
+    (if output_stop - 1 > first then indexed first (first + 1) @ indexed (output_stop - 1) output_stop
+     else indexed first (first + 1))
+  else
+    (* The first row, the gap and one row of the latest output come before
+       any diagnostic: a pane too short for all of them keeps the last. *)
+    let shown_diagnostics = Int.min diagnostic_count (Int.max 1 (height - 3)) in
+    let budget = height - 1 - shown_diagnostics in
+    let start, output_start =
+      match (view_get view first).kind with
+      | _ when height = 3 && shown_diagnostics > 0 -> [], first
+      | Metadata _ when budget >= 3 -> (
+          (* A long sender name wraps to several metadata rows, so the
+             opening is the first [Body] row after the whole prefix, not the
+             row after [first]. The prefix stays when it fits beside the
+             opening and one row of the latest output; otherwise its
+             continuation rows join the hidden count. *)
+          let rec opening index =
+            if index >= output_stop then None
+            else if is_body_row (view_get view index) then Some index
+            else opening (index + 1)
+          in
+          match opening (first + 1) with
+          | Some opening ->
+              if opening - first + 1 < budget then indexed first (opening + 1), opening + 1
+              else indexed first (first + 1) @ indexed opening (opening + 1), opening + 1
+          | None -> indexed first (first + 1), first + 1)
+      | Metadata _ | Body | Spacing | Viewport_gap _ -> indexed first (first + 1), first + 1
+    in
+    let room = budget - List.length start in
+    let tail_start = Int.max output_start (output_stop - Int.max 0 room) in
+    let physical_tail = view_rows view ~start:tail_start ~stop:output_stop in
+    let tail =
+      (* Collapsed repeats keep the first row of each run, which is still one
+         of the entry's rows, so its index is found by walking beside them. *)
+      let rec pair rows indices =
+        match rows with
+        | [] -> []
+        | row :: rest -> (
+            match row.kind with
+            | Viewport_gap _ -> (row, None) :: pair rest indices
+            | Body | Metadata _ | Spacing ->
+                let rec seek = function
+                  | [] -> (row, None), []
+                  | (candidate, index) :: more ->
+                      if candidate == row then (row, Some index), more else seek more
+                in
+                let paired, remaining = seek indices in
+                paired :: pair rest remaining)
       in
-      (* The first row, the gap and one row of the latest output come before
-         any diagnostic: a pane too short for all of them keeps the last. *)
-      let diagnostics = take_last (Int.max 1 (height - 3)) diagnostics in
-      let budget = height - 1 - List.length diagnostics in
-      let start, output, output_length =
-        match first.kind, output with
-        | _, _ when height = 3 && diagnostics <> [] -> [], first :: output, output_length + 1
-        | Metadata _, _ when budget >= 3 -> (
-            (* A long sender name wraps to several metadata rows, so the
-               opening is the first [Body] row after the whole prefix, not the
-               row after [first]. The prefix stays when it fits beside the
-               opening and one row of the latest output; otherwise its
-               continuation rows join the hidden count. *)
-            match split_before_first_body output with
-            | prefix, Some (opening, after) ->
-                let whole = (first :: prefix) @ [ opening ] in
-                let after_length = output_length - List.length prefix - 1 in
-                if List.length whole < budget then whole, after, after_length
-                else [ first; opening ], after, after_length
-            | _, None -> [ first ], output, output_length)
-        | (Metadata _ | Body | Spacing | Viewport_gap _), _ -> [ first ], output, output_length
-      in
-      let physical_tail =
-        take_last_of ~length:output_length (budget - List.length start) output in
-      let tail = collapse_repeated_body_rows ~inner_width physical_tail @ diagnostics in
-      let hidden_rows =
-        total - List.length start - List.length physical_tail
-        - List.length diagnostics + hidden_timeline_rows
-      in
-      let gap =
-        { style = Status
-        ; kind = Viewport_gap { hidden_rows }
-        ; shade = Shade_none
-        ; text = viewport_gap_text ~inner_width hidden_rows
-        ; gutter_rail_cells = 0
-        ; gutter_clock_cells = 0
-        ; gutter_label_at = 0
-        ; gutter = ""
-        ; action = Action_none
-        }
-      in
-      start @ (gap :: tail)
+      pair (collapse_repeated_body_rows ~inner_width physical_tail)
+        (List.mapi (fun offset row -> row, tail_start + offset) physical_tail)
+    in
+    let diagnostics = indexed (length - shown_diagnostics) length in
+    let hidden_rows =
+      total - List.length start - (output_stop - tail_start) - shown_diagnostics
+      + hidden_timeline_rows
+    in
+    start @ ((viewport_gap_row ~inner_width hidden_rows, None) :: tail) @ diagnostics
 
 type body_row_position = {
   entry_index : int;
@@ -2808,48 +3025,16 @@ type body_row_position = {
   rows_below : int;
 }
 
-(* The body row each chosen row is, walking the entry's rows once beside the
-   choice. A window keeps the entry's rows in their order and adds only
-   [Viewport_gap] rows of its own, which own no body row; a chosen row that is
-   not physically one of [rows] owns none either. Matching each chosen row
-   against an association of every row walked the whole entry once per
-   visible row. *)
-let body_rows_of_chosen rows chosen =
-  let body_row_after (row : row) body_row =
-    match row.kind with
-    | Body -> body_row + 1
-    | Metadata _ | Spacing | Viewport_gap _ -> body_row
-  in
-  let owned_by (row : row) body_row =
-    match row.kind with
-    | Body -> Some body_row
-    | Metadata _ | Spacing | Viewport_gap _ -> None
-  in
-  let rec walk body_row rows chosen owned =
-    match chosen with
-    | [] -> List.rev owned
-    | (wanted : row) :: rest_chosen -> (
-        match wanted.kind, rows with
-        | Viewport_gap _, _ -> walk body_row rows rest_chosen (None :: owned)
-        | (Body | Metadata _ | Spacing), [] ->
-            walk body_row [] rest_chosen (None :: owned)
-        | (Body | Metadata _ | Spacing), row :: rest ->
-            if row == wanted then
-              walk (body_row_after row body_row) rest rest_chosen
-                (owned_by row body_row :: owned)
-            else walk (body_row_after row body_row) rest chosen owned)
-  in
-  walk 0 rows chosen []
+(* The body row each chosen row is, from its index in the entry's rows. *)
+let body_rows_of_indexed view chosen =
+  List.map (fun (row, index) ->
+    match index with
+    | Some index when is_body_row row -> Some (body_rows_before view index)
+    | Some _ | None -> None) chosen
 
 (* Positions belong to the actual immutable rows selected by this producer.
    Generated gaps and rows synthesized by repeat collapse have no original
    row owner and cannot acquire a body position by matching their text. *)
-(* Whether [rows] fits in [room] rows, asking no more of the list than
-   [room + 1] of its rows. *)
-let rec fits_in rows room =
-  match rows with
-  | [] -> true
-  | _ :: rest -> room > 0 && fits_in rest (room - 1)
 
 (* The windows recent frames cut out of entries too tall for the room they
    had, per domain. A window and the body rows it shows follow from the
@@ -2858,7 +3043,7 @@ let rec fits_in rows room =
    to the next. Cut again on every frame, a 1MB reply at the live edge walked
    its 50k rows four times to keep a screenful. *)
 type kept_window = {
-  window_rows : row list;
+  window_rows : entry_rows;
   window_room : int;
   window_inner_width : int;
   window_newest : bool;
@@ -2874,7 +3059,10 @@ let kept_windows_key : kept_window list ref Domain.DLS.key =
 let windows_cut = Atomic.make 0
 
 let window_of_entry ~inner_width ~room ~newest rows =
-  if fits_in rows room then rows, body_rows_of_chosen rows rows
+  if rows.er_length <= room then
+    let view = view_of_entry_rows rows in
+    let all = List.init rows.er_length (fun index -> view_get view index, Some index) in
+    List.map fst all, body_rows_of_indexed view all
   else
     let held = Domain.DLS.get kept_windows_key in
     let matches kept =
@@ -2887,11 +3075,15 @@ let window_of_entry ~inner_width ~room ~newest rows =
     | Some kept -> kept.window_chosen, kept.window_body_rows
     | None ->
         Atomic.incr windows_cut;
-        let chosen =
-          if newest then newest_entry_window ~inner_width ~height:room rows
-          else take_last room rows
+        let view = view_of_entry_rows rows in
+        let indexed =
+          if newest then newest_entry_window ~inner_width ~height:room view
+          else
+            let start = Int.max 0 (rows.er_length - Int.max 0 room) in
+            List.init (rows.er_length - start) (fun offset -> view_get view (start + offset), Some (start + offset))
         in
-        let body_rows = body_rows_of_chosen rows chosen in
+        let chosen = List.map fst indexed in
+        let body_rows = body_rows_of_indexed view indexed in
         held :=
           { window_rows = rows; window_room = room; window_inner_width = inner_width;
             window_newest = newest; window_chosen = chosen; window_body_rows = body_rows }
@@ -2905,7 +3097,7 @@ let visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries =
     | [] -> selected, positions
     | _ when remaining = 0 -> selected, positions
     | entry :: older ->
-        let rows = rows_of_entry ?markdown ?origin ~inner_width
+        let rows = entry_rows_of_entry ?markdown ?origin ~inner_width
           ~previous:(List.nth_opt older 0) entry in
         let newest = match selected with [] -> true | _ :: _ -> false in
         let chosen, body_rows = window_of_entry ~inner_width ~room:remaining ~newest rows in
@@ -2928,7 +3120,7 @@ let total_rows ?markdown ?origin ?previous ~inner_width entries =
     (fun (previous, total) entry ->
        ( Some entry
        , total
-         + List.length (rows_of_entry ?markdown ?origin ~inner_width ~previous entry) ))
+         + (entry_rows_of_entry ?markdown ?origin ~inner_width ~previous entry).er_length ))
     (previous, 0) entries
   |> snd
 
@@ -2980,9 +3172,8 @@ let clamp_scroll ?markdown ?origin ~inner_width ~height requested entries =
       | entry :: older ->
           count
             (total
-             + List.length
-                 (rows_of_entry ?markdown ?origin ~inner_width
-                    ~previous:(List.nth_opt older 0) entry))
+             + (entry_rows_of_entry ?markdown ?origin ~inner_width
+                  ~previous:(List.nth_opt older 0) entry).er_length)
             older
     in
     Int.min requested (Int.max 0 (count 0 (List.rev entries) - height))
@@ -3040,13 +3231,15 @@ let row_counts_for ?markdown entries ~inner_width ~origin =
       row_counts_memo := Some held;
       held
 
-let entry_rows_at held ?markdown index =
+let entry_rows_of_at held ?markdown index =
   let count = Array.length held.rc_newest_first in
   let previous =
     if index + 1 < count then Some held.rc_newest_first.(index + 1) else None
   in
-  rows_of_entry ?markdown ~origin:held.rc_origin ~inner_width:held.rc_inner_width
+  entry_rows_of_entry ?markdown ~origin:held.rc_origin ~inner_width:held.rc_inner_width
     ~previous held.rc_newest_first.(index)
+
+let entry_rows_at held ?markdown index = entry_rows_list (entry_rows_of_at held ?markdown index)
 
 (* Extend the known counts from the newest until they cover [wanted] rows, or
    until the conversation runs out. Answers how many rows and how many entries
@@ -3065,7 +3258,7 @@ let first_row_count_at_least held ~wanted =
 
 let extend_row_count held ?markdown index =
   let before = if index = 0 then 0 else held.rc_row_ends.(index - 1) in
-  let total = before + List.length (entry_rows_at held ?markdown index) in
+  let total = before + (entry_rows_of_at held ?markdown index).er_length in
   held.rc_row_ends.(index) <- total;
   held.rc_filled <- index + 1;
   total
@@ -3439,8 +3632,10 @@ module For_testing = struct
   let with_no_kept_rows run =
     let held = Domain.DLS.get kept_rows_key in
     let bodies = Domain.DLS.get kept_bodies_key in
-    let previous = !held and previous_bodies = !bodies in
+    let grown = Domain.DLS.get kept_grown_key in
+    let previous = !held and previous_bodies = !bodies and previous_grown = !grown in
     held := [];
     bodies := [];
-    Fun.protect ~finally:(fun () -> held := previous; bodies := previous_bodies) run
+    grown := [];
+    Fun.protect ~finally:(fun () -> held := previous; bodies := previous_bodies; grown := previous_grown) run
 end

@@ -15,8 +15,9 @@ let growing_renderer calls ~width text =
 
 let render_growing cache calls ?(theme_revision = 1)
     ?(palette_generation = 0) ?(width = 40) ?(settled = 0) identity text =
-  Cache.render_growing cache ~theme_revision ~palette_generation ~width
-    ~renderer:(growing_renderer calls) ~identity ~settled ~text
+  let (grown : Cache.grown) = Cache.render_growing cache ~theme_revision ~palette_generation ~width
+    ~renderer:(growing_renderer calls) ~identity ~settled ~text in
+  Masc_tui_closed_rows.to_list grown.closed @ grown.tail
 
 let full_markdown ~width text =
   Markdown.render ~palette:Markdown.plain_palette ~width text
@@ -93,8 +94,9 @@ let assert_incremental_matches_full ~label ~width chunks =
       check (option (array (pair int int)))
         (Printf.sprintf "%s blocks at chunk %d %S" label index chunk)
         (Some (Markdown.render_streaming ~palette:Markdown.plain_palette ~width text).blocks)
-        (Cache.growing_blocks cache ~theme_revision:1 ~palette_generation:0 ~width
-           ~identity:label ~text))
+        (Option.map Cache.block_table_to_array
+           (Cache.growing_blocks cache ~theme_revision:1 ~palette_generation:0 ~width
+              ~identity:label ~text)))
     chunks
 
 (* A finished reply's blocks are read by binary search and by the byte
@@ -113,8 +115,9 @@ let test_kept_blocks_must_describe_the_text () =
   | _ -> fail "blocks past the end of the text were kept"
   | exception Invalid_argument _ ->
       check (option (array (pair int int))) "nothing is kept for the text" None
-        (Cache.completed_blocks cache ~theme_revision:1 ~palette_generation:0
-           ~width:40 ~identity:"entry-a" ~text:"x")
+        (Option.map Cache.block_table_to_array
+           (Cache.completed_blocks cache ~theme_revision:1 ~palette_generation:0
+              ~width:40 ~identity:"entry-a" ~text:"x"))
 
 let one_byte_chunks text =
   List.init (String.length text) (fun index -> String.make 1 text.[index])

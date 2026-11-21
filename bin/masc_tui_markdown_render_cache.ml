@@ -17,6 +17,25 @@ module Completed = struct
   }
 end
 
+type grown = { closed : string Masc_tui_closed_rows.prefix; tail : string list }
+
+type block_table = {
+  closed_blocks : (int * int) Masc_tui_closed_rows.prefix;
+  open_blocks : (int * int) array;
+}
+
+let block_count table = Masc_tui_closed_rows.length table.closed_blocks + Array.length table.open_blocks
+
+let block table index =
+  let closed = Masc_tui_closed_rows.length table.closed_blocks in
+  if index < closed then Masc_tui_closed_rows.get table.closed_blocks index
+  else table.open_blocks.(index - closed)
+
+let block_table_of_array blocks =
+  { closed_blocks = Masc_tui_closed_rows.of_array blocks; open_blocks = [||] }
+
+let block_table_to_array table = Array.init (block_count table) (block table)
+
 module Streaming = struct
   type 'identity key = {
     identity : 'identity;
@@ -29,13 +48,16 @@ module Streaming = struct
     key : 'identity key;
     text : string;
     stable_source_len : int;
-    stable_rows_newest_first : string list;
-    (* The closed rows, newest first: rows a frame closes go in front of the
-       ones closed before. Held in reading order, they were copied whole on
-       every frame of a streaming reply to put a few more at the end. *)
+    stable_rows : string Masc_tui_closed_rows.t;
+    (* The closed rows, in reading order. A frame appends the rows it closes
+       and hands on the prefix and its own tail; copying the closed rows into
+       one list cost every frame of a streaming reply what the reply had
+       accumulated. *)
     stable_row_count : int;
-    rows : string list;
-    blocks : (int * int) array;
+    rows : grown;
+    closed_blocks : (int * int) Masc_tui_closed_rows.t;
+    (* The blocks before [stable_source_len], appended as they close. *)
+    open_blocks : (int * int) array;
     settled : int;
     (* The first [settled] bytes of [text] are the same in every later text
        for this key, as the caller promised. *)
@@ -105,23 +127,6 @@ let take count entries =
   in
   loop 0 [] entries
 
-(* The first [count] entries, newest first, in front of [onto]. *)
-let rev_take_onto count entries onto =
-  let rec loop kept reversed = function
-    | _ when kept = count -> reversed
-    | [] -> reversed
-    | entry :: rest -> loop (kept + 1) (entry :: reversed) rest
-  in
-  loop 0 onto entries
-
-let drop count entries =
-  let rec loop remaining = function
-    | entries when remaining <= 0 -> entries
-    | [] -> []
-    | _ :: rest -> loop (remaining - 1) rest
-  in
-  loop count entries
-
 (* One width/source/revision tuple per completed entry. A resize or visual
    revision replaces that entry's old rows instead of accumulating variants. *)
 let remember cache (rendered : _ Completed.rendered) =
@@ -150,7 +155,7 @@ let completed_blocks cache ~theme_revision ~palette_generation ~width ~identity
   match Masc_tui_lru.find cache.completed identity with
   | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
       (match rendered.blocks with
-       | Completed.Kept blocks -> Some blocks
+       | Completed.Kept blocks -> Some (block_table_of_array blocks)
        | Completed.Not_kept -> None)
   | Some _ | None -> None
 
@@ -178,16 +183,6 @@ let valid_blocks ~source_length ~row_count blocks =
         && from (index + 1) source_start row_start)
   in
   from 0 (-1) 0
-
-(* How many of [blocks], which run in source order, start before [before]. *)
-let closed_block_count blocks ~before =
-  let rec search low high =
-    if low >= high then low
-    else
-      let middle = low + ((high - low) / 2) in
-      if fst blocks.(middle) < before then search (middle + 1) high else search low middle
-  in
-  search 0 (Array.length blocks)
 
 let validate_streaming_render ~source_length
     (rendered : Masc_tui_markdown.streaming_render) =
@@ -235,22 +230,51 @@ let extends ~settled ~kept text =
       in
       from start)
 
+(* Appends to [closed] the blocks of a render of the text from
+   [source_offset] that start before [before] in it, at the place they have
+   in the whole text, and answers the others there. *)
+let split_blocks closed ~before ~source_offset ~row_offset blocks =
+  let placed (source_start, row_start) = source_offset + source_start, row_offset + row_start in
+  let opened = ref [] in
+  Array.iter (fun ((source_start, _) as block) ->
+    if source_start < before then Masc_tui_closed_rows.append closed (placed block)
+    else opened := placed block :: !opened) blocks;
+  Array.of_list (List.rev !opened)
+
+(* Appends the first [count] of [rows] to [closed] and answers the rest. *)
+let append_closed closed count rows =
+  let rec loop remaining = function
+    | rows when remaining <= 0 -> rows
+    | [] -> []
+    | row :: rest -> Masc_tui_closed_rows.append closed row; loop (remaining - 1) rest
+  in
+  loop count rows
+
 let reset_growing cache ~(key : _ Streaming.key) ~settled ~text ~renderer =
   let rendered = renderer ~width:key.width text in
   validate_streaming_render ~source_length:(String.length text) rendered;
+  let stable_rows = Masc_tui_closed_rows.create () in
+  let tail = append_closed stable_rows rendered.mutable_row_start rendered.rows in
+  let rows = { closed = Masc_tui_closed_rows.prefix stable_rows; tail } in
+  let closed_blocks = Masc_tui_closed_rows.create () in
+  let open_blocks =
+    split_blocks closed_blocks ~before:rendered.mutable_source_start ~source_offset:0 ~row_offset:0
+      rendered.blocks
+  in
   let growing : _ Streaming.growing =
     { key;
       text;
       stable_source_len = rendered.mutable_source_start;
-      stable_rows_newest_first = rev_take_onto rendered.mutable_row_start rendered.rows [];
+      stable_rows;
       stable_row_count = rendered.mutable_row_start;
-      rows = rendered.rows;
-      blocks = rendered.blocks;
+      rows;
+      closed_blocks;
+      open_blocks;
       settled;
     }
   in
   remember_growing cache growing;
-  rendered.rows
+  rows
 
 let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
     ~identity ~settled ~text =
@@ -266,32 +290,25 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
       in
       let rendered = renderer ~width pending in
       validate_streaming_render ~source_length:(String.length pending) rendered;
-      let stable_rows_newest_first =
-        rev_take_onto rendered.mutable_row_start rendered.rows
-          growing.stable_rows_newest_first
-      in
-      let rows =
-        List.rev_append stable_rows_newest_first
-          (drop rendered.mutable_row_start rendered.rows)
-      in
+      let tail = append_closed growing.stable_rows rendered.mutable_row_start rendered.rows in
+      let rows = { closed = Masc_tui_closed_rows.prefix growing.stable_rows; tail } in
       (* The blocks before the pending text are closed; the pending render
-         numbers its own from zero. Blocks run in source order, so the
-         closed ones are a prefix and the array is built once. *)
-      let closed = closed_block_count growing.blocks ~before:growing.stable_source_len in
-      let blocks = Array.init (closed + Array.length rendered.blocks) (fun index ->
-        if index < closed then growing.blocks.(index)
-        else
-          let source_start, row_start = rendered.blocks.(index - closed) in
-          growing.stable_source_len + source_start, growing.stable_row_count + row_start) in
+         numbers its own from zero. Those it closes join them. *)
+      let open_blocks =
+        split_blocks growing.closed_blocks ~before:rendered.mutable_source_start
+          ~source_offset:growing.stable_source_len ~row_offset:growing.stable_row_count
+          rendered.blocks
+      in
       let updated : _ Streaming.growing =
         { key;
           text;
           stable_source_len =
             growing.stable_source_len + rendered.mutable_source_start;
-          stable_rows_newest_first;
+          stable_rows = growing.stable_rows;
           stable_row_count = growing.stable_row_count + rendered.mutable_row_start;
           rows;
-          blocks;
+          closed_blocks = growing.closed_blocks;
+          open_blocks;
           settled;
         }
       in
@@ -305,7 +322,9 @@ let growing_blocks cache ~theme_revision ~palette_generation ~width ~identity
     { identity; width; theme_revision; palette_generation }
   in
   match find_growing cache key with
-  | Some growing when String.equal growing.text text -> Some growing.blocks
+  | Some growing when String.equal growing.text text ->
+      Some { closed_blocks = Masc_tui_closed_rows.prefix growing.closed_blocks;
+             open_blocks = growing.open_blocks }
   | Some _ | None -> None
 
 let row_extent rows =

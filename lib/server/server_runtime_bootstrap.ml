@@ -1589,8 +1589,6 @@ let start_post_ready_owner_lanes
     ~resume:resume_model_configuration;
   Candle_status.install_appraiser_check (Server_candle_appraiser.available ~config:(Mcp_server.workspace_config state));
   Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
-  if runs_memory_lanes access then
-    Server_librarian_addon_wake.install ~sw ~config:(Mcp_server.workspace_config state);
   let start_authority () =
     start_completion_authority ~sw ~clock state;
     start_goal_verifier ~sw ~clock state;

@@ -361,15 +361,21 @@ let test_assistant_message_persists_with_typed_surface () =
 
 let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
   let base_path = Filename.temp_dir "surface-post-replay-coords-" "" in
+  (* The cleanup calls [Channel_gate_discord_state.unregister_thread], which
+     takes an [Eio.Mutex] (`use_rw`), so it must run while the Eio loop below is
+     still alive. A [Fun.protect] outside [Eio_main.run] runs its [finally] once
+     the loop has ended, and then the mutex raises
+     `Fun.Finally_raised: Stdlib.Effect.Unhandled(Eio__core__Cancel.Get_context)`
+     instead of the test's own result. *)
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
+  @@ fun () ->
+  Eio_main.run @@ fun env ->
   Fun.protect
     ~finally:(fun () ->
       Channel_gate_discord_state.unregister_thread ~thread_id:"discord-thread-9";
       Channel_gate_slack_state.clear_workspace_id ();
       Fs_compat.remove_tree base_path)
     (fun () ->
-       Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
-       @@ fun () ->
-       Eio_main.run @@ fun env ->
        if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "replay-coords-test"));

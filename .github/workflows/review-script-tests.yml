@@ -1,0 +1,38 @@
+name: Review & merge script tests
+
+# Run the offline unit test suites under scripts/review/ (including
+# test_approval_auto_merge.py and test_approval_merge_sweep.py) in CI whenever
+# review/merge automation or its imported source filter changes (task-3650).
+# Every suite mocks its GitHub CLI/HTTP boundary and requires neither API quota
+# nor write permissions.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "scripts/review/**"
+      - "scripts/ci/pr_source_changes.py"
+      - ".github/workflows/review-script-tests.yml"
+      - ".github/workflows/approval-auto-merge.yml"
+      - ".github/workflows/approval-merge-sweep.yml"
+      - ".github/workflows/approval-merge-request.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-script-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Review script unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run scripts/review offline unit tests
+        run: |
+          env -u GITHUB_STEP_SUMMARY -u GITHUB_EVENT_PATH \
+            python3 -I -m unittest discover -s scripts/review -p 'test_*.py' -v

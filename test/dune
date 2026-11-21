@@ -3417,6 +3417,7 @@
 
 (include stanzas/test_keeper_memory_admission_judgment.inc)
 (include stanzas/test_keeper_memory_successor_selection.inc)
+(include stanzas/test_keeper_memory_successor_selection_revision_evidence.inc)
 
 (include stanzas/test_keeper_memory_resolved_selection_capture.inc)
 

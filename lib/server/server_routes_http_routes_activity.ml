@@ -891,17 +891,6 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value json reqd
        )
 
-  |> Server_route.get Server_route.Public_read "/api/v1/runtime/params/audit" (fun state req reqd ->
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-         let entries = Runtime_params.recent_audit ~base_path limit in
-         let json = `Assoc [
-           ("entries", `List entries);
-           ("count", `Int (List.length entries));
-         ] in
-         Http.Response.json_value json reqd
-       )
-
   |> Server_route.get Server_route.Public_read "/api/v1/audit" (fun state req reqd ->
          let config = (Mcp_server.workspace_config state) in
          let limit  = int_query_param req "limit"  ~default:100 |> clamp ~min_v:1 ~max_v:500 in

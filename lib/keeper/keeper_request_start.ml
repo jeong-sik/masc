@@ -166,19 +166,14 @@ let resets_from ~turns_path ~from : Keeper_covered_point.unread_lines =
     Keeper_covered_point.Not_scanned { detail = Scan.error_to_string error }
 ;;
 
-let standing ~(config : Workspace.config) ~keeper_name =
-  match latest ~config ~keeper_name with
-  | None -> Unknown_until_next_request
-  | Some start ->
-    (match Keeper_memory_writers.find ~base_path:config.base_path with
-     | None -> View_unavailable
-     | Some writers ->
-       (match Librarian_writers.view writers keeper_name with
-        | Error (`Booting | `Stopped (_ : Librarian_store.stop) | `No_writer) -> View_unavailable
-        | Ok view ->
-          let turns_path = turns_path ~config ~keeper_name in
-          of_view start view ~lines_since:(function
-            | From_read_unit { line; within } ->
-              Keeper_covered_point.read_unread_lines ~turns_path ~line ~within
-            | From_request { log_end } -> resets_from ~turns_path ~from:log_end)))
+let standing ~config ~keeper_name view =
+  match latest ~config ~keeper_name, view with
+  | None, (Some (_ : Librarian_writer.view) | None) -> Unknown_until_next_request
+  | Some (_ : t), None -> View_unavailable
+  | Some start, Some view ->
+    let turns_path = turns_path ~config ~keeper_name in
+    of_view start view ~lines_since:(function
+      | From_read_unit { line; within } ->
+        Keeper_covered_point.read_unread_lines ~turns_path ~line ~within
+      | From_request { log_end } -> resets_from ~turns_path ~from:log_end)
 ;;

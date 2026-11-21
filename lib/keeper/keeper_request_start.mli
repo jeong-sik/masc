@@ -109,6 +109,14 @@ val of_view
 (** [Reset_at] for the first [Reset] line that starts at [from] or later. *)
 val resets_from : turns_path:string -> from:int -> Keeper_covered_point.unread_lines
 
-(** [keeper_name]'s latest start against the view of its writer in this
-    workspace. Reads the turn log lines {!of_view} names. *)
-val standing : config:Workspace.config -> keeper_name:string -> standing
+(** [keeper_name]'s latest start against [view], the view of its writer the
+    caller holds: [None] when the writer is booting, stopped, retired or not
+    made. Reads the turn log lines {!of_view} names.
+
+    The caller passes the view it read, so reading a standing makes no
+    writer, and the standing is about the read end the caller shows. *)
+val standing
+  :  config:Workspace.config
+  -> keeper_name:string
+  -> Librarian_writer.view option
+  -> standing

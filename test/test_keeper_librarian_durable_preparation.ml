@@ -234,14 +234,6 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
   check string "floor question uses the same captured counterpart substitution"
     fresh.rendered_prompt fresh_step.preparation.rendered_prompt)
 
-(* A Keeper whose earlier [source_path] write left one file-source fact. *)
-let source_lines =
-  Keeper_memory_source_current.budget_lines (Some
-    {Keeper_memory_source_current.revision=1;updated_at=10.;trace_id="durable-preparation";
-     facts=[{claim="The deployment notes name the release owner";first_seen=10.;
-       source={path="notes.txt";sha256="sha256:" ^ String.make 64 'a'}}];
-     invalidations=[]})
-
 (* Where the body places the two slots, and the blank line the runtime puts on
    the far side of each. The expected prompt is built apart from the runtime's
    slot rendering: the body is rendered around two markers and each marker is

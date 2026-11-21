@@ -287,24 +287,15 @@ let add_routes router =
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/voices" (fun _state _agent_name request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_voice_catalogue request reqd body))
-  (* Voice setup: read what is configured, see what a change would do, commit
-     it. All three are CanAdmin -- they read and rewrite the workspace's
-     runtime.toml, which GET /api/v1/voice/config deliberately does not expose
-     (it answers three booleans and no endpoint identity, because it is a public
-     read). *)
+  (* Voice setup: read what is configured, commit a change. Both are CanAdmin --
+     they read and rewrite the workspace's runtime.toml, which GET
+     /api/v1/voice/config deliberately does not expose (it answers three
+     booleans and no endpoint identity, because it is a public read). *)
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/setup" (fun state _agent_name request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            match Server_voice_setup_actions.observe ~base_path with
            | Ok json -> respond_json_value_with_cors ~status:`OK request reqd json
            | Error error -> respond_voice_setup_error request reqd error)
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/setup/preview" (fun state _agent_name request reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           Http.Request.read_body_async reqd (fun body ->
-             handle_voice_setup ~base_path
-               ~act:
-                 (Server_voice_setup_actions.preview
-                    ~check_command_voices:Voice_bridge.check_command_voices)
-               request reqd body))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/setup" (fun state _agent_name request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            Http.Request.read_body_async reqd (fun body ->

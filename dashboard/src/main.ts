@@ -198,5 +198,5 @@ performanceMonitor.start()
 startWebVitalsCapture()
 
 // surface/section open counters to /api/v1/dashboard/nav-event.
-// Aggregate only, no PII. Drives RFC-0048 IA decisions.
+// Aggregate only, no PII.
 startNavTelemetry()

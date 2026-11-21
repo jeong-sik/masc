@@ -79,7 +79,9 @@
     break, so its end moves by design; atoms are then counted on the history
     it returns. Its [Reset] line names everything the head holds before the
     tail goes ({!Keeper_turn_log_reset}), so on a recovery the turn log holds
-    nothing back either. A working state that covers the dropped tail no longer
+    nothing back either. The callers write that line when the report's
+    [messages_dropped_at_structural_break] is above 0, and the rule above is
+    lifted on that same count. A working state that covers the dropped tail no longer
     fits, and the recovery is refused; with the server stopped, removing that
     working state (the keeper's [librarian-continuity.json]) lets it through,
     and the Librarian writes it again from atom 0. The Librarian position is

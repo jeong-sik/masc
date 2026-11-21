@@ -292,11 +292,13 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity ~named messages
              done)
           fitting_continuity;
         (* A message the turn log has not named is read from this head by the
-           next unit, so it goes out as it is. A recovery's caller names all
-           the head holds in a [Reset] line before the change, so a recovery
-           may rewrite any message it keeps. *)
+           next unit, so it goes out as it is. The callers write the [Reset]
+           line that names all the head holds, before the change
+           ([Keeper_turn_log_reset.run]), when the report counts messages
+           dropped at a break. The rule is lifted on that same count, so a
+           purge with no such line never rewrites what no line has named. *)
         (match named with
-         | Keeper_turn_log_writer.Named_below below when not recovering ->
+         | Keeper_turn_log_writer.Named_below below when dropped_at_break = 0 ->
            for index = below to List.length retained - 1 do
              kept_message.(index) <- true
            done

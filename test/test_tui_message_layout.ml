@@ -130,7 +130,7 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
       rendered := entry.request_label :: !rendered;
       Layout.wrap_words ~max_cells:width text
     in
-    match entry.markdown_source with
+    Layout.Body_whole (match entry.markdown_source with
     | Layout.Markdown_stable
         { keeper_name; request_id; observed_at; entry_index } ->
         Markdown_cache.render cache ~theme_revision:1 ~palette_generation:0
@@ -139,7 +139,7 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
           ~text:entry.body
     | Layout.Markdown_growing _
     | Layout.Markdown_streaming ->
-        renderer ~width entry.body
+        renderer ~width entry.body)
   in
   let stable index =
     entry
@@ -159,7 +159,7 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
   let height = 4 in
   let requested = 100 in
   let uncached_markdown ~(entry : Layout.entry) ~width =
-    Layout.wrap_words ~max_cells:width entry.body
+    Layout.Body_whole (Layout.wrap_words ~max_cells:width entry.body)
   in
   let expected_scroll =
     Layout.clamp_scroll ~markdown:uncached_markdown ~inner_width ~height requested
@@ -195,7 +195,7 @@ let test_a_second_walk_pays_for_what_it_newly_reaches () =
   let laid_out = ref 0 in
   let markdown ~(entry : Layout.entry) ~width =
     incr laid_out;
-    Layout.wrap_words ~max_cells:width entry.body
+    Layout.Body_whole (Layout.wrap_words ~max_cells:width entry.body)
   in
   let walk requested =
     laid_out := 0;
@@ -226,7 +226,7 @@ let test_a_second_walk_pays_for_what_it_newly_reaches () =
      not reuse plain-text row counts for markdown or vice versa. *)
   let expanding_markdown ~(entry : Layout.entry) ~width =
     incr laid_out;
-    List.concat_map (fun line -> [ line; line ]) (Layout.wrap_words ~max_cells:width entry.body)
+    Layout.Body_whole (List.concat_map (fun line -> [ line; line ]) (Layout.wrap_words ~max_cells:width entry.body))
   in
   let plain_scroll =
     Layout.scroll_for_body_row ~inner_width ~entry_index:0 ~body_row:0 entries
@@ -831,7 +831,7 @@ let test_an_entry_drawn_again_returns_its_kept_rows () =
   let first = entry Layout.Keeper "alpha" "" body in
   let next = entry Layout.Keeper "alpha" "" (body ^ "\nmore") in
   let rendered ~(entry : Layout.entry) ~width:_ =
-    [ "rendered from " ^ String.sub entry.body 0 9 ] in
+    Layout.Body_whole [ "rendered from " ^ String.sub entry.body 0 9 ] in
   let rows ?markdown ?origin ~inner_width ~previous entry =
     Layout.rows_of_entry ?markdown ?origin ~inner_width ~previous entry in
   let base () = rows ~inner_width:60 ~previous:None first in
@@ -1030,6 +1030,28 @@ let test_window_positions_name_the_rows_shown () =
       [ 1; 2; 3; 4; 5; 8; 20; 400 ])
     [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]
 
+(* An open block's rows are drawn again only where its lines changed: with
+   every row of the block drawn on each frame, an unclosed code fence of
+   5,000 lines drew 5,000 rows a frame. *)
+let test_an_open_block_draws_only_its_new_rows () =
+  let cache = Markdown_cache.create ~capacity:4 in
+  let renderer ~width text =
+    Masc_tui_markdown.render_streaming ~palette:Masc_tui_markdown.plain_palette ~width text in
+  let markdown ~(entry : Layout.entry) ~width =
+    let grown = Markdown_cache.render_growing cache ~theme_revision:1 ~palette_generation:0
+        ~width ~renderer ~identity:"fence" ~settled:0 ~text:entry.body in
+    Layout.Body_grown { closed = grown.closed; tail = grown.tail } in
+  let text = Buffer.create 4096 in
+  Buffer.add_string text "```\n";
+  let drawn = List.init 300 (fun frame ->
+    Buffer.add_string text (Printf.sprintf "let x%d = %d\n" frame frame);
+    let before = Layout.For_testing.body_rows_built () in
+    ignore (Layout.visible_rows ~markdown ~origin:Layout.Origin_row ~inner_width:60 ~height:40
+      [ entry Layout.Keeper "alpha" "" (Buffer.contents text) ]);
+    Layout.For_testing.body_rows_built () - before) in
+  check (list int) "after the first frame, each frame draws the new line and the row before it"
+    [] (List.filteri (fun frame rows -> frame > 0 && rows > 3) drawn |> List.map Fun.id)
+
 (* At the live edge an oversized newest entry keeps exactly the pane's rows,
    and its gap counts every row it does not show: an hour heading, wrapped
    sender rows past the opening, older output and notes the room had no row
@@ -1061,6 +1083,51 @@ let test_a_live_edge_window_counts_every_row_it_hides () =
           (List.length rows) (shown + hidden))
         [ 3; 4; 5; 8; 20 ])
       [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]) shapes
+
+(* A streamed body hands its closed lines on by length. Laid out that way,
+   arrival after arrival, it draws the rows, the live edge window and the
+   body positions that its whole text laid out in one go draws. *)
+let test_a_streamed_body_lays_out_what_its_whole_text_lays_out () =
+  let random = Random.State.make [| 54182 |] in
+  let pieces =
+    [| "word "; "more words "; "\n"; "\n\n"; "- item\n"; "```\n"; "code line\n"; "# head\n";
+       "| a | b |\n"; "|---|---|\n"; "x"; "  "; "한글 "; "**bold** "; "same\n" |] in
+  let renderer ~width text =
+    Masc_tui_markdown.render_streaming ~palette:Masc_tui_markdown.plain_palette ~width text in
+  let shapes =
+    [ "inline, closing rail", Layout.Origin_inline, Layout.Rail_closes, []
+    ; "row origin", Layout.Origin_row, Layout.Rail_none, []
+    ; "bare, notes", Layout.Origin_bare, Layout.Rail_stands, [ "first note"; "second note" ] ] in
+  List.iteri (fun shape_index (name, origin, turn_rail, diagnostics) ->
+    let cache = Markdown_cache.create ~capacity:4 in
+    let identity = Printf.sprintf "streamed-%d" shape_index in
+    let grown ~(entry : Layout.entry) ~width =
+      let (rows : Markdown_cache.grown) =
+        Markdown_cache.render_growing cache ~theme_revision:1 ~palette_generation:0 ~width
+          ~renderer ~identity ~settled:0 ~text:entry.body in
+      Layout.Body_grown { closed = rows.closed; tail = rows.tail } in
+    let whole ~(entry : Layout.entry) ~width = Layout.Body_whole (renderer ~width entry.body).rows in
+    let text = Buffer.create 1024 in
+    for step = 1 to 200 do
+      Buffer.add_string text pieces.(Random.State.int random (Array.length pieces));
+      let streamed =
+        { (entry Layout.Keeper "alpha" "" (Buffer.contents text)) with turn_rail; diagnostics } in
+      let label what = Printf.sprintf "%s, arrival %d: %s" name step what in
+      let rows markdown =
+        Layout.rows_of_entry ~markdown ~origin ~inner_width:40 ~previous:None streamed in
+      let expected = Layout.For_testing.with_no_kept_rows (fun () -> rows whole) in
+      same_rows (label "rows") expected (rows grown);
+      List.iter (fun height ->
+        let window markdown =
+          Layout.clamped_scrolled_rows ~markdown ~origin ~inner_width:40 ~height ~requested:0
+            [ streamed ] in
+        let expected = Layout.For_testing.with_no_kept_rows (fun () -> window whole) in
+        let actual = window grown in
+        same_rows (label (Printf.sprintf "window of %d" height)) expected.rows actual.rows;
+        check bool (label (Printf.sprintf "positions in a window of %d" height)) true
+          (expected.body_positions = actual.body_positions))
+        [ 2; 3; 5; 8 ]
+    done) shapes
 
 (* The byte-by-byte scans the link readers used, kept here as the answer the
    jumping search must give. *)
@@ -1131,6 +1198,10 @@ let () =
         ; test_case "trailing blank lines draw no rows" `Quick
             test_trailing_blank_lines_draw_no_rows
         ; test_case "diagnostics follow the body" `Quick test_diagnostics_follow_the_body
+        ; test_case "a streamed body lays out what its whole text lays out" `Quick
+            test_a_streamed_body_lays_out_what_its_whole_text_lays_out
+        ; test_case "an open block draws only its new rows" `Quick
+            test_an_open_block_draws_only_its_new_rows
         ; test_case "a live edge window counts every row it hides" `Quick
             test_a_live_edge_window_counts_every_row_it_hides
         ; test_case "window positions name the rows shown" `Quick

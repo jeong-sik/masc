@@ -17,6 +17,18 @@
 
 type 'identity t
 
+type grown = { closed : string Masc_tui_closed_rows.prefix; tail : string list }
+(** A growing render's rows: those its blocks closed, which every later render
+    of the same key keeps at the same index, and the rows after them. *)
+
+type block_table
+(** Every block's first source byte with the first row it draws, in source
+    order. *)
+
+val block_count : block_table -> int
+val block : block_table -> int -> int * int
+val block_table_to_array : block_table -> (int * int) array
+
 val create : capacity:int -> 'identity t
 (** Create a cache retaining at most [capacity] completed entries and, in a
     separate bound, at most [capacity] growing entries and [capacity] measured
@@ -56,7 +68,7 @@ val completed_blocks :
   width:int ->
   identity:'identity ->
   text:string ->
-  (int * int) array option
+  block_table option
 (** [Some blocks] when {!render_keeping_blocks} retained exactly [text] for
     [identity] with these visual fields: every block's first source byte with
     the first row it draws, as {!Masc_tui_markdown.streaming_render} gives
@@ -72,7 +84,7 @@ val render_growing :
   identity:'identity ->
   settled:int ->
   text:string ->
-  string list
+  grown
 (** Render a source snapshot with an append-sensitive suffix.
 
     [settled] is the caller's promise that the first [settled] bytes of
@@ -92,7 +104,7 @@ val growing_blocks :
   width:int ->
   identity:'identity ->
   text:string ->
-  (int * int) array option
+  block_table option
 (** [Some blocks] when the growing entry [identity] last rendered exactly
     [text] with these visual fields: every block's first source byte with the
     first row it draws. [None] when nothing for [text] is retained. *)

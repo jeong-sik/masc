@@ -352,27 +352,35 @@ let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
       match entry.markdown_source with
       | Message_layout.Markdown_stable
           { keeper_name; request_id; observed_at; entry_index } ->
-          Markdown_cache.render_keeping_blocks chat_markdown_cache
-            ~theme_revision:chat_markdown_theme_revision
-            ~palette_generation ~width ~renderer:(chat_markdown_streaming ~context)
-            ~identity:(stable_markdown_identity entry ~keeper_name ~request_id
-              ~observed_at ~entry_index)
-            ~text:body
+          Message_layout.Body_whole
+            (Markdown_cache.render_keeping_blocks chat_markdown_cache
+               ~theme_revision:chat_markdown_theme_revision
+               ~palette_generation ~width ~renderer:(chat_markdown_streaming ~context)
+               ~identity:(stable_markdown_identity entry ~keeper_name ~request_id
+                 ~observed_at ~entry_index)
+               ~text:body)
       | Message_layout.Markdown_growing
           { keeper_name; request_id; entry_index; growth } ->
-          Markdown_cache.render_growing chat_markdown_cache
-            ~theme_revision:chat_markdown_theme_revision
-            ~palette_generation ~width
-            ~renderer:(chat_markdown_streaming ~context)
-            ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index ~growth)
-            ~settled:(settled_bytes growth)
-            ~text:body
+          let (grown : Markdown_cache.grown) =
+            Markdown_cache.render_growing chat_markdown_cache
+              ~theme_revision:chat_markdown_theme_revision
+              ~palette_generation ~width
+              ~renderer:(chat_markdown_streaming ~context)
+              ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index ~growth)
+              ~settled:(settled_bytes growth)
+              ~text:body
+          in
+          Message_layout.Body_grown { closed = grown.closed; tail = grown.tail }
       | Message_layout.Markdown_streaming ->
-          chat_markdown ~context ~width body)
+          Message_layout.Body_whole (chat_markdown ~context ~width body))
   in
   (* A cached render's own list, uncopied when there is no journal, so the
      layout's kept rows recognise it by identity. *)
-  match journal with [] -> body_rows | _ :: _ -> body_rows @ journal
+  match journal, body_rows with
+  | [], (Message_layout.Body_whole _ | Message_layout.Body_grown _) -> body_rows
+  | _ :: _, Message_layout.Body_whole rows -> Message_layout.Body_whole (rows @ journal)
+  | _ :: _, Message_layout.Body_grown { closed; tail } ->
+      Message_layout.Body_grown { closed; tail = tail @ journal }
 
 
 type mapped_chat_body = { mapped_rows : string list; runs : Search.run list; unavailable : bool }
@@ -4465,22 +4473,23 @@ let block_at blocks ~key value =
     if high - low <= 1 then low
     else
       let middle = (low + high) / 2 in
-      if key blocks.(middle) <= value then search middle high else search low middle in
-  if Array.length blocks = 0 || key blocks.(0) > value then None
-  else Some (search 0 (Array.length blocks))
+      if key (Markdown_cache.block blocks middle) <= value then search middle high else search low middle in
+  let count = Markdown_cache.block_count blocks in
+  if count = 0 || key (Markdown_cache.block blocks 0) > value then None
+  else Some (search 0 count)
 
 (* One block of an entry's body, read alone. Another block follows from the
    byte after the newline that ends this one; without that newline the bytes
    draw this block's rows and no more. *)
 let block_source_index ~theme ~width ~body_identity (entry : Message_layout.entry) blocks block =
-  let source_start, row_start = blocks.(block) in
+  let source_start, row_start = Markdown_cache.block blocks block in
   let source_end =
-    if block + 1 >= Array.length blocks then String.length entry.body
+    if block + 1 >= Markdown_cache.block_count blocks then String.length entry.body
     else
       (* [next] is at least 1: the render cache keeps only blocks that start
          in source order from byte 0 or later, so a second block starts past
          byte 0. *)
-      let next = fst blocks.(block + 1) in
+      let next = fst (Markdown_cache.block blocks (block + 1)) in
       if Char.equal entry.body.[next - 1] '\n' then next - 1 else next in
   let body_rows, runs = search_chat_markdown_range ~theme ~entry ~width ~body_identity
     ~source_start ~source_end ~row_start in
@@ -4782,7 +4791,7 @@ type chat_search_plan = {
   search_reasoning:reasoning_visibility;
   search_tools:tool_visibility;
   search_memory:memory_visibility;
-  search_markdown:entry:Message_layout.entry -> width:int -> string list;
+  search_markdown:entry:Message_layout.entry -> width:int -> Message_layout.body_lines;
   search_theme:Chat_theme.snapshot;
   search_dress:Masc_tui_markdown_theme.dress;
     (** The Markdown codes read on the UI domain; the worker renders with
@@ -4924,7 +4933,7 @@ let build_search_candidate render ~cards = function
     let body=search_chat_markdown ~link_previews_mode:render.render_mode
       ~theme:render.render_theme ~dress:render.render_dress ~cards ~entry ~width in
     mapped:=Some body;
-    body.mapped_rows in
+    Message_layout.Body_whole body.mapped_rows in
   let rows=Message_layout.rows_of_entry ~markdown:observe ~origin:render.render_origin
     ~inner_width:render.render_inner_width ~previous:source.source_previous source.source_entry in
   match !mapped with

@@ -1137,7 +1137,7 @@
  ; masc_tui_frame for the margin the chat composer's caret and the chat
  ; pane's width gate count from.
  ; masc_tui_value for the ladder of a length that is still going.
- (libraries masc_string_util masc_tui_frame masc_tui_value uucp uuseg))
+ (libraries masc_string_util masc_tui_closed_rows masc_tui_frame masc_tui_value uucp uuseg))
 
 (library
  (name masc_tui_hint_lines)
@@ -1230,7 +1230,7 @@
  (name masc_tui_markdown_render_cache)
  (wrapped false)
  (modules masc_tui_markdown_render_cache)
- (libraries masc_tui_lru masc_tui_markdown))
+ (libraries masc_tui_closed_rows masc_tui_lru masc_tui_markdown))
 
 (library
  (name masc_tui_send_disposition)

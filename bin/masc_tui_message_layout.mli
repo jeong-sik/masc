@@ -934,8 +934,16 @@ val inbound_indent : entry -> int
     a bar in the sender's colour down that block's left edge. Zero for every
     other style. *)
 
+type body_lines =
+  | Body_whole of string list
+      (** Every line of the body. *)
+  | Body_grown of { closed : string Masc_tui_closed_rows.prefix; tail : string list }
+      (** A streamed body: the lines its renderer closed, which a later
+          arrival keeps at the same index, and the lines after them. *)
+(** A body's lines as a Markdown renderer hands them to the layout. *)
+
 val rows_of_entry :
-  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?markdown:(entry:entry -> width:int -> body_lines) ->
   ?origin:origin_display ->
   inner_width:int -> previous:entry option -> entry -> row list
 (** The exact physical rows of one entry, including its metadata and body.
@@ -954,7 +962,7 @@ val rows_of_entry :
     the same indices, except at either body's last index. *)
 
 val visible_rows :
-  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?markdown:(entry:entry -> width:int -> body_lines) ->
   ?origin:origin_display ->
   inner_width:int ->
   height:int ->
@@ -977,7 +985,7 @@ val visible_rows :
     against a different height than it draws. *)
 
 val total_rows :
-  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?markdown:(entry:entry -> width:int -> body_lines) ->
   ?origin:origin_display ->
   ?previous:entry ->
   inner_width:int ->
@@ -988,7 +996,7 @@ val total_rows :
     before a suffix, so the suffix does not invent a duplicate hour rail. *)
 
 val scrolled_rows :
-  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?markdown:(entry:entry -> width:int -> body_lines) ->
   ?origin:origin_display ->
   inner_width:int ->
   height:int ->
@@ -1003,7 +1011,7 @@ val scrolled_rows :
     back, every row is already whole, and the window is a plain slice. *)
 
 val clamp_scroll :
-  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?markdown:(entry:entry -> width:int -> body_lines) ->
   ?origin:origin_display ->
   inner_width:int ->
   height:int ->
@@ -1030,7 +1038,7 @@ type scroll_window = {
 }
 
 val clamped_scrolled_rows :
-  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?markdown:(entry:entry -> width:int -> body_lines) ->
   ?origin:origin_display ->
   ?from_oldest:int ->
   inner_width:int ->
@@ -1052,7 +1060,7 @@ val clamped_scrolled_rows :
     original body owner and are omitted. *)
 
 val scroll_for_body_row :
-  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?markdown:(entry:entry -> width:int -> body_lines) ->
   ?origin:origin_display ->
   inner_width:int -> entry_index:int -> body_row:int -> entry list -> int option
 (** Number of physical rows after this body row, using the same layout and
@@ -1060,7 +1068,7 @@ val scroll_for_body_row :
     exists. Counts only the newer suffix, not the entire conversation. *)
 
 val max_scroll :
-  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?markdown:(entry:entry -> width:int -> body_lines) ->
   ?origin:origin_display ->
   inner_width:int ->
   height:int ->

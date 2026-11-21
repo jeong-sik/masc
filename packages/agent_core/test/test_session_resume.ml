@@ -960,12 +960,39 @@ let test_binding_source_change_respects_active_replay () =
   (match validate target (base @ [Types.user_msg "next query"]) with
    | Ok _ -> () | Error error -> Alcotest.fail (Binding_projection.error_to_string error));
   let all_history = binding_provider ~model:"other-model" "https://target.example" in
-  rejected (validate all_history (base @ [Types.user_msg "next query"]));
+  (* A closed prior turn is stripped, not refused: reasoning_history_projection.mli:144
+     and docs/design/living-memory-and-context-cycle.md:108 both say foreign
+     reasoning strictly before the latest caller query is cleanly excluded under
+     [Exclude_unselected] at [Provider_dispatch], and
+     reasoning_history_projection.ml:980 pins that this holds even for targets
+     that replay every assistant message. What the caller needs back is the
+     producer's identity, not a refusal. *)
+  let admitted_as_exclusion label = function
+    | Ok {Binding_projection.disposition=Binding_projection.Source_change_admitted drops; _} ->
+      Alcotest.(check bool) label true
+        (List.exists
+           (fun (drop : Binding_projection.reasoning_replay_drop) ->
+              drop.message_index = 1
+              &&
+              (match drop.reason with
+               | Binding_projection.Incompatible_reasoning_source stored ->
+                 Binding_source.equal stored (binding_source original)
+               | Binding_projection.Replay_policy_excluded _
+               | Binding_projection.Missing_reasoning_source
+               | Binding_projection.Reasoning_on_non_assistant -> false))
+           drops)
+    | Ok _ -> Alcotest.fail (label ^ ": expected an admitted source change")
+    | Error error -> Alcotest.fail (Binding_projection.error_to_string error)
+  in
+  admitted_as_exclusion "all-history target strips a closed prior turn"
+    (validate all_history (base @ [Types.user_msg "next query"]));
   let opaque = binding_provider ~model:"other-model" ~path:"/v1/responses" "https://target.example" in
-  rejected (validate opaque (base @ [Types.user_msg "next query"]));
+  admitted_as_exclusion "opaque target strips a closed prior turn"
+    (validate opaque (base @ [Types.user_msg "next query"]));
   let request_tools = binding_provider ~model:"other-model"
       ~replay:Llm_provider.Capabilities.Force_preserve_with_request_tools "https://target.example" in
-  rejected (validate request_tools (base @ [Types.user_msg "next query"]));
+  admitted_as_exclusion "request-tools target strips a closed prior turn"
+    (validate request_tools (base @ [Types.user_msg "next query"]));
   (* Anthropic selects every assistant but requires thinking back only in
      the exchange the latest caller query opened. *)
   let anthropic = anthropic_target () in
@@ -1047,7 +1074,24 @@ let test_binding_source_change_uses_effective_request_tools () = with_net (fun n
     let tool=Tool.create ~name:"inspect" ~description:"Inspect" ~parameters:[] (fun _ ->
       incr tool_calls;Ok {Types.content="unexpected re-execution";content_blocks=None;_meta=None}) in
     List.iter (fun stream ->
-      List.iter (fun (has_tools,initial_choice,hook_choice,blocked) ->
+      List.iteri (fun row (has_tools,initial_choice,hook_choice,tools_on_wire) ->
+        (* [tools_on_wire] is the effective request's tool presence: the caller's
+           tool list, after the hook's final [tool_choice], still leaves tools on
+           the wire (backend_openai_request.ml:156 [effective_tools],
+           complete_common.ml:660 [request_tools_present]). It is derived here
+           instead of written by hand, so a row whose label disagrees with that
+           definition fails loudly. *)
+        (let final_choice =
+           match hook_choice with Some choice -> Some choice | None -> initial_choice in
+         let derived =
+           has_tools
+           && (match final_choice with
+               | Some Types.None_ -> false
+               | Some (Types.Auto | Types.Any | Types.Tool _) | None -> true)
+         in
+         Alcotest.(check bool)
+           (Printf.sprintf "row %d: tools_on_wire matches the effective request" row)
+           true (derived = tools_on_wire));
         let config={ (Types.default_config ~model:target.model_id) with
           max_tokens=Some 64;tool_choice=initial_choice } in
         let hooks={Hooks.empty with before_turn_params=Some (function
@@ -1084,13 +1128,17 @@ let test_binding_source_change_uses_effective_request_tools () = with_net (fun n
         (
           let outcome=if stream then Agent.run_stream ~sw ~on_event:ignore agent "new query"
             else Agent.run ~sw agent "new query" in
-          (match blocked,outcome with
+          (match tools_on_wire,outcome with
            | true,Error (Error.Api (Llm_provider.Retry.InvalidRequest
                {reason=Llm_provider.Retry.Attempt_rejected;_})) -> ()
            | false,Ok _ -> ()
            | _,Error error -> Alcotest.fail (Error.to_string error)
-           | true,Ok _ -> Alcotest.fail "foreign mandatory replay reached a tool-bearing request");
-          Alcotest.(check int) "only admitted requests reach transport" (if blocked then 0 else 1) !requests;
+           | true,Ok _ ->
+             Alcotest.fail
+               (Printf.sprintf
+                  "row %d: foreign mandatory replay reached a tool-bearing request" row));
+          Alcotest.(check int) "only admitted requests reach transport"
+            (if tools_on_wire then 0 else 1) !requests;
           Alcotest.(check bool) "canonical foreign reasoning remains" true
             (List.mem foreign (Agent.state agent).messages);
           Alcotest.(check bool) "source checkpoint remains unchanged" true (before=Checkpoint.to_json cp))

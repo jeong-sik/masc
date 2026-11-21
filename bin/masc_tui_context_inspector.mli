@@ -209,15 +209,6 @@ type forecast_carried_origin =
   | Carried_covered of { end_atom : int }
       (** The Memory writer's read end in this history: the atoms before
           [end_atom] are in Memory and are not sent again. *)
-  | Carried_past_librarian_point of
-      { librarian_end_atom : int
-      ; front : forecast_carried_origin
-            (** One of the carried constructors above: where the start the
-                provider accepted came from. *)
-      }
-      (** The Librarian point is [librarian_end_atom] and the range opens at
-          a start the provider accepted: past the point, or behind it while
-          the window stays. *)
 
 type forecast_carried =
   { first_atom : int

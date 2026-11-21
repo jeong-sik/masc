@@ -342,33 +342,6 @@ let test_typesafeai_payment_refusal_reaches_the_operator () =
     reasons
 ;;
 
-let test_typed_original_observation_survives_rollup () =
-  let module A = Masc.Operator_action_reason in
-  let module P = Masc.Keeper_librarian_pending in
-  let worker : P.worker =
-    {installation_id="original-installation"; request_id="original-request"; wait=P.Missing_after_dispatch} in
-  let action = A.memory_attention ~keeper:"keeper-a" ~durable:(Some (P.Worker worker))
-      ~admission:None ~measured_at:(Some 123.) in
-  let r = rollup ~sections:["keeper_memory_attention", `Assoc
-    ["status", `String "degraded"; "operator_action_required", `Bool true;
-     "operator_action_reasons", `List [`String action.reason];
-     "operator_actions", `List [A.to_json action]]] () in
-  check bool "original request, Keeper and observation clock survive" true
-    (match r.R.operator_actions with [held] -> A.equal held action | _ -> false);
-  check (list string) "raw diagnostics derive from the same item"
-    [A.diagnostic action] r.operator_action_reasons;
-  check bool "the structured collection is copied into the cheap health probe" true
-    (List.mem "operator_actions" R.operator_field_names);
-  let changed = match A.to_json action with
-    | `Assoc fields -> `Assoc (("keeper_id", `String "different-keeper") :: List.remove_assoc "keeper_id" fields)
-    | _ -> Alcotest.fail "the action is an object" in
-  check bool "a changed target cannot borrow the original diagnostic" true
-    (Result.is_error (A.of_json changed));
-  let failed = A.memory_attention ~keeper:"keeper-a" ~durable:None
-      ~admission:(Some (P.Admission_failed "pass refused")) ~measured_at:None in
-  check bool "a failed admission pass survives the operator-action wire" true
-    (match A.of_json (A.to_json failed) with Ok held -> A.equal held failed | Error _ -> false)
-
 let test_queue_action_preserves_ambiguous_ownership () =
   let module A = Masc.Operator_action_reason in
   let owner name count = `Assoc ["keeper_name",`String name; "pending_count",`Int count] in
@@ -389,8 +362,6 @@ let () =
     [ ( "reach"
       , [ test_case "a listed grade moves the status" `Quick
             test_listed_grade_moves_the_status
-        ; test_case "typed original observation survives rollup" `Quick
-            test_typed_original_observation_survives_rollup
         ; test_case "queue action preserves ambiguous ownership" `Quick
             test_queue_action_preserves_ambiguous_ownership
         ; test_case "an unlisted section is not reached" `Quick

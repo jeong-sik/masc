@@ -1394,6 +1394,8 @@
   (setenv MASC_TEST_CHECKPOINT_PURGE_EXE %{dep:../bin/masc_checkpoint_purge.exe}
    (run %{test}))))
 
+(include stanzas/test_keeper_checkpoint_purge_librarian_stores.inc)
+
 (test
  (name test_exec_dispatch_file_redirect)
  (modules test_exec_dispatch_file_redirect)
@@ -2380,6 +2382,8 @@
  (modules test_server_health_rollup)
  (libraries alcotest masc masc_server yojson))
 
+(include stanzas/test_server_health_rollup_librarian_pending.inc)
+
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.
 (test
@@ -2799,6 +2803,7 @@
 
 (include stanzas/test_keeper_list_truncation.inc)
 (include stanzas/test_keeper_portrait.inc)
+(include stanzas/test_keeper_purge_turn_log_librarian_progress.inc)
 
 (include stanzas/test_keeper_census_outputs.inc)
 (include stanzas/test_keeper_shim_fleet.inc)
@@ -3337,6 +3342,7 @@
 (include stanzas/test_keeper_latched_reason.inc)
 
 (include stanzas/test_keeper_execution_join.inc)
+(include stanzas/test_keeper_external_attention_librarian_sources.inc)
 (include stanzas/test_full_health_wakeup.inc)
 (include stanzas/test_proactive_refresh_changes.inc)
 (include stanzas/test_server_observation_input.inc)
@@ -3457,6 +3463,7 @@
 (include stanzas/test_keeper_task_outcomes.inc)
 (include stanzas/test_task_outcome_measurement.inc)
 (include stanzas/test_keeper_store_boot_reconcile.inc)
+(include stanzas/test_keeper_store_boot_reconcile_admission_preflight.inc)
 
 (include stanzas/test_keeper_task_create_typed_failure.inc)
 
@@ -3593,6 +3600,7 @@
 
 (include stanzas/test_keeper_official_argument_window.inc)
 (include stanzas/test_keeper_official_client_host.inc)
+(include stanzas/test_keeper_official_client_host_continuity_observation.inc)
 (include stanzas/test_official_client_canonical_source_digest.inc)
 (include stanzas/test_official_client_result_time.inc)
 (include stanzas/test_keeper_tool_definition_source.inc)
@@ -3699,6 +3707,7 @@
 (include stanzas/test_event_bus_subscription_contract.inc)
 
 (include stanzas/test_tool_diversity.inc)
+(include stanzas/test_tool_blob_store_librarian_input_capture.inc)
 
 (include stanzas/test_tool_help_registry_shard_coverage_10101.inc)
 
@@ -4290,6 +4299,8 @@
  (modules test_tui_measurement)
  (libraries alcotest  masc.agent_core.digest masc masc_tui_types yojson))
 
+(include stanzas/test_tui_measurement_continuity_report.inc)
+
 (test
  (name test_tui_terminal_json)
  (modules test_tui_terminal_json)
@@ -4550,6 +4561,8 @@
  masc_tui_message_layout
  masc_tui_types
  unix))
+
+(include stanzas/test_tui_agenda_librarian_pending.inc)
 
 (test
  (name test_tui_message_input)
@@ -4867,6 +4880,8 @@
   masc_tui_keeper_axis_cell
   masc_tui_keeper_memory_reading))
 
+(include stanzas/test_tui_keeper_memory_reading_librarian_pending.inc)
+
 (test
  (name test_tui_editor)
  (modules test_tui_editor)
@@ -5020,6 +5035,8 @@
   masc_tui_theme
   masc_tui_types  unix
 ))
+
+(include stanzas/test_tui_render_memory_librarian_pending.inc)
 
 (test
  (name test_tui_memory_lineage)
@@ -5479,6 +5496,7 @@
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
+(include stanzas/test_keeper_turn_fragments_librarian_range.inc)
 (include stanzas/test_keeper_turn_spend.inc)
 (include stanzas/test_keeper_cost_coverage.inc)
 (include stanzas/test_keeper_cost_observation.inc)
@@ -5552,6 +5570,7 @@
 
 (include stanzas/test_keeper_prompt_capture.inc)
 (include stanzas/test_keeper_provider_input_snapshot.inc)
+(include stanzas/test_keeper_provider_input_snapshot_continuity_export.inc)
 (include stanzas/test_keeper_store_locations.inc)
 (include stanzas/test_keeper_projection_change.inc)
 (include stanzas/test_keeper_cache_outcome.inc)
@@ -6313,6 +6332,7 @@
 (include stanzas/test_browser_interaction.inc)
 
 (include stanzas/test_keeper_nerdctl_image_admission.inc)
+(include stanzas/test_keeper_next_request_forecast_turn_boundaries_and_progress.inc)
 
 (include stanzas/test_keeper_kata_inventory.inc)
 (include stanzas/test_keeper_kata_vmm_identity.inc)

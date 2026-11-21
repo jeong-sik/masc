@@ -39,6 +39,26 @@ def validate_run(run, repo, commit, run_id):
     require(run['status'] == 'completed' and run['conclusion'] == 'success', 'Release candidate verification has not succeeded')
 
 
+def check_tag_ancestor(repo, commit, main='main'):
+    """A release tag must name a commit main already contains.
+
+    v0.77.0 was tagged on a release bump that never reached main: the same
+    bump landed on main as a different commit (#54183), so
+    `git merge-base --is-ancestor v0.77.0 origin/main` answers 1 and
+    `git describe`/release-note ranges split. Publishing a tag whose commit is
+    not a main ancestor is refused here, before anything is staged.
+    """
+    comparison = api(repo, f'compare/{commit}...{main}')
+    behind = comparison['behind_by']
+    ahead = comparison['ahead_by']
+    require(
+        behind == 0,
+        f'version tag commit {commit} is not an ancestor of {main}: '
+        f'compare {commit}...{main} reports behind_by={behind}, ahead_by={ahead}; '
+        f'`git merge-base --is-ancestor {commit} origin/{main}` would exit 1, '
+        f'so a tag here would not be a main ancestor')
+
+
 def check_tag(repo, tag, commit):
     require(tag.startswith('v') and '/' not in tag, 'Expected a version tag')
     obj = api(repo, f'git/ref/tags/{tag}')['object']
@@ -48,6 +68,7 @@ def check_tag(repo, tag, commit):
         seen.add(obj['sha'])
         obj = api(repo, f"git/tags/{obj['sha']}")['object']
     require(obj['type'] == 'commit' and obj['sha'] == commit, 'Version tag target changed')
+    check_tag_ancestor(repo, commit)
 
 
 def checked_run(repo, commit, run_id, tag):

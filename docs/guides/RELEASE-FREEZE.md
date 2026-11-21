@@ -106,3 +106,7 @@ Selective backporting follows [GitLab's cherry-pick documentation](https://docs.
 Published artifact integrity follows [GitHub's immutable release model](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases);
 repository immutability settings are not asserted or changed by this document.
 Sources checked 2026-10-04 KST; confidence High.
+
+## A release tag must name a main ancestor
+
+Tag only a commit `origin/main` already contains, and make the version bump commit on main (a merged PR), never on a side branch that is not merged back. `scripts/ci/prepare-release-publication.py` refuses a tag whose commit is not an ancestor of `main` (`git merge-base --is-ancestor <tag-target> origin/main` exits 1), because v0.77.0 was tagged on a bump that reached main as a different commit (#54183).

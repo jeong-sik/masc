@@ -1051,8 +1051,16 @@ let test_board_list_route_and_projection_share_the_kept_page () =
     check int ("post accepted: " ^ title) 201 status
   in
   let path = "/api/v1/board?sort_by=recent" in
+  (* The route reads as the token's own reader. An Admin credential is one
+     person's, so since D1 that reader is [Workspace_member] of the credential's
+     agent, not [Operator]; the projection has to ask as the same reader or it
+     lands on a different cache entry. *)
+  let reader =
+    Masc_board_handlers.Board_access.Workspace_member
+      { actor_id = "list-reader"; owned_keeper_ids = [] }
+  in
   let page ?(reaction_actor = Some "list-reader") ?(target = path) () =
-    Server_board_list_http.payload ~reader:Masc_board_handlers.Board_access.Operator ~config ~reaction_actor
+    Server_board_list_http.payload ~reader ~config ~reaction_actor
       (Httpun.Request.create `GET target)
   in
   let route_titles () =
@@ -1104,8 +1112,11 @@ let test_board_list_timeout_cannot_be_not_modified () =
      exact route entry includes both the workspace and authenticated actor;
      a key mismatch returns a normal Board page and fails the wire checks. *)
   let actor = "timeout-reader" in
+  (* An Admin credential is a workspace member since D1, so the cache key names
+     that member and its (empty) Keeper list instead of [operator]. *)
   let key = Printf.sprintf
-    "board:list:operator:%d:%s:-:recent:false:false:-:50:0:%d:%s:%d:%s"
+    "board:list:member:%d:%s|keepers:0::%d:%s:-:recent:false:false:-:50:0:%d:%s:%d:%s"
+    (String.length actor) actor
     (String.length config.Masc.Workspace.base_path) config.base_path
     (String.length actor) actor
     (String.length actor) actor in
@@ -1130,7 +1141,11 @@ let test_board_list_timeout_cannot_be_not_modified () =
     check string "matching timeout still carries its evidence" payload.raw_json body)
     ["builder timeout"; String.make 9000 'x'];
   Dashboard_cache.invalidate_all ();
-  let payload = Server_board_list_http.payload ~reader:Masc_board_handlers.Board_access.Operator ~config ~reaction_actor:(Some actor)
+  let payload = Server_board_list_http.payload
+    ~reader:
+      (Masc_board_handlers.Board_access.Workspace_member
+         { actor_id = actor; owned_keeper_ids = [] })
+    ~config ~reaction_actor:(Some actor)
     (Httpun.Request.create `GET "/api/v1/board?sort_by=recent") in
   let status, body = read ~etag:payload.etag () in
   check int "a successful unchanged Board page is still 304" 304 status;
@@ -1896,7 +1911,11 @@ let test_direct_board_http_readership_and_cache () =
   let recipient = worker "direct-reader" in
   let outsider = worker "outside-reader" in
   let create ~title ~body ~visibility =
-    match Board_dispatch.create_post ~author:"direct-operator" ~content:body
+    (* The Direct post is authored by the recipient, not by the Admin whose token
+       reads the list. An author always reads their own Direct post, so an
+       Admin-authored one would still be returned and the assertion below would
+       be asking for something the design never promised. *)
+    match Board_dispatch.create_post ~author:"direct-reader" ~content:body
         ~title ~body ~visibility ~hearth:title ~post_kind:Board.Human_post () with
     | Ok post -> post
     | Error error -> fail (Board.Post_publication_failure.to_string error)

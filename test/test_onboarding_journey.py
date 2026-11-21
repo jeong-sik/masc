@@ -445,6 +445,10 @@ class Journey(StepByStep):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             receipt = json.loads(result.stdout)
             self.assertFalse(receipt['invocation_verified'])
+            # The account command reports a failed catalog read as an empty
+            # `catalog.models` plus `catalog_error`; indexing first turns that
+            # into a bare IndexError that names neither the cause nor the path.
+            self.assertIsNone(receipt.get('catalog_error'), receipt)
             self.assertEqual(receipt['catalog']['models'][0]['id'], 'account-only-id')
             selected = Path(receipt['credential_file'])
             self.assertNotEqual(selected, original)

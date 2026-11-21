@@ -1882,7 +1882,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                               refuses one, and the execution kind is the cell
                               just before. *)
                            ++ Option.fold (string_field "request_id")
-                                ~none:(Say.both ~ko:"없음" ~en:"none")
+                                ~none:(Say.code Masc_tui_theme.Glyph.no_value)
                                 ~some:Say.as_received
                          ; (Theme.recede ()),
                            Say.code "       parent tool use="
@@ -2145,7 +2145,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                let scoped_summary = scoped.summary in
                let runtime_counts values =
                  match values with
-                 | [] -> Say.both ~ko:"없음" ~en:"none"
+                 | [] -> Say.code Masc_tui_theme.Glyph.no_value
                  | values ->
                    values
                    |> List.map
@@ -2447,7 +2447,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
     let registered_rows = Tool_tree.rows registered_tools in
     let surfaces_text (tool : Masc.Tui_decode_tools.tool_entry) =
       match tool.tl_surfaces with
-      | [] -> Say.both ~ko:"없음" ~en:"none"
+      | [] -> Say.code Masc_tui_theme.Glyph.no_value
       | names -> Say.as_received (Terminal_text.single_line (String.concat ", " names))
     in
     (* The SURFACES column is as wide as its widest reading, so the layout is

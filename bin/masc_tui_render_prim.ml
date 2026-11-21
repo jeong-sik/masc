@@ -7507,12 +7507,12 @@ let context_inspector_content_lines ~cols state : context_pane_body =
   let runtime_details id =
     match state.runtime_catalog_reading with
     | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
-      let notice = match state.runtime_catalog_reading with
-        | Runtime_catalog_read -> []
-        | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
+      let notice = match Masc_tui_types.runtime_catalog_standing state.runtime_catalog_reading with
+        | Catalog_retained _ ->
             [Masc_tui_types.runtime_catalog_reading_suffix ~ko
                state.runtime_catalog_reading]
-        | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
+        | Catalog_current | Catalog_unread | Catalog_first_read
+        | Catalog_first_read_failed _ -> [] in
       notice @ (match List.find_opt (fun (r:Tui_decode.runtime_option) -> String.equal r.ro_id id) state.runtime_catalog with
        | None ->
            [ say "현재 카탈로그에서 연결·모델 설정을 찾을 수 없습니다"

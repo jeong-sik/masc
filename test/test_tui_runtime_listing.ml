@@ -1232,6 +1232,23 @@ let keeper_drawn ?(terminal_rows = keeper_picker_rows) state =
       Option.map runtime_pick_item_id (List.nth_opt view.Masc_tui_pick_list.rows row)),
     view )
 
+(* A read in flight is the reading slot's to say. The catalogue it re-reads
+   stands as the settled state that holds the same observation, so every
+   screen that reads the standing reads the same thing with or without the
+   read. The first read has no observation to stand as, so it stays apart. *)
+let test_a_read_in_flight_stands_as_its_settled_twin () =
+  let standing_is expected what a b =
+    Alcotest.(check bool) what expected
+      (runtime_catalog_standing a = runtime_catalog_standing b) in
+  standing_is true "a re-read of a catalogue that was read"
+    Runtime_catalog_read (Runtime_catalog_refreshing None);
+  standing_is true "a re-read of a catalogue kept after a failed read"
+    (Runtime_catalog_stale "offline") (Runtime_catalog_refreshing (Some "offline"));
+  standing_is false "the first read is not a re-read"
+    Runtime_catalog_loading (Runtime_catalog_refreshing None);
+  standing_is false "a kept catalogue is not a read one"
+    Runtime_catalog_read (Runtime_catalog_stale "offline")
+
 let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
   let state = keeper_picker_state () in
   let rows, selected, view = keeper_drawn state in
@@ -1485,4 +1502,6 @@ let () = Alcotest.run "runtime list geometry"
           test_default_lane_route_counts_unassigned_keepers
         ;Alcotest.test_case "a last runtime id joins the catalog by equality" `Quick
           test_a_last_runtime_id_joins_the_catalog_by_equality
+        ;Alcotest.test_case "a read in flight stands as its settled twin" `Quick
+          test_a_read_in_flight_stands_as_its_settled_twin
         ;]]

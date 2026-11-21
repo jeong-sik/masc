@@ -19,10 +19,23 @@ file, so merging one does not make the other conflict.
 - `python3 scripts/changelog-fragments.py check` validates the fragments. On a
   pull request the required `changes` check validates the fragments that pull
   request adds or edits, and a malformed one blocks the merge.
-- At release, `scripts/bump-version.sh` runs
-  `python3 scripts/changelog-fragments.py assemble`, which folds every
-  fragment into `## [Unreleased]` of `CHANGELOG.md` (grouped by section, in
-  pull request order, duplicates dropped) and deletes the fragments.
+- At release, `scripts/bump-version.sh` adds the `## [<version>]` section and
+  runs `python3 scripts/changelog-fragments.py assemble --into <version>`,
+  which folds every fragment — together with anything still sitting in
+  `## [Unreleased]` — into that section of `CHANGELOG.md` (bullets appended
+  within their section, duplicates dropped, existing headings and their order
+  untouched) and deletes the fragments. One run reaches the release section;
+  nothing is moved by hand. Plain `assemble` (no `--into`) still folds into
+  `## [Unreleased]`, and `assemble --into <version>` also serves a backfill:
+  to fold late fragments straight into an already-shipped section, delete the
+  fragments that release already folded first (below).
+- `python3 scripts/changelog-fragments.py folded` lists fragments whose pull
+  request already owns an entry in `CHANGELOG.md` — a terminal `(#<number>)`
+  citation, which a passing mention inside another entry never is. A release
+  that folds on its own branch and lands back on main as a squash leaves
+  main's fragment files behind; assembling them again would duplicate their
+  entries, so `bump-version.sh` refuses to fold while any remain.
+  `folded --delete` removes exactly those files.
 
 
 ## Fragment exemptions

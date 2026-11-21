@@ -19,7 +19,19 @@ Exempt fragments satisfy `missing --strict` without touching a shared file, and
 
 Modes:
   check [--dir D]                      refuse a malformed fragment
-  assemble [--dir D] [--changelog C]   fold fragments into [Unreleased], delete them
+  assemble [--dir D] [--changelog C] [--into V]
+                                       fold fragments into [Unreleased], delete
+                                       them; with --into V, fold them — and
+                                       whatever [Unreleased] still holds —
+                                       into the existing [V] section instead
+  folded [--dir D] [--changelog C] [--delete] [--strict]
+                                       list fragments whose pull request
+                                       already owns an entry in CHANGELOG.md
+                                       (a terminal "(#N)" citation), i.e.
+                                       redundant history a release folded
+                                       elsewhere left behind; --delete removes
+                                       them, --strict exits 3 while any
+                                       remain (exit 3, not 1: a crash is 1)
   missing --base B [--head H] [--dir D] [--strict]  (exit 3 on findings)
                                        list PRs merged since B whose changes
                                        carry no fragment — reported once, at
@@ -77,6 +89,14 @@ VALID_SECTIONS = (*SECTIONS, EXEMPT_SECTION)
 
 FRAGMENT_NAME = re.compile(r"^([1-9][0-9]*)\.md$")
 VERSION_LINE = re.compile(r"(?m)^\(version ([^)]+)\)$")
+# A release heading names its section and may carry a date:
+# "## [Unreleased]" or "## [0.78.0] - 2026-11-21".
+SECTION_HEADING = "## [{}]"
+# The terminal citation of a CHANGELOG entry line: "(#N)" or "(#N, ...)",
+# where N is the entry's owner, optionally closed by sentence punctuation
+# (English entries end "(#N).", Korean ones "(#N)"). A number named inside
+# another entry's text ("fixes #N") is a passing mention, not ownership.
+OWNER_CITE = re.compile(r"\(#([1-9][0-9]*)(?:, [^)]*)?\)\s*[.!]?\s*$")
 
 
 # {section heading: [bullet text]}; a bullet keeps its continuation lines.
@@ -202,19 +222,34 @@ def load_all(directory: pathlib.Path) -> list[tuple[pathlib.Path, Sections]]:
     return loaded
 
 
-def split_unreleased(lines: list[str]) -> tuple[list[str], list[str], list[str]]:
-    """Return (before, unreleased body, after) around the [Unreleased] section.
+def split_section(lines: list[str], heading: str) -> tuple[list[str], list[str], list[str]]:
+    """Return (before, section body, after) around the first `## [<heading>]`.
 
-    The live section is the first `## [` heading of the file. An older
-    `## [Unreleased]` further down is history (one sits under 0.2.x) and is
-    left alone."""
-    releases = [i for i, line in enumerate(lines) if line.startswith("## [")]
-    if not releases or lines[releases[0]].rstrip() != UNRELEASED:
-        raise FragmentError(f"{CHANGELOG}: the first release heading must be '{UNRELEASED}'")
-    start = releases[0]
+    The heading may carry a date ("## [0.78.0] - 2026-11-21"). The section
+    runs to the next `## [` heading. A section of the same name further down
+    (an old `## [Unreleased]` sits under 0.2.x) is history and is left
+    alone."""
+    wanted = re.escape(SECTION_HEADING.format(heading))
+    match = re.compile(rf"^{wanted}(?: - .*)?$")
+    start = next((i for i, line in enumerate(lines) if match.match(line.strip())), None)
+    if start is None:
+        raise FragmentError(f"{CHANGELOG}: no section '{SECTION_HEADING.format(heading)}'")
     end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## [")),
                len(lines))
     return lines[: start + 1], lines[start + 1 : end], lines[end:]
+
+
+def split_unreleased(lines: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """Return (before, unreleased body, after) around the [Unreleased] section.
+
+    The live section is the first `## [` heading of the file; any other
+    heading there is a malformed changelog."""
+    releases = [i for i, line in enumerate(lines) if line.startswith("## [")]
+    if not releases or lines[releases[0]].rstrip() != UNRELEASED:
+        raise FragmentError(f"{CHANGELOG}: the first release heading must be '{UNRELEASED}'")
+    # UNRELEASED carries its own "## [...]" wrapper; split_section wants the
+    # bare section name.
+    return split_section(lines, "Unreleased")
 
 
 def parse_body(body: list[str]) -> tuple[list[str], list[tuple[str, list[str]]]]:
@@ -249,16 +284,30 @@ def normalize(text: str) -> str:
     return " ".join(text.split())
 
 
-def assemble(directory: pathlib.Path, changelog: pathlib.Path) -> int:
+def assemble(directory: pathlib.Path, changelog: pathlib.Path,
+             into: str | None = None) -> int:
     fragments = load_all(directory)
     if not fragments:
         print(f"no fragments in {directory}; {changelog} unchanged")
         return 0
     lines = changelog.read_text(encoding="utf-8").splitlines()
-    before, body, after = split_unreleased(lines)
+    # Both splits run before anything is deleted: a malformed changelog (no
+    # [Unreleased], or no [into] section) leaves every fragment in place.
+    unrel_before, unrel_body, _ = split_unreleased(lines)
+    if into is None:
+        before, body, after = split_unreleased(lines)
+        moved_preamble: list[str] = []
+        moved: list[tuple[str, list[str]]] = []
+    else:
+        # With --into V the fold targets the existing [V] section, and
+        # whatever [Unreleased] still holds moves into it in the same run:
+        # one command, no hand-moved entries.
+        before, body, after = split_section(lines, into)
+        moved_preamble, moved = parse_body(unrel_body)
     release_fragments = [(path, sections) for path, sections in fragments if not is_exempt(sections)]
     exempt_fragments = [path for path, sections in fragments if is_exempt(sections)]
-    if not release_fragments:
+    moved_count = sum(len(bullets) for _, bullets in moved)
+    if not release_fragments and not moved_count:
         for path in exempt_fragments:
             path.unlink()
         print(
@@ -268,42 +317,94 @@ def assemble(directory: pathlib.Path, changelog: pathlib.Path) -> int:
         return 0
     preamble, existing = parse_body(body)
 
-    merged: Sections = {}
-    order: list[str] = []
-    seen: dict[str, set[str]] = {}
-    # A heading repeated in [Unreleased] merges into its first occurrence.
-    sources: list[Sections] = [{name: bullets} for name, bullets in existing]
-    sources += [sections for _, sections in release_fragments]
-    for sections in sources:
-        for name, bullets in sections.items():
-            if name not in merged:
-                merged[name], seen[name] = [], set()
-                order.append(name)
-            for bullet in bullets:
-                key = normalize(bullet)
-                if key not in seen[name]:
-                    seen[name].add(key)
-                    merged[name].append(bullet)
+    if into is None:
+        merged: Sections = {}
+        order: list[str] = []
+        seen: dict[str, set[str]] = {}
+        # A heading repeated in [Unreleased] merges into its first occurrence.
+        sources: list[Sections] = [{name: bullets} for name, bullets in existing]
+        sources += [sections for _, sections in release_fragments]
+        for sections in sources:
+            for name, bullets in sections.items():
+                if name not in merged:
+                    merged[name], seen[name] = [], set()
+                    order.append(name)
+                for bullet in bullets:
+                    key = normalize(bullet)
+                    if key not in seen[name]:
+                        seen[name].add(key)
+                        merged[name].append(bullet)
 
-    # Headings follow the vocabulary order; a heading outside it keeps its
-    # place after them.
-    rank = {name: i for i, name in enumerate(SECTIONS)}
-    known = sorted((n for n in order if n in rank), key=rank.__getitem__)
-    extra = [n for n in order if n not in rank]
-    out_body = [line for line in preamble if line.strip()]
-    for name in known + extra:
-        if not merged[name]:
-            continue
-        out_body += ["", f"### {name}", ""]
-        out_body += [line for bullet in merged[name] for line in bullet.split("\n")]
-    text = "\n".join(before + out_body + ([""] if after else []) + after) + "\n"
+        # Headings follow the vocabulary order; a heading outside it keeps its
+        # place after them.
+        rank = {name: i for i, name in enumerate(SECTIONS)}
+        known = sorted((n for n in order if n in rank), key=rank.__getitem__)
+        extra = [n for n in order if n not in rank]
+        out_body = [line for line in preamble if line.strip()]
+        for name in known + extra:
+            if not merged[name]:
+                continue
+            out_body += ["", f"### {name}", ""]
+            out_body += [line for bullet in merged[name] for line in bullet.split("\n")]
+    else:
+        # A release section already reads in its own voice: existing headings
+        # keep their order and position (a hand-written summary stays first),
+        # folded bullets append within their section, and a section no source
+        # had yet is appended at the end, in vocabulary order among the new
+        # ones. A section the stub left as "- TBD" placeholders keeps them
+        # only while nothing real arrives.
+        merged = {name: list(bullets) for name, bullets in existing}
+        order = [name for name, _ in existing]
+        seen = {name: {normalize(b) for b in bullets} for name, bullets in existing}
+        new_order: list[str] = []
+        sources = [{name: bullets} for name, bullets in moved]
+        sources += [sections for _, sections in release_fragments]
+        for sections in sources:
+            for name, bullets in sections.items():
+                if name not in merged:
+                    merged[name], seen[name] = [], set()
+                    new_order.append(name)
+                for bullet in bullets:
+                    key = normalize(bullet)
+                    if key not in seen[name]:
+                        seen[name].add(key)
+                        merged[name].append(bullet)
+        rank = {name: i for i, name in enumerate(SECTIONS)}
+        new_order.sort(key=lambda name: rank.get(name, len(rank)))
+        # Prose found in [Unreleased] before its first heading moves to the
+        # end of the section rather than being dropped.
+        out_body = [line for line in preamble if line.strip()]
+        for name in order + new_order:
+            bullets = merged[name]
+            if all(bullet == "- TBD" for bullet in bullets):
+                if not bullets:
+                    continue
+            else:
+                bullets = [b for b in bullets if b != "- TBD"]
+            out_body += ["", f"### {name}", ""]
+            out_body += [line for bullet in bullets for line in bullet.split("\n")]
+        out_body += [line for line in moved_preamble if line.strip()]
+
+    if into is None:
+        text = "\n".join(before + out_body + ([""] if after else []) + after) + "\n"
+    else:
+        # [Unreleased] is emptied by the move; the sections between it and
+        # the target (and the target heading itself) pass through unchanged.
+        head = unrel_before
+        gap = before[len(unrel_before) + len(unrel_body):]
+        text = "\n".join(
+            head + ([""] if gap else []) + gap
+            + out_body + ([""] if after else []) + after
+        ) + "\n"
     changelog.write_text(text, encoding="utf-8")
     for path, _ in fragments:
         path.unlink()
     suffix = f" ({len(exempt_fragments)} exempt removed)" if exempt_fragments else ""
+    target = UNRELEASED if into is None else SECTION_HEADING.format(into)
+    moved_note = f", moved {moved_count} [Unreleased] bullet(s)" if moved_count else ""
     print(
-        f"folded {len(release_fragments)} fragment(s) into {UNRELEASED} "
-        f"of {changelog}{suffix}"
+        f"folded {len(release_fragments)} fragment(s) into {target} "
+        f"of {changelog}{suffix}{moved_note}"
     )
     return 0
 
@@ -447,6 +548,65 @@ def missing(base: str, head: str, directory: pathlib.Path, strict: bool = False)
     return 0
 
 
+def entry_owners(changelog: pathlib.Path) -> dict[int, tuple[int, str]]:
+    """{PR number: (1-based line, section heading)} of each CHANGELOG entry.
+
+    An entry line ends with a terminal citation whose first number is the
+    entry's owner; a number named inside another entry's text ("fixes #N")
+    is a passing mention and owns nothing."""
+    section = "(top)"
+    owners: dict[int, tuple[int, str]] = {}
+    for lineno, raw in enumerate(changelog.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.rstrip()
+        if line.startswith("## "):
+            section = line.strip()
+        match = OWNER_CITE.search(line)
+        if match is not None:
+            number = int(match.group(1))
+            if number not in owners:
+                owners[number] = (lineno, section)
+    return owners
+
+
+def folded(directory: pathlib.Path, changelog: pathlib.Path,
+           delete: bool = False, strict: bool = False) -> int:
+    """Report (and with --delete remove) fragments already in CHANGELOG.md.
+
+    A release that folds on its own branch and lands back on main as a
+    squash leaves main's fragment files behind: their entries are already in
+    CHANGELOG.md, so folding the fragments again would duplicate them. A
+    fragment counts as folded when its number owns a CHANGELOG entry — a
+    terminal "(#N)" citation — which a passing mention never is."""
+    owners = entry_owners(changelog)
+    stale: list[tuple[pathlib.Path, int, int, str]] = []
+    kept = 0
+    for path in fragment_paths(directory):
+        match = FRAGMENT_NAME.match(path.name)
+        if match is None:
+            continue  # `check` is the mode that refuses a misnamed file
+        owner = owners.get(int(match.group(1)))
+        if owner is None:
+            kept += 1
+            continue
+        stale.append((path, int(match.group(1)), owner[0], owner[1]))
+    for path, number, lineno, section in stale:
+        note = f"  ->  {changelog}:{lineno} {section}"
+        if delete:
+            path.unlink()
+            print(f"deleted {path}{note}")
+        else:
+            print(f"{path}{note}")
+    print(
+        f"{len(stale)} fragment(s) already folded into {changelog}, "
+        f"{kept} not folded"
+    )
+    if strict and stale:
+        # Exit 3, not 1: same contract as `missing --strict` — a caller must
+        # tell "findings" from "broken report" apart, and a crash is 1.
+        return 3
+    return 0
+
+
 def _escape_annotation_data(value: str) -> str:
     """Escape a workflow-command message like actions/toolkit `escapeData`."""
     return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
@@ -535,6 +695,16 @@ def main() -> int:
     fold = sub.add_parser("assemble")
     fold.add_argument("--dir", default=FRAGMENT_DIR)
     fold.add_argument("--changelog", default=CHANGELOG)
+    fold.add_argument("--into", metavar="VERSION", default=None,
+                       help="fold into the existing [VERSION] section (with what "
+                            "[Unreleased] holds) instead of into [Unreleased]")
+    stale = sub.add_parser("folded")
+    stale.add_argument("--dir", default=FRAGMENT_DIR)
+    stale.add_argument("--changelog", default=CHANGELOG)
+    stale.add_argument("--delete", action="store_true",
+                        help="delete the fragment files already folded into CHANGELOG.md")
+    stale.add_argument("--strict", action="store_true",
+                        help="exit 3 while any already-folded fragment remains")
     miss = sub.add_parser("missing")
     miss.add_argument("--base", required=True)
     miss.add_argument("--head", default="HEAD")
@@ -555,7 +725,11 @@ def main() -> int:
         if args.mode == "check-files":
             return check_files(args.files)
         if args.mode == "assemble":
-            return assemble(pathlib.Path(args.dir), pathlib.Path(args.changelog))
+            return assemble(pathlib.Path(args.dir), pathlib.Path(args.changelog),
+                            into=args.into)
+        if args.mode == "folded":
+            return folded(pathlib.Path(args.dir), pathlib.Path(args.changelog),
+                          delete=args.delete, strict=args.strict)
         if args.mode == "missing":
             return missing(base=args.base, head=args.head, strict=args.strict,
                            directory=pathlib.Path(args.dir))

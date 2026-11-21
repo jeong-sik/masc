@@ -298,6 +298,196 @@ class AssembleTests(unittest.TestCase):
         self.assertFalse((self.frag_dir / "300.md").exists())
 
 
+CHANGELOG_WITH_SECTION = (
+    "# Changelog\n\n"
+    "## [Unreleased]\n\n"
+    "## [0.2.0] - 2026-02-02\n\n"
+    "### Summary\n\n"
+    "- Ships two fixes (#1).\n"
+    "\n"
+    "### Added\n\n"
+    "- Existing feature (#2).\n"
+    "\n"
+    "### Changed\n\n"
+    "- TBD\n"
+    "\n"
+    "### Deprecated\n\n"
+    "- TBD\n"
+    "\n"
+    "## [0.1.0] - 2026-01-01\n\n"
+    "### Fixed\n\n"
+    "- First (#3).\n"
+)
+
+
+class FoldedTests(unittest.TestCase):
+    """`folded`: a fragment already owning a CHANGELOG entry is history."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory(prefix="masc-changelog-folded-")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.frag_dir = self.root / "changelog.d"
+        self.frag_dir.mkdir()
+        (self.frag_dir / "README.md").write_text("readme\n", encoding="utf-8")
+        self.changelog = self.root / "CHANGELOG.md"
+        self.changelog.write_text(
+            "# Changelog\n\n"
+            "## [Unreleased]\n\n"
+            "## [0.1.0] - 2026-01-01\n\n"
+            "### Fixed\n\n"
+            "- Resolved the race (#10).\n"
+            "- Hardened the retry path (#12, fixes #11).\n",
+            encoding="utf-8",
+        )
+        for number in (10, 11, 12):
+            (self.frag_dir / f"{number}.md").write_text(
+                f"### Fixed\n\n- Fix {number} (#{number}).\n", encoding="utf-8"
+            )
+
+    def folded(self, *extra: str) -> subprocess.CompletedProcess[str]:
+        return _run_cli(
+            "folded", "--dir", str(self.frag_dir), "--changelog", str(self.changelog),
+            *extra, cwd=self.root,
+        )
+
+    def test_owner_citation_counts_passing_mention_does_not(self) -> None:
+        res = self.folded()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        # #10 and #12 own entries; #11 is named inside #12's entry only.
+        self.assertIn("changelog.d/10.md", res.stdout)
+        self.assertIn("changelog.d/12.md", res.stdout)
+        self.assertIn("CHANGELOG.md:9", res.stdout)
+        self.assertNotIn("changelog.d/11.md", res.stdout)
+        self.assertIn("2 fragment(s) already folded", res.stdout)
+        self.assertIn("1 not folded", res.stdout)
+
+    def test_strict_exits_3_while_any_remain_and_zero_after_delete(self) -> None:
+        strict = self.folded("--strict")
+        self.assertEqual(strict.returncode, 3, strict.stderr)
+        deleted = self.folded("--delete")
+        self.assertEqual(deleted.returncode, 0, deleted.stderr)
+        self.assertIn(f"deleted {self.frag_dir / '10.md'}", deleted.stdout)
+        self.assertFalse((self.frag_dir / "10.md").exists())
+        self.assertFalse((self.frag_dir / "12.md").exists())
+        self.assertTrue((self.frag_dir / "11.md").exists())
+        again = self.folded("--strict")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("0 fragment(s) already folded", again.stdout)
+
+
+class AssembleIntoTests(unittest.TestCase):
+    """`assemble --into V`: fold straight into the existing [V] section."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory(prefix="masc-changelog-into-")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.frag_dir = self.root / "changelog.d"
+        self.frag_dir.mkdir()
+        (self.frag_dir / "README.md").write_text("readme\n", encoding="utf-8")
+        self.changelog = self.root / "CHANGELOG.md"
+        self.changelog.write_text(CHANGELOG_WITH_SECTION, encoding="utf-8")
+
+    def assemble_into(self, version: str, *extra: str) -> subprocess.CompletedProcess[str]:
+        return _run_cli(
+            "assemble", "--dir", str(self.frag_dir), "--changelog", str(self.changelog),
+            "--into", version, *extra, cwd=self.root,
+        )
+
+    def section_body(self, heading: str) -> str:
+        text = self.changelog.read_text(encoding="utf-8")
+        start = text.index(f"## [{heading}]")
+        end = text.find("## [", start + 1)
+        return text[start:] if end == -1 else text[start:end]
+
+    def test_appends_within_existing_sections_and_keeps_heading_order(self) -> None:
+        (self.frag_dir / "5.md").write_text(
+            "### Added\n\n- New feature (#5).\n\n### Fixed\n\n- Repair (#5).\n",
+            encoding="utf-8",
+        )
+        res = self.assemble_into("0.2.0")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("folded 1 fragment(s) into ## [0.2.0]", res.stdout)
+        body = self.section_body("0.2.0")
+        # The hand-written summary stays first; Added appends, Fixed is new.
+        self.assertLess(body.index("### Summary"), body.index("### Added"))
+        self.assertLess(body.index("### Added"), body.index("### Changed"))
+        self.assertLess(body.index("### Deprecated"), body.index("### Fixed"))
+        self.assertIn("- Existing feature (#2).", body)
+        self.assertLess(body.index("- Existing feature (#2)."), body.index("- New feature (#5)."))
+        # The untouched TBD-only sections keep their placeholders.
+        self.assertIn("- TBD", body)
+
+    def test_tbd_placeholder_replaced_only_where_real_bullets_arrive(self) -> None:
+        (self.frag_dir / "6.md").write_text(
+            "### Changed\n\n- Real change (#6).\n", encoding="utf-8"
+        )
+        res = self.assemble_into("0.2.0")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        body = self.section_body("0.2.0")
+        self.assertIn("### Changed\n\n- Real change (#6).\n", body)
+        self.assertNotIn("### Changed\n\n- TBD", body)
+        self.assertIn("### Deprecated\n\n- TBD\n", body)
+
+    def test_moves_unreleased_bullets_and_empties_unreleased(self) -> None:
+        self.changelog.write_text(
+            "# Changelog\n\n"
+            "## [Unreleased]\n\n"
+            "### Fixed\n\n"
+            "- Waiting fix (#7).\n\n"
+            "## [0.2.0] - 2026-02-02\n\n"
+            "### Added\n\n"
+            "- Existing feature (#2).\n",
+            encoding="utf-8",
+        )
+        (self.frag_dir / "8.md").write_text(
+            "### Fixed\n\n- Later fix (#8).\n", encoding="utf-8"
+        )
+        res = self.assemble_into("0.2.0")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("moved 1 [Unreleased] bullet(s)", res.stdout)
+        self.assertIn("- Waiting fix (#7).", self.section_body("0.2.0"))
+        self.assertIn("- Later fix (#8).", self.section_body("0.2.0"))
+        self.assertLess(
+            self.section_body("0.2.0").index("- Waiting fix (#7)."),
+            self.section_body("0.2.0").index("- Later fix (#8)."),
+        )
+        text = self.changelog.read_text(encoding="utf-8")
+        unreleased = text[text.index("## [Unreleased]"):text.index("## [0.2.0]")]
+        self.assertNotIn("- ", unreleased)
+
+    def test_dedupes_a_bullet_the_section_already_carries(self) -> None:
+        (self.frag_dir / "2.md").write_text(
+            "### Added\n\n- Existing feature (#2).\n", encoding="utf-8"
+        )
+        res = self.assemble_into("0.2.0")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.section_body("0.2.0").count("- Existing feature (#2)."), 1)
+
+    def test_missing_target_section_fails_closed_and_keeps_fragments(self) -> None:
+        fragment = self.frag_dir / "9.md"
+        fragment.write_text("### Fixed\n\n- Repair (#9).\n", encoding="utf-8")
+        before = self.changelog.read_bytes()
+        res = self.assemble_into("9.9.9")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("no section '## [9.9.9]'", res.stderr)
+        self.assertTrue(fragment.exists())
+        self.assertEqual(self.changelog.read_bytes(), before)
+
+    def test_exempt_only_deletes_and_leaves_changelog_unchanged(self) -> None:
+        (self.frag_dir / "4.md").write_text(
+            "### Exempt\n\n- Docs only (#4).\n", encoding="utf-8"
+        )
+        before = self.changelog.read_bytes()
+        res = self.assemble_into("0.2.0")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("removed 1 exempt fragment(s)", res.stdout)
+        self.assertIn("unchanged", res.stdout)
+        self.assertEqual(self.changelog.read_bytes(), before)
+        self.assertFalse((self.frag_dir / "4.md").exists())
+
+
 class MissingAndBumpIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory(prefix="masc-changelog-missing-")
@@ -467,6 +657,55 @@ class MissingAndBumpIntegrationTests(unittest.TestCase):
         changelog = (self.root / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertNotIn("Exempt", changelog)
         self.assertNotIn("#54020", changelog)
+
+
+    def test_bump_folds_straight_into_the_version_section(self) -> None:
+        self._write("src/fix.txt", "fix\n")
+        self._write(
+            "changelog.d/54011.md",
+            "### Fixed\n\n- Repair the fold base scan (#54011).\n",
+        )
+        self._commit("fix: fold base scan (#54011)")
+
+        res = subprocess.run(
+            ["bash", "scripts/bump-version.sh", "0.2.0"],
+            cwd=self.root, env=self.env, text=True, capture_output=True,
+        )
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        changelog = (self.root / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("## [0.2.0]", changelog)
+        self.assertIn("- Repair the fold base scan (#54011).", changelog)
+        # The entry sits in the release section, not in [Unreleased].
+        section = changelog[changelog.index("## [0.2.0]"):changelog.index("## [0.1.0]")]
+        self.assertIn("- Repair the fold base scan (#54011).", section)
+        unreleased = changelog[: changelog.index("## [0.2.0]")]
+        self.assertNotIn("- ", unreleased)
+        self.assertNotIn("- TBD", changelog)
+        self.assertFalse((self.root / "changelog.d" / "54011.md").exists())
+
+    def test_bump_refuses_while_a_fragment_is_already_folded(self) -> None:
+        # A release folded elsewhere left the fragment behind while its entry
+        # is already in CHANGELOG.md: folding again would duplicate it.
+        self._write(
+            "CHANGELOG.md",
+            "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-01-01\n\n"
+            "### Fixed\n\n- Already shipped (#54030).\n",
+        )
+        self._write(
+            "changelog.d/54030.md",
+            "### Fixed\n\n- Already shipped (#54030).\n",
+        )
+        self._commit("fix: already shipped elsewhere (#54030)")
+
+        res = subprocess.run(
+            ["bash", "scripts/bump-version.sh", "0.2.0"],
+            cwd=self.root, env=self.env, text=True, capture_output=True,
+        )
+        self.assertEqual(res.returncode, 1, res.stdout)
+        self.assertIn("already folded into CHANGELOG.md", res.stderr)
+        self.assertIn("changelog.d/54030.md", res.stderr)
+        self.assertEqual(self._git("status", "--porcelain"), "")
+        self.assertTrue((self.root / "changelog.d" / "54030.md").exists())
 
 
 if __name__ == "__main__":

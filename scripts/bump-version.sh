@@ -136,6 +136,34 @@ if [ -n "$base_ref" ]; then
   rm -f "$missing_err" "$missing_out"
 fi
 
+# A fragment whose pull request already owns an entry in CHANGELOG.md is
+# history a release folded elsewhere left behind: assembling it again would
+# duplicate the entry. The report lists each one with the CHANGELOG line
+# that proves it; --strict turns findings into a refusal with the same
+# exit-3 contract as the missing-fragment report above.
+folded_err="$(mktemp)"
+folded_out="$(mktemp)"
+folded_status=0
+python3 "$ROOT_DIR/scripts/changelog-fragments.py" folded \
+  --dir "$ROOT_DIR/changelog.d" --changelog "$ROOT_DIR/CHANGELOG.md" --strict \
+  >"$folded_out" 2>"$folded_err" || folded_status=$?
+if [ "$folded_status" -eq 3 ]; then
+  cat "$folded_out" >&2
+  echo "error: fragments above are already folded into CHANGELOG.md; run" \
+    "scripts/changelog-fragments.py folded --delete (or delete them by" \
+    "hand) and rerun." >&2
+  rm -f "$folded_err" "$folded_out"
+  exit 1
+fi
+if [ "$folded_status" -ne 0 ]; then
+  # A crash must not look like an empty list.
+  echo "warning: folded-fragment report failed (exit $folded_status)" >&2
+  sed 's/^/  /' "$folded_err" >&2
+elif [ -s "$folded_out" ]; then
+  cat "$folded_out" >&2
+fi
+rm -f "$folded_err" "$folded_out"
+
 
 # 1) The version lives in dune-project; everything below follows it.
 sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
@@ -149,34 +177,32 @@ if [ -f "$ROOT_DIR/masc.opam" ]; then
   echo "  masc.opam version synchronized (CI verifies generated metadata)"
 fi
 
-# 3) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
-# [Unreleased], then add the version stub if missing. The release author moves
-# the [Unreleased] entries into the version section before tagging.
-python3 "$ROOT_DIR/scripts/changelog-fragments.py" assemble \
-  --dir "$ROOT_DIR/changelog.d" --changelog "$ROOT_DIR/CHANGELOG.md"
+# 3) CHANGELOG: make sure the [NEW_VERSION] section exists, then fold the
+# per-PR fragments (changelog.d/<PR>.md) — and anything still sitting in
+# [Unreleased] — straight into it. One assemble run reaches the release
+# section; the release author no longer moves entries by hand.
 if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then
   tmp_file="$(mktemp)"
   # The stub goes under [Unreleased], above the newest release, so
-  # [Unreleased] stays the first section changelog-fragments.py reads.
+  # [Unreleased] stays the first section changelog-fragments.py reads. It
+  # names the section and date only: assemble --into fills in the sections
+  # the fragments bring.
   awk -v ver="$NEW_VERSION" -v d="$TODAY" '
     !done && /^## \[[0-9]/ {
       print "## [" ver "] - " d;
-      print "";
-      print "### Changed";
-      print "- TBD";
-      print "";
-      print "### Deprecated";
-      print "- TBD";
       print "";
       done = 1
     }
     { print }
   ' "$ROOT_DIR/CHANGELOG.md" > "$tmp_file"
   mv "$tmp_file" "$ROOT_DIR/CHANGELOG.md"
-  echo "  CHANGELOG.md stub added"
+  echo "  CHANGELOG.md section added"
 else
   echo "  CHANGELOG already has $NEW_VERSION entry"
 fi
+python3 "$ROOT_DIR/scripts/changelog-fragments.py" assemble \
+  --dir "$ROOT_DIR/changelog.d" --changelog "$ROOT_DIR/CHANGELOG.md" \
+  --into "$NEW_VERSION"
 
 echo ""
 echo "Release version layers:"

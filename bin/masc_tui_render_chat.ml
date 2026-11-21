@@ -590,11 +590,11 @@ let tool_reopen () = Ansi.reset ^ Theme.recede ()
    it. *)
 (* The bar down the left edge of a line someone else wrote, in the sender's
    colour: solid, where the journal's siding is dotted, so the texture says
-   which kind of outside it came from (RFC chat-turn-rail-and-side-lanes
-   §4.6). Plain and styled. The space goes before the bar, not after: in the
-   inline gutter a name that fills its column would otherwise run into it,
-   and the glyph fills only the left quarter of its cell, so the rest of the
-   cell already keeps it off the text. *)
+   which kind of outside it came from. Plain and styled. The space goes
+   before the bar, not after: in the inline gutter a name that fills its
+   column would otherwise run into it, and the glyph fills only the left
+   quarter of its cell, so the rest of the cell already keeps it off the
+   text. *)
 let arrival_bar (style : Message_layout.style) =
   match style with
   | Message_layout.Inbound ->
@@ -1202,7 +1202,7 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
    composer will address. *)
 let keeper_status_cells ~cols = max 0 (cols - 1)
 
-(* Kind colours are the two slots no status token draws (RFC-0431), so a
+(* Kind colours are the two slots no status token draws, so a
    runtime id or a token count is never read as a state. *)
 let keeper_status_palette () =
   { Chat_facts.label_style = Theme.recede ()
@@ -2370,8 +2370,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
    [Markdown_streaming] because a queued line is still editable -- Ctrl-P
    takes the last one back into the composer -- so no render cache may hold
    it. [Rail_none] because the rail draws a turn's bracket and these belong
-   to a turn that has not opened one yet; RFC chat-turn-rail-and-side-lanes
-   decides later what a turn's own opening looks like. *)
+   to a turn that has not opened one yet. *)
 let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
   let ko = state.ui_language = Lang_ko in
   let now = Unix.gettimeofday () in
@@ -3414,7 +3413,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
      request's last row of any phase before output (its failure row, if any,
      came after everything the block holds), the live block after every
      committed row of its request. A settled block is the same rows with a
-     closing rail: settling changes the rail, not the words (RFC-0412 §3.3).
+     closing rail: settling changes the rail, not the words.
 
      A settled log is immutable but for the durable facts folded into its
      transcript, and its block depends on the committed rows only through

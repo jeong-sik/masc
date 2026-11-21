@@ -2264,9 +2264,8 @@ type turn_edge =
 
    Rows outside every turn stay transparent. A journal commit or somebody
    else's broadcast draws a siding meeting the line rather than a piece of it,
-   so a turn's rows are still together across one -- that is increment 2 of
-   RFC-chat-turn-rail-and-side-lanes, and it is why the interruption cases
-   below keep one bracket rather than three.
+   so a turn's rows are still together across one -- that is why the
+   interruption cases below keep one bracket rather than three.
 
    What this gives up: two rows of one turn, split by another turn's row, now
    draw as two lone rows rather than one bracket. That much is what the column
@@ -4930,7 +4929,7 @@ let keeper_detail_tabs =
   [ Detail_info; Detail_items; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
   ; Detail_identity; Detail_channels; Detail_automation; Detail_runs; Detail_terminal ]
 
-(* [Detail_identity] is RFC-0392's keeper identity: the work services a
+(* [Detail_identity] is the keeper identity: the work services a
    Keeper logs into. Each is a remote MCP server declared under
    [config/identity/], and its tools are handed to the Keeper's turns. The
    tab is named for those services, as the dashboard and the manual name
@@ -5530,7 +5529,7 @@ type keeper_roster_observation = {
      Masc_tui_keeper_control.roster_failure) result;
 }
 
-(* One Keeper's roster row, read after the server named it (RFC-0481 §3.3). *)
+(* One Keeper's roster row, read after the server named it. *)
 type keeper_row_observation = {
   row_request: Snapshot_read.request;
   row_keeper: string;
@@ -6111,8 +6110,8 @@ let runtime_listing_chrome
    rather than in structures keyed by id: Keepers can stream concurrently, and
    a single live slot lets the later stream replace the earlier one's tool
    rows. *)
-(* One turn as its event log and the transcript that follows it (RFC-0412
-   §3.3, stage 3a). The log is the record: every delta the stream or the
+(* One turn as its event log and the transcript that follows it.
+   The log is the record: every delta the stream or the
    journal delivered, keyed by journal seq. The transcript is its projection,
    kept in step by the two entry points, [turn_log_add] for a live frame and
    [turn_log_add_journaled] for a journal page, each folding a delta into
@@ -7189,7 +7188,7 @@ let metrics_status_at_end ~ko = if ko then "End: 연결 상태" else "End: statu
    the strip and roster offer; a choice lists the names on the Code
    cursor line for one language-server question and nothing else -- a
    task whose title happens to spell h-o-v-e-r in order is not an answer
-   to "which name?" (RFC-0429 §1.4). *)
+   to "which name?". *)
 type code_finder_origin = {
   cfo_workspace : workspace_authority;
   cfo_reading : unit ref;
@@ -9052,8 +9051,8 @@ type runtime_config_edit_session = {
   rce_view : runtime_config_edit_view;
 }
 
-(* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
-   RGB plus what to title it. The spectator downsamples the pixels itself. *)
+(* One MSX frame as the server hands it over: native-resolution RGB plus
+   what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
 type machine_interaction = Observe_machine | Control_machine
 
@@ -10471,8 +10470,8 @@ type state = {
      machine is [Option] so it exists only once the screen has been opened,
      and it survives closing -- reopening continues the same frame. *)
   mutable msx_open: bool;
-  (* RFC-0439 §3.7: the TUI no longer owns a machine. The spectator caches
-     the last frame the server handed it. *)
+  (* The TUI owns no machine. The spectator caches the last frame the
+     server handed it. *)
   mutable msx_frame: msx_frame option;
   (* Which machine the spectator shows. The menu picks it. *)
   mutable machine_source: Masc.Machine_lane.t;
@@ -10506,7 +10505,7 @@ type state = {
   (* Serialize issue and revoke across chat/Collab owners, including a closed
      view: a delayed receipt must not revive or erase a reissued card. *)
   mutable play_changes: play_change list;
-  (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
+  (* The load menu: the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
      game, so its keys never reach the emulator. [msx_carts] is the inventory
@@ -10879,7 +10878,7 @@ type state = {
   mutable keeper_roster_read: Snapshot_read.t;
   mutable keeper_row_read: Snapshot_read.t;
   (* The rows, or the whole roster, the server said changed and the TUI has
-     not read since (RFC-0481 §3.3). *)
+     not read since. *)
   mutable keeper_roster_owed: Masc_tui_roster_owed.t;
   mutable local_workspace_read_order: Local_read_order.t;
   mutable local_work_observation: Local_read_observation.t option;
@@ -10951,7 +10950,7 @@ type state = {
   mutable refresh_pace: Masc_tui_refresh_pace.t;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
-     fleet's own reading of what is missing, as the fleet stream (RFC-0477)
+     fleet's own reading of what is missing, as the fleet stream
      last told it. *)
   mutable fleet_stream_reader: fleet_stream_reader;
   mutable connection_status: connection_status;
@@ -11226,14 +11225,14 @@ type state = {
   mutable keeper_turns_error: request_failure option;
   mutable keeper_turns_inflight: bool;
   (* The turns read owed after a server signal, a revalidation, a resumed
-     authority or a failed read (RFC-0481 §3.4). It is read once something
-     uses the turns; until then it stays owed. *)
+     authority or a failed read. It is read once something uses the turns;
+     until then it stays owed. *)
   mutable keeper_turns_owed: Masc_tui_owed_read.t;
   (* Keepers whose running-turn preview changed while no surface drew it,
      since the last turns read began. Opening a surface that draws one owes
-     the turns a read (RFC-0481 §3.5). *)
+     the turns a read. *)
   mutable keeper_previews_unread: string list;
-  (* A failed waiting read, read again after a growing wait (RFC-0481 §3.4).
+  (* A failed waiting read, read again after a growing wait.
      A change is read at once by the waiting read itself. *)
   mutable keeper_waiting_owed: Masc_tui_owed_read.t;
   mutable keeper_waiting_read: Keeper_waiting_read.t;
@@ -11552,9 +11551,9 @@ type state = {
   (* What each part of the Tools read owes after a push: the selected
      Keeper's surface ([/dashboard/tools?keeper=]) and the Skill catalog with
      its usage counts ([/api/v1/skills]). *)
-  (* What each Tools part read on a push owes (RFC-0483 §4.3): the skills
-     catalog, the selected Keeper's activations, and each roster Keeper's
-     usage. A roster Keeper with no entry has never been read. *)
+  (* What each Tools part read on a push owes: the skills catalog, the
+     selected Keeper's activations, and each roster Keeper's usage. A roster
+     Keeper with no entry has never been read. *)
   mutable tools_catalog_owed: Masc_tui_owed_read.t;
   (* The selected Keeper's tool inventory and effective surface, and the
      Keeper the reading on screen was read for. *)
@@ -11704,11 +11703,11 @@ type state = {
   mutable memory_health_error: request_failure option;
   mutable memory_health_inflight: bool;
   (* The fleet memory health reads on arrival, on a revalidation, and again
-     after a failed read, while Memory or Metrics shows it (RFC-0487). *)
+     after a failed read, while Memory or Metrics shows it. *)
   mutable memory_health_owed: Masc_tui_owed_read.t;
   (* The Keepers whose memory health input was written since the fleet answer
      held, oldest first. Each is read as its own row and merged into that
-     answer, so one Keeper's push reads one row, not the fleet (RFC-0487). *)
+     answer, so one Keeper's push reads one row, not the fleet. *)
   mutable memory_health_rows_owed: string list;
   (* The workspace memory world the Memory header's world line draws, and
      the time its next read may start (RFC-0511 D2c). *)
@@ -11718,7 +11717,7 @@ type state = {
   mutable memory_unit: Masc_tui_memory_usage.display_unit;
   mutable memory_input: (string, Masc_tui_memory_usage.t, request_failure) Masc_tui_fetched.source;
   (* The input pane reads the selected Keeper again after each memory health
-     answer and after a failed read, while Memory shows it (RFC-0487). *)
+     answer and after a failed read, while Memory shows it. *)
   mutable memory_input_owed: Masc_tui_owed_read.t;
   (* The Memory fact browser. [memory_facts_keeper = None] draws the health
      table; [Some name] draws that keeper's fact listing over it. The
@@ -18028,8 +18027,8 @@ let journal_resume_position state ~keeper_name source =
    The observer feed carries one frame per AG-UI event of every running chat
    operation, with the journal seq of the event it projects. The pane does
    not fold the frame: a frame is a projection of a journal line, and the
-   journal is what the pane draws a turn it did not open from (RFC-0412
-   §3.2). Two feeds into one log would have to agree on order -- a frame
+   journal is what the pane draws a turn it did not open from.
+   Two feeds into one log would have to agree on order -- a frame
    lost while the observer stream was down, then read from the journal
    after later frames had landed, would put the turn's words out of order --
    and the journal alone already carries every line in order. So a frame is
@@ -18105,8 +18104,8 @@ let loaded_turn_has_output state ~keeper_name source =
 
 (* The turns of this keeper the pane can see running but did not open. A TUI
    started while a turn was running, or a turn another surface opened, has no
-   request of its own to stream from. What it has is the turn's journal
-   (RFC-0412 §3.2): read on every history load from where the last read
+   request of its own to stream from. What it has is the turn's journal:
+   read on every history load from where the last read
    stopped, folded into a log held beside the settled ones. That log was
    drawn nowhere -- the pane draws the logs that stand for a finished turn,
    and a turn still running stands for nothing yet -- so the operator read
@@ -18409,8 +18408,8 @@ let enrich_held_logs_from_rows ?only state ~keeper_name (rows : msg_entry list) 
 
 (* Settling a turn: its log is committed and, when it has anything to draw,
    kept among the settled logs; the pane stops treating it as live. Nothing
-   is copied into session rows (RFC-0412 §3.3). Here rather than in the
-   executable so the decision is linkable by a test. *)
+   is copied into session rows. Here rather than in the executable so the
+   decision is linkable by a test. *)
 let settle_turn_log state (entry : inflight) =
   Masc_tui_keeper_chat_log.commit entry.log.tl_log;
   if Masc_tui_keeper_chat_log.has_entries entry.log.tl_log
@@ -18455,8 +18454,8 @@ let inflight_by_request_id state request_id =
    drawing it from the same projection with a closing rail. Nothing is copied
    into session rows -- the tool and skill rows used to be, and were then
    replaced by the loaded transcript's copies on the next refresh, two
-   replacements of the same words with the reasoning lost at the first
-   (RFC-0412 §3.3). A log with no entries is not kept: the POST never left, or
+   replacements of the same words with the reasoning lost at the first.
+   A log with no entries is not kept: the POST never left, or
    the stream never opened, and there is nothing to draw. *)
 let settle_live_turn state (request : Masc_tui_keeper_chat_projection.request) ~record =
   match inflight_entry_by_request_id state request.request_id with
@@ -20530,9 +20529,9 @@ let usage_calls_drawn (state : state) =
 
 (* The days of the series the screen draws, [None] while it draws none. Usage's
    Calls follows the window [w] cycles. The Dashboard's line is the last day
-   whatever that window holds (RFC-tui-operator-workbench §6.4), so one
-   reading serves one screen at a time and a screen that wants the other
-   window reads again ([take_tool_series_due]). *)
+   whatever that window holds, so one reading serves one screen at a time
+   and a screen that wants the other window reads again
+   ([take_tool_series_due]). *)
 let tool_series_days (state : state) =
   if usage_calls_drawn state then Some state.provider_history_days
   else if state.view = Overview then

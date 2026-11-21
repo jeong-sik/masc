@@ -937,9 +937,8 @@ val inbound_indent_cells : int
 
 val inbound_indent : entry -> int
 (** Cells a line someone else wrote ({!Inbound}) steps in from the
-    conversation (RFC chat-turn-rail-and-side-lanes §4.6); the renderer draws
-    a bar in the sender's colour down that block's left edge. Zero for every
-    other style. *)
+    conversation; the renderer draws a bar in the sender's colour down that
+    block's left edge. Zero for every other style. *)
 
 type body_lines =
   | Body_whole of string list

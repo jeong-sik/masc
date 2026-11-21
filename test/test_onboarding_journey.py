@@ -429,7 +429,12 @@ class Journey(StepByStep):
             (base / '.masc').mkdir(parents=True, mode=0o700)
             original = Path(home, '.gemini/antigravity-cli/antigravity-oauth-token')
             original.parent.mkdir(parents=True)
-            original.write_text('fixture-private-oauth-never-print')
+            # The product reads only a login it recognises: a JSON object whose
+            # id_token_email (agy 1.5) or id_token (agy 1.2) holds a Google JWT
+            # with an email claim. A bare opaque string is refused as
+            # Unrecognized_credential, which leaves the catalog empty.
+            login = json.dumps(dict(id_token_email='eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJlbWFpbCI6ImZpeHR1cmVAZXhhbXBsZS5jb20iLCJhdWQiOiJ1bnVzZWQiLCJleHAiOjB9.signature'))
+            original.write_text(login)
             original.chmod(0o600)
             catalog = dict(status='SUCCESS', num_turns=0, usage=dict(total_tokens=0),
                            command=dict(name='models', data=dict(models=[dict(id='account-only-id', label='Account only model')])))
@@ -454,7 +459,7 @@ class Journey(StepByStep):
             self.assertNotEqual(selected, original)
             self.assertEqual(selected.read_bytes(), original.read_bytes())
             self.assertEqual(selected.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(original.read_text(), 'fixture-private-oauth-never-print')
+            self.assertEqual(original.read_text(), login)
             self.assertNotIn(original.read_text(), result.stdout + result.stderr)
     def test_final_workspace_owns_port_resolution_before_server_contact(self):
         events = []

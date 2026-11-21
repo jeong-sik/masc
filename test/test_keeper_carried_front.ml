@@ -698,20 +698,16 @@ let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
     in
     carried.first_atom, Front.origin_to_json carried.origin
   in
-  let past ~point =
-    Front.origin_to_json
-      (Front.Past_librarian_point
-         { librarian_end_atom = point; source = Front.Turn_record { turn = 1 } })
-  in
+  let accepted_record = Front.origin_to_json (Front.Carried (Front.Turn_record { turn = 1 })) in
   let progress_at end_atom = Front.origin_to_json (Front.Covered { end_atom }) in
   let origin = testable Yojson.Safe.pp Yojson.Safe.equal in
-  check (pair int origin) "behind the accepted start: open there" (8, past ~point:2)
+  check (pair int origin) "behind the accepted start: open there" (8, accepted_record)
     (start ~point:2 ~boundary:16);
   check (pair int origin) "at the accepted start: the Librarian's position again"
     (8, progress_at 8) (start ~point:8 ~boundary:16);
   check (pair int origin) "past it: the Librarian's position" (10, progress_at 10)
     (start ~point:10 ~boundary:16);
-  check (pair int origin) "never past this turn's boundary" (5, past ~point:2)
+  check (pair int origin) "never past this turn's boundary" (5, accepted_record)
     (start ~point:2 ~boundary:5)
 ;;
 

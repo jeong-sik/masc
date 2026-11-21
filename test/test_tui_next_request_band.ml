@@ -63,7 +63,7 @@ let test_a_refused_range_origin_decodes () =
   | Error detail -> Alcotest.fail ("the refused range origin decodes: " ^ detail)
 
 (* The front a refused turn-boundary range moves to where this turn began
-   decodes by the server's kind, past a Librarian point too. *)
+   decodes by the server's kind. *)
 let test_a_front_at_this_turns_start_decodes () =
   let decode origin =
     Inspector.decode_forecast
@@ -84,55 +84,7 @@ let test_a_front_at_this_turns_start_decodes () =
   in
   Alcotest.(check bool) "at this turn's start" true
     (origin_of (decode {|{"kind":"this_turn_start_after_refusal"}|})
-     = Some Inspector.Carried_this_turn_start_after_refusal);
-  Alcotest.(check bool) "past the Librarian point" true
-    (origin_of
-       (decode
-          {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"this_turn_start_after_refusal"}}|})
-     = Some
-         (Inspector.Carried_past_librarian_point
-            { librarian_end_atom = 2
-            ; front = Inspector.Carried_this_turn_start_after_refusal
-            }))
-
-let test_a_start_past_the_librarian_point_decodes () =
-  let decode origin =
-    Inspector.decode_forecast
-      (Yojson.Safe.from_string
-         (Printf.sprintf
-            {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
-               "walk":{"lane_id":"r","declared":["r"]},
-               "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
-                 "parts":{"error":"not measured"},"history_atoms":12,
-                 "carried":{"first_atom":8,"kept_atoms":4,"transmitted_bytes":300,"preamble_bytes":null,
-                            "origin":%s,"counted_tokens":null},
-                 "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
-            origin))
-  in
-  (match
-     decode
-       {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"turn_record","turn":7}}|}
-   with
-   | Ok
-       { candidates =
-           [ { carried =
-                 Some
-                   { origin =
-                       Inspector.Carried_past_librarian_point
-                         { librarian_end_atom = 2; front = Inspector.Carried_from_turn_record { turn = 7 } }
-                   ; _
-                   }
-             ; _
-             }
-           ]
-       ; _
-       } -> ()
-   | Ok _ -> Alcotest.fail "the start past the point decoded as another origin"
-   | Error detail -> Alcotest.fail ("the start past the point decodes: " ^ detail));
-  Alcotest.(check bool) "a front that is itself the read end is refused" true
-    (Result.is_error
-       (decode
-          {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"covered","end_atom":2}}|}))
+     = Some Inspector.Carried_this_turn_start_after_refusal)
 
 (* Every origin the server writes decodes as the origin it names. The
    expected value is a match over the server's types, so a new source or
@@ -151,8 +103,6 @@ let expected_source : Front.source -> Inspector.forecast_carried_origin = functi
 
 let expected_origin : Front.origin -> Inspector.forecast_carried_origin = function
   | Front.Carried source -> expected_source source
-  | Front.Past_librarian_point { librarian_end_atom; source } ->
-    Inspector.Carried_past_librarian_point { librarian_end_atom; front = expected_source source }
   | Front.Covered { end_atom } -> Inspector.Carried_covered { end_atom }
   | Front.Turn_start { end_atom } -> Inspector.Carried_turn_start { end_atom }
   | Front.Turn_start_unknown { reason } -> Inspector.Carried_turn_start_unknown { reason }
@@ -169,10 +119,7 @@ let test_every_server_origin_decodes () =
     ]
   in
   let origins =
-    List.concat_map
-      (fun source ->
-         [ Front.Carried source; Front.Past_librarian_point { librarian_end_atom = 2; source } ])
-      sources
+    List.map (fun source -> Front.Carried source) sources
     @ [ Front.Covered { end_atom = 2 }
       ; Front.Turn_start { end_atom = 8 }
       ; Front.Turn_start_unknown { reason = "the boundary log is unreadable" }
@@ -623,8 +570,6 @@ let () =
             test_a_refused_range_origin_decodes
         ; Alcotest.test_case "a front at this turn's start decodes" `Quick
             test_a_front_at_this_turns_start_decodes
-        ; Alcotest.test_case "a start past the Librarian point decodes" `Quick
-            test_a_start_past_the_librarian_point_decodes
         ; Alcotest.test_case "every origin the server writes decodes" `Quick
             test_every_server_origin_decodes
         ; Alcotest.test_case "a not-applicable lane decodes as such" `Quick

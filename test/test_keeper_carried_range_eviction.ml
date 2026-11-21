@@ -284,12 +284,9 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
   outcome, List.rev !sent, recorded, !last
 ;;
 
-let opened_past_the_point = function
-  | Some (Front.Past_librarian_point { librarian_end_atom; _ }, _) -> Some librarian_end_atom
-  | Some
-      ( ( Front.Carried _ | Front.Covered _
-        | Front.Turn_start _ | Front.Turn_start_unknown _ )
-      , _ )
+(* The origin the last request of a turn reported, in its log word. *)
+let reported_origin = function
+  | Some (origin, (_ : int)) -> Some (Front.origin_to_string origin)
   | None -> None
 ;;
 
@@ -305,15 +302,15 @@ let test_a_librarian_behind_turn_resends_from_the_boundary () =
   in
   check (result int reject) "the boundary resend is accepted" (Ok 8) first;
   check (list int) "the point, then the turn boundary" [ 2; 8 ] first_sent;
-  check (option int) "the resend opened past the Librarian point" (Some 2)
-    (opened_past_the_point first_last);
+  check (option string) "the resend reports the front the refusal held"
+    (Some "turn_start_after_refusal") (reported_origin first_last);
   let second, second_sent, _, second_last =
     librarian_turn ~point:2 ~accepted:recorded ~limit:8 ~boundary:14 (exchanges ~from:0 8)
   in
   check (result int reject) "the next turn is accepted at once" (Ok 8) second;
   check (list int) "one request, from the accepted start" [ 8 ] second_sent;
-  check (option int) "the gap still opens at the point" (Some 2)
-    (opened_past_the_point second_last)
+  check (option string) "the next turn reports the turn record of the accepted start"
+    (Some "turn_record#1") (reported_origin second_last)
 ;;
 
 (* A provider 400 can carry [Unknown_invalid_request] without a typed
@@ -769,12 +766,12 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
     (8, "turn_start_at_max_context") (start ~front:ledger_4 signal);
   check at "no point, no signal: it stays" (4, "ledger") (start ~front:ledger_4 None);
   check at "a point behind the window: the accepted start moves to the boundary"
-    (8, "past_librarian_point:turn_start_at_max_context")
+    (8, "turn_start_at_max_context")
     (start ~continuity:2 ~accepted:record_4 signal);
   check at "a point behind the window, no signal: it stays"
-    (4, "past_librarian_point:turn_record#1") (start ~continuity:2 ~accepted:record_4 None);
+    (4, "turn_record#1") (start ~continuity:2 ~accepted:record_4 None);
   check at "a window that opened at the point moves past it"
-    (8, "past_librarian_point:turn_start_at_max_context") (start ~continuity:4 signal);
+    (8, "turn_start_at_max_context") (start ~continuity:4 signal);
   check at "a point past the window moved it already" (6, "covered")
     (start ~continuity:6 ~accepted:record_4 signal);
   check at "a front a refusal held past the window moved it already"
@@ -784,7 +781,7 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
      request moved is held, and the point yields to it. *)
   let held = Option.map (fun (s : Try_provider.past_max_context) -> s.moved_to) signal in
   check at "the rest of the turn opens at the held front"
-    (8, "past_librarian_point:turn_start_at_max_context")
+    (8, "turn_start_at_max_context")
     (start ~continuity:2 ?accepted:held None);
   (* The forecast asks the same rule and counts nothing for the moved range. *)
   let forecast =
@@ -819,13 +816,13 @@ let test_a_window_that_stays_holds_behind_the_librarian_point () =
   in
   let at = pair int string in
   check at "a window held at the accepted start stays behind the point"
-    (4, "past_librarian_point:turn_record#1") (start ~held_window:(held 4) ~point:6 4);
+    (4, "turn_record#1") (start ~held_window:(held 4) ~point:6 4);
   check at "a window not held follows the point" (6, "covered")
     (start ~held_window:None ~point:6 4);
   check at "a window held elsewhere follows the point" (6, "covered")
     (start ~held_window:(held 2) ~point:6 4);
   check at "a start past the point opens there, held or not"
-    (7, "past_librarian_point:turn_record#1") (start ~held_window:None ~point:6 7)
+    (7, "turn_record#1") (start ~held_window:None ~point:6 7)
 ;;
 
 (* The signal moves a window that stays to the end of what the Librarian

@@ -190,6 +190,41 @@ let test_only_a_finished_schedule_turn_serves () =
     statuses
 ;;
 
+let selection payload =
+  { Keeper_event_queue_state.source =
+      { Keeper_event_queue.post_id = "periodic-wake-test"
+      ; urgency = Keeper_event_queue.Immediate
+      ; arrived_at = 1.0
+      ; payload
+      }
+  ; admitted_revision = 1L
+  ; arrival = 1L
+  ; checkpoint_retentions = 0
+  ; first_admitted_at = None
+  }
+;;
+
+let test_the_batch_holds_a_due_schedule () =
+  let due_schedule =
+    selection
+      (Keeper_event_queue.Schedule_due
+         { Keeper_event_queue.occurrence_id = "schedule-occurrence:periodic"
+         ; schedule_instance_id = "instance-periodic"
+         ; schedule_id = "sched-periodic"
+         ; due_at = 1.0
+         ; payload_digest = "digest-periodic"
+         ; title = None
+         ; message = "patrol"
+         ; result_delivery = None
+         })
+  and other = selection Keeper_event_queue.Bootstrap in
+  check bool "a batch with a due schedule beside other work" true
+    (L.batch_has_due_schedule [ other; due_schedule ]);
+  check bool "a batch without a due schedule" false
+    (L.batch_has_due_schedule [ other ]);
+  check bool "an empty batch" false (L.batch_has_due_schedule [])
+;;
+
 let test_cadence_change_and_initial_warmup () =
   let cadence = Signal.consume_periodic ~now:0. in
   check (float 0.) "new interval uses previous periodic boundary" 480.
@@ -211,4 +246,5 @@ let () =
         test_a_served_due_schedule_moves_the_periodic_boundary
     ; test_case "only a finished schedule turn serves the boundary" `Quick
         test_only_a_finished_schedule_turn_serves
+    ; test_case "the batch holds a due schedule" `Quick test_the_batch_holds_a_due_schedule
     ; test_case "cadence updates and warmup" `Quick test_cadence_change_and_initial_warmup ] ]

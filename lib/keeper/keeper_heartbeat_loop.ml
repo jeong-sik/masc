@@ -202,12 +202,11 @@ type due_schedule_service =
   | Due_schedule_served
   | No_due_schedule_served
 
-let is_due_schedule_selection
-      (selection : Keeper_event_queue_state.pending_selection)
-  =
-  match Stimulus_intake.event_queue_trigger_of_stimulus selection.source with
-  | Some trigger -> trigger = Keeper_world_observation.Scheduled_automation_stimulus
-  | None -> false
+let batch_has_due_schedule (selections : Keeper_event_queue_state.pending_selection list) =
+  List.exists
+    (fun (selection : Keeper_event_queue_state.pending_selection) ->
+       Option.is_some (Keeper_event_queue.scheduled_wake selection.source))
+    selections
 ;;
 
 let due_schedule_service_of_cycle ~cycle_status ~stimuli_acked ~batch_has_due_schedule =
@@ -1507,8 +1506,7 @@ let run_keepalive_unified_turn
             ~cycle_status
             ~stimuli_acked:!stimuli_acked
             ~batch_has_due_schedule:
-              (List.exists
-                 is_due_schedule_selection
+              (batch_has_due_schedule
                  (Keeper_heartbeat_source_batch.selections !source_batch))
       }
     with

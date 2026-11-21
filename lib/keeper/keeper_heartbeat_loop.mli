@@ -178,6 +178,11 @@ val due_schedule_service_of_cycle :
     answers [No_due_schedule_served]: the periodic boundary is also how soon
     a turn that made no progress is tried again. *)
 
+val batch_has_due_schedule : Keeper_event_queue_state.pending_selection list -> bool
+(** Whether the cycle's admitted batch holds a due schedule
+    ({!Keeper_event_queue.scheduled_wake} answers [Some]). The loop passes it
+    to {!due_schedule_service_of_cycle}. *)
+
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;

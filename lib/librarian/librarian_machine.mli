@@ -155,7 +155,7 @@ type t =
   ; last_read : Librarian_last.read option
   (** How the last reading ask that set it ended (§12.2). [None]: none has
       since the boot. A [Resume] of a rest and an adoption leave it, and an
-      accepted [Restart_reading] empties it (§9.2). *)
+      accepted [Restart_reading] or [Skip_item] empties it (§9.2). *)
   ; last_room : Librarian_last.room option
   (** How the last room ask ended. A committed range read empties it: what
       it said is about the Memory before that read. *)

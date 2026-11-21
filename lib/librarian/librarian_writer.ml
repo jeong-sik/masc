@@ -222,7 +222,7 @@ let answer_stopped event (stop : Store.stop) =
   match event with
   | Turn_closed | Pulse | Declaration_changed | Ask_ended _ -> ()
   | Write { reply; _ } -> tell reply (Machine.Unavailable (Store_stopped stop))
-  | Resume reply | Adopt { reply; _ } | Restart_reading { reply; _ } ->
+  | Resume reply | Adopt { reply; _ } | Restart_reading { reply; _ } | Skip_item { reply; _ } ->
     tell reply (Machine.Not_done (Act_unavailable (Store_stopped stop)))
   | Retire reply -> tell reply Still_registered
 ;;

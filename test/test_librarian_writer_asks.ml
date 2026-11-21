@@ -644,6 +644,48 @@ let test_a_skip_during_the_call_passes_the_head () =
   Eio.Promise.resolve released ()
 ;;
 
+(* §12.4: an accepted skip empties how the last ask ended. A lane whose one
+   slot answers the head item with a 400 leaves the writer resting at the
+   bottom, with that refusal as its last read (§12.2). The operator's skip
+   passes the item, and the value no longer holds a refusal of it. *)
+let test_a_skip_at_the_bottom_forgets_the_last_read () =
+  let refusal = `Bad_request, {|{"error":{"message":"fixture refusal","type":"invalid_request_error"}}|} in
+  with_fixture ~reply:(fun (_ : int) (_ : string) -> refusal)
+  @@ fun fixture ->
+  let first = close_turn fixture 1 chat_text in
+  let ask, (_ : int Atomic.t) = counted fixture in
+  let writers = table fixture ask in
+  Writers.declaration_changed writers (Some (declared ()));
+  Writers.pulse writers [ keeper_id ];
+  let machine () =
+    match List.assoc_opt keeper_id (Writers.held writers) with
+    | Some (Writer.Held value) -> Some value
+    | Some (Writer.Held_booting | Writer.Held_retired) | None -> None
+  in
+  let resting =
+    until fixture "resting at the bottom" (fun () ->
+      match machine () with
+      | Some ({ Machine.state = Resting (_ : Librarian_store.t); _ } as value) -> Some value
+      | Some (_ : Machine.t) | None -> None)
+  in
+  check bool "the refusal is how the last ask ended" true (Option.is_some resting.last_read);
+  let skip target = Writers.skip_item writers keeper_id ~by:"operator-1" ~target in
+  let head =
+    match skip (Unreadable_unit { turn_log = log_id; line = first }) with
+    | Not_done (Not_the_head { now = Some (Head_item { line; _ } as head) }) when Int.equal line first ->
+      head
+    | (_ : Machine.act_answer) -> fail "the refusal does not name the first turn's item"
+  in
+  (match skip head with
+   | Done -> ()
+   | (_ : Machine.act_answer) -> fail "the head's name was refused");
+  await_commit fixture writers 1;
+  check (list string) "the skip is the one commit" [ "skip" ] (causes fixture);
+  match machine () with
+  | Some value -> check bool "and the last read is forgotten" true (Option.is_none value.last_read)
+  | None -> fail "the writer holds no value"
+;;
+
 (* §7.1: an ask reads the tail only while the writer waits for its next
    event. A commit appends its line and then replaces the snapshot file,
    and the writer names the new line after both, so a tail read in between
@@ -841,6 +883,8 @@ let () =
             test_a_restart_during_the_call_asks_once_more
         ; test_case "a skip during the call passes the head" `Quick
             test_a_skip_during_the_call_passes_the_head
+        ; test_case "a skip at the bottom forgets the last read" `Quick
+            test_a_skip_at_the_bottom_forgets_the_last_read
         ; test_case "an ask reads the tail between events" `Quick
             test_an_ask_reads_the_tail_between_events
         ] )

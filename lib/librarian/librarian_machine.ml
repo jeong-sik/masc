@@ -835,8 +835,9 @@ let skip_from place ~stores store ~by ~target =
 ;;
 
 (* §12.4: a refusal leaves the value as it is, so an ask that is out goes
-   on. An accepted skip cancels it, empties the size facts, and counts for
-   the width memory as a commit of what it passed (§7.6, §9.2). *)
+   on. An accepted skip cancels it, empties the size facts and how the last
+   ask ended, and counts for the width memory as a commit of what it passed
+   (§7.6, §9.2). The last ask was about the item it passed (§12.2). *)
 let skip_item place ~stores t ~at ~by ~target =
   match t.state with
   | Stopped stop -> t, Not_done (Act_unavailable (Store_stopped stop))
@@ -850,7 +851,7 @@ let skip_item place ~stores t ~at ~by ~target =
        (match Store.commit_skip store ~at ~hole reach with
         | Ok { store; line = (_ : Librarian_log.commit) } ->
           let narrowing = Librarian_width.committed t.narrowing passed in
-          next_ask place (moved t ~narrowing) ~at store, Done
+          next_ask place { (moved t ~narrowing) with last_read = None } ~at store, Done
         | Error stop ->
           (* §9.2: the line is not on disk, so the act is refused as the
              store stops. *)

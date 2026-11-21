@@ -1030,6 +1030,38 @@ let test_window_positions_name_the_rows_shown () =
       [ 1; 2; 3; 4; 5; 8; 20; 400 ])
     [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]
 
+(* At the live edge an oversized newest entry keeps exactly the pane's rows,
+   and its gap counts every row it does not show: an hour heading, wrapped
+   sender rows past the opening, older output and notes the room had no row
+   for. *)
+let test_a_live_edge_window_counts_every_row_it_hides () =
+  let long = String.concat "\n" (List.init 80 (Printf.sprintf "body line %02d")) in
+  let hour = Masc_tui_value.Local_hour.of_tm (Unix.gmtime 1_763_510_400.) in
+  let plain = entry Layout.Keeper "alpha" "" long in
+  let shapes =
+    [ "plain", plain
+    ; "with notes", { plain with diagnostics = [ "first note"; "second note"; "third note" ] }
+    ; "under an hour heading", entry ~timeline_bucket:hour Layout.Keeper "alpha" "" long
+    ; "from a long sender", entry ~speaker:(String.make 140 's') Layout.Inbound "alpha" "" long ] in
+  let question = entry Layout.User "you" "" "a question" in
+  List.iter (fun (name, newest) ->
+    List.iter (fun origin ->
+      List.iter (fun height ->
+        let rows = Layout.rows_of_entry ~origin ~inner_width:50 ~previous:(Some question) newest
+          |> List.drop_while (fun (row : Layout.row) -> row.kind = Layout.Spacing) in
+        let window = Layout.clamped_scrolled_rows ~origin ~inner_width:50 ~height ~requested:0
+            [ question; newest ] in
+        let shown, hidden = List.fold_left (fun (shown, hidden) (row : Layout.row) ->
+          match row.kind with
+          | Layout.Viewport_gap { hidden_rows } -> shown, hidden + hidden_rows
+          | Layout.Metadata _ | Body | Spacing -> shown + 1, hidden) (0, 0) window.rows in
+        let label = Printf.sprintf "%s, height %d" name height in
+        check int (label ^ ": the window fills the pane") height (List.length window.rows);
+        check int (label ^ ": shown and hidden rows are the entry's rows")
+          (List.length rows) (shown + hidden))
+        [ 3; 4; 5; 8; 20 ])
+      [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]) shapes
+
 (* The byte-by-byte scans the link readers used, kept here as the answer the
    jumping search must give. *)
 let reference_url_end text index =
@@ -1099,6 +1131,8 @@ let () =
         ; test_case "trailing blank lines draw no rows" `Quick
             test_trailing_blank_lines_draw_no_rows
         ; test_case "diagnostics follow the body" `Quick test_diagnostics_follow_the_body
+        ; test_case "a live edge window counts every row it hides" `Quick
+            test_a_live_edge_window_counts_every_row_it_hides
         ; test_case "window positions name the rows shown" `Quick
             test_window_positions_name_the_rows_shown
         ; test_case "a frame drawn again cuts no window" `Quick

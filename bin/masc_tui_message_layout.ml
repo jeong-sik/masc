@@ -2708,9 +2708,21 @@ let newest_entry_window ~inner_width ~height rows =
   (* The separator above an oversized entry must not replace its opening.
      It remains an ordinary physical row when scrolling through the history. *)
   let rows = List.drop_while (fun row -> row.kind = Spacing) rows in
-  (* Counted once: a 1MB reply at the live edge has some 50k rows, and the
-     window reads their number four times. *)
-  let total = List.length rows in
+  let is_diagnostic row =
+    match row.kind with
+    | Metadata Diagnostic -> true
+    | Metadata (Timeline_break _ | Origin _ | Continued_at _ | Sender) | Body | Spacing | Viewport_gap _ -> false
+  in
+  (* One walk counts the rows and finds whether any is a diagnostic: a 1MB
+     reply at the live edge has some 50k rows, and the window read their
+     number four times and walked them once more for a diagnostic. *)
+  let total, has_diagnostic =
+    let rec walk count seen = function
+      | [] -> count, seen
+      | row :: rest -> walk (count + 1) (seen || is_diagnostic row) rest
+    in
+    walk 0 false rows
+  in
   if total <= height then rows
   else
   (* A civil-hour rail is context, while the origin and latest body are the
@@ -2727,11 +2739,6 @@ let newest_entry_window ~inner_width ~height rows =
      the bottom up, so a diagnostic dropped at the live edge could never be
      reached. They stay, below the latest output, and take their rows from
      the opening and from older output. *)
-  let is_diagnostic row =
-    match row.kind with
-    | Metadata Diagnostic -> true
-    | Metadata (Timeline_break _ | Origin _ | Continued_at _ | Sender) | Body | Spacing | Viewport_gap _ -> false
-  in
   match height, rows with
   | 0, _ | _, [] -> []
   | 1, first :: _ -> [ first ]
@@ -2743,7 +2750,7 @@ let newest_entry_window ~inner_width ~height rows =
       (* Most entries carry no diagnostic; partitioning one would copy every
          row of it to find none. *)
       let diagnostics, output, output_length =
-        if List.exists is_diagnostic rest then
+        if has_diagnostic then
           let diagnostics, output = List.partition is_diagnostic rest in
           diagnostics, output, total - 1 - List.length diagnostics
         else [], rest, total - 1

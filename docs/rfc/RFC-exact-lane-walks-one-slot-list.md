@@ -121,7 +121,7 @@ slots = [
 
 ### 3.3 walker 하나, 걸음 하나에 slot 하나
 
-lane 일곱 곳의 조립을 `Exact_lane_walk` 하나로 바꾼다. verifier 는 3.10 에서 다룬다.
+verifier 를 뺀 여섯 곳의 조립을 `Exact_lane_walk` 하나로 바꾼다. verifier 는 3.10 에서 다룬다.
 
 한 걸음은 slot 하나다.
 - HTTP slot 은 후보 하나짜리 agent_core flow 를 walker 가 잡은 자리로 돌린다.
@@ -142,7 +142,7 @@ type visit =
 CLI 방문의 모양은 HITL 이 이미 쓰는 것을 옮긴다(`hitl_summary_cli_walk.ml`).
 
 **멈추는 경우는 둘뿐이다** (Q1).
-- masc 자기 기록이 실패했다. 방문 전 bind, 넘김 기록, 측정 callback 이 실패한 경우다.
+- masc 자기 일이 실패했다. 방문 전 bind, 넘김 기록, 측정 callback 이 실패했거나 flow 에 id 를 주지 못한 경우다.
 - 취소.
 
 나머지 실패는 HTTP 든 CLI 든 다음 slot 으로 넘어간다. 도메인 검증 거절도 넘어간다.
@@ -300,7 +300,6 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
 - **preset**: `<base-path>/.masc/presets/*/runtime.json` 은 `"cli_slots"` 를 들고 있다(2026-11-21 운영 둘). 읽는 코드(`Prompt_preset`)는 이 필드를 요구한다. 호환 reader 는 만들지 않는다. 운영자가 배포 때 한 번 다시 쓴다(Q2).
 - **걷기 영수증**: Add-on Exact 요청 기록(`lane-addons/exact-requests/`)과 keeper-librarian admission 기록이 영수증을 저장하고 다시 읽는다. 호환 reader 는 만들지 않는다. Add-on host 를 옮기는 PR 의 changelog 에 `Fresh state required` 로 적는다. Librarian 컷이 먼저 들어가면 뒤의 것은 없다.
 - **Board partition 진행 기록**(3.8): Q6 을 따른다.
-- **benchmark config 생성기**(`benchmarks/terminal_bench/configs/render_configs.py`)도 목록 하나를 쓰게 고친다.
 
 ## 5. 나눠 올리는 순서
 

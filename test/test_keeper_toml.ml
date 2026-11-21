@@ -2413,7 +2413,13 @@ let test_person_keeper_declaration_loads () =
       "the network mode is the shipped default"
       (Some "inherit")
       (Option.map Masc.Keeper_types_profile.network_mode_to_string defaults.network_mode);
-    check bool "the instructions are not blank" true (String.trim defaults.instructions <> "")
+    check
+      bool
+      "the instructions are not blank"
+      true
+      (match defaults.instructions with
+       | Some text -> String.trim text <> ""
+       | None -> false)
 ;;
 
 let () =

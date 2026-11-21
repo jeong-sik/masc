@@ -1296,6 +1296,9 @@
  masc.secret_patterns
  masc.agent_core))
 
+(include stanzas/test_keeper_librarian_goal_context_input_sources.inc)
+(include stanzas/test_keeper_librarian_retry_apply_disposition.inc)
+
 (test
  (name test_keeper_tool_execute_stream_close)
  (modules test_keeper_tool_execute_stream_close)
@@ -1711,6 +1714,8 @@
   masc.masc_eio_context
   agent_core
   eio_main))
+
+(include stanzas/test_keeper_librarian_cli_lane_admission_and_plan.inc)
 
 (test
  (name test_keeper_librarian_message_floor)
@@ -5482,6 +5487,7 @@
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
 (include stanzas/test_keeper_librarian_store_scope.inc)
+(include stanzas/test_keeper_librarian_store_scope_progress_and_queue.inc)
 (include stanzas/test_keeper_librarian_range.inc)
 (include stanzas/test_keeper_librarian_durable_consumer.inc)
 (include stanzas/test_keeper_librarian_floor_step_request.inc)
@@ -7152,7 +7158,9 @@
 (include stanzas/test_keeper_continuity_dispatch.inc)
 
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
+(include stanzas/test_keeper_librarian_capacity_callback_continuity_and_durable.inc)
 (include stanzas/test_keeper_librarian_preflight.inc)
+(include stanzas/test_keeper_librarian_preflight_real_dispatch.inc)
 (include stanzas/test_keeper_librarian_walk_failure_algebra.inc)
 
 (include stanzas/test_deployment_store_directories.inc)
@@ -7653,6 +7661,8 @@
  (modules test_keeper_librarian_durable_preparation)
  (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest astring masc_test_deps masc agent_core))
+
+(include stanzas/test_keeper_librarian_durable_preparation_question_admission.inc)
 
 (test
  (name test_keeper_librarian_durable_capture)

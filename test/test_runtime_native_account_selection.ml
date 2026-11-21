@@ -75,7 +75,7 @@ let child_environment runtime =
   | Codex_app_server execution ->
     Runtime_official_account.environment
       (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))
-  | Agent_core _ | Antigravity_cli _ -> fail "expected an official client"
+  | Agent_core _ | Antigravity_cli _ | Acp _ -> fail "expected an official client"
 
 let test_inherited_home client () =
   with_directory (fun first -> with_directory (fun second ->
@@ -105,7 +105,7 @@ let test_inherited_home client () =
                (Some (Filename.concat first ".claude.json"))
                (Runtime_claude_code.account_file (Runtime_official_account.Captured
                   (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))))
-           | Agent_core _ | Codex_app_server _ | Antigravity_cli _ ->
+           | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Acp _ ->
              fail "expected Claude execution")
         | Codex -> check (option string) "Codex store remains the admitted directory"
             (Some home) (env_value "CODEX_HOME" child)))))
@@ -126,7 +126,7 @@ let test_inherited_directory client () =
               (Runtime_claude_code.account_file (Runtime_official_account.Captured
                   (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))))
           | Codex_app_server _ -> ()
-          | Agent_core _ | Antigravity_cli _ -> fail "expected native execution")))))
+          | Agent_core _ | Antigravity_cli _ | Acp _ -> fail "expected native execution")))))
 
 let test_inherited_credential client () =
   with_directory (fun home ->
@@ -184,7 +184,7 @@ let test_claude_credential_diagnosis () =
               true (Runtime_claude_code.runs_on_environment_credential
                 (Runtime_official_account.Captured
                   (Runtime_account_access.account (Masc_test_deps.authorized_account execution.account_home))))
-          | Agent_core _ | Codex_app_server _ | Antigravity_cli _ ->
+          | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Acp _ ->
             fail "expected Claude execution"))))
 
 let test_private_codex_environment configured () =
@@ -220,7 +220,7 @@ env_key = "OPENAI_API_KEY"
                check string "private projection cannot change the original account scope"
                  (Filename.concat home ".codex")
                  (Runtime_account_access.home execution.account_home)
-             | Agent_core _ | Claude_code _ | Antigravity_cli _ ->
+             | Agent_core _ | Claude_code _ | Antigravity_cli _ | Acp _ ->
                fail "expected Codex execution"))))))
 
 let with_cwd directory run =
@@ -358,7 +358,7 @@ env_http_headers = { "X-Fixture" = "CUSTOM_GATEWAY_HEADER" }
                   (Runtime_official_account.names_asked_by_the_home
                      (Runtime_account_access.account
                         (Masc_test_deps.authorized_account execution.account_home)))
-              | Agent_core _ | Claude_code _ | Antigravity_cli _ ->
+              | Agent_core _ | Claude_code _ | Antigravity_cli _ | Acp _ ->
                 fail "expected Codex execution")))))))
 
 let test_retired_codex_profiles () =

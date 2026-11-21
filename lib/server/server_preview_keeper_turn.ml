@@ -449,6 +449,7 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
                let* account = authorize execution.account_home in
                call_codex ~env ~keeper_id ~runtime:prepared.Login.runtime ~execution ~account ~message
              | Runtime_execution.Antigravity_cli _
+             | Runtime_execution.Acp _
              | Runtime_execution.Agent_core _ -> Error E.Runtime_not_supported
            in
            Ok (prepared.Login.runtime_id, answer))

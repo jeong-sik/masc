@@ -54,6 +54,7 @@ let account authorized = authorized
 
 type host_client =
   | Antigravity
+  | Acp_client of Runtime_acp_client.driver
   | Api_provider
   | Model_list
   | Files_api
@@ -68,6 +69,7 @@ type host_account = Shared_by_single_user
 
 let host_client_name = function
   | Antigravity -> "Antigravity"
+  | Acp_client driver -> "ACP (" ^ Runtime_acp_client.driver_to_string driver ^ ")"
   | Api_provider -> "An API provider of the runtime table"
   | Model_list -> "A model-list or serving-window request of a setup connection"
   | Files_api -> "The Files API of masc_file_*"
@@ -274,7 +276,7 @@ let refusal_to_string = function
       "%s sends with the credential its operator declared, which is an account of the \
        host, and a multi-account process shares no account of its host"
       (host_client_name client)
-  | Host_account (Antigravity as client) ->
+  | Host_account ((Antigravity | Acp_client _) as client) ->
     Printf.sprintf
       "%s starts on an account of the host, and a multi-account process shares no \
        account of its host"

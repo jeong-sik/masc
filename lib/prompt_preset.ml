@@ -1020,7 +1020,7 @@ let unavailable_assignments content assignments =
       | Some runtime ->
         match runtime.execution, Runtime_instance.capabilities_for_runtime runtime with
         | (Runtime_execution.Codex_app_server _ | Claude_code _
-          | Antigravity_cli _), _ -> None
+          | Antigravity_cli _ | Acp _), _ -> None
         | Runtime_execution.Agent_core _, Some _ -> None
         | Runtime_execution.Agent_core sealed, None ->
           let provider_config = Runtime_account_access.api_declaration sealed in

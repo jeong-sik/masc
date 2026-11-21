@@ -320,7 +320,7 @@ let native_cause (cause : Fusion_official_client.failure) =
       | Runtime_claude_code.Unhandled_exception _
       | Runtime_claude_code.Timeout _ ) -> Native_failed Claude
   | Claude_admission_failure _ -> Native_failed Claude_admission
-  | Antigravity_failure _ -> Native_failed Antigravity
+  | Antigravity_failure _ | Acp_failure _ -> Native_failed Antigravity
 ;;
 
 

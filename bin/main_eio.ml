@@ -3028,6 +3028,11 @@ let runtime_probe_cmd_exit base_path runtime_id =
               Printf.eprintf "runtime %S (antigravity) exposes no login probe\n"
                 runtime_id;
               3
+          | Runtime_execution.Acp exec ->
+              print_string "unsupported\n";
+              Printf.eprintf "runtime %S (acp:%s) exposes no login probe\n"
+                runtime_id (Runtime_acp_client.driver_to_string exec.driver);
+              3
           | Runtime_execution.Claude_code exec ->
               (match runtime_probe_account ~base_path exec.account_home with
                | Error reasons -> runtime_probe_refused reasons

@@ -75,7 +75,7 @@ let materialize cfg bindings =
     (List.map (fun runtime -> runtime.Runtime_instance.id) runtimes);
   match List.map (fun runtime -> match runtime.Runtime_instance.execution with
     | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
-    | Codex_app_server _ | Claude_code _ | Antigravity_cli _ ->
+    | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Acp _ ->
       fail "reload fixture requires HTTP bindings") runtimes with
   | [first; second] -> first, second
   | _ -> fail "reload fixture requires two materialized bindings"
@@ -210,7 +210,7 @@ max-context = 4096
     | [runtime], [] ->
       (match runtime.Runtime_instance.execution with
        | Runtime_execution.Claude_code _ -> ()
-       | Agent_core _ | Codex_app_server _ | Antigravity_cli _ ->
+       | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Acp _ ->
          fail "native binding changed owner")
     | _ -> fail "native-only batch must not read unused HTTP declarations")
 

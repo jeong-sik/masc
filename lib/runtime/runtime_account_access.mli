@@ -79,6 +79,7 @@ val account : 'client authorized -> 'client Runtime_official_account.t
 (** A client that starts on an account of the host. *)
 type host_client =
   | Antigravity
+  | Acp_client of Runtime_acp_client.driver
   | Api_provider
       (** An Agent_core Runtime of the runtime table: see {!api_sealed}. *)
   | Model_list

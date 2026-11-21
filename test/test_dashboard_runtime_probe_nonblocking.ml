@@ -250,6 +250,7 @@ let fanout_provider ~id ~url =
   ; exact_body_timeout_s = None
   ; admission_priority_run_limit = None
   ; antigravity_cli = None
+  ; acp = None
   ; usage_read = None
   }
 

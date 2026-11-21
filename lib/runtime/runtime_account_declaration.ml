@@ -134,7 +134,7 @@ let client_of_provider table =
      | Ok
          ( Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api
          | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api
-         | Runtime_schema.Vertex_gemini_api )
+         | Runtime_schema.Vertex_gemini_api | Runtime_schema.Acp_runtime )
      | Error _ -> None)
 ;;
 

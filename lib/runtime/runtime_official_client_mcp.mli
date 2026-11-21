@@ -42,6 +42,13 @@ val create_session : unit -> session
 
 val snapshot_session : session -> session_snapshot
 
+val is_initialize_request : Yojson.Safe.t -> bool
+(** True iff the raw JSON-RPC payload decodes cleanly as an [initialize]
+    request carrying an [id]. Used by the HTTP transport so a fresh stateless
+    MCP client (e.g. Mistral Vibe [vibe-acp] opening a new session per tool
+    call, or a persistent ACP client reconnecting across turns) may re-run
+    [initialize] without an [MCP-Protocol-Version] header. *)
+
 val handle_message :
   session:session ->
   server_name:string ->

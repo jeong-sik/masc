@@ -365,6 +365,12 @@ let dispatch_message
         }
 ;;
 
+let is_initialize_request message_json =
+  match decode_message message_json with
+  | Ok { method_name = "initialize"; request_id = Some _; _ } -> true
+  | Ok _ | Error _ -> false
+;;
+
 let handle_message
       ~session
       ~server_name

@@ -89,7 +89,8 @@ let http_provider_takes_key (provider : Runtime_schema.provider) =
     , ( Runtime_schema.Vertex_gemini_api
       | Runtime_schema.Codex_app_server_runtime
       | Runtime_schema.Claude_code_runtime
-      | Runtime_schema.Antigravity_cli_runtime ) )
+      | Runtime_schema.Antigravity_cli_runtime
+      | Runtime_schema.Acp_runtime ) )
   | Runtime_schema.Cli (_ : string), _ -> false
 ;;
 

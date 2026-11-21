@@ -743,7 +743,9 @@ let apply_execution_input_capabilities execution
     (caps : Llm_provider.Capabilities.capabilities) =
   match execution with
   | Runtime_execution.Agent_core _ -> caps
-  | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _ ->
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Acp _ ->
     { caps with
       supports_multimodal_inputs = false
     ; supports_audio_input = false
@@ -787,7 +789,8 @@ let input_capabilities_of_runtime (rt : Runtime_instance.t) =
       provider_caps_of_config (Runtime_account_access.api_declaration sealed)
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _ ->
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Acp _ ->
       Llm_provider.Capabilities.default_capabilities
   in
   input_capabilities_with_runtime provider_caps rt

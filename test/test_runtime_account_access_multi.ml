@@ -663,6 +663,7 @@ let test_multi_account () =
           (fun client ->
             match client, Access.authorize_host client with
             | ( ( Access.Antigravity
+                | Access.Acp_client _
                 | Access.Api_provider
                 | Access.Model_list
                 | Access.Files_api
@@ -671,7 +672,9 @@ let test_multi_account () =
                 | Access.Systemone_cloud
                 | Access.Voice_endpoint )
               , Ok (_ : Access.host_account) ) -> Alcotest.fail "a host client was allowed"
-            | Access.Antigravity, Error (Access.Host_account Access.Antigravity)
+            | Access.Antigravity, Error (Access.Host_account Access.Antigravity) -> ()
+            | Access.Acp_client d1, Error (Access.Host_account (Access.Acp_client d2))
+              when Runtime_acp_client.equal_driver d1 d2 -> ()
             | Access.Api_provider, Error (Access.Host_account Access.Api_provider)
             | Access.Model_list, Error (Access.Host_account Access.Model_list)
             | Access.Files_api, Error (Access.Host_account Access.Files_api)
@@ -681,6 +684,7 @@ let test_multi_account () =
             | Access.Voice_endpoint, Error (Access.Host_account Access.Voice_endpoint)
               -> ()
             | ( ( Access.Antigravity
+                | Access.Acp_client _
                 | Access.Api_provider
                 | Access.Model_list
                 | Access.Files_api
@@ -694,6 +698,9 @@ let test_multi_account () =
                 (Access.refusal_to_string refusal))
           Access.
             [ Antigravity
+            ; Acp_client Runtime_acp_client.Antigravity
+            ; Acp_client Runtime_acp_client.Kimi_code
+            ; Acp_client Runtime_acp_client.Mistral_vibe
             ; Api_provider
             ; Model_list
             ; Files_api
@@ -736,7 +743,8 @@ let test_multi_account () =
             | Runtime_execution.Agent_core sealed -> sealed
             | Runtime_execution.Codex_app_server _
             | Runtime_execution.Claude_code _
-            | Runtime_execution.Antigravity_cli _ -> Alcotest.fail "the API runtime fixture is not Agent Core"
+            | Runtime_execution.Antigravity_cli _
+            | Runtime_execution.Acp _ -> Alcotest.fail "the API runtime fixture is not Agent Core"
           in
           (match Access.authorize_api sealed with
            | Error (Access.Host_account Access.Api_provider) -> ()
@@ -1374,7 +1382,8 @@ default = "claude_code.sonnet"
           | Runtime_execution.Claude_code exec -> exec.account_home
           | Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Antigravity_cli _ ->
+          | Runtime_execution.Antigravity_cli _
+          | Runtime_execution.Acp _ ->
             Alcotest.fail "expected Claude_code execution from of_person_template"
         in
         Alcotest.(check string)
@@ -1633,7 +1642,8 @@ default = "claude_code.sonnet"
              | Runtime_execution.Codex_app_server exec -> exec.account_home
              | Runtime_execution.Agent_core _
              | Runtime_execution.Claude_code _
-             | Runtime_execution.Antigravity_cli _ ->
+             | Runtime_execution.Antigravity_cli _
+             | Runtime_execution.Acp _ ->
                Alcotest.fail "expected Codex_app_server execution")
           | Error error -> Alcotest.fail (Runtime_account_runtime.error_to_string error)
         in

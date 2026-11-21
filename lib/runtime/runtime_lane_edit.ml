@@ -15,7 +15,8 @@ let exact_slot_list_admitting api_format =
       (match api_format with
        | Runtime_schema.Codex_app_server_runtime
        | Runtime_schema.Antigravity_cli_runtime
-       | Runtime_schema.Claude_code_runtime -> Cli_slots
+       | Runtime_schema.Claude_code_runtime
+       | Runtime_schema.Acp_runtime -> Cli_slots
        | Runtime_schema.Messages_api
        | Runtime_schema.Chat_completions_api
        | Runtime_schema.Ollama_api

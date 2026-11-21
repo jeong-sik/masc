@@ -61,6 +61,7 @@ let runpod_provider =
   ; exact_body_timeout_s = None
   ; admission_priority_run_limit = None
   ; antigravity_cli = None
+  ; acp = None
   ; account_home = None
   ; usage_read = None
   }
@@ -1673,7 +1674,8 @@ let agent_core_provider_config_or_fail runtime =
   | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Acp _ ->
     fail "expected Agent Core runtime"
 
 let test_dispatch_rejects_missing_declared_env_credential () =
@@ -2548,7 +2550,8 @@ is-default = true
             | Ok (Runtime_execution.Agent_core sealed) -> Masc_test_deps.api_config sealed
             | Ok (Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
-                 | Runtime_execution.Antigravity_cli _) ->
+                 | Runtime_execution.Antigravity_cli _
+                 | Runtime_execution.Acp _) ->
               fail "HTTP binding selected an official client"
             | Error message -> failf "binding failed: %s" message)
          | _ -> fail "expected one declared binding"

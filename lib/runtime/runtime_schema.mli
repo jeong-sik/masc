@@ -16,6 +16,7 @@ type api_format =
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime
+  | Acp_runtime
 [@@deriving show, eq]
 
 type output_schema_channel =
@@ -85,6 +86,23 @@ type antigravity_cli_options =
         (** [add-dirs] — extra absolute directories the CLI may read beside
             the keeper base path, each passed as its own [--add-dir]. Empty
             means the base path stays the only workspace root. *)
+  }
+[@@deriving show, eq]
+
+type acp_driver = Runtime_acp_client.driver =
+  | Antigravity
+  | Kimi_code
+  | Mistral_vibe
+[@@deriving show, eq]
+
+type acp_options =
+  { driver : acp_driver
+  ; args : string list
+  ; strip_env : string list
+  ; skills_dirs : string list
+  ; effort : string option
+  ; mode : string option
+  ; timeout_s : float
   }
 [@@deriving show, eq]
 
@@ -177,6 +195,8 @@ type provider =
         official-client provider, is refused at load. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Present exactly when [protocol = "antigravity-cli"]. *)
+  ; acp : acp_options option
+    (** Present exactly when [protocol = "acp"]. *)
   ; usage_read : usage_read option
     (** [providers.<id>.usage-read]; [None] when not declared. *)
   }

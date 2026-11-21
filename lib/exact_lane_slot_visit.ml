@@ -201,6 +201,12 @@ let antigravity (error : Runtime_antigravity.error) : 'rejection Outcome.unanswe
   | Protocol_error _ | State_callback_failed _ | Turn_failed _ | Result_not_completed _
   | Actions_denied _ | Process_exited _ | Unhandled_exception _ | Timeout _ -> Silent Lost
 
+let acp (error : Runtime_acp_client.error) : 'rejection Outcome.unanswered =
+  match error with
+  | Invalid_config _ | Spawn_refused _ -> Silent Unavailable
+  | Protocol_error _ | Rpc_error _ | Timeout _ | Process_exited _ | Client_closed ->
+    Silent Lost
+
 let client (bodies : 'rejection bodies) (failure : Fusion_official_client.failure)
   : 'rejection Outcome.unanswered
   =
@@ -208,6 +214,7 @@ let client (bodies : 'rejection bodies) (failure : Fusion_official_client.failur
   | Codex_failure error -> codex error
   | Claude_failure error | Claude_admission_failure error -> claude error
   | Antigravity_failure error -> antigravity error
+  | Acp_failure error -> acp error
   | Missing_reply -> Silent (Unusable bodies.empty_or_partial)
   | Setup_failure _ -> Silent Unavailable
 

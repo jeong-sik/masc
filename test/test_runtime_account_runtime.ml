@@ -284,7 +284,8 @@ streaming = true
               (Result.is_error (Runtime_account_access.authorize_api sealed))
           | Runtime_execution.Claude_code _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Antigravity_cli _ -> fail "expected Agent_core execution"));
+          | Runtime_execution.Antigravity_cli _
+          | Runtime_execution.Acp _ -> fail "expected Agent_core execution"));
       check
         string
         "HTTP template with account_home is refused"

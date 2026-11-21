@@ -683,6 +683,93 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
     | Some unavailable -> Error (Unavailable unavailable)
     | None -> (
       match runtime.execution with
+      | Runtime_execution.Acp execution ->
+        (match authorize_host (Runtime_account_access.Acp_client execution.driver) with
+         | Error failure -> Error failure
+         | Ok _host ->
+           Eio.Switch.run (fun acp_sw ->
+             let bridge =
+               Runtime_official_client_mcp_http.start
+                 ~sw:acp_sw
+                 ~net
+                 ~secure_random
+                 ~server_name:"masc"
+                 ~tool_specs:(fun () ->
+                   [ `Assoc
+                       [ "name", `String tool.name
+                       ; "description", `String tool.description
+                       ; "inputSchema", tool.input_schema
+                       ]
+                   ])
+                 ~tool_execution_mode:(fun ~name ~arguments ->
+                   if String.equal name tool.name
+                   then Some (tool.execution_mode arguments)
+                   else None)
+                 ~call_tool:(fun ~name ~call_id ~arguments ->
+                   if String.equal name tool.name
+                   then (
+                     let res = tool.call ~call_id arguments in
+                     Some
+                       { Runtime_official_client_mcp_http.outcome =
+                           { Runtime_official_client_mcp.success = res.success
+                           ; content = res.content
+                           ; content_blocks = res.content_blocks
+                           }
+                       ; stop = res.abort_turn
+                       ; after_response_sent = ignore
+                       })
+                   else None)
+                 ()
+             in
+             let ep = Runtime_official_client_mcp_http.endpoint bridge in
+             let mcp_server : Runtime_acp_client.mcp_http_server =
+               { name = "masc"; url = ep.url; headers = ep.headers }
+             in
+             let acp_config : Runtime_acp_client.config =
+               { driver = execution.driver
+               ; cli_path = execution.cli_path
+               ; args = execution.args
+               ; strip_env = execution.strip_env
+               ; skills_dirs = execution.skills_dirs
+               ; cwd = cwd_path
+               ; oauth_source = execution.oauth_source
+               ; dangerously_skip_permissions = false
+               ; admission_timeout_s = Float.min timeout_s execution.timeout_s
+               }
+             in
+             let map_err = function
+               | Runtime_acp_client.Spawn_refused _ as err ->
+                 Error (Unavailable (Client_not_started (Runtime_acp_client.error_to_string err)))
+               | Runtime_acp_client.Invalid_config _ as err ->
+                 Error (Unavailable (Invalid_configuration (Runtime_acp_client.error_to_string err)))
+               | Runtime_acp_client.Timeout _ -> Error Timed_out
+               | ( Runtime_acp_client.Protocol_error _
+                 | Runtime_acp_client.Rpc_error _
+                 | Runtime_acp_client.Process_exited _
+                 | Runtime_acp_client.Client_closed ) as err ->
+                 Error (Provider_rejected (Runtime_acp_client.error_to_string err))
+             in
+             match Runtime_acp_client.start ~sw:acp_sw ~proc_mgr:mgr ~clock ~config:acp_config ~mcp_server () with
+             | Error err -> map_err err
+             | Ok client ->
+               let mode =
+                 Option.value execution.mode
+                   ~default:(Runtime_acp_client.mode_of_posture execution.driver Runtime_native_tools.Native_none)
+               in
+               (match Runtime_acp_client.new_session client ~cwd:cwd_path ~mcp_server ~mode ~model:execution.model ?effort:execution.effort () with
+                | Error err -> map_err err
+                | Ok session ->
+                  (match Runtime_acp_client.prompt client ~session_id:session.session_id
+                           ~blocks:[ Runtime_acp_client.Text_block prompt ]
+                           ~timeout_s:(Some timeout_s)
+                           ~permission_policy:
+                             (Runtime_acp_client.Allow_masc_mcp_only
+                                { mcp_server_name = "masc"
+                                ; allowed_tool_names = [ tool.name ]
+                                })
+                           () with
+                   | Error err -> map_err err
+                   | Ok res -> Ok { model = execution.model; text = res.text }))))
       | Runtime_execution.Antigravity_cli execution ->
         (match authorize_host Runtime_account_access.Antigravity with
          | Error failure -> Error failure

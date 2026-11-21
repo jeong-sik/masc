@@ -72,6 +72,56 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
         ~context_injector:None ~context:None ~event_bus:None
         ~raw_trace:None ~on_event:None ~config () in
     outcome.result, outcome.settled_session, outcome.effect_disposition
+  | S.Acp ->
+    let config : Runtime_execution.acp_client =
+      { driver = Runtime_acp_client.Antigravity
+      ; cli_path
+      ; args = [ "acp" ]
+      ; strip_env = []
+      ; skills_dirs = []
+      ; model = "synthetic-model"
+      ; effort = None
+      ; mode = None
+      ; oauth_source = None
+      ; timeout_s = 1.
+      }
+    in
+    let acp_host =
+      Masc_test_deps.host_account
+        (Runtime_account_access.Acp_client Runtime_acp_client.Antigravity)
+    in
+    let outcome =
+      Keeper_acp_runtime.run
+        ~read_retained_media:None
+        ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only
+        ~host:acp_host
+        ~configured_reasoning_effort:None
+        ~turn_timeout_s:None
+        ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+        ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+        ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
+        ~accepts_image_input:false
+        ~runtime_id
+        ~keeper_name
+        ~pre_tool_rejects:(ref [])
+        ~base_path
+        ~goal:"synthetic claim probe"
+        ~goal_blocks:None
+        ~system_prompt:"Synthetic claim probe."
+        ~tools:[]
+        ~initial_messages:[]
+        ~model_input_projection:None
+        ~on_transmitted_model_input:transmitted
+        ~hooks:None
+        ~context_injector:None
+        ~context:None
+        ~event_bus:None
+        ~raw_trace:None
+        ~on_event:None
+        ~config
+        ()
+    in
+    outcome.result, outcome.settled_session, outcome.effect_disposition
 
 let read_recovery ~base_path ~keeper_name =
   match S.load ~base_path ~keeper_name |> Result.map_error S.read_error_to_string with
@@ -391,4 +441,8 @@ let () =
             (check_case client_kind label reason))
           [ S.Effect_fenced, "effect-fenced"
           ; S.Bootstrap_floor_exceeded, "bootstrap-floor" ])
-        [ S.Codex, "codex"; S.Claude_code, "claude"; S.Antigravity, "antigravity" ] ]
+        [ S.Codex, "codex"
+        ; S.Claude_code, "claude"
+        ; S.Antigravity, "antigravity"
+        ; S.Acp, "acp"
+        ] ]

@@ -3295,3 +3295,230 @@ models = [
   "codex-gpt-5-6-sol-ultra",
   "codex-gpt-5-6-terra-ultra",
 ]
+
+# ── Unified Persistent ACP v1 Official Runtimes ──────────────────────────────
+# Persistent per-Keeper ACP v1 JSON-RPC 2.0 stdio runtimes for Antigravity
+# (`agy acp`), Kimi Code (`kimi acp`), and Mistral Vibe (`vibe-acp`).
+# Each Keeper owns an isolated persistent child + loopback HTTP MCP bridge so
+# MASC internal/builtin tools and skills run with zero cross-Keeper blast radius.
+
+[providers.antigravity_acp]
+display-name = "Antigravity ACP"
+protocol = "acp"
+driver = "antigravity"
+command = "agy"
+args = ["acp"]
+is-non-interactive = true
+timeout-s = 180.0
+
+[providers.antigravity_acp.credentials]
+type = "file"
+path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
+
+[models.acp-agy-gemini-4-neon-medium]
+api-name = "gemini-4-neon-medium"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-gemini-4-neon-medium.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-gemini-4-neon-medium]
+wizard-default = true
+
+[models.acp-agy-gemini-4-neon-high]
+api-name = "gemini-4-neon-high"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-gemini-4-neon-high.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-gemini-4-neon-high]
+
+[models.acp-agy-gemini-4-carbon-high]
+api-name = "gemini-4-carbon-high"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-gemini-4-carbon-high.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-gemini-4-carbon-high]
+
+[models.acp-agy-gemini-4-argon-high]
+api-name = "gemini-4-argon-high"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-gemini-4-argon-high.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-gemini-4-argon-high]
+
+[models.acp-agy-gemini-4-hydrogen-high]
+api-name = "gemini-4-hydrogen-high"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-gemini-4-hydrogen-high.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-gemini-4-hydrogen-high]
+
+[models.acp-agy-gemini-4-hydrogen-xhigh]
+api-name = "gemini-4-hydrogen-xhigh"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-gemini-4-hydrogen-xhigh.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-gemini-4-hydrogen-xhigh]
+
+[models.acp-agy-claude-opus-5-5-thinking]
+api-name = "claude-opus-5-5-thinking"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-claude-opus-5-5-thinking.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-claude-opus-5-5-thinking]
+
+[models.acp-agy-claude-sonnet-5-5-thinking]
+api-name = "claude-sonnet-5-5-thinking"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-claude-sonnet-5-5-thinking.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-claude-sonnet-5-5-thinking]
+
+[models.acp-agy-gemini-3-8-flash-high]
+api-name = "gemini-3.8-flash-high"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-gemini-3-8-flash-high.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-gemini-3-8-flash-high]
+
+[providers.kimi_acp]
+display-name = "Kimi Code ACP"
+protocol = "acp"
+driver = "kimi_code"
+command = "kimi"
+args = ["acp"]
+is-non-interactive = true
+timeout-s = 180.0
+
+[models.acp-kimi-k3-1-pro]
+api-name = "kimi-code/k3.1-pro"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-kimi-k3-1-pro.capabilities]
+supports-image-input = true
+
+[kimi_acp.acp-kimi-k3-1-pro]
+wizard-default = true
+
+[models.acp-kimi-k3-1-pro-highspeed]
+api-name = "kimi-code/k3.1-pro-highspeed"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-kimi-k3-1-pro-highspeed.capabilities]
+supports-image-input = true
+
+[kimi_acp.acp-kimi-k3-1-pro-highspeed]
+
+[models.acp-kimi-k3]
+api-name = "kimi-code/k3"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[kimi_acp.acp-kimi-k3]
+
+[models.acp-kimi-k3-256k]
+api-name = "kimi-code/k3-256k"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[kimi_acp.acp-kimi-k3-256k]
+
+[models.acp-kimi-for-coding]
+api-name = "kimi-code/kimi-for-coding"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[kimi_acp.acp-kimi-for-coding]
+
+[models.acp-kimi-for-coding-highspeed]
+api-name = "kimi-code/kimi-for-coding-highspeed"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[kimi_acp.acp-kimi-for-coding-highspeed]
+
+[providers.vibe_acp]
+display-name = "Mistral Vibe ACP"
+protocol = "acp"
+driver = "mistral_vibe"
+command = "vibe-acp"
+# Strip MISTRAL_API_KEY so vibe-acp uses the active os_keyring Pro subscription.
+strip-env = ["MISTRAL_API_KEY"]
+is-non-interactive = true
+timeout-s = 180.0
+
+[models.acp-vibe-default]
+api-name = "default"
+max-context = 400000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[vibe_acp.acp-vibe-default]
+wizard-default = true
+
+[models.acp-vibe-devstral-2]
+api-name = "devstral-2"
+max-context = 400000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[vibe_acp.acp-vibe-devstral-2]

@@ -91,6 +91,7 @@ let client_kind (runtime : Runtime_instance.t) =
   | Runtime_execution.Codex_app_server _ -> "codex"
   | Runtime_execution.Claude_code _ -> "claude_code"
   | Runtime_execution.Antigravity_cli _ -> "antigravity"
+  | Runtime_execution.Acp _ -> "acp"
 ;;
 
 let descriptor_schema_tool (descriptor : Keeper_tool_descriptor.t) name =
@@ -425,12 +426,22 @@ let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime_instance.t
       ~default:Runtime_native_tools.antigravity_default
       ~none_supported:false
     |> Result.map Option.some
+  | Runtime_execution.Acp config ->
+    Keeper_official_client_host.resolve_native_posture
+      ~posture_source:Runtime_native_tools.Declared_on_disk
+      ~base_path
+      ~keeper_name
+      ~client_label:("ACP(" ^ Runtime_acp_client.driver_to_string config.driver ^ ")")
+      ~default:Runtime_native_tools.Native_none
+      ~none_supported:true
+    |> Result.map Option.some
 ;;
 
 let runtime_tool_delivery (runtime : Runtime_instance.t) =
   match runtime.execution with
   | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Antigravity_cli _ -> Tools_delivered
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Acp _ -> Tools_delivered
   | Runtime_execution.Claude_code _ | Runtime_execution.Agent_core _ ->
     if Runtime_tool_support.declares_tools runtime
     then Tools_delivered

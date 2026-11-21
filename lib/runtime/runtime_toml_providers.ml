@@ -261,6 +261,145 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
          (error
             (path ^ "." ^ key)
             (Printf.sprintf "%s is valid only for protocol antigravity-cli" key)))
+  | Acp_runtime ->
+    (match
+       List.find_opt
+         (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
+         ([ "agent"; "add-dirs" ] @ antigravity_forbidden_option_keys)
+     with
+     | None -> Ok None
+     | Some key ->
+       Error
+         (error
+            (path ^ "." ^ key)
+            (Printf.sprintf "%s is valid only for protocol antigravity-cli" key)))
+;;
+
+let acp_exclusive_option_keys = [ "driver"; "args"; "strip-env"; "skills-dirs"; "mode" ]
+
+let parse_string_list_field ~(path : string) ~(key : string) (tbl : Otoml.t) =
+  match Otoml.find_opt tbl Fun.id [ key ] with
+  | None -> Ok []
+  | Some (Otoml.TomlArray entries) ->
+    let items, errs =
+      List.fold_left
+        (fun (items, errs) entry ->
+           match entry with
+           | Otoml.TomlString value when String.trim value = "" ->
+             items, errs @ error (path ^ "." ^ key) (key ^ " entries must be non-empty")
+           | Otoml.TomlString value -> items @ [ value ], errs
+           | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+           | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+           | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+           | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ->
+             items, errs @ error (path ^ "." ^ key) (key ^ " entries must be strings"))
+        ([], [])
+        entries
+    in
+    (match errs with
+     | [] -> Ok items
+     | errs -> Error errs)
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+      | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+      | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlTable _
+      | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) ->
+    Error (error (path ^ "." ^ key) (key ^ " must be an array of strings"))
+;;
+
+let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
+    (api_format : Runtime_schema.api_format)
+  : (Runtime_schema.acp_options option, parse_error list) result
+  =
+  match api_format with
+  | Runtime_schema.Acp_runtime ->
+    let driver_result =
+      match typed_find "a string" path tbl "driver" Otoml.get_string with
+      | Error _ as err -> err
+      | Ok None ->
+        Error (error (path ^ ".driver") "driver is required for protocol acp")
+      | Ok (Some raw) ->
+        (match Runtime_acp_client.driver_of_string raw with
+         | Some driver -> Ok driver
+         | None ->
+           let valid =
+             List.map Runtime_acp_client.driver_to_string Runtime_acp_client.all_drivers
+             |> String.concat ", "
+           in
+           Error
+             (error
+                (path ^ ".driver")
+                (Printf.sprintf "unknown ACP driver %S; expected one of %s" raw valid)))
+    in
+    let args_result = parse_string_list_field ~path ~key:"args" tbl in
+    let strip_env_result = parse_string_list_field ~path ~key:"strip-env" tbl in
+    let skills_dirs_result =
+      match parse_string_list_field ~path ~key:"skills-dirs" tbl with
+      | Error _ as err -> err
+      | Ok raw_dirs ->
+        let expanded =
+          List.map (Env_config_core.expand_home_prefix_under ~home) raw_dirs
+        in
+        (match List.find_opt Filename.is_relative expanded with
+         | None -> Ok expanded
+         | Some rel ->
+           Error
+             (error
+                (path ^ ".skills-dirs")
+                (Printf.sprintf "skills-dirs entries must be absolute paths, got %S" rel)))
+    in
+    let effort_result = antigravity_optional_string ~path tbl "effort" in
+    let mode_result = antigravity_optional_string ~path tbl "mode" in
+    let timeout_result =
+      match
+        strict_float_find path tbl "timeout-s"
+        |> positive_finite_float_opt_field ~path ~key:"timeout-s"
+      with
+      | Error _ as err -> err
+      | Ok None -> Ok Runtime_acp_client.default_timeout_s
+      | Ok (Some timeout_s) -> Ok timeout_s
+    in
+    (match
+       driver_result, args_result, strip_env_result, skills_dirs_result, effort_result,
+       mode_result, timeout_result
+     with
+     | Error e, _, _, _, _, _, _
+     | _, Error e, _, _, _, _, _
+     | _, _, Error e, _, _, _, _
+     | _, _, _, Error e, _, _, _
+     | _, _, _, _, Error e, _, _
+     | _, _, _, _, _, Error e, _
+     | _, _, _, _, _, _, Error e -> Error e
+     | Ok driver, Ok args, Ok strip_env, Ok skills_dirs, Ok effort, Ok mode, Ok timeout_s ->
+       Ok
+         (Some
+            { Runtime_schema.driver
+            ; args
+            ; strip_env
+            ; skills_dirs
+            ; effort
+            ; mode
+            ; timeout_s
+            }))
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api
+  | Codex_app_server_runtime
+  | Antigravity_cli_runtime
+  | Claude_code_runtime ->
+    (match
+       List.find_opt
+         (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
+         acp_exclusive_option_keys
+     with
+     | None -> Ok None
+     | Some key ->
+       Error
+         (error
+            (path ^ "." ^ key)
+            (Printf.sprintf "%s is valid only for protocol acp" key)))
 ;;
 
 let usage_read_key = "usage-read"
@@ -400,7 +539,8 @@ let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   | Runtime_schema.Vertex_gemini_api -> []
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Claude_code_runtime ->
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Acp_runtime ->
     error
       path
       "usage-read is only for an API-key HTTP provider; this protocol runs an \
@@ -510,6 +650,7 @@ let provider_keys =
   ; Runtime_schema.connect_timeout_s_key; Runtime_schema.exact_body_timeout_s_key
   ; Runtime_schema.admission_priority_run_limit_key
   ] @ antigravity_cli_option_keys @ antigravity_forbidden_option_keys
+  @ acp_exclusive_option_keys
 ;;
 
 let parse_provider ~home (id : string) (tbl : Otoml.t)
@@ -603,7 +744,7 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
               Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace"))
          | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api
          | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
-         | Runtime_schema.Antigravity_cli_runtime -> Error (error (path ^ ".account-home") "account-home is valid only for Claude Code and Codex official clients"))
+         | Runtime_schema.Antigravity_cli_runtime | Runtime_schema.Acp_runtime -> Error (error (path ^ ".account-home") "account-home is valid only for Claude Code and Codex official clients"))
     in
     let is_non_interactive_result =
       typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false
@@ -615,9 +756,10 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
       | None -> Ok None
     in
     let antigravity_cli_result = antigravity_cli_options ~path tbl api_format in
-    (match credentials_result, antigravity_cli_result with
-     | Error errs, _ | _, Error errs -> Error errs
-     | Ok credentials, Ok antigravity_cli ->
+    let acp_result = parse_acp_options ~home ~path tbl api_format in
+    (match credentials_result, antigravity_cli_result, acp_result with
+     | Error errs, _, _ | _, Error errs, _ | _, _, Error errs -> Error errs
+     | Ok credentials, Ok antigravity_cli, Ok acp ->
        let capabilities_result =
          match Otoml.find_opt tbl Fun.id [ "capabilities" ] with
          | None -> Ok None
@@ -741,6 +883,7 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
             ; exact_body_timeout_s
             ; admission_priority_run_limit
             ; antigravity_cli
+            ; acp
             ; usage_read
             }))
 ;;

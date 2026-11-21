@@ -154,9 +154,9 @@ let resolve_provider (provider : Runtime_schema.provider) =
   | Claude_code_runtime, _ ->
     native (Runtime_claude_code.account_file (Runtime_official_account.Current provider.account_home))
       (fun path -> Claude_account path)
-  | Antigravity_cli_runtime, Some (Runtime_schema.File path) ->
+  | (Antigravity_cli_runtime | Acp_runtime), Some (Runtime_schema.File path) ->
     Some (Ok (Google_oauth path))
-  | Antigravity_cli_runtime, (Some (Runtime_schema.Env _ | Inline _) | None) -> None
+  | (Antigravity_cli_runtime | Acp_runtime), (Some (Runtime_schema.Env _ | Inline _) | None) -> None
   | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _ ->
     None
 

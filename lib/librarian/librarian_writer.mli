@@ -143,6 +143,8 @@ val skip_item
   -> target:Librarian_machine.skip_target
   -> Librarian_machine.act_answer asked
 
+val skip_line : t -> offset:int -> Librarian_machine.act_answer asked
+
 type retirement =
   | Retired_now (** The lock is released and the fiber has ended. *)
   | Still_registered (** The Keeper is registered. The writer goes on. *)

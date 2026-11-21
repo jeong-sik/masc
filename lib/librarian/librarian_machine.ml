@@ -690,6 +690,7 @@ type act_refusal =
   | Not_replaced
   | Turn_log_unread
   | Not_the_head of { now : skip_target option }
+  | Not_the_faulted_line
   | Content_unread
   | Act_unavailable of unavailable
 
@@ -868,6 +869,66 @@ let skip_item place ~stores t ~at ~by ~target =
         | Ok { store; line = (_ : Librarian_log.commit) } ->
           let narrowing = Librarian_width.committed t.narrowing passed in
           next_ask place { (moved t ~narrowing) with last_read = None } ~at store, Done
+        | Error stop ->
+          (* §9.2: the line is not on disk, so the act is refused as the
+             store stops. *)
+          { t with state = Stopped stop }, Not_done (Act_unavailable (Store_stopped stop))))
+;;
+
+(* What a skip of a line passes, read from the disk when it is taken. The
+   reader, run again from the tail, stops at a line it does not read only
+   when no unit before that line holds an item, and never at a line before
+   the stored offset. The line is taken only when it is the one [offset]
+   names. The commit ends where the line ends and is covered to where the
+   units before the line ended, so the line moves no mark. A replaced file
+   and a lost position come before any line in the reader's order: a
+   restart passes those, not this act. *)
+let line_to_pass place store ~offset =
+  match
+    Librarian_unread.read ~turns_path:(turns_path place) ~until:(First_with_items 1)
+      (Store.tail store)
+  with
+  | Error (Unread { detail = (_ : string) }) -> Error Turn_log_unread
+  | Error (Fault (Turn_log_replaced _ | Position_lost _ | Line_unreadable _ | Content_unreadable _))
+  | Ok
+      { stop = Log_end | Limit_reached | Unannounced_reset _
+      ; spans = (_ : Librarian_unread.span list)
+      ; bytes = (_ : int)
+      } -> Error Not_the_faulted_line
+  | Ok
+      { stop =
+          Unreadable_line
+            { offset = at; past_line; from; sha; reason = (_ : Librarian_unread.unreadable) }
+      ; spans = (_ : Librarian_unread.span list)
+      ; bytes = (_ : int)
+      } ->
+    if Int.equal at offset
+    then (
+      let reach : Read_result.reach =
+        { line = offset; within = Whole; covered = from; turn_log_offset = past_line }
+      in
+      Ok (Librarian_log.Line_unreadable { offset; sha }, reach))
+    else Error Not_the_faulted_line
+;;
+
+(* §12.4: a refusal leaves the value as it is, so an ask that is out goes
+   on. An accepted skip cancels it and empties the size facts and how the
+   last ask ended, which was about the line it passed (§9.2, §12.2). The
+   line passes no unit with items, so the width memory is kept. *)
+let skip_line place t ~at ~offset =
+  match t.state with
+  | Stopped stop -> t, Not_done (Act_unavailable (Store_stopped stop))
+  | Idle { store; seen_length = (_ : int option) }
+  | Asking { store; asking = (_ : asking) }
+  | Resting store
+  | Refused_at_bottom store ->
+    (match line_to_pass place store ~offset with
+     | Error refusal -> t, Not_done refusal
+     | Ok (hole, reach) ->
+       (match Store.commit_skip store ~at ~hole reach with
+        | Ok { store; line = (_ : Librarian_log.commit) } ->
+          ( next_ask place { (moved t ~narrowing:t.narrowing) with last_read = None } ~at store
+          , Done )
         | Error stop ->
           (* §9.2: the line is not on disk, so the act is refused as the
              store stops. *)

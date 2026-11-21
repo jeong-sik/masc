@@ -7,8 +7,7 @@ module Log_store = Workspace_memory_log
 module Pass = Server_workspace_memory_curator_pass
 module Exact = Agent_core.Exact_output
 module Registry = Runtime_exact_output_registry
-module Backpressure = Runtime_exact_lane_backpressure
-module Receipt = Keeper_exact_walk_receipt
+module Slots = Exact_lane_slots
 module Failure_evidence = Keeper_exact_walk_failure
 open Result.Syntax
 
@@ -25,8 +24,7 @@ let iso8601_now () = Masc_domain.iso8601_of_unix_seconds (Time_compat.now ())
 
 type resolved_lane_execution =
   { generation : string
-  ; decl : Runtime_schema.exact_output_lane_decl option
-  ; ordered : Backpressure.ordered
+  ; resolved : Registry.resolved_lane
   }
 
 type lane_resolve_outcome =
@@ -59,24 +57,9 @@ let resolve_lane_execution () =
   | Ok registry ->
     (match Registry.resolve_lane registry ~lane_id with
      | Ok resolved ->
-       let decl = Registry.declared_lane registry ~lane_id in
        let generation = Registry.catalog_generation_fingerprint registry in
-       Lane_ready { generation; decl; ordered = Backpressure.order resolved }
+       Lane_ready { generation; resolved }
      | Error err -> Lane_disabled (Registry.lane_resolution_error_to_string err))
-;;
-
-let apply_lane_decl (decl : Runtime_schema.exact_output_lane_decl option) target =
-  match decl with
-  | None -> target
-  | Some d ->
-    let target =
-      match d.max_output_tokens with
-      | Some max_tokens -> Exact.admitted_target_with_max_tokens target max_tokens
-      | None -> target
-    in
-    (match d.thinking with
-     | Some thinking -> Exact.admitted_target_with_enable_thinking target thinking
-     | None -> target)
 ;;
 
 type lane_call_failure =
@@ -85,314 +68,163 @@ type lane_call_failure =
   ; detail : string
   }
 
-let http_only_failure ~declared_http ~excluded_http ~http_receipt ~transient ~output_limit_refused
-    ~detail =
-  let cli = Receipt.cli ~visited:[] ~dispatched:[] ~failures:[] ~result:Receipt.Not_reached in
-  let capacity_from_receipt =
-    match Receipt.make ~declared_http ~excluded_http ~declared_cli:[] ~http:http_receipt ~cli with
-    | Ok receipt -> Failure_evidence.refuses_input_capacity (Receipt.failure_evidence receipt)
-    | Error _ -> false
-  in
-  Error { capacity_refused = capacity_from_receipt || output_limit_refused; transient; detail }
+type slot_failure = (string, no_callback_error) Slots.failure
+
+let flow_detail cause =
+  Exact.flow_execution_error_to_string
+    ~callback_error_to_string:no_callback_error_to_string
+    ~raw_response_to_string:raw_excerpt
+    cause
 ;;
 
-let execute_cli_fallback ~base_path ~cli_slots ~requirement ~rendered_prompt ~validate ~http_receipt
-    ~http_transient ~declared_http ~excluded_http =
-  match cli_slots with
-  | [] ->
-    http_only_failure
-      ~declared_http
-      ~excluded_http
-      ~http_receipt
-      ~transient:http_transient
-      ~output_limit_refused:false
-      ~detail:"no cli fallback slots configured"
-  | _ :: _ ->
-    let visited = ref [] in
-    let dispatched = ref [] in
-    let cli_failures = ref [] in
-    let observe = function
-      | Keeper_lane_cli_oneshot.Dispatching { runtime_id } ->
-        dispatched := runtime_id :: !dispatched
-      | Keeper_lane_cli_oneshot.Raw_response _ -> ()
-    in
-    let cli_failure_slot = function
-      | Keeper_lane_cli_oneshot.Unknown_runtime { runtime_id }
-      | Keeper_lane_cli_oneshot.Not_an_official_client { runtime_id }
-      | Keeper_lane_cli_oneshot.Execution_failed { runtime_id; _ }
-      | Keeper_lane_cli_oneshot.Invalid_json_output { runtime_id; _ }
-      | Keeper_lane_cli_oneshot.Invalid_domain_output { runtime_id; _ }
-      | Keeper_lane_cli_oneshot.Held { runtime_id; _ } -> runtime_id
-    in
-    let on_failure failure =
-      visited := cli_failure_slot failure :: !visited;
-      cli_failures := failure :: !cli_failures
-    in
-    (match
-       Exact_lane_slot_capture.walk_cli_gated
-         ~before_dispatch:(fun () : (unit, no_callback_error) result -> Eio.Fiber.check (); Ok ())
-         ~base_dir:base_path
-         ~cli_slots
-         ~system_prompt:""
-         ~requirement
-         ~prompt:rendered_prompt
-         ~validate
-         ~observe
-         ~on_failure
-         ()
-     with
-     | Ok (_slot, accepted) -> Ok accepted
-     | Error (Keeper_lane_cli_oneshot.Stopped_before_dispatch _) -> .
-     | Error (Keeper_lane_cli_oneshot.Slots_exhausted _) ->
-       let failures = List.rev !cli_failures in
-       let cli =
-         Receipt.cli
-           ~visited:(List.rev !visited)
-           ~dispatched:(List.rev !dispatched)
-           ~failures
-           ~result:Receipt.Exhausted
-       in
-       let ev =
-         match
-           Receipt.make
-             ~declared_http
-             ~excluded_http
-             ~declared_cli:cli_slots
-             ~http:http_receipt
-             ~cli
-         with
-         | Ok receipt -> Receipt.failure_evidence receipt
-         | Error _ ->
-           Failure_evidence.after_cli_fallback ~prior:Failure_evidence.empty failures
-       in
-       let cli_transient =
-         failures <> [] && List.for_all Keeper_lane_cli_oneshot.refused_for_binding_rest failures
-       in
-       let detail =
-         String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
-       in
-       Error
-         { capacity_refused = Failure_evidence.refuses_input_capacity ev
-         ; transient = http_transient || cli_transient
-         ; detail =
-             if String.equal detail "" then "cli fallback slots exhausted" else detail
-         })
+(* The answer was cut at the slot's output budget, so a smaller batch, which
+   asks for a shorter answer, can fit it. *)
+let is_output_limit_cause = function
+  | Exact.Output_limit_reached -> true
+  | Completion_failed _
+  | Response_body_deadline_exceeded
+  | Provider_response_refused _
+  | Provider_context_overflow _
+  | Window_reached _
+  | Incomplete_output _
+  | Missing_output
+  | Ambiguous_output _
+  | Unexpected_output_content
+  | Invalid_json_output -> false
 ;;
 
+let flow_ran_out_of_output : no_callback_error Exact.flow_execution_error -> bool = function
+  | Flow_exact_execution_failed { cause = error; candidate = _; evidence = _ } ->
+    is_output_limit_cause error.cause
+  | Flow_candidates_exhausted _
+  | Flow_attempt_already_started _
+  | Flow_attempt_start_failed _
+  | Flow_measurement_start_failed _
+  | Flow_before_measurement_dispatch_callback_failed _
+  | Flow_measurement_terminal_callback_failed _
+  | Flow_before_dispatch_callback_failed _
+  | Flow_before_advance_callback_failed _ -> false
+;;
+
+let ran_out_of_output : (Slots.t, slot_failure) Exact_lane_walk.passed -> bool = function
+  | Failed
+      { slot = _
+      ; failure =
+          Http_failed { slot_id = _; error = Flow_execution_terminal { cause; prior_rejections = _ } }
+      } -> flow_ran_out_of_output cause
+  | Failed
+      { slot = _; failure = Http_failed { slot_id = _; error = Flow_semantic_candidates_exhausted _ } }
+  | Failed
+      { slot = _
+      ; failure =
+          (Http_unfit _ | Cli_failed _ | Cli_rejected _ | Cli_unfit _ | Cli_seats_unpublished _)
+      }
+  | Held { slot = _; until = _ }
+  | Seats_full _ -> false
+;;
+
+let failure_detail : slot_failure -> string = function
+  | Http_failed { slot_id; error = Flow_semantic_candidates_exhausted { rejections; evidence = _ } }
+    ->
+    let last = List.fold_left (fun _ rejection -> rejection) rejections.first rejections.rest in
+    slot_id ^ ": invalid domain output: " ^ last.rejection
+  | Http_failed { slot_id = _; error = Flow_execution_terminal { cause; prior_rejections = _ } } ->
+    flow_detail cause
+  | Http_unfit { slot_id; reason } -> slot_id ^ ": " ^ reason
+  | Cli_failed { runtime_id = _; failure } -> Keeper_lane_cli_oneshot.failure_to_string failure
+  | Cli_rejected { runtime_id; rejection } -> runtime_id ^ ": invalid domain output: " ^ rejection
+  | Cli_unfit { runtime_id } -> runtime_id ^ ": the request is not one prompt"
+  | Cli_seats_unpublished { runtime_id; provider_id } ->
+    runtime_id ^ ": account " ^ provider_id ^ " published no seats"
+;;
+
+let pass_detail : (Slots.t, slot_failure) Exact_lane_walk.passed -> string = function
+  | Held { slot; until } ->
+    Slots.id slot ^ ": waits for its provider until " ^ Masc_domain.iso8601_of_unix_seconds until
+  | Seats_full slot -> Slots.id slot ^ ": every seat taken"
+  | Failed { slot = _; failure } -> failure_detail failure
+;;
+
+let stop_detail : (string, no_callback_error) Slots.stop -> string = function
+  | Http_unstartable { slot_id; reason } -> slot_id ^ ": " ^ reason
+  | Http_stopped { slot_id = _; error = Flow_execution_terminal { cause; prior_rejections = _ } } ->
+    flow_detail cause
+  | Http_stopped { slot_id; error = Flow_semantic_candidates_exhausted _ } ->
+    slot_id ^ ": every answer was rejected"
+  | Record_failed _ -> .
+;;
+
+(* The batch is narrowed when a slot refused the input's size and no slot
+   answered invalid output, or, where the caller allows it, when a slot's
+   answer was cut at its output budget. *)
+let lane_failure ~allow_output_limit_split ~transient ~detail passed =
+  { capacity_refused =
+      Failure_evidence.refuses_input_capacity (Slots.failure_evidence passed)
+      || (allow_output_limit_split && List.exists ran_out_of_output passed)
+  ; transient
+  ; detail = String.concat "; " (List.map pass_detail passed @ detail)
+  }
+;;
+
+(* One walk over the lane's slots, HTTP and CLI alike
+   (RFC exact-lane-walks-one-slot-list). *)
 let execute_exact_prompt ~base_path ~(lane : resolved_lane_execution) ~schema ~rendered_prompt
     ~allow_output_limit_split ~validate =
-  let resolved = lane.ordered.lane in
-  let held_ids =
-    List.map (fun (held : Backpressure.held_slot) -> held.slot_id) lane.ordered.held_http
-  in
-  let messages =
-    [ Llm_provider.Types.make_message
-        ~role:Llm_provider.Types.User
-        [ Llm_provider.Types.text_block rendered_prompt ]
-    ]
-  in
-  let requirement =
-    Exact.make_output_requirement ~schema ~minimum_guarantee:Exact.Json_syntax
-  in
-  let declared_slots = resolved.Registry.selected_slots in
-  let usable, excluded =
-    List.fold_left
-      (fun (ok_acc, ex_acc) (slot : Registry.selected_slot) ->
-         let admitted_target = apply_lane_decl lane.decl slot.admitted_target in
-         match Exact.project_request_body ~target:admitted_target ~messages requirement with
-         | Error err ->
-           ok_acc, (slot.slot_id, Exact.admission_error_reason err) :: ex_acc
-         | Ok _ ->
-           (match Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target with
-            | Error Exact.Blank_flow_candidate_id ->
-              ok_acc, (slot.slot_id, "blank slot id") :: ex_acc
-            | Ok cand -> cand :: ok_acc, ex_acc))
-      ([], [])
-      declared_slots
-  in
-  let candidates = List.rev usable in
-  let excluded_slots = List.rev excluded in
-  let declared_http =
-    List.map (fun (s : Registry.selected_slot) -> s.slot_id) declared_slots @ held_ids
-  in
-  let excluded_http = List.map fst excluded_slots @ held_ids in
-  let held_transient = lane.ordered.held_http <> [] in
-  let run_cli_only ~http_receipt ~http_transient ~output_limit_refused ~http_detail =
-    match resolved.cli_slots with
-    | [] ->
-      let detail =
-        if held_transient && String.equal http_detail "" then
-          "all exact lane slots are temporarily held"
-        else http_detail
-      in
-      http_only_failure
-        ~declared_http
-        ~excluded_http
-        ~http_receipt
-        ~transient:(http_transient || held_transient)
-        ~output_limit_refused
-        ~detail
-    | cli_slots ->
-      execute_cli_fallback
-        ~base_path
-        ~cli_slots
-        ~requirement
-        ~rendered_prompt
-        ~validate
-        ~http_receipt
-        ~http_transient:(http_transient || held_transient)
-        ~declared_http
-        ~excluded_http
-      |> Result.map_error (fun err ->
-           let combined_detail =
-             if String.equal http_detail "" then err.detail
-             else Printf.sprintf "%s; cli: %s" http_detail err.detail
-           in
-           { err with
-             capacity_refused = err.capacity_refused || output_limit_refused
-           ; detail = combined_detail
-           })
-  in
-  match candidates with
-  | [] ->
-    let http_detail =
-      String.concat
-        "; "
-        (List.map (fun (id, reason) -> id ^ ": " ^ reason) excluded_slots)
+  match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
+  | None, _ | _, None ->
+    Error
+      { capacity_refused = false
+      ; transient = true
+      ; detail = "server Eio net/clock context unavailable"
+      }
+  | Some net, Some clock ->
+    let proceed _ : (unit, no_callback_error) result =
+      Eio.Fiber.check ();
+      Ok ()
     in
-    let http_receipt =
-      Receipt.http_not_started
-        ~detail:
-          (if String.equal http_detail "" then "no usable HTTP candidate" else http_detail)
-    in
-    run_cli_only
-      ~http_receipt
-      ~http_transient:false
-      ~output_limit_refused:false
-      ~http_detail
-  | first :: rest ->
-    (match Exact.snapshot_flow ~first ~rest ~messages requirement with
-     | Error (Exact.Duplicate_flow_candidate_id { candidate_id; _ }) ->
+    (match
+       Slots.walk
+         ~net
+         ~clock
+         ~base_dir:base_path
+         ~admission_class:(Standalone_lane.admission_class Standalone_lane.Workspace_memory_curator)
+         ~messages:
+           [ Llm_provider.Types.make_message
+               ~role:Llm_provider.Types.User
+               [ Llm_provider.Types.text_block rendered_prompt ]
+           ]
+         ~requirement:(Exact.make_output_requirement ~schema ~minimum_guarantee:Exact.Json_syntax)
+         ~cli_request:(Some { Slots.system_prompt = ""; prompt = rendered_prompt })
+         ~before_measurement_dispatch:proceed
+         ~on_measurement_terminal:proceed
+         ~before_dispatch:proceed
+         ~validate_http:(fun success ->
+           match validate (Exact.flow_success_output success).output with
+           | Ok accepted -> Exact.Accept accepted
+           | Error rejection -> Exact.Reject_and_advance rejection)
+         ~validate_cli:validate
+         ~before_cli_visit:(fun ~runtime_id:_ -> proceed ())
+         ~on_advance:(fun ~failed:_ ~next:_ -> proceed ())
+         (Slots.of_resolved_lane lane.resolved)
+     with
+     | Answered { slot = _; value = Http_answered { slot_id = _; success }; passed = _ } ->
+       Ok success.accepted
+     | Answered { slot = _; value = Cli_answered { runtime_id = _; accepted }; passed = _ } ->
+       Ok accepted
+     | Exhausted { passed; standing } ->
+       let transient =
+         match standing with
+         | Every_slot_resting -> true
+         | Not_every_slot_resting -> false
+       in
+       Error (lane_failure ~allow_output_limit_split ~transient ~detail:[] passed)
+     | Stopped { slot = _; stop; passed } ->
        Error
-         { capacity_refused = false
-         ; transient = false
-         ; detail = "duplicate candidate id in exact flow: " ^ candidate_id
-         }
-     | Ok snapshot ->
-       (match
-          Exact.start_flow
-            ~admission_class:(Standalone_lane.admission_class Standalone_lane.Workspace_memory_curator)
-            snapshot
-        with
-        | Error (Exact.Flow_id_generation_failed detail) ->
-          Error { capacity_refused = false; transient = true; detail }
-        | Ok attempt ->
-          (match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
-           | None, _ | _, None ->
-             Error
-               { capacity_refused = false
-               ; transient = true
-               ; detail = "server Eio net/clock context unavailable"
-               }
-           | Some net, Some clock ->
-             let check flow_success =
-               let raw = (Exact.flow_success_output flow_success).output in
-               match validate raw with
-               | Ok accepted -> Exact.Accept accepted
-               | Error detail -> Exact.Reject_and_advance detail
-             in
-             let flow =
-               Exact_lane_slot_capture.flow attempt (fun () ->
-                 Exact.execute_flow_once
-                   ~net
-                   ~clock
-                   ~before_measurement_dispatch:(fun _ -> Eio.Fiber.check (); Ok ())
-                   ~on_measurement_terminal:(fun _ -> Ok ())
-                   ~before_dispatch:(fun _ -> Eio.Fiber.check (); Ok ())
-                   ~before_advance:(fun ~failed:_ ~next:_ -> Eio.Fiber.check (); Ok ())
-                   ~validate:check
-                   attempt)
-             in
-             Backpressure.observe ~resolved flow;
-             (match flow with
-              | Ok success -> Ok success.accepted
-              | Error (Exact.Flow_semantic_candidates_exhausted { rejections; _ } as flow_err) ->
-                let last_rejection =
-                  List.fold_left
-                    (fun _ r -> r)
-                    rejections.first
-                    rejections.rest
-                in
-                let http_receipt =
-                  Receipt.http_failure
-                    ~callback_error_to_string:no_callback_error_to_string
-                    ~rejection_to_string:Fun.id
-                    flow_err
-                in
-                run_cli_only
-                  ~http_receipt
-                  ~http_transient:false
-                  ~output_limit_refused:false
-                  ~http_detail:("invalid domain output: " ^ last_rejection.rejection)
-              | Error (Exact.Flow_execution_terminal { cause; prior_rejections = _ } as flow_err) ->
-                let http_receipt =
-                  Receipt.http_failure
-                    ~callback_error_to_string:no_callback_error_to_string
-                    ~rejection_to_string:Fun.id
-                    flow_err
-                in
-                let detail =
-                  Exact.flow_execution_error_to_string
-                    ~callback_error_to_string:no_callback_error_to_string
-                    ~raw_response_to_string:raw_excerpt
-                    cause
-                in
-                let resting =
-                  Exact.flow_execution_binding_standing cause = Exact.Every_binding_resting
-                in
-                let is_output_limit_cause = function
-                  | Exact.Output_limit_reached -> true
-                  | Completion_failed _
-                  | Response_body_deadline_exceeded
-                  | Provider_response_refused _
-                  | Provider_context_overflow _
-                  | Window_reached _
-                  | Incomplete_output _
-                  | Missing_output
-                  | Ambiguous_output _
-                  | Unexpected_output_content
-                  | Invalid_json_output -> false
-                in
-                let output_limit_refused =
-                  allow_output_limit_split
-                  &&
-                  match cause with
-                  | Exact.Flow_exact_execution_failed { cause = err; _ } ->
-                    is_output_limit_cause err.cause
-                  | Flow_candidates_exhausted _
-                  | Flow_attempt_already_started _
-                  | Flow_attempt_start_failed _
-                  | Flow_measurement_start_failed _
-                  | Flow_before_measurement_dispatch_callback_failed _
-                  | Flow_measurement_terminal_callback_failed _
-                  | Flow_before_dispatch_callback_failed _
-                  | Flow_before_advance_callback_failed _ -> false
-                in
-                (match Exact.flow_execution_terminal_kind cause with
-                 | Exact.Non_advanceable_terminal ->
-                   http_only_failure
-                     ~declared_http
-                     ~excluded_http
-                     ~http_receipt
-                     ~transient:resting
-                     ~output_limit_refused
-                     ~detail
-                 | Exact.Advanceable_candidates_exhausted ->
-                   run_cli_only
-                     ~http_receipt
-                     ~http_transient:resting
-                     ~output_limit_refused
-                     ~http_detail:detail)))))
+         (lane_failure
+            ~allow_output_limit_split
+            ~transient:false
+            ~detail:[ stop_detail stop ]
+            passed))
 ;;
 
 let commit_two_phase_log_dynamic ~base_path ~author ~expected_changes ~apply_and_entries =

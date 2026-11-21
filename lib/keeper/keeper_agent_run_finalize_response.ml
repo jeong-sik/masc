@@ -108,12 +108,38 @@ let record_turn_boundary
      | exception exn -> not_recorded ~site:"append" (Printexc.to_string exn))
 ;;
 
+(* The ledger line of a turn an official client answered (RFC
+   librarian-call-only-proposes §11.8): the turn log does not say which
+   executor answered a turn. The turn has ended, so a line that cannot be
+   written is reported and the turn finishes all the same. *)
+let record_client_turn
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~turn_ref
+      ~settled_session
+  =
+  match
+    Keeper_turn_bridge.record_client_turn
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
+      { Keeper_turn_bridge.turn_ref; session = settled_session }
+  with
+  | Ok () -> ()
+  | Error detail ->
+    Log.Keeper.warn
+      ~keeper_name:meta.name
+      "official-client turn ledger line not written turn=%d: %s"
+      (Ids.Turn_ref.absolute_turn turn_ref)
+      detail
+;;
+
 (* An official-client turn that failed never reaches [finalize], yet its input
    is already a fragment of its [turn_ref] and the tools it called may already
    have acted. Its end line names the turn so a Librarian round reads what it
    left (RFC librarian-lifecycle §10-3). It saved no checkpoint and kept no
    assistant text, so the line is [No_atom_history] and the round reads the
-   input and the tool observations. *)
+   input and the tool observations. It settled no session, so its ledger line
+   names none. *)
 let record_errored_official_turn_boundary
       ~task_context
       ~config
@@ -124,6 +150,7 @@ let record_errored_official_turn_boundary
       ~history_at_start
       ~restart_notice_pending
   =
+  record_client_turn ~config ~meta ~turn_ref ~settled_session:None;
   match record_turn_boundary
     ~task_context
     ~config
@@ -409,7 +436,7 @@ let finalize
     | Runtime_execution.Official_client, None -> Ok None
   in
   let* saved_checkpoint = saved_checkpoint_result in
-    let boundary_recorded = record_turn_boundary
+    let (_ : boundary_recording) = record_turn_boundary
       ~task_context
       ~config
       ~meta
@@ -423,41 +450,27 @@ let finalize
       ~history_at_start
       ~restart_notice_pending
       saved_checkpoint in
-    (match boundary_recorded, checkpoint_owner, official_client_settlement with
-     | Recorded, Runtime_execution.Official_client,
-       Some
-         { Keeper_official_client_session_store.client_kind
-         ; runtime_id
-         ; phase = Keeper_official_client_session_store.Settled { session_id; _ }
-         ; updated_at
-         ; _
-         } ->
-       (match
-          Keeper_turn_bridge.record_official_client_settlement
-            ~base_path:config.base_path
-            ~keeper_name:meta.name
-            ~turn_ref
-            ~client_kind
-            ~runtime_id
-            ~session_id
-            ~updated_at
-        with
-        | Ok () -> ()
-        | Error detail ->
-          Log.Keeper.warn
-            ~keeper_name:meta.name
-            "official-client bridge cursor update skipped turn=%d: %s"
-            (Ids.Turn_ref.absolute_turn turn_ref)
-            detail)
-     | (Recorded | Not_recorded), Runtime_execution.Official_client,
-       ( None
-       | Some
-           { Keeper_official_client_session_store.phase =
-               ( Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ )
-           ; _
-           } )
-     | Not_recorded, Runtime_execution.Official_client, Some { phase = Settled _; _ }
-     | (Recorded | Not_recorded), Runtime_execution.Masc_agent_core, _ -> ());
+    (match checkpoint_owner with
+     | Runtime_execution.Official_client ->
+       record_client_turn
+         ~config
+         ~meta
+         ~turn_ref
+         ~settled_session:
+           (match official_client_settlement with
+            | Some
+                { Keeper_official_client_session_store.client_kind
+                ; runtime_id
+                ; phase = Keeper_official_client_session_store.Settled { session_id; _ }
+                ; _
+                } -> Some { Keeper_turn_bridge.client_kind; runtime_id; session_id }
+            | None
+            | Some
+                { Keeper_official_client_session_store.phase =
+                    ( Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ )
+                ; _
+                } -> None)
+     | Runtime_execution.Masc_agent_core -> ());
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge
        boundary. *)

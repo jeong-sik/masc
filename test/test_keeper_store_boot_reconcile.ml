@@ -1611,7 +1611,7 @@ let test_retained_session_blocked_dir_io_and_invalid_move_path () =
        | Error (Session.Move_read_failed (Session.Invalid_path _)) -> ()
        | Error err -> failf "expected Invalid_path for %s, got %s" bad_path (Session.move_error_to_string err)
        | Ok () -> failf "invalid binding_path %s unexpectedly succeeded" bad_path)
-    [ Filename.concat state_dir "bridge-cursors.json"
+    [ Filename.concat state_dir "client-turns.jsonl"
     ; Filename.concat (Filename.concat state_dir "runtimes") "nested/sub.json"
     ; Filename.concat (Filename.dirname state_dir) "outside.json"
     ]

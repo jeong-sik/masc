@@ -13,14 +13,14 @@ let turn n = Ids.Turn_ref.make ~trace_id ~absolute_turn:n
 let mark = Masc_test_deps.turn_log_mark ~trace_id ~closed_messages:0
 
 let session_a =
-  { Bridge.client_kind = Codex
+  { Bridge.client_kind = Keeper_semantic_execution.Codex
   ; runtime_id = "codex.a"
   ; session_id = "thread-a"
   }
 ;;
 
 let session_b =
-  { Bridge.client_kind = Claude_code
+  { Bridge.client_kind = Keeper_semantic_execution.Claude_code
   ; runtime_id = "claude.b"
   ; session_id = "session-b"
   }
@@ -299,7 +299,7 @@ let test_undecodable_line =
   answered base_path 1;
   close_turn base_path 1 Turn_log.Completed;
   Out_channel.with_open_gen
-    [ Open_append; Open_binary ]
+    [ Open_wronly; Open_append; Open_binary ]
     0o600
     (log_path base_path)
     (fun channel -> output_string channel "not a turn log line\n");

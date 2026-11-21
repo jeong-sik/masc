@@ -1,6 +1,6 @@
 ---
 rfc: "keeper-reaction-and-queue"
-title: "Keeper 는 무엇에 깨고 언제 받는가 — 반응·실림과 틱 경계"
+title: "Keeper 는 무엇에 깨고 언제 깨는가 — 바로·틱·실림"
 status: Draft
 created: 2026-11-22
 updated: 2026-11-22
@@ -8,9 +8,9 @@ author: vincent
 related: ["a-keeper-takes-every-waiting-message-in-one-turn", "official-client-start-seed-window", "keeper-context-window-in-tokens"]
 ---
 
-# RFC: Keeper 는 무엇에 깨고 언제 받는가 — 반응·실림과 틱 경계
+# RFC: Keeper 는 무엇에 깨고 언제 깨는가 — 바로·틱·실림
 
-- 상태: Draft. §1 은 운영자 결정과 정할 것, §2~§3 은 실측과 지금 코드, §4 는 제안, §5·§6 은 불변식과 Librarian 제약, §8 은 켜기 전 판정 기준이다.
+- 상태: Draft. §1 은 운영자 결정과 정할 것, §2~§3 은 실측과 지금 코드, §4 는 제안, §5·§6 은 불변식과 Librarian 제약, §8 은 켜는 순서와 판정 기준이다.
 - 코드 기준: origin/main `3e2f6b7bb03c`. 실측: 2026-11-21 11:00~24:00 KST 운영(`~/me`).
 - 이 RFC 는 `RFC-a-keeper-takes-every-waiting-message-in-one-turn.md`(이하 묶음 RFC)의 §1-3 일부와 §6 한 줄을 대체한다(§1.1).
 
@@ -18,21 +18,31 @@ related: ["a-keeper-takes-every-waiting-message-in-one-turn", "official-client-s
 
 - **[사실]** 13시간 동안 Keeper 17개가 턴 3,419번을 열었다. 큐 입력이 들어올 때마다 턴이 하나씩 열린다.
 - **[사실]** 같은 구간 Claude Code 요청의 문맥 토큰은 20.7억이다. 예약 43%, Board 31%, heartbeat 밖(Keeper 사이 채팅) 15%, 주기 9% 다.
-- **[사실]** 큐에 넣는 일은 모두 Keeper 를 깨운다. urgency 는 순서만 정하고 깨우기를 늦추지 않는다(§3.1).
+- **[사실]** 큐에 넣는 일은 하나만 빼고 모두 Keeper 를 깨운다. urgency 는 순서만 정하고 깨우기를 늦추지 않는다. 예외는 Board 읽기가 잠깐 실패할 때 남기는 `Board_routing_pending` 행이다(§3.1).
 - **[제안]** 깨우는 규칙만 바꾼다. 받는 규칙은 그대로다.
-  - 무엇에 깨는가: 입력 종류마다 만드는 쪽이 `React | Carry` 를 정한다(§4.2). 입력의 뜻으로 가른다.
-  - 언제 깨는가: 사람 입력은 바로 깨운다. Keeper 가 만든 React 입력은 그 Keeper 의 틱 경계에서 깨운다(§4.3).
-  - 무엇을 받는가: 어느 까닭으로 열린 턴이든 기다리던 입력을 모두 가져간다(묶음 RFC §1-2).
+  - 입력을 만드는 쪽이 깨우기를 셋 중 하나로 고른다. 바로(`Now`), 틱 경계에서(`At_tick`), 깨우지 않고 다음 턴에 실림(`Carry`)이다(§4.2).
+  - 고르는 근거는 입력 종류와 보낸 사람 종류다. 둘 다 타입으로 읽는다. 업무 종류로 가르지 않는다.
+  - 틱 경계는 Keeper 마다 고정 시차를 둔 격자다(§4.3).
+  - 어느 까닭으로 열린 턴이든 기다리던 입력을 모두 가져간다(묶음 RFC §1-2).
 - **[제안]** 버리거나 중복을 지우는 입력은 없다. 모든 입력이 턴에 닿는다.
 
 ## 1. 운영자 결정과 정할 것
 
 ### 1.1 결정 (2026-11-22)
 
-1. 묶음 RFC §1-3 의 「debounce, 라운드 상한도 두지 않는다」 중 **깨우는 시점**은 이 RFC 가 대체한다. Keeper 가 만든 입력은 틱 경계에서 깨운다.
-   - 까닭: 그 결정 아래에서 claim 때 묶음은 채팅 549건 중 28번만 일어났다(§2.4). Keeper 가 한가할 때 입력이 오면 바로 혼자 돈다.
+1. 묶음 RFC §1-3 의 「debounce, 라운드 상한도 두지 않는다」 중 **깨우는 시점**은 이 RFC 가 대체한다. 다른 Keeper 가 만든 입력은 틱 경계에서 깨운다.
+   - 까닭: 그 결정 아래에서 claim 때 묶음은 채팅 548건 중 28번만 일어났다(§2.4). Keeper 가 한가할 때 입력이 오면 바로 혼자 돈다.
    - 묶음 RFC §6 의 「debounce」 줄도 같은 범위에서 대체한다.
-2. 묶음 RFC 의 나머지 결정은 그대로다.
+2. 깨우지 않고 실을(`Carry`) 입력은 셋이다.
+   - 관심 판정으로 들어온 Board 글(`Board_attention`)
+   - Board 반응·투표(`Reaction_changed`, `Vote_cast`)
+   - 승인된 완료(`Task_outcome`). 거절은 `Completion_authority_rejected` 로 따로 온다.
+3. 바로(`Now`) 깨울 입력은 셋이다.
+   - 사람이 보낸 입력
+   - 외부 연결에서 온 알림(`Connector_attention`)
+   - Keeper 가 스스로 시작한 일의 결과: 도구 결과, 백그라운드 작업, 조합 실행, fusion 심의
+4. 입력을 모으는 틱의 값은 300초다. 선언된 설정으로 둔다(§4.3).
+5. 묶음 RFC 의 나머지 결정은 그대로다.
    - §1-1 큐는 업무 종류를 모른다.
    - §1-2 메시지는 한 번에 쭉 들어간다.
    - §1-3 의 휴리스틱 금지와 묶음 개수 상한 금지.
@@ -41,10 +51,11 @@ related: ["a-keeper-takes-every-waiting-message-in-one-turn", "official-client-s
 
 ### 1.2 정할 것
 
-1. **Carry 로 둘 입력 종류.** 후보는 §4.1 표에 적었다.
-2. **틱 길이.** 제안은 300초다. 선언된 설정(§4.3)으로 두고 코드 리터럴로 두지 않는다.
-3. **틱을 건너뛸 입력.** 보낸 사람으로 가른다. 제안은 사람이 보낸 입력(운영자 채팅, HITL 답, Ask 답)이다.
-4. **켜는 순서.** 제안은 §8 이다.
+1. **입력 없이 저절로 열리는 턴의 간격.**
+   - 운영자 제안: 쉬는 동안 간격을 2배씩 늘리고 상한에서 멈춘다. 반응으로 깨면 시작값으로 돌아간다.
+   - 시작값과 상한은 아직 정하지 않았다. 시작값에 따라 턴 수가 크게 다르다(§2.6).
+   - 이 RFC 의 다른 단계와 따로 켤 수 있다(§8 의 7단계). 정하기 전에는 지금 주기를 그대로 쓴다.
+2. **켜는 순서.** 제안은 §8 이다.
 
 ## 2. 무슨 일이 있었나
 
@@ -65,7 +76,10 @@ related: ["a-keeper-takes-every-waiting-message-in-one-turn", "official-client-s
 | 완료 거절(`completion_rejected`) | 19 | 7 |
 | 작업 취소(`task_cancelled`) | 1 | 1 |
 
-- 큐 입력 없이 열린 턴은 753번이다. 주기 턴 234번과 Keeper 사이 채팅 작업(구간 안에 548건 생성)이다.
+- 큐 입력 없이 열린 턴은 753번이다.
+  - 주기 턴 234번
+  - 구간 안에서 시작한 채팅 실행 499번. 시작한 작업 539건에서 묶여서 줄어든 40건을 뺀 값이다.
+  - 아직 나누지 못한 20번
 - 대부분의 턴은 입력 한 종류만 싣는다. 입력 하나가 턴 하나를 연다.
 
 ### 2.2 토큰은 어디서 나오나
@@ -93,9 +107,11 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
 | 600초 | 924 (27%) |
 | 1,800초 | 399 (12%) |
 
+이 셈은 모든 입력을 틱에 맞춘 하한이다. 바로 깨우는 입력(§1.1-3)은 틱을 기다리지 않으니, 실제로 남는 턴은 이보다 많다.
+
 ### 2.4 claim 때 묶음은 드물다
 
-같은 구간 채팅 작업 549건 가운데 다른 작업과 한 실행으로 묶인 것은 28번이다(2건 20번, 3건 7번, 7건 1번). 지금 `Keeper_chat_operation_batch.select` 는 출처·답할 곳·지시가 같은 연속 구간만 묶는다(묶음 RFC §2.2).
+같은 구간에 만든 채팅 작업 548건 가운데 다른 작업과 한 실행으로 묶인 것은 28번이다(2건 20번, 3건 7번, 7건 1번). 지금 `Keeper_chat_operation_batch.select` 는 출처·답할 곳·지시가 같은 연속 구간만 묶는다(묶음 RFC §2.2).
 
 ### 2.5 캐시는 1시간 안팎 유지된다
 
@@ -112,6 +128,28 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
 
 30분 이하 틱은 Claude Code 캐시를 놓치지 않는다. 30분 넘는 간격의 표본이 작아 신뢰도는 Medium 이다. 다른 runtime 의 캐시는 재지 않았다.
 
+### 2.6 쉬는 동안 간격을 늘리면
+
+같은 구간을 다시 돌렸다. 주기 턴이 한 번이라도 있던 Keeper 15개만 센다.
+
+- 규칙: 턴이 끝나면 다음에 저절로 열리는 턴은 t초 뒤다. 입력으로 열린 턴 뒤에는 t 가 시작값으로 돌아간다. 저절로 열린 턴 뒤에는 t 가 2배가 되고, 상한을 넘지 않는다.
+- 입력으로 열린 턴은 실제 시각 그대로 둔다. 저절로 열린 턴이 뒤의 입력을 바꿨을 수 있지만 반영하지 않았다.
+
+| 규칙 | 저절로 열린 턴 |
+|---|---|
+| 지금: 1,800초마다, 입력 턴과 상관없음 (실측) | 234 |
+| 300초에서 시작, 상한 1,800초 | 751 |
+| 300초에서 시작, 상한 7,200초 | 731 |
+| 600초에서 시작, 상한 7,200초 | 295 |
+| 1,800초, 늘리지 않음 (마지막 턴에서 잼) | 86 |
+| 1,800초에서 시작, 상한 3,600초 | 60 |
+| 1,800초에서 시작, 상한 7,200초 | 56 |
+
+- 300초에서 시작하면 오히려 늘어난다. 입력 턴마다 300·600·1,200초 뒤에 턴이 열리기 때문이다.
+- 줄어드는 몫의 대부분은 「마지막 턴에서 잰다」에서 나온다(234 → 86). 2배로 늘리기는 86 → 56 으로 더 줄인다.
+- 할 일이 남은 Keeper 도 입력이 없으면 덜 움직인다. 1,800초에서 시작해 상한 7,200초면 최대 2시간에 한 번이다.
+- 주기 경계는 진척 없는 턴을 다시 해 보는 타이머이기도 하다(#54338). 그래서 어느 턴이 시작값으로 되돌리는지는 #54338 처럼 턴 결과로 정해야 한다. 실패한 턴은 되돌리지 않는다.
+
 ## 3. 지금 코드
 
 ### 3.1 넣으면 깬다
@@ -120,6 +158,7 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
 - `Keeper_keepalive_signal.wakeup_keeper ?stimulus` 는 입력을 먼저 durable 하게 적고 깨운다.
 - `specs/keeper-state-machine/KeeperEventQueue.tla` 의 SafetyInvariant 가 이 계약을 모델링한다.
 - urgency(`Immediate | Normal | Low`)는 큐 안 순서만 정한다.
+- 예외가 하나 있다. Board 읽기가 잠깐 실패하면 `retain_unavailable_board_routing`(`keeper_keepalive_signal.ml`)이 `Board_routing_pending` 행을 깨우지 않고 넣는다. 주석은 「This row alone never requests a wake」다. 사이클이 읽을 때 경로를 다시 정한다. `Carry` 의 선례다.
 
 ### 3.2 깨운 뒤
 
@@ -130,51 +169,69 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
 
 ### 3.3 주기
 
-- 운영의 주기는 `keeper.keepalive_interval_sec = 1800` 이다(`runtime_params.json`).
+- 운영의 주기는 `keeper.keepalive_interval_sec = 1800` 이다(`runtime_params.json`). Keeper toml 에 덮어쓰기는 없다.
+- 주기 사이클도 큐를 읽는다. `heartbeat_event_intake` 는 깨운 종류로 막지 않는다.
+- 모든 Keeper 가 `reactive = true` 다. 그래서 큐에 행이 있으면 사이클이 턴을 연다. `on_demand` Keeper 도 같다.
+- scheduled-autonomous gate 가 꺼진 Keeper 는 큐 행이 없는 주기 사이클을 `Scheduled_autonomous_disabled` 로 Skip 한다(`keeper_world_observation.ml` 의 판정). 그래도 `periodic_cadence_after_cycle` 은 `periodic_due` 면 주기 경계를 쓴다.
+- `pending_stimulus_remains`(`next_cycle_starts_now` 가 읽는다)는 `~ready:(fun _ -> true)` 로 모든 행을 센다.
 - #54338 뒤로는 끝까지 돈 예약 턴도 주기 경계를 채운다.
+
+### 3.4 보낸 사람은 어디서 아나
+
+- 큐 입력(`stimulus`)은 `post_id`·`urgency`·`arrived_at`·`payload` 넷뿐이다. 보낸 사람 종류가 없다.
+- 만드는 쪽은 이미 알거나 같은 방법으로 알 수 있다.
+  - 작업 공간 메시지: `workspace_message_speaker` 가 가른다. Keeper 등록부에 같은 이름이 있으면 Keeper, 아니면 외부 작성자다. 주석대로 등록부 일치가 증명이고, 이름의 모양으로 가르지 않는다.
+  - 완료 판정: `completion_authority = Human_operator | System_llm_agent` 다.
+  - 채팅 작업: 저장소의 `speaker_authority` 가 있다.
+  - Board 글·댓글: 작성자는 `Agent_id` 다. 같은 등록부 일치로 가를 수 있다.
+  - 작업 취소: `tc_cancelled_by` 는 문자열이다. 같은 등록부 일치가 필요하다.
 
 ## 4. 제안
 
-### 4.1 입력 종류 표
+### 4.1 깨우기 표
 
-만드는 쪽과 지금 urgency 는 코드에서 읽었다. 제안 열의 「결정」은 §1.2-1 에서 운영자가 정한다.
+만드는 쪽과 지금 urgency 는 코드에서 읽었다. 「결정」은 §1.1 의 운영자 결정이다.
 
-| payload | 만드는 쪽 | 지금 urgency | 제안 |
+| 입력 | 만드는 쪽 | 지금 urgency | 깨우기 |
 |---|---|---|---|
-| `Board_signal` | Board 쓰기 → `Board_wake` | 주소·전체 알림 Immediate, 그 밖 Normal | React, 틱 |
-| `Board_routing_pending` | Board 부모 읽기 실패 | 확인 필요 | React, 틱 |
-| `Board_attention` | 관심 판정(`keeper_board_attention_candidate`) | Normal | Carry 후보(결정) |
-| `Bootstrap` | `keeper_supervisor_launch` | Normal | React |
-| `Tool_result_ready` | `keeper_client_tool_outbox_wake` | Immediate | React, 틱 여부 결정 |
-| `Fusion_completed` | `fusion_sink` | Immediate | React, 틱 |
-| `Schedule_due` | `server_schedule_consumers` | 예약 body 가 정함 | React(예약이 시각을 정함) |
-| `Connector_attention` | `server_connector_attention_delivery` | Low | React, 틱 |
-| `Hitl_resolved` | 승인 큐 | Immediate | React, 틱 건너뜀(사람) |
-| `Ask_answered` | `keeper_ask_answer_wake` | Normal | React, 틱 건너뜀(사람) |
-| `Completion_authority_rejected` | `completion_authority_wakeup` | Immediate | React, 틱 |
-| `Task_cancelled` | `keeper_task_cancellation_wake` | Normal | React, 틱 |
-| `Workspace_message` | `server_bootstrap_loops` | Immediate | React, 틱 |
-| `Delegate_completed` | `keeper_delegate_completion_wake` | Immediate | React, 틱 |
-| `Composition_completed` | `keeper_composition_completion_wake` | Immediate | React, 틱 |
-| `Owned_job_completed` | `keeper_owned_job_completion_wake` | Immediate | React, 틱 |
-| `Task_outcome` | `keeper_task_outcome_wake` | Immediate | Carry 후보(결정) |
-| Board 반응·투표 | `Board_signal` 안의 kind | 위와 같음 | Carry 후보(결정) |
-| 채팅 작업(Keeper 가 보냄) | `masc_keeper_delegate` 등 | 별도 줄 | 틱 |
-| 채팅 작업(사람이 보냄) | 대시보드·TUI·Slack | 별도 줄 | 틱 건너뜀 |
-| 주기 | heartbeat loop | — | 틱 격자 위 |
+| `Board_signal` 글·댓글 | Board 쓰기 → `Board_wake` | `Explicit_mention`·`Broadcast` Immediate, 그 밖 Normal | 사람이 쓰면 `Now`, Keeper 가 쓰면 `At_tick` |
+| `Board_signal` 반응·투표 | 같음 | 같음 | `Carry` (결정) |
+| `Board_routing_pending` | Board 부모 읽기 실패 | `Targets`·`Broadcast` Immediate, 그 밖 Normal | `Carry` (지금도 깨우지 않음) |
+| `Board_attention` | `keeper_board_attention_candidate` | Normal | `Carry` (결정) |
+| `Bootstrap` | `keeper_supervisor_launch` | Normal | `Now` |
+| `Schedule_due` | `server_schedule_consumers` | 예약 body 가 정함 | `Now` (예약이 시각을 정함) |
+| `Connector_attention` | `server_connector_attention_delivery` | Low | `Now` (결정) |
+| `Hitl_resolved` | 승인 큐 | Immediate | `Now` (결정) |
+| `Ask_answered` | `keeper_ask_answer_wake` | Normal | `Now` (결정) |
+| `Tool_result_ready` | `keeper_client_tool_outbox_wake` | Immediate | `Now` (결정) |
+| `Owned_job_completed` | `keeper_owned_job_completion_wake` | Immediate | `Now` (결정) |
+| `Composition_completed` | `keeper_composition_completion_wake` | Immediate | `Now` (결정) |
+| `Fusion_completed` | `fusion_sink` | Immediate | `Now` (결정) |
+| `Task_outcome` | `keeper_task_outcome_wake` | Immediate | `Carry` (결정) |
+| `Completion_authority_rejected` | `completion_authority_wakeup` | Immediate | `Human_operator` 면 `Now`, `System_llm_agent` 면 `At_tick` |
+| `Task_cancelled` | `keeper_task_cancellation_wake` | Normal | 사람이 취소하면 `Now`, Keeper 가 취소하면 `At_tick` |
+| `Workspace_message` | `server_bootstrap_loops` | Immediate | 외부 작성자면 `Now`, Keeper 면 `At_tick` |
+| `Delegate_completed` | `keeper_delegate_completion_wake` | Immediate | `At_tick` |
+| 채팅 작업 | 채팅 저장소 | 별도 줄 | Keeper 가 보내면 `At_tick`, 사람·외부면 `Now` |
+| 주기 | heartbeat loop | — | 틱 격자 위(§4.4) |
 
-- 이 표는 손으로 적었다. 구현 PR 은 이 표를 payload 의 `match` 로 바꾼다. 새 payload 가 생기면 컴파일러가 빈 칸을 알린다.
+- 이 표는 손으로 적었다. 구현 PR 은 이 표를 입력 종류와 보낸 사람 종류의 `match` 로 바꾼다. 새 payload 가 생기면 컴파일러가 빈 칸을 알린다.
+- `At_tick` 은 다른 Keeper 가 만든 입력에만 붙는다.
 
-### 4.2 React | Carry — 무엇에 깨는가
+### 4.2 바로 | 틱 | 실림 — 만드는 쪽이 고른다
 
-- 입력을 만드는 쪽이 `React` 와 `Carry` 중 하나를 고른다. payload 마다 `match` 로 빠짐없이 적는다.
-- `React`: 지금처럼 적고 깨운다.
-- `Carry`: 적기만 하고 깨우지 않는다. 다음 사이클이 받아 그 턴에 같이 싣는다.
-- Carry 입력은 다음에 열리는 턴에 실린다. 어느 까닭으로 열린 턴이든 된다.
-- 기다리는 시간의 상한은 주기 하나와 턴 하나다. 돌고 있는 Keeper 의 루프는 한 주기 안에 깨어 큐를 읽는다. 큐에 행이 있으면 그 행이 반응형 트리거가 되어 턴을 연다. 이 상한은 §5 의 불변식으로 확인한다.
-- 입력의 뜻을 타입으로 가르는 일이라 시간 장치가 아니다.
+- 입력을 만드는 쪽이 `Now | At_tick | Carry` 중 하나를 고른다. 입력 종류와 보낸 사람 종류를 `match` 로 빠짐없이 적는다.
+  - `Now`: 지금처럼 적고 깨운다.
+  - `At_tick`: 적고, 그 Keeper 의 다음 틱 경계에 깨운다(§4.3).
+  - `Carry`: 적기만 한다. 다음에 열리는 턴에 실린다. 어느 까닭으로 열린 턴이든 된다.
+- 보낸 사람 종류는 만드는 쪽에서 타입으로 읽는다(§3.4). 이름의 모양이나 접두어로 가르지 않는다.
+- 큐 입력에 보낸 사람 필드를 더하지 않는다. 깨우기는 넣는 순간에만 쓰인다. 재시작 뒤에는 `Bootstrap` 이 큐를 다시 읽는다.
+- `Carry` 행은 주기 경계가 된 사이클에서만 턴을 연다. 그 밖의 사이클에서 `Carry` 행만으로 턴을 열지 않는다(§5.5-3, `TurnHasCause`).
+- 주기 경계가 된 사이클은 `Carry` 가 기다리면 gate 와 상관없이 턴을 연다(§5.5-5). 지금은 gate 가 꺼진 Keeper 가 그 사이클을 Skip 하고 경계만 쓴다(§3.3). 그대로 켜면 그 Keeper 의 `Carry` 는 실리지 않는다.
+- 그래서 `Carry` 가 기다리는 시간의 상한은 주기 하나와 턴 하나다(§5.2 `CarryAgeBound`). §1.2-1 의 늘어나는 간격을 켜면 상한은 그 상한값과 턴 하나가 된다.
+- 입력의 뜻과 보낸 사람을 타입으로 가르는 일이라 시간 장치가 아니다.
 
-### 4.3 틱 경계 — 언제 받는가
+### 4.3 틱 경계 — 언제 깨는가
 
 **정의.**
 - Keeper k 의 틱 경계는 `n × T + offset(k)` 다. T 는 틱 길이다.
@@ -182,27 +239,23 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
 - 경계는 마지막 턴 시각에서 재지 않는다. 그래서 cooldown 이 아니다.
 
 **깨우는 규칙.**
-- Keeper 가 만든 React 입력이 들어오면 적기만 한다. 깨우기는 그 Keeper 의 다음 경계에 한 번 보낸다.
+- `At_tick` 입력이 들어오면 적기만 한다. 깨우기는 그 Keeper 의 다음 경계에 한 번 보낸다.
 - 경계에 기다리던 입력이 있으면 턴을 연다. 한 턴에 묶을 수 없는 입력(답할 곳이 다른 예약 등)이 남으면 이어서 다음 턴을 연다. 다음 경계를 기다리지 않는다.
 - 그래서 턴 수에 상한을 두지 않는다. 깨우는 시각만 경계로 모은다.
 
 **받는 규칙(그대로).**
 - 어느 까닭으로 열린 턴이든, 그때 기다리던 입력을 모두 가져간다. 사람이 연 턴, 주기 턴, 예약 턴도 같다.
-- 그래서 경계 전에 Keeper 입력이 와 있으면, 사람 입력이 연 턴에 같이 실릴 수 있다. 도착 시각으로 거르지 않는다.
-
-**대상.**
-- Keeper 가 만든 React 입력이다. 사람이 보낸 입력은 보낸 사람으로 가르고 틱을 건너뛴다. 업무 종류로 가르지 않는다(묶음 RFC §1-1).
-- 예약은 예약이 정한 시각에 깬다. 예약이 이미 시각을 정한 일이기 때문이다.
+- 그래서 경계 전에 `At_tick` 입력이 와 있으면, `Now` 입력이 연 턴에 같이 실릴 수 있다. 도착 시각으로 거르지 않는다.
 
 **설정.**
 - `keeper.turn_tick_sec` 를 `Runtime_params` 로 등록한다. 값은 `Off | Every of seconds` 처럼 타입으로 둔다. 0 같은 특별한 값으로 끄지 않는다.
-- 기본값은 `Off` 다. 켜는 것은 §8 의 순서를 따른다.
+- 기본값은 `Off` 다. 켤 때 값은 300초다(§1.1-4). 켜는 것은 §8 의 순서를 따른다.
 
 **구현 지점(스케치).**
-- 깨우는 쪽: `wakeup_keeper` 가 입력의 보낸 사람을 보고, Keeper 가 보낸 React 입력이면 wakeup atomic 대신 「다음 경계에 깨움」을 건다.
-- heartbeat loop: sleep 길이를 「주기 경계」와 「걸린 틱 경계」 중 이른 쪽으로 잡는다. 사람 입력의 깨우기는 지금처럼 sleep 을 끊는다(`Interrupt_on_wakeup`).
-- 턴이 끝난 뒤 남은 입력이 이미 받은 묶음에서 나온 것이면 바로 다음 턴을 연다(`next_cycle_starts_now`, 지금과 같음). 턴 도중 새로 온 Keeper 입력은 다음 경계를 기다린다.
-- 채팅 줄: Keeper 가 보낸 작업은 경계에서만 claim 을 시작한다. 사람이 보낸 작업은 지금처럼 바로 claim 한다. claim 하면 기다리던 작업을 봉투째 함께 집는다(선행 조건).
+- 깨우는 쪽: 만드는 쪽이 `wakeup_keeper` 에 깨우기 종류를 넘긴다. `wakeup_keeper` 는 보낸 사람을 추론하지 않는다. `At_tick` 이면 wakeup atomic 대신 「다음 경계에 깨움」을 건다.
+- heartbeat loop: sleep 길이를 「주기 경계」와 「걸린 틱 경계」 중 이른 쪽으로 잡는다. `Now` 깨우기는 지금처럼 sleep 을 끊는다(`Interrupt_on_wakeup`).
+- 턴이 끝난 뒤 남은 입력이 이미 받은 묶음에서 나온 것이면 바로 다음 턴을 연다(`next_cycle_starts_now`, 지금과 같음). 턴 도중 새로 온 `At_tick` 입력은 다음 경계를 기다린다.
+- 채팅 줄: Keeper 가 보낸 작업은 경계에서만 claim 을 시작한다. 사람·외부가 보낸 작업은 지금처럼 바로 claim 한다. claim 하면 기다리던 작업을 봉투째 함께 집는다(선행 조건).
 
 **선행 조건.**
 - 보낸 사람이 다른 채팅을 봉투째 한 턴에 넣는 일(묶음 RFC §4.2·§4.3)이 먼저다.
@@ -213,15 +266,16 @@ Claude Code 세션을 가진 Keeper 만 들어간다. 다른 runtime 의 토큰�
 - 주기 턴도 틱 격자 위에서 연다. 주기 경계가 되면 그 뒤 첫 틱 경계에서 연다.
 - #54338 의 규칙(끝까지 돈 예약 턴이 주기 경계를 채움)은 그대로다.
 - 그러면 Keeper 마다 시계가 틱 하나로 모인다. 예약만 자기 시각을 따로 가진다.
+- 입력 없이 저절로 열리는 턴의 간격은 §1.2-1 에서 정한다. 정하기 전에는 지금 주기(`keeper.keepalive_interval_sec`)를 쓴다.
 
 ### 4.5 결정론과 비결정론의 경계
 
 - masc 가 정한다(결정론):
-  - 입력 종류마다 React 인지 Carry 인지(타입)
+  - 입력 종류와 보낸 사람 종류마다 `Now`·`At_tick`·`Carry`(타입)
   - 틱 경계(설정과 Keeper 이름)
-  - 경계에서 무엇을 받는지(도착 시각)
+  - 저절로 열리는 턴의 간격(설정)
 - Keeper 가 정한다(비결정론): 받은 묶음에서 무엇이 낡았는지, 무엇부터 할지, 답을 어떻게 쓸지.
-- 새 durable 상태는 없다. 경계는 시계와 설정에서 계산한다. 지난 턴의 기록을 scheduling 근거로 쓰지 않는다.
+- 새 durable 상태는 없다. 경계는 시계와 설정에서 계산한다. 늘어나는 간격을 켜면 그 단계 수는 프로세스 메모리에만 둔다. 재시작하면 시작값부터 다시 센다.
 
 ## 5. 불변식과 TLA+
 
@@ -229,7 +283,7 @@ spec 은 `specs/keeper-state-machine/KeeperReactionQueue.tla` 와 cfg 열 개다
 
 ### 5.1 모델
 
-- Keeper 하나의 큐다. 입력은 셋이다.
+- Keeper 하나의 큐다. 입력은 셋이다. 모델의 「사람 입력」은 §4.2 의 `Now`, 「Keeper 입력」은 `At_tick` 이다.
   - 사람 입력: 넣을 때 깨운다.
   - Keeper 입력: 다음 틱 경계에서 깨운다. 그때 기다리던 Keeper 입력을 모두 한 번에 깨운다.
   - Carry: 깨우지 않는다.
@@ -294,7 +348,7 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 
 모델의 성질은 아래를 지킬 때만 코드에서도 선다.
 
-1. 사람 입력은 넣을 때 깨운다(`HumanRoutable`).
+1. `Now` 입력은 넣을 때 깨운다(`HumanRoutable`).
 2. 틱 경계는 그때 기다리던 Keeper 입력을 개수와 상관없이 모두 깨운다. 턴은 기다리던 입력을 보낸 사람과 상관없이 모두 가져간다(`KeeperAgeBound`).
 3. 판정은 깨우기를 올린 입력이 있거나 주기·예약 시각이 될 때만 턴을 연다. Carry 행이나 경계 전 Keeper 행만 있으면 턴을 열지 않는다(`TurnHasCause`).
 4. `pending_stimulus_remains`(`next_cycle_starts_now` 가 읽는다)는 깨우기를 올린 행만 센다. 아니면 턴 도중 들어온 Carry 가 턴이 끝나자마자 다음 사이클을 연다.
@@ -317,7 +371,7 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
   - 읽은 끝(`Covered`)이 창의 시작보다 뒤면 그 끝으로 옮긴다(`Librarian_point_at_max_context`). 요청에서 빠지는 메시지는 이미 Memory 에 있다.
   - 읽은 끝이 없거나 창의 시작보다 앞이면 지금 턴의 시작으로 옮긴다(`Turn_start_at_max_context`). 창의 시작과 턴 시작 사이의 메시지는 요청에도 Memory 에도 없다.
 - 지금 운영에는 `librarian_memory` lane 표가 없다. 쓰는 쪽에 읽은 끝이 없으니, 창을 넘는 요청은 턴 시작으로 옮겨진다.
-- 그래서 묶음을 키우는 단계(§8 의 4·5)는 Librarian 컷을 설치하고 `librarian_memory` lane 을 켠 뒤(§8 의 3)에 둔다. #54335(`RFC-official-client-start-seed-window.md`)도 같은 까닭으로 컷 설치 뒤에 켠다.
+- 그래서 묶음을 키우는 단계(§8 의 5·6)는 Librarian 컷을 설치하고 `librarian_memory` lane 을 켠 뒤(§8 의 4)에 둔다. #54335(`RFC-official-client-start-seed-window.md`)도 같은 까닭으로 컷 설치 뒤에 켠다.
 - 켠 뒤에는 W2 경보로 본다.
   - W2 는 요청이 읽은 끝보다 뒤에서 시작해, 요청에도 Memory 에도 없는 메시지가 생긴 Keeper 에 뜬다(`Keeper_request_start.standing` 의 `Behind`, #54344).
   - §8 은 W2 가 늘면 끈다.
@@ -326,7 +380,8 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 
 ## 7. 무엇이 나빠지나
 
-- Keeper 사이 응답이 최대 틱 하나만큼 늦다. 위임 → 결과 → 다음 일처럼 이어지는 사슬은 한 단계마다 틱 하나까지 늦어진다(300초 틱이면 단계마다 최대 5분).
+- 다른 Keeper 가 만든 입력에 대한 응답이 최대 틱 하나만큼 늦다. 위임 → 결과 → 다음 일처럼 이어지는 사슬은 한 단계마다 틱 하나까지 늦어진다(300초 틱이면 단계마다 최대 5분).
+- `Carry` 입력(관심 판정 글, 반응·투표, 승인된 완료)은 다른 턴이 열릴 때까지 기다린다. 지금 주기로는 최대 30분이다.
 - 턴 하나가 받는 입력이 많아져 턴이 길어진다. 첫 요청이 커진다(§6).
 - 틱보다 긴 턴을 도는 Keeper 는 효과가 작다. 턴이 끝나면 이미 지난 경계의 입력을 바로 받는다.
 - 예약 간격이 틱보다 짧아도 예약은 제 시각에 깬다. 예약을 틱으로 늦추지 않는다.
@@ -334,34 +389,39 @@ TLC 1.8.0 으로 2026-11-22 에 돌렸다. 상수는 `MaxStimuli = 3`, `MaxTime 
 ## 8. 켜는 순서와 판정 기준
 
 **순서.**
-1. 입력 종류 표를 `match` 로 바꾸고 React | Carry 를 넣는다. 기본은 모두 React 다(동작 변화 없음). 이 단계에서 `KeeperEventQueue.tla` 를 `KeeperReactionQueue.tla` 로 바꾼다(hard cut, §5).
-2. 묶음 RFC §4.2·§4.3(봉투 묶음)을 구현한다.
-3. Librarian 컷을 설치하고 `librarian_memory` lane 을 켠다.
-4. 운영자가 고른 Carry 종류를 켠다.
-5. `keeper.turn_tick_sec` 를 켠다.
+1. 깨우기 표를 `match` 로 바꾸고 `Now | At_tick | Carry` 를 넣는다. 기본은 모두 `Now` 다(동작 변화 없음). 같은 단계에서 §5.5 의 다섯 가지를 코드에 넣는다. `pending_stimulus_remains` 는 깨우기를 올린 행만 세고, 주기 경계가 된 사이클은 `Carry` 가 있으면 gate 와 상관없이 턴을 연다. `KeeperEventQueue.tla` 는 `KeeperReactionQueue.tla` 로 바꾼다(hard cut, §5).
+2. Board 글·댓글과 작업 취소의 보낸 사람 종류를 만드는 쪽에서 등록부 일치로 읽는다(§3.4).
+3. 묶음 RFC §4.2·§4.3(봉투 묶음)을 구현한다.
+4. Librarian 컷을 설치하고 `librarian_memory` lane 을 켠다.
+5. §1.1-2 의 `Carry` 를 켠다.
+6. `keeper.turn_tick_sec` 를 300초로 켠다.
+7. §1.2-1 을 정하면 저절로 열리는 턴의 간격을 켠다.
 
 **판정.** 켜기 전과 켠 뒤를 같은 길이 구간으로 잰다.
 - Keeper 마다 연 턴 수, 입력 종류별 턴 수(§2.1 의 셈)
 - 출처별 문맥 토큰(§2.2 의 셈)
 - cache_read 몫(§2.5 의 셈)
 - 입력 종류별 도착 → 턴 시작 지연. 반응 원장(`Keeper_reaction_ledger`)의 stimulus → `Turn_started` 로 잰다. 켜기 전 값부터 먼저 잰다.
+- 저절로 열린 턴 수(§2.6 의 셈)
 - 새 세션 첫 요청이 자기 창을 넘은 비율, W2 경보 수
 - 첫 턴 실패 수
 
-사람이 보낸 입력의 지연이 늘거나, 첫 턴 실패나 W2 경보가 늘면 끈다.
+`Now` 입력의 지연이 늘거나, 첫 턴 실패나 W2 경보가 늘면 끈다.
 
 ## 9. 열린 질문
 
-1. `Tool_result_ready` 는 Keeper 자기 일의 이어짐이다. 틱을 기다리게 할지 정해야 한다. 기다리면 자기 일이 틱만큼 늦고, 건너뛰면 380번(§2.1)이 그대로 남는다.
-2. 다른 runtime(Codex, Agent Core, HTTP provider)의 캐시 유지 시간은 재지 않았다.
-3. `offset(k)` 를 이름에서 정하면, Keeper 이름을 바꿀 때 경계가 옮겨진다. 문제가 되는지 본다.
-4. 여러 계정 배포(`is_multi_account`)에서 틱을 어디서 세는지 정해야 한다.
+1. 다른 runtime(Codex, Agent Core, HTTP provider)의 캐시 유지 시간은 재지 않았다.
+2. `offset(k)` 를 이름에서 정하면, Keeper 이름을 바꿀 때 경계가 옮겨진다. 문제가 되는지 본다.
+3. 여러 계정 배포(`is_multi_account`)에서 틱을 어디서 세는지 정해야 한다.
+4. 큐 입력 없이 열린 턴 20번이 어디서 왔는지 아직 나누지 못했다(§2.1).
+5. Board 가 내려간 동안 다시 남긴 routing 행 때문에 `next_cycle_starts_now` 가 사이클을 바로바로 다시 여는지는 보지 않았다. 그 행이 ack 되고 다시 들어가는지에 달렸다.
 
 ## 10. 하지 않는 것
 
 - 입력을 버리거나 중복을 지우는 일
 - 턴 수나 묶음 크기의 상한
-- 마지막 턴에서 재는 cooldown
+- 입력의 깨우기를 마지막 턴에서 재서 늦추는 일(cooldown). §1.2-1 의 간격은 입력 없이 저절로 열리는 턴에만 쓴다.
 - 업무 종류(리뷰, 배포 등)로 가르는 일
+- 이름의 모양이나 접두어로 보낸 사람을 가르는 일
 - 도는 턴을 끊는 일
 - Keeper 지시나 프롬프트에 「덜 깨라」를 적는 일

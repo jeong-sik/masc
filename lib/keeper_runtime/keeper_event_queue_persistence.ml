@@ -1835,12 +1835,13 @@ let project_selected_outbox_entry_unlocked
       ~select_entry
       ~append_before_retire
       ~retain_previous
+      ~no_entry
       owner
       state
   =
   let open Result.Syntax in
   match select_entry (State.transition_outbox state) with
-  | None -> Ok ()
+  | None -> no_entry
   | Some (entry : State.outbox_entry) ->
     let* () = append_before_retire state entry in
     let* projected =
@@ -1869,6 +1870,7 @@ let project_transition_outbox_result
         ~select_entry:(function [] -> None | entry :: _ -> Some entry)
         ~append_before_retire
         ~retain_previous
+        ~no_entry:(Ok ())
         owner
         state)
   with
@@ -1901,6 +1903,12 @@ let project_transition_outbox_entry_result
             entries)
         ~append_before_retire
         ~retain_previous
+        ~no_entry:
+          (Error
+             (Printf.sprintf
+                "event queue transition outbox has no entry keeper=%s transition_id=%s"
+                keeper_name
+                transition_id))
         owner
         state)
   with

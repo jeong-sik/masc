@@ -1977,7 +1977,9 @@ let test_direct_board_http_readership_and_cache () =
        check string "credential owns readership" "outside-reader" name;
        check string "same observation owns reactions" name actor
    | Ok (Masc_board_handlers.Board_access.Anonymous, _) | Ok (Masc_board_handlers.Board_access.Operator, _)
-   | Ok (Masc_board_handlers.Board_access.Named _, None) -> fail "worker was not a named credential reader"
+   | Ok (Masc_board_handlers.Board_access.Named _, None)
+   | Ok (Masc_board_handlers.Board_access.Workspace_member _, _) ->
+     fail "worker was not a named credential reader"
    | Error error -> fail (Masc_domain.masc_error_to_string error));
   Dashboard_cache.invalidate_all ()
 ;;

@@ -71,6 +71,7 @@ type mosaic_refusal =
   | Empty_body
   | Cache_unreadable of { detail : string }
   | Decode_failed of { detail : string }
+  | No_color
 
 type mosaic_entry =
   | Mosaic of string list
@@ -81,6 +82,8 @@ let mosaic_refusal_text = function
   | Empty_body -> "the image URL answered with an empty body"
   | Cache_unreadable { detail } -> "the cached image could not be read: " ^ detail
   | Decode_failed { detail } -> "the image could not be decoded: " ^ detail
+  | No_color ->
+      "this terminal cannot draw a colour image preview (NO_COLOR or fewer than 256 colours)"
 
 (* What the background fetch decided about an image URL, keyed by that URL and
    filled asynchronously off the render loop. Read by [render_modal_card]; a
@@ -823,7 +826,10 @@ let render_modal_card ~width ~height:_ p =
            add "  preview";
            List.iter (fun l -> add ("  " ^ l)) mosaic;
            add ""
-       | Some (Refused refusal) ->
+       | Some (Refused No_color) ->
+           add_text ("  preview: " ^ mosaic_refusal_text No_color);
+           add ""
+       | Some (Refused ((Fetch_failed _ | Empty_body | Cache_unreadable _ | Decode_failed _) as refusal)) ->
            (* Said out loud, so a card with no picture is not mistaken for a
               page with no og:image. *)
            add_text ("  preview: " ^ mosaic_refusal_text refusal);

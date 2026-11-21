@@ -27,6 +27,16 @@ val set_cell_pixels : (int * int) option -> unit
     alone. Set once at startup from the terminal probe, for the same reason
     {!set_graphics_protocol} is: this screen cannot reach the reader's state. *)
 
+module For_testing : sig
+  type color_capability = Masc_tui_image_mosaic.For_testing.color_capability =
+    | Terminal
+    | True_color
+    | Ansi256
+    | Disabled
+
+  val set_color_capability : color_capability -> unit
+end
+
 val render :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status

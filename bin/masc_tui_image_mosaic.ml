@@ -68,36 +68,79 @@ let downscale ~src_w ~src_h ~cols ~rows (rgb : string) =
     Bytes.to_string out
   end
 
-(** [render ~cols ~rows rgb] renders row-major RGB bytes ([cols*rows*3] long)
-    as [rows/2] mosaic lines. Returns [] when [rows] is odd or [rgb] is too
-    short for the stated dimensions, so a malformed decode never draws garbage
-    or raises. *)
-let render ~cols ~rows (rgb : string) : string list =
+exception Unprojectable_pixel
+
+let project_for_terminal rgb =
+  if Masc_tui_theme.colors_enabled then Masc_tui_terminal_palette.best_color rgb
+  else None
+
+let project_pixel_or_stop ~project ~bytes ~offset =
+  let rgb =
+    Masc_tui_terminal_palette.make_rgb
+      ~red:(Char.code bytes.[offset])
+      ~green:(Char.code bytes.[offset + 1])
+      ~blue:(Char.code bytes.[offset + 2])
+  in
+  match project rgb with
+  | Some projected -> projected
+  | None -> raise_notrace Unprojectable_pixel
+
+(** [render ~project ~cols ~rows rgb] renders row-major RGB bytes
+    ([cols*rows*3] long) as [rows/2] mosaic lines. Returns [] when [rows] is
+    odd, [rgb] is too short, or [project] refuses a pixel, so a malformed
+    decode or colourless terminal never draws colourless stripes or raises. *)
+let render ~project ~cols ~rows (rgb : string) : string list =
   if cols <= 0 || rows <= 0 || rows land 1 = 1 then []
   else if String.length rgb < cols * rows * bytes_per_pixel then []
-  else begin
+  else
+    let module Sgr = Masc_tui_theme.Sgr in
     let px x y =
-      let i = ((y * cols) + x) * bytes_per_pixel in
-      (Char.code rgb.[i], Char.code rgb.[i + 1], Char.code rgb.[i + 2])
+      let offset = ((y * cols) + x) * bytes_per_pixel in
+      project_pixel_or_stop ~project ~bytes:rgb ~offset
     in
-    let out_rows = rows / 2 in
-    let buf = Buffer.create (cols * 24) in
-    let lines = ref [] in
-    for cy = 0 to out_rows - 1 do
-      Buffer.clear buf;
-      for x = 0 to cols - 1 do
-        let tr, tg, tb = px x (2 * cy) in
-        let br, bg, bb = px x ((2 * cy) + 1) in
-        Buffer.add_string buf
-          (Masc_tui_theme.Sgr.truecolor_foreground ~r:tr ~g:tg ~b:tb
-           ^ Masc_tui_theme.Sgr.truecolor_background ~r:br ~g:bg ~b:bb
-           ^ upper_half_block)
+    try
+      let out_rows = rows / 2 in
+      let buf = Buffer.create (cols * 24) in
+      let lines = ref [] in
+      for cy = 0 to out_rows - 1 do
+        Buffer.clear buf;
+        for x = 0 to cols - 1 do
+          let top = px x (2 * cy) in
+          let bottom = px x ((2 * cy) + 1) in
+          Buffer.add_string buf (Sgr.pixel_foreground top);
+          Buffer.add_string buf (Sgr.pixel_background bottom);
+          Buffer.add_string buf upper_half_block
+        done;
+        Buffer.add_string buf reset;
+        lines := Buffer.contents buf :: !lines
       done;
-      Buffer.add_string buf reset;
-      lines := Buffer.contents buf :: !lines
-    done;
-    List.rev !lines
-  end
+      List.rev !lines
+    with Unprojectable_pixel -> []
+
+let render_for_terminal ~cols ~rows rgb =
+  render ~project:project_for_terminal ~cols ~rows rgb
+
+module For_testing = struct
+  type color_capability =
+    | Terminal
+    | True_color
+    | Ansi256
+    | Disabled
+
+  let render_with_capability ~capability ~cols ~rows rgb =
+    let project =
+      match capability with
+      | Terminal -> project_for_terminal
+      | True_color ->
+          Masc_tui_terminal_palette.For_testing.best_color_for_level
+            ~level:Masc_tui_terminal_palette.True_color
+      | Ansi256 ->
+          Masc_tui_terminal_palette.For_testing.best_color_for_level
+            ~level:Masc_tui_terminal_palette.Ansi256
+      | Disabled -> fun _ -> None
+    in
+    render ~project ~cols ~rows rgb
+end
 
 (* Half an alpha byte: a pixel at least this opaque is drawn, below it the
    page shows. A cell half is one colour or the page, so an antialiased edge
@@ -107,52 +150,39 @@ let opaque_alpha = 128
 let render_rgba ~project ~cols ~rows (rgba : string) : string list =
   if cols <= 0 || rows <= 0 || rows land 1 = 1 then []
   else if String.length rgba < cols * rows * rgba_bytes_per_pixel then []
-  else begin
+  else
     let module Sgr = Masc_tui_theme.Sgr in
     let px x y =
-      let i = ((y * cols) + x) * rgba_bytes_per_pixel in
-      if Char.code rgba.[i + 3] >= opaque_alpha then
-        Some
-          (project
-             (Masc_tui_terminal_palette.make_rgb ~red:(Char.code rgba.[i])
-                ~green:(Char.code rgba.[i + 1]) ~blue:(Char.code rgba.[i + 2])))
+      let offset = ((y * cols) + x) * rgba_bytes_per_pixel in
+      if Char.code rgba.[offset + 3] >= opaque_alpha then
+        Some (project_pixel_or_stop ~project ~bytes:rgba ~offset)
       else None
     in
-    (* A colour [project] cannot draw is drawn in the terminal's own, said
-       out loud: an empty escape would leave the cell in the colour of the
-       one before it. *)
-    let foreground = function
-      | Some _ as colour -> Sgr.foreground colour
-      | None -> Sgr.default_fg
-    in
-    let background = function
-      | Some _ as colour -> Sgr.background colour
-      | None -> Sgr.default_bg
-    in
-    let buf = Buffer.create (cols * 32) in
-    let line cy =
-      Buffer.clear buf;
-      for x = 0 to cols - 1 do
-        match px x (2 * cy), px x ((2 * cy) + 1) with
-        | Some top, Some bottom ->
-            Buffer.add_string buf (foreground top);
-            Buffer.add_string buf (background bottom);
-            Buffer.add_string buf upper_half_block
-        | Some top, None ->
-            Buffer.add_string buf Sgr.default_bg;
-            Buffer.add_string buf (foreground top);
-            Buffer.add_string buf upper_half_block
-        | None, Some bottom ->
-            Buffer.add_string buf Sgr.default_bg;
-            Buffer.add_string buf (foreground bottom);
-            Buffer.add_string buf lower_half_block
-        | None, None ->
-            Buffer.add_string buf Sgr.default_bg;
-            Buffer.add_char buf ' '
-      done;
-      Buffer.add_string buf Sgr.default_fg;
-      Buffer.add_string buf Sgr.default_bg;
-      Buffer.contents buf
-    in
-    List.init (rows / 2) line
-  end
+    try
+      let buf = Buffer.create (cols * 32) in
+      let line cy =
+        Buffer.clear buf;
+        for x = 0 to cols - 1 do
+          match px x (2 * cy), px x ((2 * cy) + 1) with
+          | Some top, Some bottom ->
+              Buffer.add_string buf (Sgr.pixel_foreground top);
+              Buffer.add_string buf (Sgr.pixel_background bottom);
+              Buffer.add_string buf upper_half_block
+          | Some top, None ->
+              Buffer.add_string buf Sgr.pixel_default_bg;
+              Buffer.add_string buf (Sgr.pixel_foreground top);
+              Buffer.add_string buf upper_half_block
+          | None, Some bottom ->
+              Buffer.add_string buf Sgr.pixel_default_bg;
+              Buffer.add_string buf (Sgr.pixel_foreground bottom);
+              Buffer.add_string buf lower_half_block
+          | None, None ->
+              Buffer.add_string buf Sgr.pixel_default_bg;
+              Buffer.add_char buf ' '
+        done;
+        Buffer.add_string buf Sgr.pixel_default_fg;
+        Buffer.add_string buf Sgr.pixel_default_bg;
+        Buffer.contents buf
+      in
+      List.init (rows / 2) line
+    with Unprojectable_pixel -> []

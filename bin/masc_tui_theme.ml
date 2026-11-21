@@ -222,6 +222,17 @@ module Sgr = struct
   let background = projected_background ~colors_enabled
   let foreground = projected_foreground ~colors_enabled
 
+  let pixel_foreground colour =
+    projected_foreground ~colors_enabled:true (Some colour)
+  ;;
+
+  let pixel_background colour =
+    projected_background ~colors_enabled:true (Some colour)
+  ;;
+
+  let pixel_default_fg = "\027[39m"
+  let pixel_default_bg = "\027[49m"
+
   (* Pixels, not theme. An image mosaic and a link preview swatch carry colour
      that came from the picture, so there is no palette to project it through
      -- but the escape bytes are still this module's to write, and the colour

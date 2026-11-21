@@ -4140,7 +4140,7 @@ let draw_prepared_image ?scene ?(caption=[]) ~origin state ~refuse ~title = func
         refuse "terminal size changed; reopen the image preview"
     | Some _ ->
       let lines = Masc_tui_image_mosaic.render_rgba
-        ~project:Masc_tui_terminal_palette.best_color
+        ~project:Masc_tui_image_mosaic.project_for_terminal
         ~cols:image_columns ~rows:pixel_rows bytes in
       match lines with
       | [] -> refuse "image preview has no character frame"
@@ -4302,7 +4302,9 @@ let mosaic_cols = 120
    Unix.system): the caller runs it off the render loop inside
    run_in_systhread. *)
 let image_url_to_mosaic ?(force_fetch = false) ~cols url : Masc_tui_link_preview.mosaic_entry =
-  match download_remote_image ~force_fetch url with
+  if not (character_images_available ()) then
+    Masc_tui_link_preview.(Refused No_color)
+  else match download_remote_image ~force_fetch url with
   | Error (Masc_tui_image_cache.Fetch_failed failure) ->
       Masc_tui_link_preview.(
         Refused (Fetch_failed { detail = Masc_tui_image_cache.fetch_failure_text failure }))
@@ -4336,7 +4338,11 @@ let image_url_to_mosaic ?(force_fetch = false) ~cols url : Masc_tui_link_preview
         | Error failure -> refuse failure
         | Ok data -> (
             let rows = String.length data / (cols * 3) in
-            match Masc_tui_image_mosaic.render ~cols ~rows data with
+            match
+              Masc_tui_image_mosaic.render
+                ~project:Masc_tui_image_mosaic.project_for_terminal
+                ~cols ~rows data
+            with
             | [] -> refuse Masc_tui_image_cache.No_frame_written
             | lines -> Masc_tui_link_preview.Mosaic lines))
     in

@@ -3,20 +3,54 @@
 open Alcotest
 open Masc_tui_image_mosaic
 
+let true_colour = Masc_tui_terminal_palette.For_testing.best_color_for_level
+    ~level:Masc_tui_terminal_palette.True_color
+
+let ansi256 = Masc_tui_terminal_palette.For_testing.best_color_for_level
+    ~level:Masc_tui_terminal_palette.Ansi256
+
 let test_odd_rows_empty () =
   check (list string) "odd rows -> []" []
-    (render ~cols:2 ~rows:3 (String.make 18 '\000'))
+    (render ~project:true_colour ~cols:2 ~rows:3 (String.make 18 '\000'))
 
 let test_short_buffer_empty () =
   check (list string) "short buffer -> []" []
-    (render ~cols:4 ~rows:4 (String.make 5 '\000'))
+    (render ~project:true_colour ~cols:4 ~rows:4 (String.make 5 '\000'))
 
-let true_colour = Masc_tui_terminal_palette.For_testing.best_color_for_level
-    ~level:Masc_tui_terminal_palette.True_color
+let contains ~sub haystack =
+  let n = String.length sub and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = sub || at (i + 1)) in
+  n = 0 || at 0
+
+let test_render_follows_projector_not_process_env () =
+  let rgb = "\255\000\000\000\255\000" in
+  let true_lines = render ~project:true_colour ~cols:1 ~rows:2 rgb in
+  check int "one cell row" 1 (List.length true_lines);
+  let line = List.hd true_lines in
+  check bool "truecolour fg" true (contains ~sub:"\027[38;2;255;0;0m" line);
+  check bool "truecolour bg" true (contains ~sub:"\027[48;2;0;255;0m" line);
+  let idx_lines = render ~project:ansi256 ~cols:1 ~rows:2 rgb in
+  check int "256-colour cell row" 1 (List.length idx_lines);
+  let idx_line = List.hd idx_lines in
+  check bool "256-colour fg" true (contains ~sub:"\027[38;5;" idx_line);
+  check bool "256-colour bg" true (contains ~sub:"\027[48;5;" idx_line);
+  check (list string) "no-colour projector draws no colourless stripes" []
+    (render ~project:(fun _ -> None) ~cols:1 ~rows:2 rgb)
 
 let test_rgba_refuses_what_render_refuses () =
   check (list string) "odd rows" [] (render_rgba ~project:true_colour ~cols:1 ~rows:3 (String.make 12 '\000'));
   check (list string) "short buffer" [] (render_rgba ~project:true_colour ~cols:2 ~rows:2 (String.make 15 '\000'))
+
+let test_rgba_follows_projector_not_process_env () =
+  let rgba = "\255\000\000\255\000\000\000\000" in
+  let lines = render_rgba ~project:true_colour ~cols:1 ~rows:2 rgba in
+  check int "one rgba cell row" 1 (List.length lines);
+  let line = List.hd lines in
+  check bool "rgba truecolour fg" true (contains ~sub:"\027[38;2;255;0;0m" line);
+  check bool "rgba default fg reset" true (contains ~sub:"\027[39m" line);
+  check bool "rgba default bg reset" true (contains ~sub:"\027[49m" line);
+  check (list string) "no-colour projector refuses opaque rgba pixels" []
+    (render_rgba ~project:(fun _ -> None) ~cols:1 ~rows:2 rgba)
 
 let rgb_of pixels =
   String.concat "" (List.map (fun (r, g, b) ->
@@ -79,8 +113,12 @@ let () =
     ; ( "render"
       , [ test_case "odd rows empty" `Quick test_odd_rows_empty
         ; test_case "short buffer empty" `Quick test_short_buffer_empty
+        ; test_case "follows projector not process env" `Quick
+            test_render_follows_projector_not_process_env
         ;] )
     ; ( "render_rgba"
       , [ test_case "refuses what render refuses" `Quick test_rgba_refuses_what_render_refuses
+        ; test_case "follows projector not process env" `Quick
+            test_rgba_follows_projector_not_process_env
         ] )
     ]

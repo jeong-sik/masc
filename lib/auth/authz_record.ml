@@ -150,7 +150,24 @@ let writers : Kind.t -> writer list = function
   | Kind.Legacy_attribution -> [ Host_operator; Authenticated_principal ]
 ;;
 
-let admits kind author = List.mem (writer_of author) (writers kind)
+(* A Service principal never writes a legacy attribution record: only the
+   person the bootstrap admission bound claims or retires a Keeper (design
+   10.3). [writers] names kinds of author and cannot tell a Human from a
+   Service, so the one exclusion is a list here. *)
+let service_author = function
+  | Author.Authenticated (Principal.Human _) -> false
+  | Author.Authenticated (Principal.Service _) -> true
+  | Author.Local_operator -> false
+  | Author.System_cron -> false
+  | Author.System_maintenance -> false
+;;
+
+let human_only_kinds = [ Kind.Legacy_attribution ]
+
+let admits kind author =
+  List.mem (writer_of author) (writers kind)
+  && not (service_author author && List.mem kind human_only_kinds)
+;;
 
 (* The text of an author. Every string goes through [Authz_body.string_literal],
    the one escape function of the log, even though an identifier has no

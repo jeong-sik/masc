@@ -140,8 +140,10 @@ end
     the system maintenance, which ends it. Which of the two writes which event
     is a question of the state. A [Legacy_attribution] record is written by the
     local operator, which freezes the inventory and binds the candidate, and by
-    an authenticated principal, whose claim or retirement the state checks
-    against that candidate and its Admin assignment. *)
+    an authenticated [Human]: a [Service] principal never writes one, because
+    attribution belongs to the person the bootstrap admission bound. Which
+    Human may claim or retire a Keeper is a question of the state, checked
+    against the candidate and its Admin assignment. *)
 val admits : Kind.t -> Author.t -> bool
 
 (** Where the next record goes: its position and the hash it must carry. *)

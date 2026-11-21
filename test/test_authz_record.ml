@@ -48,6 +48,7 @@ let writers_of =
     ; Runtime, authenticated
     ; Keeper, authenticated
     ; Purge, authenticated @ [ "system maintenance" ]
+    ; Legacy_attribution, [ "local operator"; "authenticated human" ]
     ]
 ;;
 
@@ -86,6 +87,7 @@ let ordinal = function
   | R.Kind.Runtime -> 18
   | R.Kind.Keeper -> 19
   | R.Kind.Purge -> 20
+  | R.Kind.Legacy_attribution -> 21
 ;;
 
 let kinds_are_all_listed () =

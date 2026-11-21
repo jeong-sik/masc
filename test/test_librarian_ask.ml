@@ -288,6 +288,7 @@ let outcome_text : Librarian_slot_outcome.unanswered -> string = function
   | Silent Not_called -> "Silent Not_called"
   | Silent Unavailable -> "Silent Unavailable"
   | Silent Busy -> "Silent Busy"
+  | Silent Overdue -> "Silent Overdue"
   | Silent Lost -> "Silent Lost"
   | Silent (Unusable rejection) -> "Silent (Unusable " ^ Librarian_answer.rejection_kind rejection ^ ")"
 ;;

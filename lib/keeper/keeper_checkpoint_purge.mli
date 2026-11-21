@@ -85,9 +85,9 @@
     fits, and the recovery is refused; with the server stopped, removing that
     working state (the keeper's [librarian-continuity.json]) lets it through,
     and the Librarian writes it again from atom 0. The Librarian position is
-    not read or moved, so a recovery can leave it past the new end. No lane
-    reads it since the Memory writer took over the Memory writes; the Memory
-    health response still does, for its [read_position] and [stalled]
+    not read or moved, so a recovery can leave it past the new end. The
+    server no longer starts the lane that read atoms from it; the Memory
+    health response still reads it, for its [read_position] and [stalled]
     values.
 
     Tool protocol cycles are never split, reordered, or dropped. The last

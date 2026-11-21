@@ -1231,6 +1231,7 @@ let booted_memory_writer_view ~sw ~(config : Masc.Workspace.config) name =
        | Masc.Librarian_machine.Turn_log_unread
        | Masc.Librarian_machine.Not_the_head _
        | Masc.Librarian_machine.Not_the_faulted_line
+       | Masc.Librarian_machine.Turn_log_stopped_on_line
        | Masc.Librarian_machine.Content_unread
        | Masc.Librarian_machine.Act_unavailable _ ) ->
      failwith "booted_memory_writer_view: the writer did not open its store");

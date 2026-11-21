@@ -106,6 +106,7 @@ let act_text : Machine.act_answer Writer.asked -> string = function
   | Answered (Not_done Turn_log_unread) -> "turn log unread"
   | Answered (Not_done (Not_the_head _)) -> "not the head"
   | Answered (Not_done Not_the_faulted_line) -> "not the faulted line"
+  | Answered (Not_done Turn_log_stopped_on_line) -> "the turn log is stopped on the line"
   | Answered (Not_done Content_unread) -> "content unread"
   | Answered (Not_done (Act_unavailable why)) -> unavailable_text why
 ;;

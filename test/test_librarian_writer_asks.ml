@@ -388,7 +388,8 @@ let settled writers =
   | Done
   | Not_done
       ( Not_stopped | Snapshot_mismatch | Snapshot_unreadable | Not_replaced | Turn_log_unread
-      | Not_the_head _ | Not_the_faulted_line | Content_unread | Act_unavailable _ ) ->
+      | Not_the_head _ | Not_the_faulted_line | Turn_log_stopped_on_line | Content_unread
+      | Act_unavailable _ ) ->
     fail "the writer was not idle or asking"
 ;;
 

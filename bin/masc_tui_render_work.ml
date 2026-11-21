@@ -19,11 +19,6 @@ module Doc = Masc_tui_doc
 module Card = Masc_tui_card
 module Text_block = Masc_tui_text_block
 
-let wrap_style style text =
-  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
-  then text
-  else style ^ text ^ Ansi.reset
-
 let task_status_mark (status : Masc_domain.task_status) =
   Masc_tui_value.Mark.glyph
     (match status with
@@ -452,8 +447,8 @@ let render_work_tasks (state : state) =
                | Some name -> Terminal_text.single_line name
                | None -> text "미배정" "unassigned" in
              let status_style = if previous then Theme.recede () else task_state_style task.status in
-             let summary = wrap_style status_style status_word
-               ^ wrap_style (Theme.recede ()) (" · " ^ owner) in
+             let summary = Ansi.wrap_style status_style status_word
+               ^ Ansi.wrap_style (Theme.recede ()) (" · " ^ owner) in
              work_entry_lines ~cells:geometry.list_width ~height:window.entry_height
                ~selected:(Some index = selected) ~title:task.title ~summary
                ~compact:status_word)) in
@@ -971,8 +966,8 @@ let render_planning_list (state : state) =
            (* Modes and a read failure can use spare space, but never replace
               the one row Enter would open in a short terminal. *)
            if available >= 8 then begin
-             if show_modes then push_context (" " ^ wrap_style (Theme.recede ()) modes);
-             Option.iter (fun detail -> push_context (" " ^ wrap_style (Theme.warn ()) (Terminal_text.single_line detail)))
+             if show_modes then push_context (" " ^ Ansi.wrap_style (Theme.recede ()) modes);
+             Option.iter (fun detail -> push_context (" " ^ Ansi.wrap_style (Theme.warn ()) (Terminal_text.single_line detail)))
                state.planning_error
            end;
            let inner = max 1 (framed_inner_width cols) in
@@ -1279,14 +1274,14 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
            Message_layout.wrap_words ~max_cells:inner_w
              (Printf.sprintf (if ko then "확인 대기: %s [%s] · 다시 누르면 제출, 다른 키는 취소" else "Armed: %s [%s] · press again to submit; other keys cancel")
                 (planning_action_label ~ko action) (planning_action_key action))
-           |> List.map (fun line -> "  " ^ wrap_style (Theme.warn () ^ Ansi.bold) line))
+           |> List.map (fun line -> "  " ^ Ansi.wrap_style (Theme.warn () ^ Ansi.bold) line))
   |> fun rows -> rows @ (match drop_reason with
        | None -> []
        | Some reason ->
            Message_layout.wrap_words ~max_cells:inner_w
              (Printf.sprintf (if ko then "중단 사유: %s_ · Enter:중단 요청" else "Drop reason: %s_ · Enter requests drop")
                 (Terminal_text.single_line reason))
-           |> List.map (fun line -> "  " ^ wrap_style (Theme.warn ()) line))
+           |> List.map (fun line -> "  " ^ Ansi.wrap_style (Theme.warn ()) line))
 
 (* The proof block sits two cells in. Its rows arrive wrapped by
    [Planning_detail] at [planning_proof_width], which leaves room for that
@@ -2376,7 +2371,7 @@ let render_schedule_list (state : state) =
             c.push (data_unreliable_row ~cols err)
         | None ->
             let reading = Snapshot_read.in_flight state.schedules_read in
-            c.push (wrap_style (if reading then Theme.info () else Theme.recede ()) (page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading)))
+            c.push (Ansi.wrap_style (if reading then Theme.info () else Theme.recede ()) (page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading)))
    | Some snapshot ->
        let warning_rows =
          match schedule_source_warning state with
@@ -2432,7 +2427,7 @@ let render_schedule_list (state : state) =
          let next_due_text =
            match snapshot.scs_next_due_iso with
            | Some iso ->
-               wrap_style (Theme.recede ())
+               Ansi.wrap_style (Theme.recede ())
                  (Printf.sprintf
                     (if ko then "  \xc2\xb7  다음 기한: %s"
                      else "  \xc2\xb7  Next due: %s")
@@ -2479,7 +2474,7 @@ let render_schedule_list (state : state) =
                    ~ko:"  (자동 일정 없음 · n 으로 만들기)"
                    ~en:"  (no scheduled automation · press n to create one)"
            in
-           c.push (wrap_style (Theme.recede ()) empty)
+           c.push (Ansi.wrap_style (Theme.recede ()) empty)
          end else begin
            (* Keep two factual rows below the list for delivery state. Without
               it the list says when a wake is due but not whether the dispatch,
@@ -3084,7 +3079,7 @@ let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row
        ~readings:
          [ (let status =
               schedule_status_reading ~ko:(state.ui_language = Lang_ko) row.sch_status in
-            wrap_style status.tone (status.mark ^ " " ^ status.word)) ]
+            Ansi.wrap_style status.tone (status.mark ^ " " ^ status.word)) ]
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count));
   box_divider buf cols;
   Option.iter (fun error -> box_line buf cols (data_unreliable_row ~cols error)) warning;

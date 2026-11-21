@@ -12,11 +12,6 @@ module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
 module Chart = Masc_tui_chart
 
-let wrap_style style text =
-  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
-  then text
-  else style ^ text ^ Ansi.reset
-
 let fusion_run_status_label ~ko = function
   | Fusion_running -> if ko then "실행 중" else "running"
   | Fusion_completed -> if ko then "완료" else "completed"
@@ -335,16 +330,16 @@ let fusion_panel_dots ~answered ~failed =
   let failed_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed in
   let run style mark n =
     if n <= 0 then ""
-    else wrap_style style (String.concat "" (List.init n (fun _ -> mark)))
+    else Ansi.wrap_style style (String.concat "" (List.init n (fun _ -> mark)))
   in
   match answered + failed with
   | 0 -> ""
   | total when total > cap ->
     let ok_part =
-      wrap_style (Theme.ok ()) (Printf.sprintf "%d\xc3\x97%s" answered filled)
+      Ansi.wrap_style (Theme.ok ()) (Printf.sprintf "%d\xc3\x97%s" answered filled)
     in
     let bad_part =
-      wrap_style (Theme.bad ()) (Printf.sprintf "%d\xc3\x97%s" failed failed_mark)
+      Ansi.wrap_style (Theme.bad ()) (Printf.sprintf "%d\xc3\x97%s" failed failed_mark)
     in
     ok_part ^ "  " ^ bad_part
   | _ -> run (Theme.ok ()) filled answered ^ run (Theme.bad ()) failed_mark failed
@@ -778,11 +773,11 @@ let fusion_tool_trace_lines ~ko ~width ~frame_width trace =
     lines
 
 let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
-  let glyph_done = wrap_style (Theme.ok ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled) in
-  let glyph_active = wrap_style (Theme.info ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way) in
-  let glyph_waiting = wrap_style (Theme.recede ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting) in
-  let glyph_failed = wrap_style (Theme.bad ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed) in
-  let arrow = " " ^ wrap_style (Theme.recede ()) "\xe2\x96\xb8" ^ " " in
+  let glyph_done = Ansi.wrap_style (Theme.ok ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled) in
+  let glyph_active = Ansi.wrap_style (Theme.info ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way) in
+  let glyph_waiting = Ansi.wrap_style (Theme.recede ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting) in
+  let glyph_failed = Ansi.wrap_style (Theme.bad ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed) in
+  let arrow = " " ^ Ansi.wrap_style (Theme.recede ()) "\xe2\x96\xb8" ^ " " in
   let status =
     match run.fur_status with
     | Fusion_completed -> `Completed
@@ -883,7 +878,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
               else float_of_int tok /. float_of_int total_tokens *. 100.
             in
             let readout =
-              wrap_style (Theme.recede ())
+              Ansi.wrap_style (Theme.recede ())
                 (Printf.sprintf "%s (%.0f%%)"
                    (Masc_tui_value.Count.grouped tok) share)
             in
@@ -1025,7 +1020,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                  (Theme.recede (), "") :: card)
           |> List.concat
         in
-        let arrow = wrap_style (Theme.recede ()) "  \xe2\x94\x80\xe2\x96\xb6  " in
+        let arrow = Ansi.wrap_style (Theme.recede ()) "  \xe2\x94\x80\xe2\x96\xb6  " in
         [ Theme.recede (), "" ]
         (* The counts are already in pipeline order, so joining them
            with the same arrow the Goal stage rail uses draws the run
@@ -1034,7 +1029,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
         @ ( ""
           , "  " ^ fusion_panel_dots ~answered ~failed
             ^ arrow ^ String.concat arrow counts
-            ^ wrap_style (Theme.recede ()) ("  \xc2\xb7  " ^ shape) )
+            ^ Ansi.wrap_style (Theme.recede ()) ("  \xc2\xb7  " ^ shape) )
         :: first_cards
   in
   let tool_lines =
@@ -1143,8 +1138,8 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
       , Printf.sprintf
           (if ko then "  호출자: %s %s  \xc2\xb7  %s"
            else "  Caller: %s %s  \xc2\xb7  %s")
-          (wrap_style (Theme.accent ()) ("@" ^ Terminal_text.single_line run.fur_keeper))
-          (wrap_style (Theme.warn ()) (if ko then "[키퍼]" else "[Keeper]"))
+          (Ansi.wrap_style (Theme.accent ()) ("@" ^ Terminal_text.single_line run.fur_keeper))
+          (Ansi.wrap_style (Theme.warn ()) (if ko then "[키퍼]" else "[Keeper]"))
           (Link.reference Keeper (Terminal_text.single_line run.fur_keeper)) )
     ; fusion_run_status_color run.fur_status, say "  상태: " "  Status: " ^ status
     ]

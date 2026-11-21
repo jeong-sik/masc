@@ -13,11 +13,6 @@ module Rows = Masc_tui_rows
 module File_icon = Masc_tui_file_icon
 module Diff = Masc_tui_diff
 
-let wrap_style style text =
-  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
-  then text
-  else style ^ text ^ Ansi.reset
-
 (* Blame reaches further back than [Masc_tui_value.Ongoing.Narrow] reads.
    A line untouched since a repository's first year is ordinary, and
    "3684d" is not a reading anyone converts in their head. Weeks and years
@@ -471,9 +466,9 @@ let code_tree_status (state : state) =
          ^ progress_inline ~ko:(state.ui_language = Lang_ko) ~now ?started_at
              (ui_text state ~ko:"목록 읽는 중" ~en:"loading directory"))
   | Masc_tui_fetched.Absent ->
-      Some (wrap_style (Theme.recede ()) (" " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko))))
+      Some (Ansi.wrap_style (Theme.recede ()) (" " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko))))
   | Masc_tui_fetched.Ready [] ->
-      Some (wrap_style (Theme.recede ()) (" " ^ empty_directory_text state))
+      Some (Ansi.wrap_style (Theme.recede ()) (" " ^ empty_directory_text state))
   | Masc_tui_fetched.Ready (_ :: _) -> None
 
 (* The file tree's rows are the pane less its status line. The drawing cuts
@@ -890,7 +885,7 @@ let render_code (state : state) =
           (match Masc_tui_fetched.current state.code_blame with
            | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
                with_note ^ "  "
-               ^ wrap_style (Theme.bad ())
+               ^ Ansi.wrap_style (Theme.bad ())
                    (ui_text state ~ko:"작성자 추적: " ~en:"blame: "
                     ^ Terminal_text.single_line detail)
            | Some (_, Masc_tui_fetched.Loading) ->
@@ -1058,10 +1053,10 @@ let render_code (state : state) =
                            Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg () ^ text ^ Ansi.reset
                        | Gd_added ->
                            Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg () ^ text ^ Ansi.reset
-                       | Gd_context -> wrap_style (Theme.recede ()) text
+                       | Gd_context -> Ansi.wrap_style (Theme.recede ()) text
                      in
                      box_line pane_buf pane_cols
-                       (wrap_style (Theme.recede ()) gutter
+                       (Ansi.wrap_style (Theme.recede ()) gutter
                         ^ Message_layout.drop_cells body state.code_diff_hscroll)
                  | None -> box_empty pane_buf pane_cols
                done)
@@ -1199,7 +1194,7 @@ let render_code (state : state) =
                    Printf.sprintf "%s %s "
                      (Message_layout.fit_width block.bb_author
                         blame_author_cells)
-                     (wrap_style (Theme.recede ())
+                     (Ansi.wrap_style (Theme.recede ())
                         (Message_layout.fit_width
                            (blame_age_text ~now_s:blame_now_s block.bb_at_ms)
                            blame_age_cells))
@@ -1219,9 +1214,9 @@ let render_code (state : state) =
                  let mark =
                    let line = row_index + 1 in
                    if covers line note_spans then
-                     wrap_style (Theme.accent ()) "\xe2\x97\x8f"
+                     Ansi.wrap_style (Theme.accent ()) "\xe2\x97\x8f"
                    else if covers line keeper_spans then
-                     wrap_style (Theme.recede ()) "\xc2\xb7"
+                     Ansi.wrap_style (Theme.recede ()) "\xc2\xb7"
                    else " "
                  in
                  if is_cursor then
@@ -1233,14 +1228,14 @@ let render_code (state : state) =
                             mark (Theme.selection_style ()) (row_index + 1) Ansi.reset body)
                    | Some _ ->
                        let gutter =
-                         wrap_style (Theme.recede ()) (Printf.sprintf "%4d" (row_index + 1))
+                         Ansi.wrap_style (Theme.recede ()) (Printf.sprintf "%4d" (row_index + 1))
                        in
                        box_line_selected_styled pane_buf pane_cols
                          (Printf.sprintf "%s%s%s %s"
                             (blame_cell (row_index + 1)) mark gutter body)
                  else
                    let gutter =
-                     wrap_style (Theme.recede ()) (Printf.sprintf "%4d" (row_index + 1))
+                     Ansi.wrap_style (Theme.recede ()) (Printf.sprintf "%4d" (row_index + 1))
                    in
                    box_line pane_buf pane_cols
                      (Printf.sprintf "%s%s%s %s"

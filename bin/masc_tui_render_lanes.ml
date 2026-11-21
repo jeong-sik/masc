@@ -15,11 +15,6 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 module Chart = Masc_tui_chart
 
-let wrap_style style text =
-  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
-  then text
-  else style ^ text ^ Ansi.reset
-
 let format_context_tokens = Masc_tui_types.format_context_tokens
 
 (* A refusal is bad news about the key pressed; a pending write is a warning
@@ -440,7 +435,7 @@ let standalone_lane_detail_lines ~ko ~now ~width (lane : Tui_decode.standalone_l
                     Page_reading.detail_indent
                     (fit_width (Terminal_text.single_line sc.slsc_slot_id) name_w)
                     bar
-                    (wrap_style (Theme.recede ()) count_text) ))
+                    (Ansi.wrap_style (Theme.recede ()) count_text) ))
               slots
           else
             Page_reading.rows ~max_cells
@@ -1050,7 +1045,7 @@ let render_lanes_overview (state : state) =
           Theme.recede () ^ ui_text state ~ko:"기능 목록 미조회 · r:조회" ~en:"Inventory not read · r:read" ^ Ansi.reset
     | None -> ""
     | Some (Masc_tui_lane_inventory.Category_header category) ->
-        wrap_style (Ansi.bold ^ Theme.series_tint Masc_tui_theme.Calls 0.8)
+        Ansi.wrap_style (Ansi.bold ^ Theme.series_tint Masc_tui_theme.Calls 0.8)
           ("  " ^ Masc_tui_lane_inventory.category_label ~ko:(state.ui_language = Lang_ko) category)
     | Some (Masc_tui_lane_inventory.Lane_row row) ->
         let observed = standing row in
@@ -1063,10 +1058,10 @@ let render_lanes_overview (state : state) =
         let recede = if Masc_tui_lane_standing.recedes observed then Theme.recede () else "" in
         let coloured =
           cursor_mark
-          ^ wrap_style (Masc_tui_lane_standing.colour observed)
+          ^ Ansi.wrap_style (Masc_tui_lane_standing.colour observed)
               (fit_width (Masc_tui_lane_standing.mark observed) 2)
-          ^ wrap_style recede (fit_width label label_width ^ "  ")
-          ^ wrap_style (Masc_tui_lane_standing.colour observed)
+          ^ Ansi.wrap_style recede (fit_width label label_width ^ "  ")
+          ^ Ansi.wrap_style (Masc_tui_lane_standing.colour observed)
               (fit_width (summary row) status_width)
         in
         let press_target = Press_lane_row (Masc_tui_lane_inventory.identity row) in
@@ -1197,7 +1192,7 @@ let render_lanes_overview (state : state) =
                     picker.Masc_tui_types.rlp_pick runtime
                 with
                 | Masc_tui_types.Pick_refused refusal ->
-                  ( wrap_style (Theme.recede ())
+                  ( Ansi.wrap_style (Theme.recede ())
                       ("[" ^ Masc_tui_types.runtime_pick_refusal_tag ~ko:(state.ui_language = Lang_ko) refusal ^ "] ")
                   , "" )
                 | Masc_tui_types.Pick_available ->
@@ -1226,7 +1221,7 @@ let render_lanes_overview (state : state) =
                   mark refusal_prefix
                   (Masc_tui_types.runtime_model_picker_title runtime)
                   ctx def
-                  (wrap_style (Theme.recede ()) note)
+                  (Ansi.wrap_style (Theme.recede ()) note)
               in
               if is_selected then
                 box_line_selected_styled buf cols row_text
@@ -1724,7 +1719,7 @@ let lane_run_tool_count_summary ~ko tools =
     if count = 0 then None
     else
       Some
-        (wrap_style (style ^ Ansi.bold) (Printf.sprintf "%s %s %d" mark label count)))
+        (Ansi.wrap_style (style ^ Ansi.bold) (Printf.sprintf "%s %s %d" mark label count)))
   |> String.concat "  "
 
 let lane_run_tool_summary ~ko = function
@@ -1764,7 +1759,7 @@ let lane_run_tool_summary ~ko = function
        operator-significant failure/deferred badge before call metadata. *)
     ( Ansi.reset
     , Printf.sprintf "%s %s%s"
-        (wrap_style Ansi.bold (if ko then "도구" else "Tools"))
+        (Ansi.wrap_style Ansi.bold (if ko then "도구" else "Tools"))
         overview
         (if String.equal evidence "" then "" else "  │  " ^ evidence) )
 

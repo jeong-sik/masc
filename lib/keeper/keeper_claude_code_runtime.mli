@@ -201,7 +201,7 @@ val run :
     either; [turn_start] is not weighed against it, since it is where a range
     with no read end begins. The capacity cuts before the working state is
     known, so whether it goes is decided by
-    {!Keeper_official_client_host.compose_librarian_range} (RFC-0460): it is
+    {!Keeper_official_client_host.compose_librarian_range}: it is
     carried only where it displaces none of the range's atoms, and otherwise
     the read end goes alone and the turn is not refused. Without
     [librarian_front] the turn has no read end.

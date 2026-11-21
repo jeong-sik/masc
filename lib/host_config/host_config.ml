@@ -1,12 +1,8 @@
-(* RFC-0085 PR-1 — Typed host configuration.
+(* Typed host configuration.
 
-   PR-1 of RFC-0085 (this commit):
-   - Renames `legacy_macos_default ()` -> `host ()` (canonical accessor).
-   - Renames inner `legacy_coreutils_macos` -> `coreutils_defaults`.
-   - Adds `log_dir`, `run_dir`, `policy_dir` fields (RFC-0085 PR-2/PR-3
-     absorb the corresponding host-local runtime path hardcodes).
-   - Applies [@@deriving show, eq] to all record / variant types,
-     replacing the ~35 lines of manual pp implementations.
+   - `host ()` is the canonical accessor.
+   - `log_dir`, `run_dir` and `policy_dir` hold host-local runtime paths.
+   - All record / variant types derive [show] and [eq].
 
    See host_config.mli for the contract. *)
 

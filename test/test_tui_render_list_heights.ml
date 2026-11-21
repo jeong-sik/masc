@@ -1270,6 +1270,59 @@ let test_schedules_and_themes_keep_sticky_viewport_scroll () =
     Alcotest.(check int) "enter_keeper_code_file resets code_tree_scroll" 0
       state.code_tree_scroll)
 
+let test_prompts_refresh_over_held_snapshot_keeps_frame_stable () =
+  let row : Masc.Tui_decode.prompt_row =
+    { pr_key = "librarian.main"
+    ; pr_category = "librarian"
+    ; pr_operator_surface = Masc.Tui_decode.Prompt_primary
+    ; pr_description = "Librarian prompt"
+    ; pr_effective = "Prompt body"
+    ; pr_file_path = "config/prompts/librarian.md"
+    ; pr_source = Masc.Tui_decode.Prompt_file
+    ; pr_authoring_issues = []
+    ; pr_template_variables = []
+    ; pr_override_default_moved = false
+    }
+  in
+  let asset : Masc.Tui_decode.runtime_prompt_asset =
+    { pra_path = "runtime/base.txt"
+    ; pra_file_path = "config/prompts/base.txt"
+    ; pra_value = "Asset text"
+    ; pra_file_exists = true
+    }
+  in
+  let snapshot : Masc.Tui_decode.prompts_snapshot =
+    { ps_rows = [ row ]; ps_runtime_assets = [ asset ]; ps_held_back = [] }
+  in
+  with_size (40, 120) (fun () ->
+    List.iter
+      (fun lang ->
+        List.iter
+          (fun show_assets ->
+            let state = create_state ~workspace:"" ~port:0 () in
+            state.view <- Config;
+            state.config_pane <- Config_prompts;
+            state.ui_language <- lang;
+            state.prompts_show_runtime_assets <- show_assets;
+            state.prompts_librarian_input <- Some ("librarian.main", [ "sample input" ]);
+            (match Masc_tui_fetched.start ~equal:Unit.equal state.prompts ~key:() with
+             | Masc_tui_fetched.Already_loading -> Alcotest.fail "fresh state already loading"
+             | Masc_tui_fetched.Started (next, req) ->
+                 state.prompts <-
+                   Masc_tui_fetched.complete ~equal:Unit.equal next req (Ok snapshot));
+            let idle_lines, _ = draw Masc_tui_render_config.render_prompts state in
+            (match Masc_tui_fetched.start ~equal:Unit.equal state.prompts ~key:() with
+             | Masc_tui_fetched.Already_loading -> Alcotest.fail "ready state already loading"
+             | Masc_tui_fetched.Started (refreshing, _req) ->
+                 state.prompts <- refreshing);
+            state.prompts_librarian_input_loading <- true;
+            let refreshing_lines, _ = draw Masc_tui_render_config.render_prompts state in
+            Alcotest.(check (list string))
+              (Printf.sprintf "prompts refresh keeps frame identical (assets=%b)" show_assets)
+              idle_lines refreshing_lines)
+          [ false; true ])
+      [ Lang_ko; Lang_en ])
+
 let () =
   Alcotest.run "tui render list heights"
     [ ( "reported heights"
@@ -1311,5 +1364,7 @@ let () =
             test_schedules_and_themes_keep_sticky_viewport_scroll
         ; Alcotest.test_case "the schedule list keeps its offset when a frame draws no rows" `Quick
             test_schedules_keep_the_offset_when_no_rows_are_drawn
+        ; Alcotest.test_case "Prompts and runtime assets keep frame identical during refresh over held snapshot" `Quick
+            test_prompts_refresh_over_held_snapshot_keeps_frame_stable
         ] )
     ]

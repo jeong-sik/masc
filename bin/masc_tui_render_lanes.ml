@@ -1383,15 +1383,19 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   in
   let ko = state.ui_language = Lang_ko in
   let now = Unix.gettimeofday () in
+  (* Only a first read without held runs draws an inline loading status;
+     refreshes and paging over held runs are reported by the zone-2 reading
+     slot (RFC tui-one-screen-grammar section 8). *)
+  let first_runs_read = Option.is_none state.lane_runs && state.lane_runs_loading in
   let runs_started =
     Masc_tui_types.progress_clock_option state ~slot:"lane-runs" ~now
-      (if state.lane_runs_loading then Some (observed_lane_label lane) else None)
+      (if first_runs_read then Some (observed_lane_label lane) else None)
   in
   let header =
     here_row ~cols state
       ~path:[ observed_lane_label lane; text "실행" "runs" ]
       ~readings:
-        (if state.lane_runs_loading then
+        (if first_runs_read then
            [ progress_inline ~ko ~now ?started_at:runs_started
                (text "실행 읽는 중" "loading runs") ]
          else [])
@@ -2693,15 +2697,20 @@ let render_clients (state : state) =
   let read_at = clients_read_at state in
   let ko = state.ui_language = Lang_ko in
   let now = Unix.gettimeofday () in
+  (* Only a first read without held clients draws an inline loading status;
+     refreshes over held clients are reported by the zone-2 reading slot. *)
+  let first_clients_read =
+    Option.is_none state.clients_surface && state.clients_surface_inflight
+  in
   let clients_started =
     Masc_tui_types.progress_clock_option state ~slot:"clients-surface" ~now
-      (if state.clients_surface_inflight then Some "reading" else None)
+      (if first_clients_read then Some "reading" else None)
   in
   let header =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"클라이언트" ~en:"clients" ]
       ~readings:
-        (if state.clients_surface_inflight then
+        (if first_clients_read then
            [ progress_inline ~ko ~now ?started_at:clients_started
                (ui_text state ~ko:"클라이언트 읽는 중" ~en:"reading clients") ]
          else [])

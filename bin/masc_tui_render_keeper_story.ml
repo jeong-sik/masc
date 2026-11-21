@@ -221,10 +221,9 @@ type schedules =
   | Store_unreadable of string option
   | Page of { snapshot : Masc_tui_types.schedule_snapshot; refresh : refresh }
 
-(* Whether a page drawn from an earlier read is being read again. *)
+(* Whether a page drawn from an earlier read failed or was kept back. *)
 and refresh =
   | Current
-  | Refreshing
   | Refresh_failed of string
   | Refresh_kept_back of string
 
@@ -263,16 +262,16 @@ let schedules (state : Masc_tui_types.state) ~keeper_name =
       Page { snapshot; refresh = Refresh_failed detail }
   | Some snapshot, Some (Masc_tui_types.Request_withdrawn refusal) ->
       Page { snapshot; refresh = Refresh_kept_back (kept_back refusal) }
-  | Some snapshot, None -> Page { snapshot; refresh = (if waiting then Refreshing else Current) }
+  (* A healthy re-read over a held schedule snapshot is reported by the
+     zone-2 reading slot rather than shifting the story feed or schedule
+     page down by a banner row (RFC tui-one-screen-grammar section 8). *)
+  | Some snapshot, None -> Page { snapshot; refresh = Current }
 ;;
 
 (* A page drawn from an earlier reading, or whose re-read failed, is the last
    reading and not the Keeper's present one. *)
 let refresh_suffix ~ko = function
   | Current -> ""
-  | Refreshing ->
-      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-      if ko then " (" ^ under_way ^ " 다시 읽는 중)" else " (" ^ under_way ^ " reading again)"
   | Refresh_failed _ -> if ko then " (일정 조회 실패)" else " (schedule read failed)"
   | Refresh_kept_back notice -> " · " ^ notice
 ;;
@@ -387,7 +386,6 @@ let turns_source (state : Masc_tui_types.state) ~keeper_name =
 let refresh_note ~ko refresh text =
   match refresh with
   | Current -> Notice (text ^ refresh_suffix ~ko refresh)
-  | Refreshing -> Active (text ^ refresh_suffix ~ko refresh)
   | Refresh_failed detail -> Caution (with_detail (text ^ refresh_suffix ~ko refresh) detail)
   | Refresh_kept_back _ -> Caution (text ^ refresh_suffix ~ko refresh)
 ;;
@@ -427,16 +425,16 @@ let wakes_source (state : Masc_tui_types.state) ~keeper_name =
            , [ Caution
                  (match refresh with
                   | Refresh_failed detail -> with_detail text detail
-                  | Current | Refreshing | Refresh_kept_back _ -> text)
+                  | Current | Refresh_kept_back _ -> text)
              ] )
        | Masc_tui_keeper_wakes.Wakes { newest_first; coverage } ->
            ( newest_first
            , (match coverage, refresh with
               | Masc_tui_keeper_wakes.Whole_page, Current -> []
-              | Masc_tui_keeper_wakes.Whole_page, (Refreshing | Refresh_failed _ | Refresh_kept_back _) ->
+              | Masc_tui_keeper_wakes.Whole_page, (Refresh_failed _ | Refresh_kept_back _) ->
                   [ refresh_note ~ko refresh (say "호출" "wakes") ]
               | Masc_tui_keeper_wakes.First_page,
-                (Current | Refreshing | Refresh_failed _ | Refresh_kept_back _) ->
+                (Current | Refresh_failed _ | Refresh_kept_back _) ->
                   [ refresh_note ~ko refresh (say "첫 페이지 호출만 표시" "wakes from the first page only") ]) ))
 ;;
 
@@ -571,14 +569,6 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
          else [])
         @ (match refresh with
            | Current -> []
-           | Refreshing ->
-               let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-               [ info
-                   (Printf.sprintf
-                      (if ko then "  %s %s 관측 표시 중 · 다시 읽는 중"
-                       else "  %s showing the reading of %s, reading again")
-                      under_way observed)
-               ]
            | Refresh_failed detail ->
                [ warn
                    (Printf.sprintf

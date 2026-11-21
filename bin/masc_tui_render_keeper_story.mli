@@ -45,8 +45,7 @@ val schedule_lines :
     read, the one the Automation tab draws first, led by the list's [◷] cell and
     the store's counts. The rows run oldest first by the time each one shows,
     and a held row or one whose delivered wake has not settled names that in
-    its status column. A page that is cut, a reading that is being read again
-    and a read that failed say so. The window asks for the read while it is
+    its status column. A page that is cut and a read that failed say so. The window asks for the read while it is
     open. *)
 
 val body_rows : rows:int -> int
@@ -57,7 +56,7 @@ val feed_lines :
 (** The past group of the story page told as one feed: the newest turns, the
     newest wakes and the last digest of [keeper_name], oldest first, one line
     each with how long ago it happened. A source that is not read, not
-    readable, cut, being read again or whose read failed has no event to put in
+    readable, cut or whose read failed has no event to put in
     its place, so it gets a line of its own after the events, cautions first,
     whatever the width: turns, schedules and the memory-health reading are the
     three sources. A note of a read that failed ends with the reason the read

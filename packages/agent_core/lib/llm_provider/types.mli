@@ -773,6 +773,10 @@ type cache_write_lifetime =
 val cache_write_lifetime_to_string : cache_write_lifetime -> string
 (** The label a cost row writes: ["provider_default"] or ["one_hour"]. *)
 
+val cache_write_lifetime_of_string : string -> cache_write_lifetime option
+(** Reads a {!cache_write_lifetime_to_string} label back. Any other text is
+    [None]. *)
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option

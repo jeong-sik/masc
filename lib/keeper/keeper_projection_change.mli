@@ -10,6 +10,9 @@
     {!Keeper_provider_input_snapshot} stores them, so there is one encoding of
     each; no digest leaves this module.
 
+    {!digests_of_parts} reads the same digests from a retained snapshot row,
+    so the last requests of two turns can be compared the same way.
+
     {!compare_requests} is pure and linear in the two message counts of the
     pair it compares. Over a whole turn of R requests whose history grows to
     M messages, the comparisons and the per-request memo lookups sum to
@@ -162,5 +165,23 @@ val compare_requests : previous:previous_request -> current:request_digests -> c
 (** Checked in order: [Appended], [Tail_removed], [Block_dropped],
     [Rewritten_in_place], [Diverged_at]. A pair that fits more than one shape
     because of repeated messages gets the first. *)
+
+val compare_messages : previous:request_digests -> current:request_digests -> message_change
+(** The message classification {!compare_requests} makes, for any two
+    digested requests, including two requests of different turns. *)
+
+val tool_schemas_differ : previous:request_digests -> current:request_digests -> bool
+(** Whether the two tool schema digest lists differ, in order. *)
+
+val digests_of_parts :
+  Keeper_provider_input_snapshot.part list -> (request_digests, string) result
+(** The digests of the request a snapshot row describes, read from the parts
+    {!Keeper_provider_input_snapshot.read_manifest} lists: the same SHA-256
+    and byte counts {!digest_request} computes for those messages and tool
+    schemas, without opening a blob. The system prompt part is skipped, as
+    {!digest_request} skips it. [Error] names a message part whose stored
+    role is not one {!Agent_core.Types.role_of_string} reads. *)
+
+val message_change_to_json : message_change -> Yojson.Safe.t
 
 val change_to_json : change -> Yojson.Safe.t

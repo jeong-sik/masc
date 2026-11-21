@@ -1236,6 +1236,12 @@ let cache_write_lifetime_to_string (lifetime : cache_write_lifetime) =
   | One_hour -> "one_hour"
 ;;
 
+let cache_write_lifetime_of_string : string -> cache_write_lifetime option = function
+  | "provider_default" -> Some Provider_default
+  | "one_hour" -> Some One_hour
+  | _ -> None
+;;
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option

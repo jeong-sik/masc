@@ -426,6 +426,60 @@ let test_upstream_provider_lands_on_request_rows_only () =
   check_null_field (H.inference_telemetry_to_runtime_json telemetry) "upstream_provider"
 ;;
 
+(* What a request row writes about its cache reads back as written. A row from
+   before rows recorded the lifetime reads as unrecorded, not as a default. *)
+let test_request_cache_fields_read_back_as_written () =
+  let module T = Agent_core.Types in
+  let module E = Masc.Keeper_hooks_agent_core_cost_events in
+  let telemetry =
+    { T.default_inference_telemetry with
+      T.cache_write_lifetime = Some T.One_hour
+    ; request_latency_ms = Some 1_250
+    }
+  in
+  let row usage_projection =
+    H.cost_event_payload ~agent_name:"keeper" ~task_id:None ~trace_id:"trace"
+      ~keeper_turn_id:1 ~agent_core_turn_ordinal:0 ~model:"model"
+      ~usage_projection ~runtime_attempt:("routing-run", "runtime-a", 0)
+      ~input_tokens:100 ~output_tokens:1 ~cost_usd:0.0
+      ~cache_creation_input_tokens:30 ~cache_read_input_tokens:60 ~telemetry ()
+  in
+  let request_row () =
+    row (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+  in
+  let read json =
+    match E.request_cache_fields_of_json json with
+    | Ok fields -> fields
+    | Error detail -> Alcotest.failf "the row did not read back: %s" detail
+  in
+  let replace_lifetime value = function
+    | `Assoc fields ->
+      let rest = List.remove_assoc "cache_write_lifetime" fields in
+      (match value with
+       | Some value -> `Assoc (("cache_write_lifetime", value) :: rest)
+       | None -> `Assoc rest)
+    | other -> other
+  in
+  let request = read (request_row ()) in
+  check (option string) "the runtime that answered" (Some "runtime-a")
+    request.E.runtime_id;
+  check (option int) "the measured latency" (Some 1_250) request.E.request_latency_ms;
+  check (option int) "the tokens written" (Some 30) request.E.cache_creation_tokens;
+  check (option int) "the tokens read" (Some 60) request.E.cache_read_tokens;
+  check bool "the hour the request asked for" true
+    (request.E.cache_write_lifetime = Some T.One_hour);
+  let settled = read (row Cost_ledger.Resolved_delta) in
+  check (option string) "a resolved row names no runtime" None settled.E.runtime_id;
+  check bool "nor a lifetime" true (Option.is_none settled.E.cache_write_lifetime);
+  check bool "a row from before the lifetime was recorded leaves it unrecorded" true
+    (Option.is_none
+       (read (replace_lifetime None (request_row ()))).E.cache_write_lifetime);
+  check bool "a label no writer uses is refused" true
+    (Result.is_error
+       (E.request_cache_fields_of_json
+          (replace_lifetime (Some (`String "forever")) (request_row ()))))
+;;
+
 let test_response_and_settlement_accounting () =
   let response id ~creation ~read ~input ~missing projection =
     H.cost_event_payload ~agent_name:"keeper" ~task_id:None ~trace_id:"trace"
@@ -955,6 +1009,8 @@ let () =
             test_a_request_row_names_its_cache_lifetime;
           test_case "upstream provider lands on request rows only and redacts in runtime json" `Quick
             test_upstream_provider_lands_on_request_rows_only;
+          test_case "request cache fields read back as written" `Quick
+            test_request_cache_fields_read_back_as_written;
           test_case "turn complete carries both cache counts" `Quick
             test_turn_complete_carries_both_cache_counts;
           test_case "unreported wire cache is null, not zero" `Quick

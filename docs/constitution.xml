@@ -423,6 +423,11 @@
       Native Stack 의 개별 PR 에 --auto 를 쓰거나 --admin 으로 규칙을 우회하지 않는다.
       구체 절차는 docs/guides/NATIVE-GITHUB-STACKS.md 를 따른다.
     </merge>
+    <pull_request_events note="2026-11-21 내부 규약 제안 #39 채택(운영자 예, ask9fe041ae3998b7c7 c1, 2026-11-21T08:56Z). 확정 문구는 리더 최종안 댓글 c-ba9e75827502db67fa98236a198c3aeb, 절차 근거는 Board 타래 p-ead334c3c33712f200001ec3e11c08ed 이다. 계기는 2026-11-21 04:40Z 무렵 스택 중간층의 ready 전환으로 사슬 전체가 자동 병합된 사례(#53939~#54017, 병합자 github-actions[bot])다. 이 조항은 외부 세션·자동화도 따라야 하는 실행 규칙만 옮긴 것이고, 제안·검토·채택 절차는 헌법에만 둔다.">
+      어떤 PR 이든 ready 전환·리뷰 제출·push·base 변경 같은 이벤트를 내기 전에, 그 PR 이 속한 scope(스택이면 사슬 전체, 단독 PR 이면 그 하나)의 멤버를 PR 페이지의 스택 배지(n/m) 또는 base 사슬로 먼저 확정하고, 멤버마다 open·draft=false·현 head(commit_id 가 현 head 40자)의 서로 다른 계정 승인 1건 이상·현 head 에 변경 요청이나 모호한 리뷰 이력이 없음·필수 체크 상태를 읽는다.
+      scope 가 이미 이 조건을 만족하면 그 이벤트 하나로 Approval merge request 와 Approval auto-merge 가 깨어나 scope 전체(단독 PR 이면 그 하나) 병합을 제출하고, 아직이면 다음 트리거까지 대기할 뿐이므로, 병합할 의도가 없는 이벤트는 scope 가 준비되지 않은 상태에서만 낸다.
+      draft 층은 이 트리거를 막는 실제 잠금이므로 준비되지 않은 사슬의 ready 해제는 마지막 잠금을 푸는 일이고, 판정 값은 판독기 결과와 PR 페이지(Merged 배지·commits/main 반영)로 교차 확인한다. 병합 직후 판독기는 방금 병합된 층을 미병합으로 보고할 수 있다.
+    </pull_request_events>
     <evidence_basis note="2026-10-06 내부 규약 제안 #14 채택 문구를 코딩 에이전트 계약으로 옮긴 것이다. 재읽기 의무일 뿐 강제 대기·스냅샷·상시 폴링을 만들지 않는다.">
       리뷰·승인을 인용하기 직전에 GitHub reviews API 의 상태와 commit_id 를 현재 head 와 대조한다.
       현재 head 가 아닌 승인은 이전 범위의 기록이다. 실제 읽은 범위와 미확인 사실을 구분한다.

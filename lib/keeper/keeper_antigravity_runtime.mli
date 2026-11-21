@@ -97,9 +97,9 @@ val run :
     from, and the working state it committed. Without it the turn has no
     read end.
     [on_carried_front] receives the front that history started from and its
-    bytes in the canonical encoding; the caller records it where the Agent
-    Core lane records its own request
-    ({!Keeper_official_client_host.continuity_observation_input}). *)
+    bytes in the canonical encoding; the caller records where the request
+    starts, as the Agent Core lane does for its own request
+    ({!Keeper_request_start.record}). *)
 
 module For_testing : sig
   val runtime_error_to_core_error : Runtime_antigravity.error -> Agent_core.Error.t

@@ -241,7 +241,6 @@ let retained_run_skill_evidence_json = function
      | Exact_lane_run_registry.Librarian
      | Exact_lane_run_registry.Hitl_auto_judge
      | Exact_lane_run_registry.Board_attention
-     | Exact_lane_run_registry.Workspace_curator
      | Exact_lane_run_registry.Candle_appraiser ->
        `Assoc [ "state", `String "no_keeper_skills" ])
   | Task_verification_run _ | Goal_verification_run _ ->
@@ -489,7 +488,7 @@ let exact_answered_by ~lane ~outcome ~origin selected_slot =
     | Some slot -> Slot slot
     | None -> match lane,outcome with
       | Exact_lane_run_registry.Board_attention,Exact_lane_run_registry.Succeeded -> Vendor_system_one
-      | (Exact_lane_run_registry.Board_attention | Librarian | Hitl_auto_judge | Workspace_curator | Candle_appraiser),
+      | (Exact_lane_run_registry.Board_attention | Librarian | Hitl_auto_judge | Candle_appraiser),
         (Exact_lane_run_registry.Succeeded | Cancelled | Failed _) -> No_slot
 ;;
 

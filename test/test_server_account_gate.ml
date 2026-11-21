@@ -27,7 +27,9 @@ let prefix ?(methods = [ get ]) path access =
 
 let inventory () =
   [ exact "/api/v1/dashboard/board" Route_access.Always_public
-  ; exact "/api/v1/dashboard/nav-event" Route_access.Public_read Route_access.Open_when_strict
+  ; exact
+      "/api/v1/dashboard/nav-event"
+      (Route_access.Public_read Route_access.Open_when_strict)
   ; prefix Server_account_route.keeper_prefix Route_access.Read_auth
   ]
 ;;

@@ -3011,22 +3011,23 @@ let test_a_429_after_an_allowed_event_is_a_turn_failure () =
            (Route.route_class_label route) (Agent_core.Error.to_string error)))
 ;;
 
-(* Response text reached the operator before the refusal, so the attempt is
-   fenced: whether it had an effect is not known, and a dated refusal does not
-   rest it. *)
+(* An ungranted built-in tool call ran before the refusal, so the attempt is
+   fenced ([Effect_attempted]) and a dated quota refusal must not rest it.
+   (#54349 narrowed the effect fence so partial response text without tool calls
+   stays rotatable/restable.) *)
 let test_a_fenced_dated_quota_refusal_is_a_turn_failure () =
   let module Route = Keeper_runtime_failure_route in
   run_refused_autonomous_cycle
-    [ Emit (response_text ~turn_id:"turn-quota-1" ~message_id:"msg-quota-1" "partial answer")
+    [ Emit (native_tool_call_block ~turn_id:"turn-quota-1" ~call_id:"write-call" ~tool_name:"Write")
     ; Emit (rate_limit_event ~status:"rejected" (an_hour_from_now ()))
     ; Emit quota_result
     ]
-    (expect_turn_failure "a dated refusal after response text" ~check_route:(fun ~error -> function
+    (expect_turn_failure "a dated refusal after an ungranted tool call" ~check_route:(fun ~error -> function
        | Route.Exhausted_visible_alive
-           { terminal = Route.Provider_attempt_effect_fenced Route.Fenced_observation_unavailable }
+           { terminal = Route.Provider_attempt_effect_fenced Route.Fenced_effect_attempted }
          -> ()
        | route ->
-         failf "a dated refusal after response text routed as %s: %s"
+         failf "a dated refusal after an ungranted tool call routed as %s: %s"
            (Route.route_class_label route) (Agent_core.Error.to_string error)))
 ;;
 
@@ -6708,8 +6709,12 @@ let test_a_working_state_that_displaces_nothing_goes () =
 module Argument_start_fixture = struct
   module T = Agent_core.Types
   module Host = Keeper_official_client_host
-  let old_input = `Assoc ["command", `String (String.make 4000 'a')]
-  let current_input = `Assoc ["command", `String (String.make 4000 'c')]
+  (* Derive payload size from [Tool_blob_store.preview_max] so a normalized
+     reference strictly shrinks the serialized argument on the wire (#54361
+     raised [preview_max] from 200 bytes to 4 KiB). *)
+  let payload_bytes = Tool_blob_store.preview_max * 2
+  let old_input = `Assoc ["command", `String (String.make payload_bytes 'a')]
+  let current_input = `Assoc ["command", `String (String.make payload_bytes 'c')]
   let exchange id input =
     [ T.make_message ~role:T.Assistant [T.ToolUse {id;name="record";input}]
     ; T.tool_result_msg ~tool_use_id:id ~content:"done" () ]

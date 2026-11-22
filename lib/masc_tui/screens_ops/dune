@@ -1,0 +1,13 @@
+(include_subdirs no)
+
+(library
+ (name masc_tui_screens_ops)
+ (wrapped true)
+ (libraries
+  masc_tui_core
+  masc_tui_term
+  masc_tui_keymap
+  masc_tui_ui
+  masc_tui_protocol
+  masc_tui_store
+  yojson))

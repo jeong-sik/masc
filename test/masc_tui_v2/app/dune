@@ -1,0 +1,21 @@
+(include_subdirs no)
+
+(test
+ (name test_app)
+ (libraries
+  masc_tui_core
+  masc_tui_term
+  masc_tui_keymap
+  masc_tui_ui
+  masc_tui_protocol
+  masc_tui_net
+  masc_tui_store
+  masc_tui_app
+  masc.sse_wire
+  masc_core
+  fs_compat
+  eio
+  eio_main
+  unix
+  yojson
+  alcotest))

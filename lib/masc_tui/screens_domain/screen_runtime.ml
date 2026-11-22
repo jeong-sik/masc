@@ -1,0 +1,2897 @@
+open Masc_tui_core
+open Masc_tui_term
+open Masc_tui_ui
+open Masc_tui_protocol
+open Masc_tui_store
+
+module H = Domain_helpers
+
+(* --- 1. Sub-Tab 1: Quotas & Credits (Signal-First, Strictly Observation-Only) --- *)
+
+let compact_window_label = function
+  | Wire_runtime.Window_five_hour -> "5h"
+  | Wire_runtime.Window_seven_day -> "7d"
+  | Wire_runtime.Window_duration_minutes m ->
+      if m >= 1440 && m mod 1440 = 0 then Printf.sprintf "%dd" (m / 1440)
+      else if m >= 60 && m mod 60 = 0 then Printf.sprintf "%dh" (m / 60)
+      else Printf.sprintf "%dm" m
+  | Wire_runtime.Window_provider_label s ->
+      let low = String.lowercase_ascii (String.trim s) in
+      if String.equal low "session" then "sess"
+      else if String.equal low "weekly" || String.equal low "week" then "7d"
+      else if String.equal low "daily" || String.equal low "day" then "24h"
+      else if String.equal low "monthly" || String.equal low "month" then "30d"
+      else Grapheme.truncate_to_width ~max_width:6 (H.sanitize_single_line s)
+
+let is_window_exhausted (w : Wire_runtime.usage_window) =
+  match w.utilization with
+  | Wire_runtime.Util_fraction f -> f >= 0.995
+  | Wire_runtime.Util_percent p -> p >= 100
+  | Wire_runtime.Util_usd { used; limit = Some l } -> l > 0.0 && used >= l
+  | Wire_runtime.Util_usd { used = _; limit = None } -> false
+  | Wire_runtime.Util_credit_balance { remaining; _ } -> remaining <= 0.0
+  | Wire_runtime.Util_credit_unlimited | Wire_runtime.Util_credit_retracted ->
+      false
+
+let is_account_cooldown_or_exhausted (acct : Wire_runtime.account_usage) =
+  match acct.cost_state with
+  | Format_val.Exhausted_zero -> true
+  | Format_val.Amount _ | Format_val.Subscription_zero | Format_val.Unreported
+    -> (
+      match acct.state with
+      | Wire_runtime.Account_reported ws -> List.exists is_window_exhausted ws
+      | Wire_runtime.Account_not_reported_since_start
+      | Wire_runtime.Account_reported_no_windows _ ->
+          false)
+
+let subscription_windows_of (acct : Wire_runtime.account_usage) =
+  match acct.state with
+  | Wire_runtime.Account_reported ws ->
+      List.filter
+        (fun (w : Wire_runtime.usage_window) ->
+          match w.utilization with
+          | Wire_runtime.Util_fraction _
+          | Wire_runtime.Util_percent _
+          | Wire_runtime.Util_credit_unlimited ->
+              true
+          | Wire_runtime.Util_usd _
+          | Wire_runtime.Util_credit_balance _
+          | Wire_runtime.Util_credit_retracted ->
+              false)
+        ws
+  | Wire_runtime.Account_not_reported_since_start
+  | Wire_runtime.Account_reported_no_windows _ ->
+      []
+
+type flat_sub_window = {
+  acct : Wire_runtime.account_usage;
+  window : Wire_runtime.usage_window;
+  is_first_for_acct : bool;
+}
+
+let collect_subscription_windows (accounts : Wire_runtime.account_usage list) =
+  List.concat_map
+    (fun (acct : Wire_runtime.account_usage) ->
+      let ws = subscription_windows_of acct in
+      List.mapi
+        (fun idx window -> { acct; window; is_first_for_acct = idx = 0 })
+        ws)
+    accounts
+
+let window_used_pct (w : Wire_runtime.usage_window) =
+  match w.utilization with
+  | Wire_runtime.Util_fraction f ->
+      Some (Float.max 0.0 (Float.min 100.0 (f *. 100.0)))
+  | Wire_runtime.Util_percent p ->
+      Some (Float.max 0.0 (Float.min 100.0 (float_of_int p)))
+  | Wire_runtime.Util_credit_unlimited -> None
+  | Wire_runtime.Util_usd _
+  | Wire_runtime.Util_credit_balance _
+  | Wire_runtime.Util_credit_retracted ->
+      None
+
+let draw_subscription_windows ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp ~lang ~now_unix ~(rt : Runtime_store.t)
+    (sub_rows : flat_sub_window list)
+    (obs : Wire_runtime.provider_usage_windows Observed.t) ~focused =
+  let cooldown_n =
+    List.fold_left
+      (fun acc r -> if is_window_exhausted r.window then acc + 1 else acc)
+      0 sub_rows
+  in
+  let badge =
+    if cooldown_n > 0 then
+      Some
+        (H.make_badge ~glyph:Glyph.Action_required ~tone:Theme.Status_attention
+           (Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "%d 쿨다운" cooldown_n)
+                 ~en:(Printf.sprintf "%d cooldown" cooldown_n))))
+    else
+      Some
+        (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_ok
+           (Printf.sprintf "%d" (List.length sub_rows)))
+  in
+  let inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ?badge ~focused
+         (Say.resolve lang
+            (Say.make ~ko:"구독 한도 창 (5h / 7d)"
+               ~en:"Subscription Quota Windows")))
+  in
+  let content = H.pad_content ~bp inner in
+  if Rect.is_empty content then ()
+  else if sub_rows = [] then
+    match obs with
+    | Observed.Value _ ->
+        H.draw_empty_notice ~grid ~rect:content ~theme
+          (Say.resolve lang
+             (Say.make ~ko:"보고된 구독 한도 창 없음"
+                ~en:"No subscription quota windows reported"))
+    | Observed.Loading _ | Observed.Absent | Observed.Unreported
+    | Observed.Failed _ ->
+        H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang obs
+  else
+    let y = ref content.y in
+    let bottom = Rect.bottom content in
+    let bg = Color.of_rgb theme.surface_1 in
+    let show_eta = content.w >= 42 in
+    let eta_w = if show_eta then 11 else 0 in
+    let pct_w = 5 in
+    let win_w = 5 in
+    let name_w =
+      Int.max 10 (Int.min 20 ((content.w - eta_w - pct_w - win_w - 6) * 52 / 100))
+    in
+    let bar_w =
+      Int.max 6
+        (content.w - name_w - win_w - pct_w - (if show_eta then eta_w + 1 else 0)
+        - 3)
+    in
+    List.iter
+      (fun (row : flat_sub_window) ->
+        if !y < bottom then begin
+          let w = row.window in
+          let exhausted = is_window_exhausted w in
+          let alias = Runtime_store.account_display_name ~lang rt row.acct in
+          let name_txt =
+            if row.is_first_for_acct then alias
+            else "  " ^ Glyph.to_utf8 Glyph.Tree_corner
+          in
+          let name_style =
+            if not row.is_first_for_acct then
+              H.whisper_style ~theme ~italic:false ()
+            else if exhausted then
+              H.status_style ~theme ~attrs:Attr.bold Theme.Status_critical
+            else H.text_style ~theme ()
+          in
+          let cx = ref content.x in
+          ignore
+            (H.put_clipped ~grid ~clip:content ~x:!cx ~y:!y ~max_w:name_w
+               ~style:name_style name_txt);
+          cx := !cx + name_w + 1;
+          let win_lbl = compact_window_label w.kind in
+          ignore
+            (H.put_clipped ~grid ~clip:content ~x:!cx ~y:!y ~max_w:win_w
+               ~style:(H.secondary_style ~theme ())
+               win_lbl);
+          cx := !cx + win_w + 1;
+          (match window_used_pct w with
+           | Some used_pct ->
+               ignore
+                 (Chart.draw_ratio_bar_run ~clip:content grid ~x:!cx ~y:!y
+                    ~width:bar_w ~theme ~bg ~unicode:true
+                    ~gradient:Chart.Gradient.Thermal
+                    ~ratio:(used_pct /. 100.0));
+               cx := !cx + bar_w + 1;
+               let pct_txt = Printf.sprintf "%3.0f%%" used_pct in
+               let pct_style =
+                 if exhausted then
+                   H.status_style ~theme ~attrs:Attr.bold Theme.Status_critical
+                 else if used_pct >= 80.0 then
+                   H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention
+                 else H.anchor_style ~theme ()
+               in
+               ignore
+                 (H.put_right ~grid ~clip:content ~right_x:(!cx + pct_w) ~y:!y
+                    ~max_w:pct_w ~style:pct_style pct_txt);
+               cx := !cx + pct_w
+           | None ->
+               let unlim =
+                 Say.resolve lang (Say.make ~ko:"무제한" ~en:"unlim")
+               in
+               ignore
+                 (H.put_clipped ~grid ~clip:content ~x:!cx ~y:!y
+                    ~max_w:(bar_w + pct_w + 1)
+                    ~style:(H.status_style ~theme Theme.Status_ok)
+                    (Glyph.to_utf8 Glyph.Live_healthy ^ " " ^ unlim));
+               cx := !cx + bar_w + pct_w + 1);
+          if show_eta && !cx + 2 < Rect.right content then begin
+            let eta_txt =
+              match w.resets_at_unix with
+              | Some ts ->
+                  let cd = H.format_countdown ~now_unix ts in
+                  Say.resolve lang
+                    (Say.make ~ko:("리셋 " ^ cd) ~en:("rst " ^ cd))
+              | None -> Glyph.to_utf8 Glyph.Missing_absent
+            in
+            ignore
+              (H.put_right ~grid ~clip:content ~right_x:(Rect.right content)
+                 ~y:!y ~max_w:eta_w ~style:(H.whisper_style ~theme ()) eta_txt)
+          end;
+          incr y
+        end)
+      sub_rows
+
+let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp ~lang ~now_unix ~(rt : Runtime_store.t)
+    (part : Runtime_store.partitioned_accounts) =
+  let all_reported = part.exhausted_and_credits @ part.active_subscriptions in
+  let exhausted_n =
+    List.fold_left
+      (fun acc (a : Wire_runtime.account_usage) ->
+        match a.cost_state with
+        | Format_val.Exhausted_zero -> acc + 1
+        | Format_val.Amount _ | Format_val.Subscription_zero
+        | Format_val.Unreported ->
+            acc)
+      0 all_reported
+  in
+  let cooldown_accts =
+    List.filter
+      (fun (a : Wire_runtime.account_usage) ->
+        match a.cost_state with
+        | Format_val.Exhausted_zero -> true
+        | Format_val.Amount _ | Format_val.Subscription_zero
+        | Format_val.Unreported ->
+            is_account_cooldown_or_exhausted a)
+      all_reported
+  in
+  let cooldown_only_n = Int.max 0 (List.length cooldown_accts - exhausted_n) in
+  let healthy_n =
+    Int.max 0 (List.length all_reported - List.length cooldown_accts)
+  in
+  let unreported_n = List.length part.unreported in
+  let active_probes, _ = Runtime_store.active_and_outside_probes rt in
+  let active_ok =
+    List.fold_left
+      (fun acc (p : Wire_runtime.provider_probe_row) ->
+        match p.reachable with Some true -> acc + 1 | Some false | None -> acc)
+      0 active_probes
+  in
+  let active_bad =
+    List.filter
+      (fun (p : Wire_runtime.provider_probe_row) ->
+        match p.reachable with Some false -> true | Some true | None -> false)
+      active_probes
+  in
+  let badge =
+    let alerts = List.length cooldown_accts + List.length active_bad in
+    if alerts > 0 then
+      Some
+        (H.make_badge ~glyph:Glyph.Action_required ~tone:Theme.Status_attention
+           (Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "%d 경고" alerts)
+                 ~en:(Printf.sprintf "%d alerts" alerts))))
+    else
+      Some
+        (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_ok
+           (Say.resolve lang (Say.make ~ko:"정상" ~en:"Healthy")))
+  in
+  let inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ?badge
+         (Say.resolve lang
+            (Say.make ~ko:"쿨다운 · 프로바이더 헬스 & 24h 요약"
+               ~en:"Cooldowns · Provider Health & 24h")))
+  in
+  let content = H.pad_content ~bp inner in
+  if Rect.is_empty content then ()
+  else
+    let y = ref content.y in
+    let bottom = Rect.bottom content in
+    let bg = Color.of_rgb theme.surface_1 in
+    (* 1. Provider Health Stacked Bar *)
+    if !y + 1 < bottom then begin
+      let bar_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:2 in
+      let spec : Chart.Spec.t =
+        {
+          title = Say.make ~ko:"헬스" ~en:"Health";
+          hotkey_hint = None;
+          kind =
+            Chart.Spec.Stacked_bar
+              {
+                segments =
+                  [
+                    ( Say.make ~ko:"정상" ~en:"OK"
+                    , float_of_int healthy_n
+                    , Theme.Status_ok );
+                    ( Say.make ~ko:"쿨다운" ~en:"Cool"
+                    , float_of_int cooldown_only_n
+                    , Theme.Status_attention );
+                    ( Say.make ~ko:"소진" ~en:"Full"
+                    , float_of_int exhausted_n
+                    , Theme.Status_critical );
+                    ( Say.make ~ko:"미보고" ~en:"Unrep"
+                    , float_of_int unreported_n
+                    , Theme.Status_historical );
+                  ];
+                total_label = Say.literal "";
+                unit = Format_val.Count;
+              };
+        }
+      in
+      ignore
+        (Chart.draw grid ~rect:bar_rect ~theme ~caps:H.default_caps ~lang
+           ~show_title:false spec);
+      y := !y + 2
+    end;
+    (* 2. Active Cooldowns & Exhausted Alerts *)
+    if !y < bottom then begin
+      H.draw_divider ~grid ~rect:content ~y:!y ~theme
+        ~label:
+          (Say.resolve lang
+             (Say.make ~ko:"활성 쿨다운 · 한도 경고" ~en:"Cooldowns & Alerts"))
+        ();
+      incr y
+    end;
+    if cooldown_accts = [] && active_bad = [] then begin
+      if !y < bottom then begin
+        ignore
+          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w
+             ~style:(H.status_style ~theme Theme.Status_ok)
+             (Glyph.to_utf8 Glyph.Live_healthy
+             ^ " "
+             ^ Say.resolve lang
+                 (Say.make ~ko:"활성 쿨다운 없음 · 보고된 모든 계정 정상"
+                    ~en:"No active cooldowns · all reported accounts healthy")));
+        incr y
+      end
+    end
+    else begin
+      let max_alerts = Int.max 1 (Int.min 4 (bottom - !y - 4)) in
+      let shown = ref 0 in
+      List.iter
+        (fun (a : Wire_runtime.account_usage) ->
+          if !y < bottom && !shown < max_alerts then begin
+            let alias = Runtime_store.account_display_name ~lang rt a in
+            let tone, detail =
+              match a.cost_state with
+              | Format_val.Exhausted_zero ->
+                  ( Theme.Status_critical
+                  , Format_val.format_cost Format_val.Exhausted_zero ~lang )
+              | Format_val.Amount _ | Format_val.Subscription_zero
+              | Format_val.Unreported -> (
+                  match
+                    List.find_opt is_window_exhausted (subscription_windows_of a)
+                  with
+                  | Some w ->
+                      let eta =
+                        match w.resets_at_unix with
+                        | Some ts ->
+                            " · "
+                            ^ Say.resolve lang (Say.make ~ko:"리셋 " ~en:"rst ")
+                            ^ H.format_countdown ~now_unix ts
+                        | None -> ""
+                      in
+                      ( Theme.Status_attention
+                      , Printf.sprintf "%s 100%%%s"
+                          (compact_window_label w.kind)
+                          eta )
+                  | None ->
+                      ( Theme.Status_attention
+                      , Say.resolve lang (Say.make ~ko:"한도 도달" ~en:"limit hit")
+                      ))
+            in
+            Card.draw_left_rail ~bg ~tone grid ~x:content.x ~y:!y ~h:1 ~theme;
+            let text_x = content.x + 2 in
+            let text_w = Int.max 0 (content.w - 2) in
+            let adv =
+              H.put_clipped ~grid ~clip:content ~x:text_x ~y:!y ~max_w:text_w
+                ~style:(H.status_style ~theme ~attrs:Attr.bold tone)
+                (Glyph.to_utf8 Glyph.Live_failing ^ " " ^ alias)
+            in
+            let rem_w = text_w - adv - 2 in
+            if rem_w > 4 then
+              ignore
+                (H.put_right ~grid ~clip:content ~right_x:(Rect.right content)
+                   ~y:!y ~max_w:rem_w ~style:(H.whisper_style ~theme ()) detail);
+            incr y;
+            incr shown
+          end)
+        cooldown_accts;
+      List.iter
+        (fun (p : Wire_runtime.provider_probe_row) ->
+          if !y < bottom && !shown < max_alerts then begin
+            let runtimes = Runtime_store.runtime_options rt in
+            let lbl = Wire_runtime.human_runtime_slot_label ~runtimes p.runtime_id in
+            let reason =
+              match p.http_status, p.error with
+              | Some 429, _ -> "HTTP 429"
+              | Some code, _ -> Printf.sprintf "HTTP %d" code
+              | None, Some e -> e
+              | None, None -> p.status
+            in
+            Card.draw_left_rail ~bg ~tone:Theme.Status_critical grid
+              ~x:content.x ~y:!y ~h:1 ~theme;
+            ignore
+              (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
+                 ~max_w:(Int.max 0 (content.w - 2))
+                 ~style:(H.status_style ~theme Theme.Status_critical)
+                 (Printf.sprintf "%s %s · %s"
+                    (Glyph.to_utf8 Glyph.Live_failing)
+                    lbl reason));
+            incr y;
+            incr shown
+          end)
+        active_bad
+    end;
+    (* 3. Failover Lane Reachability & 24h Telemetry Summary *)
+    if !y < bottom then begin
+      H.draw_divider ~grid ~rect:content ~y:!y ~theme
+        ~label:
+          (Say.resolve lang
+             (Say.make ~ko:"레인 헬스 · 24h 호출 요약"
+                ~en:"Lane Health & 24h Summary"))
+        ();
+      incr y
+    end;
+    if !y < bottom then begin
+      let lanes_n =
+        match Observed.to_option rt.runtime_resolved with
+        | Some s -> List.length s.lanes
+        | None -> 0
+      in
+      let total_p = List.length active_probes in
+      let lane_lbl = Say.resolve lang (Say.make ~ko:"활성 레인" ~en:"Lanes") in
+      let lane_val =
+        if total_p > 0 then
+          Printf.sprintf "%d · %d/%d %s" lanes_n active_ok total_p
+            (Say.resolve lang (Say.make ~ko:"가용" ~en:"ok"))
+        else Printf.sprintf "%d %s" lanes_n (Say.resolve lang (Say.make ~ko:"선언" ~en:"declared"))
+      in
+      let lane_tone =
+        if total_p = 0 then Theme.Status_active
+        else if active_bad = [] then Theme.Status_ok
+        else if active_ok > 0 then Theme.Status_attention
+        else Theme.Status_critical
+      in
+      H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w ~theme
+        ~key_w:11 ~key:lane_lbl
+        ~value_style:(H.status_style ~theme ~attrs:Attr.bold lane_tone)
+        lane_val;
+      if total_p > 0 && content.w >= 44 then begin
+        let bar_w = 8 in
+        let bx = Rect.right content - bar_w in
+        ignore
+          (Chart.draw_ratio_bar_run ~clip:content grid ~x:bx ~y:!y ~width:bar_w
+             ~theme ~bg ~unicode:true ~gradient:Chart.Gradient.Efficiency
+             ~ratio:(float_of_int active_ok /. float_of_int total_p))
+      end;
+      incr y
+    end;
+    if !y < bottom then begin
+      let cache_obs = Runtime_store.effective_cache_hit_pct rt in
+      let spend_obs = Runtime_store.effective_spend_24h_usd rt in
+      let cache_s = Format_val.format_observed Format_val.Percent cache_obs ~lang in
+      let spend_s = Format_val.format_observed Format_val.Usd spend_obs ~lang in
+      let val_style =
+        match Observed.to_option cache_obs with
+        | Some pct when pct >= 70.0 ->
+            H.status_style ~theme ~attrs:Attr.bold Theme.Status_ok
+        | Some pct when pct >= 40.0 ->
+            H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention
+        | Some _ | None -> H.text_style ~theme ()
+      in
+      H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w ~theme
+        ~key_w:11
+        ~key:(Say.resolve lang (Say.make ~ko:"24h 캐시" ~en:"24h Cache"))
+        ~value_style:val_style
+        (Printf.sprintf "%s · %s %s" cache_s
+           (Say.resolve lang (Say.make ~ko:"지출" ~en:"Spend"))
+           spend_s);
+      incr y
+    end;
+    if !y < bottom then begin
+      let calls_txt =
+        match Runtime_store.tool_series_totals rt with
+        | Some (calls, fails, p95_opt) ->
+            let p95_s =
+              match p95_opt with
+              | Some ms ->
+                  " · p95 "
+                  ^ Format_val.format_value Format_val.Milliseconds ms
+              | None -> ""
+            in
+            let fail_s =
+              if fails > 0 then
+                Printf.sprintf " (%d %s)" fails
+                  (Say.resolve lang (Say.make ~ko:"실패" ~en:"fail"))
+              else ""
+            in
+            Printf.sprintf "%s %s%s%s"
+              (Format_val.format_value Format_val.Count (float_of_int calls))
+              (Say.resolve lang (Say.make ~ko:"호출" ~en:"calls"))
+              fail_s p95_s
+        | None -> Glyph.to_utf8 Glyph.Missing_absent
+      in
+      H.put_kv ~grid ~clip:content ~x:content.x ~y:!y ~max_w:content.w ~theme
+        ~key_w:11
+        ~key:(Say.resolve lang (Say.make ~ko:"24h 도구" ~en:"24h Tools"))
+        calls_txt;
+      incr y
+    end;
+    if !y < bottom then begin
+      let probe_meta =
+        match Observed.to_option rt.runtime_probe with
+        | Some pr ->
+            let age =
+              match pr.cache_age_sec with
+              | Some s -> Format_val.format_duration_s s
+              | None -> Glyph.to_utf8 Glyph.Missing_absent
+            in
+            Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "최근 프로브 %s 전 · [r] 즉시 프로브" age)
+                 ~en:(Printf.sprintf "Last probe %s ago · [r] probe now" age))
+        | None ->
+            Say.resolve lang
+              (Say.make ~ko:"[r] 프로바이더 프로브 실행"
+                 ~en:"[r] Run provider probe")
+      in
+      ignore
+        (H.put_clipped ~grid ~clip:content ~x:content.x ~y:(bottom - 1)
+           ~max_w:content.w ~style:(H.whisper_style ~theme ()) probe_meta)
+    end
+
+type credit_list_row =
+  | Row_account of {
+      acct : Wire_runtime.account_usage;
+      tier : [ `Credit | `Sub | `Unreported ];
+      store_idx : int;
+    }
+  | Row_unreported_toggle of {
+      count : int;
+      expanded : bool;
+      preview_names : string;
+      store_idx : int;
+    }
+
+let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
+    ~lang ~(rt : Runtime_store.t) (part : Runtime_store.partitioned_accounts)
+    (obs : Wire_runtime.provider_usage_windows Observed.t) ~focused =
+  let exhausted_n =
+    List.fold_left
+      (fun acc (a : Wire_runtime.account_usage) ->
+        match a.cost_state with
+        | Format_val.Exhausted_zero -> acc + 1
+        | Format_val.Amount _ | Format_val.Subscription_zero
+        | Format_val.Unreported ->
+            acc)
+      0 part.exhausted_and_credits
+  in
+  let reported_n =
+    List.length part.exhausted_and_credits + List.length part.active_subscriptions
+  in
+  let badge =
+    if exhausted_n > 0 then
+      Some
+        (H.make_badge ~glyph:Glyph.Live_failing ~tone:Theme.Status_critical
+           (Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "%d 소진" exhausted_n)
+                 ~en:(Printf.sprintf "%d Exhausted" exhausted_n))))
+    else
+      Some
+        (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_ok
+           (Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "%d 활성" reported_n)
+                 ~en:(Printf.sprintf "%d active" reported_n))))
+  in
+  let inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ?badge ~focused
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[u] 미보고" ~en:"[u] Unreported"))
+         ~footer_hint:
+           (Say.resolve lang
+              (Say.make ~ko:"$0 구독 ≠ $0 소진 ≠ ? 미보고"
+                 ~en:"$0 Sub != $0 Exhausted != ? Unreported"))
+         (Say.resolve lang
+            (Say.make ~ko:"API 크레딧 잔액 · 계정 현황"
+               ~en:"API Credit Balances & Accounts")))
+  in
+  if Rect.is_empty inner then ()
+  else if
+    part.exhausted_and_credits = []
+    && part.active_subscriptions = []
+    && part.unreported = []
+  then H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme ~lang obs
+  else
+    let visible = Runtime_store.visible_credit_accounts rt in
+    let _ = visible in
+    let idx = ref 0 in
+    let rows_acc = ref [] in
+    List.iter
+      (fun acct ->
+        rows_acc := Row_account { acct; tier = `Credit; store_idx = !idx } :: !rows_acc;
+        incr idx)
+      part.exhausted_and_credits;
+    List.iter
+      (fun acct ->
+        rows_acc := Row_account { acct; tier = `Sub; store_idx = !idx } :: !rows_acc;
+        incr idx)
+      part.active_subscriptions;
+    if part.unreported <> [] then begin
+      let preview_names =
+        part.unreported |> H.safe_take 3
+        |> List.map (Runtime_store.account_display_name ~lang rt)
+        |> String.concat ", "
+      in
+      let toggle_idx = !idx in
+      rows_acc :=
+        Row_unreported_toggle
+          {
+            count = List.length part.unreported;
+            expanded = rt.show_unreported_accounts;
+            preview_names;
+            store_idx = toggle_idx;
+          }
+        :: !rows_acc;
+      incr idx;
+      if rt.show_unreported_accounts then
+        List.iter
+          (fun acct ->
+            rows_acc :=
+              Row_account { acct; tier = `Unreported; store_idx = !idx }
+              :: !rows_acc;
+            incr idx)
+          part.unreported
+    end;
+    let rows_arr = Array.of_list (List.rev !rows_acc) in
+    let total_rows = Array.length rows_arr in
+    let sel_idx = H.clamp_index total_rows rt.selected_index in
+    let start_row, _ =
+      Table.compute_viewport ~total_rows ~viewport_rows:inner.h
+        ~scroll:rt.scroll_offset ~selected:(Some sel_idx)
+    in
+    let pad_r = if inner.w >= 24 then 2 else 1 in
+    for row_i = 0 to inner.h - 1 do
+      let vi = start_row + row_i in
+      if vi < total_rows then begin
+        let py = inner.y + row_i in
+        let row_rect = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
+        let text_x = inner.x + 2 in
+        let right_edge = Rect.right inner - pad_r in
+        let content_w = Int.max 0 (right_edge - text_x) in
+        match rows_arr.(vi) with
+        | Row_unreported_toggle { count; expanded; preview_names; store_idx } ->
+            let is_sel = Int.equal store_idx sel_idx in
+            let row_bg =
+              if is_sel then theme.selection_bg else theme.surface_1
+            in
+            if is_sel then
+              H.paint_selected_row_bg ~grid ~clip:inner ~row_rect ~theme ();
+            let caret =
+              if expanded then Glyph.Expand_open else Glyph.Expand_closed
+            in
+            let label =
+              if expanded then
+                Say.resolve lang
+                  (Say.make
+                     ~ko:
+                       (Printf.sprintf "%s 미보고 API 키 (%d개) · [u/Enter] 접기"
+                          (Glyph.to_utf8 caret) count)
+                     ~en:
+                       (Printf.sprintf
+                          "%s Unreported API keys (%d) · [u/Enter] collapse"
+                          (Glyph.to_utf8 caret) count))
+              else
+                Say.resolve lang
+                  (Say.make
+                     ~ko:
+                       (Printf.sprintf
+                          "%s 미보고 API 키 (%d개) · [u/Enter] 펼치기"
+                          (Glyph.to_utf8 caret) count)
+                     ~en:
+                       (Printf.sprintf
+                          "%s Unreported API keys (%d) · [u/Enter] expand"
+                          (Glyph.to_utf8 caret) count))
+            in
+            let style =
+              if is_sel then
+                H.anchor_style ~theme ~bg:row_bg ()
+              else H.whisper_style ~theme ~bg:row_bg ()
+            in
+            let adv =
+              H.put_clipped ~grid ~clip:row_rect ~x:text_x ~y:py ~max_w:content_w
+                ~style label
+            in
+            if
+              (not expanded)
+              && (not (String.equal preview_names ""))
+              && content_w - adv > 12
+            then
+              ignore
+                (H.put_right ~grid ~clip:row_rect ~right_x:right_edge ~y:py
+                   ~max_w:(content_w - adv - 2)
+                   ~style:(H.whisper_style ~theme ~bg:row_bg ())
+                   preview_names)
+        | Row_account { acct; tier; store_idx } ->
+            let is_sel = Int.equal store_idx sel_idx in
+            let row_bg =
+              if is_sel then theme.selection_bg else theme.surface_1
+            in
+            let row_bg_c = Color.of_rgb row_bg in
+            if is_sel then
+              H.paint_selected_row_bg ~grid ~clip:inner ~row_rect ~theme ();
+            let alias = Runtime_store.account_display_name ~lang rt acct in
+            let cost_str = Format_val.format_cost acct.cost_state ~lang in
+            let tone, glyph =
+              match acct.cost_state with
+              | Format_val.Amount _ -> (Theme.Status_ok, Glyph.Live_healthy)
+              | Format_val.Subscription_zero ->
+                  (Theme.Status_active, Glyph.Live_healthy)
+              | Format_val.Exhausted_zero ->
+                  (Theme.Status_critical, Glyph.Live_failing)
+              | Format_val.Unreported ->
+                  (Theme.Status_historical, Glyph.Missing_unreported)
+            in
+            let ratio_and_detail =
+              match acct.state with
+              | Wire_runtime.Account_reported ws ->
+                  List.find_map
+                    (fun (w : Wire_runtime.usage_window) ->
+                      match w.utilization with
+                      | Wire_runtime.Util_credit_balance
+                          { currency = _; total = Some tot; remaining }
+                        when tot > 0.0 ->
+                          let rem_ratio =
+                            Float.max 0.0 (Float.min 1.0 (remaining /. tot))
+                          in
+                          Some
+                            ( rem_ratio
+                            , Chart.Gradient.Efficiency
+                            , Printf.sprintf "%s / %s"
+                                (Format_val.format_value Format_val.Usd remaining)
+                                (Format_val.format_value Format_val.Usd tot) )
+                      | Wire_runtime.Util_usd { used; limit = Some lim }
+                        when lim > 0.0 ->
+                          let used_ratio =
+                            Float.max 0.0 (Float.min 1.0 (used /. lim))
+                          in
+                          Some
+                            ( used_ratio
+                            , Chart.Gradient.Thermal
+                            , Printf.sprintf "%s / %s"
+                                (Format_val.format_value Format_val.Usd used)
+                                (Format_val.format_value Format_val.Usd lim) )
+                      | Wire_runtime.Util_fraction f ->
+                          Some
+                            ( Float.max 0.0 (Float.min 1.0 f)
+                            , Chart.Gradient.Thermal
+                            , cost_str )
+                      | Wire_runtime.Util_percent p ->
+                          Some
+                            ( Float.max 0.0 (Float.min 1.0 (float_of_int p /. 100.0))
+                            , Chart.Gradient.Thermal
+                            , cost_str )
+                      | Wire_runtime.Util_credit_balance _
+                      | Wire_runtime.Util_usd _
+                      | Wire_runtime.Util_credit_unlimited
+                      | Wire_runtime.Util_credit_retracted ->
+                          None)
+                    ws
+              | Wire_runtime.Account_not_reported_since_start
+              | Wire_runtime.Account_reported_no_windows _ ->
+                  None
+            in
+            let name_w = Int.max 12 (Int.min 26 (content_w * 46 / 100)) in
+            Cell_grid.put_glyph ~clip:row_rect grid ~x:text_x ~y:py
+              ~style:(H.status_style ~theme ~bg:row_bg tone)
+              glyph;
+            let name_style =
+              match tier with
+              | `Unreported ->
+                  if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                  else H.whisper_style ~theme ~bg:row_bg ()
+              | `Credit | `Sub ->
+                  if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                  else H.text_style ~theme ~bg:row_bg ()
+            in
+            ignore
+              (H.put_clipped ~grid ~clip:row_rect ~x:(text_x + 2) ~y:py
+                 ~max_w:(Int.max 0 (name_w - 2)) ~style:name_style alias);
+            let val_x = text_x + name_w + 1 in
+            let rem_w = right_edge - val_x in
+            if rem_w > 0 then
+              match ratio_and_detail with
+              | Some (ratio, grad, detail_s) when rem_w >= 20 ->
+                  let label_s =
+                    match acct.cost_state with
+                    | Format_val.Exhausted_zero -> cost_str
+                    | Format_val.Amount _ | Format_val.Subscription_zero
+                    | Format_val.Unreported ->
+                        detail_s
+                  in
+                  let lw = Grapheme.display_width label_s in
+                  let bar_w = Int.max 6 (Int.min 14 (rem_w - lw - 2)) in
+                  ignore
+                    (Chart.draw_ratio_bar_run ~clip:row_rect grid ~x:val_x ~y:py
+                       ~width:bar_w ~theme ~bg:row_bg_c ~unicode:true
+                       ~gradient:grad ~ratio);
+                  ignore
+                    (H.put_right ~grid ~clip:row_rect ~right_x:right_edge ~y:py
+                       ~max_w:(Int.max 0 (rem_w - bar_w - 1))
+                       ~style:(H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold tone)
+                       label_s)
+              | Some _ | None ->
+                  let v_style =
+                    match tier with
+                    | `Unreported -> H.whisper_style ~theme ~bg:row_bg ()
+                    | `Credit | `Sub ->
+                        H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold tone
+                  in
+                  ignore
+                    (H.put_right ~grid ~clip:row_rect ~right_x:right_edge ~y:py
+                       ~max_w:rem_w ~style:v_style cost_str)
+      end
+    done
+
+let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let now_unix = model.freshness.last_wall_unix in
+  let part = Runtime_store.partition_accounts rt in
+  let accounts =
+    match Observed.to_option rt.usage_windows with
+    | Some uw -> uw.accounts
+    | None -> []
+  in
+  let provider_count =
+    let seen = Hashtbl.create 16 in
+    List.iter
+      (fun (a : Wire_runtime.account_usage) ->
+        List.iter
+          (fun (p : Wire_runtime.usage_provider_ref) ->
+            Hashtbl.replace seen p.id ())
+          a.providers)
+      accounts;
+    Hashtbl.length seen
+  in
+  let active_reported_n =
+    List.length part.exhausted_and_credits + List.length part.active_subscriptions
+  in
+  let exhausted_n =
+    List.fold_left
+      (fun acc (a : Wire_runtime.account_usage) ->
+        match a.cost_state with
+        | Format_val.Exhausted_zero -> acc + 1
+        | Format_val.Amount _ | Format_val.Subscription_zero
+        | Format_val.Unreported ->
+            acc)
+      0 part.exhausted_and_credits
+  in
+  let cooldown_n =
+    List.fold_left
+      (fun acc a -> if is_account_cooldown_or_exhausted a then acc + 1 else acc)
+      0 accounts
+  in
+  let unreported_n = List.length part.unreported in
+  let bar_rect, body_rect =
+    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ a; b ] -> (a, b)
+    | _ -> (Rect.empty, rect)
+  in
+  let summary_pills =
+    [
+      {
+        H.label =
+          Printf.sprintf "%d %s" provider_count
+            (Say.resolve lang (Say.make ~ko:"프로바이더" ~en:"Providers"));
+        active = false;
+        tone = Some Theme.Status_active;
+        glyph = Some Glyph.Live_healthy;
+      };
+      {
+        H.label =
+          Printf.sprintf "%d %s" active_reported_n
+            (Say.resolve lang (Say.make ~ko:"활성 측정" ~en:"Reported"));
+        active = false;
+        tone = Some Theme.Status_ok;
+        glyph = Some Glyph.Live_healthy;
+      };
+      {
+        H.label =
+          if exhausted_n > 0 then
+            Printf.sprintf "%d %s" exhausted_n
+              (Say.resolve lang (Say.make ~ko:"소진" ~en:"Exhausted"))
+          else
+            Printf.sprintf "%d %s" cooldown_n
+              (Say.resolve lang (Say.make ~ko:"쿨다운" ~en:"Cooldown"));
+        active = exhausted_n > 0 || cooldown_n > 0;
+        tone =
+          Some
+            (if exhausted_n > 0 then Theme.Status_critical
+             else if cooldown_n > 0 then Theme.Status_attention
+             else Theme.Status_ok);
+        glyph =
+          Some
+            (if exhausted_n > 0 then Glyph.Live_failing
+             else Glyph.Action_required);
+      };
+      {
+        H.label =
+          Printf.sprintf "%d %s [u]" unreported_n
+            (Say.resolve lang (Say.make ~ko:"미보고" ~en:"Unreported"));
+        active = rt.show_unreported_accounts;
+        tone = Some Theme.Status_historical;
+        glyph =
+          Some
+            (if rt.show_unreported_accounts then Glyph.Expand_open
+             else Glyph.Expand_closed);
+      };
+    ]
+  in
+  ignore
+    (H.draw_pills ~grid ~rect:bar_rect ~theme
+       ~right_hint:
+         (Say.resolve lang (Say.make ~ko:"관측 전용" ~en:"Observation-only"))
+       summary_pills);
+  let left_rect, right_rect =
+    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.46
+      ~top_ratio:0.48 bp body_rect
+  in
+  let sub_rows = collect_subscription_windows accounts in
+  let top_sub_h =
+    Layout.adaptive_list_height ~items:(List.length sub_rows) ~overhead:4
+      ~min_h:5
+      ~max_h:(Int.max 5 (left_rect.h * 52 / 100))
+      ()
+  in
+  let sub_rect, health_rect =
+    if left_rect.h >= 11 then
+      match
+        Layout.split_v_bp bp left_rect [ Layout.Fixed top_sub_h; Layout.Flex 1 ]
+      with
+      | [ a; b ] -> (a, b)
+      | _ -> (left_rect, Rect.empty)
+    else (left_rect, Rect.empty)
+  in
+  draw_subscription_windows ~grid ~cache ~rect:sub_rect ~theme ~bp ~lang
+    ~now_unix ~rt sub_rows rt.usage_windows ~focused:(model.nav.pane_index = 0);
+  if not (Rect.is_empty health_rect) then
+    draw_cooldown_health_summary ~grid ~cache ~rect:health_rect ~theme ~bp ~lang
+      ~now_unix ~rt part;
+  draw_credit_balances ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~rt part
+    rt.usage_windows ~focused:(model.nav.pane_index = 1)
+
+(* --- 2. Sub-Tab 2: Efficiency & Spend (4-KPI Strip + Real btop Braille Charts) --- *)
+
+let series_stats samples =
+  let cur = ref Observed.absent in
+  let peak = ref None in
+  let sum = ref 0.0 in
+  let cnt = ref 0 in
+  Array.iter
+    (fun s ->
+      match s with
+      | Chart.Series.Value v when Float.is_finite v ->
+          cur := Observed.value ~observed_at:Clock.Mono.zero v;
+          peak :=
+            (match !peak with Some p -> Some (Float.max p v) | None -> Some v);
+          sum := !sum +. v;
+          incr cnt
+      | Chart.Series.Zero ->
+          cur := Observed.value ~observed_at:Clock.Mono.zero 0.0;
+          peak := (match !peak with Some p -> Some p | None -> Some 0.0);
+          incr cnt
+      | Chart.Series.Unread | Chart.Series.Absent | Chart.Series.Value _ -> ())
+    samples;
+  let peak_obs =
+    match !peak with
+    | Some p -> Observed.value ~observed_at:Clock.Mono.zero p
+    | None -> Observed.absent
+  in
+  let avg_obs =
+    if !cnt > 0 then
+      Observed.value ~observed_at:Clock.Mono.zero (!sum /. float_of_int !cnt)
+    else Observed.absent
+  in
+  (!cur, peak_obs, avg_obs)
+
+let float_to_sample v =
+  if not (Float.is_finite v) then Chart.Series.Absent
+  else if v <= 0.0 then Chart.Series.Zero
+  else Chart.Series.Value v
+
+let draw_efficiency_kpi_strip ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp ~lang ~(model : Model.t) ~(rt : Runtime_store.t)
+    (spend_rows : Runtime_store.keeper_spend_row list) =
+  let inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ~subtitle:"24h"
+         (Say.resolve lang
+            (Say.make ~ko:"효율 · 지출 요약" ~en:"Efficiency & Spend Summary")))
+  in
+  if Rect.is_empty inner then ()
+  else
+    let bg = Color.of_rgb theme.surface_1 in
+    let cols =
+      Layout.split_h ~gap:1 inner
+        [ Layout.Flex 1; Layout.Flex 1; Layout.Flex 1; Layout.Flex 1 ]
+    in
+    let pad = if Layout.equal_breakpoint bp Layout.Wide then 2 else 1 in
+    let draw_cell idx cell ~label ~value ~val_style ~sub ?gauge_ratio () =
+      if idx > 0 then
+        Card.draw_v_hairline ~bg grid ~x:(cell.Rect.x - 1) ~y:inner.y ~h:inner.h
+          ~theme;
+      let c = Card.pad_inner ~pad_x:pad ~pad_y:0 cell in
+      if not (Rect.is_empty c) then begin
+        let y0 = c.y in
+        ignore
+          (H.put_clipped ~grid ~clip:c ~x:c.x ~y:y0 ~max_w:c.w
+             ~style:(H.secondary_style ~theme ())
+             label);
+        if c.h >= 2 then begin
+          let y1 = c.y + 1 in
+          let vw =
+            H.put_clipped ~grid ~clip:c ~x:c.x ~y:y1 ~max_w:c.w ~style:val_style
+              value
+          in
+          let rem = c.w - vw - 1 in
+          match gauge_ratio with
+          | Some ratio when rem >= 8 ->
+              let bw = Int.min 10 rem in
+              ignore
+                (Chart.draw_ratio_bar_run ~clip:c grid ~x:(Rect.right c - bw)
+                   ~y:y1 ~width:bw ~theme ~bg ~unicode:true
+                   ~gradient:Chart.Gradient.Efficiency ~ratio)
+          | Some _ | None ->
+              if rem >= 4 && not (String.equal sub "") then
+                ignore
+                  (H.put_right ~grid ~clip:c ~right_x:(Rect.right c) ~y:y1
+                     ~max_w:rem ~style:(H.whisper_style ~theme ()) sub)
+        end
+        else
+          ignore
+            (H.put_right ~grid ~clip:c ~right_x:(Rect.right c) ~y:y0
+               ~max_w:(Int.max 0 (c.w - Grapheme.display_width label - 1))
+               ~style:val_style value)
+      end
+    in
+    let cache_obs = Runtime_store.effective_cache_hit_pct rt in
+    let cache_val = Format_val.format_observed Format_val.Percent cache_obs ~lang in
+    let cache_style, cache_ratio =
+      match Observed.to_option cache_obs with
+      | Some pct ->
+          let tone =
+            if pct >= 70.0 then Theme.Status_ok
+            else if pct >= 40.0 then Theme.Status_attention
+            else Theme.Status_critical
+          in
+          ( H.status_style ~theme ~attrs:Attr.bold tone
+          , Some (Float.max 0.0 (Float.min 1.0 (pct /. 100.0))) )
+      | None -> (H.whisper_style ~theme (), None)
+    in
+    let spend_obs = Runtime_store.effective_spend_24h_usd rt in
+    let spend_val = Format_val.format_observed Format_val.Usd spend_obs ~lang in
+    let spend_sub =
+      match Observed.to_option rt.efficiency with
+      | Some e when e.fleet.cost_usd_per_turn > 0.0 ->
+          Format_val.format_value Format_val.Usd e.fleet.cost_usd_per_turn
+          ^ "/"
+          ^ Say.resolve lang (Say.make ~ko:"턴" ~en:"turn")
+      | Some _ | None -> "24h"
+    in
+    let calls_val, calls_sub =
+      match Runtime_store.tool_series_totals rt with
+      | Some (calls, fails, p95_opt) ->
+          let p95_s =
+            match p95_opt with
+            | Some ms ->
+                "p95 " ^ Format_val.format_value Format_val.Milliseconds ms
+            | None ->
+                if fails > 0 then Printf.sprintf "%d fail" fails else "24h"
+          in
+          ( Format_val.format_value Format_val.Count (float_of_int calls)
+          , p95_s )
+      | None -> (
+          match Observed.to_option rt.models_metrics with
+          | Some m ->
+              let p95_s =
+                match m.fleet_p95_latency_ms with
+                | Some ms ->
+                    "p95 " ^ Format_val.format_value Format_val.Milliseconds ms
+                | None -> Printf.sprintf "%d err" m.total_error_entries
+              in
+              ( Format_val.format_value Format_val.Count
+                  (float_of_int m.total_entries)
+              , p95_s )
+          | None -> (Glyph.to_utf8 Glyph.Missing_absent, ""))
+    in
+    let models_n =
+      match Observed.to_option rt.models_metrics with
+      | Some m -> List.length m.models
+      | None -> (
+          match Observed.to_option rt.runtime_metrics with
+          | Some r -> List.length r.runtimes
+          | None -> List.length (Runtime_store.runtime_options rt))
+    in
+    let keepers_n =
+      let s_len = List.length spend_rows in
+      if s_len > 0 then s_len
+      else
+        match Observed.to_option model.fleet.keepers with
+        | Some ks -> List.length ks
+        | None -> 0
+    in
+    let active_val =
+      Printf.sprintf "%d %s · %d %s" models_n
+        (Say.resolve lang (Say.make ~ko:"모델" ~en:"mdl"))
+        keepers_n
+        (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"kp"))
+    in
+    let active_sub =
+      let cos = List.length (Runtime_store.company_spend_rollups rt) in
+      if cos > 0 then
+        Say.resolve lang
+          (Say.make ~ko:(Printf.sprintf "%d 조직" cos)
+             ~en:(Printf.sprintf "%d orgs" cos))
+      else ""
+    in
+    match cols with
+    | [ c0; c1; c2; c3 ] ->
+        draw_cell 0 c0
+          ~label:(Say.resolve lang (Say.make ~ko:"24h 캐시 적중" ~en:"24h Cache Hit"))
+          ~value:cache_val ~val_style:cache_style ~sub:"" ?gauge_ratio:cache_ratio ();
+        draw_cell 1 c1
+          ~label:(Say.resolve lang (Say.make ~ko:"24h 총 지출" ~en:"24h Total Spend"))
+          ~value:spend_val ~val_style:(H.anchor_style ~theme ()) ~sub:spend_sub ();
+        draw_cell 2 c2
+          ~label:(Say.resolve lang (Say.make ~ko:"24h 호출 · p95" ~en:"24h Calls & p95"))
+          ~value:calls_val ~val_style:(H.anchor_style ~theme ()) ~sub:calls_sub ();
+        draw_cell 3 c3
+          ~label:(Say.resolve lang (Say.make ~ko:"활성 모델 · 키퍼" ~en:"Models & Keepers"))
+          ~value:active_val ~val_style:(H.anchor_style ~theme ()) ~sub:active_sub ()
+    | _ -> ()
+
+let is_observed_loading = function
+  | Observed.Loading _ -> true
+  | Observed.Value _ | Observed.Absent | Observed.Unreported | Observed.Failed _
+    ->
+      false
+
+let build_cache_hit_samples ~(rt : Runtime_store.t) =
+  let hourly = Runtime_store.cache_hit_series_24h rt in
+  let has_hourly = List.exists (fun (_, p) -> Option.is_some p) hourly in
+  if has_hourly then
+    Array.of_list
+      (List.map
+         (fun (_, pct_opt) ->
+           match pct_opt with
+           | Some pct when Float.is_finite pct ->
+               let clamped = Float.max 0.0 (Float.min 100.0 pct) in
+               if clamped <= 0.0 then Chart.Series.Zero
+               else Chart.Series.Value clamped
+           | Some _ | None -> Chart.Series.Absent)
+         hourly)
+  else
+    match Observed.to_option rt.efficiency with
+    | Some eff when eff.velocity <> [] ->
+        Array.of_list
+          (List.map
+             (fun (v : Wire_runtime.token_velocity_sample) ->
+               match
+                 ( Observed.to_option v.input_tok_per_min
+                 , Observed.to_option v.cache_read_tok_per_min )
+               with
+               | Some inp, Some cr when inp > 0.0 ->
+                   let pct =
+                     Float.max 0.0 (Float.min 100.0 (cr /. inp *. 100.0))
+                   in
+                   if pct <= 0.0 then Chart.Series.Zero
+                   else Chart.Series.Value pct
+               | Some _, Some _ -> Chart.Series.Zero
+               | None, _ | _, None -> Chart.Series.Absent)
+             eff.velocity)
+    | Some _ | None ->
+        if is_observed_loading rt.models_metrics || is_observed_loading rt.efficiency
+        then [| Chart.Series.Unread |]
+        else [| Chart.Series.Absent |]
+
+let scale_lower_for_dual ~(upper : Chart.Series.sample array)
+    ~(lower : Chart.Series.sample array) =
+  let max_of arr =
+    Array.fold_left
+      (fun acc s ->
+        match s with
+        | Chart.Series.Value v when Float.is_finite v && v > acc -> v
+        | Chart.Series.Value _ | Chart.Series.Zero | Chart.Series.Absent
+        | Chart.Series.Unread ->
+            acc)
+      0.0 arr
+  in
+  let mu = max_of upper in
+  let ml = max_of lower in
+  if mu > 0.0 && ml > 0.0 && (mu /. ml > 6.0 || ml /. mu > 6.0) then
+    let factor = mu /. ml in
+    Array.map
+      (function
+        | Chart.Series.Value v when Float.is_finite v ->
+            Chart.Series.Value (v *. factor)
+        | (Chart.Series.Value _ | Chart.Series.Zero | Chart.Series.Absent
+          | Chart.Series.Unread) as other ->
+            other)
+      lower
+  else lower
+
+let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let spend_rows = Runtime_store.keeper_spend_rows rt in
+  let kpi_h = if rect.h >= 24 then 4 else 3 in
+  let charts_ratio = if rect.h >= 34 then 0.48 else 0.44 in
+  let kpi_rect, charts_rect, bottom_rect =
+    match
+      Layout.split_v_bp bp rect
+        [ Layout.Fixed kpi_h; Layout.Ratio charts_ratio; Layout.Flex 1 ]
+    with
+    | [ a; b; c ] -> (a, b, c)
+    | _ -> (Rect.empty, rect, Rect.empty)
+  in
+  (* 1. Top 4-KPI Summary Strip *)
+  draw_efficiency_kpi_strip ~grid ~cache ~rect:kpi_rect ~theme ~bp ~lang ~model
+    ~rt spend_rows;
+  (* 2. Middle Charts Band: 2 real btop Braille charts with ~show_title:false *)
+  let cache_rect, dual_rect =
+    if Layout.equal_breakpoint bp Layout.Wide then
+      match
+        Layout.split_h_bp bp charts_rect [ Layout.Ratio 0.48; Layout.Flex 1 ]
+      with
+      | [ l; r ] -> (l, r)
+      | _ -> (charts_rect, Rect.empty)
+    else if charts_rect.h >= 12 then
+      match
+        Layout.split_v_bp bp charts_rect [ Layout.Ratio 0.48; Layout.Flex 1 ]
+      with
+      | [ t; b ] -> (t, b)
+      | _ -> (charts_rect, Rect.empty)
+    else
+      match
+        Layout.split_h_bp bp charts_rect [ Layout.Ratio 0.50; Layout.Flex 1 ]
+      with
+      | [ l; r ] -> (l, r)
+      | _ -> (charts_rect, Rect.empty)
+  in
+  (* Chart A: Prompt Cache Hit % (24h) *)
+  let cache_pct_obs = Runtime_store.effective_cache_hit_pct rt in
+  let cache_badge_txt =
+    Format_val.format_observed Format_val.Percent cache_pct_obs ~lang
+  in
+  let cache_badge =
+    match cache_pct_obs with
+    | Observed.Value { data; _ } ->
+        let tone =
+          if data >= 70.0 then Theme.Status_ok
+          else if data >= 40.0 then Theme.Status_attention
+          else Theme.Status_critical
+        in
+        H.make_badge ~glyph:Glyph.Live_healthy ~tone cache_badge_txt
+    | Observed.Loading _ ->
+        H.make_badge ~glyph:Glyph.Transport_reconnecting
+          ~tone:Theme.Status_active cache_badge_txt
+    | Observed.Absent | Observed.Unreported ->
+        H.make_badge ~tone:Theme.Status_historical cache_badge_txt
+    | Observed.Failed _ ->
+        H.make_badge ~glyph:Glyph.Live_failing ~tone:Theme.Status_critical
+          cache_badge_txt
+  in
+  let cache_inner =
+    Card.draw ~cache grid ~rect:cache_rect ~theme
+      (H.card_spec ~badge:cache_badge ~subtitle:"0..100%"
+         (Say.resolve lang
+            (Say.make ~ko:"프롬프트 캐시 적중률 (24h %)"
+               ~en:"Prompt Cache Hit Rate (24h %)")))
+  in
+  let cache_content = H.pad_content ~bp cache_inner in
+  if not (Rect.is_empty cache_content) then begin
+    let samples = build_cache_hit_samples ~rt in
+    let s_cur, s_peak, avg = series_stats samples in
+    let current =
+      if Observed.is_value cache_pct_obs then cache_pct_obs else s_cur
+    in
+    let peak =
+      match (s_peak, current) with
+      | Observed.Value { data = p; observed_at }, Observed.Value { data = c; _ } ->
+          Observed.value ~observed_at (Float.max p c)
+      | ( Observed.Value _
+        , ( Observed.Loading _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ) ) ->
+          s_peak
+      | ( ( Observed.Loading _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ )
+        , Observed.Value _ ) ->
+          current
+      | ( ( Observed.Loading _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ )
+        , ( Observed.Loading _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ) ) ->
+          s_peak
+    in
+    let spec : Chart.Spec.t =
+      {
+        title = Say.make ~ko:"캐시 적중률" ~en:"Cache Hit";
+        hotkey_hint = None;
+        kind =
+          Chart.Spec.Time_series
+            {
+              series =
+                {
+                  label = Say.literal "";
+                  unit = Format_val.Percent;
+                  gradient = Chart.Gradient.Efficiency;
+                  samples;
+                  current;
+                  peak;
+                  avg;
+                  delta_pct = None;
+                };
+              scale = Chart.Scale.Fixed_bounds { floor = 0.0; ceiling = 100.0 };
+              window = Chart.Time_window.Last_24h;
+            };
+      }
+    in
+    ignore
+      (Chart.draw grid ~rect:cache_content ~theme ~caps:H.default_caps ~lang
+         ~show_title:false spec)
+  end;
+  (* Chart B: Dual-Inverted Throughput / Velocity (24h) *)
+  let vel_kind = Runtime_store.velocity_series_24h rt in
+  let dual_title, dual_subtitle, upper_series, lower_series =
+    match vel_kind with
+    | Runtime_store.Velocity_tokens pts ->
+        let up = Array.of_list (List.map (fun (_, u, _) -> float_to_sample u) pts) in
+        let dn = Array.of_list (List.map (fun (_, _, l) -> float_to_sample l) pts) in
+        let uc, upk, uavg = series_stats up in
+        let lc, lpk, lavg = series_stats dn in
+        ( Say.make ~ko:"토큰 속도 · 이중 반전 (24h)"
+            ~en:"Dual-Inverted Token Velocity (24h)"
+        , Say.make ~ko:"▲ 입력/캐시 · ▼ 출력 (tok)"
+            ~en:"Upper: Input/Cache · Lower: Output (tok)"
+        , {
+            Chart.Series.label = Say.make ~ko:"입력/캐시" ~en:"Input/Cache";
+            unit = Format_val.Tokens;
+            gradient = Chart.Gradient.Cool_flow;
+            samples = up;
+            current = uc;
+            peak = upk;
+            avg = uavg;
+            delta_pct = None;
+          }
+        , {
+            Chart.Series.label = Say.make ~ko:"출력" ~en:"Output";
+            unit = Format_val.Tokens;
+            gradient = Chart.Gradient.Warm_flow;
+            samples = dn;
+            current = lc;
+            peak = lpk;
+            avg = lavg;
+            delta_pct = None;
+          } )
+    | Runtime_store.Velocity_calls_and_spend pts ->
+        let up = Array.of_list (List.map (fun (_, u, _) -> float_to_sample u) pts) in
+        let dn_raw = Array.of_list (List.map (fun (_, _, l) -> float_to_sample l) pts) in
+        let uc, upk, uavg = series_stats up in
+        let lc, lpk, lavg = series_stats dn_raw in
+        let dn_vis = scale_lower_for_dual ~upper:up ~lower:dn_raw in
+        let peak_usd =
+          Format_val.format_observed Format_val.Usd lpk ~lang
+        in
+        ( Say.make ~ko:"24h 모델 호출 · 지출 (이중 반전)"
+            ~en:"24h Model Calls & Spend (Dual-Mirror)"
+        , Say.make
+            ~ko:(Printf.sprintf "▲ 호출 · ▼ 지출 (최대 %s/h)" peak_usd)
+            ~en:(Printf.sprintf "Upper: Calls · Lower: Spend (peak %s/h)" peak_usd)
+        , {
+            Chart.Series.label = Say.make ~ko:"호출" ~en:"Calls";
+            unit = Format_val.Count;
+            gradient = Chart.Gradient.Cool_flow;
+            samples = up;
+            current = uc;
+            peak = upk;
+            avg = uavg;
+            delta_pct = None;
+          }
+        , {
+            Chart.Series.label = Say.make ~ko:"지출" ~en:"Spend";
+            unit = Format_val.Usd;
+            gradient = Chart.Gradient.Warm_flow;
+            samples = dn_vis;
+            current = lc;
+            peak = lpk;
+            avg = lavg;
+            delta_pct = None;
+          } )
+    | Runtime_store.Velocity_tool_calls_and_p95 pts ->
+        let up = Array.of_list (List.map (fun (_, u, _) -> float_to_sample u) pts) in
+        let dn_raw = Array.of_list (List.map (fun (_, _, l) -> float_to_sample l) pts) in
+        let uc, upk, uavg = series_stats up in
+        let lc, lpk, lavg = series_stats dn_raw in
+        let dn_vis = scale_lower_for_dual ~upper:up ~lower:dn_raw in
+        let peak_ms =
+          Format_val.format_observed Format_val.Milliseconds lpk ~lang
+        in
+        ( Say.make ~ko:"24h 도구 호출 · 지연 p95 (이중 반전)"
+            ~en:"24h Tool Calls & p95 Latency (Dual-Mirror)"
+        , Say.make
+            ~ko:(Printf.sprintf "▲ 호출 · ▼ p95 (최대 %s)" peak_ms)
+            ~en:(Printf.sprintf "Upper: Calls · Lower: p95 (peak %s)" peak_ms)
+        , {
+            Chart.Series.label = Say.make ~ko:"도구 호출" ~en:"Calls";
+            unit = Format_val.Count;
+            gradient = Chart.Gradient.Cool_flow;
+            samples = up;
+            current = uc;
+            peak = upk;
+            avg = uavg;
+            delta_pct = None;
+          }
+        , {
+            Chart.Series.label = Say.make ~ko:"지연 p95" ~en:"p95";
+            unit = Format_val.Milliseconds;
+            gradient = Chart.Gradient.Ai_flow;
+            samples = dn_vis;
+            current = lc;
+            peak = lpk;
+            avg = lavg;
+            delta_pct = None;
+          } )
+    | Runtime_store.Velocity_empty ->
+        let empty_sample =
+          if
+            is_observed_loading rt.models_metrics
+            || is_observed_loading rt.efficiency
+            || is_observed_loading rt.tool_series
+          then [| Chart.Series.Unread |]
+          else [| Chart.Series.Absent |]
+        in
+        let empty_s label unit gradient : Chart.Series.t =
+          {
+            label;
+            unit;
+            gradient;
+            samples = empty_sample;
+            current = Observed.absent;
+            peak = Observed.absent;
+            avg = Observed.absent;
+            delta_pct = None;
+          }
+        in
+        ( Say.make ~ko:"24h 처리량 · 지연 (이중 반전)"
+            ~en:"24h Throughput & Latency (Dual-Mirror)"
+        , Say.make ~ko:"24h" ~en:"24h"
+        , empty_s (Say.make ~ko:"입력/호출" ~en:"In/Calls") Format_val.Tokens
+            Chart.Gradient.Cool_flow
+        , empty_s (Say.make ~ko:"출력/지연" ~en:"Out/p95") Format_val.Tokens
+            Chart.Gradient.Warm_flow )
+  in
+  let dual_inner =
+    Card.draw ~cache grid ~rect:dual_rect ~theme
+      (H.card_spec ~subtitle:(Say.resolve lang dual_subtitle)
+         (Say.resolve lang dual_title))
+  in
+  let dual_content = H.pad_content ~bp dual_inner in
+  if not (Rect.is_empty dual_content) then begin
+    let spec : Chart.Spec.t =
+      {
+        title = dual_title;
+        hotkey_hint = None;
+        kind =
+          Chart.Spec.Dual_inverted
+            {
+              upper = upper_series;
+              lower = lower_series;
+              scale = Chart.Scale.Synced_pair;
+              window = Chart.Time_window.Last_24h;
+            };
+      }
+    in
+    ignore
+      (Chart.draw grid ~rect:dual_content ~theme ~caps:H.default_caps ~lang
+         ~show_title:false spec)
+  end;
+  (* 3. Bottom Card: Company & Keeper Cost Efficiency Table *)
+  let tbl_inner =
+    Card.draw ~cache grid ~rect:bottom_rect ~theme
+      (H.card_spec ~focused:true
+         ~subtitle:
+           (Say.resolve lang
+              (Say.make ~ko:"5개 자율 조직 · 키퍼별 비용 효율"
+                 ~en:"5 Companies & Per-Keeper Cost Efficiency"))
+         (Say.resolve lang
+            (Say.make ~ko:"회사 · 키퍼별 비용 효율 표"
+               ~en:"Company & Keeper Cost Efficiency")))
+  in
+  if not (Rect.is_empty tbl_inner) then begin
+    if spend_rows = [] then
+      let obs_hint =
+        if Observed.is_value rt.efficiency || Observed.is_value rt.keeper_costs
+        then Observed.absent
+        else rt.efficiency
+      in
+      H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp tbl_inner) ~theme
+        ~lang obs_hint
+    else
+      (* Prefer explicit non-ungrouped company from fleet roster if present, else 5-company classifier *)
+      let fleet_company : (string, string) Hashtbl.t = Hashtbl.create 32 in
+      (match Observed.to_option model.fleet.keepers with
+       | Some ks ->
+           List.iter
+             (fun (k : Wire_fleet.keeper_summary) ->
+               let c = String.trim k.company in
+               if
+                 (not (String.equal c ""))
+                 && not (String.equal (String.lowercase_ascii c) "ungrouped")
+               then Hashtbl.replace fleet_company k.name c)
+             ks
+       | None -> ());
+      let company_of (r : Runtime_store.keeper_spend_row) =
+        match Hashtbl.find_opt fleet_company r.keeper with
+        | Some c -> c
+        | None -> r.company
+      in
+      let total_spend_all =
+        List.fold_left
+          (fun acc (r : Runtime_store.keeper_spend_row) -> acc +. r.cost_usd)
+          0.0 spend_rows
+      in
+      let rollups = Runtime_store.company_spend_rollups rt in
+      let _ = rollups in
+      let comp_tbl : (string, Runtime_store.keeper_spend_row list) Hashtbl.t =
+        Hashtbl.create 8
+      in
+      List.iter
+        (fun (r : Runtime_store.keeper_spend_row) ->
+          let c = company_of r in
+          let prev = match Hashtbl.find_opt comp_tbl c with Some xs -> xs | None -> [] in
+          Hashtbl.replace comp_tbl c (prev @ [ r ]))
+        spend_rows;
+      let grouped_companies =
+        Hashtbl.fold
+          (fun comp members acc ->
+            let tot_usd =
+              List.fold_left
+                (fun s (m : Runtime_store.keeper_spend_row) -> s +. m.cost_usd)
+                0.0 members
+            in
+            (comp, tot_usd, members) :: acc)
+          comp_tbl []
+        |> List.sort (fun (ca, ua, _) (cb, ub, _) ->
+               let c = Float.compare ub ua in
+               if c <> 0 then c else String.compare ca cb)
+      in
+      let columns : Table.column list =
+        [
+          {
+            id = "entity";
+            header = Say.make ~ko:"회사 / 키퍼" ~en:"Company / Keeper";
+            priority = 0;
+            min_width = 18;
+            max_width = None;
+            weight = 3;
+            align = Table.Left;
+          };
+          {
+            id = "spend";
+            header = Say.make ~ko:"비용 (USD)" ~en:"Cost USD";
+            priority = 0;
+            min_width = 9;
+            max_width = Some 12;
+            weight = 1;
+            align = Table.Right;
+          };
+          {
+            id = "calls";
+            header = Say.make ~ko:"호출 / 턴" ~en:"Calls/Turns";
+            priority = 2;
+            min_width = 10;
+            max_width = Some 14;
+            weight = 1;
+            align = Table.Right;
+          };
+          {
+            id = "cache";
+            header = Say.make ~ko:"캐시%" ~en:"Cache%";
+            priority = 1;
+            min_width = 7;
+            max_width = Some 10;
+            weight = 1;
+            align = Table.Right;
+          };
+          {
+            id = "efficiency";
+            header = Say.make ~ko:"비용 효율" ~en:"Cost/Call";
+            priority = 1;
+            min_width = 14;
+            max_width = Some 22;
+            weight = 2;
+            align = Table.Left;
+          };
+        ]
+      in
+      let table_rows =
+        List.concat_map
+          (fun (comp, tot_usd, members) ->
+            let tot_calls, tot_turns, cache_sum, cache_w =
+              List.fold_left
+                (fun (calls, turns, cs, cw)
+                     (m : Runtime_store.keeper_spend_row) ->
+                  let cs', cw' =
+                    match Observed.to_option m.cache_hit_pct with
+                    | Some pct when Float.is_finite pct ->
+                        let w = Int.max 1 m.calls in
+                        (cs +. (pct *. float_of_int w), cw + w)
+                    | Some _ | None -> (cs, cw)
+                  in
+                  (calls + m.calls, turns + m.turns, cs', cw'))
+                (0, 0, 0.0, 0) members
+            in
+            let comp_cache_cell =
+              if cache_w > 0 then
+                let pct = cache_sum /. float_of_int cache_w in
+                let tone =
+                  if pct >= 70.0 then Theme.Status_ok
+                  else if pct >= 40.0 then Theme.Status_attention
+                  else Theme.Status_critical
+                in
+                Table.text_cell
+                  ~fg:(Color.of_rgb (Theme.status_color theme tone))
+                  (Format_val.format_value Format_val.Percent pct)
+              else
+                Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                  ~attrs:Attr.italic
+                  (Glyph.to_utf8 Glyph.Missing_absent)
+            in
+            let share_ratio =
+              if total_spend_all > 0.0 then
+                Float.max 0.0 (Float.min 1.0 (tot_usd /. total_spend_all))
+              else 0.0
+            in
+            let comp_per_call =
+              if tot_calls > 0 then
+                Format_val.format_value Format_val.Usd
+                  (tot_usd /. float_of_int tot_calls)
+              else Glyph.to_utf8 Glyph.Missing_absent
+            in
+            let comp_row : Table.row =
+              {
+                id = "co:" ^ comp;
+                cells =
+                  [
+                    ( "entity"
+                    , Table.text_cell ~fg:(Color.of_rgb theme.accent)
+                        ~attrs:Attr.bold
+                        (Printf.sprintf "%s %s (%d)"
+                           (Glyph.to_utf8 Glyph.Expand_open)
+                           comp (List.length members)) );
+                    ( "spend"
+                    , Table.text_cell ~fg:(Color.of_rgb theme.text_bright)
+                        ~attrs:Attr.bold
+                        (Format_val.format_value Format_val.Usd tot_usd) );
+                    ( "calls"
+                    , Table.text_cell
+                        (Printf.sprintf "%s / %dt"
+                           (Format_val.format_value Format_val.Count
+                              (float_of_int tot_calls))
+                           tot_turns) );
+                    ("cache", comp_cache_cell);
+                    ( "efficiency"
+                    , Table.Gauge
+                        {
+                          ratio = share_ratio;
+                          gradient = Chart.Gradient.Thermal;
+                          label = Some comp_per_call;
+                        } );
+                  ];
+              }
+            in
+            let member_rows =
+              List.map
+                (fun (m : Runtime_store.keeper_spend_row) ->
+                  let cache_cell =
+                    match Observed.to_option m.cache_hit_pct with
+                    | Some pct when Float.is_finite pct ->
+                        let tone =
+                          if pct >= 70.0 then Theme.Status_ok
+                          else if pct >= 40.0 then Theme.Status_attention
+                          else Theme.Status_critical
+                        in
+                        Table.text_cell
+                          ~fg:(Color.of_rgb (Theme.status_color theme tone))
+                          (Format_val.format_value Format_val.Percent pct)
+                    | Some _ | None ->
+                        Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                          ~attrs:Attr.italic
+                          (Glyph.to_utf8 Glyph.Missing_absent)
+                  in
+                  let m_share =
+                    if total_spend_all > 0.0 then
+                      Float.max 0.0 (Float.min 1.0 (m.cost_usd /. total_spend_all))
+                    else 0.0
+                  in
+                  let per_lbl =
+                    match m.cost_per_turn_usd with
+                    | Some c -> Format_val.format_value Format_val.Usd c
+                    | None ->
+                        if m.calls > 0 then
+                          Format_val.format_value Format_val.Usd
+                            (m.cost_usd /. float_of_int m.calls)
+                        else Glyph.to_utf8 Glyph.Missing_absent
+                  in
+                  {
+                    Table.id = "kp:" ^ m.keeper;
+                    cells =
+                      [
+                        ("entity", Table.text_cell ("  " ^ m.keeper));
+                        ( "spend"
+                        , Table.text_cell
+                            (Format_val.format_value Format_val.Usd m.cost_usd) );
+                        ( "calls"
+                        , Table.text_cell
+                            (Printf.sprintf "%s / %dt"
+                               (Format_val.format_value Format_val.Count
+                                  (float_of_int m.calls))
+                               m.turns) );
+                        ("cache", cache_cell);
+                        ( "efficiency"
+                        , Table.Gauge
+                            {
+                              ratio = m_share;
+                              gradient = Chart.Gradient.Thermal;
+                              label = Some per_lbl;
+                            } );
+                      ];
+                  })
+                members
+            in
+            comp_row :: member_rows)
+          grouped_companies
+      in
+      let selected_keeper_row_idx =
+        let kp_len = List.length spend_rows in
+        if kp_len = 0 then None
+        else
+          let clamped = H.clamp_index kp_len rt.selected_index in
+          match List.nth_opt spend_rows clamped with
+          | None -> None
+          | Some target_kp ->
+              let want_id = "kp:" ^ target_kp.keeper in
+              let rec find i = function
+                | [] -> None
+                | (r : Table.row) :: rest ->
+                    if String.equal r.id want_id then Some i
+                    else find (i + 1) rest
+              in
+              find 0 table_rows
+      in
+      ignore
+        (Table.draw grid ~rect:tbl_inner ~theme ~caps:H.default_caps ~lang
+           ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.scroll_offset
+           ?selected:selected_keeper_row_idx ~columns table_rows)
+  end
+
+(* --- 3. Sub-Tab 3: Failover Lanes (Visual Flow_down Cascade + Lane Inspector) --- *)
+
+let probe_refresh_label ~lang = function
+  | Wire_runtime.Probe_fresh ->
+      Say.resolve lang (Say.make ~ko:"신선" ~en:"Fresh")
+  | Wire_runtime.Probe_recent ->
+      Say.resolve lang (Say.make ~ko:"최근 캐시" ~en:"Cached")
+  | Wire_runtime.Probe_served_stale ->
+      Say.resolve lang (Say.make ~ko:"캐시(갱신 중)" ~en:"Stale(refreshing)")
+  | Wire_runtime.Probe_warming_up ->
+      Say.resolve lang (Say.make ~ko:"워밍업" ~en:"Warming")
+
+let format_mmss ~now_unix resets_at_unix =
+  if
+    (not (Float.is_finite now_unix))
+    || (not (Float.is_finite resets_at_unix))
+    || now_unix <= 0.0
+    || resets_at_unix <= 0.0
+  then None
+  else
+    let rem = Int.max 0 (int_of_float (resets_at_unix -. now_unix)) in
+    let mins = rem / 60 in
+    let secs = rem mod 60 in
+    Some (Printf.sprintf "%02d:%02d" mins secs)
+
+let provider_cooldown_mmss ~now_unix ~provider
+    (uw_opt : Wire_runtime.provider_usage_windows option) =
+  match uw_opt with
+  | None -> None
+  | Some uw ->
+      let want = String.lowercase_ascii provider in
+      List.find_map
+        (fun (a : Wire_runtime.account_usage) ->
+          let matches_provider =
+            List.exists
+              (fun (p : Wire_runtime.usage_provider_ref) ->
+                String.equal (String.lowercase_ascii p.id) want)
+              a.providers
+          in
+          if not matches_provider then None
+          else
+            match a.state with
+            | Wire_runtime.Account_reported ws ->
+                List.find_map
+                  (fun (w : Wire_runtime.usage_window) ->
+                    if is_window_exhausted w then
+                      match w.resets_at_unix with
+                      | Some ts -> format_mmss ~now_unix ts
+                      | None -> None
+                    else None)
+                  ws
+            | Wire_runtime.Account_not_reported_since_start
+            | Wire_runtime.Account_reported_no_windows _ ->
+                None)
+        uw.accounts
+
+let format_failover_reason (p : Wire_runtime.provider_probe_row) =
+  match p.http_status, p.error with
+  | Some 429, _ -> "429 RateLimit"
+  | Some 402, _ -> "402 Quota"
+  | Some code, Some err -> Printf.sprintf "HTTP %d · %s" code err
+  | Some code, None -> Printf.sprintf "HTTP %d" code
+  | None, Some err -> err
+  | None, None -> p.status
+
+let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let now_unix = model.freshness.last_wall_unix in
+  let active_probes, outside_probes = Runtime_store.active_and_outside_probes rt in
+  let active_ok =
+    List.fold_left
+      (fun acc (p : Wire_runtime.provider_probe_row) ->
+        match p.reachable with Some true -> acc + 1 | Some false | None -> acc)
+      0 active_probes
+  in
+  let active_failed =
+    List.fold_left
+      (fun acc (p : Wire_runtime.provider_probe_row) ->
+        match p.reachable with
+        | Some false -> acc + 1
+        | Some true | None -> acc)
+      0 active_probes
+  in
+  let outside_failed =
+    List.fold_left
+      (fun acc (p : Wire_runtime.provider_probe_row) ->
+        match p.reachable with
+        | Some false -> acc + 1
+        | Some true | None -> acc)
+      0 outside_probes
+  in
+  let lanes, runtimes =
+    match Observed.to_option rt.runtime_resolved with
+    | Some snap -> (snap.lanes, snap.runtimes)
+    | None -> ([], [])
+  in
+  let runtimes_tbl : (string, Wire_runtime.runtime_option) Hashtbl.t =
+    Hashtbl.create 32
+  in
+  List.iter
+    (fun (r : Wire_runtime.runtime_option) -> Hashtbl.replace runtimes_tbl r.id r)
+    runtimes;
+  let probe_tbl : (string, Wire_runtime.provider_probe_row) Hashtbl.t =
+    Hashtbl.create 64
+  in
+  List.iter
+    (fun (p : Wire_runtime.provider_probe_row) ->
+      Hashtbl.replace probe_tbl p.runtime_id p)
+    active_probes;
+  let ssot_tone, ssot_glyph =
+    if active_probes = [] then (Theme.Status_active, Glyph.Live_healthy)
+    else if active_failed = 0 then (Theme.Status_ok, Glyph.Live_healthy)
+    else if active_ok > 0 then (Theme.Status_attention, Glyph.Warning_triangle)
+    else (Theme.Status_critical, Glyph.Live_failing)
+  in
+  let header_rect, body_rect =
+    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ a; b ] -> (a, b)
+    | _ -> (Rect.empty, rect)
+  in
+  let probe_age_txt =
+    match Observed.to_option rt.runtime_probe with
+    | Some pr ->
+        let age =
+          match pr.cache_age_sec with
+          | Some s -> " " ^ Format_val.format_duration_s s
+          | None -> ""
+        in
+        probe_refresh_label ~lang pr.refresh_state ^ age
+    | None -> Say.resolve lang (Say.make ~ko:"즉시 캐시" ~en:"Instant SSOT")
+  in
+  let header_pills =
+    [
+      {
+        H.label =
+          Printf.sprintf "%s: %d · %d/%d %s"
+            (Say.resolve lang (Say.make ~ko:"활성 레인" ~en:"Active Lanes"))
+            (List.length lanes) active_ok (List.length active_probes)
+            (Say.resolve lang (Say.make ~ko:"가용" ~en:"reachable"));
+        active = true;
+        tone = Some ssot_tone;
+        glyph = Some ssot_glyph;
+      };
+      {
+        H.label = probe_age_txt;
+        active = false;
+        tone = Some Theme.Status_active;
+        glyph = None;
+      };
+      {
+        H.label =
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "외부 프로브: %d 실패 [Space]" outside_failed)
+               ~en:(Printf.sprintf "External probes: %d failed [Space]" outside_failed));
+        active = rt.show_outside_lane_probes;
+        tone = Some Theme.Status_historical;
+        glyph = Some Glyph.Historical_incident;
+      };
+    ]
+  in
+  ignore (H.draw_pills ~grid ~rect:header_rect ~theme header_pills);
+  let left_rect, right_rect =
+    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.56
+      ~top_ratio:0.54 bp body_rect
+  in
+  (* Left Card: Visual Flow_down Cascade Tree *)
+  let cascade_inner =
+    Card.draw ~cache grid ~rect:left_rect ~theme
+      (H.card_spec ~focused:(model.nav.pane_index = 0)
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 상세" ~en:"[Enter] Dive"))
+         (Say.resolve lang
+            (Say.make ~ko:"페일오버 캐스케이드" ~en:"Failover Cascade")))
+  in
+  let pad_r = if cascade_inner.w >= 24 then 2 else 1 in
+  if not (Rect.is_empty cascade_inner) then begin
+    match rt.runtime_resolved with
+    | Observed.Value { data = snap; _ } when snap.lanes <> [] ->
+        let bottom = Rect.bottom cascade_inner in
+        let sel_idx = H.clamp_index (List.length snap.lanes) rt.selected_index in
+        let reserve_ext =
+          if rt.show_outside_lane_probes && outside_probes <> [] then
+            Int.min 5 (1 + List.length outside_probes)
+          else 0
+        in
+        let avail_h = Int.max 0 (cascade_inner.h - reserve_ext) in
+        let visual_rows = ref [] in
+        let sel_v_row = ref None in
+        List.iteri
+          (fun idx (lane : Wire_runtime.failover_lane) ->
+            let is_sel = Int.equal idx sel_idx in
+            if is_sel then sel_v_row := Some (List.length !visual_rows);
+            visual_rows := `Lane (lane, is_sel) :: !visual_rows;
+            let slot_n = List.length lane.runtime_ids in
+            List.iteri
+              (fun si rid ->
+                visual_rows := `Slot (si, slot_n, rid, is_sel) :: !visual_rows)
+              lane.runtime_ids)
+          snap.lanes;
+        let v_arr = Array.of_list (List.rev !visual_rows) in
+        let total_v = Array.length v_arr in
+        let start_v, _ =
+          Table.compute_viewport ~total_rows:total_v ~viewport_rows:avail_h
+            ~scroll:rt.scroll_offset ~selected:!sel_v_row
+        in
+        let y = ref cascade_inner.y in
+        for row_i = 0 to avail_h - 1 do
+          let v_idx = start_v + row_i in
+          if v_idx < total_v then begin
+            let py = cascade_inner.y + row_i in
+            y := py + 1;
+            let r_rect =
+              Rect.make ~x:cascade_inner.x ~y:py ~w:cascade_inner.w ~h:1
+            in
+            let right_edge = Rect.right cascade_inner - pad_r in
+            match v_arr.(v_idx) with
+            | `Lane (lane, is_sel) ->
+                let row_bg =
+                  if is_sel then theme.selection_bg else theme.surface_1
+                in
+                if is_sel then
+                  H.paint_selected_row_bg ~grid ~clip:cascade_inner
+                    ~row_rect:r_rect ~theme ();
+                let decl =
+                  if lane.declared then ""
+                  else
+                    " · "
+                    ^ Say.resolve lang (Say.make ~ko:"암묵" ~en:"implicit")
+                in
+                let caret =
+                  if is_sel then Glyph.Expand_open else Glyph.Expand_open
+                in
+                let hdr = Printf.sprintf "%s %s" (Glyph.to_utf8 caret) lane.id in
+                let meta =
+                  Printf.sprintf "%d slots%s" (List.length lane.runtime_ids) decl
+                in
+                let meta_w = Grapheme.display_width meta in
+                let left_max =
+                  Int.max 8 (right_edge - (cascade_inner.x + 2) - meta_w - 2)
+                in
+                let lane_style =
+                  if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                  else H.accent_style ~theme ~bg:row_bg ~attrs:Attr.bold ()
+                in
+                ignore
+                  (H.put_clipped ~grid ~clip:r_rect ~x:(cascade_inner.x + 2)
+                     ~y:py ~max_w:left_max ~style:lane_style hdr);
+                ignore
+                  (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
+                     ~max_w:meta_w ~style:(H.whisper_style ~theme ~bg:row_bg ())
+                     meta)
+            | `Slot (si, _slot_n, rid, parent_sel) ->
+                let is_primary = si = 0 in
+                let row_bg =
+                  if is_primary && parent_sel then theme.surface_2
+                  else theme.surface_1
+                in
+                if is_primary && parent_sel then
+                  Cell_grid.fill_rect ~clip:cascade_inner grid ~rect:r_rect
+                    ~style:(H.text_style ~theme ~bg:row_bg ()) ();
+                let prov_id =
+                  match Hashtbl.find_opt runtimes_tbl rid with
+                  | Some r -> Some r.provider
+                  | None -> None
+                in
+                let human_lbl =
+                  Wire_runtime.human_runtime_slot_label ~runtimes rid
+                in
+                let cooldown_opt =
+                  match prov_id with
+                  | Some pid ->
+                      provider_cooldown_mmss ~now_unix ~provider:pid
+                        (Observed.to_option rt.usage_windows)
+                  | None -> None
+                in
+                let status_g, status_tone, status_txt, rtt_txt =
+                  match Hashtbl.find_opt probe_tbl rid, cooldown_opt with
+                  | Some pr, _ when pr.reachable = Some false -> (
+                      match pr.http_status, cooldown_opt with
+                      | Some 429, Some mmss ->
+                          ( Glyph.Live_paused
+                          , Theme.Status_attention
+                          , "Cooldown " ^ mmss
+                          , "429" )
+                      | Some 429, None ->
+                          ( Glyph.Live_paused
+                          , Theme.Status_attention
+                          , "Cooldown"
+                          , "429" )
+                      | _, _ ->
+                          ( Glyph.Live_failing
+                          , Theme.Status_critical
+                          , format_failover_reason pr
+                          , "" ))
+                  | _, Some mmss ->
+                      ( Glyph.Live_paused
+                      , Theme.Status_attention
+                      , "Cooldown " ^ mmss
+                      , "" )
+                  | Some pr, None -> (
+                      match pr.reachable with
+                      | Some true ->
+                          let lat =
+                            match pr.latency_ms with
+                            | Some ms ->
+                                Format_val.format_value Format_val.Milliseconds
+                                  ms
+                            | None -> ""
+                          in
+                          ( (if is_primary then Glyph.Live_healthy
+                             else Glyph.Live_idle)
+                          , (if is_primary then Theme.Status_ok
+                             else Theme.Status_active)
+                          , (if is_primary then "Active" else "Ready")
+                          , lat )
+                      | Some false | None ->
+                          ( Glyph.Live_idle
+                          , Theme.Status_active
+                          , (if is_primary then "Active" else "Ready")
+                          , "" ))
+                  | None, None ->
+                      ( (if is_primary then Glyph.Live_healthy
+                         else Glyph.Live_idle)
+                      , (if is_primary then Theme.Status_ok
+                         else Theme.Status_active)
+                      , (if is_primary then "Active" else "Ready")
+                      , "" )
+                in
+                let x0 = cascade_inner.x + 2 in
+                let conn_style =
+                  Style.make ~fg:(Color.of_rgb theme.border_subtle)
+                    ~bg:(Color.of_rgb row_bg) ()
+                in
+                if is_primary then
+                  Cell_grid.put_ascii ~clip:r_rect grid ~x:x0 ~y:py
+                    ~style:conn_style ' '
+                else
+                  Cell_grid.put_glyph ~clip:r_rect grid ~x:x0 ~y:py
+                    ~style:conn_style Glyph.Flow_down;
+                let idx_s = Printf.sprintf "%d" (si + 1) in
+                ignore
+                  (H.put_clipped ~grid ~clip:r_rect ~x:(x0 + 2) ~y:py ~max_w:2
+                     ~style:(H.secondary_style ~theme ~bg:row_bg ())
+                     idx_s);
+                Cell_grid.put_glyph ~clip:r_rect grid ~x:(x0 + 4) ~y:py
+                  ~style:(H.status_style ~theme ~bg:row_bg status_tone)
+                  status_g;
+                let right_cluster =
+                  if String.equal rtt_txt "" then status_txt
+                  else Printf.sprintf "%s  %s" status_txt rtt_txt
+                in
+                let rc_w = Grapheme.display_width right_cluster in
+                let lbl_x = x0 + 6 in
+                let lbl_w = Int.max 6 (right_edge - lbl_x - rc_w - 2) in
+                let lbl_style =
+                  if is_primary then H.anchor_style ~theme ~bg:row_bg ()
+                  else H.text_style ~theme ~bg:row_bg ()
+                in
+                ignore
+                  (H.put_clipped ~grid ~clip:r_rect ~x:lbl_x ~y:py ~max_w:lbl_w
+                     ~style:lbl_style human_lbl);
+                ignore
+                  (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
+                     ~max_w:rc_w
+                     ~style:
+                       (H.status_style ~theme ~bg:row_bg
+                          ~attrs:(if is_primary then Attr.bold else Attr.none)
+                          status_tone)
+                     right_cluster)
+          end
+        done;
+        if reserve_ext > 0 && !y < bottom then begin
+          let pad_x = Layout.card_pad_x bp in
+          H.draw_divider ~grid ~rect:cascade_inner ~y:!y ~theme ~pad_x
+            ~label:
+              (Say.resolve lang
+                 (Say.make ~ko:"레인 외부 프로브 (SSOT 격리)"
+                    ~en:"Outside-Lane Probes (SSOT isolated)"))
+            ();
+          incr y;
+          List.iter
+            (fun (pr : Wire_runtime.provider_probe_row) ->
+              if !y < bottom then begin
+                let hlbl =
+                  Wire_runtime.human_runtime_slot_label ~runtimes pr.runtime_id
+                in
+                let txt =
+                  Printf.sprintf "%s %s · %s"
+                    (Glyph.to_utf8 Glyph.Historical_incident)
+                    hlbl (format_failover_reason pr)
+                in
+                ignore
+                  (H.put_clipped ~grid ~clip:cascade_inner
+                     ~x:(cascade_inner.x + pad_x) ~y:!y
+                     ~max_w:(Int.max 0 (cascade_inner.w - (2 * pad_x)))
+                     ~style:(H.status_style ~theme Theme.Status_historical)
+                     txt);
+                incr y
+              end)
+            (H.safe_take (bottom - !y) outside_probes)
+        end
+    | Observed.Value _ ->
+        H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp cascade_inner) ~theme
+          (Say.resolve lang
+             (Say.make ~ko:"선언된 페일오버 레인 없음"
+                ~en:"No failover lanes declared"))
+    | ( Observed.Loading _
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ) as obs ->
+        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp cascade_inner)
+          ~theme ~lang obs
+  end;
+  (* Right Column: Top = Selected Lane Inspector & Health, Bottom = Unified Exact + Fusion *)
+  let insp_rect, runs_rect =
+    match
+      Layout.split_v_bp bp right_rect [ Layout.Ratio 0.52; Layout.Flex 1 ]
+    with
+    | [ a; b ] -> (a, b)
+    | _ -> (right_rect, Rect.empty)
+  in
+  let sel_lane = Runtime_store.selected_lane rt in
+  let insp_inner =
+    Card.draw ~cache grid ~rect:insp_rect ~theme
+      (H.card_spec ~focused:(model.nav.pane_index = 1)
+         ?subtitle:(Option.map (fun (l : Wire_runtime.failover_lane) -> l.id) sel_lane)
+         (Say.resolve lang
+            (Say.make ~ko:"선택 레인 상세 · 헬스" ~en:"Selected Lane Health")))
+  in
+  if not (Rect.is_empty insp_inner) then begin
+    match sel_lane with
+    | None ->
+        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp insp_inner)
+          ~theme ~lang rt.runtime_resolved
+    | Some lane ->
+        let slot_n = List.length lane.runtime_ids in
+        let reach_n =
+          List.fold_left
+            (fun acc rid ->
+              match Hashtbl.find_opt probe_tbl rid with
+              | Some { reachable = Some true; _ } -> acc + 1
+              | Some _ | None -> acc)
+            0 lane.runtime_ids
+        in
+        let primary_rid = match lane.runtime_ids with r :: _ -> r | [] -> "" in
+        let primary_lbl =
+          Wire_runtime.human_runtime_slot_label ~runtimes primary_rid
+        in
+        let pad_x = Layout.card_pad_x bp in
+        let band_h = if insp_inner.h >= 6 then 2 else 1 in
+        Card.draw_section_band ~pad_x grid
+          ~rect:(Rect.make ~x:insp_inner.x ~y:insp_inner.y ~w:insp_inner.w ~h:band_h)
+          ~theme ~left_title:lane.id
+          ~right_meta:(Printf.sprintf "%d/%d %s" reach_n slot_n
+                         (Say.resolve lang (Say.make ~ko:"가용" ~en:"ok")))
+          ?subtitle:
+            (if band_h >= 2 then
+               Some
+                 (Printf.sprintf "%s %s"
+                    (Say.resolve lang (Say.make ~ko:"기본 슬롯:" ~en:"Primary:"))
+                    primary_lbl)
+             else None)
+          ();
+        let body_area =
+          Rect.make ~x:insp_inner.x ~y:(insp_inner.y + band_h) ~w:insp_inner.w
+            ~h:(Int.max 0 (insp_inner.h - band_h))
+          |> H.pad_content ~bp
+        in
+        if not (Rect.is_empty body_area) then begin
+          let y = ref body_area.y and bot = Rect.bottom body_area in
+          if !y < bot then begin
+            let g_rect = Rect.make ~x:body_area.x ~y:!y ~w:body_area.w ~h:1 in
+            let g_spec : Chart.Spec.t =
+              {
+                title = Say.make ~ko:"가용률" ~en:"Avail";
+                hotkey_hint = None;
+                kind =
+                  Chart.Spec.Ratio_gauge
+                    {
+                      used =
+                        Observed.value ~observed_at:Clock.Mono.zero
+                          (float_of_int reach_n);
+                      limit =
+                        Observed.value ~observed_at:Clock.Mono.zero
+                          (float_of_int (Int.max 1 slot_n));
+                      unit = Format_val.Count;
+                      gradient = Chart.Gradient.Efficiency;
+                      reset_hint = None;
+                    };
+              }
+            in
+            ignore
+              (Chart.draw grid ~rect:g_rect ~theme ~caps:H.default_caps ~lang
+                 ~show_title:false g_spec);
+            incr y
+          end;
+          if !y < bot then begin
+            H.draw_divider ~grid ~rect:body_area ~y:!y ~theme
+              ~label:(Say.resolve lang (Say.make ~ko:"슬롯 프로브" ~en:"Slot Probes"))
+              ();
+            incr y
+          end;
+          List.iteri
+            (fun idx rid ->
+              if !y < bot then begin
+                let lbl = Wire_runtime.human_runtime_slot_label ~runtimes rid in
+                let transport_s =
+                  match Hashtbl.find_opt runtimes_tbl rid with
+                  | Some { transport = Some t; _ } -> String.uppercase_ascii t
+                  | Some { transport = None; _ } | None -> "—"
+                in
+                let st_g, st_tone, st_val =
+                  match Hashtbl.find_opt probe_tbl rid with
+                  | Some pr -> (
+                      match pr.reachable with
+                      | Some true ->
+                          let lat =
+                            match pr.latency_ms with
+                            | Some ms ->
+                                Format_val.format_value Format_val.Milliseconds ms
+                            | None -> "ok"
+                          in
+                          (Glyph.Live_healthy, Theme.Status_ok, lat)
+                      | Some false ->
+                          ( Glyph.Live_failing
+                          , Theme.Status_critical
+                          , format_failover_reason pr )
+                      | None -> (Glyph.Live_idle, Theme.Status_active, pr.status))
+                  | None -> (Glyph.Live_idle, Theme.Status_historical, "—")
+                in
+                let right_s = Printf.sprintf "%s · %s" transport_s st_val in
+                let rw = Grapheme.display_width right_s in
+                let lw = Int.max 8 (body_area.w - rw - 2) in
+                ignore
+                  (H.put_clipped ~grid ~clip:body_area ~x:body_area.x ~y:!y
+                     ~max_w:lw ~style:(H.text_style ~theme ())
+                     (Printf.sprintf "%d %s %s" (idx + 1) (Glyph.to_utf8 st_g) lbl));
+                ignore
+                  (H.put_right ~grid ~clip:body_area ~right_x:(Rect.right body_area)
+                     ~y:!y ~max_w:rw ~style:(H.status_style ~theme st_tone)
+                     right_s);
+                incr y
+              end)
+            lane.runtime_ids
+        end
+  end;
+  (* Bottom Right Card: Unified Exact Output + Fusion Panel Fan-Out *)
+  let runs_inner =
+    Card.draw ~cache grid ~rect:runs_rect ~theme
+      (H.card_spec
+         (Say.resolve lang
+            (Say.make ~ko:"Exact · Fusion 실행 이력"
+               ~en:"Exact & Fusion Runs")))
+  in
+  let runs_content = H.pad_content ~bp runs_inner in
+  if not (Rect.is_empty runs_content) then begin
+    let y = ref runs_content.y and bot = Rect.bottom runs_content in
+    if !y < bot then begin
+      H.draw_divider ~grid ~rect:runs_content ~y:!y ~theme
+        ~label:(Say.resolve lang (Say.make ~ko:"Exact 출력" ~en:"Exact Lanes"))
+        ();
+      incr y
+    end;
+    (match rt.exact_lane_runs with
+     | Observed.Value { data = runs; _ } when runs <> [] ->
+         let dedup_runs (xs : Wire_runtime.exact_lane_run list) =
+           let order = ref [] in
+           let tbl : (string, Wire_runtime.exact_lane_run * int) Hashtbl.t =
+             Hashtbl.create 16
+           in
+           List.iter
+             (fun (r : Wire_runtime.exact_lane_run) ->
+               let key =
+                 Printf.sprintf "%s\x00%s\x00%s" r.lane r.status
+                   (match r.summary with Some s -> s | None -> "")
+               in
+               match Hashtbl.find_opt tbl key with
+               | None ->
+                   order := key :: !order;
+                   Hashtbl.add tbl key (r, 1)
+               | Some (prev, cnt) ->
+                   let best =
+                     match (prev.started_at_unix, r.started_at_unix) with
+                     | Some a, Some b when b > a -> r
+                     | None, Some _ -> r
+                     | Some _, Some _ | Some _, None | None, None -> prev
+                   in
+                   Hashtbl.replace tbl key (best, cnt + 1))
+             xs;
+           List.rev !order |> List.filter_map (fun k -> Hashtbl.find_opt tbl k)
+         in
+         let exact_status_display status =
+           match String.lowercase_ascii (String.trim status) with
+           | "succeeded" | "completed" | "approved" | "ok" ->
+               (Glyph.Live_healthy, Theme.Status_ok)
+           | "running" | "execution_pending" ->
+               (Glyph.Live_working, Theme.Status_active)
+           | "cancelled" | "review_cancelled" | "not_reviewed" ->
+               (Glyph.Live_paused, Theme.Status_historical)
+           | "infrastructure_unavailable" | "execution_repair_required" ->
+               (Glyph.Warning_triangle, Theme.Status_attention)
+           | _ -> (Glyph.Live_failing, Theme.Status_critical)
+         in
+         let max_exact = Int.max 1 ((bot - !y) / 2) in
+         List.iter
+           (fun ((r : Wire_runtime.exact_lane_run), count) ->
+             if !y < bot then begin
+               let g, tone = exact_status_display r.status in
+               let age =
+                 match r.started_at_unix with
+                 | Some ts -> H.format_age ~now_unix ts
+                 | None -> Glyph.to_utf8 Glyph.Missing_absent
+               in
+               let cnt_s = if count > 1 then Printf.sprintf " ×%d" count else "" in
+               let sum = match r.summary with Some s -> " · " ^ s | None -> "" in
+               let left_s =
+                 Printf.sprintf "%s %s [%s]%s%s" (Glyph.to_utf8 g) r.lane
+                   r.status cnt_s sum
+               in
+               let aw = Grapheme.display_width age in
+               ignore
+                 (H.put_clipped ~grid ~clip:runs_content ~x:runs_content.x ~y:!y
+                    ~max_w:(Int.max 6 (runs_content.w - aw - 2))
+                    ~style:(H.status_style ~theme tone) left_s);
+               ignore
+                 (H.put_right ~grid ~clip:runs_content
+                    ~right_x:(Rect.right runs_content) ~y:!y ~max_w:aw
+                    ~style:(H.whisper_style ~theme ()) age);
+               incr y
+             end)
+           (H.safe_take max_exact (dedup_runs runs))
+     | Observed.Value _ ->
+         if !y < bot then begin
+           ignore
+             (H.put_clipped ~grid ~clip:runs_content ~x:runs_content.x ~y:!y
+                ~max_w:runs_content.w ~style:(H.whisper_style ~theme ())
+                (Say.resolve lang
+                   (Say.make ~ko:"최근 Exact 실행 없음" ~en:"No recent Exact runs")));
+           incr y
+         end
+     | ( Observed.Loading _
+       | Observed.Absent
+       | Observed.Unreported
+       | Observed.Failed _ ) as obs ->
+         if !y < bot then begin
+           H.draw_observed_placeholder ~grid
+             ~rect:(Rect.make ~x:runs_content.x ~y:!y ~w:runs_content.w ~h:1)
+             ~theme ~lang obs;
+           incr y
+         end);
+    if !y < bot then begin
+      H.draw_divider ~grid ~rect:runs_content ~y:!y ~theme
+        ~label:(Say.resolve lang (Say.make ~ko:"Fusion 팬아웃" ~en:"Fusion Fan-Out"))
+        ();
+      incr y
+    end;
+    match rt.fusion_runs with
+    | Observed.Value { data = runs; _ } when runs <> [] ->
+        List.iter
+          (fun (f : Wire_runtime.fusion_run) ->
+            if !y < bot then begin
+              let g, tone, st_lbl =
+                match f.status with
+                | Wire_runtime.Fusion_running ->
+                    (Glyph.Live_working, Theme.Status_active, "Running")
+                | Wire_runtime.Fusion_completed ->
+                    (Glyph.Live_healthy, Theme.Status_ok, "Completed")
+                | Wire_runtime.Fusion_failed { code; error } ->
+                    ( Glyph.Live_failing
+                    , Theme.Status_critical
+                    , Printf.sprintf "Failed (%s: %s)" code error )
+              in
+              let topo = Wire_runtime.fusion_topology_to_string f.topology in
+              let dec = match f.decision with Some d -> " · " ^ d | None -> "" in
+              let age = H.format_age ~now_unix f.started_at_unix in
+              let aw = Grapheme.display_width age in
+              let left_s =
+                Printf.sprintf "%s %s [%s/%s] %s%s" (Glyph.to_utf8 g) f.keeper
+                  f.preset topo st_lbl dec
+              in
+              ignore
+                (H.put_clipped ~grid ~clip:runs_content ~x:runs_content.x ~y:!y
+                   ~max_w:(Int.max 6 (runs_content.w - aw - 2))
+                   ~style:(H.status_style ~theme tone) left_s);
+              ignore
+                (H.put_right ~grid ~clip:runs_content
+                   ~right_x:(Rect.right runs_content) ~y:!y ~max_w:aw
+                   ~style:(H.whisper_style ~theme ()) age);
+              incr y
+            end)
+          runs
+    | Observed.Value _ ->
+        if !y < bot then
+          ignore
+            (H.put_clipped ~grid ~clip:runs_content ~x:runs_content.x ~y:!y
+               ~max_w:runs_content.w ~style:(H.whisper_style ~theme ())
+               (Say.resolve lang
+                  (Say.make ~ko:"최근 Fusion 실행 없음" ~en:"No recent Fusion runs")))
+    | ( Observed.Loading _
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ) as obs ->
+        if !y < bot then
+          H.draw_observed_placeholder ~grid
+            ~rect:(Rect.make ~x:runs_content.x ~y:!y ~w:runs_content.w ~h:1)
+            ~theme ~lang obs
+  end
+
+(* --- 4. Sub-Tab 4: Tools & Connectors --- *)
+
+let connector_status_display ~lang = function
+  | Wire_runtime.Connector_connected ->
+      ( Glyph.Live_healthy
+      , Theme.Status_ok
+      , Say.resolve lang (Say.make ~ko:"연결됨" ~en:"Connected") )
+  | Wire_runtime.Connector_connected_unavailable ->
+      ( Glyph.Warning_triangle
+      , Theme.Status_attention
+      , Say.resolve lang (Say.make ~ko:"응답 불가" ~en:"Unavailable") )
+  | Wire_runtime.Connector_disconnected ->
+      ( Glyph.Live_idle
+      , Theme.Status_historical
+      , Say.resolve lang (Say.make ~ko:"연결 해제" ~en:"Disconnected") )
+  | Wire_runtime.Connector_offline ->
+      ( Glyph.Live_failing
+      , Theme.Status_critical
+      , Say.resolve lang (Say.make ~ko:"오프라인" ~en:"Offline") )
+  | Wire_runtime.Connector_stale ->
+      ( Glyph.Transport_stale
+      , Theme.Status_attention
+      , Say.resolve lang (Say.make ~ko:"오래됨" ~en:"Stale") )
+
+let render_tools_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let rt = model.runtime in
+  let top_h = if rect.h >= 30 then 13 else 9 in
+  let top_rect, bottom_rect =
+    match
+      Layout.split_v_bp bp rect [ Layout.Fixed top_h; Layout.Flex 1 ]
+    with
+    | [ a; b ] -> (a, b)
+    | _ -> (rect, Rect.empty)
+  in
+  let p95_rect, err_bar_rect =
+    match Layout.split_v_bp bp top_rect [ Layout.Flex 1; Layout.Fixed 4 ] with
+    | [ a; b ] -> (a, b)
+    | _ -> (top_rect, Rect.empty)
+  in
+  let p95_inner =
+    Card.draw ~cache grid ~rect:p95_rect ~theme
+      (H.card_spec ~subtitle:"p95 ms"
+         (Say.resolve lang
+            (Say.make ~ko:"도구 호출 지연시간 (p95)"
+               ~en:"Tool Call Latency (p95)")))
+  in
+  let p95_content = H.pad_content ~bp p95_inner in
+  if not (Rect.is_empty p95_content) then begin
+    match rt.tool_series with
+    | Observed.Value { data = series; _ } ->
+        let samples =
+          Array.of_list
+            (List.map
+               (fun (b : Wire_runtime.tool_series_bucket) ->
+                 match b.activity with
+                 | Wire_runtime.Series_idle -> Chart.Series.Zero
+                 | Wire_runtime.Series_active { p95_ms; _ } ->
+                     if p95_ms <= 0.0 then Chart.Series.Zero
+                     else Chart.Series.Value p95_ms)
+               series.buckets)
+        in
+        let cur, peak, avg = series_stats samples in
+        let win =
+          match series.bucket_width with
+          | `Hour -> Chart.Time_window.Last_24h
+          | `Day -> Chart.Time_window.Last_7d
+        in
+        let spec : Chart.Spec.t =
+          {
+            title = Say.make ~ko:"도구 지연시간 p95" ~en:"Tool Latency p95";
+            hotkey_hint = None;
+            kind =
+              Chart.Spec.Time_series
+                {
+                  series =
+                    {
+                      label = Say.make ~ko:"지연 p95" ~en:"Latency p95";
+                      unit = Format_val.Milliseconds;
+                      gradient = Chart.Gradient.Thermal;
+                      samples;
+                      current = cur;
+                      peak;
+                      avg;
+                      delta_pct = None;
+                    };
+                  scale = Chart.Scale.Auto_ceil { floor = 0.0; nice_step = true };
+                  window = win;
+                };
+          }
+        in
+        ignore
+          (Chart.draw grid ~rect:p95_content ~theme ~caps:H.default_caps ~lang
+             ~show_title:false spec)
+    | Observed.Loading _ | Observed.Absent | Observed.Unreported
+    | Observed.Failed _ ->
+        H.draw_observed_placeholder ~grid ~rect:p95_content ~theme ~lang
+          rt.tool_series
+  end;
+  let err_inner =
+    Card.draw ~cache grid ~rect:err_bar_rect ~theme
+      (H.card_spec
+         (Say.resolve lang
+            (Say.make ~ko:"4-버킷 도구 오류 분류 (24h)"
+               ~en:"4-Bucket Tool Error Classes (24h)")))
+  in
+  let err_content = H.pad_content ~bp err_inner in
+  if not (Rect.is_empty err_content) then begin
+    match model.infra.sandboxes with
+    | Observed.Value { data = s; _ } ->
+        let fc = s.fleet_metrics_24h.failure_classes in
+        let spec : Chart.Spec.t =
+          {
+            title = Say.make ~ko:"오류 분류" ~en:"Error Classes";
+            hotkey_hint = None;
+            kind =
+              Chart.Spec.Stacked_bar
+                {
+                  segments =
+                    [
+                      ( Say.literal "policy_rejection"
+                      , float_of_int fc.policy_rejection
+                      , Theme.Status_attention );
+                      ( Say.literal "workflow_rejection"
+                      , float_of_int fc.workflow_rejection
+                      , Theme.Status_active );
+                      ( Say.literal "dependency_unavailable"
+                      , float_of_int fc.dependency_unavailable
+                      , Theme.Status_historical );
+                      ( Say.literal "runtime_failure"
+                      , float_of_int fc.runtime_failure
+                      , Theme.Status_critical );
+                    ];
+                  total_label = Say.make ~ko:"오류 합계" ~en:"Total errors";
+                  unit = Format_val.Count;
+                };
+          }
+        in
+        ignore
+          (Chart.draw grid ~rect:err_content ~theme ~caps:H.default_caps ~lang
+             ~show_title:false spec)
+    | ( Observed.Loading _
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ) as obs ->
+        H.draw_observed_placeholder ~grid ~rect:err_content ~theme ~lang obs
+  end;
+  let left_rect, right_rect =
+    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.50
+      ~top_ratio:0.50 bp bottom_rect
+  in
+  let tools_inner =
+    Card.draw ~cache grid ~rect:left_rect ~theme
+      (H.card_spec ~focused:(model.nav.pane_index = 0)
+         (Say.resolve lang (Say.make ~ko:"도구 카탈로그" ~en:"Tools Catalog")))
+  in
+  if not (Rect.is_empty tools_inner) then begin
+    match rt.tools_catalog with
+    | Observed.Value { data = tools; _ } when tools <> [] ->
+        let columns : Table.column list =
+          [
+            {
+              id = "name";
+              header = Say.make ~ko:"도구" ~en:"Tool";
+              priority = 0;
+              min_width = 16;
+              max_width = None;
+              weight = 3;
+              align = Table.Left;
+            };
+            {
+              id = "calls";
+              header = Say.make ~ko:"24h 호출" ~en:"Calls 24h";
+              priority = 1;
+              min_width = 8;
+              max_width = Some 11;
+              weight = 1;
+              align = Table.Right;
+            };
+            {
+              id = "fail";
+              header = Say.make ~ko:"실패율" ~en:"Fail %";
+              priority = 1;
+              min_width = 8;
+              max_width = Some 11;
+              weight = 1;
+              align = Table.Right;
+            };
+          ]
+        in
+        let rows =
+          List.map
+            (fun (t : Wire_runtime.tool_summary) ->
+              let calls_obs = Observed.map float_of_int t.calls_24h in
+              let fail_fg =
+                match Observed.to_option t.failure_rate_pct with
+                | Some f when f >= 10.0 -> Some (Color.of_rgb theme.status_critical)
+                | Some f when f > 0.0 -> Some (Color.of_rgb theme.status_attention)
+                | Some _ -> Some (Color.of_rgb theme.text_muted)
+                | None -> Some (Color.of_rgb theme.text_muted)
+              in
+              {
+                Table.id = t.name;
+                cells =
+                  [
+                    ("name", Table.text_cell t.name);
+                    ( "calls"
+                    , Table.text_cell
+                        (Format_val.format_observed Format_val.Count calls_obs
+                           ~lang) );
+                    ( "fail"
+                    , Table.text_cell ?fg:fail_fg
+                        (Format_val.format_observed Format_val.Percent
+                           t.failure_rate_pct ~lang) );
+                  ];
+              })
+            tools
+        in
+        ignore
+          (Table.draw grid ~rect:tools_inner ~theme ~caps:H.default_caps ~lang
+             ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.scroll_offset
+             ~selected:rt.selected_index ~columns rows)
+    | Observed.Value _ ->
+        H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tools_inner) ~theme
+          (Say.resolve lang
+             (Say.make ~ko:"등록된 도구 없음" ~en:"No tools registered"))
+    | ( Observed.Loading _
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ) as obs ->
+        H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp tools_inner)
+          ~theme ~lang obs
+  end;
+  let right_inner =
+    Card.draw ~cache grid ~rect:right_rect ~theme
+      (H.card_spec ~focused:(model.nav.pane_index = 1)
+         (Say.resolve lang
+            (Say.make ~ko:"커넥터 · 브라우저 레인 · MCP"
+               ~en:"Connectors · Browser · MCP")))
+  in
+  let right_content = H.pad_content ~bp right_inner in
+  if not (Rect.is_empty right_content) then begin
+    let y = ref right_content.y in
+    let bottom = Rect.bottom right_content in
+    if !y < bottom then begin
+      H.draw_divider ~grid ~rect:right_content ~y:!y ~theme
+        ~label:
+          (Say.resolve lang
+             (Say.make ~ko:"채널 게이트 커넥터" ~en:"Channel Gate Connectors"))
+        ();
+      incr y
+    end;
+    (match rt.connectors with
+     | Observed.Value { data = cs; _ } when cs <> [] ->
+         List.iter
+           (fun (c : Wire_runtime.connector_row) ->
+             if !y < bottom then begin
+               let g, tone, st = connector_status_display ~lang c.connection in
+               let ch = match c.channel with Some s -> " #" ^ s | None -> "" in
+               let err = match c.error with Some e -> " · " ^ e | None -> "" in
+               let line =
+                 Printf.sprintf "%s %s (%s%s · %d bind)%s" (Glyph.to_utf8 g)
+                   c.display_name st ch c.binding_count err
+               in
+               ignore
+                 (H.put_clipped ~grid ~clip:right_content ~x:right_content.x
+                    ~y:!y ~max_w:right_content.w
+                    ~style:(H.status_style ~theme tone) line);
+               incr y
+             end)
+           (H.safe_take 4 cs)
+     | Observed.Value _ ->
+         if !y < bottom then begin
+           ignore
+             (H.put_clipped ~grid ~clip:right_content ~x:right_content.x ~y:!y
+                ~max_w:right_content.w ~style:(H.whisper_style ~theme ())
+                (Say.resolve lang
+                   (Say.make ~ko:"커넥터 없음" ~en:"No connectors")));
+           incr y
+         end
+     | ( Observed.Loading _
+       | Observed.Absent
+       | Observed.Unreported
+       | Observed.Failed _ ) as obs ->
+         if !y < bottom then begin
+           H.draw_observed_placeholder ~grid
+             ~rect:(Rect.make ~x:right_content.x ~y:!y ~w:right_content.w ~h:1)
+             ~theme ~lang obs;
+           incr y
+         end);
+    if !y < bottom then begin
+      H.draw_divider ~grid ~rect:right_content ~y:!y ~theme
+        ~label:(Say.resolve lang (Say.make ~ko:"브라우저 레인" ~en:"Browser Lane"))
+        ();
+      incr y
+    end;
+    (match rt.browser_lane with
+     | Observed.Value { data = bl; _ } when !y < bottom ->
+         let g, tone =
+           if bl.ok && bl.available then (Glyph.Live_healthy, Theme.Status_ok)
+           else if bl.available then
+             (Glyph.Warning_triangle, Theme.Status_attention)
+           else (Glyph.Live_idle, Theme.Status_historical)
+         in
+         let det = match bl.detail with Some d -> " · " ^ d | None -> "" in
+         let line =
+           Printf.sprintf "%s avail=%b · clients=%d · issues=%d · auto=%b%s"
+             (Glyph.to_utf8 g) bl.available bl.client_count bl.issue_count
+             bl.automatic_browse_ok det
+         in
+         ignore
+           (H.put_clipped ~grid ~clip:right_content ~x:right_content.x ~y:!y
+              ~max_w:right_content.w ~style:(H.status_style ~theme tone) line);
+         incr y
+     | Observed.Value _ -> ()
+     | ( Observed.Loading _
+       | Observed.Absent
+       | Observed.Unreported
+       | Observed.Failed _ ) as obs ->
+         if !y < bottom then begin
+           H.draw_observed_placeholder ~grid
+             ~rect:(Rect.make ~x:right_content.x ~y:!y ~w:right_content.w ~h:1)
+             ~theme ~lang obs;
+           incr y
+         end);
+    if !y < bottom then begin
+      H.draw_divider ~grid ~rect:right_content ~y:!y ~theme
+        ~label:
+          (Say.resolve lang
+             (Say.make ~ko:"연결된 MCP 클라이언트" ~en:"Connected MCP Clients"))
+        ();
+      incr y
+    end;
+    match rt.mcp_clients with
+    | Observed.Value { data = clients; _ } when clients <> [] ->
+        List.iter
+          (fun (cl : Wire_runtime.mcp_client_row) ->
+            if !y < bottom then begin
+              let kp =
+                match cl.keeper_name with Some k -> " @" ^ k | None -> ""
+              in
+              let task =
+                match cl.current_task with Some t -> " · " ^ t | None -> ""
+              in
+              let line =
+                Printf.sprintf "%s %s [%s/%s]%s (%d cap)%s"
+                  (Glyph.to_utf8 Glyph.Live_healthy)
+                  cl.name cl.agent_type cl.status kp
+                  (List.length cl.capabilities)
+                  task
+              in
+              ignore
+                (H.put_clipped ~grid ~clip:right_content ~x:right_content.x
+                   ~y:!y ~max_w:right_content.w ~style:(H.text_style ~theme ())
+                   line);
+              incr y
+            end)
+          clients
+    | Observed.Value _ ->
+        if !y < bottom then
+          ignore
+            (H.put_clipped ~grid ~clip:right_content ~x:right_content.x ~y:!y
+               ~max_w:right_content.w ~style:(H.whisper_style ~theme ())
+               (Say.resolve lang
+                  (Say.make ~ko:"연결된 MCP 클라이언트 없음"
+                     ~en:"No connected MCP clients")))
+    | ( Observed.Loading _
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ) as obs ->
+        if !y < bottom then
+          H.draw_observed_placeholder ~grid
+            ~rect:(Rect.make ~x:right_content.x ~y:!y ~w:right_content.w ~h:1)
+            ~theme ~lang obs
+  end
+
+(* --- 5. Top-Level Runtime Workspace Entry --- *)
+
+let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
+  if Rect.is_empty rect then ()
+  else
+    let theme = Theme.of_preset model.theme_preset in
+    let bp = H.layout_bp ~model ~rect in
+    let body = H.body_rect ~bp rect in
+    match model.runtime.active_tab with
+    | Nav.Runtime_quotas_credits ->
+        render_quotas_credits ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Runtime_efficiency_spend ->
+        render_efficiency_spend ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Runtime_failover_lanes ->
+        render_failover_lanes ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Runtime_tools_connectors ->
+        render_tools_connectors ~model ~cache ~rect:body ~theme ~bp grid

@@ -1,0 +1,6 @@
+(include_subdirs no)
+
+(library
+ (name masc_tui_protocol)
+ (wrapped true)
+ (libraries masc_tui_core masc.json_field masc.sse_event masc.sse_wire yojson))

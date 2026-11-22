@@ -1,0 +1,26 @@
+(include_subdirs no)
+
+(library
+ (name masc_tui_app)
+ (wrapped true)
+ (libraries
+  masc_tui_core
+  masc_tui_term
+  masc_tui_keymap
+  masc_tui_ui
+  masc_tui_protocol
+  masc_tui_net
+  masc_tui_store
+  masc.server_lifecycle
+  masc.cli_editor
+  masc.sse_wire
+  masc.build_version
+  masc.build_commit
+  terminal_size
+  masc_core
+  fs_compat
+  eio
+  eio.unix
+  eio_main
+  unix
+  yojson))

@@ -1,9 +1,7 @@
 (** Tool_schemas_run — SSOT for run-tracking tool schemas.
 
     Defines schemas for task execution lifecycle: init, plan, get,
-    and list.
-*)
-
+    and list. *)
 
 type operation =
   | Run_init
@@ -14,11 +12,16 @@ type operation =
 
 let operations = all_of_operation
 
+let init_schema = Tool_definition_embedded.schema "masc_run_init"
+let plan_schema = Tool_definition_embedded.schema "masc_run_plan"
+let get_schema = Tool_definition_embedded.schema "masc_run_get"
+let list_schema = Tool_definition_embedded.schema "masc_run_list"
+
 let schema = function
-  | Run_init -> Tool_schemas_run_toml.init
-  | Run_plan -> Tool_schemas_run_toml.plan
-  | Run_get -> Tool_schemas_run_toml.get
-  | Run_list -> Tool_schemas_run_toml.list
+  | Run_init -> init_schema
+  | Run_plan -> plan_schema
+  | Run_get -> get_schema
+  | Run_list -> list_schema
 ;;
 
 let operation_of_tool_name value =

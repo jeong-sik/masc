@@ -3,7 +3,7 @@
     Extracted from [Keeper_agent_run.run_turn]. *)
 
 let run ~config ~(meta : Keeper_meta_contract.keeper_meta)
-      ~(acc : Keeper_run_tools.hook_accumulator) ()
+      ~(acc : Keeper_run_tools_hook_accumulator.hook_accumulator) ()
   =
   match acc.meta.current_task_id with
   | None -> ()

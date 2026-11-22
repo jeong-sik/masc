@@ -1,7 +1,7 @@
 (** Tool_schemas_workspace_extra — MCP tool schemas for shared Goal
     Store operations (list / upsert / review).
 
-    Consumed by {!Tool_schemas_workspace} and {!Tools} to expose
+    Consumed by {!Tools} to expose
     [masc_goal_*] on alignment surfaces. *)
 
 val schemas : Masc_domain.tool_schema list

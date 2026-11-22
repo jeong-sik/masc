@@ -32,11 +32,6 @@ type error =
       ; diagnostics : Agent_core.Skill_document.diagnostic list
       }
   | Duplicate_skill of { name : string }
-  | Body_too_large_to_read of
-      { skill : string
-      ; bytes : int
-      ; max_bytes : int
-      }
   | Body_blank of { skill : string }
 
 type rejected_document = private

@@ -2304,7 +2304,7 @@ let keeper_owned_job_descriptor (definition : Tool_schemas_owned_job.definition)
 ;;
 
 let keeper_composition_result_descriptor () =
-  let schema : Masc_domain.tool_schema = Tool_schemas_composition_control.result_schema in
+  let schema : Masc_domain.tool_schema = Tools.composition_result_schema in
   (* No [with_composable_output]: the dispatch handler is retired
      (Keeper_tool_runtime answers "Composition result dispatch has been
      retired" with a Policy_rejection), so this tool can never emit a value
@@ -2326,7 +2326,7 @@ let keeper_composition_result_descriptor () =
 ;;
 
 let keeper_code_query_descriptor () =
-  let schema : Masc_domain.tool_schema = Tool_schemas_code_query.schema in
+  let schema : Masc_domain.tool_schema = Tools.code_query_schema in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
@@ -2351,7 +2351,7 @@ let keeper_code_query_descriptor () =
    turn's checkpoint is retained, so the call is a write and runs alone in
    order. It is never a composition leaf: a composition has no turn to end. *)
 let keeper_receipt_wait_descriptor () =
-  let schema : Masc_domain.tool_schema = Tool_schemas_receipt_wait.schema in
+  let schema : Masc_domain.tool_schema = Tools.receipt_wait_schema in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name

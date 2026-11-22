@@ -14,18 +14,20 @@ let control_schema = function
 
 let control_schemas = List.map control_schema control_operations
 
-let web_search_schema : tool_schema = Tool_schemas_misc_toml.web_search
-let web_fetch_schema : tool_schema = Tool_schemas_misc_toml.web_fetch
+let schema_of_name = Tool_definition_embedded.schema
+
+let web_search_schema : tool_schema = schema_of_name "masc_web_search"
+let web_fetch_schema : tool_schema = schema_of_name "masc_web_fetch"
 
 let web_schemas = [ web_search_schema; web_fetch_schema ]
 
-let browser_tabs_schema : tool_schema = Tool_schemas_misc_toml.browser_tabs
-let browser_read_schema : tool_schema = Tool_schemas_misc_toml.browser_read
+let browser_tabs_schema : tool_schema = schema_of_name "masc_browser_tabs"
+let browser_read_schema : tool_schema = schema_of_name "masc_browser_read"
 
-let browser_session_schema : tool_schema = Tool_schemas_misc_toml.browser_session
-let browser_goto_schema : tool_schema = Tool_schemas_misc_toml.browser_goto
-let browser_act_schema : tool_schema = Tool_schemas_misc_toml.browser_act
-let browser_interact_schema : tool_schema = Tool_schemas_misc_toml.browser_interact
+let browser_session_schema : tool_schema = schema_of_name "masc_browser_session"
+let browser_goto_schema : tool_schema = schema_of_name "masc_browser_goto"
+let browser_act_schema : tool_schema = schema_of_name "masc_browser_act"
+let browser_interact_schema : tool_schema = schema_of_name "masc_browser_interact"
 
 let browser_lane_schemas =
   [ browser_tabs_schema
@@ -36,32 +38,59 @@ let browser_lane_schemas =
   ; browser_interact_schema
   ]
 
-(* [schemas] is the public misc schema set, now read from
-   config/tools/masc_*.toml. Operator control and web runtime schemas use the
+(* Every MSX tool's definition is decoded at module initialization so a tool
+   added to [Msx_tool] without its TOML refuses the boot. *)
+let msx_schema =
+  let table = List.map (fun tool -> tool, schema_of_name (Msx_tool.name tool)) Msx_tool.all in
+  fun tool -> List.assoc tool table
+;;
+
+let dos_step_schema : tool_schema = schema_of_name "masc_dos_step"
+let dos_press_schema : tool_schema = schema_of_name "masc_dos_press"
+let dos_type_schema : tool_schema = schema_of_name "masc_dos_type"
+let dos_pass_schema : tool_schema = schema_of_name "masc_dos_pass"
+
+(* Every DOS tool's definition is decoded at module initialization so a tool
+   added to [Machine_controller_contract.dos_tool] without its TOML refuses the boot. *)
+let () =
+  List.iter
+    (fun tool -> ignore (schema_of_name (Machine_controller_contract.dos_tool_name tool)))
+    Machine_controller_contract.all_of_dos_tool
+;;
+
+let pull_requests_schema : tool_schema = schema_of_name "keeper_pull_requests_list"
+
+(* [schemas] is the public misc schema set, read directly from
+   [config/tools/*.toml]. Operator control and web runtime schemas use the
    dedicated projections above. *)
 let lane_addon_schemas : tool_schema list =
-  [ Tool_schemas_misc_toml.lane_updates
-  ; Tool_schemas_misc_toml.lane_attach
-  ; Tool_schemas_misc_toml.lane_declaration_read
-  ; Tool_schemas_misc_toml.lane_declaration_save
-  ; Tool_schemas_misc_toml.lane_inspect
-  ; Tool_schemas_misc_toml.lane_observe
-  ; Tool_schemas_misc_toml.lane_slice
-  ; Tool_schemas_misc_toml.lane_detach
-  ; Tool_schemas_misc_toml.lane_evidence
-  ; Tool_schemas_misc_toml.lane_act
-  ; Tool_schemas_misc_toml.lane_action_status
-  ]
+  List.map
+    schema_of_name
+    [ "masc_lane_updates"
+    ; "masc_lane_attach"
+    ; "masc_lane_declaration_read"
+    ; "masc_lane_declaration_save"
+    ; "masc_lane_inspect"
+    ; "masc_lane_observe"
+    ; "masc_lane_slice"
+    ; "masc_lane_detach"
+    ; "masc_lane_evidence"
+    ; "masc_lane_act"
+    ; "masc_lane_action_status"
+    ]
 
 let schemas : tool_schema list =
   lane_addon_schemas
-  @ [ Tool_schemas_misc_toml.play_room
-    ; Tool_schemas_misc_toml.candle_balance
-    ; Tool_schemas_misc_toml.candle_catalog
-    ; Tool_schemas_misc_toml.candle_purchase
-    ; Tool_schemas_misc_toml.candle_equip
-    ; Tool_schemas_misc_toml.candle_gift
-    ; Tool_schemas_misc_toml.pull_requests ]
+  @ List.map
+      schema_of_name
+      [ "masc_play_room"
+      ; "keeper_candle_balance"
+      ; "keeper_candle_catalog"
+      ; "keeper_candle_purchase"
+      ; "keeper_candle_equip"
+      ; "keeper_candle_gift"
+      ]
+  @ [ pull_requests_schema ]
   @ Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =

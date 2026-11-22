@@ -58,7 +58,8 @@ let resolved_capabilities runtime_id =
   | Some runtime ->
     (match runtime.Runtime_instance.execution with
      | Runtime_execution.Agent_core sealed ->
-       Provider_tool_support.agent_core_capabilities_of_config (Runtime_account_access.api_declaration sealed)
+       Agent_core.Provider_runtime_binding.capabilities_for_provider_config
+         (Runtime_account_access.api_declaration sealed)
      | Runtime_execution.Claude_code _
      | Runtime_execution.Codex_app_server _
      | Runtime_execution.Antigravity_cli _

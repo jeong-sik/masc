@@ -71,7 +71,7 @@ let finalize
     ~keeper_visible_sandbox_root
     ~receipt_started_at
     ~runtime_manifest_context
-    ~(acc : Keeper_run_tools.hook_accumulator)
+    ~(acc : Keeper_run_tools_hook_accumulator.hook_accumulator)
     ~(degraded_retry_hint : Keeper_error_classify.degraded_retry option)
     ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
     ~turn_result

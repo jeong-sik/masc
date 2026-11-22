@@ -150,7 +150,7 @@ let press_response ~config ~who ~body =
       let fields = if List.mem_assoc "hold_frames" fields then fields
         else ("hold_frames", `Int press_default_hold_frames) :: fields in
       let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor who)
-        ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Press) ~arguments:(`Assoc fields) in
+        ~schema:(Tool_schemas_misc.msx_schema Msx_tool.Press) ~arguments:(`Assoc fields) in
       let fields = ["ok", `Bool (succeeded result); "message", `String result.message] in
       let fields = match result.code with
         | None -> fields
@@ -171,7 +171,7 @@ let handle_press ~state ~who request reqd =
 
 let carts_response ~config =
   let result = worker_response ~config ~principal:Lane_addon_call_context.Anonymous
-    ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Meta) ~arguments:(`Assoc ["include_inventory", `Bool true]) in
+    ~schema:(Tool_schemas_misc.msx_schema Msx_tool.Meta) ~arguments:(`Assoc ["include_inventory", `Bool true]) in
   if not (succeeded result) then result.status, failure_json result
   else match result.data with
     | `Assoc fields -> (match List.assoc_opt "inventory" fields with
@@ -200,7 +200,7 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
   | Error refusal -> refusal
   | Ok arguments ->
       let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor agent_name)
-        ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Load) ~arguments in
+        ~schema:(Tool_schemas_misc.msx_schema Msx_tool.Load) ~arguments in
       result.status, answer_json result
 ;;
 
@@ -217,7 +217,7 @@ let handle_load ~state ~agent_name request reqd =
 let msx_tick_default_frames = 18
 
 let clamp_tick_frames requested =
-  let schema = (Tool_schemas_misc_toml.msx_schema Msx_tool.Step).Masc_domain.input_schema in
+  let schema = (Tool_schemas_misc.msx_schema Msx_tool.Step).Masc_domain.input_schema in
   let maximum = Yojson.Safe.Util.(schema |> member "properties" |> member "frames" |> member "maximum" |> to_int) in
   max 1 (min maximum requested)
 
@@ -247,7 +247,7 @@ let tick_response ~config ~body =
              | Some (p : Msx_wire.pixel_reference) -> ["known_pixels", `Assoc [
                  "revision", `String p.revision; "width", `Int p.width; "height", `Int p.height]]) in
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
-        ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Step)
+        ~schema:(Tool_schemas_misc.msx_schema Msx_tool.Step)
         ~arguments:(`Assoc (["frames", `Int frames; "include_frame", `Bool true] @ pixels)) in
       if succeeded result then result.status, result.data
       else if result.machine_absent then
@@ -423,7 +423,7 @@ let checkpoint_response ~(config : Workspace.config) ~restore ~body =
                        made. Admission stays here, ahead of the dispatch. *)
                     let settled =
                       try
-                        let schema = Tool_schemas_misc_toml.msx_schema (if restore then Msx_tool.Restore else Msx_tool.Save) in
+                        let schema = Tool_schemas_misc.msx_schema (if restore then Msx_tool.Restore else Msx_tool.Save) in
                         let arguments = match args with
                           | `Assoc fields -> `Assoc (List.remove_assoc "operation_id" fields)
                           | other -> other in
@@ -495,7 +495,7 @@ let change_disk_response ~(config : Workspace.config) ~body =
   | Error refusal -> refusal
   | Ok arguments ->
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
-        ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Change_disk) ~arguments in
+        ~schema:(Tool_schemas_misc.msx_schema Msx_tool.Change_disk) ~arguments in
       result.status, answer_json result
 ;;
 

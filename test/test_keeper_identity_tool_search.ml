@@ -399,7 +399,7 @@ let test_the_listing_names_every_attached_tool () =
 let test_the_declared_prose_reaches_the_model () =
   let tool = the_tool (offered [ "jira_search", "Search issues" ]) in
   let description = tool.Agent_core.Tool.schema.description in
-  let declared = Tool_schemas_identity_tool_search.schema.Masc_domain.description in
+  let declared = Tools.identity_tool_search_schema.Masc_domain.description in
   check bool "the declaration is not empty" true (String.length declared > 0);
   check
     bool

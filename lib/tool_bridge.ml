@@ -186,3 +186,28 @@ let agent_core_tool_of_masc_with_execution_env
       ?descriptor ?base_path ?answer_reader ?model_projection
       ?on_externalization_error ~schema handler)
   | Error detail -> Error (Invalid_tool_schema { name; detail })
+
+let agent_core_tool_of_embedded_name
+    ?descriptor
+    ?base_path
+    ?answer_reader
+    ?model_projection
+    ?on_externalization_error
+    embedded_name
+    handler
+  : (Agent_core.Tool.t, schema_error) result
+  =
+  match Tool_definition_embedded.find embedded_name with
+  | Error detail -> Error (Invalid_tool_schema { name = embedded_name; detail })
+  | Ok loaded ->
+    let schema = loaded.Tool_definition_toml.schema in
+    agent_core_tool_of_masc_with_execution_env
+      ?descriptor
+      ?base_path
+      ?answer_reader
+      ?model_projection
+      ?on_externalization_error
+      ~name:schema.Masc_domain.name
+      ~description:schema.Masc_domain.description
+      ~input_schema:schema.Masc_domain.input_schema
+      handler

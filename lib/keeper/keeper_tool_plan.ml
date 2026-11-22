@@ -1281,7 +1281,7 @@ let child_nodes ~child ~submission_id ~result_id ?(after=[]) () =
   { child
   ; submission = node ~id:submission_id ~tool_name:child.tool_name ~after
       ~input:child.input ()
-  ; result = node ~id:result_id ~tool_name:Tool_schemas_composition_control.result_schema.name
+  ; result = node ~id:result_id ~tool_name:Tools.composition_result_schema.name
       ~after:[submission_id] ~input:(Json_template.literal (`Assoc [])) ()
   ; output_schema = child_exports_schema child.declared_plan
   }

@@ -380,7 +380,7 @@ let test_malformed_arguments_reach_no_browser () =
   (* A client may fill in every default the schema declares, so a document
      source read carrying them must still go on: no declared default may be
      an argument html refuses. *)
-  let declared_defaults = Yojson.Safe.Util.(Tool_schemas_misc_toml.browser_read.Masc_domain.input_schema
+  let declared_defaults = Yojson.Safe.Util.(Tool_schemas_misc.browser_read_schema.Masc_domain.input_schema
     |> member "properties" |> to_assoc
     |> List.filter_map (fun (name, property) ->
       match member "default" property with `Null -> None | value -> Some (name, value))) in

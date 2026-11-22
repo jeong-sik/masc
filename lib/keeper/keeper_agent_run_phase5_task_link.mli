@@ -4,7 +4,7 @@
 val run :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  acc:Keeper_run_tools.hook_accumulator ->
+  acc:Keeper_run_tools_hook_accumulator.hook_accumulator ->
   unit ->
   unit
 (** Link execution artifacts to the current task if one exists.

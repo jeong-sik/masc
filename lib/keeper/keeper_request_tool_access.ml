@@ -10,7 +10,7 @@ let contains tools name =
 
 let create ~offered ~deferred_names ~loader_alive =
   let loadable_names =
-    if loader_alive && contains offered Tool_schemas_identity_tool_search.schema.name
+    if loader_alive && contains offered Tools.identity_tool_search_schema.name
     then deferred_names else [] in
   { offered; loadable_names }
 

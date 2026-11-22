@@ -26,11 +26,6 @@ type error =
       ; diagnostics : Agent_core.Skill_document.diagnostic list
       }
   | Duplicate_skill of { name : string }
-  | Body_too_large_to_read of
-      { skill : string
-      ; bytes : int
-      ; max_bytes : int
-      }
   | Body_blank of { skill : string }
 
 type rejected_document =
@@ -67,17 +62,8 @@ type exact_surface =
   }
 
 let readable_instruction (skill : skill) =
-  let bytes = String.length skill.body in
   if Agent_core.Skill_document.is_blank skill.body
   then Error (Body_blank { skill = skill.name })
-  else if bytes > Common.max_tool_result_wire_bytes
-  then
-    Error
-      (Body_too_large_to_read
-         { skill = skill.name
-         ; bytes
-         ; max_bytes = Common.max_tool_result_wire_bytes
-         })
   else Ok skill
 ;;
 
@@ -477,7 +463,6 @@ let provenance_to_yojson provenance =
 let error_code = function
   | Definition_rejected _ -> "definition_rejected"
   | Duplicate_skill _ -> "duplicate_skill"
-  | Body_too_large_to_read _ -> "body_too_large_to_read"
   | Body_blank _ -> "body_blank"
 ;;
 
@@ -490,13 +475,6 @@ let error_to_string = function
          "; "
          (List.map Agent_core.Skill_document.diagnostic_to_string diagnostics))
   | Duplicate_skill { name } -> "duplicate skill name: " ^ name
-  | Body_too_large_to_read { skill; bytes; max_bytes } ->
-    Printf.sprintf
-      "skill %S: body is %d bytes; keeper_skill reads at most %d bytes as one \
-       inline tool result"
-      skill
-      bytes
-      max_bytes
   | Body_blank { skill } ->
     Printf.sprintf
       "skill %S: body is blank; keeper_skill returns the body as the instruction"

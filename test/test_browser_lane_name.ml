@@ -30,10 +30,10 @@ let sorted lanes = List.sort compare lanes
    tools declare it. BrowserInteract and BrowserGoto act on a named client and
    take no lane. *)
 let browser_tools = [
-  "masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs;
-  "masc_browser_read", Tool_schemas_misc_toml.browser_read;
-  "masc_browser_act", Tool_schemas_misc_toml.browser_act;
-  "masc_browser_session", Tool_schemas_misc_toml.browser_session;
+  "masc_browser_tabs", Tool_schemas_misc.browser_tabs_schema;
+  "masc_browser_read", Tool_schemas_misc.browser_read_schema;
+  "masc_browser_act", Tool_schemas_misc.browser_act_schema;
+  "masc_browser_session", Tool_schemas_misc.browser_session_schema;
 ]
 
 (* Omission now selects from observed browser state. Schemas must leave it

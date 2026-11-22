@@ -254,9 +254,9 @@ let run_teardown_protected ~keeper_name ~site f =
         (Printexc.to_string e)
         (if String.equal backtrace "" then "" else "\n" ^ backtrace)
 
-let cleanup_agent_setup ~keeper_name (setup : Keeper_run_tools.agent_setup) =
+let cleanup_agent_setup ~keeper_name (setup : Keeper_run_tools_hooks.agent_setup) =
   run_teardown_protected ~keeper_name ~site:"tool_cleanup" (fun () ->
-    setup.Keeper_run_tools.cleanup ())
+    setup.Keeper_run_tools_hooks.cleanup ())
 
 let run_with_setup_cleanup ~cleanup f =
   match f () with

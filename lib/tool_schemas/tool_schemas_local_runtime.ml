@@ -1,6 +1,5 @@
 (** Tool_schemas_local_runtime — SSOT for local-runtime tool schemas. *)
 
-
 type operation = Local_runtime_tool_policy.operation =
   | Verify
   | Ollama_probe
@@ -13,27 +12,21 @@ type definition =
   }
 
 let operation_id = Local_runtime_tool_policy.operation_id
-
 let execution_policy = Local_runtime_tool_policy.execution_policy
 
-(* One definition per constructor, and [definitions] is [all_of_operation]
-   mapped through it. Writing the list out instead let a new operation compile
-   -- [operation_id] and the policy functions are exhaustive -- while quietly
-   staying out of the list registration walks, so it would be routable and
-   never advertised. *)
+let verify_schema = Tool_definition_embedded.schema "masc_runtime_verify"
+let ollama_probe_schema = Tool_definition_embedded.schema "masc_runtime_ollama_probe"
+let systemone_decide_schema = Tool_definition_embedded.schema "masc_decide"
+
 let definition_for operation =
   match operation with
-  | Verify -> { operation; schema = Tool_schemas_local_runtime_toml.verify }
-  | Ollama_probe -> { operation; schema = Tool_schemas_local_runtime_toml.ollama_probe }
-  | Systemone_decide ->
-    { operation; schema = Tool_schemas_local_runtime_toml.systemone_decide }
+  | Verify -> { operation; schema = verify_schema }
+  | Ollama_probe -> { operation; schema = ollama_probe_schema }
+  | Systemone_decide -> { operation; schema = systemone_decide_schema }
 ;;
 
 let definitions : definition list = List.map definition_for all_of_operation
 
-(* Taken from the declaration rather than restated, so the name a handler
-   labels its result with -- and the name it hands
-   [authorize_external_effect] -- cannot drift from the advertised one. *)
 let tool_name operation = (definition_for operation).schema.name
 
 let schemas = List.map (fun definition -> definition.schema) definitions

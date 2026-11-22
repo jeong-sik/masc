@@ -40,6 +40,18 @@ val browser_interact_schema : Masc_domain.tool_schema
 val browser_lane_schemas : Masc_domain.tool_schema list
 (** Browser-lane reader tools. *)
 
+val msx_schema : Msx_tool.t -> Masc_domain.tool_schema
+(** Embedded TOML tool schema for an MSX controller operation. *)
+
+val dos_step_schema : Masc_domain.tool_schema
+val dos_press_schema : Masc_domain.tool_schema
+val dos_type_schema : Masc_domain.tool_schema
+val dos_pass_schema : Masc_domain.tool_schema
+(** Embedded TOML tool schemas for DOS controller HTTP routes. *)
+
+val pull_requests_schema : Masc_domain.tool_schema
+(** Embedded TOML tool schema for [keeper_pull_requests_list]. *)
+
 val schemas : Masc_domain.tool_schema list
 (** [schemas] is the generated [Masc_domain.tool_schema list] for misc tools.
     Operator controls are available through {!control_schemas}. Public-surface

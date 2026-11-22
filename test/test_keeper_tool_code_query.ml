@@ -122,7 +122,7 @@ let test_a_keeper_is_offered_the_tool () =
 ;;
 
 let test_the_definition_offers_three_questions () =
-  let schema = Tool_schemas_code_query.schema in
+  let schema = Tools.code_query_schema in
   let json = Yojson.Safe.to_string schema.Masc_domain.input_schema in
   List.iter
     (fun question -> check_mentions "the schema" ~needle:question json)

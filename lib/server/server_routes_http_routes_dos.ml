@@ -41,10 +41,10 @@ let tool_name route =
      | Pass -> C.Dos_pass)
 
 let schema = function
-  | Press -> Tool_schemas_misc_toml.dos_press
-  | Type -> Tool_schemas_misc_toml.dos_type
-  | Step -> Tool_schemas_misc_toml.dos_step
-  | Pass -> Tool_schemas_misc_toml.dos_pass
+  | Press -> Tool_schemas_misc.dos_press_schema
+  | Type -> Tool_schemas_misc.dos_type_schema
+  | Step -> Tool_schemas_misc.dos_step_schema
+  | Pass -> Tool_schemas_misc.dos_pass_schema
 
 let moves = List.map (fun route -> path route, schema route) all_routes
 

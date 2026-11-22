@@ -15,23 +15,6 @@
  (name masc_tool_surface)
  (public_name masc.masc_tool_surface)
  (wrapped false)
- (private_modules
-  tool_shard_types_schemas_filesystem_toml
-  tool_shard_types_schemas_wiki_toml
-  tool_shard_types_schemas_execute_toml
-  tool_shard_types_schemas_taskboard_toml
-  tool_shard_types_schemas_base_toml
-  tool_shard_types_schemas_voice_toml
-  tool_shard_types_schemas_surface_toml
-  tool_shard_types_schemas_base
-  tool_shard_types_board_keeper_projection
-  tool_shard_types_schemas_execute
-  tool_shard_types_schemas_filesystem
-  tool_shard_types_schemas_wiki
-  tool_shard_types_schemas_surface
-  tool_shard_types_schemas_search_files
-  tool_shard_types_schemas_taskboard
-  tool_shard_types_schemas_voice)
  (libraries
   masc_types
   masc_core

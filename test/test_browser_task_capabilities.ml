@@ -16,7 +16,7 @@ let test_required_actions_schema_lists_every_operation () =
   let operations = List.map Cap.operation_name Cap.operations |> List.sort String.compare in
   List.iter (fun (name, schema) ->
     check (list string) (name ^ " requiredActions are the operation table") operations (enum schema))
-    ["masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs]
+    ["masc_browser_tabs", Tool_schemas_misc.browser_tabs_schema]
 
 let test_bound_request_keeps_its_browser () =
   check bool "bound automatic request cannot be reselected by capabilities" true
@@ -306,7 +306,7 @@ let test_snapshot_table () =
      Cap.Safari_unavailable, "Safari", false]
 
 let test_native_input_admission_surface () =
-  let schema=Tool_schemas_misc_toml.browser_interact in
+  let schema=Tool_schemas_misc.browser_interact_schema in
   let methods=Yojson.Safe.Util.(schema.input_schema |> member "properties" |> member "steps"
     |> member "items" |> member "properties" |> member "method" |> member "enum"
     |> to_list |> List.map to_string) in

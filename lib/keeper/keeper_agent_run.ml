@@ -977,7 +977,7 @@ let run_turn
     | Ok () -> Keeper_turn_preview.with_preparation_result
       ~writer:preview ~turn_ref:(Some turn_ref)
       ~phase:Keeper_turn_preview.Tool_preparation (fun () ->
-      Keeper_run_tools.prepare_agent_setup
+      Keeper_run_tools_setup.prepare_agent_setup
       ~workspace_root:ctx.workspace_root
       ~approval_admission
       ~answer_source_ids:(match world_observation with
@@ -1044,10 +1044,10 @@ let run_turn
   | Ok s ->
     let approval_gate = Option.map
       (fun (gate : Keeper_tool_approval_gate.t) ->
-        { gate with identity_tool_index = s.Keeper_run_tools.identity_tool_index })
+        { gate with identity_tool_index = s.Keeper_run_tools_hooks.identity_tool_index })
       approval_gate in
     let original_gate_message = user_message in
-    let prepared_gate_input = s.Keeper_run_tools.model_message in
+    let prepared_gate_input = s.Keeper_run_tools_hooks.model_message in
     Option.iter (fun observe ->
       try observe ~turn_ref prepared_gate_input with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1263,35 +1263,35 @@ let run_turn
        observation point that reaches for a bare [tools] is reaching for the
        wrong list -- this name makes that a compile error rather than a silent
        one. *)
-    let built_tools = s.Keeper_run_tools.tools in
-    let agent_core_tools = s.Keeper_run_tools.agent_core_tools in
+    let built_tools = s.Keeper_run_tools_hooks.tools in
+    let agent_core_tools = s.Keeper_run_tools_hooks.agent_core_tools in
     Schema_observation.surface ~site:Built_surface
       (fun () -> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) built_tools);
     Schema_observation.surface ~site:Agent_core_surface
       (fun () -> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) agent_core_tools);
     let loading_plan =
       Keeper_official_client_host.Declared
-        { on_demand = s.Keeper_run_tools.on_demand_tool_names
-        ; result_bounds = s.Keeper_run_tools.result_bounds
+        { on_demand = s.Keeper_run_tools_hooks.on_demand_tool_names
+        ; result_bounds = s.Keeper_run_tools_hooks.result_bounds
         }
     in
-    let hooks = s.Keeper_run_tools.hooks in
-    let acc = s.Keeper_run_tools.acc in
+    let hooks = s.Keeper_run_tools_hooks.hooks in
+    let acc = s.Keeper_run_tools_hooks.acc in
     (* The same cell the turn's tools captured when they were built: an
        attached tool loaded mid-turn has to reach the agent that is running,
        and a second cell here would leave that one empty forever. *)
-    let agent_ref = s.Keeper_run_tools.agent_cell in
-    let receipt_agent_core_turn_count_ref = s.Keeper_run_tools.receipt_agent_core_turn_count_ref in
-    let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
-    let receipt_stop_reason_ref = s.Keeper_run_tools.receipt_stop_reason_ref in
+    let agent_ref = s.Keeper_run_tools_hooks.agent_cell in
+    let receipt_agent_core_turn_count_ref = s.Keeper_run_tools_hooks.receipt_agent_core_turn_count_ref in
+    let receipt_model_used_ref = s.Keeper_run_tools_hooks.receipt_model_used_ref in
+    let receipt_stop_reason_ref = s.Keeper_run_tools_hooks.receipt_stop_reason_ref in
     let receipt_runtime_observation_ref =
-      s.Keeper_run_tools.receipt_runtime_observation_ref
+      s.Keeper_run_tools_hooks.receipt_runtime_observation_ref
     in
     let receipt_lane_attempt_index_ref =
-      s.Keeper_run_tools.receipt_lane_attempt_index_ref
+      s.Keeper_run_tools_hooks.receipt_lane_attempt_index_ref
     in
     let receipt_response_text_present_ref =
-      s.Keeper_run_tools.receipt_response_text_present_ref
+      s.Keeper_run_tools_hooks.receipt_response_text_present_ref
     in
     let request_evidence_ref = ref Request_evidence.empty in
     let input_segments_cache = ref None in
@@ -1340,7 +1340,7 @@ let run_turn
     let response_observed_model_input_ref = ref None in
     let refused_model_input_ref = ref None in
     let source_model_input_projection =
-      s.Keeper_run_tools.model_input_projection
+      s.Keeper_run_tools_hooks.model_input_projection
     in
     let agent_core_prompt_context_presence () =
       match acc.Keeper_run_tools_hook_accumulator.extra_system_context_assembly with
@@ -1626,13 +1626,13 @@ let run_turn
                 dispatch_input
                   ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
-                      ~on_memory_capacity_refusal:s.Keeper_run_tools.on_memory_capacity_refusal
+                      ~on_memory_capacity_refusal:s.Keeper_run_tools_hooks.on_memory_capacity_refusal
                       ~runtime_id:(match native_resume with
                         | None -> runtime_id_string
                         | Some _ -> Keeper_meta_contract.runtime_id_of_meta meta)
                       ~base_path:config.base_path
                       ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.base_path)
-                      ~media_readers:s.Keeper_run_tools.media_readers
+                      ~media_readers:s.Keeper_run_tools_hooks.media_readers
                       ~keeper_name:meta.name
                       ~walk_owner
                       ~pre_tool_rejects
@@ -1652,7 +1652,7 @@ let run_turn
                       ~tools:built_tools
                       ~loading_plan
                       ~agent_core_tools
-                      ~project_for_runtime:s.Keeper_run_tools.project_for_runtime
+                      ~project_for_runtime:s.Keeper_run_tools_hooks.project_for_runtime
                       ~checkpoint_sink
                       ~initial_messages
                       ~argument_demotion_seed
@@ -1709,7 +1709,7 @@ let run_turn
                               together. Turn-local windows and response facts
                               retain their last actual observation. *)
                            request_evidence_ref := Request_evidence.empty;
-                           s.Keeper_run_tools.on_runtime_attempt attempt)
+                           s.Keeper_run_tools_hooks.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
                         (fun ~runtime_id ~attempt ~dispatch error ->
                            runtime_walk_observed := true;
@@ -1760,7 +1760,7 @@ let run_turn
                           ~keeper_name:meta.name
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                       ~official_client_composed_context:(fun () ->
-                        acc.Keeper_run_tools.extra_system_context_assembly)
+                        acc.Keeper_run_tools_hook_accumulator.extra_system_context_assembly)
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
                            (* Official-client lanes send their requests
@@ -1795,7 +1795,7 @@ let run_turn
                            in
                            (match Request_evidence.projection !request_evidence_ref with
                             | Request_evidence.Projected (Ok provider_content) ->
-                              s.Keeper_run_tools.stage_skill_delivery_on_wire
+                              s.Keeper_run_tools_hooks.stage_skill_delivery_on_wire
                                 ~runtime_id
                                 ~agent_core_turn:acc.current_turn
                                 provider_content
@@ -1908,11 +1908,11 @@ let run_turn
                                 { block_index; tool_call_id; execution_id }))
                            on_tool_stream_observation)
                       ~on_official_client_result_handoff:
-                        s.Keeper_run_tools.observe_official_client_result_handoff
+                        s.Keeper_run_tools_hooks.observe_official_client_result_handoff
                       ~on_official_client_native_action:
-                        s.Keeper_run_tools.observe_official_client_native_action
+                        s.Keeper_run_tools_hooks.observe_official_client_native_action
                       ~on_official_client_usage_report:
-                        s.Keeper_run_tools.observe_official_client_usage_report
+                        s.Keeper_run_tools_hooks.observe_official_client_usage_report
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -2186,7 +2186,7 @@ let run_turn
                       terminal= !runtime_terminal}
               else None)
            ~receipt_response_text_present_ref
-           ~spend:(s.Keeper_run_tools.spend_attempts ())
+           ~spend:(s.Keeper_run_tools_hooks.spend_attempts ())
            ~settled_start
            ()
        in

@@ -5,8 +5,10 @@ description: "MASC TUI의 채팅·입력·Ask/승인·원본 요청/Task/검증 
 
 # 대화를 먼저 읽는 채팅
 
-정본은 `bin/masc_tui_message_layout.ml`, `bin/masc_tui_render_chat.ml`,
-`bin/masc_tui_types.ml`이다. 코드와 다르면 이 문서도 함께 고친다.
+정본은 v2.6 OCaml 5.5 + Eio TUI 모듈인 `lib/masc_tui/screens_ops/keeper_dive.ml`,
+`lib/masc_tui/store/{fleet_store,drafts,update_input,update_nav,subscriptions}.ml`,
+`lib/masc_tui/keymap/keymap.ml`, `lib/masc_tui/screens_core/chrome.ml`이다.
+코드와 다르면 이 문서도 함께 고친다.
 
 ## 주제별 파일
 
@@ -44,16 +46,14 @@ Keeper 는 `keeper_skill` 을 같은 `identity` 에 `file = "references/<파일>
 
 | 키 | 순서 | 기본 |
 |---|---|---|
-| Ctrl-F | 대화 → inline metadata → origin heading → 대화 | `Origin_bare` |
-| Ctrl-N | 숨김 → 요약 → 전체 → 숨김 | `Memory_hidden` |
-| Ctrl-D | compact → results → full → compact | `Tools_compact` |
-| Ctrl-R | folded → full → hidden → folded | `Reasoning_folded` |
-| Ctrl-S | 턴 상세 접기/펼치기 | 기존 상태 유지 |
-| Ctrl-T / `/queue` | 현재 Keeper 큐 화면 열기 | 대화와 초안 보존 |
-| F9 | 현재 Keeper 예약 Job 상태 요약/목록 | 대기·보류·최근 결과 한 줄 |
+| `Ctrl+F` | 대화 → inline metadata → origin heading → 대화 | `Origin_bare` |
+| `Ctrl+O` / `/tools [compact\|results\|full]` | compact → results → full → compact | `Tools_compact` |
+| `Alt+T` | folded → full → hidden → folded | `Reasoning_folded` |
+| `Space` (Keeper Chat 비포커스) | 턴 상세 접기/펼치기 | 기존 상태 유지 |
+| `Ctrl+T` / `/queue` / `/context` | 현재 Keeper 큐·컨텍스트·일정 3-탭 서랍 열기 | 대화와 초안 보존 |
 
 기본 설정을 알리는 `metadata:off`, `journal:off` 배지를 붙이지 않는다.
-사용자가 연 상세 모드만 제목 옆에 표시한다. 모든 단축키는 도움말에서 찾는다.
+사용자가 연 상세 모드만 제목 옆에 표시한다. 모든 단축키는 `lib/masc_tui/keymap/keymap.ml` SSOT와 `?` 도움말에서 찾는다.
 
 ## 상세 레이아웃
 
@@ -78,7 +78,7 @@ Keeper 는 `keeper_skill` 을 같은 `identity` 에 `file = "references/<파일>
   강조나 링크가 닫힌 뒤에도 원래 전경색을 복원한다.
 - 제목·시계·상태 크롬은 recede다. 진행줄 전체를 밝은 청록색과 대문자로 강조하지 않는다.
 - 실패와 조치 요청은 보이게 남긴다. 내용을 보고 오류인지 추측하지 않고 타입을 사용한다.
-- 실제 도구 결과는 Ctrl-D로 펼친다. 결과 수신 `↩`는 성공 판정이 아니다.
+- 실제 도구 결과는 `Ctrl+O`(또는 `/tools results|full`)로 펼친다. 결과 수신 `↩`는 성공 판정이 아니다.
 
 ## 입력 주변
 

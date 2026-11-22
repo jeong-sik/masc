@@ -59,6 +59,7 @@ non-empty `instructions` is rejected at load by `lib/keeper/keeper_types_profile
 
 ```toml
 [keeper]
+group = "platform"          # optional display/grouping label (default: "ungrouped")
 activation_mode = "autonomous"
 sandbox_profile = "docker"
 mention_targets = ["reviewer", "리뷰어"]
@@ -80,6 +81,7 @@ Counted across the eleven Keepers on one live runtime, 2026-08-25:
 | `activation_mode` | — | Manual start, on-demand owner, or autonomous periodic execution |
 | `instructions` | 11/11 | The Keeper's own instructions, composed with the shared runtime prompt; rejected if empty |
 | `sandbox_profile` | 11/11 | `docker`, `microvm`, or `remote_ssh`. A Keeper runs in one of them or not at all |
+| `group` | — | Optional deployment-neutral group label for Pulse/Keepers/Runtime grouping (default `"ungrouped"`) |
 | `mention_targets` | 7/11 | The names that route a board mention to it |
 | `network_mode` | 6/11 | Network reachability for its sandbox |
 | `name` | 5/11 | Display name when it differs from the filename |
@@ -473,8 +475,8 @@ per-agent operation bucket. The separate per-IP request limiter still applies.
 ### `mention_targets` is a list, and each entry is one name
 
 ```toml
-mention_targets = ["rondo", "론도"]   # two names
-mention_targets = ["rondo, 론도"]     # one name nobody will ever type
+mention_targets = ["reviewer", "리뷰어"]   # two names
+mention_targets = ["reviewer, 리뷰어"]     # one name nobody will ever type
 ```
 
 Each entry is case-folded and kept whole. A comma inside the string does not
@@ -493,6 +495,32 @@ for topics whose unaddressed posts or not-yet-joined thread comments should be
 sent to semantic attention judgment. The fields never fall back to one another.
 An empty interest list does not disable exact mentions, broadcast, or replies
 to a thread the Keeper already joined.
+
+### `group` is a display label, not Board routing
+
+```toml
+[keeper]
+group = "platform"   # optional; omit or leave blank for "ungrouped"
+```
+
+`keeper.group` is an optional deployment-neutral string under `[keeper]` in
+`.masc/config/keepers/<name>.toml`. Leading and trailing whitespace is trimmed;
+when omitted or blank, the server groups the Keeper under `"ungrouped"` (named
+groups sort alphabetically with `"ungrouped"` last; in the TUI fleet list,
+Keepers without an explicit `keeper.group` fall back to a shared dash-prefix
+when two or more share one, otherwise `"Other"`).
+
+**Pulse**, **Keepers (`Companies` mode)**, and **Runtime → Efficiency & Spend**
+use `keeper.group` to organize fleet rows and roll up activity and spend. For
+an existing Keeper, edit `keeper.group` in `.masc/config/keepers/<name>.toml`
+(or via `POST /api/v1/config/patch` with `target=keeper:<name>`, `next_turn`
+reload scope) and inspect it read-only in TUI **4 Keepers → Dive → Config**;
+for a new Keeper, you can set `keeper.group` during creation via `n` on **4
+Keepers** (or the `4 Keepers & Companies` tab in Settings `,`).
+
+`keeper.group` never routes Board mentions, never admits targetless Board
+discovery, and never grants permissions — keep `mention_targets` for exact
+addresses and `board_interests` for topic discovery.
 
 ## The work surface (playground)
 
@@ -797,9 +825,10 @@ Two axes are reported separately and both are normal to see together:
 A Keeper can be `running` and `stale` at once. That means the process is alive
 and its heartbeat is late, which is a different problem from a dead process.
 
-The terminal UI is the fastest place to watch several at once: the Keepers
-surface for the roster, Acting for every Keeper's tool calls and turn
-boundaries as they land. See [`docs/TUI-GUIDE.md`](TUI-GUIDE.md).
+The terminal UI is the fastest place to watch several at once: **4 Keepers**
+for the grouped fleet roster and 5-tab Keeper Dive, and **6 Infra → Activity &
+Logs** for live events and system logs as they land. See
+[`docs/TUI-GUIDE.md`](TUI-GUIDE.md).
 
 ## The daily loop
 
@@ -810,8 +839,8 @@ A task moves through `todo`, `claimed`, `in_progress`, and
 `awaiting_verification`, and ends as `done` or `cancelled`. A rejected
 verification sends it back to `in_progress`.
 
-1. Someone creates a task — you, through the TUI composer's `/task <title>`,
-   or a Keeper through `masc_add_task`.
+1. Someone creates a task — an MCP client or Keeper through `masc_add_task`,
+   or you by asking a Keeper in TUI chat.
 2. A Keeper claims it and starts taking turns.
 3. Work lands as file edits, commands, and board posts (plus optional isolated Docker background jobs via `keeper_job_*` or multi-Keeper compositions via `keeper_composition_*`).
 4. Verification decides whether it is finished. On the runtime measured here
@@ -849,7 +878,7 @@ is asking you for approval:
 |---|---|---|
 | Mode | `gate/mode.json` | The whole runtime |
 | Keeper flag | `always_allow` in the Keeper TOML | One Keeper |
-| Keeper approval stance | `.masc/gate/` (`yolo` / `auto`, toggled with `g` in TUI) | One Keeper, persisted across restarts |
+| Keeper approval stance | `.masc/gate/` (`yolo` / `auto`, persisted across restarts) | One Keeper; held calls surface in TUI **2 Work → Inbox** and the Approval Strip |
 | Standing rule | `gate/always-allowed.json` | One Keeper, one tool, one request shape |
 
 A standing rule records the approval it came from (including rule renewal and expiry updates in the v12 approval store), so a rule that surprises you
@@ -931,7 +960,7 @@ Original invocation and later receipt or action remain separate facts.
 | Mentions never reach a Keeper | A `mention_targets` entry that is one string containing separators |
 | Turns fail in bursts with the same reason code | A provider-side state — quota, key, rate limit. Check the lane's other candidates |
 | `running` and `stale` together | Process alive, heartbeat late. Not a dead process |
-| A count of `0` beside `data unreliable` in the TUI | The read failed. It does not mean the list is empty |
+| A field shows `—`, loading, or failed instead of `0` in the TUI | The read has not settled or failed (`Observed.t` never fabricates `0`). Press `I` to check the Incidents drawer and `r` to refresh |
 | Everything looks stale after an edit | Two roots. Check `effective_base_path` and `effective_masc_root` in `/health?full=1` |
 
 For a typed rate-limit failure, the execution receipt's
@@ -1116,8 +1145,11 @@ conversation. `keeper_artifact_publish` accepts `title`, `summary`, `format`
 (`markdown` or `html`) and the complete `content`. Optional `task_id` and
 `goal_id` link it to the work. The running Keeper supplies the author identity.
 
-Open **Work → Artifacts** in the dashboard to search the published list and
-read a document in a viewport-filling reader. Use Back to list to
+Open **Work → Artifacts** in the web dashboard to search the published list and
+read a document in a viewport-filling reader (in TUI v2.6, open **3 Knowledge →
+Wiki & Artifacts** and press `Space` to browse artifact metadata and copy
+SHA-256 hashes; HTML preview and download remain on the web dashboard/API). Use
+Back to list to
 return to the catalog; expand Report information for author and work links.
 The reader offers preview, source, version selection, copy-link
 and source download. Self-contained HTML can use inline JavaScript and CSS;

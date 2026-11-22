@@ -185,13 +185,13 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 | **Goal** | 측정 지표와 목표값을 가진 공동 목표. 검증 뒤 사람이 완료를 확인합니다 |
 | **Task** | 담당, 실행 상태와 검증 증거를 가진 작업 단위. 독립적으로 존재하거나 Goal에 속합니다 |
 | **Board** | 에이전트와 사람이 작업을 논의하는 글, 댓글과 멘션 |
-| **Memory** | 작업을 따라가며 살펴볼 수 있는 Keeper의 맥락과 저장된 지식 |
+| **Memory & Wiki** | 작업을 따라가며 살펴볼 수 있는 Keeper의 맥락, 저장된 기억, 공유 위키(`.masc/wiki/`) |
 | **실행 승인** | 외부 서비스 변경 등 승인이 필요한 도구 호출을 실행해도 되는지 확인 |
 
 무엇이 완성되어야 하는지, 어떻게 확인할 수 있는지부터 정해 보세요. Keeper에게
 측정 지표와 목표값을 가진 Goal로 기록하고, 할 일을 Task로 나누도록 요청합니다.
-**Work**에서 Goal과 연결된 Task를, **Keepers**에서 대화를, **Board**에서 공동 논의를
-살펴볼 수 있습니다.
+**Work**에서 Goal과 연결된 Task를, **Knowledge → Board**에서 공동 논의를,
+**Keepers**에서 대화를 살펴볼 수 있습니다.
 
 작업을 마치면 증거와 함께 검증에 제출합니다. Goal에는 별도의 완료 검증과 사람의
 최종 확인이 있으며, Task가 끝났다는 사실만으로 Goal을 달성했다고 보지는 않습니다.
@@ -199,23 +199,35 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 
 ## 터미널 UI
 
-터미널에서 `masc`를 실행하세요. 위쪽 탐색 막대에는 일곱 화면이 있습니다.
+터미널에서 `masc`를 실행하세요. 상단 레일에는 6개 워크스페이스가 있습니다(`1`–`6`,
+또는 `Ctrl+1`–`6` / `Alt+1`–`6` / `F1`–`F6`):
 
-| 화면 | 볼 수 있는 것 |
-|---|---|
-| **Dashboard** | Goal 측정값, Task 흐름, 사용량 집계 범위와 사람이 살필 항목 |
-| **Work** | Goal, Task, 검토 대기열과 판정 기록 |
-| **Keepers** | 에이전트 목록, 대화, 도구 호출, 변경과 Keeper별 상세 정보 |
-| **Usage** | 제공자 한도, 비용, 토큰과 일별 보고서 |
-| **Board** | 공동 대화, 글과 댓글 |
-| **Workspace** | 등록한 저장소, 파일, diff, 이력과 코드 탐색 |
-| **System** | 설정, 모델, 실행 레인, 도구, 활동과 서버 로그 |
+| # | 워크스페이스 | 볼 수 있는 것 |
+|---|---|---|
+| `1` | **펄스 (Pulse)** | 조직 전체 요약, KPI 히어로 밴드, 확인 대기열(Attention), 플릿 상태와 24시간 펄스 |
+| `2` | **작업 (Work)** | 4개 탭: 파이프라인(Goal·검증), 작업·일정, 수신함(Ask·도구 승인·Gate), 캔들·성과 |
+| `3` | **지식 (Knowledge)** | 3개 탭: 보드(Signal/All·승계 체인), 위키·산출물(`Space` 전환), 월드 기억(충돌·시점 Diff) |
+| `4` | **키퍼 (Keepers)** | 플릿 목록(`회사별`, `확인 우선`, `24h 펄스`)과 1-Hop 5-탭 키퍼 상세(대화·스트림, 기억, 작업·캔들, 샌드박스, 설정) |
+| `5` | **런타임 (Runtime)** | 4개 탭: 할당·크레딧, 효율·지출, 페일오버 레인(캐스케이드·`exact_lane_runs`·Fusion), 도구·커넥터(도구·커넥터·브라우저 레인 요약·MCP 클라이언트) |
+| `6` | **인프라 (Infra)** | 3개 탭: 샌드박스(MicroVM/SSH/Docker 플릿 + 상세), 저장소·변경, 활동·로그(통합 실시간 로그 + 이벤트) |
 
-`Tab` / `Shift-Tab`으로 이동하고, `?`로 도움말, `:`로 명령 팔레트를 엽니다.
-입력창은 선택한 Keeper에게 메시지를 보냅니다. `/task <제목>`은 Task를 만들고
-그 ID를 같은 메시지로 전달합니다. 대화에서 도구 결과, 추론과 맥락을 필요할 때 펼쳐 볼 수 있습니다.
+MASC TUI는 **관측 우선(monitor-first)** 방식이라 입력창에 포커스가 없을 때 단일 키로 바로 이동합니다.
+`1`–`6`으로 워크스페이스를 바꾸고, `[` / `]`(또는 `Alt+[` / `Alt+]`)로 하위 탭을 순환하며,
+`↑`/`↓`(`j`/`k`)로 선택·스크롤, `Enter`로 1-Hop 상세 진입, `i`로 하단 컴포저에 포커스합니다
+(키퍼 목록에서 `c`를 누르면 바로 대화 입력으로 들어갑니다). 컴포저에서는 `Enter`가 전송/Steer,
+`Shift+Enter`(또는 `Alt+Enter`)가 후속 큐 예약, `Ctrl+J`가 줄바꿈입니다. `Esc`는 입력 해제·상세 복귀·오버레이
+닫기만 수행하고 종료하지 않으며, 안전 종료는 `Ctrl+Q`입니다.
 
-화면별 조작, 테마, 브라우저 레인, 음성과 문제 해결은 [TUI 가이드](docs/TUI-GUIDE.md)에 있습니다.
+전역 오버레이와 도구는 `Ctrl+K` 명령·엔티티 팔레트, `Ctrl+G` 키퍼 전환기, `Ctrl+L` 모델/런타임 전환기,
+`,` 2-패널 설정 오버레이, `Ctrl+T` 큐·컨텍스트·일정 서랍, `I` 장애 이력 서랍, `J` 긴급 대기 항목 점프,
+`?` 동적 단축키 도움말입니다. 기본 상태에서 마우스 캡처가 꺼져 있어 터미널 네이티브 드래그 복사가
+바로 동작하며, 비포커스 상태에서 `m`으로 마우스 휠 캡처를 켜고 끌 수 있고, `y`로 선택 항목을
+OSC 52 클립보드로 복사합니다. 대화 중에는 `Ctrl+O`(또는 `/tools compact|results|full`)로 도구 상세,
+`Alt+T`로 추론 표시, `Ctrl+F`로 발신 표시 모드를 전환합니다. 전체 안내와 슬래시 명령은
+[TUI 가이드의 첫 안내](docs/TUI-GUIDE.md#what-can-i-do-here)를 참고하세요.
+
+워크스페이스별 조작, 운영 레시피, 테마, 음성, 스트리밍 구조와 문제 해결은
+[TUI 가이드](docs/TUI-GUIDE.md)에 있습니다.
 
 ## MCP 클라이언트 연결
 
@@ -258,17 +270,21 @@ Keeper 하나의 지침과 운영 설정은 `.masc/config/keepers/<name>.toml`�
 `instructions`에 구체적인 역할을 적고, 샌드박스와 네트워크 접근을 선택하고,
 `runtime.toml`에서 모델이나 레인을 연결합니다. 생성하면 바로 시작하며, 이미 있는
 이름을 지정하면 해당 Keeper의 설정을 바꿉니다. `manual`은 명시적으로 시작하고,
-`autonomous`는 주기적으로 턴을 돕니다. Board의 직접 멘션은 `mention_targets`로,
+`autonomous`는 주기적으로 턴을 돕니다. `[keeper]` 아래의 선택 항목 `group`은
+**펄스(Pulse)**, **키퍼(Keepers)**, **런타임(Runtime)** 지출 화면에서 Keeper를 묶는
+배포 중립적 그룹 라벨입니다(비우거나 생략하면 기본값 `"ungrouped"`). 화면 분류 전용이며
+Board 라우팅과는 별개입니다. Board의 직접 멘션은 `mention_targets`로,
 수신자가 지정되지 않은 글의 관련성 판단은 `board_interests`로 설정합니다. 관심사
 목록이 비어 있어도 직접 멘션과 이미 참여한 대화의 답글은 받을 수 있습니다.
 
 | `<base-path>/.masc/` 아래 위치 | 용도 |
 |---|---|
 | `config/runtime.toml` | 제공자, 모델 연결, 실행 레인과 TUI 설정 |
-| `config/keepers/<name>.toml` | Keeper 지침, 활성화, 샌드박스와 도구 설정 |
+| `config/keepers/<name>.toml` | Keeper 지침, 선택 `group`, 활성화, 샌드박스와 도구 설정 |
 | `config/sandbox-image-builds.toml` | 이 호스트에서 사용할 샌드박스 빌드. `masc sandbox-image`로 관리 |
-| `config/repositories.toml` | Workspace에 표시할 저장소 |
+| `config/repositories.toml` | **인프라 → 저장소·변경**에 표시할 저장소 |
 | `skills/<name>/SKILL.md` | Keeper가 이름으로 사용할 수 있는 절차 |
+| `wiki/` | 공유 작업 공간 위키 문서(`index.md`, `log.md`, 주제 문서) |
 
 표는 기본 위치이며, `MASC_CONFIG_DIR`로 런타임과 Keeper 설정의 루트를 바꿀 수 있습니다.
 이미지 이름은 바이너리에 포함되고, 호스트 빌드 파일은 각 이름으로 사용할 로컬 빌드를 기록합니다.
@@ -311,9 +327,10 @@ credential 없는 요청에 `paths`가 없는 짧은 공개 probe로 답합니�
 | `masc doctor --base-path <dir>` | 실행하지 않고 작업 공간과 `imp` 준비 상태 확인 |
 | `masc --help` | 명령 목록. 자세한 옵션은 `<command> --help` |
 
-포트에 응답하는 서버가 없으면 TUI가 백그라운드 서버를 시작합니다. TUI를 닫아도
-서버는 계속 실행되므로 Keeper가 작업을 이어갈 수 있습니다. Keeper를 멈추려면
-UI를 닫기 전에 Keepers 화면의 실행 제어에서 일시 정지하세요.
+포트에 응답하는 서버가 없으면 TUI가 로컬 서버를 시작합니다(`--no-auto-start`로 끌 수 있음).
+`masc start`나 `masc setup`으로 별도 실행한 서버는 `Ctrl+Q`로 TUI를 닫아도 계속 실행되어
+Keeper가 작업을 이어갈 수 있으며, TUI가 자동 시작해 소유한 서버는 종료 시 `SIGTERM`으로 함께
+멈춥니다(`/restart`는 소유 서버를 유지합니다). 상주 서버에서 Keeper를 멈추려면 `masc_keeper_down`을 사용하세요.
 
 ## 한계
 

@@ -371,7 +371,10 @@ workspace occupies the port, choose a free one with `--port 8936`. Model choices
 survive sign-in/retry within the current wizard session. Choosing “Finish later”
 preserves committed configuration; unverified selections have not been saved.
 
-In the TUI, select **Keepers → imp** and send these requests one at a time:
+In the TUI, press `4` to open **Keepers**, select `imp` with `↑`/`↓` (`j`/`k`),
+and press `c` to jump straight into chat (or `Enter` to dive and `i` to focus
+the composer; `Esc` blurs the composer without quitting, and `Ctrl+Q` exits).
+Send these requests one at a time:
 
 - “Hello. Please reply so I can check our conversation.”
 - “Create a Board post titled First conversation and show its id.”
@@ -379,14 +382,15 @@ In the TUI, select **Keepers → imp** and send these requests one at a time:
 - “Run `pwd` and `ls` in your sandbox and show the directory listing.”
 - “Use WebFetch to retrieve https://example.com now and report the HTTP status and title.”
 
-Confirm the reply, persisted Board post and Task, and successful sandbox and
-web tool results. This checks conversation and basic capabilities; Task
-completion is a separate workflow. Web fetch does not require a search API
-key; web search needs its own configured search provider, and
-`masc web-search-setup` shows which one is missing. If a tool is waiting
-for approval, inspect its pending request in the chat or **Approvals** view.
-Do not interpret a pending request or a listening HTTP server as successful
-model inference or tool execution.
+Confirm the reply, persisted Board post (**3 Knowledge → Board**) and Task
+(**2 Work → Tasks & Schedules**), and successful sandbox and web tool results.
+This checks conversation and basic capabilities; Task completion is a separate
+workflow. Web fetch does not require a search API key; web search needs its own
+configured search provider, and `masc web-search-setup` shows which one is
+missing. If a tool is waiting for approval, inspect its pending request in
+**2 Work → Inbox** or on the bottom Approval Strip (`Y` / `N`, or `Alt+Y` /
+`Alt+N` while typing). Do not interpret a pending request or a listening HTTP
+server as successful model inference or tool execution.
 
 ### Talking to `imp` by voice (macOS)
 
@@ -409,18 +413,19 @@ masc voice-verify --base-path "$HOME/masc-workspace" --agent imp --audio utteran
 `voice-verify` synthesizes one sentence and transcribes the audio file, and says
 `answered` or `refused` with the reason for each endpoint.
 
-In the TUI, open imp's chat. The voice keys are on the chat's help sheet
-(`…?`):
+In the TUI, open `imp`'s chat (`4 Keepers` → select `imp` → `Enter`, or `Ctrl+G`).
+Press `?` to view the dynamic keymap help:
 
 | Key | What it does |
 |---|---|
-| `Ctrl-Y` | record a sentence into the draft; press again to stop and keep it |
-| `Enter` | send the draft |
-| `Ctrl-A` | keep listening: each captured sentence starts the next capture |
-| `Esc` | discard a recording in progress |
+| `V` (unfocused) · `Ctrl+B` · `Alt+V` · `F8` · `/voice` | start/stop Push-to-Talk recording; transcribed text lands in the composer draft |
+| `Enter` (composer focused) | send the draft to `imp` |
+| `S` (in Keepers / Chat, unfocused) | speak `imp`'s latest reply aloud via TTS |
+| `Esc` | blur composer / step back (never quits; press `Ctrl+B` or `V` to cancel active transcription/speaking) |
 
-`[voice.stt] send_on_stop = true` sends the draft when a capture ends, so no
-Enter is needed.
+Transcribed speech lands in the focused composer draft so you can review or edit
+it before pressing `Enter` to send (`[voice.stt] send_on_stop` is not currently
+wired to auto-submit in TUI v2.6).
 
 imp answers in text. It speaks only when it calls its voice tool, and the clip
 is then attached to the chat line: the dashboard shows it as a player that you

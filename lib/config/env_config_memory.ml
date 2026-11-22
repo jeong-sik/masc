@@ -25,21 +25,39 @@ let env_opt name =
 ;;
 
 let get_bool_logged ?(invalid = Default) name ~default =
-  match env_opt name with
-  | None -> default
-  | Some raw ->
-      (match parse_bool_token raw with
-       | Some value -> value
-       | None ->
-         (match invalid with
-          | Default ->
-              Log.Keeper.warn "invalid %s=%S; using default %b" name raw default;
-              default
-          | Fail_closed ->
-              Log.Keeper.warn
-                "invalid %s=%S; using fail-closed false (default would be %b)"
-                name
-                raw
-                default;
-              false))
+  match Env_config_core.resolve_value name with
+  | Env_config_core.Unset -> default
+  | Env_config_core.From_toml (Config_boot_overrides.Bool value) -> value
+  | Env_config_core.From_toml (Config_boot_overrides.String raw)
+  | Env_config_core.From_env raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then default
+      else (
+        match parse_bool_token trimmed with
+        | Some value -> value
+        | None ->
+          (match invalid with
+           | Default ->
+               Log.Keeper.warn "invalid %s=%S; using default %b" name trimmed default;
+               default
+           | Fail_closed ->
+               Log.Keeper.warn
+                 "invalid %s=%S; using fail-closed false (default would be %b)"
+                 name
+                 trimmed
+                 default;
+               false))
+  | Env_config_core.From_toml ((Config_boot_overrides.Int _ | Config_boot_overrides.Float _) as v) ->
+      let raw = Config_boot_overrides.typed_value_to_string v in
+      (match invalid with
+       | Default ->
+           Log.Keeper.warn "invalid %s=%S; using default %b" name raw default;
+           default
+       | Fail_closed ->
+           Log.Keeper.warn
+             "invalid %s=%S; using fail-closed false (default would be %b)"
+             name
+             raw
+             default;
+           false)
 ;;

@@ -101,8 +101,50 @@ let validate_provider_slug_list ~path ~key = function
     loop [] [] slugs
 ;;
 
+let parse_effort_string ~(path : string) ~(key : string) (raw : string)
+  : (Llm_provider.Reasoning_effort.t, parse_error list) result
+  =
+  match Llm_provider.Reasoning_effort.of_string raw with
+  | Some effort -> Ok effort
+  | None ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf
+            "%s %S is not a known effort; expected one of %s"
+            key
+            raw
+            Llm_provider.Reasoning_effort.values_for_log))
+;;
+
+let parse_effort_list ~(path : string) ~(key : string) (raw_values : string list)
+  : (Llm_provider.Reasoning_effort.t list, parse_error list) result
+  =
+  match raw_values with
+  | [] -> Error (error (path ^ "." ^ key) (Printf.sprintf "%s must not be empty" key))
+  | _ ->
+    let rec loop seen acc = function
+      | [] -> Ok (List.rev acc)
+      | raw :: rest ->
+        (match parse_effort_string ~path ~key raw with
+         | Error _ as err -> err
+         | Ok effort ->
+           if List.exists (Llm_provider.Reasoning_effort.equal effort) seen
+           then
+             Error
+               (error
+                  (path ^ "." ^ key)
+                  (Printf.sprintf
+                     "%s must not repeat effort %S"
+                     key
+                     (Llm_provider.Reasoning_effort.to_string effort)))
+           else loop (effort :: seen) (effort :: acc) rest)
+    in
+    loop [] [] raw_values
+;;
+
 let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml.t)
-  : (Runtime_schema.binding, parse_error list) result
+  : (Runtime_schema.binding list, parse_error list) result
   =
   let path = Printf.sprintf "%s.%s" provider_id model_id in
   (* The keys a binding declares are the keys this function reads: every read
@@ -244,6 +286,22 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let return_progress_result =
     typed_find "a boolean" path tbl "return-progress" Otoml.get_boolean
   in
+  let effort_result =
+    match typed_find "a string" path tbl "effort" Otoml.get_string with
+    | Ok None -> Ok None
+    | Ok (Some raw) -> Result.map Option.some (parse_effort_string ~path ~key:"effort" raw)
+    | Error _ as err -> err
+  in
+  let efforts_result =
+    match typed_find "an array of strings" path tbl "efforts" (Otoml.get_array Otoml.get_string) with
+    | Ok None -> Ok None
+    | Ok (Some raw_list) ->
+      Result.map Option.some (parse_effort_list ~path ~key:"efforts" raw_list)
+    | Error _ as err -> err
+  in
+  let include_base_result =
+    typed_find "a boolean" path tbl "include-base" Otoml.get_boolean
+  in
   let ( let* ) = Result.bind in
   let* () =
     match
@@ -293,7 +351,22 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let* repeat_penalty = repeat_penalty_result in
   let* repeat_last_n = repeat_last_n_result in
   let* return_progress = return_progress_result in
-  Ok
+  let* effort = effort_result in
+  let* efforts = efforts_result in
+  let* include_base = include_base_result in
+  let* () =
+    match effort, efforts with
+    | Some _, Some _ ->
+      Error (error (path ^ ".efforts") "efforts cannot be declared alongside effort")
+    | (Some _ | None), None | None, Some _ -> Ok ()
+  in
+  let* () =
+    match include_base, efforts with
+    | Some _, None ->
+      Error (error (path ^ ".include-base") "include-base requires efforts to be declared")
+    | (Some _ | None), Some _ | None, None -> Ok ()
+  in
+  let base_binding : Runtime_schema.binding =
     { Runtime_schema.provider_id
     ; model_id
     ; enabled
@@ -313,7 +386,24 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; repeat_penalty
     ; repeat_last_n
     ; return_progress
+    ; effort
     }
+  in
+  match efforts with
+  | None -> Ok [ base_binding ]
+  | Some effort_list ->
+    let expanded =
+      List.map
+        (fun e ->
+           { base_binding with
+             model_id = model_id ^ "-" ^ Llm_provider.Reasoning_effort.to_string e
+           ; is_default = false
+           ; wizard_default = false
+           ; effort = Some e
+           })
+        effort_list
+    in
+    Ok (if Option.value include_base ~default:false then base_binding :: expanded else expanded)
 ;;
 
 (* Parse one provider table ([<provider>.*]) into its bindings. Each direct
@@ -322,22 +412,23 @@ let parse_provider_table (provider_id : string) (tbl : Otoml.t)
   : (Runtime_schema.binding list, parse_error list) result
   =
   let entries = Otoml.get_table tbl in
-  partition_results
-    (List.map
-       (fun (model_id, sub) ->
-          let path = Printf.sprintf "%s.%s" provider_id model_id in
-          if is_toml_table sub
-          then parse_binding_fields provider_id model_id sub
-          else
-            Error
-              (error
-                 path
-                 (Printf.sprintf
-                    "[%s] holds model bindings; %S must be a [%s] table"
-                    provider_id
-                    model_id
-                    path)))
-       entries)
+  Result.map List.concat
+    (partition_results
+       (List.map
+          (fun (model_id, sub) ->
+             let path = Printf.sprintf "%s.%s" provider_id model_id in
+             if is_toml_table sub
+             then parse_binding_fields provider_id model_id sub
+             else
+               Error
+                 (error
+                    path
+                    (Printf.sprintf
+                       "[%s] holds model bindings; %S must be a [%s] table"
+                       provider_id
+                       model_id
+                       path)))
+          entries))
 ;;
 
 (* Top-level table names that own a binding group, taken from the [\[providers\]]
@@ -357,19 +448,51 @@ let declared_provider_ids (toml : Otoml.t) : string list =
    as explicit tables. The runtime has one provider × model resolution path;
    account homes, credentials, quotas and overrides still belong to providers
    and bindings rather than being copied into model specifications. *)
-let parse_model_sets (toml : Otoml.t)
+let parse_model_set_entry ~(path : string) = function
+  | Otoml.TomlString model -> Ok [ model ]
+  | (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as entry_tbl ->
+    let unknown =
+      List.concat_map
+        (fun (k, _) ->
+           if String.equal k "model" || String.equal k "efforts" then []
+           else
+             error
+               (path ^ "." ^ k)
+               (Printf.sprintf "unknown model set entry key %S; expected model and efforts" k))
+        entries
+    in
+    let ( let* ) = Result.bind in
+    let* () = if unknown = [] then Ok () else Error unknown in
+    let* stem =
+      match typed_find "a string" path entry_tbl "model" Otoml.get_string with
+      | Error _ as err -> err
+      | Ok None -> Error (error (path ^ ".model") "model is required")
+      | Ok (Some s) -> Ok s
+    in
+    let* efforts =
+      match typed_find "an array of strings" path entry_tbl "efforts"
+              (Otoml.get_array Otoml.get_string) with
+      | Error _ as err -> err
+      | Ok None -> Error (error (path ^ ".efforts") "efforts is required")
+      | Ok (Some raw_list) -> parse_effort_list ~path ~key:"efforts" raw_list
+    in
+    Ok
+      (List.map
+         (fun e -> stem ^ "-" ^ Llm_provider.Reasoning_effort.to_string e)
+         efforts)
+  | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+  | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+  | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
+    Error
+      (error
+         path
+         "model set entry must be a string model id or inline table { model = ..., efforts = [...] }")
+;;
+
+let parse_model_sets ~(declared_models : string list) (toml : Otoml.t)
   : ((string * string list) list, parse_error list) result
   =
   let namespace = Ns.(key Model_sets) in
-  let declared_models =
-    match Otoml.find_opt toml Fun.id [ Ns.(key Models) ] with
-    | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
-      List.map fst entries
-    | Some (Otoml.TomlString _) | None | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
-    | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
-    | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
-    | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> []
-  in
   let parse_set (id, tbl) =
     let path = Ns.(path Model_sets) id in
     if not (is_toml_table tbl)
@@ -382,11 +505,22 @@ let parse_model_sets (toml : Otoml.t)
              else error (path ^ "." ^ key) "unknown model set key; expected models")
           (Otoml.get_table tbl)
       in
-      match typed_find "an array of strings" path tbl "models"
-              (Otoml.get_array Otoml.get_string) with
+      let models_result =
+        match Otoml.find_opt tbl Fun.id [ "models" ] with
+        | None -> Error (error (path ^ ".models") "models is required")
+        | Some (Otoml.TomlArray items) ->
+          Result.map List.concat
+            (partition_results (List.map (parse_model_set_entry ~path:(path ^ ".models")) items))
+        | Some
+            ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+            | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+            | Otoml.TomlLocalTime _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+            | Otoml.TomlTableArray _ ) ->
+          Error (error (path ^ ".models") "models must be an array")
+      in
+      match models_result with
       | Error errors -> Error (unknown @ errors)
-      | Ok None -> Error (unknown @ error (path ^ ".models") "models is required")
-      | Ok (Some models) ->
+      | Ok models ->
         let references =
           List.concat_map
             (fun model ->
@@ -413,21 +547,11 @@ let parse_model_sets (toml : Otoml.t)
   | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (error namespace "model_sets must be a TOML table")
 ;;
 
-let parse_bindings (toml : Otoml.t)
+let parse_bindings ~(declared_models : string list) (toml : Otoml.t)
   : (Runtime_schema.binding list, parse_error list) result
   =
   let top_entries = Otoml.get_table toml in
   let declared = declared_provider_ids toml in
-  (* A top-level table describes a provider's bindings only when [\[providers\]]
-     declares that provider. The namespace used to be defined by exclusion —
-     anything not on the reserved list — which made every unrelated config
-     section a phantom binding group: [\[voice.tts\]] and [\[fusion.presets\]]
-     each parsed as a binding whose provider did not exist, and the loader had to
-     drop unresolved bindings quietly for boot to survive them. That silence is
-     what hid a real dangling reference (masc#28403). Naming the namespace
-     positively lets {!Runtime.load_list} treat an unresolved binding as the typo
-     it is. Scalar / array entries are still excluded because
-     [parse_provider_table] would crash on them. *)
   let provider_tables =
     List.filter
       (fun (name, value) ->
@@ -435,7 +559,7 @@ let parse_bindings (toml : Otoml.t)
       top_entries
   in
   let ( let* ) = Result.bind in
-  let* sets = parse_model_sets toml in
+  let* sets = parse_model_sets ~declared_models toml in
   let* explicit =
     Result.map List.concat
       (partition_results
@@ -464,10 +588,11 @@ let parse_bindings (toml : Otoml.t)
                      && String.equal binding.model_id model_id) explicit))
                 models
             in
-            partition_results
-              (List.map
-                 (fun model_id -> parse_binding_fields provider_id model_id (Otoml.TomlTable []))
-                 missing)))
+            Result.map List.concat
+              (partition_results
+                 (List.map
+                    (fun model_id -> parse_binding_fields provider_id model_id (Otoml.TomlTable []))
+                    missing))))
     | Some _ -> Ok [] (* parse_providers reports the malformed provider. *)
   in
   let* generated = partition_results (List.map provider_set_bindings declared) in

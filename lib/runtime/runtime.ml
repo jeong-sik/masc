@@ -2315,7 +2315,10 @@ let reasoning_effort_of_runtime_id (id : string)
   : Llm_provider.Reasoning_effort.t option
   =
   match get_runtime_by_id id with
-  | Some rt -> rt.model.reasoning_effort
+  | Some rt ->
+    (match rt.binding.effort with
+     | Some _ as effort -> effort
+     | None -> rt.model.reasoning_effort)
   | None -> None
 ;;
 

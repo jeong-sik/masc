@@ -472,18 +472,22 @@ type binding =
     (** Ollama [options.repeat_last_n]: how many recent tokens
         [repeat_penalty] looks back over. *)
   ; return_progress : bool option
+  ; effort : Llm_provider.Reasoning_effort.t option
   }
 [@@deriving show, eq]
 
 (** {1 Lanes}
 
     Lanes are ordered failover candidate lists declared in [runtime.lanes.<id>].
-    The declaration carries opaque runtime ids; resolution to materialized
-    runtimes happens in [Runtime] so this module stays dependency-free. *)
+    The declaration carries opaque runtime ids and optional declarative effort
+    overrides; resolution to materialized runtimes happens in [Runtime] so this
+    module stays dependency-free. *)
 
 type lane_decl =
   { id : string
   ; candidate_ids : string list
+  ; effort : Llm_provider.Reasoning_effort.t option
+  ; candidate_efforts : (string * Llm_provider.Reasoning_effort.t option) list
   }
 [@@deriving show, eq]
 

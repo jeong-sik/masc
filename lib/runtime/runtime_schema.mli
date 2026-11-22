@@ -420,18 +420,25 @@ type binding =
   ; repeat_penalty : float option
   ; repeat_last_n : int option
   ; return_progress : bool option
+  ; effort : Llm_provider.Reasoning_effort.t option
+    (** Binding-scoped reasoning effort override ([effort = "low" | "medium" | "high" | "xhigh" | "max" | ...]).
+        Overrides [model_spec.reasoning_effort] when set, allowing one model
+        declaration to serve multiple effort levels without duplicating
+        [[models.<m>-<effort>]] triples. *)
   }
 [@@deriving show, eq]
 
 (** {1 Lanes}
 
     Ordered failover candidate lists declared in [runtime.lanes.<id>].
-    Declarations carry opaque runtime ids; [Runtime] resolves them to
-    materialized runtimes at load time. *)
+    Declarations carry opaque runtime ids and optional declarative effort
+    overrides; [Runtime] resolves them to materialized runtimes at load time. *)
 
 type lane_decl =
   { id : string
   ; candidate_ids : string list
+  ; effort : Llm_provider.Reasoning_effort.t option
+  ; candidate_efforts : (string * Llm_provider.Reasoning_effort.t option) list
   }
 [@@deriving show, eq]
 

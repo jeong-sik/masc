@@ -86,10 +86,13 @@ module KeeperTurn = struct
      runtime keeps its provider default. *)
   let enable_thinking () =
     let env_name = "MASC_KEEPER_ENABLE_THINKING" in
-    match raw_value_opt env_name with
-    | None -> None
-    | Some raw when String.trim raw = "" -> None
-    | Some _ -> Some (get_bool_strict ~default:false env_name)
+    match resolve_value env_name with
+    | Unset -> None
+    | From_toml (Config_boot_overrides.Bool b) -> Some b
+    | From_toml (Config_boot_overrides.String raw) | From_env raw ->
+      if String.trim raw = "" then None else Some (get_bool ~default:false env_name)
+    | From_toml (Config_boot_overrides.Int _ | Config_boot_overrides.Float _) ->
+      Some (get_bool ~default:false env_name)
   ;;
 end
 
@@ -309,13 +312,24 @@ module KeeperMemoryOs = struct
   let facts_per_category_cap_env_key = "MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP"
 
   let positive_count name ~default =
-    match Env_config_memory.env_opt name with
-    | None -> default
-    | Some raw ->
-      (match int_of_string_opt raw with
-       | Some value when value > 0 -> value
-       | Some _ | None ->
-         raise (Env_config_core.Config_error (name ^ " must be a positive integer")))
+    let check value =
+      if value > 0 then value
+      else raise (Env_config_core.Config_error (name ^ " must be a positive integer"))
+    in
+    match Env_config_core.resolve_value name with
+    | Env_config_core.Unset -> default
+    | Env_config_core.From_toml (Config_boot_overrides.Int value) -> check value
+    | Env_config_core.From_toml (Config_boot_overrides.String raw)
+    | Env_config_core.From_env raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then default
+      else
+        (match int_of_string_opt trimmed with
+         | Some value -> check value
+         | None ->
+           raise (Env_config_core.Config_error (name ^ " must be a positive integer")))
+    | Env_config_core.From_toml (Config_boot_overrides.Bool _ | Config_boot_overrides.Float _) ->
+      raise (Env_config_core.Config_error (name ^ " must be a positive integer"))
   ;;
 
   let category_cap () = positive_count category_cap_env_key ~default:30
@@ -324,27 +338,11 @@ module KeeperMemoryOs = struct
   ;;
 
   let facts_max_bytes () =
-    match Env_config_memory.env_opt facts_max_bytes_env_key with
-    | None -> facts_max_bytes_default
-    | Some raw ->
-      (match int_of_string_opt raw with
-       | Some value when value > 0 -> value
-       | Some _ | None ->
-         raise
-           (Env_config_core.Config_error
-              (facts_max_bytes_env_key ^ " must be a positive integer")))
+    positive_count facts_max_bytes_env_key ~default:facts_max_bytes_default
   ;;
 
   let pending_max_bytes () =
-    match Env_config_memory.env_opt pending_max_bytes_env_key with
-    | None -> pending_max_bytes_default
-    | Some raw ->
-      (match int_of_string_opt raw with
-       | Some value when value > 0 -> value
-       | Some _ | None ->
-         raise
-           (Env_config_core.Config_error
-              (pending_max_bytes_env_key ^ " must be a positive integer")))
+    positive_count pending_max_bytes_env_key ~default:pending_max_bytes_default
   ;;
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
@@ -355,14 +353,23 @@ module KeeperMemoryOs = struct
   ;;
 
   let librarian_config_state () =
-    match Env_config_memory.env_opt librarian_env_key with
-    | None ->
+    match Env_config_core.resolve_value librarian_env_key with
+    | Env_config_core.Unset ->
       if librarian_enabled_default then Enabled else Disabled
-    | Some raw ->
-      (match Env_config_memory.parse_bool_token raw with
-       | Some true -> Enabled
-       | Some false -> Disabled
-       | None -> Invalid)
+    | Env_config_core.From_toml (Config_boot_overrides.Bool true) -> Enabled
+    | Env_config_core.From_toml (Config_boot_overrides.Bool false) -> Disabled
+    | Env_config_core.From_toml (Config_boot_overrides.String raw)
+    | Env_config_core.From_env raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then
+        if librarian_enabled_default then Enabled else Disabled
+      else
+        (match Env_config_memory.parse_bool_token trimmed with
+         | Some true -> Enabled
+         | Some false -> Disabled
+         | None -> Invalid)
+    | Env_config_core.From_toml (Config_boot_overrides.Int _ | Config_boot_overrides.Float _) ->
+      Invalid
   ;;
 
   (** Memory OS recall prompt injection kill switch. Default: true; invalid

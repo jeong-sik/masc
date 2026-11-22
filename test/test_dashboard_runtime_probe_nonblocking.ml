@@ -292,6 +292,7 @@ let fanout_binding ~provider_id ~is_default =
   ; repeat_penalty = None
   ; repeat_last_n = None
   ; return_progress = None
+  ; effort = None
   }
 
 let fanout_runtimes () =

@@ -1122,12 +1122,19 @@ let http_model_declares_tools
   Ok caps.Llm_provider.Capabilities.supports_tools
 ;;
 
+let apply_binding_effort (binding : Runtime_schema.binding) (spec : Runtime_schema.model_spec) =
+  match binding.effort with
+  | Some _ as reasoning_effort -> { spec with reasoning_effort }
+  | None -> spec
+;;
+
 (* Materialize the exact HTTP binding and its credential authority together. *)
 let materialize_provider_binding_with ~person_api ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
     : (provider_materialization, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
   | Some spec ->
+    let spec = apply_binding_effort binding spec in
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
@@ -1544,6 +1551,7 @@ let materialize_execution ~construction (cfg : Runtime_schema.config) (binding :
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
   | Some spec ->
+    let spec = apply_binding_effort binding spec in
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
@@ -1579,6 +1587,7 @@ let materialize_person_execution
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
   | Some spec ->
+    let spec = apply_binding_effort binding spec in
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->

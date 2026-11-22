@@ -83,8 +83,6 @@ let runtime_entries =
     entry ~default:"info" Log.level_env_key "Log level override";
     entry ~default:"debug" Log.routine_level_env_key
       "Routine telemetry log level override (debug|info|warn|error|off)";
-    entry ~default:"false" Env_config_core.parse_warn_env_key
-      "Escalate malformed env parses to Config_error";
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
       "Enable telemetry collection";
     entry ~default:"52428800" "MASC_TELEMETRY_MAX_BYTES"

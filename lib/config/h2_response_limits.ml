@@ -20,13 +20,23 @@ let default_initial_window_size = 1 lsl 27
 let max_settings_value = 0x7fffffff
 
 let within ~name ~default ~min_value ~max_value =
-  match Env_config_core.raw_value_opt name with
-  | None -> default
-  | Some raw ->
+  let check_value value =
+    if value >= min_value && value <= max_value then value
+    else raise (Env_config_core.Config_error
+      (Printf.sprintf "%s must be an integer in [%d,%d]" name min_value max_value))
+  in
+  match Env_config_core.resolve_value name with
+  | Env_config_core.Unset -> default
+  | Env_config_core.From_toml (Config_boot_overrides.Int value) -> check_value value
+  | Env_config_core.From_toml (Config_boot_overrides.String raw)
+  | Env_config_core.From_env raw ->
     (match int_of_string_opt (String.trim raw) with
-     | Some value when value >= min_value && value <= max_value -> value
-     | Some _ | None -> raise (Env_config_core.Config_error
+     | Some value -> check_value value
+     | None -> raise (Env_config_core.Config_error
        (Printf.sprintf "%s must be an integer in [%d,%d]" name min_value max_value)))
+  | Env_config_core.From_toml (Config_boot_overrides.Bool _ | Config_boot_overrides.Float _) ->
+    raise (Env_config_core.Config_error
+      (Printf.sprintf "%s must be an integer in [%d,%d]" name min_value max_value))
 
 let max_concurrent_streams () =
   within ~name:"MASC_H2_MAX_CONCURRENT_STREAMS"

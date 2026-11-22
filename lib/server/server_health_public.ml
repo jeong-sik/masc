@@ -20,7 +20,7 @@ let readiness_fields ~ready ~phase =
 let health_json ~ready ~phase =
   `Assoc
     ([ server_field, `String server_name
-     ; version_field, `String Runtime_build_version.current
+     ; version_field, `String Build_version.current
      ; live_field, `Bool (Server_startup_state.is_live ())
      ]
      @ readiness_fields ~ready ~phase)

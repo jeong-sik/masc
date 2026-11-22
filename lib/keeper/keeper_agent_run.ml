@@ -812,13 +812,13 @@ let run_turn
     | None -> Keeper_turn_scope.create ~keeper_turn_id:manifest_keeper_turn_id
   in
   let schema_execution_scope =
-    if Agent_core.Base.Schema_observation.enabled () then
+    if Schema_observation.enabled () then
       Option.map (fun execution ->
         Keeper_repetition_scope.Execution.scope execution
         |> Keeper_execution_scope_id.to_json |> Yojson.Safe.to_string) repetition_execution
     else None
   in
-  Agent_core.Base.Schema_observation.with_wake
+  Schema_observation.with_wake
     ~keeper:meta.name ~trace_id ~absolute_turn:manifest_keeper_turn_id
     ~execution_scope:schema_execution_scope
     ~cause:None @@ fun () ->
@@ -1265,9 +1265,9 @@ let run_turn
        one. *)
     let built_tools = s.Keeper_run_tools.tools in
     let agent_core_tools = s.Keeper_run_tools.agent_core_tools in
-    Agent_core.Base.Schema_observation.surface ~site:Built_surface
+    Schema_observation.surface ~site:Built_surface
       (fun () -> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) built_tools);
-    Agent_core.Base.Schema_observation.surface ~site:Agent_core_surface
+    Schema_observation.surface ~site:Agent_core_surface
       (fun () -> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) agent_core_tools);
     let loading_plan =
       Keeper_official_client_host.Declared
@@ -1300,7 +1300,7 @@ let run_turn
       | Some (previous, segments) when previous == attribution -> segments
       | Some _ | None ->
       let build () =
-        Agent_core.Base.Schema_observation.with_site Final_attribution_bytes
+        Schema_observation.with_site Final_attribution_bytes
           (fun () -> Keeper_agent_prompt_metrics.build_ctx_segments
             ~prompt_blocks:attribution.prompt_blocks
             ~tools:attribution.tools
@@ -1308,12 +1308,12 @@ let run_turn
       in
       (* Final input can contain a large retained-result carrier. *)
       let submit () =
-        let work = Agent_core.Base.Schema_observation.capture build in
+        let work = Schema_observation.capture build in
         Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ work
       in
       let segments = match attribution.schema_observation_scope with
         | None -> submit ()
-        | Some scope -> Agent_core.Base.Schema_observation.with_scope scope submit in
+        | Some scope -> Schema_observation.with_scope scope submit in
       input_segments_cache := Some (attribution, segments);
       segments
     in
@@ -1424,7 +1424,7 @@ let run_turn
       in
       let attribution : Request_evidence.attribution =
         { runtime_profile = runtime_id
-        ; schema_observation_scope = Agent_core.Base.Schema_observation.current_scope ()
+        ; schema_observation_scope = Schema_observation.current_scope ()
         ; prompt_blocks = acc.prompt_blocks
         ; provider_content
         ; tools
@@ -1807,7 +1807,7 @@ let run_turn
                               in
                               let attribution : Request_evidence.attribution =
                                 { runtime_profile = runtime_id
-                                ; schema_observation_scope = Agent_core.Base.Schema_observation.current_scope ()
+                                ; schema_observation_scope = Schema_observation.current_scope ()
                                 ; prompt_blocks = acc.prompt_blocks
                                 ; provider_content
                                 ; tools = request_tools
@@ -1820,7 +1820,7 @@ let run_turn
                                  { Turn_record.runtime_profile = runtime_id
                                  ; body_bytes
                                  }
-                             ; wire_schema_observation_scope = Agent_core.Base.Schema_observation.current_scope ()
+                             ; wire_schema_observation_scope = Schema_observation.current_scope ()
                              ; serialized_observation = serialized
                              ; wire_projected_messages = projected_messages
                              ; wire_system_prompt = Option.bind acc.extra_system_context_assembly
@@ -2355,7 +2355,7 @@ let run_turn
                          { Turn_record.name = tool.Agent_core.Tool.schema.name
                          ; schema_bytes =
                              let count () =
-                               Agent_core.Base.Schema_observation.measure
+                               Schema_observation.measure
                                  ~site:Final_attribution_bytes ~schema:tool.Agent_core.Tool.schema
                                  (fun () -> Agent_core.Base.Tool.wire_bytes_of_schema
                                    tool.Agent_core.Tool.schema)
@@ -2363,7 +2363,7 @@ let run_turn
                              (match attribution.schema_observation_scope with
                               | None -> count ()
                               | Some scope ->
-                                Agent_core.Base.Schema_observation.with_scope scope count)
+                                Schema_observation.with_scope scope count)
                          })
                       request_tools))
             in
@@ -2453,7 +2453,7 @@ let run_turn
            in
            (match wire_schema_observation_scope with
             | None -> write ()
-            | Some scope -> Agent_core.Base.Schema_observation.with_scope scope write)
+            | Some scope -> Schema_observation.with_scope scope write)
          | Some { serialized_observation = None; _ }
          | Some { wire_projected_messages = None; _ }
          | Some { wire_system_prompt = None; _ }

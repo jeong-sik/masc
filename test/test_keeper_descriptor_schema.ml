@@ -3,7 +3,7 @@ open Masc
 
 module Descriptor = Keeper_tool_descriptor
 module Memo = Keeper_descriptor_schema
-module Observation = Agent_core.Base.Schema_observation
+module Observation = Schema_observation
 
 let schema_exn descriptor =
   match Memo.for_descriptor descriptor with

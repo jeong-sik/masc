@@ -44,7 +44,10 @@ let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
 let approval_policy = "never"
 
-let client_version = Runtime_build_version.current
+let client_version = Build_version.current
+let shutting_down = Atomic.make false
+let mark_shutting_down () = Atomic.set shutting_down true
+let is_shutting_down () = Atomic.get shutting_down
 
 let default_config () =
   { cli_path = "codex"
@@ -945,7 +948,7 @@ let initialize_protocol io =
            , `Assoc
                [ "name", `String "masc"
                ; "title", `String "MASC"
-               ; "version", `String Runtime_build_version.current
+               ; "version", `String Build_version.current
                ] )
          ; "capabilities", `Assoc [ "experimentalApi", `Bool true ]
          ]);
@@ -3004,7 +3007,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
         |> parse_wire_line
       with
       | End_of_file ->
-        if Runtime_host_lifecycle.is_shutting_down ()
+        if is_shutting_down ()
         then Error Runtime_shutting_down
         else
           let detail = String.trim (Stderr.contents stderr_tail) in

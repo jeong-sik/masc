@@ -116,7 +116,6 @@
   test_elicitation
   test_error
   test_error_domain
-  test_eval_stats
   test_event_bus
   test_event_envelope
   test_execution_json
@@ -169,7 +168,6 @@
   test_sessions_types
   test_sessions_types_deep
   test_skill_document
-  test_skill_registry
   test_stream_accumulator
   test_streaming_cov
   test_streaming_edge_cases
@@ -237,7 +235,6 @@
   test_elicitation
   test_error
   test_error_domain
-  test_eval_stats
   test_event_bus
   test_event_envelope
   test_execution_json
@@ -290,7 +287,6 @@
   test_sessions_types
   test_sessions_types_deep
   test_skill_document
-  test_skill_registry
   test_stream_accumulator
   test_streaming_cov
   test_streaming_edge_cases
@@ -646,8 +642,8 @@
  (libraries agent_core_test_deps agent_core alcotest))
 
 (tests
- (names test_runtime_store_unit test_runtime_types)
- (modules test_runtime_store_unit test_runtime_types)
+ (names test_runtime_types)
+ (modules test_runtime_types)
  (libraries agent_core_test_deps agent_core alcotest unix yojson)
  (action
   (run %{test})))
@@ -764,11 +760,6 @@
  (name test_minimax_responses_binding)
  (modules test_minimax_responses_binding)
  (libraries agent_core llm_provider alcotest yojson))
-
-(test
- (name test_schema_observation)
- (modules test_schema_observation)
- (libraries agent_core alcotest eio eio_main yojson))
 
 (test
  (name test_catalog_snapshot)

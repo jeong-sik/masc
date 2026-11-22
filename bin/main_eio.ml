@@ -638,6 +638,13 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      [Masc_runtime_events] mli; consumed by Olly / custom callbacks
      to bracket agent turn spans ([emit_turn_start]/[emit_turn_end]). *)
   Masc_runtime_events.start_listener ();
+  (match Sys.getenv_opt "MASC_WIRE_PARSE_DUMP" with
+   | Some path when String.trim path <> "" ->
+     Llm_provider.Complete_stream_diagnostic.set_refused_frame_sink
+       (Some
+          (Llm_provider.Complete_stream_diagnostic.append_refused_frame_to_path
+             ~path:(String.trim path)))
+   | Some _ | None -> ());
   Masc.Fusion_official_client.sweep_stale_antigravity_panel_roots ();
 
   (* Signal handlers do the minimum async-signal-safe work: mark the sticky
@@ -651,7 +658,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
   let shutdown_watchdog : Masc.Shutdown.watchdog option Atomic.t = Atomic.make None in
   let request_shutdown signal =
     Masc.Shutdown.mark_shutting_down ();
-    Runtime_host_lifecycle.mark_shutting_down ();
+    Runtime_codex_app_server.mark_shutting_down ();
     if Option.is_none (Atomic.get pending_shutdown_signal) then
       Atomic.set pending_shutdown_signal (Some signal)
   in
@@ -876,21 +883,21 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
          the scheduler. Own the output only after that handoff, and install
          the finalizer only after exclusive creation succeeds. *)
       Unix.mkdir directory 0o700;
-      let observer = Agent_core.Base.Schema_observation.create ~mode in
+      let observer = Schema_observation.create ~mode in
       let write_report () =
           (* All server-owned switches and pool jobs have settled. The
              observer binding is gone before snapshot serialization and I/O. *)
-          let report = Agent_core.Base.Schema_observation.snapshot observer in
+          let report = Schema_observation.snapshot observer in
           match Fs_compat.write_file_atomic_strict_staged
                   (Filename.concat directory "report.json")
                   ~write:(fun channel ->
-                    Agent_core.Base.Schema_observation.write_report_json
+                    Schema_observation.write_report_json
                       ~write:(output_string channel) report) with
           | Ok () -> ()
           | Error failure ->
             Printexc.raise_with_backtrace failure.exception_ failure.backtrace
       in
-      match Agent_core.Base.Schema_observation.within observer
+      match Schema_observation.within observer
               (fun () -> run_inside_scheduler env) with
       | result ->
           (* Keep report-only failures on the existing finalizer path. In
@@ -942,7 +949,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
          mcp_sessions = Server_mcp_transport_http_conn.active_session_count ();
          ws_sessions = Server_mcp_transport_ws.try_session_count ();
          ocaml_version = Sys.ocaml_version;
-         masc_version = Runtime_build_version.current;
+         masc_version = Build_version.current;
          git_commit = Build_identity.embedded_commit;
          pid = Unix.getpid ();
        }
@@ -1609,7 +1616,7 @@ let start_cmd =
     Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg $ previous_owner_arg)
 
 let schema_observe_cmd =
-  let module Observation = Agent_core.Base.Schema_observation in
+  let module Observation = Schema_observation in
   let mode =
     Arg.(required & opt (some (enum
       [ "disabled", Observation.Disabled
@@ -4995,7 +5002,7 @@ let cmd =
   let doc =
     "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
   in
-  let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
+  let info = Cmd.info "masc" ~version:Build_version.current ~doc in
   Cmd.group
     ~default:
       Term.(const front_door_cmd_exit $ host $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)

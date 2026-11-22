@@ -65,21 +65,25 @@ let rec update_candidate candidate transition =
   if Atomic.compare_and_set candidate.backpressure current next then next
   else update_candidate candidate transition
 
+let rest_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let install_rest_observer observer_fn = Atomic.set rest_observer observer_fn
+let notify_rest_recorded () = (Atomic.get rest_observer) ()
+
 let note_rate_limit ~candidate ~retry_after =
   let noted_at = now () in
   (* See update_candidate: CAS publishes the observation; discard its read-back value, not an error. *)
   ignore (update_candidate candidate (State.note_rate_limit ~noted_at ~retry_after));
-  Runtime_path_rest_signal.recorded ()
+  notify_rest_recorded ()
 
 let note_failed_attempt ~candidate ~failure ~recorded_by =
   let noted_at = now () in
   (* See update_candidate: CAS publishes the observation; discard its read-back value, not an error. *)
   ignore (update_candidate candidate (State.note_failed_attempt ~noted_at ~failure ~recorded_by));
-  Runtime_path_rest_signal.recorded ()
+  notify_rest_recorded ()
 
 let note_candidate_success ~candidate =
   Atomic.set candidate.backpressure State.empty;
-  Runtime_path_rest_signal.recorded ()
+  notify_rest_recorded ()
 
 let candidate_backpressure ~now ~candidate =
   let observed = update_candidate candidate (State.observe ~now) in

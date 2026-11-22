@@ -18,7 +18,7 @@ val version_field : string
 
 val health_json : ready:bool -> phase:Server_startup_state.phase -> Yojson.Safe.t
 (** [{server; version; live; ready; phase}], five keys and no other.
-    [version] is [Runtime_build_version.current]; [live] is
+    [version] is [Build_version.current]; [live] is
     [Server_startup_state.is_live ()]. The body never says the account mode,
     which is what tells an account server's answer from this one. *)
 

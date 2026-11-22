@@ -9,7 +9,9 @@
   masc.apple_keychain
   masc.watched_work
   masc.egress_host
-  masc.build_version
+  (re_export masc.build_version)
+  mtime
+  mtime.clock.os
   masc.embedded_config
   ptime
   yojson

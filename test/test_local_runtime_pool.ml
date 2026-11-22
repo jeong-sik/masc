@@ -1,5 +1,5 @@
 let test_runtime_id_of_base_url () =
-  let id = Local_runtime_pool.runtime_id_of_base_url in
+  let id = Masc.Tool_local_runtime_verify.runtime_id_of_base_url in
   Alcotest.(check string) "port 19001" "local-19001" (id "http://127.0.0.1:19001");
   Alcotest.(check string) "port 11434" "local-11434" (id "http://127.0.0.1:11434");
   Alcotest.(check string) "no port uses the MD5 prefix" "local-86a9106a"

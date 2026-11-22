@@ -73,8 +73,18 @@ let content_type_with_boundary ~(boundary : string) : string =
 ;;
 
 (* Dispatch helpers. Each returns the decoded body of the API's JSON reply;
-   the caller maps HTTP-level failures to its own error vocabulary. *)
-let files_base_url = "https://api.deepseek.com"
+   the caller supplies [base_url] explicitly and maps HTTP-level failures to
+   its own error vocabulary. *)
+let normalize_base_url base_url =
+  let trimmed = String.trim base_url in
+  let rec strip_slash s =
+    let len = String.length s in
+    if len > 0 && Char.equal s.[len - 1] '/'
+    then strip_slash (String.sub s 0 (len - 1))
+    else s
+  in
+  strip_slash trimmed
+;;
 
 let auth_headers ~(api_key : string) : (string * string) list =
   [ ("Authorization", "Bearer " ^ api_key) ]
@@ -82,16 +92,16 @@ let auth_headers ~(api_key : string) : (string * string) list =
 
 let parse_body_file_object (body : string) : (file_object, string) result =
   match Yojson.Safe.from_string body with
-  | exception _ -> Error "files reply is not JSON"
+  | exception Yojson.Json_error _ -> Error "files reply is not JSON"
   | json -> file_object_of_yojson json
 ;;
 
-let upload ~sw ~net ~(api_key : string) ~boundary ~filename ~purpose ~content ()
+let upload ~sw ~net ~(base_url : string) ~(api_key : string) ~boundary ~filename ~purpose ~content ()
   : (file_object, string) result =
   let body = multipart_upload_body ~boundary ~filename ~purpose ~content in
   match
     Http_client.post_sync ~sw ~net
-      ~url:(files_base_url ^ "/files")
+      ~url:(normalize_base_url base_url ^ "/files")
       ~headers:
         (auth_headers ~api_key
         @ [ ("Content-Type", content_type_with_boundary ~boundary) ])
@@ -104,11 +114,11 @@ let upload ~sw ~net ~(api_key : string) ~boundary ~filename ~purpose ~content ()
     | code -> Error (Printf.sprintf "files upload: HTTP %d" code))
 ;;
 
-let list_files ~sw ~net ~(api_key : string) ()
+let list_files ~sw ~net ~(base_url : string) ~(api_key : string) ()
   : (file_object list, string) result =
   match
     Http_client.get_sync ~sw ~net
-      ~url:(files_base_url ^ "/files")
+      ~url:(normalize_base_url base_url ^ "/files")
       ~headers:(auth_headers ~api_key)
       ()
   with
@@ -116,12 +126,11 @@ let list_files ~sw ~net ~(api_key : string) ()
   | Ok response -> (
     (* GET /files; the reply is
        {"object":"list","data":[file…],"has_more":bool}. Pagination
-       parameters exist but default to everything the account holds, which
-       is the shape a keeper listing its uploads wants. *)
+       parameters exist but default to everything the account holds. *)
     match response.Http_client.status with
     | 200 -> (
       match Yojson.Safe.from_string response.body with
-      | exception _ -> Error "files list: reply is not JSON"
+      | exception Yojson.Json_error _ -> Error "files list: reply is not JSON"
       | `Assoc fields -> (
         match List.assoc_opt "data" fields with
         | Some (`List rows) ->
@@ -143,11 +152,11 @@ let list_files ~sw ~net ~(api_key : string) ()
     | code -> Error (Printf.sprintf "files list: HTTP %d" code))
 ;;
 
-let delete ~sw ~net ~(api_key : string) ~(file_id : string) ()
+let delete ~sw ~net ~(base_url : string) ~(api_key : string) ~(file_id : string) ()
   : (bool, string) result =
   match
     Http_client.delete_sync ~sw ~net
-      ~url:(files_base_url ^ "/files/" ^ file_id)
+      ~url:(normalize_base_url base_url ^ "/files/" ^ file_id)
       ~headers:(auth_headers ~api_key)
       ()
   with
@@ -158,7 +167,7 @@ let delete ~sw ~net ~(api_key : string) ~(file_id : string) ()
     match response.Http_client.status with
     | 200 ->
       (match Yojson.Safe.from_string response.body with
-       | exception _ -> Error "files delete: reply is not JSON"
+       | exception Yojson.Json_error _ -> Error "files delete: reply is not JSON"
        | `Assoc fields -> (
          match List.assoc_opt "deleted" fields with
          | Some (`Bool true) -> Ok true

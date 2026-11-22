@@ -3237,7 +3237,7 @@ let test_shared_mcp_protocol_is_negotiated () =
        |> to_string);
     check string
       "MCP server version uses the canonical build owner"
-      Runtime_build_version.current
+      Build_version.current
       (dispatch.response
        |> Option.get
        |> member "result"

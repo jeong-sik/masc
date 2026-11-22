@@ -1200,7 +1200,7 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
           ; ( "clientInfo"
             , `Assoc
                 [ "name", `String "masc"
-                ; "version", `String Runtime_build_version.current
+                ; "version", `String Build_version.current
                 ] )
           ]
       in

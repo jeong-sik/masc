@@ -528,13 +528,33 @@ let create ?(redact_secrets = true) ?session_id ~path () =
 ;;
 
 let create_for_session ?(redact_secrets = true) ?session_root ~session_id ~agent_name () =
-  let* store = Runtime_store.create ?root:session_root () in
-  let* () = Runtime_store.ensure_tree store session_id in
-  let path =
-    Filename.concat
-      (Runtime_store.raw_traces_dir store session_id)
-      (Printf.sprintf "%s.jsonl" (safe_name agent_name))
+  let* root =
+    match Util.trim_non_empty_opt session_root with
+    | Some value when not (Filename.is_relative value) -> Ok value
+    | Some _ ->
+      Error
+        (Error.Config
+           (InvalidConfig
+              { field = "session_root"
+              ; detail = "runtime session root must be an absolute path"
+              }))
+    | None ->
+      Error
+        (Error.Config
+           (InvalidConfig
+              { field = "session_root"
+              ; detail =
+                  "missing runtime session root; pass an explicit ~root/session_root"
+              }))
   in
+  let sessions_dir = Filename.concat root "sessions" in
+  let session_dir = Filename.concat sessions_dir session_id in
+  let raw_traces_dir = Filename.concat session_dir "raw-traces" in
+  let* () = Fs_result.ensure_dir root in
+  let* () = Fs_result.ensure_dir sessions_dir in
+  let* () = Fs_result.ensure_dir session_dir in
+  let* () = Fs_result.ensure_dir raw_traces_dir in
+  let path = Filename.concat raw_traces_dir (Printf.sprintf "%s.jsonl" (safe_name agent_name)) in
   create ~redact_secrets ~session_id ~path ()
 ;;
 

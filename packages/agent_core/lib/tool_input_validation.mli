@@ -30,6 +30,8 @@ type expected =
       (** The object declares [additionalProperties: false] and no
           [patternProperties], and this field is not one of its [properties];
           [declared] are the names it accepts. *)
+  | Expected_min_items of { min_items : int }
+      (** The array declares [minItems] and received fewer items than required. *)
 
 (** A single field-level validation error. *)
 type field_error =

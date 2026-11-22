@@ -412,7 +412,7 @@ let build_ctx_segments
   let tool_schema_json =
     List.map (fun tool ->
       let json = Agent_core.Tool.schema_to_json tool in
-      Agent_core.Base.Schema_observation.encode
+      Schema_observation.encode
         ~site:Prompt_metrics_encode ~schema:tool.Agent_core.Tool.schema
         (fun () -> Yojson.Safe.to_string json)) tools
   in

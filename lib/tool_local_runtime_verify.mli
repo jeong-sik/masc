@@ -10,6 +10,10 @@
     renderer behind {!runtime_verify_json}.  The old single-host legacy
     probe fallback is gone; verification now requires AGENT_CORE discovery. *)
 
+val runtime_id_of_base_url : string -> string
+(** Stable local runtime identifier derived from [base_url] (["local-<port>"]
+    when a port is present, otherwise ["local-<8-hex-md5>"]). *)
+
 module For_testing : sig
   val select_endpoint_urls_for_pool :
     ?runtime_pool:string -> string list -> string list option

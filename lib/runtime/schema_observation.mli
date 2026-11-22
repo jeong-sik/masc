@@ -53,7 +53,7 @@ val fresh_object_id : unit -> object_id option
     Keeper's weak descriptor adapter uses this instead of casting its own IDs. *)
 
 val object_id_to_string : object_id -> string
-val schema : Types.tool_schema -> object_id option
+val schema : Agent_core.Types.tool_schema -> object_id option
 (** Physical identity in a weak registry, never name/JSON equality. *)
 
 val with_wake :
@@ -77,22 +77,22 @@ val capture : (unit -> 'a) -> (unit -> 'a)
     The caller owns the returned closure and therefore its operation's lifetime;
     neither operation nor product objects enter observer state. *)
 
-val measure : site:site -> ?schema:Types.tool_schema -> (unit -> 'a) -> 'a
+val measure : site:site -> ?schema:Agent_core.Types.tool_schema -> (unit -> 'a) -> 'a
 (** Record the actual operation once, preserving its result/backtrace. Timed
     allocation is a calling-domain interval, never process allocation. It is
     unavailable if the domain changes. Mutex/yielding callers must treat even
     same-domain intervals as potentially interleaved. *)
 val constructor :
-  site:site -> (unit -> (Types.tool_schema, 'error) result) ->
-  (Types.tool_schema, 'error) result
+  site:site -> (unit -> (Agent_core.Types.tool_schema, 'error) result) ->
+  (Agent_core.Types.tool_schema, 'error) result
 val encode :
-  site:site -> schema:Types.tool_schema -> (unit -> string) -> string
+  site:site -> schema:Agent_core.Types.tool_schema -> (unit -> string) -> string
 (** Time the existing encoder and return its original string. Only byte length
     enters the row; no shadow encoding or retained string is introduced. *)
-val surface : site:site -> (unit -> Types.tool_schema list) -> unit
+val surface : site:site -> (unit -> Agent_core.Types.tool_schema list) -> unit
 (** Ordered physical IDs including occurrences. The thunk is not called when
     disabled/unbound. The list and its keys are discarded before publication. *)
-val cache : schema:Types.tool_schema -> cache_outcome -> unit
+val cache : schema:Agent_core.Types.tool_schema -> cache_outcome -> unit
 (** Call AFTER releasing the product cache mutex. Never invoke this module,
     its weak table or its event mutex inside that critical section. *)
 

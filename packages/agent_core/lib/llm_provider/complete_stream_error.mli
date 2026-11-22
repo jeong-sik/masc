@@ -32,7 +32,7 @@ val http_error_of_oversized_payload
 (** A full refused frame for the optional diagnostic sink. [raw] is kept
     intact here; the sink redacts it before writing and records whether its
     bytes changed. This value does not read the environment or write a file. *)
-type refused_frame =
+type refused_frame = Complete_stream_diagnostic.refused_frame =
   { wire_format : Http_client.provider_wire_format
   ; reason : string
   ; raw : string

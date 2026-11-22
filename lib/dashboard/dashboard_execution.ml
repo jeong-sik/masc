@@ -75,7 +75,7 @@ let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
     ; "project", `String project
     ; "tempo_interval_s", `Float tempo.current_interval_s
-    ; "version", `String Runtime_build_version.current
+    ; "version", `String Build_version.current
     ]
 ;;
 

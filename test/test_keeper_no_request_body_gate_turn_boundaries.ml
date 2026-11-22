@@ -21,7 +21,7 @@ let rec remove path =
    turn's result stays in the prompt (with the exception of
    RFC-tool-results-age-out-of-context). *)
 let test_historical_tool_results_go_as_markers () =
-  let module Observation = Agent_core.Base.Schema_observation in
+  let module Observation = Schema_observation in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;

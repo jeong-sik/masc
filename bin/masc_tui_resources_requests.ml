@@ -10,7 +10,7 @@ let report_json = Masc_tui_http.get_json
 let session ~host ~port = function
   | Some session_id -> Ok session_id
   | None -> Masc_tui_http.open_mcp_session ~host ~port
-      ~client_version:Runtime_build_version.current
+      ~client_version:Build_version.current
 
 (* A request the workspace guard stopped was not sent: [check]'s refusal is
    said as a kept-back notice, never as the source's failure (RFC §2). The

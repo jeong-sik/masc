@@ -135,7 +135,7 @@ let agent_core_tool_of_masc
       ?on_externalization_error
       (handler json_args)
   in
-  match Agent_core.Base.Schema_observation.constructor
+  match Schema_observation.constructor
           ~site:Bridge_plain_constructor
           (fun () -> Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema ()) with
   | Ok schema ->
@@ -178,7 +178,7 @@ let agent_core_tool_of_masc_with_execution_env
     handler
   : (Agent_core.Tool.t, schema_error) result
   =
-  match Agent_core.Base.Schema_observation.constructor
+  match Schema_observation.constructor
           ~site:Bridge_execution_env_constructor
           (fun () -> Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema ()) with
   | Ok schema ->

@@ -73,6 +73,13 @@ type config =
 
 val default_timeout_s : float
 val default_config : unit -> config
+
+val mark_shutting_down : unit -> unit
+(** Signal that the MASC host entered graceful shutdown so an EOF from the
+    app-server is classified as {!error.Runtime_shutting_down}. Lock-free and
+    async-signal-safe. *)
+
+val is_shutting_down : unit -> bool
 (** One image attached to a turn. [base64_data] is the raw base64 payload with
     no data-URL prefix and no newlines; the app-server [image] input variant
     takes an inline data URL, which this module builds. *)

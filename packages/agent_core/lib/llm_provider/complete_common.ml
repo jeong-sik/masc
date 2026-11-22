@@ -110,7 +110,7 @@ let%test "capability source is model when native catalog resolves config model" 
     Provider_config.make
       ~kind:Provider_config.Glm
       ~model_id:"glm-5"
-      ~base_url:Zai_catalog.general_base_url
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ()
   in
   match resolve_capabilities_for_config config with

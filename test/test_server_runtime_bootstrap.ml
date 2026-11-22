@@ -5522,7 +5522,7 @@ let check_public_health ~name ~ready ~phase (status, headers, body) =
   Alcotest.(check (list string)) (name ^ ": the five public keys") public_health_keys
     (json_keys json);
   Alcotest.(check string) (name ^ ": server") "masc" (json |> member "server" |> to_string);
-  Alcotest.(check string) (name ^ ": version") Runtime_build_version.current
+  Alcotest.(check string) (name ^ ": version") Build_version.current
     (json |> member "version" |> to_string);
   Alcotest.(check bool) (name ^ ": live") true (json |> member "live" |> to_bool);
   Alcotest.(check bool) (name ^ ": ready") ready (json |> member "ready" |> to_bool);
@@ -5568,7 +5568,7 @@ let test_health_answers_a_reader_in_full () =
        Alcotest.(check bool) (name ^ ": timing header") true
          (List.mem_assoc server_timing_header response_headers);
        Alcotest.(check (option string)) (name ^ ": the command line reads its version")
-         (Some Runtime_build_version.current)
+         (Some Build_version.current)
          (Server_upgrade_preparation.compact_health_version body);
        let full_status, (_ : (string * string) list), full_body =
          health_answer ~headers routes.health_router Server_health_paths.full

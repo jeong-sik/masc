@@ -1,7 +1,7 @@
 (** Semantic contracts for the opt-in observer. These are not performance
     admission tests: durations and allocation amounts have no thresholds. *)
 
-module Observation = Agent_core.Base.Schema_observation
+module Observation = Schema_observation
 module Types = Agent_core.Types
 
 exception Product_failure of int ref

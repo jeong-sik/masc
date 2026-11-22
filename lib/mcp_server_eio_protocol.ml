@@ -328,7 +328,7 @@ let handle_initialize_eio ?(profile = Full) id params =
                    (Mcp_server.meta_field
                       ~key:Mcp_server.server_meta_key
                       [ "serverStartedAt", `String (Masc_domain.now_iso ())
-                      ; "serverVersion", `String Runtime_build_version.current
+                      ; "serverVersion", `String Build_version.current
                       ; "profile", `String (Mcp_server_eio_types.tool_profile_to_string profile)
                       ]) )
              ])

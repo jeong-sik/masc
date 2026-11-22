@@ -20,6 +20,7 @@ type expected =
   | Expected_const of Yojson.Safe.t
   | Expected_required
   | Expected_declared_field of { declared : string list }
+  | Expected_min_items of { min_items : int }
 
 type field_error =
   { path : string
@@ -311,6 +312,8 @@ let describe_expected = function
   | Expected_declared_field { declared = [] } -> "no field (the object declares none)"
   | Expected_declared_field { declared } ->
     "a declared field (" ^ String.concat ", " declared ^ ")"
+  | Expected_min_items { min_items } ->
+    Printf.sprintf "at least %d item(s)" min_items
 ;;
 
 let authoritative_schema_parts = function
@@ -415,14 +418,27 @@ and value_errors ~path property value =
     match property, value with
     | `Assoc _, `Assoc fields -> object_errors ~prefix:path property fields
     | `Assoc schema, `List items ->
-      (match List.assoc_opt "items" schema with
-       | Some item_schema ->
-         List.concat
-           (List.mapi
-              (fun index item ->
-                 value_errors ~path:(path ^ "/" ^ string_of_int index) item_schema item)
-              items)
-       | None -> [])
+      let min_items_errors =
+        match List.assoc_opt "minItems" schema with
+        | Some (`Int min_items) when min_items > 0 && List.length items < min_items ->
+          [ { path
+            ; expected = Expected_min_items { min_items }
+            ; actual = Received (Printf.sprintf "array(length=%d)" (List.length items))
+            }
+          ]
+        | Some _ | None -> []
+      in
+      let item_errors =
+        match List.assoc_opt "items" schema with
+        | Some item_schema ->
+          List.concat
+            (List.mapi
+               (fun index item ->
+                  value_errors ~path:(path ^ "/" ^ string_of_int index) item_schema item)
+               items)
+        | None -> []
+      in
+      min_items_errors @ item_errors
     | `Assoc _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _)
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _), _ -> [])
 ;;
@@ -540,7 +556,7 @@ let format_errors_inline ~tool_name ~(args : Yojson.Safe.t) errors =
               the model nothing it could correct. *)
            let label =
              match e.expected with
-             | Expected_enum _ | Expected_const _ -> "invalid value"
+             | Expected_enum _ | Expected_const _ | Expected_min_items _ -> "invalid value"
              | Expected_declared_field _ -> "unsupported field"
              | Expected_types _ | Expected_required -> "wrong type"
            in

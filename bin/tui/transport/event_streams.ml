@@ -68,7 +68,7 @@ let launch_observer_recovery (state : Masc_tui_types.state) ~origin ~host ~port
               | Some session_id -> Ok session_id
               | None ->
                   Masc_tui_http.open_mcp_session ~host ~port
-                    ~client_version:Runtime_build_version.current
+                    ~client_version:Build_version.current
             with
             | Error detail ->
                 open_refused := true;
@@ -207,7 +207,7 @@ let launch_observer ~browser_scope (state : Masc_tui_types.state)
           | Some session_id -> Ok session_id
           | None ->
               Masc_tui_http.open_mcp_session ~host ~port
-                ~client_version:Runtime_build_version.current
+                ~client_version:Build_version.current
         with
         | Error detail ->
             if account_server_answers ~host ~port then

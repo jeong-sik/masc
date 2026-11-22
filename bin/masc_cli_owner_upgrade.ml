@@ -116,7 +116,7 @@ let inspect ~base_path ~port =
     | Unknown_server ->
       (match Upgrade.suggest_loopback_port () with Ok port -> ["suggested_port", `Int port] | Error _ -> []) in
   emit (`Assoc (["schema", `String "masc.setup_server.v1"; "read_only", `Bool true;
-    "installed_version", `String Runtime_build_version.current] @ fields @ alternative)); 0
+    "installed_version", `String Build_version.current] @ fields @ alternative)); 0
 (* HIGH-RISK-UNREVIEWED: signs the local operator in and hands its bearer to
    [Upgrade.prepare] (#51321). The admin credential is minted only after the
    kernel names [listener] again and its port answers [expected_version]

@@ -716,7 +716,7 @@ supports_named_tool_choice = false
          Llm_provider.Provider_config.make
            ~kind:Llm_provider.Provider_config.Glm
            ~model_id:"glm-5.1"
-           ~base_url:Llm_provider.Zai_catalog.coding_base_url
+           ~base_url:"https://api.z.ai/api/coding/paas/v4"
            ~tool_choice:named
            ()
        in
@@ -725,7 +725,7 @@ supports_named_tool_choice = false
          Llm_provider.Provider_config.make
            ~kind:Llm_provider.Provider_config.Glm
            ~model_id:"glm-5.1"
-           ~base_url:Llm_provider.Zai_catalog.coding_base_url
+           ~base_url:"https://api.z.ai/api/coding/paas/v4"
            ~tool_choice:Types.Any
            ()
        in
@@ -734,7 +734,7 @@ supports_named_tool_choice = false
          Llm_provider.Provider_config.make
            ~kind:Llm_provider.Provider_config.OpenAI_compat
            ~model_id:"glm-5.1"
-           ~base_url:Llm_provider.Zai_catalog.coding_base_url
+           ~base_url:"https://api.z.ai/api/coding/paas/v4"
            ~tool_choice:named
            ()
        in
@@ -752,7 +752,7 @@ supports_named_tool_choice = false
          Llm_provider.Provider_config.make
            ~kind:Llm_provider.Provider_config.OpenAI_compat
            ~model_id:"glm-5.1"
-           ~base_url:Llm_provider.Zai_catalog.coding_base_url
+           ~base_url:"https://api.z.ai/api/coding/paas/v4"
            ~tool_choice:Types.Any
            ()
        in

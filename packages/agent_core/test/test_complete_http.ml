@@ -2111,22 +2111,24 @@ let test_complete_stream_refused_frame_diagnostics () =
   List.iter (fun format ->
     let dir = Filename.temp_dir "stream-diagnostic" "" in
     let path = Filename.concat dir "frames" in
-    let previous_setting = Sys.getenv_opt "MASC_WIRE_PARSE_DUMP" in
-    let set_destination = function
-      | None -> Unix.unsetenv "MASC_WIRE_PARSE_DUMP"
-      | Some destination -> Unix.putenv "MASC_WIRE_PARSE_DUMP" destination in
+    let sink_for_destination = function
+      | None -> None
+      | Some destination ->
+        Some (Complete_stream_diagnostic.append_refused_frame_to_path ~path:destination)
+    in
     let read_dump () =
       if Sys.file_exists path then In_channel.with_open_bin path In_channel.input_all
       else "" in
     Fun.protect
       ~finally:(fun () ->
-        set_destination previous_setting;
         if Sys.file_exists path then Sys.remove path;
         Unix.rmdir dir)
       (fun () ->
         let run ~destination ~writes ~raw ~redacted ~verbatim =
-          set_destination destination;
           let before = read_dump () in
+          Complete_stream_diagnostic.with_refused_frame_sink
+            (sink_for_destination destination)
+            (fun () ->
           try
             Eio.Switch.run @@ fun sw ->
             let content_type, body, config = match format with
@@ -2188,7 +2190,7 @@ let test_complete_stream_refused_frame_diagnostics () =
                  check string "terminal summary follows diagnostic append" expected at_summary
              | _ -> fail "expected exactly one terminal summary");
             Eio.Switch.fail sw Exit
-          with Exit -> ()
+          with Exit -> ())
         in
         let raw = "{\"pad\":\"" ^ String.make 900 'x' in
         run ~destination:None ~writes:false ~raw ~redacted:raw ~verbatim:true;

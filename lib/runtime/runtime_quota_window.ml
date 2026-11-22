@@ -68,7 +68,7 @@ let note_until ~scope ~cause ~resets_at =
     (* A stated reset is more than an observation, so it replaces one. *)
     | Some (Until _) | Some (Observed _) | None ->
       Hashtbl.replace windows scope (Until { resets_at; cause }));
-  Runtime_path_rest_signal.recorded ()
+  Runtime_candidate_backpressure.notify_rest_recorded ()
 
 let note_exhausted ~scope ~source ~resets_at =
   note_until ~scope ~cause:(Refused source) ~resets_at
@@ -96,7 +96,7 @@ let note_observed_at ~now ~scope cause =
       when Float.compare now rests_until < 0 -> ()
     | (Some (Until _) | Some (Observed _) | None), (Refused _ | Usage_read) ->
       Hashtbl.replace windows scope observed);
-  Runtime_path_rest_signal.recorded ()
+  Runtime_candidate_backpressure.notify_rest_recorded ()
 
 (* Real provider paths keep the wall clock; a caller that already holds the
    moment (a fixture, a replay) passes it in through the [_at] entry points. *)
@@ -117,7 +117,7 @@ let note_succeeded ~scope =
        inside it does not make it untrue. *)
     | Some (Observed _) -> Hashtbl.remove windows scope
     | Some (Until _) | None -> ());
-  Runtime_path_rest_signal.recorded ()
+  Runtime_candidate_backpressure.notify_rest_recorded ()
 
 (* The entry that still rests [scope] at [now], pruning one that has passed.
    Callers hold [mu]. *)

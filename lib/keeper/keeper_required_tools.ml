@@ -16,7 +16,8 @@ let check_provider requirement ~runtime_id provider_config =
   match requirement with
   | Optional -> Ok ()
   | Required ->
-    if Runtime_transport.provider_supports_inline_tools provider_config then Ok ()
+    if (Agent_core.Provider_runtime_binding.capabilities_for_provider_config provider_config).supports_tools
+    then Ok ()
     else Error {runtime_id;reason=Binding_tools_unsupported}
 
 let to_core_error failure =

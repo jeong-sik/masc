@@ -696,13 +696,12 @@ let test_the_retry_gate_reads_this_candidate_s_ladder () =
     | None -> Alcotest.fail "the router base is no longer reachable by label"
   in
   let candidate caps =
-    Runtime_candidate.of_provider_config
-      (Llm_provider.Provider_config.make
-         ~kind:Llm_provider.Provider_config.OpenAI_compat
-         ~model_id:"gate-row"
-         ~base_url:"https://openrouter.ai/api/v1"
-         ~model_capabilities_override:caps
-         ())
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"gate-row"
+      ~base_url:"https://openrouter.ai/api/v1"
+      ~model_capabilities_override:caps
+      ()
   in
   Alcotest.(check bool)
     "a ladder with no off value cannot take the retry"
@@ -731,9 +730,7 @@ let test_truncation_retry_candidate_drops_reasoning_effort () =
       ()
   in
   let stripped =
-    Masc.Keeper_turn_driver_try_provider.For_testing.candidate_without_reasoning_effort
-      (Runtime_candidate.of_provider_config cfg)
-    |> Runtime_candidate.provider_cfg
+    Masc.Keeper_turn_driver_try_provider.For_testing.candidate_without_reasoning_effort cfg
   in
   Alcotest.(check bool)
     "effort dropped"

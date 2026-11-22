@@ -98,7 +98,7 @@ let health (_ : Httpun.Request.t) reqd =
   Http.Response.json_value
     (`Assoc
        [ health_server_field, `String health_server_name
-       ; health_version_field, `String Runtime_build_version.current
+       ; health_version_field, `String Build_version.current
        ; health_account_mode_field, `String health_account_mode
        ])
     reqd

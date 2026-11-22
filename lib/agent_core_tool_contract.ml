@@ -106,107 +106,26 @@ let core_remote_operation_names =
 
 let string_member name json = Json_util.get_string json name
 
-let int_member name json = Json_util.assoc_int_opt name json
-
-let schema_type schema =
-  match string_member "type" schema with
-  | Some value -> value
-  | None -> if property_map schema <> [] then "object" else "string"
-
-let label_or_default label fallback =
-  match label with
-  | Some value when String.trim value <> "" -> value
-  | _ -> fallback
-
-let rec validate_json_value ?label schema value =
-  let label = label_or_default label "input" in
-  match schema_type schema with
-  | "object" -> (
-      match value with
-      | `Assoc pairs ->
-          let required = required_names schema in
-          let properties = property_map schema in
-          let missing =
-            List.find_opt (fun name -> not (List.mem_assoc name pairs)) required
-          in
-          (match missing with
-          | Some name -> Error (Printf.sprintf "missing required field: %s" name)
-          | None ->
-              let rec validate_props = function
-                | [] -> Ok ()
-                | (name, property_schema) :: rest -> (
-                    match List.assoc_opt name pairs with
-                    | None -> validate_props rest
-                    | Some property_value -> (
-                        match
-                          validate_json_value ~label:name property_schema
-                            property_value
-                        with
-                        | Ok () -> validate_props rest
-                        | Error _ as error -> error))
-              in
-              validate_props properties)
-      | other ->
-          Error
-            (Printf.sprintf "%s must be a JSON object (received %s)" label
-               (Json_util.kind_name other)))
-  | "array" -> (
-      match value with
-      | `List items ->
-          let min_items = int_member "minItems" schema |> Option.value ~default:0 in
-          if min_items > 0 && List.length items < min_items then
-            Error (Printf.sprintf "%s must be a non-empty JSON array" label)
-          else (
-            match Json_util.assoc_member_opt "items" schema with
-            | None -> Ok ()
-            | Some item_schema ->
-                let rec validate_items = function
-                  | [] -> Ok ()
-                  | item :: rest -> (
-                      match validate_json_value ~label item_schema item with
-                      | Ok () -> validate_items rest
-                      | Error _ as error -> error)
-                in
-                validate_items items)
-      | other ->
-          Error
-            (Printf.sprintf "%s must be a JSON array (received %s)" label
-               (Json_util.kind_name other)))
-  | "string" -> (
-      match value with
-      | `String _ -> Ok ()
-      | other ->
-          Error
-            (Printf.sprintf "%s must be a string (received %s)" label
-               (Json_util.kind_name other)))
-  | "integer" -> (
-      match value with
-      | `Int _ -> Ok ()
-      | other ->
-          Error
-            (Printf.sprintf "%s must be an integer (received %s)" label
-               (Json_util.kind_name other)))
-  | "number" -> (
-      match value with
-      | `Int _ | `Float _ -> Ok ()
-      | other ->
-          Error
-            (Printf.sprintf "%s must be a number (received %s)" label
-               (Json_util.kind_name other)))
-  | "boolean" -> (
-      match value with
-      | `Bool _ -> Ok ()
-      | other ->
-          Error
-            (Printf.sprintf "%s must be a boolean (received %s)" label
-               (Json_util.kind_name other)))
-  | _ -> Ok ()
-
-let validate_input_json schema json =
-  validate_json_value ~label:"input" schema json
+let validate_binding_input (binding : agent_core_tool_binding) json =
+  match
+    Agent_core.Types.tool_schema_of_input_schema
+      ~name:binding.name
+      ~description:binding.description
+      ~input_schema:binding.input_schema
+      ()
+  with
+  | Error msg -> Error msg
+  | Ok tool_schema ->
+    (match Agent_core.Tool_input_validation.validate tool_schema json with
+     | Agent_core.Tool_input_validation.Valid _ -> Ok ()
+     | Agent_core.Tool_input_validation.Invalid errors ->
+       Error
+         (Agent_core.Tool_input_validation.format_errors
+            ~tool_name:binding.name
+            errors))
 
 let build_operation_arguments ~agent_name binding json =
-  match validate_input_json binding.input_schema json with
+  match validate_binding_input binding json with
   | Error _ as error -> error
   | Ok () -> (
       match json with

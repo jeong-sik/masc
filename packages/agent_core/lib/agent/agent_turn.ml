@@ -49,10 +49,10 @@ let prepare_tools ~(tools : Tool_set.t) ?(deferred_tools = []) ?(defer_loading =
       Deferred_name_set.empty
       deferred_tools
   in
-  Schema_observation.surface ~site:Sdk_prepare_json (fun () ->
+  Tool_schema_hooks.surface ~site:Prepare_json (fun () ->
     List.map (fun (tool : Tool.t) -> tool.schema) wire_selected);
   let tool_schemas =
-    Schema_observation.with_site Sdk_prepare_json (fun () ->
+    Tool_schema_hooks.with_site Prepare_json (fun () ->
       List.map
         (fun (tool : Tool.t) ->
            let json = Tool.schema_to_json tool in

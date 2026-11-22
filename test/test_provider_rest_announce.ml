@@ -39,8 +39,8 @@ let quiet_wait_s = 0.5
 
 let test_the_seven_writers_report_a_record () =
   let calls = ref 0 in
-  Runtime_path_rest_signal.install (fun () -> incr calls);
-  Fun.protect ~finally:(fun () -> Runtime_path_rest_signal.install ignore) (fun () ->
+  Runtime_candidate_backpressure.install_rest_observer (fun () -> incr calls);
+  Fun.protect ~finally:(fun () -> Runtime_candidate_backpressure.install_rest_observer ignore) (fun () ->
     let candidate =
       Runtime_candidate_backpressure.create_candidate
         ~binding:Runtime_candidate_backpressure.Official_client_binding
@@ -67,7 +67,7 @@ let test_moved_rests_announce_their_keepers () =
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore original;
-      Runtime_path_rest_signal.install ignore;
+      Runtime_candidate_backpressure.install_rest_observer ignore;
       Keeper_registry.For_testing.clear ();
       Fs_compat.remove_tree base_path)
     (fun () ->
@@ -145,7 +145,7 @@ let test_moved_rests_announce_their_keepers () =
           | None -> ()
         in
         drain ();
-        Runtime_path_rest_signal.recorded ();
+        Runtime_candidate_backpressure.notify_rest_recorded ();
         (match Eio.Time.with_timeout clock quiet_wait_s (fun () -> Ok (Eio.Stream.take standings)) with
          | Ok () -> fail "a signal that changed no standing announced one"
          | Error `Timeout -> ())))

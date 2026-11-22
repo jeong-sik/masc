@@ -557,13 +557,21 @@ let read_keeper_memory_inputs_blocking ~config ~caller ~keeper =
        | Anonymous_reader ->
          Error (Mcp_error_code.Auth_error, "Keeper memory resource requires authentication")
        | Authenticated_reader { agent_name = _; board_reader } ->
-         (match board_reader with
-          | Masc_board_handlers.Board_access.Anonymous ->
-            Ok Masc_board_handlers.Board_access.Anonymous
-          | Masc_board_handlers.Board_access.Named _
-          | Masc_board_handlers.Board_access.Workspace_member _
-          | Masc_board_handlers.Board_access.Operator ->
-            keeper_memory_board_reader ~config ~keeper))
+         (* The readership metadata is resolved before the reader is chosen, so a
+            Keeper whose metadata is missing or stale stays fail-closed even for
+            a caller the resource would only read public posts for. [Anonymous]
+            is unreachable from today's only producer ([resource_caller_for]
+            always passes [named]); the order keeps that true if a second
+            producer ever appears. *)
+         (match keeper_memory_board_reader ~config ~keeper with
+          | Error _ as err -> err
+          | Ok reader ->
+            (match board_reader with
+             | Masc_board_handlers.Board_access.Anonymous ->
+               Ok Masc_board_handlers.Board_access.Anonymous
+             | Masc_board_handlers.Board_access.Named _
+             | Masc_board_handlers.Board_access.Workspace_member _
+             | Masc_board_handlers.Board_access.Operator -> Ok reader)))
   in
   match reader_res with
   | Error _ as err -> err

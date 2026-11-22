@@ -2305,6 +2305,12 @@ let keeper_owned_job_descriptor (definition : Tool_schemas_owned_job.definition)
 
 let keeper_composition_result_descriptor () =
   let schema : Masc_domain.tool_schema = Tool_schemas_composition_control.result_schema in
+  (* No [with_composable_output]: the dispatch handler is retired
+     (Keeper_tool_runtime answers "Composition result dispatch has been
+     retired" with a Policy_rejection), so this tool can never emit a value
+     a composition node could validate. Declaring Json_output here made
+     test_every_composable_tool_has_an_output_probe demand a producer probe
+     for a tool that refuses every call. *)
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
@@ -2317,12 +2323,6 @@ let keeper_composition_result_descriptor () =
     ~ordinary_execution_mode:Concurrent
     ~readonly:true
     ()
-  |> with_composable_output (Json_output { schema =
-       object_output_schema
-         ~properties:["binding", opaque_object_schema;
-                      "result", opaque_object_schema;
-                      "result_artifact", normalized_artifact_ref_schema]
-         ~required:["binding"; "result"; "result_artifact"] })
 ;;
 
 let keeper_code_query_descriptor () =

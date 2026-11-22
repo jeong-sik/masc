@@ -210,10 +210,12 @@ val run_vision
     image and query, including when a partial JSON object cannot be parsed.
     Each candidate is attempted at most once; exhausting output-limited
     candidates returns [Vo_truncated].
-    Other invalid structured responses and
-    local transport wiring rejections do not trigger this output-limit failover.
+    Other invalid structured responses do not trigger this output-limit
+    failover.
     A provider 4xx that is neither transient (408/409/429) nor capacity (413)
-    is candidate-local and advances without backoff. Before each candidate is
+    is candidate-local and advances without backoff. So is a request the
+    candidate's own validation refuses before any call ([AcceptRejected]); when
+    every candidate refuses, the last refusal is the outcome. Before each candidate is
     called, the image is fitted to the request-body cap that candidate
     declares: sent as is, shrunk once, or skipped without a call when no edge
     at or above the floor would fit. A candidate without a cap gets the image

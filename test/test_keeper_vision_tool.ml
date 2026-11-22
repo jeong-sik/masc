@@ -1575,7 +1575,7 @@ let test_credential_error_tries_next_runtime () =
         before_policy
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels)))
 
-let test_accept_rejected_is_policy_rejection_without_failover () =
+let test_accept_rejected_advances_to_the_next_candidate () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-accept-rejected" in
@@ -1602,10 +1602,45 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
               ()))
       in
       let json = json_of_output raw in
-      assert (!calls = 1);
-      assert (List.rev !models = [ "vision-a" ]);
+      (* A refusal made before any call is this candidate's verdict, so the
+         walk visits the next one; when every candidate refuses, the last
+         refusal is the outcome. *)
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "policy_rejection")))
+
+let test_accept_rejected_first_candidate_lets_the_second_answer () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-accept-rejected-then-answer" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        let model = config.Llm_provider.Provider_config.model_id in
+        models := model :: !models;
+        if String.equal model "vision-a"
+        then
+          Error
+            (Llm_provider.Http_client.AcceptRejected
+               { reason = "reasoning effort is not accepted by this candidate" })
+        else Ok (ok_response "the second candidate answered")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+      assert (String.equal (assoc_string "text" json) "the second candidate answered")))
 
 let test_eager_eviction_reason_preserves_typed_outcome () =
   let reason = Vi.eager_read_eviction_reason_of_outcome in
@@ -3138,7 +3173,8 @@ let run_all () =
   test_capacity_exhaustion_retains_size_failure ();
   test_candidate_failover_is_not_cut_off_by_local_deadline ();
   test_credential_error_tries_next_runtime ();
-  test_accept_rejected_is_policy_rejection_without_failover ();
+  test_accept_rejected_advances_to_the_next_candidate ();
+  test_accept_rejected_first_candidate_lets_the_second_answer ();
   test_eager_eviction_reason_preserves_typed_outcome ();
   test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
   test_fallback_projection_preserves_artifacts_and_caches_each_mode ();

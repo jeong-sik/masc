@@ -226,6 +226,16 @@ type error =
       ; detail : string
       }
   | State_callback_failed of string
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
+      (** Structured context-window overflow reported via an explicit protocol
+          [error_code] or structured JSON refusal envelope (never free-form
+          prose). [tool_effect_attempted] and [response_emitted] carry whether
+          activity occurred before the refusal so callers can gate same-turn
+          rollover without duplicate effects. *)
   | Turn_failed of string
   | Result_not_completed of noncompletion_result
       (** The exact documented result state and any partial reply. The identity

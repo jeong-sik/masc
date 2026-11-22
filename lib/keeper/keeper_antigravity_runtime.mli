@@ -4,11 +4,13 @@ val run :
   ?on_guidance_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   input_source:Keeper_request_source.t ->
   ?argument_source:Keeper_official_client_host.argument_source ->
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
-  (* Read after hook assembly to preserve typed block rendering. This lane
-      resends context on every resume until a compaction/reset witness can
-      prove previously delivered blocks remain available to the model. *)
+  (* Read after hook assembly to preserve typed block rendering. Held
+     standing-context digests from the last settled turn avoid resending
+     unchanged blocks on Resume; standing System observations refresh under
+     [resume_system_notice]. *)
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
@@ -109,6 +111,46 @@ module For_testing : sig
     :  Runtime_antigravity.error
     -> Keeper_official_client_session_store.recovery_failure
   (** The durable recovery failure a runtime error settles a claim with. *)
+
+  val recovery_failure_of_attempt
+    :  conversation_mode:Runtime_antigravity.conversation_mode
+    -> gate_continuation:bool
+    -> Runtime_antigravity.error
+    -> Keeper_official_client_session_store.recovery_failure
+
+  val unbounded_capacity_bytes : int
+
+  val start_seed_projection
+    :  input_source:Keeper_request_source.t
+    -> capacity_bytes:int
+    -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
+    -> ?librarian_front:Keeper_turn_driver_try_provider.continuity
+    -> ?on_carried_front:Keeper_official_client_host.carried_front_observer
+    -> turn_start:Keeper_carried_front.turn_start
+    -> ?on_model_input_window_observation:
+         (Runtime_model_input_tail_window.window_observation -> unit)
+    -> keeper_name:string
+    -> runtime_id:string
+    -> Agent_core.Types.message list
+    -> (Agent_core.Types.message list, Agent_core.Error.t) result
+
+  val observe_resume_shrink_capacity
+    :  input_source:Keeper_request_source.t
+    -> capacity_bytes:int
+    -> turn_start:Keeper_carried_front.turn_start
+    -> keeper_name:string
+    -> runtime_id:string
+    -> Agent_core.Types.message list
+    -> (int option * int option, Agent_core.Error.t) result
+
+  val held_context_for_resume_turn
+    :  resume_system_notice:string option
+    -> previously_held:Keeper_official_client_session_store.held_context list
+    -> goal:string
+    -> turn_observation:Keeper_official_client_host.turn_observation option
+    -> ?composed_context:Keeper_official_client_host.composed_context
+    -> Agent_core.Types.message list
+    -> Keeper_official_client_session_store.held_context list
 
   val report_stream_usage
     :  turn_count:int

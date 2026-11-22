@@ -61,6 +61,72 @@ let measure_model_input_message_bytes message =
   String.length (Host.encode_history_message message)
 ;;
 
+let load_compaction_anchor ~base_path ~keeper_name =
+  if String.equal (String.trim base_path) ""
+  then None
+  else (
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+    | Ok anchor -> anchor
+    | Error err ->
+      Log.Keeper.warn ~keeper_name "Claude Code compaction anchor load failed: %s"
+        (Keeper_compaction.store_error_to_string err);
+      None)
+;;
+
+let commit_compaction_anchor_for_messages
+      ~base_path ~keeper_name ~tools ~trigger evicted_messages
+  =
+  if String.equal (String.trim base_path) "" || evicted_messages = []
+  then None
+  else (
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let blob_store =
+      if Result.is_ok (Keeper_recovery_transmission.require_reader tools)
+      then Some (Tool_blob_store.create ~base_path)
+      else None
+    in
+    match
+      Keeper_compaction.compact_evicted_messages
+        ?blob_store ~keepers_dir ~keeper_id:keeper_name ~trigger ~evicted_messages ()
+    with
+    | Ok (Some anchor) ->
+      Log.Keeper.info ~keeper_name
+        "Claude Code anchored compaction committed epoch=%d covers_through=%s"
+        anchor.epoch_id
+        (Ids.Turn_id.to_string anchor.covers_through_turn);
+      Some anchor
+    | Ok None -> load_compaction_anchor ~base_path ~keeper_name
+    | Error err ->
+      Log.Keeper.warn ~keeper_name "Claude Code anchored compaction commit failed: %s"
+        (Keeper_compaction.store_error_to_string err);
+      load_compaction_anchor ~base_path ~keeper_name)
+;;
+
+let has_librarian_working_state = function
+  | Some (Keeper_turn_driver_try_provider.Covered { working_state = Some _; _ }) -> true
+  | Some (Keeper_turn_driver_try_provider.Covered { working_state = None; _ })
+  | Some Keeper_turn_driver_try_provider.No_read_end
+  | None -> false
+;;
+
+let attach_rollover_anchor_if_needed
+      ~rollover_anchor ~minimal_anchor_only ~librarian_front ~offered ~windowed
+  =
+  match rollover_anchor with
+  | None -> windowed
+  | Some anchor ->
+    if has_librarian_working_state librarian_front
+       || List.exists Runtime_model_input_tail_window.is_compaction_anchor windowed
+    then windowed
+    else (
+      let _, offered_atoms = Runtime_model_input_tail_window.annotate offered in
+      let _, kept_atoms = Runtime_model_input_tail_window.annotate windowed in
+      if minimal_anchor_only || kept_atoms < offered_atoms
+      then Keeper_compaction.anchor_to_message anchor :: windowed
+      else windowed)
+;;
+
 (* Keep the durable conversation intact and narrow only the provider-bound
    start seed. The seed starts unbounded and narrows after Claude has explicitly
    rejected the prior view as too large. The next structural boundary is computed before source projections append
@@ -72,8 +138,21 @@ let measure_model_input_message_bytes message =
    which keeps the messages and drops the counts, so every official-client turn
    wrote a record with no window reading and no input composition -- which is
    what [/context] reads. Same measurement, reported instead of discarded. *)
+let minimal_anchor_only_messages messages =
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  List.filter_map
+    (fun (msg, label) ->
+       match label with
+       | Runtime_model_input_tail_window.Pinned -> Some msg
+       | Runtime_model_input_tail_window.Atom _ -> None)
+    labelled
+;;
+
 let model_input_projection_for_capacity ~input_source
     ?argument_projection
+    ~session_mode
+    ?(rollover_anchor = None)
+    ?(minimal_anchor_only = false)
     ~capacity_bytes
     ~observed_next_shrink_capacity_bytes
     ~observed_floor_capacity_bytes
@@ -87,45 +166,73 @@ let model_input_projection_for_capacity ~input_source
     source_projection
     messages =
   let* windowed =
-    Host.start_range_projection
-      ~input_source
-      ?argument_projection
-      ~measure_message_bytes:measure_model_input_message_bytes
-      ~capacity_bytes
-      ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
-      ~reserved_bytes:0
-      ?on_model_input_window_observation
-      ?carried_front_seed
-      ?librarian_front
-      ?on_carried_front
-      ~turn_start
-      ~keeper_name
-      ~runtime_id
-      messages
+    if minimal_anchor_only
+    then Ok (minimal_anchor_only_messages messages)
+    else
+      Host.start_range_projection
+        ~input_source
+        ?argument_projection
+        ~measure_message_bytes:measure_model_input_message_bytes
+        ~capacity_bytes
+        ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
+        ~reserved_bytes:0
+        ?on_model_input_window_observation
+        ?carried_front_seed
+        ?librarian_front
+        ?on_carried_front
+        ~turn_start
+        ~keeper_name
+        ~runtime_id
+        messages
+  in
+  let windowed =
+    match session_mode with
+    | Runtime_claude_code.Start ->
+      attach_rollover_anchor_if_needed
+        ~rollover_anchor ~minimal_anchor_only ~librarian_front ~offered:messages ~windowed
+    | Runtime_claude_code.Resume _ -> windowed
   in
   let () =
-    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-      let measured =
-        Runtime_model_input_tail_window.measure_history
-          ~measure_message_bytes:measure_model_input_message_bytes windowed
-      in
-      let target_capacity_bytes =
-        if capacity_bytes = unbounded_model_input_capacity_bytes
-        then
-          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity:(Runtime_model_input_tail_window.measured_bytes measured)
-        else
-          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity:capacity_bytes
-      in
+    match session_mode with
+    | Runtime_claude_code.Start ->
+      if minimal_anchor_only
+      then (
+        observed_next_shrink_capacity_bytes := None;
+        observed_floor_capacity_bytes := None)
+      else
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+          let measured =
+            Runtime_model_input_tail_window.measure_history
+              ~measure_message_bytes:measure_model_input_message_bytes windowed
+          in
+          let target_capacity_bytes =
+            if capacity_bytes = unbounded_model_input_capacity_bytes
+            then
+              Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+                ~capacity:(Runtime_model_input_tail_window.measured_bytes measured)
+            else
+              Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+                ~capacity:capacity_bytes
+          in
+          observed_next_shrink_capacity_bytes :=
+            Runtime_model_input_tail_window.next_shrink_capacity_bytes
+              ~allow_empty_history:true
+              ~target_capacity_bytes
+              measured;
+          observed_floor_capacity_bytes :=
+            Runtime_model_input_tail_window.minimum_capacity_bytes
+              measured)
+    | Runtime_claude_code.Resume _ ->
+      (* A Resume sent none of this range, so its overflow says nothing about
+         the range's size: the vendor session it resumed is what was full.
+         Mirror [Keeper_codex_runtime]: always offer the ladder's own halved
+         step even with 0 local checkpoint atoms so [on_shrink_retry] resolves
+         into [Restart_fresh] instead of aborting. *)
       observed_next_shrink_capacity_bytes :=
-        Runtime_model_input_tail_window.next_shrink_capacity_bytes
-          ~allow_empty_history:true
-          ~target_capacity_bytes
-          measured;
-      observed_floor_capacity_bytes :=
-        Runtime_model_input_tail_window.minimum_capacity_bytes
-          measured)
+        Some
+          (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+             ~capacity:capacity_bytes);
+      observed_floor_capacity_bytes := None
   in
   Host.project_source source_projection windowed
 ;;
@@ -692,6 +799,7 @@ module For_testing = struct
         ~turn_start ?on_model_input_window_observation ~keeper_name ~runtime_id messages
     =
     model_input_projection_for_capacity ~input_source
+      ~session_mode:Runtime_claude_code.Start
       ~capacity_bytes
       ~observed_next_shrink_capacity_bytes:(ref None)
       ~observed_floor_capacity_bytes:(ref None)
@@ -707,6 +815,26 @@ module For_testing = struct
   ;;
 
   let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
+
+  let observe_resume_shrink_capacity ~input_source ~capacity_bytes ~turn_start
+        ~keeper_name ~runtime_id messages
+    =
+    let observed_next_shrink_capacity_bytes = ref None in
+    let observed_floor_capacity_bytes = ref None in
+    let* _ =
+      model_input_projection_for_capacity ~input_source
+        ~session_mode:(Runtime_claude_code.Resume { session_id = "test-session" })
+        ~capacity_bytes
+        ~observed_next_shrink_capacity_bytes
+        ~observed_floor_capacity_bytes
+        ~turn_start
+        ~keeper_name
+        ~runtime_id
+        None
+        messages
+    in
+    Ok (!observed_next_shrink_capacity_bytes, !observed_floor_capacity_bytes)
+  ;;
 end
 
 (* The same-run shrink
@@ -823,7 +951,7 @@ let observe_stream_effect ~built_ins ~effect_cell
   | Runtime_claude_code.Turn_finished _ -> ()
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~required_native_posture ~official_client_continuation ~runtime_id ~autocompact_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~rollover_anchor ~required_native_posture ~official_client_continuation ~runtime_id ~autocompact_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -884,6 +1012,42 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
       | Ok plan -> Ok plan
       | Error error -> Error (Session_store.core_error_of_claim_error error)
     in
+    let superseded_rejection =
+      Session_store.superseded_input_rejection
+        ~expected:stored_session
+        ~client_kind:Claude_code
+        ~runtime_id
+    in
+    let minimal_anchor_only =
+      match superseded_rejection with
+      | Session_store.Superseding_bootstrap_floor_exceeded ->
+        (match
+           commit_compaction_anchor_for_messages
+             ~base_path ~keeper_name ~tools
+             ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+             initial_messages
+         with
+         | Some anchor -> rollover_anchor := Some anchor
+         | None -> ());
+        Log.Keeper.info ~keeper_name
+          "Claude Code superseding Input_rejected(Bootstrap_floor_exceeded) with minimal anchor-only fresh start runtime=%s"
+          runtime_id;
+        true
+      | Session_store.Superseding_effect_fenced ->
+        (match
+           commit_compaction_anchor_for_messages
+             ~base_path ~keeper_name ~tools
+             ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+             initial_messages
+         with
+         | Some anchor -> rollover_anchor := Some anchor
+         | None -> ());
+        Log.Keeper.info ~keeper_name
+          "Claude Code superseding Input_rejected(Effect_fenced) on next turn into fresh session runtime=%s"
+          runtime_id;
+        false
+      | Session_store.Not_superseding_input_rejection -> false
+    in
     let* native_posture =
       Host.resolve_native_posture
         ~posture_source:
@@ -935,6 +1099,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
         ~tools
         ~initial_messages
         ~model_input_projection:(model_input_projection_for
+          ~minimal_anchor_only
           ~history_prefix:(Option.to_list historical_task_message) session_mode)
         ~hooks:(Some hooks)
     in
@@ -1769,6 +1934,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
   let observed_next_shrink_capacity_bytes = ref None in
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
+  let rollover_anchor = ref (load_compaction_anchor ~base_path ~keeper_name) in
   (* Whether this run's [tools] include keeper_artifact_read. A turn hook
      that sets [tool_choice] to [None_] drops these tools from one request
      ({!Host.prepare_turn}); that request then names a reader it does not
@@ -1818,6 +1984,19 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
               ~keeper_name
               ~runtime_id
               ();
+            let trigger =
+              if previous_capacity_bytes = unbounded_model_input_capacity_bytes
+              then Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None }
+              else
+                Keeper_compaction.Explicit_hard_limit
+                  { capacity_bytes; observed_bytes = previous_capacity_bytes }
+            in
+            (match
+               commit_compaction_anchor_for_messages
+                 ~base_path ~keeper_name ~tools ~trigger initial_messages
+             with
+             | Some anchor -> rollover_anchor := Some anchor
+             | None -> ());
             Log.Keeper.warn
               ~keeper_name
               "Claude typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
@@ -1825,7 +2004,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity:capacity_bytes ->
-          run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~official_client_continuation
+          run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~rollover_anchor ~official_client_continuation
             ~configured_reasoning_effort ~turn_timeout_s
           ~required_native_posture
             ~runtime_id
@@ -1844,7 +2023,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
                carries in front of the prompt is placed by this projection.
                It reports no window and no carried front, though -- the range
                it measures is not what a resume sends. *)
-            ~model_input_projection_for:(fun ~history_prefix session_mode ->
+            ~model_input_projection_for:(fun ~minimal_anchor_only ~history_prefix session_mode ->
               let observed callback =
                 match session_mode with
                 | Runtime_claude_code.Start -> callback
@@ -1859,6 +2038,9 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
                     | Runtime_claude_code.Resume _ -> None in
                   model_input_projection_for_capacity ~input_source
                    ?argument_projection
+                   ~session_mode
+                   ~rollover_anchor:!rollover_anchor
+                   ~minimal_anchor_only
                    ~capacity_bytes
                    ~observed_next_shrink_capacity_bytes
                    ~observed_floor_capacity_bytes

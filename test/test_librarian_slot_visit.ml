@@ -411,6 +411,18 @@ let samples =
   ; at antigravity "Spawn_capacity_busy" (Antigravity.Spawn_capacity_busy { waited_s = 0.; limit_s = 0. })
   ; at antigravity "Protocol_error" (Antigravity.Protocol_error { stage = ""; detail = "" })
   ; at antigravity "State_callback_failed" (Antigravity.State_callback_failed "")
+  ; at antigravity "Context_window_exceeded"
+      ~case:"tool_effect_attempted = false and response_emitted = false"
+      (Antigravity.Context_window_exceeded
+         { message = ""; tool_effect_attempted = false; response_emitted = false })
+  ; at antigravity "Context_window_exceeded"
+      ~case:"tool_effect_attempted = true or response_emitted = true"
+      (Antigravity.Context_window_exceeded
+         { message = ""; tool_effect_attempted = true; response_emitted = false })
+  ; at antigravity "Context_window_exceeded"
+      ~case:"tool_effect_attempted = true or response_emitted = true"
+      (Antigravity.Context_window_exceeded
+         { message = ""; tool_effect_attempted = false; response_emitted = true })
   ; at antigravity "Turn_failed" (Antigravity.Turn_failed "")
   ; at antigravity "Result_not_completed"
       (Antigravity.Result_not_completed

@@ -90,6 +90,26 @@ val bind_completed_arguments :
     makes that occurrence ineligible. Failure disables argument demotion only;
     it is not authority to repair, trim or reject the conversation. *)
 
+val bind_closed_arguments_in_messages :
+  Agent_core.Types.message list ->
+  (completed_arguments, Keeper_transcript_unit.structural_error) result
+(** Bind every [ToolUse] block inside structurally closed units of [messages]
+    (including already-closed tool rounds within the current turn) for
+    emergency mid-turn overflow demotion. Open or unresolved tool cycles in
+    [protected_suffix] are excluded. Existing normalized blob references are
+    left untouched. *)
+
+val preview_fallback_closed_tool_bodies :
+  measure_message_bytes:(Agent_core.Types.message -> int) ->
+  Agent_core.Types.message list ->
+  Agent_core.Types.message list * bool
+(** Deterministic head+tail UTF-8-safe preview fallback for already-closed
+    [ToolUse] arguments and [ToolResult] text bodies when blob externalization
+    cannot be used (for example when [keeper_artifact_read] is absent). Only
+    structurally closed prefix units are rewritten, open tool cycles are never
+    touched, and each message is rewritten only when [measure_message_bytes]
+    strictly shrinks. Returns [(messages, changed)]. *)
+
 type plan_result =
   { messages : Agent_core.Types.message list
         (** [messages] with each planned demotion replaced by a saturating

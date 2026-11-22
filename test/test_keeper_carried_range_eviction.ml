@@ -894,6 +894,254 @@ let test_markers_wait_only_while_the_size_signal_watches () =
        (window_ledger ~history:(exchanges ~from:100 10) ~first_atom:4 grown_turns))
 ;;
 
+(* P0-1b: Mid-turn current-turn tool demotion, deterministic preview fallback
+   without keeper_artifact_read, and oldest closed round drop + compaction
+   anchor projection. *)
+let test_p0_1b_current_turn_tool_demotion_preview_and_round_drop () =
+  let measure = Masc.Keeper_context_core.message_measurer () in
+  let wire_measure m = Some (measure m) in
+  let big_payload tag = tag ^ ":" ^ String.make 8192 'A' in
+  let tool_round idx =
+    let id = Printf.sprintf "call-%d" idx in
+    [ { Types.origin = Llm_provider.Types.Conversation
+      ; role = Types.Assistant
+      ; content =
+          [ Types.ToolUse
+              { id
+              ; name = "masc_probe"
+              ; input = `Assoc [ "payload", `String (big_payload (Printf.sprintf "arg-%d" idx)) ]
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { Types.origin = Llm_provider.Types.Conversation
+      ; role = Types.Tool
+      ; content =
+          [ Types.ToolResult
+              { tool_use_id = id
+              ; content = big_payload (Printf.sprintf "res-%d" idx)
+              ; outcome = Types.Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = Some id
+      ; metadata = []
+      }
+    ]
+  in
+  let open_suffix =
+    { Types.origin = Llm_provider.Types.Conversation
+    ; role = Types.Assistant
+    ; content =
+        [ Types.ToolUse
+            { id = "call-open"
+            ; name = "masc_probe"
+            ; input = `Assoc [ "payload", `String (big_payload "open-arg") ]
+            }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let messages =
+    [ text_message Types.User "current turn goal" ]
+    @ tool_round 1
+    @ tool_round 2
+    @ tool_round 3
+    @ [ open_suffix ]
+  in
+  (* 1. bind_closed_arguments_in_messages binds closed ToolUses and excludes open suffix. *)
+  let bound =
+    match Masc.Keeper_model_input_demotion.bind_closed_arguments_in_messages messages with
+    | Ok bound -> bound
+    | Error _ -> fail "bind_closed_arguments_in_messages rejected valid transcript"
+  in
+  let planned =
+    Masc.Keeper_model_input_demotion.plan
+      ~completed_arguments:bound
+      ~measure_message_bytes:measure
+      ~measure_wire_bytes:wire_measure
+      ~demote_before:(List.length messages)
+      messages
+  in
+  check bool "planned demotion shrinks closed ToolUses and ToolResults" true
+    (planned.pending <> []);
+  let last_planned = List.hd (List.rev planned.messages) in
+  check bool "open suffix ToolUse stays verbatim" true (last_planned = open_suffix);
+  (* 2. Deterministic head+tail preview fallback works even without keeper_artifact_read. *)
+  let total_bytes msgs = List.fold_left (fun acc m -> acc + measure m) 0 msgs in
+  let previewed, changed =
+    Masc.Keeper_model_input_demotion.preview_fallback_closed_tool_bodies
+      ~measure_message_bytes:measure
+      messages
+  in
+  check bool "preview fallback reports change on oversized closed tools" true changed;
+  check bool "preview fallback strictly reduces encoded bytes" true
+    (total_bytes previewed < total_bytes messages);
+  check bool "preview fallback never mutates open ToolUse suffix" true
+    (List.hd (List.rev previewed) = open_suffix);
+  let _, changed_again =
+    Masc.Keeper_model_input_demotion.preview_fallback_closed_tool_bodies
+      ~measure_message_bytes:measure
+      previewed
+  in
+  check bool "preview fallback is idempotent" false changed_again;
+  (* 3. compose_carried_model_input supports both in-turn demotion modes. *)
+  let closed_messages =
+    [ text_message Types.User "current turn goal" ] @ tool_round 1 @ tool_round 2 @ tool_round 3
+  in
+  let digest_at = Window.atom_opening_digest closed_messages in
+  let base_path = Filename.temp_dir "masc-p0-1b-demotion-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+       let baseline =
+         Try_provider.For_testing.compose_carried_model_input
+           ~measure_message_bytes:measure
+           ~measure_wire_bytes:wire_measure
+           ~front:None
+           ~accepted:None
+           ~history_digest_at:digest_at
+           ~current_turn_results:Try_provider.Current_turn_verbatim
+           ~base_path
+           ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
+           closed_messages
+       in
+       let with_blob_demotion =
+         Try_provider.For_testing.compose_carried_model_input
+           ~in_turn_demotion:Try_provider.For_testing.Demote_closed_current_turn_tools
+           ~measure_message_bytes:measure
+           ~measure_wire_bytes:wire_measure
+           ~front:None
+           ~accepted:None
+           ~history_digest_at:digest_at
+           ~current_turn_results:Try_provider.Current_turn_verbatim
+           ~base_path
+           ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
+           closed_messages
+       in
+       let with_preview_fallback =
+         Try_provider.For_testing.compose_carried_model_input
+           ~in_turn_demotion:Try_provider.For_testing.Demote_and_preview_closed_current_turn_tools
+           ~measure_message_bytes:measure
+           ~measure_wire_bytes:wire_measure
+           ~front:None
+           ~accepted:None
+           ~history_digest_at:digest_at
+           ~current_turn_results:Try_provider.Current_turn_verbatim
+           ~base_path:""
+           ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
+           closed_messages
+       in
+       check bool "in-turn blob demotion strictly shrinks carried bytes" true
+         (with_blob_demotion.transmitted_bytes < baseline.transmitted_bytes);
+       check bool "in-turn preview fallback shrinks carried bytes even with base_path=\"\"" true
+         (with_preview_fallback.transmitted_bytes < baseline.transmitted_bytes);
+       (* 4. droppable_current_turn_tool_atoms selects oldest closed tool rounds
+          and commits/attaches a compaction anchor even when first_atom = 0. *)
+       let droppable =
+         Try_provider.For_testing.droppable_current_turn_tool_atoms
+           ~first_atom:0
+           ~already_dropped:[]
+           closed_messages
+       in
+       check bool "droppable selects at least one closed round" true (droppable <> []);
+       check bool "droppable never drops atom 0 (User goal)" false (List.mem 0 droppable);
+       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+       let anchor =
+         match
+           Masc.Keeper_compaction.compact_evicted_messages
+             ~keepers_dir
+             ~keeper_id:"p0-1b-keeper"
+             ~trigger:(Masc.Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+             ~evicted_messages:(tool_round 1)
+             ()
+         with
+         | Ok (Some anchor) -> anchor
+         | Ok None -> fail "expected committed compaction anchor"
+         | Error err -> fail (Masc.Keeper_compaction.store_error_to_string err)
+       in
+       let dropped_composed =
+         Try_provider.For_testing.compose_carried_model_input
+           ~compaction_anchor:anchor
+           ~dropped_current_turn_atoms:droppable
+           ~measure_message_bytes:measure
+           ~measure_wire_bytes:wire_measure
+           ~front:None
+           ~accepted:None
+           ~history_digest_at:digest_at
+           ~current_turn_results:Try_provider.Current_turn_verbatim
+           ~base_path
+           ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
+           closed_messages
+       in
+       check bool "dropped current-turn rounds strictly shrink message count" true
+         (List.length dropped_composed.projection.Window.messages < List.length closed_messages + 1);
+       check bool "compaction anchor is injected when current-turn atoms were dropped" true
+         (List.exists Window.is_compaction_anchor dropped_composed.projection.Window.messages))
+;;
+
+(* P1-6: token-vs-byte conversion helper + mixed-size first failover jumping to
+   From_turn_boundary commits a durable Keeper_compaction anchor and projects it. *)
+let test_p1_6_token_to_byte_conversion_and_mixed_size_first_failover_anchor () =
+  check int "zero tokens -> 0 bytes" 0 (Try_provider.For_testing.compaction_bytes_of_tokens 0);
+  check int "negative tokens clamp to 0" 0 (Try_provider.For_testing.compaction_bytes_of_tokens (-42));
+  check int "128k tokens -> 512k bytes" 512_000
+    (Try_provider.For_testing.compaction_bytes_of_tokens 128_000);
+  check int "max_int saturates without wraparound" max_int
+    (Try_provider.For_testing.compaction_bytes_of_tokens max_int);
+  let history = exchanges ~from:0 10 in
+  let digest_at = Window.atom_opening_digest history in
+  let base_path = Filename.temp_dir "masc-p1-6-failover-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+       let keeper_id = "p1-6-mixed-failover" in
+       let anchor =
+         match
+           Masc.Keeper_compaction.compact_evicted_messages
+             ~keepers_dir
+             ~keeper_id
+             ~trigger:(Masc.Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+             ~evicted_messages:(List.filteri (fun i _ -> i < 6) history)
+             ()
+         with
+         | Ok (Some anchor) -> anchor
+         | Ok None -> fail "expected committed anchor for mixed-size failover"
+         | Error err -> fail (Masc.Keeper_compaction.store_error_to_string err)
+       in
+       let persisted =
+         match Masc.Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id with
+         | Ok (Some latest) -> latest
+         | Ok None -> fail "committed anchor not persisted in SQLite"
+         | Error err -> fail (Masc.Keeper_compaction.store_error_to_string err)
+       in
+       check int "persisted anchor epoch matches" anchor.epoch_id persisted.epoch_id;
+       let composed =
+         Try_provider.For_testing.compose_carried_model_input
+           ~compaction_anchor:persisted
+           ~measure_message_bytes:(Masc.Keeper_context_core.message_measurer ())
+           ~measure_wire_bytes:(fun _ -> None)
+           ~front:None
+           ~accepted:None
+           ~history_digest_at:digest_at
+           ~current_turn_results:Try_provider.Current_turn_verbatim
+           ~base_path
+           ~turn_boundary:(Front.Turn_boundary { end_atom = 6 })
+           history
+       in
+       check int "From_turn_boundary drops atoms before turn boundary" 6
+         composed.projection.Window.dropped_atoms;
+       check bool "mixed-size failover projects compaction anchor ahead of carried suffix" true
+         (List.exists Window.is_compaction_anchor composed.projection.Window.messages))
+;;
+
 let () =
   Eio_main.run
   @@ fun _ ->
@@ -918,6 +1166,10 @@ let () =
             test_a_refusal_not_about_size_ends_the_turn_after_one_resend
         ; test_case "a size-refused boundary keeps the front" `Quick
             test_a_size_refused_boundary_keeps_the_front
+        ; test_case "P0-1b current-turn tool demotion, preview fallback, and round drop" `Quick
+            test_p0_1b_current_turn_tool_demotion_preview_and_round_drop
+        ; test_case "P1-6 token-to-byte conversion and mixed-size failover anchor" `Quick
+            test_p1_6_token_to_byte_conversion_and_mixed_size_first_failover_anchor
         ] )
     ; ( "this turn's start"
       , [ test_case "a resumed turn names no start" `Quick test_a_resumed_turn_names_no_start

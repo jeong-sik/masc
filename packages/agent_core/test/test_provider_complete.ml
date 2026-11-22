@@ -2241,6 +2241,131 @@ let test_cache_default_false () =
   Alcotest.(check bool) "default cache off" false cfg.cache_system_prompt
 ;;
 
+(* P1-1: Anthropic direct API volatile-tail cache-write fix.
+   When strictly trailing [System_context; Outside_context] messages are present,
+   attach an explicit block-level cache_control breakpoint on the last cacheable
+   block of the stable prefix and omit top-level cache_control so ephemeral tail
+   blocks bill as plain input rather than 1.25x/2.0x cache-write every turn. *)
+let test_cache_anthropic_volatile_tail_places_explicit_prefix_breakpoint () =
+  let open Yojson.Safe.Util in
+  let with_origin origin msg = { msg with origin } in
+  List.iter
+    (fun (label, cache_extended_ttl, expected_ttl) ->
+       let config =
+         PC.make
+           ~kind:Anthropic
+           ~model_id:"claude-sonnet-5"
+           ~base_url:""
+           ~max_tokens:128
+           ~system_prompt:"Stable system."
+           ~cache_system_prompt:true
+           ~cache_extended_ttl
+           ()
+       in
+       let messages =
+         [ user_msg "stable user turn"
+         ; make_message ~role:Assistant [ Text "stable assistant turn" ]
+         ; with_origin System_context (user_msg "ephemeral clock/world")
+         ; with_origin Outside_context (user_msg "ephemeral outside context")
+         ]
+       in
+       let json = BA.build_request ~config ~messages () |> Yojson.Safe.from_string in
+       Alcotest.(check bool)
+         (label ^ ": top-level cache_control omitted when volatile tail exists")
+         true
+         (json |> member "cache_control" = `Null);
+       let wire_msgs = json |> member "messages" |> to_list in
+       Alcotest.(check int) (label ^ ": 4 messages serialized") 4 (List.length wire_msgs);
+       let prefix_last_block =
+         List.nth wire_msgs 1 |> member "content" |> to_list |> List.hd
+       in
+       let cc = prefix_last_block |> member "cache_control" in
+       Alcotest.(check string)
+         (label ^ ": last stable prefix block gets ephemeral cache_control")
+         "ephemeral"
+         (cc |> member "type" |> to_string);
+       (match expected_ttl with
+        | None ->
+          Alcotest.(check bool) (label ^ ": 5m tier omits ttl") true (cc |> member "ttl" = `Null)
+        | Some ttl ->
+          Alcotest.(check string) (label ^ ": 1h tier keeps ttl") ttl (cc |> member "ttl" |> to_string));
+       List.iter
+         (fun idx ->
+            let blocks = List.nth wire_msgs idx |> member "content" |> to_list in
+            List.iter
+              (fun block ->
+                 Alcotest.(check bool)
+                   (Printf.sprintf "%s: trailing volatile msg %d has no cache_control" label idx)
+                   true
+                   (block |> member "cache_control" = `Null))
+              blocks)
+         [ 2; 3 ])
+    [ "5m", false, None; "1h", true, Some "1h" ];
+  (* ToolResult as last stable prefix block receives explicit breakpoint cleanly. *)
+  let config =
+    PC.make
+      ~kind:Anthropic
+      ~model_id:"claude-sonnet-5"
+      ~base_url:""
+      ~max_tokens:128
+      ~cache_system_prompt:true
+      ()
+  in
+  let tool_msgs =
+    [ user_msg "run tool"
+    ; make_message ~role:Assistant [ ToolUse { id = "t1"; name = "probe"; input = `Assoc [] } ]
+    ; make_message
+        ~role:Tool
+        [ ToolResult
+            { tool_use_id = "t1"
+            ; content = "tool output"
+            ; outcome = Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; with_origin System_context (user_msg "ephemeral clock")
+    ]
+  in
+  let tool_json = BA.build_request ~config ~messages:tool_msgs () |> Yojson.Safe.from_string in
+  Alcotest.(check bool) "tool_result prefix omits top-level cache_control" true
+    (tool_json |> member "cache_control" = `Null);
+  let tr_block =
+    tool_json |> member "messages" |> index 2 |> member "content" |> index 0
+  in
+  Alcotest.(check string) "tool_result block carries cache_control" "ephemeral"
+    (tr_block |> member "cache_control" |> member "type" |> to_string);
+  (* Thinking-only last prefix message skips uncacheable thinking and marks earlier text block. *)
+  let thinking_msgs =
+    [ user_msg "stable user"
+    ; make_message
+        ~role:Assistant
+        [ Thinking { content = "internal"; signature = Some "sig-1" } ]
+    ; with_origin System_context (user_msg "ephemeral clock")
+    ]
+  in
+  let thinking_json =
+    BA.build_request ~config ~messages:thinking_msgs () |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool) "thinking-only last msg skips to earlier cacheable prefix msg" true
+    (thinking_json |> member "cache_control" = `Null);
+  let earlier_block =
+    thinking_json |> member "messages" |> index 0 |> member "content" |> index 0
+  in
+  Alcotest.(check string) "earlier text block holds cache_control" "ephemeral"
+    (earlier_block |> member "cache_control" |> member "type" |> to_string);
+  (* Non-strictly-trailing System_context (appears in prefix too) falls back safely to top-level. *)
+  let mixed_msgs =
+    [ with_origin System_context (user_msg "early system ctx")
+    ; user_msg "user turn"
+    ; with_origin System_context (user_msg "late system ctx")
+    ]
+  in
+  let mixed_json = BA.build_request ~config ~messages:mixed_msgs () |> Yojson.Safe.from_string in
+  Alcotest.(check string) "non-strictly-trailing volatile keeps top-level cache_control" "ephemeral"
+    (mixed_json |> member "cache_control" |> member "type" |> to_string)
+;;
+
 let reference_result () =
   ToolResult
     { tool_use_id = "load-1"
@@ -2590,6 +2715,10 @@ let () =
             "short prompt preserves opt-in"
             `Quick
             test_cache_short_prompt_preserves_opt_in
+        ; test_case
+            "volatile tail places explicit breakpoint on stable prefix"
+            `Quick
+            test_cache_anthropic_volatile_tail_places_explicit_prefix_breakpoint
         ] )
     ; ( "tool_reference"
       , [ test_case "Anthropic emits a tool reference" `Quick test_anthropic_tool_reference_result

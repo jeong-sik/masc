@@ -240,20 +240,36 @@ type route =
   | Rotate_now of { rotate : rotate_class }
   | Exhausted_visible_alive of { terminal : terminal_class }
 
-val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
+val route_of_error
+  :  ?has_backup_candidates:bool
+  -> boundary:error_boundary
+  -> Agent_core.Error.t
+  -> route
 (** Total over every [core_error] class. The caller supplies the actual execution
-    boundary. MASC-internal typed envelopes are decoded only at
+    boundary. When [has_backup_candidates = true] (default [false]), a
+    per-candidate [Official_client_recovery_required] refusal routes to
+    [Rotate_now { rotate = Admission }] so the lane walk can try backup
+    candidates, falling back to
+    [Exhausted_visible_alive { terminal = Session_claim_refused }] when no
+    backup candidates remain. MASC-internal typed envelopes are decoded only at
     [Masc_execution], except [Terminal_effect_failed], the two effect fences
     ([Provider_attempt_effect_fenced], [Tool_correction_lost]),
     [Runtime_connection_closed],
+    [Official_client_recovery_required] when [has_backup_candidates = true],
     and a process-local MASC-carried [Accept_rejected] with no usable progress,
     an empty response shape, and [MaxTokens]. Those exact MASC-owned observations cross the live
     AGENT_CORE boundary and retain their typed routes there. Other accept
     rejections, including plain or foreign-carried serialized messages, remain
     boundary-specific. No arm returns "no route". *)
 
+val max_retry_after_s : float
+(** Declarative ceiling (24h = 86_400.0s) applied to any provider-supplied
+    [Retry-After] wait hint so a misparsed Unix-epoch timestamp or runaway
+    header can never park a Keeper indefinitely. *)
+
 val usable_retry_after : float option -> float option
-(** The provider hint that names a wait: present, finite, above zero. A
+(** The provider hint that names a wait: present, finite, above zero, clamped
+    to {!max_retry_after_s}. A
     hint that is absent, zero, negative, infinite or NaN names none, and every
     reader of a hint answers from this one rule — the candidate's rate limit
     ([Runtime_candidate_backpressure_state.note_rate_limit]) stays until a

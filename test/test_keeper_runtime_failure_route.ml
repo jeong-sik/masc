@@ -7,8 +7,8 @@
 
 module KFR = Keeper_runtime_failure_route
 
-let route_of_agent_core_error = KFR.route_of_error ~boundary:KFR.Agent_core_execution
-let route_of_masc_error = KFR.route_of_error ~boundary:KFR.Masc_execution
+let route_of_agent_core_error err = KFR.route_of_error ~boundary:KFR.Agent_core_execution err
+let route_of_masc_error err = KFR.route_of_error ~boundary:KFR.Masc_execution err
 
 let route = Alcotest.testable (fun fmt r -> Format.pp_print_string fmt (KFR.route_kind_label r ^ ":" ^ KFR.route_class_label r)) ( = )
 
@@ -1057,6 +1057,67 @@ let test_model_absent_classifier () =
     (KFR.core_error_is_model_absent
        (Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired { message = "402" })))
 
+(* P0-4: Official_client_recovery_required rotates to backup candidates when
+   the lane has them, and exhausts visible-alive only on the last candidate. *)
+let test_official_client_recovery_required_failover_vs_last_candidate () =
+  let err =
+    internal_err
+      (Keeper_internal_error.Official_client_recovery_required
+         { runtime_id = "codex.default"
+         ; recovery_id = "rec-1"
+         ; reason = Keeper_internal_error.Effect_fenced
+         })
+  in
+  List.iter
+    (fun (label, boundary) ->
+       Alcotest.check route
+         (label ^ ": with backup candidates -> Rotate_now Admission")
+         (KFR.Rotate_now { rotate = KFR.Admission })
+         (KFR.route_of_error ~has_backup_candidates:true ~boundary err);
+       Alcotest.check route
+         (label ^ ": last candidate -> Exhausted_visible_alive Session_claim_refused")
+         (KFR.Exhausted_visible_alive { terminal = KFR.Session_claim_refused })
+         (KFR.route_of_error ~has_backup_candidates:false ~boundary err))
+    [ "agent_core", KFR.Agent_core_execution; "masc", KFR.Masc_execution ]
+;;
+
+(* P1-5: Retry-After hints above max_retry_after_s (including misparsed Unix
+   timestamps) clamp cleanly to max_retry_after_s instead of parking forever. *)
+let test_retry_after_hint_clamps_to_max_retry_after_s () =
+  Alcotest.(check (float 0.001)) "ceiling is 24h" 86_400.0 KFR.max_retry_after_s;
+  check_route
+    "Unix-epoch RateLimited retry_after clamps to max_retry_after_s"
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Rate_limited; retry_after = Some KFR.max_retry_after_s })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.RateLimited
+          { retry_after = Some 1_760_000_000.0; message = "429" }));
+  check_route
+    "over-ceiling HardQuota retry_after clamps to max_retry_after_s"
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Hard_quota KFR.Provider_quota_refused
+       ; retry_after = Some KFR.max_retry_after_s
+       })
+    (Agent_core.Error.Provider
+       (Llm_provider.Error.HardQuota
+          { provider = "glm"; retry_after = Some 120_000.0; detail = "quota" }));
+  check_route
+    "within-ceiling 12h hint is preserved verbatim"
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Rate_limited; retry_after = Some 43_200.0 })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.RateLimited
+          { retry_after = Some 43_200.0; message = "429" }));
+  List.iter
+    (fun (label, bad_hint) ->
+       check_route
+         (label ^ " becomes None")
+         (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None })
+         (Agent_core.Error.Api
+            (Llm_provider.Retry.RateLimited { retry_after = Some bad_hint; message = "429" })))
+    [ "zero", 0.0; "negative", -5.0; "nan", nan; "infinity", infinity ]
+;;
+
 let () =
   Alcotest.run
     "keeper_runtime_failure_route"
@@ -1065,6 +1126,16 @@ let () =
             "typed not-found is model absence"
             `Quick
             test_model_absent_classifier
+        ] )
+    ; ( "immortal_circulation_f1"
+      , [ Alcotest.test_case
+            "P0-4 official_client_recovery_required rotates only with backup candidates"
+            `Quick
+            test_official_client_recovery_required_failover_vs_last_candidate
+        ; Alcotest.test_case
+            "P1-5 retry_after_hint clamps to max_retry_after_s"
+            `Quick
+            test_retry_after_hint_clamps_to_max_retry_after_s
         ] )
     ; ( "api"
       , [ Alcotest.test_case "rate limited hint" `Quick test_api_rate_limited_threads_hint

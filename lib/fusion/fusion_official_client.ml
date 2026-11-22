@@ -281,6 +281,7 @@ let panel_failure ~runtime_id = function
        | Runtime_antigravity.Spawn_capacity_busy _
        | Runtime_antigravity.Protocol_error _
        | Runtime_antigravity.State_callback_failed _
+       | Runtime_antigravity.Context_window_exceeded _
        | Runtime_antigravity.Turn_failed _
        | Runtime_antigravity.Result_not_completed _
        | Runtime_antigravity.Actions_denied _

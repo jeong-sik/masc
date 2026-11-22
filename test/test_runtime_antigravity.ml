@@ -2381,11 +2381,90 @@ let test_result_completes_when_the_cli_hangs_in_shutdown () =
       check string "reply" "MASC_ANTIGRAVITY_OK\n" turn.Runtime_antigravity.text)
 ;;
 
+(* P1-2: structured error_code and JSON refusal envelopes classify as typed
+   Context_window_exceeded with exact activity flags; free-form prose stays
+   Turn_failed. *)
+let test_structured_context_window_exceeded_classification () =
+  let result_with_code ?(conversation_id = "conversation-1") ~error_code ~error () =
+    Printf.sprintf
+      {|{"event":"result","result":{"conversation_id":%S,"status":"ERROR","response":"","error":%S,"error_code":%S,"duration_seconds":0.2,"num_turns":1,"usage":{"input_tokens":100,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":100}}}|}
+      conversation_id error error_code
+  in
+  (* 1. Post-init structured error_code with no prior activity. *)
+  with_fixture
+    [ init (); result_with_code ~error_code:"context_length_exceeded" ~error:"token limit exceeded" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Context_window_exceeded
+                  { tool_effect_attempted = false; response_emitted = false; _ }) -> ()
+       | Error err -> fail ("expected activity-free Context_window_exceeded, got " ^ Runtime_antigravity.error_to_string err)
+       | Ok _ -> fail "overflow result unexpectedly succeeded");
+  (* 2. Pre-init structured error_code. *)
+  with_fixture
+    [ result_with_code ~conversation_id:"" ~error_code:"prompt_too_long" ~error:"input too large" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Context_window_exceeded
+                  { tool_effect_attempted = false; response_emitted = false; _ }) -> ()
+       | Error err -> fail ("expected pre-init Context_window_exceeded, got " ^ Runtime_antigravity.error_to_string err)
+       | Ok _ -> fail "pre-init overflow unexpectedly succeeded");
+  (* 3. After text delta -> response_emitted = true. *)
+  with_fixture
+    [ init ()
+    ; step ~index:1 ~state:"ACTIVE" ~step_type:"agent_response" ~text_delta:"partial" ()
+    ; result_with_code ~error_code:"context_length_exceeded" ~error:"hit cap mid-reply" ()
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Context_window_exceeded
+                  { tool_effect_attempted = false; response_emitted = true; _ }) -> ()
+       | Error err -> fail ("expected response_emitted=true Context_window_exceeded, got " ^ Runtime_antigravity.error_to_string err)
+       | Ok _ -> fail "post-delta overflow unexpectedly succeeded");
+  (* 4. After tool step -> tool_effect_attempted = true. *)
+  with_fixture
+    [ init ()
+    ; step ~index:2 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ()
+    ; result_with_code ~error_code:"context_length_exceeded" ~error:"hit cap after tool" ()
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Context_window_exceeded
+                  { tool_effect_attempted = true; response_emitted = false; _ }) -> ()
+       | Error err -> fail ("expected tool_effect_attempted=true Context_window_exceeded, got " ^ Runtime_antigravity.error_to_string err)
+       | Ok _ -> fail "post-tool overflow unexpectedly succeeded");
+  (* 5. Structured JSON error body without top-level error_code field. *)
+  with_fixture
+    [ init ()
+    ; result ~status:"ERROR" ~response:""
+        ~error:{|{"error":{"code":"context_window_exceeded","message":"too many input tokens"}}|} ()
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Context_window_exceeded
+                  { tool_effect_attempted = false; response_emitted = false; _ }) -> ()
+       | Error err -> fail ("expected JSON envelope Context_window_exceeded, got " ^ Runtime_antigravity.error_to_string err)
+       | Ok _ -> fail "structured JSON overflow unexpectedly succeeded");
+  (* 6. Free-form prose without error_code or JSON envelope stays Turn_failed (zero prose matching). *)
+  with_fixture
+    [ init ()
+    ; result ~status:"ERROR" ~response:"" ~error:"Your prompt is too long for the context window" ()
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed _) -> ()
+       | Error err -> fail ("free-form prose must stay Turn_failed, got " ^ Runtime_antigravity.error_to_string err)
+       | Ok _ -> fail "prose error unexpectedly succeeded")
+;;
+
 let () =
   run
     "runtime_antigravity"
     [ ( "stream-json"
-      , [ test_case "response content identity and native completion" `Quick test_response_step_ends_preserve_content_identity
+      , [ test_case
+            "P1-2 structured context_window_exceeded classification (no prose matching)"
+            `Quick
+            test_structured_context_window_exceeded_classification
+        ; test_case "response content identity and native completion" `Quick test_response_step_ends_preserve_content_identity
         ; test_case "raw current and previous response reconciliation" `Quick
             test_keeper_reconciles_raw_current_and_previous_messages
         ; test_case "complete response closes before tool" `Quick test_done_only_response_closes_before_next_tool

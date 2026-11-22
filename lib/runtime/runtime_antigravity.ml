@@ -305,6 +305,11 @@ type error = Protocol.error =
       ; detail : string
       }
   | State_callback_failed of string
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
   | Turn_failed of string
   | Result_not_completed of noncompletion_result
   | Actions_denied of denied_result
@@ -329,6 +334,8 @@ let error_to_string = function
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Antigravity stream-json protocol error during %s: %s" stage detail
   | State_callback_failed detail -> "Antigravity conversation state callback failed: " ^ detail
+  | Context_window_exceeded { message; _ } ->
+    "Antigravity context window exceeded: " ^ message
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
   | Result_not_completed { status; error; _ } ->
     Printf.sprintf "Antigravity result did not complete (status=%s)%s"
@@ -447,6 +454,7 @@ type wire_event = Protocol.wire_event =
       ; status : result_status
       ; response : string
       ; error : string option
+      ; error_code : string option
       ; num_turns : int
       ; usage : usage
       ; denied : denied_actions option
@@ -626,10 +634,16 @@ let parse_result fields =
     | Some value -> Yojson.Safe.to_string value
   in
   let* error = optional_string stage "error" result_fields in
+  let* error_code = optional_string stage "error_code" result_fields in
+  let* error_code =
+    match error_code with
+    | Some _ as code -> Ok code
+    | None -> optional_string stage "code" result_fields
+  in
   let* num_turns = required_nonnegative_int stage "num_turns" result_fields in
   let* usage = parse_usage stage result_fields in
   let* denied = parse_denied_actions stage result_fields in
-  Ok (Result { conversation_id; status; response; error; num_turns; usage; denied })
+  Ok (Result { conversation_id; status; response; error; error_code; num_turns; usage; denied })
 ;;
 
 let parse_wire_line line =
@@ -1222,6 +1236,16 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
          (* A corrected trajectory can report ERROR with a real reply.
             Prior streamed text cannot rescue an empty terminal response. *)
          if deliverable then complete terminal ~trajectory_error:(Some detail)
+         else if
+           Protocol.is_structured_context_overflow
+             ~error_code:terminal.error_code ~detail ~stderr
+         then
+           Error
+             (Context_window_exceeded
+                { message = detail
+                ; tool_effect_attempted = terminal.tool_steps > 0
+                ; response_emitted = terminal.text_streamed
+                })
          else Error (Turn_failed detail)
      (* The CLI's own noncompletion keeps its stricter recovery fence; the
         refusals ride along as evidence. *)
@@ -1236,8 +1260,21 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })
   | (`Exited _ | `Signaled _), None ->
     let exit = status_to_string status in
-    let stderr = redact_stderr_tail stderr in
-    Error (Process_exited (if stderr = "" then exit else exit ^ ": " ^ stderr))
+    let stderr_redacted = redact_stderr_tail stderr in
+    if Protocol.is_structured_context_overflow ~error_code:None ~detail:"" ~stderr
+    then (
+      let tool_effect_attempted, response_emitted = Protocol.activity_observed state in
+      Error
+        (Context_window_exceeded
+           { message =
+               if stderr_redacted = "" then exit else exit ^ ": " ^ stderr_redacted
+           ; tool_effect_attempted
+           ; response_emitted
+           }))
+    else
+      Error
+        (Process_exited
+           (if stderr_redacted = "" then exit else exit ^ ": " ^ stderr_redacted))
 ;;
 
 module For_testing = struct

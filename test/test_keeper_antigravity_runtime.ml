@@ -835,7 +835,12 @@ let test_keeper_projects_mcp_tool_and_settles () =
                           ~goal:"Observe recall delivery" ("recall fixture system", snd unchanged));
                         let prompt = Fs_compat.load_file
                           (Filename.concat base_path "antigravity-prompt.txt") in
-                        check bool "recall remains available without a compaction witness" true
+                        let expect_recall = index = 0 || index = 2 in
+                        check bool
+                          (if expect_recall
+                           then "new or changed recall is delivered"
+                           else "unchanged recall is omitted on cached resume")
+                          expect_recall
                           (String_util.contains_substring prompt recall);
                         check bool "changing clock survives" true
                           (String_util.contains_substring prompt clock);
@@ -912,8 +917,8 @@ let test_keeper_projects_mcp_tool_and_settles () =
         | None -> fail "resumed Antigravity prompt was not captured"
       in
       check bool
-        "resume carries dynamic System context without a compaction witness"
-        true
+        "resume omits unchanged dynamic System context held by session"
+        false
         (String_util.contains_substring
            resumed_prompt
            (Keeper_official_client_host.encode_history_message
@@ -3127,11 +3132,218 @@ let test_standing_system_observations_resume_with_replacement_notice () =
       "START:conv-5" mode7)
 ;;
 
+(* P1-2: Antigravity overflow classification, 0-atom Resume shrink capacity,
+   and end-to-end Resume overflow rollover + compaction anchor commit. *)
+let test_p1_2_antigravity_overflow_rollover_and_anchor () =
+  (* 1. Unit checks on typed core-error and recovery-failure mapping. *)
+  let clean_overflow =
+    Runtime_antigravity.Context_window_exceeded
+      { message = "limit reached"
+      ; tool_effect_attempted = false
+      ; response_emitted = false
+      }
+  in
+  let post_effect_overflow =
+    Runtime_antigravity.Context_window_exceeded
+      { message = "limit reached after tool"
+      ; tool_effect_attempted = true
+      ; response_emitted = false
+      }
+  in
+  (match Keeper_antigravity_runtime.For_testing.runtime_error_to_core_error clean_overflow with
+   | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _) -> ()
+   | other -> fail ("activity-free overflow must map to ContextOverflow, got " ^ Agent_core.Error.to_string other));
+  (match Keeper_antigravity_runtime.For_testing.runtime_error_to_core_error post_effect_overflow with
+   | Agent_core.Error.Provider
+       (Llm_provider.Error.ProviderReportedError
+          { error_type = Some "context_window_exceeded_after_activity"; _ }) -> ()
+   | other -> fail ("post-activity overflow must not map to retryable ContextOverflow, got " ^ Agent_core.Error.to_string other));
+  let module Store = Keeper_official_client_session_store in
+  check bool "Gate Resume overflow maps to Vendor_session_full No_activity_observed" true
+    (Keeper_antigravity_runtime.For_testing.recovery_failure_of_attempt
+       ~conversation_mode:(Runtime_antigravity.Resume { conversation_id = "c1" })
+       ~gate_continuation:true
+       clean_overflow
+     = Store.Vendor_session_full Store.No_activity_observed);
+  check bool "non-Gate clean overflow maps to Input_rejected Bootstrap_floor_exceeded" true
+    (Keeper_antigravity_runtime.For_testing.recovery_failure_of_attempt
+       ~conversation_mode:(Runtime_antigravity.Resume { conversation_id = "c1" })
+       ~gate_continuation:false
+       clean_overflow
+     = Store.Input_rejected Store.Bootstrap_floor_exceeded);
+  check bool "post-activity overflow maps to Input_rejected Effect_fenced" true
+    (Keeper_antigravity_runtime.For_testing.recovery_failure_of_attempt
+       ~conversation_mode:(Runtime_antigravity.Resume { conversation_id = "c1" })
+       ~gate_continuation:false
+       post_effect_overflow
+     = Store.Input_rejected Store.Effect_fenced);
+  (match
+     Keeper_antigravity_runtime.For_testing.observe_resume_shrink_capacity
+       ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "ag-0" })
+       ~capacity_bytes:100_000
+       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+       ~keeper_name:"ag-0"
+       ~runtime_id:"antigravity.gemini"
+       []
+   with
+   | Ok (Some next_cap, None) ->
+     check bool "0-atom Resume offers strictly smaller shrink capacity" true (next_cap < 100_000)
+   | Ok _ -> fail "0-atom Resume did not populate observed_next_shrink_capacity_bytes"
+   | Error err -> fail (Agent_core.Error.to_string err));
+  (* 2. End-to-end Resume overflow rollover (both 0 local atoms and with history). *)
+  let run_rollover_case ~label ~initial_messages ~expect_anchor =
+    let base_path = temp_workspace () |> Unix.realpath in
+    let snapshot = Runtime.For_testing.snapshot () in
+    Fun.protect
+      ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path)
+      (fun () ->
+         Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+         let keeper_name = "antigravity-rollover" in
+         Masc_test_deps.declare_fixture_keeper
+           ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+         let oauth_source = Filename.concat base_path "operator-oauth-token" in
+         write_file ~mode:0o600 oauth_source
+           (Masc_test_deps.antigravity_oauth_fixture "rollover-account");
+         let mode_path = Filename.concat base_path "rollover-modes.log" in
+         let counter_path = Filename.concat base_path "rollover-start-counter" in
+         let cwd_json =
+           Yojson.Safe.to_string
+             (`String
+                (Env_config_core.strip_trailing_slashes
+                   (Filename.concat base_path
+                      (Keeper_sandbox.host_root_rel_of_profile
+                         Keeper_types_profile_sandbox.Docker
+                         keeper_name))))
+         in
+         let cli_path = Filename.concat base_path "agy-rollover-fixture.sh" in
+         write_file ~mode:0o700 cli_path
+           (Printf.sprintf
+              {|#!/bin/sh
+set -eu
+mode=START
+conv=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--conversation" ]; then
+    mode=RESUME
+    conv="$arg"
+    break
+  fi
+  prev="$arg"
+done
+cat >/dev/null
+if [ "$mode" = "RESUME" ]; then
+  printf 'RESUME:%%s\n' "$conv" >> %s
+  printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":[],"permission_mode":"always-proceed"}}\n' "$conv"
+  printf '{"event":"result","result":{"conversation_id":"%%s","status":"ERROR","response":"","error":"prompt exceeds window","error_code":"context_length_exceeded","duration_seconds":0.1,"num_turns":2,"usage":{"input_tokens":200000,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":200000}}}\n' "$conv"
+  exit 0
+fi
+count=0
+if [ -f %s ]; then
+  count=$(cat %s)
+fi
+count=$((count + 1))
+printf '%%s\n' "$count" > %s
+conv="conv-$count"
+printf 'START:%%s\n' "$conv" >> %s
+printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":[],"permission_mode":"always-proceed"}}\n' "$conv"
+printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"RECOVERED_%%s","error":null,"duration_seconds":0.1,"num_turns":1,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":0,"total_tokens":16}}}\n' "$conv" "$conv"
+|}
+              (shell_quote mode_path)
+              cwd_json
+              (shell_quote counter_path)
+              (shell_quote counter_path)
+              (shell_quote counter_path)
+              (shell_quote mode_path)
+              cwd_json);
+         let runtime_path = Filename.concat base_path "runtime.toml" in
+         write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+         Eio_main.run (fun env ->
+           Eio.Switch.run (fun sw ->
+             Eio_context.set_env env;
+             Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw
+               (fun () ->
+                  Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                  let config =
+                    match Runtime.get_runtime_by_id "antigravity.gemini" with
+                    | Some { Runtime_instance.execution = Runtime_execution.Antigravity_cli cfg; _ } ->
+                      cfg
+                    | Some _ | None -> fail "Antigravity binding missing"
+                  in
+                  let run_once goal =
+                    Keeper_antigravity_runtime.run
+                      ~read_retained_media:None
+                      ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only
+                      ~host:(antigravity_host ())
+                      ~configured_reasoning_effort:None
+                      ~turn_timeout_s:None
+                      ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+                      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+                      ~accepts_image_input:false
+                      ~runtime_id:"antigravity.gemini"
+                      ~keeper_name
+                      ~pre_tool_rejects:(ref [])
+                      ~base_path
+                      ~goal
+                      ~goal_blocks:None
+                      ~system_prompt:"ANTIGRAVITY_ROLLOVER_SYSTEM"
+                      ~tools:[]
+                      ~initial_messages
+                      ~model_input_projection:None
+                      ~on_transmitted_model_input:(fun _ -> ())
+                      ~hooks:None
+                      ~context_injector:None
+                      ~context:(Some (Agent_core.Context.create ()))
+                      ~event_bus:None
+                      ~raw_trace:None
+                      ~on_event:None
+                      ~config
+                      ()
+                  in
+                  let a1 = run_once "Turn 1" in
+                  (match a1.result with
+                   | Ok _ -> ()
+                   | Error err -> fail (label ^ " turn 1 failed: " ^ Agent_core.Error.to_string err));
+                  let a2 = run_once "Turn 2 overflow rollover" in
+                  (match a2.result with
+                   | Ok run_res ->
+                     check string (label ^ ": rollover fresh start answered")
+                       "RECOVERED_conv-2"
+                       (Agent_core.Types.text_of_response run_res.response)
+                   | Error err ->
+                     fail (label ^ " turn 2 failed instead of rolling over: " ^ Agent_core.Error.to_string err));
+                  let modes =
+                    In_channel.with_open_bin mode_path In_channel.input_all
+                    |> String.trim |> String.split_on_char '\n'
+                  in
+                  check (list string) (label ^ ": Start -> Resume overflow -> Restart_fresh Start")
+                    [ "START:conv-1"; "RESUME:conv-1"; "START:conv-2" ]
+                    modes;
+                  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+                  match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
+                  | Ok anchor ->
+                    check bool (label ^ ": anchor presence matches evicted history")
+                      expect_anchor (Option.is_some anchor)
+                  | Error err -> fail (Keeper_compaction.store_error_to_string err)))))
+  in
+  run_rollover_case ~label:"antigravity 0-atom resume overflow" ~initial_messages:[] ~expect_anchor:false;
+  run_rollover_case
+    ~label:"antigravity history resume overflow commits anchor"
+    ~initial_messages:
+      [ Agent_core.Types.user_msg "prior user 1"
+      ; { (Agent_core.Types.user_msg "prior assistant 1") with role = Agent_core.Types.Assistant }
+      ]
+    ~expect_anchor:true
+;;
+
 let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_antigravity_runtime"
-    [ ( "async result outbox"
+    [ ( "immortal_circulation_f1"
+        , [ test_case "P1-2 Antigravity overflow rollover and compaction anchor" `Quick
+              test_p1_2_antigravity_overflow_rollover_and_anchor ] )
+    ; ( "async result outbox"
         , [test_case "original result survives vendor session replacement" `Quick
              test_original_result_survives_a_vendor_session_change])
     ; ( "lifecycle"

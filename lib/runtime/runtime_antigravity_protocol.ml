@@ -96,6 +96,11 @@ type error =
       ; detail : string
       }
   | State_callback_failed of string
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
   | Turn_failed of string
   | Result_not_completed of noncompletion_result
   | Actions_denied of denied_result
@@ -135,6 +140,7 @@ type wire_event =
       ; status : result_status
       ; response : string
       ; error : string option
+      ; error_code : string option
       ; num_turns : int
       ; usage : usage
       ; denied : denied_actions option
@@ -169,11 +175,13 @@ type terminal = {
   status : result_status;
   response : string;
   error : string option;
+  error_code : string option;
   num_turns : int;
   usage : usage;
   denied : denied_actions option;
   tool_steps : int;
   tool_errors : int;
+  text_streamed : bool;
 }
 
 type running =
@@ -191,6 +199,7 @@ type received_result =
   { status : result_status
   ; response : string
   ; error : string option
+  ; error_code : string option
   ; num_turns : int
   ; usage : usage
   ; denied : denied_actions option
@@ -214,12 +223,85 @@ let terminal (state : state) : terminal option =
       ; status = result.status
       ; response = result.response
       ; error = result.error
+      ; error_code = result.error_code
       ; num_turns = result.num_turns
       ; usage = result.usage
       ; denied = result.denied
       ; tool_steps = running.tool_steps
       ; tool_errors = running.tool_errors
+      ; text_streamed = running.text_streamed
       }
+
+let activity_observed (state : state) =
+  match state with
+  | Awaiting_init -> false, false
+  | Admitted running | Completed { running; result = _ } ->
+    running.tool_steps > 0, running.text_streamed
+
+let is_structured_overflow_code code =
+  match String.lowercase_ascii (String.trim code) with
+  | "context_length_exceeded"
+  | "context_window_exceeded"
+  | "prompt_too_long"
+  | "max_tokens_exceeded"
+  | "request_too_large"
+  | "model_context_length_exceeded"
+  | "invalid_argument_prompt_too_long" -> true
+  | _ -> false
+
+let json_fields_have_structured_overflow_code json =
+  let string_code_matches fields key =
+    match List.assoc_opt key fields with
+    | Some (`String code) -> is_structured_overflow_code code
+    | Some _ | None -> false
+  in
+  let check_object fields =
+    string_code_matches fields "error_code"
+    || string_code_matches fields "code"
+    || string_code_matches fields "type"
+    || string_code_matches fields "status"
+  in
+  match json with
+  | `Assoc fields ->
+    check_object fields
+    || (match List.assoc_opt "error" fields with
+        | Some (`Assoc err_fields) -> check_object err_fields
+        | Some _ | None -> false)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false
+
+let json_body_is_structured_overflow body =
+  let check candidate =
+    match
+      Llm_provider.Retry.classify_structured_refusal
+        ~retry_after_header:None ~status:400 ~body:candidate
+    with
+    | Some (Llm_provider.Retry.Structured_context_overflow _) -> true
+    | Some (Llm_provider.Retry.Structured_account_quota _) | None ->
+      (try json_fields_have_structured_overflow_code (Yojson.Safe.from_string candidate) with
+       | Yojson.Json_error _ -> false)
+  in
+  let trimmed = String.trim body in
+  if trimmed = ""
+  then false
+  else if check trimmed
+  then true
+  else (
+    match String.index_opt trimmed '{' with
+    | Some idx when idx > 0 ->
+      check (String.sub trimmed idx (String.length trimmed - idx))
+    | Some _ | None -> false)
+
+let is_structured_context_overflow ~error_code ~detail ~stderr =
+  let code_matches =
+    match error_code with
+    | Some code -> is_structured_overflow_code code
+    | None -> false
+  in
+  code_matches
+  || json_body_is_structured_overflow detail
+  || (stderr <> ""
+      && (json_body_is_structured_overflow stderr
+          || List.exists json_body_is_structured_overflow (String.split_on_char '\n' stderr)))
 
 (* Only an ACTIVE tool update changes the existing idle-read phase. *)
 let read_phase (state : state) : read_phase =
@@ -412,16 +494,25 @@ let advance ~expected_model ~expected_cwd ~conversation_mode
         { candidate = Admitted running
         ; required = text_obligations @ completion_obligations @ native_obligations
         }
-  | Result { conversation_id; status; response; error; num_turns; usage; denied } ->
+  | Result { conversation_id; status; response; error; error_code; num_turns; usage; denied } ->
     let stage = "result event" in
     let* running =
       match state, status with
       | Awaiting_init, Result_error ->
-        Error
-          (Turn_failed
-             (match error with
-              | Some detail -> detail
-              | None -> "status=ERROR before init"))
+        let detail =
+          match error with
+          | Some detail -> detail
+          | None -> "status=ERROR before init"
+        in
+        if is_structured_context_overflow ~error_code ~detail ~stderr:""
+        then
+          Error
+            (Context_window_exceeded
+               { message = detail
+               ; tool_effect_attempted = false
+               ; response_emitted = false
+               })
+        else Error (Turn_failed detail)
       | Awaiting_init, Success -> protocol_error stage "received result before init"
       | Awaiting_init, Not_completed status ->
         Error (Result_not_completed
@@ -453,7 +544,9 @@ let advance ~expected_model ~expected_cwd ~conversation_mode
           else []
         | Not_completed _, None -> []
     in
-    let result : received_result = { status; response; error; num_turns; usage; denied } in
+    let result : received_result =
+      { status; response; error; error_code; num_turns; usage; denied }
+    in
     Ok
       { candidate = Completed { running; result }
       ; required =

@@ -188,6 +188,124 @@ let test_lines_that_do_not_decode_are_counted () =
     (archive_text place ~current:(memory state))
 ;;
 
+let test_compact_log_preserves_promotions_across_reboot_and_archive_read () =
+  let place = started_place () in
+  let state = after_two_removals place in
+  let store =
+    match state.state with
+    | Idle { store; _ } -> store
+    | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _ ->
+      fail "expected idle store"
+  in
+  let held_fact = List.hd (Store.memory store).facts in
+  let promo : Masc.Librarian_lifecycle.world_promotion =
+    { source_fact_ids = [ Types.memory_id held_fact ]
+    ; claim = "shared platform invariant"
+    ; category = Types.Validated_approach
+    ; facets = [ "platform" ]
+    ; scope = "workspace"
+    }
+  in
+  let qid =
+    match
+      Masc.Librarian_question_id.of_halves
+        ~front:(String.make 32 '1')
+        ~back:(String.make 32 '2')
+    with
+    | Some q -> q
+    | None -> fail "bad qid"
+  in
+  let room_q : Masc.Librarian_room_result.question =
+    { id = qid
+    ; memory = [ "m1", Types.memory_id held_fact ]
+    ; basis = Masc.Librarian_log.snapshot_after (Store.tail store)
+    ; trace = "molt-promo-test"
+    }
+  in
+  let plan : Masc.Librarian_plan.t =
+    { facts = (Store.memory store).facts
+    ; effects = { Effects.empty with promotions = [ promo ] }
+    ; working_state = Masc.Librarian_plan.Kept
+    }
+  in
+  let store_with_promo =
+    match
+      Store.commit_molt store ~at:210.0 ~question:room_q ~slot:"slot-1"
+        ~trigger:(Masc.Librarian_lifecycle.Compaction_epoch_advanced { epoch_id = 1 }) plan
+    with
+    | Store.Committed { store; _ } -> store
+    | Store.Committed_without_snapshot _ | Store.Stopped _ | Store.Not_a_snapshot _ ->
+      fail "expected committed molt with promotion"
+  in
+  let _compacted_store, compacted_lines =
+    match Store.compact_log store_with_promo ~at:211.0 with
+    | Ok res -> res
+    | Error _ -> fail "compact_log failed"
+  in
+  check bool "compacted multiple lines" true (compacted_lines >= 5);
+  (* Simulate crash right after compact_log and reboot via Store.boot:
+     unannounced Promote_to_world MUST still be recovered from Checkpoint tail! *)
+  let rebooted =
+    match
+      Store.boot ~memory_dir:place.memory_dir ~turns_dir:place.turns_dir ~keeper_id ~at:212.0
+    with
+    | Ok s -> s
+    | Error _ -> fail "reboot after compact_log failed"
+  in
+  (match Store.last_promotions rebooted with
+   | Some (_seq, [ recovered ]) ->
+     check string "recovered promotion claim after compact_log reboot"
+       "shared platform invariant" recovered.claim
+   | Some (_, promos) ->
+     failf "expected 1 recovered promotion, got %d" (List.length promos)
+   | None -> fail "compact_log dropped unannounced Promote_to_world across reboot!");
+  (* Cold archive + live-first Archive.read still returns all 3 removed facts. *)
+  check (pair (list string) int) "archive read preserves all removals after compact_log"
+    (all_three, 0)
+    (archive_text place ~current:(Store.memory rebooted).facts)
+;;
+
+let test_eio_concurrent_compact_log_and_archive_read () =
+  let place = started_place () in
+  let state = after_two_removals place in
+  let store =
+    match state.state with
+    | Idle { store; _ } -> store
+    | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _ ->
+      fail "expected idle store"
+  in
+  let current = (Store.memory store).facts in
+  (* Single-domain Eio concurrency test: Store.compact_log suspends fibers inside
+     Fs_compat.save_file_atomic_strict (Systhread_host.run) while holding
+     Librarian_archive.with_path_lock; a concurrent Librarian_archive.read on the
+     same domain must wait cooperatively via Cross_context_mutex (never self-deadlock). *)
+  Eio_main.run (fun _env ->
+    let compact_result = ref None in
+    let read_results = ref [] in
+    Eio.Fiber.both
+      (fun () ->
+         compact_result := Some (Store.compact_log store ~at:250.0))
+      (fun () ->
+         for _ = 1 to 10 do
+           let res = Archive.read (log_path place) ~current in
+           read_results := res :: !read_results;
+           Eio.Fiber.yield ()
+         done);
+    (match !compact_result with
+     | Some (Ok (_compacted_store, count)) ->
+       check bool "concurrent Eio compact_log succeeded" true (count >= 4)
+     | Some (Error _) -> fail "concurrent Eio compact_log failed"
+     | None -> fail "concurrent Eio compact_log did not finish");
+    List.iter
+      (fun res ->
+         match res with
+         | Error _ -> fail "concurrent Eio archive read failed"
+         | Ok { Archive.left; unreadable } ->
+           check int "zero unreadable lines during concurrent compaction" 0 unreadable;
+           check int "all 3 removals visible during concurrent compaction" 3 (List.length left))
+      !read_results)
+;;
+
 let () =
   run "librarian_archive"
     [ ( "left"
@@ -195,6 +313,10 @@ let () =
         ; test_case "a fact added again" `Quick test_a_fact_added_again_is_not_left
         ; test_case "a fact the snapshot holds" `Quick test_a_fact_the_snapshot_holds_is_not_left
         ; test_case "lines that do not decode" `Quick test_lines_that_do_not_decode_are_counted
+        ; test_case "compact_log preserves promotions across reboot & live-first archive read" `Quick
+            test_compact_log_preserves_promotions_across_reboot_and_archive_read
+        ; test_case "Eio concurrent compact_log and archive read never deadlocks" `Quick
+            test_eio_concurrent_compact_log_and_archive_read
         ] )
     ]
 ;;

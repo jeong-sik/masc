@@ -17,6 +17,10 @@ type asked =
   (** [None] for a reactive [Make_room] ask; [Some trigger] for a proactive
       structural [Molt_and_synthesize] ask that commits through
       {!Librarian_store.commit_molt} followed by {!Librarian_store.compact_log}. *)
+  ; category_filter : Keeper_memory_os_types.category option
+  (** When [Some category], restricts the [memory:] array shown in the room/molt
+      question to facts of that category (chunked molt fallback when full Memory
+      hits [Fits_none]). *)
   }
 
 (** What the question showed, as the writer commits it. *)

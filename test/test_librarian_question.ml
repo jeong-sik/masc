@@ -292,13 +292,50 @@ let molt_room_question_carries_trigger_and_world_index () =
     (List.mem
        ("molt_trigger: " ^ Yojson.Safe.to_string (Masc.Librarian_lifecycle.molt_trigger_to_json trigger))
        lines);
+  let contains_sub ~needle haystack =
+    let nlen = String.length needle in
+    let hlen = String.length haystack in
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    nlen = 0 || loop 0
+  in
+  check bool "world_index line carries explicit untrusted workspace notes framing" true
+    (List.exists
+       (fun line ->
+          String.starts_with ~prefix:"world_index: " line
+          && contains_sub ~needle:"[UNTRUSTED WORKSPACE NOTES" line)
+       lines);
   let plain_room =
     Question.make_room ~lane ~from ~memory:(memory (facts ())) ~trace:"trace-molt" ()
   in
   check bool "world_index changes front half" false
     (String.equal plain_room.question.id.front room.question.id.front);
   check bool "molt_trigger changes back half" false
-    (String.equal plain_room.question.id.back room.question.id.back)
+    (String.equal plain_room.question.id.back room.question.id.back);
+  (* Per-category chunked room question filters memory facts while preserving canonical IDs *)
+  let all_facts = facts () in
+  let cat_room =
+    Question.make_room
+      ~molt_trigger:trigger
+      ~category_filter:Types.Constraint
+      ~lane
+      ~from
+      ~memory:(memory all_facts)
+      ~trace:"trace-molt-cat"
+      ()
+  in
+  let expected_constraint_ids =
+    List.filter_map
+      (fun (f : Types.fact) ->
+         if f.category = Types.Constraint then Some (Types.memory_id f) else None)
+      all_facts
+  in
+  check (list string) "category_filter keeps only matching category canonical IDs"
+    expected_constraint_ids
+    (List.map snd cat_room.question.memory)
 ;;
 
 let () =

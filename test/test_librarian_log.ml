@@ -130,6 +130,7 @@ let every_why : Effects.why_not list =
   ; Not_valid_alone
   ; Not_valid_in_room
   ; Successor_unsupported
+  ; Promotion_refused
   ]
 ;;
 
@@ -329,6 +330,7 @@ let test_pinned_text () =
     ; {|{"kind":"not_valid_alone"}|}
     ; {|{"kind":"not_valid_in_room"}|}
     ; {|{"kind":"successor_unsupported"}|}
+    ; {|{"kind":"promotion_refused"}|}
     ]
     (List.map
        (fun left_out -> Yojson.Safe.to_string (member "why" left_out))

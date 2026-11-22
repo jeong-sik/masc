@@ -10,8 +10,18 @@ val evict_keeper : keeper_name:string -> unit
 (** Stop and remove any persistent ACP child processes owned by [keeper_name].
     Safe to call when no child is running. *)
 
+val evict_keeper_for_workspace : base_path:string -> keeper_name:string -> unit
+(** Stop and remove any persistent ACP child processes owned by [keeper_name]
+    and clear any armed ACP rollover marker under [base_path] so no marker
+    lingers after keeper teardown/purge. *)
+
+val evict_all : unit -> unit
+(** Stop and remove every persistent ACP child process in the pool (used during
+    server shutdown and root-switch teardown). Safe to call multiple times. *)
+
 val run :
   ?on_guidance_prepared:(unit -> (unit, Agent_core.Error.t) result) ->
+  ?max_context_tokens:int ->
   input_source:Keeper_request_source.t ->
   media_store:Agent_core.History.media_store ->
   ?argument_source:Keeper_official_client_host.argument_source ->
@@ -91,6 +101,57 @@ module For_testing : sig
 
   val compaction_detected : prev_used:int option -> cur_used:int option -> bool
 
+  val should_rollover_context
+    :  context_used:int option
+    -> context_size:int option
+    -> max_context_tokens:int
+    -> bool
+
+  val rollover_threshold : float
+
+  val record_rollover_marker
+    :  base_path:string
+    -> keeper_id:string
+    -> runtime_id:string
+    -> session_id:string
+    -> unit
+
+  val rollover_marker_matches
+    :  base_path:string
+    -> keeper_id:string
+    -> runtime_id:string
+    -> session_id:string
+    -> bool
+
+  val clear_rollover_marker : base_path:string -> keeper_id:string -> unit
+
+  val split_older_for_rollover
+    :  Agent_core.Types.message list
+    -> Agent_core.Types.message list
+
+  val prefer_handoff_for_start
+    :  planned_fresh_rollover:bool
+    -> force_fresh_retry:bool
+    -> bool
+
+  val hydrate_start_messages
+    :  keepers_dir:string
+    -> keeper_id:string
+    -> prefer_handoff:bool
+    -> Agent_core.Types.message list
+    -> Agent_core.Types.message list
+
+  val compact_once_for_overflow
+    :  already_compacted:bool ref
+    -> keepers_dir:string
+    -> keeper_id:string
+    -> starting_capacity_bytes:int
+    -> effective_max_context_tokens:int
+    -> previous_capacity:int
+    -> capacity:int
+    -> initial_messages:Agent_core.Types.message list
+    -> unit
+
   val start_mcp_bridge_for_specs
     :  sw:Eio.Switch.t
     -> env:Eio_unix.Stdenv.base
@@ -128,5 +189,15 @@ module For_testing : sig
 
     val evict_if_same : 'a t -> key:pool_key -> target:'a -> close:('a -> unit) -> unit
     val evict_keeper : 'a t -> keeper_name:string -> close:('a -> unit) -> unit
+    val evict_all : 'a t -> close:('a -> unit) -> unit
+
+    val evict_idle
+      :  'a t
+      -> now:float
+      -> idle_ttl_s:float
+      -> last_used_at:('a -> float)
+      -> is_busy:('a -> bool)
+      -> close:('a -> unit)
+      -> unit
   end
 end

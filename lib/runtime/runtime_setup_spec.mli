@@ -4,7 +4,7 @@
     consume its ID before choosing/defaulting a new connection, rather than
     reimplement JSON canonicalization. Existing declared IDs remain unchanged. *)
 type t
-type choice = Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity
+type choice = Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity | Mistral_vibe
 val choice_name : choice -> string
 (** The "choice" spelling [of_json] reads back. *)
 val http : choice -> bool

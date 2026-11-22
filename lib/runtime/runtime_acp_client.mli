@@ -118,6 +118,7 @@ type config_option =
   ; name : string
   ; category : string option
   ; current_value : string
+  ; available_values : string list
   }
 
 type session_info =
@@ -233,7 +234,8 @@ val is_masc_mcp_tool
     not a native execution/mutation tool kind. *)
 
 val is_read_only_tool_kind : string option -> bool
-(** True for read-only ACP tool kinds (["read"], ["search"], ["fetch"], ["think"]). *)
+(** True for read-only local ACP tool kinds (["read"], ["search"], ["think"]).
+    Network ["fetch"] is excluded so [Native_read] cannot bypass egress/SSRF boundaries. *)
 
 type prompt_result =
   { session_id : string
@@ -269,9 +271,22 @@ type error =
 
 val error_to_string : error -> string
 
+val is_context_overflow_rpc_error : method_name:string -> code:int -> message:string -> bool
+(** True when an ACP JSON-RPC error reports a provider/model context-window or
+    prompt-length overflow that should enter shrink/compaction recovery. *)
+
 (** {1 Persistent client handle} *)
 
 type t
+
+val foreground_process_mgr
+  :  clock:_ Eio.Time.clock
+  -> ?grace_seconds:float
+  -> unit
+  -> Eio_unix.Process.mgr_ty Eio.Resource.t
+(** Build a process-group-isolated {!Posix_spawn_process_mgr} foreground process
+    manager suitable for {!start}, ensuring ACP subprocesses and any spawned
+    grandchildren are reaped via [killpg SIGTERM -> grace -> SIGKILL]. *)
 
 val start
   :  sw:Eio.Switch.t
@@ -295,6 +310,7 @@ val new_session
   -> cwd:string
   -> ?system_prompt_append:string
   -> ?mcp_server:mcp_http_server
+  -> ?additional_directories:string list
   -> ?mode:string
   -> ?model:string
   -> ?effort:string
@@ -306,6 +322,9 @@ val load_session
   -> session_id:string
   -> cwd:string
   -> ?mcp_server:mcp_http_server
+  -> ?mode:string
+  -> ?model:string
+  -> ?effort:string
   -> unit
   -> (session_info, error) result
 
@@ -314,6 +333,9 @@ val resume_session
   -> session_id:string
   -> cwd:string
   -> ?mcp_server:mcp_http_server
+  -> ?mode:string
+  -> ?model:string
+  -> ?effort:string
   -> unit
   -> (session_info, error) result
 
@@ -357,7 +379,18 @@ module For_testing : sig
 
   val build_argv : config -> temp_gemini_dir:string option -> string list
   val should_allow_permission : policy:permission_policy -> title:string -> kind:string option -> bool
+  val choose_permission_option : allow:bool -> Yojson.Safe.t list -> string option
+  val parse_config_options : Yojson.Safe.t -> config_option list
+
+  val resolve_option_value
+    :  driver:driver
+    -> config_id:string
+    -> requested:string
+    -> option:config_option
+    -> string option
+
   val parse_session_update : Yojson.Safe.t -> stream_event option
   val parse_prompt_usage : Yojson.Safe.t -> usage
   val parse_stop_reason : string -> stop_reason
+  val max_prompt_stream_bytes : int
 end

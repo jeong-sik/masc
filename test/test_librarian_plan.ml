@@ -79,6 +79,7 @@ let why_text : Effects.why_not -> string = function
   | Not_valid_alone -> "not valid alone"
   | Not_valid_in_room -> "not valid in room"
   | Successor_unsupported -> "successor unsupported"
+  | Promotion_refused -> "promotion refused"
 ;;
 
 let removed (plan : Plan.t) =
@@ -529,10 +530,245 @@ let test_same_input_same_plan () =
   check string "bytes" (encode (run ())) (encode (run ()))
 ;;
 
+let test_promote_to_world_security_boundaries () =
+  let contains_sub ~needle haystack =
+    let nlen = String.length needle in
+    let hlen = String.length haystack in
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    nlen = 0 || loop 0
+  in
+  let board_ref =
+    match Types.board_ref_of_ids ~post_id:"p-private-1" ~comment_id:None with
+    | Ok r -> r
+    | Error _ -> fail "invalid fixture post_id"
+  in
+  let private_board_fact : Types.fact =
+    { claim = "private DM secret from board"
+    ; category = Types.Fact
+    ; first_seen = 100.0
+    ; last_seen = 100.0
+    ; origin = { kind = Types.Injected; trace_id = "t1" }
+    ; basis = Types.Observed (Types.Board board_ref)
+    }
+  in
+  let derived_from_private = derived "derived summary of private board post" [ private_board_fact ] in
+  let transcript_fact = port in
+  let facts = [ transcript_fact; private_board_fact; derived_from_private ] in
+  let shown = shown_of facts in
+  let promo ?(refs = [ "m1" ]) ?(scope = "workspace") ?(claim = "safe shared fact")
+      ?(facets = [ "ops" ]) ()
+    =
+    Answer.Promote_to_world { refs; scope; claim; category = Types.Validated_approach; facets }
+  in
+  (* 1. Fail-closed default blocks direct AND transitive private board provenance *)
+  let res_default =
+    Plan.of_answer ~shown ~facts ~removed_since:[] ~at ~trace_id:"promo-sec"
+      { question = asked
+      ; ops =
+          [ promo ~refs:[ "m2" ] ~claim:"direct board promo" ()
+          ; promo ~refs:[ "m3" ] ~claim:"transitive board promo" ()
+          ; promo ~refs:[ "m1" ] ~claim:"transcript promo" ()
+          ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check int "only transcript promo accepted by default" 1 (List.length res_default.effects.promotions);
+  check refusals "direct and transitive private board promos refused"
+    [ 0, "promotion refused", None; 1, "promotion refused", None ]
+    (not_applied res_default);
+  (* 2. Explicit public-board clearance permits board-sourced promotion *)
+  let res_public =
+    Plan.of_answer
+      ~is_public_board_post:(fun pid -> pid = board_ref.post_id)
+      ~shown ~facts ~removed_since:[] ~at ~trace_id:"promo-pub"
+      { question = asked
+      ; ops = [ promo ~refs:[ "m3" ] ~claim:"cleared transitive public board promo" () ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check int "public-cleared board provenance accepted" 1 (List.length res_public.effects.promotions);
+  (* 3. Per-answer count cap (4), claim/scope/facet bounds, control chars, and secret redaction *)
+  let res_bounds =
+    Plan.of_answer ~shown ~facts ~removed_since:[] ~at ~trace_id:"promo-bounds"
+      { question = asked
+      ; ops =
+          [ promo
+              ~claim:("ok 1 with token " ^ "sk" ^ "-ant-api03-" ^ "SECRETTOKEN1234567890ABCDEFGH")
+              ()
+          ; promo ~claim:(String.make 600 'x') () (* > 512 bytes *)
+          ; promo ~scope:"bad\nscope" () (* control char *)
+          ; promo ~scope:(String.make 70 's') () (* > 64 bytes *)
+          ; promo ~facets:[ "f1"; "f2"; "f3"; "f4"; "f5"; "f6"; "f7"; "f8"; "f9" ] () (* > 8 facets *)
+          ; promo ~claim:"ok 2" ()
+          ; promo ~claim:"ok 3" ()
+          ; promo ~claim:"ok 4" ()
+          ; promo ~claim:"ok 5 exceeds cap" ()
+          ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check int "exactly 4 valid promotions accepted" 4 (List.length res_bounds.effects.promotions);
+  let first_claim = (List.hd res_bounds.effects.promotions).claim in
+  check bool "secret redacted from promoted claim" false
+    (contains_sub ~needle:"SECRETTOKEN1234567890ABCDEFGH" first_claim);
+  check bool "redaction marker present in promoted claim" true
+    (contains_sub ~needle:"[REDACTED]" first_claim);
+  check (list int) "oversized/malformed/5th promos refused as Promotion_refused"
+    [ 1; 2; 3; 4; 8 ]
+    (List.filter_map
+       (fun (idx, why, _) ->
+          match why with
+          | Effects.Promotion_refused -> Some idx
+          | _ -> None)
+       res_bounds.effects.not_applied);
+  (* 4. NUL byte in claim is refused as Promotion_refused *)
+  let res_nul =
+    Plan.of_answer ~shown ~facts ~removed_since:[] ~at ~trace_id:"promo-nul"
+      { question = asked
+      ; ops = [ promo ~claim:"valid prefix\000hidden tail" () ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check int "NUL-bearing claim refused" 0 (List.length res_nul.effects.promotions);
+  check refusals "NUL-bearing claim reported as Promotion_refused"
+    [ 0, "promotion refused", None ]
+    (not_applied res_nul);
+  (* 5. Revise/Merge laundering cannot strip private Board provenance into Observed Transcript *)
+  let res_revise =
+    Plan.of_answer ~shown ~facts ~removed_since:[] ~at ~trace_id:"promo-revise-launder"
+      { question = asked
+      ; ops =
+          [ Answer.Revise
+              { ref_ = "m2"
+              ; into =
+                  { claim = "revised private board secret"
+                  ; category = Types.Fact
+                  ; basis = Types.Observed Types.Transcript
+                  ; from_units = []
+                  }
+              }
+          ]
+      ; working_state = Answer.Keep
+      }
+  in
+  let revised_shown = shown_of res_revise.facts in
+  let revised_ref =
+    match
+      List.find_opt
+        (fun (f : Types.fact) -> String.equal f.claim "revised private board secret")
+        res_revise.facts
+    with
+    | None -> fail "expected revised fact in plan output"
+    | Some f ->
+      (match f.basis with
+       | Types.Observed (Types.Board b) ->
+         check bool "Revise preserved private board post_id" true
+           (b.post_id = board_ref.post_id)
+       | _ -> fail "Revise stripped private Board provenance!");
+      let target_id = Types.memory_id f in
+      (match revised_shown with
+       | Plan.Read (Range { memory; _ }) ->
+         fst (List.find (fun (_, id) -> String.equal id target_id) memory)
+       | _ -> fail "expected Range shown")
+  in
+  let res_after_revise =
+    Plan.of_answer ~shown:revised_shown ~facts:res_revise.facts ~removed_since:[] ~at
+      ~trace_id:"promo-after-revise"
+      { question = asked
+      ; ops = [ promo ~refs:[ revised_ref ] ~claim:"attempt after revise" () ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check int "Promote_to_world after Revise of private Board fact refused" 0
+    (List.length res_after_revise.effects.promotions);
+  let res_merge =
+    Plan.of_answer ~shown ~facts ~removed_since:[] ~at ~trace_id:"promo-merge-launder"
+      { question = asked
+      ; ops =
+          [ Answer.Merge
+              { refs = [ "m1"; "m2" ]
+              ; into =
+                  { claim = "merged transcript and private board"
+                  ; category = Types.Fact
+                  ; basis = Types.Observed Types.Transcript
+                  ; from_units = []
+                  }
+              }
+          ]
+      ; working_state = Answer.Keep
+      }
+  in
+  let merged_shown = shown_of res_merge.facts in
+  let merged_ref =
+    match
+      List.find_opt
+        (fun (f : Types.fact) -> String.equal f.claim "merged transcript and private board")
+        res_merge.facts
+    with
+    | None -> fail "expected merged fact in plan output"
+    | Some f ->
+      (match f.basis with
+       | Types.Observed (Types.Board b) ->
+         check bool "Merge preserved private board post_id" true
+           (b.post_id = board_ref.post_id)
+       | _ -> fail "Merge stripped private Board provenance!");
+      let target_id = Types.memory_id f in
+      (match merged_shown with
+       | Plan.Read (Range { memory; _ }) ->
+         fst (List.find (fun (_, id) -> String.equal id target_id) memory)
+       | _ -> fail "expected Range shown")
+  in
+  let res_after_merge =
+    Plan.of_answer ~shown:merged_shown ~facts:res_merge.facts ~removed_since:[] ~at
+      ~trace_id:"promo-after-merge"
+      { question = asked
+      ; ops = [ promo ~refs:[ merged_ref ] ~claim:"attempt after merge" () ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check int "Promote_to_world after Merge with private Board fact refused" 0
+    (List.length res_after_merge.effects.promotions);
+  (* 6. Derived fact with a missing/dropped premise ID fails CLOSED on Promote_to_world *)
+  let derived_with_missing_premise : Types.fact =
+    { claim = "derived with one missing premise and one transcript premise"
+    ; category = Types.Fact
+    ; first_seen = 100.0
+    ; last_seen = 100.0
+    ; origin = { kind = Types.Injected; trace_id = "t-miss" }
+    ; basis =
+        Types.Derived
+          [ { rule_id = "r1"; premise_ids = [ "mf-missing-dropped-premise" ] }
+          ; { rule_id = "r2"; premise_ids = [ Types.memory_id transcript_fact ] }
+          ]
+    }
+  in
+  let miss_facts = [ transcript_fact; derived_with_missing_premise ] in
+  let miss_shown = shown_of miss_facts in
+  let res_missing =
+    Plan.of_answer ~shown:miss_shown ~facts:miss_facts ~removed_since:[] ~at
+      ~trace_id:"promo-missing-premise"
+      { question = asked
+      ; ops = [ promo ~refs:[ "m2" ] ~claim:"derived with missing premise" () ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check int "Derived fact with missing premise fails closed on Promote_to_world" 0
+    (List.length res_missing.effects.promotions);
+  check refusals "missing-premise Promote_to_world reported as Promotion_refused"
+    [ 0, "promotion refused", None ]
+    (not_applied res_missing)
+;;
+
 let () =
   run "librarian_plan"
     [ ( "ops"
       , [ test_case "add a new claim" `Quick test_add_new
+        ; test_case "promote_to_world security, provenance, caps & secret redaction" `Quick
+            test_promote_to_world_security_boundaries
         ; test_case "add a held claim" `Quick test_add_held_only_moves_last_seen
         ; test_case "a held claim without a unit" `Quick
             test_add_held_without_a_unit_changes_nothing

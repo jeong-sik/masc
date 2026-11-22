@@ -1,4 +1,4 @@
-type client = Codex | Claude | Antigravity
+type client = Codex | Claude | Antigravity | Mistral_vibe | Kimi_code
 val name : client -> string
 val source_url : client -> string
 

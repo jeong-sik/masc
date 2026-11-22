@@ -367,7 +367,7 @@ let test_capacity_exceeded_and_live_try_provider_wiring () =
   (* 2. compact_evicted_messages commits idempotently + fires global on_epoch_committed hook *)
   let hook_epochs = ref [] in
   Keeper_compaction.set_on_epoch_committed
-    (Some (fun ~keeper_id anchor -> hook_epochs := (keeper_id, anchor.epoch_id) :: !hook_epochs));
+    (Some (fun ~keepers_dir:_ ~keeper_id anchor -> hook_epochs := (keeper_id, anchor.epoch_id) :: !hook_epochs));
   Fun.protect
     ~finally:(fun () -> Keeper_compaction.set_on_epoch_committed None)
     (fun () ->
@@ -1267,6 +1267,408 @@ let test_canonical_turn_disk_lifecycle_prune_and_delete () =
   C.delete_store ~keepers_dir ~keeper_id:cap_keeper |> require_c
 ;;
 
+let test_p0_10_budget_continue_collision_concurrency_redaction_and_zero_byte_db () =
+  let plain_msg role text : Agent_core.Types.message =
+    { origin = Agent_core.Types.Conversation
+    ; role
+    ; content = [ Agent_core.Types.Text text ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let tmp = Filename.temp_dir "compaction-p010-" "" in
+  let keepers_dir = Filename.concat tmp ".masc/keepers" in
+  Fs_compat.mkdir_p keepers_dir;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree tmp) (fun () ->
+    (* 1. provider_limit_tokens = None ALWAYS bounds anchor <= default_anchor_max_bytes *)
+    let huge_turns =
+      List.init 80 (fun i ->
+        let pad = String.make 1024 (Char.chr (65 + (i mod 26))) in
+        [ plain_msg User (Printf.sprintf "user goal %d %s" i pad)
+        ; plain_msg Assistant (Printf.sprintf "decision %d %s" i pad)
+        ])
+      |> List.concat
+    in
+    let anchor_none =
+      match
+        Keeper_compaction.compact_evicted_messages
+          ~keepers_dir
+          ~keeper_id:"k-none"
+          ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+          ~evicted_messages:huge_turns
+          ()
+      with
+      | Ok (Some a) -> a
+      | Ok None -> fail "expected committed anchor for None token limit"
+      | Error err -> fail (Keeper_compaction.store_error_to_string err)
+    in
+    let rendered_none = msg_bytes (Keeper_compaction.anchor_to_message anchor_none) in
+    check bool
+      (Printf.sprintf "None limit anchor (%d) <= default_anchor_max_bytes (%d)"
+         rendered_none Keeper_compaction.default_anchor_max_bytes)
+      true
+      (rendered_none <= Keeper_compaction.default_anchor_max_bytes);
+    check bool "None limit rolled off archived_epochs_through" true
+      (Option.is_some anchor_none.archived_epochs_through);
+
+    (* 2. Some 32_000 tokens -> capacity_bytes = 128_000 -> budget = 32_000 bytes (NOT 8_000!) *)
+    let medium_turns =
+      List.init 15 (fun i ->
+        let pad = String.make 900 (Char.chr (97 + (i mod 26))) in
+        [ plain_msg User (Printf.sprintf "mid goal %d" i)
+        ; plain_msg Assistant (Printf.sprintf "mid decision %d %s" i pad)
+        ])
+      |> List.concat
+    in
+    let anchor_tok =
+      match
+        Keeper_compaction.compact_evicted_messages
+          ~keepers_dir
+          ~keeper_id:"k-tok"
+          ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 32_000 })
+          ~evicted_messages:medium_turns
+          ()
+      with
+      | Ok (Some a) -> a
+      | Ok None -> fail "expected committed anchor for Some 32_000"
+      | Error err -> fail (Keeper_compaction.store_error_to_string err)
+    in
+    let rendered_tok = msg_bytes (Keeper_compaction.anchor_to_message anchor_tok) in
+    check bool
+      (Printf.sprintf "Some 32_000 anchor (%d) preserved > 8_000 bytes without 16x over-truncation"
+         rendered_tok)
+      true
+      (rendered_tok > 10_000 && rendered_tok <= 32_000);
+    check bool "Some 32_000 did not spuriously roll off under 32 KiB" true
+      (Option.is_none anchor_tok.archived_epochs_through);
+
+    (* 3. Identical "Continue." openers with distinct bodies never collide; even identical
+          byte-for-byte turns across non-adjacent epochs disambiguate instead of overwriting;
+          exact same prefix remains idempotent. *)
+    let cont_a = [ plain_msg User "Continue."; plain_msg Assistant "Reply Alpha" ] in
+    let cont_b = [ plain_msg User "Continue."; plain_msg Assistant "Reply Beta" ] in
+    let a1 =
+      match
+        Keeper_compaction.compact_evicted_messages
+          ~keepers_dir ~keeper_id:"k-cont"
+          ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
+          ~evicted_messages:cont_a ()
+      with
+      | Ok (Some a) -> a
+      | _ -> fail "epoch 1 Continue. failed"
+    in
+    let a2 =
+      match
+        Keeper_compaction.compact_evicted_messages
+          ~keepers_dir ~keeper_id:"k-cont"
+          ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
+          ~evicted_messages:cont_b ()
+      with
+      | Ok (Some a) -> a
+      | _ -> fail "epoch 2 Continue. failed"
+    in
+    check bool "distinct Continue. turns get distinct covers_through_turn IDs" false
+      (String.equal
+         (Ids.Turn_id.to_string a1.covers_through_turn)
+         (Ids.Turn_id.to_string a2.covers_through_turn));
+    (* Now repeat cont_a in epoch 3 (not covered by a2.covers_through_turn): must disambiguate, NOT overwrite a1! *)
+    let a3 =
+      match
+        Keeper_compaction.compact_evicted_messages
+          ~keepers_dir ~keeper_id:"k-cont"
+          ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
+          ~evicted_messages:cont_a ()
+      with
+      | Ok (Some a) -> a
+      | _ -> fail "epoch 3 identical Continue. disambiguation failed"
+    in
+    check bool "epoch 3 identical Continue. disambiguated from epoch 1" false
+      (String.equal
+         (Ids.Turn_id.to_string a1.covers_through_turn)
+         (Ids.Turn_id.to_string a3.covers_through_turn));
+    let ep1_turns =
+      Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-cont" ~epoch_id:1
+      |> Result.get_ok
+    in
+    let ep2_turns =
+      Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-cont" ~epoch_id:2
+      |> Result.get_ok
+    in
+    let ep3_turns =
+      Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-cont" ~epoch_id:3
+      |> Result.get_ok
+    in
+    check int "epoch 1 archived atoms preserved (not overwritten)" 2 (List.length ep1_turns);
+    check int "epoch 2 archived atoms preserved (Continue. disambiguated)" 2 (List.length ep2_turns);
+    check int "epoch 3 archived atoms preserved separately" 2 (List.length ep3_turns);
+    let all_ids =
+      List.map (fun (t : Keeper_compaction.canonical_turn) -> Ids.Turn_id.to_string t.turn_id)
+        (ep1_turns @ ep2_turns @ ep3_turns)
+    in
+    check int "all 6 archived atoms across 3 Continue. epochs have distinct turn_ids" 6
+      (List.length (List.sort_uniq String.compare all_ids));
+
+    (* 4. Concurrent compact_evicted_messages fibers serialize cleanly inside BEGIN IMMEDIATE *)
+    Eio_main.run (fun _env ->
+      let errors = ref [] in
+      Eio.Fiber.all
+        (List.init 6 (fun i () ->
+           let msgs =
+             [ plain_msg User (Printf.sprintf "concurrent-u-%d" i)
+             ; plain_msg Assistant (Printf.sprintf "concurrent-a-%d" i)
+             ]
+           in
+           match
+             Keeper_compaction.compact_evicted_messages
+               ~keepers_dir ~keeper_id:"k-race"
+               ~trigger:(Keeper_compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
+               ~evicted_messages:msgs ()
+           with
+           | Ok (Some _) -> ()
+           | Ok None -> errors := "unexpected Ok None" :: !errors
+           | Error err -> errors := Keeper_compaction.store_error_to_string err :: !errors));
+      check (list string) "zero PRIMARY KEY errors under 6 concurrent compactions" [] !errors);
+    let race_epochs =
+      Keeper_compaction.list_epochs ~keepers_dir ~keeper_id:"k-race" |> Result.get_ok
+    in
+    check int "all 6 concurrent epochs committed monotonically" 6 (List.length race_epochs);
+
+    (* 5. Workspace-scoped on_epoch_committed receives exact keepers_dir *)
+    let seen_dirs = ref [] in
+    Keeper_compaction.set_on_epoch_committed
+      (Some (fun ~keepers_dir:kd ~keeper_id anchor ->
+         seen_dirs := (kd, keeper_id, anchor.epoch_id) :: !seen_dirs));
+    Fun.protect ~finally:(fun () -> Keeper_compaction.set_on_epoch_committed None) (fun () ->
+      ignore
+        (Keeper_compaction.compact_evicted_messages
+           ~keepers_dir ~keeper_id:"k-ws"
+           ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+           ~evicted_messages:[ plain_msg User "ws check"; plain_msg Assistant "ws ok" ]
+           ()
+         |> Result.get_ok));
+    check (list (triple string string int)) "callback receives workspace keepers_dir"
+      [ keepers_dir, "k-ws", 1 ]
+      !seen_dirs;
+
+    (* 6. Secret redaction before .compaction.db persistence and microcompaction *)
+    let secret_token = "sk" ^ "-ant-api03-" ^ "COMPACTSECRET9876543210ZYXWVU" in
+    let anchor_sec =
+      match
+        Keeper_compaction.compact_evicted_messages
+          ~keepers_dir ~keeper_id:"k-sec"
+          ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+          ~evicted_messages:
+            [ plain_msg User ("token is " ^ secret_token)
+            ; plain_msg Assistant ("confirmed " ^ secret_token)
+            ]
+          ()
+      with
+      | Ok (Some a) -> a
+      | _ -> fail "expected secret-redacted epoch"
+    in
+    check bool "secret redacted from committed anchor active_intent" false
+      (String_util.contains_substring anchor_sec.active_intent secret_token);
+    let archived_sec =
+      Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-sec" ~epoch_id:1
+      |> Result.get_ok
+    in
+    let archived_text =
+      archived_sec
+      |> List.concat_map (fun (t : Keeper_compaction.canonical_turn) -> t.messages)
+      |> List.map (fun (m : Agent_core.Types.message) ->
+        Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
+      |> String.concat "\n"
+    in
+    check bool "secret redacted from archived_turns messages_json" false
+      (String_util.contains_substring archived_text secret_token);
+    check bool "[REDACTED] marker persisted in archived_turns" true
+      (String_util.contains_substring archived_text "[REDACTED]");
+
+    (* 7. Streaming decode_live_blob_references_json omits raw conversation text &
+          0-byte .compaction.db without companions returns Ok None *)
+    let decoded_sec =
+      Keeper_compaction.decode_live_blob_references_json
+        (Keeper_compaction.db_path ~keepers_dir ~keeper_id:"k-sec")
+      |> Result.get_ok
+    in
+    check bool "streaming blob decoder returns None when DB has only plain text (no full AST bloat)" true
+      (Option.is_none decoded_sec);
+    let zero_path = Keeper_compaction.db_path ~keepers_dir ~keeper_id:"k-zero" in
+    Out_channel.with_open_bin zero_path (fun _ -> ());
+    check bool "0-byte compaction DB without companions returns Ok None on latest_anchor" true
+      (Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:"k-zero" = Ok None);
+    check bool "0-byte compaction DB without companions returns Ok None on blob decoder" true
+      (Keeper_compaction.decode_live_blob_references_json zero_path = Ok None))
+;;
+
+let test_per_keeper_ssh_redaction_under_config_keepers_and_compact_and_project () =
+  with_temp_dir @@ fun base_path ->
+  let keepers_dir =
+    Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") "keepers"
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  (* Opaque per-keeper secret (no sk-/ghp_ regex shape) under .masc/ssh/redaction/<keeper>.token *)
+  let opaque_secret = "OPAQUE_SSH_KEEPER_TOKEN_99441122" in
+  let redaction_dir =
+    Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "ssh") "redaction"
+  in
+  Fs_compat.mkdir_p redaction_dir;
+  let token_path = Filename.concat redaction_dir "k-proj.token" in
+  ignore (Fs_compat.save_file_atomic token_path opaque_secret : (unit, string) result);
+  let plain_msg role text : Agent_core.Types.message =
+    { origin = Agent_core.Llm_provider.Types.Conversation
+    ; role
+    ; content = [ Agent_core.Types.Text text ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  (* 1. compact_evicted_messages with production <base>/.masc/config/keepers path
+        (trailing slash too!) resolves base_path and redacts opaque per-keeper secret. *)
+  let anchor_ev =
+    match
+      Keeper_compaction.compact_evicted_messages
+        ~keepers_dir:(keepers_dir ^ "/")
+        ~keeper_id:"k-proj"
+        ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+        ~evicted_messages:
+          [ plain_msg User ("deploy with " ^ opaque_secret)
+          ; plain_msg Assistant ("applied " ^ opaque_secret)
+          ]
+        ()
+    with
+    | Ok (Some a) -> a
+    | _ -> fail "expected epoch under config/keepers"
+  in
+  check bool "opaque per-keeper secret redacted from anchor active_intent" false
+    (contains ~needle:opaque_secret anchor_ev.active_intent);
+  check bool "[REDACTED] present in anchor active_intent" true
+    (contains ~needle:"[REDACTED]" anchor_ev.active_intent);
+  let archived_ev =
+    Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-proj" ~epoch_id:1
+    |> Result.get_ok
+  in
+  let archived_ev_text =
+    archived_ev
+    |> List.concat_map (fun (t : Keeper_compaction.canonical_turn) -> t.messages)
+    |> List.map (fun m -> Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
+    |> String.concat "\n"
+  in
+  check bool "opaque per-keeper secret redacted from archived_turns" false
+    (contains ~needle:opaque_secret archived_ev_text);
+
+  (* 2. compact_and_project redacts BEFORE bound_anchor_to_budget & enforce_capacity,
+        returning redacted messages and evicted_turns (never leaking raw secrets). *)
+  let short_opaque = "Z9Q8W7E6" in
+  let token_path_2 = Filename.concat redaction_dir "k-proj2.token" in
+  ignore (Fs_compat.save_file_atomic token_path_2 short_opaque : (unit, string) result);
+  let t1 =
+    make_turn ~idx:1
+      ~user_text:("rotate secret " ^ short_opaque ^ " " ^ String.make 80 'a')
+      ~tool_name:"bash"
+      ~tool_output:("output containing " ^ short_opaque)
+      ~assistant_text:("rotated " ^ short_opaque)
+  in
+  let t2 =
+    make_turn ~idx:2
+      ~user_text:"keep recent turn clean"
+      ~tool_name:"read"
+      ~tool_output:"ok"
+      ~assistant_text:"done"
+  in
+  let capacity_bytes = 2000 in
+  let reserved_bytes = 200 in
+  let projected =
+    Keeper_compaction.compact_and_project
+      ~keepers_dir
+      ~keeper_id:"k-proj2"
+      ~measure_message_bytes:msg_bytes
+      ~capacity_bytes
+      ~reserved_bytes
+      ~force_trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 500 })
+      [ t1; t2 ]
+    |> Result.get_ok
+  in
+  let all_returned_msg_text =
+    projected.messages
+    |> List.map (fun m -> Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
+    |> String.concat "\n"
+  in
+  let all_returned_evicted_text =
+    projected.evicted_turns
+    |> List.concat_map (fun (t : Keeper_compaction.canonical_turn) -> t.messages)
+    |> List.map (fun m -> Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
+    |> String.concat "\n"
+  in
+  check bool "compact_and_project returned messages do not leak opaque secret" false
+    (contains ~needle:short_opaque all_returned_msg_text);
+  check bool "compact_and_project returned evicted_turns do not leak opaque secret" false
+    (contains ~needle:short_opaque all_returned_evicted_text);
+  let total_projected_bytes =
+    List.fold_left (fun acc m -> acc + msg_bytes m) 0 projected.messages
+  in
+  check bool "compact_and_project enforces capacity AFTER redaction expansion" true
+    (reserved_bytes + total_projected_bytes <= capacity_bytes);
+
+  (* 3. Duplicate "Continue." turns across epochs in compact_and_project (disambiguate_turns_in_tx
+        inside commit_epoch_with_handles_full) never raise SQLITE_CONSTRAINT_PRIMARYKEY. *)
+  let dup_turn =
+    { Keeper_compaction.turn_id = Ids.Turn_id.of_string "turn-continue-dup"
+    ; messages = [ plain_msg User "Continue."; plain_msg Assistant "Continuing task." ]
+    }
+  in
+  let keep_turn_1 =
+    make_turn ~idx:10 ~user_text:"keep-1" ~tool_name:"read" ~tool_output:"ok" ~assistant_text:"a1"
+  in
+  let keep_turn_2 =
+    make_turn ~idx:11 ~user_text:"keep-2" ~tool_name:"read" ~tool_output:"ok" ~assistant_text:"a2"
+  in
+  let proj_ep1 =
+    Keeper_compaction.compact_and_project
+      ~keepers_dir
+      ~keeper_id:"k-dup-proj"
+      ~measure_message_bytes:msg_bytes
+      ~capacity_bytes:2000
+      ~reserved_bytes:200
+      ~force_trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 500 })
+      [ dup_turn; keep_turn_1 ]
+    |> Result.get_ok
+  in
+  let anchor_ep1 = Option.get proj_ep1.anchor in
+  let proj_ep2 =
+    Keeper_compaction.compact_and_project
+      ~keepers_dir
+      ~keeper_id:"k-dup-proj"
+      ~measure_message_bytes:msg_bytes
+      ~capacity_bytes:2000
+      ~reserved_bytes:200
+      ~force_trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 500 })
+      [ dup_turn; keep_turn_2 ]
+    |> Result.get_ok
+  in
+  let anchor_ep2 = Option.get proj_ep2.anchor in
+  check int "second compact_and_project epoch committed monotonically" 2 anchor_ep2.epoch_id;
+  check bool "duplicate turn_id disambiguated in epoch 2 covers_through_turn" false
+    (String.equal
+       (Ids.Turn_id.to_string anchor_ep1.covers_through_turn)
+       (Ids.Turn_id.to_string anchor_ep2.covers_through_turn));
+  let ep1_archived =
+    Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-dup-proj" ~epoch_id:1
+    |> Result.get_ok
+  in
+  let ep2_archived =
+    Keeper_compaction.load_archived_turns_for_epoch ~keepers_dir ~keeper_id:"k-dup-proj" ~epoch_id:2
+    |> Result.get_ok
+  in
+  check int "epoch 1 duplicate turn preserved" 1 (List.length ep1_archived);
+  check int "epoch 2 duplicate turn preserved separately" 1 (List.length ep2_archived);
+  check string "epoch 2 covers_through_turn matches disambiguated archived turn_id"
+    (Ids.Turn_id.to_string (List.hd ep2_archived).turn_id)
+    (Ids.Turn_id.to_string anchor_ep2.covers_through_turn)
+;;
+
 let () =
   run
     "keeper_compaction"
@@ -1275,7 +1677,11 @@ let () =
             test_tool_output_structured_handle_and_head_tail_preview
         ] )
     ; ( "anchored_compaction"
-      , [ test_case "microcompaction, incremental epochs, lossless Turn_id pointers & WAL isolation" `Quick
+      , [ test_case "P0-10 & P1-9 budget, Continue. collision, concurrency, workspace hook, redaction & 0-byte DB" `Quick
+            test_p0_10_budget_continue_collision_concurrency_redaction_and_zero_byte_db
+        ; test_case "per-keeper SSH redaction under config/keepers & compact_and_project pre-budget redaction" `Quick
+            test_per_keeper_ssh_redaction_under_config_keepers_and_compact_and_project
+        ; test_case "microcompaction, incremental epochs, lossless Turn_id pointers & WAL isolation" `Quick
             test_microcompaction_and_anchored_iterative_epochs
         ; test_case "Capacity_exceeded, compact_evicted_messages & live try_provider anchor wiring" `Quick
             test_capacity_exceeded_and_live_try_provider_wiring

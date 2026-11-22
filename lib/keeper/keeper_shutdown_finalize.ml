@@ -970,6 +970,11 @@ let complete_cleanup
              blocking -- the keeper is already gone from the registry, and
              refusing to finish would leave the shutdown half-applied over a
              container that can be removed by hand. *)
+          (* Evict any persistent ACP CLI subprocess owned by this keeper so
+             paused or removed keepers never leave warm CLI children running. *)
+          Keeper_acp_runtime.evict_keeper_for_workspace
+            ~base_path:config.Workspace.base_path
+            ~keeper_name:operation.keeper_name;
           let teardown =
              match sandbox_backend with
              | Error detail -> Error detail

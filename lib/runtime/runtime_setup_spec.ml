@@ -1,4 +1,4 @@
-type choice = Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity
+type choice = Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity | Mistral_vibe
 type http_kind = Openai_compat | Anthropic | Kimi | Glm | Ollama_kind
 type credential = Env_reference of string | File_reference of string
 type transport =
@@ -18,13 +18,14 @@ open Result.Syntax
 let invalid field = Error (Invalid_spec field)
 let choice_name = function Ollama -> "ollama" | Llama_cpp -> "llama_cpp" | Vllm -> "vllm"
   | Openai_compatible -> "openai_compatible" | Messages -> "messages" | Claude_code -> "claude_code"
-  | Codex -> "codex" | Antigravity -> "antigravity"
+  | Codex -> "codex" | Antigravity -> "antigravity" | Mistral_vibe -> "mistral_vibe"
 let protocol = function Ollama -> "ollama-http" | Messages -> "messages-http"
   | Claude_code -> "claude-code" | Codex -> "codex-app-server" | Antigravity -> "antigravity-cli"
+  | Mistral_vibe -> "acp"
   | Llama_cpp | Vllm | Openai_compatible -> "openai-compatible-http"
 let http = function
   | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> true
-  | Claude_code | Codex | Antigravity -> false
+  | Claude_code | Codex | Antigravity | Mistral_vibe -> false
 let safe_text value = value <> "" && String.trim value = value
   && not (String.exists (function '\000'..'\031' | '\127' -> true | _ -> false) value)
 let required fields key = match List.assoc_opt key fields with
@@ -128,6 +129,7 @@ let of_json ?home_dir = function
       | "ollama" -> Ok Ollama | "llama_cpp" -> Ok Llama_cpp | "vllm" -> Ok Vllm
       | "openai_compatible" -> Ok Openai_compatible | "messages" -> Ok Messages
       | "claude_code" -> Ok Claude_code | "codex" -> Ok Codex | "antigravity" -> Ok Antigravity
+      | "mistral_vibe" -> Ok Mistral_vibe
       | _ -> invalid "choice" in
     let named = List.mem_assoc "provider_id" fields in
     let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input";"existing_provider_id"]
@@ -136,8 +138,11 @@ let of_json ?home_dir = function
       @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind";"request_path"] else ["command"])
       @ (match choice with
         | Claude_code | Codex -> ["account_home"]
-        | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity -> [])
-      @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
+        | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Mistral_vibe -> [])
+      @ (match choice with
+        | Antigravity -> ["credential_file";"timeout_s"]
+        | Mistral_vibe -> ["timeout_s"]
+        | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex -> []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
     let* named_provider = if not named then Ok None else (
       let* () = if List.mem_assoc "existing_provider_id" fields then invalid "provider selection" else Ok () in
@@ -194,7 +199,7 @@ let of_json ?home_dir = function
         | (Llama_cpp | Vllm | Openai_compatible),(None | Some "openai_compat") -> Ok Openai_compat
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
         | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex
-          | Antigravity), _ -> invalid "provider_kind" in
+          | Antigravity | Mistral_vibe), _ -> invalid "provider_kind" in
       let* request_path = match List.assoc_opt "request_path" fields with
         | None -> Ok None
         | Some (`String value) when safe_text value ->
@@ -216,6 +221,7 @@ let of_json ?home_dir = function
           | Claude_code -> Ok "claude"
           | Codex -> Ok "codex"
           | Antigravity -> Ok "agy"
+          | Mistral_vibe -> Ok "vibe-acp"
           (* The five http-guarded choices return above, so this arm is
              unreachable; it stays to keep the match exhaustive over future
              choices instead of silently defaulting them. *)
@@ -226,23 +232,35 @@ let of_json ?home_dir = function
         else Ok None in
       let* account_home = match account_home,choice with
         | (None, Ollama) | (None, Llama_cpp) | (None, Vllm) | (None, Openai_compatible)
-        | (None, Messages) | (None, Claude_code) | (None, Codex) | (None, Antigravity) -> Ok None
+        | (None, Messages) | (None, Claude_code) | (None, Codex) | (None, Antigravity)
+        | (None, Mistral_vibe) -> Ok None
         | Some raw_home, (Claude_code | Codex) ->
           (match Runtime_account_home.of_string_under ~home:home_dir raw_home with
            | Ok expanded -> Ok (Some expanded)
            | Error _ -> invalid "account_home")
-        | Some _, (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity) ->
+        | Some _, (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Mistral_vibe) ->
           invalid "account_home" in
-      let* oauth,timeout = if choice <> Antigravity then Ok (None,None) else (
-        let* path = required fields "credential_file" in
-        let path = match home_dir with
-          | Some home when String.starts_with ~prefix:"~/" path -> Filename.concat home (String.sub path 2 (String.length path - 2))
-          | Some home when path = "~" -> home | _ -> path in
-        let* () = if Filename.is_relative path then invalid "credential_file" else Ok () in
-        let* timeout = match List.assoc_opt "timeout_s" fields with
-          | Some (`Int value) when value > 0 -> Ok (float_of_int value)
-          | Some (`Float value) when Float.is_finite value && value > 0. -> Ok value
-          | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
+      let* oauth,timeout = match choice with
+        | Antigravity ->
+          let* path = required fields "credential_file" in
+          let path = match home_dir with
+            | Some home when String.starts_with ~prefix:"~/" path -> Filename.concat home (String.sub path 2 (String.length path - 2))
+            | Some home when path = "~" -> home | _ -> path in
+          let* () = if Filename.is_relative path then invalid "credential_file" else Ok () in
+          let* timeout = match List.assoc_opt "timeout_s" fields with
+            | Some (`Int value) when value > 0 -> Ok (float_of_int value)
+            | Some (`Float value) when Float.is_finite value && value > 0. -> Ok value
+            | _ -> invalid "timeout_s" in
+          Ok (Some (reference_path path),Some timeout)
+        | Mistral_vibe ->
+          let* timeout = match List.assoc_opt "timeout_s" fields with
+            | None -> Ok None
+            | Some (`Int value) when value > 0 -> Ok (Some (float_of_int value))
+            | Some (`Float value) when Float.is_finite value && value > 0. -> Ok (Some value)
+            | _ -> invalid "timeout_s" in
+          Ok (None, timeout)
+        | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex ->
+          Ok (None,None) in
       Ok (Client {command;oauth;timeout;account_home})) in
     let parsed = {choice;model;context;tools;streaming;supports_image_input;transport;
       canonical_spec="";declared_provider_id=None;requested_provider_id;existing_inline=None;named_provider} in
@@ -255,7 +273,7 @@ let of_json ?home_dir = function
 let protocol_fixes_dialect = function
   | Ollama -> true
   | Llama_cpp | Vllm | Openai_compatible | Messages -> false
-  | Claude_code | Codex | Antigravity -> true
+  | Claude_code | Codex | Antigravity | Mistral_vibe -> true
 
 let quoted value = Yojson.Safe.to_string (`String value)
 let table ?(array=false) path fields =
@@ -296,7 +314,7 @@ let account_home_matches choice left right =
     | Codex -> (fun declaration ->
       Runtime_official_account.resolve_home ~client:Codex ~declaration
       |> Result.to_option)
-    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity -> Fun.id in
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Mistral_vibe -> Fun.id in
   effective left = effective right
 let same_connection left right =
   protocol left.choice=protocol right.choice && left.existing_inline=right.existing_inline
@@ -337,10 +355,15 @@ let connection_matches spec (provider : Runtime_schema.provider) =
     | Client client, Runtime_schema.Cli command ->
       client.command=command && account_home_matches spec.choice client.account_home provider.account_home
       && credential_matches (Option.map (fun path -> File_reference path) client.oauth)
-      && (match client.timeout, provider.antigravity_cli with
-          | None, None -> true
-          | Some timeout, Some options -> timeout=options.timeout_s
-          | _ -> false)
+      && (match spec.choice, client.timeout, provider.antigravity_cli, provider.acp with
+          | Mistral_vibe, timeout, None, Some acp ->
+            acp.driver = Runtime_schema.Mistral_vibe
+            && (match timeout with None -> true | Some t -> t = acp.timeout_s)
+          | Mistral_vibe, _, _, _ -> false
+          | Antigravity, Some timeout, Some options, None -> timeout=options.timeout_s
+          | Antigravity, _, _, _ -> false
+          | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex), None, None, None -> true
+          | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex), _, _, _ -> false)
     | Http connection, Runtime_schema.Http endpoint ->
       let kind = schema_kind connection.kind in
       connection.endpoint=endpoint && credential_matches connection.credential
@@ -465,8 +488,19 @@ let render ?include_provider ?wizard_default spec =
       @ (match h.request_path with None -> [] | Some path -> ["request-path", `String path])
       @ ["endpoint",`String h.endpoint;
          Runtime_schema.exact_body_timeout_s_key,`Float setup_exact_body_timeout_s],h.credential
-    | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]
-      @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout])
+    | Client c ->
+      let acp_fields =
+        match spec.choice with
+        | Mistral_vibe ->
+          [ "driver", `String "mistral_vibe"
+          ; "strip-env", `List [ `String "MISTRAL_API_KEY" ]
+          ; "timeout-s", `Float (Option.value c.timeout ~default:180.0)
+          ]
+        | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity ->
+          (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout])
+      in
+      ["command",`String c.command;"is-non-interactive",`Bool true]
+      @ acp_fields
       @ (match c.account_home with None -> [] | Some home -> ["account-home", `String home]),
       Option.map (fun path -> File_reference path) c.oauth in
   let runtime = table [Runtime_toml_namespace.(key Providers);provider] (fields @ transport_fields) in

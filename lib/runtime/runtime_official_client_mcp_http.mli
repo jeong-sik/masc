@@ -51,6 +51,11 @@ type endpoint =
     bridge serves until the owning switch closes. Never log or persist this
     value; pass it only to the client process the turn spawns. *)
 
+val begin_turn : t -> unit
+(** Reset turn-scoped admission and install a fresh stop-response boundary for
+    a persistent multi-turn bridge after draining any prior reservations.
+    Single-turn bridges do not need to call this. *)
+
 val await_host_stop : t -> Runtime_official_client_tool.host_stop
 (** Wait until a stop-request response reaches its complete-write or failed-write
     boundary, then drain every previously admitted handler reservation. Admission

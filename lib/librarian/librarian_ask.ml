@@ -358,6 +358,7 @@ let ask_room env (input : room_input) =
     Librarian_question.make_room
       ?world_index
       ?molt_trigger:input.asked.molt_trigger
+      ?category_filter:input.asked.category_filter
       ~lane:input.lane.question
       ~from:tail
       ~memory

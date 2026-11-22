@@ -17,7 +17,7 @@ type searxng_container =
           word is Docker's own. No action starts it. *)
 (** What Docker reports for the container [searxng_container_name]
     ([{{.State.Status}}]), as far as an action can tell. *)
-type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
+type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli | Vibe_cli
   | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
   | Ego_browser
   (** The program the browser lane starts: [\[browser.live.ego\]] names

@@ -1069,6 +1069,80 @@ let test_reinitialize_without_protocol_header_from_ready () =
   check int "tool executed once" 1 !calls
 ;;
 
+let test_begin_turn_reopens_admission_and_resets_host_stop () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let stop_token_1 : Runtime_official_client_tool.host_stop =
+    Terminal_tool_boundary { tool_name = "masc_probe"; outcome = Durable_stimulus_deferred }
+  in
+  let turn = ref 1 in
+  let calls = ref 0 in
+  let tool_specs () =
+    [ `Assoc
+        [ "name", `String "masc_probe"
+        ; "description", `String "Probe"
+        ; "inputSchema", `Assoc [ "type", `String "object" ]
+        ]
+    ]
+  in
+  let call_tool ~name:_ ~call_id:_ ~arguments:_ =
+    incr calls;
+    let stop = if !turn = 1 then Some stop_token_1 else None in
+    Some
+      { Runtime_official_client_mcp_http.outcome =
+          { Runtime_official_client_mcp.success = true
+          ; content = Printf.sprintf "TURN_%d_OK" !turn
+          ; content_blocks = None
+          }
+      ; stop
+      ; after_response_sent = ignore
+      }
+  in
+  let bridge =
+    Runtime_official_client_mcp_http.start
+      ~sw
+      ~net:env#net
+      ~secure_random:env#secure_random
+      ~server_name:"masc"
+      ~tool_specs
+      ~tool_execution_mode:(fun ~name:_ ~arguments:_ -> Some Agent_core.Tool_contract.Serial)
+      ~call_tool
+      ()
+  in
+  let endpoint, authorization = config_fields bridge in
+  let pv = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+  let call id =
+    request ~protocol_version:pv ~sw ~net:env#net ~endpoint ~authorization
+      (json_request id "tools/call"
+         (`Assoc [ "name", `String "masc_probe"; "arguments", `Assoc [] ]))
+  in
+  (* Turn 1 triggers host stop and closes admission for late turn-1 calls. *)
+  let stop_resolved, resolve_stop = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve resolve_stop (Runtime_official_client_mcp_http.await_host_stop bridge));
+  check int "turn 1 stopping call succeeds" 200 (call 10).status;
+  let late_t1 = call 11 in
+  check bool "turn 1 late call rejected as isError=true" true
+    ((Yojson.Safe.from_string late_t1.body |> member "result" |> member "isError") = `Bool true);
+  check int "turn 1 late call did not invoke handler" 1 !calls;
+  check bool "turn 1 await_host_stop resolved with stop token" true
+    (Eio.Promise.await stop_resolved = stop_token_1);
+  (* begin_turn resets admission and host_stop for Turn 2 on the persistent bridge. *)
+  turn := 2;
+  Runtime_official_client_mcp_http.begin_turn bridge;
+  let stop_2_resolved, resolve_stop_2 = Eio.Promise.create () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Promise.resolve resolve_stop_2 (Runtime_official_client_mcp_http.await_host_stop bridge);
+    `Stop_daemon);
+  let t2 = call 12 in
+  check int "turn 2 call succeeds after begin_turn" 200 t2.status;
+  check int "turn 2 handler executed" 2 !calls;
+  check bool "turn 2 await_host_stop stays pending (not poisoned by turn 1)" true
+    (Eio.Promise.peek stop_2_resolved = None)
+;;
+
 let () =
   run
     "runtime_official_client_mcp_http"
@@ -1081,6 +1155,10 @@ let () =
             "re-initialize without protocol header succeeds from Ready"
             `Quick
             test_reinitialize_without_protocol_header_from_ready
+        ; test_case
+            "begin_turn reopens admission and resets host_stop for persistent ACP bridge"
+            `Quick
+            test_begin_turn_reopens_admission_and_resets_host_stop
         ; test_case "unsupported media is an explicit delivery error" `Quick
             test_unsupported_media_is_a_delivery_error
         ; test_case "image media type outside the shared set is refused" `Quick

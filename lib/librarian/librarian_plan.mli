@@ -50,8 +50,25 @@ type t =
   ; working_state : working_state
   }
 
+(** Maximum accepted [Promote_to_world] ops per Librarian answer. *)
+val max_promotions_per_answer : int
+
+(** Maximum byte length of a promoted world claim after redaction. *)
+val max_promotion_claim_bytes : int
+
+(** Maximum byte length of a promoted world scope token after redaction. *)
+val max_promotion_scope_bytes : int
+
+(** Maximum facet count per promoted world entry. *)
+val max_promotion_facets : int
+
+(** Maximum byte length per promoted facet after redaction. *)
+val max_promotion_facet_bytes : int
+
 val of_answer
-  :  shown:shown
+  :  ?is_public_board_post:(Board_types.Post_id.t -> bool)
+  -> ?redact:Keeper_secret_redaction.t
+  -> shown:shown
   -> facts:fact list
   -> removed_since:(string * int) list
   -> at:float

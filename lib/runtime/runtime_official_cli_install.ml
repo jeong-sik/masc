@@ -1,14 +1,22 @@
-type client = Codex | Claude | Antigravity
+type client = Codex | Claude | Antigravity | Mistral_vibe | Kimi_code
 let name = function
-  | Codex -> "codex" | Claude -> "claude" | Antigravity -> "agy"
+  | Codex -> "codex"
+  | Claude -> "claude"
+  | Antigravity -> "agy"
+  | Mistral_vibe -> "vibe-acp"
+  | Kimi_code -> "kimi"
 let source_url = function
   | Codex -> "https://developers.openai.com/codex/cli/"
   | Claude -> "https://code.claude.com/docs/en/installation"
   | Antigravity -> "https://antigravity.google/docs/cli/install/"
+  | Mistral_vibe -> "https://github.com/mistralai/mistral-vibe"
+  | Kimi_code -> "https://www.kimi.com/coding/docs/en/kimi-cli.html"
 let script = function
   | Codex -> "https://chatgpt.com/codex/install.sh", "sh"
   | Claude -> "https://claude.ai/install.sh", "bash"
   | Antigravity -> "https://antigravity.google/cli/install.sh", "bash"
+  | Mistral_vibe -> "https://mistral.ai/vibe/install.sh", "sh"
+  | Kimi_code -> "https://code.kimi.com/install.sh", "sh"
 (* An executable regular file at [path], as the path was given. [stat] follows
    a link, so a link to such a file passes; the path returned is the link,
    not its target. The Claude Code installer keeps ~/.local/bin/claude as a
@@ -39,21 +47,36 @@ let path_directories () =
 
 let install_dir_variable = function
   | Codex -> Some "CODEX_INSTALL_DIR"
+  | Mistral_vibe | Kimi_code -> Some "UV_TOOL_BIN_DIR"
   | Claude | Antigravity -> None
 
 (* Where the vendor installer writes the client: the client's install
-   directory variable when it is set, else ~/.local/bin for each client. *)
+   directory variable when it is set, else ~/.local/bin (and ~/.cargo/bin for
+   uv-installed ACP clients such as vibe-acp and kimi). *)
 let vendor_directories client =
-  match Option.bind (install_dir_variable client) Env_config_core.raw_value_opt with
-  | Some path when String.trim path <> "" ->
-    (* Vendor installers accept relative destinations against setup's cwd.
-       Persist that same destination as an absolute spelling: the eventual
-       native process runs from another workspace. Do not resolve symlinks. *)
-    [ if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path ]
-  | Some _ | None ->
-    (match Env_config_core.raw_value_opt "HOME" with
-     | Some home -> [ Filename.concat home ".local/bin" ]
-     | None -> [])
+  let explicit =
+    match Option.bind (install_dir_variable client) Env_config_core.raw_value_opt with
+    | Some path when String.trim path <> "" ->
+      (* Vendor installers accept relative destinations against setup's cwd.
+         Persist that same destination as an absolute spelling: the eventual
+         native process runs from another workspace. Do not resolve symlinks. *)
+      [ if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path ]
+    | Some _ | None -> []
+  in
+  let home_fallbacks =
+    match Env_config_core.raw_value_opt "HOME" with
+    | Some home ->
+      let local_bin = Filename.concat home ".local/bin" in
+      (match client with
+       | Mistral_vibe | Kimi_code ->
+         [ local_bin; Filename.concat home ".cargo/bin" ]
+       | Codex | Claude | Antigravity -> [ local_bin ])
+    | None -> []
+  in
+  match client, explicit with
+  | Codex, _ :: _ -> explicit
+  | (Codex | Claude | Antigravity | Mistral_vibe | Kimi_code), _ ->
+    explicit @ home_fallbacks
 ;;
 
 (* Explicit relative paths belong to the materialization cwd, not the later

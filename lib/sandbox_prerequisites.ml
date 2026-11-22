@@ -6,7 +6,7 @@ type searxng_container =
   | Searxng_paused
   | Searxng_restarting
   | Searxng_unusable of string
-type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
+type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli | Vibe_cli
   | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
   | Ego_browser | Searxng of { config_dir : string }
 type action_effect = Open_official_installer of { url : string; argv : string list }
@@ -265,6 +265,11 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked)
         ~detail:"Follow the vendor instructions, then return to sign in and verify the selected model."
         ~source_url:(Runtime_official_cli_install.source_url Antigravity)
         (Runtime_official_cli_install.source_url Antigravity)]
+  | Vibe_cli, _ -> [install_cli Mistral_vibe;
+      open_ ~id:"vibe_official_install" ~label:"Open official Mistral Vibe installation"
+        ~detail:"Install Mistral Vibe (vibe-acp via uv or the vendor installer), run vibe --setup to sign in with OS keyring, then return to detect and verify the selected model."
+        ~source_url:(Runtime_official_cli_install.source_url Mistral_vibe)
+        (Runtime_official_cli_install.source_url Mistral_vibe)]
   | (Presentation_tools { base_path }, (Macos _ | Linux (Sandbox_readiness.Arm64)))
   | (Presentation_tools { base_path }, Linux (Sandbox_readiness.X64)) ->
     let parser = commands ~id:"presentation_parser_install" ~label:"Install the presentation parser for this workspace"

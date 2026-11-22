@@ -133,8 +133,19 @@ let mode_of_posture driver (posture : Runtime_native_tools.posture) =
 let protocol_version = 1
 let default_timeout_s = 180.0
 let init_timeout_s = 30.0
+let default_reap_grace_seconds = 5.0
 let max_ndjson_line_bytes = 16 * 1024 * 1024
+let max_prompt_stream_bytes = 16 * 1024 * 1024
+let max_outbound_queue = 256
 let max_stderr_tail_bytes = 8192
+
+let nonneg n = if n < 0 then 0 else n
+
+let sat_add a b =
+  let a = nonneg a in
+  let b = nonneg b in
+  if a > max_int - b then max_int else a + b
+;;
 
 (* ── Configuration & wire types ───────────────────────────────────────────── *)
 
@@ -186,6 +197,7 @@ type config_option =
   ; name : string
   ; category : string option
   ; current_value : string
+  ; available_values : string list
   }
 
 type session_info =
@@ -228,22 +240,25 @@ type normalized_usage =
 
 let normalize_usage driver (u : usage) : normalized_usage =
   let profile = profile_of_driver driver in
+  let in_tok = nonneg u.input_tokens in
+  let out_tok = nonneg u.output_tokens in
+  let cached_read = nonneg u.cached_read_tokens in
+  let cached_write = nonneg u.cached_write_tokens in
+  let thought = nonneg u.thought_tokens in
   let input_tokens =
     match profile.input_accounting with
-    | Inclusive_of_cached ->
-      max u.input_tokens (u.cached_read_tokens + u.cached_write_tokens)
-    | Exclusive_of_cached ->
-      u.input_tokens + u.cached_read_tokens + u.cached_write_tokens
+    | Inclusive_of_cached -> max in_tok (sat_add cached_read cached_write)
+    | Exclusive_of_cached -> sat_add in_tok (sat_add cached_read cached_write)
   in
   let output_tokens =
     match profile.output_accounting with
-    | Inclusive_of_thought -> max u.output_tokens u.thought_tokens
-    | Exclusive_of_thought -> u.output_tokens + u.thought_tokens
+    | Inclusive_of_thought -> max out_tok thought
+    | Exclusive_of_thought -> sat_add out_tok thought
   in
   { input_tokens
   ; output_tokens
-  ; cache_creation_input_tokens = u.cached_write_tokens
-  ; cache_read_input_tokens = u.cached_read_tokens
+  ; cache_creation_input_tokens = cached_write
+  ; cache_read_input_tokens = cached_read
   }
 ;;
 
@@ -384,6 +399,45 @@ let error_to_string = function
   | Client_closed -> "ACP client is closed"
 ;;
 
+let contains_substring_ci ~haystack ~needle =
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  if n_len = 0
+  then true
+  else if n_len > h_len
+  then false
+  else (
+    let h = String.lowercase_ascii haystack in
+    let n = String.lowercase_ascii needle in
+    let rec scan idx =
+      if idx > h_len - n_len
+      then false
+      else if String.sub h idx n_len = n
+      then true
+      else scan (idx + 1)
+    in
+    scan 0)
+;;
+
+let is_context_overflow_rpc_error ~method_name:_ ~code:_ ~message =
+  let needles =
+    [ "context_length_exceeded"
+    ; "context length"
+    ; "maximum context"
+    ; "context window"
+    ; "prompt is too long"
+    ; "input is too long"
+    ; "request too large"
+    ; "too many tokens"
+    ; "token limit"
+    ; "tokens exceed"
+    ; "exceeds the maximum"
+    ; "max_tokens_exceeded"
+    ]
+  in
+  List.exists (fun needle -> contains_substring_ci ~haystack:message ~needle) needles
+;;
+
 (* ── Higher-rank polymorphic JSON decoding helpers ────────────────────────── *)
 
 type 'a json_decoder = { decode : Yojson.Safe.t -> ('a, string) result }
@@ -426,12 +480,33 @@ let parse_tool_status = function
   | other -> Tool_other_status other
 ;;
 
+let parse_option_values json =
+  let extract_entry item =
+    match json_string_opt "value" item with
+    | Some v when String.trim v <> "" -> [ v ]
+    | _ ->
+      (match json_list_opt "options" item with
+       | Some grouped ->
+         List.filter_map
+           (fun sub ->
+              match json_string_opt "value" sub with
+              | Some v when String.trim v <> "" -> Some v
+              | _ -> None)
+           grouped
+       | None -> [])
+  in
+  match json_list_opt "options" json with
+  | None -> []
+  | Some items -> List.concat_map extract_entry items
+;;
+
 let parse_config_option json =
   match json_string_opt "id" json, json_string_opt "currentValue" json with
   | Some id, Some current_value ->
     let name = Option.value (json_string_opt "name" json) ~default:id in
     let category = json_string_opt "category" json in
-    Some { id; name; category; current_value }
+    let available_values = parse_option_values json in
+    Some { id; name; category; current_value; available_values }
   | _ -> None
 ;;
 
@@ -480,10 +555,11 @@ let parse_session_update params =
     let raw_output = json_field "rawOutput" update in
     Some (Tool_call_updated { tool_call_id; title; status; raw_output })
   | Some "usage_update" ->
-    let used = json_int_opt "used" update in
-    let size = json_int_opt "size" update in
+    let nonneg_opt = Option.map nonneg in
+    let used = json_int_opt "used" update |> nonneg_opt in
+    let size = json_int_opt "size" update |> nonneg_opt in
     let meta = json_field "_meta" update in
-    let meta_int k = Option.bind meta (json_int_opt k) in
+    let meta_int k = Option.bind meta (json_int_opt k) |> nonneg_opt in
     Some
       (Usage_updated
          { used
@@ -504,7 +580,7 @@ let parse_prompt_usage result_json =
   match json_field "usage" result_json with
   | None -> empty_usage
   | Some u ->
-    let i k = Option.value (json_int_opt k u) ~default:0 in
+    let i k = Option.value (json_int_opt k u) ~default:0 |> nonneg in
     let input_tokens = i "inputTokens" in
     let output_tokens = i "outputTokens" in
     let cached_read_tokens = i "cachedReadTokens" in
@@ -512,10 +588,11 @@ let parse_prompt_usage result_json =
     let thought_tokens = i "thoughtTokens" in
     let total_tokens =
       match json_int_opt "totalTokens" u with
-      | Some n -> n
+      | Some n -> nonneg n
       | None ->
-        input_tokens + output_tokens + cached_read_tokens + cached_write_tokens
-        + thought_tokens
+        sat_add
+          (sat_add (sat_add input_tokens output_tokens) (sat_add cached_read_tokens cached_write_tokens))
+          thought_tokens
     in
     { input_tokens
     ; output_tokens
@@ -636,7 +713,9 @@ let build_environment ~base_env ~driver ~extra_strip_env =
 ;;
 
 let prepare_antigravity_gemini_dir ~oauth_source ~mcp_server =
-  let dir = Filename.temp_dir "masc-agy-acp-" "" in
+  (* PID-tag temp dir so Orphan_hygiene_sweep reaps dead-PID leftovers on boot
+     while never deleting a live persistent ACP session's --gemini-dir (>24h). *)
+  let dir = Filename.temp_dir (Printf.sprintf "masc-agy-acp-%d-" (Unix.getpid ())) "" in
   try
     let config_dir = Filename.concat dir "config" in
     Fs_compat.mkdir_p config_dir;
@@ -712,18 +791,18 @@ let parse_permission_option_kind = function
   | other -> Other_option_kind other
 ;;
 
-let is_disallowed_native_kind = function
-  | Some ("execute" | "edit" | "delete" | "move" | "write" | "shell" | "terminal") -> true
-  | Some _ | None -> false
+let is_allowed_mcp_kind = function
+  | None | Some ("mcp" | "other") -> true
+  | Some _ -> false
 ;;
 
 let is_read_only_tool_kind = function
-  | Some ("read" | "search" | "fetch" | "think") -> true
+  | Some ("read" | "search" | "think") -> true
   | Some _ | None -> false
 ;;
 
 let is_masc_mcp_tool ~mcp_server_name ~allowed_tool_names ~title ~kind =
-  if is_disallowed_native_kind kind || allowed_tool_names = []
+  if (not (is_allowed_mcp_kind kind)) || allowed_tool_names = []
   then false
   else (
     let matches_tool tool_name =
@@ -731,10 +810,7 @@ let is_masc_mcp_tool ~mcp_server_name ~allowed_tool_names ~title ~kind =
       || String.equal title ("mcp_" ^ mcp_server_name ^ "." ^ tool_name)
       || String.equal title (mcp_server_name ^ ":" ^ tool_name)
       || String.equal title (mcp_server_name ^ "/" ^ tool_name)
-      || (match kind with
-          | None | Some ("mcp" | "other") ->
-            String.equal title (mcp_server_name ^ "_" ^ tool_name)
-          | Some _ -> false)
+      || String.equal title (mcp_server_name ^ "_" ^ tool_name)
       || (Option.equal String.equal kind (Some "mcp") && String.equal title tool_name)
     in
     List.exists matches_tool allowed_tool_names)
@@ -770,10 +846,7 @@ let choose_permission_option ~allow options_json =
     List.find_map (fun (id, kind) -> if kind = target then Some id else None) parsed
   in
   if allow
-  then (
-    match find_kind Allow_once with
-    | Some id -> Some id
-    | None -> find_kind Allow_always)
+  then find_kind Allow_once
   else (
     match find_kind Reject_once with
     | Some id -> Some id
@@ -799,8 +872,12 @@ type t =
   ; mutable init_latency_ms : int
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; signal_term : unit -> unit
+  ; signal_close : unit -> unit
+  ; await_reaped : unit -> unit
   ; to_stdin : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Resource.t
   ; write_mutex : Eio.Mutex.t
+  ; outbound_queue : Yojson.Safe.t Eio.Stream.t
+  ; outbound_queued : int Atomic.t
   ; state_mutex : Stdlib.Mutex.t
   ; mutable next_id : int
   ; pending : (int, rpc_response Eio.Promise.u) Hashtbl.t
@@ -858,7 +935,7 @@ let send_json t json =
         Eio.Flow.copy_string line t.to_stdin;
         Ok ()
       with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn -> raise exn
       | exn ->
         Atomic.set t.alive false;
         Error
@@ -878,7 +955,7 @@ let fail_all_pending t reason =
   List.iter (fun u -> Eio.Promise.resolve u (Rpc_closed reason)) waiters
 ;;
 
-let close t =
+let close_internal ~await_reap t =
   if Atomic.compare_and_set t.closed false true
   then (
     Atomic.set t.alive false;
@@ -888,15 +965,42 @@ let close t =
     (try t.signal_term () with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | Eio.Io _ | Unix.Unix_error _ -> ());
-    fail_all_pending t "client closed")
+    fail_all_pending t "client closed";
+    t.signal_close ());
+  if await_reap then t.await_reaped ()
+;;
+
+let close t = close_internal ~await_reap:true t
+
+(* Non-blocking bounded enqueue so the stdout reader daemon never blocks on
+   [write_mutex]/[to_stdin] while a large [session/prompt] is writing to stdin. *)
+let enqueue_outbound t json =
+  if not (Atomic.get t.closed)
+  then (
+    let rec try_reserve () =
+      let cur = Atomic.get t.outbound_queued in
+      if cur >= max_outbound_queue
+      then false
+      else if Atomic.compare_and_set t.outbound_queued cur (cur + 1)
+      then true
+      else try_reserve ()
+    in
+    if try_reserve ()
+    then Eio.Stream.add t.outbound_queue json
+    else (
+      Log.Runtime_agent.warn
+        "ACP outbound queue saturated (%d); closing client"
+        max_outbound_queue;
+      close_internal ~await_reap:false t))
 ;;
 
 let handle_permission_request t ~id ~params =
   let active = with_state_lock t (fun () -> t.active_turn) in
+  let req_session_id = json_string_opt "sessionId" params in
   let policy =
-    match active with
-    | Some turn -> turn.permission_policy
-    | None -> Deny_all
+    match active, req_session_id with
+    | Some turn, Some sid when String.equal sid turn.session_id -> turn.permission_policy
+    | _ -> Deny_all
   in
   let tool_call = Option.value (json_field "toolCall" params) ~default:(`Assoc []) in
   let title =
@@ -916,7 +1020,7 @@ let handle_permission_request t ~id ~params =
   let response =
     `Assoc [ "jsonrpc", `String "2.0"; "id", id; "result", `Assoc [ "outcome", outcome ] ]
   in
-  ignore (send_json t response)
+  enqueue_outbound t response
 ;;
 
 let dispatch_incoming_message t msg =
@@ -957,7 +1061,8 @@ let dispatch_incoming_message t msg =
        if matches_session
        then (
          try turn.on_event event with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
+           raise exn
          | _ -> ())
      | _ -> ())
   | Some "session/request_permission", Some id ->
@@ -976,7 +1081,7 @@ let dispatch_incoming_message t msg =
               ] )
         ]
     in
-    ignore (send_json t response)
+    enqueue_outbound t response
   | _ -> ()
 ;;
 
@@ -1045,7 +1150,13 @@ let cancel t ~session_id =
         ; "params", `Assoc [ "sessionId", `String session_id ]
         ]
     in
-    ignore (send_json t notif))
+    enqueue_outbound t notif)
+;;
+
+let install_client_of_driver = function
+  | Antigravity -> Runtime_official_cli_install.Antigravity
+  | Kimi_code -> Runtime_official_cli_install.Kimi_code
+  | Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe
 ;;
 
 (* ── Lifecycle: spawn + initialize ────────────────────────────────────────── *)
@@ -1080,6 +1191,10 @@ let build_argv (config : config) ~temp_gemini_dir =
   | Mistral_vibe -> config.cli_path :: base_args
 ;;
 
+let foreground_process_mgr ~clock ?(grace_seconds = default_reap_grace_seconds) () =
+  Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds
+;;
+
 let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must be non-empty")
@@ -1094,135 +1209,233 @@ let start ~sw ~proc_mgr ~clock ~(config : config) ?mcp_server () =
           (prepare_antigravity_gemini_dir ~oauth_source:config.oauth_source ~mcp_server)
       | Session_new_http_mcp -> Ok None
     in
+    let gemini_dir_cleaned = Atomic.make false in
     let cleanup_gemini_dir () =
-      Option.iter
-        (fun dir ->
-           try Fs_compat.remove_tree dir with
-           | Sys_error _ | Unix.Unix_error _ -> ())
-        temp_gemini_dir
+      if Atomic.compare_and_set gemini_dir_cleaned false true
+      then
+        Option.iter
+          (fun dir ->
+             try Fs_compat.remove_tree dir with
+             | Sys_error _ | Unix.Unix_error _ -> ())
+          temp_gemini_dir
     in
+    Eio.Switch.on_release sw cleanup_gemini_dir;
     let env =
       build_environment
         ~base_env:(Unix.environment ())
         ~driver:config.driver
         ~extra_strip_env:config.strip_env
     in
-    let argv = build_argv config ~temp_gemini_dir in
+    let resolved_cli_path =
+      Runtime_official_cli_install.spawn_path
+        (install_client_of_driver config.driver)
+        ~command:config.cli_path
+    in
+    let argv = build_argv { config with cli_path = resolved_cli_path } ~temp_gemini_dir in
     let cwd_path =
       match Eio_context.get_env_opt () with
       | Some eio_env -> Some Eio.Path.(Eio.Stdenv.fs eio_env / config.cwd)
       | None -> None
     in
     let started_at = Time_compat.now () in
-    match Process_eio.spawn_piped_child ~sw proc_mgr ?cwd:cwd_path ~env argv with
-    | Error refusal ->
-      cleanup_gemini_dir ();
-      Error (Spawn_refused refusal)
-    | Ok { Process_eio.process; to_stdin; from_stdout; from_stderr } ->
-      let t =
-        { driver = config.driver
-        ; capabilities =
-            { load_session = false
-            ; resume_session = false
-            ; close_session = false
-            ; image_prompt = false
-            ; embedded_context = false
-            ; mcp_http = false
-            ; antigravity_system_prompt_append = false
-            ; antigravity_tier = None
-            }
-        ; init_latency_ms = 0
-        ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
-        ; signal_term = (fun () -> Eio.Process.signal process Sys.sigterm)
-        ; to_stdin
-        ; write_mutex = Eio.Mutex.create ()
-        ; state_mutex = Stdlib.Mutex.create ()
-        ; next_id = 1
-        ; pending = Hashtbl.create 16
-        ; active_turn = None
-        ; alive = Atomic.make true
-        ; closed = Atomic.make false
-        ; stderr_buf = Buffer.create 512
-        ; stderr_mutex = Stdlib.Mutex.create ()
-        }
+    let close_promise, resolve_close = Eio.Promise.create () in
+    let close_signalled = Atomic.make false in
+    let signal_close () =
+      if Atomic.compare_and_set close_signalled false true
+      then Eio.Promise.resolve resolve_close ()
+    in
+    let reaped_promise, resolve_reaped = Eio.Promise.create () in
+    let mark_reaped () =
+      ignore (Eio.Promise.try_resolve resolve_reaped () : bool)
+    in
+    let await_reaped () =
+      match Eio.Promise.peek reaped_promise with
+      | Some () -> ()
+      | None ->
+        Eio.Cancel.protect (fun () ->
+          match
+            Eio.Time.with_timeout clock (default_reap_grace_seconds +. 1.0) (fun () ->
+              Eio.Promise.await reaped_promise;
+              Ok ())
+          with
+          | Ok () | Error `Timeout -> ())
+    in
+    let spawned_promise, resolve_spawned = Eio.Promise.create () in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Fun.protect ~finally:mark_reaped (fun () ->
+        try
+          Eio.Switch.run (fun child_sw ->
+            Eio.Switch.on_release child_sw cleanup_gemini_dir;
+            if Atomic.get close_signalled
+            then (
+              match Eio.Promise.peek spawned_promise with
+              | None -> Eio.Promise.resolve resolve_spawned (Error Client_closed)
+              | Some _ -> ())
+            else (
+              match Process_eio.spawn_piped_child ~sw:child_sw proc_mgr ?cwd:cwd_path ~env argv with
+              | Error refusal ->
+                Eio.Promise.resolve resolve_spawned (Error (Spawn_refused refusal))
+              | Ok { Process_eio.process; to_stdin; from_stdout; from_stderr } ->
+                let signal_term () =
+                  try Eio.Process.signal process Sys.sigterm with
+                  | Eio.Io _ | Unix.Unix_error _ -> ()
+                in
+                let t =
+                  { driver = config.driver
+                  ; capabilities =
+                      { load_session = false
+                      ; resume_session = false
+                      ; close_session = false
+                      ; image_prompt = false
+                      ; embedded_context = false
+                      ; mcp_http = false
+                      ; antigravity_system_prompt_append = false
+                      ; antigravity_tier = None
+                      }
+                  ; init_latency_ms = 0
+                  ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+                  ; signal_term
+                  ; signal_close
+                  ; await_reaped
+                  ; to_stdin
+                  ; write_mutex = Eio.Mutex.create ()
+                  ; outbound_queue = Eio.Stream.create max_int
+                  ; outbound_queued = Atomic.make 0
+                  ; state_mutex = Stdlib.Mutex.create ()
+                  ; next_id = 1
+                  ; pending = Hashtbl.create 16
+                  ; active_turn = None
+                  ; alive = Atomic.make true
+                  ; closed = Atomic.make false
+                  ; stderr_buf = Buffer.create 512
+                  ; stderr_mutex = Stdlib.Mutex.create ()
+                  }
+                in
+                Eio.Switch.on_release child_sw (fun () -> close_internal ~await_reap:false t);
+                (* Dedicated outbound writer daemon decouples stdout-reader replies
+                   (permission responses, unknown-method errors, cancel) from stdin writes. *)
+                Eio.Fiber.fork_daemon ~sw:child_sw (fun () ->
+                  (try
+                     let rec loop () =
+                       let json = Eio.Stream.take t.outbound_queue in
+                       Atomic.decr t.outbound_queued;
+                       match send_json t json with
+                       | Ok () -> loop ()
+                       | Error _ -> ()
+                     in
+                     loop ()
+                   with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn);
+                  `Stop_daemon);
+                (* Background stderr drain daemon *)
+                Eio.Fiber.fork_daemon ~sw:child_sw (fun () ->
+                  (try
+                     let buf = Cstruct.create 4096 in
+                     let rec loop () =
+                       match Eio.Flow.single_read from_stderr buf with
+                       | n when n > 0 ->
+                         append_stderr t (Cstruct.to_string ~len:n buf);
+                         loop ()
+                       | _ -> ()
+                       | exception End_of_file -> ()
+                     in
+                     loop ()
+                   with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | Eio.Io _ | Unix.Unix_error _ -> ());
+                  `Stop_daemon);
+                (* Background NDJSON stdout reader daemon *)
+                Eio.Fiber.fork_daemon ~sw:child_sw (fun () ->
+                  (try
+                     let reader = Eio.Buf_read.of_flow ~max_size:max_ndjson_line_bytes from_stdout in
+                     let rec loop () =
+                       match Eio.Buf_read.line reader with
+                       | line ->
+                         let trimmed = String.trim line in
+                         if trimmed <> ""
+                         then (
+                           match Yojson.Safe.from_string trimmed with
+                           | msg -> dispatch_incoming_message t msg
+                           | exception (Yojson.Json_error _ | Failure _) -> ());
+                         loop ()
+                       | exception End_of_file ->
+                         Atomic.set t.alive false;
+                         fail_all_pending t "stdout EOF";
+                         signal_close ()
+                     in
+                     loop ()
+                   with
+                   | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
+                     raise exn
+                   | exn ->
+                     Atomic.set t.alive false;
+                     fail_all_pending t ("stdout reader failed: " ^ Printexc.to_string exn);
+                     signal_close ());
+                  `Stop_daemon);
+                Eio.Promise.resolve resolve_spawned (Ok t);
+                Eio.Promise.await close_promise))
+        with
+        | (Out_of_memory | Stack_overflow | Sys.Break | Eio.Cancel.Cancelled _) as exn ->
+          (match Eio.Promise.peek spawned_promise with
+           | None -> Eio.Promise.resolve resolve_spawned (Error Client_closed)
+           | Some _ -> ());
+          raise exn
+        | exn ->
+          (match Eio.Promise.peek spawned_promise with
+           | None ->
+             Eio.Promise.resolve
+               resolve_spawned
+               (Error (Protocol_error { stage = "spawn"; detail = Printexc.to_string exn }))
+           | Some _ -> ()));
+      `Stop_daemon);
+    let* t =
+      try Eio.Promise.await spawned_promise with
+      | Eio.Cancel.Cancelled _ as exn ->
+        Eio.Cancel.protect (fun () ->
+          signal_close ();
+          match Eio.Promise.peek spawned_promise with
+          | Some (Ok t) -> close t
+          | Some (Error _) | None ->
+            await_reaped ();
+            cleanup_gemini_dir ());
+        raise exn
+    in
+    let init_params =
+      `Assoc
+        [ "protocolVersion", `Int protocol_version
+        ; "clientCapabilities", `Assoc []
+        ; ( "clientInfo"
+          , `Assoc
+              [ "name", `String "masc"
+              ; "version", `String Build_version.current
+              ] )
+        ]
+    in
+    let init_decoder = { decode = (fun json -> Ok (parse_capabilities json)) } in
+    let init_result =
+      try
+        rpc_call_decoded
+          t
+          ~method_name:"initialize"
+          ~params:init_params
+          ~timeout_s:(Some config.admission_timeout_s)
+          ~decoder:init_decoder
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
+        Eio.Cancel.protect (fun () -> close t);
+        raise exn
+    in
+    match init_result with
+    | Error _ as err ->
+      close t;
+      err
+    | Ok caps ->
+      let init_ms =
+        Int.of_float (Float.max 0.0 ((Time_compat.now () -. started_at) *. 1000.0))
       in
-      (* Per-Keeper switch owns the child: release hook closes stdin, signals
-         SIGTERM, and deletes temporary --gemini-dir without Eio waits. *)
-      Eio.Switch.on_release sw (fun () ->
-        close t;
-        cleanup_gemini_dir ());
-      (* Background stderr drain daemon *)
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-        (try
-           let buf = Cstruct.create 4096 in
-           let rec loop () =
-             match Eio.Flow.single_read from_stderr buf with
-             | n when n > 0 ->
-               append_stderr t (Cstruct.to_string ~len:n buf);
-               loop ()
-             | _ -> ()
-             | exception End_of_file -> ()
-           in
-           loop ()
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | Eio.Io _ | Unix.Unix_error _ -> ());
-        `Stop_daemon);
-      (* Background NDJSON stdout reader daemon *)
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-        (try
-           let reader = Eio.Buf_read.of_flow ~max_size:max_ndjson_line_bytes from_stdout in
-           let rec loop () =
-             match Eio.Buf_read.line reader with
-             | line ->
-               let trimmed = String.trim line in
-               if trimmed <> ""
-               then (
-                 match Yojson.Safe.from_string trimmed with
-                 | msg -> dispatch_incoming_message t msg
-                 | exception (Yojson.Json_error _ | Failure _) -> ());
-               loop ()
-             | exception End_of_file ->
-               Atomic.set t.alive false;
-               fail_all_pending t "stdout EOF"
-           in
-           loop ()
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Atomic.set t.alive false;
-           fail_all_pending t ("stdout reader failed: " ^ Printexc.to_string exn));
-        `Stop_daemon);
-      let init_params =
-        `Assoc
-          [ "protocolVersion", `Int protocol_version
-          ; "clientCapabilities", `Assoc []
-          ; ( "clientInfo"
-            , `Assoc
-                [ "name", `String "masc"
-                ; "version", `String Build_version.current
-                ] )
-          ]
-      in
-      let init_decoder = { decode = (fun json -> Ok (parse_capabilities json)) } in
-      (match
-         rpc_call_decoded
-           t
-           ~method_name:"initialize"
-           ~params:init_params
-           ~timeout_s:(Some config.admission_timeout_s)
-           ~decoder:init_decoder
-       with
-       | Error _ as err ->
-         close t;
-         err
-       | Ok caps ->
-         let init_ms =
-           Int.of_float (Float.max 0.0 ((Time_compat.now () -. started_at) *. 1000.0))
-         in
-         t.capabilities <- caps;
-         t.init_latency_ms <- init_ms;
-         Ok t))
+      t.capabilities <- caps;
+      t.init_latency_ms <- init_ms;
+      Ok t)
 ;;
 
 (* ── Session lifecycle RPCs ───────────────────────────────────────────────── *)
@@ -1253,6 +1466,70 @@ let set_config_option t ~session_id ~config_id ~value =
     ~decoder:{ decode = (fun json -> Ok (parse_config_options json)) }
 ;;
 
+let resolve_option_value ~driver ~config_id ~requested ~(option : config_option) =
+  let profile = profile_of_driver driver in
+  let trimmed = String.trim requested in
+  if trimmed = ""
+  then None
+  else if String.equal config_id profile.model_config_id
+          && String.equal (String.lowercase_ascii trimmed) "default"
+  then
+    (* "default" is a legacy sentinel meaning "keep the CLI's active model".
+       Vibe 3.1.0 raises InvalidRequestError if "default" is sent to
+       session/set_config_option. *)
+    None
+  else (
+    let is_effort =
+      Option.equal String.equal option.category (Some "thought_level")
+      ||
+      match profile.effort_config_id with
+      | Some eff_id -> String.equal config_id eff_id
+      | None -> false
+    in
+    let mapped =
+      if is_effort && driver = Mistral_vibe
+      then (
+        match String.lowercase_ascii trimmed with
+        | "none" -> "off"
+        | "minimal" -> "low"
+        | other -> other)
+      else trimmed
+    in
+    let candidate =
+      match option.available_values with
+      | [] -> Some mapped
+      | available when List.mem mapped available -> Some mapped
+      | available ->
+        if is_effort
+        then (
+          let lower = String.lowercase_ascii mapped in
+          if String.equal lower "off" || String.equal lower "none"
+          then List.find_opt (fun v -> List.mem v available) [ "off"; "none" ]
+          else (
+            let preference =
+              match lower with
+              | "low" | "minimal" -> [ "low"; "medium"; "high"; "xhigh"; "max" ]
+              | "medium" -> [ "medium"; "high"; "low"; "xhigh"; "max" ]
+              | "high" -> [ "high"; "xhigh"; "max"; "medium"; "low" ]
+              | "xhigh" -> [ "xhigh"; "high"; "max"; "medium"; "low" ]
+              | "max" -> [ "max"; "xhigh"; "high"; "medium"; "low" ]
+              | _ -> [ "high"; "medium"; "low"; "xhigh"; "max" ]
+            in
+            List.find_opt (fun v -> List.mem v available) preference))
+        else (
+          Log.Runtime_agent.warn
+            "skipping unsupported ACP config option %s=%S for %s (available: [%s])"
+            config_id
+            mapped
+            (driver_to_string driver)
+            (String.concat ", " available);
+          None)
+    in
+    match candidate with
+    | Some value when not (String.equal value option.current_value) -> Some value
+    | Some _ | None -> None)
+;;
+
 let apply_session_options t (info : session_info) ~mode ~model ~effort =
   let profile = profile_of_driver t.driver in
   let* () =
@@ -1266,30 +1543,53 @@ let apply_session_options t (info : session_info) ~mode ~model ~effort =
       then set_mode t ~session_id:info.session_id ~mode_id:desired
       else Ok ()
   in
-  let has_option opt_id =
-    List.exists (fun (opt : config_option) -> String.equal opt.id opt_id) info.config_options
-  in
-  let current_value opt_id =
-    List.find_map
-      (fun (opt : config_option) ->
-         if String.equal opt.id opt_id then Some opt.current_value else None)
-      info.config_options
+  let find_option options opt_id =
+    List.find_opt (fun (opt : config_option) -> String.equal opt.id opt_id) options
   in
   let* config_options =
-    match model with
-    | Some m
-      when String.trim m <> ""
-           && has_option profile.model_config_id
-           && not (Option.equal String.equal (current_value profile.model_config_id) (Some m)) ->
-      set_config_option t ~session_id:info.session_id ~config_id:profile.model_config_id ~value:m
+    match model, find_option info.config_options profile.model_config_id with
+    | Some m, Some option ->
+      (match
+         resolve_option_value
+           ~driver:t.driver
+           ~config_id:profile.model_config_id
+           ~requested:m
+           ~option
+       with
+       | Some value ->
+         set_config_option
+           t
+           ~session_id:info.session_id
+           ~config_id:profile.model_config_id
+           ~value
+       | None -> Ok info.config_options)
     | _ -> Ok info.config_options
   in
   let* config_options =
     match effort, profile.effort_config_id with
-    | Some eff, Some eff_id
-      when String.trim eff <> ""
-           && List.exists (fun (o : config_option) -> String.equal o.id eff_id) config_options ->
-      set_config_option t ~session_id:info.session_id ~config_id:eff_id ~value:eff
+    | Some eff, Some eff_id ->
+      let effort_opt =
+        match find_option config_options eff_id with
+        | Some _ as found -> found
+        | None ->
+          List.find_opt
+            (fun (opt : config_option) ->
+               Option.equal String.equal opt.category (Some "thought_level"))
+            config_options
+      in
+      (match effort_opt with
+       | Some option ->
+         (match
+            resolve_option_value
+              ~driver:t.driver
+              ~config_id:option.id
+              ~requested:eff
+              ~option
+          with
+          | Some value ->
+            set_config_option t ~session_id:info.session_id ~config_id:option.id ~value
+          | None -> Ok config_options)
+       | None -> Ok config_options)
     | _ -> Ok config_options
   in
   Ok { info with config_options }
@@ -1303,7 +1603,17 @@ let mcp_servers_param_for_driver driver mcp_server =
   | Gemini_dir_mcp_config, _ -> `List []
 ;;
 
-let new_session t ~cwd ?system_prompt_append ?mcp_server ?mode ?model ?effort () =
+let new_session
+      t
+      ~cwd
+      ?system_prompt_append
+      ?mcp_server
+      ?(additional_directories = [])
+      ?mode
+      ?model
+      ?effort
+      ()
+  =
   let profile = profile_of_driver t.driver in
   let meta_fields =
     match profile.system_prompt_channel, system_prompt_append with
@@ -1317,11 +1627,21 @@ let new_session t ~cwd ?system_prompt_append ?mcp_server ?mode ?model ?effort ()
     | Meta_antigravity_append, (Some _ | None)
     | Framed_in_first_prompt, (Some _ | None) -> []
   in
+  let extra_dir_fields =
+    match t.driver, additional_directories with
+    | Mistral_vibe, (_ :: _ as dirs) ->
+      let existing = List.filter (fun d -> String.trim d <> "" && Sys.file_exists d) dirs in
+      if existing = []
+      then []
+      else [ "additionalDirectories", `List (List.map (fun d -> `String d) existing) ]
+    | Mistral_vibe, [] | (Antigravity | Kimi_code), ([] | _ :: _) -> []
+  in
   let params =
     `Assoc
       ([ "cwd", `String cwd
        ; "mcpServers", mcp_servers_param_for_driver t.driver mcp_server
        ]
+       @ extra_dir_fields
        @ meta_fields)
   in
   let* info =
@@ -1335,7 +1655,7 @@ let new_session t ~cwd ?system_prompt_append ?mcp_server ?mode ?model ?effort ()
   apply_session_options t info ~mode ~model ~effort
 ;;
 
-let load_session t ~session_id ~cwd ?mcp_server () =
+let load_session t ~session_id ~cwd ?mcp_server ?mode ?model ?effort () =
   let params =
     `Assoc
       [ "sessionId", `String session_id
@@ -1343,25 +1663,28 @@ let load_session t ~session_id ~cwd ?mcp_server () =
       ; "mcpServers", mcp_servers_param_for_driver t.driver mcp_server
       ]
   in
-  rpc_call_decoded
-    t
-    ~method_name:"session/load"
-    ~params
-    ~timeout_s:(Some init_timeout_s)
-    ~decoder:{ decode = (fun json ->
-      match parse_session_info json with
-      | Ok info -> Ok info
-      | Error _ ->
-        Ok
-          { session_id
-          ; current_mode_id = None
-          ; available_modes = []
-          ; config_options = parse_config_options json
-          ; antigravity_tier = None
-          }) }
+  let* info =
+    rpc_call_decoded
+      t
+      ~method_name:"session/load"
+      ~params
+      ~timeout_s:(Some init_timeout_s)
+      ~decoder:{ decode = (fun json ->
+        match parse_session_info json with
+        | Ok info -> Ok info
+        | Error _ ->
+          Ok
+            { session_id
+            ; current_mode_id = None
+            ; available_modes = []
+            ; config_options = parse_config_options json
+            ; antigravity_tier = None
+            }) }
+  in
+  apply_session_options t info ~mode ~model ~effort
 ;;
 
-let resume_session t ~session_id ~cwd ?mcp_server () =
+let resume_session t ~session_id ~cwd ?mcp_server ?mode ?model ?effort () =
   let params =
     `Assoc
       [ "sessionId", `String session_id
@@ -1369,22 +1692,25 @@ let resume_session t ~session_id ~cwd ?mcp_server () =
       ; "mcpServers", mcp_servers_param_for_driver t.driver mcp_server
       ]
   in
-  rpc_call_decoded
-    t
-    ~method_name:"session/resume"
-    ~params
-    ~timeout_s:(Some init_timeout_s)
-    ~decoder:{ decode = (fun json ->
-      match parse_session_info json with
-      | Ok info -> Ok info
-      | Error _ ->
-        Ok
-          { session_id
-          ; current_mode_id = None
-          ; available_modes = []
-          ; config_options = parse_config_options json
-          ; antigravity_tier = None
-          }) }
+  let* info =
+    rpc_call_decoded
+      t
+      ~method_name:"session/resume"
+      ~params
+      ~timeout_s:(Some init_timeout_s)
+      ~decoder:{ decode = (fun json ->
+        match parse_session_info json with
+        | Ok info -> Ok info
+        | Error _ ->
+          Ok
+            { session_id
+            ; current_mode_id = None
+            ; available_modes = []
+            ; config_options = parse_config_options json
+            ; antigravity_tier = None
+            }) }
+  in
+  apply_session_options t info ~mode ~model ~effort
 ;;
 
 (* ── Prompt execution with streaming & cancellation ───────────────────────── *)
@@ -1405,10 +1731,17 @@ let prompt
   let last_context_used = ref None in
   let last_context_size = ref None in
   let streamed_usage = ref empty_usage in
+  let append_bounded buf s =
+    let remaining = max_prompt_stream_bytes - Buffer.length buf in
+    if remaining > 0
+    then (
+      let len = min (String.length s) remaining in
+      if len > 0 then Buffer.add_substring buf s 0 len)
+  in
   let handle_event event =
     (match event with
-     | Text_delta s -> Buffer.add_string text_buf s
-     | Thought_delta s -> Buffer.add_string thought_buf s
+     | Text_delta s -> append_bounded text_buf s
+     | Thought_delta s -> append_bounded thought_buf s
      | Tool_call_started _ -> incr tool_calls
      | Tool_call_updated _ | Mode_updated _ | Config_options_updated _ -> ()
      | Usage_updated
@@ -1502,7 +1835,11 @@ module For_testing = struct
   let build_environment = build_environment
   let build_argv = build_argv
   let should_allow_permission = should_allow_permission
+  let choose_permission_option = choose_permission_option
+  let parse_config_options = parse_config_options
+  let resolve_option_value = resolve_option_value
   let parse_session_update = parse_session_update
   let parse_prompt_usage = parse_prompt_usage
   let parse_stop_reason = parse_stop_reason
+  let max_prompt_stream_bytes = max_prompt_stream_bytes
 end

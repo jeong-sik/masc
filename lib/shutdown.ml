@@ -156,7 +156,7 @@ let start_process_deadline_watchdog ~timeout_s =
                        sink, so say it on stderr the way the other [FATAL]
                        arms do. *)
                     Printf.eprintf
-                      "[FATAL] process deadline watchdog expired after %.0fs: forcing _exit %d\n%!"
+                      "[FATAL] process deadline %.1fs expired; exiting %d\n%!"
                       timeout_s process_deadline_exit_code;
                     Unix._exit process_deadline_exit_code)
                 with _ ->  (* cancel-guard-ok: raw Thread.create body: Cancelled cannot arrive *)

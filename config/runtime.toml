@@ -2338,6 +2338,20 @@ supports-image-input = true
 [antigravity_acp.acp-agy-gemini-4-neon-medium]
 wizard-default = true
 
+# Bounded-context Reviewer/long-session binding: caps proactive 80% ACP session
+# rollover at 320K tokens (80% of 400K) rather than waiting for 80% of 1M.
+[models.acp-agy-gemini-4-neon-medium-400k]
+api-name = "gemini-4-neon-medium"
+max-context = 400000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.acp-agy-gemini-4-neon-medium-400k.capabilities]
+supports-image-input = true
+
+[antigravity_acp.acp-agy-gemini-4-neon-medium-400k]
+
 [models.acp-agy-gemini-4-neon-high]
 api-name = "gemini-4-neon-high"
 max-context = 1048576
@@ -2399,7 +2413,7 @@ supports-image-input = true
 [antigravity_acp.acp-agy-gemini-4-hydrogen-xhigh]
 
 [models.acp-agy-claude-opus-5-5-thinking]
-api-name = "claude-opus-5-5-thinking"
+api-name = "claude-opus-5-5-high"
 max-context = 1000000
 tools-support = true
 thinking-support = true
@@ -2411,7 +2425,7 @@ supports-image-input = true
 [antigravity_acp.acp-agy-claude-opus-5-5-thinking]
 
 [models.acp-agy-claude-sonnet-5-5-thinking]
-api-name = "claude-sonnet-5-5-thinking"
+api-name = "claude-sonnet-5-5-high"
 max-context = 1000000
 tools-support = true
 thinking-support = true

@@ -30,11 +30,17 @@ let compaction_detected ~prev_used ~cur_used =
   | _ -> false
 ;;
 
+let effective_context_limit_tokens ~context_size ~max_context_tokens =
+  match context_size, max_context_tokens with
+  | Some s, m when s > 0 && m > 0 -> min s m
+  | Some s, _ when s > 0 -> s
+  | _, m when m > 0 -> m
+  | _ -> 0
+;;
+
 let should_rollover_context ~context_used ~context_size ~max_context_tokens =
   let effective_limit =
-    match context_size with
-    | Some s when s > 0 -> s
-    | _ -> max_context_tokens
+    effective_context_limit_tokens ~context_size ~max_context_tokens
   in
   match context_used with
   | Some used when used > 0 && effective_limit > 0 ->
@@ -270,7 +276,8 @@ let tool_result (result : Host.dynamic_tool_result) : Runtime_official_client_mc
 (* ── Per-Keeper persistent ACP process & MCP bridge pool ──────────────────── *)
 
 type active_turn_binding =
-  { tools : Host.dynamic_tool list
+  { client : Acp.t
+  ; tools : Host.dynamic_tool list
   ; on_tool_started :
       call_id:string -> tool_name:string -> arguments:Yojson.Safe.t -> unit
   ; on_tool_finished : call_id:string -> unit
@@ -532,16 +539,17 @@ let start_mcp_bridge ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex =
           Fun.protect
             ~finally:(fun () -> b.on_tool_finished ~call_id)
             (fun () ->
-              let result = tool.call ~call_id arguments in
-              let on_response_sent =
-                Runtime_official_client_tool.response_observer Mcp result
-              in
-              { Runtime_official_client_mcp_http.outcome = tool_result result
-              ; stop = result.abort_turn
-              ; after_response_sent =
-                  (fun () ->
-                    Runtime_official_client_tool.notify_response_sent on_response_sent)
-              })))
+              Acp.with_external_activity b.client (fun () ->
+                let result = tool.call ~call_id arguments in
+                let on_response_sent =
+                  Runtime_official_client_tool.response_observer Mcp result
+                in
+                { Runtime_official_client_mcp_http.outcome = tool_result result
+                ; stop = result.abort_turn
+                ; after_response_sent =
+                    (fun () ->
+                      Runtime_official_client_tool.notify_response_sent on_response_sent)
+                }))))
     ()
 ;;
 
@@ -730,6 +738,29 @@ let acquire_persistent_entry
 
 (* ── SSE stream projection ────────────────────────────────────────────────── *)
 
+let should_fence_tool_call_started
+      ~native_posture
+      ~mcp_server_name
+      ~allowed_tool_names
+      (identity : Acp.tool_call_identity)
+  =
+  (* Pinned MASC MCP tools report their own exact effect boundary via
+     Host.dynamic_tools, and MASC-managed lazy MCP schema reads are read-only
+     metadata lookups. Any foreign/unpinned MCP call or posture-disallowed
+     native CLI tool fences same-turn retry. *)
+  match identity with
+  | (Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _) as mcp_or_schema ->
+    not
+      (Acp.should_allow_tool_call
+         ~policy:(Acp.Allow_masc_mcp_only { mcp_server_name; allowed_tool_names })
+         mcp_or_schema)
+  | Acp.Native_tool { kind; _ } ->
+    (match native_posture with
+     | Runtime_native_tools.Native_full -> true
+     | Runtime_native_tools.Native_read -> not (Acp.is_read_only_tool_kind kind)
+     | Runtime_native_tools.Native_none -> true)
+;;
+
 type stream_projection =
   { on_acp_event : Acp.stream_event -> unit
   ; on_tool_started :
@@ -841,20 +872,13 @@ let make_stream_projection
            ; vendor_total_tokens = total_tokens
            }
        | _ -> ())
-    | Acp.Tool_call_started { title; kind; _ } ->
-      (* MASC MCP tools report their own exact effect boundary via Host.dynamic_tools.
-         Any non-MASC native CLI tool starting under Native_full (or non-read tool
-         under Native_read / any native tool under Native_none) fences same-turn retry. *)
-      let is_masc =
-        Acp.is_masc_mcp_tool ~mcp_server_name ~allowed_tool_names ~title ~kind
-      in
-      if not is_masc
-      then (
-        match native_posture with
-        | Runtime_native_tools.Native_full -> observe_effect_attempted ()
-        | Runtime_native_tools.Native_read ->
-          if not (Acp.is_read_only_tool_kind kind) then observe_effect_attempted ()
-        | Runtime_native_tools.Native_none -> observe_effect_attempted ())
+    | Acp.Tool_call_started { identity; _ } ->
+      if should_fence_tool_call_started
+           ~native_posture
+           ~mcp_server_name
+           ~allowed_tool_names
+           identity
+      then observe_effect_attempted ()
     | Acp.Tool_call_updated _
     | Acp.Mode_updated _
     | Acp.Config_options_updated _ -> ()
@@ -1669,7 +1693,8 @@ let run_without_lifecycle
       with_slot_lock entry.turn_slot_mutex (fun () ->
         entry.turn_slot :=
           Some
-            { tools = dynamic_tools
+            { client = entry.client
+            ; tools = dynamic_tools
             ; on_tool_started = stream.on_tool_started
             ; on_tool_finished = stream.on_tool_finished
             });
@@ -2052,9 +2077,9 @@ let run_without_lifecycle
         if rollover_needed
         then (
           let effective_limit_tokens =
-            match prompt_res.usage.context_size with
-            | Some s when s > 0 -> s
-            | _ -> max_context_tokens
+            effective_context_limit_tokens
+              ~context_size:prompt_res.usage.context_size
+              ~max_context_tokens
           in
           let context_used = Option.value prompt_res.usage.context_used ~default:effective_limit_tokens in
           compact_for_rollover
@@ -2356,7 +2381,9 @@ module For_testing = struct
   let api_usage_of_acp_usage = api_usage_of_acp_usage
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason
   let compaction_detected = compaction_detected
+  let effective_context_limit_tokens = effective_context_limit_tokens
   let should_rollover_context = should_rollover_context
+  let should_fence_tool_call_started = should_fence_tool_call_started
   let rollover_threshold = rollover_threshold
   let record_rollover_marker = record_rollover_marker
   let rollover_marker_matches = rollover_marker_matches

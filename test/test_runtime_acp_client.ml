@@ -821,6 +821,30 @@ let test_acp_80_pct_rollover_marker_and_overflow_classification () =
     (should ~context_used:(Some 210_000) ~context_size:None ~max_context_tokens:262_144);
   check bool "smaller advertised context_size governs 80% rollover" true
     (should ~context_used:(Some 80_000) ~context_size:(Some 100_000) ~max_context_tokens:262_144);
+  check bool "smaller operator max_context_tokens caps 80% rollover on larger provider window" true
+    (should ~context_used:(Some 320_000) ~context_size:(Some 1_048_576) ~max_context_tokens:400_000);
+  check bool "below 80% of operator max_context_tokens cap does not trigger rollover" false
+    (should ~context_used:(Some 319_999) ~context_size:(Some 1_048_576) ~max_context_tokens:400_000);
+  check int "effective_context_limit_tokens takes min of positive context_size and max_context_tokens"
+    400_000
+    (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
+       ~context_size:(Some 1_048_576) ~max_context_tokens:400_000);
+  check int "effective_context_limit_tokens keeps smaller provider context_size"
+    100_000
+    (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
+       ~context_size:(Some 100_000) ~max_context_tokens:400_000);
+  check int "effective_context_limit_tokens falls back to max_context_tokens when context_size is non-positive"
+    400_000
+    (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
+       ~context_size:(Some 0) ~max_context_tokens:400_000);
+  check int "effective_context_limit_tokens falls back to context_size when max_context_tokens is non-positive"
+    100_000
+    (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
+       ~context_size:(Some 100_000) ~max_context_tokens:0);
+  check int "effective_context_limit_tokens returns 0 when both limits are non-positive"
+    0
+    (Keeper_acp_runtime.For_testing.effective_context_limit_tokens
+       ~context_size:(Some (-1)) ~max_context_tokens:0);
   check bool "missing context_used does not trigger rollover" false
     (should ~context_used:None ~context_size:(Some 100_000) ~max_context_tokens:262_144);
   (* Durable rollover marker roundtrip under <masc_root>/runtime/acp-rollover/
@@ -1924,6 +1948,86 @@ for line in sys.stdin:
         Runtime_acp_client.close client)))
 ;;
 
+let test_keeper_typed_tool_call_effect_fencing () =
+  let fence =
+    Keeper_acp_runtime.For_testing.should_fence_tool_call_started
+      ~mcp_server_name:"masc"
+      ~allowed_tool_names:[ "masc_probe_ping"; "keeper_skill" ]
+  in
+  let pinned_agy_mcp =
+    Runtime_acp_client.Mcp_tool
+      { server = Runtime_acp_client.Explicit_server "masc"
+      ; tool_name = "masc_probe_ping"
+      }
+  in
+  let foreign_mcp =
+    Runtime_acp_client.Mcp_tool
+      { server = Runtime_acp_client.Explicit_server "evil"
+      ; tool_name = "masc_probe_ping"
+      }
+  in
+  let pinned_schema =
+    Runtime_acp_client.Managed_mcp_schema_read
+      { mcp_server_name = "masc"
+      ; path = "/tmp/gdir/antigravity-cli/mcp/masc/masc_probe_ping.json"
+      }
+  in
+  let unpinned_schema =
+    Runtime_acp_client.Managed_mcp_schema_read
+      { mcp_server_name = "masc"
+      ; path = "/tmp/gdir/antigravity-cli/mcp/masc/unpinned.json"
+      }
+  in
+  let native_read =
+    Runtime_acp_client.Native_tool { name = Some "read_file"; kind = Some "read"; locations = [] }
+  in
+  let native_exec =
+    Runtime_acp_client.Native_tool { name = Some "run_command"; kind = Some "execute"; locations = [] }
+  in
+  let pinned_implicit_mcp =
+    Runtime_acp_client.Mcp_tool
+      { server = Runtime_acp_client.Implicit_mcp_kind
+      ; tool_name = "keeper_skill"
+      }
+  in
+  let native_fetch =
+    Runtime_acp_client.Native_tool { name = Some "fetch_url"; kind = Some "fetch"; locations = [] }
+  in
+  let native_unknown =
+    Runtime_acp_client.Native_tool { name = Some "mystery_tool"; kind = None; locations = [] }
+  in
+  (* Pinned MASC MCP calls and managed schema reads NEVER falsely fence retry *)
+  List.iter
+    (fun posture ->
+       check bool "pinned MASC MCP call does not falsely fence retry" false
+         (fence ~native_posture:posture pinned_agy_mcp);
+       check bool "pinned implicit-kind MASC MCP call does not falsely fence retry" false
+         (fence ~native_posture:posture pinned_implicit_mcp);
+       check bool "pinned managed MCP schema read does not falsely fence retry" false
+         (fence ~native_posture:posture pinned_schema);
+       check bool "foreign MCP call fences retry" true
+         (fence ~native_posture:posture foreign_mcp);
+       check bool "unpinned managed MCP schema read fences retry" true
+         (fence ~native_posture:posture unpinned_schema))
+    [ Runtime_native_tools.Native_none
+    ; Runtime_native_tools.Native_read
+    ; Runtime_native_tools.Native_full
+    ];
+  (* Native tools follow posture boundaries *)
+  check bool "Native_none fences native read" true
+    (fence ~native_posture:Runtime_native_tools.Native_none native_read);
+  check bool "Native_read does not fence native read" false
+    (fence ~native_posture:Runtime_native_tools.Native_read native_read);
+  check bool "Native_read fences native execute" true
+    (fence ~native_posture:Runtime_native_tools.Native_read native_exec);
+  check bool "Native_read fences native fetch (egress boundary)" true
+    (fence ~native_posture:Runtime_native_tools.Native_read native_fetch);
+  check bool "Native_read fences native tool with kind=None" true
+    (fence ~native_posture:Runtime_native_tools.Native_read native_unknown);
+  check bool "Native_full fences native read" true
+    (fence ~native_posture:Runtime_native_tools.Native_full native_read)
+;;
+
 let () =
   run "runtime_acp_client"
     [ "profiles", [ test_case "closed driver profiles" `Quick test_driver_profiles ]
@@ -1957,6 +2061,8 @@ let () =
             test_typed_tool_call_classification_and_schema_boundary
         ; test_case "session/set_model, toolCallId permission correlation & activity idle liveness" `Quick
             test_set_model_toolcall_correlation_and_idle_liveness
+        ; test_case "typed Tool_call_started effect fencing across postures" `Quick
+            test_keeper_typed_tool_call_effect_fencing
         ] )
     ; ( "wire"
       , [ test_case "session update & usage parsing" `Quick test_parse_wire_updates_and_usage

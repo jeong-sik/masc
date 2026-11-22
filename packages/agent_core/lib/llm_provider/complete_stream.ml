@@ -411,85 +411,161 @@ let complete_stream_http
      | None -> Completion_outcome.before_serialization (Error err))
   | Ok serialized ->
     ignore sw;
-    let dispatch_stream_once
-          ~allow_cached_fallback
-          (serialized : Complete_common.serialized_http_request)
-      =
-    let http_codec = serialized.Complete_common.http_codec in
-    let body_with_stream = serialized.body in
     if requires_non_http_transport config.kind
     then
-      Error
-        (Http_client.NetworkError
-           { message =
-               Printf.sprintf
-                 "%s provider requires a transport"
-                 (Provider_config.string_of_provider_kind config.kind)
-           ; kind = Unknown
-           })
+      Completion_outcome.after_serialization
+        ~request:serialized
+        (Error
+           (Http_client.NetworkError
+              { message =
+                  Printf.sprintf
+                    "%s provider requires a transport"
+                    (Provider_config.string_of_provider_kind config.kind)
+              ; kind = Unknown
+              }))
     else (
-      let url =
-        match config.kind with
-        | Provider_config.Gemini -> gemini_url ~config ~stream:true
-        | Anthropic | Kimi | OpenAI_compat | Ollama | Glm ->
-          config.base_url ^ config.request_path
+      let validate_stream_deadlines () =
+        let open Result.Syntax in
+        let* _ =
+          Http_client.resolve_explicit_deadline
+            ~operation:"with_post_stream"
+            ~parameter:"connect_timeout_s"
+            ~clock
+            ~timeout_s:config.connect_timeout_s
+        in
+        let* _ =
+          Http_client.resolve_explicit_deadline
+            ~operation:"with_post_stream"
+            ~parameter:"first_event_timeout_s"
+            ~clock
+            ~timeout_s:first_event_timeout_s
+        in
+        let* _ =
+          Http_client.resolve_explicit_deadline
+            ~operation:"complete_stream_http"
+            ~parameter:"body_timeout_s"
+            ~clock
+            ~timeout_s:body_timeout_s
+        in
+        Ok ()
       in
-      let observed_wire = ref false in
-      let observe_wire_once () =
-        if not !observed_wire
-        then (
-          observed_wire := true;
-          (* An admitted body and a body serialized here are observed the same
-             way: these bytes, under this request's capture_id. *)
-          observe_pre_dispatch_serialization
-            ?request_wire_observer
-            (serialization_observation ~capture_id ~config ~stream:true serialized))
-      in
-      if not allow_cached_fallback then observe_wire_once ();
-      let requested_at = Unix.gettimeofday () in
-      let latency_counter =
-        match latency_counter with
-        | Some counter -> counter
-        | None -> start_latency_counter ?clock ()
-      in
-      let ttfrc_ref = ref None in
-      (* Agent Core contract — TTFT (Time To First Token) capture.
-         [first_token_at_ref] fires on the first chunk that carries a
-         non-empty generated delta (text / reasoning / tool-call arg).
-         [first_event_at_ref] fires on the very first SSE
-         event of any kind — used to derive [prefill_ms] when the
-         provider exposes a separable prelude marker
-         (e.g. Anthropic [MessageStart] arrives before the first
-         [ContentBlockDelta]). *)
-      let first_token_at_ref : float option ref = ref None in
-      let first_event_at_ref : float option ref = ref None in
-      (* Wire-timings side channel. Ollama carries prompt_eval_count /
-     eval_count and the four duration fields only on the [done:true]
-     line; llama-server (OpenAI-compat SSE) carries a [timings] object
-     (including [cache_n], the KV-cache-reused prompt tokens) only on
-     the final chunk. stream_acc (which only sees content/tool deltas)
-     cannot capture either, so we trap them here and patch the
-     finalised response below. *)
-      let provider = Provider_config.string_of_provider_kind config.kind in
-      let model = config.model_id in
-      let active_wire_format =
-        match http_codec with
-        | Provider_http_codec.Ollama_chat -> Http_client.Ndjson
-        | Anthropic_messages
-        | Openai_chat
-        | Openai_responses
-        | Gemini_generate_content
-        | Glm_chat -> Http_client.Sse
-      in
-      let deferred_error_status = ref None in
-      let observe_status = Option.value ~default:metrics.on_http_status on_http_status in
-      let on_response_status status =
-        if (not allow_cached_fallback) || (status >= 200 && status < 300)
-        then (
-          observe_wire_once ();
-          observe_status ~provider ~model_id:model ~status)
-        else deferred_error_status := Some status
-      in
+      match validate_stream_deadlines () with
+      | Error err -> Completion_outcome.after_serialization ~request:serialized (Error err)
+      | Ok () ->
+      match Provider_config.resolve_auth_headers config with
+      | Error reason ->
+        Completion_outcome.after_serialization
+          ~request:serialized
+          (Error (Http_client.AcceptRejected { reason }))
+      | Ok initial_auth_headers ->
+        let current_auth_headers = ref initial_auth_headers in
+        let allow_initial_auth_retry = Provider_config.can_invalidate_credential config in
+        let turn_started_s = Option.map Eio.Time.now clock in
+        let resolve_remaining_stream_budgets () =
+          let elapsed_s =
+            match clock, turn_started_s with
+            | Some c, Some started -> Float.max 0.0 (Eio.Time.now c -. started)
+            | None, _ | Some _, None -> 0.0
+          in
+          if Float.compare elapsed_s 0.0 <= 0
+          then Ok (first_event_timeout_s, body_timeout_s)
+          else (
+            let deduct_opt ~knob_name budget_opt =
+              match budget_opt with
+              | Some b when Float.is_finite b && Float.compare b 0.0 > 0 ->
+                let remaining = b -. elapsed_s in
+                if Float.compare remaining 0.0 <= 0
+                then
+                  Error
+                    ( knob_name
+                    , Printf.sprintf
+                        "%s deadline exceeded after %.3fs"
+                        knob_name
+                        b )
+                else Ok (Some remaining)
+              | Some _ | None -> Ok budget_opt
+            in
+            match deduct_opt ~knob_name:"first_event_timeout_s" first_event_timeout_s with
+            | Error _ as err -> err
+            | Ok eff_first_event ->
+              (match deduct_opt ~knob_name:"body_timeout_s" body_timeout_s with
+               | Error _ as err -> err
+               | Ok eff_body -> Ok (eff_first_event, eff_body)))
+        in
+        let rec dispatch_stream_once
+              ~allow_cached_fallback
+              ~allow_auth_retry
+              (serialized : Complete_common.serialized_http_request)
+          =
+          let http_codec = serialized.Complete_common.http_codec in
+          let body_with_stream = serialized.body in
+          let url =
+            match config.kind with
+            | Provider_config.Gemini -> gemini_url ~config ~stream:true
+            | Anthropic | Kimi | OpenAI_compat | Ollama | Glm ->
+              config.base_url ^ config.request_path
+          in
+          let observed_wire = ref false in
+          let observe_wire_once () =
+            if not !observed_wire
+            then (
+              observed_wire := true;
+              (* An admitted body and a body serialized here are observed the same
+                 way: these bytes, under this request's capture_id. *)
+              observe_pre_dispatch_serialization
+                ?request_wire_observer
+                (serialization_observation ~capture_id ~config ~stream:true serialized))
+          in
+          if (not allow_cached_fallback) && not allow_auth_retry
+          then observe_wire_once ();
+          let requested_at = Unix.gettimeofday () in
+          let latency_counter =
+            match latency_counter with
+            | Some counter -> counter
+            | None -> start_latency_counter ?clock ()
+          in
+          let ttfrc_ref = ref None in
+          (* Agent Core contract — TTFT (Time To First Token) capture.
+             [first_token_at_ref] fires on the first chunk that carries a
+             non-empty generated delta (text / reasoning / tool-call arg).
+             [first_event_at_ref] fires on the very first SSE
+             event of any kind — used to derive [prefill_ms] when the
+             provider exposes a separable prelude marker
+             (e.g. Anthropic [MessageStart] arrives before the first
+             [ContentBlockDelta]). *)
+          let first_token_at_ref : float option ref = ref None in
+          let first_event_at_ref : float option ref = ref None in
+          (* Wire-timings side channel. Ollama carries prompt_eval_count /
+         eval_count and the four duration fields only on the [done:true]
+         line; llama-server (OpenAI-compat SSE) carries a [timings] object
+         (including [cache_n], the KV-cache-reused prompt tokens) only on
+         the final chunk. stream_acc (which only sees content/tool deltas)
+         cannot capture either, so we trap them here and patch the
+         finalised response below. *)
+          let provider = Provider_config.string_of_provider_kind config.kind in
+          let model = config.model_id in
+          let active_wire_format =
+            match http_codec with
+            | Provider_http_codec.Ollama_chat -> Http_client.Ndjson
+            | Anthropic_messages
+            | Openai_chat
+            | Openai_responses
+            | Gemini_generate_content
+            | Glm_chat -> Http_client.Sse
+          in
+          let deferred_error_status = ref None in
+          let observe_status = Option.value ~default:metrics.on_http_status on_http_status in
+          let may_retry_status status =
+            (allow_cached_fallback && not (status >= 200 && status < 300))
+            || (allow_auth_retry && status = 401)
+          in
+          let on_response_status status =
+            if not (may_retry_status status)
+            then (
+              observe_wire_once ();
+              observe_status ~provider ~model_id:model ~status)
+            else deferred_error_status := Some status
+          in
       let emit_telemetry evt =
         record_streaming_metrics metrics evt;
         match on_telemetry with
@@ -675,9 +751,22 @@ let complete_stream_http
                ; terminal
                }))
       in
-      let open Result.Syntax in
-      let* auth_headers = Provider_config.resolve_auth_headers config
-        |> Result.map_error (fun reason -> Http_client.AcceptRejected { reason }) in
+      let auth_headers = !current_auth_headers in
+      match resolve_remaining_stream_budgets () with
+      | Error (knob_name, message) ->
+        let err = Http_client.TimeoutError { message; phase = Http_client.First_token } in
+        observe_wire_once ();
+        emit_stream_event on_event (Types.Timeout message);
+        emit_telemetry
+          (Telemetry_event.Timeout
+             { provider; model; timeout_type = Telemetry_event.Ttft_exceeded });
+        publish_summary
+          ~terminal:
+            (Telemetry_event.Terminal_error
+               (Printf.sprintf "%s_exceeded:awaiting_first_event" knob_name))
+          ();
+        Error err
+      | Ok (eff_first_event_timeout_s, eff_body_timeout_s) ->
       match
         try
           with_request_metadata ~body:body_with_stream (fun () ->
@@ -685,7 +774,7 @@ let complete_stream_http
             ?cache:connection_cache
             ?clock
             ?connect_timeout_s:config.connect_timeout_s
-            ?first_event_timeout_s
+            ?first_event_timeout_s:eff_first_event_timeout_s
             ~on_response_status
             ~net
             ~url
@@ -699,15 +788,16 @@ let complete_stream_http
             ~body:body_with_stream
             ~f:(fun ~pre_header_elapsed_s reader ->
             (* The first-event budget is one window from the request to the
-               first token; the connection, the request and the headers have
-               already spent [pre_header_elapsed_s] of it, and the reader
-               arms the rest. A rest of zero is a budget that ran out as the
-               headers arrived: the first read reports it. *)
+               first token; explicit cachedContents setup and the connection,
+               request and headers have already spent part of it, and the
+               reader arms the rest. A rest of zero is a budget that ran out
+               as the headers arrived: the first read reports it. *)
             let first_event_timeout_s =
               Option.map
                 (fun budget_s -> Float.max 0.0 (budget_s -. pre_header_elapsed_s))
-                first_event_timeout_s
+                eff_first_event_timeout_s
             in
+            let body_timeout_s = eff_body_timeout_s in
             emit_stream_event on_event Types.Connected;
             (* AGENT_CORE exposes one redacted provider observation to a caller-owned
                nonblocking offer. Queueing, persistence, capacity, and retries
@@ -1281,17 +1371,48 @@ let complete_stream_http
            status arrives here, before any body logic, so the codec reads the
            refusal here too ([Complete_common.provider_refusal]). When an
            explicit cachedContent attempt is about to retry via implicit
-           caching, suppress the premature summary so one summary fires for the
-           final turn outcome. *)
+           caching or a 401 triggers a refreshable-credential retry, suppress
+           the premature summary so one summary fires for the final outcome. *)
         let refusal = Complete_common.provider_refusal ~http_codec err in
-        if not (allow_cached_fallback && Gemini_context_cache.is_cached_content_error refusal)
-        then (
-          observe_wire_once ();
-          Option.iter
-            (fun status -> observe_status ~provider ~model_id:model ~status)
-            !deferred_error_status;
-          publish_summary ~terminal:(Telemetry_event.Terminal_error "transport_error") ());
-        Error refusal
+        (match refusal with
+         | Http_client.HttpError { code = 401; _ }
+           when allow_auth_retry && Provider_config.invalidate_credential config ->
+           (match Provider_config.resolve_auth_headers config with
+            | Ok fresh_auth_headers ->
+              current_auth_headers := fresh_auth_headers;
+              Diag.warn
+                "complete_stream"
+                "HTTP 401 from %s (model=%s); invalidated cached refreshable credential \
+                 and retrying once"
+                provider
+                model;
+              dispatch_stream_once ~allow_cached_fallback ~allow_auth_retry:false serialized
+            | Error reason ->
+              observe_wire_once ();
+              Option.iter
+                (fun status -> observe_status ~provider ~model_id:model ~status)
+                !deferred_error_status;
+              publish_summary
+                ~terminal:(Telemetry_event.Terminal_error "auth_refresh_failed")
+                ();
+              Error (Http_client.AcceptRejected { reason }))
+         | Http_client.HttpError _
+         | Http_client.NetworkError _
+         | Http_client.Connect_failed _
+         | Http_client.TimeoutError _
+         | Http_client.AcceptRejected _
+         | Http_client.ProviderTerminal _
+         | Http_client.ProviderFailure _ ->
+           if not
+                (allow_cached_fallback
+                 && Gemini_context_cache.is_cached_content_error refusal)
+           then (
+             observe_wire_once ();
+             Option.iter
+               (fun status -> observe_status ~provider ~model_id:model ~status)
+               !deferred_error_status;
+             publish_summary ~terminal:(Telemetry_event.Terminal_error "transport_error") ());
+           Error refusal)
       | Ok (Ok resp) ->
         observe_wire_once ();
         let latency_ms = latency_ms_int latency_counter in
@@ -1447,58 +1568,54 @@ let complete_stream_http
               (Complete_stream_error.returned_error_terminal_label active_wire_format err)
         in
         publish_summary ~terminal ();
-        Error err)
+        Error err
     in
+    let cache_auth_invalidated = ref false in
     let resolve_gemini_explicit_cache () =
       match
         serialized.Complete_common.http_codec,
         Gemini_context_cache.explicit_cache_ttl_if_enabled ~config
       with
       | Provider_http_codec.Gemini_generate_content, Some ttl_s ->
-        (match Provider_config.resolve_auth_headers config with
-         | Error _ -> None
-         | Ok auth_headers ->
-           (match
-              Backend_gemini.extract_cacheable_prefix_result
-                ~config
-                ~messages
-                ~tools
-                ()
-            with
-            | Error reason ->
-              Diag.warn
-                "gemini_context_cache"
-                "skipping explicit cachedContents for model=%s (%s); falling back to \
-                 implicit caching"
-                config.model_id
-                reason;
-              None
-            | Ok prefix ->
-              let min_opt a b =
-                match a, b with
-                | Some x, Some y -> Some (Float.min x y)
-                | Some x, None | None, Some x -> Some x
-                | None, None -> None
-              in
+        (match
+           Backend_gemini.extract_cacheable_prefix_result
+             ~config
+             ~messages
+             ~tools
+             ()
+         with
+         | Error reason ->
+           Diag.warn
+             "gemini_context_cache"
+             "skipping explicit cachedContents for model=%s (%s); falling back to \
+              implicit caching"
+             config.model_id
+             reason;
+           None
+         | Ok prefix ->
+           let min_opt a b =
+             match a, b with
+             | Some x, Some y -> Some (Float.min x y)
+             | Some x, None | None, Some x -> Some x
+             | None, None -> None
+           in
+           (match resolve_remaining_stream_budgets () with
+            | Error _ -> None
+            | Ok (eff_first_event, eff_body) ->
               let timeout_s =
                 match clock with
                 | None -> None
                 | Some _ ->
-                  (match
-                     min_opt
-                       config.connect_timeout_s
-                       (min_opt first_event_timeout_s body_timeout_s)
-                   with
-                   | Some t when Float.is_finite t && Float.compare t 0.0 > 0 -> Some t
-                   | Some _ | None -> None)
+                  min_opt config.connect_timeout_s (min_opt eff_first_event eff_body)
               in
               Gemini_context_cache.resolve_or_create
                 ~net
                 ?clock
                 ?timeout_s
                 ?connection_cache
+                ~on_auth_invalidated:(fun () -> cache_auth_invalidated := true)
                 ~config
-                ~auth_headers
+                ~auth_headers:!current_auth_headers
                 ~ttl_s
                 ~prefix
                 ()))
@@ -1518,7 +1635,25 @@ let complete_stream_http
     in
     let final_serialized, result =
       match resolve_gemini_explicit_cache () with
-      | None -> serialized, dispatch_stream_once ~allow_cached_fallback:false serialized
+      | None ->
+        if !cache_auth_invalidated
+        then (
+          match Provider_config.resolve_auth_headers config with
+          | Ok fresh_auth_headers ->
+            current_auth_headers := fresh_auth_headers;
+            ( serialized
+            , dispatch_stream_once
+                ~allow_cached_fallback:false
+                ~allow_auth_retry:false
+                serialized )
+          | Error reason ->
+            serialized, Error (Http_client.AcceptRejected { reason }))
+        else
+          ( serialized
+          , dispatch_stream_once
+              ~allow_cached_fallback:false
+              ~allow_auth_retry:allow_initial_auth_retry
+              serialized )
       | Some handle ->
         (match
            serialize_gemini_cached_http_request
@@ -1529,9 +1664,18 @@ let complete_stream_http
              ~tools
          with
          | Error _ ->
-           serialized, dispatch_stream_once ~allow_cached_fallback:false serialized
+           ( serialized
+           , dispatch_stream_once
+               ~allow_cached_fallback:false
+               ~allow_auth_retry:allow_initial_auth_retry
+               serialized )
          | Ok cached_serialized ->
-           (match dispatch_stream_once ~allow_cached_fallback:true cached_serialized with
+           (match
+              dispatch_stream_once
+                ~allow_cached_fallback:true
+                ~allow_auth_retry:allow_initial_auth_retry
+                cached_serialized
+            with
             | Error err when Gemini_context_cache.is_cached_content_error err ->
               Gemini_context_cache.invalidate ~key:handle.key;
               Diag.warn
@@ -1540,8 +1684,12 @@ let complete_stream_http
                  with implicit caching"
                 handle.resource_name
                 config.model_id;
-              serialized, dispatch_stream_once ~allow_cached_fallback:false serialized
+              ( serialized
+              , dispatch_stream_once
+                  ~allow_cached_fallback:false
+                  ~allow_auth_retry:false
+                  serialized )
             | (Ok _ | Error _) as outcome -> cached_serialized, outcome))
     in
-    Completion_outcome.after_serialization ~request:final_serialized result
+    Completion_outcome.after_serialization ~request:final_serialized result)
 ;;

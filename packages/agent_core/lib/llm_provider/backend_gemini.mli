@@ -48,8 +48,9 @@ type cacheable_prefix =
 (** Extract the canonical [systemInstruction], [tools], and [toolConfig] JSON
     fragments that {!build_request_artifact} would emit for [config],
     [messages], and [tools], applying the same history projection and media
-    degradation steps. Returns [Error reason] instead of raising on invalid
-    history/tool-result projections. *)
+    degradation steps. [toolConfig] is omitted ([None]) whenever [tools] is
+    empty, matching the Gemini REST API contract. Returns [Error reason]
+    instead of raising on invalid history/tool-result projections. *)
 val extract_cacheable_prefix_result
   :  config:Provider_config.t
   -> messages:Types.message list

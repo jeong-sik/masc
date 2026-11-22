@@ -875,7 +875,13 @@ let test_build_request_tool_choice_none () =
   let config =
     make_config ~kind:Gemini ~model_id:gemini_flash_model ~tool_choice:None_ ()
   in
-  let body_str = Backend_gemini.build_request ~config ~messages:[ user_msg "hi" ] () in
+  let body_str =
+    Backend_gemini.build_request
+      ~config
+      ~messages:[ user_msg "hi" ]
+      ~tools:[ `Assoc [ "name", `String "t" ] ]
+      ()
+  in
   let json = Yojson.Safe.from_string body_str in
   let open Yojson.Safe.Util in
   let tc = json |> member "toolConfig" |> member "functionCallingConfig" in
@@ -890,7 +896,13 @@ let test_build_request_tool_choice_specific () =
       ~tool_choice:(Tool "get_weather")
       ()
   in
-  let body_str = Backend_gemini.build_request ~config ~messages:[ user_msg "hi" ] () in
+  let body_str =
+    Backend_gemini.build_request
+      ~config
+      ~messages:[ user_msg "hi" ]
+      ~tools:[ `Assoc [ "name", `String "get_weather" ] ]
+      ()
+  in
   let json = Yojson.Safe.from_string body_str in
   let open Yojson.Safe.Util in
   let tc = json |> member "toolConfig" |> member "functionCallingConfig" in

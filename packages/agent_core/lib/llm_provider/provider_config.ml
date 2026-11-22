@@ -22,6 +22,85 @@ type credential_source =
   | Static_credential
   | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
 
+type credential_refresh_fn = unit -> (Secret.t, credential_refresh_error) result
+
+(* Weak ephemeron registry mapping refresh closures to optional invalidators.
+   Each entry pairs a 1-slot [Weak.t] (to detect GC'd keys via [Weak.check] and
+   unlink dead nodes so memory and scan time stay O(live)) with an
+   [Ephemeron.K1.t] (so the invalidator callback is retained only while its
+   closure key is reachable). [invalidators_mu] only protects list accesses and
+   is never held across user invalidator callbacks or Eio yields. *)
+type invalidator_entry =
+  { key_weak : credential_refresh_fn Weak.t
+  ; eph : (credential_refresh_fn, unit -> unit) Ephemeron.K1.t
+  }
+
+let invalidators_mu = Stdlib.Mutex.create ()
+let invalidators : invalidator_entry list ref = ref []
+
+let prune_dead_invalidators entries =
+  List.filter (fun entry -> Weak.check entry.key_weak 0) entries
+;;
+
+let make_refreshable_credential ?invalidate refresh =
+  match invalidate with
+  | None -> Refreshable_credential refresh
+  | Some on_invalidate ->
+    (* Allocate a distinct closure so physical identity uniquely identifies
+       this credential source instance even when callers reuse a top-level fn. *)
+    let refresh_fn () = refresh () in
+    let key_weak = Weak.create 1 in
+    Weak.set key_weak 0 (Some refresh_fn);
+    let eph = Ephemeron.K1.make refresh_fn on_invalidate in
+    let entry = { key_weak; eph } in
+    Stdlib.Mutex.protect invalidators_mu (fun () ->
+      invalidators := entry :: prune_dead_invalidators !invalidators);
+    Refreshable_credential refresh_fn
+;;
+
+let find_credential_invalidator (refresh_fn : credential_refresh_fn) =
+  Stdlib.Mutex.protect invalidators_mu (fun () ->
+    let rec scan acc found = function
+      | [] ->
+        invalidators := List.rev acc;
+        found
+      | entry :: rest ->
+        if not (Weak.check entry.key_weak 0)
+        then scan acc found rest
+        else (
+          let found =
+            match found with
+            | Some _ -> found
+            | None -> Ephemeron.K1.query entry.eph refresh_fn
+          in
+          scan (entry :: acc) found rest)
+    in
+    scan [] None !invalidators)
+;;
+
+let%test "make_refreshable_credential prunes GC-reclaimed invalidators" =
+  let allocate_ephemeral () =
+    for _ = 1 to 200 do
+      ignore
+        (make_refreshable_credential
+           ~invalidate:(fun () -> ())
+           (fun () -> Error Credential_unavailable)
+         : credential_source)
+    done
+  in
+  allocate_ephemeral ();
+  Gc.full_major ();
+  Gc.full_major ();
+  (* Trigger pruning via a lookup against a fresh non-registered closure. *)
+  let live_count =
+    ignore
+      (find_credential_invalidator (fun () -> Error Credential_unavailable)
+       : (unit -> unit) option);
+    Stdlib.Mutex.protect invalidators_mu (fun () -> List.length !invalidators)
+  in
+  live_count = 0
+;;
+
 type provider_authentication = No_auth | Api_key | Setup_token
 
 type provider_identity =
@@ -1010,4 +1089,22 @@ let resolve_auth_headers config =
     ~auth_scheme:config.auth_scheme
     ~api_key:config.api_key
     ~credential_source:config.credential_source
+;;
+
+let can_invalidate_credential (config : t) : bool =
+  match config.credential_source with
+  | Static_credential -> false
+  | Refreshable_credential refresh_fn ->
+    Option.is_some (find_credential_invalidator refresh_fn)
+;;
+
+let invalidate_credential (config : t) : bool =
+  match config.credential_source with
+  | Static_credential -> false
+  | Refreshable_credential refresh_fn ->
+    (match find_credential_invalidator refresh_fn with
+     | Some on_invalidate ->
+       on_invalidate ();
+       true
+     | None -> false)
 ;;

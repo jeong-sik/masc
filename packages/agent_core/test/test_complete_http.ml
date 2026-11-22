@@ -5663,6 +5663,917 @@ let test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens () =
   Gemini_context_cache.clear_for_tests ()
 ;;
 
+let test_gemini_single_auth_resolve_and_bearer_rotation () =
+  let large_system = String.make 5000 'a' in
+  List.iter
+    (fun stream ->
+       Gemini_context_cache.clear_for_tests ();
+       Eio_main.run (fun env ->
+         try
+           Eio.Switch.run (fun sw ->
+             let evict_next = ref false in
+             let create_count = ref 0 in
+             let create_auths = ref [] in
+             let gen_auths = ref [] in
+             let port = fresh_port () in
+             let handler _conn req body =
+               let req_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+               let path = Cohttp.Request.uri req |> Uri.path in
+               let auth =
+                 Cohttp.Header.get (Cohttp.Request.headers req) "authorization"
+                 |> Option.value ~default:""
+               in
+               if String.ends_with ~suffix:"/cachedContents" path
+               then (
+                 incr create_count;
+                 create_auths := auth :: !create_auths;
+                 Cohttp_eio.Server.respond_string
+                   ~status:`OK
+                   ~body:{|{"name":"cachedContents/vertex-001","expireTime":"2099-01-01T00:00:00Z"}|}
+                   ())
+               else (
+                 gen_auths := auth :: !gen_auths;
+                 let json = Yojson.Safe.from_string req_body in
+                 let has_cached = Yojson.Safe.Util.(member "cachedContent" json <> `Null) in
+                 if !evict_next && has_cached
+                 then
+                   Cohttp_eio.Server.respond_string
+                     ~status:`Not_found
+                     ~body:{|{"error":{"code":404,"message":"CachedContent not found"}}|}
+                     ()
+                 else (
+                   let resp_json =
+                     {|{"candidates":[{"content":{"role":"model","parts":[{"text":"vertex-ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":50,"candidatesTokenCount":5,"totalTokenCount":55},"modelVersion":"fixture-gemini"}|}
+                   in
+                   let body = if stream then "data: " ^ resp_json ^ "\n\n" else resp_json in
+                   Cohttp_eio.Server.respond_string ~status:`OK ~body ()))
+             in
+             let socket =
+               Eio.Net.listen
+                 env#net
+                 ~sw
+                 ~backlog:8
+                 ~reuse_addr:true
+                 (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+             in
+             let server = Cohttp_eio.Server.make ~callback:handler () in
+             Eio.Fiber.fork ~sw (fun () ->
+               Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+             let resolve_calls = ref 0 in
+             let current_token = ref "fixture-oauth-hour-1" in
+             let credential_source =
+               Provider_config.Refreshable_credential
+                 (fun () ->
+                    incr resolve_calls;
+                    Ok (Secret.of_string !current_token))
+             in
+             let config =
+               Provider_config.make
+                 ~kind:Provider_config.Gemini
+                 ~model_id:"fixture-gemini"
+                 ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1beta" port)
+                 ~auth_scheme:Provider_config.Bearer_token
+                 ~credential_source
+                 ~system_prompt:large_system
+                 ~explicit_context_cache_ttl_s:300
+                 ~model_capabilities_override:Capabilities.gemini_capabilities
+                 ()
+             in
+             let run_turn () =
+               if stream
+               then
+                 (Complete.complete_stream
+                    ~sw
+                    ~net:env#net
+                    ~config
+                    ~messages
+                    ~on_event:(fun _ -> ())
+                    ())
+                   .Llm_provider.Completion_outcome.result
+               else
+                 (Complete.complete ~sw ~net:env#net ~config ~messages ())
+                   .Llm_provider.Completion_outcome.result
+             in
+             let label = Printf.sprintf "stream=%b" stream in
+             (* Turn 1: cold create + generateContent must resolve auth headers ONCE *)
+             (match run_turn () with
+              | Ok _ -> ()
+              | Error _ -> fail (label ^ ": turn 1 failed"));
+             check int (label ^ ": turn 1 resolves auth_headers exactly once") 1 !resolve_calls;
+             check int (label ^ ": turn 1 creates cachedContents once") 1 !create_count;
+             check (list string) (label ^ ": create saw hour-1 bearer")
+               [ "Bearer fixture-oauth-hour-1" ] !create_auths;
+             check (list string) (label ^ ": generate saw identical hour-1 bearer")
+               [ "Bearer fixture-oauth-hour-1" ] !gen_auths;
+             (* Turn 2: rotate OAuth token -> MUST reuse cachedContents without creating a second one *)
+             current_token := "fixture-oauth-hour-2";
+             (match run_turn () with
+              | Ok _ -> ()
+              | Error _ -> fail (label ^ ": turn 2 failed"));
+             check int (label ^ ": turn 2 resolves auth_headers once (total 2)") 2 !resolve_calls;
+             check int (label ^ ": rotating bearer token reuses cachedContents (still 1 create)")
+               1 !create_count;
+             check string (label ^ ": turn 2 generate used rotated hour-2 bearer")
+               "Bearer fixture-oauth-hour-2" (List.hd !gen_auths);
+             (* Turn 3: stale 404 fallback must ALSO reuse the single resolved auth_headers *)
+             evict_next := true;
+             current_token := "fixture-oauth-hour-3";
+             (match run_turn () with
+              | Ok _ -> ()
+              | Error _ -> fail (label ^ ": turn 3 fallback failed"));
+             check int (label ^ ": turn 3 fallback resolves auth_headers once (total 3)")
+               3 !resolve_calls;
+             Eio.Switch.fail sw Exit)
+         with Exit -> ()))
+    [ false; true ];
+  Gemini_context_cache.clear_for_tests ()
+;;
+
+let test_gemini_401_invalidates_and_recovers_once () =
+  let large_system = String.make 5000 'z' in
+  List.iter
+    (fun stream ->
+       Gemini_context_cache.clear_for_tests ();
+       Eio_main.run (fun env ->
+         try
+           Eio.Switch.run (fun sw ->
+             let cached_token = ref (Some "fixture-revoked-token") in
+             let invalidations = ref 0 in
+             let refreshes = ref 0 in
+             let create_calls = ref 0 in
+             let gen_calls = ref 0 in
+             let port = fresh_port () in
+             let handler _conn req _body =
+               let path = Cohttp.Request.uri req |> Uri.path in
+               let auth =
+                 Cohttp.Header.get (Cohttp.Request.headers req) "authorization"
+                 |> Option.value ~default:""
+               in
+               if String.ends_with ~suffix:"/cachedContents" path
+               then (
+                 incr create_calls;
+                 if String.equal auth "Bearer fixture-fresh-token"
+                 then
+                   Cohttp_eio.Server.respond_string
+                     ~status:`OK
+                     ~body:{|{"name":"cachedContents/recovered-1","expireTime":"2099-01-01T00:00:00Z"}|}
+                     ()
+                 else
+                   Cohttp_eio.Server.respond_string
+                     ~status:`Unauthorized
+                     ~body:{|{"error":{"code":401,"message":"token expired"}}|}
+                     ())
+               else (
+                 incr gen_calls;
+                 if String.equal auth "Bearer fixture-fresh-token"
+                 then (
+                   let resp_json =
+                     {|{"candidates":[{"content":{"role":"model","parts":[{"text":"recovered-ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2,"totalTokenCount":12},"modelVersion":"fixture-gemini"}|}
+                   in
+                   let body = if stream then "data: " ^ resp_json ^ "\n\n" else resp_json in
+                   Cohttp_eio.Server.respond_string ~status:`OK ~body ())
+                 else
+                   Cohttp_eio.Server.respond_string
+                     ~status:`Unauthorized
+                     ~body:{|{"error":{"code":401,"message":"token expired"}}|}
+                     ())
+             in
+             let socket =
+               Eio.Net.listen
+                 env#net
+                 ~sw
+                 ~backlog:8
+                 ~reuse_addr:true
+                 (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+             in
+             let server = Cohttp_eio.Server.make ~callback:handler () in
+             Eio.Fiber.fork ~sw (fun () ->
+               Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+             let credential_source =
+               Provider_config.make_refreshable_credential
+                 ~invalidate:(fun () ->
+                   incr invalidations;
+                   cached_token := None)
+                 (fun () ->
+                    match !cached_token with
+                    | Some tok -> Ok (Secret.of_string tok)
+                    | None ->
+                      incr refreshes;
+                      cached_token := Some "fixture-fresh-token";
+                      Ok (Secret.of_string "fixture-fresh-token"))
+             in
+             let config =
+               Provider_config.make
+                 ~kind:Provider_config.Gemini
+                 ~model_id:"fixture-gemini"
+                 ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1beta" port)
+                 ~auth_scheme:Provider_config.Bearer_token
+                 ~credential_source
+                 ~system_prompt:large_system
+                 ~explicit_context_cache_ttl_s:300
+                 ~model_capabilities_override:Capabilities.gemini_capabilities
+                 ()
+             in
+             let run_turn () =
+               let statuses = ref [] in
+               let metrics =
+                 { Metrics.noop with
+                   on_http_status = (fun ~provider:_ ~model_id:_ ~status ->
+                     statuses := status :: !statuses)
+                 }
+               in
+               let res =
+                 if stream
+                 then
+                   (Complete.complete_stream
+                      ~sw
+                      ~net:env#net
+                      ~metrics
+                      ~config
+                      ~messages
+                      ~on_event:(fun _ -> ())
+                      ())
+                     .Llm_provider.Completion_outcome.result
+                 else
+                   (Complete.complete ~sw ~net:env#net ~metrics ~config ~messages ())
+                     .Llm_provider.Completion_outcome.result
+               in
+               res, List.rev !statuses
+             in
+             let label = Printf.sprintf "stream=%b" stream in
+             (* Turn 1: stale token hits 401 on /cachedContents -> invalidates ONCE,
+                refreshes immediately, and dispatches generateContent ONCE with the
+                fresh token (zero doomed 401 generation RTT and zero double invalidation). *)
+             let res1, statuses1 = run_turn () in
+             (match res1 with
+              | Ok _ -> ()
+              | Error _ -> fail (label ^ ": turn 1 should recover from 401"));
+             check int (label ^ ": invalidator called exactly once on 401") 1 !invalidations;
+             check int (label ^ ": exactly one fresh token fetch") 1 !refreshes;
+             check int (label ^ ": generateContent skipped doomed stale-token RTT") 1 !gen_calls;
+             check (list int) (label ^ ": suppresses premature 401 status") [ 200 ] statuses1;
+             (* Turn 2: 401 on /cachedContents was NOT negative-cached, so now creates cache! *)
+             let res2, _ = run_turn () in
+             (match res2 with
+              | Ok _ -> ()
+              | Error _ -> fail (label ^ ": turn 2 failed"));
+             check int (label ^ ": 401 was not negative-cached (2nd create succeeded)")
+               2 !create_calls;
+             Eio.Switch.fail sw Exit)
+         with Exit -> ()))
+    [ false; true ];
+  Gemini_context_cache.clear_for_tests ()
+;;
+
+let test_stream_non_cached_401_budget_and_knob_labels () =
+  let large_system = String.make 5000 'q' in
+  (* 1. Non-cached streaming 401 retry deducts first-attempt elapsed time from first_event_timeout_s *)
+  Eio_main.run (fun env ->
+    try
+      Eio.Switch.run (fun sw ->
+        let cached_token = ref (Some "fixture-stale-noncached") in
+        let invalidations = ref 0 in
+        let gen_calls = ref 0 in
+        let port = fresh_port () in
+        let handler _conn req _body =
+          incr gen_calls;
+          let auth =
+            Cohttp.Header.get (Cohttp.Request.headers req) "authorization"
+            |> Option.value ~default:""
+          in
+          if String.equal auth "Bearer fixture-stale-noncached"
+          then (
+            Eio.Time.sleep env#clock 0.20;
+            Cohttp_eio.Server.respond_string
+              ~status:`Unauthorized
+              ~body:{|{"error":{"code":401,"message":"expired"}}|}
+              ())
+          else (
+            Eio.Time.sleep env#clock 0.28;
+            let body =
+              "data: "
+              ^ {|{"candidates":[{"content":{"role":"model","parts":[{"text":"too-late"}]},"finishReason":"STOP"}]}|}
+              ^ "\n\n"
+            in
+            Cohttp_eio.Server.respond_string ~status:`OK ~body ())
+        in
+        let socket =
+          Eio.Net.listen env#net ~sw ~backlog:8 ~reuse_addr:true
+            (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+        in
+        let server = Cohttp_eio.Server.make ~callback:handler () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+        let credential_source =
+          Provider_config.make_refreshable_credential
+            ~invalidate:(fun () ->
+              incr invalidations;
+              cached_token := None)
+            (fun () ->
+               match !cached_token with
+               | Some tok -> Ok (Secret.of_string tok)
+               | None ->
+                 cached_token := Some "fixture-fresh-noncached";
+                 Ok (Secret.of_string "fixture-fresh-noncached"))
+        in
+        let config =
+          Provider_config.make
+            ~kind:Provider_config.Gemini
+            ~model_id:"fixture-gemini-no-cache"
+            ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1beta" port)
+            ~auth_scheme:Provider_config.Bearer_token
+            ~credential_source
+            ~model_capabilities_override:
+              { Capabilities.gemini_capabilities with
+                prompt_cache_wire = Capabilities.No_prompt_cache_wire
+              }
+            ()
+        in
+        let res =
+          (Complete.complete_stream
+             ~sw
+             ~net:env#net
+             ~clock:env#clock
+             ~first_event_timeout_s:0.35
+             ~config
+             ~messages
+             ~on_event:(fun _ -> ())
+             ())
+            .Llm_provider.Completion_outcome.result
+        in
+        (match res with
+         | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) -> ()
+         | _ -> fail "non-cached stream 401 retry must deduct elapsed time and time out");
+        check int "non-cached 401 invalidated once" 1 !invalidations;
+        check int "non-cached 401 retried once before hitting deducted budget" 2 !gen_calls;
+        Eio.Switch.fail sw Exit)
+    with Exit -> ());
+  (* 2. body_timeout_s-only exhaustion reports body_timeout_s_exceeded in Streaming_summary,
+        and non-positive streaming timeouts fail closed with AcceptRejected before /cachedContents *)
+  Gemini_context_cache.clear_for_tests ();
+  Eio_main.run (fun env ->
+    try
+      Eio.Switch.run (fun sw ->
+        let create_calls = ref 0 in
+        let port = fresh_port () in
+        let handler _conn req _body =
+          let path = Cohttp.Request.uri req |> Uri.path in
+          if String.ends_with ~suffix:"/cachedContents" path
+          then (
+            incr create_calls;
+            Eio.Time.sleep env#clock 0.25;
+            Cohttp_eio.Server.respond_string
+              ~status:`OK
+              ~body:{|{"name":"cachedContents/slow-body","expireTime":"2099-01-01T00:00:00Z"}|}
+              ())
+          else
+            Cohttp_eio.Server.respond_string
+              ~status:`OK
+              ~body:
+                ("data: "
+                 ^ {|{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}|}
+                 ^ "\n\n")
+              ()
+        in
+        let socket =
+          Eio.Net.listen env#net ~sw ~backlog:8 ~reuse_addr:true
+            (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+        in
+        let server = Cohttp_eio.Server.make ~callback:handler () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+        let config =
+          Provider_config.make
+            ~kind:Provider_config.Gemini
+            ~model_id:"fixture-gemini"
+            ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1beta" port)
+            ~api_key:"fixture-key"
+            ~system_prompt:large_system
+            ~explicit_context_cache_ttl_s:300
+            ~model_capabilities_override:Capabilities.gemini_capabilities
+            ()
+        in
+        (* 2c: invalid non-positive first_event_timeout_s & body_timeout_s reject before /cachedContents *)
+        (match
+           (Complete.complete_stream
+              ~sw
+              ~net:env#net
+              ~clock:env#clock
+              ~first_event_timeout_s:0.0
+              ~config
+              ~messages
+              ~on_event:(fun _ -> ())
+              ())
+             .Llm_provider.Completion_outcome.result
+         with
+         | Error (Http_client.AcceptRejected _) -> ()
+         | _ -> fail "non-positive first_event_timeout_s must fail with AcceptRejected");
+        (match
+           (Complete.complete_stream
+              ~sw
+              ~net:env#net
+              ~clock:env#clock
+              ~body_timeout_s:(-1.0)
+              ~config
+              ~messages
+              ~on_event:(fun _ -> ())
+              ())
+             .Llm_provider.Completion_outcome.result
+         with
+         | Error (Http_client.AcceptRejected _) -> ()
+         | _ -> fail "negative body_timeout_s must fail with AcceptRejected");
+        check int "invalid streaming deadlines never call POST /cachedContents" 0 !create_calls;
+        (* 2b: body_timeout_s-only exhaustion carries body_timeout_s_exceeded terminal label *)
+        let summaries = ref [] in
+        let on_telemetry = function
+          | Telemetry_event.Streaming_summary { terminal; _ } ->
+            summaries := terminal :: !summaries
+          | _ -> ()
+        in
+        (match
+           (Complete.complete_stream
+              ~sw
+              ~net:env#net
+              ~clock:env#clock
+              ~body_timeout_s:0.08
+              ~on_telemetry
+              ~config
+              ~messages
+              ~on_event:(fun _ -> ())
+              ())
+             .Llm_provider.Completion_outcome.result
+         with
+         | Error (Http_client.TimeoutError { phase = Http_client.First_token; message }) ->
+           check bool "message names body_timeout_s" true
+             (String.starts_with ~prefix:"body_timeout_s" message)
+         | _ -> fail "body_timeout_s-only exhaustion must return First_token TimeoutError");
+        (match !summaries with
+         | [ Telemetry_event.Terminal_error label ] ->
+           check string "summary terminal names body_timeout_s_exceeded"
+             "body_timeout_s_exceeded:awaiting_first_event" label
+         | _ -> fail "expected single Streaming_summary with body_timeout_s_exceeded");
+        Eio.Switch.fail sw Exit)
+    with Exit -> ());
+  Gemini_context_cache.clear_for_tests ()
+;;
+
+let test_gemini_context_cache_single_flight_and_cancellation () =
+  Gemini_context_cache.clear_for_tests ();
+  let large_system = String.make 5000 'c' in
+  let prefix =
+    Backend_gemini.extract_cacheable_prefix
+      ~config:
+        (Provider_config.make
+           ~kind:Provider_config.Gemini
+           ~model_id:"fixture-gemini"
+           ~base_url:"http://127.0.0.1/v1beta"
+           ~system_prompt:large_system
+           ())
+      ~messages
+      ()
+  in
+  (* 1. N=6 concurrent Eio fibers coalesce into ONE outbound POST /cachedContents *)
+  Eio_main.run (fun env ->
+    try
+      Eio.Switch.run (fun sw ->
+        let create_calls = Atomic.make 0 in
+        let leader_entered, mark_leader_entered = Eio.Promise.create () in
+        let gate, open_gate = Eio.Promise.create () in
+        let port = fresh_port () in
+        let handler _conn _req _body =
+          let n = Atomic.fetch_and_add create_calls 1 + 1 in
+          if n = 1
+          then (
+            Eio.Promise.resolve mark_leader_entered ();
+            Eio.Promise.await gate);
+          Cohttp_eio.Server.respond_string
+            ~status:`OK
+            ~body:
+              (Printf.sprintf
+                 {|{"name":"cachedContents/coalesced-%d","expireTime":"2099-01-01T00:00:00Z"}|}
+                 n)
+            ()
+        in
+        let socket =
+          Eio.Net.listen
+            env#net
+            ~sw
+            ~backlog:16
+            ~reuse_addr:true
+            (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+        in
+        let server = Cohttp_eio.Server.make ~callback:handler () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+        let config =
+          Provider_config.make
+            ~kind:Provider_config.Gemini
+            ~model_id:"fixture-gemini"
+            ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1beta" port)
+            ~api_key:"fixture-key"
+            ~system_prompt:large_system
+            ~explicit_context_cache_ttl_s:300
+            ~model_capabilities_override:Capabilities.gemini_capabilities
+            ()
+        in
+        let results = Array.make 6 None in
+        Eio.Switch.run (fun work_sw ->
+          for i = 0 to 5 do
+            Eio.Fiber.fork ~sw:work_sw (fun () ->
+              results.(i)
+              <- Gemini_context_cache.resolve_or_create
+                   ~net:env#net
+                   ~clock:env#clock
+                   ~config
+                   ~auth_headers:[ "x-goog-api-key", "fixture-key" ]
+                   ~ttl_s:300
+                   ~prefix
+                   ())
+          done;
+          Eio.Promise.await leader_entered;
+          Eio.Fiber.yield ();
+          Eio.Fiber.yield ();
+          Eio.Promise.resolve open_gate ());
+        check int "6 concurrent fibers trigger exactly 1 POST /cachedContents"
+          1 (Atomic.get create_calls);
+        Array.iter
+          (fun res ->
+             match res with
+             | Some (h : Gemini_context_cache.handle) ->
+               check string "all fibers receive shared resource_name"
+                 "cachedContents/coalesced-1" h.resource_name
+             | None -> fail "expected Some coalesced handle")
+          results;
+        Eio.Switch.fail sw Exit)
+    with Exit -> ());
+  (* 2. Leader cancellation cleans up in-flight slot so waiter wakes with None (never hangs)
+        and subsequent caller creates cleanly *)
+  Gemini_context_cache.clear_for_tests ();
+  Eio_main.run (fun env ->
+    try
+      Eio.Switch.run (fun sw ->
+        let create_calls = Atomic.make 0 in
+        let leader_entered, mark_leader_entered = Eio.Promise.create () in
+        let never_gate, _ = Eio.Promise.create () in
+        let port = fresh_port () in
+        let handler _conn _req _body =
+          let n = Atomic.fetch_and_add create_calls 1 + 1 in
+          if n = 1
+          then (
+            Eio.Promise.resolve mark_leader_entered ();
+            Eio.Promise.await never_gate);
+          Cohttp_eio.Server.respond_string
+            ~status:`OK
+            ~body:{|{"name":"cachedContents/after-cancel","expireTime":"2099-01-01T00:00:00Z"}|}
+            ()
+        in
+        let socket =
+          Eio.Net.listen
+            env#net
+            ~sw
+            ~backlog:16
+            ~reuse_addr:true
+            (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+        in
+        let server = Cohttp_eio.Server.make ~callback:handler () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+        let config =
+          Provider_config.make
+            ~kind:Provider_config.Gemini
+            ~model_id:"fixture-gemini"
+            ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1beta" port)
+            ~api_key:"fixture-key"
+            ~system_prompt:large_system
+            ~explicit_context_cache_ttl_s:300
+            ~model_capabilities_override:Capabilities.gemini_capabilities
+            ()
+        in
+        let waiter_done, resolve_waiter_done = Eio.Promise.create () in
+        let leader_cancelled = ref false in
+        Eio.Switch.run (fun outer_sw ->
+          let cancel_leader_promise, cancel_leader = Eio.Promise.create () in
+          Eio.Fiber.fork ~sw:outer_sw (fun () ->
+            try
+              Eio.Switch.run (fun leader_sw ->
+                Eio.Fiber.fork ~sw:leader_sw (fun () ->
+                  Eio.Promise.await cancel_leader_promise;
+                  Eio.Switch.fail leader_sw Exit);
+                ignore
+                  (Gemini_context_cache.resolve_or_create
+                     ~net:env#net
+                     ~clock:env#clock
+                     ~config
+                     ~auth_headers:[ "x-goog-api-key", "fixture-key" ]
+                     ~ttl_s:300
+                     ~prefix
+                     ()
+                   : Gemini_context_cache.handle option))
+            with Exit -> leader_cancelled := true);
+          Eio.Promise.await leader_entered;
+          Eio.Fiber.fork ~sw:outer_sw (fun () ->
+            let r =
+              Gemini_context_cache.resolve_or_create
+                ~net:env#net
+                ~clock:env#clock
+                ~config
+                ~auth_headers:[ "x-goog-api-key", "fixture-key" ]
+                ~ttl_s:300
+                ~prefix
+                ()
+            in
+            Eio.Promise.resolve resolve_waiter_done r);
+          Eio.Fiber.yield ();
+          Eio.Fiber.yield ();
+          Eio.Promise.resolve cancel_leader ();
+          let waiter_res =
+            match
+              Eio.Time.with_timeout env#clock 2.0 (fun () ->
+                Ok (Eio.Promise.await waiter_done))
+            with
+            | Ok r -> r
+            | Error `Timeout -> fail "waiter hung after leader cancellation!"
+          in
+          check bool "waiter woke with None after leader cancellation" true
+            (Option.is_none waiter_res));
+        check bool "leader switch cancelled" true !leader_cancelled;
+        (* Subsequent call succeeds cleanly because in-flight slot was evicted *)
+        (match
+           Gemini_context_cache.resolve_or_create
+             ~net:env#net
+             ~clock:env#clock
+             ~config
+             ~auth_headers:[ "x-goog-api-key", "fixture-key" ]
+             ~ttl_s:300
+             ~prefix
+             ()
+         with
+         | Some h ->
+           check string "post-cancel call creates cache cleanly"
+             "cachedContents/after-cancel" h.resource_name
+         | None -> fail "expected post-cancel resolve_or_create to succeed");
+        Eio.Switch.fail sw Exit)
+    with Exit -> ());
+  Gemini_context_cache.clear_for_tests ()
+;;
+
+let test_gemini_context_cache_negative_4xx_and_transient_retry () =
+  Gemini_context_cache.clear_for_tests ();
+  let large_system = String.make 5000 'n' in
+  Eio_main.run (fun env ->
+    try
+      Eio.Switch.run (fun sw ->
+        let status_to_return = ref `Bad_request in
+        let create_calls = ref 0 in
+        let port = fresh_port () in
+        let handler _conn _req _body =
+          incr create_calls;
+          match !status_to_return with
+          | `OK ->
+            Cohttp_eio.Server.respond_string
+              ~status:`OK
+              ~body:{|{"name":"cachedContents/live-1","expireTime":"2099-01-01T00:00:00Z"}|}
+              ()
+          | (`Bad_request | `Internal_server_error | `Too_many_requests | `Forbidden | `Unauthorized) as st ->
+            Cohttp_eio.Server.respond_string
+              ~status:st
+              ~body:{|{"error":{"message":"simulated error"}}|}
+              ()
+        in
+        let socket =
+          Eio.Net.listen
+            env#net
+            ~sw
+            ~backlog:8
+            ~reuse_addr:true
+            (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+        in
+        let server = Cohttp_eio.Server.make ~callback:handler () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+        let mk_config tag =
+          Provider_config.make
+            ~kind:Provider_config.Gemini
+            ~model_id:("fixture-gemini-" ^ tag)
+            ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1beta" port)
+            ~api_key:"fixture-key"
+            ~system_prompt:large_system
+            ~explicit_context_cache_ttl_s:300
+            ~model_capabilities_override:Capabilities.gemini_capabilities
+            ()
+        in
+        let resolve ?negative_ttl_s config =
+          let prefix = Backend_gemini.extract_cacheable_prefix ~config ~messages () in
+          Gemini_context_cache.resolve_or_create
+            ~net:env#net
+            ~clock:env#clock
+            ?negative_ttl_s
+            ~config
+            ~auth_headers:[ "x-goog-api-key", "fixture-key" ]
+            ~ttl_s:300
+            ~prefix
+            ()
+        in
+        (* 1. Permanent 400 INVALID_ARGUMENT is negative-cached *)
+        status_to_return := `Bad_request;
+        let cfg_400 = mk_config "400" in
+        check bool "first 400 returns None" true (Option.is_none (resolve cfg_400));
+        check int "first 400 sent 1 POST" 1 !create_calls;
+        check bool "second call skips POST via negative cache" true
+          (Option.is_none (resolve cfg_400));
+        check int "still 1 POST on negative cache hit" 1 !create_calls;
+        (* Negative TTL expiry allows retry *)
+        let cfg_400_short = mk_config "400-short" in
+        create_calls := 0;
+        check bool "short-neg first 400 returns None" true
+          (Option.is_none (resolve ~negative_ttl_s:0.03 cfg_400_short));
+        check int "short-neg sent 1 POST" 1 !create_calls;
+        Eio.Time.sleep env#clock 0.05;
+        status_to_return := `OK;
+        (match resolve ~negative_ttl_s:0.03 cfg_400_short with
+         | Some h -> check string "recovered after negative TTL expiry" "cachedContents/live-1" h.resource_name
+         | None -> fail "expected retry after negative TTL expiry");
+        check int "retried after negative TTL expiry" 2 !create_calls;
+        (* 2. 500, 429, 403, 401 are NEVER negative-cached *)
+        List.iter
+          (fun (tag, status) ->
+             create_calls := 0;
+             status_to_return := status;
+             let cfg = mk_config tag in
+             check bool (tag ^ ": first returns None") true (Option.is_none (resolve cfg));
+             check bool (tag ^ ": second returns None") true (Option.is_none (resolve cfg));
+             check int (tag ^ ": NOT negative-cached (2 POSTs)") 2 !create_calls)
+          [ "500", `Internal_server_error
+          ; "429", `Too_many_requests
+          ; "403", `Forbidden
+          ; "401", `Unauthorized
+          ];
+        Eio.Switch.fail sw Exit)
+    with Exit -> ());
+  Gemini_context_cache.clear_for_tests ()
+;;
+
+let test_gemini_explicit_cache_timeout_budget_deduction () =
+  let large_system = String.make 5000 't' in
+  (* Case A: Sync body_timeout_s exhausted during /cachedContents -> TimeoutError, 0 generateContent calls *)
+  Gemini_context_cache.clear_for_tests ();
+  Eio_main.run (fun env ->
+    try
+      Eio.Switch.run (fun sw ->
+        let gen_calls = ref 0 in
+        let port = fresh_port () in
+        let handler _conn req _body =
+          let path = Cohttp.Request.uri req |> Uri.path in
+          if String.ends_with ~suffix:"/cachedContents" path
+          then (
+            Eio.Time.sleep env#clock 0.18;
+            Cohttp_eio.Server.respond_string
+              ~status:`OK
+              ~body:{|{"name":"cachedContents/slow-1","expireTime":"2099-01-01T00:00:00Z"}|}
+              ())
+          else (
+            incr gen_calls;
+            Cohttp_eio.Server.respond_string
+              ~status:`OK
+              ~body:{|{"candidates":[{"content":{"role":"model","parts":[{"text":"late"}]},"finishReason":"STOP"}]}|}
+              ())
+        in
+        let socket =
+          Eio.Net.listen env#net ~sw ~backlog:8 ~reuse_addr:true
+            (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+        in
+        let server = Cohttp_eio.Server.make ~callback:handler () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+        let config =
+          Provider_config.make
+            ~kind:Provider_config.Gemini
+            ~model_id:"fixture-gemini"
+            ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1beta" port)
+            ~api_key:"fixture-key"
+            ~system_prompt:large_system
+            ~explicit_context_cache_ttl_s:300
+            ~model_capabilities_override:Capabilities.gemini_capabilities
+            ()
+        in
+        let res =
+          (Complete.complete
+             ~sw
+             ~net:env#net
+             ~clock:env#clock
+             ~body_timeout_s:0.06
+             ~config
+             ~messages
+             ())
+            .Llm_provider.Completion_outcome.result
+        in
+        (match res with
+         | Error (Http_client.TimeoutError { phase = Http_client.Non_streaming_body; _ }) -> ()
+         | _ -> fail "sync: expected Non_streaming_body TimeoutError when cache exhausts budget");
+        check int "sync: generateContent skipped when body budget exhausted" 0 !gen_calls;
+        (* Stream: first_event_timeout_s exhausted during /cachedContents -> First_token TimeoutError, 0 generateContent *)
+        Gemini_context_cache.clear_for_tests ();
+        let sres =
+          (Complete.complete_stream
+             ~sw
+             ~net:env#net
+             ~clock:env#clock
+             ~first_event_timeout_s:0.06
+             ~config
+             ~messages
+             ~on_event:(fun _ -> ())
+             ())
+            .Llm_provider.Completion_outcome.result
+        in
+        (match sres with
+         | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) -> ()
+         | _ -> fail "stream: expected First_token TimeoutError when cache exhausts budget");
+        check int "stream: streamGenerateContent skipped when first_event budget exhausted"
+          0 !gen_calls;
+        Eio.Switch.fail sw Exit)
+    with Exit -> ());
+  (* Case B: Partial budget spent by /cachedContents (0.09s) leaves only 0.06s of 0.15s budget,
+     so a 0.12s generateContent / streamGenerateContent MUST time out instead of getting a fresh 0.15s! *)
+  List.iter
+    (fun stream ->
+       Gemini_context_cache.clear_for_tests ();
+       Eio_main.run (fun env ->
+         try
+           Eio.Switch.run (fun sw ->
+             let port = fresh_port () in
+             let handler _conn req _body =
+               let path = Cohttp.Request.uri req |> Uri.path in
+               if String.ends_with ~suffix:"/cachedContents" path
+               then (
+                 Eio.Time.sleep env#clock 0.09;
+                 Cohttp_eio.Server.respond_string
+                   ~status:`OK
+                   ~body:{|{"name":"cachedContents/partial-1","expireTime":"2099-01-01T00:00:00Z"}|}
+                   ())
+               else (
+                 Eio.Time.sleep env#clock 0.12;
+                 let resp_json =
+                   {|{"candidates":[{"content":{"role":"model","parts":[{"text":"too-slow"}]},"finishReason":"STOP"}]}|}
+                 in
+                 let body = if stream then "data: " ^ resp_json ^ "\n\n" else resp_json in
+                 Cohttp_eio.Server.respond_string ~status:`OK ~body ())
+             in
+             let socket =
+               Eio.Net.listen env#net ~sw ~backlog:8 ~reuse_addr:true
+                 (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+             in
+             let server = Cohttp_eio.Server.make ~callback:handler () in
+             Eio.Fiber.fork ~sw (fun () ->
+               Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+             let config =
+               Provider_config.make
+                 ~kind:Provider_config.Gemini
+                 ~model_id:"fixture-gemini"
+                 ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1beta" port)
+                 ~api_key:"fixture-key"
+                 ~system_prompt:large_system
+                 ~explicit_context_cache_ttl_s:300
+                 ~model_capabilities_override:Capabilities.gemini_capabilities
+                 ()
+             in
+             if stream
+             then (
+               let res =
+                 (Complete.complete_stream
+                    ~sw
+                    ~net:env#net
+                    ~clock:env#clock
+                    ~first_event_timeout_s:0.15
+                    ~config
+                    ~messages
+                    ~on_event:(fun _ -> ())
+                    ())
+                   .Llm_provider.Completion_outcome.result
+               in
+               match res with
+               | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) -> ()
+               | _ -> fail "stream: expected First_token TimeoutError from deducted budget")
+             else (
+               let res =
+                 (Complete.complete
+                    ~sw
+                    ~net:env#net
+                    ~clock:env#clock
+                    ~body_timeout_s:0.15
+                    ~config
+                    ~messages
+                    ())
+                   .Llm_provider.Completion_outcome.result
+               in
+               match res with
+               | Error (Http_client.TimeoutError { phase = Http_client.Non_streaming_body; _ }) -> ()
+               | _ -> fail "sync: expected Non_streaming_body TimeoutError from deducted budget");
+             Eio.Switch.fail sw Exit)
+         with Exit -> ()))
+    [ false; true ];
+  Gemini_context_cache.clear_for_tests ()
+;;
+
 let test_ollama_kv_cache_telemetry_sync_and_stream () =
   let sync_cases =
     [ ( "prompt_eval_cached_count"
@@ -6145,6 +7056,31 @@ let () =
             "explicit cachedContents create/reuse/404-fallback + toolUsePromptTokenCount"
             `Quick
             test_gemini_explicit_cache_lifecycle_and_tool_use_prompt_tokens
+        ; test_case
+            "explicit cachedContents single auth resolve and bearer rotation stability"
+            `Quick
+            test_gemini_single_auth_resolve_and_bearer_rotation
+        ; test_case
+            "refreshable credential 401 invalidates and recovers once"
+            `Quick
+            test_gemini_401_invalidates_and_recovers_once
+        ; test_case
+            "stream non-cached 401 budget deduction, body_timeout_s knob label, and invalid \
+             deadline preflight"
+            `Quick
+            test_stream_non_cached_401_budget_and_knob_labels
+        ; test_case
+            "explicit cachedContents single-flight coalescing and leader cancellation"
+            `Quick
+            test_gemini_context_cache_single_flight_and_cancellation
+        ; test_case
+            "explicit cachedContents negative 4xx cache vs transient retry"
+            `Quick
+            test_gemini_context_cache_negative_4xx_and_transient_retry
+        ; test_case
+            "explicit cachedContents timeout budget deduction (sync and stream)"
+            `Quick
+            test_gemini_explicit_cache_timeout_budget_deduction
         ; test_case
             "Ollama KV cache telemetry (sync and stream)"
             `Quick

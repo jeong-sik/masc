@@ -1413,6 +1413,143 @@ let test_google_adc_refresh_boundary () =
     | _ -> fail "empty or multiple-line ADC output must fail") [""; "token\nextra"]
 ;;
 
+let test_google_adc_cache_ttl_invalidation_and_single_flight () =
+  (* 1. Deterministic TTL cache hit, expiry, invalidation, and non-caching of errors *)
+  let now_s = ref 100.0 in
+  let cache = Runtime_google_adc.create_cache ~ttl_s:60.0 ~now:(fun () -> !now_s) () in
+  let calls = ref 0 in
+  let run _argv =
+    incr calls;
+    Ok (Printf.sprintf "fixture-cached-token-%d\n" !calls)
+  in
+  let get () =
+    match Runtime_google_adc.get_token_with ~cache ~run () with
+    | Ok tok -> Llm_provider.Secret.header_value tok
+    | Error _ -> fail "expected Ok cached token"
+  in
+  check string "cold miss fetches token 1" "fixture-cached-token-1" (get ());
+  check int "1 subprocess call on miss" 1 !calls;
+  now_s := 159.0;
+  check string "warm hit reuses token 1 before TTL" "fixture-cached-token-1" (get ());
+  check int "still 1 subprocess call on warm hit" 1 !calls;
+  now_s := 160.0;
+  check string "expiry at TTL boundary refreshes token 2" "fixture-cached-token-2" (get ());
+  check int "2 subprocess calls after TTL expiry" 2 !calls;
+  Runtime_google_adc.invalidate_cache cache;
+  check string "explicit invalidation forces refresh token 3" "fixture-cached-token-3" (get ());
+  check int "3 subprocess calls after invalidation" 3 !calls;
+  (* Provider_config.invalidate_credential clears the ADC cache *)
+  let cred_source = Runtime_google_adc.credential_source_with ~cache ~run () in
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Gemini
+      ~model_id:"fixture-gemini"
+      ~base_url:"https://aiplatform.googleapis.com/v1/projects/p/locations/global/publishers/google"
+      ~auth_scheme:Bearer_token
+      ~credential_source:cred_source
+      ()
+  in
+  check bool "ADC credential source supports invalidation" true
+    (Llm_provider.Provider_config.can_invalidate_credential provider_cfg);
+  check bool "Provider_config.invalidate_credential succeeds" true
+    (Llm_provider.Provider_config.invalidate_credential provider_cfg);
+  (match Llm_provider.Provider_config.resolve_auth_headers provider_cfg with
+   | Ok [ ("Authorization", "Bearer fixture-cached-token-4") ] -> ()
+   | Ok _ -> fail "expected refreshed bearer token 4 after Provider_config invalidation"
+   | Error reason -> fail ("resolve_auth_headers failed: " ^ reason));
+  check int "4 subprocess calls after Provider_config invalidation" 4 !calls;
+  (* Errors are never cached *)
+  Runtime_google_adc.invalidate_cache cache;
+  (match Runtime_google_adc.get_token_with ~cache ~run:(fun _ -> Error ()) () with
+   | Error Llm_provider.Provider_config.Credential_unavailable -> ()
+   | _ -> fail "expected Credential_unavailable");
+  check string "subsequent call recovers after error" "fixture-cached-token-5" (get ());
+  (* 2. Non-Eio OS-thread single-flight serialization (never raises Effect.Unhandled) *)
+  let thread_cache = Runtime_google_adc.create_cache ~ttl_s:300.0 () in
+  let thread_calls = Atomic.make 0 in
+  let thread_run _argv =
+    let n = Atomic.fetch_and_add thread_calls 1 + 1 in
+    Thread.delay 0.03;
+    Ok (Printf.sprintf "fixture-thread-token-%d" n)
+  in
+  let results = Array.make 4 "" in
+  let threads =
+    Array.init 4 (fun i ->
+      Thread.create (fun () ->
+        match Runtime_google_adc.get_token_with ~cache:thread_cache ~run:thread_run () with
+        | Ok tok -> results.(i) <- Llm_provider.Secret.header_value tok
+        | Error _ -> results.(i) <- "ERROR") ())
+  in
+  Array.iter Thread.join threads;
+  check int "non-Eio concurrent threads share single refresh" 1 (Atomic.get thread_calls);
+  Array.iter
+    (fun tok -> check string "all non-Eio threads get same token" "fixture-thread-token-1" tok)
+    results;
+  (* 3. Eio fiber single-flight + cooperative concurrency + mid-flight invalidation *)
+  Eio_main.run (fun _env ->
+    let eio_cache = Runtime_google_adc.create_cache ~ttl_s:300.0 () in
+    let eio_calls = Atomic.make 0 in
+    let entered, mark_entered = Eio.Promise.create () in
+    let gate, open_gate = Eio.Promise.create () in
+    let eio_run _argv =
+      let n = Atomic.fetch_and_add eio_calls 1 + 1 in
+      if n = 1
+      then (
+        Eio.Promise.resolve mark_entered ();
+        Eio.Promise.await gate);
+      Ok (Printf.sprintf "fixture-eio-token-%d" n)
+    in
+    let fiber_results = Array.make 6 "" in
+    let other_fiber_ran = ref false in
+    Eio.Switch.run (fun sw ->
+      for i = 0 to 5 do
+        Eio.Fiber.fork ~sw (fun () ->
+          match Runtime_google_adc.get_token_with ~cache:eio_cache ~run:eio_run () with
+          | Ok tok -> fiber_results.(i) <- Llm_provider.Secret.header_value tok
+          | Error _ -> fiber_results.(i) <- "ERROR")
+      done;
+      Eio.Promise.await entered;
+      (* Yield so remaining fibers park cooperatively on Cross_context_mutex *)
+      Eio.Fiber.yield ();
+      Eio.Fiber.yield ();
+      other_fiber_ran := true;
+      Eio.Promise.resolve open_gate ());
+    check bool "domain remained responsive while refresh suspended" true !other_fiber_ran;
+    check int "6 concurrent Eio fibers invoked refresh once" 1 (Atomic.get eio_calls);
+    Array.iter
+      (fun tok -> check string "all Eio fibers got shared token" "fixture-eio-token-1" tok)
+      fiber_results;
+    (* Invalidation mid-flight prevents stale pre-invalidation token from populating cache *)
+    let race_cache = Runtime_google_adc.create_cache ~ttl_s:300.0 () in
+    let race_calls = Atomic.make 0 in
+    let r_entered, r_mark = Eio.Promise.create () in
+    let r_gate, r_open = Eio.Promise.create () in
+    let race_run _argv =
+      let n = Atomic.fetch_and_add race_calls 1 + 1 in
+      if n = 1
+      then (
+        Eio.Promise.resolve r_mark ();
+        Eio.Promise.await r_gate);
+      Ok (Printf.sprintf "fixture-race-token-%d" n)
+    in
+    let first_tok = ref "" in
+    Eio.Switch.run (fun sw ->
+      Eio.Fiber.fork ~sw (fun () ->
+        match Runtime_google_adc.get_token_with ~cache:race_cache ~run:race_run () with
+        | Ok tok -> first_tok := Llm_provider.Secret.header_value tok
+        | Error _ -> first_tok := "ERROR");
+      Eio.Promise.await r_entered;
+      Runtime_google_adc.invalidate_cache race_cache;
+      Eio.Promise.resolve r_open ());
+    check string "in-flight caller still receives its fetched token" "fixture-race-token-1" !first_tok;
+    match Runtime_google_adc.get_token_with ~cache:race_cache ~run:race_run () with
+    | Ok tok ->
+      check string "post-invalidation caller fetches fresh token 2" "fixture-race-token-2"
+        (Llm_provider.Secret.header_value tok);
+      check int "2 refresh calls after mid-flight invalidation" 2 (Atomic.get race_calls)
+    | Error _ -> fail "expected fresh token after mid-flight invalidation")
+;;
+
 let antigravity_readiness_fixture = {|#!/usr/bin/env python3
 """Owned CLI fixture: exercise the real authenticated MCP readiness bridge."""
 import json
@@ -1574,6 +1711,8 @@ let () =
     ; ( "readiness"
       , [ test_case "Vertex native runtime binding" `Quick test_vertex_native_binding
         ; test_case "Google ADC refresh boundary" `Quick test_google_adc_refresh_boundary
+        ; test_case "Google ADC TTL cache, invalidation, and single-flight" `Quick
+            test_google_adc_cache_ttl_invalidation_and_single_flight
         ; test_case "Antigravity private MCP roundtrip" `Quick test_antigravity_private_tool_roundtrip
         ; test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
         ; test_case "official probes preserve selected effort on the wire" `Quick

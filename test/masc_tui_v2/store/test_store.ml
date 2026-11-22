@@ -4176,6 +4176,12 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
   Alcotest.(check bool) "Space on Tasks & Schedules selects the Active chip" true
     (Work_store.equal_task_status_filter Work_store.Status_active
        m_space.work.task_status_filter);
+  let m_chip_esc, _ =
+    Update.step ~now:t0 m_space (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc on a non-All chip returns it to All" true
+    (Work_store.equal_task_status_filter Work_store.Status_all
+       m_chip_esc.work.task_status_filter);
   let w_sched_clamped = Work_store.move_selection ~delta:99 w_sched in
   Alcotest.(check int) "Schedules chip clamps cleanly at 1 (no dead zone)" 1
     w_sched_clamped.selected_index;

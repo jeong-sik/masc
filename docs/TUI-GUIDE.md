@@ -98,6 +98,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
   4. Pop one level off the dive stack back to the parent workspace.
   5. Restore the split layout when a panel is zoomed with `z`.
   6. Clear an active workspace filter query when at top level.
+  7. Return the Work > Tasks & Schedules status chip to All.
 - **`Ctrl+Q`** (or `/quit` in the composer, or a double `Ctrl+C`) exits MASC TUI
   cleanly. An externally started server (`masc start` / `masc setup`) keeps
   running; a local server auto-started and owned by this TUI session is stopped

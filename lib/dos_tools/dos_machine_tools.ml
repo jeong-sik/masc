@@ -399,7 +399,7 @@ let earlier_start_failure_fields ~on_current_autosave =
    eject, or after a worker start that had nothing to resume or could not
    restore it. It says what the two autosave slots hold, how to resume, and
    why the start did not, when it tried. Every other refusal is unaffected. *)
-let no_machine ~base_path ~tool_name ~start_time =
+let no_machine ~extra ~base_path ~tool_name ~start_time =
   let found = lookup_autosave_slots ~base_path in
   let start_failure = start_failure_on_current_autosave ~base_path in
   let message = no_machine_message (no_machine_guidance ~start_failure found) in
@@ -408,7 +408,8 @@ let no_machine ~base_path ~tool_name ~start_time =
     ~data:
       (reject_data_of_fields
          (autosave_slots_fields ~start_failure found
-          @ earlier_start_failure_fields ~on_current_autosave:start_failure))
+          @ earlier_start_failure_fields ~on_current_autosave:start_failure
+          @ extra))
     message
 ;;
 
@@ -462,7 +463,7 @@ let of_lane ?(extra = []) ?png ~base_path ~tool_name ~start_time
         png
     in
     Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ()
-  | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+  | Error Dos_lane.No_machine -> no_machine ~extra ~base_path ~tool_name ~start_time
   | Error (Dos_lane.Would_discard_previous_autosave discard) ->
     would_discard_previous ~tool_name ~start_time discard
   | Error ((Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved) as error) ->
@@ -1147,17 +1148,24 @@ let image_capture_failed ~tool_name ~start_time message =
 (* The worker returns PNG bytes beside the captured text observation. *)
 (* [include_frame=false] answers from the machine state alone: a caller that
    only needs who holds the controller does not pay for a frame capture and
-   PNG encode. *)
+   PNG encode. [include_ints] adds the lane's recent INT-entry trail — the
+   same view dosboot's --int-trace gives, read after the fact instead of
+   streamed. *)
+(* The trail read takes the lane's Stdlib.Mutex, so it must leave the Eio
+   domain first -- same rule as every other lane call in this file. *)
+let int_trail_field () = ("ints", off_domain Dos_lane.int_trail_json)
+
 let handle_screen ~tool_name ~start_time ~base_path args =
+  let extra = if get_bool args "include_ints" false then int_trail_field () :: [ core_field ] else [ core_field ] in
   if not (get_bool args "include_frame" true)
-  then of_lane ~base_path ~tool_name ~start_time ~extra:[ core_field ] (off_domain Dos_lane.screen)
+  then of_lane ~base_path ~tool_name ~start_time ~extra (off_domain Dos_lane.screen)
   else
     match capture_png () with
-    | Error (Lane e) -> of_lane ~base_path ~tool_name ~start_time (Error e)
+    | Error (Lane e) -> of_lane ~base_path ~tool_name ~start_time ~extra (Error e)
     | Error (Encode message) -> image_capture_failed ~tool_name ~start_time message
     | Ok { observation; width; height; png } ->
       of_lane ~base_path ~tool_name ~start_time
-        ~extra:(png_fields ~width ~height ~png @ [ core_field ])
+        ~extra:(png_fields ~width ~height ~png @ extra)
         ~png
         (Ok observation)
 ;;
@@ -1254,7 +1262,7 @@ let handle_peek ~tool_name ~start_time ~base_path args =
              ; ("hex", `String hex)
              ])
          ()
-     | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+     | Error Dos_lane.No_machine -> no_machine ~extra:[] ~base_path ~tool_name ~start_time
      | Error
          (( Dos_lane.Activity_disabled
           | Dos_lane.Activity_unobserved

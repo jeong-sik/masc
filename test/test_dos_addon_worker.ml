@@ -118,6 +118,18 @@ let test_stdio_controller () =
               check bool "and keeps the seat facts" true
                 (member "saves_name" state_only = `String "hello.com"
                  && member "controller" state_only = `String "fixture");
+              check bool "int trail stays opt-in" true (member "ints" state_only = `Null);
+              let with_ints = call "masc_dos_screen"
+                (`Assoc ["include_frame", `Bool false; "include_ints", `Bool true]) in
+              let trail = Yojson.Safe.Util.to_list (member "ints" with_ints) in
+              check bool "booted program left an int trail" true (trail <> []);
+              check bool "trail entries carry the entry registers" true
+                (List.for_all
+                   (fun e -> Yojson.Safe.Util.(member "vector" e |> to_int) >= 0
+                    && List.for_all
+                         (fun k -> Yojson.Safe.Util.(member k e |> to_int_option) <> None)
+                         ["ax"; "bx"; "cx"; "dx"])
+                   trail);
               let input_history = Yojson.Safe.Util.(data observed |> member "rows" |> to_list |> List.hd
                 |> member "fields" |> member "input_history") in
               let count = Yojson.Safe.Util.(input_history |> member "entry_count" |> to_int) in
@@ -177,6 +189,12 @@ let test_stdio_controller () =
               ignore (call ~controller:(admission None) "masc_dos_step" step_args);
               let ejected = call ~controller:(admission (Some "fixture")) "masc_dos_eject" (`Assoc []) in
               check bool "eject succeeds" false (ejected.is_error = Some true);
+              (* The trail outlives the machine: after an eject the refused
+                 read still answers "what did it last call". *)
+              let ejected_ints = call "masc_dos_screen"
+                (`Assoc ["include_frame", `Bool false; "include_ints", `Bool true]) in
+              check bool "an ejected machine's calls stay readable" true
+                (Yojson.Safe.Util.to_list (member "ints" ejected_ints) <> []);
               let empty_screen = call "masc_dos_screen" (`Assoc []) in
               check bool "empty screen refuses before any effect" true
                 (Lane_addon_tool_result.failure empty_screen =

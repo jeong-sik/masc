@@ -210,7 +210,7 @@ readonly OCAML_MSX_SHA="581da9079377968474da3cf10310b5a65b66b505"
 # (#232) asks it before loading; a module longer than memory wraps onto
 # address 0. COMMAND.COM /C runs a built-in COPY (#234), so a guest's SHELL
 # "copy a b" writes new files into the mount table, and keep_writes saves them.
-readonly OCAML_DOS_SHA="238d2c9bea20c526119d70442422dec7b448237a"
+readonly OCAML_DOS_SHA="7cdb64b748413ad445057e617ed959c877029550"
 # cohttp-eio 6.2.1 carries the partial body read fix and typed response-head
 # errors. The latter lets browser-host distinguish peer EOF (retryable) from
 # malformed HTTP (answered, do not replay). Keep this pin until both changes

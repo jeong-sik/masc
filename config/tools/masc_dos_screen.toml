@@ -27,3 +27,9 @@ name = "include_frame"
 type = "boolean"
 default = true
 description = "false skips the frame's RGB copy and PNG encode; the text page, frame_ascii, controller and saves name still come back."
+
+[[params]]
+name = "include_ints"
+type = "boolean"
+default = false
+description = "Include the lane's recent INT-entry trail (last 64, oldest first): vector, AX, BX, CX, DX at each guest INT. Read after the fact -- which call a failing boot last made is the question this answers."

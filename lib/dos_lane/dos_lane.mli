@@ -691,6 +691,15 @@ val resume_autosave :
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)
 
+val int_trail_json : unit -> Yojson.Safe.t
+(** The last guest INT entries (newest last, oldest first, up to 64) as JSON
+    objects with [vector], [ax], [bx], [cx], [dx] -- the view dosboot's
+    --int-trace streams, read after the fact. The trail is written only while
+    the lane lock is held and this read takes the same lock briefly, so call
+    it from outside a locked lane path (a tool entry point, never from inside
+    [screen]). It spans machines on purpose: after an eject or a failed boot,
+    the previous machine's last calls are the answer to "why is it blank". *)
+
 val recent_activity : unit -> Machine_action_feed.entry list
 (** The last {!Machine_action_feed.cap} things a Keeper did to this Lane -- load,
     step, press, click, type, save, restore, pass and eject, newest first --

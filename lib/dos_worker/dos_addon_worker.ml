@@ -182,10 +182,11 @@ let create ~base_path () =
       let answer = response result in
       let fields = match answer.S._meta with Some (`Assoc fields) -> fields | None | Some _ -> [] in
       {answer with S._meta = Some (`Assoc (Controller.screen_error_meta_field error :: fields))} in
+    let ints = if Tool_args.get_bool arguments "include_ints" false then [Machine.int_trail_field ()] else [] in
     let lane_failure = function
       | Dos_lane.No_machine ->
           failure Controller.Screen_no_machine
-            (Machine.of_lane ~base_path ~tool_name ~start_time (Error Dos_lane.No_machine))
+            (Machine.of_lane ~base_path ~tool_name ~start_time ~extra:ints (Error Dos_lane.No_machine))
       | ( Dos_lane.Activity_disabled
         | Dos_lane.Activity_unobserved
         | Dos_lane.Invalid_request _
@@ -214,7 +215,7 @@ let create ~base_path () =
       | Error error -> lane_failure error
       | Ok observation ->
           response (Machine.of_lane ~base_path ~tool_name ~start_time
-            ~extra:([Machine.core_field] @ pad observation) (Ok observation))
+            ~extra:([Machine.core_field] @ pad observation @ ints) (Ok observation))
     else
     match Machine.capture_png () with
     | Error (Machine.Lane error) -> lane_failure error
@@ -223,7 +224,7 @@ let create ~base_path () =
     | Ok {observation; width; height; png} ->
         response ~extra_content:[png_content png]
           (Machine.of_lane ~base_path ~tool_name ~start_time
-            ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad observation) (Ok observation)) in
+            ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad observation @ ints) (Ok observation)) in
   let schemas = schemas () in
   let server = Server.create ~name:"masc-dos-addon" ~version:Build_version.current () in
   let server = List.fold_left (fun server (tool, (schema : Masc_domain.tool_schema)) ->

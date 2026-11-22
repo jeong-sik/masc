@@ -37,6 +37,38 @@ type request_policy_snapshot =
   ; provider_identity : provider_identity option
   }
 
+type prompt_cache_retention =
+  | Prompt_cache_in_memory
+  | Prompt_cache_24h
+
+let prompt_cache_retention_to_string = function
+  | Prompt_cache_in_memory -> "in_memory"
+  | Prompt_cache_24h -> "24h"
+;;
+
+let prompt_cache_retention_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "in_memory" -> Some Prompt_cache_in_memory
+  | "24h" -> Some Prompt_cache_24h
+  | _ -> None
+;;
+
+type responses_truncation =
+  | Truncation_auto
+  | Truncation_disabled
+
+let responses_truncation_to_string = function
+  | Truncation_auto -> "auto"
+  | Truncation_disabled -> "disabled"
+;;
+
+let responses_truncation_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "auto" -> Some Truncation_auto
+  | "disabled" -> Some Truncation_disabled
+  | _ -> None
+;;
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -77,6 +109,9 @@ type t =
   ; cache_system_prompt : bool
   ; system_prompt_cache_prefix : string option
   ; cache_extended_ttl : bool
+  ; prompt_cache_retention : prompt_cache_retention option
+  ; store : bool option
+  ; truncation : responses_truncation option
   ; explicit_context_cache_ttl_s : int option
   ; cache_session_key : string option
   ; provider_only : string list
@@ -126,6 +161,9 @@ let make
       ?(cache_system_prompt = false)
       ?system_prompt_cache_prefix
       ?(cache_extended_ttl = false)
+      ?prompt_cache_retention
+      ?store
+      ?truncation
       ?explicit_context_cache_ttl_s
       ?cache_session_key
       ?(provider_only = [])
@@ -192,6 +230,9 @@ let make
   ; cache_system_prompt
   ; system_prompt_cache_prefix
   ; cache_extended_ttl
+  ; prompt_cache_retention
+  ; store
+  ; truncation
   ; explicit_context_cache_ttl_s
   ; cache_session_key
   ; provider_only

@@ -447,13 +447,13 @@ let signals_of_body (body : string) : error_signals =
   | exception Yojson.Json_error _ -> empty_signals
 ;;
 
-let is_structured_context_overflow_code = function
+let is_structured_context_overflow_code code =
+  match code with
   | "context_length_exceeded"
   | "string_above_max_length"
   | "model_context_window_exceeded"
-  | "1261"
   | "3200" -> true
-  | _ -> false
+  | _ -> Backend_glm.is_context_overflow_code code
 ;;
 
 let is_structured_context_overflow_type = function
@@ -468,7 +468,8 @@ let is_structured_context_overflow_reason = function
   | _ -> false
 ;;
 
-let is_structured_quota_code = function
+let is_structured_quota_code code =
+  match code with
   | "insufficient_quota"
   | "billing_hard_limit_reached"
   | "credit_balance_too_low"
@@ -476,24 +477,10 @@ let is_structured_quota_code = function
   | "quota_exceeded"
   | "usage_limit_exceeded"
   (* Mistral API: billing_api_budget_exhausted (code 2303). *)
-  | "2303"
-  (* ZhipuAI / GLM (backend_glm.ml, docs.z.ai / docs.bigmodel.cn):
-     1113 = account arrears; 1308-1311, 1313, 1314, 1316-1321 = exhausted
-     resource package, expired plan, or spent usage window. *)
-  | "1113"
-  | "1308"
-  | "1309"
-  | "1310"
-  | "1311"
-  | "1313"
-  | "1314"
-  | "1316"
-  | "1317"
-  | "1318"
-  | "1319"
-  | "1320"
-  | "1321" -> true
-  | _ -> false
+  | "2303" -> true
+  (* ZhipuAI / GLM codes (1113, 1308-1311, 1313, 1314, 1316-1321) live in
+     Backend_glm.classify_glm_error as the single source of truth. *)
+  | _ -> Backend_glm.is_quota_code code
 ;;
 
 let is_structured_quota_type = function

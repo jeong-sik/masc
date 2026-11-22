@@ -56,6 +56,9 @@ let request_fingerprint
                      ; cache_system_prompt
                      ; system_prompt_cache_prefix
                      ; cache_extended_ttl
+                     ; prompt_cache_retention
+                     ; store
+                     ; truncation
                      ; explicit_context_cache_ttl_s
                      ; cache_session_key
                      ; provider_only
@@ -112,6 +115,8 @@ let request_fingerprint
      without changing the prompt or expected answer; [http_request_fingerprint]
      still binds the exact serialized body when emitted. *)
   ignore cache_session_key;
+  ignore prompt_cache_retention;
+  ignore store;
   ignore explicit_context_cache_ttl_s;
   ignore reasoning_uncontrolled;
   let json =
@@ -181,6 +186,10 @@ let request_fingerprint
       ; "num_ctx", opt_json (fun n -> `Int n) num_ctx
       ; "seed", opt_json (fun n -> `Int n) seed
       ; "previous_response_id", opt_json (fun s -> `String s) previous_response_id
+      ; ( "truncation"
+        , opt_json
+            (fun t -> `String (Provider_config.responses_truncation_to_string t))
+            truncation )
       ; "messages", `List (List.map message_fingerprint messages)
       ; "tools", `List tools
       ]

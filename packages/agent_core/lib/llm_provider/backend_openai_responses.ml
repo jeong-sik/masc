@@ -789,6 +789,34 @@ let build_request_artifact
     | Capabilities.Prompt_cache_key, None -> body
     | Capabilities.Prompt_cache_key, Some key -> ("prompt_cache_key", `String key) :: body
   in
+  let body =
+    match config.prompt_cache_retention with
+    | Some retention ->
+      if caps.Capabilities.supports_explicit_cache_opt_out
+      then
+        invalid_arg
+          (Printf.sprintf
+             "Backend_openai_responses.build_request: model %S uses prompt_cache_options \
+              and does not accept legacy prompt_cache_retention = %S"
+             config.model_id
+             (Provider_config.prompt_cache_retention_to_string retention));
+      ( "prompt_cache_retention"
+      , `String (Provider_config.prompt_cache_retention_to_string retention) )
+      :: body
+    | None -> body
+  in
+  let body =
+    match config.store with
+    | Some store -> ("store", `Bool store) :: body
+    | None -> body
+  in
+  let body =
+    match config.truncation with
+    | Some truncation ->
+      ("truncation", `String (Provider_config.responses_truncation_to_string truncation))
+      :: body
+    | None -> body
+  in
   Request_artifact_internal.create
     ~payload:(Yojson.Safe.to_string (`Assoc body))
     ~output_token_receipt

@@ -98,6 +98,7 @@ let of_catalogs ~models ~providers =
       ; default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
         capability_policy=Model_provider_catalog.Models_only
       ; supports_parallel_tool_suppression=false;supports_extended_cache_ttl=false
+      ; supports_prompt_cache_retention=false
       ; cache_session_wire=Capability_vocab.No_cache_session_wire
       ; cache_session_header=None
       ; supports_provider_routing_filter=false
@@ -139,6 +140,11 @@ let supports_parallel_tool_suppression t ~provider_id =
 let supports_extended_cache_ttl t ~provider_id =
   match policy_provider t provider_id with
   | Some (_, provider) -> provider.Model_catalog.supports_extended_cache_ttl
+  | None -> false
+
+let supports_prompt_cache_retention t ~provider_id =
+  match policy_provider t provider_id with
+  | Some (_, provider) -> provider.Model_catalog.supports_prompt_cache_retention
   | None -> false
 
 let cache_session_wire t ~provider_id =

@@ -53,6 +53,16 @@ val request_output_token_receipt : request_artifact -> Types.output_token_receip
     {!Glm_invalid_request}. *)
 val classify_glm_error : code:string -> glm_error_class option
 
+(** True iff [code] is one of the documented Z.AI / GLM quota / arrears /
+    exhausted-plan error codes classified as {!Glm_quota_exceeded}. Shared SSOT
+    consumed by {!Retry} so the 14 Z.AI codes are defined once. *)
+val is_quota_code : string -> bool
+
+(** True iff [code] is a documented Z.AI / GLM context-overflow error code
+    classified as {!Glm_context_overflow} (code ["1261"]). Shared SSOT
+    consumed by {!Retry}. *)
+val is_context_overflow_code : string -> bool
+
 (** Map a Glm error class to the equivalent HTTP status code.
     Used by complete.ml to normalize provider-specific codes
     into the shared HTTP error path. *)

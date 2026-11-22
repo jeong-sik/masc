@@ -60,6 +60,16 @@ end
 (** {1 Ollama} *)
 
 module Ollama : sig
+  (** Official Ollama host environment variable ([OLLAMA_HOST]), matching
+      {!Llm_provider.Discovery.ollama_host_env_var}.
+      Ref: https://docs.ollama.com/faq *)
+  val host_env_var : string
+
+  (** Call-time resolver reading {!host_env_var}, normalizing bare [host:port]
+      values to [http://host:port], and falling back to
+      {!Masc_network_defaults.ollama_default_url}. *)
+  val resolve_server_url : ?getenv:(string -> string option) -> unit -> string
+
   val server_url : string
   val default_model : string
 end

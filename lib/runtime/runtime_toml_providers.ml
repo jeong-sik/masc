@@ -649,6 +649,8 @@ let provider_keys =
   ; Runtime_schema.catalog_provider_key
   ; Runtime_schema.connect_timeout_s_key; Runtime_schema.exact_body_timeout_s_key
   ; Runtime_schema.admission_priority_run_limit_key
+  ; Runtime_schema.store_key; Runtime_schema.truncation_key
+  ; Runtime_schema.explicit_context_cache_ttl_s_key
   ] @ antigravity_cli_option_keys @ antigravity_forbidden_option_keys
   @ acp_exclusive_option_keys
 ;;
@@ -845,11 +847,39 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
          strict_float_find path tbl exact_body_timeout_key
          |> positive_finite_float_opt_field ~path ~key:exact_body_timeout_key
        in
+       let store_result =
+         typed_find "a boolean" path tbl Runtime_schema.store_key Otoml.get_boolean
+       in
+       let truncation_result =
+         match
+           typed_find "a string" path tbl Runtime_schema.truncation_key Otoml.get_string
+         with
+         | Error _ as err -> err
+         | Ok None -> Ok None
+         | Ok (Some raw) ->
+           (match Runtime_schema.responses_truncation_of_string raw with
+            | Some truncation -> Ok (Some truncation)
+            | None ->
+              Error
+                (error
+                   (path ^ "." ^ Runtime_schema.truncation_key)
+                   (Printf.sprintf
+                      "truncation must be \"auto\" or \"disabled\"; got %S"
+                      raw)))
+       in
        (let ( let* ) = Result.bind in
         let* max_context = positive_int_opt_field ~path ~key:"max-context" tbl in
         let* admission_priority_run_limit =
           positive_int_opt_field ~path ~key:Runtime_schema.admission_priority_run_limit_key tbl
         in
+        let* explicit_context_cache_ttl_s =
+          positive_int_opt_field
+            ~path
+            ~key:Runtime_schema.explicit_context_cache_ttl_s_key
+            tbl
+        in
+        let* store = store_result in
+        let* truncation = truncation_result in
         let* capabilities = capabilities_result in
         let* enabled_opt = enabled_result in
         let* healthcheck_path = healthcheck_result in
@@ -885,6 +915,9 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
             ; antigravity_cli
             ; acp
             ; usage_read
+            ; store
+            ; truncation
+            ; explicit_context_cache_ttl_s
             }))
 ;;
 

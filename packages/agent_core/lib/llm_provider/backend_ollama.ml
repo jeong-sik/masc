@@ -57,6 +57,10 @@ let build_request_artifact
       ()
   =
   let think_requested = Option.value config.enable_thinking ~default:false in
+  (match Provider_config.validate_reasoning_effort_request config with
+   | Ok () -> ()
+   | Error reason ->
+     invalid_arg (Printf.sprintf "Backend_ollama.reasoning_effort: %s" reason));
   let caps =
     match Provider_config.capabilities_for_config_model config with
     | Some c -> c
@@ -120,14 +124,27 @@ let build_request_artifact
      [think:true] even though the model's documented control is a
      chat-template token. For those catalog-declared rows we inject the token
      into the system turn and omit the top-level [think] field so Ollama returns
-     [message.thinking] instead of failing the request. *)
+     [message.thinking] instead of failing the request.
+     Per official Ollama thinking docs (https://docs.ollama.com/capabilities/thinking),
+     [/api/chat] [think] accepts a boolean OR an effort level string
+     (["low"] | ["medium"] | ["high"]) for models such as gpt-oss. *)
   let body =
     if chat_template_token_thinking
     then body
     else (
-      match config.enable_thinking with
-      | Some enabled -> ("think", `Bool enabled) :: body
-      | None -> body)
+      match config.enable_thinking, config.reasoning_effort with
+      | Some false, _ -> ("think", `Bool false) :: body
+      | (Some true | None), Some ((Reasoning_effort.Low | Medium | High) as effort) ->
+        ("think", `String (Reasoning_effort.to_string effort)) :: body
+      | (Some true | None), Some Reasoning_effort.None_ -> ("think", `Bool false) :: body
+      | (Some true | None), Some ((Minimal | XHigh | Max | Ultra) as other) ->
+        invalid_arg
+          (Printf.sprintf
+             "Backend_ollama.build_request: unsupported Ollama think effort %S \
+              (expected low|medium|high|none)"
+             (Reasoning_effort.to_string other))
+      | Some true, None -> ("think", `Bool true) :: body
+      | None, None -> body)
   in
   (* Ollama defaults to stream=true, so always send explicit value *)
   let body = ("stream", `Bool stream) :: body in

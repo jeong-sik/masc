@@ -252,6 +252,9 @@ let fanout_provider ~id ~url =
   ; antigravity_cli = None
   ; acp = None
   ; usage_read = None
+  ; store = None
+  ; truncation = None
+  ; explicit_context_cache_ttl_s = None
   }
 
 let fanout_model =
@@ -269,6 +272,7 @@ let fanout_model =
   ; reasoning_uncontrolled = false
   ; reasoning_effort = None
   ; turn_timeout_s = None
+  ; explicit_context_cache_ttl_s = None
   ; capabilities = None
   }
 

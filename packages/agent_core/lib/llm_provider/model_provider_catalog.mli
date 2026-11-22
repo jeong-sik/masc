@@ -33,6 +33,10 @@ type entry =
         [Provider_config.cache_extended_ttl] asks for. Missing declarations
         are false: an endpoint that speaks the same wire does not thereby
         accept the [ttl] field. *)
+  ; supports_prompt_cache_retention : bool
+    (** The provider documents OpenAI-style [prompt_cache_retention]
+        (["in_memory"] | ["24h"]) on the Responses API. Missing declarations
+        are false so non-supporting endpoints fail closed. *)
   ; cache_session_wire : Capability_vocab.cache_session_wire
     (** Wire field used by this provider to carry a caller-supplied prompt-cache
         routing session key. Missing declarations default to

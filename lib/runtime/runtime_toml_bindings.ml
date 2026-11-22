@@ -198,7 +198,9 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
          Error
            (error
               (path ^ ".cache-retention")
-              (Printf.sprintf "cache-retention must be \"5m\" or \"1h\"; got %S" raw)))
+              (Printf.sprintf
+                 "cache-retention must be \"5m\", \"1h\", \"in_memory\", or \"24h\"; got %S"
+                 raw)))
     | Error _ as e -> e
   in
   (* Upstream provider allow/deny lists (e.g. OpenRouter [provider.only] /

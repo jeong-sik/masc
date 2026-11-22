@@ -806,60 +806,109 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
     | Vertex_gemini_api), false -> Ok ()
 ;;
 
+type resolved_cache_retention =
+  { cache_extended_ttl : bool
+  ; prompt_cache_retention : Llm_provider.Provider_config.prompt_cache_retention option
+  }
+
 (* The lifetime a binding declares for the cache breakpoints its requests
-   write. Messages endpoints accept the one-hour [ttl] when their catalog
-   provider row documents [supports_extended_cache_ttl]. Chat Completions
-   endpoints carry top-level [cache_control] only when BOTH the provider row
-   documents [supports_extended_cache_ttl] AND the catalog model row declares
-   [Openrouter_top_level_cache_control]; implicit-only rows and other
-   OpenAI-compatible providers fail closed. [Ok] carries whether requests ask
-   for the one-hour lifetime. *)
+   write. Messages endpoints accept ["5m"] | ["1h"] when their catalog provider
+   row documents [supports_extended_cache_ttl]. Chat Completions endpoints carry
+   ["5m"] | ["1h"] only when BOTH the provider row documents
+   [supports_extended_cache_ttl] AND the catalog model row declares
+   [Openrouter_top_level_cache_control | Kimi_prompt_cache_options]. OpenAI
+   Responses endpoints accept ["in_memory"] | ["24h"] when their catalog
+   provider row documents [supports_prompt_cache_retention]. All mismatched
+   combinations fail closed. *)
 let validate_cache_retention (provider : Runtime_schema.provider)
-    ~(model_id : string) ~supports_extended_cache_ttl
+    ~(kind : Llm_provider.Provider_config.provider_kind option)
+    ~(model_id : string) ~request_path
+    ~supports_extended_cache_ttl
+    ~supports_prompt_cache_retention
+    ~supports_explicit_cache_opt_out
     ~(prompt_cache_wire : Llm_provider.Capabilities.prompt_cache_wire)
-    ~(cache_retention : Runtime_schema.cache_retention option) =
+    ~(cache_retention : Runtime_schema.cache_retention option)
+  : (resolved_cache_retention, string) result =
+  let validate_messages_ttl ~extended ~raw =
+    match supports_extended_cache_ttl with
+    | true -> Ok { cache_extended_ttl = extended; prompt_cache_retention = None }
+    | false ->
+      Error
+        (Printf.sprintf
+           "binding %s.%s declares cache-retention = %S, but provider %S has no catalog-declared extended cache TTL contract"
+           provider.id model_id raw provider.id)
+  in
+  let validate_chat_ttl ~extended ~raw =
+    match supports_extended_cache_ttl, prompt_cache_wire with
+    | ( true
+      , ( Llm_provider.Capabilities.Openrouter_top_level_cache_control
+        | Llm_provider.Capabilities.Kimi_prompt_cache_options ) ) ->
+      Ok { cache_extended_ttl = extended; prompt_cache_retention = None }
+    | true, Llm_provider.Capabilities.No_prompt_cache_wire ->
+      Error
+        (Printf.sprintf
+           "binding %s.%s declares cache-retention = %S, but model %S has no catalog-declared prompt-cache wire contract"
+           provider.id model_id raw model_id)
+    | true, Llm_provider.Capabilities.Gemini_explicit_cached_content ->
+      Error
+        (Printf.sprintf
+           "binding %s.%s declares cache-retention = %S, but model %S uses Gemini explicit cachedContents rather than Chat Completions cache-retention"
+           provider.id model_id raw model_id)
+    | false,
+      ( Llm_provider.Capabilities.No_prompt_cache_wire
+      | Llm_provider.Capabilities.Openrouter_top_level_cache_control
+      | Llm_provider.Capabilities.Kimi_prompt_cache_options
+      | Llm_provider.Capabilities.Gemini_explicit_cached_content ) ->
+      Error
+        (Printf.sprintf
+           "binding %s.%s declares cache-retention = %S, but protocol %s cannot carry that request policy"
+           provider.id model_id raw provider.protocol)
+  in
+  let is_openai_responses_wire =
+    match kind with
+    | Some Llm_provider.Provider_config.OpenAI_compat ->
+      Llm_provider.Provider_config.request_path_targets_responses_api request_path
+    | Some (Anthropic | Kimi | Gemini | Glm | Ollama) | None -> false
+  in
+  let validate_responses_retention ~wire ~raw =
+    if supports_explicit_cache_opt_out
+    then
+      Error
+        (Printf.sprintf
+           "binding %s.%s declares cache-retention = %S, but model %S uses OpenAI Responses prompt_cache_options and does not accept legacy prompt_cache_retention"
+           provider.id model_id raw model_id)
+    else if supports_prompt_cache_retention && is_openai_responses_wire
+    then Ok { cache_extended_ttl = false; prompt_cache_retention = Some wire }
+    else
+      Error
+        (Printf.sprintf
+           "binding %s.%s declares cache-retention = %S, but provider %S has no catalog-declared OpenAI Responses prompt_cache_retention contract"
+           provider.id model_id raw provider.id)
+  in
   match cache_retention, provider.api_format with
-  | None, _ -> Ok false
-  | Some retention, Runtime_schema.Messages_api ->
-    (match supports_extended_cache_ttl with
-     | true ->
-       Ok
-         (match retention with
-          | Runtime_schema.One_hour -> true
-          | Runtime_schema.Five_minutes -> false)
-     | false ->
-       Error
-         (Printf.sprintf
-            "binding %s.%s declares cache-retention = %S, but provider %S has no catalog-declared extended cache TTL contract"
-            provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.id))
-  | Some retention, Runtime_schema.Chat_completions_api ->
-    (match supports_extended_cache_ttl, prompt_cache_wire with
-     | ( true
-       , ( Llm_provider.Capabilities.Openrouter_top_level_cache_control
-         | Llm_provider.Capabilities.Kimi_prompt_cache_options ) ) ->
-       Ok
-         (match retention with
-          | Runtime_schema.One_hour -> true
-          | Runtime_schema.Five_minutes -> false)
-     | true, Llm_provider.Capabilities.No_prompt_cache_wire ->
-       Error
-         (Printf.sprintf
-            "binding %s.%s declares cache-retention = %S, but model %S has no catalog-declared prompt-cache wire contract"
-            provider.id model_id (Runtime_schema.cache_retention_to_string retention) model_id)
-     | true, Llm_provider.Capabilities.Gemini_explicit_cached_content ->
-       Error
-         (Printf.sprintf
-            "binding %s.%s declares cache-retention = %S, but model %S uses Gemini explicit cachedContents rather than Chat Completions cache-retention"
-            provider.id model_id (Runtime_schema.cache_retention_to_string retention) model_id)
-     | false,
-       ( Llm_provider.Capabilities.No_prompt_cache_wire
-       | Llm_provider.Capabilities.Openrouter_top_level_cache_control
-       | Llm_provider.Capabilities.Kimi_prompt_cache_options
-       | Llm_provider.Capabilities.Gemini_explicit_cached_content ) ->
-       Error
-         (Printf.sprintf
-            "binding %s.%s declares cache-retention = %S, but protocol %s cannot carry that request policy"
-            provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.protocol))
+  | None, _ -> Ok { cache_extended_ttl = false; prompt_cache_retention = None }
+  | Some Runtime_schema.Five_minutes, Runtime_schema.Messages_api ->
+    validate_messages_ttl ~extended:false ~raw:"5m"
+  | Some Runtime_schema.One_hour, Runtime_schema.Messages_api ->
+    validate_messages_ttl ~extended:true ~raw:"1h"
+  | Some ((Runtime_schema.In_memory | Runtime_schema.Twenty_four_hours) as retention),
+    Runtime_schema.Messages_api ->
+    Error
+      (Printf.sprintf
+         "binding %s.%s declares cache-retention = %S, which is only valid on OpenAI Responses; Messages API accepts \"5m\" or \"1h\""
+         provider.id model_id (Runtime_schema.cache_retention_to_string retention))
+  | Some Runtime_schema.Five_minutes, Runtime_schema.Chat_completions_api ->
+    validate_chat_ttl ~extended:false ~raw:"5m"
+  | Some Runtime_schema.One_hour, Runtime_schema.Chat_completions_api ->
+    validate_chat_ttl ~extended:true ~raw:"1h"
+  | Some Runtime_schema.In_memory, Runtime_schema.Chat_completions_api ->
+    validate_responses_retention
+      ~wire:Llm_provider.Provider_config.Prompt_cache_in_memory
+      ~raw:"in_memory"
+  | Some Runtime_schema.Twenty_four_hours, Runtime_schema.Chat_completions_api ->
+    validate_responses_retention
+      ~wire:Llm_provider.Provider_config.Prompt_cache_24h
+      ~raw:"24h"
   | Some retention,
     ( Ollama_api | Gemini_api | Vertex_gemini_api
     | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
@@ -868,6 +917,66 @@ let validate_cache_retention (provider : Runtime_schema.provider)
       (Printf.sprintf
          "binding %s.%s declares cache-retention = %S, but protocol %s cannot carry that request policy"
          provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.protocol)
+;;
+
+let validate_responses_options (provider : Runtime_schema.provider)
+    ~(kind : Llm_provider.Provider_config.provider_kind option)
+    ~(model_id : string) ~request_path =
+  match provider.store, provider.truncation with
+  | None, None -> Ok ()
+  | Some _, _ | _, Some _ ->
+    (match provider.api_format, kind with
+     | ( Runtime_schema.Chat_completions_api
+       , Some Llm_provider.Provider_config.OpenAI_compat )
+       when Llm_provider.Provider_config.request_path_targets_responses_api request_path ->
+       Ok ()
+     | ( ( Messages_api | Chat_completions_api | Ollama_api | Gemini_api
+         | Vertex_gemini_api | Codex_app_server_runtime | Antigravity_cli_runtime
+         | Claude_code_runtime | Acp_runtime )
+       , ( Some (OpenAI_compat | Anthropic | Kimi | Gemini | Glm | Ollama) | None ) ) ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares OpenAI Responses store/truncation policy, but \
+             provider %S (protocol %s, path %S) does not target the OpenAI Responses wire"
+            provider.id model_id provider.id provider.protocol request_path))
+;;
+
+let validate_explicit_context_cache_ttl_s (provider : Runtime_schema.provider)
+    ~(spec : Runtime_schema.model_spec)
+    ~(prompt_cache_wire : Llm_provider.Capabilities.prompt_cache_wire)
+  : (int option, string) result =
+  match provider.api_format with
+  | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api ->
+    (match spec.explicit_context_cache_ttl_s, provider.explicit_context_cache_ttl_s with
+     | Some ttl_s, _ ->
+       (match prompt_cache_wire with
+        | Llm_provider.Capabilities.Gemini_explicit_cached_content -> Ok (Some ttl_s)
+        | Llm_provider.Capabilities.No_prompt_cache_wire
+        | Llm_provider.Capabilities.Openrouter_top_level_cache_control
+        | Llm_provider.Capabilities.Kimi_prompt_cache_options ->
+          Error
+            (Printf.sprintf
+               "binding %s.%s declares explicit-context-cache-ttl-s = %d, but model %S \
+                does not support Gemini explicit cachedContents"
+               provider.id spec.id ttl_s spec.api_name))
+     | None, Some ttl_s ->
+       (match prompt_cache_wire with
+        | Llm_provider.Capabilities.Gemini_explicit_cached_content -> Ok (Some ttl_s)
+        | Llm_provider.Capabilities.No_prompt_cache_wire
+        | Llm_provider.Capabilities.Openrouter_top_level_cache_control
+        | Llm_provider.Capabilities.Kimi_prompt_cache_options -> Ok None)
+     | None, None -> Ok None)
+  | Messages_api | Chat_completions_api | Ollama_api
+  | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
+  | Acp_runtime ->
+    (match spec.explicit_context_cache_ttl_s, provider.explicit_context_cache_ttl_s with
+     | None, None -> Ok None
+     | Some _, _ | _, Some _ ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares explicit-context-cache-ttl-s, but protocol %s \
+             does not support Gemini explicit cachedContents"
+            provider.id spec.id provider.protocol))
 ;;
 
 let validate_provider_routing_filter (provider : Runtime_schema.provider)
@@ -951,8 +1060,30 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
     in
     (match provider_kind_for_http_provider ?declaration provider with
      | Ok kind ->
+       (* Vertex AI serves the canonical Gemini model catalog without duplicating
+          [serves_bare_models] onto a second [models.toml] provider row. When a
+          [vertex-gemini] provider omits [catalog-provider] and has no matching
+          provider row of its own, resolve capabilities against the canonical
+          ["gemini"] provider row so Gemini 3 models inherit
+          [Gemini_explicit_cached_content] while Gemini 4 rows keep
+          [No_prompt_cache_wire]. *)
+       let capability_provider_id =
+         match provider.api_format, declaration, provider.catalog_provider with
+         | Runtime_schema.Vertex_gemini_api, None, None -> "gemini"
+         | Runtime_schema.Vertex_gemini_api, (Some _ | None), (Some _ | None)
+         | ( ( Runtime_schema.Messages_api
+             | Runtime_schema.Chat_completions_api
+             | Runtime_schema.Ollama_api
+             | Runtime_schema.Gemini_api
+             | Runtime_schema.Codex_app_server_runtime
+             | Runtime_schema.Antigravity_cli_runtime
+             | Runtime_schema.Claude_code_runtime
+             | Runtime_schema.Acp_runtime )
+           , _
+           , _ ) -> Runtime_schema.catalog_provider_id provider
+       in
        let request_policy = Llm_provider.Capabilities.resolve_snapshot_request_policy ~snapshot:declarations ~wire:kind
-           ~provider_id:(Runtime_schema.catalog_provider_id provider) ~model_id:spec.api_name in
+           ~provider_id:capability_provider_id ~model_id:spec.api_name in
        let catalog_capabilities =
          Llm_provider.Capabilities.request_policy_capabilities request_policy in
        let prompt_cache_wire =
@@ -960,12 +1091,30 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
          | Some caps -> caps.Llm_provider.Capabilities.prompt_cache_wire
          | None -> Llm_provider.Capabilities.No_prompt_cache_wire
        in
-       let* cache_extended_ttl =
-         validate_cache_retention provider ~model_id:spec.id
+       let supports_explicit_cache_opt_out =
+         match catalog_capabilities with
+         | Some caps -> caps.Llm_provider.Capabilities.supports_explicit_cache_opt_out
+         | None -> false
+       in
+       let request_path =
+         request_path_for_http_provider ~provider ~declaration ~kind ~base_url
+       in
+       let* { cache_extended_ttl; prompt_cache_retention } =
+         validate_cache_retention provider ~kind:(Some kind) ~model_id:spec.id
+           ~request_path
            ~supports_extended_cache_ttl:(Declarations.supports_extended_cache_ttl
              declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
+           ~supports_prompt_cache_retention:(Declarations.supports_prompt_cache_retention
+             declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
+           ~supports_explicit_cache_opt_out
            ~prompt_cache_wire
            ~cache_retention
+       in
+       let* () =
+         validate_responses_options provider ~kind:(Some kind) ~model_id:spec.id ~request_path
+       in
+       let* explicit_context_cache_ttl_s =
+         validate_explicit_context_cache_ttl_s provider ~spec ~prompt_cache_wire
        in
        let model_capabilities_override =
          model_capabilities_override_of_model_spec
@@ -985,9 +1134,6 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
            ~catalog_capabilities
            ~model_capabilities_override
            spec
-       in
-       let request_path =
-         request_path_for_http_provider ~provider ~declaration ~kind ~base_url
        in
        let* api_key, admission =
          if person_api
@@ -1047,6 +1193,10 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
             ~request_path
             ~disable_parallel_tool_use
             ~cache_extended_ttl
+            ?prompt_cache_retention
+            ?store:provider.store
+            ?truncation:provider.truncation
+            ?explicit_context_cache_ttl_s
             ~provider_only
             ~provider_ignore
             ?max_context
@@ -1534,11 +1684,21 @@ let validate_official_binding
       in
       (* An official client writes its own cache breakpoints, so a
          declared lifetime would reach no request. *)
-      let* (_ : bool) =
-        validate_cache_retention provider ~model_id:binding.model_id
+      let* (_ : resolved_cache_retention) =
+        validate_cache_retention provider ~kind:None ~model_id:binding.model_id
+          ~request_path:""
           ~supports_extended_cache_ttl:false
+          ~supports_prompt_cache_retention:false
+          ~supports_explicit_cache_opt_out:false
           ~prompt_cache_wire:Llm_provider.Capabilities.No_prompt_cache_wire
           ~cache_retention:binding.cache_retention
+      in
+      let* () =
+        validate_responses_options provider ~kind:None ~model_id:binding.model_id ~request_path:""
+      in
+      let* (_ : int option) =
+        validate_explicit_context_cache_ttl_s provider ~spec
+          ~prompt_cache_wire:Llm_provider.Capabilities.No_prompt_cache_wire
       in
       validate_provider_routing_filter provider ~model_id:binding.model_id
         ~supports_provider_routing_filter:false

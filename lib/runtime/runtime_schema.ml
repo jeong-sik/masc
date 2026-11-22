@@ -92,6 +92,23 @@ type capabilities =
 let connect_timeout_s_key = "connect-timeout-s"
 let exact_body_timeout_s_key = "exact-body-timeout-s"
 let admission_priority_run_limit_key = "admission-priority-run-limit"
+let store_key = "store"
+let truncation_key = "truncation"
+let explicit_context_cache_ttl_s_key = "explicit-context-cache-ttl-s"
+
+type responses_truncation =
+  Llm_provider.Provider_config.responses_truncation =
+  | Truncation_auto
+  | Truncation_disabled
+[@@deriving show, eq]
+
+let responses_truncation_to_string =
+  Llm_provider.Provider_config.responses_truncation_to_string
+;;
+
+let responses_truncation_of_string =
+  Llm_provider.Provider_config.responses_truncation_of_string
+;;
 
 type antigravity_effort =
   | Antigravity_low
@@ -222,6 +239,9 @@ type provider =
     (** Typed [acp] persistent client options. Present exactly for providers
         using [protocol = "acp"]; absent for every other transport. *)
   ; usage_read : usage_read option
+  ; store : bool option
+  ; truncation : responses_truncation option
+  ; explicit_context_cache_ttl_s : int option
   }
 [@@deriving show, eq]
 
@@ -397,6 +417,7 @@ type model_spec =
         otherwise.
         Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →
         {!Runtime_inference.resolve_turn_timeout_s}. *)
+  ; explicit_context_cache_ttl_s : int option
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]
@@ -416,16 +437,22 @@ let thinking_request (model : model_spec) =
 type cache_retention =
   | Five_minutes
   | One_hour
+  | In_memory
+  | Twenty_four_hours
 [@@deriving show, eq]
 
 let cache_retention_to_string = function
   | Five_minutes -> "5m"
   | One_hour -> "1h"
+  | In_memory -> "in_memory"
+  | Twenty_four_hours -> "24h"
 ;;
 
 let cache_retention_of_string = function
   | "5m" -> Some Five_minutes
   | "1h" -> Some One_hour
+  | "in_memory" -> Some In_memory
+  | "24h" -> Some Twenty_four_hours
   | _ -> None
 ;;
 

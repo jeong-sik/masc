@@ -44,6 +44,25 @@ type provider_identity = private
 (** Attribution facts from the admitted provider selection. No credential
     material or mutable catalog handle is retained here. *)
 
+(** OpenAI Responses API [prompt_cache_retention] policy.
+    Ref: https://developers.openai.com/api/docs/guides/prompt-caching *)
+type prompt_cache_retention =
+  | Prompt_cache_in_memory
+  | Prompt_cache_24h
+
+val prompt_cache_retention_to_string : prompt_cache_retention -> string
+val prompt_cache_retention_of_string : string -> prompt_cache_retention option
+
+(** OpenAI Responses API [truncation] policy controlling server-side context
+    overflow handling.
+    Ref: https://developers.openai.com/api/reference/cli/resources/responses/methods/create *)
+type responses_truncation =
+  | Truncation_auto
+  | Truncation_disabled
+
+val responses_truncation_to_string : responses_truncation -> string
+val responses_truncation_of_string : string -> responses_truncation option
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -106,6 +125,17 @@ type t =
         authority. An absent, empty or nonmatching prefix keeps the single-block
         representation. Other provider wires ignore this internal hint. *)
   ; cache_extended_ttl : bool
+  ; prompt_cache_retention : prompt_cache_retention option
+    (** OpenAI Responses API [prompt_cache_retention] (["in_memory"] | ["24h"]).
+        [None] omits the field so the server uses its default. Honored only by
+        {!Backend_openai_responses}. *)
+  ; store : bool option
+    (** OpenAI Responses API [store] flag controlling server-side persistence
+        (e.g. [Some false] for stateless ZDR workflows with encrypted reasoning).
+        [None] omits the field. Honored only by {!Backend_openai_responses}. *)
+  ; truncation : responses_truncation option
+    (** OpenAI Responses API [truncation] policy (["auto"] | ["disabled"]).
+        [None] omits the field. Honored only by {!Backend_openai_responses}. *)
   ; explicit_context_cache_ttl_s : int option
     (** Opt-in explicit context-cache TTL in seconds for providers whose
         declared {!Capabilities.prompt_cache_wire} uses a resource-based cache
@@ -281,6 +311,9 @@ val make
   -> ?cache_system_prompt:bool
   -> ?system_prompt_cache_prefix:string
   -> ?cache_extended_ttl:bool
+  -> ?prompt_cache_retention:prompt_cache_retention
+  -> ?store:bool
+  -> ?truncation:responses_truncation
   -> ?explicit_context_cache_ttl_s:int
   -> ?cache_session_key:string
   -> ?provider_only:string list

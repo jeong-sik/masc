@@ -541,11 +541,57 @@ let test_structured_refusal_classification () =
    | _ -> fail "expected Structured_account_quota for explicit BILLING_DISABLED detail reason")
 ;;
 
+let test_zai_glm_error_codes_ssot_parity () =
+  let module Glm = Llm_provider.Backend_glm in
+  let quota_codes =
+    [ "1113"; "1308"; "1309"; "1310"; "1311"; "1313"; "1314"
+    ; "1316"; "1317"; "1318"; "1319"; "1320"; "1321"
+    ]
+  in
+  List.iter
+    (fun code ->
+       check bool (Printf.sprintf "Backend_glm.is_quota_code %s" code) true
+         (Glm.is_quota_code code);
+       check bool (Printf.sprintf "Backend_glm.is_context_overflow_code %s" code) false
+         (Glm.is_context_overflow_code code);
+       let body = Printf.sprintf {|{"error":{"code":%S,"message":"quota exhausted"}}|} code in
+       match Retry.classify_structured_refusal ~retry_after_header:None ~status:429 ~body with
+       | Some (Retry.Structured_account_quota _) -> ()
+       | Some (Retry.Structured_context_overflow _) ->
+         failf "Z.AI code %s misclassified as context overflow" code
+       | None -> failf "Z.AI quota code %s not recognized by Retry" code)
+    quota_codes;
+  check bool "Backend_glm.is_context_overflow_code 1261" true
+    (Glm.is_context_overflow_code "1261");
+  check bool "Backend_glm.is_quota_code 1261" false (Glm.is_quota_code "1261");
+  (match
+     Retry.classify_structured_refusal
+       ~retry_after_header:None
+       ~status:400
+       ~body:{|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|}
+   with
+   | Some (Retry.Structured_context_overflow _) -> ()
+   | _ -> fail "Z.AI code 1261 must classify as Structured_context_overflow");
+  List.iter
+    (fun code ->
+       check bool (Printf.sprintf "non-quota transient Z.AI code %s" code) false
+         (Glm.is_quota_code code);
+       check bool (Printf.sprintf "non-overflow Z.AI code %s" code) false
+         (Glm.is_context_overflow_code code);
+       let body = Printf.sprintf {|{"error":{"code":%S,"message":"transient"}}|} code in
+       match Retry.classify_structured_refusal ~retry_after_header:None ~status:429 ~body with
+       | None -> ()
+       | Some _ -> failf "transient Z.AI code %s must not classify as hard quota" code)
+    [ "1302"; "1305" ]
+;;
+
 let () =
   run
     "Retry"
     [ ( "classify"
       , [ test_case "http status mapping" `Quick test_classify_error
+        ; test_case "Z.AI GLM 14 error codes SSOT parity" `Quick
+            test_zai_glm_error_codes_ssot_parity
         ; test_case "edge cases" `Quick test_classify_error_edge_cases
         ; test_case
             "structured 400/422 overflow and 403/429 quota"

@@ -645,6 +645,114 @@ let content_type_of_response_headers resp_headers =
      | trimmed -> Some trimmed)
 ;;
 
+(* ── Anthropic proactive rate-limit response headers ────────── *)
+(* Ref: https://platform.claude.com/docs/en/api/rate-limits *)
+
+type rate_limit_headers =
+  { requests_limit : int option
+  ; requests_remaining : int option
+  ; requests_reset : string option
+  ; input_tokens_limit : int option
+  ; input_tokens_remaining : int option
+  ; input_tokens_reset : string option
+  ; output_tokens_limit : int option
+  ; output_tokens_remaining : int option
+  ; output_tokens_reset : string option
+  ; tokens_limit : int option
+  ; tokens_remaining : int option
+  ; tokens_reset : string option
+  }
+
+let single_header_value resp_headers name =
+  match Http.Header.get_multi resp_headers name with
+  | [ raw ] -> Some raw
+  | [] | _ :: _ :: _ -> None
+;;
+
+let nonneg_int_header resp_headers name =
+  match single_header_value resp_headers name with
+  | None -> None
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some n when n >= 0 -> Some n
+     | Some _ | None -> None)
+;;
+
+let nonblank_string_header resp_headers name =
+  match single_header_value resp_headers name with
+  | None -> None
+  | Some raw ->
+    (match String.trim raw with
+     | "" -> None
+     | trimmed -> Some trimmed)
+;;
+
+let rate_limit_headers_of_response_headers resp_headers =
+  let requests_limit =
+    nonneg_int_header resp_headers "anthropic-ratelimit-requests-limit"
+  in
+  let requests_remaining =
+    nonneg_int_header resp_headers "anthropic-ratelimit-requests-remaining"
+  in
+  let requests_reset =
+    nonblank_string_header resp_headers "anthropic-ratelimit-requests-reset"
+  in
+  let input_tokens_limit =
+    nonneg_int_header resp_headers "anthropic-ratelimit-input-tokens-limit"
+  in
+  let input_tokens_remaining =
+    nonneg_int_header resp_headers "anthropic-ratelimit-input-tokens-remaining"
+  in
+  let input_tokens_reset =
+    nonblank_string_header resp_headers "anthropic-ratelimit-input-tokens-reset"
+  in
+  let output_tokens_limit =
+    nonneg_int_header resp_headers "anthropic-ratelimit-output-tokens-limit"
+  in
+  let output_tokens_remaining =
+    nonneg_int_header resp_headers "anthropic-ratelimit-output-tokens-remaining"
+  in
+  let output_tokens_reset =
+    nonblank_string_header resp_headers "anthropic-ratelimit-output-tokens-reset"
+  in
+  let tokens_limit = nonneg_int_header resp_headers "anthropic-ratelimit-tokens-limit" in
+  let tokens_remaining =
+    nonneg_int_header resp_headers "anthropic-ratelimit-tokens-remaining"
+  in
+  let tokens_reset =
+    nonblank_string_header resp_headers "anthropic-ratelimit-tokens-reset"
+  in
+  if
+    Option.is_none requests_limit
+    && Option.is_none requests_remaining
+    && Option.is_none requests_reset
+    && Option.is_none input_tokens_limit
+    && Option.is_none input_tokens_remaining
+    && Option.is_none input_tokens_reset
+    && Option.is_none output_tokens_limit
+    && Option.is_none output_tokens_remaining
+    && Option.is_none output_tokens_reset
+    && Option.is_none tokens_limit
+    && Option.is_none tokens_remaining
+    && Option.is_none tokens_reset
+  then None
+  else
+    Some
+      { requests_limit
+      ; requests_remaining
+      ; requests_reset
+      ; input_tokens_limit
+      ; input_tokens_remaining
+      ; input_tokens_reset
+      ; output_tokens_limit
+      ; output_tokens_remaining
+      ; output_tokens_reset
+      ; tokens_limit
+      ; tokens_remaining
+      ; tokens_reset
+      }
+;;
+
 (* ── Public API ────────────────────────────────────────────── *)
 
 type one_dispatch_phase =
@@ -754,6 +862,7 @@ type raw_sync_response =
   ; body : string
   ; retry_after_header : float option
   ; content_type : string option
+  ; rate_limit_headers : rate_limit_headers option
   }
 
 type validated_sync_request =
@@ -833,7 +942,12 @@ let%test "Retry-After is captured once with explicit duplicate ambiguity" =
   in
   let retry_after_header = capture [ "Retry-After", "7" ] in
   let response =
-    { status = 429; body = "rate limited"; retry_after_header; content_type = None }
+    { status = 429
+    ; body = "rate limited"
+    ; retry_after_header
+    ; content_type = None
+    ; rate_limit_headers = None
+    }
   in
   let duplicate = capture [ "Retry-After", "7"; "retry-after", "8" ] in
   response.retry_after_header = Some 7.0
@@ -1582,6 +1696,7 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
             ; body = body_str
             ; retry_after_header = retry_after_header_of_response_headers resp_headers
             ; content_type = content_type_of_response_headers resp_headers
+            ; rate_limit_headers = rate_limit_headers_of_response_headers resp_headers
             }
           , Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body:`Drained ))))
 ;;
@@ -1615,6 +1730,7 @@ let delete_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
             ; body = body_str
             ; retry_after_header = retry_after_header_of_response_headers resp_headers
             ; content_type = content_type_of_response_headers resp_headers
+            ; rate_limit_headers = rate_limit_headers_of_response_headers resp_headers
             }
           , Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body:`Drained ))))
 ;;
@@ -1667,6 +1783,7 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
             ; body = body_str
             ; retry_after_header = retry_after_header_of_response_headers resp_headers
             ; content_type = content_type_of_response_headers resp_headers
+            ; rate_limit_headers = rate_limit_headers_of_response_headers resp_headers
             }
           , Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body:`Drained ))))
 ;;
@@ -1897,11 +2014,13 @@ let post_sync_once_after_validation
     in
     let response_of body_receipt =
       let body = refusal_body_text body_receipt in
+      let resp_headers = Cohttp.Response.headers response in
       { response =
           { status = response_status
           ; body
           ; retry_after_header
-          ; content_type = content_type_of_response_headers (Cohttp.Response.headers response)
+          ; content_type = content_type_of_response_headers resp_headers
+          ; rate_limit_headers = rate_limit_headers_of_response_headers resp_headers
           }
       ; body_receipt
       ; response_header_evidence
@@ -2087,6 +2206,7 @@ let with_post_stream
       ?connect_timeout_s
       ?first_event_timeout_s
       ?on_response_status
+      ?on_rate_limit_headers
       ~net
       ~url
       ~headers
@@ -2196,6 +2316,12 @@ let with_post_stream
               Option.iter
                 (fun observe -> observe (Cohttp.Code.code_of_status status))
                 on_response_status;
+              (match on_rate_limit_headers with
+               | None -> ()
+               | Some observe ->
+                 Option.iter
+                   observe
+                   (rate_limit_headers_of_response_headers (Cohttp.Response.headers resp)));
               (match status with
                | `OK -> Ok (`Stream_headers (conn, transport_eof_seen, resp, resp_body))
                | _ -> Ok (`Refusal_headers (conn, transport_eof_seen, resp, resp_body)))

@@ -1236,7 +1236,7 @@ let test_gemini_capabilities () =
   Alcotest.(check bool) "top_k" true c.supports_top_k;
   Alcotest.(check bool) "no min_p" false c.supports_min_p;
   Alcotest.(check (option int)) "max_context" (Some 1_000_000) c.max_context_tokens;
-  Alcotest.(check (option int)) "max_output" (Some 65_000) c.max_output_tokens
+  Alcotest.(check (option int)) "max_output" (Some 65_536) c.max_output_tokens
 ;;
 
 let test_glm_capabilities () =

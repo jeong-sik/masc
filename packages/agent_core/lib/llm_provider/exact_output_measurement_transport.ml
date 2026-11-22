@@ -407,12 +407,17 @@ let post_sync_once_after_commit
      | Ok response_body ->
        let retry_after_header = retry_after_header response in
        let content_type = content_type_header response in
+       let rate_limit_headers =
+         Http_client.rate_limit_headers_of_response_headers
+           (Cohttp.Response.headers response)
+       in
        release_connection ();
        Ok
          ({ status = response_status
           ; body = response_body
           ; retry_after_header
           ; content_type
+          ; rate_limit_headers
           }
           : Http_client.raw_sync_response))
 ;;

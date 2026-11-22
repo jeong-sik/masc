@@ -2452,6 +2452,14 @@ let test_p1_7_wire_fleet_offline_vs_failing_ssot () =
         ~keepalive_running:true;
       mk ~name:"k-paused" ~health:Wire_fleet.Keeper_paused ~paused:true
         ~keepalive_running:false;
+      (* Verifier #243 finding 4: paused=true must match Fleet_store.fleet_health_counts precedence
+         without double-counting into working_count or failing/offline into paused_count. *)
+      mk ~name:"k-work-paused" ~health:Wire_fleet.Keeper_working ~paused:true
+        ~keepalive_running:true;
+      mk ~name:"k-fail-paused" ~health:Wire_fleet.Keeper_failing ~paused:true
+        ~keepalive_running:false;
+      mk ~name:"k-off-paused" ~health:Wire_fleet.Keeper_offline ~paused:true
+        ~keepalive_running:false;
     ]
   in
   let groups = Wire_fleet.group_by_company keepers in
@@ -2459,10 +2467,12 @@ let test_p1_7_wire_fleet_offline_vs_failing_ssot () =
   let cg = List.hd groups in
   Alcotest.(check int) "running_count excludes failing/offline/paused" 3
     cg.running_count;
-  Alcotest.(check int) "failing_count counts ONLY Keeper_failing (not offline)" 1
+  Alcotest.(check int) "failing_count counts ONLY Keeper_failing (including paused=true)" 2
     cg.failing_count;
-  Alcotest.(check int) "paused_count" 1 cg.paused_count;
-  Alcotest.(check int) "working_count" 1 cg.working_count
+  Alcotest.(check int) "paused_count excludes failing & offline (no double count)" 2
+    cg.paused_count;
+  Alcotest.(check int) "working_count excludes paused working keeper (<= running_count)" 1
+    cg.working_count
 
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"

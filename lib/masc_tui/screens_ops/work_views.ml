@@ -1666,12 +1666,6 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     Markdown.draw grid ~rect:md_rect ~theme ~osc8:true md_text
                   in
                   if total_md > md_avail && md_avail >= 2 then begin
-                    let trimmed_rect =
-                      Rect.make ~x:content.x ~y:!y ~w:content.w ~h:(md_avail - 1)
-                    in
-                    ignore
-                      (Markdown.draw grid ~rect:trimmed_rect ~theme ~osc8:true
-                         md_text);
                     let more_n = total_md - (md_avail - 1) in
                     let more_s =
                       Ops_common.say model
@@ -1681,8 +1675,13 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                           (Printf.sprintf "▼ %d more lines · [Enter] Full view"
                              more_n)
                     in
+                    let footer_row =
+                      Rect.make ~x:content.x ~y:(bot - 1) ~w:content.w ~h:1
+                    in
+                    Cell_grid.fill_rect ~clip:content grid ~rect:footer_row
+                      ~style:(Typography.whisper ~bg:card_bg theme) ();
                     ignore
-                      (Ops_common.put_line ~clip:content grid ~x:content.x
+                      (Ops_common.put_line ~clip:footer_row grid ~x:content.x
                          ~y:(bot - 1) ~max_w:content.w
                          ~style:(Typography.whisper ~bg:card_bg theme)
                          more_s);
@@ -1691,7 +1690,7 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   else y := !y + Int.min md_avail total_md
               | Some _ | None -> ());
               (* Fill spare lower space cleanly with truthful Goal/Verification/Timestamp context *)
-              if !y + 2 <= bot then begin
+              if !y + 3 <= bot then begin
                 incr y;
                 Card.draw_hairline ~pad_x:0 ~bg:card_bg
                   ~label:

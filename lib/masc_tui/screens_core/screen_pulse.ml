@@ -638,7 +638,7 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                ~left_style:pri_st ~right_text:ver_badge_str
                ~right_style:ver_badge_st;
              put_left_right grid ~clip:(Rect.make ~x:rc.x ~y:y2 ~w:rc.w ~h:1)
-               ~y:y2 ~left_text:wm_hero_str ~left_style:pri_st
+               ~y:y2 ~left_text:wm_hero_str ~left_style:wm_hero_st
                ~right_text:candle_str ~right_style:candle_st
            end
        | _ -> ());

@@ -410,8 +410,8 @@ let keeper_attributed_spend_24h_usd t =
         List.fold_left
           (fun (acc, any) (row : Wire_runtime.keeper_cost_row) ->
             match Observed.to_option row.total_cost_usd with
-            | Some c -> (acc +. c, true)
-            | None -> (acc, any))
+            | Some c when Float.is_finite c -> (acc +. c, true)
+            | Some _ | None -> (acc, any))
           (0.0, false) data.rows
       in
       if seen then Observed.value ~observed_at sum else Observed.unreported

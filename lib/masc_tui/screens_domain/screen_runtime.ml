@@ -280,6 +280,118 @@ let compute_quota_health_buckets (part : Runtime_store.partitioned_accounts) :
   let total = healthy + cooldown + exhausted + unreported in
   { total; healthy; cooldown; exhausted; unreported; cooldown_accts }
 
+let format_cooldown_duration ~now_unix resets_at_unix =
+  if
+    (not (Float.is_finite now_unix))
+    || (not (Float.is_finite resets_at_unix))
+    || now_unix <= 0.0
+    || resets_at_unix <= 0.0
+  then None
+  else
+    let rem = Int.max 0 (int_of_float (resets_at_unix -. now_unix)) in
+    if rem >= 172_800 then
+      let days = rem / 86_400 in
+      let hours = (rem mod 86_400) / 3600 in
+      Some (Printf.sprintf "%dd %dh" days hours)
+    else if rem >= 3600 then
+      let hours = rem / 3600 in
+      let mins = (rem mod 3600) / 60 in
+      Some (Printf.sprintf "%dh %02dm" hours mins)
+    else if rem >= 60 then
+      let mins = rem / 60 in
+      let secs = rem mod 60 in
+      Some (Printf.sprintf "%dm %02ds" mins secs)
+    else Some (Printf.sprintf "%ds" rem)
+
+type provider_quota_state =
+  | Quota_ok
+  | Quota_cooldown of string
+  | Quota_exhausted
+
+let provider_quota_status ~now_unix ~provider
+    (uw_opt : Wire_runtime.provider_usage_windows option) : provider_quota_state =
+  match uw_opt with
+  | None -> Quota_ok
+  | Some uw ->
+      let want = String.lowercase_ascii provider in
+      let matching =
+        List.filter
+          (fun (a : Wire_runtime.account_usage) ->
+            List.exists
+              (fun (p : Wire_runtime.usage_provider_ref) ->
+                String.equal (String.lowercase_ascii p.id) want)
+              a.providers)
+          uw.accounts
+      in
+      let any_exhausted_credit =
+        List.exists
+          (fun (a : Wire_runtime.account_usage) ->
+            match a.cost_state with
+            | Format_val.Exhausted_zero -> true
+            | Format_val.Amount _ | Format_val.Subscription_zero
+            | Format_val.Unreported ->
+                false)
+          matching
+      in
+      if any_exhausted_credit then Quota_exhausted
+      else
+        let exhausted_windows =
+          List.concat_map
+            (fun (a : Wire_runtime.account_usage) ->
+              match a.state with
+              | Wire_runtime.Account_reported ws ->
+                  List.filter is_window_exhausted ws
+              | Wire_runtime.Account_not_reported_since_start
+              | Wire_runtime.Account_reported_no_windows _ ->
+                  [])
+            matching
+        in
+        match exhausted_windows with
+        | [] -> Quota_ok
+        | ws -> (
+            let max_reset =
+              List.fold_left
+                (fun acc (w : Wire_runtime.usage_window) ->
+                  match (acc, w.resets_at_unix) with
+                  | Some a, Some b -> Some (Float.max a b)
+                  | None, Some b -> Some b
+                  | Some a, None -> Some a
+                  | None, None -> None)
+                None ws
+            in
+            match max_reset with
+            | Some ts -> (
+                match format_cooldown_duration ~now_unix ts with
+                | Some dur -> Quota_cooldown dur
+                | None -> Quota_exhausted)
+            | None -> Quota_exhausted)
+
+let probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows
+    (p : Wire_runtime.provider_probe_row) : provider_quota_state =
+  match Hashtbl.find_opt runtimes_tbl p.runtime_id with
+  | Some (r : Wire_runtime.runtime_option) ->
+      provider_quota_status ~now_unix ~provider:r.provider usage_windows
+  | None -> Quota_ok
+
+let is_probe_effectively_ok ~now_unix ~runtimes_tbl ~usage_windows
+    (p : Wire_runtime.provider_probe_row) =
+  match p.reachable with
+  | Some true -> (
+      match probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows p with
+      | Quota_ok -> true
+      | Quota_cooldown _ | Quota_exhausted -> false)
+  | Some false | None -> false
+
+let is_probe_effectively_failed ~now_unix ~runtimes_tbl ~usage_windows
+    (p : Wire_runtime.provider_probe_row) =
+  match p.reachable with
+  | Some false -> true
+  | Some true -> (
+      match probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows p with
+      | Quota_ok -> false
+      | Quota_cooldown _ | Quota_exhausted -> true)
+  | None -> false
+
 let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~bp ~lang ~now_unix ~(rt : Runtime_store.t)
     (part : Runtime_store.partitioned_accounts) =
@@ -290,20 +402,34 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
   let healthy_n = buckets.healthy in
   let unreported_n = buckets.unreported in
   let active_probes, _ = Runtime_store.active_and_outside_probes rt in
+  let runtimes_tbl : (string, Wire_runtime.runtime_option) Hashtbl.t =
+    Hashtbl.create 32
+  in
+  List.iter
+    (fun (r : Wire_runtime.runtime_option) -> Hashtbl.replace runtimes_tbl r.id r)
+    (Runtime_store.runtime_options rt);
+  let usage_windows = Observed.to_option rt.usage_windows in
   let active_ok =
     List.fold_left
-      (fun acc (p : Wire_runtime.provider_probe_row) ->
-        match p.reachable with Some true -> acc + 1 | Some false | None -> acc)
+      (fun acc p ->
+        if is_probe_effectively_ok ~now_unix ~runtimes_tbl ~usage_windows p then
+          acc + 1
+        else acc)
       0 active_probes
   in
   let active_bad =
+    List.filter
+      (is_probe_effectively_failed ~now_unix ~runtimes_tbl ~usage_windows)
+      active_probes
+  in
+  let active_http_bad =
     List.filter
       (fun (p : Wire_runtime.provider_probe_row) ->
         match p.reachable with Some false -> true | Some true | None -> false)
       active_probes
   in
   let badge =
-    let alerts = List.length cooldown_accts + List.length active_bad in
+    let alerts = List.length cooldown_accts + List.length active_http_bad in
     if alerts > 0 then
       Some
         (H.make_badge ~glyph:Glyph.Action_required ~tone:Theme.Status_attention
@@ -462,7 +588,7 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
             incr y;
             incr shown
           end)
-        active_bad
+        active_http_bad
     end;
     (* 3. Failover Lane Reachability & 24h Telemetry Summary *)
     if !y < bottom then begin
@@ -2131,92 +2257,6 @@ let probe_refresh_label ~lang = function
   | Wire_runtime.Probe_warming_up ->
       Say.resolve lang (Say.make ~ko:"워밍업" ~en:"Warming")
 
-let format_cooldown_duration ~now_unix resets_at_unix =
-  if
-    (not (Float.is_finite now_unix))
-    || (not (Float.is_finite resets_at_unix))
-    || now_unix <= 0.0
-    || resets_at_unix <= 0.0
-  then None
-  else
-    let rem = Int.max 0 (int_of_float (resets_at_unix -. now_unix)) in
-    if rem >= 172_800 then
-      let days = rem / 86_400 in
-      let hours = (rem mod 86_400) / 3600 in
-      Some (Printf.sprintf "%dd %dh" days hours)
-    else if rem >= 3600 then
-      let hours = rem / 3600 in
-      let mins = (rem mod 3600) / 60 in
-      Some (Printf.sprintf "%dh %02dm" hours mins)
-    else if rem >= 60 then
-      let mins = rem / 60 in
-      let secs = rem mod 60 in
-      Some (Printf.sprintf "%dm %02ds" mins secs)
-    else Some (Printf.sprintf "%ds" rem)
-
-type provider_quota_state =
-  | Quota_ok
-  | Quota_cooldown of string
-  | Quota_exhausted
-
-let provider_quota_status ~now_unix ~provider
-    (uw_opt : Wire_runtime.provider_usage_windows option) : provider_quota_state =
-  match uw_opt with
-  | None -> Quota_ok
-  | Some uw ->
-      let want = String.lowercase_ascii provider in
-      let matching =
-        List.filter
-          (fun (a : Wire_runtime.account_usage) ->
-            List.exists
-              (fun (p : Wire_runtime.usage_provider_ref) ->
-                String.equal (String.lowercase_ascii p.id) want)
-              a.providers)
-          uw.accounts
-      in
-      let any_exhausted_credit =
-        List.exists
-          (fun (a : Wire_runtime.account_usage) ->
-            match a.cost_state with
-            | Format_val.Exhausted_zero -> true
-            | Format_val.Amount _ | Format_val.Subscription_zero
-            | Format_val.Unreported ->
-                false)
-          matching
-      in
-      if any_exhausted_credit then Quota_exhausted
-      else
-        let exhausted_windows =
-          List.concat_map
-            (fun (a : Wire_runtime.account_usage) ->
-              match a.state with
-              | Wire_runtime.Account_reported ws ->
-                  List.filter is_window_exhausted ws
-              | Wire_runtime.Account_not_reported_since_start
-              | Wire_runtime.Account_reported_no_windows _ ->
-                  [])
-            matching
-        in
-        match exhausted_windows with
-        | [] -> Quota_ok
-        | ws -> (
-            let max_reset =
-              List.fold_left
-                (fun acc (w : Wire_runtime.usage_window) ->
-                  match (acc, w.resets_at_unix) with
-                  | Some a, Some b -> Some (Float.max a b)
-                  | None, Some b -> Some b
-                  | Some a, None -> Some a
-                  | None, None -> None)
-                None ws
-            in
-            match max_reset with
-            | Some ts -> (
-                match format_cooldown_duration ~now_unix ts with
-                | Some dur -> Quota_cooldown dur
-                | None -> Quota_exhausted)
-            | None -> Quota_exhausted)
-
 let format_failover_reason (p : Wire_runtime.provider_probe_row) =
   match p.http_status, p.error with
   | Some 429, _ -> "429 RateLimit"
@@ -2232,28 +2272,6 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   let rt = model.runtime in
   let now_unix = model.freshness.last_wall_unix in
   let active_probes, outside_probes = Runtime_store.active_and_outside_probes rt in
-  let active_ok =
-    List.fold_left
-      (fun acc (p : Wire_runtime.provider_probe_row) ->
-        match p.reachable with Some true -> acc + 1 | Some false | None -> acc)
-      0 active_probes
-  in
-  let active_failed =
-    List.fold_left
-      (fun acc (p : Wire_runtime.provider_probe_row) ->
-        match p.reachable with
-        | Some false -> acc + 1
-        | Some true | None -> acc)
-      0 active_probes
-  in
-  let outside_failed =
-    List.fold_left
-      (fun acc (p : Wire_runtime.provider_probe_row) ->
-        match p.reachable with
-        | Some false -> acc + 1
-        | Some true | None -> acc)
-      0 outside_probes
-  in
   let lanes, runtimes =
     match Observed.to_option rt.runtime_resolved with
     | Some snap -> (snap.lanes, snap.runtimes)
@@ -2265,6 +2283,31 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
   List.iter
     (fun (r : Wire_runtime.runtime_option) -> Hashtbl.replace runtimes_tbl r.id r)
     runtimes;
+  let usage_windows = Observed.to_option rt.usage_windows in
+  let active_ok =
+    List.fold_left
+      (fun acc p ->
+        if is_probe_effectively_ok ~now_unix ~runtimes_tbl ~usage_windows p then
+          acc + 1
+        else acc)
+      0 active_probes
+  in
+  let active_failed =
+    List.fold_left
+      (fun acc p ->
+        if is_probe_effectively_failed ~now_unix ~runtimes_tbl ~usage_windows p
+        then acc + 1
+        else acc)
+      0 active_probes
+  in
+  let outside_failed =
+    List.fold_left
+      (fun acc (p : Wire_runtime.provider_probe_row) ->
+        match p.reachable with
+        | Some false -> acc + 1
+        | Some true | None -> acc)
+      0 outside_probes
+  in
   let probe_tbl : (string, Wire_runtime.provider_probe_row) Hashtbl.t =
     Hashtbl.create 64
   in
@@ -2440,33 +2483,35 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                 in
                 let status_g, status_tone, status_txt, rtt_txt =
                   match (Hashtbl.find_opt probe_tbl rid, quota_st) with
-                  | Some pr, _ when pr.reachable = Some false -> (
-                      match (pr.http_status, quota_st) with
-                      | Some 429, Quota_cooldown dur ->
-                          ( Glyph.Live_paused
-                          , Theme.Status_attention
-                          , "Cooldown " ^ dur
-                          , "429" )
-                      | Some 429, (Quota_ok | Quota_exhausted) ->
-                          ( Glyph.Live_paused
-                          , Theme.Status_attention
-                          , "Cooldown"
-                          , "429" )
-                      | _, Quota_exhausted ->
-                          ( Glyph.Live_failing
-                          , Theme.Status_critical
-                          , Format_val.format_cost Format_val.Exhausted_zero ~lang
-                          , "" )
-                      | _, (Quota_ok | Quota_cooldown _) ->
-                          ( Glyph.Live_failing
-                          , Theme.Status_critical
-                          , format_failover_reason pr
-                          , "" ))
                   | _, Quota_exhausted ->
                       ( Glyph.Live_failing
                       , Theme.Status_critical
                       , Format_val.format_cost Format_val.Exhausted_zero ~lang
                       , "" )
+                  | Some pr, Quota_cooldown dur when pr.reachable = Some false -> (
+                      match pr.http_status with
+                      | Some 429 ->
+                          ( Glyph.Live_paused
+                          , Theme.Status_attention
+                          , "Cooldown " ^ dur
+                          , "429" )
+                      | Some _ | None ->
+                          ( Glyph.Live_failing
+                          , Theme.Status_critical
+                          , format_failover_reason pr
+                          , "" ))
+                  | Some pr, Quota_ok when pr.reachable = Some false -> (
+                      match pr.http_status with
+                      | Some 429 ->
+                          ( Glyph.Live_paused
+                          , Theme.Status_attention
+                          , "Cooldown"
+                          , "429" )
+                      | Some _ | None ->
+                          ( Glyph.Live_failing
+                          , Theme.Status_critical
+                          , format_failover_reason pr
+                          , "" ))
                   | _, Quota_cooldown dur ->
                       ( Glyph.Live_paused
                       , Theme.Status_attention

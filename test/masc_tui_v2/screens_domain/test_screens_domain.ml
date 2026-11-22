@@ -3228,6 +3228,16 @@ let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
         ("P1-9 left Quotas overflow indicator shown (" ^ Say.lang_code lang ^ ")")
         true
         (contains_sub ~needle:more_lbl ~haystack:txt_q);
+      (* Verifier #243 finding 1: Quotas bottom card cross-checks Exhausted_zero -> 0/4 (not 1/4) *)
+      let quotas_lane_ok =
+        match lang with
+        | Say.Lang_ko -> "1 · 0/4 가용"
+        | Say.Lang_en -> "1 · 0/4 ok"
+      in
+      Alcotest.(check bool)
+        ("P1-10 Quotas cooldown summary reports 0/4 ok (" ^ Say.lang_code lang ^ ")")
+        true
+        (contains_sub ~needle:quotas_lane_ok ~haystack:txt_q);
       (* B. Failover Lanes tab *)
       let g_l =
         render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
@@ -3242,6 +3252,16 @@ let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
       in
       assert_grid_invariants ~label:("P1-10/Lanes/" ^ Say.lang_code lang) g_l;
       let txt_l = grid_all_text g_l in
+      (* Verifier #243 finding 1: Failover Lanes header pill MUST agree with inspector (0/4, never 1/4) *)
+      let header_lane_ok =
+        match lang with
+        | Say.Lang_ko -> "활성 레인: 1 · 0/4 가용"
+        | Say.Lang_en -> "Active Lanes: 1 · 0/4 reachable"
+      in
+      Alcotest.(check bool)
+        ("P1-10 Failover Lanes header pill reports 0/4 (" ^ Say.lang_code lang ^ ")")
+        true
+        (contains_sub ~needle:header_lane_ok ~haystack:txt_l);
       Alcotest.(check bool) "P1-10 human multi-day cooldown 5d 21h" true
         (contains_sub ~needle:"5d 21h" ~haystack:txt_l);
       Alcotest.(check bool) "P1-10 human multi-hour cooldown 43h 58m" true
@@ -3260,7 +3280,55 @@ let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
         || contains_sub ~needle:"297ms" ~haystack:txt_l);
       Alcotest.(check bool)
         "P1-10 lane reachability excludes exhausted slot (0/4)" true
-        (contains_sub ~needle:"0/4" ~haystack:txt_l))
+        (contains_sub ~needle:"0/4" ~haystack:txt_l);
+      (* Verifier #243 finding 2: Exhausted_zero provider returning HTTP 429 MUST render $0 소진
+         in left cascade (matching right inspector), NOT amber Cooldown 429. *)
+      let probe_exh_429 =
+        {
+          probe with
+          providers =
+            [
+              {
+                runtime_id = "slot-ollama";
+                transport = `Http;
+                status = "rate_limited";
+                reachable = Some false;
+                http_status = Some 429;
+                latency_ms = None;
+                error = Some "429 quota exhausted";
+                checked_at = "2026-11-22T02:00:00Z";
+              };
+            ];
+        }
+      in
+      let resolved_exh_429 =
+        {
+          resolved with
+          lanes =
+            [ { id = "lane-exh-429"; declared = true; runtime_ids = [ "slot-ollama" ] } ];
+        }
+      in
+      let rt_exh_429 =
+        m0.runtime
+        |> Runtime_store.apply_runtime_resolved ~observed_at:now_mono resolved_exh_429
+        |> Runtime_store.apply_runtime_probe ~observed_at:now_mono probe_exh_429
+        |> Runtime_store.set_tab Nav.Runtime_failover_lanes
+      in
+      let g_exh_429 =
+        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+            Screen_runtime.render
+              ~model:{ m0 with freshness; runtime = rt_exh_429 }
+              ~cache ~rect gr)
+      in
+      assert_grid_invariants ~label:("P1-10/Exh429/" ^ Say.lang_code lang) g_exh_429;
+      let txt_exh_429 = grid_all_text g_exh_429 in
+      Alcotest.(check bool)
+        ("P1-10 Exhausted_zero+429 renders " ^ exh_lbl ^ " in cascade & inspector")
+        true
+        (count_occurrences ~needle:exh_lbl ~haystack:txt_exh_429 >= 2);
+      Alcotest.(check bool)
+        "P1-10 Exhausted_zero+429 NEVER downgrades to Cooldown" false
+        (contains_sub ~needle:"Cooldown" ~haystack:txt_exh_429))
     [ Say.Lang_ko; Say.Lang_en ]
 
 let () =

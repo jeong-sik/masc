@@ -101,11 +101,11 @@ class AsyncDetailSignalTest(unittest.TestCase):
                 "the Tools surface did not read the async requests",
             )
             step("drain", 0.5)
-            # [p] moves from the Keeper surface to the async requests, [J]
+            # [p] moves from the Keeper surface to the async requests, [j]
             # selects the only one and Enter opens its detail.
             step("keys", "p")
             step("drain", 0.3)
-            step("keys", "J")
+            step("keys", "j")
             step("drain", 0.3)
             detail.set_phase("open")
             step("keys", "\r")

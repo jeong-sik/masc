@@ -16537,7 +16537,6 @@ let main
            or a browser lane opens without it: the next visit starts on the
            Skill list, and an open request does not outlive the screen. *)
         state.tools_skill_focus <- Choosing_skill;
-        if state.tools_async_detail_open then Masc_tui_work_requests.Tools_task_requests.close_tools_async_detail state
       end;
       (match state.view with
        | Approvals ->

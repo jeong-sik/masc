@@ -3,22 +3,17 @@ let ( let* ) = Result.bind
 
 type provenance = Live_keeper | Assessment
 type capture_status = Recording | Recorded | Incomplete
-type step_kind = Message | Restart | Await_summary
-type step_status = Started | Collecting | Captured | Restart_observed | Summary_ready_observed
+type step_kind = Message | Restart
+type step_status = Started | Collecting | Captured | Restart_observed
 type scope = Reply | Working_state | Tool_calls
 type judgment_result = Unavailable | Pending | Measured of { probability : float; model : string }
 type judgment = { criterion_id : string; scope : scope; result : judgment_result }
-type request_range = { capture_id : string; body_sha256 : string; first_atom : int; summary_end_atom : int option }
-type omission_detail = { target_end_atom : int; requests : request_range list }
-type omission = Not_requested | Omission_unavailable of string | Not_observed of string * omission_detail | Observed of omission_detail
-type summary_readiness = Readiness_not_available | Covered of { end_atom : int; last_atom_digest : string }
 type memory_readiness = Memory_unavailable | Memory_operations of (string * string) list
 type step = {
   id : string; kind : step_kind; status : step_status;
   operation_state : string option; turn_ref : string option;
   working_state_messages : int option; working_state : Yojson.Safe.t list option; reply : string list;
-  omission : omission; target_end_atom : int option; judgments : judgment list;
-  readiness : summary_readiness option;
+  judgments : judgment list;
 }
 type t = {
   keeper : string; provenance : provenance; status : capture_status;
@@ -55,44 +50,6 @@ let nullable_natural json field =
   | Some value when value < 0 -> Error (field ^ ": expected a nonnegative integer")
   | value -> Ok value
 
-let target_boundary = function
-  | `Null -> Ok None
-  | json -> Result.map Option.some (required_nonnegative_int_field json "end_atom")
-
-let request_range json =
-  let* capture_id = required_nonempty_string_field json "capture_id" in
-  let* body_sha256 = required_sha256 json "body_sha256" in
-  let* first_atom = required_nonnegative_int_field json "first_atom" in
-  let* summary_end_atom = nullable_natural json "summary_end_atom" in
-  Ok { capture_id; body_sha256; first_atom; summary_end_atom }
-
-let omission_detail json =
-  let* boundary = required_object_field json "target_boundary" in
-  let* target_end_atom = required_nonnegative_int_field boundary "end_atom" in
-  let* rows = required_list_field json "requests" in
-  let* requests = decode_list "requests" request_range rows in
-  Ok { target_end_atom; requests }
-
-let omission = function
-  | `Null -> Ok Not_requested
-  | json ->
-    let* status = required_string_field json "status" in
-    match status with
-    | "unavailable" ->
-      let* reason = required_string_field json "reason" in Ok (Omission_unavailable reason)
-    | "not_observed" ->
-      let* reason = required_string_field json "reason" in
-      let* detail = omission_detail json in Ok (Not_observed (reason, detail))
-    | "observed" ->
-      let* detail = omission_detail json in
-      if detail.requests = [] || List.exists (fun request ->
-          request.first_atom < detail.target_end_atom ||
-          match request.summary_end_atom with
-          | None -> true | Some end_atom -> end_atom < detail.target_end_atom) detail.requests
-      then Error "observed omission requires covering W and every request beyond the target"
-      else Ok (Observed detail)
-    | _ -> Error ("prefix_omission: unsupported status " ^ status)
-
 let judgment json =
   let* criterion_id = required_nonempty_string_field json "criterion_id" in
   let* scope = choice json "scope" ["reply", Reply; "working_state", Working_state; "tool_calls", Tool_calls] in
@@ -110,21 +67,6 @@ let judgment json =
     | _ -> Error ("judgment: unsupported status " ^ status) in
   Ok { criterion_id; scope; result }
 
-let summary_readiness json =
-  let* state = required_string_field json "state" in
-  match state with
-  | "not_available" -> Ok Readiness_not_available
-  | "covered" ->
-    let* end_atom = required_nonnegative_int_field json "end_atom" in
-    let* last_atom_digest = required_nonempty_string_field json "last_atom_digest" in
-    Ok (Covered { end_atom; last_atom_digest })
-  | _ -> Error ("summary readiness: unsupported state " ^ state)
-
-let optional_summary_readiness json =
-  match Yojson.Safe.Util.member "summary_readiness" json with
-  | `Null -> Ok None
-  | value -> Result.map Option.some (summary_readiness value)
-
 let memory_readiness json =
   let* state = required_string_field json "state" in
   match state with
@@ -140,10 +82,10 @@ let memory_readiness json =
 
 let step json =
   let* id = required_nonempty_string_field json "step_id" in
-  let* kind = choice json "kind" ["message", Message; "restart", Restart; "await_summary", Await_summary] in
+  let* kind = choice json "kind" ["message", Message; "restart", Restart] in
   let* status = choice json "status"
       ["started", Started; "collecting", Collecting; "captured", Captured;
-       "restart_observed", Restart_observed; "summary_ready_observed", Summary_ready_observed] in
+       "restart_observed", Restart_observed] in
   let* operation_state = required_nullable_string_field json "operation_state" in
   let* () = match operation_state with
     | None -> Ok ()
@@ -159,15 +101,10 @@ let step json =
     | `List rows, Some count when List.length rows = count -> Ok (Some rows)
     | _ -> Error "working state messages and their observed count differ" in
   let* reply = require_string_list json "reply" in
-  let* omitted = required_member json "prefix_omission" in
-  let* omission = omission omitted in
-  let* boundary = required_member json "target_boundary" in
-  let* target_end_atom = target_boundary boundary in
   let* rows = required_list_field json "judgments" in
   let* judgments = decode_list "judgments" judgment rows in
-  let* readiness = optional_summary_readiness json in
   Ok { id; kind; status; operation_state; turn_ref; working_state_messages; working_state; reply;
-       omission; target_end_atom; judgments; readiness }
+       judgments }
 
 let of_yojson json =
   let* _ = choice json "schema" [schema, ()] in

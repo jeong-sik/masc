@@ -8,7 +8,6 @@ type lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
-  | Workspace_curator
   | Candle_appraiser
 
 val run_lane : lane -> Lane_run_identity.t

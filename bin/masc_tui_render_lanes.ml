@@ -1409,7 +1409,6 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     | Lane_run_identity.Librarian
     | Lane_run_identity.Hitl_auto_judge
     | Lane_run_identity.Board_attention
-    | Lane_run_identity.Workspace_curator
     | Lane_run_identity.Candle_appraiser
     | Lane_run_identity.Librarian_memory
     | Lane_run_identity.Workspace_memory_curator ->
@@ -2082,24 +2081,9 @@ let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_deta
   | Some availability, output ->
     lane_run_payload_availability_lines ~ko ~width availability output)
 
-module Continuity_report = Masc.Librarian_continuity_report
-
 type run_inspection =
   | Inspection_lane of Tui_decode.lane_run_detail
   | Inspection_measurement of string * Measurement.t
-
-let measurement_summary_lines ~ko (report : Continuity_report.t) =
-  let counts = Measurement.counts report in
-  let provenance = match report.provenance with
-    | Continuity_report.Synthetic -> if ko then "합성 입력" else "Synthetic input" in
-  [ Ansi.reset, (if ko then "  의미 보존 측정  " else "  Meaning preservation  ") ^ Terminal_text.single_line report.run_id
-  ; Theme.recede (), "  " ^ provenance ^ "  ·  " ^ Terminal_text.single_line report.started_at
-  ; Ansi.reset,
-    Printf.sprintf
-      (if ko then "  표본 %d  ·  채점 %d  ·  실패 %d  ·  미완료 %d"
-       else "  Samples %d  ·  Scored %d  ·  Failed %d  ·  Incomplete %d")
-      (List.length report.samples) counts.scored counts.failed counts.incomplete
-  ]
 
 let measurement_text_lines ~width lines =
   List.concat_map
@@ -2110,26 +2094,6 @@ let measurement_text_lines ~width lines =
           (Terminal_text.single_line line)
         |> List.map (fun line -> style, line)))
     lines
-
-let measurement_input_lines ~ko ~width ~sha256 (measurement : Measurement.snapshot) =
-  let report = measurement.report in
-  let module R = Continuity_report in
-  let metadata =
-    [ "AUTHORITATIVE FILE  " ^ report.output_path
-    ; "BLOB SHA256  " ^ sha256
-    ; "Published blob is a copy; it may be collected."
-    ; "INPUT  " ^ report.input_path
-    ; "INPUT SHA256  " ^ report.input_sha256
-    ; "CONFIG REVISION  " ^ report.config_revision
-    ]
-    @ (match report.binary_commit with None -> [] | Some value -> [ "BINARY COMMIT  " ^ value ])
-    @ (match report.executable_sha256 with None -> [] | Some value -> [ "EXECUTABLE SHA256  " ^ value ])
-    @ List.map (fun (id, sha256) ->
-        "CONTEXT SHA256  " ^ id ^ "  " ^ sha256) measurement.context_hashes
-  in
-  measurement_text_lines ~width (List.map (fun text -> Theme.recede (), text) metadata)
-  @ lane_run_payload_lines ~ko ~width
-      (`List (List.map (fun (sample : R.sample) -> R.case_to_yojson sample.case) report.samples))
 
 type measurement_output_part =
   | Measurement_text of (string * string)
@@ -2170,77 +2134,6 @@ let measurement_output_preview ~width ~output_path parts =
   in
   measurement_text_lines ~width notice @ List.concat_map render preview
 
-let measurement_output_lines ~width (report : Continuity_report.t) =
-  let module R = Continuity_report in
-  let prepared (request : R.generation_request) =
-    List.concat_map
-      (fun (wire : Llm_provider.Request_wire_observer.observation) ->
-        [ "PREPARED REQUEST  " ^ wire.provider ^ "  ·  " ^ wire.model
-        ; "PRE-DISPATCH SHA256  " ^ wire.body_sha256 ])
-      request.prepared_requests
-  in
-  let generation label (value : R.generation) =
-    [ label ^ "  " ^ value.response.model ^ "  ·  runtime " ^ value.request.runtime_id
-    ; "RESPONSE  " ^ value.response.response_id
-    ; value.response.text
-    ] @ prepared value.request
-  in
-  let question_lines = function
-    | R.Provided text -> [ "QUESTION PROVIDED"; text ]
-    | R.Generated value -> generation "QUESTION GENERATED" value
-  in
-  (* The sample header names the failed stage. Retain the stage when the
-     header scrolls away, without repeating the FAILED status. *)
-  let failed_generation label (value : R.failed_generation) =
-    [ label ^ " CAUSE  " ^ value.error
-    ; "REQUESTED  " ^ value.request.requested_model ^ "  ·  runtime " ^ value.request.runtime_id
-    ] @ prepared value.request
-    @ (match value.incomplete_response with
-       | None -> []
-       | Some response -> [ "INCOMPLETE RESPONSE  " ^ response.model ^ "  ·  " ^ response.response_id; response.text ])
-  in
-  let values =
-    List.filter_map (fun (sample : R.sample) -> match sample.progress with
-      | R.Scored { judgment; _ } -> Some (judgment.probability, sample.case.id)
-      | R.Not_started | R.Question_failed _ | R.Question_ready _ | R.Answer_failed _
-      | R.Answer_ready _ | R.Judge_failed _ -> None) report.samples
-    |> List.sort (fun (a, id_a) (b, id_b) ->
-        let order = Float.compare a b in if order = 0 then String.compare id_a id_b else order)
-  in
-  let probabilities =
-    (Ansi.bold, "RAW PROBABILITIES · NO PASS THRESHOLD")
-    :: (match values with
-        | [] -> [ Theme.muted (), "No scored samples" ]
-        | values -> List.map (fun (probability, id) ->
-            Ansi.reset, id ^ "  " ^ Yojson.Safe.to_string (`Float probability)) values)
-  in
-  let samples = List.concat_map (fun (sample : R.sample) ->
-      let style, status, lines = match sample.progress with
-        | R.Not_started -> Theme.muted (), "NOT STARTED", []
-        | R.Question_failed failed -> Theme.bad (), "QUESTION FAILED", failed_generation "QUESTION" failed
-        | R.Question_ready question -> Theme.info (), "INCOMPLETE · QUESTION READY", question_lines question
-        | R.Answer_failed (question, failed) -> Theme.bad (), "ANSWER FAILED",
-            question_lines question @ failed_generation "ANSWER" failed
-        | R.Answer_ready { question; answer } -> Theme.info (), "INCOMPLETE · ANSWER READY",
-            question_lines question @ generation "ANSWER" answer
-        | R.Judge_failed { question; answer; failure } -> Theme.bad (), "JUDGE FAILED",
-            question_lines question @ generation "ANSWER" answer
-            @ [ "JUDGE REQUESTED  " ^ failure.request.model ^ "  ·  " ^ failure.request.endpoint
-              ; "JUDGE CAUSE  " ^ failure.error ]
-        | R.Scored { question; answer; judgment } -> Ansi.reset, "SCORED",
-            question_lines question @ generation "ANSWER" answer
-            @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint
-              ; "Noul  " ^ Yojson.Safe.to_string (`Float judgment.probability)
-              ; "TRUE  " ^ judgment.request.true_criteria
-              ; "FALSE  " ^ judgment.request.false_criteria
-              ; "REQUEST SHA256  " ^ judgment.request_body_sha256 ]
-      in
-      [ Theme.recede (), ""; style, sample.case.id ^ "  ·  " ^ status ]
-      @ List.map (fun line -> Ansi.reset, line) lines) report.samples
-  in
-  measurement_output_preview ~width ~output_path:report.output_path
-    (List.map (fun line -> Measurement_text line) (probabilities @ samples))
-
 module Temporal = Masc.Tui_decode_temporal_continuity
 
 let temporal_summary_lines ~ko (report : Temporal.t) =
@@ -2275,7 +2168,7 @@ let temporal_input_lines ~width ~sha256 (report : Temporal.t) =
        | Some (Temporal.Memory_operations operations) ->
          ["MEMORY READINESS  " ^ String.concat "  ·  "
             (List.map (fun (tool, state) -> tool ^ " " ^ state) operations)])
-    @ [ "Durable originals are retained. Omission describes prepared organic ranges."
+    @ [ "Durable originals are retained."
       ; "Provider receipt and Librarian-only causal attribution remain unestablished."
       ; "Probabilities are separate observations with no pass threshold." ] in
   measurement_text_lines ~width (List.map (fun text -> Theme.recede (), text) metadata)
@@ -2285,34 +2178,17 @@ let temporal_output_lines ~width (report : Temporal.t) =
   let natural = function
     | None -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
     | Some value -> string_of_int value in
-  let detail (value : T.omission_detail) =
-    ("TARGET EXCLUSIVE END  " ^ string_of_int value.target_end_atom)
-    :: List.concat_map (fun (request : T.request_range) ->
-      [ "REQUEST  " ^ request.capture_id ^ "  ·  W END " ^ natural request.summary_end_atom
-        ^ "  ·  ORGANIC FIRST " ^ string_of_int request.first_atom
-      ; "BODY SHA256  " ^ request.body_sha256 ]) value.requests in
   let steps = List.concat_map (fun (step : T.step) ->
-    let kind = match step.kind with T.Message -> "MESSAGE" | T.Restart -> "LANE RESTART" | T.Await_summary -> "WAIT FOR W" in
+    let kind = match step.kind with T.Message -> "MESSAGE" | T.Restart -> "LANE RESTART" in
     let status = match step.status with
       | T.Started -> "STARTED" | T.Collecting -> "COLLECTING" | T.Captured -> "CAPTURED"
-      | T.Restart_observed -> "RESTART OBSERVED" | T.Summary_ready_observed -> "W READY · READINESS ONLY" in
+      | T.Restart_observed -> "RESTART OBSERVED" in
     let identity = [step.id ^ "  ·  " ^ kind ^ "  ·  " ^ status]
       @ (match step.turn_ref with None -> [] | Some value -> ["TURN  " ^ value])
       @ (match step.operation_state with None -> [] | Some value -> ["OPERATION  " ^ value])
       @ (match step.kind with
          | T.Message -> ["W MESSAGES IN LAST REQUEST  " ^ natural step.working_state_messages]
-         | T.Restart | T.Await_summary -> [])
-      @ (match step.target_end_atom with None -> [] | Some value -> ["WAIT TARGET END  " ^ string_of_int value]) in
-    let readiness = match step.readiness with
-      | None -> []
-      | Some T.Readiness_not_available -> ["SUMMARY READINESS  NOT AVAILABLE"]
-      | Some (T.Covered { end_atom; last_atom_digest = _ }) ->
-        ["SUMMARY READINESS  COVERED · W END " ^ string_of_int end_atom] in
-    let omitted = match step.omission with
-      | T.Not_requested -> []
-      | T.Omission_unavailable reason -> ["PREFIX OMISSION  UNAVAILABLE"; reason]
-      | T.Not_observed (reason, value) -> ["PREFIX OMISSION  NOT OBSERVED"; reason] @ detail value
-      | T.Observed value -> ["PREFIX OMISSION  OBSERVED · ALL ATTRIBUTED PREPARED REQUESTS"] @ detail value in
+         | T.Restart -> []) in
     let judgments = List.map (fun (value : T.judgment) ->
       let scope = match value.scope with T.Reply -> "reply" | T.Working_state -> "W" | T.Tool_calls -> "tool calls" in
       let observation = match value.result with
@@ -2326,7 +2202,7 @@ let temporal_output_lines ~width (report : Temporal.t) =
         [ Measurement_text (Ansi.reset, "W IN LAST PREPARED REQUEST")
         ; Measurement_json (Yojson.Safe.pretty_to_string (`List messages)) ] in
     [Measurement_text (Theme.recede (), "")]
-    @ List.map (fun value -> Measurement_text (Ansi.reset, value)) (identity @ readiness @ omitted)
+    @ List.map (fun value -> Measurement_text (Ansi.reset, value)) identity
     @ working_state
     @ List.map (fun value -> Measurement_text (Ansi.reset, value))
         ((if step.reply = [] then [] else "ORIGINAL REPLY" :: step.reply) @ judgments)) report.timeline in
@@ -2336,31 +2212,22 @@ let temporal_output_lines ~width (report : Temporal.t) =
 
 let inspection_summary_lines ~cols ~language ~now = function
   | Inspection_lane detail -> lane_run_summary_lines ~cols ~language ~now detail
-  | Inspection_measurement (_, Measurement.Snapshot measurement) ->
-      measurement_summary_lines ~ko:(language = Lang_ko) measurement.report
-  | Inspection_measurement (_, Measurement.Temporal report) ->
+  | Inspection_measurement (_, report) ->
       temporal_summary_lines ~ko:(language = Lang_ko) report
 
 let inspection_panel_titles ~ko = function
   | Inspection_lane detail -> lane_run_panel_titles ~ko detail
-  | Inspection_measurement (_, Measurement.Snapshot measurement) ->
-    (match measurement.report.provenance with
-     | Continuity_report.Synthetic ->
-         if ko then "입력 · 합성 표본" else "Input · Synthetic cases"),
-    (if ko then "관측 · 판정 없음" else "Observations · No verdict")
-  | Inspection_measurement (_, Measurement.Temporal _) ->
+  | Inspection_measurement (_, _) ->
     (if ko then "원본 · 준비된 요청 근거" else "Source · Prepared request evidence"),
     (if ko then "타임라인 · 판정 없음" else "Timeline · No verdict")
 
 let inspection_input_lines ~ko ~width = function
   | Inspection_lane detail -> lane_run_input_lines ~ko ~width detail
-  | Inspection_measurement (sha256, Measurement.Snapshot report) -> measurement_input_lines ~ko ~width ~sha256 report
-  | Inspection_measurement (sha256, Measurement.Temporal report) -> temporal_input_lines ~width ~sha256 report
+  | Inspection_measurement (sha256, report) -> temporal_input_lines ~width ~sha256 report
 
 let inspection_output_lines ~ko ~details ~width = function
   | Inspection_lane detail -> lane_run_output_lines ~ko ~details ~width detail
-  | Inspection_measurement (_, Measurement.Snapshot measurement) -> measurement_output_lines ~width measurement.report
-  | Inspection_measurement (_, Measurement.Temporal report) -> temporal_output_lines ~width report
+  | Inspection_measurement (_, report) -> temporal_output_lines ~width report
 
 let lane_run_stacked_lines ~ko ~details ~width detail =
   let input_title, output_title = inspection_panel_titles ~ko detail in

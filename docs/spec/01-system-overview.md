@@ -126,7 +126,6 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `masc_lane_cli_probe` | `masc-lane-cli-probe` | `bin/masc_lane_cli_probe.ml` | 공식 CLI 레인 가용성 프로브. |
 | `deployment_preflight_helper` | `masc-deployment-preflight-helper` | `bin/deployment_preflight_helper.ml` | 배포 사전 점검 헬퍼. |
 | `masc_librarian_replay` | `masc-librarian-replay` | `bin/masc_librarian_replay.ml` | Librarian 메모리 재생 검증기. |
-| `masc_librarian_continuity` | `masc-librarian-continuity` | `bin/masc_librarian_continuity.ml` | Librarian 연속성 검증기. |
 | `masc_librarian_preflight_eval` | `masc-librarian-preflight-eval` | `bin/masc_librarian_preflight_eval.ml` | Librarian 사전 평가 실행기. |
 | `masc_msx_addon_worker` | `masc-msx-addon-worker` | `bin/masc_msx_addon_worker.ml` | MSX 공유 머신 Add-on worker. |
 | `masc_dos_addon_worker` | `masc-dos-addon-worker` | `bin/masc_dos_addon_worker.ml` | DOS 공유 머신 Add-on worker. |

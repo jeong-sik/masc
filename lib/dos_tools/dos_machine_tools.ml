@@ -399,7 +399,7 @@ let earlier_start_failure_fields ~on_current_autosave =
    eject, or after a worker start that had nothing to resume or could not
    restore it. It says what the two autosave slots hold, how to resume, and
    why the start did not, when it tried. Every other refusal is unaffected. *)
-let no_machine ?(extra = []) ~base_path ~tool_name ~start_time =
+let no_machine ~extra ~base_path ~tool_name ~start_time =
   let found = lookup_autosave_slots ~base_path in
   let start_failure = start_failure_on_current_autosave ~base_path in
   let message = no_machine_message (no_machine_guidance ~start_failure found) in
@@ -1262,7 +1262,7 @@ let handle_peek ~tool_name ~start_time ~base_path args =
              ; ("hex", `String hex)
              ])
          ()
-     | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+     | Error Dos_lane.No_machine -> no_machine ~extra:[] ~base_path ~tool_name ~start_time
      | Error
          (( Dos_lane.Activity_disabled
           | Dos_lane.Activity_unobserved

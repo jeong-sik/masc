@@ -91,10 +91,23 @@ module For_testing : sig
     :  Runtime_acp_client.error
     -> Keeper_official_client_session_store.recovery_failure
 
+  val classify_prompt_error
+    :  is_gate_continuation:bool
+    -> activity_observed:bool
+    -> Runtime_acp_client.error
+    -> Keeper_official_client_session_store.recovery_failure * Agent_core.Error.t
+
   val api_usage_of_acp_usage
     :  driver:Runtime_acp_client.driver
     -> Runtime_acp_client.usage
     -> Agent_core.Types.api_usage
+
+  val usage_is_nonzero : Agent_core.Types.api_usage -> bool
+
+  val effective_context_used
+    :  driver:Runtime_acp_client.driver
+    -> Runtime_acp_client.usage
+    -> int option
 
   val stop_reason_of_acp_stop_reason
     :  Runtime_acp_client.stop_reason
@@ -119,6 +132,12 @@ module For_testing : sig
     -> allowed_tool_names:string list
     -> Runtime_acp_client.tool_call_identity
     -> bool
+
+  val process_config_sha256
+    :  native_posture:Runtime_native_tools.posture
+    -> skills_dirs:string list
+    -> Runtime_execution.acp_client
+    -> string
 
   val rollover_threshold : float
 
@@ -148,7 +167,8 @@ module For_testing : sig
     -> bool
 
   val hydrate_start_messages
-    :  keepers_dir:string
+    :  ?appended_nudges:Agent_core.Types.message list
+    -> keepers_dir:string
     -> keeper_id:string
     -> prefer_handoff:bool
     -> Agent_core.Types.message list
@@ -165,6 +185,36 @@ module For_testing : sig
     -> initial_messages:Agent_core.Types.message list
     -> unit
 
+  val project_stream_for_testing
+    :  ?on_native_action:
+         (official_turn:int
+          -> identity:Runtime_native_tools.action_identity
+          -> tool_name:string
+          -> unit)
+    -> ?on_native_tool_completion:
+         (block_index:int
+          -> tool_call_id:string option
+          -> Runtime_native_tools.completion
+          -> unit)
+    -> ?on_usage_report:(Keeper_client_usage_report.t -> unit)
+    -> ?on_tool_execution:
+         (block_index:int -> tool_call_id:string -> execution_id:Ids.Execution_id.t -> unit)
+    -> ?on_event:(Agent_core.Types.sse_event -> unit)
+    -> driver:Runtime_acp_client.driver
+    -> model:string
+    -> session_id:string
+    -> turn_count:int
+    -> native_posture:Runtime_native_tools.posture
+    -> allowed_tool_names:string list
+    -> unit
+    -> (Runtime_acp_client.stream_event -> unit)
+       * (call_id:string -> tool_name:string -> arguments:Yojson.Safe.t -> bool)
+       * (call_id:string -> unit)
+       * (stop_reason:Agent_core.Types.stop_reason
+          -> usage:Agent_core.Types.api_usage option
+          -> unit)
+       * (unit -> Yojson.Safe.t)
+
   val start_mcp_bridge_for_specs
     :  sw:Eio.Switch.t
     -> env:Eio_unix.Stdenv.base
@@ -175,6 +225,7 @@ module For_testing : sig
     { keeper_name : string
     ; runtime_id : string
     ; tool_surface_sha256 : string
+    ; process_config_sha256 : string
     ; cwd : string
     ; dangerously_skip_permissions : bool
     }

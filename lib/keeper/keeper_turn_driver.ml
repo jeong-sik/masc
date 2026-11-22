@@ -3266,9 +3266,9 @@ let run_named
       let has_tools, surface_enabled = match runtime.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Acp _ -> tools <> [], true
-        | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
+        | Runtime_execution.Antigravity_cli _ -> tools <> [], true
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Acp _ -> tools <> [], runtime.model.tools_support in
       let complete_media () =
         match Runtime_agent.decide_modality_reroute_for_runtime_candidates
           ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
@@ -3860,6 +3860,7 @@ let run_named
             Keeper_official_client_attempt.refused_before_dispatch error
           | Ok host ->
             reset_model_input_observation ();
+            let tools = if runtime.model.tools_support then tools else [] in
             let on_transmitted_model_input transmitted =
               record_transmitted_model_input transmitted;
               Option.iter
@@ -3921,15 +3922,33 @@ let run_named
               ()
         in
         let acp_attempt =
-          match provider_config_transform with
-          | Some _ ->
+          match provider_config_transform, agent_core_checkpoint with
+          | Some _, _ ->
             Keeper_official_client_attempt.refused_before_dispatch
               (Agent_core.Error.Config
                  (Agent_core.Error.InvalidConfig
                     { field = "provider_config_transform"
                     ; detail = "provider config transforms cannot target an ACP runtime"
                     }))
-          | None -> run_acp ()
+          | None, Some _ ->
+            Log.Keeper.info
+              "%s: official-client runtime %s resolves start-or-resume from \
+               its durable session store; the Agent Core checkpoint payload is not \
+               replayed"
+              keeper_name
+              attempt_runtime_id;
+            emit_runtime_manifest
+              ~status:"checkpoint_not_replayed"
+              ~decision:
+                (`Assoc
+                  [ ( "routing_action"
+                    , `String "official_client_checkpoint_not_replayed" )
+                  ; ( "routing_reason"
+                    , `String "official_client_session_store_owns_resume" )
+                  ])
+              Keeper_runtime_manifest.Runtime_routed;
+            run_acp ()
+          | None, None -> run_acp ()
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let acp_result =

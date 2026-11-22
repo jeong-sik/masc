@@ -79,6 +79,16 @@ val decode_hub_event_msgs :
     [/api/v1/dashboard/logs/stream] frames ([{"reset": ..., "entries": [...]}])
     in chronological order as well as single-entry fallback. *)
 
+val run_setup_login_stream :
+  publish:
+    ((Masc_tui_protocol.Wire_runtime.setup_login_receipt, Msg.http_error) result ->
+    unit) ->
+  stream:(on_chunk:(string -> unit) -> (unit, Msg.http_error) result) ->
+  unit
+(** Run a setup-login SSE stream, delivering each receipt at most once and
+    propagating stream errors whenever no terminal receipt
+    ([complete]/[completed]/[failed]/[cancelled]/[interrupted]) has arrived. *)
+
 val is_local_host : string -> bool
 (** [true] iff [host] refers to the local loopback interface
     (["127.0.0.1"], ["localhost"], ["::1"], or ["[::1]"], case-insensitive

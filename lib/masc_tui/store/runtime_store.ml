@@ -377,28 +377,87 @@ let effective_cache_hit_pct t =
   best_cache_hit_pct_of ~models_metrics:t.models_metrics
     ~runtime_metrics:t.runtime_metrics ~efficiency:t.efficiency
 
-let effective_spend_24h_usd t =
+type spend_24h_source =
+  | Spend_provider_24h
+  | Spend_keeper_turns_24h
+  | Spend_unreported
+
+type spend_24h_breakdown = {
+  source : spend_24h_source;
+  total_usd : float Observed.t;
+  provider_usd : float Observed.t;
+  keeper_attributed_usd : float Observed.t;
+  system_unattributed_usd : float option;
+}
+
+type spend_table_window =
+  | Spend_window_mtd of { month : string; days_covered : int }
+  | Spend_window_24h of { window_minutes : int }
+  | Spend_window_none
+
+let provider_spend_24h_usd t =
   match Observed.to_option t.models_metrics with
   | Some m when Observed.is_value m.fleet_cost_usd -> m.fleet_cost_usd
   | Some _ | None -> (
       match Observed.to_option t.runtime_metrics with
       | Some r when Observed.is_value r.fleet_cost_usd -> r.fleet_cost_usd
-      | Some _ | None -> (
-          match t.keeper_costs with
-          | Observed.Value { data; observed_at; _ } ->
-              let sum, seen =
-                List.fold_left
-                  (fun (acc, any) (row : Wire_runtime.keeper_cost_row) ->
-                    match Observed.to_option row.total_cost_usd with
-                    | Some c -> (acc +. c, true)
-                    | None -> (acc, any))
-                  (0.0, false) data.rows
-              in
-              if seen then Observed.value ~observed_at sum
-              else Observed.unreported
-          | Observed.Loading _ | Observed.Absent | Observed.Unreported
-          | Observed.Failed _ ->
-              Observed.unreported))
+      | Some _ | None -> Observed.unreported)
+
+let keeper_attributed_spend_24h_usd t =
+  match t.keeper_costs with
+  | Observed.Value { data; observed_at; _ } ->
+      let sum, seen =
+        List.fold_left
+          (fun (acc, any) (row : Wire_runtime.keeper_cost_row) ->
+            match Observed.to_option row.total_cost_usd with
+            | Some c -> (acc +. c, true)
+            | None -> (acc, any))
+          (0.0, false) data.rows
+      in
+      if seen then Observed.value ~observed_at sum else Observed.unreported
+  | Observed.Loading _ | Observed.Absent | Observed.Unreported
+  | Observed.Failed _ ->
+      Observed.unreported
+
+let effective_spend_24h_usd t =
+  let prov = provider_spend_24h_usd t in
+  if Observed.is_value prov then prov else keeper_attributed_spend_24h_usd t
+
+let spend_24h_breakdown t =
+  let provider_usd = provider_spend_24h_usd t in
+  let keeper_attributed_usd = keeper_attributed_spend_24h_usd t in
+  let source, total_usd =
+    if Observed.is_value provider_usd then (Spend_provider_24h, provider_usd)
+    else if Observed.is_value keeper_attributed_usd then
+      (Spend_keeper_turns_24h, keeper_attributed_usd)
+    else (Spend_unreported, Observed.unreported)
+  in
+  let system_unattributed_usd =
+    match
+      (Observed.to_option provider_usd, Observed.to_option keeper_attributed_usd)
+    with
+    | Some p, Some k when Float.is_finite p && Float.is_finite k && p > k +. 0.005
+      ->
+        Some (p -. k)
+    | _ -> None
+  in
+  {
+    source;
+    total_usd;
+    provider_usd;
+    keeper_attributed_usd;
+    system_unattributed_usd;
+  }
+
+let keeper_spend_table_window t =
+  match Observed.to_option t.efficiency with
+  | Some eff when eff.keepers <> [] ->
+      Spend_window_mtd { month = eff.month; days_covered = eff.days_covered }
+  | Some _ | None -> (
+      match Observed.to_option t.keeper_costs with
+      | Some kc when kc.rows <> [] ->
+          Spend_window_24h { window_minutes = kc.window_minutes }
+      | Some _ | None -> Spend_window_none)
 
 let tool_series_totals t =
   match Observed.to_option t.tool_series with

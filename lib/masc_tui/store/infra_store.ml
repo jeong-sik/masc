@@ -128,7 +128,6 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
       Hashtbl.replace running_tbl k.name (k.keepalive_running && not k.paused))
     keepers;
   let microvms = ref [] in
-  let microvm_running = ref 0 in
   let ssh_unbound = ref [] in
   let dockers = ref [] in
   List.iter
@@ -138,13 +137,15 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
       in
       match prof with
       | Wire_fleet.Profile_microvm ->
-          if is_running then incr microvm_running;
+          (* Without /api/v1/infra/sandboxes we have no live agent socket
+             observation: NEVER report presence="running" or increment
+             microvm_running while agent_socket is Socket_absent. *)
           let guest : Wire_infra.microvm_guest =
             {
               keeper;
               backend = "apple_container";
               guest_name = "masc-" ^ keeper;
-              presence = (if is_running then "running" else "stopped");
+              presence = "unobserved";
               agent_socket = Wire_infra.Socket_absent { path_basename = None };
               shim_parity = Wire_infra.Shim_undeclared;
               network_mode = Wire_infra.Net_inherit;
@@ -215,7 +216,7 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
     {
       probe_state = Wire_infra.Probe_stale wall_unix;
       microvm_declared = List.length microvm_guests;
-      microvm_running = !microvm_running;
+      microvm_running = 0;
       microvm_sockets_present = 0;
       microvm_shim_mismatch = 0;
       ssh_pools_count = 0;

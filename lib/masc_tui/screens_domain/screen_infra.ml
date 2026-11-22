@@ -22,7 +22,7 @@ let socket_status_display = function
   | Wire_infra.Socket_unreadable _ ->
       (Glyph.Live_failing, Theme.Status_critical, "unread")
 
-let shim_parity_display = function
+let shim_parity_display ?(lang = Say.Lang_en) ?(fallback_404 = false) = function
   | Wire_infra.Shim_matched id ->
       (Glyph.Check_mark, Theme.Status_ok, "match " ^ H.short_hash ~len:7 id)
   | Wire_infra.Shim_mismatch { shim_identity; _ } ->
@@ -30,7 +30,13 @@ let shim_parity_display = function
       , Theme.Status_attention
       , "mismatch " ^ H.short_hash ~len:7 shim_identity )
   | Wire_infra.Shim_undeclared ->
-      (Glyph.Missing_absent, Theme.Status_historical, "undeclared")
+      let lbl =
+        if fallback_404 then
+          Say.resolve lang
+            (Say.make ~ko:"심 미보고 (Legacy API)" ~en:"Shim unreported (Legacy API)")
+        else Say.resolve lang (Say.make ~ko:"심 미보고" ~en:"Shim unreported")
+      in
+      (Glyph.Missing_absent, Theme.Status_historical, lbl)
   | Wire_infra.Shim_unavailable reason ->
       (Glyph.Live_failing, Theme.Status_critical, reason)
 
@@ -115,8 +121,24 @@ let draw_sandbox_inspector_body ~grid ~(inner : Rect.t) ~(theme : Theme.t) ~bp
       match entry with
       | Entry_microvm g ->
           let sg, _, sl = socket_status_display g.agent_socket in
+          let honest_presence =
+            match g.agent_socket with
+            | Wire_infra.Socket_absent _
+              when model.infra.sandboxes_fallback_404
+                   || String.equal g.presence "unobserved" ->
+                Say.resolve lang
+                  (Say.make ~ko:"미관측 (Legacy API)" ~en:"unobserved (Legacy API)")
+            | Wire_infra.Socket_absent _ when String.equal g.presence "running" ->
+                Say.resolve lang
+                  (Say.make ~ko:"소켓 없음" ~en:"socket absent")
+            | Wire_infra.Socket_present _
+            | Wire_infra.Socket_absent _
+            | Wire_infra.Socket_non_socket _
+            | Wire_infra.Socket_unreadable _ ->
+                g.presence
+          in
           ( Printf.sprintf "%s %s · vm" (Glyph.to_utf8 sg) sl
-          , Printf.sprintf "%s · %s · %s" company g.guest_name g.presence )
+          , Printf.sprintf "%s · %s · %s" company g.guest_name honest_presence )
       | Entry_ssh_bound (pool, _) ->
           let sg, sl, rtt_s =
             match pool.reachability with
@@ -196,7 +218,10 @@ let draw_sandbox_inspector_body ~grid ~(inner : Rect.t) ~(theme : Theme.t) ~bp
              ~value_style:(H.status_style ~theme st)
              (Say.resolve lang (Say.make ~ko:"소켓" ~en:"Socket"))
              (Printf.sprintf "%s %s%s" (Glyph.to_utf8 sg) sl sock_detail);
-           let shg, sht, shl = shim_parity_display g.shim_parity in
+           let shg, sht, shl =
+             shim_parity_display ~lang
+               ~fallback_404:model.infra.sandboxes_fallback_404 g.shim_parity
+           in
            put_row
              ~value_style:(H.status_style ~theme sht)
              (Say.resolve lang (Say.make ~ko:"심/패리티" ~en:"Shim"))
@@ -445,8 +470,8 @@ let draw_sandbox_inspector_body ~grid ~(inner : Rect.t) ~(theme : Theme.t) ~bp
                  ~y:(empty_box.y + 1) ~max_w:(Int.max 0 (empty_box.w - 2))
                  ~style:(H.whisper_style ~theme ())
                  (Say.resolve lang
-                    (Say.make ~ko:"[Enter] 전체 상세 · [J] 속성 트리"
-                       ~en:"[Enter] Full dive · [J] Json_tree")))
+                    (Say.make ~ko:"[Enter] 전체 상세 · [Space] 속성 트리"
+                       ~en:"[Enter] Full dive · [Space] Json_tree")))
         end
         else begin
           let log_bg_rgb = theme.surface_0 in
@@ -558,14 +583,63 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
            | _ -> (top_rect, Rect.empty, Rect.empty)
          in
          (* Card 1: apple_container microVM Fleet *)
+         let has_shim_unavail =
+           List.exists
+             (fun (g : Wire_infra.microvm_guest) ->
+               match g.shim_parity with
+               | Wire_infra.Shim_unavailable _ -> true
+               | Wire_infra.Shim_matched _
+               | Wire_infra.Shim_mismatch _
+               | Wire_infra.Shim_undeclared ->
+                   false)
+             snap.microvm_guests
+         in
+         let has_shim_matched =
+           List.exists
+             (fun (g : Wire_infra.microvm_guest) ->
+               match g.shim_parity with
+               | Wire_infra.Shim_matched _ -> true
+               | Wire_infra.Shim_mismatch _
+               | Wire_infra.Shim_undeclared
+               | Wire_infra.Shim_unavailable _ ->
+                   false)
+             snap.microvm_guests
+         in
+         let all_shim_undeclared =
+           snap.microvm_guests <> []
+           && List.for_all
+                (fun (g : Wire_infra.microvm_guest) ->
+                  match g.shim_parity with
+                  | Wire_infra.Shim_undeclared -> true
+                  | Wire_infra.Shim_matched _
+                  | Wire_infra.Shim_mismatch _
+                  | Wire_infra.Shim_unavailable _ ->
+                      false)
+                snap.microvm_guests
+         in
          let shim_badge =
            if snap.microvm_shim_mismatch > 0 then
              H.make_badge ~glyph:Glyph.Warning_triangle
                ~tone:Theme.Status_attention
                (Printf.sprintf "%d mismatch" snap.microvm_shim_mismatch)
-           else
+           else if has_shim_unavail then
+             H.make_badge ~glyph:Glyph.Live_failing ~tone:Theme.Status_critical
+               (Say.resolve lang (Say.make ~ko:"심 불가" ~en:"shim unavail"))
+           else if inf.sandboxes_fallback_404 || all_shim_undeclared then
+             H.make_badge ~glyph:Glyph.Missing_absent
+               ~tone:Theme.Status_historical
+               (Say.resolve lang
+                  (if inf.sandboxes_fallback_404 then
+                     Say.make ~ko:"심 미보고 (Legacy API)"
+                       ~en:"shim unreported (Legacy API)"
+                   else Say.make ~ko:"심 미보고" ~en:"shim unreported"))
+           else if has_shim_matched then
              H.make_badge ~glyph:Glyph.Check_mark ~tone:Theme.Status_ok
                (Say.resolve lang (Say.make ~ko:"심 일치" ~en:"shim match"))
+           else
+             H.make_badge ~glyph:Glyph.Missing_absent
+               ~tone:Theme.Status_historical
+               (Say.resolve lang (Say.make ~ko:"심 미보고" ~en:"shim unreported"))
          in
          let i1 =
            Card.draw ~cache grid ~rect:c1 ~theme
@@ -577,17 +651,24 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
            let y = ref i1.y and bot = Rect.bottom i1 in
            let bg = Color.of_rgb theme.surface_1 in
            if !y < bot then begin
+             let run_glyph =
+               if snap.microvm_running > 0 then Glyph.Live_healthy
+               else Glyph.Live_idle
+             in
              let run_txt =
                Printf.sprintf "%s %d/%d running · %d .sock"
-                 (Glyph.to_utf8 Glyph.Live_healthy)
-                 snap.microvm_running snap.microvm_declared
-                 snap.microvm_sockets_present
+                 (Glyph.to_utf8 run_glyph) snap.microvm_running
+                 snap.microvm_declared snap.microvm_sockets_present
+             in
+             let run_style =
+               if snap.microvm_running > 0 then H.anchor_style ~theme ()
+               else H.secondary_style ~theme ()
              in
              let bw = if i1.w >= 34 && snap.microvm_declared > 0 then 6 else 0 in
              ignore
                (H.put_clipped ~grid ~clip:i1 ~x:i1.x ~y:!y
                   ~max_w:(i1.w - if bw > 0 then bw + 1 else 0)
-                  ~style:(H.anchor_style ~theme ()) run_txt);
+                  ~style:run_style run_txt);
              if bw > 0 then
                ignore
                  (Chart.draw_ratio_bar_run ~clip:i1 grid
@@ -600,7 +681,13 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
            end;
            if !y < bot then begin
              let vt, vg, vtxt =
-               if invalid_vols = [] then
+               if inf.sandboxes_fallback_404 then
+                 ( Theme.Status_historical
+                 , Glyph.Missing_absent
+                 , Say.resolve lang
+                     (Say.make ~ko:"소켓·심 미관측 (Legacy API)"
+                        ~en:"sockets/shim unobserved (Legacy API)") )
+               else if invalid_vols = [] then
                  ( Theme.Status_ok
                  , Glyph.Live_healthy
                  , Say.resolve lang
@@ -2038,8 +2125,8 @@ let render_dive_sandbox ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
               ~tone:
                 (if inf.show_raw_json then Theme.Status_active
                  else Theme.Status_historical)
-              (if inf.show_raw_json then "[J] Json_tree ON"
-               else "[J] Json_tree"))
+              (if inf.show_raw_json then "[Space] Json_tree ON"
+               else "[Space] Json_tree"))
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
          (Say.resolve lang
             (Say.make ~ko:"인프라 > 샌드박스 상세" ~en:"Infra > Sandbox Dive")))
@@ -2124,8 +2211,8 @@ let render_dive_lane ~lane_id ~(model : Model.t) ~cache ~(rect : Rect.t)
               ~tone:
                 (if inf.show_raw_json then Theme.Status_active
                  else Theme.Status_historical)
-              (if inf.show_raw_json then "[J] Json_tree ON"
-               else "[J] Json_tree"))
+              (if inf.show_raw_json then "[Space] Json_tree ON"
+               else "[Space] Json_tree"))
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
          (Say.resolve lang
             (Say.make ~ko:"런타임 > 페일오버 레인 상세"
@@ -2280,7 +2367,7 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
          ~badge:
            (H.make_badge ~glyph:Glyph.Historical_incident
               ~tone:Theme.Status_historical
-              (if inf.show_raw_json then "[J] Json_tree ON"
+              (if inf.show_raw_json then "[Space] Json_tree ON"
                else
                  Say.resolve lang
                    (Say.make ~ko:"이력 원장 (Ch3)" ~en:"History Ledger (Ch3)")))

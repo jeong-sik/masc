@@ -2604,6 +2604,665 @@ let test_v25_knowledge_stacked_bar_and_conflict_rails () =
   Alcotest.(check bool) "Wiki Wide renders TOC rail" true
     (contains_sub ~needle:"목차" ~haystack:(grid_all_text g_wiki))
 
+let test_p1_7_fleet_health_counts_ssot () =
+  let mk_k ~name ~health ?(paused = false) ?(keepalive_running = true) () :
+      Wire_fleet.keeper_summary =
+    {
+      name;
+      group = Some "MASC Core";
+      company = "MASC Core";
+      health;
+      paused;
+      keepalive_running;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "sonnet";
+      model_id = Some "claude-sonnet-4";
+      current_task_id = None;
+      context_ratio = Observed.unreported;
+      total_turns = Observed.unreported;
+      total_tokens = Observed.unreported;
+      cost_24h_usd = Observed.unreported;
+      last_turn_at_unix = None;
+      active_turn = None;
+      activity_sparkline_24h = [];
+    }
+  in
+  (* Live 8935 realistic 32-keeper roster: 11 active (3 working + 7 healthy + 1 degraded),
+     5 failing (with keepalive_running=true!), 16 ordinary offline keepers. *)
+  let keepers =
+    List.init 3 (fun i ->
+        mk_k ~name:(Printf.sprintf "work-%d" i) ~health:Wire_fleet.Keeper_working ())
+    @ List.init 7 (fun i ->
+        mk_k ~name:(Printf.sprintf "ok-%d" i) ~health:Wire_fleet.Keeper_healthy ())
+    @ [ mk_k ~name:"deg-0" ~health:Wire_fleet.Keeper_degraded () ]
+    @ List.init 5 (fun i ->
+        mk_k ~name:(Printf.sprintf "fail-%d" i) ~health:Wire_fleet.Keeper_failing
+          ~keepalive_running:true ())
+    @ List.init 16 (fun i ->
+        mk_k ~name:(Printf.sprintf "off-%d" i) ~health:Wire_fleet.Keeper_offline
+          ~keepalive_running:false ())
+  in
+  let hc = Fleet_store.fleet_health_counts keepers in
+  Alcotest.(check int) "total = 32" 32 hc.total;
+  Alcotest.(check int) "active = 11" 11 hc.active;
+  Alcotest.(check int) "working = 3" 3 hc.working;
+  Alcotest.(check int) "healthy = 7" 7 hc.healthy;
+  Alcotest.(check int) "degraded = 1" 1 hc.degraded;
+  Alcotest.(check int) "failing = 5 (never lumps 16 offline into 21)" 5 hc.failing;
+  Alcotest.(check int) "offline = 16" 16 hc.offline;
+  Alcotest.(check int) "paused = 0" 0 hc.paused;
+  Alcotest.(check int) "active partition invariant" hc.active
+    (hc.working + hc.healthy + hc.degraded);
+  Alcotest.(check int) "total partition invariant" hc.total
+    (hc.active + hc.failing + hc.paused + hc.offline);
+  let k_off = mk_k ~name:"stopped-k" ~health:Wire_fleet.Keeper_offline ~keepalive_running:false () in
+  let k_fail = mk_k ~name:"broken-k" ~health:Wire_fleet.Keeper_failing () in
+  Alcotest.(check bool) "Keeper_offline maps to Health.Idle (not Down)" true
+    (match Fleet_store.keeper_live_state k_off with
+    | Health.Idle -> true
+    | Health.Healthy
+    | Health.Working _
+    | Health.Needs_attention _
+    | Health.Degraded _
+    | Health.Down _ ->
+        false);
+  Alcotest.(check bool) "Keeper_failing maps to Health.Down" true
+    (match Fleet_store.keeper_live_state k_fail with
+    | Health.Down _ -> true
+    | Health.Healthy
+    | Health.Working _
+    | Health.Needs_attention _
+    | Health.Idle
+    | Health.Degraded _ ->
+        false)
+
+let test_p1_5_infra_sandboxes_404_fallback_honesty () =
+  let mk_k ~name ~health : Wire_fleet.keeper_summary =
+    {
+      name;
+      group = Some "MASC Core";
+      company = "MASC Core";
+      health;
+      paused = false;
+      keepalive_running = (health <> Wire_fleet.Keeper_offline);
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "sonnet";
+      model_id = None;
+      current_task_id = None;
+      context_ratio = Observed.unreported;
+      total_turns = Observed.unreported;
+      total_tokens = Observed.unreported;
+      cost_24h_usd = Observed.unreported;
+      last_turn_at_unix = None;
+      active_turn = None;
+      activity_sparkline_24h = [];
+    }
+  in
+  let keepers =
+    List.init 5 (fun i ->
+        mk_k ~name:(Printf.sprintf "vm-ok-%02d" i) ~health:Wire_fleet.Keeper_healthy)
+    @ List.init 14 (fun i ->
+        mk_k ~name:(Printf.sprintf "vm-off-%02d" i) ~health:Wire_fleet.Keeper_offline)
+  in
+  let profiles =
+    List.map (fun (k : Wire_fleet.keeper_summary) -> (k.name, Wire_fleet.Profile_microvm))
+      keepers
+  in
+  let infra =
+    Infra_store.empty
+    |> Infra_store.set_tab Nav.Infra_sandboxes
+    |> Infra_store.apply_sandboxes_fallback ~observed_at:now_mono
+         ~wall_unix:now_unix ~keepers ~sandbox_profiles:profiles
+         ~tool_series_totals:None
+  in
+  (match Observed.to_option infra.sandboxes with
+  | None -> Alcotest.fail "expected fallback sandboxes snapshot"
+  | Some snap ->
+      Alcotest.(check int) "19 microVM guests synthesized" 19 snap.microvm_declared;
+      Alcotest.(check int)
+        "microvm_running = 0 when agent_socket = Socket_absent (never 5/19)" 0
+        snap.microvm_running;
+      List.iter
+        (fun (g : Wire_infra.microvm_guest) ->
+          Alcotest.(check bool) "fallback shim_parity = Shim_undeclared" true
+            (g.shim_parity = Wire_infra.Shim_undeclared);
+          Alcotest.(check bool)
+            "fallback presence is NOT 'running' when Socket_absent" false
+            (String.equal g.presence "running"))
+        snap.microvm_guests);
+  List.iter
+    (fun lang ->
+      let m0 = Model.initial ~cols:140 ~rows:40 ~lang () in
+      let m =
+        {
+          m0 with
+          freshness = { m0.freshness with last_wall_unix = now_unix };
+          infra;
+        }
+      in
+      let g =
+        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+            Screen_infra.render ~model:m ~cache ~rect gr)
+      in
+      assert_grid_invariants ~label:("P1-5/InfraFallback/" ^ Say.lang_code lang) g;
+      let txt = grid_all_text g in
+      let expected_shim =
+        match lang with
+        | Say.Lang_ko -> "심 미보고"
+        | Say.Lang_en -> "Shim unreported"
+      in
+      let forbidden_green_shim =
+        match lang with
+        | Say.Lang_ko -> "✓ 심 일치"
+        | Say.Lang_en -> "✓ Shim match"
+      in
+      Alcotest.(check bool)
+        ("renders neutral Shim_undeclared label (" ^ Say.lang_code lang ^ ")")
+        true
+        (contains_sub ~needle:expected_shim ~haystack:txt);
+      Alcotest.(check bool)
+        ("mentions Legacy API on 404 fallback (" ^ Say.lang_code lang ^ ")")
+        true
+        (contains_sub ~needle:"Legacy API" ~haystack:txt);
+      Alcotest.(check bool)
+        ("NEVER renders false-green shim match (" ^ Say.lang_code lang ^ ")")
+        false
+        (contains_sub ~needle:forbidden_green_shim ~haystack:txt);
+      Alcotest.(check bool)
+        ("NEVER renders 5/19 running contradiction (" ^ Say.lang_code lang ^ ")")
+        false
+        (contains_sub ~needle:"5/19" ~haystack:txt);
+      (* Sandbox_dive aligns raw JSON toggle hint to [Space], never conflicting [J] *)
+      let g_dive =
+        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+            Screen_infra.render_dive ~target:(Nav.Sandbox_dive "vm-ok-00")
+              ~model:m ~cache ~rect gr)
+      in
+      assert_grid_invariants ~label:("P1-5/SandboxDive/" ^ Say.lang_code lang) g_dive;
+      let dive_txt = grid_all_text g_dive in
+      Alcotest.(check bool) "Sandbox_dive uses [Space] for Json_tree" true
+        (contains_sub ~needle:"[Space]" ~haystack:dive_txt);
+      Alcotest.(check bool) "Sandbox_dive never prints conflicting [J] Json_tree"
+        false
+        (contains_sub ~needle:"[J]" ~haystack:dive_txt))
+    [ Say.Lang_ko; Say.Lang_en ]
+
+let test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd () =
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let freshness = { m0.freshness with last_wall_unix = now_unix } in
+  (* 32 active keepers in fleet roster *)
+  let active_keepers =
+    List.init 32 (fun i ->
+        {
+          Wire_fleet.name = Printf.sprintf "active-keeper-%02d" i;
+          group = Some "MASC Core";
+          company = "MASC Core";
+          health = Wire_fleet.Keeper_healthy;
+          paused = false;
+          keepalive_running = true;
+          activation_mode = Wire_fleet.Activation_autonomous;
+          runtime_id = "sonnet";
+          model_id = None;
+          current_task_id = None;
+          context_ratio = Observed.unreported;
+          total_turns = Observed.unreported;
+          total_tokens = Observed.unreported;
+          cost_24h_usd = Observed.unreported;
+          last_turn_at_unix = None;
+          active_turn = None;
+          activity_sparkline_24h = [];
+        })
+  in
+  let fleet = Fleet_store.apply_keepers ~observed_at:now_mono active_keepers m0.fleet in
+  let keeper_costs : Wire_runtime.keeper_costs_window =
+    {
+      generated_at_unix = now_unix;
+      window_minutes = 1440;
+      rows =
+        [
+          {
+            keeper_name = "active-keeper-00";
+            sample_count = 40;
+            total_tokens = Observed.value ~observed_at:now_mono 120_000;
+            total_cost_usd = Observed.value ~observed_at:now_mono 7.83;
+            tokens_reported_samples = 40;
+            tokens_missing_samples = 0;
+            cost_reported_samples = 40;
+            cost_missing_samples = 0;
+          };
+        ];
+    }
+  in
+  (* 1. Keeper-costs only: Spend_keeper_turns_24h & Spend_window_24h *)
+  let rt_kp_only =
+    m0.runtime
+    |> Runtime_store.apply_keeper_costs ~observed_at:now_mono keeper_costs
+  in
+  let bd_kp = Runtime_store.spend_24h_breakdown rt_kp_only in
+  Alcotest.(check bool) "keeper-only source = Spend_keeper_turns_24h" true
+    (bd_kp.source = Runtime_store.Spend_keeper_turns_24h);
+  Alcotest.(check (option (float 0.01))) "keeper-only total = 7.83" (Some 7.83)
+    (Observed.to_option bd_kp.total_usd);
+  Alcotest.(check (option (float 0.01))) "keeper-only system delta = None" None
+    bd_kp.system_unattributed_usd;
+  (match Runtime_store.keeper_spend_table_window rt_kp_only with
+  | Runtime_store.Spend_window_24h { window_minutes = 1440 } -> ()
+  | Runtime_store.Spend_window_24h _
+  | Runtime_store.Spend_window_mtd _
+  | Runtime_store.Spend_window_none ->
+      Alcotest.fail "expected Spend_window_24h(1440)");
+  (* 2. Add models/metrics ($82.57 24h provider total, peak 4200 calls & $6.12/h)
+     and monthly MTD efficiency (40 keepers = 32 active + 8 retired). *)
+  let buckets =
+    List.init 24 (fun i ->
+        let fi = float_of_int i in
+        {
+          Wire_runtime.ts_start = now_unix -. (float_of_int (24 - i) *. 3600.0);
+          entry_count = if i = 18 then 4200 else 300 + (i * 40);
+          success_count = if i = 18 then 4190 else 295 + (i * 40);
+          error_count = 5;
+          total_cost_usd = if i = 18 then 6.12 else 0.45 +. (fi *. 0.12);
+          p95_latency_ms = Some 1200.0;
+          cache_hit_pct = Some 97.5;
+          input_tokens = None;
+          output_tokens = None;
+          cache_read_tokens = None;
+        })
+  in
+  let models_metrics : Wire_runtime.models_metrics_snapshot =
+    {
+      window_minutes = 1440;
+      bucket_minutes = 60;
+      total_entries = 18_400;
+      total_error_entries = 120;
+      models = [];
+      hourly_buckets = buckets;
+      fleet_cache_hit_pct = Observed.value ~observed_at:now_mono 97.8;
+      fleet_cost_usd = Observed.value ~observed_at:now_mono 82.57;
+      fleet_input_tokens = 20_000_000;
+      fleet_output_tokens = 1_200_000;
+      fleet_cache_read_tokens = 19_560_000;
+      fleet_cache_creation_tokens = 120_000;
+      fleet_tool_calls = 9200;
+      fleet_p95_latency_ms = Some 1400.0;
+    }
+  in
+  let eff_rows =
+    List.init 32 (fun i ->
+        {
+          Wire_runtime.keeper = Printf.sprintf "active-keeper-%02d" i;
+          turns = 100 + i;
+          input_tokens = 200_000;
+          cache_read_tokens = Observed.unreported;
+          cache_creation_tokens = Observed.unreported;
+          output_tokens = 12_000;
+          cache_hit_pct = Observed.unreported;
+          cost_usd = 16.0;
+          calls = 250;
+          failed = 1;
+          deferred = 0;
+          tool_ms = 5000.0;
+        })
+    @ List.init 8 (fun i ->
+        {
+          Wire_runtime.keeper = Printf.sprintf "retired-keeper-%02d" i;
+          turns = 50 + i;
+          input_tokens = 80_000;
+          cache_read_tokens = Observed.unreported;
+          cache_creation_tokens = Observed.unreported;
+          output_tokens = 4_000;
+          cache_hit_pct = Observed.unreported;
+          cost_usd = 20.05;
+          calls = 120;
+          failed = 0;
+          deferred = 0;
+          tool_ms = 2000.0;
+        })
+  in
+  let eff_mtd : Wire_runtime.efficiency_month =
+    {
+      month = "2026-11";
+      generated_at_unix = now_unix;
+      days_covered = 22;
+      keepers = eff_rows;
+      fleet =
+        {
+          turns_total = 4200;
+          calls_per_turn = 2.4;
+          tool_s_per_turn = 1.2;
+          output_tokens_per_turn = 120.0;
+          input_tokens_per_turn = 2100.0;
+          cost_usd_per_turn = 0.16;
+          fleet_cache_hit_pct = Observed.unreported;
+        };
+      velocity = [];
+    }
+  in
+  let rt_full =
+    rt_kp_only
+    |> Runtime_store.set_tab Nav.Runtime_efficiency_spend
+    |> Runtime_store.apply_models_metrics ~observed_at:now_mono models_metrics
+    |> Runtime_store.apply_efficiency ~observed_at:now_mono eff_mtd
+  in
+  let bd_full = Runtime_store.spend_24h_breakdown rt_full in
+  Alcotest.(check bool) "provider source = Spend_provider_24h" true
+    (bd_full.source = Runtime_store.Spend_provider_24h);
+  Alcotest.(check (option (float 0.01))) "provider total = 82.57" (Some 82.57)
+    (Observed.to_option bd_full.total_usd);
+  Alcotest.(check (option (float 0.01))) "keeper attributed = 7.83" (Some 7.83)
+    (Observed.to_option bd_full.keeper_attributed_usd);
+  Alcotest.(check (option (float 0.01))) "system delta = 74.74" (Some 74.74)
+    bd_full.system_unattributed_usd;
+  (match Runtime_store.keeper_spend_table_window rt_full with
+  | Runtime_store.Spend_window_mtd { month = "2026-11"; days_covered = 22 } -> ()
+  | Runtime_store.Spend_window_mtd _
+  | Runtime_store.Spend_window_24h _
+  | Runtime_store.Spend_window_none ->
+      Alcotest.fail "expected Spend_window_mtd(2026-11, 22)");
+  let g =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_runtime.render
+          ~model:{ m0 with freshness; fleet; runtime = rt_full }
+          ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"P0-1-P0-2/RuntimeEfficiency" g;
+  let txt = grid_all_text g in
+  Alcotest.(check bool) "table explicitly badged 월간 누계 (MTD)" true
+    (contains_sub ~needle:"월간 누계 (MTD)" ~haystack:txt);
+  Alcotest.(check bool) "active vs retired split shown (32 활성 · 8 이력)" true
+    (contains_sub ~needle:"32 활성 · 8 이력" ~haystack:txt);
+  Alcotest.(check bool) "Dual-Mirror Spend Y-axis prints real USD ($6.12)" true
+    (contains_sub ~needle:"$6.12" ~haystack:txt);
+  Alcotest.(check bool) "Dual-Mirror Spend Y-axis NEVER prints ▼5.0k or ▼6.1k"
+    false
+    (contains_sub ~needle:"▼5.0k" ~haystack:txt
+    || contains_sub ~needle:"▼6.1k" ~haystack:txt);
+  (* Deduplicated Chart B title vs row+1 legend: border must not repeat '호출'/'지출' *)
+  Alcotest.(check bool)
+    "Chart B outer title avoids repeating legend '▲ 호출 · ▼ 지출'" false
+    (contains_sub ~needle:"24h 모델 호출 · 지출" ~haystack:txt)
+
+let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
+  (* Saturated Subscription_zero account: 5h=0%, 7d=100% (max across ALL windows!) *)
+  let acct_sat_sub : Wire_runtime.account_usage =
+    {
+      scope = "subscription";
+      scope_id = "sub_sat";
+      providers = [ { id = "claude_code_sat"; display_name = "Claude Code Sat" } ];
+      state =
+        Wire_runtime.Account_reported
+          [
+            {
+              limit_id = Some "5h";
+              kind = Wire_runtime.Window_five_hour;
+              role = Wire_runtime.Role_gates_model_calls;
+              utilization = Wire_runtime.Util_percent 0;
+              resets_at_unix = Some (now_unix +. 3600.0);
+              observed_at_unix = now_unix;
+            };
+            {
+              limit_id = Some "7d";
+              kind = Wire_runtime.Window_seven_day;
+              role = Wire_runtime.Role_gates_model_calls;
+              utilization = Wire_runtime.Util_percent 100;
+              resets_at_unix = Some (now_unix +. (5.0 *. 86400.0) +. (21.0 *. 3600.0));
+              observed_at_unix = now_unix;
+            };
+          ];
+      cost_state = Format_val.Subscription_zero;
+    }
+  in
+  let mk_cooldown_sub ~id ~disp ~reset_sec : Wire_runtime.account_usage =
+    {
+      scope = "subscription";
+      scope_id = id;
+      providers = [ { id; display_name = disp } ];
+      state =
+        Wire_runtime.Account_reported
+          [
+            {
+              limit_id = Some "7d";
+              kind = Wire_runtime.Window_seven_day;
+              role = Wire_runtime.Role_gates_model_calls;
+              utilization = Wire_runtime.Util_percent 100;
+              resets_at_unix = Some (now_unix +. reset_sec);
+              observed_at_unix = now_unix;
+            };
+          ];
+      cost_state = Format_val.Subscription_zero;
+    }
+  in
+  let acct_cd_43h =
+    mk_cooldown_sub ~id:"cd_43h" ~disp:"Cooldown 43h"
+      ~reset_sec:((43.0 *. 3600.0) +. (58.0 *. 60.0))
+  in
+  let acct_cd_12m =
+    mk_cooldown_sub ~id:"cd_12m" ~disp:"Cooldown 12m"
+      ~reset_sec:((12.0 *. 60.0) +. 4.0)
+  in
+  let acct_ollama_exh : Wire_runtime.account_usage =
+    {
+      scope = "api_wallet";
+      scope_id = "ollama_cloud";
+      providers = [ { id = "ollama_cloud"; display_name = "Ollama Cloud" } ];
+      state =
+        Wire_runtime.Account_reported
+          [
+            {
+              limit_id = Some "wallet";
+              kind = Wire_runtime.Window_provider_label "wallet";
+              role = Wire_runtime.Role_gates_model_calls;
+              utilization =
+                Wire_runtime.Util_credit_balance
+                  { currency = "USD"; total = Some 20.0; remaining = 0.0 };
+              resets_at_unix = None;
+              observed_at_unix = now_unix;
+            };
+          ];
+      cost_state = Format_val.Exhausted_zero;
+    }
+  in
+  (* Extra healthy subscription accounts so left Quotas pane overflows (>16 rows) and renders ▼ N개 더 *)
+  let extra_subs =
+    List.init 18 (fun i ->
+        let id = Printf.sprintf "sub_extra_%02d" i in
+        {
+          Wire_runtime.scope = "subscription";
+          scope_id = id;
+          providers = [ { id; display_name = Printf.sprintf "Sub Extra %02d" i } ];
+          state =
+            Wire_runtime.Account_reported
+              [
+                {
+                  limit_id = Some "5h";
+                  kind = Wire_runtime.Window_five_hour;
+                  role = Wire_runtime.Role_gates_model_calls;
+                  utilization = Wire_runtime.Util_percent (15 + (i * 3));
+                  resets_at_unix = Some (now_unix +. 7200.0);
+                  observed_at_unix = now_unix;
+                };
+              ];
+          cost_state = Format_val.Subscription_zero;
+        })
+  in
+  let accounts =
+    [ acct_sat_sub; acct_cd_43h; acct_cd_12m; acct_ollama_exh ] @ extra_subs
+  in
+  let runtimes : Wire_runtime.runtime_option list =
+    [
+      { id = "slot-ollama"; provider = "ollama_cloud"; model = Some "qwen3"; transport = Some "http"; is_default = false };
+      { id = "slot-5d"; provider = "claude_code_sat"; model = Some "sonnet"; transport = Some "cli"; is_default = true };
+      { id = "slot-43h"; provider = "cd_43h"; model = Some "glm"; transport = Some "http"; is_default = false };
+      { id = "slot-12m"; provider = "cd_12m"; model = Some "kimi"; transport = Some "http"; is_default = false };
+    ]
+  in
+  let resolved : Wire_runtime.runtime_resolved_snapshot =
+    {
+      generated_at_iso = "2026-11-22T02:00:00Z";
+      config_path = Some ".masc/runtime.toml";
+      default_route = Some "lane-honesty";
+      lanes =
+        [
+          {
+            id = "lane-honesty";
+            declared = true;
+            runtime_ids = [ "slot-ollama"; "slot-5d"; "slot-43h"; "slot-12m" ];
+          };
+        ];
+      runtimes;
+      usage_windows = Some { since_unix = now_unix -. 3600.0; accounts };
+    }
+  in
+  let probe : Wire_runtime.runtime_probe_snapshot =
+    {
+      generated_at = "2026-11-22T02:00:00Z";
+      cache_ttl_sec = 60.0;
+      cache_age_sec = Some 5.0;
+      cache_hit = true;
+      refresh_state = Wire_runtime.Probe_fresh;
+      status = Wire_runtime.Probe_degraded;
+      probe_ok = true;
+      default_runtime_id = Some "slot-5d";
+      runtimes_count = 4;
+      probed_count = 4;
+      reachable_count = 1;
+      failed_count = 3;
+      skipped_count = 0;
+      providers =
+        [
+          (* Probe says reachable=true 297ms, BUT account has Exhausted_zero ($0 소진)! *)
+          {
+            runtime_id = "slot-ollama";
+            transport = `Http;
+            status = "ok";
+            reachable = Some true;
+            http_status = Some 200;
+            latency_ms = Some 297.0;
+            error = None;
+            checked_at = "2026-11-22T02:00:00Z";
+          };
+          {
+            runtime_id = "slot-5d";
+            transport = `Cli;
+            status = "rate_limited";
+            reachable = Some false;
+            http_status = Some 429;
+            latency_ms = None;
+            error = Some "rate_limited";
+            checked_at = "2026-11-22T02:00:00Z";
+          };
+          {
+            runtime_id = "slot-43h";
+            transport = `Http;
+            status = "rate_limited";
+            reachable = Some false;
+            http_status = Some 429;
+            latency_ms = None;
+            error = Some "rate_limited";
+            checked_at = "2026-11-22T02:00:00Z";
+          };
+          {
+            runtime_id = "slot-12m";
+            transport = `Http;
+            status = "rate_limited";
+            reachable = Some false;
+            http_status = Some 429;
+            latency_ms = None;
+            error = Some "rate_limited";
+            checked_at = "2026-11-22T02:00:00Z";
+          };
+        ];
+      errors = [];
+      observations = [];
+      limitations = [];
+    }
+  in
+  List.iter
+    (fun lang ->
+      let m0 = Model.initial ~cols:140 ~rows:40 ~lang () in
+      let freshness = { m0.freshness with last_wall_unix = now_unix } in
+      let rt_base =
+        m0.runtime
+        |> Runtime_store.apply_runtime_resolved ~observed_at:now_mono resolved
+        |> Runtime_store.apply_runtime_probe ~observed_at:now_mono probe
+      in
+      (* A. Quotas & Credits tab *)
+      let g_q =
+        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+            Screen_runtime.render
+              ~model:
+                {
+                  m0 with
+                  freshness;
+                  runtime = Runtime_store.set_tab Nav.Runtime_quotas_credits rt_base;
+                }
+              ~cache ~rect gr)
+      in
+      assert_grid_invariants ~label:("P1-9/Quotas/" ^ Say.lang_code lang) g_q;
+      let txt_q = grid_all_text g_q in
+      let sat_lbl =
+        match lang with
+        | Say.Lang_ko -> "한도 소진 (구독)"
+        | Say.Lang_en -> "Limit Exhausted (Sub)"
+      in
+      let more_lbl =
+        match lang with
+        | Say.Lang_ko -> "개 더"
+        | Say.Lang_en -> "more"
+      in
+      Alcotest.(check bool)
+        ("P1-9 max(5h=0%,7d=100%) renders saturated sub (" ^ Say.lang_code lang ^ ")")
+        true
+        (contains_sub ~needle:sat_lbl ~haystack:txt_q);
+      (* Total 22 providers = 18 ok + 3 cooldown + 1 exhausted + 0 unreported *)
+      let bucket_summary =
+        match lang with
+        | Say.Lang_ko -> "22 프로바이더"
+        | Say.Lang_en -> "22 Providers"
+      in
+      Alcotest.(check bool)
+        ("P1-9 reconciled provider total 22 (" ^ Say.lang_code lang ^ ")")
+        true
+        (contains_sub ~needle:bucket_summary ~haystack:txt_q);
+      Alcotest.(check bool)
+        ("P1-9 left Quotas overflow indicator shown (" ^ Say.lang_code lang ^ ")")
+        true
+        (contains_sub ~needle:more_lbl ~haystack:txt_q);
+      (* B. Failover Lanes tab *)
+      let g_l =
+        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+            Screen_runtime.render
+              ~model:
+                {
+                  m0 with
+                  freshness;
+                  runtime = Runtime_store.set_tab Nav.Runtime_failover_lanes rt_base;
+                }
+              ~cache ~rect gr)
+      in
+      assert_grid_invariants ~label:("P1-10/Lanes/" ^ Say.lang_code lang) g_l;
+      let txt_l = grid_all_text g_l in
+      Alcotest.(check bool) "P1-10 human multi-day cooldown 5d 21h" true
+        (contains_sub ~needle:"5d 21h" ~haystack:txt_l);
+      Alcotest.(check bool) "P1-10 human multi-hour cooldown 43h 58m" true
+        (contains_sub ~needle:"43h 58m" ~haystack:txt_l);
+      Alcotest.(check bool) "P1-10 human minute cooldown 12m 04s" true
+        (contains_sub ~needle:"12m 04s" ~haystack:txt_l);
+      Alcotest.(check bool) "P1-10 NEVER formats raw MM:SS 8518:xx" false
+        (contains_sub ~needle:"8518:" ~haystack:txt_l);
+      let exh_lbl = Format_val.format_cost Format_val.Exhausted_zero ~lang in
+      Alcotest.(check bool)
+        ("P1-10 Exhausted_zero Ollama Cloud renders " ^ exh_lbl) true
+        (contains_sub ~needle:exh_lbl ~haystack:txt_l);
+      Alcotest.(check bool)
+        "P1-10 Exhausted_zero Ollama Cloud NEVER renders Active 297ms" false
+        (contains_sub ~needle:"Active 297ms" ~haystack:txt_l
+        || contains_sub ~needle:"297ms" ~haystack:txt_l);
+      Alcotest.(check bool)
+        "P1-10 lane reachability excludes exhausted slot (0/4)" true
+        (contains_sub ~needle:"0/4" ~haystack:txt_l))
+    [ Say.Lang_ko; Say.Lang_en ]
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -2649,5 +3308,20 @@ let () =
           Alcotest.test_case
             "Knowledge Memory Stacked_bar, Violet/Amber ▎ conflict rails & Wiki TOC rail"
             `Quick test_v25_knowledge_stacked_bar_and_conflict_rails;
+        ] );
+      ( "p0_p1_data_truth"
+      , [
+          Alcotest.test_case
+            "P1-7 Fleet_store.fleet_health_counts SSOT & offline vs failing separation"
+            `Quick test_p1_7_fleet_health_counts_ssot;
+          Alcotest.test_case
+            "P1-5 Infra 404 fallback Shim_undeclared neutral badge, 0/19 running & [Space]"
+            `Quick test_p1_5_infra_sandboxes_404_fallback_honesty;
+          Alcotest.test_case
+            "P0-1/P0-2 Spend 24h provenance, MTD badge, active/retired split & Dual USD axis"
+            `Quick test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd;
+          Alcotest.test_case
+            "P1-9/P1-10 Max-window saturated sub, reconciled buckets, overflow & human cooldowns"
+            `Quick test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns;
         ] );
     ]

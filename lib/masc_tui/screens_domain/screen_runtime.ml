@@ -147,9 +147,14 @@ let draw_subscription_windows ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         (content.w - name_w - win_w - pct_w - (if show_eta then eta_w + 1 else 0)
         - 3)
     in
+    let total_sub = List.length sub_rows in
+    let truncated = total_sub > content.h && content.h >= 2 in
+    let visible_limit = if truncated then content.h - 1 else content.h in
+    let visible_rows = H.safe_take visible_limit sub_rows in
+    let row_bottom = if truncated then bottom - 1 else bottom in
     List.iter
       (fun (row : flat_sub_window) ->
-        if !y < bottom then begin
+        if !y < row_bottom then begin
           let w = row.window in
           let exhausted = is_window_exhausted w in
           let alias = Runtime_store.account_display_name ~lang rt row.acct in
@@ -220,13 +225,34 @@ let draw_subscription_windows ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           end;
           incr y
         end)
-      sub_rows
+      visible_rows;
+    if truncated then begin
+      let hidden_n = Int.max 0 (total_sub - List.length visible_rows) in
+      let more_txt =
+        Say.resolve lang
+          (Say.make
+             ~ko:(Printf.sprintf "%s %d개 더" (Glyph.to_utf8 Glyph.Delta_down) hidden_n)
+             ~en:(Printf.sprintf "%s %d more" (Glyph.to_utf8 Glyph.Delta_down) hidden_n))
+      in
+      ignore
+        (H.put_right ~grid ~clip:content ~right_x:(Rect.right content)
+           ~y:(bottom - 1) ~max_w:content.w
+           ~style:(H.accent_style ~theme ()) more_txt)
+    end
 
-let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
-    ~bp ~lang ~now_unix ~(rt : Runtime_store.t)
-    (part : Runtime_store.partitioned_accounts) =
+type quota_health_buckets = {
+  total : int;
+  healthy : int;
+  cooldown : int;
+  exhausted : int;
+  unreported : int;
+  cooldown_accts : Wire_runtime.account_usage list;
+}
+
+let compute_quota_health_buckets (part : Runtime_store.partitioned_accounts) :
+    quota_health_buckets =
   let all_reported = part.exhausted_and_credits @ part.active_subscriptions in
-  let exhausted_n =
+  let exhausted =
     List.fold_left
       (fun acc (a : Wire_runtime.account_usage) ->
         match a.cost_state with
@@ -246,11 +272,23 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
             is_account_cooldown_or_exhausted a)
       all_reported
   in
-  let cooldown_only_n = Int.max 0 (List.length cooldown_accts - exhausted_n) in
-  let healthy_n =
+  let cooldown = Int.max 0 (List.length cooldown_accts - exhausted) in
+  let healthy =
     Int.max 0 (List.length all_reported - List.length cooldown_accts)
   in
-  let unreported_n = List.length part.unreported in
+  let unreported = List.length part.unreported in
+  let total = healthy + cooldown + exhausted + unreported in
+  { total; healthy; cooldown; exhausted; unreported; cooldown_accts }
+
+let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp ~lang ~now_unix ~(rt : Runtime_store.t)
+    (part : Runtime_store.partitioned_accounts) =
+  let buckets = compute_quota_health_buckets part in
+  let exhausted_n = buckets.exhausted in
+  let cooldown_accts = buckets.cooldown_accts in
+  let cooldown_only_n = buckets.cooldown in
+  let healthy_n = buckets.healthy in
+  let unreported_n = buckets.unreported in
   let active_probes, _ = Runtime_store.active_and_outside_probes rt in
   let active_ok =
     List.fold_left
@@ -472,9 +510,20 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
     end;
     if !y < bottom then begin
       let cache_obs = Runtime_store.effective_cache_hit_pct rt in
-      let spend_obs = Runtime_store.effective_spend_24h_usd rt in
+      let spend_bd = Runtime_store.spend_24h_breakdown rt in
       let cache_s = Format_val.format_observed Format_val.Percent cache_obs ~lang in
-      let spend_s = Format_val.format_observed Format_val.Usd spend_obs ~lang in
+      let spend_s =
+        Format_val.format_observed Format_val.Usd spend_bd.total_usd ~lang
+      in
+      let spend_lbl =
+        match spend_bd.source with
+        | Runtime_store.Spend_provider_24h ->
+            Say.resolve lang (Say.make ~ko:"프로바이더" ~en:"Prov")
+        | Runtime_store.Spend_keeper_turns_24h ->
+            Say.resolve lang (Say.make ~ko:"키퍼 귀속" ~en:"Keeper")
+        | Runtime_store.Spend_unreported ->
+            Say.resolve lang (Say.make ~ko:"지출" ~en:"Spend")
+      in
       let val_style =
         match Observed.to_option cache_obs with
         | Some pct when pct >= 70.0 ->
@@ -487,9 +536,7 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
         ~key_w:11
         ~key:(Say.resolve lang (Say.make ~ko:"24h 캐시" ~en:"24h Cache"))
         ~value_style:val_style
-        (Printf.sprintf "%s · %s %s" cache_s
-           (Say.resolve lang (Say.make ~ko:"지출" ~en:"Spend"))
-           spend_s);
+        (Printf.sprintf "%s · %s %s" cache_s spend_lbl spend_s);
       incr y
     end;
     if !y < bottom then begin
@@ -557,30 +604,75 @@ type credit_list_row =
       store_idx : int;
     }
 
+let max_subscription_window_ratio (acct : Wire_runtime.account_usage) =
+  match acct.state with
+  | Wire_runtime.Account_reported ws ->
+      List.fold_left
+        (fun best (w : Wire_runtime.usage_window) ->
+          let ratio_opt =
+            match w.utilization with
+            | Wire_runtime.Util_fraction f when Float.is_finite f ->
+                Some (Float.max 0.0 (Float.min 1.0 f))
+            | Wire_runtime.Util_percent p ->
+                Some (Float.max 0.0 (Float.min 1.0 (float_of_int p /. 100.0)))
+            | Wire_runtime.Util_fraction _
+            | Wire_runtime.Util_usd _
+            | Wire_runtime.Util_credit_balance _
+            | Wire_runtime.Util_credit_unlimited
+            | Wire_runtime.Util_credit_retracted ->
+                None
+          in
+          match (best, ratio_opt) with
+          | Some b, Some r -> Some (Float.max b r)
+          | None, Some r -> Some r
+          | Some b, None -> Some b
+          | None, None -> None)
+        None ws
+  | Wire_runtime.Account_not_reported_since_start
+  | Wire_runtime.Account_reported_no_windows _ ->
+      None
+
+let is_subscription_saturated (acct : Wire_runtime.account_usage) =
+  match acct.cost_state with
+  | Format_val.Subscription_zero -> (
+      match max_subscription_window_ratio acct with
+      | Some r when r >= 0.995 -> true
+      | Some _ | None -> is_account_cooldown_or_exhausted acct)
+  | Format_val.Amount _ | Format_val.Exhausted_zero | Format_val.Unreported ->
+      false
+
 let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
-    ~lang ~(rt : Runtime_store.t) (part : Runtime_store.partitioned_accounts)
+    ~lang ~now_unix ~(rt : Runtime_store.t)
+    (part : Runtime_store.partitioned_accounts)
     (obs : Wire_runtime.provider_usage_windows Observed.t) ~focused =
-  let exhausted_n =
-    List.fold_left
-      (fun acc (a : Wire_runtime.account_usage) ->
-        match a.cost_state with
-        | Format_val.Exhausted_zero -> acc + 1
-        | Format_val.Amount _ | Format_val.Subscription_zero
-        | Format_val.Unreported ->
-            acc)
-      0 part.exhausted_and_credits
-  in
+  let buckets = compute_quota_health_buckets part in
+  let exhausted_n = buckets.exhausted in
+  let sat_sub_n = buckets.cooldown in
   let reported_n =
     List.length part.exhausted_and_credits + List.length part.active_subscriptions
   in
   let badge =
-    if exhausted_n > 0 then
+    if exhausted_n > 0 && sat_sub_n > 0 then
+      Some
+        (H.make_badge ~glyph:Glyph.Live_failing ~tone:Theme.Status_critical
+           (Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "%d 소진 · %d 한도" exhausted_n sat_sub_n)
+                 ~en:(Printf.sprintf "%d Exh · %d Full" exhausted_n sat_sub_n))))
+    else if exhausted_n > 0 then
       Some
         (H.make_badge ~glyph:Glyph.Live_failing ~tone:Theme.Status_critical
            (Say.resolve lang
               (Say.make
                  ~ko:(Printf.sprintf "%d 소진" exhausted_n)
                  ~en:(Printf.sprintf "%d Exhausted" exhausted_n))))
+    else if sat_sub_n > 0 then
+      Some
+        (H.make_badge ~glyph:Glyph.Live_failing ~tone:Theme.Status_critical
+           (Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "%d 한도 소진" sat_sub_n)
+                 ~en:(Printf.sprintf "%d Limit Full" sat_sub_n))))
     else
       Some
         (H.make_badge ~glyph:Glyph.Live_healthy ~tone:Theme.Status_ok
@@ -651,12 +743,14 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
     let rows_arr = Array.of_list (List.rev !rows_acc) in
     let total_rows = Array.length rows_arr in
     let sel_idx = H.clamp_index total_rows rt.selected_index in
+    let truncated_rows = total_rows > inner.h && inner.h >= 2 in
+    let list_h = if truncated_rows then inner.h - 1 else inner.h in
     let start_row, _ =
-      Table.compute_viewport ~total_rows ~viewport_rows:inner.h
+      Table.compute_viewport ~total_rows ~viewport_rows:list_h
         ~scroll:rt.scroll_offset ~selected:(Some sel_idx)
     in
     let pad_r = if inner.w >= 24 then 2 else 1 in
-    for row_i = 0 to inner.h - 1 do
+    for row_i = 0 to list_h - 1 do
       let vi = start_row + row_i in
       if vi < total_rows then begin
         let py = inner.y + row_i in
@@ -726,65 +820,79 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
             if is_sel then
               H.paint_selected_row_bg ~grid ~clip:inner ~row_rect ~theme ();
             let alias = Runtime_store.account_display_name ~lang rt acct in
-            let cost_str = Format_val.format_cost acct.cost_state ~lang in
+            let max_sub_ratio = max_subscription_window_ratio acct in
+            let sub_saturated = is_subscription_saturated acct in
+            let cost_str =
+              if sub_saturated then
+                Say.resolve lang
+                  (Say.make ~ko:"한도 소진 (구독)" ~en:"Limit Exhausted (Sub)")
+              else Format_val.format_cost acct.cost_state ~lang
+            in
             let tone, glyph =
               match acct.cost_state with
               | Format_val.Amount _ -> (Theme.Status_ok, Glyph.Live_healthy)
               | Format_val.Subscription_zero ->
-                  (Theme.Status_active, Glyph.Live_healthy)
+                  if sub_saturated then
+                    (Theme.Status_critical, Glyph.Live_failing)
+                  else
+                    (match max_sub_ratio with
+                     | Some r when r >= 0.80 ->
+                         (Theme.Status_attention, Glyph.Live_healthy)
+                     | Some _ | None -> (Theme.Status_active, Glyph.Live_healthy))
               | Format_val.Exhausted_zero ->
                   (Theme.Status_critical, Glyph.Live_failing)
               | Format_val.Unreported ->
                   (Theme.Status_historical, Glyph.Missing_unreported)
             in
             let ratio_and_detail =
-              match acct.state with
-              | Wire_runtime.Account_reported ws ->
-                  List.find_map
-                    (fun (w : Wire_runtime.usage_window) ->
-                      match w.utilization with
-                      | Wire_runtime.Util_credit_balance
-                          { currency = _; total = Some tot; remaining }
-                        when tot > 0.0 ->
-                          let rem_ratio =
-                            Float.max 0.0 (Float.min 1.0 (remaining /. tot))
-                          in
-                          Some
-                            ( rem_ratio
-                            , Chart.Gradient.Efficiency
-                            , Printf.sprintf "%s / %s"
-                                (Format_val.format_value Format_val.Usd remaining)
-                                (Format_val.format_value Format_val.Usd tot) )
-                      | Wire_runtime.Util_usd { used; limit = Some lim }
-                        when lim > 0.0 ->
-                          let used_ratio =
-                            Float.max 0.0 (Float.min 1.0 (used /. lim))
-                          in
-                          Some
-                            ( used_ratio
-                            , Chart.Gradient.Thermal
-                            , Printf.sprintf "%s / %s"
-                                (Format_val.format_value Format_val.Usd used)
-                                (Format_val.format_value Format_val.Usd lim) )
-                      | Wire_runtime.Util_fraction f ->
-                          Some
-                            ( Float.max 0.0 (Float.min 1.0 f)
-                            , Chart.Gradient.Thermal
-                            , cost_str )
-                      | Wire_runtime.Util_percent p ->
-                          Some
-                            ( Float.max 0.0 (Float.min 1.0 (float_of_int p /. 100.0))
-                            , Chart.Gradient.Thermal
-                            , cost_str )
-                      | Wire_runtime.Util_credit_balance _
-                      | Wire_runtime.Util_usd _
-                      | Wire_runtime.Util_credit_unlimited
-                      | Wire_runtime.Util_credit_retracted ->
-                          None)
-                    ws
-              | Wire_runtime.Account_not_reported_since_start
-              | Wire_runtime.Account_reported_no_windows _ ->
-                  None
+              match acct.cost_state with
+              | Format_val.Subscription_zero -> (
+                  match max_sub_ratio with
+                  | Some r -> Some (r, Chart.Gradient.Thermal, cost_str)
+                  | None -> None)
+              | Format_val.Exhausted_zero ->
+                  Some (1.0, Chart.Gradient.Thermal, cost_str)
+              | Format_val.Amount _ | Format_val.Unreported -> (
+                  match acct.state with
+                  | Wire_runtime.Account_reported ws ->
+                      List.find_map
+                        (fun (w : Wire_runtime.usage_window) ->
+                          match w.utilization with
+                          | Wire_runtime.Util_credit_balance
+                              { currency = _; total = Some tot; remaining }
+                            when tot > 0.0 ->
+                              let rem_ratio =
+                                Float.max 0.0 (Float.min 1.0 (remaining /. tot))
+                              in
+                              Some
+                                ( rem_ratio
+                                , Chart.Gradient.Efficiency
+                                , Printf.sprintf "%s / %s"
+                                    (Format_val.format_value Format_val.Usd
+                                       remaining)
+                                    (Format_val.format_value Format_val.Usd tot) )
+                          | Wire_runtime.Util_usd { used; limit = Some lim }
+                            when lim > 0.0 ->
+                              let used_ratio =
+                                Float.max 0.0 (Float.min 1.0 (used /. lim))
+                              in
+                              Some
+                                ( used_ratio
+                                , Chart.Gradient.Thermal
+                                , Printf.sprintf "%s / %s"
+                                    (Format_val.format_value Format_val.Usd used)
+                                    (Format_val.format_value Format_val.Usd lim) )
+                          | Wire_runtime.Util_credit_balance _
+                          | Wire_runtime.Util_usd _
+                          | Wire_runtime.Util_fraction _
+                          | Wire_runtime.Util_percent _
+                          | Wire_runtime.Util_credit_unlimited
+                          | Wire_runtime.Util_credit_retracted ->
+                              None)
+                        ws
+                  | Wire_runtime.Account_not_reported_since_start
+                  | Wire_runtime.Account_reported_no_windows _ ->
+                      None)
             in
             let name_w = Int.max 12 (Int.min 26 (content_w * 46 / 100)) in
             Cell_grid.put_glyph ~clip:row_rect grid ~x:text_x ~y:py
@@ -797,6 +905,9 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                   else H.whisper_style ~theme ~bg:row_bg ()
               | `Credit | `Sub ->
                   if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                  else if sub_saturated then
+                    H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold
+                      Theme.Status_critical
                   else H.text_style ~theme ~bg:row_bg ()
             in
             ignore
@@ -810,9 +921,8 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                   let label_s =
                     match acct.cost_state with
                     | Format_val.Exhausted_zero -> cost_str
-                    | Format_val.Amount _ | Format_val.Subscription_zero
-                    | Format_val.Unreported ->
-                        detail_s
+                    | Format_val.Subscription_zero -> cost_str
+                    | Format_val.Amount _ | Format_val.Unreported -> detail_s
                   in
                   let lw = Grapheme.display_width label_s in
                   let bar_w = Int.max 6 (Int.min 14 (rem_w - lw - 2)) in
@@ -836,7 +946,121 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                     (H.put_right ~grid ~clip:row_rect ~right_x:right_edge ~y:py
                        ~max_w:rem_w ~style:v_style cost_str)
       end
-    done
+    done;
+    if truncated_rows then begin
+      let above_n = start_row in
+      let below_n = Int.max 0 (total_rows - (start_row + list_h)) in
+      let parts =
+        (if above_n > 0 then
+           [ Printf.sprintf "%s %d" (Glyph.to_utf8 Glyph.Delta_up) above_n ]
+         else [])
+        @
+        if below_n > 0 then
+          [
+            Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "%s %d개 더" (Glyph.to_utf8 Glyph.Delta_down) below_n)
+                 ~en:(Printf.sprintf "%s %d more" (Glyph.to_utf8 Glyph.Delta_down) below_n));
+          ]
+        else []
+      in
+      let ov_txt = String.concat " · " parts in
+      if not (String.equal ov_txt "") then
+        ignore
+          (H.put_right ~grid ~clip:inner ~right_x:(Rect.right inner - pad_r)
+             ~y:(Rect.bottom inner - 1) ~max_w:(Int.max 0 (inner.w - 4))
+             ~style:(H.accent_style ~theme ()) ov_txt)
+    end
+    else if total_rows + 4 <= inner.h && total_rows > 0 then begin
+      (* Fill spare bottom space cleanly with Selected Account Quota Windows *)
+      let det_y = inner.y + total_rows + 1 in
+      let det_bot = Rect.bottom inner in
+      let pad_x = Layout.card_pad_x bp in
+      match rows_arr.(sel_idx) with
+      | Row_account { acct; tier = (`Credit | `Sub); _ } ->
+          let alias = Runtime_store.account_display_name ~lang rt acct in
+          H.draw_divider ~grid ~rect:inner ~y:det_y ~theme ~pad_x
+            ~label:
+              (Printf.sprintf "%s · %s"
+                 (Say.resolve lang (Say.make ~ko:"선택 계정 상세" ~en:"Selected Account"))
+                 alias)
+            ();
+          let dy = ref (det_y + 1) in
+          let content_x = inner.x + pad_x in
+          let content_w = Int.max 0 (inner.w - (2 * pad_x)) in
+          let right_x = Rect.right inner - pad_x in
+          if !dy < det_bot then begin
+            let prov_names =
+              acct.providers
+              |> List.map (fun (p : Wire_runtime.usage_provider_ref) -> p.display_name)
+              |> H.safe_take 3 |> String.concat ", "
+            in
+            let status_s =
+              if is_subscription_saturated acct then
+                Say.resolve lang
+                  (Say.make ~ko:"✕ 한도 소진 (구독)" ~en:"✕ Limit Exhausted (Sub)")
+              else Format_val.format_cost acct.cost_state ~lang
+            in
+            H.put_kv ~grid ~clip:inner ~x:content_x ~y:!dy ~max_w:content_w
+              ~theme ~key_w:10
+              ~key:(Say.resolve lang (Say.make ~ko:"상태 · 범위" ~en:"State"))
+              (Printf.sprintf "%s · %s (%s)" status_s acct.scope prov_names);
+            incr dy
+          end;
+          (match acct.state with
+           | Wire_runtime.Account_reported ws ->
+               List.iter
+                 (fun (w : Wire_runtime.usage_window) ->
+                   if !dy < det_bot then begin
+                     let wlbl = compact_window_label w.kind in
+                     let util_s =
+                       match w.utilization with
+                       | Wire_runtime.Util_fraction f ->
+                           Printf.sprintf "%.0f%%" (f *. 100.0)
+                       | Wire_runtime.Util_percent p -> Printf.sprintf "%d%%" p
+                       | Wire_runtime.Util_credit_balance { total = Some t; remaining; _ } ->
+                           Printf.sprintf "%s / %s"
+                             (Format_val.format_value Format_val.Usd remaining)
+                             (Format_val.format_value Format_val.Usd t)
+                       | Wire_runtime.Util_credit_balance { total = None; remaining; _ } ->
+                           Format_val.format_value Format_val.Usd remaining
+                       | Wire_runtime.Util_usd { used; limit = Some l } ->
+                           Printf.sprintf "%s / %s"
+                             (Format_val.format_value Format_val.Usd used)
+                             (Format_val.format_value Format_val.Usd l)
+                       | Wire_runtime.Util_usd { used; limit = None } ->
+                           Format_val.format_value Format_val.Usd used
+                       | Wire_runtime.Util_credit_unlimited ->
+                           Say.resolve lang (Say.make ~ko:"무제한" ~en:"unlimited")
+                       | Wire_runtime.Util_credit_retracted ->
+                           Say.resolve lang (Say.make ~ko:"철회됨" ~en:"retracted")
+                     in
+                     let eta_s =
+                       match w.resets_at_unix with
+                       | Some ts ->
+                           Say.resolve lang (Say.make ~ko:"리셋 " ~en:"rst ")
+                           ^ H.format_countdown ~now_unix ts
+                       | None -> ""
+                     in
+                     let tone =
+                       if is_window_exhausted w then Theme.Status_critical
+                       else Theme.Status_ok
+                     in
+                     H.put_kv ~grid ~clip:inner ~x:content_x ~y:!dy
+                       ~max_w:content_w ~theme ~key_w:10 ~key:wlbl
+                       ~value_style:(H.status_style ~theme tone) util_s;
+                     if not (String.equal eta_s "") then
+                       ignore
+                         (H.put_right ~grid ~clip:inner ~right_x ~y:!dy
+                            ~max_w:16 ~style:(H.whisper_style ~theme ()) eta_s);
+                     incr dy
+                   end)
+                 ws
+           | Wire_runtime.Account_not_reported_since_start
+           | Wire_runtime.Account_reported_no_windows _ ->
+               ())
+      | Row_account { tier = `Unreported; _ } | Row_unreported_toggle _ -> ()
+    end
 
 let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
@@ -849,36 +1073,7 @@ let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
     | Some uw -> uw.accounts
     | None -> []
   in
-  let provider_count =
-    let seen = Hashtbl.create 16 in
-    List.iter
-      (fun (a : Wire_runtime.account_usage) ->
-        List.iter
-          (fun (p : Wire_runtime.usage_provider_ref) ->
-            Hashtbl.replace seen p.id ())
-          a.providers)
-      accounts;
-    Hashtbl.length seen
-  in
-  let active_reported_n =
-    List.length part.exhausted_and_credits + List.length part.active_subscriptions
-  in
-  let exhausted_n =
-    List.fold_left
-      (fun acc (a : Wire_runtime.account_usage) ->
-        match a.cost_state with
-        | Format_val.Exhausted_zero -> acc + 1
-        | Format_val.Amount _ | Format_val.Subscription_zero
-        | Format_val.Unreported ->
-            acc)
-      0 part.exhausted_and_credits
-  in
-  let cooldown_n =
-    List.fold_left
-      (fun acc a -> if is_account_cooldown_or_exhausted a then acc + 1 else acc)
-      0 accounts
-  in
-  let unreported_n = List.length part.unreported in
+  let buckets = compute_quota_health_buckets part in
   let bar_rect, body_rect =
     match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
     | [ a; b ] -> (a, b)
@@ -888,7 +1083,7 @@ let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
     [
       {
         H.label =
-          Printf.sprintf "%d %s" provider_count
+          Printf.sprintf "%d %s" buckets.total
             (Say.resolve lang (Say.make ~ko:"프로바이더" ~en:"Providers"));
         active = false;
         tone = Some Theme.Status_active;
@@ -896,43 +1091,50 @@ let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
       };
       {
         H.label =
-          Printf.sprintf "%d %s" active_reported_n
-            (Say.resolve lang (Say.make ~ko:"활성 측정" ~en:"Reported"));
+          Printf.sprintf "%d %s" buckets.healthy
+            (Say.resolve lang (Say.make ~ko:"정상" ~en:"OK"));
         active = false;
         tone = Some Theme.Status_ok;
         glyph = Some Glyph.Live_healthy;
       };
-      {
-        H.label =
-          if exhausted_n > 0 then
-            Printf.sprintf "%d %s" exhausted_n
-              (Say.resolve lang (Say.make ~ko:"소진" ~en:"Exhausted"))
-          else
-            Printf.sprintf "%d %s" cooldown_n
-              (Say.resolve lang (Say.make ~ko:"쿨다운" ~en:"Cooldown"));
-        active = exhausted_n > 0 || cooldown_n > 0;
-        tone =
-          Some
-            (if exhausted_n > 0 then Theme.Status_critical
-             else if cooldown_n > 0 then Theme.Status_attention
-             else Theme.Status_ok);
-        glyph =
-          Some
-            (if exhausted_n > 0 then Glyph.Live_failing
-             else Glyph.Action_required);
-      };
-      {
-        H.label =
-          Printf.sprintf "%d %s [u]" unreported_n
-            (Say.resolve lang (Say.make ~ko:"미보고" ~en:"Unreported"));
-        active = rt.show_unreported_accounts;
-        tone = Some Theme.Status_historical;
-        glyph =
-          Some
-            (if rt.show_unreported_accounts then Glyph.Expand_open
-             else Glyph.Expand_closed);
-      };
     ]
+    @ (if buckets.cooldown > 0 then
+         [
+           {
+             H.label =
+               Printf.sprintf "%d %s" buckets.cooldown
+                 (Say.resolve lang (Say.make ~ko:"쿨다운" ~en:"Cooldown"));
+             active = buckets.exhausted = 0;
+             tone = Some Theme.Status_attention;
+             glyph = Some Glyph.Action_required;
+           };
+         ]
+       else [])
+    @ (if buckets.exhausted > 0 then
+         [
+           {
+             H.label =
+               Printf.sprintf "%d %s" buckets.exhausted
+                 (Say.resolve lang (Say.make ~ko:"소진" ~en:"Exhausted"));
+             active = true;
+             tone = Some Theme.Status_critical;
+             glyph = Some Glyph.Live_failing;
+           };
+         ]
+       else [])
+    @ [
+        {
+          H.label =
+            Printf.sprintf "%d %s [u]" buckets.unreported
+              (Say.resolve lang (Say.make ~ko:"미보고" ~en:"Unreported"));
+          active = rt.show_unreported_accounts;
+          tone = Some Theme.Status_historical;
+          glyph =
+            Some
+              (if rt.show_unreported_accounts then Glyph.Expand_open
+               else Glyph.Expand_closed);
+        };
+      ]
   in
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme
@@ -964,8 +1166,8 @@ let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
   if not (Rect.is_empty health_rect) then
     draw_cooldown_health_summary ~grid ~cache ~rect:health_rect ~theme ~bp ~lang
       ~now_unix ~rt part;
-  draw_credit_balances ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~rt part
-    rt.usage_windows ~focused:(model.nav.pane_index = 1)
+  draw_credit_balances ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~now_unix
+    ~rt part rt.usage_windows ~focused:(model.nav.pane_index = 1)
 
 (* --- 2. Sub-Tab 2: Efficiency & Spend (4-KPI Strip + Real btop Braille Charts) --- *)
 
@@ -1075,15 +1277,35 @@ let draw_efficiency_kpi_strip ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           , Some (Float.max 0.0 (Float.min 1.0 (pct /. 100.0))) )
       | None -> (H.whisper_style ~theme (), None)
     in
-    let spend_obs = Runtime_store.effective_spend_24h_usd rt in
-    let spend_val = Format_val.format_observed Format_val.Usd spend_obs ~lang in
+    let spend_bd = Runtime_store.spend_24h_breakdown rt in
+    let spend_val =
+      Format_val.format_observed Format_val.Usd spend_bd.total_usd ~lang
+    in
+    let spend_label =
+      match spend_bd.source with
+      | Runtime_store.Spend_provider_24h ->
+          Say.resolve lang
+            (Say.make ~ko:"24h 프로바이더 지출" ~en:"24h Provider Spend")
+      | Runtime_store.Spend_keeper_turns_24h ->
+          Say.resolve lang
+            (Say.make ~ko:"24h 키퍼 귀속 지출" ~en:"24h Keeper Spend")
+      | Runtime_store.Spend_unreported ->
+          Say.resolve lang (Say.make ~ko:"24h 총 지출" ~en:"24h Total Spend")
+    in
     let spend_sub =
-      match Observed.to_option rt.efficiency with
-      | Some e when e.fleet.cost_usd_per_turn > 0.0 ->
-          Format_val.format_value Format_val.Usd e.fleet.cost_usd_per_turn
-          ^ "/"
-          ^ Say.resolve lang (Say.make ~ko:"턴" ~en:"turn")
-      | Some _ | None -> "24h"
+      match
+        ( spend_bd.source
+        , Observed.to_option spend_bd.keeper_attributed_usd )
+      with
+      | Runtime_store.Spend_provider_24h, Some kp_usd ->
+          Printf.sprintf "%s %s"
+            (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"Kp"))
+            (Format_val.format_value Format_val.Usd kp_usd)
+      | Runtime_store.Spend_provider_24h, None ->
+          Say.resolve lang (Say.make ~ko:"프로바이더" ~en:"Provider")
+      | Runtime_store.Spend_keeper_turns_24h, _ ->
+          Say.resolve lang (Say.make ~ko:"키퍼 귀속" ~en:"Keeper-only")
+      | Runtime_store.Spend_unreported, _ -> "24h"
     in
     let calls_val, calls_sub =
       match Runtime_store.tool_series_totals rt with
@@ -1119,27 +1341,57 @@ let draw_efficiency_kpi_strip ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           | Some r -> List.length r.runtimes
           | None -> List.length (Runtime_store.runtime_options rt))
     in
-    let keepers_n =
-      let s_len = List.length spend_rows in
-      if s_len > 0 then s_len
+    let active_roster =
+      match Observed.to_option model.fleet.keepers with
+      | Some ks -> ks
+      | None -> []
+    in
+    let active_val, active_sub =
+      if active_roster <> [] then
+        let roster_tbl = Hashtbl.create (max 16 (List.length active_roster)) in
+        List.iter
+          (fun (k : Wire_fleet.keeper_summary) ->
+            Hashtbl.replace roster_tbl k.name ())
+          active_roster;
+        let active_n = List.length active_roster in
+        let retired_n =
+          List.fold_left
+            (fun acc (r : Runtime_store.keeper_spend_row) ->
+              if Hashtbl.mem roster_tbl r.keeper then acc else acc + 1)
+            0 spend_rows
+        in
+        let orgs = List.length (Fleet_store.company_groups model.fleet) in
+        if retired_n > 0 then
+          ( Printf.sprintf "%d %s · %d %s" active_n
+              (Say.resolve lang (Say.make ~ko:"활성" ~en:"act"))
+              retired_n
+              (Say.resolve lang (Say.make ~ko:"이력" ~en:"hist"))
+          , Printf.sprintf "%d %s · %d %s" models_n
+              (Say.resolve lang (Say.make ~ko:"모델" ~en:"mdl"))
+              orgs
+              (Say.resolve lang (Say.make ~ko:"조직" ~en:"org")) )
+        else
+          ( Printf.sprintf "%d %s · %d %s" models_n
+              (Say.resolve lang (Say.make ~ko:"모델" ~en:"mdl"))
+              active_n
+              (Say.resolve lang (Say.make ~ko:"활성" ~en:"act"))
+          , if orgs > 0 then
+              Say.resolve lang
+                (Say.make ~ko:(Printf.sprintf "%d 조직" orgs)
+                   ~en:(Printf.sprintf "%d orgs" orgs))
+            else "" )
       else
-        match Observed.to_option model.fleet.keepers with
-        | Some ks -> List.length ks
-        | None -> 0
-    in
-    let active_val =
-      Printf.sprintf "%d %s · %d %s" models_n
-        (Say.resolve lang (Say.make ~ko:"모델" ~en:"mdl"))
-        keepers_n
-        (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"kp"))
-    in
-    let active_sub =
-      let cos = List.length (Runtime_store.company_spend_rollups rt) in
-      if cos > 0 then
-        Say.resolve lang
-          (Say.make ~ko:(Printf.sprintf "%d 조직" cos)
-             ~en:(Printf.sprintf "%d orgs" cos))
-      else ""
+        let keepers_n = List.length spend_rows in
+        let cos = List.length (Runtime_store.company_spend_rollups rt) in
+        ( Printf.sprintf "%d %s · %d %s" models_n
+            (Say.resolve lang (Say.make ~ko:"모델" ~en:"mdl"))
+            keepers_n
+            (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"kp"))
+        , if cos > 0 then
+            Say.resolve lang
+              (Say.make ~ko:(Printf.sprintf "%d 조직" cos)
+                 ~en:(Printf.sprintf "%d orgs" cos))
+          else "" )
     in
     match cols with
     | [ c0; c1; c2; c3 ] ->
@@ -1147,7 +1399,7 @@ let draw_efficiency_kpi_strip ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           ~label:(Say.resolve lang (Say.make ~ko:"24h 캐시 적중" ~en:"24h Cache Hit"))
           ~value:cache_val ~val_style:cache_style ~sub:"" ?gauge_ratio:cache_ratio ();
         draw_cell 1 c1
-          ~label:(Say.resolve lang (Say.make ~ko:"24h 총 지출" ~en:"24h Total Spend"))
+          ~label:spend_label
           ~value:spend_val ~val_style:(H.anchor_style ~theme ()) ~sub:spend_sub ();
         draw_cell 2 c2
           ~label:(Say.resolve lang (Say.make ~ko:"24h 호출 · p95" ~en:"24h Calls & p95"))
@@ -1201,31 +1453,15 @@ let build_cache_hit_samples ~(rt : Runtime_store.t) =
         then [| Chart.Series.Unread |]
         else [| Chart.Series.Absent |]
 
-let scale_lower_for_dual ~(upper : Chart.Series.sample array)
-    ~(lower : Chart.Series.sample array) =
-  let max_of arr =
-    Array.fold_left
-      (fun acc s ->
-        match s with
-        | Chart.Series.Value v when Float.is_finite v && v > acc -> v
-        | Chart.Series.Value _ | Chart.Series.Zero | Chart.Series.Absent
-        | Chart.Series.Unread ->
-            acc)
-      0.0 arr
-  in
-  let mu = max_of upper in
-  let ml = max_of lower in
-  if mu > 0.0 && ml > 0.0 && (mu /. ml > 6.0 || ml /. mu > 6.0) then
-    let factor = mu /. ml in
-    Array.map
-      (function
-        | Chart.Series.Value v when Float.is_finite v ->
-            Chart.Series.Value (v *. factor)
-        | (Chart.Series.Value _ | Chart.Series.Zero | Chart.Series.Absent
-          | Chart.Series.Unread) as other ->
-            other)
-      lower
-  else lower
+let max_sample_value (arr : Chart.Series.sample array) =
+  Array.fold_left
+    (fun acc s ->
+      match s with
+      | Chart.Series.Value v when Float.is_finite v && v > acc -> v
+      | Chart.Series.Value _ | Chart.Series.Zero | Chart.Series.Absent
+      | Chart.Series.Unread ->
+          acc)
+    0.0 arr
 
 let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
@@ -1356,19 +1592,19 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
       (Chart.draw grid ~rect:cache_content ~theme ~caps:H.default_caps ~lang
          ~show_title:false spec)
   end;
-  (* Chart B: Dual-Inverted Throughput / Velocity (24h) *)
+  (* Chart B: Dual-Inverted Throughput / Velocity (24h) — independent Y axes *)
   let vel_kind = Runtime_store.velocity_series_24h rt in
-  let dual_title, dual_subtitle, upper_series, lower_series =
+  let dual_title, dual_subtitle, dual_scale, upper_series, lower_series =
     match vel_kind with
     | Runtime_store.Velocity_tokens pts ->
         let up = Array.of_list (List.map (fun (_, u, _) -> float_to_sample u) pts) in
         let dn = Array.of_list (List.map (fun (_, _, l) -> float_to_sample l) pts) in
         let uc, upk, uavg = series_stats up in
         let lc, lpk, lavg = series_stats dn in
-        ( Say.make ~ko:"토큰 속도 · 이중 반전 (24h)"
-            ~en:"Dual-Inverted Token Velocity (24h)"
-        , Say.make ~ko:"▲ 입력/캐시 · ▼ 출력 (tok)"
-            ~en:"Upper: Input/Cache · Lower: Output (tok)"
+        ( Say.make ~ko:"토큰 속도 (이중 반전)"
+            ~en:"Token Velocity (Dual-Mirror)"
+        , Say.make ~ko:"24h · tok" ~en:"24h · tok"
+        , Chart.Scale.Synced_pair
         , {
             Chart.Series.label = Say.make ~ko:"입력/캐시" ~en:"Input/Cache";
             unit = Format_val.Tokens;
@@ -1394,15 +1630,22 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
         let dn_raw = Array.of_list (List.map (fun (_, _, l) -> float_to_sample l) pts) in
         let uc, upk, uavg = series_stats up in
         let lc, lpk, lavg = series_stats dn_raw in
-        let dn_vis = scale_lower_for_dual ~upper:up ~lower:dn_raw in
+        let max_u = max_sample_value up in
+        let max_l = max_sample_value dn_raw in
+        let top_max =
+          Chart.Scale.nice_ceiling (if max_u > 0.0 then max_u else 1.0)
+        in
+        let bot_max = if max_l > 0.0 then max_l else 1.0 in
         let peak_usd =
           Format_val.format_observed Format_val.Usd lpk ~lang
         in
-        ( Say.make ~ko:"24h 모델 호출 · 지출 (이중 반전)"
-            ~en:"24h Model Calls & Spend (Dual-Mirror)"
+        ( Say.make ~ko:"24h 처리량 · 비용 (이중 반전)"
+            ~en:"24h Throughput & Cost (Dual-Mirror)"
         , Say.make
-            ~ko:(Printf.sprintf "▲ 호출 · ▼ 지출 (최대 %s/h)" peak_usd)
-            ~en:(Printf.sprintf "Upper: Calls · Lower: Spend (peak %s/h)" peak_usd)
+            ~ko:(Printf.sprintf "최대 %s/h" peak_usd)
+            ~en:(Printf.sprintf "peak %s/h" peak_usd)
+        , Chart.Scale.Dual_independent
+            { top_min = 0.0; top_max; bot_min = 0.0; bot_max }
         , {
             Chart.Series.label = Say.make ~ko:"호출" ~en:"Calls";
             unit = Format_val.Count;
@@ -1417,7 +1660,7 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
             Chart.Series.label = Say.make ~ko:"지출" ~en:"Spend";
             unit = Format_val.Usd;
             gradient = Chart.Gradient.Warm_flow;
-            samples = dn_vis;
+            samples = dn_raw;
             current = lc;
             peak = lpk;
             avg = lavg;
@@ -1428,17 +1671,26 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
         let dn_raw = Array.of_list (List.map (fun (_, _, l) -> float_to_sample l) pts) in
         let uc, upk, uavg = series_stats up in
         let lc, lpk, lavg = series_stats dn_raw in
-        let dn_vis = scale_lower_for_dual ~upper:up ~lower:dn_raw in
+        let max_u = max_sample_value up in
+        let max_l = max_sample_value dn_raw in
+        let top_max =
+          Chart.Scale.nice_ceiling (if max_u > 0.0 then max_u else 1.0)
+        in
+        let bot_max =
+          Chart.Scale.nice_ceiling (if max_l > 0.0 then max_l else 1.0)
+        in
         let peak_ms =
           Format_val.format_observed Format_val.Milliseconds lpk ~lang
         in
-        ( Say.make ~ko:"24h 도구 호출 · 지연 p95 (이중 반전)"
-            ~en:"24h Tool Calls & p95 Latency (Dual-Mirror)"
+        ( Say.make ~ko:"24h 도구 부하 (이중 반전)"
+            ~en:"24h Tool Load (Dual-Mirror)"
         , Say.make
-            ~ko:(Printf.sprintf "▲ 호출 · ▼ p95 (최대 %s)" peak_ms)
-            ~en:(Printf.sprintf "Upper: Calls · Lower: p95 (peak %s)" peak_ms)
+            ~ko:(Printf.sprintf "최대 %s" peak_ms)
+            ~en:(Printf.sprintf "peak %s" peak_ms)
+        , Chart.Scale.Dual_independent
+            { top_min = 0.0; top_max; bot_min = 0.0; bot_max }
         , {
-            Chart.Series.label = Say.make ~ko:"도구 호출" ~en:"Calls";
+            Chart.Series.label = Say.make ~ko:"호출" ~en:"Calls";
             unit = Format_val.Count;
             gradient = Chart.Gradient.Cool_flow;
             samples = up;
@@ -1451,7 +1703,7 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
             Chart.Series.label = Say.make ~ko:"지연 p95" ~en:"p95";
             unit = Format_val.Milliseconds;
             gradient = Chart.Gradient.Ai_flow;
-            samples = dn_vis;
+            samples = dn_raw;
             current = lc;
             peak = lpk;
             avg = lavg;
@@ -1481,6 +1733,7 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
         ( Say.make ~ko:"24h 처리량 · 지연 (이중 반전)"
             ~en:"24h Throughput & Latency (Dual-Mirror)"
         , Say.make ~ko:"24h" ~en:"24h"
+        , Chart.Scale.Synced_pair
         , empty_s (Say.make ~ko:"입력/호출" ~en:"In/Calls") Format_val.Tokens
             Chart.Gradient.Cool_flow
         , empty_s (Say.make ~ko:"출력/지연" ~en:"Out/p95") Format_val.Tokens
@@ -1502,7 +1755,7 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
             {
               upper = upper_series;
               lower = lower_series;
-              scale = Chart.Scale.Synced_pair;
+              scale = dual_scale;
               window = Chart.Time_window.Last_24h;
             };
       }
@@ -1511,14 +1764,76 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
       (Chart.draw grid ~rect:dual_content ~theme ~caps:H.default_caps ~lang
          ~show_title:false spec)
   end;
-  (* 3. Bottom Card: Company & Keeper Cost Efficiency Table *)
+  (* 3. Bottom Card: Company & Keeper Cost Efficiency Table with explicit window badge *)
+  let active_roster_tbl : (string, unit) Hashtbl.t = Hashtbl.create 32 in
+  let active_roster_loaded =
+    match Observed.to_option model.fleet.keepers with
+    | Some ks when ks <> [] ->
+        List.iter
+          (fun (k : Wire_fleet.keeper_summary) ->
+            Hashtbl.replace active_roster_tbl k.name ())
+          ks;
+        true
+    | Some _ | None -> false
+  in
+  let active_in_tbl, retired_in_tbl =
+    if not active_roster_loaded then (List.length spend_rows, 0)
+    else
+      List.fold_left
+        (fun (act, ret) (r : Runtime_store.keeper_spend_row) ->
+          if Hashtbl.mem active_roster_tbl r.keeper then (act + 1, ret)
+          else (act, ret + 1))
+        (0, 0) spend_rows
+  in
+  let tbl_badge, tbl_subtitle =
+    match Runtime_store.keeper_spend_table_window rt with
+    | Runtime_store.Spend_window_mtd { month; days_covered } ->
+        let badge =
+          H.make_badge ~tone:Theme.Status_ai
+            (Say.resolve lang
+               (Say.make ~ko:"월간 누계 (MTD)" ~en:"Month-to-Date (MTD)"))
+        in
+        let sub =
+          if active_roster_loaded && retired_in_tbl > 0 then
+            Say.resolve lang
+              (Say.make
+                 ~ko:
+                   (Printf.sprintf "%s (%dd) · %d 활성 · %d 이력" month
+                      days_covered active_in_tbl retired_in_tbl)
+                 ~en:
+                   (Printf.sprintf "%s (%dd) · %d active · %d retired" month
+                      days_covered active_in_tbl retired_in_tbl))
+          else
+            Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "%s (%dd) · 5개 자율 조직" month days_covered)
+                 ~en:(Printf.sprintf "%s (%dd) · 5 Companies" month days_covered))
+        in
+        (Some badge, sub)
+    | Runtime_store.Spend_window_24h { window_minutes } ->
+        let hrs = Int.max 1 (window_minutes / 60) in
+        let badge =
+          H.make_badge ~tone:Theme.Status_active
+            (Say.resolve lang
+               (Say.make
+                  ~ko:(Printf.sprintf "%dh 키퍼 귀속" hrs)
+                  ~en:(Printf.sprintf "%dh Keeper-Attributed" hrs)))
+        in
+        let sub =
+          Say.resolve lang
+            (Say.make ~ko:"5개 자율 조직 · 키퍼별 비용 효율"
+               ~en:"5 Companies & Per-Keeper Cost Efficiency")
+        in
+        (Some badge, sub)
+    | Runtime_store.Spend_window_none ->
+        ( None
+        , Say.resolve lang
+            (Say.make ~ko:"5개 자율 조직 · 키퍼별 비용 효율"
+               ~en:"5 Companies & Per-Keeper Cost Efficiency") )
+  in
   let tbl_inner =
     Card.draw ~cache grid ~rect:bottom_rect ~theme
-      (H.card_spec ~focused:true
-         ~subtitle:
-           (Say.resolve lang
-              (Say.make ~ko:"5개 자율 조직 · 키퍼별 비용 효율"
-                 ~en:"5 Companies & Per-Keeper Cost Efficiency"))
+      (H.card_spec ~focused:true ?badge:tbl_badge ~subtitle:tbl_subtitle
          (Say.resolve lang
             (Say.make ~ko:"회사 · 키퍼별 비용 효율 표"
                ~en:"Company & Keeper Cost Efficiency")))
@@ -1739,11 +2054,24 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
                             (m.cost_usd /. float_of_int m.calls)
                         else Glyph.to_utf8 Glyph.Missing_absent
                   in
+                  let is_retired =
+                    active_roster_loaded
+                    && not (Hashtbl.mem active_roster_tbl m.keeper)
+                  in
+                  let entity_cell =
+                    if is_retired then
+                      Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                        ~attrs:Attr.italic
+                        ("  " ^ m.keeper
+                         ^ Say.resolve lang
+                             (Say.make ~ko:" (이력)" ~en:" (retired)"))
+                    else Table.text_cell ("  " ^ m.keeper)
+                  in
                   {
                     Table.id = "kp:" ^ m.keeper;
                     cells =
                       [
-                        ("entity", Table.text_cell ("  " ^ m.keeper));
+                        ("entity", entity_cell);
                         ( "spend"
                         , Table.text_cell
                             (Format_val.format_value Format_val.Usd m.cost_usd) );
@@ -1803,7 +2131,7 @@ let probe_refresh_label ~lang = function
   | Wire_runtime.Probe_warming_up ->
       Say.resolve lang (Say.make ~ko:"워밍업" ~en:"Warming")
 
-let format_mmss ~now_unix resets_at_unix =
+let format_cooldown_duration ~now_unix resets_at_unix =
   if
     (not (Float.is_finite now_unix))
     || (not (Float.is_finite resets_at_unix))
@@ -1812,40 +2140,82 @@ let format_mmss ~now_unix resets_at_unix =
   then None
   else
     let rem = Int.max 0 (int_of_float (resets_at_unix -. now_unix)) in
-    let mins = rem / 60 in
-    let secs = rem mod 60 in
-    Some (Printf.sprintf "%02d:%02d" mins secs)
+    if rem >= 172_800 then
+      let days = rem / 86_400 in
+      let hours = (rem mod 86_400) / 3600 in
+      Some (Printf.sprintf "%dd %dh" days hours)
+    else if rem >= 3600 then
+      let hours = rem / 3600 in
+      let mins = (rem mod 3600) / 60 in
+      Some (Printf.sprintf "%dh %02dm" hours mins)
+    else if rem >= 60 then
+      let mins = rem / 60 in
+      let secs = rem mod 60 in
+      Some (Printf.sprintf "%dm %02ds" mins secs)
+    else Some (Printf.sprintf "%ds" rem)
 
-let provider_cooldown_mmss ~now_unix ~provider
-    (uw_opt : Wire_runtime.provider_usage_windows option) =
+type provider_quota_state =
+  | Quota_ok
+  | Quota_cooldown of string
+  | Quota_exhausted
+
+let provider_quota_status ~now_unix ~provider
+    (uw_opt : Wire_runtime.provider_usage_windows option) : provider_quota_state =
   match uw_opt with
-  | None -> None
+  | None -> Quota_ok
   | Some uw ->
       let want = String.lowercase_ascii provider in
-      List.find_map
-        (fun (a : Wire_runtime.account_usage) ->
-          let matches_provider =
+      let matching =
+        List.filter
+          (fun (a : Wire_runtime.account_usage) ->
             List.exists
               (fun (p : Wire_runtime.usage_provider_ref) ->
                 String.equal (String.lowercase_ascii p.id) want)
-              a.providers
-          in
-          if not matches_provider then None
-          else
-            match a.state with
-            | Wire_runtime.Account_reported ws ->
-                List.find_map
-                  (fun (w : Wire_runtime.usage_window) ->
-                    if is_window_exhausted w then
-                      match w.resets_at_unix with
-                      | Some ts -> format_mmss ~now_unix ts
-                      | None -> None
-                    else None)
-                  ws
-            | Wire_runtime.Account_not_reported_since_start
-            | Wire_runtime.Account_reported_no_windows _ ->
-                None)
-        uw.accounts
+              a.providers)
+          uw.accounts
+      in
+      let any_exhausted_credit =
+        List.exists
+          (fun (a : Wire_runtime.account_usage) ->
+            match a.cost_state with
+            | Format_val.Exhausted_zero -> true
+            | Format_val.Amount _ | Format_val.Subscription_zero
+            | Format_val.Unreported ->
+                false)
+          matching
+      in
+      if any_exhausted_credit then Quota_exhausted
+      else
+        let exhausted_windows =
+          List.concat_map
+            (fun (a : Wire_runtime.account_usage) ->
+              match a.state with
+              | Wire_runtime.Account_reported ws ->
+                  List.filter is_window_exhausted ws
+              | Wire_runtime.Account_not_reported_since_start
+              | Wire_runtime.Account_reported_no_windows _ ->
+                  [])
+            matching
+        in
+        match exhausted_windows with
+        | [] -> Quota_ok
+        | ws -> (
+            let max_reset =
+              List.fold_left
+                (fun acc (w : Wire_runtime.usage_window) ->
+                  match (acc, w.resets_at_unix) with
+                  | Some a, Some b -> Some (Float.max a b)
+                  | None, Some b -> Some b
+                  | Some a, None -> Some a
+                  | None, None -> None)
+                None ws
+            in
+            match max_reset with
+            | Some ts -> (
+                match format_cooldown_duration ~now_unix ts with
+                | Some dur -> Quota_cooldown dur
+                | None -> Quota_exhausted)
+            | None -> Quota_exhausted)
 
 let format_failover_reason (p : Wire_runtime.provider_probe_row) =
   match p.http_status, p.error with
@@ -2061,38 +2431,48 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                 let human_lbl =
                   Wire_runtime.human_runtime_slot_label ~runtimes rid
                 in
-                let cooldown_opt =
+                let quota_st =
                   match prov_id with
                   | Some pid ->
-                      provider_cooldown_mmss ~now_unix ~provider:pid
+                      provider_quota_status ~now_unix ~provider:pid
                         (Observed.to_option rt.usage_windows)
-                  | None -> None
+                  | None -> Quota_ok
                 in
                 let status_g, status_tone, status_txt, rtt_txt =
-                  match Hashtbl.find_opt probe_tbl rid, cooldown_opt with
+                  match (Hashtbl.find_opt probe_tbl rid, quota_st) with
                   | Some pr, _ when pr.reachable = Some false -> (
-                      match pr.http_status, cooldown_opt with
-                      | Some 429, Some mmss ->
+                      match (pr.http_status, quota_st) with
+                      | Some 429, Quota_cooldown dur ->
                           ( Glyph.Live_paused
                           , Theme.Status_attention
-                          , "Cooldown " ^ mmss
+                          , "Cooldown " ^ dur
                           , "429" )
-                      | Some 429, None ->
+                      | Some 429, (Quota_ok | Quota_exhausted) ->
                           ( Glyph.Live_paused
                           , Theme.Status_attention
                           , "Cooldown"
                           , "429" )
-                      | _, _ ->
+                      | _, Quota_exhausted ->
+                          ( Glyph.Live_failing
+                          , Theme.Status_critical
+                          , Format_val.format_cost Format_val.Exhausted_zero ~lang
+                          , "" )
+                      | _, (Quota_ok | Quota_cooldown _) ->
                           ( Glyph.Live_failing
                           , Theme.Status_critical
                           , format_failover_reason pr
                           , "" ))
-                  | _, Some mmss ->
+                  | _, Quota_exhausted ->
+                      ( Glyph.Live_failing
+                      , Theme.Status_critical
+                      , Format_val.format_cost Format_val.Exhausted_zero ~lang
+                      , "" )
+                  | _, Quota_cooldown dur ->
                       ( Glyph.Live_paused
                       , Theme.Status_attention
-                      , "Cooldown " ^ mmss
+                      , "Cooldown " ^ dur
                       , "" )
-                  | Some pr, None -> (
+                  | Some pr, Quota_ok -> (
                       match pr.reachable with
                       | Some true ->
                           let lat =
@@ -2113,7 +2493,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                           , Theme.Status_active
                           , (if is_primary then "Active" else "Ready")
                           , "" ))
-                  | None, None ->
+                  | None, Quota_ok ->
                       ( (if is_primary then Glyph.Live_healthy
                          else Glyph.Live_idle)
                       , (if is_primary then Theme.Status_ok
@@ -2228,13 +2608,23 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp insp_inner)
           ~theme ~lang rt.runtime_resolved
     | Some lane ->
+        let slot_quota_st rid =
+          match Hashtbl.find_opt runtimes_tbl rid with
+          | Some r ->
+              provider_quota_status ~now_unix ~provider:r.provider
+                (Observed.to_option rt.usage_windows)
+          | None -> Quota_ok
+        in
         let slot_n = List.length lane.runtime_ids in
         let reach_n =
           List.fold_left
             (fun acc rid ->
-              match Hashtbl.find_opt probe_tbl rid with
-              | Some { reachable = Some true; _ } -> acc + 1
-              | Some _ | None -> acc)
+              match slot_quota_st rid with
+              | Quota_cooldown _ | Quota_exhausted -> acc
+              | Quota_ok -> (
+                  match Hashtbl.find_opt probe_tbl rid with
+                  | Some { reachable = Some true; _ } -> acc + 1
+                  | Some { reachable = Some false | None; _ } | None -> acc))
             0 lane.runtime_ids
         in
         let primary_rid = match lane.runtime_ids with r :: _ -> r | [] -> "" in
@@ -2305,8 +2695,16 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                   | Some { transport = None; _ } | None -> "—"
                 in
                 let st_g, st_tone, st_val =
-                  match Hashtbl.find_opt probe_tbl rid with
-                  | Some pr -> (
+                  match (Hashtbl.find_opt probe_tbl rid, slot_quota_st rid) with
+                  | _, Quota_exhausted ->
+                      ( Glyph.Live_failing
+                      , Theme.Status_critical
+                      , Format_val.format_cost Format_val.Exhausted_zero ~lang )
+                  | _, Quota_cooldown dur ->
+                      ( Glyph.Live_paused
+                      , Theme.Status_attention
+                      , "Cooldown " ^ dur )
+                  | Some pr, Quota_ok -> (
                       match pr.reachable with
                       | Some true ->
                           let lat =
@@ -2321,7 +2719,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                           , Theme.Status_critical
                           , format_failover_reason pr )
                       | None -> (Glyph.Live_idle, Theme.Status_active, pr.status))
-                  | None -> (Glyph.Live_idle, Theme.Status_historical, "—")
+                  | None, Quota_ok -> (Glyph.Live_idle, Theme.Status_historical, "—")
                 in
                 let right_s = Printf.sprintf "%s · %s" transport_s st_val in
                 let rw = Grapheme.display_width right_s in

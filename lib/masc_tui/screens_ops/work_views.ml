@@ -371,7 +371,7 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
         with
         subtitle = (match sel_goal with Some g -> Some g.id | None -> None);
         badge;
-        hotkey = Some (Ops_common.say model ~ko:"[L] 연결" ~en:"[L] Link");
+        hotkey = Some (Ops_common.say model ~ko:"[Enter] 상세" ~en:"[Enter] Dive");
         focused = false;
       }
     in
@@ -637,8 +637,8 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
              line1);
         let line2 =
           Ops_common.say model
-            ~ko:"[L] 키로 활성 작업을 선택 목표에 1회 연결할 수 있습니다"
-            ~en:"Press [L] to link active tasks to the selected Goal"
+            ~ko:"goal_id 미연결 작업은 완료 시 캔들 미귀속 상태로 기록됩니다"
+            ~en:"Tasks without goal_id record unattributed Candles on completion"
         in
         ignore
           (Ops_common.put_line ~clip:content grid ~x:(content.x + 2) ~y:(fy + 2)
@@ -1383,8 +1383,7 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           with
           hotkey =
             Some
-              (Ops_common.say model ~ko:"[Enter] 상세 · [L] 목표 연결"
-                 ~en:"[Enter] Dive · [L] Link Goal");
+              (Ops_common.say model ~ko:"[Enter] 상세" ~en:"[Enter] Dive");
           focused = Option.is_some task_sel_opt;
         }
       in
@@ -1658,34 +1657,141 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                       grid ~rect:content ~y:!y ~theme;
                     incr y
                   end;
+                  let md_avail = Int.max 0 (bot - !y) in
+                  let md_text = Ops_common.rewrite_masc_links_for_markdown desc in
                   let md_rect =
-                    Rect.make ~x:content.x ~y:!y ~w:content.w ~h:(bot - !y)
+                    Rect.make ~x:content.x ~y:!y ~w:content.w ~h:md_avail
                   in
-                  ignore
-                    (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
-                       (Ops_common.rewrite_masc_links_for_markdown desc))
-              | Some _ | None ->
-                  if !y + 1 < bot then begin
-                    Card.draw_hairline ~pad_x:0 ~bg:card_bg grid ~rect:content
-                      ~y:!y ~theme;
-                    incr y;
-                    let note =
-                      match tk.goal_link with
-                      | Wire_work.Linked gid ->
-                          Ops_common.say model
-                            ~ko:(Printf.sprintf "목표 %s에 연결됨 · [Enter] 작업 상세" gid)
-                            ~en:(Printf.sprintf "Linked to %s · [Enter] Task Dive" gid)
-                      | Wire_work.Unlinked ->
-                          Ops_common.say model
-                            ~ko:"[L] 목표에 연결하면 완료 시 캔들 귀속 대상이 됩니다"
-                            ~en:"[L] Link to a Goal so completion attributes Candles"
+                  let total_md =
+                    Markdown.draw grid ~rect:md_rect ~theme ~osc8:true md_text
+                  in
+                  if total_md > md_avail && md_avail >= 2 then begin
+                    let trimmed_rect =
+                      Rect.make ~x:content.x ~y:!y ~w:content.w ~h:(md_avail - 1)
                     in
                     ignore
-                      (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                         ~max_w:content.w
+                      (Markdown.draw grid ~rect:trimmed_rect ~theme ~osc8:true
+                         md_text);
+                    let more_n = total_md - (md_avail - 1) in
+                    let more_s =
+                      Ops_common.say model
+                        ~ko:
+                          (Printf.sprintf "▼ %d줄 더 · [Enter] 전체 보기" more_n)
+                        ~en:
+                          (Printf.sprintf "▼ %d more lines · [Enter] Full view"
+                             more_n)
+                    in
+                    ignore
+                      (Ops_common.put_line ~clip:content grid ~x:content.x
+                         ~y:(bot - 1) ~max_w:content.w
                          ~style:(Typography.whisper ~bg:card_bg theme)
-                         note)
-                  end)
+                         more_s);
+                    y := bot
+                  end
+                  else y := !y + Int.min md_avail total_md
+              | Some _ | None -> ());
+              (* Fill spare lower space cleanly with truthful Goal/Verification/Timestamp context *)
+              if !y + 2 <= bot then begin
+                incr y;
+                Card.draw_hairline ~pad_x:0 ~bg:card_bg
+                  ~label:
+                    (Ops_common.say model ~ko:"연관 컨텍스트"
+                       ~en:"Task Context")
+                  grid ~rect:content ~y:!y ~theme;
+                incr y;
+                (match tk.created_at with
+                | Some ts when !y < bot ->
+                    Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
+                      ~bg:card_bg ~label_w:12
+                      ~key:(Ops_common.say model ~ko:"생성 시각" ~en:"Created")
+                      ~value:ts ~val_fg:theme.text_muted ~val_attrs:Attr.italic
+                      ();
+                    incr y
+                | Some _ | None -> ());
+                (match tk.updated_at with
+                | Some ts when !y < bot ->
+                    Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
+                      ~bg:card_bg ~label_w:12
+                      ~key:(Ops_common.say model ~ko:"갱신 시각" ~en:"Updated")
+                      ~value:ts ~val_fg:theme.text_muted ~val_attrs:Attr.italic
+                      ();
+                    incr y
+                | Some _ | None -> ());
+                (match tk.goal_link with
+                | Wire_work.Linked gid -> (
+                    match
+                      List.find_opt
+                        (fun (g : Wire_work.goal) -> String.equal g.id gid)
+                        (Work_store.goals model.work)
+                    with
+                    | Some g when !y < bot ->
+                        Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
+                          ~bg:card_bg ~label_w:12
+                          ~key:(Ops_common.say model ~ko:"상위 목표" ~en:"Goal")
+                          ~value:(Printf.sprintf "P%d %s" g.priority g.title)
+                          ~val_fg:theme.status_ok ();
+                        incr y;
+                        if !y < bot && not (String.equal (String.trim g.measure) "")
+                        then begin
+                          Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
+                            ~bg:card_bg ~label_w:12
+                            ~key:
+                              (Ops_common.say model ~ko:"성공 조건" ~en:"Measure")
+                            ~value:g.measure ~val_fg:theme.text_secondary ();
+                          incr y
+                        end
+                    | Some _ | None -> ())
+                | Wire_work.Unlinked ->
+                    if !y < bot then begin
+                      Card.draw_left_rail ~bg:card_bg ~tone:Theme.Status_attention
+                        grid ~x:content.x ~y:!y ~h:1 ~theme;
+                      ignore
+                        (Ops_common.put_line ~clip:content grid ~x:(content.x + 2)
+                           ~y:!y ~max_w:(Int.max 0 (content.w - 2))
+                           ~style:(Typography.whisper ~bg:card_bg theme)
+                           (Ops_common.say model
+                              ~ko:"목표 미연결 · 완료 시 캔들 미귀속 ([Enter] 상세)"
+                              ~en:"Unlinked · unattributed Candle on completion ([Enter] Dive)"));
+                      incr y
+                    end;
+                    let active_goals =
+                      Work_store.goals model.work
+                      |> List.filter (fun (g : Wire_work.goal) ->
+                             match g.phase with
+                             | Wire_work.Executing | Wire_work.Verifying
+                             | Wire_work.Awaiting_confirmation ->
+                                 true
+                             | Wire_work.Completed | Wire_work.Dropped
+                             | Wire_work.Paused _ | Wire_work.Blocked _ ->
+                                 false)
+                      |> List.take 3
+                    in
+                    List.iter
+                      (fun (g : Wire_work.goal) ->
+                        if !y < bot then begin
+                          Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
+                            ~bg:card_bg ~label_w:12
+                            ~key:(Printf.sprintf "P%d %s" g.priority g.id)
+                            ~value:g.title ~val_fg:theme.text_secondary ();
+                          incr y
+                        end)
+                      active_goals);
+                (match matching_v with
+                | Some v when !y < bot && v.completion_contract <> [] ->
+                    List.iter
+                      (fun item ->
+                        if !y < bot then begin
+                          Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
+                            ~bg:card_bg ~label_w:12
+                            ~key:
+                              (Ops_common.say model ~ko:"완료 계약"
+                                 ~en:"Contract")
+                            ~value:item ~val_fg:theme.text_secondary ();
+                          incr y
+                        end)
+                      (List.take 3 v.completion_contract)
+                | Some _ | None -> ())
+              end
       end;
       (* 3. Schedules Table *)
       if not (Rect.is_empty sched_rect) then begin
@@ -2856,6 +2962,20 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   ~half_life_sec:ledger.half_life_sec
               in
               let safe_circ = Float.max 0.0 circ_c in
+              let decay_avg =
+                let sum, cnt =
+                  Array.fold_left
+                    (fun (s, c) sample ->
+                      match sample with
+                      | Chart.Series.Value v when Float.is_finite v -> (s +. v, c + 1)
+                      | Chart.Series.Zero -> (s, c + 1)
+                      | Chart.Series.Value _ | Chart.Series.Unread
+                      | Chart.Series.Absent ->
+                          (s, c))
+                    (0.0, 0) samples
+                in
+                if cnt > 0 then sum /. float_of_int cnt else safe_circ
+              in
               let spec : Chart.Spec.t =
                 {
                   title =
@@ -2877,7 +2997,9 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                             peak =
                               Observed.value ~observed_at:Clock.Mono.zero
                                 safe_circ;
-                            avg = Observed.unreported;
+                            avg =
+                              Observed.value ~observed_at:Clock.Mono.zero
+                                decay_avg;
                             delta_pct = None;
                           };
                         scale =

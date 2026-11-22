@@ -1,5 +1,67 @@
 ## [Unreleased]
 
+## [0.79.0] - 2026-11-22
+
+### 요약
+
+- 이 릴리스는 직전 절 `0.78.0` 뒤 main 에 들어간 스무 PR(`0b961d5`→`0bea19f`, 첫-부모 20 커밋, 476 파일 `+12,217 / -33,655`)을 `0.79.0`(minor)으로 내보냅니다. 사용자가 직접 보는 변화는 두 묶음입니다: **Librarian 컷**(#54326·#54328·#54331·#54340 — 옛 `keeper-librarian`·`workspace-curator` Exact 패키지, `librarian_preflight` 판정, `masc-librarian-continuity` CLI 제거)과 **공급자 캐시·wire 파라미터 정합**(#54386·#54395).
+- Stack D(`#54384`~`#54386`)와 그 적대 리뷰 후속(`#54394`)이 함께 들어갔고, `#54398` 이 그 위에서 overflow·cache thrash 회귀를 잡습니다.
+- 조각이 `### Exempt` 인 여섯(`#54335`·`#54341`·`#54342`·`#54393`·`#54396`·`#54397`)과 조각이 없는 시험 전용 `#54382` 는 그룹 절에 넣지 않고 마지막 `### Exempt` 에 모았습니다.
+- 이 절은 `changelog.d/` 조각 문구를 그대로 인용해 손으로 접었습니다. `scripts/changelog-fragments.py assemble` 은 실행하지 않았습니다 — 이 트리에는 이미 접힌 조각이 남아 있어 `assemble` 이 그것들을 `[Unreleased]` 로 다시 쏟는 문제가 있습니다(task-3920).
+
+### Added
+
+- Completed provider prompt-cache wire support: folded and exposed Gemini `toolUsePromptTokenCount`, added opt-in Gemini explicit `cachedContents` resource lifecycle with automatic 404/TTL fallback to implicit caching, parsed and preserved Ollama/llama.cpp KV-cache telemetry (`prompt_eval_cached_count`, `cache_n`, `timings.cache_n`, `prompt_tokens_details.cached_tokens`) across sync and streaming paths, and enabled declarative session routing affinity (`X-Session-Id` / `prompt_cache_key`) for GLM and Kimi in `models.toml` (#54386).
+- Support OpenAI Responses `prompt_cache_retention` (`"in_memory"` | `"24h"` via `cache-retention`), `store`, and `truncation` (`"auto"` | `"disabled"`), Gemini `explicit-context-cache-ttl-s` wiring, Anthropic `anthropic-ratelimit-*` response header capture, and Ollama `/api/chat` `think` effort strings (`"low"` | `"medium"` | `"high"`) (#54395).
+
+### Changed
+
+- Purged dead `agent_core` facades (`eval_stats`, `runtime_store`, `skill_registry`, `zai_catalog`) and tiny runtime forwarding wrappers (`local_runtime_pool`, `runtime_{transport,build_version,candidate,host_lifecycle,path_rest_signal}`), consolidated tool input validation onto `Agent_core.Tool_input_validation`, evicted MASC domain hooks (`schema_observation`, `MASC_WIRE_PARSE_DUMP`) out of `packages/agent_core`, and removed hardcoded `api.deepseek.com` defaults (#54384).
+- Replaced the TOML-to-fake-env-string `Config_boot_overrides` round-trip with direct typed `Runtime_toml_namespace` decoding and immutable typed namespace records, added declarative `effort`/`efforts` parameterization in `config/runtime.toml` (collapsing 200+ duplicate model/binding triples), and tightened `Env_config_core` parsing to fail closed on malformed or out-of-range environment values (#54385).
+
+### Fixed
+
+- `keeper_composition_result` no longer declares a composable `Json_output` its retired dispatch handler can never emit, so `composable_output_contract` stops demanding a producer probe for a tool that refuses every call (#54381).
+- Ephemeral per-request `Outside_context` carriers introduced by #54350 are now pinned via `Runtime_model_input_tail_window.is_outside_context` inside `is_pinned` instead of being numbered as durable conversation atoms, stopping `Keeper_model_input_ledger.history_holds` from dropping the working ledger on every round while keeping `is_extra_context` limited to `System_context` so post-tool rounds carrying `Active_goals` on `Outside_context` still measure provider token samples and do not reopen a turn mid-flight. `Keeper_agent_prompt_metrics.remove_prompt_context` now validates and strips `System_context` and `Outside_context` independently (`~outside_context_present` paired with `Keeper_context_assembly.split_request_context_presence`), fixing `prompt_context_presence_mismatch` attribution losses on `Outside_context`-only post-tool rounds, eliminating double-counting on dual-carrier rounds, and catching missing-one-of-two or unexpected-second-carrier anomalies. `Keeper_run_tools_hooks` now scopes `split_outside_context` to `Masc_agent_core` so `Official_client` lanes retain outside-authored context blocks, and `Keeper_official_client_host.prepare_turn` fails closed on `extra_outside_context` (#54383).
+- `exact_lane_run_registry` payload sweep no longer stops at one foreign directory entry: `EISDIR` entries are kept and counted through `failed_root_entries` while the remaining regular payload leaves of the same run are still unlinked (#54388).
+- Hardened Stack D (`#54384`–`#54386`) across `agent_core`, `runtime`, and `config`: eliminated `Effect.Unhandled` double execution in `Complete_stream_diagnostic.with_refused_frame_sink`, removed un-wired lane-level `effort` declarations and the dead `Config_boot_overrides.typed_namespaces` shadow cell, added fail-closed checks on `efforts`-expanded defaults/duplicates and typed `Env_config_core.get_string`, enabled Gemini explicit `cachedContents` on admitted/serialized production paths with Vertex AI endpoints, `403` stale-cache fallback, credential-isolated keys, custom header forwarding, and clean single-observation/status telemetry, unified `Backend_gemini.extract_cacheable_prefix_result`, and clamped negative Ollama `prompt_eval_count` sentinels while guarding non-object JSON (#54394).
+- Reconcile `models.toml` and `config/runtime.toml` SSOT drift (`kimi-for-coding`, `glm-5-3`, Codex GPT context windows, `kimi_coding_anthropic` ignored sampling parameters, Gemini 4 `prompt_cache_wire = "none"`, Gemini 65,536 default output ceiling, Ollama IPv4 loopback + `keep-alive = "30m"`) and unify `OLLAMA_HOST`, Z.AI/GLM error codes, and `anthropic-version` headers (#54395).
+- Agent Core HTTP turns now recover from pre-generation `ContextOverflow` and `413` body refusals on both `Body_only` and `Require_exact_fit` paths by narrowing the request in-run, demoting/previewing closed current-turn tool payloads, and dropping oldest closed tool rounds with a committed `Keeper_compaction` anchor instead of failing the turn (#54398).
+- Official-client `Input_rejected` recoveries (`Effect_fenced` and `Bootstrap_floor_exceeded`) now auto-supersede on the next turn into a fresh (or minimal anchor-only) session, and per-candidate `Official_client_recovery_required` rotates to backup lane candidates before exhausting visible-alive (#54398).
+- Claude Code and Antigravity CLI `Resume` overflows now roll over cleanly to a fresh session even with zero local checkpoint atoms, commit a `Keeper_compaction` anchor when history is evicted, preserve held standing context across Antigravity resumes, and record `on_refused_model_input` on official-client size refusals (#54398).
+- Anthropic direct API requests with strictly trailing ephemeral `System_context`/`Outside_context` blocks now place an explicit `cache_control` breakpoint on the last cacheable stable prefix block and omit top-level `cache_control`, eliminating per-turn volatile-tail cache-write overhead (#54398).
+- Provider `Retry-After` hints are now clamped to a 24-hour ceiling (`86_400.0s`), `Explicit_hard_limit` converts token limits to bytes safely, and mixed-size first failover commits a `Keeper_compaction` anchor when jumping to `From_turn_boundary` (#54398).
+
+### Removed
+
+- The server no longer carries, installs or wakes the `keeper-librarian` Exact worker package. `masc exact-addon-setup` writes and builds only `workspace-curator`, `candle-appraiser` and `hitl-auto-judge`, a Lane declaration with `package = "keeper-librarian"` is refused as a package this server does not carry, and every Lane Add-on Exact request runs as `Standard` (#54326).
+- Tool request originals under the old Librarian scopes have no consumer: the startup settled-archive pass and the install preflight refuse a live record there as a scope no owner claims (#54326).
+- The server no longer carries, embeds or sets up the `workspace-curator` Exact worker package. `masc exact-addon-setup` writes and builds only `candle-appraiser` and `hitl-auto-judge`, and a Lane declaration with `package = "workspace-curator"` is refused as a package this server does not carry (#54328).
+- Tool request originals under the old curator scope have no consumer: the startup settled-archive pass and the install preflight refuse a live record there as a scope no owner claims (#54328).
+- The server no longer sweeps unowned Exact run files at startup. Every Lane Add-on Exact request runs as `Standard` with the schema check alone, because no carried package checks its answers or its dispatch any more (#54328).
+- The `GET /api/v1/keepers/<name>/provider-input/continuity` route and the `masc-librarian-continuity` CLI are gone. A Keeper request no longer writes the old continuity request and observation rows; it records only where it starts, which the Memory writer row reads (#54331).
+- The TUI measurement view reads only the temporal continuity harness view, not the old Librarian continuity report. The harness no longer has the `await_summary` step or the `prefix_omission` judgment, and its view no longer carries them (#54331).
+- Old workspace-curator run records are not read: the run identity `workspace_curator_exact` is gone from the Exact run registry and the TUI (#54331).
+- The `librarian_preflight` key of the `[typesafeai]` table is gone, with the no-change judgment it turned on, that judgment's prompt and the `masc-librarian-preflight-eval` CLI. The retired Librarian pass no longer skips generation on that judgment (#54340).
+- The TUI Lanes run detail no longer decodes a Librarian run's judgment reading above its output, and the `[d]` key that folded the output behind it is gone; the detail shows the recorded output as for every other lane (#54340).
+
+### Upgrade notes
+
+- 이 릴리스의 `Removed` 네 항목은 하나의 Librarian 컷 스택입니다. **레이어를 따로 설치하지 말고 스택 전체로 설치**하고, 하드 컷 설치 절차는 스택의 마지막 레이어에 있습니다(#54326·#54328·#54331·#54340).
+- `runtime.toml` 로딩은 모르는 키를 거부합니다. `[typesafeai]` 테이블에 `librarian_preflight` 가 남아 있는 파일은 이 빌드에서 **로드되지 않습니다**. 스택 전체를 설치할 때 그 줄을 지우는 절차가 마지막 레이어에 함께 있습니다(#54340).
+- Lane 선언에 `package = "keeper-librarian"` 또는 `package = "workspace-curator"` 가 남아 있으면 이 서버는 그 패키지를 갖고 있지 않다고 거부합니다. 두 패키지를 쓰던 자동화는 `candle-appraiser`·`hitl-auto-judge` 로 옮기거나 `Standard` 실행으로 바꿔야 합니다(#54326·#54328).
+
+### Exempt
+
+- Docs only: add the RFC for an official client's fresh-session seed; no behavior change (#54335).
+- Documentation only: the vision tail RFC is marked Dropped with its measurements and reasons, with no code or user-visible change (#54341).
+- Docs only: add the RFC that decides what wakes a Keeper and when; no behavior change (#54342).
+- Tests only: derive the Antigravity `Start` fixture from `preview_max` in `test_keeper_*`; no user-facing behavior change (#54382).
+- Tests only: align `test_keeper_memory_write` Tier-1 recall digest assertions (`#54362`) and `test_runtime_config_validity` standalone lane admission class expectations (`#53573`) with `main`; no user-facing behavior change (#54393).
+- Changelog-only follow-up for task-3932: added `changelog.d/54373.md` (`### Exempt` for comment-only `#54373`) with no code, interface, or user-visible change (#54396).
+- Changelog-only follow-up for task-3932: added `changelog.d/54396.md` (`### Exempt` for changelog-only `#54396`) with no code, interface, or user-visible change (#54397).
+
+
 ## [0.78.0] - 2026-11-22
 
 ### 요약

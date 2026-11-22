@@ -25,15 +25,61 @@ let path_is_within ~root path =
   holds (parts root, parts path)
 ;;
 
-let acp_settings_json ?mcp_server_name:server_name ~gemini_dir () =
+let has_dot_segments path =
+  String.split_on_char '/' path
+  |> List.exists (function "." | ".." -> true | _ -> false)
+;;
+
+let validate_deny_read_roots ~gemini_dir roots =
+  let rec loop seen acc = function
+    | [] -> Ok (List.rev acc)
+    | root :: rest ->
+      if String.trim root = ""
+         || Filename.is_relative root
+         || String.contains root '\000'
+         || has_dot_segments root
+      then
+        Error
+          { path = root
+          ; detail =
+              "ACP deny_read_root must be a normalized non-empty absolute path without NUL or dot segments"
+          }
+      else if has_permission_pattern_syntax root
+      then
+        Error
+          { path = root
+          ; detail = "ACP deny_read_root contains permission-pattern syntax"
+          }
+      else if path_is_within ~root gemini_dir
+      then
+        Error
+          { path = root
+          ; detail =
+              "ACP deny_read_root must not contain managed --gemini-dir (would shadow MCP schema reads)"
+          }
+      else if List.mem root seen
+      then loop seen acc rest
+      else loop (root :: seen) (root :: acc) rest
+  in
+  loop [] [] roots
+;;
+
+let acp_settings_json
+      ?mcp_server_name:server_name
+      ?(deny_read_roots = [])
+      ?(deny_writes_and_commands = false)
+      ~gemini_dir
+      ()
+  =
   if String.trim gemini_dir = ""
      || Filename.is_relative gemini_dir
      || String.contains gemini_dir '\000'
+     || has_dot_segments gemini_dir
   then
     Error
       { path = gemini_dir
       ; detail =
-          "managed Antigravity ACP dir must be a non-empty absolute path without NUL bytes"
+          "managed Antigravity ACP dir must be a normalized non-empty absolute path without NUL or dot segments"
       }
   else (
     match server_name with
@@ -59,18 +105,28 @@ let acp_settings_json ?mcp_server_name:server_name ~gemini_dir () =
            ; detail = "managed Antigravity ACP dir contains permission-pattern syntax"
            }
        | None ->
-         let allow =
-           match server_name, schema_dir with
-           | Some srv, Some dir -> [ "mcp(" ^ srv ^ "/*)"; "read_file(" ^ dir ^ ")" ]
-           | Some _, None | None, (Some _ | None) -> []
-         in
-         let deny =
-           [ "read_file(" ^ config_dir ^ ")"
-           ; "read_file(" ^ token_path ^ ")"
-           ; "read_url(*)"
-           ; "execute_url(*)"
-           ]
-         in
-         let strings values = `List (List.map (fun value -> `String value) values) in
-         Ok (`Assoc [ "permissions", `Assoc [ "allow", strings allow; "deny", strings deny ] ])))
+         (match validate_deny_read_roots ~gemini_dir deny_read_roots with
+          | Error _ as err -> err
+          | Ok valid_deny_roots ->
+            let allow =
+              match server_name, schema_dir with
+              | Some srv, Some dir -> [ "mcp(" ^ srv ^ "/*)"; "read_file(" ^ dir ^ ")" ]
+              | Some _, None | None, (Some _ | None) -> []
+            in
+            let extra_root_denies =
+              List.map (fun root -> "read_file(" ^ root ^ ")") valid_deny_roots
+            in
+            let write_cmd_denies =
+              if deny_writes_and_commands then [ "write_file(*)"; "command(*)" ] else []
+            in
+            let deny =
+              [ "read_file(" ^ config_dir ^ ")"
+              ; "read_file(" ^ token_path ^ ")"
+              ]
+              @ extra_root_denies
+              @ write_cmd_denies
+              @ [ "read_url(*)"; "execute_url(*)" ]
+            in
+            let strings values = `List (List.map (fun value -> `String value) values) in
+            Ok (`Assoc [ "permissions", `Assoc [ "allow", strings allow; "deny", strings deny ] ]))))
 ;;

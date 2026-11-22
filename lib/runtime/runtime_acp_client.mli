@@ -71,6 +71,19 @@ type driver_profile =
 val profile_of_driver : driver -> driver_profile
 val mode_of_posture : driver -> Runtime_native_tools.posture -> string
 
+val resolve_mode_for_posture
+  :  driver:driver
+  -> posture:Runtime_native_tools.posture
+  -> configured_mode:string option
+  -> string
+(** Resolve the ACP session mode bounded by [posture]:
+    - [Native_none] always enforces [mode_for_native_none].
+    - [Native_read] permits [configured_mode] only when it matches the driver's
+      declared [mode_for_native_none] or [mode_for_native_read]; any other
+      value is clamped to [mode_for_native_read].
+    - [Native_full] accepts any non-empty [configured_mode], defaulting to
+      [mode_for_native_full]. *)
+
 (** {1 Named protocol bounds} *)
 
 val protocol_version : int
@@ -130,6 +143,8 @@ type session_info =
   ; available_models : string list
   ; config_options : config_option list
   ; antigravity_tier : string option
+  ; replayed_context_used : int option
+  ; replayed_context_size : int option
   }
 
 type usage =
@@ -231,6 +246,8 @@ type stream_event =
       ; prompt_tokens : int option
       ; completion_tokens : int option
       ; cached_tokens : int option
+      ; cached_write_tokens : int option
+      ; thought_tokens : int option
       ; total_tokens : int option
       }
   | Mode_updated of string
@@ -350,22 +367,42 @@ val foreground_process_mgr
     manager suitable for {!start}, ensuring ACP subprocesses and any spawned
     grandchildren are reaped via [killpg SIGTERM -> grace -> SIGKILL]. *)
 
+val create_isolated_workspace
+  :  sw:Eio.Switch.t
+  -> ?prefix:string
+  -> unit
+  -> (string, error) result
+(** Create a canonicalized, [0700], PID-tagged empty workspace directory bound
+    to [sw] (removed automatically on switch release). Use as ACP [cwd] for
+    [Native_none] / [Deny_all] turns so official CLIs that auto-allow reads
+    inside [cwd] can never access workspace state or [.masc/]. *)
+
 val start
   :  sw:Eio.Switch.t
   -> proc_mgr:[> [> `Generic ] Eio.Process.mgr_ty ] Eio.Resource.t
   -> clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
+  -> ?fs:Eio.Fs.dir_ty Eio.Path.t
   -> config:config
   -> ?mcp_server:mcp_http_server
+  -> ?native_posture:Runtime_native_tools.posture
   -> unit
   -> (t, error) result
 (** Spawn the persistent ACP CLI child under [sw], register cleanup on [sw],
-    and complete the ACP v1 [initialize] handshake. *)
+    and complete the ACP v1 [initialize] handshake. When [fs] is supplied, the
+    child's working directory is resolved directly via [fs / config.cwd]
+    without requiring a global [Eio_context]. When [native_posture] is
+    supplied, Antigravity [settings.json] enforces posture-specific write,
+    command, and [cwd] read denies and Kimi suppresses [--skills-dir] under
+    [Native_none]. *)
 
 val driver : t -> driver
 val capabilities : t -> agent_capabilities
 val init_latency_ms : t -> int
 val is_alive : t -> bool
 val stderr_tail : t -> string
+(** Recent child stderr output, UTF-8-safe bounded and redacted with
+    {!Secret_patterns.redact_text} plus any configured MCP server header
+    secrets. *)
 
 val new_session
   :  t
@@ -384,22 +421,43 @@ val load_session
   -> session_id:string
   -> cwd:string
   -> ?mcp_server:mcp_http_server
+  -> ?additional_directories:string list
   -> ?mode:string
   -> ?model:string
   -> ?effort:string
   -> unit
   -> (session_info, error) result
+(** Load an existing ACP session with activity-based idle liveness across
+    replayed [session/update] notifications, capturing replayed context usage,
+    mode, and config options into the returned {!session_info}. *)
 
 val resume_session
   :  t
   -> session_id:string
   -> cwd:string
   -> ?mcp_server:mcp_http_server
+  -> ?additional_directories:string list
   -> ?mode:string
   -> ?model:string
   -> ?effort:string
   -> unit
   -> (session_info, error) result
+
+val reconfigure_session
+  :  t
+  -> session_info
+  -> ?mode:string
+  -> ?model:string
+  -> ?effort:string
+  -> unit
+  -> (session_info, error) result
+(** Idempotently apply [mode], [model], and [effort] deltas to an already-open
+    session. Sends zero RPCs when the desired values already match [session_info]. *)
+
+val close_session : ?timeout_s:float -> t -> session_id:string -> (unit, error) result
+(** Invoke ACP [session/close] to release server-side state for [session_id].
+    Defaults to {!init_timeout_s}; pass a smaller [timeout_s] on ephemeral
+    one-shot clients so teardown never blocks for 30s. *)
 
 val set_mode : t -> session_id:string -> mode_id:string -> (unit, error) result
 
@@ -454,7 +512,13 @@ module For_testing : sig
     -> extra_strip_env:string list
     -> string array
 
-  val build_argv : config -> temp_gemini_dir:string option -> string list
+  val build_argv
+    :  ?native_posture:Runtime_native_tools.posture
+    -> config
+    -> temp_gemini_dir:string option
+    -> string list
+  val utf8_safe_suffix : max_bytes:int -> string -> string
+  val redact_stderr_text : ?extra_secrets:string list -> string -> string
   val should_allow_permission : policy:permission_policy -> title:string -> kind:string option -> bool
 
   val classify_tool_call_json

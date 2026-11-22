@@ -4527,13 +4527,14 @@ let capability_of_runtime (rt : t) : runtime_capability =
   in
   let overflow =
     match rt.execution with
-    (* Both adapters report a typed Context_window_exceeded error variant
-       (Runtime_claude_code.Context_window_exceeded / Runtime_codex_app_server.Context_window_exceeded). *)
+    (* These adapters report typed context-window overflow errors
+       (Runtime_claude_code.Context_window_exceeded / Runtime_codex_app_server.Context_window_exceeded /
+       Runtime_acp_client.is_context_overflow_rpc_error). *)
     | Runtime_execution.Claude_code _
-    | Runtime_execution.Codex_app_server _ ->
-      Rejects_oversize_input
-    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Codex_app_server _
     | Runtime_execution.Acp _ ->
+      Rejects_oversize_input
+    | Runtime_execution.Antigravity_cli _ ->
       Truncates_silently
     | Runtime_execution.Agent_core _ ->
       (match context_window with

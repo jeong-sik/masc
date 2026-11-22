@@ -2639,6 +2639,530 @@ for line in sys.stdin:
           check string "non-meta title=bash cannot be overwritten by spoofed mcp(...) title"
             "reject_once_id" (option_of "1010")))))
 ;;
+
+let test_layer3_policy_mode_redaction_and_oauth_security () =
+  let tmp = Filename.temp_dir ~perms:0o700 "masc-acp-l3-" "" in
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    let canonical_tmp = Unix.realpath tmp in
+    let iso_cwd = Filename.concat canonical_tmp "iso-cwd" in
+    let gemini_dir = Filename.concat canonical_tmp "gemini-dir" in
+    Unix.mkdir iso_cwd 0o700;
+    Unix.mkdir gemini_dir 0o700;
+    (* 1. Antigravity policy with deny_read_roots + deny_writes_and_commands *)
+    (match
+       Runtime_antigravity_policy.acp_settings_json
+         ~mcp_server_name:"masc"
+         ~deny_read_roots:[ iso_cwd ]
+         ~deny_writes_and_commands:true
+         ~gemini_dir
+         ()
+     with
+     | Error err ->
+       failf "acp_settings_json failed: %s" (Runtime_antigravity_policy.error_to_string err)
+     | Ok json ->
+       let open Yojson.Safe.Util in
+       let deny = json |> member "permissions" |> member "deny" |> to_list |> List.map to_string in
+       check bool "denies iso_cwd reads" true (List.mem ("read_file(" ^ iso_cwd ^ ")") deny);
+       check bool "denies write_file(*)" true (List.mem "write_file(*)" deny);
+       check bool "denies command(*)" true (List.mem "command(*)" deny));
+    (* Reject deny_read_root that shadows gemini_dir or uses dot segments *)
+    check bool "rejects deny_read_root containing gemini_dir" true
+      (Result.is_error
+         (Runtime_antigravity_policy.acp_settings_json
+            ~mcp_server_name:"masc"
+            ~deny_read_roots:[ canonical_tmp ]
+            ~deny_writes_and_commands:true
+            ~gemini_dir
+            ()));
+    check bool "rejects deny_read_root with /. dot segment" true
+      (Result.is_error
+         (Runtime_antigravity_policy.acp_settings_json
+            ~mcp_server_name:"masc"
+            ~deny_read_roots:[ "/." ]
+            ~deny_writes_and_commands:true
+            ~gemini_dir
+            ()));
+    check bool "rejects deny_read_root with .. traversal segment" true
+      (Result.is_error
+         (Runtime_antigravity_policy.acp_settings_json
+            ~mcp_server_name:"masc"
+            ~deny_read_roots:[ "/tmp/sub/../.." ]
+            ~deny_writes_and_commands:true
+            ~gemini_dir
+            ()));
+    (* 2. Posture-bounded resolve_mode_for_posture prevents escalation *)
+    check string "Antigravity Native_none clamps auto to default" "default"
+      (Runtime_acp_client.resolve_mode_for_posture
+         ~driver:Antigravity
+         ~posture:Runtime_native_tools.Native_none
+         ~configured_mode:(Some "auto"));
+    check string "Kimi Native_none clamps yolo to default" "default"
+      (Runtime_acp_client.resolve_mode_for_posture
+         ~driver:Kimi_code
+         ~posture:Runtime_native_tools.Native_none
+         ~configured_mode:(Some "yolo"));
+    check string "Kimi Native_read permits default" "default"
+      (Runtime_acp_client.resolve_mode_for_posture
+         ~driver:Kimi_code
+         ~posture:Runtime_native_tools.Native_read
+         ~configured_mode:(Some "default"));
+    check string "Kimi Native_read clamps yolo to plan" "plan"
+      (Runtime_acp_client.resolve_mode_for_posture
+         ~driver:Kimi_code
+         ~posture:Runtime_native_tools.Native_read
+         ~configured_mode:(Some "yolo"));
+    check string "Vibe Native_none clamps auto-approve to ask" "ask"
+      (Runtime_acp_client.resolve_mode_for_posture
+         ~driver:Mistral_vibe
+         ~posture:Runtime_native_tools.Native_none
+         ~configured_mode:(Some "auto-approve"));
+    check string "Vibe Native_full accepts custom mode" "custom-full"
+      (Runtime_acp_client.resolve_mode_for_posture
+         ~driver:Mistral_vibe
+         ~posture:Runtime_native_tools.Native_full
+         ~configured_mode:(Some "custom-full"));
+    (* 3. Kimi --skills-dir suppressed under Native_none *)
+    let kimi_cfg =
+      { (Runtime_acp_client.default_config ~driver:Kimi_code ~cwd:iso_cwd) with
+        skills_dirs = [ iso_cwd ]
+      }
+    in
+    let argv_none =
+      Runtime_acp_client.For_testing.build_argv
+        ~native_posture:Runtime_native_tools.Native_none
+        kimi_cfg
+        ~temp_gemini_dir:None
+    in
+    let argv_read =
+      Runtime_acp_client.For_testing.build_argv
+        ~native_posture:Runtime_native_tools.Native_read
+        kimi_cfg
+        ~temp_gemini_dir:None
+    in
+    check bool "Kimi suppresses --skills-dir under Native_none" false
+      (List.mem "--skills-dir" argv_none);
+    check bool "Kimi keeps --skills-dir under Native_read" true
+      (List.mem "--skills-dir" argv_read);
+    (* Antigravity clamps --dangerously-skip-permissions under Native_none & Native_read *)
+    let agy_skip_cfg =
+      { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:iso_cwd) with
+        dangerously_skip_permissions = true
+      }
+    in
+    check bool "Antigravity clamps skip-permissions under Native_none" false
+      (List.mem "--dangerously-skip-permissions"
+         (Runtime_acp_client.For_testing.build_argv
+            ~native_posture:Runtime_native_tools.Native_none
+            agy_skip_cfg
+            ~temp_gemini_dir:None));
+    check bool "Antigravity clamps skip-permissions under Native_read" false
+      (List.mem "--dangerously-skip-permissions"
+         (Runtime_acp_client.For_testing.build_argv
+            ~native_posture:Runtime_native_tools.Native_read
+            agy_skip_cfg
+            ~temp_gemini_dir:None));
+    check bool "Antigravity allows skip-permissions under Native_full" true
+      (List.mem "--dangerously-skip-permissions"
+         (Runtime_acp_client.For_testing.build_argv
+            ~native_posture:Runtime_native_tools.Native_full
+            agy_skip_cfg
+            ~temp_gemini_dir:None));
+    (* 4. UTF-8 safe suffix never splits multi-byte codepoints *)
+    let korean = "AB한글CD" in
+    check string "UTF-8 safe suffix advances past continuation bytes (max=4)" "CD"
+      (Runtime_acp_client.For_testing.utf8_safe_suffix ~max_bytes:4 korean);
+    check string "UTF-8 safe suffix preserves aligned codepoint (max=5)" "글CD"
+      (Runtime_acp_client.For_testing.utf8_safe_suffix ~max_bytes:5 korean);
+    (* 5. Stderr redaction scrubs both Secret_patterns and exact MCP tokens *)
+    let raw_stderr =
+      "err: Authorization: Bearer top-secret-bearer-token-987654 and bare top-secret-bearer-token-987654"
+    in
+    let redacted =
+      Runtime_acp_client.For_testing.redact_stderr_text
+        ~extra_secrets:[ "top-secret-bearer-token-987654" ]
+        raw_stderr
+    in
+    let contains_sub ~needle s =
+      let n = String.length needle in
+      let h = String.length s in
+      let rec scan i =
+        if i + n > h then false
+        else if String.sub s i n = needle then true
+        else scan (i + 1)
+      in
+      n = 0 || scan 0
+    in
+    check bool "secret token scrubbed from stderr" false
+      (contains_sub ~needle:"top-secret-bearer-token-987654" redacted);
+    check bool "redaction marker present" true
+      (contains_sub ~needle:"[REDACTED]" redacted);
+    (* 6. CamelCase _meta usage_update parsing *)
+    let usage_ev =
+      `Assoc
+        [ "sessionId", `String "s1"
+        ; ( "update"
+          , `Assoc
+              [ "sessionUpdate", `String "usage_update"
+              ; "used", `Int 9000
+              ; "size", `Int 400000
+              ; ( "_meta"
+                , `Assoc
+                    [ "inputTokens", `Int 4000
+                    ; "outputTokens", `Int 500
+                    ; "cachedReadTokens", `Int 3000
+                    ; "cachedWriteTokens", `Int 250
+                    ; "thoughtTokens", `Int 120
+                    ; "totalTokens", `Int 7870
+                    ] )
+              ] )
+        ]
+      |> Runtime_acp_client.For_testing.parse_session_update
+    in
+    (match usage_ev with
+     | Some
+         (Runtime_acp_client.Usage_updated
+            { used = Some 9000
+            ; size = Some 400000
+            ; prompt_tokens = Some 4000
+            ; completion_tokens = Some 500
+            ; cached_tokens = Some 3000
+            ; cached_write_tokens = Some 250
+            ; thought_tokens = Some 120
+            ; total_tokens = Some 7870
+            }) -> ()
+     | _ -> fail "expected camelCase _meta Usage_updated fields");
+    (* 7. Explicit oauth_source fails closed when missing, world-readable, or symlink *)
+    let world_oauth = Filename.concat canonical_tmp "world-oauth.json" in
+    Out_channel.with_open_text world_oauth (fun oc -> output_string oc "{}");
+    Unix.chmod world_oauth 0o644;
+    let symlink_oauth = Filename.concat canonical_tmp "link-oauth.json" in
+    Unix.symlink world_oauth symlink_oauth;
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 () in
+      let check_oauth_rejected label path =
+        Eio.Switch.run (fun sw ->
+          let cfg =
+            { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:iso_cwd) with
+              cli_path = "true"
+            ; args = []
+            ; oauth_source = Some path
+            }
+          in
+          match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config:cfg () with
+          | Error (Runtime_acp_client.Invalid_config _) -> ()
+          | Error err ->
+            failf "%s expected Invalid_config, got %s" label (Runtime_acp_client.error_to_string err)
+          | Ok client ->
+            Runtime_acp_client.close client;
+            failf "%s unexpectedly succeeded" label)
+      in
+      check_oauth_rejected "missing oauth_source" (Filename.concat canonical_tmp "missing-oauth");
+      check_oauth_rejected "0644 oauth_source" world_oauth;
+      check_oauth_rejected "symlink oauth_source" symlink_oauth))
+;;
+
+let test_layer3_mock_session_lifecycle_load_reconfigure_close_and_mode_fail_closed () =
+  let tmp = Filename.temp_dir ~perms:0o700 "masc-acp-l3-mock-" "" in
+  let canonical_tmp = Unix.realpath tmp in
+  let mock_script = Filename.concat canonical_tmp "mock_acp_l3.py" in
+  let log_file = Filename.concat canonical_tmp "state.json" in
+  let settings_copy = Filename.concat canonical_tmp "settings_copy.json" in
+  let script_body =
+    Printf.sprintf
+      {|import json, os, shutil, sys, time
+
+gdir = None
+argv = sys.argv[1:]
+for i, a in enumerate(argv):
+    if a == "--gemini-dir" and i + 1 < len(argv):
+        gdir = argv[i + 1]
+if gdir:
+    sp = os.path.join(gdir, "antigravity-cli", "settings.json")
+    if os.path.exists(sp):
+        shutil.copyfile(sp, %S)
+
+sys.stderr.write("diagnostic leak http://127.0.0.1:9999/mcp/cap-l3-token987 bearer-secret-l3-xyz987654321 done\n")
+sys.stderr.flush()
+
+state = {"set_modes": [], "set_models": [], "set_opts": [], "closed": [], "cwd": os.getcwd()}
+def flush_state():
+    with open(%S, "w") as f:
+        json.dump(state, f)
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    m = msg.get("method")
+    req_id = msg.get("id")
+    params = msg.get("params") or {}
+    if m == "initialize":
+        flush_state()
+        send({"jsonrpc": "2.0", "id": req_id, "result": {
+            "protocolVersion": 1,
+            "agentCapabilities": {
+                "loadSession": True,
+                "sessionCapabilities": {"resume": {}, "close": {}, "additionalDirectories": {}},
+                "_meta": {"antigravity": {"systemPrompt": {"append": True}}}
+            }
+        }})
+    elif m == "session/new":
+        send({"jsonrpc": "2.0", "id": req_id, "result": {
+            "sessionId": "sess-l3-1",
+            "modes": {
+                "currentModeId": "default",
+                "availableModes": [{"id": "default"}, {"id": "auto"}]
+            },
+            "models": {
+                "currentModelId": "model-a",
+                "availableModels": [{"modelId": "model-a"}, {"modelId": "model-b"}]
+            },
+            "configOptions": [
+                {"id": "thought_level", "name": "Thought", "category": "thought_level",
+                 "currentValue": "medium", "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]}
+            ]
+        }})
+    elif m == "session/load":
+        sid = params.get("sessionId")
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": sid,
+            "update": {"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "replayed user turn"}}
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": sid,
+            "update": {"sessionUpdate": "usage_update", "used": 12345, "size": 200000}
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": sid,
+            "update": {"sessionUpdate": "current_mode_update", "currentModeId": "default"}
+        }})
+        send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+    elif m == "session/set_mode":
+        state["set_modes"].append(params.get("modeId"))
+        flush_state()
+        send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+    elif m == "session/set_model":
+        state["set_models"].append(params.get("modelId"))
+        flush_state()
+        send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+    elif m == "session/set_config_option":
+        state["set_opts"].append((params.get("configId"), params.get("value")))
+        flush_state()
+        send({"jsonrpc": "2.0", "id": req_id, "result": {"configOptions": []}})
+    elif m == "session/close":
+        state["closed"].append(params.get("sessionId"))
+        flush_state()
+        send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+    elif m == "session/prompt":
+        sid = params.get("sessionId")
+        # Send one update WITHOUT sessionId (must be dropped) and one WITH matching sessionId
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "UNATTRIBUTED-"}}
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": sid,
+            "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "ATTRIBUTED"}}
+        }})
+        send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
+|}
+      settings_copy
+      log_file
+  in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc script_body);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    let iso_path_ref = ref "" in
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 () in
+      Eio.Switch.run (fun sw ->
+        let iso_cwd =
+          match Runtime_acp_client.create_isolated_workspace ~sw ~prefix:"l3" () with
+          | Ok d -> d
+          | Error err -> failf "create_isolated_workspace failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        iso_path_ref := iso_cwd;
+        let iso_stat = Unix.lstat iso_cwd in
+        check int "isolated workspace is 0700" 0o700 (iso_stat.Unix.st_perm land 0o7777);
+        let oauth_file = Filename.concat canonical_tmp "private-oauth.json" in
+        Out_channel.with_open_text oauth_file (fun oc -> output_string oc "{\"access_token\":\"test\"}");
+        Unix.chmod oauth_file 0o600;
+        let mcp_server : Runtime_acp_client.mcp_http_server =
+          { name = "masc"
+          ; url = "http://127.0.0.1:9999/mcp/cap-l3-token987"
+          ; headers = [ "Authorization", "Bearer bearer-secret-l3-xyz987654321" ]
+          }
+        in
+        let cfg =
+          { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:iso_cwd) with
+            cli_path = "python3"
+          ; args = [ mock_script ]
+          ; oauth_source = Some oauth_file
+          }
+        in
+        let client =
+          match
+            Runtime_acp_client.start
+              ~sw
+              ~proc_mgr
+              ~clock
+              ~fs:(Eio.Stdenv.fs env)
+              ~config:cfg
+              ~mcp_server
+              ~native_posture:Runtime_native_tools.Native_none
+              ()
+          with
+          | Ok c -> c
+          | Error err -> failf "start failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        (* Verify settings.json denied iso_cwd reads + writes + commands *)
+        let settings_json = Yojson.Safe.from_file settings_copy in
+        let open Yojson.Safe.Util in
+        let deny =
+          settings_json |> member "permissions" |> member "deny" |> to_list |> List.map to_string
+        in
+        check bool "Native_none settings deny iso_cwd read" true
+          (List.mem ("read_file(" ^ iso_cwd ^ ")") deny);
+        check bool "Native_none settings deny write_file(*)" true (List.mem "write_file(*)" deny);
+        check bool "Native_none settings deny command(*)" true (List.mem "command(*)" deny);
+        (* Verify unsupported mode fails closed *)
+        (match
+           Runtime_acp_client.new_session client ~cwd:iso_cwd ~mode:"bogus-mode" ()
+         with
+         | Error (Runtime_acp_client.Protocol_error { stage = "session/set_mode"; _ }) -> ()
+         | Error err ->
+           failf "expected Protocol_error for unsupported mode, got %s"
+             (Runtime_acp_client.error_to_string err)
+         | Ok _ -> fail "unsupported mode should have failed closed");
+        (* Open valid session *)
+        let info =
+          match
+            Runtime_acp_client.new_session
+              client
+              ~cwd:iso_cwd
+              ~mode:"default"
+              ~model:"model-a"
+              ~effort:"medium"
+              ()
+          with
+          | Ok s -> s
+          | Error err -> failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        (* Reconfigure with identical options sends 0 RPCs *)
+        let info2 =
+          match
+            Runtime_acp_client.reconfigure_session
+              client
+              info
+              ~mode:"default"
+              ~model:"model-a"
+              ~effort:"medium"
+              ()
+          with
+          | Ok s -> s
+          | Error err -> failf "noop reconfigure failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        let state_after_noop = Yojson.Safe.from_file log_file in
+        check int "noop reconfigure sent 0 set_opts" 0
+          (List.length (state_after_noop |> member "set_opts" |> to_list));
+        check string "child started in isolated cwd via ~fs" iso_cwd
+          (state_after_noop |> member "cwd" |> to_string);
+        (* Reconfigure effort delta updates config_options in place even when server returns [] *)
+        let info3 =
+          match
+            Runtime_acp_client.reconfigure_session
+              client
+              info2
+              ~mode:"default"
+              ~model:"model-a"
+              ~effort:"high"
+              ()
+          with
+          | Ok s -> s
+          | Error err -> failf "effort reconfigure failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        check int "config_options preserved when server returns []" 1
+          (List.length info3.config_options);
+        check string "effort current_value updated in place" "high"
+          (List.hd info3.config_options).current_value;
+        (* load_session returning {} captures replayed usage/mode, reuses cached catalog,
+           and clears cached current_value so effort="high" still dispatches set_config_option *)
+        let loaded =
+          match
+            Runtime_acp_client.load_session
+              client
+              ~session_id:"sess-l3-loaded"
+              ~cwd:iso_cwd
+              ~mode:"default"
+              ~model:"model-b"
+              ~effort:"high"
+              ()
+          with
+          | Ok s -> s
+          | Error err -> failf "load_session failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        check (option int) "replayed_context_used captured" (Some 12345) loaded.replayed_context_used;
+        check (option int) "replayed_context_size captured" (Some 200000) loaded.replayed_context_size;
+        check (option string) "replayed mode captured" (Some "default") loaded.current_mode_id;
+        check (option string) "cached availableModels enabled set_model on {} load" (Some "model-b")
+          loaded.current_model_id;
+        let state_after_load = Yojson.Safe.from_file log_file in
+        check int "load_session returning {} still applied effort set_config_option" 2
+          (List.length (state_after_load |> member "set_opts" |> to_list));
+        (* Unattributed session/update (missing sessionId) is dropped *)
+        (match
+           Runtime_acp_client.prompt
+             client
+             ~session_id:loaded.session_id
+             ~blocks:[ Runtime_acp_client.Text_block "check-attribution" ]
+             ()
+         with
+         | Error err -> failf "prompt failed: %s" (Runtime_acp_client.error_to_string err)
+         | Ok res ->
+           check string "only session-attributed update delivered" "ATTRIBUTED" res.text);
+        (* close_session sends session/close *)
+        (match Runtime_acp_client.close_session ~timeout_s:2.0 client ~session_id:loaded.session_id with
+         | Ok () -> ()
+         | Error err -> failf "close_session failed: %s" (Runtime_acp_client.error_to_string err));
+        let final_state = Yojson.Safe.from_file log_file in
+        let closed_ids = final_state |> member "closed" |> to_list |> List.map to_string in
+        check (list string) "session/close recorded" [ "sess-l3-loaded" ] closed_ids;
+        (* Wait briefly for async stderr drain daemon so assertion is never vacuous *)
+        let rec await_stderr attempts =
+          let s = Runtime_acp_client.stderr_tail client in
+          if String.trim s <> "" || attempts <= 0
+          then s
+          else (
+            Eio.Time.sleep clock 0.01;
+            await_stderr (attempts - 1))
+        in
+        let tail = await_stderr 50 in
+        let rec has_sub ~needle s i =
+          if i + String.length needle > String.length s
+          then false
+          else if String.sub s i (String.length needle) = needle
+          then true
+          else has_sub ~needle s (i + 1)
+        in
+        check bool "diagnostic stderr prefix captured" true
+          (has_sub ~needle:"diagnostic leak" tail 0);
+        check bool "redaction marker emitted in stderr_tail" true
+          (has_sub ~needle:"[REDACTED]" tail 0);
+        check bool "bearer secret redacted from stderr_tail" false
+          (has_sub ~needle:"bearer-secret-l3-xyz987654321" tail 0);
+        check bool "MCP capability URL redacted from stderr_tail" false
+          (has_sub ~needle:"cap-l3-token987" tail 0);
+        Runtime_acp_client.close client));
+    (* Isolated workspace cleaned up after switch exits *)
+    check bool "isolated workspace removed on switch release" false
+      (Sys.file_exists !iso_path_ref))
+;;
+
 let () =
   run "runtime_acp_client"
     [ "profiles", [ test_case "closed driver profiles" `Quick test_driver_profiles ]
@@ -2684,6 +3208,10 @@ let () =
             test_set_model_toolcall_correlation_and_idle_liveness
         ; test_case "typed Tool_call_started effect fencing across postures" `Quick
             test_keeper_typed_tool_call_effect_fencing
+        ; test_case "Layer 3 policy denies, posture mode clamp, UTF-8/secret stderr & fail-closed oauth"
+            `Quick test_layer3_policy_mode_redaction_and_oauth_security
+        ; test_case "Layer 3 isolated workspace, mode fail-closed, reconfigure, load replay & close_session"
+            `Quick test_layer3_mock_session_lifecycle_load_reconfigure_close_and_mode_fail_closed
         ] )
     ; ( "wire"
       , [ test_case "session update & usage parsing" `Quick test_parse_wire_updates_and_usage

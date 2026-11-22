@@ -1626,12 +1626,13 @@ let acp_execution (provider : Runtime_schema.provider)
             provider.id
             path)
      | Some options, Some (File path) ->
-       let cli_path =
+       let install_client =
          match options.driver with
-         | Runtime_acp_client.Antigravity ->
-           Runtime_official_cli_install.spawn_path Antigravity ~command
-         | Runtime_acp_client.Kimi_code | Runtime_acp_client.Mistral_vibe -> command
+         | Runtime_acp_client.Antigravity -> Runtime_official_cli_install.Antigravity
+         | Runtime_acp_client.Kimi_code -> Runtime_official_cli_install.Kimi_code
+         | Runtime_acp_client.Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe
        in
+       let cli_path = Runtime_official_cli_install.spawn_path install_client ~command in
        Ok
          (Runtime_execution.Acp
             { driver = options.driver
@@ -1646,12 +1647,13 @@ let acp_execution (provider : Runtime_schema.provider)
             ; timeout_s = options.timeout_s
             })
      | Some options, None ->
-       let cli_path =
+       let install_client =
          match options.driver with
-         | Runtime_acp_client.Antigravity ->
-           Runtime_official_cli_install.spawn_path Antigravity ~command
-         | Runtime_acp_client.Kimi_code | Runtime_acp_client.Mistral_vibe -> command
+         | Runtime_acp_client.Antigravity -> Runtime_official_cli_install.Antigravity
+         | Runtime_acp_client.Kimi_code -> Runtime_official_cli_install.Kimi_code
+         | Runtime_acp_client.Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe
        in
+       let cli_path = Runtime_official_cli_install.spawn_path install_client ~command in
        Ok
          (Runtime_execution.Acp
             { driver = options.driver

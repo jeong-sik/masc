@@ -165,6 +165,7 @@ val verify
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> mgr:_ Eio.Process.mgr
   -> clock:_ Eio.Time.clock
+  -> ?fs:Eio.Fs.dir_ty Eio.Path.t
   -> cwd:Eio.Fs.dir_ty Eio.Path.t
   -> cwd_path:string
   -> timeout_s:float

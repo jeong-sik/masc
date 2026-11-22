@@ -271,33 +271,49 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
       let mcp_server : Runtime_acp_client.mcp_http_server =
         { name = mcp_server_name; url; headers }
       in
-      let base_cfg = Runtime_acp_client.default_config ~driver ~cwd in
-      let skills_dirs =
-        if Sys.file_exists skills_root && Sys.is_directory skills_root
-        then [ skills_root ]
-        else []
+      let acp_cwd_result =
+        match posture with
+        | Runtime_native_tools.Native_none ->
+          Runtime_acp_client.create_isolated_workspace ~sw ~prefix:"probe" ()
+        | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full -> Ok cwd
       in
-      let config : Runtime_acp_client.config =
-        { base_cfg with
-          skills_dirs
-        ; dangerously_skip_permissions = (posture = Runtime_native_tools.Native_full)
-        }
+      let start_result =
+        match acp_cwd_result with
+        | Error err -> Error err
+        | Ok acp_cwd ->
+          let base_cfg = Runtime_acp_client.default_config ~driver ~cwd:acp_cwd in
+          let skills_dirs =
+            match posture with
+            | Runtime_native_tools.Native_none -> []
+            | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full ->
+              if Sys.file_exists skills_root && Sys.is_directory skills_root
+              then [ skills_root ]
+              else []
+          in
+          let config : Runtime_acp_client.config =
+            { base_cfg with
+              skills_dirs
+            ; dangerously_skip_permissions = (posture = Runtime_native_tools.Native_full)
+            }
+          in
+          let proc_mgr =
+            Runtime_acp_client.foreground_process_mgr
+              ~clock:(Eio.Stdenv.clock env)
+              ~grace_seconds:5.0
+              ()
+          in
+          Runtime_acp_client.start
+            ~sw
+            ~proc_mgr
+            ~clock:(Eio.Stdenv.clock env)
+            ~fs:(Eio.Stdenv.fs env)
+            ~config
+            ~mcp_server
+            ~native_posture:posture
+            ()
+          |> Result.map (fun client -> client, acp_cwd)
       in
-      let proc_mgr =
-        Runtime_acp_client.foreground_process_mgr
-          ~clock:(Eio.Stdenv.clock env)
-          ~grace_seconds:5.0
-          ()
-      in
-      match
-        Runtime_acp_client.start
-          ~sw
-          ~proc_mgr
-          ~clock:(Eio.Stdenv.clock env)
-          ~config
-          ~mcp_server
-          ()
-      with
+      match start_result with
       | Error err ->
         { driver
         ; posture
@@ -316,7 +332,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
         ; turn2 = None
         ; error = Some (Runtime_acp_client.error_to_string err)
         }
-      | Ok client ->
+      | Ok (client, acp_cwd) ->
         let init_ms = Runtime_acp_client.init_latency_ms client in
         let profile = Runtime_acp_client.profile_of_driver driver in
         let system_prompt_append =
@@ -335,7 +351,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
         match
           Runtime_acp_client.new_session
             client
-            ~cwd
+            ~cwd:acp_cwd
             ?system_prompt_append
             ~mcp_server
             ~mode

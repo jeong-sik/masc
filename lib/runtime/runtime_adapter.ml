@@ -1403,6 +1403,7 @@ let runtime_antigravity_effort = function
   | Runtime_schema.Antigravity_low -> Runtime_antigravity.Low
   | Runtime_schema.Antigravity_medium -> Runtime_antigravity.Medium
   | Runtime_schema.Antigravity_high -> Runtime_antigravity.High
+  | Runtime_schema.Antigravity_xhigh -> Runtime_antigravity.Xhigh
 ;;
 
 let antigravity_cli_execution (provider : Runtime_schema.provider)

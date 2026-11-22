@@ -91,6 +91,7 @@ type antigravity_effort =
   | Antigravity_low
   | Antigravity_medium
   | Antigravity_high
+  | Antigravity_xhigh
 [@@deriving show, eq]
 
 type antigravity_cli_options =

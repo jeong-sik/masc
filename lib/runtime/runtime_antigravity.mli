@@ -8,6 +8,7 @@ type effort =
   | Low
   | Medium
   | High
+  | Xhigh
 
 type execution_mode =
   | Plan

@@ -233,11 +233,12 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
          | Some "low" -> Ok (Some Runtime_schema.Antigravity_low)
          | Some "medium" -> Ok (Some Runtime_schema.Antigravity_medium)
          | Some "high" -> Ok (Some Runtime_schema.Antigravity_high)
+         | Some "xhigh" -> Ok (Some Runtime_schema.Antigravity_xhigh)
          | Some value ->
            Error
              (error
                 (path ^ ".effort")
-                (Printf.sprintf "effort must be low, medium, or high; got %S" value))
+                (Printf.sprintf "effort must be low, medium, high, or xhigh; got %S" value))
        in
        (match effort_result with
         | Error errors -> Error errors

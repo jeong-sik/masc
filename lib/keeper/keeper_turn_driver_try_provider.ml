@@ -947,8 +947,8 @@ module Message_indices = Set.Make (Int)
 
 type in_turn_overflow_demotion =
   | No_in_turn_demotion
-  | Demote_closed_current_turn_tools
-  | Demote_and_preview_closed_current_turn_tools
+  | Demote_closed_current_turn_tools of { refused_atom_count : int }
+  | Demote_and_preview_closed_current_turn_tools of { refused_atom_count : int }
 
 (* Conservative bytes-per-token factor translating a provider's declared token
    input budget into {!Keeper_compaction.Explicit_hard_limit}'s byte contract
@@ -1733,13 +1733,18 @@ let compose_carried_model_input_internal
      when the window moves ([finished_boundary]). *)
   let planned, demote_before =
     match in_turn_demotion with
-    | Demote_closed_current_turn_tools
-    | Demote_and_preview_closed_current_turn_tools ->
+    | Demote_closed_current_turn_tools { refused_atom_count }
+    | Demote_and_preview_closed_current_turn_tools { refused_atom_count } ->
+      let bounded_demote_before = Int.min refused_atom_count history_atom_count in
       let effective_completed_arguments =
         match completed_arguments with
         | Some _ -> completed_arguments
         | None when auto_bind_closed_arguments && not (String.equal base_path "") ->
-          (match Keeper_model_input_demotion.bind_closed_arguments_in_messages messages with
+          (match
+             Keeper_model_input_demotion.bind_closed_arguments_in_messages
+               ~demote_before:bounded_demote_before
+               messages
+           with
            | Ok closed_args -> Some closed_args
            | Error (_ : Keeper_transcript_unit.structural_error) -> None)
         | None -> None
@@ -1747,21 +1752,22 @@ let compose_carried_model_input_internal
       let blob_planned =
         demotion_plan ?completed_arguments:effective_completed_arguments
           ~measure_message_bytes ~measure_wire_bytes ~base_path
-          ~demote_before:history_atom_count messages
+          ~demote_before:bounded_demote_before messages
       in
       let planned =
         match in_turn_demotion with
-        | Demote_closed_current_turn_tools -> blob_planned
-        | Demote_and_preview_closed_current_turn_tools ->
+        | Demote_closed_current_turn_tools _ -> blob_planned
+        | Demote_and_preview_closed_current_turn_tools _ ->
           let previewed, _changed =
             Keeper_model_input_demotion.preview_fallback_closed_tool_bodies
+              ~demote_before:bounded_demote_before
               ~measure_message_bytes
               blob_planned.Keeper_model_input_demotion.messages
           in
           { blob_planned with messages = previewed }
         | No_in_turn_demotion -> blob_planned
       in
-      planned, applied_demote_before ~base_path ~demote_before:history_atom_count
+      planned, applied_demote_before ~base_path ~demote_before:bounded_demote_before
     | No_in_turn_demotion ->
       (match current_turn_results with
        | Current_turn_verbatim ->
@@ -2029,13 +2035,15 @@ let request_view
   let completed_arguments =
     match in_turn_demotion with
     | No_in_turn_demotion -> completed_arguments
-    | Demote_closed_current_turn_tools
-    | Demote_and_preview_closed_current_turn_tools ->
+    | Demote_closed_current_turn_tools { refused_atom_count }
+    | Demote_and_preview_closed_current_turn_tools { refused_atom_count } ->
       if String.equal base_path ""
       then completed_arguments
       else (
         match offload_model_input_cpu (fun () ->
-          Keeper_model_input_demotion.bind_closed_arguments_in_messages messages)
+          Keeper_model_input_demotion.bind_closed_arguments_in_messages
+            ~demote_before:refused_atom_count
+            messages)
         with
         | Ok closed_args -> Some closed_args
         | Error (_ : Keeper_transcript_unit.structural_error) -> completed_arguments)
@@ -2797,7 +2805,11 @@ let bounded_model_input_projection
          , pinned_bytes + preamble_bytes
          , List.exists Runtime_model_input_tail_window.is_extra_context canonical_history ))
      in
-     let first_atom = history_atom_count - transmitted_atoms in
+     let first_atom =
+       if transmitted_atoms = 0
+       then history_atom_count
+       else composed.projection.Runtime_model_input_tail_window.dropped_atoms
+     in
      (* Both positions are read off the lookup over the history the range was
         composed from, whose atom count [history_atom_count] is.
         - (Some, Some): the range carried atoms [first_atom] to the newest.
@@ -3768,43 +3780,80 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                    ~held_front:ctx.carried_front_after_refusal ~hold_front:ctx.hold_carried_front
                    ~on_this_turn_start:rungs.on_this_turn_start)
               ~current_turn_tools_blob:(fun refusal ->
+                let current_atom_count =
+                  snd (Runtime_model_input_tail_window.annotate messages)
+                in
+                let can_escalate =
+                  match !(state.in_turn_demotion) with
+                  | No_in_turn_demotion -> true
+                  | Demote_closed_current_turn_tools { refused_atom_count } ->
+                    current_atom_count > refused_atom_count
+                  | Demote_and_preview_closed_current_turn_tools _ -> false
+                in
                 if not (is_size_refusal refusal)
-                   || !(state.in_turn_demotion) <> No_in_turn_demotion
+                   || not can_escalate
+                   || current_atom_count <= 0
                    || not reader_available
                    || String.equal ctx.base_path ""
                 then Ok None
                 else (
+                  let previous = !(state.in_turn_demotion) in
                   let before_bytes = !(state.last_composed_bytes) in
-                  state.in_turn_demotion := Demote_closed_current_turn_tools;
+                  state.in_turn_demotion :=
+                    Demote_closed_current_turn_tools
+                      { refused_atom_count = current_atom_count };
                   match compose messages with
-                  | Error _ as err -> err
+                  | Error _ as err ->
+                    state.in_turn_demotion := previous;
+                    err
                   | Ok next_request ->
                     (match before_bytes, !(state.last_composed_bytes) with
                      | Some before, Some after when after < before ->
                        Log.Keeper.info ~keeper_name:ctx.keeper_name
                          "model input closed current-turn tool bodies demoted after overflow \
-                          runtime=%s before_bytes=%d after_bytes=%d error=%s"
-                         ctx.runtime_id before after (Agent_core.Error.to_string refusal);
+                          runtime=%s refused_atom_count=%d before_bytes=%d after_bytes=%d error=%s"
+                         ctx.runtime_id current_atom_count before after
+                         (Agent_core.Error.to_string refusal);
                        Ok (Some next_request)
-                     | Some _, Some _ | None, _ | _, None -> Ok None)))
+                     | Some _, Some _ | None, _ | _, None ->
+                       state.in_turn_demotion := previous;
+                       Ok None)))
               ~current_turn_tools_preview:(fun refusal ->
+                let current_atom_count =
+                  snd (Runtime_model_input_tail_window.annotate messages)
+                in
+                let can_escalate =
+                  match !(state.in_turn_demotion) with
+                  | No_in_turn_demotion | Demote_closed_current_turn_tools _ -> true
+                  | Demote_and_preview_closed_current_turn_tools { refused_atom_count } ->
+                    current_atom_count > refused_atom_count
+                in
                 if not (is_size_refusal refusal)
-                   || !(state.in_turn_demotion) = Demote_and_preview_closed_current_turn_tools
+                   || not can_escalate
+                   || current_atom_count <= 0
                 then Ok None
                 else (
+                  let previous = !(state.in_turn_demotion) in
                   let before_bytes = !(state.last_composed_bytes) in
-                  state.in_turn_demotion := Demote_and_preview_closed_current_turn_tools;
+                  state.in_turn_demotion :=
+                    Demote_and_preview_closed_current_turn_tools
+                      { refused_atom_count = current_atom_count };
                   match compose messages with
-                  | Error _ as err -> err
+                  | Error _ as err ->
+                    state.in_turn_demotion := previous;
+                    err
                   | Ok next_request ->
                     (match before_bytes, !(state.last_composed_bytes) with
                      | Some before, Some after when after < before ->
                        Log.Keeper.info ~keeper_name:ctx.keeper_name
                          "model input closed current-turn tool bodies preview-compacted after \
-                          overflow runtime=%s before_bytes=%d after_bytes=%d error=%s"
-                         ctx.runtime_id before after (Agent_core.Error.to_string refusal);
+                          overflow runtime=%s refused_atom_count=%d before_bytes=%d after_bytes=%d error=%s"
+                         ctx.runtime_id current_atom_count before after
+                         (Agent_core.Error.to_string refusal);
                        Ok (Some next_request)
-                     | Some _, Some _ | None, _ | _, None -> Ok None)))
+                     | Some _, Some _ | None, _ | _, None ->
+                       state.in_turn_demotion := previous;
+                       Ok None)))
               ~drop_current_turn_rounds
               ~compose:(fun () -> compose messages)
         }
@@ -4774,8 +4823,8 @@ module For_testing = struct
   let aged_result_min_bytes = aged_result_min_bytes
   type nonrec in_turn_overflow_demotion = in_turn_overflow_demotion =
     | No_in_turn_demotion
-    | Demote_closed_current_turn_tools
-    | Demote_and_preview_closed_current_turn_tools
+    | Demote_closed_current_turn_tools of { refused_atom_count : int }
+    | Demote_and_preview_closed_current_turn_tools of { refused_atom_count : int }
 
   let compaction_bytes_of_tokens = compaction_bytes_of_tokens
   let droppable_current_turn_tool_atoms = droppable_current_turn_tool_atoms

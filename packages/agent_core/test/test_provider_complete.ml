@@ -2036,9 +2036,13 @@ let test_cache_stable_system_prefix_before_changing_observations () =
     (List.map (fun block -> block |> member "text" |> to_string) next_system);
   Alcotest.(check bool) "the stable cache block survives the changed turn" true
     (List.hd first_system = List.hd next_system);
-  List.iter (fun block ->
-    Alcotest.(check string) "each System boundary keeps the configured TTL" "1h"
-      (block |> member "cache_control" |> member "ttl" |> to_string)) next_system;
+  (match next_system with
+   | [ stable_prefix; volatile_suffix ] ->
+     Alcotest.(check string) "stable prefix keeps the configured TTL" "1h"
+       (stable_prefix |> member "cache_control" |> member "ttl" |> to_string);
+     Alcotest.(check bool) "volatile split suffix omits cache_control" true
+       (volatile_suffix |> member "cache_control" = `Null)
+   | _ -> Alcotest.fail "expected exactly [prefix; suffix] system blocks");
   let explicit = List.filter (fun block -> member "cache_control" block <> `Null)
       (next_system @ (next |> member "tools" |> to_list)) |> List.length in
   let automatic = if member "cache_control" next = `Null then 0 else 1 in
@@ -2354,6 +2358,54 @@ let test_cache_anthropic_volatile_tail_places_explicit_prefix_breakpoint () =
   in
   Alcotest.(check string) "earlier text block holds cache_control" "ephemeral"
     (earlier_block |> member "cache_control" |> member "type" |> to_string);
+  (* #209 #2: Kimi's Anthropic-compatible wire (kimi_coding_anthropic with
+     supports_prompt_caching = true) honors ONLY top-level cache_control and
+     ignores message-block markers, so trailing volatile context must preserve
+     top-level cache_control and omit message-block cache_control. *)
+  let kimi_config =
+    let base =
+      PC.make
+        ~kind:Kimi
+        ~model_id:"kimi-for-coding"
+        ~base_url:""
+        ~max_tokens:128
+        ~system_prompt:"Stable Kimi system."
+        ~cache_system_prompt:true
+        ()
+    in
+    { base with
+      model_capabilities_override =
+        Some
+          { Llm_provider.Capabilities.default_capabilities with
+            supports_prompt_caching = true
+          }
+    }
+  in
+  let kimi_msgs =
+    [ user_msg "stable user turn"
+    ; make_message ~role:Assistant [ Text "stable assistant turn" ]
+    ; with_origin System_context (user_msg "ephemeral clock/world")
+    ; with_origin Outside_context (user_msg "ephemeral outside context")
+    ]
+  in
+  let kimi_json =
+    BA.build_request ~config:kimi_config ~messages:kimi_msgs () |> Yojson.Safe.from_string
+  in
+  Alcotest.(check string)
+    "Kimi with supports_prompt_caching=true preserves top-level cache_control"
+    "ephemeral"
+    (kimi_json |> member "cache_control" |> member "type" |> to_string);
+  List.iteri
+    (fun idx msg_json ->
+       let blocks = msg_json |> member "content" |> to_list in
+       List.iter
+         (fun block ->
+            Alcotest.(check bool)
+              (Printf.sprintf "Kimi message %d has no block-level cache_control" idx)
+              true
+              (block |> member "cache_control" = `Null))
+         blocks)
+    (kimi_json |> member "messages" |> to_list);
   (* Non-strictly-trailing System_context (appears in prefix too) falls back safely to top-level. *)
   let mixed_msgs =
     [ with_origin System_context (user_msg "early system ctx")

@@ -124,7 +124,13 @@ let bind_completed_arguments ~completed_before ~seed ~replay_prefix messages =
   bind_messages 0 Occurrences.empty labelled messages
 ;;
 
-let bind_closed_arguments_in_messages messages =
+let atom_within_demote_before demote_before atom_index =
+  match demote_before with
+  | None -> true
+  | Some limit -> atom_index < limit
+;;
+
+let bind_closed_arguments_in_messages ?demote_before messages =
   let open Result.Syntax in
   let* partition = Keeper_transcript_unit.partition ~quarantine:true messages in
   let closed =
@@ -139,6 +145,8 @@ let bind_closed_arguments_in_messages messages =
       let arguments =
         match label with
         | Runtime_model_input_tail_window.Pinned -> arguments
+        | Runtime_model_input_tail_window.Atom atom_index
+          when not (atom_within_demote_before demote_before atom_index) -> arguments
         | Runtime_model_input_tail_window.Atom _ ->
           List.fold_left
             (fun acc (block_index, block) ->
@@ -258,7 +266,7 @@ let preview_fallback_block (block : Agent_core.Types.content_block) =
   | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> block
 ;;
 
-let preview_fallback_closed_tool_bodies ~measure_message_bytes messages =
+let preview_fallback_closed_tool_bodies ?demote_before ~measure_message_bytes messages =
   match Keeper_transcript_unit.partition ~quarantine:true messages with
   | Error _ -> messages, false
   | Ok partition ->
@@ -281,6 +289,8 @@ let preview_fallback_closed_tool_bodies ~measure_message_bytes messages =
              else
                match label with
                | Runtime_model_input_tail_window.Pinned -> message
+               | Runtime_model_input_tail_window.Atom atom_index
+                 when not (atom_within_demote_before demote_before atom_index) -> message
                | Runtime_model_input_tail_window.Atom _ ->
                  let candidate =
                    { message with content = List.map preview_fallback_block message.content }

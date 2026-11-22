@@ -103,28 +103,56 @@ let commit_compaction_anchor_for_messages
       load_compaction_anchor ~base_path ~keeper_name)
 ;;
 
-let has_librarian_working_state = function
-  | Some (Keeper_turn_driver_try_provider.Covered { working_state = Some _; _ }) -> true
-  | Some (Keeper_turn_driver_try_provider.Covered { working_state = None; _ })
-  | Some Keeper_turn_driver_try_provider.No_read_end
-  | None -> false
+let evicted_prefix_of_window ~offered ~windowed =
+  let drop_preamble =
+    List.filter (fun msg -> not (Runtime_model_input_tail_window.is_synthetic_preamble msg))
+  in
+  let offered_labelled, offered_atoms =
+    Runtime_model_input_tail_window.annotate (drop_preamble offered)
+  in
+  let _, kept_atoms =
+    Runtime_model_input_tail_window.annotate (drop_preamble windowed)
+  in
+  let dropped_atoms = offered_atoms - kept_atoms in
+  if dropped_atoms <= 0
+  then [], 0
+  else
+    ( List.filter_map
+        (fun (msg, label) ->
+           match label with
+           | Runtime_model_input_tail_window.Atom idx when idx < dropped_atoms -> Some msg
+           | Runtime_model_input_tail_window.Atom _
+           | Runtime_model_input_tail_window.Pinned -> None)
+        offered_labelled
+    , dropped_atoms )
 ;;
 
 let attach_rollover_anchor_if_needed
-      ~rollover_anchor ~minimal_anchor_only ~librarian_front ~offered ~windowed
+      ~rollover_anchor
+      ~commit_evicted_prefix
+      ~minimal_anchor_only
+      ~offered
+      ~windowed
   =
-  match rollover_anchor with
-  | None -> windowed
-  | Some anchor ->
-    if has_librarian_working_state librarian_front
-       || List.exists Runtime_model_input_tail_window.is_compaction_anchor windowed
-    then windowed
-    else (
-      let _, offered_atoms = Runtime_model_input_tail_window.annotate offered in
-      let _, kept_atoms = Runtime_model_input_tail_window.annotate windowed in
-      if minimal_anchor_only || kept_atoms < offered_atoms
-      then Keeper_compaction.anchor_to_message anchor :: windowed
-      else windowed)
+  if List.exists Runtime_model_input_tail_window.is_working_state windowed
+     || List.exists Runtime_model_input_tail_window.is_compaction_anchor windowed
+  then windowed
+  else (
+    let evicted_prefix, dropped_atoms = evicted_prefix_of_window ~offered ~windowed in
+    let anchor =
+      if dropped_atoms > 0
+      then
+        (match commit_evicted_prefix ~dropped_atoms evicted_prefix with
+         | Some committed -> Some committed
+         | None -> rollover_anchor)
+      else if minimal_anchor_only
+      then rollover_anchor
+      else None
+    in
+    match anchor with
+    | Some anchor when minimal_anchor_only || dropped_atoms > 0 ->
+      Keeper_compaction.anchor_to_message anchor :: windowed
+    | Some _ | None -> windowed)
 ;;
 
 (* Keep the durable conversation intact and narrow only the provider-bound
@@ -152,6 +180,7 @@ let model_input_projection_for_capacity ~input_source
     ?argument_projection
     ~session_mode
     ?(rollover_anchor = None)
+    ?(commit_evicted_prefix = fun ~dropped_atoms:_ _ -> None)
     ?(minimal_anchor_only = false)
     ~capacity_bytes
     ~observed_next_shrink_capacity_bytes
@@ -189,7 +218,11 @@ let model_input_projection_for_capacity ~input_source
     match session_mode with
     | Runtime_claude_code.Start ->
       attach_rollover_anchor_if_needed
-        ~rollover_anchor ~minimal_anchor_only ~librarian_front ~offered:messages ~windowed
+        ~rollover_anchor
+        ~commit_evicted_prefix
+        ~minimal_anchor_only
+        ~offered:messages
+        ~windowed
     | Runtime_claude_code.Resume _ -> windowed
   in
   let () =
@@ -951,7 +984,7 @@ let observe_stream_effect ~built_ins ~effect_cell
   | Runtime_claude_code.Turn_finished _ -> ()
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~rollover_anchor ~required_native_posture ~official_client_continuation ~runtime_id ~autocompact_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~minimal_anchor_only_latched ~rollover_eviction_active ~required_native_posture ~official_client_continuation ~runtime_id ~autocompact_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -1021,32 +1054,21 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     let minimal_anchor_only =
       match superseded_rejection with
       | Session_store.Superseding_bootstrap_floor_exceeded ->
-        (match
-           commit_compaction_anchor_for_messages
-             ~base_path ~keeper_name ~tools
-             ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-             initial_messages
-         with
-         | Some anchor -> rollover_anchor := Some anchor
-         | None -> ());
-        Log.Keeper.info ~keeper_name
-          "Claude Code superseding Input_rejected(Bootstrap_floor_exceeded) with minimal anchor-only fresh start runtime=%s"
-          runtime_id;
+        rollover_eviction_active := true;
+        if not !minimal_anchor_only_latched
+        then (
+          minimal_anchor_only_latched := true;
+          Log.Keeper.info ~keeper_name
+            "Claude Code superseding Input_rejected(Bootstrap_floor_exceeded) with minimal anchor-only fresh start runtime=%s"
+            runtime_id);
         true
       | Session_store.Superseding_effect_fenced ->
-        (match
-           commit_compaction_anchor_for_messages
-             ~base_path ~keeper_name ~tools
-             ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-             initial_messages
-         with
-         | Some anchor -> rollover_anchor := Some anchor
-         | None -> ());
+        rollover_eviction_active := true;
         Log.Keeper.info ~keeper_name
           "Claude Code superseding Input_rejected(Effect_fenced) on next turn into fresh session runtime=%s"
           runtime_id;
-        false
-      | Session_store.Not_superseding_input_rejection -> false
+        !minimal_anchor_only_latched
+      | Session_store.Not_superseding_input_rejection -> !minimal_anchor_only_latched
     in
     let* native_posture =
       Host.resolve_native_posture
@@ -1593,54 +1615,71 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
         Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
       Printexc.raise_with_backtrace exn backtrace
     in
+    let settle_unexpected_exception exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      (match Session_store.failure_disposition !recovery_failure with
+       | Transient -> recovery_failure := Session_store.Transport_interrupted
+       | Ambiguous | Fatal -> ());
+      let detail = "Claude Code turn raised unexpected exception: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Claude Code unexpected-exception recovery persistence failed: %s"
+           recovery_detail);
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
+      Printexc.raise_with_backtrace exn backtrace
+    in
     let turn_result =
-      (* This scope owns one actual CLI invocation, not the routed candidate or
-         its capacity retries. Input observations precede native registration. *)
-      let task_binding = match on_native_task_observation, on_child_content_observation with
-        | None, None -> None
-        | Some _, _ | _, Some _ -> Some (Keeper_claude_task_binding.create ()) in
-      let built_ins = Runtime_native_tools.claude_code_built_ins native_posture in
-      let on_input_observation
-          (observation : Runtime_claude_input_attribution.observation) =
-        (* An interrupted user-message write before any tool starts does not
-           fence same-turn failover: only an observed side-effecting tool call
-           sets [Effect_attempted]. *)
-        Option.iter
-          (fun binding -> Keeper_claude_task_binding.observe_input binding observation)
-          task_binding
-      in
-      let on_bound_task = match task_binding, on_native_task_observation with
-        | Some binding, Some observe -> Some (fun observation ->
-            match Keeper_claude_task_binding.bind_task binding observation with
-            | Ok bound -> observe bound
-            | Error reason -> Log.Runtime_agent.debug
-                "Claude native task input binding unavailable: %s"
-                (Keeper_claude_task_binding.rejection_to_string reason))
-        | None, _ | _, None -> None in
-      let on_bound_child = match task_binding, on_child_content_observation with
-        | Some binding, Some observe -> Some (fun content ->
-            observe (Keeper_claude_task_binding.observe_child binding content))
-        | None, _ | _, None -> None in
-      let on_stream_event =
-        claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion ?on_provider_retry
-          ?on_native_task_observation:on_bound_task
-          ?on_child_content_observation:on_bound_child
-          ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
-          ~on_usage_report
-          ~position:
-            (match session_mode with
-             | Runtime_claude_code.Start -> Keeper_usage_resolution.Fresh
-             | Runtime_claude_code.Resume _ -> Keeper_usage_resolution.Resumed)
-          ~on_compacted:(fun () -> compacted := true)
-          on_event
-      in
-      let on_stream_event =
-        Some
-          (fun event ->
-            observe_stream_effect ~built_ins ~effect_cell event;
-            Option.iter (fun forward -> forward event) on_stream_event)
-      in
       try
+        (* This scope owns one actual CLI invocation, not the routed candidate or
+           its capacity retries. Input observations precede native registration. *)
+        let task_binding = match on_native_task_observation, on_child_content_observation with
+          | None, None -> None
+          | Some _, _ | _, Some _ -> Some (Keeper_claude_task_binding.create ()) in
+        let built_ins = Runtime_native_tools.claude_code_built_ins native_posture in
+        let on_input_observation
+            (observation : Runtime_claude_input_attribution.observation) =
+          (* An interrupted user-message write before any tool starts does not
+             fence same-turn failover: only an observed side-effecting tool call
+             sets [Effect_attempted]. *)
+          Option.iter
+            (fun binding -> Keeper_claude_task_binding.observe_input binding observation)
+            task_binding
+        in
+        let on_bound_task = match task_binding, on_native_task_observation with
+          | Some binding, Some observe -> Some (fun observation ->
+              match Keeper_claude_task_binding.bind_task binding observation with
+              | Ok bound -> observe bound
+              | Error reason -> Log.Runtime_agent.debug
+                  "Claude native task input binding unavailable: %s"
+                  (Keeper_claude_task_binding.rejection_to_string reason))
+          | None, _ | _, None -> None in
+        let on_bound_child = match task_binding, on_child_content_observation with
+          | Some binding, Some observe -> Some (fun content ->
+              observe (Keeper_claude_task_binding.observe_child binding content))
+          | None, _ | _, None -> None in
+        let on_stream_event =
+          claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion ?on_provider_retry
+            ?on_native_task_observation:on_bound_task
+            ?on_child_content_observation:on_bound_child
+            ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+            ~on_usage_report
+            ~position:
+              (match session_mode with
+               | Runtime_claude_code.Start -> Keeper_usage_resolution.Fresh
+               | Runtime_claude_code.Resume _ -> Keeper_usage_resolution.Resumed)
+            ~on_compacted:(fun () -> compacted := true)
+            on_event
+        in
+        let on_stream_event =
+          Some
+            (fun event ->
+              observe_stream_effect ~built_ins ~effect_cell event;
+              Option.iter (fun forward -> forward event) on_stream_event)
+        in
         let client_result =
            Runtime_claude_code.run_turn
              ~mgr:process_mgr
@@ -1880,6 +1919,8 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
       | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
       | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
         settle_cancellation exn
+      | (Out_of_memory | Stack_overflow | Sys.Break) as exn -> raise exn
+      | exn -> settle_unexpected_exception exn
     in
     let turn_result =
       let* result = turn_result in
@@ -1887,26 +1928,23 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
       on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption (tool_outbox :: produced)));
       Ok result
     in
-    let turn_result =
-      match turn_result with
-      | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
-      | Error error ->
-        Host.finish_raw_error ~keeper_name raw_trace_run error;
-        Error error
-    in
-    (match turn_result with
-     | Ok _ -> turn_result
-     | Error original_error ->
-       let original_detail = Agent_core.Error.to_string original_error in
-       (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
-        | Ok () -> turn_result
+    match turn_result with
+    | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
+    | Error original_error ->
+      let original_detail = Agent_core.Error.to_string original_error in
+      let final_error =
+        match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
+        | Ok () -> original_error
         | Error recovery_detail ->
-          Error
-            (internal_error
-               (Printf.sprintf
-                  "Claude Code turn failed and recovery state persistence also failed: original=%s recovery=%s"
-                  original_detail
-                  recovery_detail))))
+          internal_error
+            (Printf.sprintf
+               "Claude Code turn failed and recovery state persistence also failed: original=%s recovery=%s"
+               original_detail
+               recovery_detail)
+      in
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run final_error);
+      Error final_error
 ;;
 
 let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~autocompact_window ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~goal ~goal_blocks ~system_prompt
@@ -1935,6 +1973,26 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
   let rollover_anchor = ref (load_compaction_anchor ~base_path ~keeper_name) in
+  let minimal_anchor_only_latched = ref false in
+  let rollover_eviction_active = ref false in
+  let committed_evicted_atoms = ref 0 in
+  let shrink_trigger =
+    ref (Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+  in
+  let commit_evicted_prefix ~dropped_atoms evicted_prefix =
+    if !rollover_eviction_active && dropped_atoms > !committed_evicted_atoms
+    then (
+      match
+        commit_compaction_anchor_for_messages
+          ~base_path ~keeper_name ~tools ~trigger:!shrink_trigger evicted_prefix
+      with
+      | Some anchor ->
+        committed_evicted_atoms := dropped_atoms;
+        rollover_anchor := Some anchor;
+        Some anchor
+      | None -> !rollover_anchor)
+    else !rollover_anchor
+  in
   (* Whether this run's [tools] include keeper_artifact_read. A turn hook
      that sets [tool_choice] to [None_] drops these tools from one request
      ({!Host.prepare_turn}); that request then names a reader it does not
@@ -1984,19 +2042,18 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
               ~keeper_name
               ~runtime_id
               ();
-            let trigger =
-              if previous_capacity_bytes = unbounded_model_input_capacity_bytes
-              then Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None }
+            rollover_eviction_active := true;
+            shrink_trigger :=
+              if capacity_bytes < unbounded_model_input_capacity_bytes / 2
+              then
+                let observed_bytes =
+                  if previous_capacity_bytes = unbounded_model_input_capacity_bytes
+                  then min max_int (capacity_bytes * 2)
+                  else previous_capacity_bytes
+                in
+                Keeper_compaction.Explicit_hard_limit { capacity_bytes; observed_bytes }
               else
-                Keeper_compaction.Explicit_hard_limit
-                  { capacity_bytes; observed_bytes = previous_capacity_bytes }
-            in
-            (match
-               commit_compaction_anchor_for_messages
-                 ~base_path ~keeper_name ~tools ~trigger initial_messages
-             with
-             | Some anchor -> rollover_anchor := Some anchor
-             | None -> ());
+                Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None };
             Log.Keeper.warn
               ~keeper_name
               "Claude typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
@@ -2004,7 +2061,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity:capacity_bytes ->
-          run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~rollover_anchor ~official_client_continuation
+          run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~minimal_anchor_only_latched ~rollover_eviction_active ~official_client_continuation
             ~configured_reasoning_effort ~turn_timeout_s
           ~required_native_posture
             ~runtime_id
@@ -2040,6 +2097,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
                    ?argument_projection
                    ~session_mode
                    ~rollover_anchor:!rollover_anchor
+                   ~commit_evicted_prefix
                    ~minimal_anchor_only
                    ~capacity_bytes
                    ~observed_next_shrink_capacity_bytes

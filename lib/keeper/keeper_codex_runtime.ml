@@ -149,28 +149,56 @@ let commit_compaction_anchor_for_messages
       load_compaction_anchor ~base_path ~keeper_name)
 ;;
 
-let has_librarian_working_state = function
-  | Some (Keeper_turn_driver_try_provider.Covered { working_state = Some _; _ }) -> true
-  | Some (Keeper_turn_driver_try_provider.Covered { working_state = None; _ })
-  | Some Keeper_turn_driver_try_provider.No_read_end
-  | None -> false
+let evicted_prefix_of_window ~offered ~windowed =
+  let drop_preamble =
+    List.filter (fun msg -> not (Runtime_model_input_tail_window.is_synthetic_preamble msg))
+  in
+  let offered_labelled, offered_atoms =
+    Runtime_model_input_tail_window.annotate (drop_preamble offered)
+  in
+  let _, kept_atoms =
+    Runtime_model_input_tail_window.annotate (drop_preamble windowed)
+  in
+  let dropped_atoms = offered_atoms - kept_atoms in
+  if dropped_atoms <= 0
+  then [], 0
+  else
+    ( List.filter_map
+        (fun (msg, label) ->
+           match label with
+           | Runtime_model_input_tail_window.Atom idx when idx < dropped_atoms -> Some msg
+           | Runtime_model_input_tail_window.Atom _
+           | Runtime_model_input_tail_window.Pinned -> None)
+        offered_labelled
+    , dropped_atoms )
 ;;
 
 let attach_rollover_anchor_if_needed
-      ~rollover_anchor ~minimal_anchor_only ~librarian_front ~offered ~windowed
+      ~rollover_anchor
+      ~commit_evicted_prefix
+      ~minimal_anchor_only
+      ~offered
+      ~windowed
   =
-  match rollover_anchor with
-  | None -> windowed
-  | Some anchor ->
-    if has_librarian_working_state librarian_front
-       || List.exists Runtime_model_input_tail_window.is_compaction_anchor windowed
-    then windowed
-    else (
-      let _, offered_atoms = Runtime_model_input_tail_window.annotate offered in
-      let _, kept_atoms = Runtime_model_input_tail_window.annotate windowed in
-      if minimal_anchor_only || kept_atoms < offered_atoms
-      then Keeper_compaction.anchor_to_message anchor :: windowed
-      else windowed)
+  if List.exists Runtime_model_input_tail_window.is_working_state windowed
+     || List.exists Runtime_model_input_tail_window.is_compaction_anchor windowed
+  then windowed
+  else (
+    let evicted_prefix, dropped_atoms = evicted_prefix_of_window ~offered ~windowed in
+    let anchor =
+      if dropped_atoms > 0
+      then
+        (match commit_evicted_prefix ~dropped_atoms evicted_prefix with
+         | Some committed -> Some committed
+         | None -> rollover_anchor)
+      else if minimal_anchor_only
+      then rollover_anchor
+      else None
+    in
+    match anchor with
+    | Some anchor when minimal_anchor_only || dropped_atoms > 0 ->
+      Keeper_compaction.anchor_to_message anchor :: windowed
+    | Some _ | None -> windowed)
 ;;
 
 (* The next structural retry boundary, computed from the bounded history
@@ -233,6 +261,7 @@ let minimal_anchor_only_messages messages =
 let carried_model_input_projection ~input_source
     ?argument_projection
     ?(rollover_anchor = None)
+    ?(commit_evicted_prefix = fun ~dropped_atoms:_ _ -> None)
     ?(minimal_anchor_only = false)
     ~thread_mode
     ~measure_message_bytes
@@ -252,7 +281,11 @@ let carried_model_input_projection ~input_source
       match thread_mode with
       | Runtime_codex_app_server.Start ->
         attach_rollover_anchor_if_needed
-          ~rollover_anchor ~minimal_anchor_only ~librarian_front ~offered:messages ~windowed:sent
+          ~rollover_anchor
+          ~commit_evicted_prefix
+          ~minimal_anchor_only
+          ~offered:messages
+          ~windowed:sent
       | Runtime_codex_app_server.Resume _ -> sent
     in
     (match thread_mode with
@@ -1067,7 +1100,7 @@ let native_cwd ~base_path ~keeper_name ~sandbox_profile =
   | Unix.Unix_error (error, _, _) -> unusable (Unix.error_message error)
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~rollover_anchor ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~minimal_anchor_only_latched ~rollover_eviction_active ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~project_history
     ~on_transmitted_model_input ~hooks
@@ -1127,32 +1160,22 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     let minimal_anchor_only =
       match superseded_rejection with
       | Keeper_official_client_session_store.Superseding_bootstrap_floor_exceeded ->
-        (match
-           commit_compaction_anchor_for_messages
-             ~base_path ~keeper_name ~tools
-             ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-             initial_messages
-         with
-         | Some anchor -> rollover_anchor := Some anchor
-         | None -> ());
-        Log.Keeper.info ~keeper_name
-          "Codex superseding Input_rejected(Bootstrap_floor_exceeded) with minimal anchor-only fresh start runtime=%s"
-          runtime_id;
+        rollover_eviction_active := true;
+        if not !minimal_anchor_only_latched
+        then (
+          minimal_anchor_only_latched := true;
+          Log.Keeper.info ~keeper_name
+            "Codex superseding Input_rejected(Bootstrap_floor_exceeded) with minimal anchor-only fresh start runtime=%s"
+            runtime_id);
         true
       | Keeper_official_client_session_store.Superseding_effect_fenced ->
-        (match
-           commit_compaction_anchor_for_messages
-             ~base_path ~keeper_name ~tools
-             ~trigger:(Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
-             initial_messages
-         with
-         | Some anchor -> rollover_anchor := Some anchor
-         | None -> ());
+        rollover_eviction_active := true;
         Log.Keeper.info ~keeper_name
           "Codex superseding Input_rejected(Effect_fenced) on next turn into fresh session runtime=%s"
           runtime_id;
-        false
-      | Keeper_official_client_session_store.Not_superseding_input_rejection -> false
+        !minimal_anchor_only_latched
+      | Keeper_official_client_session_store.Not_superseding_input_rejection ->
+        !minimal_anchor_only_latched
     in
     (* Before the plan is read. A moved surface has to change thread_mode and
        the ordinal too, not just what the store writes, or the adapter asks the
@@ -1723,6 +1746,27 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
        | () -> ());
       Printexc.raise_with_backtrace exn backtrace
     in
+    let settle_unexpected_exception exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      (match Keeper_official_client_session_store.failure_disposition !recovery_failure with
+       | Transient ->
+         recovery_failure := Keeper_official_client_session_store.Transport_interrupted
+       | Ambiguous | Fatal -> ());
+      let detail = "Codex turn raised unexpected exception: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Codex unexpected-exception recovery persistence failed: %s"
+           recovery_detail);
+      (match
+         Eio.Cancel.protect (fun () ->
+           finish_raw_error ~keeper_name raw_trace_run (internal_error detail))
+       with
+       | () -> ());
+      Printexc.raise_with_backtrace exn backtrace
+    in
     let turn_result =
       try
         let observe_stream =
@@ -2081,28 +2125,27 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
       | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
       | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
         settle_cancellation exn
-    in
-    let turn_result =
-      match turn_result with
-      | Ok result -> Ok (finish_raw_success ~keeper_name raw_trace_run result)
-      | Error error ->
-        finish_raw_error ~keeper_name raw_trace_run error;
-        Error error
+      | (Out_of_memory | Stack_overflow | Sys.Break) as exn -> raise exn
+      | exn -> settle_unexpected_exception exn
     in
     let outcome =
-    (match turn_result with
-     | Ok _ -> turn_result
-     | Error original_error ->
-       let original_detail = Agent_core.Error.to_string original_error in
-       (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
-        | Ok () -> turn_result
-      | Error recovery_detail ->
-        Error
-            (internal_error
-               (Printf.sprintf
-                  "Codex turn failed and recovery state persistence also failed: original=%s recovery=%s"
-               original_detail
-               recovery_detail))))
+      match turn_result with
+      | Ok result -> Ok (finish_raw_success ~keeper_name raw_trace_run result)
+      | Error original_error ->
+        let original_detail = Agent_core.Error.to_string original_error in
+        let final_error =
+          match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
+          | Ok () -> original_error
+          | Error recovery_detail ->
+            internal_error
+              (Printf.sprintf
+                 "Codex turn failed and recovery state persistence also failed: original=%s recovery=%s"
+                 original_detail
+                 recovery_detail)
+        in
+        Eio.Cancel.protect (fun () ->
+          finish_raw_error ~keeper_name raw_trace_run final_error);
+        Error final_error
     in
     (* After the store settled, so a refused delete cannot change the turn:
        the store no longer names these threads and no run resumes them. *)
@@ -2215,6 +2258,26 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
   in
   let observed_next_shrink_capacity_bytes = ref None in
   let rollover_anchor = ref (load_compaction_anchor ~base_path ~keeper_name) in
+  let minimal_anchor_only_latched = ref false in
+  let rollover_eviction_active = ref false in
+  let committed_evicted_atoms = ref 0 in
+  let shrink_trigger =
+    ref (Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
+  in
+  let commit_evicted_prefix ~dropped_atoms evicted_prefix =
+    if !rollover_eviction_active && dropped_atoms > !committed_evicted_atoms
+    then (
+      match
+        commit_compaction_anchor_for_messages
+          ~base_path ~keeper_name ~tools ~trigger:!shrink_trigger evicted_prefix
+      with
+      | Some anchor ->
+        committed_evicted_atoms := dropped_atoms;
+        rollover_anchor := Some anchor;
+        Some anchor
+      | None -> !rollover_anchor)
+    else !rollover_anchor
+  in
   let measure_message_bytes = measure_model_input_message_bytes in
   (* Whether this run's [tools] include keeper_artifact_read. A turn hook
      that sets [tool_choice] to [None_] drops these tools from one request
@@ -2278,19 +2341,18 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
             ~keeper_name
             ~runtime_id
             ();
-          let trigger =
-            if previous_capacity_bytes = unbounded_model_input_capacity_bytes
-            then Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None }
+          rollover_eviction_active := true;
+          shrink_trigger :=
+            if capacity_bytes < unbounded_model_input_capacity_bytes / 2
+            then
+              let observed_bytes =
+                if previous_capacity_bytes = unbounded_model_input_capacity_bytes
+                then min max_int (capacity_bytes * 2)
+                else previous_capacity_bytes
+              in
+              Keeper_compaction.Explicit_hard_limit { capacity_bytes; observed_bytes }
             else
-              Keeper_compaction.Explicit_hard_limit
-                { capacity_bytes; observed_bytes = previous_capacity_bytes }
-          in
-          (match
-             commit_compaction_anchor_for_messages
-               ~base_path ~keeper_name ~tools ~trigger initial_messages
-           with
-           | Some anchor -> rollover_anchor := Some anchor
-           | None -> ());
+              Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None };
           Log.Keeper.warn
             ~keeper_name
             "Codex typed context overflow or input refusal; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
@@ -2301,7 +2363,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~rollover_anchor ~official_client_continuation ~context_window
+        run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~minimal_anchor_only_latched ~rollover_eviction_active ~official_client_continuation ~context_window
           ~configured_reasoning_effort ~turn_timeout_s
           ~required_native_posture
           ~runtime_id
@@ -2334,6 +2396,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
             carried_model_input_projection ~input_source
               ?argument_projection
               ~rollover_anchor:!rollover_anchor
+              ~commit_evicted_prefix
               ~minimal_anchor_only
               ~thread_mode
               ~measure_message_bytes

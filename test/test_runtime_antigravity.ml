@@ -2287,6 +2287,7 @@ let test_live_start_and_resume () =
       | Some "low" -> Some Runtime_antigravity.Low
       | Some "medium" -> Some Runtime_antigravity.Medium
       | Some "high" -> Some Runtime_antigravity.High
+      | Some "xhigh" -> Some Runtime_antigravity.Xhigh
       | Some value -> failf "invalid MASC_ANTIGRAVITY_EFFORT %S" value
     in
     let first, second =
@@ -2456,6 +2457,53 @@ let test_structured_context_window_exceeded_classification () =
        | Ok _ -> fail "prose error unexpectedly succeeded")
 ;;
 
+(* #173 / #210 #4: Runtime_antigravity.Xhigh emits [--effort xhigh] on the CLI argv. *)
+let test_antigravity_effort_xhigh_argv () =
+  let argv_file = Filename.temp_file "masc-agy-xhigh-argv-" ".txt" in
+  let script_path = Filename.temp_file "masc-agy-xhigh-" ".sh" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove argv_file with Sys_error _ -> ());
+      (try Sys.remove script_path with Sys_error _ -> ()))
+    (fun () ->
+       let oc = open_out_bin script_path in
+       output_string oc "#!/bin/sh\n";
+       output_string oc ("printf '%s\\n' \"$@\" > " ^ shell_quote argv_file ^ "\n");
+       output_string oc "cat >/dev/null\n";
+       output_string oc ("printf '%s\\n' " ^ shell_quote (init ~model:"gemini-4-hydrogen-xhigh" ()) ^ "\n");
+       output_string oc ("printf '%s\\n' " ^ shell_quote (result ()) ^ "\n");
+       close_out oc;
+       Unix.chmod script_path 0o700;
+       let res =
+         Eio_main.run (fun env ->
+           let config =
+             { (Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-4-hydrogen-xhigh") with
+               cli_path = script_path
+             ; effort = Some Runtime_antigravity.Xhigh
+             ; timeout_s = Some 5.0
+             }
+           in
+           Runtime_antigravity.run_turn
+             ~host:(antigravity_host ())
+             ~mgr:(Eio.Stdenv.process_mgr env)
+             ~clock:(Eio.Stdenv.clock env)
+             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+             config
+             ~prompt:"Verify xhigh effort flag")
+       in
+       (match res with
+        | Ok _ -> ()
+        | Error err -> fail (Runtime_antigravity.error_to_string err));
+       let args =
+         In_channel.with_open_bin argv_file In_channel.input_lines
+       in
+       let rec has_pair k v = function
+         | a :: b :: rest -> (String.equal a k && String.equal b v) || has_pair k v (b :: rest)
+         | _ -> false
+       in
+       check bool "CLI argv includes --effort xhigh" true (has_pair "--effort" "xhigh" args))
+;;
+
 let () =
   run
     "runtime_antigravity"
@@ -2464,6 +2512,10 @@ let () =
             "P1-2 structured context_window_exceeded classification (no prose matching)"
             `Quick
             test_structured_context_window_exceeded_classification
+        ; test_case
+            "P2 xhigh effort passes --effort xhigh to agy CLI"
+            `Quick
+            test_antigravity_effort_xhigh_argv
         ; test_case "response content identity and native completion" `Quick test_response_step_ends_preserve_content_identity
         ; test_case "raw current and previous response reconciliation" `Quick
             test_keeper_reconciles_raw_current_and_previous_messages

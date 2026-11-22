@@ -1295,43 +1295,44 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     in
     let unlinked_n = Work_store.unlinked_task_count model.work in
     let pill_rect, body_rect = Rect.split_v rect ~top_h:1 in
-    let q_low = String.lowercase_ascii (String.trim model.work.filter_query) in
+    let status = model.work.task_status_filter in
+    let is_status f = Work_store.equal_task_status_filter status f in
     let pills =
       [
         ( Printf.sprintf "%s %d"
             (Ops_common.say model ~ko:"전체" ~en:"All")
             (List.length all_tasks)
-        , String.equal q_low ""
+        , is_status Work_store.Status_all
         , None );
         ( Printf.sprintf "%s %d"
             (Ops_common.say model ~ko:"진행" ~en:"Active")
             active_n
-        , String.equal q_low "active"
+        , is_status Work_store.Status_active
         , Some Theme.Status_active );
         ( Printf.sprintf "%s %d"
             (Ops_common.say model ~ko:"검증대기" ~en:"AwaitingVerify")
             verify_n
-        , String.equal q_low "verify"
+        , is_status Work_store.Status_awaiting_verification
         , Some Theme.Status_attention );
         ( Printf.sprintf "%s %d"
             (Ops_common.say model ~ko:"대기" ~en:"Todo")
             todo_n
-        , String.equal q_low "todo"
+        , is_status Work_store.Status_todo
         , None );
         ( Printf.sprintf "%s %d"
             (Ops_common.say model ~ko:"미연결" ~en:"Unlinked")
             unlinked_n
-        , String.equal q_low "unlinked"
+        , is_status Work_store.Status_unlinked
         , Some Theme.Status_attention );
         ( Printf.sprintf "%s %d"
             (Ops_common.say model ~ko:"완료" ~en:"Done")
             done_n
-        , String.equal q_low "done"
+        , is_status Work_store.Status_done
         , Some Theme.Status_ok );
         ( Printf.sprintf "%s %d"
             (Ops_common.say model ~ko:"일정" ~en:"Schedules")
             (List.length all_scheds)
-        , String.equal q_low "schedules" || String.equal q_low "sched"
+        , is_status Work_store.Status_schedules
         , None );
       ]
     in
@@ -1353,9 +1354,7 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     end;
     if Rect.is_empty body_rect then ()
     else
-      let is_sched_filter =
-        String.equal q_low "schedules" || String.equal q_low "sched"
-      in
+      let is_sched_filter = is_status Work_store.Status_schedules in
       let filtered_tasks = Work_store.filtered_tasks model.work in
       let filtered_scheds = Work_store.filtered_schedules model.work in
       let n_tasks = List.length filtered_tasks in
@@ -1417,7 +1416,8 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           with
           hotkey =
             Some
-              (Ops_common.say model ~ko:"[Enter] 상세" ~en:"[Enter] Dive");
+              (Ops_common.say model ~ko:"[Space] 상태 · [Enter] 상세"
+                 ~en:"[Space] Status · [Enter] Dive");
           focused = Option.is_some task_sel_opt;
         }
       in

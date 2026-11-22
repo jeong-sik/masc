@@ -82,7 +82,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom |
 | `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, selection in Palette, or Tree / Inspector in Settings) |
 | `Enter` | Unfocused | 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Lane, Sandbox) |
-| `Space` | Unfocused | Context toggle (expand/collapse group or succession chain, Wiki/Artifacts mode, Memory diff window, Verification view, log level filter, Keeper Chat turn details, Settings dry-run diff) |
+| `Space` | Unfocused | Context toggle (expand/collapse group or succession chain, Wiki/Artifacts mode, Memory diff window, Verification view, Tasks status chip, log level filter, Keeper Chat turn details, Settings dry-run diff) |
 | `/` | Unfocused / Settings / Incidents | Focus inline filter box (`↑`/`↓` move selection live, `Enter`/`Tab` apply & blur, `Esc` clear & blur; on views without a filter bar such as Pulse or Keeper Chat, focuses the composer with `/`) |
 | `z` | Unfocused | Toggle detail pane zoom |
 | `r` | Unfocused | Force refresh active view from server SSOT (triggers `force=1` probe on Runtime Quotas/Failover) |
@@ -234,7 +234,9 @@ Four sub-tabs (`[` / `]` or `←` / `→`):
    - Verification hotkeys: `a` approve verdict, `x` reject modal, `h` / `X`
      harness overrule modal.
 2. **Tasks & Schedules**: workspace task backlog and scheduled automations
-   (`Enter` dives into Task detail, `n` opens new Schedule form, `x` opens Task
+   (`Space` cycles the status chip All → Active → AwaitingVerify → Todo →
+   Unlinked → Done → Schedules, `/` narrows by title or id within the chip,
+   `Enter` dives into Task detail, `n` opens new Schedule form, `x` opens Task
    cancel modal, `h` / `X` opens harness overrule modal).
 3. **Inbox** (Action Inbox): unified operator triage queue (see
    [Approvals](#approvals) below).

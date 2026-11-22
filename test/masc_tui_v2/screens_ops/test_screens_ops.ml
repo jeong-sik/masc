@@ -1537,14 +1537,14 @@ let test_p1_pipeline_and_tasks_selection_sync () =
     (contains_sub ~needle:"bench-proof.md" pipe_txt);
   Alcotest.(check bool) "out-of-bounds selected_index renders last goal detail" true
     (contains_sub ~needle:"Zero P0/P1 findings" pipe_txt);
-  (* Tasks & Schedules: status filter "done" selects task-3899 cleanly *)
+  (* Tasks & Schedules: Done chip selects task-3899 cleanly *)
   let m_done =
     {
       m0 with
       work =
         m0.work
         |> Work_store.set_tab Nav.Work_tasks_schedules
-        |> Work_store.set_filter "done";
+        |> Work_store.set_task_status_filter Work_store.Status_done;
     }
   in
   let done_grid =
@@ -1553,7 +1553,7 @@ let test_p1_pipeline_and_tasks_selection_sync () =
   let done_txt = grid_all_text done_grid in
   Alcotest.(check bool) "done filter detail shows task-3899" true
     (contains_sub ~needle:"Implement persistent ACP channels" done_txt);
-  (* Tasks & Schedules: "schedules" pill highlights Schedules and shows schedule detail *)
+  (* Tasks & Schedules: Schedules chip highlights Schedules and shows schedule detail *)
   let m_sched =
     {
       m0 with
@@ -1561,7 +1561,7 @@ let test_p1_pipeline_and_tasks_selection_sync () =
         {
           (m0.work
            |> Work_store.set_tab Nav.Work_tasks_schedules
-           |> Work_store.set_filter "schedules")
+           |> Work_store.set_task_status_filter Work_store.Status_schedules)
           with
           selected_index = 1;
         };

@@ -1316,10 +1316,26 @@ and execute_action ~now (m : Model.t) action =
                       let work = Work_store.toggle_verification_view m.work in
                       let next = { m with work } in
                       (next, View_fetches.fetches_for_current_view next)
-                  | Nav.Work_tasks_schedules
-                  | Nav.Work_inbox
-                  | Nav.Work_candle_scorecard ->
-                      (m, []))
+                  | Nav.Work_tasks_schedules ->
+                      let next =
+                        {
+                          m with
+                          work = Work_store.cycle_task_status_filter m.work;
+                        }
+                      in
+                      let max_pane =
+                        Int.max 0 (Model.focusable_pane_count next - 1)
+                      in
+                      ( {
+                          next with
+                          nav =
+                            {
+                              next.nav with
+                              pane_index = Int.min next.nav.pane_index max_pane;
+                            };
+                        }
+                      , [] )
+                  | Nav.Work_inbox | Nav.Work_candle_scorecard -> (m, []))
               | Nav.Infra -> (
                   match m.infra.active_tab with
                   | Nav.Infra_activity_logs ->

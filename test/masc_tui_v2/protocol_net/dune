@@ -1,0 +1,31 @@
+(include_subdirs no)
+
+(test
+ (name test_protocol_net)
+ (modules test_protocol_net)
+ (libraries
+  masc_tui_core
+  masc_tui_protocol
+  masc_tui_net
+  masc.sse_wire
+  masc.sse_event
+  yojson
+  eio
+  eio_main
+  alcotest))
+
+(test
+ (name test_server_config_roundtrip)
+ (modules test_server_config_roundtrip)
+ (libraries
+  alcotest
+  httpun
+  masc
+  masc.config
+  masc.server
+  masc.fs_compat
+  masc_workspace
+  masc_tui_core
+  masc_tui_protocol
+  yojson
+  unix))

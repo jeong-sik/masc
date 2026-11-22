@@ -1,0 +1,731 @@
+open Masc_tui_core
+open Masc_tui_net
+open Masc_tui_store
+open Masc_tui_term
+open Masc_tui_ui
+
+type render_frame =
+  model:Model.t -> cache:Card.Cache.t -> Cell_grid.t -> Presenter.cursor
+
+let drain_budget_ns = 3_000_000L
+let esc_flush_timeout_s = 0.025
+let voice_tick_interval_ns = 100_000_000L
+
+let local_tz_offset_sec ?(at = Unix.time ()) () =
+  let lt = Unix.localtime at in
+  let gt = Unix.gmtime at in
+  let day_diff =
+    if lt.Unix.tm_year <> gt.Unix.tm_year then
+      if lt.Unix.tm_year > gt.Unix.tm_year then 1 else -1
+    else if lt.Unix.tm_yday <> gt.Unix.tm_yday then
+      if lt.Unix.tm_yday > gt.Unix.tm_yday then 1 else -1
+    else 0
+  in
+  let lt_sec = (lt.Unix.tm_hour * 3600) + (lt.Unix.tm_min * 60) + lt.Unix.tm_sec in
+  let gt_sec = (gt.Unix.tm_hour * 3600) + (gt.Unix.tm_min * 60) + gt.Unix.tm_sec in
+  (day_diff * 86400) + (lt_sec - gt_sec)
+
+let with_sigpipe_ignored fn =
+  let prev_sigpipe =
+    match Sys.signal Sys.sigpipe Sys.Signal_ignore with
+    | prev -> Some prev
+    | exception Invalid_argument _ -> None
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      match prev_sigpipe with
+      | Some prev -> (
+          match Sys.set_signal Sys.sigpipe prev with
+          | () -> ()
+          | exception Invalid_argument _ -> ())
+      | None -> ())
+    fn
+
+let write_exit_line_fd fd reason =
+  let payload = Exit_reason.wire_line reason ^ "\n" in
+  with_sigpipe_ignored (fun () ->
+      ignore
+        (Terminal_out.write_all_fd ~stall_limit_s:0.5 fd payload
+          : (unit, Unix.error) result))
+
+let safe_close_fd fd =
+  match Unix.close fd with
+  | () -> ()
+  | exception Unix.Unix_error _ -> ()
+
+let redirect_stderr_off_terminal ~base_path =
+  flush stderr;
+  let orig_stderr =
+    match Unix.dup ~cloexec:true Unix.stderr with
+    | fd -> Some fd
+    | exception Unix.Unix_error _ -> None
+  in
+  match
+    let dir =
+      Filename.concat (Common.masc_dir_from_base_path ~base_path) "logs"
+    in
+    let path =
+      Filename.concat dir (Printf.sprintf "masc-tui-%d.log" (Unix.getpid ()))
+    in
+    Fs_compat.mkdir_p dir;
+    let fd =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
+    in
+    Fun.protect
+      ~finally:(fun () -> safe_close_fd fd)
+      (fun () ->
+        Unix.set_close_on_exec fd;
+        Unix.dup2 fd Unix.stderr)
+  with
+  | () -> orig_stderr
+  | exception (Unix.Unix_error _ | Sys_error _) ->
+      (match orig_stderr with Some fd -> safe_close_fd fd | None -> ());
+      output_string stderr
+        "[masc-tui] could not redirect stderr off terminal; log lines may appear on screen\n";
+      flush stderr;
+      None
+
+let measure_terminal_size ~fallback:(fb_cols, fb_rows) =
+  match Terminal_size.get () with
+  | Some (rows, cols) when rows > 0 && cols > 0 -> (cols, rows)
+  | Some _ | None -> (fb_cols, fb_rows)
+
+let detect_capabilities () : Presenter.capabilities =
+  let level = Palette.stdout_color_level () in
+  let color_depth = Palette.color_depth_of_level level in
+  {
+    Presenter.default_capabilities with
+    synchronized_output = true;
+    color_depth;
+    kitty_keyboard = true;
+    osc8_hyperlinks = true;
+    osc52_clipboard = true;
+  }
+
+let msg_pace = function
+  | Msg.Key_event _ | Msg.Paste_text _ | Msg.Mouse_event _ | Msg.Resize _
+  | Msg.Chat_stream_chunk _ | Msg.Chat_stream_done _ ->
+      Frame_scheduler.Pace_interactive
+  | Msg.Boot | Msg.Tick _ | Msg.Server_health_result _
+  | Msg.Server_start_result _ | Msg.Http_reply _ | Msg.Sse_event _
+  | Msg.Sse_freshness _ | Msg.Voice_event _ | Msg.Stream_gap _ ->
+      Frame_scheduler.Pace_animation
+
+let earliest_opt a b =
+  match a, b with
+  | None, x | x, None -> x
+  | Some x, Some y -> Some (if Int64.compare x y <= 0 then x else y)
+
+let is_ctrl_c (ev : Input_decoder.key_event) =
+  ev.mods.ctrl
+  && (not ev.mods.alt)
+  && (not ev.mods.shift)
+  &&
+  match ev.key with
+  | Input_decoder.Char ("c" | "C") -> true
+  | Input_decoder.Char _
+  | Input_decoder.Enter
+  | Input_decoder.Tab
+  | Input_decoder.Backspace
+  | Input_decoder.Escape
+  | Input_decoder.Delete
+  | Input_decoder.Insert
+  | Input_decoder.Up
+  | Input_decoder.Down
+  | Input_decoder.Left
+  | Input_decoder.Right
+  | Input_decoder.Home
+  | Input_decoder.End
+  | Input_decoder.Page_up
+  | Input_decoder.Page_down
+  | Input_decoder.Function _ ->
+      false
+
+let should_emit_tick ~now_ns ~last_voice_tick_ns ~toast_expires_ns
+    ~voice_recording =
+  let toast_expired =
+    match toast_expires_ns with
+    | Some exp -> Int64.compare now_ns exp >= 0
+    | None -> false
+  in
+  let toast_deadline =
+    match toast_expires_ns with
+    | Some exp when Int64.compare now_ns exp < 0 -> Some exp
+    | Some _ | None -> None
+  in
+  let voice_due, voice_deadline =
+    if not voice_recording then (false, None)
+    else
+      let next_due = Int64.add last_voice_tick_ns voice_tick_interval_ns in
+      if Int64.compare now_ns next_due >= 0 then
+        (true, Some (Int64.add now_ns voice_tick_interval_ns))
+      else (false, Some next_due)
+  in
+  (toast_expired || voice_due, earliest_opt toast_deadline voice_deadline)
+
+let clock_minute_of_unix wall_unix =
+  if (not (Float.is_finite wall_unix)) || wall_unix <= 0.0 then 0L
+  else Int64.div (Int64.of_float (Float.floor wall_unix)) 60L
+
+let next_minute_tick ~now_ns ~wall_unix ~last_minute =
+  let cur_min = clock_minute_of_unix wall_unix in
+  let minute_due = Int64.compare cur_min last_minute > 0 in
+  let wait_s =
+    if (not (Float.is_finite wall_unix)) || wall_unix <= 0.0 then 60.0
+    else
+      let min_start = Int64.to_float (Int64.mul cur_min 60L) in
+      let elapsed_in_min = Float.max 0.0 (Float.min 60.0 (wall_unix -. min_start)) in
+      (* Wake 50 ms after the exact :00 boundary so gettimeofday is cleanly in
+         the new minute with zero sub-minute wakeups (0 Hz between minutes). *)
+      Float.max 0.05 (60.05 -. elapsed_in_min)
+  in
+  let next_deadline_ns =
+    Int64.add now_ns (Int64.of_float (wait_s *. 1_000_000_000.0))
+  in
+  (minute_due, cur_min, next_deadline_ns)
+
+let set_stdin_nonblock enabled =
+  match
+    if enabled then Unix.set_nonblock Unix.stdin
+    else Unix.clear_nonblock Unix.stdin
+  with
+  | () -> ()
+  | exception Unix.Unix_error _ -> ()
+
+type input_reader_handle = {
+  stop_u : unit Eio.Promise.u;
+  stopped : unit Eio.Promise.t;
+}
+
+let start_input_reader ~sw ~clock ~signals ~bell ~input_queue =
+  Eio.Switch.check sw;
+  let stop_p, stop_u = Eio.Promise.create () in
+  let stopped, mark_stopped = Eio.Promise.create () in
+  let finish () = ignore (Eio.Promise.try_resolve mark_stopped () : bool) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      let decoder = Input_decoder.create () in
+      let buf = Bytes.create 256 in
+      let emit_events events =
+        let pushed = ref false in
+        List.iter
+          (function
+            | Input_decoder.Key kev when is_ctrl_c kev ->
+                Signals.record_interrupt signals;
+                Wake_bell.ring bell Wake_bell.Interrupt
+            | Input_decoder.Key kev ->
+                Signals.withdraw_interrupt signals;
+                Eio.Stream.add input_queue (Msg.Key_event kev);
+                pushed := true
+            | Input_decoder.Paste { text; _ } ->
+                Eio.Stream.add input_queue (Msg.Paste_text text);
+                pushed := true
+            | Input_decoder.Mouse mev ->
+                Eio.Stream.add input_queue (Msg.Mouse_event mev);
+                pushed := true
+            | Input_decoder.Reply _
+            | Input_decoder.Unknown_escape
+            | Input_decoder.Invalid_utf8 ->
+                ())
+          events;
+        if !pushed then Wake_bell.ring bell Wake_bell.Ui_bus
+      in
+      let rec loop () =
+        Eio.Switch.check sw;
+        if Eio.Promise.is_resolved stop_p then begin
+          finish ();
+          `Stop_daemon
+        end
+        else
+          let wait_result =
+            match Input_decoder.pending decoder with
+            | None ->
+                Eio.Fiber.first
+                  (fun () ->
+                    Eio_unix.await_readable Unix.stdin;
+                    `Readable)
+                  (fun () ->
+                    Eio.Promise.await stop_p;
+                    `Stop)
+            | Some _ ->
+                Eio.Fiber.first
+                  (fun () ->
+                    Eio_unix.await_readable Unix.stdin;
+                    `Readable)
+                  (fun () ->
+                    Eio.Fiber.first
+                      (fun () ->
+                        Eio.Time.sleep clock esc_flush_timeout_s;
+                        `Idle_flush)
+                      (fun () ->
+                        Eio.Promise.await stop_p;
+                        `Stop))
+          in
+          match wait_result with
+          | `Stop ->
+              finish ();
+              `Stop_daemon
+          | `Idle_flush ->
+              emit_events (Input_decoder.idle decoder);
+              loop ()
+          | `Readable -> (
+              match Unix.read Unix.stdin buf 0 256 with
+              | 0 ->
+                  Signals.record_terminate signals ~signal:"EOF";
+                  finish ();
+                  `Stop_daemon
+              | n ->
+                  let chunk = Bytes.sub_string buf 0 n in
+                  emit_events (Input_decoder.feed_string decoder chunk);
+                  loop ()
+              | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
+              | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+                  loop ()
+              | exception Unix.Unix_error _ ->
+                  Signals.record_terminate signals ~signal:"STDIN_ERROR";
+                  finish ();
+                  `Stop_daemon)
+      in
+      match loop () with
+      | res -> res
+      | exception (Eio.Cancel.Cancelled _ as ex) ->
+          finish ();
+          raise ex);
+  { stop_u; stopped }
+
+let stop_input_reader handle =
+  ignore (Eio.Promise.try_resolve handle.stop_u () : bool);
+  Eio.Promise.await handle.stopped
+
+let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
+  match Cli_args.check_tty () with
+  | Cli_args.Non_tty { reason; exit_code } ->
+      output_string stderr (reason ^ "\n");
+      flush stderr;
+      exit_code
+  | Cli_args.Tty_ok ->
+      Domains.use_ui_heap ();
+      let orig_stderr = ref (redirect_stderr_off_terminal ~base_path:cli.base_path) in
+      let close_orig_stderr () =
+        match !orig_stderr with
+        | None -> ()
+        | Some fd ->
+            orig_stderr := None;
+            safe_close_fd fd
+      in
+      let exit_reason = ref Exit_reason.Unrecorded in
+      let restart_requested = ref false in
+      let exit_code =
+        Fun.protect ~finally:close_orig_stderr (fun () ->
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        Eio_guard.enable ();
+        Eio.Switch.on_release sw Eio_guard.disable;
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+
+        (* LIFO release registration order:
+           1. Exit-line writer (runs LAST after terminal & signal teardown)
+           2. Wake_bell signal pipe & Signals handlers
+           3. Termios raw mode restoration
+           4. Terminal_out alt-screen / Kitty CSI u leave & stdout drain
+           5. Cmd_executor / Sse_hub / Voice_runner / Io_domain / Worker_pool *)
+        Eio.Switch.on_release sw (fun () ->
+            with_sigpipe_ignored (fun () ->
+                let reason = !exit_reason in
+                let line = Exit_reason.wire_line reason in
+                (match
+                   output_string stderr (line ^ "\n");
+                   flush stderr
+                 with
+                 | () -> ()
+                 | exception Sys_error _ -> ());
+                match !orig_stderr with
+                | None -> ()
+                | Some fd ->
+                    write_exit_line_fd fd reason;
+                    if !restart_requested then (
+                      match Unix.dup2 fd Unix.stderr with
+                      | () -> ()
+                      | exception Unix.Unix_error _ -> ());
+                    orig_stderr := None;
+                    safe_close_fd fd));
+
+        let bell = Wake_bell.create () in
+        Wake_bell.attach_signal_pipe ~sw bell;
+        let signals = Signals.create ~bell in
+        Signals.install ~sw signals;
+
+        let raw_session : Termios.raw_session option ref = ref None in
+        let enter_raw () =
+          (match Termios.enter_raw_mode Unix.stdin with
+          | Ok s -> raw_session := Some s
+          | Error _ -> ());
+          set_stdin_nonblock true
+        in
+        let restore_raw () =
+          set_stdin_nonblock false;
+          match !raw_session with
+          | None -> ()
+          | Some s ->
+              raw_session := None;
+              ignore (Termios.restore_raw_mode s : Termios.restore_outcome)
+        in
+        enter_raw ();
+        Eio.Switch.on_release sw restore_raw;
+
+        let caps = detect_capabilities () in
+        Terminal_out.set_on_write_lost (fun () ->
+            Wake_bell.ring bell Wake_bell.Ui_bus);
+        Eio.Switch.on_release sw (fun () ->
+            Terminal_out.set_on_write_lost (fun () -> ()));
+        Terminal_out.write
+          (Terminal_out.enter_screen_seq ~kitty_keyboard:caps.kitty_keyboard
+             ~mouse:true ~bracketed_paste:true);
+        Terminal_out.flush ();
+        Terminal_out.install_switch_teardown ~sw
+          ~kitty_keyboard:caps.kitty_keyboard ();
+
+        let clock = Eio.Stdenv.clock env in
+        let io = Io_domain.start ~sw ~env in
+        let worker = Worker_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
+
+        let init_cols, init_rows = measure_terminal_size ~fallback:(80, 24) in
+        let init_wall_unix = Unix.gettimeofday () in
+        let tz_offset_sec = local_tz_offset_sec ~at:init_wall_unix () in
+        let model =
+          ref
+            (Model.initial ~cols:init_cols ~rows:init_rows ~lang:cli.lang
+               ~theme_preset:cli.theme ~tz_offset_sec ~wall_unix:init_wall_unix ())
+        in
+        let presenter =
+          Presenter.create ~cols:init_cols ~rows:init_rows ~capabilities:caps
+        in
+        let card_cache = Card.Cache.create () in
+        let scheduler = ref (Frame_scheduler.create ()) in
+
+        let input_queue : Msg.t Eio.Stream.t = Eio.Stream.create max_int in
+        let input_handle : input_reader_handle option ref =
+          ref
+            (Some (start_input_reader ~sw ~clock ~signals ~bell ~input_queue))
+        in
+
+        let should_quit = ref false in
+        let on_quit reason =
+          exit_reason := reason;
+          should_quit := true;
+          Wake_bell.ring bell Wake_bell.Terminate
+        in
+        let on_restart () =
+          restart_requested := true;
+          exit_reason := Exit_reason.Quit_key;
+          should_quit := true;
+          Wake_bell.ring bell Wake_bell.Terminate
+        in
+
+        let editor_handoff : Cmd_executor.editor_handoff =
+          {
+            pause_terminal =
+              (fun () ->
+                (match !input_handle with
+                | Some h ->
+                    input_handle := None;
+                    stop_input_reader h
+                | None -> ());
+                Terminal_out.write
+                  (Terminal_out.leave_screen_seq
+                     ~kitty_keyboard:caps.kitty_keyboard);
+                ignore
+                  (Terminal_out.drain ~within_s:Terminal_out.handoff_limit_s
+                    : Terminal_out.drained);
+                restore_raw ());
+            resume_terminal =
+              (fun () ->
+                Signals.clear_interrupts signals;
+                enter_raw ();
+                Terminal_out.write
+                  (Terminal_out.enter_screen_seq
+                     ~kitty_keyboard:caps.kitty_keyboard ~mouse:true
+                     ~bracketed_paste:true);
+                Terminal_out.flush ();
+                Presenter.invalidate presenter;
+                Card.Cache.clear card_cache;
+                input_handle :=
+                  Some
+                    (start_input_reader ~sw ~clock ~signals ~bell ~input_queue);
+                scheduler :=
+                  Frame_scheduler.mark_dirty
+                    ~pace:Frame_scheduler.Pace_interactive !scheduler;
+                (* Trigger the main loop's resize path so any terminal geometry
+                   change during $EDITOR runs through Update.step and executes
+                   all resulting commands without dropping them. *)
+                Signals.record_resize signals;
+                Wake_bell.ring bell Wake_bell.Resize);
+          }
+        in
+
+        let bus =
+          Cmd_executor.create_bus
+            ~on_wake:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
+            ()
+        in
+        let executor =
+          Cmd_executor.create ~sw ~io ~worker ~clock ~cli ~bus ~editor_handoff
+            ~on_quit ~on_restart ()
+        in
+        Eio.Switch.on_release sw (fun () ->
+            Cmd_executor.shutdown ~preserve_owned_server:!restart_requested
+              executor);
+
+        let apply_msg ~now msg =
+          let next_model, cmds = Update.step ~now !model msg in
+          model := next_model;
+          scheduler :=
+            Frame_scheduler.mark_dirty ~pace:(msg_pace msg) !scheduler;
+          if cmds <> [] then Cmd_executor.execute_all executor cmds
+        in
+
+        let last_resize_gen = ref (Signals.resize_generation signals) in
+        let last_voice_tick_ns = ref 0L in
+        let last_clock_minute = ref (clock_minute_of_unix init_wall_unix) in
+
+        (* Boot sequence: GET /health + Voice probe; healthy reply triggers
+           workspace guard, declarative Sync_streams, and bootstrap fetches. *)
+        apply_msg ~now:(Clock.Mono.now ()) Msg.Boot;
+
+        let drain_inputs ~now ~deadline_ns =
+          let rec loop () =
+            if !should_quit then ()
+            else if
+              Int64.compare (Clock.Mono.to_ns (Clock.Mono.now ())) deadline_ns
+              >= 0
+            then begin
+              if not (Eio.Stream.is_empty input_queue) then
+                Wake_bell.ring bell Wake_bell.Ui_bus
+            end
+            else
+              match Eio.Stream.take_nonblocking input_queue with
+              | None -> ()
+              | Some msg ->
+                  apply_msg ~now msg;
+                  loop ()
+          in
+          loop ()
+        in
+
+        let drain_bus ~now ~deadline_ns =
+          let rec loop () =
+            if !should_quit || Ui_bus.is_empty bus then ()
+            else if Int64.compare (Clock.Mono.to_ns (Clock.Mono.now ())) deadline_ns >= 0
+            then Wake_bell.ring bell Wake_bell.Ui_bus
+            else
+              let items = Ui_bus.drain_up_to ~max_items:32 bus in
+              List.iter
+                (fun item ->
+                  if not !should_quit then
+                    match item with
+                    | Ui_bus.Snapshot (_, msg) | Ui_bus.Stream_event msg ->
+                        apply_msg ~now msg
+                    | Ui_bus.Stream_gap dropped ->
+                        apply_msg ~now (Msg.Stream_gap dropped))
+                items;
+              loop ()
+          in
+          loop ()
+        in
+
+        let run_loop () =
+          while not !should_quit do
+            ignore (Wake_bell.drain_mask bell : int);
+            let now = Clock.Mono.now () in
+            let now_ns = Clock.Mono.to_ns now in
+
+            (* 1. Process POSIX exit signals. *)
+            (match Signals.poll_exit signals with
+            | Signals.Continue -> ()
+            | Signals.Interrupt_armed ->
+                model :=
+                  Model.with_toast ~now ~duration_s:3.0 ~level:Model.Toast_warning
+                    (Say.make
+                       ~ko:"종료하려면 Ctrl+C 를 한 번 더 누르세요"
+                       ~en:"Press Ctrl+C again to quit")
+                    !model;
+                scheduler :=
+                  Frame_scheduler.mark_dirty
+                    ~pace:Frame_scheduler.Pace_interactive !scheduler
+            | (Signals.Interrupt_confirmed | Signals.Terminate _) as verdict -> (
+                match Signals.exit_reason_of_verdict verdict with
+                | Some reason ->
+                    exit_reason := reason;
+                    should_quit := true
+                | None -> ()));
+
+            (* 2. Dynamic SIGWINCH / SIGCONT resize handling. *)
+            if not !should_quit then begin
+              let cur_gen = Signals.resize_generation signals in
+              if cur_gen <> !last_resize_gen then begin
+                last_resize_gen := cur_gen;
+                let cols, rows =
+                  measure_terminal_size
+                    ~fallback:(!model.viewport.cols, !model.viewport.rows)
+                in
+                if cols <> !model.viewport.cols || rows <> !model.viewport.rows
+                then begin
+                  Presenter.resize presenter ~cols ~rows;
+                  Card.Cache.clear card_cache;
+                  apply_msg ~now (Msg.Resize { cols; rows })
+                end
+                else begin
+                  Presenter.invalidate presenter;
+                  scheduler :=
+                    Frame_scheduler.mark_dirty
+                      ~pace:Frame_scheduler.Pace_interactive !scheduler
+                end
+              end;
+
+              (* Recover from lost terminal writes by forcing full repaint. *)
+              if Terminal_out.take_lost () then begin
+                Presenter.invalidate presenter;
+                scheduler :=
+                  Frame_scheduler.mark_dirty
+                    ~pace:Frame_scheduler.Pace_interactive !scheduler
+              end;
+
+              (* 3. Drain input events first, then bounded 3 ms Ui_bus batch. *)
+              let drain_deadline_ns = Int64.add now_ns drain_budget_ns in
+              drain_inputs ~now ~deadline_ns:drain_deadline_ns;
+              drain_bus ~now ~deadline_ns:drain_deadline_ns;
+
+              (* 4. Service active timers (toast expiration / 10 Hz voice timer)
+                    without introducing idle polling. *)
+              if not !should_quit then begin
+                let now_after = Clock.Mono.now () in
+                let now_after_ns = Clock.Mono.to_ns now_after in
+                let toast_expires_ns =
+                  Option.map
+                    (fun (toast : Model.toast) -> Clock.Mono.to_ns toast.expires_at)
+                    !model.toast
+                in
+                let voice_recording =
+                  match !model.drafts.voice with
+                  | Drafts.Voice_recording _ -> true
+                  | Drafts.Voice_off
+                  | Drafts.Voice_transcribing
+                  | Drafts.Voice_speaking
+                  | Drafts.Voice_error _ ->
+                      last_voice_tick_ns := 0L;
+                      false
+                in
+                let emit_tick, extra =
+                  should_emit_tick ~now_ns:now_after_ns
+                    ~last_voice_tick_ns:!last_voice_tick_ns ~toast_expires_ns
+                    ~voice_recording
+                in
+                let wall_now = Unix.gettimeofday () in
+                let minute_due, cur_minute, minute_deadline =
+                  next_minute_tick ~now_ns:now_after_ns ~wall_unix:wall_now
+                    ~last_minute:!last_clock_minute
+                in
+                let should_tick_now = emit_tick || minute_due in
+                if should_tick_now then begin
+                  if voice_recording then last_voice_tick_ns := now_after_ns;
+                  if minute_due then last_clock_minute := cur_minute;
+                  apply_msg ~now:now_after (Msg.Tick { wall_unix = wall_now })
+                end;
+                let extra_after =
+                  if should_tick_now then
+                    let post_toast_expires =
+                      Option.map
+                        (fun (toast : Model.toast) ->
+                          Clock.Mono.to_ns toast.expires_at)
+                        !model.toast
+                    in
+                    let _, next_extra =
+                      should_emit_tick ~now_ns:now_after_ns
+                        ~last_voice_tick_ns:!last_voice_tick_ns
+                        ~toast_expires_ns:post_toast_expires ~voice_recording
+                    in
+                    earliest_opt next_extra (Some minute_deadline)
+                  else earliest_opt extra (Some minute_deadline)
+                in
+                scheduler :=
+                  Frame_scheduler.set_extra_deadline extra_after !scheduler;
+
+                (* 5. Frame pacing & differential CSI 2026 presentation. *)
+                let output_behind = Terminal_out.behind () in
+                (match
+                   Frame_scheduler.decide ~now_ns:now_after_ns ~output_behind
+                     !scheduler
+                 with
+                | Frame_scheduler.Render_now ->
+                    let render_start = Clock.Mono.now () in
+                    let grid = Presenter.back_grid presenter in
+                    Cell_grid.clear grid;
+                    let cursor = render_frame ~model:!model ~cache:card_cache grid in
+                    let render_us =
+                      Clock.Mono.us_since (Clock.Mono.now ()) ~since:render_start
+                    in
+                    let diff_stats =
+                      Presenter.present_back presenter ~cursor
+                        ~write:Terminal_out.write
+                    in
+                    if diff_stats.bytes_emitted > 0 then Terminal_out.flush ();
+                    let finished_ns = Clock.Mono.to_ns (Clock.Mono.now ()) in
+                    scheduler :=
+                      Frame_scheduler.record_rendered ~now_ns:finished_ns
+                        ~render_us ~diff_us:diff_stats.diff_us
+                        ~dirty_cells:diff_stats.dirty_cells
+                        ~bytes_emitted:diff_stats.bytes_emitted !scheduler
+                | Frame_scheduler.Skip_backpressure _ ->
+                    scheduler :=
+                      Frame_scheduler.record_skipped_backpressure
+                        ~now_ns:now_after_ns !scheduler
+                | Frame_scheduler.Wait_until _ | Frame_scheduler.Sleep_idle -> ());
+
+                (* 6. Sleep until next monotonic deadline or Wake_bell ring.
+                      When idle (Next_deadline_ns None), performs pure 0 Hz sleep. *)
+                if not !should_quit then
+                  if
+                    Wake_bell.is_rung bell
+                    || (not (Ui_bus.is_empty bus))
+                    || not (Eio.Stream.is_empty input_queue)
+                  then Eio.Fiber.yield ()
+                  else
+                    let sleep_now_ns = Clock.Mono.to_ns (Clock.Mono.now ()) in
+                    let (Frame_scheduler.Next_deadline_ns deadline_ns) =
+                      Frame_scheduler.next_deadline ~now_ns:sleep_now_ns
+                        ~output_behind:(Terminal_out.behind ()) !scheduler
+                    in
+                    ignore
+                      (Wake_bell.await_until_ns ~clock ~now_ns:sleep_now_ns
+                         ~deadline_ns bell
+                        : [ `Woken | `Timeout ])
+              end
+            end
+          done
+        in
+        match run_loop () with
+        | () ->
+            if Exit_reason.is_normal !exit_reason then 0 else 1
+        | exception (Eio.Cancel.Cancelled _ as ex) ->
+            if Exit_reason.equal !exit_reason Exit_reason.Unrecorded then
+              exit_reason := Exit_reason.Exception "cancelled";
+            raise ex
+        | exception ex ->
+            exit_reason := Exit_reason.Exception (Printexc.to_string ex);
+            1)
+      in
+      if !restart_requested then begin
+        match Unix.execv Sys.executable_name Sys.argv with
+        | _ -> 0
+        | exception Unix.Unix_error (err, fn, _) ->
+            output_string stderr
+              (Printf.sprintf "[masc-tui] restart failed (%s): %s\n" fn
+                 (Unix.error_message err));
+            flush stderr;
+            1
+      end
+      else exit_code
+
+let run_argv ?argv ~render_frame () =
+  match Cli_args.parse_and_dispatch ?argv () with
+  | Cli_args.Exit code -> code
+  | Cli_args.Start cli -> run ~cli ~render_frame ()

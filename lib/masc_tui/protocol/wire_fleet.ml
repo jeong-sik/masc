@@ -1,0 +1,1248 @@
+open Masc_tui_core
+open Json_decode_fields
+open Wire_common
+
+let ( let* ) = Result.bind
+
+let dashboard_shell_path = "/api/v1/dashboard/shell"
+let dashboard_keepers_path = "/api/v1/gate/keepers?detailed=true&fresh=true"
+let keepers_turns_path = "/api/v1/keepers/turns"
+let fleet_stream_path = "/api/v1/stream/fleet"
+let keeper_chat_stream_path = "/api/v1/keepers/chat/stream"
+let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
+
+let keeper_chat_history_path ~keeper ?limit ?before_seq () =
+  let base =
+    Printf.sprintf "/api/v1/keepers/%s/chat/history" (percent_encode keeper)
+  in
+  let params =
+    (match limit with
+    | None -> []
+    | Some n -> [ Printf.sprintf "limit=%d" (max 1 n) ])
+    @
+    match before_seq with
+    | None -> []
+    | Some s -> [ Printf.sprintf "before_seq=%d" s ]
+  in
+  match params with
+  | [] -> base
+  | _ -> base ^ "?" ^ String.concat "&" params
+
+let keeper_chat_history_page_path ~keeper ?limit ?cursor () =
+  let base =
+    Printf.sprintf "/api/v1/keepers/%s/chat/history/page"
+      (percent_encode keeper)
+  in
+  let params =
+    (match limit with
+    | None -> []
+    | Some n -> [ Printf.sprintf "limit=%d" (max 1 n) ])
+    @
+    match cursor with
+    | None -> []
+    | Some c -> [ "cursor=" ^ percent_encode c ]
+  in
+  match params with
+  | [] -> base
+  | _ -> base ^ "?" ^ String.concat "&" params
+
+type activation_mode =
+  | Activation_manual
+  | Activation_on_demand
+  | Activation_autonomous
+
+type keeper_health =
+  | Keeper_healthy
+  | Keeper_working
+  | Keeper_idle
+  | Keeper_degraded
+  | Keeper_recovering
+  | Keeper_failing
+  | Keeper_paused
+  | Keeper_offline
+  | Keeper_booting
+
+type turn_lane =
+  | Lane_chat
+  | Lane_proactive
+  | Lane_schedule
+  | Lane_board
+  | Lane_task
+  | Lane_verification
+  | Lane_maintenance
+  | Lane_internal
+
+type active_turn = {
+  lane : turn_lane;
+  started_at_unix : float;
+  interrupt_token : string;
+  phase : string option;
+  tool_in_flight : string option;
+  elapsed_ms : float option;
+}
+
+type keeper_turn_state =
+  | Turn_idle
+  | Turn_active of active_turn
+  | Turn_unavailable of string
+
+type keeper_turn_row = {
+  keeper_name : string;
+  chat_control_token : string option;
+  state : keeper_turn_state;
+}
+
+type keeper_summary = {
+  name : string;
+  group : string option;
+  company : string;
+  health : keeper_health;
+  paused : bool;
+  keepalive_running : bool;
+  activation_mode : activation_mode;
+  runtime_id : string;
+  model_id : string option;
+  current_task_id : string option;
+  context_ratio : float Observed.t;
+  total_turns : int Observed.t;
+  total_tokens : int Observed.t;
+  cost_24h_usd : float Observed.t;
+  last_turn_at_unix : float option;
+  active_turn : active_turn option;
+  activity_sparkline_24h : float list;
+}
+
+type attention_bucket =
+  | Bucket_asks
+  | Bucket_approvals
+  | Bucket_confirmations_quarantine
+
+type attention_item = {
+  id : string;
+  bucket : attention_bucket;
+  kind : Health.attention_kind;
+  title : string;
+  summary : string;
+  created_at_unix : float option;
+  keeper : string option;
+}
+
+type keeper_sandbox_profile =
+  | Profile_microvm
+  | Profile_remote_ssh
+  | Profile_docker
+  | Profile_other of string
+
+type candle_summary_fallback = {
+  issued_milli : string;
+  burned_milli : string;
+  circulating_milli : string;
+}
+
+type keeper_roster_extras = {
+  sandbox_profiles : (string * keeper_sandbox_profile) list;
+  candle_balances_milli : (string * int) list;
+  candle_summary : candle_summary_fallback option;
+}
+
+type execution_keeper_enrichment = {
+  keeper_name : string;
+  context_ratio : float option;
+  sandbox_profile : keeper_sandbox_profile option;
+  total_turns : int option;
+}
+
+type company_group = {
+  company : string;
+  keepers : keeper_summary list;
+  running_count : int;
+  working_count : int;
+  failing_count : int;
+  paused_count : int;
+  attention_count : int;
+  microvm_count : int;
+  ssh_count : int;
+  docker_count : int;
+  turns_24h : int;
+  cost_24h_usd : float;
+  sparkline_24h : float list;
+}
+
+type daily_scorecard = {
+  tasks_done_24h : int Observed.t;
+  tasks_done_total : int Observed.t;
+  tasks_in_progress : int Observed.t;
+  tasks_claimed : int Observed.t;
+  tasks_awaiting_verification : int Observed.t;
+  tasks_todo : int Observed.t;
+  tasks_cancelled : int Observed.t;
+  goals_completed_24h : int Observed.t;
+  prs_reviewed_24h : int Observed.t;
+  verifications_passed_24h : int Observed.t;
+  verifications_rejected_24h : int Observed.t;
+  board_posts_24h : int Observed.t;
+  turns_24h : int Observed.t;
+  cost_24h_usd : float Observed.t;
+}
+
+type shell_counts = {
+  agents : int;
+  tasks : int;
+  tasks_done_24h : int;
+  keepers : int;
+  persisted_keepers : int Observed.t;
+  configured_keepers : int Observed.t;
+  total_runtimes : int;
+}
+
+type shell_group = {
+  group : string;
+  keeper_count : int;
+  keepers : string list;
+}
+
+type dashboard_shell = {
+  generated_at_unix : float option;
+  project : string option;
+  version : string option;
+  counts : shell_counts;
+  scorecard_24h : daily_scorecard;
+  groups : shell_group list;
+}
+
+let keeper_health_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "healthy" | "ok" | "active" | "running" -> Some Keeper_healthy
+  | "working" | "in_turn" | "busy" -> Some Keeper_working
+  | "idle" | "ready" | "standby" -> Some Keeper_idle
+  | "degraded" | "warning" -> Some Keeper_degraded
+  | "recovering" -> Some Keeper_recovering
+  | "failing" | "failed" | "error" | "unhealthy" | "crashed" ->
+      Some Keeper_failing
+  | "paused" -> Some Keeper_paused
+  | "offline" | "stopped" | "inactive" | "down" -> Some Keeper_offline
+  | "booting" | "starting" -> Some Keeper_booting
+  | _ -> None
+
+let activation_mode_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "manual" -> Some Activation_manual
+  | "on_demand" -> Some Activation_on_demand
+  | "autonomous" -> Some Activation_autonomous
+  | _ -> None
+
+let turn_lane_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "chat" | "chat_operation" | "interactive" | "operator_chat" -> Some Lane_chat
+  | "proactive" | "keepalive" | "autonomous" -> Some Lane_proactive
+  | "schedule" | "scheduled" -> Some Lane_schedule
+  | "board" | "board_attention" -> Some Lane_board
+  | "task" -> Some Lane_task
+  | "verification" | "verifier" -> Some Lane_verification
+  | "maintenance" -> Some Lane_maintenance
+  | "internal" | "librarian" -> Some Lane_internal
+  | _ -> None
+
+let prefix_before_dash name =
+  match String.index_opt name '-' with
+  | Some idx when idx > 0 -> Some (String.sub name 0 idx)
+  | Some _ | None -> None
+
+let classify_company_single ~group _name =
+  match group with
+  | Some g when not (String.equal (String.trim g) "") -> Some (String.trim g)
+  | Some _ | None -> None
+
+let company_sort_rank = function
+  | "Other" -> 1
+  | _ -> 0
+
+let aggregate_company_sparkline (members : keeper_summary list) =
+  let non_empty =
+    List.filter_map
+      (fun (k : keeper_summary) ->
+        if k.activity_sparkline_24h = [] then None
+        else Some (Array.of_list k.activity_sparkline_24h))
+      members
+  in
+  match non_empty with
+  | [] -> []
+  | arrs ->
+      let max_len =
+        List.fold_left (fun acc a -> max acc (Array.length a)) 0 arrs
+      in
+      let out = Array.make max_len 0.0 in
+      List.iter
+        (fun a ->
+          let len = Array.length a in
+          let offset = max_len - len in
+          for i = 0 to len - 1 do
+            out.(offset + i) <- out.(offset + i) +. a.(i)
+          done)
+        arrs;
+      Array.to_list out
+
+let group_by_company ?(attention = []) ?(sandbox_profiles = [])
+    ?(keeper_costs_24h = []) keepers =
+  let prefix_counts = Hashtbl.create 16 in
+  List.iter
+    (fun (k : keeper_summary) ->
+      match classify_company_single ~group:k.group k.name with
+      | Some _ -> ()
+      | None -> (
+          match prefix_before_dash k.name with
+          | Some p ->
+              let prev =
+                match Hashtbl.find_opt prefix_counts p with
+                | Some c -> c
+                | None -> 0
+              in
+              Hashtbl.replace prefix_counts p (prev + 1)
+          | None -> ()))
+    keepers;
+  let resolve_company (k : keeper_summary) =
+    match classify_company_single ~group:k.group k.name with
+    | Some c -> c
+    | None -> (
+        match prefix_before_dash k.name with
+        | Some p -> (
+            match Hashtbl.find_opt prefix_counts p with
+            | Some c when c >= 2 -> p
+            | Some _ | None -> "Other")
+        | None -> "Other")
+  in
+  let profile_tbl = Hashtbl.create (max 8 (List.length sandbox_profiles)) in
+  List.iter (fun (n, p) -> Hashtbl.replace profile_tbl n p) sandbox_profiles;
+  let cost_tbl = Hashtbl.create (max 8 (List.length keeper_costs_24h)) in
+  List.iter (fun (n, c) -> Hashtbl.replace cost_tbl n c) keeper_costs_24h;
+  let buckets : (string, keeper_summary list) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (k : keeper_summary) ->
+      let comp = resolve_company k in
+      let k' = { k with company = comp } in
+      let prev =
+        match Hashtbl.find_opt buckets comp with Some l -> l | None -> []
+      in
+      Hashtbl.replace buckets comp (k' :: prev))
+    keepers;
+  let attn_for_keeper name =
+    List.fold_left
+      (fun acc (item : attention_item) ->
+        match item.keeper with
+        | Some kn when String.equal kn name -> acc + 1
+        | Some _ | None -> acc)
+      0 attention
+  in
+  let groups =
+    Hashtbl.fold
+      (fun company rev_members acc ->
+        let members =
+          List.sort
+            (fun (a : keeper_summary) (b : keeper_summary) ->
+              String.compare a.name b.name)
+            rev_members
+        in
+        let running_count = ref 0 in
+        let working_count = ref 0 in
+        let failing_count = ref 0 in
+        let paused_count = ref 0 in
+        let attention_count = ref 0 in
+        let microvm_count = ref 0 in
+        let ssh_count = ref 0 in
+        let docker_count = ref 0 in
+        let turns_24h = ref 0 in
+        let cost_24h_usd = ref 0.0 in
+        List.iter
+          (fun (k : keeper_summary) ->
+            if k.keepalive_running then incr running_count;
+            if k.paused then incr paused_count;
+            (match k.health with
+            | Keeper_working -> incr working_count
+            | Keeper_failing -> incr failing_count
+            | Keeper_healthy | Keeper_idle | Keeper_degraded | Keeper_recovering
+            | Keeper_paused | Keeper_offline | Keeper_booting ->
+                ());
+            attention_count := !attention_count + attn_for_keeper k.name;
+            (match Hashtbl.find_opt profile_tbl k.name with
+            | Some Profile_microvm -> incr microvm_count
+            | Some Profile_remote_ssh -> incr ssh_count
+            | Some Profile_docker -> incr docker_count
+            | Some (Profile_other _) | None -> ());
+            let k_turns =
+              List.fold_left ( +. ) 0.0 k.activity_sparkline_24h
+              |> Float.round |> Int.of_float
+            in
+            turns_24h := !turns_24h + k_turns;
+            let k_cost =
+              match Hashtbl.find_opt cost_tbl k.name with
+              | Some c -> c
+              | None -> (
+                  match Observed.to_option k.cost_24h_usd with
+                  | Some c -> c
+                  | None -> 0.0)
+            in
+            cost_24h_usd := !cost_24h_usd +. k_cost)
+          members;
+        let sparkline_24h = aggregate_company_sparkline members in
+        {
+          company;
+          keepers = members;
+          running_count = !running_count;
+          working_count = !working_count;
+          failing_count = !failing_count;
+          paused_count = !paused_count;
+          attention_count = !attention_count;
+          microvm_count = !microvm_count;
+          ssh_count = !ssh_count;
+          docker_count = !docker_count;
+          turns_24h = !turns_24h;
+          cost_24h_usd = !cost_24h_usd;
+          sparkline_24h;
+        }
+        :: acc)
+      buckets []
+  in
+  List.sort
+    (fun (a : company_group) (b : company_group) ->
+      let ra = company_sort_rank a.company in
+      let rb = company_sort_rank b.company in
+      if ra <> rb then Int.compare ra rb
+      else String.compare a.company b.company)
+    groups
+
+let decode_active_turn json =
+  let* lane = decode_enum ~field:"lane" turn_lane_of_string json in
+  let* started_at_unix = required_finite_float json "started_at_unix" in
+  let* interrupt_token = required_string_field json "interrupt_token" in
+  let* phase = optional_nonblank_string json "phase" in
+  let* tool_in_flight = optional_nonblank_string json "tool_in_flight" in
+  let* elapsed_ms = optional_finite_float json "elapsed_ms" in
+  Ok
+    {
+      lane;
+      started_at_unix;
+      interrupt_token;
+      phase;
+      tool_in_flight;
+      elapsed_ms;
+    }
+
+let decode_keeper_turn_row json =
+  let* keeper_name = required_nonblank_string json "keeper_name" in
+  let* chat_control_token =
+    optional_nonblank_string json "chat_control_token"
+  in
+  let* status = required_nonblank_string json "status" in
+  match status with
+  | "unavailable" ->
+      let* detail = required_string_field json "detail" in
+      Ok
+        { keeper_name; chat_control_token; state = Turn_unavailable detail }
+  | "ok" -> (
+      let* turn_val = required_member json "turn" in
+      match turn_val with
+      | `Null -> Ok { keeper_name; chat_control_token; state = Turn_idle }
+      | `Assoc _ as turn_json ->
+          let* active = decode_active_turn turn_json in
+          Ok { keeper_name; chat_control_token; state = Turn_active active }
+      | bad -> field_type_error "turn" "an object or null" bad)
+  | other -> Error (Printf.sprintf "unknown keeper turn status %S" other)
+
+let decode_keeper_turns json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* rows =
+    if has_field body "keepers" then required_list_field body "keepers"
+    else if has_field body "turns" then required_list_field body "turns"
+    else required_list_field body "rows"
+  in
+  decode_list "keepers" decode_keeper_turn_row rows
+
+let decode_float_list json key =
+  let* items = optional_list_field json key in
+  decode_list key
+    (function
+      | `Float f when Float.is_finite f -> Ok f
+      | `Int i -> Ok (Float.of_int i)
+      | bad -> field_type_error key "a finite number" bad)
+    items
+
+let decode_recent_turns_sparkline json =
+  match optional_object_field json "recent_turns" with
+  | Error _ as err -> err
+  | Ok None -> Ok []
+  | Ok (Some rt) ->
+      let* raw_slots = optional_list_field rt "slots" in
+      let parse_slot = function
+        | `List [ ts_j; ok_j; _rested_j; fail_j ] ->
+            let ts_res =
+              match ts_j with
+              | `Int i -> Ok (Float.of_int i)
+              | `Float f when Float.is_finite f -> Ok f
+              | bad -> field_type_error "recent_turns.slots[0]" "a timestamp number" bad
+            in
+            let count_res label = function
+              | `Int i when i >= 0 -> Ok i
+              | `Float f when Float.is_finite f && f >= 0.0 -> Ok (Int.of_float f)
+              | bad -> field_type_error label "a non-negative count" bad
+            in
+            let* ts = ts_res in
+            let* ok_c = count_res "recent_turns.slots[1]" ok_j in
+            let* fail_c = count_res "recent_turns.slots[3]" fail_j in
+            Ok (ts, Float.of_int (ok_c + fail_c))
+        | bad ->
+            field_type_error "recent_turns.slots[]"
+              "a 4-element [ts, ok, rested, failed] array" bad
+      in
+      let* parsed = decode_list "recent_turns.slots" parse_slot raw_slots in
+      let chronological =
+        List.sort (fun (ts_a, _) (ts_b, _) -> Float.compare ts_a ts_b) parsed
+      in
+      Ok (List.map snd chronological)
+
+let decode_lane_turn_count ~observed_at json =
+  match optional_object_field json "runtime_lane_observation" with
+  | Error _ | Ok None -> Observed.unreported
+  | Ok (Some obs) -> (
+      match optional_object_field obs "turn" with
+      | Error _ | Ok None -> Observed.unreported
+      | Ok (Some turn_obj) -> (
+          match optional_int_field turn_obj "turn_count" with
+          | Ok (Some n) when n >= 0 -> Observed.value ~observed_at n
+          | Ok (Some _) | Ok None | Error _ -> Observed.unreported))
+
+let decode_keeper_summary ~observed_at json =
+  let* name = required_nonblank_string json "name" in
+  let* group = optional_nonblank_string json "group" in
+  let* health = decode_enum ~field:"health" keeper_health_of_string json in
+  let* paused = required_bool_field json "paused" in
+  let* keepalive_running = required_bool_field json "keepalive_running" in
+  let* activation_mode =
+    decode_enum ~field:"activation_mode" activation_mode_of_string json
+  in
+  let* runtime_id = required_string_field json "runtime_id" in
+  let* model_id = optional_nonblank_string json "model_id" in
+  let* current_task_id = optional_nonblank_string json "current_task_id" in
+  let* context_ratio = observed_float ~observed_at json "context_ratio" in
+  let* total_turns_raw = observed_int ~observed_at json "total_turns" in
+  let total_turns =
+    match total_turns_raw with
+    | Observed.Value _ -> total_turns_raw
+    | Observed.Absent | Observed.Unreported | Observed.Loading _ | Observed.Failed _ -> (
+        match decode_lane_turn_count ~observed_at json with
+        | Observed.Value _ as v -> v
+        | Observed.Absent | Observed.Unreported | Observed.Loading _ | Observed.Failed _ ->
+            total_turns_raw)
+  in
+  let* total_tokens = observed_int ~observed_at json "total_tokens" in
+  let* cost_24h_usd = observed_float ~observed_at json "cost_24h_usd" in
+  let* last_turn_at_unix =
+    decode_optional_timestamp_unix json "last_turn_at_unix"
+  in
+  let* active_turn =
+    let* turn_obj = optional_object_field json "active_turn" in
+    match turn_obj with
+    | None -> Ok None
+    | Some obj ->
+        let* t = decode_active_turn obj in
+        Ok (Some t)
+  in
+  let* explicit_sparkline = decode_float_list json "activity_sparkline_24h" in
+  let* activity_sparkline_24h =
+    if explicit_sparkline <> [] then Ok explicit_sparkline
+    else decode_recent_turns_sparkline json
+  in
+  let company =
+    match classify_company_single ~group name with
+    | Some c -> c
+    | None -> "Other"
+  in
+  Ok
+    {
+      name;
+      group;
+      company;
+      health;
+      paused;
+      keepalive_running;
+      activation_mode;
+      runtime_id;
+      model_id;
+      current_task_id;
+      context_ratio;
+      total_turns;
+      total_tokens;
+      cost_24h_usd;
+      last_turn_at_unix;
+      active_turn;
+      activity_sparkline_24h;
+    }
+
+let decode_keepers_roster ~observed_at json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "keepers" in
+  decode_list "keepers" (decode_keeper_summary ~observed_at) items
+
+let sandbox_profile_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "microvm" -> Profile_microvm
+  | "remote_ssh" | "ssh" -> Profile_remote_ssh
+  | "docker" -> Profile_docker
+  | other -> Profile_other other
+
+let decode_milli_string json key =
+  match member key json with
+  | `String s when not (String.equal (String.trim s) "") -> Ok (String.trim s)
+  | `Int i when i >= 0 -> Ok (Int.to_string i)
+  | `Null -> Ok "0"
+  | bad -> field_type_error key "a non-negative milli string or integer" bad
+
+let decode_candle_summary_opt body =
+  match optional_object_field body "candle" with
+  | Error _ as err -> err
+  | Ok None -> Ok None
+  | Ok (Some cobj) ->
+      let* issued_milli = decode_milli_string cobj "issued_milli" in
+      let* burned_milli = decode_milli_string cobj "burned_milli" in
+      let* circulating_milli = decode_milli_string cobj "circulating_milli" in
+      Ok (Some { issued_milli; burned_milli; circulating_milli })
+
+let extract_sandbox_profile_opt obj =
+  let direct =
+    match optional_nonblank_string obj "sandbox_profile" with
+    | Ok (Some s) -> Some (sandbox_profile_of_string s)
+    | Ok None | Error _ -> None
+  in
+  match direct with
+  | Some _ -> direct
+  | None -> (
+      match optional_object_field obj "meta" with
+      | Ok (Some meta) -> (
+          match optional_nonblank_string meta "sandbox_profile" with
+          | Ok (Some s) -> Some (sandbox_profile_of_string s)
+          | Ok None | Error _ -> None)
+      | Ok None | Error _ -> None)
+
+let extract_candle_balance_opt obj =
+  let parse_milli = function
+    | `Int i -> Some i
+    | `String s -> int_of_string_opt (String.trim s)
+    | `Float f when Float.is_finite f -> Some (Int.of_float f)
+    | `Null | `Bool _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
+  in
+  match parse_milli (member "candle_balance_milli" obj) with
+  | Some v -> Some v
+  | None -> (
+      match optional_object_field obj "candle" with
+      | Ok (Some c) -> parse_milli (member "balance_milli" c)
+      | Ok None | Error _ -> None)
+
+let decode_keepers_roster_extras json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "keepers" in
+  let* candle_summary = decode_candle_summary_opt body in
+  let profiles = ref [] in
+  let balances = ref [] in
+  List.iter
+    (fun item ->
+      match optional_nonblank_string item "name" with
+      | Ok (Some name) ->
+          (match extract_sandbox_profile_opt item with
+          | Some p -> profiles := (name, p) :: !profiles
+          | None -> ());
+          (match extract_candle_balance_opt item with
+          | Some b -> balances := (name, b) :: !balances
+          | None -> ())
+      | Ok None | Error _ -> ())
+    items;
+  Ok
+    {
+      sandbox_profiles = List.rev !profiles;
+      candle_balances_milli = List.rev !balances;
+      candle_summary;
+    }
+
+let decode_execution_keeper_enrichments json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* candle_summary = decode_candle_summary_opt body in
+  let* items = optional_list_field body "keepers" in
+  let enrichments =
+    List.filter_map
+      (fun item ->
+        match optional_nonblank_string item "name" with
+        | Ok (Some keeper_name) ->
+            let context_ratio =
+              match optional_finite_float item "context_ratio" with
+              | Ok v -> v
+              | Error _ -> None
+            in
+            let sandbox_profile = extract_sandbox_profile_opt item in
+            let total_turns =
+              match optional_int_field item "total_turns" with
+              | Ok (Some n) when n >= 0 -> Some n
+              | Ok (Some _) | Ok None | Error _ -> (
+                  match optional_int_field item "turn_count" with
+                  | Ok (Some n) when n >= 0 -> Some n
+                  | Ok (Some _) | Ok None | Error _ -> None)
+            in
+            Some { keeper_name; context_ratio; sandbox_profile; total_turns }
+        | Ok None | Error _ -> None)
+      items
+  in
+  Ok (enrichments, candle_summary)
+
+let decode_attention_item json =
+  let* kind_word = required_nonblank_string json "kind" in
+  let* id = required_nonblank_string json "id" in
+  let* title = required_nonblank_string json "title" in
+  let* summary =
+    match optional_string_field json "summary" with
+    | Ok (Some s) -> Ok s
+    | Ok None -> Ok ""
+    | Error _ as err -> err
+  in
+  let* created_at_unix = decode_optional_timestamp_unix json "created_at_unix" in
+  let* bucket, kind, keeper =
+    match kind_word with
+    | "pending_ask" ->
+        let* ask_id =
+          match optional_nonblank_string json "ask_id" with
+          | Ok (Some v) -> Ok v
+          | Ok None -> Ok id
+          | Error _ as err -> err
+        in
+        let* keeper = required_nonblank_string json "keeper" in
+        Ok
+          ( Bucket_asks
+          , Health.Pending_ask { ask_id; keeper }
+          , Some keeper )
+    | "held_tool_approval" ->
+        let* request_id =
+          match optional_nonblank_string json "request_id" with
+          | Ok (Some v) -> Ok v
+          | Ok None -> Ok id
+          | Error _ as err -> err
+        in
+        let* keeper = required_nonblank_string json "keeper" in
+        let* tool = required_nonblank_string json "tool" in
+        Ok
+          ( Bucket_approvals
+          , Health.Held_tool_approval { request_id; keeper; tool }
+          , Some keeper )
+    | "goal_confirmation" ->
+        let* goal_id =
+          match optional_nonblank_string json "goal_id" with
+          | Ok (Some v) -> Ok v
+          | Ok None -> Ok id
+          | Error _ as err -> err
+        in
+        let* keeper = optional_nonblank_string json "keeper" in
+        Ok
+          ( Bucket_confirmations_quarantine
+          , Health.Goal_confirmation { goal_id }
+          , keeper )
+    | "board_quarantine" ->
+        let* keeper = required_nonblank_string json "keeper" in
+        let* count = required_nonnegative_int_field json "count" in
+        Ok
+          ( Bucket_confirmations_quarantine
+          , Health.Board_quarantine { keeper; count }
+          , Some keeper )
+    | other -> Error (Printf.sprintf "unknown attention kind %S" other)
+  in
+  Ok { id; bucket; kind; title; summary; created_at_unix; keeper }
+
+let empty_scorecard =
+  {
+    tasks_done_24h = Observed.unreported;
+    tasks_done_total = Observed.unreported;
+    tasks_in_progress = Observed.unreported;
+    tasks_claimed = Observed.unreported;
+    tasks_awaiting_verification = Observed.unreported;
+    tasks_todo = Observed.unreported;
+    tasks_cancelled = Observed.unreported;
+    goals_completed_24h = Observed.unreported;
+    prs_reviewed_24h = Observed.unreported;
+    verifications_passed_24h = Observed.unreported;
+    verifications_rejected_24h = Observed.unreported;
+    board_posts_24h = Observed.unreported;
+    turns_24h = Observed.unreported;
+    cost_24h_usd = Observed.unreported;
+  }
+
+let decode_daily_scorecard ~observed_at json =
+  let* tasks_done_24h = observed_int ~observed_at json "tasks_done_24h" in
+  let* tasks_done_total = observed_int ~observed_at json "tasks_done_total" in
+  let* tasks_in_progress = observed_int ~observed_at json "tasks_in_progress" in
+  let* tasks_claimed = observed_int ~observed_at json "tasks_claimed" in
+  let* tasks_awaiting_verification =
+    observed_int ~observed_at json "tasks_awaiting_verification"
+  in
+  let* tasks_todo = observed_int ~observed_at json "tasks_todo" in
+  let* tasks_cancelled = observed_int ~observed_at json "tasks_cancelled" in
+  let* goals_completed_24h =
+    observed_int ~observed_at json "goals_completed_24h"
+  in
+  let* prs_reviewed_24h = observed_int ~observed_at json "prs_reviewed_24h" in
+  let* verifications_passed_24h =
+    observed_int ~observed_at json "verifications_passed_24h"
+  in
+  let* verifications_rejected_24h =
+    observed_int ~observed_at json "verifications_rejected_24h"
+  in
+  let* board_posts_24h = observed_int ~observed_at json "board_posts_24h" in
+  let* turns_24h = observed_int ~observed_at json "turns_24h" in
+  let* cost_24h_usd = observed_float ~observed_at json "cost_24h_usd" in
+  Ok
+    {
+      tasks_done_24h;
+      tasks_done_total;
+      tasks_in_progress;
+      tasks_claimed;
+      tasks_awaiting_verification;
+      tasks_todo;
+      tasks_cancelled;
+      goals_completed_24h;
+      prs_reviewed_24h;
+      verifications_passed_24h;
+      verifications_rejected_24h;
+      board_posts_24h;
+      turns_24h;
+      cost_24h_usd;
+    }
+
+let decode_shell_group json =
+  let* group = required_nonblank_string json "group" in
+  let* keeper_count = required_nonnegative_int_field json "keeper_count" in
+  let* keepers = required_string_list json "keepers" in
+  Ok { group; keeper_count; keepers }
+
+let decode_dashboard_shell ~observed_at json =
+  let* meta, body = unwrap_v2_or_raw json in
+  let* generated_at_unix =
+    match meta with
+    | Some (m : envelope_meta) -> Ok (Some m.generated_at_unix)
+    | None -> (
+        match decode_optional_timestamp_unix body "generated_at" with
+        | Ok (Some _ as ts) -> Ok ts
+        | Ok None -> decode_optional_timestamp_unix body "generated_at_unix"
+        | Error _ as err -> err)
+  in
+  let* status_obj = optional_object_field body "status" in
+  let* project =
+    match status_obj with
+    | Some st -> optional_nonblank_string st "project"
+    | None -> Ok None
+  in
+  let* version =
+    match status_obj with
+    | Some st -> optional_nonblank_string st "version"
+    | None -> Ok None
+  in
+  let* counts_obj = required_object_field body "counts" in
+  let* agents = required_nonnegative_int_field counts_obj "agents" in
+  let* tasks = required_nonnegative_int_field counts_obj "tasks" in
+  let* tasks_done_24h_obs =
+    observed_int ~observed_at counts_obj "tasks_done_24h"
+  in
+  let* tasks_done_24h =
+    match tasks_done_24h_obs with
+    | Observed.Value { data; _ } when data < 0 ->
+        Error
+          (Printf.sprintf "field \"tasks_done_24h\" must be >= 0, got %d" data)
+    | Observed.Value { data; _ } -> Ok data
+    | Observed.Absent | Observed.Unreported | Observed.Loading _ | Observed.Failed _ ->
+        Ok 0
+  in
+  let* keepers = required_nonnegative_int_field counts_obj "keepers" in
+  let* persisted_keepers =
+    observed_int ~observed_at counts_obj "persisted_keepers"
+  in
+  let* configured_keepers =
+    observed_int ~observed_at body "configured_keepers"
+  in
+  let* total_runtimes =
+    required_nonnegative_int_field counts_obj "total_runtimes"
+  in
+  let* scorecard_24h =
+    match optional_object_field body "scorecard_24h" with
+    | Ok (Some sc_json) -> decode_daily_scorecard ~observed_at sc_json
+    | Ok None -> Ok empty_scorecard
+    | Error _ as err -> err
+  in
+  let* group_items = optional_list_field body "groups" in
+  let* groups = decode_list "groups" decode_shell_group group_items in
+  Ok
+    {
+      generated_at_unix;
+      project;
+      version;
+      counts =
+        {
+          agents;
+          tasks;
+          tasks_done_24h;
+          keepers;
+          persisted_keepers;
+          configured_keepers;
+          total_runtimes;
+        };
+      scorecard_24h;
+      groups;
+    }
+
+type fleet_stream_reading = {
+  status : string;
+  operator_action_required : bool;
+  bootable_count : int;
+  running_count : int;
+  executable_count : int;
+  failing_count : int;
+  recovering_count : int;
+  paused_count : int;
+  proactive_interval_sec : int option;
+}
+
+type fleet_degradation = {
+  since_unix : float;
+  reason : string;
+}
+
+type fleet_stream_event =
+  | Fleet_snapshot of {
+      schema : int;
+      revision : int;
+      measured_at_unix : float;
+      reading : fleet_stream_reading;
+      degraded : fleet_degradation option;
+    }
+  | Fleet_changed of {
+      revision : int;
+      measured_at_unix : float;
+      reading : fleet_stream_reading;
+    }
+  | Fleet_unavailable_snapshot of {
+      schema : int;
+      revision : int;
+      degradation : fleet_degradation;
+    }
+  | Fleet_degraded of {
+      revision : int;
+      degradation : fleet_degradation;
+    }
+
+let decode_fleet_reading json =
+  let* status = required_nonblank_string json "status" in
+  let* operator_action_required =
+    required_bool_field json "operator_action_required"
+  in
+  let* bootable_count = required_nonnegative_int_field json "bootable_count" in
+  let* running_count = required_nonnegative_int_field json "running_count" in
+  let* executable_count =
+    required_nonnegative_int_field json "executable_count"
+  in
+  let* failing_count = required_nonnegative_int_field json "failing_count" in
+  let* recovering_count =
+    required_nonnegative_int_field json "recovering_count"
+  in
+  let* paused_count = required_nonnegative_int_field json "paused_count" in
+  let* proactive_interval_sec =
+    optional_int_field json "proactive_interval_sec"
+  in
+  Ok
+    {
+      status;
+      operator_action_required;
+      bootable_count;
+      running_count;
+      executable_count;
+      failing_count;
+      recovering_count;
+      paused_count;
+      proactive_interval_sec;
+    }
+
+let decode_degradation_fields json =
+  let* since_unix = required_finite_float json "since" in
+  let* reason = required_nonblank_string json "reason" in
+  Ok { since_unix; reason }
+
+let decode_fleet_stream_event json =
+  (* Matches [Fleet_stream.encode] in [lib/fleet_stream/fleet_stream.ml]. *)
+  let* event_name = required_nonblank_string json "event" in
+  let* revision = required_int_field json "revision" in
+  let* () =
+    if revision < 1 then Error "fleet stream revision must be >= 1" else Ok ()
+  in
+  match event_name with
+  | "snapshot" ->
+      let* schema = required_int_field json "schema" in
+      let* measured_at_unix = required_finite_float json "measured_at" in
+      let* fleet_json = required_object_field json "fleet" in
+      let* reading = decode_fleet_reading fleet_json in
+      let* degraded =
+        match optional_object_field json "degraded" with
+        | Ok None -> Ok None
+        | Ok (Some deg) ->
+            let* d = decode_degradation_fields deg in
+            Ok (Some d)
+        | Error _ as err -> err
+      in
+      Ok (Fleet_snapshot { schema; revision; measured_at_unix; reading; degraded })
+  | "changed" ->
+      let* measured_at_unix = required_finite_float json "measured_at" in
+      let* fleet_json = required_object_field json "fleet" in
+      let* reading = decode_fleet_reading fleet_json in
+      Ok (Fleet_changed { revision; measured_at_unix; reading })
+  | "unavailable_snapshot" ->
+      let* schema = required_int_field json "schema" in
+      let* degradation = decode_degradation_fields json in
+      Ok (Fleet_unavailable_snapshot { schema; revision; degradation })
+  | "degraded" ->
+      let* degradation = decode_degradation_fields json in
+      Ok (Fleet_degraded { revision; degradation })
+  | other -> Error (Printf.sprintf "unknown fleet stream event %S" other)
+
+type chat_role =
+  | Role_user
+  | Role_assistant
+  | Role_system
+  | Role_tool
+
+type chat_origin =
+  | Origin_bare
+  | Origin_connector of string
+
+type interrupt_target =
+  | Interrupt_none
+  | Interrupt_turn_token of string
+  | Interrupt_operation_id of string
+
+type submit_mode =
+  | Follow_up
+  | Steer of {
+      control_token : string;
+      target : interrupt_target;
+    }
+
+type chat_attachment = {
+  attachment_id : string;
+  name : string;
+  mime_type : string;
+  size : int;
+  data_base64 : string;
+}
+
+type chat_submit_request = {
+  request_id : string;
+  keeper_name : string;
+  message : string;
+  origin : chat_origin;
+  mode : submit_mode;
+  turn_instructions : string option;
+  since_seq : int option;
+  attachments : chat_attachment list;
+}
+
+type chat_message = {
+  id : string;
+  role : chat_role;
+  content : string;
+  ts_unix : float;
+  turn_ref : string option;
+  model_used : string option;
+  tool_call_id : string option;
+  tool_call_name : string option;
+  execution_id : string option;
+}
+
+type chat_history_page = {
+  messages : chat_message list;
+  has_more : bool;
+  next_cursor : string option;
+}
+
+type chat_stream_chunk =
+  | Chunk_accepted of {
+      operation_id : string;
+      queued_count : int;
+      state : string;
+    }
+  | Chunk_text_delta of { operation_id : string; delta : string }
+  | Chunk_thinking_delta of { operation_id : string; delta : string }
+  | Chunk_tool_start of {
+      operation_id : string;
+      tool_use_id : string;
+      tool_name : string;
+      args_preview : string option;
+    }
+  | Chunk_tool_end of {
+      operation_id : string;
+      tool_use_id : string;
+      tool_name : string;
+      ok : bool;
+      output_preview : string option;
+    }
+  | Chunk_turn_done of {
+      operation_id : string;
+      turn_ref : string;
+      reply : string;
+    }
+  | Chunk_error of {
+      operation_id : string option;
+      code : string option;
+      message : string;
+    }
+
+let encode_chat_submit_request req =
+  (* Strict allowlist in [server_routes_http_keeper_stream.ml:366-434]:
+     [request_id; name; message; turn_instructions; channel; attachments;
+     since_seq; admission_intent]. *)
+  let channel_field =
+    match req.origin with
+    | Origin_bare -> []
+    | Origin_connector ch -> [ ("channel", `String ch) ]
+  in
+  let admission_field =
+    match req.mode with
+    | Follow_up -> []
+    | Steer { control_token; target } ->
+        let interrupt_token_json, operation_id_json =
+          match target with
+          | Interrupt_none -> (`Null, `Null)
+          | Interrupt_turn_token tok -> (`String tok, `Null)
+          | Interrupt_operation_id op -> (`Null, `String op)
+        in
+        [
+          ( "admission_intent"
+          , `Assoc
+              [
+                ("kind", `String "interactive");
+                ("control_token", `String control_token);
+                ("interrupt_token", interrupt_token_json);
+                ("operation_id", operation_id_json);
+              ] );
+        ]
+  in
+  let instructions_field =
+    match req.turn_instructions with
+    | None -> []
+    | Some instr -> [ ("turn_instructions", `String instr) ]
+  in
+  let since_seq_field =
+    match req.since_seq with
+    | None -> []
+    | Some s -> [ ("since_seq", `Int s) ]
+  in
+  let attachments_field =
+    match req.attachments with
+    | [] -> []
+    | items ->
+        [
+          ( "attachments"
+          , `List
+              (List.map
+                 (fun (a : chat_attachment) ->
+                   `Assoc
+                     [
+                       ("attachment_id", `String a.attachment_id);
+                       ("name", `String a.name);
+                       ("mime_type", `String a.mime_type);
+                       ("size", `Int a.size);
+                       ("data", `String a.data_base64);
+                     ])
+                 items) );
+        ]
+  in
+  `Assoc
+    ([
+       ("request_id", `String req.request_id);
+       ("name", `String req.keeper_name);
+       ("message", `String req.message);
+     ]
+    @ channel_field @ instructions_field @ since_seq_field @ admission_field
+    @ attachments_field)
+
+let chat_role_of_string = function
+  | "user" | "operator" -> Some Role_user
+  | "assistant" | "keeper" -> Some Role_assistant
+  | "system" -> Some Role_system
+  | "tool" -> Some Role_tool
+  | _ -> None
+
+let decode_chat_message json =
+  let* id = required_nonblank_string json "id" in
+  let* role = decode_enum ~field:"role" chat_role_of_string json in
+  let* content = required_string_field json "content" in
+  let* ts_unix = required_finite_float json "ts" in
+  let* turn_ref = optional_nonblank_string json "turn_ref" in
+  let* model_used = optional_nonblank_string json "model_used" in
+  let* tool_call_id = optional_nonblank_string json "tool_call_id" in
+  let* tool_call_name = optional_nonblank_string json "tool_call_name" in
+  let* execution_id = optional_nonblank_string json "execution_id" in
+  Ok
+    {
+      id;
+      role;
+      content;
+      ts_unix;
+      turn_ref;
+      model_used;
+      tool_call_id;
+      tool_call_name;
+      execution_id;
+    }
+
+let decode_chat_history = function
+  | `List items -> decode_list "chat_history" decode_chat_message items
+  | bad -> field_type_error "chat_history" "a JSON array" bad
+
+let decode_chat_history_page json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "messages" in
+  let* messages = decode_list "messages" decode_chat_message items in
+  let* has_more = required_bool_field body "has_more" in
+  let* next_cursor = optional_nonblank_string body "next_cursor" in
+  Ok { messages; has_more; next_cursor }
+
+let decode_chat_stream_chunk json =
+  let* kind = required_nonblank_string json "type" in
+  match kind with
+  | "accepted" ->
+      let* operation_id = required_nonblank_string json "operation_id" in
+      let* queued_count = required_nonnegative_int_field json "queued_count" in
+      let* state = required_nonblank_string json "state" in
+      Ok (Chunk_accepted { operation_id; queued_count; state })
+  | "text_delta" | "TEXT_MESSAGE_CONTENT" ->
+      let* operation_id = required_nonblank_string json "operation_id" in
+      let* delta = required_string_field json "delta" in
+      Ok (Chunk_text_delta { operation_id; delta })
+  | "thinking_delta" ->
+      let* operation_id = required_nonblank_string json "operation_id" in
+      let* delta = required_string_field json "delta" in
+      Ok (Chunk_thinking_delta { operation_id; delta })
+  | "tool_start" | "TOOL_CALL_START" ->
+      let* operation_id = required_nonblank_string json "operation_id" in
+      let* tool_use_id = required_nonblank_string json "tool_use_id" in
+      let* tool_name = required_nonblank_string json "tool_name" in
+      let* args_preview = optional_string_field json "args_preview" in
+      Ok (Chunk_tool_start { operation_id; tool_use_id; tool_name; args_preview })
+  | "tool_end" | "TOOL_CALL_END" ->
+      let* operation_id = required_nonblank_string json "operation_id" in
+      let* tool_use_id = required_nonblank_string json "tool_use_id" in
+      let* tool_name = required_nonblank_string json "tool_name" in
+      let* ok = required_bool_field json "ok" in
+      let* output_preview = optional_string_field json "output_preview" in
+      Ok
+        (Chunk_tool_end
+           { operation_id; tool_use_id; tool_name; ok; output_preview })
+  | "turn_done" | "RUN_FINISHED" ->
+      let* operation_id = required_nonblank_string json "operation_id" in
+      let* turn_ref = required_nonblank_string json "turn_ref" in
+      let* reply = required_string_field json "reply" in
+      Ok (Chunk_turn_done { operation_id; turn_ref; reply })
+  | "error" | "RUN_ERROR" ->
+      let* operation_id = optional_nonblank_string json "operation_id" in
+      let* code = optional_nonblank_string json "code" in
+      let* message = required_nonblank_string json "message" in
+      Ok (Chunk_error { operation_id; code; message })
+  | other -> Error (Printf.sprintf "unknown chat stream chunk type %S" other)

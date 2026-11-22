@@ -1,0 +1,396 @@
+open Masc_tui_core
+open Masc_tui_protocol
+
+let needs_fetch ~force obs =
+  if force then true
+  else
+    match obs with
+    | Observed.Value { stale = false; _ } -> false
+    | Observed.Failed { retryable = false; _ } -> false
+    | Observed.Loading _
+    | Observed.Value { stale = true; _ }
+    | Observed.Absent
+    | Observed.Unreported
+    | Observed.Failed { retryable = true; _ } ->
+        true
+
+let add_if cond req acc = if cond then req :: acc else acc
+
+let dedup_reqs reqs =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | req :: rest ->
+        let key = Cmd.get_request_path req in
+        if List.exists (String.equal key) seen then loop seen acc rest
+        else loop (key :: seen) (req :: acc) rest
+  in
+  loop [] [] reqs
+
+let fetches_for_overlay ~force (m : Model.t) =
+  match m.nav.overlay with
+  | Some (Nav.Settings _) ->
+      let schema_target_mismatch =
+        match Observed.to_option m.config.schema with
+        | Some s -> not (Config_store.equal_config_target s.target m.config.target)
+        | None -> false
+      in
+      []
+      |> add_if (needs_fetch ~force m.config.preferences) Cmd.Get_tui_preferences
+      |> add_if
+           (schema_target_mismatch || needs_fetch ~force m.config.schema)
+           (Cmd.Get_config_schema m.config.target)
+  | Some
+      ( Nav.Palette
+      | Nav.Incidents
+      | Nav.Queue_context _
+      | Nav.Inline_action _
+      | Nav.Help
+      | Nav.System_gate _ )
+  | None ->
+      []
+
+let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
+  match tab with
+  | Nav.Keeper_chat ->
+      let hist_needed =
+        match Fleet_store.String_map.find_opt name m.fleet.chat_histories with
+        | None -> true
+        | Some obs -> needs_fetch ~force obs
+      in
+      []
+      |> add_if hist_needed
+           (Cmd.Get_chat_history
+              { keeper = name; limit = Some 80; cursor = None })
+  | Nav.Keeper_memory ->
+      let diff_needed =
+        match m.knowledge.memory_diff with
+        | Observed.Value { data; stale = false; _ } -> (
+            force
+            ||
+            match data.scope with
+            | Wire_knowledge.Scope_keeper k -> not (String.equal k name)
+            | Wire_knowledge.Scope_world -> true)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.knowledge.memory_diff
+      in
+      []
+      |> add_if diff_needed
+           (Cmd.Get_memory_diff
+              {
+                keeper = Some name;
+                window = m.knowledge.memory_diff_window;
+              })
+  | Nav.Keeper_work_candle ->
+      []
+      |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+      |> add_if
+           (needs_fetch ~force m.work.candle_ledger)
+           (Cmd.Get_candle_ledger { limit = Some 50 })
+  | Nav.Keeper_sandbox ->
+      let sandbox_needed =
+        match m.infra.keeper_sandbox with
+        | Observed.Value { data; stale = false; _ } ->
+            force || not (String.equal data.keeper name)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.infra.keeper_sandbox
+      in
+      []
+      |> add_if sandbox_needed (Cmd.Get_keeper_sandbox { keeper = name })
+  | Nav.Keeper_config ->
+      let target = Wire_config.Target_keeper name in
+      let schema_needed =
+        force
+        || not (Config_store.equal_config_target m.config.target target)
+        || needs_fetch ~force m.config.schema
+      in
+      [] |> add_if schema_needed (Cmd.Get_config_schema target)
+
+let fetches_for_dive ~force (m : Model.t) =
+  match Model.active_dive m with
+  | None -> []
+  | Some (Nav.Dive_keeper { name; tab }) ->
+      fetches_for_keeper_tab ~force ~name ~tab m
+  | Some (Nav.Dive_work _) ->
+      []
+      |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+      |> add_if
+           (needs_fetch ~force m.work.verifications)
+           (Cmd.Get_verifications
+              { view = m.work.verification_view; limit = 50; offset = 0 })
+  | Some (Nav.Dive_knowledge target) -> (
+      match target with
+      | Nav.Thread_dive post_id ->
+          [ Cmd.Get_board_thread { post_id; comment_limit = Some 100 } ]
+      | Nav.Wiki_dive slug ->
+          [
+            Cmd.Get_wiki_page { page = slug };
+            Cmd.Get_wiki_log { limit = Some 30; page = Some slug };
+          ]
+      | Nav.Artifact_dive _ ->
+          []
+          |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
+      | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
+          [
+            Cmd.Get_memory_diff
+              {
+                keeper;
+                window = Knowledge_store.Window_revs { from_rev; to_rev };
+              };
+          ])
+  | Some (Nav.Dive_infra target) -> (
+      match target with
+      | Nav.Sandbox_dive keeper -> [ Cmd.Get_keeper_sandbox { keeper } ]
+      | Nav.Lane_dive _ ->
+          []
+          |> add_if
+               (needs_fetch ~force m.runtime.runtime_resolved)
+               Cmd.Get_runtime_resolved
+          |> add_if
+               (needs_fetch ~force m.runtime.runtime_probe)
+               (Cmd.Get_runtime_probe { force = false })
+      | Nav.Incident_dive _ -> [])
+
+let fetches_for_workspace ~force (m : Model.t) =
+  match m.nav.workspace with
+  | Nav.Pulse ->
+      []
+      |> add_if (needs_fetch ~force m.fleet.shell) Cmd.Get_dashboard_shell
+      |> add_if (needs_fetch ~force m.fleet.keepers) Cmd.Get_keepers_roster
+      |> add_if
+           (needs_fetch ~force m.knowledge.board)
+           (Cmd.Get_board_feed
+              {
+                sort_by = m.knowledge.board_sort_by;
+                hearth = m.knowledge.board_hearth;
+                signal_only = m.knowledge.board_signal_only;
+                limit = Some 30;
+                offset = None;
+              })
+      |> add_if
+           (needs_fetch ~force m.knowledge.world_memory)
+           Cmd.Get_world_memory
+      |> add_if
+           (needs_fetch ~force m.work.asks)
+           (Cmd.Get_asks { keeper = None; include_resolved = false })
+      |> add_if (needs_fetch ~force m.work.tool_approvals) Cmd.Get_tool_approvals
+      |> add_if (needs_fetch ~force m.work.gate_pending) Cmd.Get_gate_pending
+      |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+      |> add_if
+           (needs_fetch ~force m.work.verifications)
+           (Cmd.Get_verifications { view = `All; limit = 50; offset = 0 })
+      |> add_if
+           (needs_fetch ~force m.work.candle_ledger)
+           (Cmd.Get_candle_ledger { limit = Some 50 })
+      |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
+      |> add_if
+           (needs_fetch ~force m.runtime.tool_series)
+           (Cmd.Get_tool_series { bucket = `Hour; since_hours = 24 })
+      |> add_if
+           (needs_fetch ~force m.runtime.models_metrics)
+           (Cmd.Get_models_metrics { window_minutes = 1440; bucket_minutes = 60 })
+      |> add_if
+           (needs_fetch ~force m.runtime.runtime_metrics)
+           Cmd.Get_runtime_metrics
+      |> add_if
+           (needs_fetch ~force m.runtime.keeper_costs)
+           (Cmd.Get_keeper_costs { window_minutes = 1440 })
+      |> add_if
+           (needs_fetch ~force m.runtime.efficiency)
+           (Cmd.Get_efficiency { month = None })
+      |> add_if
+           (needs_fetch ~force m.runtime.runtime_resolved)
+           Cmd.Get_runtime_resolved
+  | Nav.Work -> (
+      match m.work.active_tab with
+      | Nav.Work_pipeline ->
+          []
+          |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+          |> add_if
+               (needs_fetch ~force m.work.verifications)
+               (Cmd.Get_verifications
+                  { view = m.work.verification_view; limit = 50; offset = 0 })
+      | Nav.Work_tasks_schedules ->
+          []
+          |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+          |> add_if
+               (needs_fetch ~force m.work.schedules)
+               (Cmd.Get_schedules { cursor = None })
+      | Nav.Work_inbox ->
+          []
+          |> add_if
+               (needs_fetch ~force m.work.asks)
+               (Cmd.Get_asks { keeper = None; include_resolved = false })
+          |> add_if
+               (needs_fetch ~force m.work.tool_approvals)
+               Cmd.Get_tool_approvals
+          |> add_if
+               (needs_fetch ~force m.work.gate_pending)
+               Cmd.Get_gate_pending
+      | Nav.Work_candle_scorecard ->
+          []
+          |> add_if
+               (needs_fetch ~force m.work.candle_ledger)
+               (Cmd.Get_candle_ledger { limit = Some 50 })
+          |> add_if (needs_fetch ~force m.fleet.shell) Cmd.Get_dashboard_shell)
+  | Nav.Knowledge -> (
+      match m.knowledge.active_tab with
+      | Nav.Knowledge_board ->
+          []
+          |> add_if
+               (needs_fetch ~force m.knowledge.board)
+               (Cmd.Get_board_feed
+                  {
+                    sort_by = m.knowledge.board_sort_by;
+                    hearth = m.knowledge.board_hearth;
+                    signal_only = m.knowledge.board_signal_only;
+                    limit = Some 50;
+                    offset = None;
+                  })
+      | Nav.Knowledge_wiki_artifacts ->
+          []
+          |> add_if
+               (needs_fetch ~force m.knowledge.wiki_index)
+               (Cmd.Get_wiki_index { tag = None; source = None; sort = None })
+          |> add_if (needs_fetch ~force m.knowledge.wiki_lint) Cmd.Get_wiki_lint
+          |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
+      | Nav.Knowledge_memory ->
+          []
+          |> add_if
+               (needs_fetch ~force m.knowledge.world_memory)
+               Cmd.Get_world_memory
+          |> add_if
+               (needs_fetch ~force m.knowledge.memory_diff)
+               (Cmd.Get_memory_diff
+                  {
+                    keeper = m.knowledge.memory_diff_keeper;
+                    window = m.knowledge.memory_diff_window;
+                  }))
+  | Nav.Keepers ->
+      let embedded_dive_reqs =
+        match Fleet_store.selected_keeper_summary m.fleet with
+        | Some k ->
+            fetches_for_keeper_tab ~force ~name:k.name
+              ~tab:m.fleet.keeper_dive_tab m
+        | None -> []
+      in
+      ([]
+      |> add_if (needs_fetch ~force m.fleet.keepers) Cmd.Get_keepers_roster
+      |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
+      |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes)
+      @ embedded_dive_reqs
+  | Nav.Runtime -> (
+      match m.runtime.active_tab with
+      | Nav.Runtime_quotas_credits ->
+          []
+          |> add_if
+               (needs_fetch ~force m.runtime.runtime_resolved)
+               Cmd.Get_runtime_resolved
+          |> add_if
+               (needs_fetch ~force m.runtime.usage_history)
+               (Cmd.Get_provider_usage { days = 7 })
+          |> add_if
+               (needs_fetch ~force m.runtime.runtime_probe)
+               (Cmd.Get_runtime_probe { force = false })
+          |> add_if
+               (needs_fetch ~force m.runtime.keeper_costs)
+               (Cmd.Get_keeper_costs { window_minutes = 1440 })
+      | Nav.Runtime_efficiency_spend ->
+          []
+          |> add_if
+               (needs_fetch ~force m.runtime.models_metrics)
+               (Cmd.Get_models_metrics { window_minutes = 1440; bucket_minutes = 60 })
+          |> add_if
+               (needs_fetch ~force m.runtime.runtime_metrics)
+               Cmd.Get_runtime_metrics
+          |> add_if
+               (needs_fetch ~force m.runtime.tool_series)
+               (Cmd.Get_tool_series { bucket = `Hour; since_hours = 24 })
+          |> add_if
+               (needs_fetch ~force m.runtime.efficiency)
+               (Cmd.Get_efficiency { month = None })
+          |> add_if
+               (needs_fetch ~force m.runtime.keeper_costs)
+               (Cmd.Get_keeper_costs { window_minutes = 1440 })
+      | Nav.Runtime_failover_lanes ->
+          []
+          |> add_if
+               (needs_fetch ~force m.runtime.runtime_resolved)
+               Cmd.Get_runtime_resolved
+          |> add_if
+               (needs_fetch ~force m.runtime.runtime_probe)
+               (Cmd.Get_runtime_probe { force = false })
+          |> add_if
+               (needs_fetch ~force m.runtime.exact_lane_runs)
+               (Cmd.Get_exact_lane_runs { lane = None; limit = Some 30 })
+          |> add_if
+               (needs_fetch ~force m.runtime.fusion_runs)
+               Cmd.Get_fusion_runs
+      | Nav.Runtime_tools_connectors ->
+          []
+          |> add_if
+               (needs_fetch ~force m.runtime.tool_series)
+               (Cmd.Get_tool_series { bucket = `Hour; since_hours = 24 })
+          |> add_if
+               (needs_fetch ~force m.runtime.tools_catalog)
+               (Cmd.Get_tools_catalog { keeper = None })
+          |> add_if
+               (needs_fetch ~force m.runtime.connectors)
+               Cmd.Get_connectors
+          |> add_if
+               (needs_fetch ~force m.runtime.browser_lane)
+               Cmd.Get_browser_lane
+          |> add_if
+               (needs_fetch ~force m.runtime.mcp_clients)
+               Cmd.Get_mcp_clients)
+  | Nav.Infra -> (
+      match m.infra.active_tab with
+      | Nav.Infra_sandboxes ->
+          [] |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
+      | Nav.Infra_repos_changes ->
+          []
+          |> add_if
+               (needs_fetch ~force m.infra.repositories)
+               Cmd.Get_repositories
+      | Nav.Infra_activity_logs ->
+          []
+          |> add_if
+               (force || not m.infra.logs_loaded)
+               (Cmd.Get_system_logs
+                  { limit = Some 200; level = m.infra.log_level_filter }))
+
+let fetches_for_current_view ?(force = false) (m : Model.t) =
+  let reqs =
+    fetches_for_workspace ~force m
+    @ fetches_for_dive ~force m
+    @ fetches_for_overlay ~force m
+    |> dedup_reqs
+  in
+  List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req }) reqs
+
+let bootstrap_fetches (m : Model.t) =
+  let core_reqs =
+    [
+      Cmd.Get_tui_preferences;
+      Cmd.Get_dashboard_shell;
+      Cmd.Get_keepers_roster;
+      Cmd.Get_asks { keeper = None; include_resolved = false };
+      Cmd.Get_tool_approvals;
+      Cmd.Get_gate_pending;
+      Cmd.Get_planning;
+    ]
+  in
+  let view_reqs =
+    fetches_for_workspace ~force:true m
+    @ fetches_for_dive ~force:true m
+    @ fetches_for_overlay ~force:true m
+  in
+  dedup_reqs (core_reqs @ view_reqs)
+  |> List.map (fun req -> Cmd.Http_get { epoch = m.epoch; req })

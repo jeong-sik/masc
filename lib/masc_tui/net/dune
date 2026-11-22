@@ -1,0 +1,17 @@
+(include_subdirs no)
+
+(library
+ (name masc_tui_net)
+ (wrapped true)
+ (libraries
+  masc_tui_core
+  masc_tui_protocol
+  masc.http_client
+  masc.sse_event
+  masc.sse_wire
+  masc.server_lifecycle
+  masc_core
+  eio
+  eio.unix
+  unix
+  yojson))

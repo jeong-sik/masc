@@ -182,10 +182,11 @@ let create ~base_path () =
       let answer = response result in
       let fields = match answer.S._meta with Some (`Assoc fields) -> fields | None | Some _ -> [] in
       {answer with S._meta = Some (`Assoc (Controller.screen_error_meta_field error :: fields))} in
+    let ints = if Tool_args.get_bool arguments "include_ints" false then [Machine.int_trail_field ()] else [] in
     let lane_failure = function
       | Dos_lane.No_machine ->
           failure Controller.Screen_no_machine
-            (Machine.of_lane ~base_path ~tool_name ~start_time (Error Dos_lane.No_machine))
+            (Machine.of_lane ~base_path ~tool_name ~start_time ~extra:ints (Error Dos_lane.No_machine))
       | ( Dos_lane.Activity_disabled
         | Dos_lane.Activity_unobserved
         | Dos_lane.Invalid_request _
@@ -207,7 +208,6 @@ let create ~base_path () =
             | Ok None -> `Assoc ["kind", `String "missing"; "saves_name", `String saves_name]
             | Error message -> `Assoc ["kind", `String "invalid"; "message", `String message] in
       ["pad", value] in
-    let ints = if Tool_args.get_bool arguments "include_ints" false then [Machine.int_trail_field ()] else [] in
     (* [include_frame=false]: the invite list and the pad read need only the
        controller or the pad, so they skip the frame capture and PNG encode. *)
     if not (Tool_args.get_bool arguments "include_frame" true) then

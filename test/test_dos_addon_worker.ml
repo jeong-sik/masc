@@ -189,6 +189,12 @@ let test_stdio_controller () =
               ignore (call ~controller:(admission None) "masc_dos_step" step_args);
               let ejected = call ~controller:(admission (Some "fixture")) "masc_dos_eject" (`Assoc []) in
               check bool "eject succeeds" false (ejected.is_error = Some true);
+              (* The trail outlives the machine: after an eject the refused
+                 read still answers "what did it last call". *)
+              let ejected_ints = call "masc_dos_screen"
+                (`Assoc ["include_frame", `Bool false; "include_ints", `Bool true]) in
+              check bool "an ejected machine's calls stay readable" true
+                (Yojson.Safe.Util.to_list (member "ints" ejected_ints) <> []);
               let empty_screen = call "masc_dos_screen" (`Assoc []) in
               check bool "empty screen refuses before any effect" true
                 (Lane_addon_tool_result.failure empty_screen =

@@ -37,6 +37,19 @@ let run_with_body_deadline body_deadline f =
      | Error `Timeout -> Body_deadline_exceeded timeout_s)
 ;;
 
+let run_with_body_window body_window f =
+  match body_window with
+  | Deadline_window.Unbounded -> Body_completed (f ())
+  | Deadline_window.Bounded { clock; timeout_s; _ } ->
+    (match Deadline_window.remaining body_window with
+     | `Unbounded -> Body_completed (f ())
+     | `Spent orig_timeout_s -> Body_deadline_exceeded orig_timeout_s
+     | `Remaining remaining_s ->
+       (match Under_deadline.run clock remaining_s f with
+        | Ok result -> Body_completed result
+        | Error `Timeout -> Body_deadline_exceeded timeout_s))
+;;
+
 let%test "run_with_body_deadline does not relabel a nested timeout exception" =
   Eio_main.run
   @@ fun env ->
@@ -619,380 +632,451 @@ let complete_http
      | None -> Completion_outcome.before_serialization (Error err, None))
   | Ok (body_deadline, serialized) ->
     ignore sw;
-    let dispatch_serialized
-          ~allow_cached_fallback
-          (serialized : Complete_common.serialized_http_request)
-      =
-    let http_codec = serialized.Complete_common.http_codec in
-    let body_str = serialized.body in
     if requires_non_http_transport config.kind
     then
-      ( Error
-          (Http_client.NetworkError
-             { message =
-                 Printf.sprintf
-                   "%s provider requires a transport"
-                   (Provider_config.string_of_provider_kind config.kind)
-             ; kind = Unknown
-             })
-      , None )
-    else (
-      let provider_name = Provider_registry.provider_name_of_config config in
-      let emit_status code =
-        match on_http_status with
-        | Some cb -> cb ~provider:provider_name ~model_id:config.model_id ~status:code
-        | None -> ()
-      in
-      let url =
-        match config.kind with
-        | Provider_config.Gemini -> gemini_url ~config ~stream:false
-        | Anthropic | Kimi | OpenAI_compat | Ollama | Glm ->
-          config.base_url ^ config.request_path
-      in
-      (* Pre-flight body validation: detect truncated JSON before sending.
-     Yojson.Safe.to_string should always produce balanced JSON, but if it
-     doesn't, catching it here gives us the full body for diagnosis. *)
-      let body_len = String.length body_str in
-      let body_balanced =
-        body_len >= 2 && body_str.[0] = '{' && body_str.[body_len - 1] = '}'
-      in
-      if (not body_balanced) && body_len > 0
-      then (
-        Diag.error
-          "complete"
-          "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C) for %s %s — \
-           request blocked"
-          body_len
-          body_str.[0]
-          body_str.[body_len - 1]
-          provider_name
-          config.model_id;
-        (* Fail-closed: do not send a body the provider will reject.
-       Previously this was WARN-and-continue, which let malformed
-       payloads through to produce cryptic server-side errors
-       (e.g. Ollama yyjson "can't find closing '}' symbol"). *)
+      Completion_outcome.after_serialization
+        ~request:serialized
         ( Error
-            (Http_client.HttpError
-               { code = 0
-               ; body =
-                   Http_client.Received
-                     (Printf.sprintf
-                        "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C)"
-                        body_len
-                        body_str.[0]
-                        body_str.[body_len - 1])
-               ; retry_after_header = None
+            (Http_client.NetworkError
+               { message =
+                   Printf.sprintf
+                     "%s provider requires a transport"
+                     (Provider_config.string_of_provider_kind config.kind)
+               ; kind = Unknown
                })
-        , None ))
-      else (
-        let ( let* ) result f = match result with
-          | Ok value -> f value
-          | Error reason -> Error (Http_client.AcceptRejected { reason }), None
-        in
-        let* auth_headers = Provider_config.resolve_auth_headers config in
-        let effective_headers = Provider_config.effective_request_headers config in
-        let base_headers =
-          match config.kind with
-          | Provider_config.Anthropic ->
-            Backend_anthropic.request_headers ~body:body_str effective_headers @ auth_headers
-          | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> effective_headers @ auth_headers
-        in
-        let request_headers =
-          ("content-length", string_of_int body_len)
-          :: (match connection_cache with
-              | Some _ -> base_headers
-              | None -> ("connection", "close") :: base_headers)
-        in
-        match
-          Http_client.prepare_sync_request
-            ~url
-            ~headers:request_headers
-            ~body:body_str
-        with
-        | Error error -> Error error, None
-        | Ok request ->
-          let provider_label = provider_name in
-          let observed_wire = ref false in
-          let observe_wire_once () =
-            if not !observed_wire
-            then (
-              observed_wire := true;
-              (* An admitted body and a body serialized here are observed the
-                 same way: these bytes, under this request's capture_id. *)
-              observe_pre_dispatch_serialization
-                ?request_wire_observer
-                (serialization_observation ~capture_id ~config ~stream:false serialized))
+        , None )
+    else (
+      match Provider_config.resolve_auth_headers config with
+      | Error reason ->
+        Completion_outcome.after_serialization
+          ~request:serialized
+          (Error (Http_client.AcceptRejected { reason }), None)
+      | Ok initial_auth_headers ->
+        let body_window = Deadline_window.open_ body_deadline in
+        let current_auth_headers = ref initial_auth_headers in
+        let allow_initial_auth_retry = Provider_config.can_invalidate_credential config in
+        let rec dispatch_serialized
+              ~allow_cached_fallback
+              ~allow_auth_retry
+              (serialized : Complete_common.serialized_http_request)
+          =
+          let http_codec = serialized.Complete_common.http_codec in
+          let body_str = serialized.body in
+          let provider_name = Provider_registry.provider_name_of_config config in
+          let emit_status code =
+            match on_http_status with
+            | Some cb -> cb ~provider:provider_name ~model_id:config.model_id ~status:code
+            | None -> ()
           in
-          if not allow_cached_fallback then observe_wire_once ();
-          Diag.debug
-            "complete"
-            "%s %s → %s (%d bytes)"
-            provider_label
-            config.model_id
-            (sanitize_url_for_log url)
-            body_len;
-          let latency_counter = start_latency_counter ?clock () in
-          (* The provider's connect budget bounds the wait for the response
-             headers here as it does on the streaming path: connection,
-             request and status line under one window. The sync path
-             dispatched without it, and without the clock, so a server that
-             accepted the request and never answered held a sync call for as
-             long as the socket stayed open unless the caller declared a body
-             deadline as well. *)
-          let post_sync_call () =
-            with_request_metadata ~body:body_str @@ fun () ->
-            Http_client.dispatch_sync_request
-              ?cache:connection_cache
-              ?clock
-              ?connect_timeout_s:config.connect_timeout_s
-              ~net
-              request
-              ()
+          let url =
+            match config.kind with
+            | Provider_config.Gemini -> gemini_url ~config ~stream:false
+            | Anthropic | Kimi | OpenAI_compat | Ollama | Glm ->
+              config.base_url ^ config.request_path
           in
-          (* Body-level deadline (since 0.195.0): wraps the entire validated
-             one-dispatch transport in [Eio.Time.with_timeout] so a slow
-             non-streaming provider (no progress on the wire, or progress
-             slower than caller can tolerate) cannot hang indefinitely.
-             Streaming calls deliberately use [stream_idle_timeout_s] instead
-             of a total body deadline.
-
-             No silent failure: on expiry we return a structured
-             [TimeoutError { phase = Non_streaming_body }] whose message
-             identifies the body deadline, so retry layers treat it
-             as retryable with operator-visible attribution. *)
-          let post_response =
-            try
-              match run_with_body_deadline body_deadline post_sync_call with
-              | Body_deadline_exceeded timeout_s ->
-                observe_wire_once ();
-                Error (non_streaming_body_timeout timeout_s)
-              | Body_completed transport_result ->
-                (match resolve_sync_transport transport_result with
-                 | Sync_response response ->
-                   if (not allow_cached_fallback)
-                      || (response.status >= 200 && response.status < 300)
-                   then (
-                     observe_wire_once ();
-                     emit_status response.status);
-                   Ok response
-                 | Sync_failure_before_response error ->
-                   observe_wire_once ();
-                   Error error
-                 | Sync_failure_after_response { status; error } ->
-                   observe_wire_once ();
-                   emit_status status;
-                   Error error)
+          (* Pre-flight body validation: detect truncated JSON before sending.
+         Yojson.Safe.to_string should always produce balanced JSON, but if it
+         doesn't, catching it here gives us the full body for diagnosis. *)
+          let body_len = String.length body_str in
+          let body_balanced =
+            body_len >= 2 && body_str.[0] = '{' && body_str.[body_len - 1] = '}'
+          in
+          if (not body_balanced) && body_len > 0
+          then (
+            Diag.error
+              "complete"
+              "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C) for %s %s — \
+               request blocked"
+              body_len
+              body_str.[0]
+              body_str.[body_len - 1]
+              provider_name
+              config.model_id;
+            (* Fail-closed: do not send a body the provider will reject.
+           Previously this was WARN-and-continue, which let malformed
+           payloads through to produce cryptic server-side errors
+           (e.g. Ollama yyjson "can't find closing '}' symbol"). *)
+            ( Error
+                (Http_client.HttpError
+                   { code = 0
+                   ; body =
+                       Http_client.Received
+                         (Printf.sprintf
+                            "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C)"
+                            body_len
+                            body_str.[0]
+                            body_str.[body_len - 1])
+                   ; retry_after_header = None
+                   })
+            , None ))
+          else (
+            let auth_headers = !current_auth_headers in
+            let effective_headers = Provider_config.effective_request_headers config in
+            let base_headers =
+              match config.kind with
+              | Provider_config.Anthropic ->
+                Backend_anthropic.request_headers ~body:body_str effective_headers
+                @ auth_headers
+              | Kimi | OpenAI_compat | Ollama | Gemini | Glm ->
+                effective_headers @ auth_headers
+            in
+            let request_headers =
+              ("content-length", string_of_int body_len)
+              :: (match connection_cache with
+                  | Some _ -> base_headers
+                  | None -> ("connection", "close") :: base_headers)
+            in
+            match
+              Http_client.prepare_sync_request
+                ~url
+                ~headers:request_headers
+                ~body:body_str
             with
-            | Eio.Cancel.Cancelled _ as exn ->
-              let bt = Printexc.get_raw_backtrace () in
-              observe_wire_once ();
-              Printexc.raise_with_backtrace exn bt
-          in
-        let result =
-          match post_response with
-          | Error _ as e -> e
-          | Ok response ->
-            let code = response.status in
-            let body = response.body in
-            if code >= 200 && code < 300
-            then (
-              (* Same resolution as the streaming path: whether this model
-                 embeds reasoning in its content channel is catalog data,
-                 resolved through the provider-qualified lookup so a capability
-                 declared only on a provider row is visible here too. *)
-              let content_inline_reasoning =
-                match Provider_config.capabilities_for_config_model config with
-                | Some caps -> caps.Capabilities.content_inline_reasoning
-                | None -> Capabilities.No_content_inline_reasoning
+            | Error error -> Error error, None
+            | Ok request ->
+              let provider_label = provider_name in
+              let observed_wire = ref false in
+              let observe_wire_once () =
+                if not !observed_wire
+                then (
+                  observed_wire := true;
+                  (* An admitted body and a body serialized here are observed the
+                     same way: these bytes, under this request's capture_id. *)
+                  observe_pre_dispatch_serialization
+                    ?request_wire_observer
+                    (serialization_observation
+                       ~capture_id
+                       ~config
+                       ~stream:false
+                       serialized))
               in
-              parse_sync_response
-                ~content_inline_reasoning
-                ~http_codec
-                ~provider_kind:config.kind
-                body)
-            else (
-              let refusal =
-                Complete_common.provider_refusal
-                  ~http_codec
-                  (Http_client.HttpError
-                     { code
-                     ; body = Http_client.Received body
-                     ; retry_after_header = response.retry_after_header
-                     })
-              in
-              let will_fallback_cache =
-                allow_cached_fallback && Gemini_context_cache.is_cached_content_error refusal
-              in
-              if not will_fallback_cache
-              then (
-                observe_wire_once ();
-                if allow_cached_fallback then emit_status code);
-              (* Log request body diagnostics on error responses to help debug
-             Ollama "closing '}' symbol" and similar body-rejection errors. *)
-              if code >= 400 && not will_fallback_cache
-              then (
-                (* Strong validation: round-trip parse the body we sent.  The
-               cheap balanced=true check only inspects first/last char and
-               misses internal corruption.  When the body is well-formed
-               JSON locally yet the server rejects it as "can't find closing
-               '}' symbol", that points at server-side parser limits and we
-               want the *exact* body for offline reproduction. *)
-                let parse_ok =
-                  Result.is_ok (Json_util.from_string_bounded body_str)
-                in
-                (* Mask api_key to a short fingerprint so log lines distinguish
-               same-provider calls that use different keys (e.g.
-               ZAI_API_KEY vs ZAI_CODING_API_KEY for glm vs glm-coding).
-               Empty key renders as "-"; short keys render as "<len:N>"
-               since they cannot be safely sampled. *)
-                let api_key_tag =
-                  let k = config.api_key in
-                  if Secret.is_empty k
-                  then "-"
-                  else (
-                    let len = Secret.length k in
-                    if len < 8
-                    then Printf.sprintf "len:%d" len
-                    else Printf.sprintf "fp:%s(len:%d)" (Secret.fingerprint k) len)
-                in
-                Diag.warn
-                  "complete"
-                  "HTTP %d from %s (model=%s base_url=%s request_path=%s key=%s): \
-                   req_body=%d bytes balanced=%b parse_ok=%b resp_body=%s"
-                  code
-                  provider_name
-                  config.model_id
-                  (sanitize_url_for_log config.base_url)
-                  (sanitize_url_for_log config.request_path)
-                  api_key_tag
-                  body_len
-                  body_balanced
-                  parse_ok
-                  (if String.length body <= error_body_log_max_bytes
-                   then body
-                   else
-                     Agent_core_strings.utf8_prefix
-                       ~max_bytes:error_body_log_max_bytes
-                       body
-                     ^ "..."));
-              (* The codec reads the refusal while the provider identity is
-                 still known, as the stream seam does: GLM sends a spent usage
-                 window as a 429 that the status alone reads as a rate limit
-                 (2026-11-06: code 1308 on this path rested GLM as a throttle).
-                 It reads the body as sent; only a refusal that stays an
-                 [HttpError] carries the redacted diagnostic body. *)
-              match refusal with
-              | Http_client.HttpError
-                  { code; body = Http_client.Received body; retry_after_header } ->
-                Error
-                  (Http_client.HttpError
-                     { code
-                     ; body =
-                         Http_client.Received
-                           (http_error_diagnostic_body
-                              ~provider_name
-                              ~config
-                              ~url
-                              ~code
-                              ~body)
-                     ; retry_after_header
-                     })
-              | ( Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
-                | Http_client.NetworkError _ | Http_client.Connect_failed _
-                | Http_client.TimeoutError _
-                | Http_client.AcceptRejected _
-                | Http_client.ProviderTerminal _
-                | Http_client.ProviderFailure _ ) as typed -> Error typed)
-        in
-        let latency_ms = latency_ms_int latency_counter in
-        result, latency_ms))
-    in
-    let resolve_gemini_explicit_cache () =
-      match
-        serialized.Complete_common.http_codec,
-        Gemini_context_cache.explicit_cache_ttl_if_enabled ~config
-      with
-      | Provider_http_codec.Gemini_generate_content, Some ttl_s ->
-        (match Provider_config.resolve_auth_headers config with
-         | Error _ -> None
-         | Ok auth_headers ->
-           (match
-              Backend_gemini.extract_cacheable_prefix_result
-                ~config
-                ~messages
-                ~tools
-                ()
-            with
-            | Error reason ->
-              Diag.warn
-                "gemini_context_cache"
-                "skipping explicit cachedContents for model=%s (%s); falling back to \
-                 implicit caching"
+              if (not allow_cached_fallback) && not allow_auth_retry
+              then observe_wire_once ();
+              Diag.debug
+                "complete"
+                "%s %s → %s (%d bytes)"
+                provider_label
                 config.model_id
-                reason;
-              None
-            | Ok prefix ->
-              let timeout_s =
-                match clock, config.connect_timeout_s, body_deadline with
-                | Some _, Some ct, Http_client.Bounded (_, bt) -> Some (Float.min ct bt)
-                | Some _, Some ct, Http_client.Unbounded -> Some ct
-                | Some _, None, Http_client.Bounded (_, bt) -> Some bt
-                | (Some _ | None), None, Http_client.Unbounded
-                | None, (Some _ | None), (Http_client.Bounded _ | Http_client.Unbounded) ->
-                  None
+                (sanitize_url_for_log url)
+                body_len;
+              let latency_counter = start_latency_counter ?clock () in
+              (* The provider's connect budget bounds the wait for the response
+                 headers here as it does on the streaming path: connection,
+                 request and status line under one window. The sync path
+                 dispatched without it, and without the clock, so a server that
+                 accepted the request and never answered held a sync call for as
+                 long as the socket stayed open unless the caller declared a body
+                 deadline as well. *)
+              let post_sync_call () =
+                with_request_metadata ~body:body_str @@ fun () ->
+                Http_client.dispatch_sync_request
+                  ?cache:connection_cache
+                  ?clock
+                  ?connect_timeout_s:config.connect_timeout_s
+                  ~net
+                  request
+                  ()
               in
-              Gemini_context_cache.resolve_or_create
-                ~net
-                ?clock
-                ?timeout_s
-                ?connection_cache
-                ~config
-                ~auth_headers
-                ~ttl_s
-                ~prefix
-                ()))
-      | ( Provider_http_codec.Gemini_generate_content
-        | Provider_http_codec.Anthropic_messages
-        | Provider_http_codec.Openai_chat
-        | Provider_http_codec.Openai_responses
-        | Provider_http_codec.Ollama_chat
-        | Provider_http_codec.Glm_chat ),
-        None
-      | ( Provider_http_codec.Anthropic_messages
-        | Provider_http_codec.Openai_chat
-        | Provider_http_codec.Openai_responses
-        | Provider_http_codec.Ollama_chat
-        | Provider_http_codec.Glm_chat ),
-        Some _ -> None
-    in
-    let final_serialized, result =
-      match resolve_gemini_explicit_cache () with
-      | None -> serialized, dispatch_serialized ~allow_cached_fallback:false serialized
-      | Some handle ->
-        (match
-           serialize_gemini_cached_http_request
-             ~stream:false
-             ~cached_content:handle.resource_name
-             ~config
-             ~messages
-             ~tools
-         with
-         | Error _ ->
-           serialized, dispatch_serialized ~allow_cached_fallback:false serialized
-         | Ok cached_serialized ->
-           (match dispatch_serialized ~allow_cached_fallback:true cached_serialized with
-            | Error err, _ when Gemini_context_cache.is_cached_content_error err ->
-              Gemini_context_cache.invalidate ~key:handle.key;
-              Diag.warn
-                "gemini_context_cache"
-                "stale cachedContent %s rejected for model=%s; retrying with implicit \
-                 caching"
-                handle.resource_name
-                config.model_id;
-              serialized, dispatch_serialized ~allow_cached_fallback:false serialized
-            | ((Ok _ | Error _), _) as outcome -> cached_serialized, outcome))
-    in
-    Completion_outcome.after_serialization ~request:final_serialized result
+              let defer_status_for code =
+                (allow_cached_fallback && not (code >= 200 && code < 300))
+                || (allow_auth_retry && code = 401)
+              in
+              (* Body-level deadline (since 0.195.0): wraps the entire validated
+                 one-dispatch transport in [Under_deadline.run] using the
+                 remaining [body_window] budget after explicit cache setup so
+                 a slow non-streaming provider cannot exceed the total turn
+                 deadline.
+
+                 No silent failure: on expiry we return a structured
+                 [TimeoutError { phase = Non_streaming_body }] whose message
+                 identifies the body deadline, so retry layers treat it
+                 as retryable with operator-visible attribution. *)
+              let post_response =
+                try
+                  match run_with_body_window body_window post_sync_call with
+                  | Body_deadline_exceeded timeout_s ->
+                    observe_wire_once ();
+                    Error (non_streaming_body_timeout timeout_s)
+                  | Body_completed transport_result ->
+                    (match resolve_sync_transport transport_result with
+                     | Sync_response response ->
+                       if not (defer_status_for response.status)
+                       then (
+                         observe_wire_once ();
+                         emit_status response.status);
+                       Ok response
+                     | Sync_failure_before_response error ->
+                       observe_wire_once ();
+                       Error error
+                     | Sync_failure_after_response { status; error } ->
+                       observe_wire_once ();
+                       emit_status status;
+                       Error error)
+                with
+                | Eio.Cancel.Cancelled _ as exn ->
+                  let bt = Printexc.get_raw_backtrace () in
+                  observe_wire_once ();
+                  Printexc.raise_with_backtrace exn bt
+              in
+              let outcome =
+                match post_response with
+                | Error _ as e -> `Done e
+                | Ok response ->
+                  let code = response.status in
+                  let body = response.body in
+                  if code >= 200 && code < 300
+                  then (
+                    (* Same resolution as the streaming path: whether this model
+                       embeds reasoning in its content channel is catalog data,
+                       resolved through the provider-qualified lookup so a capability
+                       declared only on a provider row is visible here too. *)
+                    let content_inline_reasoning =
+                      match Provider_config.capabilities_for_config_model config with
+                      | Some caps -> caps.Capabilities.content_inline_reasoning
+                      | None -> Capabilities.No_content_inline_reasoning
+                    in
+                    `Done
+                      (parse_sync_response
+                         ~content_inline_reasoning
+                         ~http_codec
+                         ~provider_kind:config.kind
+                         body))
+                  else if code = 401
+                          && allow_auth_retry
+                          && Provider_config.invalidate_credential config
+                  then (
+                    match Provider_config.resolve_auth_headers config with
+                    | Ok fresh_auth_headers ->
+                      current_auth_headers := fresh_auth_headers;
+                      Diag.warn
+                        "complete"
+                        "HTTP 401 from %s (model=%s); invalidated cached refreshable \
+                         credential and retrying once"
+                        provider_name
+                        config.model_id;
+                      `Retry_auth
+                    | Error reason ->
+                      observe_wire_once ();
+                      if defer_status_for code then emit_status code;
+                      `Done (Error (Http_client.AcceptRejected { reason })))
+                  else (
+                    let refusal =
+                      Complete_common.provider_refusal
+                        ~http_codec
+                        (Http_client.HttpError
+                           { code
+                           ; body = Http_client.Received body
+                           ; retry_after_header = response.retry_after_header
+                           })
+                    in
+                    let will_fallback_cache =
+                      allow_cached_fallback
+                      && Gemini_context_cache.is_cached_content_error refusal
+                    in
+                    if not will_fallback_cache
+                    then (
+                      observe_wire_once ();
+                      if defer_status_for code then emit_status code);
+                    (* Log request body diagnostics on error responses to help debug
+                   Ollama "closing '}' symbol" and similar body-rejection errors. *)
+                    if code >= 400 && not will_fallback_cache
+                    then (
+                      (* Strong validation: round-trip parse the body we sent.  The
+                     cheap balanced=true check only inspects first/last char and
+                     misses internal corruption.  When the body is well-formed
+                     JSON locally yet the server rejects it as "can't find closing
+                     '}' symbol", that points at server-side parser limits and we
+                     want the *exact* body for offline reproduction. *)
+                      let parse_ok =
+                        Result.is_ok (Json_util.from_string_bounded body_str)
+                      in
+                      (* Mask api_key to a short fingerprint so log lines distinguish
+                     same-provider calls that use different keys (e.g.
+                     ZAI_API_KEY vs ZAI_CODING_API_KEY for glm vs glm-coding).
+                     Empty key renders as "-"; short keys render as "<len:N>"
+                     since they cannot be safely sampled. *)
+                      let api_key_tag =
+                        let k = config.api_key in
+                        if Secret.is_empty k
+                        then "-"
+                        else (
+                          let len = Secret.length k in
+                          if len < 8
+                          then Printf.sprintf "len:%d" len
+                          else Printf.sprintf "fp:%s(len:%d)" (Secret.fingerprint k) len)
+                      in
+                      Diag.warn
+                        "complete"
+                        "HTTP %d from %s (model=%s base_url=%s request_path=%s key=%s): \
+                         req_body=%d bytes balanced=%b parse_ok=%b resp_body=%s"
+                        code
+                        provider_name
+                        config.model_id
+                        (sanitize_url_for_log config.base_url)
+                        (sanitize_url_for_log config.request_path)
+                        api_key_tag
+                        body_len
+                        body_balanced
+                        parse_ok
+                        (if String.length body <= error_body_log_max_bytes
+                         then body
+                         else
+                           Agent_core_strings.utf8_prefix
+                             ~max_bytes:error_body_log_max_bytes
+                             body
+                           ^ "..."));
+                    (* The codec reads the refusal while the provider identity is
+                       still known, as the stream seam does: GLM sends a spent usage
+                       window as a 429 that the status alone reads as a rate limit
+                       (2026-11-06: code 1308 on this path rested GLM as a throttle).
+                       It reads the body as sent; only a refusal that stays an
+                       [HttpError] carries the redacted diagnostic body. *)
+                    let final_err =
+                      match refusal with
+                      | Http_client.HttpError
+                          { code
+                          ; body = Http_client.Received body
+                          ; retry_after_header
+                          } ->
+                        Error
+                          (Http_client.HttpError
+                             { code
+                             ; body =
+                                 Http_client.Received
+                                   (http_error_diagnostic_body
+                                      ~provider_name
+                                      ~config
+                                      ~url
+                                      ~code
+                                      ~body)
+                             ; retry_after_header
+                             })
+                      | ( Http_client.HttpError
+                            { body = Http_client.Not_received_in_window; _ }
+                        | Http_client.NetworkError _ | Http_client.Connect_failed _
+                        | Http_client.TimeoutError _
+                        | Http_client.AcceptRejected _
+                        | Http_client.ProviderTerminal _
+                        | Http_client.ProviderFailure _ ) as typed -> Error typed
+                    in
+                    `Done final_err)
+              in
+              match outcome with
+              | `Retry_auth ->
+                dispatch_serialized ~allow_cached_fallback ~allow_auth_retry:false serialized
+              | `Done result ->
+                let latency_ms = latency_ms_int latency_counter in
+                result, latency_ms)
+        in
+        let resolve_gemini_explicit_cache () =
+          match
+            serialized.Complete_common.http_codec,
+            Gemini_context_cache.explicit_cache_ttl_if_enabled ~config
+          with
+          | Provider_http_codec.Gemini_generate_content, Some ttl_s ->
+            (match
+               Backend_gemini.extract_cacheable_prefix_result
+                 ~config
+                 ~messages
+                 ~tools
+                 ()
+             with
+             | Error reason ->
+               Diag.warn
+                 "gemini_context_cache"
+                 "skipping explicit cachedContents for model=%s (%s); falling back to \
+                  implicit caching"
+                 config.model_id
+                 reason;
+               None
+             | Ok prefix ->
+               let remaining_opt =
+                 match Deadline_window.remaining body_window with
+                 | `Unbounded -> Ok None
+                 | `Remaining rem -> Ok (Some rem)
+                 | `Spent _ -> Error `Budget_spent
+               in
+               (match remaining_opt with
+                | Error `Budget_spent -> None
+                | Ok rem_opt ->
+                  let timeout_s =
+                    match clock, config.connect_timeout_s, rem_opt with
+                    | Some _, Some ct, Some bt -> Some (Float.min ct bt)
+                    | Some _, Some ct, None -> Some ct
+                    | Some _, None, Some bt -> Some bt
+                    | (Some _ | None), None, None
+                    | None, (Some _ | None), (Some _ | None) -> None
+                  in
+                  Gemini_context_cache.resolve_or_create
+                    ~net
+                    ?clock
+                    ?timeout_s
+                    ?connection_cache
+                    ~config
+                    ~auth_headers:!current_auth_headers
+                    ~ttl_s
+                    ~prefix
+                    ()))
+          | ( Provider_http_codec.Gemini_generate_content
+            | Provider_http_codec.Anthropic_messages
+            | Provider_http_codec.Openai_chat
+            | Provider_http_codec.Openai_responses
+            | Provider_http_codec.Ollama_chat
+            | Provider_http_codec.Glm_chat ),
+            None
+          | ( Provider_http_codec.Anthropic_messages
+            | Provider_http_codec.Openai_chat
+            | Provider_http_codec.Openai_responses
+            | Provider_http_codec.Ollama_chat
+            | Provider_http_codec.Glm_chat ),
+            Some _ -> None
+        in
+        let final_serialized, result =
+          match resolve_gemini_explicit_cache () with
+          | None ->
+            ( serialized
+            , dispatch_serialized
+                ~allow_cached_fallback:false
+                ~allow_auth_retry:allow_initial_auth_retry
+                serialized )
+          | Some handle ->
+            (match
+               serialize_gemini_cached_http_request
+                 ~stream:false
+                 ~cached_content:handle.resource_name
+                 ~config
+                 ~messages
+                 ~tools
+             with
+             | Error _ ->
+               ( serialized
+               , dispatch_serialized
+                   ~allow_cached_fallback:false
+                   ~allow_auth_retry:allow_initial_auth_retry
+                   serialized )
+             | Ok cached_serialized ->
+               (match
+                  dispatch_serialized
+                    ~allow_cached_fallback:true
+                    ~allow_auth_retry:allow_initial_auth_retry
+                    cached_serialized
+                with
+                | Error err, _ when Gemini_context_cache.is_cached_content_error err ->
+                  Gemini_context_cache.invalidate ~key:handle.key;
+                  Diag.warn
+                    "gemini_context_cache"
+                    "stale cachedContent %s rejected for model=%s; retrying with implicit \
+                     caching"
+                    handle.resource_name
+                    config.model_id;
+                  ( serialized
+                  , dispatch_serialized
+                      ~allow_cached_fallback:false
+                      ~allow_auth_retry:false
+                      serialized )
+                | ((Ok _ | Error _), _) as outcome -> cached_serialized, outcome))
+        in
+        Completion_outcome.after_serialization ~request:final_serialized result)
 ;;
 
 (* body_balanced else-branch *)

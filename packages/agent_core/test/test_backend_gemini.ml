@@ -1500,7 +1500,9 @@ let test_explicit_cached_content_request_omits_prefix_fields () =
   check bool "tools omitted" true (json |> member "tools" = `Null);
   check bool "toolConfig omitted" true (json |> member "toolConfig" = `Null);
   check int "contents preserved" 1 (json |> member "contents" |> to_list |> List.length);
-  (* Prefix key isolates by api_key, Refreshable_credential auth_headers, custom headers, and model_id *)
+  (* Prefix key isolates static api_key / x-goog-api-key, Vertex project/region,
+     credential_scope, custom headers, and model_id, while remaining STABLE across
+     rotating OAuth Bearer tokens on Refreshable_credential / Vertex endpoints. *)
   let other_key_cfg = { config with api_key = Secret.of_string "other-key" } in
   let other_model_cfg = { config with model_id = "gemini-3.8-flash" } in
   let k1 = Gemini_context_cache.prefix_key ~config ~prefix () in
@@ -1508,29 +1510,104 @@ let test_explicit_cached_content_request_omits_prefix_fields () =
   let k3 = Gemini_context_cache.prefix_key ~config:other_model_cfg ~prefix () in
   check bool "different api_key produces distinct prefix key" true (not (String.equal k1 k2));
   check bool "different model_id produces distinct prefix key" true (not (String.equal k1 k3));
-  let refreshable_cfg = { config with api_key = Secret.empty } in
+  let hk1 =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "x-goog-api-key", "fixture-static-key-a" ]
+      ~config
+      ~prefix
+      ()
+  in
+  let hk2 =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "x-goog-api-key", "fixture-static-key-b" ]
+      ~config:other_key_cfg
+      ~prefix
+      ()
+  in
+  check bool "distinct static x-goog-api-key headers produce distinct prefix keys" true
+    (not (String.equal hk1 hk2));
+  let vertex_regional =
+    "https://us-central1-aiplatform.googleapis.com/v1/projects/my-proj/locations/us-central1/publishers/google"
+  in
+  let vertex_other_project =
+    "https://us-central1-aiplatform.googleapis.com/v1/projects/other-proj/locations/us-central1/publishers/google"
+  in
+  let refreshable_cfg =
+    { config with
+      base_url = vertex_regional
+    ; api_key = Secret.empty
+    ; auth_scheme = Provider_config.Bearer_token
+    ; credential_source =
+        Provider_config.Refreshable_credential
+          (fun () -> Ok (Secret.of_string "fixture-rotated"))
+    }
+  in
   let rk1 =
     Gemini_context_cache.prefix_key
-      ~auth_headers:[ "Authorization", "Bearer token-account-a" ]
+      ~auth_headers:[ "Authorization", "Bearer fixture-token-hour-1" ]
       ~config:refreshable_cfg
       ~prefix
       ()
   in
   let rk2 =
     Gemini_context_cache.prefix_key
-      ~auth_headers:[ "Authorization", "Bearer token-account-b" ]
+      ~auth_headers:[ "Authorization", "Bearer fixture-token-hour-2" ]
       ~config:refreshable_cfg
       ~prefix
       ()
   in
-  check bool "distinct refreshable Bearer tokens produce distinct prefix keys" true
-    (not (String.equal rk1 rk2));
+  check string "rotating OAuth Bearer tokens preserve identical prefix key" rk1 rk2;
+  let rk_other_proj =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer fixture-token-hour-1" ]
+      ~config:{ refreshable_cfg with base_url = vertex_other_project }
+      ~prefix
+      ()
+  in
+  check bool "distinct Vertex project base_url produces distinct prefix key" true
+    (not (String.equal rk1 rk_other_proj));
+  let policy =
+    Capabilities.resolve_request_policy
+      ~wire:Provider_config.Gemini
+      ~provider:(Model_catalog.Declared_provider "vertex")
+      ~model_id:refreshable_cfg.model_id
+  in
+  let scoped_a =
+    Provider_config.with_binding_policy
+      ~authentication:Provider_config.Setup_token
+      ~credential_scope:(Some "scope-alpha")
+      policy
+      { refreshable_cfg with provider_id = Some "vertex" }
+  in
+  let scoped_b =
+    Provider_config.with_binding_policy
+      ~authentication:Provider_config.Setup_token
+      ~credential_scope:(Some "scope-beta")
+      policy
+      { refreshable_cfg with provider_id = Some "vertex" }
+  in
+  let rks_a =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer fixture-token-hour-1" ]
+      ~config:scoped_a
+      ~prefix
+      ()
+  in
+  let rks_b =
+    Gemini_context_cache.prefix_key
+      ~auth_headers:[ "Authorization", "Bearer fixture-token-hour-1" ]
+      ~config:scoped_b
+      ~prefix
+      ()
+  in
+  check bool "distinct credential_scope produces distinct prefix key" true
+    (not (String.equal rks_a rks_b));
   let proj_cfg =
     { refreshable_cfg with headers = [ "x-goog-user-project", "proj-b" ] }
   in
   let rk3 =
     Gemini_context_cache.prefix_key
-      ~auth_headers:[ "Authorization", "Bearer token-account-a" ]
+      ~auth_headers:[ "Authorization", "Bearer fixture-token-hour-1" ]
       ~config:proj_cfg
       ~prefix
       ()
@@ -1561,9 +1638,6 @@ let test_explicit_cached_content_request_omits_prefix_fields () =
   let tk2 = Gemini_context_cache.prefix_key ~config:traced_cfg_2 ~prefix () in
   check string "distinct per-call trace headers produce identical prefix keys" tk1 tk2;
   (* Vertex Gemini endpoint and model resource formatting *)
-  let vertex_regional =
-    "https://us-central1-aiplatform.googleapis.com/v1/projects/my-proj/locations/us-central1/publishers/google"
-  in
   check string "vertex regional cachedContents URL"
     "https://us-central1-aiplatform.googleapis.com/v1/projects/my-proj/locations/us-central1/cachedContents"
     (Gemini_context_cache.cached_contents_url ~base_url:vertex_regional);
@@ -1699,6 +1773,44 @@ let test_tool_choice_tool_name () =
   check string "mode" "ANY" (fcc |> member "mode" |> to_string);
   let allowed = fcc |> member "allowedFunctionNames" |> to_list |> List.map to_string in
   check (list string) "allowedFunctionNames" [ "get_weather" ] allowed
+;;
+
+let test_tool_config_omitted_when_tools_empty () =
+  let choices =
+    [ "Auto", Types.Auto
+    ; "Any", Types.Any
+    ; "None_", Types.None_
+    ; "Tool", Types.Tool "get_weather"
+    ]
+  in
+  let messages = [ Types.user_msg "Hello without tools" ] in
+  List.iter
+    (fun (label, choice) ->
+       let config =
+         { (gemini_config ~system:"System prompt" ()) with tool_choice = Some choice }
+       in
+       let body = Backend_gemini.build_request ~config ~messages ~tools:[] () in
+       let json = parse_body body in
+       check bool (label ^ ": build_request omits tools when empty") true
+         (json |> member "tools" = `Null);
+       check bool (label ^ ": build_request omits toolConfig when tools=[]") true
+         (json |> member "toolConfig" = `Null);
+       let prefix = Backend_gemini.extract_cacheable_prefix ~config ~messages ~tools:[] () in
+       check bool (label ^ ": extract_cacheable_prefix omits tools_json when tools=[]") true
+         (Option.is_none prefix.tools_json);
+       check bool (label ^ ": extract_cacheable_prefix omits tool_config_json when tools=[]") true
+         (Option.is_none prefix.tool_config_json);
+       let create_json =
+         Gemini_context_cache.build_create_body
+           ~model_id:config.model_id
+           ~ttl_s:300
+           ~prefix
+           ()
+         |> parse_body
+       in
+       check bool (label ^ ": build_create_body omits toolConfig when tools=[]") true
+         (create_json |> member "toolConfig" = `Null))
+    choices
 ;;
 
 let test_thinking_part_roundtrip () =
@@ -2427,6 +2539,10 @@ let () =
             "explicit cachedContent omits prefix fields and isolates keys"
             `Quick
             test_explicit_cached_content_request_omits_prefix_fields
+        ; test_case
+            "toolConfig omitted when tools is empty"
+            `Quick
+            test_tool_config_omitted_when_tools_empty
         ] )
     ]
 ;;

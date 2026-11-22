@@ -928,7 +928,11 @@ let extract_cacheable_prefix_result
       in
       let system_instruction = merge_system_instruction ~config msg_system in
       let tools_json = tools_json_of_list_pure tools in
-      let tool_config_json = tool_config_json_of_choice config.tool_choice in
+      let tool_config_json =
+        match tools_json with
+        | None -> None
+        | Some _ -> tool_config_json_of_choice config.tool_choice
+      in
       Ok { system_instruction; tools_json; tool_config_json }
   with
   | Invalid_argument reason -> Error reason
@@ -1066,19 +1070,20 @@ let build_request_artifact
      gen_config := ("responseFormat", `Assoc [ "text", text ]) :: !gen_config
    | None -> ());
   let body = ("generationConfig", `Assoc !gen_config) :: body in
-  (* Tools and toolConfig: omitted when carried by explicit cachedContent *)
+  (* Tools and toolConfig: omitted when carried by explicit cachedContent, and
+     toolConfig is never emitted when [tools] is empty (Gemini REST API rejects
+     toolConfig without tools with 400 INVALID_ARGUMENT). *)
   let body =
     match cached_content with
     | Some _ -> body
     | None ->
-      let body =
-        match tools_json_of_list ~config tools with
-        | Some tools_json -> ("tools", tools_json) :: body
-        | None -> body
-      in
-      (match tool_config_json_of_choice config.tool_choice with
-       | Some tc -> ("toolConfig", tc) :: body
-       | None -> body)
+      (match tools_json_of_list ~config tools with
+       | None -> body
+       | Some tools_json ->
+         let body = ("tools", tools_json) :: body in
+         (match tool_config_json_of_choice config.tool_choice with
+          | Some tc -> ("toolConfig", tc) :: body
+          | None -> body))
   in
   Request_artifact_internal.create
     ~payload:(Yojson.Safe.to_string (`Assoc body))

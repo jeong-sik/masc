@@ -22,6 +22,32 @@ type credential_source =
   | Static_credential
   | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
 
+type credential_refresh_fn = unit -> (Secret.t, credential_refresh_error) result
+
+(* Weak ephemeron bucket mapping refresh closures to optional invalidators.
+   [invalidators_mu] only protects bucket accesses and is never held across
+   user invalidator callbacks or Eio yields. *)
+let invalidators_mu = Stdlib.Mutex.create ()
+let invalidators : (credential_refresh_fn, unit -> unit) Ephemeron.K1.Bucket.t =
+  Ephemeron.K1.Bucket.make ()
+
+let make_refreshable_credential ?invalidate refresh =
+  match invalidate with
+  | None -> Refreshable_credential refresh
+  | Some on_invalidate ->
+    (* Allocate a distinct closure so physical identity uniquely identifies
+       this credential source instance even when callers reuse a top-level fn. *)
+    let refresh_fn () = refresh () in
+    Stdlib.Mutex.protect invalidators_mu (fun () ->
+      Ephemeron.K1.Bucket.add invalidators refresh_fn on_invalidate);
+    Refreshable_credential refresh_fn
+;;
+
+let find_credential_invalidator (refresh_fn : credential_refresh_fn) =
+  Stdlib.Mutex.protect invalidators_mu (fun () ->
+    Ephemeron.K1.Bucket.find invalidators refresh_fn)
+;;
+
 type provider_authentication = No_auth | Api_key | Setup_token
 
 type provider_identity =
@@ -1010,4 +1036,22 @@ let resolve_auth_headers config =
     ~auth_scheme:config.auth_scheme
     ~api_key:config.api_key
     ~credential_source:config.credential_source
+;;
+
+let can_invalidate_credential (config : t) : bool =
+  match config.credential_source with
+  | Static_credential -> false
+  | Refreshable_credential refresh_fn ->
+    Option.is_some (find_credential_invalidator refresh_fn)
+;;
+
+let invalidate_credential (config : t) : bool =
+  match config.credential_source with
+  | Static_credential -> false
+  | Refreshable_credential refresh_fn ->
+    (match find_credential_invalidator refresh_fn with
+     | Some on_invalidate ->
+       on_invalidate ();
+       true
+     | None -> false)
 ;;

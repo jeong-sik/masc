@@ -32,6 +32,15 @@ type credential_source =
   | Static_credential
   | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
 
+(** Construct a {!Refreshable_credential} optionally paired with an invalidation
+    callback (e.g. to evict a cached OAuth access token after HTTP 401).
+    The association is held via a weak ephemeron so unreachable credential
+    sources are reclaimed automatically without memory leaks. *)
+val make_refreshable_credential
+  :  ?invalidate:(unit -> unit)
+  -> (unit -> (Secret.t, credential_refresh_error) result)
+  -> credential_source
+
 type request_policy_snapshot
 (** Internal request-owned catalog resolution, including absent entries. *)
 
@@ -662,3 +671,13 @@ val resolve_auth_headers : t -> ((string * string) list, string) result
     Exact-output plans freeze the resolved headers into their fingerprint and
     do not refresh during execution. After a delay that may outlive a token,
     prepare a new exact-output plan rather than reuse the old plan. *)
+
+(** Whether [config]'s credential source carries an explicit invalidation hook
+    (for example a cached ADC/OAuth token that can be evicted on HTTP 401). *)
+val can_invalidate_credential : t -> bool
+
+(** Evict any cached credential state associated with [config]'s
+    {!Refreshable_credential} source. Returns [true] when an invalidator was
+    invoked and [false] for static credentials or refreshable sources without
+    an invalidator. *)
+val invalidate_credential : t -> bool

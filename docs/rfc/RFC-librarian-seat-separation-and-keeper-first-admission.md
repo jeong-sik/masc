@@ -3,7 +3,7 @@ rfc: "librarian-seat-separation-and-keeper-first-admission"
 title: "Librarian Seat Separation and Strict Keeper-First Slot Admission"
 status: Draft
 created: 2026-11-19
-updated: 2026-11-19
+updated: 2026-11-22
 author: masc contributors
 supersedes: []
 superseded_by: null
@@ -21,8 +21,8 @@ Keepers (`Admission_class.Standard`, mean turn ~29.5s) and Librarian (`Admission
 
 This RFC adopts two clean, magic-number-free architectural changes grounded in [RFC-librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line](./RFC-librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line.md) (§15.3) and `docs/constitution.xml`:
 
-1. **Strict Keeper-First Class Ordering in `Slot_scheduler`**: Every request always queues in its declared `Admission_class.t` (`Priority > Standard > Background`). When `priority_run_limit = None`, strict `Priority > Standard > Background` ordering applies with **zero** artificial weights, **zero** queue-derived fake quotas, and **zero** concurrency cap imposed on `Background` when foreground queues are empty. Operator-declared `admission-priority-run-limit` (`Some limit`) continues to apply bounded fairness **only** when explicitly configured.
-2. **Account/Seat Separation with Pre-Publication Overlap Inspection**: Dedicated non-overlapping endpoints eliminate head-of-line blocking and shared-pool contention altogether without magic numbers or remote cancellation races. `Runtime.detect_librarian_keeper_seat_overlaps` inspects enabled `librarian_exact` and `librarian_memory` lanes across both HTTP `slots` and CLI `cli_slots` against Keeper-reachable runtimes and emits structured diagnostic warnings before `Provider_admission.publish` without breaking existing single-account or shared dev configurations.
+1. **Strict Keeper-First Class Ordering in `Llm_provider.Slot_scheduler`** (`packages/agent_core/lib/llm_provider/slot_scheduler.ml`): Every request always queues in its declared `Admission_class.t` (`Priority > Standard > Background`). When `priority_run_limit = None`, strict `Priority > Standard > Background` ordering applies with **zero** artificial weights, **zero** queue-derived fake quotas, and **zero** concurrency cap imposed on `Background` when foreground queues are empty. Operator-declared `admission-priority-run-limit` (`Some limit`) continues to apply bounded fairness **only** when explicitly configured.
+2. **Account/Seat Separation with Pre-Publication Overlap Inspection**: Dedicated non-overlapping endpoints eliminate head-of-line blocking and shared-pool contention altogether without magic numbers or remote cancellation races. `Runtime.detect_librarian_keeper_seat_overlaps` inspects enabled `librarian_exact` and `librarian_memory` lanes across both HTTP `slots` and CLI `cli_slots` against Keeper-reachable runtimes and emits structured debug diagnostics (`Log.Runtime.debug`) before `Provider_admission.publish` without breaking existing single-account or shared dev configurations.
 
 ---
 
@@ -102,7 +102,7 @@ Account separation is the unique design guaranteeing **0 Keeper wait behind Libr
     - Identical `runtime_id` (`Same_runtime_id`).
     - HTTP pairs (`Shared_http_account`): matching `provider_kind`, canonicalized `base_url` (lowercased scheme/host, explicit default ports `80`/`443`, trimmed trailing slash), and shared credential identity (`Secret.identity` when authorized or `quota_scope` / both keyless local endpoints).
     - CLI pairs (`Shared_cli_account`): `Runtime_execution.same_account_selection` / matching `Runtime_instance.quota_scope` (`Claude_code` / `Codex_app_server` `account_home`, `Muse_serve` `account_home`, `Antigravity_cli` `oauth_source` / `quota_scope`, `Vibe_cli`).
-- **Non-breaking rollout**: Overlap detection currently logs structured `Log.Runtime.warn` diagnostics and returns typed `librarian_keeper_seat_overlap list` values so existing dev/single-account and live configurations continue booting cleanly until operators complete slot allocation decisions.
+- **Non-breaking rollout**: Overlap detection logs structured `Log.Runtime.debug` diagnostics (quiet at default boot log levels; run with `MASC_LOG_LEVEL=debug` to inspect) and returns typed `librarian_keeper_seat_overlap list` values so existing dev/single-account and live configurations continue booting cleanly until operators complete slot allocation decisions.
 - **Known external boundary**: Two distinct API keys belonging to the same provider organization concurrency pool cannot be proven identical locally from `(kind, canonical_base_url, Secret.identity)`.
 
 ---
@@ -114,4 +114,4 @@ Live deployments currently place shared `glm`, `ollama_cloud`, `opencode_go`, an
 - **Option 1 — Dedicated Librarian seat(s)**: Allocate at least one dedicated HTTP endpoint/API account (or dedicated local runtime such as `tinker`) exclusively to `[runtime.exact_output_lanes.librarian_exact]` and `[runtime.exact_output_lanes.librarian_memory]`, removing shared `glm` / `ollama_cloud` / `opencode_go` / `claude_code` entries from Librarian slots (or dedicating separate paid accounts/CLI homes).
 - **Option 2 — Keep Librarian optional/disabled on single-account installs**: On single-key or single-subscription hosts without a separate Librarian runtime, set `enabled = false` on optional `[runtime.exact_output_lanes.librarian_memory]` (and ensure `[runtime.exact_output_lanes.librarian_exact]` routes do not collide) before enabling strict seat-isolation enforcement.
 
-**Status**: Left explicitly as an **Open Operator Decision**. MASC enforces strict Keeper-first admission in `Slot_scheduler` and surfaces typed HTTP + CLI seat overlaps via `Runtime.detect_librarian_keeper_seat_overlaps` without hard-rejecting shared default configs until the operator confirms seat allocation.
+**Status**: Left explicitly as an **Open Operator Decision**. MASC enforces strict Keeper-first admission in `Llm_provider.Slot_scheduler` (`packages/agent_core/lib/llm_provider/slot_scheduler.ml`, `next_queue` ordering `Admission_class.Priority > Standard > Background`) and keeps `Runtime.detect_librarian_keeper_seat_overlaps` available without hard-rejecting shared default configs until the operator confirms seat allocation. Overlap diagnostics are emitted at `Log.Runtime.debug` rather than `warn` so default boot logs stay quiet; operators inspecting shared seats can start with `MASC_LOG_LEVEL=debug`.

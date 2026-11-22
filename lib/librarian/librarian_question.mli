@@ -115,14 +115,20 @@ type room =
   ; schema : Yojson.Safe.t (** The [room] answer schema. *)
   }
 
-(** The question that makes room (§7.4): Memory as the snapshot [from] names
-    holds it and the working state of [from], then the [make_room:] line. It
-    reads no unit. [trace] is the trace of the item read alone just before;
-    the question carries it unchanged. Like a reading question, it is a
-    function of its inputs and carries no clock. *)
+(** The question that makes room (§7.4) or runs a structural molt pass:
+    Memory as the snapshot [from] names holds it and the working state of
+    [from], optionally followed by the read-only [world_index:] snapshot, then
+    either the [molt_trigger:] JSON line (when [molt_trigger = Some _]) or the
+    [make_room:] line (when [molt_trigger = None]). It reads no unit. [trace]
+    is the trace of the triggering event; the question carries it unchanged.
+    Like a reading question, it is a function of its inputs and carries no
+    clock. *)
 val make_room
-  :  lane:Librarian_memory_lane.question_side
+  :  ?world_index:string
+  -> ?molt_trigger:Librarian_lifecycle.molt_trigger
+  -> lane:Librarian_memory_lane.question_side
   -> from:Librarian_log.line
   -> memory:Keeper_memory_os_current_types.t
   -> trace:string
+  -> unit
   -> room

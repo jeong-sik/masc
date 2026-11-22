@@ -3287,15 +3287,22 @@ let test_source_snapshot_commit_notifications () =
     Alcotest.(check int) "unsubscribe detaches source listener" 4 (List.length !observed))
 ;;
 
+let with_molt_observer f =
+  let signals = ref [] in
+  Render.set_on_molt_requested
+    (Some (fun ~keeper_id budget -> signals := (keeper_id, budget) :: !signals));
+  Fun.protect
+    ~finally:(fun () -> Render.set_on_molt_requested None)
+    (fun () -> f signals)
+;;
+
 let test_ordinary_commit_budget_preserves_store_on_rejection () =
   with_temp_dir @@ fun keepers_dir ->
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "500" @@ fun () ->
+  with_molt_observer @@ fun signals ->
   let keeper_id = "ordinary-budget" in
   replace_current_facts ~keepers_dir ~keeper_id [ fact "small current fact" ];
-  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let before_snapshot = Fs_compat.load_file snapshot_path in
-  let before_journal = Fs_compat.load_file journal_path in
+  Alcotest.(check int) "within-threshold commit emits no molt signal" 0 (List.length !signals);
   let proposed = current_facts ~keepers_dir ~keeper_id @ [ fact (String.make 600 'x') ] in
   (match
      Current.replace
@@ -3304,23 +3311,28 @@ let test_ordinary_commit_budget_preserves_store_on_rejection () =
        ~source:{ Current.kind = Current.Librarian; trace_id = "oversize" }
        ~facts:proposed ()
    with
-   | Error detail ->
-     Alcotest.(check bool) "budget explains rejection" true
-       (contains ~needle:"exceed commit budget" detail)
-   | Ok _ -> Alcotest.fail "over-budget ordinary facts committed");
-  Alcotest.(check string) "snapshot unchanged" before_snapshot
-    (Fs_compat.load_file snapshot_path);
-  Alcotest.(check string) "journal unchanged" before_journal
-    (Fs_compat.load_file journal_path)
+   | Ok snapshot ->
+     Alcotest.(check int) "commit succeeds without hard budget refusal" 2 snapshot.revision;
+     Alcotest.(check int) "all proposed facts persisted" 2 (List.length snapshot.facts)
+   | Error detail -> Alcotest.fail ("commit should not hard-reject on soft molt threshold: " ^ detail));
+  (match !signals with
+   | [ (notified_keeper, budget) ] ->
+     Alcotest.(check string) "molt notified for exact keeper" keeper_id notified_keeper;
+     Alcotest.(check bool) "molt reports payload above soft threshold" true
+       (budget.Render.total_bytes > budget.Render.maximum_bytes)
+   | other ->
+     Alcotest.failf "expected 1 non-blocking molt signal, got %d" (List.length other))
 ;;
 
 let test_over_budget_retraction_recovers_incrementally () =
   with_temp_dir @@ fun keepers_dir ->
+  with_molt_observer @@ fun signals ->
   let keeper_id = "retraction-budget" in
   let first = fact (String.make 300 'a') in
   let second = fact (String.make 300 'b') in
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "1000" @@ fun () ->
   replace_current_facts ~keepers_dir ~keeper_id [ first; second ];
+  Alcotest.(check int) "seed within threshold emits no molt" 0 (List.length !signals);
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "200" @@ fun () ->
   let source = { Current.kind = Current.Explicit_write; trace_id = "retract" } in
   (match
@@ -3331,25 +3343,24 @@ let test_over_budget_retraction_recovers_incrementally () =
    with
    | Ok _ -> ()
    | Error _ -> Alcotest.fail "a reducing over-budget retraction was rejected");
+  Alcotest.(check int) "shrinking commit emits no new molt signal" 0 (List.length !signals);
   let remaining = current_facts ~keepers_dir ~keeper_id in
-  Alcotest.(check int) "one fact remains" 1
-    (List.length remaining);
-  Alcotest.(check bool) "remaining fact is still over the reduced cap" true
+  Alcotest.(check int) "one fact remains" 1 (List.length remaining);
+  Alcotest.(check bool) "remaining fact is still over the reduced threshold" true
     (Render.facts_payload_bytes ~ordinary_facts:remaining ~source_lines:[] > 200);
   Alcotest.(check bool) "the second fact remains" true
     (String.equal (List.hd remaining).claim second.claim);
+  (* Growth past threshold commits cleanly and notifies the Librarian to molt. *)
   (match
      Current.replace
        ~keepers_dir ~keeper_id ~expected_revision:(Some 2)
        ~now:(Time_compat.now ()) ~source
        ~facts:(remaining @ [ fact "new fact" ]) ()
    with
-   | Error detail ->
-     Alcotest.(check bool) "growth fails for the budget" true
-       (contains ~needle:"exceed commit budget" detail)
-   | Ok _ -> Alcotest.fail "over-budget growth was committed");
-  Alcotest.(check int) "growth left the current set alone" 1
-    (List.length (current_facts ~keepers_dir ~keeper_id));
+   | Ok snapshot ->
+     Alcotest.(check int) "growth commit succeeded" 2 (List.length snapshot.facts)
+   | Error detail -> Alcotest.fail ("growth should commit and signal molt: " ^ detail));
+  Alcotest.(check int) "growth past threshold fired molt signal" 1 (List.length !signals);
   (match
      Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete
        ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
@@ -3358,13 +3369,14 @@ let test_over_budget_retraction_recovers_incrementally () =
    with
    | Ok _ -> ()
    | Error _ -> Alcotest.fail "final recovery retraction was rejected");
-  Alcotest.(check int) "all facts removed" 0
+  Alcotest.(check int) "one remaining fact after retracting second" 1
     (List.length (current_facts ~keepers_dir ~keeper_id))
 ;;
 
 let test_source_commit_budget_counts_ordinary_facts () =
   with_temp_dir @@ fun base_path ->
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "500" @@ fun () ->
+  with_molt_observer @@ fun signals ->
   let module Source = Masc.Keeper_memory_source_current in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "source-aggregate-budget" in
@@ -3373,8 +3385,7 @@ let test_source_commit_budget_counts_ordinary_facts () =
   in
   replace_current_facts ~keepers_dir ~keeper_id:meta.name
     [ fact (String.make 180 'o') ];
-  let ordinary_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
-  let before_ordinary = Fs_compat.load_file ordinary_path in
+  Alcotest.(check int) "initial ordinary fact within threshold" 0 (List.length !signals);
   let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Fs_compat.mkdir_p sandbox_root;
   let source_path = "source.txt" in
@@ -3388,22 +3399,25 @@ let test_source_commit_budget_counts_ordinary_facts () =
        ~config ~meta ~keepers_dir ~now:(Time_compat.now ())
        ~claim:(String.make 180 's') ~source_path ()
    with
-   | Error (Source.Store_write_failed detail) ->
-     Alcotest.(check bool) "aggregate budget explains rejection" true
-       (contains ~needle:"exceed commit budget" detail)
+   | Ok snapshot ->
+     Alcotest.(check int) "source fact committed without hard refusal" 1
+       (List.length snapshot.facts)
+   | Error (Source.Store_write_failed detail) -> Alcotest.fail detail
    | Error (Source.Source_read_failed failure) ->
-     Alcotest.fail (Source.source_read_failure_to_string failure)
-   | Ok _ -> Alcotest.fail "over-budget combined facts committed");
-  (match Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
-   | Ok None -> ()
-   | Ok (Some _) | Error _ -> Alcotest.fail "rejected source snapshot appeared");
-  Alcotest.(check string) "ordinary snapshot unchanged" before_ordinary
-    (Fs_compat.load_file ordinary_path)
+     Alcotest.fail (Source.source_read_failure_to_string failure));
+  (match !signals with
+   | [ (notified_keeper, budget) ] ->
+     Alcotest.(check string) "molt notified for source keeper" meta.name notified_keeper;
+     Alcotest.(check bool) "combined ordinary + source exceeded soft threshold" true
+       (budget.Render.total_bytes > budget.Render.maximum_bytes)
+   | other ->
+     Alcotest.failf "expected 1 molt signal on combined source commit, got %d" (List.length other))
 ;;
 
 let test_ordinary_commit_budget_counts_source_facts () =
   with_temp_dir @@ fun base_path ->
   with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "500" @@ fun () ->
+  with_molt_observer @@ fun signals ->
   let module Source = Masc.Keeper_memory_source_current in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "ordinary-aggregate-budget" in
@@ -3427,8 +3441,7 @@ let test_ordinary_commit_budget_counts_source_facts () =
    | Error (Source.Store_write_failed detail) -> Alcotest.fail detail
    | Error (Source.Source_read_failed failure) ->
      Alcotest.fail (Source.source_read_failure_to_string failure));
-  let source_store_path = Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
-  let before_source = Fs_compat.load_file source_store_path in
+  Alcotest.(check int) "initial source fact within threshold" 0 (List.length !signals);
   (match
      Current.replace
        ~keepers_dir ~keeper_id:meta.name ~expected_revision:None
@@ -3436,15 +3449,17 @@ let test_ordinary_commit_budget_counts_source_facts () =
        ~source:{ Current.kind = Current.Librarian; trace_id = "oversize" }
        ~facts:[ fact (String.make 180 'o') ] ()
    with
-   | Error detail ->
-     Alcotest.(check bool) "aggregate budget explains rejection" true
-       (contains ~needle:"exceed commit budget" detail)
-   | Ok _ -> Alcotest.fail "over-budget combined facts committed");
-  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
-   | Ok None -> ()
-   | Ok (Some _) | Error _ -> Alcotest.fail "rejected ordinary snapshot appeared");
-  Alcotest.(check string) "source snapshot unchanged" before_source
-    (Fs_compat.load_file source_store_path)
+   | Ok snapshot ->
+     Alcotest.(check int) "ordinary fact committed without hard refusal" 1
+       (List.length snapshot.facts)
+   | Error detail -> Alcotest.fail detail);
+  (match !signals with
+   | [ (notified_keeper, budget) ] ->
+     Alcotest.(check string) "molt notified for ordinary keeper" meta.name notified_keeper;
+     Alcotest.(check bool) "combined ordinary + source exceeded soft threshold" true
+       (budget.Render.total_bytes > budget.Render.maximum_bytes)
+   | other ->
+     Alcotest.failf "expected 1 molt signal on combined ordinary commit, got %d" (List.length other))
 ;;
 
 let test_source_invalidation_committed_turn_retirement () =

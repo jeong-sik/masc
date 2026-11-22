@@ -70,15 +70,27 @@ let transition ~from ~to_ =
 type molt_trigger =
   | Compaction_epoch_advanced of { epoch_id : int }
   | Synthesis_cycle_completed
+  | Memory_growth_molt_requested of
+      { current_bytes : int
+      ; threshold_bytes : int
+      }
 
 let f_kind = wire_field_kind
 let f_epoch_id = "epoch_id"
+let f_current_bytes = "current_bytes"
+let f_threshold_bytes = "threshold_bytes"
 
 let molt_trigger_to_json = function
   | Compaction_epoch_advanced { epoch_id } ->
     `Assoc [ f_kind, `String "compaction_epoch_advanced"; f_epoch_id, `Int epoch_id ]
   | Synthesis_cycle_completed ->
     `Assoc [ f_kind, `String "synthesis_cycle_completed" ]
+  | Memory_growth_molt_requested { current_bytes; threshold_bytes } ->
+    `Assoc
+      [ f_kind, `String "memory_growth_molt_requested"
+      ; f_current_bytes, `Int current_bytes
+      ; f_threshold_bytes, `Int threshold_bytes
+      ]
 ;;
 
 let ( let* ) = Result.bind
@@ -96,6 +108,18 @@ let molt_trigger_of_json = function
      | "synthesis_cycle_completed" ->
        let* () = exact_field_names_result [ f_kind ] fields in
        Ok Synthesis_cycle_completed
+     | "memory_growth_molt_requested" ->
+       let* () =
+         exact_field_names_result [ f_kind; f_current_bytes; f_threshold_bytes ] fields
+       in
+       let* current_bytes = wire_int_field f_current_bytes fields in
+       let* () =
+         if current_bytes < 0 then wire_fail [ Wire_field f_current_bytes ] Negative else Ok ()
+       in
+       let* threshold_bytes = wire_int_field f_threshold_bytes fields in
+       if threshold_bytes < 0
+       then wire_fail [ Wire_field f_threshold_bytes ] Negative
+       else Ok (Memory_growth_molt_requested { current_bytes; threshold_bytes })
      | other -> wire_fail [ Wire_field f_kind ] (Unknown_token other))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire_here Expected_object

@@ -165,7 +165,21 @@ type t =
       it said is about the Memory before that read. *)
   ; read_alone : bool
   (** The last committed read was of an item alone, without Memory (W3). *)
+  ; pending_molt : Librarian_lifecycle.molt_trigger option
+  (** A structural molt request latched while an ask was in flight (or while
+      no lane was declared), dispatched as soon as the active ask settles
+      without ever spinning from [ended_molt] itself. *)
   }
+
+(** Structural molt trigger precedence latch: unconditional triggers
+    ([Compaction_epoch_advanced _], [Synthesis_cycle_completed]) are never
+    overwritten by a conditional [Memory_growth_molt_requested _]. Shared by
+    both the machine state latch and the writer's coalescing 1-slot molt
+    mailbox. *)
+val latch_pending_molt
+  :  Librarian_lifecycle.molt_trigger option
+  -> Librarian_lifecycle.molt_trigger
+  -> Librarian_lifecycle.molt_trigger option
 
 (** A token for one slot's outcome, as the Keeper's log and the operator's
     row name it. *)
@@ -221,6 +235,9 @@ type event =
   (** Structural lifecycle boundary: the Keeper's anchored compaction epoch
       advanced, triggering proactive declarative molting and cross-category
       synthesis when the store is open and idle/resting. *)
+  | Molt_requested of Librarian_lifecycle.molt_trigger
+  (** Non-blocking structural molt request (e.g., Memory OS growth crossing
+      the soft consolidation threshold or completed synthesis cycle). *)
 
 (** One event (§9.3). A [Declaration_changed] whose lane value is the one
     held does not reach the table: the registry and the runtime table send

@@ -43,6 +43,27 @@ let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
                Librarian_writers.compaction_epoch_advanced writers keeper_id
                  ~epoch_id:anchor.epoch_id)
             (Atomic.get tables)));
+  Keeper_memory_os_render.set_on_molt_requested
+    (Some
+       (fun ~keeper_id (budget : Keeper_memory_os_render.facts_budget) ->
+          By_workspace.iter
+            (fun (_ : string) writers ->
+               Librarian_writers.request_molt writers keeper_id
+                 ~trigger:
+                   (Librarian_lifecycle.Memory_growth_molt_requested
+                      { current_bytes = budget.total_bytes
+                      ; threshold_bytes = budget.maximum_bytes
+                      }))
+            (Atomic.get tables)));
+  Keeper_memory_os_render.set_is_molt_receiver_stopped
+    (Some
+       (fun ~keeper_id ->
+          let current_tables = Atomic.get tables in
+          By_workspace.is_empty current_tables
+          || By_workspace.exists
+               (fun (_ : string) writers ->
+                  Librarian_writers.is_stopped writers keeper_id)
+               current_tables));
   (* A later start may have replaced this table; only its own entry goes. *)
   Eio.Switch.on_release sw (fun () ->
     update (fun tables ->
@@ -50,7 +71,10 @@ let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
       | Some current when current == table -> By_workspace.remove key tables
       | Some _ | None -> tables);
     if By_workspace.is_empty (Atomic.get tables)
-    then Keeper_compaction.set_on_epoch_committed None);
+    then (
+      Keeper_compaction.set_on_epoch_committed None;
+      Keeper_memory_os_render.set_on_molt_requested None;
+      Keeper_memory_os_render.set_is_molt_receiver_stopped None));
   table
 ;;
 

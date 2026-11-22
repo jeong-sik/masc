@@ -236,7 +236,7 @@ let the_item_alone_shows_no_memory () =
    the units were. The front half carries the room schema, so the id is not
    the reading question's under the same Memory. *)
 let the_room_question_reads_no_unit () =
-  let room = Question.make_room ~lane ~from ~memory:(memory (facts ())) ~trace:"trace-1" in
+  let room = Question.make_room ~lane ~from ~memory:(memory (facts ())) ~trace:"trace-1" () in
   let lines = String.split_on_char '\n' room.text in
   let labels =
     [ "question: "; "memory: "; "working_state: "; "units: "; "make_room: "; "question-end: " ]
@@ -256,6 +256,51 @@ let the_room_question_reads_no_unit () =
     (String.equal reading.id.front room.question.id.front)
 ;;
 
+let molt_room_question_carries_trigger_and_world_index () =
+  let trigger =
+    Masc.Librarian_lifecycle.Memory_growth_molt_requested
+      { current_bytes = 600_000; threshold_bytes = 524_288 }
+  in
+  let room =
+    Question.make_room
+      ~world_index:"[world] sqlite WAL busy_timeout=5000"
+      ~molt_trigger:trigger
+      ~lane
+      ~from
+      ~memory:(memory (facts ()))
+      ~trace:"trace-molt"
+      ()
+  in
+  let lines = String.split_on_char '\n' room.text in
+  let labels =
+    [ "question: "
+    ; "memory: "
+    ; "working_state: "
+    ; "world_index: "
+    ; "units: "
+    ; "make_room: "
+    ; "molt_trigger: "
+    ; "question-end: "
+    ]
+  in
+  check (list string) "molt room lines include world_index and molt_trigger in fixed order"
+    [ "question: "; "memory: "; "working_state: "; "world_index: "; "molt_trigger: "; "question-end: " ]
+    (List.filter_map
+       (fun line -> List.find_opt (fun label -> String.starts_with ~prefix:label line) labels)
+       lines);
+  check bool "molt_trigger JSON matches trigger codec" true
+    (List.mem
+       ("molt_trigger: " ^ Yojson.Safe.to_string (Masc.Librarian_lifecycle.molt_trigger_to_json trigger))
+       lines);
+  let plain_room =
+    Question.make_room ~lane ~from ~memory:(memory (facts ())) ~trace:"trace-molt" ()
+  in
+  check bool "world_index changes front half" false
+    (String.equal plain_room.question.id.front room.question.id.front);
+  check bool "molt_trigger changes back half" false
+    (String.equal plain_room.question.id.back room.question.id.back)
+;;
+
 let () =
   run
     "librarian_question"
@@ -263,6 +308,10 @@ let () =
       , [ test_case "the same inputs give the same bytes" `Quick same_inputs_same_bytes
         ; test_case "the item alone shows no Memory" `Quick the_item_alone_shows_no_memory
         ; test_case "the room question reads no unit" `Quick the_room_question_reads_no_unit
+        ; test_case
+            "the molt room question carries trigger and world index"
+            `Quick
+            molt_room_question_carries_trigger_and_world_index
         ; test_case
             "a change to Memory alone moves the front half"
             `Quick

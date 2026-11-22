@@ -208,7 +208,7 @@ let supersede_fact
             current_facts
         with
         | None ->
-          (match find_removal ~keepers_dir ~keeper_id superseded_memory_id with
+          (match find_removal_inline ~keepers_dir ~keeper_id superseded_memory_id with
            | Removed removal ->
              (match removal.removed_by.kind, removal.removed_origin with
               | Librarian, Authored -> Ok (Target_already_dropped removal)

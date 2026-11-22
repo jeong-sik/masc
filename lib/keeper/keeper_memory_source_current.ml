@@ -584,73 +584,97 @@ let upsert_file_fact
     | Error failure -> Error (Source_read_failed failure)
     | Ok content ->
       let incoming_source = { path = source_path; sha256 = sha256 content } in
-      with_commit_notification
-        ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name (fun on_commit ->
-      Keeper_memory_os_aggregate_lock.with_lock
-        ?clock
-        ~keepers_dir
-        ~keeper_id:meta.Keeper_meta_contract.name
-        (fun () ->
-           update_locked
-             ?clock
-             ~keepers_dir
-             ~keeper_id:meta.Keeper_meta_contract.name
-             ~on_commit
-             (fun previous ->
-      let previous_facts, previous_invalidations, revision, first_seen =
-        match previous with
-        | None -> [], [], 1, now
-        | Some snapshot ->
-          let first_seen =
-            List.find_map
-              (fun fact ->
-                 if
-                   String.equal fact.source.path source_path
-                   && String.equal fact.claim claim
-                   && String.equal fact.source.sha256 incoming_source.sha256
-                 then Some fact.first_seen
-                 else None)
-              snapshot.facts
-            |> Option.value ~default:now
-          in
-          snapshot.facts, snapshot.invalidations, snapshot.revision + 1, first_seen
+      let molt_outcome = ref None in
+      let result =
+        with_commit_notification
+          ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name (fun on_commit ->
+        Keeper_memory_os_aggregate_lock.with_lock
+          ?clock
+          ~keepers_dir
+          ~keeper_id:meta.Keeper_meta_contract.name
+          (fun () ->
+             update_locked
+               ?clock
+               ~keepers_dir
+               ~keeper_id:meta.Keeper_meta_contract.name
+               ~on_commit
+               (fun previous ->
+        let previous_facts, previous_invalidations, revision, first_seen =
+          match previous with
+          | None -> [], [], 1, now
+          | Some snapshot ->
+            let first_seen =
+              List.find_map
+                (fun fact ->
+                   if
+                     String.equal fact.source.path source_path
+                     && String.equal fact.claim claim
+                     && String.equal fact.source.sha256 incoming_source.sha256
+                   then Some fact.first_seen
+                   else None)
+                snapshot.facts
+              |> Option.value ~default:now
+            in
+            snapshot.facts, snapshot.invalidations, snapshot.revision + 1, first_seen
+        in
+        let facts =
+          previous_facts
+          |> List.filter (fun fact -> not (String.equal fact.source.path source_path))
+          |> fun facts ->
+          facts @ [ { claim; first_seen; source = incoming_source } ]
+        in
+        let invalidations =
+          List.filter
+            (fun invalidation -> not (String.equal invalidation.source_path source_path))
+            previous_invalidations
+        in
+        let* ordinary = ordinary_facts () in
+        let source_lines = budget_lines_of ~facts ~invalidations in
+        let previous_bytes =
+          Keeper_memory_os_render.facts_payload_bytes
+            ~ordinary_facts:ordinary
+            ~source_lines:
+              (budget_lines_of ~facts:previous_facts ~invalidations:previous_invalidations)
+        in
+        let* budget_outcome =
+          match
+            Keeper_memory_os_render.evaluate_facts_budget
+              ~keeper_id:meta.Keeper_meta_contract.name
+              ~previous_bytes
+              ~ordinary_facts:ordinary
+              ~source_lines
+          with
+          | (Keeper_memory_os_render.Within_threshold _
+            | Keeper_memory_os_render.Molt_recommended _) as outcome ->
+            Ok outcome
+          | Keeper_memory_os_render.Backstop_exceeded
+              { budget; hard_limit_bytes; reason } ->
+            Error
+              (Keeper_memory_os_render.backstop_rejection_message
+                 ~budget
+                 ~hard_limit_bytes
+                 ~reason)
+        in
+        molt_outcome := Some budget_outcome;
+        Ok
+          ( { revision
+            ; updated_at = now
+            ; trace_id = trace_id meta
+            ; facts
+            ; invalidations
+            }
+          , true
+          , () ))))
+        |> Result.map fst
+        |> Result.map_error (fun detail -> Store_write_failed detail)
       in
-      let facts =
-        previous_facts
-        |> List.filter (fun fact -> not (String.equal fact.source.path source_path))
-        |> fun facts ->
-        facts @ [ { claim; first_seen; source = incoming_source } ]
-      in
-      let invalidations =
-        List.filter
-          (fun invalidation -> not (String.equal invalidation.source_path source_path))
-          previous_invalidations
-      in
-      let* ordinary = ordinary_facts () in
-      let source_lines = budget_lines_of ~facts ~invalidations in
-      let previous_bytes =
-        Keeper_memory_os_render.facts_payload_bytes
-          ~ordinary_facts:ordinary
-          ~source_lines:
-            (budget_lines_of ~facts:previous_facts ~invalidations:previous_invalidations)
-      in
-      let* () =
-        Keeper_memory_os_render.check_facts_budget
-          ~previous_bytes
-          ~ordinary_facts:ordinary
-          ~source_lines
-      in
-      Ok
-        ( { revision
-          ; updated_at = now
-          ; trace_id = trace_id meta
-          ; facts
-          ; invalidations
-          }
-        , true
-        , () ))))
-      |> Result.map fst
-      |> Result.map_error (fun detail -> Store_write_failed detail)
+      (match result, !molt_outcome with
+       | Ok _, Some outcome ->
+         Keeper_memory_os_render.notify_molt_if_recommended
+           ~keeper_id:meta.Keeper_meta_contract.name
+           outcome
+       | Ok _, None | Error _, (Some _ | None) -> ());
+      result
 ;;
 
 (* Whether a revalidation pass still asks its sources. The first read the

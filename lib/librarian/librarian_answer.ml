@@ -136,28 +136,10 @@ let closed_schema properties =
 
 let field_names properties = List.map fst properties
 
-let derivation_schema =
-  closed_schema
-    [ "rule_id", string_schema
-    ; "premise_ids", names_schema
-    ]
-;;
-
-let derived_basis_schema =
-  closed_schema
-    [ wire_field_kind, `Assoc [ "type", `String "string"; "enum", `List [ `String "derived" ] ]
-    ; wire_field_derivations, `Assoc [ "type", `String "array"; "items", derivation_schema ]
-    ]
-;;
-
-let basis_schema =
-  `Assoc [ "anyOf", `List [ observed_basis_schema; derived_basis_schema ] ]
-;;
-
 let new_fact_properties =
   [ field_claim, string_schema
   ; field_category, string_schema
-  ; field_basis, basis_schema
+  ; field_basis, observed_basis_schema
   ; field_from, names_schema
   ]
 ;;
@@ -327,6 +309,12 @@ let new_fact_of_fields fields =
   let* category = category_field fields in
   let* basis_json = wire_json_field field_basis fields in
   let* basis = wire_at (Wire_field field_basis) (basis_of_json basis_json) in
+  let* basis =
+    match basis with
+    | Observed _ -> Ok basis
+    | Derived _ ->
+      wire_fail [ Wire_field field_basis; Wire_field wire_field_kind ] (Unknown_token "derived")
+  in
   let* from_units = names_field field_from fields in
   Ok { claim; category; basis; from_units }
 ;;

@@ -204,19 +204,19 @@ let test_op_rejections () =
   expect_schema "a reserved category" ~path:(at_op 0 [ Wire_field "category" ])
     ~reason:(Unknown_token "dropped")
     (document (add_with ~category:{|"dropped"|} ()));
-  (* Derived provenance is unlocked for Librarian synthesis and derivation. *)
-  let derived_answer =
-    decoded "a derived basis"
-      (Answer.of_string ~asked
-         (document
-            (add_with
-               ~basis:
-                 (Printf.sprintf
-                    {|{"kind":"derived","derivations":[{"rule_id":"r","premise_ids":["%s"]}]}|}
-                    (Types.memory_id_of_claim "premise"))
-               ())))
-  in
-  check int "derived add decodes" 1 (List.length derived_answer.ops);
+  (* Derived provenance is emitted exclusively via [op: "synthesize"] (which
+     maps short [mN] refs to canonical premise IDs). [add]/[merge]/[revise]
+     accept observed basis ONLY so models never emit [premise_ids: ["m1"]]. *)
+  expect_schema "derived basis rejected on add"
+    ~path:(at_op 0 [ Wire_field "basis"; Wire_field "kind" ])
+    ~reason:(Unknown_token "derived")
+    (document
+       (add_with
+          ~basis:
+            (Printf.sprintf
+               {|{"kind":"derived","derivations":[{"rule_id":"r","premise_ids":["%s"]}]}|}
+               (Types.memory_id_of_claim "premise"))
+          ()));
   expect_schema "a unit name that is a number" ~path:(at_op 0 [ Wire_field "from"; Wire_index 1 ])
     ~reason:Expected_string
     (document (add_with ~from:{|["u1",2]|} ()));

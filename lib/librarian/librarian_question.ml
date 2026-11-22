@@ -24,6 +24,7 @@ let label_working_state = "working_state: "
 let label_world_index = "world_index: "
 let label_units = "units: "
 let label_make_room = "make_room: "
+let label_molt_trigger = "molt_trigger: "
 let label_question_end = "question-end: "
 
 (* The one sentence a question that makes room shows where a reading
@@ -453,17 +454,37 @@ type room =
   ; schema : Yojson.Safe.t
   }
 
-let make_room ~(lane : Librarian_memory_lane.question_side) ~from ~memory ~trace =
+let make_room
+      ?world_index
+      ?molt_trigger
+      ~(lane : Librarian_memory_lane.question_side)
+      ~from
+      ~memory
+      ~trace
+      ()
+  =
   let schema = lane.answer_schemas.room in
-  let table, memory_lines = memory_and_working_state ~from memory in
-  let sentence_line = json_line label_make_room (`String make_room_sentence) in
+  let table, base_memory_lines = memory_and_working_state ~from memory in
+  let world_lines =
+    match world_index with
+    | Some snapshot when String.trim snapshot <> "" ->
+      [ json_line label_world_index (`String snapshot) ]
+    | Some _ | None -> []
+  in
+  let memory_lines = base_memory_lines @ world_lines in
+  let directive_line =
+    match molt_trigger with
+    | Some trigger ->
+      json_line label_molt_trigger (Librarian_lifecycle.molt_trigger_to_json trigger)
+    | None -> json_line label_make_room (`String make_room_sentence)
+  in
   let id =
     Librarian_question_id.of_digests
       ~front:(front ~lane ~schema memory_lines)
-      ~back:(digest [ sentence_line ])
+      ~back:(digest [ directive_line ])
   in
   { question = { id; memory = table; basis = Librarian_log.snapshot_after from; trace }
-  ; text = text ~lane id (memory_lines @ [ sentence_line ])
+  ; text = text ~lane id (memory_lines @ [ directive_line ])
   ; schema
   }
 ;;

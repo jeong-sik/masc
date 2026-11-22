@@ -51,6 +51,7 @@ type t =
   ; last_read : Last.read option
   ; last_room : Last.room option
   ; read_alone : bool
+  ; pending_molt : Librarian_lifecycle.molt_trigger option
   }
 
 let boot { memory_dir; turns_dir; keeper_id } ~at =
@@ -59,6 +60,91 @@ let boot { memory_dir; turns_dir; keeper_id } ~at =
 
 let turns_path { turns_dir; keeper_id; memory_dir = (_ : string) } =
   Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir:turns_dir ~keeper_id
+;;
+
+let molt_trace ~ask = function
+  | Librarian_lifecycle.Compaction_epoch_advanced { epoch_id } ->
+    Printf.sprintf "compaction-epoch-%d" epoch_id
+  | Librarian_lifecycle.Synthesis_cycle_completed ->
+    Printf.sprintf "synthesis-cycle-%d" ask
+  | Librarian_lifecycle.Memory_growth_molt_requested { current_bytes; threshold_bytes } ->
+    Printf.sprintf "memory-growth-molt-%d-of-%d" current_bytes threshold_bytes
+;;
+
+let start_molt t ~at store ~(declared : declared) trigger =
+  let ask = t.last_ask + 1 in
+  let asking : asking =
+    { ask
+    ; since = at
+    ; lane = declared
+    ; removed_since = []
+    ; asked = Room { trace = molt_trace ~ask trigger; molt_trigger = Some trigger }
+    ; bottom = t.bottom
+    }
+  in
+  { t with state = Asking { store; asking }; last_ask = ask; pending_molt = None }
+;;
+
+let growth_molt_trigger ~keeper_id ~before_facts ~after_facts =
+  let previous_bytes =
+    Keeper_memory_os_render.facts_payload_bytes
+      ~ordinary_facts:before_facts
+      ~source_lines:[]
+  in
+  match
+    Keeper_memory_os_render.evaluate_facts_budget
+      ~keeper_id
+      ~previous_bytes
+      ~ordinary_facts:after_facts
+      ~source_lines:[]
+  with
+  | Keeper_memory_os_render.Within_threshold _ -> None
+  | Keeper_memory_os_render.Molt_recommended budget
+  | Keeper_memory_os_render.Backstop_exceeded { budget; _ } ->
+    Some
+      (Librarian_lifecycle.Memory_growth_molt_requested
+         { current_bytes = budget.total_bytes
+         ; threshold_bytes = budget.maximum_bytes
+         })
+;;
+
+(* Unconditional structural triggers (compaction epoch advance, synthesis cycle
+   completion) must never be overwritten by a conditional growth molt request,
+   which could otherwise be dropped if Memory shrinks before the active ask
+   settles. *)
+let latch_pending_molt current incoming =
+  match current, incoming with
+  | ( Some (Librarian_lifecycle.Compaction_epoch_advanced _ | Synthesis_cycle_completed)
+    , Librarian_lifecycle.Memory_growth_molt_requested _ ) -> current
+  | ( (None | Some (Librarian_lifecycle.Memory_growth_molt_requested _))
+    , ( Librarian_lifecycle.Compaction_epoch_advanced _
+      | Synthesis_cycle_completed
+      | Memory_growth_molt_requested _ ) )
+  | ( Some (Librarian_lifecycle.Compaction_epoch_advanced _ | Synthesis_cycle_completed)
+    , (Librarian_lifecycle.Compaction_epoch_advanced _ | Synthesis_cycle_completed) ) ->
+    Some incoming
+;;
+
+let pending_molt_still_needed place store = function
+  | Librarian_lifecycle.Memory_growth_molt_requested { threshold_bytes; _ } ->
+    (match
+       Keeper_memory_source_current.read_budget_lines
+         ~keepers_dir:place.memory_dir
+         ~keeper_id:place.keeper_id
+     with
+     | Error _ ->
+       (* Never drop a latched molt if the source-bound store is momentarily
+          unreadable. *)
+       true
+     | Ok source_lines ->
+       let current_bytes =
+         Keeper_memory_os_render.facts_payload_bytes
+           ~ordinary_facts:(Store.memory store).facts
+           ~source_lines
+       in
+       current_bytes > threshold_bytes)
+  | Librarian_lifecycle.Compaction_epoch_advanced _
+  | Librarian_lifecycle.Synthesis_cycle_completed -> true
 ;;
 
 (* §9.2 "the next ask". The length is read before the turn log: read after,
@@ -118,12 +204,21 @@ let ask_room t ~at store ~(declared : declared) ~trace =
 ;;
 
 (* The width memory says how wide; the head item alone is asked only from
-   the bottom's verdict. *)
+   the bottom's verdict. If a structural molt request was latched while an
+   earlier ask was running (or while no lane was declared), dispatch it once
+   before resuming normal turn reading. *)
 let next_ask place t ~at store =
-  ask place t ~at store ~asked:(Read_range (Librarian_width.next t.narrowing))
+  match t.pending_molt, t.lane with
+  | Some trigger, Some declared when pending_molt_still_needed place store trigger ->
+    start_molt t ~at store ~declared trigger
+  | Some _, Some _ ->
+    ask place { t with pending_molt = None } ~at store
+      ~asked:(Read_range (Librarian_width.next t.narrowing))
+  | (Some _ | None), None | None, Some _ ->
+    ask place t ~at store ~asked:(Read_range (Librarian_width.next t.narrowing))
 ;;
 
-let stopped ~lane ~last_ask stop =
+let stopped_with_pending ~lane ~last_ask ~pending_molt stop =
   { state = Stopped stop
   ; lane
   ; last_ask
@@ -132,12 +227,17 @@ let stopped ~lane ~last_ask stop =
   ; last_read = None
   ; last_room = None
   ; read_alone = false
+  ; pending_molt
   }
 ;;
 
-let booted place ~at ~lane ~last_ask (opened : (Store.t, Store.stop) result) =
+let stopped ~lane ~last_ask stop =
+  stopped_with_pending ~lane ~last_ask ~pending_molt:None stop
+;;
+
+let booted_with_pending place ~at ~lane ~last_ask ~pending_molt (opened : (Store.t, Store.stop) result) =
   match opened with
-  | Error stop -> stopped ~lane ~last_ask stop
+  | Error stop -> stopped_with_pending ~lane ~last_ask ~pending_molt stop
   | Ok store ->
     next_ask place
       { state = Idle { store; seen_length = None }
@@ -148,8 +248,13 @@ let booted place ~at ~lane ~last_ask (opened : (Store.t, Store.stop) result) =
       ; last_read = None
       ; last_room = None
       ; read_alone = false
+      ; pending_molt
       }
       ~at store
+;;
+
+let booted place ~at ~lane ~last_ask opened =
+  booted_with_pending place ~at ~lane ~last_ask ~pending_molt:None opened
 ;;
 
 type ended =
@@ -168,6 +273,7 @@ type event =
       }
   | Declaration_changed of declared option
   | Compaction_epoch_advanced of { epoch_id : int }
+  | Molt_requested of Librarian_lifecycle.molt_trigger
 
 (* The answer of an ask that is not the current one is dropped; only one
    that carried an answer is counted. *)
@@ -354,8 +460,9 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
   : Read_result.t -> t
   = function
   | Answered { question; answer; slot } ->
+    let before_facts = (Store.memory store).facts in
     let plan =
-      Librarian_plan.of_answer ~shown:(Read question.shown) ~facts:(Store.memory store).facts
+      Librarian_plan.of_answer ~shown:(Read question.shown) ~facts:before_facts
         ~removed_since:asking.removed_since ~at ~trace_id:question.trace answer
     in
     let narrowing =
@@ -363,22 +470,34 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
         (Librarian_width.passed question.offered question.reach.within)
     in
     let committed = Store.commit_read store ~at ~question ~slot plan in
+    let with_growth_molt store t =
+      match
+        growth_molt_trigger
+          ~keeper_id:place.keeper_id
+          ~before_facts
+          ~after_facts:(Store.memory store).facts
+      with
+      | Some trigger -> { t with pending_molt = latch_pending_molt t.pending_molt trigger }
+      | None -> t
+    in
     (* A range shows Memory, so its read is one with Memory, and what the
        last room ask said is about a Memory before it (§12.2 E5, W3). *)
     (match asked with
      | Read_range (_ : Librarian_width.width) ->
        settled t store committed ~after:(fun store ->
          next_ask place
-           { (moved t ~narrowing) with
-             last_read = Some Last.Committed
-           ; read_alone = false
-           ; last_room = None
-           }
+           (with_growth_molt store
+              { (moved t ~narrowing) with
+                last_read = Some Last.Committed
+              ; read_alone = false
+              ; last_room = None
+              })
            ~at store)
      | Read_item_alone ->
        settled t store committed ~after:(fun store ->
          after_alone place
-           { (moved t ~narrowing) with last_read = Some Last.Committed; read_alone = true }
+           (with_growth_molt store
+              { (moved t ~narrowing) with last_read = Some Last.Committed; read_alone = true })
            ~at store asking ~trace:question.trace))
   | Nothing_to_ask -> next_ask place t ~at store
   | No_answer { question; slots } -> no_answer place t ~at store asking ~asked question slots
@@ -681,30 +800,58 @@ let table place t ~at event =
      | (Some _ | None), (Some _ | None) -> next_ask place { t with lane } ~at store)
   (* Stopped, Declaration_changed: held for the boot that opens the store. *)
   | Stopped (_ : Store.stop), Declaration_changed lane -> { t with lane }
-  (* Structural boundary (compaction epoch advance): proactively schedule a
-     declarative consolidation / synthesis / molting ask when open and not
-     already asking. Never driven by wall-clock TTL or numeric score weights. *)
+  (* Structural boundaries (compaction epoch advance / memory growth / synthesis
+     cycle): proactively schedule a declarative consolidation / synthesis /
+     molting ask when open and idle/resting; latch [pending_molt] if an ask is
+     currently in flight or no lane is declared yet so requests are never
+     silently dropped. Never driven by wall-clock TTL or numeric score weights. *)
   | ( (Idle { store; seen_length = (_ : int option) } | Resting store | Refused_at_bottom store)
     , Compaction_epoch_advanced { epoch_id } ) ->
+    let trigger = Librarian_lifecycle.Compaction_epoch_advanced { epoch_id } in
     (match t.lane with
-     | None -> t
-     | Some lane ->
-       let ask = t.last_ask + 1 in
-       let asking : asking =
-         { ask
-         ; since = at
-         ; lane
-         ; removed_since = []
-         ; asked =
-             Room
-               { trace = Printf.sprintf "compaction-epoch-%d" epoch_id
-               ; molt_trigger = Some (Compaction_epoch_advanced { epoch_id })
-               }
-         ; bottom = t.bottom
-         }
-       in
-       { t with state = Asking { store; asking }; last_ask = ask })
-  | (Asking _ | Stopped _), Compaction_epoch_advanced _ -> t
+     | None -> { t with pending_molt = latch_pending_molt t.pending_molt trigger }
+     | Some declared -> start_molt t ~at store ~declared trigger)
+  | Asking _, Compaction_epoch_advanced { epoch_id } ->
+    let trigger = Librarian_lifecycle.Compaction_epoch_advanced { epoch_id } in
+    { t with pending_molt = latch_pending_molt t.pending_molt trigger }
+  | Stopped stop, Compaction_epoch_advanced { epoch_id } ->
+    let trigger = Librarian_lifecycle.Compaction_epoch_advanced { epoch_id } in
+    let stop_kind =
+      match stop with
+      | Store.Log_diverged _ -> "log_diverged"
+      | Store.Memory_unreadable -> "memory_unreadable"
+      | Store.Log_unreadable -> "log_unreadable"
+      | Store.Store_unwritable -> "store_unwritable"
+      | Store.Raised _ -> "raised"
+    in
+    Log.Keeper.warn
+      ~keeper_name:place.keeper_id
+      "librarian memory writer is stopped (%s); latching compaction molt trigger epoch=%d until resume"
+      stop_kind
+      epoch_id;
+    { t with pending_molt = latch_pending_molt t.pending_molt trigger }
+  | ( (Idle { store; seen_length = (_ : int option) } | Resting store | Refused_at_bottom store)
+    , Molt_requested trigger ) ->
+    (match t.lane with
+     | None -> { t with pending_molt = latch_pending_molt t.pending_molt trigger }
+     | Some declared -> start_molt t ~at store ~declared trigger)
+  | Asking _, Molt_requested trigger ->
+    { t with pending_molt = latch_pending_molt t.pending_molt trigger }
+  | Stopped stop, Molt_requested trigger ->
+    let stop_kind =
+      match stop with
+      | Store.Log_diverged _ -> "log_diverged"
+      | Store.Memory_unreadable -> "memory_unreadable"
+      | Store.Log_unreadable -> "log_unreadable"
+      | Store.Store_unwritable -> "store_unwritable"
+      | Store.Raised _ -> "raised"
+    in
+    Log.Keeper.warn
+      ~keeper_name:place.keeper_id
+      "librarian memory writer is stopped (%s); latching structural molt trigger=%s until resume"
+      stop_kind
+      (Yojson.Safe.to_string (Librarian_lifecycle.molt_trigger_to_json trigger));
+    { t with pending_molt = latch_pending_molt t.pending_molt trigger }
 ;;
 
 (* The same value changes no state, but its resolution is the one the
@@ -717,7 +864,8 @@ let decide place t ~at event =
   | Declaration_changed lane when same_lane t.lane lane -> { t with lane }
   | Declaration_changed (_ : declared option) ->
     table place { t with narrowing = Librarian_width.empty } ~at event
-  | Turn_closed | Pulse | Ask_ended _ | Compaction_epoch_advanced _ -> table place t ~at event
+  | Turn_closed | Pulse | Ask_ended _ | Compaction_epoch_advanced _ | Molt_requested _ ->
+    table place t ~at event
 ;;
 
 type unavailable =
@@ -743,37 +891,66 @@ let removed_by (line : Librarian_log.commit) =
 
 let write place t ~at ~by ~trace write =
   let commit store ~after =
-    match Direct.plan ~by ~at ~trace_id:trace (Store.memory store).facts write with
+    let before_facts = (Store.memory store).facts in
+    match Direct.plan ~by ~at ~trace_id:trace before_facts write with
     | Already_held -> t, Already_held
     | Already_done -> t, Already_done
     | Already_absent -> t, Already_absent
     | Refused refusal -> t, Refused refusal
     | Writes { effects; facts = (_ : Keeper_memory_os_types.fact list) } ->
       (match Store.commit_direct store ~at ~by ~trace write effects with
-       | Committed { store; line } -> after store line, Written line
+       | Committed { store; line } ->
+         let growth =
+           growth_molt_trigger
+             ~keeper_id:place.keeper_id
+             ~before_facts
+             ~after_facts:(Store.memory store).facts
+         in
+         after store line growth, Written line
        | Committed_without_snapshot line ->
          { t with state = Stopped Store_unwritable }, Written line
        | Stopped stop -> { t with state = Stopped stop }, Unavailable (Store_stopped stop)
        | Not_a_snapshot refusal -> t, Not_a_snapshot refusal)
   in
+  let maybe_start_growth_molt ~fallback store growth =
+    match growth, t.lane with
+    | Some trigger, Some declared -> start_molt t ~at store ~declared trigger
+    | Some trigger, None ->
+      { (fallback store) with pending_molt = latch_pending_molt t.pending_molt trigger }
+    | None, (Some _ | None) -> fallback store
+  in
   match t.state with
   | Idle { store; seen_length } ->
-    commit store ~after:(fun store (_ : Librarian_log.commit) ->
-      { t with state = Idle { store; seen_length } })
+    commit store ~after:(fun store (_ : Librarian_log.commit) growth ->
+      maybe_start_growth_molt store growth ~fallback:(fun store ->
+        { t with state = Idle { store; seen_length } }))
   | Asking { store; asking } ->
-    commit store ~after:(fun store line ->
+    commit store ~after:(fun store line growth ->
+      let pending_molt =
+        match growth with
+        | Some trigger -> latch_pending_molt t.pending_molt trigger
+        | None -> t.pending_molt
+      in
       { t with
         state =
           Asking
             { store
             ; asking = { asking with removed_since = asking.removed_since @ removed_by line }
             }
+      ; pending_molt
       })
   | Resting store ->
-    commit store ~after:(fun store (_ : Librarian_log.commit) -> { t with state = Resting store })
+    commit store ~after:(fun store (_ : Librarian_log.commit) growth ->
+      maybe_start_growth_molt store growth ~fallback:(fun store -> { t with state = Resting store }))
   (* Memory changed, so the head item with Memory is another question (§9.3). *)
   | Refused_at_bottom store ->
-    commit store ~after:(fun store (_ : Librarian_log.commit) -> next_ask place t ~at store)
+    commit store ~after:(fun store (_ : Librarian_log.commit) growth ->
+      let t =
+        match growth with
+        | Some trigger -> { t with pending_molt = latch_pending_molt t.pending_molt trigger }
+        | None -> t
+      in
+      next_ask place t ~at store)
   | Stopped stop -> t, Unavailable (Store_stopped stop)
 ;;
 
@@ -809,7 +986,14 @@ type act_answer =
 let resume place ~boot t ~at =
   match t.state with
   | Stopped (_ : Store.stop) ->
-    booted place ~at ~lane:t.lane ~last_ask:t.last_ask (boot ()), Done
+    booted_with_pending
+      place
+      ~at
+      ~lane:t.lane
+      ~last_ask:t.last_ask
+      ~pending_molt:t.pending_molt
+      (boot ()),
+    Done
   | Resting store | Refused_at_bottom store ->
     next_ask place { t with bottom = Librarian_bottom.empty } ~at store, Done
   | Idle _ | Asking _ -> t, Not_done Nothing_to_resume
